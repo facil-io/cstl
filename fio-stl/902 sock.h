@@ -131,7 +131,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     fprintf(stderr, "* Testing UDP socket (abbreviated test)\n");
     int srv =
         fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
-    int n = 0; /* try for 32Mb */
+    int n = 0;
     socklen_t sn = sizeof(n);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
@@ -145,6 +145,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
       else
         break;
     }
+    do {
+      n += 16 * 1024; /* at 16Kb at a time */
+    } while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) != -1);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);

@@ -356,7 +356,7 @@ static void http_respond(fio_http_s *h) {
 /* *****************************************************************************
 Pub/Sub Logger / Recorder
 ***************************************************************************** */
-#if 1
+#if 0
 FIO_SFUNC void logger_detached(const fio_pubsub_engine_s *eng) {
   FIO_LOG_INFO("%d (logger) detached", fio_srv_pid());
   (void)eng;

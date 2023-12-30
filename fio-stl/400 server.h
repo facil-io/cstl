@@ -100,7 +100,7 @@ Listening to Incoming Connections
 ***************************************************************************** */
 
 /** Arguments for the fio_listen function */
-struct fio_srv_listen_args {
+typedef struct fio_srv_listen_args {
   /**
    * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
@@ -149,16 +149,15 @@ struct fio_srv_listen_args {
   uint8_t on_root;
   /** Hides "started/stopped listening" messages from log (if set). */
   uint8_t hide_from_log;
-};
+} fio_srv_listen_args;
 
 /**
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
  */
-SFUNC void *fio_srv_listen(struct fio_srv_listen_args args);
-#define fio_srv_listen(...)                                                    \
-  fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
+SFUNC void *fio_srv_listen(fio_srv_listen_args args);
+#define fio_srv_listen(...) fio_srv_listen((fio_srv_listen_args){__VA_ARGS__})
 
 /** Notifies a listener to stop listening. */
 SFUNC void fio_srv_listen_stop(void *listener);
@@ -166,52 +165,6 @@ SFUNC void fio_srv_listen_stop(void *listener);
 /** Returns the URL on which the listener is listening. */
 SFUNC fio_buf_info_s fio_srv_listener_url(void *listener);
 
-/* *****************************************************************************
-Listening to Incoming Connections
-***************************************************************************** */
-#if 0
-/** Arguments for the fio_listen function */
-struct fio_srv_listen2_args {
-  /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
-  const char *url;
-  /**
-   * Called whenever a new connection is accepted (required).
-   *
-   * Should either call `fio_attach` or close the connection.
-   */
-  void (*on_open)(int fd, void *udata);
-  /** Called when the a listening socket starts to listen (update state). */
-  void (*on_start)(void *udata);
-  /**
-   * Called when the server is done, usable for cleanup.
-   *
-   * This will be called separately for every process before exiting.
-   */
-  void (*on_finish)(void *udata);
-  /** Opaque user data. */
-  void *udata;
-  /**
-   * Selects a queue that will be used to schedule a pre-accept task.
-   * May be used to test user thread stress levels before accepting connections.
-   */
-  fio_queue_s *queue_for_accept;
-  /** If the server is forked - listen on the root process or the workers? */
-  uint8_t on_root;
-  /** Hides "started/stopped listening" messages from log (if set). */
-  uint8_t hide_from_log;
-};
-
-/**
- * Sets up a network service on a listening socket.
- *
- * Returns 0 on success or -1 on error.
- *
- * See the `fio_srv_listen2` Macro for details.
- */
-SFUNC int fio_srv_listen2(struct fio_srv_listen2_args args);
-#define fio_srv_listen2(...)                                                   \
-  fio_srv_listen2((struct fio_srv_listen2_args){__VA_ARGS__})
-#endif
 /* *****************************************************************************
 Connecting as a Client
 ***************************************************************************** */

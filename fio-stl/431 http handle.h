@@ -376,10 +376,10 @@ SFUNC int fio_http_is_streaming(fio_http_s *);
 /** Returns true if the HTTP connection was (or should have been) upgraded. */
 SFUNC int fio_http_is_upgraded(fio_http_s *h);
 
-/** Returns true if the HTTP handle establishes a WebSocket Upgrade. */
+/** Returns true if the HTTP handle refers to a WebSocket connection. */
 SFUNC int fio_http_is_websocket(fio_http_s *);
 
-/** Returns true if the HTTP handle establishes an EventSource connection. */
+/** Returns true if the HTTP handle refers to an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
 
 /**

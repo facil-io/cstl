@@ -1611,7 +1611,7 @@ is_special_message:
   FIO_LOG_DDEBUG2("%d (pubsub) internal subscription/ID message received",
                   fio_srv_pid());
   switch (flags) {
-  case FIO___PUBSUB_SPECIAL: /* run generic command on root */ break;
+  case FIO___PUBSUB_SPECIAL: /* TODO: run generic command on root */ break;
   case FIO___PUBSUB_SUB:
     fio_subscribe(.io = m->data.io,
                   .channel = m->data.channel,

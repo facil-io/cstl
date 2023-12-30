@@ -1691,8 +1691,8 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
     fio_u2buf64u(buf, (fio_buf2u64u(buf) ^ mask));
     buf += 8;
   }
-  if (len & 7) {
-    uint64_t tmp;
+  {
+    uint64_t tmp = 0;
     fio_memcpy7x(&tmp, buf, len);
     tmp ^= mask;
     fio_memcpy7x(buf, &tmp, len);
@@ -3946,8 +3946,8 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   /* convert `mant` to absolute value - constant time */
   mant = mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
   mant = fio_ct_abs(mant);
-  /* normalize exponent */
   tmp = fio_msb_index_unsafe(mant);
+  /* normalize exponent */
   exponent += tmp + 1023;
   if (FIO_UNLIKELY(exponent < 0))
     goto is_zero;
@@ -12007,16 +12007,17 @@ Memory Allocation - Setup Alignment Info
 /** Allocation alignment, MUST be >= 3 and <= 10*/
 #define FIO_MEMORY_ALIGN_LOG 4
 
-#elif FIO_MEMORY_ALIGN_LOG < 3 || FIO_MEMORY_ALIGN_LOG > 10
+#elif FIO_MEMORY_ALIGN_LOG < 3
 #undef FIO_MEMORY_ALIGN_LOG
-#define FIO_MEMORY_ALIGN_LOG 4
+#define FIO_MEMORY_ALIGN_LOG 3
+#elif FIO_MEMORY_ALIGN_LOG > 10
+#undef FIO_MEMORY_ALIGN_LOG
+#define FIO_MEMORY_ALIGN_LOG 6
 #endif
 
 /* Helper macro, don't change this */
 #undef FIO_MEMORY_ALIGN_SIZE
-/**
- * The maximum allocation size, after which a direct system allocation is used.
- */
+/** The minimal allocation size & alignment. */
 #define FIO_MEMORY_ALIGN_SIZE (1UL << FIO_MEMORY_ALIGN_LOG)
 
 /* inform the compiler that the returned value is aligned on 16 byte marker */
@@ -12069,7 +12070,7 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
  * Re-allocates memory. An attempt to avoid copying the data is made only for
  * big memory allocations (larger than FIO_MEMORY_BLOCK_ALLOC_LIMIT).
  *
- * This variation is slightly faster as it might copy less data.
+ * This variation can perform better, as it might copy less data.
  */
 SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                                                               size_t new_size,
@@ -13872,6 +13873,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
                    "\t* allocation units per block:               %zu units\n"
                    "\t* arena per-allocation limit:               %zu bytes\n"
                    "\t* local per-allocation limit (before mmap): %zu bytes\n"
+                   "\t* allocation alignment (non-zero):          %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
@@ -13885,6 +13887,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
       (size_t)FIO_MEMORY_UNITS_PER_BLOCK,
       (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT,
       (size_t)FIO_MEMORY_ALLOC_LIMIT,
+      (size_t)FIO_MEMORY_ALIGN_SIZE,
       FIO_MEMORY_MALLOC_ZERO_POINTER,
       (FIO_MEMORY_INITIALIZE_ALLOCATIONS ? "true" : "false"));
 }
@@ -17727,7 +17730,7 @@ struct fio_keystr_s {
   const char *buf;
 };
 
-/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+/** returns the Key String. */
 FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
   fio_buf_info_s r;
   if ((str->info + 1) > 1) {
@@ -17737,7 +17740,7 @@ FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
   r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
   return r;
 }
-/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+/** returns the Key String. */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
   fio_str_info_s r;
   if ((str->info + 1) > 1) {
@@ -17762,7 +17765,7 @@ FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   return r;
 }
 
-/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+/** Returns a copy of `fio_keystr_s`. */
 FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};
@@ -28149,7 +28152,7 @@ Listening to Incoming Connections
 ***************************************************************************** */
 
 /** Arguments for the fio_listen function */
-struct fio_srv_listen_args {
+typedef struct fio_srv_listen_args {
   /**
    * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
@@ -28198,16 +28201,15 @@ struct fio_srv_listen_args {
   uint8_t on_root;
   /** Hides "started/stopped listening" messages from log (if set). */
   uint8_t hide_from_log;
-};
+} fio_srv_listen_args;
 
 /**
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
  */
-SFUNC void *fio_srv_listen(struct fio_srv_listen_args args);
-#define fio_srv_listen(...)                                                    \
-  fio_srv_listen((struct fio_srv_listen_args){__VA_ARGS__})
+SFUNC void *fio_srv_listen(fio_srv_listen_args args);
+#define fio_srv_listen(...) fio_srv_listen((fio_srv_listen_args){__VA_ARGS__})
 
 /** Notifies a listener to stop listening. */
 SFUNC void fio_srv_listen_stop(void *listener);
@@ -28215,52 +28217,6 @@ SFUNC void fio_srv_listen_stop(void *listener);
 /** Returns the URL on which the listener is listening. */
 SFUNC fio_buf_info_s fio_srv_listener_url(void *listener);
 
-/* *****************************************************************************
-Listening to Incoming Connections
-***************************************************************************** */
-#if 0
-/** Arguments for the fio_listen function */
-struct fio_srv_listen2_args {
-  /** The binding address in URL format. Defaults to: tcp://0.0.0.0:3000 */
-  const char *url;
-  /**
-   * Called whenever a new connection is accepted (required).
-   *
-   * Should either call `fio_attach` or close the connection.
-   */
-  void (*on_open)(int fd, void *udata);
-  /** Called when the a listening socket starts to listen (update state). */
-  void (*on_start)(void *udata);
-  /**
-   * Called when the server is done, usable for cleanup.
-   *
-   * This will be called separately for every process before exiting.
-   */
-  void (*on_finish)(void *udata);
-  /** Opaque user data. */
-  void *udata;
-  /**
-   * Selects a queue that will be used to schedule a pre-accept task.
-   * May be used to test user thread stress levels before accepting connections.
-   */
-  fio_queue_s *queue_for_accept;
-  /** If the server is forked - listen on the root process or the workers? */
-  uint8_t on_root;
-  /** Hides "started/stopped listening" messages from log (if set). */
-  uint8_t hide_from_log;
-};
-
-/**
- * Sets up a network service on a listening socket.
- *
- * Returns 0 on success or -1 on error.
- *
- * See the `fio_srv_listen2` Macro for details.
- */
-SFUNC int fio_srv_listen2(struct fio_srv_listen2_args args);
-#define fio_srv_listen2(...)                                                   \
-  fio_srv_listen2((struct fio_srv_listen2_args){__VA_ARGS__})
-#endif
 /* *****************************************************************************
 Connecting as a Client
 ***************************************************************************** */
@@ -33305,7 +33261,7 @@ is_special_message:
   FIO_LOG_DDEBUG2("%d (pubsub) internal subscription/ID message received",
                   fio_srv_pid());
   switch (flags) {
-  case FIO___PUBSUB_SPECIAL: /* run generic command on root */ break;
+  case FIO___PUBSUB_SPECIAL: /* TODO: run generic command on root */ break;
   case FIO___PUBSUB_SUB:
     fio_subscribe(.io = m->data.io,
                   .channel = m->data.channel,
@@ -34296,10 +34252,10 @@ SFUNC int fio_http_is_streaming(fio_http_s *);
 /** Returns true if the HTTP connection was (or should have been) upgraded. */
 SFUNC int fio_http_is_upgraded(fio_http_s *h);
 
-/** Returns true if the HTTP handle establishes a WebSocket Upgrade. */
+/** Returns true if the HTTP handle refers to a WebSocket connection. */
 SFUNC int fio_http_is_websocket(fio_http_s *);
 
-/** Returns true if the HTTP handle establishes an EventSource connection. */
+/** Returns true if the HTTP handle refers to an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
 
 /**
@@ -47291,7 +47247,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     fprintf(stderr, "* Testing UDP socket (abbreviated test)\n");
     int srv =
         fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
-    int n = 0; /* try for 32Mb */
+    int n = 0;
     socklen_t sn = sizeof(n);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
@@ -47305,6 +47261,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
       else
         break;
     }
+    do {
+      n += 16 * 1024; /* at 16Kb at a time */
+    } while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) != -1);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t- UDP receive buffer could be set to %d bytes\n", n);

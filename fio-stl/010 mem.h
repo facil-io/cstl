@@ -28,16 +28,17 @@ Memory Allocation - Setup Alignment Info
 /** Allocation alignment, MUST be >= 3 and <= 10*/
 #define FIO_MEMORY_ALIGN_LOG 4
 
-#elif FIO_MEMORY_ALIGN_LOG < 3 || FIO_MEMORY_ALIGN_LOG > 10
+#elif FIO_MEMORY_ALIGN_LOG < 3
 #undef FIO_MEMORY_ALIGN_LOG
-#define FIO_MEMORY_ALIGN_LOG 4
+#define FIO_MEMORY_ALIGN_LOG 3
+#elif FIO_MEMORY_ALIGN_LOG > 10
+#undef FIO_MEMORY_ALIGN_LOG
+#define FIO_MEMORY_ALIGN_LOG 6
 #endif
 
 /* Helper macro, don't change this */
 #undef FIO_MEMORY_ALIGN_SIZE
-/**
- * The maximum allocation size, after which a direct system allocation is used.
- */
+/** The minimal allocation size & alignment. */
 #define FIO_MEMORY_ALIGN_SIZE (1UL << FIO_MEMORY_ALIGN_LOG)
 
 /* inform the compiler that the returned value is aligned on 16 byte marker */
@@ -90,7 +91,7 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
  * Re-allocates memory. An attempt to avoid copying the data is made only for
  * big memory allocations (larger than FIO_MEMORY_BLOCK_ALLOC_LIMIT).
  *
- * This variation is slightly faster as it might copy less data.
+ * This variation can perform better, as it might copy less data.
  */
 SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                                                               size_t new_size,
@@ -1893,6 +1894,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
                    "\t* allocation units per block:               %zu units\n"
                    "\t* arena per-allocation limit:               %zu bytes\n"
                    "\t* local per-allocation limit (before mmap): %zu bytes\n"
+                   "\t* allocation alignment (non-zero):          %zu bytes\n"
                    "\t* malloc(0) pointer:                        %p\n"
                    "\t* always initializes memory  (zero-out):    %s\n"
                    "\t* " FIO_MEMORY_LOCK_NAME " locking system\n",
@@ -1906,6 +1908,7 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {
       (size_t)FIO_MEMORY_UNITS_PER_BLOCK,
       (size_t)FIO_MEMORY_BLOCK_ALLOC_LIMIT,
       (size_t)FIO_MEMORY_ALLOC_LIMIT,
+      (size_t)FIO_MEMORY_ALIGN_SIZE,
       FIO_MEMORY_MALLOC_ZERO_POINTER,
       (FIO_MEMORY_INITIALIZE_ALLOCATIONS ? "true" : "false"));
 }

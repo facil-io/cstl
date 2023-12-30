@@ -375,8 +375,8 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   /* convert `mant` to absolute value - constant time */
   mant = mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
   mant = fio_ct_abs(mant);
-  /* normalize exponent */
   tmp = fio_msb_index_unsafe(mant);
+  /* normalize exponent */
   exponent += tmp + 1023;
   if (FIO_UNLIKELY(exponent < 0))
     goto is_zero;

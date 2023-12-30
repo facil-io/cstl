@@ -1025,7 +1025,7 @@ struct fio_keystr_s {
   const char *buf;
 };
 
-/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+/** returns the Key String. */
 FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
   fio_buf_info_s r;
   if ((str->info + 1) > 1) {
@@ -1035,7 +1035,7 @@ FIO_IFUNC fio_buf_info_s fio_keystr_buf(fio_keystr_s *str) {
   r = (fio_buf_info_s){.len = str->len, .buf = (char *)str->buf};
   return r;
 }
-/** returns the Key String. NOTE: Key Strings are NOT NUL TERMINATED! */
+/** returns the Key String. */
 FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
   fio_str_info_s r;
   if ((str->info + 1) > 1) {
@@ -1060,7 +1060,7 @@ FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   return r;
 }
 
-/** Returns a copy of `fio_keystr_s` - used internally by the hash map. */
+/** Returns a copy of `fio_keystr_s`. */
 FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len)) {
   fio_keystr_s r = {0};

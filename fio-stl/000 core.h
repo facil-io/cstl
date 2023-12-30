@@ -1654,8 +1654,8 @@ FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
     fio_u2buf64u(buf, (fio_buf2u64u(buf) ^ mask));
     buf += 8;
   }
-  if (len & 7) {
-    uint64_t tmp;
+  {
+    uint64_t tmp = 0;
     fio_memcpy7x(&tmp, buf, len);
     tmp ^= mask;
     fio_memcpy7x(buf, &tmp, len);
