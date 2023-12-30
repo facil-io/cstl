@@ -373,6 +373,7 @@ int main(int argc, char const *argv[]) {
           "(please wait):\n\n",
           thread_count);
   if (warmup) {
+    fprintf(stderr, "Warming up... ");
     for (size_t i = 0; i < thread_count; ++i) {
       FIO_ASSERT(fio_thread_create(threads + i, test_facil_malloc, NULL) == 0,
                  "Couldn't spawn thread.");
@@ -384,6 +385,7 @@ int main(int argc, char const *argv[]) {
                  errno);
     }
     test_mem_functions(NULL, calloc, NULL, NULL);
+    fprintf(stderr, "Finished.\n");
   }
 
   for (size_t i = 0; i < thread_count; ++i) {
@@ -405,6 +407,7 @@ int main(int argc, char const *argv[]) {
           "(please wait):\n\n",
           thread_count);
   if (warmup) {
+    fprintf(stderr, "Warming up... ");
     for (size_t i = 0; i < thread_count; ++i) {
       FIO_ASSERT(fio_thread_create(threads + i, test_system_malloc, NULL) == 0,
                  "Couldn't spawn thread.");
@@ -416,6 +419,7 @@ int main(int argc, char const *argv[]) {
                  errno);
     }
     test_mem_functions(NULL, calloc, NULL, NULL);
+    fprintf(stderr, "Finished.\n");
   }
   for (size_t i = 0; i < thread_count; ++i) {
     FIO_ASSERT(fio_thread_create(threads + i, test_system_malloc, NULL) == 0,

@@ -147,6 +147,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
     }
     do {
       n += 16 * 1024; /* at 16Kb at a time */
+      if (n >= 32 * 1024 * 1024)
+        break;
     } while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) != -1);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)

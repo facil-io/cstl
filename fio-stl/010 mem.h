@@ -33,7 +33,7 @@ Memory Allocation - Setup Alignment Info
 #define FIO_MEMORY_ALIGN_LOG 3
 #elif FIO_MEMORY_ALIGN_LOG > 10
 #undef FIO_MEMORY_ALIGN_LOG
-#define FIO_MEMORY_ALIGN_LOG 6
+#define FIO_MEMORY_ALIGN_LOG 10
 #endif
 
 /* Helper macro, don't change this */
@@ -222,7 +222,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 
 #ifndef FIO_MEMORY_USE_THREAD_MUTEX
 #if FIO_USE_THREAD_MUTEX_TMP
-#define FIO_MEMORY_USE_THREAD_MUTEX 1
+#define FIO_MEMORY_USE_THREAD_MUTEX FIO_USE_THREAD_MUTEX
 #else
 #if FIO_MEMORY_ARENA_COUNT > 0
 /**
@@ -979,7 +979,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
                    "          Consider recompiling with more arenas.");        \
     warning_printed = 1;                                                       \
   } while (0)
-#else
+#else /* !DEBUG || FIO_MEMORY_ARENA_COUNT <= 0 */
 #define FIO___MEMORY_ARENA_LOCK_WARNING()
 #endif
   /** thread arena value */
@@ -991,9 +991,9 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
       void *p;
       fio_thread_t t;
     } u = {.t = fio_thread_current()};
-    arena_index = fio_risky_ptr(u.p) %
+    arena_index = (fio_risky_ptr(u.p) & 127) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
-#if defined(DEBUG) && 0
+#if (defined(DEBUG) && 0)
     static void *pthread_last = NULL;
     if (pthread_last != u.p) {
       FIO_LOG_DEBUG(
@@ -1093,10 +1093,10 @@ FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(
 /* *****************************************************************************
 Allocator State Initialization & Cleanup
 ***************************************************************************** */
-#define FIO_MEMORY_STATE_SIZE(arean_count)                                     \
+#define FIO_MEMORY_STATE_SIZE(arena_count)                                     \
   FIO_MEM_BYTES2PAGES(                                                         \
       (sizeof(*FIO_NAME(FIO_MEMORY_NAME, __mem_state)) +                       \
-       (sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s)) * (arean_count))))
+       (sizeof(FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s)) * (arena_count))))
 
 /* function declarations for functions called during cleanup */
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_dealloc)(
@@ -1223,37 +1223,41 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
   /* allocate the state machine */
   {
 #if FIO_MEMORY_ARENA_COUNT > 0
-    size_t const arean_count = FIO_MEMORY_ARENA_COUNT;
+    size_t const arena_count = FIO_MEMORY_ARENA_COUNT;
 #else
-    size_t arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
+    size_t arena_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
 #ifdef _SC_NPROCESSORS_ONLN
-    arean_count = sysconf(_SC_NPROCESSORS_ONLN);
-    if (arean_count == (size_t)-1UL)
-      arean_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
+    arena_count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (arena_count == (size_t)-1UL)
+      arena_count = FIO_MEMORY_ARENA_COUNT_FALLBACK;
     else /* arenas !> threads (birthday) */
-      arean_count = (arean_count << 1) + 2;
-#else
+      arena_count = (arena_count << 1) + 2;
+#else /* FIO_MEMORY_ARENA_COUNT <= 0 */
 #if _MSC_VER || __MINGW32__
     /* https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
      */
     SYSTEM_INFO win_system_info;
     GetSystemInfo(&win_system_info);
-    arean_count = (size_t)win_system_info.dwNumberOfProcessors;
+    arena_count = (size_t)win_system_info.dwNumberOfProcessors;
 #else
 #warning Dynamic CPU core count is unavailable - assuming FIO_MEMORY_ARENA_COUNT_FALLBACK cores.
 #endif
 #endif /* _SC_NPROCESSORS_ONLN */
+#if FIO_MEMORY_ARENA_COUNT < -1
+    arena_count = arena_count / (0 - FIO_MEMORY_ARENA_COUNT);
+#endif
+    if (arena_count >= FIO_MEMORY_ARENA_COUNT_MAX)
+      arena_count = FIO_MEMORY_ARENA_COUNT_MAX;
+    if (!arena_count)
+      arena_count = 1;
 
-    if (arean_count >= FIO_MEMORY_ARENA_COUNT_MAX)
-      arean_count = FIO_MEMORY_ARENA_COUNT_MAX;
+#endif /* FIO_MEMORY_ARENA_COUNT <= 0 */
 
-#endif /* FIO_MEMORY_ARENA_COUNT > 0 */
-
-    const size_t s = FIO_MEMORY_STATE_SIZE(arean_count);
+    const size_t s = FIO_MEMORY_STATE_SIZE(arena_count);
     FIO_NAME(FIO_MEMORY_NAME, __mem_state) =
         (FIO_NAME(FIO_MEMORY_NAME, __mem_state_s *))FIO_MEM_SYS_ALLOC(s, 0);
     FIO_ASSERT_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __mem_state));
-    FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arean_count;
+    FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count = arena_count;
   }
   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks =
       FIO_LIST_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks);

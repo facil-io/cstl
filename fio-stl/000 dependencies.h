@@ -221,10 +221,6 @@ Memory Allocation - FIO_MALLOC defines a FIOBJ dedicated memory allocator
 /* fight fragmentation */
 #define FIO_MEMORY_BLOCKS_PER_ALLOCATION_LOG 4
 #endif
-#ifndef FIO_MEMORY_ALIGN_LOG
-/* align on 8 bytes, it's enough for FIOBJ types */
-#define FIO_MEMORY_ALIGN_LOG 3
-#endif
 #ifndef FIO_MEMORY_CACHE_SLOTS
 /* cache up to 64Mb */
 #define FIO_MEMORY_CACHE_SLOTS 16
