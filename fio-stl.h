@@ -1104,19 +1104,6 @@ FIO___MAKE_MEMCPY_FIXED(32)
 FIO___MAKE_MEMCPY_FIXED(64)
 /** Copies 128 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(128)
-
-#if !(__has_builtin(__builtin_memcpy))
-#undef FIO___MAKE_MEMCPY_FIXED
-#define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
-  FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
-                                    const void *restrict s) {                  \
-    void *const r = (char *)d + bytes;                                         \
-    for (size_t i = 0; i < (bytes); i += 128) /* compiler, please vectorize */ \
-      fio_memcpy128(((char *)d)[i], ((const char *)s)[i]);                     \
-    return r;                                                                  \
-  }
-#endif /* __has_builtin(__builtin_memcpy) */
-
 /** Copies 256 bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MAKE_MEMCPY_FIXED(256)
 /** Copies 512 bytes from `src` (`s`) to `dest` (`d`). */
