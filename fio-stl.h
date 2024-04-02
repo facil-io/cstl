@@ -1124,10 +1124,10 @@ FIO_IFUNC void *fio___memcpy_unsafe_63x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
 #define FIO___MEMCPY_XX_GROUP(bytes)                                           \
   do {                                                                         \
-    fio_memcpy##bytes(d, s);                                                   \
+    fio_memcpy##bytes((void *)d, (void *)s);                                   \
     d += l & (bytes - 1);                                                      \
     s += l & (bytes - 1);                                                      \
-    fio_memcpy##bytes(d, s);                                                   \
+    fio_memcpy##bytes((void *)d, (void *)s);                                   \
     return (void *)(d += bytes);                                               \
   } while (0)
   if (l > 31)
@@ -1159,7 +1159,7 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
     return fio___memcpy_unsafe_63x(d_, s_, l);
 #define FIO___MEMCPY_UNSAFE_STEP(bytes)                                        \
   do {                                                                         \
-    fio_memcpy##bytes(d, s);                                                   \
+    fio_memcpy##bytes((void *)d, (void *)s);                                   \
     (l -= bytes), (d += bytes), (s += bytes);                                  \
   } while (0)
 
@@ -1179,7 +1179,7 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
   s -= 64;
   d += l & 63U;
   s += l & 63U;
-  fio_memcpy64(d, s);
+  fio_memcpy64((void *)d, (void *)s);
   return (void *)(d += 64);
 }
 
