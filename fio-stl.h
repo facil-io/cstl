@@ -20733,6 +20733,8 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
 
 /* Frees the mustache template object (or reduces it's reference count). */
 SFUNC void fio_mustache_free(fio_mustache_s *m) {
+  if (!m)
+    return;
   FIO_LEAK_COUNTER_ON_FREE(fio_mustache_s);
   fio_bstr_free((char *)m);
 }
