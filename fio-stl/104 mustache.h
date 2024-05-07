@@ -1212,7 +1212,8 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
     a.free_file_data(a.data, a.udata);
-  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  if (parser.root)
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
 
@@ -1226,6 +1227,8 @@ SFUNC void fio_mustache_free(fio_mustache_s *m) {
 
 /** Increases the mustache template's reference count. */
 SFUNC fio_mustache_s *fio_mustache_dup(fio_mustache_s *m) {
+  if (!m)
+    return m;
   FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)fio_bstr_copy((char *)m);
 }

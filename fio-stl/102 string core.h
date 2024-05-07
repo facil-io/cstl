@@ -725,8 +725,8 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
 FIO_IFUNC char *fio_bstr___len_set(char *bstr, size_t len) {
   if (FIO_UNLIKELY(!bstr))
     return bstr;
-  if (FIO_UNLIKELY(len >= 0xFFFFFFFFULL))
-    return bstr;
+  // if (FIO_UNLIKELY(len >= 0xFFFFFFFFULL))
+  //   return bstr;
   bstr[(FIO___BSTR_META(bstr)->len = (uint32_t)len)] = 0;
   return bstr;
 }
@@ -2771,14 +2771,16 @@ Binary String Type - Embedded Strings
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
-  const size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
+  size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
+  if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
+    new_capa = (size_t)0xFFFFFFFFULL + sizeof(bstr_m[0]);
   if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])) - 1)
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
       ((fio___bstr_meta_s *)dest->buf - 1),
       sizeof(bstr_m[0]) + dest->capa,
       new_capa,
-      ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
+      FIO___BSTR_META(dest->buf)->len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
 update_metadata:

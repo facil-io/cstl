@@ -17430,8 +17430,8 @@ FIO_IFUNC void fio_bstr_free(char *bstr) {
 FIO_IFUNC char *fio_bstr___len_set(char *bstr, size_t len) {
   if (FIO_UNLIKELY(!bstr))
     return bstr;
-  if (FIO_UNLIKELY(len >= 0xFFFFFFFFULL))
-    return bstr;
+  // if (FIO_UNLIKELY(len >= 0xFFFFFFFFULL))
+  //   return bstr;
   bstr[(FIO___BSTR_META(bstr)->len = (uint32_t)len)] = 0;
   return bstr;
 }
@@ -19476,14 +19476,16 @@ Binary String Type - Embedded Strings
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
-  const size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
+  size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
+  if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
+    new_capa = (size_t)0xFFFFFFFFULL + sizeof(bstr_m[0]);
   if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])) - 1)
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
       ((fio___bstr_meta_s *)dest->buf - 1),
       sizeof(bstr_m[0]) + dest->capa,
       new_capa,
-      ((fio___bstr_meta_s *)dest->buf)[-1].len + sizeof(bstr_m[0]));
+      FIO___BSTR_META(dest->buf)->len + sizeof(bstr_m[0]));
   if (!bstr_m)
     return -1;
 update_metadata:
@@ -20727,7 +20729,8 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
   /* No need to write FIO___MUSTACHE_I_STACK_POP, as the string ends with NUL */
   if (should_free_data)
     a.free_file_data(a.data, a.udata);
-  FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
+  if (parser.root)
+    FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)parser.root;
 }
 
@@ -20741,6 +20744,8 @@ SFUNC void fio_mustache_free(fio_mustache_s *m) {
 
 /** Increases the mustache template's reference count. */
 SFUNC fio_mustache_s *fio_mustache_dup(fio_mustache_s *m) {
+  if (!m)
+    return m;
   FIO_LEAK_COUNTER_ON_ALLOC(fio_mustache_s);
   return (fio_mustache_s *)fio_bstr_copy((char *)m);
 }
