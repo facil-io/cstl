@@ -470,7 +470,7 @@ struct fio_protocol_s {
    */
   fio_io_functions_s io_functions;
   /**
-   * The timeout value in seconds for all connections using this protocol.
+   * The timeout value in milliseconds for all connections using this protocol.
    *
    * Limited to FIO_SRV_TIMEOUT_MAX seconds. Zero (0) == FIO_SRV_TIMEOUT_MAX
    */
@@ -2366,7 +2366,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
   fio___srv_listen_s *l = NULL;
   void *built_tls = NULL;
   int should_free_tls = !args.tls;
-  FIO_STR_INFO_TMP_VAR(url_alt, 64);
+  FIO_STR_INFO_TMP_VAR(url_alt, 2048);
   if (!args.protocol) {
     FIO_LOG_ERROR("fio_srv_listen requires a protocol to be assigned.");
     return l;
@@ -2375,9 +2375,24 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
     FIO_LOG_ERROR("fio_srv_listen called with `on_root` by a non-root worker.");
     return l;
   }
-
-  if (!args.url ||
-      args.url[0] == '?') { /* if no URL is given use 0.0.0.0:3000 as default */
+  if (!args.url) {
+    args.url = getenv("ADDRESS");
+    if (!args.url)
+      args.url = "0.0.0.0";
+  }
+  url_alt.len = strlen(args.url);
+  if (url_alt.len > 2024) {
+    FIO_LOG_ERROR("binding address / url too long.");
+    args.url = NULL;
+  }
+  fio_url_s url = fio_url_parse(args.url, url_alt.len);
+  if (url.scheme.buf &&
+      (url.scheme.len > 2 && url.scheme.len < 5 &&
+       (url.scheme.buf[0] | (char)0x20) == 't' &&
+       (url.scheme.buf[1] | (char)0x20) == 'c') &&
+      (url.scheme.buf[2] | (char)0x20) == 'p')
+    url.scheme = FIO_BUF_INFO0;
+  if (!url.port.buf && !url.scheme.buf) {
     static size_t port_counter = 3000;
     size_t port = fio_atomic_add(&port_counter, 1);
     if (port == 3000 && getenv("PORT")) {
@@ -2386,23 +2401,19 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
       if (!port | (port > 65535ULL))
         port = 3000;
     }
-    fio_buf_info_s root_addr = FIO_BUF_INFO1((char *)"0.0.0.0");
-    if (getenv("ADDRESS")) {
-      fio_buf_info_s tmp = FIO_BUF_INFO1((char *)getenv("ADDRESS"));
-      if (tmp.len < 56)
-        root_addr = tmp;
-    }
+    url_alt.len = 0;
     fio_string_write2(&url_alt,
                       NULL,
-                      FIO_STRING_WRITE_STR2(root_addr.buf, root_addr.len),
+                      FIO_STRING_WRITE_STR2(url.scheme.buf, url.scheme.len),
+                      (url.scheme.len ? FIO_STRING_WRITE_STR2("://", 3)
+                                      : FIO_STRING_WRITE_STR2(NULL, 0)),
+                      FIO_STRING_WRITE_STR2(url.host.buf, url.host.len),
                       FIO_STRING_WRITE_STR2(":", 1),
                       FIO_STRING_WRITE_NUM(port));
-    if (args.url)
-      fio_string_write(&url_alt, NULL, args.url, strlen(args.url));
     args.url = url_alt.buf;
-  } else
-    url_alt.len = strlen(args.url);
-  fio_url_s url = fio_url_parse(args.url, url_alt.len);
+    url = fio_url_parse(args.url, url_alt.len);
+  }
+
   args.tls = fio_tls_from_url(args.tls, url);
   fio___srv_init_protocol_test(args.protocol, !!args.tls);
   built_tls = args.protocol->io_functions.build_context(args.tls, 0);

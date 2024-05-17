@@ -473,7 +473,7 @@ SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
 
-/** Closes a persistent HTTP connection (i.s., if upgraded). */
+/** Closes a persistent HTTP connection (i.e., if upgraded). */
 SFUNC void fio_http_close(fio_http_s *h);
 
 /* *****************************************************************************
@@ -1309,7 +1309,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-/** Closes a persistent HTTP connection (i.s., if upgraded). */
+/** Closes a persistent HTTP connection (i.e., if upgraded). */
 SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
 
 /** Creates a copy of an existing handle, copying only its request data. */

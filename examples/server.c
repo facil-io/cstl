@@ -200,29 +200,29 @@ int main(int argc, char const *argv[]) {
   if (!fio_cli_get("-b"))
     fio_cli_set(fio_cli_get("-b"), fio_cli_unnamed(0));
   if (fio_cli_get("-p")) {
-    fio_buf_info_s tmp;
-    FIO_STR_INFO_TMP_VAR(url, 2048);
-    tmp.buf = (char *)fio_cli_get("-b");
-    if (!tmp.buf)
-      tmp.buf = (char *)"0.0.0.0";
-    tmp.len = strlen(tmp.buf);
-    FIO_ASSERT(tmp.len < 2000, "binding address / url too long.");
-    fio_url_s u = fio_url_parse(tmp.buf, tmp.len);
-    tmp.buf = (char *)fio_cli_get("-p");
-    tmp.len = strlen(tmp.buf);
-    FIO_ASSERT(tmp.len < 6, "port number too long.");
-    fio_string_write2(&url,
-                      NULL,
-                      FIO_STRING_WRITE_STR2(u.scheme.buf, u.scheme.len),
-                      (u.scheme.len ? FIO_STRING_WRITE_STR2("://", 3)
-                                    : FIO_STRING_WRITE_STR2(NULL, 0)),
-                      FIO_STRING_WRITE_STR2(u.host.buf, u.host.len),
-                      FIO_STRING_WRITE_STR2(":", 1),
-                      FIO_STRING_WRITE_STR2(tmp.buf, tmp.len),
-                      (u.query.len ? FIO_STRING_WRITE_STR2("?", 1)
-                                   : FIO_STRING_WRITE_STR2(NULL, 0)),
-                      FIO_STRING_WRITE_STR2(u.query.buf, u.query.len));
-    fio_cli_set_unnamed(0, url.buf);
+    fio_buf_info_s tmp = fio_cli_get_str("-b");
+    if (tmp.buf) {
+      FIO_STR_INFO_TMP_VAR(url, 2048);
+      FIO_ASSERT(tmp.len < 2000, "binding address / url too long.");
+      fio_url_s u = fio_url_parse(tmp.buf, tmp.len);
+      tmp.buf = (char *)fio_cli_get("-p");
+      tmp.len = strlen(tmp.buf);
+      FIO_ASSERT(tmp.len < 6, "port number too long.");
+      fio_string_write2(&url,
+                        NULL,
+                        FIO_STRING_WRITE_STR2(u.scheme.buf, u.scheme.len),
+                        (u.scheme.len ? FIO_STRING_WRITE_STR2("://", 3)
+                                      : FIO_STRING_WRITE_STR2(NULL, 0)),
+                        FIO_STRING_WRITE_STR2(u.host.buf, u.host.len),
+                        FIO_STRING_WRITE_STR2(":", 1),
+                        FIO_STRING_WRITE_STR2(tmp.buf, tmp.len),
+                        (u.query.len ? FIO_STRING_WRITE_STR2("?", 1)
+                                     : FIO_STRING_WRITE_STR2(NULL, 0)),
+                        FIO_STRING_WRITE_STR2(u.query.buf, u.query.len));
+      fio_cli_set("-b", url.buf);
+    } else {
+      setenv("PORT", fio_cli_get("-p"), 1);
+    }
   }
 
   /* listen to incoming HTTP connections */

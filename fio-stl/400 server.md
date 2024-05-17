@@ -512,7 +512,7 @@ struct fio_protocol_s {
     void (*free)(void *tls);
   } io_functions;
   /**
-   * The timeout value in seconds for all connections using this protocol.
+   * The timeout value in milliseconds for all connections using this protocol.
    *
    * Limited to FIO_SRV_TIMEOUT_MAX seconds.
    * 
