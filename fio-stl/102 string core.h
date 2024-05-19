@@ -152,7 +152,7 @@ SFUNC int fio_string_write2(fio_str_info_s *restrict dest,
 #define FIO_STRING_WRITE_STR1(str_)                                            \
   ((fio_string_write_s){                                                       \
       .klass = 1,                                                              \
-      .info.str = {.len = FIO_STRLEN((str_)), .buf = (str_)}})
+      .info.str = {.len = (size_t)FIO_STRLEN((str_)), .buf = (str_)}})
 
 /** A macro to add a String with known length to `fio_string_write2`. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \

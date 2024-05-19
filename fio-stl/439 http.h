@@ -65,8 +65,10 @@ typedef struct fio_http_settings_s {
   void (*pre_http_body)(fio_http_s *h);
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
+  /** Called when a request / response cycle is finished with no Upgrade. */
+  void (*on_finish)(fio_http_s *h);
   /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_finish)(struct fio_http_settings_s *settings);
+  void (*on_stop)(struct fio_http_settings_s *settings);
 
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
   int (*on_authenticate_sse)(fio_http_s *h);
@@ -281,7 +283,7 @@ static int fio___http_default_authenticate(fio_http_s *h) {
 }
 
 // on_queue
-static void fio___http_default_on_finish(struct fio_http_settings_s *settings) {
+static void fio___http_default_on_stop(struct fio_http_settings_s *settings) {
   ((void)settings);
 }
 
@@ -322,7 +324,9 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
     s->on_http = is_client ? fio___http_default_noop
                            : fio___http_default_on_http_request;
   if (!s->on_finish)
-    s->on_finish = fio___http_default_on_finish;
+    s->on_finish = fio___http_default_noop;
+  if (!s->on_stop)
+    s->on_stop = fio___http_default_on_stop;
   if (!s->on_authenticate_sse)
     s->on_authenticate_sse = is_client ? FIO_HTTP_AUTHENTICATE_ALLOW
                                        : fio___http_default_authenticate;
@@ -421,8 +425,8 @@ typedef struct {
   do {                                                                         \
     if (o.settings.tls)                                                        \
       fio_tls_free(o.settings.tls);                                            \
-    if (o.settings.on_finish)                                                  \
-      o.settings.on_finish(&o.settings);                                       \
+    if (o.settings.on_stop)                                                    \
+      o.settings.on_stop(&o.settings);                                         \
   } while (0)
 #include FIO_INCLUDE_FILE
 
@@ -433,6 +437,7 @@ HTTP Connection Container
 struct fio___http_connection_http_s {
   void (*on_http_callback)(void *, void *);
   void (*on_http)(fio_http_s *h);
+  void (*on_finish)(fio_http_s *h);
   fio_http1_parser_s parser;
   uint32_t max_header;
 };
@@ -857,6 +862,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
           {
               .on_http_callback = p->on_http_callback,
               .on_http = p->settings.on_http,
+              .on_finish = p->settings.on_finish,
               .max_header = p->settings.max_header_size,
           },
       .capa = p->settings.max_line_len,
@@ -1005,6 +1011,10 @@ static int fio_http1_on_expect(void *udata) {
     return 1;
   fio_dup(c->io);
   c->h = NULL;
+  /* TODO: test for body size violation and deny request if payload too big. */
+  if (FIO_HTTP1_EXPECTED_CHUNKED != fio_http1_expected(&c->state.http.parser) &&
+      c->settings->max_body_size > fio_http1_expected(&c->state.http.parser))
+    goto payload_too_big;
   c->settings->pre_http_body(h);
   if (fio_http_status(h))
     goto response_sent;
@@ -1012,7 +1022,10 @@ static int fio_http1_on_expect(void *udata) {
   fio_undup(c->io);
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
   return 0; /* TODO?: improve support for `expect` headers? */
+payload_too_big:
+  fio_http_send_error_response(h, 413); /* fall through */
 response_sent:
+  // c->h = NULL;
   fio_http_free(h);
   return 1;
 }
@@ -1055,6 +1068,7 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
           {
               .on_http_callback = p->on_http_callback,
               .on_http = p->settings.on_http,
+              .on_finish = p->settings.on_finish,
               .max_header = p->settings.max_header_size,
           },
       .capa = capa,
@@ -1294,6 +1308,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   c->suspend = 0;
   if (upgraded)
     goto upgraded;
+
   if (fio_srv_is_open(c->io)) {
     /* TODO: test for connection:close header and h->status values */
     fio___http1_process_data(c->io, c);
@@ -1346,9 +1361,18 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   if (c->log)
     fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+  if (fio_http_is_upgraded(h))
+    goto upgraded;
+  /* once the function returns, `h` may be freed (possible finish on free). */
+  c->state.http.on_finish(h);
+
+  fio_srv_defer(fio___http_controller_http1_on_finish_task, (void *)(c), NULL);
+  return;
+
+upgraded:
   fio_srv_defer(fio___http_controller_http1_on_finish_task,
                 (void *)(c),
-                fio_http_is_upgraded(h) ? (void *)h : NULL);
+                (void *)h);
 }
 
 /* *****************************************************************************

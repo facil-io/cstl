@@ -524,7 +524,7 @@ Assertions
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
-      exit(-1);                                                                \
+      abort();                                                                 \
     }                                                                          \
   } while (0)
 

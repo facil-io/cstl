@@ -401,7 +401,7 @@ static inline int fio_http1___read_header_line(
   }
 
 headers_finished:
-  if (p->fn == fio_http1___read_header_post_expect &&
+  if (p->fn == fio_http1___read_header_post_expect && p->expected &&
       fio_http1_on_expect(udata))
     goto expect_failed;
   p->fn = (!p->expected)         ? fio_http1___finish
