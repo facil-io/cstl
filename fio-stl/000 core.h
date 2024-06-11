@@ -915,15 +915,23 @@ typedef struct fio_index8_node_s {
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */
 #define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
-       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
+  for (size_t pos = (head),                                                    \
+              stopper___ils___ = 0,                                            \
+              pos##___nxt = (root)[(head)].node_name.next;                     \
+       !stopper___ils___;                                                      \
+       (stopper___ils___ = ((pos = pos##___nxt) == (head))),                   \
+              pos##___nxt = (root)[pos].node_name.next)
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */
 #define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
-  for (size_t pos = ((root)[head].node_name.prev), stopper___ils___ = 0;       \
+  for (size_t pos = ((root)[head].node_name.prev),                             \
+              pos##___nxt =                                                    \
+                  ((root)[((root)[head].node_name.prev)].node_name.prev),      \
+              stopper___ils___ = 0;                                            \
        !stopper___ils___;                                                      \
        ((stopper___ils___ = (pos == head)),                                    \
-        (pos = (root)[pos].node_name.prev)))
+        (pos = pos##___nxt),                                                   \
+        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
 #endif
 
 /* *****************************************************************************
@@ -1864,8 +1872,23 @@ FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
-  return (row - UINT64_C(0x0101010101010101)) &
-         ((~row) & UINT64_C(0x8080808080808080));
+#define FIO_HAS_ZERO_BYTE64(row)                                               \
+  (((row)-UINT64_C(0x0101010101010101)) &                                      \
+   ((~(row)) & UINT64_C(0x8080808080808080)))
+  return FIO_HAS_ZERO_BYTE64(row);
+}
+
+/**
+ * Detects a byte where no bits are set (0) within an 8 byte vector.
+ *
+ * This variation should NOT be used to build a bitmap, but May be used to
+ * detect the first occurrence.
+ */
+FIO_IFUNC uint64_t fio_has_zero_byte_alt64(uint64_t row) {
+#define FIO_HAS_ZERO_BYTE64(row)                                               \
+  (((row)-UINT64_C(0x0101010101010101)) &                                      \
+   ((~(row)) & UINT64_C(0x8080808080808080)))
+  return FIO_HAS_ZERO_BYTE64(row);
 }
 
 /**
@@ -1883,17 +1906,25 @@ FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
  * The full byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
-  return fio_has_zero_byte64(~row);
+#define FIO_HAS_FULL_BYTE64(row)                                               \
+  ((((row)&UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &     \
+   (row)&UINT64_C(0x8080808080808080))
+  return FIO_HAS_FULL_BYTE64(row);
 }
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
 FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
-  result = fio_ltole64(result); /* map little endian to bitmap */
-  result >>= 7;                 /* move all 0x80 to 0x01 */
-  result |= result >> 7;        /* pack all 0x80 bits into one byte */
-  result |= result >> 14;
-  result |= result >> 28;
-  result &= 0xFFU;
+/** Converts a FIO_HAS_FULL_BYTE64 result to relative position bitmap. */
+#define FIO_HAS_BYTE2BITMAP(result)                                            \
+  do {                                                                         \
+    (result) = fio_ltole64((result)); /* map little endian to bitmap */        \
+    (result) >>= 7;                   /* move all 0x80 to 0x01 */              \
+    (result) |= (result) >> 7;        /* pack all 0x80 bits into one byte */   \
+    (result) |= (result) >> 14;                                                \
+    (result) |= (result) >> 28;                                                \
+    (result) &= 0xFFU;                                                         \
+  } while (0)
+  FIO_HAS_BYTE2BITMAP(result);
   return result;
 }
 

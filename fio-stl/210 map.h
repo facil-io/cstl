@@ -1200,7 +1200,10 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
 #if defined(FIO_MAP_HASH_FN)
   hash = FIO_MAP_HASH_FN(key);
 #endif
-  hash += !hash; /* hash is never zero */
+  hash += !hash;  /* hash is never zero */
+  if (!o->bits) { /* minimal space is 8 objects... */
+    *o = FIO_NAME(FIO_MAP_NAME, __duplicate)(o, 3, 1);
+  }
   /* find the object's (potential) position in the array */
   for (int i = 0;;) {
     pos = FIO_NAME(FIO_MAP_NAME, __index)(o, key, hash);

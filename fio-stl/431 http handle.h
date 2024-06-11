@@ -208,6 +208,9 @@ SFUNC fio_str_info_s fio_http_request_header(fio_http_s *,
                                              fio_str_info_s name,
                                              size_t index);
 
+/** Returns the number of headers named `name` that were received. */
+SFUNC size_t fio_http_request_header_count(fio_http_s *, fio_str_info_s name);
+
 /** Sets the header information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_request_header_set(fio_http_s *,
                                                  fio_str_info_s name,
@@ -228,6 +231,9 @@ SFUNC fio_str_info_s fio_http_request_header_add(fio_http_s *,
  * Iterates through all request headers (except cookies!).
  *
  * A non-zero return will stop iteration.
+ *
+ * Returns the number of iterations performed. If `callback` is `NULL`, returns
+ * the number of headers available (multi-value headers are counted as 1).
  * */
 SFUNC size_t fio_http_request_header_each(fio_http_s *,
                                           int (*callback)(fio_http_s *,
@@ -248,7 +254,8 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
 /**
  * Reads from the body until finding `token`, reaching `limit` or EOF.
  *
- * Note: `limit` is ignored if the
+ * Note: `limit` is ignored if zero or if the remaining data is lower than
+ * limit.
  */
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
                                               char token,
@@ -397,6 +404,9 @@ SFUNC int fio_http_is_sse(fio_http_s *);
 SFUNC fio_str_info_s fio_http_response_header(fio_http_s *,
                                               fio_str_info_s name,
                                               size_t index);
+
+/** Returns the number of headers named `name` that were received. */
+SFUNC size_t fio_http_response_header_count(fio_http_s *, fio_str_info_s name);
 
 /**
  * Sets the header information associated with the HTTP handle.
@@ -1145,6 +1155,17 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
   return r;
 }
 
+FIO_IFUNC size_t fio___http_hmap_count2(fio___http_hmap_s *map,
+                                        fio_str_info_s key) {
+  size_t r = 0;
+  fio___http_sary_s *a =
+      fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
+  if (!a)
+    return r;
+  r = fio___http_sary_count(a);
+  return r;
+}
+
 /* *****************************************************************************
 Header iteration Task
 ***************************************************************************** */
@@ -1416,16 +1437,6 @@ SFUNC int fio_http_is_sse(fio_http_s *h) {
 Header Data Management
 ***************************************************************************** */
 
-/**
- * Gets the header information associated with the HTTP handle.
- *
- * Since more than a single value may be associated with a header name, the
- * index may be used to collect subsequent values.
- *
- * An empty value is returned if no header value is available (or index is
- * exceeded).
- */
-
 #define FIO___HTTP_HEADER_SET_FN(category, name_, headers, add_val)            \
   /** Sets the header information associated with the HTTP handle. */          \
   fio_str_info_s fio_http_##category##_header_##name_(fio_http_s *h,           \
@@ -1453,6 +1464,18 @@ fio_str_info_s fio_http_response_header(fio_http_s *h,
                                         size_t index) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
   return fio___http_hmap_get2(HTTP_HDR_RESPONSE(h), name, (int32_t)index);
+}
+
+/** Returns the number of headers named `name` that were received. */
+SFUNC size_t fio_http_request_header_count(fio_http_s *h, fio_str_info_s name) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return fio___http_hmap_count2(HTTP_HDR_REQUEST(h), name);
+}
+/** Returns the number of headers named `name` that were received. */
+SFUNC size_t fio_http_response_header_count(fio_http_s *h,
+                                            fio_str_info_s name) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  return fio___http_hmap_count2(HTTP_HDR_RESPONSE(h), name);
 }
 
 /** Iterates through all headers. A non-zero return will stop iteration. */
@@ -1927,7 +1950,7 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
 /**
  * Reads from the body until finding `token`, reaching `limit` or EOF.
  *
- * Note: `limit` is ignored if the
+ * Note: `limit` is ignored if zero or larger than remaining data.
  */
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                               char token,
