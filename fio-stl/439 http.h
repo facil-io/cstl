@@ -746,16 +746,17 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
         s.tls_io_func = &tmp_fn;
       for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
         p->state[i].protocol.io_functions = *s.tls_io_func;
+      if (should_free_tls)
+        fio_tls_free(s.tls);
     }
-    if (should_free_tls)
-      fio_tls_free(s.tls);
   }
   p->settings = s;
   p->on_http_callback = (p->settings.public_folder.len)
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
   p->settings.public_folder.buf = p->public_folder_buf;
-  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
+  p->queue = p->settings.queue && p->settings.queue->q ? p->settings.queue->q
+                                                       : fio_srv_queue();
   if (s.public_folder.len)
     FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
   void *listener =
@@ -840,9 +841,9 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
       s.tls_io_func = &tmp_fn;
     for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
       p->state[i].protocol.io_functions = *s.tls_io_func;
+    if (should_free_tls)
+      fio_tls_free(s.tls);
   }
-  if (should_free_tls)
-    fio_tls_free(s.tls);
   p->settings = s;
   p->settings.public_folder.buf = p->public_folder_buf;
   p->settings.public_folder.len = 0;

@@ -164,6 +164,22 @@ Accepts a listener handler returned by `fio_srv_listen` and destroys it.
 
 Normally this function isn't called, as the `listener` handle auto-destructs during server cleanup (at exit).
 
+#### `fio_srv_listener_url`
+
+```c
+fio_buf_info_s fio_srv_listener_url(void *listener);
+```
+
+Returns the URL on which the listener is listening.
+
+#### `fio_srv_listener_is_tls`
+
+```c
+int fio_srv_listener_is_tls(void *listener);
+```
+
+Returns true if the listener protocol has an attached TLS context.
+
 #### `fio_srv_attach_fd`
 
 ```c

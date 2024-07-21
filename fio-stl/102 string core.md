@@ -770,6 +770,8 @@ Destroys a copy of `fio_keystr_s` - used internally by the hash map.
 
 ```c
 int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
+int fio_keystr_is_eq2(fio_keystr_s a, fio_str_info_s b);
+int fio_keystr_is_eq3(fio_keystr_s a, fio_buf_info_s b);
 ```
 
 Compares two Key Strings - used internally by the hash map.

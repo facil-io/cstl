@@ -316,7 +316,8 @@ FIO_MAP Ordering & Naming Shortcut
 #if defined(FIO_HTTP_HANDLE) || defined(FIO_STR_NAME) ||                       \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
-    (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) || defined(FIO_MUSTACHE)
+    (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
+    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME)
 #undef FIO_STR
 #define FIO_STR
 #endif

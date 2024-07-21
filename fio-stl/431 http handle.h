@@ -208,7 +208,12 @@ SFUNC fio_str_info_s fio_http_request_header(fio_http_s *,
                                              fio_str_info_s name,
                                              size_t index);
 
-/** Returns the number of headers named `name` that were received. */
+/**
+ * Returns the number of headers named `name` that were received.
+ *
+ * If `name` buffer is `NULL`, returns the number of unique headers (not the
+ * number of unique values).
+ */
 SFUNC size_t fio_http_request_header_count(fio_http_s *, fio_str_info_s name);
 
 /** Sets the header information associated with the HTTP handle. */
@@ -298,8 +303,8 @@ typedef enum fio_http_cookie_same_site_e {
  * This struct is used together with the `fio_http_cookie_set` macro. i.e.:
  *
  *       fio_http_set_cookie(h,
- *                      .name = "my_cookie",
- *                      .value = "data");
+ *                      .name = FIO_STR_INFO1("my_cookie"),
+ *                      .value = FIO_STR_INFO1("data"));
  *
  */
 typedef struct fio_http_cookie_args_s {
@@ -374,6 +379,9 @@ fio_http_set_cookie_each(fio_http_s *h,
 Responding to an HTTP event.
 ***************************************************************************** */
 
+/** Returns true if no HTTP headers / data was sent (a clean slate). */
+SFUNC int fio_http_is_clean(fio_http_s *);
+
 /** Returns true if the HTTP handle's response was sent. */
 SFUNC int fio_http_is_finished(fio_http_s *);
 
@@ -404,8 +412,12 @@ SFUNC int fio_http_is_sse(fio_http_s *);
 SFUNC fio_str_info_s fio_http_response_header(fio_http_s *,
                                               fio_str_info_s name,
                                               size_t index);
-
-/** Returns the number of headers named `name` that were received. */
+/**
+ * Returns the number of headers named `name` in the response.
+ *
+ * If `name` buffer is `NULL`, returns the number of unique headers (not the
+ * number of unique values).
+ */
 SFUNC size_t fio_http_response_header_count(fio_http_s *, fio_str_info_s name);
 
 /**
@@ -1403,6 +1415,11 @@ SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
 Handler State
 ***************************************************************************** */
 
+SFUNC int fio_http_is_clean(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return !h->state;
+}
+
 /** Returns true if the HTTP handle's response was sent. */
 SFUNC int fio_http_is_finished(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
@@ -1469,12 +1486,16 @@ fio_str_info_s fio_http_response_header(fio_http_s *h,
 /** Returns the number of headers named `name` that were received. */
 SFUNC size_t fio_http_request_header_count(fio_http_s *h, fio_str_info_s name) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  if (!name.buf)
+    return fio___http_hmap_count(HTTP_HDR_REQUEST(h));
   return fio___http_hmap_count2(HTTP_HDR_REQUEST(h), name);
 }
 /** Returns the number of headers named `name` that were received. */
 SFUNC size_t fio_http_response_header_count(fio_http_s *h,
                                             fio_str_info_s name) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP Handle!");
+  if (!name.buf)
+    return fio___http_hmap_count(HTTP_HDR_RESPONSE(h));
   return fio___http_hmap_count2(HTTP_HDR_RESPONSE(h), name);
 }
 

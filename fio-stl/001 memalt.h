@@ -154,7 +154,8 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   const char *s = (const char *)src_;
 
   if ((d == s) | !bytes | !d | !s) {
-    FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
+    if (bytes && (d != s))
+      FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return d;
   }
 

@@ -165,6 +165,9 @@ SFUNC void fio_srv_listen_stop(void *listener);
 /** Returns the URL on which the listener is listening. */
 SFUNC fio_buf_info_s fio_srv_listener_url(void *listener);
 
+/** Returns true if the listener protocol has an attached TLS context. */
+SFUNC int fio_srv_listener_is_tls(void *listener);
+
 /* *****************************************************************************
 Connecting as a Client
 ***************************************************************************** */
@@ -723,6 +726,9 @@ FIO_IFUNC fio_queue_s *fio_srv_async_queue(fio_srv_async_s *q) { return q->q; }
  * will eventually run the server).
  */
 SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads);
+
+/** Initializes an async server queue for multo-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_update(fio_srv_async_s *q, uint32_t threads);
 
 #define fio_srv_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
 
@@ -1996,7 +2002,7 @@ error: /* note: `dealloc` is called by the `fio_stream` API error handler. */
                 (io ? io->fd : -1));
   return;
 write_called_after_close:
-  FIO_LOG_WARNING("`write` called after `close` was called for IO.");
+  FIO_LOG_DEBUG2("`write` called after `close` was called for IO.");
   {
     union {
       void *ptr;
@@ -2293,6 +2299,12 @@ SFUNC void fio_srv_listen_stop(void *listener) {
 SFUNC fio_buf_info_s fio_srv_listener_url(void *listener) {
   fio___srv_listen_s *l = (fio___srv_listen_s *)listener;
   return FIO_BUF_INFO2(l->url, l->url_len);
+}
+
+/** Returns true if the listener protocol has an attached TLS context. */
+SFUNC int fio_srv_listener_is_tls(void *listener) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)listener;
+  return !!l->tls_ctx;
 }
 
 static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
@@ -3074,6 +3086,14 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
   FIO_LIST_PUSH(&fio___srvdata.async, &q->node);
   fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
   fio_state_callback_add(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
+}
+
+/** Updates an async server queue for multi-threaded (non IO) tasks. */
+SFUNC void fio_srv_async_update(fio_srv_async_s *q, uint32_t threads) {
+  FIO_LIST_REMOVE(&q->node);
+  fio_state_callback_remove(FIO_CALL_ON_START, fio___srv_async_start, q);
+  fio_state_callback_remove(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
+  fio_srv_async_init(q, threads);
 }
 
 /* *****************************************************************************

@@ -104,6 +104,10 @@
 #include "210 map.h"
 #endif
 
+#if defined(FIO_MAP2_NAME)
+#include "210 map2.h"
+#endif
+
 #include "299 reference counter.h" /* required: pointer tagging cleanup is here */
 
 #ifdef FIO_SHA1

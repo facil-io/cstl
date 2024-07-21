@@ -613,6 +613,8 @@ FIO_SFUNC void fio_keystr_destroy(fio_keystr_s *key,
 FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
 /** Compares a Key String to any String - used internally by the hash map. */
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b);
+/** Compares a Key String to any String - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq3(fio_keystr_s a_, fio_buf_info_s b);
 /** Returns a good-enough `fio_keystr_s` risky hash. */
 FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a);
 
@@ -1083,6 +1085,11 @@ FIO_IFUNC int fio_keystr_is_eq(fio_keystr_s a_, fio_keystr_s b_) {
 FIO_IFUNC int fio_keystr_is_eq2(fio_keystr_s a_, fio_str_info_s b) {
   fio_str_info_s a = fio_keystr_info(&a_);
   return FIO_STR_INFO_IS_EQ(a, b);
+}
+/** Compares a Key String to any String - used internally by the hash map. */
+FIO_IFUNC int fio_keystr_is_eq3(fio_keystr_s a_, fio_buf_info_s b) {
+  fio_buf_info_s a = fio_keystr_buf(&a_);
+  return FIO_BUF_INFO_IS_EQ(a, b);
 }
 
 /** Returns a good-enough `fio_keystr_s` risky hash. */
