@@ -916,20 +916,22 @@ typedef struct fio_index8_node_s {
 /** Loops through every index in the indexed list, assuming `head` is valid. */
 #define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
   for (size_t pos = (head),                                                    \
+              stooper___hd = (head),                                           \
               stopper___ils___ = 0,                                            \
               pos##___nxt = (root)[(head)].node_name.next;                     \
        !stopper___ils___;                                                      \
-       (stopper___ils___ = ((pos = pos##___nxt) == (head))),                   \
+       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
               pos##___nxt = (root)[pos].node_name.next)
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */
 #define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
-  for (size_t pos = ((root)[head].node_name.prev),                             \
+  for (size_t pos = ((root)[(head)].node_name.prev),                           \
               pos##___nxt =                                                    \
-                  ((root)[((root)[head].node_name.prev)].node_name.prev),      \
+                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
+              stooper___hd = (head),                                           \
               stopper___ils___ = 0;                                            \
        !stopper___ils___;                                                      \
-       ((stopper___ils___ = (pos == head)),                                    \
+       ((stopper___ils___ = (pos == stooper___hd)),                            \
         (pos = pos##___nxt),                                                   \
         (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
 #endif

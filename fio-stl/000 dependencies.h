@@ -181,6 +181,7 @@ Memory Allocation - FIO_MALLOC as a "global" default memory allocator
 ***************************************************************************** */
 /* FIO_MALLOC defines a "global" default memory allocator */
 #if defined(FIO_MALLOC) && !defined(H___FIO_MALLOC___H)
+#define H___FIO_MALLOC___H
 #ifndef FIO_MEMORY_NAME
 #define FIO_MEMORY_NAME fio
 #endif
@@ -225,8 +226,10 @@ Memory Allocation - FIO_MALLOC defines a FIOBJ dedicated memory allocator
 /* cache up to 64Mb */
 #define FIO_MEMORY_CACHE_SLOTS 16
 #endif
-#endif /* FIOBJ_MALLOC */
+#endif /* FIOBJ_MALLOC / FIO_MALLOC*/
 
+#undef FIOBJ_MALLOC
+#undef FIO_MALLOC
 /* *****************************************************************************
 FIO_SORT_NAME naming
 ***************************************************************************** */

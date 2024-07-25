@@ -162,18 +162,21 @@ Stream Implementation - inlined static functions
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
+FIO_LEAK_COUNTER_DEF(fio_stream)
 /* Allocates a new object on the heap and initializes it's memory. */
 FIO_IFUNC fio_stream_s *fio_stream_new(void) {
   fio_stream_s *s = (fio_stream_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
   if (s) {
     *s = (fio_stream_s)FIO_STREAM_INIT(s[0]);
   }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_stream);
   return s;
 }
 /* Frees any internal data AND the object's container! */
 FIO_IFUNC int fio_stream_free(fio_stream_s *s) {
   fio_stream_destroy(s);
   FIO_MEM_FREE_(s, sizeof(*s));
+  FIO_LEAK_COUNTER_ON_FREE(fio_stream);
   return 0;
 }
 #endif /* FIO_REF_CONSTRUCTOR_ONLY */

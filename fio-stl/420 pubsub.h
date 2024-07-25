@@ -760,6 +760,7 @@ FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata);
+FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_s *io);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
@@ -814,7 +815,7 @@ static struct FIO___PUBSUB_POSTOFFICE {
                     .on_attach = fio___pubsub_protocol_on_attach,
                     .on_data = fio___pubsub_protocol_on_data_remote,
                     .on_close = fio___pubsub_protocol_on_close,
-                    .on_timeout = NULL,
+                    .on_timeout = fio___pubsub_protocol_on_timeout,
                 },
         },
 };
@@ -1842,7 +1843,7 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata) {
   fio___pubsub_message_parser_free(p);
 }
 
-void fio___pubsub_protocol_on_timeout(fio_s *io) {
+static void fio___pubsub_protocol_on_timeout(fio_s *io) {
   static const uint8_t ping_msg[FIO___PUBSUB_MESSAGE_OVERHEAD] = {
       [23] = FIO___PUBSUB_PING};
   fio_write2(io, .buf = (void *)ping_msg, .len = FIO___PUBSUB_MESSAGE_OVERHEAD);

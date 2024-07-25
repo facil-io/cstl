@@ -183,7 +183,7 @@ Leak Counter Helpers
   }                                                                            \
   static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
-    FIO_LOG_DDEBUG2("testing leaks for " FIO_MACRO2STR(name));                 \
+    FIO_LOG_DEBUG2("testing leaks for " FIO_MACRO2STR(name));                  \
     if (counter)                                                               \
       FIO_LOG_ERROR("%zu leaks detected for " FIO_MACRO2STR(name), counter);   \
   }                                                                            \
@@ -192,6 +192,7 @@ Leak Counter Helpers
                            FIO_NAME(fio___leak_counter_cleanup, name),         \
                            NULL);                                              \
   }
+#define FIO_LEAK_COUNTER_COUNT(name)    FIO_NAME(fio___leak_counter, name)(0)
 #define FIO_LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
 #define FIO_LEAK_COUNTER_ON_FREE(name)                                         \
   FIO_NAME(fio___leak_counter, name)(((size_t)-1))

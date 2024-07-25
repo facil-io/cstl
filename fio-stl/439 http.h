@@ -203,6 +203,9 @@ SFUNC fio_s *fio_http_connect(const char *url,
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
 
+/** Returns the HTTP settings associated with the HTTP object, if any. */
+SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *);
+
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
 ***************************************************************************** */
@@ -709,6 +712,13 @@ FIO_SFUNC void fio___http_on_select_h2(fio_s *io) {
 HTTP Listen
 ***************************************************************************** */
 
+static void fio___http_listen_on_start(fio_protocol_s *protocol, void *u) {
+  (void)u;
+  fio___http_protocol_s *p = (fio___http_protocol_s *)protocol;
+  p->queue = ((p->settings.queue && p->settings.queue->q) ? p->settings.queue->q
+                                                          : fio_srv_queue());
+}
+
 static void fio___http_listen_on_finished(fio_protocol_s *p, void *u) {
   (void)u;
   fio___http_protocol_free(
@@ -755,17 +765,17 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
                             ? fio___http_on_http_with_public_folder
                             : fio___http_on_http_direct;
   p->settings.public_folder.buf = p->public_folder_buf;
-  p->queue = p->settings.queue && p->settings.queue->q ? p->settings.queue->q
-                                                       : fio_srv_queue();
+  p->queue = fio_srv_queue();
+
   if (s.public_folder.len)
     FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
   void *listener =
       fio_srv_listen(.url = url,
                      .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                      .tls = s.tls,
-                     // .on_open = fio___http_on_open,
+                     .on_start = fio___http_listen_on_start,
                      .on_finish = fio___http_listen_on_finished,
-                     .queue_for_accept = p->queue ? p->queue : NULL);
+                     .queue_for_accept = p->settings.queue);
   return listener;
 }
 
@@ -1057,13 +1067,17 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                          fio_protocol_get(io));
   fio___http_protocol_dup(p);
+  // p->queue = fio_srv_queue();
+
   const uint32_t capa = p->settings.max_line_len;
   fio___http_connection_s *c = fio___http_connection_new(capa);
   FIO_ASSERT_ALLOC(c);
   *c = (fio___http_connection_s){
       .io = io,
       .settings = &(p->settings),
-      .queue = p->queue,
+      .queue =
+          ((p->settings.queue && p->settings.queue->q) ? p->settings.queue->q
+                                                       : fio_srv_queue()),
       .udata = p->settings.udata,
       .state.http =
           {
@@ -2057,6 +2071,13 @@ SFUNC fio_s *fio_http_io(fio_http_s *h) {
   return c->io;
 }
 
+/** Returns the HTTP settings associated with the HTTP object, if any. */
+SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *h) {
+  if (!h)
+    return NULL;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  return c->settings;
+}
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */

@@ -136,6 +136,37 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___state_map,
 #undef FIO_STATE_CALLBACK_IS_VALID
 
 /* *****************************************************************************
+Names.
+***************************************************************************** */
+
+static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
+    [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
+    [FIO_CALL_PRE_START] = "PRE_START",
+    [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
+    [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
+    [FIO_CALL_IN_CHILD] = "IN_CHILD",
+    [FIO_CALL_IN_MASTER] = "IN_MASTER",
+    [FIO_CALL_ON_WORKER_THREAD_START] = "ON_WORKER_THREAD_START",
+    [FIO_CALL_ON_START] = "ON_START",
+    [FIO_CALL_RESERVED1] = "RESERVED1",
+    [FIO_CALL_RESERVED2] = "RESERVED2",
+    [FIO_CALL_ON_USER1] = "ON_USER1",
+    [FIO_CALL_ON_USER2] = "ON_USER2",
+    [FIO_CALL_ON_IDLE] = "ON_IDLE",
+    [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
+    [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
+    [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
+    [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
+    [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
+    [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
+    [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
+    [FIO_CALL_ON_WORKER_THREAD_END] = "ON_WORKER_THREAD_END",
+    [FIO_CALL_ON_FINISH] = "ON_FINISH",
+    [FIO_CALL_AT_EXIT] = "AT_EXIT",
+    [FIO_CALL_NEVER] = "NEVER",
+};
+
+/* *****************************************************************************
 State Callback Global State and Locks
 ***************************************************************************** */
 /* use `weak` instead of `static` to make sure state callbacks are global. */
@@ -206,30 +237,6 @@ FIO_SFUNC void fio_state_callback_force___task(void *fn_p, void *arg) {
  */
 SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   /** a type-to-string map for callback types */
-  static const char *fio___state_tasks_names[FIO_CALL_NEVER + 1] = {
-      [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
-      [FIO_CALL_PRE_START] = "PRE_START",
-      [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
-      [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
-      [FIO_CALL_IN_CHILD] = "IN_CHILD",
-      [FIO_CALL_IN_MASTER] = "IN_MASTER",
-      [FIO_CALL_ON_START] = "ON_START",
-      [FIO_CALL_RESERVED1] = "RESERVED1",
-      [FIO_CALL_RESERVED2] = "RESERVED2",
-      [FIO_CALL_ON_USER1] = "ON_USER1",
-      [FIO_CALL_ON_USER2] = "ON_USER2",
-      [FIO_CALL_ON_IDLE] = "ON_IDLE",
-      [FIO_CALL_ON_USER1_REVERSE] = "ON_USER1_REVERSE",
-      [FIO_CALL_ON_USER2_REVERSE] = "ON_USER2_REVERSE",
-      [FIO_CALL_RESERVED1_REVERSED] = "RESERVED1_REVERSED",
-      [FIO_CALL_RESERVED2_REVERSED] = "RESERVED2_REVERSED",
-      [FIO_CALL_ON_SHUTDOWN] = "ON_SHUTDOWN",
-      [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
-      [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
-      [FIO_CALL_ON_FINISH] = "ON_FINISH",
-      [FIO_CALL_AT_EXIT] = "AT_EXIT",
-      [FIO_CALL_NEVER] = "NEVER",
-  };
 
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
@@ -248,10 +255,12 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER);
   }
 
-  FIO_LOG_DDEBUG2("%d scheduling %s callbacks.",
+  FIO_LOG_DDEBUG2("%d scheduling %s callbacks (%zu tasks).",
                   (int)(fio_thread_getpid()),
-                  fio___state_tasks_names[e]);
-
+                  FIO___STATE_TASKS_NAMES[e],
+                  (size_t)FIO___STATE_TASKS_ARRAY[e].count);
+  if (!FIO___STATE_TASKS_ARRAY[e].count)
+    return;
   /* copy task queue */
   fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
   if (FIO___STATE_TASKS_ARRAY[e].w) {
@@ -280,8 +289,24 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);
-  (void)fio___state_tasks_names; /* if unused */
+  (void)FIO___STATE_TASKS_NAMES; /* if unused */
 }
+
+/* *****************************************************************************
+Debug Helpers
+***************************************************************************** */
+
+FIO_IFUNC void fio_state_callback_print_state(void) {
+  FIO_LOG2STDERR("DEBUG:    fio_state_callback maps state:");
+  for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
+    fprintf(stderr,
+            "\t%-32s %-4zu out of %-4zu\n",
+            FIO___STATE_TASKS_NAMES[i],
+            (size_t)FIO___STATE_TASKS_ARRAY[i].count,
+            fio___state_map_capa(FIO___STATE_TASKS_ARRAY + i));
+  }
+}
+
 /* *****************************************************************************
 State constructor / destructor
 ***************************************************************************** */

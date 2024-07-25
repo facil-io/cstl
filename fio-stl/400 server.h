@@ -64,6 +64,9 @@ typedef struct fio_tls_s fio_tls_s;
 /** Message structure, as received by the `on_message` subscription callback. */
 typedef struct fio_msg_s fio_msg_s;
 
+/** The Server Async Queue type. */
+typedef struct fio_srv_async_s fio_srv_async_s;
+
 /* *****************************************************************************
 Starting / Stopping the Server
 ***************************************************************************** */
@@ -144,7 +147,7 @@ typedef struct fio_srv_listen_args {
    * Selects a queue that will be used to schedule a pre-accept task.
    * May be used to test user thread stress levels before accepting connections.
    */
-  fio_queue_s *queue_for_accept;
+  fio_srv_async_s *queue_for_accept;
   /** If the server is forked - listen on the root process instead of workers */
   uint8_t on_root;
   /** Hides "started/stopped listening" messages from log (if set). */
@@ -700,12 +703,12 @@ Server Async - Worker Threads for non-IO tasks
 ***************************************************************************** */
 
 /** The Server Async Queue type. */
-typedef struct {
+struct fio_srv_async_s {
   fio_queue_s *q;
   uint32_t count;
   fio_queue_s queue;
   FIO_LIST_NODE node;
-} fio_srv_async_s;
+};
 
 /**
  * Initializes a server - async (multi-threaded) task queue.
@@ -1636,7 +1639,7 @@ FIO_SFUNC void fio___srv_tick(int timeout) {
   if (fio_poll_review(&fio___srvdata.poll_data, timeout) > 0) {
     performed_idle = 0;
   } else if (timeout) {
-    if (!performed_idle)
+    if (!performed_idle && !fio___srvdata.stop)
       fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
@@ -1722,8 +1725,14 @@ FIO_SFUNC void fio___srv_work_task(void *ignr_1, void *ignr_2) {
   fio_queue_push(fio___srv_tasks, fio___srv_work_task, ignr_1, ignr_2);
 }
 
+FIO_SFUNC void fio___srv_async_start(fio_srv_async_s *q);
+FIO_SFUNC void fio___srv_async_stop(fio_srv_async_s *q);
 FIO_SFUNC void fio___srv_work(int is_worker) {
   fio___srvdata.is_worker = is_worker;
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, q) {
+    fio___srv_async_start(q);
+  }
+
   fio_queue_perform_all(fio___srv_tasks);
   if (is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
@@ -1731,7 +1740,14 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   fio___srv_wakeup_init();
   fio_queue_push(fio___srv_tasks, fio___srv_work_task);
   fio_queue_perform_all(fio___srv_tasks);
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, q) {
+    fio___srv_async_stop(q);
+  }
   fio___srv_shutdown();
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, q) {
+    fio___srv_async_stop(q);
+  }
+  fio_queue_perform_all(fio___srv_tasks);
   fio_queue_perform_all(fio___srv_tasks);
   fio_state_callback_force(FIO_CALL_ON_FINISH);
   fio_queue_perform_all(fio___srv_tasks);
@@ -1791,7 +1807,9 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
     return;
   if (fio_atomic_or_fetch(&fio___srvdata.stop, 2) != 2)
     return;
-
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, q) {
+    fio___srv_async_stop(q);
+  }
   fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* do not allow master tasks to run in worker */
@@ -1879,6 +1897,11 @@ SFUNC void fio_srv_start(int workers) {
   workers = (int)fio___srvdata.workers;
   fio___srvdata.is_worker = !workers;
   fio_sock_maximize_limits(0);
+
+  FIO_LIST_EACH(fio_srv_async_s, node, &fio___srvdata.async, q) {
+    fio___srv_async_start(q);
+  }
+
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(fio___srv_tasks);
   fio_signal_monitor(SIGINT,
@@ -2066,160 +2089,6 @@ SFUNC int fio_srv_is_open(fio_s *io) {
 }
 
 /* *****************************************************************************
-Listening
-***************************************************************************** */
-#if 0
-static void fio___srv_listen2_on_data_task(void *io_, void *ignr_) {
-  (void)ignr_;
-  fio_s *io = (fio_s *)io_;
-  int fd;
-  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)(io->udata);
-  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
-    l->on_open(fd, l->udata);
-  }
-  fio_free2(io);
-}
-static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
-  fio_queue_push(fio___srv_tasks, fio___srv_listen2_on_data_task, io_, ignr_);
-}
-
-static void fio___srv_listen2_on_data(fio_s *io) {
-  int fd;
-  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)(io->udata);
-  if (l->queue_for_accept) {
-    fio_queue_push(l->queue_for_accept,
-                   fio___srv_listen_on_data_task_reschd,
-                   fio_dup2(io));
-    return;
-  }
-  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
-    l->on_open(fd, l->udata);
-  }
-}
-static void fio___srv_listen2_on_close(void *settings_) {
-  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)settings_;
-  if (((!l->on_root && fio_srv_is_worker()) ||
-       (l->on_root && fio_srv_is_master()))) {
-    if (l->hide_from_log)
-      FIO_LOG_DEBUG2("%d stopped listening on %s", fio___srvdata.pid, l->url);
-    else
-      FIO_LOG_INFO("%d stopped listening on %s", fio___srvdata.pid, l->url);
-  }
-}
-
-FIO_SFUNC void fio___srv_listen2_cleanup_task(void *udata) {
-  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)udata;
-  int *pfd = (int *)(l + 1);
-  if (l->on_finish)
-    l->on_finish(l->udata);
-  fio_sock_close(*pfd);
-#ifdef AF_UNIX
-  /* delete the unix socket file, if any. */
-  fio_url_s u = fio_url_parse(l->url, FIO_STRLEN(l->url));
-  if (fio_srv_is_master() && !u.host.buf && !u.port.buf && u.path.buf) {
-    unlink(u.path.buf);
-  }
-#endif
-  fio_state_callback_remove(FIO_CALL_AT_EXIT,
-                            fio___srv_listen2_cleanup_task,
-                            udata);
-  FIO_MEM_FREE_(l, sizeof(*l) + sizeof(int) + FIO_STRLEN(l->url) + 1);
-}
-
-static fio_protocol_s FIO___LISTEN2_PROTOCOL = {
-    .on_data = fio___srv_listen2_on_data,
-    .on_close = fio___srv_listen2_on_close,
-    .on_timeout = fio___srv_on_timeout_never,
-};
-
-FIO_SFUNC void fio___srv_listen2_attach_task(void *udata) {
-  struct fio_srv_listen2_args *l = (struct fio_srv_listen2_args *)udata;
-  int *pfd = (int *)(l + 1);
-  int fd = fio_sock_dup(*pfd);
-  FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("%d Called dup(%d) to attach %d as a listening socket.",
-                 (int)fio___srvdata.pid,
-                 *pfd,
-                 fd);
-  fio_srv_attach_fd(fd, &FIO___LISTEN2_PROTOCOL, l, NULL);
-  if (l->on_start)
-    l->on_start(l->udata);
-  if (l->hide_from_log)
-    FIO_LOG_DEBUG2("%d started listening on %s", fio___srvdata.pid, l->url);
-  else
-    FIO_LOG_INFO("%d started listening on %s", fio___srvdata.pid, l->url);
-}
-
-FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *udata, void *ignr_) {
-  (void)ignr_;
-  fio___srv_listen2_attach_task(udata);
-}
-
-void fio_srv_listen2___(void); /* IDE Marker */
-SFUNC int fio_srv_listen2 FIO_NOOP(struct fio_srv_listen2_args args) {
-  static int64_t port = 0;
-  size_t len = args.url ? FIO_STRLEN(args.url) + 1 : 0;
-  struct fio_srv_listen2_args *cpy = NULL;
-  fio_str_info_s adr, tmp;
-  int *fd_store;
-  int fd;
-  if (!args.on_open) {
-    FIO_LOG_ERROR("fio_listen missing `on_open` callback.");
-    goto other_error;
-  }
-  len += (!len) << 6;
-  cpy = (struct fio_srv_listen2_args *)
-      FIO_MEM_REALLOC_(NULL, 0, (sizeof(*cpy) + sizeof(int) + len), 0);
-  FIO_ASSERT_ALLOC(cpy);
-  *cpy = args;
-  cpy->url = (char *)(cpy + 1) + sizeof(int);
-  fd_store = (int *)(cpy + 1);
-  if (args.url) {
-    FIO_MEMCPY((void *)(cpy->url), args.url, len);
-  } else {
-    if (!port) {
-      char *port_env = getenv("PORT");
-      if (port_env)
-        port = fio_atol10(&port_env);
-      if (!port | ((uint64_t)port > 65535))
-        port = 3000;
-    }
-    tmp = FIO_STR_INFO3((char *)cpy->url, 0, len);
-    if (!(adr.buf = getenv("ADDRESS")) ||
-        (adr.len = FIO_STRLEN(adr.buf)) > 58) {
-      adr = FIO_STR_INFO2((char *)"0.0.0.0", 7);
-    }
-    fio_string_write2(&tmp,
-                      NULL,
-                      FIO_STRING_WRITE_STR2(adr.buf, adr.len),
-                      FIO_STRING_WRITE_STR2(":", 1),
-                      FIO_STRING_WRITE_UNUM(port));
-    ++port;
-  }
-  fd = fio_sock_open2(cpy->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
-  if (fd == -1)
-    goto fd_error;
-  *fd_store = fd;
-  if (fio_srv_is_running()) {
-    fio_srv_defer(fio___srv_listen_attach_task_deferred, cpy, NULL);
-  } else {
-    fio_state_callback_add(
-        (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
-        fio___srv_listen2_attach_task,
-        (void *)cpy);
-  }
-  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___srv_listen2_cleanup_task, cpy);
-  return 0;
-fd_error:
-  FIO_MEM_FREE_(cpy, (sizeof(*cpy) + len));
-other_error:
-  if (args.on_finish)
-    args.on_finish(args.udata);
-  return -1;
-}
-#endif
-
-/* *****************************************************************************
 Listening to Incoming Connections
 ***************************************************************************** */
 
@@ -2227,7 +2096,8 @@ typedef struct {
   fio_protocol_s *protocol;
   void *udata;
   void *tls_ctx;
-  fio_queue_s *queue_for_accept;
+  fio_srv_async_s *queue_for_accept;
+  fio_queue_s *queue;
   fio_s *io;
   void (*on_start)(fio_protocol_s *protocol, void *udata);
   void (*on_finish)(fio_protocol_s *protocol, void *udata);
@@ -2312,6 +2182,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   fio_s *io = (fio_s *)io_;
   int fd;
   fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
+  fio_srv_unsuspend(io);
   while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
     fio_srv_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
@@ -2320,11 +2191,21 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
 static void fio___srv_listen_on_data_task_reschd(void *io_, void *ignr_) {
   fio_srv_defer(fio___srv_listen_on_data_task, io_, ignr_);
 }
-
+static void fio___srv_listen_on_attach(fio_s *io) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
+  l->queue = (l->queue_for_accept && l->queue_for_accept->q != fio___srv_tasks)
+                 ? l->queue_for_accept->q
+                 : NULL;
+}
+static void fio___srv_listen_on_shutdown(fio_s *io) {
+  fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
+  l->queue = fio_srv_queue();
+}
 static void fio___srv_listen_on_data(fio_s *io) {
   fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
-  if (l->queue_for_accept) {
-    fio_queue_push(l->queue_for_accept,
+  if (l->queue) {
+    fio_srv_suspend(io);
+    fio_queue_push(l->queue,
                    fio___srv_listen_on_data_task_reschd,
                    fio_dup2(io));
     return;
@@ -2337,9 +2218,11 @@ static void fio___srv_listen_on_close(void *l) {
 }
 
 static fio_protocol_s FIO___LISTEN_PROTOCOL = {
+    .on_attach = fio___srv_listen_on_attach,
     .on_data = fio___srv_listen_on_data,
     .on_close = fio___srv_listen_on_close,
     .on_timeout = fio___srv_on_timeout_never,
+    .on_shutdown = fio___srv_listen_on_shutdown,
 };
 
 FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
@@ -3053,19 +2936,24 @@ SFUNC fio_io_functions_s fio_tls_default_io_functions(fio_io_functions_s *f) {
 Server Async - Worker Threads for non-IO tasks
 ***************************************************************************** */
 
-FIO_SFUNC void fio___srv_async_start(void *q_) {
-  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+FIO_SFUNC void fio___srv_async_start(fio_srv_async_s *q) {
+  if (!q->count)
+    goto no_worker_threads;
   q->q = &q->queue;
+  if (q->count > 4095)
+    goto failed;
+  fio_queue_workers_stop(&q->queue);
   if (fio_queue_workers_add(&q->queue, (size_t)q->count))
     goto failed;
   return;
 
 failed:
   FIO_LOG_ERROR("Server Async Queue couldn't spawn threads!");
+no_worker_threads:
   q->q = fio_srv_queue();
+  fio_queue_perform_all(&q->queue);
 }
-FIO_SFUNC void fio___srv_async_finish(void *q_) {
-  fio_srv_async_s *q = (fio_srv_async_s *)q_;
+FIO_SFUNC void fio___srv_async_stop(fio_srv_async_s *q) {
   q->q = fio___srv_tasks;
   fio_queue_workers_stop(&q->queue);
   fio_queue_perform_all(&q->queue);
@@ -3080,20 +2968,14 @@ SFUNC void fio_srv_async_init(fio_srv_async_s *q, uint32_t threads) {
       .queue = FIO_QUEUE_STATIC_INIT(q->queue),
       .node = FIO_LIST_INIT(q->node),
   };
-  if (!threads || threads > 4095)
-    return;
-  q->q = &q->queue;
   FIO_LIST_PUSH(&fio___srvdata.async, &q->node);
-  fio_state_callback_add(FIO_CALL_ON_START, fio___srv_async_start, q);
-  fio_state_callback_add(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
 }
 
 /** Updates an async server queue for multi-threaded (non IO) tasks. */
 SFUNC void fio_srv_async_update(fio_srv_async_s *q, uint32_t threads) {
-  FIO_LIST_REMOVE(&q->node);
-  fio_state_callback_remove(FIO_CALL_ON_START, fio___srv_async_start, q);
-  fio_state_callback_remove(FIO_CALL_ON_SHUTDOWN, fio___srv_async_finish, q);
-  fio_srv_async_init(q, threads);
+  q->count = threads;
+  if (fio_srv_is_running())
+    fio___srv_async_start(q);
 }
 
 /* *****************************************************************************
