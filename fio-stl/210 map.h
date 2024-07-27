@@ -497,7 +497,7 @@ FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, capa)(FIO_MAP_PTR map) {
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint32_t FIO_NAME(FIO_MAP_NAME, count)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
-  return ((FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map))->count;
+  return FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map)->count;
 }
 
 /** Returns 1 if the iterator points to a valid object, otherwise returns 0. */
@@ -1425,8 +1425,7 @@ Map API
 SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
   // FIO_PTR_TAG_VALID_OR_RETURN(map, 0);
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   FIO_NAME(FIO_MAP_NAME, __free_map)(m, 1);
   *m = (FIO_NAME(FIO_MAP_NAME, s)){0};
 }
@@ -1434,8 +1433,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, destroy)(FIO_MAP_PTR map) {
 /** Reserves at minimum the capacity requested. */
 SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (capa <= FIO_MAP_CAPA(m->bits))
     return;
   size_t bits = m->bits;
@@ -1470,8 +1468,7 @@ SFUNC int FIO_NAME(FIO_MAP_NAME, remove)(FIO_MAP_PTR map,
 #endif
 ) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, -1);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (!m->count)
     return -1;
   return FIO_NAME(FIO_MAP_NAME, __node_delete)(m,
@@ -1498,8 +1495,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
   if (!number_of_elements)
     return;
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (m->count <= number_of_elements) {
     FIO_NAME(FIO_MAP_NAME, __destroy_map)(m, 1);
     return;
@@ -1512,10 +1508,38 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, evict)(FIO_MAP_PTR map,
  */
 SFUNC void FIO_NAME(FIO_MAP_NAME, clear)(FIO_MAP_PTR map) {
   FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (m->map)
     FIO_NAME(FIO_MAP_NAME, __destroy_map)(m, 1);
+}
+
+/** Attempts to minimize memory use. */
+SFUNC void FIO_NAME(FIO_MAP_NAME, compact)(FIO_MAP_PTR map) {
+  FIO_PTR_TAG_VALID_OR_RETURN_VOID(map);
+  FIO_NAME(FIO_MAP_NAME, s) *o = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
+  if (!o->map || !o->count)
+    return;
+  FIO_NAME(FIO_MAP_NAME, s) cpy = {0};
+  uint32_t bits = o->bits;
+  while (FIO_MAP_CAPA(bits >> 1) > o->count)
+    bits >>= 1;
+  ++bits;
+  if (bits >= o->bits)
+    return;
+  for (size_t i = 0; i < 2; ++i) {
+    if (FIO_NAME(FIO_MAP_NAME, __allocate_map)(&cpy, bits))
+      return;
+    if (!FIO_NAME(FIO_MAP_NAME, __move2map)(&cpy, o))
+      goto finish;
+    FIO_NAME(FIO_MAP_NAME, __free_map)(&cpy, 0);
+    ++bits;
+  }
+  return;
+
+finish:
+  FIO_NAME(FIO_MAP_NAME, __free_map)(o, 0);
+  o[0] = cpy;
+  return;
 }
 
 SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
@@ -1533,8 +1557,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
 #endif
     ) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   uint32_t i = FIO_NAME(FIO_MAP_NAME, __node_insert)(m,
 #ifndef FIO_MAP_HASH_FN
                                                      hash,
@@ -1566,8 +1589,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, node_s) *
 #endif
                                     FIO_MAP_KEY key) {
   FIO_PTR_TAG_VALID_OR_RETURN(map, NULL);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   uint32_t i = FIO_NAME(FIO_MAP_NAME, __node_find)(m,
 #ifndef FIO_MAP_HASH_FN
                                                    hash,
@@ -1594,8 +1616,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
                        FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(m);
   if (!m->count)
     return r;
@@ -1682,8 +1703,7 @@ SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
                                          current_pos) { // TODO!
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
 #if FIO_MAP_ORDERED
   uint32_t ipos;
 #else
@@ -1826,8 +1846,7 @@ SFUNC uint32_t FIO_NAME(FIO_MAP_NAME,
                               ssize_t start_at) {
   uint32_t r = (uint32_t)-1;
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
-  FIO_NAME(FIO_MAP_NAME, s) *m =
-      (FIO_NAME(FIO_MAP_NAME, s) *)FIO_PTR_UNTAG(map);
+  FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (start_at < 0)
     start_at += m->count;
   if (start_at < 0)

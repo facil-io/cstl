@@ -168,6 +168,9 @@ SFUNC unsigned int fio_cli_unnamed_count(void);
 /** Returns the unnamed argument using a 0 based `index`. */
 SFUNC char const *fio_cli_unnamed(unsigned int index);
 
+/** Returns the unnamed argument using a 0 based `index`. */
+SFUNC fio_buf_info_s fio_cli_unnamed_str(unsigned int index);
+
 /**
  * Sets the argument's value as a NUL terminated C String.
  *
@@ -243,7 +246,8 @@ FIO_SFUNC fio_cli_str_s fio_cli_str_init(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
   if (s.len < sizeof(r) - 1) {
     r.em = s.len;
-    FIO_MEMCPY(r.pad, s.buf, s.len);
+    if (s.len)
+      FIO_MEMCPY(r.pad, s.buf, s.len);
     return r;
   }
   r.len = (uint32_t)s.len;
@@ -432,6 +436,8 @@ FIO_SFUNC fio_buf_info_s fio___cli_data_get(fio_buf_info_s key) {
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (a)
     r = fio___cli_ary_get(&fio___cli_data.indexed, a->index);
+  if (!r.len)
+    r.buf = NULL;
   return r;
 }
 
@@ -504,6 +510,13 @@ SFUNC char const *fio_cli_unnamed(unsigned int index) {
   if (index >= fio___cli_data.unnamed.w)
     return NULL;
   return fio___cli_ary_get(&fio___cli_data.unnamed, (uint32_t)index).buf;
+}
+
+/** Returns the unnamed argument using a 0 based `index`. */
+SFUNC fio_buf_info_s fio_cli_unnamed_str(unsigned int index) {
+  if (index >= fio___cli_data.unnamed.w)
+    return FIO_BUF_INFO0;
+  return fio___cli_ary_get(&fio___cli_data.unnamed, (uint32_t)index);
 }
 
 /**

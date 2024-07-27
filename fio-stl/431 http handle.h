@@ -2035,8 +2035,14 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
   /* if response has an `etag` header matching `if-none-match`, skip */
   fio___http_hmap_s *hdrs = h->headers + (!!h->status);
-  if (h->status && args->len && fio___http_response_etag_if_none_match(h))
-    return -1;
+  if (h->status) {
+    if (args->len && fio___http_response_etag_if_none_match(h))
+      return -1;
+    if (!args->len && args->finish) {
+      fio_http_send_error_response(h, h->status);
+      return 0;
+    }
+  }
   /* test if streaming / single body response */
   if (!fio___http_hmap_get_ptr(hdrs,
                                FIO_STR_INFO2((char *)"content-length", 14))) {

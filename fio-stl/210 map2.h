@@ -710,7 +710,7 @@ Internal Helpers
 #define FIO_MAP2_ARRAY_LOG_LIMIT 3
 #endif
 #ifndef FIO_MAP2_CAPA
-#define FIO_MAP2_CAPA(bits) ((size_t)1ULL << bits)
+#define FIO_MAP2_CAPA(bits) ((size_t)1ULL << (bits))
 #endif
 
 #ifndef FIO_MAP2_IS_SPARSE
@@ -1038,10 +1038,11 @@ SFUNC void FIO_NAME(FIO_MAP2_NAME, compact)(FIO_MAP2_PTR map) {
   if (!o->map || !o->count)
     return;
   uint32_t bits = o->bits;
-  while ((bits >> 1) > o->count)
+  while (FIO_MAP2_CAPA(bits >> 1) > o->count)
     bits >>= 1;
+  ++bits;
   for (;;) {
-    if (bits == o->bits)
+    if (bits >= o->bits)
       return;
     FIO_NAME(FIO_MAP2_NAME, s)
     cpy = FIO_NAME(FIO_MAP2_NAME, __duplicate)(o, bits, 1);

@@ -1758,7 +1758,10 @@ SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
       (fio___http_connection_s *)fio_udata_get(msg->io);
   if (!c)
     return;
+  FIO_STR_INFO_TMP_VAR(id_str, 64);
+  fio_string_write_hex(&id_str, NULL, msg->id);
   fio_http_sse_write(c->h,
+                     .id = FIO_STR2BUF_INFO(id_str),
                      .event = FIO_STR2BUF_INFO(msg->channel),
                      .data = FIO_STR2BUF_INFO(msg->message));
 }
@@ -1894,6 +1897,7 @@ FIO_SFUNC void fio___sse_on_close(void *udata) {
                   (int)fio_thread_getpid(),
                   udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  c->settings->on_close(c->h);
   c->io = NULL;
   // fio_bstr_free(c->state.sse.msg);
   fio_http_free(c->h);
@@ -2078,6 +2082,7 @@ SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   return c->settings;
 }
+
 /* *****************************************************************************
 Cleanup
 ***************************************************************************** */
