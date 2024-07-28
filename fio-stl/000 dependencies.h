@@ -67,7 +67,6 @@ Everything Inclusion
 #define FIO_CRYPT
 #define FIO_SIGNAL
 #define FIO_SOCK
-#define FIO_STATE
 #define FIO_THREADS
 
 #else
@@ -152,8 +151,10 @@ Core Inclusion
 #undef FIO_LOG
 #undef FIO_MATH
 #undef FIO_RAND
+#undef FIO_STATE
 #undef FIO_TIME
 #undef FIO_URL
+#undef FIO_CORE
 #define FIO_ATOL
 #define FIO_ATOMIC
 #define FIO_FILES
@@ -161,9 +162,9 @@ Core Inclusion
 #define FIO_LOG
 #define FIO_MATH
 #define FIO_RAND
+#define FIO_STATE
 #define FIO_TIME
 #define FIO_URL
-#undef FIO_CORE
 #endif
 
 /* *****************************************************************************
