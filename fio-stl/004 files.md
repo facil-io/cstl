@@ -35,6 +35,18 @@ Creates a temporary file, returning its file descriptor.
 
 Returns -1 on error.
 
+#### `fio_file_dup`
+
+```c
+#if FIO_OS_WIN
+#define fio_file_dup(fd) _dup(fd)
+#else
+#define fio_file_dup(fd) dup(fd)
+#endif
+```
+
+Duplicates the file handle (int).
+
 #### `fio_filename_overwrite`
 
 ```c

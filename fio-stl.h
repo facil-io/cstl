@@ -8476,9 +8476,13 @@ SFUNC size_t fio_fd_find_next(int fd, char token, size_t start_at);
 
 #if FIO_OS_WIN
 #define FIO_FOLDER_SEPARATOR '\\'
+/** Duplicates the file handle (int)*/
+#define fio_file_dup(fd) _dup(fd)
 #else
 #define FIO_FOLDER_SEPARATOR '/'
-#endif
+/** Duplicates the file handle (int)*/
+#define fio_file_dup(fd)     dup(fd)
+#endif /* FIO_OS_WIN */
 
 /* *****************************************************************************
 File Helper Inline Implementation
