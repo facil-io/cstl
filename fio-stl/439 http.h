@@ -1210,6 +1210,9 @@ FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
 /* *****************************************************************************
 HTTP/1 Controller
 ***************************************************************************** */
+FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
+  return fio_fd_get(fio_http_io(h));
+}
 
 /** called by the HTTP handle for each header. */
 FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
@@ -1375,7 +1378,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
   if (fio_http_is_streaming(h))
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   if (c->log)
-    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+    fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
     goto upgraded;
   /* once the function returns, `h` may be freed (possible finish on free). */
@@ -2017,6 +2020,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
@@ -2026,12 +2030,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_WS:
@@ -2040,6 +2046,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_ws_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -2048,12 +2055,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   default:

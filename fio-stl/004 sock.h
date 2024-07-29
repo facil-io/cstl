@@ -152,6 +152,17 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(const char *restrict address,
 /** Frees the pointer returned by `fio_sock_address_new`. */
 FIO_IFUNC void fio_sock_address_free(struct addrinfo *a);
 
+/**
+ * Returns a human readable address representation of the socket's peer address.
+ *
+ * On error, returns a NULL buffer with zero length.
+ *
+ * Buffer lengths are limited to 63 bytes.
+ *
+ * This function is limited in its thread safety to 128 threads / calls.
+ */
+SFUNC fio_buf_info_s fio_sock_peer_addr(int s);
+
 /** Creates a new network socket and binds it to a local address. */
 SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 
@@ -657,6 +668,39 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   FIO_ASSERT(0, "this system does not support Unix sockets.");
 }
 #endif /* AF_UNIX */
+
+/* *****************************************************************************
+Peer Address
+***************************************************************************** */
+
+/**
+ * Returns a human readable address representation of the socket's peer address.
+ *
+ * On error, returns a NULL buffer with zero length.
+ *
+ * Buffer lengths are limited to 63 bytes.
+ *
+ * This function is limited in its thread safety to 128 threads / calls.
+ */
+SFUNC fio_buf_info_s fio_sock_peer_addr(int s) {
+  static char buffer[8129]; /* 64 byte per buffer x 128 threads */
+  static unsigned pos = 0;
+  fio_buf_info_s r =
+      FIO_BUF_INFO2(buffer + (fio_atomic_add(&pos, 63) & 127), 0);
+  struct sockaddr addr[8] = {0};
+  socklen_t len = sizeof(addr);
+  if (!FIO_SOCK_FD_ISVALID(s))
+    goto finish;
+  if (getpeername(s, addr, &len))
+    goto finish;
+  if (getnameinfo(addr, len, r.buf, 64, NULL, 0, NI_NUMERICHOST))
+    goto finish;
+  r.len = FIO_STRLEN(r.buf);
+finish:
+  if (!r.len)
+    r.buf = NULL;
+  return r;
+}
 
 /* *****************************************************************************
 WinSock initialization

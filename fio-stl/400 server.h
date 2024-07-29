@@ -1937,7 +1937,7 @@ IO API
 ***************************************************************************** */
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io) { return io->fd; }
+SFUNC int fio_fd_get(fio_s *io) { return io ? io->fd : -1; }
 
 FIO_SFUNC void fio_touch___task(void *io_, void *ignr_) {
   (void)ignr_;

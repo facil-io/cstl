@@ -9548,6 +9548,17 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(const char *restrict address,
 /** Frees the pointer returned by `fio_sock_address_new`. */
 FIO_IFUNC void fio_sock_address_free(struct addrinfo *a);
 
+/**
+ * Returns a human readable address representation of the socket's peer address.
+ *
+ * On error, returns a NULL buffer with zero length.
+ *
+ * Buffer lengths are limited to 63 bytes.
+ *
+ * This function is limited in its thread safety to 128 threads / calls.
+ */
+SFUNC fio_buf_info_s fio_sock_peer_addr(int s);
+
 /** Creates a new network socket and binds it to a local address. */
 SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 
@@ -10053,6 +10064,39 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   FIO_ASSERT(0, "this system does not support Unix sockets.");
 }
 #endif /* AF_UNIX */
+
+/* *****************************************************************************
+Peer Address
+***************************************************************************** */
+
+/**
+ * Returns a human readable address representation of the socket's peer address.
+ *
+ * On error, returns a NULL buffer with zero length.
+ *
+ * Buffer lengths are limited to 63 bytes.
+ *
+ * This function is limited in its thread safety to 128 threads / calls.
+ */
+SFUNC fio_buf_info_s fio_sock_peer_addr(int s) {
+  static char buffer[8129]; /* 64 byte per buffer x 128 threads */
+  static unsigned pos = 0;
+  fio_buf_info_s r =
+      FIO_BUF_INFO2(buffer + (fio_atomic_add(&pos, 63) & 127), 0);
+  struct sockaddr addr[8] = {0};
+  socklen_t len = sizeof(addr);
+  if (!FIO_SOCK_FD_ISVALID(s))
+    goto finish;
+  if (getpeername(s, addr, &len))
+    goto finish;
+  if (getnameinfo(addr, len, r.buf, 64, NULL, 0, NI_NUMERICHOST))
+    goto finish;
+  r.len = FIO_STRLEN(r.buf);
+finish:
+  if (!r.len)
+    r.buf = NULL;
+  return r;
+}
 
 /* *****************************************************************************
 WinSock initialization
@@ -32184,7 +32228,7 @@ IO API
 ***************************************************************************** */
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io) { return io->fd; }
+SFUNC int fio_fd_get(fio_s *io) { return io ? io->fd : -1; }
 
 FIO_SFUNC void fio_touch___task(void *io_, void *ignr_) {
   (void)ignr_;
@@ -36645,7 +36689,18 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
 SFUNC fio_str_info_s fio_http_status2str(size_t status);
 
 /** Logs an HTTP (response) to STDOUT. */
-SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr);
+SFUNC void fio_http_write_log(fio_http_s *h);
+
+/**
+ * Writes peer address to `dest` starting with the `forwarded` header, with a
+ * fallback to actual socket address and a final fallback to `"[unknown]"`.
+ *
+ * If `unknown` is returned, the function returns -1. if `dest` capacity is too
+ * small, the number of bytes required will be returned.
+ *
+ * If all goes well, this function returns 0.
+ */
+SFUNC int fio_http_from(fio_str_info_s *dest, const fio_http_s *h);
 
 /* *****************************************************************************
 The HTTP Controller
@@ -36668,6 +36723,8 @@ struct fio_http_controller_s {
   void (*on_finish)(fio_http_s *h);
   /** called to close an HTTP connection */
   void (*close)(fio_http_s *h);
+  /** called when the file descriptor is directly required */
+  int (*get_fd)(fio_http_s *h);
 };
 
 /* *****************************************************************************
@@ -37205,6 +37262,10 @@ Cookie Maps
 Controller Validation
 ***************************************************************************** */
 
+FIO_SFUNC int fio___mock_controller_get_fd_cb(fio_http_s *h) {
+  return -1;
+  (void)h;
+}
 FIO_SFUNC void fio___mock_controller_cb(fio_http_s *h) { (void)h; }
 FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
                                        fio_http_write_args_s args) {
@@ -37223,6 +37284,7 @@ static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .write_body = fio___mock_c_write_body,
     .on_finish = fio___mock_controller_cb,
     .close = fio___mock_controller_cb,
+    .get_fd = fio___mock_controller_get_fd_cb,
 };
 
 SFUNC fio_http_controller_s *fio___http_controller_validate(
@@ -37241,6 +37303,8 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c->on_finish = fio___mock_controller_cb;
   if (!c->close)
     c->close = fio___mock_controller_cb;
+  if (!c->get_fd)
+    c->get_fd = fio___mock_controller_get_fd_cb;
   return c;
 }
 
@@ -37820,6 +37884,72 @@ fio_http_set_cookie_each(fio_http_s *h,
       return i;
   }
   return i;
+}
+
+/* *****************************************************************************
+Peer Address
+***************************************************************************** */
+
+/**
+ * Writes peer address to `dest` starting with the `forwarded` header, with a
+ * fallback to actual socket address and a final fallback to `"[unknown]"`.
+ *
+ * If `unknown` is returned, the function returns -1. if `dest` capacity is too
+ * small, the number of bytes required will be returned.
+ *
+ * If all goes well, this function returns 0.
+ */
+SFUNC int fio_http_from(fio_str_info_s *dest, const fio_http_s *h) {
+  int r = 0;
+  /* Guess IP address from headers (forwarded) where possible */
+  fio_str_info_s forwarded =
+      fio_http_request_header((fio_http_s *)h,
+                              FIO_STR_INFO2((char *)"forwarded", 9),
+                              -1);
+  fio_buf_info_s buf;
+  char *end;
+  if (forwarded.len) {
+    forwarded.len &= 1023; /* limit possible attack surface */
+    for (; forwarded.len > 5;) {
+      if ((forwarded.buf[0] | 32) != 'f' || (forwarded.buf[1] | 32) != 'o' ||
+          (forwarded.buf[2] | 32) != 'r' || forwarded.buf[3] != '=') {
+        ++forwarded.buf;
+        --forwarded.len;
+        continue;
+      }
+      forwarded.buf += 4 + (forwarded.buf[4] == '"');
+      break;
+    }
+  client_address_found:
+    buf.buf = end = forwarded.buf;
+    while (*end && *end != '"' && *end != ',' && *end != ' ' && *end != ';' &&
+           (end - forwarded.buf) < 48)
+      ++end;
+    buf.len = (size_t)(end - forwarded.buf);
+  } else {
+    forwarded =
+        fio_http_request_header((fio_http_s *)h,
+                                FIO_STR_INFO2((char *)"x-forwarded-for", 15),
+                                -1);
+    if (forwarded.len) {
+      forwarded.buf += (forwarded.buf[0] == '"');
+      goto client_address_found;
+    }
+#if defined(H___FIO_SOCK___H)
+    if (!(buf = fio_sock_peer_addr(
+              fio_http_controller((fio_http_s *)h)->get_fd((fio_http_s *)h)))
+             .len)
+#endif
+      buf = FIO_BUF_INFO1((char *)"[unknown]");
+    r = -1;
+  }
+  if (dest->capa > dest->len + buf.len) { /* enough space? */
+    FIO_MEMCPY(dest->buf + dest->len, buf.buf, buf.len);
+    dest->len += buf.len;
+    dest->buf[dest->len] = 0;
+  } else
+    r = (int)buf.len - (!buf.len);
+  return r;
 }
 
 /* *****************************************************************************
@@ -38429,48 +38559,14 @@ HTTP Logging
 ***************************************************************************** */
 
 /** Logs an HTTP (response) to STDOUT. */
-SFUNC void fio_http_write_log(fio_http_s *h, fio_buf_info_s peer_addr) {
+SFUNC void fio_http_write_log(fio_http_s *h) {
   FIO_STR_INFO_TMP_VAR(buf, 1023);
   intptr_t bytes_sent = h->sent;
   uint64_t time_start, time_end;
   time_start = h->received_at;
   time_end = fio_http_get_timestump();
   fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
-
-  { /* try to gather address from request headers */
-    /* Guess IP address from headers (forwarded) where possible */
-    fio_str_info_s forwarded =
-        fio_http_request_header(h, FIO_STR_INFO2((char *)"forwarded", 9), -1);
-    if (forwarded.len) {
-      forwarded.len &= 1023; /* limit possible attack surface */
-      for (; forwarded.len > 5;) {
-        if ((forwarded.buf[0] | 32) != 'f' || (forwarded.buf[1] | 32) != 'o' ||
-            (forwarded.buf[2] | 32) != 'r' || forwarded.buf[3] != '=') {
-          ++forwarded.buf;
-          --forwarded.len;
-          continue;
-        }
-        forwarded.buf += 4 + (forwarded.buf[4] == '"');
-        char *end = forwarded.buf;
-        while (*end && *end != '"' && *end != ',' && *end != ' ' &&
-               *end != ';' && (end - forwarded.buf) < 48)
-          ++end;
-        buf.len = (size_t)(end - forwarded.buf);
-        if (buf.len)
-          FIO_MEMCPY(buf.buf, forwarded.buf, buf.len);
-        break;
-      }
-    }
-    if (!buf.len) { /* if we failed, use peer_addr */
-      if (peer_addr.len) {
-        FIO_MEMCPY(buf.buf, peer_addr.buf, peer_addr.len);
-        buf.len = peer_addr.len;
-      } else {
-        FIO_MEMCPY(buf.buf, "[unknown]", 9);
-        buf.len = 9;
-      }
-    }
-  }
+  fio_http_from(&buf, h);
   FIO_MEMCPY(buf.buf + buf.len, " - - [", 6);
   FIO_MEMCPY(buf.buf + buf.len + 6, date.buf, date.len);
   buf.len += date.len + 6;
@@ -41360,6 +41456,9 @@ FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
 /* *****************************************************************************
 HTTP/1 Controller
 ***************************************************************************** */
+FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
+  return fio_fd_get(fio_http_io(h));
+}
 
 /** called by the HTTP handle for each header. */
 FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
@@ -41525,7 +41624,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
   if (fio_http_is_streaming(h))
     fio_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   if (c->log)
-    fio_http_write_log(h, FIO_BUF_INFO2(NULL, 0)); /* TODO: get_peer_addr */
+    fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
     goto upgraded;
   /* once the function returns, `h` may be freed (possible finish on free). */
@@ -42167,6 +42266,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
@@ -42176,12 +42276,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_WS:
@@ -42190,6 +42292,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_ws_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_SSE:
@@ -42198,12 +42301,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
         .close = fio___http_default_close,
+        .get_fd = fio___http_controller_get_fd,
     };
     return r;
   default:
