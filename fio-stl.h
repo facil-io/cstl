@@ -36003,7 +36003,11 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
                     FIO_SOCK_TCP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
   FIO_ASSERT(fd_tcp != -1, "couldn't open cluster-peer listening socket!");
   {
+#if FIO_OS_WIN
+    char enabled = 1;
+#else
     int enabled = 1;
+#endif
     setsockopt(fd_udp, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
     enabled = 1;
     setsockopt(fd_udp, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
