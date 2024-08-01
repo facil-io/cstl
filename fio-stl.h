@@ -38160,7 +38160,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
   if (h->status) {
     if (args->len && fio___http_response_etag_if_none_match(h))
       return -1;
-    if (!args->len && args->finish) {
+    if (!args->len && args->finish && h->status >= 400) {
       fio_http_send_error_response(h, h->status);
       return 0;
     }
