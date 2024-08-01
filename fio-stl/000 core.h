@@ -281,7 +281,7 @@ typedef SSIZE_T ssize_t;
 #endif /* __CYGWIN__ __MINGW32__ */
 
 #if _MSC_VER
-#pragma message("Warning: some functionality is enabled by patchwork.")
+#pragma message("Warning: (Windows) some functionality enabled by patchwork.")
 #else
 #warning some functionality is enabled by patchwork.
 #endif

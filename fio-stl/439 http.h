@@ -1463,6 +1463,7 @@ FIO_SFUNC void fio___websocket_on_message_task(void *c_, void *is_text) {
 FIO_SFUNC void fio_websocket_on_message(void *udata,
                                         fio_buf_info_s msg,
                                         unsigned char is_text) {
+  /* TODO: suspend IO and queue in async queue? */
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->state.ws.on_message(c->h,
                          fio_bstr_buf(c->state.ws.msg),

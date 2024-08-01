@@ -1996,8 +1996,11 @@ FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
                                                         size_t limit) {
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
   char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
-  if (end)
-    r.len = (end - r.buf) + 1;
+  if (end) {
+    ++end;
+    r.len = end - r.buf;
+    h->body.pos = end - h->body.buf;
+  }
   return r;
 }
 FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {

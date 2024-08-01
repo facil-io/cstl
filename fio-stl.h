@@ -318,7 +318,7 @@ typedef SSIZE_T ssize_t;
 #endif /* __CYGWIN__ __MINGW32__ */
 
 #if _MSC_VER
-#pragma message("Warning: some functionality is enabled by patchwork.")
+#pragma message("Warning: (Windows) some functionality enabled by patchwork.")
 #else
 #warning some functionality is enabled by patchwork.
 #endif
@@ -38029,8 +38029,11 @@ FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
                                                         size_t limit) {
   fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
   char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
-  if (end)
-    r.len = (end - r.buf) + 1;
+  if (end) {
+    ++end;
+    r.len = end - r.buf;
+    h->body.pos = end - h->body.buf;
+  }
   return r;
 }
 FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {
@@ -41713,6 +41716,7 @@ FIO_SFUNC void fio___websocket_on_message_task(void *c_, void *is_text) {
 FIO_SFUNC void fio_websocket_on_message(void *udata,
                                         fio_buf_info_s msg,
                                         unsigned char is_text) {
+  /* TODO: suspend IO and queue in async queue? */
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->state.ws.on_message(c->h,
                          fio_bstr_buf(c->state.ws.msg),
