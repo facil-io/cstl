@@ -190,7 +190,8 @@ The `fio_publish` macro shadows the `fio_publish` function and allows the follow
 typedef struct fio_publish_args_s {
   /** The pub/sub engine that should be used to forward this message. */
   fio_pubsub_engine_s const *engine;
-  /** If `from` is specified, it will be skipped (won't receive message). */
+  /** If `from` is specified, it will be skipped (won't receive message)
+   *  UNLESS a non-native `engine` is specified. */
   fio_s *from;
   /** The target named channel. Only published when filter == 0. */
   fio_buf_info_s channel;
@@ -208,6 +209,8 @@ typedef struct fio_publish_args_s {
 The pub/sub system allows the delivery of messages through either internal or external services called "engines".
 
 The default pub/sub engine can be set by setting the global `FIO_PUBSUB_DEFAULT` variable which is set to `FIO_PUBSUB_LOCAL` by default.
+
+External engines are funneled to the root / master process before their `publish` function is called, which means that even if `from` is specified, it will be ignored for any external engine.
 
 #### `FIO_PUBSUB_ROOT`
 

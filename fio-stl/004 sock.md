@@ -154,6 +154,22 @@ void fio_sock_address_free(struct addrinfo *a);
 
 Frees the pointer returned by `fio_sock_address_new`.
 
+#### `fio_sock_peer_addr`
+
+```c
+fio_buf_info_s fio_sock_peer_addr(int s);
+```
+
+Returns a human readable address representation of the socket's peer address.
+
+On error, returns a NULL buffer with zero length.
+
+Buffer lengths are limited to 63 bytes.
+
+This function is limited in its thread safety to 128 threads / calls.
+
+
+
 #### `fio_sock_set_non_block`
 
 ```c

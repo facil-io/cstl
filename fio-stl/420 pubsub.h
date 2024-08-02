@@ -168,7 +168,8 @@ typedef struct fio_pubsub_engine_s fio_pubsub_engine_s;
 typedef struct fio_publish_args_s {
   /** The pub/sub engine that should be used to forward this message. */
   fio_pubsub_engine_s const *engine;
-  /** If `from` is specified, it will be skipped (won't receive message). */
+  /** If `from` is specified, it will be skipped (won't receive message)
+   *  UNLESS a non-native `engine` is specified. */
   fio_s *from;
   /** Message ID (if missing, a random ID will be generated). */
   uint64_t id;
@@ -1863,7 +1864,7 @@ static void fio___pubsub_mock_sub_unsub(const fio_pubsub_engine_s *eng,
 }
 static void fio___pubsub_mock_publish(const fio_pubsub_engine_s *eng,
                                       fio_msg_s *msg) {
-  (void)eng, (void)msg;
+  (void)eng, (void)msg; /* TODO:? sensible default? publish to cluster? */
 }
 
 static void fio___pubsub_attach_task(void *engine_, void *ignr_) {
