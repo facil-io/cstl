@@ -34,6 +34,71 @@ FIO_IFUNC int64_t FIO_NAME_TEST(stl, atol_time)(void) {
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
+FIO_SFUNC double fio___aton_float_wrapper(char **pstr) {
+  fio_aton_s r = fio_aton(pstr);
+  if (r.is_float)
+    return r.f;
+  return (double)r.i;
+}
+
+FIO_SFUNC double fio___strtod_wrapper(char **pstr) {
+  return strtod(*pstr, pstr);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
+  struct {
+    const char *n;
+    double (*fn)(char **);
+  } to_test[] = {
+      {.n = "fio_aton", .fn = fio___aton_float_wrapper},
+      {.n = "strtod  ", .fn = fio___strtod_wrapper},
+  };
+  const char *floats[] = {
+      "1E+10",
+      "1E-10",
+      "-1E10",
+      "-1e10",
+      "-1E+10",
+      "-1E-10",
+      "1.234E+10",
+      "1.234E-10",
+      "1.79769e+308",
+      "2.22507e-308",
+      "1.79769e+308",
+      "2.22507e-308",
+      "4.9406564584124654e-324",
+      "2.2250738585072009e-308",
+      "2.2250738585072014e-308",
+      "1.7976931348623157e+308",
+      "1.00000000000000011102230246251565404236316680908203124",
+      "72057594037927928.0",
+      "7205759403792793200001e-5",
+      "5708990770823839207320493820740630171355185152001e-3",
+      "0x10.1p0",
+      "0x1.8p1",
+      "0x1.8p5",
+      "0x4.0p5",
+      "0x1.0p50a",
+      "0x1.0p500",
+      "0x1.0P-1074",
+      "0x3a.0P-1074",
+  };
+  printf("* Testing fio_aton/strtod performance:\n");
+  for (size_t fn_i = 0; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
+    printf("\t%s\t", to_test[fn_i].n);
+    int64_t start = FIO_NAME_TEST(stl, atol_time)();
+    for (size_t i = 0; i < (FIO_ATOL_TEST_MAX / 10); ++i) {
+      for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
+        FIO_COMPILER_GUARD;
+        char *tmp = (char *)floats[n_i];
+        to_test[fn_i].fn(&tmp);
+      }
+    }
+    int64_t end = FIO_NAME_TEST(stl, atol_time)();
+    printf("%lld us\n", end - start);
+  }
+}
+
 FIO_SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   switch (base) {
   case 2: /* overflow - unsupported */
@@ -49,6 +114,12 @@ FIO_SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
 
 FIO_SFUNC int64_t strtoll_wrapper(char **pstr) {
   return strtoll(*pstr, pstr, 0);
+}
+FIO_SFUNC int64_t fio_aton_wrapper(char **pstr) {
+  fio_aton_s r = fio_aton(pstr);
+  if (r.is_float)
+    return (int64_t)r.f;
+  return r.i;
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
@@ -151,7 +222,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
     char *tmp2 = buffer;
     int i2 = fio_atol(&tmp2);
-    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
+    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (1:%i)", i);
     FIO_ASSERT(i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
                i,
@@ -164,7 +235,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     buffer[tmp] = 0;
     char *tmp2 = buffer;
     int64_t i2 = fio_atol(&tmp2);
-    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
+    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (2:%zu)", bit);
     FIO_ASSERT((int64_t)i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
                i,
@@ -387,46 +458,74 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 
   FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
   FIO_NAME_TEST(stl, atol_speed)
-  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
+  ("fio_aton/fio_ltoa", fio_aton_wrapper, fio_ltoa);
 
-#ifdef FIO_ATOF_ALT
+  FIO_NAME_TEST(stl, atol_speed)
+  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
+  FIO_NAME_TEST(stl, aton_speed)();
+
 #define TEST_DOUBLE(s, d, stop)                                                \
   do {                                                                         \
     union {                                                                    \
       double d_;                                                               \
       uint64_t as_i;                                                           \
-    } pn, pn2;                                                                 \
+    } pn, pn1, pn2;                                                            \
     pn2.d_ = d;                                                                \
     char *p = (char *)(s);                                                     \
+    char *p1 = (char *)(s);                                                    \
     char *p2 = (char *)(s);                                                    \
     double r = fio_atof(&p);                                                   \
+    fio_aton_s num_result = fio_aton(&p1);                                     \
+    double r2 = num_result.is_float ? num_result.f : (double)num_result.i;     \
     double std = strtod(p2, &p2);                                              \
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
+    pn1.d_ = r2;                                                               \
     FIO_ASSERT(*p == stop || p == p2,                                          \
-               "float parsing didn't stop at correct position! %x != %x",      \
+               "atof float parsing didn't stop at correct position! %x != %x", \
                *p,                                                             \
                stop);                                                          \
-    if ((double)d == r || r == std) {                                          \
+    FIO_ASSERT(*p1 == stop || p1 == p2,                                        \
+               "aton float parsing didn't stop at correct position!\n\t%s"     \
+               "\n\t%x != %x",                                                 \
+               s,                                                              \
+               *p1,                                                            \
+               stop);                                                          \
+    if (((double)d == r && (double)d == r2) || (r == std && r2 == std)) {      \
       /** fprintf(stderr, "Okay for %s\n", s); */                              \
     } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {     \
-      fprintf(stderr,                                                          \
-              "* WARNING: Single bit rounding error detected: %s\n",           \
-              s);                                                              \
-    } else if (r == 0.0 && d != 0.0) {                                         \
-      fprintf(stderr, "* WARNING: float range limit marked before: %s\n", s);  \
+      FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",        \
+                      ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
+                      s);                                                      \
+    } else if ((pn1.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn1.as_i) {     \
+      FIO_LOG_WARNING("aton Single bit rounding error detected (%s1): %s\n"    \
+                      "\t%g != %g",                                            \
+                      ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
+                      s,                                                       \
+                      r2,                                                      \
+                      std);                                                    \
+    } else if (r == 0.0 && d != 0.0 && !isnan(d)) {                            \
+      FIO_LOG_WARNING("float range limit marked before: %s\n", s);             \
+    } else if (r2 == 0.0 && d != 0.0 && !isnan(d)) {                           \
+      FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);        \
     } else {                                                                   \
-      char f_buf[164];                                                         \
+      char f_buf[256];                                                         \
       pn.d_ = std;                                                             \
       pn2.d_ = r;                                                              \
-      size_t tmp_pos = fio_ltoa(f_buf, pn.as_i, 2);                            \
-      f_buf[tmp_pos] = '\n';                                                   \
-      fio_ltoa(f_buf + tmp_pos + 1, pn2.as_i, 2);                              \
+      size_t tmp_pos = fio_ltoa(f_buf, pn2.as_i, 2);                           \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      tmp_pos += fio_ltoa(f_buf + tmp_pos, pn.as_i, 2);                        \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      fio_ltoa(f_buf + tmp_pos, pn1.as_i, 2);                                  \
       FIO_ASSERT(0,                                                            \
-                 "Float error bigger than a single bit rounding error. exp. "  \
-                 "vs. act.:\n%.19g\n%.19g\nBinary:\n%s",                       \
+                 "Float error bigger than a single bit rounding error."        \
+                 "\n\tString: %s"                                              \
+                 "\n\texp. "                                                   \
+                 "vs. act.:\nstd %.19g\natof %.19g\naton %.19g\nBinary:\n%s",  \
+                 s,                                                            \
                  std,                                                          \
                  r,                                                            \
+                 r2,                                                           \
                  f_buf);                                                       \
     }                                                                          \
   } while (0)
@@ -470,7 +569,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_DOUBLE(" -e", 0, 0);
   TEST_DOUBLE(" .9", 0.9, 0);
   TEST_DOUBLE(" ..9", 0, '.');
-  TEST_DOUBLE("009", 9, 0);
+  TEST_DOUBLE("007", 7, 0);
   TEST_DOUBLE("0.09e02", 9, 0);
   /* http://thread.gmane.org/gmane.editors.vim.devel/19268/ */
   TEST_DOUBLE("0.9999999999999999999999999999999999", 1, 0);
@@ -608,7 +707,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
             stop - start);
   }
 #endif /* !DEBUG */
-#endif /* FIO_ATOF_ALT */
 }
 #undef FIO_ATOL_TEST_MAX
 

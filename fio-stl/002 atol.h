@@ -20,6 +20,44 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
+#ifndef FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+#define FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER 1
+#endif
+
+/* *****************************************************************************
+Strings to Signed Numbers - The fio_aton function
+***************************************************************************** */
+
+/** Result type for fio_aton */
+typedef struct {
+  union {
+    int64_t i;
+    double f;
+    uint64_t u;
+  };
+  int is_float;
+  int err;
+} fio_aton_s;
+
+/**
+ * Converts a String to a number - either an integer or a float (double).
+ *
+ * Skips white space at the beginning of the string.
+ *
+ * Auto detects binary and hex formats when prefix is provided (0x / 0b).
+ *
+ * Auto detects octal when number starts with zero.
+ *
+ * Auto detects the Strings "inf", "infinity" and "nan" as float values.
+ *
+ * The number's format and type are returned in the return type.
+ *
+ * If a numerical overflow or format error occurred, the `.err` flag is set.
+ *
+ * Note: rounding errors may occur, as this is not an `strtod` exact match.
+ */
+FIO_SFUNC fio_aton_s fio_aton(char **pstr);
+
 /* *****************************************************************************
 Strings to Signed Numbers - API
 ***************************************************************************** */
@@ -149,7 +187,10 @@ IEEE 754 Floating Points, Building Blocks and Helpers
 ***************************************************************************** */
 
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
-FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent);
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
+
+/** Converts a 64 bit unsigned integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
 
 /* *****************************************************************************
 
@@ -303,20 +344,27 @@ FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
 
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
   dest += digits;
-  *dest-- = 0;
-  switch (digits & 7) { /* last use of `digits` */
-    while (i) {
-      *dest-- = '0' + (i & 1);
-      i >>= 1;                                /* fall through */
-    case 7: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 6: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 5: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 4: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 3: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 2: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 1: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 0:;
-    }
+  *dest = 0;
+  switch (digits & 7) {
+  case 7: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 6: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 5: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 4: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 3: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 2: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 1: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 0:;
+  }
+  digits &= ~(uint64_t)7ULL;
+  while (digits > 7) {
+    uint64_t tmp = (i & 0xFFULL);
+    dest -= 8;
+    digits -= 8;
+    i >>= 8;
+    tmp = ((tmp & 0x7F) * 0x02040810204081ULL) | ((tmp & 0x80) << 49);
+    tmp &= 0x0101010101010101ULL;
+    tmp += (0x0101010101010101ULL * '0');
+    fio_u2buf64_be(dest, tmp);
   }
 }
 
@@ -363,6 +411,19 @@ IEEE 754 Floating Points, Building Blocks and Helpers
 #define FIO_MATH_DBL_SIGN_MASK ((uint64_t)1ULL << 63)
 #endif
 
+FIO_IFUNC int fio_d2expo(double d) {
+  int r;
+  union {
+    uint64_t u64;
+    double d;
+  } u = {.d = d};
+  u.u64 &= FIO_MATH_DBL_EXPO_MASK;
+  r = (int)(u.u64 >> 52);
+  r -= 1023;
+  r *= -1;
+  return r;
+}
+
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
 FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   union {
@@ -373,7 +434,7 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   if (!mant)
     goto is_zero;
   /* convert `mant` to absolute value - constant time */
-  mant = mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
+  // mant = (uint64_t)mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
   mant = fio_ct_abs(mant);
   tmp = fio_msb_index_unsafe(mant);
   /* normalize exponent */
@@ -397,16 +458,42 @@ is_inifinity_or_nan:
   return u.d;
 }
 
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
+  union {
+    uint64_t u64;
+    double d;
+  } u = {0};
+  size_t tmp;
+  if (!mant)
+    goto is_zero;
+  /* convert `mant` to absolute value - constant time */
+  // mant = (uint64_t)mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
+  tmp = fio_msb_index_unsafe(mant);
+  /* normalize exponent */
+  exponent += tmp + 1023;
+  if (FIO_UNLIKELY(exponent < 0))
+    goto is_zero;
+  if (FIO_UNLIKELY(exponent > 2047))
+    goto is_inifinity_or_nan;
+  exponent = (uint64_t)exponent << 52;
+  u.u64 |= exponent;
+  /* reposition mant bits so we "hide" the fist set bit in bit[52] */
+  if (tmp < 52)
+    mant = mant << (52 - tmp);
+  else if (FIO_UNLIKELY(tmp > 52)) /* losing precision */
+    mant = mant >> (tmp - 52);
+  u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
+is_zero:
+  return u.d;
+is_inifinity_or_nan:
+  u.u64 = FIO_MATH_DBL_EXPO_MASK;
+  return u.d;
+}
 /* *****************************************************************************
 Implementation - possibly externed
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-typedef struct {
-  uint64_t val;
-  int64_t expo;
-  uint8_t sign;
-} fio___number_s;
 
 /* *****************************************************************************
 Unsigned core and helpers
@@ -490,28 +577,81 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
     ++*pstr;
     if ((r & UINT64_C(0xE000000000000000)))
       break;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    *pstr += (**pstr == '_'); /* allow '_' as a divider. */
+#endif
   }
   if ((fio_c2i(**pstr)) < 8)
     errno = E2BIG;
   return r;
 }
 
-/** Reads an unsigned base 10 formatted number. */
-SFUNC uint64_t fio_atol10u(char **pstr) {
-  uint64_t r = 0;
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+FIO_IFUNC uint64_t fio___atol10u_with_prefix(uint64_t r, char **pstr) {
   char *pos = *pstr;
-  uint64_t r0;
-  while (((r0 = (uint64_t)(pos[0] - '0')) < 10ULL) & (r < add_limit)) {
+  uint64_t u0, u1 = r;
+  u0 = (uint64_t)(pos[0] - '0');
+  if (u0 > 9ULL)
+    return r;
+  for (;;) {
+    r += u0;
+    if (r < u1)
+      goto value_overflow;
+    ++pos;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    pos += (*pos == '_'); /* allow '_' as a divider. */
+#endif
+    u0 = (uint64_t)(pos[0] - '0');
+    if (u0 > 9ULL)
+      break;
+    if (r > ((~(uint64_t)0ULL) / 10))
+      goto value_overflow_stepback;
+    u1 = r;
     r *= 10;
-    r += r0;
-    ++pos;
-  }
-  while (((size_t)(pos[0] - '0') < 10ULL)) {
-    errno = E2BIG;
-    ++pos;
   }
   *pstr = pos;
+  return r;
+
+value_overflow_stepback:
+  --pos;
+value_overflow:
+  r = u1;
+  errno = E2BIG;
+  *pstr = pos;
+  return r;
+}
+
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  return fio___atol10u_with_prefix(0, pstr);
+}
+
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+FIO_IFUNC uint64_t fio___atol16u_with_prefix(uint64_t r, char **pstr) {
+  size_t d;
+  unsigned char *p = (unsigned char *)*pstr;
+  p += ((p[0] == '0') & ((p[1] | 32) == 'x')) << 1;
+  if ((d = fio_c2i(*p)) > 15)
+    goto possible_misread;
+  for (;;) {
+    r |= d;
+    ++p;
+    d = (size_t)fio_c2i(*p);
+    if (d > 15)
+      break;
+    if ((r & UINT64_C(0xF000000000000000))) {
+      errno = E2BIG;
+      break;
+    }
+    r <<= 4;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    p += (*p == '_'); /* allow '_' as a divider. */
+#endif
+  }
+  *pstr = (char *)p;
+  return r;
+possible_misread:
+  /* if 0x was read, move to X. */
+  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
   return r;
 }
 
@@ -534,6 +674,9 @@ SFUNC uint64_t fio_atol16u(char **pstr) {
       break;
     }
     r <<= 4;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    p += (*p == '_'); /* allow '_' as a divider. */
+#endif
   }
   *pstr = (char *)p;
   return r;
@@ -549,12 +692,30 @@ SFUNC uint64_t fio_atol_bin(char **pstr) {
   size_t d;
   *pstr += (**pstr == '0');
   *pstr += (**pstr | 32) == 'b' && ((size_t)(pstr[0][1]) - (size_t)'0') < 2;
+  for (; (((uintptr_t)*pstr & 4095) < 4089);) { /* respect page boundary */
+    uint64_t tmp = fio_buf2u64_be(*pstr);       /* may overflow */
+    tmp -= 0x0101010101010101ULL * '0';
+    if (tmp & (~0x0101010101010101ULL))
+      break;
+    tmp |= tmp >> 7;
+    tmp |= tmp >> 14;
+    tmp |= tmp >> 28;
+    tmp &= 0xFF;
+    r <<= 8;
+    r |= tmp;
+    *pstr += 8;
+    if ((r & UINT64_C(0xFF00000000000000)))
+      break;
+  }
   while ((d = (size_t)((unsigned char)(**pstr)) - (size_t)'0') < 2) {
     r <<= 1;
     r |= d;
     ++*pstr;
     if ((r & UINT64_C(0x8000000000000000)))
       break;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    *pstr += (**pstr == '_') | (**pstr == '.'); /* allow as a dividers */
+#endif
   }
   if ((d = (size_t)(**pstr) - (size_t)'0') < 2)
     errno = E2BIG;
@@ -591,44 +752,36 @@ fio_atol
 ***************************************************************************** */
 
 SFUNC int64_t fio_atol(char **pstr) {
+  static uint64_t (*const fn[])(char **) = {
+      fio_atol10u,
+      fio_atol8u,
+      fio_atol_bin,
+      fio_atol16u,
+  };
   if (!pstr || !(*pstr))
     return 0;
-  uint64_t v = 0;
-  uint64_t (*fn)(char **) = fio_atol10u;
+  union {
+    uint64_t u64;
+    int64_t i64;
+  } u = {0};
   char *p = *pstr;
-  unsigned inv = (p[0] == '-');
-  p += inv;
-  char *const s = p;
-  switch (*p) {
-  case 'x': /* fall through */
-  case 'X': fn = fio_atol16u; goto compute;
-  case 'b': /* fall through */
-  case 'B': fn = fio_atol_bin; goto compute;
-  case '0':
-    switch (p[1]) {
-    case 'x': /* fall through */
-    case 'X': fn = fio_atol16u; goto compute;
-    case 'b': /* fall through */
-    case 'B': fn = fio_atol_bin; goto compute;
-    case '0': /* fall through */
-    case '1': /* fall through */
-    case '2': /* fall through */
-    case '3': /* fall through */
-    case '4': /* fall through */
-    case '5': /* fall through */
-    case '6': /* fall through */
-    case '7': fn = fio_atol8u;
-    }
-  }
-compute:
-  v = fn(&p);
-  if (p != s)
+
+  uint32_t neg = 0, base = 0;
+  neg = (p[0] == '-');
+  p += (neg | (p[0] == '+'));
+
+  base += (p[0] == '0');             /* oct */
+  p += base;                         /* consume '0' */
+  base += ((p[0] | 32) == 'b');      /* binary */
+  base += ((p[0] | 32) == 'x') << 1; /* hex */
+  p += (base > 1);                   /* consume 'b' or 'x' */
+  char *const s = p;                 /* mark starting point */
+  u.u64 = fn[base](&p);              /* convert string to unsigned long long */
+  if (p != s || base == 1)           /* false oct base, a single '0'? */
     *pstr = p;
-  if (fn == fio_atol10u)
-    return fio_u2i_limit(v, inv);
-  if (!inv) /* sign embedded in the representation */
-    return (int64_t)v;
-  return fio_u2i_limit(v, inv);
+  if ((neg | !base)) /* if base 10 or negative, treat signed bit as overflow */
+    return fio_u2i_limit(u.u64, neg);
+  return u.i64;
 }
 
 /* *****************************************************************************
@@ -763,6 +916,232 @@ is_inifinity:
 is_nan:
   fio_memcpy4(dest, "NaN");
   return 3;
+}
+
+/* *****************************************************************************
+fio_aton
+***************************************************************************** */
+/** Returns a power of 10. Supports values up to 1.0e308. */
+FIO_IFUNC long double fio___aton_pow10(uint64_t e10) {
+  // clang-format off
+#define fio___aton_pow10_map_row(i) 1.0e##i##0L, 1.0e##i##1L, 1.0e##i##2L, 1.0e##i##3L, 1.0e##i##4L, 1.0e##i##5L, 1.0e##i##6L, 1.0e##i##7L, 1.0e##i##8L, 1.0e##i##9L
+  static const long double pow_map[] = {
+      fio___aton_pow10_map_row(0),  fio___aton_pow10_map_row(1),  fio___aton_pow10_map_row(2),  fio___aton_pow10_map_row(3),  fio___aton_pow10_map_row(4),
+      fio___aton_pow10_map_row(5),  fio___aton_pow10_map_row(6),  fio___aton_pow10_map_row(7),  fio___aton_pow10_map_row(8),  fio___aton_pow10_map_row(9),
+      fio___aton_pow10_map_row(10), fio___aton_pow10_map_row(11), fio___aton_pow10_map_row(12), fio___aton_pow10_map_row(13), fio___aton_pow10_map_row(14),
+      fio___aton_pow10_map_row(15), fio___aton_pow10_map_row(16), fio___aton_pow10_map_row(17), fio___aton_pow10_map_row(18), fio___aton_pow10_map_row(19),
+      fio___aton_pow10_map_row(20), fio___aton_pow10_map_row(21), fio___aton_pow10_map_row(22), fio___aton_pow10_map_row(23), fio___aton_pow10_map_row(24),
+      fio___aton_pow10_map_row(25), fio___aton_pow10_map_row(26), fio___aton_pow10_map_row(27), fio___aton_pow10_map_row(28), fio___aton_pow10_map_row(29),
+      1.0e300L, 1.0e301L, 1.0e302L, 1.0e303L, 1.0e304L, 1.0e305L, 1.0e306L, 1.0e307L, 1.0e308L, // clang-format on
+  };
+#undef fio___aton_pow10_map_row
+  if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
+    return pow_map[e10];
+  return powl(10, e10); /* return infinity? */
+}
+
+/** Returns a power of 10. Supports values up to 1.0e-308. */
+FIO_IFUNC long double fio___aton_pow10n(uint64_t e10) {
+  // clang-format off
+#define fio___aton_pow10_map_row(i) 1.0e-##i##0L, 1.0e-##i##1L, 1.0e-##i##2L, 1.0e-##i##3L, 1.0e-##i##4L, 1.0e-##i##5L, 1.0e-##i##6L, 1.0e-##i##7L, 1.0e-##i##8L, 1.0e-##i##9L
+  static const long double pow_map[] = {
+      fio___aton_pow10_map_row(0),  fio___aton_pow10_map_row(1),  fio___aton_pow10_map_row(2),  fio___aton_pow10_map_row(3),  fio___aton_pow10_map_row(4),
+      fio___aton_pow10_map_row(5),  fio___aton_pow10_map_row(6),  fio___aton_pow10_map_row(7),  fio___aton_pow10_map_row(8),  fio___aton_pow10_map_row(9),
+      fio___aton_pow10_map_row(10), fio___aton_pow10_map_row(11), fio___aton_pow10_map_row(12), fio___aton_pow10_map_row(13), fio___aton_pow10_map_row(14),
+      fio___aton_pow10_map_row(15), fio___aton_pow10_map_row(16), fio___aton_pow10_map_row(17), fio___aton_pow10_map_row(18), fio___aton_pow10_map_row(19),
+      fio___aton_pow10_map_row(20), fio___aton_pow10_map_row(21), fio___aton_pow10_map_row(22), fio___aton_pow10_map_row(23), fio___aton_pow10_map_row(24),
+      fio___aton_pow10_map_row(25), fio___aton_pow10_map_row(26), fio___aton_pow10_map_row(27), fio___aton_pow10_map_row(28), fio___aton_pow10_map_row(29),
+      1.0e-300L, 1.0e-301L, 1.0e-302L, 1.0e-303L, 1.0e-304L, 1.0e-305L, 1.0e-306L, 1.0e-307L, 1.0e-308L, // clang-format on
+  };
+#undef fio___aton_pow10_map_row
+  if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
+    return pow_map[e10];
+  return powl(10, (int64_t)(0 - e10)); /* return zero? */
+}
+
+FIO_SFUNC fio_aton_s fio_aton(char **pstr) {
+  fio_aton_s r = {0};
+  uint64_t (*fn)(char **) = fio_atol10u;
+  long double dbl = 0, dbl_tail = 0, dbl_dot = 0;
+
+  const uint8_t *p = (uint8_t *)*pstr;
+  const uint8_t *tail_start = NULL, *tail_end = NULL, *skip_end = NULL,
+                *dot = NULL, *dot_finish = NULL;
+  uint64_t before_dot = 0, tail = 0, after_dot = 0, expo = 0;
+  size_t head_expo = 0, tail_expo = 0, dot_expo = 0;
+  bool hex = 0, bin = 0, oct = 0, inv = 0, expo_inv = 0, expo_is_p = 0,
+       has_tail = 0, has_dot = 0;
+  uint8_t base = 10;
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+    ++p;
+  inv = (p[0] == '-');
+  p += (inv | (p[0] == '+'));
+
+  switch (p[0]) {
+  case '0':
+    ++p;
+    switch (p[0]) {
+    case '0': /* fall through*/
+    case '1': /* fall through*/
+    case '2': /* fall through*/
+    case '3': /* fall through*/
+    case '4': /* fall through*/
+    case '5': /* fall through*/
+    case '6': /* fall through*/
+    case '7':
+      base = 8;
+      oct = 1;
+      fn = fio_atol8u;
+      break;
+    case 'X': /* fall through*/
+    case 'x':
+      ++p;
+      hex = 1;
+      base = 16;
+      fn = fio_atol16u;
+      break;
+    case 'B': /* fall through*/
+    case 'b':
+      bin = 1;
+      base = 2;
+      fn = fio_atol_bin;
+      ++p;
+      ;
+    case '.': break; /* decimal */
+    default: --p; break;
+    }
+    break;
+  case '.': /* fall through*/
+  case '1': /* fall through*/
+  case '2': /* fall through*/
+  case '3': /* fall through*/
+  case '4': /* fall through*/
+  case '5': /* fall through*/
+  case '6': /* fall through*/
+  case '7': /* fall through*/
+  case '8': /* fall through*/
+  case '9': /* fall through*/ break;
+  case 'I': /* fall through*/
+  case 'i': goto is_infinity;
+  case 'N': /* fall through*/
+  case 'n': goto is_nan;
+  case 'X': /* fall through*/
+  case 'x':
+    ++p;
+    base = 16;
+    fn = fio_atol16u;
+    hex = 1;
+    break;
+  case 'B': /* fall through*/
+  case 'b':
+    bin = 1;
+    base = 2;
+    fn = fio_atol_bin;
+    ++p;
+    ;
+  default: return r /* invalid input */;
+  }
+
+  // FIO_LOG_INFO("Start Unsigned: %s", p);
+  before_dot = fn((char **)&p);
+  if (bin) {
+    r.u = before_dot;
+    r.is_float = ((p[0] | 32) == 'f');
+    p += r.is_float;
+    *pstr = (char *)p;
+    return r;
+  }
+  tail_start = p;
+  // FIO_LOG_INFO("Start Tail: %s", p);
+  tail = fn((char **)&p);
+  skip_end = tail_end = p;
+  has_tail = (p != tail_start);
+  do {
+    skip_end = p;
+    fn((char **)&p);
+  } while (skip_end != p);
+  // FIO_LOG_INFO("Start Dot: %s", p);
+  has_dot = (p[0] == '.');
+  if (has_dot) {
+    ++p;
+    dot = p;
+    after_dot = fn((char **)&p);
+    dot_finish = p;
+    while (fio_c2i(p[0]) < base)
+      ++p;
+  }
+  // FIO_LOG_INFO("Start Expo: %s", p);
+  if ((p[0] | 32) == 'e' || (expo_is_p = ((p[0] | 32) == 'p'))) {
+    has_dot = 1;
+    ++p;
+    expo_inv = (p[0] == '-');
+    p += expo_inv | (p[0] == '+');
+    expo = fio_atol10u((char **)&p);
+    while (fio_c2i(p[0]) < 10)
+      ++p;
+  }
+  *pstr = (char *)p;
+  if (!has_dot && !has_tail &&
+      (!(before_dot & ((uint64_t)1ULL << 63)) ||
+       (!inv && hex))) { /* is integer */
+    r.u = before_dot;
+    if (inv)
+      r.i = 0 - r.u;
+    return r;
+  }
+  dbl = (long double)before_dot;
+  dbl_tail = (long double)tail;
+  dbl_dot = (long double)after_dot;
+  head_expo = (size_t)(skip_end - tail_start);
+  tail_expo = (size_t)(skip_end - tail_end);
+  dot_expo = (size_t)(dot_finish - dot);
+  if (hex) {
+    dbl *= fio_u2d(1, (head_expo * 4));
+    dbl_tail *= fio_u2d(1, (tail_expo * 4));
+    dbl_dot /= fio_u2d(1, (dot_expo * 4));
+  } else if (oct) {
+    dbl *= fio_u2d(1, (head_expo * 3));
+    dbl_tail *= fio_u2d(1, (tail_expo * 3));
+    dbl_dot /= fio_u2d(1, (dot_expo * 3));
+  } else {
+    dbl *= fio___aton_pow10(head_expo);
+    if (tail)
+      dbl_tail *= fio___aton_pow10(tail_expo);
+    if (after_dot)
+      dbl_dot *= fio___aton_pow10n(dot_expo);
+  }
+  dbl += dbl_tail + dbl_dot;
+  if (expo_is_p) {
+    dbl *= fio_u2d(1, (int64_t)(expo_inv ? 0 - expo : expo));
+  } else if (expo) {
+    dbl *= (expo_inv ? fio___aton_pow10n : fio___aton_pow10)(expo);
+  }
+  r.is_float = 1;
+  r.f = (double)dbl;
+  r.u |= (uint64_t)inv << 63;
+  return r;
+
+is_infinity:
+  if ((p[1] | 32) == 'n' && (p[2] | 32) == 'f') { /* inf */
+    r.is_float = 1;
+    r.u = ((uint64_t)inv << 63) | ((uint64_t)2047ULL << 52);
+    p += 3 + ((fio_buf2u64u("infinity") ==
+               (fio_buf2u64u(p) | 0x2020202020202020ULL)) *
+              5);
+    *pstr = (char *)p;
+  } else
+    r.err = 1;
+  return r;
+
+is_nan:
+  if ((p[1] | 32) == 'a' && (p[2] | 32) == 'n') { /* nan */
+    r.is_float = 1;
+    r.i = ((~(uint64_t)0) >> (!inv));
+    p += 3;
+    *pstr = (char *)p;
+  } else
+    r.err = 1;
+  return r;
 }
 
 /* *****************************************************************************

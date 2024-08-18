@@ -228,7 +228,7 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
  * should be faster.
  */
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  return memchr(buffer, token, len); /* FIXME */
+  // return (void *)memchr(buffer, token, len); /* FIXME */
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
   uint64_t u[16] FIO_ALIGN(64) = {0};

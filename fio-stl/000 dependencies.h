@@ -100,13 +100,11 @@ Basics Inclusion
 #undef FIO_FIOBJ
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
-#undef FIO_STATE
 #undef FIO_THREADS
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
 #define FIO_CRYPT
-#define FIO_STATE
 #define FIO_THREADS
 
 #elif !defined(H___FIO_BASIC_ROUND2___H)
@@ -294,6 +292,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_FIOBJ)
 #define FIO_MUSTACHE
+#define FIO_JSON
 #endif
 
 #if defined(FIO_HTTP)

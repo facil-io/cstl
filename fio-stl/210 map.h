@@ -922,10 +922,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_mini)(
     FIO_NAME(FIO_MAP_NAME, s) * o,
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   if (!o->bits)
     return r;
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
@@ -955,10 +956,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_med)(
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
   static int guard_print = 0;
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const uint32_t mask = FIO_MAP_CAPA(o->bits) - 1;
   uint32_t guard = FIO_MAP_ATTACK_LIMIT + 1;
@@ -1019,10 +1021,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
   static int guard_print = 0;
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint32_t mask = (FIO_MAP_CAPA(o->bits) - 1) & (~(uint32_t)7ULL);
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const size_t attempt_limit = o->bits + 7;

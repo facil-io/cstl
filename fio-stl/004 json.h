@@ -1,6 +1,7 @@
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ATOL               /* Development inclusion - ignore line */
 #define FIO_JSON               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -14,26 +15,60 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_JSON) && !defined(H___FIO_JSON_H)
-#define H___FIO_JSON_H
+#if defined(FIO_JSON) && !defined(H___FIO_JSON___H)
+#define H___FIO_JSON___H
 
 #ifndef FIO_JSON_MAX_DEPTH
 /** Maximum allowed JSON nesting level. Values above 64K might fail. */
 #define FIO_JSON_MAX_DEPTH 512
 #endif
 
-/** The JSON parser type. Memory must be initialized to 0 before first uses. */
-typedef struct {
-  /** level of nesting. */
-  uint32_t depth;
-  /** expectation bit flag: 0=key, 1=colon, 2=value, 4=comma/closure . */
-  uint8_t expect;
-  /** nesting bit flags - dictionary bit = 0, array bit = 1. */
-  uint8_t nesting[(FIO_JSON_MAX_DEPTH + 7) >> 3];
-} fio_json_parser_s;
+#ifndef FIO_JSON_USE_FIO_ATON
+#define FIO_JSON_USE_FIO_ATON 0
+#endif
 
-#define FIO_JSON_INIT                                                          \
-  { .depth = 0 }
+/** The JSON parser settings. */
+typedef struct {
+  /** NULL object was detected. Returns new object as `void *`. */
+  void *(*get_null)(void);
+  /** TRUE object was detected. Returns new object as `void *`. */
+  void *(*get_true)(void);
+  /** FALSE object was detected. Returns new object as `void *`. */
+  void *(*get_false)(void);
+  /** Number was detected (long long). Returns new object as `void *`. */
+  void *(*get_number)(int64_t i);
+  /** Float was detected (double).Returns new object as `void *`.  */
+  void *(*get_float)(double f);
+  /** (escaped) String was detected. Returns a new String as `void *`. */
+  void *(*get_string)(const void *start, size_t len);
+  /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
+  void *(*get_map)(void *ctx, void *at);
+  /** Array was detected. Returns ctx to array or NULL on error. */
+  void *(*get_array)(void *ctx, void *at);
+  /** Array was detected. Returns non-zero on error. */
+  int (*map_push)(void *ctx, void *key, void *value);
+  /** Array was detected. Returns non-zero on error. */
+  int (*array_push)(void *ctx, void *value);
+  /** Called when an array object (`ctx`) appears done. */
+  int (*array_finished)(void *ctx);
+  /** Called when a map object (`ctx`) appears done. */
+  int (*map_finished)(void *ctx);
+  /** Called when context is expected to be an array (i.e., fio_json_update). */
+  int (*is_array)(void *ctx);
+  /** Called when context is expected to be a map (i.e., fio_json_update). */
+  int (*is_map)(void *ctx);
+  /** Called for the `key` element in case of error or NULL value. */
+  void (*free_unused_object)(void *ctx);
+  /** the JSON parsing encountered an error - what to do with ctx? */
+  void *(*on_error)(void *ctx);
+} fio_json_parser_callbacks_s;
+
+/** The JSON return type. */
+typedef struct {
+  void *ctx;
+  size_t stop_pos;
+  int err;
+} fio_json_result_s;
 
 /**
  * The facil.io JSON parser is a non-strict parser, with support for trailing
@@ -48,9 +83,9 @@ typedef struct {
  * error or end of data). Stops as close as possible to the end of the buffer or
  * once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *parser,
-                            const char *buffer,
-                            const size_t len);
+SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *settings,
+                                       const char *json_string,
+                                       const size_t len);
 
 /* *****************************************************************************
 JSON Parsing - Implementation - Helpers and Callbacks
@@ -62,427 +97,563 @@ Note: a Helper API is provided for the parsing implementation.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/** common FIO_JSON callback function properties */
-#define FIO_JSON_CB static inline __attribute__((unused))
+// typedef struct {
+//   struct {
+//     uintptr_t start;
+//     uintptr_t end;
+//   } intructions[16];
+//   uint32_t count;
+// } fio___json_cb_queue_s;
 
-/* *****************************************************************************
-JSON Parsing - Helpers API
-***************************************************************************** */
+typedef struct {
+  fio_json_parser_callbacks_s cb;
+  void *ctx;
+  void *key;
+  const char *pos;
+  const char *end;
+  uint32_t depth;
+  uint32_t error;
+} fio___json_state_s;
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *parser);
+FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *parser);
+#if 0
+#define FIO_JSON___PRINT_STEP(s, step_name)                                    \
+  FIO_LOG_DEBUG2("JSON " step_name " starting at: %.*s",                       \
+                 (int)((s->end - s->pos) > 16 ? 16 : (s->end - s->pos)),       \
+                 s->pos)
+#else
+#define FIO_JSON___PRINT_STEP(s, step_name)
+#endif
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *parser);
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *parser);
-
-/* *****************************************************************************
-JSON Parsing - Implementation - Callbacks
-***************************************************************************** */
-
-/** a NULL object was detected */
-FIO_JSON_CB void fio_json_on_null(fio_json_parser_s *p);
-/** a TRUE object was detected */
-static inline void fio_json_on_true(fio_json_parser_s *p);
-/** a FALSE object was detected */
-FIO_JSON_CB void fio_json_on_false(fio_json_parser_s *p);
-/** a Number was detected (long long). */
-FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i);
-/** a Float was detected (double). */
-FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f);
-/** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void fio_json_on_string(fio_json_parser_s *p,
-                                    const void *start,
-                                    size_t len);
-/** a dictionary object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p);
-/** a dictionary object closure detected */
-FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p);
-/** an array object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_array(fio_json_parser_s *p);
-/** an array closure was detected */
-FIO_JSON_CB void fio_json_on_end_array(fio_json_parser_s *p);
-/** the JSON parsing is complete */
-FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p);
-/** the JSON parsing encountered an error */
-FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p);
-
-/* *****************************************************************************
-JSON Parsing - Implementation - Helpers and Parsing
-
-
-Note: static Callacks must be implemented in the C file that uses the parser
-***************************************************************************** */
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *p) {
-  return p->depth && fio_bit_get(p->nesting, p->depth);
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *p) {
-  return p->depth && !fio_bit_get(p->nesting, p->depth);
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *p) {
-  return fio_json_parser_is_in_object(p) && !p->expect;
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *p) {
-  return !fio_json_parser_is_key(p);
-}
-
-FIO_IFUNC const char *fio___json_skip_comments(const char *buffer,
-                                               const char *stop) {
-  if (*buffer == '#' ||
-      ((stop - buffer) > 2 && buffer[0] == '/' && buffer[1] == '/')) {
-    /* EOL style comment, C style or Bash/Ruby style*/
-    buffer = (const char *)FIO_MEMCHR(buffer + 1, '\n', stop - (buffer + 1));
-    return buffer;
+FIO_SFUNC int fio___json_move2next(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "white space");
+  while (s->pos < s->end) {
+    switch (*s->pos) { /* consume whitespace */
+    case 0x09:         /* fall through */
+    case 0x0A:         /* fall through */
+    case 0x0D:         /* fall through */
+    case 0x20: ++s->pos; continue;
+    }
+    return 0;
   }
-  if (((stop - buffer) > 3 && buffer[0] == '/' && buffer[1] == '*')) {
-    while ((buffer = (const char *)FIO_MEMCHR(buffer, '/', stop - buffer)) &&
-           buffer && ++buffer && buffer[-2] != '*')
-      ;
-    return buffer;
+  return (s->error = -1);
+}
+
+FIO_SFUNC void *fio___json_consume_infinit(fio___json_state_s *s,
+                                           _Bool negative) {
+  FIO_JSON___PRINT_STEP(s, "infinity");
+  if (s->pos + 7 < s->end) {
+    const uint64_t inf = fio_buf2u64u("infinity");
+    uint64_t tst = (fio_buf2u64u(s->pos) | (uint64_t)0x2020202020202020ULL);
+    if (tst == inf) {
+      s->pos += 8;
+      goto finish;
+    }
   }
+  if (s->pos + 2 < s->end) {
+    const uint16_t inf = fio_buf2u16u("nf");
+    uint16_t tst = (fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020U);
+    if (tst == inf) {
+      s->pos += 3;
+      goto finish;
+    }
+  }
+  s->error = 1;
+  return NULL;
+finish:
+  return s->cb.get_float(negative ? (INFINITY * -1) : INFINITY);
+}
+
+FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "number");
+#if FIO_JSON_USE_FIO_ATON
+  fio_aton_s aton = fio_aton((char **)&s->pos);
+  return aton.is_float ? s->cb.get_float(aton.f) : s->cb.get_number(aton.i);
+#else
+  const char *tst = s->pos;
+  uint64_t i;
+  double f;
+  _Bool negative = (tst[0] == '-') | (tst[0] == '+');
+  _Bool hex = 0;
+  _Bool binary = 0;
+  long ilimit = 19 + negative;
+  tst += negative;
+  if (tst + 1 > s->end)
+    goto buffer_overflow;
+  if ((tst[0] | 0x20) == 'i')
+    goto is_inifinity;
+  tst += (tst[0] == '0' && tst + 2 < s->end);
+  if ((tst[0] | 32) == 'x') {
+    hex = 1;
+    while ((tst < s->end) & ((tst[0] >= '0' & tst[0] <= '9') |
+                             ((tst[0] | 32) >= 'a' & (tst[0] | 32) <= 'f')))
+      ++tst;
+  } else if ((tst[0] | 32) == 'b') {
+    binary = 1;
+    ilimit = 66 + negative;
+    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '1')))
+      ++tst;
+  } else {
+    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '9')))
+      ++tst;
+  }
+  if (tst > (s->pos + ilimit) ||
+      ((tst < s->end) &&
+       (tst[0] == '.' || (tst[0] | 32) == 'e' || (tst[0] | 32) == 'p')))
+    goto is_float;
+  tst = s->pos;
+  s->pos += negative;
+  errno = 0;
+  i = (hex              ? fio_atol16u((char **)&s->pos)
+       : binary         ? fio_atol_bin((char **)&s->pos)
+       : *s->pos == '0' ? fio_atol8u((char **)&s->pos)
+                        : fio_atol10u((char **)&s->pos));
+  if (errno == E2BIG || (((uint64_t)(1 ^ hex ^ binary) << 63) & i))
+    goto is_float_from_error;
+  // s->error = (errno == E2BIG);
+  return s->cb.get_number(fio_u2i_limit(i, negative));
+is_float_from_error:
+  s->pos = tst;
+  errno = 0;
+
+is_float:
+  f = fio_atof((char **)&s->pos);
+  s->error = (errno == E2BIG);
+  return s->cb.get_float(f);
+
+buffer_overflow:
+  s->error = 1;
+  return NULL;
+is_inifinity:
+  ++s->pos;
+  return fio___json_consume_infinit(s, negative);
+#endif /* FIO_JSON_USE_FIO_ATON */
+}
+
+FIO_SFUNC void *fio___json_consume_string(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "string");
+  const char *start = ++s->pos;
+  for (;;) {
+    while (s->pos < s->end && *s->pos != '"' && *s->pos != '\\')
+      ++s->pos;
+    if (s->pos >= s->end)
+      break;
+    if (*s->pos == '\\') {
+      s->pos += 2;
+      continue;
+    }
+    return s->cb.get_string(start, (s->pos++) - start);
+  }
+  s->error = 1;
   return NULL;
 }
 
-FIO_IFUNC const char *fio___json_consume_string(fio_json_parser_s *p,
-                                                const char *buffer,
-                                                const char *stop) {
-  const char *start = ++buffer;
+FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "map");
+  void *old = s->ctx;
+  void *old_key = s->key;
+  void *map = s->cb.get_map(s, s->key);
+  s->ctx = map;
+  s->key = NULL;
+  if (++s->depth == FIO_JSON_MAX_DEPTH)
+    goto too_deep;
   for (;;) {
-    buffer = (const char *)FIO_MEMCHR(buffer, '\"', stop - buffer);
-    if (!buffer)
-      return NULL;
-    int escaped = 1;
-    while (buffer[0 - escaped] == '\\')
-      ++escaped;
-    if (escaped & 1)
+    ++s->pos;
+    if (fio___json_move2next(s))
       break;
-    ++buffer;
+    if (*s->pos == '}')
+      break;
+    s->key = fio___json_consume(s);
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ':')
+      break;
+    ++s->pos;
+    if (fio___json_move2next(s))
+      break;
+    void *value = fio___json_consume(s);
+    s->error |= s->cb.map_push(s->ctx, s->key, value);
+    s->key = NULL;
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ',')
+      break;
   }
-  fio_json_on_string(p, start, buffer - start);
-  return buffer + 1;
-}
-
-FIO_IFUNC const char *fio___json_consume_number(fio_json_parser_s *p,
-                                                const char *buffer,
-                                                const char *stop) {
-
-  const char *const was = buffer;
-  errno = 0; /* testo for E2BIG on number parsing */
-  long long i = fio_atol((char **)&buffer);
-
-  if (buffer < stop &&
-      ((*buffer) == '.' || (*buffer | 32) == 'e' || (*buffer | 32) == 'x' ||
-       (*buffer | 32) == 'p' || (*buffer | 32) == 'i' || errno)) {
-    buffer = was;
-    double f = fio_atof((char **)&buffer);
-    fio_json_on_float(p, f);
+  if (s->key) {
+    s->error = 1;
+    s->cb.free_unused_object(s->key);
+  } else if (*s->pos != '}' || s->error) {
+    s->error = 1;
   } else {
-    fio_json_on_number(p, i);
+    ++s->pos;
   }
-  return buffer;
+  --s->depth;
+  s->ctx = old;
+  s->key = old_key;
+  s->error |= s->cb.map_finished(map);
+  return map;
+too_deep:
+  s->ctx = old;
+  s->key = old_key;
+  s->error = 1;
+  --s->depth;
+  return map;
+}
+FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "array");
+  void *old = s->ctx;
+  void *array = s->ctx = s->cb.get_array(s, s->key);
+  if (++s->depth == FIO_JSON_MAX_DEPTH)
+    goto too_deep;
+  for (;;) {
+    ++s->pos;
+    if (fio___json_move2next(s))
+      break;
+    if (*s->pos == ']')
+      break;
+    void *value = fio___json_consume(s);
+    s->error |= s->cb.array_push(s->ctx, value);
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ',')
+      break;
+  }
+  if (*s->pos != ']' || s->error) {
+    s->error = 1;
+  } else {
+    ++s->pos;
+  }
+  s->ctx = old;
+  --s->depth;
+  s->error |= s->cb.array_finished(array);
+  return array;
+too_deep:
+  s->ctx = old;
+  s->error = 1;
+  --s->depth;
+  return array;
+}
+FIO_SFUNC void *fio___json_consume_null(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "null");
+  const uint32_t wrd = fio_buf2u32u("null");
+  uint32_t data;
+  if (s->end - s->pos < 4)
+    goto on_error;
+  data = fio_buf2u32u(s->pos) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 4;
+  return s->cb.get_null();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_true(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "true");
+  const uint32_t wrd = fio_buf2u32u("true");
+  uint32_t data;
+  if (s->end - s->pos < 4)
+    goto on_error;
+  data = fio_buf2u32u(s->pos) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 4;
+  return s->cb.get_true();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_false(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "false");
+  const uint32_t wrd = fio_buf2u32u("alse");
+  uint32_t data;
+  if (s->end - s->pos < 5)
+    goto on_error;
+  data = fio_buf2u32u(s->pos + 1) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 5;
+  return s->cb.get_false();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_nan(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "nan");
+  const uint16_t wrd = fio_buf2u16u("an");
+  uint16_t data;
+  if (s->end - s->pos < 3)
+    goto on_error;
+  data = fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 3;
+  return s->cb.get_float(NAN);
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "comment");
+  const size_t len = (size_t)(s->end - s->pos);
+  if (*s->pos == '#' || (len > 2 && s->pos[0] == '/' && s->pos[1] == '/')) {
+    /* EOL style comment, C style or Bash/Ruby style*/
+    const char *tmp = (const char *)FIO_MEMCHR(s->pos, '\n', len);
+    if (tmp) {
+      s->pos = tmp;
+      return 0;
+    }
+    s->error = 1;
+    return -1;
+  }
+  if ((len > 3 && s->pos[0] == '/' && s->pos[1] == '*')) {
+    const char *tmp = s->pos;
+    while (tmp < s->end &&
+           (tmp = (const char *)FIO_MEMCHR(s->pos, '/', s->end - tmp))) {
+      s->pos = ++tmp;
+      if (tmp[-2] == '*')
+        return 0;
+    }
+    s->error = 1;
+    return -1;
+  }
+  s->error = 1;
+  return -1;
 }
 
-FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
-                                          const char *buffer,
-                                          const char *stop) {
-  /* Use `break` to change separator requirement status.
-   * Use `continue` to keep separator requirement the same.
-   */
-  switch (*buffer) {
-  case 0x09: /* fall through */
-  case 0x0A: /* fall through */
-  case 0x0D: /* fall through */
-  case 0x20:
-    /* consume whitespace */
-    ++buffer;
-    while (buffer + 8 < stop && (buffer[0] == 0x20 || buffer[0] == 0x09 ||
-                                 buffer[0] == 0x0A || buffer[0] == 0x0D)) {
-      const uint64_t w = fio_buf2u64u(buffer);
-      const uint64_t w1 = 0x0101010101010101 * 0x09; /* '\t' (tab) */
-      const uint64_t w2 = 0x0101010101010101 * 0x0A; /* '\n' (new line) */
-      const uint64_t w3 = 0x0101010101010101 * 0x0D; /* '\r' (CR) */
-      const uint64_t w4 = 0x0101010101010101 * 0x20; /* ' '  (space) */
-      uint64_t b = fio_has_zero_byte64(w1 ^ w) | fio_has_zero_byte64(w2 ^ w) |
-                   fio_has_zero_byte64(w3 ^ w) | fio_has_zero_byte64(w4 ^ w);
-      if (b == 0x8080808080808080ULL) {
-        buffer += 8;
-        continue;
-      }
-      while ((b & UINT64_C(0x80))) {
-        b >>= 8;
-        ++buffer;
-      }
-      break;
-    }
-
-    return buffer;
-  case ',': /* comma separator */
-    if (!p->depth || !(p->expect & 4))
-      goto unexpected_separator;
-    ++buffer;
-    p->expect = (fio_bit_get(p->nesting, p->depth) << 1);
-    return buffer;
-  case ':': /* colon separator */
-    if (!p->depth || !(p->expect & 1))
-      goto unexpected_separator;
-    ++buffer;
-    p->expect = 2;
-    return buffer;
-    /*
-     *
-     * JSON Strings
-     *
-     */
-  case '"':
-    if (p->depth && (p->expect & ((uint8_t)5)))
-      goto missing_separator;
-    buffer = fio___json_consume_string(p, buffer, stop);
-    if (!buffer)
-      goto unterminated_string;
-    break;
-    /*
-     *
-     * JSON Objects
-     *
-     */
-  case '{':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (p->depth == FIO_JSON_MAX_DEPTH)
-      goto too_deep;
-    ++p->depth;
-    fio_bit_unset(p->nesting, p->depth);
-    fio_json_on_start_object(p);
-    p->expect = 0;
-    return buffer + 1;
-  case '}':
-    if (fio_bit_get(p->nesting, p->depth) || !p->depth || (p->expect & 3))
-      goto object_closure_unexpected;
-    fio_bit_unset(p->nesting, p->depth);
-    p->expect = 4; /* expect comma */
-    --p->depth;
-    fio_json_on_end_object(p);
-    return buffer + 1;
-    /*
-     *
-     * JSON Arrays
-     *
-     */
-  case '[':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (p->depth == FIO_JSON_MAX_DEPTH)
-      goto too_deep;
-    ++p->depth;
-    fio_json_on_start_array(p);
-    fio_bit_set(p->nesting, p->depth);
-    p->expect = 2;
-    return buffer + 1;
-  case ']':
-    if (!fio_bit_get(p->nesting, p->depth) || !p->depth)
-      goto array_closure_unexpected;
-    fio_bit_unset(p->nesting, p->depth);
-    p->expect = 4; /* expect comma */
-    --p->depth;
-    fio_json_on_end_array(p);
-    return buffer + 1;
-    /*
-     *
-     * JSON Primitives (true / false / null (NaN))
-     *
-     */
-  case 'N': /* NaN or null? - fall through */
-  case 'n':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 4 > stop || buffer[1] != 'u' || buffer[2] != 'l' ||
-        buffer[3] != 'l') {
-      if (buffer + 3 > stop || (buffer[1] | 32) != 'a' ||
-          (buffer[2] | 32) != 'n')
+void *fio___json_consume(fio___json_state_s *s) {
+  for (;;) {
+    FIO_JSON___PRINT_STEP(s, "consumption type test");
+    switch (*s->pos) {
+    case '+': /* fall through */
+    case '-': /* fall through */
+    case '0': /* fall through */
+    case '1': /* fall through */
+    case '2': /* fall through */
+    case '3': /* fall through */
+    case '4': /* fall through */
+    case '5': /* fall through */
+    case '6': /* fall through */
+    case '7': /* fall through */
+    case '8': /* fall through */
+    case '9': /* fall through */
+    case 'x': /* fall through */
+    case '.': /* fall through */
+    case 'e': /* fall through */
+    case 'E': return fio___json_consume_number(s);
+    case 'i': /* fall through */
+    case 'I': return fio___json_consume_infinit(s, 0);
+    case '"': return fio___json_consume_string(s);
+    case '{': return fio___json_consume_map(s);
+    case '[': return fio___json_consume_array(s);
+    case 'T': /* fall through */
+    case 't': return fio___json_consume_true(s);
+    case 'F': /* fall through */
+    case 'f': return fio___json_consume_false(s);
+    case 'N': /* fall through */
+    case 'n':
+      return (((s->pos[1] | 32) == 'u') ? fio___json_consume_null
+                                        : fio___json_consume_nan)(s);
+    case '#':
+    case '/':
+      if (fio___json_consume_comment(s)) {
+        s->error = 1;
         return NULL;
-      char *nan_str = (char *)"NaN";
-      fio_json_on_float(p, fio_atof(&nan_str));
-      buffer += 3;
-      break;
+      }
+      if (fio___json_move2next(s)) {
+        s->error = 1;
+        return NULL;
+      }
+      continue;
     }
-    fio_json_on_null(p);
-    buffer += 4;
-    break;
-  case 't': /* true */
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 4 > stop || buffer[1] != 'r' || buffer[2] != 'u' ||
-        buffer[3] != 'e')
-      return NULL;
-    fio_json_on_true(p);
-    buffer += 4;
-    break;
-  case 'f': /* false */
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 5 > stop || buffer[1] != 'a' || buffer[2] != 'l' ||
-        buffer[3] != 's' || buffer[4] != 'e')
-      return NULL;
-    fio_json_on_false(p);
-    buffer += 5;
-    break;
-    /*
-     *
-     * JSON Numbers (Integers / Floats)
-     *
-     */
-  case '+': /* fall through */
-  case '-': /* fall through */
-  case '0': /* fall through */
-  case '1': /* fall through */
-  case '2': /* fall through */
-  case '3': /* fall through */
-  case '4': /* fall through */
-  case '5': /* fall through */
-  case '6': /* fall through */
-  case '7': /* fall through */
-  case '8': /* fall through */
-  case '9': /* fall through */
-  case 'x': /* fall through */
-  case '.': /* fall through */
-  case 'e': /* fall through */
-  case 'E': /* fall through */
-  case 'i': /* fall through */
-  case 'I':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    buffer = fio___json_consume_number(p, buffer, stop);
-    if (!buffer)
-      goto bad_number_format;
-    break;
-    /*
-     *
-     * Comments
-     *
-     */
-  case '#': /* fall through */
-  case '/': /* fall through */
-    return fio___json_skip_comments(buffer, stop);
-    /*
-     *
-     * Unrecognized Data Handling
-     *
-     */
-  default:
-    FIO_LOG_DEBUG("unrecognized JSON identifier at:\n%.*s",
-                  ((stop - buffer > 48) ? (int)48 : ((int)(stop - buffer))),
-                  buffer);
+    s->error = 1;
     return NULL;
   }
-  /* p->expect should be either 0 (key) or 2 (value) */
-  p->expect = (p->expect << 1) + ((p->expect ^ 2) >> 1);
-  return buffer;
-
-missing_separator:
-  FIO_LOG_DEBUG("missing JSON separator '%c' at (%d):\n%.*s",
-                (p->expect == 2 ? ':' : ','),
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-unexpected_separator:
-  FIO_LOG_DEBUG("unexpected JSON separator at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-unterminated_string:
-  FIO_LOG_DEBUG("unterminated JSON string at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-bad_number_format:
-  FIO_LOG_DEBUG("bad JSON numeral format at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-array_closure_unexpected:
-  FIO_LOG_DEBUG("JSON array closure unexpected at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-object_closure_unexpected:
-  FIO_LOG_DEBUG("JSON object closure unexpected at (%d):\n%.*s",
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-too_deep:
-  FIO_LOG_DEBUG("JSON object nesting too deep at:\n%.*s",
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
 }
 
+static int fio___json_callback_noop(void *ctx) {
+  return 0;
+  (void)ctx;
+}
+static void *fio___json_callback_noop2(void *ctx) { return ctx; }
+
+FIO_SFUNC int fio___json_callbacks_validate(fio_json_parser_callbacks_s *cb) {
+  if (!cb)
+    goto is_invalid;
+  if (!cb->get_null)
+    goto is_invalid;
+  if (!cb->get_true)
+    goto is_invalid;
+  if (!cb->get_false)
+    goto is_invalid;
+  if (!cb->get_number)
+    goto is_invalid;
+  if (!cb->get_float)
+    goto is_invalid;
+  if (!cb->get_string)
+    goto is_invalid;
+  if (!cb->get_map)
+    goto is_invalid;
+  if (!cb->get_array)
+    goto is_invalid;
+  if (!cb->map_push)
+    goto is_invalid;
+  if (!cb->array_push)
+    goto is_invalid;
+  if (!cb->free_unused_object)
+    goto is_invalid;
+  if (!cb->array_finished)
+    cb->array_finished = fio___json_callback_noop;
+  if (!cb->map_finished)
+    cb->map_finished = fio___json_callback_noop;
+  if (!cb->is_array)
+    cb->is_array = fio___json_callback_noop;
+  if (!cb->is_map)
+    cb->is_map = fio___json_callback_noop;
+  if (!cb->on_error)
+    cb->on_error = fio___json_callback_noop2;
+  return 0;
+is_invalid:
+  return -1;
+}
 /**
  * Returns the number of bytes consumed. Stops as close as possible to the end
  * of the buffer or once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *p,
-                            const char *buffer,
-                            const size_t len) {
-  const char *start = buffer;
-  const char *stop = buffer + len;
-  const char *last;
+SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
+                                       const char *start,
+                                       const size_t len) {
+  fio_json_result_s r = {.stop_pos = 0, .err = 0};
+  fio___json_state_s state;
+  if (fio___json_callbacks_validate(callbacks))
+    goto missing_callback;
+
+  state = (fio___json_state_s){
+      .cb = callbacks[0],
+      .pos = start,
+      .end = start + len,
+  };
+
   /* skip BOM, if exists */
-  if (len >= 3 && buffer[0] == (char)0xEF && buffer[1] == (char)0xBB &&
-      buffer[2] == (char)0xBF) {
-    buffer += 3;
+  if (len >= 3 && state.pos[0] == (char)0xEF && state.pos[1] == (char)0xBB &&
+      state.pos[2] == (char)0xBF) {
+    state.pos += 3;
     if (len == 3)
       goto finish;
   }
-  /* loop until the first JSON data was read */
-  do {
-    last = buffer;
-    buffer = fio___json_identify(p, buffer, stop);
-    if (!buffer)
-      goto failed;
-  } while (!p->expect && buffer < stop);
-  /* loop until the JSON object (nesting) is closed */
-  while (p->depth && buffer < stop) {
-    last = buffer;
-    buffer = fio___json_identify(p, buffer, stop);
-    if (!buffer)
-      goto failed;
-  }
-  if (!p->depth) {
-    p->expect = 0;
-    fio_json_on_json(p);
-  }
+  if (fio___json_move2next(&state))
+    goto finish;
+  r.ctx = fio___json_consume(&state);
+  r.err = state.error;
+  r.stop_pos = state.pos - start;
+  if (state.error)
+    goto failed;
 finish:
-  return buffer - start;
+  return r;
 failed:
-  FIO_LOG_DEBUG("JSON parsing failed after:\n%.*s",
-                ((stop - last > 48) ? 48 : ((int)(stop - last))),
-                last);
-  return last - start;
+  FIO_LOG_DEBUG(
+      "JSON parsing failed after:\n%.*s",
+      ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
+      state.pos);
+  r.ctx = callbacks->on_error(r.ctx);
+  return r;
+
+missing_callback:
+  FIO_LOG_ERROR("JSON parser missing a critical callback!");
+  r.err = 1;
+  return r;
 }
 
+/** Dictionary was detected. Returns ctx to hash map or NULL on error. */
+FIO_SFUNC void *fio___json_parse_update_get_map(void *ctx, void *at) {
+  void **ex_data = (void **)ctx;
+  fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
+  ctx = ex_data[1];
+  fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
+  s->cb.get_map = cb->get_map;
+  s->cb.get_array = cb->get_array;
+  if (ctx && !s->cb.is_map(ctx))
+    return NULL;
+  else if (!ctx)
+    ctx = cb->get_map(ctx, at);
+  return ctx;
+}
+/** Array was detected. Returns ctx to array or NULL on error. */
+FIO_SFUNC void *fio___json_parse_update_get_array(void *ctx, void *at) {
+  void **ex_data = (void **)ctx;
+  fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
+  ctx = ex_data[1];
+  fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
+  s->cb.get_map = cb->get_map;
+  s->cb.get_array = cb->get_array;
+  if (ctx && !s->cb.is_array(ctx))
+    return NULL;
+  else if (!ctx)
+    ctx = cb->get_array(ctx, at);
+
+  return ctx;
+}
+
+/**
+ * Use only when `ctx` is an object and JSON data is wrapped in an object (of
+ * the same type).
+ *
+ * i.e., update an array or hash map.
+ */
+SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
+                                              void *ctx,
+                                              const char *start,
+                                              const size_t len) {
+  fio_json_result_s r = {.stop_pos = 0, .err = 0};
+  fio_json_parser_callbacks_s callbacks;
+  callbacks.get_map = fio___json_parse_update_get_map;
+  callbacks.get_array = fio___json_parse_update_get_array;
+  fio___json_state_s state;
+  void *ex_data[3] = {s, ctx, &state};
+
+  if (!s->is_array)
+    goto missing_callback;
+  if (!s->is_map)
+    goto missing_callback;
+  if (fio___json_callbacks_validate(s))
+    goto missing_callback;
+
+  callbacks = *s;
+  state = (fio___json_state_s){
+      .cb = callbacks,
+      .pos = start,
+      .end = start + len,
+  };
+  state.ctx = (void *)ex_data;
+  /* skip BOM, if exists */
+  if (len >= 3 && state.pos[0] == (char)0xEF && state.pos[1] == (char)0xBB &&
+      state.pos[2] == (char)0xBF) {
+    state.pos += 3;
+    if (len == 3)
+      goto finish;
+  }
+  if (fio___json_move2next(&state))
+    goto finish;
+  r.ctx = fio___json_consume(&state);
+  r.err = state.error;
+  r.stop_pos = state.pos - start;
+  if (state.error)
+    goto failed;
+finish:
+  return r;
+failed:
+  FIO_LOG_DEBUG(
+      "JSON parsing failed after:\n%.*s",
+      ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
+      state.pos);
+  r.ctx = s->on_error(r.ctx);
+  return r;
+missing_callback:
+  FIO_LOG_ERROR("JSON parser missing a critical callback!");
+  r.err = 1;
+  return r;
+}
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_JSON
 #endif /* FIO_JSON */

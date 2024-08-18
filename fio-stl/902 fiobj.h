@@ -200,7 +200,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
                    FIO_STRLEN(json + 61),
-               "JSON roundtrip failed (length error).");
+               "JSON roundtrip failed (length error %zu != %zu).\n%s\n%s",
+               (size_t)FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j),
+               (size_t)FIO_STRLEN(json + 61),
+               FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
+               json + 61);
     FIO_ASSERT(!memcmp(json + 61,
                        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
                        FIO_STRLEN(json + 61)),
@@ -337,23 +341,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                            new_cstr)("number: ", 8);
       FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(o, k, fiobj_dup(tmp));
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set_if_missing2)(o, k, tmp);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
+      (o, k, fiobj_dup(tmp), NULL);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set_if_missing)(o, k, tmp);
       fiobj_free(k);
     }
 
     FIOBJ set = FIOBJ_INVALID;
     FIOBJ removed = FIOBJ_INVALID;
     FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(1);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)(o, k, &removed);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(o, k, &removed);
     fiobj_free(k);
     k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(2);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
-    (o, fiobj2hash(o, k), k, fiobj_true(), &set);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(o, k, fiobj_true(), &set);
     fiobj_free(k);
-    FIO_ASSERT(set, "fiobj_hash_set2 didn't copy information to old pointer?");
+    FIO_ASSERT(set, "fiobj_hash_set didn't copy information to old pointer?");
     FIO_ASSERT(removed,
-               "fiobj_hash_remove2 didn't copy information to old pointer?");
+               "fiobj_hash_remove didn't copy information to old pointer?");
     // fiobj_hash_set(o, uintptr_t hash, FIOBJ key, FIOBJ value, FIOBJ *old)
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed) ==
@@ -391,8 +395,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIOBJ h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
     FIOBJ key = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(key, "array", 5);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(h, key, a);
-    FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(h, key) == a,
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(h, key, a);
+    FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(h, key) == a,
                "FIOBJ Hash retrieval failed");
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(a, key);
     if (0) {

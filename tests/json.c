@@ -62,9 +62,13 @@ int main(int argc, char const *argv[]) {
   FIOBJ obj2 = fiobj_json_parse2((char *)fiobj_str2cstr(json2).buf,
                                  fiobj_str2cstr(json2).len,
                                  &consumed2);
-  FIO_LOG_DEBUG2("JSON reprtinted:\n%s", fiobj_str2cstr(json2).buf);
+  FIO_LOG_DEBUG2("JSON reprinted:\n%s", fiobj_str2cstr(json2).buf);
   FIO_ASSERT(obj2, "JSON roundtrip parsing failed");
-  FIO_LOG_DEBUG2("JSON re-parsed:\n%s", fiobj2cstr(obj2).buf);
+  {
+    FIOBJ tmp = fiobj2json(FIOBJ_INVALID, obj2, 0);
+    FIO_LOG_DEBUG2("JSON re-parsed:\n%s", fiobj_str_ptr(tmp));
+    fiobj_free(tmp);
+  }
   FIO_ASSERT(consumed2 == fiobj_str2cstr(json2).len,
              "Should have consumed all the stringified data");
   FIO_ASSERT(fiobj_is_eq(obj1, obj2),
@@ -73,10 +77,10 @@ int main(int argc, char const *argv[]) {
              fiobj2cstr(obj2).buf);
 
   if (FIOBJ_TYPE(obj2) == FIOBJ_T_HASH &&
-      fiobj_hash_get3(obj2, "___sanity_test____ ____ ____ ", 29) !=
+      fiobj_hash_get2(obj2, "___sanity_test____ ____ ____ ", 29) !=
           fiobj_true()) {
     /* sanity test */
-    fiobj_hash_set3(obj2, "___sanity_test____ ____ ____ ", 29, fiobj_true());
+    fiobj_hash_set2(obj2, "___sanity_test____ ____ ____ ", 29, fiobj_true());
     FIO_ASSERT(
         !fiobj_is_eq(obj1, obj2),
         "Sanity test failed - objects shouldn't be equal after being updated");

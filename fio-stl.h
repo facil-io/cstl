@@ -332,6 +332,7 @@ typedef SSIZE_T ssize_t;
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1480,6 +1481,14 @@ FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
       intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
 }
 
+/** Returns `a` if a >= `b`. */
+FIO_IFUNC intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintmax_t a = a_, b = b_;
+  return (
+      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, a, b);
+}
+
 /** Returns absolute value. */
 FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
   // if b - a is negative, a > b, unless both / one are negative.
@@ -2209,13 +2218,11 @@ Basics Inclusion
 #undef FIO_FIOBJ
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
-#undef FIO_STATE
 #undef FIO_THREADS
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
 #define FIO_CRYPT
-#define FIO_STATE
 #define FIO_THREADS
 
 #elif !defined(H___FIO_BASIC_ROUND2___H)
@@ -2403,6 +2410,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_FIOBJ)
 #define FIO_MUSTACHE
+#define FIO_JSON
 #endif
 
 #if defined(FIO_HTTP)
@@ -3130,7 +3138,7 @@ FIO_MEMCHR / fio_memchr - memchr fallbacks
  * should be faster.
  */
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  return memchr(buffer, token, len); /* FIXME */
+  // return (void *)memchr(buffer, token, len); /* FIXME */
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
   uint64_t u[16] FIO_ALIGN(64) = {0};
@@ -3627,6 +3635,44 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #include <inttypes.h>
 #include <math.h>
 
+#ifndef FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+#define FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER 1
+#endif
+
+/* *****************************************************************************
+Strings to Signed Numbers - The fio_aton function
+***************************************************************************** */
+
+/** Result type for fio_aton */
+typedef struct {
+  union {
+    int64_t i;
+    double f;
+    uint64_t u;
+  };
+  int is_float;
+  int err;
+} fio_aton_s;
+
+/**
+ * Converts a String to a number - either an integer or a float (double).
+ *
+ * Skips white space at the beginning of the string.
+ *
+ * Auto detects binary and hex formats when prefix is provided (0x / 0b).
+ *
+ * Auto detects octal when number starts with zero.
+ *
+ * Auto detects the Strings "inf", "infinity" and "nan" as float values.
+ *
+ * The number's format and type are returned in the return type.
+ *
+ * If a numerical overflow or format error occurred, the `.err` flag is set.
+ *
+ * Note: rounding errors may occur, as this is not an `strtod` exact match.
+ */
+FIO_SFUNC fio_aton_s fio_aton(char **pstr);
+
 /* *****************************************************************************
 Strings to Signed Numbers - API
 ***************************************************************************** */
@@ -3756,7 +3802,10 @@ IEEE 754 Floating Points, Building Blocks and Helpers
 ***************************************************************************** */
 
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
-FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent);
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
+
+/** Converts a 64 bit unsigned integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
 
 /* *****************************************************************************
 
@@ -3910,20 +3959,27 @@ FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
 
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
   dest += digits;
-  *dest-- = 0;
-  switch (digits & 7) { /* last use of `digits` */
-    while (i) {
-      *dest-- = '0' + (i & 1);
-      i >>= 1;                                /* fall through */
-    case 7: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 6: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 5: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 4: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 3: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 2: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 1: *dest-- = '0' + (i & 1); i >>= 1; /* fall through */
-    case 0:;
-    }
+  *dest = 0;
+  switch (digits & 7) {
+  case 7: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 6: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 5: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 4: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 3: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 2: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 1: *--dest = '0' + (i & 1); i >>= 1; /* fall through */
+  case 0:;
+  }
+  digits &= ~(uint64_t)7ULL;
+  while (digits > 7) {
+    uint64_t tmp = (i & 0xFFULL);
+    dest -= 8;
+    digits -= 8;
+    i >>= 8;
+    tmp = ((tmp & 0x7F) * 0x02040810204081ULL) | ((tmp & 0x80) << 49);
+    tmp &= 0x0101010101010101ULL;
+    tmp += (0x0101010101010101ULL * '0');
+    fio_u2buf64_be(dest, tmp);
   }
 }
 
@@ -3970,6 +4026,19 @@ IEEE 754 Floating Points, Building Blocks and Helpers
 #define FIO_MATH_DBL_SIGN_MASK ((uint64_t)1ULL << 63)
 #endif
 
+FIO_IFUNC int fio_d2expo(double d) {
+  int r;
+  union {
+    uint64_t u64;
+    double d;
+  } u = {.d = d};
+  u.u64 &= FIO_MATH_DBL_EXPO_MASK;
+  r = (int)(u.u64 >> 52);
+  r -= 1023;
+  r *= -1;
+  return r;
+}
+
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
 FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   union {
@@ -3980,7 +4049,7 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   if (!mant)
     goto is_zero;
   /* convert `mant` to absolute value - constant time */
-  mant = mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
+  // mant = (uint64_t)mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
   mant = fio_ct_abs(mant);
   tmp = fio_msb_index_unsafe(mant);
   /* normalize exponent */
@@ -4004,16 +4073,42 @@ is_inifinity_or_nan:
   return u.d;
 }
 
+/** Converts a 64 bit integer to an IEEE 754 formatted double. */
+FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
+  union {
+    uint64_t u64;
+    double d;
+  } u = {0};
+  size_t tmp;
+  if (!mant)
+    goto is_zero;
+  /* convert `mant` to absolute value - constant time */
+  // mant = (uint64_t)mant >> ((uint64_t)mant == ~(uint64_t)0ULL);
+  tmp = fio_msb_index_unsafe(mant);
+  /* normalize exponent */
+  exponent += tmp + 1023;
+  if (FIO_UNLIKELY(exponent < 0))
+    goto is_zero;
+  if (FIO_UNLIKELY(exponent > 2047))
+    goto is_inifinity_or_nan;
+  exponent = (uint64_t)exponent << 52;
+  u.u64 |= exponent;
+  /* reposition mant bits so we "hide" the fist set bit in bit[52] */
+  if (tmp < 52)
+    mant = mant << (52 - tmp);
+  else if (FIO_UNLIKELY(tmp > 52)) /* losing precision */
+    mant = mant >> (tmp - 52);
+  u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
+is_zero:
+  return u.d;
+is_inifinity_or_nan:
+  u.u64 = FIO_MATH_DBL_EXPO_MASK;
+  return u.d;
+}
 /* *****************************************************************************
 Implementation - possibly externed
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-typedef struct {
-  uint64_t val;
-  int64_t expo;
-  uint8_t sign;
-} fio___number_s;
 
 /* *****************************************************************************
 Unsigned core and helpers
@@ -4097,28 +4192,81 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
     ++*pstr;
     if ((r & UINT64_C(0xE000000000000000)))
       break;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    *pstr += (**pstr == '_'); /* allow '_' as a divider. */
+#endif
   }
   if ((fio_c2i(**pstr)) < 8)
     errno = E2BIG;
   return r;
 }
 
-/** Reads an unsigned base 10 formatted number. */
-SFUNC uint64_t fio_atol10u(char **pstr) {
-  uint64_t r = 0;
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+FIO_IFUNC uint64_t fio___atol10u_with_prefix(uint64_t r, char **pstr) {
   char *pos = *pstr;
-  uint64_t r0;
-  while (((r0 = (uint64_t)(pos[0] - '0')) < 10ULL) & (r < add_limit)) {
+  uint64_t u0, u1 = r;
+  u0 = (uint64_t)(pos[0] - '0');
+  if (u0 > 9ULL)
+    return r;
+  for (;;) {
+    r += u0;
+    if (r < u1)
+      goto value_overflow;
+    ++pos;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    pos += (*pos == '_'); /* allow '_' as a divider. */
+#endif
+    u0 = (uint64_t)(pos[0] - '0');
+    if (u0 > 9ULL)
+      break;
+    if (r > ((~(uint64_t)0ULL) / 10))
+      goto value_overflow_stepback;
+    u1 = r;
     r *= 10;
-    r += r0;
-    ++pos;
-  }
-  while (((size_t)(pos[0] - '0') < 10ULL)) {
-    errno = E2BIG;
-    ++pos;
   }
   *pstr = pos;
+  return r;
+
+value_overflow_stepback:
+  --pos;
+value_overflow:
+  r = u1;
+  errno = E2BIG;
+  *pstr = pos;
+  return r;
+}
+
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  return fio___atol10u_with_prefix(0, pstr);
+}
+
+/** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
+FIO_IFUNC uint64_t fio___atol16u_with_prefix(uint64_t r, char **pstr) {
+  size_t d;
+  unsigned char *p = (unsigned char *)*pstr;
+  p += ((p[0] == '0') & ((p[1] | 32) == 'x')) << 1;
+  if ((d = fio_c2i(*p)) > 15)
+    goto possible_misread;
+  for (;;) {
+    r |= d;
+    ++p;
+    d = (size_t)fio_c2i(*p);
+    if (d > 15)
+      break;
+    if ((r & UINT64_C(0xF000000000000000))) {
+      errno = E2BIG;
+      break;
+    }
+    r <<= 4;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    p += (*p == '_'); /* allow '_' as a divider. */
+#endif
+  }
+  *pstr = (char *)p;
+  return r;
+possible_misread:
+  /* if 0x was read, move to X. */
+  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
   return r;
 }
 
@@ -4141,6 +4289,9 @@ SFUNC uint64_t fio_atol16u(char **pstr) {
       break;
     }
     r <<= 4;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    p += (*p == '_'); /* allow '_' as a divider. */
+#endif
   }
   *pstr = (char *)p;
   return r;
@@ -4156,12 +4307,30 @@ SFUNC uint64_t fio_atol_bin(char **pstr) {
   size_t d;
   *pstr += (**pstr == '0');
   *pstr += (**pstr | 32) == 'b' && ((size_t)(pstr[0][1]) - (size_t)'0') < 2;
+  for (; (((uintptr_t)*pstr & 4095) < 4089);) { /* respect page boundary */
+    uint64_t tmp = fio_buf2u64_be(*pstr);       /* may overflow */
+    tmp -= 0x0101010101010101ULL * '0';
+    if (tmp & (~0x0101010101010101ULL))
+      break;
+    tmp |= tmp >> 7;
+    tmp |= tmp >> 14;
+    tmp |= tmp >> 28;
+    tmp &= 0xFF;
+    r <<= 8;
+    r |= tmp;
+    *pstr += 8;
+    if ((r & UINT64_C(0xFF00000000000000)))
+      break;
+  }
   while ((d = (size_t)((unsigned char)(**pstr)) - (size_t)'0') < 2) {
     r <<= 1;
     r |= d;
     ++*pstr;
     if ((r & UINT64_C(0x8000000000000000)))
       break;
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    *pstr += (**pstr == '_') | (**pstr == '.'); /* allow as a dividers */
+#endif
   }
   if ((d = (size_t)(**pstr) - (size_t)'0') < 2)
     errno = E2BIG;
@@ -4198,44 +4367,36 @@ fio_atol
 ***************************************************************************** */
 
 SFUNC int64_t fio_atol(char **pstr) {
+  static uint64_t (*const fn[])(char **) = {
+      fio_atol10u,
+      fio_atol8u,
+      fio_atol_bin,
+      fio_atol16u,
+  };
   if (!pstr || !(*pstr))
     return 0;
-  uint64_t v = 0;
-  uint64_t (*fn)(char **) = fio_atol10u;
+  union {
+    uint64_t u64;
+    int64_t i64;
+  } u = {0};
   char *p = *pstr;
-  unsigned inv = (p[0] == '-');
-  p += inv;
-  char *const s = p;
-  switch (*p) {
-  case 'x': /* fall through */
-  case 'X': fn = fio_atol16u; goto compute;
-  case 'b': /* fall through */
-  case 'B': fn = fio_atol_bin; goto compute;
-  case '0':
-    switch (p[1]) {
-    case 'x': /* fall through */
-    case 'X': fn = fio_atol16u; goto compute;
-    case 'b': /* fall through */
-    case 'B': fn = fio_atol_bin; goto compute;
-    case '0': /* fall through */
-    case '1': /* fall through */
-    case '2': /* fall through */
-    case '3': /* fall through */
-    case '4': /* fall through */
-    case '5': /* fall through */
-    case '6': /* fall through */
-    case '7': fn = fio_atol8u;
-    }
-  }
-compute:
-  v = fn(&p);
-  if (p != s)
+
+  uint32_t neg = 0, base = 0;
+  neg = (p[0] == '-');
+  p += (neg | (p[0] == '+'));
+
+  base += (p[0] == '0');             /* oct */
+  p += base;                         /* consume '0' */
+  base += ((p[0] | 32) == 'b');      /* binary */
+  base += ((p[0] | 32) == 'x') << 1; /* hex */
+  p += (base > 1);                   /* consume 'b' or 'x' */
+  char *const s = p;                 /* mark starting point */
+  u.u64 = fn[base](&p);              /* convert string to unsigned long long */
+  if (p != s || base == 1)           /* false oct base, a single '0'? */
     *pstr = p;
-  if (fn == fio_atol10u)
-    return fio_u2i_limit(v, inv);
-  if (!inv) /* sign embedded in the representation */
-    return (int64_t)v;
-  return fio_u2i_limit(v, inv);
+  if ((neg | !base)) /* if base 10 or negative, treat signed bit as overflow */
+    return fio_u2i_limit(u.u64, neg);
+  return u.i64;
 }
 
 /* *****************************************************************************
@@ -4370,6 +4531,232 @@ is_inifinity:
 is_nan:
   fio_memcpy4(dest, "NaN");
   return 3;
+}
+
+/* *****************************************************************************
+fio_aton
+***************************************************************************** */
+/** Returns a power of 10. Supports values up to 1.0e308. */
+FIO_IFUNC long double fio___aton_pow10(uint64_t e10) {
+  // clang-format off
+#define fio___aton_pow10_map_row(i) 1.0e##i##0L, 1.0e##i##1L, 1.0e##i##2L, 1.0e##i##3L, 1.0e##i##4L, 1.0e##i##5L, 1.0e##i##6L, 1.0e##i##7L, 1.0e##i##8L, 1.0e##i##9L
+  static const long double pow_map[] = {
+      fio___aton_pow10_map_row(0),  fio___aton_pow10_map_row(1),  fio___aton_pow10_map_row(2),  fio___aton_pow10_map_row(3),  fio___aton_pow10_map_row(4),
+      fio___aton_pow10_map_row(5),  fio___aton_pow10_map_row(6),  fio___aton_pow10_map_row(7),  fio___aton_pow10_map_row(8),  fio___aton_pow10_map_row(9),
+      fio___aton_pow10_map_row(10), fio___aton_pow10_map_row(11), fio___aton_pow10_map_row(12), fio___aton_pow10_map_row(13), fio___aton_pow10_map_row(14),
+      fio___aton_pow10_map_row(15), fio___aton_pow10_map_row(16), fio___aton_pow10_map_row(17), fio___aton_pow10_map_row(18), fio___aton_pow10_map_row(19),
+      fio___aton_pow10_map_row(20), fio___aton_pow10_map_row(21), fio___aton_pow10_map_row(22), fio___aton_pow10_map_row(23), fio___aton_pow10_map_row(24),
+      fio___aton_pow10_map_row(25), fio___aton_pow10_map_row(26), fio___aton_pow10_map_row(27), fio___aton_pow10_map_row(28), fio___aton_pow10_map_row(29),
+      1.0e300L, 1.0e301L, 1.0e302L, 1.0e303L, 1.0e304L, 1.0e305L, 1.0e306L, 1.0e307L, 1.0e308L, // clang-format on
+  };
+#undef fio___aton_pow10_map_row
+  if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
+    return pow_map[e10];
+  return powl(10, e10); /* return infinity? */
+}
+
+/** Returns a power of 10. Supports values up to 1.0e-308. */
+FIO_IFUNC long double fio___aton_pow10n(uint64_t e10) {
+  // clang-format off
+#define fio___aton_pow10_map_row(i) 1.0e-##i##0L, 1.0e-##i##1L, 1.0e-##i##2L, 1.0e-##i##3L, 1.0e-##i##4L, 1.0e-##i##5L, 1.0e-##i##6L, 1.0e-##i##7L, 1.0e-##i##8L, 1.0e-##i##9L
+  static const long double pow_map[] = {
+      fio___aton_pow10_map_row(0),  fio___aton_pow10_map_row(1),  fio___aton_pow10_map_row(2),  fio___aton_pow10_map_row(3),  fio___aton_pow10_map_row(4),
+      fio___aton_pow10_map_row(5),  fio___aton_pow10_map_row(6),  fio___aton_pow10_map_row(7),  fio___aton_pow10_map_row(8),  fio___aton_pow10_map_row(9),
+      fio___aton_pow10_map_row(10), fio___aton_pow10_map_row(11), fio___aton_pow10_map_row(12), fio___aton_pow10_map_row(13), fio___aton_pow10_map_row(14),
+      fio___aton_pow10_map_row(15), fio___aton_pow10_map_row(16), fio___aton_pow10_map_row(17), fio___aton_pow10_map_row(18), fio___aton_pow10_map_row(19),
+      fio___aton_pow10_map_row(20), fio___aton_pow10_map_row(21), fio___aton_pow10_map_row(22), fio___aton_pow10_map_row(23), fio___aton_pow10_map_row(24),
+      fio___aton_pow10_map_row(25), fio___aton_pow10_map_row(26), fio___aton_pow10_map_row(27), fio___aton_pow10_map_row(28), fio___aton_pow10_map_row(29),
+      1.0e-300L, 1.0e-301L, 1.0e-302L, 1.0e-303L, 1.0e-304L, 1.0e-305L, 1.0e-306L, 1.0e-307L, 1.0e-308L, // clang-format on
+  };
+#undef fio___aton_pow10_map_row
+  if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
+    return pow_map[e10];
+  return powl(10, (int64_t)(0 - e10)); /* return zero? */
+}
+
+FIO_SFUNC fio_aton_s fio_aton(char **pstr) {
+  fio_aton_s r = {0};
+  uint64_t (*fn)(char **) = fio_atol10u;
+  long double dbl = 0, dbl_tail = 0, dbl_dot = 0;
+
+  const uint8_t *p = (uint8_t *)*pstr;
+  const uint8_t *tail_start = NULL, *tail_end = NULL, *skip_end = NULL,
+                *dot = NULL, *dot_finish = NULL;
+  uint64_t before_dot = 0, tail = 0, after_dot = 0, expo = 0;
+  size_t head_expo = 0, tail_expo = 0, dot_expo = 0;
+  bool hex = 0, bin = 0, oct = 0, inv = 0, expo_inv = 0, expo_is_p = 0,
+       has_tail = 0, has_dot = 0;
+  uint8_t base = 10;
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+    ++p;
+  inv = (p[0] == '-');
+  p += (inv | (p[0] == '+'));
+
+  switch (p[0]) {
+  case '0':
+    ++p;
+    switch (p[0]) {
+    case '0': /* fall through*/
+    case '1': /* fall through*/
+    case '2': /* fall through*/
+    case '3': /* fall through*/
+    case '4': /* fall through*/
+    case '5': /* fall through*/
+    case '6': /* fall through*/
+    case '7':
+      base = 8;
+      oct = 1;
+      fn = fio_atol8u;
+      break;
+    case 'X': /* fall through*/
+    case 'x':
+      ++p;
+      hex = 1;
+      base = 16;
+      fn = fio_atol16u;
+      break;
+    case 'B': /* fall through*/
+    case 'b':
+      bin = 1;
+      base = 2;
+      fn = fio_atol_bin;
+      ++p;
+      ;
+    case '.': break; /* decimal */
+    default: --p; break;
+    }
+    break;
+  case '.': /* fall through*/
+  case '1': /* fall through*/
+  case '2': /* fall through*/
+  case '3': /* fall through*/
+  case '4': /* fall through*/
+  case '5': /* fall through*/
+  case '6': /* fall through*/
+  case '7': /* fall through*/
+  case '8': /* fall through*/
+  case '9': /* fall through*/ break;
+  case 'I': /* fall through*/
+  case 'i': goto is_infinity;
+  case 'N': /* fall through*/
+  case 'n': goto is_nan;
+  case 'X': /* fall through*/
+  case 'x':
+    ++p;
+    base = 16;
+    fn = fio_atol16u;
+    hex = 1;
+    break;
+  case 'B': /* fall through*/
+  case 'b':
+    bin = 1;
+    base = 2;
+    fn = fio_atol_bin;
+    ++p;
+    ;
+  default: return r /* invalid input */;
+  }
+
+  // FIO_LOG_INFO("Start Unsigned: %s", p);
+  before_dot = fn((char **)&p);
+  if (bin) {
+    r.u = before_dot;
+    r.is_float = ((p[0] | 32) == 'f');
+    p += r.is_float;
+    *pstr = (char *)p;
+    return r;
+  }
+  tail_start = p;
+  // FIO_LOG_INFO("Start Tail: %s", p);
+  tail = fn((char **)&p);
+  skip_end = tail_end = p;
+  has_tail = (p != tail_start);
+  do {
+    skip_end = p;
+    fn((char **)&p);
+  } while (skip_end != p);
+  // FIO_LOG_INFO("Start Dot: %s", p);
+  has_dot = (p[0] == '.');
+  if (has_dot) {
+    ++p;
+    dot = p;
+    after_dot = fn((char **)&p);
+    dot_finish = p;
+    while (fio_c2i(p[0]) < base)
+      ++p;
+  }
+  // FIO_LOG_INFO("Start Expo: %s", p);
+  if ((p[0] | 32) == 'e' || (expo_is_p = ((p[0] | 32) == 'p'))) {
+    has_dot = 1;
+    ++p;
+    expo_inv = (p[0] == '-');
+    p += expo_inv | (p[0] == '+');
+    expo = fio_atol10u((char **)&p);
+    while (fio_c2i(p[0]) < 10)
+      ++p;
+  }
+  *pstr = (char *)p;
+  if (!has_dot && !has_tail &&
+      (!(before_dot & ((uint64_t)1ULL << 63)) ||
+       (!inv && hex))) { /* is integer */
+    r.u = before_dot;
+    if (inv)
+      r.i = 0 - r.u;
+    return r;
+  }
+  dbl = (long double)before_dot;
+  dbl_tail = (long double)tail;
+  dbl_dot = (long double)after_dot;
+  head_expo = (size_t)(skip_end - tail_start);
+  tail_expo = (size_t)(skip_end - tail_end);
+  dot_expo = (size_t)(dot_finish - dot);
+  if (hex) {
+    dbl *= fio_u2d(1, (head_expo * 4));
+    dbl_tail *= fio_u2d(1, (tail_expo * 4));
+    dbl_dot /= fio_u2d(1, (dot_expo * 4));
+  } else if (oct) {
+    dbl *= fio_u2d(1, (head_expo * 3));
+    dbl_tail *= fio_u2d(1, (tail_expo * 3));
+    dbl_dot /= fio_u2d(1, (dot_expo * 3));
+  } else {
+    dbl *= fio___aton_pow10(head_expo);
+    if (tail)
+      dbl_tail *= fio___aton_pow10(tail_expo);
+    if (after_dot)
+      dbl_dot *= fio___aton_pow10n(dot_expo);
+  }
+  dbl += dbl_tail + dbl_dot;
+  if (expo_is_p) {
+    dbl *= fio_u2d(1, (int64_t)(expo_inv ? 0 - expo : expo));
+  } else if (expo) {
+    dbl *= (expo_inv ? fio___aton_pow10n : fio___aton_pow10)(expo);
+  }
+  r.is_float = 1;
+  r.f = (double)dbl;
+  r.u |= (uint64_t)inv << 63;
+  return r;
+
+is_infinity:
+  if ((p[1] | 32) == 'n' && (p[2] | 32) == 'f') { /* inf */
+    r.is_float = 1;
+    r.u = ((uint64_t)inv << 63) | ((uint64_t)2047ULL << 52);
+    p += 3 + ((fio_buf2u64u("infinity") ==
+               (fio_buf2u64u(p) | 0x2020202020202020ULL)) *
+              5);
+    *pstr = (char *)p;
+  } else
+    r.err = 1;
+  return r;
+
+is_nan:
+  if ((p[1] | 32) == 'a' && (p[2] | 32) == 'n') { /* nan */
+    r.is_float = 1;
+    r.i = ((~(uint64_t)0) >> (!inv));
+    p += 3;
+    *pstr = (char *)p;
+  } else
+    r.err = 1;
+  return r;
 }
 
 /* *****************************************************************************
@@ -8909,6 +9296,7 @@ Module Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ATOL               /* Development inclusion - ignore line */
 #define FIO_JSON               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -8922,26 +9310,60 @@ Module Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_JSON) && !defined(H___FIO_JSON_H)
-#define H___FIO_JSON_H
+#if defined(FIO_JSON) && !defined(H___FIO_JSON___H)
+#define H___FIO_JSON___H
 
 #ifndef FIO_JSON_MAX_DEPTH
 /** Maximum allowed JSON nesting level. Values above 64K might fail. */
 #define FIO_JSON_MAX_DEPTH 512
 #endif
 
-/** The JSON parser type. Memory must be initialized to 0 before first uses. */
-typedef struct {
-  /** level of nesting. */
-  uint32_t depth;
-  /** expectation bit flag: 0=key, 1=colon, 2=value, 4=comma/closure . */
-  uint8_t expect;
-  /** nesting bit flags - dictionary bit = 0, array bit = 1. */
-  uint8_t nesting[(FIO_JSON_MAX_DEPTH + 7) >> 3];
-} fio_json_parser_s;
+#ifndef FIO_JSON_USE_FIO_ATON
+#define FIO_JSON_USE_FIO_ATON 0
+#endif
 
-#define FIO_JSON_INIT                                                          \
-  { .depth = 0 }
+/** The JSON parser settings. */
+typedef struct {
+  /** NULL object was detected. Returns new object as `void *`. */
+  void *(*get_null)(void);
+  /** TRUE object was detected. Returns new object as `void *`. */
+  void *(*get_true)(void);
+  /** FALSE object was detected. Returns new object as `void *`. */
+  void *(*get_false)(void);
+  /** Number was detected (long long). Returns new object as `void *`. */
+  void *(*get_number)(int64_t i);
+  /** Float was detected (double).Returns new object as `void *`.  */
+  void *(*get_float)(double f);
+  /** (escaped) String was detected. Returns a new String as `void *`. */
+  void *(*get_string)(const void *start, size_t len);
+  /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
+  void *(*get_map)(void *ctx, void *at);
+  /** Array was detected. Returns ctx to array or NULL on error. */
+  void *(*get_array)(void *ctx, void *at);
+  /** Array was detected. Returns non-zero on error. */
+  int (*map_push)(void *ctx, void *key, void *value);
+  /** Array was detected. Returns non-zero on error. */
+  int (*array_push)(void *ctx, void *value);
+  /** Called when an array object (`ctx`) appears done. */
+  int (*array_finished)(void *ctx);
+  /** Called when a map object (`ctx`) appears done. */
+  int (*map_finished)(void *ctx);
+  /** Called when context is expected to be an array (i.e., fio_json_update). */
+  int (*is_array)(void *ctx);
+  /** Called when context is expected to be a map (i.e., fio_json_update). */
+  int (*is_map)(void *ctx);
+  /** Called for the `key` element in case of error or NULL value. */
+  void (*free_unused_object)(void *ctx);
+  /** the JSON parsing encountered an error - what to do with ctx? */
+  void *(*on_error)(void *ctx);
+} fio_json_parser_callbacks_s;
+
+/** The JSON return type. */
+typedef struct {
+  void *ctx;
+  size_t stop_pos;
+  int err;
+} fio_json_result_s;
 
 /**
  * The facil.io JSON parser is a non-strict parser, with support for trailing
@@ -8956,9 +9378,9 @@ typedef struct {
  * error or end of data). Stops as close as possible to the end of the buffer or
  * once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *parser,
-                            const char *buffer,
-                            const size_t len);
+SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *settings,
+                                       const char *json_string,
+                                       const size_t len);
 
 /* *****************************************************************************
 JSON Parsing - Implementation - Helpers and Callbacks
@@ -8970,427 +9392,563 @@ Note: a Helper API is provided for the parsing implementation.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/** common FIO_JSON callback function properties */
-#define FIO_JSON_CB static inline __attribute__((unused))
+// typedef struct {
+//   struct {
+//     uintptr_t start;
+//     uintptr_t end;
+//   } intructions[16];
+//   uint32_t count;
+// } fio___json_cb_queue_s;
 
-/* *****************************************************************************
-JSON Parsing - Helpers API
-***************************************************************************** */
+typedef struct {
+  fio_json_parser_callbacks_s cb;
+  void *ctx;
+  void *key;
+  const char *pos;
+  const char *end;
+  uint32_t depth;
+  uint32_t error;
+} fio___json_state_s;
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *parser);
+FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *parser);
+#if 0
+#define FIO_JSON___PRINT_STEP(s, step_name)                                    \
+  FIO_LOG_DEBUG2("JSON " step_name " starting at: %.*s",                       \
+                 (int)((s->end - s->pos) > 16 ? 16 : (s->end - s->pos)),       \
+                 s->pos)
+#else
+#define FIO_JSON___PRINT_STEP(s, step_name)
+#endif
 
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *parser);
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *parser);
-
-/* *****************************************************************************
-JSON Parsing - Implementation - Callbacks
-***************************************************************************** */
-
-/** a NULL object was detected */
-FIO_JSON_CB void fio_json_on_null(fio_json_parser_s *p);
-/** a TRUE object was detected */
-static inline void fio_json_on_true(fio_json_parser_s *p);
-/** a FALSE object was detected */
-FIO_JSON_CB void fio_json_on_false(fio_json_parser_s *p);
-/** a Number was detected (long long). */
-FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i);
-/** a Float was detected (double). */
-FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f);
-/** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void fio_json_on_string(fio_json_parser_s *p,
-                                    const void *start,
-                                    size_t len);
-/** a dictionary object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p);
-/** a dictionary object closure detected */
-FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p);
-/** an array object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_array(fio_json_parser_s *p);
-/** an array closure was detected */
-FIO_JSON_CB void fio_json_on_end_array(fio_json_parser_s *p);
-/** the JSON parsing is complete */
-FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p);
-/** the JSON parsing encountered an error */
-FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p);
-
-/* *****************************************************************************
-JSON Parsing - Implementation - Helpers and Parsing
-
-
-Note: static Callacks must be implemented in the C file that uses the parser
-***************************************************************************** */
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_array(fio_json_parser_s *p) {
-  return p->depth && fio_bit_get(p->nesting, p->depth);
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_in_object(fio_json_parser_s *p) {
-  return p->depth && !fio_bit_get(p->nesting, p->depth);
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_key(fio_json_parser_s *p) {
-  return fio_json_parser_is_in_object(p) && !p->expect;
-}
-
-/** Tests the state of the JSON parser. Returns 1 for true and 0 for false. */
-FIO_JSON_CB uint8_t fio_json_parser_is_value(fio_json_parser_s *p) {
-  return !fio_json_parser_is_key(p);
-}
-
-FIO_IFUNC const char *fio___json_skip_comments(const char *buffer,
-                                               const char *stop) {
-  if (*buffer == '#' ||
-      ((stop - buffer) > 2 && buffer[0] == '/' && buffer[1] == '/')) {
-    /* EOL style comment, C style or Bash/Ruby style*/
-    buffer = (const char *)FIO_MEMCHR(buffer + 1, '\n', stop - (buffer + 1));
-    return buffer;
+FIO_SFUNC int fio___json_move2next(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "white space");
+  while (s->pos < s->end) {
+    switch (*s->pos) { /* consume whitespace */
+    case 0x09:         /* fall through */
+    case 0x0A:         /* fall through */
+    case 0x0D:         /* fall through */
+    case 0x20: ++s->pos; continue;
+    }
+    return 0;
   }
-  if (((stop - buffer) > 3 && buffer[0] == '/' && buffer[1] == '*')) {
-    while ((buffer = (const char *)FIO_MEMCHR(buffer, '/', stop - buffer)) &&
-           buffer && ++buffer && buffer[-2] != '*')
-      ;
-    return buffer;
+  return (s->error = -1);
+}
+
+FIO_SFUNC void *fio___json_consume_infinit(fio___json_state_s *s,
+                                           _Bool negative) {
+  FIO_JSON___PRINT_STEP(s, "infinity");
+  if (s->pos + 7 < s->end) {
+    const uint64_t inf = fio_buf2u64u("infinity");
+    uint64_t tst = (fio_buf2u64u(s->pos) | (uint64_t)0x2020202020202020ULL);
+    if (tst == inf) {
+      s->pos += 8;
+      goto finish;
+    }
   }
+  if (s->pos + 2 < s->end) {
+    const uint16_t inf = fio_buf2u16u("nf");
+    uint16_t tst = (fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020U);
+    if (tst == inf) {
+      s->pos += 3;
+      goto finish;
+    }
+  }
+  s->error = 1;
+  return NULL;
+finish:
+  return s->cb.get_float(negative ? (INFINITY * -1) : INFINITY);
+}
+
+FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "number");
+#if FIO_JSON_USE_FIO_ATON
+  fio_aton_s aton = fio_aton((char **)&s->pos);
+  return aton.is_float ? s->cb.get_float(aton.f) : s->cb.get_number(aton.i);
+#else
+  const char *tst = s->pos;
+  uint64_t i;
+  double f;
+  _Bool negative = (tst[0] == '-') | (tst[0] == '+');
+  _Bool hex = 0;
+  _Bool binary = 0;
+  long ilimit = 19 + negative;
+  tst += negative;
+  if (tst + 1 > s->end)
+    goto buffer_overflow;
+  if ((tst[0] | 0x20) == 'i')
+    goto is_inifinity;
+  tst += (tst[0] == '0' && tst + 2 < s->end);
+  if ((tst[0] | 32) == 'x') {
+    hex = 1;
+    while ((tst < s->end) & ((tst[0] >= '0' & tst[0] <= '9') |
+                             ((tst[0] | 32) >= 'a' & (tst[0] | 32) <= 'f')))
+      ++tst;
+  } else if ((tst[0] | 32) == 'b') {
+    binary = 1;
+    ilimit = 66 + negative;
+    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '1')))
+      ++tst;
+  } else {
+    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '9')))
+      ++tst;
+  }
+  if (tst > (s->pos + ilimit) ||
+      ((tst < s->end) &&
+       (tst[0] == '.' || (tst[0] | 32) == 'e' || (tst[0] | 32) == 'p')))
+    goto is_float;
+  tst = s->pos;
+  s->pos += negative;
+  errno = 0;
+  i = (hex              ? fio_atol16u((char **)&s->pos)
+       : binary         ? fio_atol_bin((char **)&s->pos)
+       : *s->pos == '0' ? fio_atol8u((char **)&s->pos)
+                        : fio_atol10u((char **)&s->pos));
+  if (errno == E2BIG || (((uint64_t)(1 ^ hex ^ binary) << 63) & i))
+    goto is_float_from_error;
+  // s->error = (errno == E2BIG);
+  return s->cb.get_number(fio_u2i_limit(i, negative));
+is_float_from_error:
+  s->pos = tst;
+  errno = 0;
+
+is_float:
+  f = fio_atof((char **)&s->pos);
+  s->error = (errno == E2BIG);
+  return s->cb.get_float(f);
+
+buffer_overflow:
+  s->error = 1;
+  return NULL;
+is_inifinity:
+  ++s->pos;
+  return fio___json_consume_infinit(s, negative);
+#endif /* FIO_JSON_USE_FIO_ATON */
+}
+
+FIO_SFUNC void *fio___json_consume_string(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "string");
+  const char *start = ++s->pos;
+  for (;;) {
+    while (s->pos < s->end && *s->pos != '"' && *s->pos != '\\')
+      ++s->pos;
+    if (s->pos >= s->end)
+      break;
+    if (*s->pos == '\\') {
+      s->pos += 2;
+      continue;
+    }
+    return s->cb.get_string(start, (s->pos++) - start);
+  }
+  s->error = 1;
   return NULL;
 }
 
-FIO_IFUNC const char *fio___json_consume_string(fio_json_parser_s *p,
-                                                const char *buffer,
-                                                const char *stop) {
-  const char *start = ++buffer;
+FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "map");
+  void *old = s->ctx;
+  void *old_key = s->key;
+  void *map = s->cb.get_map(s, s->key);
+  s->ctx = map;
+  s->key = NULL;
+  if (++s->depth == FIO_JSON_MAX_DEPTH)
+    goto too_deep;
   for (;;) {
-    buffer = (const char *)FIO_MEMCHR(buffer, '\"', stop - buffer);
-    if (!buffer)
-      return NULL;
-    int escaped = 1;
-    while (buffer[0 - escaped] == '\\')
-      ++escaped;
-    if (escaped & 1)
+    ++s->pos;
+    if (fio___json_move2next(s))
       break;
-    ++buffer;
+    if (*s->pos == '}')
+      break;
+    s->key = fio___json_consume(s);
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ':')
+      break;
+    ++s->pos;
+    if (fio___json_move2next(s))
+      break;
+    void *value = fio___json_consume(s);
+    s->error |= s->cb.map_push(s->ctx, s->key, value);
+    s->key = NULL;
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ',')
+      break;
   }
-  fio_json_on_string(p, start, buffer - start);
-  return buffer + 1;
-}
-
-FIO_IFUNC const char *fio___json_consume_number(fio_json_parser_s *p,
-                                                const char *buffer,
-                                                const char *stop) {
-
-  const char *const was = buffer;
-  errno = 0; /* testo for E2BIG on number parsing */
-  long long i = fio_atol((char **)&buffer);
-
-  if (buffer < stop &&
-      ((*buffer) == '.' || (*buffer | 32) == 'e' || (*buffer | 32) == 'x' ||
-       (*buffer | 32) == 'p' || (*buffer | 32) == 'i' || errno)) {
-    buffer = was;
-    double f = fio_atof((char **)&buffer);
-    fio_json_on_float(p, f);
+  if (s->key) {
+    s->error = 1;
+    s->cb.free_unused_object(s->key);
+  } else if (*s->pos != '}' || s->error) {
+    s->error = 1;
   } else {
-    fio_json_on_number(p, i);
+    ++s->pos;
   }
-  return buffer;
+  --s->depth;
+  s->ctx = old;
+  s->key = old_key;
+  s->error |= s->cb.map_finished(map);
+  return map;
+too_deep:
+  s->ctx = old;
+  s->key = old_key;
+  s->error = 1;
+  --s->depth;
+  return map;
+}
+FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "array");
+  void *old = s->ctx;
+  void *array = s->ctx = s->cb.get_array(s, s->key);
+  if (++s->depth == FIO_JSON_MAX_DEPTH)
+    goto too_deep;
+  for (;;) {
+    ++s->pos;
+    if (fio___json_move2next(s))
+      break;
+    if (*s->pos == ']')
+      break;
+    void *value = fio___json_consume(s);
+    s->error |= s->cb.array_push(s->ctx, value);
+    if (s->error || fio___json_move2next(s))
+      break;
+    if (*s->pos != ',')
+      break;
+  }
+  if (*s->pos != ']' || s->error) {
+    s->error = 1;
+  } else {
+    ++s->pos;
+  }
+  s->ctx = old;
+  --s->depth;
+  s->error |= s->cb.array_finished(array);
+  return array;
+too_deep:
+  s->ctx = old;
+  s->error = 1;
+  --s->depth;
+  return array;
+}
+FIO_SFUNC void *fio___json_consume_null(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "null");
+  const uint32_t wrd = fio_buf2u32u("null");
+  uint32_t data;
+  if (s->end - s->pos < 4)
+    goto on_error;
+  data = fio_buf2u32u(s->pos) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 4;
+  return s->cb.get_null();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_true(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "true");
+  const uint32_t wrd = fio_buf2u32u("true");
+  uint32_t data;
+  if (s->end - s->pos < 4)
+    goto on_error;
+  data = fio_buf2u32u(s->pos) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 4;
+  return s->cb.get_true();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_false(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "false");
+  const uint32_t wrd = fio_buf2u32u("alse");
+  uint32_t data;
+  if (s->end - s->pos < 5)
+    goto on_error;
+  data = fio_buf2u32u(s->pos + 1) | (uint32_t)0x20202020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 5;
+  return s->cb.get_false();
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC void *fio___json_consume_nan(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "nan");
+  const uint16_t wrd = fio_buf2u16u("an");
+  uint16_t data;
+  if (s->end - s->pos < 3)
+    goto on_error;
+  data = fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020;
+  if (data != wrd)
+    goto on_error;
+  s->pos += 3;
+  return s->cb.get_float(NAN);
+on_error:
+  s->error = 1;
+  return NULL;
+}
+FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "comment");
+  const size_t len = (size_t)(s->end - s->pos);
+  if (*s->pos == '#' || (len > 2 && s->pos[0] == '/' && s->pos[1] == '/')) {
+    /* EOL style comment, C style or Bash/Ruby style*/
+    const char *tmp = (const char *)FIO_MEMCHR(s->pos, '\n', len);
+    if (tmp) {
+      s->pos = tmp;
+      return 0;
+    }
+    s->error = 1;
+    return -1;
+  }
+  if ((len > 3 && s->pos[0] == '/' && s->pos[1] == '*')) {
+    const char *tmp = s->pos;
+    while (tmp < s->end &&
+           (tmp = (const char *)FIO_MEMCHR(s->pos, '/', s->end - tmp))) {
+      s->pos = ++tmp;
+      if (tmp[-2] == '*')
+        return 0;
+    }
+    s->error = 1;
+    return -1;
+  }
+  s->error = 1;
+  return -1;
 }
 
-FIO_IFUNC const char *fio___json_identify(fio_json_parser_s *p,
-                                          const char *buffer,
-                                          const char *stop) {
-  /* Use `break` to change separator requirement status.
-   * Use `continue` to keep separator requirement the same.
-   */
-  switch (*buffer) {
-  case 0x09: /* fall through */
-  case 0x0A: /* fall through */
-  case 0x0D: /* fall through */
-  case 0x20:
-    /* consume whitespace */
-    ++buffer;
-    while (buffer + 8 < stop && (buffer[0] == 0x20 || buffer[0] == 0x09 ||
-                                 buffer[0] == 0x0A || buffer[0] == 0x0D)) {
-      const uint64_t w = fio_buf2u64u(buffer);
-      const uint64_t w1 = 0x0101010101010101 * 0x09; /* '\t' (tab) */
-      const uint64_t w2 = 0x0101010101010101 * 0x0A; /* '\n' (new line) */
-      const uint64_t w3 = 0x0101010101010101 * 0x0D; /* '\r' (CR) */
-      const uint64_t w4 = 0x0101010101010101 * 0x20; /* ' '  (space) */
-      uint64_t b = fio_has_zero_byte64(w1 ^ w) | fio_has_zero_byte64(w2 ^ w) |
-                   fio_has_zero_byte64(w3 ^ w) | fio_has_zero_byte64(w4 ^ w);
-      if (b == 0x8080808080808080ULL) {
-        buffer += 8;
-        continue;
-      }
-      while ((b & UINT64_C(0x80))) {
-        b >>= 8;
-        ++buffer;
-      }
-      break;
-    }
-
-    return buffer;
-  case ',': /* comma separator */
-    if (!p->depth || !(p->expect & 4))
-      goto unexpected_separator;
-    ++buffer;
-    p->expect = (fio_bit_get(p->nesting, p->depth) << 1);
-    return buffer;
-  case ':': /* colon separator */
-    if (!p->depth || !(p->expect & 1))
-      goto unexpected_separator;
-    ++buffer;
-    p->expect = 2;
-    return buffer;
-    /*
-     *
-     * JSON Strings
-     *
-     */
-  case '"':
-    if (p->depth && (p->expect & ((uint8_t)5)))
-      goto missing_separator;
-    buffer = fio___json_consume_string(p, buffer, stop);
-    if (!buffer)
-      goto unterminated_string;
-    break;
-    /*
-     *
-     * JSON Objects
-     *
-     */
-  case '{':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (p->depth == FIO_JSON_MAX_DEPTH)
-      goto too_deep;
-    ++p->depth;
-    fio_bit_unset(p->nesting, p->depth);
-    fio_json_on_start_object(p);
-    p->expect = 0;
-    return buffer + 1;
-  case '}':
-    if (fio_bit_get(p->nesting, p->depth) || !p->depth || (p->expect & 3))
-      goto object_closure_unexpected;
-    fio_bit_unset(p->nesting, p->depth);
-    p->expect = 4; /* expect comma */
-    --p->depth;
-    fio_json_on_end_object(p);
-    return buffer + 1;
-    /*
-     *
-     * JSON Arrays
-     *
-     */
-  case '[':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (p->depth == FIO_JSON_MAX_DEPTH)
-      goto too_deep;
-    ++p->depth;
-    fio_json_on_start_array(p);
-    fio_bit_set(p->nesting, p->depth);
-    p->expect = 2;
-    return buffer + 1;
-  case ']':
-    if (!fio_bit_get(p->nesting, p->depth) || !p->depth)
-      goto array_closure_unexpected;
-    fio_bit_unset(p->nesting, p->depth);
-    p->expect = 4; /* expect comma */
-    --p->depth;
-    fio_json_on_end_array(p);
-    return buffer + 1;
-    /*
-     *
-     * JSON Primitives (true / false / null (NaN))
-     *
-     */
-  case 'N': /* NaN or null? - fall through */
-  case 'n':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 4 > stop || buffer[1] != 'u' || buffer[2] != 'l' ||
-        buffer[3] != 'l') {
-      if (buffer + 3 > stop || (buffer[1] | 32) != 'a' ||
-          (buffer[2] | 32) != 'n')
+void *fio___json_consume(fio___json_state_s *s) {
+  for (;;) {
+    FIO_JSON___PRINT_STEP(s, "consumption type test");
+    switch (*s->pos) {
+    case '+': /* fall through */
+    case '-': /* fall through */
+    case '0': /* fall through */
+    case '1': /* fall through */
+    case '2': /* fall through */
+    case '3': /* fall through */
+    case '4': /* fall through */
+    case '5': /* fall through */
+    case '6': /* fall through */
+    case '7': /* fall through */
+    case '8': /* fall through */
+    case '9': /* fall through */
+    case 'x': /* fall through */
+    case '.': /* fall through */
+    case 'e': /* fall through */
+    case 'E': return fio___json_consume_number(s);
+    case 'i': /* fall through */
+    case 'I': return fio___json_consume_infinit(s, 0);
+    case '"': return fio___json_consume_string(s);
+    case '{': return fio___json_consume_map(s);
+    case '[': return fio___json_consume_array(s);
+    case 'T': /* fall through */
+    case 't': return fio___json_consume_true(s);
+    case 'F': /* fall through */
+    case 'f': return fio___json_consume_false(s);
+    case 'N': /* fall through */
+    case 'n':
+      return (((s->pos[1] | 32) == 'u') ? fio___json_consume_null
+                                        : fio___json_consume_nan)(s);
+    case '#':
+    case '/':
+      if (fio___json_consume_comment(s)) {
+        s->error = 1;
         return NULL;
-      char *nan_str = (char *)"NaN";
-      fio_json_on_float(p, fio_atof(&nan_str));
-      buffer += 3;
-      break;
+      }
+      if (fio___json_move2next(s)) {
+        s->error = 1;
+        return NULL;
+      }
+      continue;
     }
-    fio_json_on_null(p);
-    buffer += 4;
-    break;
-  case 't': /* true */
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 4 > stop || buffer[1] != 'r' || buffer[2] != 'u' ||
-        buffer[3] != 'e')
-      return NULL;
-    fio_json_on_true(p);
-    buffer += 4;
-    break;
-  case 'f': /* false */
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    if (buffer + 5 > stop || buffer[1] != 'a' || buffer[2] != 'l' ||
-        buffer[3] != 's' || buffer[4] != 'e')
-      return NULL;
-    fio_json_on_false(p);
-    buffer += 5;
-    break;
-    /*
-     *
-     * JSON Numbers (Integers / Floats)
-     *
-     */
-  case '+': /* fall through */
-  case '-': /* fall through */
-  case '0': /* fall through */
-  case '1': /* fall through */
-  case '2': /* fall through */
-  case '3': /* fall through */
-  case '4': /* fall through */
-  case '5': /* fall through */
-  case '6': /* fall through */
-  case '7': /* fall through */
-  case '8': /* fall through */
-  case '9': /* fall through */
-  case 'x': /* fall through */
-  case '.': /* fall through */
-  case 'e': /* fall through */
-  case 'E': /* fall through */
-  case 'i': /* fall through */
-  case 'I':
-    if (p->depth && !(p->expect & 2))
-      goto missing_separator;
-    buffer = fio___json_consume_number(p, buffer, stop);
-    if (!buffer)
-      goto bad_number_format;
-    break;
-    /*
-     *
-     * Comments
-     *
-     */
-  case '#': /* fall through */
-  case '/': /* fall through */
-    return fio___json_skip_comments(buffer, stop);
-    /*
-     *
-     * Unrecognized Data Handling
-     *
-     */
-  default:
-    FIO_LOG_DEBUG("unrecognized JSON identifier at:\n%.*s",
-                  ((stop - buffer > 48) ? (int)48 : ((int)(stop - buffer))),
-                  buffer);
+    s->error = 1;
     return NULL;
   }
-  /* p->expect should be either 0 (key) or 2 (value) */
-  p->expect = (p->expect << 1) + ((p->expect ^ 2) >> 1);
-  return buffer;
-
-missing_separator:
-  FIO_LOG_DEBUG("missing JSON separator '%c' at (%d):\n%.*s",
-                (p->expect == 2 ? ':' : ','),
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-unexpected_separator:
-  FIO_LOG_DEBUG("unexpected JSON separator at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-unterminated_string:
-  FIO_LOG_DEBUG("unterminated JSON string at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-bad_number_format:
-  FIO_LOG_DEBUG("bad JSON numeral format at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-array_closure_unexpected:
-  FIO_LOG_DEBUG("JSON array closure unexpected at:\n%.*s",
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-object_closure_unexpected:
-  FIO_LOG_DEBUG("JSON object closure unexpected at (%d):\n%.*s",
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
-too_deep:
-  FIO_LOG_DEBUG("JSON object nesting too deep at:\n%.*s",
-                p->expect,
-                ((stop - buffer > 48) ? 48 : ((int)(stop - buffer))),
-                buffer);
-  fio_json_on_error(p);
-  return NULL;
 }
 
+static int fio___json_callback_noop(void *ctx) {
+  return 0;
+  (void)ctx;
+}
+static void *fio___json_callback_noop2(void *ctx) { return ctx; }
+
+FIO_SFUNC int fio___json_callbacks_validate(fio_json_parser_callbacks_s *cb) {
+  if (!cb)
+    goto is_invalid;
+  if (!cb->get_null)
+    goto is_invalid;
+  if (!cb->get_true)
+    goto is_invalid;
+  if (!cb->get_false)
+    goto is_invalid;
+  if (!cb->get_number)
+    goto is_invalid;
+  if (!cb->get_float)
+    goto is_invalid;
+  if (!cb->get_string)
+    goto is_invalid;
+  if (!cb->get_map)
+    goto is_invalid;
+  if (!cb->get_array)
+    goto is_invalid;
+  if (!cb->map_push)
+    goto is_invalid;
+  if (!cb->array_push)
+    goto is_invalid;
+  if (!cb->free_unused_object)
+    goto is_invalid;
+  if (!cb->array_finished)
+    cb->array_finished = fio___json_callback_noop;
+  if (!cb->map_finished)
+    cb->map_finished = fio___json_callback_noop;
+  if (!cb->is_array)
+    cb->is_array = fio___json_callback_noop;
+  if (!cb->is_map)
+    cb->is_map = fio___json_callback_noop;
+  if (!cb->on_error)
+    cb->on_error = fio___json_callback_noop2;
+  return 0;
+is_invalid:
+  return -1;
+}
 /**
  * Returns the number of bytes consumed. Stops as close as possible to the end
  * of the buffer or once an object parsing was completed.
  */
-SFUNC size_t fio_json_parse(fio_json_parser_s *p,
-                            const char *buffer,
-                            const size_t len) {
-  const char *start = buffer;
-  const char *stop = buffer + len;
-  const char *last;
+SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
+                                       const char *start,
+                                       const size_t len) {
+  fio_json_result_s r = {.stop_pos = 0, .err = 0};
+  fio___json_state_s state;
+  if (fio___json_callbacks_validate(callbacks))
+    goto missing_callback;
+
+  state = (fio___json_state_s){
+      .cb = callbacks[0],
+      .pos = start,
+      .end = start + len,
+  };
+
   /* skip BOM, if exists */
-  if (len >= 3 && buffer[0] == (char)0xEF && buffer[1] == (char)0xBB &&
-      buffer[2] == (char)0xBF) {
-    buffer += 3;
+  if (len >= 3 && state.pos[0] == (char)0xEF && state.pos[1] == (char)0xBB &&
+      state.pos[2] == (char)0xBF) {
+    state.pos += 3;
     if (len == 3)
       goto finish;
   }
-  /* loop until the first JSON data was read */
-  do {
-    last = buffer;
-    buffer = fio___json_identify(p, buffer, stop);
-    if (!buffer)
-      goto failed;
-  } while (!p->expect && buffer < stop);
-  /* loop until the JSON object (nesting) is closed */
-  while (p->depth && buffer < stop) {
-    last = buffer;
-    buffer = fio___json_identify(p, buffer, stop);
-    if (!buffer)
-      goto failed;
-  }
-  if (!p->depth) {
-    p->expect = 0;
-    fio_json_on_json(p);
-  }
+  if (fio___json_move2next(&state))
+    goto finish;
+  r.ctx = fio___json_consume(&state);
+  r.err = state.error;
+  r.stop_pos = state.pos - start;
+  if (state.error)
+    goto failed;
 finish:
-  return buffer - start;
+  return r;
 failed:
-  FIO_LOG_DEBUG("JSON parsing failed after:\n%.*s",
-                ((stop - last > 48) ? 48 : ((int)(stop - last))),
-                last);
-  return last - start;
+  FIO_LOG_DEBUG(
+      "JSON parsing failed after:\n%.*s",
+      ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
+      state.pos);
+  r.ctx = callbacks->on_error(r.ctx);
+  return r;
+
+missing_callback:
+  FIO_LOG_ERROR("JSON parser missing a critical callback!");
+  r.err = 1;
+  return r;
 }
 
+/** Dictionary was detected. Returns ctx to hash map or NULL on error. */
+FIO_SFUNC void *fio___json_parse_update_get_map(void *ctx, void *at) {
+  void **ex_data = (void **)ctx;
+  fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
+  ctx = ex_data[1];
+  fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
+  s->cb.get_map = cb->get_map;
+  s->cb.get_array = cb->get_array;
+  if (ctx && !s->cb.is_map(ctx))
+    return NULL;
+  else if (!ctx)
+    ctx = cb->get_map(ctx, at);
+  return ctx;
+}
+/** Array was detected. Returns ctx to array or NULL on error. */
+FIO_SFUNC void *fio___json_parse_update_get_array(void *ctx, void *at) {
+  void **ex_data = (void **)ctx;
+  fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
+  ctx = ex_data[1];
+  fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
+  s->cb.get_map = cb->get_map;
+  s->cb.get_array = cb->get_array;
+  if (ctx && !s->cb.is_array(ctx))
+    return NULL;
+  else if (!ctx)
+    ctx = cb->get_array(ctx, at);
+
+  return ctx;
+}
+
+/**
+ * Use only when `ctx` is an object and JSON data is wrapped in an object (of
+ * the same type).
+ *
+ * i.e., update an array or hash map.
+ */
+SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
+                                              void *ctx,
+                                              const char *start,
+                                              const size_t len) {
+  fio_json_result_s r = {.stop_pos = 0, .err = 0};
+  fio_json_parser_callbacks_s callbacks;
+  callbacks.get_map = fio___json_parse_update_get_map;
+  callbacks.get_array = fio___json_parse_update_get_array;
+  fio___json_state_s state;
+  void *ex_data[3] = {s, ctx, &state};
+
+  if (!s->is_array)
+    goto missing_callback;
+  if (!s->is_map)
+    goto missing_callback;
+  if (fio___json_callbacks_validate(s))
+    goto missing_callback;
+
+  callbacks = *s;
+  state = (fio___json_state_s){
+      .cb = callbacks,
+      .pos = start,
+      .end = start + len,
+  };
+  state.ctx = (void *)ex_data;
+  /* skip BOM, if exists */
+  if (len >= 3 && state.pos[0] == (char)0xEF && state.pos[1] == (char)0xBB &&
+      state.pos[2] == (char)0xBF) {
+    state.pos += 3;
+    if (len == 3)
+      goto finish;
+  }
+  if (fio___json_move2next(&state))
+    goto finish;
+  r.ctx = fio___json_consume(&state);
+  r.err = state.error;
+  r.stop_pos = state.pos - start;
+  if (state.error)
+    goto failed;
+finish:
+  return r;
+failed:
+  FIO_LOG_DEBUG(
+      "JSON parsing failed after:\n%.*s",
+      ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
+      state.pos);
+  r.ctx = s->on_error(r.ctx);
+  return r;
+missing_callback:
+  FIO_LOG_ERROR("JSON parser missing a critical callback!");
+  r.err = 1;
+  return r;
+}
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_JSON
 #endif /* FIO_JSON */
@@ -18737,21 +19295,40 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     return r;
   if (dest->len + len >= dest->capa) { /* reserve only what we need */
     reduced = 0;
+#if 0
     const char *tmp = (const char *)src_;
     const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
-    for (;;) {
-      tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
-      if (!tmp)
-        break;
-      size_t step = 1;
-      step += ((tmp[1] == 'x') << 1); /* step == 3 */
-      step += (tmp[1] == 'u');        /* UTF-8 output <= 3 */
-      reduced += step;
-      tmp += step + 1;
-      if (tmp + 1 > stop)
-        break;
+    while ((size_t)(stop - tmp) > 65) {
+      for (size_t i = 0; i < 64; ++i) {
+        uint8_t t0 = tmp[i];
+        uint8_t t1 = tmp[i + 1] | 32;
+        size_t s1 = (t0 == '\\');            /* reduce the escape char  */
+        size_t s2 = (s1 & (t1 == 'x')) << 1; /* hex is at least 4 chars */
+        size_t s3 = (s1 & (t1 == 'u'));      /* UTF-8 */
+        reduced += (s1 + s2 + s3);
+      }
+      tmp += 64;
     }
-    FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too long");
+    FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
+#else
+    if (len > 127) { /* skip memory savings on small strings */
+      const char *tmp = (const char *)src_;
+      const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
+      for (;;) {
+        tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
+        if (!tmp)
+          break;
+        size_t step = 1;
+        step += (((tmp[1] | 32) == 'x') << 1); /* step == 3 */
+        step += ((tmp[1] | 32) == 'u');        /* UTF-8 output <= 3 */
+        reduced += step;
+        tmp += step + 1;
+        if (tmp + 1 > stop)
+          break;
+      }
+      FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
+    }
+#endif
     reduced = len - reduced;
     if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
       r = -1;
@@ -25640,10 +26217,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_mini)(
     FIO_NAME(FIO_MAP_NAME, s) * o,
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   if (!o->bits)
     return r;
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
@@ -25673,10 +26251,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_med)(
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
   static int guard_print = 0;
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const uint32_t mask = FIO_MAP_CAPA(o->bits) - 1;
   uint32_t guard = FIO_MAP_ATTACK_LIMIT + 1;
@@ -25737,10 +26316,11 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     FIO_NAME(FIO_MAP_NAME, __o_node_s) * node) {
   // FIO_LOG_INFO("seek as linear array for h %llu", node->hash);
   static int guard_print = 0;
-  fio___map_node_info_s r = {(uint32_t)-1,
-                             (uint32_t)-1,
-                             (uint32_t)-1,
-                             FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
+  fio___map_node_info_s r = {
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)-1,
+      (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint32_t mask = (FIO_MAP_CAPA(o->bits) - 1) & (~(uint32_t)7ULL);
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const size_t attempt_limit = o->bits + 7;
@@ -42565,6 +43145,9 @@ FIO_IFUNC intptr_t FIO_NAME2(fiobj, i)(FIOBJ o);
 /** Returns a float (double) representation for any FIOBJ object. */
 FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o);
 
+/** Calculates an object's hash value for a specific hash map object. */
+FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ object_key);
+
 /* *****************************************************************************
 FIOBJ Containers (iteration)
 ***************************************************************************** */
@@ -42909,57 +43492,36 @@ FIOBJ Hash Maps
 #define FIO_MAP_KEY_COPY(dest, o) (dest = fiobj_dup(o))
 #define FIO_MAP_KEY_DESTROY(o)    fiobj_free(o)
 #define FIO_MAP_VALUE             FIOBJ
+#define FIO_MAP_HASH_FN(o)        FIO_NAME2(fiobj, hash)(o)
 #define FIO_MAP_VALUE_DESTROY(o)  fiobj_free(o)
 #define FIO_MAP_VALUE_DISCARD(o)  fiobj_free(o)
 #define FIO_PTR_TAG(p)            FIOBJ_PTR_TAG(p, FIOBJ_T_HASH)
 #define FIO_PTR_UNTAG(p)          FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_VALIDATE(p)   (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_HASH)
 #define FIO_PTR_TAG_TYPE          FIOBJ
+/* TODO! auto-hash object value */
 #include FIO_INCLUDE_FILE
-/** Calculates an object's hash value for a specific hash map object. */
-FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ object_key);
-
-/** Inserts a value to a hash map, with a default hash value calculation. */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set2)(FIOBJ hash, FIOBJ key, FIOBJ value);
-
-/**
- * Inserts a value to a hash map, with a default hash value calculation.
- *
- * If the key already exists in the Hash Map, the value will be freed instead.
- */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set_if_missing2)(FIOBJ hash, FIOBJ key, FIOBJ value);
-
-/** Finds a value in a hash map, with a default hash value calculation. */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(FIOBJ hash,
-                                                                   FIOBJ key);
-
-/** Removes a value from a hash map, with a default hash value calculation. */
-FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove2)(FIOBJ hash, FIOBJ key, FIOBJ *old);
-
 /**
  * Sets a value in a hash map, allocating the key String and automatically
  * calculating the hash value.
  */
 FIO_IFUNC
 FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-               set3)(FIOBJ hash, const char *key, size_t len, FIOBJ value);
+               set2)(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 
 /**
  * Finds a value in the hash map, using a temporary String and automatically
  * calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         get3)(FIOBJ hash, const char *buf, size_t len);
+                         get2)(FIOBJ hash, const char *buf, size_t len);
 
 /**
  * Removes a value in a hash map, using a temporary String and automatically
  * calculating the hash value.
  */
 FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove3)(FIOBJ hash,
+                       remove2)(FIOBJ hash,
                                 const char *buf,
                                 size_t len,
                                 FIOBJ *old);
@@ -43460,35 +44022,31 @@ FIOBJ Hash Maps
 ***************************************************************************** */
 
 /** Calculates an object's hash value for a specific hash map object. */
-FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
+FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ o) {
+  uint64_t seed = (uint64_t)(uintptr_t)&FIO_NAME2(fiobj, hash);
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
-    return fio_risky_hash(&o,
-                          sizeof(o),
-                          (uint64_t)(uintptr_t)target_hash + (uintptr_t)o);
+    return fio_risky_hash(&o, sizeof(o), seed + (uintptr_t)o);
   case FIOBJ_T_NUMBER: {
     uintptr_t tmp = FIO_NAME2(fiobj, i)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), seed);
   }
   case FIOBJ_T_FLOAT: {
     double tmp = FIO_NAME2(fiobj, f)(o);
-    return fio_risky_hash(&tmp, sizeof(tmp), (uint64_t)(uintptr_t)target_hash);
+    return fio_risky_hash(&tmp, sizeof(tmp), seed);
   }
   case FIOBJ_T_STRING: /* fall through */
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
-                    hash)(o, (uint64_t)(uintptr_t)target_hash);
+    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), hash)(o, seed);
   case FIOBJ_T_ARRAY: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
-    h += fio_risky_hash(&h,
-                        sizeof(h),
-                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_ARRAY);
+    h += fio_risky_hash(&h, sizeof(h), seed + FIOBJ_T_ARRAY);
     {
       FIOBJ *a = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), ptr)(o);
       const size_t count =
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
       if (a) {
         for (size_t i = 0; i < count; ++i) {
-          h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_ARRAY + i, a[i]);
+          h += FIO_NAME2(fiobj, hash)(a[i]);
         }
       }
     }
@@ -43496,59 +44054,20 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ target_hash, FIOBJ o) {
   }
   case FIOBJ_T_HASH: {
     uint64_t h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-    size_t c = 0;
-    h += fio_risky_hash(&h,
-                        sizeof(h),
-                        (uint64_t)(uintptr_t)target_hash + FIOBJ_T_HASH);
+    h += fio_risky_hash(&h, sizeof(h), seed + FIOBJ_T_HASH);
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, i) {
       h += i.hash;
-      h += FIO_NAME2(fiobj, hash)(target_hash + FIOBJ_T_HASH + (c++), i.value);
+      h += FIO_NAME2(fiobj, hash)(i.value);
     }
     return h;
   }
   case FIOBJ_T_OTHER: {
     /* TODO: can we avoid "stringifying" the object? */
     fio_str_info_s tmp = (*fiobj_object_metadata(o))->to_s(o);
-    return fio_risky_hash(tmp.buf, tmp.len, (uint64_t)(uintptr_t)target_hash);
+    return fio_risky_hash(tmp.buf, tmp.len, seed);
   }
   }
   return 0;
-}
-
-/** Inserts a value to a hash map, with a default hash value calculation. */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set2)(FIOBJ hash, FIOBJ key, FIOBJ value) {
-  return FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      set)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, value, NULL);
-}
-
-/**
- * Inserts a value to a hash map, with a default hash value calculation.
- *
- * If the key already exists in the Hash Map, the value will be freed instead.
- */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set_if_missing2)(FIOBJ hash, FIOBJ key, FIOBJ value) {
-  return FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      set_if_missing)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, value);
-}
-
-/** Finds a value in a hash map, automatically calculating the hash value. */
-FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(FIOBJ hash,
-                                                                   FIOBJ key) {
-  if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH)
-    return FIOBJ_INVALID;
-  return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                  get)(hash, FIO_NAME2(fiobj, hash)(hash, key), key);
-}
-
-/** Removes a value from a hash map, with a default hash value calculation. */
-FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove2)(FIOBJ hash, FIOBJ key, FIOBJ *old) {
-  return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                  remove)(hash, FIO_NAME2(fiobj, hash)(hash, key), key, old);
 }
 
 /**
@@ -43556,18 +44075,14 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         set3)(FIOBJ hash,
+                         set2)(FIOBJ hash,
                                const char *key,
                                size_t len,
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
   FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
-  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                     set)(hash,
-                          fio_risky_hash(key, len, (uint64_t)(uintptr_t)hash),
-                          tmp,
-                          value,
-                          NULL);
+  FIOBJ v =
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(hash, tmp, value, NULL);
   fiobj_free(tmp);
   return v;
 }
@@ -43577,13 +44092,11 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * automatically calculating the hash value.
  */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                         get3)(FIOBJ hash, const char *buf, size_t len) {
+                         get2)(FIOBJ hash, const char *buf, size_t len) {
   if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH)
     return FIOBJ_INVALID;
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  FIOBJ v = FIO_NAME(
-      FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-      get)(hash, fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash), tmp);
+  FIOBJ v = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(hash, tmp);
   return v;
 }
 
@@ -43592,16 +44105,12 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * automatically calculating the hash value.
  */
 FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                       remove3)(FIOBJ hash,
+                       remove2)(FIOBJ hash,
                                 const char *buf,
                                 size_t len,
                                 FIOBJ *old) {
   FIOBJ_STR_TEMP_VAR_STATIC(tmp, buf, len);
-  int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                   remove)(hash,
-                           fio_risky_hash(buf, len, (uint64_t)(uintptr_t)hash),
-                           tmp,
-                           old);
+  int r = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(hash, tmp, old);
   FIOBJ_STR_TEMP_DESTROY(tmp);
   return r;
 }
@@ -43614,15 +44123,14 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
     return;
   FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
     if (i.key == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(i.key) == FIOBJ_T_NULL) {
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)
-      (dest, i.key, NULL);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(dest, i.key, NULL);
       continue;
     }
     register FIOBJ tmp;
     switch (FIOBJ_TYPE_CLASS(i.value)) {
     case FIOBJ_T_ARRAY:
       /* TODO? decide if we should merge elements or overwrite...? */
-      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i.key);
+      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(dest, i.key);
       if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
         (tmp, i.value);
@@ -43630,7 +44138,7 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
       }
       break;
     case FIOBJ_T_HASH:
-      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(dest, i.key);
+      tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(dest, i.key);
       if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
       (dest, i.value);
@@ -43642,8 +44150,8 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
     case FIOBJ_T_FLOAT:     /* fall through */
     case FIOBJ_T_OTHER: break;
     }
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)
-    (dest, i.key, fiobj_dup(i.value));
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
+    (dest, i.key, fiobj_dup(i.value), NULL);
   }
 }
 
@@ -43773,7 +44281,7 @@ FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name) {
     return NULL;
   if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_HASH))
     return NULL;
-  return fiobj_hash_get3((FIOBJ)ctx, name.buf, name.len);
+  return fiobj_hash_get2((FIOBJ)ctx, name.buf, name.len);
 }
 /* if context is an Array, should return its length. */
 FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx) {
@@ -43997,7 +44505,7 @@ SFUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
     if (!fiobj____each2_element_count(a))
       return 1;
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), a, pos) {
-      FIOBJ val = fiobj_hash_get2(b, pos.key);
+      FIOBJ val = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(b, pos.key);
       if (!fiobj___test_eq_nested(val, pos.value, nesting))
         return 0;
     }
@@ -44273,7 +44781,132 @@ log_nesting_error:
 /* *****************************************************************************
 FIOBJ JSON parsing
 ***************************************************************************** */
+#if 1
 
+FIO_SFUNC void *fiobj___json_get_null(void) {
+  return FIO_NAME(fiobj, FIOBJ___NAME_NULL)();
+}
+FIO_SFUNC void *fiobj___json_get_true(void) { return fiobj_true(); }
+FIO_SFUNC void *fiobj___json_get_false(void) { return fiobj_false(); }
+FIO_SFUNC void *fiobj___json_get_number(long long i) {
+  return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))(i);
+}
+FIO_SFUNC void *fiobj___json_get_float(double f) {
+  return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_FLOAT, new))(f);
+}
+FIO_SFUNC void *fiobj___json_get_string(const void *start, size_t len) {
+  FIOBJ str = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, new))();
+  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write_unescape))
+  (str, (const char *)start, len);
+  return str;
+}
+FIO_SFUNC void *fiobj___json_get_map(void *ctx, void *at) {
+  FIOBJ m = FIOBJ_INVALID;
+  if (ctx && at && FIOBJ_TYPE_CLASS(ctx) == FIOBJ_T_HASH)
+    m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, get))((FIOBJ)ctx,
+                                                          (FIOBJ)at);
+  if (!m || m == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(m) != FIOBJ_T_ARRAY)
+    m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, new))();
+  return m;
+}
+FIO_SFUNC void *fiobj___json_get_array(void *ctx, void *at) {
+  FIOBJ m = FIOBJ_INVALID;
+  if (ctx && at && FIOBJ_TYPE_CLASS(ctx) == FIOBJ_T_HASH)
+    m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, get))((FIOBJ)ctx,
+                                                          (FIOBJ)at);
+  if (!m || m == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(m) != FIOBJ_T_ARRAY)
+    m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, new))();
+  return m;
+}
+FIO_SFUNC int fiobj___json_map_push(void *ctx, void *key, void *value) {
+  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, set))
+  ((FIOBJ)ctx, (FIOBJ)key, (FIOBJ)value, NULL);
+  fiobj_free((FIOBJ)key);
+  return 0;
+}
+FIO_SFUNC int fiobj___json_array_push(void *ctx, void *value) {
+  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, push))((FIOBJ)ctx, (FIOBJ)value);
+  return 0;
+}
+FIO_SFUNC void fiobj___json_free_unused_object(void *ctx) {
+  fiobj_free((FIOBJ)ctx);
+}
+FIO_SFUNC void *fiobj___json_on_error(void *ctx) {
+  fiobj_free((FIOBJ)ctx);
+  return FIOBJ_INVALID;
+}
+static fio_json_parser_callbacks_s FIOBJ_JSON_PARSER_CALLBACKS = {
+    .get_null = fiobj___json_get_null,
+    .get_true = fiobj___json_get_true,
+    .get_false = fiobj___json_get_false,
+    .get_number = fiobj___json_get_number,
+    .get_float = fiobj___json_get_float,
+    .get_string = fiobj___json_get_string,
+    .get_map = fiobj___json_get_map,
+    .get_array = fiobj___json_get_array,
+    .map_push = fiobj___json_map_push,
+    .array_push = fiobj___json_array_push,
+    .free_unused_object = fiobj___json_free_unused_object,
+    .on_error = fiobj___json_on_error,
+};
+
+/** Returns a JSON valid FIOBJ String, representing the object. */
+SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
+  fio_json_result_s result =
+      fio_json_parse(&FIOBJ_JSON_PARSER_CALLBACKS, str.buf, str.len);
+  if (consumed_p)
+    *consumed_p = result.stop_pos;
+  if (result.err) {
+#ifdef DEBUG
+    FIOBJ s = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, (FIOBJ)result.ctx, 0);
+    FIO_LOG_DEBUG("JSON data being deleted:\n%s",
+                  FIO_NAME2(fiobj, cstr)(s).buf);
+    fiobj_free(s);
+#endif
+    fiobj_free((FIOBJ)result.ctx);
+    result.ctx = FIOBJ_INVALID;
+  }
+  return (FIOBJ)result.ctx;
+}
+
+/**
+ * Updates a Hash using JSON data.
+ *
+ * Parsing errors and non-dictionary object JSON data are silently ignored,
+ * attempting to update the Hash as much as possible before any errors
+ * encountered.
+ *
+ * Conflicting Hash data is overwritten (preferring the new over the old).
+ *
+ * Returns the number of bytes consumed. On Error, 0 is returned and no data is
+ * consumed.
+ */
+SFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+                      update_json)(FIOBJ hash, fio_str_info_s str) {
+  /* TODO! FIXME! this will leak memory on NULL hash and break on Arrays */
+  fio_json_result_s result = fio_json_parse_update(&FIOBJ_JSON_PARSER_CALLBACKS,
+                                                   hash,
+                                                   str.buf,
+                                                   str.len);
+  // if (consumed_p)
+  //   *consumed_p = result.stop_pos;
+  if (result.err) {
+#ifdef DEBUG
+    FIOBJ s = FIO_NAME2(fiobj, json)(FIOBJ_INVALID, (FIOBJ)result.ctx, 0);
+    FIO_LOG_DEBUG("JSON data being deleted:\n%s",
+                  FIO_NAME2(fiobj, cstr)(s).buf);
+    fiobj_free(s);
+#endif
+    fiobj_free((FIOBJ)result.ctx);
+    result.ctx = FIOBJ_INVALID;
+  }
+  return result.stop_pos;
+  FIO_LOG_ERROR("fiobj_hash_update_json note yet implemented");
+  return 0;
+  (void)str;
+}
+
+#else
 #define FIO_JSON
 #define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
@@ -44282,18 +44915,19 @@ FIOBJ JSON parsing
 /* FIOBJ JSON parser */
 typedef struct {
   fio_json_parser_s p;
+  size_t so; /* stack offset */
   FIOBJ key;
   FIOBJ top;
   FIOBJ target;
   FIOBJ stack[JSON_MAX_DEPTH + 1];
-  uint8_t so; /* stack offset */
 } fiobj_json_parser_s;
 
 static inline void fiobj_json_add2parser(fiobj_json_parser_s *p, FIOBJ o) {
   if (p->top) {
     if (FIOBJ_TYPE_CLASS(p->top) == FIOBJ_T_HASH) {
       if (p->key) {
-        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(p->top, p->key, o);
+        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
+        (p->top, p->key, o, NULL);
         fiobj_free(p->key);
         p->key = FIOBJ_INVALID;
       } else {
@@ -44353,7 +44987,7 @@ static inline int fio_json_on_start_object(fio_json_parser_s *p) {
     hash = FIOBJ_INVALID;
     if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
       hash =
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(pr->top, pr->key);
     }
     if (FIOBJ_TYPE_CLASS(hash) != FIOBJ_T_HASH) {
       hash = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
@@ -44396,7 +45030,7 @@ static int fio_json_on_start_array(fio_json_parser_s *p) {
   }
 #if FIOBJ_JSON_APPEND
   if (pr->key && FIOBJ_TYPE_CLASS(pr->top) == FIOBJ_T_HASH) {
-    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(pr->top, pr->key);
+    ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(pr->top, pr->key);
   }
   if (FIOBJ_TYPE_CLASS(ary) != FIOBJ_T_ARRAY) {
     ary = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
@@ -44481,6 +45115,7 @@ SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
   fiobj_free(p.key);
   return p.top;
 }
+#endif
 
 /** Uses JSON (JavaScript) notation to find data in an object structure. Returns
  * a temporary object. */
@@ -44518,7 +45153,7 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
       return o;
     }
     case FIOBJ_T_HASH: {
-      FIOBJ tmp = fiobj_hash_get3(o, n.buf, n.len);
+      FIOBJ tmp = fiobj_hash_get2(o, n.buf, n.len);
       if (tmp != FIOBJ_INVALID)
         return tmp;
       char *end = n.buf + n.len - 1;
@@ -44528,7 +45163,7 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
         if (end == n.buf)
           return FIOBJ_INVALID;
         const size_t t_len = end - n.buf;
-        tmp = fiobj_hash_get3(o, n.buf, t_len);
+        tmp = fiobj_hash_get2(o, n.buf, t_len);
         if (tmp != FIOBJ_INVALID) {
           o = tmp;
           n.len -= t_len + (end[0] == '.');
@@ -44542,7 +45177,6 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
     }
   }
 }
-
 /* *****************************************************************************
 FIOBJ cleanup
 ***************************************************************************** */
@@ -45012,6 +45646,71 @@ FIO_IFUNC int64_t FIO_NAME_TEST(stl, atol_time)(void) {
   return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
 }
 
+FIO_SFUNC double fio___aton_float_wrapper(char **pstr) {
+  fio_aton_s r = fio_aton(pstr);
+  if (r.is_float)
+    return r.f;
+  return (double)r.i;
+}
+
+FIO_SFUNC double fio___strtod_wrapper(char **pstr) {
+  return strtod(*pstr, pstr);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
+  struct {
+    const char *n;
+    double (*fn)(char **);
+  } to_test[] = {
+      {.n = "fio_aton", .fn = fio___aton_float_wrapper},
+      {.n = "strtod  ", .fn = fio___strtod_wrapper},
+  };
+  const char *floats[] = {
+      "1E+10",
+      "1E-10",
+      "-1E10",
+      "-1e10",
+      "-1E+10",
+      "-1E-10",
+      "1.234E+10",
+      "1.234E-10",
+      "1.79769e+308",
+      "2.22507e-308",
+      "1.79769e+308",
+      "2.22507e-308",
+      "4.9406564584124654e-324",
+      "2.2250738585072009e-308",
+      "2.2250738585072014e-308",
+      "1.7976931348623157e+308",
+      "1.00000000000000011102230246251565404236316680908203124",
+      "72057594037927928.0",
+      "7205759403792793200001e-5",
+      "5708990770823839207320493820740630171355185152001e-3",
+      "0x10.1p0",
+      "0x1.8p1",
+      "0x1.8p5",
+      "0x4.0p5",
+      "0x1.0p50a",
+      "0x1.0p500",
+      "0x1.0P-1074",
+      "0x3a.0P-1074",
+  };
+  printf("* Testing fio_aton/strtod performance:\n");
+  for (size_t fn_i = 0; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
+    printf("\t%s\t", to_test[fn_i].n);
+    int64_t start = FIO_NAME_TEST(stl, atol_time)();
+    for (size_t i = 0; i < (FIO_ATOL_TEST_MAX / 10); ++i) {
+      for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
+        FIO_COMPILER_GUARD;
+        char *tmp = (char *)floats[n_i];
+        to_test[fn_i].fn(&tmp);
+      }
+    }
+    int64_t end = FIO_NAME_TEST(stl, atol_time)();
+    printf("%lld us\n", end - start);
+  }
+}
+
 FIO_SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
   switch (base) {
   case 2: /* overflow - unsupported */
@@ -45027,6 +45726,12 @@ FIO_SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
 
 FIO_SFUNC int64_t strtoll_wrapper(char **pstr) {
   return strtoll(*pstr, pstr, 0);
+}
+FIO_SFUNC int64_t fio_aton_wrapper(char **pstr) {
+  fio_aton_s r = fio_aton(pstr);
+  if (r.is_float)
+    return (int64_t)r.f;
+  return r.i;
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
@@ -45129,7 +45834,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
     char *tmp2 = buffer;
     int i2 = fio_atol(&tmp2);
-    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
+    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (1:%i)", i);
     FIO_ASSERT(i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
                i,
@@ -45142,7 +45847,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     buffer[tmp] = 0;
     char *tmp2 = buffer;
     int64_t i2 = fio_atol(&tmp2);
-    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error");
+    FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (2:%zu)", bit);
     FIO_ASSERT((int64_t)i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",
                i,
@@ -45365,46 +46070,74 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
 
   FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
   FIO_NAME_TEST(stl, atol_speed)
-  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
+  ("fio_aton/fio_ltoa", fio_aton_wrapper, fio_ltoa);
 
-#ifdef FIO_ATOF_ALT
+  FIO_NAME_TEST(stl, atol_speed)
+  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
+  FIO_NAME_TEST(stl, aton_speed)();
+
 #define TEST_DOUBLE(s, d, stop)                                                \
   do {                                                                         \
     union {                                                                    \
       double d_;                                                               \
       uint64_t as_i;                                                           \
-    } pn, pn2;                                                                 \
+    } pn, pn1, pn2;                                                            \
     pn2.d_ = d;                                                                \
     char *p = (char *)(s);                                                     \
+    char *p1 = (char *)(s);                                                    \
     char *p2 = (char *)(s);                                                    \
     double r = fio_atof(&p);                                                   \
+    fio_aton_s num_result = fio_aton(&p1);                                     \
+    double r2 = num_result.is_float ? num_result.f : (double)num_result.i;     \
     double std = strtod(p2, &p2);                                              \
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
+    pn1.d_ = r2;                                                               \
     FIO_ASSERT(*p == stop || p == p2,                                          \
-               "float parsing didn't stop at correct position! %x != %x",      \
+               "atof float parsing didn't stop at correct position! %x != %x", \
                *p,                                                             \
                stop);                                                          \
-    if ((double)d == r || r == std) {                                          \
+    FIO_ASSERT(*p1 == stop || p1 == p2,                                        \
+               "aton float parsing didn't stop at correct position!\n\t%s"     \
+               "\n\t%x != %x",                                                 \
+               s,                                                              \
+               *p1,                                                            \
+               stop);                                                          \
+    if (((double)d == r && (double)d == r2) || (r == std && r2 == std)) {      \
       /** fprintf(stderr, "Okay for %s\n", s); */                              \
     } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {     \
-      fprintf(stderr,                                                          \
-              "* WARNING: Single bit rounding error detected: %s\n",           \
-              s);                                                              \
-    } else if (r == 0.0 && d != 0.0) {                                         \
-      fprintf(stderr, "* WARNING: float range limit marked before: %s\n", s);  \
+      FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",        \
+                      ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
+                      s);                                                      \
+    } else if ((pn1.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn1.as_i) {     \
+      FIO_LOG_WARNING("aton Single bit rounding error detected (%s1): %s\n"    \
+                      "\t%g != %g",                                            \
+                      ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
+                      s,                                                       \
+                      r2,                                                      \
+                      std);                                                    \
+    } else if (r == 0.0 && d != 0.0 && !isnan(d)) {                            \
+      FIO_LOG_WARNING("float range limit marked before: %s\n", s);             \
+    } else if (r2 == 0.0 && d != 0.0 && !isnan(d)) {                           \
+      FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);        \
     } else {                                                                   \
-      char f_buf[164];                                                         \
+      char f_buf[256];                                                         \
       pn.d_ = std;                                                             \
       pn2.d_ = r;                                                              \
-      size_t tmp_pos = fio_ltoa(f_buf, pn.as_i, 2);                            \
-      f_buf[tmp_pos] = '\n';                                                   \
-      fio_ltoa(f_buf + tmp_pos + 1, pn2.as_i, 2);                              \
+      size_t tmp_pos = fio_ltoa(f_buf, pn2.as_i, 2);                           \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      tmp_pos += fio_ltoa(f_buf + tmp_pos, pn.as_i, 2);                        \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      fio_ltoa(f_buf + tmp_pos, pn1.as_i, 2);                                  \
       FIO_ASSERT(0,                                                            \
-                 "Float error bigger than a single bit rounding error. exp. "  \
-                 "vs. act.:\n%.19g\n%.19g\nBinary:\n%s",                       \
+                 "Float error bigger than a single bit rounding error."        \
+                 "\n\tString: %s"                                              \
+                 "\n\texp. "                                                   \
+                 "vs. act.:\nstd %.19g\natof %.19g\naton %.19g\nBinary:\n%s",  \
+                 s,                                                            \
                  std,                                                          \
                  r,                                                            \
+                 r2,                                                           \
                  f_buf);                                                       \
     }                                                                          \
   } while (0)
@@ -45448,7 +46181,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
   TEST_DOUBLE(" -e", 0, 0);
   TEST_DOUBLE(" .9", 0.9, 0);
   TEST_DOUBLE(" ..9", 0, '.');
-  TEST_DOUBLE("009", 9, 0);
+  TEST_DOUBLE("007", 7, 0);
   TEST_DOUBLE("0.09e02", 9, 0);
   /* http://thread.gmane.org/gmane.editors.vim.devel/19268/ */
   TEST_DOUBLE("0.9999999999999999999999999999999999", 1, 0);
@@ -45586,7 +46319,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
             stop - start);
   }
 #endif /* !DEBUG */
-#endif /* FIO_ATOF_ALT */
 }
 #undef FIO_ATOL_TEST_MAX
 
@@ -46482,7 +47214,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
 #endif
     FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j) ==
                    FIO_STRLEN(json + 61),
-               "JSON roundtrip failed (length error).");
+               "JSON roundtrip failed (length error %zu != %zu).\n%s\n%s",
+               (size_t)FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(j),
+               (size_t)FIO_STRLEN(json + 61),
+               FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
+               json + 61);
     FIO_ASSERT(!memcmp(json + 61,
                        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), ptr)(j),
                        FIO_STRLEN(json + 61)),
@@ -46619,23 +47355,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
                            new_cstr)("number: ", 8);
       FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(i);
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)(tmp, i);
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(o, k, fiobj_dup(tmp));
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set_if_missing2)(o, k, tmp);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
+      (o, k, fiobj_dup(tmp), NULL);
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set_if_missing)(o, k, tmp);
       fiobj_free(k);
     }
 
     FIOBJ set = FIOBJ_INVALID;
     FIOBJ removed = FIOBJ_INVALID;
     FIOBJ k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(1);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove2)(o, k, &removed);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(o, k, &removed);
     fiobj_free(k);
     k = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), new)(2);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)
-    (o, fiobj2hash(o, k), k, fiobj_true(), &set);
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(o, k, fiobj_true(), &set);
     fiobj_free(k);
-    FIO_ASSERT(set, "fiobj_hash_set2 didn't copy information to old pointer?");
+    FIO_ASSERT(set, "fiobj_hash_set didn't copy information to old pointer?");
     FIO_ASSERT(removed,
-               "fiobj_hash_remove2 didn't copy information to old pointer?");
+               "fiobj_hash_remove didn't copy information to old pointer?");
     // fiobj_hash_set(o, uintptr_t hash, FIOBJ key, FIOBJ value, FIOBJ *old)
     FIO_ASSERT(
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(removed) ==
@@ -46673,8 +47409,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj)(void) {
     FIOBJ h = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
     FIOBJ key = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(key, "array", 5);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set2)(h, key, a);
-    FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get2)(h, key) == a,
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(h, key, a);
+    FIO_ASSERT(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(h, key) == a,
                "FIOBJ Hash retrieval failed");
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(a, key);
     if (0) {

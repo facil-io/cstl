@@ -295,6 +295,7 @@ typedef SSIZE_T ssize_t;
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1441,6 +1442,14 @@ FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
   const uintmax_t a = a_, b = b_;
   return (
       intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+}
+
+/** Returns `a` if a >= `b`. */
+FIO_IFUNC intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
+  // if b - a is negative, a > b, unless both / one are negative.
+  const uintmax_t a = a_, b = b_;
+  return (
+      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, a, b);
 }
 
 /** Returns absolute value. */

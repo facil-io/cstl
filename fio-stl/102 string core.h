@@ -1903,21 +1903,40 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
     return r;
   if (dest->len + len >= dest->capa) { /* reserve only what we need */
     reduced = 0;
+#if 0
     const char *tmp = (const char *)src_;
     const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
-    for (;;) {
-      tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
-      if (!tmp)
-        break;
-      size_t step = 1;
-      step += ((tmp[1] == 'x') << 1); /* step == 3 */
-      step += (tmp[1] == 'u');        /* UTF-8 output <= 3 */
-      reduced += step;
-      tmp += step + 1;
-      if (tmp + 1 > stop)
-        break;
+    while ((size_t)(stop - tmp) > 65) {
+      for (size_t i = 0; i < 64; ++i) {
+        uint8_t t0 = tmp[i];
+        uint8_t t1 = tmp[i + 1] | 32;
+        size_t s1 = (t0 == '\\');            /* reduce the escape char  */
+        size_t s2 = (s1 & (t1 == 'x')) << 1; /* hex is at least 4 chars */
+        size_t s3 = (s1 & (t1 == 'u'));      /* UTF-8 */
+        reduced += (s1 + s2 + s3);
+      }
+      tmp += 64;
     }
-    FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too long");
+    FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
+#else
+    if (len > 127) { /* skip memory savings on small strings */
+      const char *tmp = (const char *)src_;
+      const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
+      for (;;) {
+        tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
+        if (!tmp)
+          break;
+        size_t step = 1;
+        step += (((tmp[1] | 32) == 'x') << 1); /* step == 3 */
+        step += ((tmp[1] | 32) == 'u');        /* UTF-8 output <= 3 */
+        reduced += step;
+        tmp += step + 1;
+        if (tmp + 1 > stop)
+          break;
+      }
+      FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
+    }
+#endif
     reduced = len - reduced;
     if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
       r = -1;
