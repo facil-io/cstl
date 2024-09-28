@@ -173,21 +173,28 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
   }
   { /* Testing UTF-8 */
     fprintf(stderr, "* Testing UTF-8 support.\n");
-    const char *utf8_sample = /* three hearts, small-big-small*/
-        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
+    /* 4B heart, 3B heart, 3B heart resizer, 4B heart, 2B f, 1B Z */
+    const char *utf8_sample =
+        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95\xc6\x92Z\0";
     fio_str_info_s utf8 = FIO_STR_INFO1((char *)utf8_sample);
-    intptr_t pos = -2;
+
+    FIO_ASSERT(fio_string_utf8_valid(utf8),
+               "fio_string_utf8_valid failed on valid code");
+    FIO_ASSERT(fio_string_utf8_len(utf8) == 6, /* manual knowledge */
+               "fio_string_utf8_len failed with valid UTF-8 %zu != 6",
+               fio_string_utf8_len(utf8));
+    intptr_t pos = -4;
     size_t len = 2;
     FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
                "`fio_string_utf8_select` returned error for negative pos on "
                "UTF-8 data! (%zd, %zu)",
                (ssize_t)pos,
                len);
-    FIO_ASSERT(pos == (intptr_t)utf8.len - 4, /* 4 byte emoji */
+    FIO_ASSERT(pos == (intptr_t)utf8.len - 10,
                "`fio_string_utf8_select` error, negative position invalid on "
                "UTF-8 data! (%zd)",
                (ssize_t)pos);
-    FIO_ASSERT(len == 4, /* last utf-8 char is 4 byte long */
+    FIO_ASSERT(len == 7, /* heart + math 'f' */
                "`fio_string_utf8_select` error, truncated length invalid on "
                "UTF-8 data! (%zd)",
                (ssize_t)len);
@@ -202,10 +209,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "`fio_string_utf8_select` error, position invalid on "
                "UTF-8 data! (%zd)",
                (ssize_t)pos);
-    FIO_ASSERT(len == 10,
+    FIO_ASSERT(len == utf8.len - 4,
                "`fio_string_utf8_select` error, length invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)len);
+               "UTF-8 data! (%zd != %zu)",
+               (ssize_t)len,
+               utf8.len - 4);
     pos = 1;
     len = 3;
     FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
@@ -213,11 +221,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "(2)! (%zd, %zu)",
                (ssize_t)pos,
                len);
-    FIO_ASSERT(len ==
-                   10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte codes == 10 */
+    FIO_ASSERT(len == 10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte == 10 */
                "`fio_string_utf8_select` error, length invalid on UTF-8 data! "
                "(%zd)",
                (ssize_t)len);
+    /* TODO! test fio_string_utf8_valid speed. */
   }
   { /* testing C / JSON style escaping */
     fprintf(stderr, "* Testing C / JSON style character (un)escaping.\n");
@@ -226,7 +234,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
     fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 1024);
     const char *utf8_sample = /* three hearts, small-big-small*/
-        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
+        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95\xc6\x92Z";
+    // "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_ASSERT(!fio_string_write(&unescaped,
                                  NULL,
                                  utf8_sample,

@@ -751,6 +751,86 @@ typedef struct fio_buf_info_s {
   }
 
 /* *****************************************************************************
+UTF-8 Support (basic)
+***************************************************************************** */
+
+/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
+#define FIO_UTF8_CODE_LEN(u)                                                   \
+  (((size_t)((u) > ((1U << 21) - 1)) - 1) &                                    \
+   (1U + ((u) > 127) + ((u) > 2047) + ((u) > 65535)))
+
+/* Returns the number of valid UTF-8 bytes on pointer `str`. */
+#define FIO_UTF8_CHAR_LEN(str)                                                 \
+  ((((((*(str)) & 0xF8U) == 0xF0U) &                                           \
+     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) /* 1||0 */]) & 0xC0U) == 0x80U) &  \
+     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) << 1]) & 0xC0U) == 0x80U) &        \
+     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) |                                  \
+              ((((*(str)) & 0xF8U) == 0xF0U) << 1)]) &                         \
+       0xC0U) == 0x80U))                                                       \
+    << 2) |                                                                    \
+   ((((*(str)&0xF0U) == 0xE0U) &                                               \
+     (((((str)[(((*(str)) & 0xF0U) == 0xE0U) /* 1||0 */]) & 0xC0U) == 0x80U) & \
+      ((((str)[(((*(str)) & 0xF0U) == 0xE0U) << 1]) & 0xC0U) == 0x80U))) *     \
+    3) |                                                                       \
+   ((((*(str)&0xE0U) == 0xC0U) &                                               \
+     ((((str)[((*(str)&0xE0U) == 0xC0U) /* 1 or 0 */]) & 0xC0U) == 0x80U))     \
+    << 1) |                                                                    \
+   (((*(str)) & 0x80U) == 0U))
+
+/*
+ * Writes code point `u` to `dest`, assuming `dest` is a `uint8_t` pointer.
+ *
+ * Use:
+ *
+ *     FIO_UTF8_WRITE(dest, 0x1D11E, FIO_UTF8_CODE_LEN(0x1D11E))
+ *
+ */
+#define FIO_UTF8_WRITE(dest, u, u_code_len)                                    \
+  do {                                                                         \
+    const uint8_t len__ = (u_code_len);                                        \
+    const uint8_t offset__ = 0xF0U << (4U - len__);                            \
+    const uint8_t head__ = 0x80U << (len__ < 2);                               \
+    const uint8_t mask__ = 0xFFU >> ((len__ > 1) << 1);                        \
+    *(dest) = offset__ | ((u) >> (6 * (len__ - (len__ > 1))));                 \
+    (dest) += (len__ > 1);                                                     \
+    *(dest) = head__ | (((u) >> 12) & mask__);                                 \
+    (dest) += (len__ > 3);                                                     \
+    *(dest) = head__ | (((u) >> 6) & mask__);                                  \
+    (dest) += (len__ > 2);                                                     \
+    *(dest) = head__ | ((u)&mask__);                                           \
+    (dest) += (len__ > 0);                                                     \
+  } while (0)
+
+/*
+ * Reads code point to `uint32_t` `target` from `uint8_t` pointer `src`.
+ *
+ * The `src` pointer will advance by `FIO_UTF8_CHAR_LEN` (0 on error).
+ *
+ * Use:
+ *
+ *     uint32_t target;
+ *     FIO_UTF8_READ(target, str)
+ *
+ */
+#define FIO_UTF8_READ(target, src)                                             \
+  do {                                                                         \
+    const uint8_t len__ = FIO_UTF8_CHAR_LEN(src);                              \
+    const uint8_t offset__ = ~(0xF0U << (4U - len__));                         \
+    const uint8_t mask__ = ~(0x80U << (len__ < 2));                            \
+    target = (0U - (len__ > 1)) & (*src & offset__);                           \
+    target <<= 6;                                                              \
+    src += (len__ > 1);                                                        \
+    target |= (0U - (len__ > 3)) & *src & mask__;                              \
+    target <<= ((len__ > 3) << 2) | ((len__ > 3) << 1);                        \
+    src += (len__ > 3);                                                        \
+    target |= (0U - (len__ > 2)) & *src & mask__;                              \
+    target <<= ((len__ > 2) << 2) | ((len__ > 2) << 1);                        \
+    src += (len__ > 2);                                                        \
+    target |= (*src & mask__);                                                 \
+    src += (len__ > 0);                                                        \
+  } while (0)
+
+/* *****************************************************************************
 Linked Lists Persistent Macros and Types
 ***************************************************************************** */
 

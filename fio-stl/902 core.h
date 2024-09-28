@@ -296,6 +296,49 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                  "fio_xmask rountrip (with move) error");
     }
   }
+  {
+    fprintf(stderr, "* Testing Core UTF-8 Support (Macros).\n");
+    struct {
+      const char *buf;
+      size_t clen;
+    } utf8_core_tests[] = {
+        {"\xf0\x9f\x92\x95", 4},
+        {"\xe2\x9d\xa4", 3},
+        {"\xc6\x92", 2},
+        {"Z", 1},
+        {0},
+    };
+    for (size_t i = 0; utf8_core_tests[i].buf; ++i) {
+      char *pos = (char *)utf8_core_tests[i].buf;
+      FIO_ASSERT((size_t)FIO_UTF8_CHAR_LEN(pos) == utf8_core_tests[i].clen,
+                 "FIO_UTF8_CHAR_LEN failed on %s",
+                 utf8_core_tests[i].buf);
+      uint32_t value = 0, validate = 0;
+      void *tst_str = NULL;
+      fio_memcpy7x(&tst_str, utf8_core_tests[i].buf, utf8_core_tests[i].clen);
+#if __LITTLE_ENDIAN__
+      tst_str = (void *)(uintptr_t)fio_lton32((uint32_t)(uintptr_t)tst_str);
+#endif
+      FIO_UTF8_READ(value, pos);
+      uint32_t val_len = FIO_UTF8_CODE_LEN(value);
+      char output[32];
+      pos = output;
+      FIO_UTF8_WRITE(pos, value, val_len);
+      FIO_ASSERT(val_len == utf8_core_tests[i].clen,
+                 "FIO_UTF8_READ + FIO_UTF8_CODE_LEN failed on %s / %p (%zu "
+                 "len => %zu != %zu)",
+                 utf8_core_tests[i].buf,
+                 tst_str,
+                 (size_t)value,
+                 val_len,
+                 utf8_core_tests[i].clen);
+      pos = output;
+      FIO_UTF8_READ(validate, pos);
+      FIO_ASSERT(validate == value && value > 0,
+                 "FIO_UTF8_READ + FIO_UTF8_WRITE roundtrip failed on %s",
+                 utf8_core_tests[i].buf);
+    }
+  }
 }
 /* *****************************************************************************
 Cleanup

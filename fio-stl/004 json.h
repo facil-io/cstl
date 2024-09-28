@@ -30,21 +30,23 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /** The JSON parser settings. */
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
-  void *(*get_null)(void);
+  void *(*on_null)(void);
   /** TRUE object was detected. Returns new object as `void *`. */
-  void *(*get_true)(void);
+  void *(*on_true)(void);
   /** FALSE object was detected. Returns new object as `void *`. */
-  void *(*get_false)(void);
+  void *(*on_false)(void);
   /** Number was detected (long long). Returns new object as `void *`. */
-  void *(*get_number)(int64_t i);
+  void *(*on_number)(int64_t i);
   /** Float was detected (double).Returns new object as `void *`.  */
-  void *(*get_float)(double f);
+  void *(*on_float)(double f);
   /** (escaped) String was detected. Returns a new String as `void *`. */
-  void *(*get_string)(const void *start, size_t len);
+  void *(*on_string)(const void *start, size_t len);
+  /** (unescaped) String was detected. Returns a new String as `void *`. */
+  void *(*on_string_simple)(const void *start, size_t len);
   /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-  void *(*get_map)(void *ctx, void *at);
+  void *(*on_map)(void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
-  void *(*get_array)(void *ctx, void *at);
+  void *(*on_array)(void *ctx, void *at);
   /** Array was detected. Returns non-zero on error. */
   int (*map_push)(void *ctx, void *key, void *value);
   /** Array was detected. Returns non-zero on error. */
@@ -101,7 +103,7 @@ Note: a Helper API is provided for the parsing implementation.
 //   struct {
 //     uintptr_t start;
 //     uintptr_t end;
-//   } intructions[16];
+//   } instructions[16];
 //   uint32_t count;
 // } fio___json_cb_queue_s;
 
@@ -117,7 +119,7 @@ typedef struct {
 
 FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
 
-#if 0
+#if 0 /* Used for Debugging */
 #define FIO_JSON___PRINT_STEP(s, step_name)                                    \
   FIO_LOG_DEBUG2("JSON " step_name " starting at: %.*s",                       \
                  (int)((s->end - s->pos) > 16 ? 16 : (s->end - s->pos)),       \
@@ -126,50 +128,61 @@ FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
 #define FIO_JSON___PRINT_STEP(s, step_name)
 #endif
 
-FIO_SFUNC int fio___json_move2next(fio___json_state_s *s) {
+FIO_IFUNC int fio___json_consume_whitespace(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "white space");
   while (s->pos < s->end) {
-    switch (*s->pos) { /* consume whitespace */
-    case 0x09:         /* fall through */
-    case 0x0A:         /* fall through */
-    case 0x0D:         /* fall through */
-    case 0x20: ++s->pos; continue;
-    }
-    return 0;
+    if (!(((uint8_t)*s->pos == 0x09U) | ((uint8_t)*s->pos == 0x0AU) |
+          ((uint8_t)*s->pos == 0x0DU) | ((uint8_t)*s->pos == 0x20U)))
+      return 0;
+    ++s->pos;
   }
   return (s->error = -1);
+}
+FIO_IFUNC int fio___json_consume_comma(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "comma");
+  fio___json_consume_whitespace(s);
+  if (*s->pos != ',')
+    return -1;
+  fio___json_consume_whitespace(s);
+  return 0;
+}
+FIO_IFUNC int fio___json_consume_colon(fio___json_state_s *s) {
+  FIO_JSON___PRINT_STEP(s, "colon");
+  fio___json_consume_whitespace(s);
+  if (*s->pos != ':')
+    return -1;
+  fio___json_consume_whitespace(s);
+  return 0;
 }
 
 FIO_SFUNC void *fio___json_consume_infinit(fio___json_state_s *s,
                                            _Bool negative) {
   FIO_JSON___PRINT_STEP(s, "infinity");
-  if (s->pos + 7 < s->end) {
-    const uint64_t inf = fio_buf2u64u("infinity");
-    uint64_t tst = (fio_buf2u64u(s->pos) | (uint64_t)0x2020202020202020ULL);
-    if (tst == inf) {
-      s->pos += 8;
-      goto finish;
+  const uint64_t inf64 = fio_buf2u64u("infinity");
+  const uint16_t inf16 = fio_buf2u16u("nf");
+  uint64_t tst64;
+  uint16_t tst16;
+  if (s->pos + 3 > s->end)
+    goto buffer_error;
+  tst16 = (fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020U);
+  if (tst16 == inf16) {
+    if (s->pos + 7 < s->end) {
+      tst64 = (fio_buf2u64u(s->pos) | (uint64_t)0x2020202020202020ULL);
+      s->pos += (tst64 == inf64) * 5;
     }
+    s->pos += 3;
+    return s->cb.on_float(negative ? (INFINITY * -1) : INFINITY);
   }
-  if (s->pos + 2 < s->end) {
-    const uint16_t inf = fio_buf2u16u("nf");
-    uint16_t tst = (fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020U);
-    if (tst == inf) {
-      s->pos += 3;
-      goto finish;
-    }
-  }
+buffer_error:
   s->error = 1;
   return NULL;
-finish:
-  return s->cb.get_float(negative ? (INFINITY * -1) : INFINITY);
 }
 
 FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "number");
 #if FIO_JSON_USE_FIO_ATON
   fio_aton_s aton = fio_aton((char **)&s->pos);
-  return aton.is_float ? s->cb.get_float(aton.f) : s->cb.get_number(aton.i);
+  return aton.is_float ? s->cb.on_float(aton.f) : s->cb.on_number(aton.i);
 #else
   const char *tst = s->pos;
   uint64_t i;
@@ -212,7 +225,7 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   if (errno == E2BIG || (((uint64_t)(1 ^ hex ^ binary) << 63) & i))
     goto is_float_from_error;
   // s->error = (errno == E2BIG);
-  return s->cb.get_number(fio_u2i_limit(i, negative));
+  return s->cb.on_number(fio_u2i_limit(i, negative));
 is_float_from_error:
   s->pos = tst;
   errno = 0;
@@ -220,7 +233,7 @@ is_float_from_error:
 is_float:
   f = fio_atof((char **)&s->pos);
   s->error = (errno == E2BIG);
-  return s->cb.get_float(f);
+  return s->cb.on_float(f);
 
 buffer_overflow:
   s->error = 1;
@@ -233,17 +246,14 @@ is_inifinity:
 
 FIO_SFUNC void *fio___json_consume_string(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "string");
+  void *(*cb)(const void *start, size_t len) = s->cb.on_string_simple;
   const char *start = ++s->pos;
-  for (;;) {
-    while (s->pos < s->end && *s->pos != '"' && *s->pos != '\\')
-      ++s->pos;
-    if (s->pos >= s->end)
-      break;
-    if (*s->pos == '\\') {
-      s->pos += 2;
-      continue;
-    }
-    return s->cb.get_string(start, (s->pos++) - start);
+  for (; s->pos < s->end; ++s->pos) {
+    if (*s->pos == '"')
+      return cb(start, (s->pos++) - start);
+    if (*s->pos == '\\')
+      cb = s->cb.on_string;
+    s->pos += (*s->pos == '\\');
   }
   s->error = 1;
   return NULL;
@@ -253,29 +263,25 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "map");
   void *old = s->ctx;
   void *old_key = s->key;
-  void *map = s->cb.get_map(s, s->key);
+  void *map = s->cb.on_map(s, s->key);
   s->ctx = map;
   s->key = NULL;
   if (++s->depth == FIO_JSON_MAX_DEPTH)
     goto too_deep;
   for (;;) {
     ++s->pos;
-    if (fio___json_move2next(s))
-      break;
-    if (*s->pos == '}')
-      break;
     s->key = fio___json_consume(s);
-    if (s->error || fio___json_move2next(s))
+    if (s->error || !s->key)
       break;
     if (*s->pos != ':')
       break;
     ++s->pos;
-    if (fio___json_move2next(s))
+    if (fio___json_consume_whitespace(s))
       break;
     void *value = fio___json_consume(s);
     s->error |= s->cb.map_push(s->ctx, s->key, value);
     s->key = NULL;
-    if (s->error || fio___json_move2next(s))
+    if (s->error || fio___json_consume_whitespace(s))
       break;
     if (*s->pos != ',')
       break;
@@ -303,18 +309,19 @@ too_deep:
 FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "array");
   void *old = s->ctx;
-  void *array = s->ctx = s->cb.get_array(s, s->key);
+  void *array = s->ctx = s->cb.on_array(s, s->key);
   if (++s->depth == FIO_JSON_MAX_DEPTH)
     goto too_deep;
   for (;;) {
     ++s->pos;
-    if (fio___json_move2next(s))
+    if (fio___json_consume_whitespace(s))
       break;
     if (*s->pos == ']')
       break;
     void *value = fio___json_consume(s);
-    s->error |= s->cb.array_push(s->ctx, value);
-    if (s->error || fio___json_move2next(s))
+    if (value)
+      s->error |= s->cb.array_push(s->ctx, value);
+    if (s->error || fio___json_consume_comma(s))
       break;
     if (*s->pos != ',')
       break;
@@ -344,7 +351,7 @@ FIO_SFUNC void *fio___json_consume_null(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 4;
-  return s->cb.get_null();
+  return s->cb.on_null();
 on_error:
   s->error = 1;
   return NULL;
@@ -359,7 +366,7 @@ FIO_SFUNC void *fio___json_consume_true(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 4;
-  return s->cb.get_true();
+  return s->cb.on_true();
 on_error:
   s->error = 1;
   return NULL;
@@ -374,7 +381,7 @@ FIO_SFUNC void *fio___json_consume_false(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 5;
-  return s->cb.get_false();
+  return s->cb.on_false();
 on_error:
   s->error = 1;
   return NULL;
@@ -389,7 +396,7 @@ FIO_SFUNC void *fio___json_consume_nan(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 3;
-  return s->cb.get_float(NAN);
+  return s->cb.on_float(NAN);
 on_error:
   s->error = 1;
   return NULL;
@@ -426,6 +433,14 @@ void *fio___json_consume(fio___json_state_s *s) {
   for (;;) {
     FIO_JSON___PRINT_STEP(s, "consumption type test");
     switch (*s->pos) {
+    case 0x09: /* fall through */
+    case 0x0A: /* fall through */
+    case 0x0D: /* fall through */
+    case 0x20:
+      ++s->pos;
+      if (fio___json_consume_whitespace(s))
+        goto set_error;
+      continue;
     case '+': /* fall through */
     case '-': /* fall through */
     case '0': /* fall through */
@@ -446,8 +461,10 @@ void *fio___json_consume(fio___json_state_s *s) {
     case 'I': return fio___json_consume_infinit(s, 0);
     case '"': return fio___json_consume_string(s);
     case '{': return fio___json_consume_map(s);
+    case '}': return NULL; /* don't progress, just stop. */
     case '[': return fio___json_consume_array(s);
-    case 'T': /* fall through */
+    case ']': return NULL; /* don't progress, just stop. */
+    case 'T':              /* fall through */
     case 't': return fio___json_consume_true(s);
     case 'F': /* fall through */
     case 'f': return fio___json_consume_false(s);
@@ -457,16 +474,11 @@ void *fio___json_consume(fio___json_state_s *s) {
                                         : fio___json_consume_nan)(s);
     case '#':
     case '/':
-      if (fio___json_consume_comment(s)) {
-        s->error = 1;
-        return NULL;
-      }
-      if (fio___json_move2next(s)) {
-        s->error = 1;
-        return NULL;
-      }
+      if (fio___json_consume_comment(s))
+        goto set_error;
       continue;
     }
+  set_error:
     s->error = 1;
     return NULL;
   }
@@ -481,21 +493,27 @@ static void *fio___json_callback_noop2(void *ctx) { return ctx; }
 FIO_SFUNC int fio___json_callbacks_validate(fio_json_parser_callbacks_s *cb) {
   if (!cb)
     goto is_invalid;
-  if (!cb->get_null)
+
+  if (!cb->on_string)
+    cb->on_string = cb->on_string_simple;
+  if (!cb->on_string_simple)
+    cb->on_string_simple = cb->on_string;
+
+  if (!cb->on_null)
     goto is_invalid;
-  if (!cb->get_true)
+  if (!cb->on_true)
     goto is_invalid;
-  if (!cb->get_false)
+  if (!cb->on_false)
     goto is_invalid;
-  if (!cb->get_number)
+  if (!cb->on_number)
     goto is_invalid;
-  if (!cb->get_float)
+  if (!cb->on_float)
     goto is_invalid;
-  if (!cb->get_string)
+  if (!cb->on_string)
     goto is_invalid;
-  if (!cb->get_map)
+  if (!cb->on_map)
     goto is_invalid;
-  if (!cb->get_array)
+  if (!cb->on_array)
     goto is_invalid;
   if (!cb->map_push)
     goto is_invalid;
@@ -542,8 +560,6 @@ SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
     if (len == 3)
       goto finish;
   }
-  if (fio___json_move2next(&state))
-    goto finish;
   r.ctx = fio___json_consume(&state);
   r.err = state.error;
   r.stop_pos = state.pos - start;
@@ -566,31 +582,31 @@ missing_callback:
 }
 
 /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-FIO_SFUNC void *fio___json_parse_update_get_map(void *ctx, void *at) {
+FIO_SFUNC void *fio___json_parse_update_on_map(void *ctx, void *at) {
   void **ex_data = (void **)ctx;
   fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
   ctx = ex_data[1];
   fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
-  s->cb.get_map = cb->get_map;
-  s->cb.get_array = cb->get_array;
+  s->cb.on_map = cb->on_map;
+  s->cb.on_array = cb->on_array;
   if (ctx && !s->cb.is_map(ctx))
     return NULL;
   else if (!ctx)
-    ctx = cb->get_map(ctx, at);
+    ctx = cb->on_map(ctx, at);
   return ctx;
 }
 /** Array was detected. Returns ctx to array or NULL on error. */
-FIO_SFUNC void *fio___json_parse_update_get_array(void *ctx, void *at) {
+FIO_SFUNC void *fio___json_parse_update_on_array(void *ctx, void *at) {
   void **ex_data = (void **)ctx;
   fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
   ctx = ex_data[1];
   fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
-  s->cb.get_map = cb->get_map;
-  s->cb.get_array = cb->get_array;
+  s->cb.on_map = cb->on_map;
+  s->cb.on_array = cb->on_array;
   if (ctx && !s->cb.is_array(ctx))
     return NULL;
   else if (!ctx)
-    ctx = cb->get_array(ctx, at);
+    ctx = cb->on_array(ctx, at);
 
   return ctx;
 }
@@ -607,8 +623,8 @@ SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
                                               const size_t len) {
   fio_json_result_s r = {.stop_pos = 0, .err = 0};
   fio_json_parser_callbacks_s callbacks;
-  callbacks.get_map = fio___json_parse_update_get_map;
-  callbacks.get_array = fio___json_parse_update_get_array;
+  callbacks.on_map = fio___json_parse_update_on_map;
+  callbacks.on_array = fio___json_parse_update_on_array;
   fio___json_state_s state;
   void *ex_data[3] = {s, ctx, &state};
 
@@ -633,8 +649,6 @@ SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
     if (len == 3)
       goto finish;
   }
-  if (fio___json_move2next(&state))
-    goto finish;
   r.ctx = fio___json_consume(&state);
   r.err = state.error;
   r.stop_pos = state.pos - start;

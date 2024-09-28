@@ -1847,24 +1847,30 @@ FIOBJ JSON parsing
 ***************************************************************************** */
 #if 1
 
-FIO_SFUNC void *fiobj___json_get_null(void) {
+FIO_SFUNC void *fiobj___json_on_null(void) {
   return FIO_NAME(fiobj, FIOBJ___NAME_NULL)();
 }
-FIO_SFUNC void *fiobj___json_get_true(void) { return fiobj_true(); }
-FIO_SFUNC void *fiobj___json_get_false(void) { return fiobj_false(); }
-FIO_SFUNC void *fiobj___json_get_number(long long i) {
+FIO_SFUNC void *fiobj___json_on_true(void) { return fiobj_true(); }
+FIO_SFUNC void *fiobj___json_on_false(void) { return fiobj_false(); }
+FIO_SFUNC void *fiobj___json_on_number(long long i) {
   return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))(i);
 }
-FIO_SFUNC void *fiobj___json_get_float(double f) {
+FIO_SFUNC void *fiobj___json_on_float(double f) {
   return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_FLOAT, new))(f);
 }
-FIO_SFUNC void *fiobj___json_get_string(const void *start, size_t len) {
+FIO_SFUNC void *fiobj___json_on_string(const void *start, size_t len) {
   FIOBJ str = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, new))();
   FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write_unescape))
   (str, (const char *)start, len);
   return str;
 }
-FIO_SFUNC void *fiobj___json_get_map(void *ctx, void *at) {
+FIO_SFUNC void *fiobj___json_on_string_simple(const void *start, size_t len) {
+  FIOBJ str = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, new))();
+  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write))
+  (str, (const char *)start, len);
+  return str;
+}
+FIO_SFUNC void *fiobj___json_on_map(void *ctx, void *at) {
   FIOBJ m = FIOBJ_INVALID;
   if (ctx && at && FIOBJ_TYPE_CLASS(ctx) == FIOBJ_T_HASH)
     m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, get))((FIOBJ)ctx,
@@ -1873,7 +1879,7 @@ FIO_SFUNC void *fiobj___json_get_map(void *ctx, void *at) {
     m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, new))();
   return m;
 }
-FIO_SFUNC void *fiobj___json_get_array(void *ctx, void *at) {
+FIO_SFUNC void *fiobj___json_on_array(void *ctx, void *at) {
   FIOBJ m = FIOBJ_INVALID;
   if (ctx && at && FIOBJ_TYPE_CLASS(ctx) == FIOBJ_T_HASH)
     m = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, get))((FIOBJ)ctx,
@@ -1900,14 +1906,15 @@ FIO_SFUNC void *fiobj___json_on_error(void *ctx) {
   return FIOBJ_INVALID;
 }
 static fio_json_parser_callbacks_s FIOBJ_JSON_PARSER_CALLBACKS = {
-    .get_null = fiobj___json_get_null,
-    .get_true = fiobj___json_get_true,
-    .get_false = fiobj___json_get_false,
-    .get_number = fiobj___json_get_number,
-    .get_float = fiobj___json_get_float,
-    .get_string = fiobj___json_get_string,
-    .get_map = fiobj___json_get_map,
-    .get_array = fiobj___json_get_array,
+    .on_null = fiobj___json_on_null,
+    .on_true = fiobj___json_on_true,
+    .on_false = fiobj___json_on_false,
+    .on_number = fiobj___json_on_number,
+    .on_float = fiobj___json_on_float,
+    .on_string = fiobj___json_on_string,
+    .on_string_simple = fiobj___json_on_string_simple,
+    .on_map = fiobj___json_on_map,
+    .on_array = fiobj___json_on_array,
     .map_push = fiobj___json_map_push,
     .array_push = fiobj___json_array_push,
     .free_unused_object = fiobj___json_free_unused_object,

@@ -1724,7 +1724,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
 
     if (1) {
       /* String content == whole file (this file) */
-      intptr_t pos = -11;
+      intptr_t pos = -10;
       size_t len = 20;
       fprintf(stderr, "* Testing UTF-8 positioning.\n");
 

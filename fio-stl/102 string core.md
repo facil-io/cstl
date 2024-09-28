@@ -380,6 +380,8 @@ If the String isn't UTF-8 valid up to the requested selection, than `pos` will b
 
 The returned `len` value may be shorter than the original if there wasn't enough data left to accommodate the requested length. When a `len` value of `0` is returned, this means that `pos` marks the end of the String.
 
+if `pos` is negative, counts backwards (`-1` is the position of the last UTF-8 character).
+
 Returns -1 on error and 0 on success.
 
 ### Core String C / JSON escaping

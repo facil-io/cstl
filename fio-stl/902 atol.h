@@ -54,6 +54,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       {.n = "strtod  ", .fn = fio___strtod_wrapper},
   };
   const char *floats[] = {
+      "inf",
+      "nan",
+      "-inf",
+      "-nan",
+      "infinity",
+      "1E+1000",
+      "1E-1000",
       "1E+10",
       "1E-10",
       "-1E10",
@@ -70,6 +77,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       "2.2250738585072009e-308",
       "2.2250738585072014e-308",
       "1.7976931348623157e+308",
+      "2.171e-308",
+      "2.2250738585072012e-308", /* possible infinit loop bug for strtod */
+      "1.0020284025808569e-134",
       "1.00000000000000011102230246251565404236316680908203124",
       "72057594037927928.0",
       "7205759403792793200001e-5",
@@ -82,21 +92,64 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       "0x1.0p500",
       "0x1.0P-1074",
       "0x3a.0P-1074",
+      "0x0.f9c7573d7fe52p-1022",
   };
   printf("* Testing fio_aton/strtod performance:\n");
+  /* Sanity Test */
+  bool rounding_errors_detected = 0;
+  for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
+    union {
+      double f;
+      uint64_t u64;
+    } u1, u2;
+    char *tmp = (char *)floats[n_i];
+    u1.f = to_test[0].fn(&tmp);
+    for (size_t fn_i = 1; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
+      char *tmp2 = (char *)floats[n_i];
+      u2.f = to_test[fn_i].fn(&tmp2);
+      if (tmp2 == tmp) {
+        if ((isnan(u1.f) && isnan(u2.f)) || u1.u64 == u2.u64)
+          continue;
+        rounding_errors_detected = 1;
+#ifdef DEBUG
+        FIO_LOG_WARNING("Rounding error for %s:\n\t%.17g ?= %.17g",
+                        floats[n_i],
+                        u1.f,
+                        u2.f);
+#endif
+        if (u1.u64 + 1 == u2.u64)
+          continue;
+        if (u2.u64 + 1 == u1.u64)
+          continue;
+      }
+      FIO_ASSERT(tmp2 == tmp && u1.u64 == u2.u64,
+                 "Sanity test failed for %s\n\t %.17g ?!= %.17g\n\t %s ?!= %s",
+                 (char *)floats[n_i],
+                 u1.f,
+                 u2.f,
+                 tmp,
+                 tmp2);
+    }
+  }
+  /* Speed Test */
   for (size_t fn_i = 0; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
+    double unused;
     printf("\t%s\t", to_test[fn_i].n);
     int64_t start = FIO_NAME_TEST(stl, atol_time)();
     for (size_t i = 0; i < (FIO_ATOL_TEST_MAX / 10); ++i) {
       for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
-        FIO_COMPILER_GUARD;
         char *tmp = (char *)floats[n_i];
-        to_test[fn_i].fn(&tmp);
+        unused = to_test[fn_i].fn(&tmp);
+        FIO_COMPILER_GUARD;
       }
     }
+    (void)unused;
     int64_t end = FIO_NAME_TEST(stl, atol_time)();
     printf("%lld us\n", end - start);
   }
+  if (rounding_errors_detected)
+    FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
+                    "`fio_aton` to `strtod`.\n");
 }
 
 FIO_SFUNC size_t sprintf_wrapper(char *dest, int64_t num, uint8_t base) {
@@ -174,11 +227,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
       int64_t n = a2l(&bf);
       bf = buf;
       FIO_ASSERT(n == i,
-                 "roundtrip error for %s: %s != %lld (got %lld)",
+                 "roundtrip error for %s: %s != %lld (got %lld stopped: %s)",
                  name,
                  buf,
                  i,
-                 a2l(&bf));
+                 a2l(&bf),
+                 bf);
     }
     trt = FIO_NAME_TEST(stl, atol_time)() - start;
     start = FIO_NAME_TEST(stl, atol_time)();
@@ -494,20 +548,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     if (((double)d == r && (double)d == r2) || (r == std && r2 == std)) {      \
       /** fprintf(stderr, "Okay for %s\n", s); */                              \
     } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {     \
-      FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",        \
-                      ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
-                      s);                                                      \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",      \
+                        ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),             \
+                        s);                                                    \
     } else if ((pn1.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn1.as_i) {     \
-      FIO_LOG_WARNING("aton Single bit rounding error detected (%s1): %s\n"    \
-                      "\t%g != %g",                                            \
-                      ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),               \
-                      s,                                                       \
-                      r2,                                                      \
-                      std);                                                    \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("aton Single bit rounding error detected (%s1): %s\n"  \
+                        "\t%g != %g",                                          \
+                        ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),             \
+                        s,                                                     \
+                        r2,                                                    \
+                        std);                                                  \
     } else if (r == 0.0 && d != 0.0 && !isnan(d)) {                            \
-      FIO_LOG_WARNING("float range limit marked before: %s\n", s);             \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("float range limit marked before: %s\n", s);           \
     } else if (r2 == 0.0 && d != 0.0 && !isnan(d)) {                           \
-      FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);        \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);      \
     } else {                                                                   \
       char f_buf[256];                                                         \
       pn.d_ = std;                                                             \
@@ -530,7 +588,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     }                                                                          \
   } while (0)
 
-  fprintf(stderr, "* Testing fio_atof samples.\n");
+  fprintf(stderr, "* Testing fio_atof & fio_aton samples.\n");
 
   /* A few hex-float examples  */
   TEST_DOUBLE("0x10.1p0", 0x10.1p0, 0);

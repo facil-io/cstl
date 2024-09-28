@@ -3268,13 +3268,9 @@ This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
 #include "fio-stl.h"
 ```
 
-The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters, comments, and octal, hex and binary numbers.
+The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters, comments, and common numeral formats (octal, hex and binary).
 
-The parser allows for streaming data and decouples the parsing process from the resulting data-structure by calling static callbacks for JSON related events.
-
-To use the JSON parser, define `FIO_JSON` before including the `fio-slt.h` file and later define the static callbacks required by the parser (see list of callbacks).
-
-**Note**: the FIOBJ soft types already use the JSON parser. For this reason, another JSON parser can't be implemented in the same translation unit as the FIOBJ implementation. To use another JSON parser, implement it in a different C file then  the one where the FIOBJ types are implemented.
+The facil.io JSON parser should be considered **unsafe** as overflow protection depends on the `NUL` character appearing at the end of the string passed to the parser.
 
 **Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
 
@@ -3286,35 +3282,8 @@ To use the JSON parser, define `FIO_JSON` before including the `fio-slt.h` file 
 #define FIO_JSON_MAX_DEPTH 512
 #endif
 ```
-The JSON parser isn't recursive, but it allocates a nesting bitmap on the stack, which consumes stack memory.
 
-To ensure the stack isn't abused, the parser will limit JSON nesting levels to a customizable `FIO_JSON_MAX_DEPTH` number of nesting levels.
-
-
-The JSON parser type. Memory must be initialized to 0 before first uses (see `FIO_JSON_INIT`).
-
-The type should be considered opaque. To add user data to the parser, use C-style inheritance and pointer arithmetics or simple type casting.
-
-i.e.:
-
-```c
-typedef struct {
-  fio_json_parser_s private;
-  int my_data;
-} my_json_parser_s;
-// void use_in_callback (fio_json_parser_s * p) {
-//    my_json_parser_s *my = (my_json_parser_s *)p;
-// }
-```
-
-#### `FIO_JSON_INIT`
-
-```c
-#define FIO_JSON_INIT                                                          \
-  { .depth = 0 }
-```
-
-A convenient macro that could be used to initialize the parser's memory to 0.
+To ensure the program's stack isn't abused, the parser will limit JSON nesting levels to a customizable `FIO_JSON_MAX_DEPTH` number of nesting levels.
 
 ### JSON parser API
 
@@ -5682,6 +5651,8 @@ Takes a UTF-8 character selection information (UTF-8 position and length) and up
 If the String isn't UTF-8 valid up to the requested selection, than `pos` will be updated to `-1` otherwise values are always positive.
 
 The returned `len` value may be shorter than the original if there wasn't enough data left to accommodate the requested length. When a `len` value of `0` is returned, this means that `pos` marks the end of the String.
+
+if `pos` is negative, counts backwards (`-1` is the position of the last UTF-8 character).
 
 Returns -1 on error and 0 on success.
 

@@ -332,6 +332,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          3,
                          2);
   fprintf(stderr, "\n");
+#if 0  /* speed test num and ptr hashing */
   fio_test_hash_function(FIO_NAME_TEST(stl, risky_ptr_wrapper),
                          (char *)"fio_risky_ptr (emulated)",
                          7,
@@ -358,6 +359,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+#endif /* speed test num and ptr hashing */
+
   /* xmask speed testing */
   fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
@@ -371,6 +374,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          1,
                          2);
 
+#if 0  /* speed test playground */
   /* playground speed testing */
   fprintf(stderr, "\n");
   fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
@@ -393,8 +397,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
                          5,
                          3,
                          2);
+#endif /* speed test playground */
   fprintf(stderr, "\n");
-#endif
+#endif /* DEBUG */
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
