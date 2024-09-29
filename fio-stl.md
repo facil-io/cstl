@@ -632,6 +632,78 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
 
 Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
 
+### Core UTF-8 Support
+
+Note, these functions are for single UTF-8 character / code-point handling, they don't check for memory bounds (may overflow) and aren't considered safe.
+
+However, they could be used for writing safe a UTF-8 implementation if used with care. Assuming your strings end with a little padding or a NUL character, these should be safe to use (when writing, check available buffer before writing a possibly multi-byte UTF-8 char.
+
+#### `fio_utf8_code_len`
+
+```c
+size_t fio_utf8_code_len(uint32_t u);
+```
+
+Returns the number of bytes required to UTF-8 encoded a code point `u`.
+
+#### `fio_utf8_char_len_unsafe`
+
+```c
+size_t fio_utf8_char_len_unsafe(uint8_t c);
+```
+
+Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid).
+
+Use only to re-collect lost length information after a successful `fio_utf8_write` or `fio_utf8_char_len` call.
+
+#### `fio_utf8_char_len`
+
+```c
+size_t fio_utf8_char_len(const void *str);
+```
+
+Returns the number of valid UTF-8 bytes used by first char at `str`.
+
+If `str` doesn't point to a valid UTF-8 encoded code-point, returns 0.
+
+**Note**: This function also tests all the following bytes that are part of the asme UTF-8 character.
+
+
+#### `fio_utf8_char_len`
+
+```c
+size_t fio_utf8_write(void *dest, uint32_t u);
+```
+
+Writes code point to `dest` using UFT-8. Returns number of bytes written.
+
+Possible use pattern will be:
+
+```c
+dest += fio_utf8_write(dest, u);
+```
+
+
+#### `fio_utf8_read`
+
+```c
+uint32_t fio_utf8_read(char **str);
+```
+
+Decodes the first UTF-8 char at `str` and returns its code point value.
+
+Advances the pointer at `str` by the number of bytes consumed (read).
+
+#### `fio_utf8_peek`
+
+```c
+uint32_t fio_utf8_peek(char *str);
+```
+
+Decodes the first UTF-8 char at `str` and returns its code point value.
+
+Unlike `fio_utf8_read`, the pointer does not change.
+
 -------------------------------------------------------------------------------
 
 ## Memory Copying, Seeking and Setting

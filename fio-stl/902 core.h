@@ -301,31 +301,77 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
     struct {
       const char *buf;
       size_t clen;
+      bool expect_fail;
     } utf8_core_tests[] = {
+        {"\xf0\x9f\x92\x85", 4},
         {"\xf0\x9f\x92\x95", 4},
         {"\xe2\x9d\xa4", 3},
+        {"\xE1\x9A\x80", 3},
+        {"\xE2\x80\x80", 3},
+        {"\xE2\x80\x81", 3},
+        {"\xE2\x80\x82", 3},
+        {"\xE2\x80\x83", 3},
+        {"\xE2\x80\x84", 3},
+        {"\xE2\x80\x85", 3},
+        {"\xE2\x80\x86", 3},
+        {"\xE2\x80\x87", 3},
+        {"\xE2\x80\x88", 3},
+        {"\xE2\x80\x89", 3},
+        {"\xE2\x80\x8A", 3},
+        {"\xE2\x80\xA8", 3},
+        {"\xE2\x80\xA9", 3},
+        {"\xE2\x80\xAF", 3},
+        {"\xE2\x81\x9F", 3},
+        {"\xE3\x80\x80", 3},
+        {"\xEF\xBB\xBF", 3},
         {"\xc6\x92", 2},
+        {"\xC2\xA0", 2},
+        {"\x09", 1},
+        {"\x0A", 1},
+        {"\x0B", 1},
+        {"\x0C", 1},
+        {"\x0D", 1},
+        {"\x20", 1},
         {"Z", 1},
+        {"\0", 1},
         {0},
+        {"\xf0\x9f\x92\x35", 4, 1},
+        {"\xf0\x9f\x32\x95", 4, 1},
+        {"\xf0\x3f\x92\x95", 4, 1},
+        {"\x30\x9f\x92\x95", 4, 1},
+        {"\xE1\x9A\x30", 3, 1},
+        {"\xE1\x3A\x80", 3, 1},
+        {"\xf0\x9A\x80", 3, 1},
+        {"\xc6\x32", 2, 1},
+        {"\xf0\x92", 2, 1},
     };
     for (size_t i = 0; utf8_core_tests[i].buf; ++i) {
       char *pos = (char *)utf8_core_tests[i].buf;
-      FIO_ASSERT((size_t)FIO_UTF8_CHAR_LEN(pos) == utf8_core_tests[i].clen,
-                 "FIO_UTF8_CHAR_LEN failed on %s",
-                 utf8_core_tests[i].buf);
+      FIO_ASSERT((size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
+                 "FIO_UTF8_CHAR_LEN failed on %s ([0] == %X), %d != %d",
+                 utf8_core_tests[i].buf,
+                 (unsigned)(uint8_t)utf8_core_tests[i].buf[0],
+                 (int)fio_utf8_char_len(pos),
+                 utf8_core_tests[i].clen);
       uint32_t value = 0, validate = 0;
       void *tst_str = NULL;
       fio_memcpy7x(&tst_str, utf8_core_tests[i].buf, utf8_core_tests[i].clen);
 #if __LITTLE_ENDIAN__
       tst_str = (void *)(uintptr_t)fio_lton32((uint32_t)(uintptr_t)tst_str);
 #endif
-      FIO_UTF8_READ(value, pos);
-      uint32_t val_len = FIO_UTF8_CODE_LEN(value);
+      value = fio_utf8_read(&pos);
+      uint32_t val_len = fio_utf8_code_len(value);
+      FIO_ASSERT(!utf8_core_tests[i].expect_fail ||
+                     (!value && pos == utf8_core_tests[i].buf &&
+                      !fio_utf8_char_len(utf8_core_tests[i].buf)),
+                 "Failed to detect invalid UTF-8");
+      if (utf8_core_tests[i].expect_fail)
+        continue;
       char output[32];
       pos = output;
-      FIO_UTF8_WRITE(pos, value, val_len);
+      pos += fio_utf8_write(pos, value);
       FIO_ASSERT(val_len == utf8_core_tests[i].clen,
-                 "FIO_UTF8_READ + FIO_UTF8_CODE_LEN failed on %s / %p (%zu "
+                 "fio_utf8_read + fio_utf8_code_len failed on %s / %p (%zu "
                  "len => %zu != %zu)",
                  utf8_core_tests[i].buf,
                  tst_str,
@@ -333,9 +379,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                  val_len,
                  utf8_core_tests[i].clen);
       pos = output;
-      FIO_UTF8_READ(validate, pos);
-      FIO_ASSERT(validate == value && value > 0,
-                 "FIO_UTF8_READ + FIO_UTF8_WRITE roundtrip failed on %s",
+      validate = fio_utf8_read(&pos);
+      FIO_ASSERT(validate == value && (value > 0 || !utf8_core_tests[i].buf[0]),
+                 "fio_utf8_read + fio_utf8_write roundtrip failed on %s",
                  utf8_core_tests[i].buf);
     }
   }

@@ -1278,21 +1278,9 @@ UTF-8 Support
 
 /** Returns 0 if non-UTF-8 or returns 1-4 (UTF-8 if a valid char). */
 SFUNC size_t fio_string_utf8_valid_code_point(const void *c, size_t buf_len) {
-  size_t l = FIO_UTF8_CHAR_LEN((uint8_t *)c);
+  size_t l = fio_utf8_char_len((uint8_t *)c);
   l &= 0U - (buf_len >= l);
-  return FIO_UTF8_CHAR_LEN((uint8_t *)c);
-}
-
-/** Encodes `u` in UTF-8 format, writing it to `dest`. */
-FIO_IFUNC size_t fio___string_utf8_code_point_len(size_t u) {
-  return FIO_UTF8_CODE_LEN(u);
-}
-
-/** Encodes `u` in UTF-8 format, writing it to `dest`. */
-FIO_IFUNC size_t fio___string_utf8_write(uint8_t *dest, size_t u) {
-  size_t r = FIO_UTF8_CODE_LEN(u);
-  FIO_UTF8_WRITE(dest, u, r);
-  return r;
+  return l;
 }
 
 /** Returns 1 if the String is UTF-8 valid and 0 if not. */
@@ -1301,7 +1289,7 @@ SFUNC bool fio_string_utf8_valid(fio_str_info_s str) {
     return 1;
   char *const end = str.buf + str.len;
   size_t tmp;
-  while ((tmp = FIO_UTF8_CHAR_LEN(str.buf)) && ((str.buf += tmp) < end))
+  while ((tmp = fio_utf8_char_len(str.buf)) && ((str.buf += tmp) < end))
     ;
   return str.buf == end;
 }
@@ -1313,7 +1301,7 @@ SFUNC size_t fio_string_utf8_len(fio_str_info_s str) {
   char *end = str.buf + str.len;
   size_t utf8len = 0, tmp;
   do {
-    tmp = FIO_UTF8_CHAR_LEN(str.buf);
+    tmp = fio_utf8_char_len(str.buf);
     str.buf += tmp;
     utf8len += !!tmp;
   } while (tmp && str.buf < end);
@@ -1348,7 +1336,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
   if ((*pos) > 0) {
     start = *pos;
     do {
-      clen = FIO_UTF8_CHAR_LEN(p);
+      clen = fio_utf8_char_len(p);
       p += clen;
       --start;
     } while (clen && start && p < end);
@@ -1364,7 +1352,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
       --p;
       while ((*p & 0xC0U) == 0x80U && p > (uint8_t *)str.buf)
         --p;
-      if (FIO_UTF8_CHAR_LEN(p) != was - p)
+      if ((size_t)fio_utf8_char_len_unsafe(*p) != (size_t)(was - p))
         goto error;
     } while (--start && p > (uint8_t *)str.buf);
   }
@@ -1373,7 +1361,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
   /* find end */
   start = *len;
   clen = 1;
-  while (start && p < end && (clen = FIO_UTF8_CHAR_LEN(p))) {
+  while (start && p < end && (clen = fio_utf8_char_len(p))) {
     p += clen;
     --start;
   }
@@ -1859,7 +1847,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
           u += 0x10000;
           src += 6;
         }
-        at += fio___string_utf8_write(writer + at, u);
+        at += fio_utf8_write(writer + at, u);
         src += 5;
         break; /* from switch */
       } else
@@ -2188,7 +2176,7 @@ FIO_IFUNC int fio_string_write_url_dec_internal(
         u += 0x10000;
         last += 6;
       }
-      dest->len += fio___string_utf8_write((uint8_t *)dest->buf + dest->len, u);
+      dest->len += fio_utf8_write((uint8_t *)dest->buf + dest->len, u);
       last += 5;
     } else {
       dest->buf[dest->len++] = '%';
@@ -2419,7 +2407,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
           continue;
         del += (*del == ';');
         reduced -= (del - tmp);
-        reduced += fio___string_utf8_code_point_len(num);
+        reduced += fio_utf8_code_len(num);
         continue;
       }
       union {
@@ -2471,8 +2459,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
           goto untrusted_no_encode;
-        dest->len +=
-            fio___string_utf8_write((uint8_t *)dest->buf + dest->len, num);
+        dest->len += fio_utf8_write((uint8_t *)dest->buf + dest->len, num);
         del += (del < end && del[0] == ';');
         continue;
       }

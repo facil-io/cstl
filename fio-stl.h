@@ -792,84 +792,103 @@ UTF-8 Support (basic)
 ***************************************************************************** */
 
 /* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-#define FIO_UTF8_CODE_LEN(u)                                                   \
-  (((size_t)((u) > ((1U << 21) - 1)) - 1) &                                    \
-   (1U + ((u) > 127) + ((u) > 2047) + ((u) > 65535)))
+FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
+  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
+                  ((uint32_t)(u) > 65535));
+  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
+  return len;
+}
 
-/* Returns the number of valid UTF-8 bytes on pointer `str`. */
-#define FIO_UTF8_CHAR_LEN(str)                                                 \
-  ((((((*(str)) & 0xF8U) == 0xF0U) &                                           \
-     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) /* 1||0 */]) & 0xC0U) == 0x80U) &  \
-     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) << 1]) & 0xC0U) == 0x80U) &        \
-     ((((str)[(((*(str)) & 0xF8U) == 0xF0U) |                                  \
-              ((((*(str)) & 0xF8U) == 0xF0U) << 1)]) &                         \
-       0xC0U) == 0x80U))                                                       \
-    << 2) |                                                                    \
-   ((((*(str)&0xF0U) == 0xE0U) &                                               \
-     (((((str)[(((*(str)) & 0xF0U) == 0xE0U) /* 1||0 */]) & 0xC0U) == 0x80U) & \
-      ((((str)[(((*(str)) & 0xF0U) == 0xE0U) << 1]) & 0xC0U) == 0x80U))) *     \
-    3) |                                                                       \
-   ((((*(str)&0xE0U) == 0xC0U) &                                               \
-     ((((str)[((*(str)&0xE0U) == 0xC0U) /* 1 or 0 */]) & 0xC0U) == 0x80U))     \
-    << 1) |                                                                    \
-   (((*(str)) & 0x80U) == 0U))
+/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
+FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
+  /* Ruby script for map:
+  map = [];
+  32.times { | i |
+    map << (((i & 0b10000) == 0b00000) ? 1
+        :   ((i & 0b11000) == 0b10000) ? 8
+        :   ((i & 0b11100) == 0b11000) ? 2
+        :   ((i & 0b11110) == 0b11100) ? 3
+        :   ((i & 0b11111) == 0b11110) ? 4
+                               : 0)
+  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
+  */
+  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
+                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
+  return map[c >> 3];
+}
 
-/*
- * Writes code point `u` to `dest`, assuming `dest` is a `uint8_t` pointer.
+/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
+FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
+  size_t r, tst;
+  const uint8_t *s = (uint8_t *)str_;
+  r = fio_utf8_char_len_unsafe(*s);
+  if (r < 2)
+    return r;
+  tst = fio_utf8_char_len_unsafe(s[1]); /* avoid overflowing more than 1 char */
+  tst &= fio_utf8_char_len_unsafe(s[(tst >> 3) + (r > 2)]);
+  tst &= fio_utf8_char_len_unsafe(s[((tst >> 3) + (r > 3)) | (tst >> 3)]);
+  tst &= 8;
+  tst -= tst >> 3;
+  r &= tst;
+  return r;
+}
+
+/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
+FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
+  const uint8_t len = fio_utf8_code_len(u);
+  uint8_t *dest = (uint8_t *)dest_;
+  if (!len)
+    return len;
+  if (len == 1) {
+    *dest = u;
+    return len;
+  }
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  (dest) += 1;
+  *(dest) = head | (((u) >> 12) & mask);
+  (dest) += (len > 3);
+  *(dest) = head | (((u) >> 6) & mask);
+  (dest) += (len > 2);
+  *(dest) = head | ((u)&mask);
+  return len;
+}
+
+/**
+ * Decodes the first UTF-8 char at `str` and returns its code point value.
  *
- * Use:
- *
- *     FIO_UTF8_WRITE(dest, 0x1D11E, FIO_UTF8_CODE_LEN(0x1D11E))
- *
+ * Advances the pointer at `str` by the number of bytes consumed (read).
  */
-#define FIO_UTF8_WRITE(dest, u, u_code_len)                                    \
-  do {                                                                         \
-    const uint8_t len__ = (u_code_len);                                        \
-    const uint8_t offset__ = 0xF0U << (4U - len__);                            \
-    const uint8_t head__ = 0x80U << (len__ < 2);                               \
-    const uint8_t mask__ = 0xFFU >> ((len__ > 1) << 1);                        \
-    *(dest) = offset__ | ((u) >> (6 * (len__ - (len__ > 1))));                 \
-    (dest) += (len__ > 1);                                                     \
-    *(dest) = head__ | (((u) >> 12) & mask__);                                 \
-    (dest) += (len__ > 3);                                                     \
-    *(dest) = head__ | (((u) >> 6) & mask__);                                  \
-    (dest) += (len__ > 2);                                                     \
-    *(dest) = head__ | ((u)&mask__);                                           \
-    (dest) += (len__ > 0);                                                     \
-  } while (0)
+FIO_IFUNC uint32_t fio_utf8_read(char **str) {
+  const uint8_t *s = *(const uint8_t **)str;
+  const unsigned len = fio_utf8_char_len(s);
+  *str += len;
+  if (!len)
+    return 0;
+  if (len == 1)
+    return *s;
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
+         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+         ((uint32_t)(s[t4] & 63));
+}
 
-/*
- * Reads code point to `uint32_t` `target` from `uint8_t` pointer `src`.
- *
- * The `src` pointer will advance by `FIO_UTF8_CHAR_LEN` (0 on error).
- *
- * Use:
- *
- *     uint32_t target;
- *     FIO_UTF8_READ(target, str)
- *
- */
-#define FIO_UTF8_READ(target, src)                                             \
-  do {                                                                         \
-    const uint8_t len__ = FIO_UTF8_CHAR_LEN(src);                              \
-    const uint8_t offset__ = ~(0xF0U << (4U - len__));                         \
-    const uint8_t mask__ = ~(0x80U << (len__ < 2));                            \
-    target = (0U - (len__ > 1)) & (*src & offset__);                           \
-    target <<= 6;                                                              \
-    src += (len__ > 1);                                                        \
-    target |= (0U - (len__ > 3)) & *src & mask__;                              \
-    target <<= ((len__ > 3) << 2) | ((len__ > 3) << 1);                        \
-    src += (len__ > 3);                                                        \
-    target |= (0U - (len__ > 2)) & *src & mask__;                              \
-    target <<= ((len__ > 2) << 2) | ((len__ > 2) << 1);                        \
-    src += (len__ > 2);                                                        \
-    target |= (*src & mask__);                                                 \
-    src += (len__ > 0);                                                        \
-  } while (0)
+/** Decodes the first UTF-8 char at `str` and returns its code point value. */
+FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
+  return fio_utf8_read((char **)&str);
+}
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
@@ -1359,7 +1378,8 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1442,7 +1462,8 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1527,7 +1548,8 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 
 /* *****************************************************************************
 Constant-Time Selectors
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Returns 1 if the expression is true (input isn't zero). */
 FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
@@ -1547,7 +1569,8 @@ FIO_IFUNC uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b) {
   return (b ^ (((uintmax_t)0ULL - (cond & 1)) & (a ^ b)));
 }
 
-/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
+/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise.
+ */
 FIO_IFUNC uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
@@ -1578,7 +1601,8 @@ FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
 
 /* *****************************************************************************
 Constant-Time Comparison Test
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** A timing attack resistant memory comparison function. */
 FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
@@ -1765,7 +1789,8 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1840,7 +1865,8 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-***************************************************************************** */
+*****************************************************************************
+*/
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1963,7 +1989,8 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
@@ -2091,7 +2118,8 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {
@@ -2115,7 +2143,8 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Add with carry. */
 FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
@@ -18698,21 +18727,9 @@ UTF-8 Support
 
 /** Returns 0 if non-UTF-8 or returns 1-4 (UTF-8 if a valid char). */
 SFUNC size_t fio_string_utf8_valid_code_point(const void *c, size_t buf_len) {
-  size_t l = FIO_UTF8_CHAR_LEN((uint8_t *)c);
+  size_t l = fio_utf8_char_len((uint8_t *)c);
   l &= 0U - (buf_len >= l);
-  return FIO_UTF8_CHAR_LEN((uint8_t *)c);
-}
-
-/** Encodes `u` in UTF-8 format, writing it to `dest`. */
-FIO_IFUNC size_t fio___string_utf8_code_point_len(size_t u) {
-  return FIO_UTF8_CODE_LEN(u);
-}
-
-/** Encodes `u` in UTF-8 format, writing it to `dest`. */
-FIO_IFUNC size_t fio___string_utf8_write(uint8_t *dest, size_t u) {
-  size_t r = FIO_UTF8_CODE_LEN(u);
-  FIO_UTF8_WRITE(dest, u, r);
-  return r;
+  return l;
 }
 
 /** Returns 1 if the String is UTF-8 valid and 0 if not. */
@@ -18721,7 +18738,7 @@ SFUNC bool fio_string_utf8_valid(fio_str_info_s str) {
     return 1;
   char *const end = str.buf + str.len;
   size_t tmp;
-  while ((tmp = FIO_UTF8_CHAR_LEN(str.buf)) && ((str.buf += tmp) < end))
+  while ((tmp = fio_utf8_char_len(str.buf)) && ((str.buf += tmp) < end))
     ;
   return str.buf == end;
 }
@@ -18733,7 +18750,7 @@ SFUNC size_t fio_string_utf8_len(fio_str_info_s str) {
   char *end = str.buf + str.len;
   size_t utf8len = 0, tmp;
   do {
-    tmp = FIO_UTF8_CHAR_LEN(str.buf);
+    tmp = fio_utf8_char_len(str.buf);
     str.buf += tmp;
     utf8len += !!tmp;
   } while (tmp && str.buf < end);
@@ -18768,7 +18785,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
   if ((*pos) > 0) {
     start = *pos;
     do {
-      clen = FIO_UTF8_CHAR_LEN(p);
+      clen = fio_utf8_char_len(p);
       p += clen;
       --start;
     } while (clen && start && p < end);
@@ -18784,7 +18801,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
       --p;
       while ((*p & 0xC0U) == 0x80U && p > (uint8_t *)str.buf)
         --p;
-      if (FIO_UTF8_CHAR_LEN(p) != was - p)
+      if ((size_t)fio_utf8_char_len_unsafe(*p) != (size_t)(was - p))
         goto error;
     } while (--start && p > (uint8_t *)str.buf);
   }
@@ -18793,7 +18810,7 @@ SFUNC int fio_string_utf8_select(fio_str_info_s str,
   /* find end */
   start = *len;
   clen = 1;
-  while (start && p < end && (clen = FIO_UTF8_CHAR_LEN(p))) {
+  while (start && p < end && (clen = fio_utf8_char_len(p))) {
     p += clen;
     --start;
   }
@@ -19279,7 +19296,7 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
           u += 0x10000;
           src += 6;
         }
-        at += fio___string_utf8_write(writer + at, u);
+        at += fio_utf8_write(writer + at, u);
         src += 5;
         break; /* from switch */
       } else
@@ -19608,7 +19625,7 @@ FIO_IFUNC int fio_string_write_url_dec_internal(
         u += 0x10000;
         last += 6;
       }
-      dest->len += fio___string_utf8_write((uint8_t *)dest->buf + dest->len, u);
+      dest->len += fio_utf8_write((uint8_t *)dest->buf + dest->len, u);
       last += 5;
     } else {
       dest->buf[dest->len++] = '%';
@@ -19839,7 +19856,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
           continue;
         del += (*del == ';');
         reduced -= (del - tmp);
-        reduced += fio___string_utf8_code_point_len(num);
+        reduced += fio_utf8_code_len(num);
         continue;
       }
       union {
@@ -19891,8 +19908,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
           goto untrusted_no_encode;
-        dest->len +=
-            fio___string_utf8_write((uint8_t *)dest->buf + dest->len, num);
+        dest->len += fio_utf8_write((uint8_t *)dest->buf + dest->len, num);
         del += (del < end && del[0] == ';');
         continue;
       }
@@ -46840,31 +46856,77 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
     struct {
       const char *buf;
       size_t clen;
+      bool expect_fail;
     } utf8_core_tests[] = {
+        {"\xf0\x9f\x92\x85", 4},
         {"\xf0\x9f\x92\x95", 4},
         {"\xe2\x9d\xa4", 3},
+        {"\xE1\x9A\x80", 3},
+        {"\xE2\x80\x80", 3},
+        {"\xE2\x80\x81", 3},
+        {"\xE2\x80\x82", 3},
+        {"\xE2\x80\x83", 3},
+        {"\xE2\x80\x84", 3},
+        {"\xE2\x80\x85", 3},
+        {"\xE2\x80\x86", 3},
+        {"\xE2\x80\x87", 3},
+        {"\xE2\x80\x88", 3},
+        {"\xE2\x80\x89", 3},
+        {"\xE2\x80\x8A", 3},
+        {"\xE2\x80\xA8", 3},
+        {"\xE2\x80\xA9", 3},
+        {"\xE2\x80\xAF", 3},
+        {"\xE2\x81\x9F", 3},
+        {"\xE3\x80\x80", 3},
+        {"\xEF\xBB\xBF", 3},
         {"\xc6\x92", 2},
+        {"\xC2\xA0", 2},
+        {"\x09", 1},
+        {"\x0A", 1},
+        {"\x0B", 1},
+        {"\x0C", 1},
+        {"\x0D", 1},
+        {"\x20", 1},
         {"Z", 1},
+        {"\0", 1},
         {0},
+        {"\xf0\x9f\x92\x35", 4, 1},
+        {"\xf0\x9f\x32\x95", 4, 1},
+        {"\xf0\x3f\x92\x95", 4, 1},
+        {"\x30\x9f\x92\x95", 4, 1},
+        {"\xE1\x9A\x30", 3, 1},
+        {"\xE1\x3A\x80", 3, 1},
+        {"\xf0\x9A\x80", 3, 1},
+        {"\xc6\x32", 2, 1},
+        {"\xf0\x92", 2, 1},
     };
     for (size_t i = 0; utf8_core_tests[i].buf; ++i) {
       char *pos = (char *)utf8_core_tests[i].buf;
-      FIO_ASSERT((size_t)FIO_UTF8_CHAR_LEN(pos) == utf8_core_tests[i].clen,
-                 "FIO_UTF8_CHAR_LEN failed on %s",
-                 utf8_core_tests[i].buf);
+      FIO_ASSERT((size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
+                 "FIO_UTF8_CHAR_LEN failed on %s ([0] == %X), %d != %d",
+                 utf8_core_tests[i].buf,
+                 (unsigned)(uint8_t)utf8_core_tests[i].buf[0],
+                 (int)fio_utf8_char_len(pos),
+                 utf8_core_tests[i].clen);
       uint32_t value = 0, validate = 0;
       void *tst_str = NULL;
       fio_memcpy7x(&tst_str, utf8_core_tests[i].buf, utf8_core_tests[i].clen);
 #if __LITTLE_ENDIAN__
       tst_str = (void *)(uintptr_t)fio_lton32((uint32_t)(uintptr_t)tst_str);
 #endif
-      FIO_UTF8_READ(value, pos);
-      uint32_t val_len = FIO_UTF8_CODE_LEN(value);
+      value = fio_utf8_read(&pos);
+      uint32_t val_len = fio_utf8_code_len(value);
+      FIO_ASSERT(!utf8_core_tests[i].expect_fail ||
+                     (!value && pos == utf8_core_tests[i].buf &&
+                      !fio_utf8_char_len(utf8_core_tests[i].buf)),
+                 "Failed to detect invalid UTF-8");
+      if (utf8_core_tests[i].expect_fail)
+        continue;
       char output[32];
       pos = output;
-      FIO_UTF8_WRITE(pos, value, val_len);
+      pos += fio_utf8_write(pos, value);
       FIO_ASSERT(val_len == utf8_core_tests[i].clen,
-                 "FIO_UTF8_READ + FIO_UTF8_CODE_LEN failed on %s / %p (%zu "
+                 "fio_utf8_read + fio_utf8_code_len failed on %s / %p (%zu "
                  "len => %zu != %zu)",
                  utf8_core_tests[i].buf,
                  tst_str,
@@ -46872,9 +46934,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                  val_len,
                  utf8_core_tests[i].clen);
       pos = output;
-      FIO_UTF8_READ(validate, pos);
-      FIO_ASSERT(validate == value && value > 0,
-                 "FIO_UTF8_READ + FIO_UTF8_WRITE roundtrip failed on %s",
+      validate = fio_utf8_read(&pos);
+      FIO_ASSERT(validate == value && (value > 0 || !utf8_core_tests[i].buf[0]),
+                 "fio_utf8_read + fio_utf8_write roundtrip failed on %s",
                  utf8_core_tests[i].buf);
     }
   }
