@@ -5,17 +5,17 @@
 static void mustache_json_run_test(FIOBJ test) {
   printf("Test name: %s\n"
          "Test desc: %s\n",
-         fiobj2cstr(fiobj_hash_get3(test, "name", 4)).buf,
-         fiobj2cstr(fiobj_hash_get3(test, "desc", 4)).buf);
-  FIOBJ data = fiobj_hash_get3(test, "data", 4);
+         fiobj2cstr(fiobj_hash_get2(test, "name", 4)).buf,
+         fiobj2cstr(fiobj_hash_get2(test, "desc", 4)).buf);
+  FIOBJ data = fiobj_hash_get2(test, "data", 4);
   fio_buf_info_s template_data =
-      fiobj_str_buf(fiobj_hash_get3(test, "template", 8));
+      fiobj_str_buf(fiobj_hash_get2(test, "template", 8));
   fio_buf_info_s expected_data =
-      fiobj_str_buf(fiobj_hash_get3(test, "expected", 8));
+      fiobj_str_buf(fiobj_hash_get2(test, "expected", 8));
   FIO_ASSERT(template_data.buf, "template content missing");
   FIO_ASSERT(expected_data.buf, "expected result missing");
-  if (!FIOBJ_IS_INVALID(fiobj_hash_get3(test, "partials", 8))) {
-    FIOBJ list = fiobj_hash_get3(test, "partials", 8);
+  if (!FIOBJ_IS_INVALID(fiobj_hash_get2(test, "partials", 8))) {
+    FIOBJ list = fiobj_hash_get2(test, "partials", 8);
     /* write partials to temporary files */
     FIO_MAP_EACH(fiobj_hash, list, o) {
       FIO_STR_INFO_TMP_VAR(fn, 4095);
@@ -42,8 +42,8 @@ static void mustache_json_run_test(FIOBJ test) {
                          .var_is_truthful = fiobj___mustache_var_is_truthful,
                          .ctx = data);
 
-  if (!FIOBJ_IS_INVALID(fiobj_hash_get3(test, "partials", 8))) {
-    FIOBJ list = fiobj_hash_get3(test, "partials", 8);
+  if (!FIOBJ_IS_INVALID(fiobj_hash_get2(test, "partials", 8))) {
+    FIOBJ list = fiobj_hash_get2(test, "partials", 8);
     /* delete temporary files */
     FIO_MAP_EACH(fiobj_hash, list, o) {
       FIO_STR_INFO_TMP_VAR(fn, 4095);
@@ -96,7 +96,7 @@ static void mustache_json_test(const char *json_file_name) {
           "\n\n===\ntesting specification file:\n\t%s\n\n%s===\n\n",
           json_file_name,
           fiobj2cstr(fiobj_json_find(json, FIO_STR_INFO1("overview"))).buf);
-  FIOBJ tests = fiobj_hash_get3(json, "tests", 5);
+  FIOBJ tests = fiobj_hash_get2(json, "tests", 5);
   FIO_ASSERT(FIOBJ_TYPE_IS(tests, FIOBJ_T_ARRAY),
              "JSON tests array type mismatch or missing");
   for (size_t i = 0; i < fiobj_array_count(tests); ++i) {
