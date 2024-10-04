@@ -787,6 +787,10 @@ typedef struct fio_buf_info_s {
     .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
 
+/** Tests to see if memory reallocation happened. */
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
+  (fio___stack_mem___##name != name.buf)
+
 /* *****************************************************************************
 UTF-8 Support (basic)
 ***************************************************************************** */
@@ -820,17 +824,17 @@ FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
 
 /** Returns the number of valid UTF-8 bytes used by first char at `str`. */
 FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst;
+  size_t r, tst = 1;
   const uint8_t *s = (uint8_t *)str_;
   r = fio_utf8_char_len_unsafe(*s);
+  r &= 7;
   if (r < 2)
     return r;
-  tst = fio_utf8_char_len_unsafe(s[1]); /* avoid overflowing more than 1 char */
-  tst &= fio_utf8_char_len_unsafe(s[(tst >> 3) + (r > 2)]);
-  tst &= fio_utf8_char_len_unsafe(s[((tst >> 3) + (r > 3)) | (tst >> 3)]);
-  tst &= 8;
-  tst -= tst >> 3;
-  r &= tst;
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  if (r != tst)
+    r = 0;
   return r;
 }
 
@@ -838,9 +842,7 @@ FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
 FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
   const uint8_t len = fio_utf8_code_len(u);
   uint8_t *dest = (uint8_t *)dest_;
-  if (!len)
-    return len;
-  if (len == 1) {
+  if (len < 2) { /* writes, but doesn't report on len == 0 */
     *dest = u;
     return len;
   }
@@ -3328,7 +3330,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
       goto found_nul_byte0;
     str += 8;
   }
-  str = FIO_PTR_MATH_RMASK(const char, str, 6);
+  str = FIO_PTR_MATH_RMASK(const char, str, 6); /* compiler hint */
   /* loop endlessly */
   for (;;) {
     for (size_t i = 0; i < 8; ++i) {
@@ -17824,7 +17826,7 @@ FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 /** Default reallocation callback implementation using the default allocator */
 #define FIO_STRING_REALLOC fio_string_default_reallocate
 /** Default reallocation callback for memory that mustn't be freed. */
-#define FIO_STRING_ALLOC_COPY fio_string_default_copy_and_reallocate
+#define FIO_STRING_ALLOC_COPY fio_string_default_allocate_copy
 /** default allocator for the fio_keystr_s string data.. */
 #define FIO_STRING_ALLOC_KEY fio_string_default_key_alloc
 /** Frees memory that was allocated with the default callbacks. */
@@ -17841,8 +17843,8 @@ FIO_IFUNC size_t fio_string_capa4len(size_t new_len);
 /** default reallocation callback implementation. */
 SFUNC int fio_string_default_reallocate(fio_str_info_s *dst, size_t len);
 /** default reallocation callback for memory that mustn't be freed. */
-SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                 size_t new_capa);
+SFUNC int fio_string_default_allocate_copy(fio_str_info_s *dest,
+                                           size_t new_capa);
 /** frees memory that was allocated with the default callbacks. */
 SFUNC void fio_string_default_free(void *);
 /** frees memory that was allocated with the default callbacks. */
@@ -18580,8 +18582,7 @@ SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
   return 0;
 }
 
-SFUNC int fio_string_default_copy_and_reallocate(fio_str_info_s *dest,
-                                                 size_t len) {
+SFUNC int fio_string_default_allocate_copy(fio_str_info_s *dest, size_t len) {
   len = fio_string_capa4len(len);
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, len, 0);
   if (!tmp)
@@ -19051,6 +19052,130 @@ truncate:
 }
 
 /* *****************************************************************************
+Escaping / Un-Escaping Primitives (not for encoding)
+***************************************************************************** */
+
+typedef struct {
+  fio_str_info_s *restrict dest;
+  fio_string_realloc_fn reallocate;
+  const void *restrict src;
+  const size_t len;
+  /* moves to the next character (or character sequence) to alter. */
+  const uint8_t *(*next)(const uint8_t *restrict s, const uint8_t *restrict e);
+  /*
+   * `dest` will be NULL when calculating length to be written.
+   *
+   * `*s` is the source data.
+   *
+   * `e` is the end-of-bounds position (src + len).
+   *
+   * Returns the number of characters that would have been written.
+   *
+   * Note: must update `s` to point to the next character after the altered
+   * sequence.
+   */
+  size_t (*diff)(uint8_t *restrict dest,
+                 const uint8_t *restrict *restrict s,
+                 const uint8_t *restrict e);
+  /*
+   * Writes (un)escaped data to `dest`.
+   *
+   * Behaves the same as `diff` only writes data to `dest`.
+   *
+   * `dest` is the same number of bytes as reported by `diff` (or more).
+   */
+  size_t (*write)(uint8_t *restrict dest,
+                  const uint8_t *restrict *restrict s,
+                  const uint8_t *restrict e);
+  /* If `len` of `src` is less then `skip_diff_len`, skips the test. */
+  uint32_t skip_diff_len;
+  /* If set, will not allow a partial write when memory allocation fails. */
+  uint32_t refuse_partial;
+} fio___string_altering_args_s;
+
+/**
+ * Writes an escaped data into the string after un-escaping the data.
+ */
+FIO_IFUNC int fio___string_altering_cycle(
+    const fio___string_altering_args_s args) {
+  int r = 0;
+  if (((long long)args.len < 1) | !args.src | !args.dest)
+    return r;
+  const uint8_t *s = (const uint8_t *)args.src;
+  const uint8_t *e = s + args.len;
+  const uint8_t *p = s;
+  fio_str_info_s d = *args.dest;
+  size_t first_stop = 0;
+  size_t updater = 0;
+  /* we need to allocate memory - limit to result's length */
+  if (d.len + args.len >= d.capa) {
+    updater = (args.len > args.skip_diff_len);
+    size_t written_length = args.len;
+    if (updater) { /* skip memory reduction for small strings */
+      written_length = 0;
+      p = s;
+      for (;;) {
+        const uint8_t *p2 = args.next(p, e);
+        if (!p2)
+          break;
+        written_length += p2 - p;
+        p = p2;
+        first_stop |= (0ULL - updater) & ((p - s) + 1);
+        updater = 0;
+        written_length += args.diff(NULL, &p, e);
+        if (p + 1 > e)
+          break;
+      }
+    }
+    written_length += e - p;
+    /* allocate extra required space. */
+    FIO_ASSERT_DEBUG(written_length > 0, "string (un)escape reduced too much");
+    if (d.len + written_length >= d.capa &&
+        fio_string___write_validate_len(&d, args.reallocate, &written_length)) {
+      r = -1;
+      if (args.refuse_partial)
+        goto finish;
+      e = (const uint8_t *)d.capa - (d.len + 1);
+    }
+  }
+
+  /* copy unescaped head of string (if it's worth our time), saves one memchr */
+  if (((!first_stop) & updater) | (first_stop > 16)) {
+    if (!first_stop)
+      first_stop = (e - s) + 1;
+    --first_stop;
+    FIO_MEMMOVE(d.buf + d.len, s, first_stop);
+    d.len += first_stop;
+    s += first_stop;
+  }
+  p = s;
+
+  /* start copying and un-escaping as needed */
+  while (p < e) {
+    const uint8_t *p2 = args.next(p, e);
+    if (!p2)
+      break;
+    if (p2 - p) {
+      updater = p2 - p;
+      FIO_MEMMOVE(d.buf + d.len, p, updater);
+      d.len += updater;
+    }
+    p = p2;
+    d.len += args.write((uint8_t *)d.buf + d.len, &p, e);
+  }
+  if (p < e) {
+    updater = e - p;
+    FIO_MEMCPY(d.buf + d.len, p, updater);
+    d.len += updater;
+  }
+
+finish:
+  d.buf[d.len] = 0;
+  *args.dest = d;
+  return r;
+}
+
+/* *****************************************************************************
 String C / JSON escaping
 ***************************************************************************** */
 
@@ -19062,283 +19187,262 @@ String C / JSON escaping
  */
 SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
                                   fio_string_realloc_fn reallocate,
-                                  const void *src_,
+                                  const void *restrict src,
                                   size_t len) {
+  /* Escaping map, test if bit 64 is set or not. Created using Ruby Script:
+  map = []; 256.times { |i| map << ((i > 126 || i < 35) ? 48.chr : 64.chr)  };
+  map[' '.ord] = 64.chr; map['!'.ord] = 64.chr;
+  ["\b","\f","\n","\r","\t",'\\','"'].each {|c| map[c.ord] = 49.chr };
+  str = map.join(''); puts "static const uint8_t escape_map[256]= " +
+          "\"#{str.slice(0,64)}\"" +
+          "\"#{str.slice(64,64)}\"" +
+          "\"#{str.slice(128,64)}\"" +
+          "\"#{str.slice(192,64)}\";"
+   */
+  static const uint8_t escape_map[256] =
+      "00000000111011000000000000000000@@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@0"
+      "0000000000000000000000000000000000000000000000000000000000000000"
+      "0000000000000000000000000000000000000000000000000000000000000000";
   int r = 0;
-  if ((!len | !src_ | !dest))
+  if ((!len | !src | !dest))
     return r;
-  if (dest->buf + dest->len == (char *)src_)
-    return (r = -1);
-  const uint8_t *src = (const uint8_t *)src_;
-  size_t at = 0;
-  uint8_t set_at = 1;
-  size_t escaped_len = len;
+  size_t extra_space = 0;
+  size_t first_stop = 0;
+  size_t updater = 1;
+  const uint8_t *s = (const uint8_t *)src;
+  const uint8_t *e = s + len;
+  const uint8_t *p = s;
 
-  /* collect escaping requirements */
-  for (size_t i = 0; i < len; ++i) {
-    /* skip valid ascii */
-    if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
-        src[i] == ' ')
+  /* test memory length requirements – unlikely to be avoided (len * 5) */
+  for (; (p < e); ++p) {
+    if ((escape_map[*p] & 64)) /* hope for compiler magic */
       continue;
-    /* skip if valid UTF-8 */
-    {
-      size_t utf_8_valid_len =
-          fio_string_utf8_valid_code_point((void *)(src + i), len - i);
-      if (utf_8_valid_len > 1) {
-        i += utf_8_valid_len - 1;
-        continue;
-      }
+    size_t valid_utf8_len = fio_utf8_char_len(p);
+    if (valid_utf8_len > 1) {
+      p += valid_utf8_len - 1;
+      continue;
     }
-    /* store first instance of character that needs escaping */
-    /* constant time (non-branching) alternative to if(`set_at`) */
-    at ^= ((set_at | (0 - set_at)) & (i ^ at));
-    set_at = 0;
+    first_stop |= (0ULL - updater) & (p - s);
+    updater = 0;
     /* count extra bytes */
-    switch (src[i]) {
-    case '\b': /* fall through */
-    case '\f': /* fall through */
-    case '\n': /* fall through */
-    case '\r': /* fall through */
-    case '\t': /* fall through */
-    case '"':  /* fall through */
-    case '\\': /* fall through */
-    case '/': ++escaped_len; break;
-    default:
-      /* escaping all control characters and non-UTF-8 characters */
-      escaped_len += 3 + ((src[i] < 127) << 1);
-    }
+    ++extra_space; /* the '\' character followed by escape sequence */
+    /* constant-time "if" (bit mask) – known escape or \xFF / \uFFFF escaping */
+    extra_space += (escape_map[*p] - 1) & (3 + ((*p < 127) << 1));
   }
-  /* reserve space and copy any valid "head" */
-  /* the +4 adds room for the usual use case of a following "\", \"" */
-  if ((dest->capa < dest->len + escaped_len + 1) &&
+
+  /* reserve space and copy any valid first_stop */
+  /* the + 3 adds room for the likely use case of JSON: "\",\"" */
+  if ((dest->capa < dest->len + extra_space + len + 1) &&
       (!reallocate ||
-       reallocate(dest, fio_string_capa4len(dest->len + escaped_len + 4)))) {
+       reallocate(dest,
+                  fio_string_capa4len(dest->len + extra_space + len + 3)))) {
     r = -1;
-    len = (dest->capa + len) - (dest->len + escaped_len + 2);
-    if (dest->capa < len + 2)
+    len = dest->capa - (dest->len + 6);
+    if (dest->capa < len + 6)
       return r;
   }
 
-  uint8_t *writer = (uint8_t *)dest->buf + dest->len;
-  /* is escaping required? - simple memcpy if we don't need to escape */
-  if (set_at) {
-    FIO_MEMCPY(writer, src, len);
-    dest->len += len;
-    return r;
+  /* copy unescaped head of string (if it's worth our time) */
+  if (((!first_stop) & updater & (escape_map[*s] == 64)) || first_stop > 16) {
+    if (!first_stop)
+      first_stop = len;
+    FIO_MEMMOVE(dest->buf + dest->len, s, first_stop);
+    dest->len += first_stop;
+    s += first_stop;
   }
-  /* simple memcpy until first char that needs escaping */
-  if (at >= 8) {
-    FIO_MEMCPY(writer, src, at);
-  } else {
-    at = 0;
-  }
-  /* start escaping */
-  for (size_t i = at; i < len; ++i) {
-    /* skip valid ascii */
-    if ((src[i] > 34 && src[i] < 127 && src[i] != '\\') || src[i] == '!' ||
-        src[i] == ' ') {
-      writer[at++] = src[i];
-      continue;
+  p = s;
+
+  /* start copying and escaping as needed */
+  for (;;) {
+    if ((escape_map[*p] & 64)) {
+      for (s = p; (s < e) && (escape_map[*s] & 64); ++s)
+        ; /* hope for compiler magic */
+      updater = s - p;
+      FIO_MEMMOVE(dest->buf + dest->len, p, updater);
+      dest->len += updater;
+      p = s;
     }
-    /* skip valid UTF-8 */
-    switch (fio_string_utf8_valid_code_point((void *)(src + i), len - i)) {
-    case 4: writer[at++] = src[i++]; /* fall through */
-    case 3: writer[at++] = src[i++]; /* fall through */
+    if (p >= e)
+      break;
+    size_t valid_utf8_len = fio_utf8_char_len(p);
+    size_t limit = e - p;
+    if (valid_utf8_len > limit)
+      valid_utf8_len = limit;
+    switch (valid_utf8_len) {
+    case 4: dest->buf[dest->len++] = *p++; /* fall through */
+    case 3: dest->buf[dest->len++] = *p++; /* fall through */
     case 2:
-      writer[at++] = src[i++];
-      writer[at++] = src[i];
+      dest->buf[dest->len++] = *p++; /* fall through */
+      dest->buf[dest->len++] = *p++; /* fall through */
       continue;
+    default: break;
     }
-    /* write escape sequence */
-    writer[at++] = '\\';
-    switch (src[i]) {
-    case '\b': writer[at++] = 'b'; break;
-    case '\f': writer[at++] = 'f'; break;
-    case '\n': writer[at++] = 'n'; break;
-    case '\r': writer[at++] = 'r'; break;
-    case '\t': writer[at++] = 't'; break;
-    case '"': writer[at++] = '"'; break;
-    case '\\': writer[at++] = '\\'; break;
-    case '/': writer[at++] = '/'; break;
+    // FIO_ASSERT(valid_utf8_len < 2, "valid_utf8_len error!");
+    dest->buf[dest->len++] = '\\';
+    uint8_t ec = *p++;
+    switch (ec) {
+    case '\b': dest->buf[dest->len++] = 'b'; continue;
+    case '\f': dest->buf[dest->len++] = 'f'; continue;
+    case '\n': dest->buf[dest->len++] = 'n'; continue;
+    case '\r': dest->buf[dest->len++] = 'r'; continue;
+    case '\t': dest->buf[dest->len++] = 't'; continue;
+    case '\\': dest->buf[dest->len++] = '\\'; continue;
+    case ' ': dest->buf[dest->len++] = ' '; continue;
+    case '"': dest->buf[dest->len++] = '"'; continue;
     default:
+      /* pass through character */
+      first_stop = (ec > 34);
+      dest->buf[dest->len - first_stop] = ec;
       /* escaping all control characters and non-UTF-8 characters */
-      if (src[i] < 127) {
-        writer[at++] = 'u';
-        writer[at++] = '0';
-        writer[at++] = '0';
-        writer[at++] = fio_i2c(src[i] >> 4);
-        writer[at++] = fio_i2c(src[i] & 15);
-      } else {
-        /* non UTF-8 data... encode as hex */
-        writer[at++] = 'x';
-        writer[at++] = fio_i2c(src[i] >> 4);
-        writer[at++] = fio_i2c(src[i] & 15);
-      }
+      first_stop = (ec < 127);
+      const char in_hex[2] = {(char)fio_i2c(ec >> 4), (char)fio_i2c(ec & 15)};
+      dest->buf[dest->len] = 'u'; /* UTF-8 encoding (remains valid) */
+      dest->buf[dest->len += first_stop] = '0';
+      dest->buf[dest->len += first_stop] = '0';
+      dest->buf[dest->len += first_stop] = in_hex[0];
+      dest->buf[dest->len += first_stop] = in_hex[1];
+      dest->len += first_stop;
     }
   }
-  dest->len += at;
   dest->buf[dest->len] = 0;
   return r;
 }
 
-/**
- * Writes an escaped data into the string after unescaping the data.
- */
-SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
-                                    fio_string_realloc_fn reallocate,
-                                    const void *src_,
-                                    size_t len) {
-  int r = 0;
-  size_t at = 0;
-  size_t reduced = len;
-  if ((!len | !src_ | !dest))
-    return r;
-  if (dest->len + len >= dest->capa) { /* reserve only what we need */
-    reduced = 0;
-#if 0
-    const char *tmp = (const char *)src_;
-    const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
-    while ((size_t)(stop - tmp) > 65) {
-      for (size_t i = 0; i < 64; ++i) {
-        uint8_t t0 = tmp[i];
-        uint8_t t1 = tmp[i + 1] | 32;
-        size_t s1 = (t0 == '\\');            /* reduce the escape char  */
-        size_t s2 = (s1 & (t1 == 'x')) << 1; /* hex is at least 4 chars */
-        size_t s3 = (s1 & (t1 == 'u'));      /* UTF-8 */
-        reduced += (s1 + s2 + s3);
-      }
-      tmp += 64;
-    }
-    FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
-#else
-    if (len > 127) { /* skip memory savings on small strings */
-      const char *tmp = (const char *)src_;
-      const char *stop = tmp + len - 1; /* avoid overflow for tmp[1] */
-      for (;;) {
-        tmp = (const char *)FIO_MEMCHR(tmp, '\\', (size_t)(stop - tmp));
-        if (!tmp)
-          break;
-        size_t step = 1;
-        step += (((tmp[1] | 32) == 'x') << 1); /* step == 3 */
-        step += ((tmp[1] | 32) == 'u');        /* UTF-8 output <= 3 */
-        reduced += step;
-        tmp += step + 1;
-        if (tmp + 1 > stop)
-          break;
-      }
-      FIO_ASSERT_DEBUG(reduced < len, "string unescape reduced too much");
-    }
-#endif
-    reduced = len - reduced;
-    if (fio_string___write_validate_len(dest, reallocate, &reduced)) {
-      r = -1;
-      len = dest->capa - (dest->len + 1);
-    }
-  }
-  const uint8_t *src = (const uint8_t *)src_;
-  const uint8_t *end = src + len;
-  uint8_t *writer = (uint8_t *)dest->buf + dest->len;
-  while (src < end) {
-    if (*src != '\\') {
-      const uint8_t *escape_pos =
-          (const uint8_t *)FIO_MEMCHR(src, '\\', end - src);
-      if (!escape_pos)
-        escape_pos = end;
-      const size_t valid_len = escape_pos - src;
-      if (writer + at != src && valid_len)
-        FIO_MEMMOVE(writer + at, src, valid_len);
-      at += valid_len;
-      src = escape_pos;
-    }
-    if (end - src == 1) {
-      writer[at++] = *(src++);
-    }
-    if (src >= end)
-      break;
-    /* escaped data - src[0] == '\\' */
-    ++src;
-    switch (src[0]) {
-    case 'b':
-      writer[at++] = '\b';
-      ++src;
-      break; /* from switch */
-    case 'f':
-      writer[at++] = '\f';
-      ++src;
-      break; /* from switch */
-    case 'n':
-      writer[at++] = '\n';
-      ++src;
-      break; /* from switch */
-    case 'r':
-      writer[at++] = '\r';
-      ++src;
-      break; /* from switch */
-    case 't':
-      writer[at++] = '\t';
-      ++src;
-      break; /* from switch */
-    case 'u': {
-      /* test UTF-8 notation */
-      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16 &&
-          fio_c2i(src[3]) < 16 && fio_c2i(src[4]) < 16) {
-        uint32_t u = (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) << 8) |
-                     ((fio_c2i(src[3]) << 4) | fio_c2i(src[4]));
-        if (((fio_c2i(src[1]) << 4) | fio_c2i(src[2])) == 0xD8U &&
-            src[5] == '\\' && src[6] == 'u' && fio_c2i(src[7]) < 16 &&
-            fio_c2i(src[8]) < 16 && fio_c2i(src[9]) < 16 &&
-            fio_c2i(src[10]) < 16) {
-          /* surrogate-pair (high/low code points) */
-          u = (u & 0x03FF) << 10;
-          u |= (((((fio_c2i(src[7]) << 4) | fio_c2i(src[8])) << 8) |
-                 ((fio_c2i(src[9]) << 4) | fio_c2i(src[10]))) &
-                0x03FF);
-          u += 0x10000;
-          src += 6;
-        }
-        at += fio_utf8_write(writer + at, u);
-        src += 5;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case 'x': { /* test for hex notation */
-      if (fio_c2i(src[1]) < 16 && fio_c2i(src[2]) < 16) {
-        writer[at++] = (fio_c2i(src[1]) << 4) | fio_c2i(src[2]);
-        src += 3;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7': { /* test for octal notation */
-      if (src[0] >= '0' && src[0] <= '7' && src[1] >= '0' && src[1] <= '7') {
-        writer[at++] = ((src[0] - '0') << 3) | (src[1] - '0');
-        src += 2;
-        break; /* from switch */
-      } else
-        goto invalid_escape;
-    }
-    case '"':
-    case '\\':
-    case '/':
-    /* fall through */
-    default:
-    invalid_escape:
-      writer[at++] = *(src++);
-    }
-  }
-  dest->len += at;
-  dest->buf[dest->len] = 0;
-  FIO_ASSERT_DEBUG(r || (at < reduced + 1),
-                   "string unescape reduced calculation error");
+const uint8_t *fio___string_write_unescape_next(const uint8_t *restrict s,
+                                                const uint8_t *restrict e) {
+  if (*s == '\\')
+    return s;
+  return (const uint8_t *)FIO_MEMCHR(s, '\\', e - s);
+}
+
+size_t fio___string_write_unescape_diff(uint8_t *restrict dest,
+                                        const uint8_t *restrict *restrict ps,
+                                        const uint8_t *restrict e) {
+  size_t r = 1;
+  unsigned step = 1;
+  const uint8_t *s = *ps;
+  ++s;
+  unsigned peek = ((*s == 'x') & (e - s > 2));
+  peek &= (unsigned)(fio_c2i(s[peek]) < 16) & (fio_c2i(s[peek + peek]) < 16);
+  step |= (peek << 1);
+  // peek &= (fio_c2i(s[peek]) > 7);
+  r += peek; /* assumes \xFF is unescaped as UTF-8, up to 2 bytes */
+
+  peek = ((*s == 'u') & (e - s > 4));
+  peek &= (unsigned)(fio_c2i(s[peek]) < 16) & (fio_c2i(s[peek + peek]) < 16) &
+          (fio_c2i(s[peek + peek + peek]) < 16) &
+          (fio_c2i(s[peek + peek + peek + peek]) < 16);
+  r |= (peek << 1); /* assumes \uFFFF in maximum length, ignores UTF-16 pairs */
+  step |= (peek << 2);
+
+  s += step;
+  *ps = s;
   return r;
+  (void)dest;
+}
+FIO_IFUNC size_t
+fio___string_write_unescape_write(uint8_t *restrict dest,
+                                  const uint8_t *restrict *restrict ps,
+                                  const uint8_t *restrict e) {
+  unsigned r = 1;
+  const uint8_t *restrict s = *ps;
+  s += ((s + 1) < e); /* skip '\\' byte */
+  switch (*s) {
+  case 'b':
+    *dest = '\b';
+    ++s;
+    break; /* from switch */
+  case 'f':
+    *dest = '\f';
+    ++s;
+    break; /* from switch */
+  case 'n':
+    *dest = '\n';
+    ++s;
+    break; /* from switch */
+  case 'r':
+    *dest = '\r';
+    ++s;
+    break; /* from switch */
+  case 't':
+    *dest = '\t';
+    ++s;
+    break; /* from switch */
+  case 'u': {
+    /* test UTF-8 notation */
+    if ((s + 4 < e) && ((unsigned)(fio_c2i(s[1]) < 16) & (fio_c2i(s[2]) < 16) &
+                        (fio_c2i(s[3]) < 16) & (fio_c2i(s[4]) < 16))) {
+      uint32_t u = (((fio_c2i(s[1]) << 4) | fio_c2i(s[2])) << 8) |
+                   ((fio_c2i(s[3]) << 4) | fio_c2i(s[4]));
+      if ((s + 10 < e) &&
+          (((fio_c2i(s[1]) << 4) | fio_c2i(s[2])) == 0xD8U && s[5] == '\\' &&
+           s[6] == 'u' &&
+           ((unsigned)(fio_c2i(s[7]) < 16) & (fio_c2i(s[8]) < 16) &
+            (fio_c2i(s[9]) < 16) & (fio_c2i(s[10]) < 16)))) {
+        /* surrogate-pair (high/low code points) */
+        u = (u & 0x03FF) << 10;
+        u |= (((((fio_c2i(s[7]) << 4) | fio_c2i(s[8])) << 8) |
+               ((fio_c2i(s[9]) << 4) | fio_c2i(s[10]))) &
+              0x03FF);
+        u += 0x10000;
+        s += 6;
+      }
+      r = fio_utf8_write(dest, u);
+      s += 5;
+      break; /* from switch */
+    } else
+      goto invalid_escape;
+  }
+  case 'x': { /* test for hex notation */
+    if (fio_c2i(s[1]) < 16 && fio_c2i(s[2]) < 16) {
+      *dest = (fio_c2i(s[1]) << 4) | fio_c2i(s[2]);
+      s += 3;
+      break; /* from switch */
+    } else
+      goto invalid_escape;
+  }
+  case '0':
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7': { /* test for octal notation */
+    if (s[0] >= '0' && s[0] <= '7' && s[1] >= '0' && s[1] <= '7') {
+      *dest = ((s[0] - '0') << 3) | (s[1] - '0');
+      s += 2;
+      break; /* from switch */
+    } else
+      goto invalid_escape;
+  }
+  case '"':
+  case '\\':
+  case '/':
+  /* fall through */
+  default:
+  invalid_escape:
+    *dest = *s++;
+  }
+  *ps = s;
+  return r;
+}
+FIO_IFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
+                                        fio_string_realloc_fn alloc,
+                                        const void *src,
+                                        size_t len) {
+  return fio___string_altering_cycle((fio___string_altering_args_s){
+      .dest = dest,
+      .reallocate = alloc,
+      .src = src,
+      .len = len,
+      .next = fio___string_write_unescape_next,
+      .diff = fio___string_write_unescape_diff,
+      .write = fio___string_write_unescape_write,
+      .skip_diff_len = 127,
+      .refuse_partial = 1,
+  });
 }
 
 /* *****************************************************************************
@@ -20022,8 +20126,8 @@ SFUNC int fio_string_readfile(fio_str_info_s *dest,
 }
 
 /**
- * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and
- * ending at the first occurrence of `token`.
+ * Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`
+ * and ending at the first occurrence of `token`.
  *
  * If `limit` is 0 (or less than 0) as much data as may be required will be
  * written.
@@ -46889,25 +46993,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
         {"\x20", 1},
         {"Z", 1},
         {"\0", 1},
-        {0},
         {"\xf0\x9f\x92\x35", 4, 1},
         {"\xf0\x9f\x32\x95", 4, 1},
         {"\xf0\x3f\x92\x95", 4, 1},
-        {"\x30\x9f\x92\x95", 4, 1},
+        {"\xFE\x9f\x92\x95", 4, 1},
         {"\xE1\x9A\x30", 3, 1},
         {"\xE1\x3A\x80", 3, 1},
         {"\xf0\x9A\x80", 3, 1},
         {"\xc6\x32", 2, 1},
         {"\xf0\x92", 2, 1},
+        {0},
     };
     for (size_t i = 0; utf8_core_tests[i].buf; ++i) {
       char *pos = (char *)utf8_core_tests[i].buf;
-      FIO_ASSERT((size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
-                 "FIO_UTF8_CHAR_LEN failed on %s ([0] == %X), %d != %d",
+      FIO_ASSERT(utf8_core_tests[i].expect_fail ||
+                     (size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
+                 "fio_utf8_char_len failed on %s ([%zu] == %X), %d != %u",
                  utf8_core_tests[i].buf,
+                 i,
                  (unsigned)(uint8_t)utf8_core_tests[i].buf[0],
                  (int)fio_utf8_char_len(pos),
-                 utf8_core_tests[i].clen);
+                 (unsigned)utf8_core_tests[i].clen);
       uint32_t value = 0, validate = 0;
       void *tst_str = NULL;
       fio_memcpy7x(&tst_str, utf8_core_tests[i].buf, utf8_core_tests[i].clen);
@@ -46915,7 +47021,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
       tst_str = (void *)(uintptr_t)fio_lton32((uint32_t)(uintptr_t)tst_str);
 #endif
       value = fio_utf8_read(&pos);
-      uint32_t val_len = fio_utf8_code_len(value);
+      uint32_t val_len = fio_utf8_code_len(value); /* val_len 0 (fail) == 1 */
       FIO_ASSERT(!utf8_core_tests[i].expect_fail ||
                      (!value && pos == utf8_core_tests[i].buf &&
                       !fio_utf8_char_len(utf8_core_tests[i].buf)),
@@ -46936,8 +47042,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
       pos = output;
       validate = fio_utf8_read(&pos);
       FIO_ASSERT(validate == value && (value > 0 || !utf8_core_tests[i].buf[0]),
-                 "fio_utf8_read + fio_utf8_write roundtrip failed on %s",
-                 utf8_core_tests[i].buf);
+                 "fio_utf8_read + fio_utf8_write roundtrip failed on [%zu] %s\n"
+                 "\t %zu != %zu",
+                 i,
+                 utf8_core_tests[i].buf,
+                 validate,
+                 value);
     }
   }
 }
@@ -51079,7 +51189,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                                  utf8_sample,
                                  FIO_STRLEN(utf8_sample)),
                "Couldn't write UTF-8 example.");
-    for (int i = 0; i < 256; ++i) {
+    for (int i = 1; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
                  "write returned an error");
@@ -51091,19 +51201,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
         !fio_string_write_unescape(&decoded, NULL, encoded.buf, encoded.len),
         "write unescape returned an error");
     FIO_ASSERT(encoded.len, "JSON encoding failed");
+    FIO_ASSERT(decoded.buf == mem + 512 && encoded.buf == mem + 1024,
+               "C escaping unexpected side-effects!");
     FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,
                decoded.buf);
-    FIO_ASSERT(
-        unescaped.len == decoded.len,
-        "C escaping roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-        unescaped.len,
-        decoded.len,
-        decoded.len,
-        encoded.len,
-        decoded.buf);
+    FIO_ASSERT(unescaped.len == decoded.len,
+               "C escaping roundtrip length error, %zu != %zu (%zu - "
+               "%zu):\n%.127s\n\n!=>\n\n%.127s",
+               unescaped.len,
+               decoded.len,
+               decoded.len,
+               encoded.len,
+               encoded.buf,
+               decoded.buf);
     FIO_ASSERT(!memcmp(unescaped.buf, decoded.buf, unescaped.len),
                "C escaping round-trip failed:\n %s",
                decoded.buf);

@@ -334,25 +334,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
         {"\x20", 1},
         {"Z", 1},
         {"\0", 1},
-        {0},
         {"\xf0\x9f\x92\x35", 4, 1},
         {"\xf0\x9f\x32\x95", 4, 1},
         {"\xf0\x3f\x92\x95", 4, 1},
-        {"\x30\x9f\x92\x95", 4, 1},
+        {"\xFE\x9f\x92\x95", 4, 1},
         {"\xE1\x9A\x30", 3, 1},
         {"\xE1\x3A\x80", 3, 1},
         {"\xf0\x9A\x80", 3, 1},
         {"\xc6\x32", 2, 1},
         {"\xf0\x92", 2, 1},
+        {0},
     };
     for (size_t i = 0; utf8_core_tests[i].buf; ++i) {
       char *pos = (char *)utf8_core_tests[i].buf;
-      FIO_ASSERT((size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
-                 "FIO_UTF8_CHAR_LEN failed on %s ([0] == %X), %d != %d",
+      FIO_ASSERT(utf8_core_tests[i].expect_fail ||
+                     (size_t)fio_utf8_char_len(pos) == utf8_core_tests[i].clen,
+                 "fio_utf8_char_len failed on %s ([%zu] == %X), %d != %u",
                  utf8_core_tests[i].buf,
+                 i,
                  (unsigned)(uint8_t)utf8_core_tests[i].buf[0],
                  (int)fio_utf8_char_len(pos),
-                 utf8_core_tests[i].clen);
+                 (unsigned)utf8_core_tests[i].clen);
       uint32_t value = 0, validate = 0;
       void *tst_str = NULL;
       fio_memcpy7x(&tst_str, utf8_core_tests[i].buf, utf8_core_tests[i].clen);
@@ -360,7 +362,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
       tst_str = (void *)(uintptr_t)fio_lton32((uint32_t)(uintptr_t)tst_str);
 #endif
       value = fio_utf8_read(&pos);
-      uint32_t val_len = fio_utf8_code_len(value);
+      uint32_t val_len = fio_utf8_code_len(value); /* val_len 0 (fail) == 1 */
       FIO_ASSERT(!utf8_core_tests[i].expect_fail ||
                      (!value && pos == utf8_core_tests[i].buf &&
                       !fio_utf8_char_len(utf8_core_tests[i].buf)),
@@ -381,8 +383,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
       pos = output;
       validate = fio_utf8_read(&pos);
       FIO_ASSERT(validate == value && (value > 0 || !utf8_core_tests[i].buf[0]),
-                 "fio_utf8_read + fio_utf8_write roundtrip failed on %s",
-                 utf8_core_tests[i].buf);
+                 "fio_utf8_read + fio_utf8_write roundtrip failed on [%zu] %s\n"
+                 "\t %zu != %zu",
+                 i,
+                 utf8_core_tests[i].buf,
+                 validate,
+                 value);
     }
   }
 }

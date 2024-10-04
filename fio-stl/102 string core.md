@@ -277,8 +277,8 @@ Default reallocation callback implementation
 #### `FIO_STRING_ALLOC_COPY`
 
 ```c
-#define FIO_STRING_ALLOC_COPY fio_string_default_copy_and_reallocate
-void fio_string_default_copy_and_reallocate(fio_str_info_s *dest, size_t new_capa);
+#define FIO_STRING_ALLOC_COPY fio_string_default_allocate_copy
+void fio_string_default_allocate_copy(fio_str_info_s *dest, size_t new_capa);
 ```
 
 Default reallocation callback for memory that mustn't be freed.

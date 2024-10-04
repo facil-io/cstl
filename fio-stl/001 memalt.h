@@ -309,7 +309,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
       goto found_nul_byte0;
     str += 8;
   }
-  str = FIO_PTR_MATH_RMASK(const char, str, 6);
+  str = FIO_PTR_MATH_RMASK(const char, str, 6); /* compiler hint */
   /* loop endlessly */
   for (;;) {
     for (size_t i = 0; i < 8; ++i) {

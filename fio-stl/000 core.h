@@ -750,6 +750,10 @@ typedef struct fio_buf_info_s {
     .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
 
+/** Tests to see if memory reallocation happened. */
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
+  (fio___stack_mem___##name != name.buf)
+
 /* *****************************************************************************
 UTF-8 Support (basic)
 ***************************************************************************** */
@@ -783,17 +787,17 @@ FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
 
 /** Returns the number of valid UTF-8 bytes used by first char at `str`. */
 FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst;
+  size_t r, tst = 1;
   const uint8_t *s = (uint8_t *)str_;
   r = fio_utf8_char_len_unsafe(*s);
+  r &= 7;
   if (r < 2)
     return r;
-  tst = fio_utf8_char_len_unsafe(s[1]); /* avoid overflowing more than 1 char */
-  tst &= fio_utf8_char_len_unsafe(s[(tst >> 3) + (r > 2)]);
-  tst &= fio_utf8_char_len_unsafe(s[((tst >> 3) + (r > 3)) | (tst >> 3)]);
-  tst &= 8;
-  tst -= tst >> 3;
-  r &= tst;
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  if (r != tst)
+    r = 0;
   return r;
 }
 
@@ -801,9 +805,7 @@ FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
 FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
   const uint8_t len = fio_utf8_code_len(u);
   uint8_t *dest = (uint8_t *)dest_;
-  if (!len)
-    return len;
-  if (len == 1) {
+  if (len < 2) { /* writes, but doesn't report on len == 0 */
     *dest = u;
     return len;
   }

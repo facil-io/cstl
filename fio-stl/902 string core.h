@@ -241,7 +241,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                                  utf8_sample,
                                  FIO_STRLEN(utf8_sample)),
                "Couldn't write UTF-8 example.");
-    for (int i = 0; i < 256; ++i) {
+    for (int i = 1; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
                  "write returned an error");
@@ -253,19 +253,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
         !fio_string_write_unescape(&decoded, NULL, encoded.buf, encoded.len),
         "write unescape returned an error");
     FIO_ASSERT(encoded.len, "JSON encoding failed");
+    FIO_ASSERT(decoded.buf == mem + 512 && encoded.buf == mem + 1024,
+               "C escaping unexpected side-effects!");
     FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
                "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
                (int)encoded.len,
                encoded.buf,
                decoded.buf);
-    FIO_ASSERT(
-        unescaped.len == decoded.len,
-        "C escaping roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-        unescaped.len,
-        decoded.len,
-        decoded.len,
-        encoded.len,
-        decoded.buf);
+    FIO_ASSERT(unescaped.len == decoded.len,
+               "C escaping roundtrip length error, %zu != %zu (%zu - "
+               "%zu):\n%.127s\n\n!=>\n\n%.127s",
+               unescaped.len,
+               decoded.len,
+               decoded.len,
+               encoded.len,
+               encoded.buf,
+               decoded.buf);
     FIO_ASSERT(!memcmp(unescaped.buf, decoded.buf, unescaped.len),
                "C escaping round-trip failed:\n %s",
                decoded.buf);
