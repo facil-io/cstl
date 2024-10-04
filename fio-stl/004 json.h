@@ -114,7 +114,7 @@ typedef struct {
   const char *pos;
   const char *end;
   uint32_t depth;
-  uint32_t error;
+  int32_t error;
 } fio___json_state_s;
 
 FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
@@ -199,8 +199,8 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   tst += (tst[0] == '0' && tst + 2 < s->end);
   if ((tst[0] | 32) == 'x') {
     hex = 1;
-    while ((tst < s->end) & ((tst[0] >= '0' & tst[0] <= '9') |
-                             ((tst[0] | 32) >= 'a' & (tst[0] | 32) <= 'f')))
+    while ((tst < s->end) & (((tst[0] >= '0') & (tst[0] <= '9')) |
+                             (((tst[0] | 32) >= 'a') & ((tst[0] | 32) <= 'f'))))
       ++tst;
   } else if ((tst[0] | 32) == 'b') {
     binary = 1;

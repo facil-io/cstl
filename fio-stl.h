@@ -9454,7 +9454,7 @@ typedef struct {
   const char *pos;
   const char *end;
   uint32_t depth;
-  uint32_t error;
+  int32_t error;
 } fio___json_state_s;
 
 FIO_SFUNC void *fio___json_consume(fio___json_state_s *s);
@@ -9539,8 +9539,8 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   tst += (tst[0] == '0' && tst + 2 < s->end);
   if ((tst[0] | 32) == 'x') {
     hex = 1;
-    while ((tst < s->end) & ((tst[0] >= '0' & tst[0] <= '9') |
-                             ((tst[0] | 32) >= 'a' & (tst[0] | 32) <= 'f')))
+    while ((tst < s->end) & (((tst[0] >= '0') & (tst[0] <= '9')) |
+                             (((tst[0] | 32) >= 'a') & ((tst[0] | 32) <= 'f'))))
       ++tst;
   } else if ((tst[0] | 32) == 'b') {
     binary = 1;
@@ -44791,7 +44791,7 @@ FIO_SFUNC void *fiobj___json_on_null(void) {
 }
 FIO_SFUNC void *fiobj___json_on_true(void) { return fiobj_true(); }
 FIO_SFUNC void *fiobj___json_on_false(void) { return fiobj_false(); }
-FIO_SFUNC void *fiobj___json_on_number(long long i) {
+FIO_SFUNC void *fiobj___json_on_number(int64_t i) {
   return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))(i);
 }
 FIO_SFUNC void *fiobj___json_on_float(double f) {
@@ -46182,10 +46182,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                         s,                                                     \
                         r2,                                                    \
                         std);                                                  \
-    } else if (r == 0.0 && d != 0.0 && !isnan(d)) {                            \
+    } else if (r == 0.0 && d != 0.0 && !isnan((double)d)) {                    \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("float range limit marked before: %s\n", s);           \
-    } else if (r2 == 0.0 && d != 0.0 && !isnan(d)) {                           \
+    } else if (r2 == 0.0 && d != 0.0 && !isnan((double)d)) {                   \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);      \
     } else {                                                                   \

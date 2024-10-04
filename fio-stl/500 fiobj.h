@@ -1852,7 +1852,7 @@ FIO_SFUNC void *fiobj___json_on_null(void) {
 }
 FIO_SFUNC void *fiobj___json_on_true(void) { return fiobj_true(); }
 FIO_SFUNC void *fiobj___json_on_false(void) { return fiobj_false(); }
-FIO_SFUNC void *fiobj___json_on_number(long long i) {
+FIO_SFUNC void *fiobj___json_on_number(int64_t i) {
   return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))(i);
 }
 FIO_SFUNC void *fiobj___json_on_float(double f) {

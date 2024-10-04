@@ -560,10 +560,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                         s,                                                     \
                         r2,                                                    \
                         std);                                                  \
-    } else if (r == 0.0 && d != 0.0 && !isnan(d)) {                            \
+    } else if (r == 0.0 && d != 0.0 && !isnan((double)d)) {                    \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("float range limit marked before: %s\n", s);           \
-    } else if (r2 == 0.0 && d != 0.0 && !isnan(d)) {                           \
+    } else if (r2 == 0.0 && d != 0.0 && !isnan((double)d)) {                   \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);      \
     } else {                                                                   \
