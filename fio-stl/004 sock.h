@@ -265,6 +265,12 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_socktype = sock_type;
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
+  /* test for variations of localhost */
+  if ((address[0] | 32) == 'l' && FIO_STRLEN(address) == 9 &&
+      (fio_buf2u64u(address + 1) | (uint64_t)0x2020202020202020ULL) ==
+          fio_buf2u64u("ocalhost"))
+    address = "127.0.0.1";
+  /* call for OS address resolution */
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {
     FIO_LOG_ERROR("(fio_sock_address_new(\"%s\", \"%s\")) error: %s",
                   (address ? address : "NULL"),

@@ -26,14 +26,6 @@ The parser provides static functions only, always as part or implementation.
 #define H___FIO_WEBSOCKET_PARSER___H
 
 /* *****************************************************************************
-WebSocket Parser Settings
-***************************************************************************** */
-#ifndef WEBSOCKET_CLIENT_MUST_MASK
-/** According to the RFC, a client WebSocket MUST mask messages. */
-#define WEBSOCKET_CLIENT_MUST_MASK 1
-#endif
-
-/* *****************************************************************************
 WebSocket Parsing API
 ***************************************************************************** */
 
@@ -89,7 +81,11 @@ FIO_SFUNC void fio_websocket_on_protocol_close(void *udata, fio_buf_info_s msg);
 /* *****************************************************************************
 WebSocket Formatting API
 ***************************************************************************** */
-/** returns the length of the buffer required to wrap a message `len` long */
+/**
+ * Returns the length of the buffer required to wrap a message `len` long
+ *
+ * Client connections should add 4 to this number to accommodate for the mask.
+ */
 FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len);
 
 /**
@@ -182,20 +178,20 @@ FIO_IFUNC uint64_t fio_websocket_header(void *target,
   ((uint8_t *)target)[1] = ((!!mask) << 7U);
   size_t mask_l = ((!!mask) << 2);
   if (message_len < 126) {
-    ((uint8_t *)target)[1] = message_len;
+    ((uint8_t *)target)[1] |= message_len;
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 2), mask);
     return 2 + mask_l;
   } else if (message_len < (1UL << 16)) {
     /* head is 4 bytes */
-    ((uint8_t *)target)[1] = 126;
+    ((uint8_t *)target)[1] |= 126;
     fio_u2buf16_be(((uint8_t *)target + 2), message_len);
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 4), mask);
     return 4 + mask_l;
   } else {
     /* Really Long Message  */
-    ((uint8_t *)target)[1] = 127;
+    ((uint8_t *)target)[1] |= 127;
     fio_u2buf64_be(((uint8_t *)target + 2), message_len);
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 10), mask);
@@ -367,24 +363,24 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
   const uint8_t mask_f = (((uint8_t *)buf->buf)[1] >> 7) & 1;
   const uint8_t mask_l = (mask_f << 2);
   const uint8_t info = (uint8_t)(buf->buf[0]);
-  uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127);
+  uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127U);
   switch (len_indicator) {
   case 126:
-    if (buf->len < (4ULL + mask_l))
+    if (buf->len < 8UL)
       return 1;
     p->expect = fio_buf2u16_be(buf->buf + 2);
-    p->mask = mask_f ? fio_buf2u32u(buf->buf + 4) : 0;
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 4);
     buf->buf += 4 + mask_l;
     buf->len -= 4 + mask_l;
     break;
 
   case 127:
-    if (buf->len < (10ULL + mask_l))
+    if (buf->len < 14UL)
       return 1;
     p->expect = fio_buf2u64_be(buf->buf + 2);
     if (p->expect & 0xFF00000000000000ULL)
       return -1; /* really?! */
-    p->mask = mask_f ? fio_buf2u32u(buf->buf + 10) : 0;
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 10);
     buf->buf += 10 + mask_l;
     buf->len -= 10 + mask_l;
     break;

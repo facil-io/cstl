@@ -31,7 +31,7 @@ Playhouse hashing (next risky version)
 ***************************************************************************** */
 
 typedef union {
-  uint64_t v[4] FIO_ALIGN(32);
+  uint64_t v[4] FIO_ALIGN(16);
 #ifdef __SIZEOF_INT128__
   __uint128_t u128[2];
 #endif

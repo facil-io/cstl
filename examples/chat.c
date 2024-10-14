@@ -87,9 +87,15 @@ FIO_SFUNC void on_close(void *udata) {
 
 /** Performs "login" logic (saves user handle) */
 FIO_SFUNC void on_data_first_line(fio_s *io, char *name, size_t len) {
+  if (!len)
+    goto error_name_too_short;
+  do
+    --len;
+  while (len && (name[len] == '\r' || name[len] == '\n' || name[len] == ' ' ||
+                 name[len] == '\t'));
+  ++len;
   if (len < 2)
     goto error_name_too_short;
-  --len;
   if (len > 30)
     goto error_name_too_long;
   client_s *c = fio_udata_get(io);
@@ -196,6 +202,10 @@ FIO_SFUNC void on_shutdown(fio_s *io) {
 Starting the program - main()
 ***************************************************************************** */
 
+static void print_chat(fio_msg_s *m) {
+  printf("%.*s", (int)m->message.len, m->message.buf);
+}
+
 int main(int argc, char const *argv[]) {
   // FIO_NAME_TEST(stl, letter)();
   /* initialize the CLI options */
@@ -215,15 +225,16 @@ int main(int argc, char const *argv[]) {
       "\tNAME tcp://localhost:3000/\n"
       "\tNAME localhost://3000\n",
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
-      FIO_CLI_BOOL("--log -v log HTTP messages."),
-      FIO_CLI_INT("--workers -w (4) number of worker processes to use."),
-      FIO_CLI_PRINT_LINE(
-          "NOTE: requests are limited to 32Kb and 16 headers each."));
+      FIO_CLI_BOOL("--log -v logs chat messages."),
+      FIO_CLI_INT("--workers -w (2) number of worker processes to use."));
 
   /* review CLI for logging */
-  if (fio_cli_get_bool("-V")) {
+  if (fio_cli_get_bool("-V"))
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
-  }
+
+  if (fio_cli_get_bool("-v"))
+    fio_subscribe(.on_message = print_chat, .master_only = 1);
+
   /* review CLI connection address (in URL format) */
   FIO_ASSERT(fio_srv_listen(.url = fio_cli_unnamed(0),
                             .protocol = &CHAT_PROTOCOL_LOGIN),

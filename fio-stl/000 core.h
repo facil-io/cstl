@@ -204,11 +204,18 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
+#if 1 /* Allow Intrinsic / SIMD / Neon ? */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
-    (defined(__ARM_NEON) || defined(__ARM_NEON__))
+    (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
+    __has_include("arm_acle.h") && __has_include("arm_neon.h")
 #include <arm_acle.h>
 #include <arm_neon.h>
 #define FIO___HAS_ARM_INTRIN 1
+#elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
+#define FIO___HAS_X86_INTRIN 1
+#include <immintrin.h>
+#endif
+
 #endif
 
 /* *****************************************************************************
@@ -333,6 +340,10 @@ Function Attributes
 #ifndef FIO_IFUNC
 /** Marks a function as `static`, `inline` and possibly unused. */
 #define FIO_IFUNC FIO_SFUNC inline
+#endif
+
+#ifndef FIO_MIFN
+#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
 #endif
 
 #ifndef FIO_WEAK
@@ -677,368 +688,6 @@ Sleep / Thread Scheduling Macros
 #endif
 
 /* *****************************************************************************
-String and Buffer Information Containers + Helper Macros
-***************************************************************************** */
-
-/** An information type for reporting the string's state. */
-typedef struct fio_str_info_s {
-  /** The string's length, if any. */
-  size_t len;
-  /** The string's buffer (pointer to first byte) or NULL on error. */
-  char *buf;
-  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
-  size_t capa;
-} fio_str_info_s;
-
-/** An information type for reporting/storing buffer data (no `capa`). */
-typedef struct fio_buf_info_s {
-  /** The buffer's length, if any. */
-  size_t len;
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf;
-} fio_buf_info_s;
-
-/** Compares two `fio_str_info_s` objects for content equality. */
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len &&                                                     \
-   (!(s1).len || (s1).buf == (s2).buf ||                                       \
-    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
-     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
-
-/** Compares two `fio_buf_info_s` objects for content equality. */
-#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
-
-/** A NULL fio_str_info_s. */
-#define FIO_STR_INFO0 ((fio_str_info_s){0})
-
-/** Converts a C String into a fio_str_info_s. */
-#define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_str_info_s. */
-#define FIO_STR_INFO2(str, length)                                             \
-  ((fio_str_info_s){.len = (length), .buf = (str)})
-
-/** Converts a String with a known length and capacity into a fio_str_info_s. */
-#define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
-
-/** A NULL fio_buf_info_s. */
-#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
-
-/** Converts a C String into a fio_buf_info_s. */
-#define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_buf_info_s. */
-#define FIO_BUF_INFO2(str, length)                                             \
-  ((fio_buf_info_s){.len = (length), .buf = (str)})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
-
-/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
-#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
-  char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
-  fio_str_info_s name = (fio_str_info_s) {                                     \
-    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
-  }
-
-/** Tests to see if memory reallocation happened. */
-#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
-  (fio___stack_mem___##name != name.buf)
-
-/* *****************************************************************************
-UTF-8 Support (basic)
-***************************************************************************** */
-
-/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
-  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
-                  ((uint32_t)(u) > 65535));
-  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
-  return len;
-}
-
-/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
-FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
-  /* Ruby script for map:
-  map = [];
-  32.times { | i |
-    map << (((i & 0b10000) == 0b00000) ? 1
-        :   ((i & 0b11000) == 0b10000) ? 8
-        :   ((i & 0b11100) == 0b11000) ? 2
-        :   ((i & 0b11110) == 0b11100) ? 3
-        :   ((i & 0b11111) == 0b11110) ? 4
-                               : 0)
-  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
-  */
-  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
-                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
-  return map[c >> 3];
-}
-
-/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
-FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst = 1;
-  const uint8_t *s = (uint8_t *)str_;
-  r = fio_utf8_char_len_unsafe(*s);
-  r &= 7;
-  if (r < 2)
-    return r;
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  if (r != tst)
-    r = 0;
-  return r;
-}
-
-/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
-FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
-  const uint8_t len = fio_utf8_code_len(u);
-  uint8_t *dest = (uint8_t *)dest_;
-  if (len < 2) { /* writes, but doesn't report on len == 0 */
-    *dest = u;
-    return len;
-  }
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
-  const uint8_t mask = 63U;
-  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
-  (dest) += 1;
-  *(dest) = head | (((u) >> 12) & mask);
-  (dest) += (len > 3);
-  *(dest) = head | (((u) >> 6) & mask);
-  (dest) += (len > 2);
-  *(dest) = head | ((u)&mask);
-  return len;
-}
-
-/**
- * Decodes the first UTF-8 char at `str` and returns its code point value.
- *
- * Advances the pointer at `str` by the number of bytes consumed (read).
- */
-FIO_IFUNC uint32_t fio_utf8_read(char **str) {
-  const uint8_t *s = *(const uint8_t **)str;
-  const unsigned len = fio_utf8_char_len(s);
-  *str += len;
-  if (!len)
-    return 0;
-  if (len == 1)
-    return *s;
-  const uint32_t t2 = (len > 2);
-  const uint32_t t3 = 1 + (len > 3);
-  const uint32_t t3a = (len > 2) + (len > 3);
-  const uint32_t t4 = len - 1;
-  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
-         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
-         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
-         ((uint32_t)(s[t4] & 63));
-}
-
-/** Decodes the first UTF-8 char at `str` and returns its code point value. */
-FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
-  return fio_utf8_read((char **)&str);
-}
-
-/* *****************************************************************************
-Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
-
-/** A linked list arch-type */
-typedef struct fio_list_node_s {
-  struct fio_list_node_s *next;
-  struct fio_list_node_s *prev;
-} fio_list_node_s;
-
-/** A linked list node type */
-#define FIO_LIST_NODE fio_list_node_s
-/** A linked list head type */
-#define FIO_LIST_HEAD fio_list_node_s
-
-/** Allows initialization of FIO_LIST_HEAD objects. */
-#define FIO_LIST_INIT(obj)                                                     \
-  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
-
-#ifndef FIO_LIST_EACH
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.next)))
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.prev)))
-#endif
-
-/** UNSAFE macro for pushing a node to a list. */
-#define FIO_LIST_PUSH(head, n)                                                 \
-  do {                                                                         \
-    (n)->prev = (head)->prev;                                                  \
-    (n)->next = (head);                                                        \
-    (head)->prev->next = (n);                                                  \
-    (head)->prev = (n);                                                        \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. */
-#define FIO_LIST_REMOVE(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. Resets node data. */
-#define FIO_LIST_REMOVE_RESET(n)                                               \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
-  } while (0)
-
-/** UNSAFE macro for popping a node to a list. */
-#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
-  do {                                                                         \
-    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
-    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
-  } while (0)
-
-/** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head)                                                \
-  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
-
-/* *****************************************************************************
-Indexed Linked Lists Persistent Macros and Types
-
-Indexed Linked Lists can be used to create a linked list that uses is always
-relative to some root pointer (usually the root of an array). This:
-
-1. Allows easy reallocation of the list without requiring pointer updates.
-
-2. Could be used for memory optimization if the array limits are known.
-
-The "head" index is usually validated by reserving the value of `-1` to indicate
-an empty list.
-***************************************************************************** */
-#ifndef FIO_INDEXED_LIST_EACH
-
-/** A 32 bit indexed linked list node type */
-typedef struct fio_index32_node_s {
-  uint32_t next;
-  uint32_t prev;
-} fio_index32_node_s;
-
-/** A 16 bit indexed linked list node type */
-typedef struct fio_index16_node_s {
-  uint16_t next;
-  uint16_t prev;
-} fio_index16_node_s;
-
-/** An 8 bit indexed linked list node type */
-typedef struct fio_index8_node_s {
-  uint8_t next;
-  uint8_t prev;
-} fio_index8_node_s;
-
-/** A 32 bit indexed linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-/** A 16 bit indexed linked list node type */
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-/** An 8 bit indexed linked list node type */
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-
-/** UNSAFE macro for pushing a node to a list. */
-#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
-    (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
-  } while (0)
-
-/** UNSAFE macro for adding a node to the begging of the list. */
-#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
-    (root)[n__].node_name.prev = (head);                                       \
-    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
-    (root)[(head)].node_name.next = n__;                                       \
-    (head) = n__;                                                              \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. */
-#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. Resets node data. */
-#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
-  } while (0)
-
-/** Loops through every index in the indexed list, assuming `head` is valid. */
-#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head),                                                    \
-              stooper___hd = (head),                                           \
-              stopper___ils___ = 0,                                            \
-              pos##___nxt = (root)[(head)].node_name.next;                     \
-       !stopper___ils___;                                                      \
-       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
-              pos##___nxt = (root)[pos].node_name.next)
-
-/** Loops through every index in the indexed list, assuming `head` is valid. */
-#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
-  for (size_t pos = ((root)[(head)].node_name.prev),                           \
-              pos##___nxt =                                                    \
-                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
-              stooper___hd = (head),                                           \
-              stopper___ils___ = 0;                                            \
-       !stopper___ils___;                                                      \
-       ((stopper___ils___ = (pos == stooper___hd)),                            \
-        (pos = pos##___nxt),                                                   \
-        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
-#endif
-
-/* *****************************************************************************
 Settings - Memory Function Selectors
 ***************************************************************************** */
 #ifdef FIO_MEMALT
@@ -1343,8 +992,7 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1427,8 +1075,7 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1512,9 +1159,782 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 }
 
 /* *****************************************************************************
+String and Buffer Information Containers + Helper Macros
+***************************************************************************** */
+
+/** An information type for reporting the string's state. */
+typedef struct fio_str_info_s {
+  /** The string's length, if any. */
+  size_t len;
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+  size_t capa;
+} fio_str_info_s;
+
+/** An information type for reporting/storing buffer data (no `capa`). */
+typedef struct fio_buf_info_s {
+  /** The buffer's length, if any. */
+  size_t len;
+  /** The buffer's address (may be NULL if no buffer). */
+  char *buf;
+} fio_buf_info_s;
+
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len &&                                                     \
+   (!(s1).len || (s1).buf == (s2).buf ||                                       \
+    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
+     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+
+/** A NULL fio_str_info_s. */
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+
+/** Converts a C String into a fio_str_info_s. */
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_str_info_s. */
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
+
+/** Converts a String with a known length and capacity into a fio_str_info_s. */
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** A NULL fio_buf_info_s. */
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
+
+/** Converts a C String into a fio_buf_info_s. */
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_buf_info_s. */
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
+  }
+
+/** Tests to see if memory reallocation happened. */
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
+  (fio___stack_mem___##name != name.buf)
+
+/* *****************************************************************************
+UTF-8 Support (basic)
+***************************************************************************** */
+
+#ifndef FIO_UTF8_ALLOW_IF
+#define FIO_UTF8_ALLOW_IF 0
+#endif
+
+/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
+FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
+  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
+                  ((uint32_t)(u) > 65535));
+  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
+  return len;
+}
+
+/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
+FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
+  /* Ruby script for map:
+  map = [];
+  32.times { | i |
+    map << (((i & 0b10000) == 0b00000) ? 1
+        :   ((i & 0b11000) == 0b10000) ? 8
+        :   ((i & 0b11100) == 0b11000) ? 2
+        :   ((i & 0b11110) == 0b11100) ? 3
+        :   ((i & 0b11111) == 0b11110) ? 4
+                               : 0)
+  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
+  */
+  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
+                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
+  return map[c >> 3];
+}
+
+/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
+FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
+  size_t r, tst = 1;
+  const uint8_t *s = (uint8_t *)str_;
+  r = fio_utf8_char_len_unsafe(*s);
+  r &= 7;
+#if FIO_UTF8_ALLOW_IF
+  if (r < 2)
+    return r;
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  if (r != tst)
+    r = 0;
+#else
+  tst &= (r > 0);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  r &= 0U - (r == tst);
+  return r;
+#endif
+}
+
+/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
+FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
+  const uint8_t len = fio_utf8_code_len(u);
+  uint8_t *dest = (uint8_t *)dest_;
+#if FIO_UTF8_ALLOW_IF
+  if (len < 2) { /* writes, but doesn't report on len == 0 */
+    *dest = u;
+    return len;
+  }
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  (dest) += 1;
+  *(dest) = head | (((u) >> 12) & mask);
+  (dest) += (len > 3);
+  *(dest) = head | (((u) >> 6) & mask);
+  (dest) += (len > 2);
+  *(dest) = head | ((u)&mask);
+  return len;
+#else
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *dest = (uint8_t)u;
+  dest += (len == 1);
+  *dest = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  dest += (len > 1);
+  *dest = head | (((u) >> 12) & mask);
+  dest += (len > 3);
+  *dest = head | (((u) >> 6) & mask);
+  dest += (len > 2);
+  *dest = head | ((u)&mask);
+  return len;
+#endif
+}
+
+/**
+ * Decodes the first UTF-8 char at `str` and returns its code point value.
+ *
+ * Advances the pointer at `str` by the number of bytes consumed (read).
+ */
+FIO_IFUNC uint32_t fio_utf8_read(char **str) {
+  const uint8_t *s = *(const uint8_t **)str;
+  const unsigned len = fio_utf8_char_len(s);
+  *str += len;
+#if FIO_UTF8_ALLOW_IF
+  if (!len)
+    return 0;
+  if (len == 1)
+    return *s;
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
+         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+         ((uint32_t)(s[t4] & 63));
+#else
+  const uint32_t t1 = (len > 1);
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  uint32_t r1 = *s & ((uint32_t)0UL - (len == 1));
+  uint32_t r2 = ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+                ((uint32_t)(s[t1] & 63) << ((t3a << 3) - (t3a << 1))) |
+                ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+                ((uint32_t)(s[t4] & 63));
+  r2 &= (uint32_t)0UL - t1;
+  return (r1 | r2);
+#endif
+}
+
+/** Decodes the first UTF-8 char at `str` and returns its code point value. */
+FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
+  return fio_utf8_read((char **)&str);
+}
+
+/* *****************************************************************************
+Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
+***************************************************************************** */
+#define FIO____SHFL_FN(T, prefx, len)                                          \
+  FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
+    T tmp[len];                                                                \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      tmp[i] = v[indx[i] & (len - 1)];                                         \
+    }                                                                          \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      v[i] = tmp[i];                                                           \
+    }                                                                          \
+  }
+#define FIO____REDUCE_FN(T, prefx, len, opnm, op)                              \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_##opnm(T *v) {                       \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r op v[i];                                                           \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC void fio_##prefx##x##len##_##opnm(T *dest, T *a, T *b) {           \
+    for (size_t i = 0; i < len; ++i)                                           \
+      dest[i] = a[i] op b[i];                                                  \
+  }
+#define FIO____REDUCE_MINMAX(T, prefx, len)                                    \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_max(T *v) {                          \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r < v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_min(T *v) {                          \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r > v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }
+
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_FN(T, prefx, len, and, &)                                      \
+  FIO____REDUCE_FN(T, prefx, len, or, |)                                       \
+  FIO____REDUCE_FN(T, prefx, len, xor, ^)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(uint8_t, u8, 4)
+FIO____SHFL_REDUCE(uint8_t, u8, 8)
+FIO____SHFL_REDUCE(uint8_t, u8, 16)
+FIO____SHFL_REDUCE(uint8_t, u8, 32)
+FIO____SHFL_REDUCE(uint8_t, u8, 64)
+FIO____SHFL_REDUCE(uint8_t, u8, 128)
+FIO____SHFL_REDUCE(uint8_t, u8, 256)
+FIO____SHFL_REDUCE(uint16_t, u16, 2)
+FIO____SHFL_REDUCE(uint16_t, u16, 4)
+FIO____SHFL_REDUCE(uint16_t, u16, 8)
+FIO____SHFL_REDUCE(uint16_t, u16, 16)
+FIO____SHFL_REDUCE(uint16_t, u16, 32)
+FIO____SHFL_REDUCE(uint16_t, u16, 64)
+FIO____SHFL_REDUCE(uint16_t, u16, 128)
+FIO____SHFL_REDUCE(uint32_t, u32, 2)
+FIO____SHFL_REDUCE(uint32_t, u32, 4)
+FIO____SHFL_REDUCE(uint32_t, u32, 8)
+FIO____SHFL_REDUCE(uint32_t, u32, 16)
+FIO____SHFL_REDUCE(uint32_t, u32, 32)
+FIO____SHFL_REDUCE(uint32_t, u32, 64)
+FIO____SHFL_REDUCE(uint64_t, u64, 2)
+FIO____SHFL_REDUCE(uint64_t, u64, 4)
+FIO____SHFL_REDUCE(uint64_t, u64, 8)
+FIO____SHFL_REDUCE(uint64_t, u64, 16)
+FIO____SHFL_REDUCE(uint64_t, u64, 32)
+
+#undef FIO____SHFL_REDUCE
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(float, float, 2)
+FIO____SHFL_REDUCE(float, float, 4)
+FIO____SHFL_REDUCE(float, float, 8)
+FIO____SHFL_REDUCE(float, float, 16)
+FIO____SHFL_REDUCE(float, float, 32)
+FIO____SHFL_REDUCE(float, float, 64)
+FIO____SHFL_REDUCE(double, dbl, 2)
+FIO____SHFL_REDUCE(double, dbl, 4)
+FIO____SHFL_REDUCE(double, dbl, 8)
+FIO____SHFL_REDUCE(double, dbl, 16)
+FIO____SHFL_REDUCE(double, dbl, 32)
+#undef FIO____REDUCE_FN
+#undef FIO____REDUCE_MINMAX
+#undef FIO____SHFL_FN
+#undef FIO____SHFL_REDUCE
+
+/* clang-format off */
+#define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
+#define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
+#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
+#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
+#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
+#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
+#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
+#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
+#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
+#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+/* clang-format on */
+
+/* *****************************************************************************
+Vector Types (SIMD / Math)
+***************************************************************************** */
+/** An unsigned 128bit union type. */
+typedef union {
+  size_t uz[16 / sizeof(size_t)];
+  uint64_t u64[2];
+  uint32_t u32[4];
+  uint16_t u16[8];
+  uint8_t u8[16];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[1];
+  uint32x4_t x32[1];
+  uint16x8_t x16[1];
+  uint8x16_t x8[1];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(16)));
+  uint64_t x32 __attribute__((vector_size(16)));
+  uint64_t x16 __attribute__((vector_size(16)));
+  uint64_t x8 __attribute__((vector_size(16)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[1];
+#endif
+} fio_u128 FIO_ALIGN(16);
+
+/** An unsigned 256bit union type. */
+typedef union {
+  size_t uz[32 / sizeof(size_t)];
+  uint64_t u64[4];
+  uint32_t u32[8];
+  uint16_t u16[16];
+  uint8_t u8[32];
+  fio_u128 u128[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[2];
+  uint32x4_t x32[2];
+  uint16x8_t x16[2];
+  uint8x16_t x8[2];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(32)));
+  uint64_t x32 __attribute__((vector_size(32)));
+  uint64_t x16 __attribute__((vector_size(32)));
+  uint64_t x8 __attribute__((vector_size(32)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[2];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t alignment_for_u256_[1];
+#endif
+} fio_u256 FIO_ALIGN(16);
+
+/** An unsigned 512bit union type. */
+typedef union {
+  size_t uz[64 / sizeof(size_t)];
+  uint64_t u64[8];
+  uint32_t u32[16];
+  uint16_t u16[32];
+  uint8_t u8[64];
+  fio_u128 u128[4];
+  fio_u256 u256[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[4];
+  uint32x4_t x32[4];
+  uint16x8_t x16[4];
+  uint8x16_t x8[4];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(64)));
+  uint64_t x32 __attribute__((vector_size(64)));
+  uint64_t x16 __attribute__((vector_size(64)));
+  uint64_t x8 __attribute__((vector_size(64)));
+#endif
+} fio_u512 FIO_ALIGN(16);
+
+/** An unsigned 1024bit union type. */
+typedef union {
+  size_t uz[128 / sizeof(size_t)];
+  uint64_t u64[16];
+  uint32_t u32[32];
+  uint16_t u16[64];
+  uint8_t u8[128];
+  fio_u128 u128[8];
+  fio_u256 u256[4];
+  fio_u512 u512[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[8];
+  uint32x4_t x32[8];
+  uint16x8_t x16[8];
+  uint8x16_t x8[8];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(128)));
+  uint64_t x32 __attribute__((vector_size(128)));
+  uint64_t x16 __attribute__((vector_size(128)));
+  uint64_t x8 __attribute__((vector_size(128)));
+#endif
+} fio_u1024 FIO_ALIGN(16);
+
+/** An unsigned 2048bit union type. */
+typedef union {
+  size_t uz[256 / sizeof(size_t)];
+  uint64_t u64[32];
+  uint32_t u32[64];
+  uint16_t u16[128];
+  uint8_t u8[256];
+  fio_u128 u128[16];
+  fio_u256 u256[8];
+  fio_u512 u512[4];
+  fio_u1024 u1024[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[16];
+  uint32x4_t x32[16];
+  uint16x8_t x16[16];
+  uint8x16_t x8[16];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(256)));
+  uint64_t x32 __attribute__((vector_size(256)));
+  uint64_t x16 __attribute__((vector_size(256)));
+  uint64_t x8 __attribute__((vector_size(256)));
+#endif
+} fio_u2048 FIO_ALIGN(16);
+
+/** An unsigned 4096bit union type. */
+typedef union {
+  size_t uz[512 / sizeof(size_t)];
+  uint64_t u64[64];
+  uint32_t u32[128];
+  uint16_t u16[256];
+  uint8_t u8[512];
+  fio_u128 u128[32];
+  fio_u256 u256[16];
+  fio_u512 u512[8];
+  fio_u1024 u1024[4];
+  fio_u2048 u2048[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[32];
+  uint32x4_t x32[32];
+  uint16x8_t x16[32];
+  uint8x16_t x8[32];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(512)));
+  uint64_t x32 __attribute__((vector_size(512)));
+  uint64_t x16 __attribute__((vector_size(512)));
+  uint64_t x8 __attribute__((vector_size(512)));
+#endif
+} fio_u4096 FIO_ALIGN(16);
+
+FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
+
+#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
+#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
+#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
+#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
+#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
+#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
+#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
+#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
+#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
+
+#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
+#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
+#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
+#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
+#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
+#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
+#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
+#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
+#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+
+/* *****************************************************************************
+Vector Helpers - memory load operations (implementation starts here)
+***************************************************************************** */
+
+#define FIO_MATH_TYPE_LOADER(bits, bytes)                                      \
+  /** Loads from memory using local-endian. */                                 \
+  FIO_MIFN fio_u##bits fio_u##bits##_load(const void *buf) {                   \
+    fio_u##bits r;                                                             \
+    fio_memcpy##bytes(&r, buf);                                                \
+    return r;                                                                  \
+  }                                                                            \
+  /** Stores to memory using local-endian. */                                  \
+  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) {         \
+    fio_memcpy##bytes(buf, &a);                                                \
+  }                                                                            \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 16)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 32)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 64)
+
+#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                        \
+  /** Loads vector from memory, reading from little-endian.  */                \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_le##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** Loads vector from memory, reading from big-endian.  */                   \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_be##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
+      fio_u##total_bits a) {                                                   \
+    fio_u##total_bits r;                                                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i)                           \
+      r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
+    return r;                                                                  \
+  }
+
+FIO_MATH_TYPE_LOADER(128, 16)
+FIO_MATH_TYPE_LOADER(256, 32)
+FIO_MATH_TYPE_LOADER(512, 64)
+FIO_MATH_TYPE_LOADER(1024, 128)
+FIO_MATH_TYPE_LOADER(2048, 256)
+FIO_MATH_TYPE_LOADER(4096, 512)
+
+#undef FIO_MATH_TYPE_LOADER
+#undef FIO_VECTOR_LOADER_ENDIAN_FUNC
+#undef FIO_VECTOR_LOADER_ENDIAN
+
+/* *****************************************************************************
+Linked Lists Persistent Macros and Types
+***************************************************************************** */
+
+/** A linked list arch-type */
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+
+/** A linked list node type */
+#define FIO_LIST_NODE fio_list_node_s
+/** A linked list head type */
+#define FIO_LIST_HEAD fio_list_node_s
+
+/** Allows initialization of FIO_LIST_HEAD objects. */
+#define FIO_LIST_INIT(obj)                                                     \
+  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
+
+#ifndef FIO_LIST_EACH
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.prev)))
+#endif
+
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_LIST_REMOVE_RESET(n)                                               \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+
+/** UNSAFE macro for popping a node to a list. */
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+
+/** UNSAFE macro for testing if a list is empty. */
+#define FIO_LIST_IS_EMPTY(head)                                                \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
+
+/* *****************************************************************************
+Indexed Linked Lists Persistent Macros and Types
+
+Indexed Linked Lists can be used to create a linked list that uses is always
+relative to some root pointer (usually the root of an array). This:
+
+1. Allows easy reallocation of the list without requiring pointer updates.
+
+2. Could be used for memory optimization if the array limits are known.
+
+The "head" index is usually validated by reserving the value of `-1` to indicate
+an empty list.
+***************************************************************************** */
+#ifndef FIO_INDEXED_LIST_EACH
+
+/** A 32 bit indexed linked list node type */
+typedef struct fio_index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio_index32_node_s;
+
+/** A 16 bit indexed linked list node type */
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+
+/** An 8 bit indexed linked list node type */
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
+
+/** A 32 bit indexed linked list node type */
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+/** A 16 bit indexed linked list node type */
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+/** An 8 bit indexed linked list node type */
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[n__].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
+    (root)[(head)].node_name.prev = n__;                                       \
+  } while (0)
+
+/** UNSAFE macro for adding a node to the begging of the list. */
+#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
+    (root)[n__].node_name.prev = (head);                                       \
+    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
+    (root)[(head)].node_name.next = n__;                                       \
+    (head) = n__;                                                              \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+  } while (0)
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
+  for (size_t pos = (head),                                                    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0,                                            \
+              pos##___nxt = (root)[(head)].node_name.next;                     \
+       !stopper___ils___;                                                      \
+       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
+              pos##___nxt = (root)[pos].node_name.next)
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
+  for (size_t pos = ((root)[(head)].node_name.prev),                           \
+              pos##___nxt =                                                    \
+                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0;                                            \
+       !stopper___ils___;                                                      \
+       ((stopper___ils___ = (pos == stooper___hd)),                            \
+        (pos = pos##___nxt),                                                   \
+        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
+#endif
+
+/* *****************************************************************************
 Constant-Time Selectors
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
 FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
@@ -1566,8 +1986,7 @@ FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
 
 /* *****************************************************************************
 Constant-Time Comparison Test
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A timing attack resistant memory comparison function. */
 FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
@@ -1578,8 +1997,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(64) = {0};
-    uint64_t ub[8] FIO_ALIGN(64) = {0};
+    uint64_t ua[8] FIO_ALIGN(16) = {0};
+    uint64_t ub[8] FIO_ALIGN(16) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -1611,8 +2030,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(64);
-    uint64_t ub[8] FIO_ALIGN(64);
+    uint64_t ua[8] FIO_ALIGN(16);
+    uint64_t ub[8] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -1754,8 +2173,7 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1830,8 +2248,7 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1954,8 +2371,7 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
@@ -2035,16 +2451,16 @@ FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
 /** Converts a `fio_has_byteX` result to a bitmap. */
 FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
 /** Converts a FIO_HAS_FULL_BYTE64 result to relative position bitmap. */
-#define FIO_HAS_BYTE2BITMAP(result)                                            \
+#define FIO_HAS_BYTE2BITMAP(result, bit_index)                                 \
   do {                                                                         \
     (result) = fio_ltole64((result)); /* map little endian to bitmap */        \
-    (result) >>= 7;                   /* move all 0x80 to 0x01 */              \
+    (result) >>= bit_index;           /* move bit index to 0x01 */             \
     (result) |= (result) >> 7;        /* pack all 0x80 bits into one byte */   \
     (result) |= (result) >> 14;                                                \
     (result) |= (result) >> 28;                                                \
     (result) &= 0xFFU;                                                         \
   } while (0)
-  FIO_HAS_BYTE2BITMAP(result);
+  FIO_HAS_BYTE2BITMAP(result, 7);
   return result;
 }
 
@@ -2083,8 +2499,7 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {
@@ -2108,8 +2523,7 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Add with carry. */
 FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,

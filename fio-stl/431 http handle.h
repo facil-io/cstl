@@ -131,6 +131,9 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h);
 /** Collects an updated timestamp for logging purposes. */
 SFUNC void fio_http_start_time_set(fio_http_s *);
 
+/** Clears any response data. */
+SFUNC fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body);
+
 /* *****************************************************************************
 Opaque User and Controller Data
 ***************************************************************************** */
@@ -272,6 +275,13 @@ SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
 /** Writes `data` to the body (payload) associated with the HTTP handle. */
 SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 
+/**
+ * If the body is stored in a temporary file, returns the file's handle.
+ *
+ * Otherwise returns -1.
+ */
+SFUNC int fio_http_body_fd(fio_http_s *);
+
 /* *****************************************************************************
 Cookies
 ***************************************************************************** */
@@ -397,6 +407,9 @@ SFUNC int fio_http_is_websocket(fio_http_s *);
 /** Returns true if the HTTP handle refers to an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
 
+/** Returns true if handle is in the process of freeing itself. */
+SFUNC int fio_http_is_freeing(fio_http_s *);
+
 /**
  * Gets the header information associated with the HTTP handle.
  *
@@ -505,6 +518,9 @@ WebSocket / SSE Helpers
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *);
 
+/** Returns non-zero if the response accepts a WebSocket upgrade request. */
+SFUNC int fio_http_websockets_accepted(fio_http_s *h);
+
 /** Sets response data to agree to a WebSockets Upgrade.*/
 SFUNC void fio_http_upgrade_websockets(fio_http_s *);
 
@@ -513,6 +529,9 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *);
+
+/** Returns non-zero if the response accepts an SSE request. */
+SFUNC int fio_http_sse_accepted(fio_http_s *h);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_upgrade_sse(fio_http_s *);
@@ -1243,7 +1262,7 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   if (args.buf) {
     if (args.dealloc)
       args.dealloc((void *)args.buf);
-  } else if (args.fd != -1) {
+  } else if (args.fd != -1 && !args.copy && args.fd != fio_http_body_fd(h)) {
     close(args.fd);
   }
   (void)h;
@@ -1289,6 +1308,7 @@ HTTP Handle Type
 #define FIO_HTTP_STATE_WEBSOCKET      8
 #define FIO_HTTP_STATE_SSE            16
 #define FIO_HTTP_STATE_COOKIES_PARSED 32
+#define FIO_HTTP_STATE_FREEING        64
 
 FIO_SFUNC int fio____http_write_start(fio_http_s *, fio_http_write_args_s *);
 FIO_SFUNC int fio____http_write_cont(fio_http_s *, fio_http_write_args_s *);
@@ -1330,6 +1350,7 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
+  h->state |= FIO_HTTP_STATE_FREEING;
   h->controller->on_destroyed(h);
 
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
@@ -1347,6 +1368,24 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   return h;
 }
 #include FIO_INCLUDE_FILE
+
+/** Clears any response data. */
+SFUNC fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body) {
+  fio___http_hmap_destroy(HTTP_HDR_RESPONSE(h));
+  h->state = 0;
+  h->writer = fio____http_write_start;
+  h->received_at = fio_http_get_timestump();
+  h->status = 0;
+  if (!clear_body)
+    return h;
+  fio_bstr_free(h->body.buf);
+  if (h->body.fd != -1)
+    close(h->body.fd);
+  h->body.buf = NULL;
+  h->body.len = h->body.pos = 0;
+  h->body.fd = -1;
+  return h;
+}
 
 /** Create a new http_s handle. */
 SFUNC fio_http_s *fio_http_new(void) { return fio_http_new2(); }
@@ -1444,6 +1483,12 @@ SFUNC int fio_http_is_clean(fio_http_s *h) {
 SFUNC int fio_http_is_finished(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   return (!!(h->state & FIO_HTTP_STATE_FINISHED));
+}
+
+/** Returns true if handle is in the process of freeing itself. */
+SFUNC int fio_http_is_freeing(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (!!(h->state & FIO_HTTP_STATE_FREEING));
 }
 
 /** Returns true if the HTTP handle's response is streaming. */
@@ -2032,6 +2077,13 @@ Body Management - Public API
 /** Gets the body (payload) length associated with the HTTP handle. */
 SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
 
+/**
+ * If the body is stored in a temporary file, returns the file's handle.
+ *
+ * Otherwise returns -1.
+ */
+SFUNC int fio_http_body_fd(fio_http_s *h) { return h->body.fd; }
+
 /** Adjusts the body's reading position. Negative values start at the end. */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
   if (pos < 0) {
@@ -2131,6 +2183,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       fio_http_send_error_response(h, h->status);
       return 0;
     }
+    /* validate Date header */
+    fio___http_hmap_set2(
+        hdrs,
+        FIO_STR_INFO2((char *)"date", 4),
+        fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
+        0);
   }
   /* test if streaming / single body response */
   if (!fio___http_hmap_get_ptr(hdrs,
@@ -2147,17 +2205,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
-  /* validate Date header */
-  fio___http_hmap_set2(
-      hdrs,
-      FIO_STR_INFO2((char *)"date", 4),
-      fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
-      0);
 
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
 }
+
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
   if (args->buf || args->fd) {
@@ -2284,9 +2337,6 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
                               FIO_STR_INFO2((char *)"cache-control", 13),
                               FIO_STR_INFO2((char *)"no-cache", 8));
   fio_http_request_header_set(h,
-                              FIO_STR_INFO2((char *)"connection", 10),
-                              FIO_STR_INFO2((char *)"keep-alive", 10));
-  fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"upgrade", 7),
                               FIO_STR_INFO2((char *)"websocket", 9));
   fio_http_request_header_set(
@@ -2300,23 +2350,114 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
     fio_string_write_base64enc(&key, NULL, tmp, 16, 0);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
-                                FIO_STR_INFO2((char *)"13", 2));
+                                key);
   }
   /* sec-websocket-extensions ? */
   /* send request? */
+}
+
+/** Returns non-zero if the response accepts a WebSocket upgrade request. */
+SFUNC int fio_http_websockets_accepted(fio_http_s *h) {
+  if (h->status != 101)
+    return 0;
+  if (!fio_http_websockets_requested(h))
+    return 0;
+  fio_str_info_s tst =
+      fio_http_response_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
+  if (tst.len < 7 ||
+      (fio_buf2u64_le(tst.buf) | (uint64_t)0x20202020202020FFULL) !=
+          (fio_buf2u64_le("upgrade") | (uint64_t)0x20202020202020FFULL))
+    return 0;
+  tst = fio_http_response_header(h, FIO_STR_INFO2((char *)"upgrade", 7), 0);
+  if (tst.len < 9 || (tst.buf[0] | 32) != 'w' ||
+      (fio_buf2u64u(tst.buf + 1) | (uint64_t)0x2020202020202020ULL) !=
+          fio_buf2u64u("ebsocket"))
+    return 0;
+  tst = fio_http_response_header(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      0);
+  if (tst.len != 2 || tst.buf[0] != '1' || tst.buf[1] != '3')
+    return 0;
+  { /* Sec-WebSocket-Accept */
+    tst = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
+        0);
+    if (!tst.len)
+      return 0;
+
+    fio_str_info_s k =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                                0);
+    FIO_STR_INFO_TMP_VAR(accept_val, 63);
+    if (k.len != 24)
+      return 0;
+    fio_string_write(&accept_val, NULL, k.buf, k.len);
+    fio_string_write(&accept_val,
+                     NULL,
+                     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                     36);
+    fio_sha1_s sha = fio_sha1(accept_val.buf, accept_val.len);
+    fio_sha1_digest(&sha);
+    accept_val.len = 0;
+    fio_string_write_base64enc(&accept_val,
+                               NULL,
+                               fio_sha1_digest(&sha),
+                               fio_sha1_len(),
+                               0);
+    if (!FIO_STR_INFO_IS_EQ(tst, accept_val))
+      return 0;
+  }
+  h->state |= (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET |
+               FIO_HTTP_STATE_FINISHED);
+  h->writer = fio____http_write_upgraded;
+  return 1;
 }
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *h) {
   fio_str_info_s val =
       fio_http_request_header(h, FIO_STR_INFO2((char *)"accept", 6), 0);
-  if (val.len == 17 && fio_buf2u64u(val.buf) == fio_buf2u64u("text/eve") &&
-      fio_buf2u64u(val.buf + 8) == fio_buf2u64u("nt-strea") &&
-      val.buf[16] == 'm') {
-    FIO_LOG_DDEBUG("EventSource connection requested.");
-    return 1;
+  if (val.len < 17)
+    return 0;
+  if ((val.buf[0] | 32) != 't')
+    return 0;
+  uint64_t t0 = fio_buf2u64u(val.buf + 1) | (uint64_t)0x2020202020202020ULL;
+  uint64_t t1 = fio_buf2u64u(val.buf + 9) | (uint64_t)0x2020202020202020ULL;
+  if ((t0 != fio_buf2u64u("ext/even")) || (t1 != fio_buf2u64u("t-stream")))
+    return 0; /* note that '/' and '-' both have 32 (bit[5]) set */
+  FIO_LOG_DDEBUG2("EventSource connection requested.");
+  return 1;
+}
+
+/** Returns non-zero if the response accepts an SSE request. */
+SFUNC int fio_http_sse_accepted(fio_http_s *h) {
+  if (!fio_http_sse_requested(h))
+    return 0;
+  if (h->status != 200)
+    return 0;
+  fio_str_info_s val =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"accept", 6), 0);
+  for (size_t i = 0; i < 2; ++i) {
+    if (val.len < 17)
+      return 0;
+    if ((val.buf[0] | 32) != 't')
+      return 0;
+    uint64_t t0 = fio_buf2u64u(val.buf + 1) | (uint64_t)0x2020202020202020ULL;
+    uint64_t t1 = fio_buf2u64u(val.buf + 9) | (uint64_t)0x2020202020202020ULL;
+    if ((t0 != fio_buf2u64u("ext/even")) || (t1 != fio_buf2u64u("t-stream")))
+      return 0; /* note that '/' and '-' both have 32 (bit[5]) set */
+    val = fio_http_response_header(h,
+                                   FIO_STR_INFO2((char *)"content-type", 12),
+                                   0);
   }
-  return 0;
+  h->state |=
+      (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE | FIO_HTTP_STATE_FINISHED);
+  h->writer = fio____http_write_upgraded;
+  FIO_LOG_DDEBUG2("EventSource connection accepted.");
+  return 1;
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
@@ -2350,7 +2491,6 @@ SFUNC void fio_http_sse_set_request(fio_http_s *h) {
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"cache-control", 13),
                               FIO_STR_INFO2((char *)"no-cache", 8));
-  /* TODO: send request? */
 }
 
 /* *****************************************************************************

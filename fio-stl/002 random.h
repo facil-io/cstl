@@ -150,8 +150,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 
   /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
-  uint64_t v[8] FIO_ALIGN(64), w[8] FIO_ALIGN(64) = {0};
-  uint64_t const prime[8] FIO_ALIGN(64) = {
+  uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
+  uint64_t const prime[8] FIO_ALIGN(16) = {
       FIO_U64_HASH_PRIME1,
       FIO_U64_HASH_PRIME2,
       FIO_U64_HASH_PRIME3,

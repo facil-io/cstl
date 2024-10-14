@@ -67,7 +67,7 @@ FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
                                         size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[8] FIO_ALIGN(64);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     fio_memcpy64(t, s);
     FIO_COMPILER_GUARD_INSTRUCTION;
@@ -106,7 +106,7 @@ FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
                                                  size_t l) {
   char *d = (char *)d_ + l;
   const char *s = (const char *)s_ + l;
-  uint64_t t[8] FIO_ALIGN(64);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     (s -= 64), (d -= 64), (l -= 64);
     fio_memcpy64(t, s);
@@ -231,7 +231,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   // return (void *)memchr(buffer, token, len); /* FIXME */
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
-  uint64_t u[16] FIO_ALIGN(64) = {0};
+  uint64_t u[16] FIO_ALIGN(16) = {0};
   uint64_t flag = 0;
   size_t i;
   uint64_t umsk = ((uint64_t)((uint8_t)token));
@@ -292,7 +292,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
   uint64_t flag = 0;
-  uint64_t map[8] FIO_ALIGN(64);
+  uint64_t map[8] FIO_ALIGN(16);
   /* align to 8 bytes - most likely skipped */
   switch (start & 7) { // clang-format off
   case 1: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
@@ -342,8 +342,8 @@ fio_memcmp
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   if (a_ == b_ || !len)
     return 0;
-  uint64_t ua[8] FIO_ALIGN(64);
-  uint64_t ub[8] FIO_ALIGN(64);
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
   size_t flag = 0;
   char *a = (char *)a_;
   char *b = (char *)b_;

@@ -344,6 +344,9 @@ SFUNC int fio_srv_is_suspended(fio_s *io);
 /** Returns 1 if the IO handle is marked as open. */
 SFUNC int fio_srv_is_open(fio_s *io);
 
+/** Returns the approximate number of bytes in the outgoing buffer. */
+SFUNC size_t fio_srv_backlog(fio_s *io);
+
 /* *****************************************************************************
 Task Scheduling
 ***************************************************************************** */
@@ -1086,24 +1089,23 @@ FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
   (void)r;
-  fio___srvdata.wakeup_wait = 0;
 #if DEBUG
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup called", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
 #endif
+  fio___srvdata.wakeup_wait = 0;
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
   fio_sock_close(fio___srvdata.wakeup_fd);
   fio___srvdata.wakeup = NULL;
   fio___srvdata.wakeup_fd = -1;
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup destroyed", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup destroyed", fio___srvdata.pid);
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
       fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
-  fio___srvdata.wakeup_wait = 1;
   char buf[1] = {(char)~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
   (void)ignr;
@@ -1120,7 +1122,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
     return;
   int fds[2];
   if (pipe(fds)) {
-    FIO_LOG_ERROR("%d couldn't open wakeup pipes, fio___srv_wakeup disabled.",
+    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___srv_wakeup disabled.",
                   fio___srvdata.pid);
     return;
   }
@@ -1131,7 +1133,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
                                            &FIO___SRV_WAKEUP_PROTOCOL,
                                            (void *)(uintptr_t)fds[1],
                                            NULL);
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup initialized", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup initialized", fio___srvdata.pid);
 }
 
 /* *****************************************************************************
@@ -1190,26 +1192,26 @@ FIO_IFUNC void fio_set_valid(fio_s *io) {
   fio_validity_map_set(&fio___srvdata.valid, fio_risky_ptr(io), io, NULL);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(fio_is_valid(io),
-                   "%d IO validity set, but map reported as invalid!",
+                   "(%d) IO validity set, but map reported as invalid!",
                    (int)fio___srvdata.pid);
-  FIO_LOG_DEBUG2("%d IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
+  FIO_LOG_DEBUG2("(%d) IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
 }
 
 FIO_IFUNC void fio_set_invalid(fio_s *io) {
   fio_s *old = NULL;
-  FIO_LOG_DEBUG2("%d IO %p is no longer valid",
+  FIO_LOG_DEBUG2("(%d) IO %p is no longer valid",
                  (int)fio___srvdata.pid,
                  (void *)io);
   FIO_VALIDATE_LOCK();
   fio_validity_map_remove(&fio___srvdata.valid, fio_risky_ptr(io), io, &old);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(!old || old == io,
-                   "%d invalidity map corruption (%p != %p)!",
+                   "(%d) invalidity map corruption (%p != %p)!",
                    (int)fio___srvdata.pid,
                    io,
                    old);
   FIO_ASSERT_DEBUG(!fio_is_valid(io),
-                   "%d IO validity removed, but map reported as valid!",
+                   "(%d) IO validity removed, but map reported as valid!",
                    (int)fio___srvdata.pid);
 }
 
@@ -1249,18 +1251,22 @@ struct fio_s {
   size_t total_sent;
 #endif
   int64_t active;
-  uint32_t state;
+  uint16_t state;
+  uint16_t pflags;
   int fd;
   /* TODO? peer address buffer */
 };
 
-#define FIO_STATE_OPEN         ((uint32_t)1U)
-#define FIO_STATE_SUSPENDED    ((uint32_t)2U)
-#define FIO_STATE_THROTTLED    ((uint32_t)4U)
-#define FIO_STATE_CLOSING      ((uint32_t)8U)
-#define FIO_STATE_CLOSE_LOCAL  ((uint32_t)16U)
-#define FIO_STATE_CLOSE_REMOTE ((uint32_t)32U)
-#define FIO_STATE_CLOSE_ERROR  ((uint32_t)64U)
+#define FIO___STATE_OPENOPEN         ((uint16_t)1U)
+#define FIO___STATE_OPENSUSPENDED    ((uint16_t)2U)
+#define FIO___STATE_OPENTHROTTLED    ((uint16_t)4U)
+#define FIO___STATE_OPENCLOSING      ((uint16_t)8U)
+#define FIO___STATE_OPENCLOSE_LOCAL  ((uint16_t)16U)
+#define FIO___STATE_OPENCLOSE_REMOTE ((uint16_t)32U)
+#define FIO___STATE_OPENCLOSE_ERROR  ((uint16_t)64U)
+
+#define FIO___STATE_POLLIN_SET  ((uint16_t)1U)
+#define FIO___STATE_POLLOUT_SET ((uint16_t)2U)
 
 FIO_SFUNC void fio_s_init(fio_s *io) {
   *io = (fio_s){
@@ -1269,7 +1275,7 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
       .stream = FIO_STREAM_INIT(io->stream),
       .env = FIO___SRV_ENV_SAFE_INIT,
       .active = fio___srvdata.tick,
-      .state = FIO_STATE_OPEN,
+      .state = FIO___STATE_OPENOPEN,
       .fd = -1,
   };
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
@@ -1277,6 +1283,19 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
   FIO_LIST_PUSH(&fio___srvdata.protocols,
                 &FIO___MOCK_PROTOCOL.reserved.protocols);
   fio_set_valid(io);
+}
+
+FIO_IFUNC void fio___s_monitor_in(fio_s *io) {
+  if ((fio_atomic_or(&io->pflags, FIO___STATE_POLLIN_SET) &
+       FIO___STATE_POLLIN_SET) == FIO___STATE_POLLIN_SET)
+    return;
+  fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
+}
+FIO_IFUNC void fio___s_monitor_out(fio_s *io) {
+  if ((fio_atomic_or(&io->pflags, FIO___STATE_POLLOUT_SET) &
+       FIO___STATE_POLLOUT_SET) == FIO___STATE_POLLOUT_SET)
+    return;
+  fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLOUT);
 }
 
 FIO_SFUNC void fio_s_destroy(fio_s *io) {
@@ -1318,6 +1337,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   if (io->node.next == io->node.prev) /* list was empty before IO was added */
     FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
   io->pr->on_attach(io);
+  io->pflags = (FIO___STATE_POLLIN_SET | FIO___STATE_POLLOUT_SET);
   fio_poll_monitor(&fio___srvdata.poll_data,
                    io->fd,
                    (void *)io,
@@ -1357,7 +1377,7 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
     goto error;
   io = fio_new2();
   FIO_ASSERT_ALLOC(io);
-  FIO_LOG_DDEBUG2("%d attaching fd %d to IO object %p",
+  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,
                   (void *)io);
@@ -1401,7 +1421,7 @@ FIO_SFUNC size_t fio_protocol_each(fio_protocol_s *protocol,
   if (!protocol || !protocol->reserved.ios.next || !protocol->reserved.ios.prev)
     return count;
   FIO_LIST_EACH(fio_s, node, &protocol->reserved.ios, io) {
-    if (!(io->state & FIO_STATE_OPEN))
+    if (!(io->state & FIO___STATE_OPENOPEN))
       continue;
     task(io, udata);
     ++count;
@@ -1463,20 +1483,71 @@ SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_get_args_s args) {
 }
 
 /* *****************************************************************************
+Writing from the stream
+***************************************************************************** */
+
+static void fio___srv_try_to_write_to_io(fio_s *io) {
+  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
+  size_t total = 0;
+  if (!(io->state & FIO___STATE_OPENOPEN))
+    return;
+  for (;;) {
+    size_t len = FIO_SRV_BUFFER_PER_WRITE;
+    char *buf = buf_mem;
+    fio_stream_read(&io->stream, &buf, &len);
+    if (!len)
+      break;
+    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    if (r > 0) {
+      FIO_LOG_DEBUG2("Written %zu bytes to fd %d", (size_t)r, io->fd);
+      total += r;
+      fio_stream_advance(&io->stream, r);
+      continue;
+    }
+    if (r == -1) {
+      if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
+        break;
+      if (errno == EINTR)
+        continue;
+    }
+    goto connection_error;
+  }
+  if (total) {
+    fio_touch(io);
+#ifdef DEBUG
+    io->total_sent += total;
+#endif
+  }
+  return;
+
+connection_error:
+#if DEBUG
+  if (fio_stream_any(&io->stream))
+    FIO_LOG_DDEBUG2(
+        "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
+        errno,
+        (void *)io,
+        io->fd,
+        strerror(errno));
+#endif
+  fio_close_now(io);
+}
+/* *****************************************************************************
 Event handling
 ***************************************************************************** */
 
 static void fio___srv_poll_on_data(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
-  if (io->state == FIO_STATE_OPEN) {
+  fio_atomic_and(&io->pflags, ~FIO___STATE_POLLIN_SET);
+  if (io->state == FIO___STATE_OPENOPEN) {
     /* this also tests for the suspended / throttled / closing flags */
     io->pr->on_data(io);
-    if (io->state == FIO_STATE_OPEN) {
-      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
+    if (io->state == FIO___STATE_OPENOPEN) {
+      fio___s_monitor_in(io);
     }
-  } else if ((io->state & FIO_STATE_OPEN)) {
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+  } else if ((io->state & FIO___STATE_OPENOPEN)) {
+    fio___s_monitor_out(io);
   }
   fio_free2(io);
   return;
@@ -1488,73 +1559,43 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
   errno = 0;
 #endif
   fio_s *io = (fio_s *)io_;
-  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
-  size_t total = 0;
-  if (!(io->state & FIO_STATE_OPEN))
-    goto finish;
-  for (;;) {
-    size_t len = FIO_SRV_BUFFER_PER_WRITE;
-    char *buf = buf_mem;
-    fio_stream_read(&io->stream, &buf, &len);
-    if (!len)
-      break;
-    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-    if (r > 0) {
-      total += r;
-      fio_stream_advance(&io->stream, r);
-      continue;
-    } else if ((r == -1) & ((errno == EWOULDBLOCK) || (errno == EAGAIN) ||
-                            (errno == EINTR))) {
-      break;
-    } else {
-#if DEBUG
-      if (fio_stream_any(&io->stream))
-        FIO_LOG_DDEBUG2(
-            "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
-            errno,
-            (void *)io,
-            io->fd,
-            strerror(errno));
-#endif
-      fio_close_now(io);
-      goto finish;
-    }
-  }
-  if (total) {
-    fio_touch(io);
-#ifdef DEBUG
-    io->total_sent += total;
-#endif
-  }
+  fio_atomic_and(&io->pflags, ~FIO___STATE_POLLOUT_SET);
+  fio___srv_try_to_write_to_io(io);
   if (!fio_stream_any(&io->stream) &&
       !io->pr->io_functions.flush(io->fd, io->tls)) {
-    if ((io->state & FIO_STATE_CLOSING)) {
+    if ((io->state & FIO___STATE_OPENCLOSING)) {
       io->pr->io_functions.finish(io->fd, io->tls);
       fio_close_now(io);
     } else {
-      if ((io->state & FIO_STATE_THROTTLED)) {
-        fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
-        fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
+      if ((io->state & FIO___STATE_OPENTHROTTLED)) {
+        fio_atomic_and(&io->state, ~FIO___STATE_OPENTHROTTLED);
+        fio___s_monitor_in(io);
       }
-      FIO_LOG_DDEBUG2("calling on_ready for %p (fd %d)", (void *)io, io->fd);
+      FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
+                      fio___srvdata.pid,
+                      (void *)io,
+                      io->fd,
+                      fio_stream_length(&io->stream));
       io->pr->on_ready(io);
     }
   } else {
     if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
-      if (!(io->state & FIO_STATE_THROTTLED))
-        FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
-      fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
+      if (!(io->state & FIO___STATE_OPENTHROTTLED))
+        FIO_LOG_DDEBUG2("(%d), throttled IO %p (fd %d)",
+                        fio___srvdata.pid,
+                        (void *)io,
+                        io->fd);
+      fio_atomic_or(&io->state, FIO___STATE_OPENTHROTTLED);
     }
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+    fio___s_monitor_out(io);
   }
-finish:
   fio_free2(io);
 }
 
 static void fio___srv_poll_on_close(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
-  fio_atomic_or(&io->state, FIO_STATE_CLOSE_REMOTE);
+  fio_atomic_or(&io->state, FIO___STATE_OPENCLOSE_REMOTE);
   fio_close_now(io);
   fio_free2(io);
 }
@@ -1618,7 +1659,10 @@ static int fio___srv_review_timeouts(void) {
       FIO_ASSERT_DEBUG(io->pr == pr, "IO protocol ownership error");
       if (io->active >= limit)
         break;
-      FIO_LOG_DDEBUG2("scheduling timeout for %p (fd %d)", (void *)io, io->fd);
+      FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
+                      fio___srvdata.pid,
+                      (void *)io,
+                      io->fd);
       fio_queue_push(fio___srv_tasks, fio___srv_poll_on_timeout, fio_dup2(io));
       ++c;
     }
@@ -1835,12 +1879,12 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
 is_worker_process:
   fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.is_worker = 1;
-  FIO_LOG_INFO("%d worker starting up.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
   if (!fio_atomic_xor_fetch(&fio___srvdata.stop, 2))
     fio___srv_work(1);
-  FIO_LOG_INFO("%d worker exiting.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
   exit(0);
 }
 
@@ -1885,7 +1929,7 @@ SFUNC uint16_t fio_srv_workers(int workers) {
 SFUNC void fio_srv_add_workers(int workers) {
   if (!workers || fio___srvdata.root_pid != fio___srvdata.pid)
     return;
-  FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+  FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
   for (int i = 0; i < workers; ++i)
     fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker);
 }
@@ -1915,12 +1959,12 @@ SFUNC void fio_srv_start(int workers) {
 #endif
   fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   if (workers) {
-    FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+    FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
     for (int i = 0; i < workers; ++i) {
       fio___srv_spawn_worker(NULL, NULL);
     }
   } else {
-    FIO_LOG_DEBUG2("%d starting facil.io server in single process mode.",
+    FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
                    fio___srvdata.root_pid);
   }
   fio___srv_work(!workers);
@@ -1983,12 +2027,12 @@ FIO_SFUNC void fio_write2___dealloc_task(void *fn, void *data) {
 FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   fio_s *io = (fio_s *)io_;
   fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
-  if (!(io->state & FIO_STATE_OPEN))
+  if (!(io->state & FIO___STATE_OPENOPEN))
     goto io_error;
   fio_stream_add(&io->stream, packet);
-  fio_queue_push(fio___srv_tasks,
-                 fio___srv_poll_on_ready,
-                 io); /* no dup/undup, already done.*/
+  fio___srv_try_to_write_to_io(io);
+  fio___s_monitor_out(io);
+  fio_free2(io); /* undup the IO object since it isn't moved to on_ready */
   return;
 io_error:
   fio_stream_pack_free(packet);
@@ -2014,7 +2058,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   }
   if (!packet)
     goto error;
-  if ((io->state & FIO_STATE_CLOSING))
+  if ((io->state & FIO___STATE_OPENCLOSING))
     goto write_called_after_close;
   fio_srv_defer(fio_write2___task, fio_dup2(io), packet);
   return;
@@ -2036,7 +2080,7 @@ write_called_after_close:
   }
   return;
 io_error_null:
-  FIO_LOG_ERROR("%d `fio_write2` called for invalid IO (NULL)",
+  FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)",
                 fio___srvdata.pid);
   if (args.dealloc) {
     union {
@@ -2050,9 +2094,10 @@ io_error_null:
 
 /** Marks the IO for closure as soon as scheduled data was sent. */
 SFUNC void fio_close(fio_s *io) {
-  if (io && (io->state & FIO_STATE_OPEN) &&
-      !(fio_atomic_or(&io->state, (FIO_STATE_CLOSING | FIO_STATE_CLOSE_LOCAL)) &
-        FIO_STATE_CLOSING)) {
+  if (io && (io->state & FIO___STATE_OPENOPEN) &&
+      !(fio_atomic_or(&io->state,
+                      (FIO___STATE_OPENCLOSING | FIO___STATE_OPENCLOSE_LOCAL)) &
+        FIO___STATE_OPENCLOSING)) {
     FIO_LOG_DDEBUG2("scheduling IO %p (fd %d) for closure", (void *)io, io->fd);
     fio_queue_push(fio___srv_tasks,
                    fio___srv_poll_on_ready,
@@ -2062,30 +2107,39 @@ SFUNC void fio_close(fio_s *io) {
 
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
-  fio_atomic_or(&io->state, FIO_STATE_CLOSING);
-  if ((fio_atomic_and(&io->state, ~FIO_STATE_OPEN) & FIO_STATE_OPEN))
+  fio_atomic_or(&io->state, FIO___STATE_OPENCLOSING);
+  if ((fio_atomic_and(&io->state, ~FIO___STATE_OPENOPEN) &
+       FIO___STATE_OPENOPEN))
     fio_free2(io);
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) {
+  io->state |= FIO___STATE_OPENSUSPENDED;
+}
 
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_srv_unsuspend(fio_s *io) {
-  if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) &
-       FIO_STATE_SUSPENDED)) {
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
+  if ((fio_atomic_and(&io->state, ~FIO___STATE_OPENSUSPENDED) &
+       FIO___STATE_OPENSUSPENDED)) {
+    fio___s_monitor_in(io);
   }
 }
 
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_srv_is_suspended(fio_s *io) {
-  return (io->state & FIO_STATE_SUSPENDED);
+  return (io->state & FIO___STATE_OPENSUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */
 SFUNC int fio_srv_is_open(fio_s *io) {
-  return (io->state & FIO_STATE_OPEN) && !(io->state & FIO_STATE_CLOSING);
+  return io && (io->state & FIO___STATE_OPENOPEN) &&
+         !(io->state & FIO___STATE_OPENCLOSING);
+}
+
+/** Returns the approximate number of bytes in the outgoing buffer. */
+SFUNC size_t fio_srv_backlog(fio_s *io) {
+  return io ? fio_stream_length(&io->stream) : 0;
 }
 
 /* *****************************************************************************
@@ -2146,12 +2200,12 @@ static void fio___srv_listen_free(void *l_) {
     l->on_finish(l->protocol, l->udata);
 
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("%d stopped listening @ %.*s",
+    FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
                    getpid(),
                    (int)l->url_len,
                    l->url);
   else
-    FIO_LOG_INFO("%d stopped listening @ %.*s",
+    FIO_LOG_INFO("(%d) stopped listening @ %.*s",
                  getpid(),
                  (int)l->url_len,
                  l->url);
@@ -2230,7 +2284,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   l = fio___srv_listen_dup(l);
   int fd = fio_sock_dup(l->fd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("%d Called dup(%d) to attach %d as a listening socket.",
+  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
                  (int)fio___srvdata.pid,
                  l->fd,
                  fd);
@@ -2238,9 +2292,9 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   if (l->on_start)
     l->on_start(l->protocol, l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("%d started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_DEBUG2("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   else
-    FIO_LOG_INFO("%d started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_INFO("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   (void)ignr_;
 }
 
@@ -2385,7 +2439,7 @@ FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
   if (!fio_srv_is_open(io))
     return;
   fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
-  FIO_LOG_DEBUG2("%d established client connection to %s",
+  FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);
   fio_udata_set(io, c->udata);

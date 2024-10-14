@@ -442,6 +442,22 @@ Returns non-zero if the IO is suspended (this might not be reliable information)
 
 **Note**: this function is thread safe (though `fio_srv_suspend` is **NOT**).
 
+#### `fio_srv_is_open`
+
+```c
+int fio_srv_is_open(fio_s *io);
+```
+
+Returns 1 if the IO handle is marked as open.
+
+#### `fio_srv_backlog`
+
+```c
+size_t fio_srv_backlog(fio_s *io);
+```
+
+Returns the approximate number of bytes in the outgoing buffer.
+
 #### `fio_dup`
 
 ```c

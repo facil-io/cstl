@@ -534,26 +534,6 @@ IFUNC uint8_t fio_i2c(unsigned char i) {
   return fio___alphanumeric_map[i & 63];
 }
 
-/** Reads a signed base 10 formatted number. */
-SFUNC int64_t fio_atol10(char **pstr) {
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
-  char *pos = *pstr;
-  const size_t inv = (pos[0] == '-');
-  pos += inv;
-  uint64_t val = 0;
-  uint64_t r0;
-  while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
-    val *= 10;
-    val += r0;
-    ++pos;
-  }
-  if (((size_t)(pos[0] - '0') < 10ULL)) {
-    errno = E2BIG;
-  }
-  *pstr = pos;
-  return fio_u2i_limit(val, inv);
-}
-
 /** Reads a signed base 8 formatted number. */
 SFUNC uint64_t fio_atol8u(char **pstr) {
   uint64_t r = 0;
@@ -573,12 +553,34 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
   return r;
 }
 
-FIO_IFUNC uint64_t fio___atol10u_with_prefix(uint64_t r, char **pstr) {
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  uint64_t r = 0, u0 = 0, u1 = 0;
   char *pos = *pstr;
-  uint64_t u0, u1 = r;
+  /* can't use SIMD, as we don't want to overflow. */
+  for (size_t i = 0; i < 8; ++i)
+    u0 += ((pos[u0] >= '0') & (pos[u0] <= '9'));
+  switch ((u0 & 12)) { /* now we are safe to copy all bytes validated */
+  case 8:
+    r = fio_buf2u64_le(pos);
+    *pstr = (pos += 8); /* credit Johnny Lee, not mine... */
+    r = ((r & 0x0F0F0F0F0F0F0F0FULL) * 2561ULL) >> 8;
+    r = ((r & 0x00FF00FF00FF00FFULL) * 6553601ULL) >> 16;
+    r = ((r & 0x0000FFFF0000FFFFULL) * 42949672960001ULL) >> 32;
+    u1 = r; /* https://johnnylee-sde.github.io/Fast-numeric-string-to-int/ */
+    break;
+  case 4:
+    r = ((unsigned)(pos[0] - '0') * 1000) + ((unsigned)(pos[1] - '0') * 100) +
+        ((unsigned)(pos[2] - '0') * 10) + (unsigned)(pos[3] - '0');
+    *pstr = (pos += 4);
+    u1 = r;
+    break;
+  }
+
   u0 = (uint64_t)(pos[0] - '0');
   if (u0 > 9ULL)
     return r;
+  r *= 10;
   for (;;) {
     r += u0;
     if (r < u1)
@@ -607,9 +609,27 @@ value_overflow:
   return r;
 }
 
-/** Reads an unsigned base 10 formatted number. */
-SFUNC uint64_t fio_atol10u(char **pstr) {
-  return fio___atol10u_with_prefix(0, pstr);
+/** Reads a signed base 10 formatted number. */
+SFUNC int64_t fio_atol10(char **pstr) {
+  // const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+  char *pos = *pstr;
+  const size_t inv = (pos[0] == '-');
+  pos += inv;
+  // uint64_t val = 0;
+  // uint64_t r0;
+  // while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
+  //   val *= 10;
+  //   val += r0;
+  //   ++pos;
+  // }
+  // if (((size_t)(pos[0] - '0') < 10ULL)) {
+  //   errno = E2BIG;
+  // }
+  *pstr = pos;
+  uint64_t val = fio_atol10u(pstr);
+  if (((size_t)(**pstr - '0') < 10ULL))
+    errno = E2BIG;
+  return fio_u2i_limit(val, inv);
 }
 
 /** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */

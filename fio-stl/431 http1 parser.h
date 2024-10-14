@@ -171,6 +171,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
                              fio_buf_info_s *buf,
                              void *udata) {
   /* find line start/end and test */
+  fio_buf_info_s wrd[3];
   char *start = buf->buf;
   char *tmp;
   while ((start[0] == ' ' || start[0] == '\r' || start[0] == '\n') &&
@@ -197,35 +198,33 @@ static int fio_http1___start(fio_http1_parser_s *p,
   /* request: method path version */
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
-  if (fio_http1_on_method(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
+  wrd[0] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_url(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
+  wrd[1] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
   if (start >= eol)
     return -1;
-  if (fio_http1_on_version(
-          FIO_BUF_INFO2(start,
-                        (size_t)(((eol - start) > 14) ? 14 : (eol - start))),
-          udata))
+  wrd[2] = FIO_BUF_INFO2(start, (size_t)(eol - start));
+  if (fio_c2i(wrd[1].buf[0]) < 10)
+    goto parse_response_line;
+  if (wrd[2].len > 14)
+    wrd[2].len = 14;
+  if (fio_http1_on_method(wrd[0], udata))
+    return -1;
+  if (fio_http1_on_url(wrd[1], udata))
+    return -1;
+  if (fio_http1_on_version(wrd[2], udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 
 parse_response_line:
-  /* response: version code text */
-  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
+  if (wrd[0].len > 14)
+    wrd[0].len = 14;
+  if (fio_http1_on_version(wrd[0], udata))
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
-  start = tmp + 1;
-  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
-    return -1;
-  if (fio_http1_on_status(fio_atol10(&start),
-                          FIO_BUF_INFO2((tmp + 1), (size_t)(eol - tmp)),
-                          udata))
+  if (fio_http1_on_status(fio_atol10u(&wrd[1].buf), wrd[2], udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 }
@@ -368,7 +367,6 @@ static inline int fio_http1___read_header_line(
                    fio_buf_info_s,
                    fio_buf_info_s,
                    void *)) {
-  int r;
   for (;;) {
     char *start = buf->buf;
     char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
@@ -395,7 +393,7 @@ static inline int fio_http1___read_header_line(
       while (eol[-1] == ' ' || eol[-1] == '\t')
         --eol;
     value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
-    r = handler(p, name, value, udata);
+    int r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
       return r;
   }
@@ -408,6 +406,7 @@ headers_finished:
           : (!(p->expected + 1)) ? fio_http1___read_body_chunked
                                  : fio_http1___read_body;
   return p->fn(p, buf, udata);
+
 expect_failed:
   *p = (fio_http1_parser_s){0};
   return 1;

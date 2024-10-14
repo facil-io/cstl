@@ -136,6 +136,21 @@ int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
 Allows all clients to connect to WebSockets / EventSource (SSE) connections (bypasses authentication), to be used with the `.on_authenticate_sse` and `.on_authenticate_websocket` settings options.
 
+#### `fio_http_connect`
+
+```c
+fio_s *fio_http_connect(const char *url,
+                              fio_http_s *h,
+                              fio_http_settings_s settings);
+/* Shadow the function for named arguments */
+#define fio_http_connect(url, h, ...)                                          \
+  fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+
+```
+
+Connects to HTTP / WebSockets / SSE connections on `url`.
+
+Accepts named arguments for the `fio_http_settings_s` settings.
 
 ### Creating an HTTP Handle
 
@@ -232,6 +247,15 @@ fio_s *fio_http_io(fio_http_s *);
 ```
 
 Returns the IO object associated with the HTTP object (request only).
+
+
+#### `fio_http_settings`
+
+```c
+fio_http_settings_s *fio_http_settings(fio_http_s *);
+```
+
+Returns the HTTP settings associated with the HTTP object, if any.
 
 #### `fio_http_from`
 

@@ -241,11 +241,18 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
+#if 1 /* Allow Intrinsic / SIMD / Neon ? */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
-    (defined(__ARM_NEON) || defined(__ARM_NEON__))
+    (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
+    __has_include("arm_acle.h") && __has_include("arm_neon.h")
 #include <arm_acle.h>
 #include <arm_neon.h>
 #define FIO___HAS_ARM_INTRIN 1
+#elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
+#define FIO___HAS_X86_INTRIN 1
+#include <immintrin.h>
+#endif
+
 #endif
 
 /* *****************************************************************************
@@ -370,6 +377,10 @@ Function Attributes
 #ifndef FIO_IFUNC
 /** Marks a function as `static`, `inline` and possibly unused. */
 #define FIO_IFUNC FIO_SFUNC inline
+#endif
+
+#ifndef FIO_MIFN
+#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
 #endif
 
 #ifndef FIO_WEAK
@@ -714,368 +725,6 @@ Sleep / Thread Scheduling Macros
 #endif
 
 /* *****************************************************************************
-String and Buffer Information Containers + Helper Macros
-***************************************************************************** */
-
-/** An information type for reporting the string's state. */
-typedef struct fio_str_info_s {
-  /** The string's length, if any. */
-  size_t len;
-  /** The string's buffer (pointer to first byte) or NULL on error. */
-  char *buf;
-  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
-  size_t capa;
-} fio_str_info_s;
-
-/** An information type for reporting/storing buffer data (no `capa`). */
-typedef struct fio_buf_info_s {
-  /** The buffer's length, if any. */
-  size_t len;
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf;
-} fio_buf_info_s;
-
-/** Compares two `fio_str_info_s` objects for content equality. */
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len &&                                                     \
-   (!(s1).len || (s1).buf == (s2).buf ||                                       \
-    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
-     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
-
-/** Compares two `fio_buf_info_s` objects for content equality. */
-#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
-
-/** A NULL fio_str_info_s. */
-#define FIO_STR_INFO0 ((fio_str_info_s){0})
-
-/** Converts a C String into a fio_str_info_s. */
-#define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_str_info_s. */
-#define FIO_STR_INFO2(str, length)                                             \
-  ((fio_str_info_s){.len = (length), .buf = (str)})
-
-/** Converts a String with a known length and capacity into a fio_str_info_s. */
-#define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
-
-/** A NULL fio_buf_info_s. */
-#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
-
-/** Converts a C String into a fio_buf_info_s. */
-#define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_buf_info_s. */
-#define FIO_BUF_INFO2(str, length)                                             \
-  ((fio_buf_info_s){.len = (length), .buf = (str)})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
-
-/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
-#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
-  char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
-  fio_str_info_s name = (fio_str_info_s) {                                     \
-    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
-  }
-
-/** Tests to see if memory reallocation happened. */
-#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
-  (fio___stack_mem___##name != name.buf)
-
-/* *****************************************************************************
-UTF-8 Support (basic)
-***************************************************************************** */
-
-/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
-  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
-                  ((uint32_t)(u) > 65535));
-  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
-  return len;
-}
-
-/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
-FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
-  /* Ruby script for map:
-  map = [];
-  32.times { | i |
-    map << (((i & 0b10000) == 0b00000) ? 1
-        :   ((i & 0b11000) == 0b10000) ? 8
-        :   ((i & 0b11100) == 0b11000) ? 2
-        :   ((i & 0b11110) == 0b11100) ? 3
-        :   ((i & 0b11111) == 0b11110) ? 4
-                               : 0)
-  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
-  */
-  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
-                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
-  return map[c >> 3];
-}
-
-/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
-FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst = 1;
-  const uint8_t *s = (uint8_t *)str_;
-  r = fio_utf8_char_len_unsafe(*s);
-  r &= 7;
-  if (r < 2)
-    return r;
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  if (r != tst)
-    r = 0;
-  return r;
-}
-
-/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
-FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
-  const uint8_t len = fio_utf8_code_len(u);
-  uint8_t *dest = (uint8_t *)dest_;
-  if (len < 2) { /* writes, but doesn't report on len == 0 */
-    *dest = u;
-    return len;
-  }
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
-  const uint8_t mask = 63U;
-  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
-  (dest) += 1;
-  *(dest) = head | (((u) >> 12) & mask);
-  (dest) += (len > 3);
-  *(dest) = head | (((u) >> 6) & mask);
-  (dest) += (len > 2);
-  *(dest) = head | ((u)&mask);
-  return len;
-}
-
-/**
- * Decodes the first UTF-8 char at `str` and returns its code point value.
- *
- * Advances the pointer at `str` by the number of bytes consumed (read).
- */
-FIO_IFUNC uint32_t fio_utf8_read(char **str) {
-  const uint8_t *s = *(const uint8_t **)str;
-  const unsigned len = fio_utf8_char_len(s);
-  *str += len;
-  if (!len)
-    return 0;
-  if (len == 1)
-    return *s;
-  const uint32_t t2 = (len > 2);
-  const uint32_t t3 = 1 + (len > 3);
-  const uint32_t t3a = (len > 2) + (len > 3);
-  const uint32_t t4 = len - 1;
-  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
-         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
-         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
-         ((uint32_t)(s[t4] & 63));
-}
-
-/** Decodes the first UTF-8 char at `str` and returns its code point value. */
-FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
-  return fio_utf8_read((char **)&str);
-}
-
-/* *****************************************************************************
-Linked Lists Persistent Macros and Types
-*****************************************************************************
-*/
-
-/** A linked list arch-type */
-typedef struct fio_list_node_s {
-  struct fio_list_node_s *next;
-  struct fio_list_node_s *prev;
-} fio_list_node_s;
-
-/** A linked list node type */
-#define FIO_LIST_NODE fio_list_node_s
-/** A linked list head type */
-#define FIO_LIST_HEAD fio_list_node_s
-
-/** Allows initialization of FIO_LIST_HEAD objects. */
-#define FIO_LIST_INIT(obj)                                                     \
-  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
-
-#ifndef FIO_LIST_EACH
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH(type, node_name, head, pos)                              \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.next)))
-/** Loops through every node in the linked list except the head. */
-#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
-            *next____p_ls_##pos =                                              \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
-       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
-       (pos = next____p_ls_##pos),                                             \
-            (next____p_ls_##pos =                                              \
-                 FIO_PTR_FROM_FIELD(type,                                      \
-                                    node_name,                                 \
-                                    next____p_ls_##pos->node_name.prev)))
-#endif
-
-/** UNSAFE macro for pushing a node to a list. */
-#define FIO_LIST_PUSH(head, n)                                                 \
-  do {                                                                         \
-    (n)->prev = (head)->prev;                                                  \
-    (n)->next = (head);                                                        \
-    (head)->prev->next = (n);                                                  \
-    (head)->prev = (n);                                                        \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. */
-#define FIO_LIST_REMOVE(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. Resets node data. */
-#define FIO_LIST_REMOVE_RESET(n)                                               \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
-  } while (0)
-
-/** UNSAFE macro for popping a node to a list. */
-#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
-  do {                                                                         \
-    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
-    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
-  } while (0)
-
-/** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head)                                                \
-  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
-
-/* *****************************************************************************
-Indexed Linked Lists Persistent Macros and Types
-
-Indexed Linked Lists can be used to create a linked list that uses is always
-relative to some root pointer (usually the root of an array). This:
-
-1. Allows easy reallocation of the list without requiring pointer updates.
-
-2. Could be used for memory optimization if the array limits are known.
-
-The "head" index is usually validated by reserving the value of `-1` to indicate
-an empty list.
-***************************************************************************** */
-#ifndef FIO_INDEXED_LIST_EACH
-
-/** A 32 bit indexed linked list node type */
-typedef struct fio_index32_node_s {
-  uint32_t next;
-  uint32_t prev;
-} fio_index32_node_s;
-
-/** A 16 bit indexed linked list node type */
-typedef struct fio_index16_node_s {
-  uint16_t next;
-  uint16_t prev;
-} fio_index16_node_s;
-
-/** An 8 bit indexed linked list node type */
-typedef struct fio_index8_node_s {
-  uint8_t next;
-  uint8_t prev;
-} fio_index8_node_s;
-
-/** A 32 bit indexed linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-/** A 16 bit indexed linked list node type */
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-/** An 8 bit indexed linked list node type */
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-
-/** UNSAFE macro for pushing a node to a list. */
-#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
-    (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
-  } while (0)
-
-/** UNSAFE macro for adding a node to the begging of the list. */
-#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
-    (root)[n__].node_name.prev = (head);                                       \
-    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
-    (root)[(head)].node_name.next = n__;                                       \
-    (head) = n__;                                                              \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. */
-#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-  } while (0)
-
-/** UNSAFE macro for removing a node from a list. Resets node data. */
-#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
-  do {                                                                         \
-    register const size_t n__ = (i);                                           \
-    (root)[(root)[n__].node_name.prev].node_name.next =                        \
-        (root)[n__].node_name.next;                                            \
-    (root)[(root)[n__].node_name.next].node_name.prev =                        \
-        (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
-  } while (0)
-
-/** Loops through every index in the indexed list, assuming `head` is valid. */
-#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head),                                                    \
-              stooper___hd = (head),                                           \
-              stopper___ils___ = 0,                                            \
-              pos##___nxt = (root)[(head)].node_name.next;                     \
-       !stopper___ils___;                                                      \
-       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
-              pos##___nxt = (root)[pos].node_name.next)
-
-/** Loops through every index in the indexed list, assuming `head` is valid. */
-#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
-  for (size_t pos = ((root)[(head)].node_name.prev),                           \
-              pos##___nxt =                                                    \
-                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
-              stooper___hd = (head),                                           \
-              stopper___ils___ = 0;                                            \
-       !stopper___ils___;                                                      \
-       ((stopper___ils___ = (pos == stooper___hd)),                            \
-        (pos = pos##___nxt),                                                   \
-        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
-#endif
-
-/* *****************************************************************************
 Settings - Memory Function Selectors
 ***************************************************************************** */
 #ifdef FIO_MEMALT
@@ -1380,8 +1029,7 @@ FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
 
 /* *****************************************************************************
 Switching Endian Ordering
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #define fio_ltole8(i) (i) /* avoid special cases by defining for all sizes */
 #define fio_lton8(i)  (i) /* avoid special cases by defining for all sizes */
@@ -1464,8 +1112,7 @@ Switching Endian Ordering
 
 /* *****************************************************************************
 Unaligned memory read / write operations
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Converts an unaligned byte stream to an 8 bit number. */
 FIO_IFUNC uint8_t fio_buf2u8u(const void *c) { return *(const uint8_t *)c; }
@@ -1549,9 +1196,782 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 }
 
 /* *****************************************************************************
+String and Buffer Information Containers + Helper Macros
+***************************************************************************** */
+
+/** An information type for reporting the string's state. */
+typedef struct fio_str_info_s {
+  /** The string's length, if any. */
+  size_t len;
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+  size_t capa;
+} fio_str_info_s;
+
+/** An information type for reporting/storing buffer data (no `capa`). */
+typedef struct fio_buf_info_s {
+  /** The buffer's length, if any. */
+  size_t len;
+  /** The buffer's address (may be NULL if no buffer). */
+  char *buf;
+} fio_buf_info_s;
+
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len &&                                                     \
+   (!(s1).len || (s1).buf == (s2).buf ||                                       \
+    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
+     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+
+/** A NULL fio_str_info_s. */
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+
+/** Converts a C String into a fio_str_info_s. */
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_str_info_s. */
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
+
+/** Converts a String with a known length and capacity into a fio_str_info_s. */
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** A NULL fio_buf_info_s. */
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
+
+/** Converts a C String into a fio_buf_info_s. */
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_buf_info_s. */
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
+  }
+
+/** Tests to see if memory reallocation happened. */
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
+  (fio___stack_mem___##name != name.buf)
+
+/* *****************************************************************************
+UTF-8 Support (basic)
+***************************************************************************** */
+
+#ifndef FIO_UTF8_ALLOW_IF
+#define FIO_UTF8_ALLOW_IF 0
+#endif
+
+/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
+FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
+  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
+                  ((uint32_t)(u) > 65535));
+  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
+  return len;
+}
+
+/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
+FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
+  /* Ruby script for map:
+  map = [];
+  32.times { | i |
+    map << (((i & 0b10000) == 0b00000) ? 1
+        :   ((i & 0b11000) == 0b10000) ? 8
+        :   ((i & 0b11100) == 0b11000) ? 2
+        :   ((i & 0b11110) == 0b11100) ? 3
+        :   ((i & 0b11111) == 0b11110) ? 4
+                               : 0)
+  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
+  */
+  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
+                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
+  return map[c >> 3];
+}
+
+/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
+FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
+  size_t r, tst = 1;
+  const uint8_t *s = (uint8_t *)str_;
+  r = fio_utf8_char_len_unsafe(*s);
+  r &= 7;
+#if FIO_UTF8_ALLOW_IF
+  if (r < 2)
+    return r;
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  if (r != tst)
+    r = 0;
+#else
+  tst &= (r > 0);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  r &= 0U - (r == tst);
+  return r;
+#endif
+}
+
+/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
+FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
+  const uint8_t len = fio_utf8_code_len(u);
+  uint8_t *dest = (uint8_t *)dest_;
+#if FIO_UTF8_ALLOW_IF
+  if (len < 2) { /* writes, but doesn't report on len == 0 */
+    *dest = u;
+    return len;
+  }
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  (dest) += 1;
+  *(dest) = head | (((u) >> 12) & mask);
+  (dest) += (len > 3);
+  *(dest) = head | (((u) >> 6) & mask);
+  (dest) += (len > 2);
+  *(dest) = head | ((u)&mask);
+  return len;
+#else
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *dest = (uint8_t)u;
+  dest += (len == 1);
+  *dest = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  dest += (len > 1);
+  *dest = head | (((u) >> 12) & mask);
+  dest += (len > 3);
+  *dest = head | (((u) >> 6) & mask);
+  dest += (len > 2);
+  *dest = head | ((u)&mask);
+  return len;
+#endif
+}
+
+/**
+ * Decodes the first UTF-8 char at `str` and returns its code point value.
+ *
+ * Advances the pointer at `str` by the number of bytes consumed (read).
+ */
+FIO_IFUNC uint32_t fio_utf8_read(char **str) {
+  const uint8_t *s = *(const uint8_t **)str;
+  const unsigned len = fio_utf8_char_len(s);
+  *str += len;
+#if FIO_UTF8_ALLOW_IF
+  if (!len)
+    return 0;
+  if (len == 1)
+    return *s;
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
+         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+         ((uint32_t)(s[t4] & 63));
+#else
+  const uint32_t t1 = (len > 1);
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  uint32_t r1 = *s & ((uint32_t)0UL - (len == 1));
+  uint32_t r2 = ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+                ((uint32_t)(s[t1] & 63) << ((t3a << 3) - (t3a << 1))) |
+                ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+                ((uint32_t)(s[t4] & 63));
+  r2 &= (uint32_t)0UL - t1;
+  return (r1 | r2);
+#endif
+}
+
+/** Decodes the first UTF-8 char at `str` and returns its code point value. */
+FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
+  return fio_utf8_read((char **)&str);
+}
+
+/* *****************************************************************************
+Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
+***************************************************************************** */
+#define FIO____SHFL_FN(T, prefx, len)                                          \
+  FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
+    T tmp[len];                                                                \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      tmp[i] = v[indx[i] & (len - 1)];                                         \
+    }                                                                          \
+    for (size_t i = 0; i < len; ++i) {                                         \
+      v[i] = tmp[i];                                                           \
+    }                                                                          \
+  }
+#define FIO____REDUCE_FN(T, prefx, len, opnm, op)                              \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_##opnm(T *v) {                       \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r op v[i];                                                           \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_IFUNC void fio_##prefx##x##len##_##opnm(T *dest, T *a, T *b) {           \
+    for (size_t i = 0; i < len; ++i)                                           \
+      dest[i] = a[i] op b[i];                                                  \
+  }
+#define FIO____REDUCE_MINMAX(T, prefx, len)                                    \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_max(T *v) {                          \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r < v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_MIFN T fio_##prefx##x##len##_reduce_min(T *v) {                          \
+    T r = v[0];                                                                \
+    for (size_t i = 1; i < len; ++i) {                                         \
+      r = r > v[i] ? v[i] : r;                                                 \
+    }                                                                          \
+    return r;                                                                  \
+  }
+
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_FN(T, prefx, len, and, &)                                      \
+  FIO____REDUCE_FN(T, prefx, len, or, |)                                       \
+  FIO____REDUCE_FN(T, prefx, len, xor, ^)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(uint8_t, u8, 4)
+FIO____SHFL_REDUCE(uint8_t, u8, 8)
+FIO____SHFL_REDUCE(uint8_t, u8, 16)
+FIO____SHFL_REDUCE(uint8_t, u8, 32)
+FIO____SHFL_REDUCE(uint8_t, u8, 64)
+FIO____SHFL_REDUCE(uint8_t, u8, 128)
+FIO____SHFL_REDUCE(uint8_t, u8, 256)
+FIO____SHFL_REDUCE(uint16_t, u16, 2)
+FIO____SHFL_REDUCE(uint16_t, u16, 4)
+FIO____SHFL_REDUCE(uint16_t, u16, 8)
+FIO____SHFL_REDUCE(uint16_t, u16, 16)
+FIO____SHFL_REDUCE(uint16_t, u16, 32)
+FIO____SHFL_REDUCE(uint16_t, u16, 64)
+FIO____SHFL_REDUCE(uint16_t, u16, 128)
+FIO____SHFL_REDUCE(uint32_t, u32, 2)
+FIO____SHFL_REDUCE(uint32_t, u32, 4)
+FIO____SHFL_REDUCE(uint32_t, u32, 8)
+FIO____SHFL_REDUCE(uint32_t, u32, 16)
+FIO____SHFL_REDUCE(uint32_t, u32, 32)
+FIO____SHFL_REDUCE(uint32_t, u32, 64)
+FIO____SHFL_REDUCE(uint64_t, u64, 2)
+FIO____SHFL_REDUCE(uint64_t, u64, 4)
+FIO____SHFL_REDUCE(uint64_t, u64, 8)
+FIO____SHFL_REDUCE(uint64_t, u64, 16)
+FIO____SHFL_REDUCE(uint64_t, u64, 32)
+
+#undef FIO____SHFL_REDUCE
+#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
+  FIO____SHFL_FN(T, prefx, len)                                                \
+  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
+  FIO____REDUCE_MINMAX(T, prefx, len)
+
+FIO____SHFL_REDUCE(float, float, 2)
+FIO____SHFL_REDUCE(float, float, 4)
+FIO____SHFL_REDUCE(float, float, 8)
+FIO____SHFL_REDUCE(float, float, 16)
+FIO____SHFL_REDUCE(float, float, 32)
+FIO____SHFL_REDUCE(float, float, 64)
+FIO____SHFL_REDUCE(double, dbl, 2)
+FIO____SHFL_REDUCE(double, dbl, 4)
+FIO____SHFL_REDUCE(double, dbl, 8)
+FIO____SHFL_REDUCE(double, dbl, 16)
+FIO____SHFL_REDUCE(double, dbl, 32)
+#undef FIO____REDUCE_FN
+#undef FIO____REDUCE_MINMAX
+#undef FIO____SHFL_FN
+#undef FIO____SHFL_REDUCE
+
+/* clang-format off */
+#define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
+#define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
+#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
+#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
+#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
+#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
+#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
+#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
+#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
+#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+/* clang-format on */
+
+/* *****************************************************************************
+Vector Types (SIMD / Math)
+***************************************************************************** */
+/** An unsigned 128bit union type. */
+typedef union {
+  size_t uz[16 / sizeof(size_t)];
+  uint64_t u64[2];
+  uint32_t u32[4];
+  uint16_t u16[8];
+  uint8_t u8[16];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[1];
+  uint32x4_t x32[1];
+  uint16x8_t x16[1];
+  uint8x16_t x8[1];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(16)));
+  uint64_t x32 __attribute__((vector_size(16)));
+  uint64_t x16 __attribute__((vector_size(16)));
+  uint64_t x8 __attribute__((vector_size(16)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[1];
+#endif
+} fio_u128 FIO_ALIGN(16);
+
+/** An unsigned 256bit union type. */
+typedef union {
+  size_t uz[32 / sizeof(size_t)];
+  uint64_t u64[4];
+  uint32_t u32[8];
+  uint16_t u16[16];
+  uint8_t u8[32];
+  fio_u128 u128[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[2];
+  uint32x4_t x32[2];
+  uint16x8_t x16[2];
+  uint8x16_t x8[2];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(32)));
+  uint64_t x32 __attribute__((vector_size(32)));
+  uint64_t x16 __attribute__((vector_size(32)));
+  uint64_t x8 __attribute__((vector_size(32)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[2];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t alignment_for_u256_[1];
+#endif
+} fio_u256 FIO_ALIGN(16);
+
+/** An unsigned 512bit union type. */
+typedef union {
+  size_t uz[64 / sizeof(size_t)];
+  uint64_t u64[8];
+  uint32_t u32[16];
+  uint16_t u16[32];
+  uint8_t u8[64];
+  fio_u128 u128[4];
+  fio_u256 u256[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[4];
+  uint32x4_t x32[4];
+  uint16x8_t x16[4];
+  uint8x16_t x8[4];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(64)));
+  uint64_t x32 __attribute__((vector_size(64)));
+  uint64_t x16 __attribute__((vector_size(64)));
+  uint64_t x8 __attribute__((vector_size(64)));
+#endif
+} fio_u512 FIO_ALIGN(16);
+
+/** An unsigned 1024bit union type. */
+typedef union {
+  size_t uz[128 / sizeof(size_t)];
+  uint64_t u64[16];
+  uint32_t u32[32];
+  uint16_t u16[64];
+  uint8_t u8[128];
+  fio_u128 u128[8];
+  fio_u256 u256[4];
+  fio_u512 u512[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[8];
+  uint32x4_t x32[8];
+  uint16x8_t x16[8];
+  uint8x16_t x8[8];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(128)));
+  uint64_t x32 __attribute__((vector_size(128)));
+  uint64_t x16 __attribute__((vector_size(128)));
+  uint64_t x8 __attribute__((vector_size(128)));
+#endif
+} fio_u1024 FIO_ALIGN(16);
+
+/** An unsigned 2048bit union type. */
+typedef union {
+  size_t uz[256 / sizeof(size_t)];
+  uint64_t u64[32];
+  uint32_t u32[64];
+  uint16_t u16[128];
+  uint8_t u8[256];
+  fio_u128 u128[16];
+  fio_u256 u256[8];
+  fio_u512 u512[4];
+  fio_u1024 u1024[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[16];
+  uint32x4_t x32[16];
+  uint16x8_t x16[16];
+  uint8x16_t x8[16];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(256)));
+  uint64_t x32 __attribute__((vector_size(256)));
+  uint64_t x16 __attribute__((vector_size(256)));
+  uint64_t x8 __attribute__((vector_size(256)));
+#endif
+} fio_u2048 FIO_ALIGN(16);
+
+/** An unsigned 4096bit union type. */
+typedef union {
+  size_t uz[512 / sizeof(size_t)];
+  uint64_t u64[64];
+  uint32_t u32[128];
+  uint16_t u16[256];
+  uint8_t u8[512];
+  fio_u128 u128[32];
+  fio_u256 u256[16];
+  fio_u512 u512[8];
+  fio_u1024 u1024[4];
+  fio_u2048 u2048[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[32];
+  uint32x4_t x32[32];
+  uint16x8_t x16[32];
+  uint8x16_t x8[32];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(512)));
+  uint64_t x32 __attribute__((vector_size(512)));
+  uint64_t x16 __attribute__((vector_size(512)));
+  uint64_t x8 __attribute__((vector_size(512)));
+#endif
+} fio_u4096 FIO_ALIGN(16);
+
+FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
+
+#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
+#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
+#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
+#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
+#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
+#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
+#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
+#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
+#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
+
+#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
+#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
+#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
+#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
+#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
+#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
+#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
+#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
+#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+
+/* *****************************************************************************
+Vector Helpers - memory load operations (implementation starts here)
+***************************************************************************** */
+
+#define FIO_MATH_TYPE_LOADER(bits, bytes)                                      \
+  /** Loads from memory using local-endian. */                                 \
+  FIO_MIFN fio_u##bits fio_u##bits##_load(const void *buf) {                   \
+    fio_u##bits r;                                                             \
+    fio_memcpy##bytes(&r, buf);                                                \
+    return r;                                                                  \
+  }                                                                            \
+  /** Stores to memory using local-endian. */                                  \
+  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) {         \
+    fio_memcpy##bytes(buf, &a);                                                \
+  }                                                                            \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 16)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 32)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 64)
+
+#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                        \
+  /** Loads vector from memory, reading from little-endian.  */                \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_le##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** Loads vector from memory, reading from big-endian.  */                   \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_be##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
+      fio_u##total_bits a) {                                                   \
+    fio_u##total_bits r;                                                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i)                           \
+      r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
+    return r;                                                                  \
+  }
+
+FIO_MATH_TYPE_LOADER(128, 16)
+FIO_MATH_TYPE_LOADER(256, 32)
+FIO_MATH_TYPE_LOADER(512, 64)
+FIO_MATH_TYPE_LOADER(1024, 128)
+FIO_MATH_TYPE_LOADER(2048, 256)
+FIO_MATH_TYPE_LOADER(4096, 512)
+
+#undef FIO_MATH_TYPE_LOADER
+#undef FIO_VECTOR_LOADER_ENDIAN_FUNC
+#undef FIO_VECTOR_LOADER_ENDIAN
+
+/* *****************************************************************************
+Linked Lists Persistent Macros and Types
+***************************************************************************** */
+
+/** A linked list arch-type */
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+
+/** A linked list node type */
+#define FIO_LIST_NODE fio_list_node_s
+/** A linked list head type */
+#define FIO_LIST_HEAD fio_list_node_s
+
+/** Allows initialization of FIO_LIST_HEAD objects. */
+#define FIO_LIST_INIT(obj)                                                     \
+  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
+
+#ifndef FIO_LIST_EACH
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH(type, node_name, head, pos)                              \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.next)))
+/** Loops through every node in the linked list except the head. */
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.prev)))
+#endif
+
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_LIST_REMOVE_RESET(n)                                               \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+
+/** UNSAFE macro for popping a node to a list. */
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+
+/** UNSAFE macro for testing if a list is empty. */
+#define FIO_LIST_IS_EMPTY(head)                                                \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
+
+/* *****************************************************************************
+Indexed Linked Lists Persistent Macros and Types
+
+Indexed Linked Lists can be used to create a linked list that uses is always
+relative to some root pointer (usually the root of an array). This:
+
+1. Allows easy reallocation of the list without requiring pointer updates.
+
+2. Could be used for memory optimization if the array limits are known.
+
+The "head" index is usually validated by reserving the value of `-1` to indicate
+an empty list.
+***************************************************************************** */
+#ifndef FIO_INDEXED_LIST_EACH
+
+/** A 32 bit indexed linked list node type */
+typedef struct fio_index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio_index32_node_s;
+
+/** A 16 bit indexed linked list node type */
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+
+/** An 8 bit indexed linked list node type */
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
+
+/** A 32 bit indexed linked list node type */
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+/** A 16 bit indexed linked list node type */
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+/** An 8 bit indexed linked list node type */
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+
+/** UNSAFE macro for pushing a node to a list. */
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)                        \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
+    (root)[n__].node_name.next = (head);                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
+    (root)[(head)].node_name.prev = n__;                                       \
+  } while (0)
+
+/** UNSAFE macro for adding a node to the begging of the list. */
+#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
+    (root)[n__].node_name.prev = (head);                                       \
+    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
+    (root)[(head)].node_name.next = n__;                                       \
+    (head) = n__;                                                              \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. */
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)                            \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+  } while (0)
+
+/** UNSAFE macro for removing a node from a list. Resets node data. */
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[(root)[n__].node_name.prev].node_name.next =                        \
+        (root)[n__].node_name.next;                                            \
+    (root)[(root)[n__].node_name.next].node_name.prev =                        \
+        (root)[n__].node_name.prev;                                            \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+  } while (0)
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
+  for (size_t pos = (head),                                                    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0,                                            \
+              pos##___nxt = (root)[(head)].node_name.next;                     \
+       !stopper___ils___;                                                      \
+       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
+              pos##___nxt = (root)[pos].node_name.next)
+
+/** Loops through every index in the indexed list, assuming `head` is valid. */
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
+  for (size_t pos = ((root)[(head)].node_name.prev),                           \
+              pos##___nxt =                                                    \
+                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0;                                            \
+       !stopper___ils___;                                                      \
+       ((stopper___ils___ = (pos == stooper___hd)),                            \
+        (pos = pos##___nxt),                                                   \
+        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
+#endif
+
+/* *****************************************************************************
 Constant-Time Selectors
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
 FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
@@ -1603,8 +2023,7 @@ FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
 
 /* *****************************************************************************
 Constant-Time Comparison Test
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** A timing attack resistant memory comparison function. */
 FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
@@ -1615,8 +2034,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(64) = {0};
-    uint64_t ub[8] FIO_ALIGN(64) = {0};
+    uint64_t ua[8] FIO_ALIGN(16) = {0};
+    uint64_t ub[8] FIO_ALIGN(16) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -1648,8 +2067,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(64);
-    uint64_t ub[8] FIO_ALIGN(64);
+    uint64_t ua[8] FIO_ALIGN(16);
+    uint64_t ub[8] FIO_ALIGN(16);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -1791,8 +2210,7 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 
 /* *****************************************************************************
 Byte masking (XOR)
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Masks data using a persistent 64 bit mask.
@@ -1867,8 +2285,7 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
 
 /* *****************************************************************************
 Popcount (set bit counting) and Hemming Distance
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
@@ -1991,8 +2408,7 @@ FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
 
 /* *****************************************************************************
 Byte Value helpers
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /**
  * Detects a byte where no bits are set (0) within a 4 byte vector.
@@ -2072,16 +2488,16 @@ FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
 /** Converts a `fio_has_byteX` result to a bitmap. */
 FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
 /** Converts a FIO_HAS_FULL_BYTE64 result to relative position bitmap. */
-#define FIO_HAS_BYTE2BITMAP(result)                                            \
+#define FIO_HAS_BYTE2BITMAP(result, bit_index)                                 \
   do {                                                                         \
     (result) = fio_ltole64((result)); /* map little endian to bitmap */        \
-    (result) >>= 7;                   /* move all 0x80 to 0x01 */              \
+    (result) >>= bit_index;           /* move bit index to 0x01 */             \
     (result) |= (result) >> 7;        /* pack all 0x80 bits into one byte */   \
     (result) |= (result) >> 14;                                                \
     (result) |= (result) >> 28;                                                \
     (result) &= 0xFFU;                                                         \
   } while (0)
-  FIO_HAS_BYTE2BITMAP(result);
+  FIO_HAS_BYTE2BITMAP(result, 7);
   return result;
 }
 
@@ -2120,8 +2536,7 @@ zero:
 
 /* *****************************************************************************
 Bitmap access / manipulation
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_bit_get(void *map, size_t bit) {
@@ -2145,8 +2560,7 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
-*****************************************************************************
-*/
+***************************************************************************** */
 
 /** Add with carry. */
 FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
@@ -3088,7 +3502,7 @@ FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
                                         size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  uint64_t t[8] FIO_ALIGN(64);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     fio_memcpy64(t, s);
     FIO_COMPILER_GUARD_INSTRUCTION;
@@ -3127,7 +3541,7 @@ FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
                                                  size_t l) {
   char *d = (char *)d_ + l;
   const char *s = (const char *)s_ + l;
-  uint64_t t[8] FIO_ALIGN(64);
+  uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     (s -= 64), (d -= 64), (l -= 64);
     fio_memcpy64(t, s);
@@ -3252,7 +3666,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   // return (void *)memchr(buffer, token, len); /* FIXME */
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
-  uint64_t u[16] FIO_ALIGN(64) = {0};
+  uint64_t u[16] FIO_ALIGN(16) = {0};
   uint64_t flag = 0;
   size_t i;
   uint64_t umsk = ((uint64_t)((uint8_t)token));
@@ -3313,7 +3727,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
   uint64_t flag = 0;
-  uint64_t map[8] FIO_ALIGN(64);
+  uint64_t map[8] FIO_ALIGN(16);
   /* align to 8 bytes - most likely skipped */
   switch (start & 7) { // clang-format off
   case 1: if(*str == 0) return (uintptr_t)str - start; ++str; /* fall through */
@@ -3363,8 +3777,8 @@ fio_memcmp
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   if (a_ == b_ || !len)
     return 0;
-  uint64_t ua[8] FIO_ALIGN(64);
-  uint64_t ub[8] FIO_ALIGN(64);
+  uint64_t ua[8] FIO_ALIGN(16);
+  uint64_t ub[8] FIO_ALIGN(16);
   size_t flag = 0;
   char *a = (char *)a_;
   char *b = (char *)b_;
@@ -4260,26 +4674,6 @@ IFUNC uint8_t fio_i2c(unsigned char i) {
   return fio___alphanumeric_map[i & 63];
 }
 
-/** Reads a signed base 10 formatted number. */
-SFUNC int64_t fio_atol10(char **pstr) {
-  const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
-  char *pos = *pstr;
-  const size_t inv = (pos[0] == '-');
-  pos += inv;
-  uint64_t val = 0;
-  uint64_t r0;
-  while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
-    val *= 10;
-    val += r0;
-    ++pos;
-  }
-  if (((size_t)(pos[0] - '0') < 10ULL)) {
-    errno = E2BIG;
-  }
-  *pstr = pos;
-  return fio_u2i_limit(val, inv);
-}
-
 /** Reads a signed base 8 formatted number. */
 SFUNC uint64_t fio_atol8u(char **pstr) {
   uint64_t r = 0;
@@ -4299,12 +4693,34 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
   return r;
 }
 
-FIO_IFUNC uint64_t fio___atol10u_with_prefix(uint64_t r, char **pstr) {
+/** Reads an unsigned base 10 formatted number. */
+SFUNC uint64_t fio_atol10u(char **pstr) {
+  uint64_t r = 0, u0 = 0, u1 = 0;
   char *pos = *pstr;
-  uint64_t u0, u1 = r;
+  /* can't use SIMD, as we don't want to overflow. */
+  for (size_t i = 0; i < 8; ++i)
+    u0 += ((pos[u0] >= '0') & (pos[u0] <= '9'));
+  switch ((u0 & 12)) { /* now we are safe to copy all bytes validated */
+  case 8:
+    r = fio_buf2u64_le(pos);
+    *pstr = (pos += 8); /* credit Johnny Lee, not mine... */
+    r = ((r & 0x0F0F0F0F0F0F0F0FULL) * 2561ULL) >> 8;
+    r = ((r & 0x00FF00FF00FF00FFULL) * 6553601ULL) >> 16;
+    r = ((r & 0x0000FFFF0000FFFFULL) * 42949672960001ULL) >> 32;
+    u1 = r; /* https://johnnylee-sde.github.io/Fast-numeric-string-to-int/ */
+    break;
+  case 4:
+    r = ((unsigned)(pos[0] - '0') * 1000) + ((unsigned)(pos[1] - '0') * 100) +
+        ((unsigned)(pos[2] - '0') * 10) + (unsigned)(pos[3] - '0');
+    *pstr = (pos += 4);
+    u1 = r;
+    break;
+  }
+
   u0 = (uint64_t)(pos[0] - '0');
   if (u0 > 9ULL)
     return r;
+  r *= 10;
   for (;;) {
     r += u0;
     if (r < u1)
@@ -4333,9 +4749,27 @@ value_overflow:
   return r;
 }
 
-/** Reads an unsigned base 10 formatted number. */
-SFUNC uint64_t fio_atol10u(char **pstr) {
-  return fio___atol10u_with_prefix(0, pstr);
+/** Reads a signed base 10 formatted number. */
+SFUNC int64_t fio_atol10(char **pstr) {
+  // const uint64_t add_limit = (~(uint64_t)0ULL) - 9;
+  char *pos = *pstr;
+  const size_t inv = (pos[0] == '-');
+  pos += inv;
+  // uint64_t val = 0;
+  // uint64_t r0;
+  // while (((r0 = pos[0] - '0') < 10ULL) & (val < add_limit)) {
+  //   val *= 10;
+  //   val += r0;
+  //   ++pos;
+  // }
+  // if (((size_t)(pos[0] - '0') < 10ULL)) {
+  //   errno = E2BIG;
+  // }
+  *pstr = pos;
+  uint64_t val = fio_atol10u(pstr);
+  if (((size_t)(**pstr - '0') < 10ULL))
+    errno = E2BIG;
+  return fio_u2i_limit(val, inv);
 }
 
 /** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
@@ -5670,119 +6104,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_MATH) && !defined(H___FIO_MATH___H)
 #define H___FIO_MATH___H 1
 
-#ifndef FIO_MIFN
-#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
-#endif
-
-/* *****************************************************************************
-Useful math unions.
-***************************************************************************** */
-/** An unsigned 128bit union type. */
-typedef union {
-  size_t uz[16 / sizeof(size_t)];
-  uint64_t u64[2];
-  uint32_t u32[4];
-  uint16_t u16[8];
-  uint8_t u8[16];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[1];
-#endif
-} fio_u128 FIO_ALIGN(16);
-
-/** An unsigned 256bit union type. */
-typedef union {
-  size_t uz[32 / sizeof(size_t)];
-  uint64_t u64[4];
-  uint32_t u32[8];
-  uint16_t u16[16];
-  uint8_t u8[32];
-  fio_u128 u128[2];
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[2];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t alignment_for_u256_[1];
-#endif
-} fio_u256 FIO_ALIGN(32);
-
-/** An unsigned 512bit union type. */
-typedef union {
-  size_t uz[64 / sizeof(size_t)];
-  uint64_t u64[8];
-  uint32_t u32[16];
-  uint16_t u16[32];
-  uint8_t u8[64];
-  fio_u128 u128[4];
-  fio_u256 u256[2];
-} fio_u512 FIO_ALIGN(64);
-
-/** An unsigned 1024bit union type. */
-typedef union {
-  size_t uz[128 / sizeof(size_t)];
-  uint64_t u64[16];
-  uint32_t u32[32];
-  uint16_t u16[64];
-  uint8_t u8[128];
-  fio_u128 u128[8];
-  fio_u256 u256[4];
-  fio_u512 u512[2];
-} fio_u1024 FIO_ALIGN(64);
-
-/** An unsigned 2048bit union type. */
-typedef union {
-  size_t uz[256 / sizeof(size_t)];
-  uint64_t u64[32];
-  uint32_t u32[64];
-  uint16_t u16[128];
-  uint8_t u8[256];
-  fio_u128 u128[16];
-  fio_u256 u256[8];
-  fio_u512 u512[4];
-  fio_u1024 u1024[2];
-} fio_u2048 FIO_ALIGN(64);
-
-/** An unsigned 4096bit union type. */
-typedef union {
-  size_t uz[512 / sizeof(size_t)];
-  uint64_t u64[64];
-  uint32_t u32[128];
-  uint16_t u16[256];
-  uint8_t u8[512];
-  fio_u128 u128[32];
-  fio_u256 u256[16];
-  fio_u512 u512[8];
-  fio_u1024 u1024[4];
-  fio_u2048 u2048[2];
-} fio_u4096 FIO_ALIGN(64);
-
-FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
-
-#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
-#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
-#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
-#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
-#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
-#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
-#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
-#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
-#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
-#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
-
-#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
-#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
-#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
-#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
-#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
-#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
-#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
-#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
-#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
-
 /* *****************************************************************************
 Multi-precision, little endian helpers.
 
@@ -5843,205 +6164,6 @@ FIO_MIFN size_t fio_math_msb_index(uint64_t *n, const size_t len);
 /** Multi-precision - returns the index for the least significant bit or -1. */
 FIO_MIFN size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 
-/* *****************************************************************************
-Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
-***************************************************************************** */
-#define FIO____SHFL_FN(T, prefx, len)                                          \
-  FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
-    T tmp[len];                                                                \
-    for (size_t i = 0; i < len; ++i) {                                         \
-      tmp[i] = v[indx[i] & (len - 1)];                                         \
-    }                                                                          \
-    for (size_t i = 0; i < len; ++i) {                                         \
-      v[i] = tmp[i];                                                           \
-    }                                                                          \
-  }
-
-#define FIO____REDUCE_FN(T, prefx, len, opnm, op)                              \
-  FIO_IFUNC T fio_##prefx##x##len##_reduce_##opnm(T *v) {                      \
-    T r = v[0];                                                                \
-    for (size_t i = 1; i < len; ++i) {                                         \
-      r = r op v[i];                                                           \
-    }                                                                          \
-    return r;                                                                  \
-  }
-#define FIO____REDUCE_MINMAX(T, prefx, len)                                    \
-  FIO_IFUNC T fio_##prefx##x##len##_reduce_max(T *v) {                         \
-    T r = v[0];                                                                \
-    for (size_t i = 1; i < len; ++i) {                                         \
-      r = r < v[i] ? v[i] : r;                                                 \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  FIO_IFUNC T fio_##prefx##x##len##_reduce_min(T *v) {                         \
-    T r = v[0];                                                                \
-    for (size_t i = 1; i < len; ++i) {                                         \
-      r = r > v[i] ? v[i] : r;                                                 \
-    }                                                                          \
-    return r;                                                                  \
-  }
-
-#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
-  FIO____SHFL_FN(T, prefx, len)                                                \
-  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
-  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
-  FIO____REDUCE_FN(T, prefx, len, and, &)                                      \
-  FIO____REDUCE_FN(T, prefx, len, or, |)                                       \
-  FIO____REDUCE_FN(T, prefx, len, xor, ^)                                      \
-  FIO____REDUCE_MINMAX(T, prefx, len)
-
-FIO____SHFL_REDUCE(uint8_t, u8, 4)
-FIO____SHFL_REDUCE(uint8_t, u8, 8)
-FIO____SHFL_REDUCE(uint8_t, u8, 16)
-FIO____SHFL_REDUCE(uint8_t, u8, 32)
-FIO____SHFL_REDUCE(uint8_t, u8, 64)
-FIO____SHFL_REDUCE(uint8_t, u8, 128)
-FIO____SHFL_REDUCE(uint8_t, u8, 256)
-FIO____SHFL_REDUCE(uint16_t, u16, 2)
-FIO____SHFL_REDUCE(uint16_t, u16, 4)
-FIO____SHFL_REDUCE(uint16_t, u16, 8)
-FIO____SHFL_REDUCE(uint16_t, u16, 16)
-FIO____SHFL_REDUCE(uint16_t, u16, 32)
-FIO____SHFL_REDUCE(uint16_t, u16, 64)
-FIO____SHFL_REDUCE(uint16_t, u16, 128)
-FIO____SHFL_REDUCE(uint32_t, u32, 2)
-FIO____SHFL_REDUCE(uint32_t, u32, 4)
-FIO____SHFL_REDUCE(uint32_t, u32, 8)
-FIO____SHFL_REDUCE(uint32_t, u32, 16)
-FIO____SHFL_REDUCE(uint32_t, u32, 32)
-FIO____SHFL_REDUCE(uint32_t, u32, 64)
-FIO____SHFL_REDUCE(uint64_t, u64, 2)
-FIO____SHFL_REDUCE(uint64_t, u64, 4)
-FIO____SHFL_REDUCE(uint64_t, u64, 8)
-FIO____SHFL_REDUCE(uint64_t, u64, 16)
-FIO____SHFL_REDUCE(uint64_t, u64, 32)
-
-#undef FIO____SHFL_REDUCE
-#define FIO____SHFL_REDUCE(T, prefx, len)                                      \
-  FIO____SHFL_FN(T, prefx, len)                                                \
-  FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
-  FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
-  FIO____REDUCE_MINMAX(T, prefx, len)
-
-FIO____SHFL_REDUCE(float, float, 2)
-FIO____SHFL_REDUCE(float, float, 4)
-FIO____SHFL_REDUCE(float, float, 8)
-FIO____SHFL_REDUCE(float, float, 16)
-FIO____SHFL_REDUCE(float, float, 32)
-FIO____SHFL_REDUCE(float, float, 64)
-FIO____SHFL_REDUCE(double, dbl, 2)
-FIO____SHFL_REDUCE(double, dbl, 4)
-FIO____SHFL_REDUCE(double, dbl, 8)
-FIO____SHFL_REDUCE(double, dbl, 16)
-FIO____SHFL_REDUCE(double, dbl, 32)
-#undef FIO____SHFL_REDUCE
-#undef FIO____REDUCE_FN
-#undef FIO____SHFL_FN
-
-/* clang-format off */
-#define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
-#define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
-#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
-#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
-#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
-#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
-#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
-#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
-#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
-#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
-#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
-#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-/* clang-format on */
-
-/* *****************************************************************************
-Vector Helpers - memory load operations (implementation starts here)
-***************************************************************************** */
-
-#define FIO_MATH_TYPE_LOADER(bits, bytes)                                      \
-  /** Loads from memory using local-endian. */                                 \
-  FIO_MIFN fio_u##bits fio_u##bits##_load(const void *buf) {                   \
-    fio_u##bits r;                                                             \
-    fio_memcpy##bytes(&r, buf);                                                \
-    return r;                                                                  \
-  }                                                                            \
-  /** Stores to memory using local-endian. */                                  \
-  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) {         \
-    fio_memcpy##bytes(buf, &a);                                                \
-  }
-
-#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                        \
-  /** Loads vector from memory, reading from little-endian.  */                \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_le##bits(                \
-      const void *buf) {                                                       \
-    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  /** Loads vector from memory, reading from big-endian.  */                   \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_be##bits(                \
-      const void *buf) {                                                       \
-    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
-      fio_u##total_bits a) {                                                   \
-    fio_u##total_bits r;                                                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i)                           \
-      r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
-    return r;                                                                  \
-  }
-
-FIO_MATH_TYPE_LOADER(128, 16)
-FIO_MATH_TYPE_LOADER(256, 32)
-FIO_MATH_TYPE_LOADER(512, 64)
-FIO_MATH_TYPE_LOADER(1024, 128)
-FIO_MATH_TYPE_LOADER(2048, 256)
-FIO_MATH_TYPE_LOADER(4096, 512)
-
-#define FIO_VECTOR_LOADER_ENDIAN(total_bits)                                   \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 16)                                \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 32)                                \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, 64)
-
-FIO_VECTOR_LOADER_ENDIAN(128)
-FIO_VECTOR_LOADER_ENDIAN(256)
-FIO_VECTOR_LOADER_ENDIAN(512)
-FIO_VECTOR_LOADER_ENDIAN(1024)
-FIO_VECTOR_LOADER_ENDIAN(2048)
-FIO_VECTOR_LOADER_ENDIAN(4096)
-
-#undef FIO_MATH_TYPE_LOADER
-#undef FIO_VECTOR_LOADER_ENDIAN_FUNC
-#undef FIO_VECTOR_LOADER_ENDIAN
 /* *****************************************************************************
 Vector Helpers - Simple Math functions
 ***************************************************************************** */
@@ -6724,8 +6846,8 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 
   /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
-  uint64_t v[8] FIO_ALIGN(64), w[8] FIO_ALIGN(64) = {0};
-  uint64_t const prime[8] FIO_ALIGN(64) = {
+  uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
+  uint64_t const prime[8] FIO_ALIGN(16) = {
       FIO_U64_HASH_PRIME1,
       FIO_U64_HASH_PRIME2,
       FIO_U64_HASH_PRIME3,
@@ -10278,6 +10400,12 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_socktype = sock_type;
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
+  /* test for variations of localhost */
+  if ((address[0] | 32) == 'l' && FIO_STRLEN(address) == 9 &&
+      (fio_buf2u64u(address + 1) | (uint64_t)0x2020202020202020ULL) ==
+          fio_buf2u64u("ocalhost"))
+    address = "127.0.0.1";
+  /* call for OS address resolution */
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {
     FIO_LOG_ERROR("(fio_sock_address_new(\"%s\", \"%s\")) error: %s",
                   (address ? address : "NULL"),
@@ -11867,7 +11995,7 @@ FIO_IFUNC fio_buf_info_s fio_cli_str_buf(fio_cli_str_s *s) {
 }
 
 /** CLI String copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str_init(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_new(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
   if (s.len < sizeof(r) - 1) {
     r.em = s.len;
@@ -11953,7 +12081,7 @@ FIO_IFUNC void fio___cli_ary_set(fio___cli_ary_s *a,
   if (index >= a->w)
     return;
   fio_cli_str_destroy(a->ary + index);
-  a->ary[index] = fio_cli_str_init(str);
+  a->ary[index] = fio_cli_str_new(str);
 }
 
 /* *****************************************************************************
@@ -12010,7 +12138,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
   fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    o.name = fio_cli_str_init(key);
+    o.name = fio_cli_str_new(key);
     o.index = fio___cli_ary_new_index(&fio___cli_data.indexed);
     o.t = t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -12024,7 +12152,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
                     fio_cli_str_buf(&o.name).buf);
     old->index = a->index;
   } else {
-    o.name = fio_cli_str_init(alias);
+    o.name = fio_cli_str_new(alias);
     o.index = a->index;
     o.t = a->t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -18753,7 +18881,7 @@ SFUNC size_t fio_string_utf8_len(fio_str_info_s str) {
   do {
     tmp = fio_utf8_char_len(str.buf);
     str.buf += tmp;
-    utf8len += !!tmp;
+    ++utf8len;
   } while (tmp && str.buf < end);
   utf8len &= 0U - (str.buf == end);
   return utf8len;
@@ -18844,8 +18972,8 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(32) = {0};
-  uint64_t ub[4] FIO_ALIGN(32) = {0};
+  uint64_t ua[4] FIO_ALIGN(16) = {0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0};
   uint64_t flag = 0;
   if (len < 32)
     goto mini_cmp;
@@ -19792,16 +19920,16 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
     a = (0..255).to_a.map {|i| "&#x#{i.to_s(16)};" }
     must_escape = ['&', '<', '>', '"', "'", '`', '!', '@', '$', '%',
                    '(', ')', '=', '+', '{', '}', '[', ']'] # space?
+    ["\b","\f","\n","\r","\t",'\\'].each {|i| a[i.ord] = i }
     (32..123).each {|i| a[i] = i.chr unless must_escape.include?(i.chr) }
-    a['<'.ord] = "&lt;"
-    a['>'.ord] = "&gt;"
-    a['"'.ord] = "&qout;"
-    a['&'.ord] = "&amp;"
+    {'<': "&lt;", '>': "&gt;", '"': "&qout;", '&': "&amp;"}.each {|k,v|
+       a[k.to_s.ord] = v
+    }
     b = a.map {|s| s.length }
-    puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
+    puts "static const uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
   */
-  static uint8_t html_escape_len[] = {
-      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6,
+  static const uint8_t html_escape_len[] = {
+      5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 1, 5, 1, 1, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6,
       6, 6, 6, 6, 6, 6, 6, 6, 1, 6, 6, 1, 6, 6, 5, 6, 6, 6, 1, 6, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 6, 4, 1, 6, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 6, 1, 1,
@@ -26136,7 +26264,7 @@ sparse_map:
       tmp = FIO_HAS_FULL_BYTE64(tmp);
       inv = FIO_HAS_FULL_BYTE64(inv);
       tmp |= inv;
-      FIO_HAS_BYTE2BITMAP(tmp);
+      FIO_HAS_BYTE2BITMAP(tmp, 7);
       bitmap |= (tmp << j);
     }
     bitmap = ~bitmap; /* where 1 was a free slot, now it's an occupied one */
@@ -29628,7 +29756,7 @@ typedef struct {
   uint64_t s[2];
   /* Accumulator should not exceed 131 bits at the end of every cycle. */
   uint64_t a[3];
-} FIO_ALIGN(64) fio___poly_s;
+} FIO_ALIGN(16) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   static const uint64_t defkey[4] = {0};
@@ -30312,12 +30440,11 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   vst1q_u32(old, v0);
   old[4] = e0;
 
-#else /* portable implementation */
+#else /* !FIO___HAS_ARM_INTRIN portable implementation */
 
-  uint32_t v[8]; /* copy old state to new + reserve registers (8 not 6) */
-  for (size_t i = 0; i < 5; ++i) {
+  uint32_t v[8] = {0}; /* copy old state to new + reserve registers (8 not 6) */
+  for (size_t i = 0; i < 5; ++i)
     v[i] = old[i];
-  }
 
   for (size_t i = 0; i < 16; ++i) /* convert read buffer to Big Endian */
     w[i] = fio_ntol32(w[i]);
@@ -30336,13 +30463,18 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   FIO___SHA1_ROUND16(K, F, i);                                                 \
   FIO___SHA1_ROUND4((K), (F), i + 16);
 
-#define FIO___SHA1_ROTATE(K, F, i)                                             \
+#define FIO___SHA1_ROTATE_OLD(K, F, i)                                         \
   v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
   v[4] = v[3];                                                                 \
   v[3] = v[2];                                                                 \
   v[2] = fio_lrot32(v[1], 30);                                                 \
   v[1] = v[0];                                                                 \
   v[0] = v[5];
+
+#define FIO___SHA1_ROTATE(K, F, i)                                             \
+  v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
+  v[1] = fio_lrot32(v[1], 30);                                                 \
+  fio_u32x8_reshuffle(v, 5, 0, 1, 2, 3, 5, 6, 7);
 
 #define FIO___SHA1_CALC_WORD(i)                                                \
   fio_lrot32(                                                                  \
@@ -30367,11 +30499,11 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   FIO___SHA1_ROUND20(0x8F1BBCDC, ((v[1] & (v[2] | v[3])) | (v[2] & v[3])), 40);
   FIO___SHA1_ROUND20(0xCA62C1D6, (v[1] ^ v[2] ^ v[3]), 60);
   /* sum and store */
-  for (size_t i = 0; i < 5; ++i) {
+  for (size_t i = 0; i < 5; ++i)
     old[i] += v[i];
-  }
 
 #undef FIO___SHA1_ROTATE
+#undef FIO___SHA1_ROTATE_OLD
 #undef FIO___SHA1_CALC_WORD
 #undef FIO___SHA1_ROUND
 #undef FIO___SHA1_ROUND4
@@ -30386,14 +30518,14 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  fio_sha1_s s FIO_ALIGN(64) = {.v = {
+  fio_sha1_s s FIO_ALIGN(16) = {.v = {
                                     0x67452301,
                                     0xEFCDAB89,
                                     0x98BADCFE,
                                     0x10325476,
                                     0xC3D2E1F0,
                                 }};
-  uint32_t vec[16] FIO_ALIGN(64);
+  uint32_t vec[16] FIO_ALIGN(16);
 
   const uint8_t *buf = (const uint8_t *)data;
 
@@ -30568,7 +30700,7 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
     v[i] = h->u32[i];
   }
   /* read data as an array of 16 big endian 32 bit integers. */
-  uint32_t w[16] FIO_ALIGN(64);
+  uint32_t w[16] FIO_ALIGN(16);
   fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
@@ -30690,12 +30822,12 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
 
   uint64_t t1, t2; /* used often... */
   /* copy original state */
-  uint64_t v[8] FIO_ALIGN(64);
+  uint64_t v[8] FIO_ALIGN(16);
   for (size_t i = 0; i < 8; ++i)
     v[i] = h->u64[i];
 
   /* read data as an array of 16 big endian 64 bit integers. */
-  uint64_t w[16] FIO_ALIGN(64);
+  uint64_t w[16] FIO_ALIGN(16);
   fio_memcpy128(w, block);
   for (size_t i = 0; i < 16; ++i)
     w[i] = fio_lton64(w[i]); /* no-op on big endien systems */
@@ -30761,7 +30893,9 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
 }
 
 /** Feed data into the hash */
-SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
+SFUNC void fio_sha512_consume(fio_sha512_s *restrict h,
+                              const void *restrict data,
+                              uint64_t len) {
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;
@@ -31217,6 +31351,9 @@ SFUNC int fio_srv_is_suspended(fio_s *io);
 
 /** Returns 1 if the IO handle is marked as open. */
 SFUNC int fio_srv_is_open(fio_s *io);
+
+/** Returns the approximate number of bytes in the outgoing buffer. */
+SFUNC size_t fio_srv_backlog(fio_s *io);
 
 /* *****************************************************************************
 Task Scheduling
@@ -31960,24 +32097,23 @@ FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
   (void)r;
-  fio___srvdata.wakeup_wait = 0;
 #if DEBUG
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup called", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
 #endif
+  fio___srvdata.wakeup_wait = 0;
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
   (void)ignr_;
   fio_sock_close(fio___srvdata.wakeup_fd);
   fio___srvdata.wakeup = NULL;
   fio___srvdata.wakeup_fd = -1;
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup destroyed", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup destroyed", fio___srvdata.pid);
 }
 
 FIO_SFUNC void fio___srv_wakeup(void) {
   if (!fio___srvdata.wakeup || fio_queue_count(fio_srv_queue()) > 3 ||
       fio_atomic_or(&fio___srvdata.wakeup_wait, 1))
     return;
-  fio___srvdata.wakeup_wait = 1;
   char buf[1] = {(char)~0};
   ssize_t ignr = fio_sock_write(fio___srvdata.wakeup_fd, buf, 1);
   (void)ignr;
@@ -31994,7 +32130,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
     return;
   int fds[2];
   if (pipe(fds)) {
-    FIO_LOG_ERROR("%d couldn't open wakeup pipes, fio___srv_wakeup disabled.",
+    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___srv_wakeup disabled.",
                   fio___srvdata.pid);
     return;
   }
@@ -32005,7 +32141,7 @@ FIO_SFUNC void fio___srv_wakeup_init(void) {
                                            &FIO___SRV_WAKEUP_PROTOCOL,
                                            (void *)(uintptr_t)fds[1],
                                            NULL);
-  FIO_LOG_DEBUG2("%d fio___srv_wakeup initialized", fio___srvdata.pid);
+  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup initialized", fio___srvdata.pid);
 }
 
 /* *****************************************************************************
@@ -32064,26 +32200,26 @@ FIO_IFUNC void fio_set_valid(fio_s *io) {
   fio_validity_map_set(&fio___srvdata.valid, fio_risky_ptr(io), io, NULL);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(fio_is_valid(io),
-                   "%d IO validity set, but map reported as invalid!",
+                   "(%d) IO validity set, but map reported as invalid!",
                    (int)fio___srvdata.pid);
-  FIO_LOG_DEBUG2("%d IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
+  FIO_LOG_DEBUG2("(%d) IO %p is now valid", (int)fio___srvdata.pid, (void *)io);
 }
 
 FIO_IFUNC void fio_set_invalid(fio_s *io) {
   fio_s *old = NULL;
-  FIO_LOG_DEBUG2("%d IO %p is no longer valid",
+  FIO_LOG_DEBUG2("(%d) IO %p is no longer valid",
                  (int)fio___srvdata.pid,
                  (void *)io);
   FIO_VALIDATE_LOCK();
   fio_validity_map_remove(&fio___srvdata.valid, fio_risky_ptr(io), io, &old);
   FIO_VALIDATE_UNLOCK();
   FIO_ASSERT_DEBUG(!old || old == io,
-                   "%d invalidity map corruption (%p != %p)!",
+                   "(%d) invalidity map corruption (%p != %p)!",
                    (int)fio___srvdata.pid,
                    io,
                    old);
   FIO_ASSERT_DEBUG(!fio_is_valid(io),
-                   "%d IO validity removed, but map reported as valid!",
+                   "(%d) IO validity removed, but map reported as valid!",
                    (int)fio___srvdata.pid);
 }
 
@@ -32123,18 +32259,22 @@ struct fio_s {
   size_t total_sent;
 #endif
   int64_t active;
-  uint32_t state;
+  uint16_t state;
+  uint16_t pflags;
   int fd;
   /* TODO? peer address buffer */
 };
 
-#define FIO_STATE_OPEN         ((uint32_t)1U)
-#define FIO_STATE_SUSPENDED    ((uint32_t)2U)
-#define FIO_STATE_THROTTLED    ((uint32_t)4U)
-#define FIO_STATE_CLOSING      ((uint32_t)8U)
-#define FIO_STATE_CLOSE_LOCAL  ((uint32_t)16U)
-#define FIO_STATE_CLOSE_REMOTE ((uint32_t)32U)
-#define FIO_STATE_CLOSE_ERROR  ((uint32_t)64U)
+#define FIO___STATE_OPENOPEN         ((uint16_t)1U)
+#define FIO___STATE_OPENSUSPENDED    ((uint16_t)2U)
+#define FIO___STATE_OPENTHROTTLED    ((uint16_t)4U)
+#define FIO___STATE_OPENCLOSING      ((uint16_t)8U)
+#define FIO___STATE_OPENCLOSE_LOCAL  ((uint16_t)16U)
+#define FIO___STATE_OPENCLOSE_REMOTE ((uint16_t)32U)
+#define FIO___STATE_OPENCLOSE_ERROR  ((uint16_t)64U)
+
+#define FIO___STATE_POLLIN_SET  ((uint16_t)1U)
+#define FIO___STATE_POLLOUT_SET ((uint16_t)2U)
 
 FIO_SFUNC void fio_s_init(fio_s *io) {
   *io = (fio_s){
@@ -32143,7 +32283,7 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
       .stream = FIO_STREAM_INIT(io->stream),
       .env = FIO___SRV_ENV_SAFE_INIT,
       .active = fio___srvdata.tick,
-      .state = FIO_STATE_OPEN,
+      .state = FIO___STATE_OPENOPEN,
       .fd = -1,
   };
   FIO_LIST_PUSH(&io->pr->reserved.ios, &io->node);
@@ -32151,6 +32291,19 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
   FIO_LIST_PUSH(&fio___srvdata.protocols,
                 &FIO___MOCK_PROTOCOL.reserved.protocols);
   fio_set_valid(io);
+}
+
+FIO_IFUNC void fio___s_monitor_in(fio_s *io) {
+  if ((fio_atomic_or(&io->pflags, FIO___STATE_POLLIN_SET) &
+       FIO___STATE_POLLIN_SET) == FIO___STATE_POLLIN_SET)
+    return;
+  fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
+}
+FIO_IFUNC void fio___s_monitor_out(fio_s *io) {
+  if ((fio_atomic_or(&io->pflags, FIO___STATE_POLLOUT_SET) &
+       FIO___STATE_POLLOUT_SET) == FIO___STATE_POLLOUT_SET)
+    return;
+  fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLOUT);
 }
 
 FIO_SFUNC void fio_s_destroy(fio_s *io) {
@@ -32192,6 +32345,7 @@ static void fio___protocol_set_task(void *io_, void *old_) {
   if (io->node.next == io->node.prev) /* list was empty before IO was added */
     FIO_LIST_PUSH(&fio___srvdata.protocols, &io->pr->reserved.protocols);
   io->pr->on_attach(io);
+  io->pflags = (FIO___STATE_POLLIN_SET | FIO___STATE_POLLOUT_SET);
   fio_poll_monitor(&fio___srvdata.poll_data,
                    io->fd,
                    (void *)io,
@@ -32231,7 +32385,7 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
     goto error;
   io = fio_new2();
   FIO_ASSERT_ALLOC(io);
-  FIO_LOG_DDEBUG2("%d attaching fd %d to IO object %p",
+  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,
                   (void *)io);
@@ -32275,7 +32429,7 @@ FIO_SFUNC size_t fio_protocol_each(fio_protocol_s *protocol,
   if (!protocol || !protocol->reserved.ios.next || !protocol->reserved.ios.prev)
     return count;
   FIO_LIST_EACH(fio_s, node, &protocol->reserved.ios, io) {
-    if (!(io->state & FIO_STATE_OPEN))
+    if (!(io->state & FIO___STATE_OPENOPEN))
       continue;
     task(io, udata);
     ++count;
@@ -32337,20 +32491,71 @@ SFUNC int fio_env_remove FIO_NOOP(fio_s *io, fio_env_get_args_s args) {
 }
 
 /* *****************************************************************************
+Writing from the stream
+***************************************************************************** */
+
+static void fio___srv_try_to_write_to_io(fio_s *io) {
+  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
+  size_t total = 0;
+  if (!(io->state & FIO___STATE_OPENOPEN))
+    return;
+  for (;;) {
+    size_t len = FIO_SRV_BUFFER_PER_WRITE;
+    char *buf = buf_mem;
+    fio_stream_read(&io->stream, &buf, &len);
+    if (!len)
+      break;
+    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    if (r > 0) {
+      FIO_LOG_DEBUG2("Written %zu bytes to fd %d", (size_t)r, io->fd);
+      total += r;
+      fio_stream_advance(&io->stream, r);
+      continue;
+    }
+    if (r == -1) {
+      if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
+        break;
+      if (errno == EINTR)
+        continue;
+    }
+    goto connection_error;
+  }
+  if (total) {
+    fio_touch(io);
+#ifdef DEBUG
+    io->total_sent += total;
+#endif
+  }
+  return;
+
+connection_error:
+#if DEBUG
+  if (fio_stream_any(&io->stream))
+    FIO_LOG_DDEBUG2(
+        "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
+        errno,
+        (void *)io,
+        io->fd,
+        strerror(errno));
+#endif
+  fio_close_now(io);
+}
+/* *****************************************************************************
 Event handling
 ***************************************************************************** */
 
 static void fio___srv_poll_on_data(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
-  if (io->state == FIO_STATE_OPEN) {
+  fio_atomic_and(&io->pflags, ~FIO___STATE_POLLIN_SET);
+  if (io->state == FIO___STATE_OPENOPEN) {
     /* this also tests for the suspended / throttled / closing flags */
     io->pr->on_data(io);
-    if (io->state == FIO_STATE_OPEN) {
-      fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
+    if (io->state == FIO___STATE_OPENOPEN) {
+      fio___s_monitor_in(io);
     }
-  } else if ((io->state & FIO_STATE_OPEN)) {
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+  } else if ((io->state & FIO___STATE_OPENOPEN)) {
+    fio___s_monitor_out(io);
   }
   fio_free2(io);
   return;
@@ -32362,73 +32567,43 @@ static void fio___srv_poll_on_ready(void *io_, void *ignr_) {
   errno = 0;
 #endif
   fio_s *io = (fio_s *)io_;
-  char buf_mem[FIO_SRV_BUFFER_PER_WRITE];
-  size_t total = 0;
-  if (!(io->state & FIO_STATE_OPEN))
-    goto finish;
-  for (;;) {
-    size_t len = FIO_SRV_BUFFER_PER_WRITE;
-    char *buf = buf_mem;
-    fio_stream_read(&io->stream, &buf, &len);
-    if (!len)
-      break;
-    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-    if (r > 0) {
-      total += r;
-      fio_stream_advance(&io->stream, r);
-      continue;
-    } else if ((r == -1) & ((errno == EWOULDBLOCK) || (errno == EAGAIN) ||
-                            (errno == EINTR))) {
-      break;
-    } else {
-#if DEBUG
-      if (fio_stream_any(&io->stream))
-        FIO_LOG_DDEBUG2(
-            "IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
-            errno,
-            (void *)io,
-            io->fd,
-            strerror(errno));
-#endif
-      fio_close_now(io);
-      goto finish;
-    }
-  }
-  if (total) {
-    fio_touch(io);
-#ifdef DEBUG
-    io->total_sent += total;
-#endif
-  }
+  fio_atomic_and(&io->pflags, ~FIO___STATE_POLLOUT_SET);
+  fio___srv_try_to_write_to_io(io);
   if (!fio_stream_any(&io->stream) &&
       !io->pr->io_functions.flush(io->fd, io->tls)) {
-    if ((io->state & FIO_STATE_CLOSING)) {
+    if ((io->state & FIO___STATE_OPENCLOSING)) {
       io->pr->io_functions.finish(io->fd, io->tls);
       fio_close_now(io);
     } else {
-      if ((io->state & FIO_STATE_THROTTLED)) {
-        fio_atomic_and(&io->state, ~FIO_STATE_THROTTLED);
-        fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLIN);
+      if ((io->state & FIO___STATE_OPENTHROTTLED)) {
+        fio_atomic_and(&io->state, ~FIO___STATE_OPENTHROTTLED);
+        fio___s_monitor_in(io);
       }
-      FIO_LOG_DDEBUG2("calling on_ready for %p (fd %d)", (void *)io, io->fd);
+      FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
+                      fio___srvdata.pid,
+                      (void *)io,
+                      io->fd,
+                      fio_stream_length(&io->stream));
       io->pr->on_ready(io);
     }
   } else {
     if (fio_stream_length(&io->stream) >= FIO_SRV_THROTTLE_LIMIT) {
-      if (!(io->state & FIO_STATE_THROTTLED))
-        FIO_LOG_DDEBUG2("throttled IO %p (fd %d)", (void *)io, io->fd);
-      fio_atomic_or(&io->state, FIO_STATE_THROTTLED);
+      if (!(io->state & FIO___STATE_OPENTHROTTLED))
+        FIO_LOG_DDEBUG2("(%d), throttled IO %p (fd %d)",
+                        fio___srvdata.pid,
+                        (void *)io,
+                        io->fd);
+      fio_atomic_or(&io->state, FIO___STATE_OPENTHROTTLED);
     }
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, io, POLLOUT);
+    fio___s_monitor_out(io);
   }
-finish:
   fio_free2(io);
 }
 
 static void fio___srv_poll_on_close(void *io_, void *ignr_) {
   (void)ignr_;
   fio_s *io = (fio_s *)io_;
-  fio_atomic_or(&io->state, FIO_STATE_CLOSE_REMOTE);
+  fio_atomic_or(&io->state, FIO___STATE_OPENCLOSE_REMOTE);
   fio_close_now(io);
   fio_free2(io);
 }
@@ -32492,7 +32667,10 @@ static int fio___srv_review_timeouts(void) {
       FIO_ASSERT_DEBUG(io->pr == pr, "IO protocol ownership error");
       if (io->active >= limit)
         break;
-      FIO_LOG_DDEBUG2("scheduling timeout for %p (fd %d)", (void *)io, io->fd);
+      FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
+                      fio___srvdata.pid,
+                      (void *)io,
+                      io->fd);
       fio_queue_push(fio___srv_tasks, fio___srv_poll_on_timeout, fio_dup2(io));
       ++c;
     }
@@ -32709,12 +32887,12 @@ static void fio___srv_spawn_worker(void *ignr_1, void *ignr_2) {
 is_worker_process:
   fio___srvdata.pid = fio_thread_getpid();
   fio___srvdata.is_worker = 1;
-  FIO_LOG_INFO("%d worker starting up.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("(%d) worker starting up.", (int)fio___srvdata.pid);
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
   if (!fio_atomic_xor_fetch(&fio___srvdata.stop, 2))
     fio___srv_work(1);
-  FIO_LOG_INFO("%d worker exiting.", (int)fio___srvdata.pid);
+  FIO_LOG_INFO("(%d) worker exiting.", (int)fio___srvdata.pid);
   exit(0);
 }
 
@@ -32759,7 +32937,7 @@ SFUNC uint16_t fio_srv_workers(int workers) {
 SFUNC void fio_srv_add_workers(int workers) {
   if (!workers || fio___srvdata.root_pid != fio___srvdata.pid)
     return;
-  FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+  FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
   for (int i = 0; i < workers; ++i)
     fio_queue_push(fio___srv_tasks, fio___srv_spawn_worker);
 }
@@ -32789,12 +32967,12 @@ SFUNC void fio_srv_start(int workers) {
 #endif
   fio___srvdata.tick = FIO___SRV_GET_TIME_MILLI();
   if (workers) {
-    FIO_LOG_INFO("%d spawning %d workers.", fio___srvdata.root_pid, workers);
+    FIO_LOG_INFO("(%d) spawning %d workers.", fio___srvdata.root_pid, workers);
     for (int i = 0; i < workers; ++i) {
       fio___srv_spawn_worker(NULL, NULL);
     }
   } else {
-    FIO_LOG_DEBUG2("%d starting facil.io server in single process mode.",
+    FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
                    fio___srvdata.root_pid);
   }
   fio___srv_work(!workers);
@@ -32857,12 +33035,12 @@ FIO_SFUNC void fio_write2___dealloc_task(void *fn, void *data) {
 FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   fio_s *io = (fio_s *)io_;
   fio_stream_packet_s *packet = (fio_stream_packet_s *)packet_;
-  if (!(io->state & FIO_STATE_OPEN))
+  if (!(io->state & FIO___STATE_OPENOPEN))
     goto io_error;
   fio_stream_add(&io->stream, packet);
-  fio_queue_push(fio___srv_tasks,
-                 fio___srv_poll_on_ready,
-                 io); /* no dup/undup, already done.*/
+  fio___srv_try_to_write_to_io(io);
+  fio___s_monitor_out(io);
+  fio_free2(io); /* undup the IO object since it isn't moved to on_ready */
   return;
 io_error:
   fio_stream_pack_free(packet);
@@ -32888,7 +33066,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
   }
   if (!packet)
     goto error;
-  if ((io->state & FIO_STATE_CLOSING))
+  if ((io->state & FIO___STATE_OPENCLOSING))
     goto write_called_after_close;
   fio_srv_defer(fio_write2___task, fio_dup2(io), packet);
   return;
@@ -32910,7 +33088,7 @@ write_called_after_close:
   }
   return;
 io_error_null:
-  FIO_LOG_ERROR("%d `fio_write2` called for invalid IO (NULL)",
+  FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)",
                 fio___srvdata.pid);
   if (args.dealloc) {
     union {
@@ -32924,9 +33102,10 @@ io_error_null:
 
 /** Marks the IO for closure as soon as scheduled data was sent. */
 SFUNC void fio_close(fio_s *io) {
-  if (io && (io->state & FIO_STATE_OPEN) &&
-      !(fio_atomic_or(&io->state, (FIO_STATE_CLOSING | FIO_STATE_CLOSE_LOCAL)) &
-        FIO_STATE_CLOSING)) {
+  if (io && (io->state & FIO___STATE_OPENOPEN) &&
+      !(fio_atomic_or(&io->state,
+                      (FIO___STATE_OPENCLOSING | FIO___STATE_OPENCLOSE_LOCAL)) &
+        FIO___STATE_OPENCLOSING)) {
     FIO_LOG_DDEBUG2("scheduling IO %p (fd %d) for closure", (void *)io, io->fd);
     fio_queue_push(fio___srv_tasks,
                    fio___srv_poll_on_ready,
@@ -32936,30 +33115,39 @@ SFUNC void fio_close(fio_s *io) {
 
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
-  fio_atomic_or(&io->state, FIO_STATE_CLOSING);
-  if ((fio_atomic_and(&io->state, ~FIO_STATE_OPEN) & FIO_STATE_OPEN))
+  fio_atomic_or(&io->state, FIO___STATE_OPENCLOSING);
+  if ((fio_atomic_and(&io->state, ~FIO___STATE_OPENOPEN) &
+       FIO___STATE_OPENOPEN))
     fio_free2(io);
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) {
+  io->state |= FIO___STATE_OPENSUSPENDED;
+}
 
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_srv_unsuspend(fio_s *io) {
-  if ((fio_atomic_and(&io->state, ~FIO_STATE_SUSPENDED) &
-       FIO_STATE_SUSPENDED)) {
-    fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
+  if ((fio_atomic_and(&io->state, ~FIO___STATE_OPENSUSPENDED) &
+       FIO___STATE_OPENSUSPENDED)) {
+    fio___s_monitor_in(io);
   }
 }
 
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_srv_is_suspended(fio_s *io) {
-  return (io->state & FIO_STATE_SUSPENDED);
+  return (io->state & FIO___STATE_OPENSUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */
 SFUNC int fio_srv_is_open(fio_s *io) {
-  return (io->state & FIO_STATE_OPEN) && !(io->state & FIO_STATE_CLOSING);
+  return io && (io->state & FIO___STATE_OPENOPEN) &&
+         !(io->state & FIO___STATE_OPENCLOSING);
+}
+
+/** Returns the approximate number of bytes in the outgoing buffer. */
+SFUNC size_t fio_srv_backlog(fio_s *io) {
+  return io ? fio_stream_length(&io->stream) : 0;
 }
 
 /* *****************************************************************************
@@ -33020,12 +33208,12 @@ static void fio___srv_listen_free(void *l_) {
     l->on_finish(l->protocol, l->udata);
 
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("%d stopped listening @ %.*s",
+    FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
                    getpid(),
                    (int)l->url_len,
                    l->url);
   else
-    FIO_LOG_INFO("%d stopped listening @ %.*s",
+    FIO_LOG_INFO("(%d) stopped listening @ %.*s",
                  getpid(),
                  (int)l->url_len,
                  l->url);
@@ -33104,7 +33292,7 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   l = fio___srv_listen_dup(l);
   int fd = fio_sock_dup(l->fd);
   FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("%d Called dup(%d) to attach %d as a listening socket.",
+  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
                  (int)fio___srvdata.pid,
                  l->fd,
                  fd);
@@ -33112,9 +33300,9 @@ FIO_SFUNC void fio___srv_listen_attach_task_deferred(void *l_, void *ignr_) {
   if (l->on_start)
     l->on_start(l->protocol, l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("%d started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_DEBUG2("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   else
-    FIO_LOG_INFO("%d started listening @ %s", fio___srvdata.pid, l->url);
+    FIO_LOG_INFO("(%d) started listening @ %s", fio___srvdata.pid, l->url);
   (void)ignr_;
 }
 
@@ -33259,7 +33447,7 @@ FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
   if (!fio_srv_is_open(io))
     return;
   fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
-  FIO_LOG_DEBUG2("%d established client connection to %s",
+  FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);
   fio_udata_set(io, c->udata);
@@ -35349,14 +35537,16 @@ Listening to Local Connections (IPC)
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
   if (fio_srv_is_worker()) {
-    FIO_LOG_DEBUG2("(pub/sub) IPC socket skipped - no workers are spawned.");
+    FIO_LOG_DEBUG2("(%d) pub/sub IPC socket skipped - no workers are spawned.",
+                   fio_srv_pid());
     return;
   }
   FIO_ASSERT(fio_srv_listen(.url = FIO___PUBSUB_POSTOFFICE.ipc_url,
                             .protocol = &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
                             .on_root = 1,
                             .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
-             "(pub/sub) couldn't open a socket for IPC\n\t\t%s",
+             "(%d) pub/sub couldn't open a socket for IPC\n\t\t%s",
+             fio_srv_pid(),
              FIO___PUBSUB_POSTOFFICE.ipc_url);
 }
 #undef FIO___PUBSUB_HIDE_FROM_LOG
@@ -35405,7 +35595,7 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
                          &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
                          NULL,
                          NULL)) {
-    FIO_LOG_FATAL("%d couldn't connect to pub/sub socket @ %s",
+    FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
                   fio_srv_pid(),
                   FIO___PUBSUB_POSTOFFICE.ipc_url);
     fio_thread_kill(fio_srv_root_pid(), SIGINT);
@@ -35570,7 +35760,7 @@ has_handle:
   return;
 
 is_master_only:
-  if (fio_srv_is_master())
+  if (!fio_srv_is_master())
     goto error_not_on_master;
 is_global:
   if (1) { /* so C++ can jump even though there's a new var here */
@@ -35596,14 +35786,14 @@ error_not_on_master:
   s->history = FIO_LIST_INIT(s->history);
   fio_subscription_free(s);
   FIO_LOG_WARNING(
-      "%d master-only subscription attempt on a non-master process: %.*s",
+      "(%d) master-only subscription attempt on a non-master process: %.*s",
       fio_srv_pid(),
       (int)args.channel.len,
       args.channel.buf);
   return;
 
 sub_error:
-  FIO_LOG_ERROR("%d (pubsub) subscription/channel cannot be created?"
+  FIO_LOG_ERROR("(%d) pub/sub subscription/channel cannot be created?"
                 "\n\t%zu bytes long\n\t%.*s...",
                 fio_srv_pid(),
                 args.channel.len,
@@ -35942,7 +36132,7 @@ FIO_IFUNC void fio___pubsub_message_write2io(fio_s *io, void *m_) {
   fio___pubsub_message_s *m = (fio___pubsub_message_s *)m_;
   if (io == m->data.io)
     return;
-  FIO_LOG_DDEBUG2("%d (pubsub) sending IPC/peer message.", fio_srv_pid());
+  FIO_LOG_DDEBUG2("(%d) pub/sub sending IPC/peer message.", fio_srv_pid());
   fio___pubsub_message_encrypt(m);
   fio_write2(io,
              .buf = fio___pubsub_message_dup(m),
@@ -35971,7 +36161,7 @@ Pub/Sub Message Routing
 FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
   fio___pubsub_message_parser_s *p;
   unsigned flags = m->data.is_json;
-  FIO_LOG_DDEBUG2("%d (pubsub) routing message (%x)",
+  FIO_LOG_DDEBUG2("(%d) pub/sub routing message (%x)",
                   fio_srv_pid(),
                   (int)m->data.is_json);
 
@@ -35995,7 +36185,7 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
   return;
 
 is_special_message:
-  FIO_LOG_DDEBUG2("%d (pubsub) internal subscription/ID message received",
+  FIO_LOG_DDEBUG2("(%d) pub/sub internal subscription/ID message received",
                   fio_srv_pid());
   switch (flags) {
   case FIO___PUBSUB_SPECIAL: /* TODO: run generic command on root */ break;
@@ -36046,12 +36236,12 @@ is_special_message:
     return;
 
   case FIO___PUBSUB_HISTORY_START:
-    FIO_LOG_DDEBUG2("%d (pubsub) internal history start message received",
+    FIO_LOG_DDEBUG2("(%d) pub/sub internal history start message received",
                     fio_srv_pid());
     /* TODO! */
     return;
   case FIO___PUBSUB_HISTORY_END:
-    FIO_LOG_DDEBUG2("%d (pubsub) internal history end message received",
+    FIO_LOG_DDEBUG2("(%d) pub/sub internal history end message received",
                     fio_srv_pid());
     /* TODO! */
     return;
@@ -36074,13 +36264,13 @@ FIO_SFUNC void fio___publish_message_task(void *m_, void *ignr_) {
 void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   if (FIO_UNLIKELY(args.channel.len > 0xFFFFUL)) {
-    FIO_LOG_ERROR("%d (pubsub) channel name too long (%zu bytes)",
+    FIO_LOG_ERROR("(%d) pub/sub channel name too long (%zu bytes)",
                   fio_srv_pid(),
                   args.channel.len);
     return;
   }
   if (FIO_UNLIKELY(args.message.len > 0xFFFFFFUL)) {
-    FIO_LOG_ERROR("%d (pubsub) message payload too large (%zu bytes)",
+    FIO_LOG_ERROR("(%d) pub/sub message payload too large (%zu bytes)",
                   fio_srv_pid(),
                   args.message.len);
     return;
@@ -36147,7 +36337,7 @@ FIO_IFUNC void fio___pubsub_message_parse(
   fio___pubsub_message_s *m = parser->msg;
   const size_t needed = m->data.channel.len + m->data.message.len +
                         FIO___PUBSUB_MESSAGE_OVERHEAD_NET;
-  FIO_LOG_DDEBUG2("%d (pubsub) parsing IPC/peer message (%zu/%zu bytes)",
+  FIO_LOG_DDEBUG2("(%d) pub/sub parsing IPC/peer message (%zu/%zu bytes)",
                   fio_srv_pid(),
                   existing,
                   needed);
@@ -36164,7 +36354,7 @@ FIO_IFUNC void fio___pubsub_message_parse(
   parser->len = 0;
   m->data.io = io;
   if (fio___pubsub_message_decrypt(m)) {
-    FIO_LOG_SECURITY("%d (pubsub) message decryption error", fio_srv_pid());
+    FIO_LOG_SECURITY("(%d) pub/sub message decryption error", fio_srv_pid());
     fio_close_now(io);
   } else {
     cb(io, m);
@@ -36305,7 +36495,7 @@ Channel Creation / Destruction Callback (notifying engines)
 /** Callback for when a channel is created. */
 FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
-  FIO_LOG_DDEBUG2("%d (pubsub) %s created, filter %d, length %zu bytes: %s",
+  FIO_LOG_DDEBUG2("(%d) pub/sub %s created, filter %d, length %zu bytes: %s",
                   fio_srv_pid(),
                   (ch->is_pattern ? "pattern" : "channel"),
                   (int)ch->filter,
@@ -36355,7 +36545,7 @@ FIO_IFUNC void fio___channel_on_destroy(fio_channel_s *ch) {
     }
   }
 
-  FIO_LOG_DDEBUG2("%d (pubsub) %s destroyed, filter %d, length %zu bytes: %s",
+  FIO_LOG_DDEBUG2("(%d) pub/sub %s destroyed, filter %d, length %zu bytes: %s",
                   fio_srv_pid(),
                   (ch->is_pattern ? "pattern" : "channel"),
                   (int)ch->filter,
@@ -36398,7 +36588,7 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
       .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata_get(io)),
       .sin_addr.s_addr = INADDR_BROADCAST, // inet_addr("255.255.255.255"),
   };
-  FIO_LOG_DEBUG2("(pub/sub) sending broadcast.");
+  FIO_LOG_DEBUG2("(%d) pub/sub sending broadcast.", fio_srv_pid());
   sendto(fio_fd_get(io),
          (const char *)u.u8,
          48,
@@ -36426,7 +36616,8 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
   if (mac[0] > fio_ltole64(hello[3]) + 8192 ||
       mac[0] + 8192 < fio_ltole64(hello[3])) {
     FIO_LOG_SECURITY(
-        "(pubsub-broadcast) timing error - possible replay attack?");
+        "(%d) pub/sub-broadcast timing error - possible replay attack?",
+        fio_srv_pid());
     return -1;
   }
   /* test for duplicate connections */
@@ -36434,14 +36625,16 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
           &FIO___PUBSUB_POSTOFFICE.remote_uuids,
           hello[0],
           hello[1])) {
-    FIO_LOG_DEBUG2("(pubsub-broadcast) Prevented duplicate connection!");
+    FIO_LOG_DEBUG2("(%d) pub/sub-broadcast Prevented duplicate connection!",
+                   fio_srv_pid());
     return -1;
   }
   /* test MAC */
   const void *k = fio___pubsub_secret_key(fio_ltole64(hello[2]));
   fio_poly1305_auth(mac, k, NULL, 0, hello, 32);
   if (mac[0] != hello[4] || mac[1] != hello[5]) {
-    FIO_LOG_SECURITY("(pubsub-broadcast) MAC failure - under attack?");
+    FIO_LOG_SECURITY("(%d) pub/sub-broadcast MAC failure - under attack?",
+                     fio_srv_pid());
     return -1;
   }
   return 0;
@@ -36480,13 +36673,15 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
       0) {
     if (len != 48) {
       FIO_LOG_WARNING(
-          "pub/sub peer detection received invalid packet (%zu bytes)!",
+          "(%d) pub/sub peer detection received invalid packet (%zu bytes)!",
+          fio_srv_pid(),
           len);
       continue;
     }
     if (fio___pubsub_broadcast_hello_validate(buf)) {
       FIO_LOG_WARNING(
-          "pub/sub peer detection received invalid packet payload!");
+          "(%d) pub/sub peer detection received invalid packet payload!",
+          fio_srv_pid());
       continue;
     }
     if (fio___pubsub_broadcast_connected_get(
@@ -36508,7 +36703,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                     addr_buf + 64,
                     64,
                     (NI_NUMERICHOST | NI_NUMERICHOST))) {
-      FIO_LOG_ERROR("couldn't resolve peer address");
+      FIO_LOG_ERROR("(%d) couldn't resolve peer address", fio_srv_pid());
       continue;
     }
     int fd = fio_sock_open(addr_buf,
@@ -36526,7 +36721,8 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                                     NULL,
                                     NULL);
     fio___pubsub_message_write2io(peer, m);
-    FIO_LOG_INFO("(cluster) connecting to peer (%zu connections).",
+    FIO_LOG_INFO("(%d) pub/sub-cluster connecting to peer (%zu connections).",
+                 fio_srv_pid(),
                  fio___pubsub_broadcast_connected_count(
                      &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
@@ -36748,6 +36944,9 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h);
 /** Collects an updated timestamp for logging purposes. */
 SFUNC void fio_http_start_time_set(fio_http_s *);
 
+/** Clears any response data. */
+SFUNC fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body);
+
 /* *****************************************************************************
 Opaque User and Controller Data
 ***************************************************************************** */
@@ -36889,6 +37088,13 @@ SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
 /** Writes `data` to the body (payload) associated with the HTTP handle. */
 SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 
+/**
+ * If the body is stored in a temporary file, returns the file's handle.
+ *
+ * Otherwise returns -1.
+ */
+SFUNC int fio_http_body_fd(fio_http_s *);
+
 /* *****************************************************************************
 Cookies
 ***************************************************************************** */
@@ -37014,6 +37220,9 @@ SFUNC int fio_http_is_websocket(fio_http_s *);
 /** Returns true if the HTTP handle refers to an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *);
 
+/** Returns true if handle is in the process of freeing itself. */
+SFUNC int fio_http_is_freeing(fio_http_s *);
+
 /**
  * Gets the header information associated with the HTTP handle.
  *
@@ -37122,6 +37331,9 @@ WebSocket / SSE Helpers
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
 SFUNC int fio_http_websockets_requested(fio_http_s *);
 
+/** Returns non-zero if the response accepts a WebSocket upgrade request. */
+SFUNC int fio_http_websockets_accepted(fio_http_s *h);
+
 /** Sets response data to agree to a WebSockets Upgrade.*/
 SFUNC void fio_http_upgrade_websockets(fio_http_s *);
 
@@ -37130,6 +37342,9 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *);
+
+/** Returns non-zero if the response accepts an SSE request. */
+SFUNC int fio_http_sse_accepted(fio_http_s *h);
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_upgrade_sse(fio_http_s *);
@@ -37860,7 +38075,7 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   if (args.buf) {
     if (args.dealloc)
       args.dealloc((void *)args.buf);
-  } else if (args.fd != -1) {
+  } else if (args.fd != -1 && !args.copy && args.fd != fio_http_body_fd(h)) {
     close(args.fd);
   }
   (void)h;
@@ -37906,6 +38121,7 @@ HTTP Handle Type
 #define FIO_HTTP_STATE_WEBSOCKET      8
 #define FIO_HTTP_STATE_SSE            16
 #define FIO_HTTP_STATE_COOKIES_PARSED 32
+#define FIO_HTTP_STATE_FREEING        64
 
 FIO_SFUNC int fio____http_write_start(fio_http_s *, fio_http_write_args_s *);
 FIO_SFUNC int fio____http_write_cont(fio_http_s *, fio_http_write_args_s *);
@@ -37947,6 +38163,7 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
+  h->state |= FIO_HTTP_STATE_FREEING;
   h->controller->on_destroyed(h);
 
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
@@ -37964,6 +38181,24 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   return h;
 }
 #include FIO_INCLUDE_FILE
+
+/** Clears any response data. */
+SFUNC fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body) {
+  fio___http_hmap_destroy(HTTP_HDR_RESPONSE(h));
+  h->state = 0;
+  h->writer = fio____http_write_start;
+  h->received_at = fio_http_get_timestump();
+  h->status = 0;
+  if (!clear_body)
+    return h;
+  fio_bstr_free(h->body.buf);
+  if (h->body.fd != -1)
+    close(h->body.fd);
+  h->body.buf = NULL;
+  h->body.len = h->body.pos = 0;
+  h->body.fd = -1;
+  return h;
+}
 
 /** Create a new http_s handle. */
 SFUNC fio_http_s *fio_http_new(void) { return fio_http_new2(); }
@@ -38061,6 +38296,12 @@ SFUNC int fio_http_is_clean(fio_http_s *h) {
 SFUNC int fio_http_is_finished(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
   return (!!(h->state & FIO_HTTP_STATE_FINISHED));
+}
+
+/** Returns true if handle is in the process of freeing itself. */
+SFUNC int fio_http_is_freeing(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  return (!!(h->state & FIO_HTTP_STATE_FREEING));
 }
 
 /** Returns true if the HTTP handle's response is streaming. */
@@ -38649,6 +38890,13 @@ Body Management - Public API
 /** Gets the body (payload) length associated with the HTTP handle. */
 SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
 
+/**
+ * If the body is stored in a temporary file, returns the file's handle.
+ *
+ * Otherwise returns -1.
+ */
+SFUNC int fio_http_body_fd(fio_http_s *h) { return h->body.fd; }
+
 /** Adjusts the body's reading position. Negative values start at the end. */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
   if (pos < 0) {
@@ -38748,6 +38996,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       fio_http_send_error_response(h, h->status);
       return 0;
     }
+    /* validate Date header */
+    fio___http_hmap_set2(
+        hdrs,
+        FIO_STR_INFO2((char *)"date", 4),
+        fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
+        0);
   }
   /* test if streaming / single body response */
   if (!fio___http_hmap_get_ptr(hdrs,
@@ -38764,17 +39018,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
-  /* validate Date header */
-  fio___http_hmap_set2(
-      hdrs,
-      FIO_STR_INFO2((char *)"date", 4),
-      fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
-      0);
 
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
 }
+
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
   if (args->buf || args->fd) {
@@ -38901,9 +39150,6 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
                               FIO_STR_INFO2((char *)"cache-control", 13),
                               FIO_STR_INFO2((char *)"no-cache", 8));
   fio_http_request_header_set(h,
-                              FIO_STR_INFO2((char *)"connection", 10),
-                              FIO_STR_INFO2((char *)"keep-alive", 10));
-  fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"upgrade", 7),
                               FIO_STR_INFO2((char *)"websocket", 9));
   fio_http_request_header_set(
@@ -38917,23 +39163,114 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
     fio_string_write_base64enc(&key, NULL, tmp, 16, 0);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"sec-websocket-key", 17),
-                                FIO_STR_INFO2((char *)"13", 2));
+                                key);
   }
   /* sec-websocket-extensions ? */
   /* send request? */
+}
+
+/** Returns non-zero if the response accepts a WebSocket upgrade request. */
+SFUNC int fio_http_websockets_accepted(fio_http_s *h) {
+  if (h->status != 101)
+    return 0;
+  if (!fio_http_websockets_requested(h))
+    return 0;
+  fio_str_info_s tst =
+      fio_http_response_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
+  if (tst.len < 7 ||
+      (fio_buf2u64_le(tst.buf) | (uint64_t)0x20202020202020FFULL) !=
+          (fio_buf2u64_le("upgrade") | (uint64_t)0x20202020202020FFULL))
+    return 0;
+  tst = fio_http_response_header(h, FIO_STR_INFO2((char *)"upgrade", 7), 0);
+  if (tst.len < 9 || (tst.buf[0] | 32) != 'w' ||
+      (fio_buf2u64u(tst.buf + 1) | (uint64_t)0x2020202020202020ULL) !=
+          fio_buf2u64u("ebsocket"))
+    return 0;
+  tst = fio_http_response_header(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      0);
+  if (tst.len != 2 || tst.buf[0] != '1' || tst.buf[1] != '3')
+    return 0;
+  { /* Sec-WebSocket-Accept */
+    tst = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
+        0);
+    if (!tst.len)
+      return 0;
+
+    fio_str_info_s k =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                                0);
+    FIO_STR_INFO_TMP_VAR(accept_val, 63);
+    if (k.len != 24)
+      return 0;
+    fio_string_write(&accept_val, NULL, k.buf, k.len);
+    fio_string_write(&accept_val,
+                     NULL,
+                     "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                     36);
+    fio_sha1_s sha = fio_sha1(accept_val.buf, accept_val.len);
+    fio_sha1_digest(&sha);
+    accept_val.len = 0;
+    fio_string_write_base64enc(&accept_val,
+                               NULL,
+                               fio_sha1_digest(&sha),
+                               fio_sha1_len(),
+                               0);
+    if (!FIO_STR_INFO_IS_EQ(tst, accept_val))
+      return 0;
+  }
+  h->state |= (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET |
+               FIO_HTTP_STATE_FINISHED);
+  h->writer = fio____http_write_upgraded;
+  return 1;
 }
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *h) {
   fio_str_info_s val =
       fio_http_request_header(h, FIO_STR_INFO2((char *)"accept", 6), 0);
-  if (val.len == 17 && fio_buf2u64u(val.buf) == fio_buf2u64u("text/eve") &&
-      fio_buf2u64u(val.buf + 8) == fio_buf2u64u("nt-strea") &&
-      val.buf[16] == 'm') {
-    FIO_LOG_DDEBUG("EventSource connection requested.");
-    return 1;
+  if (val.len < 17)
+    return 0;
+  if ((val.buf[0] | 32) != 't')
+    return 0;
+  uint64_t t0 = fio_buf2u64u(val.buf + 1) | (uint64_t)0x2020202020202020ULL;
+  uint64_t t1 = fio_buf2u64u(val.buf + 9) | (uint64_t)0x2020202020202020ULL;
+  if ((t0 != fio_buf2u64u("ext/even")) || (t1 != fio_buf2u64u("t-stream")))
+    return 0; /* note that '/' and '-' both have 32 (bit[5]) set */
+  FIO_LOG_DDEBUG2("EventSource connection requested.");
+  return 1;
+}
+
+/** Returns non-zero if the response accepts an SSE request. */
+SFUNC int fio_http_sse_accepted(fio_http_s *h) {
+  if (!fio_http_sse_requested(h))
+    return 0;
+  if (h->status != 200)
+    return 0;
+  fio_str_info_s val =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"accept", 6), 0);
+  for (size_t i = 0; i < 2; ++i) {
+    if (val.len < 17)
+      return 0;
+    if ((val.buf[0] | 32) != 't')
+      return 0;
+    uint64_t t0 = fio_buf2u64u(val.buf + 1) | (uint64_t)0x2020202020202020ULL;
+    uint64_t t1 = fio_buf2u64u(val.buf + 9) | (uint64_t)0x2020202020202020ULL;
+    if ((t0 != fio_buf2u64u("ext/even")) || (t1 != fio_buf2u64u("t-stream")))
+      return 0; /* note that '/' and '-' both have 32 (bit[5]) set */
+    val = fio_http_response_header(h,
+                                   FIO_STR_INFO2((char *)"content-type", 12),
+                                   0);
   }
-  return 0;
+  h->state |=
+      (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE | FIO_HTTP_STATE_FINISHED);
+  h->writer = fio____http_write_upgraded;
+  FIO_LOG_DDEBUG2("EventSource connection accepted.");
+  return 1;
 }
 
 /** Sets response data to agree to an EventSource (SSE) Upgrade.*/
@@ -38967,7 +39304,6 @@ SFUNC void fio_http_sse_set_request(fio_http_s *h) {
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"cache-control", 13),
                               FIO_STR_INFO2((char *)"no-cache", 8));
-  /* TODO: send request? */
 }
 
 /* *****************************************************************************
@@ -40025,6 +40361,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
                              fio_buf_info_s *buf,
                              void *udata) {
   /* find line start/end and test */
+  fio_buf_info_s wrd[3];
   char *start = buf->buf;
   char *tmp;
   while ((start[0] == ' ' || start[0] == '\r' || start[0] == '\n') &&
@@ -40051,35 +40388,33 @@ static int fio_http1___start(fio_http1_parser_s *p,
   /* request: method path version */
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
-  if (fio_http1_on_method(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
+  wrd[0] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
     return -1;
-  if (fio_http1_on_url(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
+  wrd[1] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
   if (start >= eol)
     return -1;
-  if (fio_http1_on_version(
-          FIO_BUF_INFO2(start,
-                        (size_t)(((eol - start) > 14) ? 14 : (eol - start))),
-          udata))
+  wrd[2] = FIO_BUF_INFO2(start, (size_t)(eol - start));
+  if (fio_c2i(wrd[1].buf[0]) < 10)
+    goto parse_response_line;
+  if (wrd[2].len > 14)
+    wrd[2].len = 14;
+  if (fio_http1_on_method(wrd[0], udata))
+    return -1;
+  if (fio_http1_on_url(wrd[1], udata))
+    return -1;
+  if (fio_http1_on_version(wrd[2], udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 
 parse_response_line:
-  /* response: version code text */
-  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
+  if (wrd[0].len > 14)
+    wrd[0].len = 14;
+  if (fio_http1_on_version(wrd[0], udata))
     return -1;
-  if (fio_http1_on_version(FIO_BUF_INFO2(start, (size_t)(tmp - start)), udata))
-    return -1;
-  start = tmp + 1;
-  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
-    return -1;
-  if (fio_http1_on_status(fio_atol10(&start),
-                          FIO_BUF_INFO2((tmp + 1), (size_t)(eol - tmp)),
-                          udata))
+  if (fio_http1_on_status(fio_atol10u(&wrd[1].buf), wrd[2], udata))
     return -1;
   return (p->fn = fio_http1___read_header)(p, buf, udata);
 }
@@ -40222,7 +40557,6 @@ static inline int fio_http1___read_header_line(
                    fio_buf_info_s,
                    fio_buf_info_s,
                    void *)) {
-  int r;
   for (;;) {
     char *start = buf->buf;
     char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
@@ -40249,7 +40583,7 @@ static inline int fio_http1___read_header_line(
       while (eol[-1] == ' ' || eol[-1] == '\t')
         --eol;
     value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
-    r = handler(p, name, value, udata);
+    int r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
       return r;
   }
@@ -40262,6 +40596,7 @@ headers_finished:
           : (!(p->expected + 1)) ? fio_http1___read_body_chunked
                                  : fio_http1___read_body;
   return p->fn(p, buf, udata);
+
 expect_failed:
   *p = (fio_http1_parser_s){0};
   return 1;
@@ -40419,14 +40754,6 @@ The parser provides static functions only, always as part or implementation.
 #define H___FIO_WEBSOCKET_PARSER___H
 
 /* *****************************************************************************
-WebSocket Parser Settings
-***************************************************************************** */
-#ifndef WEBSOCKET_CLIENT_MUST_MASK
-/** According to the RFC, a client WebSocket MUST mask messages. */
-#define WEBSOCKET_CLIENT_MUST_MASK 1
-#endif
-
-/* *****************************************************************************
 WebSocket Parsing API
 ***************************************************************************** */
 
@@ -40482,7 +40809,11 @@ FIO_SFUNC void fio_websocket_on_protocol_close(void *udata, fio_buf_info_s msg);
 /* *****************************************************************************
 WebSocket Formatting API
 ***************************************************************************** */
-/** returns the length of the buffer required to wrap a message `len` long */
+/**
+ * Returns the length of the buffer required to wrap a message `len` long
+ *
+ * Client connections should add 4 to this number to accommodate for the mask.
+ */
 FIO_IFUNC uint64_t fio_websocket_wrapped_len(uint64_t len);
 
 /**
@@ -40575,20 +40906,20 @@ FIO_IFUNC uint64_t fio_websocket_header(void *target,
   ((uint8_t *)target)[1] = ((!!mask) << 7U);
   size_t mask_l = ((!!mask) << 2);
   if (message_len < 126) {
-    ((uint8_t *)target)[1] = message_len;
+    ((uint8_t *)target)[1] |= message_len;
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 2), mask);
     return 2 + mask_l;
   } else if (message_len < (1UL << 16)) {
     /* head is 4 bytes */
-    ((uint8_t *)target)[1] = 126;
+    ((uint8_t *)target)[1] |= 126;
     fio_u2buf16_be(((uint8_t *)target + 2), message_len);
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 4), mask);
     return 4 + mask_l;
   } else {
     /* Really Long Message  */
-    ((uint8_t *)target)[1] = 127;
+    ((uint8_t *)target)[1] |= 127;
     fio_u2buf64_be(((uint8_t *)target + 2), message_len);
     if (mask)
       fio_u2buf32u(((uint8_t *)target + 10), mask);
@@ -40760,24 +41091,24 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
   const uint8_t mask_f = (((uint8_t *)buf->buf)[1] >> 7) & 1;
   const uint8_t mask_l = (mask_f << 2);
   const uint8_t info = (uint8_t)(buf->buf[0]);
-  uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127);
+  uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127U);
   switch (len_indicator) {
   case 126:
-    if (buf->len < (4ULL + mask_l))
+    if (buf->len < 8UL)
       return 1;
     p->expect = fio_buf2u16_be(buf->buf + 2);
-    p->mask = mask_f ? fio_buf2u32u(buf->buf + 4) : 0;
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 4);
     buf->buf += 4 + mask_l;
     buf->len -= 4 + mask_l;
     break;
 
   case 127:
-    if (buf->len < (10ULL + mask_l))
+    if (buf->len < 14UL)
       return 1;
     p->expect = fio_buf2u64_be(buf->buf + 2);
     if (p->expect & 0xFF00000000000000ULL)
       return -1; /* really?! */
-    p->mask = mask_f ? fio_buf2u32u(buf->buf + 10) : 0;
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 10);
     buf->buf += 10 + mask_l;
     buf->len -= 10 + mask_l;
     break;
@@ -41031,7 +41362,7 @@ SFUNC fio_s *fio_http_io(fio_http_s *);
 #define fio_http_subscribe(h, ...)                                             \
   fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 
-/** TODO: Connects to HTTP / WebSockets / SSE connections on `url`. */
+/** Connects to HTTP / WebSockets / SSE connections on `url`. */
 SFUNC fio_s *fio_http_connect(const char *url,
                               fio_http_s *h,
                               fio_http_settings_s settings);
@@ -41270,6 +41601,59 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
+FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr);
+FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
+FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr);
+/* move init code here*/
+FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
+    fio___http_protocol_s *p,
+    const char *url,
+    fio_http_settings_s s,
+    bool is_client) {
+  int should_free_tls = !s.tls;
+  FIO_ASSERT_ALLOC(p);
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
+    p->state[i].protocol =
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, is_client);
+    p->state[i].controller =
+        fio___http_controller_get((fio___http_protocol_selector_e)i, is_client);
+  }
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
+    p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  if (url) {
+    fio_url_s u = fio_url_parse(url, strlen(url));
+    s.tls = fio_tls_from_url(s.tls, u);
+    if (s.tls) {
+      s.tls = fio_tls_dup(s.tls);
+      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
+      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+      if (!s.tls_io_func)
+        s.tls_io_func = &tmp_fn;
+      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+        p->state[i].protocol.io_functions = *s.tls_io_func;
+      if (should_free_tls)
+        fio_tls_free(s.tls);
+    }
+  }
+  p->settings = s;
+  p->on_http_callback = is_client ? fio___http_on_http_client
+                        : (p->settings.public_folder.len)
+                            ? fio___http_on_http_with_public_folder
+                            : fio___http_on_http_direct;
+  p->settings.public_folder.buf = p->public_folder_buf;
+  p->queue = fio_srv_queue();
+
+  if (s.public_folder.len)
+    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
+  return p;
+}
 /* *****************************************************************************
 HTTP Connection Container
 ***************************************************************************** */
@@ -41283,15 +41667,20 @@ struct fio___http_connection_http_s {
 };
 struct fio___http_connection_ws_s {
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
+  void (*on_ready)(fio_http_s *h);
   fio_websocket_parser_s parser;
   char *msg;
   uint16_t code;
 };
 struct fio___http_connection_sse_s {
-  void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
+  void (*on_message)(fio_http_s *h,
+                     fio_buf_info_s id,
+                     fio_buf_info_s event,
+                     fio_buf_info_s data);
   void (*on_ready)(fio_http_s *h);
-  void (*on_shutdown)(fio_http_s *h);
-  void (*on_close)(fio_http_s *h);
+  fio_buf_info_s id;
+  fio_buf_info_s event;
+  char *data;
 };
 
 /** Connection objects for managing HTTP / WebSocket connection state. */
@@ -41514,17 +41903,56 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   (void)ignr;
 }
 
+FIO_SFUNC void fio___http_perform_user_callback_client(void *cb_, void *h_) {
+  fio_http_s *h = (fio_http_s *)h_;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  fio___http_perform_user_callback(cb_, h_);
+  fio_undup(c->io);
+}
+
 FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (fio___http_on_http_test4upgrade(h, c))
-    return;
+  size_t pr = FIO___HTTP_PROTOCOL_WS;
   union {
     void (*fn)(fio_http_s *);
     void *ptr;
   } cb = {.fn = c->state.http.on_http};
-  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
+
+  /* TODO! review WS and SSE responses. */
+  if (fio_http_websockets_accepted(h))
+    goto websocket_accepted;
+  if (fio_http_sse_accepted(h))
+    goto sse_accepted;
+  fio_queue_push(c->queue,
+                 fio___http_perform_user_callback_client,
+                 cb.ptr,
+                 (void *)h);
+  return;
   (void)ignr;
+
+sse_accepted:
+  pr = FIO___HTTP_PROTOCOL_SSE;
+
+websocket_accepted:
+  c->h = h; /* was set to NULL in `on_http_complete` */
+  fio_http_controller_set(
+      c->h,
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
+            ->state[pr]
+            .controller));
+  fio_protocol_set(
+      c->io,
+      &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
+            ->state[pr]
+            .protocol));
+  fio_undup(c->io);
+  c->suspend = 0;
+  fio_srv_unsuspend(c->io);
+  FIO_LOG_DDEBUG2("(%d) Client %s upgrade complete for fd %d",
+                  fio_srv_pid(),
+                  (fio_http_is_websocket(h) ? "WebSocket" : "SSE"),
+                  fio_fd_get(c->io));
 }
 
 /* *****************************************************************************
@@ -41568,44 +41996,7 @@ void fio_http_listen___(void); /* IDE marker */
 SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   http_settings_validate(&s, 0);
   fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
-  int should_free_tls = !s.tls;
-  FIO_ASSERT_ALLOC(p);
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
-    p->state[i].protocol =
-        fio___http_protocol_get((fio___http_protocol_selector_e)i, 0);
-    p->state[i].controller =
-        fio___http_controller_get((fio___http_protocol_selector_e)i, 0);
-  }
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
-    p->state[i].protocol.timeout = s.ws_timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout = s.timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
-  if (url) {
-    fio_url_s u = fio_url_parse(url, strlen(url));
-    s.tls = fio_tls_from_url(s.tls, u);
-    if (s.tls) {
-      s.tls = fio_tls_dup(s.tls);
-      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
-      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
-      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
-      if (!s.tls_io_func)
-        s.tls_io_func = &tmp_fn;
-      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
-        p->state[i].protocol.io_functions = *s.tls_io_func;
-      if (should_free_tls)
-        fio_tls_free(s.tls);
-    }
-  }
-  p->settings = s;
-  p->on_http_callback = (p->settings.public_folder.len)
-                            ? fio___http_on_http_with_public_folder
-                            : fio___http_on_http_direct;
-  p->settings.public_folder.buf = p->public_folder_buf;
-  p->queue = fio_srv_queue();
-
-  if (s.public_folder.len)
-    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
+  fio___http_protocol_init(p, url, s, 0);
   void *listener =
       fio_srv_listen(.url = url,
                      .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
@@ -41659,44 +42050,10 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
     fio_http_sse_set_request(h);
 
   /* TODO: test for and attempt to re-use connection */
-  if (fio_http_cdata(h)) {
-  }
+  // if (fio_http_cdata(h)) { }
 
   fio___http_protocol_s *p = fio___http_protocol_new(u.host.len);
-  int should_free_tls = !s.tls;
-  FIO_ASSERT_ALLOC(p);
-  FIO_MEMCPY(p->public_folder_buf, url, (u.host.buf + u.host.len) - url);
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
-    p->state[i].protocol =
-        fio___http_protocol_get((fio___http_protocol_selector_e)i, 1);
-    p->state[i].controller =
-        fio___http_controller_get((fio___http_protocol_selector_e)i, 1);
-  }
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
-    p->state[i].protocol.timeout = s.ws_timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout = s.timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout = s.timeout * 1000;
-  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout = s.timeout * 1000;
-
-  s.tls = fio_tls_from_url(s.tls, u);
-  if (s.tls) {
-    s.tls = fio_tls_dup(s.tls);
-    /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
-    // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
-    fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
-    if (!s.tls_io_func)
-      s.tls_io_func = &tmp_fn;
-    for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
-      p->state[i].protocol.io_functions = *s.tls_io_func;
-    if (should_free_tls)
-      fio_tls_free(s.tls);
-  }
-  p->settings = s;
-  p->settings.public_folder.buf = p->public_folder_buf;
-  p->settings.public_folder.len = 0;
-  p->settings.public_folder.buf[0] = 0;
-  p->queue = p->settings.queue ? p->settings.queue->q : fio_srv_queue();
-  p->on_http_callback = fio___http_on_http_client;
+  fio___http_protocol_init(p, url, s, 1);
   fio___http_connection_s *c =
       fio___http_connection_new(p->settings.max_line_len);
   FIO_ASSERT_ALLOC(c);
@@ -41715,10 +42072,14 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
           },
       .capa = p->settings.max_line_len,
       .log = p->settings.log,
+      .is_client = 1,
   };
+  fio_http_controller_set(h, &p->state[FIO___HTTP_PROTOCOL_HTTP1].controller);
+  fio_http_udata_set(h, c->udata);
+  fio_http_cdata_set(h, fio___http_connection_dup(c));
   return fio_srv_connect(url,
                          .protocol =
-                             &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                             &p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol,
                          .on_failed = NULL,
                          .udata = c,
                          .tls = s.tls,
@@ -41737,6 +42098,7 @@ static void fio_http1_on_complete(void *udata) {
   fio_http_s *h = c->h;
   c->h = NULL;
   c->suspend = 1;
+  // fio_srv_defer(c->state.http.on_http_callback, h, NULL);
   fio_queue_push(fio_srv_queue(), c->state.http.on_http_callback, h);
 }
 
@@ -41781,9 +42143,7 @@ static int fio_http1_on_status(size_t istatus,
                                fio_buf_info_s status,
                                void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  if (c->h) /* TODO! is this the way it goes, or do we have a request obj? */
-    return -1;
-  fio_http1_attach_handle(c);
+  fio_http_clear_response(c->h, istatus != 301 && istatus != 302);
   fio_http_status_set(c->h, istatus);
   return 0;
   (void)status;
@@ -41807,6 +42167,9 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
 /** called when a the HTTP/1.x version is parsed. */
 static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  FIO_ASSERT_DEBUG(c->h, "on_version called without a pre-existing handle!");
+  if (!c->h)
+    return -1;
   fio_http_version_set(c->h, FIO_BUF2STR_INFO(version));
   return 0;
 }
@@ -41867,8 +42230,8 @@ static int fio_http1_on_expect(void *udata) {
   if (fio_http_status(h))
     goto response_sent;
   c->h = h;
-  fio_undup(c->io);
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
+  fio_undup(c->io);
   return 0; /* TODO?: improve support for `expect` headers? */
 payload_too_big:
   fio_http_send_error_response(h, 413); /* fall through */
@@ -41883,6 +42246,9 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   if (!c->h)
     return -1; /* close connection if a large payload is unstoppable */
+  if (c->is_client &&
+      (fio_http_status(c->h) == 301 || fio_http_status(c->h) == 302))
+    return 0; /* don't overwrite client payload on redirect */
   if (chunk.len + fio_http_body_length(c->h) > c->settings->max_body_size)
     goto too_big;
   fio_http_body_write(c->h, chunk.buf, chunk.len);
@@ -42010,11 +42376,15 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
   return 0;
 
 http1_error:
+  FIO_LOG_DDEBUG2("HTTP/1.1 parser error! disconnecting client at %d",
+                  fio_fd_get(io));
   if (c->h) {
     fio_http_s *h = c->h;
     c->h = NULL;
-    fio_dup(c->io);
-    fio_http_send_error_response(h, 400);
+    if (!c->is_client) {
+      fio_dup(c->io);
+      fio_http_send_error_response(h, 400);
+    }
     fio_http_free(h);
   }
   fio_close(io);
@@ -42045,10 +42415,24 @@ FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
 }
 
 /* *****************************************************************************
-HTTP/1 Controller
+HTTP/1.1 Client Protocol
 ***************************************************************************** */
-FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
-  return fio_fd_get(fio_http_io(h));
+
+/** Iterates through all cookies. A non-zero return will stop iteration. */
+FIO_SFUNC int fio_http1___write_client_cookie_callback(fio_http_s *h,
+                                                       fio_str_info_s name,
+                                                       fio_str_info_s value,
+                                                       void *udata) {
+  fio_str_info_s *buf = (fio_str_info_s *)udata;
+  fio_string_write2(buf,
+                    FIO_STRING_REALLOC,
+                    FIO_STRING_WRITE_STR2("cookie:", 7),
+                    FIO_STRING_WRITE_STR_INFO(name),
+                    FIO_STRING_WRITE_STR2("=", 1),
+                    FIO_STRING_WRITE_STR_INFO(value),
+                    FIO_STRING_WRITE_STR2("\r\n", 2));
+  return 0;
+  (void)h;
 }
 
 /** called by the HTTP handle for each header. */
@@ -42065,6 +42449,88 @@ FIO_SFUNC int fio_http1___write_header_callback(fio_http_s *h,
                            FIO_STRING_WRITE_STR2(":", 1),
                            FIO_STRING_WRITE_STR2(value.buf, value.len),
                            FIO_STRING_WRITE_STR2("\r\n", 2));
+}
+
+FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (!c->io || !fio_srv_is_open(c->io))
+    return;
+  fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
+  { /* set Content-Length (client is never streaming) */
+    char ibuf[32];
+    fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
+    fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+    v.len = fio_digits10u(fio_http_body_length(h));
+    fio_ltoa10u(v.buf, fio_http_body_length(h), v.len);
+    if (!fio_http_body_length(h))
+      v.len = 0;
+    fio_http_request_header_set(h, k, v);
+  }
+  { /* write status string */
+    fio_str_info_s method = fio_http_method(h);
+    fio_str_info_s path = fio_http_path(h);
+    fio_str_info_s version = fio_http_version(h);
+    if (!path.len)
+      path = FIO_STR_INFO1((char *)"/");
+    if ((version.len - 1) > 15)
+      version = FIO_STR_INFO1((char *)"HTTP/1.1");
+    fio_string_write2(&buf,
+                      FIO_STRING_REALLOC,
+                      FIO_STRING_WRITE_STR_INFO(method),
+                      FIO_STRING_WRITE_STR2(" ", 1),
+                      FIO_STRING_WRITE_STR_INFO(path),
+                      FIO_STRING_WRITE_STR2(" ", 1),
+                      FIO_STRING_WRITE_STR_INFO(version),
+                      FIO_STRING_WRITE_STR2("\r\n", 2));
+  }
+  /* write headers */
+  fio_http_request_header_each(h, fio_http1___write_header_callback, &buf);
+  /* write cookies */
+  fio_http_cookie_each(h, fio_http1___write_client_cookie_callback, &buf);
+  fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
+  /* send data (moves memory ownership) */
+  fio_write2(c->io,
+             .buf = buf.buf,
+             .len = buf.len,
+             .dealloc = FIO_STRING_FREE,
+             .copy = 0);
+  /* make sure we listen to incoming data */
+  c->suspend = 0;
+  fio_srv_unsuspend(c->io);
+  /* Write Body */
+  if (!fio_http_body_length(h))
+    return;
+  fio_http_body_seek(h, 0);
+  if (fio_http_body_fd(h) == -1) {
+    buf = fio_http_body_read(h, (size_t)-1);
+    fio_write2(c->io,
+               .buf = (char *)fio_http_dup(h),
+               .len = buf.len,
+               .offset = (size_t)((char *)h - buf.buf),
+               .dealloc = (void (*)(void *))fio_http_free);
+  } else {
+    fio_write2(c->io,
+               .fd = fio_http_body_fd(h),
+               .len = fio_http_body_length(h),
+               .copy = 1);
+  }
+}
+
+FIO_SFUNC void fio___http1_on_attach_client(fio_s *io) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  // c->io = fio_dup(io);
+  c->io = io;
+  fio___http1_send_request(c->h); /* TODO: Write Request! */
+  if (c->len)
+    fio___http1_process_data(io, c);
+  return;
+}
+
+/* *****************************************************************************
+HTTP/1 Controller
+***************************************************************************** */
+FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
+  return fio_fd_get(fio_http_io(h));
 }
 
 /** Informs the controller that request / response headers must be sent. */
@@ -42124,6 +42590,7 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
              .dealloc = args.dealloc,
              .copy = (uint8_t)args.copy);
   return;
+
 stream_chunk:
   if (args.len) { /* print chunk header */
     char buf[24];
@@ -42174,7 +42641,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   return;
 
 upgraded:
-  if (c->h || !fio_srv_is_open(c->io))
+  if ((c->h && !c->is_client) || !fio_srv_is_open(c->io))
     goto something_is_wrong;
   c->h = (fio_http_s *)upgraded;
   {
@@ -42218,9 +42685,8 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
     goto upgraded;
-  /* once the function returns, `h` may be freed (possible finish on free). */
+  /* once the function returns, `h` may be freed (auto-finish on free). */
   c->state.http.on_finish(h);
-
   fio_srv_defer(fio___http_controller_http1_on_finish_task, (void *)(c), NULL);
   return;
 
@@ -42278,10 +42744,9 @@ FIO_SFUNC int fio___websocket_process_data(fio_s *io,
 
 FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   fio___http_connection_s *c = (fio___http_connection_s *)c_;
-  fio_bstr_free(c->state.ws.msg);
-  c->state.ws.msg = NULL;
   c->suspend = 0;
-  fio___websocket_process_data(c->io, c);
+  if (c->len)
+    fio___websocket_process_data(c->io, c);
   if (!c->suspend)
     fio_srv_unsuspend(c->io);
   fio_undup(c->io);
@@ -42293,6 +42758,8 @@ FIO_SFUNC void fio___websocket_on_message_task(void *c_, void *is_text) {
   c->state.ws.on_message(c->h,
                          fio_bstr_buf(c->state.ws.msg),
                          (uint8_t)(uintptr_t)is_text);
+  fio_bstr_free(c->state.ws.msg);
+  c->state.ws.msg = NULL;
   fio_srv_defer(fio___websocket_on_message_finalize, c, NULL);
 }
 
@@ -42302,12 +42769,16 @@ FIO_SFUNC void fio_websocket_on_message(void *udata,
                                         unsigned char is_text) {
   /* TODO: suspend IO and queue in async queue? */
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  c->state.ws.on_message(c->h,
-                         fio_bstr_buf(c->state.ws.msg),
-                         (uint8_t)(uintptr_t)is_text);
-  fio_bstr_free(c->state.ws.msg);
-  c->state.ws.msg = NULL;
-  return; /* TODO: FIXME! */
+  // c->state.ws.on_message(c->h,
+  //                        fio_bstr_buf(c->state.ws.msg),
+  //                        (uint8_t)(uintptr_t)is_text);
+  // fio_bstr_free(c->state.ws.msg);
+  // c->state.ws.msg = NULL;
+  // c->suspend = 0;
+  // fio___websocket_process_data(c->io, c);
+  // if (!c->suspend)
+  //   fio_srv_unsuspend(c->io);
+  // return; /* TODO: FIXME! */
   fio_dup(c->io);
   fio_srv_suspend(c->io);
   c->suspend = 1;
@@ -42347,15 +42818,23 @@ FIO_SFUNC fio_buf_info_s fio_websocket_decompress(void *udata,
 /** Called when a `ping` message was received. */
 FIO_SFUNC void fio_websocket_on_protocol_ping(void *udata, fio_buf_info_s msg) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  if (msg.len < 252) {
+  if (msg.len < 248) {
     char buf[256];
     size_t len =
-        fio_websocket_server_wrap(buf, msg.buf, msg.len, 0x0A, 1, 1, 0);
+        (c->is_client
+             ? fio_websocket_client_wrap
+             : fio_websocket_server_wrap)(buf, msg.buf, msg.len, 0x0A, 1, 1, 0);
     fio_write2(c->io, .buf = buf, .len = len, .copy = 1);
   } else {
     char *pong = fio_bstr_reserve(NULL, msg.len + 11);
-    size_t len =
-        fio_websocket_server_wrap(pong, msg.buf, msg.len, 0x0A, 1, 1, 0);
+    size_t len = (c->is_client ? fio_websocket_client_wrap
+                               : fio_websocket_server_wrap)(pong,
+                                                            msg.buf,
+                                                            msg.len,
+                                                            0x0A,
+                                                            1,
+                                                            1,
+                                                            0);
     pong = fio_bstr_len_set(pong, len);
     fio_write2(c->io,
                .buf = pong,
@@ -42431,7 +42910,7 @@ ws_error:
   return -1;
 }
 
-// /** Called when a data is available. */
+/** Called when a data is available. */
 FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   size_t r;
@@ -42444,6 +42923,14 @@ FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
     if (fio___websocket_process_data(io, c))
       return;
   }
+}
+
+FIO_SFUNC void fio___websocket_on_ready(fio_s *io) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio_http_s *h = c->h;
+  if (!h)
+    return;
+  c->state.ws.on_ready(h);
 }
 
 FIO_SFUNC void fio___websocket_on_timeout(fio_s *io) {
@@ -42466,6 +42953,8 @@ FIO_SFUNC void fio___websocket_on_attach(fio_s *io) {
   fio_http_s *h = c->h;
   c->state.ws = (struct fio___http_connection_ws_s){
       .on_message = c->settings->on_message,
+      .on_ready = c->settings->on_ready,
+      .parser = {.must_mask = !c->is_client},
   };
   c->settings->on_open(h);
   fio___websocket_process_data(io, c);
@@ -42563,18 +43052,18 @@ SFUNC int fio_http_sse_write FIO_NOOP(fio_http_s *h,
                         FIO_STRING_WRITE_STR2(args.event.buf, args.event.len),
                         FIO_STRING_WRITE_STR2("\r\n", 2));
   { /* separate lines (add "data:" at beginning of each new line) */
-    char *pos = (char *)FIO_MEMCHR(args.data.buf, '\n', args.data.len);
-    while (pos) {
-      size_t len = pos - args.data.buf;
-      args.data.buf += len + 1;
-      args.data.len -= len + 1;
-      --len;
-      len -= (pos > args.data.buf && pos[-1] == '\r');
-      payload =
-          fio_bstr_write2(payload,
-                          FIO_STRING_WRITE_STR2("data:", 5),
-                          FIO_STRING_WRITE_STR2(args.data.buf, args.data.len),
-                          FIO_STRING_WRITE_STR2("\r\n", 2));
+    char *pos;
+    while (args.data.len &&
+           (pos = (char *)FIO_MEMCHR(args.data.buf, '\n', args.data.len))) {
+      const size_t len = (pos + 1) - args.data.buf;
+      pos -= (pos[-1] == '\r');
+      payload = fio_bstr_write2(
+          payload,
+          FIO_STRING_WRITE_STR2("data:", 5),
+          FIO_STRING_WRITE_STR2(args.data.buf, (size_t)(pos - args.data.buf)),
+          FIO_STRING_WRITE_STR2("\r\n", 2));
+      args.data.buf += len;
+      args.data.len -= len;
     }
   }
   /* write reminder */
@@ -42615,7 +43104,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
                                    const void *buf,
                                    size_t len,
                                    uint8_t is_text) {
-  if (!h || !(h->state & FIO_HTTP_STATE_WEBSOCKET))
+  if (!h || !fio_http_is_websocket(h))
     return -1;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (!c)
@@ -42623,7 +43112,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
   is_text = (!!is_text);
   is_text |= (!is_text) << 1;
   uint8_t rsv = 0;
-  if (len < 512) {
+  if (len < 512) { /* fast-path: no allocation, no compression */
     char tmp[520];
     size_t wlen =
         (c->is_client
@@ -42633,7 +43122,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
     return 0;
   }
 #if HAVE_ZLIB /* TODO: compress? */
-  // if(len > 512 && c->state.ws.deflate) ;
+  // if(c->state.ws.deflate) ;
 #endif
   char *payload =
       fio_bstr_reserve(NULL,
@@ -42667,7 +43156,7 @@ FIO_SFUNC void fio___http_controller_ws_on_finish(fio_http_s *h) {
   fio_srv_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
 }
 
-/* called by the HTTP handle for each body chunk (or to finish a response. */
+/* Called by the HTTP handle for each body chunk (or to finish a response). */
 FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
                                                    fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
@@ -42708,15 +43197,103 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
 EventSource / SSE Protocol (TODO!)
 ***************************************************************************** */
 
+FIO_SFUNC void fio___sse_consume_data(fio___http_connection_s *c) {
+  /* TODO: Fix Me! parse and process SSE data */
+  FIO_LOG_DEBUG2("SSE data processing:\n%.*s", (int)c->len, c->buf);
+  struct fio___http_connection_sse_s *sse = &c->state.sse;
+  const char *next_line = c->buf;
+  const char *stop = c->buf + c->len;
+  for (; next_line < stop;) {
+    char *line = (char *)next_line;
+    const char *eol =
+        (const char *)FIO_MEMCHR(next_line, '\n', stop - next_line);
+    if (!eol)
+      break;
+    next_line = eol + 1;
+    eol -= (eol > c->buf && eol[-1] == '\n');
+    eol -= (eol > c->buf && eol[-1] == '\r');
+    if (eol == line) { /* empty line, end of input? */
+      if (sse->data || sse->event.buf || sse->id.buf) {
+        sse->on_message(c->h, sse->id, sse->event, fio_bstr_buf(sse->data));
+        fio_bstr_free(sse->data);
+        sse->data = NULL;
+        sse->event = sse->id = FIO_BUF_INFO0;
+      }
+      continue;
+    }
+    if (line[0] == ':') /* comment */
+      continue;
+    const size_t line_len = (size_t)(eol - line);
+    if (line_len > 2 && line[2] == ':') { /* id */
+      const char *start = line + 3;
+      start += (start[0] == ' ' || start[0] == '\t');
+      if ((line[0] |= 32) == 'i' && (line[1] |= 32) == 'd')
+        sse->id = FIO_BUF_INFO2((char *)start, (size_t)(eol - start));
+
+    } else if (line_len > 4 && line[4] == ':') { /* data */
+      const char *start = line + 5;
+      start += (start[0] == ' ' || start[0] == '\t');
+      if ((fio_buf2u32u(line) | 0x20202020U) == fio_buf2u32u("data"))
+        sse->data = fio_bstr_write2(
+            sse->data,
+            FIO_STRING_WRITE_STR2("\r\n", ((size_t) !!sse->data << 1)),
+            FIO_STRING_WRITE_STR2(start, (size_t)(eol - start)));
+
+    } else if (line_len > 5 && line[5] == ':') { /* event */
+      const char *start = line + 3;
+      start += (start[0] == ' ' || start[0] == '\t');
+      if ((line[0] |= 32) == 'e' &&
+          (fio_buf2u32u(line + 1) | 0x20202020U) == fio_buf2u32u("vent"))
+        sse->event = FIO_BUF_INFO2((char *)start, (size_t)(eol - start));
+
+    } else if (!FIO_MEMCHR(line, ':', line_len))
+      goto error;
+  }
+  FIO_ASSERT(next_line <= stop, "overflow on next line read");
+  if (next_line > stop)
+    next_line = stop;
+  c->len -= next_line - c->buf;
+  if (c->len)
+    FIO_MEMMOVE(c->buf, next_line, c->len);
+  return;
+
+error:
+  FIO_LOG_ERROR("SSE incoming data malformed!");
+  FIO_LOG_DEBUG2("data dump:\n%.*s", (int)c->len, c->buf);
+  fio_close(c->io);
+}
+
+/** Called when a data is available. */
+FIO_SFUNC void fio___sse_on_data(fio_s *io) {
+  FIO_LOG_DEBUG2("Reading SSE data from socket");
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  size_t r;
+  for (;;) {
+    if (c->len + 2 > c->capa)
+      goto error;
+    if (!(r = fio_read(io, c->buf + c->len, c->capa - c->len)))
+      return;
+    c->len += r;
+    fio___sse_consume_data(c);
+  }
+error:
+  FIO_LOG_ERROR("Incoming SSE data too long (HTTP line limit set at %zu)!",
+                c->capa);
+  fio_close(io);
+}
+
 /** Called when an IO is attached to a protocol. */
 static void fio___sse_on_attach(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   fio_http_s *h = c->h;
   c->state.sse = (struct fio___http_connection_sse_s){
-      .on_message = c->settings->on_message,
+      .on_message = c->settings->on_eventsource,
+      .on_ready = c->settings->on_ready,
   };
   c->settings->on_open(h);
-  // fio___websocket_process_data(io, c); /* TODO: SSE client mode */
+  FIO_LOG_DEBUG2("SSE attached buffer length (unread): %zu", c->len);
+  if (c->len && c->is_client)
+    fio___sse_consume_data(c);
 }
 
 FIO_SFUNC void fio___sse_on_timeout(fio_s *io) {
@@ -42740,7 +43317,7 @@ FIO_SFUNC void fio___sse_on_close(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->settings->on_close(c->h);
   c->io = NULL;
-  // fio_bstr_free(c->state.sse.msg);
+  fio_bstr_free(c->state.sse.data);
   fio_http_free(c->h);
   fio___http_connection_free(c);
 }
@@ -42787,6 +43364,20 @@ FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
 }
 
 /** Called when an HTTP handle is freed. */
+FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
+  fio_queue_push(fio_srv_queue(),
+                 fio___http_controller_on_destroyed_task,
+                 fio_http_cdata(h));
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  c->state.http.on_finish(h);
+  c->h = NULL;
+  fio_close(c->io);
+  fio_queue_push(fio_srv_queue(),
+                 fio___http_controller_on_destroyed_task,
+                 fio_http_cdata(h));
+}
+
+/** Called when an HTTP handle is freed. */
 FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
   fio_queue_push(fio_srv_queue(),
                  fio___http_controller_on_destroyed_task,
@@ -42809,9 +43400,15 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
                          .on_close = fio___http_on_close};
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
-    r = (fio_protocol_s){.on_attach = fio___http1_on_attach,
-                         .on_data = fio___http1_on_data,
-                         .on_close = fio___http_on_close};
+    if (is_client) {
+      r = (fio_protocol_s){.on_attach = fio___http1_on_attach_client,
+                           .on_data = fio___http1_on_data,
+                           .on_close = fio___http_on_close};
+    } else {
+      r = (fio_protocol_s){.on_attach = fio___http1_on_attach,
+                           .on_data = fio___http1_on_data,
+                           .on_close = fio___http_on_close};
+    }
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_protocol_s){.on_close = fio___http_on_close};
@@ -42820,6 +43417,7 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
     r = (fio_protocol_s){
         .on_attach = fio___websocket_on_attach,
         .on_data = fio___websocket_on_data,
+        .on_ready = fio___websocket_on_ready,
         .on_close = fio___websocket_on_close,
         .on_shutdown = fio___websocket_on_shutdown,
         .on_timeout = fio___websocket_on_timeout,
@@ -42829,6 +43427,8 @@ fio___http_protocol_get(fio___http_protocol_selector_e s, int is_client) {
   case FIO___HTTP_PROTOCOL_SSE:
     r = (fio_protocol_s){
         .on_attach = fio___sse_on_attach,
+        .on_data = (is_client ? fio___sse_on_data : NULL),
+        .on_ready = fio___websocket_on_ready,
         .on_close = fio___sse_on_close,
         .on_shutdown = fio___sse_on_shutdown,
         .on_timeout = fio___sse_on_timeout,
@@ -42862,14 +43462,23 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     };
     return r;
   case FIO___HTTP_PROTOCOL_HTTP1:
-    r = (fio_http_controller_s){
-        .on_destroyed = fio__http_controller_on_destroyed,
-        .send_headers = fio___http_controller_http1_send_headers,
-        .write_body = fio___http_controller_http1_write_body,
-        .on_finish = fio___http_controller_http1_on_finish,
-        .close = fio___http_default_close,
-        .get_fd = fio___http_controller_get_fd,
-    };
+    if (is_client) {
+      r = (fio_http_controller_s){
+          .on_destroyed = fio__http_controller_on_destroyed_client,
+          // .on_finish = fio___http_controller_http1_on_finish_client,
+          .close = fio___http_default_close,
+          .get_fd = fio___http_controller_get_fd,
+      };
+    } else {
+      r = (fio_http_controller_s){
+          .on_destroyed = fio__http_controller_on_destroyed,
+          .send_headers = fio___http_controller_http1_send_headers,
+          .write_body = fio___http_controller_http1_write_body,
+          .on_finish = fio___http_controller_http1_on_finish,
+          .close = fio___http_default_close,
+          .get_fd = fio___http_controller_get_fd,
+      };
+    }
     return r;
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
@@ -45767,7 +46376,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
     }
     (void)unused;
     int64_t end = FIO_NAME_TEST(stl, atol_time)();
-    printf("%lld us\n", end - start);
+    printf("%lld us\n", (long long int)(end - start));
   }
   if (rounding_errors_detected)
     FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
@@ -49494,7 +50103,7 @@ Playhouse hashing (next risky version)
 ***************************************************************************** */
 
 typedef union {
-  uint64_t v[4] FIO_ALIGN(32);
+  uint64_t v[4] FIO_ALIGN(16);
 #ifdef __SIZEOF_INT128__
   __uint128_t u128[2];
 #endif

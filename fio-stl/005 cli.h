@@ -242,7 +242,7 @@ FIO_IFUNC fio_buf_info_s fio_cli_str_buf(fio_cli_str_s *s) {
 }
 
 /** CLI String copy */
-FIO_SFUNC fio_cli_str_s fio_cli_str_init(fio_buf_info_s s) {
+FIO_SFUNC fio_cli_str_s fio_cli_str_new(fio_buf_info_s s) {
   fio_cli_str_s r = {0};
   if (s.len < sizeof(r) - 1) {
     r.em = s.len;
@@ -328,7 +328,7 @@ FIO_IFUNC void fio___cli_ary_set(fio___cli_ary_s *a,
   if (index >= a->w)
     return;
   fio_cli_str_destroy(a->ary + index);
-  a->ary[index] = fio_cli_str_init(str);
+  a->ary[index] = fio_cli_str_new(str);
 }
 
 /* *****************************************************************************
@@ -385,7 +385,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
   fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};
   fio___cli_aliases_s *a = fio___cli_amap_get(&fio___cli_data.aliases, o);
   if (!a) {
-    o.name = fio_cli_str_init(key);
+    o.name = fio_cli_str_new(key);
     o.index = fio___cli_ary_new_index(&fio___cli_data.indexed);
     o.t = t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);
@@ -399,7 +399,7 @@ FIO_SFUNC void fio___cli_data_alias(fio_buf_info_s key,
                     fio_cli_str_buf(&o.name).buf);
     old->index = a->index;
   } else {
-    o.name = fio_cli_str_init(alias);
+    o.name = fio_cli_str_new(alias);
     o.index = a->index;
     o.t = a->t;
     fio___cli_amap_set(&fio___cli_data.aliases, o, 1);

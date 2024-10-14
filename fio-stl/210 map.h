@@ -838,7 +838,7 @@ sparse_map:
       tmp = FIO_HAS_FULL_BYTE64(tmp);
       inv = FIO_HAS_FULL_BYTE64(inv);
       tmp |= inv;
-      FIO_HAS_BYTE2BITMAP(tmp);
+      FIO_HAS_BYTE2BITMAP(tmp, 7);
       bitmap |= (tmp << j);
     }
     bitmap = ~bitmap; /* where 1 was a free slot, now it's an occupied one */

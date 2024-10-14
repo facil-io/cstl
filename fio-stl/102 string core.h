@@ -1302,7 +1302,7 @@ SFUNC size_t fio_string_utf8_len(fio_str_info_s str) {
   do {
     tmp = fio_utf8_char_len(str.buf);
     str.buf += tmp;
-    utf8len += !!tmp;
+    ++utf8len;
   } while (tmp && str.buf < end);
   utf8len &= 0U - (str.buf == end);
   return utf8len;
@@ -1393,8 +1393,8 @@ SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
   size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
-  uint64_t ua[4] FIO_ALIGN(32) = {0};
-  uint64_t ub[4] FIO_ALIGN(32) = {0};
+  uint64_t ua[4] FIO_ALIGN(16) = {0};
+  uint64_t ub[4] FIO_ALIGN(16) = {0};
   uint64_t flag = 0;
   if (len < 32)
     goto mini_cmp;
@@ -2341,16 +2341,16 @@ SFUNC int fio_string_write_html_escape(fio_str_info_s *dest,
     a = (0..255).to_a.map {|i| "&#x#{i.to_s(16)};" }
     must_escape = ['&', '<', '>', '"', "'", '`', '!', '@', '$', '%',
                    '(', ')', '=', '+', '{', '}', '[', ']'] # space?
+    ["\b","\f","\n","\r","\t",'\\'].each {|i| a[i.ord] = i }
     (32..123).each {|i| a[i] = i.chr unless must_escape.include?(i.chr) }
-    a['<'.ord] = "&lt;"
-    a['>'.ord] = "&gt;"
-    a['"'.ord] = "&qout;"
-    a['&'.ord] = "&amp;"
+    {'<': "&lt;", '>': "&gt;", '"': "&qout;", '&': "&amp;"}.each {|k,v|
+       a[k.to_s.ord] = v
+    }
     b = a.map {|s| s.length }
-    puts "static uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
+    puts "static const uint8_t html_escape_len[] = {", b.to_s.slice(1..-2), "};"
   */
-  static uint8_t html_escape_len[] = {
-      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6,
+  static const uint8_t html_escape_len[] = {
+      5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 1, 5, 1, 1, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6,
       6, 6, 6, 6, 6, 6, 6, 6, 1, 6, 6, 1, 6, 6, 5, 6, 6, 6, 1, 6, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 6, 4, 1, 6, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 6, 1, 1,

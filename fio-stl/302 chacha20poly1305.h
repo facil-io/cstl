@@ -112,7 +112,7 @@ typedef struct {
   uint64_t s[2];
   /* Accumulator should not exceed 131 bits at the end of every cycle. */
   uint64_t a[3];
-} FIO_ALIGN(64) fio___poly_s;
+} FIO_ALIGN(16) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   static const uint64_t defkey[4] = {0};

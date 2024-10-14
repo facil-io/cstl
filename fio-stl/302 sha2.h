@@ -130,7 +130,7 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
     v[i] = h->u32[i];
   }
   /* read data as an array of 16 big endian 32 bit integers. */
-  uint32_t w[16] FIO_ALIGN(64);
+  uint32_t w[16] FIO_ALIGN(16);
   fio_memcpy64(w, block);
   for (size_t i = 0; i < 16; ++i) {
     w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
@@ -252,12 +252,12 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
 
   uint64_t t1, t2; /* used often... */
   /* copy original state */
-  uint64_t v[8] FIO_ALIGN(64);
+  uint64_t v[8] FIO_ALIGN(16);
   for (size_t i = 0; i < 8; ++i)
     v[i] = h->u64[i];
 
   /* read data as an array of 16 big endian 64 bit integers. */
-  uint64_t w[16] FIO_ALIGN(64);
+  uint64_t w[16] FIO_ALIGN(16);
   fio_memcpy128(w, block);
   for (size_t i = 0; i < 16; ++i)
     w[i] = fio_lton64(w[i]); /* no-op on big endien systems */
@@ -323,7 +323,9 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
 }
 
 /** Feed data into the hash */
-SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len) {
+SFUNC void fio_sha512_consume(fio_sha512_s *restrict h,
+                              const void *restrict data,
+                              uint64_t len) {
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;

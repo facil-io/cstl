@@ -152,12 +152,11 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   vst1q_u32(old, v0);
   old[4] = e0;
 
-#else /* portable implementation */
+#else /* !FIO___HAS_ARM_INTRIN portable implementation */
 
-  uint32_t v[8]; /* copy old state to new + reserve registers (8 not 6) */
-  for (size_t i = 0; i < 5; ++i) {
+  uint32_t v[8] = {0}; /* copy old state to new + reserve registers (8 not 6) */
+  for (size_t i = 0; i < 5; ++i)
     v[i] = old[i];
-  }
 
   for (size_t i = 0; i < 16; ++i) /* convert read buffer to Big Endian */
     w[i] = fio_ntol32(w[i]);
@@ -176,13 +175,18 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   FIO___SHA1_ROUND16(K, F, i);                                                 \
   FIO___SHA1_ROUND4((K), (F), i + 16);
 
-#define FIO___SHA1_ROTATE(K, F, i)                                             \
+#define FIO___SHA1_ROTATE_OLD(K, F, i)                                         \
   v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
   v[4] = v[3];                                                                 \
   v[3] = v[2];                                                                 \
   v[2] = fio_lrot32(v[1], 30);                                                 \
   v[1] = v[0];                                                                 \
   v[0] = v[5];
+
+#define FIO___SHA1_ROTATE(K, F, i)                                             \
+  v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
+  v[1] = fio_lrot32(v[1], 30);                                                 \
+  fio_u32x8_reshuffle(v, 5, 0, 1, 2, 3, 5, 6, 7);
 
 #define FIO___SHA1_CALC_WORD(i)                                                \
   fio_lrot32(                                                                  \
@@ -207,11 +211,11 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   FIO___SHA1_ROUND20(0x8F1BBCDC, ((v[1] & (v[2] | v[3])) | (v[2] & v[3])), 40);
   FIO___SHA1_ROUND20(0xCA62C1D6, (v[1] ^ v[2] ^ v[3]), 60);
   /* sum and store */
-  for (size_t i = 0; i < 5; ++i) {
+  for (size_t i = 0; i < 5; ++i)
     old[i] += v[i];
-  }
 
 #undef FIO___SHA1_ROTATE
+#undef FIO___SHA1_ROTATE_OLD
 #undef FIO___SHA1_CALC_WORD
 #undef FIO___SHA1_ROUND
 #undef FIO___SHA1_ROUND4
@@ -226,14 +230,14 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
  * require it's use (i.e., WebSockets), so it's here for your convinience.
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
-  fio_sha1_s s FIO_ALIGN(64) = {.v = {
+  fio_sha1_s s FIO_ALIGN(16) = {.v = {
                                     0x67452301,
                                     0xEFCDAB89,
                                     0x98BADCFE,
                                     0x10325476,
                                     0xC3D2E1F0,
                                 }};
-  uint32_t vec[16] FIO_ALIGN(64);
+  uint32_t vec[16] FIO_ALIGN(16);
 
   const uint8_t *buf = (const uint8_t *)data;
 

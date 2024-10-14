@@ -145,7 +145,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
     }
     (void)unused;
     int64_t end = FIO_NAME_TEST(stl, atol_time)();
-    printf("%lld us\n", end - start);
+    printf("%lld us\n", (long long int)(end - start));
   }
   if (rounding_errors_detected)
     FIO_LOG_WARNING("Single bit rounding errors detected when comparing "

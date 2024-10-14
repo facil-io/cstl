@@ -8707,6 +8707,22 @@ Returns non-zero if the IO is suspended (this might not be reliable information)
 
 **Note**: this function is thread safe (though `fio_srv_suspend` is **NOT**).
 
+#### `fio_srv_is_open`
+
+```c
+int fio_srv_is_open(fio_s *io);
+```
+
+Returns 1 if the IO handle is marked as open.
+
+#### `fio_srv_backlog`
+
+```c
+size_t fio_srv_backlog(fio_s *io);
+```
+
+Returns the approximate number of bytes in the outgoing buffer.
+
 #### `fio_dup`
 
 ```c
@@ -9862,6 +9878,21 @@ int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
 Allows all clients to connect to WebSockets / EventSource (SSE) connections (bypasses authentication), to be used with the `.on_authenticate_sse` and `.on_authenticate_websocket` settings options.
 
+#### `fio_http_connect`
+
+```c
+fio_s *fio_http_connect(const char *url,
+                              fio_http_s *h,
+                              fio_http_settings_s settings);
+/* Shadow the function for named arguments */
+#define fio_http_connect(url, h, ...)                                          \
+  fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+
+```
+
+Connects to HTTP / WebSockets / SSE connections on `url`.
+
+Accepts named arguments for the `fio_http_settings_s` settings.
 
 ### Creating an HTTP Handle
 
@@ -9958,6 +9989,15 @@ fio_s *fio_http_io(fio_http_s *);
 ```
 
 Returns the IO object associated with the HTTP object (request only).
+
+
+#### `fio_http_settings`
+
+```c
+fio_http_settings_s *fio_http_settings(fio_http_s *);
+```
+
+Returns the HTTP settings associated with the HTTP object, if any.
 
 #### `fio_http_from`
 

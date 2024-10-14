@@ -125,6 +125,7 @@ else
   LIB_EXT=so
 endif
 # optimization level. (-march=native fails with clang on some ARM compilers)
+# Consider: -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 # optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined -fsanitize=address
 OPTIMIZATION_DEBUG=-O0 -g -coverage -fno-omit-frame-pointer -fno-builtin
