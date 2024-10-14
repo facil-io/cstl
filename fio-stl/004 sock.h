@@ -265,11 +265,40 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_socktype = sock_type;
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
-  /* test for variations of localhost */
-  if ((address[0] | 32) == 'l' && FIO_STRLEN(address) == 9 &&
+  size_t port_len = FIO_STRLEN(port);
+  switch (port_len) { /* skip system service lookup for common web stuff */
+  case 2:
+    if ((port[0] | 32) == 'w' && (port[1] | 32) == 's')
+      port = "80";
+    break;
+  case 3:
+    if ((port[0] | 32) == 'w' && (port[1] | 32) == 's' && (port[2] | 32) == 's')
+      port = "443";
+    else if ((port[0] | 32) == 's' && (port[1] | 32) == 's' &&
+             (port[2] | 32) == 'e')
+      port = "80";
+    break;
+  case 4:
+    if ((port[0] | 32) == 'h' && (port[1] | 32) == 't' &&
+        (port[2] | 32) == 't' && (port[3] | 32) == 'p')
+      port = "80";
+    else if ((port[0] | 32) == 's' && (port[1] | 32) == 's' &&
+             (port[2] | 32) == 'e' && (port[3] | 32) == 's')
+      port = "443";
+  case 5:
+    if ((port[0] | 32) == 'h' && (port[1] | 32) == 't' &&
+        (port[2] | 32) == 't' && (port[3] | 32) == 'p' && (port[4] | 32) == 's')
+      port = "443";
+    break;
+  }
+
+#if 1 /* override system resolution for localhost ? */
+  size_t address_len = FIO_STRLEN(address);
+  if ((address[0] | 32) == 'l' && address_len == 9 &&
       (fio_buf2u64u(address + 1) | (uint64_t)0x2020202020202020ULL) ==
           fio_buf2u64u("ocalhost"))
     address = "127.0.0.1";
+#endif
   /* call for OS address resolution */
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {
     FIO_LOG_ERROR("(fio_sock_address_new(\"%s\", \"%s\")) error: %s",

@@ -123,6 +123,8 @@ typedef struct fio_http_settings_s {
    * fails).
    */
   uint8_t sse_timeout;
+  /** Timeout for client connections (only relevant in client mode). */
+  uint8_t connect_timeout;
   /** Logging flag - set to TRUE to log HTTP requests. */
   uint8_t log;
 } fio_http_settings_s;
@@ -811,26 +813,26 @@ Logs an HTTP (response) to STDOUT.
 
 ### HTTP WebSocket / SSE Helpers
 
-#### `fio_http_websockets_requested`
+#### `fio_http_websocket_requested`
 
 ```c
-int fio_http_websockets_requested(fio_http_s *);
+int fio_http_websocket_requested(fio_http_s *);
 ```
 
 Returns non-zero if request headers ask for a WebSockets Upgrade.
 
-#### `fio_http_upgrade_websockets`
+#### `fio_http_upgrade_websocket`
 
 ```c
-void fio_http_upgrade_websockets(fio_http_s *);
+void fio_http_upgrade_websocket(fio_http_s *);
 ```
 
 Sets response data to agree to a WebSockets Upgrade.
 
-#### `fio_http_websockets_set_request`
+#### `fio_http_websocket_set_request`
 
 ```c
-void fio_http_websockets_set_request(fio_http_s *);
+void fio_http_websocket_set_request(fio_http_s *);
 ```
 
 Sets request data to request a WebSockets Upgrade.

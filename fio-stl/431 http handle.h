@@ -516,16 +516,16 @@ WebSocket / SSE Helpers
 ***************************************************************************** */
 
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
-SFUNC int fio_http_websockets_requested(fio_http_s *);
+SFUNC int fio_http_websocket_requested(fio_http_s *);
 
 /** Returns non-zero if the response accepts a WebSocket upgrade request. */
-SFUNC int fio_http_websockets_accepted(fio_http_s *h);
+SFUNC int fio_http_websocket_accepted(fio_http_s *h);
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_upgrade_websockets(fio_http_s *);
+SFUNC void fio_http_upgrade_websocket(fio_http_s *);
 
 /** Sets request data to request a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_request(fio_http_s *);
+SFUNC void fio_http_websocket_set_request(fio_http_s *);
 
 /** Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.*/
 SFUNC int fio_http_sse_requested(fio_http_s *);
@@ -2251,7 +2251,7 @@ WebSocket / SSE Helpers
 ***************************************************************************** */
 
 /** Returns non-zero if request headers ask for a WebSockets Upgrade.*/
-SFUNC int fio_http_websockets_requested(fio_http_s *h) {
+SFUNC int fio_http_websocket_requested(fio_http_s *h) {
   fio_str_info_s val =
       fio_http_request_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
   /* test for "Connection: Upgrade" (TODO? allow for multi-value?) */
@@ -2271,11 +2271,31 @@ SFUNC int fio_http_websockets_requested(fio_http_s *h) {
                                 0);
   if (val.len != 24)
     return 0;
+  /* test for version value */
+  val = fio_http_request_header(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      0);
+  if (val.len != 2 || (val.buf[0] != '1' || val.buf[1] != '3'))
+    return -1; /* note the error value is still true, requested WebSocket... */
   return 1;
 }
 
 /** Sets response data to agree to a WebSockets Upgrade.*/
-SFUNC void fio_http_upgrade_websockets(fio_http_s *h) {
+SFUNC void fio_http_upgrade_websocket(fio_http_s *h) {
+  { /* validate WebSocket version */
+    fio_str_info_s val = fio_http_request_header(
+        h,
+        FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+        0);
+    if (val.len != 2 || (val.buf[0] != '1' || val.buf[1] != '3')) {
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+          FIO_STR_INFO2((char *)"13", 2));
+      fio_http_send_error_response(h, 400);
+    }
+  }
   h->status = 101;
   fio_http_response_header_set(h,
                                FIO_STR_INFO2((char *)"connection", 10),
@@ -2283,11 +2303,6 @@ SFUNC void fio_http_upgrade_websockets(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO2((char *)"upgrade", 7),
                                FIO_STR_INFO2((char *)"websocket", 9));
-  /* we ignore client version and force the RFC final version instead */
-  fio_http_response_header_set(
-      h,
-      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
-      FIO_STR_INFO2((char *)"13", 2));
   { /* Sec-WebSocket-Accept */
     fio_str_info_s k =
         fio_http_request_header(h,
@@ -2326,7 +2341,7 @@ handshake_error:
 }
 
 /** Sets request data to request a WebSockets Upgrade.*/
-SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
+SFUNC void fio_http_websocket_set_request(fio_http_s *h) {
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"connection", 10),
                               FIO_STR_INFO2((char *)"Upgrade", 7));
@@ -2339,6 +2354,12 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"upgrade", 7),
                               FIO_STR_INFO2((char *)"websocket", 9));
+  {
+    fio_http_request_header_set(
+        h,
+        FIO_STR_INFO2((char *)"origin", 6),
+        fio_http_request_header(h, FIO_STR_INFO2((char *)"host", 4), 0));
+  }
   fio_http_request_header_set(
       h,
       FIO_STR_INFO2((char *)"sec-websocket-version", 21),
@@ -2357,10 +2378,10 @@ SFUNC void fio_http_websockets_set_request(fio_http_s *h) {
 }
 
 /** Returns non-zero if the response accepts a WebSocket upgrade request. */
-SFUNC int fio_http_websockets_accepted(fio_http_s *h) {
+SFUNC int fio_http_websocket_accepted(fio_http_s *h) {
   if (h->status != 101)
     return 0;
-  if (!fio_http_websockets_requested(h))
+  if (!fio_http_websocket_requested(h))
     return 0;
   fio_str_info_s tst =
       fio_http_response_header(h, FIO_STR_INFO2((char *)"connection", 10), 0);
@@ -2372,12 +2393,6 @@ SFUNC int fio_http_websockets_accepted(fio_http_s *h) {
   if (tst.len < 9 || (tst.buf[0] | 32) != 'w' ||
       (fio_buf2u64u(tst.buf + 1) | (uint64_t)0x2020202020202020ULL) !=
           fio_buf2u64u("ebsocket"))
-    return 0;
-  tst = fio_http_response_header(
-      h,
-      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
-      0);
-  if (tst.len != 2 || tst.buf[0] != '1' || tst.buf[1] != '3')
     return 0;
   { /* Sec-WebSocket-Accept */
     tst = fio_http_response_header(
@@ -2407,8 +2422,15 @@ SFUNC int fio_http_websockets_accepted(fio_http_s *h) {
                                fio_sha1_digest(&sha),
                                fio_sha1_len(),
                                0);
-    if (!FIO_STR_INFO_IS_EQ(tst, accept_val))
+    if (!FIO_STR_INFO_IS_EQ(tst, accept_val)) {
+      FIO_LOG_DDEBUG2(
+          "(%d) sec-websocket-key invalid, WebSocket handshake failed.\n\t"
+          "%s != %s",
+          getpid(),
+          tst.buf,
+          accept_val.buf);
       return 0;
+    }
   }
   h->state |= (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET |
                FIO_HTTP_STATE_FINISHED);

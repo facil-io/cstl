@@ -173,6 +173,8 @@ typedef struct fio_http_settings_s {
    * fails).
    */
   uint8_t sse_timeout;
+  /** Timeout for client connections (only relevant in client mode). */
+  uint8_t connect_timeout;
   /** Logging flag - set to TRUE to log HTTP requests. */
   uint8_t log;
 } fio_http_settings_s;
@@ -366,6 +368,8 @@ static void http_settings_validate(fio_http_settings_s *s, int is_client) {
     s->timeout = FIO_HTTP_DEFAULT_TIMEOUT;
   if (!s->ws_timeout)
     s->ws_timeout = FIO_HTTP_DEFAULT_TIMEOUT_LONG;
+  if (!s->sse_timeout)
+    s->sse_timeout = s->ws_timeout;
 
   if (s->max_header_size < s->max_line_len)
     s->max_header_size = s->max_line_len;
@@ -452,6 +456,8 @@ FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
   }
   for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
     p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_SSE].protocol.timeout =
+      (unsigned)s.sse_timeout * 1000U;
   p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
       (unsigned)s.timeout * 1000U;
   p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
@@ -577,8 +583,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio_http_free(h);
 }
 
-FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
-                                                                   void *h_) {
+FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
+                                                                  void *h_) {
   union {
     int (*fn)(fio_http_s *);
     void *ptr;
@@ -634,7 +640,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websockets(void *cb_,
     break;
   } /* HAVE_ZLIB */
 #endif
-  fio_http_upgrade_websockets(h);
+  fio_http_upgrade_websocket(h);
   return;
 
 refuse_upgrade:
@@ -670,7 +676,7 @@ FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
     int (*fn)(fio_http_s *);
     void *ptr;
   } cb;
-  if (fio_http_websockets_requested(h))
+  if (fio_http_websocket_requested(h))
     goto websocket_requested;
   if (fio_http_sse_requested(h))
     goto sse_requested;
@@ -678,7 +684,7 @@ FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
 websocket_requested:
   cb.fn = c->settings->on_authenticate_websocket;
   fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback_websockets,
+                 fio___http_perform_user_upgrade_callback_websocket,
                  cb.ptr,
                  (void *)h);
   return -1;
@@ -752,7 +758,7 @@ FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr) {
   } cb = {.fn = c->state.http.on_http};
 
   /* TODO! review WS and SSE responses. */
-  if (fio_http_websockets_accepted(h))
+  if (fio_http_websocket_accepted(h))
     goto websocket_accepted;
   if (fio_http_sse_accepted(h))
     goto sse_accepted;
@@ -878,7 +884,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
   if ((u.scheme.len == 2 ||
        (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
       (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws"))
-    fio_http_websockets_set_request(h);
+    fio_http_websocket_set_request(h);
   /* test for sse:// or sses:// - Server Sent Events scheme */
   else if ((u.scheme.len == 3 ||
             (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
@@ -920,7 +926,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
                          .on_failed = fio___http_connect_on_failed,
                          .udata = c,
                          .tls = s.tls,
-                         .timeout = s.timeout);
+                         .timeout = s.connect_timeout);
 }
 
 /* *****************************************************************************
@@ -1293,15 +1299,23 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
   if (!c->io || !fio_srv_is_open(c->io))
     return;
   fio_str_info_s buf = FIO_STR_INFO2(NULL, 0);
-  { /* set Content-Length (client is never streaming) */
+  /* set Content-Length (client is never streaming) */
+  if (fio_http_body_length(h)) {
     char ibuf[32];
     fio_str_info_s k = FIO_STR_INFO2((char *)"content-length", 14);
     fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
     v.len = fio_digits10u(fio_http_body_length(h));
     fio_ltoa10u(v.buf, fio_http_body_length(h), v.len);
-    if (!fio_http_body_length(h))
-      v.len = 0;
     fio_http_request_header_set(h, k, v);
+  }
+  { /* set sensible defaults for common headers (Accept, User-Agent) */
+    fio_http_request_header_set_if_missing(h,
+                                           FIO_STR_INFO1((char *)"accept"),
+                                           FIO_STR_INFO1((char *)"*/*"));
+    fio_http_request_header_set_if_missing(
+        h,
+        FIO_STR_INFO1((char *)"user-agent"),
+        FIO_STR_INFO1((char *)"facil.io/" FIO_VERSION_STRING));
   }
   { /* write status string */
     fio_str_info_s method = fio_http_method(h);

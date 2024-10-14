@@ -155,11 +155,13 @@ FIO_SFUNC void open_client_connection(void *is_http) {
                                 .on_eventsource = client_on_eventsource,
                                 .on_close = client_on_close,
                                 .on_finish = client_on_close,
-                                .timeout = (fio_cli_get_i("-t") * 1000),
-                                .ws_timeout = (fio_cli_get_i("-w") * 1000)),
+                                .timeout = (fio_cli_get_i("-t")),
+                                .ws_timeout = (fio_cli_get_i("-t")),
+                                .connect_timeout = (fio_cli_get_i("-w"))),
                "HTTP/WS Connection error!");
   } else {
     /* Raw TCP/IP / UDP Client */
+    CLIENT_PROTOCOL.timeout = (fio_cli_get_i("-t") * 1000);
     FIO_ASSERT(fio_srv_connect(fio_cli_unnamed(0),
                                .protocol = &CLIENT_PROTOCOL,
                                .on_failed = on_failed,
@@ -268,10 +270,10 @@ FIO_SFUNC void client_print_response_headers(fio_http_s *h) {
   if (fio_cli_get_bool("-b"))
     return;
   FIO_LOG_DEBUG2("HTTP response received");
-  printf("%zu %s %s\n",
+  printf("%s %zu %s\n",
+         fio_http_version(h).buf,
          fio_http_status(h),
-         fio_http_status2str(fio_http_status(h)).buf,
-         fio_http_version(h).buf);
+         fio_http_status2str(fio_http_status(h)).buf);
   fio_http_response_header_each(h, client_print_header, NULL);
   printf("\n");
 }
