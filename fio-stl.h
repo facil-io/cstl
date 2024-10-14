@@ -42011,7 +42011,12 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
 HTTP Connect
 ***************************************************************************** */
 
-void fio___http_connect_on_failed(void *udata);
+void fio___http_connect_on_failed(void *udata) {
+  fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  fio_http_free(c->h);
+  c->h = NULL;
+  fio___http_connection_free(c);
+}
 
 void fio_http_connect___(void); /* IDE Marker */
 /** Connects to HTTP / WebSockets / SSE connections on `url`. */
@@ -42080,7 +42085,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
   return fio_srv_connect(url,
                          .protocol =
                              &p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol,
-                         .on_failed = NULL,
+                         .on_failed = fio___http_connect_on_failed,
                          .udata = c,
                          .tls = s.tls,
                          .timeout = s.timeout);
@@ -43371,7 +43376,8 @@ FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->state.http.on_finish(h);
   c->h = NULL;
-  fio_close(c->io);
+  if (c->io)
+    fio_close(c->io);
   fio_queue_push(fio_srv_queue(),
                  fio___http_controller_on_destroyed_task,
                  fio_http_cdata(h));
