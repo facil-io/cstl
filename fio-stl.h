@@ -46980,10 +46980,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
     pn1.d_ = r2;                                                               \
-    FIO_ASSERT(*p == stop || p == p2,                                          \
-               "atof float parsing didn't stop at correct position! %x != %x", \
-               *p,                                                             \
-               stop);                                                          \
+    FIO_ASSERT(                                                                \
+        *p == stop || p == p2,                                                 \
+        "atof float parsing didn't stop at correct position! %x != %x\n%s",    \
+        *p,                                                                    \
+        stop,                                                                  \
+        (s));                                                                  \
     FIO_ASSERT(*p1 == stop || p1 == p2,                                        \
                "aton float parsing didn't stop at correct position!\n\t%s"     \
                "\n\t%x != %x",                                                 \
