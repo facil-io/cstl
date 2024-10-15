@@ -1350,7 +1350,7 @@ FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
  */
 FIO_IFUNC uint32_t fio_utf8_read(char **str) {
   const uint8_t *s = *(const uint8_t **)str;
-  const unsigned len = fio_utf8_char_len(s);
+  unsigned len = fio_utf8_char_len(s);
   *str += len;
 #if FIO_UTF8_ALLOW_IF
   if (!len)
@@ -1366,6 +1366,7 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
          ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
          ((uint32_t)(s[t4] & 63));
 #else
+  len &= 7;
   const uint32_t t1 = (len > 1);
   const uint32_t t2 = (len > 2);
   const uint32_t t3 = 1 + (len > 3);

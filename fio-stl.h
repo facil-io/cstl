@@ -1387,7 +1387,7 @@ FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
  */
 FIO_IFUNC uint32_t fio_utf8_read(char **str) {
   const uint8_t *s = *(const uint8_t **)str;
-  const unsigned len = fio_utf8_char_len(s);
+  unsigned len = fio_utf8_char_len(s);
   *str += len;
 #if FIO_UTF8_ALLOW_IF
   if (!len)
@@ -1403,6 +1403,7 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
          ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
          ((uint32_t)(s[t4] & 63));
 #else
+  len &= 7;
   const uint32_t t1 = (len > 1);
   const uint32_t t2 = (len > 2);
   const uint32_t t3 = 1 + (len > 3);
@@ -4850,15 +4851,72 @@ possible_misread:
 }
 
 /** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
-SFUNC uint64_t fio_atol_bin(char **pstr) {
+SFUNC FIO___ASAN_AVOID uint64_t fio_atol_bin(char **pstr) {
   uint64_t r = 0;
-  size_t d;
   *pstr += (**pstr == '0');
-  *pstr += (**pstr | 32) == 'b' && ((size_t)(pstr[0][1]) - (size_t)'0') < 2;
+  *pstr += (**pstr | 32) == 'b' && (((size_t)(pstr[0][1]) - (size_t)'0') < 2);
+#if FIO___ASAN_DETECTED || 1
+  for (;;) { /* Prevent safe overflow of allocated memory region */
+    if ((r & UINT64_C(0x8000000000000000)))
+      break;
+    size_t len = 0;
+    union {
+      uint64_t u64;
+      uint32_t u32;
+    } u;
+    for (size_t i = 0; i < 8; ++i)
+      len += (((size_t)pstr[0][len] - (size_t)'0') < 2);
+    if (!len)
+      goto done;
+    switch (len & 12) {
+    case 8:
+      if ((r & UINT64_C(0xFF00000000000000)))
+        break; /* from switch */
+      u.u64 = fio_buf2u64_be(*pstr);
+      u.u64 -= 0x0101010101010101ULL * '0';
+      u.u64 |= u.u64 >> 7;
+      u.u64 |= u.u64 >> 14;
+      u.u64 |= u.u64 >> 28;
+      u.u64 &= 0xFF;
+      r <<= 8;
+      r |= u.u64;
+      *pstr += 8;
+      continue;
+    case 4:
+      if ((r & UINT64_C(0xF000000000000000)))
+        break; /* from switch */
+      u.u32 = fio_buf2u32_be(*pstr);
+      u.u32 -= (0x01010101UL * '0');
+      u.u32 |= u.u32 >> 7;
+      u.u32 |= u.u32 >> 14;
+      u.u32 &= 0x0F;
+      r <<= 4;
+      r |= u.u32;
+      *pstr += 4;
+      continue;
+    }
+    while ((len = (size_t)((unsigned char)(**pstr)) - (size_t)'0') < 2) {
+      r <<= 1;
+      r |= len;
+      ++*pstr;
+      if ((r & UINT64_C(0x8000000000000000)))
+        break;
+    }
+#if FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER
+    if ((**pstr == '_') | (**pstr == '.')) { /* allow as a dividers */
+      ++*pstr;
+      continue;
+    }
+#endif
+    break;
+  }
+done:
+#else
+  size_t d;
   for (; (((uintptr_t)*pstr & 4095) < 4089);) { /* respect page boundary */
     uint64_t tmp = fio_buf2u64_be(*pstr);       /* may overflow */
-    tmp -= 0x0101010101010101ULL * '0';
-    if (tmp & (~0x0101010101010101ULL))
+    tmp -= 0x0101010101010101ULL * '0';         /* was it all `0`s and `1`s? */
+    if (tmp & (~0x0101010101010101ULL))         /* if note, break. */
       break;
     tmp |= tmp >> 7;
     tmp |= tmp >> 14;
@@ -4880,7 +4938,8 @@ SFUNC uint64_t fio_atol_bin(char **pstr) {
     *pstr += (**pstr == '_') | (**pstr == '.'); /* allow as a dividers */
 #endif
   }
-  if ((d = (size_t)(**pstr) - (size_t)'0') < 2)
+#endif
+  if (((size_t)(**pstr) - (size_t)'0') < 2)
     errno = E2BIG;
   return r;
 }
@@ -4914,7 +4973,8 @@ SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base) {
 fio_atol
 ***************************************************************************** */
 
-SFUNC int64_t fio_atol(char **pstr) {
+SFUNC int64_t FIO___ASAN_AVOID fio_atol(char **pstr) {
+  /* note: sanitizer avoided due to possible 8 byte overflow within mem-page */
   static uint64_t (*const fn[])(char **) = {
       fio_atol10u,
       fio_atol8u,
@@ -4933,8 +4993,8 @@ SFUNC int64_t fio_atol(char **pstr) {
   neg = (p[0] == '-');
   p += (neg | (p[0] == '+'));
 
-  base += (p[0] == '0');             /* oct */
-  p += base;                         /* consume '0' */
+  base += (p[0] == '0');             /* starts with zero? - oct */
+  p += base;                         /* consume the possible '0' */
   base += ((p[0] | 32) == 'b');      /* binary */
   base += ((p[0] | 32) == 'x') << 1; /* hex */
   p += (base > 1);                   /* consume 'b' or 'x' */
@@ -5123,7 +5183,8 @@ FIO_IFUNC long double fio___aton_pow10n(uint64_t e10) {
   return powl(10, (int64_t)(0 - e10)); /* return zero? */
 }
 
-FIO_SFUNC fio_aton_s fio_aton(char **pstr) {
+FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
+  /* note: sanitizer avoided due to possible 8 byte overflow within mem-page */
   static uint64_t (*const fn[])(char **) = {
       fio_atol10u,
       fio_atol8u,
@@ -5226,8 +5287,9 @@ is_infinity:
   if ((p[1] | 32) == 'n' && (p[2] | 32) == 'f') { /* inf */
     r.is_float = 1;
     r.u = ((uint64_t)neg << 63) | ((uint64_t)2047ULL << 52);
-    p += 3 + ((fio_buf2u64u("infinity") ==
-               (fio_buf2u64u(p) | 0x2020202020202020ULL)) *
+    p += 3 + (((p[3] | 32) == 'i' &&
+               fio_buf2u64u("infinity") ==
+                   (fio_buf2u64u(p) | 0x2020202020202020ULL)) *
               5);
     *pstr = (char *)p;
   } else
