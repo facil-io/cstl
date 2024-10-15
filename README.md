@@ -4,7 +4,7 @@
 
 > **The [facil.io](http://facil.io) C STL aims to provide C developers with easy-to-use tools to write memory safe and performant programs**.
 
-## The C Server Toolbox Library Powers a Web microFramework
+## This C Server Toolbox Library Powers a microFramework
 
 The [facil.io library](https://facil.io) is much more than a Web Application Framework and includes core tools and type templates that any C (and C++) project will find useful.
 

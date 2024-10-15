@@ -43448,11 +43448,15 @@ FIO_SFUNC void fio___sse_consume_data(fio___http_connection_s *c) {
     } else if (line_len > 4 && line[4] == ':') { /* data */
       const char *start = line + 5;
       start += (start[0] == ' ' || start[0] == '\t');
-      if ((fio_buf2u32u(line) | 0x20202020U) == fio_buf2u32u("data"))
+      if ((fio_buf2u32u(line) | 0x20202020U) == fio_buf2u32u("data")) {
+        if (fio_bstr_len(sse->data) + (size_t)(eol - start) >
+            c->settings->ws_max_msg_size)
+          goto breach;
         sse->data = fio_bstr_write2(
             sse->data,
             FIO_STRING_WRITE_STR2("\r\n", ((size_t) !!sse->data << 1)),
             FIO_STRING_WRITE_STR2(start, (size_t)(eol - start)));
+      }
 
     } else if (line_len > 5 && line[5] == ':') { /* event */
       const char *start = line + 3;
@@ -43475,6 +43479,11 @@ FIO_SFUNC void fio___sse_consume_data(fio___http_connection_s *c) {
 error:
   FIO_LOG_ERROR("SSE incoming data malformed!");
   FIO_LOG_DEBUG2("data dump:\n%.*s", (int)c->len, c->buf);
+  fio_close(c->io);
+  return;
+
+breach:
+  FIO_LOG_SECURITY("SSE incoming data payload too large!");
   fio_close(c->io);
 }
 
