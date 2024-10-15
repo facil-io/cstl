@@ -1289,7 +1289,9 @@ UTF-8 Support (basic)
 ***************************************************************************** */
 
 #ifndef FIO_UTF8_ALLOW_IF
-#define FIO_UTF8_ALLOW_IF 0
+/* UTF-8 Constant Time? (0 = avoid mis-predictions; 1 = mostly ascii) */
+#define FIO_UTF8_ALLOW_IF 1
+
 #endif
 
 /* Returns the number of bytes required to UTF-8 encoded a code point `u` */
@@ -1391,17 +1393,6 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
   unsigned len = fio_utf8_char_len(s);
   *str += len;
 #if FIO_UTF8_ALLOW_IF
-  switch (len) {
-  case 4:
-    return (((uint32_t)s[0] & 15) << 18) | (((uint32_t)s[1] & 63) << 12) |
-           (((uint32_t)s[2] & 63) << 6) | ((uint32_t)s[3] & 63);
-  case 3:
-    return (((uint32_t)s[0] & 31) << 12) | (((uint32_t)s[1] & 63) << 6) |
-           ((uint32_t)s[2] & 63);
-  case 2: return (((uint32_t)s[0] & 63) << 6) | ((uint32_t)s[0] & 63);
-  case 1: return (uint32_t)*s;
-  }
-  return 0;
   if (!len)
     return 0;
   if (len == 1)
