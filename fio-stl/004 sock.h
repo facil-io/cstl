@@ -265,7 +265,7 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   addr_hints.ai_socktype = sock_type;
   addr_hints.ai_flags = AI_PASSIVE; // use my IP
 
-  size_t port_len = FIO_STRLEN(port);
+  size_t port_len = (port ? FIO_STRLEN(port) : 0U);
   switch (port_len) { /* skip system service lookup for common web stuff */
   case 2:
     if ((port[0] | 32) == 'w' && (port[1] | 32) == 's')
@@ -293,11 +293,17 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
   }
 
 #if 1 /* override system resolution for localhost ? */
-  size_t address_len = FIO_STRLEN(address);
-  if ((address[0] | 32) == 'l' && address_len == 9 &&
+  size_t address_len = (address ? FIO_STRLEN(address) : 0U);
+  if (address && address_len == 9 && (address[0] | 32) == 'l' &&
       (fio_buf2u64u(address + 1) | (uint64_t)0x2020202020202020ULL) ==
           fio_buf2u64u("ocalhost"))
     address = "127.0.0.1";
+  else if (sock_type != SOCK_DGRAM && address_len == 7 &&
+           (fio_buf2u64u("0.0.0.0") |
+            fio_buf2u64u("\x00\x00\x00\x00\x00\x00\x00\xFF")) ==
+               (fio_buf2u64u(address) |
+                fio_buf2u64u("\x00\x00\x00\x00\x00\x00\x00\xFF")))
+    address = NULL; /* bind to everything INADDR_ANY */
 #endif
   /* call for OS address resolution */
   if ((e = getaddrinfo(address, (port ? port : "0"), &addr_hints, &a)) != 0) {

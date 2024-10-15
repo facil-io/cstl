@@ -113,10 +113,10 @@ Inline Implementation
 FIO_IFUNC FIO_REF_TYPE_PTR
 FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+  if (!wrapped || !wrapped_)
+    return 0;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
-  if (!o)
-    return wrapped_;
   fio_atomic_add(&o->ref, 1);
   return wrapped_;
 }
@@ -124,10 +124,10 @@ FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
 /** Debugging helper, do not use for data, as returned value is unstable. */
 FIO_IFUNC size_t FIO_NAME(FIO_REF_NAME, references)(FIO_REF_TYPE_PTR wrapped_) {
   FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+  if (!wrapped || !wrapped_)
+    return 0;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
-  if (!o)
-    return 0;
   return o->ref;
 }
 

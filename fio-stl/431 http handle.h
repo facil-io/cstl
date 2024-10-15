@@ -661,7 +661,7 @@ General Helpers
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
-SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status);
+SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status);
 
 /** Returns true (1) if the ETag response matches an if-none-match request. */
 SFUNC int fio_http_etag_is_match(fio_http_s *h);
@@ -1262,7 +1262,8 @@ FIO_SFUNC void fio___mock_c_write_body(fio_http_s *h,
   if (args.buf) {
     if (args.dealloc)
       args.dealloc((void *)args.buf);
-  } else if (args.fd != -1 && !args.copy && args.fd != fio_http_body_fd(h)) {
+  } else if ((unsigned)(args.fd + 1) > 1U && !args.copy &&
+             args.fd != fio_http_body_fd(h)) {
     close(args.fd);
   }
   (void)h;
@@ -2355,7 +2356,7 @@ SFUNC void fio_http_websocket_set_request(fio_http_s *h) {
                               FIO_STR_INFO2((char *)"upgrade", 7),
                               FIO_STR_INFO2((char *)"websocket", 9));
   {
-    fio_http_request_header_set(
+    fio_http_request_header_set_if_missing(
         h,
         FIO_STR_INFO2((char *)"origin", 6),
         fio_http_request_header(h, FIO_STR_INFO2((char *)"host", 4), 0));
@@ -2450,7 +2451,8 @@ SFUNC int fio_http_sse_requested(fio_http_s *h) {
   uint64_t t1 = fio_buf2u64u(val.buf + 9) | (uint64_t)0x2020202020202020ULL;
   if ((t0 != fio_buf2u64u("ext/even")) || (t1 != fio_buf2u64u("t-stream")))
     return 0; /* note that '/' and '-' both have 32 (bit[5]) set */
-  FIO_LOG_DDEBUG2("EventSource connection requested.");
+  FIO_LOG_DDEBUG2("(%d) EventSource connection requested.",
+                  fio_thread_getpid());
   return 1;
 }
 
@@ -2651,9 +2653,9 @@ Error Handling
 ***************************************************************************** */
 
 /** Sends the requested error message and finishes the response. */
-SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
+SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!h || h->writer != fio____http_write_start)
-    return;
+    return -1;
   if (!status || status > 1000)
     status = 404;
   h->status = (uint32_t)status;
@@ -2688,6 +2690,7 @@ SFUNC void fio_http_send_error_response(fio_http_s *h, size_t status) {
     args.dealloc = NULL;
   }
   fio_http_write FIO_NOOP(h, args);
+  return 0;
 }
 
 /* *****************************************************************************

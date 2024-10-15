@@ -645,7 +645,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
 
 refuse_upgrade:
   c->state.http = old;
-  fio_http_send_error_response(h, 403);
+  if (fio_http_send_error_response(h, 403))
+    fio_undup(c->io);
   fio_http_free(h);
 }
 
@@ -656,17 +657,17 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
     void *ptr;
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c;
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (cb.fn(h))
     goto refuse_upgrade;
-  c = (fio___http_connection_s *)fio_http_cdata(h);
   if (c->h) /* request after eventsource? an attack vector? */
     goto refuse_upgrade;
   fio_http_upgrade_sse(h);
   return;
 
 refuse_upgrade:
-  fio_http_send_error_response(h, 403);
+  if (fio_http_send_error_response(h, 403))
+    fio_undup(c->io);
   fio_http_free(h);
 }
 
@@ -688,6 +689,7 @@ websocket_requested:
                  cb.ptr,
                  (void *)h);
   return -1;
+
 sse_requested:
   cb.fn = c->settings->on_authenticate_sse;
   fio_queue_push(c->queue,
@@ -695,6 +697,7 @@ sse_requested:
                  cb.ptr,
                  (void *)h);
   return -1;
+
 #if 0
 http2_requested:
   // Connection: Upgrade, HTTP2-Settings
@@ -784,13 +787,15 @@ websocket_accepted:
       &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
             ->state[pr]
             .protocol));
-  fio_undup(c->io);
-  c->suspend = 0;
-  fio_srv_unsuspend(c->io);
+
   FIO_LOG_DDEBUG2("(%d) Client %s upgrade complete for fd %d",
                   fio_srv_pid(),
                   (fio_http_is_websocket(h) ? "WebSocket" : "SSE"),
                   fio_fd_get(c->io));
+
+  fio_undup(c->io); /* fio_dup called by fio_http1_on_complete */
+  c->suspend = 0;
+  fio_srv_unsuspend(c->io);
 }
 
 /* *****************************************************************************
@@ -861,6 +866,7 @@ void fio_http_connect___(void); /* IDE Marker */
 SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
                                        fio_http_s *h,
                                        fio_http_settings_s s) {
+  FIO_STR_INFO_TMP_VAR(origin, 4096);
   http_settings_validate(&s, 1);
   fio_url_s u = (fio_url_s){0};
   if (url)
@@ -876,21 +882,43 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
     fio_http_query_set(h, FIO_BUF2STR_INFO(u.query));
   if (!fio_http_method(h).len)
     fio_http_method_set(h, FIO_STR_INFO2((char *)"GET", 3));
-  if (u.host.len)
+  if (u.host.len) {
     fio_http_request_header_set_if_missing(h,
                                            FIO_STR_INFO2((char *)"host", 4),
                                            FIO_BUF2STR_INFO(u.host));
+    /* Origin header */
+    fio_string_write2(
+        &origin,
+        NULL,
+        FIO_STRING_WRITE_STR2(
+            "https",
+            (size_t)(4 + (u.scheme.len > 2 &&
+                          (u.scheme.buf[u.scheme.len - 1] | 32) == 's'))),
+        FIO_STRING_WRITE_STR2("://", 3U),
+        FIO_STRING_WRITE_STR_INFO(u.host),
+        FIO_STRING_WRITE_STR2(":", (size_t)(!!u.port.len)),
+        FIO_STRING_WRITE_STR_INFO(u.port));
+  }
+
   /* test for ws:// or wss:// - WebSocket scheme */
   if ((u.scheme.len == 2 ||
        (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
-      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws"))
+      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws")) {
+    fio_http_request_header_set_if_missing(h,
+                                           FIO_STR_INFO2((char *)"origin", 6),
+                                           origin);
     fio_http_websocket_set_request(h);
+  }
   /* test for sse:// or sses:// - Server Sent Events scheme */
   else if ((u.scheme.len == 3 ||
             (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
            (fio_buf2u32u(u.scheme.buf) | fio_buf2u32u("\x20\x20\x20\xFF")) ==
-               fio_buf2u32u("sse\xFF"))
+               fio_buf2u32u("sse\xFF")) {
+    fio_http_request_header_set_if_missing(h,
+                                           FIO_STR_INFO2((char *)"origin", 6),
+                                           origin);
     fio_http_sse_set_request(h);
+  }
 
   /* TODO: test for and attempt to re-use connection */
   // if (fio_http_cdata(h)) { }
@@ -936,7 +964,7 @@ HTTP/1.1 Request / Response Completed
 /** called when either a request or a response was received. */
 static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  fio_dup(c->io);
+  fio_dup(c->io); /* make sure the IO and its data are valid in callback */
   fio_srv_suspend(c->io);
   fio_http_s *h = c->h;
   c->h = NULL;
@@ -951,11 +979,12 @@ HTTP/1.1 Parser callbacks
 
 FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
   fio_http_s *h = c->h;
-  fio_dup(c->io);
+  fio_dup(c->io); /* sending the response will result in fio_undup */
   fio_srv_suspend(c->io);
   c->h = NULL;
   c->suspend = 1;
-  fio_http_send_error_response(h, 413);
+  if (fio_http_send_error_response(h, 413))
+    fio_undup(c->io); /* response not sent, we need to fio_undup */
   fio_http_free(h);
 }
 
@@ -1063,7 +1092,6 @@ static int fio_http1_on_expect(void *udata) {
   fio_http_s *h = c->h;
   if (!h)
     return 1;
-  fio_dup(c->io);
   c->h = NULL;
   /* TODO: test for body size violation and deny request if payload too big. */
   if (FIO_HTTP1_EXPECTED_CHUNKED != fio_http1_expected(&c->state.http.parser) &&
@@ -1074,10 +1102,12 @@ static int fio_http1_on_expect(void *udata) {
     goto response_sent;
   c->h = h;
   fio_write2(c->io, .buf = response.buf, .len = response.len, .copy = 0);
-  fio_undup(c->io);
   return 0; /* TODO?: improve support for `expect` headers? */
 payload_too_big:
-  fio_http_send_error_response(h, 413); /* fall through */
+  fio_dup(c->io);
+  if (fio_http_send_error_response(h, 413))
+    fio_undup(c->io); /* response not sent, we need to fio_undup */
+                      /* fall through */
 response_sent:
   // c->h = NULL;
   fio_http_free(h);
@@ -1226,7 +1256,8 @@ http1_error:
     c->h = NULL;
     if (!c->is_client) {
       fio_dup(c->io);
-      fio_http_send_error_response(h, 400);
+      if (fio_http_send_error_response(h, 400))
+        fio_undup(c->io);
     }
     fio_http_free(h);
   }
@@ -1371,7 +1402,7 @@ FIO_SFUNC void fio___http1_on_attach_client(fio_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   // c->io = fio_dup(io);
   c->io = io;
-  fio___http1_send_request(c->h); /* TODO: Write Request! */
+  fio___http1_send_request(c->h);
   if (c->len)
     fio___http1_process_data(io, c);
   return;
@@ -1492,7 +1523,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
   return;
 
 upgraded:
-  if ((c->h && !c->is_client) || !fio_srv_is_open(c->io))
+  if (c->h || !fio_srv_is_open(c->io))
     goto something_is_wrong;
   c->h = (fio_http_s *)upgraded;
   {
@@ -1522,6 +1553,10 @@ upgraded:
   return;
 
 something_is_wrong:
+  if (fio_srv_is_open(c->io))
+    FIO_LOG_DEBUG2("(%d) Connection upgrade went wrong for fd %d - closing",
+                   fio_srv_pid(),
+                   fio_fd_get(c->io));
   fio_protocol_set(c->io, NULL); /* make zombie, timeout will clear it. */
   fio_undup(c->io);
   fio___http_connection_free(c); /* free HTTP connection element */
@@ -1601,6 +1636,7 @@ FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   if (!c->suspend)
     fio_srv_unsuspend(c->io);
   fio_undup(c->io);
+  fio___http_connection_free(c);
   (void)ignr_;
 }
 
@@ -1631,6 +1667,7 @@ FIO_SFUNC void fio_websocket_on_message(void *udata,
   //   fio_srv_unsuspend(c->io);
   // return; /* TODO: FIXME! */
   fio_dup(c->io);
+  fio___http_connection_dup(c);
   fio_srv_suspend(c->io);
   c->suspend = 1;
   fio_queue_push(c->queue,
@@ -2142,7 +2179,9 @@ static void fio___sse_on_attach(fio_s *io) {
       .on_ready = c->settings->on_ready,
   };
   c->settings->on_open(h);
-  FIO_LOG_DEBUG2("SSE attached buffer length (unread): %zu", c->len);
+  FIO_LOG_DDEBUG2("(%d) SSE attached; buffer length (unread): %zu",
+                  fio_srv_pid(),
+                  c->len);
   if (c->len && c->is_client)
     fio___sse_consume_data(c);
 }
@@ -2162,12 +2201,10 @@ FIO_SFUNC void fio___sse_on_shutdown(fio_s *io) {
 
 /** Called after the connection was closed, and pending tasks completed. */
 FIO_SFUNC void fio___sse_on_close(void *udata) {
-  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p",
-                  (int)fio_thread_getpid(),
-                  udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  c->settings->on_close(c->h);
+  FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p", fio_srv_pid(), c->io);
   c->io = NULL;
+  c->settings->on_close(c->h);
   fio_bstr_free(c->state.sse.data);
   fio_http_free(c->h);
   fio___http_connection_free(c);
@@ -2214,6 +2251,13 @@ FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
                  fio_http_cdata(h));
 }
 
+/** Called when an HTTP handle is freed (no auto-finish, post upgrade). */
+FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
+  fio_queue_push(fio_srv_queue(),
+                 fio___http_controller_on_destroyed_task,
+                 fio_http_cdata(h));
+}
+
 /** Called when an HTTP handle is freed. */
 FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
   fio_queue_push(fio_srv_queue(),
@@ -2224,16 +2268,7 @@ FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
   c->h = NULL;
   if (c->io)
     fio_close(c->io);
-  fio_queue_push(fio_srv_queue(),
-                 fio___http_controller_on_destroyed_task,
-                 fio_http_cdata(h));
-}
-
-/** Called when an HTTP handle is freed. */
-FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
-  fio_queue_push(fio_srv_queue(),
-                 fio___http_controller_on_destroyed_task,
-                 fio_http_cdata(h));
+  fio_queue_push(fio_srv_queue(), fio___http_controller_on_destroyed_task, c);
 }
 
 /* *****************************************************************************

@@ -351,7 +351,7 @@ start_target:
 
 finish:
 
-  if (r.scheme.len == 4 && r.host.buf) {
+  if (r.scheme.len == 4 && r.host.buf) { /* recognize file paths */
     uint32_t s, file_str, unix_str, priv_str;
     fio_memcpy4(&file_str, "file");
     fio_memcpy4(&unix_str, "unix");

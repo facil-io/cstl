@@ -294,7 +294,9 @@ FIO_SFUNC void client_on_http(fio_http_s *h) {
 /** Called once a WebSocket / SSE connection upgrade is complete. */
 FIO_SFUNC void client_on_open(fio_http_s *h) {
   client_print_response_headers(h);
-  FIO_LOG_DEBUG2("Connection Established with: %s", fio_http_path(h).buf);
+  FIO_LOG_INFO("%s Connection Established with: %s",
+               (fio_http_is_websocket(h) ? "WebSocket" : "SSE"),
+               fio_http_path(h).buf);
   /* WebSocket only code - read from STDIN and publish to WebSocket. */
   if (!fio_http_is_websocket(h))
     return;
