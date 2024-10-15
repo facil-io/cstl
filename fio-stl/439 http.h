@@ -2153,7 +2153,7 @@ error:
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___sse_on_data(fio_s *io) {
-  FIO_LOG_DEBUG2("Reading SSE data from socket");
+  FIO_LOG_DDEBUG2("(%d) Reading SSE data from socket", fio_srv_pid());
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   size_t r;
   for (;;) {
@@ -2224,7 +2224,7 @@ FIO_SFUNC void fio___http_controller_sse_write_body(
   }
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
-  if (args.fd != -1)
+  if (!args.buf && (unsigned)(args.fd + 1) > 1)
     close(args.fd);
 }
 /* *****************************************************************************
@@ -2344,7 +2344,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .send_headers = fio___http_controller_http1_send_headers,
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -2353,7 +2353,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
       r = (fio_http_controller_s){
           .on_destroyed = fio__http_controller_on_destroyed_client,
           // .on_finish = fio___http_controller_http1_on_finish_client,
-          .close = fio___http_default_close,
+          .close_io = fio___http_default_close,
           .get_fd = fio___http_controller_get_fd,
       };
     } else {
@@ -2362,7 +2362,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
           .send_headers = fio___http_controller_http1_send_headers,
           .write_body = fio___http_controller_http1_write_body,
           .on_finish = fio___http_controller_http1_on_finish,
-          .close = fio___http_default_close,
+          .close_io = fio___http_default_close,
           .get_fd = fio___http_controller_get_fd,
       };
     }
@@ -2370,7 +2370,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -2379,7 +2379,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_ws_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -2388,14 +2388,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;

@@ -712,7 +712,7 @@ struct fio_http_controller_s {
   /** called once a request / response had finished */
   void (*on_finish)(fio_http_s *h);
   /** called to close an HTTP connection */
-  void (*close)(fio_http_s *h);
+  void (*close_io)(fio_http_s *h);
   /** called when the file descriptor is directly required */
   int (*get_fd)(fio_http_s *h);
 };
@@ -1274,7 +1274,7 @@ static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
     .on_finish = fio___mock_controller_cb,
-    .close = fio___mock_controller_cb,
+    .close_io = fio___mock_controller_cb,
     .get_fd = fio___mock_controller_get_fd_cb,
 };
 
@@ -1292,8 +1292,8 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
     c->on_finish = fio___mock_controller_cb;
-  if (!c->close)
-    c->close = fio___mock_controller_cb;
+  if (!c->close_io)
+    c->close_io = fio___mock_controller_cb;
   if (!c->get_fd)
     c->get_fd = fio___mock_controller_get_fd_cb;
   return c;
@@ -1403,7 +1403,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
 }
 
 /** Closes a persistent HTTP connection (i.e., if upgraded). */
-SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
+SFUNC void fio_http_close(fio_http_s *h) { h->controller->close_io(h); }
 
 /** Creates a copy of an existing handle, copying only its request data. */
 SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
@@ -3378,7 +3378,8 @@ FIO_SFUNC void fio___http_cleanup(void *ignr_) {
     (void)names; /* if unused */
   }
 #endif /* FIO_HTTP_CACHE_LIMIT */
-  FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
+  FIO_LOG_DEBUG2("(%d) HTTP MIME hash storage count/capa: %zu / %zu",
+                 fio_getpid(),
                  FIO___HTTP_MIMETYPES.count,
                  fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);

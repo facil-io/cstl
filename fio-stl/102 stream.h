@@ -365,7 +365,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
                                               uint8_t keep_open) {
   fio_stream_packet_s *p = NULL;
   fio_stream_packet_fd_s *f;
-  if (fd < 0)
+  if ((unsigned)(fd + 1) < 2)
     goto no_file;
 
   if (!len) {

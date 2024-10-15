@@ -93,13 +93,25 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #define fio_sock_write(fd, data, len) write((fd), (data), (len))
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
 #define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
-/** Acts as POSIX close. Use this macro for portability with WinSock2. */
-#define fio_sock_close(fd)            close(fd)
 /** Acts as POSIX dup. Use this macro for portability with WinSock2. */
 #define fio_sock_dup(fd)              dup(fd)
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd)            close(fd)
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
+
+/* Set to 1 if in need to debug unexpected IO closures. */
+#if defined(DEBUG) && 0
+#define close(fd)                                                              \
+  do {                                                                         \
+    FIO_LOG_DWARNING("(%d) (" FIO__FILE__ ":" FIO_MACRO2STR(                   \
+                         __LINE__) ") fio_sock_close called for fd %d",        \
+                     fio_getpid(),                                             \
+                     (int)fd);                                                 \
+    close(fd);                                                                 \
+  } while (0)
+#endif /* DEBUG */
 
 /* *****************************************************************************
 Socket OS abstraction - API

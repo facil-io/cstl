@@ -278,6 +278,7 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___KILL_SELF()   kill(0, SIGINT)
+#define fio_getpid          getpid
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
@@ -304,6 +305,8 @@ OS Specific includes and Macros
 #include <sysinfoapi.h>
 #include <time.h>
 #include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
+#define fio_getpid _getpid
 
 #define FIO___KILL_SELF() TerminateProcess(GetCurrentProcess(), 1)
 
@@ -547,10 +550,18 @@ Logging Defaults (no-op)
 #ifdef DEBUG
 #define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
 #define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_LOG_DERROR(...)           FIO_LOG_ERROR(__VA_ARGS__)
+#define FIO_LOG_DSECURITY(...)        FIO_LOG_SECURITY(__VA_ARGS__)
+#define FIO_LOG_DWARNING(...)         FIO_LOG_WARNING(__VA_ARGS__)
+#define FIO_LOG_DINFO(...)            FIO_LOG_INFO(__VA_ARGS__)
 #define FIO_ASSERT___PERFORM_SIGNAL() FIO___KILL_SELF();
 #else
-#define FIO_LOG_DDEBUG(...)  ((void)(0))
-#define FIO_LOG_DDEBUG2(...) ((void)(0))
+#define FIO_LOG_DDEBUG(...)    ((void)(0))
+#define FIO_LOG_DDEBUG2(...)   ((void)(0))
+#define FIO_LOG_DERROR(...)    ((void)(0))
+#define FIO_LOG_DSECURITY(...) ((void)(0))
+#define FIO_LOG_DWARNING(...)  ((void)(0))
+#define FIO_LOG_DINFO(...)     ((void)(0))
 #define FIO_ASSERT___PERFORM_SIGNAL()
 #endif /* DEBUG */
 
@@ -3253,13 +3264,18 @@ Leak Counter Helpers
       goto error_double_free;                                                  \
     return tmp;                                                                \
   error_double_free:                                                           \
-    FIO_ASSERT(0, FIO_MACRO2STR(name) " `free` after `free` detected!");       \
+    FIO_ASSERT(0,                                                              \
+               "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
+               fio_getpid());                                                  \
   }                                                                            \
   static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
-    FIO_LOG_DEBUG2("testing leaks for " FIO_MACRO2STR(name));                  \
+    FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
+                   fio_getpid());                                              \
     if (counter)                                                               \
-      FIO_LOG_ERROR("%zu leaks detected for " FIO_MACRO2STR(name), counter);   \
+      FIO_LOG_ERROR("(%d) %zu leaks detected for " FIO_MACRO2STR(name),        \
+                    fio_getpid(),                                              \
+                    counter);                                                  \
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
     fio_state_callback_add(FIO_CALL_AT_EXIT,                                   \
@@ -10228,13 +10244,25 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #define fio_sock_write(fd, data, len) write((fd), (data), (len))
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
 #define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
-/** Acts as POSIX close. Use this macro for portability with WinSock2. */
-#define fio_sock_close(fd)            close(fd)
 /** Acts as POSIX dup. Use this macro for portability with WinSock2. */
 #define fio_sock_dup(fd)              dup(fd)
+/** Acts as POSIX close. Use this macro for portability with WinSock2. */
+#define fio_sock_close(fd)            close(fd)
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
+
+/* Set to 1 if in need to debug unexpected IO closures. */
+#if defined(DEBUG) && 0
+#define close(fd)                                                              \
+  do {                                                                         \
+    FIO_LOG_DWARNING("(%d) (" FIO__FILE__ ":" FIO_MACRO2STR(                   \
+                         __LINE__) ") fio_sock_close called for fd %d",        \
+                     fio_getpid(),                                             \
+                     (int)fd);                                                 \
+    close(fd);                                                                 \
+  } while (0)
+#endif /* DEBUG */
 
 /* *****************************************************************************
 Socket OS abstraction - API
@@ -11081,7 +11109,8 @@ FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
   }
-  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
+  FIO_LOG_DEBUG2("(%d) fio_state_callback maps have been cleared.",
+                 fio_getpid());
 }
 
 /** Adds a callback to the list of callbacks to be called for the event. */
@@ -17374,7 +17403,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
                                               uint8_t keep_open) {
   fio_stream_packet_s *p = NULL;
   fio_stream_packet_fd_s *f;
-  if (fd < 0)
+  if ((unsigned)(fd + 1) < 2)
     goto no_file;
 
   if (!len) {
@@ -32132,9 +32161,7 @@ FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
   (void)r;
-#if DEBUG
-  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
-#endif
+  FIO_LOG_DDEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
   fio___srvdata.wakeup_wait = 0;
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
@@ -32566,7 +32593,7 @@ static void fio___srv_try_to_write_to_io(fio_s *io) {
 connection_error:
 #if DEBUG
   if (fio_stream_any(&io->stream))
-    FIO_LOG_DDEBUG2(
+    FIO_LOG_DERROR(
         "(%d) IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
         fio___srvdata.pid,
         errno,
@@ -32784,7 +32811,9 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG2("Server shutting down with %zu connected clients", connected);
+  FIO_LOG_DEBUG2("(%d) Server shutting down with %zu connected clients",
+                 fio___srvdata.pid,
+                 connected);
   /* cycle while connections exist. */
   fio_queue_push(fio___srv_tasks,
                  fio___srv_shutdown_task,
@@ -32802,7 +32831,9 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG("Server shutdown timed out with %zu clients", connected);
+  FIO_LOG_DEBUG2("(%d) Server shutdown timeout/done with %zu clients",
+                 fio___srvdata.pid,
+                 connected);
   /* perform remaining tasks. */
   fio_queue_perform_all(fio___srv_tasks);
 }
@@ -33099,7 +33130,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
                                   args.offset,
                                   args.copy,
                                   args.dealloc);
-  } else if (args.fd != -1) {
+  } else if ((unsigned)(args.fd + 1) > 1) {
     packet = fio_stream_pack_fd(args.fd, args.len, args.offset, args.copy);
   }
   if (!packet)
@@ -33135,6 +33166,8 @@ io_error_null:
     } u = {.fn = args.dealloc};
     // u.fn(args.buf);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
+    if ((unsigned)(args.fd + 1) > 1)
+      close(args.fd);
   }
 }
 
@@ -37560,7 +37593,7 @@ struct fio_http_controller_s {
   /** called once a request / response had finished */
   void (*on_finish)(fio_http_s *h);
   /** called to close an HTTP connection */
-  void (*close)(fio_http_s *h);
+  void (*close_io)(fio_http_s *h);
   /** called when the file descriptor is directly required */
   int (*get_fd)(fio_http_s *h);
 };
@@ -38122,7 +38155,7 @@ static fio_http_controller_s FIO___MOCK_CONTROLLER = {
     .send_headers = fio___mock_controller_cb,
     .write_body = fio___mock_c_write_body,
     .on_finish = fio___mock_controller_cb,
-    .close = fio___mock_controller_cb,
+    .close_io = fio___mock_controller_cb,
     .get_fd = fio___mock_controller_get_fd_cb,
 };
 
@@ -38140,8 +38173,8 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c->write_body = fio___mock_c_write_body;
   if (!c->on_finish)
     c->on_finish = fio___mock_controller_cb;
-  if (!c->close)
-    c->close = fio___mock_controller_cb;
+  if (!c->close_io)
+    c->close_io = fio___mock_controller_cb;
   if (!c->get_fd)
     c->get_fd = fio___mock_controller_get_fd_cb;
   return c;
@@ -38251,7 +38284,7 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
 }
 
 /** Closes a persistent HTTP connection (i.e., if upgraded). */
-SFUNC void fio_http_close(fio_http_s *h) { h->controller->close(h); }
+SFUNC void fio_http_close(fio_http_s *h) { h->controller->close_io(h); }
 
 /** Creates a copy of an existing handle, copying only its request data. */
 SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
@@ -40226,7 +40259,8 @@ FIO_SFUNC void fio___http_cleanup(void *ignr_) {
     (void)names; /* if unused */
   }
 #endif /* FIO_HTTP_CACHE_LIMIT */
-  FIO_LOG_DEBUG2("HTTP MIME hash storage count/capa: %zu / %zu",
+  FIO_LOG_DEBUG2("(%d) HTTP MIME hash storage count/capa: %zu / %zu",
+                 fio_getpid(),
                  FIO___HTTP_MIMETYPES.count,
                  fio___http_mime_map_capa(&FIO___HTTP_MIMETYPES));
   fio___http_mime_map_destroy(&FIO___HTTP_MIMETYPES);
@@ -43381,7 +43415,7 @@ error:
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___sse_on_data(fio_s *io) {
-  FIO_LOG_DEBUG2("Reading SSE data from socket");
+  FIO_LOG_DDEBUG2("(%d) Reading SSE data from socket", fio_srv_pid());
   fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
   size_t r;
   for (;;) {
@@ -43452,7 +43486,7 @@ FIO_SFUNC void fio___http_controller_sse_write_body(
   }
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
-  if (args.fd != -1)
+  if (!args.buf && (unsigned)(args.fd + 1) > 1)
     close(args.fd);
 }
 /* *****************************************************************************
@@ -43572,7 +43606,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .send_headers = fio___http_controller_http1_send_headers,
         .write_body = fio___http_controller_http1_write_body,
         .on_finish = fio___http_controller_http1_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -43581,7 +43615,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
       r = (fio_http_controller_s){
           .on_destroyed = fio__http_controller_on_destroyed_client,
           // .on_finish = fio___http_controller_http1_on_finish_client,
-          .close = fio___http_default_close,
+          .close_io = fio___http_default_close,
           .get_fd = fio___http_controller_get_fd,
       };
     } else {
@@ -43590,7 +43624,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
           .send_headers = fio___http_controller_http1_send_headers,
           .write_body = fio___http_controller_http1_write_body,
           .on_finish = fio___http_controller_http1_on_finish,
-          .close = fio___http_default_close,
+          .close_io = fio___http_default_close,
           .get_fd = fio___http_controller_get_fd,
       };
     }
@@ -43598,7 +43632,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   case FIO___HTTP_PROTOCOL_HTTP2:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -43607,7 +43641,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_ws_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
@@ -43616,14 +43650,14 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_sse_write_body,
         .on_finish = fio___http_controller_ws_on_finish,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;
   case FIO___HTTP_PROTOCOL_NONE:
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
-        .close = fio___http_default_close,
+        .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
     return r;

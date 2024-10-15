@@ -179,13 +179,18 @@ Leak Counter Helpers
       goto error_double_free;                                                  \
     return tmp;                                                                \
   error_double_free:                                                           \
-    FIO_ASSERT(0, FIO_MACRO2STR(name) " `free` after `free` detected!");       \
+    FIO_ASSERT(0,                                                              \
+               "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
+               fio_getpid());                                                  \
   }                                                                            \
   static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
-    FIO_LOG_DEBUG2("testing leaks for " FIO_MACRO2STR(name));                  \
+    FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
+                   fio_getpid());                                              \
     if (counter)                                                               \
-      FIO_LOG_ERROR("%zu leaks detected for " FIO_MACRO2STR(name), counter);   \
+      FIO_LOG_ERROR("(%d) %zu leaks detected for " FIO_MACRO2STR(name),        \
+                    fio_getpid(),                                              \
+                    counter);                                                  \
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
     fio_state_callback_add(FIO_CALL_AT_EXIT,                                   \

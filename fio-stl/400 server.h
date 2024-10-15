@@ -1089,9 +1089,7 @@ FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
   ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
   (void)r;
-#if DEBUG
-  FIO_LOG_DEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
-#endif
+  FIO_LOG_DDEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
   fio___srvdata.wakeup_wait = 0;
 }
 FIO_SFUNC void fio___srv_wakeup_on_close(void *ignr_) {
@@ -1523,7 +1521,7 @@ static void fio___srv_try_to_write_to_io(fio_s *io) {
 connection_error:
 #if DEBUG
   if (fio_stream_any(&io->stream))
-    FIO_LOG_DDEBUG2(
+    FIO_LOG_DERROR(
         "(%d) IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
         fio___srvdata.pid,
         errno,
@@ -1741,7 +1739,9 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG2("Server shutting down with %zu connected clients", connected);
+  FIO_LOG_DEBUG2("(%d) Server shutting down with %zu connected clients",
+                 fio___srvdata.pid,
+                 connected);
   /* cycle while connections exist. */
   fio_queue_push(fio___srv_tasks,
                  fio___srv_shutdown_task,
@@ -1759,7 +1759,9 @@ FIO_SFUNC void fio___srv_shutdown(void) {
       ++connected;
     }
   }
-  FIO_LOG_DEBUG("Server shutdown timed out with %zu clients", connected);
+  FIO_LOG_DEBUG2("(%d) Server shutdown timeout/done with %zu clients",
+                 fio___srvdata.pid,
+                 connected);
   /* perform remaining tasks. */
   fio_queue_perform_all(fio___srv_tasks);
 }
@@ -2056,7 +2058,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
                                   args.offset,
                                   args.copy,
                                   args.dealloc);
-  } else if (args.fd != -1) {
+  } else if ((unsigned)(args.fd + 1) > 1) {
     packet = fio_stream_pack_fd(args.fd, args.len, args.offset, args.copy);
   }
   if (!packet)
@@ -2092,6 +2094,8 @@ io_error_null:
     } u = {.fn = args.dealloc};
     // u.fn(args.buf);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
+    if ((unsigned)(args.fd + 1) > 1)
+      close(args.fd);
   }
 }
 

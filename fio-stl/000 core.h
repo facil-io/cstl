@@ -241,6 +241,7 @@ OS Specific includes and Macros
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___KILL_SELF()   kill(0, SIGINT)
+#define fio_getpid          getpid
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
@@ -267,6 +268,8 @@ OS Specific includes and Macros
 #include <sysinfoapi.h>
 #include <time.h>
 #include <winsock2.h> /* struct timeval is here... why? Microsoft. */
+
+#define fio_getpid _getpid
 
 #define FIO___KILL_SELF() TerminateProcess(GetCurrentProcess(), 1)
 
@@ -510,10 +513,18 @@ Logging Defaults (no-op)
 #ifdef DEBUG
 #define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
 #define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
+#define FIO_LOG_DERROR(...)           FIO_LOG_ERROR(__VA_ARGS__)
+#define FIO_LOG_DSECURITY(...)        FIO_LOG_SECURITY(__VA_ARGS__)
+#define FIO_LOG_DWARNING(...)         FIO_LOG_WARNING(__VA_ARGS__)
+#define FIO_LOG_DINFO(...)            FIO_LOG_INFO(__VA_ARGS__)
 #define FIO_ASSERT___PERFORM_SIGNAL() FIO___KILL_SELF();
 #else
-#define FIO_LOG_DDEBUG(...)  ((void)(0))
-#define FIO_LOG_DDEBUG2(...) ((void)(0))
+#define FIO_LOG_DDEBUG(...)    ((void)(0))
+#define FIO_LOG_DDEBUG2(...)   ((void)(0))
+#define FIO_LOG_DERROR(...)    ((void)(0))
+#define FIO_LOG_DSECURITY(...) ((void)(0))
+#define FIO_LOG_DWARNING(...)  ((void)(0))
+#define FIO_LOG_DINFO(...)     ((void)(0))
 #define FIO_ASSERT___PERFORM_SIGNAL()
 #endif /* DEBUG */
 

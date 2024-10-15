@@ -177,7 +177,8 @@ FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
   }
-  FIO_LOG_DEBUG2("fio_state_callback maps have been cleared.");
+  FIO_LOG_DEBUG2("(%d) fio_state_callback maps have been cleared.",
+                 fio_getpid());
 }
 
 /** Adds a callback to the list of callbacks to be called for the event. */
