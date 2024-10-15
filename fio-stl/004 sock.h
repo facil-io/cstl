@@ -297,6 +297,7 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(
     else if ((port[0] | 32) == 's' && (port[1] | 32) == 's' &&
              (port[2] | 32) == 'e' && (port[3] | 32) == 's')
       port = "443";
+    break;
   case 5:
     if ((port[0] | 32) == 'h' && (port[1] | 32) == 't' &&
         (port[2] | 32) == 't' && (port[3] | 32) == 'p' && (port[4] | 32) == 's')

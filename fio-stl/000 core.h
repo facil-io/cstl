@@ -1284,26 +1284,27 @@ FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
 
 /** Returns the number of valid UTF-8 bytes used by first char at `str`. */
 FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst = 1;
+  size_t r, tst;
   const uint8_t *s = (uint8_t *)str_;
-  r = fio_utf8_char_len_unsafe(*s);
-  r &= 7;
+  r = fio_utf8_char_len_unsafe(*s) & 7;
 #if FIO_UTF8_ALLOW_IF
   if (r < 2)
     return r;
+  tst = 1;
   tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
   tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
   tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
   if (r != tst)
     r = 0;
 #else
-  tst &= (r > 0);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst = (r > 0);
+  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3));
+  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2));
   tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
   r &= 0U - (r == tst);
-  return r;
 #endif
+
+  return r;
 }
 
 /** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
@@ -1353,6 +1354,17 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
   unsigned len = fio_utf8_char_len(s);
   *str += len;
 #if FIO_UTF8_ALLOW_IF
+  switch (len) {
+  case 4:
+    return (((uint32_t)s[0] & 15) << 18) | (((uint32_t)s[1] & 63) << 12) |
+           (((uint32_t)s[2] & 63) << 6) | ((uint32_t)s[3] & 63);
+  case 3:
+    return (((uint32_t)s[0] & 31) << 12) | (((uint32_t)s[1] & 63) << 6) |
+           ((uint32_t)s[2] & 63);
+  case 2: return (((uint32_t)s[0] & 63) << 6) | ((uint32_t)s[0] & 63);
+  case 1: return (uint32_t)*s;
+  }
+  return 0;
   if (!len)
     return 0;
   if (len == 1)
@@ -1366,12 +1378,11 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
          ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
          ((uint32_t)(s[t4] & 63));
 #else
-  len &= 7;
   const uint32_t t1 = (len > 1);
   const uint32_t t2 = (len > 2);
-  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3 = t2 + (len > 3);
   const uint32_t t3a = (len > 2) + (len > 3);
-  const uint32_t t4 = len - 1;
+  const uint32_t t4 = len - t1;
   uint32_t r1 = *s & ((uint32_t)0UL - (len == 1));
   uint32_t r2 = ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
                 ((uint32_t)(s[t1] & 63) << ((t3a << 3) - (t3a << 1))) |
