@@ -52298,7 +52298,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       }
       end = clock();
       fprintf(stderr,
-              "\t* memcmp libc test cycles:            %zu\n",
+              "\t* memcmp libc test cycles:             %zu\n",
               (size_t)(end - start));
       start = clock();
       for (size_t i = 0; i < test_repetitions; ++i) {
@@ -52308,7 +52308,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       }
       end = clock();
       fprintf(stderr,
-              "\t* strcmp libc test cycles:            %zu\n",
+              "\t* strcmp libc test cycles:             %zu\n",
               (size_t)(end - start));
       start = clock();
       for (size_t i = 0; i < test_repetitions; ++i) {
@@ -52321,7 +52321,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
       }
       end = clock();
       fprintf(stderr,
-              "\t* fio_ct_is_eq test cycles:             %zu (only equality)\n",
+              "\t* fio_ct_is_eq test cycles:            %zu (only equality)\n",
               (size_t)(end - start));
     }
 
