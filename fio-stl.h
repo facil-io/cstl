@@ -4585,6 +4585,10 @@ FIO_IFUNC int fio_d2expo(double d) {
 
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
 FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
+#ifndef FIO___ATON_TIE2EVEN
+  /* If set, performs a rounding attempt with tie to even */
+#define FIO___ATON_TIE2EVEN 0
+#endif
   union {
     uint64_t u64;
     double d;
@@ -4593,6 +4597,17 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
   if (!mant)
     return u.d;
   msbi = fio_msb_index_unsafe(mant);
+  if (FIO___ATON_TIE2EVEN && FIO_UNLIKELY(msbi > 52)) { /* losing precision */
+    bool not53 = (msbi != 53);
+    bool far_set = ((mant >> (53 + not53)) != 0);
+    mant = mant >> (msbi - (53 + not53));
+    mant |= far_set;
+    mant |= (mant >> (1U + not53)) & 1; /* set the non-even bit as rounder */
+    mant += 1; /* 1 will propagate if rounding is necessary. */
+    bool add_to_expo = (mant >> (53U + not53)) & 1;
+    mant >>= (1U + not53 + add_to_expo);
+    exponent += add_to_expo;
+  }
   /* normalize exponent */
   exponent += msbi + 1023;
   if (FIO_UNLIKELY(exponent > 2047))
@@ -4604,7 +4619,8 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
   /* reposition mant bits so we "hide" the fist set bit in bit[52] */
   if (msbi < 52)
     mant = mant << (52 - msbi);
-  else if (FIO_UNLIKELY(msbi > 52)) /* losing precision */
+  else if (!FIO___ATON_TIE2EVEN &&
+           FIO_UNLIKELY(msbi > 52)) /* losing precision */
     mant = mant >> (msbi - 52);
   u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
   return u.d;
@@ -5218,7 +5234,7 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
   p += base;                         /* consume '0' */
   base += ((p[0] | 32) == 'b');      /* binary */
   base += ((p[0] | 32) == 'x') << 1; /* hex */
-  base -= base && (p[0] == '.');     /* 0. isn't oct...  */
+  base -= (base & (p[0] == '.'));    /* 0. isn't oct...  */
   p += (base > 1);                   /* consume 'b' or 'x' */
   start = p;                         /* mark starting point */
 
@@ -46776,6 +46792,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                e[1].p,
                r[1].p);
   }
+  for (size_t i = 1; i < (~0ULL); i = ((i << 1U) | 1U)) {
+    union {
+      double d;
+      void *p;
+    } tst[2];
+    tst[0].d = fio_u2d(i, 0);
+    tst[1].d = (double)i;
+    char buf[128];
+    buf[0] = 'x';
+    fio_ltoa16u(buf + 1, i, 16);
+    buf[17] = 0;
+    FIO_ASSERT(tst[0].d == tst[0].d,
+               "fio_u2d failed (%s) %g != %g\n\t%p != %p",
+               buf,
+               tst[0].d,
+               tst[1].d,
+               tst[0].p,
+               tst[1].p);
+  }
 #if 1 || !(DEBUG - 1 + 1)
   {
     uint64_t start, end, rep = (1ULL << 22);
@@ -46805,6 +46840,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     end = fio_time_micro();
     fprintf(stderr, "\t- fio_i2d: %zuus\n", (size_t)(end - start));
     FIO_ASSERT(rtest == dbl[127], "fio_i2d results not the same as C cast?");
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += fio_u2d((int64_t)u64[i & 127], 1);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- fio_u2d: %zuus\n", (size_t)(end - start));
   }
 #endif
   fprintf(stderr, "* Testing fio_atol samples.\n");

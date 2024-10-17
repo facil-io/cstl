@@ -322,6 +322,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                e[1].p,
                r[1].p);
   }
+  for (size_t i = 1; i < (~0ULL); i = ((i << 1U) | 1U)) {
+    union {
+      double d;
+      void *p;
+    } tst[2];
+    tst[0].d = fio_u2d(i, 0);
+    tst[1].d = (double)i;
+    char buf[128];
+    buf[0] = 'x';
+    fio_ltoa16u(buf + 1, i, 16);
+    buf[17] = 0;
+    FIO_ASSERT(tst[0].d == tst[0].d,
+               "fio_u2d failed (%s) %g != %g\n\t%p != %p",
+               buf,
+               tst[0].d,
+               tst[1].d,
+               tst[0].p,
+               tst[1].p);
+  }
 #if 1 || !(DEBUG - 1 + 1)
   {
     uint64_t start, end, rep = (1ULL << 22);
@@ -351,6 +370,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     end = fio_time_micro();
     fprintf(stderr, "\t- fio_i2d: %zuus\n", (size_t)(end - start));
     FIO_ASSERT(rtest == dbl[127], "fio_i2d results not the same as C cast?");
+    start = fio_time_micro();
+    for (size_t i = 0; i < rep; ++i) {
+      u64[i & 127] -= i;
+      FIO_COMPILER_GUARD;
+      dbl[i & 127] += fio_u2d((int64_t)u64[i & 127], 1);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio_time_micro();
+    fprintf(stderr, "\t- fio_u2d: %zuus\n", (size_t)(end - start));
   }
 #endif
   fprintf(stderr, "* Testing fio_atol samples.\n");

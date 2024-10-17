@@ -426,6 +426,10 @@ FIO_IFUNC int fio_d2expo(double d) {
 
 /** Converts a 64 bit integer to an IEEE 754 formatted double. */
 FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
+#ifndef FIO___ATON_TIE2EVEN
+  /* If set, performs a rounding attempt with tie to even */
+#define FIO___ATON_TIE2EVEN 0
+#endif
   union {
     uint64_t u64;
     double d;
@@ -434,6 +438,17 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
   if (!mant)
     return u.d;
   msbi = fio_msb_index_unsafe(mant);
+  if (FIO___ATON_TIE2EVEN && FIO_UNLIKELY(msbi > 52)) { /* losing precision */
+    bool not53 = (msbi != 53);
+    bool far_set = ((mant >> (53 + not53)) != 0);
+    mant = mant >> (msbi - (53 + not53));
+    mant |= far_set;
+    mant |= (mant >> (1U + not53)) & 1; /* set the non-even bit as rounder */
+    mant += 1; /* 1 will propagate if rounding is necessary. */
+    bool add_to_expo = (mant >> (53U + not53)) & 1;
+    mant >>= (1U + not53 + add_to_expo);
+    exponent += add_to_expo;
+  }
   /* normalize exponent */
   exponent += msbi + 1023;
   if (FIO_UNLIKELY(exponent > 2047))
@@ -445,7 +460,8 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
   /* reposition mant bits so we "hide" the fist set bit in bit[52] */
   if (msbi < 52)
     mant = mant << (52 - msbi);
-  else if (FIO_UNLIKELY(msbi > 52)) /* losing precision */
+  else if (!FIO___ATON_TIE2EVEN &&
+           FIO_UNLIKELY(msbi > 52)) /* losing precision */
     mant = mant >> (msbi - 52);
   u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
   return u.d;
@@ -1059,7 +1075,7 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
   p += base;                         /* consume '0' */
   base += ((p[0] | 32) == 'b');      /* binary */
   base += ((p[0] | 32) == 'x') << 1; /* hex */
-  base -= base && (p[0] == '.');     /* 0. isn't oct...  */
+  base -= (base & (p[0] == '.'));    /* 0. isn't oct...  */
   p += (base > 1);                   /* consume 'b' or 'x' */
   start = p;                         /* mark starting point */
 
