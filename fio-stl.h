@@ -47146,7 +47146,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
       double d_;                                                               \
       uint64_t as_i;                                                           \
     } pn, pn1, pn2;                                                            \
-    pn2.d_ = d;                                                                \
+    pn2.d_ = (double)d;                                                        \
     char *p = (char *)(s);                                                     \
     char *p1 = (char *)(s);                                                    \
     char *p2 = (char *)(s);                                                    \
@@ -47184,10 +47184,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
                         s,                                                     \
                         r2,                                                    \
                         std);                                                  \
-    } else if (r == 0.0 && d != 0.0 && !isnan((double)d)) {                    \
+    } else if (r == 0.0 && (double)d != 0.0 && !isnan((double)d)) {            \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("float range limit marked before: %s\n", s);           \
-    } else if (r2 == 0.0 && d != 0.0 && !isnan((double)d)) {                   \
+    } else if (r2 == 0.0 && (double)d != 0.0 && !isnan((double)d)) {           \
       if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
         FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);      \
     } else {                                                                   \
@@ -47373,7 +47373,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     stop = clock();
     fprintf(stderr,
             "* fio_atol speed test completed in %zu cycles\n",
-            stop - start);
+            (size_t)(stop - start));
     r = 0;
 
     start = clock();
@@ -47386,7 +47386,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     stop = clock();
     fprintf(stderr,
             "* system atol speed test completed in %zu cycles\n",
-            stop - start);
+            (size_t)(stop - start));
   }
 #endif /* !DEBUG */
 }
