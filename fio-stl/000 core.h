@@ -155,6 +155,11 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 #endif
 
 #if _MSC_VER
+
+#undef _CRT_SECURE_NO_WARNINGS
+/** We define this because Microsoft's naming scheme isn't portable */
+#define _CRT_SECURE_NO_WARNINGS 1
+
 #define inline   __inline
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
