@@ -505,8 +505,6 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
               !(i.value.len == 4 &&
                 (fio_buf2u32u(i.value.buf) | 0x20202020UL) == wrd_true))
             cert = key = i.value;
-          else
-            FIO_LOG_DEBUG2("tls=1 or tls=true detected");
         }
         break;
       case 4:
@@ -528,13 +526,13 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
   }
   FIO_LOG_DDEBUG2(
       "URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: %.*s\n\tpass: %.*s",
-      (tls_info.tls ? "Secure" : "plaintext"),
-      (int)tls_info.key.len,
-      tls_info.key.buf,
-      (int)tls_info.cert.len,
-      tls_info.cert.buf,
-      (int)tls_info.pass.len,
-      tls_info.pass.buf);
+      (r.tls ? "Secure" : "plaintext"),
+      (int)r.key.len,
+      r.key.buf,
+      (int)r.cert.len,
+      r.cert.buf,
+      (int)r.pass.len,
+      r.pass.buf);
   return r;
 }
 /* *****************************************************************************
