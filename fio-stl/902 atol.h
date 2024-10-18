@@ -275,7 +275,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     size_t tmp = fio_ltoa(buffer, i, 0);
     FIO_ASSERT(tmp > 0, "fio_ltoa returned length error");
     char *tmp2 = buffer;
-    int i2 = fio_atol(&tmp2);
+    int i2 = (int)fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (1:%i)", i);
     FIO_ASSERT(i == i2,
                "fio_ltoa-fio_atol roundtrip error %lld != %lld",

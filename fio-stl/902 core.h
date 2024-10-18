@@ -78,10 +78,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
     FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot failed");
     tmp = 1;
-    tmp = fio_rrot32(tmp, 1);
+    tmp = fio_rrot32((uint32_t)tmp, 1);
     FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 31), "fio_rrot32 failed");
-    tmp = fio_lrot32(tmp, 3);
+    tmp = fio_lrot32((uint32_t)tmp, 3);
     FIO_COMPILER_GUARD;
     FIO_ASSERT(tmp == ((uint64_t)1 << 2), "fio_lrot32 failed");
     tmp = 1;

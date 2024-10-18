@@ -15,8 +15,11 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-
 #ifdef FIO_ARRAY_NAME
+
+#ifndef FIO_ARRAY_NOT_FOUND
+#define FIO_ARRAY_NOT_FOUND ((uint32_t)-1)
+#endif
 
 #ifdef FIO_ARRAY_TYPE_STR
 #ifndef FIO_ARRAY_TYPE
@@ -142,7 +145,7 @@ typedef struct FIO_NAME(FIO_ARRAY_NAME, s) {
   uint32_t end;
   /* end common header (with embedded array type) */
   /** The array's capacity - limited to 32bits, but we use the extra padding. */
-  uintptr_t capa;
+  uint32_t capa;
   /** a pointer to the array's memory (if not embedded) */
   FIO_ARRAY_TYPE *ary;
 #if FIO_ARRAY_ENABLE_EMBEDDED > 1
@@ -207,7 +210,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME2(FIO_ARRAY_NAME, ptr)(FIO_ARRAY_PTR ary);
  * Returns the array's new capacity.
  */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary,
-                                                 int32_t capa);
+                                                 int64_t capa);
 
 /**
  * Adds all the items in the `src` Array to the end of the `dest` Array.
@@ -231,7 +234,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest,
  * Returns a pointer to the new object, or NULL on error.
  */
 SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary,
-                                                    int32_t index,
+                                                    int64_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old);
 
@@ -242,17 +245,17 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary,
  * last element).
  */
 FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary,
-                                                       int32_t index);
+                                                       int64_t index);
 
 /**
- * Returns the index of the object or -1 if the object wasn't found.
+ * Returns the index of the object or (uint32_t)-1 if the object wasn't found.
  *
  * If `start_at` is negative (i.e., -1), than seeking will be performed in
  * reverse, where -1 == last index (-2 == second to last, etc').
  */
-SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
-                                             FIO_ARRAY_TYPE data,
-                                             int32_t start_at);
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
+                                              FIO_ARRAY_TYPE data,
+                                              int64_t start_at);
 
 /**
  * Removes an object from the array, MOVING all the other objects to prevent
@@ -267,7 +270,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary,
  * It could get expensive.
  */
 SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary,
-                                           int32_t index,
+                                           int64_t index,
                                            FIO_ARRAY_TYPE *old);
 
 /**
@@ -353,7 +356,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                               int (*task)(FIO_NAME(FIO_ARRAY_NAME, each_s) *
                                           info),
                               void *udata,
-                              int32_t start_at);
+                              int64_t start_at);
 
 #ifndef FIO_ARRAY_EACH
 /**
@@ -502,7 +505,7 @@ FIO_IFUNC int FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(FIO_ARRAY_PTR ary_) {
  * last element).
  */
 FIO_IFUNC FIO_ARRAY_TYPE FIO_NAME(FIO_ARRAY_NAME, get)(FIO_ARRAY_PTR ary_,
-                                                       int32_t index) {
+                                                       int64_t index) {
   FIO_PTR_TAG_VALID_OR_RETURN(ary_, FIO_ARRAY_TYPE_INVALID);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
@@ -538,7 +541,7 @@ FIO_IFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME,
   FIO_PTR_TAG_VALID_OR_RETURN(ary_, NULL);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
-  int32_t count;
+  int64_t count;
   FIO_ARRAY_TYPE *a;
   switch (FIO_NAME_BL(FIO_ARRAY_NAME, embedded)(ary_)) {
   case 0:
@@ -655,10 +658,12 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
 
 /** Reserves a minimal capacity for the array. */
 SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, reserve)(FIO_ARRAY_PTR ary_,
-                                                 int32_t capa_) {
+                                                 int64_t capa_) {
   FIO_PTR_TAG_VALID_OR_RETURN(ary_, 0);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_ARRAY_NAME, s), ary_);
+  if (capa_ > UINT32_MAX || capa_ < ((int64_t)0LL - UINT32_MAX))
+    return ary->capa;
   uint32_t abs_capa = ((capa_ >= 0) ? (uint32_t)capa_ : (uint32_t)(0 - capa_));
   uint32_t capa;
   FIO_ARRAY_TYPE *tmp;
@@ -828,7 +833,7 @@ SFUNC FIO_ARRAY_PTR FIO_NAME(FIO_ARRAY_NAME, concat)(FIO_ARRAY_PTR dest_,
  * Returns a pointer to the new object, or NULL on error.
  */
 SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
-                                                    int32_t index,
+                                                    int64_t index,
                                                     FIO_ARRAY_TYPE data,
                                                     FIO_ARRAY_TYPE *old) {
   FIO_ARRAY_TYPE *a = NULL;
@@ -846,6 +851,9 @@ SFUNC FIO_ARRAY_TYPE *FIO_NAME(FIO_ARRAY_NAME, set)(FIO_ARRAY_PTR ary_,
     if (index < 0)
       goto negative_expansion;
   }
+
+  if ((size_t)index > 0xFFFFFFFFULL)
+    goto invalid;
 
   if ((uint32_t)index >= count) {
     if ((uint32_t)index == count)
@@ -885,30 +893,30 @@ expansion:
   {
     uint8_t was_moved = 0;
     /* test if we need to move objects to make room at the end */
-    if (ary->start + index >= ary->capa) {
+    if (ary->start + (uint32_t)index >= ary->capa) {
       FIO_MEMMOVE(ary->ary, ary->ary + ary->start, (count) * sizeof(*ary->ary));
       ary->start = 0;
-      ary->end = index + 1;
+      ary->end = (uint32_t)index + 1;
       was_moved = 1;
     }
     /* initialize memory in between objects */
     if (was_moved || !FIO_MEM_REALLOC_IS_SAFE_ ||
         !FIO_ARRAY_TYPE_INVALID_SIMPLE) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
-      FIO_MEMSET(a + count, 0, (index - count) * sizeof(*ary->ary));
+      FIO_MEMSET(a + count, 0, ((uint32_t)index - count) * sizeof(*ary->ary));
 #else
       for (size_t i = count; i <= (size_t)index; ++i) {
         FIO_ARRAY_TYPE_COPY(a[i], FIO_ARRAY_TYPE_INVALID);
       }
 #endif
     }
-    ary->end = index + 1;
+    ary->end = (uint32_t)index + 1;
   }
   goto done;
 
 expand_embedded:
   pre_existing = 0;
-  ary->start = index + 1;
+  ary->start = (uint32_t)index + 1;
   a = FIO_ARRAY2EMBEDDED(ary)->embedded;
   goto done;
 
@@ -916,16 +924,17 @@ negative_expansion:
   pre_existing = 0;
   FIO_NAME(FIO_ARRAY_NAME, reserve)(ary_, (index - count));
   index = 0 - index;
-
+  if (index > ary->capa)
+    goto invalid;
   if ((FIO_ARRAY_IS_EMBEDDED(ary)))
     goto negative_expansion_embedded;
   a = ary->ary;
   if (index > (int32_t)ary->start) {
     FIO_MEMMOVE(a + index, a + ary->start, count * sizeof(*a));
-    ary->end = index + count;
-    ary->start = index;
+    ary->end = (uint32_t)index + count;
+    ary->start = (uint32_t)index;
   }
-  index = ary->start - index;
+  index = ary->start - (uint32_t)index;
   if ((uint32_t)(index + 1) < ary->start) {
 #if FIO_ARRAY_TYPE_INVALID_SIMPLE
     FIO_MEMSET(a + index, 0, (ary->start - index) * (sizeof(*a)));
@@ -935,7 +944,7 @@ negative_expansion:
     }
 #endif
   }
-  ary->start = index;
+  ary->start = (uint32_t)index;
   goto done;
 
 negative_expansion_embedded:
@@ -961,14 +970,14 @@ invalid:
 }
 
 /**
- * Returns the index of the object or -1 if the object wasn't found.
+ * Returns the index of the object or (uint32_t)-1 if the object wasn't found.
  *
  * If `start_at` is negative (i.e., -1), than seeking will be performed in
  * reverse, where -1 == last index (-2 == second to last, etc').
  */
-SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
-                                             FIO_ARRAY_TYPE data,
-                                             int32_t start_at) {
+SFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
+                                              FIO_ARRAY_TYPE data,
+                                              int64_t start_at) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   if (!a)
     return -1;
@@ -979,7 +988,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
       start_at = (int32_t)count;
     while ((uint32_t)start_at < count) {
       if (FIO_ARRAY_TYPE_CMP(a[start_at], data))
-        return start_at;
+        return (uint32_t)start_at;
       ++start_at;
     }
   } else {
@@ -990,7 +999,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
     count += 1;
     while (count--) {
       if (FIO_ARRAY_TYPE_CMP(a[count], data))
-        return count;
+        return (uint32_t)count;
     }
   }
   return -1;
@@ -1006,7 +1015,7 @@ SFUNC int32_t FIO_NAME(FIO_ARRAY_NAME, find)(FIO_ARRAY_PTR ary_,
  * Returns 0 on success and -1 on error.
  */
 SFUNC int FIO_NAME(FIO_ARRAY_NAME, remove)(FIO_ARRAY_PTR ary_,
-                                           int32_t index,
+                                           int64_t index,
                                            FIO_ARRAY_TYPE *old) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   FIO_NAME(FIO_ARRAY_NAME, s) *ary =
@@ -1378,7 +1387,7 @@ IFUNC uint32_t FIO_NAME(FIO_ARRAY_NAME,
                               int (*task)(FIO_NAME(FIO_ARRAY_NAME, each_s) *
                                           info),
                               void *udata,
-                              int32_t start_at) {
+                              int64_t start_at) {
   FIO_ARRAY_TYPE *a = FIO_NAME2(FIO_ARRAY_NAME, ptr)(ary_);
   if (!a)
     return (uint32_t)-1;
@@ -1514,7 +1523,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1),
                  "unshift-get cycle failed (%d)",
                  i);
-      int32_t negative_index = 0 - (((int)(FIO_ARRAY_EMBEDDED_CAPA) + 3) - i);
+      int64_t negative_index = 0 - (((int)(FIO_ARRAY_EMBEDDED_CAPA) + 3) - i);
       o = FIO_NAME(FIO_ARRAY_NAME, get)(a, negative_index);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1),
                  "get with %d returned wrong result.",
@@ -1597,8 +1606,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
     if (FIO_ARRAY_TYPE_CMP(o, FIO_ARRAY_TYPE_INVALID)) {
       FIO_ARRAY_TEST_OBJ_SET(o, 100);
     }
-    int found = FIO_NAME(FIO_ARRAY_NAME, find)(a, o, 0);
-    FIO_ASSERT(found == -1,
+    uint32_t found = FIO_NAME(FIO_ARRAY_NAME, find)(a, o, 0);
+    FIO_ASSERT(found == (uint32_t)-1,
                "seeking for an object that doesn't exist should fail.");
     FIO_ARRAY_TEST_OBJ_SET(o, 1);
     found = FIO_NAME(FIO_ARRAY_NAME, find)(a, o, 1);

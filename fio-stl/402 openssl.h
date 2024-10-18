@@ -82,25 +82,27 @@ static X509 *fio_tls_create_self_signed(const char *server_name) {
   /* set identity details */
   X509_NAME *s = X509_get_subject_name(cert);
   size_t srv_name_len = FIO_STRLEN(server_name);
+  FIO_ASSERT(srv_name_len < (size_t)((int)0 - 1),
+             "fio_tls_create_self_signed server_name too long");
   X509_NAME_add_entry_by_txt(s,
                              "O",
                              MBSTRING_ASC,
                              (unsigned char *)server_name,
-                             srv_name_len,
+                             (int)srv_name_len,
                              -1,
                              0);
   X509_NAME_add_entry_by_txt(s,
                              "CN",
                              MBSTRING_ASC,
                              (unsigned char *)server_name,
-                             srv_name_len,
+                             (int)srv_name_len,
                              -1,
                              0);
   X509_NAME_add_entry_by_txt(s,
                              "CA",
                              MBSTRING_ASC,
                              (unsigned char *)server_name,
-                             srv_name_len,
+                             (int)srv_name_len,
                              -1,
                              0);
   X509_set_issuer_name(cert, s);
@@ -323,13 +325,15 @@ FIO_SFUNC ssize_t fio___openssl_read(int fd,
   ssize_t r;
   SSL *ssl = (SSL *)tls_ctx;
   errno = 0;
-  r = SSL_read(ssl, buf, len);
+  if (len > INT_MAX)
+    len = INT_MAX;
+  r = SSL_read(ssl, buf, (int)len);
   if (r > 0)
     return r;
   if (errno == EWOULDBLOCK || errno == EAGAIN)
-    return -1;
+    return (ssize_t)-1;
 
-  switch ((r = SSL_get_error(ssl, r))) {
+  switch ((r = (ssize_t)SSL_get_error(ssl, (int)r))) {
   case SSL_ERROR_SSL:                                   /* fall through */
   case SSL_ERROR_SYSCALL:                               /* fall through */
   case SSL_ERROR_ZERO_RETURN: return (r = 0);           /* EOF */
@@ -391,13 +395,15 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
     return r;
   SSL *ssl = (SSL *)tls_ctx;
   errno = 0;
-  r = SSL_write(ssl, buf, len);
+  if (len > INT_MAX)
+    len = INT_MAX;
+  r = SSL_write(ssl, buf, (int)len);
   if (r > 0)
     return r;
   if (errno == EWOULDBLOCK || errno == EAGAIN)
     return -1;
 
-  switch ((r = SSL_get_error(ssl, r))) {
+  switch ((r = (ssize_t)SSL_get_error(ssl, (int)r))) {
   case SSL_ERROR_SSL:                         /* fall through */
   case SSL_ERROR_SYSCALL:                     /* fall through */
   case SSL_ERROR_ZERO_RETURN: return (r = 0); /* EOF */

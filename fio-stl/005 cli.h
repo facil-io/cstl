@@ -300,6 +300,7 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
     if (!a->ary)
       FIO_LEAK_COUNTER_ON_ALLOC(fio_cli_ary);
     size_t new_capa = a->capa + 8;
+    FIO_ASSERT(new_capa < 0xFFFFFFFFU, "fio_cli data overflow");
     fio_cli_str_s *tmp =
         (fio_cli_str_s *)FIO_MEM_REALLOC_(a->ary,
                                           sizeof(*a->ary) * a->capa,
@@ -307,11 +308,11 @@ FIO_SFUNC uint32_t fio___cli_ary_new_index(fio___cli_ary_s *a) {
                                           a->capa);
     FIO_ASSERT_ALLOC(tmp);
     a->ary = tmp;
-    a->capa = new_capa;
+    a->capa = (uint32_t)new_capa;
     if (!(FIO_MEM_REALLOC_IS_SAFE_))
       FIO_MEMSET(a->ary + a->w, 0, sizeof(*a->ary) * (new_capa - a->w));
   }
-  FIO_ASSERT_DEBUG(a->w < a->capa, "CLI array index error!");
+  FIO_ASSERT_DEBUG(a->w < (uint32_t)a->capa, "CLI array index error!");
   return a->w++;
 }
 

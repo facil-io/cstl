@@ -90,13 +90,15 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #define FIO_SOCK_FD_ISVALID(fd) ((int)fd != (int)-1)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
-#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+#define fio_sock_write(fd, data, len)      write((fd), (data), (len))
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
-#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+#define fio_sock_read(fd, buf, len)        read((fd), (buf), (len))
 /** Acts as POSIX dup. Use this macro for portability with WinSock2. */
-#define fio_sock_dup(fd)              dup(fd)
+#define fio_sock_dup(fd)                   dup(fd)
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
-#define fio_sock_close(fd)            close(fd)
+#define fio_sock_close(fd)                 close(fd)
+/** Acts as POSIX accept. Use this macro for portability with WinSock2. */
+#define fio_sock_accept(fd, addr, addrlen) accept(fd, addr, addrlen)
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif

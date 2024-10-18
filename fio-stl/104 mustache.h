@@ -711,7 +711,7 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
   if (!FIO_BUF_INFO_IS_EQ(old_var_name, var))
     goto value_name_mismatch;
 
-  fio_u2buf32u(prev + 3, fio_bstr_len(p->root) + 1);
+  fio_u2buf32u(prev + 3, (uint32_t)(fio_bstr_len(p->root) + 1));
   fio___mustache_stand_alone_skip_eol(p);
 
 #if FIO_MUSTACHE_LAMBDA_SUPPORT
@@ -838,7 +838,7 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
   int r = fio___mustache_parse_template_file(&new_section);
   buf.u8[0] = FIO___MUSTACHE_I_STACK_POP;
   p->root = fio_bstr_write(new_section.root, buf.u8, 1);
-  fio_u2buf32u(p->root + ipos, fio_bstr_len(p->root));
+  fio_u2buf32u(p->root + ipos, (uint32_t)fio_bstr_len(p->root));
   fio___mustache_free_template(p, file_content);
   return r;
 }

@@ -77,7 +77,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sock)(void) {
                "incoming connection should have been detected (%d : %u)",
                srv,
                (unsigned)ev);
-    intptr_t accepted = accept(srv, NULL, NULL);
+    int accepted = fio_sock_accept(srv, NULL, NULL);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
                "accepted socket failed to open (%zd)",
                (ssize_t)accepted);

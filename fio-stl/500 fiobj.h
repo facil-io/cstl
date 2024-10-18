@@ -1355,9 +1355,9 @@ FIO_SFUNC size_t fiobj___mustache_array_length(void *ctx) {
 }
 /* if context is an Array, should return a context pointer @ index. */
 FIO_SFUNC void *fiobj___mustache_get_var_index(void *ctx, size_t index) {
-  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+  if (!FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY) || index > 0xFFFFFFFFUL)
     return NULL;
-  return fiobj_array_get((FIOBJ)ctx, index);
+  return fiobj_array_get((FIOBJ)ctx, (uint32_t)index);
 }
 /* should return the String value of context `var` as a `fio_buf_info_s`. */
 FIO_SFUNC fio_buf_info_s fiobj___mustache_var2str(void *var) {
@@ -1412,6 +1412,7 @@ typedef struct {
 #define FIO___RECURSIVE_INCLUDE  1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
+
 #define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
 #define FIO_ARRAY_NAME           fiobj___stack
 #define FIO_ARRAY_TYPE           fiobj___stack_element_s
@@ -1496,7 +1497,8 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
   uint32_t end = fiobj____each2_element_count(o);
   fiobj____each2_wrapper_task((fiobj_each_s *)&e_tmp);
   while (!d.stop && i.obj && i.pos < end) {
-    i.pos = fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, i.pos);
+    i.pos =
+        fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, (uint32_t)i.pos);
     if (d.next != FIOBJ_INVALID) {
       if (fiobj___stack_count(&d.stack) + 1 > FIOBJ_MAX_NESTING) {
         FIO_LOG_ERROR("FIOBJ nesting level too deep (%u)."
@@ -1520,7 +1522,7 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
     }
   };
   fiobj___stack_destroy(&d.stack);
-  return d.count;
+  return (uint32_t)d.count;
 }
 
 /* *****************************************************************************
@@ -1557,8 +1559,10 @@ SFUNC unsigned char fiobj___test_eq_nested(FIOBJ restrict a,
       const size_t count = fiobj____each2_element_count(a);
       for (size_t i = 0; i < count; ++i) {
         if (!fiobj___test_eq_nested(
-                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a, i),
-                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b, i),
+                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(a,
+                                                                   (int32_t)i),
+                FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(b,
+                                                                   (int32_t)i),
                 nesting))
           return 0;
       }
@@ -2207,9 +2211,9 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
         ++n.buf;
         --n.len;
       }
-      if (!n.len || n.buf[0] != ']')
+      if (!n.len || n.buf[0] != ']' || i > 0xFFFFFFFFU)
         return FIOBJ_INVALID;
-      o = fiobj_array_get(o, i);
+      o = fiobj_array_get(o, (uint32_t)i);
       ++n.buf;
       --n.len;
       if (n.len) {

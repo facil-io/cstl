@@ -210,7 +210,7 @@ typedef struct {
   /** Connection protocol (once connection established). */
   fio_protocol_s *protocol;
   /** Called in case of a failed connection, use for cleanup. */
-  void (*on_failed)(void *udata);
+  void (*on_failed)(fio_protocol_s *protocol, void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
   /** TLS builder object for TLS connections. */
@@ -225,7 +225,7 @@ SFUNC fio_s *fio_srv_connect(fio_srv_connect_args_s args);
 
 Connects to a remote URL (accepting TLS hints in the URL query and scheme). The protocol is only attached if the connection was established.
 
-**Note**: use the `on_failed` callback if cleanup is required after a failed connection. The `on_close` callback is only called if connection was successful.
+**Note**: use the `on_failed` callback if cleanup is required after a failed connection. The protocol's `on_close` callback is only called if connection was successful.
 
 `fio_srv_connect` adds some overhead in parsing the URL for TLS hints and for wrapping the connection protocol for timeout and connection validation before calling the `on_attached`. If these aren't required, it's possible to simply open a socket and attach it like so:
 

@@ -930,7 +930,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_mini)(
   if (!o->bits)
     return r;
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
-  const uint32_t capa = FIO_MAP_CAPA(o->bits);
+  const uint32_t capa = (uint32_t)FIO_MAP_CAPA(o->bits);
   const uint32_t mask = capa - 1;
   size_t pos = node->hash & 0xFF;
   for (uint32_t i = 0; i < capa; ++i) {
@@ -938,13 +938,13 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_mini)(
     if (imap[pos] == r.bhash &&
         FIO_NAME(FIO_MAP_NAME, __is_eq_hash)(o->map + pos, node->hash) &&
         FIO_MAP_KEY_CMP(o->map[pos].key, node->key)) {
-      r.act = pos;
+      r.act = (uint32_t)pos;
       return r;
     } else if (!imap[pos]) {
-      r.alt = r.home = pos;
+      r.alt = r.home = (uint32_t)pos;
       return r;
     } else if (imap[pos] == 255U) { /* "home" has been occupied before */
-      r.alt = r.home = pos;
+      r.alt = r.home = (uint32_t)pos;
     }
   }
   return r;
@@ -962,7 +962,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_med)(
       (uint32_t)-1,
       (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
-  const uint32_t mask = FIO_MAP_CAPA(o->bits) - 1;
+  const uint32_t mask = (uint32_t)(FIO_MAP_CAPA(o->bits) - 1);
   uint32_t guard = FIO_MAP_ATTACK_LIMIT + 1;
   uint32_t pos = r.home = (node->hash & mask);
   uint32_t step = 2;
@@ -1040,7 +1040,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     group += UINT64_C(0x0101010101010101);
     group &= UINT64_C(0x8080808080808080);
     while (group) {
-      uint32_t offset = fio_lsb_index_unsafe(group);
+      uint32_t offset = (uint32_t)fio_lsb_index_unsafe(group);
       group ^= (uint64_t)1ULL << offset;
       offset >>= 3;
       offset += pos;
@@ -1061,7 +1061,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     group += UINT64_C(0x0101010101010101);
     group &= UINT64_C(0x8080808080808080);
     while (group) {
-      uint32_t offset = fio_lsb_index_unsafe(group);
+      uint32_t offset = (uint32_t)fio_lsb_index_unsafe(group);
       group ^= (uint64_t)1ULL << offset;
       offset >>= 3;
       offset += pos;
@@ -1075,7 +1075,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     group += UINT64_C(0x0101010101010101);
     group &= UINT64_C(0x8080808080808080);
     while (group) {
-      uint32_t offset = fio_lsb_index_unsafe(group);
+      uint32_t offset = (uint32_t)fio_lsb_index_unsafe(group);
       group ^= (uint64_t)1ULL << offset;
       offset >>= 3;
       offset += pos;
@@ -1094,7 +1094,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     group += UINT64_C(0x0101010101010101);
     group &= UINT64_C(0x8080808080808080);
     while (group) {
-      uint32_t offset = fio_lsb_index_unsafe(group);
+      uint32_t offset = (uint32_t)fio_lsb_index_unsafe(group);
       group ^= (uint64_t)1ULL << offset;
       offset >>= 3;
       offset += pos;
@@ -1115,7 +1115,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
     group += UINT64_C(0x0101010101010101);
     group &= UINT64_C(0x8080808080808080);
     while (group) {
-      uint32_t offset = fio_lsb_index_unsafe(group);
+      uint32_t offset = (uint32_t)fio_lsb_index_unsafe(group);
       group ^= (uint64_t)1ULL << offset;
       offset >>= 3;
       offset += pos;
@@ -1163,8 +1163,6 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
     o->map[i].node.next = o->map[i].node.prev = i;
   } else {
 #ifdef FIO_MAP_LRU
-    FIO_INDEXED_LIST_PUSH(o->map, node, o->head, i);
-#else
     FIO_INDEXED_LIST_PUSH(o->map, node, o->head, i);
 #endif
   }
@@ -1439,7 +1437,7 @@ SFUNC void FIO_NAME(FIO_MAP_NAME, reserve)(FIO_MAP_PTR map, size_t capa) {
   FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
   if (capa <= FIO_MAP_CAPA(m->bits))
     return;
-  size_t bits = m->bits;
+  uint32_t bits = m->bits;
   for (; capa > FIO_MAP_CAPA(bits); ++bits)
     ;
   FIO_NAME(FIO_MAP_NAME, s) tmp;
@@ -1487,7 +1485,7 @@ FIO_SFUNC int FIO_NAME(FIO_MAP_NAME,
                                      e) {
   size_t *counter = (size_t *)e->udata;
   FIO_NAME(FIO_MAP_NAME, __node_delete_at)
-  (e->map, e->node - e->map->map, NULL);
+  (e->map, (uint32_t)(e->node - e->map->map), NULL);
   if ((counter[0] -= 1))
     return 0;
   return -1;

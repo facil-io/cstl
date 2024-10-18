@@ -182,7 +182,7 @@ typedef struct {
   /** Connection protocol (once connection established). */
   fio_protocol_s *protocol;
   /** Called in case of a failed connection, use for cleanup. */
-  void (*on_failed)(void *udata);
+  void (*on_failed)(fio_protocol_s *protocol, void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
   /** TLS builder object for TLS connections. */
@@ -1913,17 +1913,17 @@ SFUNC int fio_srv_is_worker(void) { return fio___srvdata.is_worker; }
 /* Returns the number or workers the server will actually run. */
 SFUNC uint16_t fio_srv_workers(int workers) {
   if (workers < 0) {
-    int cores = -1;
+    long cores = -1;
 #ifdef _SC_NPROCESSORS_ONLN
     cores = sysconf(_SC_NPROCESSORS_ONLN);
 #endif /* _SC_NPROCESSORS_ONLN */
-    if (cores == -1) {
+    if (cores == -1L) {
       cores = 8;
       FIO_LOG_WARNING("fio_srv_start called with negative value for worker "
                       "count, but auto-detect failed, assuming %d CPU cores",
                       cores);
     }
-    workers = cores / (0 - workers);
+    workers = (int)(cores / (0 - workers));
     workers += !workers;
   }
   return workers;
@@ -2059,7 +2059,7 @@ SFUNC void fio_write2 FIO_NOOP(fio_s *io, fio_write_args_s args) {
                                   args.copy,
                                   args.dealloc);
   } else if ((unsigned)(args.fd + 1) > 1) {
-    packet = fio_stream_pack_fd(args.fd, args.len, args.offset, args.copy);
+    packet = fio_stream_pack_fd((int)args.fd, args.len, args.offset, args.copy);
   }
   if (!packet)
     goto error;
@@ -2095,7 +2095,7 @@ io_error_null:
     // u.fn(args.buf);
     fio_queue_push(fio___srv_tasks, fio_write2___dealloc_task, u.ptr, args.buf);
     if ((unsigned)(args.fd + 1) > 1)
-      close(args.fd);
+      close((int)args.fd);
   }
 }
 
@@ -2241,7 +2241,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   int fd;
   fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
   fio_srv_unsuspend(io);
-  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
+  while ((fd = fio_sock_accept(fio_fd_get(io), NULL, NULL)) != -1) {
     fio_srv_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
   fio_free2(io);
@@ -2420,7 +2420,7 @@ Establishing New Connections
 typedef struct {
   fio_protocol_s protocol;
   fio_protocol_s *upr;
-  void (*on_failed)(void *udata);
+  void (*on_failed)(fio_protocol_s *protocol, void *udata);
   void *udata;
   void *tls_ctx;
   size_t url_len;
@@ -2436,7 +2436,7 @@ FIO_SFUNC void fio___connecting_cleanup(fio___connecting_s *c) {
 FIO_SFUNC void fio___connecting_on_close(void *udata) {
   fio___connecting_s *c = (fio___connecting_s *)udata;
   if (c->on_failed)
-    c->on_failed(c->udata);
+    c->on_failed(c->upr, c->udata);
   fio___connecting_cleanup(c);
 }
 FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
@@ -2458,7 +2458,7 @@ SFUNC fio_s *fio_srv_connect FIO_NOOP(fio_srv_connect_args_s args) {
     return NULL;
   if (!args.url) {
     if (args.on_failed)
-      args.on_failed(args.udata);
+      args.on_failed(args.protocol, args.udata);
     return NULL;
   }
   if (!args.timeout)

@@ -325,7 +325,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
       tmp->next = p;
       em = (fio_stream_packet_embd_s *)(tmp + 1);
       em->type = FIO_PACKET_TYPE_EMBEDDED;
-      em->length = slice;
+      em->length = (uint32_t)slice;
       FIO_MEMCPY(em->buf, (char *)buf + offset + (len - slice), slice);
       p = tmp;
       len -= slice;

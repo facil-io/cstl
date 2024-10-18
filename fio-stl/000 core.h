@@ -1263,7 +1263,7 @@ UTF-8 Support (basic)
 #endif
 
 /* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
+FIO_IFUNC unsigned fio_utf8_code_len(uint32_t u) {
   uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
                   ((uint32_t)(u) > 65535));
   len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
@@ -1271,7 +1271,7 @@ FIO_IFUNC size_t fio_utf8_code_len(uint32_t u) {
 }
 
 /** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
-FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
+FIO_IFUNC unsigned fio_utf8_char_len_unsafe(uint8_t c) {
   /* Ruby script for map:
   map = [];
   32.times { | i |
@@ -1290,8 +1290,8 @@ FIO_IFUNC size_t fio_utf8_char_len_unsafe(uint8_t c) {
 }
 
 /** Returns the number of valid UTF-8 bytes used by first char at `str`. */
-FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
-  size_t r, tst;
+FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
+  unsigned r, tst;
   const uint8_t *s = (uint8_t *)str_;
   r = fio_utf8_char_len_unsafe(*s) & 7;
 #if FIO_UTF8_ALLOW_IF
@@ -1315,7 +1315,7 @@ FIO_IFUNC size_t fio_utf8_char_len(const void *str_) {
 }
 
 /** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
-FIO_IFUNC size_t fio_utf8_write(void *dest_, uint32_t u) {
+FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
   const uint8_t len = fio_utf8_code_len(u);
   uint8_t *dest = (uint8_t *)dest_;
 #if FIO_UTF8_ALLOW_IF
@@ -1892,8 +1892,8 @@ typedef struct fio_index8_node_s {
     register const size_t n__ = (i);                                           \
     (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
     (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = (n__);              \
+    (root)[(head)].node_name.prev = (n__);                                     \
   } while (0)
 
 /** UNSAFE macro for adding a node to the begging of the list. */
@@ -1902,9 +1902,9 @@ typedef struct fio_index8_node_s {
     register const size_t n__ = (i);                                           \
     (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
     (root)[n__].node_name.prev = (head);                                       \
-    (root)[(root)[(head)].node_name.next].node_name.prev = n__;                \
-    (root)[(head)].node_name.next = n__;                                       \
-    (head) = n__;                                                              \
+    (root)[(root)[(head)].node_name.next].node_name.prev = (n__);              \
+    (root)[(head)].node_name.next = (n__);                                     \
+    (head) = (n__);                                                            \
   } while (0)
 
 /** UNSAFE macro for removing a node from a list. */
@@ -1925,7 +1925,7 @@ typedef struct fio_index8_node_s {
         (root)[n__].node_name.next;                                            \
     (root)[(root)[n__].node_name.next].node_name.prev =                        \
         (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = (n__);           \
   } while (0)
 
 /** Loops through every index in the indexed list, assuming `head` is valid. */

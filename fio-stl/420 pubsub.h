@@ -1490,11 +1490,11 @@ FIO_SFUNC void fio___pubsub_message_encrypt(fio___pubsub_message_s *m) {
   pos += 8;
   fio_u2buf64_le(pos, m->data.published);
   pos += 8;
-  fio_u2buf16_le(pos, m->data.filter);
+  fio_u2buf16_le(pos, (uint16_t)m->data.filter);
   pos += 2;
-  fio_u2buf16_le(pos, m->data.channel.len);
+  fio_u2buf16_le(pos, (uint16_t)m->data.channel.len);
   pos += 2;
-  fio_u2buf24_le(pos, m->data.message.len);
+  fio_u2buf24_le(pos, (uint32_t)m->data.message.len);
   pos += 3;
   *(pos++) = m->data.is_json;
   const size_t enc_len = m->data.channel.len + m->data.message.len + 2;

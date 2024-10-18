@@ -129,7 +129,7 @@ endif
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 # optimization level in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined -fsanitize=address
 OPTIMIZATION_DEBUG=-O0 -g -coverage -fno-omit-frame-pointer -fno-builtin
-# Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic
+# Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic -Wshorten-64-to-32
 WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security
 # any extra include folders, space separated list. (i.e. `pg_config --includedir`)
 INCLUDE=.

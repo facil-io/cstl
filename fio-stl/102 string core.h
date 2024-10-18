@@ -1062,7 +1062,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
   return r;
 no_mem:
   FIO_LOG_FATAL("fio_keystr_init allocation failed - results undefined!!!");
-  r = fio_keystr_tmp(str.buf, str.len);
+  r = fio_keystr_tmp(str.buf, (uint32_t)str.len);
   return r;
 }
 /** Destroys a copy of `fio_keystr_s` - used internally by the hash map. */
@@ -1389,7 +1389,7 @@ fio_string_is_greater
  * Note: returns 0 if data in b is bigger than or equal(!).
  */
 SFUNC int fio_string_is_greater_buf(fio_buf_info_s a, fio_buf_info_s b) {
-  const size_t a_len_is_bigger = a.len > b.len;
+  const int a_len_is_bigger = a.len > b.len;
   size_t len = a_len_is_bigger ? b.len : a.len; /* shared length */
   if (a.buf == b.buf)
     return a_len_is_bigger;
@@ -2509,7 +2509,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
           continue;
         del += (*del == ';');
         reduced -= (del - tmp);
-        reduced += fio_utf8_code_len(num);
+        reduced += fio_utf8_code_len((uint32_t)num);
         continue;
       }
       union {
@@ -2561,7 +2561,8 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
             (del[-1] == 'x' ? fio_atol16u : fio_atol10u)((char **)&del);
         if (*del != ';' || num > 65535)
           goto untrusted_no_encode;
-        dest->len += fio_utf8_write((uint8_t *)dest->buf + dest->len, num);
+        dest->len +=
+            fio_utf8_write((uint8_t *)dest->buf + dest->len, (uint32_t)num);
         del += (del < end && del[0] == ';');
         continue;
       }
@@ -2743,7 +2744,7 @@ SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
   size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
   if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
-    new_capa = (size_t)0xFFFFFFFFULL + sizeof(bstr_m[0]);
+    new_capa = (size_t)0x0FFFFFFFFULL + sizeof(bstr_m[0]);
   if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])) - 1)
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
@@ -2755,7 +2756,8 @@ SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
     return -1;
 update_metadata:
   dest->buf = (char *)(bstr_m + 1);
-  bstr_m->capa = dest->capa = new_capa - sizeof(bstr_m[0]);
+  dest->capa = new_capa - sizeof(bstr_m[0]);
+  bstr_m->capa = (uint32_t)dest->capa;
   return 0;
 
 copy_the_string:
@@ -2767,7 +2769,7 @@ copy_the_string:
   FIO_LEAK_COUNTER_ON_ALLOC(fio_bstr_s);
   if (dest->len) {
     FIO_MEMCPY((bstr_m + 1), dest->buf, dest->len + 1);
-    bstr_m->len = dest->len;
+    bstr_m->len = (uint32_t)dest->len;
   }
   if (dest->capa)
     fio_bstr_free(dest->buf);

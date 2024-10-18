@@ -161,7 +161,7 @@ Returns the current, temporary, array capacity (it's dynamic).
 #### `ARY_reserve`
 
 ```c
-uint32_t ARY_reserve(ARY_s * ary, int32_t capa);
+uint32_t ARY_reserve(ARY_s * ary, int64_t capa);
 ```
 
 Reserves capacity for new members to be added to the array.
@@ -186,7 +186,7 @@ Always returns the destination array (`dest`).
 
 ```c
 FIO_ARRAY_TYPE * ARY_set(ARY_s * ary,
-                       int32_t index,
+                       int64_t index,
                        FIO_ARRAY_TYPE data,
                        FIO_ARRAY_TYPE *old);
 ```
@@ -202,7 +202,7 @@ Returns a pointer to the new object, or NULL on error.
 #### `ARY_get`
 
 ```c
-FIO_ARRAY_TYPE ARY_get(ARY_s * ary, int32_t index);
+FIO_ARRAY_TYPE ARY_get(ARY_s * ary, int64_t index);
 ```
 
 Returns the value located at `index` (no copying is performed).
@@ -214,16 +214,18 @@ If `index` is negative, it will be counted from the end of the Array (-1 == last
 #### `ARY_find`
 
 ```c
-int32_t ARY_find(ARY_s * ary, FIO_ARRAY_TYPE data, int32_t start_at);
+uint32_t ARY_find(ARY_s * ary, FIO_ARRAY_TYPE data, int64_t start_at);
+/* When an object can't be founds, this is the returned value. */
+#define FIO_ARRAY_NOT_FOUND ((uint32_t)-1)
 ```
 
-Returns the index of the object or -1 if the object wasn't found.
+Returns the index of the object or `FIO_ARRAY_NOT_FOUND` (`(uint32_t)-1`) if the object wasn't found.
 
 If `start_at` is negative (i.e., -1), than seeking will be performed in reverse, where -1 == last index (-2 == second to last, etc').
 
 #### `ARY_remove`
 ```c
-int ARY_remove(ARY_s * ary, int32_t index, FIO_ARRAY_TYPE *old);
+int ARY_remove(ARY_s * ary, int64_t index, FIO_ARRAY_TYPE *old);
 ```
 
 Removes an object from the array, MOVING all the other objects to prevent "holes" in the data.
@@ -309,7 +311,7 @@ Returns -1 on error (Array is empty) and 0 on success.
 uint32_t ARY_each(ARY_s * ary,
                   int (*task)(ARY_each_s * info),
                   void *arg,
-                  int32_t start_at);
+                  int64_t start_at);
 ```
 
 Iteration using a callback for each entry in the array.

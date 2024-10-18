@@ -353,11 +353,9 @@ typedef struct fio_http_cookie_args_s {
  */
 SFUNC int fio_http_cookie_set(fio_http_s *h, fio_http_cookie_args_s);
 
-#ifndef __cplusplus
 /** Named arguments helper. See fio_http_cookie_args_s for details. */
 #define fio_http_cookie_set(http___handle, ...)                                \
   fio_http_cookie_set((http___handle), (fio_http_cookie_args_s){__VA_ARGS__})
-#endif
 
 /** Returns a cookie value (either received of newly set), if any. */
 SFUNC fio_str_info_s fio_http_cookie(fio_http_s *,
