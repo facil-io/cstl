@@ -8673,6 +8673,61 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
        i.name.buf;                                                             \
        i = fio_url_query_each_next(i))
 
+/* Return type for  `fio_url_is_tls` */
+typedef struct {
+  fio_buf_info_s key;
+  fio_buf_info_s cert;
+  fio_buf_info_s pass;
+  bool tls;
+} fio_url_tls_info_s;
+
+/**
+ * Returns TLS data associated with the URL.
+ *
+ * This function supports implicit TLS by scheme data for the following possible
+ * values:
+ *
+ * - `wss`   - Secure WebSockets.
+ * - `sses`  - Secure SSE (Server Sent Events).
+ * - `https` - Secure HTTP.
+ * - `tcps`  - Secure TCP/IP.
+ * - `tls`   - Secure TCP/IP.
+ * - `udps`  - Secure UDP.
+ *
+ * i.e.:
+ *     tls://example.com/
+ *     tcps://example.com/
+ *     udps://example.com/
+ *
+ *     wss://example.com/
+ *     https://example.com/
+ *     sses://example.com/
+ *
+ * This function also supports explicit TLS by query data for the following
+ * possible key-pair values:
+ *
+ * - `tls`                   - self-signed TLS (unless key / cert are provided).
+ * - `tls=true`              - self-signed TLS (unless key / cert are provided).
+ * - `tls=<file>`            - key and certificate files (same path, different
+ *                             file extensions).
+ * - `key=<file/env_data>`   - path or env variable name for the private key.
+ * - `cert=<file/env_data>`  - path or env variable name for the public
+ *                             certificate.
+ *
+ * - `pass`                  - password for decrypting key / cert data.
+ *
+ *i.e.:
+ *
+ *     tcp://example.com/?tls          (anonymous TLS)
+ *     udp://example.com/?tls=true
+ *
+ *     https://example.com/?tls=key_cert_folder_or_prefix&pass=key_password
+ *
+ *     https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ *     wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ *     tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ */
+SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u);
 /* *****************************************************************************
 FIO_URL - Implementation (static)
 ***************************************************************************** */
@@ -8980,6 +9035,94 @@ finish:
   return r;
 }
 
+/* Returns TLS data associated with the URL. */
+SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
+  fio_url_tls_info_s r = {0};
+  switch (u.scheme.len) {
+  case 3: /* wss || tls || ssl */
+    r.tls =
+        ((fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("wss:") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("tls:") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("ssl:"));
+
+    break;
+  case 4: /* ssse || sses || tcps || stcp || udps || sudp */
+    r.tls =
+        ((fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("sses") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("ssse") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("tcps") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("stcp") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("udps") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("sudp"));
+    break;
+  case 5: /* https */
+    r.tls = ((u.scheme.buf[4] | 32) == 's' &&
+             (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("http"));
+    break;
+  }
+  if (u.query.len) { /* key=, cert=, pass=, password=*/
+    fio_buf_info_s key = {0};
+    fio_buf_info_s cert = {0};
+    fio_buf_info_s pass = {0};
+    uint32_t name;
+    const uint32_t wrd_key = fio_buf2u32u("key="); /* keyword's value */
+    const uint32_t wrd_tls = fio_buf2u32u("tls=");
+    const uint32_t wrd_ssl = fio_buf2u32u("ssl=");
+    const uint32_t wrd_cert = fio_buf2u32u("cert");
+    const uint32_t wrd_true = fio_buf2u32u("true");
+    const uint32_t wrd_pass = fio_buf2u32u("pass");
+    const uint64_t wrd_password = fio_buf2u64u("password");
+    FIO_URL_QUERY_EACH(u.query, i) { /* iterates each name=value pair */
+      switch (i.name.len) {
+      case 8:
+        if ((fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
+          pass = i.value;
+        break;
+      case 3:
+        name = fio_buf2u32u(i.name.buf) | 0x20202020UL; /* '=' stays the same */
+        name &= fio_buf2u32u("\xFF\xFF\xFF\x00");
+        name |= fio_buf2u32u("\x00\x00\x00="); /* in case there was no = sign */
+        if (name == wrd_key) {
+          if (i.value.len)
+            key = i.value;
+        } else if (name == wrd_tls || name == wrd_ssl) {
+          r.tls = 1;
+          if (i.value.len && !(i.value.len == 1 && i.value.buf[0] == '1') &&
+              !(i.value.len == 4 &&
+                (fio_buf2u32u(i.value.buf) | 0x20202020UL) == wrd_true))
+            cert = key = i.value;
+          else
+            FIO_LOG_DEBUG2("tls=1 or tls=true detected");
+        }
+        break;
+      case 4:
+        name = fio_buf2u32u(i.name.buf) | 0x20202020UL;
+        if (name == wrd_cert)
+          cert = i.value;
+        else if (name == wrd_pass)
+          pass = i.value;
+        break;
+      }
+    }
+    if (key.len && cert.len) {
+      r.key = key;
+      r.cert = cert;
+      if (pass.len)
+        r.pass = pass;
+      r.tls = 1;
+    }
+  }
+  FIO_LOG_DDEBUG2(
+      "URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: %.*s\n\tpass: %.*s",
+      (tls_info.tls ? "Secure" : "plaintext"),
+      (int)tls_info.key.len,
+      tls_info.key.buf,
+      (int)tls_info.cert.len,
+      tls_info.cert.buf,
+      (int)tls_info.pass.len,
+      tls_info.pass.buf);
+  return r;
+}
 /* *****************************************************************************
 FIO_URL - Cleanup
 ***************************************************************************** */
@@ -33820,101 +33963,82 @@ SFUNC void fio_tls_free(fio_tls_s *tls) {
 
 /** Takes a parsed URL and optional TLS target and returns a TLS if needed. */
 SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
-  /* test for schemes `tls` / `wss` / `https` / `sses` / `tcps` / `udps` */
-  if (!tls &&
-      ((url.scheme.len == 3 && /* tls:// or wss:// */
-        (fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020U) ||
-         fio_buf2u16u("tl") == (fio_buf2u16u(url.scheme.buf) | 0x2020U)) &&
-        (url.scheme.buf[2] | 0x20U) == 's') ||
-       (url.scheme.len == 4 && /* server sent events secure scheme sses:// */
-        (fio_buf2u32u("sses") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
-         fio_buf2u32u("tcps") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
-         fio_buf2u32u("udps") ==
-             (fio_buf2u32u(url.scheme.buf) | 0x20202020U))) ||
-       (url.scheme.len == 5 && /* https:// */
-        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) &&
-        (url.scheme.buf[4] | 0x20) == 's')))
+  /* test for TLS info in URL */
+  fio_url_tls_info_s tls_info = fio_url_is_tls(url);
+  if (!tls_info.tls)
+    return tls;
+
+  if (!tls && tls_info.tls)
     tls = fio_tls_new();
-  /* test for TLS keywords in URL query */
-  if (url.query.len) {
-    fio_buf_info_s key = {0};
-    fio_buf_info_s cert = {0};
-    fio_buf_info_s pass = {0};
-    const uint32_t wrd_key = fio_buf2u32u("key\xFF"); /* keyword's value */
-    const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
-    const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
-    const uint32_t wrd_cert = fio_buf2u32u("cert");
-    const uint64_t wrd_password = fio_buf2u64u("password");
-    _Bool btls = 0;
-    FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
-      if (i.name.len == 8 && i.value.len &&
-          (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
-        pass = i.value;
-      if (i.name.len < 3 || i.name.len > 4)
-        continue; /* not one of the keywords used */
-      uint32_t name = fio_buf2u32u(i.name.buf);
-      if (i.value.buf) { /* value given (may be empty) */
-        if (i.name.len == 4) {
-          name |= 0x20202020UL;
-          if (name == wrd_cert)
-            cert = i.value;
-          else if (name == (uint32_t)wrd_password)
-            pass = i.value;
-        } else if (i.name.len == 3) {
-          name |= fio_buf2u32u("\x20\x20\x20\xFF"); /* any endieness */
-          if (name == wrd_key) {
-            key = i.value;
-          } else if (name == wrd_tls || name == wrd_ssl) {
-            cert = key = i.value;
+
+  if (tls_info.key.buf && tls_info.cert.buf) {
+    const char *tmp = NULL;
+    FIO_STR_INFO_TMP_VAR(host_tmp, 512);
+    FIO_STR_INFO_TMP_VAR(key_tmp, 128);
+    FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
+    FIO_STR_INFO_TMP_VAR(pass_tmp, 128);
+    if (url.host.len < 512 && url.host.buf)
+      fio_string_write(&host_tmp, NULL, url.host.buf, url.host.len);
+    else
+      host_tmp.buf = NULL;
+
+    if (tls_info.key.len < 124 && tls_info.cert.len < 124 &&
+        tls_info.pass.len < 124) {
+      fio_string_write(&key_tmp, NULL, tls_info.key.buf, tls_info.key.len);
+      fio_string_write(&cert_tmp, NULL, tls_info.cert.buf, tls_info.cert.len);
+      if (tls_info.pass.len)
+        fio_string_write(&pass_tmp, NULL, tls_info.pass.buf, tls_info.pass.len);
+      else
+        pass_tmp.buf = NULL;
+
+      if (tls_info.key.buf ==
+          tls_info.cert.buf) { /* assume value is prefix / folder */
+        if ((tmp = getenv(cert_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            key_tmp.len = cert_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(key_tmp.buf, buf_tmp.buf, buf_tmp.len);
+            FIO_MEMCPY(cert_tmp.buf, buf_tmp.buf, buf_tmp.len);
           }
         }
-      } else if (i.name.len == 3) { /* value not given */
-        name |= fio_buf2u32u("\x20\x20\x20\xFF");
-        if (name == wrd_tls || name == wrd_ssl)
-          btls = 1;
-      }
-    }
-
-    if (!tls && (btls || (key.buf && cert.buf)))
-      tls = fio_tls_new();
-
-    if (key.buf && cert.buf) {
-      FIO_STR_INFO_TMP_VAR(host_tmp, 512);
-      FIO_STR_INFO_TMP_VAR(key_tmp, 128);
-      FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
-      FIO_STR_INFO_TMP_VAR(pass_tmp, 128);
-      if (url.host.len < 512 && url.host.buf)
-        fio_string_write(&host_tmp, NULL, url.host.buf, url.host.len);
-      else
-        host_tmp.buf = NULL;
-
-      if (key.len < 124 && cert.len < 124 && pass.len < 124) {
-        fio_string_write(&key_tmp, NULL, key.buf, key.len);
-        fio_string_write(&cert_tmp, NULL, cert.buf, cert.len);
-        if (pass.len)
-          fio_string_write(&pass_tmp, NULL, pass.buf, pass.len);
-        else
-          pass_tmp.buf = NULL;
-        if (key.buf == cert.buf) { /* assume value is prefix / folder */
-          fio_string_write(&key_tmp, NULL, "key.pem", 7);
-          fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
-        } else {
-          if (key.len < 5 || (fio_buf2u32u(key.buf + (key.len - 4)) |
-                              0x20202020UL) != fio_buf2u32u(".pem"))
-            fio_string_write(&key_tmp, NULL, ".pem", 4);
-          if (cert.len < 5 || (fio_buf2u32u(cert.buf + (cert.len - 4)) |
-                               0x20202020UL) != fio_buf2u32u(".pem"))
-            fio_string_write(&cert_tmp, NULL, ".pem", 4);
-        }
-        fio_tls_cert_add(tls,
-                         host_tmp.buf,
-                         cert_tmp.buf,
-                         key_tmp.buf,
-                         pass_tmp.buf);
+        fio_string_write(&key_tmp, NULL, "key.pem", 7);
+        fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
       } else {
-        FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
-                      "construct TLS object separately");
+        if ((tmp = getenv(key_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            key_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(key_tmp.buf, buf_tmp.buf, buf_tmp.len);
+          }
+        }
+
+        if ((tmp = getenv(cert_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            cert_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(cert_tmp.buf, buf_tmp.buf, buf_tmp.len);
+          }
+        }
+
+        if (tls_info.key.len < 5 ||
+            (fio_buf2u32u(tls_info.key.buf + (tls_info.key.len - 4)) |
+             0x20202020UL) != fio_buf2u32u(".pem")) {
+          fio_string_write(&key_tmp, NULL, ".pem", 4);
+        }
+        if (tls_info.cert.len < 5 ||
+            (fio_buf2u32u(tls_info.cert.buf + (tls_info.cert.len - 4)) |
+             0x20202020UL) != fio_buf2u32u(".pem")) {
+          fio_string_write(&cert_tmp, NULL, ".pem", 4);
+        }
       }
+      fio_tls_cert_add(tls,
+                       host_tmp.buf,
+                       cert_tmp.buf,
+                       key_tmp.buf,
+                       pass_tmp.buf);
+    } else {
+      FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
+                    "construct TLS object separately");
     }
   }
   return tls;
@@ -42233,10 +42357,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
     fio_string_write2(
         &origin,
         NULL,
-        FIO_STRING_WRITE_STR2(
-            "https",
-            (size_t)(4 + (u.scheme.len > 2 &&
-                          (u.scheme.buf[u.scheme.len - 1] | 32) == 's'))),
+        FIO_STRING_WRITE_STR2("https", (size_t)(4 + fio_url_is_tls(u).tls)),
         FIO_STRING_WRITE_STR2("://", 3U),
         FIO_STRING_WRITE_STR_INFO(u.host),
         FIO_STRING_WRITE_STR2(":", (size_t)(!!u.port.len)),
@@ -52635,183 +52756,265 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
     char *url;
     size_t len;
     fio_url_s expected;
+    fio_url_tls_info_s tls;
   } tests[] = {
       {
           .url = (char *)"file://go/home/",
-          .len = 15,
+          5,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"file", 4),
-                  .path = FIO_BUF_INFO2((char *)"go/home/", 8),
+                  .scheme = FIO_BUF_INFO1((char *)"file"),
+                  .path = FIO_BUF_INFO1((char *)"go/home/"),
               },
       },
       {
           .url = (char *)"unix:///go/home/",
-          .len = 16,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"unix", 4),
-                  .path = FIO_BUF_INFO2((char *)"/go/home/", 9),
+                  .scheme = FIO_BUF_INFO1((char *)"unix"),
+                  .path = FIO_BUF_INFO1((char *)"/go/home/"),
               },
       },
       {
           .url = (char *)"unix:///go/home/?query#target",
-          .len = 29,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"unix", 4),
-                  .path = FIO_BUF_INFO2((char *)"/go/home/", 9),
-                  .query = FIO_BUF_INFO2((char *)"query", 5),
-                  .target = FIO_BUF_INFO2((char *)"target", 6),
+                  .scheme = FIO_BUF_INFO1((char *)"unix"),
+                  .path = FIO_BUF_INFO1((char *)"/go/home/"),
+                  .query = FIO_BUF_INFO1((char *)"query"),
+                  .target = FIO_BUF_INFO1((char *)"target"),
               },
       },
       {
           .url = (char *)"schema://user:password@host:port/path?query#target",
-          .len = 50,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"schema", 6),
-                  .user = FIO_BUF_INFO2((char *)"user", 4),
-                  .password = FIO_BUF_INFO2((char *)"password", 8),
-                  .host = FIO_BUF_INFO2((char *)"host", 4),
-                  .port = FIO_BUF_INFO2((char *)"port", 4),
-                  .path = FIO_BUF_INFO2((char *)"/path", 5),
-                  .query = FIO_BUF_INFO2((char *)"query", 5),
-                  .target = FIO_BUF_INFO2((char *)"target", 6),
+                  .scheme = FIO_BUF_INFO1((char *)"schema"),
+                  .user = FIO_BUF_INFO1((char *)"user"),
+                  .password = FIO_BUF_INFO1((char *)"password"),
+                  .host = FIO_BUF_INFO1((char *)"host"),
+                  .port = FIO_BUF_INFO1((char *)"port"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"query"),
+                  .target = FIO_BUF_INFO1((char *)"target"),
               },
       },
       {
           .url = (char *)"schema://user@host:port/path?query#target",
-          .len = 41,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"schema", 6),
-                  .user = FIO_BUF_INFO2((char *)"user", 4),
-                  .host = FIO_BUF_INFO2((char *)"host", 4),
-                  .port = FIO_BUF_INFO2((char *)"port", 4),
-                  .path = FIO_BUF_INFO2((char *)"/path", 5),
-                  .query = FIO_BUF_INFO2((char *)"query", 5),
-                  .target = FIO_BUF_INFO2((char *)"target", 6),
+                  .scheme = FIO_BUF_INFO1((char *)"schema"),
+                  .user = FIO_BUF_INFO1((char *)"user"),
+                  .host = FIO_BUF_INFO1((char *)"host"),
+                  .port = FIO_BUF_INFO1((char *)"port"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"query"),
+                  .target = FIO_BUF_INFO1((char *)"target"),
               },
       },
       {
           .url = (char *)"http://localhost.com:3000/home?is=1",
-          .len = 35,
           .expected =
               {
-                  .scheme = FIO_BUF_INFO2((char *)"http", 4),
-                  .host = FIO_BUF_INFO2((char *)"localhost.com", 13),
-                  .port = FIO_BUF_INFO2((char *)"3000", 4),
-                  .path = FIO_BUF_INFO2((char *)"/home", 5),
-                  .query = FIO_BUF_INFO2((char *)"is=1", 4),
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"localhost.com"),
+                  .port = FIO_BUF_INFO1((char *)"3000"),
+                  .path = FIO_BUF_INFO1((char *)"/home"),
+                  .query = FIO_BUF_INFO1((char *)"is=1"),
               },
       },
       {
           .url = (char *)"/complete_path?query#target",
-          .len = 27,
           .expected =
               {
-                  .path = FIO_BUF_INFO2((char *)"/complete_path", 14),
-                  .query = FIO_BUF_INFO2((char *)"query", 5),
-                  .target = FIO_BUF_INFO2((char *)"target", 6),
+                  .path = FIO_BUF_INFO1((char *)"/complete_path"),
+                  .query = FIO_BUF_INFO1((char *)"query"),
+                  .target = FIO_BUF_INFO1((char *)"target"),
               },
       },
       {
           .url = (char *)"/index.html?page=1#list",
-          .len = 23,
           .expected =
               {
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
-                  .query = FIO_BUF_INFO2((char *)"page=1", 6),
-                  .target = FIO_BUF_INFO2((char *)"list", 4),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
+                  .query = FIO_BUF_INFO1((char *)"page=1"),
+                  .target = FIO_BUF_INFO1((char *)"list"),
               },
       },
       {
           .url = (char *)"example.com",
-          .len = 11,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
               },
       },
 
       {
           .url = (char *)"example.com:8080",
-          .len = 16,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
               },
       },
       {
           .url = (char *)"example.com:8080?q=true",
-          .len = 23,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
-                  .query = FIO_BUF_INFO2((char *)"q=true", 6),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
+                  .query = FIO_BUF_INFO1((char *)"q=true"),
               },
       },
       {
           .url = (char *)"example.com/index.html",
-          .len = 22,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
               },
       },
       {
           .url = (char *)"example.com:8080/index.html",
-          .len = 27,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
               },
       },
       {
           .url = (char *)"example.com:8080/index.html?key=val#target",
-          .len = 42,
           .expected =
               {
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
-                  .query = FIO_BUF_INFO2((char *)"key=val", 7),
-                  .target = FIO_BUF_INFO2((char *)"target", 6),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
+                  .query = FIO_BUF_INFO1((char *)"key=val"),
+                  .target = FIO_BUF_INFO1((char *)"target"),
               },
       },
       {
           .url = (char *)"user:1234@example.com:8080/index.html",
-          .len = 37,
           .expected =
               {
-                  .user = FIO_BUF_INFO2((char *)"user", 4),
-                  .password = FIO_BUF_INFO2((char *)"1234", 4),
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .user = FIO_BUF_INFO1((char *)"user"),
+                  .password = FIO_BUF_INFO1((char *)"1234"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
               },
       },
       {
           .url = (char *)"user@example.com:8080/index.html",
-          .len = 32,
           .expected =
               {
-                  .user = FIO_BUF_INFO2((char *)"user", 4),
-                  .host = FIO_BUF_INFO2((char *)"example.com", 11),
-                  .port = FIO_BUF_INFO2((char *)"8080", 4),
-                  .path = FIO_BUF_INFO2((char *)"/index.html", 11),
+                  .user = FIO_BUF_INFO1((char *)"user"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .port = FIO_BUF_INFO1((char *)"8080"),
+                  .path = FIO_BUF_INFO1((char *)"/index.html"),
+              },
+      },
+      {
+          .url = (char *)"https://example.com/path",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"https"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"wss://example.com/path",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"wss"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"sses://example.com/path",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"sses"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"sses://example.com/path",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"sses"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"http://example.com/path?tls=true",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"tls=true"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"http://example.com/path?tls",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"tls"),
+              },
+          .tls = {.tls = 1},
+      },
+      {
+          .url = (char *)"http://example.com/path?tls=something",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"tls=something"),
+              },
+          .tls =
+              {
+                  .key = FIO_BUF_INFO1((char *)"something"),
+                  .cert = FIO_BUF_INFO1((char *)"something"),
+                  .tls = 1,
+              },
+      },
+      {
+          .url = (char *)"http://example.com/path?key=something&cert=pubthing",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"key=something&cert=pubthing"),
+              },
+          .tls =
+              {
+                  .key = FIO_BUF_INFO1((char *)"something"),
+                  .cert = FIO_BUF_INFO1((char *)"pubthing"),
+                  .tls = 1,
               },
       },
       {.url = NULL},
   };
   for (size_t i = 0; tests[i].url; ++i) {
+    tests[i].len = strlen(tests[i].url);
     fio_url_s result = fio_url_parse(tests[i].url, tests[i].len);
+    fio_url_tls_info_s tls = fio_url_is_tls(result);
     FIO_LOG_DEBUG2("Result for: %s"
                    "\n\t     scheme   (%zu bytes):  %.*s"
                    "\n\t     user     (%zu bytes):  %.*s"
@@ -52937,6 +53140,24 @@ FIO_SFUNC void FIO_NAME_TEST(stl, url)(void) {
         tests[i].expected.target.buf,
         (int)result.target.len,
         result.target.buf);
+
+    FIO_ASSERT(
+        1,
+        "TSL detection result failed for:\n\ttest[%zu]: %s\n\texpected: "
+        "%s key:%s, cert:%s, pass%s\n\tgot: %s key:%.*s, cert:%.*s, pass%.*s",
+        i,
+        tests[i].url,
+        tests[i].tls.tls ? "TLS" : "none",
+        tests[i].tls.key.buf,
+        tests[i].tls.cert.buf,
+        tests[i].tls.pass.buf,
+        tls.tls ? "TLS" : "none",
+        (int)tls.key.len,
+        tls.key.buf,
+        (int)tls.cert.len,
+        tls.cert.buf,
+        (int)tls.pass.len,
+        tls.pass.buf);
   }
 }
 /* *****************************************************************************

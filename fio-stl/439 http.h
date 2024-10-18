@@ -890,10 +890,7 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
     fio_string_write2(
         &origin,
         NULL,
-        FIO_STRING_WRITE_STR2(
-            "https",
-            (size_t)(4 + (u.scheme.len > 2 &&
-                          (u.scheme.buf[u.scheme.len - 1] | 32) == 's'))),
+        FIO_STRING_WRITE_STR2("https", (size_t)(4 + fio_url_is_tls(u).tls)),
         FIO_STRING_WRITE_STR2("://", 3U),
         FIO_STRING_WRITE_STR_INFO(u.host),
         FIO_STRING_WRITE_STR2(":", (size_t)(!!u.port.len)),

@@ -2667,101 +2667,82 @@ SFUNC void fio_tls_free(fio_tls_s *tls) {
 
 /** Takes a parsed URL and optional TLS target and returns a TLS if needed. */
 SFUNC fio_tls_s *fio_tls_from_url(fio_tls_s *tls, fio_url_s url) {
-  /* test for schemes `tls` / `wss` / `https` / `sses` / `tcps` / `udps` */
-  if (!tls &&
-      ((url.scheme.len == 3 && /* tls:// or wss:// */
-        (fio_buf2u16u("ws") == (fio_buf2u16u(url.scheme.buf) | 0x2020U) ||
-         fio_buf2u16u("tl") == (fio_buf2u16u(url.scheme.buf) | 0x2020U)) &&
-        (url.scheme.buf[2] | 0x20U) == 's') ||
-       (url.scheme.len == 4 && /* server sent events secure scheme sses:// */
-        (fio_buf2u32u("sses") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
-         fio_buf2u32u("tcps") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) ||
-         fio_buf2u32u("udps") ==
-             (fio_buf2u32u(url.scheme.buf) | 0x20202020U))) ||
-       (url.scheme.len == 5 && /* https:// */
-        fio_buf2u32u("http") == (fio_buf2u32u(url.scheme.buf) | 0x20202020U) &&
-        (url.scheme.buf[4] | 0x20) == 's')))
+  /* test for TLS info in URL */
+  fio_url_tls_info_s tls_info = fio_url_is_tls(url);
+  if (!tls_info.tls)
+    return tls;
+
+  if (!tls && tls_info.tls)
     tls = fio_tls_new();
-  /* test for TLS keywords in URL query */
-  if (url.query.len) {
-    fio_buf_info_s key = {0};
-    fio_buf_info_s cert = {0};
-    fio_buf_info_s pass = {0};
-    const uint32_t wrd_key = fio_buf2u32u("key\xFF"); /* keyword's value */
-    const uint32_t wrd_tls = fio_buf2u32u("tls\xFF");
-    const uint32_t wrd_ssl = fio_buf2u32u("ssl\xFF");
-    const uint32_t wrd_cert = fio_buf2u32u("cert");
-    const uint64_t wrd_password = fio_buf2u64u("password");
-    _Bool btls = 0;
-    FIO_URL_QUERY_EACH(url.query, i) { /* iterates each name=value pair */
-      if (i.name.len == 8 && i.value.len &&
-          (fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
-        pass = i.value;
-      if (i.name.len < 3 || i.name.len > 4)
-        continue; /* not one of the keywords used */
-      uint32_t name = fio_buf2u32u(i.name.buf);
-      if (i.value.buf) { /* value given (may be empty) */
-        if (i.name.len == 4) {
-          name |= 0x20202020UL;
-          if (name == wrd_cert)
-            cert = i.value;
-          else if (name == (uint32_t)wrd_password)
-            pass = i.value;
-        } else if (i.name.len == 3) {
-          name |= fio_buf2u32u("\x20\x20\x20\xFF"); /* any endieness */
-          if (name == wrd_key) {
-            key = i.value;
-          } else if (name == wrd_tls || name == wrd_ssl) {
-            cert = key = i.value;
+
+  if (tls_info.key.buf && tls_info.cert.buf) {
+    const char *tmp = NULL;
+    FIO_STR_INFO_TMP_VAR(host_tmp, 512);
+    FIO_STR_INFO_TMP_VAR(key_tmp, 128);
+    FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
+    FIO_STR_INFO_TMP_VAR(pass_tmp, 128);
+    if (url.host.len < 512 && url.host.buf)
+      fio_string_write(&host_tmp, NULL, url.host.buf, url.host.len);
+    else
+      host_tmp.buf = NULL;
+
+    if (tls_info.key.len < 124 && tls_info.cert.len < 124 &&
+        tls_info.pass.len < 124) {
+      fio_string_write(&key_tmp, NULL, tls_info.key.buf, tls_info.key.len);
+      fio_string_write(&cert_tmp, NULL, tls_info.cert.buf, tls_info.cert.len);
+      if (tls_info.pass.len)
+        fio_string_write(&pass_tmp, NULL, tls_info.pass.buf, tls_info.pass.len);
+      else
+        pass_tmp.buf = NULL;
+
+      if (tls_info.key.buf ==
+          tls_info.cert.buf) { /* assume value is prefix / folder */
+        if ((tmp = getenv(cert_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            key_tmp.len = cert_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(key_tmp.buf, buf_tmp.buf, buf_tmp.len);
+            FIO_MEMCPY(cert_tmp.buf, buf_tmp.buf, buf_tmp.len);
           }
         }
-      } else if (i.name.len == 3) { /* value not given */
-        name |= fio_buf2u32u("\x20\x20\x20\xFF");
-        if (name == wrd_tls || name == wrd_ssl)
-          btls = 1;
-      }
-    }
-
-    if (!tls && (btls || (key.buf && cert.buf)))
-      tls = fio_tls_new();
-
-    if (key.buf && cert.buf) {
-      FIO_STR_INFO_TMP_VAR(host_tmp, 512);
-      FIO_STR_INFO_TMP_VAR(key_tmp, 128);
-      FIO_STR_INFO_TMP_VAR(cert_tmp, 128);
-      FIO_STR_INFO_TMP_VAR(pass_tmp, 128);
-      if (url.host.len < 512 && url.host.buf)
-        fio_string_write(&host_tmp, NULL, url.host.buf, url.host.len);
-      else
-        host_tmp.buf = NULL;
-
-      if (key.len < 124 && cert.len < 124 && pass.len < 124) {
-        fio_string_write(&key_tmp, NULL, key.buf, key.len);
-        fio_string_write(&cert_tmp, NULL, cert.buf, cert.len);
-        if (pass.len)
-          fio_string_write(&pass_tmp, NULL, pass.buf, pass.len);
-        else
-          pass_tmp.buf = NULL;
-        if (key.buf == cert.buf) { /* assume value is prefix / folder */
-          fio_string_write(&key_tmp, NULL, "key.pem", 7);
-          fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
-        } else {
-          if (key.len < 5 || (fio_buf2u32u(key.buf + (key.len - 4)) |
-                              0x20202020UL) != fio_buf2u32u(".pem"))
-            fio_string_write(&key_tmp, NULL, ".pem", 4);
-          if (cert.len < 5 || (fio_buf2u32u(cert.buf + (cert.len - 4)) |
-                               0x20202020UL) != fio_buf2u32u(".pem"))
-            fio_string_write(&cert_tmp, NULL, ".pem", 4);
-        }
-        fio_tls_cert_add(tls,
-                         host_tmp.buf,
-                         cert_tmp.buf,
-                         key_tmp.buf,
-                         pass_tmp.buf);
+        fio_string_write(&key_tmp, NULL, "key.pem", 7);
+        fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
       } else {
-        FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
-                      "construct TLS object separately");
+        if ((tmp = getenv(key_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            key_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(key_tmp.buf, buf_tmp.buf, buf_tmp.len);
+          }
+        }
+
+        if ((tmp = getenv(cert_tmp.buf))) {
+          fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
+          if (buf_tmp.len < 124) {
+            cert_tmp.len = buf_tmp.len;
+            FIO_MEMCPY(cert_tmp.buf, buf_tmp.buf, buf_tmp.len);
+          }
+        }
+
+        if (tls_info.key.len < 5 ||
+            (fio_buf2u32u(tls_info.key.buf + (tls_info.key.len - 4)) |
+             0x20202020UL) != fio_buf2u32u(".pem")) {
+          fio_string_write(&key_tmp, NULL, ".pem", 4);
+        }
+        if (tls_info.cert.len < 5 ||
+            (fio_buf2u32u(tls_info.cert.buf + (tls_info.cert.len - 4)) |
+             0x20202020UL) != fio_buf2u32u(".pem")) {
+          fio_string_write(&cert_tmp, NULL, ".pem", 4);
+        }
       }
+      fio_tls_cert_add(tls,
+                       host_tmp.buf,
+                       cert_tmp.buf,
+                       key_tmp.buf,
+                       pass_tmp.buf);
+    } else {
+      FIO_LOG_ERROR("TLS files in `fio_srv_listen` URL too long, "
+                    "construct TLS object separately");
     }
   }
   return tls;

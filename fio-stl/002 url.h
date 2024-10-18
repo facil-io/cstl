@@ -87,6 +87,61 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
        i.name.buf;                                                             \
        i = fio_url_query_each_next(i))
 
+/* Return type for  `fio_url_is_tls` */
+typedef struct {
+  fio_buf_info_s key;
+  fio_buf_info_s cert;
+  fio_buf_info_s pass;
+  bool tls;
+} fio_url_tls_info_s;
+
+/**
+ * Returns TLS data associated with the URL.
+ *
+ * This function supports implicit TLS by scheme data for the following possible
+ * values:
+ *
+ * - `wss`   - Secure WebSockets.
+ * - `sses`  - Secure SSE (Server Sent Events).
+ * - `https` - Secure HTTP.
+ * - `tcps`  - Secure TCP/IP.
+ * - `tls`   - Secure TCP/IP.
+ * - `udps`  - Secure UDP.
+ *
+ * i.e.:
+ *     tls://example.com/
+ *     tcps://example.com/
+ *     udps://example.com/
+ *
+ *     wss://example.com/
+ *     https://example.com/
+ *     sses://example.com/
+ *
+ * This function also supports explicit TLS by query data for the following
+ * possible key-pair values:
+ *
+ * - `tls`                   - self-signed TLS (unless key / cert are provided).
+ * - `tls=true`              - self-signed TLS (unless key / cert are provided).
+ * - `tls=<file>`            - key and certificate files (same path, different
+ *                             file extensions).
+ * - `key=<file/env_data>`   - path or env variable name for the private key.
+ * - `cert=<file/env_data>`  - path or env variable name for the public
+ *                             certificate.
+ *
+ * - `pass`                  - password for decrypting key / cert data.
+ *
+ *i.e.:
+ *
+ *     tcp://example.com/?tls          (anonymous TLS)
+ *     udp://example.com/?tls=true
+ *
+ *     https://example.com/?tls=key_cert_folder_or_prefix&pass=key_password
+ *
+ *     https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ *     wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ *     tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ */
+SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u);
 /* *****************************************************************************
 FIO_URL - Implementation (static)
 ***************************************************************************** */
@@ -394,6 +449,94 @@ finish:
   return r;
 }
 
+/* Returns TLS data associated with the URL. */
+SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
+  fio_url_tls_info_s r = {0};
+  switch (u.scheme.len) {
+  case 3: /* wss || tls || ssl */
+    r.tls =
+        ((fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("wss:") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("tls:") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("ssl:"));
+
+    break;
+  case 4: /* ssse || sses || tcps || stcp || udps || sudp */
+    r.tls =
+        ((fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("sses") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("ssse") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("tcps") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("stcp") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("udps") ||
+         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("sudp"));
+    break;
+  case 5: /* https */
+    r.tls = ((u.scheme.buf[4] | 32) == 's' &&
+             (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("http"));
+    break;
+  }
+  if (u.query.len) { /* key=, cert=, pass=, password=*/
+    fio_buf_info_s key = {0};
+    fio_buf_info_s cert = {0};
+    fio_buf_info_s pass = {0};
+    uint32_t name;
+    const uint32_t wrd_key = fio_buf2u32u("key="); /* keyword's value */
+    const uint32_t wrd_tls = fio_buf2u32u("tls=");
+    const uint32_t wrd_ssl = fio_buf2u32u("ssl=");
+    const uint32_t wrd_cert = fio_buf2u32u("cert");
+    const uint32_t wrd_true = fio_buf2u32u("true");
+    const uint32_t wrd_pass = fio_buf2u32u("pass");
+    const uint64_t wrd_password = fio_buf2u64u("password");
+    FIO_URL_QUERY_EACH(u.query, i) { /* iterates each name=value pair */
+      switch (i.name.len) {
+      case 8:
+        if ((fio_buf2u64u(i.name.buf) | 0x2020202020202020ULL) == wrd_password)
+          pass = i.value;
+        break;
+      case 3:
+        name = fio_buf2u32u(i.name.buf) | 0x20202020UL; /* '=' stays the same */
+        name &= fio_buf2u32u("\xFF\xFF\xFF\x00");
+        name |= fio_buf2u32u("\x00\x00\x00="); /* in case there was no = sign */
+        if (name == wrd_key) {
+          if (i.value.len)
+            key = i.value;
+        } else if (name == wrd_tls || name == wrd_ssl) {
+          r.tls = 1;
+          if (i.value.len && !(i.value.len == 1 && i.value.buf[0] == '1') &&
+              !(i.value.len == 4 &&
+                (fio_buf2u32u(i.value.buf) | 0x20202020UL) == wrd_true))
+            cert = key = i.value;
+          else
+            FIO_LOG_DEBUG2("tls=1 or tls=true detected");
+        }
+        break;
+      case 4:
+        name = fio_buf2u32u(i.name.buf) | 0x20202020UL;
+        if (name == wrd_cert)
+          cert = i.value;
+        else if (name == wrd_pass)
+          pass = i.value;
+        break;
+      }
+    }
+    if (key.len && cert.len) {
+      r.key = key;
+      r.cert = cert;
+      if (pass.len)
+        r.pass = pass;
+      r.tls = 1;
+    }
+  }
+  FIO_LOG_DDEBUG2(
+      "URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: %.*s\n\tpass: %.*s",
+      (tls_info.tls ? "Secure" : "plaintext"),
+      (int)tls_info.key.len,
+      tls_info.key.buf,
+      (int)tls_info.cert.len,
+      tls_info.cert.buf,
+      (int)tls_info.pass.len,
+      tls_info.pass.buf);
+  return r;
+}
 /* *****************************************************************************
 FIO_URL - Cleanup
 ***************************************************************************** */
