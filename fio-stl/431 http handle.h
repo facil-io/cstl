@@ -1636,17 +1636,70 @@ FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
   }
 }
 
+/** (Helper) HTTP Cookie Parser */
+FIO_IFUNC void fio___http_cookie_parse_set_cookie(fio_http_s *h,
+                                                  fio_str_info_s s) {
+  /* TODO! */
+  fio_str_info_s k = {0}, v = {0};
+  /* remove white-space */
+  while ((s.buf[0] == ' ' || s.buf[0] == '\t') && s.len) {
+    ++s.buf;
+    --s.len;
+  }
+  if (!s.len)
+    return;
+  char *div = (char *)FIO_MEMCHR(s.buf, '=', s.len);
+  char *end = (char *)FIO_MEMCHR(s.buf, ';', s.len);
+  if (div == s.buf || !div)
+    return;
+  if (!end)
+    end = s.buf + s.len;
+  const uint64_t prefix_secure = fio_buf2u64u("_Secure-");
+  const uint32_t prefix_host = fio_buf2u32u("Host");
+  uint32_t cont;
+  k.buf = s.buf;
+  k.len = div - s.buf;
+  v.buf = div + 1;
+  v.len = end - v.buf;
+  do { /* loop to clear away cookie prefixes in any order */
+    cont = 0;
+    if (k.len > 8 && k.buf[0] == '_' &&
+        fio_buf2u64u(k.buf + 1) == prefix_secure) {
+      cont = 1;
+      k.len -= 9;
+      k.buf += 9;
+    }
+    if (k.len > 6 && k.buf[0] == '_' && k.buf[1] == '_' && k.buf[6] == '-' &&
+        fio_buf2u32u(k.buf + 2) == prefix_host) {
+      cont = 1;
+      k.len -= 7;
+      k.buf += 7;
+    }
+  } while (cont);
+  if (k.len)
+    fio___http_cmap_set_if_missing(h->cookies, k, v);
+}
+
 /** (Helper) Parses all HTTP Cookies */
 FIO_SFUNC void fio___http_cookie_collect(fio_http_s *h) {
   fio___http_sary_s *header = NULL;
-  {
-    header = fio___http_hmap_node2val_ptr(
-        fio___http_hmap_get_ptr(h->headers, FIO_STR_INFO1((char *)"cookie")));
+  header = fio___http_hmap_node2val_ptr(
+      fio___http_hmap_get_ptr(h->headers, FIO_STR_INFO1((char *)"cookie")));
+  if (header) {
+    FIO_ARRAY_EACH(fio___http_sary, header, pos) {
+      fio___http_cookie_parse_cookie(h, fio_bstr_info(*pos));
+    }
   }
+  /* if headers were sent, set-cookie data might belong to the handle */
+  if (h->writer != fio____http_write_start)
+    return;
+  header = fio___http_hmap_node2val_ptr(
+      fio___http_hmap_get_ptr(h->headers + 1,
+                              FIO_STR_INFO1((char *)"set-cookie")));
   if (!header)
     return;
   FIO_ARRAY_EACH(fio___http_sary, header, pos) {
-    fio___http_cookie_parse_cookie(h, fio_bstr_info(*pos));
+    fio___http_cookie_parse_set_cookie(h, fio_bstr_info(*pos));
   }
   return;
 }
@@ -1869,6 +1922,9 @@ SFUNC size_t fio_http_cookie_each(fio_http_s *h,
                                                   fio_str_info_s value,
                                                   void *udata),
                                   void *udata) {
+  if (!(fio_atomic_or(&h->state, FIO_HTTP_STATE_COOKIES_PARSED) &
+        FIO_HTTP_STATE_COOKIES_PARSED))
+    fio___http_cookie_collect(h);
   size_t i = 0;
   FIO_MAP_EACH(fio___http_cmap, h->cookies, pos) {
     ++i;

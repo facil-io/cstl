@@ -60,7 +60,7 @@ FIO_SFUNC void on_input(fio_s *io);
 /** Called when STDIN closed. */
 FIO_SFUNC void on_input_closed(void *udata);
 /** Called if connection failed to establish. */
-FIO_SFUNC void on_failed(void *arg);
+FIO_SFUNC void on_failed(fio_protocol_s *p, void *arg);
 
 /** STDIN protocol (REPL) */
 static fio_protocol_s STDIN_PROTOCOL = {
@@ -248,9 +248,9 @@ FIO_SFUNC void on_close(void *arg) {
 }
 
 /** Called if connection failed to establish. */
-FIO_SFUNC void on_failed(void *arg) {
+FIO_SFUNC void on_failed(fio_protocol_s *p, void *arg) {
   FIO_LOG_ERROR("Connection failed / no data received: %s", fio_cli_unnamed(0));
-  on_close(arg);
+  p->on_close(arg);
 }
 
 /* *****************************************************************************
