@@ -829,6 +829,7 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
       counter,
       (size_t)FIO_MAP_CAPA(o->bits));
   return 0;
+
 sparse_map:
   for (size_t i = 0; counter && i < len; i += 64) {
     uint64_t bitmap = 0;
@@ -1162,9 +1163,7 @@ FIO_IFUNC void FIO_NAME(FIO_MAP_NAME,
     o->head = i;
     o->map[i].node.next = o->map[i].node.prev = i;
   } else {
-#ifdef FIO_MAP_LRU
     FIO_INDEXED_LIST_PUSH(o->map, node, o->head, i);
-#endif
   }
 }
 #define FIO___MAP_UPDATE_ORDER(map, at)                                        \
