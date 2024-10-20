@@ -878,7 +878,7 @@ FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
   static uint64_t date_buf_val;
   if (date_buf_val == now_in_seconds)
     return FIO_STR_INFO2(date_buf, date_len);
-  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
+  date_len = fio_time2log(date_buf, now_in_seconds);
   date_buf[date_len] = 0;
   date_buf_val = now_in_seconds;
   return FIO_STR_INFO2(date_buf, date_len);
@@ -2751,6 +2751,34 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
 HTTP Logging
 ***************************************************************************** */
 
+SFUNC void fio___http_write_pid(fio_str_info_s *dest) {
+  static int last_pid = 0;
+  static char buf[64];
+  static size_t len = 0;
+#ifdef H___FIO_SERVER___H
+  int pid = fio_srv_pid();
+#else
+  int pid = fio_thread_getpid();
+#endif
+  if (last_pid != pid)
+    goto rewrite;
+copy:
+  if (len)
+    FIO_MEMCPY(dest->buf + dest->len, buf, len);
+  dest->len += len;
+  return;
+rewrite:
+  len = 0;
+  buf[len++] = '[';
+  if (pid > 0) {
+    size_t d = fio_digits10u((uint64_t)pid);
+    fio_ltoa10u(buf + 1, (uint64_t)pid, d);
+    len += d;
+  }
+  buf[len++] = ']';
+  last_pid = pid;
+  goto copy;
+}
 /** Logs an HTTP (response) to STDOUT. */
 SFUNC void fio_http_write_log(fio_http_s *h) {
   FIO_STR_INFO_TMP_VAR(buf, 1023);
@@ -2759,14 +2787,17 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
   time_start = h->received_at;
   time_end = fio_http_get_timestump();
   fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
+  fio___http_write_pid(&buf);
+  buf.buf[buf.len++] = ' ';
   fio_http_from(&buf, h);
-  FIO_MEMCPY(buf.buf + buf.len, " - - [", 6);
-  FIO_MEMCPY(buf.buf + buf.len + 6, date.buf, date.len);
+  FIO_MEMCPY(buf.buf + buf.len, " - - ", 5);
+  FIO_MEMCPY(buf.buf + buf.len + 5, date.buf, date.len);
   buf.len += date.len + 6;
+  buf.buf[buf.len++] = ' ';
+  buf.buf[buf.len++] = '\"';
   fio_string_write2(
       &buf,
       NULL,
-      FIO_STRING_WRITE_STR2((const char *)"] \"", 3),
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),

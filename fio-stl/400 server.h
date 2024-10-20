@@ -1926,7 +1926,7 @@ SFUNC uint16_t fio_srv_workers(int workers) {
     workers = (int)(cores / (0 - workers));
     workers += !workers;
   }
-  return workers;
+  return (uint16_t)workers;
 }
 
 /** Adds `workers` amount of workers to the root server process. */

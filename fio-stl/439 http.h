@@ -1435,6 +1435,7 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
                       FIO_STRING_WRITE_STR2(status.buf, status.len),
                       FIO_STRING_WRITE_STR2("\r\n", 2));
   }
+
   /* write headers */
   fio_http_response_header_each(h, fio_http1___write_header_callback, &buf);
   /* write cookies */
@@ -1854,9 +1855,12 @@ FIO_SFUNC void fio___websocket_on_close(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_bstr_free(c->state.ws.msg);
-  fio_http_status_set(c->h, (size_t)(c->state.ws.code));
-  c->settings->on_close(c->h);
-  fio_http_free(c->h);
+  if (c->h) {
+    fio_http_status_set(c->h, (size_t)(c->state.ws.code));
+    c->settings->on_close(c->h);
+    c->settings->on_finish(c->h);
+    fio_http_free(c->h);
+  }
   fio___http_connection_free(c);
 }
 
@@ -2029,19 +2033,6 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
 WebSocket Controller
 ***************************************************************************** */
 
-FIO_SFUNC void fio___http_controller_ws_on_finish_task(void *h_, void *ignr_) {
-  fio_http_s *h = (fio_http_s *)h_;
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio_protocol_set(c->io, NULL); /* make zombie, timeout will clear it. */
-  fio___http_connection_free(c);
-  (void)ignr_;
-}
-
-/** called once a request / response had finished */
-FIO_SFUNC void fio___http_controller_ws_on_finish(fio_http_s *h) {
-  fio_srv_defer(fio___http_controller_ws_on_finish_task, (void *)(h), NULL);
-}
-
 /* Called by the HTTP handle for each body chunk (or to finish a response). */
 FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
                                                    fio_http_write_args_s args) {
@@ -2211,9 +2202,12 @@ FIO_SFUNC void fio___sse_on_close(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   FIO_LOG_DDEBUG2("(%d) SSE connection closed for %p", fio_srv_pid(), c->io);
   c->io = NULL;
-  c->settings->on_close(c->h);
   fio_bstr_free(c->state.sse.data);
-  fio_http_free(c->h);
+  if (c->h) {
+    c->settings->on_close(c->h);
+    c->settings->on_finish(c->h);
+    fio_http_free(c->h);
+  }
   fio___http_connection_free(c);
 }
 
@@ -2242,6 +2236,26 @@ FIO_SFUNC void fio___http_controller_on_destroyed_task(void *c_, void *ignr_) {
   fio___http_connection_s *c = (fio___http_connection_s *)c_;
   fio___http_connection_free(c);
   (void)ignr_;
+}
+
+FIO_SFUNC void fio___http_controller_http1_on_finish_client_task(void *c_,
+                                                                 void *h_) {
+  fio___http_connection_s *c = (fio___http_connection_s *)c_;
+  fio_http_s *h = (fio_http_s *)h_;
+  c->settings->on_finish(h);
+  fio_http_free(h);
+  fio___http_connection_free(c);
+}
+
+FIO_SFUNC void fio___http_controller_http1_on_finish_client(fio_http_s *h) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  /* on_finish should be called after the `on_close` or after on_http */
+  if (!fio_http_is_upgraded(h)) {
+    /* on_finish always manually called here */
+    fio_srv_defer(fio___http_controller_http1_on_finish_client_task,
+                  (void *)fio___http_connection_dup(c),
+                  (void *)fio_http_dup(h));
+  }
 }
 
 /** Called when an HTTP handle is freed. */
@@ -2359,7 +2373,7 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     if (is_client) {
       r = (fio_http_controller_s){
           .on_destroyed = fio__http_controller_on_destroyed_client,
-          // .on_finish = fio___http_controller_http1_on_finish_client,
+          .on_finish = fio___http_controller_http1_on_finish_client,
           .close_io = fio___http_default_close,
           .get_fd = fio___http_controller_get_fd,
       };
@@ -2385,7 +2399,6 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_ws_write_body,
-        .on_finish = fio___http_controller_ws_on_finish,
         .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };
@@ -2394,7 +2407,6 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
     r = (fio_http_controller_s){
         .on_destroyed = fio__http_controller_on_destroyed2,
         .write_body = fio___http_controller_sse_write_body,
-        .on_finish = fio___http_controller_ws_on_finish,
         .close_io = fio___http_default_close,
         .get_fd = fio___http_controller_get_fd,
     };

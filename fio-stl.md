@@ -9398,7 +9398,7 @@ The internal Pub/Sub Letter Exchange Protocol imposes the following limitations 
 
 * Empty messages (no numerical filters, no channel, no message payload, no flags) are ignored.
 
-* Subscriptions match delivery interests by both channel name (or pattern) and a numerical filter.
+* Subscriptions match delivery matches by both channel name (or pattern) and the numerical filter.
 
 ### Subscriptions - Receiving Messages
 
