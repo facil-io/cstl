@@ -18,10 +18,10 @@ jobs:
       with:
         platform: x64
     - name: Test No-Op (debug)
-      run: clang -O0 -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && ./noop.exe
+      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && ./noop.exe
     - name: Test STL (debug) - no allocators
-      run: clang -O0 -fstack-protector-all tests\stl.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./stld.exe && ./stld.exe
+      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\stl.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./stld.exe && ./stld.exe
     - name: Test fio_malloc speed
-      run: clang -O3 -march=native tests\malloc.c -I. -o ./malloc.exe && ./malloc.exe
+      run: clang -O3 -Wno-#pragma-messages -march=native tests\malloc.c -I. -o ./malloc.exe && ./malloc.exe
     - name: Test STL
-      run: clang -O3 -march=native tests\stl.c -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -I. -o ./stl.exe && ./stl.exe
+      run: clang -O3 -Wno-#pragma-messages -march=native tests\stl.c -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -I. -o ./stl.exe && ./stl.exe
