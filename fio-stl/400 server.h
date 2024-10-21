@@ -2035,7 +2035,6 @@ FIO_SFUNC void fio_write2___task(void *io_, void *packet_) {
   if (!(io->state & FIO___IO_STATE_OPEN))
     goto io_error;
   fio_stream_add(&io->stream, packet);
-  fio___srv_try_to_write_to_io(io);
   fio___s_monitor_out(io);
   fio_free2(io); /* undup the IO object since it isn't moved to on_ready */
   return;
