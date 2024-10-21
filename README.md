@@ -1,8 +1,9 @@
 # facil.io 0.8.x - The C Server Toolbox Library (C STL)
 
-[![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml) [![Windows Clang CI](https://github.com/facil-io/cstl/actions/workflows/windows_clang.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows_clang.yml)
+[![facil.io logo](./extras/logo.svg?raw=true "facil.io")](https://github.com/facil-io/cstl)[![POSIX C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/c-cpp.yml) [![Windows C/C++ CI](https://github.com/facil-io/cstl/actions/workflows/windows.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows.yml) [![Windows Clang CI](https://github.com/facil-io/cstl/actions/workflows/windows_clang.yml/badge.svg)](https://github.com/facil-io/cstl/actions/workflows/windows_clang.yml)
 
 > **The [facil.io](http://facil.io) C STL aims to provide C developers with easy-to-use tools to write memory safe and performant programs**.
+
 
 ## This C Server Toolbox Library Powers a microFramework
 
@@ -83,7 +84,9 @@ If you're submitting a PR, make sure to update the corresponding code slice (fil
 
 Note that the master branch is currently as unstable as it gets. Commits may get squashed, the branch may be overwritten (force push), etc'. I will play nicer when the code stabilizes.
 
-Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](CONTRIBUTING.md). 
+Also, contributions are subject to the terms and conditions set in [the facil.io contribution guide](CONTRIBUTING.md).
+
+Logo contributed by ([Area55](https://github.com/area55git)) under a [Creative Commons Attribution 4.0 International License.](https://creativecommons.org/licenses/by/4.0/).
 
 ## Documentation
 
