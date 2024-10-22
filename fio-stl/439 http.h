@@ -854,7 +854,7 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
 HTTP Connect
 ***************************************************************************** */
 
-void fio___http_connect_on_failed(fio_protocol_s *p, void *udata) {
+static void fio___http_connect_on_failed(fio_protocol_s *p, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_http_free(c->h);
   c->h = NULL;

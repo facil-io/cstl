@@ -1858,16 +1858,18 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   return r;
 }
 
-const uint8_t *fio___string_write_unescape_next(const uint8_t *restrict s,
-                                                const uint8_t *restrict e) {
+FIO_SFUNC const uint8_t *fio___string_write_unescape_next(
+    const uint8_t *restrict s,
+    const uint8_t *restrict e) {
   if (*s == '\\')
     return s;
   return (const uint8_t *)FIO_MEMCHR(s, '\\', e - s);
 }
 
-size_t fio___string_write_unescape_diff(uint8_t *restrict dest,
-                                        const uint8_t *restrict *restrict ps,
-                                        const uint8_t *restrict e) {
+FIO_SFUNC size_t
+fio___string_write_unescape_diff(uint8_t *restrict dest,
+                                 const uint8_t *restrict *restrict ps,
+                                 const uint8_t *restrict e) {
   size_t r = 1;
   unsigned step = 1;
   const uint8_t *s = *ps;
