@@ -1895,9 +1895,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
       stderr,
       "* Testing map " FIO_MACRO2STR(FIO_MAP_NAME) " with key " FIO_MACRO2STR(
           FIO_MAP_KEY) " (=> " FIO_MACRO2STR(FIO_MAP_VALUE) ").\n");
+  size_t test_len_limit = (1UL << (FIO_MAP_ARRAY_LOG_LIMIT + 15));
   { /* test set / get overwrite , FIO_MAP_EACH and evict */
     FIO_NAME(FIO_MAP_NAME, s) map = FIO_MAP_INIT;
-    for (size_t i = 1; i < (1UL << (FIO_MAP_ARRAY_LOG_LIMIT + 5)); ++i) {
+    for (size_t i = 1; i < test_len_limit; ++i) {
       FIO_NAME(FIO_MAP_NAME, set)
       (&map, FIO___M_HASH(i) i FIO___M_VAL(i) FIO___M_OLD);
       FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&map) == i,
@@ -1937,6 +1938,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                  "map FIO_MAP_EACH ordering broken? %zu != %zu",
                  (size_t)(i.key),
                  (size_t)(loop_test));
+#else
+      FIO_ASSERT(i.key < test_len_limit,
+                 "map FIO_MAP_EACH invalid data? %zu !< %zu",
+                 (size_t)(i.key),
+                 (size_t)(test_len_limit));
 #endif
     }
     FIO_ASSERT(loop_test == count,
@@ -1998,22 +2004,25 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
                "map reserve error? %zu != %zu",
                (size_t)FIO_NAME(FIO_MAP_NAME, capa)(&map),
                4096);
-    for (size_t i = 1; i < 4096; ++i) {
+    for (size_t i = 1; i < test_len_limit; ++i) {
       FIO_NAME(FIO_MAP_NAME, set)
       (&map, FIO___M_HASH(i) i FIO___M_VAL(i) FIO___M_OLD);
       FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&map) == i, "insertion failed?");
     }
-    for (size_t i = 1; i < 4096; ++i) {
+    for (size_t i = 1; i < test_len_limit; ++i) {
       FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, get)(&map, FIO___M_HASH(i) i),
                  "key missing?");
+      size_t count = FIO_NAME(FIO_MAP_NAME, count)(&map);
       FIO_NAME(FIO_MAP_NAME, remove)
       (&map, FIO___M_HASH(i) i, NULL);
       FIO_ASSERT(!FIO_NAME(FIO_MAP_NAME, get)(&map, FIO___M_HASH(i) i),
                  "map_remove error?");
-      FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&map) == 4095 - i,
+      FIO_ASSERT(FIO_NAME(FIO_MAP_NAME, count)(&map) == count - 1,
                  "map count error after removal? %zu != %zu",
                  (size_t)FIO_NAME(FIO_MAP_NAME, count)(&map),
-                 i);
+                 count - 1);
+      /* see if removal produces errors while rehashing */
+      FIO_NAME(FIO_MAP_NAME, compact)(&map);
     }
     FIO_NAME(FIO_MAP_NAME, destroy)(&map);
   }

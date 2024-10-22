@@ -87,6 +87,9 @@ HTTP Handle Settings
 #define FIO_HTTP_STATIC_FILE_COMPLETION 1
 #endif
 
+#ifndef FIO_HTTP_LOG_X_REQUEST_START
+#define FIO_HTTP_LOG_X_REQUEST_START 1
+#endif
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -2783,21 +2786,11 @@ rewrite:
 SFUNC void fio_http_write_log(fio_http_s *h) {
   FIO_STR_INFO_TMP_VAR(buf, 1023);
   intptr_t bytes_sent = h->sent;
-  uint64_t time_start, time_end;
+  uint64_t time_start, time_end, time_proxy = 0;
   time_start = h->received_at;
   time_end = fio_http_get_timestump();
   fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
-  fio___http_write_pid(&buf);
-  buf.buf[buf.len++] = ' ';
-  fio_http_from(&buf, h);
-  FIO_MEMCPY(buf.buf + buf.len, " - - ", 5);
-  FIO_MEMCPY(buf.buf + buf.len + 5, date.buf, date.len);
-  buf.len += date.len + 6;
-  buf.buf[buf.len++] = ' ';
-  buf.buf[buf.len++] = '\"';
-  fio_string_write2(
-      &buf,
-      NULL,
+  fio_string_write_s to_write[16] = {
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
@@ -2810,11 +2803,48 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
                         : (FIO_STRING_WRITE_STR2((const char *)"---", 3))),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
       FIO_STRING_WRITE_NUM(time_end - time_start),
-      FIO_STRING_WRITE_STR2((const char *)(FIO___HTTP_TIME_UNIT "\r\n"), 4));
+      FIO_STRING_WRITE_STR2((const char *)(FIO___HTTP_TIME_UNIT "\r\n"), 4),
+  };
+  if (FIO_HTTP_LOG_X_REQUEST_START) {
+    /* log request wait time using x-request-start header */
+    fio_str_info_s xstart =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"x-request-start", 15),
+                                0);
+    unsigned step =
+        (xstart.len > 1 && (xstart.buf[0] | 32) == 't' && xstart.buf[1] == '=');
+    step <<= 1;
+    xstart.buf += step;
+    xstart.len -= step;
+    time_proxy = fio_atol(&xstart.buf);
+    time_proxy *= (FIO___HTTP_TIME_DIV / 1000); /* assumes info in ms */
+    time_proxy = time_start - time_proxy;
+    if (time_proxy < (512 * FIO___HTTP_TIME_DIV)) { /* was ms? */
+      to_write[11] =
+          FIO_STRING_WRITE_STR2((const char *)(FIO___HTTP_TIME_UNIT " (wait "),
+                                9);
+      to_write[12] = FIO_STRING_WRITE_NUM(time_proxy);
+      to_write[13] =
+          FIO_STRING_WRITE_STR2((const char *)(FIO___HTTP_TIME_UNIT ")\r\n"),
+                                5);
+    }
+  }
+
+  /* Write log line to buffer */
+  fio___http_write_pid(&buf);
+  buf.buf[buf.len++] = ' ';
+  fio_http_from(&buf, h);
+  FIO_MEMCPY(buf.buf + buf.len, " - - ", 5);
+  FIO_MEMCPY(buf.buf + buf.len + 5, date.buf, date.len);
+  buf.len += date.len + 6;
+  buf.buf[buf.len++] = ' ';
+  buf.buf[buf.len++] = '\"';
+  fio_string_write2 FIO_NOOP(&buf, NULL, to_write);
 
   if (buf.buf[buf.len - 1] != '\n')
     buf.buf[buf.len++] = '\n'; /* log was truncated, data too long */
 
+  /* Write log line to STDOUT */
   fwrite(buf.buf, 1, buf.len, stdout);
   h->received_at = time_end;
 }

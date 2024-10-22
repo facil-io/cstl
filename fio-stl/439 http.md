@@ -809,7 +809,13 @@ Returns a human readable string related to the HTTP status number.
 void fio_http_write_log(fio_http_s *h);
 ```
 
-Logs an HTTP (response) to STDOUT.
+Logs an HTTP (response) to STDOUT using common log format:
+
+```txt
+[PID] ADDR - - [DATE/TIME] REQ RES_CODE BYTES_SENT TIME_SPENT_IN_APP <(wait PROXY_DELAY)>
+```
+
+See also the `FIO_HTTP_LOG_X_REQUEST_START` and `FIO_HTTP_EXACT_LOGGING` compilation flags.
 
 ### HTTP WebSocket / SSE Helpers
 
@@ -1112,6 +1118,19 @@ The fuzzy timestamp includes delays that aren't related to the HTTP request and 
 On the other hand, `FIO_HTTP_EXACT_LOGGING` collects exact time stamps to measure the time it took to process the HTTP request (excluding time spent reading / writing the data from the network).
 
 Due to the preference to err on the side of higher performance, fuzzy time-stamping is the default.
+
+
+#### `FIO_HTTP_LOG_X_REQUEST_START`
+
+```c
+#ifndef FIO_HTTP_LOG_X_REQUEST_START
+#define FIO_HTTP_LOG_X_REQUEST_START 1
+#endif
+```
+
+If set, logs will react to an `X-Request-Start` header that provides time in milliseconds.
+
+An additional `(wait XXms)` data point will be provided in the logs to inform of the delay between the proxy server's `X-Request-Start` start time and the application's start time.
 
 #### `FIO_HTTP_BODY_RAM_LIMIT`
 

@@ -43,7 +43,7 @@ Memory allocation macros
 /** Frees allocated memory. */
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
-#define FIO_MEM_REALLOC_IS_SAFE 1
+#define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 
 #else /* H___FIO_MALLOC___H */
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
