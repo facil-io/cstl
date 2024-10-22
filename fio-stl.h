@@ -10791,12 +10791,12 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(int fd) {
 /* If they have O_NONBLOCK, use the Posix way to do it */
-#if defined(O_NONBLOCK)
+#if defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
   /* Fixme: O_NONBLOCK is defined but broken on SunOS 4.1.x and AIX 3.2.5. */
   int flags;
   if (-1 == (flags = fcntl(fd, F_GETFL, 0)))
     flags = 0;
-#ifdef O_CLOEXEC
+#if defined(O_CLOEXEC)
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK | O_CLOEXEC);
 #else
   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
