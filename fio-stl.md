@@ -3889,7 +3889,7 @@ The callback should accept a single `void *` as an argument.
 
 Events are performed either in the order in which they were registered or in reverse order, depending on the context.
 
-These are the possible `event` values, note that some of them are only relevant in the context of the `FIO_SERVER` module:
+These are the possible `event` values, note that some of them are only relevant in the context of the `FIO_SERVER` module and were designed for the server's use:
 
 ```c
 typedef enum {
@@ -3938,8 +3938,8 @@ typedef enum {
   FIO_CALL_ON_CHILD_CRUSH,
   /** Called by each worker thread in a Server Async queue as it ends. */
   FIO_CALL_ON_WORKER_THREAD_END,
-  /** Called just before finishing up (both on child and parent processes). */
-  FIO_CALL_ON_FINISH,
+  /** Called when wither a *Worker* or *Master* stopped. */
+  FIO_CALL_ON_STOP,
   /** An alternative to the system's at_exit. */
   FIO_CALL_AT_EXIT,
   /** used for testing and array allocation - must be last. */

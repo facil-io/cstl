@@ -70,8 +70,8 @@ typedef enum {
   FIO_CALL_ON_CHILD_CRUSH,
   /** Called by each worker thread in a Server Async queue as it ends. */
   FIO_CALL_ON_WORKER_THREAD_END,
-  /** Called just before finishing up (both on child and parent processes). */
-  FIO_CALL_ON_FINISH,
+  /** Called when wither a *Worker* or *Master* stopped. */
+  FIO_CALL_ON_STOP,
   /** An alternative to the system's at_exit. */
   FIO_CALL_AT_EXIT,
   /** used for testing and array allocation - must be last. */
@@ -161,7 +161,7 @@ static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
     [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
     [FIO_CALL_ON_WORKER_THREAD_END] = "ON_WORKER_THREAD_END",
-    [FIO_CALL_ON_FINISH] = "ON_FINISH",
+    [FIO_CALL_ON_STOP] = "ON_FINISH",
     [FIO_CALL_AT_EXIT] = "AT_EXIT",
     [FIO_CALL_NEVER] = "NEVER",
 };

@@ -193,9 +193,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
   eol -= eol[-1] == '\r';
 
   /* parse first line */
-  if (start[0] > ('0' - 1) && start[0] < ('9' + 1))
-    goto parse_response_line;
-  /* request: method path version */
+  /* request: method path version ; response: version code txt */
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
   wrd[0] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
@@ -207,7 +205,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
   if (start >= eol)
     return -1;
   wrd[2] = FIO_BUF_INFO2(start, (size_t)(eol - start));
-  if (fio_c2i(wrd[1].buf[0]) < 10)
+  if (fio_c2i(wrd[1].buf[0]) < 10) /* test if path or code */
     goto parse_response_line;
   if (wrd[2].len > 14)
     wrd[2].len = 14;

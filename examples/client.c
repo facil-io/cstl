@@ -49,8 +49,8 @@ FIO_SFUNC void client_on_eventsource(fio_http_s *h,
                                      fio_buf_info_s id,
                                      fio_buf_info_s event,
                                      fio_buf_info_s data);
-/** Called after a WebSocket / SSE connection is closed (for cleanup). */
-FIO_SFUNC void client_on_close(fio_http_s *h);
+/** Called after HTTP / WebSocket / SSE cycle had finished (for cleanup). */
+FIO_SFUNC void client_on_finish(fio_http_s *h);
 
 /** Called for show... when the outgoing buffer appears empty. */
 FIO_SFUNC void client_on_ready(fio_http_s *h);
@@ -153,8 +153,7 @@ FIO_SFUNC void open_client_connection(void *is_http) {
                                 .on_message = client_on_message,
                                 .on_ready = client_on_ready,
                                 .on_eventsource = client_on_eventsource,
-                                .on_close = client_on_close,
-                                .on_finish = client_on_close,
+                                .on_finish = client_on_finish,
                                 .timeout = (fio_cli_get_i("-t")),
                                 .ws_timeout = (fio_cli_get_i("-t")),
                                 .connect_timeout = (fio_cli_get_i("-w"))),
@@ -333,7 +332,7 @@ FIO_SFUNC void client_on_eventsource(fio_http_s *h,
   (void)h;
 }
 /** Called after a WebSocket / SSE connection is closed (for cleanup). */
-FIO_SFUNC void client_on_close(fio_http_s *h) {
+FIO_SFUNC void client_on_finish(fio_http_s *h) {
   if (!fio_cli_get_bool("-b"))
     FIO_LOG_INFO("Connection Closed");
   fio_srv_stop();

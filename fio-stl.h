@@ -11231,8 +11231,8 @@ typedef enum {
   FIO_CALL_ON_CHILD_CRUSH,
   /** Called by each worker thread in a Server Async queue as it ends. */
   FIO_CALL_ON_WORKER_THREAD_END,
-  /** Called just before finishing up (both on child and parent processes). */
-  FIO_CALL_ON_FINISH,
+  /** Called when wither a *Worker* or *Master* stopped. */
+  FIO_CALL_ON_STOP,
   /** An alternative to the system's at_exit. */
   FIO_CALL_AT_EXIT,
   /** used for testing and array allocation - must be last. */
@@ -11322,7 +11322,7 @@ static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_PARENT_CRUSH] = "ON_PARENT_CRUSH",
     [FIO_CALL_ON_CHILD_CRUSH] = "ON_CHILD_CRUSH",
     [FIO_CALL_ON_WORKER_THREAD_END] = "ON_WORKER_THREAD_END",
-    [FIO_CALL_ON_FINISH] = "ON_FINISH",
+    [FIO_CALL_ON_STOP] = "ON_FINISH",
     [FIO_CALL_AT_EXIT] = "AT_EXIT",
     [FIO_CALL_NEVER] = "NEVER",
 };
@@ -31461,7 +31461,7 @@ typedef struct fio_srv_listen_args {
    *
    * This will be called separately for every process before exiting.
    */
-  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  void (*on_stop)(fio_protocol_s *protocol, void *udata);
   /**
    * Selects a queue that will be used to schedule a pre-accept task.
    * May be used to test user thread stress levels before accepting connections.
@@ -31689,7 +31689,7 @@ SFUNC void fio_srv_run_every(fio_timer_schedule_args_s args);
  * * Opaque user data:
  *        void *udata2
  * * Called when the timer is done (finished):
- *        void (*on_finish)(void *, void *)
+ *        void (*on_stop)(void *, void *)
  * * Timer interval, in milliseconds:
  *        uint32_t every
  * * The number of times the timer should be performed. -1 == infinity:
@@ -32626,7 +32626,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   /* store info, as it might be freed if the protocol is freed. */
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
-  /* call on_finish / free callbacks . */
+  /* call on_stop / free callbacks . */
   io->pr->io_functions.cleanup(io->tls);
   io->pr->on_close(io->udata); /* may destroy protocol object! */
   fio___srv_env_safe_destroy(&io->env);
@@ -33116,7 +33116,7 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   }
   fio_queue_perform_all(fio___srv_tasks);
   fio_queue_perform_all(fio___srv_tasks);
-  fio_state_callback_force(FIO_CALL_ON_FINISH);
+  fio_state_callback_force(FIO_CALL_ON_STOP);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srvdata.workers = 0;
 }
@@ -33138,7 +33138,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
-  fio_state_callback_add(FIO_CALL_ON_FINISH,
+  fio_state_callback_add(FIO_CALL_ON_STOP,
                          fio___srv_wait_for_worker,
                          (void *)thr);
   if (fio_thread_waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
@@ -33151,7 +33151,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
     FIO_ASSERT_DEBUG(
         0,
         "DEBUG mode prevents worker re-spawning, now crashing parent.");
-    fio_state_callback_remove(FIO_CALL_ON_FINISH,
+    fio_state_callback_remove(FIO_CALL_ON_STOP,
                               fio___srv_wait_for_worker,
                               (void *)thr);
     fio_thread_detach(&thr);
@@ -33476,7 +33476,7 @@ typedef struct {
   fio_queue_s *queue;
   fio_s *io;
   void (*on_start)(fio_protocol_s *protocol, void *udata);
-  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  void (*on_stop)(fio_protocol_s *protocol, void *udata);
   int owner;
   int fd;
   size_t ref_count;
@@ -33518,8 +33518,8 @@ static void fio___srv_listen_free(void *l_) {
   }
 #endif
 
-  if (l->on_finish)
-    l->on_finish(l->protocol, l->udata);
+  if (l->on_stop)
+    l->on_stop(l->protocol, l->udata);
 
   if (l->hide_from_log)
     FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
@@ -33704,7 +33704,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
       .tls_ctx = built_tls,
       .queue_for_accept = args.queue_for_accept,
       .on_start = args.on_start,
-      .on_finish = args.on_finish,
+      .on_stop = args.on_stop,
       .owner = fio___srvdata.pid,
       .url_len = url_buf.len,
       .hide_from_log = args.hide_from_log,
@@ -40825,9 +40825,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
   eol -= eol[-1] == '\r';
 
   /* parse first line */
-  if (start[0] > ('0' - 1) && start[0] < ('9' + 1))
-    goto parse_response_line;
-  /* request: method path version */
+  /* request: method path version ; response: version code txt */
   if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start))))
     return -1;
   wrd[0] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
@@ -40839,7 +40837,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
   if (start >= eol)
     return -1;
   wrd[2] = FIO_BUF_INFO2(start, (size_t)(eol - start));
-  if (fio_c2i(wrd[1].buf[0]) < 10)
+  if (fio_c2i(wrd[1].buf[0]) < 10) /* test if path or code */
     goto parse_response_line;
   if (wrd[2].len > 14)
     wrd[2].len = 14;
@@ -42437,7 +42435,7 @@ static void fio___http_listen_on_start(fio_protocol_s *protocol, void *u) {
                                                           : fio_srv_queue());
 }
 
-static void fio___http_listen_on_finished(fio_protocol_s *p, void *u) {
+static void fio___http_listen_on_stop(fio_protocol_s *p, void *u) {
   (void)u;
   fio___http_protocol_free(
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
@@ -42455,7 +42453,7 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
                      .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                      .tls = s.tls,
                      .on_start = fio___http_listen_on_start,
-                     .on_finish = fio___http_listen_on_finished,
+                     .on_stop = fio___http_listen_on_stop,
                      .queue_for_accept = p->settings.queue);
   return listener;
 }

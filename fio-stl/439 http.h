@@ -827,7 +827,7 @@ static void fio___http_listen_on_start(fio_protocol_s *protocol, void *u) {
                                                           : fio_srv_queue());
 }
 
-static void fio___http_listen_on_finished(fio_protocol_s *p, void *u) {
+static void fio___http_listen_on_stop(fio_protocol_s *p, void *u) {
   (void)u;
   fio___http_protocol_free(
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
@@ -845,7 +845,7 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
                      .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                      .tls = s.tls,
                      .on_start = fio___http_listen_on_start,
-                     .on_finish = fio___http_listen_on_finished,
+                     .on_stop = fio___http_listen_on_stop,
                      .queue_for_accept = p->settings.queue);
   return listener;
 }

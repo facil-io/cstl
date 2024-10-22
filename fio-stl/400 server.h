@@ -142,7 +142,7 @@ typedef struct fio_srv_listen_args {
    *
    * This will be called separately for every process before exiting.
    */
-  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  void (*on_stop)(fio_protocol_s *protocol, void *udata);
   /**
    * Selects a queue that will be used to schedule a pre-accept task.
    * May be used to test user thread stress levels before accepting connections.
@@ -370,7 +370,7 @@ SFUNC void fio_srv_run_every(fio_timer_schedule_args_s args);
  * * Opaque user data:
  *        void *udata2
  * * Called when the timer is done (finished):
- *        void (*on_finish)(void *, void *)
+ *        void (*on_stop)(void *, void *)
  * * Timer interval, in milliseconds:
  *        uint32_t every
  * * The number of times the timer should be performed. -1 == infinity:
@@ -1307,7 +1307,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   /* store info, as it might be freed if the protocol is freed. */
   if (FIO_LIST_IS_EMPTY(&io->pr->reserved.ios))
     FIO_LIST_REMOVE_RESET(&io->pr->reserved.protocols);
-  /* call on_finish / free callbacks . */
+  /* call on_stop / free callbacks . */
   io->pr->io_functions.cleanup(io->tls);
   io->pr->on_close(io->udata); /* may destroy protocol object! */
   fio___srv_env_safe_destroy(&io->env);
@@ -1797,7 +1797,7 @@ FIO_SFUNC void fio___srv_work(int is_worker) {
   }
   fio_queue_perform_all(fio___srv_tasks);
   fio_queue_perform_all(fio___srv_tasks);
-  fio_state_callback_force(FIO_CALL_ON_FINISH);
+  fio_state_callback_force(FIO_CALL_ON_STOP);
   fio_queue_perform_all(fio___srv_tasks);
   fio___srvdata.workers = 0;
 }
@@ -1819,7 +1819,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
-  fio_state_callback_add(FIO_CALL_ON_FINISH,
+  fio_state_callback_add(FIO_CALL_ON_STOP,
                          fio___srv_wait_for_worker,
                          (void *)thr);
   if (fio_thread_waitpid(pid, &status, 0) != pid && !fio___srvdata.stop)
@@ -1832,7 +1832,7 @@ static void *fio___srv_worker_sentinel(void *pid_data) {
     FIO_ASSERT_DEBUG(
         0,
         "DEBUG mode prevents worker re-spawning, now crashing parent.");
-    fio_state_callback_remove(FIO_CALL_ON_FINISH,
+    fio_state_callback_remove(FIO_CALL_ON_STOP,
                               fio___srv_wait_for_worker,
                               (void *)thr);
     fio_thread_detach(&thr);
@@ -2157,7 +2157,7 @@ typedef struct {
   fio_queue_s *queue;
   fio_s *io;
   void (*on_start)(fio_protocol_s *protocol, void *udata);
-  void (*on_finish)(fio_protocol_s *protocol, void *udata);
+  void (*on_stop)(fio_protocol_s *protocol, void *udata);
   int owner;
   int fd;
   size_t ref_count;
@@ -2199,8 +2199,8 @@ static void fio___srv_listen_free(void *l_) {
   }
 #endif
 
-  if (l->on_finish)
-    l->on_finish(l->protocol, l->udata);
+  if (l->on_stop)
+    l->on_stop(l->protocol, l->udata);
 
   if (l->hide_from_log)
     FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
@@ -2385,7 +2385,7 @@ SFUNC void *fio_srv_listen FIO_NOOP(struct fio_srv_listen_args args) {
       .tls_ctx = built_tls,
       .queue_for_accept = args.queue_for_accept,
       .on_start = args.on_start,
-      .on_finish = args.on_finish,
+      .on_stop = args.on_stop,
       .owner = fio___srvdata.pid,
       .url_len = url_buf.len,
       .hide_from_log = args.hide_from_log,
