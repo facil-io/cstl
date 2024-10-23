@@ -80,7 +80,32 @@ The numbering at the beginning of the header filenames serves a dual purpose:
 
 * Feature classification (e.g., core types that require memory allocation are in the 100-199 range while new type templates are placed in the 200-299 range). This numbering ensures that modules are added in the correct sequence and can manage their dependencies efficiently.
 
-* Please remember to add your module to both the `include.h` and `000 dependencies.h` header files, so people can access it.
+
+These are the current numbering ranges:
+
+* 000-099: core features, ordered by priority and dependency. This may also include non-core helpers and parsers that require no memory allocation.
+
+* 100-198: non-template / core types and building blocks. This may also include parsers that require memory allocations.
+
+* 200-298: template types – types that can be customized using macros, such as hash maps and dynamic arrays.
+
+* 300-398: cryptography and cryptographic tools - these should be considered as fallback elements when a cryptography library is missing.
+
+* 400-498: server, web and IO, such as HTTP, WebSockets, communication protocols, etc'.
+
+* 500: FIOBJ soft types.
+
+* 501-598: to be decided.
+
+* 600-698: to be decided.
+
+* 700: cleanup.
+
+* 900-998: tests.
+
+Please remember to add your module to both the `include.h` and `000 dependencies.h` header files, so people can access it.
+
+Please write tests to test your module. See the `902 empty module tests.h` boilerplate.
 
 ### Community Guideline - Play Nice
 
