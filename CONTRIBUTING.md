@@ -6,6 +6,8 @@ Thank you for inquiring `facil.io`'s contribution guide. It's people like you an
 
 * Play nice.
 
+* Contributions and edits to the code should be placed in the `/fio-stl` folder and its many header files which are numbered by priority and classification (**NOT** in the auto-generated `fio-stl.h` header).
+
 * PRs are appreciated. Most likely the code you're looking for is @ the [facil.io C STL repository](https://github.com/facil-io/cstl).
 
 * Always add a comment in the CHANGELOG to say what you did and credit yourself.
@@ -59,6 +61,26 @@ Thank you for inquiring `facil.io`'s contribution guide. It's people like you an
 * **Easy to manage**:
 
     See the License section below. Contributions must relinquish ownership of contributed code, so licensing and copyright can be managed without the need to reach out to every past contributor.
+
+### File Naming and Edits
+
+The `fio-stl.h` header is **Auto-Generated** - do **not** edit it. 
+
+Any new features or changes should be made in the individual headers placed in the `./fio-stl` **folder**. This avoids manual edits and ensures consistency during the generation process.
+
+#### Boilerplate for New Modules
+
+There's a template or boilerplate for new modules provided the [`./fio-stl/699 empty module.h`](https://github.com/facil-io/cstl/blob/master/fio-stl/699%20empty%20module.h), which should be used as the starting point for adding any new functionality. This includes the necessary structure and naming conventions for creating new modules within the CSTL.
+
+#### Numbering Scheme for Header Files
+
+The numbering at the beginning of the header filenames serves a dual purpose:
+
+* Prioritization in the generated fio-stl.h file (e.g., headers that require dynamic memory allocation begin from 100).
+
+* Feature classification (e.g., core types that require memory allocation are in the 100-199 range while new type templates are placed in the 200-299 range). This numbering ensures that modules are added in the correct sequence and can manage their dependencies efficiently.
+
+* Please remember to add your module to both the `include.h` and `000 dependencies.h` header files, so people can access it.
 
 ### Community Guideline - Play Nice
 
