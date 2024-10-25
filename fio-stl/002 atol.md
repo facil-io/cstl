@@ -261,4 +261,5 @@ size_t fio_digits_xbase(int64_t i);
 Returns the number of digits of the **unsigned** number when using base `base`.
 
 This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+
 -------------------------------------------------------------------------------

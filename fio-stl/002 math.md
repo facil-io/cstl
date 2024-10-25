@@ -5,96 +5,14 @@
 #include "fio-stl.h"
 ```
 
-If `FIO_MATH` is defined, some building blocks for multi-precision math will be provided as well as some naive implementations of simple multi-precision operation that focus on constant time (security) rather than performance.
+When requiring more than multi-precision ADD, SUB and MUL, `FIO_MATH` attempts to provide some commonly used (yet more advanced) operations.
 
 Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
-
-### Multi-Precision Helper Types
-
-The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types.
-
-
-#### `fio_u128`
-
-```c
-typedef union {
-  uint8_t u8[16];
-  uint16_t u16[8];
-  uint32_t u32[4];
-  uint64_t u64[2];
-  __uint128_t u128[1]; /* if supported by the compiler */
-} fio_u128;
-```
-
-An unsigned 128 bit union type.
-
-#### `fio_u256`
-
-```c
-typedef union {
-  uint8_t u8[32];
-  uint16_t u16[16];
-  uint32_t u32[8];
-  uint64_t u64[4];
-  __uint128_t u128[2]; /* if supported by the compiler */
-  __uint256_t u256[1]; /* if supported by the compiler */
-} fio_u256;
-```
-
-An unsigned 256 bit union type.
-
-#### `fio_u512`
-
-```c
-typedef union {
-  uint8_t u8[64];
-  uint16_t u16[32];
-  uint32_t u32[16];
-  uint64_t u64[8];
-  __uint128_t u128[4]; /* if supported by the compiler */
-  __uint256_t u256[2]; /* if supported by the compiler */
-} fio_u512;
-```
-
-An unsigned 512 bit union type.
 
 ### Multi-Precision Math with Little Endian arrays
 
 The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
 
-
-#### `fio_math_add`
-
-```c
-uint64_t fio_math_add(uint64_t *dest,
-                      const uint64_t *a,
-                      const uint64_t *b,
-                      const size_t number_array_length);
-```
-
-Multi-precision ADD for `len*64` bit long a + b. Returns the carry.
-
-#### `fio_math_sub`
-
-```c
-uint64_t fio_math_sub(uint64_t *dest,
-                      const uint64_t *a,
-                      const uint64_t *b,
-                      const size_t number_array_length);
-```
-
-Multi-precision SUB for `len*64` bit long a + b. Returns the carry.
-
-#### `fio_math_mul`
-
-```c
-void fio_math_mul(uint64_t *restrict dest,
-                  const uint64_t *a,
-                  const uint64_t *b,
-                  const size_t number_array_length);
-```
-
-Multi-precision MUL for `len*64` bit long a, b. `dest` must be `len*2` long or buffer overflows will occur.
 
 #### `fio_math_div`
 ```c

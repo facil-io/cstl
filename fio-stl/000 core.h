@@ -326,6 +326,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #if FIO_HAVE_UNIX_TOOLS
+#include <sched.h>
 #include <sys/param.h>
 #include <unistd.h>
 #endif
@@ -475,7 +476,455 @@ Pointer Math
                    (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 
 /* *****************************************************************************
-Logging Defaults (no-op)
+Sleep / Thread Scheduling Macros
+***************************************************************************** */
+
+#ifndef FIO_THREAD_WAIT
+#if FIO_OS_WIN
+/** Calls NtDelayExecution with the requested nano-second count. */
+#define FIO_THREAD_WAIT(nano_sec)                                              \
+  do {                                                                         \
+    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
+  } while (0)
+// https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
+
+#elif FIO_OS_POSIX
+/** Calls nanonsleep with the requested nano-second count. */
+#define FIO_THREAD_WAIT(nano_sec)                                              \
+  do {                                                                         \
+    const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
+                                .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
+    nanosleep(&tm, (struct timespec *)NULL);                                   \
+  } while (0)
+
+#endif
+#endif
+
+#ifndef FIO_THREAD_RESCHEDULE
+// Define the thread_yield function
+
+#if (defined(__x86_64__) || defined(__i386__)) &&                              \
+    (defined(__GNUC__) || defined(__clang__))
+/** Yields the thread, hinting to the processor about spinlock loop. */
+#define FIO_THREAD_RESCHEDULE() __asm__ __volatile__("pause" ::: "memory")
+#elif (defined(__aarch64__) || defined(__arm__)) &&                            \
+    (defined(__GNUC__) || defined(__clang__))
+/** Yields the thread, hinting to the processor about spinlock loop. */
+#define FIO_THREAD_RESCHEDULE() __asm__ __volatile__("yield" ::: "memory")
+#elif defined(_MSC_VER)
+#define FIO_THREAD_RESCHEDULE() YieldProcessor()
+#elif FIO_OS_POSIX
+/** Yields the thread, hinting to the processor about spinlock loop. */
+#define FIO_THREAD_RESCHEDULE() sched_yield()
+#else
+/**
+ * Reschedules the thread by calling nanosleeps for a single nano-second.
+ *
+ * In practice, the thread will probably sleep for 60ns or more.
+ */
+#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
+#endif
+
+#endif /* FIO_THREAD_RESCHEDULE */
+
+/* *****************************************************************************
+
+
+
+
+                            Atomic Operations
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+
+/* C11 Atomics are defined? */
+#if defined(__ATOMIC_RELAXED)
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj)                                           \
+  do {                                                                         \
+    dest = __atomic_load_n((p_obj), __ATOMIC_SEQ_CST);                         \
+  } while (0)
+
+// clang-format off
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __atomic_compare_exchange((p_obj), (p_expected), (p_desired), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) __atomic_exchange_n((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) __atomic_fetch_add((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) __atomic_fetch_sub((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) __atomic_fetch_and((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) __atomic_fetch_xor((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value) __atomic_fetch_or((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic NOT AND ((~)&) operation, returns previous value */
+#define fio_atomic_nand(p_obj, value) __atomic_fetch_nand((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) __atomic_add_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) __atomic_sub_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) __atomic_and_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) __atomic_xor_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) __atomic_or_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/** An atomic NOT AND ((~)&) operation, returns new value */
+#define fio_atomic_nand_fetch(p_obj, value) __atomic_nand_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
+/* note: __ATOMIC_SEQ_CST may be safer and __ATOMIC_ACQ_REL may be faster */
+
+/* Select the correct compiler builtin method. */
+#elif __has_builtin(__sync_add_and_fetch) || (__GNUC__ > 3) /* Atomic Implementation Selector */
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj)                                           \
+  do {                                                                         \
+    dest = *(p_obj);                                                           \
+  } while (!__sync_bool_compare_and_swap((p_obj), dest, dest))
+
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __sync_bool_compare_and_swap((p_obj), (p_expected), *(p_desired))
+/** An atomic exchange operation, ruturns previous value */
+#define fio_atomic_exchange(p_obj, value) __sync_val_compare_and_swap((p_obj), *(p_obj), (value))
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add(p_obj, value) __sync_fetch_and_add((p_obj), (value))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub(p_obj, value) __sync_fetch_and_sub((p_obj), (value))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and(p_obj, value) __sync_fetch_and_and((p_obj), (value))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor(p_obj, value) __sync_fetch_and_xor((p_obj), (value))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or(p_obj, value) __sync_fetch_and_or((p_obj), (value))
+/** An atomic NOT AND ((~)&) operation, returns new value */
+#define fio_atomic_nand(p_obj, value) __sync_fetch_and_nand((p_obj), (value))
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add_fetch(p_obj, value) __sync_add_and_fetch((p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub_fetch(p_obj, value) __sync_sub_and_fetch((p_obj), (value))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and_fetch(p_obj, value) __sync_and_and_fetch((p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor_fetch(p_obj, value) __sync_xor_and_fetch((p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or_fetch(p_obj, value) __sync_or_and_fetch((p_obj), (value))
+/** An atomic NOT AND ((~)&) operation, returns previous value */
+#define fio_atomic_nand_fetch(p_obj, value) __sync_nand_and_fetch((p_obj), (value))
+
+
+/* Atomic Implementation Selector */
+#elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+#include <stdatomic.h>
+#ifdef _MSC_VER
+#pragma message ("Fallback to C11 atomic header, might be missing some features.")
+#undef FIO_COMPILER_GUARD
+#define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
+#else
+#warning Fallback to C11 atomic header, might be missing some features.
+#endif /* _MSC_VER */
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) atomic_compare_exchange_strong((p_obj), (p_expected), (p_desired))
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) atomic_exchange((p_obj), (value))
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) atomic_fetch_add((p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) atomic_fetch_sub((p_obj), (value))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) atomic_fetch_and((p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) atomic_fetch_xor((p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value) atomic_fetch_or((p_obj), (value))
+/** An atomic NOT AND ((~)&) operation, returns previous value */
+#define fio_atomic_nand(p_obj, value) atomic_fetch_nand((p_obj), (value))
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
+
+#elif _MSC_VER
+#pragma message ("Warning: WinAPI atomics have less features, but this is what this compiler has, so...")
+#include <intrin.h>
+#define FIO___ATOMICS_FN_ROUTE(fn, ptr, ...)                                   \
+  ((sizeof(*ptr) == 1)                                                         \
+       ? fn##8((int8_t volatile *)(ptr), __VA_ARGS__)                          \
+       : (sizeof(*ptr) == 2)                                                   \
+             ? fn##16((int16_t volatile *)(ptr), __VA_ARGS__)                  \
+             : (sizeof(*ptr) == 4)                                             \
+                   ? fn((int32_t volatile *)(ptr), __VA_ARGS__)                \
+                   : fn##64((int64_t volatile *)(ptr), __VA_ARGS__))
+
+#ifndef _WIN64
+#error Atomics on Windows require 64bit OS and compiler support.
+#endif
+
+/** An atomic load operation, returns value in pointer. */
+#define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),(*(p_desired)),(*(p_expected))), (*(p_obj) == *(p_desired)))
+/** An atomic exchange operation, returns previous value */
+#define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
+
+/** An atomic addition operation, returns previous value */
+#define fio_atomic_add(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchangeAdd, (p_obj), (value))
+/** An atomic subtraction operation, returns previous value */
+#define fio_atomic_sub(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchangeAdd, (p_obj), (0ULL - (value)))
+/** An atomic AND (&) operation, returns previous value */
+#define fio_atomic_and(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedAnd, (p_obj), (value))
+/** An atomic XOR (^) operation, returns previous value */
+#define fio_atomic_xor(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedXor, (p_obj), (value))
+/** An atomic OR (|) operation, returns previous value */
+#define fio_atomic_or(p_obj, value)  FIO___ATOMICS_FN_ROUTE(_InterlockedOr, (p_obj), (value))
+
+/** An atomic addition operation, returns new value */
+#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)), (*(p_obj)))
+/** An atomic subtraction operation, returns new value */
+#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)), (*(p_obj)))
+/** An atomic AND (&) operation, returns new value */
+#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)), (*(p_obj)))
+/** An atomic XOR (^) operation, returns new value */
+#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)), (*(p_obj)))
+/** An atomic OR (|) operation, returns new value */
+#define fio_atomic_or_fetch(p_obj, value) (fio_atomic_or((p_obj), (value)), (*(p_obj)))
+#else
+#error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
+
+#endif /* Atomic Implementation Selector */
+// clang-format on
+
+/* *****************************************************************************
+Spin-Locks
+***************************************************************************** */
+
+#define FIO_LOCK_INIT         0
+#define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
+typedef volatile unsigned char fio_lock_i;
+
+/** Tries to lock a specific sublock. Returns 0 on success and 1 on failure. */
+FIO_IFUNC uint8_t fio_trylock_sublock(fio_lock_i *lock, uint8_t sub) {
+  FIO_COMPILER_GUARD;
+  sub &= 7;
+  uint8_t sub_ = 1U << sub;
+  return ((fio_atomic_or(lock, sub_) & sub_) >> sub);
+}
+
+/** Busy waits for a specific sublock to become available - not recommended. */
+FIO_IFUNC void fio_lock_sublock(fio_lock_i *lock, uint8_t sub) {
+  while (fio_trylock_sublock(lock, sub)) {
+    FIO_THREAD_RESCHEDULE();
+  }
+}
+
+/** Unlocks the specific sublock, no matter which thread owns the lock. */
+FIO_IFUNC void fio_unlock_sublock(fio_lock_i *lock, uint8_t sub) {
+  sub = 1U << (sub & 7);
+  fio_atomic_and(lock, (~(fio_lock_i)sub));
+}
+
+/**
+ * Tries to lock a group of sublocks.
+ *
+ * Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+ * macro. i.e.:
+ *
+ *      if(!fio_trylock_group(&lock,
+ *                            FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
+ *         // act in lock
+ *      }
+ *
+ * Returns 0 on success and non-zero on failure.
+ */
+FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
+  if (!group)
+    group = 1;
+  FIO_COMPILER_GUARD;
+  uint8_t state = fio_atomic_or(lock, group);
+  if (!(state & group))
+    return 0;
+  /* release the locks we aquired, which are: ((~state) & group) */
+  fio_atomic_and(lock, ~((~state) & group));
+  return 1;
+}
+
+/**
+ * Busy waits for a group lock to become available - not recommended.
+ *
+ * See `fio_trylock_group` for details.
+ */
+FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
+  while (fio_trylock_group(lock, group)) {
+    FIO_THREAD_RESCHEDULE();
+  }
+}
+
+/** Unlocks a sublock group, no matter which thread owns which sublock. */
+FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
+  if (!group)
+    group = 1;
+  fio_atomic_and(lock, (~group));
+}
+
+/** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
+FIO_IFUNC uint8_t fio_trylock_full(fio_lock_i *lock) {
+  FIO_COMPILER_GUARD;
+  fio_lock_i old = fio_atomic_or(lock, ~(fio_lock_i)0);
+  if (!old)
+    return 0;
+  fio_atomic_and(lock, old);
+  return 1;
+}
+
+/** Busy waits for all sub lock to become available - not recommended. */
+FIO_IFUNC void fio_lock_full(fio_lock_i *lock) {
+  while (fio_trylock_full(lock)) {
+    FIO_THREAD_RESCHEDULE();
+  }
+}
+
+/** Unlocks all sub locks, no matter which thread owns the lock. */
+FIO_IFUNC void fio_unlock_full(fio_lock_i *lock) { fio_atomic_and(lock, 0); }
+
+/**
+ * Tries to acquire the default lock (sublock 0).
+ *
+ * Returns 0 on success and 1 on failure.
+ */
+FIO_IFUNC uint8_t fio_trylock(fio_lock_i *lock) {
+  return fio_trylock_sublock(lock, 0);
+}
+
+/** Busy waits for the default lock to become available - not recommended. */
+FIO_IFUNC void fio_lock(fio_lock_i *lock) {
+  while (fio_trylock(lock)) {
+    FIO_THREAD_RESCHEDULE();
+  }
+}
+
+/** Unlocks the default lock, no matter which thread owns the lock. */
+FIO_IFUNC void fio_unlock(fio_lock_i *lock) { fio_unlock_sublock(lock, 0); }
+
+/** Returns 1 if the lock is locked, 0 otherwise. */
+FIO_IFUNC uint8_t FIO_NAME_BL(fio, locked)(fio_lock_i *lock) {
+  return *lock & 1;
+}
+
+/** Returns 1 if the lock is locked, 0 otherwise. */
+FIO_IFUNC uint8_t FIO_NAME_BL(fio, sublocked)(fio_lock_i *lock, uint8_t sub) {
+  uint8_t bit = 1U << (sub & 7);
+  return (((*lock) & bit) >> (sub & 7));
+}
+
+/* *****************************************************************************
+Atomic Bit access / manipulation
+***************************************************************************** */
+
+/** Gets the state of a bit in a bitmap. */
+FIO_IFUNC uint8_t fio_atomic_bit_get(void *map, size_t bit) {
+  return ((((uint8_t *)(map))[(bit) >> 3] >> ((bit)&7)) & 1);
+}
+
+/** Sets the a bit in a bitmap (sets to 1). */
+FIO_IFUNC void fio_atomic_bit_set(void *map, size_t bit) {
+  fio_atomic_or((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
+}
+
+/** Unsets the a bit in a bitmap (sets to 0). */
+FIO_IFUNC void fio_atomic_bit_unset(void *map, size_t bit) {
+  fio_atomic_and((uint8_t *)(map) + ((bit) >> 3),
+                 (uint8_t)(~(1UL << ((bit)&7))));
+}
+
+/** Flips the a bit in a bitmap (sets to 0 if 1, sets to 1 if 0). */
+FIO_IFUNC void fio_atomic_bit_flip(void *map, size_t bit) {
+  fio_atomic_xor((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
+}
+
+/* *****************************************************************************
+UNSAFE (good enough) Static Memory Allocation
+
+This is useful when attempting thread-safety controls through a round-robin
+buffer that assumes both fast usage and a maximum number of concurrent calls, or
+maximum number of threads, of `FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX`.
+
+This is supposed to provide both a safe alternative to `alloca` and allows the
+memory address to be returned if needed (valid until concurrency max calls).
+***************************************************************************** */
+
+#ifndef FIO_STATIC_ALLOC_CONCURRENCY_MAX
+/* The multiplier is used to set the maximum number of safe concurrent calls. */
+#define FIO_STATIC_ALLOC_CONCURRENCY_MAX 256
+#endif
+
+/**
+ * Defines a simple (almost naive) static memory allocator named `name`.
+ *
+ * This defines a memory allocation function named `name` that accepts a
+ * single input `count` and returns a `type_T` pointer (`type_T *`) containing
+ * `sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
+ *
+ *          static type_T *name(size_t allocation_count);
+ *
+ * That memory is statically allocated, allowing it be returned and never
+ * needing to be freed.
+ *
+ * The functions can safely allocate the following number of bytes before
+ * the function returns the same memory block to another caller:
+ *
+ *     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
+ *         sizeof(type_T) * size_per_allocation
+ *
+ * Example use:
+ *
+ * ```c
+ * // defined a static allocator for 32 byte long strings
+ * FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
+ * // a function that returns an unsigned number as a 16 digit hex string
+ * char * ntos16(uint16_t n) {
+ *   char * n = numer2hex_allocator(1);
+ *   n[0] = '0'; n[1] = 'x';
+ *   fio_ltoa16u(n+2, n, 16);
+ *   n[18] = 0;
+ *   return n;
+ * }
+ * ```
+ *
+ * A similar approach is use by `fiobj_num2cstr` in order to provide temporary
+ * conversions of FIOBJ to a C String that doesn't require memory management.
+ */
+#define FIO_STATIC_ALLOC_DEF(name,                                             \
+                             type_T,                                           \
+                             size_per_allocation,                              \
+                             allocations_per_thread)                           \
+  FIO_SFUNC __attribute__((warn_unused_result)) type_T *name(size_t count) {   \
+    static type_T name##buffer[sizeof(type_T) *                                \
+                               FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *         \
+                               size_per_allocation * allocations_per_thread];  \
+    static size_t pos;                                                         \
+    size_t at = fio_atomic_add(&pos, count * size_per_allocation);             \
+    at %= FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * size_per_allocation *        \
+          allocations_per_thread;                                              \
+    return at + name##buffer;                                                  \
+  }
+
+/* *****************************************************************************
+Logging Primitives (no-op)
 ***************************************************************************** */
 
 /* avoid printing a full / nested path when __FILE_NAME__ is available */
@@ -548,7 +997,7 @@ Assertions
 /* Asserts a condition is true, or kills the application using SIGINT. */
 #define FIO_ASSERT(cond, ...)                                                  \
   do {                                                                         \
-    if (!(cond)) {                                                             \
+    if (FIO_UNLIKELY(!(cond))) {                                               \
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
@@ -668,40 +1117,6 @@ Security Related macros
     volatile char stack_mem[(pages) << 12] = {0};                              \
     (void)stack_mem;                                                           \
   } while (0)
-
-/* *****************************************************************************
-Sleep / Thread Scheduling Macros
-***************************************************************************** */
-
-#ifndef FIO_THREAD_WAIT
-#if FIO_OS_WIN
-/** Calls NtDelayExecution with the requested nano-second count. */
-#define FIO_THREAD_WAIT(nano_sec)                                              \
-  do {                                                                         \
-    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
-  } while (0)
-// https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
-
-#elif FIO_OS_POSIX
-/** Calls nanonsleep with the requested nano-second count. */
-#define FIO_THREAD_WAIT(nano_sec)                                              \
-  do {                                                                         \
-    const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
-                                .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
-    nanosleep(&tm, (struct timespec *)NULL);                                   \
-  } while (0)
-
-#endif
-#endif
-
-#ifndef FIO_THREAD_RESCHEDULE
-/**
- * Reschedules the thread by calling nanosleeps for a single nano-second.
- *
- * In practice, the thread will probably sleep for 60ns or more.
- */
-#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
-#endif
 
 /* *****************************************************************************
 Settings - Memory Function Selectors
@@ -1175,227 +1590,7 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 }
 
 /* *****************************************************************************
-String and Buffer Information Containers + Helper Macros
-***************************************************************************** */
-
-/** An information type for reporting the string's state. */
-typedef struct fio_str_info_s {
-  /** The string's length, if any. */
-  size_t len;
-  /** The string's buffer (pointer to first byte) or NULL on error. */
-  char *buf;
-  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
-  size_t capa;
-} fio_str_info_s;
-
-/** An information type for reporting/storing buffer data (no `capa`). */
-typedef struct fio_buf_info_s {
-  /** The buffer's length, if any. */
-  size_t len;
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf;
-} fio_buf_info_s;
-
-/** Compares two `fio_str_info_s` objects for content equality. */
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len &&                                                     \
-   (!(s1).len || (s1).buf == (s2).buf ||                                       \
-    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
-     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
-
-/** Compares two `fio_buf_info_s` objects for content equality. */
-#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
-
-/** A NULL fio_str_info_s. */
-#define FIO_STR_INFO0 ((fio_str_info_s){0})
-
-/** Converts a C String into a fio_str_info_s. */
-#define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_str_info_s. */
-#define FIO_STR_INFO2(str, length)                                             \
-  ((fio_str_info_s){.len = (length), .buf = (str)})
-
-/** Converts a String with a known length and capacity into a fio_str_info_s. */
-#define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
-
-/** A NULL fio_buf_info_s. */
-#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
-
-/** Converts a C String into a fio_buf_info_s. */
-#define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
-
-/** Converts a String with a known length into a fio_buf_info_s. */
-#define FIO_BUF_INFO2(str, length)                                             \
-  ((fio_buf_info_s){.len = (length), .buf = (str)})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
-
-/** Converts a fio_buf_info_s into a fio_str_info_s. */
-#define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
-
-/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
-#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
-  char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
-  fio_str_info_s name = (fio_str_info_s) {                                     \
-    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
-  }
-
-/** Tests to see if memory reallocation happened. */
-#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
-  (fio___stack_mem___##name != name.buf)
-
-/* *****************************************************************************
-UTF-8 Support (basic)
-***************************************************************************** */
-
-#ifndef FIO_UTF8_ALLOW_IF
-/* UTF-8 Constant Time? (0 = avoid mis-predictions; 1 = mostly ascii) */
-#define FIO_UTF8_ALLOW_IF 1
-
-#endif
-
-/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-FIO_IFUNC unsigned fio_utf8_code_len(uint32_t u) {
-  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
-                  ((uint32_t)(u) > 65535));
-  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
-  return len;
-}
-
-/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
-FIO_IFUNC unsigned fio_utf8_char_len_unsafe(uint8_t c) {
-  /* Ruby script for map:
-  map = [];
-  32.times { | i |
-    map << (((i & 0b10000) == 0b00000) ? 1
-        :   ((i & 0b11000) == 0b10000) ? 8
-        :   ((i & 0b11100) == 0b11000) ? 2
-        :   ((i & 0b11110) == 0b11100) ? 3
-        :   ((i & 0b11111) == 0b11110) ? 4
-                               : 0)
-  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
-  */
-  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
-                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
-  return map[c >> 3];
-}
-
-/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
-FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
-  unsigned r, tst;
-  const uint8_t *s = (uint8_t *)str_;
-  r = fio_utf8_char_len_unsafe(*s) & 7;
-#if FIO_UTF8_ALLOW_IF
-  if (r < 2)
-    return r;
-  tst = 1;
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  if (r != tst)
-    r = 0;
-#else
-  tst = (r > 0);
-  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3));
-  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2));
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  r &= 0U - (r == tst);
-#endif
-
-  return r;
-}
-
-/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
-FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
-  const uint8_t len = fio_utf8_code_len(u);
-  uint8_t *dest = (uint8_t *)dest_;
-#if FIO_UTF8_ALLOW_IF
-  if (len < 2) { /* writes, but doesn't report on len == 0 */
-    *dest = u;
-    return len;
-  }
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
-  const uint8_t mask = 63U;
-  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
-  (dest) += 1;
-  *(dest) = head | (((u) >> 12) & mask);
-  (dest) += (len > 3);
-  *(dest) = head | (((u) >> 6) & mask);
-  (dest) += (len > 2);
-  *(dest) = head | ((u)&mask);
-  return len;
-#else
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
-  const uint8_t mask = 63U;
-  *dest = (uint8_t)u;
-  dest += (len == 1);
-  *dest = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
-  dest += (len > 1);
-  *dest = head | (((u) >> 12) & mask);
-  dest += (len > 3);
-  *dest = head | (((u) >> 6) & mask);
-  dest += (len > 2);
-  *dest = head | ((u)&mask);
-  return len;
-#endif
-}
-
-/**
- * Decodes the first UTF-8 char at `str` and returns its code point value.
- *
- * Advances the pointer at `str` by the number of bytes consumed (read).
- */
-FIO_IFUNC uint32_t fio_utf8_read(char **str) {
-  const uint8_t *s = *(const uint8_t **)str;
-  unsigned len = fio_utf8_char_len(s);
-  *str += len;
-#if FIO_UTF8_ALLOW_IF
-  if (!len)
-    return 0;
-  if (len == 1)
-    return *s;
-  const uint32_t t2 = (len > 2);
-  const uint32_t t3 = 1 + (len > 3);
-  const uint32_t t3a = (len > 2) + (len > 3);
-  const uint32_t t4 = len - 1;
-  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
-         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
-         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
-         ((uint32_t)(s[t4] & 63));
-#else
-  const uint32_t t1 = (len > 1);
-  const uint32_t t2 = (len > 2);
-  const uint32_t t3 = t2 + (len > 3);
-  const uint32_t t3a = (len > 2) + (len > 3);
-  const uint32_t t4 = len - t1;
-  uint32_t r1 = *s & ((uint32_t)0UL - (len == 1));
-  uint32_t r2 = ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
-                ((uint32_t)(s[t1] & 63) << ((t3a << 3) - (t3a << 1))) |
-                ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
-                ((uint32_t)(s[t4] & 63));
-  r2 &= (uint32_t)0UL - t1;
-  return (r1 | r2);
-#endif
-}
-
-/** Decodes the first UTF-8 char at `str` and returns its code point value. */
-FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
-  return fio_utf8_read((char **)&str);
-}
-
-/* *****************************************************************************
-Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
+Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
 ***************************************************************************** */
 #define FIO____SHFL_FN(T, prefx, len)                                          \
   FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
@@ -1438,6 +1633,7 @@ Byte Shuffle & Reduction (on native types, up to 2048 bits == 256 bytes)
 #define FIO____SHFL_REDUCE(T, prefx, len)                                      \
   FIO____SHFL_FN(T, prefx, len)                                                \
   FIO____REDUCE_FN(T, prefx, len, add, +)                                      \
+  FIO____REDUCE_FN(T, prefx, len, sub, -)                                      \
   FIO____REDUCE_FN(T, prefx, len, mul, *)                                      \
   FIO____REDUCE_FN(T, prefx, len, and, &)                                      \
   FIO____REDUCE_FN(T, prefx, len, or, |)                                       \
@@ -1531,238 +1727,6 @@ FIO____SHFL_REDUCE(double, dbl, 32)
 #define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
 #define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
 /* clang-format on */
-
-/* *****************************************************************************
-Vector Types (SIMD / Math)
-***************************************************************************** */
-/** An unsigned 128bit union type. */
-typedef union {
-  size_t uz[16 / sizeof(size_t)];
-  uint64_t u64[2];
-  uint32_t u32[4];
-  uint16_t u16[8];
-  uint8_t u8[16];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[1];
-  uint32x4_t x32[1];
-  uint16x8_t x16[1];
-  uint8x16_t x8[1];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(16)));
-  uint64_t x32 __attribute__((vector_size(16)));
-  uint64_t x16 __attribute__((vector_size(16)));
-  uint64_t x8 __attribute__((vector_size(16)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[1];
-#endif
-} fio_u128 FIO_ALIGN(16);
-
-/** An unsigned 256bit union type. */
-typedef union {
-  size_t uz[32 / sizeof(size_t)];
-  uint64_t u64[4];
-  uint32_t u32[8];
-  uint16_t u16[16];
-  uint8_t u8[32];
-  fio_u128 u128[2];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[2];
-  uint32x4_t x32[2];
-  uint16x8_t x16[2];
-  uint8x16_t x8[2];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(32)));
-  uint64_t x32 __attribute__((vector_size(32)));
-  uint64_t x16 __attribute__((vector_size(32)));
-  uint64_t x8 __attribute__((vector_size(32)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[2];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t alignment_for_u256_[1];
-#endif
-} fio_u256 FIO_ALIGN(16);
-
-/** An unsigned 512bit union type. */
-typedef union {
-  size_t uz[64 / sizeof(size_t)];
-  uint64_t u64[8];
-  uint32_t u32[16];
-  uint16_t u16[32];
-  uint8_t u8[64];
-  fio_u128 u128[4];
-  fio_u256 u256[2];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[4];
-  uint32x4_t x32[4];
-  uint16x8_t x16[4];
-  uint8x16_t x8[4];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(64)));
-  uint64_t x32 __attribute__((vector_size(64)));
-  uint64_t x16 __attribute__((vector_size(64)));
-  uint64_t x8 __attribute__((vector_size(64)));
-#endif
-} fio_u512 FIO_ALIGN(16);
-
-/** An unsigned 1024bit union type. */
-typedef union {
-  size_t uz[128 / sizeof(size_t)];
-  uint64_t u64[16];
-  uint32_t u32[32];
-  uint16_t u16[64];
-  uint8_t u8[128];
-  fio_u128 u128[8];
-  fio_u256 u256[4];
-  fio_u512 u512[2];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[8];
-  uint32x4_t x32[8];
-  uint16x8_t x16[8];
-  uint8x16_t x8[8];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(128)));
-  uint64_t x32 __attribute__((vector_size(128)));
-  uint64_t x16 __attribute__((vector_size(128)));
-  uint64_t x8 __attribute__((vector_size(128)));
-#endif
-} fio_u1024 FIO_ALIGN(16);
-
-/** An unsigned 2048bit union type. */
-typedef union {
-  size_t uz[256 / sizeof(size_t)];
-  uint64_t u64[32];
-  uint32_t u32[64];
-  uint16_t u16[128];
-  uint8_t u8[256];
-  fio_u128 u128[16];
-  fio_u256 u256[8];
-  fio_u512 u512[4];
-  fio_u1024 u1024[2];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[16];
-  uint32x4_t x32[16];
-  uint16x8_t x16[16];
-  uint8x16_t x8[16];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(256)));
-  uint64_t x32 __attribute__((vector_size(256)));
-  uint64_t x16 __attribute__((vector_size(256)));
-  uint64_t x8 __attribute__((vector_size(256)));
-#endif
-} fio_u2048 FIO_ALIGN(16);
-
-/** An unsigned 4096bit union type. */
-typedef union {
-  size_t uz[512 / sizeof(size_t)];
-  uint64_t u64[64];
-  uint32_t u32[128];
-  uint16_t u16[256];
-  uint8_t u8[512];
-  fio_u128 u128[32];
-  fio_u256 u256[16];
-  fio_u512 u512[8];
-  fio_u1024 u1024[4];
-  fio_u2048 u2048[2];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[32];
-  uint32x4_t x32[32];
-  uint16x8_t x16[32];
-  uint8x16_t x8[32];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(512)));
-  uint64_t x32 __attribute__((vector_size(512)));
-  uint64_t x16 __attribute__((vector_size(512)));
-  uint64_t x8 __attribute__((vector_size(512)));
-#endif
-} fio_u4096 FIO_ALIGN(16);
-
-FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
-
-#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
-#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
-#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
-#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
-#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
-#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
-#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
-#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
-#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
-#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
-
-#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
-#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
-#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
-#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
-#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
-#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
-#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
-#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
-#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
-
-/* *****************************************************************************
-Vector Helpers - memory load operations (implementation starts here)
-***************************************************************************** */
-
-#define FIO_MATH_TYPE_LOADER(bits, bytes)                                      \
-  /** Loads from memory using local-endian. */                                 \
-  FIO_MIFN fio_u##bits fio_u##bits##_load(const void *buf) {                   \
-    fio_u##bits r;                                                             \
-    fio_memcpy##bytes(&r, buf);                                                \
-    return r;                                                                  \
-  }                                                                            \
-  /** Stores to memory using local-endian. */                                  \
-  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) {         \
-    fio_memcpy##bytes(buf, &a);                                                \
-  }                                                                            \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 16)                                      \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 32)                                      \
-  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 64)
-
-#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                        \
-  /** Loads vector from memory, reading from little-endian.  */                \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_le##bits(                \
-      const void *buf) {                                                       \
-    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  /** Loads vector from memory, reading from big-endian.  */                   \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_be##bits(                \
-      const void *buf) {                                                       \
-    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
-      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
-    }                                                                          \
-    return r;                                                                  \
-  }                                                                            \
-  FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
-      fio_u##total_bits a) {                                                   \
-    fio_u##total_bits r;                                                       \
-    for (size_t i = 0; i < (total_bits / bits); ++i)                           \
-      r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
-    return r;                                                                  \
-  }
-
-FIO_MATH_TYPE_LOADER(128, 16)
-FIO_MATH_TYPE_LOADER(256, 32)
-FIO_MATH_TYPE_LOADER(512, 64)
-FIO_MATH_TYPE_LOADER(1024, 128)
-FIO_MATH_TYPE_LOADER(2048, 256)
-FIO_MATH_TYPE_LOADER(4096, 512)
-
-#undef FIO_MATH_TYPE_LOADER
-#undef FIO_VECTOR_LOADER_ENDIAN_FUNC
-#undef FIO_VECTOR_LOADER_ENDIAN
 
 /* *****************************************************************************
 Linked Lists Persistent Macros and Types
@@ -2545,10 +2509,10 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 ***************************************************************************** */
 
 /** Add with carry. */
-FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
+FIO_MIFN uint64_t fio_math_addc64(uint64_t a,
+                                  uint64_t b,
+                                  uint64_t carry_in,
+                                  uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_addc64 requires a carry pointer");
 #if __has_builtin(__builtin_addcll) && UINT64_MAX == LLONG_MAX
   return __builtin_addcll(a, b, carry_in, (unsigned long long *)carry_out);
@@ -2564,39 +2528,79 @@ FIO_IFUNC uint64_t fio_math_addc64(uint64_t a,
 #endif
 }
 
-/** Subtract with carry. */
-FIO_IFUNC uint64_t fio_math_subc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t carry_in,
-                                   uint64_t *carry_out) {
-  FIO_ASSERT_DEBUG(carry_out, "fio_math_subc64 requires a carry pointer");
+/** Multi-precision ADD for `len` 64 bit words a + b. Returns the carry. */
+FIO_MIFN bool fio_math_add(uint64_t *dest,
+                           const uint64_t *a,
+                           const uint64_t *b,
+                           const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i)
+    dest[i] = fio_math_addc64(a[i], b[i], c, &c);
+  return (bool)c;
+}
+
+#ifdef __SIZEOF_INT128__
+/** Multi-precision ADD for `bits` long a + b. Returns the carry. */
+FIO_MIFN __uint128_t fio_math_addc128(const __uint128_t a,
+                                      const __uint128_t b,
+                                      bool carry_in,
+                                      bool *carry_out) {
+  __uint128_t r = a + b + carry_in;
+  *carry_out = (r < a) | ((r == a) & carry_in);
+  return r;
+}
+FIO_MIFN bool fio_math_add2(__uint128_t *dest,
+                            const __uint128_t *a,
+                            const __uint128_t *b,
+                            const size_t len) {
+  bool c = 0;
+  for (size_t i = 0; i < len; ++i)
+    dest[i] = fio_math_addc128(a[i], b[i], c, &c);
+  return c;
+}
+#endif
+
+/** Subtract with borrow. */
+FIO_MIFN uint64_t fio_math_subc64(uint64_t a,
+                                  uint64_t b,
+                                  uint64_t borrow_in,
+                                  uint64_t *borrow_out) {
+  FIO_ASSERT_DEBUG(borrow_out, "fio_math_subc64 requires a carry pointer");
 #if __has_builtin(__builtin_subcll) && UINT64_MAX == LLONG_MAX
   uint64_t u =
-      __builtin_subcll(a, b, carry_in, (unsigned long long *)carry_out);
+      __builtin_subcll(a, b, borrow_in, (unsigned long long *)borrow_out);
 #elif defined(__SIZEOF_INT128__)
-  __uint128_t u = (__uint128_t)a - b - carry_in;
-  if (carry_out)
-    *carry_out = (uint64_t)(u >> 127U);
+  __uint128_t u = (__uint128_t)a - b - borrow_in;
+  if (borrow_out)
+    *borrow_out = (uint64_t)(u >> 127U);
 #else
   uint64_t u = a - b;
   a = u > a;
-  b = u < carry_in;
-  u -= carry_in;
-  if (carry_out)
-    *carry_out = a + b;
+  b = u < borrow_in;
+  u -= borrow_in;
+  *borrow_out = a + b;
 #endif
   return (uint64_t)u;
 }
 
+/** Multi-precision SUB for `len` 64 bit words a + b. Returns the borrow. */
+FIO_MIFN uint64_t fio_math_sub(uint64_t *dest,
+                               const uint64_t *a,
+                               const uint64_t *b,
+                               const size_t len) {
+  uint64_t c = 0;
+  for (size_t i = 0; i < len; ++i)
+    dest[i] = fio_math_subc64(a[i], b[i], c, &c);
+  return c;
+}
+
 /** Multiply with carry out. */
-FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
-                                   uint64_t b,
-                                   uint64_t *carry_out) {
+FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out) {
   FIO_ASSERT_DEBUG(carry_out, "fio_math_mulc64 requires a carry pointer");
 #if defined(__SIZEOF_INT128__)
   __uint128_t r = (__uint128_t)a * b;
   *carry_out = (uint64_t)(r >> 64U);
-#else /* At this point long multiplication makes sense... */
+#else /* long multiplication using 32 bits results in up to 64 bit result */
   uint64_t r, midc = 0, lowc = 0;
   const uint64_t al = a & 0xFFFFFFFF;
   const uint64_t ah = a >> 32;
@@ -2609,6 +2613,732 @@ FIO_IFUNC uint64_t fio_math_mulc64(uint64_t a,
   *carry_out = hi + (mid >> 32) + (midc << 32) + lowc;
 #endif
   return (uint64_t)r;
+}
+
+/**
+ * Multi-precision long multiplication for `len` 64 bit words.
+ *
+ * `dest` must be `len * 2` long to hold the result.
+ *
+ * `a` and `b` must be of equal `len`.
+ *
+ * This uses long multiplication, which may be slower for larger numbers.
+ */
+FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
+                                   const uint64_t *a,
+                                   const uint64_t *b,
+                                   const size_t len) {
+  for (size_t i = 0; i < len; ++i)
+    target[i] = 0; /* zero out result */
+  for (size_t i = 0; i < len; ++i) {
+#ifdef __SIZEOF_INT128__
+    __uint128_t carry = 0;
+    for (size_t j = 0; j < len; j++) {
+      size_t k = i + j;
+      __uint128_t product = (__uint128_t)a[i] * b[j];
+      __uint128_t sum =
+          (__uint128_t)target[k] + (product & 0xFFFFFFFFFFFFFFFF) + carry;
+      target[k] = (uint64_t)sum;
+      carry = (product >> 64) + (sum >> 64);
+    }
+    target[i + len] += (uint64_t)carry;
+#else
+    uint64_t ch = 0, cl = 0;
+    for (size_t j = 0; j < len; ++j) {
+      /* Multiply hi and lo parts, getting a 128-bit result (hi:lo)  */
+      uint64_t hi, lo;
+      lo = fio_math_mulc64(a[i], b[j], &hi);
+      /* add to result, propagate carry */
+      target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
+      target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
+    }
+    target[len - 1] += cl;
+#endif
+  }
+}
+
+/**
+ * Multi-precision MUL for `len` 64 bit words.
+ *
+ * `dest` must be `len * 2` long to hold the result.
+ *
+ * `a` and `b` must be of equal `len`.
+ */
+FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
+                            const uint64_t *a,
+                            const uint64_t *b,
+                            const size_t len) {
+  if (!len) {
+    dest[0] = 0;
+  }
+  if (len == 1) { /* route to the correct function */
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+  } else { // len < 16
+    fio___math_mul_long(dest, a, b, len);
+  }
+  /* FIXME!!! (len >= 16) ? Karatsuba-ish / FFT math? : long mul */
+}
+
+/* *****************************************************************************
+Vector Types (SIMD / Math)
+***************************************************************************** */
+#if FIO___HAS_ARM_INTRIN || __has_attribute(vector_size)
+#define FIO_HAS_UX 1
+#endif
+
+/** An unsigned 128bit union type. */
+typedef union {
+  /** unsigned native word size array, length is system dependent */
+  size_t uz[16 / sizeof(size_t)];
+  /** known bit word arrays */
+  uint64_t u64[2];
+  uint32_t u32[4];
+  uint16_t u16[8];
+  uint8_t u8[16];
+  /** vector types, if supported */
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[1];
+  uint32x4_t x32[1];
+  uint16x8_t x16[1];
+  uint8x16_t x8[1];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(16)));
+  uint64_t x32 __attribute__((vector_size(16)));
+  uint64_t x16 __attribute__((vector_size(16)));
+  uint64_t x8 __attribute__((vector_size(16)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[1];
+#endif
+} fio_u128 FIO_ALIGN(16);
+
+/** An unsigned 256bit union type. */
+typedef union {
+  size_t uz[32 / sizeof(size_t)];
+  uint64_t u64[4];
+  uint32_t u32[8];
+  uint16_t u16[16];
+  uint8_t u8[32];
+  fio_u128 u128[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[2];
+  uint32x4_t x32[2];
+  uint16x8_t x16[2];
+  uint8x16_t x8[2];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(32)));
+  uint64_t x32 __attribute__((vector_size(32)));
+  uint64_t x16 __attribute__((vector_size(32)));
+  uint64_t x8 __attribute__((vector_size(32)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[2];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t alignment_for_u256_[1];
+#endif
+} fio_u256 FIO_ALIGN(16);
+
+/** An unsigned 512bit union type. */
+typedef union {
+  size_t uz[64 / sizeof(size_t)];
+  uint64_t u64[8];
+  uint32_t u32[16];
+  uint16_t u16[32];
+  uint8_t u8[64];
+  fio_u128 u128[4];
+  fio_u256 u256[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[4];
+  uint32x4_t x32[4];
+  uint16x8_t x16[4];
+  uint8x16_t x8[4];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(64)));
+  uint64_t x32 __attribute__((vector_size(64)));
+  uint64_t x16 __attribute__((vector_size(64)));
+  uint64_t x8 __attribute__((vector_size(64)));
+#endif
+} fio_u512 FIO_ALIGN(16);
+
+/** An unsigned 1024bit union type. */
+typedef union {
+  size_t uz[128 / sizeof(size_t)];
+  uint64_t u64[16];
+  uint32_t u32[32];
+  uint16_t u16[64];
+  uint8_t u8[128];
+  fio_u128 u128[8];
+  fio_u256 u256[4];
+  fio_u512 u512[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[8];
+  uint32x4_t x32[8];
+  uint16x8_t x16[8];
+  uint8x16_t x8[8];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(128)));
+  uint64_t x32 __attribute__((vector_size(128)));
+  uint64_t x16 __attribute__((vector_size(128)));
+  uint64_t x8 __attribute__((vector_size(128)));
+#endif
+} fio_u1024 FIO_ALIGN(16);
+
+/** An unsigned 2048bit union type. */
+typedef union {
+  size_t uz[256 / sizeof(size_t)];
+  uint64_t u64[32];
+  uint32_t u32[64];
+  uint16_t u16[128];
+  uint8_t u8[256];
+  fio_u128 u128[16];
+  fio_u256 u256[8];
+  fio_u512 u512[4];
+  fio_u1024 u1024[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[16];
+  uint32x4_t x32[16];
+  uint16x8_t x16[16];
+  uint8x16_t x8[16];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(256)));
+  uint64_t x32 __attribute__((vector_size(256)));
+  uint64_t x16 __attribute__((vector_size(256)));
+  uint64_t x8 __attribute__((vector_size(256)));
+#endif
+} fio_u2048 FIO_ALIGN(16);
+
+/** An unsigned 4096bit union type. */
+typedef union {
+  size_t uz[512 / sizeof(size_t)];
+  uint64_t u64[64];
+  uint32_t u32[128];
+  uint16_t u16[256];
+  uint8_t u8[512];
+  fio_u128 u128[32];
+  fio_u256 u256[16];
+  fio_u512 u512[8];
+  fio_u1024 u1024[4];
+  fio_u2048 u2048[2];
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[32];
+  uint32x4_t x32[32];
+  uint16x8_t x16[32];
+  uint8x16_t x8[32];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(512)));
+  uint64_t x32 __attribute__((vector_size(512)));
+  uint64_t x16 __attribute__((vector_size(512)));
+  uint64_t x8 __attribute__((vector_size(512)));
+#endif
+} fio_u4096 FIO_ALIGN(16);
+
+FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
+
+#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
+#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
+#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
+#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
+#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
+#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
+#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
+#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
+#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
+
+#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
+#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
+#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
+#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
+#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
+#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
+#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
+#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
+#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+
+/* *****************************************************************************
+Vector Helpers - memory load operations (implementation starts here)
+***************************************************************************** */
+
+#define FIO_MATH_TYPE_LOADER(bits, bytes)                                      \
+  /** Loads from memory using local-endian. */                                 \
+  FIO_MIFN fio_u##bits fio_u##bits##_load(const void *buf) {                   \
+    fio_u##bits r;                                                             \
+    fio_memcpy##bytes(&r, buf);                                                \
+    return r;                                                                  \
+  }                                                                            \
+  /** Stores to memory using local-endian. */                                  \
+  FIO_IFUNC void fio_u##bits##_store(void *buf, const fio_u##bits a) {         \
+    fio_memcpy##bytes(buf, &a);                                                \
+  }                                                                            \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 16)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 32)                                      \
+  FIO_VECTOR_LOADER_ENDIAN_FUNC(bits, 64)
+
+#define FIO_VECTOR_LOADER_ENDIAN_FUNC(total_bits, bits)                        \
+  /** Loads vector from memory, reading from little-endian.  */                \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_le##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_ltole##bits(r.u##bits[i]);                            \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** Loads vector from memory, reading from big-endian.  */                   \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_load_be##bits(                \
+      const void *buf) {                                                       \
+    fio_u##total_bits r = fio_u##total_bits##_load(buf);                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i) {                         \
+      r.u##bits[i] = fio_lton##bits(r.u##bits[i]);                             \
+    }                                                                          \
+    return r;                                                                  \
+  }                                                                            \
+  FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
+      fio_u##total_bits a) {                                                   \
+    fio_u##total_bits r;                                                       \
+    for (size_t i = 0; i < (total_bits / bits); ++i)                           \
+      r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
+    return r;                                                                  \
+  }
+
+FIO_MATH_TYPE_LOADER(128, 16)
+FIO_MATH_TYPE_LOADER(256, 32)
+FIO_MATH_TYPE_LOADER(512, 64)
+FIO_MATH_TYPE_LOADER(1024, 128)
+FIO_MATH_TYPE_LOADER(2048, 256)
+FIO_MATH_TYPE_LOADER(4096, 512)
+
+#undef FIO_MATH_TYPE_LOADER
+#undef FIO_VECTOR_LOADER_ENDIAN_FUNC
+#undef FIO_VECTOR_LOADER_ENDIAN
+
+/* *****************************************************************************
+Vector Helpers - Vector Math Operations
+***************************************************************************** */
+
+#if FIO_HAS_UX || !defined(DEBUG)
+/** Performs `a op b` (+,-, *, etc') as a vector of `bit` long words. */
+#define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
+         ++i__)                                                                \
+      (t).x##bits[i__] = (a).x##bits[i__] op(b).x##bits[i__];                  \
+  } while (0)
+/** Performs `a op b` (+,-, *, etc'), where `b` is a constant. */
+#define FIO_MATH_UXXX_COP(t, a, b, bits, op)                                   \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
+         ++i__)                                                                \
+      (t).x##bits[i__] = (a).x##bits[i__] op(b);                               \
+  } while (0)
+/** Performs `t = op (a)`. */
+#define FIO_MATH_UXXX_SOP(t, a, bits, op)                                      \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
+         ++i__)                                                                \
+      (t).x##bits[i__] = op(a).x##bits[i__];                                   \
+  } while (0)
+
+#else /* FIO_HAS_UX */
+
+#define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
+         ++i__)                                                                \
+      (t).u##bits[i__] = (a).u##bits[i__] op(b).u##bits[i__];                  \
+  } while (0)
+#define FIO_MATH_UXXX_COP(t, a, b, bits, op)                                   \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
+         ++i__)                                                                \
+      (t).u##bits[i__] = (a).u##bits[i__] op(b);                               \
+  } while (0)
+#define FIO_MATH_UXXX_SOP(t, a, bits, op)                                      \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
+         ++i__)                                                                \
+      (t).u##bits[i__] = op(a).u##bits[i__];                                   \
+  } while (0)
+#endif /* FIO_HAS_UX */
+
+/** Performs vector reduction for using `op` (+,-, *, etc'), storing to `t`. */
+#define FIO_MATH_UXXX_REDUCE(t, a, bits, op)                                   \
+  do {                                                                         \
+    t = 0;                                                                     \
+    for (size_t i__ = 0; i__ < (sizeof((a).u##bits) / sizeof((a).u##bits[0])); \
+         ++i__)                                                                \
+      (t) = (t)op(a).u##bits[i__];                                             \
+  } while (0)
+
+#define FIO___UXXX_DEF_OP(total_bits, bits, opnm, op)                          \
+  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(fio_u##total_bits *target,   \
+                                                  fio_u##total_bits *a,        \
+                                                  fio_u##total_bits *b) {      \
+    FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
+  }                                                                            \
+  FIO_IFUNC void fio_u##total_bits##_c##opnm##bits(fio_u##total_bits *target,  \
+                                                   fio_u##total_bits *a,       \
+                                                   uint##bits##_t b) {         \
+    FIO_MATH_UXXX_COP(((target)[0]), ((a)[0]), (b), bits, op);                 \
+  }                                                                            \
+  FIO_MIFN uint##bits##_t fio_u##total_bits##_reduce_##opnm##bits(             \
+      fio_u##total_bits *a) {                                                  \
+    uint##bits##_t t;                                                          \
+    FIO_MATH_UXXX_REDUCE(t, ((a)[0]), bits, op);                               \
+    return t;                                                                  \
+  }
+#define FIO___UXXX_DEF_OP2(total_bits, bits, opnm, op)                         \
+  FIO_IFUNC void fio_u##total_bits##_##opnm(fio_u##total_bits *target,         \
+                                            fio_u##total_bits *a,              \
+                                            fio_u##total_bits *b) {            \
+    FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
+  }
+
+#define FIO___UXXX_DEF_OP4T_INNER(total_bits, opnm, op)                        \
+  FIO___UXXX_DEF_OP(total_bits, 8, opnm, op)                                   \
+  FIO___UXXX_DEF_OP(total_bits, 16, opnm, op)                                  \
+  FIO___UXXX_DEF_OP(total_bits, 32, opnm, op)                                  \
+  FIO___UXXX_DEF_OP(total_bits, 64, opnm, op)
+
+#define FIO___UXXX_DEF_OP4T(total_bits)                                        \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, add, +)                                \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, sub, -)                                \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, mul, *)                                \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, and, &)                                \
+  FIO___UXXX_DEF_OP2(total_bits, 64, and, &)                                   \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, or, |)                                 \
+  FIO___UXXX_DEF_OP2(total_bits, 64, or, |)                                    \
+  FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
+  FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
+  FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
+                                         fio_u##total_bits *a) {               \
+    FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
+  }
+
+FIO___UXXX_DEF_OP4T(128)
+FIO___UXXX_DEF_OP4T(256)
+FIO___UXXX_DEF_OP4T(512)
+FIO___UXXX_DEF_OP4T(1024)
+FIO___UXXX_DEF_OP4T(2048)
+FIO___UXXX_DEF_OP4T(4096)
+
+#undef FIO___UXXX_DEF_OP4T
+#undef FIO___UXXX_DEF_OP4T_INNER
+#undef FIO___UXXX_DEF_OP
+#undef FIO___UXXX_DEF_OP2
+/* *****************************************************************************
+Vector Helpers - Multi-Precision Math
+***************************************************************************** */
+
+#undef FIO___VMATH_DEF_LARGE_ADD_SUB
+#define FIO___VMATH_DEF_LARGE_ADD_SUB(bits)                                    \
+  /** Performs A+B, storing in `result`. Return the carry bit (1 or 0). */     \
+  FIO_MIFN uint64_t fio_u##bits##_add(fio_u##bits *result,                     \
+                                      const fio_u##bits *a,                    \
+                                      const fio_u##bits *b) {                  \
+    uint64_t carry = 0;                                                        \
+    for (size_t i = 0; i < (bits / 64); ++i) {                                 \
+      uint64_t sum = a->u64[i] + b->u64[i] + carry;                            \
+      carry = (sum < a->u64[i]) | (carry & (sum == a->u64[i]));                \
+      result->u64[i] = sum;                                                    \
+    }                                                                          \
+    return carry;                                                              \
+  }                                                                            \
+  /** Performs A-B, storing in `result`. Returns the borrow bit (1 or 0). */   \
+  FIO_MIFN uint64_t fio_u##bits##_sub(fio_u##bits *result,                     \
+                                      const fio_u##bits *a,                    \
+                                      const fio_u##bits *b) {                  \
+    uint64_t borrow = 0;                                                       \
+    for (size_t i = 0; i < (bits / 64); ++i) {                                 \
+      uint64_t diff = a->u64[i] - b->u64[i] - borrow;                          \
+      borrow =                                                                 \
+          ((a->u64[i] < b->u64[i]) | ((a->u64[i] == b->u64[i]) & borrow));     \
+      result->u64[i] = diff;                                                   \
+    }                                                                          \
+    return borrow;                                                             \
+  }                                                                            \
+  /** Returns -1, 0, or 1 if a < b, a == b or a > a (respectively). */         \
+  FIO_MIFN int fio_u##bits##_cmp(fio_u##bits *a, fio_u##bits *b) {             \
+    unsigned is_eq = 1;                                                        \
+    unsigned is_bigger = 0;                                                    \
+    for (size_t i = (bits / 64); i--;) {                                       \
+      is_bigger |= (is_eq & (a->u64[i] > b->u64[i]));                          \
+      is_eq &= (unsigned)(a->u64[i] == b->u64[i]);                             \
+    }                                                                          \
+    return (is_eq - 1) + (is_bigger << 1);                                     \
+  }
+
+#undef FIO___VMATH_DEF_LARGE_MUL
+#define FIO___VMATH_DEF_LARGE_MUL(dbl_bits, bits)                              \
+  /** Multiplies A and B, storing the result in `result`. */                   \
+  FIO_SFUNC void fio_u##bits##_mul(fio_u##dbl_bits *result,                    \
+                                   const fio_u##bits *a,                       \
+                                   const fio_u##bits *b) {                     \
+    fio_math_mul(result->u64, a->u64, b->u64, (bits / 64));                    \
+  }                                                                            \
+  FIO_SFUNC void fio_u##bits##_montgomery_mul(fio_u##bits *result,             \
+                                              const fio_u##bits *a,            \
+                                              const fio_u##bits *b,            \
+                                              const fio_u##bits *N,            \
+                                              const fio_u##bits *N_dash) {     \
+    fio_u##dbl_bits u;                                                         \
+    fio_u##dbl_bits t, mN;                                                     \
+    /* Step 1: t = a * b  */                                                   \
+    fio_u##bits##_mul(&t, a, b);                                               \
+    /* Step 2: m = ((t Mod R) * N_dash) mod R */                               \
+    fio_u##bits##_mul(&mN, t.u##bits, N_dash);                                 \
+    /* Step 3: u = (t + m * N) */                                              \
+    fio_u##bits##_mul(&mN, mN.u##bits, N);                                     \
+    (void)fio_u##dbl_bits##_add(&u, &t, &mN);                                  \
+    /* Step 4: Constant Time select, if u >= N, then u = u - N */              \
+    bool selector = (bool)fio_u##bits##_sub(u.u##bits, u.u##bits + 1, N);      \
+    /* Step 5: Set result */                                                   \
+    /* result is u.u##bits[0] if equal or bigger */                            \
+    /* result is u.u##bits[1] if smaller */                                    \
+    /* TODO: use mask instead of implied `if` selector? memory not hot? */     \
+    *result = u.u##bits[selector];                                             \
+  }
+
+FIO___VMATH_DEF_LARGE_ADD_SUB(128)
+FIO___VMATH_DEF_LARGE_ADD_SUB(256)
+FIO___VMATH_DEF_LARGE_ADD_SUB(512)
+FIO___VMATH_DEF_LARGE_ADD_SUB(1024)
+FIO___VMATH_DEF_LARGE_ADD_SUB(2048)
+FIO___VMATH_DEF_LARGE_ADD_SUB(4096)
+
+FIO___VMATH_DEF_LARGE_MUL(256, 128)
+FIO___VMATH_DEF_LARGE_MUL(512, 256)
+FIO___VMATH_DEF_LARGE_MUL(1024, 512)
+FIO___VMATH_DEF_LARGE_MUL(2048, 1024)
+FIO___VMATH_DEF_LARGE_MUL(4096, 2048)
+
+#undef FIO___VMATH_DEF_LARGE_ADD_SUB
+#undef FIO___VMATH_DEF_LARGE_MUL
+
+/* *****************************************************************************
+String and Buffer Information Containers + Helper Macros
+***************************************************************************** */
+
+/** An information type for reporting the string's state. */
+typedef struct fio_str_info_s {
+  /** The string's length, if any. */
+  size_t len;
+  /** The string's buffer (pointer to first byte) or NULL on error. */
+  char *buf;
+  /** The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+  size_t capa;
+} fio_str_info_s;
+
+/** An information type for reporting/storing buffer data (no `capa`). */
+typedef struct fio_buf_info_s {
+  /** The buffer's length, if any. */
+  size_t len;
+  /** The buffer's address (may be NULL if no buffer). */
+  char *buf;
+} fio_buf_info_s;
+
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len &&                                                     \
+   (!(s1).len || (s1).buf == (s2).buf ||                                       \
+    ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
+     !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+
+/** A NULL fio_str_info_s. */
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+
+/** Converts a C String into a fio_str_info_s. */
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_str_info_s. */
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
+
+/** Converts a String with a known length and capacity into a fio_str_info_s. */
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+
+/** A NULL fio_buf_info_s. */
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
+
+/** Converts a C String into a fio_buf_info_s. */
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_buf_info_s. */
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
+
+/** Converts a fio_buf_info_s into a fio_str_info_s. */
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+
+/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
+  }
+
+/** Tests to see if memory reallocation happened. */
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
+  (fio___stack_mem___##name != name.buf)
+
+/* *****************************************************************************
+UTF-8 Support (basic)
+***************************************************************************** */
+
+#ifndef FIO_UTF8_ALLOW_IF
+/* UTF-8 Constant Time? (0 = avoid mis-predictions; 1 = mostly ascii) */
+#define FIO_UTF8_ALLOW_IF 1
+
+#endif
+
+/* Returns the number of bytes required to UTF-8 encoded a code point `u` */
+FIO_IFUNC unsigned fio_utf8_code_len(uint32_t u) {
+  uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
+                  ((uint32_t)(u) > 65535));
+  len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
+  return len;
+}
+
+/** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
+FIO_IFUNC unsigned fio_utf8_char_len_unsafe(uint8_t c) {
+  /* Ruby script for map:
+  map = [];
+  32.times { | i |
+    map << (((i & 0b10000) == 0b00000) ? 1
+        :   ((i & 0b11000) == 0b10000) ? 8
+        :   ((i & 0b11100) == 0b11000) ? 2
+        :   ((i & 0b11110) == 0b11100) ? 3
+        :   ((i & 0b11111) == 0b11110) ? 4
+                               : 0)
+  }; puts "static const uint8_t map[32] = {#{ map.join(', ')} };"
+  */
+  static const uint8_t map[32] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                                  1, 1, 1, 1, 1, 8, 8, 8, 8, 8, 8,
+                                  8, 8, 2, 2, 2, 2, 3, 3, 4, 0};
+  return map[c >> 3];
+}
+
+/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
+FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
+  unsigned r, tst;
+  const uint8_t *s = (uint8_t *)str_;
+  r = fio_utf8_char_len_unsafe(*s) & 7;
+#if FIO_UTF8_ALLOW_IF
+  if (r < 2)
+    return r;
+  tst = 1;
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  if (r != tst)
+    r = 0;
+#else
+  tst = (r > 0);
+  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3));
+  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2));
+  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
+  r &= 0U - (r == tst);
+#endif
+
+  return r;
+}
+
+/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
+FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
+  const uint8_t len = fio_utf8_code_len(u);
+  uint8_t *dest = (uint8_t *)dest_;
+#if FIO_UTF8_ALLOW_IF
+  if (len < 2) { /* writes, but doesn't report on len == 0 */
+    *dest = u;
+    return len;
+  }
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  (dest) += 1;
+  *(dest) = head | (((u) >> 12) & mask);
+  (dest) += (len > 3);
+  *(dest) = head | (((u) >> 6) & mask);
+  (dest) += (len > 2);
+  *(dest) = head | ((u)&mask);
+  return len;
+#else
+  const uint8_t offset = 0xF0U << (4U - len);
+  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t mask = 63U;
+  *dest = (uint8_t)u;
+  dest += (len == 1);
+  *dest = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  dest += (len > 1);
+  *dest = head | (((u) >> 12) & mask);
+  dest += (len > 3);
+  *dest = head | (((u) >> 6) & mask);
+  dest += (len > 2);
+  *dest = head | ((u)&mask);
+  return len;
+#endif
+}
+
+/**
+ * Decodes the first UTF-8 char at `str` and returns its code point value.
+ *
+ * Advances the pointer at `str` by the number of bytes consumed (read).
+ */
+FIO_IFUNC uint32_t fio_utf8_read(char **str) {
+  const uint8_t *s = *(const uint8_t **)str;
+  unsigned len = fio_utf8_char_len(s);
+  *str += len;
+#if FIO_UTF8_ALLOW_IF
+  if (!len)
+    return 0;
+  if (len == 1)
+    return *s;
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = 1 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - 1;
+  return ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+         ((uint32_t)(s[1] & 63) << ((t3a << 3) - (t3a << 1))) |
+         ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+         ((uint32_t)(s[t4] & 63));
+#else
+  const uint32_t t1 = (len > 1);
+  const uint32_t t2 = (len > 2);
+  const uint32_t t3 = t2 + (len > 3);
+  const uint32_t t3a = (len > 2) + (len > 3);
+  const uint32_t t4 = len - t1;
+  uint32_t r1 = *s & ((uint32_t)0UL - (len == 1));
+  uint32_t r2 = ((uint32_t)(s[0] & (63 >> t4)) << ((t4 << 3) - (t4 << 1))) |
+                ((uint32_t)(s[t1] & 63) << ((t3a << 3) - (t3a << 1))) |
+                ((uint32_t)(s[t3] & 63) << ((t2 << 3) - (t2 << 1))) |
+                ((uint32_t)(s[t4] & 63));
+  r2 &= (uint32_t)0UL - t1;
+  return (r1 | r2);
+#endif
+}
+
+/** Decodes the first UTF-8 char at `str` and returns its code point value. */
+FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
+  return fio_utf8_read((char **)&str);
 }
 
 /* *****************************************************************************

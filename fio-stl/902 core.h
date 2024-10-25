@@ -391,6 +391,117 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
                  value);
     }
   }
+  {
+    fprintf(stderr,
+            "* Testing Basic Multi-Precision add / sub / mul for fio_uXXX "
+            "(fio_u256).\n");
+
+    char *buf[1024];
+
+    fio_u256 a = fio_u256_init64(2);
+    fio_u256 b = fio_u256_init64(3);
+    fio_u512 expected = fio_u512_init64(6);
+
+    fio_u512 result = {0};
+    fio_u256_mul(&result, &a, &b);
+
+    FIO_ASSERT(!FIO_MEMCMP(&result, &expected, sizeof(result)),
+               "2 * 3 should be 6");
+    FIO_ASSERT(!fio_u512_cmp(&result, &expected),
+               "fio_u512_cmp failed for result 6.");
+
+    a = fio_u256_init64(2, 2);
+    expected = fio_u512_init64(6, 6);
+    fio_u256_mul(&result, &a, &b);
+    FIO_ASSERT(!FIO_MEMCMP(&result, &expected, sizeof(result)),
+               "2,2 * 3 should be 6,6");
+    FIO_ASSERT(!fio_u512_cmp(&result, &expected),
+               "fio_u512_cmp failed for result 6,6.");
+
+    a = fio_u256_init64(2, 0x8000000000000000);
+    expected = fio_u512_init64(6, 0x8000000000000000, 1);
+    fio_u256_mul(&result, &a, &b);
+    FIO_ASSERT(!FIO_MEMCMP(&result, &expected, sizeof(result)),
+               "2,0x8... * 3 should be 6,0x8..., 1");
+    FIO_ASSERT(!fio_u512_cmp(&result, &expected),
+               "fio_u512_cmp failed for result 6,0x8..., 1");
+
+    a = fio_u256_init64(0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF); // Max value
+    b = fio_u256_init64(0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF,
+                        0xFFFFFFFFFFFFFFFF); // Max value
+    expected = fio_u512_init64(0x1,
+                               0,
+                               0,
+                               0,
+                               0xFFFFFFFFFFFFFFFE,
+                               0xFFFFFFFFFFFFFFFF,
+                               0xFFFFFFFFFFFFFFFF,
+                               0xFFFFFFFFFFFFFFFF);
+    fio_u256_mul(&result, &a, &b);
+    buf[fio_u512_hex_write((char *)buf, &result)] = 0;
+
+    FIO_ASSERT(!FIO_MEMCMP(&result, &expected, sizeof(result)),
+               "Max * Max should be (Max << 256) + 1\n\t0x%s",
+               buf);
+    FIO_ASSERT(!fio_u512_cmp(&result, &expected),
+               "fio_u512_cmp failed for Max * Max result.");
+  }
+  {
+    fprintf(stderr,
+            "* Testing Basic vector operations for fio_uXXX (fio_u256).\n");
+    for (uint64_t a = 1; a; a = ((a << 2) | (((a >> 62) & 1) ^ 1))) {
+      for (uint64_t b = 2; b; b = ((b << 2) | (((b >> 62) & 2) ^ 2))) {
+        uint64_t expected[8] = {1, ~0, 4, ~0};
+        uint64_t na[4] = {a, a, a, a};
+        uint64_t nb[4] = {b, b, b, b};
+        fio_u512 result = fio_u512_init64(~0, 1, ~0, 4);
+        fio_u256 ua = fio_u256_init64(a, a, a, a);
+        fio_u256 ub = fio_u256_init64(b, b, b, b);
+
+        fio_u64x4_add(expected, na, nb);
+        fio_u256_add64(&result.u256[0], &ua, &ub);
+        FIO_ASSERT(
+            !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
+            "Basic vector ADD error");
+
+        fio_u64x4_sub(expected, na, nb);
+        fio_u256_sub64(&result.u256[0], &ua, &ub);
+        FIO_ASSERT(
+            !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
+            "Basic vector SUB error");
+
+        fio_u64x4_mul(expected, na, nb);
+        fio_u256_mul64(&result.u256[0], &ua, &ub);
+        FIO_ASSERT(
+            !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
+            "Basic vector MUL error");
+
+        /* the following will probably never detect an error */
+
+        (void)fio_math_add(expected, na, nb, 4);
+        (void)fio_u256_add(&result.u256[0], &ua, &ub);
+        FIO_ASSERT(
+            !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
+            "Multi-Precision ADD error");
+
+        (void)fio_math_sub(expected, na, nb, 4);
+        (void)fio_u256_sub(&result.u256[0], &ua, &ub);
+        FIO_ASSERT(
+            !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
+            "Multi-Precision SUB error");
+
+        fio___math_mul_long(expected, na, nb, 4); /* test possible difference */
+        fio_u256_mul(&result, &ua, &ub);
+        FIO_ASSERT(!memcmp(result.u64, expected, sizeof(result.u64)),
+                   "Multi-Precision MUL error");
+      }
+    }
+  }
 }
 /* *****************************************************************************
 Cleanup

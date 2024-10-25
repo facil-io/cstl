@@ -19,9 +19,6 @@
 #include "001 memalt.h"
 #endif
 
-#ifdef FIO_ATOMIC
-#include "002 atomics.h"
-#endif
 #ifdef FIO_ATOL
 #include "002 atol.h"
 #endif

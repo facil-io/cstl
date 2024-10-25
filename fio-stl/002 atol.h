@@ -193,6 +193,36 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
 FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
 
 /* *****************************************************************************
+Big Numbers
+***************************************************************************** */
+
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u128 fio_u128_hex_read(char **pstr);
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u256 fio_u256_hex_read(char **pstr);
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u512 fio_u512_hex_read(char **pstr);
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u1024 fio_u1024_hex_read(char **pstr);
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u2048 fio_u2048_hex_read(char **pstr);
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u4096 fio_u4096_hex_read(char **pstr);
+
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u128_hex_write(char *dest, const fio_u128 *);
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u256_hex_write(char *dest, const fio_u256 *);
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u512_hex_write(char *dest, const fio_u512 *);
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u1024_hex_write(char *dest, const fio_u1024 *);
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u2048_hex_write(char *dest, const fio_u2048 *);
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u4096_hex_write(char *dest, const fio_u4096 *);
+
+/* *****************************************************************************
 
 
 Implementation - inlined
@@ -329,17 +359,16 @@ FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
 }
 
 FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
+  digits += (digits & 1U); /* force even number of digits */
   dest += digits;
   *dest-- = 0;
-  while (i > 255) {
+  while (digits) {
+    digits -= 2;
     *dest-- = fio_i2c(i & 15);
     i >>= 4;
     *dest-- = fio_i2c(i & 15);
     i >>= 4;
   }
-  *dest-- = fio_i2c(i & 15);
-  i >>= 4;
-  *dest = fio_i2c(i);
 }
 
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits) {
@@ -1176,12 +1205,107 @@ is_binary:
 }
 
 /* *****************************************************************************
-Numbers <=> Strings - Testing
+Big Numbers
 ***************************************************************************** */
 
-#ifdef FIO_TEST_ALL
+FIO_IFUNC void fio___uXXX_hex_read(uint64_t *t, char **p, size_t l) {
+  char *start = *p;
+  start += ((unsigned)(start[0] == '0' & start[1] == 'x') << 1);
+  char *pos = start;
+  while (fio_i2c((uint8_t)*pos) < 16)
+    ++pos;
+  ++pos;
+  *p = pos;
+  for (size_t i = 0; i < l; ++i) { /* per uint64_t in t */
+    uint64_t wrd = 0;
+    for (size_t j = 0; j < 16 && pos > start; ++j) {
+      --pos;
+      wrd |= ((uint64_t)fio_i2c((uint8_t)*pos) << (j << 2));
+    }
+    *t = wrd;
+    ++t;
+  }
+}
 
-#endif /* FIO_TEST_ALL */
+FIO_IFUNC size_t fio___uXXX_hex_write(char *dest, const uint64_t *t, size_t l) {
+  while (--l && !t[l])
+    ;
+  if (!l && !t[0]) {
+    dest[0] = '0';
+    return 1;
+  }
+  char *pos = dest;
+  size_t digits = fio_digits16u(t[l]);
+  ++l;
+  while (l--) {
+    fio_ltoa16u(pos, t[l], digits);
+    pos += digits;
+    digits = 16;
+  }
+  return (size_t)(pos - dest);
+}
+
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u128 fio_u128_hex_read(char **pstr) {
+  fio_u128 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u256 fio_u256_hex_read(char **pstr) {
+  fio_u256 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u512 fio_u512_hex_read(char **pstr) {
+  fio_u512 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u1024 fio_u1024_hex_read(char **pstr) {
+  fio_u1024 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u2048 fio_u2048_hex_read(char **pstr) {
+  fio_u2048 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+/** Reads a hex numeral string and initializes the numeral. */
+SFUNC fio_u4096 fio_u4096_hex_read(char **pstr) {
+  fio_u4096 r;
+  fio___uXXX_hex_read(r.u64, pstr, sizeof(r) / sizeof(r.u64[0]));
+  return r;
+}
+
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u128_hex_write(char *dest, const fio_u128 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u256_hex_write(char *dest, const fio_u256 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u512_hex_write(char *dest, const fio_u512 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u1024_hex_write(char *dest, const fio_u1024 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u2048_hex_write(char *dest, const fio_u2048 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
+/** Prints out the underlying 64 bit array (for debugging). */
+SFUNC size_t fio_u4096_hex_write(char *dest, const fio_u4096 *u) {
+  return fio___uXXX_hex_write(dest, u->u64, sizeof(u->u64) / sizeof(u->u64[0]));
+}
 
 /* *****************************************************************************
 Numbers <=> Strings - Cleanup

@@ -27,7 +27,6 @@ developer.
 
 #if FIO_OS_POSIX /* POSIX Systems */
 #include <pthread.h>
-#include <sched.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 

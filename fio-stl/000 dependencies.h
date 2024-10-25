@@ -143,7 +143,6 @@ Core Inclusion
 ***************************************************************************** */
 #if defined(FIO_CORE)
 #undef FIO_ATOL
-#undef FIO_ATOMIC
 #undef FIO_FILES
 #undef FIO_GLOB_MATCH
 #undef FIO_LOG
@@ -154,7 +153,6 @@ Core Inclusion
 #undef FIO_URL
 #undef FIO_CORE
 #define FIO_ATOL
-#define FIO_ATOMIC
 #define FIO_FILES
 #define FIO_GLOB_MATCH
 #define FIO_LOG
@@ -381,14 +379,6 @@ FIO_MAP Ordering & Naming Shortcut
     defined(FIO_TIME) || defined(FIO_FILES)
 #undef FIO_ATOL
 #define FIO_ATOL
-#endif
-
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_FIOBJ) ||                          \
-    defined(FIO_LEAK_COUNTER) || defined(FIO_MEMORY_NAME) ||                   \
-    defined(FIO_POLL) || defined(FIO_STATE) || defined(FIO_STR) ||             \
-    defined(FIO_QUEUE)
-#undef FIO_ATOMIC
-#define FIO_ATOMIC
 #endif
 
 #if defined(FIO_PUBSUB)

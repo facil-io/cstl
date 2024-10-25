@@ -261,3 +261,5 @@ UNSAFE macro for removing a node from a list. Resets node data so it links to it
 ```
 
 Loops through every index in the indexed list, **assuming `head` is valid**.
+
+-------------------------------------------------------------------------------

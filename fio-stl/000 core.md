@@ -308,7 +308,82 @@ void my_type_free(my_type_s * t) {
 
 -------------------------------------------------------------------------------
 
-### Pointer Arithmetics
+## Dedicated Static Memory Allocations
+
+The core module provides a simple way to manage a "good enough" thread safe memory allocations for short term use that never need to be freed (e.g., when the caller cannot be trusted to free the memory).
+
+#### `FIO_STATIC_ALLOC_DEF`
+
+```c
+#ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
+/* Maximum number of threads to be expected to call the allocator at once. */
+#define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
+#endif
+#define FIO_STATIC_ALLOC_DEF(function_name,                                             \
+                             type_T,                                           \
+                             size_per_allocation,                              \
+                             allocations_per_thread) /* ... */ 
+```
+
+
+Defines a simple (almost naive) static memory allocator named `function_name` which accepts a single `size_t` argument `count`.
+
+The defined function returns a `type_T` pointer (`type_T *`) containing `sizeof(type_T) * count * size_per_allocation` in correct memory alignment for the requested type.
+
+
+```c
+static type_T *function_name(size_t count);
+```
+
+That memory is statically allocated, allowing it to be returned without ever needing to be freed.
+
+The functions can safely allocate the following number of bytes before the function returns the same memory block to another caller:
+
+    FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
+        sizeof(type_T) * size_per_allocation
+
+The following example uses static memory to create a (zero allocation) number to string converter and then uses it to print out a number's value for logging:
+
+```c
+// Step 1: define the allocator
+
+// Defined a static allocator for 19 byte long strings.
+// 
+// This will reserve 4,864 bytes in static memory.
+// 
+FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
+
+// Step 2: use the allocator
+
+// example function that returns an unsigned number as a 16 digit hex string
+char * ntos16(uint16_t n) {
+  // allocates 19 bytes from the static memory pool.
+  char * n = numer2hex_allocator(1);
+  // Writes the number in hex + NUL byte.
+  n[0] = '0'; n[1] = 'x';
+  fio_ltoa16u(n+2, n, 16);
+  n[18] = 0;
+  // returns the string (a pointer to the 19 bytes).
+  return n;
+}
+
+// Step 3: example use-case.
+
+void print_number_for_debugging(char * file, int line, char * var, uint16_t n) {
+  printf("(%s:%d) %s = %s", file, line, var_name, ntos16(n));
+}
+
+// Prints any number in hex, along with file location and variable name.
+#define LOG_PRINT_VAL(n) print_number_for_debugging(__FILE__, __LINE__, #n, n)
+
+
+```
+
+A similar approach is use by `fiobj_num2cstr` in order to provide temporary conversions of FIOBJ to a C String without the caller having to reason about memory management.
+
+-------------------------------------------------------------------------------
+
+## Pointer Arithmetics
 
 #### `FIO_PTR_MATH_LMASK`
 
@@ -529,180 +604,6 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 ```
 
 Used internally to name test functions.
-
--------------------------------------------------------------------------------
-
-## Core Binary Strings and Buffer Helpers
-
-Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
-
-#### `fio_str_info_s`
-
-Some functions use the `fio_str_info_s` type to either collect or return string related information. This helper type is defined as:
-
-```c
-typedef struct fio_str_info_s {
-  size_t len;  /* The string's length, if any. */
-  char *buf;   /* The string's buffer (pointer to first byte) or NULL on error. */
-  size_t capa; /* The buffer's capacity. Zero (0) indicates the buffer is read-only. */
-} fio_str_info_s;
-```
-
-Note that it is often the case that the data in the string object could be binary, where NUL is a valid character, so using C string functions isn't advised.
-
-Also, note that `capa` might be `0` or otherwise less than `len`. This would indicate the data might be non-mutable (overwriting the string might break things).
-
-
-#### `fio_buf_info_s`
-
-```c
-typedef struct fio_buf_info_s {
-  size_t len; /* The buffer's length, if any. */
-  char *buf;  /* The buffer's address (may be NULL if no buffer). */
-} fio_buf_info_s;
-```
-
-An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
-
-#### `FIO_STR_INFO_IS_EQ`
-
-```c
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
-```
-
-This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content content equality.
-
-#### `FIO_STR_INFO1`
-
-```c
-#define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = FIO_STRLEN((str)), .buf = (str)})
-```
-
-Converts a C String into a `fio_str_info_s`.
-
-#### `FIO_STR_INFO2`
-
-```c
-#define FIO_STR_INFO2(str, length)                                             \
-  ((fio_str_info_s){.len = (length), .buf = (str)})
-```
-
-Converts a String with a known length into a `fio_str_info_s`.
-
-#### `FIO_STR_INFO3`
-
-```c
-#define FIO_STR_INFO3(str, length, capacity)                                   \
-  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
-```
-
-Converts a String with a known length and capacity into a `fio_str_info_s`.
-
-#### `FIO_BUF2STR_INFO`
-
-```c
-#define FIO_BUF2STR_INFO(buf_info)                                             \
-  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
-```
-
-Converts a `fio_buf_info_s` into a `fio_str_info_s`.
-
-#### `FIO_STR2BUF_INFO`
-
-```c
-#define FIO_STR2BUF_INFO(str_info)                                             \
-  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
-```
-
-Converts a `fio_buf_info_s` into a `fio_str_info_s`.
-
-#### `FIO_STR_INFO_TMP_VAR(name, capacity)`
-
-```c
-#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
-  char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
-  fio_str_info_s name = (fio_str_info_s) {                                     \
-    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
-  }
-```
-
-Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
-
-### Core UTF-8 Support
-
-Note, these functions are for single UTF-8 character / code-point handling, they don't check for memory bounds (may overflow) and aren't considered safe.
-
-However, they could be used for writing safe a UTF-8 implementation if used with care. Assuming your strings end with a little padding or a NUL character, these should be safe to use (when writing, check available buffer before writing a possibly multi-byte UTF-8 char.
-
-#### `fio_utf8_code_len`
-
-```c
-size_t fio_utf8_code_len(uint32_t u);
-```
-
-Returns the number of bytes required to UTF-8 encoded a code point `u`.
-
-#### `fio_utf8_char_len_unsafe`
-
-```c
-size_t fio_utf8_char_len_unsafe(uint8_t c);
-```
-
-Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid).
-
-Use only to re-collect lost length information after a successful `fio_utf8_write` or `fio_utf8_char_len` call.
-
-#### `fio_utf8_char_len`
-
-```c
-size_t fio_utf8_char_len(const void *str);
-```
-
-Returns the number of valid UTF-8 bytes used by first char at `str`.
-
-If `str` doesn't point to a valid UTF-8 encoded code-point, returns 0.
-
-**Note**: This function also tests all the following bytes that are part of the asme UTF-8 character.
-
-
-#### `fio_utf8_char_len`
-
-```c
-size_t fio_utf8_write(void *dest, uint32_t u);
-```
-
-Writes code point to `dest` using UFT-8. Returns number of bytes written.
-
-Possible use pattern will be:
-
-```c
-dest += fio_utf8_write(dest, u);
-```
-
-
-#### `fio_utf8_read`
-
-```c
-uint32_t fio_utf8_read(char **str);
-```
-
-Decodes the first UTF-8 char at `str` and returns its code point value.
-
-Advances the pointer at `str` by the number of bytes consumed (read).
-
-#### `fio_utf8_peek`
-
-```c
-uint32_t fio_utf8_peek(char *str);
-```
-
-Decodes the first UTF-8 char at `str` and returns its code point value.
-
-Unlike `fio_utf8_read`, the pointer does not change.
 
 -------------------------------------------------------------------------------
 
@@ -1083,6 +984,8 @@ Performs the operation indicated in constant time.
 
 **Note**: the 128 bit helpers are only available with systems / compilers that support 128 bit types.
 
+**Note**: for mutable shared data, please consider using the atomic operations.
+
 #### Bitmap helpers
 
 - `fio_bit_get(void *map, size_t bit)`
@@ -1190,6 +1093,9 @@ __uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
 
 The following simple operations can be used to build your own multi-precision implementation.
 
+The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
+
+
 #### `fio_math_addc64`
 
 ```c
@@ -1200,6 +1106,21 @@ uint64_t fio_math_addc64(uint64_t a,
 ```
 
 Add with carry.
+
+#### `fio_math_add`
+
+```c
+bool fio_math_add(uint64_t *dest,
+                  const uint64_t *a,
+                  const uint64_t *b,
+                  const size_t len);
+```
+
+Multi-precision ADD for `len` 64 bit words a + b. Returns the carry.
+
+This assumes all the pointers point to memory blocks that are the same-length `len` (use zero padding for uneven word lengths).
+
+This assume LSW (Least Significant Word) ordering.
 
 #### `fio_math_subc64`
 
@@ -1212,6 +1133,21 @@ uint64_t fio_math_subc64(uint64_t a,
 
 Subtract with carry.
 
+#### `fio_math_sub`
+
+```c
+uint64_t fio_math_sub(uint64_t *dest,
+                      const uint64_t *a,
+                      const uint64_t *b,
+                      const size_t len)
+```
+
+Multi-precision SUB for `len` 64 bit words a + b. Returns the borrow.
+
+This assumes all the pointers point to memory blocks that are the same-length `len` (use zero padding for uneven word lengths).
+
+This assume LSW (Least Significant Word) ordering.
+
 #### `fio_math_mulc64`
 ```c
 uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
@@ -1219,4 +1155,754 @@ uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out);
 
 Multiply with carry out.
 
+
+#### `fio_math_mul`
+
+```c
+void fio_math_mul(uint64_t *restrict dest,
+                  const uint64_t *a,
+                  const uint64_t *b,
+                  const size_t len)
+```
+
+Multi-precision MUL for `len` 64 bit words.
+
+`dest` must be `len * 2` long to hold the result.
+
+`a` and `b` must be 64 bit word arrays of equal `len`.
+
+This assume LSW (Least Significant Word) ordering.
+
 -------------------------------------------------------------------------------
+
+## Native Numeral Vector Operation
+
+These are operations defined on native C types, written with the hope that the compiler will replace these somewhat naive implementations with SIMD instructions where possible.
+
+These operate on common, power of 2, collections of numbers
+
+#### Vectorized Mathematical Operations (`fio_u##x#_OP`)
+
+Add, Multiply, Subtract and more using any of the following (or similarly named):
+
+```c
+void fio_u8x4_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x8_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x16_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x32_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x64_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x128_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+void fio_u8x256_add(uint8_t * dest, uint8_t * a, uint8_t *b);
+
+void fio_u16x2_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x4_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x8_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x16_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x32_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x64_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+void fio_u16x128_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+
+void fio_u32x2_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+void fio_u32x4_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+void fio_u32x8_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+void fio_u32x16_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+void fio_u32x32_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+void fio_u32x64_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+
+void fio_u64x2_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+void fio_u64x4_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+void fio_u64x8_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+void fio_u64x16_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+void fio_u64x32_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+```
+
+The following operations are supported: `add`, `mul`, `and`, `or`, `xor`.
+
+#### Vectorized Mathematical Summing (`fio_u##x#_OP`)
+
+Sum vectors up using Add, Or, XOR, and more using any of the following (or similarly named):
+
+```c
+uint8_t fio_u8x4_reduce_add(uint8_t * v);
+uint8_t fio_u8x8_reduce_add(uint8_t * v);
+uint8_t fio_u8x16_reduce_add(uint8_t * v);
+uint8_t fio_u8x32_reduce_add(uint8_t * v);
+uint8_t fio_u8x64_reduce_add(uint8_t * v);
+uint8_t fio_u8x128_reduce_add(uint8_t * v);
+uint8_t fio_u8x256_reduce_add(uint8_t * v);
+
+uint16_t fio_u16x2_reduce_add(uint16_t * v);
+uint16_t fio_u16x4_reduce_add(uint16_t * v);
+uint16_t fio_u16x8_reduce_add(uint16_t * v);
+uint16_t fio_u16x16_reduce_add(uint16_t * v);
+uint16_t fio_u16x32_reduce_add(uint16_t * v);
+uint16_t fio_u16x64_reduce_add(uint16_t * v);
+uint16_t fio_u16x128_reduce_add(uint16_t * v);
+
+uint32_t fio_u32x2_reduce_add(uint32_t * v);
+uint32_t fio_u32x4_reduce_add(uint32_t * v);
+uint32_t fio_u32x8_reduce_add(uint32_t * v);
+uint32_t fio_u32x16_reduce_add(uint32_t * v);
+uint32_t fio_u32x32_reduce_add(uint32_t * v);
+uint32_t fio_u32x64_reduce_add(uint32_t * v);
+
+uint64_t fio_u64x2_reduce_add(uint64_t * v);
+uint64_t fio_u64x4_reduce_add(uint64_t * v);
+uint64_t fio_u64x8_reduce_add(uint64_t * v);
+uint64_t fio_u64x16_reduce_add(uint64_t * v);
+uint64_t fio_u64x32_reduce_add(uint64_t * v);
+
+```
+
+The following summation operations are supported: `max`, `min`, `add`, `mul`, `and`, `or`, `xor`.
+
+#### Reshuffling (`fio_u##x#_reshuffle`)
+
+Reorders the words inside the vector.
+
+```c
+#define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
+#define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
+#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
+#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
+#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
+#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
+#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
+#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
+#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
+#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
+#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
+#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
+#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
+#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
+#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
+#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
+#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
+#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
+#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
+#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+```
+
+-------------------------------------------------------------------------------
+
+## Atomic Operations (Core)
+
+```c
+#define FIO_ATOMIC
+#include "fio-stl.h"
+```
+
+If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
+
+In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
+
+#### `fio_atomic_load(p_obj)`
+
+Atomically loads and returns the value stored in the object pointed to by `p_obj`.
+
+#### `fio_atomic_exchange(p_obj, value)`
+
+Atomically sets the object pointer to by `p_obj` to `value`, returning the
+previous value.
+
+#### `fio_atomic_add(p_obj, value)`
+
+A MACRO / function that performs `add` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_sub(p_obj, value)`
+
+A MACRO / function that performs `sub` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_and(p_obj, value)`
+
+A MACRO / function that performs `and` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_xor(p_obj, value)`
+
+A MACRO / function that performs `xor` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_or(p_obj, value)`
+
+A MACRO / function that performs `or` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_nand(p_obj, value)`
+
+A MACRO / function that performs `nand` atomically.
+
+Returns the previous value.
+
+#### `fio_atomic_add_fetch(p_obj, value)`
+
+A MACRO / function that performs `add` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_sub_fetch(p_obj, value)`
+
+A MACRO / function that performs `sub` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_and_fetch(p_obj, value)`
+
+A MACRO / function that performs `and` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_xor_fetch(p_obj, value)`
+
+A MACRO / function that performs `xor` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_or_fetch(p_obj, value)`
+
+A MACRO / function that performs `or` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_nand_fetch(p_obj, value)`
+
+A MACRO / function that performs `nand` atomically.
+
+Returns the new value.
+
+#### `fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired)`
+
+A MACRO / function that performs a system specific `fio_atomic_compare_exchange` using pointers.
+
+The behavior of this instruction is compiler / CPU architecture specific, where `p_expected` **SHOULD** be overwritten with the latest value of `p_obj`, but **MAY NOT**, depending on system and compiler implementations.
+
+Returns 1 for successful exchange or 0 for failure.
+
+#### Atomic Bitmap helpers
+
+- `fio_atomic_bit_get(void *map, size_t bit)`
+
+- `fio_atomic_bit_set(void *map, size_t bit)`   (an **atomic** operation, thread-safe)
+
+- `fio_atomic_bit_unset(void *map, size_t bit)` (an **atomic** operation, thread-safe)
+
+Gets / Sets bits an atomic thread-safe way.
+
+-------------------------------------------------------------------------------
+
+## a SpinLock style MultiLock
+
+Atomic operations lend themselves easily to implementing spinlocks, so the facil.io STL includes one.
+
+Spinlocks are effective for very short critical sections or when a a failure to acquire a lock allows the program to redirect itself to other pending tasks. 
+
+However, in general, spinlocks should be avoided when a task might take a longer time to complete or when the program might need to wait for a high contention lock to become available.
+
+#### `fio_lock_i`
+
+A spinlock type based on a volatile unsigned char.
+
+**Note**: the spinlock contains one main / default lock (`sub == 0`) and 7 sub-locks (`sub >= 1 && sub <= 7`), which could be managed:
+
+- Separately: using the `fio_lock_sublock`, `fio_trylock_sublock` and `fio_unlock_sublock` functions.
+- Jointly: using the `fio_trylock_group`, `fio_lock_group` and `fio_unlock_group` functions.
+- Collectively: using the `fio_trylock_full`, `fio_lock_full` and `fio_unlock_full` functions.
+
+
+#### `fio_lock(fio_lock_i *)`
+
+Busy waits for the default lock (sub-lock `0`) to become available.
+
+#### `fio_trylock(fio_lock_i *)`
+
+Attempts to acquire the default lock (sub-lock `0`). Returns 0 on success and 1 on failure.
+
+#### `fio_unlock(fio_lock_i *)`
+
+Unlocks the default lock (sub-lock `0`), no matter which thread owns the lock.
+
+#### `fio_is_locked(fio_lock_i *)`
+
+Returns 1 if the (main) lock is engaged. Otherwise returns 0.
+
+#### `fio_lock_sublock(fio_lock_i *, uint8_t sub)`
+
+Busy waits for a sub-lock to become available.
+
+#### `fio_trylock_sublock(fio_lock_i *, uint8_t sub)`
+
+Attempts to acquire the sub-lock. Returns 0 on success and 1 on failure.
+
+#### `fio_unlock_sublock(fio_lock_i *, uint8_t sub)`
+
+Unlocks the sub-lock, no matter which thread owns the lock.
+
+#### `fio_is_sublocked(fio_lock_i *, uint8_t sub)`
+
+Returns 1 if the specified sub-lock is engaged. Otherwise returns 0.
+
+#### `uint8_t fio_trylock_group(fio_lock_i *lock, const uint8_t group)`
+
+Tries to lock a group of sub-locks.
+
+Combine a number of sub-locks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
+macro. i.e.:
+
+```c
+if(fio_trylock_group(&lock,
+                     FIO_LOCK_SUBLOCK(1) |
+                     FIO_LOCK_SUBLOCK(2)) == 0) {
+  // act in lock and then release the SAME lock with:
+  fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2));
+}
+```
+
+Returns 0 on success and 1 on failure.
+
+#### `void fio_lock_group(fio_lock_i *lock, uint8_t group)`
+
+Busy waits for a group lock to become available - not recommended.
+
+See `fio_trylock_group` for details.
+
+#### `void fio_unlock_group(fio_lock_i *lock, uint8_t group)`
+
+Unlocks a sub-lock group, no matter which thread owns which sub-lock.
+
+#### `fio_trylock_full(fio_lock_i *lock)`
+
+Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
+
+#### `fio_lock_full(fio_lock_i *lock)`
+
+Busy waits for all sub-locks to become available - not recommended.
+
+#### `fio_unlock_full(fio_lock_i *lock)`
+
+Unlocks all sub-locks, no matter which thread owns which lock.
+
+-------------------------------------------------------------------------------
+
+## Numeral / Vector Helper Types
+
+The following union types hold (little endian) arrays of unsigned 64 bit numbers that are accessible also as byte arrays or smaller numeral types:
+
+- `fio_u128`
+- `fio_u256`
+- `fio_u512`
+- `fio_u1024`
+- `fio_u2048`
+- `fio_u4096`
+
+The main ones are as follows (the rest follow the same pattern):
+
+#### `fio_u128`
+
+```c
+typedef union {
+  /** unsigned native word size array, length is system dependent */
+  size_t uz[16 / sizeof(size_t)];
+
+  /** known bit word arrays */
+  uint64_t u64[2];
+  uint32_t u32[4];
+  uint16_t u16[8];
+  uint8_t u8[16];
+
+  /** vector types, if supported */
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[1];
+  uint32x4_t x32[1];
+  uint16x8_t x16[1];
+  uint8x16_t x8[1];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(16)));
+  uint64_t x32 __attribute__((vector_size(16)));
+  uint64_t x16 __attribute__((vector_size(16)));
+  uint64_t x8 __attribute__((vector_size(16)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[1];
+#endif
+} fio_u128 FIO_ALIGN(16);
+```
+
+An unsigned 128 bit union type.
+
+#### `fio_u256`
+
+```c
+typedef union {
+  /** unsigned native word size array, length is system dependent */
+  size_t uz[32 / sizeof(size_t)];
+
+  /** known bit word arrays */
+  uint64_t u64[4];
+  uint32_t u32[8];
+  uint16_t u16[16];
+  uint8_t u8[32];
+
+  /* previous types */
+  fio_u128 u128[2];
+
+  /** vector types, if supported */
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[2];
+  uint32x4_t x32[2];
+  uint16x8_t x16[2];
+  uint8x16_t x8[2];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(32)));
+  uint64_t x32 __attribute__((vector_size(32)));
+  uint64_t x16 __attribute__((vector_size(32)));
+  uint64_t x8 __attribute__((vector_size(32)));
+#endif
+#if defined(__SIZEOF_INT128__)
+  __uint128_t alignment_for_u128_[2];
+#endif
+#if defined(__SIZEOF_INT256__)
+  __uint256_t alignment_for_u256_[1];
+#endif
+} fio_u256 FIO_ALIGN(16);
+```
+
+An unsigned 256 bit union type.
+
+#### `fio_u512`
+
+```c
+typedef union {
+  /** unsigned native word size array, length is system dependent */
+  size_t uz[64 / sizeof(size_t)];
+
+  /** known bit word arrays */
+  uint64_t u64[8];
+  uint32_t u32[16];
+  uint16_t u16[32];
+  uint8_t u8[64];
+
+  /* previous types */
+  fio_u128 u128[4];
+  fio_u256 u256[2];
+
+  /** vector types, if supported */
+#if FIO___HAS_ARM_INTRIN
+  uint64x2_t x64[4];
+  uint32x4_t x32[4];
+  uint16x8_t x16[4];
+  uint8x16_t x8[4];
+#elif __has_attribute(vector_size)
+  uint64_t x64 __attribute__((vector_size(64)));
+  uint64_t x32 __attribute__((vector_size(64)));
+  uint64_t x16 __attribute__((vector_size(64)));
+  uint64_t x8 __attribute__((vector_size(64)));
+#endif
+} fio_u512 FIO_ALIGN(16);
+```
+
+An unsigned 512 bit union type.
+
+### Numeral / Vector Helper Type Initialization
+
+Fast and easy macros are provided for these numeral helper initialization, initializing any provided X bit words in least-significant-word ordering and initializing any remaining higher words with zero.
+
+#### `fio_u128_init8` / `fio_u128_init16` / `fio_u128_init32` / `fio_u128_init64` ...
+
+```c
+#define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
+#define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
+#define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
+#define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
+
+#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
+#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
+#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
+#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
+
+#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
+#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
+#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
+#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
+
+#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
+#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
+#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
+#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
+
+#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
+#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
+#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
+#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
+
+#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
+#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
+#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
+#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+```
+
+### Numeral / Vector Helper Type Load / Store
+
+These numerals can be stored and loaded from memory using big endian / little endian formatting:
+
+#### `fio_u128_load`, `fio_u256_load` ...
+
+- `fio_u128 fio_u128_load(const void *buf)`          - load in native ordering.
+- `void fio_u128_store(void *buf, const fio_u128 a)` - store in native ordering.
+- `fio_u128 fio_u128_load_le16(const void *buf)` - load in little endian ordering using 16 bit words.
+- `fio_u128 fio_u128_load_be16(const void *buf)` - load in big endian ordering using 16 bit words.
+- `fio_u128 fio_u128_bswap16(const void *buf)`   - load in and byte-swap using 16 bit words (2 bytes).
+- `fio_u128 fio_u128_load_le32(const void *buf)` - load in little endian ordering using 32 bit words.
+- `fio_u128 fio_u128_load_be32(const void *buf)` - load in big endian ordering using 32 bit words.
+- `fio_u128 fio_u128_bswap32(const void *buf)`   - load in and byte-swap using 32 bit words (2 bytes).
+- `fio_u128 fio_u128_load_le64(const void *buf)` - load in little endian ordering using 64 bit words.
+- `fio_u128 fio_u128_load_be64(const void *buf)` - load in big endian ordering using 64 bit words.
+- `fio_u128 fio_u128_bswap64(const void *buf)`   - load in and byte-swap using 64 bit words (2 bytes).
+
+- `fio_u256 fio_u256_load(const void *buf)`          - load in native ordering.
+- `void fio_u256_store(void *buf, const fio_u256 a)` - store in native ordering.
+- ... (etc')
+
+### Numeral / Vector Helper Type Operation
+
+Common mathematical operations are provided for the Vector Helper Types, much like they were provided for the Native C typed vectors.
+
+#### `fio_u128_add16`, `fio_u256_sub32`, `fio_u512_mul64` ...
+
+These functions follow the naming scheme of `fio_u##TOTAL_BITS##_##OP##WORD_BITS`, where `TOTAL_BITS` is the total number of bits, `OP` is the name of the operation (`add`, `sub`, `mul`, etc') and `WORD_BITS` is the number of bits in each vector "word".
+
+i.e:
+
+- `void fio_u128_add8(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs a modular 8 bit ADD (`+`) operation `a+b`.
+- `void fio_u256_sub16(fio_u256 *t, fio_u256 *a, fio_u256 *b)`  - performs a modular 16 bit SUB (`-`) operation `a-b`.
+- `void fio_u512_mul32(fio_u512 *t, fio_u512 *a, fio_u512 *b)`  - performs a modular 32 bit MUL (`*`) operation `a*b`.
+- `void fio_u1024_and(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit AND (`&`) operation `a&b`.
+- `void fio_u2048_or(fio_u512 *t, fio_u512 *a, fio_u512 *b)`    - performs a bit OR (`|`) operation `a|b`.
+- `void fio_u4096_xor(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit XOR (`^`) operation `a^b`.
+
+Supported operations (`OP`) are: `add`, `sub`, `mul`, `and`, `or`, `xor`.
+
+For bitwise operations, the `WORD_BITS` part of the function name is optional.
+
+
+#### `fio_u128_cadd16`, `fio_u128_csub32`, `fio_u256_cmul64` ...
+
+These functions perform an operation `a OP b` where `b` is a constant rather than a vector.
+
+i.e.:
+
+- `void fio_u128_cadd8(fio_u128 *t, fio_u128 *a, uint8_t b)`     - performs a modular 8 bit ADD (`+`) operation `a+b`.
+- `void fio_u256_csub16(fio_u256 *t, fio_u256 *a, uint16_t b)`   - performs a modular 16 bit SUB (`-`) operation `a-b`.
+- `void fio_u512_cmul32(fio_u512 *t, fio_u512 *a, uint32_t b)`   - performs a modular 32 bit MUL (`*`) operation `a*b`.
+- `void fio_u1024_cand8(fio_u512 *t, fio_u512 *a, uint8_t b)`    - performs an 8 bit AND (`&`) operation `a&b`.
+- `void fio_u2048_cor16(fio_u512 *t, fio_u512 *a, uint16_t b)`   - performs a 16 bit OR (`|`) operation `a|b`.
+- `void fio_u4096_cxor32(fio_u512 *t, fio_u512 *a, uint32_t b)`  - performs a 32 bit XOR (`^`) operation `a^b`.
+
+
+#### Multi-Precision `fio_u128_add`, `fio_u256_sub`, `fio_u512_mul` ...
+
+These functions provide Multi-Precision operations for the Numeral / Vector Helper Types.
+
+The functions support up to 2048 bits of multi-precision. The 4096 bit type is mostly reserved for storing the result of multiplying two 2048 bit numerals (as storing the result requires bit expansion from 2048 bits to 4096 bits).
+
+- `bool fio_u128_add(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs ADD (`t=a+b`), returning the carry bit.
+- `bool fio_u256_sub(fio_u256 *t, fio_u256 *a, fio_u256 *b)`   - performs SUB (`t=a-b`), returning the borrow bit.
+- `void fio_u512_mul(fio_u512 *t, fio_u256 *a, fio_u256 *b)`   - performs MUL (`t=a*b`) operation.
+
+
+-------------------------------------------------------------------------------
+
+## Core Binary Strings and Buffer Helpers
+
+Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
+
+#### `fio_str_info_s`
+
+Some functions use the `fio_str_info_s` type to either collect or return string related information. This helper type is defined as:
+
+```c
+typedef struct fio_str_info_s {
+  size_t len;  /* The string's length, if any. */
+  char *buf;   /* The string's buffer (pointer to first byte) or NULL on error. */
+  size_t capa; /* The buffer's capacity. Zero (0) indicates the buffer is read-only. */
+} fio_str_info_s;
+```
+
+Note that it is often the case that the data in the string object could be binary, where NUL is a valid character, so using C string functions isn't advised.
+
+Also, note that `capa` might be `0` or otherwise less than `len`. This would indicate the data might be non-mutable (overwriting the string might break things).
+
+
+#### `fio_buf_info_s`
+
+```c
+typedef struct fio_buf_info_s {
+  size_t len; /* The buffer's length, if any. */
+  char *buf;  /* The buffer's address (may be NULL if no buffer). */
+} fio_buf_info_s;
+```
+
+An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
+
+#### `FIO_STR_INFO_IS_EQ`
+
+```c
+#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
+  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
+                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+```
+
+This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content content equality.
+
+#### `FIO_STR_INFO1`
+
+```c
+#define FIO_STR_INFO1(str)                                                     \
+  ((fio_str_info_s){.len = FIO_STRLEN((str)), .buf = (str)})
+```
+
+Converts a C String into a `fio_str_info_s`.
+
+#### `FIO_STR_INFO2`
+
+```c
+#define FIO_STR_INFO2(str, length)                                             \
+  ((fio_str_info_s){.len = (length), .buf = (str)})
+```
+
+Converts a String with a known length into a `fio_str_info_s`.
+
+#### `FIO_STR_INFO3`
+
+```c
+#define FIO_STR_INFO3(str, length, capacity)                                   \
+  ((fio_str_info_s){.len = (length), .buf = (str), .capa = (capacity)})
+```
+
+Converts a String with a known length and capacity into a `fio_str_info_s`.
+
+#### `FIO_BUF2STR_INFO`
+
+```c
+#define FIO_BUF2STR_INFO(buf_info)                                             \
+  ((fio_str_info_s){.len = (buf_info).len, .buf = (buf_info).buf})
+```
+
+Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+
+#### `FIO_STR2BUF_INFO`
+
+```c
+#define FIO_STR2BUF_INFO(str_info)                                             \
+  ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
+```
+
+Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+
+#### `FIO_STR_INFO_TMP_VAR(name, capacity)`
+
+```c
+#define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
+  char fio___stack_mem___##name[(capacity) + 1];                               \
+  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio_str_info_s name = (fio_str_info_s) {                                     \
+    .buf = fio___stack_mem___##name, .capa = (capacity)                        \
+  }
+```
+
+Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
+
+### Core UTF-8 Support
+
+Note, these functions are for single UTF-8 character / code-point handling, they don't check for memory bounds (may overflow) and aren't considered safe.
+
+However, they could be used for writing safe a UTF-8 implementation if used with care. Assuming your strings end with a little padding or a NUL character, these should be safe to use (when writing, check available buffer before writing a possibly multi-byte UTF-8 char.
+
+#### `fio_utf8_code_len`
+
+```c
+size_t fio_utf8_code_len(uint32_t u);
+```
+
+Returns the number of bytes required to UTF-8 encoded a code point `u`.
+
+#### `fio_utf8_char_len_unsafe`
+
+```c
+size_t fio_utf8_char_len_unsafe(uint8_t c);
+```
+
+Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid).
+
+Use only to re-collect lost length information after a successful `fio_utf8_write` or `fio_utf8_char_len` call.
+
+#### `fio_utf8_char_len`
+
+```c
+size_t fio_utf8_char_len(const void *str);
+```
+
+Returns the number of valid UTF-8 bytes used by first char at `str`.
+
+If `str` doesn't point to a valid UTF-8 encoded code-point, returns 0.
+
+**Note**: This function also tests all the following bytes that are part of the asme UTF-8 character.
+
+
+#### `fio_utf8_char_len`
+
+```c
+size_t fio_utf8_write(void *dest, uint32_t u);
+```
+
+Writes code point to `dest` using UFT-8. Returns number of bytes written.
+
+Possible use pattern will be:
+
+```c
+dest += fio_utf8_write(dest, u);
+```
+
+
+#### `fio_utf8_read`
+
+```c
+uint32_t fio_utf8_read(char **str);
+```
+
+Decodes the first UTF-8 char at `str` and returns its code point value.
+
+Advances the pointer at `str` by the number of bytes consumed (read).
+
+#### `fio_utf8_peek`
+
+```c
+uint32_t fio_utf8_peek(char *str);
+```
+
+Decodes the first UTF-8 char at `str` and returns its code point value.
+
+Unlike `fio_utf8_read`, the pointer does not change.
+
