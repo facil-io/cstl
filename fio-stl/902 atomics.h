@@ -131,8 +131,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   fio_lock(&lock);
   FIO_ASSERT(fio_is_locked(&lock), "lock should be engaged (fio_lock)");
   for (uint8_t i = 1; i < 8; ++i) {
-    FIO_ASSERT(!fio_is_sublocked(&lock, i),
-               "sublock flagged, but wasn't engaged (%u - %p)",
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock flagged, but wasn't engaged (%u - %p)",
                (unsigned int)i,
                (void *)(uintptr_t)lock);
   }
@@ -140,13 +140,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(!fio_is_locked(&lock), "lock should be released");
   lock = FIO_LOCK_INIT;
   for (size_t i = 0; i < 8; ++i) {
-    FIO_ASSERT(!fio_is_sublocked(&lock, i),
-               "sublock should be initialized in unlocked state");
-    FIO_ASSERT(!fio_trylock_sublock(&lock, i),
-               "fio_trylock_sublock should succeed");
-    FIO_ASSERT(fio_trylock_sublock(&lock, i), "fio_trylock should fail");
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be initialized in unlocked state");
+    FIO_ASSERT(!fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock_group should succeed");
+    FIO_ASSERT(fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock should fail");
     FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "sub-lock %d should be engaged", i);
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "sub-lock %d should be engaged",
+               i);
     {
       uint8_t g =
           fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
@@ -156,12 +159,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
         fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
     }
     for (uint8_t j = 1; j < 8; ++j) {
-      FIO_ASSERT(i == j || !fio_is_sublocked(&lock, j),
-                 "another sublock was flagged, though it wasn't engaged");
+      FIO_ASSERT(i == j || !fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(j)),
+                 "another group lock was flagged, though it wasn't engaged");
     }
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "lock should remain engaged");
-    fio_unlock_sublock(&lock, i);
-    FIO_ASSERT(!fio_is_sublocked(&lock, i), "sublock should be released");
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "lock should remain engaged");
+    fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(i));
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be released");
     FIO_ASSERT(!fio_trylock_full(&lock), "fio_trylock_full should succeed");
     fio_unlock_full(&lock);
     FIO_ASSERT(!lock, "fio_unlock_full should unlock all");

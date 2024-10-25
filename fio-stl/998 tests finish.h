@@ -124,14 +124,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
           .name = "fio_lock      (spinlock)",
           .task = fio___lock_mytask_lock,
       },
-#ifdef H___FIO_LOCK2___H
-      {
-          .type_size = sizeof(fio_lock2_s),
-          .type_name = "fio_lock2_s",
-          .name = "fio_lock2 (pause/resume)",
-          .task = fio___lock_mytask_lock2,
-      },
-#endif
       {
           .type_size = sizeof(fio_thread_mutex_t),
           .type_name = "fio_thread_mutex_t",

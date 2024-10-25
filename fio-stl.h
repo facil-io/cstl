@@ -538,29 +538,30 @@ Sleep / Thread Scheduling Macros
 #endif
 
 #ifndef FIO_THREAD_RESCHEDULE
-// Define the thread_yield function
-
 #if (defined(__x86_64__) || defined(__i386__)) &&                              \
     (defined(__GNUC__) || defined(__clang__))
 /** Yields the thread, hinting to the processor about spinlock loop. */
-#define FIO_THREAD_RESCHEDULE() __asm__ __volatile__("pause" ::: "memory")
+#define FIO_THREAD_YIELD() __asm__ __volatile__("pause" ::: "memory")
 #elif (defined(__aarch64__) || defined(__arm__)) &&                            \
     (defined(__GNUC__) || defined(__clang__))
 /** Yields the thread, hinting to the processor about spinlock loop. */
-#define FIO_THREAD_RESCHEDULE() __asm__ __volatile__("yield" ::: "memory")
+#define FIO_THREAD_YIELD() __asm__ __volatile__("yield" ::: "memory")
 #elif defined(_MSC_VER)
-#define FIO_THREAD_RESCHEDULE() YieldProcessor()
-#elif FIO_OS_POSIX
+#define FIO_THREAD_YIELD() YieldProcessor()
+#else FIO_OS_POSIX
 /** Yields the thread, hinting to the processor about spinlock loop. */
-#define FIO_THREAD_RESCHEDULE() sched_yield()
-#else
+#define FIO_THREAD_YIELD() sched_yield()
+#endif
+
 /**
- * Reschedules the thread by calling nanosleeps for a single nano-second.
+ * Reschedules the thread by calling nanosleeps for nano-seconds.
  *
  * In practice, the thread will probably sleep for 60ns or more.
+ *
+ * Seems to be faster then thread_yield, perhaps it prevents de-prioritization
+ * of the thread.
  */
 #define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
-#endif
 
 #endif /* FIO_THREAD_RESCHEDULE */
 
@@ -754,27 +755,6 @@ Spin-Locks
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
 typedef volatile unsigned char fio_lock_i;
 
-/** Tries to lock a specific sublock. Returns 0 on success and 1 on failure. */
-FIO_IFUNC uint8_t fio_trylock_sublock(fio_lock_i *lock, uint8_t sub) {
-  FIO_COMPILER_GUARD;
-  sub &= 7;
-  uint8_t sub_ = 1U << sub;
-  return ((fio_atomic_or(lock, sub_) & sub_) >> sub);
-}
-
-/** Busy waits for a specific sublock to become available - not recommended. */
-FIO_IFUNC void fio_lock_sublock(fio_lock_i *lock, uint8_t sub) {
-  while (fio_trylock_sublock(lock, sub)) {
-    FIO_THREAD_RESCHEDULE();
-  }
-}
-
-/** Unlocks the specific sublock, no matter which thread owns the lock. */
-FIO_IFUNC void fio_unlock_sublock(fio_lock_i *lock, uint8_t sub) {
-  sub = 1U << (sub & 7);
-  fio_atomic_and(lock, (~(fio_lock_i)sub));
-}
-
 /**
  * Tries to lock a group of sublocks.
  *
@@ -795,8 +775,10 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   uint8_t state = fio_atomic_or(lock, group);
   if (!(state & group))
     return 0;
-  /* release the locks we aquired, which are: ((~state) & group) */
-  fio_atomic_and(lock, ~((~state) & group));
+  /* store the acquired locks in `state`. */
+  state = ~((~state) & group);
+  /* release the locks we acquired */
+  fio_atomic_and(lock, state);
   return 1;
 }
 
@@ -806,8 +788,12 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
  * See `fio_trylock_group` for details.
  */
 FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
+  size_t i = 0;
   while (fio_trylock_group(lock, group)) {
-    FIO_THREAD_RESCHEDULE();
+    if ((i++ & 64)) {
+      i = 0;
+      FIO_THREAD_RESCHEDULE();
+    }
   }
 }
 
@@ -820,19 +806,12 @@ FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_full(fio_lock_i *lock) {
-  FIO_COMPILER_GUARD;
-  fio_lock_i old = fio_atomic_or(lock, ~(fio_lock_i)0);
-  if (!old)
-    return 0;
-  fio_atomic_and(lock, old);
-  return 1;
+  return fio_trylock_group(lock, (uint8_t)~0);
 }
 
 /** Busy waits for all sub lock to become available - not recommended. */
 FIO_IFUNC void fio_lock_full(fio_lock_i *lock) {
-  while (fio_trylock_full(lock)) {
-    FIO_THREAD_RESCHEDULE();
-  }
+  fio_lock_group(lock, (uint8_t)~0);
 }
 
 /** Unlocks all sub locks, no matter which thread owns the lock. */
@@ -844,18 +823,16 @@ FIO_IFUNC void fio_unlock_full(fio_lock_i *lock) { fio_atomic_and(lock, 0); }
  * Returns 0 on success and 1 on failure.
  */
 FIO_IFUNC uint8_t fio_trylock(fio_lock_i *lock) {
-  return fio_trylock_sublock(lock, 0);
+  return fio_trylock_group(lock, (uint8_t)1);
 }
 
 /** Busy waits for the default lock to become available - not recommended. */
-FIO_IFUNC void fio_lock(fio_lock_i *lock) {
-  while (fio_trylock(lock)) {
-    FIO_THREAD_RESCHEDULE();
-  }
-}
+FIO_IFUNC void fio_lock(fio_lock_i *lock) { fio_lock_group(lock, (uint8_t)1); }
 
 /** Unlocks the default lock, no matter which thread owns the lock. */
-FIO_IFUNC void fio_unlock(fio_lock_i *lock) { fio_unlock_sublock(lock, 0); }
+FIO_IFUNC void fio_unlock(fio_lock_i *lock) {
+  fio_unlock_group(lock, (uint8_t)1);
+}
 
 /** Returns 1 if the lock is locked, 0 otherwise. */
 FIO_IFUNC uint8_t FIO_NAME_BL(fio, locked)(fio_lock_i *lock) {
@@ -863,9 +840,9 @@ FIO_IFUNC uint8_t FIO_NAME_BL(fio, locked)(fio_lock_i *lock) {
 }
 
 /** Returns 1 if the lock is locked, 0 otherwise. */
-FIO_IFUNC uint8_t FIO_NAME_BL(fio, sublocked)(fio_lock_i *lock, uint8_t sub) {
-  uint8_t bit = 1U << (sub & 7);
-  return (((*lock) & bit) >> (sub & 7));
+FIO_IFUNC uint8_t FIO_NAME_BL(fio, group_locked)(fio_lock_i *lock,
+                                                 uint8_t group) {
+  return !!((*lock) & group);
 }
 
 /* *****************************************************************************
@@ -47988,8 +47965,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   fio_lock(&lock);
   FIO_ASSERT(fio_is_locked(&lock), "lock should be engaged (fio_lock)");
   for (uint8_t i = 1; i < 8; ++i) {
-    FIO_ASSERT(!fio_is_sublocked(&lock, i),
-               "sublock flagged, but wasn't engaged (%u - %p)",
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock flagged, but wasn't engaged (%u - %p)",
                (unsigned int)i,
                (void *)(uintptr_t)lock);
   }
@@ -47997,13 +47974,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
   FIO_ASSERT(!fio_is_locked(&lock), "lock should be released");
   lock = FIO_LOCK_INIT;
   for (size_t i = 0; i < 8; ++i) {
-    FIO_ASSERT(!fio_is_sublocked(&lock, i),
-               "sublock should be initialized in unlocked state");
-    FIO_ASSERT(!fio_trylock_sublock(&lock, i),
-               "fio_trylock_sublock should succeed");
-    FIO_ASSERT(fio_trylock_sublock(&lock, i), "fio_trylock should fail");
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be initialized in unlocked state");
+    FIO_ASSERT(!fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock_group should succeed");
+    FIO_ASSERT(fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock should fail");
     FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "sub-lock %d should be engaged", i);
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "sub-lock %d should be engaged",
+               i);
     {
       uint8_t g =
           fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
@@ -48013,12 +47993,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atomics)(void) {
         fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
     }
     for (uint8_t j = 1; j < 8; ++j) {
-      FIO_ASSERT(i == j || !fio_is_sublocked(&lock, j),
-                 "another sublock was flagged, though it wasn't engaged");
+      FIO_ASSERT(i == j || !fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(j)),
+                 "another group lock was flagged, though it wasn't engaged");
     }
-    FIO_ASSERT(fio_is_sublocked(&lock, i), "lock should remain engaged");
-    fio_unlock_sublock(&lock, i);
-    FIO_ASSERT(!fio_is_sublocked(&lock, i), "sublock should be released");
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "lock should remain engaged");
+    fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(i));
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be released");
     FIO_ASSERT(!fio_trylock_full(&lock), "fio_trylock_full should succeed");
     fio_unlock_full(&lock);
     FIO_ASSERT(!lock, "fio_unlock_full should unlock all");
@@ -54521,14 +54503,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lock_speed)(void) {
           .name = "fio_lock      (spinlock)",
           .task = fio___lock_mytask_lock,
       },
-#ifdef H___FIO_LOCK2___H
-      {
-          .type_size = sizeof(fio_lock2_s),
-          .type_name = "fio_lock2_s",
-          .name = "fio_lock2 (pause/resume)",
-          .task = fio___lock_mytask_lock2,
-      },
-#endif
       {
           .type_size = sizeof(fio_thread_mutex_t),
           .type_name = "fio_thread_mutex_t",
