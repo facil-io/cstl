@@ -1427,10 +1427,8 @@ A spinlock type based on a volatile unsigned char.
 
 **Note**: the spinlock contains one main / default lock (`sub == 0`) and 7 sub-locks (`sub >= 1 && sub <= 7`), which could be managed:
 
-- Separately: using the `fio_lock_sublock`, `fio_trylock_sublock` and `fio_unlock_sublock` functions.
-- Jointly: using the `fio_trylock_group`, `fio_lock_group` and `fio_unlock_group` functions.
+- Separately / Jointly: using the `fio_trylock_group`, `fio_lock_group` and `fio_unlock_group` functions.
 - Collectively: using the `fio_trylock_full`, `fio_lock_full` and `fio_unlock_full` functions.
-
 
 #### `fio_lock(fio_lock_i *)`
 
@@ -1447,22 +1445,6 @@ Unlocks the default lock (sub-lock `0`), no matter which thread owns the lock.
 #### `fio_is_locked(fio_lock_i *)`
 
 Returns 1 if the (main) lock is engaged. Otherwise returns 0.
-
-#### `fio_lock_sublock(fio_lock_i *, uint8_t sub)`
-
-Busy waits for a sub-lock to become available.
-
-#### `fio_trylock_sublock(fio_lock_i *, uint8_t sub)`
-
-Attempts to acquire the sub-lock. Returns 0 on success and 1 on failure.
-
-#### `fio_unlock_sublock(fio_lock_i *, uint8_t sub)`
-
-Unlocks the sub-lock, no matter which thread owns the lock.
-
-#### `fio_is_sublocked(fio_lock_i *, uint8_t sub)`
-
-Returns 1 if the specified sub-lock is engaged. Otherwise returns 0.
 
 #### `uint8_t fio_trylock_group(fio_lock_i *lock, const uint8_t group)`
 
@@ -1491,6 +1473,10 @@ See `fio_trylock_group` for details.
 #### `void fio_unlock_group(fio_lock_i *lock, uint8_t group)`
 
 Unlocks a sub-lock group, no matter which thread owns which sub-lock.
+
+#### `fio_is_group_locked(fio_lock_i *, uint8_t group)`
+
+Returns 1 if the specified group-lock is engaged. Otherwise returns 0.
 
 #### `fio_trylock_full(fio_lock_i *lock)`
 

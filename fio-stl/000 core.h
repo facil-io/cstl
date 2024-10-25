@@ -718,6 +718,9 @@ Spin-Locks
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
 typedef volatile unsigned char fio_lock_i;
 
+#ifndef FIO___LOCK_RESCHDULE_EVERY_LOG
+#define FIO___LOCK_RESCHDULE_EVERY_LOG 8
+#endif
 /**
  * Tries to lock a group of sublocks.
  *
@@ -753,7 +756,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
 FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
   size_t i = 0;
   while (fio_trylock_group(lock, group)) {
-    if ((i++ & 64)) {
+    if ((i++ & (1U << FIO___LOCK_RESCHDULE_EVERY_LOG))) {
       i = 0;
       FIO_THREAD_RESCHEDULE();
     }
