@@ -90,6 +90,12 @@ HTTP Handle Settings
 #ifndef FIO_HTTP_LOG_X_REQUEST_START
 #define FIO_HTTP_LOG_X_REQUEST_START 1
 #endif
+
+#ifndef FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+/** If true, the HTTP handle will copy input header names to lower case. */
+#define FIO_HTTP_ENFORCE_LOWERCASE_HEADERS 0
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -875,7 +881,21 @@ FIO_IFUNC int64_t fio_http_get_timestump(void) {
 }
 #endif
 
+/* date/time string caching for HTTP date header */
 FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
+  static char date_buf[128];
+  static size_t date_len;
+  static uint64_t date_buf_val;
+  if (date_buf_val == now_in_seconds)
+    return FIO_STR_INFO2(date_buf, date_len);
+  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
+  date_buf[date_len] = 0;
+  date_buf_val = now_in_seconds;
+  return FIO_STR_INFO2(date_buf, date_len);
+}
+
+/* date/time string caching for HTTP logging */
+FIO_SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
   static char date_buf[128];
   static size_t date_len;
   static uint64_t date_buf_val;
@@ -1135,15 +1155,43 @@ Headers Maps
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio___http_sary_destroy)
 #include FIO_INCLUDE_FILE
 
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+#define FIO___HTTP_ENFORCE_LOWERCASE(var_name, inpute_var)                     \
+  FIO_STR_INFO_TMP_VAR(var_name, 4096);                                        \
+  fio___http_hmap_key_to_lower(&var_name, &inpute_var);
+
+/** Converts a Header key to lower-case */
+FIO_IFUNC void fio___http_hmap_key_to_lower(fio_str_info_s *t,
+                                            fio_str_info_s *k) {
+  if (k->len >= t->capa)
+    goto too_big;
+  for (size_t i = 0; i < k->len; ++i) {
+    uint8_t c = (uint8_t)k->buf[i];
+    c |= (uint8_t)(c >= 'A' || c <= 'Z') << 5;
+    t->buf[i] = c;
+  }
+  t->len = k->len;
+  return;
+too_big:
+  *t = *k;
+}
+
+#else
+#define FIO___HTTP_ENFORCE_LOWERCASE(var_name, inpute_var)                     \
+  fio_str_info_s var_name = inpute_var;
+#endif
+
 /** set `add` to positive to add multiple values or negative to overwrite. */
 FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
-                                              fio_str_info_s key,
+                                              fio_str_info_s key_input,
                                               fio_str_info_s val,
                                               int add) {
   fio_str_info_s r = {0};
-  fio___http_sary_s *o;
-  if (!key.buf || !key.len || !map)
+  if (!key_input.buf || !key_input.len || !map)
     return r;
+  /* make sure key is all lower-case? */
+  FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
+  fio___http_sary_s *o;
   if (!val.buf || !val.len)
     goto remove_key;
   o = fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
@@ -1179,9 +1227,10 @@ remove_key:
 }
 
 FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
-                                              fio_str_info_s key,
+                                              fio_str_info_s key_input,
                                               int32_t index) {
   fio_str_info_s r = {0};
+  FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
   fio___http_sary_s *a =
       fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
   if (!a)
@@ -2204,18 +2253,7 @@ A Response Payload
 ***************************************************************************** */
 
 /** ETag Helper */
-FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  if (!fio_http_etag_is_match(h))
-    return 0;
-  h->status = 304;
-  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
-                       FIO_STR_INFO2((char *)"content-length", 14),
-                       FIO_STR_INFO2((char *)"0", 1),
-                       -1);
-  h->controller->send_headers(h);
-  h->controller->on_finish(h);
-  return -1;
-}
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h);
 
 FIO_SFUNC int fio____http_write_done(fio_http_s *h,
                                      fio_http_write_args_s *args) {
@@ -2302,6 +2340,23 @@ handle_error:
     close(args.fd);
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
+}
+
+/** ETag Helper */
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
+  if (!fio_http_etag_is_match(h))
+    return 0;
+  h->status = 304;
+  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       FIO_STR_INFO0,
+                       -1);
+
+  h->controller->send_headers(h);
+  h->state |= FIO_HTTP_STATE_FINISHED;
+  h->writer = fio____http_write_done;
+  h->controller->on_finish(h);
+  return -1;
 }
 
 /* *****************************************************************************
@@ -2789,7 +2844,7 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
   uint64_t time_start, time_end, time_proxy = 0;
   time_start = h->received_at;
   time_end = fio_http_get_timestump();
-  fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
+  fio_str_info_s date = fio_http_log_time(time_end / FIO___HTTP_TIME_DIV);
   fio_string_write_s to_write[16] = {
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
@@ -2926,7 +2981,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                            (fio_buf2u64u("options") | 0x2020202020202020ULL)))
       goto file_not_found;
   }
-  rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
+  rt.len -= ((rt.len > 0) && (fnm.len > 0 && fnm.buf[0] == '/') &&
              (rt.buf[rt.len - 1] == '/' ||
               rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
   fio_string_write(&filename, NULL, rt.buf, rt.len);

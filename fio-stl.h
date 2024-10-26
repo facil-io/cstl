@@ -31403,8 +31403,8 @@ typedef struct {
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
 
-/* Generate ED25519 keypair */
-SFUNC fio_ed25519_s fio_ed25519_keypair(void);
+/* Generates a random ED25519 keypair. */
+SFUNC void fio_ed25519_keypair(fio_ed25519_s *keypair);
 
 /* Sign a message using ED25519 */
 SFUNC void fio_ed25519_sign(uint8_t *signature,
@@ -31432,13 +31432,17 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
+static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0x7FFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFED);
 /* Obfuscate or recover ED25519 keys to prevent easy memory scraping */
 FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   /* Generate a deterministic mask */
   uint64_t msk =
       k->public_key.u64[3] + (uint64_t)(uintptr_t)(void *)&fio_ed25519_keypair;
   /* XOR mask the private key */
-  k->private_key = fio_u512_cxor64(k->private_key, msk);
+  fio_u512_cxor64(&k->private_key, &k->private_key, msk);
   /* XOR mask the first 192 bits of the public key */
   k->public_key.u64[0] ^= msk;
   k->public_key.u64[1] ^= msk;
@@ -31533,10 +31537,13 @@ SFUNC fio_ed25519_s fio_ed25519_keypair(void) {
   keypair.private_key.u64[3] = fio_rand64();
   keypair.private_key = fio_sha512(keypair.private_key.u8, 32);
   fio___ed25519_clamp_on_key(keypair.private_key.u8);
-  /* Derive the public key */
-  fio___ed25519_mul(&keypair.public_key,
-                    &keypair.private_key,
-                    &FIO___ED25519_BASEPOINT);
+  /* TODO: Derive the public key */
+  fio_u256_mul(fio_u512 * result, const fio_u256 *a, const fio_u256 *b)
+      fio___ed25519_mul(&keypair.public_key,
+                        &keypair.private_key,
+                        &FIO___ED25519_BASEPOINT);
+  /* Maybe... */
+
   /* Mask data, so it's harder to scrape in case of a memory dump. */
   fio___ed25519_flip(&keypair);
   return keypair;
@@ -33611,6 +33618,8 @@ SFUNC void fio_touch(fio_s *io) {
  * NOTE: zero (`0`) is a valid return value meaning no data was available.
  */
 SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
+  if (!io)
+    return 0;
   ssize_t r = io->pr->io_functions.read(io->fd, buf, len, io->tls);
   if (r > 0) {
     fio_touch(io);
@@ -33716,25 +33725,31 @@ SFUNC void fio_close(fio_s *io) {
 
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
+  if (!io)
+    return;
   fio_atomic_or(&io->state, FIO___IO_STATE_CLOSING);
   if ((fio_atomic_and(&io->state, ~FIO___IO_STATE_OPEN) & FIO___IO_STATE_OPEN))
     fio_free2(io);
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO___IO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) {
+  if (!io)
+    return;
+  io->state |= FIO___IO_STATE_SUSPENDED;
+}
 
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_srv_unsuspend(fio_s *io) {
-  if ((fio_atomic_and(&io->state, ~FIO___IO_STATE_SUSPENDED) &
-       FIO___IO_STATE_SUSPENDED)) {
+  if (io && (fio_atomic_and(&io->state, ~FIO___IO_STATE_SUSPENDED) &
+             FIO___IO_STATE_SUSPENDED)) {
     fio___s_monitor_in(io);
   }
 }
 
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_srv_is_suspended(fio_s *io) {
-  return (io->state & FIO___IO_STATE_SUSPENDED);
+  return (io && io->state & FIO___IO_STATE_SUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */
@@ -37488,6 +37503,12 @@ HTTP Handle Settings
 #ifndef FIO_HTTP_LOG_X_REQUEST_START
 #define FIO_HTTP_LOG_X_REQUEST_START 1
 #endif
+
+#ifndef FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+/** If true, the HTTP handle will copy input header names to lower case. */
+#define FIO_HTTP_ENFORCE_LOWERCASE_HEADERS 0
+#endif
+
 /* *****************************************************************************
 HTTP Handle Type
 ***************************************************************************** */
@@ -38273,7 +38294,21 @@ FIO_IFUNC int64_t fio_http_get_timestump(void) {
 }
 #endif
 
+/* date/time string caching for HTTP date header */
 FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
+  static char date_buf[128];
+  static size_t date_len;
+  static uint64_t date_buf_val;
+  if (date_buf_val == now_in_seconds)
+    return FIO_STR_INFO2(date_buf, date_len);
+  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
+  date_buf[date_len] = 0;
+  date_buf_val = now_in_seconds;
+  return FIO_STR_INFO2(date_buf, date_len);
+}
+
+/* date/time string caching for HTTP logging */
+FIO_SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
   static char date_buf[128];
   static size_t date_len;
   static uint64_t date_buf_val;
@@ -38533,15 +38568,43 @@ Headers Maps
   fio_risky_hash((k).buf, (k).len, (uint64_t)(uintptr_t)fio___http_sary_destroy)
 #include FIO_INCLUDE_FILE
 
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+#define FIO___HTTP_ENFORCE_LOWERCASE(var_name, inpute_var)                     \
+  FIO_STR_INFO_TMP_VAR(var_name, 4096);                                        \
+  fio___http_hmap_key_to_lower(&var_name, &inpute_var);
+
+/** Converts a Header key to lower-case */
+FIO_IFUNC void fio___http_hmap_key_to_lower(fio_str_info_s *t,
+                                            fio_str_info_s *k) {
+  if (k->len >= t->capa)
+    goto too_big;
+  for (size_t i = 0; i < k->len; ++i) {
+    uint8_t c = (uint8_t)k->buf[i];
+    c |= (uint8_t)(c >= 'A' || c <= 'Z') << 5;
+    t->buf[i] = c;
+  }
+  t->len = k->len;
+  return;
+too_big:
+  *t = *k;
+}
+
+#else
+#define FIO___HTTP_ENFORCE_LOWERCASE(var_name, inpute_var)                     \
+  fio_str_info_s var_name = inpute_var;
+#endif
+
 /** set `add` to positive to add multiple values or negative to overwrite. */
 FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
-                                              fio_str_info_s key,
+                                              fio_str_info_s key_input,
                                               fio_str_info_s val,
                                               int add) {
   fio_str_info_s r = {0};
-  fio___http_sary_s *o;
-  if (!key.buf || !key.len || !map)
+  if (!key_input.buf || !key_input.len || !map)
     return r;
+  /* make sure key is all lower-case? */
+  FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
+  fio___http_sary_s *o;
   if (!val.buf || !val.len)
     goto remove_key;
   o = fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
@@ -38577,9 +38640,10 @@ remove_key:
 }
 
 FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
-                                              fio_str_info_s key,
+                                              fio_str_info_s key_input,
                                               int32_t index) {
   fio_str_info_s r = {0};
+  FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
   fio___http_sary_s *a =
       fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
   if (!a)
@@ -39602,18 +39666,7 @@ A Response Payload
 ***************************************************************************** */
 
 /** ETag Helper */
-FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
-  if (!fio_http_etag_is_match(h))
-    return 0;
-  h->status = 304;
-  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
-                       FIO_STR_INFO2((char *)"content-length", 14),
-                       FIO_STR_INFO2((char *)"0", 1),
-                       -1);
-  h->controller->send_headers(h);
-  h->controller->on_finish(h);
-  return -1;
-}
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h);
 
 FIO_SFUNC int fio____http_write_done(fio_http_s *h,
                                      fio_http_write_args_s *args) {
@@ -39700,6 +39753,23 @@ handle_error:
     close(args.fd);
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
+}
+
+/** ETag Helper */
+FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
+  if (!fio_http_etag_is_match(h))
+    return 0;
+  h->status = 304;
+  fio___http_hmap_set2(HTTP_HDR_RESPONSE(h),
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       FIO_STR_INFO0,
+                       -1);
+
+  h->controller->send_headers(h);
+  h->state |= FIO_HTTP_STATE_FINISHED;
+  h->writer = fio____http_write_done;
+  h->controller->on_finish(h);
+  return -1;
 }
 
 /* *****************************************************************************
@@ -40187,7 +40257,7 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
   uint64_t time_start, time_end, time_proxy = 0;
   time_start = h->received_at;
   time_end = fio_http_get_timestump();
-  fio_str_info_s date = fio_http_date(time_end / FIO___HTTP_TIME_DIV);
+  fio_str_info_s date = fio_http_log_time(time_end / FIO___HTTP_TIME_DIV);
   fio_string_write_s to_write[16] = {
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
@@ -40324,7 +40394,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                            (fio_buf2u64u("options") | 0x2020202020202020ULL)))
       goto file_not_found;
   }
-  rt.len -= ((rt.len > 0) && fnm.buf[0] == '/' &&
+  rt.len -= ((rt.len > 0) && (fnm.len > 0 && fnm.buf[0] == '/') &&
              (rt.buf[rt.len - 1] == '/' ||
               rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
   fio_string_write(&filename, NULL, rt.buf, rt.len);
@@ -43462,7 +43532,8 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
     goto upgraded;
-  /* once the function returns, `h` may be freed (auto-finish on free). */
+  /* once the function returns, `h` may be freed (auto-finish on free).
+   * so we must call this callback here (sync), no matter the thread */
   c->state.http.on_finish(h);
   fio_srv_defer(fio___http_controller_http1_on_finish_task, (void *)(c), NULL);
   return;

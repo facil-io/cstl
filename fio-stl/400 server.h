@@ -2008,6 +2008,8 @@ SFUNC void fio_touch(fio_s *io) {
  * NOTE: zero (`0`) is a valid return value meaning no data was available.
  */
 SFUNC size_t fio_read(fio_s *io, void *buf, size_t len) {
+  if (!io)
+    return 0;
   ssize_t r = io->pr->io_functions.read(io->fd, buf, len, io->tls);
   if (r > 0) {
     fio_touch(io);
@@ -2113,25 +2115,31 @@ SFUNC void fio_close(fio_s *io) {
 
 /** Marks the IO for immediate closure. */
 SFUNC void fio_close_now(fio_s *io) {
+  if (!io)
+    return;
   fio_atomic_or(&io->state, FIO___IO_STATE_CLOSING);
   if ((fio_atomic_and(&io->state, ~FIO___IO_STATE_OPEN) & FIO___IO_STATE_OPEN))
     fio_free2(io);
 }
 
 /** Suspends future "on_data" events for the IO. */
-SFUNC void fio_srv_suspend(fio_s *io) { io->state |= FIO___IO_STATE_SUSPENDED; }
+SFUNC void fio_srv_suspend(fio_s *io) {
+  if (!io)
+    return;
+  io->state |= FIO___IO_STATE_SUSPENDED;
+}
 
 /** Listens for future "on_data" events related to the IO. */
 SFUNC void fio_srv_unsuspend(fio_s *io) {
-  if ((fio_atomic_and(&io->state, ~FIO___IO_STATE_SUSPENDED) &
-       FIO___IO_STATE_SUSPENDED)) {
+  if (io && (fio_atomic_and(&io->state, ~FIO___IO_STATE_SUSPENDED) &
+             FIO___IO_STATE_SUSPENDED)) {
     fio___s_monitor_in(io);
   }
 }
 
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_srv_is_suspended(fio_s *io) {
-  return (io->state & FIO___IO_STATE_SUSPENDED);
+  return (io && io->state & FIO___IO_STATE_SUSPENDED);
 }
 
 /** Returns 1 if the IO handle is marked as open. */

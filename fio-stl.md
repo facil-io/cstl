@@ -2585,7 +2585,7 @@ The following patterns are recognized:
 
 
 -------------------------------------------------------------------------------
-## iMap - a Mapped Array
+## iMap - an Index Mapped Array (Hash Map - Array Combo)
 
 The `FIO_TYPEDEF_IMAP_ARRAY` macro is one way to design a hash map and is **used internally** for some modules (to minimize dependencies or nested inclusions).
 

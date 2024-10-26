@@ -1570,7 +1570,8 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
     goto upgraded;
-  /* once the function returns, `h` may be freed (auto-finish on free). */
+  /* once the function returns, `h` may be freed (auto-finish on free).
+   * so we must call this callback here (sync), no matter the thread */
   c->state.http.on_finish(h);
   fio_srv_defer(fio___http_controller_http1_on_finish_task, (void *)(c), NULL);
   return;

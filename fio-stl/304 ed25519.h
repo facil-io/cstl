@@ -40,8 +40,8 @@ typedef struct {
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
 
-/* Generate ED25519 keypair */
-SFUNC fio_ed25519_s fio_ed25519_keypair(void);
+/* Generates a random ED25519 keypair. */
+SFUNC void fio_ed25519_keypair(fio_ed25519_s *keypair);
 
 /* Sign a message using ED25519 */
 SFUNC void fio_ed25519_sign(uint8_t *signature,
@@ -69,13 +69,17 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
+static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0x7FFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFFF,
+                                                      0xFFFFFFFFFFFFFFED);
 /* Obfuscate or recover ED25519 keys to prevent easy memory scraping */
 FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   /* Generate a deterministic mask */
   uint64_t msk =
       k->public_key.u64[3] + (uint64_t)(uintptr_t)(void *)&fio_ed25519_keypair;
   /* XOR mask the private key */
-  k->private_key = fio_u512_cxor64(k->private_key, msk);
+  fio_u512_cxor64(&k->private_key, &k->private_key, msk);
   /* XOR mask the first 192 bits of the public key */
   k->public_key.u64[0] ^= msk;
   k->public_key.u64[1] ^= msk;
@@ -170,10 +174,13 @@ SFUNC fio_ed25519_s fio_ed25519_keypair(void) {
   keypair.private_key.u64[3] = fio_rand64();
   keypair.private_key = fio_sha512(keypair.private_key.u8, 32);
   fio___ed25519_clamp_on_key(keypair.private_key.u8);
-  /* Derive the public key */
-  fio___ed25519_mul(&keypair.public_key,
-                    &keypair.private_key,
-                    &FIO___ED25519_BASEPOINT);
+  /* TODO: Derive the public key */
+  fio_u256_mul(fio_u512 * result, const fio_u256 *a, const fio_u256 *b)
+      fio___ed25519_mul(&keypair.public_key,
+                        &keypair.private_key,
+                        &FIO___ED25519_BASEPOINT);
+  /* Maybe... */
+
   /* Mask data, so it's harder to scrape in case of a memory dump. */
   fio___ed25519_flip(&keypair);
   return keypair;
