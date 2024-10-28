@@ -2747,7 +2747,7 @@ SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
   if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
     new_capa = (size_t)0x0FFFFFFFFULL + sizeof(bstr_m[0]);
-  if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])) - 1)
+  if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])))
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
       ((fio___bstr_meta_s *)dest->buf - 1),

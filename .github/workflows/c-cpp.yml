@@ -8,12 +8,17 @@ on:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
 
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
     - uses: actions/checkout@v3
+    - name: Setup ENV
+      run: |
+        echo "CI=false" >> "$GITHUB_ENV"
     - name: Test STL (debug) - no allocators
       run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/test
     - name: Test STL

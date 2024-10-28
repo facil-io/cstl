@@ -20720,7 +20720,7 @@ SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
   if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
     new_capa = (size_t)0x0FFFFFFFFULL + sizeof(bstr_m[0]);
-  if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])) - 1)
+  if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])))
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(
       ((fio___bstr_meta_s *)dest->buf - 1),
@@ -32895,7 +32895,8 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
 
 FIO_IFUNC void fio___s_monitor_in(fio_s *io) {
   if ((fio_atomic_or(&io->pflags, FIO___IO_STATE_POLLIN_SET) &
-       FIO___IO_STATE_POLLIN_SET) == FIO___IO_STATE_POLLIN_SET)
+       (FIO___IO_STATE_POLLIN_SET | FIO___IO_STATE_SUSPENDED |
+        FIO___IO_STATE_THROTTLED | FIO___IO_STATE_CLOSING)))
     return;
   fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
 }

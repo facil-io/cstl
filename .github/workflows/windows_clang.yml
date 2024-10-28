@@ -8,6 +8,8 @@ on:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
 
     runs-on: windows-latest
     timeout-minutes: 30
@@ -17,6 +19,9 @@ jobs:
     - uses: egor-tensin/setup-clang@v1
       with:
         platform: x64
+    - name: Setup ENV
+      run: |
+        echo "CI=false" >> "$GITHUB_ENV"
     - name: Test No-Op (debug)
       run: clang -O0 -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && ./noop.exe
     - name: Test STL (debug) - no allocators
