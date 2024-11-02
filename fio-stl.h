@@ -20095,8 +20095,8 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
     *s++ = (0xFF & (val >> (bits - 8)));
     bits -= 8;
   }
-  if (bits) { /* letfover should we validate padding with `=`? */
-    *s++ = 0xFF & (val << (8 - bits));
+  if (bits) { /* letfover bits considered padding */
+    // *s++ = 0xFF & (val << (8 - bits));
   }
   dest->len = (size_t)(s - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
