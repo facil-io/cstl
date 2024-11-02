@@ -1633,8 +1633,7 @@ FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   c->suspend = 0;
   if (c->len)
     fio___websocket_process_data(c->io, c);
-  if (!c->suspend)
-    fio_srv_unsuspend(c->io);
+  fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   fio___http_connection_free(c);
   (void)ignr_;

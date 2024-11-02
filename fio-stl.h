@@ -33151,10 +33151,13 @@ FIO_SFUNC void fio_s_init(fio_s *io) {
 }
 
 FIO_IFUNC void fio___s_monitor_in(fio_s *io) {
-  if ((fio_atomic_or(&io->pflags, FIO___IO_STATE_POLLIN_SET) &
-       (FIO___IO_STATE_POLLIN_SET | FIO___IO_STATE_SUSPENDED |
-        FIO___IO_STATE_THROTTLED | FIO___IO_STATE_CLOSING)))
+  if (io->state & (FIO___IO_STATE_SUSPENDED | FIO___IO_STATE_THROTTLED |
+                   FIO___IO_STATE_CLOSING))
     return;
+  if ((fio_atomic_or(&io->pflags, FIO___IO_STATE_POLLIN_SET) &
+       FIO___IO_STATE_POLLIN_SET)) {
+    return;
+  }
   fio_poll_monitor(&fio___srvdata.poll_data, io->fd, (void *)io, POLLIN);
 }
 FIO_IFUNC void fio___s_monitor_out(fio_s *io) {
@@ -33410,9 +33413,7 @@ static void fio___srv_poll_on_data(void *io_, void *ignr_) {
   if (io->state == FIO___IO_STATE_OPEN) {
     /* this also tests for the suspended / throttled / closing flags */
     io->pr->on_data(io);
-    if (io->state == FIO___IO_STATE_OPEN) {
-      fio___s_monitor_in(io);
-    }
+    fio___s_monitor_in(io);
   } else if ((io->state & FIO___IO_STATE_OPEN)) {
     fio___s_monitor_out(io);
   }
@@ -43853,8 +43854,7 @@ FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   c->suspend = 0;
   if (c->len)
     fio___websocket_process_data(c->io, c);
-  if (!c->suspend)
-    fio_srv_unsuspend(c->io);
+  fio_srv_unsuspend(c->io);
   fio_undup(c->io);
   fio___http_connection_free(c);
   (void)ignr_;
