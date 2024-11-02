@@ -244,6 +244,22 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
                                     size_t enscaped_len);
 
 /* *****************************************************************************
+String Base32 support
+***************************************************************************** */
+
+/** Writes data to String using base64 encoding. */
+SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *raw,
+                                     size_t raw_len);
+
+/** Writes decoded base64 data to String. */
+SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *encoded,
+                                     size_t encoded_len);
+
+/* *****************************************************************************
 String Base64 support
 ***************************************************************************** */
 
@@ -1994,6 +2010,120 @@ FIO_IFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
       .skip_diff_len = 127,
       .refuse_partial = 1,
   });
+}
+
+/* *****************************************************************************
+String Base32 support
+***************************************************************************** */
+
+/** Writes data to String using base64 encoding. */
+SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *raw,
+                                     size_t raw_len) {
+  const static uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  int r = 0;
+  size_t expected = ((raw_len * 8) / 5) + 1;
+  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
+    return (r = -1); /* no partial encoding. */
+  }
+  expected = dest->len;
+  size_t bits = 0, store = 0;
+  for (size_t i = 0; i < raw_len; ++i) {
+    store = (store << 8) | (size_t)((uint8_t *)raw)[i];
+    bits += 8;
+    if (bits < 25)
+      continue;
+    while (bits > 4) {
+      uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+      dest->buf[dest->len++] = val;
+      bits -= 5;
+    }
+  }
+  while (bits > 4) {
+    uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+    dest->buf[dest->len++] = val;
+    bits -= 5;
+  }
+  if (bits) {
+    // dest->buf[dest->len++] = base32ecncode[store & ((1U << bits) - 1)];
+    dest->buf[dest->len++] = base32ecncode[31U & (store << (5 - bits))];
+    dest->buf[dest->len] = '=';
+    dest->len += !!((dest->len - expected) % 5);
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Writes decoded base64 data to String. */
+SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *encoded,
+                                     size_t encoded_len) {
+  /* ABCDEF6HIJK3MN6PQRSTUV6XYZ234567
+ a = [];
+ 256.times { a << 255 }
+ b = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes
+ b.length.times {|i| a[b[i]] = i }
+ b = "abcdefghijklmnopqrstuvwxyz234567".bytes
+ b.length.times {|i| a[b[i]] = i }
+ b = " \r\n\t\b".bytes
+ b.length.times {|i| a[b[i]] = 32 }
+ a.map! {|n| n.to_s 10 }
+ puts "const static uint8_t base32decode[256] = { #{a.join(", ") } }; "
+*/
+  const static uint8_t base32decode[256] = {
+      255, 255, 255, 255, 255, 255, 255, 255, 32,  32,  32,  255, 255, 32,  255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 32,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 26,  27,  28,  29,  30,  31,  255, 255, 255, 255,
+      255, 255, 255, 255, 255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,
+      10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,
+      25,  255, 255, 255, 255, 255, 255, 0,   1,   2,   3,   4,   5,   6,   7,
+      8,   9,   10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,
+      23,  24,  25,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255};
+  int r = 0;
+  size_t expected = ((encoded_len * 5) / 8) + 1;
+  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
+    return (r = -1); /* no partial encoding. */
+  }
+  size_t val = 0;
+  size_t bits = 0;
+  uint8_t *s = (uint8_t *)dest->buf + dest->len;
+  for (size_t i = 0; i < encoded_len; ++i) {
+    size_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
+    if (dec == 32)
+      continue;
+    if (dec > 31)
+      break;
+    bits += 5;
+    val = (val << 5) | dec;
+    if (bits < 40)
+      continue;
+    do {
+      *s++ = (0xFF & (val >> (bits - 8)));
+      bits -= 8;
+    } while (bits > 7);
+  }
+  while (bits > 7) {
+    *s++ = (0xFF & (val >> (bits - 8)));
+    bits -= 8;
+  }
+  if (bits) { /* letfover should we validate padding with `=`? */
+    *s++ = 0xFF & (val << (8 - bits));
+  }
+  dest->len = (size_t)(s - (uint8_t *)dest->buf);
+  dest->buf[dest->len] = 0;
+  return r;
 }
 
 /* *****************************************************************************

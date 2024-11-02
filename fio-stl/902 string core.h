@@ -313,7 +313,48 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "Base64 round-trip failed:\n %s",
                decoded.buf);
   }
-  { /* testing Base64 Support */
+  { /* testing Base32 Support */
+    fprintf(stderr, "* Testing Base32 encoding / decoding.\n");
+    char mem[2048];
+    fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
+    fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
+    fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 512);
+    fio_string_write(&original,
+                     NULL,
+                     "Hello World, this is the voice of peace:)",
+                     41);
+    for (int i = 0; i < 256; ++i) {
+      uint8_t c = i;
+      FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
+                 "write returned an error");
+    }
+    FIO_ASSERT(
+        !fio_string_write_base32enc(&encoded, NULL, original.buf, original.len),
+        "base32 write escape returned an error");
+    FIO_ASSERT(
+        !fio_string_write_base32dec(&decoded, NULL, encoded.buf, encoded.len),
+        "base32 write unescape returned an error");
+
+    FIO_ASSERT(encoded.len, "Base32 encoding failed");
+    FIO_ASSERT(decoded.len < encoded.len,
+               "Base32 decoding failed:\n%s",
+               encoded.buf);
+    FIO_ASSERT(original.len == decoded.len,
+               "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
+               original.len,
+               decoded.len,
+               decoded.len,
+               encoded.len,
+               decoded.buf);
+    FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
+               "Base32 round-trip failed: (%zu vs. %zu bytes, encoded using "
+               "%zu bytes)\n %s",
+               original.len,
+               decoded.len,
+               encoded.len,
+               decoded.buf);
+  }
+  { /* testing URL encoding Support */
     fprintf(stderr, "* Testing URL (percent) encoding / decoding.\n");
     char mem[2048];
     for (size_t i = 0; i < 256; ++i) {

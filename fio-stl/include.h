@@ -107,6 +107,10 @@
 
 #include "299 reference counter.h" /* required: pointer tagging cleanup is here */
 
+#ifdef FIO_CRYPTO_CORE
+#include "300 crypto core.h"
+#endif
+
 #ifdef FIO_SHA1
 #include "302 sha1.h"
 #endif

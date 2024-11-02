@@ -36,7 +36,7 @@ ED25519 API
 
 /** ED25519 Key Pair */
 typedef struct {
-  fio_u512 private_key; /* Private key (with extra internal storage) */
+  fio_u512 private_key; /* Private key (with extra internal storage?) */
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
 

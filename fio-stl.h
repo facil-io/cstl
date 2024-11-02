@@ -3731,6 +3731,10 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA2
 #endif
 
+#if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2)
+#undef FIO_CRYPTO_CORE
+#define FIO_CRYPTO_CORE
+#endif
 /* *****************************************************************************
 
 
@@ -18217,6 +18221,22 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *dest,
                                     size_t enscaped_len);
 
 /* *****************************************************************************
+String Base32 support
+***************************************************************************** */
+
+/** Writes data to String using base64 encoding. */
+SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *raw,
+                                     size_t raw_len);
+
+/** Writes decoded base64 data to String. */
+SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *encoded,
+                                     size_t encoded_len);
+
+/* *****************************************************************************
 String Base64 support
 ***************************************************************************** */
 
@@ -19967,6 +19987,120 @@ FIO_IFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
       .skip_diff_len = 127,
       .refuse_partial = 1,
   });
+}
+
+/* *****************************************************************************
+String Base32 support
+***************************************************************************** */
+
+/** Writes data to String using base64 encoding. */
+SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *raw,
+                                     size_t raw_len) {
+  const static uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  int r = 0;
+  size_t expected = ((raw_len * 8) / 5) + 1;
+  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
+    return (r = -1); /* no partial encoding. */
+  }
+  expected = dest->len;
+  size_t bits = 0, store = 0;
+  for (size_t i = 0; i < raw_len; ++i) {
+    store = (store << 8) | (size_t)((uint8_t *)raw)[i];
+    bits += 8;
+    if (bits < 25)
+      continue;
+    while (bits > 4) {
+      uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+      dest->buf[dest->len++] = val;
+      bits -= 5;
+    }
+  }
+  while (bits > 4) {
+    uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+    dest->buf[dest->len++] = val;
+    bits -= 5;
+  }
+  if (bits) {
+    // dest->buf[dest->len++] = base32ecncode[store & ((1U << bits) - 1)];
+    dest->buf[dest->len++] = base32ecncode[31U & (store << (5 - bits))];
+    dest->buf[dest->len] = '=';
+    dest->len += !!((dest->len - expected) % 5);
+  }
+  dest->buf[dest->len] = 0;
+  return r;
+}
+
+/** Writes decoded base64 data to String. */
+SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
+                                     fio_string_realloc_fn reallocate,
+                                     const void *encoded,
+                                     size_t encoded_len) {
+  /* ABCDEF6HIJK3MN6PQRSTUV6XYZ234567
+ a = [];
+ 256.times { a << 255 }
+ b = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes
+ b.length.times {|i| a[b[i]] = i }
+ b = "abcdefghijklmnopqrstuvwxyz234567".bytes
+ b.length.times {|i| a[b[i]] = i }
+ b = " \r\n\t\b".bytes
+ b.length.times {|i| a[b[i]] = 32 }
+ a.map! {|n| n.to_s 10 }
+ puts "const static uint8_t base32decode[256] = { #{a.join(", ") } }; "
+*/
+  const static uint8_t base32decode[256] = {
+      255, 255, 255, 255, 255, 255, 255, 255, 32,  32,  32,  255, 255, 32,  255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 32,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 26,  27,  28,  29,  30,  31,  255, 255, 255, 255,
+      255, 255, 255, 255, 255, 0,   1,   2,   3,   4,   5,   6,   7,   8,   9,
+      10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  24,
+      25,  255, 255, 255, 255, 255, 255, 0,   1,   2,   3,   4,   5,   6,   7,
+      8,   9,   10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,
+      23,  24,  25,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+      255};
+  int r = 0;
+  size_t expected = ((encoded_len * 5) / 8) + 1;
+  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
+    return (r = -1); /* no partial encoding. */
+  }
+  size_t val = 0;
+  size_t bits = 0;
+  uint8_t *s = (uint8_t *)dest->buf + dest->len;
+  for (size_t i = 0; i < encoded_len; ++i) {
+    size_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
+    if (dec == 32)
+      continue;
+    if (dec > 31)
+      break;
+    bits += 5;
+    val = (val << 5) | dec;
+    if (bits < 40)
+      continue;
+    do {
+      *s++ = (0xFF & (val >> (bits - 8)));
+      bits -= 8;
+    } while (bits > 7);
+  }
+  while (bits > 7) {
+    *s++ = (0xFF & (val >> (bits - 8)));
+    bits -= 8;
+  }
+  if (bits) { /* letfover should we validate padding with `=`? */
+    *s++ = 0xFF & (val << (8 - bits));
+  }
+  dest->len = (size_t)(s - (uint8_t *)dest->buf);
+  dest->buf[dest->len] = 0;
+  return r;
 }
 
 /* *****************************************************************************
@@ -30058,6 +30192,42 @@ Pointer Tagging Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_CRYPTO_CORE        /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                  A Template for New Types / Modules
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_CRYPTO_CORE) && !defined(H___FIO_CRYPTO_CORE___H)
+#define H___FIO_CRYPTO_CORE___H
+
+/* *****************************************************************************
+Module Implementation - inlined functions
+***************************************************************************** */
+
+/* *****************************************************************************
+Module Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_CRYPTO_CORE
+#endif /* FIO_CRYPTO_CORE */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_CHACHA             /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -30741,10 +30911,10 @@ typedef union {
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len);
 
-/** returns the digest length of SHA1 in bytes */
+/** Returns the digest length of SHA1 in bytes (20 bytes) */
 FIO_IFUNC size_t fio_sha1_len(void);
 
-/** returns the digest of a SHA1 object. */
+/** Returns the 20 Byte long digest of a SHA1 object. */
 FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s);
 
 /* *****************************************************************************
@@ -30974,6 +31144,93 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   return s;
 }
 
+/** HMAC-SHA1, resulting in a 20 byte authentication code. */
+SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len) {
+  fio_sha1_s inner FIO_ALIGN(16) = {.v =
+                                        {
+                                            0x67452301,
+                                            0xEFCDAB89,
+                                            0x98BADCFE,
+                                            0x10325476,
+                                            0xC3D2E1F0,
+                                        }},
+                   outer FIO_ALIGN(16) = {.v = {
+                                              0x67452301,
+                                              0xEFCDAB89,
+                                              0x98BADCFE,
+                                              0x10325476,
+                                              0xC3D2E1F0,
+                                          }};
+  fio_u512 v = fio_u512_init64(0), k = fio_u512_init64(0);
+  const uint8_t *buf = (const uint8_t *)msg;
+
+  /* copy key */
+  if (key_len > 64)
+    goto key_too_long;
+  if (key_len == 64)
+    fio_memcpy64(k.u8, key);
+  else
+    fio_memcpy63x(k.u8, key, key_len);
+  /* prepare inner key */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
+
+  /* hash inner key block */
+  fio___sha1_round512(inner.v, k.u32);
+  /* consume data */
+  for (size_t i = 63; i < msg_len; i += 64) {
+    fio_memcpy64(v.u8, buf);
+    fio___sha1_round512(inner.v, v.u32);
+    buf += 64;
+  }
+  /* finalize temporary hash */
+  if ((msg_len & 63)) {
+    v = fio_u512_init64(0);
+    fio_memcpy63x(v.u8, buf, msg_len);
+  }
+  v.u8[(msg_len & 63)] = 0x80;
+  if ((msg_len & 63) > 55) {
+    fio___sha1_round512(inner.v, v.u32);
+    v = fio_u512_init64(0);
+  }
+  msg_len += 64; /* add the 64 byte inner key to the length count */
+  msg_len <<= 3;
+  msg_len = fio_lton64(msg_len);
+  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFFUL);
+  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio___sha1_round512(inner.v, v.u32);
+  for (size_t i = 0; i < 5; ++i)
+    inner.v[i] = fio_ntol32(inner.v[i]);
+
+  /* switch key to outer key */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^=
+        ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
+
+  /* hash outer key block */
+  fio___sha1_round512(outer.v, k.u32);
+  /* hash inner (temporary) hash result and finalize */
+  v = fio_u512_init64(0);
+  for (size_t i = 0; i < 5; ++i)
+    v.u32[i] = inner.v[i];
+  v.u8[20] = 0x80;
+  msg_len = ((64U + 20U) << 3);
+  msg_len = fio_lton64(msg_len);
+  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFF);
+  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio___sha1_round512(outer.v, v.u32);
+  for (size_t i = 0; i < 5; ++i)
+    outer.v[i] = fio_ntol32(outer.v[i]);
+
+  return outer;
+
+key_too_long:
+  inner = fio_sha1(key, key_len);
+  return fio_sha1_hmac(inner.digest, 20, msg, msg_len);
+}
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
@@ -31399,7 +31656,7 @@ ED25519 API
 
 /** ED25519 Key Pair */
 typedef struct {
-  fio_u512 private_key; /* Private key (with extra internal storage) */
+  fio_u512 private_key; /* Private key (with extra internal storage?) */
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
 
@@ -52827,7 +53084,48 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                "Base64 round-trip failed:\n %s",
                decoded.buf);
   }
-  { /* testing Base64 Support */
+  { /* testing Base32 Support */
+    fprintf(stderr, "* Testing Base32 encoding / decoding.\n");
+    char mem[2048];
+    fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
+    fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
+    fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 512);
+    fio_string_write(&original,
+                     NULL,
+                     "Hello World, this is the voice of peace:)",
+                     41);
+    for (int i = 0; i < 256; ++i) {
+      uint8_t c = i;
+      FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
+                 "write returned an error");
+    }
+    FIO_ASSERT(
+        !fio_string_write_base32enc(&encoded, NULL, original.buf, original.len),
+        "base32 write escape returned an error");
+    FIO_ASSERT(
+        !fio_string_write_base32dec(&decoded, NULL, encoded.buf, encoded.len),
+        "base32 write unescape returned an error");
+
+    FIO_ASSERT(encoded.len, "Base32 encoding failed");
+    FIO_ASSERT(decoded.len < encoded.len,
+               "Base32 decoding failed:\n%s",
+               encoded.buf);
+    FIO_ASSERT(original.len == decoded.len,
+               "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
+               original.len,
+               decoded.len,
+               decoded.len,
+               encoded.len,
+               decoded.buf);
+    FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
+               "Base32 round-trip failed: (%zu vs. %zu bytes, encoded using "
+               "%zu bytes)\n %s",
+               original.len,
+               decoded.len,
+               encoded.len,
+               decoded.buf);
+  }
+  { /* testing URL encoding Support */
     fprintf(stderr, "* Testing URL (percent) encoding / decoding.\n");
     char mem[2048];
     for (size_t i = 0; i < 256; ++i) {
@@ -54976,6 +55274,10 @@ Finish testing segment
 #endif
 
 #include "299 reference counter.h" /* required: pointer tagging cleanup is here */
+
+#ifdef FIO_CRYPTO_CORE
+#include "300 crypto core.h"
+#endif
 
 #ifdef FIO_SHA1
 #include "302 sha1.h"

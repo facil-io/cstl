@@ -40,10 +40,10 @@ typedef union {
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len);
 
-/** returns the digest length of SHA1 in bytes */
+/** Returns the digest length of SHA1 in bytes (20 bytes) */
 FIO_IFUNC size_t fio_sha1_len(void);
 
-/** returns the digest of a SHA1 object. */
+/** Returns the 20 Byte long digest of a SHA1 object. */
 FIO_IFUNC uint8_t *fio_sha1_digest(fio_sha1_s *s);
 
 /* *****************************************************************************
@@ -273,6 +273,93 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
   return s;
 }
 
+/** HMAC-SHA1, resulting in a 20 byte authentication code. */
+SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len) {
+  fio_sha1_s inner FIO_ALIGN(16) = {.v =
+                                        {
+                                            0x67452301,
+                                            0xEFCDAB89,
+                                            0x98BADCFE,
+                                            0x10325476,
+                                            0xC3D2E1F0,
+                                        }},
+                   outer FIO_ALIGN(16) = {.v = {
+                                              0x67452301,
+                                              0xEFCDAB89,
+                                              0x98BADCFE,
+                                              0x10325476,
+                                              0xC3D2E1F0,
+                                          }};
+  fio_u512 v = fio_u512_init64(0), k = fio_u512_init64(0);
+  const uint8_t *buf = (const uint8_t *)msg;
+
+  /* copy key */
+  if (key_len > 64)
+    goto key_too_long;
+  if (key_len == 64)
+    fio_memcpy64(k.u8, key);
+  else
+    fio_memcpy63x(k.u8, key, key_len);
+  /* prepare inner key */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
+
+  /* hash inner key block */
+  fio___sha1_round512(inner.v, k.u32);
+  /* consume data */
+  for (size_t i = 63; i < msg_len; i += 64) {
+    fio_memcpy64(v.u8, buf);
+    fio___sha1_round512(inner.v, v.u32);
+    buf += 64;
+  }
+  /* finalize temporary hash */
+  if ((msg_len & 63)) {
+    v = fio_u512_init64(0);
+    fio_memcpy63x(v.u8, buf, msg_len);
+  }
+  v.u8[(msg_len & 63)] = 0x80;
+  if ((msg_len & 63) > 55) {
+    fio___sha1_round512(inner.v, v.u32);
+    v = fio_u512_init64(0);
+  }
+  msg_len += 64; /* add the 64 byte inner key to the length count */
+  msg_len <<= 3;
+  msg_len = fio_lton64(msg_len);
+  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFFUL);
+  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio___sha1_round512(inner.v, v.u32);
+  for (size_t i = 0; i < 5; ++i)
+    inner.v[i] = fio_ntol32(inner.v[i]);
+
+  /* switch key to outer key */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^=
+        ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
+
+  /* hash outer key block */
+  fio___sha1_round512(outer.v, k.u32);
+  /* hash inner (temporary) hash result and finalize */
+  v = fio_u512_init64(0);
+  for (size_t i = 0; i < 5; ++i)
+    v.u32[i] = inner.v[i];
+  v.u8[20] = 0x80;
+  msg_len = ((64U + 20U) << 3);
+  msg_len = fio_lton64(msg_len);
+  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFF);
+  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio___sha1_round512(outer.v, v.u32);
+  for (size_t i = 0; i < 5; ++i)
+    outer.v[i] = fio_ntol32(outer.v[i]);
+
+  return outer;
+
+key_too_long:
+  inner = fio_sha1(key, key_len);
+  return fio_sha1_hmac(inner.digest, 20, msg, msg_len);
+}
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */

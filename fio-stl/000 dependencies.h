@@ -359,6 +359,10 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA2
 #endif
 
+#if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2)
+#undef FIO_CRYPTO_CORE
+#define FIO_CRYPTO_CORE
+#endif
 /* *****************************************************************************
 
 
