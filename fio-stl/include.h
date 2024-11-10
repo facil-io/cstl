@@ -105,24 +105,28 @@
 #include "210 map2.h"
 #endif
 
-#include "299 reference counter.h" /* required: pointer tagging cleanup is here */
+#include "249 reference counter.h" /* required: pointer tagging cleanup is here */
+
+#if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "250 fiobj.h"
+#endif
 
 #ifdef FIO_CRYPTO_CORE
-#include "300 crypto core.h"
+#include "150 crypto core.h"
 #endif
 
 #ifdef FIO_SHA1
-#include "302 sha1.h"
+#include "152 sha1.h"
 #endif
 #ifdef FIO_SHA2
-#include "302 sha2.h"
+#include "152 sha2.h"
 #endif
 #ifdef FIO_CHACHA
-#include "302 chacha20poly1305.h"
+#include "152 chacha20poly1305.h"
 #endif
 
 #ifdef FIO_ED25519
-#include "304 ed25519.h"
+#include "154 ed25519.h"
 #endif
 
 #if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE)
@@ -149,10 +153,6 @@
 
 #if defined(FIO_HTTP) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "439 http.h"
-#endif
-
-#if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "500 fiobj.h"
 #endif
 
 #ifndef FIO___DEV___
