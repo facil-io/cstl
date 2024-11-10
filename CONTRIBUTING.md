@@ -85,15 +85,17 @@ These are the current numbering ranges:
 
 * 000-099: core features, ordered by priority and dependency. This may also include non-core helpers and parsers that require no memory allocation.
 
-* 100-198: non-template / core types and building blocks. This may also include parsers that require memory allocations.
+* 100-148: non-template / core types and building blocks. This may also include parsers that require memory allocations.
 
-* 200-298: template types – types that can be customized using macros, such as hash maps and dynamic arrays.
+* 150-198: cryptography and cryptographic tools - these should be considered as fallback elements when a cryptography library is missing.
 
-* 300-398: cryptography and cryptographic tools - these should be considered as fallback elements when a cryptography library is missing.
+* 200-248: template types – types that can be customized using macros, such as hash maps and dynamic arrays.
+
+* 250-298: `FIOBJ` types – types for use by the soft type `FIOBJ` system.
+
+* 301-398: to be decided.
 
 * 400-498: server, web and IO, such as HTTP, WebSockets, communication protocols, etc'.
-
-* 500: FIOBJ soft types.
 
 * 501-598: to be decided.
 
@@ -175,7 +177,7 @@ These are the features that have been requested so far. Even if any of them are 
 |-------------------|--------------------|-----------------------------------------------------|
 |       Pub/Sub     |                    |  Review / Polish / Rewrite
 |-------------------|--------------------|-----------------------------------------------------|
-|       ED25519     |                    |  
+|       ED25519/DH  |                    |  
 |-------------------|--------------------|-----------------------------------------------------|
 | FIO_PTR_TAG_VALID |                    |  implement pointer tag validation for all types.
 |-------------------|--------------------|-----------------------------------------------------|

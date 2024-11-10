@@ -26,13 +26,13 @@ The library in written and tested on POSIX systems. Windows support was added af
 
 Please note I cannot continually test the windows support as I avoid the OS... hence, Windows OS support should be considered unstable.
 
-## Server Toolbox lIbrary (STL) Overview
+## Server Toolbox Library (STL) Overview
 
-At the core of the [facil.io library](https://facil.io) is its powerful Server Toolbox lIbrary for C (and C++).
+At the core of the [facil.io library](https://facil.io) is its powerful Server Toolbox Library for C (and C++).
 
-The Server Toolbox lIbrary is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
+The Server Toolbox Library is a "swiss-army-knife" library, that uses MACROS to generate code for different common types, such as Hash Maps, Arrays, Linked Lists, Binary-Safe Strings, etc'.
 
-The [testable](#testing-the-library-fio_test_cstl) header library includes a Server Toolbox lIbrary for the following common types:
+The [testable](#testing-the-library-fio_test_cstl) header library includes a Server Toolbox Library for the following common types:
 
 * [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
 
@@ -45,7 +45,7 @@ The [testable](#testing-the-library-fio_test_cstl) header library includes a Ser
 * [Soft / Dynamic Types (FIOBJ)](#fiobj-soft-dynamic-types) - defined by `FIO_FIOBJ`
 
 
-In addition, the core Server Toolbox lIbrary (STL) includes helpers for common tasks, such as:
+In addition, the core Server Toolbox Library (STL) includes helpers for common tasks, such as:
 
 * [Fast String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
@@ -73,7 +73,7 @@ In addition, the core Server Toolbox lIbrary (STL) includes helpers for common t
 
 ## Compilation Modes
 
-The Server Toolbox lIbrary types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
+The Server Toolbox Library types and functions could be compiled as either static or extern ("global"), either limiting their scope to a single C file (compilation unit) or exposing them throughout the program.
 
 ### Static Functions by Default
 
@@ -83,13 +83,13 @@ To change this behavior, `FIO_EXTERN` and `FIO_EXTERN_COMPLETE` could be used to
 
 #### `FIO_EXTERN`
 
-If defined, the the Server Toolbox lIbrary will generate non-static code.
+If defined, the the Server Toolbox Library will generate non-static code.
 
 If `FIO_EXTERN` is defined alone, only function declarations and inline functions will be generated.
 
 If `FIO_EXTERN_COMPLETE` is defined, the function definition (the implementation code) will also be generated.
 
-**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Server Toolbox lIbrary header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
+**Note**: the `FIO_EXTERN` will be **automatically undefined** each time the Server Toolbox Library header is included, **unless** the `FIO_EXTERN` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN` definition will remain in force until manually removed.
 
 For example, in the header (i.e., `mymem.h`), use:
 
@@ -113,7 +113,7 @@ Later, in the implementation file, use:
 
 When defined, this macro will force full code generation.
 
-**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Server Toolbox lIbrary header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
+**Note**: the `FIO_EXTERN_COMPLETE` will be **automatically undefined** each time the Server Toolbox Library header is included, **unless** the `FIO_EXTERN_COMPLETE` is defined with a **numerical** value other than `1` (a compiler default value in some cases), in which case the `FIO_EXTERN_COMPLETE` definition will remain in force until manually removed.
 
 -------------------------------------------------------------------------------
 
@@ -186,7 +186,7 @@ Defined the `fio_test_dynamic_types` and enables as many testing features as pos
 
 ## Version and Common Helper Macros
 
-The facil.io C STL (Server Toolbox lIbrary) offers a number of common helper macros that are also used internally. These are automatically included once the `fio-stl.h` is included.
+The facil.io C STL (Server Toolbox Library) offers a number of common helper macros that are also used internally. These are automatically included once the `fio-stl.h` is included.
 
 ### Version Macros
 
