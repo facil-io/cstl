@@ -7,6 +7,10 @@ Feel free to copy, use and enjoy according to the license provided.
 
 /* *****************************************************************************
 This is a simple chat server example, exploring pub/sub on plain text protocol.
+
+Connect to Chat Server using nc:
+
+      nc 127.0.0.1 3000
 ***************************************************************************** */
 
 #define FIO_MEMORY_DISABLE 1
@@ -68,7 +72,15 @@ FIO_IFUNC void client_free(client_s *c) {
 /** Called when a new connection is created and login process starts. */
 FIO_SFUNC void on_login_start(fio_s *io) {
   fio_udata_set(io, client_new());
-  fio_write(io, "Please enter a login handle (up to 30 characters long)\n", 55);
+  FIO_STR_INFO_TMP_VAR(node_msg, 1024);
+  fio_string_write2(
+      &node_msg,
+      NULL,
+      FIO_STRING_WRITE_STR1("Connecting to node: "),
+      FIO_STRING_WRITE_UNUM(getpid()),
+      FIO_STRING_WRITE_STR1(
+          "\nPlease enter a login handle (up to 30 characters long)\n"));
+  fio_write(io, node_msg.buf, node_msg.len);
   if (fio_cli_get_bool("-v"))
     FIO_LOG_INFO("(%d) %p connected", getpid(), (void *)io);
 }

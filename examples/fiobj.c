@@ -9,7 +9,7 @@ int main(void) {
   FIOBJ map = fiobj_hash_new();
 
   /* note that the ownership of `array` is placed inside the hash map. */
-  FIOBJ array = fiobj_hash_set3(map, "array", 5, fiobj_array_new());
+  FIOBJ array = fiobj_hash_set2(map, "array", 5, fiobj_array_new());
   for (size_t i = 0; i < 5; ++i) {
     /* add numerals to array */
     fiobj_array_unshift(array, fiobj_num_new(0 - (intptr_t)i));
