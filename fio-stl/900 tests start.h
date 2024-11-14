@@ -129,9 +129,10 @@ static int ary____test_was_destroyed = 0;
 /* *****************************************************************************
 Environment printout
 ***************************************************************************** */
-
+#ifndef FIO_PRINT_SIZE_OF
 #define FIO_PRINT_SIZE_OF(T)                                                   \
   fprintf(stderr, "\t%-19s%zu Bytes\n", #T, sizeof(T))
+#endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -175,7 +176,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   }
 #endif /* FIO_OS_POSIX */
 }
-#undef FIO_PRINT_SIZE_OF
 /* *****************************************************************************
 
 ***************************************************************************** */

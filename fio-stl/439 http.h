@@ -401,13 +401,6 @@ typedef enum fio___http_protocol_selector_e {
   FIO___HTTP_PROTOCOL_NONE
 } fio___http_protocol_selector_e;
 
-/** Returns a facil.io protocol object with the proper protocol callbacks. */
-FIO_IFUNC fio_protocol_s fio___http_protocol_get(fio___http_protocol_selector_e,
-                                                 int is_client);
-/** Returns an http controller object with the proper protocol callbacks. */
-FIO_IFUNC fio_http_controller_s
-fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
-
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
@@ -440,58 +433,12 @@ typedef struct {
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr);
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
 FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr);
-/* move init code here*/
+
 FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
     fio___http_protocol_s *p,
     const char *url,
     fio_http_settings_s s,
-    bool is_client) {
-  int should_free_tls = !s.tls;
-  FIO_ASSERT_ALLOC(p);
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
-    p->state[i].protocol =
-        fio___http_protocol_get((fio___http_protocol_selector_e)i, is_client);
-    p->state[i].controller =
-        fio___http_controller_get((fio___http_protocol_selector_e)i, is_client);
-  }
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
-    p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_SSE].protocol.timeout =
-      (unsigned)s.sse_timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  if (url) {
-    fio_url_s u = fio_url_parse(url, strlen(url));
-    s.tls = fio_tls_from_url(s.tls, u);
-    if (s.tls) {
-      s.tls = fio_tls_dup(s.tls);
-      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
-      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
-      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
-      if (!s.tls_io_func)
-        s.tls_io_func = &tmp_fn;
-      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
-        p->state[i].protocol.io_functions = *s.tls_io_func;
-      if (should_free_tls)
-        fio_tls_free(s.tls);
-    }
-  }
-  p->settings = s;
-  p->on_http_callback = is_client ? fio___http_on_http_client
-                        : (p->settings.public_folder.len)
-                            ? fio___http_on_http_with_public_folder
-                            : fio___http_on_http_direct;
-  p->settings.public_folder.buf = p->public_folder_buf;
-  p->queue = fio_srv_queue();
-
-  if (s.public_folder.len)
-    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
-  return p;
-}
+    bool is_client);
 /* *****************************************************************************
 HTTP Connection Container
 ***************************************************************************** */
@@ -2424,6 +2371,59 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   }
 }
 
+FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
+    fio___http_protocol_s *p,
+    const char *url,
+    fio_http_settings_s s,
+    bool is_client) {
+  int should_free_tls = !s.tls;
+  FIO_ASSERT_ALLOC(p);
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
+    p->state[i].protocol =
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, is_client);
+    // p->state[i].protocol.iomem_size =
+    //     sizeof(fio___http_connection_s) + s.max_line_len;
+    p->state[i].controller =
+        fio___http_controller_get((fio___http_protocol_selector_e)i, is_client);
+  }
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
+    p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_SSE].protocol.timeout =
+      (unsigned)s.sse_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  if (url) {
+    fio_url_s u = fio_url_parse(url, strlen(url));
+    s.tls = fio_tls_from_url(s.tls, u);
+    if (s.tls) {
+      s.tls = fio_tls_dup(s.tls);
+      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
+      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+      if (!s.tls_io_func)
+        s.tls_io_func = &tmp_fn;
+      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+        p->state[i].protocol.io_functions = *s.tls_io_func;
+      if (should_free_tls)
+        fio_tls_free(s.tls);
+    }
+  }
+  p->settings = s;
+  p->on_http_callback = is_client ? fio___http_on_http_client
+                        : (p->settings.public_folder.len)
+                            ? fio___http_on_http_with_public_folder
+                            : fio___http_on_http_direct;
+  p->settings.public_folder.buf = p->public_folder_buf;
+  p->queue = fio_srv_queue();
+
+  if (s.public_folder.len)
+    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
+  return p;
+}
 /* *****************************************************************************
 HTTP Helpers
 ***************************************************************************** */

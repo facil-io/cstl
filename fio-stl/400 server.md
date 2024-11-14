@@ -200,6 +200,26 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 
 Returns `NULL` on error. the `fio_s` pointer must NOT be used except within proper callbacks.
 
+#### `fio_iomem`
+
+```c
+void *fio_iomem(fio_s *io);
+```
+
+Returns the a pointer to the memory buffer required by the original protocol used when calling `fio_srv_attach_fd`.
+
+The memory is aligned on the system's native word size (8 bytes on 64 bit systems) and is always in blocks of 16 bytes.
+
+For example, if the `fio_protocol_s` defines `.iomem_size = 5`, than `fio_iomem` will be `16` bytes long.
+
+#### `fio_iomem_len`
+
+```c
+size_t fio_iomem_len(fio_s *io);
+```
+
+Returns the length of the allocated `fio_iomem` buffer.
+
 #### `fio_srv_connect`
 
 ```c

@@ -8541,6 +8541,8 @@ This allows reference objects structures to include a flexible array of type `FI
 
 The `members` variable passed to the constructor will also be available to the `FIO_REF_INIT` macro.
 
+**Note**: using `FIO_REF_FLEX_TYPE` limits the reference counter to 32 bits (rather then the native word size which **may** be 64 bits).
+
 #### `FIO_REF_METADATA`
 
 If defined, should be type that will be available as "meta data".
@@ -9929,6 +9931,26 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 * `tls` is a context for Transport Layer (Security) and can be used to redirect read/write operations, as set by the protocol.
 
 Returns `NULL` on error. the `fio_s` pointer must NOT be used except within proper callbacks.
+
+#### `fio_iomem`
+
+```c
+void *fio_iomem(fio_s *io);
+```
+
+Returns the a pointer to the memory buffer required by the original protocol used when calling `fio_srv_attach_fd`.
+
+The memory is aligned on the system's native word size (8 bytes on 64 bit systems) and is always in blocks of 16 bytes.
+
+For example, if the `fio_protocol_s` defines `.iomem_size = 5`, than `fio_iomem` will be `16` bytes long.
+
+#### `fio_iomem_len`
+
+```c
+size_t fio_iomem_len(fio_s *io);
+```
+
+Returns the length of the allocated `fio_iomem` buffer.
 
 #### `fio_srv_connect`
 

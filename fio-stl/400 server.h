@@ -231,6 +231,12 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
  */
 SFUNC fio_protocol_s *fio_protocol(fio_s *io);
 
+/** Returns the a pointer to the memory buffer required by the protocol. */
+IFUNC void *fio_iomem(fio_s *io);
+
+/** Returns the length of the `iomem` buffer. */
+IFUNC size_t fio_iomem_len(fio_s *io);
+
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
 FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata);
 
@@ -910,6 +916,7 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
     pr->io_functions.finish = io_fn.finish;
   if (!pr->io_functions.cleanup)
     pr->io_functions.cleanup = io_fn.cleanup;
+  pr->iomem_size = ((pr->iomem_size + 15ULL) & (~15ULL));
 }
 
 /* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -1252,7 +1259,6 @@ struct fio_s {
   uint16_t state;
   uint16_t pflags;
   int fd;
-  int iomem_size;
   /* TODO? peer address buffer */
 };
 
@@ -1328,6 +1334,14 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
+/** Returns the a pointer to the memory buffer required by the protocol. */
+IFUNC void *fio_iomem(fio_s *io) { return (void *)(io + 1); }
+
+/** Returns the length of the `iomem` buffer. */
+IFUNC size_t fio_iomem_len(fio_s *io) {
+  return (size_t)fio_metadata_flex_len(io);
+}
+
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
   fio_protocol_s *old = (fio_protocol_s *)old_;
@@ -1381,7 +1395,6 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
     goto error;
   io = fio_new2(protocol->iomem_size);
   FIO_ASSERT_ALLOC(io);
-  io->iomem_size = protocol->iomem_size;
   FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,

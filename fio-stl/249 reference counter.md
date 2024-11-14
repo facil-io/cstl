@@ -61,6 +61,8 @@ This allows reference objects structures to include a flexible array of type `FI
 
 The `members` variable passed to the constructor will also be available to the `FIO_REF_INIT` macro.
 
+**Note**: using `FIO_REF_FLEX_TYPE` limits the reference counter to 32 bits (rather then the native word size which **may** be 64 bits).
+
 #### `FIO_REF_METADATA`
 
 If defined, should be type that will be available as "meta data".

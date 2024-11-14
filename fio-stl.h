@@ -34386,6 +34386,12 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
  */
 SFUNC fio_protocol_s *fio_protocol(fio_s *io);
 
+/** Returns the a pointer to the memory buffer required by the protocol. */
+IFUNC void *fio_iomem(fio_s *io);
+
+/** Returns the length of the `iomem` buffer. */
+IFUNC size_t fio_iomem_len(fio_s *io);
+
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
 FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata);
 
@@ -35065,6 +35071,7 @@ FIO_SFUNC void fio___srv_init_protocol(fio_protocol_s *pr, _Bool has_tls) {
     pr->io_functions.finish = io_fn.finish;
   if (!pr->io_functions.cleanup)
     pr->io_functions.cleanup = io_fn.cleanup;
+  pr->iomem_size = ((pr->iomem_size + 15ULL) & (~15ULL));
 }
 
 /* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -35407,7 +35414,6 @@ struct fio_s {
   uint16_t state;
   uint16_t pflags;
   int fd;
-  int iomem_size;
   /* TODO? peer address buffer */
 };
 
@@ -35483,6 +35489,14 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
+/** Returns the a pointer to the memory buffer required by the protocol. */
+IFUNC void *fio_iomem(fio_s *io) { return (void *)(io + 1); }
+
+/** Returns the length of the `iomem` buffer. */
+IFUNC size_t fio_iomem_len(fio_s *io) {
+  return (size_t)fio_metadata_flex_len(io);
+}
+
 static void fio___protocol_set_task(void *io_, void *old_) {
   fio_s *io = (fio_s *)io_;
   fio_protocol_s *old = (fio_protocol_s *)old_;
@@ -35536,7 +35550,6 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
     goto error;
   io = fio_new2(protocol->iomem_size);
   FIO_ASSERT_ALLOC(io);
-  io->iomem_size = protocol->iomem_size;
   FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,
@@ -44926,13 +44939,6 @@ typedef enum fio___http_protocol_selector_e {
   FIO___HTTP_PROTOCOL_NONE
 } fio___http_protocol_selector_e;
 
-/** Returns a facil.io protocol object with the proper protocol callbacks. */
-FIO_IFUNC fio_protocol_s fio___http_protocol_get(fio___http_protocol_selector_e,
-                                                 int is_client);
-/** Returns an http controller object with the proper protocol callbacks. */
-FIO_IFUNC fio_http_controller_s
-fio___http_controller_get(fio___http_protocol_selector_e, int is_client);
-
 /* *****************************************************************************
 HTTP Protocol Container (vtable + settings storage)
 ***************************************************************************** */
@@ -44965,58 +44971,12 @@ typedef struct {
 FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr);
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
 FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr);
-/* move init code here*/
+
 FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
     fio___http_protocol_s *p,
     const char *url,
     fio_http_settings_s s,
-    bool is_client) {
-  int should_free_tls = !s.tls;
-  FIO_ASSERT_ALLOC(p);
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
-    p->state[i].protocol =
-        fio___http_protocol_get((fio___http_protocol_selector_e)i, is_client);
-    p->state[i].controller =
-        fio___http_controller_get((fio___http_protocol_selector_e)i, is_client);
-  }
-  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
-    p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_SSE].protocol.timeout =
-      (unsigned)s.sse_timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout =
-      (unsigned)s.timeout * 1000U;
-  if (url) {
-    fio_url_s u = fio_url_parse(url, strlen(url));
-    s.tls = fio_tls_from_url(s.tls, u);
-    if (s.tls) {
-      s.tls = fio_tls_dup(s.tls);
-      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
-      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
-      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
-      if (!s.tls_io_func)
-        s.tls_io_func = &tmp_fn;
-      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
-        p->state[i].protocol.io_functions = *s.tls_io_func;
-      if (should_free_tls)
-        fio_tls_free(s.tls);
-    }
-  }
-  p->settings = s;
-  p->on_http_callback = is_client ? fio___http_on_http_client
-                        : (p->settings.public_folder.len)
-                            ? fio___http_on_http_with_public_folder
-                            : fio___http_on_http_direct;
-  p->settings.public_folder.buf = p->public_folder_buf;
-  p->queue = fio_srv_queue();
-
-  if (s.public_folder.len)
-    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
-  return p;
-}
+    bool is_client);
 /* *****************************************************************************
 HTTP Connection Container
 ***************************************************************************** */
@@ -46949,6 +46909,59 @@ fio___http_controller_get(fio___http_protocol_selector_e s, int is_client) {
   }
 }
 
+FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
+    fio___http_protocol_s *p,
+    const char *url,
+    fio_http_settings_s s,
+    bool is_client) {
+  int should_free_tls = !s.tls;
+  FIO_ASSERT_ALLOC(p);
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i) {
+    p->state[i].protocol =
+        fio___http_protocol_get((fio___http_protocol_selector_e)i, is_client);
+    // p->state[i].protocol.iomem_size =
+    //     sizeof(fio___http_connection_s) + s.max_line_len;
+    p->state[i].controller =
+        fio___http_controller_get((fio___http_protocol_selector_e)i, is_client);
+  }
+  for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE; ++i)
+    p->state[i].protocol.timeout = (unsigned)s.ws_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_SSE].protocol.timeout =
+      (unsigned)s.sse_timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  p->state[FIO___HTTP_PROTOCOL_NONE].protocol.timeout =
+      (unsigned)s.timeout * 1000U;
+  if (url) {
+    fio_url_s u = fio_url_parse(url, strlen(url));
+    s.tls = fio_tls_from_url(s.tls, u);
+    if (s.tls) {
+      s.tls = fio_tls_dup(s.tls);
+      /* fio_tls_alpn_add(s.tls, "h2", fio___http_on_select_h2); // not yet */
+      // fio_tls_alpn_add(s.tls, "http/1.1", fio___http_on_select_h1);
+      fio_io_functions_s tmp_fn = fio_tls_default_io_functions(NULL);
+      if (!s.tls_io_func)
+        s.tls_io_func = &tmp_fn;
+      for (size_t i = 0; i < FIO___HTTP_PROTOCOL_NONE + 1; ++i)
+        p->state[i].protocol.io_functions = *s.tls_io_func;
+      if (should_free_tls)
+        fio_tls_free(s.tls);
+    }
+  }
+  p->settings = s;
+  p->on_http_callback = is_client ? fio___http_on_http_client
+                        : (p->settings.public_folder.len)
+                            ? fio___http_on_http_with_public_folder
+                            : fio___http_on_http_direct;
+  p->settings.public_folder.buf = p->public_folder_buf;
+  p->queue = fio_srv_queue();
+
+  if (s.public_folder.len)
+    FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
+  return p;
+}
 /* *****************************************************************************
 HTTP Helpers
 ***************************************************************************** */
@@ -47349,9 +47362,10 @@ static int ary____test_was_destroyed = 0;
 /* *****************************************************************************
 Environment printout
 ***************************************************************************** */
-
+#ifndef FIO_PRINT_SIZE_OF
 #define FIO_PRINT_SIZE_OF(T)                                                   \
   fprintf(stderr, "\t%-19s%zu Bytes\n", #T, sizeof(T))
+#endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   switch (sizeof(void *)) {
@@ -47395,7 +47409,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, type_sizes)(void) {
   }
 #endif /* FIO_OS_POSIX */
 }
-#undef FIO_PRINT_SIZE_OF
 /* *****************************************************************************
 
 ***************************************************************************** */
@@ -52208,6 +52221,8 @@ Test Server Modules
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
   fprintf(stderr, "* Testing fio_srv units (TODO).\n");
+  FIO_PRINT_SIZE_OF(fio_protocol_s);
+  FIO_PRINT_SIZE_OF(fio_s);
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)();
 }

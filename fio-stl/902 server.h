@@ -296,6 +296,8 @@ Test Server Modules
 
 FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
   fprintf(stderr, "* Testing fio_srv units (TODO).\n");
+  FIO_PRINT_SIZE_OF(fio_protocol_s);
+  FIO_PRINT_SIZE_OF(fio_s);
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)();
 }
