@@ -110,7 +110,7 @@ FIO_SFUNC void on_data_first_line(fio_s *io, char *name, size_t len) {
     goto error_name_too_short;
   if (len > 30)
     goto error_name_too_long;
-  client_s *c = fio_udata_get(io);
+  client_s *c = fio_udata(io);
   memcpy(c->name, name, len);
   c->name[len] = 0;
   c->name[31] = (char)len;
@@ -138,7 +138,7 @@ error_name_too_short:
 
 /** Manages chat messages */
 FIO_SFUNC void on_data_message_line(fio_s *io, char *msg, size_t len) {
-  client_s *c = fio_udata_get(io);
+  client_s *c = fio_udata(io);
   char *buf = fio_bstr_write2(NULL,
                               FIO_STRING_WRITE_STR2(c->name, c->name[31]),
                               FIO_STRING_WRITE_STR2(": ", 2),
@@ -163,7 +163,7 @@ FIO_IFUNC int on_data_read(fio_s *io) {
   size_t r = fio_read(io, buf, CHAT_MAX_MESSAGE_LEN);
   if (!r)
     return -1;
-  client_s *c = fio_udata_get(io);
+  client_s *c = fio_udata(io);
   fio_stream_add(&c->input, fio_stream_pack_data(buf, r, 0, 1, NULL));
   return 0;
 }
@@ -173,7 +173,7 @@ FIO_IFUNC int on_data_process_line(fio_s *io,
   char tmp[CHAT_MAX_MESSAGE_LEN];
   char *buf = tmp;
   size_t len = CHAT_MAX_MESSAGE_LEN;
-  client_s *c = fio_udata_get(io);
+  client_s *c = fio_udata(io);
   fio_stream_read(&c->input, &buf, &len);
   if (!len)
     return -1;

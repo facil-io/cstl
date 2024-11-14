@@ -131,8 +131,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
   struct kevent events[FIO_POLL_MAX_EVENTS] = {{0}};
 
   const struct timespec timeout = {
-      .tv_sec = (time_t)(timeout_ / 1024),
-      .tv_nsec = (suseconds_t)((timeout_ & (1023UL)) * 1000000)};
+      .tv_sec = (time_t)(timeout_ / 1000),
+      .tv_nsec = (suseconds_t)((timeout_ % 1000) * 1000000)};
   /* wait for events and handle them */
   int active_count =
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);

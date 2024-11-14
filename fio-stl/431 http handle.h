@@ -2971,6 +2971,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s fnm,
                                         size_t max_age) {
   int fd = -1;
+  size_t file_length = 0;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
@@ -3117,13 +3118,11 @@ accept_encoding_header_test_done:
                                    FIO_STR_INFO1((char *)"cache-control"),
                                    filename);
     }
-    filename.len = stt.st_size;
+    file_length = stt.st_size;
     filename.capa = 0;
     if (fio___http_response_etag_if_none_match(h))
       return 0;
   }
-  /* Note: at this point filename.len holds the length of the file */
-
   /* test for range requests. */
   {
     /* test / validate range requests */
@@ -3140,7 +3139,6 @@ accept_encoding_header_test_done:
     if (rng.len < 7 || fio_buf2u32u(rng.buf) != fio_buf2u32u("byte") ||
         fio_buf2u16u(rng.buf + 4) != fio_buf2u16u("s="))
       goto range_request_review_finished;
-    const size_t file_length = filename.len;
     char *ipos = rng.buf + 6;
     size_t start_range = fio_atol10u(&ipos);
     if (ipos == rng.buf + 6)
@@ -3153,10 +3151,12 @@ accept_encoding_header_test_done:
       goto range_request_review_finished;
     if (!end_range)
       end_range = file_length - 1;
-    if (start_range > end_range) {
+    if (start_range == (size_t)-1) {
       start_range = file_length - end_range;
       end_range = file_length - 1;
     }
+    if (start_range > end_range || end_range > file_length)
+      goto invalid_range;
     if (!start_range && end_range + 1 == file_length)
       goto range_request_review_finished;
     /* update response headers and info */
@@ -3174,7 +3174,7 @@ accept_encoding_header_test_done:
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"content-range", 13),
                                  filename);
-    filename.len = (end_range - start_range) + 1;
+    file_length = (end_range - start_range) + 1;
     filename.capa = start_range;
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"etag", 4),
@@ -3201,7 +3201,7 @@ range_request_review_finished:
                                  mime_type);
   { /* send response (avoid macro for C++ compatibility) */
     fio_http_write_args_s args = {
-        .len = filename.len,     /* now holds body length */
+        .len = file_length,
         .offset = filename.capa, /* now holds starting offset */
         .fd = fd,
         .finish = 1};
@@ -3223,6 +3223,18 @@ head_request:
     fio_http_write FIO_NOOP(h, args);
   }
   return 0;
+
+invalid_range:
+  filename.len = 0;
+  filename.capa = 1024;
+  fio_string_write2(&filename,
+                    NULL,
+                    FIO_STRING_WRITE_STR2("bytes */", 8),
+                    FIO_STRING_WRITE_UNUM(file_length));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-range", 13),
+                               filename);
+  return fio_http_send_error_response(h, 416);
 }
 
 /* *****************************************************************************

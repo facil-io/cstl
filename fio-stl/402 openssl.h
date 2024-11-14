@@ -429,8 +429,7 @@ FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_s *io) {
-  fio___openssl_context_s *ctx_parent =
-      (fio___openssl_context_s *)fio_tls_get(io);
+  fio___openssl_context_s *ctx_parent = (fio___openssl_context_s *)fio_tls(io);
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
@@ -441,7 +440,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
                   (int)fio_thread_getpid(),
                   (void *)io);
-  BIO *bio = BIO_new_socket(fio_fd_get(io), 0);
+  BIO *bio = BIO_new_socket(fio_fd(io), 0);
   SSL_set_bio(ssl, bio, bio);
   SSL_set_ex_data(ssl, 0, (void *)io);
   if (SSL_is_server(ssl))

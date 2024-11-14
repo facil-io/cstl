@@ -69,7 +69,12 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 typedef struct {
+#ifdef FIO_REF_FLEX_TYPE
+  volatile uint32_t ref;
+  uint32_t flx_size;
+#else
   volatile size_t ref;
+#endif
 #ifdef FIO_REF_METADATA
   FIO_REF_METADATA metadata;
 #endif
@@ -106,6 +111,11 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
                                  metadata)(FIO_REF_TYPE_PTR wrapped);
 #endif
 
+#ifdef FIO_REF_FLEX_TYPE
+/** The allocation length for the flex type */
+IFUNC uint32_t FIO_NAME(FIO_REF_NAME,
+                        metadata_flex_len)(FIO_REF_TYPE_PTR wrapped);
+#endif
 /* *****************************************************************************
 Inline Implementation
 ***************************************************************************** */
@@ -130,6 +140,19 @@ FIO_IFUNC size_t FIO_NAME(FIO_REF_NAME, references)(FIO_REF_TYPE_PTR wrapped_) {
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   return o->ref;
 }
+
+#ifdef FIO_REF_FLEX_TYPE
+/** The allocation length for the flex type */
+IFUNC uint32_t FIO_NAME(FIO_REF_NAME,
+                        metadata_flex_len)(FIO_REF_TYPE_PTR wrapped_) {
+  FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+  if (!wrapped || !wrapped_)
+    return 0;
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
+  return o->flx_size;
+}
+#endif
 
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
@@ -158,6 +181,9 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
     return (FIO_REF_TYPE_PTR)(o);
   FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
+#ifdef FIO_REF_FLEX_TYPE
+  o->flx_size = members;
+#endif
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
   FIO_REF_INIT((ret[0]));
@@ -181,7 +207,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
-  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
+  FIO_MEM_FREE_(o, sizeof(*o) + (o->flx_size * sizeof(FIO_REF_TYPE)));
 }
 
 #ifdef FIO_REF_METADATA

@@ -229,22 +229,22 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
  *
  * If `protocol` wasn't properly set, the pointer might be invalid.
  */
-SFUNC fio_protocol_s *fio_protocol_get(fio_s *io);
+SFUNC fio_protocol_s *fio_protocol(fio_s *io);
 
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
 FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata);
 
 /** Returns the `udata` pointer associated with the IO. */
-FIO_IFUNC void *fio_udata_get(fio_s *io);
+FIO_IFUNC void *fio_udata(fio_s *io);
 
 /** Associates a new `tls` pointer with the IO, returning the old `tls` */
 FIO_IFUNC void *fio_tls_set(fio_s *io, void *tls);
 
 /** Returns the `tls` pointer associated with the IO. */
-FIO_IFUNC void *fio_tls_get(fio_s *io);
+FIO_IFUNC void *fio_tls(fio_s *io);
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io);
+SFUNC int fio_fd(fio_s *io);
 
 /* Resets a socket's timeout counter. */
 SFUNC void fio_touch(fio_s *io);
@@ -484,6 +484,8 @@ struct fio_protocol_s {
    * Limited to FIO_SRV_TIMEOUT_MAX seconds. Zero (0) == FIO_SRV_TIMEOUT_MAX
    */
   uint32_t timeout;
+  /** The number of bytes to reserve for the fio_iomem buffer. */
+  uint32_t iomem_size;
 };
 
 /** Performs a task for each IO in the stated protocol. */
@@ -749,9 +751,7 @@ Simple Server Implementation - inlined static functions
     ((void **)io)[index] = property;                                           \
     return old;                                                                \
   }                                                                            \
-  FIO_IFUNC void *fio_##property##_get(fio_s *io) {                            \
-    return ((void **)io)[index];                                               \
-  }
+  FIO_IFUNC void *fio_##property(fio_s *io) { return ((void **)io)[index]; }
 FIO_SERVER_GETSET_FUNC(udata, 0)
 FIO_SERVER_GETSET_FUNC(tls, 1)
 
@@ -1087,7 +1087,7 @@ Wakeup Protocol
 
 FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
-  ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
+  ssize_t r = fio_sock_read(fio_fd(io), buf, 512);
   (void)r;
   FIO_LOG_DDEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
   fio___srvdata.wakeup_wait = 0;
@@ -1252,6 +1252,7 @@ struct fio_s {
   uint16_t state;
   uint16_t pflags;
   int fd;
+  int iomem_size;
   /* TODO? peer address buffer */
 };
 
@@ -1320,6 +1321,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_poll_forget(&fio___srvdata.poll_data, io->fd);
 }
 #define FIO_REF_NAME            fio
+#define FIO_REF_FLEX_TYPE       uint8_t
 #define FIO_REF_INIT(o)         fio_s_init(&(o))
 #define FIO_REF_DESTROY(o)      fio_s_destroy(&(o))
 #define FIO___RECURSIVE_INCLUDE 1
@@ -1353,6 +1355,9 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   fio_protocol_s *old = io->pr;
   if (pr == old)
     return NULL;
+  FIO_ASSERT(
+      fio_metadata_flex_len(io) < pr->iomem_size,
+      "new protocol memory requirements larger than allocated IO handle!");
   io->pr = pr;
   // fio_queue_push(fio___srv_tasks, fio___protocol_set_task, io, old);
   fio___protocol_set_task((void *)io, (void *)old);
@@ -1360,7 +1365,7 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
 }
 
 /** Returns a pointer to the current protocol object. */
-SFUNC fio_protocol_s *fio_protocol_get(fio_s *io) { return io->pr; }
+SFUNC fio_protocol_s *fio_protocol(fio_s *io) { return io->pr; }
 
 /* Attaches the socket in `fd` to the facio.io engine (reactor). */
 SFUNC fio_s *fio_srv_attach_fd(int fd,
@@ -1374,8 +1379,9 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
   fio___srv_init_protocol_test(protocol, !!tls);
   if (fd == -1)
     goto error;
-  io = fio_new2();
+  io = fio_new2(protocol->iomem_size);
   FIO_ASSERT_ALLOC(io);
+  io->iomem_size = protocol->iomem_size;
   FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,
@@ -1987,7 +1993,7 @@ IO API
 ***************************************************************************** */
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io) { return io ? io->fd : -1; }
+SFUNC int fio_fd(fio_s *io) { return io ? io->fd : -1; }
 
 FIO_SFUNC void fio_touch___task(void *io_, void *ignr_) {
   (void)ignr_;
@@ -2250,7 +2256,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   int fd;
   fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
   fio_srv_unsuspend(io);
-  while ((fd = fio_sock_accept(fio_fd_get(io), NULL, NULL)) != -1) {
+  while ((fd = fio_sock_accept(fio_fd(io), NULL, NULL)) != -1) {
     fio_srv_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
   fio_free2(io);
@@ -2451,7 +2457,7 @@ FIO_SFUNC void fio___connecting_on_close(void *udata) {
 FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
   if (!fio_srv_is_open(io))
     return;
-  fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
+  fio___connecting_s *c = (fio___connecting_s *)fio_udata(io);
   FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);

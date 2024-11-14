@@ -9971,10 +9971,10 @@ void *fio_udata_set(fio_s *io, void *udata);
 
 Associates a new `udata` pointer with the IO, returning the old `udata`
 
-#### `fio_udata_get`
+#### `fio_udata`
 
 ```c
-void *fio_udata_get(fio_s *io);
+void *fio_udata(fio_s *io);
 ```
 
 Returns the `udata` pointer associated with the IO.
@@ -10067,10 +10067,10 @@ void *fio_tls_set(fio_s *io, void *tls);
 
 Associates a new `tls` pointer with the IO, returning the old `tls`
 
-#### `fio_tls_get`
+#### `fio_tls`
 
 ```c
-void *fio_tls_get(fio_s *io);
+void *fio_tls(fio_s *io);
 ```
 
 Returns the `tls` pointer associated with the IO.
@@ -10083,10 +10083,10 @@ fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
 
 Sets a new protocol object (allows for dynamic protocol substitution). `NULL` is a valid "only-write" protocol.
 
-#### `fio_protocol_get`
+#### `fio_protocol`
 
 ```c
-fio_protocol_s *fio_protocol_get(fio_s *io);
+fio_protocol_s *fio_protocol(fio_s *io);
 ```
 
 Returns a pointer to the current protocol object.
@@ -10128,10 +10128,10 @@ void some_callback(fio_s *io) {
 }
 ```
 
-#### `fio_fd_get`
+#### `fio_fd`
 
 ```c
-int fio_fd_get(fio_s *io);
+int fio_fd(fio_s *io);
 ```
 
 Returns the socket file descriptor (fd) associated with the IO.
@@ -10281,6 +10281,8 @@ struct fio_protocol_s {
    * The zero value (0) is the same as the timeout limit (FIO_SRV_TIMEOUT_MAX).
    */
   uint32_t timeout;
+  /** The number of bytes to reserve for the fio_iomem buffer. */
+  uint32_t iomem_size;
 };
 ```
 
@@ -12505,62 +12507,62 @@ Running AppendedZeroesTest .......... PASS
 [[[ Speed Tests ]]]
 
 Bulk speed test - 262144-byte keys
-Alignment  7 - 17.892 bytes/cycle - 51190.53 MiB/sec @ 3 ghz
-Alignment  6 - 17.906 bytes/cycle - 51229.69 MiB/sec @ 3 ghz
-Alignment  5 - 17.900 bytes/cycle - 51211.34 MiB/sec @ 3 ghz
-Alignment  4 - 17.889 bytes/cycle - 51179.97 MiB/sec @ 3 ghz
-Alignment  3 - 17.901 bytes/cycle - 51215.52 MiB/sec @ 3 ghz
-Alignment  2 - 17.877 bytes/cycle - 51145.72 MiB/sec @ 3 ghz
-Alignment  1 - 17.857 bytes/cycle - 51089.71 MiB/sec @ 3 ghz
-Alignment  0 - 19.055 bytes/cycle - 54516.81 MiB/sec @ 3 ghz
-Average      - 18.035 bytes/cycle - 51597.41 MiB/sec @ 3 ghz
+Alignment  7 - 17.861 bytes/cycle - 51100.77 MiB/sec @ 3 ghz
+Alignment  6 - 17.833 bytes/cycle - 51019.28 MiB/sec @ 3 ghz
+Alignment  5 - 17.832 bytes/cycle - 51018.87 MiB/sec @ 3 ghz
+Alignment  4 - 17.853 bytes/cycle - 51077.60 MiB/sec @ 3 ghz
+Alignment  3 - 17.844 bytes/cycle - 51051.63 MiB/sec @ 3 ghz
+Alignment  2 - 17.854 bytes/cycle - 51080.37 MiB/sec @ 3 ghz
+Alignment  1 - 17.912 bytes/cycle - 51245.99 MiB/sec @ 3 ghz
+Alignment  0 - 19.064 bytes/cycle - 54541.55 MiB/sec @ 3 ghz
+Average      - 18.006 bytes/cycle - 51517.01 MiB/sec @ 3 ghz
 
 Small key speed test -    1-byte keys -    13.90 cycles/hash
-Small key speed test -    2-byte keys -    14.62 cycles/hash
-Small key speed test -    3-byte keys -    14.24 cycles/hash
-Small key speed test -    4-byte keys -    14.00 cycles/hash
-Small key speed test -    5-byte keys -    14.28 cycles/hash
-Small key speed test -    6-byte keys -    14.95 cycles/hash
+Small key speed test -    2-byte keys -    14.59 cycles/hash
+Small key speed test -    3-byte keys -    14.27 cycles/hash
+Small key speed test -    4-byte keys -    14.32 cycles/hash
+Small key speed test -    5-byte keys -    14.81 cycles/hash
+Small key speed test -    6-byte keys -    14.99 cycles/hash
 Small key speed test -    7-byte keys -    15.00 cycles/hash
 Small key speed test -    8-byte keys -    14.00 cycles/hash
-Small key speed test -    9-byte keys -    14.00 cycles/hash
+Small key speed test -    9-byte keys -    14.15 cycles/hash
 Small key speed test -   10-byte keys -    14.00 cycles/hash
 Small key speed test -   11-byte keys -    14.00 cycles/hash
 Small key speed test -   12-byte keys -    14.00 cycles/hash
 Small key speed test -   13-byte keys -    14.00 cycles/hash
-Small key speed test -   14-byte keys -    14.00 cycles/hash
+Small key speed test -   14-byte keys -    14.11 cycles/hash
 Small key speed test -   15-byte keys -    14.00 cycles/hash
-Small key speed test -   16-byte keys -    14.61 cycles/hash
-Small key speed test -   17-byte keys -    15.61 cycles/hash
-Small key speed test -   18-byte keys -    15.68 cycles/hash
-Small key speed test -   19-byte keys -    15.67 cycles/hash
-Small key speed test -   20-byte keys -    15.61 cycles/hash
-Small key speed test -   21-byte keys -    15.66 cycles/hash
-Small key speed test -   22-byte keys -    15.64 cycles/hash
-Small key speed test -   23-byte keys -    15.66 cycles/hash
-Small key speed test -   24-byte keys -    15.71 cycles/hash
-Small key speed test -   25-byte keys -    15.63 cycles/hash
-Small key speed test -   26-byte keys -    15.64 cycles/hash
-Small key speed test -   27-byte keys -    15.64 cycles/hash
-Small key speed test -   28-byte keys -    15.65 cycles/hash
-Small key speed test -   29-byte keys -    15.66 cycles/hash
-Small key speed test -   30-byte keys -    15.64 cycles/hash
-Small key speed test -   31-byte keys -    15.65 cycles/hash
-Average                                    14.914 cycles/hash
+Small key speed test -   16-byte keys -    14.72 cycles/hash
+Small key speed test -   17-byte keys -    15.74 cycles/hash
+Small key speed test -   18-byte keys -    15.62 cycles/hash
+Small key speed test -   19-byte keys -    15.60 cycles/hash
+Small key speed test -   20-byte keys -    15.66 cycles/hash
+Small key speed test -   21-byte keys -    15.83 cycles/hash
+Small key speed test -   22-byte keys -    15.69 cycles/hash
+Small key speed test -   23-byte keys -    15.73 cycles/hash
+Small key speed test -   24-byte keys -    15.63 cycles/hash
+Small key speed test -   25-byte keys -    15.67 cycles/hash
+Small key speed test -   26-byte keys -    15.66 cycles/hash
+Small key speed test -   27-byte keys -    15.76 cycles/hash
+Small key speed test -   28-byte keys -    15.67 cycles/hash
+Small key speed test -   29-byte keys -    15.68 cycles/hash
+Small key speed test -   30-byte keys -    15.65 cycles/hash
+Small key speed test -   31-byte keys -    15.64 cycles/hash
+Average                                    14.971 cycles/hash
 
 [[[ 'Hashmap' Speed Tests ]]]
 
 std::unordered_map
-Init std HashMapTest:     147.319 cycles/op (466569 inserts, 1% deletions)
-Running std HashMapTest:  88.414 cycles/op (1.1 stdv, found 461903)
+Init std HashMapTest:     148.866 cycles/op (466569 inserts, 1% deletions)
+Running std HashMapTest:  85.492 cycles/op (1.0 stdv, found 461903)
 
 greg7mdp/parallel-hashmap
-Init fast HashMapTest:    138.590 cycles/op (466569 inserts, 1% deletions)
-Running fast HashMapTest: 88.165 cycles/op (0.6 stdv, found 461903)
+Init fast HashMapTest:    158.746 cycles/op (466569 inserts, 1% deletions)
+Running fast HashMapTest: 74.728 cycles/op (2.5 stdv, found 461903)
 
 facil.io HashMap
-Init fast fio_map_s Test:    75.517 cycles/op (466569 inserts, 1% deletions)
-Running fast fio_map_s Test: 42.490 cycles/op (0.2 stdv, found 461903)
+Init fast fio_map_s Test:    62.909 cycles/op (466569 inserts, 1% deletions)
+Running fast fio_map_s Test: 32.332 cycles/op (0.2 stdv, found 461903)
  ....... PASS
 
 [[[ Avalanche Tests ]]]
@@ -13631,7 +13633,7 @@ Testing collisions (low  28-44 bits) - Worst is 41 bits: 261/255 (1.02x)
 
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
-Verification value is 0x00000001 - Testing took 685.179970 seconds
+Verification value is 0x00000001 - Testing took 681.305909 seconds
 -------------------------------------------------------------------------------
 ```
 

@@ -68,7 +68,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.08"
+#define FIO_VERSION_BUILD "alpha.09"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -246,7 +246,7 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
-#if 1 /* Allow Intrinsic / SIMD / Neon ? */
+#if !defined(DEBUG) /* Allow Intrinsic / SIMD / Neon ? */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
     (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
     __has_include("arm_acle.h") && __has_include("arm_neon.h")
@@ -2719,10 +2719,10 @@ typedef union {
   uint16x8_t x16[1];
   uint8x16_t x8[1];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(16)));
-  uint64_t x32 __attribute__((vector_size(16)));
-  uint64_t x16 __attribute__((vector_size(16)));
-  uint64_t x8 __attribute__((vector_size(16)));
+  uint64_t __attribute__((vector_size(16))) x64[1];
+  uint64_t __attribute__((vector_size(16))) x32[1];
+  uint64_t __attribute__((vector_size(16))) x16[1];
+  uint64_t __attribute__((vector_size(16))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[1];
@@ -2743,10 +2743,10 @@ typedef union {
   uint16x8_t x16[2];
   uint8x16_t x8[2];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(32)));
-  uint64_t x32 __attribute__((vector_size(32)));
-  uint64_t x16 __attribute__((vector_size(32)));
-  uint64_t x8 __attribute__((vector_size(32)));
+  uint64_t __attribute__((vector_size(32))) x64[1];
+  uint64_t __attribute__((vector_size(32))) x32[1];
+  uint64_t __attribute__((vector_size(32))) x16[1];
+  uint64_t __attribute__((vector_size(32))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[2];
@@ -2771,10 +2771,10 @@ typedef union {
   uint16x8_t x16[4];
   uint8x16_t x8[4];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(64)));
-  uint64_t x32 __attribute__((vector_size(64)));
-  uint64_t x16 __attribute__((vector_size(64)));
-  uint64_t x8 __attribute__((vector_size(64)));
+  uint64_t __attribute__((vector_size(64))) x64[1];
+  uint64_t __attribute__((vector_size(64))) x32[1];
+  uint64_t __attribute__((vector_size(64))) x16[1];
+  uint64_t __attribute__((vector_size(64))) x8[1];
 #endif
 } fio_u512 FIO_ALIGN(16);
 
@@ -2794,10 +2794,10 @@ typedef union {
   uint16x8_t x16[8];
   uint8x16_t x8[8];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(128)));
-  uint64_t x32 __attribute__((vector_size(128)));
-  uint64_t x16 __attribute__((vector_size(128)));
-  uint64_t x8 __attribute__((vector_size(128)));
+  uint64_t __attribute__((vector_size(128))) x64[1];
+  uint64_t __attribute__((vector_size(128))) x32[1];
+  uint64_t __attribute__((vector_size(128))) x16[1];
+  uint64_t __attribute__((vector_size(128))) x8[1];
 #endif
 } fio_u1024 FIO_ALIGN(16);
 
@@ -2818,10 +2818,10 @@ typedef union {
   uint16x8_t x16[16];
   uint8x16_t x8[16];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(256)));
-  uint64_t x32 __attribute__((vector_size(256)));
-  uint64_t x16 __attribute__((vector_size(256)));
-  uint64_t x8 __attribute__((vector_size(256)));
+  uint64_t __attribute__((vector_size(256))) x64[1];
+  uint64_t __attribute__((vector_size(256))) x32[1];
+  uint64_t __attribute__((vector_size(256))) x16[1];
+  uint64_t __attribute__((vector_size(256))) x8[1];
 #endif
 } fio_u2048 FIO_ALIGN(16);
 
@@ -2843,10 +2843,10 @@ typedef union {
   uint16x8_t x16[32];
   uint8x16_t x8[32];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(512)));
-  uint64_t x32 __attribute__((vector_size(512)));
-  uint64_t x16 __attribute__((vector_size(512)));
-  uint64_t x8 __attribute__((vector_size(512)));
+  uint64_t __attribute__((vector_size(512))) x64[1];
+  uint64_t __attribute__((vector_size(512))) x32[1];
+  uint64_t __attribute__((vector_size(512))) x16[1];
+  uint64_t __attribute__((vector_size(512))) x8[1];
 #endif
 } fio_u4096 FIO_ALIGN(16);
 
@@ -2980,7 +2980,7 @@ Vector Helpers - Vector Math Operations
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
          ++i__)                                                                \
-      (t).u##bits[i__] = op(a).u##bits[i__];                                   \
+      (t).u##bits[i__] = op((a).u##bits[i__]);                                 \
   } while (0)
 #endif /* FIO_HAS_UX */
 
@@ -2994,13 +2994,14 @@ Vector Helpers - Vector Math Operations
   } while (0)
 
 #define FIO___UXXX_DEF_OP(total_bits, bits, opnm, op)                          \
-  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(fio_u##total_bits *target,   \
-                                                  fio_u##total_bits *a,        \
-                                                  fio_u##total_bits *b) {      \
+  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(                             \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const fio_u##total_bits *b) {                                            \
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }                                                                            \
   FIO_IFUNC void fio_u##total_bits##_c##opnm##bits(fio_u##total_bits *target,  \
-                                                   fio_u##total_bits *a,       \
+                                                   const fio_u##total_bits *a, \
                                                    uint##bits##_t b) {         \
     FIO_MATH_UXXX_COP(((target)[0]), ((a)[0]), (b), bits, op);                 \
   }                                                                            \
@@ -3012,8 +3013,8 @@ Vector Helpers - Vector Math Operations
   }
 #define FIO___UXXX_DEF_OP2(total_bits, bits, opnm, op)                         \
   FIO_IFUNC void fio_u##total_bits##_##opnm(fio_u##total_bits *target,         \
-                                            fio_u##total_bits *a,              \
-                                            fio_u##total_bits *b) {            \
+                                            const fio_u##total_bits *a,        \
+                                            const fio_u##total_bits *b) {      \
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }
 
@@ -3034,7 +3035,7 @@ Vector Helpers - Vector Math Operations
   FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
   FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
   FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
-                                         fio_u##total_bits *a) {               \
+                                         const fio_u##total_bits *a) {         \
     FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
   }
 
@@ -3081,7 +3082,7 @@ Vector Helpers - Multi-Precision Math
     return borrow;                                                             \
   }                                                                            \
   /** Returns -1, 0, or 1 if a < b, a == b or a > a (respectively). */         \
-  FIO_MIFN int fio_u##bits##_cmp(fio_u##bits *a, fio_u##bits *b) {             \
+  FIO_MIFN int fio_u##bits##_cmp(const fio_u##bits *a, const fio_u##bits *b) { \
     unsigned is_eq = 1;                                                        \
     unsigned is_bigger = 0;                                                    \
     for (size_t i = (bits / 64); i--;) {                                       \
@@ -7049,7 +7050,6 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
       v[i + 4] += w[i];                                                        \
     }                                                                          \
   } while (0)
-
   /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
   uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
@@ -7093,7 +7093,6 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   v[0] = w[5] + fio_math_mulc64(w[4], w[6], v + 1);
   v[0] += v[1];
   return v[0];
-
 #undef FIO___RISKY_HASH_ROUND64
 }
 
@@ -16286,8 +16285,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
   struct kevent events[FIO_POLL_MAX_EVENTS] = {{0}};
 
   const struct timespec timeout = {
-      .tv_sec = (time_t)(timeout_ / 1024),
-      .tv_nsec = (suseconds_t)((timeout_ & (1023UL)) * 1000000)};
+      .tv_sec = (time_t)(timeout_ / 1000),
+      .tv_nsec = (suseconds_t)((timeout_ % 1000) * 1000000)};
   /* wait for events and handle them */
   int active_count =
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
@@ -31708,7 +31707,12 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 typedef struct {
+#ifdef FIO_REF_FLEX_TYPE
+  volatile uint32_t ref;
+  uint32_t flx_size;
+#else
   volatile size_t ref;
+#endif
 #ifdef FIO_REF_METADATA
   FIO_REF_METADATA metadata;
 #endif
@@ -31745,6 +31749,11 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
                                  metadata)(FIO_REF_TYPE_PTR wrapped);
 #endif
 
+#ifdef FIO_REF_FLEX_TYPE
+/** The allocation length for the flex type */
+IFUNC uint32_t FIO_NAME(FIO_REF_NAME,
+                        metadata_flex_len)(FIO_REF_TYPE_PTR wrapped);
+#endif
 /* *****************************************************************************
 Inline Implementation
 ***************************************************************************** */
@@ -31769,6 +31778,19 @@ FIO_IFUNC size_t FIO_NAME(FIO_REF_NAME, references)(FIO_REF_TYPE_PTR wrapped_) {
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   return o->ref;
 }
+
+#ifdef FIO_REF_FLEX_TYPE
+/** The allocation length for the flex type */
+IFUNC uint32_t FIO_NAME(FIO_REF_NAME,
+                        metadata_flex_len)(FIO_REF_TYPE_PTR wrapped_) {
+  FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+  if (!wrapped || !wrapped_)
+    return 0;
+  FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
+      ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
+  return o->flx_size;
+}
+#endif
 
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
@@ -31797,6 +31819,9 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
     return (FIO_REF_TYPE_PTR)(o);
   FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
+#ifdef FIO_REF_FLEX_TYPE
+  o->flx_size = members;
+#endif
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
   FIO_REF_INIT((ret[0]));
@@ -31820,7 +31845,7 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_DESTROY((wrapped[0]));
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
-  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
+  FIO_MEM_FREE_(o, sizeof(*o) + (o->flx_size * sizeof(FIO_REF_TYPE)));
 }
 
 #ifdef FIO_REF_METADATA
@@ -34359,22 +34384,22 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
  *
  * If `protocol` wasn't properly set, the pointer might be invalid.
  */
-SFUNC fio_protocol_s *fio_protocol_get(fio_s *io);
+SFUNC fio_protocol_s *fio_protocol(fio_s *io);
 
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
 FIO_IFUNC void *fio_udata_set(fio_s *io, void *udata);
 
 /** Returns the `udata` pointer associated with the IO. */
-FIO_IFUNC void *fio_udata_get(fio_s *io);
+FIO_IFUNC void *fio_udata(fio_s *io);
 
 /** Associates a new `tls` pointer with the IO, returning the old `tls` */
 FIO_IFUNC void *fio_tls_set(fio_s *io, void *tls);
 
 /** Returns the `tls` pointer associated with the IO. */
-FIO_IFUNC void *fio_tls_get(fio_s *io);
+FIO_IFUNC void *fio_tls(fio_s *io);
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io);
+SFUNC int fio_fd(fio_s *io);
 
 /* Resets a socket's timeout counter. */
 SFUNC void fio_touch(fio_s *io);
@@ -34614,6 +34639,8 @@ struct fio_protocol_s {
    * Limited to FIO_SRV_TIMEOUT_MAX seconds. Zero (0) == FIO_SRV_TIMEOUT_MAX
    */
   uint32_t timeout;
+  /** The number of bytes to reserve for the fio_iomem buffer. */
+  uint32_t iomem_size;
 };
 
 /** Performs a task for each IO in the stated protocol. */
@@ -34879,9 +34906,7 @@ Simple Server Implementation - inlined static functions
     ((void **)io)[index] = property;                                           \
     return old;                                                                \
   }                                                                            \
-  FIO_IFUNC void *fio_##property##_get(fio_s *io) {                            \
-    return ((void **)io)[index];                                               \
-  }
+  FIO_IFUNC void *fio_##property(fio_s *io) { return ((void **)io)[index]; }
 FIO_SERVER_GETSET_FUNC(udata, 0)
 FIO_SERVER_GETSET_FUNC(tls, 1)
 
@@ -35217,7 +35242,7 @@ Wakeup Protocol
 
 FIO_SFUNC void fio___srv_wakeup_cb(fio_s *io) {
   char buf[512];
-  ssize_t r = fio_sock_read(fio_fd_get(io), buf, 512);
+  ssize_t r = fio_sock_read(fio_fd(io), buf, 512);
   (void)r;
   FIO_LOG_DDEBUG2("(%d) fio___srv_wakeup called", fio___srvdata.pid);
   fio___srvdata.wakeup_wait = 0;
@@ -35382,6 +35407,7 @@ struct fio_s {
   uint16_t state;
   uint16_t pflags;
   int fd;
+  int iomem_size;
   /* TODO? peer address buffer */
 };
 
@@ -35450,6 +35476,7 @@ FIO_SFUNC void fio_s_destroy(fio_s *io) {
   fio_poll_forget(&fio___srvdata.poll_data, io->fd);
 }
 #define FIO_REF_NAME            fio
+#define FIO_REF_FLEX_TYPE       uint8_t
 #define FIO_REF_INIT(o)         fio_s_init(&(o))
 #define FIO_REF_DESTROY(o)      fio_s_destroy(&(o))
 #define FIO___RECURSIVE_INCLUDE 1
@@ -35483,6 +35510,9 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
   fio_protocol_s *old = io->pr;
   if (pr == old)
     return NULL;
+  FIO_ASSERT(
+      fio_metadata_flex_len(io) < pr->iomem_size,
+      "new protocol memory requirements larger than allocated IO handle!");
   io->pr = pr;
   // fio_queue_push(fio___srv_tasks, fio___protocol_set_task, io, old);
   fio___protocol_set_task((void *)io, (void *)old);
@@ -35490,7 +35520,7 @@ SFUNC fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *pr) {
 }
 
 /** Returns a pointer to the current protocol object. */
-SFUNC fio_protocol_s *fio_protocol_get(fio_s *io) { return io->pr; }
+SFUNC fio_protocol_s *fio_protocol(fio_s *io) { return io->pr; }
 
 /* Attaches the socket in `fd` to the facio.io engine (reactor). */
 SFUNC fio_s *fio_srv_attach_fd(int fd,
@@ -35504,8 +35534,9 @@ SFUNC fio_s *fio_srv_attach_fd(int fd,
   fio___srv_init_protocol_test(protocol, !!tls);
   if (fd == -1)
     goto error;
-  io = fio_new2();
+  io = fio_new2(protocol->iomem_size);
   FIO_ASSERT_ALLOC(io);
+  io->iomem_size = protocol->iomem_size;
   FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
                   fio___srvdata.pid,
                   fd,
@@ -36117,7 +36148,7 @@ IO API
 ***************************************************************************** */
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-SFUNC int fio_fd_get(fio_s *io) { return io ? io->fd : -1; }
+SFUNC int fio_fd(fio_s *io) { return io ? io->fd : -1; }
 
 FIO_SFUNC void fio_touch___task(void *io_, void *ignr_) {
   (void)ignr_;
@@ -36380,7 +36411,7 @@ static void fio___srv_listen_on_data_task(void *io_, void *ignr_) {
   int fd;
   fio___srv_listen_s *l = (fio___srv_listen_s *)(io->udata);
   fio_srv_unsuspend(io);
-  while ((fd = fio_sock_accept(fio_fd_get(io), NULL, NULL)) != -1) {
+  while ((fd = fio_sock_accept(fio_fd(io), NULL, NULL)) != -1) {
     fio_srv_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
   fio_free2(io);
@@ -36581,7 +36612,7 @@ FIO_SFUNC void fio___connecting_on_close(void *udata) {
 FIO_SFUNC void fio___connecting_on_ready(fio_s *io) {
   if (!fio_srv_is_open(io))
     return;
-  fio___connecting_s *c = (fio___connecting_s *)fio_udata_get(io);
+  fio___connecting_s *c = (fio___connecting_s *)fio_udata(io);
   FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  (int)fio___srvdata.pid,
                  c->url);
@@ -37592,8 +37623,7 @@ FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_s *io) {
-  fio___openssl_context_s *ctx_parent =
-      (fio___openssl_context_s *)fio_tls_get(io);
+  fio___openssl_context_s *ctx_parent = (fio___openssl_context_s *)fio_tls(io);
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
@@ -37604,7 +37634,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
                   (int)fio_thread_getpid(),
                   (void *)io);
-  BIO *bio = BIO_new_socket(fio_fd_get(io), 0);
+  BIO *bio = BIO_new_socket(fio_fd(io), 0);
   SSL_set_bio(ssl, bio, bio);
   SSL_set_ex_data(ssl, 0, (void *)io);
   if (SSL_is_server(ssl))
@@ -38195,7 +38225,7 @@ FIO_SFUNC void fio___subscription_mock_cb(fio_msg_s *msg) { (void)msg; }
 FIO_SFUNC void fio___subscription_call_protocol(fio_msg_s *msg) {
   if (!msg->io)
     return;
-  fio_protocol_s *p = fio_protocol_get(msg->io);
+  fio_protocol_s *p = fio_protocol(msg->io);
   FIO_ASSERT_DEBUG(p, "every IO object should have a protocol, always");
   p->on_pubsub(msg);
 }
@@ -39327,7 +39357,7 @@ is_special_message:
     return;
 
   case FIO___PUBSUB_IDENTIFY:
-    p = (fio___pubsub_message_parser_s *)fio_udata_get(m->data.io);
+    p = (fio___pubsub_message_parser_s *)fio_udata(m->data.io);
     if (p) {
       p->uuid[0] = m->data.id;
       p->uuid[1] = m->data.published;
@@ -39437,7 +39467,7 @@ FIO_IFUNC void fio___pubsub_message_parse(
     fio_s *io,
     void (*cb)(fio_s *, fio___pubsub_message_s *)) {
   fio___pubsub_message_parser_s *parser =
-      (fio___pubsub_message_parser_s *)fio_udata_get(io);
+      (fio___pubsub_message_parser_s *)fio_udata(io);
   if (!parser)
     return;
   size_t existing = parser->len;
@@ -39707,11 +39737,11 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
   fio_u512 u = fio___pubsub_broadcast_compose((last_hello = this_hello));
   struct sockaddr_in addr = (struct sockaddr_in){
       .sin_family = AF_INET,
-      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata_get(io)),
+      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata(io)),
       .sin_addr.s_addr = INADDR_BROADCAST, // inet_addr("255.255.255.255"),
   };
   FIO_LOG_DEBUG2("(%d) pub/sub sending broadcast.", fio_srv_pid());
-  sendto(fio_fd_get(io),
+  sendto(fio_fd(io),
          (const char *)u.u8,
          48,
          0,
@@ -39790,9 +39820,8 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                            .published = FIO___PUBSUB_POSTOFFICE.uuid.u64[1],
                            .is_json = FIO___PUBSUB_IDENTIFY});
 
-  while (
-      (len = recvfrom(fio_fd_get(io), (char *)buf, 128, 0, from, &from_len)) >
-      0) {
+  while ((len = recvfrom(fio_fd(io), (char *)buf, 128, 0, from, &from_len)) >
+         0) {
     if (len != 48) {
       FIO_LOG_WARNING(
           "(%d) pub/sub peer detection received invalid packet (%zu bytes)!",
@@ -39860,7 +39889,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
 
 FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_s *io) {
   int fd;
-  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
+  while ((fd = accept(fio_fd(io), NULL, NULL)) != -1) {
     FIO_LOG_DDEBUG2("accepting a cluster peer connection");
     fio_srv_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
   }
@@ -42906,6 +42935,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s fnm,
                                         size_t max_age) {
   int fd = -1;
+  size_t file_length = 0;
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
@@ -43052,13 +43082,11 @@ accept_encoding_header_test_done:
                                    FIO_STR_INFO1((char *)"cache-control"),
                                    filename);
     }
-    filename.len = stt.st_size;
+    file_length = stt.st_size;
     filename.capa = 0;
     if (fio___http_response_etag_if_none_match(h))
       return 0;
   }
-  /* Note: at this point filename.len holds the length of the file */
-
   /* test for range requests. */
   {
     /* test / validate range requests */
@@ -43075,7 +43103,6 @@ accept_encoding_header_test_done:
     if (rng.len < 7 || fio_buf2u32u(rng.buf) != fio_buf2u32u("byte") ||
         fio_buf2u16u(rng.buf + 4) != fio_buf2u16u("s="))
       goto range_request_review_finished;
-    const size_t file_length = filename.len;
     char *ipos = rng.buf + 6;
     size_t start_range = fio_atol10u(&ipos);
     if (ipos == rng.buf + 6)
@@ -43088,10 +43115,12 @@ accept_encoding_header_test_done:
       goto range_request_review_finished;
     if (!end_range)
       end_range = file_length - 1;
-    if (start_range > end_range) {
+    if (start_range == (size_t)-1) {
       start_range = file_length - end_range;
       end_range = file_length - 1;
     }
+    if (start_range > end_range || end_range > file_length)
+      goto invalid_range;
     if (!start_range && end_range + 1 == file_length)
       goto range_request_review_finished;
     /* update response headers and info */
@@ -43109,7 +43138,7 @@ accept_encoding_header_test_done:
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"content-range", 13),
                                  filename);
-    filename.len = (end_range - start_range) + 1;
+    file_length = (end_range - start_range) + 1;
     filename.capa = start_range;
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"etag", 4),
@@ -43136,7 +43165,7 @@ range_request_review_finished:
                                  mime_type);
   { /* send response (avoid macro for C++ compatibility) */
     fio_http_write_args_s args = {
-        .len = filename.len,     /* now holds body length */
+        .len = file_length,
         .offset = filename.capa, /* now holds starting offset */
         .fd = fd,
         .finish = 1};
@@ -43158,6 +43187,18 @@ head_request:
     fio_http_write FIO_NOOP(h, args);
   }
   return 0;
+
+invalid_range:
+  filename.len = 0;
+  filename.capa = 1024;
+  fio_string_write2(&filename,
+                    NULL,
+                    FIO_STRING_WRITE_STR2("bytes */", 8),
+                    FIO_STRING_WRITE_UNUM(file_length));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-range", 13),
+                               filename);
+  return fio_http_send_error_response(h, 416);
 }
 
 /* *****************************************************************************
@@ -45275,7 +45316,7 @@ websocket_accepted:
   FIO_LOG_DDEBUG2("(%d) Client %s upgrade complete for fd %d",
                   fio_srv_pid(),
                   (fio_http_is_websocket(h) ? "WebSocket" : "SSE"),
-                  fio_fd_get(c->io));
+                  fio_fd(c->io));
 
   fio_undup(c->io); /* fio_dup called by fio_http1_on_complete */
   c->suspend = 0;
@@ -45288,7 +45329,7 @@ ALPN Helpers
 
 FIO_SFUNC void fio___http_on_select_h1(fio_s *io) {
   FIO_LOG_DDEBUG2("TLS ALPN HTTP/1.1 selected for %p", io);
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   fio_protocol_set(
       io,
       &(FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings)
@@ -45428,7 +45469,8 @@ SFUNC fio_s *fio_http_connect FIO_NOOP(const char *url,
       .is_client = 1,
   };
   fio_http_controller_set(h, &p->state[FIO___HTTP_PROTOCOL_HTTP1].controller);
-  fio_http_udata_set(h, c->udata);
+  if (!fio_http_udata(h)) /* avoid overwriting existing `udata` if set */
+    fio_http_udata_set(h, c->udata);
   fio_http_cdata_set(h, fio___http_connection_dup(c));
   return fio_srv_connect(url,
                          .protocol =
@@ -45623,7 +45665,7 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_s *io) {
   fio___http_protocol_s *p =
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_protocol_get(io));
+                         fio_protocol(io));
   fio___http_protocol_dup(p);
   // p->queue = fio_srv_queue();
 
@@ -45666,7 +45708,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_s *io) {
       (char *)"\x50\x52\x49\x20\x2a\x20\x48\x54\x54\x50\x2f\x32\x2e\x30"
               "\x0d\x0a\x0d\x0a\x53\x4d\x0d\x0a\x0d\x0a",
       24);
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   fio_protocol_s *phttp_new;
   size_t r = fio_read(io, c->buf + c->len, c->capa - c->len);
   if (!r) /* nothing happened */
@@ -45732,7 +45774,7 @@ FIO_SFUNC int fio___http1_process_data(fio_s *io, fio___http_connection_s *c) {
 
 http1_error:
   FIO_LOG_DDEBUG2("HTTP/1.1 parser error! disconnecting client at %d",
-                  fio_fd_get(io));
+                  fio_fd(io));
   if (c->h) {
     fio_http_s *h = c->h;
     c->h = NULL;
@@ -45749,7 +45791,7 @@ http1_error:
 
 // /** Called when a data is available. */
 FIO_SFUNC void fio___http1_on_data(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   size_t r;
   for (;;) {
     if (c->capa == c->len)
@@ -45764,7 +45806,7 @@ FIO_SFUNC void fio___http1_on_data(fio_s *io) {
 
 // /** Called when an IO is attached to a protocol. */
 FIO_SFUNC void fio___http1_on_attach(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   if (c->len)
     fio___http1_process_data(io, c);
   return;
@@ -45881,7 +45923,7 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
 }
 
 FIO_SFUNC void fio___http1_on_attach_client(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   // c->io = fio_dup(io);
   c->io = io;
   fio___http1_send_request(c->h);
@@ -45894,7 +45936,7 @@ FIO_SFUNC void fio___http1_on_attach_client(fio_s *io) {
 HTTP/1 Controller
 ***************************************************************************** */
 FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
-  return fio_fd_get(fio_http_io(h));
+  return fio_fd(fio_http_io(h));
 }
 
 /** Informs the controller that request / response headers must be sent. */
@@ -46039,7 +46081,7 @@ something_is_wrong:
   if (fio_srv_is_open(c->io))
     FIO_LOG_DEBUG2("(%d) Connection upgrade went wrong for fd %d - closing",
                    fio_srv_pid(),
-                   fio_fd_get(c->io));
+                   fio_fd(c->io));
   fio_protocol_set(c->io, NULL); /* make zombie, timeout will clear it. */
   fio_undup(c->io);
   fio___http_connection_free(c); /* free HTTP connection element */
@@ -46283,7 +46325,7 @@ ws_error:
 
 /** Called when a data is available. */
 FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   size_t r;
   for (;;) {
     if (c->capa == c->len)
@@ -46297,7 +46339,7 @@ FIO_SFUNC void fio___websocket_on_data(fio_s *io) {
 }
 
 FIO_SFUNC void fio___websocket_on_ready(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   fio_http_s *h = c->h;
   if (!h)
     return;
@@ -46313,14 +46355,14 @@ FIO_SFUNC void fio___websocket_on_timeout(fio_s *io) {
 }
 
 FIO_SFUNC void fio___websocket_on_shutdown(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   c->settings->on_shutdown(c->h);
   fio_websocket_on_protocol_close(c, ((fio_buf_info_s){0}));
 }
 
 /** Called when an IO is attached to a protocol. */
 FIO_SFUNC void fio___websocket_on_attach(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   fio_http_s *h = c->h;
   c->state.ws = (struct fio___http_connection_ws_s){
       .on_message = c->settings->on_message,
@@ -46374,8 +46416,7 @@ WebSocket Writing / Subscription Helpers
 
 FIO_IFUNC void fio___http_websocket_subscribe_imp(fio_msg_s *msg,
                                                   uint8_t is_text) {
-  fio___http_connection_s *c =
-      (fio___http_connection_s *)fio_udata_get(msg->io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(msg->io);
   if (!c)
     return;
   fio_http_websocket_write(c->h, msg->message.buf, msg->message.len, is_text);
@@ -46458,8 +46499,7 @@ SFUNC int fio_http_sse_write FIO_NOOP(fio_http_s *h,
 
 /** Optional EventSource subscription callback - messages MUST be UTF-8. */
 SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg) {
-  fio___http_connection_s *c =
-      (fio___http_connection_s *)fio_udata_get(msg->io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(msg->io);
   if (!c)
     return;
   FIO_STR_INFO_TMP_VAR(id_str, 64);
@@ -46636,7 +46676,7 @@ breach:
 /** Called when a data is available. */
 FIO_SFUNC void fio___sse_on_data(fio_s *io) {
   FIO_LOG_DDEBUG2("(%d) Reading SSE data from socket", fio_srv_pid());
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   size_t r;
   for (;;) {
     if (c->len + 2 > c->capa)
@@ -46654,7 +46694,7 @@ error:
 
 /** Called when an IO is attached to a protocol. */
 static void fio___sse_on_attach(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   fio_http_s *h = c->h;
   c->state.sse = (struct fio___http_connection_sse_s){
       .on_message = c->settings->on_eventsource,
@@ -46676,7 +46716,7 @@ FIO_SFUNC void fio___sse_on_timeout(fio_s *io) {
 }
 
 FIO_SFUNC void fio___sse_on_shutdown(fio_s *io) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata_get(io);
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_udata(io);
   c->settings->on_shutdown(c->h);
   // fio_websocket_on_protocol_close(c, ((fio_buf_info_s){0}));
 }
@@ -51851,6 +51891,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
   FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
   fprintf(stderr, "\n");
+  {
+    FIO_STR_INFO_TMP_VAR(data, 1124);
+    data.len = 1024;
+    for (size_t i = 0; i < data.len; ++i)
+      data.buf[i] = (char)(i & 255);
+    uint64_t h = fio_stable_hash(data.buf, 1024, 0);
+    FIO_LOG_DDEBUG2("Stable Hash Value: %p", (void *)h);
+    FIO_ASSERT(h == (uint64_t)0x5DC4DAD435547F67ULL,
+               "Stable Hash Value Error!");
+  }
 #if DEBUG
   fprintf(stderr,
           "\t- to compare CPU cycles, test randomness with optimization.\n\n");

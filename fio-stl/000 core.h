@@ -31,7 +31,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.08"
+#define FIO_VERSION_BUILD "alpha.09"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -209,7 +209,7 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
-#if 1 /* Allow Intrinsic / SIMD / Neon ? */
+#if !defined(DEBUG) /* Allow Intrinsic / SIMD / Neon ? */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
     (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
     __has_include("arm_acle.h") && __has_include("arm_neon.h")
@@ -2682,10 +2682,10 @@ typedef union {
   uint16x8_t x16[1];
   uint8x16_t x8[1];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(16)));
-  uint64_t x32 __attribute__((vector_size(16)));
-  uint64_t x16 __attribute__((vector_size(16)));
-  uint64_t x8 __attribute__((vector_size(16)));
+  uint64_t __attribute__((vector_size(16))) x64[1];
+  uint64_t __attribute__((vector_size(16))) x32[1];
+  uint64_t __attribute__((vector_size(16))) x16[1];
+  uint64_t __attribute__((vector_size(16))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[1];
@@ -2706,10 +2706,10 @@ typedef union {
   uint16x8_t x16[2];
   uint8x16_t x8[2];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(32)));
-  uint64_t x32 __attribute__((vector_size(32)));
-  uint64_t x16 __attribute__((vector_size(32)));
-  uint64_t x8 __attribute__((vector_size(32)));
+  uint64_t __attribute__((vector_size(32))) x64[1];
+  uint64_t __attribute__((vector_size(32))) x32[1];
+  uint64_t __attribute__((vector_size(32))) x16[1];
+  uint64_t __attribute__((vector_size(32))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[2];
@@ -2734,10 +2734,10 @@ typedef union {
   uint16x8_t x16[4];
   uint8x16_t x8[4];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(64)));
-  uint64_t x32 __attribute__((vector_size(64)));
-  uint64_t x16 __attribute__((vector_size(64)));
-  uint64_t x8 __attribute__((vector_size(64)));
+  uint64_t __attribute__((vector_size(64))) x64[1];
+  uint64_t __attribute__((vector_size(64))) x32[1];
+  uint64_t __attribute__((vector_size(64))) x16[1];
+  uint64_t __attribute__((vector_size(64))) x8[1];
 #endif
 } fio_u512 FIO_ALIGN(16);
 
@@ -2757,10 +2757,10 @@ typedef union {
   uint16x8_t x16[8];
   uint8x16_t x8[8];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(128)));
-  uint64_t x32 __attribute__((vector_size(128)));
-  uint64_t x16 __attribute__((vector_size(128)));
-  uint64_t x8 __attribute__((vector_size(128)));
+  uint64_t __attribute__((vector_size(128))) x64[1];
+  uint64_t __attribute__((vector_size(128))) x32[1];
+  uint64_t __attribute__((vector_size(128))) x16[1];
+  uint64_t __attribute__((vector_size(128))) x8[1];
 #endif
 } fio_u1024 FIO_ALIGN(16);
 
@@ -2781,10 +2781,10 @@ typedef union {
   uint16x8_t x16[16];
   uint8x16_t x8[16];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(256)));
-  uint64_t x32 __attribute__((vector_size(256)));
-  uint64_t x16 __attribute__((vector_size(256)));
-  uint64_t x8 __attribute__((vector_size(256)));
+  uint64_t __attribute__((vector_size(256))) x64[1];
+  uint64_t __attribute__((vector_size(256))) x32[1];
+  uint64_t __attribute__((vector_size(256))) x16[1];
+  uint64_t __attribute__((vector_size(256))) x8[1];
 #endif
 } fio_u2048 FIO_ALIGN(16);
 
@@ -2806,10 +2806,10 @@ typedef union {
   uint16x8_t x16[32];
   uint8x16_t x8[32];
 #elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(512)));
-  uint64_t x32 __attribute__((vector_size(512)));
-  uint64_t x16 __attribute__((vector_size(512)));
-  uint64_t x8 __attribute__((vector_size(512)));
+  uint64_t __attribute__((vector_size(512))) x64[1];
+  uint64_t __attribute__((vector_size(512))) x32[1];
+  uint64_t __attribute__((vector_size(512))) x16[1];
+  uint64_t __attribute__((vector_size(512))) x8[1];
 #endif
 } fio_u4096 FIO_ALIGN(16);
 
@@ -2943,7 +2943,7 @@ Vector Helpers - Vector Math Operations
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
          ++i__)                                                                \
-      (t).u##bits[i__] = op(a).u##bits[i__];                                   \
+      (t).u##bits[i__] = op((a).u##bits[i__]);                                 \
   } while (0)
 #endif /* FIO_HAS_UX */
 
@@ -2957,13 +2957,14 @@ Vector Helpers - Vector Math Operations
   } while (0)
 
 #define FIO___UXXX_DEF_OP(total_bits, bits, opnm, op)                          \
-  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(fio_u##total_bits *target,   \
-                                                  fio_u##total_bits *a,        \
-                                                  fio_u##total_bits *b) {      \
+  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(                             \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const fio_u##total_bits *b) {                                            \
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }                                                                            \
   FIO_IFUNC void fio_u##total_bits##_c##opnm##bits(fio_u##total_bits *target,  \
-                                                   fio_u##total_bits *a,       \
+                                                   const fio_u##total_bits *a, \
                                                    uint##bits##_t b) {         \
     FIO_MATH_UXXX_COP(((target)[0]), ((a)[0]), (b), bits, op);                 \
   }                                                                            \
@@ -2975,8 +2976,8 @@ Vector Helpers - Vector Math Operations
   }
 #define FIO___UXXX_DEF_OP2(total_bits, bits, opnm, op)                         \
   FIO_IFUNC void fio_u##total_bits##_##opnm(fio_u##total_bits *target,         \
-                                            fio_u##total_bits *a,              \
-                                            fio_u##total_bits *b) {            \
+                                            const fio_u##total_bits *a,        \
+                                            const fio_u##total_bits *b) {      \
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }
 
@@ -2997,7 +2998,7 @@ Vector Helpers - Vector Math Operations
   FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
   FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
   FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
-                                         fio_u##total_bits *a) {               \
+                                         const fio_u##total_bits *a) {         \
     FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
   }
 
@@ -3044,7 +3045,7 @@ Vector Helpers - Multi-Precision Math
     return borrow;                                                             \
   }                                                                            \
   /** Returns -1, 0, or 1 if a < b, a == b or a > a (respectively). */         \
-  FIO_MIFN int fio_u##bits##_cmp(fio_u##bits *a, fio_u##bits *b) {             \
+  FIO_MIFN int fio_u##bits##_cmp(const fio_u##bits *a, const fio_u##bits *b) { \
     unsigned is_eq = 1;                                                        \
     unsigned is_bigger = 0;                                                    \
     for (size_t i = (bits / 64); i--;) {                                       \

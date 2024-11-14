@@ -500,7 +500,7 @@ FIO_SFUNC void fio___subscription_mock_cb(fio_msg_s *msg) { (void)msg; }
 FIO_SFUNC void fio___subscription_call_protocol(fio_msg_s *msg) {
   if (!msg->io)
     return;
-  fio_protocol_s *p = fio_protocol_get(msg->io);
+  fio_protocol_s *p = fio_protocol(msg->io);
   FIO_ASSERT_DEBUG(p, "every IO object should have a protocol, always");
   p->on_pubsub(msg);
 }
@@ -1632,7 +1632,7 @@ is_special_message:
     return;
 
   case FIO___PUBSUB_IDENTIFY:
-    p = (fio___pubsub_message_parser_s *)fio_udata_get(m->data.io);
+    p = (fio___pubsub_message_parser_s *)fio_udata(m->data.io);
     if (p) {
       p->uuid[0] = m->data.id;
       p->uuid[1] = m->data.published;
@@ -1742,7 +1742,7 @@ FIO_IFUNC void fio___pubsub_message_parse(
     fio_s *io,
     void (*cb)(fio_s *, fio___pubsub_message_s *)) {
   fio___pubsub_message_parser_s *parser =
-      (fio___pubsub_message_parser_s *)fio_udata_get(io);
+      (fio___pubsub_message_parser_s *)fio_udata(io);
   if (!parser)
     return;
   size_t existing = parser->len;
@@ -2012,11 +2012,11 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
   fio_u512 u = fio___pubsub_broadcast_compose((last_hello = this_hello));
   struct sockaddr_in addr = (struct sockaddr_in){
       .sin_family = AF_INET,
-      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata_get(io)),
+      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata(io)),
       .sin_addr.s_addr = INADDR_BROADCAST, // inet_addr("255.255.255.255"),
   };
   FIO_LOG_DEBUG2("(%d) pub/sub sending broadcast.", fio_srv_pid());
-  sendto(fio_fd_get(io),
+  sendto(fio_fd(io),
          (const char *)u.u8,
          48,
          0,
@@ -2095,9 +2095,8 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                            .published = FIO___PUBSUB_POSTOFFICE.uuid.u64[1],
                            .is_json = FIO___PUBSUB_IDENTIFY});
 
-  while (
-      (len = recvfrom(fio_fd_get(io), (char *)buf, 128, 0, from, &from_len)) >
-      0) {
+  while ((len = recvfrom(fio_fd(io), (char *)buf, 128, 0, from, &from_len)) >
+         0) {
     if (len != 48) {
       FIO_LOG_WARNING(
           "(%d) pub/sub peer detection received invalid packet (%zu bytes)!",
@@ -2165,7 +2164,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
 
 FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_s *io) {
   int fd;
-  while ((fd = accept(fio_fd_get(io), NULL, NULL)) != -1) {
+  while ((fd = accept(fio_fd(io), NULL, NULL)) != -1) {
     FIO_LOG_DDEBUG2("accepting a cluster peer connection");
     fio_srv_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
   }

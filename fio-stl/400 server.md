@@ -241,10 +241,10 @@ void *fio_udata_set(fio_s *io, void *udata);
 
 Associates a new `udata` pointer with the IO, returning the old `udata`
 
-#### `fio_udata_get`
+#### `fio_udata`
 
 ```c
-void *fio_udata_get(fio_s *io);
+void *fio_udata(fio_s *io);
 ```
 
 Returns the `udata` pointer associated with the IO.
@@ -337,10 +337,10 @@ void *fio_tls_set(fio_s *io, void *tls);
 
 Associates a new `tls` pointer with the IO, returning the old `tls`
 
-#### `fio_tls_get`
+#### `fio_tls`
 
 ```c
-void *fio_tls_get(fio_s *io);
+void *fio_tls(fio_s *io);
 ```
 
 Returns the `tls` pointer associated with the IO.
@@ -353,10 +353,10 @@ fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
 
 Sets a new protocol object (allows for dynamic protocol substitution). `NULL` is a valid "only-write" protocol.
 
-#### `fio_protocol_get`
+#### `fio_protocol`
 
 ```c
-fio_protocol_s *fio_protocol_get(fio_s *io);
+fio_protocol_s *fio_protocol(fio_s *io);
 ```
 
 Returns a pointer to the current protocol object.
@@ -398,10 +398,10 @@ void some_callback(fio_s *io) {
 }
 ```
 
-#### `fio_fd_get`
+#### `fio_fd`
 
 ```c
-int fio_fd_get(fio_s *io);
+int fio_fd(fio_s *io);
 ```
 
 Returns the socket file descriptor (fd) associated with the IO.
@@ -551,6 +551,8 @@ struct fio_protocol_s {
    * The zero value (0) is the same as the timeout limit (FIO_SRV_TIMEOUT_MAX).
    */
   uint32_t timeout;
+  /** The number of bytes to reserve for the fio_iomem buffer. */
+  uint32_t iomem_size;
 };
 ```
 

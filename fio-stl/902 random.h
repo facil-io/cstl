@@ -565,6 +565,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
   FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
   fprintf(stderr, "\n");
+  {
+    FIO_STR_INFO_TMP_VAR(data, 1124);
+    data.len = 1024;
+    for (size_t i = 0; i < data.len; ++i)
+      data.buf[i] = (char)(i & 255);
+    uint64_t h = fio_stable_hash(data.buf, 1024, 0);
+    FIO_LOG_DDEBUG2("Stable Hash Value: %p", (void *)h);
+    FIO_ASSERT(h == (uint64_t)0x5DC4DAD435547F67ULL,
+               "Stable Hash Value Error!");
+  }
 #if DEBUG
   fprintf(stderr,
           "\t- to compare CPU cycles, test randomness with optimization.\n\n");

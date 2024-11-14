@@ -147,7 +147,6 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
       v[i + 4] += w[i];                                                        \
     }                                                                          \
   } while (0)
-
   /* Approach inspired by komihash, copyrighted: Aleksey Vaneev, MIT license */
   const uint8_t *data = (const uint8_t *)data_;
   uint64_t v[8] FIO_ALIGN(16), w[8] FIO_ALIGN(16) = {0};
@@ -191,7 +190,6 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   v[0] = w[5] + fio_math_mulc64(w[4], w[6], v + 1);
   v[0] += v[1];
   return v[0];
-
 #undef FIO___RISKY_HASH_ROUND64
 }
 
