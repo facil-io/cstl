@@ -2510,6 +2510,7 @@ SFUNC fio_s *fio_srv_connect FIO_NOOP(fio_srv_connect_args_s args) {
               .on_close = fio___connecting_on_close,
               .io_functions = args.protocol->io_functions,
               .timeout = args.timeout,
+              .iomem_size = args.protocol->iomem_size,
           },
       .upr = args.protocol,
       .on_failed = args.on_failed,

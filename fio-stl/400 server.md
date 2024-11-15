@@ -373,6 +373,8 @@ fio_protocol_s *fio_protocol_set(fio_s *io, fio_protocol_s *protocol);
 
 Sets a new protocol object (allows for dynamic protocol substitution). `NULL` is a valid "only-write" protocol.
 
+Requires that the new protocol's memory requirements (`iomem_size`) will be no larger than the original protocol used to establish the IO (`fio_s *`).
+
 #### `fio_protocol`
 
 ```c
