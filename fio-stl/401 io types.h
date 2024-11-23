@@ -328,6 +328,7 @@ FIO_IFUNC void fio___io_defer_no_wakeup(void (*task)(void *, void *),
 void fio_io_run_every___(void);
 /** Schedules a timer bound task, see `fio_timer_schedule`. */
 SFUNC void fio_io_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
+  args.start_at = FIO___IO.tick;
   fio_timer_schedule FIO_NOOP(&FIO___IO.timer, args);
 }
 
@@ -845,7 +846,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   size_t total = 0;
   FIO___IO_FLAG_UNSET(io,
                       (FIO___IO_FLAG_POLLOUT_SET | FIO___IO_FLAG_WRITE_SCHD));
-  FIO_LOG_DDEBUG2("(%d) on_read callback for fd %d",
+  FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
                   fio_io_pid(),
                   fio_io_fd(io));
   if (!(io->flags & FIO___IO_FLAG_OPEN))
@@ -880,11 +881,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
     io->total_sent += total;
 #endif
   }
-  if ((io->flags & FIO___IO_FLAG_CLOSE)) {
-    io->pr->io_functions.finish(io->fd, io->tls);
-    fio_io_close_now(io);
-  } else if (fio_stream_any(&io->out) ||
-             io->pr->io_functions.flush(io->fd, io->tls)) {
+  if (fio_stream_any(&io->out) || io->pr->io_functions.flush(io->fd, io->tls)) {
     if (fio_stream_length(&io->out) >= FIO_IO_THROTTLE_LIMIT) {
       if (!(io->flags & FIO___IO_FLAG_THROTTLED))
         FIO_LOG_DDEBUG2("(%d), throttled IO %p (fd %d)",
@@ -894,6 +891,9 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       FIO___IO_FLAG_SET(io, FIO___IO_FLAG_THROTTLED);
     }
     fio___io_monitor_out(io);
+  } else if ((io->flags & FIO___IO_FLAG_CLOSE)) {
+    io->pr->io_functions.finish(io->fd, io->tls);
+    fio_io_close_now(io);
   } else {
     if ((io->flags & FIO___IO_FLAG_THROTTLED)) {
       FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_THROTTLED);

@@ -9784,6 +9784,52 @@ Although many IO API calls are thread safe (they actually schedule events on the
 
 **Note**: this will automatically include a large amount of the facil.io STL modules, which you may prefer to manually include beforehand in order to choose the appropriate memory allocator per module.
 
+### Time Server Example
+
+The following example uses the `FIO_PUBSUB` module together with the `FIO_IO` module to author a very simplistic time server (with no micro-second accuracy).
+
+the `FIO_PUBSUB` module could have been replaced with a `fio_protocol_each` approach, assuming a single threaded implementation. But this approach is both simpler and (usually) more powerful.
+
+```c
+#define FIO_LOG
+#define FIO_IO
+#define FIO_PUBSUB
+#define FIO_TIME
+#include "fio-stl/include.h"
+
+/** Called when an IO is attached to a protocol. */
+FIO_SFUNC void time_protocol_on_attach(fio_io_s *io) {
+  /* .on_message is unnecessary, by default the message is sent to the IO. */
+  fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("time"));
+}
+
+fio_io_protocol_s TIME_PROTOCOL = {
+    .on_attach = time_protocol_on_attach,     /* subscribe after connection */
+    .on_timeout = fio_io_touch,               /* never times out */
+    .on_pubsub = FIO_ON_MESSAGE_SEND_MESSAGE, /* write messages to IO */
+};
+
+/* timer callback for publishing time */
+static int publish_time(void *ignore1_, void *ignore2_) {
+  char buf[32];
+  size_t len = fio_time2iso(buf, fio_time_real().tv_sec);
+  buf[len++] = '\r';
+  buf[len++] = '\n';
+  fio_publish(.channel = FIO_BUF_INFO1("time"),
+              .message = FIO_BUF_INFO2(buf, len));
+  return 0;
+  (void)ignore1_, (void)ignore2_;
+}
+
+int main(void) {
+  fio_io_run_every(.fn = publish_time, .every = 1000, .repetitions = -1);
+  FIO_ASSERT(fio_io_listen(.protocol = &TIME_PROTOCOL), "");
+  printf("* Time service starting up.\n");
+  printf("  Press ^C to stop server and exit.\n");
+  fio_io_start(0);
+}
+```
+
 ### IO Compiler Settings
 
 The following macros control the IO reactor's behavior during compile-time.

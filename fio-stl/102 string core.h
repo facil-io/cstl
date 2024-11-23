@@ -2021,7 +2021,7 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
                                      fio_string_realloc_fn reallocate,
                                      const void *raw,
                                      size_t raw_len) {
-  const static uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  static const uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   int r = 0;
   size_t expected = ((raw_len * 8) / 5) + 1;
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {

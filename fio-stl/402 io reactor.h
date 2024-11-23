@@ -26,11 +26,12 @@ static void fio___io_signal_handle(int sig, void *flg) {
 
 FIO_SFUNC void fio___io_tick(int timeout) {
   static size_t performed_idle = 0;
-  if (fio_poll_review(&FIO___IO.poll, timeout) > 0) {
-    performed_idle = 0;
-  } else if (timeout) {
-    if (!performed_idle && !FIO___IO.stop)
-      fio_state_callback_force(FIO_CALL_ON_IDLE);
+  size_t idle_round = (fio_poll_review(&FIO___IO.poll, timeout) == 0);
+  performed_idle &= idle_round;
+  idle_round &= (timeout > 0);
+  idle_round ^= performed_idle;
+  if ((idle_round & !FIO___IO.stop)) {
+    fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();

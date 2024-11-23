@@ -765,7 +765,6 @@ FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_io_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_io_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_close(void *buffer, void *udata);
 FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_io_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_iomem_free(void *p_);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
@@ -1724,6 +1723,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
   m = fio___pubsub_message_author(args);
   m->data.is_json = ((!!args.is_json) | ((uint8_t)(uintptr_t)args.engine));
 
+  FIO_LOG_DDEBUG2("publishing pub/sub message (scheduling)");
   fio_io_defer(fio___publish_message_task, m, NULL);
   return;
 

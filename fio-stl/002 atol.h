@@ -1210,7 +1210,7 @@ Big Numbers
 
 FIO_IFUNC void fio___uXXX_hex_read(uint64_t *t, char **p, size_t l) {
   char *start = *p;
-  start += ((unsigned)(start[0] == '0' & start[1] == 'x') << 1);
+  start += (((unsigned)(start[0] == '0') & (start[1] == 'x')) << 1);
   char *pos = start;
   while (fio_i2c((uint8_t)*pos) < 16)
     ++pos;

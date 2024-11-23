@@ -537,7 +537,7 @@ Sleep / Thread Scheduling Macros
 #define FIO_THREAD_YIELD() __asm__ __volatile__("yield" ::: "memory")
 #elif defined(_MSC_VER)
 #define FIO_THREAD_YIELD() YieldProcessor()
-#else FIO_OS_POSIX
+#else /* FIO_OS_POSIX */
 /** Yields the thread, hinting to the processor about spinlock loop. */
 #define FIO_THREAD_YIELD() sched_yield()
 #endif

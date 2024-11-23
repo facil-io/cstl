@@ -574,7 +574,7 @@ Sleep / Thread Scheduling Macros
 #define FIO_THREAD_YIELD() __asm__ __volatile__("yield" ::: "memory")
 #elif defined(_MSC_VER)
 #define FIO_THREAD_YIELD() YieldProcessor()
-#else FIO_OS_POSIX
+#else /* FIO_OS_POSIX */
 /** Yields the thread, hinting to the processor about spinlock loop. */
 #define FIO_THREAD_YIELD() sched_yield()
 #endif
@@ -6150,7 +6150,7 @@ Big Numbers
 
 FIO_IFUNC void fio___uXXX_hex_read(uint64_t *t, char **p, size_t l) {
   char *start = *p;
-  start += ((unsigned)(start[0] == '0' & start[1] == 'x') << 1);
+  start += (((unsigned)(start[0] == '0') & (start[1] == 'x')) << 1);
   char *pos = start;
   while (fio_i2c((uint8_t)*pos) < 16)
     ++pos;
@@ -20108,7 +20108,7 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
                                      fio_string_realloc_fn reallocate,
                                      const void *raw,
                                      size_t raw_len) {
-  const static uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  static const uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   int r = 0;
   size_t expected = ((raw_len * 8) / 5) + 1;
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
@@ -35378,6 +35378,7 @@ FIO_IFUNC void fio___io_defer_no_wakeup(void (*task)(void *, void *),
 void fio_io_run_every___(void);
 /** Schedules a timer bound task, see `fio_timer_schedule`. */
 SFUNC void fio_io_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
+  args.start_at = FIO___IO.tick;
   fio_timer_schedule FIO_NOOP(&FIO___IO.timer, args);
 }
 
@@ -35895,7 +35896,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   size_t total = 0;
   FIO___IO_FLAG_UNSET(io,
                       (FIO___IO_FLAG_POLLOUT_SET | FIO___IO_FLAG_WRITE_SCHD));
-  FIO_LOG_DDEBUG2("(%d) on_read callback for fd %d",
+  FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
                   fio_io_pid(),
                   fio_io_fd(io));
   if (!(io->flags & FIO___IO_FLAG_OPEN))
@@ -35930,11 +35931,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
     io->total_sent += total;
 #endif
   }
-  if ((io->flags & FIO___IO_FLAG_CLOSE)) {
-    io->pr->io_functions.finish(io->fd, io->tls);
-    fio_io_close_now(io);
-  } else if (fio_stream_any(&io->out) ||
-             io->pr->io_functions.flush(io->fd, io->tls)) {
+  if (fio_stream_any(&io->out) || io->pr->io_functions.flush(io->fd, io->tls)) {
     if (fio_stream_length(&io->out) >= FIO_IO_THROTTLE_LIMIT) {
       if (!(io->flags & FIO___IO_FLAG_THROTTLED))
         FIO_LOG_DDEBUG2("(%d), throttled IO %p (fd %d)",
@@ -35944,6 +35941,9 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       FIO___IO_FLAG_SET(io, FIO___IO_FLAG_THROTTLED);
     }
     fio___io_monitor_out(io);
+  } else if ((io->flags & FIO___IO_FLAG_CLOSE)) {
+    io->pr->io_functions.finish(io->fd, io->tls);
+    fio_io_close_now(io);
   } else {
     if ((io->flags & FIO___IO_FLAG_THROTTLED)) {
       FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_THROTTLED);
@@ -36678,11 +36678,12 @@ static void fio___io_signal_handle(int sig, void *flg) {
 
 FIO_SFUNC void fio___io_tick(int timeout) {
   static size_t performed_idle = 0;
-  if (fio_poll_review(&FIO___IO.poll, timeout) > 0) {
-    performed_idle = 0;
-  } else if (timeout) {
-    if (!performed_idle && !FIO___IO.stop)
-      fio_state_callback_force(FIO_CALL_ON_IDLE);
+  size_t idle_round = (fio_poll_review(&FIO___IO.poll, timeout) == 0);
+  performed_idle &= idle_round;
+  idle_round &= (timeout > 0);
+  idle_round ^= performed_idle;
+  if ((idle_round & !FIO___IO.stop)) {
+    fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
@@ -38609,7 +38610,6 @@ FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_io_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_io_s *io);
 FIO_SFUNC void fio___pubsub_protocol_on_close(void *buffer, void *udata);
 FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_io_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_iomem_free(void *p_);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
@@ -39568,6 +39568,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
   m = fio___pubsub_message_author(args);
   m->data.is_json = ((!!args.is_json) | ((uint8_t)(uintptr_t)args.engine));
 
+  FIO_LOG_DDEBUG2("publishing pub/sub message (scheduling)");
   fio_io_defer(fio___publish_message_task, m, NULL);
   return;
 
