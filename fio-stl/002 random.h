@@ -71,42 +71,6 @@ Here's a few resources about hashes that might explain more:
 
 ***************************************************************************** */
 
-/* Primes with with 16 bits, half of them set. */
-#define FIO_U16_HASH_PRIME0 0xDA23U
-#define FIO_U16_HASH_PRIME1 0xB48BU
-#define FIO_U16_HASH_PRIME2 0xC917U
-#define FIO_U16_HASH_PRIME3 0xD855U
-#define FIO_U16_HASH_PRIME4 0xE0B9U
-#define FIO_U16_HASH_PRIME5 0xE471U
-#define FIO_U16_HASH_PRIME6 0x85CDU
-#define FIO_U16_HASH_PRIME7 0xD433U
-#define FIO_U16_HASH_PRIME8 0xE951U
-#define FIO_U16_HASH_PRIME9 0xA8E5U
-
-/* Primes with with 32 bits, half of them set. */
-#define FIO_U32_HASH_PRIME0 0xC19F5985UL
-#define FIO_U32_HASH_PRIME1 0x8D567931UL
-#define FIO_U32_HASH_PRIME2 0x9C178B17UL
-#define FIO_U32_HASH_PRIME3 0xA4B842DFUL
-#define FIO_U32_HASH_PRIME4 0xB0B94EC9UL
-#define FIO_U32_HASH_PRIME5 0xFA9E7084UL
-#define FIO_U32_HASH_PRIME6 0xCA63037BUL
-#define FIO_U32_HASH_PRIME7 0xD728C15DUL
-#define FIO_U32_HASH_PRIME8 0xA872A277UL
-#define FIO_U32_HASH_PRIME9 0xF5781551UL
-
-/* Primes with with 64 bits, half of them set. */
-#define FIO_U64_HASH_PRIME0 0x39664DEECA23D825
-#define FIO_U64_HASH_PRIME1 0x48644F7B3959621F
-#define FIO_U64_HASH_PRIME2 0x613A19F5CB0D98D5
-#define FIO_U64_HASH_PRIME3 0x84B56B93C869EA0F
-#define FIO_U64_HASH_PRIME4 0x8EE38D13E0D95A8D
-#define FIO_U64_HASH_PRIME5 0x92E99EC981F0E279
-#define FIO_U64_HASH_PRIME6 0xDDC3100BEF158BB1
-#define FIO_U64_HASH_PRIME7 0x918F4D38049F78BD
-#define FIO_U64_HASH_PRIME8 0xB6C9F8032A35E2D9
-#define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
-
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
   seed ^= fio_lrot64(seed, 47);

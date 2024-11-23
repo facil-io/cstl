@@ -60,7 +60,7 @@ Everything Inclusion
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
 #undef FIO_PUBSUB
-#undef FIO_SERVER
+#undef FIO_IO
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
@@ -76,18 +76,19 @@ Everything Inclusion
 #undef FIO_MEMALT
 #define FIO_FIOBJ
 #define FIO_HTTP
+#define FIO_IO
 #define FIO_MALLOC
 #define FIO_MUSTACHE
 #define FIO_PUBSUB
-#define FIO_SERVER
 #define FIO_MEMALT
 
 #endif
 
 #define FIO___INCLUDE_AGAIN
 #endif /* FIO_EVERYTHING */
+
 /* *****************************************************************************
-Basics Inclusion
+FIO_BASIC                   Basic Kitchen Sink Inclusion
 ***************************************************************************** */
 #if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_BASIC) &&                 \
     !defined(H___FIO_BASIC___H)
@@ -124,7 +125,7 @@ Basics Inclusion
 #define FIO___INCLUDE_AGAIN
 #endif /* FIO_BASIC */
 /* *****************************************************************************
-Poor-man's Cryptographic Elements
+FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
 #undef FIO_CHACHA
@@ -139,7 +140,7 @@ Poor-man's Cryptographic Elements
 #endif /* FIO_CRYPT */
 
 /* *****************************************************************************
-Core Inclusion
+FIO_CORE                        Core Inclusion
 ***************************************************************************** */
 #if defined(FIO_CORE)
 #undef FIO_ATOL
@@ -202,6 +203,10 @@ Memory Allocation - FIO_MALLOC as a "global" default memory allocator
 #define FIO_MEMORY_ENABLE_BIG_ALLOC 1
 #endif
 
+#ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS
+/* should memory be initialized to zero? */
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#endif
 /* *****************************************************************************
 Memory Allocation - FIO_MALLOC defines a FIOBJ dedicated memory allocator
 ***************************************************************************** */
@@ -269,11 +274,11 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_HTTP) || defined(FIO_PUBSUB)
-#undef FIO_SERVER
-#define FIO_SERVER
+#undef FIO_IO
+#define FIO_IO
 #endif
 
-#if defined(FIO_HTTP) || defined(FIO_SERVER)
+#if defined(FIO_HTTP) || defined(FIO_IO)
 #undef FIO_POLL
 #define FIO_POLL
 #endif
@@ -303,7 +308,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_WEBSOCKET_PARSER
 #endif
 
-#if defined(FIO_POLL) || defined(FIO_SERVER) || defined(FIO_PUBSUB)
+#if defined(FIO_POLL) || defined(FIO_IO) || defined(FIO_PUBSUB)
 #undef FIO_SOCK
 #define FIO_SOCK
 #endif
@@ -323,19 +328,19 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_STR
 #endif
 
-#if defined(FIO_SERVER)
+#if defined(FIO_IO)
 #undef FIO_STREAM
 #define FIO_STREAM
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_SERVER) || defined(FIO_QUEUE)
-#undef FIO_TIME
-#define FIO_TIME
-#endif
-
-#if defined(FIO_SERVER)
+#if defined(FIO_IO)
 #undef FIO_QUEUE
 #define FIO_QUEUE
+#endif
+
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE)
+#undef FIO_TIME
+#define FIO_TIME
 #endif
 
 /* *****************************************************************************
@@ -391,7 +396,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_POLL) ||       \
-    defined(FIO_STATE)
+    defined(FIO_STATE) || defined(FIO_HTTP_HANDLE)
 #undef FIO_IMAP_CORE
 #define FIO_IMAP_CORE
 #endif
@@ -408,7 +413,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_RAND
 #endif
 
-#if defined(FIO_SERVER)
+#if defined(FIO_IO)
 #undef FIO_SIGNAL
 #define FIO_SIGNAL
 #endif

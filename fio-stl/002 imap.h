@@ -331,6 +331,80 @@ iMap Creation Macro
 #define FIO_TYPEDEF_IMAP_FREE FIO_MEM_FREE
 #endif
 
+#define FIO___IMAP_SEEKER_TYPE(bits)                                           \
+  typedef struct {                                                             \
+    uint##bits##_t pos;                                                        \
+    uint##bits##_t ipos;                                                       \
+    uint##bits##_t set_val;                                                    \
+    bool is_valid;                                                             \
+  } fio___imap##bits##_seeker_s;                                               \
+  /** Returns the index map position and array position of a value, if any. */ \
+  FIO_SFUNC fio___imap##bits##_seeker_s fio___imap##bits##_seek(               \
+      void *ary,                                                               \
+      uint##bits##_t *imap,                                                    \
+      const uint##bits##_t capa_bits,                                          \
+      void *pobj,                                                              \
+      uint##bits##_t hash,                                                     \
+      bool cmp_fn(void *arry, void *obj, uint##bits##_t indx),                 \
+      const size_t max_attempts) {                                             \
+    fio___imap##bits##_seeker_s r = {(uint##bits##_t)(~(uint##bits##_t)0),     \
+                                     (uint##bits##_t)(~(uint##bits##_t)0),     \
+                                     (uint##bits##_t)(~(uint##bits##_t)0)};    \
+    if (!ary)                                                                  \
+      return r;                                                                \
+    const uint##bits##_t capa = ((uint##bits##_t)1 << capa_bits);              \
+    const uint##bits##_t pos_mask = (uint##bits##_t)(capa - 1);                \
+    const uint##bits##_t hash_mask = (uint##bits##_t) ~pos_mask;               \
+    uint##bits##_t tester = (hash & hash_mask); /* hide `tester` lower bits */ \
+    uint##bits##_t pos = hash;                  /* use more bits */            \
+    /* make sure tester isn't a reserved value (0 || ~0) */                    \
+    tester += (!tester) << capa_bits;                                          \
+    tester -= (hash_mask == tester) << capa_bits;                              \
+    r.set_val = tester; /* store tester value */                               \
+    size_t attempts = max_attempts;                                            \
+    /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */    \
+    for (;;) {                                                                 \
+      for (size_t mini_steps = 0;;) {                                          \
+        pos &= pos_mask;                                                       \
+        const uint##bits##_t pos_hash = imap[pos] & hash_mask;                 \
+        const uint##bits##_t pos_index = imap[pos] & pos_mask;                 \
+        if ((pos_hash == tester) && cmp_fn(ary, pobj, pos_index)) {            \
+          r.ipos = pos;                                                        \
+          r.pos = pos_index;                                                   \
+          r.set_val = tester | pos_index;                                      \
+          r.is_valid = 1;                                                      \
+          return r;                                                            \
+        }                                                                      \
+        if (!imap[pos]) {                                                      \
+          r.ipos = pos;                                                        \
+          r.set_val = tester; /* mark empty slot */                            \
+          return r;                                                            \
+        }                                                                      \
+        if (imap[pos] == (uint##bits##_t)(~(uint##bits##_t)0)) {               \
+          r.ipos = pos;                                                        \
+        }                                                                      \
+        if (!((--attempts)))                                                   \
+          return r;                                                            \
+        if (mini_steps == 2)                                                   \
+          break;                                                               \
+        pos += 3 + mini_steps; /* 0, 3, 7 =>  max of 56 byte distance */       \
+        ++mini_steps;                                                          \
+      }                                                                        \
+      pos += (uint##bits##_t)0xC19F5985UL; /* big step */                      \
+    }                                                                          \
+  }                                                                            \
+  /** utilizes the values returned by the seeker object. */                    \
+  FIO_IFUNC void fio___imap##bits##_set(uint##bits##_t *imap,                  \
+                                        uint##bits##_t ipos,                   \
+                                        uint##bits##_t set_val) {              \
+    imap[ipos] = set_val;                                                      \
+  }
+
+FIO___IMAP_SEEKER_TYPE(8)
+FIO___IMAP_SEEKER_TYPE(16)
+FIO___IMAP_SEEKER_TYPE(32)
+FIO___IMAP_SEEKER_TYPE(64)
+
 /* *****************************************************************************
 iMap Cleanup
 ***************************************************************************** */

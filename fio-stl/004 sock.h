@@ -87,7 +87,7 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #include <sys/un.h>
 #include <unistd.h>
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((int)fd != (int)-1)
+#define FIO_SOCK_FD_ISVALID(fd) ((int)(fd) != (int)-1)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len)      write((fd), (data), (len))

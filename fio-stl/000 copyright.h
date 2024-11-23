@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2023
+Copyright: Boaz Segev, 2019-2024
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.

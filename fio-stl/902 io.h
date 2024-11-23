@@ -29,8 +29,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 Test TLS support
 ***************************************************************************** */
 
-FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
-                            tls_each_cert)(fio_tls_each_s *e,
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, io),
+                            tls_each_cert)(fio_io_tls_each_s *e,
                                            const char *nm,
                                            const char *public_cert_file,
                                            const char *private_key_file,
@@ -54,10 +54,10 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
   }
   return 0;
 }
-FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
-                            tls_each_alpn)(fio_tls_each_s *e,
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, io),
+                            tls_each_alpn)(fio_io_tls_each_s *e,
                                            const char *nm,
-                                           void (*fn)(fio_s *)) {
+                                           void (*fn)(fio_io_s *)) {
   size_t *result = (size_t *)e->udata2;
   *result += 0x0100U;
   const size_t step = (result[0] >> 8) & 0xFF;
@@ -65,8 +65,9 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
   FIO_ASSERT((uintptr_t)fn == step, "fn value error for tls_each_alpn");
   return 0;
 }
-FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
-                            tls_each_trust)(fio_tls_each_s *e, const char *nm) {
+FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, io),
+                            tls_each_trust)(fio_io_tls_each_s *e,
+                                            const char *nm) {
 
   size_t *result = (size_t *)e->udata2;
   *result += 0x010000U;
@@ -75,13 +76,13 @@ FIO_SFUNC int FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
   return 0;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
-                             tls_each_alpn_cb)(fio_s *io) {
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, io),
+                             tls_each_alpn_cb)(fio_io_s *io) {
   ((size_t *)io)[0]++;
 }
 
-FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
-  fprintf(stderr, "   * Testing fio_tls_s helpers.\n");
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_helpers)(void) {
+  fprintf(stderr, "   * Testing fio_io_tls_s helpers.\n");
   struct {
     const char *nm;
     const char *public_cert_file;
@@ -116,19 +117,19 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   };
   struct {
     const char *nm;
-    void (*fn)(fio_s *);
+    void (*fn)(fio_io_s *);
   } tls_test_alpn_data[] = {
       {
           .nm = "1",
-          .fn = (void (*)(fio_s *))(uintptr_t)3,
+          .fn = (void (*)(fio_io_s *))(uintptr_t)3,
       },
       {
           .nm = "2",
-          .fn = (void (*)(fio_s *))(uintptr_t)2,
+          .fn = (void (*)(fio_io_s *))(uintptr_t)2,
       },
       {
           .nm = "1",
-          .fn = (void (*)(fio_s *))(uintptr_t)1,
+          .fn = (void (*)(fio_io_s *))(uintptr_t)1,
       },
       {NULL},
   };
@@ -150,41 +151,43 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
       (void *)&tls_test_trust_data,
       NULL,
   };
-  fio_tls_s *t = fio_tls_new();
-  FIO_ASSERT(t, "fio_tls_new should return a valid fio_tls_s object");
+  fio_io_tls_s *t = fio_io_tls_new();
+  FIO_ASSERT(t, "fio_io_tls_new should return a valid fio_io_tls_s object");
   for (size_t i = 0; tls_test_cert_data[i].nm; ++i) {
-    fio_tls_s *r = fio_tls_cert_add(t,
-                                    tls_test_cert_data[i].nm,
-                                    tls_test_cert_data[i].public_cert_file,
-                                    tls_test_cert_data[i].private_key_file,
-                                    tls_test_cert_data[i].pk_password);
-    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+    fio_io_tls_s *r =
+        fio_io_tls_cert_add(t,
+                            tls_test_cert_data[i].nm,
+                            tls_test_cert_data[i].public_cert_file,
+                            tls_test_cert_data[i].private_key_file,
+                            tls_test_cert_data[i].pk_password);
+    FIO_ASSERT(r == t, "`fio_io_tls_X_add` functions should return `self`.");
   }
   for (size_t i = 0; tls_test_alpn_data[i].nm; ++i) {
-    fio_tls_s *r =
-        fio_tls_alpn_add(t, tls_test_alpn_data[i].nm, tls_test_alpn_data[i].fn);
-    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+    fio_io_tls_s *r = fio_io_tls_alpn_add(t,
+                                          tls_test_alpn_data[i].nm,
+                                          tls_test_alpn_data[i].fn);
+    FIO_ASSERT(r == t, "`fio_io_tls_X_add` functions should return `self`.");
   }
   for (size_t i = 0; tls_test_trust_data[i].nm; ++i) {
-    fio_tls_s *r = fio_tls_trust_add(t, tls_test_trust_data[i].nm);
-    FIO_ASSERT(r == t, "`fio_tls_X_add` functions should return `self`.");
+    fio_io_tls_s *r = fio_io_tls_trust_add(t, tls_test_trust_data[i].nm);
+    FIO_ASSERT(r == t, "`fio_io_tls_X_add` functions should return `self`.");
   }
 
-  fio_tls_each(
+  fio_io_tls_each(
       t,
       .udata = data_containers,
       .udata2 = &counter,
-      .each_cert = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_cert),
-      .each_alpn = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn),
-      .each_trust = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_trust));
-  FIO_ASSERT(counter == 0x020203, "fio_tls_each iteration count error.");
-  fio_tls_alpn_add(t,
-                   "tst",
-                   FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_each_alpn_cb));
+      .each_cert = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_each_cert),
+      .each_alpn = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_each_alpn),
+      .each_trust = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_each_trust));
+  FIO_ASSERT(counter == 0x020203, "fio_io_tls_each iteration count error.");
+  fio_io_tls_alpn_add(t,
+                      "tst",
+                      FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_each_alpn_cb));
   counter = 0;
-  fio_tls_alpn_select(t, "tst", 3, (fio_s *)&counter);
-  FIO_ASSERT(counter == 1, "fio_tls_alpn_select failed.");
-  fio_tls_free(t);
+  fio_io_tls_alpn_select(t, "tst", 3, (fio_io_s *)&counter);
+  FIO_ASSERT(counter == 1, "fio_io_tls_alpn_select failed.");
+  fio_io_tls_free(t);
 
   const struct {
     fio_buf_info_s url;
@@ -208,11 +211,11 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)(void) {
   for (size_t i = 0; url_tests[i].url.buf; ++i) {
     t = NULL;
     fio_url_s u = fio_url_parse(url_tests[i].url.buf, url_tests[i].url.len);
-    t = fio_tls_from_url(t, u);
+    t = fio_io_tls_from_url(t, u);
     FIO_ASSERT((!url_tests[i].is_tls && !t) || (url_tests[i].is_tls && t),
-               "fio_tls_from_url result error @ %s",
+               "fio_io_tls_from_url result error @ %s",
                url_tests[i].url.buf);
-    fio_tls_free(t);
+    fio_io_tls_free(t);
   }
 }
 
@@ -221,72 +224,72 @@ Test IO ENV support
 ***************************************************************************** */
 
 /* State callback test task */
-FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server),
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, io),
                              env_on_close)(void *udata) {
   size_t *p = (size_t *)udata;
   ++p[0];
 }
 
 /* State callback tests */
-FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
+FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env)(void) {
   fprintf(stderr, "   * Testing fio_env.\n");
   size_t a = 0, b = 0, c = 0;
-  fio___srv_env_safe_s env = FIO___SRV_ENV_SAFE_INIT;
-  fio___srv_env_safe_set(
+  fio___io_env_safe_s env = FIO___IO_ENV_SAFE_INIT;
+  fio___io_env_safe_set(
       &env,
       (char *)"a_key",
       5,
       1,
-      (fio___srv_env_obj_s){
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+      (fio___io_env_obj_s){
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env_on_close),
           .udata = &a},
       1);
-  FIO_ASSERT(fio___srv_env_safe_get(&env, (char *)"a_key", 5, 1) == &a,
-             "fio___srv_env_safe_set/get round-trip error!");
-  fio___srv_env_safe_set(
+  FIO_ASSERT(fio___io_env_safe_get(&env, (char *)"a_key", 5, 1) == &a,
+             "fio___io_env_safe_set/get round-trip error!");
+  fio___io_env_safe_set(
       &env,
       (char *)"a_key",
       5,
       2,
-      (fio___srv_env_obj_s){
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+      (fio___io_env_obj_s){
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env_on_close),
           .udata = &a},
       2);
-  fio___srv_env_safe_set(
+  fio___io_env_safe_set(
       &env,
       (char *)"a_key",
       5,
       3,
-      (fio___srv_env_obj_s){
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+      (fio___io_env_obj_s){
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env_on_close),
           .udata = &a},
       1);
-  fio___srv_env_safe_set(
+  fio___io_env_safe_set(
       &env,
       (char *)"b_key",
       5,
       1,
-      (fio___srv_env_obj_s){
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+      (fio___io_env_obj_s){
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env_on_close),
           .udata = &b},
       1);
-  fio___srv_env_safe_set(
+  fio___io_env_safe_set(
       &env,
       (char *)"c_key",
       5,
       1,
-      (fio___srv_env_obj_s){
-          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env_on_close),
+      (fio___io_env_obj_s){
+          .on_close = FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env_on_close),
           .udata = &c},
       1);
-  fio___srv_env_safe_unset(&env, (char *)"a_key", 5, 3);
+  fio___io_env_safe_unset(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a,
              "unset should have removed an object without calling callback.");
-  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 3);
+  fio___io_env_safe_remove(&env, (char *)"a_key", 5, 3);
   FIO_ASSERT(!a, "remove after unset should have no side-effects.");
-  fio___srv_env_safe_remove(&env, (char *)"a_key", 5, 2);
+  fio___io_env_safe_remove(&env, (char *)"a_key", 5, 2);
   FIO_ASSERT(a == 1, "remove should call callbacks.");
-  fio___srv_env_safe_destroy(&env);
+  fio___io_env_safe_destroy(&env);
   FIO_ASSERT(a == 2 && b == 1 && c == 1, "destroy should call callbacks.");
 }
 
@@ -294,12 +297,12 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)(void) {
 Test Server Modules
 ***************************************************************************** */
 
-FIO_SFUNC void FIO_NAME_TEST(stl, server)(void) {
-  fprintf(stderr, "* Testing fio_srv units (TODO).\n");
-  FIO_PRINT_SIZE_OF(fio_protocol_s);
-  FIO_PRINT_SIZE_OF(fio_s);
-  FIO_NAME_TEST(FIO_NAME_TEST(stl, server), env)();
-  FIO_NAME_TEST(FIO_NAME_TEST(stl, server), tls_helpers)();
+FIO_SFUNC void FIO_NAME_TEST(stl, io)(void) {
+  fprintf(stderr, "* Testing fio_io units (TODO).\n");
+  FIO_PRINT_SIZE_OF(fio_io_protocol_s);
+  FIO_PRINT_SIZE_OF(fio_io_s);
+  FIO_NAME_TEST(FIO_NAME_TEST(stl, io), env)();
+  FIO_NAME_TEST(FIO_NAME_TEST(stl, io), tls_helpers)();
 }
 /* *****************************************************************************
 Cleanup

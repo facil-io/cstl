@@ -1,7 +1,7 @@
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_SERVER             /* Development inclusion - ignore line */
+#define FIO_IO                 /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -61,7 +61,7 @@ static void fio___openssl_make_root_key(void) {
   fio_unlock(&lock);
 }
 
-static X509 *fio_tls_create_self_signed(const char *server_name) {
+static X509 *fio_io_tls_create_self_signed(const char *server_name) {
   X509 *cert = X509_new();
   static uint32_t counter = 0;
   FIO_ASSERT(cert,
@@ -83,7 +83,7 @@ static X509 *fio_tls_create_self_signed(const char *server_name) {
   X509_NAME *s = X509_get_subject_name(cert);
   size_t srv_name_len = FIO_STRLEN(server_name);
   FIO_ASSERT(srv_name_len < (size_t)((int)0 - 1),
-             "fio_tls_create_self_signed server_name too long");
+             "fio_io_tls_create_self_signed server_name too long");
   X509_NAME_add_entry_by_txt(s,
                              "O",
                              MBSTRING_ASC,
@@ -120,7 +120,7 @@ OpenSSL Context type wrappers
 /* Context for all future connections */
 typedef struct {
   SSL_CTX *ctx;
-  fio_tls_s *tls;
+  fio_io_tls_s *tls;
 } fio___openssl_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___openssl_context_s)
@@ -148,7 +148,7 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
                                              const unsigned char *in,
                                              unsigned int inlen,
                                              void *tls_) {
-  fio_s *io = (fio_s *)SSL_get_ex_data(ssl, 0);
+  fio_io_s *io = (fio_io_s *)SSL_get_ex_data(ssl, 0);
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_;
 
   const unsigned char *end = in + inlen;
@@ -157,7 +157,7 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
     uint8_t len = in[0];
     FIO_MEMCPY(buf, in + 1, len);
     buf[len] = 0;
-    if (fio_tls_alpn_select(ctx->tls, buf, (size_t)len, io)) {
+    if (fio_io_tls_alpn_select(ctx->tls, buf, (size_t)len, io)) {
       in += len + 1;
       if (in < end)
         continue;
@@ -181,7 +181,7 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
 Public Context Builder
 ***************************************************************************** */
 
-FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
+FIO_SFUNC int fio___openssl_each_cert(struct fio_io_tls_each_s *e,
                                       const char *server_name,
                                       const char *public_cert_file,
                                       const char *private_key_file,
@@ -214,16 +214,16 @@ FIO_SFUNC int fio___openssl_each_cert(struct fio_tls_each_s *e,
   } else { /* self signed */
     if (!server_name || !strlen(server_name))
       server_name = (const char *)"localhost";
-    X509 *cert = fio_tls_create_self_signed(server_name);
+    X509 *cert = fio_io_tls_create_self_signed(server_name);
     SSL_CTX_use_certificate(s->ctx, cert);
     SSL_CTX_use_PrivateKey(s->ctx, fio___openssl_pkey);
   }
   return 0;
 }
 
-FIO_SFUNC int fio___openssl_each_alpn(struct fio_tls_each_s *e,
+FIO_SFUNC int fio___openssl_each_alpn(struct fio_io_tls_each_s *e,
                                       const char *protocol_name,
-                                      void (*on_selected)(fio_s *)) {
+                                      void (*on_selected)(fio_io_s *)) {
   fio_str_info_s *str = (fio_str_info_s *)e->udata2;
   size_t len = FIO_STRLEN(protocol_name);
   if (len > 255 || (len + str->len >= str->capa)) {
@@ -237,7 +237,7 @@ FIO_SFUNC int fio___openssl_each_alpn(struct fio_tls_each_s *e,
   (void)on_selected;
 }
 
-FIO_SFUNC int fio___openssl_each_trust(struct fio_tls_each_s *e,
+FIO_SFUNC int fio___openssl_each_trust(struct fio_io_tls_each_s *e,
                                        const char *public_cert_file) {
   X509_STORE *store = (X509_STORE *)e->udata2;
   if (public_cert_file) /* trust specific certificate */
@@ -252,15 +252,16 @@ FIO_SFUNC int fio___openssl_each_trust(struct fio_tls_each_s *e,
   return 0;
 }
 
-/** Helper that converts a `fio_tls_s` into the implementation's context. */
-FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
+/** Helper that converts a `fio_io_tls_s` into the implementation's context. */
+FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
+                                            uint8_t is_client) {
   fio___openssl_context_s *ctx =
       (fio___openssl_context_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*ctx), 0);
   FIO_ASSERT_ALLOC(ctx);
   FIO_LEAK_COUNTER_ON_ALLOC(fio___openssl_context_s);
   *ctx = (fio___openssl_context_s){
       .ctx = SSL_CTX_new((is_client ? TLS_client_method : TLS_server_method)()),
-      .tls = fio_tls_dup(tls),
+      .tls = fio_io_tls_dup(tls),
   };
 
   SSL_CTX_set_mode(ctx->ctx, SSL_MODE_ENABLE_PARTIAL_WRITE);
@@ -268,31 +269,31 @@ FIO_SFUNC void *fio___openssl_build_context(fio_tls_s *tls, uint8_t is_client) {
   SSL_CTX_clear_mode(ctx->ctx, SSL_MODE_AUTO_RETRY);
 
   X509_STORE *store = NULL;
-  if (fio_tls_trust_count(tls)) {
+  if (fio_io_tls_trust_count(tls)) {
     SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_PEER, NULL);
     store = X509_STORE_new();
     SSL_CTX_set_cert_store(ctx->ctx, store);
   } else {
     SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_NONE, NULL);
   }
-  if (!fio_tls_cert_count(tls) && !is_client) {
+  if (!fio_io_tls_cert_count(tls) && !is_client) {
     /* add self-signed certificate to context */
-    X509 *cert = fio_tls_create_self_signed("localhost");
+    X509 *cert = fio_io_tls_create_self_signed("localhost");
     SSL_CTX_use_certificate(ctx->ctx, cert);
     SSL_CTX_use_PrivateKey(ctx->ctx, fio___openssl_pkey);
   }
-  fio_tls_each(tls,
-               .udata = ctx,
-               .udata2 = store,
-               .each_cert = fio___openssl_each_cert,
-               .each_trust = fio___openssl_each_trust);
+  fio_io_tls_each(tls,
+                  .udata = ctx,
+                  .udata2 = store,
+                  .each_cert = fio___openssl_each_cert,
+                  .each_trust = fio___openssl_each_trust);
 
-  if (fio_tls_alpn_count(tls)) {
+  if (fio_io_tls_alpn_count(tls)) {
     FIO_STR_INFO_TMP_VAR(alpn_list, 1023);
-    fio_tls_each(tls,
-                 .udata = ctx,
-                 .udata2 = &alpn_list,
-                 .each_alpn = fio___openssl_each_alpn);
+    fio_io_tls_each(tls,
+                    .udata = ctx,
+                    .udata2 = &alpn_list,
+                    .each_alpn = fio___openssl_each_alpn);
     if (SSL_CTX_set_alpn_protos(ctx->ctx,
                                 (const unsigned char *)alpn_list.buf,
                                 (unsigned int)alpn_list.len)) {
@@ -428,13 +429,13 @@ Per-Connection Builder
 FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
-FIO_SFUNC void fio___openssl_start(fio_s *io) {
+FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
   fio___openssl_context_s *ctx_parent = (fio___openssl_context_s *)fio_tls(io);
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
   FIO_LEAK_COUNTER_ON_ALLOC(fio___SSL);
-  fio_tls_set(io, (void *)ssl);
+  fio_io_tls_set(io, (void *)ssl);
 
   /* attach socket */
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
@@ -453,7 +454,7 @@ FIO_SFUNC void fio___openssl_start(fio_s *io) {
 Closing Connections
 ***************************************************************************** */
 
-/** Decreases a fio_tls_s object's reference count, or frees the object. */
+/** Decreases a fio_io_tls_s object's reference count, or frees the object. */
 FIO_SFUNC void fio___openssl_finish(int fd, void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
@@ -464,7 +465,7 @@ FIO_SFUNC void fio___openssl_finish(int fd, void *tls_ctx) {
 Per-Connection Cleanup
 ***************************************************************************** */
 
-/** Decreases a fio_tls_s object's reference count, or frees the object. */
+/** Decreases a fio_io_tls_s object's reference count, or frees the object. */
 FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   SSL *ssl = (SSL *)tls_ctx;
   SSL_shutdown(ssl);
@@ -480,12 +481,12 @@ static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
   fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
   FIO_LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
   SSL_CTX_free(ctx->ctx);
-  fio_tls_free(ctx->tls);
+  fio_io_tls_free(ctx->tls);
   FIO_MEM_FREE(ctx, sizeof(*ctx));
   (void)ignr_;
 }
 
-/** Builds a local TLS context out of the fio_tls_s object. */
+/** Builds a local TLS context out of the fio_io_tls_s object. */
 static void fio___openssl_free_context(void *tls_ctx) {
   fio_srv_defer(fio___openssl_free_context_task, tls_ctx, NULL);
 }
@@ -508,16 +509,9 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
 
 /* Setup OpenSSL as TLS IO default */
 FIO_CONSTRUCTOR(fio___openssl_setup_default) {
-  static fio_io_functions_s FIO___OPENSSL_IO_FUNCS = {
-      .build_context = fio___openssl_build_context,
-      .free_context = fio___openssl_free_context,
-      .start = fio___openssl_start,
-      .read = fio___openssl_read,
-      .write = fio___openssl_write,
-      .flush = fio___openssl_flush,
-      .cleanup = fio___openssl_cleanup,
-  };
-  fio_tls_default_io_functions(&FIO___OPENSSL_IO_FUNCS);
+  static fio_io_functions_s FIO___OPENSSL_IO_FUNCS;
+  FIO___OPENSSL_IO_FUNCS = fio_openssl_io_functions();
+  fio_io_tls_default_io_functions(&FIO___OPENSSL_IO_FUNCS);
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL); /* avoid OpenSSL issue... */
 #endif

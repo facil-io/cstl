@@ -46,7 +46,7 @@ The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
 
 ```c
 typedef struct {
-  /** callback for when data is availabl in the incoming buffer. */
+  /** callback for when data is available in the incoming buffer. */
   void (*on_data)(void *udata);
   /** callback for when the outgoing buffer allows a call to `write`. */
   void (*on_ready)(void *udata);

@@ -113,7 +113,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
               .channel = test_channel,                                         \
               .filter = -127);                                                 \
   expected += delta;                                                           \
-  fio_queue_perform_all(fio_srv_queue());
+  fio_queue_perform_all(fio_io_queue());
 
   for (int i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
@@ -129,7 +129,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
       FIO_LOG_WARNING("fio_unsubscribe returned an error value");
     --delta;
     --expected;
-    fio_queue_perform_all(fio___srv_tasks);
+    fio_queue_perform_all(fio_io_queue());
     FIO_ASSERT(state == expected, "unsubscribe should call callback (%i)", i);
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (3-%d)", i);
@@ -146,7 +146,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub)(void) {
   FIO_NAME_TEST(stl, pubsub_encryption)();
   FIO_NAME_TEST(stl, pubsub_roundtrip)();
-  fio___srv_cleanup_at_exit(NULL);
+  fio___io_cleanup_at_exit(NULL);
 }
 
 /* *****************************************************************************

@@ -129,12 +129,14 @@
 #include "154 ed25519.h"
 #endif
 
-#if defined(FIO_SERVER) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "400 server.h"
+#if defined(FIO_IO) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "400 io api.h"
+#include "401 io types.h"
+#include "402 io reactor.h"
 #if defined(HAVE_OPENSSL)
-#include "402 openssl.h"
+#include "411 openssl.h"
 #endif
-#endif /* FIO_SERVER */
+#endif /* FIO_IO */
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
@@ -170,6 +172,7 @@
 #include "902 glob matching.h"
 #include "902 http handle.h"
 #include "902 imap.h"
+#include "902 io.h"
 #include "902 math.h"
 #include "902 memalt.h"
 #include "902 mustache.h"
@@ -177,7 +180,6 @@
 #include "902 pubsub.h"
 #include "902 queue.h"
 #include "902 random.h"
-#include "902 server.h"
 #include "902 sock.h"
 #include "902 sort.h"
 #include "902 state callbacks.h"

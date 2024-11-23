@@ -20,14 +20,14 @@ This program uses a single thread, which reduces complexity.
 #include "fio-stl/include.h"
 
 /** Called When the client socket is attached to the server. */
-FIO_SFUNC void on_attach(fio_s *io);
+FIO_SFUNC void on_attach(fio_io_s *io);
 /** Called there's incoming data (from the server). */
-FIO_SFUNC void on_data(fio_s *io);
+FIO_SFUNC void on_data(fio_io_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(void *udata);
+FIO_SFUNC void on_close(void *buf, void *udata);
 
 /** Socket client protocol */
-static fio_protocol_s CLIENT_PROTOCOL = {
+static fio_io_protocol_s CLIENT_PROTOCOL = {
     .on_attach = on_attach,
     .on_data = on_data,
     .on_close = on_close,
@@ -56,14 +56,14 @@ FIO_SFUNC void client_on_finish(fio_http_s *h);
 FIO_SFUNC void client_on_ready(fio_http_s *h);
 
 /** Called there's incoming data from STDIN. */
-FIO_SFUNC void on_input(fio_s *io);
+FIO_SFUNC void on_input(fio_io_s *io);
 /** Called when STDIN closed. */
-FIO_SFUNC void on_input_closed(void *udata);
+FIO_SFUNC void on_input_closed(void *buf, void *udata);
 /** Called if connection failed to establish. */
-FIO_SFUNC void on_failed(fio_protocol_s *p, void *arg);
+FIO_SFUNC void on_failed(fio_io_protocol_s *p, void *arg);
 
 /** STDIN protocol (REPL) */
-static fio_protocol_s STDIN_PROTOCOL = {
+static fio_io_protocol_s STDIN_PROTOCOL = {
     .on_data = on_input,
     .on_close = on_input_closed,
 };
@@ -134,7 +134,7 @@ int main(int argc, char const *argv[]) {
   /* set connection task in master process. */
   fio_state_callback_add(FIO_CALL_ON_START, open_client_connection, is_http);
   /* start server, connection termination will stop it. */
-  fio_srv_start(0);
+  fio_io_start(0);
   return 0;
 }
 
@@ -161,10 +161,10 @@ FIO_SFUNC void open_client_connection(void *is_http) {
   } else {
     /* Raw TCP/IP / UDP Client */
     CLIENT_PROTOCOL.timeout = (fio_cli_get_i("-t") * 1000);
-    FIO_ASSERT(fio_srv_connect(fio_cli_unnamed(0),
-                               .protocol = &CLIENT_PROTOCOL,
-                               .on_failed = on_failed,
-                               .timeout = (fio_cli_get_i("-w") * 1000)),
+    FIO_ASSERT(fio_io_connect(fio_cli_unnamed(0),
+                              .protocol = &CLIENT_PROTOCOL,
+                              .on_failed = on_failed,
+                              .timeout = (fio_cli_get_i("-w") * 1000)),
                "Connection error!");
   }
 }
@@ -174,7 +174,7 @@ Input from STDIN - directed to the client's socket using pub/sub
 ***************************************************************************** */
 
 /** Called there's incoming data (from STDIN / the client socket). */
-FIO_SFUNC void on_input(fio_s *io) {
+FIO_SFUNC void on_input(fio_io_s *io) {
   struct {
     size_t len;
     char buf[4080];
@@ -192,10 +192,10 @@ FIO_SFUNC void on_input(fio_s *io) {
 }
 
 /** Called when STDIN closed. */
-FIO_SFUNC void on_input_closed(void *udata) {
+FIO_SFUNC void on_input_closed(void *buf, void *udata) {
   FIO_LOG_DEBUG2("STDIN input stream closed.");
-  fio_srv_stop();
-  (void)udata;
+  fio_io_stop();
+  (void)buf, (void)udata;
 }
 
 /* Debug messages for STDIN round-trip */
@@ -208,7 +208,7 @@ void debug_subscriber(fio_msg_s *msg) {
 /* Attach STDIN */
 FIO_SFUNC void attach_stdin(void) {
   FIO_LOG_DEBUG2("listening to user input on STDIN.");
-  fio_srv_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
+  fio_io_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
   if (fio_cli_get_bool("-V"))
     fio_subscribe(.channel = FIO_BUF_INFO1("client"),
                   .on_message = debug_subscriber,
@@ -220,19 +220,19 @@ IO callback(s)
 ***************************************************************************** */
 
 /** Called When the client socket is attached to the server. */
-FIO_SFUNC void on_attach(fio_s *io) {
+FIO_SFUNC void on_attach(fio_io_s *io) {
   fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("client"));
-  fio_udata_set(io, (void *)1);
+  fio_io_udata_set(io, (void *)1);
   FIO_LOG_DEBUG2("* connection established.\n");
   FIO_LOG_DEBUG2("Connected client IO to pub/sub");
   attach_stdin();
 }
 /** Called there's incoming data from the client socket. */
-FIO_SFUNC void on_data(fio_s *io) {
+FIO_SFUNC void on_data(fio_io_s *io) {
   FIO_LOG_DEBUG2("on_data callback called for: %p", io);
   char buf[4080];
   for (;;) { /* read until done */
-    size_t l = fio_read(io, buf, 4080);
+    size_t l = fio_io_read(io, buf, 4080);
     if (!l)
       return;
     fwrite(buf, 1, l, stdout); /* test for incomplete `write`? */
@@ -240,16 +240,16 @@ FIO_SFUNC void on_data(fio_s *io) {
 }
 
 /** Called when the monitored IO is closed or has a fatal error. */
-FIO_SFUNC void on_close(void *arg) {
+FIO_SFUNC void on_close(void *buf, void *udata) {
   FIO_LOG_DEBUG2("Connection lost, shutting down client.");
-  fio_srv_stop();
-  (void)arg;
+  fio_io_stop();
+  (void)buf, (void)udata;
 }
 
 /** Called if connection failed to establish. */
-FIO_SFUNC void on_failed(fio_protocol_s *p, void *arg) {
+FIO_SFUNC void on_failed(fio_io_protocol_s *p, void *arg) {
   FIO_LOG_ERROR("Connection failed / no data received: %s", fio_cli_unnamed(0));
-  p->on_close(arg);
+  p->on_close(arg, NULL);
 }
 
 /* *****************************************************************************
@@ -287,7 +287,7 @@ FIO_SFUNC void client_on_http(fio_http_s *h) {
     printf("%.*s", (int)buf.len, buf.buf);
   }
 
-  fio_srv_stop();
+  fio_io_stop();
 }
 
 /** Called once a WebSocket / SSE connection upgrade is complete. */
@@ -335,13 +335,13 @@ FIO_SFUNC void client_on_eventsource(fio_http_s *h,
 FIO_SFUNC void client_on_finish(fio_http_s *h) {
   if (!fio_cli_get_bool("-b"))
     FIO_LOG_INFO("Connection Closed");
-  fio_srv_stop();
+  fio_io_stop();
   (void)h;
 }
 
 /** Called for show. */
 FIO_SFUNC void client_on_ready(fio_http_s *h) {
   FIO_LOG_DEBUG2("ON_READY Called! %zu bytes in outgoing buffer.",
-                 fio_srv_backlog(fio_http_io(h)));
+                 fio_io_backlog(fio_http_io(h)));
   (void)h;
 }

@@ -605,6 +605,47 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 
 Used internally to name test functions.
 
+#### `FIO_IFUNC_DEF_GET`
+
+```c
+#define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
+  /** Returns current value of property within the struct / union. */          \
+  FIO_IFUNC F_type FIO_NAME(namespace, field_name)(T_type * o) {               \
+    return o->field_name;                                                      \
+  }
+```
+
+Defines a "get" function for a field within a struct / union.
+
+This allows for consistent naming of "get" functions.
+
+ **Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
+
+#### `FIO_IFUNC_DEF_SET`
+
+```c
+#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)               \
+  /** Sets a new value, returning the old one */                               \
+  FIO_IFUNC F_type FIO_NAME(FIO_NAME(namespace, field_name),                   \
+                            set)(T_type * o, F_type new_value) {               \
+    F_type old_value = o->field_name;                                          \
+    o->field_name = new_value;                                                 \
+    return old_value;                                                          \
+  }
+```
+
+Defines a "set" function for a field within a struct / union.
+
+#### `FIO_IFUNC_DEF_GETSET`
+
+```c
+#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, field_name)            \
+  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)                     \
+  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)
+```
+
+Shortcut for defining both a `get` and a `set` function for a field within a struct / union.
+
 -------------------------------------------------------------------------------
 
 ## Memory Copying, Seeking and Setting

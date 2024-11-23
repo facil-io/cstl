@@ -355,7 +355,7 @@ FIO_SFUNC void fio_test_dynamic_types(void) {
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, fiobj)();
   fprintf(stderr, "===============\n");
-  FIO_NAME_TEST(stl, server)();
+  FIO_NAME_TEST(stl, io)();
   FIO_NAME_TEST(stl, pubsub)();
   fprintf(stderr, "===============\n");
   FIO_NAME_TEST(stl, http_s)();

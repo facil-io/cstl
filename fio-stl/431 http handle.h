@@ -927,19 +927,21 @@ static struct {
 
 #if FIO_HTTP_CACHE_STATIC_HEADERS
 
-#define FIO___HTTP_STATIC_CACHE_MASK       127
-#define FIO___HTTP_STATIC_CACHE_FOLD       56
-#define FIO___HTTP_STATIC_CACHE_STEP       1
-#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 2
-#define FIO___HTTP_STATIC_CACHE_MASK_INV                                       \
-  (~(uint16_t)FIO___HTTP_STATIC_CACHE_MASK)
+#define FIO___HTTP_STATIC_CACHE_CAPA_BITS  7
+#define FIO___HTTP_STATIC_CACHE_CAPA       (1U << FIO___HTTP_STATIC_CACHE_CAPA_BITS)
+#define FIO___HTTP_STATIC_CACHE_MASK       (FIO___HTTP_STATIC_CACHE_CAPA - 1)
+#define FIO___HTTP_STATIC_CACHE_STEP_LIMIT 4
 
-static struct {
+typedef struct FIO___HTTP_STATIC_CACHE_T {
   fio___bstr_meta_s meta;
   char str[32];
-} FIO___HTTP_STATIC_CACHE[] = {
+} FIO___HTTP_STATIC_CACHE_T;
+static FIO___HTTP_STATIC_CACHE_T FIO___HTTP_STATIC_CACHE[] = {
 #define FIO___HTTP_STATIC_CACHE_SET(s)                                         \
-  { .meta = {.len = (uint32_t)(sizeof(s) - 1), .ref = 3}, .str = s }
+  {                                                                            \
+    .meta = {.len = (uint32_t)(sizeof(s) - 1), .ref = ((uint32_t)(~0) >> 8)},  \
+    .str = s                                                                   \
+  }
     FIO___HTTP_STATIC_CACHE_SET("a-im"),
     FIO___HTTP_STATIC_CACHE_SET("accept"),
     FIO___HTTP_STATIC_CACHE_SET("accept-charset"),
@@ -1014,66 +1016,123 @@ static struct {
     FIO___HTTP_STATIC_CACHE_SET("x-requested-with"),
     {{0}}};
 
-static uint16_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_MASK + 1] =
-    {0};
+static uint32_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_CAPA];
+
+static uint64_t fio___http_str_cached_hash(char *str, size_t len) {
+  /* use low-case hash specific for the HTTP handle (change resilient) */
+  const fio_u256 primes = fio_u256_init64(FIO_U64_HASH_PRIME1,
+                                          FIO_U64_HASH_PRIME2,
+                                          FIO_U64_HASH_PRIME3,
+                                          FIO_U64_HASH_PRIME4);
+  uint64_t hash = 0;
+  if (len > 32)
+    return hash;
+  fio_u512 s = {0};
+  fio_memcpy63x(s.u8, str, len);
+  for (size_t i = 0; i < 4; ++i)
+    s.u64[i] = fio_ltole64(s.u64[i]);
+#if 0
+  fio_u256_cor64(s.u256, s.u256, 0x2020202020202020ULL); /* lower case hash */
+  fio_u256_cadd16(s.u256, s.u256, len);
+  for (size_t i = 0; i < 4; ++i)
+    s.u64[i] = fio_math_mulc64(s.u64[i], primes.u64[i], s.u64 + 4 + i);
+  hash = fio_u256_reduce_add64(s.u256 + 1);
+  hash ^= fio_u256_reduce_add64(s.u256);
+  fio_u256_cxor64(s.u256, s.u256, hash);
+  hash += fio_u256_reduce_add64(s.u256);
+#else
+  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], 0x2020202020202020ULL, 64, |);
+  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], (uint16_t)len, 16, +);
+  for (size_t i = 0; i < 4; ++i) {
+    s.u64[i] = fio_math_mulc64(s.u64[i], primes.u64[i], s.u64 + 4 + i);
+  }
+  uint64_t tmp;
+  FIO_MATH_UXXX_REDUCE(hash, s.u256[1], 64, +);
+  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0], 64, +);
+  hash ^= tmp;
+  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], hash, 64, ^);
+  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0], 64, +);
+  hash += tmp;
+#endif
+  // hash += hash >> 4;
+  hash += hash >> 5;
+  return hash;
+}
+
+#ifndef FIO___HTTP_STATIC_CACHE_CMP_SECURE
+#define FIO___HTTP_STATIC_CACHE_CMP_SECURE 0
+#endif
+static bool fio___http_str_cached_cmp(void *arry, void *obj, uint32_t indx) {
+  FIO___HTTP_STATIC_CACHE_T *ary = (FIO___HTTP_STATIC_CACHE_T *)arry;
+  if (indx >
+      ((sizeof(FIO___HTTP_STATIC_CACHE) / sizeof(FIO___HTTP_STATIC_CACHE[0])) -
+       1))
+    return 0;
+  fio_buf_info_s *s = (fio_buf_info_s *)obj;
+  fio_buf_info_s t = FIO_BUF_INFO2(ary[indx].str, ary[indx].meta.len);
+#if FIO___HTTP_STATIC_CACHE_CMP_SECURE
+  return FIO_BUF_INFO_IS_EQ((*s), t);
+#else
+  return s[0].len == t.len && s[0].buf[0] == (t.buf[0] | 32);
+#endif
+}
+#undef FIO___HTTP_STATIC_CACHE_CMP_SECURE
+
+static char *fio___http_str_cached_static(char *str, size_t len) {
+  if (len >= 32)
+    return NULL;
+  fio_buf_info_s obj = FIO_BUF_INFO2(str, len);
+  uint64_t hash = fio___http_str_cached_hash(obj.buf, obj.len);
+  fio___imap32_seeker_s pos =
+      fio___imap32_seek((void *)FIO___HTTP_STATIC_CACHE,
+                        FIO___HTTP_STATIC_CACHE_IMAP,
+                        FIO___HTTP_STATIC_CACHE_CAPA_BITS,
+                        (void *)&obj,
+                        (uint32_t)hash,
+                        fio___http_str_cached_cmp,
+                        FIO___HTTP_STATIC_CACHE_STEP_LIMIT);
+  if (!pos.is_valid)
+    return NULL;
+  ++FIO___HTTP_STATIC_CACHE[pos.pos].meta.ref;
+  return FIO___HTTP_STATIC_CACHE[pos.pos].str;
+}
 
 static void fio___http_str_cached_init(void) {
   FIO_MEMSET(FIO___HTTP_STATIC_CACHE_IMAP,
              0,
-             (FIO___HTTP_STATIC_CACHE_MASK + 1) *
-                 sizeof(FIO___HTTP_STATIC_CACHE_IMAP[0]));
+             sizeof(FIO___HTTP_STATIC_CACHE_IMAP));
 
   for (size_t i = 0; FIO___HTTP_STATIC_CACHE[i].meta.ref; ++i) {
-    uint64_t hash = fio_stable_hash(FIO___HTTP_STATIC_CACHE[i].str,
-                                    FIO___HTTP_STATIC_CACHE[i].meta.len,
-                                    0); /* use stable hash (change resilient) */
-    hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
-    size_t protection = 0;
-    while (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK]) {
-      FIO_ASSERT(
-          (FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-           FIO___HTTP_STATIC_CACHE_MASK_INV) !=
-              (hash & FIO___HTTP_STATIC_CACHE_MASK_INV),
-          "full collision for HTTP static hash (%zu == %zu!",
-          (size_t)(hash & FIO___HTTP_STATIC_CACHE_MASK),
-          i);
-      hash += hash >> FIO___HTTP_STATIC_CACHE_STEP;
-      FIO_ASSERT((protection++) < FIO___HTTP_STATIC_CACHE_STEP_LIMIT,
-                 "HTTP static cache collision overflow @ %zu (%s)",
-                 i,
-                 FIO___HTTP_STATIC_CACHE[i].str);
-    }
-    FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] =
-        (hash & FIO___HTTP_STATIC_CACHE_MASK_INV) | i;
+    fio_buf_info_s obj = FIO_BUF_INFO2(FIO___HTTP_STATIC_CACHE[i].str,
+                                       FIO___HTTP_STATIC_CACHE[i].meta.len);
+    uint64_t hash = fio___http_str_cached_hash(obj.buf, obj.len);
+    fio___imap32_seeker_s pos =
+        fio___imap32_seek((void *)FIO___HTTP_STATIC_CACHE,
+                          FIO___HTTP_STATIC_CACHE_IMAP,
+                          FIO___HTTP_STATIC_CACHE_CAPA_BITS,
+                          (void *)&obj,
+                          hash,
+                          fio___http_str_cached_cmp,
+                          FIO___HTTP_STATIC_CACHE_STEP_LIMIT);
+    FIO_ASSERT(!pos.is_valid && pos.ipos < FIO___HTTP_STATIC_CACHE_CAPA &&
+                   !FIO___HTTP_STATIC_CACHE_IMAP[pos.ipos],
+               "HTTP static cache collision / overflow @ %zu (%s)",
+               i,
+               obj.buf);
+
+    pos.set_val |= i;
+    fio___imap32_set(FIO___HTTP_STATIC_CACHE_IMAP, pos.ipos, pos.set_val);
+
+    FIO_ASSERT(fio___http_str_cached_static(obj.buf, obj.len) == obj.buf,
+               "HTTP static cache initialization round-trip error @ %zu (%s)",
+               i,
+               obj.buf);
   }
 }
 
-static char *fio___http_str_cached_static(char *str, size_t len) {
-  uint64_t hash =
-      fio_stable_hash(str, len, 0); /* use stable hash (change resilient) */
-  hash ^= hash >> FIO___HTTP_STATIC_CACHE_FOLD;
-  for (size_t attempts = 0; attempts < FIO___HTTP_STATIC_CACHE_STEP_LIMIT;
-       ++attempts) {
-    if ((FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-         FIO___HTTP_STATIC_CACHE_MASK_INV) ==
-        (hash & FIO___HTTP_STATIC_CACHE_MASK_INV))
-      break;
-    hash += hash >> FIO___HTTP_STATIC_CACHE_STEP;
-  }
-  size_t pos =
-      FIO___HTTP_STATIC_CACHE_IMAP[hash & FIO___HTTP_STATIC_CACHE_MASK] &
-      FIO___HTTP_STATIC_CACHE_MASK;
-  if (FIO___HTTP_STATIC_CACHE[pos].meta.len == len &&
-      !FIO_MEMCMP(str, FIO___HTTP_STATIC_CACHE[pos].str, len)) {
-    return FIO___HTTP_STATIC_CACHE[pos].str;
-  }
-  return NULL;
-}
-
-#undef FIO___HTTP_STATIC_CACHE_FOLD
+#undef FIO___HTTP_STATIC_CACHE_CAPA_BITS
+#undef FIO___HTTP_STATIC_CACHE_CAPA
 #undef FIO___HTTP_STATIC_CACHE_MASK
-#undef FIO___HTTP_STATIC_CACHE_MASK_INV
-#undef FIO___HTTP_STATIC_CACHE_STEP
 #undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
 #else
 #define fio___http_str_cached_init() (void)0
@@ -1120,8 +1179,12 @@ FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
   if (s.len > FIO_HTTP_CACHE_STR_MAX_LEN)
     goto skip_cache_test;
   tmp = fio___http_str_cached_static(s.buf, s.len);
-  if (tmp)
-    return fio_bstr_copy(tmp);
+  if (tmp) {
+    FIO_LOG_DDEBUG2("(%d) using statically cached header: %s",
+                    fio_io_pid(),
+                    tmp);
+    return tmp; /* reference count increased by fio___http_str_cached_static */
+  }
 skip_cache_test:
 #endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
   return fio_bstr_write(NULL, s.buf, s.len);
@@ -1489,13 +1552,13 @@ Simple Property Set / Get
 ***************************************************************************** */
 
 #define HTTP___MAKE_GET_SET(property)                                          \
-  fio_str_info_s fio_http_##property(fio_http_s *h) {                          \
+  FIO_IFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return fio_keystr_info(&h->property);                                      \
   }                                                                            \
                                                                                \
-  fio_str_info_s fio_http_##property##_set(fio_http_s *h,                      \
-                                           fio_str_info_s value) {             \
+  FIO_IFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,            \
+                                                     fio_str_info_s value) {   \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
@@ -1509,8 +1572,7 @@ HTTP___MAKE_GET_SET(version)
 
 #undef HTTP___MAKE_GET_SET
 
-/** Gets the status associated with the HTTP handle (response). */
-SFUNC size_t fio_http_status(fio_http_s *h) { return (size_t)(h->status); }
+FIO_IFUNC_DEF_GET(fio_http, fio_http_s, size_t, status)
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {

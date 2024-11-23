@@ -31,7 +31,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.09"
+#define FIO_VERSION_BUILD "alpha.10"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -360,6 +360,32 @@ Function Attributes
 #define FIO_WEAK __attribute__((weak))
 #endif
 
+#ifndef FIO_IFUNC_DEF_GETSET
+/** Defines a "get" function for a field within a struct / union. */
+#define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
+  /** Returns current value of property within the struct / union. */          \
+  FIO_IFUNC F_type FIO_NAME(namespace, field_name)(T_type * o) {               \
+    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `get`!"); \
+    return o->field_name;                                                      \
+  }
+
+/** Defines a "set" function for a field within a struct / union. */
+#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)               \
+  /** Sets a new value, returning the old one */                               \
+  FIO_IFUNC F_type FIO_NAME(FIO_NAME(namespace, field_name),                   \
+                            set)(T_type * o, F_type new_value) {               \
+    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `set`!"); \
+    F_type old_value = o->field_name;                                          \
+    o->field_name = new_value;                                                 \
+    return old_value;                                                          \
+  }
+
+/** Defines get/set functions for a field within a struct / union. */
+#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, field_name)            \
+  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)                     \
+  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)
+
+#endif /* FIO_IFUNC_DEF_GETSET */
 /* *****************************************************************************
 Constructors and Destructors
 ***************************************************************************** */
@@ -2485,6 +2511,46 @@ FIO_IFUNC void fio_bit_flip(void *map, size_t bit) {
 }
 
 /* *****************************************************************************
+Fun Primes
+***************************************************************************** */
+
+/* Primes with with 16 bits, half of them set. */
+#define FIO_U16_HASH_PRIME0 0xDA23U
+#define FIO_U16_HASH_PRIME1 0xB48BU
+#define FIO_U16_HASH_PRIME2 0xC917U
+#define FIO_U16_HASH_PRIME3 0xD855U
+#define FIO_U16_HASH_PRIME4 0xE0B9U
+#define FIO_U16_HASH_PRIME5 0xE471U
+#define FIO_U16_HASH_PRIME6 0x85CDU
+#define FIO_U16_HASH_PRIME7 0xD433U
+#define FIO_U16_HASH_PRIME8 0xE951U
+#define FIO_U16_HASH_PRIME9 0xA8E5U
+
+/* Primes with with 32 bits, half of them set. */
+#define FIO_U32_HASH_PRIME0 0xC19F5985UL
+#define FIO_U32_HASH_PRIME1 0x8D567931UL
+#define FIO_U32_HASH_PRIME2 0x9C178B17UL
+#define FIO_U32_HASH_PRIME3 0xA4B842DFUL
+#define FIO_U32_HASH_PRIME4 0xB0B94EC9UL
+#define FIO_U32_HASH_PRIME5 0xFA9E7084UL
+#define FIO_U32_HASH_PRIME6 0xCA63037BUL
+#define FIO_U32_HASH_PRIME7 0xD728C15DUL
+#define FIO_U32_HASH_PRIME8 0xA872A277UL
+#define FIO_U32_HASH_PRIME9 0xF5781551UL
+
+/* Primes with with 64 bits, half of them set. */
+#define FIO_U64_HASH_PRIME0 0x39664DEECA23D825
+#define FIO_U64_HASH_PRIME1 0x48644F7B3959621F
+#define FIO_U64_HASH_PRIME2 0x613A19F5CB0D98D5
+#define FIO_U64_HASH_PRIME3 0x84B56B93C869EA0F
+#define FIO_U64_HASH_PRIME4 0x8EE38D13E0D95A8D
+#define FIO_U64_HASH_PRIME5 0x92E99EC981F0E279
+#define FIO_U64_HASH_PRIME6 0xDDC3100BEF158BB1
+#define FIO_U64_HASH_PRIME7 0x918F4D38049F78BD
+#define FIO_U64_HASH_PRIME8 0xB6C9F8032A35E2D9
+#define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
+
+/* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
 ***************************************************************************** */
 
@@ -2902,7 +2968,8 @@ FIO_MATH_TYPE_LOADER(4096, 512)
 Vector Helpers - Vector Math Operations
 ***************************************************************************** */
 
-#if FIO_HAS_UX || !defined(DEBUG)
+#if FIO_HAS_UX && !defined(DEBUG)
+
 /** Performs `a op b` (+,-, *, etc') as a vector of `bit` long words. */
 #define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
   do {                                                                         \

@@ -27,7 +27,7 @@ Pub/Sub - message format
 /** Message structure, as received by the `on_message` subscription callback. */
 struct fio_msg_s {
   /** A connection (if any) to which the subscription belongs. */
-  fio_s *io;
+  fio_io_s *io;
   /** The `udata` argument associated with the subscription. */
   void *udata;
   /** Message ID. */
@@ -70,7 +70,7 @@ typedef struct {
    * subscription per channel for the global system unless managing the
    * subscription handle manually.
    */
-  fio_s *io;
+  fio_io_s *io;
   /**
    * A named `channel` to which the message was sent.
    *
@@ -170,7 +170,7 @@ typedef struct fio_publish_args_s {
   fio_pubsub_engine_s const *engine;
   /** If `from` is specified, it will be skipped (won't receive message)
    *  UNLESS a non-native `engine` is specified. */
-  fio_s *from;
+  fio_io_s *from;
   /** Message ID (if missing, a random ID will be generated). */
   uint64_t id;
   /** Milliseconds since epoch (if missing, defaults to "now"). */
@@ -372,7 +372,7 @@ Pub/Sub Middleware and Extensions ("Engines")
  *
  * IMPORTANT: The callbacks will be called by the main IO thread, so they should
  * never block. Long tasks should copy the data and scheduling an external task
- * (i.e., using `fio_srv_defer`).
+ * (i.e., using `fio_io_defer`).
  */
 struct fio_pubsub_engine_s {
   /** Called after the engine was detached, may be used for cleanup. */
@@ -500,7 +500,7 @@ FIO_SFUNC void fio___subscription_mock_cb(fio_msg_s *msg) { (void)msg; }
 FIO_SFUNC void fio___subscription_call_protocol(fio_msg_s *msg) {
   if (!msg->io)
     return;
-  fio_protocol_s *p = fio_protocol(msg->io);
+  fio_io_protocol_s *p = fio_io_protocol(msg->io);
   FIO_ASSERT_DEBUG(p, "every IO object should have a protocol, always");
   p->on_pubsub(msg);
 }
@@ -544,7 +544,7 @@ typedef struct fio_subscription_s {
   FIO_LIST_NODE history;
   FIO_LIST_NODE history_active;
   uint64_t replay_since;
-  fio_s *io;
+  fio_io_s *io;
   fio_channel_s *channel;
   void (*on_message)(fio_msg_s *msg);
   void (*on_unsubscribe)(void *udata);
@@ -594,22 +594,25 @@ typedef struct {
 
 FIO_LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
 
-FIO_SFUNC fio___pubsub_message_parser_s *fio___pubsub_message_parser_new(void) {
-  fio___pubsub_message_parser_s *p =
-      (fio___pubsub_message_parser_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*p), 0);
-  FIO_ASSERT_ALLOC(p);
-  FIO_LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
-  *p = (fio___pubsub_message_parser_s){0};
-  return p;
+FIO_IFUNC fio___pubsub_message_parser_s *fio___pubsub_message_parser(
+    fio_io_s *io) {
+  return (fio___pubsub_message_parser_s *)fio_io_buffer(io);
 }
 
-FIO_SFUNC void fio___pubsub_message_parser_free(
+FIO_SFUNC void fio___pubsub_message_parser_init(
+    fio___pubsub_message_parser_s *p) {
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
+  p->len = 0;
+  p->uuid[0] = p->uuid[1] = 0;
+  p->msg = NULL;
+}
+
+FIO_SFUNC void fio___pubsub_message_parser_destroy(
     fio___pubsub_message_parser_s *p) {
   if (!p)
     return;
   fio___pubsub_message_free(p->msg);
   FIO_LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
-  FIO_MEM_FREE_(p, sizeof(*p));
 }
 
 /* *****************************************************************************
@@ -678,7 +681,7 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy(fio_subscription_s *s) {
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = s->on_unsubscribe};
-    fio_queue_push(fio_srv_queue(),
+    fio_queue_push(fio_io_queue(),
                    fio___pubsub_subscription_on_destroy__task,
                    u.p,
                    s->udata);
@@ -756,12 +759,13 @@ Pub/Sub Post Office State
 #define FIO___IPC_LEN 256
 #endif
 
-FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata);
-FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_close(void *buffer, void *udata);
+FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_iomem_free(void *p_);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
@@ -784,10 +788,10 @@ static struct FIO___PUBSUB_POSTOFFICE {
   fio___pubsub_message_map_s remote_messages;
   fio___pubsub_message_map_s history_messages;
   struct {
-    fio_protocol_s ipc;
-    fio_protocol_s remote;
+    fio_io_protocol_s ipc;
+    fio_io_protocol_s remote;
   } protocol;
-  fio_s *broadcaster;
+  fio_io_s *broadcaster;
   struct {
     fio_msg_metadata_fn build;
     void (*cleanup)(void *);
@@ -809,7 +813,8 @@ static struct FIO___PUBSUB_POSTOFFICE {
                     .on_attach = fio___pubsub_protocol_on_attach,
                     .on_data = fio___pubsub_protocol_on_data_master,
                     .on_close = fio___pubsub_protocol_on_close,
-                    .on_timeout = fio_touch,
+                    .on_timeout = fio_io_touch,
+                    .buffer_size = sizeof(fio___pubsub_message_parser_s),
                 },
             .remote =
                 {
@@ -817,6 +822,7 @@ static struct FIO___PUBSUB_POSTOFFICE {
                     .on_data = fio___pubsub_protocol_on_data_remote,
                     .on_close = fio___pubsub_protocol_on_close,
                     .on_timeout = fio___pubsub_protocol_on_timeout,
+                    .buffer_size = sizeof(fio___pubsub_message_parser_s),
                 },
         },
 };
@@ -832,7 +838,7 @@ PostOffice Helpers
 
 /** Sets the current IPC socket address (shouldn't be changed while running). */
 SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
-  if (fio_srv_is_running() || len >= FIO___IPC_LEN)
+  if (fio_io_is_running() || len >= FIO___IPC_LEN)
     return -1;
   fio_str_info_s url =
       FIO_STR_INFO3(FIO___PUBSUB_POSTOFFICE.ipc_url, 0, FIO___IPC_LEN);
@@ -963,17 +969,17 @@ Listening to Local Connections (IPC)
 /** Starts listening to IPC connections on a local socket. */
 FIO_IFUNC void fio___pubsub_ipc_listen(void *ignr_) {
   (void)ignr_;
-  if (fio_srv_is_worker()) {
+  if (fio_io_is_worker()) {
     FIO_LOG_DEBUG2("(%d) pub/sub IPC socket skipped - no workers are spawned.",
-                   fio_srv_pid());
+                   fio_io_pid());
     return;
   }
-  FIO_ASSERT(fio_srv_listen(.url = FIO___PUBSUB_POSTOFFICE.ipc_url,
-                            .protocol = &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                            .on_root = 1,
-                            .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
+  FIO_ASSERT(fio_io_listen(.url = FIO___PUBSUB_POSTOFFICE.ipc_url,
+                           .protocol = &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                           .on_root = 1,
+                           .hide_from_log = FIO___PUBSUB_HIDE_FROM_LOG),
              "(%d) pub/sub couldn't open a socket for IPC\n\t\t%s",
-             fio_srv_pid(),
+             fio_io_pid(),
              FIO___PUBSUB_POSTOFFICE.ipc_url);
 }
 #undef FIO___PUBSUB_HIDE_FROM_LOG
@@ -985,15 +991,15 @@ Postoffice Constructor / Destructor
 /* listens for IPC connections. */
 FIO_SFUNC void fio___pubsub_ipc_listen(void *);
 /* protocol functions. */
-FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_s *io);
-FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata);
+FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_io_s *io);
+FIO_SFUNC void fio___pubsub_protocol_on_close(void *buffer, void *udata);
 
 FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
   (void)ignr_;
-  fio_queue_perform_all(fio_srv_queue());
+  fio_queue_perform_all(fio_io_queue());
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.global_subscriptions);
   fio___pubsub_broadcast_connected_destroy(
@@ -1002,7 +1008,7 @@ FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
   FIO___LOCK_DESTROY(FIO___PUBSUB_POSTOFFICE.lock);
-  fio_queue_perform_all(fio_srv_queue());
+  fio_queue_perform_all(fio_io_queue());
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -1017,15 +1023,15 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
   FIO___PUBSUB_POSTOFFICE.filter.remote = 0;
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
-  if (!fio_srv_attach_fd(fio_sock_open2(FIO___PUBSUB_POSTOFFICE.ipc_url,
-                                        FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
-                         &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                         NULL,
-                         NULL)) {
+  if (!fio_io_attach_fd(fio_sock_open2(FIO___PUBSUB_POSTOFFICE.ipc_url,
+                                       FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
+                        &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                        NULL,
+                        NULL)) {
     FIO_LOG_FATAL("(%d) couldn't connect to pub/sub socket @ %s",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   FIO___PUBSUB_POSTOFFICE.ipc_url);
-    fio_thread_kill(fio_srv_root_pid(), SIGINT);
+    fio_thread_kill(fio_io_root_pid(), SIGINT);
     FIO_ASSERT(0, "fatal error encountered");
   }
 }
@@ -1047,17 +1053,17 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___pubsub_on_enter_child, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___pubsub_at_exit, NULL);
   /* TODO!!! */
-  FIO___PUBSUB_POSTOFFICE.protocol.ipc = (fio_protocol_s){
+  FIO___PUBSUB_POSTOFFICE.protocol.ipc = (fio_io_protocol_s){
       .on_attach = fio___pubsub_protocol_on_attach,
       .on_data = fio___pubsub_protocol_on_data_master,
       .on_close = fio___pubsub_protocol_on_close,
-      .on_timeout = fio_touch,
+      .on_timeout = fio_io_touch,
   };
-  FIO___PUBSUB_POSTOFFICE.protocol.remote = (fio_protocol_s){
+  FIO___PUBSUB_POSTOFFICE.protocol.remote = (fio_io_protocol_s){
       .on_attach = fio___pubsub_protocol_on_attach,
       .on_data = fio___pubsub_protocol_on_data_remote,
       .on_close = fio___pubsub_protocol_on_close,
-      .on_timeout = fio_touch,
+      .on_timeout = fio_io_touch,
   };
 }
 
@@ -1125,7 +1131,7 @@ FIO_IFUNC void fio___pubsub_subscription_unsubscribe(fio_subscription_s *s) {
   if (!s)
     return;
   s->on_message = fio___subscription_mock_cb;
-  fio_queue_push(fio_srv_queue(),
+  fio_queue_push(fio_io_queue(),
                  fio___pubsub_unsubscribe_task,
                  (void *)s,
                  NULL);
@@ -1171,27 +1177,27 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   if (!args.io)
     goto is_global;
 
-  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
-  fio_env_set(args.io,
-              .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
-                                        (uint16_t)args.filter)),
-              .name = args.channel,
-              .udata = s,
-              .on_close =
-                  (void (*)(void *))fio___pubsub_subscription_unsubscribe);
+  fio_io_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio_io_env_set(
+      args.io,
+      .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
+                                (uint16_t)args.filter)),
+      .name = args.channel,
+      .udata = s,
+      .on_close = (void (*)(void *))fio___pubsub_subscription_unsubscribe);
   return;
 
 has_handle:
-  fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+  fio_io_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
   *args.subscription_handle_ptr = (uintptr_t)s;
   return;
 
 is_master_only:
-  if (!fio_srv_is_master())
+  if (!fio_io_is_master())
     goto error_not_on_master;
 is_global:
   if (1) { /* so C++ can jump even though there's a new var here */
-    fio_srv_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
+    fio_io_defer(fio___pubsub_subscribe_task, (void *)s, NULL);
     uint64_t hashed_value =
         fio_risky_hash(args.channel.buf,
                        args.channel.len,
@@ -1214,7 +1220,7 @@ error_not_on_master:
   fio_subscription_free(s);
   FIO_LOG_WARNING(
       "(%d) master-only subscription attempt on a non-master process: %.*s",
-      fio_srv_pid(),
+      fio_io_pid(),
       (int)args.channel.len,
       args.channel.buf);
   return;
@@ -1222,7 +1228,7 @@ error_not_on_master:
 sub_error:
   FIO_LOG_ERROR("(%d) pub/sub subscription/channel cannot be created?"
                 "\n\t%zu bytes long\n\t%.*s...",
-                fio_srv_pid(),
+                fio_io_pid(),
                 args.channel.len,
                 (int)(args.channel.len > 10 ? 7 : args.channel.len),
                 args.channel.buf);
@@ -1232,7 +1238,7 @@ sub_error:
       void *p;
       void (*fn)(void *udata);
     } u = {.fn = args.on_unsubscribe};
-    fio_queue_push(fio_srv_queue(),
+    fio_queue_push(fio_io_queue(),
                    fio___pubsub_subscription_on_destroy__task,
                    u.p,
                    args.udata);
@@ -1248,7 +1254,7 @@ int fio_unsubscribe FIO_NOOP(fio_subscribe_args_s args) {
   if (args.master_only || !args.io)
     goto is_global;
 
-  return fio_env_remove(
+  return fio_io_env_remove(
       args.io,
       .type = (intptr_t)(0LL - (((2ULL | (!!args.is_pattern)) << 16) |
                                 (uint16_t)args.filter)),
@@ -1304,7 +1310,7 @@ FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *m_) {
   fio___pubsub_message_free(m);
   return;
 reschedule:
-  fio_queue_push(fio_srv_queue(), fio___subscription_on_message_task, s_, m_);
+  fio_queue_push(fio_io_queue(), fio___subscription_on_message_task, s_, m_);
 }
 
 /* returns the internal message object. */
@@ -1329,7 +1335,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.io != s->io && m->data.published >= s->replay_since)
           fio_queue_push(
-              fio_srv_queue(),
+              fio_io_queue(),
               (void (*)(void *, void *))fio___subscription_on_message_task,
               fio_subscription_dup(s),
               fio___pubsub_message_dup(m));
@@ -1338,7 +1344,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.io != s->io)
           fio_queue_push(
-              fio_srv_queue(),
+              fio_io_queue(),
               (void (*)(void *, void *))fio___subscription_on_message_task,
               fio_subscription_dup(s),
               fio___pubsub_message_dup(m));
@@ -1349,7 +1355,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.published >= s->replay_since)
           fio_queue_push(
-              fio_srv_queue(),
+              fio_io_queue(),
               (void (*)(void *, void *))fio___subscription_on_message_task,
               fio_subscription_dup(s),
               fio___pubsub_message_dup(m));
@@ -1357,7 +1363,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
     } else {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         fio_queue_push(
-            fio_srv_queue(),
+            fio_io_queue(),
             (void (*)(void *, void *))fio___subscription_on_message_task,
             fio_subscription_dup(s),
             fio___pubsub_message_dup(m));
@@ -1380,14 +1386,14 @@ FIO_SFUNC void fio___pubsub_message_deliver(fio___pubsub_message_s *m) {
   fio_channel_s **ch_ptr = fio___channel_map_node2key_ptr(
       fio___channel_map_get_ptr(&FIO___PUBSUB_POSTOFFICE.channels, ch_name));
   if (ch_ptr)
-    fio_queue_push(fio_srv_queue(),
+    fio_queue_push(fio_io_queue(),
                    fio___pubsub_channel_deliver_task,
                    fio_channel_dup(ch_ptr[0]),
                    fio___pubsub_message_dup(m));
   FIO_MAP_EACH(fio___channel_map, &FIO___PUBSUB_POSTOFFICE.patterns, i) {
     if (i.node->key->filter == m->data.filter &&
         FIO_PUBSUB_PATTERN_MATCH(i.key, ch_name))
-      fio_queue_push(fio_srv_queue(),
+      fio_queue_push(fio_io_queue(),
                      fio___pubsub_channel_deliver_task,
                      fio_channel_dup(i.node->key),
                      fio___pubsub_message_dup(m));
@@ -1555,18 +1561,18 @@ FIO_IFUNC void fio___pubsub_message_is_dirty(fio___pubsub_message_s *m) {
 Pub/Sub Message Object - IO helpers
 ***************************************************************************** */
 
-FIO_IFUNC void fio___pubsub_message_write2io(fio_s *io, void *m_) {
+FIO_IFUNC void fio___pubsub_message_write2io(fio_io_s *io, void *m_) {
   fio___pubsub_message_s *m = (fio___pubsub_message_s *)m_;
   if (io == m->data.io)
     return;
-  FIO_LOG_DDEBUG2("(%d) pub/sub sending IPC/peer message.", fio_srv_pid());
+  FIO_LOG_DDEBUG2("(%d) pub/sub sending IPC/peer message.", fio_io_pid());
   fio___pubsub_message_encrypt(m);
-  fio_write2(io,
-             .buf = fio___pubsub_message_dup(m),
-             .len = (m->data.message.len + m->data.channel.len +
-                     FIO___PUBSUB_MESSAGE_OVERHEAD_NET),
-             .offset = ((uintptr_t)(m->data.udata) - (uintptr_t)(m)),
-             .dealloc = (void (*)(void *))fio___pubsub_message_free);
+  fio_io_write2(io,
+                .buf = fio___pubsub_message_dup(m),
+                .len = (m->data.message.len + m->data.channel.len +
+                        FIO___PUBSUB_MESSAGE_OVERHEAD_NET),
+                .offset = ((uintptr_t)(m->data.udata) - (uintptr_t)(m)),
+                .dealloc = (void (*)(void *))fio___pubsub_message_free);
 }
 
 /* A callback for IO subscriptions - sends raw message data. */
@@ -1574,11 +1580,11 @@ FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg) {
   if (!msg || !msg->message.len)
     return;
   fio___pubsub_message_s *m = fio___pubsub_msg2internal(msg);
-  fio_write2(msg->io,
-             .buf = fio___pubsub_message_dup(m),
-             .len = msg->message.len,
-             .offset = (size_t)(msg->message.buf - (char *)m),
-             .dealloc = (void (*)(void *))fio___pubsub_message_free);
+  fio_io_write2(msg->io,
+                .buf = fio___pubsub_message_dup(m),
+                .len = msg->message.len,
+                .offset = (size_t)(msg->message.buf - (char *)m),
+                .dealloc = (void (*)(void *))fio___pubsub_message_free);
 }
 
 /* *****************************************************************************
@@ -1589,31 +1595,31 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
   fio___pubsub_message_parser_s *p;
   unsigned flags = m->data.is_json;
   FIO_LOG_DDEBUG2("(%d) pub/sub routing message (%x)",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   (int)m->data.is_json);
 
   if (flags & FIO___PUBSUB_SPECIAL)
     goto is_special_message;
 
   if ((FIO___PUBSUB_POSTOFFICE.filter.publish & flags))
-    fio_queue_push(fio_srv_queue(),
+    fio_queue_push(fio_io_queue(),
                    fio___pubsub_message_deliver_task,
                    fio___pubsub_message_dup(m));
 
   if ((FIO___PUBSUB_POSTOFFICE.filter.local & flags))
-    fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                      fio___pubsub_message_write2io,
-                      m);
+    fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                         fio___pubsub_message_write2io,
+                         m);
 
   if ((FIO___PUBSUB_POSTOFFICE.filter.remote & flags))
-    fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.remote,
-                      fio___pubsub_message_write2io,
-                      m);
+    fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.remote,
+                         fio___pubsub_message_write2io,
+                         m);
   return;
 
 is_special_message:
   FIO_LOG_DDEBUG2("(%d) pub/sub internal subscription/ID message received",
-                  fio_srv_pid());
+                  fio_io_pid());
   switch (flags) {
   case FIO___PUBSUB_SPECIAL: /* TODO: run generic command on root */ break;
   case FIO___PUBSUB_SUB:
@@ -1632,7 +1638,7 @@ is_special_message:
     return;
 
   case FIO___PUBSUB_IDENTIFY:
-    p = (fio___pubsub_message_parser_s *)fio_udata(m->data.io);
+    p = fio___pubsub_message_parser(m->data.io);
     if (p) {
       p->uuid[0] = m->data.id;
       p->uuid[1] = m->data.published;
@@ -1656,20 +1662,20 @@ is_special_message:
       m->data.message.buf[m->data.message.len] = 0;
       e->publish(e, &m->data);
     } else { /* child process */
-      fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                        fio___pubsub_message_write2io,
-                        m);
+      fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                           fio___pubsub_message_write2io,
+                           m);
     }
     return;
 
   case FIO___PUBSUB_HISTORY_START:
     FIO_LOG_DDEBUG2("(%d) pub/sub internal history start message received",
-                    fio_srv_pid());
+                    fio_io_pid());
     /* TODO! */
     return;
   case FIO___PUBSUB_HISTORY_END:
     FIO_LOG_DDEBUG2("(%d) pub/sub internal history end message received",
-                    fio_srv_pid());
+                    fio_io_pid());
     /* TODO! */
     return;
   }
@@ -1692,13 +1698,13 @@ void fio_publish___(void); /* SublimeText marker*/
 void fio_publish FIO_NOOP(fio_publish_args_s args) {
   if (FIO_UNLIKELY(args.channel.len > 0xFFFFUL)) {
     FIO_LOG_ERROR("(%d) pub/sub channel name too long (%zu bytes)",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   args.channel.len);
     return;
   }
   if (FIO_UNLIKELY(args.message.len > 0xFFFFFFUL)) {
     FIO_LOG_ERROR("(%d) pub/sub message payload too large (%zu bytes)",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   args.message.len);
     return;
   }
@@ -1718,7 +1724,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
   m = fio___pubsub_message_author(args);
   m->data.is_json = ((!!args.is_json) | ((uint8_t)(uintptr_t)args.engine));
 
-  fio_srv_defer(fio___publish_message_task, m, NULL);
+  fio_io_defer(fio___publish_message_task, m, NULL);
   return;
 
 external_engine:
@@ -1731,7 +1737,7 @@ external_engine:
   m->data.is_json = ((!!args.is_json) | ((uint8_t)FIO___PUBSUB_FORWARDER));
   FIO_MEMCPY(m->data.message.buf, msg.message.buf, msg.message.len);
   fio_u2buf64u(m->data.message.buf + msg.message.len, (uintptr_t)args.engine);
-  fio_srv_defer(fio___publish_message_task, m, NULL);
+  fio_io_defer(fio___publish_message_task, m, NULL);
 }
 
 /* *****************************************************************************
@@ -1739,18 +1745,18 @@ Pub/Sub Message on-the-wire parsing
 ***************************************************************************** */
 
 FIO_IFUNC void fio___pubsub_message_parse(
-    fio_s *io,
-    void (*cb)(fio_s *, fio___pubsub_message_s *)) {
-  fio___pubsub_message_parser_s *parser =
-      (fio___pubsub_message_parser_s *)fio_udata(io);
+    fio_io_s *io,
+    void (*cb)(fio_io_s *, fio___pubsub_message_s *)) {
+  fio___pubsub_message_parser_s *parser = fio___pubsub_message_parser(io);
   if (!parser)
     return;
   size_t existing = parser->len;
   if (!parser->msg) {
     while (existing < FIO___PUBSUB_MESSAGE_HEADER) { /* get message length */
-      size_t consumed = fio_read(io,
-                                 parser->buf + existing,
-                                 FIO___PUBSUB_MESSAGE_OVERHEAD_NET - existing);
+      size_t consumed =
+          fio_io_read(io,
+                      parser->buf + existing,
+                      FIO___PUBSUB_MESSAGE_OVERHEAD_NET - existing);
       if (!consumed) {
         parser->len = existing;
         return;
@@ -1765,12 +1771,12 @@ FIO_IFUNC void fio___pubsub_message_parse(
   const size_t needed = m->data.channel.len + m->data.message.len +
                         FIO___PUBSUB_MESSAGE_OVERHEAD_NET;
   FIO_LOG_DDEBUG2("(%d) pub/sub parsing IPC/peer message (%zu/%zu bytes)",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   existing,
                   needed);
   while (existing < needed) {
     size_t consumed =
-        fio_read(io, (char *)m->data.udata + existing, needed - existing);
+        fio_io_read(io, (char *)m->data.udata + existing, needed - existing);
     if (!consumed) {
       parser->len = existing;
       return;
@@ -1781,8 +1787,8 @@ FIO_IFUNC void fio___pubsub_message_parse(
   parser->len = 0;
   m->data.io = io;
   if (fio___pubsub_message_decrypt(m)) {
-    FIO_LOG_SECURITY("(%d) pub/sub message decryption error", fio_srv_pid());
-    fio_close_now(io);
+    FIO_LOG_SECURITY("(%d) pub/sub message decryption error", fio_io_pid());
+    fio_io_close_now(io);
   } else {
     cb(io, m);
   }
@@ -1794,17 +1800,17 @@ FIO_IFUNC void fio___pubsub_message_parse(
 Pub/Sub Protocols
 ***************************************************************************** */
 
-FIO_SFUNC void fio___pubsub_on_message_master(fio_s *io,
+FIO_SFUNC void fio___pubsub_on_message_master(fio_io_s *io,
                                               fio___pubsub_message_s *msg) {
   fio___pubsub_message_route(msg);
   (void)io;
 }
-FIO_SFUNC void fio___pubsub_on_message_worker(fio_s *io,
+FIO_SFUNC void fio___pubsub_on_message_worker(fio_io_s *io,
                                               fio___pubsub_message_s *msg) {
   fio___pubsub_message_route(msg);
   (void)io;
 }
-FIO_SFUNC void fio___pubsub_on_message_remote(fio_s *io,
+FIO_SFUNC void fio___pubsub_on_message_remote(fio_io_s *io,
                                               fio___pubsub_message_s *msg) {
   fio___pubsub_message_map_s *map = &FIO___PUBSUB_POSTOFFICE.remote_messages;
   map += !!(msg->data.is_json & FIO___PUBSUB_REPLAY);
@@ -1814,26 +1820,23 @@ FIO_SFUNC void fio___pubsub_on_message_remote(fio_s *io,
   fio___pubsub_message_route(msg);
   (void)io;
 }
-FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_s *io) {
-  fio_udata_set(io, fio___pubsub_message_parser_new());
+FIO_SFUNC void fio___pubsub_protocol_on_attach(fio_io_s *io) {
+  fio___pubsub_message_parser_init(fio___pubsub_message_parser(io));
 }
-FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_s *io) {
+FIO_SFUNC void fio___pubsub_protocol_on_data_master(fio_io_s *io) {
   fio___pubsub_message_parse(io, fio___pubsub_on_message_master);
 }
-FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_s *io) {
+FIO_SFUNC void fio___pubsub_protocol_on_data_worker(fio_io_s *io) {
   fio___pubsub_message_parse(io, fio___pubsub_on_message_worker);
 }
-FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_s *io) {
+FIO_SFUNC void fio___pubsub_protocol_on_data_remote(fio_io_s *io) {
   fio___pubsub_message_parse(io, fio___pubsub_on_message_remote);
 }
-FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata) {
-  fio___pubsub_message_parser_s *p = (fio___pubsub_message_parser_s *)udata;
-  if (!fio_srv_is_master())
-    fio_srv_stop();
-  if (!p)
-    return;
+
+FIO_SFUNC void fio___pubsub_protocol_on_close(void *p_, void *udata) {
+  fio___pubsub_message_parser_s *p = (fio___pubsub_message_parser_s *)p_;
   if (p->uuid[0] || p->uuid[1]) {
-    // TODO!: fio___pubsub_broadcast_hello(fio_s *io) ?
+    // TODO!: fio___pubsub_broadcast_hello(fio_io_s *io) ?
     fio___pubsub_broadcast_connected_remove(
         &FIO___PUBSUB_POSTOFFICE.remote_uuids,
         p->uuid[0],
@@ -1843,13 +1846,18 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *udata) {
                  fio___pubsub_broadcast_connected_count(
                      &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
-  fio___pubsub_message_parser_free(p);
+  fio___pubsub_message_parser_destroy(p);
+  if (!fio_io_is_master())
+    fio_io_stop();
+  (void)udata;
 }
 
-static void fio___pubsub_protocol_on_timeout(fio_s *io) {
+static void fio___pubsub_protocol_on_timeout(fio_io_s *io) {
   static const uint8_t ping_msg[FIO___PUBSUB_MESSAGE_OVERHEAD] = {
       [23] = FIO___PUBSUB_PING};
-  fio_write2(io, .buf = (void *)ping_msg, .len = FIO___PUBSUB_MESSAGE_OVERHEAD);
+  fio_io_write2(io,
+                .buf = (void *)ping_msg,
+                .len = FIO___PUBSUB_MESSAGE_OVERHEAD);
 }
 
 /* *****************************************************************************
@@ -1907,12 +1915,12 @@ FIO_SFUNC void fio___pubsub_detach_task(void *engine, void *ignr_) {
 SFUNC void fio_pubsub_attach(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
-  fio_srv_defer(fio___pubsub_attach_task, engine, NULL);
+  fio_io_defer(fio___pubsub_attach_task, engine, NULL);
 }
 
 /** Schedules an engine for Detachment, so it could be safely destroyed. */
 SFUNC void fio_pubsub_detach(fio_pubsub_engine_s *engine) {
-  fio_queue_push(fio_srv_queue(), fio___pubsub_detach_task, engine, NULL);
+  fio_queue_push(fio_io_queue(), fio___pubsub_detach_task, engine, NULL);
 }
 
 /* *****************************************************************************
@@ -1923,7 +1931,7 @@ Channel Creation / Destruction Callback (notifying engines)
 FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
   FIO_LOG_DDEBUG2("(%d) pub/sub %s created, filter %d, length %zu bytes: %s",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   (ch->is_pattern ? "pattern" : "channel"),
                   (int)ch->filter,
                   (size_t)ch->name_len,
@@ -1941,9 +1949,9 @@ FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
             .is_json = FIO___PUBSUB_SUB,
         });
     if (m) {
-      fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                        fio___pubsub_message_write2io,
-                        m);
+      fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                           fio___pubsub_message_write2io,
+                           m);
       fio___pubsub_message_free(m);
     }
   }
@@ -1965,15 +1973,15 @@ FIO_IFUNC void fio___channel_on_destroy(fio_channel_s *ch) {
             .is_json = FIO___PUBSUB_UNSUB,
         });
     if (m) {
-      fio_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                        fio___pubsub_message_write2io,
-                        m);
+      fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                           fio___pubsub_message_write2io,
+                           m);
       fio___pubsub_message_free(m);
     }
   }
 
   FIO_LOG_DDEBUG2("(%d) pub/sub %s destroyed, filter %d, length %zu bytes: %s",
-                  fio_srv_pid(),
+                  fio_io_pid(),
                   (ch->is_pattern ? "pattern" : "channel"),
                   (int)ch->filter,
                   (size_t)ch->name_len,
@@ -2001,22 +2009,22 @@ FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick) {
   return u;
 }
 
-FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
+FIO_SFUNC void fio___pubsub_broadcast_hello(fio_io_s *io) {
 
-  if (!fio_srv_is_running() || !(io = FIO___PUBSUB_POSTOFFICE.broadcaster))
+  if (!fio_io_is_running() || !(io = FIO___PUBSUB_POSTOFFICE.broadcaster))
     return;
   static int64_t last_hello = 0;
-  int64_t this_hello = fio_srv_last_tick();
+  int64_t this_hello = fio_io_last_tick();
   if (last_hello == this_hello)
     return;
   fio_u512 u = fio___pubsub_broadcast_compose((last_hello = this_hello));
   struct sockaddr_in addr = (struct sockaddr_in){
       .sin_family = AF_INET,
-      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_udata(io)),
+      .sin_port = fio_lton16((uint16_t)(uintptr_t)fio_io_udata(io)),
       .sin_addr.s_addr = INADDR_BROADCAST, // inet_addr("255.255.255.255"),
   };
-  FIO_LOG_DEBUG2("(%d) pub/sub sending broadcast.", fio_srv_pid());
-  sendto(fio_fd(io),
+  FIO_LOG_DEBUG2("(%d) pub/sub sending broadcast.", fio_io_pid());
+  sendto(fio_io_fd(io),
          (const char *)u.u8,
          48,
          0,
@@ -2026,9 +2034,9 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_s *io) {
 
 FIO_SFUNC int fio___pubsub_broadcast_hello_task(void *io_, void *ignr_) {
   (void)ignr_;
-  fio_s *io = (fio_s *)io_;
+  fio_io_s *io = (fio_io_s *)io_;
   fio___pubsub_broadcast_hello(io);
-  fio_undup(io);
+  fio_io_free(io);
   return 0;
 }
 
@@ -2039,12 +2047,12 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
       hello[1] == FIO___PUBSUB_POSTOFFICE.uuid.u64[1])
     return -1;
   /* test time window */
-  mac[0] = fio_srv_last_tick();
+  mac[0] = fio_io_last_tick();
   if (mac[0] > fio_ltole64(hello[3]) + 8192 ||
       mac[0] + 8192 < fio_ltole64(hello[3])) {
     FIO_LOG_SECURITY(
         "(%d) pub/sub-broadcast timing error - possible replay attack?",
-        fio_srv_pid());
+        fio_io_pid());
     return -1;
   }
   /* test for duplicate connections */
@@ -2053,7 +2061,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
           hello[0],
           hello[1])) {
     FIO_LOG_DEBUG2("(%d) pub/sub-broadcast Prevented duplicate connection!",
-                   fio_srv_pid());
+                   fio_io_pid());
     return -1;
   }
   /* test MAC */
@@ -2061,7 +2069,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
   fio_poly1305_auth(mac, k, NULL, 0, hello, 32);
   if (mac[0] != hello[4] || mac[1] != hello[5]) {
     FIO_LOG_SECURITY("(%d) pub/sub-broadcast MAC failure - under attack?",
-                     fio_srv_pid());
+                     fio_io_pid());
     return -1;
   }
   return 0;
@@ -2070,21 +2078,21 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
 Letter Listening to Remote Connections - TODO!
 *****************************************************************************
 */
-FIO_SFUNC void fio___pubsub_broadcast_on_attach(fio_s *io) {
+FIO_SFUNC void fio___pubsub_broadcast_on_attach(fio_io_s *io) {
   fio___pubsub_broadcast_hello((FIO___PUBSUB_POSTOFFICE.broadcaster = io));
-  fio_srv_run_every(.fn = fio___pubsub_broadcast_hello_task,
-                    .udata1 = fio_dup(io),
-                    .every = (uint32_t)(1024 |
-                                        (1023 &
-                                         FIO___PUBSUB_POSTOFFICE.uuid.u64[0])),
-                    .repetitions = 2);
+  fio_io_run_every(.fn = fio___pubsub_broadcast_hello_task,
+                   .udata1 = fio_io_dup(io),
+                   .every =
+                       (uint32_t)(1024 |
+                                  (1023 & FIO___PUBSUB_POSTOFFICE.uuid.u64[0])),
+                   .repetitions = 2);
 }
-FIO_SFUNC void fio___pubsub_broadcast_on_close(void *ignr_) {
+FIO_SFUNC void fio___pubsub_broadcast_on_close(void *ignr1_, void *ignr2_) {
   FIO___PUBSUB_POSTOFFICE.broadcaster = NULL;
-  (void)ignr_;
+  (void)ignr1_, (void)ignr2_;
 }
 
-FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
+FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_io_s *io) {
   uint64_t buf[16];
   struct sockaddr from[2];
   socklen_t from_len = sizeof(from);
@@ -2095,19 +2103,19 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                            .published = FIO___PUBSUB_POSTOFFICE.uuid.u64[1],
                            .is_json = FIO___PUBSUB_IDENTIFY});
 
-  while ((len = recvfrom(fio_fd(io), (char *)buf, 128, 0, from, &from_len)) >
+  while ((len = recvfrom(fio_io_fd(io), (char *)buf, 128, 0, from, &from_len)) >
          0) {
     if (len != 48) {
       FIO_LOG_WARNING(
           "(%d) pub/sub peer detection received invalid packet (%zu bytes)!",
-          fio_srv_pid(),
+          fio_io_pid(),
           len);
       continue;
     }
     if (fio___pubsub_broadcast_hello_validate(buf)) {
       FIO_LOG_WARNING(
           "(%d) pub/sub peer detection received invalid packet payload!",
-          fio_srv_pid());
+          fio_io_pid());
       continue;
     }
     if (fio___pubsub_broadcast_connected_get(
@@ -2129,7 +2137,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
                     addr_buf + 64,
                     64,
                     (NI_NUMERICHOST | NI_NUMERICHOST))) {
-      FIO_LOG_ERROR("(%d) couldn't resolve peer address", fio_srv_pid());
+      FIO_LOG_ERROR("(%d) couldn't resolve peer address", fio_io_pid());
       continue;
     }
     int fd = fio_sock_open(addr_buf,
@@ -2142,31 +2150,31 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_s *io) {
     fio___pubsub_broadcast_connected_set(&FIO___PUBSUB_POSTOFFICE.remote_uuids,
                                          addr_buf[0],
                                          addr_buf[1]);
-    fio_s *peer = fio_srv_attach_fd(fd,
-                                    &FIO___PUBSUB_POSTOFFICE.protocol.remote,
-                                    NULL,
-                                    NULL);
+    fio_io_s *peer = fio_io_attach_fd(fd,
+                                      &FIO___PUBSUB_POSTOFFICE.protocol.remote,
+                                      NULL,
+                                      NULL);
     fio___pubsub_message_write2io(peer, m);
     FIO_LOG_INFO("(%d) pub/sub-cluster connecting to peer (%zu connections).",
-                 fio_srv_pid(),
+                 fio_io_pid(),
                  fio___pubsub_broadcast_connected_count(
                      &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
   fio___pubsub_message_free(m);
   if (should_say_hello)
-    fio_srv_run_every(.fn = fio___pubsub_broadcast_hello_task,
-                      .udata1 = fio_dup(io),
-                      .every =
-                          (uint32_t)(1024 |
-                                     (1023 &
-                                      FIO___PUBSUB_POSTOFFICE.uuid.u64[0])));
+    fio_io_run_every(.fn = fio___pubsub_broadcast_hello_task,
+                     .udata1 = fio_io_dup(io),
+                     .every =
+                         (uint32_t)(1024 |
+                                    (1023 &
+                                     FIO___PUBSUB_POSTOFFICE.uuid.u64[0])));
 }
 
-FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_s *io) {
+FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_io_s *io) {
   int fd;
-  while ((fd = accept(fio_fd(io), NULL, NULL)) != -1) {
+  while ((fd = accept(fio_io_fd(io), NULL, NULL)) != -1) {
     FIO_LOG_DDEBUG2("accepting a cluster peer connection");
-    fio_srv_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
+    fio_io_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
   }
   FIO_LOG_INFO("(cluster) accepted new peer(s) (%zu connections).",
                fio___pubsub_broadcast_connected_count(
@@ -2175,15 +2183,15 @@ FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_s *io) {
 
 SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
   int16_t port = (int16_t)(uintptr_t)port_;
-  static fio_protocol_s broadcast = {
+  static fio_io_protocol_s broadcast = {
       .on_attach = fio___pubsub_broadcast_on_attach,
       .on_data = fio___pubsub_broadcast_on_data,
       .on_close = fio___pubsub_broadcast_on_close,
-      .on_timeout = fio_touch,
+      .on_timeout = fio_io_touch,
   };
-  static fio_protocol_s accept_remote = {
+  static fio_io_protocol_s accept_remote = {
       .on_data = fio___pubsub_broadcast_on_incoming,
-      .on_timeout = fio_touch,
+      .on_timeout = fio_io_touch,
   };
   if (FIO___PUBSUB_POSTOFFICE.secret_is_random) {
     FIO_LOG_ERROR(
@@ -2218,8 +2226,8 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
     enabled = 1;
     setsockopt(fd_udp, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
   }
-  fio_srv_attach_fd(fd_udp, &broadcast, port_, NULL);
-  fio_srv_attach_fd(fd_tcp, &accept_remote, NULL, NULL);
+  fio_io_attach_fd(fd_udp, &broadcast, port_, NULL);
+  fio_io_attach_fd(fd_tcp, &accept_remote, NULL, NULL);
   return;
 }
 

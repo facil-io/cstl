@@ -77,7 +77,7 @@ Main
 ***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
-  static fio_srv_async_s http_queue; /* async queue for worker threads. */
+  static fio_io_async_s http_queue; /* async queue for worker threads. */
 
   /* setup CLI options */
   fio_cli_start(
@@ -162,18 +162,18 @@ int main(int argc, char const *argv[]) {
   }
 
   /* Debug data: print type sizes */
-  FIO_LOG_DEBUG2("IO overhead: %zu bytes", sizeof(fio_s) + 8);
+  FIO_LOG_DEBUG2("IO overhead: %zu bytes", sizeof(fio_io_s) + 8);
   FIO_LOG_DEBUG2("HTTP connection overhead: %zu bytes state + %zu bytes buffer",
                  sizeof(fio___http_connection_s) + 8,
                  FIO_HTTP_DEFAULT_MAX_LINE_LEN);
   FIO_LOG_DEBUG2("HTTP handle overhead: %zu", sizeof(fio_http_s) + 8);
   FIO_LOG_DEBUG2("Total HTTP overhead: %zu+%zu bytes",
-                 sizeof(fio_s) + sizeof(fio___http_connection_s) +
+                 sizeof(fio_io_s) + sizeof(fio___http_connection_s) +
                      sizeof(fio_http_s) + 24,
                  FIO_HTTP_DEFAULT_MAX_LINE_LEN);
 
   /* initialize Async HTTP queue */
-  fio_srv_async_init(&http_queue, fio_srv_workers(fio_cli_get_i("-t")));
+  fio_io_async_attach(&http_queue, fio_io_workers(fio_cli_get_i("-t")));
 
   /* Clustering */
   if (fio_cli_get_i("-bp") > 0) {
@@ -183,19 +183,19 @@ int main(int argc, char const *argv[]) {
   }
 
   /* Test for TLS */
-  fio_tls_s *tls = (fio_cli_get("--tls-cert") && fio_cli_get("--tls-key"))
-                       ? fio_tls_cert_add(fio_tls_new(),
-                                          fio_cli_get("--tls-name"),
-                                          fio_cli_get("--tls-cert"),
-                                          fio_cli_get("--tls-key"),
-                                          fio_cli_get("-tls-pass"))
-                   : fio_cli_get("-tls")
-                       ? fio_tls_cert_add(fio_tls_new(),
-                                          fio_cli_get("-tls-name"),
-                                          NULL,
-                                          NULL,
-                                          NULL)
-                       : NULL;
+  fio_io_tls_s *tls = (fio_cli_get("--tls-cert") && fio_cli_get("--tls-key"))
+                          ? fio_io_tls_cert_add(fio_io_tls_new(),
+                                                fio_cli_get("--tls-name"),
+                                                fio_cli_get("--tls-cert"),
+                                                fio_cli_get("--tls-key"),
+                                                fio_cli_get("-tls-pass"))
+                      : fio_cli_get("-tls")
+                          ? fio_io_tls_cert_add(fio_io_tls_new(),
+                                                fio_cli_get("-tls-name"),
+                                                NULL,
+                                                NULL,
+                                                NULL)
+                          : NULL;
   /* support -b and -p for when a URL isn't provided */
   if (!fio_cli_get("-b"))
     fio_cli_set(fio_cli_get("-b"), fio_cli_unnamed(0));
@@ -251,19 +251,19 @@ int main(int argc, char const *argv[]) {
                       .log = fio_cli_get_bool("-v")),
       "Could not open listening socket as requested.");
   /* we don't need the tls object any more. */
-  fio_tls_free(tls);
+  fio_io_tls_free(tls);
 
-  FIO_LOG_INFO("\n\tStarting HTTP echo server example app."
-               "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d\t(%s)"
-               "\n\tThreads: 1+%d\t(per worker)"
-               "\n\tPress ^C to exit.",
-               fio_srv_workers(fio_cli_get_i("-w")),
-               (fio_srv_workers(fio_cli_get_i("-w")) ? "cluster mode"
-                                                     : "single process"),
-               (int)http_queue.count);
+  FIO_LOG_INFO(
+      "\n\tStarting HTTP echo server example app."
+      "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d\t(%s)"
+      "\n\tThreads: 1+%d\t(per worker)"
+      "\n\tPress ^C to exit.",
+      fio_io_workers(fio_cli_get_i("-w")),
+      (fio_io_workers(fio_cli_get_i("-w")) ? "cluster mode" : "single process"),
+      (int)http_queue.count);
 
   /* start server reactor */
-  fio_srv_start(fio_cli_get_i("-w"));
+  fio_io_start(fio_cli_get_i("-w"));
 
   /* shutdown starts here */
   FIO_LOG_INFO("Shutdown complete.");
@@ -325,12 +325,12 @@ static void http_respond(fio_http_s *h) {
                           FIO_STRING_WRITE_STR2(body.buf, body.len),
                           FIO_STRING_WRITE_STR2("\r\n", 2));
   }
-  /* fio_env_set(io, ...) example */
+  /* fio_io_env_set(io, ...) example */
   if (0) {
-    fio_env_set(fio_http_io(h),
-                .name = FIO_BUF_INFO2("my key", 6),
-                .udata = fio_bstr_write(NULL, "my env data", 11),
-                .on_close = (void (*)(void *))fio_bstr_free);
+    fio_io_env_set(fio_http_io(h),
+                   .name = FIO_BUF_INFO2("my key", 6),
+                   .udata = fio_bstr_write(NULL, "my env data", 11),
+                   .on_close = (void (*)(void *))fio_bstr_free);
   }
   /* ETag header example */
   if (1) {
@@ -348,9 +348,9 @@ static void http_respond(fio_http_s *h) {
                  .dealloc = (void (*)(void *))fio_bstr_free,
                  .copy = 0,
                  .finish = 1);
-#else
+#else  /* HTTP_RESPONSE_ECHO */
   fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
-#endif
+#endif /* HTTP_RESPONSE_ECHO */
 }
 
 /* *****************************************************************************
@@ -358,12 +358,12 @@ Pub/Sub Logger / Recorder
 ***************************************************************************** */
 #if 0
 FIO_SFUNC void logger_detached(const fio_pubsub_engine_s *eng) {
-  FIO_LOG_INFO("%d (logger) detached", fio_srv_pid());
+  FIO_LOG_INFO("%d (logger) detached", fio_io_pid());
   (void)eng;
 }
 FIO_SFUNC void logger_on_msg(fio_msg_s *msg) {
   FIO_LOG_INFO("%d (logger) pub/sub message for %s (%d):\n%s",
-               fio_srv_pid(),
+               fio_io_pid(),
                (msg->channel.len ? msg->channel.buf : "<null>"),
                (int)msg->filter,
                (msg->message.len ? msg->message.buf : "<null>"));
