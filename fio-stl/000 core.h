@@ -2749,9 +2749,9 @@ typedef union {
   uint8x16_t x8[1];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(16))) x64[1];
-  uint64_t __attribute__((vector_size(16))) x32[1];
-  uint64_t __attribute__((vector_size(16))) x16[1];
-  uint64_t __attribute__((vector_size(16))) x8[1];
+  uint32_t __attribute__((vector_size(16))) x32[1];
+  uint16_t __attribute__((vector_size(16))) x16[1];
+  uint8_t __attribute__((vector_size(16))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[1];
@@ -2773,9 +2773,9 @@ typedef union {
   uint8x16_t x8[2];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(32))) x64[1];
-  uint64_t __attribute__((vector_size(32))) x32[1];
-  uint64_t __attribute__((vector_size(32))) x16[1];
-  uint64_t __attribute__((vector_size(32))) x8[1];
+  uint32_t __attribute__((vector_size(32))) x32[1];
+  uint16_t __attribute__((vector_size(32))) x16[1];
+  uint8_t __attribute__((vector_size(32))) x8[1];
 #endif
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[2];
@@ -2801,9 +2801,9 @@ typedef union {
   uint8x16_t x8[4];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(64))) x64[1];
-  uint64_t __attribute__((vector_size(64))) x32[1];
-  uint64_t __attribute__((vector_size(64))) x16[1];
-  uint64_t __attribute__((vector_size(64))) x8[1];
+  uint32_t __attribute__((vector_size(64))) x32[1];
+  uint16_t __attribute__((vector_size(64))) x16[1];
+  uint8_t __attribute__((vector_size(64))) x8[1];
 #endif
 } fio_u512 FIO_ALIGN(16);
 
@@ -2824,9 +2824,9 @@ typedef union {
   uint8x16_t x8[8];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(128))) x64[1];
-  uint64_t __attribute__((vector_size(128))) x32[1];
-  uint64_t __attribute__((vector_size(128))) x16[1];
-  uint64_t __attribute__((vector_size(128))) x8[1];
+  uint32_t __attribute__((vector_size(128))) x32[1];
+  uint16_t __attribute__((vector_size(128))) x16[1];
+  uint8_t __attribute__((vector_size(128))) x8[1];
 #endif
 } fio_u1024 FIO_ALIGN(16);
 
@@ -2848,9 +2848,9 @@ typedef union {
   uint8x16_t x8[16];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(256))) x64[1];
-  uint64_t __attribute__((vector_size(256))) x32[1];
-  uint64_t __attribute__((vector_size(256))) x16[1];
-  uint64_t __attribute__((vector_size(256))) x8[1];
+  uint32_t __attribute__((vector_size(256))) x32[1];
+  uint16_t __attribute__((vector_size(256))) x16[1];
+  uint8_t __attribute__((vector_size(256))) x8[1];
 #endif
 } fio_u2048 FIO_ALIGN(16);
 
@@ -2873,9 +2873,9 @@ typedef union {
   uint8x16_t x8[32];
 #elif __has_attribute(vector_size)
   uint64_t __attribute__((vector_size(512))) x64[1];
-  uint64_t __attribute__((vector_size(512))) x32[1];
-  uint64_t __attribute__((vector_size(512))) x16[1];
-  uint64_t __attribute__((vector_size(512))) x8[1];
+  uint32_t __attribute__((vector_size(512))) x32[1];
+  uint16_t __attribute__((vector_size(512))) x16[1];
+  uint8_t __attribute__((vector_size(512))) x8[1];
 #endif
 } fio_u4096 FIO_ALIGN(16);
 
