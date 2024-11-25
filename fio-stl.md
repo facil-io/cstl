@@ -9922,7 +9922,11 @@ struct fio_io_protocol_s {
    * even if the client did not consume all buffered data.
    */
   void (*on_shutdown)(fio_io_s *io);
-  /** Called when a connection's timeout was reached */
+  /**
+   * Called when a connection's timeout was reached
+   * 
+   * Can be set to `fio_io_touch` if timeout is irrelevant (i.e., listening / UDP).
+   */
   void (*on_timeout)(fio_io_s *io);
   /** Used as a default `on_message` when an IO object subscribes. */
 

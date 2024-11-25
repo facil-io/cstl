@@ -444,7 +444,7 @@ static fio_io_protocol_s FIO___IO_LISTEN_PROTOCOL = {
     .on_attach = fio___io_listen_on_attach,
     .on_data = fio___io_listen_on_data,
     .on_close = fio___io_listen_on_close,
-    .on_timeout = fio___io_on_timeout_never,
+    .on_timeout = fio_io_touch,
     .on_shutdown = fio___io_listen_on_shutdown,
 };
 

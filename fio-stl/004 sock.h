@@ -32,7 +32,7 @@ OS specific patches.
 #include <afunix.h>
 #endif
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((size_t)fd <= (size_t)0x7FFFFFFF)
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)(fd) <= (size_t)0x7FFFFFFF)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)

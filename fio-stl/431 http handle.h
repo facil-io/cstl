@@ -2,7 +2,6 @@
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_HTTP_HANDLE        /* Development inclusion - ignore line */
-#define FIO_STR                /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -42,7 +41,7 @@ HTTP Handle Settings
  * time-stamping is the default.
  */
 #define FIO_HTTP_EXACT_LOGGING 0
-#ifndef H___FIO_SERVER___H
+#ifndef H___FIO_IO___H
 #undef FIO_HTTP_EXACT_LOGGING
 #define FIO_HTTP_EXACT_LOGGING 1
 #endif
@@ -72,9 +71,9 @@ HTTP Handle Settings
 #define FIO_HTTP_CACHE_USES_MUTEX 1
 #endif
 
-#ifndef FIO_HTTP_CACHE_STATIC_HEADERS
+#ifndef FIO_HTTP_PRE_CACHE_KNOWN_HEADERS
 /** Adds a static cache for common HTTP header names. */
-#define FIO_HTTP_CACHE_STATIC_HEADERS 1
+#define FIO_HTTP_PRE_CACHE_KNOWN_HEADERS 1
 #endif
 
 #ifndef FIO_HTTP_DEFAULT_INDEX_FILENAME
@@ -699,6 +698,11 @@ SFUNC void fio_http_write_log(fio_http_s *h);
  */
 SFUNC int fio_http_from(fio_str_info_s *dest, const fio_http_s *h);
 
+/* date/time string caching for HTTP date header */
+SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds);
+
+/* date/time string caching for HTTP logging */
+SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds);
 /* *****************************************************************************
 The HTTP Controller
 ***************************************************************************** */
@@ -849,7 +853,49 @@ HTTP Handle Implementation - possibly externed functions.
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
-Helpers - memory allocation & logging time collection
+Helpers - reading time
+***************************************************************************** */
+
+#if FIO_HTTP_EXACT_LOGGING
+#define FIO___HTTP_TIME_DIV  1000000
+#define FIO___HTTP_TIME_UNIT "us"
+FIO_IFUNC int64_t fio_http_get_timestump(void) {
+  return fio_time2micro(fio_time_real());
+}
+#else
+#define FIO___HTTP_TIME_DIV      1000
+#define FIO___HTTP_TIME_UNIT     "ms"
+#define fio_http_get_timestump() fio_io_last_tick()
+#endif
+
+/* date/time string caching for HTTP date header */
+SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
+  static char date_buf[128];
+  static size_t date_len;
+  static uint64_t date_buf_val;
+  if (date_buf_val == now_in_seconds)
+    return FIO_STR_INFO2(date_buf, date_len);
+  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
+  date_buf[date_len] = 0;
+  date_buf_val = now_in_seconds;
+  return FIO_STR_INFO2(date_buf, date_len);
+}
+
+/* date/time string caching for HTTP logging */
+SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
+  static char date_buf[128];
+  static size_t date_len;
+  static uint64_t date_buf_val;
+  if (date_buf_val == now_in_seconds)
+    return FIO_STR_INFO2(date_buf, date_len);
+  date_len = fio_time2log(date_buf, now_in_seconds);
+  date_buf[date_len] = 0;
+  date_buf_val = now_in_seconds;
+  return FIO_STR_INFO2(date_buf, date_len);
+}
+
+/* *****************************************************************************
+Helpers - fio_keystr_s memory allocation callbacks
 ***************************************************************************** */
 
 FIO_LEAK_COUNTER_DEF(http___keystr_allocator)
@@ -866,47 +912,9 @@ FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
   return FIO_MEM_REALLOC_(NULL, 0, capa, 0);
 }
 
-#if FIO_HTTP_EXACT_LOGGING
-#define FIO___HTTP_TIME_DIV  1000000
-#define FIO___HTTP_TIME_UNIT "us"
-FIO_IFUNC int64_t fio_http_get_timestump(void) {
-  return fio_time2micro(fio_time_real());
-}
-#else
-#define FIO___HTTP_TIME_DIV  1000
-#define FIO___HTTP_TIME_UNIT "ms"
-int64_t fio_srv_last_tick(void);
-FIO_IFUNC int64_t fio_http_get_timestump(void) {
-  return (int64_t)fio_srv_last_tick();
-}
-#endif
-
-/* date/time string caching for HTTP date header */
-FIO_SFUNC fio_str_info_s fio_http_date(uint64_t now_in_seconds) {
-  static char date_buf[128];
-  static size_t date_len;
-  static uint64_t date_buf_val;
-  if (date_buf_val == now_in_seconds)
-    return FIO_STR_INFO2(date_buf, date_len);
-  date_len = fio_time2rfc7231(date_buf, now_in_seconds);
-  date_buf[date_len] = 0;
-  date_buf_val = now_in_seconds;
-  return FIO_STR_INFO2(date_buf, date_len);
-}
-
-/* date/time string caching for HTTP logging */
-FIO_SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
-  static char date_buf[128];
-  static size_t date_len;
-  static uint64_t date_buf_val;
-  if (date_buf_val == now_in_seconds)
-    return FIO_STR_INFO2(date_buf, date_len);
-  date_len = fio_time2log(date_buf, now_in_seconds);
-  date_buf[date_len] = 0;
-  date_buf_val = now_in_seconds;
-  return FIO_STR_INFO2(date_buf, date_len);
-}
-
+/* *****************************************************************************
+Helper Types
+***************************************************************************** */
 #define FIO___RECURSIVE_INCLUDE 1
 /* *****************************************************************************
 String Cache
@@ -925,7 +933,7 @@ static struct {
 #define FIO___HTTP_STR_CACHE_COOKIE 0
 #define FIO___HTTP_STR_CACHE_VALUE  1
 
-#if FIO_HTTP_CACHE_STATIC_HEADERS
+#if FIO_HTTP_PRE_CACHE_KNOWN_HEADERS
 
 #define FIO___HTTP_STATIC_CACHE_CAPA_BITS  7
 #define FIO___HTTP_STATIC_CACHE_CAPA       (1U << FIO___HTTP_STATIC_CACHE_CAPA_BITS)
@@ -1136,7 +1144,7 @@ static void fio___http_str_cached_init(void) {
 #undef FIO___HTTP_STATIC_CACHE_STEP_LIMIT
 #else
 #define fio___http_str_cached_init() (void)0
-#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
+#endif /* FIO_HTTP_PRE_CACHE_KNOWN_HEADERS */
 
 FIO_IFUNC char *fio___http_str_cached_inner(size_t group,
                                             uint64_t hash,
@@ -1172,7 +1180,7 @@ avoid_caching:
 }
 
 FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
-#if FIO_HTTP_CACHE_STATIC_HEADERS
+#if FIO_HTTP_PRE_CACHE_KNOWN_HEADERS
   char *tmp;
   if (!s.len)
     return NULL;
@@ -1186,7 +1194,7 @@ FIO_IFUNC char *fio___http_str_cached_with_static(fio_str_info_s s) {
     return tmp; /* reference count increased by fio___http_str_cached_static */
   }
 skip_cache_test:
-#endif /* FIO_HTTP_CACHE_STATIC_HEADERS */
+#endif /* FIO_HTTP_PRE_CACHE_KNOWN_HEADERS */
   return fio_bstr_write(NULL, s.buf, s.len);
 }
 

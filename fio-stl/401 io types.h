@@ -121,7 +121,6 @@ static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
 }
 static void fio___io_on_close_mock(void *p1, void *p2) { (void)p1, (void)p2; }
 static void fio___io_on_ev_on_timeout(fio_io_s *io) { fio_io_close_now(io); }
-static void fio___io_on_timeout_never(fio_io_s *io) { fio_io_touch(io); }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
 static ssize_t fio___io_func_default_read(int fd,
@@ -592,9 +591,8 @@ FIO_SFUNC void fio___io_touch(void *io_, void *ignr_) {
 
 /* Resets a socket's timeout counter. */
 SFUNC void fio_io_touch(fio_io_s *io) {
-  if ((fio_atomic_or(&io->flags, FIO___IO_FLAG_TOUCH) & FIO___IO_FLAG_TOUCH))
-    return;
-  fio_queue_push_urgent(&FIO___IO.queue, fio___io_touch, fio___io_dup2(io));
+  if (!(fio_atomic_or(&io->flags, FIO___IO_FLAG_TOUCH) & FIO___IO_FLAG_TOUCH))
+    fio_queue_push_urgent(&FIO___IO.queue, fio___io_touch, fio___io_dup2(io));
 }
 
 /**
@@ -1044,7 +1042,7 @@ FIO_SFUNC void fio___io_wakeup(void) {
 static fio_io_protocol_s FIO___IO_WAKEUP_PROTOCOL = {
     .on_data = fio___io_wakeup_cb,
     .on_close = fio___io_wakeup_on_close,
-    .on_timeout = fio___io_on_timeout_never,
+    .on_timeout = fio_io_touch,
 };
 
 FIO_SFUNC void fio___io_wakeup_init(void) {
