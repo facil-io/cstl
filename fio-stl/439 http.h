@@ -444,6 +444,7 @@ struct fio___http_connection_http_s {
   void (*on_http)(fio_http_s *h);
   void (*on_finish)(fio_http_s *h);
   fio_http1_parser_s parser;
+  fio_str_info_s buf;
   uint32_t max_header;
 };
 struct fio___http_connection_ws_s {
@@ -1393,7 +1394,9 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
                      "transfer-encoding: chunked\r\n",
                      28);
   fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
-  /* send data (move memory ownership) */
+  /* send data (move memory ownership)? */
+  c->state.http.buf = buf;
+  return;
   fio_io_write2(c->io,
                 .buf = buf.buf,
                 .len = buf.len,
@@ -1409,6 +1412,21 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     goto no_write_err;
   if (fio_http_is_streaming(h))
     goto stream_chunk;
+  if (c->state.http.buf.len && args.buf && args.len) {
+    fio_string_write(&c->state.http.buf,
+                     FIO_STRING_REALLOC,
+                     (char *)args.buf + args.offset,
+                     args.len);
+    if (args.dealloc)
+      args.dealloc((void *)args.buf);
+    fio_io_write2(c->io,
+                  .buf = (void *)c->state.http.buf.buf,
+                  .len = c->state.http.buf.len,
+                  .dealloc = FIO_STRING_FREE);
+    c->state.http.buf = FIO_STR_INFO0;
+    return;
+  }
+
   fio_io_write2(c->io,
                 .buf = (void *)args.buf,
                 .fd = args.fd,
@@ -1455,6 +1473,14 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
                                                           void *upgraded) {
   fio___http_connection_s *c = (fio___http_connection_s *)c_;
   c->suspend = 0;
+  if (c->state.http.buf.len) {
+    fio_io_write2(c->io,
+                  .buf = (void *)c->state.http.buf.buf,
+                  .len = c->state.http.buf.len,
+                  .dealloc = FIO_STRING_FREE);
+    c->state.http.buf = FIO_STR_INFO0;
+  }
+
   if (upgraded)
     goto upgraded;
 
@@ -2213,6 +2239,10 @@ FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
     fio_http_write_args_s args = {.finish = 1}; /* never sets upgrade flag */
     fio_http_write FIO_NOOP(h, args);
   }
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (c->state.http.buf.buf)
+    FIO_STRING_FREE2(c->state.http.buf);
+  c->state.http.buf = FIO_STR_INFO0;
   fio_queue_push(fio_io_queue(),
                  fio___http_controller_on_destroyed_task,
                  fio_http_cdata(h));

@@ -182,7 +182,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
   FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
 #ifdef FIO_REF_FLEX_TYPE
-  o->flx_size = members;
+  o->flx_size = (uint32_t)members;
 #endif
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);

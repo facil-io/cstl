@@ -1119,7 +1119,7 @@ static void fio___http_str_cached_init(void) {
                           FIO___HTTP_STATIC_CACHE_IMAP,
                           FIO___HTTP_STATIC_CACHE_CAPA_BITS,
                           (void *)&obj,
-                          hash,
+                          (uint32_t)hash,
                           fio___http_str_cached_cmp,
                           FIO___HTTP_STATIC_CACHE_STEP_LIMIT);
     FIO_ASSERT(!pos.is_valid && pos.ipos < FIO___HTTP_STATIC_CACHE_CAPA &&
