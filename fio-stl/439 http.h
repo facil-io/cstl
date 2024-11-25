@@ -430,10 +430,6 @@ typedef struct {
   } while (0)
 #include FIO_INCLUDE_FILE
 
-FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr);
-FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
-FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr);
-
 FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
     fio___http_protocol_s *p,
     const char *url,
