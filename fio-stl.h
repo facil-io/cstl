@@ -22346,7 +22346,7 @@ ChaCha20Poly1305 API
  * data, producing a 16 byte message authentication code (MAC) using Poly1305.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `nonce` MUST point to a  96 bit long memory address (12 Bytes).
  * * `ad`     MAY be omitted, will NOT be encrypted.
  * * `data`   MAY be omitted, WILL be encrypted.
  * * `mac`    MUST point to a buffer with (at least) 16 available bytes.
@@ -22357,14 +22357,14 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      const void *ad, /* additional data */
                                      size_t adlen,
                                      const void *key,
-                                     const void *nounce);
+                                     const void *nonce);
 
 /**
  * Performs an in-place decryption of `data` using ChaCha20 after authenticating
  * the message authentication code (MAC) using Poly1305.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `nonce` MUST point to a  96 bit long memory address (12 Bytes).
  * * `ad`     MAY be omitted ONLY IF originally omitted.
  * * `data`   MAY be omitted, WILL be decrypted.
  * * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
@@ -22377,7 +22377,7 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *ad, /* additional data */
                                     size_t adlen,
                                     const void *key,
-                                    const void *nounce);
+                                    const void *nonce);
 
 /* *****************************************************************************
 Using ChaCha20 and Poly1305 separately
@@ -22387,13 +22387,13 @@ Using ChaCha20 and Poly1305 separately
  * Performs an in-place encryption/decryption of `data` using ChaCha20.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
- * * `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+ * * `nonce` MUST point to a  96 bit long memory address (12 Bytes).
  * * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
  */
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
                         const void *key,
-                        const void *nounce,
+                        const void *nonce,
                         uint32_t counter);
 
 /**
@@ -22666,7 +22666,7 @@ ChaCha20 (encryption)
   }
 
 FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
-                                     const void *nounce,
+                                     const void *nonce,
                                      uint32_t counter) {
   fio_u512 o = {
       .u32 =
@@ -22682,9 +22682,9 @@ FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
               fio_buf2u32_le((uint8_t *)key + 24),
               fio_buf2u32_le((uint8_t *)key + 28),
               counter,
-              fio_buf2u32_le(nounce),
-              fio_buf2u32_le((uint8_t *)nounce + 4),
-              fio_buf2u32_le((uint8_t *)nounce + 8),
+              fio_buf2u32_le(nonce),
+              fio_buf2u32_le((uint8_t *)nonce + 4),
+              fio_buf2u32_le((uint8_t *)nonce + 8),
           }, // clang-format on
   };
   return o;
@@ -22785,9 +22785,9 @@ FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
                         const void *key,
-                        const void *nounce,
+                        const void *nonce,
                         uint32_t counter) {
-  fio_u512 c = fio___chacha_init(key, nounce, counter);
+  fio_u512 c = fio___chacha_init(key, nonce, counter);
   for (size_t pos = 127; pos < len; pos += 128) {
     fio___chacha_vround20x2(c, (uint8_t *)data);
     c.u32[12] += 2; /* block counter */
@@ -22821,8 +22821,8 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
                                      const void *ad, /* additional data */
                                      size_t adlen,
                                      const void *key,
-                                     const void *nounce) {
-  fio_u512 c = fio___chacha_init(key, nounce, 0);
+                                     const void *nonce) {
+  fio_u512 c = fio___chacha_init(key, nonce, 0);
   fio___poly_s pl;
   {
     fio_u512 c2 = fio___chacha20_mixround(c);
@@ -22902,10 +22902,10 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
                                       const void *ad, /* additional data */
                                       size_t adlen,
                                       const void *key,
-                                      const void *nounce) {
+                                      const void *nonce) {
   fio___poly_s pl;
   {
-    fio_u512 c = fio___chacha_init(key, nounce, 0);
+    fio_u512 c = fio___chacha_init(key, nonce, 0);
     c = fio___chacha20_mixround(c); /* computes poly1305 key */
     pl = fio___poly_init(&c);
   }
@@ -22944,13 +22944,13 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *ad, /* additional data */
                                     size_t adlen,
                                     const void *key,
-                                    const void *nounce) {
+                                    const void *nonce) {
   uint64_t auth[2];
-  fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nounce);
+  fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nonce);
   if (((auth[0] ^ fio_buf2u64u(mac)) |
        (auth[1] ^ fio_buf2u64u(((char *)mac + 8)))))
     return -1;
-  fio_chacha20(data, len, key, nounce, 1);
+  fio_chacha20(data, len, key, nonce, 1);
   return 0;
 }
 /* *****************************************************************************
@@ -31931,7 +31931,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
   FIO_LEAK_COUNTER_ON_ALLOC(FIO_REF_NAME);
   o->ref = 1;
 #ifdef FIO_REF_FLEX_TYPE
-  o->flx_size = members;
+  o->flx_size = (uint32_t)members;
 #endif
   FIO_REF_METADATA_INIT((o->metadata));
   FIO_REF_TYPE *ret = (FIO_REF_TYPE *)(o + 1);
@@ -35319,7 +35319,7 @@ IO Reactor State Machine
 
 #define FIO___IO_FLAG_WAKEUP (1U)
 
-SFUNC struct {
+SFUNC struct FIO___IO {
   fio_poll_s poll;
   int64_t tick;
   fio_queue_s queue;
@@ -35573,10 +35573,11 @@ SFUNC fio_io_s *fio_io_attach_fd(int fd,
       .active = FIO___IO.tick,
   };
   fio_sock_set_non_block(fd);
-  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
+  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p (%zu bytes buffer)",
                   fio_io_pid(),
                   fd,
-                  (void *)io);
+                  (void *)io,
+                  fio_io_buffer_len(io));
   fio_io_defer(fio___io_protocol_set, (void *)fio___io_dup2(io), (void *)pr);
   return io;
 
@@ -38317,11 +38318,8 @@ Message wire format (as 64 bit numerals in little endien encoding):
 #undef FIO___PUBSUB_MESSAGE_HEADER
 #define FIO___PUBSUB_MESSAGE_HEADER 24
 /* header + 2 NUL bytes (message + channel) + 16 byte MAC */
-#undef FIO___PUBSUB_MESSAGE_OVERHEAD_NET
-#define FIO___PUBSUB_MESSAGE_OVERHEAD_NET (FIO___PUBSUB_MESSAGE_HEADER + 18)
-/* extra 2 NUL bytes (after message & channel name) */
 #undef FIO___PUBSUB_MESSAGE_OVERHEAD
-#define FIO___PUBSUB_MESSAGE_OVERHEAD (FIO___PUBSUB_MESSAGE_OVERHEAD_NET + 2)
+#define FIO___PUBSUB_MESSAGE_OVERHEAD (FIO___PUBSUB_MESSAGE_HEADER + 18)
 
 /* *****************************************************************************
 Pub/Sub - defaults and builtin pub/sub engines
@@ -38436,28 +38434,24 @@ typedef struct {
   size_t len;
   uint64_t uuid[2];
   fio___pubsub_message_s *msg;
-  char buf[FIO___PUBSUB_MESSAGE_OVERHEAD_NET];
+  char buf[];
 } fio___pubsub_message_parser_s;
 
 FIO_LEAK_COUNTER_DEF(fio___pubsub_message_parser_s)
 
 FIO_IFUNC fio___pubsub_message_parser_s *fio___pubsub_message_parser(
     fio_io_s *io) {
-  return (fio___pubsub_message_parser_s *)fio_io_buffer(io);
+  return io ? (fio___pubsub_message_parser_s *)fio_io_buffer(io) : NULL;
 }
 
 FIO_SFUNC void fio___pubsub_message_parser_init(
     fio___pubsub_message_parser_s *p) {
   FIO_LEAK_COUNTER_ON_ALLOC(fio___pubsub_message_parser_s);
-  p->len = 0;
-  p->uuid[0] = p->uuid[1] = 0;
-  p->msg = NULL;
+  *p = (fio___pubsub_message_parser_s){0};
 }
 
 FIO_SFUNC void fio___pubsub_message_parser_destroy(
     fio___pubsub_message_parser_s *p) {
-  if (!p)
-    return;
   fio___pubsub_message_free(p->msg);
   FIO_LEAK_COUNTER_ON_FREE(fio___pubsub_message_parser_s);
 }
@@ -38660,7 +38654,8 @@ static struct FIO___PUBSUB_POSTOFFICE {
                     .on_data = fio___pubsub_protocol_on_data_master,
                     .on_close = fio___pubsub_protocol_on_close,
                     .on_timeout = fio_io_touch,
-                    .buffer_size = sizeof(fio___pubsub_message_parser_s),
+                    .buffer_size = sizeof(fio___pubsub_message_parser_s) +
+                                   FIO___PUBSUB_MESSAGE_OVERHEAD,
                 },
             .remote =
                 {
@@ -38668,7 +38663,8 @@ static struct FIO___PUBSUB_POSTOFFICE {
                     .on_data = fio___pubsub_protocol_on_data_remote,
                     .on_close = fio___pubsub_protocol_on_close,
                     .on_timeout = fio___pubsub_protocol_on_timeout,
-                    .buffer_size = sizeof(fio___pubsub_message_parser_s),
+                    .buffer_size = sizeof(fio___pubsub_message_parser_s) +
+                                   FIO___PUBSUB_MESSAGE_OVERHEAD,
                 },
         },
 };
@@ -38904,12 +38900,16 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
       .on_data = fio___pubsub_protocol_on_data_master,
       .on_close = fio___pubsub_protocol_on_close,
       .on_timeout = fio_io_touch,
+      .buffer_size =
+          sizeof(fio___pubsub_message_parser_s) + FIO___PUBSUB_MESSAGE_OVERHEAD,
   };
   FIO___PUBSUB_POSTOFFICE.protocol.remote = (fio_io_protocol_s){
       .on_attach = fio___pubsub_protocol_on_attach,
       .on_data = fio___pubsub_protocol_on_data_remote,
       .on_close = fio___pubsub_protocol_on_close,
       .on_timeout = fio_io_touch,
+      .buffer_size =
+          sizeof(fio___pubsub_message_parser_s) + FIO___PUBSUB_MESSAGE_OVERHEAD,
   };
 }
 
@@ -39296,12 +39296,15 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_alloc(void *header) {
   const size_t channel_len = fio_buf2u16_le((char *)header + 18);
   const size_t message_len = fio_buf2u24_le((char *)header + 20);
   m = fio___pubsub_message_new(((channel_len + message_len) << 1) +
-                               FIO___PUBSUB_MESSAGE_OVERHEAD);
+                               (FIO___PUBSUB_MESSAGE_OVERHEAD + 2));
   FIO_ASSERT_ALLOC(m);
-  m->data = (fio_msg_s){
-      .udata = m->buf + channel_len + message_len + 2,
-      .channel = FIO_BUF_INFO2(m->buf, channel_len),
-      .message = FIO_BUF_INFO2(m->buf + channel_len + 1, message_len),
+  *m = (fio___pubsub_message_s){
+      .data =
+          (fio_msg_s){
+              .udata = m->buf + channel_len + message_len + 2,
+              .channel = FIO_BUF_INFO2(m->buf, channel_len),
+              .message = FIO_BUF_INFO2(m->buf + channel_len + 1, message_len),
+          },
   };
   return m;
 }
@@ -39310,22 +39313,27 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_author(
     fio_publish_args_s args) {
   fio___pubsub_message_s *m =
       fio___pubsub_message_new(((args.message.len + args.channel.len) << 1) +
-                               FIO___PUBSUB_MESSAGE_OVERHEAD);
+                               (FIO___PUBSUB_MESSAGE_OVERHEAD + 2));
   FIO_ASSERT_ALLOC(m);
-  m->data = (fio_msg_s){
-      .io = args.from,
-      .id = args.id ? args.id : fio_rand64(),
-      .published = args.published ? args.published
-                                  : (uint64_t)fio_time2milli(fio_time_real()),
-      .channel = FIO_BUF_INFO2(m->buf, args.channel.len),
-      .message = FIO_BUF_INFO2(m->buf + args.channel.len + 1, args.message.len),
-      .filter = args.filter,
-      .is_json = args.is_json,
+  *m = (fio___pubsub_message_s){
+      .data =
+          (fio_msg_s){
+              .io = args.from,
+              .id = args.id ? args.id : fio_rand64(),
+              .published = args.published
+                               ? args.published
+                               : (uint64_t)fio_time2milli(fio_time_real()),
+              .channel = FIO_BUF_INFO2(m->buf, args.channel.len),
+              .message = FIO_BUF_INFO2(m->buf + args.channel.len + 1,
+                                       args.message.len),
+              .filter = args.filter,
+              .is_json = args.is_json,
+          },
   };
-  if (args.channel.len)
+  if (args.channel.buf && args.channel.len)
     FIO_MEMCPY(m->data.channel.buf, args.channel.buf, args.channel.len);
   m->data.channel.buf[args.channel.len] = 0;
-  if (args.message.buf)
+  if (args.message.buf && args.message.len)
     FIO_MEMCPY(m->data.message.buf, args.message.buf, args.message.len);
   m->data.message.buf[args.message.len] = 0;
   return m;
@@ -39337,6 +39345,7 @@ FIO_SFUNC void fio___pubsub_message_encrypt(fio___pubsub_message_s *m) {
   const void *k = fio___pubsub_secret_key(m->data.id);
   const uint64_t nonce[2] = {fio_risky_num(m->data.id, 0), m->data.published};
   uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
+  uint8_t *dest = pos;
   m->data.udata = (void *)pos;
   fio_u2buf64_le(pos, m->data.id);
   pos += 8;
@@ -39354,14 +39363,13 @@ FIO_SFUNC void fio___pubsub_message_encrypt(fio___pubsub_message_s *m) {
   if (enc_len == 2)
     return;
   pos += enc_len;
-  fio_chacha20_poly1305_enc(
-      pos,
-      (void *)((char *)(m->data.udata) + FIO___PUBSUB_MESSAGE_HEADER),
-      m->data.channel.len + m->data.message.len + 2,
-      m->data.udata,
-      FIO___PUBSUB_MESSAGE_HEADER,
-      k,
-      nonce);
+  fio_chacha20_poly1305_enc(pos,
+                            (void *)(dest + FIO___PUBSUB_MESSAGE_HEADER),
+                            m->data.channel.len + m->data.message.len + 2,
+                            m->data.udata,
+                            FIO___PUBSUB_MESSAGE_HEADER,
+                            k,
+                            nonce);
 }
 
 FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
@@ -39369,7 +39377,8 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
     return 0;
   if (!m->data.udata)
     return -1;
-  uint8_t *pos = (uint8_t *)(m->data.udata);
+  uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
+  uint8_t *const dest = pos;
   m->data.id = fio_buf2u64_le(pos);
   pos += 8;
   m->data.published = fio_buf2u64_le(pos);
@@ -39393,7 +39402,7 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
                                    m->buf,
                                    m->data.channel.len + m->data.message.len +
                                        2,
-                                   m->data.udata,
+                                   dest,
                                    FIO___PUBSUB_MESSAGE_HEADER,
                                    k,
                                    nonce);
@@ -39411,12 +39420,15 @@ FIO_IFUNC void fio___pubsub_message_write2io(fio_io_s *io, void *m_) {
   fio___pubsub_message_s *m = (fio___pubsub_message_s *)m_;
   if (io == m->data.io)
     return;
-  FIO_LOG_DDEBUG2("(%d) pub/sub sending IPC/peer message.", fio_io_pid());
+  FIO_LOG_DDEBUG2("(%d) pub/sub sending IPC/peer message: %zu bytes",
+                  fio_io_pid(),
+                  m->data.message.len + m->data.channel.len +
+                      FIO___PUBSUB_MESSAGE_OVERHEAD);
   fio___pubsub_message_encrypt(m);
   fio_io_write2(io,
                 .buf = fio___pubsub_message_dup(m),
                 .len = (m->data.message.len + m->data.channel.len +
-                        FIO___PUBSUB_MESSAGE_OVERHEAD_NET),
+                        FIO___PUBSUB_MESSAGE_OVERHEAD),
                 .offset = ((uintptr_t)(m->data.udata) - (uintptr_t)(m)),
                 .dealloc = (void (*)(void *))fio___pubsub_message_free);
 }
@@ -39447,11 +39459,6 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
   if (flags & FIO___PUBSUB_SPECIAL)
     goto is_special_message;
 
-  if ((FIO___PUBSUB_POSTOFFICE.filter.publish & flags))
-    fio_queue_push(fio_io_queue(),
-                   fio___pubsub_message_deliver_task,
-                   fio___pubsub_message_dup(m));
-
   if ((FIO___PUBSUB_POSTOFFICE.filter.local & flags))
     fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
                          fio___pubsub_message_write2io,
@@ -39461,6 +39468,12 @@ FIO_SFUNC void fio___pubsub_message_route(fio___pubsub_message_s *m) {
     fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.remote,
                          fio___pubsub_message_write2io,
                          m);
+
+  if ((FIO___PUBSUB_POSTOFFICE.filter.publish & flags))
+    fio_queue_push(fio_io_queue(),
+                   fio___pubsub_message_deliver_task,
+                   fio___pubsub_message_dup(m));
+
   return;
 
 is_special_message:
@@ -39493,7 +39506,8 @@ is_special_message:
           p->uuid[0],
           p->uuid[1]);
     }
-    FIO_LOG_INFO("(cluster) identified new peer (%zu connections)",
+    FIO_LOG_INFO("(%d - cluster) identified new peer (%zu connections)",
+                 fio_io_pid(),
                  fio___pubsub_broadcast_connected_count(
                      &FIO___PUBSUB_POSTOFFICE.remote_uuids));
     return;
@@ -39570,7 +39584,7 @@ void fio_publish FIO_NOOP(fio_publish_args_s args) {
   m = fio___pubsub_message_author(args);
   m->data.is_json = ((!!args.is_json) | ((uint8_t)(uintptr_t)args.engine));
 
-  FIO_LOG_DDEBUG2("publishing pub/sub message (scheduling)");
+  FIO_LOG_DDEBUG2("(%d) publishing pub/sub message (scheduling)", fio_io_pid());
   fio_io_defer(fio___publish_message_task, m, NULL);
   return;
 
@@ -39600,10 +39614,9 @@ FIO_IFUNC void fio___pubsub_message_parse(
   size_t existing = parser->len;
   if (!parser->msg) {
     while (existing < FIO___PUBSUB_MESSAGE_HEADER) { /* get message length */
-      size_t consumed =
-          fio_io_read(io,
-                      parser->buf + existing,
-                      FIO___PUBSUB_MESSAGE_OVERHEAD_NET - existing);
+      size_t consumed = fio_io_read(io,
+                                    parser->buf + existing,
+                                    FIO___PUBSUB_MESSAGE_OVERHEAD - existing);
       if (!consumed) {
         parser->len = existing;
         return;
@@ -39615,12 +39628,13 @@ FIO_IFUNC void fio___pubsub_message_parse(
   }
   /* known message length, read to end and publish */
   fio___pubsub_message_s *m = parser->msg;
-  const size_t needed = m->data.channel.len + m->data.message.len +
-                        FIO___PUBSUB_MESSAGE_OVERHEAD_NET;
-  FIO_LOG_DDEBUG2("(%d) pub/sub parsing IPC/peer message (%zu/%zu bytes)",
-                  fio_io_pid(),
-                  existing,
-                  needed);
+  const size_t needed =
+      m->data.channel.len + m->data.message.len + FIO___PUBSUB_MESSAGE_OVERHEAD;
+  // FIO_LOG_DDEBUG2("(%d) pub/sub parsing IPC/peer message %p (%zu/%zu bytes)",
+  //                 fio_io_pid(),
+  //                 (void *)fio_buf2u64_le(m->data.udata),
+  //                 existing,
+  //                 needed);
   while (existing < needed) {
     size_t consumed =
         fio_io_read(io, (char *)m->data.udata + existing, needed - existing);
@@ -39689,9 +39703,11 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *p_, void *udata) {
         p->uuid[0],
         p->uuid[1],
         NULL);
-    FIO_LOG_INFO("(cluster) lost peer connection (%zu connections)",
-                 fio___pubsub_broadcast_connected_count(
-                     &FIO___PUBSUB_POSTOFFICE.remote_uuids));
+    FIO_LOG_INFO(
+        "(%d) (pub/sub cluster) lost peer connection (%zu connections)",
+        fio_io_pid(),
+        fio___pubsub_broadcast_connected_count(
+            &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
   fio___pubsub_message_parser_destroy(p);
   if (!fio_io_is_master())
@@ -39787,7 +39803,8 @@ FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
     (&i.key->subscribe + ch->is_pattern)[0](i.key, name, ch->filter);
   }
   if (!FIO___PUBSUB_POSTOFFICE.filter.remote) { /* inform root process */
-    FIO_LOG_DDEBUG2("informing root process of new channel.");
+    FIO_LOG_DDEBUG2("(%d) informing root process of new channel.",
+                    fio_io_pid());
     fio___pubsub_message_s *m =
         fio___pubsub_message_author((fio_publish_args_s){
             .id = (uint64_t)(ch->is_pattern + 1),
@@ -39795,12 +39812,10 @@ FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
             .filter = ch->filter,
             .is_json = FIO___PUBSUB_SUB,
         });
-    if (m) {
-      fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
-                           fio___pubsub_message_write2io,
-                           m);
-      fio___pubsub_message_free(m);
-    }
+    fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                         fio___pubsub_message_write2io,
+                         m);
+    fio___pubsub_message_free(m);
   }
 }
 /** Callback for when a channel is destroy. */
@@ -39879,11 +39894,16 @@ FIO_SFUNC void fio___pubsub_broadcast_hello(fio_io_s *io) {
          sizeof(addr));
 }
 
+FIO_SFUNC void fio___pubsub_broadcast_hello_task_done(void *io_, void *ignr_) {
+  (void)ignr_;
+  fio_io_s *io = (fio_io_s *)io_;
+  fio_io_free(io);
+}
+
 FIO_SFUNC int fio___pubsub_broadcast_hello_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
   fio___pubsub_broadcast_hello(io);
-  fio_io_free(io);
   return 0;
 }
 
@@ -39929,6 +39949,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_attach(fio_io_s *io) {
   fio___pubsub_broadcast_hello((FIO___PUBSUB_POSTOFFICE.broadcaster = io));
   fio_io_run_every(.fn = fio___pubsub_broadcast_hello_task,
                    .udata1 = fio_io_dup(io),
+                   .on_finish = fio___pubsub_broadcast_hello_task_done,
                    .every =
                        (uint32_t)(1024 |
                                   (1023 & FIO___PUBSUB_POSTOFFICE.uuid.u64[0])),
@@ -39969,11 +39990,12 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_io_s *io) {
             &FIO___PUBSUB_POSTOFFICE.remote_uuids,
             buf[0],
             buf[1]) == buf[1]) {
-      FIO_LOG_DDEBUG2("skipping peer connection - already exists");
+      FIO_LOG_DDEBUG2("(%d) skipping peer connection - already exists",
+                      fio_io_pid());
       continue; /* skip connection, already exists. */
     }
     should_say_hello |= 1;
-    FIO_LOG_DDEBUG2("detected peer, should now connect");
+    FIO_LOG_DDEBUG2("(%d) detected peer, should now connect", fio_io_pid());
 
     /* TODO: fixme! */
     char addr_buf[128];
@@ -40011,6 +40033,7 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_io_s *io) {
   if (should_say_hello)
     fio_io_run_every(.fn = fio___pubsub_broadcast_hello_task,
                      .udata1 = fio_io_dup(io),
+                     .on_finish = fio___pubsub_broadcast_hello_task_done,
                      .every =
                          (uint32_t)(1024 |
                                     (1023 &
@@ -40020,10 +40043,11 @@ FIO_SFUNC void fio___pubsub_broadcast_on_data(fio_io_s *io) {
 FIO_SFUNC void fio___pubsub_broadcast_on_incoming(fio_io_s *io) {
   int fd;
   while ((fd = accept(fio_io_fd(io), NULL, NULL)) != -1) {
-    FIO_LOG_DDEBUG2("accepting a cluster peer connection");
+    FIO_LOG_DDEBUG2("(%d) accepting a cluster peer connection", fio_io_pid());
     fio_io_attach_fd(fd, &FIO___PUBSUB_POSTOFFICE.protocol.remote, NULL, NULL);
   }
-  FIO_LOG_INFO("(cluster) accepted new peer(s) (%zu connections).",
+  FIO_LOG_INFO("(%d) (cluster) accepted new peer(s) (%zu connections).",
+               fio_io_pid(),
                fio___pubsub_broadcast_connected_count(
                    &FIO___PUBSUB_POSTOFFICE.remote_uuids));
 }
@@ -40042,8 +40066,9 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
   };
   if (FIO___PUBSUB_POSTOFFICE.secret_is_random) {
     FIO_LOG_ERROR(
-        "Listening to cluster peer connections failed!"
-        "\n\tUsing a random (non-shared) secret, cannot validate peers.");
+        "(%d) Listening to cluster peer connections failed!"
+        "\n\tUsing a random (non-shared) secret, cannot validate peers.",
+        fio_io_pid());
     return;
   }
   if (!port || port < 0)
@@ -41213,7 +41238,7 @@ static void fio___http_str_cached_init(void) {
                           FIO___HTTP_STATIC_CACHE_IMAP,
                           FIO___HTTP_STATIC_CACHE_CAPA_BITS,
                           (void *)&obj,
-                          hash,
+                          (uint32_t)hash,
                           fio___http_str_cached_cmp,
                           FIO___HTTP_STATIC_CACHE_STEP_LIMIT);
     FIO_ASSERT(!pos.is_valid && pos.ipos < FIO___HTTP_STATIC_CACHE_CAPA &&
@@ -54646,6 +54671,53 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
           (int)len,
           buffer);
     }
+  }
+  { /* test roundtrip */
+    fprintf(stderr, "\t * Testing ChaCha20Poly1305 round-trip.\n");
+    fio_u256 key =
+        fio_u256_init64(fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64());
+    FIO_STR_INFO_TMP_VAR(ad, 128);
+    FIO_STR_INFO_TMP_VAR(plaintext, 1024);
+    FIO_STR_INFO_TMP_VAR(cyphertext, 1024);
+    FIO_STR_INFO_TMP_VAR(decrypted, 1024);
+    fio_string_write2(&ad,
+                      NULL,
+                      FIO_STRING_WRITE_STR1(
+                          "This is unencrypted additional data with a nonce:"),
+                      FIO_STRING_WRITE_HEX(fio_rand64()));
+    fio_string_write2(
+        &plaintext,
+        NULL,
+        FIO_STRING_WRITE_STR1(
+            "This is unencrypted text that will eventually be encrypted, the "
+            "following are the whole 0-255 byte values:"));
+    for (size_t i = 0; i < 256; ++i) {
+      plaintext.buf[plaintext.len++] = (char)i;
+    }
+    plaintext.buf[plaintext.len] = 0;
+    FIO_MEMCPY(cyphertext.buf, plaintext.buf, plaintext.len);
+    cyphertext.len = plaintext.len;
+    fio_chacha20_poly1305_enc(ad.buf + ad.len,
+                              cyphertext.buf,
+                              cyphertext.len,
+                              ad.buf, /* additional data */
+                              ad.len,
+                              key.u8,
+                              ad.buf + ad.len - 12);
+    FIO_MEMCPY(decrypted.buf, cyphertext.buf, cyphertext.len);
+    decrypted.len = cyphertext.len;
+    FIO_ASSERT(!fio_chacha20_poly1305_dec(ad.buf + ad.len,
+                                          decrypted.buf,
+                                          decrypted.len,
+                                          ad.buf, /* additional data */
+                                          ad.len,
+                                          key.u8,
+                                          ad.buf + ad.len - 12),
+               "fio_chacha20_poly1305_dec failed!");
+    FIO_ASSERT(FIO_MEMCMP(cyphertext.buf, plaintext.buf, plaintext.len),
+               "chacha20 cypher-text should be different than plain-text.");
+    FIO_ASSERT(!FIO_MEMCMP(decrypted.buf, plaintext.buf, plaintext.len),
+               "chacha20_poly1305 roundtrip error!");
   }
 
 #if !DEBUG

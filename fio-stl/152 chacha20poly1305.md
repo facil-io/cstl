@@ -20,13 +20,13 @@ void fio_chacha20_poly1305_enc(void *mac,
                                void *ad, /* additional data */
                                size_t adlen,
                                void *key,
-                               void *nounce);
+                               void *nonce);
 ```
 
 Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
 
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
 * `ad`     MAY be omitted, will NOT be encrypted.
 * `data`   MAY be omitted, WILL be encrypted.
 * `mac`    MUST point to a buffer with (at least) 16 available bytes.
@@ -40,13 +40,13 @@ int fio_chacha20_poly1305_dec(void *mac,
                               void *ad, /* additional data */
                               size_t adlen,
                               void *key,
-                              void *nounce);
+                              void *nonce);
 ```
 
 Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
 
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
 * `ad`     MAY be omitted ONLY IF originally omitted.
 * `data`   MAY be omitted, WILL be decrypted.
 * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
@@ -59,14 +59,14 @@ Returns `-1` on error (authentication failed).
 void fio_chacha20(void *data,
                   size_t len,
                   void *key,
-                  void *nounce,
+                  void *nonce,
                   uint32_t counter);
 ```
 
 Performs an in-place encryption/decryption of `data` using ChaCha20.
 
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nounce` MUST point to a  96 bit long memory address (12 Bytes).
+* `nonce` MUST point to a  96 bit long memory address (12 Bytes).
 * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
 
 

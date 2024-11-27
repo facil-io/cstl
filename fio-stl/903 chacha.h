@@ -330,6 +330,53 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
           buffer);
     }
   }
+  { /* test roundtrip */
+    fprintf(stderr, "\t * Testing ChaCha20Poly1305 round-trip.\n");
+    fio_u256 key =
+        fio_u256_init64(fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64());
+    FIO_STR_INFO_TMP_VAR(ad, 128);
+    FIO_STR_INFO_TMP_VAR(plaintext, 1024);
+    FIO_STR_INFO_TMP_VAR(cyphertext, 1024);
+    FIO_STR_INFO_TMP_VAR(decrypted, 1024);
+    fio_string_write2(&ad,
+                      NULL,
+                      FIO_STRING_WRITE_STR1(
+                          "This is unencrypted additional data with a nonce:"),
+                      FIO_STRING_WRITE_HEX(fio_rand64()));
+    fio_string_write2(
+        &plaintext,
+        NULL,
+        FIO_STRING_WRITE_STR1(
+            "This is unencrypted text that will eventually be encrypted, the "
+            "following are the whole 0-255 byte values:"));
+    for (size_t i = 0; i < 256; ++i) {
+      plaintext.buf[plaintext.len++] = (char)i;
+    }
+    plaintext.buf[plaintext.len] = 0;
+    FIO_MEMCPY(cyphertext.buf, plaintext.buf, plaintext.len);
+    cyphertext.len = plaintext.len;
+    fio_chacha20_poly1305_enc(ad.buf + ad.len,
+                              cyphertext.buf,
+                              cyphertext.len,
+                              ad.buf, /* additional data */
+                              ad.len,
+                              key.u8,
+                              ad.buf + ad.len - 12);
+    FIO_MEMCPY(decrypted.buf, cyphertext.buf, cyphertext.len);
+    decrypted.len = cyphertext.len;
+    FIO_ASSERT(!fio_chacha20_poly1305_dec(ad.buf + ad.len,
+                                          decrypted.buf,
+                                          decrypted.len,
+                                          ad.buf, /* additional data */
+                                          ad.len,
+                                          key.u8,
+                                          ad.buf + ad.len - 12),
+               "fio_chacha20_poly1305_dec failed!");
+    FIO_ASSERT(FIO_MEMCMP(cyphertext.buf, plaintext.buf, plaintext.len),
+               "chacha20 cypher-text should be different than plain-text.");
+    FIO_ASSERT(!FIO_MEMCMP(decrypted.buf, plaintext.buf, plaintext.len),
+               "chacha20_poly1305 roundtrip error!");
+  }
 
 #if !DEBUG
   fio_test_hash_function(fio__poly1305_speed_wrapper,

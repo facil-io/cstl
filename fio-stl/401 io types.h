@@ -265,7 +265,7 @@ IO Reactor State Machine
 
 #define FIO___IO_FLAG_WAKEUP (1U)
 
-SFUNC struct {
+SFUNC struct FIO___IO {
   fio_poll_s poll;
   int64_t tick;
   fio_queue_s queue;
@@ -519,10 +519,11 @@ SFUNC fio_io_s *fio_io_attach_fd(int fd,
       .active = FIO___IO.tick,
   };
   fio_sock_set_non_block(fd);
-  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p",
+  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p (%zu bytes buffer)",
                   fio_io_pid(),
                   fd,
-                  (void *)io);
+                  (void *)io,
+                  fio_io_buffer_len(io));
   fio_io_defer(fio___io_protocol_set, (void *)fio___io_dup2(io), (void *)pr);
   return io;
 

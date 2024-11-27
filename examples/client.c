@@ -199,7 +199,7 @@ FIO_SFUNC void on_input_closed(void *buf, void *udata) {
 }
 
 /* Debug messages for STDIN round-trip */
-void debug_subscriber(fio_msg_s *msg) {
+FIO_SFUNC void debug_subscriber(fio_msg_s *msg) {
   FIO_LOG_DEBUG2("Subscriber received: %.*s",
                  msg->message.len,
                  msg->message.buf);
