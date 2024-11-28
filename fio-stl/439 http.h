@@ -111,8 +111,8 @@ typedef struct fio_http_settings_s {
    */
   fio_str_info_s public_folder;
   /**
-   * The max-age value (in seconds) for possibly caching static files from the
-   * public folder specified.
+   * The max-age value (in seconds) for caching static files send from
+   * `public_folder`.
    *
    * Defaults to 0 (not sent).
    */
