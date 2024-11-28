@@ -2072,7 +2072,7 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
  a.map! {|n| n.to_s 10 }
  puts "const static uint8_t base32decode[256] = { #{a.join(", ") } }; "
 */
-  const static uint8_t base32decode[256] = {
+  static const uint8_t base32decode[256] = {
       255, 255, 255, 255, 255, 255, 255, 255, 32,  32,  32,  255, 255, 32,  255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 32,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,

@@ -20159,7 +20159,7 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
  a.map! {|n| n.to_s 10 }
  puts "const static uint8_t base32decode[256] = { #{a.join(", ") } }; "
 */
-  const static uint8_t base32decode[256] = {
+  static const uint8_t base32decode[256] = {
       255, 255, 255, 255, 255, 255, 255, 255, 32,  32,  32,  255, 255, 32,  255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 32,  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -51421,6 +51421,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_encryption)(void) {
   FIO_MEM_STACK_WIPE(2);
 
   fio___pubsub_message_s *dec = fio___pubsub_message_alloc(enc->data.udata);
+  FIO_MEMCPY(dec->data.udata,
+             enc->data.udata,
+             origin.channel.len + origin.message.len +
+                 FIO___PUBSUB_MESSAGE_OVERHEAD);
   dec->data.udata = enc->data.udata;
   FIO_ASSERT(!fio___pubsub_message_decrypt(dec), "decryption failed");
   FIO_ASSERT(enc->data.filter == dec->data.filter,

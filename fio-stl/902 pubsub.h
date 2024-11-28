@@ -48,6 +48,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_encryption)(void) {
   FIO_MEM_STACK_WIPE(2);
 
   fio___pubsub_message_s *dec = fio___pubsub_message_alloc(enc->data.udata);
+  FIO_MEMCPY(dec->data.udata,
+             enc->data.udata,
+             origin.channel.len + origin.message.len +
+                 FIO___PUBSUB_MESSAGE_OVERHEAD);
   dec->data.udata = enc->data.udata;
   FIO_ASSERT(!fio___pubsub_message_decrypt(dec), "decryption failed");
   FIO_ASSERT(enc->data.filter == dec->data.filter,
