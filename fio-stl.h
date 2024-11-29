@@ -35069,6 +35069,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 #define H___FIO_IO_TYPES___H
 
+/** I would love to use fio_time_mono, but using time_real enables logging. */
 #define FIO___IO_GET_TIME_MILLI() fio_time2milli(fio_time_real())
 
 /* *****************************************************************************
@@ -40837,7 +40838,7 @@ struct fio_http_controller_s {
   void (*on_destroyed)(fio_http_s *h);
   /** Informs the controller that request / response headers must be sent. */
   void (*send_headers)(fio_http_s *h);
-  /** called by the HTTP handle for each body chunk (or to finish a response. */
+  /** called by the HTTP handle for each body chunk, or to finish a response. */
   void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
   /** called once a request / response had finished */
   void (*on_finish)(fio_http_s *h);

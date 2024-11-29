@@ -15,6 +15,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 #define H___FIO_IO_TYPES___H
 
+/** I would love to use fio_time_mono, but using time_real enables logging. */
 #define FIO___IO_GET_TIME_MILLI() fio_time2milli(fio_time_real())
 
 /* *****************************************************************************
