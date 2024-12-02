@@ -749,6 +749,7 @@ struct fio_io_async_s {
   fio_queue_s *q;
   uint32_t count;
   fio_queue_s queue;
+  fio_timer_queue_s timers;
   FIO_LIST_NODE node;
 };
 
@@ -781,6 +782,30 @@ SFUNC void fio_io_async_attach(fio_io_async_s *q, uint32_t threads);
 
 /** Pushes a task to an IO Async Queue (macro helper). */
 #define fio_io_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
+
+/** Schedules a timer bound task for the async queue (`fio_timer_schedule`). */
+SFUNC void fio_io_async_every(fio_io_async_s *q, fio_timer_schedule_args_s);
+
+/**
+ * Schedules a timer bound task, for the async queue, see `fio_timer_schedule`.
+ *
+ * Possible "named arguments" (fio_timer_schedule_args_s members) include:
+ *
+ * * The timer function. If it returns a non-zero value, the timer stops:
+ *        int (*fn)(void *, void *)
+ * * Opaque user data:
+ *        void *udata1
+ * * Opaque user data:
+ *        void *udata2
+ * * Called when the timer is done (finished):
+ *        void (*on_stop)(void *, void *)
+ * * Timer interval, in milliseconds:
+ *        uint32_t every
+ * * The number of times the timer should be performed. -1 == infinity:
+ *        int32_t repetitions
+ */
+#define fio_io_async_every(async, ...)                                         \
+  fio_io_async_every(async, (fio_timer_schedule_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
 IO API Finish

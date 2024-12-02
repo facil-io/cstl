@@ -16,7 +16,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(H___FIO_SERVER___H) &&                                             \
+#if defined(H___FIO_IO___H) &&                                                 \
     (HAVE_OPENSSL || __has_include("openssl/ssl.h")) &&                        \
      !defined(H___FIO_OPENSSL___H) && !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_OPENSSL___H 1
@@ -430,7 +430,8 @@ FIO_LEAK_COUNTER_DEF(fio___SSL)
 
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
-  fio___openssl_context_s *ctx_parent = (fio___openssl_context_s *)fio_tls(io);
+  fio___openssl_context_s *ctx_parent =
+      (fio___openssl_context_s *)fio_io_tls(io);
   FIO_ASSERT_DEBUG(ctx_parent, "OpenSSL Context missing!");
 
   SSL *ssl = SSL_new(ctx_parent->ctx);
@@ -441,7 +442,7 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context for %p.",
                   (int)fio_thread_getpid(),
                   (void *)io);
-  BIO *bio = BIO_new_socket(fio_fd(io), 0);
+  BIO *bio = BIO_new_socket(fio_io_fd(io), 0);
   SSL_set_bio(ssl, bio, bio);
   SSL_set_ex_data(ssl, 0, (void *)io);
   if (SSL_is_server(ssl))
@@ -488,7 +489,7 @@ static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
 
 /** Builds a local TLS context out of the fio_io_tls_s object. */
 static void fio___openssl_free_context(void *tls_ctx) {
-  fio_srv_defer(fio___openssl_free_context_task, tls_ctx, NULL);
+  fio_io_defer(fio___openssl_free_context_task, tls_ctx, NULL);
 }
 /* *****************************************************************************
 IO Functions Structure
@@ -511,7 +512,7 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
 FIO_CONSTRUCTOR(fio___openssl_setup_default) {
   static fio_io_functions_s FIO___OPENSSL_IO_FUNCS;
   FIO___OPENSSL_IO_FUNCS = fio_openssl_io_functions();
-  fio_io_tls_default_io_functions(&FIO___OPENSSL_IO_FUNCS);
+  fio_io_tls_default_functions(&FIO___OPENSSL_IO_FUNCS);
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL); /* avoid OpenSSL issue... */
 #endif

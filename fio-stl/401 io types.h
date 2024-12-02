@@ -662,7 +662,8 @@ SFUNC void fio_io_write2 FIO_NOOP(fio_io_s *io, fio_io_write_args_s args) {
                                   args.dealloc);
   } else if ((unsigned)(args.fd + 1) > 1) {
     packet = fio_stream_pack_fd((int)args.fd, args.len, args.offset, args.copy);
-  }
+  } else /* fio_io_write2 called without data */
+    goto do_nothing;
   if (!packet)
     goto error;
   if ((io->flags & FIO___IO_FLAG_CLOSE))
@@ -671,14 +672,17 @@ SFUNC void fio_io_write2 FIO_NOOP(fio_io_s *io, fio_io_write_args_s args) {
   return;
 
 error: /* note: `dealloc` already called by the `fio_stream` error handler. */
-  FIO_LOG_ERROR("couldn't create %zu bytes long user-packet for IO %p (%d)",
-                args.len,
-                (void *)io,
-                (io ? io->fd : -1));
+  FIO_LOG_ERROR(
+      "(%d) couldn't create %zu bytes long user-packet for IO %p (%d)",
+      fio_io_pid(),
+      args.len,
+      (void *)io,
+      (io ? io->fd : -1));
   return;
 
 write_called_after_close:
-  FIO_LOG_DEBUG2("`write` called after `close` was called for IO.");
+  FIO_LOG_DEBUG2("(%d) `write` called after `close` was called for IO.",
+                 fio_io_pid());
   {
     union {
       void *ptr;
@@ -690,6 +694,7 @@ write_called_after_close:
 
 io_error_null:
   FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)", FIO___IO.pid);
+do_nothing:
   if (args.dealloc) {
     union {
       void *ptr;
@@ -1532,6 +1537,7 @@ SFUNC void fio_io_async_attach(fio_io_async_s *q, uint32_t threads) {
         .q = fio_io_queue(),
         .count = threads,
         .queue = FIO_QUEUE_STATIC_INIT(q->queue),
+        .timers = FIO_TIMER_QUEUE_INIT,
         .node = FIO_LIST_INIT(q->node),
     };
     FIO_LIST_PUSH(&FIO___IO.async, &q->node);
@@ -1539,6 +1545,14 @@ SFUNC void fio_io_async_attach(fio_io_async_s *q, uint32_t threads) {
   q->count = threads;
   if (fio_io_is_running())
     fio___io_async_start(q);
+}
+
+void fio_io_async_every___(void); /* IDE Mark */
+/** Schedules a timer bound task for the async queue (`fio_timer_schedule`). */
+SFUNC void fio_io_async_every FIO_NOOP(fio_io_async_s *q,
+                                       fio_timer_schedule_args_s a) {
+  a.start_at = FIO___IO.tick;
+  fio_timer_schedule FIO_NOOP(&q->timers, a);
 }
 
 /* *****************************************************************************

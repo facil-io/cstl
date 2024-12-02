@@ -1412,13 +1412,15 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
     goto no_write_err;
   if (fio_http_is_streaming(h))
     goto stream_chunk;
-  if (c->state.http.buf.len && args.buf && args.len) {
-    fio_string_write(&c->state.http.buf,
-                     FIO_STRING_REALLOC,
-                     (char *)args.buf + args.offset,
-                     args.len);
-    if (args.dealloc)
-      args.dealloc((void *)args.buf);
+  if (c->state.http.buf.len) {
+    if (args.buf && args.len) {
+      fio_string_write(&c->state.http.buf,
+                       FIO_STRING_REALLOC,
+                       (char *)args.buf + args.offset,
+                       args.len);
+      if (args.dealloc)
+        args.dealloc((void *)args.buf);
+    }
     fio_io_write2(c->io,
                   .buf = (void *)c->state.http.buf.buf,
                   .len = c->state.http.buf.len,
@@ -1438,14 +1440,40 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
 
 stream_chunk:
   if (args.len) { /* print chunk header */
-    char buf[24];
-    fio_str_info_s i = FIO_STR_INFO3(buf, 0, 24);
-    fio_string_write_hex(&i, NULL, args.len);
-    fio_string_write(&i, NULL, "\r\n", 2);
-    fio_io_write2(c->io, .buf = (void *)i.buf, .len = i.len, .copy = 1);
+    if (c->state.http.buf.len) {
+      fio_io_write2(c->io,
+                    .buf = (void *)c->state.http.buf.buf,
+                    .len = c->state.http.buf.len,
+                    .dealloc = FIO_STRING_FREE);
+      fio_string_write2(&c->state.http.buf,
+                        FIO_STRING_REALLOC,
+                        FIO_STRING_WRITE_HEX(args.len),
+                        FIO_STRING_WRITE_STR2("\r\n", 2));
+      fio_io_write2(c->io,
+                    .buf = (void *)c->state.http.buf.buf,
+                    .len = c->state.http.buf.len,
+                    .dealloc = FIO_STRING_FREE);
+      c->state.http.buf = FIO_STR_INFO0;
+    } else {
+      char buf[24];
+      fio_str_info_s i = FIO_STR_INFO3(buf, 0, 24);
+      fio_string_write_hex(&i, NULL, args.len);
+      fio_string_write(&i, NULL, "\r\n", 2);
+      fio_io_write2(c->io, .buf = (void *)i.buf, .len = i.len, .copy = 1);
+    }
   } else {
-    FIO_LOG_ERROR("HTTP1 streaming requires a correctly pre-determined "
-                  "length per chunk.");
+    if (c->state.http.buf.len) {
+      fio_io_write2(c->io,
+                    .buf = (void *)c->state.http.buf.buf,
+                    .len = c->state.http.buf.len,
+                    .dealloc = FIO_STRING_FREE);
+      c->state.http.buf = FIO_STR_INFO0;
+    }
+    if (args.buf || (uint32_t)(args.fd + 1) > 0U)
+      FIO_LOG_ERROR("HTTP1 streaming requires a correctly pre-determined "
+                    "length per chunk.");
+    else
+      goto no_write_err;
   }
   fio_io_write2(c->io,
                 .buf = (void *)args.buf,
@@ -1460,6 +1488,7 @@ stream_chunk:
     fio_io_write2(c->io, .buf = trailer.buf, .len = trailer.len, .copy = 1);
   }
   return;
+
 no_write_err:
   if (args.buf) {
     if (args.dealloc)

@@ -36,6 +36,9 @@ FIO_SFUNC void fio___io_tick(int timeout) {
   }
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   fio_timer_push2queue(&FIO___IO.queue, &FIO___IO.timer, FIO___IO.tick);
+  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, a) {
+    fio_timer_push2queue(a->q, &a->timers, FIO___IO.tick);
+  }
   for (size_t i = 0; i < 2048; ++i)
     if (fio_queue_perform(&FIO___IO.queue))
       break;
