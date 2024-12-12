@@ -1426,7 +1426,8 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
                   .len = c->state.http.buf.len,
                   .dealloc = FIO_STRING_FREE);
     c->state.http.buf = FIO_STR_INFO0;
-    return;
+    if (args.buf && args.len)
+      return;
   }
 
   fio_io_write2(c->io,

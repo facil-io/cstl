@@ -559,11 +559,7 @@ IFUNC size_t fio_io_buffer_len(fio_io_s *io) {
 }
 
 /** Associates a new `udata` pointer with the IO, returning the old `udata` */
-IFUNC void *fio_io_udata_set(fio_io_s *io, void *udata) {
-  void *old = io->udata;
-  io->udata = udata;
-  return old;
-}
+FIO_DEF_SET_FUNC(IFUNC, fio_io, fio_io_s, void *, udata, FIO_NOOP_FN)
 
 /** Returns the `udata` pointer associated with the IO. */
 IFUNC void *fio_io_udata(fio_io_s *io) { return io->udata; }

@@ -1,7 +1,3 @@
----
-title: facil.io - C real-time web application framework
-sidebar: 0.8.x/_sidebar.md
----
 # facil.io - C Real-Time Web Application Framework
 
 [facil.io](http://facil.io) focuses on providing solutions for real-time web applications. facil.io includes:
@@ -34,7 +30,7 @@ The Server Toolbox Library is a "swiss-army-knife" library, that uses MACROS to 
 
 The [testable](#testing-the-library-fio_test_cstl) header library includes a Server Toolbox Library for the following common types:
 
-* [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR_NAME` / `FIO_STR_SMALL`
+* [Binary Safe Dynamic Strings](#dynamic-strings) - defined by `FIO_STR` / `FIO_STR_NAME` / `FIO_STR_SMALL`
 
 * [Dynamic Arrays](#dynamic-arrays) - defined by `FIO_ARRAY_NAME`
 
@@ -46,6 +42,10 @@ The [testable](#testing-the-library-fio_test_cstl) header library includes a Ser
 
 
 In addition, the core Server Toolbox Library (STL) includes helpers for common tasks, such as:
+
+* [Atomic operations](#atomic-operations)
+
+* [Pointer Arithmetics](#pointer-arithmetics)
 
 * [Fast String / Number conversion](#string-number-conversion) - defined by `FIO_ATOL`
 
@@ -63,11 +63,25 @@ In addition, the core Server Toolbox Library (STL) includes helpers for common t
 
 * [Local Memory Allocation](#local-memory-allocation) - defined by `FIO_MEMORY` / `FIO_MALLOC`
 
-* [Atomic operations](#atomic-operations) - defined by `FIO_ATOMIC`
-
-* [Pointer Arithmetics](#pointer-arithmetics) (included by default)
+* [An Evented IO Reactor](#io-reactor---an-evented-single-threaded-io-reactor) - defined by `FIO_IO`
 
 * And much more...
+
+-------------------------------------------------------------------------------
+
+## How to Use
+
+Simply copy the `fio-stl` folder to your project (or the combined `fio-stl.h` file).
+
+Then include the file in your project to use the facil.io CSTL library.
+
+The library can be included more than once and produce different results depending on the MACROS predefined before each inclusion.
+
+#### `FIO_INCLUDE_FILE`
+
+The facil.io C STL can be used as either a single header library (`fio-stl.h`) or a multi-header library (`fio-stl/include.h`).
+
+The `FIO_INCLUDE_FILE` macro will remember which approach was first used and will use the same approach for subsequent inclusions.
 
 -------------------------------------------------------------------------------
 
@@ -159,10 +173,6 @@ When `FIO_BASIC` is defined, the `FIOBJ` types, multi threading, and CLI modules
 
 When `FIO_CRYPT` is defined, all hash and cryptographic modules are included.
 
-#### `FIO_SERVER_COMPLETE`
-
-When `FIO_SERVER_COMPLETE` is defined all Server related modules are included.
-
 #### `FIO_EVERYTHING`
 
 Adds all the code facil.io C STL has to offer.
@@ -218,12 +228,6 @@ Translates to the STL's build version **string** (i.e., `"beta.1"`), if any.
 
 Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
-### Inclusion Macros
-
-#### `FIO_INCLUDE_FILE`
-
-The facil.io C STL can be used as either a single header library (`fio-stl.h`) or a multi-header library (`fio-stl/include.h`). The `FIO_INCLUDE_FILE` macro will remember which approach was first used and will use the same approach for subsequent inclusions.
-
 -------------------------------------------------------------------------------
 
 ### Default Memory Allocation
@@ -266,13 +270,15 @@ When `FIO_MEMORY_DISABLE` is defined, all (future) custom memory allocators will
 
 #### `FIO_LEAK_COUNTER`
 
-If defined, facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with a high degree of certainty.
+Unless defined as zero (`0`), facil.io will count allocations and deallocations for custom memory allocators and reference counted types - allowing memory leaks to be detected with a high degree of certainty.
 
-This also prints out some minimal usage information about each allocator when exiting the program. 
+This may also print some minimal usage information about each allocator when exiting the program (when logging using `FIO_LOG_LEVEL_DEBUG`. 
 
 **Note**: enabling leak detection automatically adds the `FIO_LOG` module (to print errors), the `FIO_ATOMIC` module (for atomic counters) and the `FIO_STATE` module (for more predictable `at_exit` callbacks).
 
-When this MACRO is defined and truthful, the following macros have an effect:
+#### `FIO_LEAK_COUNTER_DEF`, `FIO_LEAK_COUNTER_ON_ALLOC` and `FIO_LEAK_COUNTER_ON_FREE`
+
+These macros require `FIO_LEAK_COUNTER` to be true, otherwise they do nothing.
 
 - `FIO_LEAK_COUNTER_DEF(name)` - defines the named memory leak counter / detection functions.
 
@@ -305,6 +311,8 @@ void my_type_free(my_type_s * t) {
   free(t);
 }
 ```
+
+**Note**: the `FIO_REF` reference counting module does this automatically when `FIO_LEAK_COUNTER` is defined as true.
 
 -------------------------------------------------------------------------------
 
@@ -345,16 +353,15 @@ The functions can safely allocate the following number of bytes before the funct
 The following example uses static memory to create a (zero allocation) number to string converter and then uses it to print out a number's value for logging:
 
 ```c
-// Step 1: define the allocator
-
-// Defined a static allocator for 19 byte long strings.
-// 
-// This will reserve 4,864 bytes in static memory.
-// 
+// Step 1: define the allocator:
+//
+// This will define a static allocator,
+// allocating 19 byte long strings per allocation.
+// Reserving 4,864 bytes in static memory.
 FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
 
 // Step 2: use the allocator
-
+//
 // example function that returns an unsigned number as a 16 digit hex string
 char * ntos16(uint16_t n) {
   // allocates 19 bytes from the static memory pool.
@@ -368,15 +375,12 @@ char * ntos16(uint16_t n) {
 }
 
 // Step 3: example use-case.
-
 void print_number_for_debugging(char * file, int line, char * var, uint16_t n) {
   printf("(%s:%d) %s = %s", file, line, var_name, ntos16(n));
 }
 
 // Prints any number in hex, along with file location and variable name.
 #define LOG_PRINT_VAL(n) print_number_for_debugging(__FILE__, __LINE__, #n, n)
-
-
 ```
 
 A similar approach is use by `fiobj_num2cstr` in order to provide temporary conversions of FIOBJ to a C String without the caller having to reason about memory management.
@@ -526,6 +530,26 @@ Marks a function as a _destructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
 
+#### `FIO_NOOP`
+
+```c
+#define FIO_NOOP
+```
+
+An empty macro, adding white space.
+
+This is useful when a function name is shadowed by a macro (such as when named arguments are used). The additional `FIO_NOOP` macro and white space that follows prevents the named argument macro from being expanded by the preprocessor.
+
+#### `FIO_NOOP_FN`
+
+```c
+#define FIO_NOOP_FN(...)
+```
+
+An empty macro that does nothing.
+
+This is useful for creating macros that can have optional callbacks (`FIO_NOOP_FN` can be used instead of a callback in these cases).
+
 #### `FIO_MACRO2STR`
 
 ```c
@@ -605,43 +629,93 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 
 Used internally to name test functions.
 
+#### `FIO_DEF_GET_FUNC` / `FIO_DEF_GET_FUNC_DEF`
+
+```c
+#define FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, field_name)        \
+  /** Returns current value of property within the struct / union. */          \
+  static F_type FIO_NAME(namespace, field_name)(T_type * o) {                  \
+    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `get`!"); \
+    return o->field_name;                                                      \
+  }
+
+#define FIO_DEF_GET_FUNC_DEF(static, namespace, T_type, F_type, field_name)    \
+  /** Returns current value of property within the struct / union. */          \
+  static F_type FIO_NAME(namespace, field_name)(T_type * o);
+```
+
+Defines a `get` function for a field within a struct / union.
+
+This allows for consistent naming of `get` functions.
+
+**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
+
+#### `FIO_DEF_SET_FUNC` / `FIO_DEF_SET_FUNC_DEF`
+
+```c
+#define FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)    \
+  /** Sets a new value, returning the old one */                               \
+  static F_type FIO_NAME(FIO_NAME(namespace, field_name),                      \
+                         set)(T_type * o, F_type new_value) {                  \
+    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `set`!"); \
+    F_type old_value = o->field_name;                                          \
+    o->field_name = new_value;                                                 \
+    on_set(o);                                                                 \
+    return old_value;                                                          \
+  }
+
+#define FIO_DEF_SET_FUNC_DEF(static, namespace, T_type, F_type, F_name)        \
+  /** Sets a new value, returning the old one */                               \
+  static F_type FIO_NAME(FIO_NAME(namespace, F_name), set)(T_type * o,         \
+                                                           F_type new_value);
+```
+
+Defines a `set` function for a field within a struct / union.
+
+This allows for consistent naming of `set` functions.
+
+#### `FIO_DEF_GETSET_FUNC`
+
+```c
+#define FIO_DEF_GETSET_FUNC(static, namespace, T_type, F_type, F_name, on_set) \
+  FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, F_name)                  \
+  FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)
+```
+
+Defines `get` / `set` functions for a field within a struct / union.
+
 #### `FIO_IFUNC_DEF_GET`
 
 ```c
 #define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
-  /** Returns current value of property within the struct / union. */          \
-  FIO_IFUNC F_type FIO_NAME(namespace, field_name)(T_type * o) {               \
-    return o->field_name;                                                      \
-  }
+  FIO_DEF_GET_FUNC(FIO_IFUNC, namespace, T_type, F_type, field_name)
 ```
 
-Defines a "get" function for a field within a struct / union.
+Defines a `get` function for a field within a struct / union.
 
-This allows for consistent naming of "get" functions.
+This allows for consistent naming of `get` functions.
 
- **Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
+**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
 
 #### `FIO_IFUNC_DEF_SET`
 
 ```c
-#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)               \
-  /** Sets a new value, returning the old one */                               \
-  FIO_IFUNC F_type FIO_NAME(FIO_NAME(namespace, field_name),                   \
-                            set)(T_type * o, F_type new_value) {               \
-    F_type old_value = o->field_name;                                          \
-    o->field_name = new_value;                                                 \
-    return old_value;                                                          \
-  }
+#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)               \
+  FIO_DEF_SET_FUNC(FIO_IFUNC, namespace, T_type, F_type, F_name, on_set)
 ```
 
-Defines a "set" function for a field within a struct / union.
+Defines a `set` function for a field within a struct / union.
+
+The `on_set` callback accepts a pointer to the updated struct and a pointer to the old value (in this order).
+
+If no `on_set` is required, using `FIO_NOOP_FN` as the `on_set` value.
 
 #### `FIO_IFUNC_DEF_GETSET`
 
 ```c
-#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, field_name)            \
-  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)                     \
-  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, field_name)
+#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, F_name, on_set)        \
+  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, F_name)                         \
+  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)
 ```
 
 Shortcut for defining both a `get` and a `set` function for a field within a struct / union.
