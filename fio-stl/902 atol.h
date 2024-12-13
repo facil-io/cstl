@@ -94,7 +94,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       "0x3a.0P-1074",
       "0x0.f9c7573d7fe52p-1022",
   };
-  printf("* Testing fio_aton/strtod performance:\n");
+  fprintf(stderr, "* Testing fio_aton/strtod performance:\n");
   /* Sanity Test */
   bool rounding_errors_detected = 0;
   for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
@@ -134,7 +134,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
   /* Speed Test */
   for (size_t fn_i = 0; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
     double unused;
-    printf("\t%s\t", to_test[fn_i].n);
+    fprintf(stderr, "\t%s\t", to_test[fn_i].n);
     int64_t start = FIO_NAME_TEST(stl, atol_time)();
     for (size_t i = 0; i < (FIO_ATOL_TEST_MAX / 10); ++i) {
       for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
@@ -145,7 +145,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
     }
     (void)unused;
     int64_t end = FIO_NAME_TEST(stl, atol_time)();
-    printf("%lld us\n", (long long int)(end - start));
+    fprintf(stderr, "%lld us\n", (long long int)(end - start));
   }
   if (rounding_errors_detected)
     FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
