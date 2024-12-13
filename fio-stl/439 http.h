@@ -1503,13 +1503,6 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
                                                           void *upgraded) {
   fio___http_connection_s *c = (fio___http_connection_s *)c_;
   c->suspend = 0;
-  if (c->state.http.buf.len) {
-    fio_io_write2(c->io,
-                  .buf = (void *)c->state.http.buf.buf,
-                  .len = c->state.http.buf.len,
-                  .dealloc = FIO_STRING_FREE);
-    c->state.http.buf = FIO_STR_INFO0;
-  }
 
   if (upgraded)
     goto upgraded;
@@ -1566,8 +1559,18 @@ something_is_wrong:
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (fio_http_is_streaming(h))
-    fio_io_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
+  if (c->state.http.buf.len) {
+    if (fio_http_is_streaming(h))
+      fio_string_write(&c->state.http.buf, FIO_STRING_REALLOC, "0\r\n\r\n", 5);
+    fio_io_write2(c->io,
+                  .buf = (void *)c->state.http.buf.buf,
+                  .len = c->state.http.buf.len,
+                  .dealloc = FIO_STRING_FREE);
+    c->state.http.buf = FIO_STR_INFO0;
+  } else {
+    if (fio_http_is_streaming(h))
+      fio_io_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
+  }
   if (c->log)
     fio_http_write_log(h);
   if (fio_http_is_upgraded(h))
