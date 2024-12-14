@@ -11033,6 +11033,8 @@ typedef struct {
   void (*on_unsubscribe)(void *udata);
   /** The opaque udata value is ignored and made available to the callbacks. */
   void *udata;
+  /** The queue to which the callbacks should be routed. May be NULL. */
+  fio_queue_s *queue;
   /**
    * OPTIONAL: subscription handle return value - should be NULL when using
    * automatic memory management with the IO or global environment.
@@ -11095,7 +11097,7 @@ int fio_unsubscribe(subscribe_args_s args);
 
 Cancels an existing subscriptions.
 
-Accepts the same arguments as [`fio_subscribe`](fio_subscribe), except the `udata` and callback details are ignored (no need to provide `udata` or callback details).
+Accepts the same arguments as [`fio_subscribe`](fio_subscribe), except the `udata`, and callback details are ignored (no need to provide `udata` or callback details).
 
 If a `subscription_handle_ptr` was provided it should contain the value of the subscription handle returned.
 
@@ -11474,7 +11476,7 @@ typedef struct fio_http_settings_s {
    */
   size_t max_body_size;
   /**
-   * The maximum websocket message size/buffer (in bytes) for Websocket
+   * The maximum WebSocket message size/buffer (in bytes) for Websocket
    * connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
    */
   size_t ws_max_msg_size;

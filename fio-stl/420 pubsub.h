@@ -85,6 +85,8 @@ typedef struct {
   void (*on_unsubscribe)(void *udata);
   /** The opaque udata value is ignored and made available to the callbacks. */
   void *udata;
+  /** The queue to which the callbacks should be routed. May be NULL. */
+  fio_queue_s *queue;
   /** Replay cached messages (if any) since supplied time in milliseconds. */
   uint64_t replay_since;
   /**
@@ -543,6 +545,7 @@ typedef struct fio_subscription_s {
   uint64_t replay_since;
   fio_io_s *io;
   fio_channel_s *channel;
+  fio_queue_s *queue;
   void (*on_message)(fio_msg_s *msg);
   void (*on_unsubscribe)(void *udata);
   void *udata;
@@ -552,7 +555,8 @@ typedef struct fio_subscription_s {
  * Reference counting: `fio_subscription_dup(sb)` / `fio_subscription_free(sb)`
  */
 FIO_SFUNC void fio___pubsub_subscription_on_destroy(fio_subscription_s *sub);
-#define FIO_REF_NAME             fio_subscription
+#define FIO_REF_NAME             fio___subscription
+#define FIO_REF_TYPE             fio_subscription_s
 #define FIO_REF_DESTROY(obj)     fio___pubsub_subscription_on_destroy(&(obj))
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO___RECURSIVE_INCLUDE  1
@@ -1119,7 +1123,7 @@ FIO_IFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
   sub->channel = NULL;
 
 no_channel:
-  fio_subscription_free(sub);
+  fio___subscription_free(sub);
   return;
   (void)ignr_;
 }
@@ -1145,10 +1149,11 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   } uptr;
   if (args.channel.len > 0xFFFFUL)
     goto sub_error;
-  s = fio_subscription_new();
+  s = fio___subscription_new();
   if (!s)
     goto sub_error;
-
+  if (!args.queue)
+    args.queue = fio_io_queue();
   *s = (fio_subscription_s){
       .replay_since = args.replay_since,
       .io = args.io,
@@ -1158,6 +1163,7 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
                                       : fio___subscription_mock_cb)),
       .on_unsubscribe = args.on_unsubscribe,
       .udata = args.udata,
+      .queue = args.queue,
   };
   args.is_pattern = !!args.is_pattern; /* make sure this is either 1 or zero */
   uptr.ls = &s->node;
@@ -1215,7 +1221,7 @@ error_not_on_master:
   fio_bstr_free(uptr.str->buf);
   s->node = FIO_LIST_INIT(s->node);
   s->history = FIO_LIST_INIT(s->history);
-  fio_subscription_free(s);
+  fio___subscription_free(s);
   FIO_LOG_WARNING(
       "(%d) master-only subscription attempt on a non-master process: %.*s",
       fio_io_pid(),
@@ -1285,6 +1291,11 @@ is_global:
 Pub/Sub Message Distribution (local process)
 ***************************************************************************** */
 
+static void fio___subscription_after_on_message_task(void *s, void *m) {
+  fio___subscription_free((fio_subscription_s *)s);
+  fio___pubsub_message_free((fio___pubsub_message_s *)m);
+}
+
 /* performs the subscription callback */
 FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *m_) {
   fio_subscription_s *s = (fio_subscription_s *)s_;
@@ -1304,11 +1315,13 @@ FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *m_) {
   s->udata = container.msg.udata;
   if (container.flag)
     goto reschedule;
-  fio_subscription_free(s);
-  fio___pubsub_message_free(m);
+  fio_queue_push(fio_io_queue(),
+                 fio___subscription_after_on_message_task,
+                 s,
+                 m);
   return;
 reschedule:
-  fio_queue_push(fio_io_queue(), fio___subscription_on_message_task, s_, m_);
+  fio_queue_push(s->queue, fio___subscription_on_message_task, s_, m_);
 }
 
 /* returns the internal message object. */
@@ -1333,18 +1346,18 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.io != s->io && m->data.published >= s->replay_since)
           fio_queue_push(
-              fio_io_queue(),
+              s->queue,
               (void (*)(void *, void *))fio___subscription_on_message_task,
-              fio_subscription_dup(s),
+              fio___subscription_dup(s),
               fio___pubsub_message_dup(m));
       }
     } else {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.io != s->io)
           fio_queue_push(
-              fio_io_queue(),
+              s->queue,
               (void (*)(void *, void *))fio___subscription_on_message_task,
-              fio_subscription_dup(s),
+              fio___subscription_dup(s),
               fio___pubsub_message_dup(m));
       }
     }
@@ -1353,17 +1366,17 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         if (m->data.published >= s->replay_since)
           fio_queue_push(
-              fio_io_queue(),
+              s->queue,
               (void (*)(void *, void *))fio___subscription_on_message_task,
-              fio_subscription_dup(s),
+              fio___subscription_dup(s),
               fio___pubsub_message_dup(m));
       }
     } else {
       FIO_LIST_EACH(fio_subscription_s, node, head, s) {
         fio_queue_push(
-            fio_io_queue(),
+            s->queue,
             (void (*)(void *, void *))fio___subscription_on_message_task,
-            fio_subscription_dup(s),
+            fio___subscription_dup(s),
             fio___pubsub_message_dup(m));
       }
     }

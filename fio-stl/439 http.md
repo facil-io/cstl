@@ -90,7 +90,7 @@ typedef struct fio_http_settings_s {
    */
   size_t max_body_size;
   /**
-   * The maximum websocket message size/buffer (in bytes) for Websocket
+   * The maximum WebSocket message size/buffer (in bytes) for Websocket
    * connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
    */
   size_t ws_max_msg_size;
