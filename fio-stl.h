@@ -39078,7 +39078,7 @@ SFUNC void fio_subscribe FIO_NOOP(fio_subscribe_args_s args) {
   s = fio___subscription_new();
   if (!s)
     goto sub_error;
-  if (!args.queue)
+  if (!args.queue || !args.on_message)
     args.queue = fio_io_queue();
   *s = (fio_subscription_s){
       .replay_since = args.replay_since,
