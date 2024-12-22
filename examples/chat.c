@@ -33,11 +33,13 @@ FIO_SFUNC void on_data_chat(fio_io_s *io);
 FIO_SFUNC void on_shutdown(fio_io_s *io);
 /** Called when the monitored IO is closed or has a fatal error. */
 FIO_SFUNC void on_close(void *buf, void *udata);
+/** Called when the monitored IO is closed or has a fatal error. */
+FIO_SFUNC void on_close_unconnected(void *buf, void *udata);
 
 static fio_io_protocol_s CHAT_PROTOCOL_LOGIN = {
     .on_attach = on_login_start,
     .on_data = on_data_login,
-    .on_close = on_close,
+    .on_close = on_close_unconnected,
 };
 static fio_io_protocol_s CHAT_PROTOCOL_CHAT = {
     .on_data = on_data_chat,
@@ -94,6 +96,13 @@ FIO_SFUNC void on_close(void *buf, void *udata) {
                     FIO_STRING_WRITE_STR2(c->name, c->name[31]),
                     FIO_STRING_WRITE_STR1(" left the chat.\n"));
   fio_publish(.message = FIO_STR2BUF_INFO(s));
+  client_free(c);
+  (void)buf;
+}
+
+/** Called when the monitored IO is closed or has a fatal error. */
+FIO_SFUNC void on_close_unconnected(void *buf, void *udata) {
+  client_s *c = udata;
   client_free(c);
   (void)buf;
 }

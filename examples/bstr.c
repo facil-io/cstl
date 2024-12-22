@@ -24,7 +24,7 @@ int main(void) {
                          FIO_STRING_WRITE_STR1(". The answer is: "),
                          FIO_STRING_WRITE_UNUM(42));
   printf("Original string: %s\n", org);
-  printf("Copied string:   %s\n", copy);
+  printf("Edited string:   %s\n", copy);
   fio_bstr_free(org);
   fio_bstr_free(copy);
 }
