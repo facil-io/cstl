@@ -321,7 +321,13 @@ int main(int argc, char const *argv[]) {
           "invalid. \n");
 #endif
 
-  const size_t thread_count = fio_cli_get_i("-t") ? fio_cli_get_i("-t") : 1;
+  size_t thread_count = fio_cli_get_i("-t") ? fio_cli_get_i("-t") : 1;
+  if (thread_count == (size_t)-1) {
+    thread_count = fio_malloc_arenas();
+  } else if (thread_count > 64) {
+    FIO_LOG_ERROR("thread count cannot exceed 64 threads when testing.");
+    thread_count = 64;
+  }
   fio_cli_end();
   fio_free(fio_malloc(16)); /* initialize allocator if needed */
   free(malloc(16));         /* initialize allocator if needed */
