@@ -26,7 +26,9 @@ jobs:
     - name: Test Mustache Compliance
       run: make tests/mustache
     - name: Test fio_malloc speed
-      run: make tests/malloc
+      run: |
+        make tests/malloc
+        ./tmp/malloc -t 4
     - name: clean
       run: make clean
     - name: Test STL in debug mode
