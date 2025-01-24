@@ -332,7 +332,7 @@ static void http_respond(fio_http_s *h) {
                    .udata = fio_bstr_write(NULL, "my env data", 11),
                    .on_close = (void (*)(void *))fio_bstr_free);
   }
-  /* ETag header example */
+  /* ETag header example - setting an ETag automatically enables caching */
   if (1) {
     uint64_t hash =
         fio_risky_hash(fio_http_path(h).buf, fio_http_path(h).len, 0);

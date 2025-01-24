@@ -83,29 +83,30 @@ int main(int argc, char const *argv[]) {
       1, /* require 1 unnamed argument - the address to connect to */
       1,
       "A simple TCP/IP, Unix or UDP client application. Requires a URL "
-      "type address. i.e.\n"
-      "\tNAME <url>\n"
-      "\nHTTP examples:\n"
-      "\tNAME http://google.com/\n"
-      "\tNAME https://google.com/\n"
-      "\nWebSocket examples:\n"
-      "\tNAME ws://localhost:3000/\n"
-      "\tNAME wss://localhost:3000/\n"
-      "\nSSE (Server Sent Events) examples:\n"
-      "\tNAME sse://localhost:3000/\n"
-      "\tNAME sses://localhost:3000/\n"
-      "\nUnix socket examples:\n"
-      "\tNAME unix://./my.sock\n"
-      "\tNAME /full/path/to/my.sock\n"
-      "\nTCP/IP socket examples:\n"
-      "\tNAME tcp://localhost:3000/\n"
-      "\tNAME localhost://3000\n"
-      "\nUDP socket examples:\n"
-      "\tNAME udp://localhost:3000/\n",
+      "type address.",
       FIO_CLI_INT("--timeout -t (50) ongoing connection timeout in seconds."),
       FIO_CLI_INT("--wait -w (5) connection attempt timeout in seconds."),
       FIO_CLI_BOOL("--body -b print out body only, ignore headers."),
-      FIO_CLI_BOOL("--verbose -V -d print out debugging messages."));
+      FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
+      FIO_CLI_PRINT_HEADER("\nUse:"),
+      FIO_CLI_PRINT_LINE("\tNAME <url>\n"
+                         "\nHTTP examples:\n"
+                         "\tNAME http://www.google.com/\n"
+                         "\tNAME https://www.google.com/\n"
+                         "\nWebSocket examples:\n"
+                         "\tNAME ws://localhost:3000/\n"
+                         "\tNAME wss://localhost:3000/\n"
+                         "\nSSE (Server Sent Events) examples:\n"
+                         "\tNAME sse://localhost:3000/\n"
+                         "\tNAME sses://localhost:3000/\n"
+                         "\nUnix socket examples:\n"
+                         "\tNAME unix://./my.sock\n"
+                         "\tNAME /full/path/to/my.sock\n"
+                         "\nTCP/IP socket examples:\n"
+                         "\tNAME tcp://localhost:3000/\n"
+                         "\tNAME localhost://3000\n"
+                         "\nUDP socket examples:\n"
+                         "\tNAME udp://localhost:3000/\n"));
 
   /* review CLI for logging */
   if (fio_cli_get_bool("-V")) {
@@ -295,7 +296,9 @@ FIO_SFUNC void client_on_http(fio_http_s *h) {
       break;
     printf("%.*s", (int)buf.len, buf.buf);
   }
-
+  if (!fio_cli_get_bool("-b"))
+    printf("\n");
+  fflush(stdout);
   fio_io_stop();
 }
 
