@@ -76,6 +76,14 @@ static void http_respond(fio_http_s *h);
 Main
 ***************************************************************************** */
 
+static int heartbeat(void *i1, void *i2) {
+  (void)i1, (void)i2;
+  if (!fio_io_is_master())
+    return -1;
+  FIO_LOG_INFO("(%d) heartbeat", fio_io_pid());
+  return 0;
+}
+
 int main(int argc, char const *argv[]) {
   static fio_io_async_s http_queue; /* async queue for worker threads. */
 
@@ -149,17 +157,26 @@ int main(int argc, char const *argv[]) {
           "--contained -C attempts to handle possible container restrictions."),
       FIO_CLI_PRINT(
           "Containers sometimes impose file-system restrictions, i.e.,"),
-      FIO_CLI_PRINT("the IPC Unix Socket might need to be placed in `/tmp`."));
+      FIO_CLI_PRINT("the IPC Unix Socket might need to be placed in `/tmp`."),
+      FIO_CLI_INT("--heartbeat -ph Prints a heartbeat every requested number "
+                  "of seconds."));
 
   /* review CLI for logging */
   if (fio_cli_get_bool("-V")) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
+  /* schedule heartbeat */
+  if (fio_cli_get_i("-ph"))
+    fio_io_run_every(.every = (fio_cli_get_i("-ph") * 1000),
+                     .fn = heartbeat,
+                     .repetitions = -1);
 
   if (fio_cli_get_bool("-C")) { /* container - place pub/sub socket in tmp */
     char *u = (char *)fio_pubsub_ipc_url();
     memcpy((void *)(u + 7), "/tmp/", 5);
   }
+
+  fio_io_restart_on_signal(SIGUSR1);
 
   /* Debug data: print type sizes */
   FIO_LOG_DEBUG2("IO overhead: %zu bytes", sizeof(fio_io_s) + 8);
@@ -171,6 +188,8 @@ int main(int argc, char const *argv[]) {
                  sizeof(fio_io_s) + sizeof(fio___http_connection_s) +
                      sizeof(fio_http_s) + 24,
                  FIO_HTTP_DEFAULT_MAX_LINE_LEN);
+  if (fio_cli_get_i("-w"))
+    FIO_LOG_DEBUG2("Hot restart signal: SIGUSR1");
 
   /* initialize Async HTTP queue */
   fio_io_async_attach(&http_queue, fio_io_workers(fio_cli_get_i("-t")));
@@ -226,30 +245,32 @@ int main(int argc, char const *argv[]) {
   }
 
   /* listen to incoming HTTP connections */
-  FIO_ASSERT(
-      fio_http_listen(fio_cli_get("-b"),
-                      .on_http = http_respond,
-                      .on_authenticate_sse = FIO_HTTP_AUTHENTICATE_ALLOW,
-                      .on_authenticate_websocket = FIO_HTTP_AUTHENTICATE_ALLOW,
-                      .on_open = websocket_on_open,
-                      .on_message = websocket_on_message,
-                      .on_shutdown = websocket_on_shutdown,
-                      .public_folder =
-                          fio_cli_get("-www")
-                              ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
-                              : FIO_STR_INFO2(NULL, 0),
-                      .max_age = 0,
-                      .max_header_size = (fio_cli_get_i("-maxhd") * 1024),
-                      .max_line_len = (fio_cli_get_i("-maxhd") * 1024),
-                      .max_body_size = (fio_cli_get_i("-maxbd") * 1024 * 1024),
-                      .ws_max_msg_size = (fio_cli_get_i("-maxms") * 1024),
-                      .ws_timeout = fio_cli_get_i("-ping"),
-                      .sse_timeout = fio_cli_get_i("-ping"),
-                      .timeout = fio_cli_get_i("-k"),
-                      .queue = &http_queue,
-                      .tls = tls,
-                      .log = fio_cli_get_bool("-v")),
-      "Could not open listening socket as requested.");
+  void *listener = fio_http_listen(
+      fio_cli_get("-b"),
+      .on_http = http_respond,
+      .on_authenticate_sse = FIO_HTTP_AUTHENTICATE_ALLOW,
+      .on_authenticate_websocket = FIO_HTTP_AUTHENTICATE_ALLOW,
+      .on_open = websocket_on_open,
+      .on_message = websocket_on_message,
+      .on_shutdown = websocket_on_shutdown,
+      .public_folder = fio_cli_get("-www")
+                           ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
+                           : FIO_STR_INFO2(NULL, 0),
+      .max_age = 0,
+      .max_header_size = (fio_cli_get_i("-maxhd") * 1024),
+      .max_line_len = (fio_cli_get_i("-maxhd") * 1024),
+      .max_body_size = (fio_cli_get_i("-maxbd") * 1024 * 1024),
+      .ws_max_msg_size = (fio_cli_get_i("-maxms") * 1024),
+      .ws_timeout = fio_cli_get_i("-ping"),
+      .sse_timeout = fio_cli_get_i("-ping"),
+      .timeout = fio_cli_get_i("-k"),
+      .queue = &http_queue,
+      .tls = tls,
+      .log = fio_cli_get_bool("-v"));
+  FIO_ASSERT(listener, "Could not open listening socket as requested.");
+  FIO_ASSERT(fio_http_listener_settings(listener)->on_http == http_respond,
+             "HTP listener error.");
+
   /* we don't need the tls object any more. */
   fio_io_tls_free(tls);
 
@@ -265,7 +286,7 @@ int main(int argc, char const *argv[]) {
   /* start server reactor */
   fio_io_start(fio_cli_get_i("-w"));
 
-  /* shutdown starts here */
+  /* shutdown finished */
   FIO_LOG_INFO("Shutdown complete.");
   return 0;
 }

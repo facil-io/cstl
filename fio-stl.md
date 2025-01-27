@@ -4898,12 +4898,15 @@ It is similar to using:
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
+#undef FIO_MEM_ALIGNMENT_SIZE
 
 /*
 * Set if FIO_MEM_REALLOC copies only what was asked,
 * and the rest of the memory is initialized (as if returned from calloc).
 */
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
+/* Stores memory alignment info. */
+#define FIO_MEM_ALIGNMENT_SIZE fio_malloc_alignment()
 
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
 #define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len) fio_realloc2((ptr), (new_size), (copy_len))
@@ -4926,12 +4929,12 @@ Overrides the system's default `malloc` to use this allocator instead.
 #### `FIO_MEMORY_ALIGN_LOG`
 
 ```c
-#define FIO_MEMORY_ALIGN_LOG 4
+#define FIO_MEMORY_ALIGN_LOG 6
 ```
 
 Sets the memory allocation alignment log. This starts with 8 byte alignment (value of 3) and accepts values up to 1024 (value of 10).
 
-The default is 4 (16 byte alignment) which is the X64 requirement for SIMD instructions (SSE).
+The default is 6 (64 byte alignment) which is a typical cache line alignment on many machines.
 
 Allocation alignment, if set, **must** be >= 3 and <= 10.
 
@@ -10294,14 +10297,6 @@ void fio_io_listen_stop(void *listener);
 
 Notifies a listener to stop listening.
 
-#### `fio_io_listener_url`
-
-```c
-fio_buf_info_s fio_io_listener_url(void *listener);
-```
-
-Returns the URL on which the listener is listening.
-
 #### `fio_io_listener_is_tls`
 
 ```c
@@ -10310,6 +10305,37 @@ int fio_io_listener_is_tls(void *listener);
 
 Returns true if the listener protocol has an attached TLS context.
 
+#### `fio_io_listener_protocol`
+
+```c
+fio_io_protocol_s *fio_io_listener_protocol(void *listener);
+```
+
+Returns the listener's associated protocol.
+
+#### `fio_io_listener_udata`
+
+```c
+void *fio_io_listener_udata(void *listener);
+```
+
+Returns the listener's associated `udata`.
+
+#### `fio_io_listener_udata_set`
+
+```c
+void *fio_io_listener_udata_set(void *listener, void *new_udata);
+```
+
+Sets the listener's associated `udata`, returning the old value.
+
+#### `fio_io_listener_url`
+
+```c
+fio_buf_info_s fio_io_listener_url(void *listener);
+```
+
+Returns the URL on which the listener is listening.
 
 ### Connecting as a Client
 
@@ -10572,7 +10598,7 @@ Marks the IO for immediate closure.
 void fio_io_suspend(fio_io_s *io);
 ```
 
-Suspends future `on_data` events for the IO.
+Suspends future `on_data` events for the IO and **prevents** IO from being automatically closed during shutdown process (assumes IO object is waiting on an event or has a task scheduled).
 
 #### `fio_io_unsuspend`
 
@@ -10580,7 +10606,7 @@ Suspends future `on_data` events for the IO.
 void fio_io_unsuspend(fio_io_s *io);
 ```
 
-Listens for future `on_data` events related to the IO.
+Listens for future `on_data` events related to the IO, if shutting down, this will call `fio_io_close`).
 
 #### `fio_io_is_suspended`
 
@@ -11514,6 +11540,14 @@ typedef struct fio_http_settings_s {
   uint8_t log;
 } fio_http_settings_s;
 ```
+
+#### `fio_http_listener_settings`
+
+```c
+fio_http_settings_s *fio_http_listener_settings(void *listener);
+```
+
+Returns the a pointer to the HTTP settings associated with the listener.
 
 #### `FIO_HTTP_AUTHENTICATE_ALLOW`
 

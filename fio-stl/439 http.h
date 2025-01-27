@@ -186,6 +186,9 @@ SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
 
+/** Returns the a pointer to the HTTP settings associated with the listener. */
+SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener);
+
 /** Allows all clients to connect (bypasses authentication). */
 SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
 
@@ -794,6 +797,14 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
   return listener;
 }
 
+/** Returns the a pointer to the HTTP settings associated with the listener. */
+SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener) {
+  fio___http_protocol_s *p =
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         fio_io_listener_protocol(listener));
+  return &p->settings;
+}
 /* *****************************************************************************
 HTTP Connect
 ***************************************************************************** */

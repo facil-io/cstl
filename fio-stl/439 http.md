@@ -129,6 +129,14 @@ typedef struct fio_http_settings_s {
 } fio_http_settings_s;
 ```
 
+#### `fio_http_listener_settings`
+
+```c
+fio_http_settings_s *fio_http_listener_settings(void *listener);
+```
+
+Returns the a pointer to the HTTP settings associated with the listener.
+
 #### `FIO_HTTP_AUTHENTICATE_ALLOW`
 
 ```c

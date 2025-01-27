@@ -774,6 +774,7 @@ static struct FIO___PUBSUB_POSTOFFICE {
     uint8_t remote;
   } filter;
   uint8_t secret_is_random;
+  uint8_t crush_on_close;
   FIO___LOCK_TYPE lock;
   fio___pubsub_engines_s engines;
   FIO_LIST_NODE history_active;
@@ -1014,6 +1015,8 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
   (void)ignr_;
   FIO___PUBSUB_POSTOFFICE.protocol.ipc.on_data =
       fio___pubsub_protocol_on_data_worker;
+
+  FIO___PUBSUB_POSTOFFICE.crush_on_close = 1;
 
   FIO___PUBSUB_POSTOFFICE.filter.publish = FIO___PUBSUB_PROCESS;
   FIO___PUBSUB_POSTOFFICE.filter.local =
@@ -1875,7 +1878,7 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *p_, void *udata) {
             &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
   fio___pubsub_message_parser_destroy(p);
-  if (!fio_io_is_master())
+  if (FIO___PUBSUB_POSTOFFICE.crush_on_close)
     fio_io_stop();
   (void)udata;
 }

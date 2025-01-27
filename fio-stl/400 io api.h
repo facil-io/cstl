@@ -87,6 +87,12 @@ SFUNC void fio_io_add_workers(int workers);
 /** Starts the IO reactor, using optional `workers` processes. Will BLOCK! */
 SFUNC void fio_io_start(int workers);
 
+/** Retiers all existing workers and restarts with the number of workers. */
+SFUNC void fio_io_restart(int workers);
+
+/** Sets a signal to listen to for a hot restart (see `fio_io_restart`). */
+SFUNC void fio_io_restart_on_signal(int signal);
+
 /* *****************************************************************************
 The IO Reactor's State
 ***************************************************************************** */
@@ -179,6 +185,15 @@ SFUNC void *fio_io_listen(fio_io_listen_args args);
 
 /** Notifies a listener to stop listening. */
 SFUNC void fio_io_listen_stop(void *listener);
+
+/** Returns the listener's associated protocol. */
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(void *listener);
+
+/** Returns the listener's associated `udata`. */
+SFUNC void *fio_io_listener_udata(void *listener);
+
+/** Sets the listener's associated `udata`, returning the old value. */
+SFUNC void *fio_io_listener_udata_set(void *listener, void *new_udata);
 
 /** Returns the URL on which the listener is listening. */
 SFUNC fio_buf_info_s fio_io_listener_url(void *listener);

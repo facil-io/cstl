@@ -19,9 +19,17 @@ Copyright and License: see header file (000 copyright.h) or top of file
 The IO Reactor Cycle (the actual work)
 ***************************************************************************** */
 
-static void fio___io_signal_handle(int sig, void *flg) {
-  ((uint8_t *)flg)[0] = 1;
-  (void)sig;
+static void fio___io_signal_stop(int sig, void *flg) {
+  fio_io_stop();
+  (void)sig, (void)flg;
+}
+
+static void fio___io_signal_restart(int sig, void *flg) {
+  if (fio_io_is_master())
+    fio_io_restart(FIO___IO.workers);
+  else
+    fio_io_stop();
+  (void)sig, (void)flg;
 }
 
 FIO_SFUNC void fio___io_tick(int timeout) {
@@ -83,7 +91,8 @@ FIO_SFUNC void fio___io_shutdown(void) {
                 pr) {
     FIO_LIST_EACH(fio_io_s, node, &pr->reserved.ios, io) {
       pr->on_shutdown(io); /* TODO / FIX: move callback to task? */
-      fio_io_close(io);    /* TODO / FIX: skip close on return value? */
+      if (!(io->flags & FIO___IO_FLAG_SUSPENDED))
+        fio_io_close(io); /* TODO / FIX: skip close on return value? */
       ++connected;
     }
   }
@@ -116,9 +125,12 @@ FIO_SFUNC void fio___io_shutdown(void) {
 
 FIO_SFUNC void fio___io_work_task(void *ignr_1, void *ignr_2) {
   if (FIO___IO.stop)
-    return;
+    goto no_run;
   fio___io_tick(fio_queue_count(&FIO___IO.queue) ? 0 : 500);
   fio_queue_push(&FIO___IO.queue, fio___io_work_task, ignr_1, ignr_2);
+  return;
+no_run:
+  FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_CYCLING);
 }
 
 FIO_SFUNC void fio___io_work(int is_worker) {
@@ -132,15 +144,18 @@ FIO_SFUNC void fio___io_work(int is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
   }
   fio___io_wakeup_init();
+  FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING);
   fio_queue_push(&FIO___IO.queue, fio___io_work_task);
   fio_queue_perform_all(&FIO___IO.queue);
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
   fio___io_shutdown();
+
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
+
   fio_queue_perform_all(&FIO___IO.queue);
   fio_state_callback_force(FIO_CALL_ON_STOP);
   fio_queue_perform_all(&FIO___IO.queue);
@@ -150,7 +165,7 @@ FIO_SFUNC void fio___io_work(int is_worker) {
 /* *****************************************************************************
 Worker Forking
 ***************************************************************************** */
-static void fio___io_spawn_worker(void *ignr_1, void *ignr_2);
+static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2);
 
 static void fio___io_wait_for_worker(void *thr_) {
   fio_thread_t t = (fio_thread_t)thr_;
@@ -160,20 +175,33 @@ static void fio___io_wait_for_worker(void *thr_) {
 /** Worker sentinel */
 static void *fio___io_worker_sentinel(void *pid_data) {
 #ifdef WEXITSTATUS
-  fio_thread_pid_t pid = (fio_thread_pid_t)(uintptr_t)pid_data;
+  fio___io_pid_s sentinal = {.pid = (fio_thread_pid_t)(uintptr_t)pid_data};
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
   fio_state_callback_add(FIO_CALL_ON_STOP,
                          fio___io_wait_for_worker,
                          (void *)thr);
-  if (fio_thread_waitpid(pid, &status, 0) != pid && !FIO___IO.stop)
+
+  FIO___LOCK_LOCK(FIO___IO.lock);
+  if (!FIO___IO.pids.next)
+    FIO___IO.pids = FIO_LIST_INIT(FIO___IO.pids);
+  FIO_LIST_PUSH(&FIO___IO.pids, &sentinal.node);
+  FIO___LOCK_UNLOCK(FIO___IO.lock);
+
+  if (fio_thread_waitpid(sentinal.pid, &status, 0) != sentinal.pid &&
+      !FIO___IO.stop)
     FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
+
+  FIO___LOCK_LOCK(FIO___IO.lock);
+  FIO_LIST_REMOVE(&sentinal.node);
+  FIO___LOCK_UNLOCK(FIO___IO.lock);
+
   if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-    FIO_LOG_WARNING("abnormal worker exit detected");
+    FIO_LOG_WARNING("(%d) abnormal worker exit detected", FIO___IO.pid);
     fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
   }
-  if (!FIO___IO.stop) {
+  if (!FIO___IO.stop && !sentinal.stop) {
     FIO_ASSERT_DEBUG(
         0,
         "DEBUG mode prevents worker re-spawning, now crashing parent.");
@@ -181,7 +209,11 @@ static void *fio___io_worker_sentinel(void *pid_data) {
                               fio___io_wait_for_worker,
                               (void *)thr);
     fio_thread_detach(&thr);
-    fio___io_defer_no_wakeup(fio___io_spawn_worker, (void *)thr, NULL);
+    FIO_LOG_WARNING("(%d) worker exit detected, replacing worker %d",
+                    FIO___IO.pid,
+                    sentinal.pid);
+    fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)1);
+    fio_queue_push_urgent(fio_io_queue(), fio___io_spawn_workers_task);
   }
 #else /* Non POSIX? no `fork`? no fio_thread_waitpid? */
   FIO_ASSERT(
@@ -191,27 +223,31 @@ static void *fio___io_worker_sentinel(void *pid_data) {
   return NULL;
 }
 
-static void fio___io_spawn_worker(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
+static void fio___io_spawn_worker(void) {
   fio_thread_t t;
   fio_signal_review();
 
   if (FIO___IO.stop || !fio_io_is_master())
     return;
+
+  /* do not allow master tasks to run in worker - pretend to stop. */
+  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   if (fio_atomic_or_fetch(&FIO___IO.stop, 2) != 2)
     return;
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
-  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
-  /* do not allow master tasks to run in worker */
   fio_queue_perform_all(&FIO___IO.queue);
+  /* perform forking procedure with the stop flag reset. */
+  fio_atomic_and_fetch(&FIO___IO.stop, 1);
+  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
+  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   /* perform actual fork */
   fio_thread_pid_t pid = fio_thread_fork();
   FIO_ASSERT(pid != (fio_thread_pid_t)-1, "system call `fork` failed.");
   if (!pid)
     goto is_worker_process;
+  /* finish up */
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_state_callback_force(FIO_CALL_IN_MASTER);
   if (fio_thread_create(&t, fio___io_worker_sentinel, (void *)(uintptr_t)pid)) {
@@ -219,20 +255,60 @@ static void fio___io_spawn_worker(void *ignr_1, void *ignr_2) {
         "sentinel thread creation failed, no worker will be spawned.");
     fio_io_stop();
   }
-  if (!fio_atomic_xor_fetch(&FIO___IO.stop, 2))
-    fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
   return;
 
 is_worker_process:
   FIO___IO.pid = fio_thread_getpid();
+  /* close all inherited connections immediately? */
+  FIO_LIST_EACH(fio_io_protocol_s,
+                reserved.protocols,
+                &FIO___IO.protocols,
+                pr) {
+    FIO_LIST_EACH(fio_io_s, node, &pr->reserved.ios, io) {
+      fio_io_close_now(io);
+    }
+  }
+  fio_queue_perform_all(&FIO___IO.queue);
+  /* TODO: keep? */
+
   FIO___IO.is_worker = 1;
   FIO_LOG_INFO("(%d) worker starting up.", fio_io_pid());
+
+  if (FIO___IO.stop)
+    goto skip_work;
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_queue_perform_all(&FIO___IO.queue);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
-  if (!fio_atomic_xor_fetch(&FIO___IO.stop, 2))
-    fio___io_work(1);
+  fio_queue_perform_all(&FIO___IO.queue);
+  fio___io_work(1);
+skip_work:
   FIO_LOG_INFO("(%d) worker exiting.", fio_io_pid());
   exit(0);
+}
+
+static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
+  static volatile unsigned is_running = 0;
+
+  if (!fio_io_is_master() || !FIO___IO.to_spawn)
+    return;
+  /* don't run nested */
+  if (fio_atomic_or(&is_running, 1))
+    return;
+  FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_pid(), FIO___IO.to_spawn);
+  do {
+    fio___io_spawn_worker();
+  } while (fio_atomic_sub_fetch(&FIO___IO.to_spawn, 1));
+
+  if (!(FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING) &
+        FIO___IO_FLAG_CYCLING)) {
+    fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
+    FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
+      fio___io_async_start(q);
+    }
+  }
+
+  is_running = 0;
+  (void)ignr_1, (void)ignr_2;
 }
 
 /* *****************************************************************************
@@ -243,9 +319,8 @@ Starting / Stopping the IO Reactor
 SFUNC void fio_io_add_workers(int workers) {
   if (!workers || !fio_io_is_master())
     return;
-  FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_pid(), workers);
-  for (int i = 0; i < workers; ++i)
-    fio___io_defer_no_wakeup(fio___io_spawn_worker, NULL, NULL);
+  fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)fio_io_workers(workers));
+  fio_queue_push_urgent(&FIO___IO.queue, fio___io_spawn_workers_task);
 }
 
 /** Starts the IO reactor, using optional `workers` processes. Will BLOCK! */
@@ -262,8 +337,11 @@ SFUNC void fio_io_start(int workers) {
 
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(&FIO___IO.queue);
-  fio_signal_monitor(SIGINT, fio___io_signal_handle, (void *)&FIO___IO.stop);
-  fio_signal_monitor(SIGTERM, fio___io_signal_handle, (void *)&FIO___IO.stop);
+  fio_signal_monitor(SIGINT, fio___io_signal_stop, NULL);
+  fio_signal_monitor(SIGTERM, fio___io_signal_stop, NULL);
+  if (FIO___IO.restart_signal)
+    fio_signal_monitor(FIO___IO.restart_signal, fio___io_signal_restart, NULL);
+
 #ifdef SIGPIPE
   fio_signal_monitor(SIGPIPE, NULL, NULL);
 #endif
@@ -271,7 +349,7 @@ SFUNC void fio_io_start(int workers) {
   if (workers) {
     FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_root_pid(), workers);
     for (int i = 0; i < workers; ++i) {
-      fio___io_spawn_worker(NULL, NULL);
+      fio___io_spawn_worker();
     }
   } else {
     FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
@@ -280,6 +358,8 @@ SFUNC void fio_io_start(int workers) {
   fio___io_work(!workers);
   fio_signal_forget(SIGINT);
   fio_signal_forget(SIGTERM);
+  if (FIO___IO.restart_signal)
+    fio_signal_forget(FIO___IO.restart_signal);
 #ifdef SIGPIPE
   fio_signal_forget(SIGPIPE);
 #endif
@@ -304,6 +384,54 @@ SFUNC uint16_t fio_io_workers(int workers) {
     workers += !workers;
   }
   return (uint16_t)workers;
+}
+
+/** Retiers all existing workers and restarts with the number of workers. */
+SFUNC void fio___io_restart(void *workers_, void *ignr_) {
+  int workers = (int)(uintptr_t)workers_;
+  (void)ignr_;
+  if (!fio_io_is_master())
+    return;
+  if (!FIO___IO.workers)
+    goto no_workers;
+
+  FIO___IO.workers = fio_io_workers(workers);
+  workers = (int)FIO___IO.workers;
+  if (workers) {
+    FIO_LOG_INFO(
+        "(%d) shutting down existing workers and (re)spawning %d workers.",
+        fio_io_root_pid(),
+        workers);
+    fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)workers);
+    /* schedule workers to spawn - won't run until we return from function. */
+    fio_queue_push_urgent(fio_io_queue(), fio___io_spawn_workers_task);
+  } else {
+    FIO_LOG_INFO(
+        "(%d) shutting down existing workers and switching to single mode.",
+        fio_io_root_pid());
+  }
+  /* signal existing children */
+  FIO___LOCK_LOCK(FIO___IO.lock);
+  FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, w) {
+    w->stop = 1;
+    fio_thread_kill(w->pid, SIGTERM);
+  }
+  FIO___LOCK_UNLOCK(FIO___IO.lock);
+  /* switch to single mode? */
+  if (!workers) {
+    fio_state_callback_force(FIO_CALL_ON_START);
+    FIO___IO.is_worker = 1;
+  }
+  return;
+no_workers:
+  FIO_LOG_ERROR("no workers to restart - IO worker restart is only available "
+                "in cluster mode!");
+  /* TODO: exec with all listeners intact...? */
+  return;
+}
+
+SFUNC void fio_io_restart(int workers) {
+  fio_queue_push(&FIO___IO.queue, fio___io_restart, (void *)(uintptr_t)workers);
 }
 
 /* *****************************************************************************
@@ -393,6 +521,27 @@ SFUNC int fio_io_listener_is_tls(void *listener) {
   return !!l->tls_ctx;
 }
 
+/** Returns the listener's associated protocol. */
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(void *listener) {
+  fio___io_listen_s *l = (fio___io_listen_s *)listener;
+  return l->protocol;
+}
+
+/** Returns the listener's associated `udata`. */
+SFUNC void *fio_io_listener_udata(void *listener) {
+  fio___io_listen_s *l = (fio___io_listen_s *)listener;
+  return l->udata;
+}
+
+/** Sets the listener's associated `udata`, returning the old value. */
+SFUNC void *fio_io_listener_udata_set(void *listener, void *new_udata) {
+  void *old;
+  fio___io_listen_s *l = (fio___io_listen_s *)listener;
+  old = l->udata;
+  l->udata = new_udata;
+  return old;
+}
+
 static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
@@ -418,9 +567,15 @@ static void fio___io_listen_on_attach(fio_io_s *io) {
   if (l->on_start)
     l->on_start(l->protocol, l->udata);
   if (l->hide_from_log)
-    FIO_LOG_DEBUG2("(%d) started listening @ %s", fio_io_pid(), l->url);
+    FIO_LOG_DEBUG2("(%d) started listening @ %s%s",
+                   fio_io_pid(),
+                   l->url,
+                   l->tls_ctx ? " (TLS)" : "");
   else
-    FIO_LOG_INFO("(%d) started listening @ %s", fio_io_pid(), l->url);
+    FIO_LOG_INFO("(%d) started listening @ %s%s",
+                 fio_io_pid(),
+                 l->url,
+                 l->tls_ctx ? " (TLS)" : "");
 }
 static void fio___io_listen_on_shutdown(fio_io_s *io) {
   fio___io_listen_s *l = (fio___io_listen_s *)(io->udata);

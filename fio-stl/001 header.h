@@ -33,6 +33,7 @@ Memory allocation macros
 #undef FIO_MEM_REALLOC
 #undef FIO_MEM_FREE
 #undef FIO_MEM_REALLOC_IS_SAFE
+#undef FIO_MEM_ALIGNMENT_SIZE
 #undef FIO_MEM_RESET
 
 /* if a global allocator was previously defined route macros to fio_malloc */
@@ -44,6 +45,8 @@ Memory allocation macros
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
+/** Detect allocator allignment dynamically. */
+#define FIO_MEM_ALIGNMENT_SIZE fio_malloc_alignment()
 
 #else /* H___FIO_MALLOC___H */
 /** Reallocates memory, copying (at least) `copy_len` if necessary. */
@@ -53,6 +56,8 @@ Memory allocation macros
 #define FIO_MEM_FREE(ptr, size) free((ptr))
 /** Set to true of internall allocator is used (memory returned set to zero). */
 #define FIO_MEM_REALLOC_IS_SAFE 0
+/** Assume allocator allignment. */
+#define FIO_MEM_ALIGNMENT_SIZE  sizeof(long double)
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_REALLOC) */
@@ -69,17 +74,20 @@ Memory allocation macros
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
+#undef FIO_MEM_ALIGNMENT_SIZE_
 
 #ifdef FIO_MALLOC_TMP_USE_SYSTEM /* force malloc */
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ 0
+#define FIO_MEM_ALIGNMENT_SIZE_  sizeof(long double)
 
 #else /* FIO_MALLOC_TMP_USE_SYSTEM */
 #define FIO_MEM_REALLOC_         FIO_MEM_REALLOC
 #define FIO_MEM_FREE_            FIO_MEM_FREE
 #define FIO_MEM_REALLOC_IS_SAFE_ FIO_MEM_REALLOC_IS_SAFE
+#define FIO_MEM_ALIGNMENT_SIZE_  FIO_MEM_ALIGNMENT_SIZE
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
 #endif /* !defined(FIO_MEM_REALLOC_)... */

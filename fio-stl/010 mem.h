@@ -26,7 +26,7 @@ Memory Allocation - Setup Alignment Info
 
 #ifndef FIO_MEMORY_ALIGN_LOG
 /** Allocation alignment, MUST be >= 3 and <= 10*/
-#define FIO_MEMORY_ALIGN_LOG 4
+#define FIO_MEMORY_ALIGN_LOG 6
 
 #elif FIO_MEMORY_ALIGN_LOG < 3
 #undef FIO_MEMORY_ALIGN_LOG
@@ -39,7 +39,7 @@ Memory Allocation - Setup Alignment Info
 /* Helper macro, don't change this */
 #undef FIO_MEMORY_ALIGN_SIZE
 /** The minimal allocation size & alignment. */
-#define FIO_MEMORY_ALIGN_SIZE (1UL << FIO_MEMORY_ALIGN_LOG)
+#define FIO_MEMORY_ALIGN_SIZE (1UL << (FIO_MEMORY_ALIGN_LOG))
 
 /* inform the compiler that the returned value is aligned on 16 byte marker */
 #if __clang__ || __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 8)
@@ -357,6 +357,8 @@ Set global macros to use this allocator if FIO_MALLOC
 #define FIO_MEM_FREE(ptr, size) fio_free((ptr))
 #undef FIO_MEM_REALLOC_IS_SAFE
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
+#undef FIO_MEM_ALIGNMENT_SIZE
+#define FIO_MEM_ALIGNMENT_SIZE fio_malloc_alignment()
 #undef FIO_MALLOC
 #endif /* FIO_MALLOC */
 
@@ -368,11 +370,12 @@ Temporarily (at least) set memory allocation macros to use this allocator
 #undef FIO_MEM_REALLOC_
 #undef FIO_MEM_FREE_
 #undef FIO_MEM_REALLOC_IS_SAFE_
-
+#undef FIO_MEM_ALIGNMENT_SIZE_
 #define FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)                    \
   FIO_NAME(FIO_MEMORY_NAME, realloc2)((ptr), (new_size), (copy_len))
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)()
+#define FIO_MEM_ALIGNMENT_SIZE_  FIO_NAME(FIO_MEMORY_NAME, malloc_alignment)()
 
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
@@ -901,13 +904,18 @@ typedef struct {
 /* *****************************************************************************
 Arena type
 ***************************************************************************** */
+#define FIO___MEM_ARENA_CACHE_ALIGN_VAL                                        \
+  (sizeof(void *) + sizeof(int32_t) + sizeof(FIO_MEMORY_LOCK_TYPE))
 typedef struct {
   void *block;
   int32_t last_pos;
   FIO_MEMORY_LOCK_TYPE lock;
-  uint8_t pad_for_cache___[115]; /* cache line padding */
+  /* cache line padding */
+  uint8_t pad_for_cache___[FIO___MEM_ARENA_CACHE_ALIGN_VAL >= 128
+                               ? 0
+                               : (128 - FIO___MEM_ARENA_CACHE_ALIGN_VAL)];
 } FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s);
-
+#undef FIO___MEM_ARENA_CACHE_ALIGN_VAL
 /* *****************************************************************************
 Allocator State
 ***************************************************************************** */
@@ -958,7 +966,63 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(
 
 /* SublimeText marker */
 void fio___mem_arena_lock___(void);
+#if 1
+/** Locks and returns the thread's arena. */
+FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
+    FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)(void) {
+#if FIO_MEMORY_ARENA_COUNT == 1
+  FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[0].lock);
+  return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena;
 
+#else /* FIO_MEMORY_ARENA_COUNT != 1 */
+
+#if defined(DEBUG) && FIO_MEMORY_ARENA_COUNT > 0 && !defined(FIO_TEST_ALL)
+  static size_t warning_printed = 0;
+#define FIO___MEMORY_ARENA_LOCK_WARNING()                                      \
+  do {                                                                         \
+    if (!warning_printed)                                                      \
+      FIO_LOG_WARNING(FIO_MACRO2STR(FIO_NAME(                                  \
+          FIO_MEMORY_NAME,                                                     \
+          malloc)) " high arena contention.\n"                                 \
+                   "          Consider recompiling with more arenas.");        \
+    warning_printed = 1;                                                       \
+  } while (0)
+#else /* !DEBUG || FIO_MEMORY_ARENA_COUNT <= 0 */
+#define FIO___MEMORY_ARENA_LOCK_WARNING()
+#endif
+  /** thread arena value */
+  const size_t arena_count =
+      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
+  size_t arena_index;
+  {
+    /* select the default arena selection using a thread ID. */
+    union {
+      void *p;
+      fio_thread_t t;
+    } u = {.t = fio_thread_current()};
+    arena_index = fio_risky_ptr(u.p) % arena_count;
+  }
+  for (size_t i = 0; i < arena_count; ++i) {
+    if (!FIO_MEMORY_TRYLOCK(
+            FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
+      return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
+    FIO_LOG_DDEBUG("thread %p had to switch arena from %zu / %zu",
+                   fio_thread_current(),
+                   arena_index,
+                   (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
+    ++arena_index;
+    arena_index %= arena_count;
+  }
+  /* wait for base arena to become available */
+  FIO___MEMORY_ARENA_LOCK_WARNING();
+#undef FIO___MEMORY_ARENA_LOCK_WARNING
+  /* slow wait for arena */
+  FIO_MEMORY_LOCK(
+      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock);
+  return FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index;
+#endif /* FIO_MEMORY_ARENA_COUNT != 1 */
+}
+#else
 /** Locks and returns the thread's arena. */
 FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     FIO_NAME(FIO_MEMORY_NAME, __mem_arena_lock)(void) {
@@ -991,7 +1055,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
       void *p;
       fio_thread_t t;
     } u = {.t = fio_thread_current()};
-    arena_index = (fio_risky_ptr(u.p) & 127) %
+    arena_index = (fio_risky_ptr(u.p) & 1023) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
 #if (defined(DEBUG) && 0)
     static void *pthread_last = NULL;
@@ -1034,7 +1098,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
   }
 #endif /* FIO_MEMORY_ARENA_COUNT != 1 */
 }
-
+#endif
 /* *****************************************************************************
 Converting between chunk & block data to pointers (and back)
 ***************************************************************************** */
@@ -1856,7 +1920,7 @@ Memory Allocation - malloc(0) pointer
 
 static long double FIO_NAME(
     FIO_MEMORY_NAME,
-    malloc_zero)[((1UL << (FIO_MEMORY_ALIGN_LOG)) / sizeof(long double)) + 1];
+    malloc_zero)[(FIO_MEMORY_ALIGN_SIZE / sizeof(long double)) + 1];
 
 #define FIO_MEMORY_MALLOC_ZERO_POINTER                                         \
   ((void *)(((uintptr_t)FIO_NAME(FIO_MEMORY_NAME, malloc_zero) +               \

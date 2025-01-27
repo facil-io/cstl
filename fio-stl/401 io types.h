@@ -115,6 +115,7 @@ Protocol Type Initialization
 ***************************************************************************** */
 
 static void fio___io_on_ev_mock_sus(fio_io_s *io) { fio_io_suspend(io); }
+static void fio___io_on_ev_mock_unsus(fio_io_s *io) { fio_io_unsuspend(io); }
 static void fio___io_on_ev_mock(fio_io_s *io) { (void)(io); }
 static void fio___io_on_ev_pubsub_mock(struct fio_msg_s *msg) { (void)(msg); }
 static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
@@ -216,7 +217,7 @@ FIO_SFUNC void fio___io_init_protocol(fio_io_protocol_s *pr, _Bool has_tls) {
   if (!pr->on_close)
     pr->on_close = fio___io_on_close_mock;
   if (!pr->on_shutdown)
-    pr->on_shutdown = fio___io_on_ev_mock;
+    pr->on_shutdown = fio___io_on_ev_mock_unsus;
   if (!pr->on_timeout)
     pr->on_timeout = fio___io_on_ev_on_timeout;
   if (!pr->on_pubsub)
@@ -264,9 +265,16 @@ FIO_IFUNC void fio___io_init_protocol_test(fio_io_protocol_s *pr,
 IO Reactor State Machine
 ***************************************************************************** */
 
-#define FIO___IO_FLAG_WAKEUP (1U)
+#define FIO___IO_FLAG_WAKEUP  (1U)
+#define FIO___IO_FLAG_CYCLING (2U)
 
-SFUNC struct FIO___IO {
+typedef struct {
+  FIO_LIST_NODE node;
+  fio_thread_pid_t pid;
+  volatile size_t stop;
+} fio___io_pid_s;
+
+static struct FIO___IO_S {
   fio_poll_s poll;
   int64_t tick;
   fio_queue_s queue;
@@ -275,21 +283,26 @@ SFUNC struct FIO___IO {
   uint8_t is_worker;
   volatile uint8_t stop;
   fio_timer_queue_s timer;
+  int restart_signal;
   int wakeup_fd;
   fio_thread_pid_t root_pid;
   fio_thread_pid_t pid;
   fio___io_env_safe_s env;
   FIO_LIST_NODE protocols;
   FIO_LIST_NODE async;
+  FIO_LIST_NODE pids;
+  uint32_t to_spawn;
   fio_io_s *wakeup;
+  FIO___LOCK_TYPE lock;
 } FIO___IO = {
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
+    .lock = FIO___LOCK_INIT,
 };
 
 /** Stopping the IO reactor. */
-SFUNC void fio_io_stop(void) { FIO___IO.stop = 1; }
+SFUNC void fio_io_stop(void) { fio_atomic_or_fetch(&FIO___IO.stop, 1); }
 
 /** Returns current process id. */
 SFUNC int fio_io_pid(void) { return FIO___IO.pid; }
@@ -308,6 +321,11 @@ SFUNC int fio_io_is_worker(void) { return FIO___IO.is_worker; }
 
 /** Returns the last millisecond when the polled for IO events. */
 SFUNC int64_t fio_io_last_tick(void) { return FIO___IO.tick; }
+
+/** Sets a signal to listen to for a hot restart (see `fio_io_restart`). */
+SFUNC void fio_io_restart_on_signal(int signal) {
+  FIO___IO.restart_signal = signal;
+}
 
 FIO_SFUNC void fio___io_wakeup(void);
 void fio_io_defer___(void);
@@ -752,7 +770,11 @@ SFUNC void fio_io_suspend(fio_io_s *io) {
 
 SFUNC void fio___io_unsuspend(void *io_, void *ignr_) {
   fio_io_s *io = (fio_io_s *)io_;
-  fio___io_monitor_in(io);
+  if (FIO___IO.stop)
+    fio_io_close(io);
+  else
+    fio___io_monitor_in(io);
+  return;
   (void)ignr_;
 }
 
@@ -951,6 +973,7 @@ static void fio___io_poll_on_data_schd(void *io) {
   FIO_LOG_DDEBUG2("(%d) `on_data` scheduled for fd %d.",
                   fio_io_pid(),
                   fio_io_fd((fio_io_s *)io));
+  // FIO___IO_FLAG_POLLIN_SET
   fio___io_defer_no_wakeup(fio___io_poll_on_data,
                            (void *)fio___io_dup2((fio_io_s *)io),
                            NULL);
