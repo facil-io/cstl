@@ -309,10 +309,22 @@ void my_type_free(my_type_s * t) {
   /* count deallocation before freeing object - tests excessive calls to free) */
   FIO_LEAK_COUNTER_ON_FREE(my_type_s);
   free(t);
+  FIO_LOG_DEBUG("We now have only %zu my_type_s objects left.",
+                FIO_LEAK_COUNTER_COUNT(my_type_s));
 }
 ```
 
 **Note**: the `FIO_REF` reference counting module does this automatically when `FIO_LEAK_COUNTER` is defined as true.
+
+#### `FIO_LEAK_COUNTER_COUNT`
+
+```c
+#define FIO_LEAK_COUNTER_COUNT(name)
+```
+
+Returns the number of unfreed allocattions according to the named memory leak detector.
+
+Returned type is `size_t`
 
 -------------------------------------------------------------------------------
 

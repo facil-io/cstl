@@ -271,7 +271,8 @@ IO Reactor State Machine
 typedef struct {
   FIO_LIST_NODE node;
   fio_thread_pid_t pid;
-  volatile size_t stop;
+  volatile unsigned done;
+  volatile unsigned stop;
 } fio___io_pid_s;
 
 static struct FIO___IO_S {
@@ -952,8 +953,10 @@ connection_error:
 static void fio___io_poll_on_close(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
-  FIO___IO_FLAG_SET(io, FIO___IO_FLAG_CLOSE_REMOTE);
-  FIO_LOG_DEBUG2("(%d) fd %d closed by remote peer", FIO___IO.pid, io->fd);
+  if (!(io->flags & FIO___IO_FLAG_CLOSE)) {
+    FIO___IO_FLAG_SET(io, FIO___IO_FLAG_CLOSE_REMOTE);
+    FIO_LOG_DEBUG2("(%d) fd %d closed by remote peer", FIO___IO.pid, io->fd);
+  }
   fio_io_close_now(io);
   fio___io_free2(io);
 }

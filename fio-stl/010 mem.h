@@ -796,26 +796,34 @@ static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
 #define FIO_MEMORY_ON_CHUNK_ALLOC(ptr)                                         \
   do {                                                                         \
     FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));      \
-    FIO_LOG_DEBUG2("MEMORY CHUNK-ALLOC allocated      %p", ptr);               \
+    FIO_LOG_DEBUG2("(%d) MEMORY CHUNK-ALLOC allocated      %p",                \
+                   fio_getpid(),                                               \
+                   ptr);                                                       \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_FREE(ptr)                                          \
   do {                                                                         \
     FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_MEMORY_NAME, __malloc_chunk));       \
-    FIO_LOG_DEBUG2("MEMORY CHUNK-DEALLOC de-allocated %p", ptr);               \
+    FIO_LOG_DEBUG2("(%d) MEMORY CHUNK-DEALLOC de-allocated %p",                \
+                   fio_getpid(),                                               \
+                   ptr);                                                       \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_CACHE(ptr)                                         \
   do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY CACHE-PUSH placed          %p in cache", ptr);      \
+    FIO_LOG_DEBUG2("(%d) MEMORY CACHE-PUSH placed          %p in cache",       \
+                   fio_getpid(),                                               \
+                   ptr);                                                       \
   } while (0);
 #define FIO_MEMORY_ON_CHUNK_UNCACHE(ptr)                                       \
   do {                                                                         \
-    FIO_LOG_DEBUG2("MEMORY CACHE-POP retrieved        %p from cache", ptr);    \
+    FIO_LOG_DEBUG2("(%d) MEMORY CACHE-POP retrieved        %p from cache",     \
+                   fio_getpid(),                                               \
+                   ptr);                                                       \
   } while (0);
 
 #define FIO_MEMORY_ON_BLOCK_RESET_IN_LOCK(ptr, blk)                            \
   do {                                                                         \
     if (0)                                                                     \
-      FIO_LOG_DEBUG2("MEMORY chunk %p block %zu reset in lock",                \
+      FIO_LOG_DEBUG2("(%d) MEMORY chunk %p block %zu reset in lock",           \
                      ptr,                                                      \
                      (size_t)blk);                                             \
   } while (0);
@@ -823,19 +831,24 @@ static volatile size_t FIO_NAME(FIO_MEMORY_NAME, __malloc_total);
 #define FIO_MEMORY_ON_BIG_BLOCK_SET(ptr)                                       \
   do {                                                                         \
     if (1)                                                                     \
-      FIO_LOG_DEBUG2("MEMORY chunk %p used as big-block", ptr);                \
+      FIO_LOG_DEBUG2("(%d) MEMORY chunk %p used as big-block",                 \
+                     fio_getpid(),                                             \
+                     ptr);                                                     \
   } while (0);
 
 #define FIO_MEMORY_ON_BIG_BLOCK_UNSET(ptr)                                     \
   do {                                                                         \
     if (1)                                                                     \
-      FIO_LOG_DEBUG2("MEMORY chunk %p no longer used as big-block", ptr);      \
+      FIO_LOG_DEBUG2("(%d) MEMORY chunk %p no longer used as big-block",       \
+                     fio_getpid(),                                             \
+                     ptr);                                                     \
   } while (0);
 #define FIO_MEMORY_PRINT_STATS_END()                                           \
   do {                                                                         \
     FIO_LOG_DEBUG2(                                                            \
-        "(" FIO_MACRO2STR(                                                     \
+        "(%d) (" FIO_MACRO2STR(                                                \
             FIO_NAME(FIO_MEMORY_NAME, malloc)) ") total allocations: %zu",     \
+        fio_getpid(),                                                          \
         FIO_NAME(FIO_MEMORY_NAME, __malloc_total));                            \
   } while (0)
 #define FIO_MEMORY_ON_ALLOC_FUNC()                                             \
@@ -1354,8 +1367,9 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void) {
     FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)();
     return;
   }
-  FIO_LOG_DEBUG2("MEMORY reinitializing " FIO_MACRO2STR(
-      FIO_NAME(FIO_MEMORY_NAME, malloc)) " state");
+  FIO_LOG_DEBUG2("(%d) MEMORY reinitializing " FIO_MACRO2STR(
+                     FIO_NAME(FIO_MEMORY_NAME, malloc)) " state",
+                 fio_getpid());
   FIO_MEMORY_LOCK_TYPE_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   FIO_MEMORY_LOCK_TYPE_INIT(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
@@ -1375,9 +1389,10 @@ Memory Allocation - state printing (debug helper)
 void fio_malloc_print_state___(void);
 /** Prints the allocator's data structure. May be used for debugging. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void) {
-  fprintf(
-      stderr,
-      FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME, malloc)) " allocator state:\n");
+  fprintf(stderr,
+          "(%d) " FIO_MACRO2STR(
+              FIO_NAME(FIO_MEMORY_NAME, malloc)) " allocator state:\n",
+          fio_getpid());
   for (size_t i = 0; i < FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
        ++i) {
     fprintf(stderr,
@@ -1436,9 +1451,11 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {
   if (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev ==
       &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks)
     return;
-  fprintf(stderr,
-          FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME,
-                                 malloc)) " allocator free block list:\n");
+  fprintf(
+      stderr,
+      "(%d) " FIO_MACRO2STR(
+          FIO_NAME(FIO_MEMORY_NAME, malloc)) " allocator free block list:\n",
+      fio_getpid());
   FIO_LIST_NODE *n = FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks.prev;
   for (size_t i = 0; n != &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks;
        ++i) {
@@ -1584,11 +1601,13 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
     return;
   FIO_ASSERT_DEBUG(
       (uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
-      "block reference count corrupted, possible double free? (%zd)",
+      "(%d) block reference count corrupted, possible double free? (%zd)",
+      fio_getpid(),
       (size_t)c->blocks[b].ref);
   FIO_ASSERT_DEBUG(
       (uint32_t)c->blocks[b].pos <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
-      "block allocation position corrupted, possible double free? (%zd)",
+      "(%d) block allocation position corrupted, possible double free? (%zd)",
+      fio_getpid(),
       (size_t)c->blocks[b].pos);
   if (fio_atomic_sub_fetch(&c->blocks[b].ref, 1))
     return;
@@ -2014,8 +2033,9 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
   {
 #ifdef DEBUG
     FIO_LOG_WARNING(
-        "unintended " FIO_MACRO2STR(
+        "(%d) unintended " FIO_MACRO2STR(
             FIO_NAME(FIO_MEMORY_NAME, mmap)) " allocation (slow): %zu bytes",
+        fio_getpid(),
         FIO_MEM_BYTES2PAGES(size));
 #endif
     p = FIO_NAME(FIO_MEMORY_NAME, mmap)(size);
@@ -2187,7 +2207,9 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
         FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(ptr);
     size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, ptr);
-    FIO_ASSERT(c, "cannot reallocate a pointer with a NULL system allocation");
+    FIO_ASSERT(c,
+               "(%d) cannot reallocate a pointer with a NULL system allocation",
+               fio_getpid());
 
     register size_t max_len =
         ((uintptr_t)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0) +

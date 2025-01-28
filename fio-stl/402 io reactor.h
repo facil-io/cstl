@@ -130,7 +130,7 @@ FIO_SFUNC void fio___io_work_task(void *ignr_1, void *ignr_2) {
   fio_queue_push(&FIO___IO.queue, fio___io_work_task, ignr_1, ignr_2);
   return;
 no_run:
-  FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_CYCLING);
+  return;
 }
 
 FIO_SFUNC void fio___io_work(int is_worker) {
@@ -144,17 +144,25 @@ FIO_SFUNC void fio___io_work(int is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
   }
   fio___io_wakeup_init();
-  FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING);
+
   fio_queue_push(&FIO___IO.queue, fio___io_work_task);
+  FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING);
   fio_queue_perform_all(&FIO___IO.queue);
-  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
-    fio___io_async_stop(q);
-  }
+  FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_CYCLING);
+
   fio___io_shutdown();
 
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
+  /* signal all child workers to terminate, parent is going away. */
+  FIO___LOCK_LOCK(FIO___IO.lock);
+  if (FIO___IO.pids.next)
+    FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
+      if (!pos->done)
+        fio_thread_kill(pos->pid, SIGTERM);
+    }
+  FIO___LOCK_UNLOCK(FIO___IO.lock);
 
   fio_queue_perform_all(&FIO___IO.queue);
   fio_state_callback_force(FIO_CALL_ON_STOP);
@@ -191,8 +199,10 @@ static void *fio___io_worker_sentinel(void *pid_data) {
 
   if (fio_thread_waitpid(sentinal.pid, &status, 0) != sentinal.pid &&
       !FIO___IO.stop)
-    FIO_LOG_ERROR("waitpid failed, worker re-spawning might fail.");
-
+    FIO_LOG_ERROR("(%d) waitpid failed for %d, worker re-spawning might fail.",
+                  fio_thread_getpid(),
+                  sentinal.pid);
+  sentinal.done = 1;
   FIO___LOCK_LOCK(FIO___IO.lock);
   FIO_LIST_REMOVE(&sentinal.node);
   FIO___LOCK_UNLOCK(FIO___IO.lock);
@@ -259,6 +269,8 @@ static void fio___io_spawn_worker(void) {
 
 is_worker_process:
   FIO___IO.pid = fio_thread_getpid();
+  FIO___IO.is_worker = 1;
+
   /* close all inherited connections immediately? */
   FIO_LIST_EACH(fio_io_protocol_s,
                 reserved.protocols,
@@ -271,7 +283,6 @@ is_worker_process:
   fio_queue_perform_all(&FIO___IO.queue);
   /* TODO: keep? */
 
-  FIO___IO.is_worker = 1;
   FIO_LOG_INFO("(%d) worker starting up.", fio_io_pid());
 
   if (FIO___IO.stop)
@@ -281,8 +292,11 @@ is_worker_process:
   fio_state_callback_force(FIO_CALL_IN_CHILD);
   fio_queue_perform_all(&FIO___IO.queue);
   fio___io_work(1);
-skip_work:
   FIO_LOG_INFO("(%d) worker exiting.", fio_io_pid());
+  exit(0);
+skip_work:
+  FIO_LOG_WARNING("(%d) worker exiting - stop signal detected during restart.",
+                  fio_io_pid());
   exit(0);
 }
 
@@ -299,8 +313,7 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
     fio___io_spawn_worker();
   } while (fio_atomic_sub_fetch(&FIO___IO.to_spawn, 1));
 
-  if (!(FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING) &
-        FIO___IO_FLAG_CYCLING)) {
+  if ((FIO___IO.flags & FIO___IO_FLAG_CYCLING)) {
     fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
     FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
       fio___io_async_start(q);
@@ -491,12 +504,12 @@ static void fio___io_listen_free(void *l_) {
 
   if (l->hide_from_log)
     FIO_LOG_DEBUG2("(%d) stopped listening @ %.*s",
-                   getpid(),
+                   fio_thread_getpid(),
                    (int)l->url_len,
                    l->url);
   else
     FIO_LOG_INFO("(%d) stopped listening @ %.*s",
-                 getpid(),
+                 fio_thread_getpid(),
                  (int)l->url_len,
                  l->url);
   fio_queue_perform_all(&FIO___IO.queue);
