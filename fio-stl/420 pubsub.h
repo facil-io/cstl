@@ -1016,7 +1016,7 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
   FIO___PUBSUB_POSTOFFICE.protocol.ipc.on_data =
       fio___pubsub_protocol_on_data_worker;
 
-  FIO___PUBSUB_POSTOFFICE.crush_on_close = 1;
+  FIO___PUBSUB_POSTOFFICE.crush_on_close = !fio_io_is_master();
 
   FIO___PUBSUB_POSTOFFICE.filter.publish = FIO___PUBSUB_PROCESS;
   FIO___PUBSUB_POSTOFFICE.filter.local =
@@ -1878,8 +1878,11 @@ FIO_SFUNC void fio___pubsub_protocol_on_close(void *p_, void *udata) {
             &FIO___PUBSUB_POSTOFFICE.remote_uuids));
   }
   fio___pubsub_message_parser_destroy(p);
-  if (FIO___PUBSUB_POSTOFFICE.crush_on_close)
+  if (FIO___PUBSUB_POSTOFFICE.crush_on_close) {
+    if (fio_io_is_running())
+      FIO_LOG_FATAL("(%d) pub/sub connection lost unexpectedly.", fio_io_pid());
     fio_io_stop();
+  }
   (void)udata;
 }
 

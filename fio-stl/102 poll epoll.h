@@ -159,6 +159,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     return total;
   int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
+    /* TODO! fix error handling*/
     for (int i = 0; i < active_count; i++) {
       // errors are handled as disconnections (on_close) in the EPOLLIN queue
       // if no error, try an active event(s)
@@ -170,12 +171,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   active_count = epoll_wait(p->fds[1].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
     for (int i = 0; i < active_count; i++) {
+      // holds an active event(s)
+      if (events[i].events & EPOLLIN)
+        p->settings.on_data(events[i].data.ptr);
       // errors are handled as disconnections (on_close), but only once...
       if (events[i].events & (~(EPOLLIN | EPOLLOUT)))
         p->settings.on_close(events[i].data.ptr);
-      // no error, then it's an active event(s)
-      else if (events[i].events & EPOLLIN)
-        p->settings.on_data(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }

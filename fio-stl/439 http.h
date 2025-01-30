@@ -693,8 +693,14 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
 
 FIO_SFUNC void fio___http_perform_user_callback_client(void *cb_, void *h_) {
   fio_http_s *h = (fio_http_s *)h_;
+  union {
+    void (*fn)(fio_http_s *);
+    void *ptr;
+  } cb = {.ptr = cb_};
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio___http_perform_user_callback(cb_, h_);
+  /* unlike Server mode, handle responses from closed connections */
+  cb.fn(h);
+  fio_http_free(h);
   fio_io_free(c->io);
 }
 
@@ -1408,11 +1414,11 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   /* send data (move memory ownership)? */
   c->state.http.buf = buf;
   return;
-  fio_io_write2(c->io,
-                .buf = buf.buf,
-                .len = buf.len,
-                .dealloc = FIO_STRING_FREE,
-                .copy = 0);
+  // fio_io_write2(c->io,
+  //               .buf = buf.buf,
+  //               .len = buf.len,
+  //               .dealloc = FIO_STRING_FREE,
+  //               .copy = 0);
 }
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 FIO_SFUNC void fio___http_controller_http1_write_body(

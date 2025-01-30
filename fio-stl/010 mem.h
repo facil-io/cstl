@@ -1250,9 +1250,10 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
       FIO_LIST_NODE node;
     };
     void *last_chunk = NULL;
-    FIO_LOG_WARNING("(" FIO_MACRO2STR(
-        FIO_NAME(FIO_MEMORY_NAME,
-                 malloc)) ") blocks left after cleanup - memory leaks?");
+    FIO_LOG_WARNING("(%d) (" FIO_MACRO2STR(FIO_NAME(
+                        FIO_MEMORY_NAME,
+                        malloc)) ") blocks left after cleanup - memory leaks?",
+                    fio_getpid());
     FIO_LIST_EACH(struct t_s,
                   node,
                   &FIO_NAME(FIO_MEMORY_NAME, __mem_state)->blocks,
@@ -1260,11 +1261,12 @@ FIO_SFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup)(void *ignr_) {
       if (last_chunk == (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos))
         continue;
       last_chunk = (void *)FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(pos);
-      FIO_LOG_WARNING(
-          "(" FIO_MACRO2STR(FIO_NAME(FIO_MEMORY_NAME,
-                                     malloc)) ") leaked block(s) for chunk %p",
-          (void *)pos,
-          last_chunk);
+      FIO_LOG_WARNING("(%d) (" FIO_MACRO2STR(
+                          FIO_NAME(FIO_MEMORY_NAME,
+                                   malloc)) ") leaked block(s) for chunk %p",
+                      fio_getpid(),
+                      (void *)pos,
+                      last_chunk);
     }
   }
 

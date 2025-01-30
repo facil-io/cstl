@@ -114,15 +114,13 @@ FIO_IFUNC void fio___io_env_safe_destroy(fio___io_env_safe_s *e) {
 Protocol Type Initialization
 ***************************************************************************** */
 
-static void fio___io_on_ev_mock_sus(fio_io_s *io) { fio_io_suspend(io); }
-static void fio___io_on_ev_mock_unsus(fio_io_s *io) { fio_io_unsuspend(io); }
-static void fio___io_on_ev_mock(fio_io_s *io) { (void)(io); }
+SFUNC void fio_io_noop(fio_io_s *io) { (void)(io); }
+
 static void fio___io_on_ev_pubsub_mock(struct fio_msg_s *msg) { (void)(msg); }
 static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
   (void)io, (void)i_;
 }
 static void fio___io_on_close_mock(void *p1, void *p2) { (void)p1, (void)p2; }
-static void fio___io_on_ev_on_timeout(fio_io_s *io) { fio_io_close_now(io); }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
 static ssize_t fio___io_func_default_read(int fd,
@@ -199,7 +197,7 @@ FIO_SFUNC void fio___io_init_protocol(fio_io_protocol_s *pr, _Bool has_tls) {
   fio_io_functions_s io_fn = {
       .build_context = fio___io_func_default_build_context,
       .free_context = fio___io_func_default_free_context,
-      .start = fio___io_on_ev_mock,
+      .start = fio_io_noop,
       .read = fio___io_func_default_read,
       .write = fio___io_func_default_write,
       .flush = fio___io_func_default_flush,
@@ -209,17 +207,17 @@ FIO_SFUNC void fio___io_init_protocol(fio_io_protocol_s *pr, _Bool has_tls) {
   if (has_tls)
     io_fn = fio_io_tls_default_functions(NULL);
   if (!pr->on_attach)
-    pr->on_attach = fio___io_on_ev_mock;
+    pr->on_attach = fio_io_noop;
   if (!pr->on_data)
-    pr->on_data = fio___io_on_ev_mock_sus;
+    pr->on_data = fio_io_suspend;
   if (!pr->on_ready)
-    pr->on_ready = fio___io_on_ev_mock;
+    pr->on_ready = fio_io_noop;
   if (!pr->on_close)
     pr->on_close = fio___io_on_close_mock;
   if (!pr->on_shutdown)
-    pr->on_shutdown = fio___io_on_ev_mock_unsus;
+    pr->on_shutdown = fio_io_noop;
   if (!pr->on_timeout)
-    pr->on_timeout = fio___io_on_ev_on_timeout;
+    pr->on_timeout = fio_io_close_now;
   if (!pr->on_pubsub)
     pr->on_pubsub = fio___io_on_ev_pubsub_mock;
   if (!pr->on_user1)
@@ -364,14 +362,15 @@ IO Type
 #define FIO___IO_FLAG_CLOSE        ((uint32_t)8U)
 #define FIO___IO_FLAG_CLOSE_REMOTE ((uint32_t)16U)
 #define FIO___IO_FLAG_CLOSE_ERROR  ((uint32_t)32U)
-#define FIO___IO_FLAG_TOUCH        ((uint32_t)64U)
-#define FIO___IO_FLAG_WRITE_SCHD   ((uint32_t)128U)
-#define FIO___IO_FLAG_POLLIN_SET   ((uint32_t)256U)
-#define FIO___IO_FLAG_POLLOUT_SET  ((uint32_t)512U)
+#define FIO___IO_FLAG_CLOSED_ALL                                               \
+  (FIO___IO_FLAG_CLOSE | FIO___IO_FLAG_CLOSE_REMOTE | FIO___IO_FLAG_CLOSE_ERROR)
+#define FIO___IO_FLAG_TOUCH       ((uint32_t)64U)
+#define FIO___IO_FLAG_WRITE_SCHD  ((uint32_t)128U)
+#define FIO___IO_FLAG_POLLIN_SET  ((uint32_t)256U)
+#define FIO___IO_FLAG_POLLOUT_SET ((uint32_t)512U)
 
 #define FIO___IO_FLAG_PREVENT_ON_DATA                                          \
-  (FIO___IO_FLAG_SUSPENDED | FIO___IO_FLAG_THROTTLED | FIO___IO_FLAG_CLOSE |   \
-   FIO___IO_FLAG_CLOSE_REMOTE | FIO___IO_FLAG_CLOSE_ERROR)
+  (FIO___IO_FLAG_SUSPENDED | FIO___IO_FLAG_THROTTLED)
 
 #define FIO___IO_FLAG_POLL_SET                                                 \
   (FIO___IO_FLAG_POLLIN_SET | FIO___IO_FLAG_POLLOUT_SET)
@@ -406,7 +405,7 @@ FIO_IFUNC void fio___io_monitor_in(fio_io_s *io) {
   FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d (called)",
                   fio_io_pid(),
                   io->fd);
-  if (io->flags & FIO___IO_FLAG_PREVENT_ON_DATA)
+  if (io->flags & (FIO___IO_FLAG_PREVENT_ON_DATA | FIO___IO_FLAG_CLOSED_ALL))
     return;
   if ((FIO___IO_FLAG_SET(io, FIO___IO_FLAG_POLLIN_SET) &
        FIO___IO_FLAG_POLLIN_SET)) {
@@ -526,6 +525,7 @@ SFUNC fio_io_s *fio_io_attach_fd(int fd,
                                  void *udata,
                                  void *tls) {
   fio_io_s *io = NULL;
+  fio_io_protocol_s cpy;
   if (fd == -1)
     goto error;
   io = fio___io_new2(pr->buffer_size);
@@ -548,8 +548,9 @@ SFUNC fio_io_s *fio_io_attach_fd(int fd,
   return io;
 
 error:
-  pr->on_close(NULL, udata);
-  pr->io_functions.cleanup(tls);
+  cpy = *pr;
+  cpy.on_close(NULL, udata);
+  cpy.io_functions.cleanup(tls);
   return io;
 }
 
@@ -657,6 +658,9 @@ FIO_SFUNC void fio___io_write2(void *io_, void *packet_) {
   return;
 
 io_closed:
+  FIO_LOG_DEBUG2("(%d) write task to closed IO %d failed (task too late).",
+                 fio_io_pid(),
+                 fio_io_fd(io));
   fio_stream_packet_free(packet);
   fio___io_free2(io);
 }
@@ -850,7 +854,7 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
   fio_io_s *io = (fio_io_s *)io_;
   FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLLIN_SET);
   if (!(io->flags & FIO___IO_FLAG_PREVENT_ON_DATA)) {
-    /* this also tests for the suspended / throttled / closing flags */
+    /* this also tests for the suspended / throttled flags, allows closed */
     io->pr->on_data(io);
     fio___io_monitor_in(io);
   } else if ((io->flags & FIO___IO_FLAG_OPEN)) {
@@ -950,6 +954,13 @@ connection_error:
   fio___io_free2(io);
 }
 
+// static void fio___io_poll_on_close_task(void *io_, void *ignr_) {
+//   (void)ignr_;
+//   fio_io_s *io = (fio_io_s *)io_;
+//   fio_io_close_now(io);
+//   fio___io_free2(io);
+// }
+
 static void fio___io_poll_on_close(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
@@ -957,6 +968,7 @@ static void fio___io_poll_on_close(void *io_, void *ignr_) {
     FIO___IO_FLAG_SET(io, FIO___IO_FLAG_CLOSE_REMOTE);
     FIO_LOG_DEBUG2("(%d) fd %d closed by remote peer", FIO___IO.pid, io->fd);
   }
+  /* allow on_data tasks to complete before closing? */
   fio_io_close_now(io);
   fio___io_free2(io);
 }
@@ -1336,7 +1348,7 @@ SFUNC fio_io_tls_s *fio_io_tls_alpn_add(fio_io_tls_s *t,
   if (!t || !protocol_name)
     return t;
   if (!on_selected)
-    on_selected = fio___io_on_ev_mock;
+    on_selected = fio_io_noop;
   size_t pr_name_len = strlen(protocol_name);
   if (pr_name_len > 255) {
     FIO_LOG_ERROR(
@@ -1486,7 +1498,7 @@ SFUNC int fio_io_tls_each FIO_NOOP(fio_io_tls_each_s a) {
 SFUNC fio_io_functions_s fio_io_tls_default_functions(fio_io_functions_s *f) {
   static fio_io_functions_s default_io_functions = {
       .build_context = fio___io_func_default_build_context,
-      .start = fio___io_on_ev_mock,
+      .start = fio_io_noop,
       .read = fio___io_func_default_read,
       .write = fio___io_func_default_write,
       .flush = fio___io_func_default_flush,
@@ -1498,7 +1510,7 @@ SFUNC fio_io_functions_s fio_io_tls_default_functions(fio_io_functions_s *f) {
   if (!f->build_context)
     f->build_context = fio___io_func_default_build_context;
   if (!f->start)
-    f->start = fio___io_on_ev_mock;
+    f->start = fio_io_noop;
   if (!f->read)
     f->read = fio___io_func_default_read;
   if (!f->write)

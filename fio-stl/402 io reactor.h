@@ -20,6 +20,7 @@ The IO Reactor Cycle (the actual work)
 ***************************************************************************** */
 
 static void fio___io_signal_stop(int sig, void *flg) {
+  FIO_LOG_INFO("(%d) stop signal detected.", FIO___IO.pid);
   fio_io_stop();
   (void)sig, (void)flg;
 }
@@ -27,8 +28,10 @@ static void fio___io_signal_stop(int sig, void *flg) {
 static void fio___io_signal_restart(int sig, void *flg) {
   if (fio_io_is_master())
     fio_io_restart(FIO___IO.workers);
-  else
+  else {
+    FIO_LOG_INFO("(%d) restart signal detected.", FIO___IO.pid);
     fio_io_stop();
+  }
   (void)sig, (void)flg;
 }
 
@@ -208,7 +211,9 @@ static void *fio___io_worker_sentinel(void *pid_data) {
   FIO___LOCK_UNLOCK(FIO___IO.lock);
 
   if (!WIFEXITED(status) || WEXITSTATUS(status)) {
-    FIO_LOG_WARNING("(%d) abnormal worker exit detected", FIO___IO.pid);
+    FIO_LOG_WARNING("(%d) abnormal worker exit detected for %d",
+                    FIO___IO.pid,
+                    sentinal.pid);
     fio_state_callback_force(FIO_CALL_ON_CHILD_CRUSH);
   }
   if (!FIO___IO.stop && !sentinal.stop) {
@@ -240,26 +245,10 @@ static void fio___io_spawn_worker(void) {
   if (FIO___IO.stop || !fio_io_is_master())
     return;
 
-  /* do not allow master tasks to run in worker - pretend to stop. */
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
-  if (fio_atomic_or_fetch(&FIO___IO.stop, 2) != 2)
-    return;
-  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
-    fio___io_async_stop(q);
-  }
-  fio_queue_perform_all(&FIO___IO.queue);
-  /* perform forking procedure with the stop flag reset. */
-  fio_atomic_and_fetch(&FIO___IO.stop, 1);
-  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
-  /* perform actual fork */
   fio_thread_pid_t pid = fio_thread_fork();
   FIO_ASSERT(pid != (fio_thread_pid_t)-1, "system call `fork` failed.");
   if (!pid)
     goto is_worker_process;
-  /* finish up */
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
-  fio_state_callback_force(FIO_CALL_IN_MASTER);
   if (fio_thread_create(&t, fio___io_worker_sentinel, (void *)(uintptr_t)pid)) {
     FIO_LOG_FATAL(
         "sentinel thread creation failed, no worker will be spawned.");
@@ -309,10 +298,29 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
   if (fio_atomic_or(&is_running, 1))
     return;
   FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_pid(), FIO___IO.to_spawn);
+
+  /* do not allow master tasks to run in worker - pretend to stop. */
+  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  if (fio_atomic_or_fetch(&FIO___IO.stop, 2) != 2)
+    return;
+  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
+    fio___io_async_stop(q);
+  }
+  fio_queue_perform_all(&FIO___IO.queue);
+
+  /* perform forking procedure with the stop flag reset. */
+  fio_atomic_and_fetch(&FIO___IO.stop, 1);
+  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
+  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+
+  /* perform actual fork */
   do {
     fio___io_spawn_worker();
   } while (fio_atomic_sub_fetch(&FIO___IO.to_spawn, 1));
 
+  /* finish up */
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
+  fio_state_callback_force(FIO_CALL_IN_MASTER);
   if ((FIO___IO.flags & FIO___IO_FLAG_CYCLING)) {
     fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
     FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
@@ -360,10 +368,8 @@ SFUNC void fio_io_start(int workers) {
 #endif
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   if (workers) {
-    FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_root_pid(), workers);
-    for (int i = 0; i < workers; ++i) {
-      fio___io_spawn_worker();
-    }
+    FIO___IO.to_spawn = workers;
+    fio___io_spawn_workers_task(NULL, NULL);
   } else {
     FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
                    fio_io_root_pid());
@@ -427,7 +433,7 @@ SFUNC void fio___io_restart(void *workers_, void *ignr_) {
   FIO___LOCK_LOCK(FIO___IO.lock);
   FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, w) {
     w->stop = 1;
-    fio_thread_kill(w->pid, SIGTERM);
+    fio_thread_kill(w->pid, SIGUSR1);
   }
   FIO___LOCK_UNLOCK(FIO___IO.lock);
   /* switch to single mode? */

@@ -140,14 +140,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
   if (active_count > 0) {
     for (int i = 0; i < active_count; i++) {
       // test for event(s) type
-      if (events[i].filter == EVFILT_WRITE) {
+      if ((events[i].filter & EVFILT_WRITE))
         p->settings.on_ready(events[i].udata);
-      } else if (events[i].filter == EVFILT_READ) {
+      if ((events[i].filter & EVFILT_READ))
         p->settings.on_data(events[i].udata);
-      }
-      if (events[i].flags & (EV_EOF | EV_ERROR)) {
+      if (events[i].flags & (EV_EOF | EV_ERROR))
         p->settings.on_close(events[i].udata);
-      }
     }
   } else if (active_count < 0) {
     if (errno == EINTR)

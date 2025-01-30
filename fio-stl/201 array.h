@@ -637,13 +637,15 @@ SFUNC void FIO_NAME(FIO_ARRAY_NAME, destroy)(FIO_ARRAY_PTR ary_) {
   switch (
       FIO_NAME_BL(FIO_ARRAY_NAME, embedded)((FIO_ARRAY_PTR)FIO_PTR_TAG(&tmp))) {
   case 0:
+    if (tmp.a.ary) {
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE
-    for (size_t i = tmp.a.start; i < tmp.a.end; ++i) {
-      FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
-    }
+      for (size_t i = tmp.a.start; i < tmp.a.end; ++i) {
+        FIO_ARRAY_TYPE_DESTROY(tmp.a.ary[i]);
+      }
 #endif
-    FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
-    FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
+      FIO_LEAK_COUNTER_ON_FREE(FIO_NAME(FIO_ARRAY_NAME, destroy));
+      FIO_MEM_FREE_(tmp.a.ary, tmp.a.capa * sizeof(*tmp.a.ary));
+    }
     return;
   case 1:
 #if !FIO_ARRAY_TYPE_DESTROY_SIMPLE

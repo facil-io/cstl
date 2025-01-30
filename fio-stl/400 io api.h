@@ -42,7 +42,7 @@ developer.
 
 #ifndef FIO_IO_SHUTDOWN_TIMEOUT
 /* Sets the hard timeout (in milliseconds) for the reactor's shutdown loop. */
-#define FIO_IO_SHUTDOWN_TIMEOUT 10000
+#define FIO_IO_SHUTDOWN_TIMEOUT 15000
 #endif
 
 #ifndef FIO_IO_COUNT_STORAGE
@@ -386,6 +386,9 @@ SFUNC int fio_io_is_open(fio_io_s *io);
 
 /** Returns the approximate number of bytes in the outgoing buffer. */
 SFUNC size_t fio_io_backlog(fio_io_s *io);
+
+/** Does nothing. */
+SFUNC void fio_io_noop(fio_io_s *io);
 
 /* *****************************************************************************
 Task Scheduling
