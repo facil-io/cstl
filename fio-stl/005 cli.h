@@ -814,6 +814,8 @@ SFUNC void fio_cli_start FIO_NOOP(int argc,
         (key.len == 6 && key.buf[1] == '-' &&
          (fio_buf2u32u(key.buf + 2) | 0x20202020UL) == help_value32))
       fio___cli_print_help();
+    if (key.len == 2 && key.buf[1] == '-') /* "--" detected, skip the rest */
+      break;
     /* look for longest argument match for argument (find, i.e. -arg=val) */
     for (;;) {
       fio___cli_aliases_s o = {.name = fio_cli_str_tmp(key)};

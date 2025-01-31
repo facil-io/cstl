@@ -433,7 +433,7 @@ SFUNC void fio___io_restart(void *workers_, void *ignr_) {
   FIO___LOCK_LOCK(FIO___IO.lock);
   FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, w) {
     w->stop = 1;
-    fio_thread_kill(w->pid, SIGUSR1);
+    fio_thread_kill(w->pid, FIO___IO.restart_signal);
   }
   FIO___LOCK_UNLOCK(FIO___IO.lock);
   /* switch to single mode? */
