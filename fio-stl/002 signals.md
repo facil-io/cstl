@@ -14,12 +14,14 @@ When defining `FIO_SIGNAL`, the following function are defined.
 #### `fio_signal_monitor`
 
 ```c
-int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata);
+int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata, bool propagate);
 ```
 
 Starts to monitor for the specified signal, setting an optional callback.
 
 If the signal is already being monitored, the callback and `udata` pointers are updated.
+
+If `propagate` is true and a previous signal handler was set, it will be called.
 
 **Note**: `udata` stands for "user data", it is an opaque pointer that is simply passed along to the callback.
 

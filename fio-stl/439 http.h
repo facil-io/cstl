@@ -1537,7 +1537,7 @@ upgraded:
   if (c->h || !fio_io_is_open(c->io))
     goto something_is_wrong;
   c->h = (fio_http_s *)upgraded;
-  {
+  { /* TODO! test if safe to move to user thread for callback execution? */
     const size_t pr_i = fio_http_is_websocket(c->h) ? FIO___HTTP_PROTOCOL_WS
                                                     : FIO___HTTP_PROTOCOL_SSE;
     fio_http_controller_set(

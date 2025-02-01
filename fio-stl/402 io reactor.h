@@ -19,9 +19,24 @@ Copyright and License: see header file (000 copyright.h) or top of file
 The IO Reactor Cycle (the actual work)
 ***************************************************************************** */
 
+static void fio___io_signal_crash(int sig, void *flg) {
+  FIO_LOG_FATAL("(%d) additional stop signal(!) - should crash.", FIO___IO.pid);
+  fio_signal_forget(sig);
+  /* cannot lock, signal may be received during critical section */
+  FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
+    if (!pos->done)
+      fio_thread_kill(pos->pid, SIGKILL);
+  }
+  fio_thread_kill(FIO___IO.root_pid, SIGKILL);
+  fio_thread_kill(FIO___IO.pid, SIGKILL);
+  exit(-1);
+  (void)sig, (void)flg;
+}
+
 static void fio___io_signal_stop(int sig, void *flg) {
   FIO_LOG_INFO("(%d) stop signal detected.", FIO___IO.pid);
   fio_io_stop();
+  fio_signal_monitor(sig, fio___io_signal_crash, flg, 0);
   (void)sig, (void)flg;
 }
 
@@ -72,9 +87,9 @@ FIO_SFUNC void fio___io_run_async_as_sync(void *ignr_1, void *ignr_2) {
 }
 
 FIO_SFUNC void fio___io_shutdown_task(void *shutdown_start_, void *a2) {
-  intptr_t shutdown_start = (intptr_t)shutdown_start_;
-  if (shutdown_start + FIO_IO_SHUTDOWN_TIMEOUT < FIO___IO.tick ||
-      FIO_LIST_IS_EMPTY(&FIO___IO.protocols))
+  intptr_t shutdown_start =
+      (intptr_t)shutdown_start_ + FIO___IO.shutdown_timeout;
+  if (shutdown_start < FIO___IO.tick || FIO_LIST_IS_EMPTY(&FIO___IO.protocols))
     return;
   fio___io_tick(fio_queue_count(&FIO___IO.queue) ? 0 : 100);
   fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync);
@@ -160,11 +175,10 @@ FIO_SFUNC void fio___io_work(int is_worker) {
   }
   /* signal all child workers to terminate, parent is going away. */
   FIO___LOCK_LOCK(FIO___IO.lock);
-  if (FIO___IO.pids.next)
-    FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
-      if (!pos->done)
-        fio_thread_kill(pos->pid, SIGTERM);
-    }
+  FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
+    if (!pos->done)
+      fio_thread_kill(pos->pid, SIGTERM);
+  }
   FIO___LOCK_UNLOCK(FIO___IO.lock);
 
   fio_queue_perform_all(&FIO___IO.queue);
@@ -195,8 +209,6 @@ static void *fio___io_worker_sentinel(void *pid_data) {
                          (void *)thr);
 
   FIO___LOCK_LOCK(FIO___IO.lock);
-  if (!FIO___IO.pids.next)
-    FIO___IO.pids = FIO_LIST_INIT(FIO___IO.pids);
   FIO_LIST_PUSH(&FIO___IO.pids, &sentinal.node);
   FIO___LOCK_UNLOCK(FIO___IO.lock);
 
@@ -358,13 +370,16 @@ SFUNC void fio_io_start(int workers) {
 
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(&FIO___IO.queue);
-  fio_signal_monitor(SIGINT, fio___io_signal_stop, NULL);
-  fio_signal_monitor(SIGTERM, fio___io_signal_stop, NULL);
+  fio_signal_monitor(SIGINT, fio___io_signal_stop, NULL, 0);
+  fio_signal_monitor(SIGTERM, fio___io_signal_stop, NULL, 0);
   if (FIO___IO.restart_signal)
-    fio_signal_monitor(FIO___IO.restart_signal, fio___io_signal_restart, NULL);
+    fio_signal_monitor(FIO___IO.restart_signal,
+                       fio___io_signal_restart,
+                       NULL,
+                       0);
 
 #ifdef SIGPIPE
-  fio_signal_monitor(SIGPIPE, NULL, NULL);
+  fio_signal_monitor(SIGPIPE, NULL, NULL, 0);
 #endif
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   if (workers) {

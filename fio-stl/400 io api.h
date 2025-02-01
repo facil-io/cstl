@@ -93,6 +93,12 @@ SFUNC void fio_io_restart(int workers);
 /** Sets a signal to listen to for a hot restart (see `fio_io_restart`). */
 SFUNC void fio_io_restart_on_signal(int signal);
 
+/** Returns the shutdown timeout for the reactor. */
+SFUNC size_t fio_io_shutdown_timsout(void);
+
+/** Sets the shutdown timeout for the reactor, returning the new value. */
+SFUNC size_t fio_io_shutdown_timsout_set(size_t milliseconds);
+
 /* *****************************************************************************
 The IO Reactor's State
 ***************************************************************************** */

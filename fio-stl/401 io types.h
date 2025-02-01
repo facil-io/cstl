@@ -293,11 +293,13 @@ static struct FIO___IO_S {
   uint32_t to_spawn;
   fio_io_s *wakeup;
   FIO___LOCK_TYPE lock;
+  size_t shutdown_timeout;
 } FIO___IO = {
     .tick = 0,
     .wakeup_fd = -1,
     .stop = 1,
     .lock = FIO___LOCK_INIT,
+    .shutdown_timeout = FIO_IO_SHUTDOWN_TIMEOUT,
 };
 
 /** Stopping the IO reactor. */
@@ -351,6 +353,14 @@ SFUNC void fio_io_run_every FIO_NOOP(fio_timer_schedule_args_s args) {
 
 /** Returns a pointer for the IO reactor's queue. */
 SFUNC fio_queue_s *fio_io_queue(void) { return &FIO___IO.queue; }
+
+/** Returns the shutdown timeout for the reactor. */
+SFUNC size_t fio_io_shutdown_timsout(void) { return FIO___IO.shutdown_timeout; }
+
+/** Sets the shutdown timeout for the reactor, returning the new value. */
+SFUNC size_t fio_io_shutdown_timsout_set(size_t milliseconds) {
+  return (FIO___IO.shutdown_timeout = milliseconds);
+}
 
 /* *****************************************************************************
 IO Type
@@ -1607,18 +1617,19 @@ FIO_SFUNC void fio___io_after_fork(void *ignr_) {
   }
   fio_queue_perform_all(&FIO___IO.queue);
   fio_queue_destroy(&FIO___IO.queue);
+  FIO___IO.pids = FIO_LIST_INIT(FIO___IO.pids);
 }
 
 FIO_SFUNC void fio___io_cleanup_at_exit(void *ignr_) {
+#ifdef SIGKILL
+  FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, w) {
+    fio_thread_kill(w->pid, SIGKILL);
+  }
+#endif /* SIGKILL */
+  FIO___LOCK_DESTROY(FIO___IO.lock);
   fio___io_after_fork(ignr_);
   fio_poll_destroy(&FIO___IO.poll);
   fio___io_env_safe_destroy(&FIO___IO.env);
-#if FIO_VALIDITY_MAP_USE
-  fio_validity_map_destroy(&FIO___IO.valid);
-#if FIO_VALIDATE_IO_MUTEX
-  fio_thread_mutex_destroy(&FIO___IO.valid_lock);
-#endif
-#endif /* FIO_VALIDATE_IO_MUTEX / FIO_VALIDITY_MAP_USE */
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   fio_queue_perform_all(&FIO___IO.queue);
   fio_timer_destroy(&FIO___IO.timer);
@@ -1634,6 +1645,7 @@ FIO_CONSTRUCTOR(fio___io) {
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   FIO___IO.root_pid = FIO___IO.pid = fio_thread_getpid();
   FIO___IO.async = FIO_LIST_INIT(FIO___IO.async);
+  FIO___IO.pids = FIO_LIST_INIT(FIO___IO.pids);
   fio___io_init_protocol(&FIO___IO_MOCK_PROTOCOL, 0);
   fio_poll_init(&FIO___IO.poll,
                 .on_data = fio___io_poll_on_data_schd,
