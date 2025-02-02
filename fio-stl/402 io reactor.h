@@ -22,6 +22,8 @@ The IO Reactor Cycle (the actual work)
 static void fio___io_signal_crash(int sig, void *flg) {
   FIO_LOG_FATAL("(%d) additional stop signal(!) - should crash.", FIO___IO.pid);
   fio_signal_forget(sig);
+
+#ifdef SIGKILL
   /* cannot lock, signal may be received during critical section */
   FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
     if (!pos->done)
@@ -29,6 +31,7 @@ static void fio___io_signal_crash(int sig, void *flg) {
   }
   fio_thread_kill(FIO___IO.root_pid, SIGKILL);
   fio_thread_kill(FIO___IO.pid, SIGKILL);
+#endif
   exit(-1);
   (void)sig, (void)flg;
 }

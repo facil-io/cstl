@@ -172,7 +172,8 @@ Windows Implementation
 
 static struct {
   int32_t sig;
-  volatile unsigned flag;
+  uint16_t propagate;
+  volatile uint16_t flag;
   void (*callback)(int sig, void *);
   void *udata;
   void (*old)(int sig);
@@ -251,8 +252,8 @@ SFUNC int fio_signal_forget(int sig) {
     fio___signal_watchers[i].callback = NULL;
     fio___signal_watchers[i].udata = (void *)1;
     fio___signal_watchers[i].sig = 0;
-    if (fio___signal_watchers[i].old.sa_handler &&
-        fio___signal_watchers[i].old.sa_handler != SIG_DFL) {
+    if (fio___signal_watchers[i].old &&
+        fio___signal_watchers[i].old != SIG_DFL) {
       if ((intptr_t)signal(sig, fio___signal_watchers[i].old) ==
           (intptr_t)SIG_ERR)
         goto sig_error;
@@ -260,13 +261,13 @@ SFUNC int fio_signal_forget(int sig) {
       if ((intptr_t)signal(sig, SIG_DFL) == (intptr_t)SIG_ERR)
         goto sig_error;
     }
-    fio___signal_watchers[i].old.sa_handler = SIG_DFL;
+    fio___signal_watchers[i].old = SIG_DFL;
     return 0;
   }
   signal(sig, SIG_DFL);
   return -1;
 sig_error:
-  fio___signal_watchers[i].old.sa_handler = SIG_DFL;
+  fio___signal_watchers[i].old = SIG_DFL;
   signal(sig, SIG_DFL);
   FIO_LOG_ERROR("couldn't unset signal handler: %s", strerror(errno));
   return -1;

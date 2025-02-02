@@ -47,6 +47,11 @@ Patches for Windows
 
 
 ***************************************************************************** */
+#ifndef SIGKILL
+#ifdef SIGABRT
+#define SIGKILL SIGABRT
+#endif
+#endif
 #if FIO_OS_WIN
 
 /* *****************************************************************************
