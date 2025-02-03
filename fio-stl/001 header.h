@@ -172,13 +172,14 @@ Leak Counter Helpers
 #undef FIO_LEAK_COUNTER_DEF
 #undef FIO_LEAK_COUNTER_ON_ALLOC
 #undef FIO_LEAK_COUNTER_ON_FREE
+#undef FIO_LEAK_COUNTER_COUNT
 
 #if (FIO_LEAK_COUNTER + 1) == 1
 /* No leak counting defined */
 #define FIO_LEAK_COUNTER_DEF(name)
-#define FIO_LEAK_COUNTER_ON_ALLOC(name)
-#define FIO_LEAK_COUNTER_ON_FREE(name)
-#define FIO_LEAK_COUNTER_COUNT(name) ((size_t)0)
+#define FIO_LEAK_COUNTER_ON_ALLOC(name) ((void)0)
+#define FIO_LEAK_COUNTER_ON_FREE(name)  ((void)0)
+#define FIO_LEAK_COUNTER_COUNT(name)    ((size_t)0)
 #else
 #define FIO_LEAK_COUNTER_DEF(name)                                             \
   FIO_IFUNC size_t FIO_NAME(fio___leak_counter, name)(size_t i) {              \

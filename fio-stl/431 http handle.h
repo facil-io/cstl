@@ -2222,7 +2222,8 @@ FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
     ++end;
     r.len = end - r.buf;
     h->body.pos = end - h->body.buf;
-  }
+  } else
+    h->body.pos = h->body.len;
   return r;
 }
 FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {

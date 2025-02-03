@@ -44,11 +44,18 @@ FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
 /** Returns true if the parser is waiting to parse a new request/response .*/
 FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p);
 
+/** Returns true if the parser is waiting for header data .*/
+FIO_IFUNC size_t fio_http1_parser_is_on_header(fio_http1_parser_s *p);
+
+/** Returns true if the parser is on body data .*/
+FIO_IFUNC size_t fio_http1_parser_is_on_body(fio_http1_parser_s *p);
+
 /** The error return value for fio_http1_parse. */
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
 
 /** Returns the number of bytes of payload still expected to be received. */
 FIO_IFUNC size_t fio_http1_expected(fio_http1_parser_s *p);
+
 /** A return value for `fio_http1_expected` when chunked data is expected. */
 #define FIO_HTTP1_EXPECTED_CHUNKED ((size_t)(-1))
 
@@ -125,6 +132,17 @@ struct fio_http1_parser_s {
 /** Returns true if the parser is waiting to parse a new request/response .*/
 FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p) {
   return !p->fn || p->fn == fio_http1___start;
+}
+
+/** Returns true if the parser is waiting for header data .*/
+FIO_IFUNC size_t fio_http1_parser_is_on_header(fio_http1_parser_s *p) {
+  return p->fn == fio_http1___read_header || p->fn == fio_http1___read_trailer;
+}
+
+/** Returns true if the parser is on body data .*/
+FIO_IFUNC size_t fio_http1_parser_is_on_body(fio_http1_parser_s *p) {
+  return p->fn == fio_http1___read_body ||
+         p->fn == fio_http1___read_body_chunked;
 }
 
 /** Returns the number of bytes of payload still expected to be received. */
