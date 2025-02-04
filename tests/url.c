@@ -1,4 +1,5 @@
 #define FIO_URL
+#define FIO_STR
 #include "fio-stl.h"
 
 int main(int argc, char const *argv[]) {
@@ -6,6 +7,7 @@ int main(int argc, char const *argv[]) {
       (char *)"http://anon:1234@example.com:443/my/path?answer=42#target";
   if (argc >= 2)
     to_parse = (char *)argv[1];
+  FIO_STR_INFO_TMP_VAR(path, 1024);
   fio_url_s u = fio_url_parse(to_parse, strlen(to_parse));
   fprintf(stderr,
           "Parsed URL:\n"
@@ -42,6 +44,11 @@ int main(int argc, char const *argv[]) {
              (int)i.value.len,
              i.value.buf);
     }
+  }
+  if (u.path.len < 1024) {
+    fio_string_write_url_dec(&path, NULL, u.path.buf, u.path.len);
+    if (!FIO_STR_INFO_IS_EQ(path, u.path))
+      printf("\tdecoded path:\t%s\n", path.buf);
   }
   return 0;
 }

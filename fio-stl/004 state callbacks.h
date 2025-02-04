@@ -257,7 +257,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
 
   FIO_LOG_DEBUG2("(%d) scheduling %s callbacks (%zu tasks).",
-                 (int)(fio_thread_getpid()),
+                 (int)(fio_getpid()),
                  FIO___STATE_TASKS_NAMES[e],
                  (size_t)FIO___STATE_TASKS_ARRAY[e].count);
   if (!FIO___STATE_TASKS_ARRAY[e].count)
