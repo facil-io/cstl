@@ -1831,7 +1831,8 @@ int fio_http_cookie_set___(void); /* IDE Marker */
 SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
                                        fio_http_cookie_args_s cookie) {
   FIO_ASSERT_DEBUG(h, "Can't set cookie for NULL HTTP handler!");
-  if (!h || (h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_STREAMING)))
+  if (!h || ((h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_STREAMING)) |
+             (h->writer != fio____http_write_start)))
     return -1;
   /* promises that some warnings print only once. */
   static unsigned int warn_illegal = 0;

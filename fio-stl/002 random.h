@@ -263,8 +263,8 @@ Random - Implementation
 #include <sys/time.h>
 #endif
 
-static volatile uint64_t fio___rand_state[4]; /* random state */
-static volatile size_t fio___rand_counter;    /* seed counter */
+static volatile uint64_t fio___rand_state[4] = {0}; /* random state */
+static volatile size_t fio___rand_counter = 0;      /* seed counter */
 /* feeds random data to the algorithm through this 256 bit feed. */
 static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
                                                  0x7cc568e838f6a40d,
@@ -327,14 +327,14 @@ SFUNC uint64_t fio_rand64(void) {
   /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
   uint64_t r = 0;
   if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
-    /* re-seed state every 524,288 requests / 2^19-1 attempts  */
+    /* re-seed state every 4095 requests / 2^12-1 attempts  */
     fio_rand_reseed();
   }
   const uint64_t s0[] = {fio___rand_state[0],
                          fio___rand_state[1],
                          fio___rand_state[2],
                          fio___rand_state[3]}; /* load to registers */
-  uint64_t s1[4];
+  uint64_t s1[4] = {0};
   {
     const uint64_t mulp[] = {0x37701261ED6C16C7ULL,
                              0x764DBBB75F3B3E0DULL,

@@ -527,7 +527,8 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (FIO_LIKELY(fio_io_is_open(c->io)))
+
+  if (FIO_LIKELY(FIO_SOCK_IS_OPEN(fio_io_fd(c->io))))
     cb.fn(h);
   fio_http_free(h);
 }
@@ -541,7 +542,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   struct fio___http_connection_http_s old = c->state.http;
-  if (cb.fn(h))
+  if (!FIO_LIKELY(fio_io_is_open(c->io)) || cb.fn(h))
     goto refuse_upgrade;
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
@@ -607,7 +608,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_sse(void *cb_,
   } cb = {.ptr = cb_};
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (cb.fn(h))
+  if (!FIO_LIKELY(fio_io_is_open(c->io)) || cb.fn(h))
     goto refuse_upgrade;
   if (c->h) /* request after eventsource? an attack vector? */
     goto refuse_upgrade;
@@ -1208,19 +1209,21 @@ HTTP/1.1 Protocol
 
 FIO_SFUNC int fio___http1_process_data(fio_io_s *io,
                                        fio___http_connection_s *c) {
-  (void)io, (void)c;
-  size_t consumed = fio_http1_parse(&c->state.http.parser,
-                                    FIO_BUF_INFO2(c->buf, c->len),
-                                    (void *)c);
-  if (!consumed)
-    goto nothing_consumed;
-  if (consumed == FIO_HTTP1_PARSER_ERROR)
-    goto http1_error;
-  c->len -= consumed;
-  if (c->len)
-    FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
-  if (c->suspend)
-    return -1;
+  (void)io;
+  for (;;) {
+    size_t consumed = fio_http1_parse(&c->state.http.parser,
+                                      FIO_BUF_INFO2(c->buf, c->len),
+                                      (void *)c);
+    if (!consumed)
+      goto nothing_consumed;
+    if (consumed == FIO_HTTP1_PARSER_ERROR)
+      goto http1_error;
+    c->len -= consumed;
+    if (c->len)
+      FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
+    if (c->suspend)
+      return -1;
+  }
   return 0;
 
 nothing_consumed:

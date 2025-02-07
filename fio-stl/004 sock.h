@@ -195,6 +195,8 @@ SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
 /**
  * Returns 0 on timeout, -1 on error or the events that are valid.
  *
+ * A zero timeout returns immediately.
+ *
  * Possible events are POLLIN | POLLOUT
  */
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
@@ -208,6 +210,16 @@ SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
 
 /** A helper macro that waits on a single IO with no callbacks (0 = no event) */
 #define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
+
+#ifdef POLLRDHUP
+/** A helper macro that tests if a socket was closed.  */
+#define FIO_SOCK_IS_OPEN(fd)                                                   \
+  (!(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &                          \
+     (POLLRDHUP | POLLHUP | POLLNVAL)))
+#else
+#define FIO_SOCK_IS_OPEN(fd)                                                   \
+  (!(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
+#endif
 
 /* *****************************************************************************
 IO Poll - Implementation (always static / inlined)

@@ -860,4 +860,7 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
 /* *****************************************************************************
 IO Reactor Finish
 ***************************************************************************** */
+#undef FIO___IO_FLAG_SET
+#undef FIO___IO_FLAG_UNSET
+#undef FIO___IO_GET_TIME_MILLI
 #endif /* FIO_IO */
