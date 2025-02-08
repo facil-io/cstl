@@ -10861,7 +10861,9 @@ SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
  *
  * A zero timeout returns immediately.
  *
- * Possible events are POLLIN | POLLOUT
+ * Possible events include POLLIN | POLLOUT
+ *
+ * Possible return values include POLLIN | POLLOUT | POLLHUP | POLLNVAL
  */
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
 

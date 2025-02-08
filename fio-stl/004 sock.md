@@ -104,33 +104,40 @@ Uses `poll` to wait until an IO device has one or more of the evens listed in `e
 
 Returns 0 on timeout, -1 on error or the events that are valid.
 
-#### `FIO_SOCK_POLL_RW` (macro)
+Possible valid return values also include `POLLIN | POLLOUT | POLLHUP | POLLNVAL`
+
+#### `FIO_SOCK_WAIT_RW`
 
 ```c
-#define FIO_SOCK_POLL_RW(fd_)                                                  \
-  (struct pollfd) { .fd = fd_, .events = (POLLIN | POLLOUT) }
+#define FIO_SOCK_WAIT_RW(fd, timeout_) fio_sock_wait_io(fd, POLLIN | POLLOUT, timeout_)
 ```
 
-This helper macro helps to author a `struct pollfd` member who's set to polling for both read and write events (data availability and/or space in the outgoing buffer).
+A helper macro that waits on a single IO with no callbacks (0 = no event)
 
-#### `FIO_SOCK_POLL_R` (macro)
+#### `FIO_SOCK_WAIT_R`
 
 ```c
-#define FIO_SOCK_POLL_R(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLIN }
+#define FIO_SOCK_WAIT_R(fd, timeout_) fio_sock_wait_io(fd, POLLIN, timeout_)
 ```
 
-This helper macro helps to author a `struct pollfd` member who's set to polling for incoming data availability.
+A helper macro that waits on a single IO with no callbacks (0 = no event)
 
-
-#### `FIO_SOCK_POLL_W` (macro)
+#### `FIO_SOCK_WAIT_W`
 
 ```c
-#define FIO_SOCK_POLL_W(fd_)                                                   \
-  (struct pollfd) { .fd = fd_, .events = POLLOUT }
+#define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
 ```
 
-This helper macro helps to author a `struct pollfd` member who's set to polling for space in the outgoing `fd`'s buffer.
+A helper macro that waits on a single IO with no callbacks (0 = no event)
+
+#### `FIO_SOCK_IS_OPEN`
+
+```c
+#define FIO_SOCK_IS_OPEN(fd)                                                   \
+  (!(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
+```
+
+A helper macro that tests if a socket was remotely closed.
 
 #### `fio_sock_address_new`
 
