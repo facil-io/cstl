@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2024
+Copyright: Boaz Segev, 2019-2025
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -40669,9 +40669,9 @@ RESP Parser Settings
 
 /* RESP's parser type - do not access directly. */
 typedef struct {
-  void *(*get_null)(void);
-  void *(*get_true)(void);
-  void *(*get_false)(void);
+  void *set_null;
+  void *set_true;
+  void *set_false;
   void *(*get_number)(int64_t i);
   void *(*get_float)(double f);
   void *(*get_bignum)(char *str, size_t len);
@@ -40684,6 +40684,10 @@ typedef struct {
   void *(*map_push)(void *map, void *key, void *value);
   /* returns non-zero on error. */
   int (*done)(void *udata, void *response);
+  /** Called on error response, NOT on protocol error. */
+  int (*error)(void *udata, void *response);
+  /** Called after either response callbacks or protocol error. */
+  void (*free_response)(void *obj);
 } fio_resp3_settings_s;
 
 /* *****************************************************************************
@@ -40692,21 +40696,26 @@ RESP Parser API
 
 /* RESP's parser type - do not access directly. */
 typedef struct fio_resp3_s {
+  /** callback settings. */
+  fio_resp3_settings_s settings;
   struct {
-    /** callback settings. */
-    fio_resp3_settings_s *settings;
     /** current parsing function. */
     size_t (*parse)(struct fio_resp3_s *, uint8_t *, size_t);
     /** Stack's depth */
     uint16_t depth;
-    struct {
-      void *data;
-      uint32_t expected;
-      uint8_t typ;
-    } stack[FIO_RESP3_MAX_NESTING];
   } private_data;
+  struct {
+    void *data;
+    uint32_t expected;
+    uint8_t typ;
+  } private_stack[FIO_RESP3_MAX_NESTING];
   void *udata;
 } fio_resp3_s;
+
+#define FIO_RESP3_INIT(...)                                                    \
+  (fio_resp3_s) {                                                              \
+    .settings = {__VA_ARGS__}, .private_data = {0}, .udata = NULL              \
+  }
 
 /** Returns an initialized parser. */
 FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
@@ -40720,17 +40729,68 @@ FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
 FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser);
 
 /* *****************************************************************************
+Validating RESP3 Settings.
+***************************************************************************** */
+
+/* clang-format off */
+static void *fio___resp3_get_number(int64_t i) { (void)i; }
+static void *fio___resp3_get_float(double f) { (void)f; }
+static void *fio___resp3_get_bignum(char *str, size_t len) { (void)str, (void)len; }
+static void *fio___resp3_get_string(char *str, size_t len) { (void)str, (void)len; }
+static void *fio___resp3_str_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_str(void *d, char *s, size_t l) { (void)d, (void)s, (void)l; }
+static void *fio___resp3_arr_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_arr_push(void *a, void *v) { (void)a, (void)v; }
+static void *fio___resp3_map_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_map(void *m, void *k, void *v) { (void)m, (void)k, (void)v; }
+static int fio___resp3_done(void *u, void *r) { (void)u, (void)r; }
+static int fio___resp3_err(void *u, void *r) { (void)u, (void)r; }
+static void fio___resp3_free(void *r) { (void)r; }
+/* clang-format on */
+
+static void fio___resp3_validate_settings(fio_resp3_settings_s *settings) {
+  static const fio_resp3_settings_s defaults = {
+      .set_null = NULL,
+      .set_true = (void *)1,
+      .set_false = NULL,
+      .get_number = fio___resp3_get_number,
+      .get_float = fio___resp3_get_float,
+      .get_bignum = fio___resp3_get_bignum,
+      .get_string = fio___resp3_get_string,
+      .string_start = fio___resp3_str_start,
+      .string_write = fio___resp3_str,
+      .array_start = fio___resp3_arr_start,
+      .array_push = fio___resp3_arr_push,
+      .map_start = fio___resp3_map_start,
+      .map_push = fio___resp3_map,
+      .done = fio___resp3_done,
+      .error = fio___resp3_err,
+      .free_response = fio___resp3_free,
+  };
+  union {
+    uintptr_t *ptr;
+    fio_resp3_settings_s *s;
+  } src, dest;
+  src.s = (fio_resp3_settings_s *)&defaults;
+  dest.s = settings;
+  for (int i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
+    if (!dest.ptr[i])
+      dest.ptr[i] = src.ptr[i];
+}
+
+/* *****************************************************************************
 RESP Implementation - inline functions.
 ***************************************************************************** */
 
-SFUNC size_t fio___resp3_parse_start(fio_resp3_s *parser,
-                                     uint8_t *buf,
-                                     size_t len);
+FIO_SFUNC size_t fio___resp3_parse_start(fio_resp3_s *parser,
+                                         uint8_t *buf,
+                                         size_t len);
 /** Returns an initialized parser. */
 FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
                                      void *udata) {
   fio_resp3_s r;
-  r.private_data.settings = settings;
+  fio___resp3_validate_settings(settings);
+  r.settings = *settings;
   r.private_data.parse = fio___resp3_parse_start;
   r.private_data.depth = 0;
   r.udata = udata;
@@ -40741,7 +40801,8 @@ FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
 FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
                                fio_resp3_settings_s *settings,
                                void *udata) {
-  dest->private_data.settings = settings;
+  fio___resp3_validate_settings(settings);
+  dest->settings = *settings;
   dest->private_data.parse = fio___resp3_parse_start;
   dest->private_data.depth = 0;
   dest->udata = udata;
