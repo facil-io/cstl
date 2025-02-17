@@ -194,7 +194,10 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
     const size_t delta = rlen - blen;
     fio_math_shl(t, (uint64_t *)b, delta, len);
-    (void)fio_math_sub(r, (uint64_t *)r, t, len);
+    {
+      uint64_t ignr_ = fio_math_sub(r, (uint64_t *)r, t, len);
+      (void)ignr_;
+    }
     q[delta >> 6] |= (1ULL << (delta & 63)); /* set the bit used */
   }
   mask = (uint64_t)0ULL - fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);

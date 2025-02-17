@@ -3098,6 +3098,22 @@ Vector Helpers - Vector Math Operations
       (t) = (t)op(a).u##bits[i__];                                             \
   } while (0)
 
+/** Performs vector shuffling (reordering) of `var`. */
+#define FIO_MATH_UXXX_SUFFLE(var, bits, ...)                                   \
+  do {                                                                         \
+    uint##bits##_t t____[sizeof((var).u##bits) / sizeof((var).u##bits[0])];    \
+    const uint8_t shuf____[sizeof((var).u##bits) / sizeof((var).u##bits[0])] = \
+        {__VA_ARGS__};                                                         \
+    for (size_t i___ = 0;                                                      \
+         i___ < (sizeof((var).u##bits) / sizeof((var).u##bits[0]));            \
+         ++i___)                                                               \
+      t____[i___] = (var).u##bits[shuf____[i___]];                             \
+    for (size_t i___ = 0;                                                      \
+         i___ < (sizeof((var).u##bits) / sizeof((var).u##bits[0]));            \
+         ++i___)                                                               \
+      (var).u##bits[i___] = t____[i___];                                       \
+  } while (0)
+
 #define FIO___UXXX_DEF_OP(total_bits, bits, opnm, op)                          \
   FIO_IFUNC void fio_u##total_bits##_##opnm##bits(                             \
       fio_u##total_bits *target,                                               \
@@ -3155,6 +3171,7 @@ FIO___UXXX_DEF_OP4T(4096)
 #undef FIO___UXXX_DEF_OP4T_INNER
 #undef FIO___UXXX_DEF_OP
 #undef FIO___UXXX_DEF_OP2
+
 /* *****************************************************************************
 Vector Helpers - Multi-Precision Math
 ***************************************************************************** */
@@ -3243,6 +3260,90 @@ FIO___VMATH_DEF_LARGE_MUL(4096, 2048)
 
 #undef FIO___VMATH_DEF_LARGE_ADD_SUB
 #undef FIO___VMATH_DEF_LARGE_MUL
+
+/* ****************************************************************************
+Defining a Pseudo-Random Number Generator Function (deterministic / not)
+**************************************************************************** */
+
+/**
+ * Defines a deterministic Pseudo-Random Number Generator function.
+ *
+ * The following functions will be defined:
+ *
+ * - static fio_u128 name##128(void); // returns 128 bits - for internal use
+ * - extern uint64_t name##64(void); // returns 64 bits
+ * - extern void name##_bytes(void *buffer, size_t len); // fills buffer
+ *
+ * If `reseed_log` is non-zero and less than 32, the PNGR is no longer
+ * deterministic, as it will automatically re-seeds itself every 2^reseed_log
+ * iterations.
+ *
+ * The PRNG follows the design for SHISHUA, without using intrinsic functions.
+ *
+ * If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
+ *
+ * https://espadrine.github.io/blog/posts/shishua-the-fastest-prng-in-the-world.html
+ */
+#define FIO_DEFINE_RANDOM_FUNCTION(extern, name, reseed_log, seed_offset)      \
+  static fio_u256 name##___state =                                             \
+      fio_u256_init64(FIO_U64_HASH_PRIME0 + seed_offset,                       \
+                      FIO_U64_HASH_PRIME1 + seed_offset,                       \
+                      FIO_U64_HASH_PRIME2 + seed_offset,                       \
+                      FIO_U64_HASH_PRIME3 + seed_offset);                      \
+  FIO_SFUNC void name##___state_reseed(fio_u256 *state) {                      \
+    const size_t jitter_samples = 16 | (state->u8[0] & 15);                    \
+    for (size_t i = 0; i < jitter_samples; ++i) {                              \
+      struct timespec t;                                                       \
+      clock_gettime(CLOCK_MONOTONIC, &t);                                      \
+      FIO_MATH_UXXX_SUFFLE(state[0], 32, 3, 4, 5, 6, 7, 0, 1, 2);              \
+      uint64_t clk[2];                                                         \
+      clk[0] = (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec);              \
+      clk[0] = fio_math_mulc64(clk[0], FIO_U64_HASH_PRIME0, clk + 1);          \
+      state->u64[0] += clk[0];                                                 \
+      state->u64[1] += clk[1];                                                 \
+      state->u64[2] += clk[0];                                                 \
+      state->u64[3] += clk[1];                                                 \
+    }                                                                          \
+  }                                                                            \
+  /** Returns a 128 bit pseudo-random number. */                               \
+  FIO_IFUNC fio_u128 name##128(void) {                                         \
+    register fio_u256 r, t;                                                    \
+    if (reseed_log && reseed_log < 32) {                                       \
+      static size_t counter;                                                   \
+      if (!((counter++) & ((1ULL << reseed_log) - 1)))                         \
+        name##___state_reseed(&name##___state);                                \
+    }                                                                          \
+    t = name##___state;                                                        \
+    r.u64[0] = fio_math_mulc64(t.u64[0], FIO_U64_HASH_PRIME0, r.u64 + 1);      \
+    r.u64[2] = fio_math_mulc64(t.u64[2], FIO_U64_HASH_PRIME1, r.u64 + 3);      \
+    /* rotate 256 bit state by 96 bits and add */                              \
+    FIO_MATH_UXXX_SUFFLE(t, 32, 3, 4, 5, 6, 7, 0, 1, 2);                       \
+    FIO_MATH_UXXX_OP(r, r, t, 32, +);                                          \
+    name##___state = r;                                                        \
+    r.u64[0] ^= r.u64[2];                                                      \
+    r.u64[1] ^= r.u64[3];                                                      \
+    return r.u128[0];                                                          \
+  }                                                                            \
+  /** Returns a 64 bit pseudo-random number. */                                \
+  extern uint64_t name##64(void) {                                             \
+    fio_u128 r = name##128();                                                  \
+    return r.u64[0];                                                           \
+  }                                                                            \
+  /** Fills the `dest` buffer with pseudo-random noise. */                     \
+  extern void name##_bytes(void *dest, size_t len) {                           \
+    if (!dest || !len)                                                         \
+      return;                                                                  \
+    uint8_t *d = (uint8_t *)dest;                                              \
+    for (unsigned i = 15; i < len; i += 16) {                                  \
+      fio_u128 r = name##128();                                                \
+      fio_memcpy16(d, r.u8);                                                   \
+      d += 16;                                                                 \
+    }                                                                          \
+    if (len & 15) {                                                            \
+      fio_u128 r = name##128();                                                \
+      fio_memcpy15x(d, r.u8, len);                                             \
+    }                                                                          \
+  }
 
 /* *****************************************************************************
 String and Buffer Information Containers + Helper Macros
@@ -7067,7 +7168,10 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
     const size_t delta = rlen - blen;
     fio_math_shl(t, (uint64_t *)b, delta, len);
-    (void)fio_math_sub(r, (uint64_t *)r, t, len);
+    {
+      uint64_t ignr_ = fio_math_sub(r, (uint64_t *)r, t, len);
+      (void)ignr_;
+    }
     q[delta >> 6] |= (1ULL << (delta & 63)); /* set the bit used */
   }
   mask = (uint64_t)0ULL - fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
@@ -15039,9 +15143,9 @@ void fio___mem_block_free___(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
-  size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
   if (!c)
     return;
+  size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
   FIO_ASSERT_DEBUG(
       (uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
       "(%d) block reference count corrupted, possible double free? (%zd)",
@@ -15057,6 +15161,9 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
 
   /* reset memory */
   FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
+
+  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
+    return; /* leak if arena already freed*/
 
   /* place in free list */
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
@@ -40667,25 +40774,40 @@ RESP Parser Settings
 /** The maximum number of nested layers in object responses (2...32,768)*/
 #define FIO_RESP3_MAX_NESTING 32
 
-/* RESP's parser type - do not access directly. */
+/** RESP's parser settings – callbacks and object creation. */
 typedef struct {
+  /** The value for NULL */
   void *set_null;
+  /** The value for TRUE */
   void *set_true;
+  /** The value for FALSE */
   void *set_false;
+  /** Should return an object representing the number `i` */
   void *(*get_number)(int64_t i);
+  /** Should return an object representing the float `f` */
   void *(*get_float)(double f);
+  /** Should return an object representing the BIG number `i` */
   void *(*get_bignum)(char *str, size_t len);
+  /** Should return an object representing the String */
   void *(*get_string)(char *str, size_t len);
+  /** Should return an object representing a dynamic String */
   void *(*string_start)(size_t soft_expected);
+  /** Should write data to the a dynamic String, perhaps reallocating it */
   void *(*string_write)(void *dest, char *str, size_t len);
+  /** Should return an object representing a dynamic Array */
   void *(*array_start)(size_t soft_expected);
+  /** Should push an object to the dynamic Array, perhaps reallocating it */
   void *(*array_push)(void *array, void *value);
+  /** Should return an object representing a dynamic Map */
   void *(*map_start)(size_t soft_expected);
+  /** Should push an object to the dynamic Map, perhaps reallocating it */
   void *(*map_push)(void *map, void *key, void *value);
-  /* returns non-zero on error. */
+  /** Called on object received. returns non-zero on error. */
   int (*done)(void *udata, void *response);
   /** Called on error response, NOT on protocol error. */
   int (*error)(void *udata, void *response);
+  /** Called on out-of-bounds object received. returns non-zero on error. */
+  int (*push)(void *udata, void *response);
   /** Called after either response callbacks or protocol error. */
   void (*free_response)(void *obj);
 } fio_resp3_settings_s;
@@ -40694,22 +40816,23 @@ typedef struct {
 RESP Parser API
 ***************************************************************************** */
 
+struct fio___resp3_frame_s {
+  /** Object in Frame */
+  void *obj;
+  /** Object Size */
+  uint32_t size;
+  /** Object Type */
+  uint8_t otype;
+};
+
 /* RESP's parser type - do not access directly. */
 typedef struct fio_resp3_s {
   /** callback settings. */
   fio_resp3_settings_s settings;
-  struct {
-    /** current parsing function. */
-    size_t (*parse)(struct fio_resp3_s *, uint8_t *, size_t);
-    /** Stack's depth */
-    uint16_t depth;
-  } private_data;
-  struct {
-    void *data;
-    uint32_t expected;
-    uint8_t typ;
-  } private_stack[FIO_RESP3_MAX_NESTING];
   void *udata;
+  uint32_t depth;
+  uint8_t perror; /* protocol error flag */
+  struct fio___resp3_frame_s stack[FIO_RESP3_MAX_NESTING];
 } fio_resp3_s;
 
 #define FIO_RESP3_INIT(...)                                                    \
@@ -40727,101 +40850,6 @@ FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
 
 /** Parse `data`, returning the abount of bytes consumed. */
 FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser);
-
-/* *****************************************************************************
-Validating RESP3 Settings.
-***************************************************************************** */
-
-/* clang-format off */
-static void *fio___resp3_get_number(int64_t i) { (void)i; }
-static void *fio___resp3_get_float(double f) { (void)f; }
-static void *fio___resp3_get_bignum(char *str, size_t len) { (void)str, (void)len; }
-static void *fio___resp3_get_string(char *str, size_t len) { (void)str, (void)len; }
-static void *fio___resp3_str_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_str(void *d, char *s, size_t l) { (void)d, (void)s, (void)l; }
-static void *fio___resp3_arr_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_arr_push(void *a, void *v) { (void)a, (void)v; }
-static void *fio___resp3_map_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_map(void *m, void *k, void *v) { (void)m, (void)k, (void)v; }
-static int fio___resp3_done(void *u, void *r) { (void)u, (void)r; }
-static int fio___resp3_err(void *u, void *r) { (void)u, (void)r; }
-static void fio___resp3_free(void *r) { (void)r; }
-/* clang-format on */
-
-static void fio___resp3_validate_settings(fio_resp3_settings_s *settings) {
-  static const fio_resp3_settings_s defaults = {
-      .set_null = NULL,
-      .set_true = (void *)1,
-      .set_false = NULL,
-      .get_number = fio___resp3_get_number,
-      .get_float = fio___resp3_get_float,
-      .get_bignum = fio___resp3_get_bignum,
-      .get_string = fio___resp3_get_string,
-      .string_start = fio___resp3_str_start,
-      .string_write = fio___resp3_str,
-      .array_start = fio___resp3_arr_start,
-      .array_push = fio___resp3_arr_push,
-      .map_start = fio___resp3_map_start,
-      .map_push = fio___resp3_map,
-      .done = fio___resp3_done,
-      .error = fio___resp3_err,
-      .free_response = fio___resp3_free,
-  };
-  union {
-    uintptr_t *ptr;
-    fio_resp3_settings_s *s;
-  } src, dest;
-  src.s = (fio_resp3_settings_s *)&defaults;
-  dest.s = settings;
-  for (int i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
-    if (!dest.ptr[i])
-      dest.ptr[i] = src.ptr[i];
-}
-
-/* *****************************************************************************
-RESP Implementation - inline functions.
-***************************************************************************** */
-
-FIO_SFUNC size_t fio___resp3_parse_start(fio_resp3_s *parser,
-                                         uint8_t *buf,
-                                         size_t len);
-/** Returns an initialized parser. */
-FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
-                                     void *udata) {
-  fio_resp3_s r;
-  fio___resp3_validate_settings(settings);
-  r.settings = *settings;
-  r.private_data.parse = fio___resp3_parse_start;
-  r.private_data.depth = 0;
-  r.udata = udata;
-  return r; /* return by value */
-}
-
-/** Initializes the parser. */
-FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
-                               fio_resp3_settings_s *settings,
-                               void *udata) {
-  fio___resp3_validate_settings(settings);
-  dest->settings = *settings;
-  dest->private_data.parse = fio___resp3_parse_start;
-  dest->private_data.depth = 0;
-  dest->udata = udata;
-}
-
-/** Parse `data`, returning the abount of bytes consumed. */
-FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser,
-                                 uint8_t *buf,
-                                 size_t len) {
-  size_t r = 0, tmp = 0;
-  if (!buf)
-    return r;
-  while (len && (tmp = parser->private_data.parse(parser, buf, len)) + 1 > 1) {
-    r += tmp;
-    buf += tmp;
-    len -= tmp;
-  }
-  return r;
-}
 
 /* *****************************************************************************
 RESP Implementation - possibly externed functions.
@@ -40877,15 +40905,231 @@ RESP Implementation - possibly externed functions.
 #define FIO___RESP3_HELLO_STR_LEN (sizeof(FIO___RESP3_HELLO_STR_BUF) - 1)
 
 /* *****************************************************************************
+Validating RESP3 Settings.
+***************************************************************************** */
+
+/* clang-format off */
+static void *fio___resp3_get_number(int64_t i) { (void)i; }
+static void *fio___resp3_get_float(double f) { (void)f; }
+static void *fio___resp3_get_bignum(char *str, size_t len) { (void)str, (void)len; }
+static void *fio___resp3_get_string(char *str, size_t len) { (void)str, (void)len; }
+static void *fio___resp3_str_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_str(void *d, char *s, size_t l) { (void)d, (void)s, (void)l; }
+static void *fio___resp3_arr_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_arr_push(void *a, void *v) { (void)a, (void)v; }
+static void *fio___resp3_map_start(size_t soft_expected) { (void)soft_expected; }
+static void *fio___resp3_map(void *m, void *k, void *v) { (void)m, (void)k, (void)v; }
+static int fio___resp3_done(void *u, void *r) { (void)u, (void)r; }
+static void fio___resp3_free(void *r) { (void)r; }
+/* clang-format on */
+
+static void fio___resp3_validate_settings(fio_resp3_settings_s *settings) {
+  static const fio_resp3_settings_s defaults = {
+      .set_null = NULL,
+      .set_true = NULL,
+      .set_false = NULL,
+      .get_number = fio___resp3_get_number,
+      .get_float = fio___resp3_get_float,
+      .get_bignum = fio___resp3_get_bignum,
+      .get_string = fio___resp3_get_string,
+      .string_start = fio___resp3_str_start,
+      .string_write = fio___resp3_str,
+      .array_start = fio___resp3_arr_start,
+      .array_push = fio___resp3_arr_push,
+      .map_start = fio___resp3_map_start,
+      .map_push = fio___resp3_map,
+      .done = fio___resp3_done,
+      .error = fio___resp3_done,
+      .push = fio___resp3_done,
+      .free_response = fio___resp3_free,
+  };
+  union {
+    uintptr_t *ptr;
+    fio_resp3_settings_s *s;
+  } src, dest;
+  src.s = (fio_resp3_settings_s *)&defaults;
+  dest.s = settings;
+  for (int i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
+    if (!dest.ptr[i])
+      dest.ptr[i] = src.ptr[i];
+}
+
+/* *****************************************************************************
+RESP3 Initialization
+***************************************************************************** */
+
+/** Returns an initialized parser. */
+FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
+                                     void *udata) {
+  fio_resp3_s r;
+  fio___resp3_validate_settings(settings);
+  r.settings = *settings;
+  r.udata = udata;
+  r.depth = 0;
+  r.stack[0] = (struct fio___resp3_frame_s){0};
+  return r; /* return by value */
+}
+
+/** Initializes the parser. */
+FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
+                               fio_resp3_settings_s *settings,
+                               void *udata) {
+  fio___resp3_validate_settings(settings);
+  dest->settings = *settings;
+  dest->udata = udata;
+  dest->depth = 0;
+  dest->stack[0] = (struct fio___resp3_frame_s){0};
+}
+
+/* *****************************************************************************
+RESP3 Stack Push/Pop
+***************************************************************************** */
+
+static void fio___resp3_stack_destroy(fio_resp3_s *p) {
+  while (p->depth) {
+    size_t i = p->depth--;
+    if (p->stack[i].obj)
+      p->settings.free_response(p->stack[i].obj);
+  }
+  if (p->stack[0].obj)
+    p->settings.free_response(p->stack[0].obj);
+  p->stack[0] = (struct fio___resp3_frame_s){0};
+}
+
+static int fio___resp3_stack_push(fio_resp3_s *p) {
+  size_t i = ++p->depth;
+  if (i == FIO_RESP3_MAX_NESTING)
+    goto error;
+  p->stack[i] = (struct fio___resp3_frame_s){0};
+  return 0;
+error:
+  --p->depth;
+  fio___resp3_stack_destroy(p);
+  return -1;
+}
+
+static int fio___resp3_stack_consume(fio_resp3_s *p) {
+  while (p->depth) {
+    size_t v = p->depth;
+    size_t k = p->depth - 1;
+    size_t c = c;
+    /* ignore attributes */
+    if (p->stack[v].otype == FIO___RESP3_U8_ATTR) {
+      p->depth = c;
+      continue;
+    }
+    /* if the container type is a map, we need another object */
+    switch (p->stack[c].otype) {
+    case FIO___RESP3_U8_ATTR: /* fall through / ignore? */
+    case FIO___RESP3_U8_MAP:
+      if (p->stack[c].size)
+        return fio___resp3_stack_push(p);
+      p->depth = c;
+      continue;
+    case FIO___RESP3_U8_SET: /* push key=true and  */
+      p->settings.map_push(p->stack[c].obj,
+                           p->stack[v].obj,
+                           p->settings.set_true);
+      p->depth = c;
+      if (--p->stack[c].size)
+        return fio___resp3_stack_push(p);
+      continue;
+
+    case FIO___RESP3_U8_ARRAY: /* fall through */
+    case FIO___RESP3_U8_PUSH:
+      p->settings.array_push(p->stack[c].obj, p->stack[v].obj);
+      p->depth = c;
+      if (--p->stack[c].size)
+        return fio___resp3_stack_push(p);
+      continue;
+
+    default:
+      /* if `c` (container) isn't a container, it may be a key in a map */
+      c -= !!c;
+      switch (p->stack[c].otype) {
+      case FIO___RESP3_U8_ATTR: /* TODO: FIXME: ignore attributes? */
+        if (p->stack[v].obj)
+          p->settings.free_response(p->stack[v].obj);
+        if (p->stack[k].obj)
+          p->settings.free_response(p->stack[k].obj);
+        break;
+        p->depth = c;
+        if (--p->stack[c].size)
+          return fio___resp3_stack_push(p);
+        continue;
+
+      case FIO___RESP3_U8_MAP:
+        /* push both key and value to map */
+        p->settings.map_push(p->stack[c].obj, p->stack[k].obj, p->stack[v].obj);
+        p->depth = c;
+        if (--p->stack[c].size)
+          return fio___resp3_stack_push(p);
+        continue;
+        break;
+      default: goto error;
+      }
+    }
+  }
+
+  /* ignore attributes, as they are not replies */
+  if (p->stack[0].otype == FIO___RESP3_U8_ATTR) {
+    p->stack[0] = (struct fio___resp3_frame_s){0};
+    return 0;
+  }
+  /* call the correct callback by offset (done == 0, err == 1, push == 2) */
+  (&(p->settings.done))[(
+      (uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_ERROR) |
+      (uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_ERROR_BLOB) |
+      ((uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_PUSH) << 1))](
+      p->udata,
+      p->stack[0].obj);
+  /* free memory */
+  p->settings.free_response(p->stack[0].obj);
+  p->stack[0] = (struct fio___resp3_frame_s){0};
+  return 0;
+
+error:
+  fio___resp3_stack_destroy(p);
+  return -1;
+}
+
+static int fio___resp3_stack_pop(fio_resp3_s *p) {
+  p->depth -= !!p->depth;
+  return fio___resp3_stack_consume(p);
+}
+/* *****************************************************************************
+RESP Implementation - inline functions.
+***************************************************************************** */
+
+static size_t fio___resp3_parse_start(fio_resp3_s *parser,
+                                      uint8_t *buf,
+                                      size_t len);
+
+/** Parse `data`, returning the abount of bytes consumed. */
+FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser,
+                                 uint8_t *buf,
+                                 size_t len) {
+  size_t r = 0, tmp = 0;
+  if (!buf)
+    return r;
+  while (len && (tmp = parser->private_data.parse(parser, buf, len)) + 1 > 1) {
+    r += tmp;
+    buf += tmp;
+    len -= tmp;
+  }
+  return r;
+}
+
+/* *****************************************************************************
 RESP Single Line Types
 ***************************************************************************** */
 
 /* *****************************************************************************
 RESP Parsing @ Root
 ***************************************************************************** */
-SFUNC size_t fio___resp3_parse_start(fio_resp3_s *parser,
-                                     uint8_t *buf,
-                                     size_t len);
+static size_t fio___resp3_parse_start(fio_resp3_s *parser,
+                                      uint8_t *buf,
+                                      size_t len);
 
 /* *****************************************************************************
 Queue Thoughts
@@ -50178,14 +50422,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
 
         /* the following will probably never detect an error */
 
-        (void)fio_math_add(expected, na, nb, 4);
-        (void)fio_u256_add(&result.u256[0], &ua, &ub);
+        {
+          uint64_t ignr_ = fio_math_add(expected, na, nb, 4);
+          ignr_ += fio_u256_add(&result.u256[0], &ua, &ub);
+          (void)ignr_;
+        }
         FIO_ASSERT(
             !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
             "Multi-Precision ADD error");
 
-        (void)fio_math_sub(expected, na, nb, 4);
-        (void)fio_u256_sub(&result.u256[0], &ua, &ub);
+        {
+          uint64_t ignr_ = fio_math_sub(expected, na, nb, 4);
+          ignr_ += fio_u256_sub(&result.u256[0], &ua, &ub);
+          (void)ignr_;
+        }
         FIO_ASSERT(
             !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
             "Multi-Precision SUB error");

@@ -1598,9 +1598,9 @@ void fio___mem_block_free___(void);
 FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
       FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(p);
-  size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
   if (!c)
     return;
+  size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, p);
   FIO_ASSERT_DEBUG(
       (uint32_t)c->blocks[b].ref <= FIO_MEMORY_UNITS_PER_BLOCK + 1,
       "(%d) block reference count corrupted, possible double free? (%zd)",
@@ -1616,6 +1616,9 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_block_free)(void *p) {
 
   /* reset memory */
   FIO_NAME(FIO_MEMORY_NAME, __mem_block__reset_memory)(c, b);
+
+  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state))
+    return; /* leak if arena already freed*/
 
   /* place in free list */
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);

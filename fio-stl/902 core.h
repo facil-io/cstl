@@ -483,14 +483,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
 
         /* the following will probably never detect an error */
 
-        (void)fio_math_add(expected, na, nb, 4);
-        (void)fio_u256_add(&result.u256[0], &ua, &ub);
+        {
+          uint64_t ignr_ = fio_math_add(expected, na, nb, 4);
+          ignr_ += fio_u256_add(&result.u256[0], &ua, &ub);
+          (void)ignr_;
+        }
         FIO_ASSERT(
             !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
             "Multi-Precision ADD error");
 
-        (void)fio_math_sub(expected, na, nb, 4);
-        (void)fio_u256_sub(&result.u256[0], &ua, &ub);
+        {
+          uint64_t ignr_ = fio_math_sub(expected, na, nb, 4);
+          ignr_ += fio_u256_sub(&result.u256[0], &ua, &ub);
+          (void)ignr_;
+        }
         FIO_ASSERT(
             !memcmp(result.u256[0].u64, expected, sizeof(result.u256[0].u64)),
             "Multi-Precision SUB error");
