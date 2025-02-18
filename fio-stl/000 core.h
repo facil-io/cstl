@@ -3248,48 +3248,72 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * https://espadrine.github.io/blog/posts/shishua-the-fastest-prng-in-the-world.html
  */
 #define FIO_DEFINE_RANDOM_FUNCTION(extern, name, reseed_log, seed_offset)      \
-  static fio_u256 name##___state = {                                           \
-      .u64 = {(FIO_U64_HASH_PRIME0 + seed_offset),                             \
-              (FIO_U64_HASH_PRIME1 + seed_offset),                             \
-              (FIO_U64_HASH_PRIME2 + seed_offset),                             \
-              (FIO_U64_HASH_PRIME3 + seed_offset)}};                           \
-  FIO_SFUNC void name##___state_reseed(fio_u256 *state) {                      \
-    const size_t jitter_samples = 16 | (state->u8[0] & 15);                    \
+  static uint64_t name##___state[4] = {0x9c65875be1fce7b9ULL,                  \
+                                       0x7cc568e838f6a40dULL,                  \
+                                       0x4bb8d885a0fe47d5ULL,                  \
+                                       0x95561f0927ad7ecdULL};                 \
+  FIO_SFUNC void name##___state_reseed(uint64_t *state) {                      \
+    const size_t jitter_samples = 8 | (state[0] & 15);                         \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
       struct timespec t;                                                       \
       clock_gettime(CLOCK_MONOTONIC, &t);                                      \
-      FIO_MATH_UXXX_SUFFLE(state[0], 32, 3, 4, 5, 6, 7, 0, 1, 2);              \
       uint64_t clk[2];                                                         \
       clk[0] = (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec);              \
       clk[0] = fio_math_mulc64(clk[0], FIO_U64_HASH_PRIME0, clk + 1);          \
-      state->u64[0] += clk[0];                                                 \
-      state->u64[1] += clk[1];                                                 \
-      state->u64[2] += clk[0];                                                 \
-      state->u64[3] += clk[1];                                                 \
+      clk[1] += FIO_U64_HASH_PRIME0;                                           \
+      clk[0] += fio_lrot64(clk[0], 27);                                        \
+      clk[0] += fio_lrot64(clk[0], 49);                                        \
+      clk[1] += fio_lrot64(clk[1], 27);                                        \
+      clk[1] += fio_lrot64(clk[1], 49);                                        \
+      state[0] += clk[0];                                                      \
+      state[1] += clk[1];                                                      \
+      state[2] += clk[0];                                                      \
+      state[3] += clk[1];                                                      \
     }                                                                          \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  FIO_IFUNC fio_u128 name##128(void) {                                         \
-    fio_u256 r, t;                                                             \
+  FIO_IFUNC fio_u128 name##___rand(void) {                                     \
+    fio_u256 r;                                                                \
     if (reseed_log && reseed_log < 32) {                                       \
       static size_t counter;                                                   \
       if (!((counter++) & ((1ULL << reseed_log) - 1)))                         \
-        name##___state_reseed(&name##___state);                                \
+        name##___state_reseed(name##___state);                                 \
     }                                                                          \
-    t = name##___state;                                                        \
-    r.u64[0] = fio_math_mulc64(t.u64[0], FIO_U64_HASH_PRIME0, r.u64 + 1);      \
-    r.u64[2] = fio_math_mulc64(t.u64[2], FIO_U64_HASH_PRIME1, r.u64 + 3);      \
-    /* rotate 256 bit state by 96 bits and add */                              \
-    FIO_MATH_UXXX_SUFFLE(t, 32, 3, 4, 5, 6, 7, 0, 1, 2);                       \
-    FIO_MATH_UXXX_OP(r, r, t, 32, +);                                          \
-    name##___state = r;                                                        \
-    r.u64[0] ^= r.u64[2];                                                      \
-    r.u64[1] ^= r.u64[3];                                                      \
+    uint64_t s1[4];                                                            \
+    { /* load state to registers and roll, mul, add */                         \
+      const uint64_t s0[] = {name##___state[0],                                \
+                             name##___state[1],                                \
+                             name##___state[2],                                \
+                             name##___state[3]};                               \
+      const uint64_t mulp[] = {0x37701261ED6C16C7ULL,                          \
+                               0x764DBBB75F3B3E0DULL,                          \
+                               ~(0x37701261ED6C16C7ULL),                       \
+                               ~(0x764DBBB75F3B3E0DULL)};                      \
+      const uint64_t addc[] = {FIO_U64_HASH_PRIME0,                            \
+                               FIO_U64_HASH_PRIME1,                            \
+                               FIO_U64_HASH_PRIME2,                            \
+                               FIO_U64_HASH_PRIME3};                           \
+      for (size_t i = 0; i < 4; ++i) {                                         \
+        s1[i] = fio_lrot64(s0[i], 33);                                         \
+        s1[i] += addc[i];                                                      \
+        s1[i] *= mulp[i];                                                      \
+        s1[i] += s0[i];                                                        \
+      }                                                                        \
+    }                                                                          \
+    for (size_t i = 0; i < 4; ++i) /* store to memory */                       \
+      name##___state[i] = s1[i];                                               \
+    {                                                                          \
+      const uint8_t rotc[] = {31, 29, 27, 30};                                 \
+      for (size_t i = 0; i < 4; ++i)                                           \
+        r.u64[i] = fio_lrot64(s1[i], rotc[i]);                                 \
+    }                                                                          \
+    r.u64[0] += r.u64[2];                                                      \
+    r.u64[1] += r.u64[3];                                                      \
     return r.u128[0];                                                          \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
   extern uint64_t name##64(void) {                                             \
-    fio_u128 r = name##128();                                                  \
+    fio_u128 r = name##___rand();                                              \
     return r.u64[0];                                                           \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
@@ -3298,12 +3322,12 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \
     for (unsigned i = 15; i < len; i += 16) {                                  \
-      fio_u128 r = name##128();                                                \
+      fio_u128 r = name##___rand();                                            \
       fio_memcpy16(d, r.u8);                                                   \
       d += 16;                                                                 \
     }                                                                          \
     if (len & 15) {                                                            \
-      fio_u128 r = name##128();                                                \
+      fio_u128 r = name##___rand();                                            \
       fio_memcpy15x(d, r.u8, len);                                             \
     }                                                                          \
   }

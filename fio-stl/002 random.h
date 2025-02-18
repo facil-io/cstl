@@ -330,10 +330,11 @@ SFUNC uint64_t fio_rand64(void) {
     /* re-seed state every 4095 requests / 2^12-1 attempts  */
     fio_rand_reseed();
   }
+  /* load to registers */
   const uint64_t s0[] = {fio___rand_state[0],
                          fio___rand_state[1],
                          fio___rand_state[2],
-                         fio___rand_state[3]}; /* load to registers */
+                         fio___rand_state[3]};
   uint64_t s1[4] = {0};
   {
     const uint64_t mulp[] = {0x37701261ED6C16C7ULL,
