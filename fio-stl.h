@@ -2614,16 +2614,16 @@ Fun Primes
 #define FIO_U32_HASH_PRIME9 0xF5781551UL
 
 /* Primes with with 64 bits, half of them set. */
-#define FIO_U64_HASH_PRIME0 0x39664DEECA23D825
-#define FIO_U64_HASH_PRIME1 0x48644F7B3959621F
-#define FIO_U64_HASH_PRIME2 0x613A19F5CB0D98D5
-#define FIO_U64_HASH_PRIME3 0x84B56B93C869EA0F
-#define FIO_U64_HASH_PRIME4 0x8EE38D13E0D95A8D
-#define FIO_U64_HASH_PRIME5 0x92E99EC981F0E279
-#define FIO_U64_HASH_PRIME6 0xDDC3100BEF158BB1
-#define FIO_U64_HASH_PRIME7 0x918F4D38049F78BD
-#define FIO_U64_HASH_PRIME8 0xB6C9F8032A35E2D9
-#define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
+#define FIO_U64_HASH_PRIME0 ((uint64_t)0x39664DEECA23D825)
+#define FIO_U64_HASH_PRIME1 ((uint64_t)0x48644F7B3959621F)
+#define FIO_U64_HASH_PRIME2 ((uint64_t)0x613A19F5CB0D98D5)
+#define FIO_U64_HASH_PRIME3 ((uint64_t)0x84B56B93C869EA0F)
+#define FIO_U64_HASH_PRIME4 ((uint64_t)0x8EE38D13E0D95A8D)
+#define FIO_U64_HASH_PRIME5 ((uint64_t)0x92E99EC981F0E279)
+#define FIO_U64_HASH_PRIME6 ((uint64_t)0xDDC3100BEF158BB1)
+#define FIO_U64_HASH_PRIME7 ((uint64_t)0x918F4D38049F78BD)
+#define FIO_U64_HASH_PRIME8 ((uint64_t)0xB6C9F8032A35E2D9)
+#define FIO_U64_HASH_PRIME9 ((uint64_t)0xFA2A5F16D2A128D5)
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -3285,11 +3285,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * https://espadrine.github.io/blog/posts/shishua-the-fastest-prng-in-the-world.html
  */
 #define FIO_DEFINE_RANDOM_FUNCTION(extern, name, reseed_log, seed_offset)      \
-  static fio_u256 name##___state =                                             \
-      fio_u256_init64(FIO_U64_HASH_PRIME0 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME1 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME2 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME3 + seed_offset);                      \
+  static fio_u256 name##___state = {                                           \
+      .u64 = {(FIO_U64_HASH_PRIME0 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME1 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME2 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME3 + seed_offset)}};                           \
   FIO_SFUNC void name##___state_reseed(fio_u256 *state) {                      \
     const size_t jitter_samples = 16 | (state->u8[0] & 15);                    \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
@@ -3307,7 +3307,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   FIO_IFUNC fio_u128 name##128(void) {                                         \
-    register fio_u256 r, t;                                                    \
+    fio_u256 r, t;                                                             \
     if (reseed_log && reseed_log < 32) {                                       \
       static size_t counter;                                                   \
       if (!((counter++) & ((1ULL << reseed_log) - 1)))                         \
@@ -37947,7 +37947,7 @@ IO Reactor Finish
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(H___FIO_IO___H) &&                                                 \
+#if defined(H___FIO_IO___H) && !defined(FIO_NO_TLS) &&                         \
     (HAVE_OPENSSL || __has_include("openssl/ssl.h")) &&                        \
      !defined(H___FIO_OPENSSL___H) && !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_OPENSSL___H 1
@@ -37962,10 +37962,21 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void);
 OpenSSL Helpers Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+/* *****************************************************************************
+Validate OpenSSL Library Version
+***************************************************************************** */
+
+#if !defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 3
+#undef HAVE_OPENSSL
+#warning HAVE_OPENSSL flag error - incompatible OpenSSL version
+/* No valid OpenSSL, return the default TLS IO functions */
+SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
+  return fio_io_tls_default_functions(NULL);
+}
+#else
 FIO_ASSERT_STATIC(OPENSSL_VERSION_MAJOR > 2, "OpenSSL version mismatch");
 
 /* *****************************************************************************
@@ -38276,7 +38287,7 @@ FIO_SFUNC ssize_t fio___openssl_read(int fd,
     r = SSL_write_ex(ssl, (void *)&r, 0, (size_t *)&r); /* fall through */
   case SSL_ERROR_WANT_X509_LOOKUP:                      /* fall through */
   case SSL_ERROR_WANT_READ:                             /* fall through */
-#ifdef SSL_ERROR_WANT_ASYNC                             /* fall through */
+#ifdef SSL_ERROR_WANT_ASYNC
   case SSL_ERROR_WANT_ASYNC:                            /* fall through */
 #endif
   default: errno = EWOULDBLOCK; return (r = -1);
@@ -38345,7 +38356,7 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
   case SSL_ERROR_WANT_X509_LOOKUP:            /* fall through */
   case SSL_ERROR_WANT_WRITE:                  /* fall through */
   case SSL_ERROR_WANT_READ:                   /* fall through */
-#ifdef SSL_ERROR_WANT_ASYNC                   /* fall through */
+#ifdef SSL_ERROR_WANT_ASYNC /* fall through */
   case SSL_ERROR_WANT_ASYNC:                  /* fall through */
 #endif
   default: errno = EWOULDBLOCK; return (r = -1);
@@ -38452,7 +38463,7 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
 /* *****************************************************************************
 OpenSSL Helpers Cleanup
 ***************************************************************************** */
-
+#endif /* defined(OPENSSL_VERSION_MAJOR) && OPENSSL_VERSION_MAJOR >= 3 */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* HAVE_OPENSSL */
 /* ************************************************************************* */

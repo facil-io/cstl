@@ -2577,16 +2577,16 @@ Fun Primes
 #define FIO_U32_HASH_PRIME9 0xF5781551UL
 
 /* Primes with with 64 bits, half of them set. */
-#define FIO_U64_HASH_PRIME0 0x39664DEECA23D825
-#define FIO_U64_HASH_PRIME1 0x48644F7B3959621F
-#define FIO_U64_HASH_PRIME2 0x613A19F5CB0D98D5
-#define FIO_U64_HASH_PRIME3 0x84B56B93C869EA0F
-#define FIO_U64_HASH_PRIME4 0x8EE38D13E0D95A8D
-#define FIO_U64_HASH_PRIME5 0x92E99EC981F0E279
-#define FIO_U64_HASH_PRIME6 0xDDC3100BEF158BB1
-#define FIO_U64_HASH_PRIME7 0x918F4D38049F78BD
-#define FIO_U64_HASH_PRIME8 0xB6C9F8032A35E2D9
-#define FIO_U64_HASH_PRIME9 0xFA2A5F16D2A128D5
+#define FIO_U64_HASH_PRIME0 ((uint64_t)0x39664DEECA23D825)
+#define FIO_U64_HASH_PRIME1 ((uint64_t)0x48644F7B3959621F)
+#define FIO_U64_HASH_PRIME2 ((uint64_t)0x613A19F5CB0D98D5)
+#define FIO_U64_HASH_PRIME3 ((uint64_t)0x84B56B93C869EA0F)
+#define FIO_U64_HASH_PRIME4 ((uint64_t)0x8EE38D13E0D95A8D)
+#define FIO_U64_HASH_PRIME5 ((uint64_t)0x92E99EC981F0E279)
+#define FIO_U64_HASH_PRIME6 ((uint64_t)0xDDC3100BEF158BB1)
+#define FIO_U64_HASH_PRIME7 ((uint64_t)0x918F4D38049F78BD)
+#define FIO_U64_HASH_PRIME8 ((uint64_t)0xB6C9F8032A35E2D9)
+#define FIO_U64_HASH_PRIME9 ((uint64_t)0xFA2A5F16D2A128D5)
 
 /* *****************************************************************************
 64bit addition (ADD) / subtraction (SUB) / multiplication (MUL) with carry.
@@ -3248,11 +3248,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * https://espadrine.github.io/blog/posts/shishua-the-fastest-prng-in-the-world.html
  */
 #define FIO_DEFINE_RANDOM_FUNCTION(extern, name, reseed_log, seed_offset)      \
-  static fio_u256 name##___state =                                             \
-      fio_u256_init64(FIO_U64_HASH_PRIME0 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME1 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME2 + seed_offset,                       \
-                      FIO_U64_HASH_PRIME3 + seed_offset);                      \
+  static fio_u256 name##___state = {                                           \
+      .u64 = {(FIO_U64_HASH_PRIME0 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME1 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME2 + seed_offset),                             \
+              (FIO_U64_HASH_PRIME3 + seed_offset)}};                           \
   FIO_SFUNC void name##___state_reseed(fio_u256 *state) {                      \
     const size_t jitter_samples = 16 | (state->u8[0] & 15);                    \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
@@ -3270,7 +3270,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   FIO_IFUNC fio_u128 name##128(void) {                                         \
-    register fio_u256 r, t;                                                    \
+    fio_u256 r, t;                                                             \
     if (reseed_log && reseed_log < 32) {                                       \
       static size_t counter;                                                   \
       if (!((counter++) & ((1ULL << reseed_log) - 1)))                         \

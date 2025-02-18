@@ -16,7 +16,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(H___FIO_IO___H) &&                                                 \
+#if defined(H___FIO_IO___H) && !defined(FIO_NO_TLS) &&                         \
     (HAVE_OPENSSL || __has_include("openssl/ssl.h")) &&                        \
      !defined(H___FIO_OPENSSL___H) && !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_OPENSSL___H 1
@@ -31,10 +31,21 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void);
 OpenSSL Helpers Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
+/* *****************************************************************************
+Validate OpenSSL Library Version
+***************************************************************************** */
+
+#if !defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 3
+#undef HAVE_OPENSSL
+#warning HAVE_OPENSSL flag error - incompatible OpenSSL version
+/* No valid OpenSSL, return the default TLS IO functions */
+SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
+  return fio_io_tls_default_functions(NULL);
+}
+#else
 FIO_ASSERT_STATIC(OPENSSL_VERSION_MAJOR > 2, "OpenSSL version mismatch");
 
 /* *****************************************************************************
@@ -345,7 +356,7 @@ FIO_SFUNC ssize_t fio___openssl_read(int fd,
     r = SSL_write_ex(ssl, (void *)&r, 0, (size_t *)&r); /* fall through */
   case SSL_ERROR_WANT_X509_LOOKUP:                      /* fall through */
   case SSL_ERROR_WANT_READ:                             /* fall through */
-#ifdef SSL_ERROR_WANT_ASYNC                             /* fall through */
+#ifdef SSL_ERROR_WANT_ASYNC
   case SSL_ERROR_WANT_ASYNC:                            /* fall through */
 #endif
   default: errno = EWOULDBLOCK; return (r = -1);
@@ -414,7 +425,7 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
   case SSL_ERROR_WANT_X509_LOOKUP:            /* fall through */
   case SSL_ERROR_WANT_WRITE:                  /* fall through */
   case SSL_ERROR_WANT_READ:                   /* fall through */
-#ifdef SSL_ERROR_WANT_ASYNC                   /* fall through */
+#ifdef SSL_ERROR_WANT_ASYNC /* fall through */
   case SSL_ERROR_WANT_ASYNC:                  /* fall through */
 #endif
   default: errno = EWOULDBLOCK; return (r = -1);
@@ -521,6 +532,6 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
 /* *****************************************************************************
 OpenSSL Helpers Cleanup
 ***************************************************************************** */
-
+#endif /* defined(OPENSSL_VERSION_MAJOR) && OPENSSL_VERSION_MAJOR >= 3 */
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* HAVE_OPENSSL */
