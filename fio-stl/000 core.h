@@ -3198,7 +3198,8 @@ Vector Helpers - Multi-Precision Math
     fio_u##bits##_mul(&mN, t.u##bits, N_dash);                                 \
     /* Step 3: u = (t + m * N) */                                              \
     fio_u##bits##_mul(&mN, mN.u##bits, N);                                     \
-    (void)fio_u##dbl_bits##_add(&u, &t, &mN);                                  \
+    uint64_t ignr_ = fio_u##dbl_bits##_add(&u, &t, &mN);                       \
+    (void)ignr_;                                                               \
     /* Step 4: Constant Time select, if u >= N, then u = u - N */              \
     bool selector = (bool)fio_u##bits##_sub(u.u##bits, u.u##bits + 1, N);      \
     /* Step 5: Set result */                                                   \
