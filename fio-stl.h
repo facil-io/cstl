@@ -19438,7 +19438,7 @@ FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   fio_keystr_s r = {0};
   if (len + 1 < sizeof(r)) { /* always embed small strings in container! */
     r.info = (uint8_t)len;
-    FIO_MEMCPY(r.embd, buf, len);
+    FIO_MEMCPY((char *)r.embd, buf, len);
     return r;
   }
   r.info = 0xFF;
@@ -19455,7 +19455,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
     return r;
   if (str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
-    FIO_MEMCPY(r.embd, str.buf, str.len);
+    FIO_MEMCPY((char *)r.embd, str.buf, str.len);
     return r;
   }
   if (str.capa == FIO_KEYSTR_CONST) {
