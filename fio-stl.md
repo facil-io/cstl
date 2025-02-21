@@ -1847,6 +1847,53 @@ The functions support up to 2048 bits of multi-precision. The 4096 bit type is m
 
 -------------------------------------------------------------------------------
 
+## Core Randomness
+
+The core module provides macros for generating semi-deterministic Pseudo-Random Number Generator functions.
+
+#### `FIO_DEFINE_RANDOM128_FN`
+
+```c
+#define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)
+```
+
+Defines a semi-deterministic Pseudo-Random 128 bit Number Generator function.
+
+The following functions will be defined:
+
+```c
+extern fio_u128 name##128(void); // returns 128 bits
+extern uint64_t name##64(void);  // returns 64 bits (simply half of the 128 bit result)
+extern void name##_bytes(void *buffer, size_t len); // fills a buffer
+extern void name##_reset(void); // resets the state of the PRNG
+```
+
+If `reseed_log` is non-zero and less than 32, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
+
+If `extern` is `static` or `FIO_SFUNC`, a `static` function will be defined.
+
+#### `FIO_DEFINE_RANDOM64_FN`
+
+```c
+#define FIO_DEFINE_RANDOM64_FN(extern, name, reseed_log, seed_offset)
+```
+
+Defines a semi-deterministic Pseudo-Random 64 bit Number Generator function.
+
+The following functions will be defined:
+
+```c
+extern uint64_t name##64(void); // returns 64 bits
+extern void name##_bytes(void *buffer, size_t len); // fills buffer
+extern void name##_reset(void); // resets the state of the PRNG
+```
+
+If `reseed_log` is non-zero and less than 32, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
+
+If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
+
+-------------------------------------------------------------------------------
+
 ## Core Binary Strings and Buffer Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:
@@ -16340,6 +16387,289 @@ Testing collisions (low  28-44 bits) - Worst is 43 bits: 85/63 (1.33x)
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 1063.513065 seconds
 -------------------------------------------------------------------------------
+```
+
+-------------------------------------------------------------------------------
+## Pseudo-Random Function Testing
+
+Testing the Pseudo-Random Number Generator (PRNG) Functions isn't somewhat of a chore, as a complete test could take a week or so to complete and my laptop wasn't designed for such long running intensive tasks.
+
+Tests were conducted by utilizing [PractRand](https://pracrand.sourceforge.net) as well as the [xoshiro](http://xoshiro.di.unimi.it/hwd.php) test code, running both up to 2TB of random data (which took about 1 night).
+
+Results are as follows:
+
+-------------------------------------------------------------------------------
+### `fio_rand`
+
+The following are the tests for the core  `fio_rand64` and `fio_rand_bytes` functions provided when using `FIO_RAND`.
+
+```txt
+# ./tmp/rnd -p fio | RNG_test stdin
+RNG_test using PractRand version 0.95
+RNG = RNG_stdin, seed = unknown
+test set = core, folding = standard(unknown format)
+
+rng=RNG_stdin, seed=unknown
+length= 256 megabytes (2^28 bytes), time= 3.0 seconds
+  no anomalies in 217 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 megabytes (2^29 bytes), time= 6.5 seconds
+  no anomalies in 232 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 gigabyte (2^30 bytes), time= 13.0 seconds
+  no anomalies in 251 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 gigabytes (2^31 bytes), time= 25.2 seconds
+  no anomalies in 269 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 4 gigabytes (2^32 bytes), time= 48.2 seconds
+  no anomalies in 283 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 8 gigabytes (2^33 bytes), time= 96.5 seconds
+  Test Name                         Raw       Processed     Evaluation
+  BCFN(2+7,13-2,T)                  R=  -9.1  p =1-3.9e-5   unusual          
+  ...and 299 test result(s) without anomalies
+
+rng=RNG_stdin, seed=unknown
+length= 16 gigabytes (2^34 bytes), time= 190 seconds
+  no anomalies in 315 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 32 gigabytes (2^35 bytes), time= 376 seconds
+  no anomalies in 328 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 64 gigabytes (2^36 bytes), time= 752 seconds
+  no anomalies in 344 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 128 gigabytes (2^37 bytes), time= 1498 seconds
+  no anomalies in 359 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 256 gigabytes (2^38 bytes), time= 2978 seconds
+  no anomalies in 372 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 gigabytes (2^39 bytes), time= 9897 seconds
+  no anomalies in 387 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 terabyte (2^40 bytes), time= 21004 seconds
+  no anomalies in 401 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 terabytes (2^41 bytes), time= 43108 seconds
+  no anomalies in 413 test result(s)
+```
+
+
+-------------------------------------------------------------------------------
+### `FIO_DEFINE_RANDOM128_FN`
+
+The following are the tests for the built-in `FIO_DEFINE_RANDOM128_FN` macro using the deterministic PRNG (where the auto-reseeding `reseed_log` is set to `0`).
+
+```txt
+# ./tmp/rnd -p M128 | RNG_test stdin
+RNG_test using PractRand version 0.95
+RNG = RNG_stdin, seed = unknown
+test set = core, folding = standard(unknown format)
+
+rng=RNG_stdin, seed=unknown
+length= 256 megabytes (2^28 bytes), time= 2.4 seconds
+  no anomalies in 217 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 megabytes (2^29 bytes), time= 5.0 seconds
+  no anomalies in 232 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 gigabyte (2^30 bytes), time= 10.1 seconds
+  no anomalies in 251 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 gigabytes (2^31 bytes), time= 20.6 seconds
+  no anomalies in 269 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 4 gigabytes (2^32 bytes), time= 41.2 seconds
+  no anomalies in 283 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 8 gigabytes (2^33 bytes), time= 83.9 seconds
+  no anomalies in 300 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 16 gigabytes (2^34 bytes), time= 167 seconds
+  no anomalies in 315 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 32 gigabytes (2^35 bytes), time= 330 seconds
+  no anomalies in 328 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 64 gigabytes (2^36 bytes), time= 665 seconds
+  no anomalies in 344 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 128 gigabytes (2^37 bytes), time= 1329 seconds
+  no anomalies in 359 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 256 gigabytes (2^38 bytes), time= 2630 seconds
+  no anomalies in 372 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 gigabytes (2^39 bytes), time= 6846 seconds
+  no anomalies in 387 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 terabyte (2^40 bytes), time= 18633 seconds
+  no anomalies in 401 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 terabytes (2^41 bytes), time= 39061 seconds
+  no anomalies in 413 test result(s)
+```
+
+-------------------------------------------------------------------------------
+### `FIO_DEFINE_RANDOM64_FN`
+
+The following are the tests for the built-in `FIO_DEFINE_RANDOM64_FN` macro using the deterministic PRNG (where the auto-reseeding `reseed_log` is set to `0`).
+
+
+```txt
+# ./tmp/rnd -p M64 | RNG_test stdin
+RNG_test using PractRand version 0.95
+RNG = RNG_stdin, seed = unknown
+test set = core, folding = standard(unknown format)
+
+rng=RNG_stdin, seed=unknown
+length= 256 megabytes (2^28 bytes), time= 2.6 seconds
+  no anomalies in 217 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 megabytes (2^29 bytes), time= 5.6 seconds
+  no anomalies in 232 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 gigabyte (2^30 bytes), time= 11.0 seconds
+  no anomalies in 251 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 gigabytes (2^31 bytes), time= 21.9 seconds
+  no anomalies in 269 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 4 gigabytes (2^32 bytes), time= 42.9 seconds
+  no anomalies in 283 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 8 gigabytes (2^33 bytes), time= 85.3 seconds
+  no anomalies in 300 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 16 gigabytes (2^34 bytes), time= 168 seconds
+  no anomalies in 315 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 32 gigabytes (2^35 bytes), time= 331 seconds
+  no anomalies in 328 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 64 gigabytes (2^36 bytes), time= 666 seconds
+  no anomalies in 344 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 128 gigabytes (2^37 bytes), time= 1328 seconds
+  no anomalies in 359 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 256 gigabytes (2^38 bytes), time= 2626 seconds
+  no anomalies in 372 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 gigabytes (2^39 bytes), time= 6834 seconds
+  no anomalies in 387 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 terabyte (2^40 bytes), time= 18619 seconds
+  no anomalies in 401 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 terabytes (2^41 bytes), time= 39032 seconds
+  no anomalies in 413 test result(s)
+```
+
+
+-------------------------------------------------------------------------------
+
+```txt
+# ./tmp/rnd -p M128 | RNG_test stdin
+RNG_test using PractRand version 0.95
+RNG = RNG_stdin, seed = unknown
+test set = core, folding = standard(unknown format)
+
+rng=RNG_stdin, seed=unknown
+length= 256 megabytes (2^28 bytes), time= 2.4 seconds
+  no anomalies in 217 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 megabytes (2^29 bytes), time= 5.0 seconds
+  no anomalies in 232 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 gigabyte (2^30 bytes), time= 10.1 seconds
+  no anomalies in 251 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 gigabytes (2^31 bytes), time= 20.6 seconds
+  no anomalies in 269 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 4 gigabytes (2^32 bytes), time= 41.2 seconds
+  no anomalies in 283 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 8 gigabytes (2^33 bytes), time= 83.9 seconds
+  no anomalies in 300 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 16 gigabytes (2^34 bytes), time= 167 seconds
+  no anomalies in 315 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 32 gigabytes (2^35 bytes), time= 330 seconds
+  no anomalies in 328 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 64 gigabytes (2^36 bytes), time= 665 seconds
+  no anomalies in 344 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 128 gigabytes (2^37 bytes), time= 1329 seconds
+  no anomalies in 359 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 256 gigabytes (2^38 bytes), time= 2630 seconds
+  no anomalies in 372 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 512 gigabytes (2^39 bytes), time= 6846 seconds
+  no anomalies in 387 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 1 terabyte (2^40 bytes), time= 18633 seconds
+  no anomalies in 401 test result(s)
+
+rng=RNG_stdin, seed=unknown
+length= 2 terabytes (2^41 bytes), time= 39061 seconds
+  no anomalies in 413 test result(s)
 ```
 
 -------------------------------------------------------------------------------

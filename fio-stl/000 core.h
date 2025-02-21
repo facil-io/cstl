@@ -3230,29 +3230,35 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
 **************************************************************************** */
 
 /**
- * Defines a deterministic Pseudo-Random Number Generator function.
+ * Defines a semi-deterministic Pseudo-Random 128 bit Number Generator function.
  *
  * The following functions will be defined:
  *
- * - static fio_u128 name##128(void); // returns 128 bits - for internal use
- * - extern uint64_t name##64(void); // returns 64 bits
- * - extern void name##_bytes(void *buffer, size_t len); // fills buffer
+ * - extern fio_u128 name##128(void); // returns 128 bits
+ * - extern uint64_t name##64(void); // returns 64 bits (simply half the result)
+ * - extern void name##_bytes(void *buffer, size_t len); // fills a buffer
+ * - extern void name##_reset(void); // resets the state of the PRNG
  *
  * If `reseed_log` is non-zero and less than 32, the PNGR is no longer
  * deterministic, as it will automatically re-seeds itself every 2^reseed_log
  * iterations.
  *
- * The PRNG follows the design for SHISHUA, without using intrinsic functions.
- *
  * If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
- *
- * https://espadrine.github.io/blog/posts/shishua-the-fastest-prng-in-the-world.html
  */
-#define FIO_DEFINE_RANDOM_FUNCTION(extern, name, reseed_log, seed_offset)      \
-  static uint64_t name##___state[4] = {0x9c65875be1fce7b9ULL,                  \
-                                       0x7cc568e838f6a40dULL,                  \
-                                       0x4bb8d885a0fe47d5ULL,                  \
-                                       0x95561f0927ad7ecdULL};                 \
+#define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)         \
+  static uint64_t name##___state[8] FIO_ALIGN(64) = {                          \
+      0x9c65875be1fce7b9ULL + seed_offset,                                     \
+      0x7cc568e838f6a40dULL,                                                   \
+      0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
+      0x95561f0927ad7ecdULL,                                                   \
+      0};                                                                      \
+  extern void name##_reset(void) {                                             \
+    name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;                   \
+    name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
+    name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
+    name##___state[3] = 0x95561f0927ad7ecdULL;                                 \
+    name##___state[4] = 0;                                                     \
+  }                                                                            \
   FIO_SFUNC void name##___state_reseed(uint64_t *state) {                      \
     const size_t jitter_samples = 8 | (state[0] & 15);                         \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
@@ -3273,13 +3279,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     }                                                                          \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  FIO_IFUNC fio_u128 name##___rand(void) {                                     \
+  extern fio_u128 name##128(void) {                                            \
     fio_u256 r;                                                                \
-    if (reseed_log && reseed_log < 32) {                                       \
-      static size_t counter;                                                   \
-      if (!((counter++) & ((1ULL << reseed_log) - 1)))                         \
-        name##___state_reseed(name##___state);                                 \
-    }                                                                          \
+    if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) && reseed_log && \
+        reseed_log < 32)                                                       \
+      name##___state_reseed(name##___state);                                   \
     uint64_t s1[4];                                                            \
     { /* load state to registers and roll, mul, add */                         \
       const uint64_t s0[] = {name##___state[0],                                \
@@ -3290,10 +3294,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
                                0x764DBBB75F3B3E0DULL,                          \
                                ~(0x37701261ED6C16C7ULL),                       \
                                ~(0x764DBBB75F3B3E0DULL)};                      \
-      const uint64_t addc[] = {FIO_U64_HASH_PRIME0,                            \
-                               FIO_U64_HASH_PRIME1,                            \
-                               FIO_U64_HASH_PRIME2,                            \
-                               FIO_U64_HASH_PRIME3};                           \
+      const uint64_t addc[] = {name##___state[4], 0, name##___state[4], 0};    \
       for (size_t i = 0; i < 4; ++i) {                                         \
         s1[i] = fio_lrot64(s0[i], 33);                                         \
         s1[i] += addc[i];                                                      \
@@ -3314,8 +3315,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
   extern uint64_t name##64(void) {                                             \
-    fio_u128 r = name##___rand();                                              \
-    return r.u64[0];                                                           \
+    static size_t counter;                                                     \
+    static fio_u128 r;                                                         \
+    if (!((counter++) & 1))                                                    \
+      r = name##128();                                                         \
+    return r.u64[counter & 1];                                                 \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
   extern void name##_bytes(void *dest, size_t len) {                           \
@@ -3323,12 +3327,12 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \
     for (unsigned i = 15; i < len; i += 16) {                                  \
-      fio_u128 r = name##___rand();                                            \
+      fio_u128 r = name##128();                                                \
       fio_memcpy16(d, r.u8);                                                   \
       d += 16;                                                                 \
     }                                                                          \
     if (len & 15) {                                                            \
-      fio_u128 r = name##___rand();                                            \
+      fio_u128 r = name##128();                                                \
       fio_memcpy15x(d, r.u8, len);                                             \
     }                                                                          \
   }

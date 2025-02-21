@@ -40,7 +40,7 @@ static uint64_t sys_next(void) {
 Defining a Pseudo-Random Number Generator Function (deterministic / not)
 **************************************************************************** */
 
-FIO_DEFINE_RANDOM_FUNCTION(FIO_SFUNC, ex, 0, 0)
+FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, r128nd, 0, 0)
 
 /* ****************************************************************************
 Testing code
@@ -506,14 +506,21 @@ int main(int argc, const char **argv) {
   fio_cli_start(
       argc,
       argv,
-      0,
+      1,
       1,
       "implements the Hamming-weight dependency test based on z9 from gjrand "
       "4.2.1.0 and described by David Blackman and Sebastiano Vigna.\n"
       "Runs the test, by default, on the facil.io random function.",
-      FIO_CLI_BOOL("--system -s tests a patched  `rand` instead of facil.io's "
-                   "`fio_rand64`."),
-      FIO_CLI_BOOL("--experimental -e tests experimental `rand`."),
+      FIO_CLI_PRINT_HEADER("Supported PRNG Functions"),
+      FIO_CLI_PRINT_LINE("`fio`"),
+      FIO_CLI_PRINT("the build-it PRNG supplied by `FIO_RAND` "
+                    "(`fio_rand64`)."),
+      FIO_CLI_PRINT_LINE("`M128`"),
+      FIO_CLI_PRINT("the 128 bit Macro based PRNG customizable "
+                    "using `FIO_DEFINE_RANDOM128_FN`."),
+      FIO_CLI_PRINT_LINE("`sys`"),
+      FIO_CLI_PRINT("a patched version of the clib `rand` function."),
+      FIO_CLI_PRINT_HEADER("Misc"),
       FIO_CLI_BOOL("--progress -p uses progressive test sizes (true unless N "
                    "is provided)."),
       FIO_CLI_BOOL("--trans -t tests transitions (vs. bits)."),
@@ -532,19 +539,21 @@ int main(int argc, const char **argv) {
       fprintf(stderr, "Optional --low-pv must be a float.\n");
     exit(1);
   }
-  if (fio_cli_get_bool("-s")) {
-    fprintf(
-        stderr,
-        "Testing a fixed variation of system's `rand` instead of facil.io.\n");
-    sys_next();
-    next = sys_next;
-  }
-  if (fio_cli_get_bool("-e")) {
-    fprintf(stderr, "Testing experimental facil.io PRNG.\n");
-    ex64();
-    next = ex64;
+  {
+    const char *tmp = fio_cli_unnamed(0);
+    if (!tmp)
+      exit(-1);
+    if (!strncasecmp(tmp, "fio", 3)) {
+      next = fio_rand64;
+    } else if (!strncasecmp(tmp, "m128", 4)) {
+      next = r128nd64;
+    } else if (!strncasecmp(tmp, "sys", 4)) {
+      next = sys_next;
+    }
+    FIO_LOG_INFO("Testing using `%s`", fio_cli_unnamed(0));
   }
   fio_cli_end();
+  next();
 
 #ifdef HWD_MMAP
   fprintf(stderr, "Allocating memory via mmap()... ");

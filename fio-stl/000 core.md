@@ -1847,6 +1847,33 @@ The functions support up to 2048 bits of multi-precision. The 4096 bit type is m
 
 -------------------------------------------------------------------------------
 
+## Core Randomness
+
+The core module provides macros for generating semi-deterministic Pseudo-Random Number Generator functions.
+
+#### `FIO_DEFINE_RANDOM128_FN`
+
+```c
+#define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)
+```
+
+Defines a semi-deterministic Pseudo-Random 128 bit Number Generator function.
+
+The following functions will be defined:
+
+```c
+extern fio_u128 name##128(void); // returns 128 bits
+extern uint64_t name##64(void);  // returns 64 bits (simply half of the 128 bit result)
+extern void name##_bytes(void *buffer, size_t len); // fills a buffer
+extern void name##_reset(void); // resets the state of the PRNG
+```
+
+If `reseed_log` is non-zero and less than 32, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
+
+If `extern` is `static` or `FIO_SFUNC`, a `static` function will be defined.
+
+-------------------------------------------------------------------------------
+
 ## Core Binary Strings and Buffer Helpers
 
 Some informational types and helpers are always defined (similarly to the [Linked Lists Macros](#linked-lists-macros)). These include:

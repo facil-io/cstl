@@ -26,6 +26,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #undef FIO___TEST_REINCLUDE
 #endif
 
+FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 31, 0)
 /* *****************************************************************************
 Playhouse hashing (next risky version)
 ***************************************************************************** */
@@ -137,6 +138,10 @@ FIO_SFUNC void fio_risky2_hash128(void *restrict dest,
   fio_memcpy16(dest, r);
 }
 
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
+  return fio_risky2_hash(buf, len, 1);
+}
+
 #undef FIO___R2_HASH_MUL_PRIME
 #undef FIO___R2_HASH_ROUND_FULL
 
@@ -217,9 +222,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
 }
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
   return fio_stable_hash(buf, len, 1);
-}
-FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
-  return fio_risky2_hash(buf, len, 1);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
@@ -432,8 +434,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
   fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
 #endif
   fprintf(stderr,
-          "\t  zeros / ones (bit frequency)\t%.05f\n",
-          ((float)1.0 * totals[0]) / totals[1]);
+          "\t  zeros / ones (frequency bias)\t%.05f%% (should be near zero)\n",
+          ((((float)100.0 * totals[0]) / totals[1]) > (float)100.0
+               ? ((((float)100.0 * totals[0]) / totals[1]) - 100)
+               : ((float)100 - (((float)100.0 * totals[0]) / totals[1]))));
   if (!(totals[0] < totals[1] + (total_bits / 20) &&
         totals[1] < totals[0] + (total_bits / 20)))
     FIO_LOG_ERROR("randomness isn't random?");
@@ -467,12 +471,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
-  fprintf(stderr,
-          "* Testing randomness "
-          "- bit frequency / hemming distance / chi-square.\n");
   const size_t test_len = (1UL << 21);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
+  fprintf(
+      stderr,
+      "* Testing randomness "
+      "- bit frequency / hemming distance / chi-square (%zu random bytes).\n",
+      (size_t)(sizeof(*rs) * test_len));
   clock_t start, end;
   FIO_ASSERT_ALLOC(rs);
 
@@ -562,7 +568,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random)(void) {
   FIO_NAME_TEST(stl, random_buffer)
   (rs, test_len, "fio_rand_bytes", end - start);
 
-  fio_rand_feed2seed(rs, sizeof(*rs) * test_len);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  fio___prng64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio___prng64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "PNGR128/64bits", end - start);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio___prng_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "PNGR128_bytes", end - start);
+
   FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
   fprintf(stderr, "\n");
   {
