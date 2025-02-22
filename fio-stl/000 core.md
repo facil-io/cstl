@@ -1868,7 +1868,7 @@ extern void name##_bytes(void *buffer, size_t len); // fills a buffer
 extern void name##_reset(void); // resets the state of the PRNG
 ```
 
-If `reseed_log` is non-zero and less than 32, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
+If `reseed_log` is non-zero and less than 64, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
 
 If `extern` is `static` or `FIO_SFUNC`, a `static` function will be defined.
 

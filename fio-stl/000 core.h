@@ -3239,7 +3239,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * - extern void name##_bytes(void *buffer, size_t len); // fills a buffer
  * - extern void name##_reset(void); // resets the state of the PRNG
  *
- * If `reseed_log` is non-zero and less than 32, the PNGR is no longer
+ * If `reseed_log` is non-zero and less than 64, the PNGR is no longer
  * deterministic, as it will automatically re-seeds itself every 2^reseed_log
  * iterations.
  *
@@ -3281,8 +3281,8 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
   /** Returns a 128 bit pseudo-random number. */                               \
   extern fio_u128 name##128(void) {                                            \
     fio_u256 r;                                                                \
-    if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) && reseed_log && \
-        reseed_log < 32)                                                       \
+    if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) &&               \
+        ((size_t)(reseed_log - 1) < 63))                                       \
       name##___state_reseed(name##___state);                                   \
     uint64_t s1[4];                                                            \
     { /* load state to registers and roll, mul, add */                         \

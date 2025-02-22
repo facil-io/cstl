@@ -1995,10 +1995,10 @@ fio___string_write_unescape_write(uint8_t *restrict dest,
   *ps = s;
   return r;
 }
-FIO_IFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
-                                        fio_string_realloc_fn alloc,
-                                        const void *src,
-                                        size_t len) {
+SFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
+                                    fio_string_realloc_fn alloc,
+                                    const void *src,
+                                    size_t len) {
   return fio___string_altering_cycle((fio___string_altering_args_s){
       .dest = dest,
       .reallocate = alloc,

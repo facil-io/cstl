@@ -1560,13 +1560,13 @@ Simple Property Set / Get
 ***************************************************************************** */
 
 #define HTTP___MAKE_GET_SET(property)                                          \
-  FIO_IFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                \
+  SFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                    \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return fio_keystr_info(&h->property);                                      \
   }                                                                            \
                                                                                \
-  FIO_IFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,            \
-                                                     fio_str_info_s value) {   \
+  SFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,                \
+                                                 fio_str_info_s value) {       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
@@ -1580,7 +1580,7 @@ HTTP___MAKE_GET_SET(version)
 
 #undef HTTP___MAKE_GET_SET
 
-FIO_IFUNC_DEF_GET(fio_http, fio_http_s, size_t, status)
+FIO_DEF_GET_FUNC(SFUNC, fio_http, fio_http_s, size_t, status)
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
