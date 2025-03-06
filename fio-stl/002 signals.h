@@ -32,13 +32,24 @@ Copyright and License: see header file (000 copyright.h) or top of file
 Signal Monitoring API
 ***************************************************************************** */
 
+typedef struct {
+  /** The signal number to listen for. */
+  int sig;
+  /** The callback to run - leave NULL to ignore signal. */
+  void (*callback)(int sig, void *udata);
+  /** Opaque user data. */
+  void *udata;
+  /** Should the signal propagate to existing handler(s)? */
+  bool propagate;
+  /** Call (safe) callback immediately? or wait for `fio_signal_review`? */
+  bool immediate;
+} fio_signal_monitor_args_s;
 /**
  * Starts to monitor for the specified signal, setting an optional callback.
  */
-SFUNC int fio_signal_monitor(int sig,
-                             void (*callback)(int sig, void *),
-                             void *udata,
-                             bool propagate);
+SFUNC int fio_signal_monitor(fio_signal_monitor_args_s args);
+#define fio_signal_monitor(...)                                                \
+  fio_signal_monitor((fio_signal_monitor_args_s){__VA_ARGS__})
 
 /** Reviews all signals, calling any relevant callbacks. */
 SFUNC int fio_signal_review(void);
@@ -66,27 +77,31 @@ Signal Monitoring Implementation - possibly externed functions.
 /* *****************************************************************************
 POSIX implementation
 ***************************************************************************** */
-#ifdef FIO_OS_POSIX
+#if defined(FIO_OS_POSIX)
 
 static struct {
-  int32_t sig;
-  uint16_t propagate;
-  volatile uint16_t flag;
-  void (*callback)(int sig, void *);
-  void *udata;
+  fio_signal_monitor_args_s args;
   struct sigaction old;
+  volatile uint16_t flag;
 } fio___signal_watchers[FIO_SIGNAL_MONITOR_MAX];
 
 FIO_SFUNC void fio___signal_catcher(int sig) {
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+    if (!fio___signal_watchers[i].args.sig &&
+        !fio___signal_watchers[i].args.udata)
       return; /* initialized list is finishe */
-    if (fio___signal_watchers[i].sig != sig)
+    if (fio___signal_watchers[i].args.sig != sig)
       continue;
+    /* execute vs mark */
+    if (fio___signal_watchers[i].args.immediate)
+      fio___signal_watchers[i].args.callback(
+          fio___signal_watchers[i].args.sig,
+          fio___signal_watchers[i].args.udata);
     /* mark flag */
-    fio___signal_watchers[i].flag = 1;
+    fio___signal_watchers[i].flag = !fio___signal_watchers[i].args.immediate;
+
     /* pass-through if exists */
-    if (fio___signal_watchers[i].propagate &&
+    if (fio___signal_watchers[i].args.propagate &&
         fio___signal_watchers[i].old.sa_handler != SIG_IGN &&
         fio___signal_watchers[i].old.sa_handler != SIG_DFL)
       fio___signal_watchers[i].old.sa_handler(sig);
@@ -94,43 +109,36 @@ FIO_SFUNC void fio___signal_catcher(int sig) {
   }
 }
 
+int fio_signal_monitor___(void); /* IDE Marker */
 /**
  * Starts to monitor for the specified signal, setting an optional callback.
  */
-SFUNC int fio_signal_monitor(int sig,
-                             void (*callback)(int sig, void *),
-                             void *udata,
-                             bool propagate) {
-  if (!sig)
+SFUNC int fio_signal_monitor FIO_NOOP(fio_signal_monitor_args_s args) {
+  if (!args.sig)
     return -1;
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     /* updating an existing monitor */
-    if (fio___signal_watchers[i].sig == sig) {
-      fio___signal_watchers[i].callback = callback;
-      fio___signal_watchers[i].udata = udata;
-      fio___signal_watchers[i].propagate = propagate;
+    if (fio___signal_watchers[i].args.sig == args.sig) {
+      fio___signal_watchers[i].args = args;
       return 0;
     }
     /* slot busy */
-    if (fio___signal_watchers[i].sig || fio___signal_watchers[i].callback)
+    if (fio___signal_watchers[i].args.sig ||
+        fio___signal_watchers[i].args.callback)
       continue;
     /* place monitor in this slot */
     struct sigaction act;
     memset(&act, 0, sizeof(act));
     memset(fio___signal_watchers + i, 0, sizeof(fio___signal_watchers[i]));
-    fio___signal_watchers[i].sig = sig;
-    fio___signal_watchers[i].callback = callback;
-    fio___signal_watchers[i].udata = udata;
-    fio___signal_watchers[i].propagate = propagate;
+    fio___signal_watchers[i].args = args;
     act.sa_handler = fio___signal_catcher;
     sigemptyset(&act.sa_mask);
     act.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-    if (sigaction(sig, &act, &fio___signal_watchers[i].old)) {
+    if (sigaction(args.sig, &act, &fio___signal_watchers[i].old)) {
       FIO_LOG_ERROR("couldn't set signal handler: %s", strerror(errno));
-      fio___signal_watchers[i].callback = NULL;
-      fio___signal_watchers[i].udata = (void *)1;
-      fio___signal_watchers[i].sig = 0;
-      fio___signal_watchers[i].propagate = 0;
+      fio___signal_watchers[i].args = (fio_signal_monitor_args_s){
+          .udata = (void *)1,
+      };
       return -1;
     }
     return 0;
@@ -145,14 +153,14 @@ SFUNC int fio_signal_forget(int sig) {
   struct sigaction act = {0};
   act.sa_handler = SIG_DFL;
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+    if (!fio___signal_watchers[i].args.sig &&
+        !fio___signal_watchers[i].args.udata)
       break; /* initialized list is finished */
-    if (fio___signal_watchers[i].sig != sig)
+    if (fio___signal_watchers[i].args.sig != sig)
       continue;
-    fio___signal_watchers[i].callback = NULL;
-    fio___signal_watchers[i].udata = (void *)1;
-    fio___signal_watchers[i].sig = 0;
-    fio___signal_watchers[i].propagate = 0;
+    fio___signal_watchers[i].args = (fio_signal_monitor_args_s){
+        .udata = (void *)1,
+    };
     struct sigaction old = fio___signal_watchers[i].old;
     old = act;
     if (sigaction(sig, &old, &act)) {
@@ -171,24 +179,28 @@ Windows Implementation
 #elif FIO_OS_WIN
 
 static struct {
-  int32_t sig;
-  uint16_t propagate;
-  volatile uint16_t flag;
-  void (*callback)(int sig, void *);
-  void *udata;
+  fio_signal_monitor_args_s args;
   void (*old)(int sig);
+  volatile uint16_t flag;
 } fio___signal_watchers[FIO_SIGNAL_MONITOR_MAX];
 
 FIO_SFUNC void fio___signal_catcher(int sig) {
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+    if (!fio___signal_watchers[i].args.sig &&
+        !fio___signal_watchers[i].args.udata)
       return; /* initialized list is finished */
-    if (fio___signal_watchers[i].sig != sig)
+    if (fio___signal_watchers[i].args.sig != sig)
       continue;
+    /* execute vs mark */
+    if (fio___signal_watchers[i].args.immediate)
+      fio___signal_watchers[i].args.callback(
+          fio___signal_watchers[i].args.sig,
+          fio___signal_watchers[i].args.udata);
     /* mark flag */
-    fio___signal_watchers[i].flag = 1;
+    fio___signal_watchers[i].flag = !fio___signal_watchers[i].args.immediate;
     /* pass-through if exists */
-    if (fio___signal_watchers[i].propagate && fio___signal_watchers[i].old &&
+    if (fio___signal_watchers[i].args.propagate &&
+        fio___signal_watchers[i].old &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_IGN &&
         (intptr_t)fio___signal_watchers[i].old != (intptr_t)SIG_DFL) {
       fio___signal_watchers[i].old(sig);
@@ -200,37 +212,31 @@ FIO_SFUNC void fio___signal_catcher(int sig) {
   }
 }
 
+SFUNC int fio_signal_monitor___(void); /* IDE Marker */
 /**
  * Starts to monitor for the specified signal, setting an optional callback.
  */
-SFUNC int fio_signal_monitor(int sig,
-                             void (*callback)(int sig, void *),
-                             void *udata,
-                             bool propagate) {
-  if (!sig)
+SFUNC int fio_signal_monitor FIO_NOOP(fio_signal_monitor_args_s args) {
+  if (!args.sig)
     return -1;
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
     /* updating an existing monitor */
-    if (fio___signal_watchers[i].sig == sig) {
-      fio___signal_watchers[i].callback = callback;
-      fio___signal_watchers[i].udata = udata;
+    if (fio___signal_watchers[i].args.sig == args.sig) {
+      fio___signal_watchers[i].args = args;
       return 0;
     }
     /* slot busy */
-    if (fio___signal_watchers[i].sig || fio___signal_watchers[i].callback)
+    if (fio___signal_watchers[i].args.sig ||
+        fio___signal_watchers[i].args.callback ||
+        fio___signal_watchers[i].args.udata)
       continue;
     /* place monitor in this slot */
-    fio___signal_watchers[i].sig = sig;
-    fio___signal_watchers[i].callback = callback;
-    fio___signal_watchers[i].udata = udata;
-    fio___signal_watchers[i].propagate = propagate;
-    fio___signal_watchers[i].old = signal(sig, fio___signal_catcher);
+    fio___signal_watchers[i].args = args;
+    fio___signal_watchers[i].old = signal(args.sig, fio___signal_catcher);
     if ((intptr_t)SIG_ERR == (intptr_t)fio___signal_watchers[i].old) {
-      fio___signal_watchers[i].sig = 0;
-      fio___signal_watchers[i].callback = NULL;
-      fio___signal_watchers[i].udata = (void *)1;
-      fio___signal_watchers[i].old = NULL;
-      fio___signal_watchers[i].propagate = 0;
+      fio___signal_watchers[i].args = (fio_signal_monitor_args_s){
+          .udata = (void *)1,
+      };
       FIO_LOG_ERROR("couldn't set signal handler: %s", strerror(errno));
       return -1;
     }
@@ -245,13 +251,14 @@ SFUNC int fio_signal_forget(int sig) {
     return -1;
   size_t i = 0;
   for (; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+    if (!fio___signal_watchers[i].args.sig &&
+        !fio___signal_watchers[i].args.udata)
       return -1; /* initialized list is finished */
-    if (fio___signal_watchers[i].sig != sig)
+    if (fio___signal_watchers[i].args.sig != sig)
       continue;
-    fio___signal_watchers[i].callback = NULL;
-    fio___signal_watchers[i].udata = (void *)1;
-    fio___signal_watchers[i].sig = 0;
+    fio___signal_watchers[i].args = (fio_signal_monitor_args_s){
+        .udata = (void *)1,
+    };
     if (fio___signal_watchers[i].old &&
         fio___signal_watchers[i].old != SIG_DFL) {
       if ((intptr_t)signal(sig, fio___signal_watchers[i].old) ==
@@ -282,14 +289,16 @@ Common OS implementation
 SFUNC int fio_signal_review(void) {
   int c = 0;
   for (size_t i = 0; i < FIO_SIGNAL_MONITOR_MAX; ++i) {
-    if (!fio___signal_watchers[i].sig && !fio___signal_watchers[i].udata)
+    if (!fio___signal_watchers[i].args.sig &&
+        !fio___signal_watchers[i].args.udata)
       return c;
     if (fio___signal_watchers[i].flag) {
       fio___signal_watchers[i].flag = 0;
       ++c;
-      if (fio___signal_watchers[i].callback)
-        fio___signal_watchers[i].callback(fio___signal_watchers[i].sig,
-                                          fio___signal_watchers[i].udata);
+      if (fio___signal_watchers[i].args.callback)
+        fio___signal_watchers[i].args.callback(
+            fio___signal_watchers[i].args.sig,
+            fio___signal_watchers[i].args.udata);
     }
   }
   return c;

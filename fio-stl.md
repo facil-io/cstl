@@ -3114,10 +3114,27 @@ When defining `FIO_SIGNAL`, the following function are defined.
 #### `fio_signal_monitor`
 
 ```c
-int fio_signal_monitor(int sig, void (*callback)(int sig, void *), void *udata, bool propagate);
+typedef struct {
+  /** The signal number to listen for. */
+  int sig;
+  /** The callback to run - leave NULL to ignore signal. */
+  void (*callback)(int sig, void *udata);
+  /** Opaque user data. */
+  void *udata;
+  /** Should the signal propagate to existing handler(s)? */
+  bool propagate;
+  /** Should the callback run immediately (signal safe code) or wait for `fio_signal_review`? */
+  bool immediate;
+} fio_signal_monitor_args_s;
+
+SFUNC int fio_signal_monitor(fio_signal_monitor_args_s args);
+#define fio_signal_monitor(...)                                                \
+  fio_signal_monitor((fio_signal_monitor_args_s){__VA_ARGS__})
 ```
 
 Starts to monitor for the specified signal, setting an optional callback.
+
+If `callback` is `NULL`, the signal will be ignored.
 
 If the signal is already being monitored, the callback and `udata` pointers are updated.
 

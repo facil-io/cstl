@@ -788,6 +788,7 @@ typedef struct FIO_NAME(FIO_MAP_NAME, __each_node_s) {
   void *udata;
 } FIO_NAME(FIO_MAP_NAME, __each_node_s);
 
+void fio___map___each_node___(void); /* IDE Marker */
 /* perform task for each node. */
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
                        __each_node)(FIO_NAME(FIO_MAP_NAME, s) * o,
@@ -964,7 +965,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_med)(
       (uint32_t)FIO_NAME(FIO_MAP_NAME, __byte_hash)(node->hash)};
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const uint32_t mask = (uint32_t)(FIO_MAP_CAPA(o->bits) - 1);
-  uint32_t guard = FIO_MAP_ATTACK_LIMIT + 1;
+  uint32_t guard = FIO_MAP_ATTACK_LIMIT;
   uint32_t pos = r.home = (node->hash & mask);
   uint32_t step = 2;
   uint32_t attempts = (mask < 511) ? ((mask >> 2) | 8) : 127;
@@ -1031,7 +1032,7 @@ FIO_SFUNC fio___map_node_info_s FIO_NAME(FIO_MAP_NAME, __node_info_full)(
   const uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   const size_t attempt_limit = o->bits + 7;
   const uint64_t mbyte64 = ~(UINT64_C(0x0101010101010101) * (uint64_t)r.bhash);
-  uint32_t guard = FIO_MAP_ATTACK_LIMIT + 1;
+  uint32_t guard = FIO_MAP_ATTACK_LIMIT;
   uint32_t pos = r.home = (node->hash & mask);
   size_t attempt = 0;
   for (; r.alt == (uint32_t)-1 && attempt < attempt_limit; ++attempt) {
@@ -1199,6 +1200,7 @@ static int FIO_NAME(FIO_MAP_NAME,
   return 0;
 }
 
+void fio___map___move2map___(void); /* IDE Marker */
 FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
                        __move2map)(FIO_NAME(FIO_MAP_NAME, s) * dest,
                                    FIO_NAME(FIO_MAP_NAME, s) * src) {
@@ -1282,19 +1284,21 @@ perform_overwrite:
 
 reallocate_map:
   /* reallocate map */
-  if (FIO_NAME(FIO_MAP_NAME, __allocate_map)(&tmp, o->bits + 1))
-    goto no_memory;
-  if (FIO_NAME(FIO_MAP_NAME, __move2map)(&tmp, o)) {
+  for (int i = 1; i < 3; ++i) {
+    if (FIO_NAME(FIO_MAP_NAME, __allocate_map)(&tmp, o->bits + i))
+      goto no_memory;
+    if (FIO_NAME(FIO_MAP_NAME, __move2map)(&tmp, o)) {
+      FIO_NAME(FIO_MAP_NAME, __free_map)(&tmp, 0);
+      continue;
+    }
+    info = FIO_NAME(FIO_MAP_NAME, __node_info)(&tmp, &node);
+    if (info.home != r) {
+      FIO_NAME(FIO_MAP_NAME, __free_map)(o, 0);
+      *o = tmp;
+      goto insert;
+    }
     FIO_NAME(FIO_MAP_NAME, __free_map)(&tmp, 0);
-    goto security_partial;
   }
-  info = FIO_NAME(FIO_MAP_NAME, __node_info)(&tmp, &node);
-  if (info.home != r) {
-    FIO_NAME(FIO_MAP_NAME, __free_map)(o, 0);
-    *o = tmp;
-    goto insert;
-  }
-  FIO_NAME(FIO_MAP_NAME, __free_map)(&tmp, 0);
   goto security_partial;
 
 no_memory:
@@ -2038,44 +2042,10 @@ Map Cleanup
 
 #endif /* FIO_EXTERN_COMPLETE */
 
-#undef FIO_MAP_ARRAY_LOG_LIMIT
-#undef FIO_MAP_ATTACK_LIMIT
-#undef FIO_MAP_CAPA
-#undef FIO_MAP_CAPA_BITS_LIMIT
-#undef FIO_MAP_CUCKOO_STEPS
-#undef FIO_MAP_GET_T
-#undef FIO_MAP_HASH_FN
-#undef FIO_MAP_IS_SPARSE
-#undef FIO_MAP_KEY
-#undef FIO_MAP_KEY_CMP
-#undef FIO_MAP_KEY_COPY
-#undef FIO_MAP_KEY_DESTROY
-#undef FIO_MAP_KEY_DESTROY_SIMPLE
-#undef FIO_MAP_KEY_DISCARD
-#undef FIO_MAP_KEY_FROM_INTERNAL
-#undef FIO_MAP_KEY_INTERNAL
-#undef FIO_MAP_KEY_IS_GREATER_THAN
-#undef FIO_MAP_LRU
-#undef FIO_MAP_NAME
-#undef FIO_MAP_ORDERED
-#undef FIO_MAP_PTR
-#undef FIO_MAP_RECALC_HASH
-#undef FIO_MAP_SEEK_LIMIT
-#undef FIO_MAP_T
-#undef FIO_MAP_TEST
-#undef FIO_MAP_VALUE
-#undef FIO_MAP_VALUE_BSTR
-#undef FIO_MAP_VALUE_COPY
-#undef FIO_MAP_VALUE_DESTROY
-#undef FIO_MAP_VALUE_DESTROY_SIMPLE
-#undef FIO_MAP_VALUE_DISCARD
-#undef FIO_MAP_VALUE_FROM_INTERNAL
-#undef FIO_MAP_VALUE_INTERNAL
-
+#undef FIO___MAP_UPDATE_ORDER
 #undef FIO_MAP___MAKE_BITMAP
 #undef FIO_MAP___STEP_POS
 #undef FIO_MAP___TEST_MATCH
-#undef FIO___MAP_UPDATE_ORDER
 #undef FIO_MAP_ARRAY_LOG_LIMIT
 #undef FIO_MAP_ATTACK_LIMIT
 #undef FIO_MAP_CAPA

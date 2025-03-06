@@ -525,7 +525,7 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
   FIO___OPENSSL_IO_FUNCS = fio_openssl_io_functions();
   fio_io_tls_default_functions(&FIO___OPENSSL_IO_FUNCS);
 #ifdef SIGPIPE
-  fio_signal_monitor(SIGPIPE, NULL, NULL, 0); /* avoid OpenSSL issue... */
+  fio_signal_monitor(.sig = SIGPIPE); /* avoid OpenSSL issue... */
 #endif
 }
 

@@ -40,7 +40,11 @@ static void fio___io_signal_stop(int sig, void *flg) {
   FIO_LOG_INFO("(%d) stop signal detected.", FIO___IO.pid);
   fio_io_stop();
   if (fio_io_is_master())
-    fio_signal_monitor(sig, fio___io_signal_crash, flg, 0);
+    fio_signal_monitor(.sig = sig,
+                       .callback = fio___io_signal_crash,
+                       .udata = flg,
+                       .propagate = 0,
+                       .immediate = 1);
   (void)sig, (void)flg;
 }
 
@@ -373,16 +377,19 @@ SFUNC void fio_io_start(int workers) {
 
   fio_state_callback_force(FIO_CALL_PRE_START);
   fio_queue_perform_all(&FIO___IO.queue);
-  fio_signal_monitor(SIGINT, fio___io_signal_stop, NULL, 0);
-  fio_signal_monitor(SIGTERM, fio___io_signal_stop, NULL, 0);
+  fio_signal_monitor(.sig = SIGINT,
+                     .callback = fio___io_signal_stop,
+                     .immediate = 1);
+  fio_signal_monitor(.sig = SIGTERM,
+                     .callback = fio___io_signal_stop,
+                     .immediate = 1);
   if (FIO___IO.restart_signal)
-    fio_signal_monitor(FIO___IO.restart_signal,
-                       fio___io_signal_restart,
-                       NULL,
-                       0);
+    fio_signal_monitor(.sig = FIO___IO.restart_signal,
+                       .callback = fio___io_signal_restart,
+                       .immediate = 1);
 
 #ifdef SIGPIPE
-  fio_signal_monitor(SIGPIPE, NULL, NULL, 0);
+  fio_signal_monitor(.sig = SIGPIPE);
 #endif
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   if (workers) {
