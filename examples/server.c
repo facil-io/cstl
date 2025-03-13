@@ -73,16 +73,19 @@ HTTP Callbacks (see later)
 static void http_respond(fio_http_s *h);
 
 /* *****************************************************************************
-Main
+Timers
 ***************************************************************************** */
-
 static int heartbeat(void *i1, void *i2) {
   (void)i1, (void)i2;
-  if (!fio_io_is_master())
+  if (i1 && !fio_io_is_master())
     return -1;
   FIO_LOG_INFO("(%d) heartbeat", fio_io_pid());
   return 0;
 }
+
+/* *****************************************************************************
+Main
+***************************************************************************** */
 
 int main(int argc, char const *argv[]) {
   static fio_io_async_s http_queue; /* async queue for worker threads. */
@@ -166,16 +169,20 @@ int main(int argc, char const *argv[]) {
           "Containers sometimes impose file-system restrictions, i.e.,"),
       FIO_CLI_PRINT("the IPC Unix Socket might need to be placed in `/tmp`."),
       FIO_CLI_INT("--heartbeat -ph Prints a heartbeat every requested number "
-                  "of seconds."));
+                  "of seconds."),
+      FIO_CLI_BOOL("-phw Prints the heartbeat also on worker processes."));
 
   /* review CLI for logging */
   if (fio_cli_get_bool("-V")) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
+  if (fio_cli_get_bool("-phw") && !fio_cli_get_i("-ph"))
+    fio_cli_set_i("-ph", 1);
   /* schedule heartbeat */
   if (fio_cli_get_i("-ph"))
     fio_io_run_every(.every = (fio_cli_get_i("-ph") * 1000),
                      .fn = heartbeat,
+                     .udata1 = (void *)(uintptr_t)fio_cli_get_bool("-phw"),
                      .repetitions = -1);
 
   if (fio_cli_get_bool("-C")) { /* container - place pub/sub socket in tmp */
