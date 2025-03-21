@@ -491,6 +491,13 @@ size_t fio_http_body_length(fio_http_s *);
 
 Gets the body (payload) length associated with the HTTP handle.
 
+#### `fio_http_body_pos`
+
+```c
+size_t fio_http_body_pos(fio_http_s *h);
+```
+
+Returns the body's reading position.
 
 #### `fio_http_body_seek`
 ```c
@@ -499,6 +506,7 @@ size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
 
 Adjusts the body's reading position. Negative values start at the end.
 
+If `pos == SSIZE_MAX`, returns `fio_http_body_pos`.
 
 #### `fio_http_body_read`
 ```c
