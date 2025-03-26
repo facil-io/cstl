@@ -77,7 +77,7 @@ Signal Monitoring Implementation - possibly externed functions.
 /* *****************************************************************************
 POSIX implementation
 ***************************************************************************** */
-#if defined(FIO_OS_POSIX)
+#if FIO_OS_POSIX
 
 static struct {
   fio_signal_monitor_args_s args;
