@@ -248,8 +248,11 @@ Aligned Memory Access Selectors
 /* *****************************************************************************
 OS Specific includes and Macros
 ***************************************************************************** */
+#define FIO_OS_POSIX 0
+#define FIO_OS_WIN   0
 
 #if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+#undef FIO_OS_POSIX
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___KILL_SELF()   kill(0, SIGINT)
@@ -257,6 +260,7 @@ OS Specific includes and Macros
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
+#undef FIO_OS_WIN
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN

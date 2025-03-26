@@ -1039,7 +1039,8 @@ FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
 FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   fio_keystr_s r = {0};
-  if (len + 1 < sizeof(r)) { /* always embed small strings in container! */
+  if (len + 1 &&             /* test for overflow */
+      len + 1 < sizeof(r)) { /* always embed small strings in container! */
     r.info = (uint8_t)len;
     FIO_MEMCPY((char *)r.embd, buf, len);
     return r;
@@ -1056,7 +1057,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
   fio_keystr_s r = {0};
   if (!str.buf || !str.len || (str.len & (~(size_t)0xFFFFFFFF)))
     return r;
-  if (str.len + 1 < sizeof(r)) {
+  if (str.len + 1 && str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY((char *)r.embd, str.buf, str.len);
     return r;

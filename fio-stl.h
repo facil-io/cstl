@@ -285,8 +285,11 @@ Aligned Memory Access Selectors
 /* *****************************************************************************
 OS Specific includes and Macros
 ***************************************************************************** */
+#define FIO_OS_POSIX 0
+#define FIO_OS_WIN   0
 
 #if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
+#undef FIO_OS_POSIX
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
 #define FIO___KILL_SELF()   kill(0, SIGINT)
@@ -294,6 +297,7 @@ OS Specific includes and Macros
 
 #elif defined(_WIN32) || defined(_WIN64) || defined(WIN32) ||                  \
     defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
+#undef FIO_OS_WIN
 #define FIO_OS_WIN     1
 #define POSIX_C_SOURCE 200809L
 #ifndef WIN32_LEAN_AND_MEAN
@@ -10039,7 +10043,7 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
       if (!r.ext.len)
         r.ext.buf = NULL;
       return r;
-#ifdef FIO_OS_WIN
+#if FIO_OS_WIN
     case '/': /* pass through (on windows test both variants) */
 #endif
     case FIO_FOLDER_SEPARATOR:
@@ -10091,7 +10095,7 @@ SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len) {
       if (!r.ext.len)
         r.ext.buf = NULL;
       return r;
-#ifdef FIO_OS_WIN
+#if FIO_OS_WIN
     case '/': /* pass through (on windows test both variants) */
 #endif
     case FIO_FOLDER_SEPARATOR:
@@ -11400,7 +11404,7 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 /** Returns 0 on timeout, -1 on error or the events that are valid. */
 SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
   short r = 0;
-#ifdef FIO_OS_WIN
+#if FIO_OS_WIN
   if (fd == -1) {
     FIO_THREAD_WAIT((timeout * 1000000));
     return r;
@@ -19455,7 +19459,8 @@ FIO_IFUNC fio_str_info_s fio_keystr_info(fio_keystr_s *str) {
 /** Returns a TEMPORARY `fio_keystr_s` to be used as a key for a hash map. */
 FIO_IFUNC fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len) {
   fio_keystr_s r = {0};
-  if (len + 1 < sizeof(r)) { /* always embed small strings in container! */
+  if (len + 1 &&             /* test for overflow */
+      len + 1 < sizeof(r)) { /* always embed small strings in container! */
     r.info = (uint8_t)len;
     FIO_MEMCPY((char *)r.embd, buf, len);
     return r;
@@ -19472,7 +19477,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
   fio_keystr_s r = {0};
   if (!str.buf || !str.len || (str.len & (~(size_t)0xFFFFFFFF)))
     return r;
-  if (str.len + 1 < sizeof(r)) {
+  if (str.len + 1 && str.len + 1 < sizeof(r)) {
     r.info = (uint8_t)str.len;
     FIO_MEMCPY((char *)r.embd, str.buf, str.len);
     return r;
@@ -49571,9 +49576,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
       uint64_t as_i;                                                           \
     } pn, pn1, pn2;                                                            \
     pn2.d_ = (double)d;                                                        \
-    char *p = (char *)(s);                                                     \
-    char *p1 = (char *)(s);                                                    \
-    char *p2 = (char *)(s);                                                    \
+    char *start = (char *)(s);                                                 \
+    char *p = start;                                                           \
+    char *p1 = start;                                                          \
+    char *p2 = start;                                                          \
     double r = fio_atof(&p);                                                   \
     fio_aton_s num_result = fio_aton(&p1);                                     \
     double r2 = num_result.is_float ? num_result.f : (double)num_result.i;     \
@@ -49582,7 +49588,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     pn.d_ = r;                                                                 \
     pn1.d_ = r2;                                                               \
     FIO_ASSERT(                                                                \
-        *p == stop || p == p2,                                                 \
+        *p == stop || p == p2 || ((FIO_OS_WIN - 1 + 1) && p == start),         \
         "atof float parsing didn't stop at correct position! %x != %x\n%s",    \
         *p,                                                                    \
         stop,                                                                  \

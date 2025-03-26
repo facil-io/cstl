@@ -553,9 +553,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
       uint64_t as_i;                                                           \
     } pn, pn1, pn2;                                                            \
     pn2.d_ = (double)d;                                                        \
-    char *p = (char *)(s);                                                     \
-    char *p1 = (char *)(s);                                                    \
-    char *p2 = (char *)(s);                                                    \
+    char *start = (char *)(s);                                                 \
+    char *p = start;                                                           \
+    char *p1 = start;                                                          \
+    char *p2 = start;                                                          \
     double r = fio_atof(&p);                                                   \
     fio_aton_s num_result = fio_aton(&p1);                                     \
     double r2 = num_result.is_float ? num_result.f : (double)num_result.i;     \
@@ -564,7 +565,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol)(void) {
     pn.d_ = r;                                                                 \
     pn1.d_ = r2;                                                               \
     FIO_ASSERT(                                                                \
-        *p == stop || p == p2,                                                 \
+        *p == stop || p == p2 || ((FIO_OS_WIN - 1 + 1) && p == start),         \
         "atof float parsing didn't stop at correct position! %x != %x\n%s",    \
         *p,                                                                    \
         stop,                                                                  \

@@ -468,7 +468,7 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
       if (!r.ext.len)
         r.ext.buf = NULL;
       return r;
-#ifdef FIO_OS_WIN
+#if FIO_OS_WIN
     case '/': /* pass through (on windows test both variants) */
 #endif
     case FIO_FOLDER_SEPARATOR:
@@ -520,7 +520,7 @@ SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len) {
       if (!r.ext.len)
         r.ext.buf = NULL;
       return r;
-#ifdef FIO_OS_WIN
+#if FIO_OS_WIN
     case '/': /* pass through (on windows test both variants) */
 #endif
     case FIO_FOLDER_SEPARATOR:
