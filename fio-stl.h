@@ -4230,9 +4230,9 @@ Leak Counter Helpers
 #define FIO_LEAK_COUNTER_COUNT(name)    ((size_t)0)
 #else
 #define FIO_LEAK_COUNTER_DEF(name)                                             \
+  volatile size_t FIO_WEAK FIO_NAME(FIO___LEAK_COUNTER, name);                 \
   FIO_IFUNC size_t FIO_NAME(fio___leak_counter, name)(size_t i) {              \
-    static volatile size_t counter;                                            \
-    size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
+    size_t tmp = fio_atomic_add_fetch(&FIO_NAME(FIO___LEAK_COUNTER, name), i); \
     if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
       goto error_double_free;                                                  \
     return tmp;                                                                \
@@ -7707,7 +7707,7 @@ Signal Monitoring Implementation - possibly externed functions.
 /* *****************************************************************************
 POSIX implementation
 ***************************************************************************** */
-#if defined(FIO_OS_POSIX)
+#if FIO_OS_POSIX
 
 static struct {
   fio_signal_monitor_args_s args;
