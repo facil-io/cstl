@@ -21258,7 +21258,7 @@ SFUNC int fio_string_getdelim_fd(fio_str_info_s *dest,
     return r;
   size_t index = fio_fd_find_next(fd, delim, (size_t)start_at);
   if (index == FIO_FD_FIND_EOF)
-    return r;
+    index = file_len;
   if (limit < 1 || limit > (index - start_at) + 1) {
     limit = (index - start_at) + 1;
   }
@@ -43634,12 +43634,16 @@ SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                               char token,
                                               size_t limit) {
   fio_str_info_s r = {0};
-  if (h->body.pos == h->body.len)
+  if (h->body.pos >= h->body.len)
     return r;
-  if (!limit || (h->body.pos + limit) > h->body.len)
+  if (!limit || limit > h->body.len || limit > (h->body.len - h->body.pos))
     limit = h->body.len - h->body.pos;
+  if (!limit)
+    return r;
   r = ((h->body.fd == -1) ? fio___http_body_read_until_buf
                           : fio___http_body_read_until_fd)(h, token, limit);
+  if (!r.len)
+    r.buf = NULL;
   return r;
 }
 
@@ -48379,6 +48383,9 @@ FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
                  fio_http_cdata(h));
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->state.http.on_finish(h);
+  if (c->state.http.buf.buf)
+    FIO_STRING_FREE2(c->state.http.buf);
+  c->state.http.buf = FIO_STR_INFO0;
   c->h = NULL;
   if (c->io)
     fio_io_close(c->io);

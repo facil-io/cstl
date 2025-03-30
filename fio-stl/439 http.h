@@ -2392,6 +2392,9 @@ FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
                  fio_http_cdata(h));
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->state.http.on_finish(h);
+  if (c->state.http.buf.buf)
+    FIO_STRING_FREE2(c->state.http.buf);
+  c->state.http.buf = FIO_STR_INFO0;
   c->h = NULL;
   if (c->io)
     fio_io_close(c->io);

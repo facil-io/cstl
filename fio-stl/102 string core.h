@@ -2838,7 +2838,7 @@ SFUNC int fio_string_getdelim_fd(fio_str_info_s *dest,
     return r;
   size_t index = fio_fd_find_next(fd, delim, (size_t)start_at);
   if (index == FIO_FD_FIND_EOF)
-    return r;
+    index = file_len;
   if (limit < 1 || limit > (index - start_at) + 1) {
     limit = (index - start_at) + 1;
   }

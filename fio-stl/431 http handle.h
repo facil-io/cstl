@@ -2309,12 +2309,16 @@ SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                               char token,
                                               size_t limit) {
   fio_str_info_s r = {0};
-  if (h->body.pos == h->body.len)
+  if (h->body.pos >= h->body.len)
     return r;
-  if (!limit || (h->body.pos + limit) > h->body.len)
+  if (!limit || limit > h->body.len || limit > (h->body.len - h->body.pos))
     limit = h->body.len - h->body.pos;
+  if (!limit)
+    return r;
   r = ((h->body.fd == -1) ? fio___http_body_read_until_buf
                           : fio___http_body_read_until_fd)(h, token, limit);
+  if (!r.len)
+    r.buf = NULL;
   return r;
 }
 
