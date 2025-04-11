@@ -3731,6 +3731,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define FIO_FIOBJ
 #define FIO_MUSTACHE
 #define FIOBJ_MALLOC
+#define FIO_OTP
 
 #else
 #define H___FIO_BASIC___H
@@ -3750,10 +3751,12 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_ED25519
 #undef FIO_SHA1
 #undef FIO_SHA2
+#define FIO_CRYPTO_CORE
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
 #define FIO_SHA2
+#define FIO_SECRET
 #undef FIO_CRYPT
 #endif /* FIO_CRYPT */
 
@@ -3941,7 +3944,7 @@ FIO_MAP Ordering & Naming Shortcut
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
-    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME)
+    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP)
 #undef FIO_STR
 #define FIO_STR
 #endif
@@ -3956,7 +3959,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_QUEUE
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE)
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_OTP)
 #undef FIO_TIME
 #define FIO_TIME
 #endif
@@ -3974,11 +3977,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_CHACHA
 #endif
 
-#if defined(FIO_HTTP_HANDLE)
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_OTP)
 #define FIO_SHA1
 #endif
 
-#if defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB) || defined(FIO_SECRET)
 #define FIO_SHA2
 #endif
 
@@ -3986,6 +3989,7 @@ FIO_MAP Ordering & Naming Shortcut
 #undef FIO_CRYPTO_CORE
 #define FIO_CRYPTO_CORE
 #endif
+
 /* *****************************************************************************
 
 
@@ -20517,11 +20521,11 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
     return (r = -1); /* no partial encoding. */
   }
-  size_t val = 0;
-  size_t bits = 0;
+  uint64_t val = 0;
+  uint64_t bits = 0;
   uint8_t *s = (uint8_t *)dest->buf + dest->len;
   for (size_t i = 0; i < encoded_len; ++i) {
-    size_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
+    uint64_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
     if (dec == 32)
       continue;
     if (dec > 31)
@@ -20531,16 +20535,18 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
     if (bits < 40)
       continue;
     do {
-      *s++ = (0xFF & (val >> (bits - 8)));
+      *(s++) = (0xFF & (val >> (bits - 8)));
       bits -= 8;
     } while (bits > 7);
   }
   while (bits > 7) {
-    *s++ = (0xFF & (val >> (bits - 8)));
+    *(s++) = (0xFF & (val >> (bits - 8)));
     bits -= 8;
   }
-  if (bits) { /* letfover bits considered padding */
-    // *s++ = 0xFF & (val << (8 - bits));
+  if (bits) { /* letfover bits considered padding? */
+    val = 0xFF & (val << (8 - bits));
+    if (val || (encoded_len && ((uint8_t *)encoded)[encoded_len - 1] != '='))
+      *(s++) = val;
   }
   dest->len = (size_t)(s - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
@@ -23657,6 +23663,7 @@ key_too_long:
   inner = fio_sha1(key, key_len);
   return fio_sha1_hmac(inner.digest, 20, msg, msg_len);
 }
+
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
@@ -24291,6 +24298,234 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_ED25519
 #endif /* FIO_ED25519 */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_OTP                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                    OTP (SHA1)
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_OTP) && !defined(H___FIO_OTP___H)
+#define H___FIO_OTP___H
+
+/* *****************************************************************************
+TOTP API
+***************************************************************************** */
+
+typedef struct {
+  /** The time interval for TOTP rotation. */
+  size_t interval; /* 30 == Google OTP */
+  /** The number of digits in the OTP. */
+  size_t digits; /* 6 == Google OTP */
+  /** The time offset (in seconds) from the current time. */
+  int64_t offset; /* 0 == Google OTP */
+  /** Set to true if the secret / key is in Hex instead of Byte32 encoding. */
+  uint8_t is_hex;
+  /** Set to true if the secret / key is raw bit data (no encoding). */
+  uint8_t is_raw;
+} fio_otp_settings_s;
+
+/** Generates a random 128 bit key for TOTP processing. */
+FIO_IFUNC fio_u128 fio_otp_generate_key(void);
+
+/** Prints out an OTP secret (big endian number) as a Byte32 encoded String. */
+FIO_IFUNC size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len);
+
+/** Returns a TOTP based on `secret` and the otp settings. */
+SFUNC uint32_t fio_otp(fio_buf_info_s secret, fio_otp_settings_s settings);
+#define fio_otp(secret, ...) fio_otp(secret, (fio_otp_settings_s){__VA_ARGS__})
+
+/* *****************************************************************************
+TOTP Implementation
+***************************************************************************** */
+
+/** Generates a random 128 bit key for TOTP processing. */
+FIO_IFUNC fio_u128 fio_otp_generate_key(void) {
+  fio_u128 k = fio_u128_init64(fio_rand64(), fio_rand64());
+  while (k.u64[0] == 0)
+    k.u64[0] = fio_rand64();
+  while (k.u64[1] == 0)
+    k.u64[1] = fio_rand64();
+  return k;
+}
+
+/** Prints out an OTP secret (big endian number) as a Byte32 encoded String. */
+FIO_IFUNC size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len) {
+  fio_str_info_s s = FIO_STR_INFO3(dest, 0, (len * 2) + 1);
+  fio_u128 buf;
+  if (!key) {
+    buf = fio_otp_generate_key();
+    s.capa = 20;
+    key = buf.u8;
+  }
+  FIO_ASSERT(!fio_string_write_base32enc(&s, NULL, key, len),
+             "writing the generated OTP key failed");
+  return s.len;
+}
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO_IFUNC void fio___otp_settings_validate(fio_otp_settings_s *s) {
+  if (!s->interval)
+    s->interval = 30;
+  if (!s->digits)
+    s->digits = 6;
+}
+uint32_t fio_otp___(void);
+SFUNC uint32_t fio_otp FIO_NOOP(fio_buf_info_s key,
+                                fio_otp_settings_s settings) {
+  uint32_t r = 0;
+  uint64_t t = fio_time_real().tv_sec;
+  fio_u1024 s = fio_u1024_init64(0);
+  fio_sha1_s hash;
+  fio_str_info_s secret = FIO_STR_INFO3((char *)s.u8, 0, (1024 / 8));
+  fio___otp_settings_validate(&settings);
+
+  /* Prep time */
+  t -= settings.offset;
+  t /= settings.interval;
+  /* t should be big endian */
+  t = fio_lton64(t);
+
+  if (settings.is_raw)
+    secret = FIO_BUF2STR_INFO(key);
+  else if (settings.is_hex) {
+    /* decode Hex key input OTP */
+    FIO_ASSERT(key.len < (1024 / (8 * 2)), "key too long");
+    size_t written = 0; /* fun times... */
+    for (size_t i = 0; i < key.len; ++i) {
+      if (key.buf[i] == '-' || key.buf[i] == ' ' || key.buf[i] == '\n')
+        continue;
+      const size_t pos = written >> 1;
+      if (!(written & 1))
+        secret.buf[pos] = 0;
+      secret.buf[pos] |= (fio_c2i(key.buf[i]) << (((++written) & 1) << 2));
+    }
+    secret.len = (written >> 1) + (written & 1);
+  } else {
+    /* decode Byte32 key input OTP */
+    FIO_ASSERT(key.len < ((64 * 8) / 5), "key too long");
+    if (fio_string_write_base32dec(&secret, NULL, key.buf, key.len))
+      return -1;
+  }
+
+  /* compute HMAC (HOTP of T / TOTP)  */
+  hash = fio_sha1_hmac(secret.buf, secret.len, &t, sizeof(t));
+
+  /* compute unsigned int as a function of offset from hash */
+  size_t offset = (fio_sha1_digest(&hash)[fio_sha1_len() - 1] & 0x0F);
+  fio_sha1_digest(&hash)[offset] &= 0x7F;
+  r = fio_buf2u32_be(fio_sha1_digest(&hash) + offset);
+
+  /*  reduce number of digits */
+  switch (settings.digits) {
+  case 1: offset = 10; break;
+  case 2: offset = 100; break;
+  case 3: offset = 1000; break;
+  case 4: offset = 10000; break;
+  case 5: offset = 100000; break;
+  case 6: offset = 1000000; break;
+  case 7: offset = 10000000; break;
+  case 8: offset = 100000000; break;
+  case 9: offset = 1000000000; break;
+  case 10: offset = 10000000000; break;
+  }
+  r %= offset;
+
+  return r;
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_SHA1 */
+#undef FIO_SHA1
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_CRYPTO_CORE        /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                  A Template for New Types / Modules
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_SECRET) && !defined(H___FIO_SECRET___H)
+#define H___FIO_SECRET___H
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret(void);
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set(char *str, size_t len, bool is_random);
+
+/* *****************************************************************************
+Module Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+static fio_u512 fio___secret;
+static bool fio___secret_is_random;
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret(void) { return fio___secret; }
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
+  if (!str)
+    return;
+  fio___secret_is_random = is_random;
+  fio___secret = fio_sha512(str, len);
+}
+
+FIO_CONSTRUCTOR(fio___secret_constructor) {
+  char *str = NULL;
+  size_t len = 0;
+  uint64_t fallback_secret = 0;
+  bool is_random = 0;
+  if ((str = getenv("SECRET"))) {
+    const char *secret_length = getenv("SECRET_LENGTH");
+    len = secret_length ? fio_atol((char **)&secret_length) : 0;
+    if (!len)
+      len = strlen(str);
+  } else {
+    fallback_secret = fio_rand64();
+    str = (char *)&fallback_secret;
+    len = sizeof(fallback_secret);
+    is_random = 1;
+  }
+
+  fio_secret_set(str, len, is_random);
+}
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_SECRET
+#endif /* FIO_CRYPTO_CORE */
 /* ************************************************************************** */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -54825,13 +55060,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(decoded.len < encoded.len,
                "Base32 decoding failed:\n%s",
                encoded.buf);
-    FIO_ASSERT(original.len == decoded.len,
-               "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-               original.len,
-               decoded.len,
-               decoded.len,
-               encoded.len,
-               decoded.buf);
+    FIO_ASSERT(
+        original.len == decoded.len,
+        "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n%s\n\t=>?\n%s",
+        original.len,
+        decoded.len,
+        decoded.len,
+        encoded.len,
+        encoded.buf,
+        decoded.buf);
     FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
                "Base32 round-trip failed: (%zu vs. %zu bytes, encoded using "
                "%zu bytes)\n %s",
@@ -57021,6 +57258,31 @@ Finish testing segment
 #include "104 mustache.h"
 #endif
 
+#ifdef FIO_CRYPTO_CORE
+#include "150 crypto core.h"
+#endif
+
+#ifdef FIO_SHA1
+#include "152 sha1.h"
+#endif
+#ifdef FIO_SHA2
+#include "152 sha2.h"
+#endif
+#ifdef FIO_CHACHA
+#include "152 chacha20poly1305.h"
+#endif
+
+#ifdef FIO_ED25519
+#include "154 ed25519.h"
+#endif
+
+#ifdef FIO_OTP
+#include "160 otp.h"
+#endif
+#ifdef FIO_SECRET
+#include "160 secret.h"
+#endif
+
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
 #include "200 string.h"
 #endif
@@ -57039,24 +57301,6 @@ Finish testing segment
 
 #if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "250 fiobj.h"
-#endif
-
-#ifdef FIO_CRYPTO_CORE
-#include "150 crypto core.h"
-#endif
-
-#ifdef FIO_SHA1
-#include "152 sha1.h"
-#endif
-#ifdef FIO_SHA2
-#include "152 sha2.h"
-#endif
-#ifdef FIO_CHACHA
-#include "152 chacha20poly1305.h"
-#endif
-
-#ifdef FIO_ED25519
-#include "154 ed25519.h"
 #endif
 
 #if defined(FIO_IO) && !defined(FIO___RECURSIVE_INCLUDE)

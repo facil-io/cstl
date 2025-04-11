@@ -339,13 +339,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
     FIO_ASSERT(decoded.len < encoded.len,
                "Base32 decoding failed:\n%s",
                encoded.buf);
-    FIO_ASSERT(original.len == decoded.len,
-               "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-               original.len,
-               decoded.len,
-               decoded.len,
-               encoded.len,
-               decoded.buf);
+    FIO_ASSERT(
+        original.len == decoded.len,
+        "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n%s\n\t=>?\n%s",
+        original.len,
+        decoded.len,
+        decoded.len,
+        encoded.len,
+        encoded.buf,
+        decoded.buf);
     FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
                "Base32 round-trip failed: (%zu vs. %zu bytes, encoded using "
                "%zu bytes)\n %s",

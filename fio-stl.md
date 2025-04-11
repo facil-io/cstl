@@ -6907,6 +6907,70 @@ Finalizes a fio_u512 with the SHA 512 hash.
 
 
 -------------------------------------------------------------------------------
+## OTP
+
+```c
+#define FIO_OTP
+#include FIO_INCLUDE_FILE
+```
+
+By defining the `FIO_OTP`, a small T-OTP (Time based One Time Password) helper API will be provided. This requires the `FIO_SHA1` and `FIO_STR` modules.
+
+The following helper functions are defined:
+
+#### `fio_otp_generate_key`
+
+```c
+fio_u128 fio_otp_generate_key(void);
+```
+
+Generates a random 128 bit key for TOTP processing.
+
+Random keys may be required when generating a new OTP secret for possible logins.
+
+#### `fio_otp_print_key`
+
+```c
+size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len)
+```
+
+Prints out an OTP secret (big endian number) as a Byte32 encoded String.
+
+Printing out the OTP secret can be important when providing it to authentication apps.
+
+#### `fio_otp`
+
+```c
+uint32_t fio_otp(fio_buf_info_s secret, fio_otp_settings_s settings);
+#define fio_otp(secret, ...) fio_otp(secret, (fio_otp_settings_s){__VA_ARGS__})
+```
+
+Returns a TOTP based on `secret` and the OTP settings.
+
+This can be used to either validate an existing TOTP or generate a new one.
+
+Possible settings include:
+
+```c
+typedef struct {
+  /** The time interval for TOTP rotation. */
+  size_t interval; /* defaults to 30 == Google OTP */
+  /** The number of digits in the OTP. */
+  size_t digits; /* defaults to 6 == Google OTP */
+  /** The time offset (in seconds) from the current time. */
+  int64_t offset; /* defaults to 0 == now */
+  /** Set to true if the secret / key is is Hex instead of Byte32 encoding. */
+  uint8_t is_hex;
+} fio_otp_settings_s;
+```
+
+Example:
+
+```c
+uint32_t totp = fio_otp(FIO_BUF_INFO1("My Secret"), 0);
+```
+
+-------------------------------------------------------------------------------
 ## Dynamic Strings
 
 ```c

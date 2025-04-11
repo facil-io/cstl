@@ -113,6 +113,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define FIO_FIOBJ
 #define FIO_MUSTACHE
 #define FIOBJ_MALLOC
+#define FIO_OTP
 
 #else
 #define H___FIO_BASIC___H
@@ -132,10 +133,12 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_ED25519
 #undef FIO_SHA1
 #undef FIO_SHA2
+#define FIO_CRYPTO_CORE
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
 #define FIO_SHA2
+#define FIO_SECRET
 #undef FIO_CRYPT
 #endif /* FIO_CRYPT */
 
@@ -323,7 +326,7 @@ FIO_MAP Ordering & Naming Shortcut
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
-    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME)
+    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP)
 #undef FIO_STR
 #define FIO_STR
 #endif
@@ -338,7 +341,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_QUEUE
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE)
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_OTP)
 #undef FIO_TIME
 #define FIO_TIME
 #endif
@@ -356,11 +359,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_CHACHA
 #endif
 
-#if defined(FIO_HTTP_HANDLE)
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_OTP)
 #define FIO_SHA1
 #endif
 
-#if defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB) || defined(FIO_SECRET)
 #define FIO_SHA2
 #endif
 
@@ -368,6 +371,7 @@ FIO_MAP Ordering & Naming Shortcut
 #undef FIO_CRYPTO_CORE
 #define FIO_CRYPTO_CORE
 #endif
+
 /* *****************************************************************************
 
 

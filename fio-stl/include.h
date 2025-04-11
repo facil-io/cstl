@@ -91,6 +91,31 @@
 #include "104 mustache.h"
 #endif
 
+#ifdef FIO_CRYPTO_CORE
+#include "150 crypto core.h"
+#endif
+
+#ifdef FIO_SHA1
+#include "152 sha1.h"
+#endif
+#ifdef FIO_SHA2
+#include "152 sha2.h"
+#endif
+#ifdef FIO_CHACHA
+#include "152 chacha20poly1305.h"
+#endif
+
+#ifdef FIO_ED25519
+#include "154 ed25519.h"
+#endif
+
+#ifdef FIO_OTP
+#include "160 otp.h"
+#endif
+#ifdef FIO_SECRET
+#include "160 secret.h"
+#endif
+
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
 #include "200 string.h"
 #endif
@@ -109,24 +134,6 @@
 
 #if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "250 fiobj.h"
-#endif
-
-#ifdef FIO_CRYPTO_CORE
-#include "150 crypto core.h"
-#endif
-
-#ifdef FIO_SHA1
-#include "152 sha1.h"
-#endif
-#ifdef FIO_SHA2
-#include "152 sha2.h"
-#endif
-#ifdef FIO_CHACHA
-#include "152 chacha20poly1305.h"
-#endif
-
-#ifdef FIO_ED25519
-#include "154 ed25519.h"
 #endif
 
 #if defined(FIO_IO) && !defined(FIO___RECURSIVE_INCLUDE)

@@ -2097,11 +2097,11 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
     return (r = -1); /* no partial encoding. */
   }
-  size_t val = 0;
-  size_t bits = 0;
+  uint64_t val = 0;
+  uint64_t bits = 0;
   uint8_t *s = (uint8_t *)dest->buf + dest->len;
   for (size_t i = 0; i < encoded_len; ++i) {
-    size_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
+    uint64_t dec = (size_t)base32decode[((uint8_t *)encoded)[i]];
     if (dec == 32)
       continue;
     if (dec > 31)
@@ -2111,16 +2111,18 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
     if (bits < 40)
       continue;
     do {
-      *s++ = (0xFF & (val >> (bits - 8)));
+      *(s++) = (0xFF & (val >> (bits - 8)));
       bits -= 8;
     } while (bits > 7);
   }
   while (bits > 7) {
-    *s++ = (0xFF & (val >> (bits - 8)));
+    *(s++) = (0xFF & (val >> (bits - 8)));
     bits -= 8;
   }
-  if (bits) { /* letfover bits considered padding */
-    // *s++ = 0xFF & (val << (8 - bits));
+  if (bits) { /* letfover bits considered padding? */
+    val = 0xFF & (val << (8 - bits));
+    if (val || (encoded_len && ((uint8_t *)encoded)[encoded_len - 1] != '='))
+      *(s++) = val;
   }
   dest->len = (size_t)(s - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
