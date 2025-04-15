@@ -922,9 +922,9 @@ This is supposed to provide both a safe alternative to `alloca` and allows the
 memory address to be returned if needed (valid until concurrency max calls).
 ***************************************************************************** */
 
-#ifndef FIO_STATIC_ALLOC_CONCURRENCY_MAX
+#ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
 /* The multiplier is used to set the maximum number of safe concurrent calls. */
-#define FIO_STATIC_ALLOC_CONCURRENCY_MAX 256
+#define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
 #endif
 
 /**
@@ -2218,7 +2218,7 @@ Byte masking (XOR)
  * When the buffer's memory is aligned, the function may perform significantly
  * better.
  */
-FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
+FIO_IFUNC void fio_xmask(void *buf_, size_t len, uint64_t mask) {
   register char *buf = (char *)buf_;
   for (size_t i = 31; i < len; i += 32) {
     for (size_t g = 0; g < 4; ++g) {
@@ -3128,6 +3128,14 @@ Vector Helpers - Vector Math Operations
   FIO___UXXX_DEF_OP2(total_bits, 64, or, |)                                    \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
   FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
+  FIO_IFUNC bool fio_u##total_bits##_is_eq(const fio_u##total_bits *a,         \
+                                           const fio_u##total_bits *b) {       \
+    uint64_t red = 0;                                                          \
+    fio_u##total_bits eq;                                                      \
+    FIO_MATH_UXXX_OP(eq, a[0], b[0], 64, ^);                                   \
+    FIO_MATH_UXXX_REDUCE(red, eq, 64, |);                                      \
+    return !red;                                                               \
+  }                                                                            \
   FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
                                          const fio_u##total_bits *a) {         \
     FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
@@ -3248,6 +3256,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * - extern uint64_t name##64(void); // returns 64 bits (simply half the result)
  * - extern void name##_bytes(void *buffer, size_t len); // fills a buffer
  * - extern void name##_reset(void); // resets the state of the PRNG
+ * - extern void name##_on_fork(void * is_null); // reseeds the PRNG
  *
  * If `reseed_log` is non-zero and less than 64, the PNGR is no longer
  * deterministic, as it will automatically re-seeds itself every 2^reseed_log
@@ -3287,6 +3296,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       state[2] += clk[0];                                                      \
       state[3] += clk[1];                                                      \
     }                                                                          \
+  }                                                                            \
+  /** Re-seeds the PNGR so forked processes don't match. */                    \
+  extern void name##_on_fork(void *is_null) {                                  \
+    (void)is_null;                                                             \
+    name##___state_reseed(name##___state);                                     \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   extern fio_u128 name##128(void) {                                            \

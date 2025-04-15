@@ -959,9 +959,9 @@ This is supposed to provide both a safe alternative to `alloca` and allows the
 memory address to be returned if needed (valid until concurrency max calls).
 ***************************************************************************** */
 
-#ifndef FIO_STATIC_ALLOC_CONCURRENCY_MAX
+#ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
 /* The multiplier is used to set the maximum number of safe concurrent calls. */
-#define FIO_STATIC_ALLOC_CONCURRENCY_MAX 256
+#define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
 #endif
 
 /**
@@ -2255,7 +2255,7 @@ Byte masking (XOR)
  * When the buffer's memory is aligned, the function may perform significantly
  * better.
  */
-FIO_IFUNC void fio_xmask(char *buf_, size_t len, uint64_t mask) {
+FIO_IFUNC void fio_xmask(void *buf_, size_t len, uint64_t mask) {
   register char *buf = (char *)buf_;
   for (size_t i = 31; i < len; i += 32) {
     for (size_t g = 0; g < 4; ++g) {
@@ -3165,6 +3165,14 @@ Vector Helpers - Vector Math Operations
   FIO___UXXX_DEF_OP2(total_bits, 64, or, |)                                    \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
   FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
+  FIO_IFUNC bool fio_u##total_bits##_is_eq(const fio_u##total_bits *a,         \
+                                           const fio_u##total_bits *b) {       \
+    uint64_t red = 0;                                                          \
+    fio_u##total_bits eq;                                                      \
+    FIO_MATH_UXXX_OP(eq, a[0], b[0], 64, ^);                                   \
+    FIO_MATH_UXXX_REDUCE(red, eq, 64, |);                                      \
+    return !red;                                                               \
+  }                                                                            \
   FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
                                          const fio_u##total_bits *a) {         \
     FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
@@ -3285,6 +3293,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
  * - extern uint64_t name##64(void); // returns 64 bits (simply half the result)
  * - extern void name##_bytes(void *buffer, size_t len); // fills a buffer
  * - extern void name##_reset(void); // resets the state of the PRNG
+ * - extern void name##_on_fork(void * is_null); // reseeds the PRNG
  *
  * If `reseed_log` is non-zero and less than 64, the PNGR is no longer
  * deterministic, as it will automatically re-seeds itself every 2^reseed_log
@@ -3324,6 +3333,11 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       state[2] += clk[0];                                                      \
       state[3] += clk[1];                                                      \
     }                                                                          \
+  }                                                                            \
+  /** Re-seeds the PNGR so forked processes don't match. */                    \
+  extern void name##_on_fork(void *is_null) {                                  \
+    (void)is_null;                                                             \
+    name##___state_reseed(name##___state);                                     \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   extern fio_u128 name##128(void) {                                            \
@@ -3975,6 +3989,7 @@ FIO_MAP Ordering & Naming Shortcut
 ***************************************************************************** */
 #if defined(FIO_PUBSUB)
 #define FIO_CHACHA
+#define FIO_SECRET
 #endif
 
 #if defined(FIO_HTTP_HANDLE) || defined(FIO_OTP)
@@ -4007,7 +4022,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_CLI) || defined(FIO_HTTP_HANDLE) ||                            \
     defined(FIO_HTTP1_PARSER) || defined(FIO_JSON) || defined(FIO_STR) ||      \
-    defined(FIO_TIME) || defined(FIO_FILES)
+    defined(FIO_TIME) || defined(FIO_FILES) || defined(FIO_SECRET)
 #undef FIO_ATOL
 #define FIO_ATOL
 #endif
@@ -24476,6 +24491,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_SECRET) && !defined(H___FIO_SECRET___H)
 #define H___FIO_SECRET___H
 
+/** Returns true if the secret was randomly generated. */
+SFUNC bool fio_secret_is_random(void);
+
 /** Gets the SHA512 of a (possibly shared) secret. */
 SFUNC fio_u512 fio_secret(void);
 
@@ -24489,16 +24507,61 @@ Module Implementation - possibly externed functions.
 
 static fio_u512 fio___secret;
 static bool fio___secret_is_random;
+static uint64_t fio___secret_masker;
+
+/** Returns true if the secret was randomly generated. */
+SFUNC bool fio_secret_is_random(void) { return fio___secret_is_random; }
 
 /** Gets the SHA512 of a (possibly shared) secret. */
-SFUNC fio_u512 fio_secret(void) { return fio___secret; }
+SFUNC fio_u512 fio_secret(void) {
+  fio_u512 r;
+  fio_u512_cxor64(&r, &fio___secret, fio___secret_masker);
+  return r;
+}
 
 /** Sets a (possibly shared) secret and stores its SHA512 hash. */
 SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
-  if (!str)
+  if (!str || !len)
     return;
+  fio_u512 zero = {0};
+  size_t i = 0;
+  FIO_STR_INFO_TMP_VAR(from_hex, 4096);
+  if (len > 8191)
+    goto done;
+  /* convert any Hex data to bytes */
+  for (i = 0; i + 1 < len; i += 2) {
+    /* skip white space */
+    if (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r') {
+      --i;
+      continue;
+    }
+    const size_t hi = fio_c2i(str[i]);
+    const size_t lo = fio_c2i(str[i + 1]);
+    if ((unsigned)(hi > 15) | (lo > 15))
+      goto done;
+    from_hex.buf[from_hex.len++] = (hi << 4) | lo;
+  }
+  from_hex.buf[from_hex.len] = 0;
+  while (i < len &&
+         (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r'))
+    ++i;
+  if (i == len) { /* test if the secret was all Hex encoded */
+    FIO_LOG_DDEBUG2("(secret) Decoded HEX encoded secret (%zu bytes).",
+                    from_hex.len);
+    str = from_hex.buf;
+    len = from_hex.len;
+  }
+
+done:
   fio___secret_is_random = is_random;
   fio___secret = fio_sha512(str, len);
+  if (fio_u512_is_eq(&zero, &fio___secret)) {
+    fio___secret.u64[0] = len;
+    fio___secret = fio_sha512(fio___secret.u8, sizeof(fio___secret));
+  }
+  while (!(fio___secret_masker = fio_rand64()))
+    ;
+  fio_u512_cxor64(&fio___secret, &fio___secret, fio___secret_masker);
 }
 
 FIO_CONSTRUCTOR(fio___secret_constructor) {
@@ -24517,7 +24580,6 @@ FIO_CONSTRUCTOR(fio___secret_constructor) {
     len = sizeof(fallback_secret);
     is_random = 1;
   }
-
   fio_secret_set(str, len, is_random);
 }
 /* *****************************************************************************
@@ -39157,17 +39219,6 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 /** Returns a pointer to the current IPC socket address. */
 SFUNC const char *fio_pubsub_ipc_url(void);
 
-/**
- * Sets a (possibly shared) secret for securing pub/sub communication.
- *
- * If `secret` is `NULL`, the environment variable `"SECRET"` will be used or.
- *
- * If secret is never set, a random secret will be generated.
- *
- * NOTE: secrets produce a SHA-512 Hash that is used to produce 256 bit keys.
- */
-SFUNC void fio_pubsub_secret_set(char *secret, size_t len);
-
 /** Auto-peer detection and pub/sub multi-machine clustering using `port`. */
 SFUNC void fio_pubsub_broadcast_on_port(int16_t port);
 
@@ -39494,7 +39545,6 @@ FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_io_s *io);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
-  fio_u512 secret;
   fio___channel_map_s channels;
   fio___channel_map_s patterns;
   struct {
@@ -39502,7 +39552,6 @@ static struct FIO___PUBSUB_POSTOFFICE {
     uint8_t local;
     uint8_t remote;
   } filter;
-  uint8_t secret_is_random;
   uint8_t crush_on_close;
   FIO___LOCK_TYPE lock;
   fio___pubsub_engines_s engines;
@@ -39556,8 +39605,10 @@ static struct FIO___PUBSUB_POSTOFFICE {
 };
 
 /** Returns the secret key for a message with stated `rndm` value. */
-FIO_IFUNC const void *fio___pubsub_secret_key(uint64_t rndm) {
-  return (void *)&FIO___PUBSUB_POSTOFFICE.secret.u8[rndm & 15];
+FIO_IFUNC const void *fio___pubsub_secret_key(fio_u256 *dest, uint64_t rndm) {
+  fio_u512 s = fio_secret();
+  fio_memcpy32(dest->u8, s.u8 + (rndm & 15));
+  return (void *)dest;
 }
 
 /* *****************************************************************************
@@ -39576,26 +39627,6 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void) {
   return FIO___PUBSUB_POSTOFFICE.ipc_url;
-}
-
-/** Sets a (possibly shared) secret for securing pub/sub communication. */
-SFUNC void fio_pubsub_secret_set(char *str, size_t len) {
-  FIO___PUBSUB_POSTOFFICE.secret_is_random = 0;
-  uint64_t fallback_secret = 0;
-  if (!str || !len) {
-    if ((str = getenv("SECRET"))) {
-      const char *secret_length = getenv("SECRET_LENGTH");
-      len = secret_length ? fio_atol((char **)&secret_length) : 0;
-      if (!len)
-        len = strlen(str);
-    } else {
-      fallback_secret = fio_rand64();
-      str = (char *)&fallback_secret;
-      len = sizeof(fallback_secret);
-      FIO___PUBSUB_POSTOFFICE.secret_is_random = 1;
-    }
-  }
-  FIO___PUBSUB_POSTOFFICE.secret = fio_sha512(str, len);
 }
 
 /* *****************************************************************************
@@ -39768,7 +39799,6 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO___PUBSUB_POSTOFFICE.engines = (fio___pubsub_engines_s)FIO_MAP_INIT;
-  fio_pubsub_secret_set(NULL, 0); /* allocate a random secret */
   for (size_t i = 0; i < sizeof(FIO___PUBSUB_POSTOFFICE.uuid) / 8; ++i)
     FIO___PUBSUB_POSTOFFICE.uuid.u64[i] = fio_rand64();
   fio_str_info_s url =
@@ -40239,7 +40269,8 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_author(
 FIO_SFUNC void fio___pubsub_message_encrypt(fio___pubsub_message_s *m) {
   if (m->data.udata)
     return;
-  const void *k = fio___pubsub_secret_key(m->data.id);
+  fio_u256 key_buf;
+  const void *k = fio___pubsub_secret_key(&key_buf, m->data.id);
   const uint64_t nonce[2] = {fio_risky_num(m->data.id, 0), m->data.published};
   uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
   uint8_t *dest = pos;
@@ -40274,6 +40305,7 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
     return 0;
   if (!m->data.udata)
     return -1;
+  fio_u256 key_buf;
   uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
   uint8_t *const dest = pos;
   m->data.id = fio_buf2u64_le(pos);
@@ -40288,7 +40320,7 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
       FIO_BUF_INFO2(m->buf + m->data.channel.len + 1, fio_buf2u24_le(pos));
   pos += 3;
   m->data.is_json = *(pos++);
-  const void *k = fio___pubsub_secret_key(m->data.id);
+  const void *k = fio___pubsub_secret_key(&key_buf, m->data.id);
   uint64_t nonce[2] = {fio_risky_num(m->data.id, 0), m->data.published};
   const size_t enc_len = m->data.channel.len + m->data.message.len + 2;
   FIO_MEMCPY(m->buf, pos, enc_len);
@@ -40761,8 +40793,9 @@ FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick) {
    * [4-5]  MAC
    */
   fio_u512 u = {0};
+  fio_u256 key_buf;
   uint64_t hello_rand = fio_rand64();
-  const void *k = fio___pubsub_secret_key(hello_rand);
+  const void *k = fio___pubsub_secret_key(&key_buf, hello_rand);
   u.u64[0] = FIO___PUBSUB_POSTOFFICE.uuid.u64[0];
   u.u64[1] = FIO___PUBSUB_POSTOFFICE.uuid.u64[1];
   u.u64[2] = fio_ltole64(hello_rand); /* persistent endienes required for k */
@@ -40808,6 +40841,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_task(void *io_, void *ignr_) {
 }
 
 FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
+  fio_u256 key_buf;
   uint64_t mac[2] = {0};
   /* test server UUID (ignore self generated messages) */
   if (hello[0] == FIO___PUBSUB_POSTOFFICE.uuid.u64[0] &&
@@ -40832,7 +40866,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
     return -1;
   }
   /* test MAC */
-  const void *k = fio___pubsub_secret_key(fio_ltole64(hello[2]));
+  const void *k = fio___pubsub_secret_key(&key_buf, fio_ltole64(hello[2]));
   fio_poly1305_auth(mac, k, NULL, 0, hello, 32);
   if (mac[0] != hello[4] || mac[1] != hello[5]) {
     FIO_LOG_SECURITY("(%d) pub/sub-broadcast MAC failure - under attack?",
@@ -40964,7 +40998,7 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
       .on_data = fio___pubsub_broadcast_on_incoming,
       .on_timeout = fio_io_touch,
   };
-  if (FIO___PUBSUB_POSTOFFICE.secret_is_random) {
+  if (fio_secret_is_random()) {
     FIO_LOG_ERROR(
         "(%d) Listening to cluster peer connections failed!"
         "\n\tUsing a random (non-shared) secret, cannot validate peers.",
@@ -56697,6 +56731,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           sha512.u8[30],
           sha512.u8[31]);
     }
+  }
+
+  {
+    fprintf(stderr, "- Testing SHA-2 based secret.\n");
+    fio_u512 s0 = {0};
+    fio_u512 s1 = fio_secret();
+    FIO_ASSERT(!fio_u512_is_eq(&s0, &s1), "Secret is zero?!");
+    s0 = fio_secret();
+    FIO_ASSERT(fio_u512_is_eq(&s0, &s1), "Secret should be consistent");
+    FIO_ASSERT(!fio_u512_is_eq(&s0, &fio___secret), "Secret should be masked");
   }
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),

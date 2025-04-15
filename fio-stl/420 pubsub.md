@@ -409,15 +409,4 @@ const char *fio_pubsub_ipc_url(void);
 
 Returns the current IPC socket address (shouldn't be changed).
 
-
-#### `fio_pubsub_secret_set`
-
-```c
-void fio_pubsub_secret_set(char *secret, size_t len);
-```
-
-Sets a (possibly shared) secret for securing pub/sub communication.
-
-If `secret` is `NULL`, the environment variable `"SECRET"` will be used or, if not set, a random secret will be generated.
-
 -------------------------------------------------------------------------------

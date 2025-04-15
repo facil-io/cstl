@@ -252,6 +252,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           sha512.u8[31]);
     }
   }
+
+  {
+    fprintf(stderr, "- Testing SHA-2 based secret.\n");
+    fio_u512 s0 = {0};
+    fio_u512 s1 = fio_secret();
+    FIO_ASSERT(!fio_u512_is_eq(&s0, &s1), "Secret is zero?!");
+    s0 = fio_secret();
+    FIO_ASSERT(fio_u512_is_eq(&s0, &s1), "Secret should be consistent");
+    FIO_ASSERT(!fio_u512_is_eq(&s0, &fio___secret), "Secret should be masked");
+  }
 #if !DEBUG
   fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
                          (char *)"fio_sha256",

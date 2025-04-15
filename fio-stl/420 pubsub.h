@@ -428,17 +428,6 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len);
 /** Returns a pointer to the current IPC socket address. */
 SFUNC const char *fio_pubsub_ipc_url(void);
 
-/**
- * Sets a (possibly shared) secret for securing pub/sub communication.
- *
- * If `secret` is `NULL`, the environment variable `"SECRET"` will be used or.
- *
- * If secret is never set, a random secret will be generated.
- *
- * NOTE: secrets produce a SHA-512 Hash that is used to produce 256 bit keys.
- */
-SFUNC void fio_pubsub_secret_set(char *secret, size_t len);
-
 /** Auto-peer detection and pub/sub multi-machine clustering using `port`. */
 SFUNC void fio_pubsub_broadcast_on_port(int16_t port);
 
@@ -765,7 +754,6 @@ FIO_SFUNC void fio___pubsub_protocol_on_timeout(fio_io_s *io);
 
 static struct FIO___PUBSUB_POSTOFFICE {
   fio_u128 uuid;
-  fio_u512 secret;
   fio___channel_map_s channels;
   fio___channel_map_s patterns;
   struct {
@@ -773,7 +761,6 @@ static struct FIO___PUBSUB_POSTOFFICE {
     uint8_t local;
     uint8_t remote;
   } filter;
-  uint8_t secret_is_random;
   uint8_t crush_on_close;
   FIO___LOCK_TYPE lock;
   fio___pubsub_engines_s engines;
@@ -827,8 +814,10 @@ static struct FIO___PUBSUB_POSTOFFICE {
 };
 
 /** Returns the secret key for a message with stated `rndm` value. */
-FIO_IFUNC const void *fio___pubsub_secret_key(uint64_t rndm) {
-  return (void *)&FIO___PUBSUB_POSTOFFICE.secret.u8[rndm & 15];
+FIO_IFUNC const void *fio___pubsub_secret_key(fio_u256 *dest, uint64_t rndm) {
+  fio_u512 s = fio_secret();
+  fio_memcpy32(dest->u8, s.u8 + (rndm & 15));
+  return (void *)dest;
 }
 
 /* *****************************************************************************
@@ -847,26 +836,6 @@ SFUNC int fio_pubsub_ipc_url_set(char *str, size_t len) {
 /** Returns the current IPC socket address (shouldn't be changed). */
 SFUNC const char *fio_pubsub_ipc_url(void) {
   return FIO___PUBSUB_POSTOFFICE.ipc_url;
-}
-
-/** Sets a (possibly shared) secret for securing pub/sub communication. */
-SFUNC void fio_pubsub_secret_set(char *str, size_t len) {
-  FIO___PUBSUB_POSTOFFICE.secret_is_random = 0;
-  uint64_t fallback_secret = 0;
-  if (!str || !len) {
-    if ((str = getenv("SECRET"))) {
-      const char *secret_length = getenv("SECRET_LENGTH");
-      len = secret_length ? fio_atol((char **)&secret_length) : 0;
-      if (!len)
-        len = strlen(str);
-    } else {
-      fallback_secret = fio_rand64();
-      str = (char *)&fallback_secret;
-      len = sizeof(fallback_secret);
-      FIO___PUBSUB_POSTOFFICE.secret_is_random = 1;
-    }
-  }
-  FIO___PUBSUB_POSTOFFICE.secret = fio_sha512(str, len);
 }
 
 /* *****************************************************************************
@@ -1039,7 +1008,6 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
 
 FIO_CONSTRUCTOR(fio_postoffice_init) {
   FIO___PUBSUB_POSTOFFICE.engines = (fio___pubsub_engines_s)FIO_MAP_INIT;
-  fio_pubsub_secret_set(NULL, 0); /* allocate a random secret */
   for (size_t i = 0; i < sizeof(FIO___PUBSUB_POSTOFFICE.uuid) / 8; ++i)
     FIO___PUBSUB_POSTOFFICE.uuid.u64[i] = fio_rand64();
   fio_str_info_s url =
@@ -1510,7 +1478,8 @@ FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_author(
 FIO_SFUNC void fio___pubsub_message_encrypt(fio___pubsub_message_s *m) {
   if (m->data.udata)
     return;
-  const void *k = fio___pubsub_secret_key(m->data.id);
+  fio_u256 key_buf;
+  const void *k = fio___pubsub_secret_key(&key_buf, m->data.id);
   const uint64_t nonce[2] = {fio_risky_num(m->data.id, 0), m->data.published};
   uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
   uint8_t *dest = pos;
@@ -1545,6 +1514,7 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
     return 0;
   if (!m->data.udata)
     return -1;
+  fio_u256 key_buf;
   uint8_t *pos = (uint8_t *)(m->data.message.buf + m->data.message.len + 1);
   uint8_t *const dest = pos;
   m->data.id = fio_buf2u64_le(pos);
@@ -1559,7 +1529,7 @@ FIO_SFUNC int fio___pubsub_message_decrypt(fio___pubsub_message_s *m) {
       FIO_BUF_INFO2(m->buf + m->data.channel.len + 1, fio_buf2u24_le(pos));
   pos += 3;
   m->data.is_json = *(pos++);
-  const void *k = fio___pubsub_secret_key(m->data.id);
+  const void *k = fio___pubsub_secret_key(&key_buf, m->data.id);
   uint64_t nonce[2] = {fio_risky_num(m->data.id, 0), m->data.published};
   const size_t enc_len = m->data.channel.len + m->data.message.len + 2;
   FIO_MEMCPY(m->buf, pos, enc_len);
@@ -2032,8 +2002,9 @@ FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick) {
    * [4-5]  MAC
    */
   fio_u512 u = {0};
+  fio_u256 key_buf;
   uint64_t hello_rand = fio_rand64();
-  const void *k = fio___pubsub_secret_key(hello_rand);
+  const void *k = fio___pubsub_secret_key(&key_buf, hello_rand);
   u.u64[0] = FIO___PUBSUB_POSTOFFICE.uuid.u64[0];
   u.u64[1] = FIO___PUBSUB_POSTOFFICE.uuid.u64[1];
   u.u64[2] = fio_ltole64(hello_rand); /* persistent endienes required for k */
@@ -2079,6 +2050,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_task(void *io_, void *ignr_) {
 }
 
 FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
+  fio_u256 key_buf;
   uint64_t mac[2] = {0};
   /* test server UUID (ignore self generated messages) */
   if (hello[0] == FIO___PUBSUB_POSTOFFICE.uuid.u64[0] &&
@@ -2103,7 +2075,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
     return -1;
   }
   /* test MAC */
-  const void *k = fio___pubsub_secret_key(fio_ltole64(hello[2]));
+  const void *k = fio___pubsub_secret_key(&key_buf, fio_ltole64(hello[2]));
   fio_poly1305_auth(mac, k, NULL, 0, hello, 32);
   if (mac[0] != hello[4] || mac[1] != hello[5]) {
     FIO_LOG_SECURITY("(%d) pub/sub-broadcast MAC failure - under attack?",
@@ -2235,7 +2207,7 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
       .on_data = fio___pubsub_broadcast_on_incoming,
       .on_timeout = fio_io_touch,
   };
-  if (FIO___PUBSUB_POSTOFFICE.secret_is_random) {
+  if (fio_secret_is_random()) {
     FIO_LOG_ERROR(
         "(%d) Listening to cluster peer connections failed!"
         "\n\tUsing a random (non-shared) secret, cannot validate peers.",

@@ -357,6 +357,7 @@ FIO_MAP Ordering & Naming Shortcut
 ***************************************************************************** */
 #if defined(FIO_PUBSUB)
 #define FIO_CHACHA
+#define FIO_SECRET
 #endif
 
 #if defined(FIO_HTTP_HANDLE) || defined(FIO_OTP)
@@ -389,7 +390,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_CLI) || defined(FIO_HTTP_HANDLE) ||                            \
     defined(FIO_HTTP1_PARSER) || defined(FIO_JSON) || defined(FIO_STR) ||      \
-    defined(FIO_TIME) || defined(FIO_FILES)
+    defined(FIO_TIME) || defined(FIO_FILES) || defined(FIO_SECRET)
 #undef FIO_ATOL
 #define FIO_ATOL
 #endif
