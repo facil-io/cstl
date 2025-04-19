@@ -3271,7 +3271,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
       0x95561f0927ad7ecdULL,                                                   \
       0};                                                                      \
-  extern void name##_reset(void) {                                             \
+  extern __attribute__((unused)) void name##_reset(void) {                     \
     name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;                   \
     name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
@@ -3298,12 +3298,12 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     }                                                                          \
   }                                                                            \
   /** Re-seeds the PNGR so forked processes don't match. */                    \
-  extern void name##_on_fork(void *is_null) {                                  \
+  extern __attribute__((unused)) void name##_on_fork(void *is_null) {          \
     (void)is_null;                                                             \
     name##___state_reseed(name##___state);                                     \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  extern fio_u128 name##128(void) {                                            \
+  extern __attribute__((unused)) fio_u128 name##128(void) {                    \
     fio_u256 r;                                                                \
     if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) &&               \
         ((size_t)(reseed_log - 1) < 63))                                       \
@@ -3338,7 +3338,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     return r.u128[0];                                                          \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
-  extern uint64_t name##64(void) {                                             \
+  extern __attribute__((unused)) uint64_t name##64(void) {                     \
     static size_t counter;                                                     \
     static fio_u128 r;                                                         \
     if (!((counter++) & 1))                                                    \
@@ -3346,7 +3346,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     return r.u64[counter & 1];                                                 \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
-  extern void name##_bytes(void *dest, size_t len) {                           \
+  extern __attribute__((unused)) void name##_bytes(void *dest, size_t len) {   \
     if (!dest || !len)                                                         \
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \

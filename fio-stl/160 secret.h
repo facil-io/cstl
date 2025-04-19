@@ -28,6 +28,12 @@ SFUNC fio_u512 fio_secret(void);
 /** Sets a (possibly shared) secret and stores its SHA512 hash. */
 SFUNC void fio_secret_set(char *str, size_t len, bool is_random);
 
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len);
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret_at(fio_u512 *secret);
+
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -36,6 +42,8 @@ Module Implementation - possibly externed functions.
 static fio_u512 fio___secret;
 static bool fio___secret_is_random;
 static uint64_t fio___secret_masker;
+
+FIO_DEFINE_RANDOM128_FN(static, fio___secret_rand, 1, 0)
 
 /** Returns true if the secret was randomly generated. */
 SFUNC bool fio_secret_is_random(void) { return fio___secret_is_random; }
@@ -50,10 +58,21 @@ SFUNC fio_u512 fio_secret(void) {
 /** Sets a (possibly shared) secret and stores its SHA512 hash. */
 SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
   if (!str || !len)
+    is_random = 1;
+  fio_secret_set_at(&fio___secret, str, len);
+  fio___secret_is_random = is_random;
+}
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
+  if (!secret)
     return;
+  fio_u512 random_buffer = {0};
   fio_u512 zero = {0};
   size_t i = 0;
   FIO_STR_INFO_TMP_VAR(from_hex, 4096);
+  if (!str)
+    len = 0;
   if (len > 8191)
     goto done;
   /* convert any Hex data to bytes */
@@ -79,37 +98,45 @@ SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
     str = from_hex.buf;
     len = from_hex.len;
   }
+  if (!len) {
+    str = (char *)random_buffer.u8;
+    len = sizeof(random_buffer);
+    fio___secret_rand_bytes(random_buffer.u8, sizeof(random_buffer));
+  }
 
 done:
-  fio___secret_is_random = is_random;
-  fio___secret = fio_sha512(str, len);
-  if (fio_u512_is_eq(&zero, &fio___secret)) {
-    fio___secret.u64[0] = len;
-    fio___secret = fio_sha512(fio___secret.u8, sizeof(fio___secret));
+
+  *secret = fio_sha512(str, len);
+  if (fio_u512_is_eq(&zero, secret)) {
+    secret->u64[0] = len;
+    secret[0] = fio_sha512(secret->u8, sizeof(*secret));
   }
-  while (!(fio___secret_masker = fio_rand64()))
+  while (!(fio___secret_masker = fio___secret_rand64()))
     ;
-  fio_u512_cxor64(&fio___secret, &fio___secret, fio___secret_masker);
+  fio_u512_cxor64(secret, secret, fio___secret_masker);
+}
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret_at(fio_u512 *secret) {
+  fio_u512 r;
+  fio_u512_cxor64(&r, secret, fio___secret_masker);
+  return r;
 }
 
 FIO_CONSTRUCTOR(fio___secret_constructor) {
   char *str = NULL;
   size_t len = 0;
-  uint64_t fallback_secret = 0;
-  bool is_random = 0;
   if ((str = getenv("SECRET"))) {
     const char *secret_length = getenv("SECRET_LENGTH");
     len = secret_length ? fio_atol((char **)&secret_length) : 0;
     if (!len)
       len = strlen(str);
-  } else {
-    fallback_secret = fio_rand64();
-    str = (char *)&fallback_secret;
-    len = sizeof(fallback_secret);
-    is_random = 1;
+    if (!len)
+      str = NULL;
   }
-  fio_secret_set(str, len, is_random);
+  fio_secret_set(str, len, 0);
 }
+
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */

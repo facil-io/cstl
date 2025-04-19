@@ -3308,7 +3308,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
       0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
       0x95561f0927ad7ecdULL,                                                   \
       0};                                                                      \
-  extern void name##_reset(void) {                                             \
+  extern __attribute__((unused)) void name##_reset(void) {                     \
     name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;                   \
     name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
@@ -3335,12 +3335,12 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     }                                                                          \
   }                                                                            \
   /** Re-seeds the PNGR so forked processes don't match. */                    \
-  extern void name##_on_fork(void *is_null) {                                  \
+  extern __attribute__((unused)) void name##_on_fork(void *is_null) {          \
     (void)is_null;                                                             \
     name##___state_reseed(name##___state);                                     \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  extern fio_u128 name##128(void) {                                            \
+  extern __attribute__((unused)) fio_u128 name##128(void) {                    \
     fio_u256 r;                                                                \
     if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) &&               \
         ((size_t)(reseed_log - 1) < 63))                                       \
@@ -3375,7 +3375,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     return r.u128[0];                                                          \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
-  extern uint64_t name##64(void) {                                             \
+  extern __attribute__((unused)) uint64_t name##64(void) {                     \
     static size_t counter;                                                     \
     static fio_u128 r;                                                         \
     if (!((counter++) & 1))                                                    \
@@ -3383,7 +3383,7 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     return r.u64[counter & 1];                                                 \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
-  extern void name##_bytes(void *dest, size_t len) {                           \
+  extern __attribute__((unused)) void name##_bytes(void *dest, size_t len) {   \
     if (!dest || !len)                                                         \
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \
@@ -24500,6 +24500,12 @@ SFUNC fio_u512 fio_secret(void);
 /** Sets a (possibly shared) secret and stores its SHA512 hash. */
 SFUNC void fio_secret_set(char *str, size_t len, bool is_random);
 
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len);
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret_at(fio_u512 *secret);
+
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -24508,6 +24514,8 @@ Module Implementation - possibly externed functions.
 static fio_u512 fio___secret;
 static bool fio___secret_is_random;
 static uint64_t fio___secret_masker;
+
+FIO_DEFINE_RANDOM128_FN(static, fio___secret_rand, 1, 0)
 
 /** Returns true if the secret was randomly generated. */
 SFUNC bool fio_secret_is_random(void) { return fio___secret_is_random; }
@@ -24522,10 +24530,21 @@ SFUNC fio_u512 fio_secret(void) {
 /** Sets a (possibly shared) secret and stores its SHA512 hash. */
 SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
   if (!str || !len)
+    is_random = 1;
+  fio_secret_set_at(&fio___secret, str, len);
+  fio___secret_is_random = is_random;
+}
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
+  if (!secret)
     return;
+  fio_u512 random_buffer = {0};
   fio_u512 zero = {0};
   size_t i = 0;
   FIO_STR_INFO_TMP_VAR(from_hex, 4096);
+  if (!str)
+    len = 0;
   if (len > 8191)
     goto done;
   /* convert any Hex data to bytes */
@@ -24551,37 +24570,45 @@ SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
     str = from_hex.buf;
     len = from_hex.len;
   }
+  if (!len) {
+    str = (char *)random_buffer.u8;
+    len = sizeof(random_buffer);
+    fio___secret_rand_bytes(random_buffer.u8, sizeof(random_buffer));
+  }
 
 done:
-  fio___secret_is_random = is_random;
-  fio___secret = fio_sha512(str, len);
-  if (fio_u512_is_eq(&zero, &fio___secret)) {
-    fio___secret.u64[0] = len;
-    fio___secret = fio_sha512(fio___secret.u8, sizeof(fio___secret));
+
+  *secret = fio_sha512(str, len);
+  if (fio_u512_is_eq(&zero, secret)) {
+    secret->u64[0] = len;
+    secret[0] = fio_sha512(secret->u8, sizeof(*secret));
   }
-  while (!(fio___secret_masker = fio_rand64()))
+  while (!(fio___secret_masker = fio___secret_rand64()))
     ;
-  fio_u512_cxor64(&fio___secret, &fio___secret, fio___secret_masker);
+  fio_u512_cxor64(secret, secret, fio___secret_masker);
+}
+
+/** Gets the SHA512 of a (possibly shared) secret. */
+SFUNC fio_u512 fio_secret_at(fio_u512 *secret) {
+  fio_u512 r;
+  fio_u512_cxor64(&r, secret, fio___secret_masker);
+  return r;
 }
 
 FIO_CONSTRUCTOR(fio___secret_constructor) {
   char *str = NULL;
   size_t len = 0;
-  uint64_t fallback_secret = 0;
-  bool is_random = 0;
   if ((str = getenv("SECRET"))) {
     const char *secret_length = getenv("SECRET_LENGTH");
     len = secret_length ? fio_atol((char **)&secret_length) : 0;
     if (!len)
       len = strlen(str);
-  } else {
-    fallback_secret = fio_rand64();
-    str = (char *)&fallback_secret;
-    len = sizeof(fallback_secret);
-    is_random = 1;
+    if (!len)
+      str = NULL;
   }
-  fio_secret_set(str, len, is_random);
+  fio_secret_set(str, len, 0);
 }
+
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
