@@ -742,22 +742,22 @@ else
 AFTER_DISAMS___= >> $(TMP_ROOT)/$*.s
 endif
 
-$(TMP_ROOT)/%.o: create_tree %.c $(TMP_ROOT)/%.d
+$(TMP_ROOT)/%.o: %.c $(TMP_ROOT)/%.d | create_tree
 	@echo "* Compiling $*.c"
 	@$(CC) -c $*.c -o $@ $(CFLAGS_DEPENDENCY) $(CFLAGS) $(OPTIMIZATION)
 	@$(DISAMS) $(TMP_ROOT)/$*.o $(AFTER_DISAMS___)
 
-$(TMP_ROOT)/%.o: create_tree %.cpp $(TMP_ROOT)/%.d
+$(TMP_ROOT)/%.o: %.cpp $(TMP_ROOT)/%.d | create_tree
 	@echo "* Compiling $*.cpp (C++ source file)"
 	@$(CC) -c $*.cpp -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
 
-$(TMP_ROOT)/%.o: create_tree %.cxx $(TMP_ROOT)/%.d
+$(TMP_ROOT)/%.o: %.cxx $(TMP_ROOT)/%.d | create_tree
 	@echo "* Compiling $*.cxx (C++ source file)"
 	@$(CC) -c $*.cxx -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))
 
-$(TMP_ROOT)/%.o: create_tree %.c++ $(TMP_ROOT)/%.d
+$(TMP_ROOT)/%.o: %.c++ $(TMP_ROOT)/%.d | create_tree
 	@echo "* Compiling $*.c++ (C++ source file)"
 	@$(CC) -c $*.c++ -o $@ $(CFLAGS_DEPENDENCY) $(CXXFLAGS) $(OPTIMIZATION)
 	$(eval CCL=$(CXX))

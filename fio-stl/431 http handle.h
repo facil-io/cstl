@@ -1732,6 +1732,38 @@ size_t fio_http_response_header_each(
 Cookies
 ***************************************************************************** */
 
+FIO_IFUNC void fio___http_cookie_set_if_missing_encoded(fio_http_s *h,
+                                                        fio_str_info_s k,
+                                                        fio_str_info_s v) {
+  char *div = NULL;
+  FIO_STR_INFO_TMP_VAR(dec, 8192);
+  /* TODO: test for percent encoding... */
+  if ((div = (char *)FIO_MEMCHR(k.buf, '%', k.len))) {
+    if (div + 2 < (k.buf + k.len) && fio_c2i(div[1]) < 16 &&
+        fio_c2i(div[2]) < 16 &&
+        !fio_string_write_path_dec(&dec, FIO_STRING_ALLOC_COPY, k.buf, k.len))
+      k = dec;
+  }
+  if ((div = (char *)FIO_MEMCHR(v.buf, '%', v.len))) {
+    fio_str_info_s old = dec;
+    if (div + 2 < (v.buf + v.len) && fio_c2i(div[1]) < 16 &&
+        fio_c2i(div[2]) < 16 &&
+        !fio_string_write_path_dec(&dec,
+                                   FIO_STR_INFO_TMP_IS_REALLOCATED(dec)
+                                       ? FIO_STRING_REALLOC
+                                       : FIO_STRING_ALLOC_COPY,
+                                   v.buf,
+                                   v.len)) {
+      v = dec;
+      v.buf += old.len;
+      v.len -= old.len;
+    }
+  }
+  fio___http_cmap_set_if_missing(h->cookies, k, v);
+  if (FIO_STR_INFO_TMP_IS_REALLOCATED(dec))
+    FIO_STRING_FREE2(dec);
+}
+
 /** (Helper) HTTP Cookie Parser */
 FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
   /* loop and read Cookie: name=value; name2=value2; name3=value3 */
@@ -1761,7 +1793,7 @@ FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
     /* skip the ';' if exists (if len is not zero, !!s.len == 1). */
     s.buf += !!s.len;
     s.len -= !!s.len;
-    fio___http_cmap_set_if_missing(h->cookies, k, v);
+    fio___http_cookie_set_if_missing_encoded(h, k, v);
   }
 }
 
@@ -1806,7 +1838,7 @@ FIO_IFUNC void fio___http_cookie_parse_set_cookie(fio_http_s *h,
     }
   } while (cont);
   if (k.len)
-    fio___http_cmap_set_if_missing(h->cookies, k, v);
+    fio___http_cookie_set_if_missing_encoded(h, k, v);
 }
 
 /** (Helper) Parses all HTTP Cookies */
@@ -1852,9 +1884,12 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       ('A'.ord..'Z'.ord).each {|i| a[i] = 0;}
       ('0'.ord..'9'.ord).each {|i| a[i] = 0;}
       "!#$%&'*+-.^_`|~".bytes.each {|i| a[i] = 0;}
-      p a; nil
+      puts "static const char invalid_cookie_name_char[256] = {"
+      puts "#{ a.map {|i| i.to_s } .join(', ') }};"
       "!#$%&'()*+-./:<=>?@[]^_`{|}~".bytes.each {|i| a[i] = 0;} # for values
-      p a; nil
+      ",\"\\".bytes.each {|i| a[i] = 0;} # commonly used, though not allowed
+      puts "static const char invalid_cookie_value_char[256] = {"
+      puts "#{ a.map {|i| i.to_s } .join(', ') }};"
   */
   static const char invalid_cookie_name_char[256] = {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -1870,9 +1905,9 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
   static const char invalid_cookie_value_char[256] = {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -1889,20 +1924,20 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
   fio_str_info_s t = FIO_STR_INFO3(tmp_buf, 0, 5119);
 
 #define fio___http_h_copy_cookie_ch(ch_var)                                    \
-  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
-    t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
-  } else {                                                                     \
-    need2warn |= 1;                                                            \
-    t.buf[t.len++] = '%';                                                      \
-    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var.buf[tmp] >> 4) & 0x0F);   \
-    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var.buf[tmp] & 0x0F);          \
-  }                                                                            \
-  tmp += 1;                                                                    \
   if (t.capa <= t.len + 3) {                                                   \
     ((t.buf == tmp_buf)                                                        \
          ? FIO_STRING_ALLOC_COPY                                               \
          : FIO_STRING_REALLOC)(&t, fio_string_capa4len(t.len + 3));            \
-  }
+  }                                                                            \
+  if (!invalid_cookie_##ch_var##_char[(uint8_t)cookie.ch_var.buf[tmp]]) {      \
+    t.buf[t.len++] = cookie.ch_var.buf[tmp];                                   \
+  } else {                                                                     \
+    need2warn = tmp + 1;                                                       \
+    t.buf[t.len++] = '%';                                                      \
+    t.buf[t.len++] = fio_i2c(((uint8_t)cookie.ch_var.buf[tmp] >> 4) & 0x0F);   \
+    t.buf[t.len++] = fio_i2c((uint8_t)cookie.ch_var.buf[tmp] & 0x0F);          \
+  }                                                                            \
+  tmp += 1;
 
   if (cookie.name.buf) {
     size_t tmp = 0;
@@ -1919,7 +1954,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie name (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.name.buf[tmp],
+                      cookie.name.buf[need2warn - 1],
                       cookie.name.buf);
     }
   }
@@ -1939,7 +1974,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
       warn_illegal |= 1;
       FIO_LOG_WARNING("illegal char 0x%.2x in cookie value (in %s)\n"
                       "         automatic %% encoding applied",
-                      cookie.value.buf[tmp],
+                      cookie.value.buf[need2warn - 1],
                       cookie.value.buf);
     }
   } else

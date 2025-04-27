@@ -129,17 +129,22 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
+#undef FIO_CRYPT
+#undef FIO_CRYPTO_CORE
 #undef FIO_CHACHA
 #undef FIO_ED25519
 #undef FIO_SHA1
 #undef FIO_SHA2
+#undef FIO_SECRET
+#undef FIO_OTP
 #define FIO_CRYPTO_CORE
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_SHA1
 #define FIO_SHA2
 #define FIO_SECRET
-#undef FIO_CRYPT
+#define FIO_OTP
+
 #endif /* FIO_CRYPT */
 
 /* *****************************************************************************

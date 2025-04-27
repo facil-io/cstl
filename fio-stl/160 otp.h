@@ -27,7 +27,7 @@ typedef struct {
   size_t interval; /* 30 == Google OTP */
   /** The number of digits in the OTP. */
   size_t digits; /* 6 == Google OTP */
-  /** The time offset (in seconds) from the current time. */
+  /** The time offset (in `interval` units) from the current time. */
   int64_t offset; /* 0 == Google OTP */
   /** Set to true if the secret / key is in Hex instead of Byte32 encoding. */
   uint8_t is_hex;
@@ -95,7 +95,7 @@ SFUNC uint32_t fio_otp FIO_NOOP(fio_buf_info_s key,
   fio___otp_settings_validate(&settings);
 
   /* Prep time */
-  t -= settings.offset;
+  t -= (settings.offset * settings.interval);
   t /= settings.interval;
   /* t should be big endian */
   t = fio_lton64(t);

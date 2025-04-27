@@ -3430,7 +3430,7 @@ typedef struct fio_buf_info_s {
 /** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
 #define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
   char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio___stack_mem___##name[0] = 0; /* guard */                                 \
   fio_str_info_s name = (fio_str_info_s) {                                     \
     .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
