@@ -21,15 +21,14 @@ jobs:
         echo "CI=false" >> "$GITHUB_ENV"
     - name: Test STL (debug) - no allocators
       run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/test
+    - name: Test STL in debug mode
+      run: make clean && make db/test
     - name: Test STL
-      run: make test
+      run: make clean && make test
     - name: Test Mustache Compliance
       run: make tests/mustache
     - name: Test fio_malloc speed
       run: |
+        make clean
         make tests/malloc
         ./tmp/malloc -t 4
-    - name: clean
-      run: make clean
-    - name: Test STL in debug mode
-      run: make db/test
