@@ -1604,7 +1604,7 @@ Handler State
 
 SFUNC int fio_http_is_clean(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return !h->state;
+  return !(h->state & (~FIO_HTTP_STATE_COOKIES_PARSED));
 }
 
 /** Returns true if the HTTP handle's response was sent. */

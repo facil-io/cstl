@@ -210,10 +210,105 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                       "\x18\xD2\x87\x7E\xEC\x2F\x63\xB9\x31\xBD\x47\x41\x7A\x81"
                       "\xA5\x38\x32\x7A\xF9\x27\xDA\x3E",
       },
+      {
+          .str = (char *)"There was an Old Man on some rocks, Who shut his "
+                         "wife up in a box; When she said, \"Let me out,\" He "
+                         "exclaimed, \"Without doubt, You will pass all your "
+                         "life in that box.\"",
+      },
+      {
+          .str = (char *)"Once upon a time, there was a little secret garden "
+                         "locked away behind a little mouse hole in Agatha's "
+                         "kitchen. The mouse hole was tucked away behind the "
+                         "fridge.",
+      },
+      {
+          .str = (char *)"It was a loud fridge, that would klunk happily "
+                         "through the night, humming softly to mask the sound "
+                         "of chippering birds from t...",
+      },
   };
+#if HAVE_OPENSSL
+  FIO_LOG_DEBUG2("Testing against OpenSSL SHA512 and SHA256");
+#endif
   for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
     if (!data[i].str)
       continue;
+#if HAVE_OPENSSL
+    {
+      fio_u512 openssl_result;
+      fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
+      fio_u256 sha256 = fio_sha256(data[i].str, FIO_STRLEN(data[i].str));
+      SHA256((const unsigned char *)data[i].str,
+             FIO_STRLEN(data[i].str),
+             openssl_result.u8);
+      FIO_ASSERT(fio_u256_is_eq(openssl_result.u256, &sha256),
+                 "SHA256 OpenSSL mismatch for \"%s\":\n\t %X%X%X%X...%X%X%X%X",
+                 data[i].str,
+                 sha256.u8[0],
+                 sha256.u8[1],
+                 sha256.u8[2],
+                 sha256.u8[3],
+                 sha256.u8[28],
+                 sha256.u8[29],
+                 sha256.u8[30],
+                 sha256.u8[31]);
+
+      SHA512((const unsigned char *)data[i].str,
+             FIO_STRLEN(data[i].str),
+             openssl_result.u8);
+      FIO_ASSERT(fio_u512_is_eq(&openssl_result, &sha512),
+                 "SHA512 OpenSSL mismatch for \"%s\":\n\t "
+                 "%X%X%X%X%X%X%X%X...%X%X%X%X%X%X%X%X",
+                 data[i].str,
+                 sha512.u8[0],
+                 sha512.u8[1],
+                 sha512.u8[2],
+                 sha512.u8[3],
+                 sha512.u8[4],
+                 sha512.u8[5],
+                 sha512.u8[6],
+                 sha512.u8[7],
+                 sha512.u8[24],
+                 sha512.u8[25],
+                 sha512.u8[26],
+                 sha512.u8[27],
+                 sha512.u8[28],
+                 sha512.u8[29],
+                 sha512.u8[30],
+                 sha512.u8[31]);
+
+      if (FIO_STRLEN(data[i].str) > 128) {
+        fio_sha512_s tmp = fio_sha512_init();
+        fio_sha512_consume(&tmp, data[i].str, 128);
+        fio_sha512_consume(&tmp,
+                           data[i].str + 128,
+                           FIO_STRLEN(data[i].str) - 128);
+        sha512 = fio_sha512_finalize(&tmp);
+        FIO_ASSERT(fio_u512_is_eq(&openssl_result, &sha512),
+                   "SHA512 OpenSSL mismatch for streamed \"%s\":\n\t "
+                   "%X%X%X%X%X%X%X%X...%X%X%X%X%X%X%X%X",
+                   data[i].str,
+                   sha512.u8[0],
+                   sha512.u8[1],
+                   sha512.u8[2],
+                   sha512.u8[3],
+                   sha512.u8[4],
+                   sha512.u8[5],
+                   sha512.u8[6],
+                   sha512.u8[7],
+                   sha512.u8[24],
+                   sha512.u8[25],
+                   sha512.u8[26],
+                   sha512.u8[27],
+                   sha512.u8[28],
+                   sha512.u8[29],
+                   sha512.u8[30],
+                   sha512.u8[31]);
+      }
+    }
+#endif
+
     if (data[i].sha256) {
       fio_u256 sha256 = fio_sha256(data[i].str, FIO_STRLEN(data[i].str));
       FIO_ASSERT(!memcmp(sha256.u8, data[i].sha256, 32),
@@ -227,6 +322,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
                  sha256.u8[29],
                  sha256.u8[30],
                  sha256.u8[31]);
+      if (FIO_STRLEN(data[i].str) > 8) {
+        fio_sha256_s sha = fio_sha256_init();
+        fio_sha256_consume(&sha, data[i].str, 4);
+        FIO_COMPILER_GUARD;
+        fio_sha256_consume(&sha, data[i].str + 4, 4);
+        FIO_COMPILER_GUARD;
+        fio_sha256_consume(&sha, data[i].str + 8, FIO_STRLEN(data[i].str) - 8);
+        sha256 = fio_sha256_finalize(&sha);
+        FIO_ASSERT(
+            !memcmp(sha256.u8, data[i].sha256, 32),
+            "SHA256 mismatch for \"%s\" (in parts):\n\t %X%X%X%X...%X%X%X%X",
+            data[i].str,
+            sha256.u8[0],
+            sha256.u8[1],
+            sha256.u8[2],
+            sha256.u8[3],
+            sha256.u8[28],
+            sha256.u8[29],
+            sha256.u8[30],
+            sha256.u8[31]);
+      }
     }
     if (data[i].sha512) {
       fio_u512 sha512 = fio_sha512(data[i].str, FIO_STRLEN(data[i].str));
@@ -250,6 +366,35 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
           sha512.u8[29],
           sha512.u8[30],
           sha512.u8[31]);
+      if (FIO_STRLEN(data[i].str) > 8) {
+        fio_sha512_s sha = fio_sha512_init();
+        fio_sha512_consume(&sha, data[i].str, 4);
+        FIO_COMPILER_GUARD;
+        fio_sha512_consume(&sha, data[i].str + 4, 4);
+        FIO_COMPILER_GUARD;
+        fio_sha512_consume(&sha, data[i].str + 8, FIO_STRLEN(data[i].str) - 8);
+        sha512 = fio_sha512_finalize(&sha);
+        FIO_ASSERT(!memcmp(sha512.u8, data[i].sha512, 64),
+                   "SHA512 mismatch for \"%s\" (in parts):\n\t "
+                   "%X%X%X%X%X%X%X%X...%X%X%X%X%X%X%X%X",
+                   data[i].str,
+                   sha512.u8[0],
+                   sha512.u8[1],
+                   sha512.u8[2],
+                   sha512.u8[3],
+                   sha512.u8[4],
+                   sha512.u8[5],
+                   sha512.u8[6],
+                   sha512.u8[7],
+                   sha512.u8[24],
+                   sha512.u8[25],
+                   sha512.u8[26],
+                   sha512.u8[27],
+                   sha512.u8[28],
+                   sha512.u8[29],
+                   sha512.u8[30],
+                   sha512.u8[31]);
+      }
     }
   }
 

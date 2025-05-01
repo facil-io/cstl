@@ -341,7 +341,7 @@ SFUNC void fio_sha512_consume(fio_sha512_s *restrict h,
     const size_t byte2copy = 128UL - offset;
     fio_memcpy127x(h->cache.u8 + offset, r, byte2copy);
     fio___sha512_round(&h->hash, h->cache.u8);
-    FIO_MEMSET(h->cache.u8, 0, 128);
+    h->cache = (fio_u1024){0};
     r += byte2copy;
     len -= byte2copy;
   }
@@ -362,7 +362,7 @@ SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
   h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
   if ((remainder) > 112) { /* make sure there's room to attach `total_len` */
     fio___sha512_round(&h->hash, h->cache.u8);
-    FIO_MEMSET(h->cache.u8, 0, 128);
+    h->cache = (fio_u1024){0};
   }
   h->cache.u64[15] = fio_lton64((total << 3));
   fio___sha512_round(&h->hash, h->cache.u8);
@@ -370,6 +370,66 @@ SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
     h->hash.u64[i] = fio_ntol64(h->hash.u64[i]); /* back to/from big endien */
   h->total_len = ((uint64_t)0ULL - 1ULL);
   return h->hash;
+}
+
+/* *****************************************************************************
+HMAC
+***************************************************************************** */
+
+/**
+ * HMAC-SHA512, resulting in a 64 byte authentication code.
+ *
+ * Keys are limited to 128 bytes.
+ *
+ * TODO: FIXME!
+ */
+SFUNC fio_u512 fio_sha512_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len) {
+  fio_sha512_s inner = fio_sha512_init();
+  fio_u2048 k;
+  /* copy key */
+  if (key_len > 128)
+    goto key_too_long;
+  if (key_len == 128)
+    fio_memcpy128(k.u8, key);
+  else {
+    k.u1024[0] = (fio_u1024){0};
+    fio_memcpy127x(k.u8, key, key_len);
+  }
+  /* prepare inner key */
+  for (size_t i = 0; i < 16; ++i)
+    k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
+  /* hash of inner key + msg  */
+  if (1) {
+    /* consume key block */
+    fio___sha512_round(&inner.hash, k.u8);
+    /* consume data */
+    uint8_t *buf = (uint8_t *)msg;
+    for (size_t i = 127; i < msg_len; (i += 128), (buf += 128))
+      fio___sha512_round(&inner.hash, buf);
+    if ((msg_len & 127)) {
+      inner.cache = (fio_u1024){0};
+      fio_memcpy127x(inner.cache.u8, buf, msg_len);
+    }
+    inner.total_len = 128 + msg_len;
+  } else { /* ... same as ... */
+    fio_sha512_consume(&inner, k.u8, 128);
+    fio_sha512_consume(&inner, msg, msg_len);
+  }
+  /* finalize SHA512 and append to end of key */
+  k.u512[2] = fio_sha512_finalize(&inner);
+  /* switch key to outer key */
+  for (size_t i = 0; i < 16; ++i)
+    k.u64[i] ^=
+        ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
+  /* hash outer key with inner hash appended and return */
+  return fio_sha512(k.u8, 192);
+
+key_too_long:
+  k.u512[3] = fio_sha512(key, key_len);
+  return fio_sha512_hmac(k.u512[3].u8, sizeof(k.u512[3]), msg, msg_len);
 }
 
 /* *****************************************************************************

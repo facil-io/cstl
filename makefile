@@ -732,6 +732,7 @@ set_debug_flags:
 	$(eval CXXFLAGS+= -DDEBUG=1 -fno-builtin)
 	$(eval LINKER_FLAGS= -g -DDEBUG=1 $(LINKER_FLAGS))
 	@echo "* Set debug flags."
+	@$(CC) -v
 
 $(TMP_ROOT)/%.d: ;
 
@@ -851,6 +852,7 @@ endif
 # Tasks - Examples
 #############################################################################
 
+.PHONY : examples_set_env
 examples_set_env.%: create_tree
 	$(eval MAIN_OBJS=$(TMP_ROOT)/$(EXAMPLES_ROOT)/$*.o)
 	@echo "* Set example flags ($*)"
