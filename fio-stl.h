@@ -1299,6 +1299,10 @@ Settings - Memory Function Selectors
 #endif
 #endif /* FIO_MEMCMP */
 
+#ifndef FIO_FOR
+/** Helper for simple `for` loops, where `i` is the variable name to use. */
+#define FIO_FOR(i, count) for (size_t i = 0; i < (count); ++i)
+#endif
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
 ***************************************************************************** */
@@ -1640,22 +1644,6 @@ FIO___MEMBUF_FN(8, 64, 64, fio_lton64, _be)
 #undef FIO___MEMBUF_FN
 
 /** Converts an unaligned byte stream to a 24 bit number. */
-FIO_IFUNC uint32_t fio_buf2u24u(const void *c) {
-  uint32_t tmp = 0;
-  fio_memcpy3(&tmp, c);
-#if __BIG_ENDIAN__
-  c = c >> 8;
-#endif
-  return tmp;
-} /** Writes a 24 bit number to an unaligned buffer. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-#if __BIG_ENDIAN__
-  i = i << 8;
-#endif
-  fio_memcpy3(buf, &i);
-}
-
-/** Converts an unaligned byte stream to a 24 bit number. */
 FIO_IFUNC uint32_t fio_buf2u24_le(const void *c) {
   uint32_t tmp = ((uint32_t)((uint8_t *)c)[0]) |
                  ((uint32_t)((uint8_t *)c)[1] << 8) |
@@ -1673,12 +1661,31 @@ FIO_IFUNC uint32_t fio_buf2u24_be(const void *c) {
                  ((uint32_t)((uint8_t *)c)[1] << 8) |
                  ((uint32_t)((uint8_t *)c)[2]);
   return tmp;
-} /** Writes a 24 bit number to an unaligned buffer. */
+}
+/** Writes a 24 bit number to an unaligned buffer. */
 FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
   ((uint8_t *)buf)[0] = (i >> 16) & 0xFFU;
   ((uint8_t *)buf)[1] = (i >> 8) & 0xFFU;
   ((uint8_t *)buf)[2] = (i)&0xFFU;
 }
+
+#if __BIG_ENDIAN__
+/** Converts an unaligned byte stream to a 24 bit number - local endieness. */
+FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_be(c); }
+/** Writes a 24 bit number to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
+  return fio_u2buf24_be(buf, i);
+}
+#elif __LITTLE_ENDIAN__
+/** Converts an unaligned byte stream to a 24 bit number - local endieness. */
+FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_le(c); }
+/** Writes a 24 bit number to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
+  return fio_u2buf24_le(buf, i);
+}
+#else
+#warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
+#endif
 
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
@@ -2818,7 +2825,7 @@ Vector Types (SIMD / Math)
 #endif
 
 /** An unsigned 128bit union type. */
-typedef union {
+typedef union fio_u128 {
   /** unsigned native word size array, length is system dependent */
   size_t uz[16 / sizeof(size_t)];
   /** known bit word arrays */
@@ -2826,6 +2833,12 @@ typedef union {
   uint32_t u32[4];
   uint16_t u16[8];
   uint8_t u8[16];
+  /** signed variants */
+  ssize_t iz[16 / sizeof(size_t)];
+  int64_t i64[2];
+  int32_t i32[4];
+  int16_t i16[8];
+  int8_t i8[16];
   /** vector types, if supported */
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[1];
@@ -2844,13 +2857,19 @@ typedef union {
 } fio_u128 FIO_ALIGN(16);
 
 /** An unsigned 256bit union type. */
-typedef union {
+typedef union fio_u256 {
   size_t uz[32 / sizeof(size_t)];
   uint64_t u64[4];
   uint32_t u32[8];
   uint16_t u16[16];
   uint8_t u8[32];
   fio_u128 u128[2];
+  /** signed variants */
+  ssize_t iz[32 / sizeof(size_t)];
+  int64_t i64[4];
+  int32_t i32[8];
+  int16_t i16[16];
+  int8_t i8[32];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[2];
   uint32x4_t x32[2];
@@ -2871,7 +2890,7 @@ typedef union {
 } fio_u256 FIO_ALIGN(16);
 
 /** An unsigned 512bit union type. */
-typedef union {
+typedef union fio_u512 {
   size_t uz[64 / sizeof(size_t)];
   uint64_t u64[8];
   uint32_t u32[16];
@@ -2879,6 +2898,12 @@ typedef union {
   uint8_t u8[64];
   fio_u128 u128[4];
   fio_u256 u256[2];
+  /** signed variants */
+  ssize_t iz[64 / sizeof(size_t)];
+  int64_t i64[8];
+  int32_t i32[16];
+  int16_t i16[32];
+  int8_t i8[64];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[4];
   uint32x4_t x32[4];
@@ -2893,7 +2918,7 @@ typedef union {
 } fio_u512 FIO_ALIGN(16);
 
 /** An unsigned 1024bit union type. */
-typedef union {
+typedef union fio_u1024 {
   size_t uz[128 / sizeof(size_t)];
   uint64_t u64[16];
   uint32_t u32[32];
@@ -2902,6 +2927,12 @@ typedef union {
   fio_u128 u128[8];
   fio_u256 u256[4];
   fio_u512 u512[2];
+  /** signed variants */
+  ssize_t iz[128 / sizeof(size_t)];
+  int64_t i64[16];
+  int32_t i32[32];
+  int16_t i16[64];
+  int8_t i8[128];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[8];
   uint32x4_t x32[8];
@@ -2916,7 +2947,7 @@ typedef union {
 } fio_u1024 FIO_ALIGN(16);
 
 /** An unsigned 2048bit union type. */
-typedef union {
+typedef union fio_u2048 {
   size_t uz[256 / sizeof(size_t)];
   uint64_t u64[32];
   uint32_t u32[64];
@@ -2926,6 +2957,12 @@ typedef union {
   fio_u256 u256[8];
   fio_u512 u512[4];
   fio_u1024 u1024[2];
+  /** signed variants */
+  ssize_t iz[256 / sizeof(size_t)];
+  int64_t i64[32];
+  int32_t i32[64];
+  int16_t i16[128];
+  int8_t i8[256];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[16];
   uint32x4_t x32[16];
@@ -2940,7 +2977,7 @@ typedef union {
 } fio_u2048 FIO_ALIGN(16);
 
 /** An unsigned 4096bit union type. */
-typedef union {
+typedef union fio_u4096 {
   size_t uz[512 / sizeof(size_t)];
   uint64_t u64[64];
   uint32_t u32[128];
@@ -2951,6 +2988,12 @@ typedef union {
   fio_u512 u512[8];
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
+  /** signed variants */
+  ssize_t iz[512 / sizeof(size_t)];
+  int64_t i64[64];
+  int32_t i32[128];
+  int16_t i16[256];
+  int8_t i8[512];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[32];
   uint32x4_t x32[32];
@@ -16053,7 +16096,8 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   void *old = &mark;
   mark = fio_risky_hash(&old, sizeof(mark), 0);
 
-  for (int repeat_cycle_test = 0; repeat_cycle_test < 4; ++repeat_cycle_test) {
+  for (size_t repeat_cycle_test = 0; repeat_cycle_test < 4;
+       ++repeat_cycle_test) {
     for (size_t i = 0; i < limit - 4; i += 4) {
       if (ary[i])
         fio___memset_test_aligned(ary[i], mark, 16, "mark missing at ary[0]");
@@ -16101,19 +16145,19 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
       ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME,
                                     realloc2)(ary[i + 3], cycles * 2, cycles);
 
-      for (int b = 0; b < 4; ++b) {
+      for (size_t b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
           FIO_ASSERT(((uint64_t *)(ary[i + b]))[pos] == mark,
                      "memory mark corrupted at test ptr %zu",
                      i + b);
         }
       }
-      for (int b = 1; b < 4; ++b) {
+      for (size_t b = 1; b < 4; ++b) {
         FIO_NAME(FIO_MEMORY_NAME, free)(ary[b]);
         ary[b] = NULL;
         FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + b]);
       }
-      for (int b = 1; b < 4; ++b) {
+      for (size_t b = 1; b < 4; ++b) {
         ary[i + b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
         if (i) {
           ary[b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
@@ -16124,7 +16168,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
         fio_xmask(ary[i + b], cycles, mark);
       }
 
-      for (int b = 0; b < 4; ++b) {
+      for (size_t b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
           FIO_ASSERT(((uint64_t *)(ary[b]))[pos] == mark,
                      "memory mark corrupted at test ptr %zu",
@@ -16489,7 +16533,7 @@ FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
 
 /** Destroys the polling object, freeing its resources. */
 FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
-  for (int i = 0; i < 2; ++i) {
+  for (size_t i = 0; i < 2; ++i) {
     if (p->fds[i].fd != -1)
       close(p->fds[i].fd);
     p->fds[i].fd = -1;
@@ -16591,7 +16635,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
     /* TODO! fix error handling*/
-    for (int i = 0; i < active_count; i++) {
+    for (size_t i = 0; i < active_count; i++) {
       // errors are handled as disconnections (on_close) in the EPOLLIN queue
       // if no error, try an active event(s)
       if (events[i].events & EPOLLOUT)
@@ -16601,7 +16645,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   }
   active_count = epoll_wait(p->fds[1].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
-    for (int i = 0; i < active_count; i++) {
+    for (size_t i = 0; i < active_count; i++) {
       // holds an active event(s)
       if (events[i].events & EPOLLIN)
         p->settings.on_data(events[i].data.ptr);
@@ -16759,7 +16803,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
 
   if (active_count > 0) {
-    for (int i = 0; i < active_count; i++) {
+    for (size_t i = 0; i < active_count; i++) {
       // test for event(s) type
       if ((events[i].filter & EVFILT_WRITE))
         p->settings.on_ready(events[i].udata);
@@ -24195,6 +24239,10 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+/* *****************************************************************************
+Basic Operations (Helpers)
+***************************************************************************** */
+
 /* prevent ED25519 keys from having a small period (cyclic value). */
 FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
@@ -24218,6 +24266,52 @@ FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   k->public_key.u64[1] ^= msk;
   k->public_key.u64[2] ^= msk;
 }
+
+FIO_IFUNC fio_u1024 fio___ed25519_unpack(uint8_t *u) {
+  fio_u1024 r;
+  for (size_t i = 0; i < 16; ++i)
+    r.u64[i] = (uint64_t)u[(i << 1)] | ((uint64_t)u[(i << 1)] << 8);
+  r.u64[15] &= 0x7FFFULL;
+  return r;
+}
+
+#define fio___ed25519_add fio_u1024_add64
+#define fio___ed25519_sub fio_u1024_sub64
+
+FIO_IFUNC void fio___ed25519_normalize_step(fio_u1024 *u) {
+  uint64_t c;
+  for (size_t i = 0; i < 15; ++i) {
+    /* ERR: example code uses illegal / undefined signed shift. */
+    c = u->u64[i] >> 16; /* TODO: propagate carry bits of negative numbers? */
+    c |= (0ULL - (u->u64[i] >> 63)) & ((1ULL << 48) - 1);
+    u->u64[i] &= 0xFFFFU;
+    u->u64[i + 1] += c;
+  }
+  c = u->u64[15] >> 16;
+  c |= (0ULL - (u->u64[15] >> 63)) & ((1ULL << 48) - 1);
+  u->u64[15] &= 0xFFFFU;
+  u->u64[0] += 38 * c;
+}
+
+FIO_IFUNC fio_u1024 fio___ed25519_mul(const fio_u1024 *a, const fio_u1024 *b) {
+  fio_u1024 r;
+  fio_u2048 p = {0};
+  for (size_t i = 0; i < 16; ++i)
+    for (size_t j = 0; j < 16; ++j)
+      p.u64[i + j] += a->u64[i] * b->u64[j];
+  for (size_t i = 0; i < 15; ++i)
+    p.u64[i] += 38 * p.u64[16 + i];
+  for (size_t i = 0; i < 16; ++i)
+    r.u64[i] = p.u64[i];
+  /* partial normalize / carry (2/3) */
+  fio___ed25519_normalize_step(&r);
+  fio___ed25519_normalize_step(&r);
+  return r;
+}
+
+/* *****************************************************************************
+Point Math
+***************************************************************************** */
 
 /* Elliptic Curve Point Addition for Ed25519 */
 FIO_IFUNC void fio___ed25519_point_add(fio_u1024 *R, const fio_u1024 *P) {
@@ -26506,7 +26600,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         FIO_PTR_TAG(&b64message),
         "Hello World, this is the voice of peace:)",
         41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       b64i = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&b64message), &c, 1);
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)) ==
@@ -26561,7 +26655,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_NAME(FIO_STR_NAME, write)
     (FIO_PTR_TAG(&unescaped), utf8_sample, FIO_STRLEN(utf8_sample));
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       ue = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&unescaped), &c, 1);
     }
@@ -28112,7 +28206,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
   a_array[1] = FIO_NAME(FIO_ARRAY_NAME, new)();
   FIO_ASSERT_ALLOC(a_array[1]);
   /* perform test twice, once for an array on the stack and once for allocate */
-  for (int selector = 0; selector < 2; ++selector) {
+  for (size_t selector = 0; selector < 2; ++selector) {
     FIO_ARRAY_PTR a = a_array[selector];
     fprintf(stderr,
             "* Testing dynamic arrays on the %s (" FIO_MACRO2STR(
@@ -28124,7 +28218,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
     /* Test start here */
 
     /* test push */
-    for (int i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
+    for (size_t i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       o = *FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1), "push failed (%d)", i);
@@ -28142,7 +28236,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3);
 
     /* test pop */
-    for (int i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
+    for (size_t i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
       FIO_NAME(FIO_ARRAY_NAME, pop)(a, &o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((i + 1)),
                  "pop value error failed (%d)",
@@ -28159,7 +28253,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                "compact zero elementes didn't make array embedded?");
 
     /* test unshift */
-    for (int i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
+    for (size_t i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       o = *FIO_NAME(FIO_ARRAY_NAME, unshift)(a, o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1), "shift failed (%d)", i);
@@ -28180,7 +28274,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3);
 
     /* test shift */
-    for (int i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
+    for (size_t i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
       FIO_NAME(FIO_ARRAY_NAME, shift)(a, &o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((i + 1)),
                  "shift value error failed (%d)",
@@ -28303,7 +28397,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
 
     /* test push / unshift alternate */
     FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       FIO_ASSERT(FIO_NAME(FIO_ARRAY_NAME, count)(a) + 1 ==
@@ -28328,20 +28422,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                  "push-shift cycle failed (%d)",
                  i);
     }
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       o = FIO_NAME(FIO_ARRAY_NAME, get)(a, i);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((4096 * 2) - i),
                  "item value error at index %d",
                  i);
     }
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       o = FIO_NAME(FIO_ARRAY_NAME, get)(a, i + 4096);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((1 + i)),
                  "item value error at index %d",
                  i + 4096);
     }
 #if DEBUG
-    for (int i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
       FIO_LOG_DEBUG2(
           "\t- " FIO_MACRO2STR(
               FIO_NAME(FIO_ARRAY_NAME, s)) " after push/unshit cycle%s:\n"
@@ -28359,7 +28453,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
     FIO_ARRAY_TYPE_COPY(o, FIO_ARRAY_TYPE_INVALID);
 /* test set with NULL, hopefully a bug will cause a crash */
 #if FIO_ARRAY_TYPE_DESTROY_SIMPLE
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       FIO_NAME(FIO_ARRAY_NAME, set)(a, i, o, NULL);
     }
 #else
@@ -28367,7 +28461,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
      * we need to clear the memory to make sure a cleanup actions don't get
      * unexpected values.
      */
-    for (int i = 0; i < (4096 * 2); ++i) {
+    for (size_t i = 0; i < (4096 * 2); ++i) {
       FIO_ARRAY_TYPE_COPY((FIO_NAME2(FIO_ARRAY_NAME, ptr)(a)[i]),
                           FIO_ARRAY_TYPE_INVALID);
     }
@@ -28383,7 +28477,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
         int va[10];
       } d = {1, {1, 8, 2, 7, 3, 6, 4, 5}};
       FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
-      for (int i = 0; d.va[i]; ++i) {
+      for (size_t i = 0; d.va[i]; ++i) {
         FIO_ARRAY_TEST_OBJ_SET(o, d.va[i]);
         FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       }
@@ -29762,7 +29856,7 @@ perform_overwrite:
 
 reallocate_map:
   /* reallocate map */
-  for (int i = 1; i < 3; ++i) {
+  for (size_t i = 1; i < 3; ++i) {
     if (FIO_NAME(FIO_MAP_NAME, __allocate_map)(&tmp, o->bits + i))
       goto no_memory;
     if (FIO_NAME(FIO_MAP_NAME, __move2map)(&tmp, o)) {
@@ -31377,7 +31471,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP2_NAME,
       if (!(has_possible_full_byte | has_possible_empty_byte))
         continue;
       /* there was a 7 bit match for a possible free space in this group */
-      for (int i = 0; i < 8; ++i) {
+      for (size_t i = 0; i < 8; ++i) {
         const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
         if (!imap[tmp])
           return (r = tmp); /* empty slot always ends search */
@@ -31673,7 +31767,7 @@ SFUNC void FIO_NAME(FIO_MAP2_NAME, evict)(FIO_MAP2_PTR map,
     /* map is scattered */
     uint32_t pos_mask = (uint32_t)(FIO_MAP2_CAPA(o->bits) - 1);
     uint32_t pos = *(uint32_t *)o->map;
-    for (int i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < 3; ++i) {
       struct timespec t = {0};
       clock_gettime(CLOCK_MONOTONIC, &t);
       pos *= t.tv_nsec ^ t.tv_sec ^ (uintptr_t)imap;
@@ -31780,7 +31874,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, node_s) *
     *o = FIO_NAME(FIO_MAP2_NAME, __duplicate)(o, 3, 1);
   }
   /* find the object's (potential) position in the array */
-  for (int i = 0;;) {
+  for (size_t i = 0;;) {
     pos = FIO_NAME(FIO_MAP2_NAME, __index)(o, key, hash);
     if (pos != (uint32_t)-1)
       break;
@@ -32012,7 +32106,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, iterator_s)
         r.private_.index += 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (++r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         FIO_MAP2___EACH_COPY_DATA();
@@ -32055,7 +32149,7 @@ find_pos:
         r.private_.index += 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (++r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         if (pos_counter != r.private_.pos) {
@@ -32134,7 +32228,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, iterator_s)
         r.private_.index -= 8;
         continue;
       }
-      for (int i = 0; i < 8; ++i) {
+      for (size_t i = 0; i < 8; ++i) {
         --r.private_.index;
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
@@ -32179,7 +32273,7 @@ find_pos:
         r.private_.index -= 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (--r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (--r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         if (pos_counter != r.private_.pos) {
@@ -41352,7 +41446,7 @@ static void fio___resp3_validate_settings(fio_resp3_settings_s *settings) {
   } src, dest;
   src.s = (fio_resp3_settings_s *)&defaults;
   dest.s = settings;
-  for (int i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
+  for (size_t i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
     if (!dest.ptr[i])
       dest.ptr[i] = src.ptr[i];
 }
@@ -41635,48 +41729,6 @@ RESP Parsing @ Root
 static size_t fio___resp3_parse_start(fio_resp3_s *parser,
                                       uint8_t *buf,
                                       size_t len);
-
-/* *****************************************************************************
-Queue Thoughts
-***************************************************************************** */
-
-typedef union {
-  uint64_t cache_line_size[8];
-  struct {
-    fio_list_node_s node;
-    union {
-      void (*fn1)(void *);
-      void (*fn2)(void *, void *);
-      void (*fn3)(void *, void *, void *);
-      void (*fn4)(void *, void *, void *, void *);
-    };
-    void *argv[4];
-    size_t argc;
-    size_t flags;
-  };
-  struct {
-    fio_list_node_s queue;
-    fio_list_node_s free;
-    struct fio___queue_block_s *next;
-  } head;
-} fio___queue_cache_line_s;
-
-#define FIO_QQUEUE_LINES 64
-typedef struct fio___queue_block_s {
-  fio___queue_cache_line_s line[FIO_QQUEUE_LINES];
-} fio___queue_block_s;
-
-typedef struct {
-  fio___queue_cache_line_s lines[FIO_QQUEUE_LINES];
-} fio_qqueue_s;
-
-FIO_IFUNC void fio_qqueue_init(fio_qqueue_s *q) {
-  q->lines[0].head.free = FIO_LIST_INIT(q->lines[0].head.free);
-  q->lines[0].head.queue = FIO_LIST_INIT(q->lines[0].head.queue);
-  for (int i = 1; i < FIO_QQUEUE_LINES; ++i) {
-    FIO_LIST_PUSH(&q->lines[0].head.free, &q->lines[i].node);
-  }
-}
 
 /* *****************************************************************************
 RESP Cleanup
@@ -44118,8 +44170,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
 
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
-  h->controller->write_body(h, *args);
-  h->sent += args->len;
+  int r = (int)0 - (int)((unsigned)(h->status == 204) | (h->status == 205) |
+                         (h->status == 304));
+  if (!r) {
+    h->controller->write_body(h, *args);
+    h->sent += args->len;
+  }
   if (args->finish) {
     h->state |= FIO_HTTP_STATE_FINISHED;
     h->writer = (h->state & FIO_HTTP_STATE_UPGRADED)
@@ -44127,7 +44183,7 @@ FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                     : fio____http_write_done;
     h->controller->on_finish(h);
   }
-  return 0;
+  return r;
 }
 
 void fio_http_write___(void); /* IDE Marker */
@@ -50732,23 +50788,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
   }
   {
     fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
-    for (int i = 0; i < 64; ++i) {
+    for (size_t i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
                  "fio_popcount error for 1 bit");
     }
-    for (int i = 0; i < 63; ++i) {
+    for (size_t i = 0; i < 63; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
                  "fio_popcount error for 2 bits");
     }
-    for (int i = 0; i < 62; ++i) {
+    for (size_t i = 0; i < 62; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
                  "fio_popcount error for 3 bits");
     }
-    for (int i = 0; i < 59; ++i) {
+    for (size_t i = 0; i < 59; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
                  "fio_popcount error for 3 alternating bits");
     }
-    for (int i = 0; i < 64; ++i) {
+    for (size_t i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
                  "fio_hemming_dist error at %d",
                  i);
@@ -52689,7 +52745,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memcpy:\n");
 
-  for (int len_i = 5; len_i < 21; ++len_i) {
+  for (size_t len_i = 5; len_i < 21; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
@@ -52755,7 +52811,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memchr:\n");
 
-  for (int len_i = 2; len_i < 20; ++len_i) {
+  for (size_t len_i = 2; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
@@ -52822,7 +52878,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memcmp:\n");
 
-  for (int len_i = 2; len_i < 21; ++len_i) {
+  for (size_t len_i = 2; len_i < 21; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 13 ? (15 - (len_i & 15)) : 2);
     const size_t mem_len = (1ULL << len_i);
@@ -52949,7 +53005,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing strlen:\n");
 
-  for (int len_i = 2; len_i < 20; ++len_i) {
+  for (size_t len_i = 2; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
@@ -53125,12 +53181,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fio_poll_s p;
   fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
-  for (int i = 128; i--;) {
+  for (size_t i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
                "fio_poll_monitor failed for fd %d",
                i);
   }
-  for (int i = 128; i--;) {
+  for (size_t i = 128; i--;) {
     if ((i & 3) == 3) {
       FIO_ASSERT(!fio_poll_forget(&p, i), "fio_poll_forget failed at %d", i);
       FIO_ASSERT(fio_poll_forget(&p, i),
@@ -53267,7 +53323,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
   expected += delta;                                                           \
   fio_queue_perform_all(fio_io_queue());
 
-  for (int i = 0; i < sub_count; ++i) {
+  for (size_t i = 0; i < sub_count; ++i) {
     fio_subscribe FIO_NOOP(sub[i]);
     ++delta;
     FIO_ASSERT(state == expected, "subscribe shouldn't affect state (%d)", i);
@@ -53276,7 +53332,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
     FIO___PUBLISH2TEST();
     FIO_ASSERT(state == expected, "pub/sub test state incorrect (2-%d)", i);
   }
-  for (int i = 0; i < sub_count; ++i) {
+  for (size_t i = 0; i < sub_count; ++i) {
     if (fio_unsubscribe FIO_NOOP(sub[i]))
       FIO_LOG_WARNING("fio_unsubscribe returned an error value");
     --delta;
@@ -53953,7 +54009,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     FIO_MEMCPY(buf, str, len);
     uint64_t org_hash = fio_risky_hash(buf, len, 0);
     FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
-    for (int i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
@@ -54089,7 +54145,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
     for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
       uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
       ++freq[val];
-      for (int bit = 0; bit < 8; ++bit) {
+      for (size_t bit = 0; bit < 8; ++bit) {
         ++totals[(val >> bit) & 1];
       }
     }
@@ -54549,7 +54605,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sort)(void) {
       FIO_ASSERT(0, "fio_sort != clib qsort first error at index %zu", i);
     }
     clock_t start, end, fio_clk = 0, lib_clk = 0;
-    for (int count = 0; count < 8; ++count) {
+    for (size_t count = 0; count < 8; ++count) {
       for (size_t i = 0; i < len; ++i) {
         mem[i] = mem[len + i] = (size_t)rand();
       }
@@ -54721,7 +54777,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "stream is empty after `fio_stream_add` (data, copy)");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
              "copying a packet should deallocate the original");
-  for (int i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < 3; ++i) {
     /* test that read operrations are immutable */
     buf = mem;
     len = 4000;
@@ -55123,7 +55179,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                                  utf8_sample,
                                  FIO_STRLEN(utf8_sample)),
                "Couldn't write UTF-8 example.");
-    for (int i = 1; i < 256; ++i) {
+    for (size_t i = 1; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
                  "write returned an error");
@@ -55165,7 +55221,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                      NULL,
                      "Hello World, this is the voice of peace:)",
                      41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
                  "write returned an error");
@@ -55205,7 +55261,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                      NULL,
                      "Hello World, this is the voice of peace:)",
                      41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
                  "write returned an error");
@@ -56318,7 +56374,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                         FIO_STRLEN(tests[t].msg),
                         NULL,
                         0);
-      for (int i = 0; i < 16; ++i) {
+      for (size_t i = 0; i < 16; ++i) {
         buf1[(i << 1)] = fio_i2c(((auth[i] >> 4) & 0xF));
         buf1[(i << 1) + 1] = fio_i2c(((auth[i]) & 0xF));
         buf2[(i << 1)] = fio_i2c(((tests[t].expected[i] >> 4) & 0xF));

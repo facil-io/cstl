@@ -1470,7 +1470,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
   a_array[1] = FIO_NAME(FIO_ARRAY_NAME, new)();
   FIO_ASSERT_ALLOC(a_array[1]);
   /* perform test twice, once for an array on the stack and once for allocate */
-  for (int selector = 0; selector < 2; ++selector) {
+  for (size_t selector = 0; selector < 2; ++selector) {
     FIO_ARRAY_PTR a = a_array[selector];
     fprintf(stderr,
             "* Testing dynamic arrays on the %s (" FIO_MACRO2STR(
@@ -1482,7 +1482,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
     /* Test start here */
 
     /* test push */
-    for (int i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
+    for (size_t i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       o = *FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1), "push failed (%d)", i);
@@ -1500,7 +1500,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3);
 
     /* test pop */
-    for (int i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
+    for (size_t i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
       FIO_NAME(FIO_ARRAY_NAME, pop)(a, &o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((i + 1)),
                  "pop value error failed (%d)",
@@ -1517,7 +1517,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                "compact zero elementes didn't make array embedded?");
 
     /* test unshift */
-    for (int i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
+    for (size_t i = (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; i--;) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       o = *FIO_NAME(FIO_ARRAY_NAME, unshift)(a, o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS(i + 1), "shift failed (%d)", i);
@@ -1538,7 +1538,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3);
 
     /* test shift */
-    for (int i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
+    for (size_t i = 0; i < (int)(FIO_ARRAY_EMBEDDED_CAPA) + 3; ++i) {
       FIO_NAME(FIO_ARRAY_NAME, shift)(a, &o);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((i + 1)),
                  "shift value error failed (%d)",
@@ -1661,7 +1661,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
 
     /* test push / unshift alternate */
     FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       FIO_ARRAY_TEST_OBJ_SET(o, (i + 1));
       FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       FIO_ASSERT(FIO_NAME(FIO_ARRAY_NAME, count)(a) + 1 ==
@@ -1686,20 +1686,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
                  "push-shift cycle failed (%d)",
                  i);
     }
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       o = FIO_NAME(FIO_ARRAY_NAME, get)(a, i);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((4096 * 2) - i),
                  "item value error at index %d",
                  i);
     }
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       o = FIO_NAME(FIO_ARRAY_NAME, get)(a, i + 4096);
       FIO_ASSERT(FIO_ARRAY_TEST_OBJ_IS((1 + i)),
                  "item value error at index %d",
                  i + 4096);
     }
 #if DEBUG
-    for (int i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
       FIO_LOG_DEBUG2(
           "\t- " FIO_MACRO2STR(
               FIO_NAME(FIO_ARRAY_NAME, s)) " after push/unshit cycle%s:\n"
@@ -1717,7 +1717,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
     FIO_ARRAY_TYPE_COPY(o, FIO_ARRAY_TYPE_INVALID);
 /* test set with NULL, hopefully a bug will cause a crash */
 #if FIO_ARRAY_TYPE_DESTROY_SIMPLE
-    for (int i = 0; i < 4096; ++i) {
+    for (size_t i = 0; i < 4096; ++i) {
       FIO_NAME(FIO_ARRAY_NAME, set)(a, i, o, NULL);
     }
 #else
@@ -1725,7 +1725,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
      * we need to clear the memory to make sure a cleanup actions don't get
      * unexpected values.
      */
-    for (int i = 0; i < (4096 * 2); ++i) {
+    for (size_t i = 0; i < (4096 * 2); ++i) {
       FIO_ARRAY_TYPE_COPY((FIO_NAME2(FIO_ARRAY_NAME, ptr)(a)[i]),
                           FIO_ARRAY_TYPE_INVALID);
     }
@@ -1741,7 +1741,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
         int va[10];
       } d = {1, {1, 8, 2, 7, 3, 6, 4, 5}};
       FIO_NAME(FIO_ARRAY_NAME, destroy)(a);
-      for (int i = 0; d.va[i]; ++i) {
+      for (size_t i = 0; d.va[i]; ++i) {
         FIO_ARRAY_TEST_OBJ_SET(o, d.va[i]);
         FIO_NAME(FIO_ARRAY_NAME, push)(a, o);
       }

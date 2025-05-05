@@ -61,7 +61,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, stream)(void) {
              "stream is empty after `fio_stream_add` (data, copy)");
   FIO_ASSERT(FIO_NAME_TEST(stl, stream___noop_dealloc_count) == expect_dealloc,
              "copying a packet should deallocate the original");
-  for (int i = 0; i < 3; ++i) {
+  for (size_t i = 0; i < 3; ++i) {
     /* test that read operrations are immutable */
     buf = mem;
     len = 4000;

@@ -2435,7 +2435,8 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
   void *old = &mark;
   mark = fio_risky_hash(&old, sizeof(mark), 0);
 
-  for (int repeat_cycle_test = 0; repeat_cycle_test < 4; ++repeat_cycle_test) {
+  for (size_t repeat_cycle_test = 0; repeat_cycle_test < 4;
+       ++repeat_cycle_test) {
     for (size_t i = 0; i < limit - 4; i += 4) {
       if (ary[i])
         fio___memset_test_aligned(ary[i], mark, 16, "mark missing at ary[0]");
@@ -2483,19 +2484,19 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
       ary[i + 3] = (char *)FIO_NAME(FIO_MEMORY_NAME,
                                     realloc2)(ary[i + 3], cycles * 2, cycles);
 
-      for (int b = 0; b < 4; ++b) {
+      for (size_t b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
           FIO_ASSERT(((uint64_t *)(ary[i + b]))[pos] == mark,
                      "memory mark corrupted at test ptr %zu",
                      i + b);
         }
       }
-      for (int b = 1; b < 4; ++b) {
+      for (size_t b = 1; b < 4; ++b) {
         FIO_NAME(FIO_MEMORY_NAME, free)(ary[b]);
         ary[b] = NULL;
         FIO_NAME(FIO_MEMORY_NAME, free)(ary[i + b]);
       }
-      for (int b = 1; b < 4; ++b) {
+      for (size_t b = 1; b < 4; ++b) {
         ary[i + b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
         if (i) {
           ary[b] = (char *)FIO_NAME(FIO_MEMORY_NAME, malloc)(cycles);
@@ -2506,7 +2507,7 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
         fio_xmask(ary[i + b], cycles, mark);
       }
 
-      for (int b = 0; b < 4; ++b) {
+      for (size_t b = 0; b < 4; ++b) {
         for (size_t pos = 0; pos < (cycles / sizeof(uint64_t)); ++pos) {
           FIO_ASSERT(((uint64_t *)(ary[b]))[pos] == mark,
                      "memory mark corrupted at test ptr %zu",

@@ -1824,7 +1824,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         FIO_PTR_TAG(&b64message),
         "Hello World, this is the voice of peace:)",
         41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       b64i = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&b64message), &c, 1);
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, len)(FIO_PTR_TAG(&b64message)) ==
@@ -1879,7 +1879,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_NAME(FIO_STR_NAME, write)
     (FIO_PTR_TAG(&unescaped), utf8_sample, FIO_STRLEN(utf8_sample));
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       ue = FIO_NAME(FIO_STR_NAME, write)(FIO_PTR_TAG(&unescaped), &c, 1);
     }

@@ -1262,6 +1262,10 @@ Settings - Memory Function Selectors
 #endif
 #endif /* FIO_MEMCMP */
 
+#ifndef FIO_FOR
+/** Helper for simple `for` loops, where `i` is the variable name to use. */
+#define FIO_FOR(i, count) for (size_t i = 0; i < (count); ++i)
+#endif
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
 ***************************************************************************** */
@@ -1603,22 +1607,6 @@ FIO___MEMBUF_FN(8, 64, 64, fio_lton64, _be)
 #undef FIO___MEMBUF_FN
 
 /** Converts an unaligned byte stream to a 24 bit number. */
-FIO_IFUNC uint32_t fio_buf2u24u(const void *c) {
-  uint32_t tmp = 0;
-  fio_memcpy3(&tmp, c);
-#if __BIG_ENDIAN__
-  c = c >> 8;
-#endif
-  return tmp;
-} /** Writes a 24 bit number to an unaligned buffer. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-#if __BIG_ENDIAN__
-  i = i << 8;
-#endif
-  fio_memcpy3(buf, &i);
-}
-
-/** Converts an unaligned byte stream to a 24 bit number. */
 FIO_IFUNC uint32_t fio_buf2u24_le(const void *c) {
   uint32_t tmp = ((uint32_t)((uint8_t *)c)[0]) |
                  ((uint32_t)((uint8_t *)c)[1] << 8) |
@@ -1636,12 +1624,31 @@ FIO_IFUNC uint32_t fio_buf2u24_be(const void *c) {
                  ((uint32_t)((uint8_t *)c)[1] << 8) |
                  ((uint32_t)((uint8_t *)c)[2]);
   return tmp;
-} /** Writes a 24 bit number to an unaligned buffer. */
+}
+/** Writes a 24 bit number to an unaligned buffer. */
 FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
   ((uint8_t *)buf)[0] = (i >> 16) & 0xFFU;
   ((uint8_t *)buf)[1] = (i >> 8) & 0xFFU;
   ((uint8_t *)buf)[2] = (i)&0xFFU;
 }
+
+#if __BIG_ENDIAN__
+/** Converts an unaligned byte stream to a 24 bit number - local endieness. */
+FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_be(c); }
+/** Writes a 24 bit number to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
+  return fio_u2buf24_be(buf, i);
+}
+#elif __LITTLE_ENDIAN__
+/** Converts an unaligned byte stream to a 24 bit number - local endieness. */
+FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_le(c); }
+/** Writes a 24 bit number to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
+  return fio_u2buf24_le(buf, i);
+}
+#else
+#warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
+#endif
 
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
@@ -2781,7 +2788,7 @@ Vector Types (SIMD / Math)
 #endif
 
 /** An unsigned 128bit union type. */
-typedef union {
+typedef union fio_u128 {
   /** unsigned native word size array, length is system dependent */
   size_t uz[16 / sizeof(size_t)];
   /** known bit word arrays */
@@ -2789,6 +2796,12 @@ typedef union {
   uint32_t u32[4];
   uint16_t u16[8];
   uint8_t u8[16];
+  /** signed variants */
+  ssize_t iz[16 / sizeof(size_t)];
+  int64_t i64[2];
+  int32_t i32[4];
+  int16_t i16[8];
+  int8_t i8[16];
   /** vector types, if supported */
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[1];
@@ -2807,13 +2820,19 @@ typedef union {
 } fio_u128 FIO_ALIGN(16);
 
 /** An unsigned 256bit union type. */
-typedef union {
+typedef union fio_u256 {
   size_t uz[32 / sizeof(size_t)];
   uint64_t u64[4];
   uint32_t u32[8];
   uint16_t u16[16];
   uint8_t u8[32];
   fio_u128 u128[2];
+  /** signed variants */
+  ssize_t iz[32 / sizeof(size_t)];
+  int64_t i64[4];
+  int32_t i32[8];
+  int16_t i16[16];
+  int8_t i8[32];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[2];
   uint32x4_t x32[2];
@@ -2834,7 +2853,7 @@ typedef union {
 } fio_u256 FIO_ALIGN(16);
 
 /** An unsigned 512bit union type. */
-typedef union {
+typedef union fio_u512 {
   size_t uz[64 / sizeof(size_t)];
   uint64_t u64[8];
   uint32_t u32[16];
@@ -2842,6 +2861,12 @@ typedef union {
   uint8_t u8[64];
   fio_u128 u128[4];
   fio_u256 u256[2];
+  /** signed variants */
+  ssize_t iz[64 / sizeof(size_t)];
+  int64_t i64[8];
+  int32_t i32[16];
+  int16_t i16[32];
+  int8_t i8[64];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[4];
   uint32x4_t x32[4];
@@ -2856,7 +2881,7 @@ typedef union {
 } fio_u512 FIO_ALIGN(16);
 
 /** An unsigned 1024bit union type. */
-typedef union {
+typedef union fio_u1024 {
   size_t uz[128 / sizeof(size_t)];
   uint64_t u64[16];
   uint32_t u32[32];
@@ -2865,6 +2890,12 @@ typedef union {
   fio_u128 u128[8];
   fio_u256 u256[4];
   fio_u512 u512[2];
+  /** signed variants */
+  ssize_t iz[128 / sizeof(size_t)];
+  int64_t i64[16];
+  int32_t i32[32];
+  int16_t i16[64];
+  int8_t i8[128];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[8];
   uint32x4_t x32[8];
@@ -2879,7 +2910,7 @@ typedef union {
 } fio_u1024 FIO_ALIGN(16);
 
 /** An unsigned 2048bit union type. */
-typedef union {
+typedef union fio_u2048 {
   size_t uz[256 / sizeof(size_t)];
   uint64_t u64[32];
   uint32_t u32[64];
@@ -2889,6 +2920,12 @@ typedef union {
   fio_u256 u256[8];
   fio_u512 u512[4];
   fio_u1024 u1024[2];
+  /** signed variants */
+  ssize_t iz[256 / sizeof(size_t)];
+  int64_t i64[32];
+  int32_t i32[64];
+  int16_t i16[128];
+  int8_t i8[256];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[16];
   uint32x4_t x32[16];
@@ -2903,7 +2940,7 @@ typedef union {
 } fio_u2048 FIO_ALIGN(16);
 
 /** An unsigned 4096bit union type. */
-typedef union {
+typedef union fio_u4096 {
   size_t uz[512 / sizeof(size_t)];
   uint64_t u64[64];
   uint32_t u32[128];
@@ -2914,6 +2951,12 @@ typedef union {
   fio_u512 u512[8];
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
+  /** signed variants */
+  ssize_t iz[512 / sizeof(size_t)];
+  int64_t i64[64];
+  int32_t i32[128];
+  int16_t i16[256];
+  int8_t i8[512];
 #if FIO___HAS_ARM_INTRIN
   uint64x2_t x64[32];
   uint32x4_t x32[32];

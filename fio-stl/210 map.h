@@ -1284,7 +1284,7 @@ perform_overwrite:
 
 reallocate_map:
   /* reallocate map */
-  for (int i = 1; i < 3; ++i) {
+  for (size_t i = 1; i < 3; ++i) {
     if (FIO_NAME(FIO_MAP_NAME, __allocate_map)(&tmp, o->bits + i))
       goto no_memory;
     if (FIO_NAME(FIO_MAP_NAME, __move2map)(&tmp, o)) {

@@ -241,7 +241,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                                  utf8_sample,
                                  FIO_STRLEN(utf8_sample)),
                "Couldn't write UTF-8 example.");
-    for (int i = 1; i < 256; ++i) {
+    for (size_t i = 1; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
                  "write returned an error");
@@ -283,7 +283,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                      NULL,
                      "Hello World, this is the voice of peace:)",
                      41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
                  "write returned an error");
@@ -323,7 +323,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, string_core_helpers)(void) {
                      NULL,
                      "Hello World, this is the voice of peace:)",
                      41);
-    for (int i = 0; i < 256; ++i) {
+    for (size_t i = 0; i < 256; ++i) {
       uint8_t c = i;
       FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
                  "write returned an error");

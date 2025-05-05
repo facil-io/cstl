@@ -810,7 +810,7 @@ FIO_SFUNC uint32_t FIO_NAME(FIO_MAP2_NAME,
       if (!(has_possible_full_byte | has_possible_empty_byte))
         continue;
       /* there was a 7 bit match for a possible free space in this group */
-      for (int i = 0; i < 8; ++i) {
+      for (size_t i = 0; i < 8; ++i) {
         const uint32_t tmp = (uint32_t)((pos + offsets[i]) & pos_mask);
         if (!imap[tmp])
           return (r = tmp); /* empty slot always ends search */
@@ -1106,7 +1106,7 @@ SFUNC void FIO_NAME(FIO_MAP2_NAME, evict)(FIO_MAP2_PTR map,
     /* map is scattered */
     uint32_t pos_mask = (uint32_t)(FIO_MAP2_CAPA(o->bits) - 1);
     uint32_t pos = *(uint32_t *)o->map;
-    for (int i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < 3; ++i) {
       struct timespec t = {0};
       clock_gettime(CLOCK_MONOTONIC, &t);
       pos *= t.tv_nsec ^ t.tv_sec ^ (uintptr_t)imap;
@@ -1213,7 +1213,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, node_s) *
     *o = FIO_NAME(FIO_MAP2_NAME, __duplicate)(o, 3, 1);
   }
   /* find the object's (potential) position in the array */
-  for (int i = 0;;) {
+  for (size_t i = 0;;) {
     pos = FIO_NAME(FIO_MAP2_NAME, __index)(o, key, hash);
     if (pos != (uint32_t)-1)
       break;
@@ -1445,7 +1445,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, iterator_s)
         r.private_.index += 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (++r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         FIO_MAP2___EACH_COPY_DATA();
@@ -1488,7 +1488,7 @@ find_pos:
         r.private_.index += 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (++r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (++r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         if (pos_counter != r.private_.pos) {
@@ -1567,7 +1567,7 @@ SFUNC FIO_NAME(FIO_MAP2_NAME, iterator_s)
         r.private_.index -= 8;
         continue;
       }
-      for (int i = 0; i < 8; ++i) {
+      for (size_t i = 0; i < 8; ++i) {
         --r.private_.index;
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
@@ -1612,7 +1612,7 @@ find_pos:
         r.private_.index -= 8;
         continue;
       }
-      for (int i = 0; i < 8; (++i), (--r.private_.index)) {
+      for (size_t i = 0; i < 8; (++i), (--r.private_.index)) {
         if (!imap[r.private_.index] || imap[r.private_.index] == 0xFF)
           continue;
         if (pos_counter != r.private_.pos) {

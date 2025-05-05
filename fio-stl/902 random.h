@@ -282,7 +282,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
     FIO_MEMCPY(buf, str, len);
     uint64_t org_hash = fio_risky_hash(buf, len, 0);
     FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
-    for (int i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
       char *tmp = buf + i;
       FIO_MEMCPY(tmp, str, len);
       uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
@@ -418,7 +418,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
     for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
       uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
       ++freq[val];
-      for (int bit = 0; bit < 8; ++bit) {
+      for (size_t bit = 0; bit < 8; ++bit) {
         ++totals[(val >> bit) & 1];
       }
     }

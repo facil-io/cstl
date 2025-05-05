@@ -138,7 +138,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
 
   if (active_count > 0) {
-    for (int i = 0; i < active_count; i++) {
+    for (size_t i = 0; i < active_count; i++) {
       // test for event(s) type
       if ((events[i].filter & EVFILT_WRITE))
         p->settings.on_ready(events[i].udata);

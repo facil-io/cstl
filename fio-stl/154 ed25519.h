@@ -62,6 +62,10 @@ Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+/* *****************************************************************************
+Basic Operations (Helpers)
+***************************************************************************** */
+
 /* prevent ED25519 keys from having a small period (cyclic value). */
 FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[0] &= 0xF8U;  /* zero out 3 least significant bits (emulate mul by 8) */
@@ -85,6 +89,52 @@ FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   k->public_key.u64[1] ^= msk;
   k->public_key.u64[2] ^= msk;
 }
+
+FIO_IFUNC fio_u1024 fio___ed25519_unpack(uint8_t *u) {
+  fio_u1024 r;
+  for (size_t i = 0; i < 16; ++i)
+    r.u64[i] = (uint64_t)u[(i << 1)] | ((uint64_t)u[(i << 1)] << 8);
+  r.u64[15] &= 0x7FFFULL;
+  return r;
+}
+
+#define fio___ed25519_add fio_u1024_add64
+#define fio___ed25519_sub fio_u1024_sub64
+
+FIO_IFUNC void fio___ed25519_normalize_step(fio_u1024 *u) {
+  uint64_t c;
+  for (size_t i = 0; i < 15; ++i) {
+    /* ERR: example code uses illegal / undefined signed shift. */
+    c = u->u64[i] >> 16; /* TODO: propagate carry bits of negative numbers? */
+    c |= (0ULL - (u->u64[i] >> 63)) & ((1ULL << 48) - 1);
+    u->u64[i] &= 0xFFFFU;
+    u->u64[i + 1] += c;
+  }
+  c = u->u64[15] >> 16;
+  c |= (0ULL - (u->u64[15] >> 63)) & ((1ULL << 48) - 1);
+  u->u64[15] &= 0xFFFFU;
+  u->u64[0] += 38 * c;
+}
+
+FIO_IFUNC fio_u1024 fio___ed25519_mul(const fio_u1024 *a, const fio_u1024 *b) {
+  fio_u1024 r;
+  fio_u2048 p = {0};
+  for (size_t i = 0; i < 16; ++i)
+    for (size_t j = 0; j < 16; ++j)
+      p.u64[i + j] += a->u64[i] * b->u64[j];
+  for (size_t i = 0; i < 15; ++i)
+    p.u64[i] += 38 * p.u64[16 + i];
+  for (size_t i = 0; i < 16; ++i)
+    r.u64[i] = p.u64[i];
+  /* partial normalize / carry (2/3) */
+  fio___ed25519_normalize_step(&r);
+  fio___ed25519_normalize_step(&r);
+  return r;
+}
+
+/* *****************************************************************************
+Point Math
+***************************************************************************** */
 
 /* Elliptic Curve Point Addition for Ed25519 */
 FIO_IFUNC void fio___ed25519_point_add(fio_u1024 *R, const fio_u1024 *P) {

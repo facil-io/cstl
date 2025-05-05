@@ -2432,8 +2432,12 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
 
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
-  h->controller->write_body(h, *args);
-  h->sent += args->len;
+  int r = (int)0 - (int)((unsigned)(h->status == 204) | (h->status == 205) |
+                         (h->status == 304));
+  if (!r) {
+    h->controller->write_body(h, *args);
+    h->sent += args->len;
+  }
   if (args->finish) {
     h->state |= FIO_HTTP_STATE_FINISHED;
     h->writer = (h->state & FIO_HTTP_STATE_UPGRADED)
@@ -2441,7 +2445,7 @@ FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                     : fio____http_write_done;
     h->controller->on_finish(h);
   }
-  return 0;
+  return r;
 }
 
 void fio_http_write___(void); /* IDE Marker */

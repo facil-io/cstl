@@ -223,7 +223,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memcpy:\n");
 
-  for (int len_i = 5; len_i < 21; ++len_i) {
+  for (size_t len_i = 5; len_i < 21; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     for (size_t mem_len = (1ULL << len_i) - 1; mem_len <= (1ULL << len_i) + 1;
@@ -289,7 +289,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memchr:\n");
 
-  for (int len_i = 2; len_i < 20; ++len_i) {
+  for (size_t len_i = 2; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;
@@ -356,7 +356,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing memcmp:\n");
 
-  for (int len_i = 2; len_i < 21; ++len_i) {
+  for (size_t len_i = 2; len_i < 21; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 13 ? (15 - (len_i & 15)) : 2);
     const size_t mem_len = (1ULL << len_i);
@@ -483,7 +483,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, memalt)(void) {
 
   fprintf(stderr, "* Speed testing strlen:\n");
 
-  for (int len_i = 2; len_i < 20; ++len_i) {
+  for (size_t len_i = 2; len_i < 20; ++len_i) {
     const size_t repetitions = base_repetitions
                                << (len_i < 15 ? (15 - (len_i & 15)) : 0);
     const size_t mem_len = (1ULL << len_i) - 1;

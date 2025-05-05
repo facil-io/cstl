@@ -233,23 +233,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
   }
   {
     fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
-    for (int i = 0; i < 64; ++i) {
+    for (size_t i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
                  "fio_popcount error for 1 bit");
     }
-    for (int i = 0; i < 63; ++i) {
+    for (size_t i = 0; i < 63; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
                  "fio_popcount error for 2 bits");
     }
-    for (int i = 0; i < 62; ++i) {
+    for (size_t i = 0; i < 62; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
                  "fio_popcount error for 3 bits");
     }
-    for (int i = 0; i < 59; ++i) {
+    for (size_t i = 0; i < 59; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
                  "fio_popcount error for 3 alternating bits");
     }
-    for (int i = 0; i < 64; ++i) {
+    for (size_t i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
                  "fio_hemming_dist error at %d",
                  i);

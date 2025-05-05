@@ -90,7 +90,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sort)(void) {
       FIO_ASSERT(0, "fio_sort != clib qsort first error at index %zu", i);
     }
     clock_t start, end, fio_clk = 0, lib_clk = 0;
-    for (int count = 0; count < 8; ++count) {
+    for (size_t count = 0; count < 8; ++count) {
       for (size_t i = 0; i < len; ++i) {
         mem[i] = mem[len + i] = (size_t)rand();
       }

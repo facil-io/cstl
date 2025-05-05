@@ -174,7 +174,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha)(void) {
                         FIO_STRLEN(tests[t].msg),
                         NULL,
                         0);
-      for (int i = 0; i < 16; ++i) {
+      for (size_t i = 0; i < 16; ++i) {
         buf1[(i << 1)] = fio_i2c(((auth[i] >> 4) & 0xF));
         buf1[(i << 1) + 1] = fio_i2c(((auth[i]) & 0xF));
         buf2[(i << 1)] = fio_i2c(((tests[t].expected[i] >> 4) & 0xF));

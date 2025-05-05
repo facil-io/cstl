@@ -6776,7 +6776,8 @@ void fio_poly1305_auth(void *mac_dest,
 
 Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
 
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `mac_dest`      MUST point to a 128 bit long memory address (16 Bytes).
+* `key256bits`    MUST point to a 256 bit long memory address (32 Bytes).
 
 -------------------------------------------------------------------------------
 ## SHA1

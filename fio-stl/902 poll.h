@@ -46,12 +46,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poll)(void) {
   fio_poll_s p;
   fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};
-  for (int i = 128; i--;) {
+  for (size_t i = 128; i--;) {
     FIO_ASSERT(!fio_poll_monitor(&p, i, (void *)(uintptr_t)i, events[(i & 3)]),
                "fio_poll_monitor failed for fd %d",
                i);
   }
-  for (int i = 128; i--;) {
+  for (size_t i = 128; i--;) {
     if ((i & 3) == 3) {
       FIO_ASSERT(!fio_poll_forget(&p, i), "fio_poll_forget failed at %d", i);
       FIO_ASSERT(fio_poll_forget(&p, i),
