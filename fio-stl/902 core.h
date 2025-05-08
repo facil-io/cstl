@@ -482,7 +482,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
             "Basic vector MUL error");
 
         /* the following will probably never detect an error */
-
         {
           uint64_t ignr_ = fio_math_add(expected, na, nb, 4);
           ignr_ += fio_u256_add(&result.u256[0], &ua, &ub);
@@ -505,6 +504,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
         fio_u256_mul(&result, &ua, &ub);
         FIO_ASSERT(!memcmp(result.u64, expected, sizeof(result.u64)),
                    "Multi-Precision MUL error");
+        FIO_ASSERT(fio_u256_is_eq(&result, (fio_u256 *)&expected),
+                   "Multi-Precision MUL error (is_eq)");
+        {
+          fio_u512 cpy = result;
+          fio_u512 tmp = result;
+          fio_u512_cadd16(&tmp, &tmp, 1);
+          FIO_ASSERT(fio_u512_is_eq(&result, &cpy),
+                     "Should be equal(fio_u512_is_eq)");
+          FIO_ASSERT(!fio_u512_is_eq(&result, &tmp),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          fio_u512_ct_swap_if(0, &cpy, &tmp);
+          FIO_ASSERT(fio_u512_is_eq(&result, &cpy),
+                     "Should be equal(fio_u512_is_eq)");
+          FIO_ASSERT(!fio_u512_is_eq(&result, &tmp),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          fio_u512_ct_swap_if(1, &cpy, &tmp);
+          FIO_ASSERT(!fio_u512_is_eq(&result, &cpy),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          FIO_ASSERT(fio_u512_is_eq(&result, &tmp),
+                     "Should be equal(fio_u512_is_eq)");
+        }
       }
     }
   }

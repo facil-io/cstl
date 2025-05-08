@@ -2035,8 +2035,7 @@ FIO_IFUNC uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b) {
   return (b ^ (((uintmax_t)0ULL - (cond & 1)) & (a ^ b)));
 }
 
-/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise.
- */
+/** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
 FIO_IFUNC uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
@@ -3203,10 +3202,10 @@ Vector Helpers - Vector Math Operations
   FIO___UXXX_DEF_OP4T_INNER(total_bits, sub, -)                                \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, mul, *)                                \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, and, &)                                \
-  FIO___UXXX_DEF_OP2(total_bits, 64, and, &)                                   \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, or, |)                                 \
-  FIO___UXXX_DEF_OP2(total_bits, 64, or, |)                                    \
   FIO___UXXX_DEF_OP4T_INNER(total_bits, xor, ^)                                \
+  FIO___UXXX_DEF_OP2(total_bits, 64, and, &)                                   \
+  FIO___UXXX_DEF_OP2(total_bits, 64, or, |)                                    \
   FIO___UXXX_DEF_OP2(total_bits, 64, xor, ^)                                   \
   FIO_IFUNC bool fio_u##total_bits##_is_eq(const fio_u##total_bits *a,         \
                                            const fio_u##total_bits *b) {       \
@@ -3219,6 +3218,17 @@ Vector Helpers - Vector Math Operations
   FIO_IFUNC void fio_u##total_bits##_inv(fio_u##total_bits *target,            \
                                          const fio_u##total_bits *a) {         \
     FIO_MATH_UXXX_SOP(((target)[0]), ((a)[0]), 64, ~);                         \
+  }                                                                            \
+  FIO_IFUNC void fio_u##total_bits##_ct_swap_if(                               \
+      bool cond,                                                               \
+      fio_u##total_bits *restrict a,                                           \
+      fio_u##total_bits *restrict b) {                                         \
+    fio_u##total_bits mask;                                                    \
+    /* compiler, please vectorize / unify loops as well as possible */         \
+    fio_u##total_bits##_xor(&mask, a, b);                                      \
+    fio_u##total_bits##_cand64(&mask, &mask, (uint64_t)0ULL - cond);           \
+    fio_u##total_bits##_xor(a, a, &mask);                                      \
+    fio_u##total_bits##_xor(b, b, &mask);                                      \
   }
 
 FIO___UXXX_DEF_OP4T(128)
@@ -51037,7 +51047,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
             "Basic vector MUL error");
 
         /* the following will probably never detect an error */
-
         {
           uint64_t ignr_ = fio_math_add(expected, na, nb, 4);
           ignr_ += fio_u256_add(&result.u256[0], &ua, &ub);
@@ -51060,6 +51069,27 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
         fio_u256_mul(&result, &ua, &ub);
         FIO_ASSERT(!memcmp(result.u64, expected, sizeof(result.u64)),
                    "Multi-Precision MUL error");
+        FIO_ASSERT(fio_u256_is_eq(&result, (fio_u256 *)&expected),
+                   "Multi-Precision MUL error (is_eq)");
+        {
+          fio_u512 cpy = result;
+          fio_u512 tmp = result;
+          fio_u512_cadd16(&tmp, &tmp, 1);
+          FIO_ASSERT(fio_u512_is_eq(&result, &cpy),
+                     "Should be equal(fio_u512_is_eq)");
+          FIO_ASSERT(!fio_u512_is_eq(&result, &tmp),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          fio_u512_ct_swap_if(0, &cpy, &tmp);
+          FIO_ASSERT(fio_u512_is_eq(&result, &cpy),
+                     "Should be equal(fio_u512_is_eq)");
+          FIO_ASSERT(!fio_u512_is_eq(&result, &tmp),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          fio_u512_ct_swap_if(1, &cpy, &tmp);
+          FIO_ASSERT(!fio_u512_is_eq(&result, &cpy),
+                     "Shouldn't be equal(fio_u512_is_eq)");
+          FIO_ASSERT(fio_u512_is_eq(&result, &tmp),
+                     "Should be equal(fio_u512_is_eq)");
+        }
       }
     }
   }
