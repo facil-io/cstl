@@ -1636,16 +1636,12 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 /** Converts an unaligned byte stream to a 24 bit number - local endieness. */
 FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_be(c); }
 /** Writes a 24 bit number to an unaligned buffer - in local endieness. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-  return fio_u2buf24_be(buf, i);
-}
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_be(buf, i); }
 #elif __LITTLE_ENDIAN__
 /** Converts an unaligned byte stream to a 24 bit number - local endieness. */
 FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_le(c); }
 /** Writes a 24 bit number to an unaligned buffer - in local endieness. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-  return fio_u2buf24_le(buf, i);
-}
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_le(buf, i); }
 #else
 #warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
 #endif

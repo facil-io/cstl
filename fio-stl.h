@@ -1673,16 +1673,12 @@ FIO_IFUNC void fio_u2buf24_be(void *buf, uint32_t i) {
 /** Converts an unaligned byte stream to a 24 bit number - local endieness. */
 FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_be(c); }
 /** Writes a 24 bit number to an unaligned buffer - in local endieness. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-  return fio_u2buf24_be(buf, i);
-}
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_be(buf, i); }
 #elif __LITTLE_ENDIAN__
 /** Converts an unaligned byte stream to a 24 bit number - local endieness. */
 FIO_IFUNC uint32_t fio_buf2u24u(const void *c) { return fio_buf2u24_le(c); }
 /** Writes a 24 bit number to an unaligned buffer - in local endieness. */
-FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) {
-  return fio_u2buf24_le(buf, i);
-}
+FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_le(buf, i); }
 #else
 #warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
 #endif
@@ -16645,7 +16641,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
     /* TODO! fix error handling*/
-    for (size_t i = 0; i < active_count; i++) {
+    for (unsigned i = 0; i < (unsigned)active_count; i++) {
       // errors are handled as disconnections (on_close) in the EPOLLIN queue
       // if no error, try an active event(s)
       if (events[i].events & EPOLLOUT)
@@ -16655,7 +16651,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   }
   active_count = epoll_wait(p->fds[1].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
-    for (size_t i = 0; i < active_count; i++) {
+    for (unsigned i = 0; i < (unsigned)active_count; i++) {
       // holds an active event(s)
       if (events[i].events & EPOLLIN)
         p->settings.on_data(events[i].data.ptr);
@@ -16813,7 +16809,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
       kevent(p->fd, NULL, 0, events, FIO_POLL_MAX_EVENTS, &timeout);
 
   if (active_count > 0) {
-    for (size_t i = 0; i < active_count; i++) {
+    for (unsigned i = 0; i < (unsigned)active_count; i++) {
       // test for event(s) type
       if ((events[i].filter & EVFILT_WRITE))
         p->settings.on_ready(events[i].udata);
@@ -24204,7 +24200,7 @@ Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if 0 && defined(FIO_ED25519) && !defined(H___FIO_ED25519___H)
+#if defined(FIO_ED25519) && !defined(H___FIO_ED25519___H) && 0
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
@@ -24222,7 +24218,7 @@ ED25519 API
 ***************************************************************************** */
 
 /** ED25519 Key Pair */
-typedef struct {
+typedef struct {        /* TODO: FIXME: do we need all the bits? */
   fio_u512 private_key; /* Private key (with extra internal storage?) */
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
@@ -24260,10 +24256,18 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
-static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0x7FFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFED);
+static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0xFFFFFFFFFFFFFFEDULL,
+                                                      0xFFFFFFFFFFFFFFFFULL,
+                                                      0xFFFFFFFFFFFFFFFFULL,
+                                                      0x7FFFFFFFFFFFFFFFULL);
+/* clang-format off */
+static fio_u1024 FIO___ED25519_PRIME_UNPACKED =
+                 fio_u1024_init64(0xFFEDULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0x7FFFULL);
+/* clang-format on */
+
 /* Obfuscate or recover ED25519 keys to prevent easy memory scraping */
 FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   /* Generate a deterministic mask */
@@ -24285,8 +24289,9 @@ FIO_IFUNC fio_u1024 fio___ed25519_unpack(uint8_t *u) {
   return r;
 }
 
-#define fio___ed25519_add fio_u1024_add64
-#define fio___ed25519_sub fio_u1024_sub64
+#define fio___ed25519_add     fio_u1024_add64
+#define fio___ed25519_sub     fio_u1024_sub64
+#define fio___ed25519_swap_if fio_u1024_ct_swap_if
 
 FIO_IFUNC void fio___ed25519_normalize_step(fio_u1024 *u) {
   uint64_t c;
@@ -50798,23 +50803,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
   }
   {
     fprintf(stderr, "* Testing popcount and hemming distance calculation.\n");
-    for (size_t i = 0; i < 64; ++i) {
+    for (int i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
                  "fio_popcount error for 1 bit");
     }
-    for (size_t i = 0; i < 63; ++i) {
+    for (int i = 0; i < 63; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)3 << i) == 2,
                  "fio_popcount error for 2 bits");
     }
-    for (size_t i = 0; i < 62; ++i) {
+    for (int i = 0; i < 62; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)7 << i) == 3,
                  "fio_popcount error for 3 bits");
     }
-    for (size_t i = 0; i < 59; ++i) {
+    for (int i = 0; i < 59; ++i) {
       FIO_ASSERT(fio_popcount((uint64_t)21 << i) == 3,
                  "fio_popcount error for 3 alternating bits");
     }
-    for (size_t i = 0; i < 64; ++i) {
+    for (int i = 0; i < 64; ++i) {
       FIO_ASSERT(fio_hemming_dist(((uint64_t)1 << i) - 1, 0) == i,
                  "fio_hemming_dist error at %d",
                  i);
@@ -51069,7 +51074,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, core)(void) {
         fio_u256_mul(&result, &ua, &ub);
         FIO_ASSERT(!memcmp(result.u64, expected, sizeof(result.u64)),
                    "Multi-Precision MUL error");
-        FIO_ASSERT(fio_u256_is_eq(&result, (fio_u256 *)&expected),
+        FIO_ASSERT(fio_u512_is_eq(&result, (fio_u512 *)&expected),
                    "Multi-Precision MUL error (is_eq)");
         {
           fio_u512 cpy = result;

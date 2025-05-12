@@ -17,7 +17,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if 0 && defined(FIO_ED25519) && !defined(H___FIO_ED25519___H)
+#if defined(FIO_ED25519) && !defined(H___FIO_ED25519___H) && 0
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
@@ -35,7 +35,7 @@ ED25519 API
 ***************************************************************************** */
 
 /** ED25519 Key Pair */
-typedef struct {
+typedef struct {        /* TODO: FIXME: do we need all the bits? */
   fio_u512 private_key; /* Private key (with extra internal storage?) */
   fio_u256 public_key;  /* Public key */
 } fio_ed25519_s;
@@ -73,10 +73,18 @@ FIO_IFUNC void fio___ed25519_clamp_on_key(uint8_t *k) {
   k[31] |= 0x40U; /* set the 255th bit (making sure the value is big) */
 }
 
-static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0x7FFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFFF,
-                                                      0xFFFFFFFFFFFFFFED);
+static fio_u256 FIO___ED25519_PRIME = fio_u256_init64(0xFFFFFFFFFFFFFFEDULL,
+                                                      0xFFFFFFFFFFFFFFFFULL,
+                                                      0xFFFFFFFFFFFFFFFFULL,
+                                                      0x7FFFFFFFFFFFFFFFULL);
+/* clang-format off */
+static fio_u1024 FIO___ED25519_PRIME_UNPACKED =
+                 fio_u1024_init64(0xFFEDULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0xFFFFULL,
+                                  0xFFFFULL, 0xFFFFULL, 0xFFFFULL, 0x7FFFULL);
+/* clang-format on */
+
 /* Obfuscate or recover ED25519 keys to prevent easy memory scraping */
 FIO_IFUNC void fio___ed25519_flip(fio_ed25519_s *k) {
   /* Generate a deterministic mask */
@@ -98,8 +106,9 @@ FIO_IFUNC fio_u1024 fio___ed25519_unpack(uint8_t *u) {
   return r;
 }
 
-#define fio___ed25519_add fio_u1024_add64
-#define fio___ed25519_sub fio_u1024_sub64
+#define fio___ed25519_add     fio_u1024_add64
+#define fio___ed25519_sub     fio_u1024_sub64
+#define fio___ed25519_swap_if fio_u1024_ct_swap_if
 
 FIO_IFUNC void fio___ed25519_normalize_step(fio_u1024 *u) {
   uint64_t c;
