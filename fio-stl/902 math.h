@@ -132,9 +132,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
                fio_math_lsb_index(b, 3));
   }
   { /* Test vectors (partial) */
-    fio_u128 v128 = {{0}};
-    fio_u256 v256 = {{0}};
-    fio_u512 v512 = {{0}};
+    fio_u128 v128 = {.u64 = {0}};
+    fio_u256 v256 = {.u64 = {0}};
+    fio_u512 v512 = {.u64 = {0}};
 #define FIO_VTEST_ACT_CONST(opt, val)                                          \
   fio_u128_c##opt##64(&v128, &v128, val);                                      \
   fio_u256_c##opt##64(&v256, &v256, val);                                      \

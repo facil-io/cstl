@@ -31,119 +31,59 @@ FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 31, 0)
 Playhouse hashing (next risky version)
 ***************************************************************************** */
 
-typedef union {
-  uint64_t v[4] FIO_ALIGN(16);
-#ifdef __SIZEOF_INT128__
-  __uint128_t u128[2];
-#endif
-} fio___r2hash_s;
-
-FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
-                                                 size_t len,
-                                                 uint64_t seed) {
-  fio___r2hash_s v = {.v = {seed, seed, seed, seed}};
-  fio___r2hash_s const prime = {.v = {FIO_U64_HASH_PRIME0,
-                                      FIO_U64_HASH_PRIME1,
-                                      FIO_U64_HASH_PRIME2,
-                                      FIO_U64_HASH_PRIME3}};
-  fio___r2hash_s w;
-  const uint8_t *data = (const uint8_t *)data_;
-  /* seed selection is constant time to avoid leaking seed data */
-  seed += len;
-  seed ^= fio_lrot64(seed, 47);
-  seed ^= FIO_U64_HASH_PRIME4;
-
-#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
-  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
-  v.v[i] ^= w.v[i];                                                            \
-  v.v[i] *= prime.v[i];                                                        \
-  w.v[i] = fio_lrot64(w.v[i], 31);                                             \
-  v.v[i] += w.v[i];                                                            \
-  v.v[i] ^= seed;
-
-  /* consumes 32 bytes (256 bits) blocks (no padding needed) */
-  for (size_t pos = 31; pos < len; pos += 32) {
-    for (size_t i = 0; i < 4; ++i) {
-      fio_memcpy8(w.v + i, data + (i << 3));
-      FIO___R2_ROUND(i);
-    }
-    seed += w.v[0] + w.v[1] + w.v[2] + w.v[3];
-    data += 32;
-  }
-#if (FIO___R2_PERFORM_FULL_BLOCK + 1) && 1
-  if (len & 31) { // pad with zeros
-    uint64_t tmp_buf[4] = {0};
-    fio_memcpy31x(tmp_buf, data, len);
-    for (size_t i = 0; i < 4; ++i) {
-      w.v[0] = tmp_buf[1];
-      FIO___R2_ROUND(i);
-    }
-  }
-#else
-  switch (len & 24) { /* only performed if data exits in these positions */
-  case 24: fio_memcpy8(w.v + 2, data + 16); FIO___R2_ROUND(2); /*fall through*/
-  case 16: fio_memcpy8(w.v + 1, data + 8); FIO___R2_ROUND(1);  /*fall through*/
-  case 8:
-    fio_memcpy8(w.v + 0, data);
-    FIO___R2_ROUND(0);
-    data += len & 24;
-  }
-  if (len & 7) {
-    uint64_t i = (len & 24) >> 3;
-    w.v[i] = 0;
-    fio_memcpy7x(w.v + i, data, len);
-    FIO___R2_ROUND(i);
-  }
-#endif
-
-  /* inner vector mini-avalanche */
-  for (size_t i = 0; i < 4; ++i)
-    v.v[i] *= prime.v[i];
-  v.v[0] ^= fio_lrot64(v.v[0], 7);
-  v.v[1] ^= fio_lrot64(v.v[1], 11);
-  v.v[2] ^= fio_lrot64(v.v[2], 13);
-  v.v[3] ^= fio_lrot64(v.v[3], 17);
-  return v;
-#undef FIO___R2_ROUND
+FIO_IFUNC void fio___risky2_round(fio_u256 *restrict v, uint8_t *bytes32) {
+  const fio_u512 primes = {.u64 = {
+                               FIO_U32_HASH_PRIME0,
+                               FIO_U32_HASH_PRIME1,
+                               FIO_U32_HASH_PRIME2,
+                               FIO_U32_HASH_PRIME3,
+                               FIO_U32_HASH_PRIME4,
+                               FIO_U32_HASH_PRIME5,
+                               FIO_U32_HASH_PRIME6,
+                               FIO_U32_HASH_PRIME7,
+                           }};
+  fio_u512 in = {.u64 = {
+                     1 + fio_buf2u32u(bytes32),
+                     1 + fio_buf2u32u(bytes32 + 4),
+                     1 + fio_buf2u32u(bytes32 + 8),
+                     1 + fio_buf2u32u(bytes32 + 12),
+                     1 + fio_buf2u32u(bytes32 + 16),
+                     1 + fio_buf2u32u(bytes32 + 20),
+                     1 + fio_buf2u32u(bytes32 + 24),
+                     1 + fio_buf2u32u(bytes32 + 28),
+                 }};
+  FIO_FOR(i, 8) { in.u64[i] *= primes.u64[i]; }
+  FIO_FOR(i, 8) { in.u32[(i << 1)] += in.u32[(i << 1) + 1]; }
+  FIO_FOR(i, 8) { v->u32[i] += in.u32[(i << 1)]; }
 }
-
 /*  Computes a facil.io Stable Hash. */
 FIO_SFUNC uint64_t fio_risky2_hash(const void *data_,
                                    size_t len,
                                    uint64_t seed) {
   uint64_t r;
-  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
-  /* summing avalanche */
-  r = v.v[0] + v.v[1] + v.v[2] + v.v[3];
-  r ^= r >> 31;
-  r *= FIO_U64_HASH_PRIME4;
-  r ^= r >> 31;
+  uint8_t *data = (uint8_t *)data_;
+  fio_u256 v = {.u64 = {(FIO_U64_HASH_PRIME0 + seed) + (len),
+                        (FIO_U64_HASH_PRIME1 - seed) + (len << 1),
+                        (FIO_U64_HASH_PRIME2 + seed) + (len << 2),
+                        (FIO_U64_HASH_PRIME3 ^ seed) + (len << 3)}};
+  for (size_t i = 31; i < len; i += 32) {
+    fio___risky2_round(&v, data);
+    data += 32;
+  }
+  if ((len & 31)) { /* leftover + length input */
+    fio_u256 buf = {0};
+    fio_memcpy31x(buf.u8, data, len);
+    fio___risky2_round(&v, buf.u8);
+  }
+  /* reducing */
+  r = v.u64[0] ^ v.u64[1] ^ v.u64[2] ^ v.u64[3];
+  r ^= v.u64[0] + v.u64[1] + v.u64[2] + v.u64[3];
   return r;
-}
-
-FIO_SFUNC void fio_risky2_hash128(void *restrict dest,
-                                  const void *restrict data_,
-                                  size_t len,
-                                  uint64_t seed) {
-  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
-  uint64_t r[2];
-  r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
-  r[1] = v.v[0] ^ v.v[1] ^ v.v[2] ^ v.v[3];
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
-  r[0] *= FIO_U64_HASH_PRIME4;
-  r[1] *= FIO_U64_HASH_PRIME0;
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
-  fio_memcpy16(dest, r);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
   return fio_risky2_hash(buf, len, 1);
 }
-
-#undef FIO___R2_HASH_MUL_PRIME
-#undef FIO___R2_HASH_ROUND_FULL
 
 /* *****************************************************************************
 Hashing speed test

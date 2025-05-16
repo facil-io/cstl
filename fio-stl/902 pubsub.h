@@ -110,7 +110,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
           .is_pattern = 1,
       },
   };
-  const int sub_count = (sizeof(sub) / sizeof(sub[0]));
+  const size_t sub_count = (sizeof(sub) / sizeof(sub[0]));
 
 #define FIO___PUBLISH2TEST()                                                   \
   fio_publish(.engine = FIO_PUBSUB_CLUSTER,                                    \

@@ -211,7 +211,7 @@ int main(int argc, char const *argv[]) {
   /* Clustering */
   if (fio_cli_get_i("-bp") > 0) {
     fio_buf_info_s scrt = FIO_BUF_INFO1((char *)fio_cli_get("-scrt"));
-    fio_pubsub_secret_set(scrt.buf, scrt.len);
+    fio_secret_set(scrt.buf, scrt.len, 0);
     fio_pubsub_broadcast_on_port(fio_cli_get_i("-bp"));
   }
 

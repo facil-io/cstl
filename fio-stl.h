@@ -2819,33 +2819,54 @@ Vector Types (SIMD / Math)
 #define FIO_HAS_UX 1
 #endif
 
+#if FIO___HAS_ARM_INTRIN
+/** defines a vector group for a fio_uXXX union */
+#define FIO___UXXX_XGRP_DEF(bits)                                              \
+  uint64x2_t x64[bits / 128];                                                  \
+  uint32x4_t x32[bits / 128];                                                  \
+  uint16x8_t x16[bits / 128];                                                  \
+  uint8x16_t x8[bits / 128]
+#elif __has_attribute(vector_size)
+/** defines a vector group for a fio_uXXX union */
+#define FIO___UXXX_XGRP_DEF(bits)                                              \
+  uint64_t __attribute__((vector_size((bits / 8)))) x64[1];                    \
+  uint32_t __attribute__((vector_size((bits / 8)))) x32[1];                    \
+  uint16_t __attribute__((vector_size((bits / 8)))) x16[1];                    \
+  uint8_t __attribute__((vector_size((bits / 8)))) x8[1]
+#else
+/** defines a (fake) vector group for a fio_uXXX union */
+#define FIO___UXXX_XGRP_DEF(bits)                                              \
+  uint64_t x64[(bits / 64)];                                                   \
+  uint32_t x32[(bits / 32)];                                                   \
+  uint16_t x16[(bits / 16)];                                                   \
+  uint8_t x8[(bits / 8)]
+#endif
+
+/** defines a type array group for a fio_uXXX union */
+#define FIO___UXXX_UGRP_DEF(bits)                                              \
+  /** unsigned native word size array, length is system dependent */           \
+  size_t uz[(bits / 8) / sizeof(size_t)];                                      \
+  /** known bit word arrays */                                                 \
+  uint64_t u64[(bits / 64)];                                                   \
+  uint32_t u32[(bits / 32)];                                                   \
+  uint16_t u16[(bits / 16)];                                                   \
+  uint8_t u8[(bits / 8)];                                                      \
+  /** signed variants */                                                       \
+  ssize_t iz[(bits / 8) / sizeof(size_t)];                                     \
+  int64_t i64[(bits / 64)];                                                    \
+  int32_t i32[(bits / 32)];                                                    \
+  int16_t i16[(bits / 16)];                                                    \
+  int8_t i8[(bits / 8)];                                                       \
+  /** float variants */                                                        \
+  float f[(bits / 8) / sizeof(float)];                                         \
+  double d[(bits / 8) / sizeof(double)];                                       \
+  long double ld[(bits / 8) / sizeof(long double)];                            \
+  /** vector variants (if supported) */                                        \
+  FIO___UXXX_XGRP_DEF(bits)
+
 /** An unsigned 128bit union type. */
 typedef union fio_u128 {
-  /** unsigned native word size array, length is system dependent */
-  size_t uz[16 / sizeof(size_t)];
-  /** known bit word arrays */
-  uint64_t u64[2];
-  uint32_t u32[4];
-  uint16_t u16[8];
-  uint8_t u8[16];
-  /** signed variants */
-  ssize_t iz[16 / sizeof(size_t)];
-  int64_t i64[2];
-  int32_t i32[4];
-  int16_t i16[8];
-  int8_t i8[16];
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[1];
-  uint32x4_t x32[1];
-  uint16x8_t x16[1];
-  uint8x16_t x8[1];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(16))) x64[1];
-  uint32_t __attribute__((vector_size(16))) x32[1];
-  uint16_t __attribute__((vector_size(16))) x16[1];
-  uint8_t __attribute__((vector_size(16))) x8[1];
-#endif
+  FIO___UXXX_UGRP_DEF(128);
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[1];
 #endif
@@ -2853,32 +2874,8 @@ typedef union fio_u128 {
 
 /** An unsigned 256bit union type. */
 typedef union fio_u256 {
-  size_t uz[32 / sizeof(size_t)];
-  uint64_t u64[4];
-  uint32_t u32[8];
-  uint16_t u16[16];
-  uint8_t u8[32];
   fio_u128 u128[2];
-  /** signed variants */
-  ssize_t iz[32 / sizeof(size_t)];
-  int64_t i64[4];
-  int32_t i32[8];
-  int16_t i16[16];
-  int8_t i8[32];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[2];
-  uint32x4_t x32[2];
-  uint16x8_t x16[2];
-  uint8x16_t x8[2];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(32))) x64[1];
-  uint32_t __attribute__((vector_size(32))) x32[1];
-  uint16_t __attribute__((vector_size(32))) x16[1];
-  uint8_t __attribute__((vector_size(32))) x8[1];
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[2];
-#endif
+  FIO___UXXX_UGRP_DEF(256);
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
@@ -2886,122 +2883,42 @@ typedef union fio_u256 {
 
 /** An unsigned 512bit union type. */
 typedef union fio_u512 {
-  size_t uz[64 / sizeof(size_t)];
-  uint64_t u64[8];
-  uint32_t u32[16];
-  uint16_t u16[32];
-  uint8_t u8[64];
   fio_u128 u128[4];
   fio_u256 u256[2];
-  /** signed variants */
-  ssize_t iz[64 / sizeof(size_t)];
-  int64_t i64[8];
-  int32_t i32[16];
-  int16_t i16[32];
-  int8_t i8[64];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[4];
-  uint32x4_t x32[4];
-  uint16x8_t x16[4];
-  uint8x16_t x8[4];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(64))) x64[1];
-  uint32_t __attribute__((vector_size(64))) x32[1];
-  uint16_t __attribute__((vector_size(64))) x16[1];
-  uint8_t __attribute__((vector_size(64))) x8[1];
-#endif
+  FIO___UXXX_UGRP_DEF(512);
 } fio_u512 FIO_ALIGN(16);
 
 /** An unsigned 1024bit union type. */
 typedef union fio_u1024 {
-  size_t uz[128 / sizeof(size_t)];
-  uint64_t u64[16];
-  uint32_t u32[32];
-  uint16_t u16[64];
-  uint8_t u8[128];
   fio_u128 u128[8];
   fio_u256 u256[4];
   fio_u512 u512[2];
-  /** signed variants */
-  ssize_t iz[128 / sizeof(size_t)];
-  int64_t i64[16];
-  int32_t i32[32];
-  int16_t i16[64];
-  int8_t i8[128];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[8];
-  uint32x4_t x32[8];
-  uint16x8_t x16[8];
-  uint8x16_t x8[8];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(128))) x64[1];
-  uint32_t __attribute__((vector_size(128))) x32[1];
-  uint16_t __attribute__((vector_size(128))) x16[1];
-  uint8_t __attribute__((vector_size(128))) x8[1];
-#endif
+  FIO___UXXX_UGRP_DEF(1024);
 } fio_u1024 FIO_ALIGN(16);
 
 /** An unsigned 2048bit union type. */
 typedef union fio_u2048 {
-  size_t uz[256 / sizeof(size_t)];
-  uint64_t u64[32];
-  uint32_t u32[64];
-  uint16_t u16[128];
-  uint8_t u8[256];
   fio_u128 u128[16];
   fio_u256 u256[8];
   fio_u512 u512[4];
   fio_u1024 u1024[2];
-  /** signed variants */
-  ssize_t iz[256 / sizeof(size_t)];
-  int64_t i64[32];
-  int32_t i32[64];
-  int16_t i16[128];
-  int8_t i8[256];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[16];
-  uint32x4_t x32[16];
-  uint16x8_t x16[16];
-  uint8x16_t x8[16];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(256))) x64[1];
-  uint32_t __attribute__((vector_size(256))) x32[1];
-  uint16_t __attribute__((vector_size(256))) x16[1];
-  uint8_t __attribute__((vector_size(256))) x8[1];
-#endif
+  FIO___UXXX_UGRP_DEF(2048);
 } fio_u2048 FIO_ALIGN(16);
 
 /** An unsigned 4096bit union type. */
 typedef union fio_u4096 {
-  size_t uz[512 / sizeof(size_t)];
-  uint64_t u64[64];
-  uint32_t u32[128];
-  uint16_t u16[256];
-  uint8_t u8[512];
   fio_u128 u128[32];
   fio_u256 u256[16];
   fio_u512 u512[8];
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
-  /** signed variants */
-  ssize_t iz[512 / sizeof(size_t)];
-  int64_t i64[64];
-  int32_t i32[128];
-  int16_t i16[256];
-  int8_t i8[512];
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[32];
-  uint32x4_t x32[32];
-  uint16x8_t x16[32];
-  uint8x16_t x8[32];
-#elif __has_attribute(vector_size)
-  uint64_t __attribute__((vector_size(512))) x64[1];
-  uint32_t __attribute__((vector_size(512))) x32[1];
-  uint16_t __attribute__((vector_size(512))) x16[1];
-  uint8_t __attribute__((vector_size(512))) x8[1];
-#endif
+  FIO___UXXX_UGRP_DEF(4096);
 } fio_u4096 FIO_ALIGN(16);
 
+#undef FIO___UXXX_XGRP_DEF
+#undef FIO___UXXX_UGRP_DEF
+
+FIO_ASSERT_STATIC(sizeof(fio_u128) == 16, "Math type size error!");
 FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
 
 #define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
@@ -3140,8 +3057,8 @@ Vector Helpers - Vector Math Operations
 /** Performs vector reduction for using `op` (+,-, *, etc'), storing to `t`. */
 #define FIO_MATH_UXXX_REDUCE(t, a, bits, op)                                   \
   do {                                                                         \
-    t = 0;                                                                     \
-    for (size_t i__ = 0; i__ < (sizeof((a).u##bits) / sizeof((a).u##bits[0])); \
+    t = (a).u##bits[0];                                                        \
+    for (size_t i__ = 1; i__ < (sizeof((a).u##bits) / sizeof((a).u##bits[0])); \
          ++i__)                                                                \
       (t) = (t)op(a).u##bits[i__];                                             \
   } while (0)
@@ -3175,7 +3092,7 @@ Vector Helpers - Vector Math Operations
     FIO_MATH_UXXX_COP(((target)[0]), ((a)[0]), (b), bits, op);                 \
   }                                                                            \
   FIO_MIFN uint##bits##_t fio_u##total_bits##_reduce_##opnm##bits(             \
-      fio_u##total_bits *a) {                                                  \
+      const fio_u##total_bits *a) {                                            \
     uint##bits##_t t;                                                          \
     FIO_MATH_UXXX_REDUCE(t, ((a)[0]), bits, op);                               \
     return t;                                                                  \
@@ -52493,9 +52410,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, math)(void) {
                fio_math_lsb_index(b, 3));
   }
   { /* Test vectors (partial) */
-    fio_u128 v128 = {{0}};
-    fio_u256 v256 = {{0}};
-    fio_u512 v512 = {{0}};
+    fio_u128 v128 = {.u64 = {0}};
+    fio_u256 v256 = {.u64 = {0}};
+    fio_u512 v512 = {.u64 = {0}};
 #define FIO_VTEST_ACT_CONST(opt, val)                                          \
   fio_u128_c##opt##64(&v128, &v128, val);                                      \
   fio_u256_c##opt##64(&v256, &v256, val);                                      \
@@ -53349,7 +53266,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
           .is_pattern = 1,
       },
   };
-  const int sub_count = (sizeof(sub) / sizeof(sub[0]));
+  const size_t sub_count = (sizeof(sub) / sizeof(sub[0]));
 
 #define FIO___PUBLISH2TEST()                                                   \
   fio_publish(.engine = FIO_PUBSUB_CLUSTER,                                    \
@@ -53793,119 +53710,59 @@ FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 31, 0)
 Playhouse hashing (next risky version)
 ***************************************************************************** */
 
-typedef union {
-  uint64_t v[4] FIO_ALIGN(16);
-#ifdef __SIZEOF_INT128__
-  __uint128_t u128[2];
-#endif
-} fio___r2hash_s;
-
-FIO_IFUNC fio___r2hash_s fio_risky2_hash___inner(const void *restrict data_,
-                                                 size_t len,
-                                                 uint64_t seed) {
-  fio___r2hash_s v = {.v = {seed, seed, seed, seed}};
-  fio___r2hash_s const prime = {.v = {FIO_U64_HASH_PRIME0,
-                                      FIO_U64_HASH_PRIME1,
-                                      FIO_U64_HASH_PRIME2,
-                                      FIO_U64_HASH_PRIME3}};
-  fio___r2hash_s w;
-  const uint8_t *data = (const uint8_t *)data_;
-  /* seed selection is constant time to avoid leaking seed data */
-  seed += len;
-  seed ^= fio_lrot64(seed, 47);
-  seed ^= FIO_U64_HASH_PRIME4;
-
-#define FIO___R2_ROUND(i) /* this version passes all, but fast enough? */      \
-  w.v[i] = fio_ltole64(w.v[i]); /* make sure we're using little endien? */     \
-  v.v[i] ^= w.v[i];                                                            \
-  v.v[i] *= prime.v[i];                                                        \
-  w.v[i] = fio_lrot64(w.v[i], 31);                                             \
-  v.v[i] += w.v[i];                                                            \
-  v.v[i] ^= seed;
-
-  /* consumes 32 bytes (256 bits) blocks (no padding needed) */
-  for (size_t pos = 31; pos < len; pos += 32) {
-    for (size_t i = 0; i < 4; ++i) {
-      fio_memcpy8(w.v + i, data + (i << 3));
-      FIO___R2_ROUND(i);
-    }
-    seed += w.v[0] + w.v[1] + w.v[2] + w.v[3];
-    data += 32;
-  }
-#if (FIO___R2_PERFORM_FULL_BLOCK + 1) && 1
-  if (len & 31) { // pad with zeros
-    uint64_t tmp_buf[4] = {0};
-    fio_memcpy31x(tmp_buf, data, len);
-    for (size_t i = 0; i < 4; ++i) {
-      w.v[0] = tmp_buf[1];
-      FIO___R2_ROUND(i);
-    }
-  }
-#else
-  switch (len & 24) { /* only performed if data exits in these positions */
-  case 24: fio_memcpy8(w.v + 2, data + 16); FIO___R2_ROUND(2); /*fall through*/
-  case 16: fio_memcpy8(w.v + 1, data + 8); FIO___R2_ROUND(1);  /*fall through*/
-  case 8:
-    fio_memcpy8(w.v + 0, data);
-    FIO___R2_ROUND(0);
-    data += len & 24;
-  }
-  if (len & 7) {
-    uint64_t i = (len & 24) >> 3;
-    w.v[i] = 0;
-    fio_memcpy7x(w.v + i, data, len);
-    FIO___R2_ROUND(i);
-  }
-#endif
-
-  /* inner vector mini-avalanche */
-  for (size_t i = 0; i < 4; ++i)
-    v.v[i] *= prime.v[i];
-  v.v[0] ^= fio_lrot64(v.v[0], 7);
-  v.v[1] ^= fio_lrot64(v.v[1], 11);
-  v.v[2] ^= fio_lrot64(v.v[2], 13);
-  v.v[3] ^= fio_lrot64(v.v[3], 17);
-  return v;
-#undef FIO___R2_ROUND
+FIO_IFUNC void fio___risky2_round(fio_u256 *restrict v, uint8_t *bytes32) {
+  const fio_u512 primes = {.u64 = {
+                               FIO_U32_HASH_PRIME0,
+                               FIO_U32_HASH_PRIME1,
+                               FIO_U32_HASH_PRIME2,
+                               FIO_U32_HASH_PRIME3,
+                               FIO_U32_HASH_PRIME4,
+                               FIO_U32_HASH_PRIME5,
+                               FIO_U32_HASH_PRIME6,
+                               FIO_U32_HASH_PRIME7,
+                           }};
+  fio_u512 in = {.u64 = {
+                     1 + fio_buf2u32u(bytes32),
+                     1 + fio_buf2u32u(bytes32 + 4),
+                     1 + fio_buf2u32u(bytes32 + 8),
+                     1 + fio_buf2u32u(bytes32 + 12),
+                     1 + fio_buf2u32u(bytes32 + 16),
+                     1 + fio_buf2u32u(bytes32 + 20),
+                     1 + fio_buf2u32u(bytes32 + 24),
+                     1 + fio_buf2u32u(bytes32 + 28),
+                 }};
+  FIO_FOR(i, 8) { in.u64[i] *= primes.u64[i]; }
+  FIO_FOR(i, 8) { in.u32[(i << 1)] += in.u32[(i << 1) + 1]; }
+  FIO_FOR(i, 8) { v->u32[i] += in.u32[(i << 1)]; }
 }
-
 /*  Computes a facil.io Stable Hash. */
 FIO_SFUNC uint64_t fio_risky2_hash(const void *data_,
                                    size_t len,
                                    uint64_t seed) {
   uint64_t r;
-  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
-  /* summing avalanche */
-  r = v.v[0] + v.v[1] + v.v[2] + v.v[3];
-  r ^= r >> 31;
-  r *= FIO_U64_HASH_PRIME4;
-  r ^= r >> 31;
+  uint8_t *data = (uint8_t *)data_;
+  fio_u256 v = {.u64 = {(FIO_U64_HASH_PRIME0 + seed) + (len),
+                        (FIO_U64_HASH_PRIME1 - seed) + (len << 1),
+                        (FIO_U64_HASH_PRIME2 + seed) + (len << 2),
+                        (FIO_U64_HASH_PRIME3 ^ seed) + (len << 3)}};
+  for (size_t i = 31; i < len; i += 32) {
+    fio___risky2_round(&v, data);
+    data += 32;
+  }
+  if ((len & 31)) { /* leftover + length input */
+    fio_u256 buf = {0};
+    fio_memcpy31x(buf.u8, data, len);
+    fio___risky2_round(&v, buf.u8);
+  }
+  /* reducing */
+  r = v.u64[0] ^ v.u64[1] ^ v.u64[2] ^ v.u64[3];
+  r ^= v.u64[0] + v.u64[1] + v.u64[2] + v.u64[3];
   return r;
-}
-
-FIO_SFUNC void fio_risky2_hash128(void *restrict dest,
-                                  const void *restrict data_,
-                                  size_t len,
-                                  uint64_t seed) {
-  fio___r2hash_s v = fio_risky2_hash___inner(data_, len, seed);
-  uint64_t r[2];
-  r[0] = v.v[0] + v.v[1] + v.v[2] + v.v[3];
-  r[1] = v.v[0] ^ v.v[1] ^ v.v[2] ^ v.v[3];
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
-  r[0] *= FIO_U64_HASH_PRIME4;
-  r[1] *= FIO_U64_HASH_PRIME0;
-  r[0] ^= r[0] >> 31;
-  r[1] ^= r[1] >> 31;
-  fio_memcpy16(dest, r);
 }
 
 FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
   return fio_risky2_hash(buf, len, 1);
 }
-
-#undef FIO___R2_HASH_MUL_PRIME
-#undef FIO___R2_HASH_ROUND_FULL
 
 /* *****************************************************************************
 Hashing speed test
