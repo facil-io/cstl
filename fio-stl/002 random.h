@@ -177,10 +177,10 @@ FIO_IFUNC void fio_stable_hash___inner(uint64_t dest[4],
   seed ^= fio_lrot64(seed, 47);
   seed = (seed << 1) + 1;
   uint64_t v[4] = {seed, seed, seed, seed};
-  uint64_t const prime[4] = {FIO_U32_HASH_PRIME0,
-                             FIO_U32_HASH_PRIME1,
-                             FIO_U32_HASH_PRIME2,
-                             FIO_U32_HASH_PRIME3};
+  uint64_t const prime[4] = {0xC19F5985UL,
+                             0x8D567931UL,
+                             0x9C178B17UL,
+                             0xA4B842DFUL};
 
   for (size_t j = 31; j < len; j += 32) {
     /* consumes 32 bytes (256 bits) each loop */
