@@ -2705,7 +2705,7 @@ Fun Primes
 
 /** Perform modular multiplication for numbers with up to 64 bits. */
 FIO_IFUNC uint64_t fio_math_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
-#if defined(__SIZEOF_INT128__)
+#if defined(__SIZEOF_INT128__) && !FIO_OS_WIN
   return (uint64_t)(((__uint128_t)a * b) % mod);
 #else
   uint64_t r = 0;
