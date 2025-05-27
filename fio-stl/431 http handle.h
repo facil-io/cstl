@@ -1875,7 +1875,7 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
     return -1;
   /* promises that some warnings print only once. */
   static unsigned int warn_illegal = 0;
-  unsigned int need2warn = 0;
+  size_t need2warn = 0;
 
   /* valid / invalid characters in cookies, create with Ruby using:
       a = []
