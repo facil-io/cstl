@@ -1300,6 +1300,68 @@ Multi-precision MUL for `len` 64 bit words.
 
 This assume LSW (Least Significant Word) ordering.
 
+#### `fio_math_mod_mul64`
+
+```c
+uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod);
+```
+
+Perform modular multiplication for numbers with up to 64 bits.
+
+#### `fio_math_mod_expo64`
+
+```c
+uint64_t fio_math_mod_expo64(uint64_t base, uint64_t exp, uint64_t mod);
+```
+
+Perform modular exponentiation for numbers with up to 64 bits.
+
+-------------------------------------------------------------------------------
+
+## 64 bit Prime Helpers
+
+### Detecting primes
+
+Sometimes it is important to know if a number is a prime. the facil.io CSTL provides helpers for detecting if a 64 bit number is likely to be a prime.
+
+#### `fio_math_is_uprime`
+
+```c
+bool fio_math_is_uprime(uint64_t n);
+```
+
+Tests if an unsigned 64 bit number is (probably) a prime. For numbers up to 1023 this is deterministic.
+
+#### `fio_math_is_iprime`
+
+```c
+bool fio_math_is_iprime(int64_t n);
+```
+
+Tests if the absolute value of a signed 64 bit number is (probably) a prime. For numbers up to 1023 this is deterministic.
+
+### Constants
+
+The importance of primes for some aspects of programming is difficult to exaggerate. For this reason, facil.io provides the following helper MACROS that represent somewhat randomly pre-selected primes out of a prime pool that fit the requirements (about half of the bits set).
+
+Each group of macros contains 32 primes (indexed from `0` to `31`), where the post-fix of the macro correlates to its index.
+
+#### `FIO_U8_HASH_PRIME0` ... `FIO_U8_HASH_PRIME31`
+
+These set of macros, with post-fixes from `0` to `31`, represent a prime number that would fit inside a `uint8_t` type and has between 3 and 5 bits set (out of 8).
+
+#### `FIO_U16_HASH_PRIME0` ... `FIO_U16_HASH_PRIME31`
+
+These set of macros, with post-fixes from `0` to `31`, represent a prime number that would fit inside a `uint16_t` type and has only half of its bits set.
+
+#### `FIO_U32_HASH_PRIME0` ... `FIO_U32_HASH_PRIME31`
+
+These set of macros, with post-fixes from `0` to `31`, represent a prime number that would fit inside a `uint32_t` type and has only half of its bits set.
+
+#### `FIO_U64_HASH_PRIME0` ... `FIO_U64_HASH_PRIME31`
+
+These set of macros, with post-fixes from `0` to `31`, represent a prime number that would fit inside a `uint64_t` type and has only half of its bits set.
+
 -------------------------------------------------------------------------------
 
 ## Native Numeral Vector Operation

@@ -2741,7 +2741,7 @@ Fun Primes
 /* clang-format on */
 
 /** Perform modular multiplication for numbers with up to 64 bits. */
-FIO_IFUNC uint64_t fio_math_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
+FIO_IFUNC uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod) {
 #if defined(__SIZEOF_INT128__) && !FIO_OS_WIN
   return (uint64_t)(((__uint128_t)a * b) % mod);
 #else
@@ -2756,14 +2756,16 @@ FIO_IFUNC uint64_t fio_math_mod_mul(uint64_t a, uint64_t b, uint64_t mod) {
 }
 
 /** Perform modular exponentiation */
-uint64_t fio___math_mod_expo(uint64_t base, uint64_t exp, uint64_t mod) {
+FIO_IFUNC uint64_t fio_math_mod_expo64(uint64_t base,
+                                       uint64_t exp,
+                                       uint64_t mod) {
   uint64_t result = 1;
   base %= mod;
   for (; exp; exp >>= 1) {
     if ((exp & 1)) { /* if exp is odd, multiply base with result */
-      result = fio_math_mod_mul(result, base, mod);
+      result = fio_math_mod_mul64(result, base, mod);
     }
-    base = fio_math_mod_mul(base, base, mod); /* mod square base */
+    base = fio_math_mod_mul64(base, base, mod); /* mod square base */
   }
   return result;
 }
@@ -2799,11 +2801,11 @@ FIO_SFUNC bool fio___is_prime_maybe(uint64_t n, size_t tests) {
   /* loop until tests == 0, starting with base 2 */
   uint64_t a = 2;
   for (;;) {
-    uint64_t x = fio___math_mod_expo(a, d, n);
+    uint64_t x = fio_math_mod_expo64(a, d, n);
     if (x != 1 && x != nm1) {
       bool composite = 1;
       for (size_t j = 0; j < r - 1; j++) {
-        x = fio___math_mod_expo(x, 2, n);
+        x = fio_math_mod_expo64(x, 2, n);
         if (x == nm1) {
           composite = 0;
           break;
@@ -7191,7 +7193,7 @@ iMap Creation Macro
         pos += 3 + mini_steps; /* 0, 3, 7 =>  max of 56 byte distance */       \
         ++mini_steps;                                                          \
       }                                                                        \
-      pos += (uint##bits##_t)0xC19F5985UL; /* big step */                      \
+      pos += (uint##bits##_t)FIO_U##bits##_HASH_PRIME0;                        \
     }                                                                          \
   }                                                                            \
   /** utilizes the values returned by the seeker object. */                    \

@@ -390,7 +390,7 @@ iMap Creation Macro
         pos += 3 + mini_steps; /* 0, 3, 7 =>  max of 56 byte distance */       \
         ++mini_steps;                                                          \
       }                                                                        \
-      pos += (uint##bits##_t)0xC19F5985UL; /* big step */                      \
+      pos += (uint##bits##_t)FIO_U##bits##_HASH_PRIME0;                        \
     }                                                                          \
   }                                                                            \
   /** utilizes the values returned by the seeker object. */                    \
