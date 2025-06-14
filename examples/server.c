@@ -230,8 +230,9 @@ int main(int argc, char const *argv[]) {
                                                 NULL)
                           : NULL;
   /* support -b and -p for when a URL isn't provided */
-  if (!fio_cli_get("-b"))
-    fio_cli_set(fio_cli_get("-b"), fio_cli_unnamed(0));
+  if (!fio_cli_get("-b")) {
+    fio_cli_set("-b", fio_cli_unnamed(0));
+  }
   if (fio_cli_get("-p")) {
     fio_buf_info_s tmp = fio_cli_get_str("-b");
     if (tmp.buf) {
