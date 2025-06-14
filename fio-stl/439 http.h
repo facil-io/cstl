@@ -67,8 +67,6 @@ typedef struct fio_http_settings_s {
   void (*on_http)(fio_http_s *h);
   /** Called when a request / response cycle is finished with no Upgrade. */
   void (*on_finish)(fio_http_s *h);
-  /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_stop)(struct fio_http_settings_s *settings);
 
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
   int (*on_authenticate_sse)(fio_http_s *h);
@@ -95,8 +93,12 @@ typedef struct fio_http_settings_s {
   /** Called after a WebSocket / SSE connection is closed (for cleanup). */
   void (*on_close)(fio_http_s *h);
 
+  /** (optional) the callback to be performed when the HTTP service closes. */
+  void (*on_stop)(struct fio_http_settings_s *settings);
+
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
+
   /** Optional SSL/TLS support. */
   fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
@@ -179,15 +181,19 @@ typedef struct fio_http_settings_s {
   uint8_t log;
 } fio_http_settings_s;
 
+/* a pointer safety type */
+typedef struct fio_http_listener_s fio_http_listener_s;
+
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
+SFUNC fio_http_listener_s *fio_http_listen(const char *url,
+                                           fio_http_settings_s settings);
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
 
 /** Returns the a pointer to the HTTP settings associated with the listener. */
-SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener);
+SFUNC fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l);
 
 /** Allows all clients to connect (bypasses authentication). */
 SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
@@ -792,11 +798,21 @@ static void fio___http_listen_on_stop(fio_io_protocol_s *p, void *u) {
 }
 
 void fio_http_listen___(void); /* IDE marker */
-SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
+SFUNC fio_http_listener_s *fio_http_listen FIO_NOOP(const char *url,
+                                                    fio_http_settings_s s) {
   http_settings_validate(&s, 0);
+  if (url) {
+    fio_url_s u = fio_url_parse(url, FIO_STRLEN(url));
+    if (u.path.len)
+      FIO_LOG_WARNING(
+          "HTTP listener is always at the root (home folder).\n\t"
+          "  Ignoring the path set in the listening instruction: %.*s",
+          (int)u.path.len,
+          u.path.buf);
+  }
   fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
   fio___http_protocol_init(p, url, s, 0);
-  void *listener =
+  fio_http_listener_s *listener = (fio_http_listener_s *)
       fio_io_listen(.url = url,
                     .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                     .tls = s.tls,
@@ -807,11 +823,11 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
 }
 
 /** Returns the a pointer to the HTTP settings associated with the listener. */
-SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener) {
+SFUNC fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l) {
   fio___http_protocol_s *p =
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_io_listener_protocol(listener));
+                         fio_io_listener_protocol((fio_listener_s *)l));
   return &p->settings;
 }
 /* *****************************************************************************

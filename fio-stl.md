@@ -11694,10 +11694,12 @@ Returns a listener handle (same as `fio_srv_listen`). Listening can be stopped u
 
 ```c
 typedef struct fio_http_settings_s {
+  /** Called before body uploads, when a client sends an `Expect` header. */
+  void (*pre_http_body)(fio_http_s *h);
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
-  /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_finish)(struct fio_http_settings_s *settings);
+  /** Called when a request / response cycle is finished with no Upgrade. */
+  void (*on_finish)(fio_http_s *h);
 
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
   int (*on_authenticate_sse)(fio_http_s *h);
@@ -11724,14 +11726,18 @@ typedef struct fio_http_settings_s {
   /** Called after a WebSocket / SSE connection is closed (for cleanup). */
   void (*on_close)(fio_http_s *h);
 
+  /** (optional) the callback to be performed when the HTTP service closes. */
+  void (*on_stop)(struct fio_http_settings_s *settings);
+
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
+
   /** Optional SSL/TLS support. */
   fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
-  fio_tls_s *tls;
+  fio_io_tls_s *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
-  fio_srv_async_s *queue;
+  fio_io_async_s *queue;
   /**
    * A public folder for file transfers - allows to circumvent any application
    * layer logic and simply serve static files.
@@ -11740,7 +11746,8 @@ typedef struct fio_http_settings_s {
    */
   fio_str_info_s public_folder;
   /**
-   * The max-age value (in seconds) for caching static files send from `public_folder`.
+   * The max-age value (in seconds) for caching static files send from
+   * `public_folder`.
    *
    * Defaults to 0 (not sent).
    */
@@ -11782,16 +11789,20 @@ typedef struct fio_http_settings_s {
    */
   uint8_t timeout;
   /**
-   * Timeout for the WebSocket connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for the WebSocket connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails). Pongs are ignored.
    */
   uint8_t ws_timeout;
   /**
-   * Timeout for EventSource (SSE) connections, a ping will be sent whenever the
-   * timeout is reached. Defaults to FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   * Timeout for EventSource (SSE) connections in seconds. Defaults to
+   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+   *
+   * A ping will be sent whenever the timeout is reached.
    *
    * Connections are only closed when a ping cannot be sent (the network layer
    * fails).

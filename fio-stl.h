@@ -35380,31 +35380,32 @@ typedef struct fio_io_listen_args {
   uint8_t hide_from_log;
 } fio_io_listen_args;
 
+typedef struct fio_listener_s fio_listener_s;
 /**
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
  */
-SFUNC void *fio_io_listen(fio_io_listen_args args);
+SFUNC fio_listener_s *fio_io_listen(fio_io_listen_args args);
 #define fio_io_listen(...) fio_io_listen((fio_io_listen_args){__VA_ARGS__})
 
 /** Notifies a listener to stop listening. */
-SFUNC void fio_io_listen_stop(void *listener);
+SFUNC void fio_io_listen_stop(fio_listener_s *l);
 
 /** Returns the listener's associated protocol. */
-SFUNC fio_io_protocol_s *fio_io_listener_protocol(void *listener);
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_listener_s *l);
 
 /** Returns the listener's associated `udata`. */
-SFUNC void *fio_io_listener_udata(void *listener);
+SFUNC void *fio_io_listener_udata(fio_listener_s *l);
 
 /** Sets the listener's associated `udata`, returning the old value. */
-SFUNC void *fio_io_listener_udata_set(void *listener, void *new_udata);
+SFUNC void *fio_io_listener_udata_set(fio_listener_s *l, void *new_udata);
 
 /** Returns the URL on which the listener is listening. */
-SFUNC fio_buf_info_s fio_io_listener_url(void *listener);
+SFUNC fio_buf_info_s fio_io_listener_url(fio_listener_s *l);
 
 /** Returns true if the listener protocol has an attached TLS context. */
-SFUNC int fio_io_listener_is_tls(void *listener);
+SFUNC int fio_io_listener_is_tls(fio_listener_s *l);
 
 /* *****************************************************************************
 Connecting as a Client
@@ -38259,37 +38260,38 @@ static void fio___io_listen_free(void *l_) {
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 
-SFUNC void fio_io_listen_stop(void *listener) {
+SFUNC void fio_io_listen_stop(fio_listener_s *listener) {
   if (listener)
-    fio___io_listen_free(listener);
+    fio___io_listen_free((fio___io_listen_s *)listener);
 }
 
 /** Returns the URL on which the listener is listening. */
-SFUNC fio_buf_info_s fio_io_listener_url(void *listener) {
+SFUNC fio_buf_info_s fio_io_listener_url(fio_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return FIO_BUF_INFO2(l->url, l->url_len);
 }
 
 /** Returns true if the listener protocol has an attached TLS context. */
-SFUNC int fio_io_listener_is_tls(void *listener) {
+SFUNC int fio_io_listener_is_tls(fio_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return !!l->tls_ctx;
 }
 
 /** Returns the listener's associated protocol. */
-SFUNC fio_io_protocol_s *fio_io_listener_protocol(void *listener) {
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return l->protocol;
 }
 
 /** Returns the listener's associated `udata`. */
-SFUNC void *fio_io_listener_udata(void *listener) {
+SFUNC void *fio_io_listener_udata(fio_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return l->udata;
 }
 
 /** Sets the listener's associated `udata`, returning the old value. */
-SFUNC void *fio_io_listener_udata_set(void *listener, void *new_udata) {
+SFUNC void *fio_io_listener_udata_set(fio_listener_s *listener,
+                                      void *new_udata) {
   void *old;
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   old = l->udata;
@@ -38387,18 +38389,18 @@ int fio_io_listen___(void); /* IDE marker */
  *
  * See the `fio_listen` Macro for details.
  */
-SFUNC void *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
+SFUNC fio_listener_s *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
   fio___io_listen_s *l = NULL;
   void *built_tls = NULL;
   int should_free_tls = !args.tls;
   FIO_STR_INFO_TMP_VAR(url_alt, 2048);
   if (!args.protocol) {
     FIO_LOG_ERROR("fio_io_listen requires a protocol to be assigned.");
-    return l;
+    return (fio_listener_s *)l;
   }
   if (args.on_root && !fio_io_is_master()) {
     FIO_LOG_ERROR("fio_io_listen called with `on_root` by a non-root worker.");
-    return l;
+    return (fio_listener_s *)l;
   }
   if (!args.url) {
     args.url = getenv("ADDRESS");
@@ -38422,7 +38424,7 @@ SFUNC void *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
     size_t port = fio_atomic_add(&port_counter, 1);
     if (port == 3000 && getenv("PORT")) {
       char *port_env = getenv("PORT");
-      port = fio_atol10(&port_env);
+      port = fio_atol(&port_env);
       if (!port | (port > 65535ULL))
         port = 3000;
     }
@@ -38471,7 +38473,7 @@ SFUNC void *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
   l->fd = fio_sock_open2(l->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
   if (l->fd == -1) {
     fio___io_listen_free(l);
-    return (l = NULL);
+    return (fio_listener_s *)(l = NULL);
   }
   if (fio_io_is_running()) {
     fio_io_defer(fio___io_listen_attach_task_deferred, l, NULL);
@@ -38482,7 +38484,7 @@ SFUNC void *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
         (void *)l);
   }
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___io_listen_free, l);
-  return l;
+  return (fio_listener_s *)l;
 }
 
 /* *****************************************************************************
@@ -42787,17 +42789,17 @@ SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
 Helpers - fio_keystr_s memory allocation callbacks
 ***************************************************************************** */
 
-FIO_LEAK_COUNTER_DEF(http___keystr_allocator)
+FIO_LEAK_COUNTER_DEF(fio___http_keystr_allocator)
 
 FIO_SFUNC void fio___http_keystr_free(void *ptr, size_t len) {
   if (!ptr)
     return;
-  FIO_LEAK_COUNTER_ON_FREE(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_FREE(fio___http_keystr_allocator);
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
 FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
-  FIO_LEAK_COUNTER_ON_ALLOC(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___http_keystr_allocator);
   return FIO_MEM_REALLOC_(NULL, 0, capa, 0);
 }
 
@@ -42917,10 +42919,10 @@ static uint32_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_CAPA];
 
 static uint64_t fio___http_str_cached_hash(char *str, size_t len) {
   /* use low-case hash specific for the HTTP handle (change resilient) */
-  const fio_u256 primes = fio_u256_init64(FIO_U64_HASH_PRIME1,
-                                          FIO_U64_HASH_PRIME2,
-                                          FIO_U64_HASH_PRIME3,
-                                          FIO_U64_HASH_PRIME4);
+  const fio_u256 primes = fio_u256_init64(((uint64_t)0x84B56B93C869EA0F),
+                                          ((uint64_t)0x613A19F5CB0D98D5),
+                                          ((uint64_t)0x48644F7B3959621F),
+                                          ((uint64_t)0x39664DEECA23D825));
   uint64_t hash = 0;
   if (len > 32)
     return hash;
@@ -43457,8 +43459,9 @@ Simple Property Set / Get
   SFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,                \
                                                  fio_str_info_s value) {       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
-    fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
+    fio_keystr_s old = h->property; /* delay destroy in case of copy/edit. */  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
+    fio_keystr_destroy(&old, fio___http_keystr_free);                          \
     return fio_keystr_info(&h->property);                                      \
   }
 
@@ -46654,8 +46657,6 @@ typedef struct fio_http_settings_s {
   void (*on_http)(fio_http_s *h);
   /** Called when a request / response cycle is finished with no Upgrade. */
   void (*on_finish)(fio_http_s *h);
-  /** (optional) the callback to be performed when the HTTP service closes. */
-  void (*on_stop)(struct fio_http_settings_s *settings);
 
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
   int (*on_authenticate_sse)(fio_http_s *h);
@@ -46682,8 +46683,12 @@ typedef struct fio_http_settings_s {
   /** Called after a WebSocket / SSE connection is closed (for cleanup). */
   void (*on_close)(fio_http_s *h);
 
+  /** (optional) the callback to be performed when the HTTP service closes. */
+  void (*on_stop)(struct fio_http_settings_s *settings);
+
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
+
   /** Optional SSL/TLS support. */
   fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
@@ -46766,15 +46771,19 @@ typedef struct fio_http_settings_s {
   uint8_t log;
 } fio_http_settings_s;
 
+/* a pointer safety type */
+typedef struct fio_http_listener_s fio_http_listener_s;
+
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
-SFUNC void *fio_http_listen(const char *url, fio_http_settings_s settings);
+SFUNC fio_http_listener_s *fio_http_listen(const char *url,
+                                           fio_http_settings_s settings);
 
 /** Listens to HTTP / WebSockets / SSE connections on `url`. */
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
 
 /** Returns the a pointer to the HTTP settings associated with the listener. */
-SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener);
+SFUNC fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l);
 
 /** Allows all clients to connect (bypasses authentication). */
 SFUNC int FIO_HTTP_AUTHENTICATE_ALLOW(fio_http_s *h);
@@ -47379,11 +47388,21 @@ static void fio___http_listen_on_stop(fio_io_protocol_s *p, void *u) {
 }
 
 void fio_http_listen___(void); /* IDE marker */
-SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
+SFUNC fio_http_listener_s *fio_http_listen FIO_NOOP(const char *url,
+                                                    fio_http_settings_s s) {
   http_settings_validate(&s, 0);
+  if (url) {
+    fio_url_s u = fio_url_parse(url, FIO_STRLEN(url));
+    if (u.path.len)
+      FIO_LOG_WARNING(
+          "HTTP listener is always at the root (home folder).\n\t"
+          "  Ignoring the path set in the listening instruction: %.*s",
+          (int)u.path.len,
+          u.path.buf);
+  }
   fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
   fio___http_protocol_init(p, url, s, 0);
-  void *listener =
+  fio_http_listener_s *listener = (fio_http_listener_s *)
       fio_io_listen(.url = url,
                     .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
                     .tls = s.tls,
@@ -47394,11 +47413,11 @@ SFUNC void *fio_http_listen FIO_NOOP(const char *url, fio_http_settings_s s) {
 }
 
 /** Returns the a pointer to the HTTP settings associated with the listener. */
-SFUNC fio_http_settings_s *fio_http_listener_settings(void *listener) {
+SFUNC fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l) {
   fio___http_protocol_s *p =
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_io_listener_protocol(listener));
+                         fio_io_listener_protocol((fio_listener_s *)l));
   return &p->settings;
 }
 /* *****************************************************************************

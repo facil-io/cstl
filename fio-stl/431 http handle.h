@@ -905,17 +905,17 @@ SFUNC fio_str_info_s fio_http_log_time(uint64_t now_in_seconds) {
 Helpers - fio_keystr_s memory allocation callbacks
 ***************************************************************************** */
 
-FIO_LEAK_COUNTER_DEF(http___keystr_allocator)
+FIO_LEAK_COUNTER_DEF(fio___http_keystr_allocator)
 
 FIO_SFUNC void fio___http_keystr_free(void *ptr, size_t len) {
   if (!ptr)
     return;
-  FIO_LEAK_COUNTER_ON_FREE(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_FREE(fio___http_keystr_allocator);
   FIO_MEM_FREE_(ptr, len);
   (void)len; /* if unused */
 }
 FIO_SFUNC void *fio___http_keystr_alloc(size_t capa) {
-  FIO_LEAK_COUNTER_ON_ALLOC(http___keystr_allocator);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___http_keystr_allocator);
   return FIO_MEM_REALLOC_(NULL, 0, capa, 0);
 }
 
@@ -1035,10 +1035,10 @@ static uint32_t FIO___HTTP_STATIC_CACHE_IMAP[FIO___HTTP_STATIC_CACHE_CAPA];
 
 static uint64_t fio___http_str_cached_hash(char *str, size_t len) {
   /* use low-case hash specific for the HTTP handle (change resilient) */
-  const fio_u256 primes = fio_u256_init64(FIO_U64_HASH_PRIME1,
-                                          FIO_U64_HASH_PRIME2,
-                                          FIO_U64_HASH_PRIME3,
-                                          FIO_U64_HASH_PRIME4);
+  const fio_u256 primes = fio_u256_init64(((uint64_t)0x84B56B93C869EA0F),
+                                          ((uint64_t)0x613A19F5CB0D98D5),
+                                          ((uint64_t)0x48644F7B3959621F),
+                                          ((uint64_t)0x39664DEECA23D825));
   uint64_t hash = 0;
   if (len > 32)
     return hash;
@@ -1575,8 +1575,9 @@ Simple Property Set / Get
   SFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,                \
                                                  fio_str_info_s value) {       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
-    fio_keystr_destroy(&h->property, fio___http_keystr_free);                  \
+    fio_keystr_s old = h->property; /* delay destroy in case of copy/edit. */  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
+    fio_keystr_destroy(&old, fio___http_keystr_free);                          \
     return fio_keystr_info(&h->property);                                      \
   }
 
