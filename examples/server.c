@@ -5,11 +5,6 @@ License: ISC / MIT (choose your license)
 Feel free to copy, use and enjoy according to the license provided.
 ***************************************************************************** */
 
-#ifndef HTTP_RESPONSE_ECHO
-/* Set to 0 to replace the echo response with "Hello World". */
-#define HTTP_RESPONSE_ECHO 1
-#endif
-
 /* Lazy? let the linker drop any unused functions... */
 #define FIO_EVERYTHING
 #include "fio-stl/include.h"
@@ -71,6 +66,7 @@ HTTP Callbacks (see later)
 ***************************************************************************** */
 
 static void http_respond(fio_http_s *h);
+static void http_respond_hello(fio_http_s *h);
 
 /* *****************************************************************************
 Timers
@@ -117,8 +113,8 @@ int main(int argc, char const *argv[]) {
           "Note: these are optional and supersede previous instructions."),
 
       FIO_CLI_PRINT_HEADER("Concurrency"),
-      FIO_CLI_INT("--threads -t number of worker threads to use."),
-      FIO_CLI_INT("--workers -w number of worker processes to use."),
+      FIO_CLI_INT("--threads -t (1) number of worker threads to use."),
+      FIO_CLI_INT("--workers -w (0) number of worker processes to use."),
 
       FIO_CLI_PRINT_HEADER("HTTP"),
       FIO_CLI_STRING("--public -www public folder for static file service."),
@@ -260,7 +256,7 @@ int main(int argc, char const *argv[]) {
   }
 
   /* listen to incoming HTTP connections */
-  void *listener = fio_http_listen(
+  fio_http_listener_s *listener = fio_http_listen(
       fio_cli_get("-b"),
       .on_http = http_respond,
       .on_authenticate_sse = FIO_HTTP_AUTHENTICATE_ALLOW,
@@ -284,13 +280,15 @@ int main(int argc, char const *argv[]) {
       .log = fio_cli_get_bool("-v"));
   FIO_ASSERT(listener, "Could not open listening socket as requested.");
   FIO_ASSERT(fio_http_listener_settings(listener)->on_http == http_respond,
-             "HTP listener error.");
+             "HTTP listener error.");
+
+  fio_http_route(listener, "/hello", .on_http = http_respond_hello);
 
   /* we don't need the tls object any more. */
   fio_io_tls_free(tls);
 
   FIO_LOG_INFO(
-      "\n\tStarting HTTP echo server example app."
+      "\n\tStarting HTTP echo/hello server example app."
       "\n\tEngine: " FIO_POLL_ENGINE_STR "\n\tWorkers: %d\t(%s)"
       "\n\tThreads: 1+%d\t(per worker)"
       "\n\tPress ^C to exit.",
@@ -328,6 +326,16 @@ FIO_SFUNC int http_write_headers_to_string(fio_http_s *h,
 HTTP/1.1 response callback
 ***************************************************************************** */
 
+static void http_respond_hello(fio_http_s *h) {
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO1("server"),
+                               FIO_STR_INFO1("facil.io"));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO1("x-path-left"),
+                               fio_http_path(h));
+  fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
+}
+
 static void http_respond(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO1("server"),
@@ -338,7 +346,6 @@ static void http_respond(fio_http_s *h) {
     fio_http_cookie_set(h, .name = FIO_STR_INFO1("fio-rand"), .value = tmp);
     fio_http_response_header_set(h, FIO_STR_INFO1("x-fio-rand"), tmp);
   }
-#if HTTP_RESPONSE_ECHO /* write request to string to be sent as response */
   char *out = fio_bstr_write2(
       NULL,
       FIO_STRING_WRITE_STR2(fio_http_method(h).buf, fio_http_method(h).len),
@@ -384,9 +391,6 @@ static void http_respond(fio_http_s *h) {
                  .dealloc = (void (*)(void *))fio_bstr_free,
                  .copy = 0,
                  .finish = 1);
-#else  /* HTTP_RESPONSE_ECHO */
-  fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
-#endif /* HTTP_RESPONSE_ECHO */
 }
 
 /* *****************************************************************************

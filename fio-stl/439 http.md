@@ -140,6 +140,30 @@ typedef struct fio_http_settings_s {
 } fio_http_settings_s;
 ```
 
+#### `fio_http_route`
+
+```c
+int fio_http_route(fio_http_listener_s *listener,
+                         const char *url,
+                         fio_http_settings_s settings);
+#define fio_http_route(listener, url, ...)                                     \
+  fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Adds a route prefix to the HTTP handler.
+
+The order in which `fio_http_route` are called is irrelevant (unless overwriting an existing route).
+
+Matching is performed as a best-prefix match. i.e.:
+
+- All paths match the prefix `"/"` (the default prefix).
+
+- Setting `"/user"` will match all `"/user/..."` paths but not `"/userX..."`
+
+**Note**: the `udata`, `on_finish` and `public_folder` properties are all inherited (if missing) from the default HTTP settings used to create the listener.
+
+**Note**: TLS options are ignored.
+
 #### `fio_http_listener_settings`
 
 ```c
@@ -147,6 +171,8 @@ fio_http_settings_s *fio_http_listener_settings(void *listener);
 ```
 
 Returns the a pointer to the HTTP settings associated with the listener.
+
+**Note**: changing the settings for the root path should be performed using `fio_http_route` and not by altering the settings directly.
 
 #### `FIO_HTTP_AUTHENTICATE_ALLOW`
 

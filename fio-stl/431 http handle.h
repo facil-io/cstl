@@ -188,6 +188,12 @@ SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
 
+/** Gets the original / first path associated with the HTTP handle. */
+SFUNC fio_str_info_s fio_http_opath(fio_http_s *);
+
+/** Sets the original / first path associated with the HTTP handle. */
+SFUNC fio_str_info_s fio_http_opath_set(fio_http_s *, fio_str_info_s);
+
 /** Gets the path information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_path(fio_http_s *);
 
@@ -1453,6 +1459,7 @@ struct fio_http_s {
   uint32_t state;
   uint32_t status;
   fio_keystr_s method;
+  fio_keystr_s opath;
   fio_keystr_s path;
   fio_keystr_s query;
   fio_keystr_s version;
@@ -1483,6 +1490,7 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   h->controller->on_destroyed(h);
 
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
+  fio_keystr_destroy(&h->opath, fio___http_keystr_free);
   fio_keystr_destroy(&h->path, fio___http_keystr_free);
   fio_keystr_destroy(&h->query, fio___http_keystr_free);
   fio_keystr_destroy(&h->version, fio___http_keystr_free);
@@ -1537,6 +1545,7 @@ SFUNC void fio_http_close(fio_http_s *h) { h->controller->close_io(h); }
 SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
   fio_http_s *h = fio_http_new();
   FIO_ASSERT_ALLOC(h);
+  fio_http_opath_set(h, fio_http_opath(o));
   fio_http_path_set(h, fio_http_path(o));
   fio_http_method_set(h, fio_http_method(o));
   fio_http_query_set(h, fio_http_query(o));
@@ -1566,7 +1575,7 @@ SFUNC fio_http_s *fio_http_new_copy_request(fio_http_s *o) {
 Simple Property Set / Get
 ***************************************************************************** */
 
-#define HTTP___MAKE_GET_SET(property)                                          \
+#define FIO___HTTP_MAKE_GET_SET(property)                                      \
   SFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                    \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return fio_keystr_info(&h->property);                                      \
@@ -1581,12 +1590,13 @@ Simple Property Set / Get
     return fio_keystr_info(&h->property);                                      \
   }
 
-HTTP___MAKE_GET_SET(method)
-HTTP___MAKE_GET_SET(path)
-HTTP___MAKE_GET_SET(query)
-HTTP___MAKE_GET_SET(version)
+FIO___HTTP_MAKE_GET_SET(method)
+FIO___HTTP_MAKE_GET_SET(path)
+FIO___HTTP_MAKE_GET_SET(opath)
+FIO___HTTP_MAKE_GET_SET(query)
+FIO___HTTP_MAKE_GET_SET(version)
 
-#undef HTTP___MAKE_GET_SET
+#undef FIO___HTTP_MAKE_GET_SET
 
 FIO_DEF_GET_FUNC(SFUNC, fio_http, fio_http_s, size_t, status)
 
