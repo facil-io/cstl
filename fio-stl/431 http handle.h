@@ -2984,7 +2984,7 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
   fio_string_write_s to_write[16] = {
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->method)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
-      FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->path)),
+      FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->opath)),
       FIO_STRING_WRITE_STR2((const char *)" ", 1),
       FIO_STRING_WRITE_STR_INFO(fio_keystr_info(&h->version)),
       FIO_STRING_WRITE_STR2((const char *)"\" ", 2),

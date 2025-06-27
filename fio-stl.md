@@ -11831,13 +11831,23 @@ The order in which `fio_http_route` are called is irrelevant (unless overwriting
 
 Matching is performed as a best-prefix match. i.e.:
 
-- All paths match the prefix `"/"` (the default prefix).
+- All paths match the prefix `"/*"` (the default prefix).
 
-- Setting `"/user"` will match all `"/user/..."` paths but not `"/userX..."`
+- Setting `"/user"` will match `"/user"` and all `"/user/*"` paths but not `"/user*"`
 
-**Note**: the `udata`, `on_finish` and `public_folder` properties are all inherited (if missing) from the default HTTP settings used to create the listener.
+- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route `"/user/new"` and `"/user/new/*"` to `"/user/new"`. Otherwise, the `"/user"` route will continue to behave the same.
+
+**Note**: the `udata`, `on_finish`, `public_folder` and `log` properties are all inherited (if missing) from the default HTTP settings used to create the listener.
 
 **Note**: TLS options are ignored.
+
+#### `fio_http_route_settings`
+
+```c
+fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *listener, const char *url);
+```
+
+Returns a link to the settings matching `url`, as set by `fio_http_route`.
 
 #### `fio_http_listener_settings`
 

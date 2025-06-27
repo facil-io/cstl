@@ -278,11 +278,18 @@ int main(int argc, char const *argv[]) {
       .queue = &http_queue,
       .tls = tls,
       .log = fio_cli_get_bool("-v"));
+
   FIO_ASSERT(listener, "Could not open listening socket as requested.");
   FIO_ASSERT(fio_http_listener_settings(listener)->on_http == http_respond,
              "HTTP listener error.");
 
-  fio_http_route(listener, "/hello", .on_http = http_respond_hello);
+  fio_http_route(listener,
+                 "/hello",
+                 .on_http = http_respond_hello,
+                 .public_folder =
+                     fio_cli_get("-www")
+                         ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
+                         : FIO_STR_INFO2(NULL, 0));
 
   /* we don't need the tls object any more. */
   fio_io_tls_free(tls);
