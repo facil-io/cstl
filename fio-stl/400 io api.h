@@ -181,32 +181,32 @@ typedef struct fio_io_listen_args {
   uint8_t hide_from_log;
 } fio_io_listen_args;
 
-typedef struct fio_listener_s fio_listener_s;
+typedef struct fio_io_listener_s fio_io_listener_s;
 /**
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
  */
-SFUNC fio_listener_s *fio_io_listen(fio_io_listen_args args);
+SFUNC fio_io_listener_s *fio_io_listen(fio_io_listen_args args);
 #define fio_io_listen(...) fio_io_listen((fio_io_listen_args){__VA_ARGS__})
 
 /** Notifies a listener to stop listening. */
-SFUNC void fio_io_listen_stop(fio_listener_s *l);
+SFUNC void fio_io_listen_stop(fio_io_listener_s *l);
 
 /** Returns the listener's associated protocol. */
-SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_listener_s *l);
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_io_listener_s *l);
 
 /** Returns the listener's associated `udata`. */
-SFUNC void *fio_io_listener_udata(fio_listener_s *l);
+SFUNC void *fio_io_listener_udata(fio_io_listener_s *l);
 
 /** Sets the listener's associated `udata`, returning the old value. */
-SFUNC void *fio_io_listener_udata_set(fio_listener_s *l, void *new_udata);
+SFUNC void *fio_io_listener_udata_set(fio_io_listener_s *l, void *new_udata);
 
 /** Returns the URL on which the listener is listening. */
-SFUNC fio_buf_info_s fio_io_listener_url(fio_listener_s *l);
+SFUNC fio_buf_info_s fio_io_listener_url(fio_io_listener_s *l);
 
 /** Returns true if the listener protocol has an attached TLS context. */
-SFUNC int fio_io_listener_is_tls(fio_listener_s *l);
+SFUNC int fio_io_listener_is_tls(fio_io_listener_s *l);
 
 /* *****************************************************************************
 Connecting as a Client

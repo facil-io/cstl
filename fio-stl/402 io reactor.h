@@ -547,37 +547,37 @@ static void fio___io_listen_free(void *l_) {
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 
-SFUNC void fio_io_listen_stop(fio_listener_s *listener) {
+SFUNC void fio_io_listen_stop(fio_io_listener_s *listener) {
   if (listener)
     fio___io_listen_free((fio___io_listen_s *)listener);
 }
 
 /** Returns the URL on which the listener is listening. */
-SFUNC fio_buf_info_s fio_io_listener_url(fio_listener_s *listener) {
+SFUNC fio_buf_info_s fio_io_listener_url(fio_io_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return FIO_BUF_INFO2(l->url, l->url_len);
 }
 
 /** Returns true if the listener protocol has an attached TLS context. */
-SFUNC int fio_io_listener_is_tls(fio_listener_s *listener) {
+SFUNC int fio_io_listener_is_tls(fio_io_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return !!l->tls_ctx;
 }
 
 /** Returns the listener's associated protocol. */
-SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_listener_s *listener) {
+SFUNC fio_io_protocol_s *fio_io_listener_protocol(fio_io_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return l->protocol;
 }
 
 /** Returns the listener's associated `udata`. */
-SFUNC void *fio_io_listener_udata(fio_listener_s *listener) {
+SFUNC void *fio_io_listener_udata(fio_io_listener_s *listener) {
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
   return l->udata;
 }
 
 /** Sets the listener's associated `udata`, returning the old value. */
-SFUNC void *fio_io_listener_udata_set(fio_listener_s *listener,
+SFUNC void *fio_io_listener_udata_set(fio_io_listener_s *listener,
                                       void *new_udata) {
   void *old;
   fio___io_listen_s *l = (fio___io_listen_s *)listener;
@@ -676,18 +676,19 @@ int fio_io_listen___(void); /* IDE marker */
  *
  * See the `fio_listen` Macro for details.
  */
-SFUNC fio_listener_s *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
+SFUNC fio_io_listener_s *fio_io_listen
+FIO_NOOP(struct fio_io_listen_args args) {
   fio___io_listen_s *l = NULL;
   void *built_tls = NULL;
   int should_free_tls = !args.tls;
   FIO_STR_INFO_TMP_VAR(url_alt, 2048);
   if (!args.protocol) {
     FIO_LOG_ERROR("fio_io_listen requires a protocol to be assigned.");
-    return (fio_listener_s *)l;
+    return (fio_io_listener_s *)l;
   }
   if (args.on_root && !fio_io_is_master()) {
     FIO_LOG_ERROR("fio_io_listen called with `on_root` by a non-root worker.");
-    return (fio_listener_s *)l;
+    return (fio_io_listener_s *)l;
   }
   if (!args.url) {
     args.url = getenv("ADDRESS");
@@ -760,7 +761,7 @@ SFUNC fio_listener_s *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
   l->fd = fio_sock_open2(l->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
   if (l->fd == -1) {
     fio___io_listen_free(l);
-    return (fio_listener_s *)(l = NULL);
+    return (fio_io_listener_s *)(l = NULL);
   }
   if (fio_io_is_running()) {
     fio_io_defer(fio___io_listen_attach_task_deferred, l, NULL);
@@ -771,7 +772,7 @@ SFUNC fio_listener_s *fio_io_listen FIO_NOOP(struct fio_io_listen_args args) {
         (void *)l);
   }
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___io_listen_free, l);
-  return (fio_listener_s *)l;
+  return (fio_io_listener_s *)l;
 }
 
 /* *****************************************************************************

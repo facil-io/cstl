@@ -559,6 +559,7 @@ HTTP Routing
 ***************************************************************************** */
 
 FIO_LEAK_COUNTER_DEF(fio___http_router_u)
+FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
 
 void fio_http_route___(void);
 /** Adds a route prefix to the HTTP handler. */
@@ -573,7 +574,7 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
     goto invalid_listener_error;
   p = FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_io_listener_protocol((fio_listener_s *)l));
+                         fio_io_listener_protocol((fio_io_listener_s *)l));
   r = &p->router;
   if (!u || !u[0]) {
     url = "/";
@@ -645,9 +646,17 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
     s.public_folder = FIO_STR_INFO2((char *)s.tls, s.public_folder.len);
     s.public_folder.buf[s.public_folder.len] = 0;
   }
-  /* make sure we're not leaking memory when overwriting */
-  if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf)
-    FIO_MEM_FREE_(r->s.tls, r->s.public_folder.len + 1);
+  /* make sure we're not leaking memory when overwriting an existing route */
+  if (r->s.on_http) {
+    if (r->s.on_stop != p->settings.on_stop || r->s.udata != p->settings.udata)
+      r->s.on_stop(&r->s);
+    if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf)
+      FIO_MEM_FREE_(r->s.tls, r->s.public_folder.len + 1);
+  }
+  /* if we have a route with a static file service, we need this */
+  if (s.public_folder.buf && s.public_folder.len) {
+    p->on_http_callback = fio___http_on_http_with_public_folder;
+  }
   r->s = s;
   return err;
 
@@ -667,15 +676,19 @@ invalid_listener_error:
   return err;
 }
 
+static const fio_str_info_s fio___http_route_root_path =
+    FIO_STR_INFO2((char *)"/", 1);
+
 void fio___http_route_settings___(void);
 FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
     fio___http_router_u *route,
     fio_str_info_s *path) {
-  static const fio_str_info_s root_path = FIO_STR_INFO2((char *)"/", 1);
   fio_http_settings_s *r = &route->s;
   uint8_t *pos = (uint8_t *)path->buf;
   const uint8_t *n = pos;
   pos += (*pos == (uint8_t)'/');
+  if (!*pos)
+    return r;
   for (uint8_t c, hi, lo;
        route && ((c = *pos) >= (sizeof(*r) / sizeof(void *)));
        ++pos) {
@@ -684,8 +697,7 @@ FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
       r = &route->s;
       n = pos;
     } else if (c == (uint8_t)'%' && (hi = fio_c2i(pos[1])) < 16) {
-      /* decrypt route? */
-      if ((lo = fio_c2i(pos[2])) < 16) {
+      if ((lo = fio_c2i(pos[2])) < 16) { /* decrypt route */
         c = (hi << 4) | lo;
         pos += 2;
         if (c < (sizeof(*r) / sizeof(void *)))
@@ -697,7 +709,7 @@ FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
   /* test if '/' may be inferred */
   if (!*pos && route && route->map[0]) {
     r = &route->s;
-    *path = root_path;
+    *path = fio___http_route_root_path;
     n = (uint8_t *)path->buf;
   }
   n -= (n == (uint8_t *)path->buf + 1);
@@ -748,7 +760,7 @@ SFUNC fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *l,
     return r;
   p = FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_io_listener_protocol((fio_listener_s *)l));
+                         fio_io_listener_protocol((fio_io_listener_s *)l));
   r = fio___http_route_settings(&p->router, &path);
   return r;
 }
@@ -779,7 +791,7 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
 
-  if (FIO_LIKELY(FIO_SOCK_IS_OPEN(fio_io_fd(c->io))))
+  if (FIO_LIKELY(c && FIO_SOCK_IS_OPEN(fio_io_fd(c->io))))
     cb.fn(h);
   fio_http_free(h);
 }
@@ -930,11 +942,10 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   fio_http_settings_s *s = fio___http_route_get(h);
-  fio_http_udata_set(h, s->udata);
-  c->state.http.on_finish = s->on_finish;
   if (fio___http_on_http_test4upgrade(h, c, s))
     return;
-  if ((fio_http_method(h).len != 4 || (fio_buf2u32u(fio_http_method(h).buf) |
+  if (s->public_folder.buf &&
+      (fio_http_method(h).len != 4 || (fio_buf2u32u(fio_http_method(h).buf) |
                                        0x20202020UL) != fio_buf2u32u("post")) &&
       !fio_http_static_file_response(
           h,
@@ -1081,7 +1092,7 @@ SFUNC fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l) {
   fio___http_protocol_s *p =
       FIO_PTR_FROM_FIELD(fio___http_protocol_s,
                          state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                         fio_io_listener_protocol((fio_listener_s *)l));
+                         fio_io_listener_protocol((fio_io_listener_s *)l));
   return &p->settings;
 }
 

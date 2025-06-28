@@ -158,7 +158,7 @@ Matching is performed as a best-prefix match. i.e.:
 
 - All paths match the prefix `"/*"` (the default prefix).
 
-- Setting `"/user"` will match `"/user"` and all `"/user/*"` paths but not `"/user*"`
+- Partial URL matches are only valid if the `/` character is the one following the partial match. For example: setting `"/user"` will match `"/user"` and all `"/user/*"` paths but not `"/user*"`
 
 - Setting `"/user/new"` as well as `"/user"` (in whatever order) will route `"/user/new"` and `"/user/new/*"` to `"/user/new"`. Otherwise, the `"/user"` route will continue to behave the same.
 

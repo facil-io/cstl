@@ -9674,7 +9674,7 @@ uint64_t fiobj2hash(FIOBJ target_hash, FIOBJ value);
 
 Calculates an object's hash value for a specific hash map object.
 
-#### `fiobj_hash_set2`
+#### `fiobj_hash_set`
 
 ```c
 FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
@@ -9682,7 +9682,7 @@ FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
 
 Inserts a value to a hash map, with a default hash value calculation.
 
-#### `fiobj_hash_set_if_missing2`
+#### `fiobj_hash_set_if_missing`
 
 ```c
 FIOBJ fiobj_hash_set_if_missing2(FIOBJ hash, FIOBJ key, FIOBJ value);
@@ -9692,7 +9692,7 @@ Inserts a value to a hash map, with a default hash value calculation.
 
 If the key already exists in the Hash Map, the value will be freed instead.
 
-#### `fiobj_hash_get2`
+#### `fiobj_hash_get`
 
 ```c
 FIOBJ fiobj_hash_get2(FIOBJ hash, FIOBJ key);
@@ -9700,7 +9700,7 @@ FIOBJ fiobj_hash_get2(FIOBJ hash, FIOBJ key);
 
 Finds a value in a hash map, with a default hash value calculation.
 
-#### `fiobj_hash_remove2`
+#### `fiobj_hash_remove`
 
 ```c
 int fiobj_hash_remove2(FIOBJ hash, FIOBJ key, FIOBJ *old);
@@ -9708,26 +9708,26 @@ int fiobj_hash_remove2(FIOBJ hash, FIOBJ key, FIOBJ *old);
 
 Removes a value from a hash map, with a default hash value calculation.
 
-#### `fiobj_hash_set3`
+#### `fiobj_hash_set2`
 
 ```c
-FIOBJ fiobj_hash_set3(FIOBJ hash, const char *key, size_t len, FIOBJ value);
+FIOBJ fiobj_hash_set2(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 ```
 
 Sets a value in a hash map, allocating the key String and automatically calculating the hash value.
 
-#### `fiobj_hash_get3`
+#### `fiobj_hash_get2`
 
 ```c
-FIOBJ fiobj_hash_get3(FIOBJ hash, const char *buf, size_t len);
+FIOBJ fiobj_hash_get2(FIOBJ hash, const char *buf, size_t len);
 ```
 
 Finds a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
 
-#### `fiobj_hash_remove3`
+#### `fiobj_hash_remove2`
 
 ```c
-int fiobj_hash_remove3(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
+int fiobj_hash_remove2(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
 ```
 
 Removes a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
@@ -9792,8 +9792,8 @@ If `dest` is an existing String, the formatted JSON data will be appended to the
 
 ```c
 FIOBJ result = fiobj_json_parse2("{\"name\":\"John\",\"surname\":\"Smith\",\"ID\":1}",40, NULL);
-FIO_ASSERT( fiobj2cstr(fiobj_hash_get3(result, "name", 4)).len == 4 &&
-            !memcmp(fiobj2cstr(fiobj_hash_get3(result, "name", 4)).buf, "John", 4), "result error");
+FIO_ASSERT( fiobj2cstr(fiobj_hash_get2(result, "name", 4)).len == 4 &&
+            !memcmp(fiobj2cstr(fiobj_hash_get2(result, "name", 4)).buf, "John", 4), "result error");
 
 FIOBJ_STR_TEMP_VAR(json_str); /* places string on the stack */
 fiobj2json(json_str, result, 1);
@@ -10494,7 +10494,7 @@ Returns the last millisecond when the IO reactor polled for events.
 ### Listening to Incoming Connections
 
 ```c
-void *fio_io_listen(fio_io_listen_args args);
+fio_io_listener_s *fio_io_listen(fio_io_listen_args args);
 /* Named arguments using macro. */
 #define fio_io_listen(...) fio_io_listen((fio_io_listen_args){__VA_ARGS__})
 
@@ -10566,7 +10566,7 @@ fio_io_listen(.protocol = &MY_PROTOCOL);
 #### `fio_io_listen_stop`
 
 ```c
-void fio_io_listen_stop(void *listener);
+void fio_io_listen_stop(fio_io_listener_s *listener);
 ```
 
 Notifies a listener to stop listening.
@@ -10574,7 +10574,7 @@ Notifies a listener to stop listening.
 #### `fio_io_listener_is_tls`
 
 ```c
-int fio_io_listener_is_tls(void *listener);
+int fio_io_listener_is_tls(fio_io_listener_s *listener);
 ```
 
 Returns true if the listener protocol has an attached TLS context.
@@ -10582,7 +10582,7 @@ Returns true if the listener protocol has an attached TLS context.
 #### `fio_io_listener_protocol`
 
 ```c
-fio_io_protocol_s *fio_io_listener_protocol(void *listener);
+fio_io_protocol_s *fio_io_listener_protocol(fio_io_listener_s *listener);
 ```
 
 Returns the listener's associated protocol.
@@ -10590,7 +10590,7 @@ Returns the listener's associated protocol.
 #### `fio_io_listener_udata`
 
 ```c
-void *fio_io_listener_udata(void *listener);
+void *fio_io_listener_udata(fio_io_listener_s *listener);
 ```
 
 Returns the listener's associated `udata`.
@@ -10598,7 +10598,7 @@ Returns the listener's associated `udata`.
 #### `fio_io_listener_udata_set`
 
 ```c
-void *fio_io_listener_udata_set(void *listener, void *new_udata);
+void *fio_io_listener_udata_set(fio_io_listener_s *listener, void *new_udata);
 ```
 
 Sets the listener's associated `udata`, returning the old value.
@@ -10606,7 +10606,7 @@ Sets the listener's associated `udata`, returning the old value.
 #### `fio_io_listener_url`
 
 ```c
-fio_buf_info_s fio_io_listener_url(void *listener);
+fio_buf_info_s fio_io_listener_url(fio_io_listener_s *listener);
 ```
 
 Returns the URL on which the listener is listening.
