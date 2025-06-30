@@ -47277,9 +47277,6 @@ invalid_listener_error:
   return err;
 }
 
-static const fio_str_info_s fio___http_route_root_path =
-    FIO_STR_INFO2((char *)"/", 1);
-
 void fio___http_route_settings___(void);
 FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
     fio___http_router_u *route,
@@ -47310,7 +47307,7 @@ FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
   /* test if '/' may be inferred */
   if (!*pos && route && route->map[0]) {
     r = &route->s;
-    *path = fio___http_route_root_path;
+    path->len = 1;
     n = (uint8_t *)path->buf;
   }
   n -= (n == (uint8_t *)path->buf + 1);
