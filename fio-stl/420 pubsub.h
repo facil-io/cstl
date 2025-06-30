@@ -1038,6 +1038,15 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
       .buffer_size =
           sizeof(fio___pubsub_message_parser_s) + FIO___PUBSUB_MESSAGE_OVERHEAD,
   };
+  for (char *tmp = getenv("PUBSUB_PORT"); tmp; tmp = NULL) {
+    uint64_t port = (uint64_t)fio_atol(&tmp);
+    if (port < 0xFFFFU)
+      fio_pubsub_broadcast_on_port(port);
+    else
+      FIO_LOG_ERROR("(%d) (pub/sub) PUBSUB_PORT is out of range: %zu",
+                    fio_getpid(),
+                    (size_t)port);
+  }
 }
 
 /* *****************************************************************************
@@ -2243,6 +2252,8 @@ SFUNC void fio___pubsub_broadcast_on_port(void *port_) {
   }
   fio_io_attach_fd(fd_udp, &broadcast, port_, NULL);
   fio_io_attach_fd(fd_tcp, &accept_remote, NULL, NULL);
+  FIO_LOG_INFO("(pub/sub) broadcasting and listening on port %zu",
+               (size_t)port);
   return;
 }
 
