@@ -304,6 +304,26 @@ SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 SFUNC int fio_http_body_fd(fio_http_s *);
 
 /* *****************************************************************************
+Path Section Looping
+***************************************************************************** */
+
+/**
+ * Loops over each section of the path, decrypting percent encoding as
+ * necessary.
+ *
+ * The macro accepts the following:
+ *
+ * - `path`: the path string - accessible using fio_http_path(h).
+ * - `pos` : the name of the variable to use for accessing the section.
+ *
+ * The variable `pos` is a `fio_buf_info_s`.
+ *
+ * **Note**: the macro will break if a path's section length is greater than
+ *           (about) 4063 bytes.
+ */
+#define FIO_HTTP_PATH_EACH(path, pos)
+
+/* *****************************************************************************
 Cookies
 ***************************************************************************** */
 
@@ -859,6 +879,66 @@ fio___http_parsed_property_next(fio___http_header_property_s property) {
                (fio___http_header_property_s){.value = value_});               \
        property.name.len;                                                      \
        property = fio___http_parsed_property_next(property))
+
+/* *****************************************************************************
+Path Section Looping
+***************************************************************************** */
+
+#undef FIO_HTTP_PATH_EACH
+
+/**
+ * Loops over each section of the path, decrypting percent encoding as
+ * necessary.
+ *
+ * The macro accepts the following:
+ *
+ * - `path`: the path string - accessible using fio_http_path(h).
+ * - `pos` : the name of the variable to use for accessing the section.
+ *
+ * The variable `pos` is a `fio_buf_info_s`. This uses 4096 bytes on the stack.
+ * The variable `pos_reminder` is a `fio_buf_info_s` pointing to the rest of the
+ * path.
+ *
+ * **Note**: the macro will break if a path's section length is greater than
+ *           (about) 4063 bytes.
+ */
+#define FIO_HTTP_PATH_EACH(path, pos)                                          \
+  for (fio_buf_info_s pos##_reminder = FIO_STR2BUF_INFO(path),                 \
+                      pos,                                                     \
+                      buf[(4096 / sizeof(fio_buf_info_s)) - 2];                \
+       fio___http_path_each_next(&pos, &pos##_reminder, buf);)
+
+/* used internally for the macro FIO_HTTP_PATH_EACH */
+FIO_IFUNC bool fio___http_path_each_next(fio_buf_info_s *restrict section,
+                                         fio_buf_info_s *restrict path,
+                                         void *restrict mem) {
+  if (path->len < 2)
+    return 0;
+  const char *p = path->buf;
+  const char *e = p + path->len;
+  char *w = (char *)mem;
+  const char *w_start = w;
+  const char *w_end = w + (4096 - ((sizeof(fio_buf_info_s) * 2) + 1));
+  p += (*p == '/');
+  while (p < e && *p != '/' && w < w_end) {
+    while (p < e && *p != '%' && *p != '/' && w < w_end)
+      *(w++) = *(p++);
+    if (p == e || *p == '/')
+      break;
+    uint8_t hi, lo;
+    if (p + 4 > e || ((hi = fio_c2i((unsigned char)p[1])) > 15) ||
+        ((lo = fio_c2i((unsigned char)p[2])) > 15)) {
+      *(w++) = *(p++);
+      continue;
+    }
+    p += 3;
+    *(w++) = (char)((hi << 4) | lo);
+  }
+  *w = 0;
+  *section = FIO_BUF_INFO2((char *)w_start, (size_t)(w - w_start));
+  *path = FIO_BUF_INFO2((char *)p, (size_t)(e - p));
+  return (p == e || *p == '/');
+}
 
 /* *****************************************************************************
 HTTP Handle Implementation - possibly externed functions.
@@ -3202,6 +3282,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       char *value;
       fio_buf_info_s ext;
     } options[] = {{(char *)"br", FIO_BUF_INFO2((char *)".br", 3)},
+                   {(char *)"zstd", FIO_BUF_INFO2((char *)".zstd", 4)},
                    {(char *)"gzip", FIO_BUF_INFO2((char *)".gz", 3)},
                    {(char *)"deflate", FIO_BUF_INFO2((char *)".zip", 4)},
                    {NULL}};

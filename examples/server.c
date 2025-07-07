@@ -67,6 +67,7 @@ HTTP Callbacks (see later)
 
 static void http_respond(fio_http_s *h);
 static void http_respond_hello(fio_http_s *h);
+static void http_respond_crud(fio_http_s *h);
 
 /* *****************************************************************************
 Timers
@@ -290,6 +291,13 @@ int main(int argc, char const *argv[]) {
                      fio_cli_get("-www")
                          ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
                          : FIO_STR_INFO2(NULL, 0));
+  fio_http_route(listener,
+                 "/crud",
+                 .on_http = http_respond_crud,
+                 .public_folder =
+                     fio_cli_get("-www")
+                         ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
+                         : FIO_STR_INFO2(NULL, 0));
 
   /* we don't need the tls object any more. */
   fio_io_tls_free(tls);
@@ -343,6 +351,34 @@ static void http_respond_hello(fio_http_s *h) {
   fio_http_write(h, .buf = "Hello World!", .len = 12, .finish = 1);
 }
 
+static void http_respond_crud(fio_http_s *h) {
+  fio_str_info_s info = FIO_STR_INFO1("crude operation detection failed.");
+  switch (fio_http_resource_action(h)) {
+  case FIO_HTTP_RESOURCE_NONE: break;
+  case FIO_HTTP_RESOURCE_INDEX:
+    info = FIO_STR_INFO1("crude operation detected: INDEX.");
+    break;
+  case FIO_HTTP_RESOURCE_SHOW:
+    info = FIO_STR_INFO1("crude operation detected: SHOW.");
+    break;
+  case FIO_HTTP_RESOURCE_NEW:
+    info = FIO_STR_INFO1("crude operation detected: NEW.");
+    break;
+  case FIO_HTTP_RESOURCE_EDIT:
+    info = FIO_STR_INFO1("crude operation detected: EDIT.");
+    break;
+  case FIO_HTTP_RESOURCE_CREATE:
+    info = FIO_STR_INFO1("crude operation detected: CREATE.");
+    break;
+  case FIO_HTTP_RESOURCE_UPDATE:
+    info = FIO_STR_INFO1("crude operation detected: UPDATE.");
+    break;
+  case FIO_HTTP_RESOURCE_DELETE:
+    info = FIO_STR_INFO1("crude operation detected: DELETE.");
+    break;
+  }
+  fio_http_write(h, .buf = info.buf, .len = info.len, .finish = 1);
+}
 static void http_respond(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO1("server"),

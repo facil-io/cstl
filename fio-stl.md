@@ -11849,6 +11849,55 @@ fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *listener, cons
 
 Returns a link to the settings matching `url`, as set by `fio_http_route`.
 
+
+#### `fio_http_resource_action`
+
+```c
+typedef enum {
+FIO_HTTP_RESOURCE_NONE,
+FIO_HTTP_RESOURCE_INDEX,
+FIO_HTTP_RESOURCE_SHOW,
+FIO_HTTP_RESOURCE_NEW,
+FIO_HTTP_RESOURCE_EDIT,
+FIO_HTTP_RESOURCE_CREATE,
+FIO_HTTP_RESOURCE_UPDATE,
+FIO_HTTP_RESOURCE_DELETE,
+} fio_http_route_resource_e;
+fio_http_resource_action_e fio_http_resource_action(fio_http_s *h);
+```
+
+Returns the resource action expected by the request details in the HTTP handle `h`.
+
+If no REST / CRUD style action is detected, FIO_HTTP_RESOURCE_NONE is returned.
+
+- `FIO_HTTP_RESOURCE_INDEX`: will be returned on `GET` `/`.
+
+    Should show the list of available items.
+
+- `FIO_HTTP_RESOURCE_SHOW`: will be returned on `GET` `/:id`.
+
+    Should show selected item(s).
+
+- `FIO_HTTP_RESOURCE_NEW`: will be returned on `GET/new`.
+
+    Should return a form for creating an item.
+
+- `FIO_HTTP_RESOURCE_EDIT`: will be returned on `GET` `/:id/edit`.
+
+    Should show a form for editing the selected item(s).
+
+- `FIO_HTTP_RESOURCE_CREATE`: will be returned on `PUT`/`POST`/`PATCH` `/`.
+
+    Should create **or update** an item (if `id` is provided).
+
+- `FIO_HTTP_RESOURCE_UPDATE`: will be returned on `PUT`/`POST`/`PATCH` `/:id`.
+
+    Should update selected item.
+
+- `FIO_HTTP_RESOURCE_DELETE`: will be returned on `DELETE` `/:id`.
+
+    Should delete selected item.
+
 #### `fio_http_listener_settings`
 
 ```c
@@ -12102,6 +12151,24 @@ fio_str_info_s fio_http_path_set(fio_http_s *, fio_str_info_s);
 ```
 
 Sets the path information associated with the HTTP handle.
+
+#### `FIO_HTTP_PATH_EACH`
+
+```c
+#define FIO_HTTP_PATH_EACH(path, pos)
+```
+
+Loops over each section of `path`, decrypting percent encoding as necessary.
+
+The macro accepts the following:
+
+- `path`: the path string as a `fio_str_info_s` or `fio_buf_info_s` object (see [`fio_http_path(h)`](#fio_http_path)).
+
+- `pos` : the name of the variable to use for accessing the section.
+
+The variable `pos` is a `fio_buf_info_s`.
+
+**Note**: the macro will break if any path's section length is greater than (about) 4063 bytes.
 
 #### `fio_http_query`
 
