@@ -762,7 +762,7 @@ FIO_IFUNC char *fio_bstr_reserve(char *bstr, size_t len) {
 FIO_IFUNC fio_str_info_s fio_bstr_info(const char *bstr) {
   fio_str_info_s r = {0};
   r.buf = (char *)bstr;
-  /* please emit conditional mov and not an if branches */
+  /* please emit conditional mov and not if branches */
   if (bstr)
     r.len = FIO___BSTR_META(bstr)->len;
   if (bstr)
@@ -794,6 +794,8 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len) {
   fio___bstr_meta_s *meta = FIO___BSTR_META(bstr);
   if (!bstr)
     meta = m;
+  if (FIO_UNLIKELY(len >= 0xFFFFFFFFULL))
+    return bstr;
   if (FIO_UNLIKELY(meta->ref || meta->capa <= len)) {
     fio_str_info_s i = fio_bstr_info(bstr);
     fio_bstr_reallocate(&i, len);
