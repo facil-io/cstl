@@ -65,7 +65,7 @@ static void websocket_on_shutdown(fio_http_s *h) {
 HTTP Callbacks (see later)
 ***************************************************************************** */
 
-static void http_respond(fio_http_s *h);
+static void http_respond_echo(fio_http_s *h);
 static void http_respond_hello(fio_http_s *h);
 static void http_respond_crud(fio_http_s *h);
 
@@ -259,7 +259,7 @@ int main(int argc, char const *argv[]) {
   /* listen to incoming HTTP connections */
   fio_http_listener_s *listener = fio_http_listen(
       fio_cli_get("-b"),
-      .on_http = http_respond,
+      .on_http = http_respond_echo,
       .on_authenticate_sse = FIO_HTTP_AUTHENTICATE_ALLOW,
       .on_authenticate_websocket = FIO_HTTP_AUTHENTICATE_ALLOW,
       .on_open = websocket_on_open,
@@ -281,7 +281,7 @@ int main(int argc, char const *argv[]) {
       .log = fio_cli_get_bool("-v"));
 
   FIO_ASSERT(listener, "Could not open listening socket as requested.");
-  FIO_ASSERT(fio_http_listener_settings(listener)->on_http == http_respond,
+  FIO_ASSERT(fio_http_listener_settings(listener)->on_http == http_respond_echo,
              "HTTP listener error.");
 
   fio_http_route(listener,
@@ -294,6 +294,13 @@ int main(int argc, char const *argv[]) {
   fio_http_route(listener,
                  "/crud",
                  .on_http = http_respond_crud,
+                 .public_folder =
+                     fio_cli_get("-www")
+                         ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
+                         : FIO_STR_INFO2(NULL, 0));
+  fio_http_route(listener,
+                 "/crud/echo",
+                 .on_http = http_respond_echo,
                  .public_folder =
                      fio_cli_get("-www")
                          ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
@@ -353,6 +360,8 @@ static void http_respond_hello(fio_http_s *h) {
 
 static void http_respond_crud(fio_http_s *h) {
   fio_str_info_s info = FIO_STR_INFO1("crude operation detection failed.");
+  // FIO_STR_INFO_TMP_VAR(name, capacity)
+  // FIO_HTTP_PATH_EACH(fio_http_path(h), pos);
   switch (fio_http_resource_action(h)) {
   case FIO_HTTP_RESOURCE_NONE: break;
   case FIO_HTTP_RESOURCE_INDEX:
@@ -379,7 +388,7 @@ static void http_respond_crud(fio_http_s *h) {
   }
   fio_http_write(h, .buf = info.buf, .len = info.len, .finish = 1);
 }
-static void http_respond(fio_http_s *h) {
+static void http_respond_echo(fio_http_s *h) {
   fio_http_response_header_set(h,
                                FIO_STR_INFO1("server"),
                                FIO_STR_INFO1("facil.io"));
