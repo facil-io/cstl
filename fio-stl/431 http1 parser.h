@@ -421,9 +421,6 @@ static inline int fio_http1___read_header_line(
     fio_buf_info_s name, value;
     if (!eol)
       return 1;
-    if (0)
-      while (*start == ' ' || *start == '\t')
-        ++start;
 
     buf->len -= (eol - buf->buf) + 1;
     buf->buf = eol + 1;
@@ -432,7 +429,7 @@ static inline int fio_http1___read_header_line(
       goto headers_finished;
 
     div = fio_http1___seek_header_div(start);
-    if (div[0] != ':')
+    if (div[0] != ':' || div == start)
       return -1;
     name = FIO_BUF_INFO2(start, (size_t)(div - start));
     do {
