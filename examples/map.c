@@ -14,10 +14,10 @@ using different smart defaults for short keys `FIO_MAP_KEY_KSTR` vs longer keys
 ***************************************************************************** */
 
 /* Set the properties for the key-value Unordered Map type called `dict_s` */
-#define FIO_UMAP_NAME      dict
-#define FIO_MAP_KEY_KSTR   /* pre-defined macro for using fio_keystr_s keys. */
-#define FIO_MAP_VALUE_BSTR /* pre-defined macro for using String values. */
-#define FIO_MAP_HASH_FN(str)                                                   \
+#define FIO_UMAP_NAME        dict
+#define FIO_MAP_KEY_KSTR     /* pre-defined macro for using fio_keystr_s keys. */
+#define FIO_MAP_VALUE_BSTR   /* pre-defined macro for using String values. */
+#define FIO_MAP_HASH_FN(str) /* use function instead of manual hash values */  \
   fio_risky_hash(str.buf, str.len, (uint64_t)&fio_risky_hash)
 #include "fio-stl/include.h" /* or "fio-stl.h" */
 

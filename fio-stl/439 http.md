@@ -429,6 +429,28 @@ Returns true if the HTTP handle refers to an EventSource connection.
 
 ### HTTP Request Data
 
+#### `fio_http_received_at`
+
+```c
+int64_t fio_http_received_at(fio_http_s *);
+```
+
+Gets the received_at timestamp (ms) associated with the HTTP handle.
+
+**Note**: when `FIO_HTTP_EXACT_LOGGING` is true, this will be in micro-seconds (1/1000000), otherwise milliseconds are used (1/1000). 
+
+#### `fio_http_received_at_set`
+
+```c
+int64_t fio_http_received_at_set(fio_http_s *, int64_t);
+```
+
+Sets the received_at timestamp (ms) associated with the HTTP handle.
+
+**Note**: this is automatically set by the [`fio_http_new`](#fio_http_new) constructor. **There is no need to call this function**.
+
+**Note**: when `FIO_HTTP_EXACT_LOGGING` is true, this should be set in micro-seconds (1/1000000), otherwise milliseconds should be used (1/1000).
+
 #### `fio_http_status`
 
 ```c

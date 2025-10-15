@@ -20,6 +20,9 @@ Please refer to the core documentation in the Markdown File.
 /** An empty macro, adding white space. Used to avoid function like macros. */
 #define FIO_NOOP_FN(...)
 
+/** Macro for a No-Op function name (void). */
+#define FIO_NOOP_FN_NAME (void)
+
 /* *****************************************************************************
 Version Macros
 

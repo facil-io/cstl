@@ -1,4 +1,4 @@
-# facil.io 0.8.x - The C Server Toolbox Library (C STL)
+# facil.io 0.8.x - The C Server Toolbox Library – C STL :)
 
 [![facil.io logo](./extras/logo.svg?raw=true "facil.io")](https://github.com/facil-io/cstl)
 
@@ -56,7 +56,7 @@ There are a number of examples in the [./examples](examples) folder, including:
 
 * [Mix an HTTP/1.1 Server to serve data with a WebSockets/SSE Chat Server](examples/server.c).
 * [A simple network client example](examples/client.c).
-* [Pub/Sub based text Chat server](examples/chat.c).
+* [Pub/Sub based TCP/IP text Chat server](examples/chat.c).
 
 ### Examples using the C Server Toolbox Library (STL) Types:
 

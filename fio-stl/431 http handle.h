@@ -212,6 +212,12 @@ SFUNC fio_str_info_s fio_http_version(fio_http_s *);
 /** Sets the version information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_version_set(fio_http_s *, fio_str_info_s);
 
+/** Gets the received_at timestamp (ms) associated with the HTTP handle. */
+SFUNC int64_t fio_http_received_at(fio_http_s *);
+
+/** Sets the received_at timestamp (ms) associated with the HTTP handle. */
+SFUNC int64_t fio_http_received_at_set(fio_http_s *, int64_t);
+
 /**
  * Gets the header information associated with the HTTP handle.
  *
@@ -1679,6 +1685,9 @@ FIO___HTTP_MAKE_GET_SET(version)
 #undef FIO___HTTP_MAKE_GET_SET
 
 FIO_DEF_GET_FUNC(SFUNC, fio_http, fio_http_s, size_t, status)
+/* clang-format off */
+FIO_DEF_GETSET_FUNC(SFUNC, fio_http, fio_http_s, int64_t, received_at, FIO_NOOP_FN)
+/* clang-format on */
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
