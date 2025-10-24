@@ -4439,7 +4439,7 @@ Leak Counter Helpers
 #endif
 #define FIO_LEAK_COUNTER_DEF(name)                                             \
   size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
-    volatile static size_t counter = 0;                                        \
+    static volatile size_t counter = 0;                                        \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
     if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
       goto error_double_free;                                                  \
@@ -43590,12 +43590,9 @@ FIO___HTTP_MAKE_GET_SET(version)
 #undef FIO___HTTP_MAKE_GET_SET
 
 FIO_DEF_GET_FUNC(SFUNC, fio_http, fio_http_s, size_t, status)
-FIO_DEF_GETSET_FUNC(SFUNC,
-                    fio_http,
-                    fio_http_s,
-                    int64_t,
-                    received_at,
-                    FIO_NOOP_FN)
+/* clang-format off */
+FIO_DEF_GETSET_FUNC(SFUNC, fio_http, fio_http_s, int64_t, received_at, FIO_NOOP_FN)
+/* clang-format on */
 
 /** Sets the status associated with the HTTP handle (response). */
 SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {

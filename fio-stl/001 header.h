@@ -186,7 +186,7 @@ Leak Counter Helpers
 #endif
 #define FIO_LEAK_COUNTER_DEF(name)                                             \
   size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
-    volatile static size_t counter = 0;                                        \
+    static volatile size_t counter = 0;                                        \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
     if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
       goto error_double_free;                                                  \
