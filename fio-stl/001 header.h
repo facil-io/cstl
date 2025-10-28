@@ -184,37 +184,10 @@ Leak Counter Helpers
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
-#define FIO_LEAK_COUNTER_DEF(name)                                             \
-  size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
-    static volatile size_t counter = 0;                                        \
-    size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
-    if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
-      goto error_double_free;                                                  \
-    return tmp;                                                                \
-  error_double_free:                                                           \
-    FIO_ASSERT(0,                                                              \
-               "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
-               fio_getpid());                                                  \
-  }                                                                            \
-  static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
-    size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
-    FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
-                   fio_getpid());                                              \
-    if (counter)                                                               \
-      FIO_LOG_ERROR("(%d) %zu leaks detected for " FIO_MACRO2STR(name),        \
-                    fio_getpid(),                                              \
-                    counter);                                                  \
-  }                                                                            \
-  FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
-    if (!FIO_LEAK_COUNTER_SKIP_EXIT)                                           \
-      fio_state_callback_add(FIO_CALL_AT_EXIT,                                 \
-                             FIO_NAME(fio___leak_counter_cleanup, name),       \
-                             NULL);                                            \
-  }
-#define FIO_LEAK_COUNTER_COUNT(name)    FIO_NAME(fio___leak_counter, name)(0)
-#define FIO_LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
-#define FIO_LEAK_COUNTER_ON_FREE(name)                                         \
-  FIO_NAME(fio___leak_counter, name)(((size_t)-1))
+#define FIO_LEAK_COUNTER_DEF      FIO___LEAK_COUNTER_DEF
+#define FIO_LEAK_COUNTER_COUNT    FIO___LEAK_COUNTER_COUNT
+#define FIO_LEAK_COUNTER_ON_ALLOC FIO___LEAK_COUNTER_ON_ALLOC
+#define FIO_LEAK_COUNTER_ON_FREE  FIO___LEAK_COUNTER_ON_FREE
 #endif
 
 /* *****************************************************************************
