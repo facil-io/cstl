@@ -1477,6 +1477,7 @@ Memory Leak Detection
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
+#ifndef FIO___LEAK_COUNTER_DEF
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
     static volatile size_t counter = 0;                                        \
@@ -9176,8 +9177,9 @@ Multi-Threaded `memcpy` (naive and slow)
 #ifndef FIO_MEMCPY_THREADS
 #define FIO_MEMCPY_THREADS 8
 #endif
-#undef FIO_MEMCPY_THREADS___MINCPY
+#ifndef FIO_MEMCPY_THREADS___MINCPY
 #define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
+#endif
 typedef struct {
   const char *restrict dest;
   void *restrict src;
@@ -9317,7 +9319,9 @@ typedef struct {
  *
  *   i.e.: http://example.com/index.html?page=1#list
  *
- * Invalid formats might produce unexpected results. No error testing performed.
+ * For performance reasons, no format validation is performed. Function assumes
+ * that the `url` string is `len` long and contains a valid URL. Invalid formats
+ * might produce unexpected results.
  *
  * NOTE: the `unix`, `file` and `priv` schemas are reserved for file paths.
  */
@@ -9451,7 +9455,9 @@ FIO_URL - Implementation
  *
  *   i.e.: http://example.com/index.html?page=1#list
  *
- * Invalid formats might produce unexpected results. No error testing performed.
+ * For performance reasons, no format validation is performed. Function assumes
+ * that the `url` string is `len` long and contains a valid URL. Invalid formats
+ * might produce unexpected results.
  */
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   /*
@@ -10385,9 +10391,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_JSON___H
 
 #ifndef FIO_JSON_MAX_DEPTH
-/** Maximum allowed JSON nesting level. Values above 64K might fail. */
+/**
+ * Maximum allowed JSON nesting level. MUST be less then 64K
+ *
+ * Values above 64K might cause the stack to overflow and cause a failure.
+ */
 #define FIO_JSON_MAX_DEPTH 512
 #endif
+
+FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536)
 
 #ifndef FIO_JSON_USE_FIO_ATON
 #define FIO_JSON_USE_FIO_ATON 0
@@ -24273,9 +24285,7 @@ HMAC
 /**
  * HMAC-SHA512, resulting in a 64 byte authentication code.
  *
- * Keys are limited to 128 bytes.
- *
- * TODO: FIXME!
+ * Keys are limited to 128 bytes due to the design of the HMAC algorithm.
  */
 SFUNC fio_u512 fio_sha512_hmac(const void *key,
                                uint64_t key_len,
@@ -24295,8 +24305,11 @@ SFUNC fio_u512 fio_sha512_hmac(const void *key,
   /* prepare inner key */
   for (size_t i = 0; i < 16; ++i)
     k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
-  /* hash of inner key + msg  */
-  if (1) {
+  /* hash of inner key + msg
+   * It's the same as the following, but easier for compilers to optimize:
+   * fio_sha512_consume(&inner, k.u8, 128);
+   * fio_sha512_consume(&inner, msg, msg_len); */
+  {
     /* consume key block */
     fio___sha512_round(&inner.hash, k.u8);
     /* consume data */
@@ -24308,9 +24321,6 @@ SFUNC fio_u512 fio_sha512_hmac(const void *key,
       fio_memcpy127x(inner.cache.u8, buf, msg_len);
     }
     inner.total_len = 128 + msg_len;
-  } else { /* ... same as ... */
-    fio_sha512_consume(&inner, k.u8, 128);
-    fio_sha512_consume(&inner, msg, msg_len);
   }
   /* finalize SHA512 and append to end of key */
   k.u512[2] = fio_sha512_finalize(&inner);
@@ -44017,7 +44027,7 @@ FIO_IFUNC void fio___http_cookie_set_if_missing_encoded(fio_http_s *h,
                                                         fio_str_info_s v) {
   char *div = NULL;
   FIO_STR_INFO_TMP_VAR(dec, 8192);
-  /* TODO: test for percent encoding... */
+  /* test for percent encoding */
   if ((div = (char *)FIO_MEMCHR(k.buf, '%', k.len))) {
     if (div + 2 < (k.buf + k.len) && fio_c2i(div[1]) < 16 &&
         fio_c2i(div[2]) < 16 &&

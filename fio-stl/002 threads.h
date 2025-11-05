@@ -753,8 +753,9 @@ Multi-Threaded `memcpy` (naive and slow)
 #ifndef FIO_MEMCPY_THREADS
 #define FIO_MEMCPY_THREADS 8
 #endif
-#undef FIO_MEMCPY_THREADS___MINCPY
+#ifndef FIO_MEMCPY_THREADS___MINCPY
 #define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
+#endif
 typedef struct {
   const char *restrict dest;
   void *restrict src;

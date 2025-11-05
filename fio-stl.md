@@ -6851,7 +6851,7 @@ Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code f
 
 By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
 
-Do **not** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
+Do **NOT** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
 
 #### `fio_sha1`
 

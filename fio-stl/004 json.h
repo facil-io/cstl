@@ -19,9 +19,15 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_JSON___H
 
 #ifndef FIO_JSON_MAX_DEPTH
-/** Maximum allowed JSON nesting level. Values above 64K might fail. */
+/**
+ * Maximum allowed JSON nesting level. MUST be less then 64K
+ *
+ * Values above 64K might cause the stack to overflow and cause a failure.
+ */
 #define FIO_JSON_MAX_DEPTH 512
 #endif
+
+FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536)
 
 #ifndef FIO_JSON_USE_FIO_ATON
 #define FIO_JSON_USE_FIO_ATON 0

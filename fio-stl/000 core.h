@@ -1440,6 +1440,7 @@ Memory Leak Detection
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
+#ifndef FIO___LEAK_COUNTER_DEF
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
     static volatile size_t counter = 0;                                        \

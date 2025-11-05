@@ -1837,7 +1837,7 @@ FIO_IFUNC void fio___http_cookie_set_if_missing_encoded(fio_http_s *h,
                                                         fio_str_info_s v) {
   char *div = NULL;
   FIO_STR_INFO_TMP_VAR(dec, 8192);
-  /* TODO: test for percent encoding... */
+  /* test for percent encoding */
   if ((div = (char *)FIO_MEMCHR(k.buf, '%', k.len))) {
     if (div + 2 < (k.buf + k.len) && fio_c2i(div[1]) < 16 &&
         fio_c2i(div[2]) < 16 &&

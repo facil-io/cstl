@@ -379,9 +379,7 @@ HMAC
 /**
  * HMAC-SHA512, resulting in a 64 byte authentication code.
  *
- * Keys are limited to 128 bytes.
- *
- * TODO: FIXME!
+ * Keys are limited to 128 bytes due to the design of the HMAC algorithm.
  */
 SFUNC fio_u512 fio_sha512_hmac(const void *key,
                                uint64_t key_len,
@@ -401,8 +399,11 @@ SFUNC fio_u512 fio_sha512_hmac(const void *key,
   /* prepare inner key */
   for (size_t i = 0; i < 16; ++i)
     k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
-  /* hash of inner key + msg  */
-  if (1) {
+  /* hash of inner key + msg
+   * It's the same as the following, but easier for compilers to optimize:
+   * fio_sha512_consume(&inner, k.u8, 128);
+   * fio_sha512_consume(&inner, msg, msg_len); */
+  {
     /* consume key block */
     fio___sha512_round(&inner.hash, k.u8);
     /* consume data */
@@ -414,9 +415,6 @@ SFUNC fio_u512 fio_sha512_hmac(const void *key,
       fio_memcpy127x(inner.cache.u8, buf, msg_len);
     }
     inner.total_len = 128 + msg_len;
-  } else { /* ... same as ... */
-    fio_sha512_consume(&inner, k.u8, 128);
-    fio_sha512_consume(&inner, msg, msg_len);
   }
   /* finalize SHA512 and append to end of key */
   k.u512[2] = fio_sha512_finalize(&inner);

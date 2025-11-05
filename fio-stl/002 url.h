@@ -64,7 +64,9 @@ typedef struct {
  *
  *   i.e.: http://example.com/index.html?page=1#list
  *
- * Invalid formats might produce unexpected results. No error testing performed.
+ * For performance reasons, no format validation is performed. Function assumes
+ * that the `url` string is `len` long and contains a valid URL. Invalid formats
+ * might produce unexpected results.
  *
  * NOTE: the `unix`, `file` and `priv` schemas are reserved for file paths.
  */
@@ -198,7 +200,9 @@ FIO_URL - Implementation
  *
  *   i.e.: http://example.com/index.html?page=1#list
  *
- * Invalid formats might produce unexpected results. No error testing performed.
+ * For performance reasons, no format validation is performed. Function assumes
+ * that the `url` string is `len` long and contains a valid URL. Invalid formats
+ * might produce unexpected results.
  */
 SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   /*

@@ -304,6 +304,7 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
         return -1;
       if (!clen) /* no length? */
         clen = FIO___HTTP1_BODY_NOT_ALLOWED;
+      /* Prevent CL.TE / TE.CL by validating header's payload changes nothing */
       if (p->expected)
         return 0 - (p->expected != clen);
       p->expected = clen;
