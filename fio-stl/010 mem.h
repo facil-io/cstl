@@ -303,26 +303,34 @@ Memory Allocation - configuration value - results and constants
 Memory Allocation - configuration access - UNSTABLE API!!!
 ***************************************************************************** */
 
+/** Arena count for the allocator. */
+SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arenas)(void);
+
+/** System allocation sizes (bytes per system allocation). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_sys_alloc_size)(void) {
   return FIO_MEMORY_SYS_ALLOCATION_SIZE;
 }
 
+/** Cached system allocations (free, but held on to). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_cache_slots)(void) {
   return FIO_MEMORY_CACHE_SLOTS;
 }
+/** Allocations alignment. */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_alignment)(void) {
   return FIO_MEMORY_ALIGN_SIZE;
 }
+/** Allocations alignment log (base 2). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_alignment_log)(void) {
   return FIO_MEMORY_ALIGN_LOG;
 }
-
+/** Allocation limit (at which point do we switch to system allocations?). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_alloc_limit)(void) {
   return (FIO_MEMORY_BLOCK_ALLOC_LIMIT > FIO_MEMORY_ALLOC_LIMIT)
              ? FIO_MEMORY_BLOCK_ALLOC_LIMIT
              : FIO_MEMORY_ALLOC_LIMIT;
 }
 
+/** Allocation limit for arena based allocation (vs. big allocations). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arena_alloc_limit)(void) {
   return FIO_MEMORY_BLOCK_ALLOC_LIMIT;
 }
