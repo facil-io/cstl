@@ -1702,9 +1702,9 @@ empty:
 }
 
 SFUNC FIO_NAME(FIO_MAP_NAME, iterator_s)
-    FIO_NAME(FIO_MAP_NAME, get_prev)(FIO_MAP_PTR map,
-                                     FIO_NAME(FIO_MAP_NAME, iterator_s) *
-                                         current_pos) { // TODO!
+    FIO_NAME(FIO_MAP_NAME,
+             get_prev)(FIO_MAP_PTR map,
+                       FIO_NAME(FIO_MAP_NAME, iterator_s) * current_pos) {
   FIO_NAME(FIO_MAP_NAME, iterator_s) r = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(map, r);
   FIO_NAME(FIO_MAP_NAME, s) *m = FIO_PTR_TAG_GET_UNTAGGED(FIO_MAP_T, map);
@@ -1897,7 +1897,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
   /* testing only only works with integer external types */
   fprintf(
       stderr,
-      "* Testing map " FIO_MACRO2STR(FIO_MAP_NAME) " with key " FIO_MACRO2STR(
+      "\t* Testing map " FIO_MACRO2STR(FIO_MAP_NAME) " with key " FIO_MACRO2STR(
           FIO_MAP_KEY) " (=> " FIO_MACRO2STR(FIO_MAP_VALUE) ").\n");
   size_t test_len_limit = (1UL << (FIO_MAP_ARRAY_LOG_LIMIT + 15));
   { /* test set / get overwrite , FIO_MAP_EACH and evict */
@@ -1986,7 +1986,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_MAP_NAME)(void) {
     FIO_NAME(FIO_MAP_NAME, s) map = FIO_MAP_INIT;
     fprintf(
         stderr,
-        "* Testing full collision guard for " FIO_MACRO2STR(
+        "\t* Testing full collision guard for " FIO_MACRO2STR(
             FIO_NAME(FIO_MAP_NAME, s)) " - expect SECURITY log messages.\n");
     for (size_t i = 1; i < 4096; ++i) {
       FIO_NAME(FIO_MAP_NAME, set)

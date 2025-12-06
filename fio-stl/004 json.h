@@ -27,7 +27,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_JSON_MAX_DEPTH 512
 #endif
 
-FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536)
+FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536, "FIO_JSON_MAX_DEPTH too big");
 
 #ifndef FIO_JSON_USE_FIO_ATON
 #define FIO_JSON_USE_FIO_ATON 0

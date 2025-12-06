@@ -298,11 +298,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, compact)(FIO_STR_PTR s);
 /**
  * Reserves (at least) `amount` of bytes for the string's data.
  *
- * The reserved count includes used data. If `amount` is less than the current
- * string length, the string will be truncated(!).
- *
- * Note: When optimized for immutability (`FIO_STR_SMALL`), this may corrupt the
- * string length data.
+ * `amount` is in addition to existing String length.
  *
  * Make sure to call `resize` with the updated information once the editing is
  * done.
@@ -1509,14 +1505,14 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
   FIO_NAME(FIO_STR_NAME, s) str = {0}; /* test zeroed out memory */
 #define FIO__STR_SMALL_CAPA FIO_STR_SMALL_CAPA(&str)
   FIO_STR_PTR pstr = FIO_PTR_TAG((&str));
-  fprintf(
-      stderr,
-      "* Testing core string features for " FIO_MACRO2STR(FIO_STR_NAME) ".\n");
   fprintf(stderr,
-          "* String container size (without wrapper): %zu\n",
+          "\t* Testing core string features for " FIO_MACRO2STR(
+              FIO_STR_NAME) ".\n");
+  fprintf(stderr,
+          "\t* String container size (without wrapper): %zu\n",
           sizeof(FIO_NAME(FIO_STR_NAME, s)));
   fprintf(stderr,
-          "* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
+          "\t* Self-contained capacity (FIO_STR_SMALL_CAPA): %zu\n",
           FIO__STR_SMALL_CAPA);
   FIO_ASSERT(!FIO_NAME_BL(FIO_STR_NAME, frozen)(pstr), "new string is frozen");
   FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == FIO__STR_SMALL_CAPA,
@@ -1635,7 +1631,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, capa)(pstr) == sizeof(str) - 2,
                "Compacted String capacity reporting error!");
   } else {
-    FIO_LOG_DEBUG2("* Skipped `compact` test (irrelevant for type).");
+    FIO_LOG_DEBUG2("\t* Skipped `compact` test (irrelevant for type).");
   }
 
   {
@@ -1690,7 +1686,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
              FIO_NAME(FIO_STR_NAME, ptr)(pstr));
   FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   {
-    fprintf(stderr, "* Testing string `readfile`.\n");
+    fprintf(stderr, "\t* Testing string `readfile`.\n");
     FIO_NAME(FIO_STR_NAME, s) *s = FIO_NAME(FIO_STR_NAME, new)();
     FIO_ASSERT(FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s),
                "error, string not allocated (%p)!",
@@ -1709,7 +1705,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
                "content error, header mismatch!\n %s",
                state.buf);
 #endif /* H___FIO_CSTL_COMBINED___H */
-    fprintf(stderr, "* Testing UTF-8 validation and length.\n");
+    fprintf(stderr, "\t* Testing UTF-8 validation and length.\n");
     FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_valid)(s),
                "`utf8_valid` error, code in this file "
                "should be valid!");
@@ -1726,7 +1722,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
       /* String content == whole file (this file) */
       intptr_t pos = -10;
       size_t len = 20;
-      fprintf(stderr, "* Testing UTF-8 positioning.\n");
+      fprintf(stderr, "\t* Testing UTF-8 positioning.\n");
 
       FIO_ASSERT(FIO_NAME(FIO_STR_NAME, utf8_select)(s, &pos, &len) == 0,
                  "`select` returned error for negative "
@@ -1816,7 +1812,7 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_NAME(FIO_STR_NAME, dealloc)(cstr);
   }
   {
-    fprintf(stderr, "* Testing Base64 encoding / decoding.\n");
+    fprintf(stderr, "\t* Testing Base64 encoding / decoding.\n");
     FIO_NAME(FIO_STR_NAME, destroy)(pstr); /* does nothing, but why not... */
 
     FIO_NAME(FIO_STR_NAME, s) b64message = FIO_STR_INIT;
@@ -1872,7 +1868,8 @@ SFUNC void FIO_NAME_TEST(stl, FIO_STR_NAME)(void) {
     FIO_NAME(FIO_STR_NAME, destroy)(pstr);
   }
   {
-    fprintf(stderr, "* Testing JSON style character escaping / unescaping.\n");
+    fprintf(stderr,
+            "\t* Testing JSON style character escaping / unescaping.\n");
     FIO_NAME(FIO_STR_NAME, s) unescaped = FIO_STR_INIT;
     fio_str_info_s ue;
     const char *utf8_sample = /* three hearts, small-big-small*/

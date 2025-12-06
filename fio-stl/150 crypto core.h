@@ -9,7 +9,7 @@
 
 
 
-                  A Template for New Types / Modules
+                          Cryptographic Core Module
 
 
 
@@ -17,6 +17,10 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_CRYPTO_CORE) && !defined(H___FIO_CRYPTO_CORE___H)
+/* *****************************************************************************
+**Note**: do NOT use these cryptographic unless you have no other choice. Always
+*prefer tested cryptographic libraries such as OpenSSL.
+***************************************************************************** */
 #define H___FIO_CRYPTO_CORE___H
 
 /* *****************************************************************************

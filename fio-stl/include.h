@@ -168,7 +168,7 @@
 #include "700 cleanup.h"
 #endif
 
-#if defined(FIO_TEST_ALL) && !defined(H___FIO_TESTS_START___H)
+#if 0 && defined(FIO_TEST_ALL) && !defined(H___FIO_TESTS_START___H)
 #include "900 tests start.h"
 #include "902 atol.h"
 #include "902 atomics.h"

@@ -1473,9 +1473,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
   for (size_t selector = 0; selector < 2; ++selector) {
     FIO_ARRAY_PTR a = a_array[selector];
     fprintf(stderr,
-            "* Testing dynamic arrays on the %s (" FIO_MACRO2STR(
+            "\t* Testing dynamic arrays on the %s (" FIO_MACRO2STR(
                 FIO_NAME(FIO_ARRAY_NAME,
-                         s)) ").\n"
+                         s)) ").\n\t"
                              "  This type supports %zu embedded items\n",
             (selector ? "heap" : "stack"),
             FIO_ARRAY_EMBEDDED_CAPA);
@@ -1767,7 +1767,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, FIO_ARRAY_NAME)(void) {
         FIO_MEMSET(tmp + i, i + 1, sizeof(*tmp));
       }
       for (size_t items = 0; items <= max_items; items = ((items << 1) | 1)) {
-        FIO_LOG_DEBUG2("* testing the FIO_ARRAY_EACH macro with %zu items.",
+        FIO_LOG_DEBUG2("\t* testing the FIO_ARRAY_EACH macro with %zu items.",
                        items);
         size_t i = 0;
         for (i = 0; i < items; ++i)

@@ -173,6 +173,8 @@ When `FIO_BASIC` is defined, the `FIOBJ` types, multi threading, and CLI modules
 
 When `FIO_CRYPT` is defined, all hash and cryptographic modules are included.
 
+**Note**: do NOT use these cryptographic unless you have no other choice. Always prefer tested cryptographic libraries such as OpenSSL.
+
 #### `FIO_EVERYTHING`
 
 Adds all the code facil.io C STL has to offer.
@@ -6851,7 +6853,7 @@ Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code f
 
 By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
 
-Do **NOT** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
+**Warning(!) / Broken**: Do **NOT** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
 
 #### `fio_sha1`
 
@@ -8464,10 +8466,16 @@ This can be done using the `FIO_MAP_HASH_FN(external_key)` macro i.e.:
 #define FIO_RAND           /* to provide us with a hash function. */
 
 /* use any non-inlined function's address as a hash salt. Here `dict_destroy` is used. */
-#define FIO_MAP_HASH_FN(ex_key) fio_risky_hash(ex_key.buf, ex_key.len, (uint64_t)(dict_destroy))
+#define FIO_MAP_HASH_FN(ex_key)                                   \
+        fio_risky_hash(ex_key.buf,                                \
+           ex_key.len,                                            \
+           (uint64_t)(dict_destroy) /* function address as salt */\
+           )
 
 #include "fio-stl.h"
 ```
+
+**Default**: by default the `FIO_MAP_HASH_FN` is empty, which means all the API calls require a hash to be pre-computed by the user and passed to the function.
 
 #### `FIO_MAP_RECALC_HASH`
 
@@ -8481,6 +8489,8 @@ Sometimes hashing can be very fast. A good example is when hashing pointer or in
 Since the Map always caches an 8 bits permutation of the hash, it is often possible to avoid spending the additional overhead of 8 bytes per-object by setting `FIO_MAP_RECALC_HASH` to `1` (true).
 
 This, of course, requires that the `FIO_MAP_HASH_FN(key)` macro be defined, or the map will not know how to recalculate the hash and instead cache the information.
+
+**Default**: always remembers the hash value, unless both `FIO_MAP_RECALC_HASH` and `FIO_MAP_HASH_FN` are set.
 
 ### Ordering and Performance
 

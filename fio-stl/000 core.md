@@ -173,6 +173,8 @@ When `FIO_BASIC` is defined, the `FIOBJ` types, multi threading, and CLI modules
 
 When `FIO_CRYPT` is defined, all hash and cryptographic modules are included.
 
+**Note**: do NOT use these cryptographic unless you have no other choice. Always prefer tested cryptographic libraries such as OpenSSL.
+
 #### `FIO_EVERYTHING`
 
 Adds all the code facil.io C STL has to offer.

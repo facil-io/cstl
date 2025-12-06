@@ -429,7 +429,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE) ||                          \
-    (defined(DEBUG) && defined(FIO_STATE))
+    (defined(DEBUG) && defined(FIO_STATE)) || defined(FIO_HTTP_HANDLE)
 #undef FIO_THREADS
 #define FIO_THREADS
 #endif

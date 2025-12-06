@@ -1,602 +1,449 @@
-/*
- * Original Source code copied from: http://xoshiro.di.unimi.it/hwd.php
- *
- * Copyright (C) 2004-2016 David Blackman.
- * Copyright (C) 2017-2018 David Blackman and Sebastiano Vigna.
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- *  or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, see <http://www.gnu.org/licenses/>.
- *
- */
-
-// I edited the original code only slightly, the original copyright still holds.
+/* *****************************************************************************
+Test
+***************************************************************************** */
+#include "test-helpers.h"
 
 #define FIO_RAND
-#define FIO_CLI
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
-/* ****************************************************************************
-System Randomized (patched)
-**************************************************************************** */
+FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 31, 0)
+/* *****************************************************************************
+Playhouse hashing (next risky version)
+***************************************************************************** */
 
-static uint64_t sys_next(void) {
-  uint64_t r = (uint64_t)rand() >> 8;
-  r ^= (uint64_t)rand() << 20;
-  r ^= (uint64_t)rand() << 40;
+FIO_IFUNC void fio___risky2_round(fio_u256 *restrict v, uint8_t *bytes32) {
+  const fio_u512 primes = {.u64 = {
+                               FIO_U32_HASH_PRIME0,
+                               FIO_U32_HASH_PRIME1,
+                               FIO_U32_HASH_PRIME2,
+                               FIO_U32_HASH_PRIME3,
+                               FIO_U32_HASH_PRIME4,
+                               FIO_U32_HASH_PRIME5,
+                               FIO_U32_HASH_PRIME6,
+                               FIO_U32_HASH_PRIME7,
+                           }};
+  fio_u512 in = {.u64 = {
+                     1 + fio_buf2u32u(bytes32),
+                     1 + fio_buf2u32u(bytes32 + 4),
+                     1 + fio_buf2u32u(bytes32 + 8),
+                     1 + fio_buf2u32u(bytes32 + 12),
+                     1 + fio_buf2u32u(bytes32 + 16),
+                     1 + fio_buf2u32u(bytes32 + 20),
+                     1 + fio_buf2u32u(bytes32 + 24),
+                     1 + fio_buf2u32u(bytes32 + 28),
+                 }};
+  FIO_FOR(i, 8) { in.u64[i] *= primes.u64[i]; }
+  FIO_FOR(i, 8) { in.u32[(i << 1)] += in.u32[(i << 1) + 1]; }
+  FIO_FOR(i, 8) { v->u32[i] += in.u32[(i << 1)]; }
+}
+/*  Computes a facil.io Stable Hash. */
+FIO_SFUNC uint64_t fio_risky2_hash(const void *data_,
+                                   size_t len,
+                                   uint64_t seed) {
+  uint64_t r;
+  uint8_t *data = (uint8_t *)data_;
+  fio_u256 v = {.u64 = {(FIO_U64_HASH_PRIME0 + seed) + (len),
+                        (FIO_U64_HASH_PRIME1 - seed) + (len << 1),
+                        (FIO_U64_HASH_PRIME2 + seed) + (len << 2),
+                        (FIO_U64_HASH_PRIME3 ^ seed) + (len << 3)}};
+  for (size_t i = 31; i < len; i += 32) {
+    fio___risky2_round(&v, data);
+    data += 32;
+  }
+  if ((len & 31)) { /* leftover + length input */
+    fio_u256 buf = {0};
+    fio_memcpy31x(buf.u8, data, len);
+    fio___risky2_round(&v, buf.u8);
+  }
+  /* reducing */
+  r = v.u64[0] ^ v.u64[1] ^ v.u64[2] ^ v.u64[3];
+  r ^= v.u64[0] + v.u64[1] + v.u64[2] + v.u64[3];
   return r;
 }
 
-/* ****************************************************************************
-Defining a Pseudo-Random Number Generator Function (deterministic / not)
-**************************************************************************** */
-
-FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, r128nd, 0, 0)
-
-/* ****************************************************************************
-Testing code
-**************************************************************************** */
-
-#define HWD_BITS 64
-static uint64_t (*next)(void) = fio_rand64;
-
-#include <assert.h>
-#include <fcntl.h>
-#include <float.h>
-#include <inttypes.h>
-#include <math.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
-#ifdef HWD_MMAP
-#include <sys/mman.h>
-#endif
-
-/*
-   HWD 1.1 (2018-05-24)
-
-   This code implements the Hamming-weight dependency test based on z9
-   from gjrand 4.2.1.0 and described in detail in
-
-   David Blackman and Sebastiano Vigna, "Scrambled linear pseudorandom number
-   generators", 2018.
-
-   Please refer to the paper for details about the test.
-
-   To compile, you must define:
-
-   - HWD_BITS is set to 64 in this implementation.
-   - HWD_BITS, which is the number of bits output by the PRNG, and it is by
-     default HWD_BITS. Presently legal combinations are 32/32, 32/64,
-     64/64 and 128/64.
-   - Optionally HWD_DIM, which defines the length of the signatures examined
-     (parameter k in the paper). Valid values are between 1 and 19;
-     the default value is 8.
-   - Optionally, HWD_NOPOPCOUNT, if your compiler does not support gcc's
-   builtins.
-   - Optionally, HWD_NUMCATS, if you want to override the default number
-     of categories. Valid values are between 1 and HWD_DIM; the default value
-     is HWD_DIM/2 + 1.
-   - Optionally, HWD_MMAP if you want to allocate memory in huge pages using
-   mmap().
-
-   You must insert the code for your PRNG, providing a suitable next()
-   method (returning a uint32_t or a uint64_t, depending on HWD_BITS)
-   at the HERE comment below. You may additionally initialize his state in
-   the main() if necessary.
-*/
-
-#ifndef HWD_DIM
-// This must be at most 19
-#define DIM (8)
-#else
-#define DIM (HWD_DIM)
-#endif
-
-#ifndef HWD_NUMCATS
-// This must be at most DIM
-#define NUMCATS (DIM / 2 + 1)
-#else
-#define NUMCATS (HWD_NUMCATS)
-#endif
-
-// Number of bits used for the sum in cs[] (small counters/sums).
-#define SUM_BITS (19)
-
-// Compile-time computation of 3^DIM
-#define SIZE                                                                   \
-  ((DIM >= 1 ? UINT64_C(3) : UINT64_C(1)) * (DIM >= 2 ? 3 : 1) *               \
-   (DIM >= 3 ? 3 : 1) * (DIM >= 4 ? 3 : 1) * (DIM >= 5 ? 3 : 1) *              \
-   (DIM >= 6 ? 3 : 1) * (DIM >= 7 ? 3 : 1) * (DIM >= 8 ? 3 : 1) *              \
-   (DIM >= 9 ? 3 : 1) * (DIM >= 10 ? 3 : 1) * (DIM >= 11 ? 3 : 1) *            \
-   (DIM >= 12 ? 3 : 1) * (DIM >= 13 ? 3 : 1) * (DIM >= 14 ? 3 : 1) *           \
-   (DIM >= 15 ? 3 : 1) * (DIM >= 16 ? 3 : 1) * (DIM >= 17 ? 3 : 1) *           \
-   (DIM >= 18 ? 3 : 1) * (DIM >= 19 ? 3 : 1))
-
-// Fast division by 3; works up to DIM = 19.
-#define DIV3(x) ((x)*UINT64_C(1431655766) >> 32)
-
-// batch_size values MUST be even. P is the probability of a 1 trit.
-
-#define P (0.46769122397215788544)
-const int64_t batch_size[] = {-1,
-                              UINT64_C(14744),
-                              UINT64_C(28320),
-                              UINT64_C(56616),
-                              UINT64_C(116264),
-                              UINT64_C(242784),
-                              UINT64_C(512040),
-                              UINT64_C(1086096),
-                              UINT64_C(2311072),
-                              UINT64_C(4926224),
-                              UINT64_C(10510376),
-                              UINT64_C(22435504),
-                              UINT64_C(47903280),
-                              UINT64_C(102294608),
-                              UINT64_C(218459240),
-                              UINT64_C(466556056),
-                              UINT64_C(996427288),
-                              UINT64_C(2128099936),
-                              UINT64_C(4545075936),
-                              UINT64_C(9707156552)};
-
-#ifdef HWD_NO_POPCOUNT
-static inline int popcount64(uint64_t x) {
-  x = x - ((x >> 1) & 0x5555555555555555);
-  x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333);
-  x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0f;
-  x = x + (x >> 8);
-  x = x + (x >> 16);
-  x = x + (x >> 32);
-  return x & 0x7f;
-}
-#else
-#define popcount64(x) __builtin_popcountll(x)
-#endif
-
-/* Probability that the smallest of n numbers in [0..1) is <= x . */
-static double pco_scale(double x, double n) {
-  if (x >= 1.0 || x <= 0.0)
-    return x;
-
-  /* This is the result we want: return 1.0 - pow(1.0 - x, n); except the
-     important cases are with x very small so this method gives better
-     accuracy. */
-
-  return -expm1(log1p(-x) * n);
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky2_wrapper)(char *buf, size_t len) {
+  return fio_risky2_hash(buf, len, 1);
 }
 
-/* The idea of the test is based around Hamming weights. We calculate the
-   average number of bits per BITS-bit word and how it depends on the
-   weights of the previous DIM words. There are SIZE different categories
-   for the previous words. For each one accumulate number of samples
-   (get_count(cs[j]) and count_sum[j].c) and number of bits per sample
-   (get_sum(cs[j]) and count_sum[j].s) .
-
-   To increase cache hits, we pack a 13-bit unsigned counter (upper bits)
-   and a and a 19-bit unsigned sum of Hamming weights (lower bits) into a
-   uint32_t. It would make sense to use bitfields, but in this way
-   update_cs() can update both fields with a single sum. */
-
-static inline int get_count(uint32_t cs) { return cs >> SUM_BITS; }
-
-static inline int get_sum(uint32_t cs) { return cs & ((1 << SUM_BITS) - 1); }
-
-/* We add bc to the sum field of *p then add 1 to the count field. */
-static inline void update_cs(int bc, uint32_t *p) {
-  *p += bc + (1 << SUM_BITS);
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_wrapper)(char *buf, size_t len) {
+  return fio_risky_hash(buf, len, 1);
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, stable_wrapper)(char *buf, size_t len) {
+  return fio_stable_hash(buf, len, 1);
 }
 
-#ifdef HWD_MMAP
-// "Small" counters/sums
-static uint32_t *cs;
-
-// "Large" counters/sums
-static struct {
-  uint64_t c;
-  int64_t s;
-} * count_sum;
-#else
-// "Small" counters/sums
-static uint32_t cs[SIZE];
-
-// "Large" counters/sums
-static struct {
-  uint64_t c;
-  int64_t s;
-} count_sum[SIZE];
-#endif
-
-/* Copy accumulated numbers out of cs[] into count_sum, then zero the ones
-   in cs[]. Note it is impossible for totals to overflow unless counts do. */
-
-static void desat(const int64_t next_batch_size) {
-  int64_t c = 0;
-
-  for (uint64_t i = 0; i < SIZE; i++) {
-    const int32_t st = cs[i];
-    const int count = get_count(st);
-
-    c += count;
-
-    count_sum[i].c += count;
-    /* In cs[] the total Hamming weight is stored as actual weight. In
-       count_sum, it is stored as difference from expected average
-       Hamming weight, hence (BITS/2) * ct */
-    count_sum[i].s += get_sum(st) - (HWD_BITS / 2) * count;
-    cs[i] = 0;
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_ptr_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  while (len > 31) {
+    h[0] += fio_risky_ptr((void *)fio_buf2u64u(buf));
+    h[1] += fio_risky_ptr((void *)fio_buf2u64u(buf + 8));
+    h[2] += fio_risky_ptr((void *)fio_buf2u64u(buf + 16));
+    h[3] += fio_risky_ptr((void *)fio_buf2u64u(buf + 24));
+    len -= 32;
+    buf += 32;
   }
-
-  if (c != next_batch_size) {
-    fprintf(stderr, "Counters overflowed. Seriously non-random.\n");
-    printf("p = %.3g\n", 1e-100);
-    exit(0);
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_ptr((void *)t[0]);
+    h[1] += fio_risky_ptr((void *)t[1]);
+    h[2] += fio_risky_ptr((void *)t[2]);
+    h[3] += fio_risky_ptr((void *)t[3]);
   }
+  return h[0] + h[1] + h[2] + h[3];
+}
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, risky_num_wrapper)(char *buf,
+                                                          size_t len) {
+  uint64_t h[4] = {0};
+  while (len > 31) {
+    h[0] += fio_risky_num(fio_buf2u64u(buf), 0);
+    h[1] += fio_risky_num(fio_buf2u64u(buf + 8), 0);
+    h[2] += fio_risky_num(fio_buf2u64u(buf + 16), 0);
+    h[3] += fio_risky_num(fio_buf2u64u(buf + 24), 0);
+    len -= 32;
+    buf += 32;
+  }
+  if ((len & 31)) {
+    uint64_t t[4] = {0};
+    fio_memcpy31x(t, buf, len);
+    h[0] += fio_risky_num(t[0], 0);
+    h[1] += fio_risky_num(t[1], 0);
+    h[2] += fio_risky_num(t[2], 0);
+    h[3] += fio_risky_num(t[3], 0);
+  }
+  return h[0] + h[1] + h[2] + h[3];
 }
 
-/* sig is the last signature from the previous call. At each step it
-   contains an index into cs[], derived from the Hamming weights of the
-   previous DIM numbers. Considered as a base 3 number, the most
-   significant digit is the most recent trit. n is the batch size. */
-static inline uint32_t scan_batch(uint32_t sig, int64_t n, uint64_t *ts) {
-  uint64_t t = ts ? *ts : 0;
-  int bc;
-
-  for (int64_t i = 0; i < n; i++) {
-    const uint64_t w = next();
-
-    if (ts) {
-      bc = popcount64(w ^ w << 1 ^ t);
-      t = w >> 63;
-    } else
-      bc = popcount64(w);
-
-    update_cs(bc, cs + sig);
-    sig = DIV3(sig) + ((bc >= 30) + (bc >= 35)) * (SIZE / 3);
-  }
-
-  if (ts)
-    *ts = t;
-  /* return the current signature so it can be passed back in on the next batch
-   */
-  return sig;
+FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
+  fio_xmask(buf, len, fio_rand64());
+  return len;
 }
 
-/* Now we're out of the the accumulate phase, which is the inside loop.
-   Next is analysis. */
-
-/* Mostly a debugging printf, though it can tell you a bit about the
-   structure of a prng when it fails. Print sig out in base 3, least
-   significant digits first. This means the most recent trit is the
-   rightmost. */
-
-static void print_sig(uint32_t sig) {
-  for (uint64_t i = DIM; i > 0; i--) {
-    putchar(sig % 3 + '0');
-    sig /= 3;
-  }
-}
-
-#ifndef M_SQRT1_2
-/* 1.0/sqrt(2.0) */
-#define M_SQRT1_2 0.70710678118654752438
-#endif
-/* 1.0/sqrt(3.0) */
-#define CORRECT3 0.57735026918962576451
-/* 1.0/sqrt(6.0) */
-#define CORRECT6 0.40824829046386301636
-
-/* This is a transform similar in spirit to the Walsh-Hadamard transform
-  (see the paper). It's ortho-normal. So with independent normal
-  distribution mean 0 standard deviation 1 in, we get independent normal
-  distribution mean 0 standard deviation 1 out, except maybe for element 0.
-  And of course, for certain kinds of bad prngs when the null hypthosis is
-  false, some of these numbers will get extreme. */
-
-static void mix3(double *ct, int sig) {
-  double *p1 = ct + sig, *p2 = p1 + sig;
-  double a, b, c;
-
-  for (int i = 0; i < sig; i++) {
-    a = ct[i];
-    b = p1[i];
-    c = p2[i];
-    ct[i] = (a + b + c) * CORRECT3;
-    p1[i] = (a - c) * M_SQRT1_2;
-    p2[i] = (2 * b - a - c) * CORRECT6;
-  }
-
-  sig = DIV3(sig);
-  if (sig) {
-    mix3(ct, sig);
-    mix3(p1, sig);
-    mix3(p2, sig);
-  }
-}
-
-/* categorise sig based on nonzero ternary digits. */
-static int cat(uint32_t sig) {
-  int r = 0;
-
-  while (sig) {
-    r += (sig % 3) != 0;
-    sig /= 3;
-  }
-
-  return (r >= NUMCATS ? NUMCATS : r) - 1;
-}
-
-/* Apply the transform; then, compute, log and return the resulting p-value. */
-
-#ifdef HWD_MMAP
-static double *norm;
-#else
-static double norm[SIZE]; // This might be large
-#endif
-
-static double compute_pvalue(const bool trans) {
-  const double db = HWD_BITS * 0.25;
-
-  for (uint64_t i = 0; i < SIZE; i++) {
-    /* copy the bit count totals from count_sum[i].s to norm[i] with
-       normalisation. We expect mean 0 standard deviation 1 db is the
-       expected variance for Hamming weight of BITS-bit words.
-       count_sum[i].c is number of samples */
-    if (count_sum[i].c == 0)
-      norm[i] = 0.0;
-    else
-      norm[i] = count_sum[i].s / sqrt(count_sum[i].c * db);
-  }
-
-  /* The transform. The wonderful transform. After this we expect still
-     normalised to mean 0 stdev 1 under the null hypothesis. (But not for
-     element 0 which we will ignore.) */
-  mix3(norm, SIZE / 3);
-
-  double overall_pvalue = DBL_MAX;
-
-  /* To make the test more sensitive (see the paper) we split the
-     elements of norm into NUMCAT categories. These are based only on the
-     index into norm, not the content. We go though norm[], decide which
-     category each one is in, and record the signature (sig[]) and the
-     absolute value (sigma[]) For the most extreme value in each
-     category. Also a count (cat_count[]) of how many were in each
-     category. */
-
-  double sigma[NUMCATS];
-  uint32_t sig[NUMCATS], cat_count[NUMCATS] = {0};
-  for (int i = 0; i < NUMCATS; i++)
-    sigma[i] = DBL_MIN;
-
-  for (uint64_t i = 1; i < SIZE; i++) {
-    const int c = cat(i);
-    cat_count[c]++;
-    const double x = fabs(norm[i]);
-    if (x > sigma[c]) {
-      sig[c] = i;
-      sigma[c] = x;
+/* tests Risky Hash and Stable Hash... takes a while (speed tests as well) */
+FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
+  fprintf(stderr, "\t Testing Risky Hash and Risky Mask (sanity).\n");
+  {
+    char *str = (char *)"testing that risky hash is always the same hash";
+    const size_t len = FIO_STRLEN(str);
+    char buf[128];
+    FIO_MEMCPY(buf, str, len);
+    uint64_t org_hash = fio_risky_hash(buf, len, 0);
+    FIO_ASSERT(!memcmp(buf, str, len), "hashing shouldn't touch data");
+    for (size_t i = 0; i < 8; ++i) {
+      char *tmp = buf + i;
+      FIO_MEMCPY(tmp, str, len);
+      uint64_t tmp_hash = fio_risky_hash(tmp, len, 0);
+      FIO_ASSERT(tmp_hash == fio_risky_hash(tmp, len, 0),
+                 "hash should be consistent!");
+      FIO_ASSERT(tmp_hash == org_hash, "memory address shouldn't effect hash!");
     }
   }
+#if !DEBUG
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash (unaligned)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_wrapper),
+                         (char *)"fio_risky_hash (unaligned)",
+                         5,
+                         3,
+                         2);
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit)",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit unaligned)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, stable_wrapper),
+                         (char *)"fio_stable_hash (64 bit unaligned)",
+                         5,
+                         3,
+                         2);
+  fprintf(stderr, "\n");
+#if 0  /* speed test num and ptr hashing */
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_ptr_wrapper),
+                         (char *)"fio_risky_ptr (emulated)",
+                         7,
+                         0,
+                         2);
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky_num_wrapper),
+                         (char *)"fio_risky_num (emulated)",
+                         5,
+                         3,
+                         2);
+#endif /* speed test num and ptr hashing */
 
-  /* For each category, calculate a p-value, put the lowest into
-     overall_pvalue, and print something out. */
-  for (int i = 0; i < NUMCATS; i++) {
-    printf("mix3 extreme = %.5f (sig = ", sigma[i]);
-    print_sig(sig[i]);
-    /* convert absolute value of approximate normal into p-value. */
-    double pvalue = erfc(M_SQRT1_2 * sigma[i]);
-    /* Ok, that's the lowest p-value cherry picked out of a choice of
-       cat_count[i] of them. Must correct for that. */
-    pvalue = pco_scale(pvalue, cat_count[i]);
-    printf(") weight %s%d (%" PRIu32 "), p-value = %.3g\n",
-           i == NUMCATS - 1 ? ">=" : "",
-           i + 1,
-           cat_count[i],
-           pvalue);
-    if (pvalue < overall_pvalue)
-      overall_pvalue = pvalue;
-  }
+  /* xmask speed testing */
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                         (char *)"fio_xmask (XOR, NO counter)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, xmask_wrapper),
+                         (char *)"fio_xmask (unaligned)",
+                         13,
+                         1,
+                         2);
 
-  printf("bits per word = %d (analyzing %s); min category p-value = %.3g\n\n",
-         HWD_BITS,
-         trans ? "transitions" : "bits",
-         overall_pvalue);
-  /* again, we're cherry picking worst of NUMCATS, so correct it again. */
-  return pco_scale(overall_pvalue, NUMCATS);
+#if 0  /* speed test playground */
+  /* playground speed testing */
+  fprintf(stderr, "\n");
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"rXtest (64 bit)",
+                         7,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"rXtest (64 bit)",
+                         13,
+                         0,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"rXtest (64 bit unaligned)",
+                         6,
+                         3,
+                         2);
+  fio_test_hash_function(FIO_NAME_TEST(stl, risky2_wrapper),
+                         (char *)"rXtest (64 bit unaligned)",
+                         5,
+                         3,
+                         2);
+#endif /* speed test playground */
+  fprintf(stderr, "\n");
+#endif /* DEBUG */
 }
 
-static time_t tstart;
-static double low_pvalue = DBL_MIN;
-
-/* This is the call made when we want to print some analysis. This will be
-   done multiple times if --progress is used. */
-static void analyze(int64_t pos, bool trans, bool final) {
-
-  if (pos < 2 * pow(2.0 / (1.0 - P), DIM))
-    printf("WARNING: p-values are unreliable, you have to wait (insufficient "
-           "data for meaningful answer)\n");
-
-  const double pvalue = compute_pvalue(trans);
-  const time_t tm = time(0);
-
-  printf("processed %.3g bytes in %.3g seconds (%.4g GB/s, %.4g TB/h). %s\n",
-         (double)pos,
-         (double)(tm - tstart),
-         pos * 1E-9 / (double)(tm - tstart),
-         pos * (3600 * 1E-12) / (double)(tm - tstart),
-         ctime(&tm));
-
-  if (final)
-    printf("final\n");
-  printf("p = %.3g\n", pvalue);
-
-  if (pvalue < low_pvalue)
-    exit(0);
-
-  if (!final)
-    printf("------\n\n");
-}
-
-static int64_t progsize[] = {100000000,
-                             125000000,
-                             150000000,
-                             175000000,
-                             200000000,
-                             250000000,
-                             300000000,
-                             400000000,
-                             500000000,
-                             600000000,
-                             700000000,
-                             850000000,
-                             0};
-
-/* We use the all-one signature (the most probable) as initial signature. */
-static int64_t pos;
-static uint32_t last_sig = (SIZE - 1) / 2;
-static uint64_t ts;
-static int64_t next_progr = 100000000; // progsize[0]
-static int progr_index;
-
-static void run_test(const int64_t n, const bool trans, const bool progress) {
-
-  uint64_t *const p = trans ? &ts : NULL;
-
-  while (n < 0 || pos < n) {
-    int64_t next_batch_size = batch_size[DIM];
-    if (n >= 0 && (n - pos) / (HWD_BITS / 8) < next_batch_size)
-      next_batch_size = (n - pos) / (HWD_BITS / 8) & ~UINT64_C(7);
-
-    if (next_batch_size == 0)
-      break;
-    last_sig = scan_batch(last_sig, next_batch_size, p);
-    desat(next_batch_size);
-    pos += next_batch_size * (HWD_BITS / 8);
-
-    if (progress && pos >= next_progr) {
-      analyze(pos, trans, false);
-      progsize[progr_index++] *= 10;
-      next_progr = progsize[progr_index];
-      if (next_progr == 0) {
-        progr_index = 0;
-        next_progr = progsize[0];
+FIO_SFUNC void FIO_NAME_TEST(stl, random_buffer)(uint64_t *stream,
+                                                 size_t len,
+                                                 const char *name,
+                                                 size_t clk) {
+  size_t totals[2] = {0};
+  size_t freq[256] = {0};
+  const size_t total_bits = (len * sizeof(*stream) * 8);
+  uint64_t hemming = 0;
+  /* collect data */
+  for (size_t i = 1; i < len; i += 2) {
+    hemming += fio_hemming_dist(stream[i], stream[i - 1]);
+    for (size_t byte = 0; byte < (sizeof(*stream) << 1); ++byte) {
+      uint8_t val = ((uint8_t *)(stream + (i - 1)))[byte];
+      ++freq[val];
+      for (size_t bit = 0; bit < 8; ++bit) {
+        ++totals[(val >> bit) & 1];
       }
     }
   }
-
-  analyze(pos, trans, true);
+  hemming /= len;
+  fprintf(stderr, "\n");
+#if DEBUG
+  fprintf(stderr,
+          "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles NOT OPTIMIZED):\n",
+          name,
+          clk);
+#else
+  fprintf(stderr, "\t- \x1B[1m%s\x1B[0m (%zu CPU cycles):\n", name, clk);
+#endif
+  fprintf(stderr,
+          "\t  zeros / ones (frequency bias)\t%.05f%% (should be near zero)\n",
+          ((((float)100.0 * totals[0]) / totals[1]) > (float)100.0
+               ? ((((float)100.0 * totals[0]) / totals[1]) - 100)
+               : ((float)100 - (((float)100.0 * totals[0]) / totals[1]))));
+  if (!(totals[0] < totals[1] + (total_bits / 20) &&
+        totals[1] < totals[0] + (total_bits / 20)))
+    FIO_LOG_ERROR("randomness isn't random?");
+  fprintf(stderr,
+          "\t  avarage hemming distance\t%zu (should be: 14-18)\n",
+          (size_t)hemming);
+  /* expect avarage hemming distance of 25% == 16 bits */
+  if (!(hemming >= 14 && hemming <= 18))
+    FIO_LOG_ERROR("randomness isn't random (hemming distance failed)?");
+  /* test chi-square ... I think */
+  if (len * sizeof(*stream) > 2560) {
+    double n_r = (double)1.0 * ((len * sizeof(*stream)) / 256);
+    double chi_square = 0;
+    for (unsigned int i = 0; i < 256; ++i) {
+      double f = freq[i] - n_r;
+      chi_square += (f * f);
+    }
+    chi_square /= n_r;
+    double chi_square_r_abs =
+        (chi_square - 256 >= 0) ? chi_square - 256 : (256 - chi_square);
+    fprintf(
+        stderr,
+        "\t  chi-sq. variation\t\t%.02lf - %s (expect <= %0.2lf)\n",
+        chi_square_r_abs,
+        ((chi_square_r_abs <= 2 * (sqrt(n_r)))
+             ? "good"
+             : ((chi_square_r_abs <= 3 * (sqrt(n_r))) ? "not amazing"
+                                                      : "\x1B[1mBAD\x1B[0m")),
+        2 * (sqrt(n_r)));
+  }
 }
 
-int main(int argc, const char **argv) {
-  int64_t n = -1;
-  bool trans = false, progress = false;
+int main(void) {
+  const size_t test_len = (1UL << 21);
+  uint64_t *rs =
+      (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
+  fprintf(
+      stderr,
+      "\t * Testing randomness "
+      "- bit frequency / hemming distance / chi-square (%zu random bytes).\n",
+      (size_t)(sizeof(*rs) * test_len));
+  clock_t start, end;
+  FIO_ASSERT_ALLOC(rs);
 
-  fio_cli_start(
-      argc,
-      argv,
-      1,
-      1,
-      "implements the Hamming-weight dependency test based on z9 from gjrand "
-      "4.2.1.0 and described by David Blackman and Sebastiano Vigna.\n"
-      "Runs the test, by default, on the facil.io random function.",
-      FIO_CLI_PRINT_HEADER("Supported PRNG Functions"),
-      FIO_CLI_PRINT_LINE("`fio`"),
-      FIO_CLI_PRINT("the build-it PRNG supplied by `FIO_RAND` "
-                    "(`fio_rand64`)."),
-      FIO_CLI_PRINT_LINE("`M128`"),
-      FIO_CLI_PRINT("the 128 bit Macro based PRNG customizable "
-                    "using `FIO_DEFINE_RANDOM128_FN`."),
-      FIO_CLI_PRINT_LINE("`sys`"),
-      FIO_CLI_PRINT("a patched version of the clib `rand` function."),
-      FIO_CLI_PRINT_HEADER("Misc"),
-      FIO_CLI_BOOL("--progress -p uses progressive test sizes (true unless N "
-                   "is provided)."),
-      FIO_CLI_BOOL("--trans -t tests transitions (vs. bits)."),
-      FIO_CLI_STRING("--low-pv a float indicating the test's low P value."),
-      FIO_CLI_INT("--N -n the tests iteration size limit."));
-
-  if (fio_cli_get_bool("-p"))
-    progress = true;
-  if (fio_cli_get_bool("-t"))
-    trans = true;
-  if (fio_cli_get_i("-n"))
-    n = fio_cli_get_i("-n");
-  if (fio_cli_get("--low-pv")) {
-    if (fio_cli_get("--low-pv") &&
-        sscanf(fio_cli_get("--low-pv"), "%lf", &low_pvalue) != 1)
-      fprintf(stderr, "Optional --low-pv must be a float.\n");
-    exit(1);
-  }
-  {
-    const char *tmp = fio_cli_unnamed(0);
-    if (!tmp)
-      exit(-1);
-    if (!strncasecmp(tmp, "fio", 3)) {
-      next = fio_rand64;
-    } else if (!strncasecmp(tmp, "m128", 4)) {
-      next = r128nd64;
-    } else if (!strncasecmp(tmp, "sys", 4)) {
-      next = sys_next;
+  rand(); /* warmup */
+  if (sizeof(int) < sizeof(uint64_t)) {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = ((uint64_t)rand() << 32) | (uint64_t)rand();
     }
-    FIO_LOG_INFO("Testing using `%s`", fio_cli_unnamed(0));
+    end = clock();
+  } else {
+    start = clock();
+    for (size_t i = 0; i < test_len; ++i) {
+      rs[i] = (uint64_t)rand();
+    }
+    end = clock();
   }
-  fio_cli_end();
-  next();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "rand (system - naive, ignoring missing bits)", end - start);
 
-#ifdef HWD_MMAP
-  fprintf(stderr, "Allocating memory via mmap()... ");
-  // (SIZE + 1) is necessary for a correct memory alignment.
-  cs = mmap((void *)(0x0UL),
-            (SIZE + 1) * sizeof *cs + SIZE * sizeof *norm +
-                SIZE * sizeof *count_sum,
-            PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | (30 << MAP_HUGE_SHIFT),
-            0,
-            0);
-  if (cs == MAP_FAILED) {
-    fprintf(stderr, "Failed.\n");
-    exit(1);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  {
+    if (RAND_MAX == ~(uint64_t)0ULL) {
+      /* RAND_MAX fills all bits */
+      start = clock();
+      for (size_t i = 0; i < test_len; ++i) {
+        rs[i] = (uint64_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint32_t)0UL)) {
+      /* RAND_MAX fill at least 32 bits per call */
+      uint32_t *rs_adjusted = (uint32_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 1); ++i) {
+        rs_adjusted[i] = (uint32_t)rand();
+      }
+      end = clock();
+    } else if (RAND_MAX >= (~(uint16_t)0U)) {
+      /* RAND_MAX fill at least 16 bits per call */
+      uint16_t *rs_adjusted = (uint16_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint16_t)rand();
+      }
+      end = clock();
+    } else {
+      /* assume RAND_MAX fill at least 8 bits per call */
+      uint8_t *rs_adjusted = (uint8_t *)rs;
+
+      start = clock();
+      for (size_t i = 0; i < (test_len << 2); ++i) {
+        rs_adjusted[i] = (uint8_t)rand();
+      }
+      end = clock();
+    }
+    /* test RAND_MAX value */
+    uint8_t rand_bits = 63;
+    while (rand_bits) {
+      if (RAND_MAX <= (~(0ULL)) >> rand_bits) break;
+      --rand_bits;
+    }
+    rand_bits = 64 - rand_bits;
+
+    char buffer[128] = {0};
+    snprintf(buffer,
+             128 - 14,
+             "rand (system - fixed, testing %d random bits)",
+             (int)rand_bits);
+    FIO_NAME_TEST(stl, random_buffer)(rs, test_len, buffer, end - start);
   }
-  fprintf(stderr, "OK.\n");
-  norm = (void *)(cs + SIZE + 1);
-  count_sum = (void *)(norm + SIZE);
-#endif
 
-  tstart = time(0);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  fio_rand64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio_rand64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)(rs, test_len, "fio_rand64", end - start);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio_rand_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "fio_rand_bytes", end - start);
 
-  // for (int i = 1; i < argc; i++) {
-  //   double dn;
-  //   if (strcmp(argv[i], "--progress") == 0)
-  //     progress = true;
-  //   else if (strcmp(argv[i], "-t") == 0)
-  //     trans = true;
-  //   else if (sscanf(argv[i], "%lf", &dn) == 1)
-  //     n = (int64_t)dn;
-  //   else if (sscanf(argv[i], "--low-pv=%lf", &low_pvalue) == 1) {
-  //   } else {
-  //     fprintf(stderr,
-  //             "Optional arg must be --progress or -t or "
-  //             "--low-pv=number or numeric\n");
-  //     exit(1);
-  //   }
-  // }
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  fio___prng64(); /* warmup */
+  start = clock();
+  for (size_t i = 0; i < test_len; ++i) {
+    rs[i] = fio___prng64();
+  }
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "PNGR128/64bits", end - start);
+  FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
+  start = clock();
+  fio___prng_bytes(rs, test_len * sizeof(*rs));
+  end = clock();
+  FIO_NAME_TEST(stl, random_buffer)
+  (rs, test_len, "PNGR128_bytes", end - start);
 
-  if (n <= 0)
-    progress = true;
-
-  run_test(n, trans, progress);
-
-  exit(0);
+  FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
+  fprintf(stderr, "\n");
+  {
+    FIO_STR_INFO_TMP_VAR(data, 1124);
+    data.len = 1024;
+    for (size_t i = 0; i < data.len; ++i) data.buf[i] = (char)(i & 255);
+    uint64_t h = fio_stable_hash(data.buf, 1024, 0);
+    FIO_LOG_DDEBUG2("Stable Hash Value: %p", (void *)h);
+    FIO_ASSERT(h == (uint64_t)0x5DC4DAD435547F67ULL,
+               "Stable Hash Value Error!");
+  }
+#if DEBUG
+  fprintf(stderr,
+          "\t- to compare CPU cycles, test randomness with optimization.\n\n");
+#endif /* DEBUG */
 }

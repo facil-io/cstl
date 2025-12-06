@@ -306,7 +306,7 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
         clen = FIO___HTTP1_BODY_NOT_ALLOWED;
       /* Prevent CL.TE / TE.CL by validating header's payload changes nothing */
       if (p->expected)
-        return 0 - (p->expected != clen);
+        return 0 - (p->expected != clen); /* causes parser to fail and stop */
       p->expected = clen;
       if (clen == FIO___HTTP1_BODY_NOT_ALLOWED)
         return 0;
@@ -375,7 +375,7 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
 }
 
 /* returns either a lower case (ASCI) or the original char. */
-static uint8_t fio_http1_tolower(uint8_t c) {
+static inline uint8_t fio_http1_tolower(uint8_t c) {
   c |= (((uint8_t)(c - (uint8_t)'A') < (uint8_t)((uint8_t)'Z' - ((uint8_t)'A')))
         << 5);
   return c;

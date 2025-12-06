@@ -3465,6 +3465,73 @@ FIO___VMATH_DEF_LARGE_MUL(4096, 2048)
 #undef FIO___VMATH_DEF_LARGE_ADD_SUB
 #undef FIO___VMATH_DEF_LARGE_MUL
 
+/* *****************************************************************************
+SIMD Vector Looping Helper
+***************************************************************************** */
+
+/* Internal - bytes per constant iterative loop for compiler optimization  */
+#define FIO___SIMD_BYTES ((size_t)256U)
+/* Internal - looping macro that separates   */
+#define FIO_FOR_UNROLL(itterations, size_of_loop, i, action)                   \
+  do {                                                                         \
+    size_t i = 0;                                                              \
+    /* handle odd length vectors, not multiples of FIO___LOG2V */              \
+    if ((itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))               \
+      for (; i < (itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i) \
+        action;                                                                \
+    if (itterations)                                                           \
+      for (; i < itterations;)                                                 \
+        for (size_t j__loop__ = 0;                                             \
+             j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
+             ++j__loop__, ++i) /* dear compiler, please vectorize */           \
+          action;                                                              \
+  } while (0)
+
+/* *****************************************************************************
+SIMD Vector Operations
+***************************************************************************** */
+
+/** A math operation `op` between correlating vector positions of same length */
+#define FIO_VEC_SIMPLE_OP(result, a, b, len, op)                               \
+  FIO_FOR_UNROLL(len, sizeof(*a), i__, result[i__] = a[i__] op b[i__])
+/** A math operation `op` between a scalar and a vector */
+#define FIO_VEC_SCALAR_OP(result, v, sclr, len, op)                            \
+  FIO_FOR_UNROLL(len, sizeof(*v), i__, result[i__] = vec[i__] op scalar)
+/** A math operation `op` between all vector members */
+#define FIO_VEC_REDUCE_OP(result, vec, len, op)                                \
+  FIO_FOR_UNROLL(len, sizeof(*vec), i__, result = result op vec[i__])
+
+/** The dot product of two vectors (sum(a[i]*b[i])). */
+#define FIO_VEC_DOT(result, a, b, len)                                         \
+  FIO_FOR_UNROLL(len, sizeof(*a), i__, result += a[i__] * b[i__])
+
+/** Add two vectors of same length (adding corresponding positions) */
+#define FIO_VEC_ADD(result, a, b, len) FIO_VEC_SIMPLE_OP(result, a, b, len, +)
+/** Subtracting two vectors of same length */
+#define FIO_VEC_SUB(result, a, b, len) FIO_VEC_SIMPLE_OP(result, a, b, len, -)
+/** Multiplying two vectors (multiplying corresponding positions - half dot) */
+#define FIO_VEC_MUL(result, a, b, len) FIO_VEC_SIMPLE_OP(result, a, b, len, *)
+
+/** Add scalar to vector */
+#define FIO_VEC_SCALAR_ADD(result, vec, scalar, vlen)                          \
+  FIO_VEC_SCALAR_OP(result, vec, scalar, vlen, +)
+/** Subtract scalar from vector */
+#define FIO_VEC_SCALAR_SUB(result, vec, scalar, vlen)                          \
+  FIO_VEC_SCALAR_OP(result, vec, scalar, vlen, -)
+/** Multiply scalar from vector */
+#define FIO_VEC_SCALAR_MUL(result, vec, scalar, vlen)                          \
+  FIO_VEC_SCALAR_OP(result, vec, scalar, vlen, *)
+
+/** Add all members of a vector */
+#define FIO_VEC_REDUCE_ADD(result, vec, vlen)                                  \
+  FIO_VEC_REDUCE_OP(result, vec, vlen, +)
+/** Subtract all members of a vector */
+#define FIO_VEC_REDUCE_SUB(result, vec, vlen)                                  \
+  FIO_VEC_REDUCE_OP(result, vec, vlen, -)
+/** Multiply all members of a vector */
+#define FIO_VEC_REDUCE_MUL(result, vec, vlen)                                  \
+  FIO_VEC_REDUCE_OP(result, vec, vlen, *)
+
 /* ****************************************************************************
 Defining a Pseudo-Random Number Generator Function (deterministic / not)
 **************************************************************************** */

@@ -454,6 +454,8 @@ POSIX Allocation
 FIO_SFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
                                            uint8_t alignment_log) {
   void *result;
+  FIO_ASSERT((alignment_log < 25),
+             "`alignment_log > 24` out of range in FIO_MEM_SYS_ALLOC");
   static void *next_alloc = (void *)0x01;
   const size_t alignment_mask = (1ULL << alignment_log) - 1;
   const size_t alignment_size = (1ULL << alignment_log);
@@ -735,7 +737,7 @@ SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
 
 #ifdef FIO_TEST_ALL
 SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
-  fprintf(stderr, "* Custom memory allocator bypassed.\n");
+  fprintf(stderr, "\t* Custom memory allocator bypassed.\n");
 }
 #endif /* FIO_TEST_ALL */
 
@@ -2531,12 +2533,12 @@ FIO_IFUNC void *FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio),
 /* main test function */
 FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
   fprintf(stderr,
-          "* Testing core memory allocator " FIO_MACRO2STR(
+          "\t* Testing core memory allocator " FIO_MACRO2STR(
               FIO_NAME(FIO_MEMORY_NAME, malloc)) ".\n");
 
   const uintptr_t alignment_mask = (FIO_MEMORY_ALIGN_SIZE - 1);
   fprintf(stderr,
-          "* Validating allocation alignment on %zu byte border.\n",
+          "\t* Validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
@@ -2551,7 +2553,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 
   for (uintptr_t cycles = 16; cycles <= (FIO_MEMORY_ALLOC_LIMIT); cycles *= 2) {
     fprintf(stderr,
-            "* Testing %zu byte allocation blocks, single threaded.\n",
+            "\t* Testing %zu byte allocation blocks, single threaded.\n",
             (size_t)(cycles));
     FIO_NAME_TEST(FIO_NAME(FIO_MEMORY_NAME, fio), mem_tsk)((void *)cycles);
   }
@@ -2569,7 +2571,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
 #endif
 
       fprintf(stderr,
-              "* Testing %zu byte allocation blocks, using %zu threads.\n",
+              "\t* Testing %zu byte allocation blocks, using %zu threads.\n",
               (size_t)(cycles),
               (thread_count + 1));
       for (size_t i = 0; i < thread_count; ++i) {
@@ -2587,7 +2589,7 @@ FIO_SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {
     }
   }
   fprintf(stderr,
-          "* Re-validating allocation alignment on %zu byte border.\n",
+          "\t* Re-validating allocation alignment on %zu byte border.\n",
           (size_t)(FIO_MEMORY_ALIGN_SIZE));
   for (size_t i = 0; i < alignment_mask; ++i) {
     void *p = FIO_NAME(FIO_MEMORY_NAME, malloc)(i);
