@@ -322,6 +322,7 @@ typedef SSIZE_T ssize_t;
 
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
