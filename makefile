@@ -27,7 +27,7 @@ OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
 # CFLAGS in production mode.
 CFLAGS+=$(OPTIMIZATION) $(WARNINGS) -I$(SRC_DIR) -I.
-LDFLAGS+=-lm
+LDFLAGS+= -lm
 
 # Main executable
 PROJECT = $(BUILD_DIR)/$(NAME)
@@ -89,7 +89,7 @@ lint:
 
 set_debug_flags:
 	$(eval CFLAGS=$(DEBUG_CFLAGS))
-	@echo "Debug mode detected. Set CFLAGS to $(CFLAGS)"
+	@echo "(!) Debug mode detected."
 
 db/%: | clean set_debug_flags % ;
 %/db: | clean set_debug_flags % ;
