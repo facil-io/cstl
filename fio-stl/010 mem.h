@@ -742,6 +742,8 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void) {}
 /** Prints the settings used to define the allocator. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void) {}
 SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void) { return 0; }
+void fio_malloc_arenas___(void);
+SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arenas)(void) { return 0; }
 
 #ifdef FIO_TEST_ALL
 SFUNC void FIO_NAME_TEST(FIO_NAME(stl, FIO_MEMORY_NAME), mem)(void) {

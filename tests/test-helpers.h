@@ -164,7 +164,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
 /* *****************************************************************************
 Hashing speed testing
 ***************************************************************************** */
-#include <math.h>
 
 typedef uintptr_t (*fio__hashing_func_fn)(char *, size_t);
 
