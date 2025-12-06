@@ -5,7 +5,7 @@
 #define FIO_CORE
 #include "../fio-stl/include.h"
 
-FIO_SFUNC void fio_test_dynamic_types(void);
+#include <math.h>
 
 FIO_SFUNC uintptr_t fio___dynamic_types_test_tag(uintptr_t i) { return i | 1; }
 FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {

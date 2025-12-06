@@ -2819,7 +2819,9 @@ FIO_IFUNC uint64_t fio_math_mod_expo64(uint64_t base,
 #endif
 /* Perform sieve prime test - deterministic. */
 FIO_SFUNC bool fio___is_prime_table(size_t n) {
-  FIO_ASSERT_DEBUG(n < FIO_PRIME_TABLE_LIMIT);
+  FIO_ASSERT_DEBUG(n < FIO_PRIME_TABLE_LIMIT,
+                   "%zu too big for fio___is_prime_table",
+                   n);
   uint64_t primes[((FIO_PRIME_TABLE_LIMIT + 63) >> 6)];
   for (size_t i = 0; i < (sizeof(primes) / sizeof(primes[0])); ++i)
     primes[i] = ~(uint64_t)0;
