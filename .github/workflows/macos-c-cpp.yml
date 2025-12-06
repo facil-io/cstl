@@ -31,4 +31,4 @@ jobs:
       run: |
         make clean
         make tests/malloc
-        ./tmp/malloc -t 4
+        ./tmp/tests/malloc -t 4
