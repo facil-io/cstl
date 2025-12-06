@@ -24,9 +24,9 @@ WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wfor
 # Consider: -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 # CFLAGS in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined -fsanitize=address -coverage
-DEBUG_CFLAGS:=$(CFLAGS) -std=c23 -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
+DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
 # CFLAGS in production mode.
-CFLAGS+=-std=c23 $(OPTIMIZATION) $(WARNINGS) -I$(SRC_DIR) -I.
+CFLAGS+=$(OPTIMIZATION) $(WARNINGS) -I$(SRC_DIR) -I.
 LDFLAGS?=
 
 # Main executable
