@@ -294,6 +294,7 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
                                               0xC3D2E1F0,
                                           }};
   fio_u512 v = fio_u512_init64(0), k = fio_u512_init64(0);
+  uint32_t tmp[16] FIO_ALIGN(16); /* temp buffer for sha1 rounds */
   const uint8_t *buf = (const uint8_t *)msg;
 
   /* copy key */
@@ -308,11 +309,12 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
     k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
 
   /* hash inner key block */
-  fio___sha1_round512(inner.v, k.u32);
+  fio_memcpy64(tmp, k.u32);
+  fio___sha1_round512(inner.v, tmp);
   /* consume data */
   for (size_t i = 63; i < msg_len; i += 64) {
-    fio_memcpy64(v.u8, buf);
-    fio___sha1_round512(inner.v, v.u32);
+    fio_memcpy64(tmp, buf);
+    fio___sha1_round512(inner.v, tmp);
     buf += 64;
   }
   /* finalize temporary hash */
@@ -322,7 +324,8 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
   }
   v.u8[(msg_len & 63)] = 0x80;
   if ((msg_len & 63) > 55) {
-    fio___sha1_round512(inner.v, v.u32);
+    fio_memcpy64(tmp, v.u32);
+    fio___sha1_round512(inner.v, tmp);
     v = fio_u512_init64(0);
   }
   msg_len += 64; /* add the 64 byte inner key to the length count */
@@ -330,7 +333,8 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
   msg_len = fio_lton64(msg_len);
   v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFFUL);
   v.u32[15] = (uint32_t)(msg_len >> 32);
-  fio___sha1_round512(inner.v, v.u32);
+  fio_memcpy64(tmp, v.u32);
+  fio___sha1_round512(inner.v, tmp);
   for (size_t i = 0; i < 5; ++i)
     inner.v[i] = fio_ntol32(inner.v[i]);
 
@@ -340,7 +344,8 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
         ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
 
   /* hash outer key block */
-  fio___sha1_round512(outer.v, k.u32);
+  fio_memcpy64(tmp, k.u32);
+  fio___sha1_round512(outer.v, tmp);
   /* hash inner (temporary) hash result and finalize */
   v = fio_u512_init64(0);
   for (size_t i = 0; i < 5; ++i)
@@ -350,7 +355,8 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
   msg_len = fio_lton64(msg_len);
   v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFF);
   v.u32[15] = (uint32_t)(msg_len >> 32);
-  fio___sha1_round512(outer.v, v.u32);
+  fio_memcpy64(tmp, v.u32);
+  fio___sha1_round512(outer.v, tmp);
   for (size_t i = 0; i < 5; ++i)
     outer.v[i] = fio_ntol32(outer.v[i]);
 
