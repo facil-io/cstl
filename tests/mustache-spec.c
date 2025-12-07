@@ -9,10 +9,10 @@
 #define PRINT_ESCAPE_MISMATCH 0
 #endif
 
-struct {
+static struct {
   size_t passed;
   size_t tests;
-} static GLOBALS;
+} GLOBALS;
 static void mustache_json_run_test(FIOBJ test) {
   ++GLOBALS.tests;
 #define MUS____PRINT_TEST_NAME()                                               \
