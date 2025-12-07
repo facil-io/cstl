@@ -45,29 +45,45 @@ FIO_IFUNC size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len);
 SFUNC uint32_t fio_otp(fio_buf_info_s secret, fio_otp_settings_s settings);
 #define fio_otp(secret, ...) fio_otp(secret, (fio_otp_settings_s){__VA_ARGS__})
 
+/**
+ * Returns a TOTP for a specific unix timestamp (for testing/verification).
+ * This is useful for verifying OTPs at specific times or for RFC test vectors.
+ */
+SFUNC uint32_t fio_otp_at(fio_buf_info_s secret,
+                          uint64_t unix_time,
+                          fio_otp_settings_s settings);
+#define fio_otp_at(secret, unix_time, ...)                                     \
+  fio_otp_at(secret, unix_time, (fio_otp_settings_s){__VA_ARGS__})
+
 /* *****************************************************************************
 TOTP Implementation
 ***************************************************************************** */
 
-/** Generates a random 128 bit key for TOTP processing. */
+/**
+ * Generates a cryptographically secure random 128 bit key for TOTP processing.
+ * Uses system CSPRNG via fio_rand_bytes_secure().
+ */
 FIO_IFUNC fio_u128 fio_otp_generate_key(void) {
-  fio_u128 k = fio_u128_init64(fio_rand64(), fio_rand64());
-  while (k.u64[0] == 0)
-    k.u64[0] = fio_rand64();
-  while (k.u64[1] == 0)
-    k.u64[1] = fio_rand64();
+  fio_u128 k = {0};
+  /* Ensure non-zero (extremely unlikely to be zero with 128 bits) */
+  while (k.u64[0] == 0 || k.u64[1] == 0) {
+    if (fio_rand_bytes_secure(k.u8, sizeof(k)) != 0)
+      k = fio_rand128();
+  }
   return k;
 }
 
 /** Prints out an OTP secret (big endian number) as a Byte32 encoded String. */
 FIO_IFUNC size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len) {
-  fio_str_info_s s = FIO_STR_INFO3(dest, 0, (len * 2) + 1);
   fio_u128 buf;
   if (!key) {
     buf = fio_otp_generate_key();
-    s.capa = 20;
     key = buf.u8;
+    len = sizeof(buf); /* 16 bytes */
   }
+  /* Base32 encoding: 5 bits per char, so len*8/5 chars + null terminator */
+  /* Using len*2 as safe upper bound (1.6x actual need) */
+  fio_str_info_s s = FIO_STR_INFO3(dest, 0, (len * 2) + 1);
   FIO_ASSERT(!fio_string_write_base32enc(&s, NULL, key, len),
              "writing the generated OTP key failed");
   return s.len;
@@ -84,11 +100,13 @@ FIO_IFUNC void fio___otp_settings_validate(fio_otp_settings_s *s) {
   if (!s->digits)
     s->digits = 6;
 }
-uint32_t fio_otp___(void);
-SFUNC uint32_t fio_otp FIO_NOOP(fio_buf_info_s key,
-                                fio_otp_settings_s settings) {
+
+/* Internal: compute OTP from raw secret and time counter */
+FIO_SFUNC uint32_t fio___otp_compute(fio_buf_info_s key,
+                                     uint64_t unix_time,
+                                     fio_otp_settings_s settings) {
   uint32_t r = 0;
-  uint64_t t = fio_time_real().tv_sec;
+  uint64_t t = unix_time;
   fio_u1024 s = fio_u1024_init64(0);
   fio_sha1_s hash;
   fio_str_info_s secret = FIO_STR_INFO3((char *)s.u8, 0, (1024 / 8));
@@ -148,10 +166,22 @@ SFUNC uint32_t fio_otp FIO_NOOP(fio_buf_info_s key,
   return r;
 }
 
+uint32_t fio_otp___(void);
+SFUNC uint32_t fio_otp FIO_NOOP(fio_buf_info_s key,
+                                fio_otp_settings_s settings) {
+  return fio___otp_compute(key, (uint64_t)fio_time_real().tv_sec, settings);
+}
+
+SFUNC uint32_t fio_otp_at FIO_NOOP(fio_buf_info_s key,
+                                   uint64_t unix_time,
+                                   fio_otp_settings_s settings) {
+  return fio___otp_compute(key, unix_time, settings);
+}
+
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_SHA1 */
-#undef FIO_SHA1
+#endif /* FIO_OTP */
+#undef FIO_OTP

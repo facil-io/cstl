@@ -362,38 +362,41 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
   return fd;
 }
 
+/** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//"). */
+SFUNC int fio___filename_is_unsafe_sep(const char *path, const char sep) {
+  if (!path) /* no file is a safe file, nothing to do */
+    return 0;
+  /* Check for leading "../" which escapes the base directory */
+  if (path[0] == '.' && path[1] == '.' && (path[2] == sep || path[2] == '\0'))
+    return 1;
+  /* Scan through path looking for problematic patterns */
+  while (*path) {
+    if (path[0] == sep) {
+      /* Check for "//" (double separator, potential path confusion) */
+      if (path[1] == sep)
+        return 1;
+      /* Check for "/../" or "/.." at end (path traversal) */
+      if (path[1] == '.' && path[2] == '.' &&
+          (path[3] == sep || path[3] == '\0'))
+        return 1;
+    }
+    ++path;
+  }
+  return 0;
+}
+
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe(const char *path) {
 #if FIO_OS_WIN
-  const char sep = '\\';
+  return fio___filename_is_unsafe_sep(path, '\\');
 #else
-  const char sep = '/';
+  return fio___filename_is_unsafe_sep(path, '/');
 #endif
-  for (;;) {
-    if (!path)
-      return 0;
-    if (path[0] == sep && path[1] == sep)
-      return 1;
-    if (path[0] == sep && path[1] == '.' && path[2] == '.' && path[3] == sep)
-      return 1;
-    ++path;
-    path = strchr(path, sep);
-  }
 }
 
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe_url(const char *path) {
-  const char sep = '/';
-  for (;;) {
-    if (!path)
-      return 0;
-    if (path[0] == sep && path[1] == sep)
-      return 1;
-    if (path[0] == sep && path[1] == '.' && path[2] == '.' && path[3] == sep)
-      return 1;
-    ++path;
-    path = strchr(path, sep);
-  }
+  return fio___filename_is_unsafe_sep(path, '/');
 }
 
 /** Creates a temporary file, returning its file descriptor. */

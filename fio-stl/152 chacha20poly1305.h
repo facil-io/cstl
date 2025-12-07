@@ -324,6 +324,7 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
   fio___poly_finilize(&pl);
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
+  fio_secure_zero(&pl, sizeof(pl));
 }
 
 /* *****************************************************************************
@@ -575,6 +576,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   fio___poly_finilize(&pl);
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
+  fio_secure_zero(&pl, sizeof(pl));
 }
 
 SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
@@ -617,6 +619,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
   fio___poly_finilize(&pl);
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
+  fio_secure_zero(&pl, sizeof(pl));
 }
 
 SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
@@ -628,16 +631,20 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *nonce) {
   uint64_t auth[2];
   fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nonce);
-  if (((auth[0] ^ fio_buf2u64u(mac)) |
-       (auth[1] ^ fio_buf2u64u(((char *)mac + 8)))))
+  /* Use constant-time comparison to prevent timing side-channel attacks.
+   * Even though early return stops communication with attacker, timing
+   * differences could leak information about the correct MAC value. */
+  if (!fio_ct_is_eq(auth, mac, 16)) {
+    fio_secure_zero(auth, sizeof(auth));
     return -1;
+  }
+  fio_secure_zero(auth, sizeof(auth));
   fio_chacha20(data, len, key, nonce, 1);
   return 0;
 }
 /* *****************************************************************************
 Module Cleanup
-*****************************************************************************
-*/
+***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_CHACHA

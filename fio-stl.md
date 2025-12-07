@@ -3078,18 +3078,6 @@ void fio_rand_bytes(void *data_, size_t len)
 Writes `len` random Bytes to the buffer pointed to by `data`. Probably **not**
 cryptographically safe.
 
-#### `fio_rand_feed2seed`
-
-```c
-static void fio_rand_feed2seed(void *buf_, size_t len);
-```
-
-An internal function (accessible from the translation unit) that allows a program to feed random data to the PRNG (`fio_rand64`).
-
-The random data will effect the random seed on the next reseeding.
-
-Limited to 1023 bytes of data per function call.
-
 #### `fio_rand_reseed`
 
 ```c

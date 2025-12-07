@@ -1270,6 +1270,29 @@ Settings - Memory Function Selectors
 /** Helper for simple `for` loops, where `i` is the variable name to use. */
 #define FIO_FOR(i, count) for (size_t i = 0; i < (count); ++i)
 #endif
+
+/* *****************************************************************************
+SIMD Vector Looping Helper
+***************************************************************************** */
+
+/* Internal - bytes per constant iterative loop for compiler optimization  */
+#define FIO___SIMD_BYTES ((size_t)256U)
+/* Internal - looping macro that separates   */
+#define FIO_FOR_UNROLL(itterations, size_of_loop, i, action)                   \
+  do {                                                                         \
+    size_t i = 0;                                                              \
+    /* handle odd length vectors, not multiples of FIO___LOG2V */              \
+    if ((itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))               \
+      for (; i < (itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i) \
+        action;                                                                \
+    if (itterations)                                                           \
+      for (; i < itterations;)                                                 \
+        for (size_t j__loop__ = 0;                                             \
+             j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
+             ++j__loop__, ++i) /* dear compiler, please vectorize */           \
+          action;                                                              \
+  } while (0)
+
 /* *****************************************************************************
 Memory Copying Primitives (the basis for unaligned memory access for numbers)
 ***************************************************************************** */
@@ -2124,6 +2147,12 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += 64;
   }
   return !flag;
+}
+
+/** A timing attack resistant memory comparison function. */
+FIO_IFUNC void fio_secure_zero(const void *a_, size_t bytes) {
+  volatile uint8_t *buf = (volatile uint8_t *)(a_);
+  FIO_FOR_UNROLL(bytes, 1, i, buf[i] = 0);
 }
 
 /* *****************************************************************************
@@ -3469,28 +3498,6 @@ FIO___VMATH_DEF_LARGE_MUL(4096, 2048)
 #undef FIO___VMATH_DEF_LARGE_MUL
 
 /* *****************************************************************************
-SIMD Vector Looping Helper
-***************************************************************************** */
-
-/* Internal - bytes per constant iterative loop for compiler optimization  */
-#define FIO___SIMD_BYTES ((size_t)256U)
-/* Internal - looping macro that separates   */
-#define FIO_FOR_UNROLL(itterations, size_of_loop, i, action)                   \
-  do {                                                                         \
-    size_t i = 0;                                                              \
-    /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if ((itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))               \
-      for (; i < (itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i) \
-        action;                                                                \
-    if (itterations)                                                           \
-      for (; i < itterations;)                                                 \
-        for (size_t j__loop__ = 0;                                             \
-             j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
-             ++j__loop__, ++i) /* dear compiler, please vectorize */           \
-          action;                                                              \
-  } while (0)
-
-/* *****************************************************************************
 SIMD Vector Operations
 ***************************************************************************** */
 
@@ -3539,6 +3546,24 @@ SIMD Vector Operations
 Defining a Pseudo-Random Number Generator Function (deterministic / not)
 **************************************************************************** */
 
+#if defined(__x86_64__) || defined(__i386__)
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  uint64_t r = 0;
+  uint32_t lo, hi;
+  __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+  r = ((uint64_t)hi << 32) | lo;
+  return r;
+}
+#elif defined(__aarch64__)
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  uint64_t r;
+  __asm__ volatile("mrs %0, cntvct_el0" : "=r"(r));
+  return r;
+}
+#else
+FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
+#endif
+
 /**
  * Defines a semi-deterministic Pseudo-Random 128 bit Number Generator function.
  *
@@ -3570,47 +3595,59 @@ Defining a Pseudo-Random Number Generator Function (deterministic / not)
     name##___state[3] = 0x95561f0927ad7ecdULL;                                 \
     name##___state[4] = 0;                                                     \
   }                                                                            \
-  FIO_SFUNC void name##___state_reseed(uint64_t *state) {                      \
-    const size_t jitter_samples = 8 | (state[0] & 15);                         \
+  extern void name##_reseed(void) {                                            \
+    const size_t jitter_samples = 16 | (name##___state[0] & 15);               \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
       struct timespec t;                                                       \
       clock_gettime(CLOCK_MONOTONIC, &t);                                      \
-      uint64_t clk[2];                                                         \
-      clk[0] = (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec);              \
+      uint64_t clk[2] = {(uint64_t)(uintptr_t)&clk + (uint64_t)(uintptr_t) &   \
+                             (name##_reseed),                                  \
+                         0};                                                   \
+      clk[0] += (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec);             \
       clk[0] = fio_math_mulc64(clk[0], FIO_U64_HASH_PRIME0, clk + 1);          \
       clk[1] += FIO_U64_HASH_PRIME0;                                           \
       clk[0] += fio_lrot64(clk[0], 27);                                        \
       clk[0] += fio_lrot64(clk[0], 49);                                        \
       clk[1] += fio_lrot64(clk[1], 27);                                        \
       clk[1] += fio_lrot64(clk[1], 49);                                        \
-      state[0] += clk[0];                                                      \
-      state[1] += clk[1];                                                      \
-      state[2] += clk[0];                                                      \
-      state[3] += clk[1];                                                      \
+      name##___state[0] += clk[0] + fio_cycle_counter();                       \
+      name##___state[1] += clk[1] + fio_cycle_counter();                       \
+      name##___state[2] += clk[0] + fio_cycle_counter();                       \
+      name##___state[3] += clk[1] + fio_cycle_counter();                       \
     }                                                                          \
   }                                                                            \
   /** Re-seeds the PNGR so forked processes don't match. */                    \
   extern __attribute__((unused)) void name##_on_fork(void *is_null) {          \
     (void)is_null;                                                             \
-    name##___state_reseed(name##___state);                                     \
+    name##_reseed();                                                           \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   extern __attribute__((unused)) fio_u128 name##128(void) {                    \
     fio_u256 r;                                                                \
-    if (!((name##___state[4]++) & ((1ULL << reseed_log) - 1)) &&               \
+    if (!(fio_atomic_add(name##___state + 4, 1) &                              \
+          ((1ULL << reseed_log) - 1)) &&                                       \
         ((size_t)(reseed_log - 1) < 63))                                       \
-      name##___state_reseed(name##___state);                                   \
+      name##_reseed();                                                         \
     uint64_t s1[4];                                                            \
     { /* load state to registers and roll, mul, add */                         \
-      const uint64_t s0[] = {name##___state[0],                                \
-                             name##___state[1],                                \
-                             name##___state[2],                                \
-                             name##___state[3]};                               \
+      const uint64_t cycles =                                                  \
+          reseed_log ? fio_cycle_counter() + (uint64_t)(uintptr_t)&cycles      \
+                     : 0xB5ULL;                                                \
+      const uint64_t variation =                                               \
+          0x4E55788DULL +                                                      \
+          (reseed_log ? (uint64_t)(uintptr_t)&name##_reseed : 0);              \
+      const uint64_t s0[] = {(name##___state[0] + cycles),                     \
+                             (name##___state[1] + cycles),                     \
+                             (name##___state[2] + cycles),                     \
+                             (name##___state[3] + cycles)};                    \
       const uint64_t mulp[] = {0x37701261ED6C16C7ULL,                          \
                                0x764DBBB75F3B3E0DULL,                          \
                                ~(0x37701261ED6C16C7ULL),                       \
                                ~(0x764DBBB75F3B3E0DULL)};                      \
-      const uint64_t addc[] = {name##___state[4], 0, name##___state[4], 0};    \
+      const uint64_t addc[] = {name##___state[4],                              \
+                               seed_offset + 0x59DD1C23ULL,                    \
+                               name##___state[4] + cycles,                     \
+                               variation};                                     \
       for (size_t i = 0; i < 4; ++i) {                                         \
         s1[i] = fio_lrot64(s0[i], 33);                                         \
         s1[i] += addc[i];                                                      \

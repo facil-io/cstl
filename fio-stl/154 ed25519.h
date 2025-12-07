@@ -11,6 +11,7 @@
 
 
                           Elliptic Curve ED25519 (WIP)
+                              NOT YET IMPLEMENTED!
 
 
 
@@ -21,7 +22,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_ED25519___H
 
 /* *****************************************************************************
-TODO: ED 25519
+TODO: ED 25519 - NOT YET IMPLEMENTED!
 
 ED-25519 key generation, key exchange and signatures are crucial to complete the
 minimal building blocks that would allow to secure inter-machine communication

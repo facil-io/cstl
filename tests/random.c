@@ -6,7 +6,7 @@ Test
 #define FIO_RAND
 #include FIO_INCLUDE_FILE
 
-FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 31, 0)
+FIO_DEFINE_RANDOM128_FN(FIO_SFUNC, fio___prng, 0, 0)
 /* *****************************************************************************
 Playhouse hashing (next risky version)
 ***************************************************************************** */
@@ -387,7 +387,8 @@ int main(void) {
     /* test RAND_MAX value */
     uint8_t rand_bits = 63;
     while (rand_bits) {
-      if (RAND_MAX <= (~(0ULL)) >> rand_bits) break;
+      if (RAND_MAX <= (~(0ULL)) >> rand_bits)
+        break;
       --rand_bits;
     }
     rand_bits = 64 - rand_bits;
@@ -423,20 +424,21 @@ int main(void) {
   }
   end = clock();
   FIO_NAME_TEST(stl, random_buffer)
-  (rs, test_len, "PNGR128/64bits", end - start);
+  (rs, test_len, "PNGR128/64bits (deterministic)", end - start);
   FIO_MEMSET(rs, 0, sizeof(*rs) * test_len);
   start = clock();
   fio___prng_bytes(rs, test_len * sizeof(*rs));
   end = clock();
   FIO_NAME_TEST(stl, random_buffer)
-  (rs, test_len, "PNGR128_bytes", end - start);
+  (rs, test_len, "PNGR128_bytes (deterministic)", end - start);
 
   FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
   fprintf(stderr, "\n");
   {
     FIO_STR_INFO_TMP_VAR(data, 1124);
     data.len = 1024;
-    for (size_t i = 0; i < data.len; ++i) data.buf[i] = (char)(i & 255);
+    for (size_t i = 0; i < data.len; ++i)
+      data.buf[i] = (char)(i & 255);
     uint64_t h = fio_stable_hash(data.buf, 1024, 0);
     FIO_LOG_DDEBUG2("Stable Hash Value: %p", (void *)h);
     FIO_ASSERT(h == (uint64_t)0x5DC4DAD435547F67ULL,

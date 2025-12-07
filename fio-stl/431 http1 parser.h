@@ -297,8 +297,11 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
     if (fio_buf2u64u(name.buf) == fio_buf2u64u("content-") &&
         fio_buf2u64u(name.buf + 6) == fio_buf2u64u("t-length")) {
       char *tmp = value.buf;
+      errno = 0; /* reset errno before parsing */
       uint64_t clen = fio_atol10u(&tmp);
-      if ((unsigned)(tmp != value.buf + value.len) |
+      /* Reject if: parsing failed (tmp didn't reach end), overflow occurred,
+       * or value collides with sentinel values */
+      if ((unsigned)(tmp != value.buf + value.len) | (errno == E2BIG) |
           (clen == FIO___HTTP1_BODY_NOT_ALLOWED) |
           (clen == FIO_HTTP1_EXPECTED_CHUNKED))
         return -1;
@@ -310,6 +313,7 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
       p->expected = clen;
       if (clen == FIO___HTTP1_BODY_NOT_ALLOWED)
         return 0;
+      /* fio_http1_on_header_content_length tests if body length is too large */
       return 0 -
              (fio_http1_on_header_content_length(name, value, clen, udata) ==
               -1);
@@ -547,11 +551,11 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
     buf->buf += tmp;
   }
 
-  // if (!FIO_MEMCHR(buf->buf, '\n', buf->len)) /* prevent read overflow? */
-  //   return 1;
+  if (!FIO_MEMCHR(buf->buf, '\n', buf->len)) /* prevent read overflow */
+    return (buf->len < 10) ? 1 : -1;
 
   char *eol = buf->buf;
-  size_t expected = fio_atol16u(&eol); /* may read overflow, tests after */
+  size_t expected = fio_atol16u(&eol); /* never overflows, EOL validated */
   if (eol == buf->buf)
     return -1;
   eol += (eol[0] == '\r');

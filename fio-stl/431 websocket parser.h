@@ -45,6 +45,15 @@ FIO_SFUNC size_t fio_websocket_parse(fio_websocket_parser_s *p,
 /** The parsers return value on error. */
 #define FIO_WEBSOCKET_PARSER_ERROR ((size_t)-1)
 
+/**
+ * Maximum allowed WebSocket frame payload length.
+ * Default: 1GB (1 << 30). Override before including this header if needed.
+ * Setting this helps prevent DoS attacks via memory exhaustion.
+ */
+#ifndef FIO_WEBSOCKET_MAX_PAYLOAD
+#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(1ULL << 30))
+#endif
+
 /* *****************************************************************************
 WebSocket Parsing Callbacks
 ***************************************************************************** */
@@ -259,6 +268,9 @@ FIO_SFUNC uint64_t fio_websocket_client_wrap(void *restrict target,
                                              unsigned char first,
                                              unsigned char last,
                                              unsigned char rsv) {
+  /* WebSocket masking per RFC 6455 - prevents proxy cache poisoning attacks.
+   * PRNG is acceptable here as masking is not for cryptographic security;
+   * it's specifically to prevent intermediary interpretation of frame data. */
   uint64_t mask = (fio_rand64() | 0x01020408ULL) & 0xFFFFFFFFULL; /* non-zero */
   mask |= mask << 32;
   uint64_t r = fio_websocket_header(target,
@@ -378,8 +390,11 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
     if (buf->len < 14UL)
       return 1;
     p->expect = fio_buf2u64_be(buf->buf + 2);
-    if (p->expect & 0xFF00000000000000ULL)
-      return -1; /* really?! */
+    /* RFC 6455: most significant bit MUST be 0, and enforce max payload limit
+     * to prevent memory exhaustion attacks */
+    if ((p->expect & 0x8000000000000000ULL) ||
+        (p->expect > FIO_WEBSOCKET_MAX_PAYLOAD))
+      return -1;
     p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 10);
     buf->buf += 10 + mask_l;
     buf->len -= 10 + mask_l;

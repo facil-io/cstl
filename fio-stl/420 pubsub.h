@@ -2095,8 +2095,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
 }
 /* *****************************************************************************
 Letter Listening to Remote Connections - TODO!
-*****************************************************************************
-*/
+***************************************************************************** */
 FIO_SFUNC void fio___pubsub_broadcast_on_attach(fio_io_s *io) {
   fio___pubsub_broadcast_hello((FIO___PUBSUB_POSTOFFICE.broadcaster = io));
   fio_io_run_every(.fn = fio___pubsub_broadcast_hello_task,

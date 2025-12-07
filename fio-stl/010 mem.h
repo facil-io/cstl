@@ -2119,14 +2119,16 @@ void fio_calloc__(void);
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                        calloc)(size_t size_per_unit,
                                                size_t unit_count) {
+  const size_t total = size_per_unit * unit_count;
+  if (total < size_per_unit || total < unit_count)
+    return NULL; /* test for size overflow */
 #if FIO_MEMORY_INITIALIZE_ALLOCATIONS
-  return FIO_NAME(FIO_MEMORY_NAME, malloc)(size_per_unit * unit_count);
+  return FIO_NAME(FIO_MEMORY_NAME, malloc)(total);
 #else
   void *p;
   /* round up to alignment size. */
-  const size_t len =
-      ((size_per_unit * unit_count) + (FIO_MEMORY_ALIGN_SIZE - 1)) &
-      (~((size_t)FIO_MEMORY_ALIGN_SIZE - 1));
+  const size_t len = ((total) + (FIO_MEMORY_ALIGN_SIZE - 1)) &
+                     (~((size_t)FIO_MEMORY_ALIGN_SIZE - 1));
   p = FIO_NAME(FIO_MEMORY_NAME, malloc)(len);
   /* initialize memory only when required */
   FIO_MEMSET(p, 0, len);

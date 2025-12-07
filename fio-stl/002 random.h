@@ -26,11 +26,21 @@ Random - API
 /** Returns 64 psedo-random bits. Probably not cryptographically safe. */
 SFUNC uint64_t fio_rand64(void);
 
+/** Returns 64 psedo-random bits. Probably not cryptographically safe. */
+SFUNC fio_u128 fio_rand128(void);
+
 /** Writes `len` bytes of psedo-random bits to the target buffer. */
 SFUNC void fio_rand_bytes(void *target, size_t len);
 
-/** Feeds up to 1023 bytes of entropy to the random state. */
-IFUNC void fio_rand_feed2seed(void *buf_, size_t len);
+/**
+ * Writes `len` bytes of cryptographically secure random data to `target`.
+ *
+ * Uses system CSPRNG: getrandom() on Linux, arc4random_buf() on BSD/macOS,
+ * or /dev/urandom as fallback. Returns 0 on success, -1 on failure.
+ *
+ * IMPORTANT: Use this for security-sensitive operations like key generation.
+ */
+SFUNC int fio_rand_bytes_secure(void *target, size_t len);
 
 /** Reseeds the random engine using system state (rusage / jitter). */
 SFUNC void fio_rand_reseed(void);
@@ -93,6 +103,10 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 Possibly `extern` Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Risky Hash
+***************************************************************************** */
 
 /*  Computes a facil.io Risky Hash. */
 SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
@@ -257,125 +271,53 @@ SFUNC void fio_stable_hash128(void *restrict dest,
 Random - Implementation
 ***************************************************************************** */
 
-#if FIO_OS_POSIX ||                                                            \
-    (__has_include("sys/resource.h") && __has_include("sys/time.h"))
+#if FIO_OS_POSIX || (__has_include("sys/resource.h") &&                        \
+                     __has_include("sys/time.h") && __has_include("fcntl.h"))
+#include <fcntl.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #endif
 
-static volatile uint64_t fio___rand_state[4] = {0}; /* random state */
-static volatile size_t fio___rand_counter = 0;      /* seed counter */
-/* feeds random data to the algorithm through this 256 bit feed. */
-static volatile uint64_t fio___rand_buffer[4] = {0x9c65875be1fce7b9ULL,
-                                                 0x7cc568e838f6a40d,
-                                                 0x4bb8d885a0fe47d5,
-                                                 0x95561f0927ad7ecd};
+/* The fio_rand64 implementation. */
+FIO_DEFINE_RANDOM128_FN(SFUNC, fio_rand, 11, 0)
 
-IFUNC void fio_rand_feed2seed(void *buf_, size_t len) {
-  len &= 1023;
-  uint8_t *buf = (uint8_t *)buf_;
-  uint8_t offset = (fio___rand_counter & 3);
-  uint64_t tmp = 0;
-  for (size_t i = 0; i < (len >> 3); ++i) {
-    tmp = fio_buf2u64u(buf);
-    fio___rand_buffer[(offset++ & 3)] ^= tmp;
-    buf += 8;
-  }
-  if ((len & 7)) {
-    tmp = 0;
-    fio_memcpy7x(&tmp, buf, len);
-    fio___rand_buffer[(offset++ & 3)] ^= tmp;
-  }
-}
+/**
+ * Cryptographically secure random bytes using system CSPRNG.
+ * Returns 0 on success, -1 on failure.
+ */
+SFUNC int fio_rand_bytes_secure(void *target, size_t len) {
+  if (!target || !len)
+    return 0;
 
-SFUNC void fio_rand_reseed(void) {
-  const size_t jitter_samples = 16 | (fio___rand_state[0] & 15);
-#if defined(RUSAGE_SELF)
-  {
-    struct rusage rusage;
-    getrusage(RUSAGE_SELF, &rusage);
-    fio___rand_state[0] ^=
-        fio_risky_hash(&rusage, sizeof(rusage), fio___rand_state[0]);
+#if (defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||     \
+     defined(__NetBSD__) || defined(__DragonFly__))
+  /* BSD/macOS: use arc4random_buf (always succeeds, CSPRNG) */
+  arc4random_buf(target, len);
+  return 0;
+#else
+  /* Generic POSIX fallback: read from /dev/urandom */
+  uint8_t *buf = (uint8_t *)target;
+  int fd = open("/dev/urandom", O_RDONLY);
+  if (fd < 0)
+    return -1;
+  while (len > 0) {
+    ssize_t got = read(fd, buf, len);
+    if (got < 0) {
+      if (errno == EINTR)
+        continue;
+      close(fd);
+      return -1;
+    }
+    if (got == 0) {
+      close(fd);
+      return -1; /* unexpected EOF */
+    }
+    buf += got;
+    len -= (size_t)got;
   }
+  close(fd);
+  return 0;
 #endif
-  for (size_t i = 0; i < jitter_samples; ++i) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    uint64_t clk =
-        (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec) + fio___rand_counter;
-    fio___rand_state[0] ^= fio_risky_num(clk, fio___rand_state[0] + i);
-    fio___rand_state[1] ^= fio_risky_num(clk, fio___rand_state[1] + i);
-  }
-  {
-    uint64_t tmp[2];
-    tmp[0] = fio_risky_num(fio___rand_buffer[0], fio___rand_state[0]) +
-             fio_risky_num(fio___rand_buffer[1], fio___rand_state[1]);
-    tmp[1] = fio_risky_num(fio___rand_buffer[2], fio___rand_state[0]) +
-             fio_risky_num(fio___rand_buffer[3], fio___rand_state[1]);
-    fio___rand_state[2] ^= tmp[0];
-    fio___rand_state[3] ^= tmp[1];
-  }
-  fio___rand_buffer[0] = fio_lrot64(fio___rand_buffer[0], 31);
-  fio___rand_buffer[1] = fio_lrot64(fio___rand_buffer[1], 29);
-  fio___rand_buffer[2] ^= fio___rand_buffer[0];
-  fio___rand_buffer[3] ^= fio___rand_buffer[1];
-  fio___rand_counter += jitter_samples;
-}
-
-/* tested for randomness using code from: http://xoshiro.di.unimi.it/hwd.php */
-SFUNC uint64_t fio_rand64(void) {
-  /* modeled after xoroshiro128+, by David Blackman and Sebastiano Vigna */
-  uint64_t r = 0;
-  if (!((fio___rand_counter++) & (((size_t)1 << 12) - 1))) {
-    /* re-seed state every 4095 requests / 2^12-1 attempts  */
-    fio_rand_reseed();
-  }
-  /* load to registers */
-  const uint64_t s0[] = {fio___rand_state[0],
-                         fio___rand_state[1],
-                         fio___rand_state[2],
-                         fio___rand_state[3]};
-  uint64_t s1[4] = {0};
-  {
-    const uint64_t mulp[] = {0x37701261ED6C16C7ULL,
-                             0x764DBBB75F3B3E0DULL,
-                             ~(0x37701261ED6C16C7ULL),
-                             ~(0x764DBBB75F3B3E0DULL)}; /* load to registers */
-    const uint64_t addc[] = {fio___rand_counter, 0, fio___rand_counter, 0};
-    for (size_t i = 0; i < 4; ++i) {
-      s1[i] = fio_lrot64(s0[i], 33);
-      s1[i] += addc[i];
-      s1[i] *= mulp[i];
-      s1[i] += s0[i];
-    }
-  }
-  for (size_t i = 0; i < 4; ++i) { /* store to memory */
-    fio___rand_state[i] = s1[i];
-  }
-  {
-    uint8_t rotc[] = {31, 29, 27, 30};
-    for (size_t i = 0; i < 4; ++i) {
-      s1[i] = fio_lrot64(s1[i], rotc[i]);
-      r += s1[i];
-    }
-  }
-  return r;
-}
-
-/* copies 64 bits of randomness (8 bytes) repeatedly. */
-SFUNC void fio_rand_bytes(void *data_, size_t len) {
-  if (!data_ || !len)
-    return;
-  uint8_t *data = (uint8_t *)data_;
-  for (unsigned i = 31; i < len; i += 32) {
-    uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    fio_memcpy32(data, rv);
-    data += 32;
-  }
-  if (len & 31) {
-    uint64_t rv[4] = {fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64()};
-    fio_memcpy31x(data, rv, len);
-  }
 }
 /* *****************************************************************************
 Random - Cleanup

@@ -152,7 +152,7 @@ $(BUILD_DIR)/$(TEST_DIR)/%: $(TEST_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
 
 
 # Build and run tests
-test: | all $(TEST_BINS)
+test: clean | all $(TEST_BINS)
 	@echo ""
 	@if [ -n "$(TEST_BINS)" ]; then \
 		echo "Running test suite..."; \
@@ -182,7 +182,7 @@ test: | all $(TEST_BINS)
 	@echo $(AFTER_TEST_MESSAGE)
 
 $(TEST_DIR)/%: $(BUILD_DIR)/$(TEST_DIR)/%
-	@echo "Running test $@"
+	@echo "Running test $(BUILD_DIR)/$@"
 	@echo "=================================="
 	@if $(BUILD_DIR)/$@; then \
 		echo " ✓ PASS";         \
@@ -207,7 +207,7 @@ $(BUILD_DIR)/$(EXAMPLES_DIR)/%: $(EXAMPLES_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
 	@$(CC) $(CFLAGS) -o $@ $< $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(LDFLAGS)
 
 $(EXAMPLES_DIR)/%: $(BUILD_DIR)/$(EXAMPLES_DIR)/%
-	@echo "Running $@"
+	@echo "Running $(BUILD_DIR)/$@"
 	@echo "=================================="
 	@$(BUILD_DIR)/$@
 
