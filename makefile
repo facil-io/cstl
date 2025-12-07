@@ -32,7 +32,7 @@ LDFLAGS+= -lm
 # Main executable
 PROJECT = $(BUILD_DIR)/$(NAME)
 
-# combining the fio-stl headers to a single file: fio-stl
+# combining headers, C files and docs to a single file? i.e., fio-stl
 LIB_CONCAT_FOLDER=fio-stl
 LIB_CONCAT_TARGET=fio-stl
 
@@ -142,7 +142,7 @@ everything___: install-docs install-headers
 TEST_SOURCES = $(shell find $(TEST_DIR) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
 TEST_TARGETS = $(TEST_SOURCES:$(TEST_DIR)/%=$(BUILD_DIR)/$(TEST_DIR)/%)
 TEST_BINS = $(TEST_TARGETS:%.c=%)
-AFTER_TEST_MESSAGE="\n$(DESCRIPTION) is brought to you by \x1B[1m$(AUTHOR)\x1B[0m.\n\x1B[1mValue deserves to be valued.\x1B[0m\n(please consider code contributions / donations)\n"
+AFTER_TEST_MESSAGE="\\n$(DESCRIPTION) is brought to you by \\x1B[1m$(AUTHOR)\x1B[0m.\\n\\x1B[1mValue deserves to be valued.\\x1B[0m\\n(please consider code contributions / donations)\\n"
 
 # Build test binaries (each test file becomes a separate executable)
 $(BUILD_DIR)/$(TEST_DIR)/%: $(TEST_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
@@ -181,7 +181,7 @@ test: clean | all $(TEST_BINS)
 	@echo "All tests complete!"
 	@echo $(AFTER_TEST_MESSAGE)
 
-$(TEST_DIR)/%: $(BUILD_DIR)/$(TEST_DIR)/%
+$(TEST_DIR)/%: | clean $(BUILD_DIR)/$(TEST_DIR)/%
 	@echo "Running test $(BUILD_DIR)/$@"
 	@echo "=================================="
 	@if $(BUILD_DIR)/$@; then \
