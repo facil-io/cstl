@@ -219,7 +219,7 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
-#if !defined(DEBUG) /* Allow Intrinsic / SIMD / Neon ? */
+#if !defined(DEBUG) && !defined(NO_INTRIN) /* Allow Intrinsic / SIMD / Neon */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
     (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
     __has_include("arm_acle.h") && __has_include("arm_neon.h")
@@ -229,6 +229,9 @@ Intrinsic Availability Flags
 #elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
 #define FIO___HAS_X86_INTRIN 1
 #include <immintrin.h>
+#if defined(__SHA__) /* SHA-NI extension available */
+#define FIO___HAS_X86_SHA_INTRIN 1
+#endif
 #endif
 
 #endif
@@ -2092,6 +2095,56 @@ FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
 }
 
 /* *****************************************************************************
+Constant-Time Bitwise Selection Functions
+
+These functions perform bitwise selection operations in constant time.
+They are commonly used in cryptographic algorithms (SHA, AES, etc.) and
+can also be used for branchless programming.
+***************************************************************************** */
+
+/**
+ * Bitwise "choose": for each bit, if x is set, return y's bit, else z's bit.
+ * Formula: (x & y) ^ (~x & z)  -or equivalently-  z ^ (x & (y ^ z))
+ * Used in: SHA-1 (Ch), SHA-256 (Ch), SHA-512 (Ch), AES, etc.
+ */
+FIO_IFUNC uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z) {
+  return z ^ (x & (y ^ z)); /* branchless ternary: x ? y : z (per bit) */
+}
+
+/** 64-bit version of bitwise choose/mux. */
+FIO_IFUNC uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z) {
+  return z ^ (x & (y ^ z));
+}
+
+/**
+ * Bitwise "majority": for each bit position, return 1 if 2+ inputs have 1.
+ * Formula: (x & y) ^ (x & z) ^ (y & z)  -or-  (x & y) | (z & (x | y))
+ * Used in: SHA-1 (Maj), SHA-256 (Maj), SHA-512 (Maj), etc.
+ */
+FIO_IFUNC uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) | (z & (x | y)); /* slightly fewer ops than XOR version */
+}
+
+/** 64-bit version of bitwise majority. */
+FIO_IFUNC uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z) {
+  return (x & y) | (z & (x | y));
+}
+
+/**
+ * Bitwise "parity": XOR of all three inputs (1 if odd number of 1s).
+ * Formula: x ^ y ^ z
+ * Used in: SHA-1 (Parity function for rounds 20-39 and 60-79)
+ */
+FIO_IFUNC uint32_t fio_ct_xor3_32(uint32_t x, uint32_t y, uint32_t z) {
+  return x ^ y ^ z;
+}
+
+/** 64-bit version of 3-way XOR. */
+FIO_IFUNC uint64_t fio_ct_xor3_64(uint64_t x, uint64_t y, uint64_t z) {
+  return x ^ y ^ z;
+}
+
+/* *****************************************************************************
 Constant-Time Comparison Test
 ***************************************************************************** */
 
@@ -2283,6 +2336,53 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 /** Rotates the bits Forwards (endian specific). */
 #define fio_frot64 fio_lrot64
 #endif
+
+/* *****************************************************************************
+Combined Rotation-XOR operations (common in cryptographic hash functions)
+
+These combine multiple rotations with XOR, which is a common pattern in
+SHA-2, BLAKE2, and other hash functions. Keeping them as separate operations
+allows the compiler to potentially optimize better than inline expressions.
+***************************************************************************** */
+
+/**
+ * XOR of three right rotations: ROTR(x,a) ^ ROTR(x,b) ^ ROTR(x,c)
+ * Common in SHA-256/SHA-512 Sigma functions.
+ */
+FIO_IFUNC uint32_t fio_xor_rrot3_32(uint32_t x,
+                                    uint8_t a,
+                                    uint8_t b,
+                                    uint8_t c) {
+  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ fio_rrot32(x, c);
+}
+
+/** 64-bit version of triple rotation XOR. */
+FIO_IFUNC uint64_t fio_xor_rrot3_64(uint64_t x,
+                                    uint8_t a,
+                                    uint8_t b,
+                                    uint8_t c) {
+  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ fio_rrot64(x, c);
+}
+
+/**
+ * XOR of two right rotations and a right shift: ROTR(x,a) ^ ROTR(x,b) ^
+ * SHR(x,c) Common in SHA-256/SHA-512 sigma (lowercase) functions for message
+ * schedule.
+ */
+FIO_IFUNC uint32_t fio_xor_rrot2_shr_32(uint32_t x,
+                                        uint8_t a,
+                                        uint8_t b,
+                                        uint8_t c) {
+  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ (x >> c);
+}
+
+/** 64-bit version of double rotation + shift XOR. */
+FIO_IFUNC uint64_t fio_xor_rrot2_shr_64(uint64_t x,
+                                        uint8_t a,
+                                        uint8_t b,
+                                        uint8_t c) {
+  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ (x >> c);
+}
 
 /* *****************************************************************************
 Byte masking (XOR)

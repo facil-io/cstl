@@ -256,7 +256,7 @@ Address Sanitizer Detection
 /* *****************************************************************************
 Intrinsic Availability Flags
 ***************************************************************************** */
-#if !defined(DEBUG) /* Allow Intrinsic / SIMD / Neon ? */
+#if !defined(DEBUG) && !defined(NO_INTRIN) /* Allow Intrinsic / SIMD / Neon */
 #if defined(__ARM_FEATURE_CRYPTO) &&                                           \
     (defined(__ARM_NEON) || defined(__ARM_NEON__)) &&                          \
     __has_include("arm_acle.h") && __has_include("arm_neon.h")
@@ -266,6 +266,9 @@ Intrinsic Availability Flags
 #elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
 #define FIO___HAS_X86_INTRIN 1
 #include <immintrin.h>
+#if defined(__SHA__) /* SHA-NI extension available */
+#define FIO___HAS_X86_SHA_INTRIN 1
+#endif
 #endif
 
 #endif
@@ -2129,6 +2132,56 @@ FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
 }
 
 /* *****************************************************************************
+Constant-Time Bitwise Selection Functions
+
+These functions perform bitwise selection operations in constant time.
+They are commonly used in cryptographic algorithms (SHA, AES, etc.) and
+can also be used for branchless programming.
+***************************************************************************** */
+
+/**
+ * Bitwise "choose": for each bit, if x is set, return y's bit, else z's bit.
+ * Formula: (x & y) ^ (~x & z)  -or equivalently-  z ^ (x & (y ^ z))
+ * Used in: SHA-1 (Ch), SHA-256 (Ch), SHA-512 (Ch), AES, etc.
+ */
+FIO_IFUNC uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z) {
+  return z ^ (x & (y ^ z)); /* branchless ternary: x ? y : z (per bit) */
+}
+
+/** 64-bit version of bitwise choose/mux. */
+FIO_IFUNC uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z) {
+  return z ^ (x & (y ^ z));
+}
+
+/**
+ * Bitwise "majority": for each bit position, return 1 if 2+ inputs have 1.
+ * Formula: (x & y) ^ (x & z) ^ (y & z)  -or-  (x & y) | (z & (x | y))
+ * Used in: SHA-1 (Maj), SHA-256 (Maj), SHA-512 (Maj), etc.
+ */
+FIO_IFUNC uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z) {
+  return (x & y) | (z & (x | y)); /* slightly fewer ops than XOR version */
+}
+
+/** 64-bit version of bitwise majority. */
+FIO_IFUNC uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z) {
+  return (x & y) | (z & (x | y));
+}
+
+/**
+ * Bitwise "parity": XOR of all three inputs (1 if odd number of 1s).
+ * Formula: x ^ y ^ z
+ * Used in: SHA-1 (Parity function for rounds 20-39 and 60-79)
+ */
+FIO_IFUNC uint32_t fio_ct_xor3_32(uint32_t x, uint32_t y, uint32_t z) {
+  return x ^ y ^ z;
+}
+
+/** 64-bit version of 3-way XOR. */
+FIO_IFUNC uint64_t fio_ct_xor3_64(uint64_t x, uint64_t y, uint64_t z) {
+  return x ^ y ^ z;
+}
+
+/* *****************************************************************************
 Constant-Time Comparison Test
 ***************************************************************************** */
 
@@ -2320,6 +2373,53 @@ FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
 /** Rotates the bits Forwards (endian specific). */
 #define fio_frot64 fio_lrot64
 #endif
+
+/* *****************************************************************************
+Combined Rotation-XOR operations (common in cryptographic hash functions)
+
+These combine multiple rotations with XOR, which is a common pattern in
+SHA-2, BLAKE2, and other hash functions. Keeping them as separate operations
+allows the compiler to potentially optimize better than inline expressions.
+***************************************************************************** */
+
+/**
+ * XOR of three right rotations: ROTR(x,a) ^ ROTR(x,b) ^ ROTR(x,c)
+ * Common in SHA-256/SHA-512 Sigma functions.
+ */
+FIO_IFUNC uint32_t fio_xor_rrot3_32(uint32_t x,
+                                    uint8_t a,
+                                    uint8_t b,
+                                    uint8_t c) {
+  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ fio_rrot32(x, c);
+}
+
+/** 64-bit version of triple rotation XOR. */
+FIO_IFUNC uint64_t fio_xor_rrot3_64(uint64_t x,
+                                    uint8_t a,
+                                    uint8_t b,
+                                    uint8_t c) {
+  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ fio_rrot64(x, c);
+}
+
+/**
+ * XOR of two right rotations and a right shift: ROTR(x,a) ^ ROTR(x,b) ^
+ * SHR(x,c) Common in SHA-256/SHA-512 sigma (lowercase) functions for message
+ * schedule.
+ */
+FIO_IFUNC uint32_t fio_xor_rrot2_shr_32(uint32_t x,
+                                        uint8_t a,
+                                        uint8_t b,
+                                        uint8_t c) {
+  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ (x >> c);
+}
+
+/** 64-bit version of double rotation + shift XOR. */
+FIO_IFUNC uint64_t fio_xor_rrot2_shr_64(uint64_t x,
+                                        uint8_t a,
+                                        uint8_t b,
+                                        uint8_t c) {
+  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ (x >> c);
+}
 
 /* *****************************************************************************
 Byte masking (XOR)
@@ -22946,10 +23046,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_CRYPTO_CORE___H
 
 /* *****************************************************************************
-Module Implementation - inlined functions
-***************************************************************************** */
-
-/* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
@@ -23676,7 +23772,199 @@ Implementation - possibly externed functions.
 
 FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
                                    uint32_t *w /* 16 words */) {
-#if FIO___HAS_ARM_INTRIN
+#if FIO___HAS_X86_SHA_INTRIN
+  /* Code adjusted from:
+   * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-x86.c
+   * Credit to Jeffrey Walton.
+   */
+  __m128i abcd, e0, e1;
+  __m128i abcd_save, e_save;
+  __m128i msg0, msg1, msg2, msg3;
+
+  /* Load initial values */
+  abcd = _mm_loadu_si128((const __m128i *)old);
+  e0 = _mm_set_epi32(old[4], 0, 0, 0);
+  abcd = _mm_shuffle_epi32(abcd, 0x1B); /* big endian */
+  /* Save current state */
+  abcd_save = abcd;
+  e_save = e0;
+
+  /* Load and convert message to big endian */
+  msg0 = _mm_loadu_si128((const __m128i *)(w + 0));
+  msg1 = _mm_loadu_si128((const __m128i *)(w + 4));
+  msg2 = _mm_loadu_si128((const __m128i *)(w + 8));
+  msg3 = _mm_loadu_si128((const __m128i *)(w + 12));
+  msg0 = _mm_shuffle_epi8(
+      msg0,
+      _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+  msg1 = _mm_shuffle_epi8(
+      msg1,
+      _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+  msg2 = _mm_shuffle_epi8(
+      msg2,
+      _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+  msg3 = _mm_shuffle_epi8(
+      msg3,
+      _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+
+  /* Rounds 0-3 */
+  e0 = _mm_add_epi32(e0, msg0);
+  e1 = abcd;
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
+
+  /* Rounds 4-7 */
+  e1 = _mm_sha1nexte_epu32(e1, msg1);
+  e0 = abcd;
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 0);
+  msg0 = _mm_sha1msg1_epu32(msg0, msg1);
+
+  /* Rounds 8-11 */
+  e0 = _mm_sha1nexte_epu32(e0, msg2);
+  e1 = abcd;
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
+  msg1 = _mm_sha1msg1_epu32(msg1, msg2);
+  msg0 = _mm_xor_si128(msg0, msg2);
+
+  /* Rounds 12-15 */
+  e1 = _mm_sha1nexte_epu32(e1, msg3);
+  e0 = abcd;
+  msg0 = _mm_sha1msg2_epu32(msg0, msg3);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 0);
+  msg2 = _mm_sha1msg1_epu32(msg2, msg3);
+  msg1 = _mm_xor_si128(msg1, msg3);
+
+  /* Rounds 16-19 */
+  e0 = _mm_sha1nexte_epu32(e0, msg0);
+  e1 = abcd;
+  msg1 = _mm_sha1msg2_epu32(msg1, msg0);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 0);
+  msg3 = _mm_sha1msg1_epu32(msg3, msg0);
+  msg2 = _mm_xor_si128(msg2, msg0);
+
+  /* Rounds 20-23 */
+  e1 = _mm_sha1nexte_epu32(e1, msg1);
+  e0 = abcd;
+  msg2 = _mm_sha1msg2_epu32(msg2, msg1);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 1);
+  msg0 = _mm_sha1msg1_epu32(msg0, msg1);
+  msg3 = _mm_xor_si128(msg3, msg1);
+
+  /* Rounds 24-27 */
+  e0 = _mm_sha1nexte_epu32(e0, msg2);
+  e1 = abcd;
+  msg3 = _mm_sha1msg2_epu32(msg3, msg2);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 1);
+  msg1 = _mm_sha1msg1_epu32(msg1, msg2);
+  msg0 = _mm_xor_si128(msg0, msg2);
+
+  /* Rounds 28-31 */
+  e1 = _mm_sha1nexte_epu32(e1, msg3);
+  e0 = abcd;
+  msg0 = _mm_sha1msg2_epu32(msg0, msg3);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 1);
+  msg2 = _mm_sha1msg1_epu32(msg2, msg3);
+  msg1 = _mm_xor_si128(msg1, msg3);
+
+  /* Rounds 32-35 */
+  e0 = _mm_sha1nexte_epu32(e0, msg0);
+  e1 = abcd;
+  msg1 = _mm_sha1msg2_epu32(msg1, msg0);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 1);
+  msg3 = _mm_sha1msg1_epu32(msg3, msg0);
+  msg2 = _mm_xor_si128(msg2, msg0);
+
+  /* Rounds 36-39 */
+  e1 = _mm_sha1nexte_epu32(e1, msg1);
+  e0 = abcd;
+  msg2 = _mm_sha1msg2_epu32(msg2, msg1);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 1);
+  msg0 = _mm_sha1msg1_epu32(msg0, msg1);
+  msg3 = _mm_xor_si128(msg3, msg1);
+
+  /* Rounds 40-43 */
+  e0 = _mm_sha1nexte_epu32(e0, msg2);
+  e1 = abcd;
+  msg3 = _mm_sha1msg2_epu32(msg3, msg2);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 2);
+  msg1 = _mm_sha1msg1_epu32(msg1, msg2);
+  msg0 = _mm_xor_si128(msg0, msg2);
+
+  /* Rounds 44-47 */
+  e1 = _mm_sha1nexte_epu32(e1, msg3);
+  e0 = abcd;
+  msg0 = _mm_sha1msg2_epu32(msg0, msg3);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 2);
+  msg2 = _mm_sha1msg1_epu32(msg2, msg3);
+  msg1 = _mm_xor_si128(msg1, msg3);
+
+  /* Rounds 48-51 */
+  e0 = _mm_sha1nexte_epu32(e0, msg0);
+  e1 = abcd;
+  msg1 = _mm_sha1msg2_epu32(msg1, msg0);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 2);
+  msg3 = _mm_sha1msg1_epu32(msg3, msg0);
+  msg2 = _mm_xor_si128(msg2, msg0);
+
+  /* Rounds 52-55 */
+  e1 = _mm_sha1nexte_epu32(e1, msg1);
+  e0 = abcd;
+  msg2 = _mm_sha1msg2_epu32(msg2, msg1);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 2);
+  msg0 = _mm_sha1msg1_epu32(msg0, msg1);
+  msg3 = _mm_xor_si128(msg3, msg1);
+
+  /* Rounds 56-59 */
+  e0 = _mm_sha1nexte_epu32(e0, msg2);
+  e1 = abcd;
+  msg3 = _mm_sha1msg2_epu32(msg3, msg2);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 2);
+  msg1 = _mm_sha1msg1_epu32(msg1, msg2);
+  msg0 = _mm_xor_si128(msg0, msg2);
+
+  /* Rounds 60-63 */
+  e1 = _mm_sha1nexte_epu32(e1, msg3);
+  e0 = abcd;
+  msg0 = _mm_sha1msg2_epu32(msg0, msg3);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
+  msg2 = _mm_sha1msg1_epu32(msg2, msg3);
+  msg1 = _mm_xor_si128(msg1, msg3);
+
+  /* Rounds 64-67 */
+  e0 = _mm_sha1nexte_epu32(e0, msg0);
+  e1 = abcd;
+  msg1 = _mm_sha1msg2_epu32(msg1, msg0);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 3);
+  msg3 = _mm_sha1msg1_epu32(msg3, msg0);
+  msg2 = _mm_xor_si128(msg2, msg0);
+
+  /* Rounds 68-71 */
+  e1 = _mm_sha1nexte_epu32(e1, msg1);
+  e0 = abcd;
+  msg2 = _mm_sha1msg2_epu32(msg2, msg1);
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
+  msg3 = _mm_xor_si128(msg3, msg1);
+
+  /* Rounds 72-75 */
+  e0 = _mm_sha1nexte_epu32(e0, msg2);
+  e1 = abcd;
+  msg3 = _mm_sha1msg2_epu32(msg3, msg2);
+  abcd = _mm_sha1rnds4_epu32(abcd, e0, 3);
+
+  /* Rounds 76-79 */
+  e1 = _mm_sha1nexte_epu32(e1, msg3);
+  e0 = abcd;
+  abcd = _mm_sha1rnds4_epu32(abcd, e1, 3);
+
+  /* Combine state */
+  e0 = _mm_sha1nexte_epu32(e0, e_save);
+  abcd = _mm_add_epi32(abcd, abcd_save);
+
+  /* Save state (convert back from big endian) */
+  abcd = _mm_shuffle_epi32(abcd, 0x1B);
+  _mm_storeu_si128((__m128i *)old, abcd);
+  old[4] = _mm_extract_epi32(e0, 3);
+
+#elif FIO___HAS_ARM_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-arm.c
    * Credit to Jeffrey Walton.
@@ -23765,76 +24053,69 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   vst1q_u32(old, v0);
   old[4] = e0;
 
-#else /* !FIO___HAS_ARM_INTRIN portable implementation */
+#else /* Portable implementation */
 
-  uint32_t v[8] = {0}; /* copy old state to new + reserve registers (8 not 6) */
+  uint32_t v[5]; /* working variables a, b, c, d, e */
   for (size_t i = 0; i < 5; ++i)
     v[i] = old[i];
 
-  for (size_t i = 0; i < 16; ++i) /* convert read buffer to Big Endian */
+  /* convert read buffer to Big Endian */
+  for (size_t i = 0; i < 16; ++i)
     w[i] = fio_ntol32(w[i]);
 
-#define FIO___SHA1_ROUND4(K, F, i)                                             \
-  FIO___SHA1_ROUND((K), (F), i);                                               \
-  FIO___SHA1_ROUND((K), (F), i + 1);                                           \
-  FIO___SHA1_ROUND((K), (F), i + 2);                                           \
-  FIO___SHA1_ROUND((K), (F), i + 3);
-#define FIO___SHA1_ROUND16(K, F, i)                                            \
-  FIO___SHA1_ROUND4((K), (F), i);                                              \
-  FIO___SHA1_ROUND4((K), (F), i + 4);                                          \
-  FIO___SHA1_ROUND4((K), (F), i + 8);                                          \
-  FIO___SHA1_ROUND4((K), (F), i + 12);
-#define FIO___SHA1_ROUND20(K, F, i)                                            \
-  FIO___SHA1_ROUND16(K, F, i);                                                 \
-  FIO___SHA1_ROUND4((K), (F), i + 16);
+    /* SHA-1 round function */
+#define FIO___SHA1_ROUND(i, k, f)                                              \
+  do {                                                                         \
+    const uint32_t t = fio_lrot32(v[0], 5) + (f) + v[4] + (k) + w[(i)&15];     \
+    v[4] = v[3];                                                               \
+    v[3] = v[2];                                                               \
+    v[2] = fio_lrot32(v[1], 30);                                               \
+    v[1] = v[0];                                                               \
+    v[0] = t;                                                                  \
+  } while (0)
 
-#define FIO___SHA1_ROTATE_OLD(K, F, i)                                         \
-  v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
-  v[4] = v[3];                                                                 \
-  v[3] = v[2];                                                                 \
-  v[2] = fio_lrot32(v[1], 30);                                                 \
-  v[1] = v[0];                                                                 \
-  v[0] = v[5];
+    /* Message schedule expansion */
+#define FIO___SHA1_EXPAND(i)                                                   \
+  (w[(i)&15] = fio_lrot32(w[((i) + 13) & 15] ^ w[((i) + 8) & 15] ^             \
+                              w[((i) + 2) & 15] ^ w[(i)&15],                   \
+                          1))
 
-#define FIO___SHA1_ROTATE(K, F, i)                                             \
-  v[5] = fio_lrot32(v[0], 5) + v[4] + F + (uint32_t)K + w[(i)&15];             \
-  v[1] = fio_lrot32(v[1], 30);                                                 \
-  fio_u32x8_reshuffle(v, 5, 0, 1, 2, 3, 5, 6, 7);
+  /* Rounds 0-15: use message words directly */
+  for (size_t i = 0; i < 16; ++i)
+    FIO___SHA1_ROUND(i, 0x5A827999UL, fio_ct_mux32(v[1], v[2], v[3]));
 
-#define FIO___SHA1_CALC_WORD(i)                                                \
-  fio_lrot32(                                                                  \
-      (w[(i + 13) & 15] ^ w[(i + 8) & 15] ^ w[(i + 2) & 15] ^ w[(i)&15]),      \
-      1);
+  /* Rounds 16-19: Ch function */
+  for (size_t i = 16; i < 20; ++i) {
+    FIO___SHA1_EXPAND(i);
+    FIO___SHA1_ROUND(i, 0x5A827999UL, fio_ct_mux32(v[1], v[2], v[3]));
+  }
 
-#define FIO___SHA1_ROUND(K, F, i) FIO___SHA1_ROTATE(K, F, i);
-  /* perform first 16 rounds with simple words as copied from data */
-  FIO___SHA1_ROUND16(0x5A827999, ((v[1] & v[2]) | ((~v[1]) & (v[3]))), 0);
+  /* Rounds 20-39: Parity function */
+  for (size_t i = 20; i < 40; ++i) {
+    FIO___SHA1_EXPAND(i);
+    FIO___SHA1_ROUND(i, 0x6ED9EBA1UL, fio_ct_xor3_32(v[1], v[2], v[3]));
+  }
 
-/* change round definition so now we compute the word's value per round */
+  /* Rounds 40-59: Maj function */
+  for (size_t i = 40; i < 60; ++i) {
+    FIO___SHA1_EXPAND(i);
+    FIO___SHA1_ROUND(i, 0x8F1BBCDCUL, fio_ct_maj32(v[1], v[2], v[3]));
+  }
+
+  /* Rounds 60-79: Parity function */
+  for (size_t i = 60; i < 80; ++i) {
+    FIO___SHA1_EXPAND(i);
+    FIO___SHA1_ROUND(i, 0xCA62C1D6UL, fio_ct_xor3_32(v[1], v[2], v[3]));
+  }
+
 #undef FIO___SHA1_ROUND
-#define FIO___SHA1_ROUND(K, F, i)                                              \
-  w[(i)&15] = FIO___SHA1_CALC_WORD(i);                                         \
-  FIO___SHA1_ROTATE(K, F, i);
+#undef FIO___SHA1_EXPAND
 
-  /* complete last 4 round from the first 20 round group */
-  FIO___SHA1_ROUND4(0x5A827999, ((v[1] & v[2]) | ((~v[1]) & (v[3]))), 16);
-
-  /* remaining 20 round groups */
-  FIO___SHA1_ROUND20(0x6ED9EBA1, (v[1] ^ v[2] ^ v[3]), 20);
-  FIO___SHA1_ROUND20(0x8F1BBCDC, ((v[1] & (v[2] | v[3])) | (v[2] & v[3])), 40);
-  FIO___SHA1_ROUND20(0xCA62C1D6, (v[1] ^ v[2] ^ v[3]), 60);
-  /* sum and store */
+  /* Add compressed chunk to current hash value */
   for (size_t i = 0; i < 5; ++i)
     old[i] += v[i];
 
-#undef FIO___SHA1_ROTATE
-#undef FIO___SHA1_ROTATE_OLD
-#undef FIO___SHA1_CALC_WORD
-#undef FIO___SHA1_ROUND
-#undef FIO___SHA1_ROUND4
-#undef FIO___SHA1_ROUND16
-#undef FIO___SHA1_ROUND20
-#endif /* FIO___HAS_ARM_INTRIN */
+#endif /* FIO___HAS_X86_SHA_INTRIN / FIO___HAS_ARM_INTRIN */
 }
 /**
  * A simple, non streaming, implementation of the SHA1 hashing algorithm.
@@ -24099,63 +24380,460 @@ Implementation - SHA-256
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
-  const uint32_t sha256_consts[64] = {
-      0x428A2F98ULL, 0x71374491ULL, 0xB5C0FBCFULL, 0xE9B5DBA5ULL, 0x3956C25BULL,
-      0x59F111F1ULL, 0x923F82A4ULL, 0xAB1C5ED5ULL, 0xD807AA98ULL, 0x12835B01ULL,
-      0x243185BEULL, 0x550C7DC3ULL, 0x72BE5D74ULL, 0x80DEB1FEULL, 0x9BDC06A7ULL,
-      0xC19BF174ULL, 0xE49B69C1ULL, 0xEFBE4786ULL, 0x0FC19DC6ULL, 0x240CA1CCULL,
-      0x2DE92C6FULL, 0x4A7484AAULL, 0x5CB0A9DCULL, 0x76F988DAULL, 0x983E5152ULL,
-      0xA831C66DULL, 0xB00327C8ULL, 0xBF597FC7ULL, 0xC6E00BF3ULL, 0xD5A79147ULL,
-      0x06CA6351ULL, 0x14292967ULL, 0x27B70A85ULL, 0x2E1B2138ULL, 0x4D2C6DFCULL,
-      0x53380D13ULL, 0x650A7354ULL, 0x766A0ABBULL, 0x81C2C92EULL, 0x92722C85ULL,
-      0xA2BFE8A1ULL, 0xA81A664BULL, 0xC24B8B70ULL, 0xC76C51A3ULL, 0xD192E819ULL,
-      0xD6990624ULL, 0xF40E3585ULL, 0x106AA070ULL, 0x19A4C116ULL, 0x1E376C08ULL,
-      0x2748774CULL, 0x34B0BCB5ULL, 0x391C0CB3ULL, 0x4ED8AA4AULL, 0x5B9CCA4FULL,
-      0x682E6FF3ULL, 0x748F82EEULL, 0x78A5636FULL, 0x84C87814ULL, 0x8CC70208ULL,
-      0x90BEFFFAULL, 0xA4506CEBULL, 0xBEF9A3F7ULL, 0xC67178F2ULL};
+#if FIO___HAS_X86_SHA_INTRIN
+  /* Code adjusted from:
+   * https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c
+   * Credit to Jeffrey Walton.
+   */
+  __m128i state0, state1;
+  __m128i msg, tmp;
+  __m128i msg0, msg1, msg2, msg3;
+  __m128i abef_save, cdgh_save;
+  const __m128i shuf_mask =
+      _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+
+  /* Load initial values */
+  tmp = _mm_loadu_si128((const __m128i *)&h->u32[0]);
+  state1 = _mm_loadu_si128((const __m128i *)&h->u32[4]);
+
+  tmp = _mm_shuffle_epi32(tmp, 0xB1);          /* CDAB */
+  state1 = _mm_shuffle_epi32(state1, 0x1B);    /* EFGH */
+  state0 = _mm_alignr_epi8(tmp, state1, 8);    /* ABEF */
+  state1 = _mm_blend_epi16(state1, tmp, 0xF0); /* CDGH */
+
+  /* Save current state */
+  abef_save = state0;
+  cdgh_save = state1;
+
+  /* Rounds 0-3 */
+  msg = _mm_loadu_si128((const __m128i *)(block + 0));
+  msg0 = _mm_shuffle_epi8(msg, shuf_mask);
+  msg = _mm_add_epi32(
+      msg0,
+      _mm_set_epi64x(0xE9B5DBA5B5C0FBCFULL, 0x71374491428A2F98ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+
+  /* Rounds 4-7 */
+  msg1 = _mm_loadu_si128((const __m128i *)(block + 16));
+  msg1 = _mm_shuffle_epi8(msg1, shuf_mask);
+  msg = _mm_add_epi32(
+      msg1,
+      _mm_set_epi64x(0xAB1C5ED5923F82A4ULL, 0x59F111F13956C25BULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+
+  /* Rounds 8-11 */
+  msg2 = _mm_loadu_si128((const __m128i *)(block + 32));
+  msg2 = _mm_shuffle_epi8(msg2, shuf_mask);
+  msg = _mm_add_epi32(
+      msg2,
+      _mm_set_epi64x(0x550C7DC3243185BEULL, 0x12835B01D807AA98ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+
+  /* Rounds 12-15 */
+  msg3 = _mm_loadu_si128((const __m128i *)(block + 48));
+  msg3 = _mm_shuffle_epi8(msg3, shuf_mask);
+  msg = _mm_add_epi32(
+      msg3,
+      _mm_set_epi64x(0xC19BF1749BDC06A7ULL, 0x80DEB1FE72BE5D74ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg3, msg2, 4);
+  msg0 = _mm_add_epi32(msg0, tmp);
+  msg0 = _mm_sha256msg2_epu32(msg0, msg3);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+
+  /* Rounds 16-19 */
+  msg = _mm_add_epi32(
+      msg0,
+      _mm_set_epi64x(0x240CA1CC0FC19DC6ULL, 0xEFBE4786E49B69C1ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg0, msg3, 4);
+  msg1 = _mm_add_epi32(msg1, tmp);
+  msg1 = _mm_sha256msg2_epu32(msg1, msg0);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+
+  /* Rounds 20-23 */
+  msg = _mm_add_epi32(
+      msg1,
+      _mm_set_epi64x(0x76F988DA5CB0A9DCULL, 0x4A7484AA2DE92C6FULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg1, msg0, 4);
+  msg2 = _mm_add_epi32(msg2, tmp);
+  msg2 = _mm_sha256msg2_epu32(msg2, msg1);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+
+  /* Rounds 24-27 */
+  msg = _mm_add_epi32(
+      msg2,
+      _mm_set_epi64x(0xBF597FC7B00327C8ULL, 0xA831C66D983E5152ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg2, msg1, 4);
+  msg3 = _mm_add_epi32(msg3, tmp);
+  msg3 = _mm_sha256msg2_epu32(msg3, msg2);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+
+  /* Rounds 28-31 */
+  msg = _mm_add_epi32(
+      msg3,
+      _mm_set_epi64x(0x1429296706CA6351ULL, 0xD5A79147C6E00BF3ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg3, msg2, 4);
+  msg0 = _mm_add_epi32(msg0, tmp);
+  msg0 = _mm_sha256msg2_epu32(msg0, msg3);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+
+  /* Rounds 32-35 */
+  msg = _mm_add_epi32(
+      msg0,
+      _mm_set_epi64x(0x53380D134D2C6DFCULL, 0x2E1B213827B70A85ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg0, msg3, 4);
+  msg1 = _mm_add_epi32(msg1, tmp);
+  msg1 = _mm_sha256msg2_epu32(msg1, msg0);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+
+  /* Rounds 36-39 */
+  msg = _mm_add_epi32(
+      msg1,
+      _mm_set_epi64x(0x92722C8581C2C92EULL, 0x766A0ABB650A7354ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg1, msg0, 4);
+  msg2 = _mm_add_epi32(msg2, tmp);
+  msg2 = _mm_sha256msg2_epu32(msg2, msg1);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+
+  /* Rounds 40-43 */
+  msg = _mm_add_epi32(
+      msg2,
+      _mm_set_epi64x(0xC76C51A3C24B8B70ULL, 0xA81A664BA2BFE8A1ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg2, msg1, 4);
+  msg3 = _mm_add_epi32(msg3, tmp);
+  msg3 = _mm_sha256msg2_epu32(msg3, msg2);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+
+  /* Rounds 44-47 */
+  msg = _mm_add_epi32(
+      msg3,
+      _mm_set_epi64x(0x106AA070F40E3585ULL, 0xD6990624D192E819ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg3, msg2, 4);
+  msg0 = _mm_add_epi32(msg0, tmp);
+  msg0 = _mm_sha256msg2_epu32(msg0, msg3);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+
+  /* Rounds 48-51 */
+  msg = _mm_add_epi32(
+      msg0,
+      _mm_set_epi64x(0x34B0BCB52748774CULL, 0x1E376C0819A4C116ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg0, msg3, 4);
+  msg1 = _mm_add_epi32(msg1, tmp);
+  msg1 = _mm_sha256msg2_epu32(msg1, msg0);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+  msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+
+  /* Rounds 52-55 */
+  msg = _mm_add_epi32(
+      msg1,
+      _mm_set_epi64x(0x5B9CCA4F4ED8AA4AULL, 0x391C0CB3391C0CB3ULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg1, msg0, 4);
+  msg2 = _mm_add_epi32(msg2, tmp);
+  msg2 = _mm_sha256msg2_epu32(msg2, msg1);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+
+  /* Rounds 56-59 */
+  msg = _mm_add_epi32(
+      msg2,
+      _mm_set_epi64x(0x8CC7020884C87814ULL, 0x78A5636F748F82EEULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  tmp = _mm_alignr_epi8(msg2, msg1, 4);
+  msg3 = _mm_add_epi32(msg3, tmp);
+  msg3 = _mm_sha256msg2_epu32(msg3, msg2);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+
+  /* Rounds 60-63 */
+  msg = _mm_add_epi32(
+      msg3,
+      _mm_set_epi64x(0xC67178F2BEF9A3F7ULL, 0xA4506CEB90BEFFFAULL));
+  state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+  msg = _mm_shuffle_epi32(msg, 0x0E);
+  state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+
+  /* Combine state */
+  state0 = _mm_add_epi32(state0, abef_save);
+  state1 = _mm_add_epi32(state1, cdgh_save);
+
+  tmp = _mm_shuffle_epi32(state0, 0x1B);       /* FEBA */
+  state1 = _mm_shuffle_epi32(state1, 0xB1);    /* DCHG */
+  state0 = _mm_blend_epi16(tmp, state1, 0xF0); /* DCBA */
+  state1 = _mm_alignr_epi8(state1, tmp, 8);    /* ABEF */
+
+  /* Save state */
+  _mm_storeu_si128((__m128i *)&h->u32[0], state0);
+  _mm_storeu_si128((__m128i *)&h->u32[4], state1);
+
+#elif FIO___HAS_ARM_INTRIN
+  /* Code adjusted from:
+   * https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-arm.c
+   * Credit to Jeffrey Walton.
+   */
+  static const uint32_t sha256_consts[64] FIO_ALIGN(16) = {
+      0x428A2F98UL, 0x71374491UL, 0xB5C0FBCFUL, 0xE9B5DBA5UL, 0x3956C25BUL,
+      0x59F111F1UL, 0x923F82A4UL, 0xAB1C5ED5UL, 0xD807AA98UL, 0x12835B01UL,
+      0x243185BEUL, 0x550C7DC3UL, 0x72BE5D74UL, 0x80DEB1FEUL, 0x9BDC06A7UL,
+      0xC19BF174UL, 0xE49B69C1UL, 0xEFBE4786UL, 0x0FC19DC6UL, 0x240CA1CCUL,
+      0x2DE92C6FUL, 0x4A7484AAUL, 0x5CB0A9DCUL, 0x76F988DAUL, 0x983E5152UL,
+      0xA831C66DUL, 0xB00327C8UL, 0xBF597FC7UL, 0xC6E00BF3UL, 0xD5A79147UL,
+      0x06CA6351UL, 0x14292967UL, 0x27B70A85UL, 0x2E1B2138UL, 0x4D2C6DFCUL,
+      0x53380D13UL, 0x650A7354UL, 0x766A0ABBUL, 0x81C2C92EUL, 0x92722C85UL,
+      0xA2BFE8A1UL, 0xA81A664BUL, 0xC24B8B70UL, 0xC76C51A3UL, 0xD192E819UL,
+      0xD6990624UL, 0xF40E3585UL, 0x106AA070UL, 0x19A4C116UL, 0x1E376C08UL,
+      0x2748774CUL, 0x34B0BCB5UL, 0x391C0CB3UL, 0x4ED8AA4AUL, 0x5B9CCA4FUL,
+      0x682E6FF3UL, 0x748F82EEUL, 0x78A5636FUL, 0x84C87814UL, 0x8CC70208UL,
+      0x90BEFFFAUL, 0xA4506CEBUL, 0xBEF9A3F7UL, 0xC67178F2UL};
+
+  uint32x4_t state0, state1, state0_save, state1_save;
+  uint32x4_t msg0, msg1, msg2, msg3;
+  uint32x4_t tmp0, tmp1, tmp2;
+
+  /* Load state */
+  state0 = vld1q_u32(&h->u32[0]);
+  state1 = vld1q_u32(&h->u32[4]);
+
+  /* Save state */
+  state0_save = state0;
+  state1_save = state1;
+
+  /* Load and byte-swap message */
+  msg0 = vld1q_u32((const uint32_t *)(block + 0));
+  msg1 = vld1q_u32((const uint32_t *)(block + 16));
+  msg2 = vld1q_u32((const uint32_t *)(block + 32));
+  msg3 = vld1q_u32((const uint32_t *)(block + 48));
+  msg0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg0)));
+  msg1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg1)));
+  msg2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg2)));
+  msg3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(msg3)));
+
+  /* Rounds 0-3 */
+  tmp0 = vaddq_u32(msg0, vld1q_u32(&sha256_consts[0]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg0 = vsha256su0q_u32(msg0, msg1);
+
+  /* Rounds 4-7 */
+  tmp1 = vaddq_u32(msg1, vld1q_u32(&sha256_consts[4]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+  msg1 = vsha256su0q_u32(msg1, msg2);
+
+  /* Rounds 8-11 */
+  tmp0 = vaddq_u32(msg2, vld1q_u32(&sha256_consts[8]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+  msg2 = vsha256su0q_u32(msg2, msg3);
+
+  /* Rounds 12-15 */
+  tmp1 = vaddq_u32(msg3, vld1q_u32(&sha256_consts[12]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+  msg3 = vsha256su0q_u32(msg3, msg0);
+
+  /* Rounds 16-19 */
+  tmp0 = vaddq_u32(msg0, vld1q_u32(&sha256_consts[16]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+  msg0 = vsha256su0q_u32(msg0, msg1);
+
+  /* Rounds 20-23 */
+  tmp1 = vaddq_u32(msg1, vld1q_u32(&sha256_consts[20]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+  msg1 = vsha256su0q_u32(msg1, msg2);
+
+  /* Rounds 24-27 */
+  tmp0 = vaddq_u32(msg2, vld1q_u32(&sha256_consts[24]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+  msg2 = vsha256su0q_u32(msg2, msg3);
+
+  /* Rounds 28-31 */
+  tmp1 = vaddq_u32(msg3, vld1q_u32(&sha256_consts[28]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+  msg3 = vsha256su0q_u32(msg3, msg0);
+
+  /* Rounds 32-35 */
+  tmp0 = vaddq_u32(msg0, vld1q_u32(&sha256_consts[32]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+  msg0 = vsha256su0q_u32(msg0, msg1);
+
+  /* Rounds 36-39 */
+  tmp1 = vaddq_u32(msg1, vld1q_u32(&sha256_consts[36]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg0 = vsha256su1q_u32(msg0, msg2, msg3);
+  msg1 = vsha256su0q_u32(msg1, msg2);
+
+  /* Rounds 40-43 */
+  tmp0 = vaddq_u32(msg2, vld1q_u32(&sha256_consts[40]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg1 = vsha256su1q_u32(msg1, msg3, msg0);
+  msg2 = vsha256su0q_u32(msg2, msg3);
+
+  /* Rounds 44-47 */
+  tmp1 = vaddq_u32(msg3, vld1q_u32(&sha256_consts[44]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+  msg2 = vsha256su1q_u32(msg2, msg0, msg1);
+  msg3 = vsha256su0q_u32(msg3, msg0);
+
+  /* Rounds 48-51 */
+  tmp0 = vaddq_u32(msg0, vld1q_u32(&sha256_consts[48]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+  msg3 = vsha256su1q_u32(msg3, msg1, msg2);
+
+  /* Rounds 52-55 */
+  tmp1 = vaddq_u32(msg1, vld1q_u32(&sha256_consts[52]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+
+  /* Rounds 56-59 */
+  tmp0 = vaddq_u32(msg2, vld1q_u32(&sha256_consts[56]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp0);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp0);
+
+  /* Rounds 60-63 */
+  tmp1 = vaddq_u32(msg3, vld1q_u32(&sha256_consts[60]));
+  tmp2 = state0;
+  state0 = vsha256hq_u32(state0, state1, tmp1);
+  state1 = vsha256h2q_u32(state1, tmp2, tmp1);
+
+  /* Combine state */
+  state0 = vaddq_u32(state0, state0_save);
+  state1 = vaddq_u32(state1, state1_save);
+
+  /* Save state */
+  vst1q_u32(&h->u32[0], state0);
+  vst1q_u32(&h->u32[4], state1);
+
+#else /* Portable implementation */
+  static const uint32_t sha256_consts[64] = {
+      0x428A2F98UL, 0x71374491UL, 0xB5C0FBCFUL, 0xE9B5DBA5UL, 0x3956C25BUL,
+      0x59F111F1UL, 0x923F82A4UL, 0xAB1C5ED5UL, 0xD807AA98UL, 0x12835B01UL,
+      0x243185BEUL, 0x550C7DC3UL, 0x72BE5D74UL, 0x80DEB1FEUL, 0x9BDC06A7UL,
+      0xC19BF174UL, 0xE49B69C1UL, 0xEFBE4786UL, 0x0FC19DC6UL, 0x240CA1CCUL,
+      0x2DE92C6FUL, 0x4A7484AAUL, 0x5CB0A9DCUL, 0x76F988DAUL, 0x983E5152UL,
+      0xA831C66DUL, 0xB00327C8UL, 0xBF597FC7UL, 0xC6E00BF3UL, 0xD5A79147UL,
+      0x06CA6351UL, 0x14292967UL, 0x27B70A85UL, 0x2E1B2138UL, 0x4D2C6DFCUL,
+      0x53380D13UL, 0x650A7354UL, 0x766A0ABBUL, 0x81C2C92EUL, 0x92722C85UL,
+      0xA2BFE8A1UL, 0xA81A664BUL, 0xC24B8B70UL, 0xC76C51A3UL, 0xD192E819UL,
+      0xD6990624UL, 0xF40E3585UL, 0x106AA070UL, 0x19A4C116UL, 0x1E376C08UL,
+      0x2748774CUL, 0x34B0BCB5UL, 0x391C0CB3UL, 0x4ED8AA4AUL, 0x5B9CCA4FUL,
+      0x682E6FF3UL, 0x748F82EEUL, 0x78A5636FUL, 0x84C87814UL, 0x8CC70208UL,
+      0x90BEFFFAUL, 0xA4506CEBUL, 0xBEF9A3F7UL, 0xC67178F2UL};
 
   uint32_t v[8];
-  for (size_t i = 0; i < 8; ++i) {
+  for (size_t i = 0; i < 8; ++i)
     v[i] = h->u32[i];
-  }
+
   /* read data as an array of 16 big endian 32 bit integers. */
   uint32_t w[16] FIO_ALIGN(16);
   fio_memcpy64(w, block);
-  for (size_t i = 0; i < 16; ++i) {
-    w[i] = fio_lton32(w[i]); /* no-op on big endien systems */
-  }
+  for (size_t i = 0; i < 16; ++i)
+    w[i] = fio_lton32(w[i]); /* no-op on big endian systems */
 
-#define FIO___SHA256_ROUND_INNER_COMMON()                                      \
-  uint32_t t2 =                                                                \
-      ((v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2])) +                        \
-      (fio_rrot32(v[0], 2) ^ fio_rrot32(v[0], 13) ^ fio_rrot32(v[0], 22));     \
-  fio_u32x8_reshuffle(v, 7, 0, 1, 2, 3, 4, 5, 6);                              \
-  v[4] += t1;                                                                  \
-  v[0] = t1 + t2;
+    /* SHA-256 round - processes one word */
+#define FIO___SHA256_ROUND(i, k)                                               \
+  do {                                                                         \
+    const uint32_t t1 = v[7] + (k) + w[(i)&15] +                               \
+                        fio_ct_mux32(v[4], v[5], v[6]) +                       \
+                        fio_xor_rrot3_32(v[4], 6, 11, 25);                     \
+    const uint32_t t2 =                                                        \
+        fio_ct_maj32(v[0], v[1], v[2]) + fio_xor_rrot3_32(v[0], 2, 13, 22);    \
+    v[7] = v[6];                                                               \
+    v[6] = v[5];                                                               \
+    v[5] = v[4];                                                               \
+    v[4] = v[3] + t1;                                                          \
+    v[3] = v[2];                                                               \
+    v[2] = v[1];                                                               \
+    v[1] = v[0];                                                               \
+    v[0] = t1 + t2;                                                            \
+  } while (0)
 
-  for (size_t i = 0; i < 16; ++i) {
-    const uint32_t t1 =
-        v[7] + sha256_consts[i] + w[i] + ((v[4] & v[5]) ^ ((~v[4]) & v[6])) +
-        (fio_rrot32(v[4], 6) ^ fio_rrot32(v[4], 11) ^ fio_rrot32(v[4], 25));
-    FIO___SHA256_ROUND_INNER_COMMON();
+  /* First 16 rounds - use message words directly */
+  for (size_t i = 0; i < 16; ++i)
+    FIO___SHA256_ROUND(i, sha256_consts[i]);
+
+  /* Remaining 48 rounds - expand message schedule inline */
+  for (size_t i = 16; i < 64; ++i) {
+    w[i & 15] = fio_xor_rrot2_shr_32(w[(i + 14) & 15], 17, 19, 10) +
+                w[(i + 9) & 15] +
+                fio_xor_rrot2_shr_32(w[(i + 1) & 15], 7, 18, 3) + w[i & 15];
+    FIO___SHA256_ROUND(i, sha256_consts[i]);
   }
-  for (size_t i = 0; i < 48; ++i) { /* expand block */
-    w[(i & 15)] =
-        (fio_rrot32(w[((i + 14) & 15)], 17) ^
-         fio_rrot32(w[((i + 14) & 15)], 19) ^ (w[((i + 14) & 15)] >> 10)) +
-        w[((i + 9) & 15)] + w[(i & 15)] +
-        (fio_rrot32(w[((i + 1) & 15)], 7) ^ fio_rrot32(w[((i + 1) & 15)], 18) ^
-         (w[((i + 1) & 15)] >> 3));
-    const uint32_t t1 =
-        v[7] + sha256_consts[i + 16] + w[(i & 15)] +
-        ((v[4] & v[5]) ^ ((~v[4]) & v[6])) +
-        (fio_rrot32(v[4], 6) ^ fio_rrot32(v[4], 11) ^ fio_rrot32(v[4], 25));
-    FIO___SHA256_ROUND_INNER_COMMON();
-  }
+#undef FIO___SHA256_ROUND
+
+  /* Add compressed chunk to current hash value */
   for (size_t i = 0; i < 8; ++i)
-    h->u32[i] += v[i]; /* compress block with previous state */
+    h->u32[i] += v[i];
 
-#undef FIO___SHA256_ROUND_INNER_COMMON
+#endif /* FIO___HAS_X86_SHA_INTRIN / FIO___HAS_ARM_INTRIN */
 }
 
 /** consume data and feed it to hash. */
@@ -24210,36 +24888,35 @@ Implementation - SHA-512
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
-  const uint64_t sha512_consts[80] = {
-      0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F,
-      0xE9B5DBA58189DBBC, 0x3956C25BF348B538, 0x59F111F1B605D019,
-      0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118, 0xD807AA98A3030242,
-      0x12835B0145706FBE, 0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2,
-      0x72BE5D74F27B896F, 0x80DEB1FE3B1696B1, 0x9BDC06A725C71235,
-      0xC19BF174CF692694, 0xE49B69C19EF14AD2, 0xEFBE4786384F25E3,
-      0x0FC19DC68B8CD5B5, 0x240CA1CC77AC9C65, 0x2DE92C6F592B0275,
-      0x4A7484AA6EA6E483, 0x5CB0A9DCBD41FBD4, 0x76F988DA831153B5,
-      0x983E5152EE66DFAB, 0xA831C66D2DB43210, 0xB00327C898FB213F,
-      0xBF597FC7BEEF0EE4, 0xC6E00BF33DA88FC2, 0xD5A79147930AA725,
-      0x06CA6351E003826F, 0x142929670A0E6E70, 0x27B70A8546D22FFC,
-      0x2E1B21385C26C926, 0x4D2C6DFC5AC42AED, 0x53380D139D95B3DF,
-      0x650A73548BAF63DE, 0x766A0ABB3C77B2A8, 0x81C2C92E47EDAEE6,
-      0x92722C851482353B, 0xA2BFE8A14CF10364, 0xA81A664BBC423001,
-      0xC24B8B70D0F89791, 0xC76C51A30654BE30, 0xD192E819D6EF5218,
-      0xD69906245565A910, 0xF40E35855771202A, 0x106AA07032BBD1B8,
-      0x19A4C116B8D2D0C8, 0x1E376C085141AB53, 0x2748774CDF8EEB99,
-      0x34B0BCB5E19B48A8, 0x391C0CB3C5C95A63, 0x4ED8AA4AE3418ACB,
-      0x5B9CCA4F7763E373, 0x682E6FF3D6B2B8A3, 0x748F82EE5DEFB2FC,
-      0x78A5636F43172F60, 0x84C87814A1F0AB72, 0x8CC702081A6439EC,
-      0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915,
-      0xC67178F2E372532B, 0xCA273ECEEA26619C, 0xD186B8C721C0C207,
-      0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178, 0x06F067AA72176FBA,
-      0x0A637DC5A2C898A6, 0x113F9804BEF90DAE, 0x1B710B35131C471B,
-      0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC,
-      0x431D67C49C100D4C, 0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A,
-      0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817};
+  static const uint64_t sha512_consts[80] = {
+      0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
+      0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
+      0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
+      0x12835B0145706FBEULL, 0x243185BE4EE4B28CULL, 0x550C7DC3D5FFB4E2ULL,
+      0x72BE5D74F27B896FULL, 0x80DEB1FE3B1696B1ULL, 0x9BDC06A725C71235ULL,
+      0xC19BF174CF692694ULL, 0xE49B69C19EF14AD2ULL, 0xEFBE4786384F25E3ULL,
+      0x0FC19DC68B8CD5B5ULL, 0x240CA1CC77AC9C65ULL, 0x2DE92C6F592B0275ULL,
+      0x4A7484AA6EA6E483ULL, 0x5CB0A9DCBD41FBD4ULL, 0x76F988DA831153B5ULL,
+      0x983E5152EE66DFABULL, 0xA831C66D2DB43210ULL, 0xB00327C898FB213FULL,
+      0xBF597FC7BEEF0EE4ULL, 0xC6E00BF33DA88FC2ULL, 0xD5A79147930AA725ULL,
+      0x06CA6351E003826FULL, 0x142929670A0E6E70ULL, 0x27B70A8546D22FFCULL,
+      0x2E1B21385C26C926ULL, 0x4D2C6DFC5AC42AEDULL, 0x53380D139D95B3DFULL,
+      0x650A73548BAF63DEULL, 0x766A0ABB3C77B2A8ULL, 0x81C2C92E47EDAEE6ULL,
+      0x92722C851482353BULL, 0xA2BFE8A14CF10364ULL, 0xA81A664BBC423001ULL,
+      0xC24B8B70D0F89791ULL, 0xC76C51A30654BE30ULL, 0xD192E819D6EF5218ULL,
+      0xD69906245565A910ULL, 0xF40E35855771202AULL, 0x106AA07032BBD1B8ULL,
+      0x19A4C116B8D2D0C8ULL, 0x1E376C085141AB53ULL, 0x2748774CDF8EEB99ULL,
+      0x34B0BCB5E19B48A8ULL, 0x391C0CB3C5C95A63ULL, 0x4ED8AA4AE3418ACBULL,
+      0x5B9CCA4F7763E373ULL, 0x682E6FF3D6B2B8A3ULL, 0x748F82EE5DEFB2FCULL,
+      0x78A5636F43172F60ULL, 0x84C87814A1F0AB72ULL, 0x8CC702081A6439ECULL,
+      0x90BEFFFA23631E28ULL, 0xA4506CEBDE82BDE9ULL, 0xBEF9A3F7B2C67915ULL,
+      0xC67178F2E372532BULL, 0xCA273ECEEA26619CULL, 0xD186B8C721C0C207ULL,
+      0xEADA7DD6CDE0EB1EULL, 0xF57D4F7FEE6ED178ULL, 0x06F067AA72176FBAULL,
+      0x0A637DC5A2C898A6ULL, 0x113F9804BEF90DAEULL, 0x1B710B35131C471BULL,
+      0x28DB77F523047D84ULL, 0x32CAAB7B40C72493ULL, 0x3C9EBE0A15C9BEBCULL,
+      0x431D67C49C100D4CULL, 0x4CC5D4BECB3E42B6ULL, 0x597F299CFC657E2AULL,
+      0x5FCB6FAB3AD6FAECULL, 0x6C44198C4A475817ULL};
 
-  uint64_t t1, t2; /* used often... */
   /* copy original state */
   uint64_t v[8] FIO_ALIGN(16);
   for (size_t i = 0; i < 8; ++i)
@@ -24249,64 +24926,40 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
   uint64_t w[16] FIO_ALIGN(16);
   fio_memcpy128(w, block);
   for (size_t i = 0; i < 16; ++i)
-    w[i] = fio_lton64(w[i]); /* no-op on big endien systems */
+    w[i] = fio_lton64(w[i]); /* no-op on big endian systems */
 
-#define FIO___SHA512_ROUND_UNROLL(s)                                           \
-  t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
-       (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
-        fio_rrot64(v[(4 - s) & 7], 41)) +                                      \
-       ((v[(4 - s) & 7] & v[(5 - s) & 7]) ^                                    \
-        ((~v[(4 - s) & 7]) & v[(6 - s) & 7]));                                 \
-  t2 =                                                                         \
-      (fio_rrot64(v[(0 - s) & 7], 28) ^ fio_rrot64(v[(0 - s) & 7], 34) ^       \
-       fio_rrot64(v[(0 - s) & 7], 39)) +                                       \
-      ((v[(0 - s) & 7] & v[(1 - s) & 7]) ^ (v[(0 - s) & 7] & v[(2 - s) & 7]) ^ \
-       (v[(1 - s) & 7] & v[(2 - s) & 7]));                                     \
-  v[(3 - s) & 7] += t1;                                                        \
-  v[(7 - s) & 7] = t1 + t2
+    /* SHA-512 round - processes one word */
+#define FIO___SHA512_ROUND(i, k)                                               \
+  do {                                                                         \
+    const uint64_t t1 = v[7] + (k) + w[(i)&15] +                               \
+                        fio_ct_mux64(v[4], v[5], v[6]) +                       \
+                        fio_xor_rrot3_64(v[4], 14, 18, 41);                    \
+    const uint64_t t2 =                                                        \
+        fio_ct_maj64(v[0], v[1], v[2]) + fio_xor_rrot3_64(v[0], 28, 34, 39);   \
+    v[7] = v[6];                                                               \
+    v[6] = v[5];                                                               \
+    v[5] = v[4];                                                               \
+    v[4] = v[3] + t1;                                                          \
+    v[3] = v[2];                                                               \
+    v[2] = v[1];                                                               \
+    v[1] = v[0];                                                               \
+    v[0] = t1 + t2;                                                            \
+  } while (0)
 
-  /* perform 80 "shuffle" rounds */
-  for (size_t i = 0; i < 16; i += 8) {
-    FIO___SHA512_ROUND_UNROLL(0);
-    FIO___SHA512_ROUND_UNROLL(1);
-    FIO___SHA512_ROUND_UNROLL(2);
-    FIO___SHA512_ROUND_UNROLL(3);
-    FIO___SHA512_ROUND_UNROLL(4);
-    FIO___SHA512_ROUND_UNROLL(5);
-    FIO___SHA512_ROUND_UNROLL(6);
-    FIO___SHA512_ROUND_UNROLL(7);
+  /* First 16 rounds - use message words directly */
+  for (size_t i = 0; i < 16; ++i)
+    FIO___SHA512_ROUND(i, sha512_consts[i]);
+
+  /* Remaining 64 rounds - expand message schedule inline */
+  for (size_t i = 16; i < 80; ++i) {
+    w[i & 15] = fio_xor_rrot2_shr_64(w[(i + 14) & 15], 19, 61, 6) +
+                w[(i + 9) & 15] +
+                fio_xor_rrot2_shr_64(w[(i + 1) & 15], 1, 8, 7) + w[i & 15];
+    FIO___SHA512_ROUND(i, sha512_consts[i]);
   }
-#undef FIO___SHA512_ROUND_UNROLL
-#define FIO___SHA512_ROUND_UNROLL(s)                                           \
-  t1 = (i + s + 14) & 15;                                                      \
-  t2 = (i + s + 1) & 15;                                                       \
-  t1 = fio_rrot64(w[t1], 19) ^ fio_rrot64(w[t1], 61) ^ (w[t1] >> 6);           \
-  t2 = fio_rrot64(w[t2], 1) ^ fio_rrot64(w[t2], 8) ^ (w[t2] >> 7);             \
-  w[(i + s) & 15] = t1 + t2 + w[(i + s + 9) & 15] + w[(i + s) & 15];           \
-  t1 = v[(7 - s) & 7] + sha512_consts[i + s] + w[(i + s) & 15] +               \
-       (fio_rrot64(v[(4 - s) & 7], 14) ^ fio_rrot64(v[(4 - s) & 7], 18) ^      \
-        fio_rrot64(v[(4 - s) & 7], 41)) +                                      \
-       ((v[(4 - s) & 7] & v[(5 - s) & 7]) ^                                    \
-        ((~v[(4 - s) & 7]) & v[(6 - s) & 7]));                                 \
-  t2 =                                                                         \
-      (fio_rrot64(v[(0 - s) & 7], 28) ^ fio_rrot64(v[(0 - s) & 7], 34) ^       \
-       fio_rrot64(v[(0 - s) & 7], 39)) +                                       \
-      ((v[(0 - s) & 7] & v[(1 - s) & 7]) ^ (v[(0 - s) & 7] & v[(2 - s) & 7]) ^ \
-       (v[(1 - s) & 7] & v[(2 - s) & 7]));                                     \
-  v[(3 - s) & 7] += t1;                                                        \
-  v[(7 - s) & 7] = t1 + t2
+#undef FIO___SHA512_ROUND
 
-  for (size_t i = 16; i < 80; i += 8) {
-    FIO___SHA512_ROUND_UNROLL(0);
-    FIO___SHA512_ROUND_UNROLL(1);
-    FIO___SHA512_ROUND_UNROLL(2);
-    FIO___SHA512_ROUND_UNROLL(3);
-    FIO___SHA512_ROUND_UNROLL(4);
-    FIO___SHA512_ROUND_UNROLL(5);
-    FIO___SHA512_ROUND_UNROLL(6);
-    FIO___SHA512_ROUND_UNROLL(7);
-  }
-  /* sum/store state */
+  /* Add compressed chunk to current hash value */
   for (size_t i = 0; i < 8; ++i)
     h->u64[i] += v[i];
 }

@@ -208,7 +208,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   FIO_LOG_DEBUG2("Testing against OpenSSL SHA512 and SHA256");
 #endif
   for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
-    if (!data[i].str) continue;
+    if (!data[i].str)
+      continue;
 #if HAVE_OPENSSL
     {
       fio_u512 openssl_result;

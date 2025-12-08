@@ -188,7 +188,7 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
 #ifdef DEBUG
   fprintf(stderr,
           "\t* Testing %s speed with %zu byte blocks"
-          "(DEBUG mode detected - speed may be affected).\n",
+          " (DEBUG mode detected - speed may be affected).\n",
           name,
           buffer_len);
 #else

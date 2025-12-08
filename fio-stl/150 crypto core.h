@@ -24,10 +24,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_CRYPTO_CORE___H
 
 /* *****************************************************************************
-Module Implementation - inlined functions
-***************************************************************************** */
-
-/* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
