@@ -61,6 +61,7 @@ int main(void) {
   fprintf(stderr, "\t(using x86 AES-NI)\n");
 #elif FIO___HAS_ARM_AES_INTRIN
   fprintf(stderr, "\t(using ARM Crypto Extensions)\n");
+
 #else
   fprintf(stderr, "\t(using software fallback)\n");
 #endif
