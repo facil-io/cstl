@@ -360,7 +360,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
-#if defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB) || defined(FIO_ED25519)
 #define FIO_CHACHA
 #define FIO_SECRET
 #endif

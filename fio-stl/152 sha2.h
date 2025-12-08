@@ -599,9 +599,9 @@ SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h) {
   if (h->total_len == ((uint64_t)0ULL - 1ULL))
     return h->hash;
   const size_t total = h->total_len;
-  const size_t remainder = total & 63;
+  size_t remainder = total & 63;
   h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
-  if ((remainder) > 47) { /* make sure there's room to attach `total_len` */
+  if ((remainder) > 55) { /* make sure there's room to attach `total_len` */
     fio___sha256_round(&h->hash, h->cache.u8);
     FIO_MEMSET(h->cache.u8, 0, 64);
   }
@@ -748,6 +748,42 @@ SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
 HMAC
 ***************************************************************************** */
 
+/**
+ * HMAC-SHA256, resulting in a 32 byte authentication code.
+ *
+ * Keys are limited to 64 bytes due to the design of the HMAC algorithm.
+ */
+SFUNC fio_u256 fio_sha256_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len) {
+  fio_u512 k = {0};
+  /* copy key - SHA-256 block size is 64 bytes */
+  if (key_len > 64) {
+    /* keys longer than block size are hashed first */
+    k.u256[0] = fio_sha256(key, key_len);
+    key_len = 32;
+  } else {
+    FIO_MEMCPY(k.u8, key, key_len);
+  }
+  /* prepare inner key (k XOR ipad) */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
+  /* inner hash = H((k XOR ipad) || msg) */
+  fio_sha256_s inner = fio_sha256_init();
+  fio_sha256_consume(&inner, k.u8, 64);
+  fio_sha256_consume(&inner, msg, msg_len);
+  fio_u256 inner_hash = fio_sha256_finalize(&inner);
+  /* switch to outer key (k XOR opad) */
+  for (size_t i = 0; i < 8; ++i)
+    k.u64[i] ^=
+        ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
+  /* outer hash = H((k XOR opad) || inner_hash) */
+  fio_sha256_s outer = fio_sha256_init();
+  fio_sha256_consume(&outer, k.u8, 64);
+  fio_sha256_consume(&outer, inner_hash.u8, 32);
+  return fio_sha256_finalize(&outer);
+}
 /**
  * HMAC-SHA512, resulting in a 64 byte authentication code.
  *

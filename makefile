@@ -19,7 +19,7 @@ INSTALL_PREFIX ?= /usr/local
 
 
 # Compiler / Linker Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic -Wshorten-64-to-32
-WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security
+WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security -Wno-psabi
 # Compiler and linker flags
 # Consider: -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
