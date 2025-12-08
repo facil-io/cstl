@@ -2106,72 +2106,61 @@ FIO_IFUNC void fio___aes256_encrypt_block(uint8_t out[16],
 
 /* 4-bit table-based GHASH using Shoup's method
  *
- * For each of the 32 nibbles in a 128-bit block, we precompute:
- *   M[i] = i * H for i = 0..15
+ * We precompute 16 entries: M[i] = i * H for i=0..15
+ * This gives us 256 bytes of tables and 32 iterations per block.
  *
- * Then for input X, we compute X * H by processing nibbles from
- * least significant to most significant, accumulating:
+ * We process nibbles from least significant to most significant:
  *   Z = Z * x^4 + nibble * H
  *
  * The multiplication by x^4 is a right shift by 4 bits with reduction.
- * We use a 16-entry reduction table for the 4 bits that fall off.
+ * We use a 16-entry reduction table for the nibble that falls off.
  */
 typedef struct {
-  uint64_t hl[16]; /* Low 64 bits of i*H */
-  uint64_t hh[16]; /* High 64 bits of i*H */
+  uint64_t hl[16]; /* Low 64 bits of i*H for i=0..15 */
+  uint64_t hh[16]; /* High 64 bits of i*H for i=0..15 */
 } fio___gcm_htable_s;
 
-/* Reduction table: when shifting right by 4, the low 4 bits fall off.
- * Entry i contains the XOR value for the high word when bits i fall off.
- * Computed as: i * (x^128 mod P) where P = x^128 + x^7 + x^2 + x + 1
- * In reflected bit order, this becomes shifts of 0xE1 */
-static const uint64_t FIO___GCM_REDUCE4[16] = {0x0000000000000000ULL,
-                                               0x1C20000000000000ULL,
-                                               0x3840000000000000ULL,
-                                               0x2460000000000000ULL,
-                                               0x7080000000000000ULL,
-                                               0x6CA0000000000000ULL,
-                                               0x48C0000000000000ULL,
-                                               0x54E0000000000000ULL,
-                                               0xE100000000000000ULL,
-                                               0xFD20000000000000ULL,
-                                               0xD940000000000000ULL,
-                                               0xC560000000000000ULL,
-                                               0x9180000000000000ULL,
-                                               0x8DA0000000000000ULL,
-                                               0xA9C0000000000000ULL,
-                                               0xB5E0000000000000ULL};
+/* Reduction table: when shifting right by 4, the low nibble falls off.
+ * Entry i contains the XOR value for the high word when nibble i falls off.
+ * Computed as: i * (x^128 mod P) where P = x^128 + x^7 + x^2 + x + 1 */
+/* clang-format off */
+static const uint64_t FIO___GCM_REDUCE4[16] = {
+    0x0000000000000000ULL, 0x1C20000000000000ULL,
+    0x3840000000000000ULL, 0x2460000000000000ULL,
+    0x7080000000000000ULL, 0x6CA0000000000000ULL,
+    0x48C0000000000000ULL, 0x54E0000000000000ULL,
+    0xE100000000000000ULL, 0xFD20000000000000ULL,
+    0xD940000000000000ULL, 0xC560000000000000ULL,
+    0x9180000000000000ULL, 0x8DA0000000000000ULL,
+    0xA9C0000000000000ULL, 0xB5E0000000000000ULL
+};
+/* clang-format on */
 
-/* Precompute the multiplication table: M[i] = i * H */
+/* Precompute the 16-entry multiplication table: M[i] = i * H */
 FIO_IFUNC void fio___gcm_precompute_htable(fio___gcm_htable_s *ctx,
                                            const uint8_t h[16]) {
   uint64_t h0 = fio_buf2u64_be(h);
   uint64_t h1 = fio_buf2u64_be(h + 8);
 
-  /* M[0] = 0 */
   ctx->hh[0] = 0;
   ctx->hl[0] = 0;
-
-  /* M[8] = H (we build the table in a specific order for efficiency) */
   ctx->hh[8] = h0;
   ctx->hl[8] = h1;
 
-  /* M[4] = x * H (multiply by x = shift right 1 with reduction) */
+  /* Powers of x times H: M[4] = x*H, M[2] = x^2*H, M[1] = x^3*H */
   int carry = h1 & 1;
   ctx->hl[4] = (h1 >> 1) | (h0 << 63);
   ctx->hh[4] = (h0 >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
 
-  /* M[2] = x^2 * H */
   carry = ctx->hl[4] & 1;
   ctx->hl[2] = (ctx->hl[4] >> 1) | (ctx->hh[4] << 63);
   ctx->hh[2] = (ctx->hh[4] >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
 
-  /* M[1] = x^3 * H */
   carry = ctx->hl[2] & 1;
   ctx->hl[1] = (ctx->hl[2] >> 1) | (ctx->hh[2] << 63);
   ctx->hh[1] = (ctx->hh[2] >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
 
-  /* Build remaining entries using XOR (addition in GF(2^128)) */
+  /* Build remaining entries using XOR (linearity of GF multiplication) */
   ctx->hh[3] = ctx->hh[1] ^ ctx->hh[2];
   ctx->hl[3] = ctx->hl[1] ^ ctx->hl[2];
   ctx->hh[5] = ctx->hh[1] ^ ctx->hh[4];
@@ -2197,33 +2186,31 @@ FIO_IFUNC void fio___gcm_precompute_htable(fio___gcm_htable_s *ctx,
 }
 
 /* GHASH multiplication: result = x * H using 4-bit table
- * Process from the last nibble to the first, accumulating the result */
+ * Process nibbles from byte 15 down to byte 0, low nibble first */
 FIO_IFUNC void fio___gcm_ghash_mult(uint64_t z[2],
                                     const uint8_t x[16],
                                     const fio___gcm_htable_s *ctx) {
   uint64_t z0 = 0, z1 = 0;
 
-  /* Process nibbles from byte 15 down to byte 0, low nibble first */
+  /* Process from byte 15 to byte 0 */
   for (int i = 15; i >= 0; --i) {
     uint8_t b = x[i];
 
-    /* Low nibble of byte i */
-    uint8_t idx = b & 0xF;
-    /* Shift z right by 4 and reduce */
-    uint64_t rem = z1 & 0xF;
+    /* Process low nibble first */
+    uint8_t lo = b & 0xF;
+    uint8_t rem = z1 & 0xF;
     z1 = (z1 >> 4) | (z0 << 60);
     z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    /* XOR in table entry */
-    z0 ^= ctx->hh[idx];
-    z1 ^= ctx->hl[idx];
+    z0 ^= ctx->hh[lo];
+    z1 ^= ctx->hl[lo];
 
-    /* High nibble of byte i */
-    idx = (b >> 4) & 0xF;
+    /* Process high nibble */
+    uint8_t hi = b >> 4;
     rem = z1 & 0xF;
     z1 = (z1 >> 4) | (z0 << 60);
     z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[idx];
-    z1 ^= ctx->hl[idx];
+    z0 ^= ctx->hh[hi];
+    z1 ^= ctx->hl[hi];
   }
 
   z[0] = z0;
