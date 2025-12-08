@@ -23393,16 +23393,16 @@ ChaCha20 (encryption)
   for (size_t i = 0; i < count; ++i) {                                         \
     a[i] += b[i];                                                              \
     d[i] ^= a[i];                                                              \
-    d[i] = (d[i] << 16) | (d[i] >> (32 - 16));                                 \
+    d[i] = fio_lrot32(d[i], 16);                                               \
     c[i] += d[i];                                                              \
     b[i] ^= c[i];                                                              \
-    b[i] = (b[i] << 12) | (b[i] >> (32 - 12));                                 \
+    b[i] = fio_lrot32(b[i], 12);                                               \
     a[i] += b[i];                                                              \
     d[i] ^= a[i];                                                              \
-    d[i] = (d[i] << 8) | (d[i] >> (32 - 8));                                   \
+    d[i] = fio_lrot32(d[i], 8);                                                \
     c[i] += d[i];                                                              \
     b[i] ^= c[i];                                                              \
-    b[i] = (b[i] << 7) | (b[i] >> (32 - 7));                                   \
+    b[i] = fio_lrot32(b[i], 7);                                                \
   }
 
 FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
