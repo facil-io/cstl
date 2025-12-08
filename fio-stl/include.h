@@ -104,6 +104,9 @@
 #ifdef FIO_CHACHA
 #include "152 chacha20poly1305.h"
 #endif
+#ifdef FIO_AES
+#include "153 aes.h"
+#endif
 
 #ifdef FIO_ED25519
 #include "154 ed25519.h"

@@ -130,6 +130,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT)
 #undef FIO_CRYPT
+#undef FIO_AES
 #undef FIO_CRYPTO_CORE
 #undef FIO_CHACHA
 #undef FIO_ED25519
@@ -137,6 +138,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_SHA2
 #undef FIO_SECRET
 #undef FIO_OTP
+#define FIO_AES
 #define FIO_CRYPTO_CORE
 #define FIO_CHACHA
 #define FIO_ED25519
