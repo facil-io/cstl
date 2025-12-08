@@ -773,14 +773,14 @@ FIO_SFUNC void fio___sc_muladd(uint8_t s[32],
                                const uint8_t a[32],
                                const uint8_t b[32],
                                const uint8_t c[32]) {
-  long long x[64] = {0};
+  long long x[65] = {0};
   int i, j;
   for (i = 0; i < 32; ++i)
     x[i] = (unsigned long long)a[i];
   for (i = 0; i < 32; ++i)
     for (j = 0; j < 32; ++j)
       x[i + j] += (unsigned long long)b[i] * (unsigned long long)c[j];
-  uint8_t tmp[64];
+  uint8_t tmp[65];
   for (i = 0; i < 64; ++i) {
     x[i + 1] += x[i] >> 8;
     tmp[i] = x[i] & 255;

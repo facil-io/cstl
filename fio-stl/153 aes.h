@@ -2148,7 +2148,7 @@ FIO_IFUNC void fio___gcm_precompute_htable(fio___gcm_htable_s *ctx,
   ctx->hl[8] = h1;
 
   /* Powers of x times H: M[4] = x*H, M[2] = x^2*H, M[1] = x^3*H */
-  int carry = h1 & 1;
+  uint64_t carry = h1 & 1;
   ctx->hl[4] = (h1 >> 1) | (h0 << 63);
   ctx->hh[4] = (h0 >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
 
@@ -2186,46 +2186,64 @@ FIO_IFUNC void fio___gcm_precompute_htable(fio___gcm_htable_s *ctx,
 }
 
 /* GHASH multiplication: result = x * H using 4-bit table
- * Process nibbles from byte 15 down to byte 0, low nibble first */
+ * Process nibbles from byte 15 down to byte 0, low nibble first
+ *
+ * Unrolled for better performance - processes 2 bytes (4 nibbles) per iteration
+ */
 FIO_IFUNC void fio___gcm_ghash_mult(uint64_t z[2],
                                     const uint8_t x[16],
                                     const fio___gcm_htable_s *ctx) {
   uint64_t z0 = 0, z1 = 0;
+  uint64_t rem;
 
-  /* Process from byte 15 to byte 0 */
-  for (int i = 15; i >= 0; --i) {
-    uint8_t b = x[i];
+  /* Unroll: process 2 bytes at a time */
+  for (int i = 14; i >= 0; i -= 2) {
+    uint8_t b0 = x[i + 1]; /* Lower byte first */
+    uint8_t b1 = x[i];
 
-    /* Process low nibble first */
-    uint8_t lo = b & 0xF;
-    uint8_t rem = z1 & 0xF;
-    z1 = (z1 >> 4) | (z0 << 60);
-    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[lo];
-    z1 ^= ctx->hl[lo];
-
-    /* Process high nibble */
-    uint8_t hi = b >> 4;
+    /* Byte 0, low nibble */
     rem = z1 & 0xF;
     z1 = (z1 >> 4) | (z0 << 60);
     z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[hi];
-    z1 ^= ctx->hl[hi];
+    z0 ^= ctx->hh[b0 & 0xF];
+    z1 ^= ctx->hl[b0 & 0xF];
+
+    /* Byte 0, high nibble */
+    rem = z1 & 0xF;
+    z1 = (z1 >> 4) | (z0 << 60);
+    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
+    z0 ^= ctx->hh[b0 >> 4];
+    z1 ^= ctx->hl[b0 >> 4];
+
+    /* Byte 1, low nibble */
+    rem = z1 & 0xF;
+    z1 = (z1 >> 4) | (z0 << 60);
+    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
+    z0 ^= ctx->hh[b1 & 0xF];
+    z1 ^= ctx->hl[b1 & 0xF];
+
+    /* Byte 1, high nibble */
+    rem = z1 & 0xF;
+    z1 = (z1 >> 4) | (z0 << 60);
+    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
+    z0 ^= ctx->hh[b1 >> 4];
+    z1 ^= ctx->hl[b1 >> 4];
   }
 
   z[0] = z0;
   z[1] = z1;
 }
 
-/* GHASH a block: tag = (tag XOR block) * H */
+/* GHASH a block: tag = (tag XOR block) * H
+ * Optimized to use 64-bit XOR operations */
 FIO_IFUNC void fio___gcm_ghash_block(uint64_t tag[2],
                                      const uint8_t block[16],
                                      const fio___gcm_htable_s *ctx) {
   uint8_t tmp[16];
-  fio_u2buf64_be(tmp, tag[0]);
-  fio_u2buf64_be(tmp + 8, tag[1]);
-  for (int i = 0; i < 16; ++i)
-    tmp[i] ^= block[i];
+  uint64_t b0 = fio_buf2u64_be(block);
+  uint64_t b1 = fio_buf2u64_be(block + 8);
+  fio_u2buf64_be(tmp, tag[0] ^ b0);
+  fio_u2buf64_be(tmp + 8, tag[1] ^ b1);
   fio___gcm_ghash_mult(tag, tmp, ctx);
 }
 
@@ -2286,8 +2304,11 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
-    for (int i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
+    /* Use 64-bit XOR for better performance */
+    uint64_t *p64 = (uint64_t *)p;
+    uint64_t *ks64 = (uint64_t *)keystream;
+    p64[0] ^= ks64[0];
+    p64[1] ^= ks64[1];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
@@ -2348,8 +2369,11 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);
-    for (int i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
+    /* Use 64-bit XOR for better performance */
+    uint64_t *p64 = (uint64_t *)p;
+    uint64_t *ks64 = (uint64_t *)keystream;
+    p64[0] ^= ks64[0];
+    p64[1] ^= ks64[1];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
@@ -2426,8 +2450,11 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
-    for (int i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
+    /* Use 64-bit XOR for better performance */
+    uint64_t *p64 = (uint64_t *)p;
+    uint64_t *ks64 = (uint64_t *)keystream;
+    p64[0] ^= ks64[0];
+    p64[1] ^= ks64[1];
     p += 16;
     len -= 16;
   }
@@ -2490,8 +2517,11 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);
-    for (int i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
+    /* Use 64-bit XOR for better performance */
+    uint64_t *p64 = (uint64_t *)p;
+    uint64_t *ks64 = (uint64_t *)keystream;
+    p64[0] ^= ks64[0];
+    p64[1] ^= ks64[1];
     p += 16;
     len -= 16;
   }

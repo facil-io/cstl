@@ -56,7 +56,7 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 int main(void) {
-  fprintf(stderr, "* Testing AES-GCM implementation\n");
+  fprintf(stderr, "\t* Testing AES-GCM implementation\n");
 #if FIO___HAS_X86_AES_INTRIN
   fprintf(stderr, "\t(using x86 AES-NI)\n");
 #elif FIO___HAS_ARM_AES_INTRIN
@@ -676,7 +676,7 @@ int main(void) {
     }
   }
 
-  fprintf(stderr, "* AES-GCM tests passed!\n");
+  fprintf(stderr, "\t* AES-GCM tests passed!\n");
 
 #if !DEBUG
   fprintf(stderr, "\n");
