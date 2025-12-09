@@ -227,143 +227,436 @@ Implementation - possibly externed functions.
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
-Field Arithmetic for GF(2^255 - 19)
+Field Arithmetic for GF(2^255 - 19) - Radix 2^51 Implementation
 
-We use a radix-2^16 representation with 16 limbs (like TweetNaCl).
-Each limb is stored in an int64_t to allow for lazy reduction.
+Based on curve25519-donna-64bit by Andrew Moon.
+Uses 5 limbs of 51 bits each, stored in uint64_t.
+Uses fio_math_mulc64 for portable 64x64->128 bit multiplication.
 
-This representation is simpler and well-tested, though slower than
-optimized radix-2^51 implementations.
+This provides ~10x fewer multiplications than radix-2^16 (25 vs 256).
 ***************************************************************************** */
 
-/* field element: 16 limbs in radix 2^16 */
-typedef int64_t fio___gf_s[16];
+/* Field element: 5 limbs in radix 2^51 */
+typedef uint64_t fio___gf_s[5];
 
-/* carry propagation and reduction */
-FIO_IFUNC void fio___gf_carry(fio___gf_s o) {
-  int64_t c;
-  for (int i = 0; i < 16; ++i) {
-    o[i] += (1LL << 16);
-    c = o[i] >> 16;
-    o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
-    o[i] -= c << 16;
-  }
-}
+/* Masks for reduction */
+#define FIO___GF_MASK51 ((1ULL << 51) - 1)
 
-/* load a 32-byte little-endian number into field element */
+/* Load 32-byte little-endian number into field element */
 FIO_IFUNC void fio___gf_frombytes(fio___gf_s r, const uint8_t in[32]) {
-  for (int i = 0; i < 16; ++i)
-    r[i] = in[2 * i] + ((int64_t)in[2 * i + 1] << 8);
-  r[15] &= 0x7FFF;
+  uint64_t x0 = fio_buf2u64_le(in);
+  uint64_t x1 = fio_buf2u64_le(in + 8);
+  uint64_t x2 = fio_buf2u64_le(in + 16);
+  uint64_t x3 = fio_buf2u64_le(in + 24);
+
+  r[0] = x0 & FIO___GF_MASK51;
+  x0 = (x0 >> 51) | (x1 << 13);
+  r[1] = x0 & FIO___GF_MASK51;
+  x1 = (x1 >> 38) | (x2 << 26);
+  r[2] = x1 & FIO___GF_MASK51;
+  x2 = (x2 >> 25) | (x3 << 39);
+  r[3] = x2 & FIO___GF_MASK51;
+  x3 = (x3 >> 12);
+  r[4] = x3 & FIO___GF_MASK51;
 }
 
-/* conditional swap: swap p and q if b is 1, else no-op (constant time) */
+/* Conditional swap: swap p and q if b is 1, else no-op (constant time) */
 FIO_IFUNC void fio___gf_cswap(fio___gf_s p, fio___gf_s q, int b) {
-  int64_t t, c = ~((int64_t)b - 1);
-  for (int i = 0; i < 16; ++i) {
-    t = c & (p[i] ^ q[i]);
-    p[i] ^= t;
-    q[i] ^= t;
-  }
+  uint64_t mask = (uint64_t)0 - (uint64_t)b;
+  uint64_t t;
+  t = mask & (p[0] ^ q[0]);
+  p[0] ^= t;
+  q[0] ^= t;
+  t = mask & (p[1] ^ q[1]);
+  p[1] ^= t;
+  q[1] ^= t;
+  t = mask & (p[2] ^ q[2]);
+  p[2] ^= t;
+  q[2] ^= t;
+  t = mask & (p[3] ^ q[3]);
+  p[3] ^= t;
+  q[3] ^= t;
+  t = mask & (p[4] ^ q[4]);
+  p[4] ^= t;
+  q[4] ^= t;
 }
 
-/* store field element to 32-byte little-endian output */
+/* Store field element to 32-byte little-endian output (fully reduced) */
 FIO_IFUNC void fio___gf_tobytes(uint8_t out[32], fio___gf_s n) {
-  int i, j;
-  fio___gf_s m, t;
-  for (i = 0; i < 16; ++i)
-    t[i] = n[i];
-  fio___gf_carry(t);
-  fio___gf_carry(t);
-  fio___gf_carry(t);
-  for (j = 0; j < 2; ++j) {
-    m[0] = t[0] - 0xffed;
-    for (i = 1; i < 15; ++i) {
-      m[i] = t[i] - 0xffff - ((m[i - 1] >> 16) & 1);
-      m[i - 1] &= 0xffff;
-    }
-    m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
-    int swap = (m[15] >> 16) & 1;
-    m[14] &= 0xffff;
-    fio___gf_cswap(t, m, 1 - swap);
-  }
-  for (i = 0; i < 16; ++i) {
-    out[2 * i] = t[i] & 0xff;
-    out[2 * i + 1] = t[i] >> 8;
-  }
+  uint64_t t0 = n[0], t1 = n[1], t2 = n[2], t3 = n[3], t4 = n[4];
+
+  /* Carry chain */
+  t1 += t0 >> 51;
+  t0 &= FIO___GF_MASK51;
+  t2 += t1 >> 51;
+  t1 &= FIO___GF_MASK51;
+  t3 += t2 >> 51;
+  t2 &= FIO___GF_MASK51;
+  t4 += t3 >> 51;
+  t3 &= FIO___GF_MASK51;
+  t0 += 19 * (t4 >> 51);
+  t4 &= FIO___GF_MASK51;
+
+  /* Second carry pass */
+  t1 += t0 >> 51;
+  t0 &= FIO___GF_MASK51;
+  t2 += t1 >> 51;
+  t1 &= FIO___GF_MASK51;
+  t3 += t2 >> 51;
+  t2 &= FIO___GF_MASK51;
+  t4 += t3 >> 51;
+  t3 &= FIO___GF_MASK51;
+  t0 += 19 * (t4 >> 51);
+  t4 &= FIO___GF_MASK51;
+
+  /* Now t is between 0 and 2^255-1, properly carried.
+   * Compute t - p = t - (2^255 - 19) = t + 19 - 2^255
+   * If result is positive (no borrow from bit 255), use it. */
+  t0 += 19;
+  t1 += t0 >> 51;
+  t0 &= FIO___GF_MASK51;
+  t2 += t1 >> 51;
+  t1 &= FIO___GF_MASK51;
+  t3 += t2 >> 51;
+  t2 &= FIO___GF_MASK51;
+  t4 += t3 >> 51;
+  t3 &= FIO___GF_MASK51;
+  /* t4 now has bit 51 set if t >= p */
+  uint64_t c = t4 >> 51;
+  t4 &= FIO___GF_MASK51;
+
+  /* If c == 0, we need to subtract 19 back (t was < p) */
+  uint64_t mask = c - 1; /* 0 if c==1, all 1s if c==0 */
+  t0 -= 19 & mask;
+  /* Propagate borrow */
+  c = (t0 >> 63);
+  t0 &= FIO___GF_MASK51;
+  t1 -= c;
+  c = (t1 >> 63);
+  t1 &= FIO___GF_MASK51;
+  t2 -= c;
+  c = (t2 >> 63);
+  t2 &= FIO___GF_MASK51;
+  t3 -= c;
+  c = (t3 >> 63);
+  t3 &= FIO___GF_MASK51;
+  t4 -= c;
+  t4 &= FIO___GF_MASK51;
+
+  /* Pack into bytes */
+  uint64_t r0 = t0 | (t1 << 51);
+  uint64_t r1 = (t1 >> 13) | (t2 << 38);
+  uint64_t r2 = (t2 >> 26) | (t3 << 25);
+  uint64_t r3 = (t3 >> 39) | (t4 << 12);
+
+  fio_u2buf64_le(out, r0);
+  fio_u2buf64_le(out + 8, r1);
+  fio_u2buf64_le(out + 16, r2);
+  fio_u2buf64_le(out + 24, r3);
 }
 
-/* field element addition: h = f + g */
+/* Field element addition: h = f + g */
 FIO_IFUNC void fio___gf_add(fio___gf_s h,
                             const fio___gf_s f,
                             const fio___gf_s g) {
-  for (int i = 0; i < 16; ++i)
-    h[i] = f[i] + g[i];
+  h[0] = f[0] + g[0];
+  h[1] = f[1] + g[1];
+  h[2] = f[2] + g[2];
+  h[3] = f[3] + g[3];
+  h[4] = f[4] + g[4];
 }
 
-/* field element subtraction: h = f - g */
+/* Constants for subtraction: 2^54 - 152 and 2^54 - 8 */
+#define FIO___GF_TWO54M152 ((1ULL << 54) - 152)
+#define FIO___GF_TWO54M8   ((1ULL << 54) - 8)
+
+/* Field element subtraction: h = f - g */
 FIO_IFUNC void fio___gf_sub(fio___gf_s h,
                             const fio___gf_s f,
                             const fio___gf_s g) {
-  for (int i = 0; i < 16; ++i)
-    h[i] = f[i] - g[i];
+  h[0] = f[0] + FIO___GF_TWO54M152 - g[0];
+  h[1] = f[1] + FIO___GF_TWO54M8 - g[1];
+  h[2] = f[2] + FIO___GF_TWO54M8 - g[2];
+  h[3] = f[3] + FIO___GF_TWO54M8 - g[3];
+  h[4] = f[4] + FIO___GF_TWO54M8 - g[4];
 }
 
-/* field element multiplication: o = f * g */
+/* Helper: add 64-bit value to 128-bit accumulator (lo, hi) */
+#define FIO___GF_ADD128_64(lo, hi, v)                                          \
+  do {                                                                         \
+    uint64_t _c;                                                               \
+    (lo) = fio_math_addc64((lo), (v), 0, &_c);                                 \
+    (hi) += _c;                                                                \
+  } while (0)
+
+/* Helper: 128-bit right shift by 51 bits, return result as 64-bit */
+#define FIO___GF_SHR128_51(lo, hi) (((lo) >> 51) | ((hi) << 13))
+
+/* Field element multiplication: o = a * b
+ * Uses fio_math_mulc64 for 64x64->128 multiplication */
 FIO_IFUNC void fio___gf_mul(fio___gf_s o,
-                            const fio___gf_s f,
-                            const fio___gf_s g) {
-  int64_t i, j, t[31];
-  for (i = 0; i < 31; ++i)
-    t[i] = 0;
-  for (i = 0; i < 16; ++i)
-    for (j = 0; j < 16; ++j)
-      t[i + j] += f[i] * g[j];
-  for (i = 0; i < 15; ++i)
-    t[i] += 38 * t[i + 16];
-  for (i = 0; i < 16; ++i)
-    o[i] = t[i];
-  fio___gf_carry(o);
-  fio___gf_carry(o);
+                            const fio___gf_s a,
+                            const fio___gf_s b) {
+  uint64_t t0_lo, t0_hi, t1_lo, t1_hi, t2_lo, t2_hi, t3_lo, t3_hi, t4_lo, t4_hi;
+  uint64_t tmp_lo, tmp_hi;
+  uint64_t r0, r1, r2, r3, r4, s0, s1, s2, s3, s4, c;
+
+  r0 = b[0];
+  r1 = b[1];
+  r2 = b[2];
+  r3 = b[3];
+  r4 = b[4];
+  s0 = a[0];
+  s1 = a[1];
+  s2 = a[2];
+  s3 = a[3];
+  s4 = a[4];
+
+  /* Compute direct products t[i] = sum of r[j]*s[i-j] for j <= i */
+  t0_lo = fio_math_mulc64(r0, s0, &t0_hi);
+
+  t1_lo = fio_math_mulc64(r0, s1, &t1_hi);
+  tmp_lo = fio_math_mulc64(r1, s0, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+
+  t2_lo = fio_math_mulc64(r0, s2, &t2_hi);
+  tmp_lo = fio_math_mulc64(r2, s0, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r1, s1, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+
+  t3_lo = fio_math_mulc64(r0, s3, &t3_hi);
+  tmp_lo = fio_math_mulc64(r3, s0, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r1, s2, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r2, s1, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+
+  t4_lo = fio_math_mulc64(r0, s4, &t4_hi);
+  tmp_lo = fio_math_mulc64(r4, s0, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r3, s1, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r1, s3, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r2, s2, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+
+  /* Multiply r1-r4 by 19 for wrapped terms */
+  r1 *= 19;
+  r2 *= 19;
+  r3 *= 19;
+  r4 *= 19;
+
+  /* Add wrapped products */
+  tmp_lo = fio_math_mulc64(r4, s1, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r1, s4, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r2, s3, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r3, s2, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+
+  tmp_lo = fio_math_mulc64(r4, s2, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r2, s4, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r3, s3, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+
+  tmp_lo = fio_math_mulc64(r4, s3, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r3, s4, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+
+  tmp_lo = fio_math_mulc64(r4, s4, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+
+  /* Carry propagation */
+  r0 = t0_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t0_lo, t0_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, c);
+  r1 = t1_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t1_lo, t1_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, c);
+  r2 = t2_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t2_lo, t2_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, c);
+  r3 = t3_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t3_lo, t3_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, c);
+  r4 = t4_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t4_lo, t4_hi);
+  r0 += c * 19;
+  c = r0 >> 51;
+  r0 &= FIO___GF_MASK51;
+  r1 += c;
+
+  o[0] = r0;
+  o[1] = r1;
+  o[2] = r2;
+  o[3] = r3;
+  o[4] = r4;
 }
 
-/* field element squaring: o = f^2 */
+/* Field element squaring: o = f^2
+ * Optimized: uses symmetry to reduce multiplications */
 FIO_IFUNC void fio___gf_sqr(fio___gf_s o, const fio___gf_s f) {
-  fio___gf_mul(o, f, f);
+  uint64_t t0_lo, t0_hi, t1_lo, t1_hi, t2_lo, t2_hi, t3_lo, t3_hi, t4_lo, t4_hi;
+  uint64_t tmp_lo, tmp_hi;
+  uint64_t r0, r1, r2, r3, r4, c;
+  uint64_t d0, d1, d2, d419, d4;
+
+  r0 = f[0];
+  r1 = f[1];
+  r2 = f[2];
+  r3 = f[3];
+  r4 = f[4];
+
+  d0 = r0 * 2;
+  d1 = r1 * 2;
+  d2 = r2 * 2 * 19;
+  d419 = r4 * 19;
+  d4 = d419 * 2;
+
+  /* t0 = r0^2 + 2*19*r4*r1 + 2*19*r2*r3 */
+  t0_lo = fio_math_mulc64(r0, r0, &t0_hi);
+  tmp_lo = fio_math_mulc64(d4, r1, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(d2, r3, &tmp_hi);
+  FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
+  t0_hi += tmp_hi;
+
+  /* t1 = 2*r0*r1 + 2*19*r4*r2 + 19*r3^2 */
+  t1_lo = fio_math_mulc64(d0, r1, &t1_hi);
+  tmp_lo = fio_math_mulc64(d4, r2, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r3, r3 * 19, &tmp_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
+  t1_hi += tmp_hi;
+
+  /* t2 = 2*r0*r2 + r1^2 + 2*19*r4*r3 */
+  t2_lo = fio_math_mulc64(d0, r2, &t2_hi);
+  tmp_lo = fio_math_mulc64(r1, r1, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(d4, r3, &tmp_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
+  t2_hi += tmp_hi;
+
+  /* t3 = 2*r0*r3 + 2*r1*r2 + 19*r4^2 */
+  t3_lo = fio_math_mulc64(d0, r3, &t3_hi);
+  tmp_lo = fio_math_mulc64(d1, r2, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r4, d419, &tmp_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
+  t3_hi += tmp_hi;
+
+  /* t4 = 2*r0*r4 + 2*r1*r3 + r2^2 */
+  t4_lo = fio_math_mulc64(d0, r4, &t4_hi);
+  tmp_lo = fio_math_mulc64(d1, r3, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+  tmp_lo = fio_math_mulc64(r2, r2, &tmp_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
+  t4_hi += tmp_hi;
+
+  /* Carry propagation */
+  r0 = t0_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t0_lo, t0_hi);
+  FIO___GF_ADD128_64(t1_lo, t1_hi, c);
+  r1 = t1_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t1_lo, t1_hi);
+  FIO___GF_ADD128_64(t2_lo, t2_hi, c);
+  r2 = t2_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t2_lo, t2_hi);
+  FIO___GF_ADD128_64(t3_lo, t3_hi, c);
+  r3 = t3_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t3_lo, t3_hi);
+  FIO___GF_ADD128_64(t4_lo, t4_hi, c);
+  r4 = t4_lo & FIO___GF_MASK51;
+  c = FIO___GF_SHR128_51(t4_lo, t4_hi);
+  r0 += c * 19;
+  c = r0 >> 51;
+  r0 &= FIO___GF_MASK51;
+  r1 += c;
+
+  o[0] = r0;
+  o[1] = r1;
+  o[2] = r2;
+  o[3] = r3;
+  o[4] = r4;
 }
 
-/* field element inversion: o = 1/i using Fermat's little theorem */
-/* f^(-1) = f^(p-2) where p = 2^255 - 19 */
+/* Field element inversion: o = 1/i using Fermat's little theorem
+ * f^(-1) = f^(p-2) where p = 2^255 - 19 */
 FIO_IFUNC void fio___gf_inv(fio___gf_s o, const fio___gf_s i) {
   fio___gf_s c;
   int a;
-  for (a = 0; a < 16; ++a)
-    c[a] = i[a];
+  c[0] = i[0];
+  c[1] = i[1];
+  c[2] = i[2];
+  c[3] = i[3];
+  c[4] = i[4];
   for (a = 253; a >= 0; --a) {
     fio___gf_sqr(c, c);
     if (a != 2 && a != 4)
       fio___gf_mul(c, c, i);
   }
-  for (a = 0; a < 16; ++a)
-    o[a] = c[a];
+  o[0] = c[0];
+  o[1] = c[1];
+  o[2] = c[2];
+  o[3] = c[3];
+  o[4] = c[4];
 }
 
-/* compute f^((p-5)/8) for square root computation */
+/* Compute f^((p-5)/8) for square root computation */
 FIO_IFUNC void fio___gf_pow_pm5d8(fio___gf_s o, const fio___gf_s i) {
   fio___gf_s c;
   int a;
-  for (a = 0; a < 16; ++a)
-    c[a] = i[a];
+  c[0] = i[0];
+  c[1] = i[1];
+  c[2] = i[2];
+  c[3] = i[3];
+  c[4] = i[4];
   for (a = 250; a >= 0; --a) {
     fio___gf_sqr(c, c);
     if (a != 1)
       fio___gf_mul(c, c, i);
   }
-  for (a = 0; a < 16; ++a)
-    o[a] = c[a];
+  o[0] = c[0];
+  o[1] = c[1];
+  o[2] = c[2];
+  o[3] = c[3];
+  o[4] = c[4];
 }
 
-/* check if field element is zero */
+/* Check if field element is zero */
 FIO_IFUNC int fio___gf_iszero(fio___gf_s f) {
   uint8_t s[32];
   fio___gf_tobytes(s, f);
@@ -373,36 +666,48 @@ FIO_IFUNC int fio___gf_iszero(fio___gf_s f) {
   return r == 0;
 }
 
-/* check if field element is negative (LSB of canonical form) */
+/* Check if field element is negative (LSB of canonical form) */
 FIO_IFUNC int fio___gf_isneg(fio___gf_s f) {
   uint8_t s[32];
   fio___gf_tobytes(s, f);
   return s[0] & 1;
 }
 
-/* field element negation: o = -f */
+/* Field element negation: o = -f */
 FIO_IFUNC void fio___gf_neg(fio___gf_s o, const fio___gf_s f) {
-  for (int i = 0; i < 16; ++i)
-    o[i] = -f[i];
+  /* 0 - f = (2p - f) mod p, using subtraction constants */
+  o[0] = FIO___GF_TWO54M152 - f[0];
+  o[1] = FIO___GF_TWO54M8 - f[1];
+  o[2] = FIO___GF_TWO54M8 - f[2];
+  o[3] = FIO___GF_TWO54M8 - f[3];
+  o[4] = FIO___GF_TWO54M8 - f[4];
 }
 
-/* set field element to 1 */
+/* Set field element to 1 */
 FIO_IFUNC void fio___gf_one(fio___gf_s r) {
   r[0] = 1;
-  for (int i = 1; i < 16; ++i)
-    r[i] = 0;
+  r[1] = 0;
+  r[2] = 0;
+  r[3] = 0;
+  r[4] = 0;
 }
 
-/* set field element to 0 */
+/* Set field element to 0 */
 FIO_IFUNC void fio___gf_zero(fio___gf_s r) {
-  for (int i = 0; i < 16; ++i)
-    r[i] = 0;
+  r[0] = 0;
+  r[1] = 0;
+  r[2] = 0;
+  r[3] = 0;
+  r[4] = 0;
 }
 
-/* copy field element: r = a */
+/* Copy field element: r = a */
 FIO_IFUNC void fio___gf_copy(fio___gf_s r, const fio___gf_s a) {
-  for (int i = 0; i < 16; ++i)
-    r[i] = a[i];
+  r[0] = a[0];
+  r[1] = a[1];
+  r[2] = a[2];
+  r[3] = a[3];
+  r[4] = a[4];
 }
 
 /* *****************************************************************************
@@ -426,15 +731,13 @@ FIO_IFUNC void fio___x25519_scalarmult(uint8_t out[32],
   fio___gf_frombytes(x, point);
 
   /* initialize: a=1, b=x, c=0, d=1 */
-  for (int i = 0; i < 16; ++i) {
-    b[i] = x[i];
-    d[i] = a[i] = c[i] = 0;
-  }
-  a[0] = d[0] = 1;
+  fio___gf_copy(b, x);
+  fio___gf_zero(c);
+  fio___gf_one(a);
+  fio___gf_one(d);
 
   /* constant for curve parameter (a-2)/4 = 121665 */
-  static const fio___gf_s k121665 =
-      {0xDB41, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  static const fio___gf_s k121665 = {121665ULL, 0, 0, 0, 0};
 
   for (int i = 254; i >= 0; --i) {
     int64_t r = (z[i >> 3] >> (i & 7)) & 1;
@@ -507,33 +810,41 @@ x = x/z, y = y/z, x*y = t/z
 /* ed25519 group element in extended coordinates (x, y, z, t) */
 typedef fio___gf_s fio___ge_p3_s[4];
 
-/* clang-format off */
+/* Curve constants in radix 2^51 (computed via node.js) */
 /* d = -121665/121666 mod p */
-static const fio___gf_s FIO___ED25519_D = {
-    0x78a3, 0x1359, 0x4dca, 0x75eb, 0xd8ab, 0x4141, 0x0a4d, 0x0070,
-    0xe898, 0x7779, 0x4079, 0x8cc7, 0xfe73, 0x2b6f, 0x6cee, 0x5203};
+static const fio___gf_s FIO___ED25519_D = {0x34dca135978a3ULL,
+                                           0x1a8283b156ebdULL,
+                                           0x5e7a26001c029ULL,
+                                           0x739c663a03cbbULL,
+                                           0x52036cee2b6ffULL};
 
 /* 2*d */
-static const fio___gf_s FIO___ED25519_D2 = {
-    0xf159, 0x26b2, 0x9b94, 0xebd6, 0xb156, 0x8283, 0x149a, 0x00e0,
-    0xd130, 0xeef3, 0x80f2, 0x198e, 0xfce7, 0x56df, 0xd9dc, 0x2406};
+static const fio___gf_s FIO___ED25519_D2 = {0x69b9426b2f159ULL,
+                                            0x35050762add7aULL,
+                                            0x3cf44c0038052ULL,
+                                            0x6738cc7407977ULL,
+                                            0x2406d9dc56dffULL};
 
 /* sqrt(-1) mod p */
-static const fio___gf_s FIO___ED25519_SQRTM1 = {
-    0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43,
-    0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83};
+static const fio___gf_s FIO___ED25519_SQRTM1 = {0x61b274a0ea0b0ULL,
+                                                0x0d5a5fc8f189dULL,
+                                                0x7ef5e9cbd0c60ULL,
+                                                0x78595a6804c9eULL,
+                                                0x2b8324804fc1dULL};
 
-/* ed25519 base point coordinates */
-/* y = 4/5 */
-static const fio___gf_s FIO___ED25519_BASE_Y = {
-    0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666,
-    0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666};
+/* ed25519 base point y = 4/5 */
+static const fio___gf_s FIO___ED25519_BASE_Y = {0x6666666666658ULL,
+                                                0x4ccccccccccccULL,
+                                                0x1999999999999ULL,
+                                                0x3333333333333ULL,
+                                                0x6666666666666ULL};
 
-/* x = recovered from y */
-static const fio___gf_s FIO___ED25519_BASE_X = {
-    0xd51a, 0x8f25, 0x2d60, 0xc956, 0xa7b2, 0x9525, 0xc760, 0x692c,
-    0xdc5c, 0xfdd6, 0xe231, 0xc0a4, 0x53fe, 0xcd6e, 0x36d3, 0x2169};
-/* clang-format on */
+/* ed25519 base point x */
+static const fio___gf_s FIO___ED25519_BASE_X = {0x62d608f25d51aULL,
+                                                0x412a4b4f6592aULL,
+                                                0x75b7171a4b31dULL,
+                                                0x1ff60527118feULL,
+                                                0x216936d3cd6e5ULL};
 
 /* set p to the base point */
 FIO_IFUNC void fio___ge_p3_base(fio___ge_p3_s p) {
@@ -773,14 +1084,14 @@ FIO_SFUNC void fio___sc_muladd(uint8_t s[32],
                                const uint8_t a[32],
                                const uint8_t b[32],
                                const uint8_t c[32]) {
-  long long x[65] = {0};
+  long long x[64] = {0};
   int i, j;
   for (i = 0; i < 32; ++i)
     x[i] = (unsigned long long)a[i];
   for (i = 0; i < 32; ++i)
     for (j = 0; j < 32; ++j)
       x[i + j] += (unsigned long long)b[i] * (unsigned long long)c[j];
-  uint8_t tmp[65];
+  uint8_t tmp[64];
   for (i = 0; i < 64; ++i) {
     x[i + 1] += x[i] >> 8;
     tmp[i] = x[i] & 255;

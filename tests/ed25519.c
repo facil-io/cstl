@@ -590,6 +590,470 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
 }
 
 /* *****************************************************************************
+Performance Testing
+***************************************************************************** */
+
+/* Number of iterations for performance tests */
+#ifndef FIO_ED25519_PERF_ITERATIONS
+#define FIO_ED25519_PERF_ITERATIONS 1000
+#endif
+
+FIO_SFUNC int64_t fio___ed25519_time_us(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
+  const size_t iterations = FIO_ED25519_PERF_ITERATIONS;
+  int64_t start, end;
+  double elapsed_us, ops_per_sec;
+
+  /* Pre-generate test data */
+  uint8_t sk[32], pk[32], sig[64];
+  uint8_t x_sk[32], x_pk[32], x_other_sk[32], x_other_pk[32];
+  const char *message = "Performance test message for Ed25519 signing";
+  size_t message_len = strlen(message);
+
+  fio_ed25519_keypair(sk, pk);
+  fio_x25519_keypair(x_sk, x_pk);
+  fio_x25519_keypair(x_other_sk, x_other_pk);
+
+#ifdef DEBUG
+  fprintf(stderr,
+          "\n\t* Ed25519/X25519 Performance Tests "
+          "(DEBUG mode - results may be slower)\n");
+#else
+  fprintf(stderr, "\n\t* Ed25519/X25519 Performance Tests\n");
+#endif
+  fprintf(stderr,
+          "\t  Running %zu iterations per operation...\n\n",
+          iterations);
+
+  /* --- Ed25519 Key Generation --- */
+  {
+    uint8_t tmp_sk[32], tmp_pk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_keypair(tmp_sk, tmp_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 keypair generation",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- Ed25519 Public Key Derivation --- */
+  {
+    uint8_t tmp_pk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_public_key(tmp_pk, sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 public key derivation",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- Ed25519 Signing --- */
+  {
+    uint8_t tmp_sig[64];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_sign(tmp_sig, message, message_len, sk, pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 sign (45 byte message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* Pre-sign for verification tests */
+  fio_ed25519_sign(sig, message, message_len, sk, pk);
+
+  /* --- Ed25519 Verification --- */
+  {
+    volatile int result = 0;
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      result = fio_ed25519_verify(sig, message, message_len, pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    (void)result;
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 verify (45 byte message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- Ed25519 Sign + Verify Combined --- */
+  {
+    uint8_t tmp_sig[64];
+    volatile int result = 0;
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_sign(tmp_sig, message, message_len, sk, pk);
+      result = fio_ed25519_verify(tmp_sig, message, message_len, pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    (void)result;
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 sign+verify roundtrip",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  fprintf(stderr, "\n");
+
+  /* --- Ed25519 Signing Speed with Various Message Sizes --- */
+  fprintf(stderr, "\t  Ed25519 Signing Speed by Message Size:\n");
+  {
+    static const size_t msg_sizes[] =
+        {0, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
+    static const size_t num_sizes = sizeof(msg_sizes) / sizeof(msg_sizes[0]);
+    uint8_t tmp_sig[64];
+    uint8_t *msg_buf = malloc(65536);
+
+    /* Fill buffer with test data */
+    for (size_t i = 0; i < 65536; ++i)
+      msg_buf[i] = (uint8_t)(i & 0xFF);
+
+    for (size_t s = 0; s < num_sizes; ++s) {
+      size_t msg_size = msg_sizes[s];
+      /* Adjust iterations for larger messages */
+      size_t iters = iterations;
+      if (msg_size > 4096)
+        iters = iterations / 4;
+      else if (msg_size > 1024)
+        iters = iterations / 2;
+
+      start = fio___ed25519_time_us();
+      for (size_t i = 0; i < iters; ++i) {
+        fio_ed25519_sign(tmp_sig, msg_buf, msg_size, sk, pk);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio___ed25519_time_us();
+      elapsed_us = (double)(end - start);
+      ops_per_sec = (iters * 1000000.0) / elapsed_us;
+
+      char label[64];
+      if (msg_size < 1024)
+        snprintf(label, sizeof(label), "    Sign (%zu bytes)", msg_size);
+      else
+        snprintf(label, sizeof(label), "    Sign (%zuKB)", msg_size / 1024);
+
+      fprintf(stderr,
+              "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+              label,
+              ops_per_sec,
+              elapsed_us / iters);
+    }
+    free(msg_buf);
+  }
+
+  fprintf(stderr, "\n");
+
+  /* --- Ed25519 Verification Speed with Various Message Sizes --- */
+  fprintf(stderr, "\t  Ed25519 Verification Speed by Message Size:\n");
+  {
+    static const size_t msg_sizes[] =
+        {0, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
+    static const size_t num_sizes = sizeof(msg_sizes) / sizeof(msg_sizes[0]);
+    uint8_t tmp_sig[64];
+    uint8_t *msg_buf = malloc(65536);
+    volatile int result = 0;
+
+    /* Fill buffer with test data */
+    for (size_t i = 0; i < 65536; ++i)
+      msg_buf[i] = (uint8_t)(i & 0xFF);
+
+    for (size_t s = 0; s < num_sizes; ++s) {
+      size_t msg_size = msg_sizes[s];
+      /* Pre-sign the message */
+      fio_ed25519_sign(tmp_sig, msg_buf, msg_size, sk, pk);
+
+      /* Adjust iterations for larger messages */
+      size_t iters = iterations;
+      if (msg_size > 4096)
+        iters = iterations / 4;
+      else if (msg_size > 1024)
+        iters = iterations / 2;
+
+      start = fio___ed25519_time_us();
+      for (size_t i = 0; i < iters; ++i) {
+        result = fio_ed25519_verify(tmp_sig, msg_buf, msg_size, pk);
+        FIO_COMPILER_GUARD;
+      }
+      end = fio___ed25519_time_us();
+      (void)result;
+      elapsed_us = (double)(end - start);
+      ops_per_sec = (iters * 1000000.0) / elapsed_us;
+
+      char label[64];
+      if (msg_size < 1024)
+        snprintf(label, sizeof(label), "    Verify (%zu bytes)", msg_size);
+      else
+        snprintf(label, sizeof(label), "    Verify (%zuKB)", msg_size / 1024);
+
+      fprintf(stderr,
+              "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+              label,
+              ops_per_sec,
+              elapsed_us / iters);
+    }
+    free(msg_buf);
+  }
+
+  fprintf(stderr, "\n");
+
+  /* --- X25519 Key Generation --- */
+  {
+    uint8_t tmp_sk[32], tmp_pk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_keypair(tmp_sk, tmp_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "X25519 keypair generation",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- X25519 Public Key Derivation --- */
+  {
+    uint8_t tmp_pk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_public_key(tmp_pk, x_sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "X25519 public key derivation",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- X25519 Shared Secret (ECDH) --- */
+  {
+    uint8_t tmp_shared[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_shared_secret(tmp_shared, x_sk, x_other_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "X25519 shared secret (ECDH)",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- X25519 Full Key Exchange --- */
+  {
+    uint8_t a_sk[32], a_pk[32], b_sk[32], b_pk[32];
+    uint8_t a_shared[32], b_shared[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_keypair(a_sk, a_pk);
+      fio_x25519_keypair(b_sk, b_pk);
+      fio_x25519_shared_secret(a_shared, a_sk, b_pk);
+      fio_x25519_shared_secret(b_shared, b_sk, a_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "X25519 full key exchange (2 parties)",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  fprintf(stderr, "\n");
+
+  /* --- Key Conversion: Ed25519 SK to X25519 --- */
+  {
+    uint8_t tmp_x_sk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_sk_to_x25519(tmp_x_sk, sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 SK -> X25519 SK conversion",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  /* --- Key Conversion: Ed25519 PK to X25519 --- */
+  {
+    uint8_t tmp_x_pk[32];
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_ed25519_pk_to_x25519(tmp_x_pk, pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "Ed25519 PK -> X25519 PK conversion",
+            ops_per_sec,
+            elapsed_us / iterations);
+  }
+
+  fprintf(stderr, "\n");
+
+  /* --- ECIES Encryption (small message) --- */
+  {
+    const char *small_msg = "Small test message";
+    size_t small_len = strlen(small_msg);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(small_len);
+    uint8_t *ciphertext = malloc(ct_len);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_encrypt(ciphertext, small_msg, small_len, x_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES encrypt (18 byte message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(ciphertext);
+  }
+
+  /* --- ECIES Decryption (small message) --- */
+  {
+    const char *small_msg = "Small test message";
+    size_t small_len = strlen(small_msg);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(small_len);
+    uint8_t *ciphertext = malloc(ct_len);
+    uint8_t *plaintext = malloc(small_len);
+    fio_x25519_encrypt(ciphertext, small_msg, small_len, x_pk);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_decrypt(plaintext, ciphertext, ct_len, x_sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES decrypt (18 byte message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(ciphertext);
+    free(plaintext);
+  }
+
+  /* --- ECIES Encryption (1KB message) --- */
+  {
+    size_t large_len = 1024;
+    uint8_t *large_msg = malloc(large_len);
+    for (size_t i = 0; i < large_len; ++i)
+      large_msg[i] = (uint8_t)(i & 0xFF);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(large_len);
+    uint8_t *ciphertext = malloc(ct_len);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_encrypt(ciphertext, large_msg, large_len, x_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES encrypt (1KB message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(large_msg);
+    free(ciphertext);
+  }
+
+  /* --- ECIES Decryption (1KB message) --- */
+  {
+    size_t large_len = 1024;
+    uint8_t *large_msg = malloc(large_len);
+    for (size_t i = 0; i < large_len; ++i)
+      large_msg[i] = (uint8_t)(i & 0xFF);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(large_len);
+    uint8_t *ciphertext = malloc(ct_len);
+    uint8_t *plaintext = malloc(large_len);
+    fio_x25519_encrypt(ciphertext, large_msg, large_len, x_pk);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_decrypt(plaintext, ciphertext, ct_len, x_sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES decrypt (1KB message)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(large_msg);
+    free(ciphertext);
+    free(plaintext);
+  }
+
+  fprintf(stderr, "\n\t  Performance tests complete.\n");
+}
+
+/* *****************************************************************************
 Main Test Function
 ***************************************************************************** */
 
@@ -599,6 +1063,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
   FIO_NAME_TEST(stl, x25519_rfc7748)();
   FIO_NAME_TEST(stl, ed25519_x25519_conversion)();
   FIO_NAME_TEST(stl, x25519_ecies)();
+#if !DEBUG
+  FIO_NAME_TEST(stl, ed25519_performance)();
+#endif
   fprintf(stderr, "\t* Ed25519 / X25519 tests complete.\n");
 }
 

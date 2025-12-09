@@ -2002,18 +2002,13 @@ FIO_IFUNC uint32_t fio___aes_subword(uint32_t w) {
          ((uint32_t)FIO___AES_SBOX[(w >> 24) & 0xFF] << 24);
 }
 
-/* RotWord: rotate 32-bit word left by 8 bits */
-FIO_IFUNC uint32_t fio___aes_rotword(uint32_t w) {
-  return (w << 8) | (w >> 24);
-}
-
 FIO_IFUNC void fio___aes128_key_expand(uint32_t *w, const uint8_t key[16]) {
   for (int i = 0; i < 4; ++i)
     w[i] = fio_buf2u32_be(key + 4 * i);
   for (int i = 4; i < 44; ++i) {
     uint32_t tmp = w[i - 1];
     if ((i & 3) == 0)
-      tmp = fio___aes_subword(fio___aes_rotword(tmp)) ^
+      tmp = fio___aes_subword(fio_rrot32(tmp, 24)) ^
             ((uint32_t)FIO___AES_RCON[i / 4] << 24);
     w[i] = w[i - 4] ^ tmp;
   }
@@ -2025,7 +2020,7 @@ FIO_IFUNC void fio___aes256_key_expand(uint32_t *w, const uint8_t key[32]) {
   for (int i = 8; i < 60; ++i) {
     uint32_t tmp = w[i - 1];
     if ((i & 7) == 0)
-      tmp = fio___aes_subword(fio___aes_rotword(tmp)) ^
+      tmp = fio___aes_subword(fio_rrot32(tmp, 24)) ^
             ((uint32_t)FIO___AES_RCON[i / 8] << 24);
     else if ((i & 7) == 4)
       tmp = fio___aes_subword(tmp);
@@ -2074,34 +2069,38 @@ FIO_IFUNC void fio___aes128_encrypt_block(uint8_t out[16],
                                           const uint8_t in[16],
                                           const uint32_t *rk) {
   uint32_t state[4];
-  state[0] = fio_buf2u32_be(in + 0) ^ rk[0];
-  state[1] = fio_buf2u32_be(in + 4) ^ rk[1];
-  state[2] = fio_buf2u32_be(in + 8) ^ rk[2];
-  state[3] = fio_buf2u32_be(in + 12) ^ rk[3];
+  fio_memcpy16(state, in);
+  state[0] = fio_lton32(state[0]) ^ rk[0];
+  state[1] = fio_lton32(state[1]) ^ rk[1];
+  state[2] = fio_lton32(state[2]) ^ rk[2];
+  state[3] = fio_lton32(state[3]) ^ rk[3];
   for (int round = 1; round < 10; ++round)
     fio___aes_encrypt_round(state, rk + round * 4);
   fio___aes_encrypt_final_round(state, rk + 40);
-  fio_u2buf32_be(out + 0, state[0]);
-  fio_u2buf32_be(out + 4, state[1]);
-  fio_u2buf32_be(out + 8, state[2]);
-  fio_u2buf32_be(out + 12, state[3]);
+  state[0] = fio_lton32(state[0]);
+  state[1] = fio_lton32(state[1]);
+  state[2] = fio_lton32(state[2]);
+  state[3] = fio_lton32(state[3]);
+  fio_memcpy16(out, state);
 }
 
 FIO_IFUNC void fio___aes256_encrypt_block(uint8_t out[16],
                                           const uint8_t in[16],
                                           const uint32_t *rk) {
   uint32_t state[4];
-  state[0] = fio_buf2u32_be(in + 0) ^ rk[0];
-  state[1] = fio_buf2u32_be(in + 4) ^ rk[1];
-  state[2] = fio_buf2u32_be(in + 8) ^ rk[2];
-  state[3] = fio_buf2u32_be(in + 12) ^ rk[3];
+  fio_memcpy16(state, in);
+  state[0] = fio_lton32(state[0]) ^ rk[0];
+  state[1] = fio_lton32(state[1]) ^ rk[1];
+  state[2] = fio_lton32(state[2]) ^ rk[2];
+  state[3] = fio_lton32(state[3]) ^ rk[3];
   for (int round = 1; round < 14; ++round)
     fio___aes_encrypt_round(state, rk + round * 4);
   fio___aes_encrypt_final_round(state, rk + 56);
-  fio_u2buf32_be(out + 0, state[0]);
-  fio_u2buf32_be(out + 4, state[1]);
-  fio_u2buf32_be(out + 8, state[2]);
-  fio_u2buf32_be(out + 12, state[3]);
+  state[0] = fio_lton32(state[0]);
+  state[1] = fio_lton32(state[1]);
+  state[2] = fio_lton32(state[2]);
+  state[3] = fio_lton32(state[3]);
+  fio_memcpy16(out, state);
 }
 
 /* 4-bit table-based GHASH using Shoup's method
