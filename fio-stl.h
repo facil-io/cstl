@@ -25604,6 +25604,10 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
 }
 
 SFUNC void fio_aes256_gcm_enc(void *restrict mac,
@@ -25747,6 +25751,10 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -25849,8 +25857,14 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];
   _mm_storeu_si128((__m128i *)computed_mac, tag);
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(htbl, sizeof(htbl));
+    fio_secure_zero(j0_bytes, sizeof(j0_bytes));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   /* Decrypt - process 4 blocks at a time */
   while (len >= 64) {
@@ -25895,6 +25909,10 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
   return 0;
 }
 
@@ -25998,8 +26016,14 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];
   _mm_storeu_si128((__m128i *)computed_mac, tag);
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(htbl, sizeof(htbl));
+    fio_secure_zero(j0_bytes, sizeof(j0_bytes));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   /* Decrypt - process 4 blocks at a time */
   while (len >= 64) {
@@ -26044,6 +26068,10 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
   return 0;
 }
 
@@ -26497,6 +26525,11 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   uint8x16_t s = fio___arm_aes128_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   vst1q_u8((uint8_t *)mac, tag);
+
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
 }
 
 SFUNC void fio_aes256_gcm_enc(void *restrict mac,
@@ -26633,6 +26666,11 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   uint8x16_t s = fio___arm_aes256_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   vst1q_u8((uint8_t *)mac, tag);
+
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -26730,8 +26768,14 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   tag = veorq_u8(tag, s);
   uint8_t computed_mac[16];
   vst1q_u8(computed_mac, tag);
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(htbl, sizeof(htbl));
+    fio_secure_zero(j0_bytes, sizeof(j0_bytes));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   /* Decrypt - process 4 blocks at a time */
   while (len >= 64) {
@@ -26776,6 +26820,11 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
+
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
   return 0;
 }
 
@@ -26874,8 +26923,14 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   tag = veorq_u8(tag, s);
   uint8_t computed_mac[16];
   vst1q_u8(computed_mac, tag);
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(htbl, sizeof(htbl));
+    fio_secure_zero(j0_bytes, sizeof(j0_bytes));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   /* Decrypt - process 4 blocks at a time */
   while (len >= 64) {
@@ -26920,6 +26975,10 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(htbl, sizeof(htbl));
+  fio_secure_zero(j0_bytes, sizeof(j0_bytes));
   return 0;
 }
 
@@ -27450,6 +27509,13 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   fio_u2buf64_be((uint8_t *)mac + 8, tag[1]);
   for (int i = 0; i < 16; ++i)
     ((uint8_t *)mac)[i] ^= keystream[i];
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(&htbl, sizeof(htbl));
+  fio_secure_zero(j0, sizeof(j0));
+  fio_secure_zero(counter, sizeof(counter));
+  fio_secure_zero(keystream, sizeof(keystream));
+  fio_secure_zero(tag, sizeof(tag));
 }
 
 SFUNC void fio_aes256_gcm_enc(void *restrict mac,
@@ -27515,6 +27581,13 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   fio_u2buf64_be((uint8_t *)mac + 8, tag[1]);
   for (int i = 0; i < 16; ++i)
     ((uint8_t *)mac)[i] ^= keystream[i];
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(&htbl, sizeof(htbl));
+  fio_secure_zero(j0, sizeof(j0));
+  fio_secure_zero(counter, sizeof(counter));
+  fio_secure_zero(keystream, sizeof(keystream));
+  fio_secure_zero(tag, sizeof(tag));
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -27560,8 +27633,17 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   for (int i = 0; i < 16; ++i)
     computed_mac[i] ^= keystream[i];
 
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(&htbl, sizeof(htbl));
+    fio_secure_zero(j0, sizeof(j0));
+    fio_secure_zero(counter, sizeof(counter));
+    fio_secure_zero(keystream, sizeof(keystream));
+    fio_secure_zero(tag, sizeof(tag));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   FIO_MEMCPY(counter, j0, 16);
   while (len >= 16) {
@@ -27581,6 +27663,13 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= keystream[i];
   }
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(&htbl, sizeof(htbl));
+  fio_secure_zero(j0, sizeof(j0));
+  fio_secure_zero(counter, sizeof(counter));
+  fio_secure_zero(keystream, sizeof(keystream));
+  fio_secure_zero(tag, sizeof(tag));
   return 0;
 }
 
@@ -27627,8 +27716,17 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   for (int i = 0; i < 16; ++i)
     computed_mac[i] ^= keystream[i];
 
-  if (!fio_ct_is_eq(computed_mac, mac, 16))
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
+    fio_secure_zero(rk, sizeof(rk));
+    fio_secure_zero(&htbl, sizeof(htbl));
+    fio_secure_zero(j0, sizeof(j0));
+    fio_secure_zero(counter, sizeof(counter));
+    fio_secure_zero(keystream, sizeof(keystream));
+    fio_secure_zero(tag, sizeof(tag));
     return -1;
+  }
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
   FIO_MEMCPY(counter, j0, 16);
   while (len >= 16) {
@@ -27648,6 +27746,13 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     for (size_t i = 0; i < len; ++i)
       p[i] ^= keystream[i];
   }
+  /* Clear sensitive data */
+  fio_secure_zero(rk, sizeof(rk));
+  fio_secure_zero(&htbl, sizeof(htbl));
+  fio_secure_zero(j0, sizeof(j0));
+  fio_secure_zero(counter, sizeof(counter));
+  fio_secure_zero(keystream, sizeof(keystream));
+  fio_secure_zero(tag, sizeof(tag));
   return 0;
 }
 
