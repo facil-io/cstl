@@ -283,6 +283,7 @@ OS Specific includes and Macros
 
 #include <fcntl.h>
 #include <io.h>
+#include <process.h>
 #include <processthreadsapi.h>
 #include <sys/types.h>
 
