@@ -278,6 +278,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_HTTP_HANDLE
 #endif
 
+#if (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
+#undef FIO_IO
+#define FIO_IO
+#endif
+
 #if defined(FIO_HTTP)
 #undef FIO_PUBSUB
 #define FIO_PUBSUB
