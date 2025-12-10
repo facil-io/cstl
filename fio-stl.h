@@ -28488,7 +28488,7 @@ FIO_IFUNC void fio___x25519_scalarmult(uint8_t out[32],
                                        const uint8_t scalar[32],
                                        const uint8_t point[32]) {
   uint8_t z[32];
-  FIO_MEMCPY(z, scalar, 32);
+  fio_memcpy32(z, scalar);
   z[31] = (scalar[31] & 127) | 64;
   z[0] &= 248;
 
@@ -28751,7 +28751,7 @@ FIO_IFUNC void fio___ge_p3_tobytes(uint8_t out[32], fio___ge_p3_s p) {
 /* decode 32 bytes to point (returns 0 on success, -1 on failure) */
 FIO_SFUNC int fio___ge_p3_frombytes(fio___ge_p3_s p, const uint8_t in[32]) {
   uint8_t s[32];
-  FIO_MEMCPY(s, in, 32);
+  fio_memcpy32(s, in);
   int x_sign = s[31] >> 7;
   s[31] &= 0x7F;
 
@@ -28858,10 +28858,11 @@ FIO_SFUNC void fio___sc_muladd(uint8_t s[32],
     for (j = 0; j < 32; ++j)
       x[i + j] += (unsigned long long)b[i] * (unsigned long long)c[j];
   uint8_t tmp[64];
-  for (i = 0; i < 64; ++i) {
+  for (i = 0; i < 63; ++i) {
     x[i + 1] += x[i] >> 8;
     tmp[i] = x[i] & 255;
   }
+  tmp[63] = x[63] & 255;
   fio___sc_reduce(s, tmp);
 }
 
@@ -28941,17 +28942,29 @@ SFUNC int fio_ed25519_verify(const uint8_t signature[64],
     return -1;
 
   /* check s < l */
-  static const uint8_t l[32] = {0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-                                0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10};
-  const uint8_t *s = signature + 32;
-  uint8_t c = 0;
-  for (int i = 31; i >= 0; --i) {
-    c = (s[i] > l[i]) | ((s[i] == l[i]) & c);
+  { /* check s < l */
+    static const uint64_t l_u64[4] FIO_ALIGN(16) = {
+        0x5812631a5cf5d3edULL, /* l[0..7]   */
+        0x14def9dea2f79cd6ULL, /* l[8..15]  */
+        0x0000000000000000ULL, /* l[16..23] */
+        0x1000000000000000ULL, /* l[24..31] */
+    };
+    /* Load s as little-endian uint64_t (handles endianness) */
+    uint64_t s_u64[4] FIO_ALIGN(16);
+    s_u64[0] = fio_buf2u64_le(signature + 32 + 0);
+    s_u64[1] = fio_buf2u64_le(signature + 32 + 8);
+    s_u64[2] = fio_buf2u64_le(signature + 32 + 16);
+    s_u64[3] = fio_buf2u64_le(signature + 32 + 24);
+    /* Constant-time comparison */
+    uint8_t c = 0;
+    for (int i = 0; i < 4; i++) {
+      uint8_t gt = s_u64[i] > l_u64[i];
+      uint8_t eq = s_u64[i] == l_u64[i];
+      c = gt | (eq & c);
+    }
+    if (c)
+      return -1;
   }
-  if (c)
-    return -1;
 
   /* k = h(r || public_key || message) mod l */
   fio_sha512_s sha = fio_sha512_init();
@@ -28999,7 +29012,7 @@ SFUNC void fio_ed25519_sk_to_x25519(uint8_t x_secret_key[32],
                                     const uint8_t ed_secret_key[32]) {
   /* hash ed25519 secret key and use first 32 bytes */
   fio_u512 h = fio_sha512(ed_secret_key, 32);
-  FIO_MEMCPY(x_secret_key, h.u8, 32);
+  fio_memcpy32(x_secret_key, h.u8);
   /* x25519 clamping is done in the scalar multiplication */
 }
 
@@ -29059,7 +29072,7 @@ SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
   fio_secure_zero(shared, 32);
 
   /* copy ephemeral public key to output */
-  FIO_MEMCPY(ciphertext, eph_pk, 32);
+  fio_memcpy32(ciphertext, eph_pk);
 
   /* copy plaintext to ciphertext buffer (after eph_pk and mac space) */
   if (message_len > 0)
@@ -29112,7 +29125,7 @@ SFUNC int fio_x25519_decrypt(uint8_t *plaintext,
 
   /* copy mac for in-place verification (chacha20_poly1305_dec modifies it) */
   uint8_t mac_copy[16];
-  FIO_MEMCPY(mac_copy, mac, 16);
+  fio_memcpy16(mac_copy, mac);
 
   /* decrypt and verify with chacha20-poly1305 */
   int result = fio_chacha20_poly1305_dec(mac_copy,    /* mac to verify */
