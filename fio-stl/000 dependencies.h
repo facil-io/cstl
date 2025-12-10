@@ -128,8 +128,9 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 /* *****************************************************************************
 FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO)
 #undef FIO_CRYPT
+#undef FIO_CRYPTO
 #undef FIO_AES
 #undef FIO_CRYPTO_CORE
 #undef FIO_CHACHA
@@ -147,7 +148,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_SECRET
 #define FIO_OTP
 
-#endif /* FIO_CRYPT */
+#endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
 FIO_CORE                        Core Inclusion
@@ -367,7 +368,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
-#if defined(FIO_PUBSUB) || defined(FIO_ED25519)
+#if defined(FIO_PUBSUB)
 #define FIO_CHACHA
 #define FIO_SECRET
 #endif

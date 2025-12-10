@@ -3,9 +3,7 @@ Ed25519 / X25519 Tests
 ***************************************************************************** */
 #include "test-helpers.h"
 
-#define FIO_ED25519
-#define FIO_SHA2
-#define FIO_CHACHA
+#define FIO_CRYPTO
 #include FIO_INCLUDE_FILE
 
 /* *****************************************************************************
@@ -396,12 +394,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     FIO_ASSERT(ciphertext && plaintext, "Memory allocation failed");
 
     /* Encrypt */
-    int enc_result = fio_x25519_encrypt(ciphertext, message, message_len, pk);
+    int enc_result = fio_x25519_encrypt(ciphertext,
+                                        message,
+                                        message_len,
+                                        fio_chacha20_poly1305_enc,
+                                        pk);
     FIO_ASSERT(enc_result == 0, "ECIES encryption failed");
 
     /* Decrypt */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, sk);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk);
     FIO_ASSERT(dec_result == 0, "ECIES decryption failed");
 
     plaintext[message_len] = '\0';
@@ -420,10 +425,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     size_t ciphertext_len = FIO_X25519_CIPHERTEXT_LEN(0);
     uint8_t ciphertext[48]; /* 32 + 16 + 0 */
 
-    int enc_result = fio_x25519_encrypt(ciphertext, NULL, 0, pk);
+    int enc_result =
+        fio_x25519_encrypt(ciphertext, NULL, 0, fio_chacha20_poly1305_enc, pk);
     FIO_ASSERT(enc_result == 0, "ECIES encryption of empty message failed");
 
-    int dec_result = fio_x25519_decrypt(NULL, ciphertext, ciphertext_len, sk);
+    int dec_result = fio_x25519_decrypt(NULL,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk);
     FIO_ASSERT(dec_result == 0, "ECIES decryption of empty message failed");
   }
 
@@ -440,14 +450,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     uint8_t *plaintext = malloc(message_len);
 
     /* Encrypt */
-    fio_x25519_encrypt(ciphertext, message, message_len, pk);
+    fio_x25519_encrypt(ciphertext,
+                       message,
+                       message_len,
+                       fio_chacha20_poly1305_enc,
+                       pk);
 
     /* Tamper with encrypted data */
     ciphertext[50] ^= 0x01;
 
     /* Decryption should fail */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, sk);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk);
     FIO_ASSERT(dec_result != 0, "ECIES should detect tampered ciphertext");
 
     free(ciphertext);
@@ -467,14 +484,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     uint8_t *plaintext = malloc(message_len);
 
     /* Encrypt */
-    fio_x25519_encrypt(ciphertext, message, message_len, pk);
+    fio_x25519_encrypt(ciphertext,
+                       message,
+                       message_len,
+                       fio_chacha20_poly1305_enc,
+                       pk);
 
     /* Tamper with MAC (bytes 32-47) */
     ciphertext[35] ^= 0x01;
 
     /* Decryption should fail */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, sk);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk);
     FIO_ASSERT(dec_result != 0, "ECIES should detect tampered MAC");
 
     free(ciphertext);
@@ -496,11 +520,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     uint8_t *plaintext = malloc(message_len);
 
     /* Encrypt to pk1 */
-    fio_x25519_encrypt(ciphertext, message, message_len, pk1);
+    fio_x25519_encrypt(ciphertext,
+                       message,
+                       message_len,
+                       fio_chacha20_poly1305_enc,
+                       pk1);
 
     /* Try to decrypt with sk2 (wrong key) */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, sk2);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk2);
     FIO_ASSERT(dec_result != 0, "ECIES should fail with wrong secret key");
 
     free(ciphertext);
@@ -522,12 +553,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     uint8_t *plaintext = malloc(message_len);
 
     /* Encrypt */
-    int enc_result = fio_x25519_encrypt(ciphertext, message, message_len, pk);
+    int enc_result = fio_x25519_encrypt(ciphertext,
+                                        message,
+                                        message_len,
+                                        fio_chacha20_poly1305_enc,
+                                        pk);
     FIO_ASSERT(enc_result == 0, "ECIES encryption of large message failed");
 
     /* Decrypt */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, sk);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        sk);
     FIO_ASSERT(dec_result == 0, "ECIES decryption of large message failed");
 
     FIO_ASSERT(!memcmp(plaintext, message, message_len),
@@ -570,12 +608,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     uint8_t *plaintext = malloc(message_len + 1);
 
     /* Encrypt using converted X25519 public key */
-    int enc_result = fio_x25519_encrypt(ciphertext, message, message_len, x_pk);
+    int enc_result = fio_x25519_encrypt(ciphertext,
+                                        message,
+                                        message_len,
+                                        fio_chacha20_poly1305_enc,
+                                        x_pk);
     FIO_ASSERT(enc_result == 0, "ECIES encryption with converted key failed");
 
     /* Decrypt using converted X25519 secret key */
-    int dec_result =
-        fio_x25519_decrypt(plaintext, ciphertext, ciphertext_len, x_sk);
+    int dec_result = fio_x25519_decrypt(plaintext,
+                                        ciphertext,
+                                        ciphertext_len,
+                                        fio_chacha20_poly1305_dec,
+                                        x_sk);
     FIO_ASSERT(dec_result == 0, "ECIES decryption with converted key failed");
 
     plaintext[message_len] = '\0';
@@ -955,7 +1000,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
 
     start = fio___ed25519_time_us();
     for (size_t i = 0; i < iterations; ++i) {
-      fio_x25519_encrypt(ciphertext, small_msg, small_len, x_pk);
+      fio_x25519_encrypt(ciphertext,
+                         small_msg,
+                         small_len,
+                         fio_chacha20_poly1305_enc,
+                         x_pk);
       FIO_COMPILER_GUARD;
     }
     end = fio___ed25519_time_us();
@@ -963,7 +1012,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     ops_per_sec = (iterations * 1000000.0) / elapsed_us;
     fprintf(stderr,
             "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
-            "ECIES encrypt (18 byte message)",
+            "ECIES encrypt (18 byte message, using ChaCha20Poly1305)",
             ops_per_sec,
             elapsed_us / iterations);
     free(ciphertext);
@@ -976,11 +1025,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(small_len);
     uint8_t *ciphertext = malloc(ct_len);
     uint8_t *plaintext = malloc(small_len);
-    fio_x25519_encrypt(ciphertext, small_msg, small_len, x_pk);
+    fio_x25519_encrypt(ciphertext,
+                       small_msg,
+                       small_len,
+                       fio_chacha20_poly1305_enc,
+                       x_pk);
 
     start = fio___ed25519_time_us();
     for (size_t i = 0; i < iterations; ++i) {
-      fio_x25519_decrypt(plaintext, ciphertext, ct_len, x_sk);
+      fio_x25519_decrypt(plaintext,
+                         ciphertext,
+                         ct_len,
+                         fio_chacha20_poly1305_dec,
+                         x_sk);
       FIO_COMPILER_GUARD;
     }
     end = fio___ed25519_time_us();
@@ -988,7 +1045,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     ops_per_sec = (iterations * 1000000.0) / elapsed_us;
     fprintf(stderr,
             "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
-            "ECIES decrypt (18 byte message)",
+            "ECIES decrypt (18 byte message, using ChaCha20Poly1305)",
             ops_per_sec,
             elapsed_us / iterations);
     free(ciphertext);
@@ -1006,7 +1063,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
 
     start = fio___ed25519_time_us();
     for (size_t i = 0; i < iterations; ++i) {
-      fio_x25519_encrypt(ciphertext, large_msg, large_len, x_pk);
+      fio_x25519_encrypt(ciphertext,
+                         large_msg,
+                         large_len,
+                         fio_chacha20_poly1305_enc,
+                         x_pk);
       FIO_COMPILER_GUARD;
     }
     end = fio___ed25519_time_us();
@@ -1014,7 +1075,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     ops_per_sec = (iterations * 1000000.0) / elapsed_us;
     fprintf(stderr,
             "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
-            "ECIES encrypt (1KB message)",
+            "ECIES encrypt (1KB message, using ChaCha20Poly1305)",
             ops_per_sec,
             elapsed_us / iterations);
     free(large_msg);
@@ -1030,11 +1091,19 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(large_len);
     uint8_t *ciphertext = malloc(ct_len);
     uint8_t *plaintext = malloc(large_len);
-    fio_x25519_encrypt(ciphertext, large_msg, large_len, x_pk);
+    fio_x25519_encrypt(ciphertext,
+                       large_msg,
+                       large_len,
+                       fio_chacha20_poly1305_enc,
+                       x_pk);
 
     start = fio___ed25519_time_us();
     for (size_t i = 0; i < iterations; ++i) {
-      fio_x25519_decrypt(plaintext, ciphertext, ct_len, x_sk);
+      fio_x25519_decrypt(plaintext,
+                         ciphertext,
+                         ct_len,
+                         fio_chacha20_poly1305_dec,
+                         x_sk);
       FIO_COMPILER_GUARD;
     }
     end = fio___ed25519_time_us();
@@ -1042,7 +1111,74 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_performance)(void) {
     ops_per_sec = (iterations * 1000000.0) / elapsed_us;
     fprintf(stderr,
             "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
-            "ECIES decrypt (1KB message)",
+            "ECIES decrypt (1KB message, using ChaCha20Poly1305)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(large_msg);
+    free(ciphertext);
+    free(plaintext);
+  }
+
+  /* --- ECIES Encryption (1KB message) AES --- */
+  {
+    size_t large_len = 1024;
+    uint8_t *large_msg = malloc(large_len);
+    for (size_t i = 0; i < large_len; ++i)
+      large_msg[i] = (uint8_t)(i & 0xFF);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(large_len);
+    uint8_t *ciphertext = malloc(ct_len);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_encrypt(ciphertext,
+                         large_msg,
+                         large_len,
+                         fio_aes256_gcm_enc,
+                         x_pk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES encrypt (1KB message, using AES256-GCM)",
+            ops_per_sec,
+            elapsed_us / iterations);
+    free(large_msg);
+    free(ciphertext);
+  }
+
+  /* --- ECIES Decryption (1KB message) AES --- */
+  {
+    size_t large_len = 1024;
+    uint8_t *large_msg = malloc(large_len);
+    for (size_t i = 0; i < large_len; ++i)
+      large_msg[i] = (uint8_t)(i & 0xFF);
+    size_t ct_len = FIO_X25519_CIPHERTEXT_LEN(large_len);
+    uint8_t *ciphertext = malloc(ct_len);
+    uint8_t *plaintext = malloc(large_len);
+    fio_x25519_encrypt(ciphertext,
+                       large_msg,
+                       large_len,
+                       fio_aes256_gcm_enc,
+                       x_pk);
+
+    start = fio___ed25519_time_us();
+    for (size_t i = 0; i < iterations; ++i) {
+      fio_x25519_decrypt(plaintext,
+                         ciphertext,
+                         ct_len,
+                         fio_aes256_gcm_dec,
+                         x_sk);
+      FIO_COMPILER_GUARD;
+    }
+    end = fio___ed25519_time_us();
+    elapsed_us = (double)(end - start);
+    ops_per_sec = (iterations * 1000000.0) / elapsed_us;
+    fprintf(stderr,
+            "\t  %-40s %10.2f ops/sec  (%6.2f us/op)\n",
+            "ECIES decrypt (1KB message, using AES256-GCM)",
             ops_per_sec,
             elapsed_us / iterations);
     free(large_msg);

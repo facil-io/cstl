@@ -4189,8 +4189,9 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 /* *****************************************************************************
 FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO)
 #undef FIO_CRYPT
+#undef FIO_CRYPTO
 #undef FIO_AES
 #undef FIO_CRYPTO_CORE
 #undef FIO_CHACHA
@@ -4208,7 +4209,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_SECRET
 #define FIO_OTP
 
-#endif /* FIO_CRYPT */
+#endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
 FIO_CORE                        Core Inclusion
@@ -4428,7 +4429,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
-#if defined(FIO_PUBSUB) || defined(FIO_ED25519)
+#if defined(FIO_PUBSUB)
 #define FIO_CHACHA
 #define FIO_SECRET
 #endif
@@ -23052,6 +23053,21 @@ Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #define H___FIO_CRYPTO_CORE___H
 
+typedef void(fio_crypto_enc_fn)(void *restrict mac,
+                                void *restrict data,
+                                size_t len,
+                                const void *ad, /* additional data */
+                                size_t adlen,
+                                const void *key,
+                                const void *nonce);
+typedef int(fio_crypto_dec_fn)(void *restrict mac,
+                               void *restrict data,
+                               size_t len,
+                               const void *ad, /* additional data */
+                               size_t adlen,
+                               const void *key,
+                               const void *nonce);
+
 /* *****************************************************************************
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
@@ -27936,12 +27952,10 @@ their private key. No prior key exchange or handshake is required.
 The scheme uses:
 - X25519 for ephemeral key agreement
 - SHA-256 for key derivation (HKDF-like)
-- ChaCha20-Poly1305 for authenticated encryption
+- ChaCha20-Poly1305 or AES256-GCM for authenticated encryption
 
 Ciphertext format: [32-byte ephemeral public key][16-byte MAC][encrypted data]
 Total overhead: 48 bytes
-
-Note: Requires FIO_CHACHA to be defined for ChaCha20-Poly1305 support.
 ***************************************************************************** */
 
 /**
@@ -27957,12 +27971,14 @@ Note: Requires FIO_CHACHA to be defined for ChaCha20-Poly1305 support.
  * @param ciphertext Output buffer (must be at least message_len + 48 bytes)
  * @param message    The plaintext message to encrypt
  * @param message_len Length of the message
+ * @param encryption_function Encryption function (fio_chacha20_poly1305_enc)
  * @param recipient_pk The recipient's X25519 public key (32 bytes)
  * @return 0 on success, -1 on failure
  */
 SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
                              const void *message,
                              size_t message_len,
+                             fio_crypto_enc_fn encryption_function,
                              const uint8_t recipient_pk[32]);
 
 /**
@@ -27971,12 +27987,14 @@ SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
  * @param plaintext   Output buffer (must be at least ciphertext_len - 48 bytes)
  * @param ciphertext  The ciphertext (ephemeral_pk || mac || encrypted_data)
  * @param ciphertext_len Length of the ciphertext (must be >= 48)
+ * @param decryption_function Decryption function (fio_chacha20_poly1305_dec)
  * @param recipient_sk The recipient's X25519 secret key (32 bytes)
  * @return 0 on success, -1 on failure (authentication failed or invalid input)
  */
 SFUNC int fio_x25519_decrypt(uint8_t *plaintext,
                              const uint8_t *ciphertext,
                              size_t ciphertext_len,
+                             fio_crypto_dec_fn decryption_function,
                              const uint8_t recipient_sk[32]);
 
 /**
@@ -27990,7 +28008,7 @@ SFUNC int fio_x25519_decrypt(uint8_t *plaintext,
  * Returns 0 if ciphertext_len < 48 (invalid ciphertext).
  */
 #define FIO_X25519_PLAINTEXT_LEN(ciphertext_len)                               \
-  ((ciphertext_len) >= 48 ? ((ciphertext_len)-48) : 0)
+  ((ciphertext_len) > 48 ? ((ciphertext_len)-48) : 0)
 
 /* *****************************************************************************
 Implementation - possibly externed functions.
@@ -29054,6 +29072,7 @@ Format: [32-byte ephemeral public key][16-byte MAC][encrypted data]
 SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
                              const void *message,
                              size_t message_len,
+                             fio_crypto_enc_fn encryption_function,
                              const uint8_t recipient_pk[32]) {
   /* generate ephemeral key pair */
   uint8_t eph_sk[32], eph_pk[32];
@@ -29085,13 +29104,13 @@ SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
 
   /* encrypt with chacha20-poly1305 */
   /* nonce: first 12 bytes of ephemeral public key (unique per encryption) */
-  fio_chacha20_poly1305_enc(ciphertext + 32, /* mac output */
-                            ciphertext + 48, /* data to encrypt */
-                            message_len,     /* data length */
-                            ciphertext,      /* additional data: eph_pk */
-                            32,              /* ad length */
-                            key.u8,          /* encryption key */
-                            eph_pk);         /* nonce (first 12 bytes) */
+  encryption_function(ciphertext + 32, /* mac output */
+                      ciphertext + 48, /* data to encrypt */
+                      message_len,     /* data length */
+                      ciphertext,      /* additional data: eph_pk */
+                      32,              /* ad length */
+                      key.u8,          /* encryption key */
+                      eph_pk);         /* nonce (first 12 bytes) */
 
   fio_secure_zero(&key, sizeof(key));
   return 0;
@@ -29100,6 +29119,7 @@ SFUNC int fio_x25519_encrypt(uint8_t *ciphertext,
 SFUNC int fio_x25519_decrypt(uint8_t *plaintext,
                              const uint8_t *ciphertext,
                              size_t ciphertext_len,
+                             fio_crypto_dec_fn decryption_function,
                              const uint8_t recipient_sk[32]) {
   /* validate minimum ciphertext length */
   if (ciphertext_len < 48)
@@ -29133,13 +29153,13 @@ SFUNC int fio_x25519_decrypt(uint8_t *plaintext,
   fio_memcpy16(mac_copy, mac);
 
   /* decrypt and verify with chacha20-poly1305 */
-  int result = fio_chacha20_poly1305_dec(mac_copy,    /* mac to verify */
-                                         plaintext,   /* data to decrypt */
-                                         message_len, /* data length */
-                                         eph_pk,      /* additional data */
-                                         32,          /* ad length */
-                                         key.u8,      /* decryption key */
-                                         eph_pk);     /* nonce */
+  int result = decryption_function(mac_copy,    /* mac to verify */
+                                   plaintext,   /* data to decrypt */
+                                   message_len, /* data length */
+                                   eph_pk,      /* additional data */
+                                   32,          /* ad length */
+                                   key.u8,      /* decryption key */
+                                   eph_pk);     /* nonce */
 
   fio_secure_zero(&key, sizeof(key));
   return result;
