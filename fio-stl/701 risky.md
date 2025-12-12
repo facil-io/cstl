@@ -3,7 +3,7 @@
 The following results were achieved on my personal computer when testing the facil.io Risky Hash (`fio_risky_hash`).
 
 ```txt
--------------------------------------------------------------------------------
+------------------------------------------------------------
 --- Testing Risky "facil.io Risky Hash" GOOD
 
 [[[ Sanity Tests ]]]
@@ -1142,7 +1142,7 @@ Testing collisions (low  28-44 bits) - Worst is 41 bits: 261/255 (1.02x)
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 681.305909 seconds
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------

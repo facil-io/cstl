@@ -93,3 +93,33 @@ Logo contributed by ([Area55](https://github.com/area55git)) under a [Creative C
 ## Documentation
 
 [Documentation is available in the (auto-generated) `fio-stl.md` file](fio-stl.md).
+
+## Naming Conventions
+
+- `snake_case`
+
+- Namespace prefix: All public APIs use fio_ prefix (e.g., `fio_io_start`, `fio_subscribe`)
+
+- Internal functions: Use `fio___` triple underscore for internal/private functions
+
+- Type naming:
+  - Structs: `<name>_s` suffix (e.g., `fio_io_s`, `fio_msg_s`)
+  - Enums: `<name>_e` suffix
+  - No `_t` suffix (reserved for POSIX)
+
+- Function naming:
+  - `<namespace>_<verb>` pattern (e.g., `fio_io_attach_fd`, `fio_pubsub_attach`)
+  - Named arguments pattern: Variadic macros with struct initialization
+      `#define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})`
+  - Argument structs: `_args_s` suffix (e.g., `fio_subscribe_args_s`)
+  - Property naming (getter / setter): `<namespace>_<property>(_set)` pattern (e.g., `fio_bstr_len`, `fio_bstr_len_set`)
+  - Data retrieval: `<namespace>_<property>_get` - avoid - implies non-trivial data retrieval with possible side effects.
+
+##  Error Handling
+
+- Return values: 
+  - Pointers: `NULL` on error
+  - Integers: `-1` on error, `0` on success
+  - Boolean: `0` for `false`, non-zero for `true`
+
+

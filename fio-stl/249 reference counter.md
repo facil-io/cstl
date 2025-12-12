@@ -1,8 +1,8 @@
 ## Reference Counting and Type Wrapping
 
 ```c
-#define FIO_STR_SMALL fio_str
-#define FIO_REF_NAME fio_str
+#define FIO_REF_NAME my_type
+#define FIO_REF_TYPE my_type_s
 #define FIO_REF_CONSTRUCTOR_ONLY
 #include "fio-stl.h"
 ```
@@ -10,6 +10,8 @@
 If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be defined for any named type.
 
 **Note**: requires the atomic operations to be defined (`FIO_ATOMIC`).
+
+**Note**: if `FIO_PTR_TAG_TYPE` is defined, the reference counting functions will use the tagged pointer type for parameters and return values instead of `FIO_REF_TYPE *`.
 
 ### Reference Counting Type Macros
 
@@ -28,12 +30,16 @@ By default, `FIO_REF_TYPE` will equal `FIO_REF_NAME_s`, using the naming convent
 #### `FIO_REF_INIT`
 
 ```c
-#define FIO_REF_INIT(obj) (obj) = (FIO_REF_TYPE){0}
+#define FIO_REF_INIT(obj)                                                      \
+  do {                                                                         \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (obj) = (FIO_REF_TYPE){0};                                               \
+  } while (0)
 ```
 
 Sets up the default object initializer.
 
-By default initializes the object's memory to zero.
+By default initializes the object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
 
 If `FIO_REF_FLEX_TYPE` is defined, the variable `members` may be used during initialization. It's value is the same as the value passed on to the `REF_new` function.
 
@@ -72,10 +78,14 @@ A pointer to this type sill be available using the `REF_metadata` function and w
 #### `FIO_REF_METADATA_INIT`
 
 ```c
-#define FIO_REF_METADATA_INIT(meta) (meta) = (FIO_REF_TYPE){0}
+#define FIO_REF_METADATA_INIT(meta)                                            \
+  do {                                                                         \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (meta) = (FIO_REF_METADATA){0};                                          \
+  } while (0)
 ```
 
-Sets up object's meta-data initialization (if any). Be default initializes the meta-data object's memory to zero.
+Sets up object's meta-data initialization (if any). By default initializes the meta-data object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
 
 #### `FIO_REF_METADATA_DESTROY`
 
@@ -105,13 +115,20 @@ Allocates a new reference counted object, initializing it using the `FIO_REF_INI
 
 If `FIO_REF_METADATA` is defined, than the metadata is initialized using the `FIO_REF_METADATA_INIT(metadata)` macro.
 
-#### `REF_dup`
+#### `REF_dup` / `REF_dup2`
 
 ```c
-FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * object)
+FIO_REF_TYPE * REF_dup2(FIO_REF_TYPE * wrapped)
+// or, if FIO_REF_CONSTRUCTOR_ONLY is defined
+FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * wrapped)
 ```
 
 Increases an object's reference count (an atomic operation, thread-safe).
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the same pointer passed in, or `NULL` if the input was `NULL`.
 
 #### `REF_free` / `REF_free2`
 
@@ -130,9 +147,42 @@ If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the 
 #### `REF_metadata`
 
 ```c
-FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * object)
+FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * wrapped)
 ```
 
-If `FIO_REF_METADATA` is defined, than the metadata is accessible using this inlined function.
+If `FIO_REF_METADATA` is defined, then the metadata is accessible using this inlined function.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** a pointer to the object's metadata.
+
+#### `REF_metadata_flex_len`
+
+```c
+uint32_t REF_metadata_flex_len(FIO_REF_TYPE * wrapped)
+```
+
+If `FIO_REF_FLEX_TYPE` is defined, this function returns the number of flex array members that were allocated with the object.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the number of flex array members allocated, or `0` if `wrapped` is `NULL`.
+
+#### `REF_references`
+
+```c
+size_t REF_references(FIO_REF_TYPE * wrapped)
+```
+
+A debugging helper that returns the current reference count for an object.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the current reference count, or `0` if `wrapped` is `NULL`.
+
+**Note**: the returned value is unstable and should not be used for program logic. It is intended for debugging purposes only.
 
 -------------------------------------------------------------------------------

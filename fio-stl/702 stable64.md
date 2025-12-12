@@ -3,7 +3,7 @@
 The following results were achieved on my personal computer when testing the 64bit variant of the facil.io Stable Hash (`fio_stable_hash`).
 
 ```txt
--------------------------------------------------------------------------------
+------------------------------------------------------------
 --- Testing Stable "facil.io Stable Hash 64bit" GOOD
 
 [[[ Sanity Tests ]]]
@@ -1142,7 +1142,7 @@ Testing collisions (low  28-44 bits) - Worst is 43 bits: 68/63 (1.06x)
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 755.424002 seconds
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------

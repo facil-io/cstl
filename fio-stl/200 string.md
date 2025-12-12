@@ -7,9 +7,9 @@
 
 Dynamic Strings are extremely useful, since:
 
-* The can safely store binary data (unlike regular C strings).
+* They can safely store binary data (unlike regular C strings).
 
-* They make it easy to edit String data. Granted, the standard C library can do this too, but this approach offers some optimizations and safety measures that the C library cannot offer due to it's historical design.
+* They make it easy to edit String data. Granted, the standard C library can do this too, but this approach offers some optimizations and safety measures that the C library cannot offer due to its historical design.
 
 To create a dynamic string define the type name using the `FIO_STR_NAME` macro.
 
@@ -17,9 +17,9 @@ Alternatively, the type name could be defined using the `FIO_STR_SMALL` macro, r
 
 The type (`FIO_STR_NAME_s`) and the functions will be automatically defined.
 
-For brevities sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
+For brevity's sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
 
-**Note:** this module depends on the  `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
+**Note:** this module depends on the `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
 
 ### Optimizations / Flavors
 
@@ -225,6 +225,42 @@ This could save memory when strings aren't short enough to be contained within t
 
 This could also save memory, potentially, if the string type will be wrapped / embedded within other data-types (i.e., using `FIO_REF_NAME` for reference counting).
 
+### Configuration Macros
+
+#### `FIO_STR_OPTIMIZE_EMBEDDED`
+
+```c
+#define FIO_STR_OPTIMIZE_EMBEDDED 0 /* default */
+```
+
+For each unit (0 by default), adds `sizeof(char *)` bytes to the type size, increasing the amount of strings that could be embedded within the type without additional memory allocation.
+
+For example, when using a reference counter wrapper on a 64bit system, it would make sense to set this value to 1 - allowing the type size to fully utilize a 16 byte memory allocation alignment.
+
+**Note**: Maximum value is 4 for default strings, or 1 for `FIO_STR_SMALL` / `FIO_STR_OPTIMIZE4IMMUTABILITY` strings.
+
+#### `FIO_STR_OPTIMIZE4IMMUTABILITY`
+
+```c
+#define FIO_STR_OPTIMIZE4IMMUTABILITY 0 /* default */
+```
+
+Minimizes the struct size, storing only string length and pointer.
+
+By avoiding extra (mutable related) data, such as the allocated memory's capacity, strings require less memory. However, this does introduce a performance penalty when editing the string data.
+
+**Note**: This is automatically set to `1` when using `FIO_STR_SMALL`.
+
+#### `FIO_STR_NO_ALIGN`
+
+```c
+#define FIO_STR_NO_ALIGN 0 /* default */
+```
+
+When set to `1`, prevents the default behavior of using extra alignment space for small strings.
+
+This could save memory when strings aren't short enough to be contained within the type, or when the string type will be wrapped / embedded within other data-types (i.e., using `FIO_REF_NAME` for reference counting).
+
 ### String API - Initialization and Destruction
 
 #### `FIO_STR_INIT`
@@ -232,7 +268,7 @@ This could also save memory, potentially, if the string type will be wrapped / e
 This value should be used for initialization. It should be considered opaque, but is defined as:
 
 ```c
-#define FIO_STR_INIT { .special = 1 }
+#define FIO_STR_INIT { .special = 0 }
 ```
 
 For example:
@@ -266,8 +302,13 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC(buffer)                                            \
-  { .special = 4, .buf = (char *)(buffer), .len = FIO_STRLEN((buffer)) }
+  {                                                                            \
+    .special = 4, .capa = FIO_STRLEN((buffer)), .len = FIO_STRLEN((buffer)),   \
+    .buf = (char *)(buffer)                                                    \
+  }
 ```
+
+**Note**: This macro isn't valid for `FIO_STR_SMALL` (or strings with the `FIO_STR_OPTIMIZE4IMMUTABILITY` optimization).
 
 #### `FIO_STR_INIT_STATIC2`
 
@@ -275,8 +316,10 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC2(buffer, length)                                   \
-  { .buf = (char *)(buffer), .len = (length) }
+  { .special = 4, .capa = (length), .len = (length), .buf = (char *)(buffer) }
 ```
+
+**Note**: This macro isn't valid for `FIO_STR_SMALL` (or strings with the `FIO_STR_OPTIMIZE4IMMUTABILITY` optimization).
 
 
 #### `STR_init_const`
@@ -377,7 +420,15 @@ Frees the pointer returned by [`detach`](#str_detach).
 fio_str_info_s STR_info(const FIO_STR_PTR s);
 ```
 
-Returns the String's complete state (capacity, length and pointer). 
+Returns the String's complete state (capacity, length and pointer).
+
+#### `STR_buf`
+
+```c
+fio_buf_info_s STR_buf(const FIO_STR_PTR s);
+```
+
+Returns the String's partial state (length and pointer) as a `fio_buf_info_s`.
 
 #### `STR_len`
 
@@ -438,12 +489,16 @@ Binary comparison returns `1` if both strings are equal and `0` if not.
 #### `STR_hash`
 
 ```c
-uint64_t STR_hash(const FIO_STR_PTR s);
+uint64_t STR_hash(const FIO_STR_PTR s, uint64_t seed);
 ```
 
 Returns the string's Risky Hash value.
 
-Note: Hash algorithm might change without notice.
+**Parameters:**
+- `s` - the String pointer
+- `seed` - a seed value for the hash function
+
+**Note**: Hash algorithm might change without notice.
 
 ### String API - Memory management
 
@@ -541,6 +596,14 @@ Writes a number at the end of the String using Hex (base 16) notation.
 
 **Note**: the `0x` prefix **is automatically written** before the hex numerals.
 
+#### `STR_write_bin`
+
+```c
+fio_str_info_s STR_write_bin(FIO_STR_PTR s, int64_t num);
+```
+
+Writes a number at the end of the String using binary notation.
+
 #### `STR_concat` / `STR_join`
 
 ```c
@@ -569,6 +632,25 @@ Negative `start_pos` values are calculated backwards, `-1` == end of String.
 When `old_len` is zero, the function will insert the data at `start_pos`.
 
 If `src_len == 0` than `src` will be ignored and the data marked for replacement will be erased.
+
+#### `FIO_STR_WRITE2`
+
+```c
+#define FIO_STR_WRITE2(str_name, dest, ...)                                    \
+  FIO_NAME(str_name, __write2)(dest, (fio_string_write_s[]){__VA_ARGS__, {0}})
+```
+
+Writes data at the end of the String using the `fio_string_write2` interface.
+
+This macro allows multiple write operations to be performed in a single call using `fio_string_write_s` arguments.
+
+Example:
+
+```c
+FIO_STR_WRITE2(my_str, &str,
+               FIO_STRING_WRITE_STR1("Hello "),
+               FIO_STRING_WRITE_STR1("World!"));
+```
 
 #### `STR_vprintf`
 
@@ -691,6 +773,6 @@ fio_str_info_s STR_write_html_unescape(FIO_STR_PTR s,
 
 Writes HTML un-escaped data to a String - incomplete and minimal.
 
-**Note**: the un-escaping of HTML content includes a long list of named code-point. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
+**Note**: the un-escaping of HTML content includes a long list of named code-points. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
 
 -------------------------------------------------------------------------------

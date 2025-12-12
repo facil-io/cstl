@@ -129,7 +129,7 @@ Listening to Incoming Connections
 ***************************************************************************** */
 
 /** Arguments for the fio_io_listen function */
-typedef struct fio_io_listen_args {
+typedef struct fio_io_listen_args_s {
   /**
    * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
@@ -179,7 +179,7 @@ typedef struct fio_io_listen_args {
   uint8_t on_root;
   /** Hides "started/stopped listening" messages from log (if set). */
   uint8_t hide_from_log;
-} fio_io_listen_args;
+} fio_io_listen_args_s;
 
 typedef struct fio_io_listener_s fio_io_listener_s;
 /**
@@ -187,8 +187,8 @@ typedef struct fio_io_listener_s fio_io_listener_s;
  *
  * Returns a self-destructible listener handle on success or NULL on error.
  */
-SFUNC fio_io_listener_s *fio_io_listen(fio_io_listen_args args);
-#define fio_io_listen(...) fio_io_listen((fio_io_listen_args){__VA_ARGS__})
+SFUNC fio_io_listener_s *fio_io_listen(fio_io_listen_args_s args);
+#define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})
 
 /** Notifies a listener to stop listening. */
 SFUNC void fio_io_listen_stop(fio_io_listener_s *l);

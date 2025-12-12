@@ -5,92 +5,323 @@
 #include "fio-stl.h"
 ```
 
-If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG_WRITE` macro will be defined.
+The logging module provides heap-allocation-free logging macros and assertion utilities. When `FIO_LOG` is defined, the `FIO_LOG2STDERR` function and related logging macros become functional (otherwise they are no-ops).
 
-**Note:** `FIO_LOG` always uses `libc` functions and cannot be used for authoring apps without `libc` unless `memcpy` and `vsnprintf` are implemented separately (and shadowed by a macro before the module is included).
+**Note:** `FIO_LOG` uses `libc` functions (`memcpy`, `vsnprintf`, `fwrite`) and cannot be used for authoring apps without `libc` unless these functions are implemented separately and shadowed by macros before the module is included.
 
-**Note**: in **all** of the following `msg` **must** be a string literal (`const char *`).
+**Note:** in **all** logging macros, `msg` **must** be a string literal (`const char *`).
 
-#### `FIO_LOG_LEVEL_GET` and `FIO_LOG_LEVEL_SET`
+### Logging Levels
+
+The following logging level constants are always defined:
 
 ```c
-/** Sets the Logging Level */
-#define FIO_LOG_LEVEL_SET(new_level) (0)
-/** Returns the Logging Level */
-#define FIO_LOG_LEVEL_GET() (0)
+#define FIO_LOG_LEVEL_NONE    0  /* No logging */
+#define FIO_LOG_LEVEL_FATAL   1  /* Log fatal errors */
+#define FIO_LOG_LEVEL_ERROR   2  /* Log errors and fatal errors */
+#define FIO_LOG_LEVEL_WARNING 3  /* Log warnings, errors and fatal errors */
+#define FIO_LOG_LEVEL_INFO    4  /* Log info, warnings, errors and fatal errors */
+#define FIO_LOG_LEVEL_DEBUG   5  /* Log everything, including debug messages */
 ```
 
-An application wide integer get/set with a value of either:
+### Configuration Macros
 
-- `FIO_LOG_LEVEL_NONE` (0)
-- `FIO_LOG_LEVEL_FATAL` (1)
-- `FIO_LOG_LEVEL_ERROR` (2)
-- `FIO_LOG_LEVEL_WARNING` (3)
-- `FIO_LOG_LEVEL_INFO` (4)
-- `FIO_LOG_LEVEL_DEBUG` (5)
+#### `FIO_LOG_LENGTH_LIMIT`
 
-The initial value can be set using the `FIO_LOG_LEVEL_DEFAULT` macro. By default, the level is 4 (`FIO_LOG_LEVEL_INFO`) for normal compilation and 5 (`FIO_LOG_LEVEL_DEBUG`) for DEBUG compilation.
+```c
+#define FIO_LOG_LENGTH_LIMIT 1024
+```
 
-**Note:** although the integer itself is global and accessible, it shouldn't be used directly (in case `FIO_NO_LOG` is defined).
+Defines the maximum length of a log message. Messages exceeding this limit will be truncated. The default value is `1024`. It's recommended that this value be greater than 128.
 
-#### `FIO_LOG2STDERR(msg, ...)`
+#### `FIO_LOG_LEVEL_DEFAULT`
 
-This `printf` style **function** will log a message to `stderr`, without allocating any memory on the heap for the string (`fprintf` might).
+```c
+#ifndef FIO_LOG_LEVEL_DEFAULT
+#if DEBUG
+#define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_DEBUG
+#else
+#define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_INFO
+#endif
+#endif
+```
 
-The function is defined as `weak`, allowing it to be overridden during the linking stage, so logging could be diverted... although, it's recommended to divert `stderr` rather then the logging function.
+Sets the initial logging level. By default, the level is `FIO_LOG_LEVEL_INFO` (4) for normal compilation and `FIO_LOG_LEVEL_DEBUG` (5) when `DEBUG` is defined.
 
-#### `FIO_LOG_WRITE(msg, ...)`
+### Logging Level Control
 
-This macro routs to the `FIO_LOG2STDERR` function after prefixing the message with the file name and line number in which the error occurred.
+#### `FIO_LOG_LEVEL_GET`
 
-#### `FIO_LOG_FATAL(msg, ...)`
+```c
+#define FIO_LOG_LEVEL_GET() ((fio___log_level()))
+```
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_FATAL`.
+Returns the current application-wide logging level as an integer.
 
-#### `FIO_LOG_ERROR(msg, ...)`
+#### `FIO_LOG_LEVEL_SET`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_ERROR`.
+```c
+#define FIO_LOG_LEVEL_SET(new_level) fio___log_level_set(new_level)
+```
 
-#### `FIO_LOG_SECURITY(msg, ...)`
+Sets the application-wide logging level to `new_level`. Returns the new level.
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_ERROR`.
+Example:
 
-#### `FIO_LOG_WARNING(msg, ...)`
+```c
+FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_WARNING); // Only log warnings and above
+int level = FIO_LOG_LEVEL_GET();          // Returns 3
+```
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_WARNING`.
+### Core Logging Functions
 
-#### `FIO_LOG_INFO(msg, ...)`
+#### `FIO_LOG2STDERR`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_INFO`.
+```c
+void FIO_LOG2STDERR(const char *format, ...);
+```
 
-#### `FIO_LOG_DEBUG(msg, ...)`
+A `printf`-style function that logs a message to `stderr` without allocating heap memory for the string (unlike `fprintf` which might).
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_DEBUG`.
+Messages exceeding `FIO_LOG_LENGTH_LIMIT` will be truncated with a warning.
 
-#### `FIO_LOG_DDEBUG(msg, ...)`
+**Note:** this function is defined as a static function, allowing it to be overridden by defining your own version before including the module.
 
-Same as `FIO_LOG_DEBUG` if `DEBUG` was defined. Otherwise a no-op.
+#### `FIO_LOG_WRITE`
 
-#### `FIO_ASSERT(cond, msg, ...)`
+```c
+#define FIO_LOG_WRITE(...) FIO_LOG2STDERR("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
+```
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an `exit(-1)`.
+Routes to `FIO_LOG2STDERR` after prefixing the message with the file name and line number where the log statement occurs.
 
-The use of `SIGINT` should allow debuggers everywhere to pause execution before exiting the program.
+### Logging Macros
 
-#### `FIO_ASSERT_ALLOC(ptr)`
+All logging macros check the current log level before printing. If the log level is below the macro's threshold, the message is not printed.
 
-Reports a failure to allocate memory, exiting the program the same way as `FIO_ASSERT`.
+#### `FIO_LOG_FATAL`
 
-#### `FIO_ASSERT_DEBUG(cond, msg, ...)`
+```c
+#define FIO_LOG_FATAL(...) /* logs if level >= FIO_LOG_LEVEL_FATAL */
+```
+
+Logs a fatal error message **if** the log level is equal to or above `FIO_LOG_LEVEL_FATAL` (1).
+
+Output is prefixed with `FATAL:` in bold inverse text.
+
+#### `FIO_LOG_ERROR`
+
+```c
+#define FIO_LOG_ERROR(...) /* logs if level >= FIO_LOG_LEVEL_ERROR */
+```
+
+Logs an error message **if** the log level is equal to or above `FIO_LOG_LEVEL_ERROR` (2).
+
+Output is prefixed with `ERROR:` in bold text.
+
+#### `FIO_LOG_SECURITY`
+
+```c
+#define FIO_LOG_SECURITY(...) /* logs if level >= FIO_LOG_LEVEL_ERROR */
+```
+
+Logs a security-related message **if** the log level is equal to or above `FIO_LOG_LEVEL_ERROR` (2).
+
+Output is prefixed with `SECURITY:` in bold text.
+
+#### `FIO_LOG_WARNING`
+
+```c
+#define FIO_LOG_WARNING(...) /* logs if level >= FIO_LOG_LEVEL_WARNING */
+```
+
+Logs a warning message **if** the log level is equal to or above `FIO_LOG_LEVEL_WARNING` (3).
+
+Output is prefixed with `WARNING:` in dim text.
+
+#### `FIO_LOG_INFO`
+
+```c
+#define FIO_LOG_INFO(...) /* logs if level >= FIO_LOG_LEVEL_INFO */
+```
+
+Logs an informational message **if** the log level is equal to or above `FIO_LOG_LEVEL_INFO` (4).
+
+Output is prefixed with `INFO:`.
+
+#### `FIO_LOG_DEBUG`
+
+```c
+#define FIO_LOG_DEBUG(...) /* logs if level >= FIO_LOG_LEVEL_DEBUG */
+```
+
+Logs a debug message **if** the log level is equal to or above `FIO_LOG_LEVEL_DEBUG` (5).
+
+Output is prefixed with `DEBUG:` followed by the file name and line number.
+
+#### `FIO_LOG_DEBUG2`
+
+```c
+#define FIO_LOG_DEBUG2(...) /* logs if level >= FIO_LOG_LEVEL_DEBUG */
+```
+
+Same as `FIO_LOG_DEBUG` but without the file name and line number prefix.
+
+Output is prefixed with `DEBUG:` only.
+
+### Debug-Only Logging Macros
+
+These macros only produce output when `DEBUG` is defined at compile time. Otherwise, they are no-ops with zero runtime overhead.
+
+#### `FIO_LOG_DDEBUG`
+
+```c
+#define FIO_LOG_DDEBUG(...) /* FIO_LOG_DEBUG if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_DEBUG` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DDEBUG2`
+
+```c
+#define FIO_LOG_DDEBUG2(...) /* FIO_LOG_DEBUG2 if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_DEBUG2` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DERROR`
+
+```c
+#define FIO_LOG_DERROR(...) /* FIO_LOG_ERROR if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_ERROR` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DSECURITY`
+
+```c
+#define FIO_LOG_DSECURITY(...) /* FIO_LOG_SECURITY if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_SECURITY` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DWARNING`
+
+```c
+#define FIO_LOG_DWARNING(...) /* FIO_LOG_WARNING if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_WARNING` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DINFO`
+
+```c
+#define FIO_LOG_DINFO(...) /* FIO_LOG_INFO if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_INFO` when `DEBUG` is defined. Otherwise a no-op.
+
+### Assertion Macros
+
+#### `FIO_ASSERT`
+
+```c
+#define FIO_ASSERT(cond, ...)
+```
+
+Reports an error unless `cond` is true. If the assertion fails:
+
+1. Prints the message using `FIO_LOG_FATAL`
+2. Prints the current `errno` value and its string description
+3. Raises `SIGINT` (when `DEBUG` is defined) to allow debuggers to pause execution
+4. Calls `abort()` to terminate the program
+
+Example:
+
+```c
+void *ptr = malloc(size);
+FIO_ASSERT(ptr, "memory allocation of %zu bytes failed", size);
+```
+
+#### `FIO_ASSERT_ALLOC`
+
+```c
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
+```
+
+A convenience macro for testing allocation failures. Equivalent to `FIO_ASSERT(ptr, "memory allocation failed.")`.
+
+Example:
+
+```c
+void *ptr = malloc(size);
+FIO_ASSERT_ALLOC(ptr);
+```
+
+#### `FIO_ASSERT_DEBUG`
+
+```c
+#define FIO_ASSERT_DEBUG(cond, ...)
+```
 
 Ignored unless `DEBUG` is defined.
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and aborting (not exiting) the application.
+When `DEBUG` is defined, reports an error unless `cond` is true. If the assertion fails:
 
-Note, this macro will **only** raise a `SIGINT` signal, but will not exit the program. This is designed to allow debuggers to catch these occurrences and continue execution when possible.
+1. Prints the message using `FIO_LOG_FATAL` with file name and line number
+2. Prints the current `errno` value and its string description
+3. Raises `SIGINT` to allow debuggers to catch the failure
+4. Calls `exit(-1)` to terminate the program
 
-#### `FIO_ASSERT_STATIC(cond, msg)`
+**Note:** unlike `FIO_ASSERT`, this macro calls `exit(-1)` instead of `abort()`, and only raises `SIGINT` when `DEBUG` is defined.
 
-Performs static assertion test (tested during compile time). Note that `cond` **must** be a constant expression and `msg` cannot be formatted.
+#### `FIO_ASSERT_STATIC`
+
+```c
+#define FIO_ASSERT_STATIC(cond, msg)
+```
+
+Performs a static assertion test at compile time. If `cond` is false, compilation fails with the message `msg`.
+
+**Note:** `cond` **must** be a constant expression and `msg` cannot contain format specifiers.
+
+Example:
+
+```c
+FIO_ASSERT_STATIC(sizeof(int) >= 4, "int must be at least 32 bits");
+```
+
+### Example Usage
+
+```c
+#define FIO_LOG
+#include "fio-stl.h"
+
+int main(void) {
+  // Set logging level
+  FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_WARNING);
+  
+  // These will not print (below warning level)
+  FIO_LOG_INFO("This info message won't appear");
+  FIO_LOG_DEBUG("This debug message won't appear");
+  
+  // These will print
+  FIO_LOG_WARNING("number invalid: %d", 42);
+  FIO_LOG_ERROR("something went wrong");
+  
+  // Direct logging (always prints, ignores level)
+  FIO_LOG2STDERR("Direct message to stderr");
+  
+  // Assertions
+  void *ptr = malloc(100);
+  FIO_ASSERT_ALLOC(ptr);
+  
+  int value = 5;
+  FIO_ASSERT(value > 0, "value must be positive, got %d", value);
+  
+  free(ptr);
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------

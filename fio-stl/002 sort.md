@@ -1,13 +1,14 @@
 ## Quick Sort and Insert Sort
 
 ```c
-#define FIO_SORT_NAME
+#define FIO_SORT_NAME num
+#define FIO_SORT_TYPE size_t
 #include "fio-stl.h"
 ```
 
-If the `FIO_SORT_NAME` is defined (and named), the following functions will be defined.
+If `FIO_SORT_NAME` is defined, the following sorting functions will be defined. The `FIO_SORT_TYPE` macro **must** also be defined to specify the type of array elements to sort.
 
-This can be performed multiple times for multiple types.
+This module can be included multiple times to create sorting functions for different types.
 
 ### Sort Settings
 
@@ -16,23 +17,20 @@ The following macros define the behavior of the sorting algorithm.
 #### `FIO_SORT_NAME`
 
 ```c
-#define FIO_SORT_NAME num // will produce function names such as num_sort(...)
+#define FIO_SORT_NAME num // produces function names: num_sort, num_qsort, num_isort
 ```
 
 The prefix used for naming the sorting functions.
 
-**Note**: if not defined, than `FIO_SORT_NAME` will be defined as `FIO_SORT_TYPE##_vec`.
-
 #### `FIO_SORT_TYPE`
 
 ```c
-// i.e.
 #define FIO_SORT_TYPE size_t
 ```
 
 The type of the array members to be sorted.
 
-**Note**: this macro **MUST** be defined.
+**Note**: this macro **must** be defined.
 
 #### `FIO_SORT_IS_BIGGER`
 
@@ -40,7 +38,9 @@ The type of the array members to be sorted.
 #define FIO_SORT_IS_BIGGER(a, b) ((a) > (b))
 ```
 
-Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
+Comparison macro that **must** evaluate to `1` if `a > b`, and `0` if equal or smaller.
+
+The default implementation uses the `>` operator, which works for numeric types.
 
 #### `FIO_SORT_SWAP`
 
@@ -53,7 +53,9 @@ Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
   } while (0)
 ```
 
-Swaps array members. Usually there is no need to override the default macro.
+Swaps two array members. The default implementation uses a temporary variable.
+
+Usually there is no need to override this macro.
 
 #### `FIO_SORT_THRESHOLD`
 
@@ -61,43 +63,49 @@ Swaps array members. Usually there is no need to override the default macro.
 #define FIO_SORT_THRESHOLD 96
 ```
 
-The threshold below which quick-sort delegates to insert sort. Usually there is no need to override the default macro.
+The threshold below which quick-sort delegates to insert sort. For small arrays, insert sort is faster due to lower overhead.
 
+Usually there is no need to override this macro.
 
 ### Sorting API
 
-#### `FIO_SORT_sort`
+The following functions are created using the `FIO_SORT_NAME` prefix. In the examples below, `FIO_SORT_NAME` is assumed to be `num`.
+
+#### `num_sort`
 
 ```c
-void FIO_SORT_sort(FIO_SORT_TYPE *array, size_t count);
+void num_sort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array`.
 
-Currently this wraps the [`FIO_SORT_qsort`](#fio_sort_qsort) function.
+This is the main sorting function and currently wraps `num_qsort` (quick-sort).
 
-#### `FIO_SORT_qsort`
+#### `num_qsort`
 
 ```c
-void FIO_SORT_qsort(FIO_SORT_TYPE *array, size_t count);
+void num_qsort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array` using quick-sort.
 
+The implementation is non-recursive, using an internal stack to avoid stack overflow on large arrays. For small partitions (below `FIO_SORT_THRESHOLD`), it delegates to insert sort for better performance.
 
-#### `FIO_SORT_isort`
+The algorithm uses median-of-three pivot selection for improved performance on partially sorted data.
+
+#### `num_isort`
 
 ```c
-void FIO_SORT_isort(FIO_SORT_TYPE *array, size_t count);
+void num_isort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array` using insert-sort.
 
-Use only with small arrays (unless you are a fan of inefficiency).
+Insert sort is efficient for small arrays but has O(n²) complexity. Use only with small arrays or when the data is nearly sorted.
 
 ### Sort Example
 
-The following example code creates an array of random strings and then sorts the array.
+The following example creates an array of random strings and then sorts the array:
 
 ```c
 #define FIO_STR_SMALL sstr
@@ -128,6 +136,27 @@ int main(int argc, char const *argv[]) {
     printf("[%zu] %s\n", i, sstr2ptr(ary + i));
     sstr_destroy(ary + i); /* cleanup */
   }
+  return 0;
+}
+```
+
+A simpler example sorting integers:
+
+```c
+#define FIO_SORT_NAME int
+#define FIO_SORT_TYPE int
+#include "fio-stl.h"
+
+int main(void) {
+  int numbers[] = {5, 2, 8, 1, 9, 3, 7, 4, 6, 0};
+  size_t count = sizeof(numbers) / sizeof(numbers[0]);
+  
+  int_sort(numbers, count);
+  
+  for (size_t i = 0; i < count; ++i) {
+    printf("%d ", numbers[i]);
+  }
+  printf("\n"); /* Output: 0 1 2 3 4 5 6 7 8 9 */
   return 0;
 }
 ```

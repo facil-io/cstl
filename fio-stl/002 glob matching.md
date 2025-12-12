@@ -1,67 +1,119 @@
-## Globe Matching
+## Glob Matching
 
 ```c
 #define FIO_GLOB_MATCH
 #include "fio-stl.h"
 ```
 
-By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
+By defining the macro `FIO_GLOB_MATCH`, the following glob pattern matching function is defined. This provides a binary glob matching helper useful for filtering strings against wildcard patterns.
 
 #### `fio_glob_match`
 
 ```c
-uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str);
+uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 ```
 
-This function is a **binary** glob matching helper.
+A **binary** glob matching helper that tests if `string` matches the glob `pattern`.
 
-Returns 1 on a match, otherwise returns 0.
+**Parameters:**
 
-The following patterns are recognized:
+- `pattern` - the glob pattern to match against
+- `string` - the string to test
 
-* `*` - matches any string, including an empty string.
-		
-	i.e., the following patterns will match against the string `"String"`:
+**Returns:** `1` on a match, `0` otherwise.
 
-    `"*"`
+**Note**: this function operates on raw bytes and does **not** support UTF-8 multi-byte characters for single-character matching (`?` and `[...]`).
 
-    `"*String*"`
+### Supported Patterns
 
-    `"S*ing"`
+The following glob patterns are recognized:
 
-* `?` - matches any single **byte** (does NOT support UTF-8 characters).
-		
-	i.e., the following patterns will match against the string `"String"`:
+#### Wildcard `*`
 
-    `"?tring"`
+Matches any string, including an empty string.
 
-    `"Strin?"`
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("*"), FIO_STR_INFO1("String"));        /* matches */
+fio_glob_match(FIO_STR_INFO1("*String*"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("S*ing"), FIO_STR_INFO1("String"));    /* matches */
+```
 
-    `"St?ing"`
+#### Single Character `?`
 
-* `[!...]` or `[^...]` - matches any **byte** that is **not** withing the brackets (does **not** support UTF-8 characters).
+Matches any single **byte** (does NOT support UTF-8 characters).
 
-    Byte ranges are supported using `'-'` (i.e., `[!0-9]`)
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("?tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("Strin?"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("St?ing"), FIO_STR_INFO1("String")); /* matches */
+```
 
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
+#### Negated Character Class `[!...]` or `[^...]`
 
-    `"[!a-z]tring"`
+Matches any **byte** that is **not** within the brackets (does **not** support UTF-8 characters).
 
-    `"[^a-z]tring"`
+Byte ranges are supported using `-` (e.g., `[!0-9]` matches any non-digit).
 
-    `"[^F]tring"` (same as `"[!F]tring"`)
+Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
 
-* `[...]` - matches any **byte** that **is** withing the brackets (does **not** support UTF-8 characters).
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("[!a-z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[^a-z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[^F]tring"), FIO_STR_INFO1("String"));   /* matches */
+```
 
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
+#### Character Class `[...]`
 
-    `"[A-Z]tring"`
+Matches any **byte** that **is** within the brackets (does **not** support UTF-8 characters).
 
-    `"[sS]tring"`
+Byte ranges are supported using `-` (e.g., `[a-z]` matches any lowercase letter).
 
+Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("[A-Z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[sS]tring"), FIO_STR_INFO1("String"));  /* matches */
+```
+
+#### Escape Character `\`
+
+The backslash can be used to escape special characters (`*`, `?`, `[`, `\`) so they are matched literally.
+
+```c
+/* Match a literal asterisk */
+fio_glob_match(FIO_STR_INFO1("file\\*"), FIO_STR_INFO1("file*")); /* matches */
+```
+
+### Example
+
+```c
+#define FIO_GLOB_MATCH
+#define FIO_STR
+#include "fio-stl.h"
+
+int main(void) {
+  fio_str_info_s pattern = FIO_STR_INFO1("*.txt");
+  fio_str_info_s filename = FIO_STR_INFO1("document.txt");
+
+  if (fio_glob_match(pattern, filename)) {
+    printf("File matches pattern!\n");
+  } else {
+    printf("No match.\n");
+  }
+
+  /* More examples */
+  fio_glob_match(FIO_STR_INFO1("test_*"), FIO_STR_INFO1("test_file"));   /* 1 */
+  fio_glob_match(FIO_STR_INFO1("data[0-9]"), FIO_STR_INFO1("data5"));    /* 1 */
+  fio_glob_match(FIO_STR_INFO1("log_????"), FIO_STR_INFO1("log_2024"));  /* 1 */
+  fio_glob_match(FIO_STR_INFO1("[A-Z]*"), FIO_STR_INFO1("Hello"));       /* 1 */
+  fio_glob_match(FIO_STR_INFO1("[!0-9]*"), FIO_STR_INFO1("abc"));        /* 1 */
+
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------

@@ -9,117 +9,204 @@ The facil.io JSON parser is a non-strict parser, with support for trailing comma
 
 The facil.io JSON parser should be considered **unsafe** as overflow protection depends on the `NUL` character appearing at the end of the string passed to the parser.
 
-**Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
+**Note**: this module depends on the `FIO_ATOL` module which will be automatically included.
+
+### Configuration Macros
 
 #### `FIO_JSON_MAX_DEPTH`
 
 ```c
 #ifndef FIO_JSON_MAX_DEPTH
-/** Maximum allowed JSON nesting level. Values above 64K might fail. */
-#define FIO_JSON_MAX_DEPTH 512
+/** Maximum allowed JSON nesting level. MUST be less than 65536. */
+#define FIO_JSON_MAX_DEPTH 128
 #endif
 ```
 
 To ensure the program's stack isn't abused, the parser will limit JSON nesting levels to a customizable `FIO_JSON_MAX_DEPTH` number of nesting levels.
 
-### JSON parser API
+Values above 65536 might cause the stack to overflow and cause a failure.
+
+#### `FIO_JSON_USE_FIO_ATON`
+
+```c
+#ifndef FIO_JSON_USE_FIO_ATON
+#define FIO_JSON_USE_FIO_ATON 0
+#endif
+```
+
+When set to `1`, the JSON parser will use `fio_aton` for number parsing instead of the default number parsing logic.
+
+The default value is `0`.
+
+### Types
 
 #### `fio_json_parser_callbacks_s`
 
 ```c
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
-  void *(*get_null)(void);
+  void *(*on_null)(void);
   /** TRUE object was detected. Returns new object as `void *`. */
-  void *(*get_true)(void);
+  void *(*on_true)(void);
   /** FALSE object was detected. Returns new object as `void *`. */
-  void *(*get_false)(void);
+  void *(*on_false)(void);
   /** Number was detected (long long). Returns new object as `void *`. */
-  void *(*get_number)(int64_t i);
-  /** Float was detected (double).Returns new object as `void *`.  */
-  void *(*get_float)(double f);
-  /** String was detected (int / float). update `pos` to point at ending */
-  void *(*get_string)(const void *start, size_t len);
+  void *(*on_number)(int64_t i);
+  /** Float was detected (double). Returns new object as `void *`. */
+  void *(*on_float)(double f);
+  /** (escaped) String was detected. Returns a new String as `void *`. */
+  void *(*on_string)(const void *start, size_t len);
+  /** (unescaped) String was detected. Returns a new String as `void *`. */
+  void *(*on_string_simple)(const void *start, size_t len);
   /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-  void *(*get_map)(void *ctx, void *at);
+  void *(*on_map)(void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
-  void *(*get_array)(void *ctx, void *at);
-  /** Array was detected. Returns non-zero on error. */
+  void *(*on_array)(void *ctx, void *at);
+  /** Map push. Returns non-zero on error. */
   int (*map_push)(void *ctx, void *key, void *value);
-  /** Array was detected. Returns non-zero on error. */
+  /** Array push. Returns non-zero on error. */
   int (*array_push)(void *ctx, void *value);
+  /** Called when an array object (`ctx`) appears done. */
+  int (*array_finished)(void *ctx);
+  /** Called when a map object (`ctx`) appears done. */
+  int (*map_finished)(void *ctx);
+  /** Called when context is expected to be an array (i.e., fio_json_parse_update). */
+  int (*is_array)(void *ctx);
+  /** Called when context is expected to be a map (i.e., fio_json_parse_update). */
+  int (*is_map)(void *ctx);
   /** Called for the `key` element in case of error or NULL value. */
   void (*free_unused_object)(void *ctx);
-  /** the JSON parsing encountered an error - what to do with ctx? */
+  /** The JSON parsing encountered an error - what to do with ctx? */
   void *(*on_error)(void *ctx);
 } fio_json_parser_callbacks_s;
 ```
 
 The JSON parser requires certain callbacks to create objects or perform actions based on JSON data.
 
-The following callbacks MUST be provided to the parser:
+**Required Callbacks:**
 
- - `void *(*get_null)(void)` - `NULL` object was detected. Returns NULL object as `void *`.
+The following callbacks **MUST** be provided to the parser:
 
- - `void *(*get_true)(void)` - `true` object was detected. Returns TRUE object as `void *`.
+- `on_null` - `NULL` object was detected. Returns NULL object as `void *`.
 
- - `void *(*get_false)(void)` - `false` object was detected. Returns FALSE object as `void *`.
+- `on_true` - `true` object was detected. Returns TRUE object as `void *`.
 
- - `void *(*get_number)(int64_t i)` - Number was detected (`int64_t`). Returns new number object as `void *`.
+- `on_false` - `false` object was detected. Returns FALSE object as `void *`.
 
- - `void *(*get_float)(double f)` - Float was detected (`double`). Returns new float object as `void *`. 
+- `on_number` - Number was detected (`int64_t`). Returns new number object as `void *`.
 
- - `void *(*get_string)(const void *start, size_t len)` - String was detected. `start` points to a JSON escaped String (remember to unescape). Returns a new String as `void *`.
+- `on_float` - Float was detected (`double`). Returns new float object as `void *`.
 
- - `void *(*get_map)(void *ctx, void *at)` - Dictionary was detected. Returns new `ctx` to hash map or `NULL` on error.
+- `on_string` - Escaped string was detected. `start` points to a JSON escaped String (remember to unescape). Returns a new String as `void *`.
 
- - `void *(*get_array)(void *ctx, void *at)` - Array was detected. Returns new `ctx` to array or `NULL` on error.
+- `on_map` - Dictionary was detected. `ctx` is the current context, `at` is the key (if any). Returns new `ctx` to hash map or `NULL` on error.
 
- - `int (*map_push)(void *ctx, void *key, void *value)` - Pushes data to Array. Returns non-zero on error.
+- `on_array` - Array was detected. `ctx` is the current context, `at` is the key (if any). Returns new `ctx` to array or `NULL` on error.
 
- - `int (*array_push)(void *ctx, void *value)` - Pushes data to Dictionary. Returns non-zero on error.
+- `map_push` - Pushes a key-value pair to a dictionary. Returns non-zero on error.
 
- - `void (*free_unused_object)(void *ctx)` - Called for the `key` element in case of error that caused `key` to be unused.
+- `array_push` - Pushes a value to an array. Returns non-zero on error.
 
- - `void *(*on_error)(void *ctx)` - the JSON parsing encountered an error - what to do with ctx?
+- `free_unused_object` - Called for the `key` element in case of error that caused `key` to be unused.
 
+**Optional Callbacks:**
 
-#### `fio_json_parse`
+The following callbacks are optional and will use default no-op implementations if not provided:
+
+- `on_string_simple` - Unescaped string was detected (no escape sequences). If not provided, falls back to `on_string`. If `on_string` is not provided but `on_string_simple` is, `on_string` will use `on_string_simple`.
+
+- `array_finished` - Called when an array object (`ctx`) appears done. Returns non-zero on error. Default: no-op returning 0.
+
+- `map_finished` - Called when a map object (`ctx`) appears done. Returns non-zero on error. Default: no-op returning 0.
+
+- `is_array` - Called to check if context is an array (used by `fio_json_parse_update`). Returns non-zero if true. Default: no-op returning 0.
+
+- `is_map` - Called to check if context is a map (used by `fio_json_parse_update`). Returns non-zero if true. Default: no-op returning 0.
+
+- `on_error` - The JSON parsing encountered an error. Receives the current context and returns what to do with it. Default: returns ctx unchanged.
+
+#### `fio_json_result_s`
 
 ```c
-/** The JSON return type. */
 typedef struct {
   void *ctx;
   size_t stop_pos;
   int err;
 } fio_json_result_s;
+```
 
+The JSON return type containing the parsing result.
+
+**Members:**
+
+- `ctx` - The top-most context/object in the JSON stream (the root object)
+- `stop_pos` - The number of bytes consumed before parsing stopped
+- `err` - Non-zero if the parsing stopped due to an error
+
+### JSON Parser API
+
+#### `fio_json_parse`
+
+```c
 fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
                                  const char *json_string,
                                  const size_t len);
 ```
 
+Parses a JSON string using the provided callbacks.
 
-The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters and octal, hex and binary numbers.
+The facil.io JSON parser is a non-strict parser, with support for:
 
-The parser allows for streaming data and decouples the parsing process from the resulting data-structure by calling the requested callbacks for JSON related events.
+- Trailing commas in collections
+- New-lines in strings
+- Extended escape characters
+- Comments (C-style `//` and `/* */`, and shell-style `#`)
+- Octal, hex, and binary number formats
+- `NaN` and `Infinity` float values
 
-Returns the result object which details the number of bytes consumed (stop position index `stop_pos`), if the parsing stopped due to an error (`err`) and the top most context / object in the JSON stream.
+The parser decouples the parsing process from the resulting data-structure by calling the requested callbacks for JSON related events.
+
+**Parameters:**
+
+- `callbacks` - Pointer to the callback structure defining how to handle JSON elements
+- `json_string` - The JSON string to parse
+- `len` - Length of the JSON string in bytes
+
+**Returns:** A `fio_json_result_s` containing:
+
+- `ctx` - The root object created by the callbacks
+- `stop_pos` - Number of bytes consumed (position where parsing stopped)
+- `err` - Non-zero if an error occurred
+
+**Note**: The parser automatically skips UTF-8 BOM (Byte Order Mark) if present at the beginning of the string.
 
 #### `fio_json_parse_update`
 
 ```c
-fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
+fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *callbacks,
                                         void *ctx,
-                                        const char *start,
+                                        const char *json_string,
                                         const size_t len);
 ```
 
-Use only when `ctx` is an object and JSON data is wrapped in an object (of the same type).
+Updates an existing object with data from a JSON string.
 
-i.e., update an array or hash map.
+Use only when `ctx` is an existing object (array or map) and the JSON data is wrapped in an object of the same type.
 
-### JSON Parsing Example - a JSON minifier
+This function is useful for merging JSON data into an existing data structure.
+
+**Parameters:**
+
+- `callbacks` - Pointer to the callback structure (must include `is_array` and `is_map` callbacks)
+- `ctx` - The existing object to update
+- `json_string` - The JSON string containing update data
+- `len` - Length of the JSON string in bytes
+
+**Returns:** A `fio_json_result_s` with the updated context.
+
+**Note**: The `is_array` and `is_map` callbacks **MUST** be provided when using this function, as they are used to verify that the existing context matches the JSON structure.
+
+### JSON Parsing Example
 
 The biggest question about parsing JSON is - where do we store the resulting data?
 
@@ -127,9 +214,9 @@ Different parsers solve this question in different ways.
 
 The `FIOBJ` soft-typed object system offers a very effective solution for data manipulation, as it creates a separate object for every JSON element.
 
-However, many parsers store the result in an internal data structure that can't be separated into different elements. These parser appear faster while actually deferring a lot of the heavy lifting to a later stage.
+However, many parsers store the result in an internal data structure that can't be separated into different elements. These parsers appear faster while actually deferring a lot of the heavy lifting to a later stage.
 
-Here is a short example that parses the data and writes it to a new minifed (compact) JSON String result.
+Here is a short example that parses JSON data and prints it back as minified JSON:
 
 ```c
 #define FIO_JSON
@@ -137,115 +224,255 @@ Here is a short example that parses the data and writes it to a new minifed (com
 #define FIO_LOG
 #include "fio-stl.h"
 
-#define FIO_CLI
-#include "fio-stl.h"
+/* Forward declarations for our object types */
+typedef struct my_json_obj_s my_json_obj_s;
 
-typedef struct {
-  fio_json_parser_s p;
-  fio_str_s out;
-  uint8_t counter;
-  uint8_t done;
-} my_json_parser_s;
+/* Simple tagged union for JSON values */
+typedef enum {
+  MY_JSON_NULL,
+  MY_JSON_TRUE,
+  MY_JSON_FALSE,
+  MY_JSON_NUMBER,
+  MY_JSON_FLOAT,
+  MY_JSON_STRING,
+  MY_JSON_ARRAY,
+  MY_JSON_MAP,
+} my_json_type_e;
 
-#define JSON_PARSER_CAST(ptr) FIO_PTR_FROM_FIELD(my_json_parser_s, p, ptr)
-#define JSON_PARSER2OUTPUT(p) (&JSON_PARSER_CAST(p)->out)
+struct my_json_obj_s {
+  my_json_type_e type;
+  union {
+    int64_t i;
+    double f;
+    fio_str_s str;
+    struct {
+      my_json_obj_s **items;
+      size_t len;
+      size_t capa;
+    } array;
+    struct {
+      my_json_obj_s **keys;
+      my_json_obj_s **values;
+      size_t len;
+      size_t capa;
+    } map;
+  };
+};
 
-FIO_IFUNC void my_json_write_seperator(fio_json_parser_s *p) {
-  my_json_parser_s *j = JSON_PARSER_CAST(p);
-  if (j->counter) {
-    switch (fio_json_parser_is_in_object(p)) {
-    case 0: /* array */
-      if (fio_json_parser_is_in_array(p))
-        fio_str_write(&j->out, ",", 1);
-      break;
-    case 1: /* object */
-      // note the reverse `if` statement due to operation ordering
-      fio_str_write(&j->out, (fio_json_parser_is_key(p) ? "," : ":"), 1);
-      break;
-    }
+/* Callback implementations */
+static void *my_on_null(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_NULL;
+  return o;
+}
+
+static void *my_on_true(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_TRUE;
+  return o;
+}
+
+static void *my_on_false(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_FALSE;
+  return o;
+}
+
+static void *my_on_number(int64_t i) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_NUMBER;
+  o->i = i;
+  return o;
+}
+
+static void *my_on_float(double f) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_FLOAT;
+  o->f = f;
+  return o;
+}
+
+static void *my_on_string(const void *start, size_t len) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_STRING;
+  /* Note: in production, you'd want to unescape the string */
+  fio_str_write(&o->str, start, len);
+  return o;
+}
+
+static void *my_on_array(void *ctx, void *at) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_ARRAY;
+  o->array.capa = 8;
+  o->array.items = calloc(o->array.capa, sizeof(void *));
+  (void)ctx;
+  (void)at;
+  return o;
+}
+
+static void *my_on_map(void *ctx, void *at) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_MAP;
+  o->map.capa = 8;
+  o->map.keys = calloc(o->map.capa, sizeof(void *));
+  o->map.values = calloc(o->map.capa, sizeof(void *));
+  (void)ctx;
+  (void)at;
+  return o;
+}
+
+static int my_array_push(void *ctx, void *value) {
+  my_json_obj_s *arr = ctx;
+  if (arr->array.len >= arr->array.capa) {
+    arr->array.capa *= 2;
+    arr->array.items = realloc(arr->array.items, arr->array.capa * sizeof(void *));
   }
-  j->counter |= 1;
-}
-
-/** a NULL object was detected */
-FIO_JSON_CB void fio_json_on_null(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "null", 4);
-}
-/** a TRUE object was detected */
-static inline void fio_json_on_true(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "true", 4);
-}
-/** a FALSE object was detected */
-FIO_JSON_CB void fio_json_on_false(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "false", 4);
-}
-/** a Number was detected (long long). */
-FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i) {
-  my_json_write_seperator(p);
-  fio_str_write_i(JSON_PARSER2OUTPUT(p), i);
-}
-/** a Float was detected (double). */
-FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f) {
-  my_json_write_seperator(p);
-  char buffer[256];
-  size_t len = fio_ftoa(buffer, f, 10);
-  fio_str_write(JSON_PARSER2OUTPUT(p), buffer, len);
-}
-/** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void
-fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "\"", 1);
-  fio_str_write(JSON_PARSER2OUTPUT(p), start, len);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "\"", 1);
-}
-/** a dictionary object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "{", 1);
-  JSON_PARSER_CAST(p)->counter = 0;
+  arr->array.items[arr->array.len++] = value;
   return 0;
 }
-/** a dictionary object closure detected */
-FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p) {
-  fio_str_write(JSON_PARSER2OUTPUT(p), "}", 1);
-  JSON_PARSER_CAST(p)->counter = 1;
-}
-/** an array object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_array(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "[", 1);
-  JSON_PARSER_CAST(p)->counter = 0;
+
+static int my_map_push(void *ctx, void *key, void *value) {
+  my_json_obj_s *map = ctx;
+  if (map->map.len >= map->map.capa) {
+    map->map.capa *= 2;
+    map->map.keys = realloc(map->map.keys, map->map.capa * sizeof(void *));
+    map->map.values = realloc(map->map.values, map->map.capa * sizeof(void *));
+  }
+  map->map.keys[map->map.len] = key;
+  map->map.values[map->map.len] = value;
+  map->map.len++;
   return 0;
 }
-/** an array closure was detected */
-FIO_JSON_CB void fio_json_on_end_array(fio_json_parser_s *p) {
-  fio_str_write(JSON_PARSER2OUTPUT(p), "]", 1);
-  JSON_PARSER_CAST(p)->counter = 1;
-}
-/** the JSON parsing is complete */
-FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p) {
-  JSON_PARSER_CAST(p)->done = 1;
-  (void)p;
-}
-/** the JSON parsing encountered an error */
-FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p) {
-  fio_str_write(
-      JSON_PARSER2OUTPUT(p), "--- ERROR, invalid JSON after this point.\0", 42);
+
+static void my_free_obj(void *ctx) {
+  my_json_obj_s *o = ctx;
+  if (!o)
+    return;
+  switch (o->type) {
+  case MY_JSON_STRING:
+    fio_str_destroy(&o->str);
+    break;
+  case MY_JSON_ARRAY:
+    for (size_t i = 0; i < o->array.len; i++)
+      my_free_obj(o->array.items[i]);
+    free(o->array.items);
+    break;
+  case MY_JSON_MAP:
+    for (size_t i = 0; i < o->map.len; i++) {
+      my_free_obj(o->map.keys[i]);
+      my_free_obj(o->map.values[i]);
+    }
+    free(o->map.keys);
+    free(o->map.values);
+    break;
+  default:
+    break;
+  }
+  free(o);
 }
 
-void run_my_json_minifier(char *json, size_t len) {
-  my_json_parser_s p = {{0}};
-  fio_json_parse(&p.p, json, len);
-  if (!p.done)
-    FIO_LOG_WARNING(
-        "JSON parsing was incomplete, minification output is partial");
-  fprintf(stderr, "%s\n", fio_str2ptr(&p.out));
-  fio_str_destroy(&p.out);
+/* Print JSON object as minified string */
+static void my_print_json(my_json_obj_s *o) {
+  if (!o)
+    return;
+  switch (o->type) {
+  case MY_JSON_NULL:
+    printf("null");
+    break;
+  case MY_JSON_TRUE:
+    printf("true");
+    break;
+  case MY_JSON_FALSE:
+    printf("false");
+    break;
+  case MY_JSON_NUMBER:
+    printf("%lld", (long long)o->i);
+    break;
+  case MY_JSON_FLOAT:
+    printf("%g", o->f);
+    break;
+  case MY_JSON_STRING:
+    printf("\"%s\"", fio_str2ptr(&o->str));
+    break;
+  case MY_JSON_ARRAY:
+    printf("[");
+    for (size_t i = 0; i < o->array.len; i++) {
+      if (i > 0)
+        printf(",");
+      my_print_json(o->array.items[i]);
+    }
+    printf("]");
+    break;
+  case MY_JSON_MAP:
+    printf("{");
+    for (size_t i = 0; i < o->map.len; i++) {
+      if (i > 0)
+        printf(",");
+      my_print_json(o->map.keys[i]);
+      printf(":");
+      my_print_json(o->map.values[i]);
+    }
+    printf("}");
+    break;
+  }
+}
+
+int main(void) {
+  const char *json = "{ \"name\": \"John\", \"age\": 30, \"active\": true, "
+                     "\"scores\": [100, 95, 87] }";
+
+  fio_json_parser_callbacks_s callbacks = {
+      .on_null = my_on_null,
+      .on_true = my_on_true,
+      .on_false = my_on_false,
+      .on_number = my_on_number,
+      .on_float = my_on_float,
+      .on_string = my_on_string,
+      .on_string_simple = my_on_string,
+      .on_array = my_on_array,
+      .on_map = my_on_map,
+      .array_push = my_array_push,
+      .map_push = my_map_push,
+      .free_unused_object = my_free_obj,
+  };
+
+  fio_json_result_s result = fio_json_parse(&callbacks, json, strlen(json));
+
+  if (result.err) {
+    FIO_LOG_ERROR("JSON parsing failed at position %zu", result.stop_pos);
+    return 1;
+  }
+
+  printf("Minified: ");
+  my_print_json(result.ctx);
+  printf("\n");
+
+  my_free_obj(result.ctx);
+  return 0;
 }
 ```
+
+### Supported JSON Extensions
+
+The facil.io JSON parser supports several extensions beyond strict JSON:
+
+**Comments:**
+- C-style single-line comments: `// comment`
+- C-style multi-line comments: `/* comment */`
+- Shell/Ruby-style comments: `# comment`
+
+**Numbers:**
+- Hexadecimal: `0x1A2B`
+- Binary: `0b1010`
+- Octal: `0755`
+- Infinity: `Infinity`, `inf`, `-Infinity`
+- NaN: `NaN`, `nan`
+- Leading plus sign: `+42`
+
+**Strings:**
+- New-lines within strings (non-strict)
+
+**Collections:**
+- Trailing commas: `[1, 2, 3,]` and `{"a": 1,}`
 
 -------------------------------------------------------------------------------

@@ -677,7 +677,7 @@ int fio_io_listen___(void); /* IDE marker */
  * See the `fio_listen` Macro for details.
  */
 SFUNC fio_io_listener_s *fio_io_listen
-FIO_NOOP(struct fio_io_listen_args args) {
+FIO_NOOP(struct fio_io_listen_args_s args) {
   fio___io_listen_s *l = NULL;
   void *built_tls = NULL;
   int should_free_tls = !args.tls;

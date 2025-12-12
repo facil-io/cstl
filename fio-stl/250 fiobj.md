@@ -6,13 +6,13 @@
 #include "fio-stl.h"
 ```
 
-The facil.io library includes a dynamic type system that makes it a easy to handle mixed-type tasks, such as JSON object construction.
+The facil.io library includes a dynamic type system that makes it easy to handle mixed-type tasks, such as JSON object construction.
 
-This soft type system included in the facil.io STL, it is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
+This soft type system included in the facil.io STL is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
 
-The soft type system also offers an (optional) * [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
+The soft type system also offers an (optional) [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
 
-The `FIOBJ` API offers type generic functions in addition to the type specific API. An objects underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
+The `FIOBJ` API offers type generic functions in addition to the type specific API. An object's underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
 
 The documentation regarding the `FIOBJ` soft-type system is divided as follows:  
 
@@ -38,6 +38,8 @@ The documentation regarding the `FIOBJ` soft-type system is divided as follows:
 
 * [JSON Helpers](#fiobj-json-helpers)
 
+* [Mustache Helpers](#fiobj-mustache-helpers)
+
 * [How to Extend the `FIOBJ` Type System](#how-to-extend-the-fiobj-type-system)
 
 In the facil.io web application framework, there are extensions to the core `FIOBJ` primitives, including:
@@ -45,6 +47,30 @@ In the facil.io web application framework, there are extensions to the core `FIO
 * [IO storage](fiobj_io)
 
 * [Mustache](fiobj_mustache)
+
+### `FIOBJ` Configuration Macros
+
+#### `FIOBJ_MAX_NESTING`
+
+```c
+#define FIOBJ_MAX_NESTING 512
+```
+
+Sets the limit on nesting level traversal by recursive functions.
+
+This affects JSON output/input and the `fiobj_each2` function since they are recursive.
+
+**Note**: this value will **NOT** affect the recursive `fiobj_free` which could (potentially) explode the stack if given malformed input such as cyclic data structures.
+
+Values should be less than 32K.
+
+#### `FIOBJ_JSON_APPEND`
+
+```c
+#define FIOBJ_JSON_APPEND 1
+```
+
+When set to `1` (default), JSON parsing will append to existing Arrays and Hash Maps when updating. When set to `0`, existing containers are replaced.
 
 ### `FIOBJ` General Considerations
 
@@ -119,20 +145,22 @@ The following functions / MACROs help identify a `FIOBJ` object's underlying typ
 #### `FIOBJ_TYPE_CLASS(o)`
 
 ```c
-#define FIOBJ_TYPE_CLASS(o) ((fiobj_class_en)(((uintptr_t)o) & 7UL))
+#define FIOBJ_TYPE_CLASS(o) ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 ```
 
-Returns the object's type class. This is limited to one of the core types. `FIOBJ_T_PRIMITIVE` and `FIOBJ_T_OTHER` may be returned (they aren't expended to their underlying type).
+Returns the object's type class. This is limited to one of the core types. `FIOBJ_T_PRIMITIVE` and `FIOBJ_T_OTHER` may be returned (they aren't expanded to their underlying type).
 
 **Note**: some numbers (`FIOBJ_T_NUMBER` / `FIOBJ_T_FLOAT`) may return `FIOBJ_T_OTHER` when `FIOBJ_TYPE_CLASS` is used, but return their proper type when `FIOBJ_TYPE` is used. This is due to memory optimizations being unavailable for some numerical values.
 
 #### `FIOBJ_IS_INVALID(o)`
 
 ```c
-#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o) & 7UL) == 0)
 ```
 
-Tests if the object is (probably) a valid FIOBJ
+Tests if the object is (probably) an invalid FIOBJ (returns true if invalid).
+
+**Note**: A valid FIOBJ always has at least one of the lower 3 bits set due to pointer tagging.
 
 #### `FIOBJ_IS_NULL(o)`
 
@@ -142,13 +170,23 @@ Tests if the object is (probably) a valid FIOBJ
 
 Tests if the object is either a `NULL` `FIOBJ` object or an invalid object.
 
+#### `FIOBJ_PTR_TAG(o, klass)`
+
+```c
+#define FIOBJ_PTR_TAG(o, klass) ((uintptr_t)(((uintptr_t)(o)) | (klass)))
+```
+
+Adds a `FIOBJ` type tag to a pointer. The `klass` should be one of the `FIOBJ_T_*` type constants.
+
+This is made available for authoring `FIOBJ` extensions and **shouldn't** be normally used.
+
 #### `FIOBJ_PTR_UNTAG(o)`
 
 ```c
-#define FIOBJ_PTR_UNTAG(o) ((uintptr_t)o & (~7ULL))
+#define FIOBJ_PTR_UNTAG(o) ((uintptr_t)(((uintptr_t)(o)) & (~7ULL)))
 ```
 
-Removes the `FIOBJ` type tag from a `FIOBJ` objects, allowing access to the underlying pointer and possible type.
+Removes the `FIOBJ` type tag from a `FIOBJ` object, allowing access to the underlying pointer and possible type.
 
 This is made available for authoring `FIOBJ` extensions and **shouldn't** be normally used.
 
@@ -208,7 +246,7 @@ unsigned char fiobj_is_eq(FIOBJ a, FIOBJ b);
 
 Compares two objects.
 
-Note: objects that contain other objects (i.e., Hash Maps) don't support this equality check just yet (feel free to contribute a PR for this).
+**Note**: this function now supports deep equality checks for Arrays and Hash Maps.
 
 #### `fiobj2cstr`
 
@@ -238,13 +276,52 @@ double fiobj2f(FIOBJ o);
 
 Returns a float (double) representation for any FIOBJ object.
 
+#### `fiobj_hash` (was `fiobj2hash`)
+
+```c
+uint64_t fiobj_hash(FIOBJ o);
+```
+
+Calculates an object's hash value for a specific hash map object.
+
+### `FIOBJ` Iteration
+
+#### `fiobj_each_s`
+
+```c
+typedef struct fiobj_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIOBJ const parent;
+  /** The index to start at / the current object's index */
+  uint64_t index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct fiobj_each_s *info);
+  /** The argument passed along to the task. */
+  void *udata;
+  /** The value of the current object in the Array or Hash Map */
+  FIOBJ value;
+  /* The key, if a Hash Map */
+  FIOBJ key;
+} fiobj_each_s;
+```
+
+Iteration information structure passed to the callback during `fiobj_each1` and `fiobj_each2` operations.
+
+**Members:**
+- `parent` - The object being iterated (read-only once set)
+- `index` - The current index position
+- `task` - The callback function (can be updated mid-iteration)
+- `udata` - User data passed to the task
+- `value` - The current element's value
+- `key` - The current element's key (for Hash Maps only)
 
 #### `fiobj_each1`
 
 ```c
-uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
-                     int (*task)(FIOBJ child, void *arg),
-                     void *arg);
+uint32_t fiobj_each1(FIOBJ o,
+                     int (*task)(fiobj_each_s *info),
+                     void *udata,
+                     int32_t start_at);
 ```
 
 Performs a task for each element held by the FIOBJ object **directly** (but **not** itself).
@@ -253,22 +330,32 @@ If `task` returns -1, the `each` loop will break (stop).
 
 Returns the "stop" position - the number of elements processed + `start_at`.
 
+**Parameters:**
+- `o` - The FIOBJ container to iterate (Array or Hash Map)
+- `task` - Callback function receiving a `fiobj_each_s` pointer
+- `udata` - User data passed to the callback via `info->udata`
+- `start_at` - Starting index for iteration
 
 #### `fiobj_each2`
 
 ```c
 uint32_t fiobj_each2(FIOBJ o,
-                     int (*task)(FIOBJ obj, void *arg),
-                     void *arg);
+                     int (*task)(fiobj_each_s *info),
+                     void *udata);
 ```
 
-Performs a task for each element held by the FIOBJ object (directly or indirectly), **including** itself and any nested elements (a deep task).
+Performs a task for the object itself and each element held by the FIOBJ object or any of its elements (a deep task).
 
 The order of performance is by order of appearance, as if all nesting levels were flattened.
 
 If `task` returns -1, the `each` loop will break (stop).
 
 Returns the number of elements processed.
+
+**Parameters:**
+- `o` - The FIOBJ object to iterate deeply
+- `task` - Callback function receiving a `fiobj_each_s` pointer
+- `udata` - User data passed to the callback via `info->udata`
 
 **Note**:
 
@@ -300,7 +387,7 @@ i.e., `"name1.name2.name3"` will first be tested as the whole string (`"name1.na
 
 ```c
 #define fiobj_json_find2(object, str, length)                                  \
-  fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+  fiobj_json_find(object, FIO_STR_INFO2(str, length))
 ```
 
 A macro helper for [`fiobj_json_find`](#fiobj_json_find).
@@ -656,48 +743,6 @@ These functions include:
 
 In addition, the following `fiobj_hash` functions and MACROs are defined:
 
-#### `fiobj2hash`
-
-```c
-uint64_t fiobj2hash(FIOBJ target_hash, FIOBJ value);
-```
-
-Calculates an object's hash value for a specific hash map object.
-
-#### `fiobj_hash_set`
-
-```c
-FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
-```
-
-Inserts a value to a hash map, with a default hash value calculation.
-
-#### `fiobj_hash_set_if_missing`
-
-```c
-FIOBJ fiobj_hash_set_if_missing2(FIOBJ hash, FIOBJ key, FIOBJ value);
-```
-
-Inserts a value to a hash map, with a default hash value calculation.
-
-If the key already exists in the Hash Map, the value will be freed instead.
-
-#### `fiobj_hash_get`
-
-```c
-FIOBJ fiobj_hash_get2(FIOBJ hash, FIOBJ key);
-```
-
-Finds a value in a hash map, with a default hash value calculation.
-
-#### `fiobj_hash_remove`
-
-```c
-int fiobj_hash_remove2(FIOBJ hash, FIOBJ key, FIOBJ *old);
-```
-
-Removes a value from a hash map, with a default hash value calculation.
-
 #### `fiobj_hash_set2`
 
 ```c
@@ -705,6 +750,14 @@ FIOBJ fiobj_hash_set2(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 ```
 
 Sets a value in a hash map, allocating the key String and automatically calculating the hash value.
+
+**Parameters:**
+- `hash` - The hash map to modify
+- `key` - Pointer to the key string
+- `len` - Length of the key string
+- `value` - The FIOBJ value to store
+
+**Returns:** The previous value if the key existed, or `FIOBJ_INVALID`.
 
 #### `fiobj_hash_get2`
 
@@ -714,6 +767,13 @@ FIOBJ fiobj_hash_get2(FIOBJ hash, const char *buf, size_t len);
 
 Finds a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
 
+**Parameters:**
+- `hash` - The hash map to search
+- `buf` - Pointer to the key string
+- `len` - Length of the key string
+
+**Returns:** The value associated with the key, or `FIOBJ_INVALID` if not found.
+
 #### `fiobj_hash_remove2`
 
 ```c
@@ -721,6 +781,28 @@ int fiobj_hash_remove2(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
 ```
 
 Removes a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
+
+**Parameters:**
+- `hash` - The hash map to modify
+- `buf` - Pointer to the key string
+- `len` - Length of the key string
+- `old` - Optional pointer to store the removed value (pass NULL to discard)
+
+**Returns:** 0 on success, -1 if the key was not found.
+
+#### `fiobj_hash_update`
+
+```c
+void fiobj_hash_update(FIOBJ dest, FIOBJ src);
+```
+
+Updates a hash map using information from another Hash Map.
+
+For nested Hash Maps, the update is recursive (deep merge). For Arrays, elements are concatenated. For other types, values are overwritten.
+
+**Parameters:**
+- `dest` - The destination hash map to update
+- `src` - The source hash map to copy from
 
 #### `FIOBJ` Hash Map - Core Type Functions
 
@@ -770,15 +852,22 @@ This is in addition to `facil.io` support to some JSON extensions such as commen
 
 However, there are [faster alternatives as well as slower alternatives out there](json_performance.html) (i.e., the [Qajson4c library](https://github.com/DeHecht/qajson4c) is a wonderful alternative for embedded systems).
 
-#### `fiobj2json`
+#### `fiobj_json` (was `fiobj2json`)
 
 ```c
-FIOBJ fiobj2json(FIOBJ dest, FIOBJ o, uint8_t beautify);
+FIOBJ fiobj_json(FIOBJ dest, FIOBJ o, uint8_t beautify);
 ```
 
 Returns a JSON valid FIOBJ String, representing the object.
 
 If `dest` is an existing String, the formatted JSON data will be appended to the existing string.
+
+**Parameters:**
+- `dest` - Destination string (or `FIOBJ_INVALID` to create a new string)
+- `o` - The FIOBJ object to convert to JSON
+- `beautify` - If non-zero, adds indentation and newlines for readability
+
+**Returns:** A FIOBJ String containing the JSON representation.
 
 ```c
 FIOBJ result = fiobj_json_parse2("{\"name\":\"John\",\"surname\":\"Smith\",\"ID\":1}",40, NULL);
@@ -786,7 +875,7 @@ FIO_ASSERT( fiobj2cstr(fiobj_hash_get2(result, "name", 4)).len == 4 &&
             !memcmp(fiobj2cstr(fiobj_hash_get2(result, "name", 4)).buf, "John", 4), "result error");
 
 FIOBJ_STR_TEMP_VAR(json_str); /* places string on the stack */
-fiobj2json(json_str, result, 1);
+fiobj_json(json_str, result, 1);
 FIO_LOG_INFO("updated JSON data to look nicer:\n%s", fiobj2cstr(json_str).buf);
 fiobj_free(result);
 FIOBJ_STR_TEMP_DESTROY(json_str);
@@ -815,8 +904,8 @@ The `fiobj_hash_update_json2` function is a helper function, it calls `fiobj_has
 ```c
 FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
 
-#define fiobj_json_parse2(data_, len_, consumed)                      \
-  fiobj_json_parse((fio_str_info_s){.buf = data_, .len = len_}, consumed)
+#define fiobj_json_parse2(data_, len_, consumed)                               \
+  fiobj_json_parse(FIO_STR_INFO2(data_, len_), consumed)
 ```
 
 Parses a C string for JSON data. If `consumed` is not NULL, the `size_t` variable will contain the number of bytes consumed before the parser stopped (due to either error or end of a valid JSON data segment).
@@ -826,6 +915,41 @@ Returns a FIOBJ object matching the JSON valid C string `str`.
 If the parsing failed (no complete valid JSON data) `FIOBJ_INVALID` is returned.
 
 `fiobj_json_parse2` is a helper macro, it calls `fiobj_json_parse` with the provided string information.
+
+### `FIOBJ` Mustache Helpers
+
+FIOBJ provides integration with the Mustache templating system, allowing you to render Mustache templates using FIOBJ data structures (typically Hash Maps) as the context.
+
+#### `fiobj_mustache_build`
+
+```c
+FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
+```
+
+Builds a Mustache template using a FIOBJ context (usually a Hash).
+
+**Parameters:**
+- `m` - A compiled Mustache template (see Mustache documentation)
+- `ctx` - The FIOBJ context, typically a Hash Map with template variables
+
+**Returns:** A FIOBJ String with the rendered template. May return `FIOBJ_INVALID` if nothing was written.
+
+#### `fiobj_mustache_build2`
+
+```c
+FIOBJ fiobj_mustache_build2(fio_mustache_s *m, FIOBJ dest, FIOBJ ctx);
+```
+
+Builds a Mustache template using a FIOBJ context (usually a Hash).
+
+Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+
+**Parameters:**
+- `m` - A compiled Mustache template
+- `dest` - Destination string to append to (or `FIOBJ_INVALID` to create new)
+- `ctx` - The FIOBJ context, typically a Hash Map with template variables
+
+**Returns:** `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was written and `dest` was empty.
 
 ### How to Extend the `FIOBJ` Type System
 
@@ -880,10 +1004,14 @@ This is the structure of the virtual table:
 ```c
 /** FIOBJ types can be extended using virtual function tables. */
 typedef struct {
-  /** A unique number to identify object type. */
+  /**
+   * MUST return a unique number to identify object type.
+   *
+   * Numbers (type IDs) under 100 are reserved. Numbers under 40 are illegal.
+   */
   size_t type_id;
   /** Test for equality between two objects with the same `type_id` */
-  unsigned char (*is_eq)(FIOBJ a, FIOBJ b);
+  unsigned char (*is_eq)(FIOBJ restrict a, FIOBJ restrict b);
   /** Converts an object to a String */
   fio_str_info_s (*to_s)(FIOBJ o);
   /** Converts an object to an integer */
@@ -893,16 +1021,15 @@ typedef struct {
   /** Returns the number of exposed elements held by the object, if any. */
   uint32_t (*count)(FIOBJ o);
   /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-  uint32_t (*each1)(FIOBJ o, int32_t start_at,
-                    int (*task)(FIOBJ child, void *arg), void *arg);
+  uint32_t (*each1)(FIOBJ o,
+                    int (*task)(fiobj_each_s *e),
+                    void *udata,
+                    int32_t start_at);
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
-   *
-   * Returns 0 if the object is still alive or 1 if the object was freed. The
-   * return value is currently ignored, but this might change in the future.
    */
-  int (*free2)(FIOBJ o);
+  void (*free2)(FIOBJ o);
 } FIOBJ_class_vtable_s;
 ```
 
@@ -962,7 +1089,7 @@ The Virtual Function Table (definitions and table)
 ***************************************************************************** */
 
 /** Test for equality between two objects with the same `type_id` */
-static unsigned char static_string_is_eq(FIOBJ a, FIOBJ b);
+static unsigned char static_string_is_eq(FIOBJ restrict a, FIOBJ restrict b);
 /** Converts an object to a String */
 static fio_str_info_s static_string_to_s(FIOBJ o);
 /** Converts an object to an integer */
@@ -972,16 +1099,15 @@ static double static_string_to_f(FIOBJ o);
 /** Returns the number of exposed elements held by the object, if any. */
 static uint32_t static_string_count(FIOBJ o);
 /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-static uint32_t static_string_each1(FIOBJ o, int32_t start_at,
-                                    int (*task)(FIOBJ, void *), void *arg);
+static uint32_t static_string_each1(FIOBJ o,
+                                    int (*task)(fiobj_each_s *),
+                                    void *udata,
+                                    int32_t start_at);
 /**
  * Decreases the reference count and/or frees the object, calling `free2` for
  * any nested objects (which we don't have for this type).
- *
- * Returns 0 if the object is still alive or 1 if the object was freed. The
- * return value is currently ignored, but this might change in the future.
  */
-static int static_string_free2(FIOBJ o);
+static void static_string_free2(FIOBJ o);
 
 /** The virtual function table object. */
 static const FIOBJ_class_vtable_s FIOBJ___STATIC_STRING_VTABLE = {
@@ -1082,13 +1208,15 @@ static uint32_t static_string_count(FIOBJ o) {
   (void)o;
 }
 /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-static uint32_t static_string_each1(FIOBJ o, int32_t start_at,
-                                    int (*task)(FIOBJ, void *), void *arg) {
+static uint32_t static_string_each1(FIOBJ o,
+                                    int (*task)(fiobj_each_s *),
+                                    void *udata,
+                                    int32_t start_at) {
   return 0;
-  (void)o; (void)start_at; (void)task; (void)arg;
+  (void)o; (void)start_at; (void)task; (void)udata;
 }
 /** Decreases the reference count and/or frees the object. */
-static int static_string_free2(FIOBJ o) { return fiobj_static_string_free(o); }
+static void static_string_free2(FIOBJ o) { fiobj_static_string_free(o); }
 ```
 
 Example usage:
@@ -1111,4 +1239,3 @@ int main(void) {
 ```
 
 -------------------------------------------------------------------------------
-

@@ -5,7 +5,7 @@
 #### `fio_http_listen`
 
 ```c
-void * fio_http_listen(const char *url, fio_http_settings_s settings);
+fio_http_listener_s *fio_http_listen(const char *url, fio_http_settings_s settings);
 
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
@@ -13,9 +13,9 @@ void * fio_http_listen(const char *url, fio_http_settings_s settings);
 
 Listens to HTTP / WebSockets / SSE connections on `url`.
 
-The MACRO shadowing the function enables the used of named arguments for the `fio_http_settings_s`.
+The MACRO shadowing the function enables the use of named arguments for the `fio_http_settings_s`.
 
-Returns a listener handle (same as `fio_srv_listen`). Listening can be stopped using `fio_srv_listen_stop`.
+Returns a listener handle (`fio_http_listener_s *`). The listener can be used with `fio_http_route` to add route-specific handlers.
 
 ```c
 typedef struct fio_http_settings_s {
@@ -179,15 +179,16 @@ Returns a link to the settings matching `url`, as set by `fio_http_route`.
 
 ```c
 typedef enum {
-FIO_HTTP_RESOURCE_NONE,
-FIO_HTTP_RESOURCE_INDEX,
-FIO_HTTP_RESOURCE_SHOW,
-FIO_HTTP_RESOURCE_NEW,
-FIO_HTTP_RESOURCE_EDIT,
-FIO_HTTP_RESOURCE_CREATE,
-FIO_HTTP_RESOURCE_UPDATE,
-FIO_HTTP_RESOURCE_DELETE,
-} fio_http_route_resource_e;
+  FIO_HTTP_RESOURCE_NONE,
+  FIO_HTTP_RESOURCE_INDEX,
+  FIO_HTTP_RESOURCE_SHOW,
+  FIO_HTTP_RESOURCE_NEW,
+  FIO_HTTP_RESOURCE_EDIT,
+  FIO_HTTP_RESOURCE_CREATE,
+  FIO_HTTP_RESOURCE_UPDATE,
+  FIO_HTTP_RESOURCE_DELETE,
+} fio_http_resource_action_e;
+
 fio_http_resource_action_e fio_http_resource_action(fio_http_s *h);
 ```
 
@@ -226,10 +227,10 @@ If no REST / CRUD style action is detected, FIO_HTTP_RESOURCE_NONE is returned.
 #### `fio_http_listener_settings`
 
 ```c
-fio_http_settings_s *fio_http_listener_settings(void *listener);
+fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *listener);
 ```
 
-Returns the a pointer to the HTTP settings associated with the listener.
+Returns a pointer to the HTTP settings associated with the listener.
 
 **Note**: changing the settings for the root path should be performed using `fio_http_route` and not by altering the settings directly.
 
@@ -244,9 +245,9 @@ Allows all clients to connect to WebSockets / EventSource (SSE) connections (byp
 #### `fio_http_connect`
 
 ```c
-fio_s *fio_http_connect(const char *url,
-                              fio_http_s *h,
-                              fio_http_settings_s settings);
+fio_io_s *fio_http_connect(const char *url,
+                           fio_http_s *h,
+                           fio_http_settings_s settings);
 /* Shadow the function for named arguments */
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
@@ -256,6 +257,8 @@ fio_s *fio_http_connect(const char *url,
 Connects to HTTP / WebSockets / SSE connections on `url`.
 
 Accepts named arguments for the `fio_http_settings_s` settings.
+
+**Returns:** an IO handle (`fio_io_s *`) on success, or NULL on error.
 
 ### Creating an HTTP Handle
 
@@ -348,7 +351,7 @@ Sets a second opaque user pointer associated with the HTTP handle.
 #### `fio_http_io`
 
 ```c
-fio_s *fio_http_io(fio_http_s *);
+fio_io_s *fio_http_io(fio_http_s *);
 ```
 
 Returns the IO object associated with the HTTP object (request only).
@@ -427,6 +430,14 @@ int fio_http_is_sse(fio_http_s *);
 
 Returns true if the HTTP handle refers to an EventSource connection.
 
+#### `fio_http_is_freeing`
+
+```c
+int fio_http_is_freeing(fio_http_s *);
+```
+
+Returns true if the HTTP handle is in the process of freeing itself.
+
 ### HTTP Request Data
 
 #### `fio_http_received_at`
@@ -498,6 +509,24 @@ fio_str_info_s fio_http_path_set(fio_http_s *, fio_str_info_s);
 ```
 
 Sets the path information associated with the HTTP handle.
+
+#### `fio_http_opath`
+
+```c
+fio_str_info_s fio_http_opath(fio_http_s *);
+```
+
+Gets the original / first path associated with the HTTP handle.
+
+This is the path before any routing modifications were applied.
+
+#### `fio_http_opath_set`
+
+```c
+fio_str_info_s fio_http_opath_set(fio_http_s *, fio_str_info_s);
+```
+
+Sets the original / first path associated with the HTTP handle.
 
 #### `FIO_HTTP_PATH_EACH`
 
@@ -677,6 +706,16 @@ void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 ```
 
 Writes `data` to the body (payload) associated with the HTTP handle.
+
+#### `fio_http_body_fd`
+
+```c
+int fio_http_body_fd(fio_http_s *);
+```
+
+If the body is stored in a temporary file, returns the file's handle.
+
+Otherwise returns -1.
 
 #### HTTP Cookies
 
@@ -920,10 +959,12 @@ Calls [`fio_http_write`](#fio_http_write) without any data to be sent.
 #### `fio_http_send_error_response`
 
 ```c
-void fio_http_send_error_response(fio_http_s *h, size_t status);
+int fio_http_send_error_response(fio_http_s *h, size_t status);
 ```
 
 Sends the requested error message and finishes the response.
+
+**Returns:** 0 on success, -1 on error (e.g., if headers were already sent).
 
 #### `fio_http_etag_is_match`
 
@@ -967,6 +1008,38 @@ Logs an HTTP (response) to STDOUT using common log format:
 ```
 
 See also the `FIO_HTTP_LOG_X_REQUEST_START` and `FIO_HTTP_EXACT_LOGGING` compilation flags.
+
+#### `fio_http_date`
+
+```c
+fio_str_info_s fio_http_date(uint64_t now_in_seconds);
+```
+
+Returns a cached date/time string for HTTP date headers (RFC 7231 format).
+
+The string is cached and updated when the timestamp changes.
+
+#### `fio_http_log_time`
+
+```c
+fio_str_info_s fio_http_log_time(uint64_t now_in_seconds);
+```
+
+Returns a cached date/time string for HTTP logging.
+
+The string is cached and updated when the timestamp changes.
+
+#### `fio_http_clear_response`
+
+```c
+fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body);
+```
+
+Clears any response data from the HTTP handle.
+
+If `clear_body` is true, also clears the body data.
+
+Returns the HTTP handle.
 
 ### HTTP WebSocket / SSE Helpers
 
@@ -1084,18 +1157,20 @@ Closes a persistent HTTP connection (i.e., if upgraded).
 #### `fio_http_subscribe`
 
 ```c
-int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-
-#define fio_http_subscribe(h, ...) fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+#define fio_http_subscribe(h, ...)                                             \
+  fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 ```
 
-Subscribes the HTTP handle (WebSocket / SSE) to events. Requires an Upgraded connection.
+Macro helper for HTTP handle pub/sub subscriptions.
 
-Automatically sets the correct `io` object and the default callback if none was provided (either `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT` or `FIO_HTTP_SSE_SUBSCRIBE_DIRECT`).
+This macro wraps `fio_subscribe`, automatically setting the `io` argument to the IO object associated with the HTTP handle.
 
-Using a `NULL` HTTP handle (`fio_http_s *`) is the same as calling `fio_subscribe` without an `io` object.
+Example:
 
-Returns `-1` on error (i.e., upgrade still being negotiated).
+```c
+fio_http_subscribe(h, .channel = FIO_STR_INFO1("chat"),
+                      .on_message = my_on_message_callback);
+```
 
 #### `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT`
 
@@ -1323,11 +1398,11 @@ The HTTP handle will avoid caching strings longer than this value.
 
 The HTTP cache will use a mutex to allow headers to be set concurrently.
 
-#### `FIO_HTTP_CACHE_STATIC_HEADERS`
+#### `FIO_HTTP_PRE_CACHE_KNOWN_HEADERS`
 
 ```c
-#ifndef FIO_HTTP_CACHE_STATIC_HEADERS
-#define FIO_HTTP_CACHE_STATIC_HEADERS 1
+#ifndef FIO_HTTP_PRE_CACHE_KNOWN_HEADERS
+#define FIO_HTTP_PRE_CACHE_KNOWN_HEADERS 1
 #endif
 ```
 
@@ -1352,6 +1427,16 @@ The default file name when a static file response points to a folder.
 ```
 
 Attempts to auto-complete static file paths with missing extensions.
+
+#### `FIO_HTTP_ENFORCE_LOWERCASE_HEADERS`
+
+```c
+#ifndef FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+#define FIO_HTTP_ENFORCE_LOWERCASE_HEADERS 0
+#endif
+```
+
+If true, the HTTP handle will copy input header names to lower case.
 
 ### Compilation Flags and Default HTTP Connection Settings
 
@@ -1428,4 +1513,4 @@ UTF-8 validity tests will be performed only for data shorter than this.
 
 If true, logs longest WebSocket ping-pong round-trips (using `FIO_LOG_INFO`).
 
--------------------------------------------------------------------------------
+------------------------------------------------------------

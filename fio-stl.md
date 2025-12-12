@@ -232,6 +232,26 @@ Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
 -------------------------------------------------------------------------------
 
+## OS Detection Macros
+
+#### `FIO_OS_POSIX`
+
+Set to `1` on POSIX systems (Linux, macOS, BSD, etc.), `0` otherwise.
+
+#### `FIO_OS_WIN`
+
+Set to `1` on Windows systems, `0` otherwise.
+
+#### `FIO_HAVE_UNIX_TOOLS`
+
+Set to a non-zero value when Unix-like tools are available. Values:
+- `0` - No Unix tools
+- `1` - Full POSIX
+- `2` - MinGW
+- `3` - Cygwin
+
+-------------------------------------------------------------------------------
+
 ### Default Memory Allocation
 
 By setting these macros, the memory allocator used by facil.io could be changed from the default allocator (either the custom allocator or, if missing, the system's allocator).
@@ -324,7 +344,7 @@ void my_type_free(my_type_s * t) {
 #define FIO_LEAK_COUNTER_COUNT(name)
 ```
 
-Returns the number of unfreed allocattions according to the named memory leak detector.
+Returns the number of unfreed allocations according to the named memory leak detector.
 
 Returned type is `size_t`
 
@@ -337,21 +357,12 @@ The core module provides a simple way to manage a "good enough" thread safe memo
 #### `FIO_STATIC_ALLOC_DEF`
 
 ```c
-#ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
-/* Maximum number of threads to be expected to call the allocator at once. */
-#define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
-#endif
-#define FIO_STATIC_ALLOC_DEF(function_name,                                             \
-                             type_T,                                           \
-                             size_per_allocation,                              \
-                             allocations_per_thread) /* ... */ 
+#define FIO_STATIC_ALLOC_DEF(function_name, type_T, size_per_allocation, allocations_per_thread)
 ```
-
 
 Defines a simple (almost naive) static memory allocator named `function_name` which accepts a single `size_t` argument `count`.
 
 The defined function returns a `type_T` pointer (`type_T *`) containing `sizeof(type_T) * count * size_per_allocation` in correct memory alignment for the requested type.
-
 
 ```c
 static type_T *function_name(size_t count);
@@ -364,40 +375,21 @@ The functions can safely allocate the following number of bytes before the funct
     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
         sizeof(type_T) * size_per_allocation
 
-The following example uses static memory to create a (zero allocation) number to string converter and then uses it to print out a number's value for logging:
+Example:
 
 ```c
 // Step 1: define the allocator:
-//
-// This will define a static allocator,
-// allocating 19 byte long strings per allocation.
-// Reserving 4,864 bytes in static memory.
 FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
 
 // Step 2: use the allocator
-//
-// example function that returns an unsigned number as a 16 digit hex string
 char * ntos16(uint16_t n) {
-  // allocates 19 bytes from the static memory pool.
-  char * n = numer2hex_allocator(1);
-  // Writes the number in hex + NUL byte.
-  n[0] = '0'; n[1] = 'x';
-  fio_ltoa16u(n+2, n, 16);
-  n[18] = 0;
-  // returns the string (a pointer to the 19 bytes).
-  return n;
+  char * buf = numer2hex_allocator(1);
+  buf[0] = '0'; buf[1] = 'x';
+  fio_ltoa16u(buf+2, n, 16);
+  buf[18] = 0;
+  return buf;
 }
-
-// Step 3: example use-case.
-void print_number_for_debugging(char * file, int line, char * var, uint16_t n) {
-  printf("(%s:%d) %s = %s", file, line, var_name, ntos16(n));
-}
-
-// Prints any number in hex, along with file location and variable name.
-#define LOG_PRINT_VAL(n) print_number_for_debugging(__FILE__, __LINE__, #n, n)
 ```
-
-A similar approach is use by `fiobj_num2cstr` in order to provide temporary conversions of FIOBJ to a C String without the caller having to reason about memory management.
 
 -------------------------------------------------------------------------------
 
@@ -407,7 +399,7 @@ A similar approach is use by `fiobj_num2cstr` in order to provide temporary conv
 
 ```c
 #define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
+  ((T_type *)(((uintptr_t)(ptr)) & (((uintptr_t)1ULL << (bits)) - 1)))
 ```
 
 Masks a pointer's left-most bits, returning the right bits (i.e., `0x000000FF`).
@@ -416,7 +408,7 @@ Masks a pointer's left-most bits, returning the right bits (i.e., `0x000000FF`).
 
 ```c
 #define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << bits)))
+  ((T_type *)(((uintptr_t)(ptr)) & ((~(uintptr_t)0ULL) << (bits))))
 ```
 
 Masks a pointer's right-most bits, returning the left bits (i.e., `0xFFFFFF00`).
@@ -443,14 +435,14 @@ Subtract X bytes from pointer's address, updating the pointer's type.
 
 ```c
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type, ptr, (&((T_type *)0)->field))
+  FIO_PTR_MATH_SUB(T_type, ptr, (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 ```
 
-Find the root object (of a `struct`) from a pointer to its field's (the field's address).
+Find the root object (of a `struct`) from a pointer to its field's address.
 
 -------------------------------------------------------------------------------
 
-## Pointer Tagging Support:
+## Pointer Tagging Support
 
 Pointer tagging allows types created using this library to have their pointers "tagged".
 
@@ -491,8 +483,7 @@ If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer wi
 #define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
 ```
 
-If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing
-any code.
+If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing any code.
 
 `FIO_PTR_TAG_VALIDATE` **must** fail on NULL pointers.
 
@@ -516,18 +507,42 @@ Marks a function as `static`, `inline` and possibly unused.
 
 Marks a function as `static` and possibly unused.
 
+#### `FIO_MIFN`
+
+```c
+#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
+```
+
+Marks a function as `static`, `inline`, possibly unused, and warns if the return value is unused.
+
 #### `FIO_WEAK`
 
 ```c
 #define FIO_WEAK __attribute__((weak))
 ```
 
-Marks a function as weak
+Marks a function as weak.
+
+#### `FIO_ALIGN`
+
+```c
+#define FIO_ALIGN(bytes) __attribute__((aligned(bytes)))
+```
+
+Aligns a type or variable to the specified byte boundary.
+
+#### `DEPRECATED`
+
+```c
+#define DEPRECATED(reason) __attribute__((deprecated(reason)))
+```
+
+Marks a function or type as deprecated with an optional reason string.
 
 #### `FIO_CONSTRUCTOR(fname)`
 
 ```c
-#define FIO_CONSTRUCTOR(fname) FIO_SFUNC __attribute__((constructor)) void fname (void)
+#define FIO_CONSTRUCTOR(fname) static __attribute__((constructor)) void fname(void)
 ```
 
 Marks a function as a _constructor_ - **if supported**.
@@ -537,12 +552,21 @@ When supported by the compiler (i.e., `gcc` / `clang`), this function will execu
 #### `FIO_DESTRUCTOR(fname)`
 
 ```c
-#define FIO_DESTRUCTOR(fname) FIO_SFUNC __attribute__((destructor)) void fname (void)
+#define FIO_DESTRUCTOR(fname) static __attribute__((destructor)) void fname(void)
 ```
 
 Marks a function as a _destructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
+
+#### `FIO_LIKELY` / `FIO_UNLIKELY`
+
+```c
+#define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
+#define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
+```
+
+Branch prediction hints for the compiler. Use `FIO_LIKELY` when a condition is expected to be true most of the time, and `FIO_UNLIKELY` when it's expected to be false.
 
 #### `FIO_NOOP`
 
@@ -563,6 +587,14 @@ This is useful when a function name is shadowed by a macro (such as when named a
 An empty macro that does nothing.
 
 This is useful for creating macros that can have optional callbacks (`FIO_NOOP_FN` can be used instead of a callback in these cases).
+
+#### `FIO_NOOP_FN_NAME`
+
+```c
+#define FIO_NOOP_FN_NAME (void)
+```
+
+A macro for a No-Op function name that casts to void.
 
 #### `FIO_MACRO2STR`
 
@@ -623,18 +655,6 @@ int64_t FIO_NAME2(a, l)(const char * buf) {
 
 Sets naming convention for boolean functions, i.e.: foo_is_true
 
-i.e.:
-
-```c
-// typedef struct { long l; } number_s
-typedef struct { long l; } FIO_NAME(number, s)
-
-// int number_is_zero(number_s n)
-int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
-  return (!n.l);
-}
-```
-
 #### `FIO_NAME_TEST`
 
 ```c
@@ -643,96 +663,105 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 
 Used internally to name test functions.
 
-#### `FIO_DEF_GET_FUNC` / `FIO_DEF_GET_FUNC_DEF`
+#### `FIO_FOR`
 
 ```c
-#define FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, field_name)        \
-  /** Returns current value of property within the struct / union. */          \
-  static F_type FIO_NAME(namespace, field_name)(T_type * o) {                  \
-    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `get`!"); \
-    return o->field_name;                                                      \
-  }
-
-#define FIO_DEF_GET_FUNC_DEF(static, namespace, T_type, F_type, field_name)    \
-  /** Returns current value of property within the struct / union. */          \
-  static F_type FIO_NAME(namespace, field_name)(T_type * o);
+#define FIO_FOR(i, count) for (size_t i = 0; i < (count); ++i)
 ```
 
-Defines a `get` function for a field within a struct / union.
+Helper for simple `for` loops, where `i` is the variable name to use.
 
-This allows for consistent naming of `get` functions.
+-------------------------------------------------------------------------------
 
-**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
+## Compiler Guards and Memory Barriers
 
-#### `FIO_DEF_SET_FUNC` / `FIO_DEF_SET_FUNC_DEF`
+#### `FIO_COMPILER_GUARD`
 
 ```c
-#define FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)    \
-  /** Sets a new value, returning the old one */                               \
-  static F_type FIO_NAME(FIO_NAME(namespace, field_name),                      \
-                         set)(T_type * o, F_type new_value) {                  \
-    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `set`!"); \
-    F_type old_value = o->field_name;                                          \
-    o->field_name = new_value;                                                 \
-    on_set(o);                                                                 \
-    return old_value;                                                          \
-  }
-
-#define FIO_DEF_SET_FUNC_DEF(static, namespace, T_type, F_type, F_name)        \
-  /** Sets a new value, returning the old one */                               \
-  static F_type FIO_NAME(FIO_NAME(namespace, F_name), set)(T_type * o,         \
-                                                           F_type new_value);
+#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
 ```
 
-Defines a `set` function for a field within a struct / union.
+Clobber CPU registers and prevent compiler reordering optimizations.
 
-This allows for consistent naming of `set` functions.
-
-#### `FIO_DEF_GETSET_FUNC`
+#### `FIO_COMPILER_GUARD_INSTRUCTION`
 
 ```c
-#define FIO_DEF_GETSET_FUNC(static, namespace, T_type, F_type, F_name, on_set) \
-  FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, F_name)                  \
-  FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)
+#define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
 ```
 
-Defines `get` / `set` functions for a field within a struct / union.
+Prevent compiler instruction reordering without clobbering memory.
 
-#### `FIO_IFUNC_DEF_GET`
+-------------------------------------------------------------------------------
+
+## Thread Scheduling Macros
+
+#### `FIO_THREAD_WAIT`
 
 ```c
-#define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
-  FIO_DEF_GET_FUNC(FIO_IFUNC, namespace, T_type, F_type, field_name)
+#define FIO_THREAD_WAIT(nano_sec)
 ```
 
-Defines a `get` function for a field within a struct / union.
+Calls the system's sleep function with the requested nano-second count.
 
-This allows for consistent naming of `get` functions.
+On POSIX systems, calls `nanosleep`. On Windows, calls `Sleep`.
 
-**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
-
-#### `FIO_IFUNC_DEF_SET`
+#### `FIO_THREAD_YIELD`
 
 ```c
-#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)               \
-  FIO_DEF_SET_FUNC(FIO_IFUNC, namespace, T_type, F_type, F_name, on_set)
+#define FIO_THREAD_YIELD()
 ```
 
-Defines a `set` function for a field within a struct / union.
+Yields the thread, hinting to the processor about a spinlock loop.
 
-The `on_set` callback accepts a pointer to the updated struct and a pointer to the old value (in this order).
+Uses CPU-specific instructions (`pause` on x86, `yield` on ARM) when available.
 
-If no `on_set` is required, using `FIO_NOOP_FN` as the `on_set` value.
-
-#### `FIO_IFUNC_DEF_GETSET`
+#### `FIO_THREAD_RESCHEDULE`
 
 ```c
-#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, F_name, on_set)        \
-  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, F_name)                         \
-  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)
+#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
 ```
 
-Shortcut for defining both a `get` and a `set` function for a field within a struct / union.
+Reschedules the thread by calling nanosleep for a few nanoseconds.
+
+In practice, the thread will probably sleep for 60ns or more. Seems to be faster than `FIO_THREAD_YIELD`, perhaps it prevents de-prioritization of the thread.
+
+-------------------------------------------------------------------------------
+
+## Assertions
+
+#### `FIO_ASSERT`
+
+```c
+#define FIO_ASSERT(cond, ...)
+```
+
+Asserts a condition is true, or kills the application using SIGINT.
+
+Prints the error message and errno information before aborting.
+
+#### `FIO_ASSERT_ALLOC`
+
+```c
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
+```
+
+Tests for an allocation failure. The behavior can be overridden.
+
+#### `FIO_ASSERT_DEBUG`
+
+```c
+#define FIO_ASSERT_DEBUG(cond, ...)
+```
+
+If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP.
+
+#### `FIO_ASSERT_STATIC`
+
+```c
+#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
+```
+
+Compile-time assertion. Uses C11 `_Static_assert` when available.
 
 -------------------------------------------------------------------------------
 
@@ -740,14 +769,12 @@ Shortcut for defining both a `get` and a `set` function for a field within a str
 
 The following macros are defined to allow for memory copying primitives of set sizes.
 
-In addition an overrideble `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
+In addition an overridable `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
 
 #### `FIO_MEMCPY`
 
 ```c
-#ifndef
 #define FIO_MEMCPY memcpy // or __builtin_memcpy if available
-#endif
 ```
 
 This macro makes it easy to override the `memcpy` implementation used by the library.
@@ -757,9 +784,7 @@ By default this will be set to either `memcpy` or `__builtin_memcpy` (if availab
 #### `FIO_MEMMOVE`
 
 ```c
-#ifndef
 #define FIO_MEMMOVE memmove // or __builtin_memmove if available
-#endif
 ```
 
 This macro makes it easy to override the `memmove` implementation used by the library.
@@ -772,6 +797,7 @@ By default this will be set to either `memmove` or `__builtin_memmove` (if avail
 static void * fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
 static void * fio_memcpy1(void *restrict dest, const void *restrict src);
 static void * fio_memcpy2(void *restrict dest, const void *restrict src);
+static void * fio_memcpy3(void *restrict dest, const void *restrict src);
 static void * fio_memcpy4(void *restrict dest, const void *restrict src);
 static void * fio_memcpy8(void *restrict dest, const void *restrict src);
 static void * fio_memcpy16(void *restrict dest, const void *restrict src);
@@ -780,14 +806,14 @@ static void * fio_memcpy64(void *restrict dest, const void *restrict src);
 // ... void * fio_memcpy4096
 ```
 
-Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including).
+Copies a pre-defined `n` bytes from `src` to `dest` where `n` is a power of 2 between 1 and 4096 (including).
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
 #### `fio_memcpy##x`
 
 ```c
-static void * fio_memcpy7x(void *restrict dest, const void *restrict src), size_t length;
+static void * fio_memcpy7x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy15x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy31x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy63x(void *restrict dest, const void *restrict src, size_t length);
@@ -817,9 +843,7 @@ On most of `libc` implementations the library call will be faster. On embedded s
 #### `FIO_MEMSET`
 
 ```c
-#ifndef
 #define FIO_MEMSET memset // or __builtin_memset if available
-#endif
 ```
 
 This macro makes it easy to override the `memset` implementation used by the library.
@@ -845,9 +869,7 @@ Returns `dest` (the pointer originally received).
 #### `FIO_MEMCHR`
 
 ```c
-#ifndef
 #define FIO_MEMCHR memchr // or __builtin_memchr if available
-#endif
 ```
 
 This macro makes it easy to override the `memchr` implementation used by the library.
@@ -871,9 +893,7 @@ On most of `libc` implementations the library call will be faster. Test before d
 #### `FIO_MEMCMP`
 
 ```c
-#ifndef
 #define FIO_MEMCMP memcmp // or __builtin_memcmp if available
-#endif
 ```
 
 This macro makes it easy to override the `memcmp` implementation used by the library.
@@ -895,9 +915,7 @@ Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
 #### `FIO_STRLEN`
 
 ```c
-#ifndef
-#define FIO_MEMCMP strlen // or __builtin_memstrlen if available
-#endif
+#define FIO_STRLEN strlen // or __builtin_strlen if available
 ```
 
 This macro makes it easy to override the `strlen` implementation used by the library.
@@ -920,31 +938,27 @@ If defined, defines all previously undefined memory macros to use facil.io's fal
 
 Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `fio_memcpy##` functions.
 
+-------------------------------------------------------------------------------
+
+## Security Related Functions
+
+#### `fio_secure_zero`
+
 ```c
-#ifdef FIO_MEMALT
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY fio_memcpy
-#endif
-#ifndef FIO_MEMMOVE
-#define FIO_MEMMOVE fio_memcpy
-#endif
-#ifndef FIO_MEMCMP
-#define FIO_MEMCMP fio_memcmp
-#endif
-#ifndef FIO_MEMCHR
-#define FIO_MEMCHR fio_memchr
-#endif
-#ifndef FIO_MEMSET
-#define FIO_MEMSET fio_memset
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#endif /* FIO_MEMALT */
+void fio_secure_zero(const void *a_, size_t bytes);
 ```
+
+Securely zeros memory, preventing compiler optimizations from removing the operation.
+
+Use this to clear sensitive data (passwords, keys, etc.) from memory.
+
+#### `FIO_MEM_STACK_WIPE`
+
+```c
+#define FIO_MEM_STACK_WIPE(pages)
+```
+
+Wipes stack memory by allocating and zeroing a volatile array of the specified number of pages (each page is 4096 bytes).
 
 -------------------------------------------------------------------------------
 
@@ -1025,6 +1039,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Big Endian**:
 
 - `fio_buf2u16_be(buffer)`
+- `fio_buf2u24_be(buffer)`
 - `fio_buf2u32_be(buffer)`
 - `fio_buf2u64_be(buffer)`
 - `fio_buf2u128_be(buffer)`
@@ -1032,6 +1047,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Little Endian**:
 
 - `fio_buf2u16_le(buffer)`
+- `fio_buf2u24_le(buffer)`
 - `fio_buf2u32_le(buffer)`
 - `fio_buf2u64_le(buffer)`
 - `fio_buf2u128_le(buffer)`
@@ -1039,6 +1055,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Native (Unspecified) Byte Order**:
 
 - `fio_buf2u16u(buffer)`
+- `fio_buf2u24u(buffer)`
 - `fio_buf2u32u(buffer)`
 - `fio_buf2u64u(buffer)`
 - `fio_buf2u128u(buffer)`
@@ -1050,6 +1067,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Big Endian (default)**:
 
 - `fio_u2buf16_be(buffer, i)`
+- `fio_u2buf24_be(buffer, i)`
 - `fio_u2buf32_be(buffer, i)`
 - `fio_u2buf64_be(buffer, i)`
 - `fio_u2buf128_be(buffer, i)`
@@ -1057,6 +1075,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Little Endian**:
 
 - `fio_u2buf16_le(buffer, i)`
+- `fio_u2buf24_le(buffer, i)`
 - `fio_u2buf32_le(buffer, i)`
 - `fio_u2buf64_le(buffer, i)`
 - `fio_u2buf128_le(buffer, i)`
@@ -1064,6 +1083,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Native (Unspecified) Byte Order**:
 
 - `fio_u2buf16u(buffer, i)`
+- `fio_u2buf24u(buffer, i)`
 - `fio_u2buf32u(buffer, i)`
 - `fio_u2buf64u(buffer, i)`
 - `fio_u2buf128u(buffer, i)`
@@ -1078,34 +1098,158 @@ Masks data using a 64 bit mask.
 
 The function may perform significantly better when the buffer's memory is aligned.
 
-#### Constant Time Helpers
+#### `fio_xmask_cpy`
+
+```c
+void fio_xmask_cpy(char *restrict dest, const char *src, size_t len, uint64_t mask);
+```
+
+Masks data using a 64 bit mask while copying from `src` to `dest`.
+
+If `dest == src`, behaves like `fio_xmask`.
+
+-------------------------------------------------------------------------------
+
+## Constant Time Helpers
 
 Performs the operation indicated in constant time.
 
-- `fio_ct_true(condition)`
+#### `fio_ct_true`
 
-    Tests if `condition` is non-zero (returns `1` / `0`).
+```c
+uintmax_t fio_ct_true(uintmax_t cond);
+```
 
-- `fio_ct_false(condition)`
+Returns 1 if `cond` is non-zero, 0 otherwise.
 
-    Tests if `condition` is zero (returns `1` / `0`).
+#### `fio_ct_false`
 
-- `fio_ct_if_bool(bool, a_if_true, b_if_false)`
+```c
+uintmax_t fio_ct_false(uintmax_t cond);
+```
 
-    Tests if `bool == 1` (returns `a` if `true` and `b` if `false`).
+Returns 1 if `cond` is zero, 0 otherwise.
 
-- `fio_ct_if(condition, a_if_true, b_if_false)`
+#### `fio_ct_if_bool`
 
-    Tests if `condition` is non-zero (returns `a` / `b`).
+```c
+uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b);
+```
 
-- `fio_ct_max(a, b)`
+Returns `a` if `cond == 1`, returns `b` otherwise.
 
-    Returns `a` if a >= `b` (performs a **signed** comparison).
+#### `fio_ct_if`
 
+```c
+uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b);
+```
 
-- `fio_ct_is_eq(const void * a, const void * b, len)`
+Returns `a` if `cond` is non-zero, returns `b` otherwise.
 
-    Returns 1 if memory regions are equal. Should be resistant to timing attacks.
+#### `fio_ct_max`
+
+```c
+intmax_t fio_ct_max(intmax_t a, intmax_t b);
+```
+
+Returns `a` if `a >= b` (performs a **signed** comparison).
+
+#### `fio_ct_min`
+
+```c
+intmax_t fio_ct_min(intmax_t a, intmax_t b);
+```
+
+Returns `a` if `a <= b` (performs a **signed** comparison).
+
+#### `fio_ct_abs`
+
+```c
+uintmax_t fio_ct_abs(intmax_t i);
+```
+
+Returns the absolute value of `i`.
+
+#### `fio_ct_is_eq`
+
+```c
+_Bool fio_ct_is_eq(const void *a, const void *b, size_t len);
+```
+
+Returns 1 if memory regions are equal. Should be resistant to timing attacks.
+
+-------------------------------------------------------------------------------
+
+## Constant-Time Bitwise Selection Functions
+
+These functions perform bitwise selection operations in constant time. They are commonly used in cryptographic algorithms (SHA, AES, etc.) and can also be used for branchless programming.
+
+#### `fio_ct_mux32` / `fio_ct_mux64`
+
+```c
+uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "choose": for each bit, if x is set, return y's bit, else z's bit.
+
+Formula: `z ^ (x & (y ^ z))`
+
+Used in: SHA-1 (Ch), SHA-256 (Ch), SHA-512 (Ch), AES, etc.
+
+#### `fio_ct_maj32` / `fio_ct_maj64`
+
+```c
+uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "majority": for each bit position, return 1 if 2+ inputs have 1.
+
+Formula: `(x & y) | (z & (x | y))`
+
+Used in: SHA-1 (Maj), SHA-256 (Maj), SHA-512 (Maj), etc.
+
+#### `fio_ct_xor3_32` / `fio_ct_xor3_64`
+
+```c
+uint32_t fio_ct_xor3_32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_xor3_64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "parity": XOR of all three inputs (1 if odd number of 1s).
+
+Formula: `x ^ y ^ z`
+
+Used in: SHA-1 (Parity function for rounds 20-39 and 60-79)
+
+-------------------------------------------------------------------------------
+
+## Combined Rotation-XOR Operations
+
+These combine multiple rotations with XOR, which is a common pattern in SHA-2, BLAKE2, and other hash functions.
+
+#### `fio_xor_rrot3_32` / `fio_xor_rrot3_64`
+
+```c
+uint32_t fio_xor_rrot3_32(uint32_t x, uint8_t a, uint8_t b, uint8_t c);
+uint64_t fio_xor_rrot3_64(uint64_t x, uint8_t a, uint8_t b, uint8_t c);
+```
+
+XOR of three right rotations: `ROTR(x,a) ^ ROTR(x,b) ^ ROTR(x,c)`
+
+Common in SHA-256/SHA-512 Sigma functions.
+
+#### `fio_xor_rrot2_shr_32` / `fio_xor_rrot2_shr_64`
+
+```c
+uint32_t fio_xor_rrot2_shr_32(uint32_t x, uint8_t a, uint8_t b, uint8_t c);
+uint64_t fio_xor_rrot2_shr_64(uint64_t x, uint8_t a, uint8_t b, uint8_t c);
+```
+
+XOR of two right rotations and a right shift: `ROTR(x,a) ^ ROTR(x,b) ^ SHR(x,c)`
+
+Common in SHA-256/SHA-512 sigma (lowercase) functions for message schedule.
 
 -------------------------------------------------------------------------------
 
@@ -1115,17 +1259,93 @@ Performs the operation indicated in constant time.
 
 **Note**: for mutable shared data, please consider using the atomic operations.
 
-#### Bitmap helpers
+### Bitmap helpers
 
-- `fio_bit_get(void *map, size_t bit)`
+#### `fio_bit_get`
 
-- `fio_bit_set(void *map, size_t bit)`   (a **non-atomic** operation, **not** thread-safe)
+```c
+uint8_t fio_bit_get(void *map, size_t bit);
+```
 
-- `fio_bit_unset(void *map, size_t bit)` (a **non-atomic** operation, **not** thread-safe)
+Gets the state of a bit in a bitmap.
 
-Sets and un-sets bits in an arbitrary bitmap - non-atomic, **not** thread-safe.
+#### `fio_bit_set`
 
-#### `fio_popcount` and Hemming 
+```c
+void fio_bit_set(void *map, size_t bit);
+```
+
+Sets a bit in a bitmap (sets to 1). **Non-atomic**, not thread-safe.
+
+#### `fio_bit_unset`
+
+```c
+void fio_bit_unset(void *map, size_t bit);
+```
+
+Unsets a bit in a bitmap (sets to 0). **Non-atomic**, not thread-safe.
+
+#### `fio_bit_flip`
+
+```c
+void fio_bit_flip(void *map, size_t bit);
+```
+
+Flips a bit in a bitmap (sets to 0 if 1, sets to 1 if 0). **Non-atomic**, not thread-safe.
+
+### Bit Isolation and Indexing
+
+#### `fio_bits_lsb`
+
+```c
+uint64_t fio_bits_lsb(uint64_t i);
+```
+
+Isolates the least significant (lowest) bit.
+
+#### `fio_bits_msb`
+
+```c
+uint64_t fio_bits_msb(uint64_t i);
+```
+
+Isolates the most significant (highest) bit.
+
+#### `fio_bits_lsb_index`
+
+```c
+size_t fio_bits_lsb_index(uint64_t i);
+```
+
+Returns the index of the least significant (lowest) bit. Returns `(size_t)-1` if `i` is 0.
+
+#### `fio_bits_msb_index`
+
+```c
+size_t fio_bits_msb_index(uint64_t i);
+```
+
+Returns the index of the most significant (highest) bit. Returns `(size_t)-1` if `i` is 0.
+
+#### `fio_lsb_index_unsafe`
+
+```c
+size_t fio_lsb_index_unsafe(uint64_t i);
+```
+
+Returns the index of the least significant (lowest) bit. Undefined behavior if `i` is 0.
+
+#### `fio_msb_index_unsafe`
+
+```c
+size_t fio_msb_index_unsafe(uint64_t i);
+```
+
+Returns the index of the most significant (highest) bit. Undefined behavior if `i` is 0.
+
+### Popcount and Hamming Distance
+
+#### `fio_popcount`
 
 ```c
 int fio_popcount(uint64_t n);
@@ -1139,82 +1359,99 @@ Returns the number of set bits in the number `n`.
 #define fio_hemming_dist(n1, n2) fio_popcount(((uint64_t)(n1) ^ (uint64_t)(n2)))
 ```
 
-Returns the Hemming Distance between the number `n1` and the number `n2`.
+Returns the Hamming Distance between the number `n1` and the number `n2`.
 
-Hemming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
+Hamming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
 
+### Byte Detection in Vectors
 
 #### `fio_has_full_byte32`
 
 ```c
-uint32_t fio_has_full_byte32(uint32_t row)
+uint32_t fio_has_full_byte32(uint32_t row);
 ```
 
-  Detects a byte where all the bits are set (`255`) within a 4 byte vector.
+Detects a byte where all the bits are set (`255`) within a 4 byte vector.
 
 #### `fio_has_zero_byte32`
 
 ```c
-uint32_t fio_has_zero_byte32(uint32_t row)
+uint32_t fio_has_zero_byte32(uint32_t row);
 ```
 
-  Detects a byte where no bits are set (0) within a 4 byte vector.
+Detects a byte where no bits are set (0) within a 4 byte vector.
 
 #### `fio_has_byte32`
 
 ```c
-uint32_t fio_has_byte32(uint32_t row, uint8_t byte)
+uint32_t fio_has_byte32(uint32_t row, uint8_t byte);
 ```
 
-  Detects if `byte` exists within a 4 byte vector.
+Detects if `byte` exists within a 4 byte vector.
 
 #### `fio_has_full_byte64`
 
 ```c
-uint64_t fio_has_full_byte64(uint64_t row)
+uint64_t fio_has_full_byte64(uint64_t row);
 ```
 
-  Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+Detects a byte where all the bits are set (`255`) within an 8 byte vector.
 
 #### `fio_has_zero_byte64`
 
 ```c
-uint64_t fio_has_zero_byte64(uint64_t row)
+uint64_t fio_has_zero_byte64(uint64_t row);
 ```
 
-  Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
+Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
+
+#### `fio_has_zero_byte_alt64`
+
+```c
+uint64_t fio_has_zero_byte_alt64(uint64_t row);
+```
+
+Alternative version of `fio_has_zero_byte64`. Should NOT be used to build a bitmap, but may be used to detect the first occurrence.
 
 #### `fio_has_byte64`
 
 ```c
-uint64_t fio_has_byte64(uint64_t row, uint8_t byte)
+uint64_t fio_has_byte64(uint64_t row, uint8_t byte);
 ```
 
-  Detects if `byte` exists within an 8 byte vector.
+Detects if `byte` exists within an 8 byte vector.
+
+#### `fio_has_byte2bitmap`
+
+```c
+uint64_t fio_has_byte2bitmap(uint64_t result);
+```
+
+Converts a `fio_has_byteX` result to a bitmap.
 
 #### `fio_has_full_byte128`
 
 ```c
-__uint128_t fio_has_full_byte128(__uint128_t row)
+__uint128_t fio_has_full_byte128(__uint128_t row);
 ```
 
-    Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+Detects a byte where all the bits are set (`255`) within a 16 byte vector.
 
 #### `fio_has_zero_byte128`
 
 ```c
-__uint128_t fio_has_zero_byte128(__uint128_t row)
+__uint128_t fio_has_zero_byte128(__uint128_t row);
 ```
 
-    Detects a byte where no bits are set (0) within an 8 byte vector.
+Detects a byte where no bits are set (0) within a 16 byte vector.
 
 #### `fio_has_byte128`
 
 ```c
-__uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
+__uint128_t fio_has_byte128(__uint128_t row, uint8_t byte);
 ```
 
-    Detects if `byte` exists within an 8 byte vector.
+Detects if `byte` exists within a 16 byte vector.
 
 -------------------------------------------------------------------------------
 
@@ -1268,7 +1505,7 @@ Subtract with carry.
 uint64_t fio_math_sub(uint64_t *dest,
                       const uint64_t *a,
                       const uint64_t *b,
-                      const size_t len)
+                      const size_t len);
 ```
 
 Multi-precision SUB for `len` 64 bit words a + b. Returns the borrow.
@@ -1291,7 +1528,7 @@ Multiply with carry out.
 void fio_math_mul(uint64_t *restrict dest,
                   const uint64_t *a,
                   const uint64_t *b,
-                  const size_t len)
+                  const size_t len);
 ```
 
 Multi-precision MUL for `len` 64 bit words.
@@ -1387,62 +1624,34 @@ void fio_u8x256_add(uint8_t * dest, uint8_t * a, uint8_t *b);
 
 void fio_u16x2_add(uint16_t * dest, uint16_t * a, uint16_t *b);
 void fio_u16x4_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x8_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x16_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x32_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x64_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x128_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+// ... etc.
 
 void fio_u32x2_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x4_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x8_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x16_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x32_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x64_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+// ... etc.
 
 void fio_u64x2_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x4_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x8_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x16_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x32_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+// ... etc.
 ```
 
-The following operations are supported: `add`, `mul`, `and`, `or`, `xor`.
+The following operations are supported: `add`, `sub`, `mul`, `and`, `or`, `xor`.
 
-#### Vectorized Mathematical Summing (`fio_u##x#_OP`)
+#### Vectorized Mathematical Summing (`fio_u##x#_reduce_OP`)
 
 Sum vectors up using Add, Or, XOR, and more using any of the following (or similarly named):
 
 ```c
 uint8_t fio_u8x4_reduce_add(uint8_t * v);
 uint8_t fio_u8x8_reduce_add(uint8_t * v);
-uint8_t fio_u8x16_reduce_add(uint8_t * v);
-uint8_t fio_u8x32_reduce_add(uint8_t * v);
-uint8_t fio_u8x64_reduce_add(uint8_t * v);
-uint8_t fio_u8x128_reduce_add(uint8_t * v);
-uint8_t fio_u8x256_reduce_add(uint8_t * v);
+// ... etc.
 
 uint16_t fio_u16x2_reduce_add(uint16_t * v);
-uint16_t fio_u16x4_reduce_add(uint16_t * v);
-uint16_t fio_u16x8_reduce_add(uint16_t * v);
-uint16_t fio_u16x16_reduce_add(uint16_t * v);
-uint16_t fio_u16x32_reduce_add(uint16_t * v);
-uint16_t fio_u16x64_reduce_add(uint16_t * v);
-uint16_t fio_u16x128_reduce_add(uint16_t * v);
+// ... etc.
 
 uint32_t fio_u32x2_reduce_add(uint32_t * v);
-uint32_t fio_u32x4_reduce_add(uint32_t * v);
-uint32_t fio_u32x8_reduce_add(uint32_t * v);
-uint32_t fio_u32x16_reduce_add(uint32_t * v);
-uint32_t fio_u32x32_reduce_add(uint32_t * v);
-uint32_t fio_u32x64_reduce_add(uint32_t * v);
+// ... etc.
 
 uint64_t fio_u64x2_reduce_add(uint64_t * v);
-uint64_t fio_u64x4_reduce_add(uint64_t * v);
-uint64_t fio_u64x8_reduce_add(uint64_t * v);
-uint64_t fio_u64x16_reduce_add(uint64_t * v);
-uint64_t fio_u64x32_reduce_add(uint64_t * v);
-
+// ... etc.
 ```
 
 The following summation operations are supported: `max`, `min`, `add`, `mul`, `and`, `or`, `xor`.
@@ -1454,56 +1663,18 @@ Reorders the words inside the vector.
 ```c
 #define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
 #define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
-#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
-#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
-#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
-#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
-#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
-#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
-#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
-#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
-#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
-#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+// ... etc.
 ```
 
 -------------------------------------------------------------------------------
 
 ## Atomic Operations (Core)
 
-```c
-#define FIO_ATOMIC
-#include "fio-stl.h"
-```
-
 If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
 
 In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
 
-#### `fio_atomic_load(p_obj)`
+#### `fio_atomic_load(dest, p_obj)`
 
 Atomically loads and returns the value stored in the object pointed to by `p_obj`.
 
@@ -1594,13 +1765,13 @@ Returns 1 for successful exchange or 0 for failure.
 
 #### Atomic Bitmap helpers
 
-- `fio_atomic_bit_get(void *map, size_t bit)`
+- `fio_atomic_bit_get(void *map, size_t bit)` - Gets the state of a bit atomically.
 
-- `fio_atomic_bit_set(void *map, size_t bit)`   (an **atomic** operation, thread-safe)
+- `fio_atomic_bit_set(void *map, size_t bit)` - Sets a bit atomically (an **atomic** operation, thread-safe).
 
-- `fio_atomic_bit_unset(void *map, size_t bit)` (an **atomic** operation, thread-safe)
+- `fio_atomic_bit_unset(void *map, size_t bit)` - Unsets a bit atomically (an **atomic** operation, thread-safe).
 
-Gets / Sets bits an atomic thread-safe way.
+- `fio_atomic_bit_flip(void *map, size_t bit)` - Flips a bit atomically (an **atomic** operation, thread-safe).
 
 -------------------------------------------------------------------------------
 
@@ -1675,11 +1846,144 @@ Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
 
 #### `fio_lock_full(fio_lock_i *lock)`
 
-Busy waits for all sub-locks to become available - not recommended.
+Busy waits for all sub lock to become available - not recommended.
 
 #### `fio_unlock_full(fio_lock_i *lock)`
 
-Unlocks all sub-locks, no matter which thread owns which lock.
+Unlocks all sub locks, no matter which thread owns which lock.
+
+-------------------------------------------------------------------------------
+
+## Linked Lists
+
+#### `fio_list_node_s`
+
+```c
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+```
+
+A linked list arch-type.
+
+#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
+
+```c
+#define FIO_LIST_NODE fio_list_node_s
+#define FIO_LIST_HEAD fio_list_node_s
+```
+
+Type aliases for linked list nodes and heads.
+
+#### `FIO_LIST_INIT`
+
+```c
+#define FIO_LIST_INIT(obj) (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
+```
+
+Allows initialization of FIO_LIST_HEAD objects.
+
+#### `FIO_LIST_EACH`
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list except the head.
+
+#### `FIO_LIST_EACH_REVERSED`
+
+```c
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list in reverse order except the head.
+
+#### `FIO_LIST_PUSH`
+
+```c
+#define FIO_LIST_PUSH(head, n)
+```
+
+UNSAFE macro for pushing a node to a list.
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)
+```
+
+UNSAFE macro for removing a node from a list.
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)
+```
+
+UNSAFE macro for removing a node from a list. Resets node data.
+
+#### `FIO_LIST_POP`
+
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)
+```
+
+UNSAFE macro for popping a node from a list.
+
+#### `FIO_LIST_IS_EMPTY`
+
+```c
+#define FIO_LIST_IS_EMPTY(head)
+```
+
+UNSAFE macro for testing if a list is empty.
+
+-------------------------------------------------------------------------------
+
+## Indexed Linked Lists
+
+Indexed Linked Lists can be used to create a linked list that uses is always relative to some root pointer (usually the root of an array). This:
+
+1. Allows easy reallocation of the list without requiring pointer updates.
+2. Could be used for memory optimization if the array limits are known.
+
+The "head" index is usually validated by reserving the value of `-1` to indicate an empty list.
+
+#### `fio_index32_node_s` / `fio_index16_node_s` / `fio_index8_node_s`
+
+```c
+typedef struct fio_index32_node_s { uint32_t next; uint32_t prev; } fio_index32_node_s;
+typedef struct fio_index16_node_s { uint16_t next; uint16_t prev; } fio_index16_node_s;
+typedef struct fio_index8_node_s { uint8_t next; uint8_t prev; } fio_index8_node_s;
+```
+
+Indexed linked list node types for different index sizes.
+
+#### `FIO_INDEXED_LIST_PUSH`
+
+```c
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)
+```
+
+UNSAFE macro for pushing a node to an indexed list.
+
+#### `FIO_INDEXED_LIST_REMOVE`
+
+```c
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)
+```
+
+UNSAFE macro for removing a node from an indexed list.
+
+#### `FIO_INDEXED_LIST_EACH`
+
+```c
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)
+```
+
+Loops through every index in the indexed list, assuming `head` is valid.
 
 -------------------------------------------------------------------------------
 
@@ -1694,36 +1998,18 @@ The following union types hold (little endian) arrays of unsigned 64 bit numbers
 - `fio_u2048`
 - `fio_u4096`
 
-The main ones are as follows (the rest follow the same pattern):
-
 #### `fio_u128`
 
 ```c
 typedef union {
-  /** unsigned native word size array, length is system dependent */
   size_t uz[16 / sizeof(size_t)];
-
-  /** known bit word arrays */
   uint64_t u64[2];
   uint32_t u32[4];
   uint16_t u16[8];
   uint8_t u8[16];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[1];
-  uint32x4_t x32[1];
-  uint16x8_t x16[1];
-  uint8x16_t x8[1];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(16)));
-  uint64_t x32 __attribute__((vector_size(16)));
-  uint64_t x16 __attribute__((vector_size(16)));
-  uint64_t x8 __attribute__((vector_size(16)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[1];
-#endif
+  int64_t i64[2];
+  int32_t i32[4];
+  // ... plus vector types if supported
 } fio_u128 FIO_ALIGN(16);
 ```
 
@@ -1731,74 +2017,9 @@ An unsigned 128 bit union type.
 
 #### `fio_u256`
 
-```c
-typedef union {
-  /** unsigned native word size array, length is system dependent */
-  size_t uz[32 / sizeof(size_t)];
-
-  /** known bit word arrays */
-  uint64_t u64[4];
-  uint32_t u32[8];
-  uint16_t u16[16];
-  uint8_t u8[32];
-
-  /* previous types */
-  fio_u128 u128[2];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[2];
-  uint32x4_t x32[2];
-  uint16x8_t x16[2];
-  uint8x16_t x8[2];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(32)));
-  uint64_t x32 __attribute__((vector_size(32)));
-  uint64_t x16 __attribute__((vector_size(32)));
-  uint64_t x8 __attribute__((vector_size(32)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[2];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t alignment_for_u256_[1];
-#endif
-} fio_u256 FIO_ALIGN(16);
-```
-
-An unsigned 256 bit union type.
+An unsigned 256 bit union type. Same structure as `fio_u128` but with larger arrays.
 
 #### `fio_u512`
-
-```c
-typedef union {
-  /** unsigned native word size array, length is system dependent */
-  size_t uz[64 / sizeof(size_t)];
-
-  /** known bit word arrays */
-  uint64_t u64[8];
-  uint32_t u32[16];
-  uint16_t u16[32];
-  uint8_t u8[64];
-
-  /* previous types */
-  fio_u128 u128[4];
-  fio_u256 u256[2];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[4];
-  uint32x4_t x32[4];
-  uint16x8_t x16[4];
-  uint8x16_t x8[4];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(64)));
-  uint64_t x32 __attribute__((vector_size(64)));
-  uint64_t x16 __attribute__((vector_size(64)));
-  uint64_t x8 __attribute__((vector_size(64)));
-#endif
-} fio_u512 FIO_ALIGN(16);
-```
 
 An unsigned 512 bit union type.
 
@@ -1813,31 +2034,7 @@ Fast and easy macros are provided for these numeral helper initialization, initi
 #define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
 #define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
 #define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
-
-#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
-#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
-#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
-
-#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
-#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
-#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
-
-#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
-#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
-#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
-
-#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
-#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
-#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
-
-#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
-#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
-#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+// ... similar for fio_u256, fio_u512, etc.
 ```
 
 ### Numeral / Vector Helper Type Load / Store
@@ -1846,74 +2043,44 @@ These numerals can be stored and loaded from memory using big endian / little en
 
 #### `fio_u128_load`, `fio_u256_load` ...
 
-- `fio_u128 fio_u128_load(const void *buf)`          - load in native ordering.
+- `fio_u128 fio_u128_load(const void *buf)` - load in native ordering.
 - `void fio_u128_store(void *buf, const fio_u128 a)` - store in native ordering.
 - `fio_u128 fio_u128_load_le16(const void *buf)` - load in little endian ordering using 16 bit words.
 - `fio_u128 fio_u128_load_be16(const void *buf)` - load in big endian ordering using 16 bit words.
-- `fio_u128 fio_u128_bswap16(const void *buf)`   - load in and byte-swap using 16 bit words (2 bytes).
-- `fio_u128 fio_u128_load_le32(const void *buf)` - load in little endian ordering using 32 bit words.
-- `fio_u128 fio_u128_load_be32(const void *buf)` - load in big endian ordering using 32 bit words.
-- `fio_u128 fio_u128_bswap32(const void *buf)`   - load in and byte-swap using 32 bit words (2 bytes).
-- `fio_u128 fio_u128_load_le64(const void *buf)` - load in little endian ordering using 64 bit words.
-- `fio_u128 fio_u128_load_be64(const void *buf)` - load in big endian ordering using 64 bit words.
-- `fio_u128 fio_u128_bswap64(const void *buf)`   - load in and byte-swap using 64 bit words (2 bytes).
-
-- `fio_u256 fio_u256_load(const void *buf)`          - load in native ordering.
-- `void fio_u256_store(void *buf, const fio_u256 a)` - store in native ordering.
-- ... (etc')
+- `fio_u128 fio_u128_bswap16(const void *buf)` - load in and byte-swap using 16 bit words.
+- ... similar for 32 and 64 bit words, and for larger types.
 
 ### Numeral / Vector Helper Type Operation
 
-Common mathematical operations are provided for the Vector Helper Types, much like they were provided for the Native C typed vectors.
+Common mathematical operations are provided for the Vector Helper Types.
 
 #### `fio_u128_add16`, `fio_u256_sub32`, `fio_u512_mul64` ...
 
 These functions follow the naming scheme of `fio_u##TOTAL_BITS##_##OP##WORD_BITS`, where `TOTAL_BITS` is the total number of bits, `OP` is the name of the operation (`add`, `sub`, `mul`, etc') and `WORD_BITS` is the number of bits in each vector "word".
 
-i.e:
-
-- `void fio_u128_add8(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs a modular 8 bit ADD (`+`) operation `a+b`.
-- `void fio_u256_sub16(fio_u256 *t, fio_u256 *a, fio_u256 *b)`  - performs a modular 16 bit SUB (`-`) operation `a-b`.
-- `void fio_u512_mul32(fio_u512 *t, fio_u512 *a, fio_u512 *b)`  - performs a modular 32 bit MUL (`*`) operation `a*b`.
-- `void fio_u1024_and(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit AND (`&`) operation `a&b`.
-- `void fio_u2048_or(fio_u512 *t, fio_u512 *a, fio_u512 *b)`    - performs a bit OR (`|`) operation `a|b`.
-- `void fio_u4096_xor(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit XOR (`^`) operation `a^b`.
-
 Supported operations (`OP`) are: `add`, `sub`, `mul`, `and`, `or`, `xor`.
-
-For bitwise operations, the `WORD_BITS` part of the function name is optional.
-
-
-#### `fio_u128_cadd16`, `fio_u128_csub32`, `fio_u256_cmul64` ...
-
-These functions perform an operation `a OP b` where `b` is a constant rather than a vector.
-
-i.e.:
-
-- `void fio_u128_cadd8(fio_u128 *t, fio_u128 *a, uint8_t b)`     - performs a modular 8 bit ADD (`+`) operation `a+b`.
-- `void fio_u256_csub16(fio_u256 *t, fio_u256 *a, uint16_t b)`   - performs a modular 16 bit SUB (`-`) operation `a-b`.
-- `void fio_u512_cmul32(fio_u512 *t, fio_u512 *a, uint32_t b)`   - performs a modular 32 bit MUL (`*`) operation `a*b`.
-- `void fio_u1024_cand8(fio_u512 *t, fio_u512 *a, uint8_t b)`    - performs an 8 bit AND (`&`) operation `a&b`.
-- `void fio_u2048_cor16(fio_u512 *t, fio_u512 *a, uint16_t b)`   - performs a 16 bit OR (`|`) operation `a|b`.
-- `void fio_u4096_cxor32(fio_u512 *t, fio_u512 *a, uint32_t b)`  - performs a 32 bit XOR (`^`) operation `a^b`.
-
 
 #### Multi-Precision `fio_u128_add`, `fio_u256_sub`, `fio_u512_mul` ...
 
 These functions provide Multi-Precision operations for the Numeral / Vector Helper Types.
 
-The functions support up to 2048 bits of multi-precision. The 4096 bit type is mostly reserved for storing the result of multiplying two 2048 bit numerals (as storing the result requires bit expansion from 2048 bits to 4096 bits).
-
-- `bool fio_u128_add(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs ADD (`t=a+b`), returning the carry bit.
-- `bool fio_u256_sub(fio_u256 *t, fio_u256 *a, fio_u256 *b)`   - performs SUB (`t=a-b`), returning the borrow bit.
-- `void fio_u512_mul(fio_u512 *t, fio_u256 *a, fio_u256 *b)`   - performs MUL (`t=a*b`) operation.
-
+- `bool fio_u128_add(fio_u128 *t, fio_u128 *a, fio_u128 *b)` - performs ADD (`t=a+b`), returning the carry bit.
+- `bool fio_u256_sub(fio_u256 *t, fio_u256 *a, fio_u256 *b)` - performs SUB (`t=a-b`), returning the borrow bit.
+- `void fio_u512_mul(fio_u512 *t, fio_u256 *a, fio_u256 *b)` - performs MUL (`t=a*b`) operation.
 
 -------------------------------------------------------------------------------
 
 ## Core Randomness
 
 The core module provides macros for generating semi-deterministic Pseudo-Random Number Generator functions.
+
+#### `fio_cycle_counter`
+
+```c
+uint64_t fio_cycle_counter(void);
+```
+
+Returns the CPU cycle counter. Uses `rdtsc` on x86, `cntvct_el0` on ARM64, or returns 0 on unsupported platforms.
 
 #### `FIO_DEFINE_RANDOM128_FN`
 
@@ -1930,6 +2097,8 @@ extern fio_u128 name##128(void); // returns 128 bits
 extern uint64_t name##64(void);  // returns 64 bits (simply half of the 128 bit result)
 extern void name##_bytes(void *buffer, size_t len); // fills a buffer
 extern void name##_reset(void); // resets the state of the PRNG
+extern void name##_reseed(void); // reseeds the PRNG using time and jitter
+extern void name##_on_fork(void *is_null); // reseeds the PRNG (for fork safety)
 ```
 
 If `reseed_log` is non-zero and less than 64, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
@@ -1970,15 +2139,29 @@ typedef struct fio_buf_info_s {
 
 An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
 
+#### `FIO_STR_INFO0`
+
+```c
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+```
+
+A NULL fio_str_info_s.
+
 #### `FIO_STR_INFO_IS_EQ`
 
 ```c
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+#define FIO_STR_INFO_IS_EQ(s1, s2)
 ```
 
-This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content content equality.
+This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content equality.
+
+#### `FIO_BUF_INFO_IS_EQ`
+
+```c
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+```
+
+This helper MACRO compares two `fio_buf_info_s` objects for content equality.
 
 #### `FIO_STR_INFO1`
 
@@ -2007,6 +2190,32 @@ Converts a String with a known length into a `fio_str_info_s`.
 
 Converts a String with a known length and capacity into a `fio_str_info_s`.
 
+#### `FIO_BUF_INFO0`
+
+```c
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
+```
+
+A NULL fio_buf_info_s.
+
+#### `FIO_BUF_INFO1`
+
+```c
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+```
+
+Converts a C String into a `fio_buf_info_s`.
+
+#### `FIO_BUF_INFO2`
+
+```c
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+```
+
+Converts a String with a known length into a `fio_buf_info_s`.
+
 #### `FIO_BUF2STR_INFO`
 
 ```c
@@ -2023,20 +2232,30 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 ```
 
-Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+Converts a `fio_str_info_s` into a `fio_buf_info_s`.
 
 #### `FIO_STR_INFO_TMP_VAR(name, capacity)`
 
 ```c
 #define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
   char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio___stack_mem___##name[0] = 0; /* guard */                                 \
   fio_str_info_s name = (fio_str_info_s) {                                     \
     .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
 ```
 
 Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
+
+#### `FIO_STR_INFO_TMP_IS_REALLOCATED`
+
+```c
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name) (fio___stack_mem___##name != name.buf)
+```
+
+Tests to see if memory reallocation happened for a `FIO_STR_INFO_TMP_VAR`.
+
+-------------------------------------------------------------------------------
 
 ### Core UTF-8 Support
 
@@ -2047,7 +2266,7 @@ However, they could be used for writing safe a UTF-8 implementation if used with
 #### `fio_utf8_code_len`
 
 ```c
-size_t fio_utf8_code_len(uint32_t u);
+unsigned fio_utf8_code_len(uint32_t u);
 ```
 
 Returns the number of bytes required to UTF-8 encoded a code point `u`.
@@ -2055,7 +2274,7 @@ Returns the number of bytes required to UTF-8 encoded a code point `u`.
 #### `fio_utf8_char_len_unsafe`
 
 ```c
-size_t fio_utf8_char_len_unsafe(uint8_t c);
+unsigned fio_utf8_char_len_unsafe(uint8_t c);
 ```
 
 Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid).
@@ -2065,20 +2284,20 @@ Use only to re-collect lost length information after a successful `fio_utf8_writ
 #### `fio_utf8_char_len`
 
 ```c
-size_t fio_utf8_char_len(const void *str);
+unsigned fio_utf8_char_len(const void *str);
 ```
 
 Returns the number of valid UTF-8 bytes used by first char at `str`.
 
 If `str` doesn't point to a valid UTF-8 encoded code-point, returns 0.
 
-**Note**: This function also tests all the following bytes that are part of the asme UTF-8 character.
+**Note**: This function also tests all the following bytes that are part of the same UTF-8 character.
 
 
-#### `fio_utf8_char_len`
+#### `fio_utf8_write`
 
 ```c
-size_t fio_utf8_write(void *dest, uint32_t u);
+unsigned fio_utf8_write(void *dest, uint32_t u);
 ```
 
 Writes code point to `dest` using UFT-8. Returns number of bytes written.
@@ -2103,26 +2322,23 @@ Advances the pointer at `str` by the number of bytes consumed (read).
 #### `fio_utf8_peek`
 
 ```c
-uint32_t fio_utf8_peek(char *str);
+uint32_t fio_utf8_peek(const char *str);
 ```
 
 Decodes the first UTF-8 char at `str` and returns its code point value.
 
 Unlike `fio_utf8_read`, the pointer does not change.
 
+-------------------------------------------------------------------------------
 ## Doubly Linked Lists
 
 ```c
-// initial `include` defines the `FIO_LIST_NODE` macro and type
 #include "fio-stl.h"
-// list element 
-typedef struct {
-  FIO_LIST_NODE node;
-  char * data;
-} my_list_s;
 ```
 
-Doubly Linked Lists are an incredibly common and useful data structure.
+Doubly Linked Lists are an incredibly common and useful data structure. The facil.io C STL provides macros and types for managing both pointer-based linked lists and indexed linked lists.
+
+These macros are always defined by the CSTL core and can be used without defining any additional macros.
 
 ### Linked Lists Performance
 
@@ -2134,9 +2350,9 @@ However, Linked Lists suffer from slow seek/find and iteration operations.
 
 Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
 
-### Linked Lists Macros
+-------------------------------------------------------------------------------
 
-Linked List Macros (and arch-type) are always defined by the CSTL and can be used to manage linked lists without creating a dedicated type.
+### Linked List Types
 
 #### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
 
@@ -2145,24 +2361,46 @@ Linked List Macros (and arch-type) are always defined by the CSTL and can be use
 #define FIO_LIST_NODE fio_list_node_s
 /** A linked list head type */
 #define FIO_LIST_HEAD fio_list_node_s
+
 /** A linked list arch-type */
 typedef struct fio_list_node_s {
   struct fio_list_node_s *next;
   struct fio_list_node_s *prev;
 } fio_list_node_s;
-
 ```
 
 These are the basic core types for a linked list node used by the Linked List macros.
 
-#### `FIO_LIST_INIT(head)`
+`FIO_LIST_NODE` and `FIO_LIST_HEAD` are both aliases for `fio_list_node_s`. The distinction is semantic - use `FIO_LIST_HEAD` for the list's head/root and `FIO_LIST_NODE` for nodes embedded in your data structures.
+
+Example:
 
 ```c
-#define FIO_LIST_INIT(obj)                                                     \
-  (FIO_LIST_HEAD){ .next = &(obj), .prev = &(obj) }
+typedef struct {
+  FIO_LIST_NODE node;
+  char *data;
+} my_list_s;
+
+FIO_LIST_HEAD my_list = FIO_LIST_INIT(my_list);
 ```
 
-Initializes a linked list.
+-------------------------------------------------------------------------------
+
+### Linked List Macros
+
+#### `FIO_LIST_INIT`
+
+```c
+#define FIO_LIST_INIT(obj) (fio_list_node_s){ .next = &(obj), .prev = &(obj) }
+```
+
+Initializes a linked list head so it points to itself (indicating an empty list).
+
+Example:
+
+```c
+FIO_LIST_HEAD my_list = FIO_LIST_INIT(my_list);
+```
 
 #### `FIO_LIST_PUSH`
 
@@ -2176,9 +2414,13 @@ Initializes a linked list.
   } while (0)
 ```
 
-UNSAFE macro for pushing a node to a list.
+UNSAFE macro for pushing a node to the end of a list (before the head).
 
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+**Parameters:**
+- `head` - pointer to the list head (`FIO_LIST_HEAD *`)
+- `n` - pointer to the node to push (`FIO_LIST_NODE *`)
+
+**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
 #### `FIO_LIST_POP`
 
@@ -2190,19 +2432,33 @@ Note that this macro does not test that the list / data was initialized before r
   } while (0)
 ```
 
-UNSAFE macro for popping a node from a list.
+UNSAFE macro for popping a node from the beginning of a list.
 
-* `type` is the underlying `struct` type of the next list member.
+**Parameters:**
+- `type` - the underlying `struct` type of the list member
+- `node_name` - the field name in `type` that is the `FIO_LIST_NODE` linking type
+- `dest_ptr` - the pointer that will receive the popped list member
+- `head` - pointer to the list head
 
-* `node_name` is the field name in the `type` that is the `FIO_LIST_NODE` linking type.
+**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
-* `dest_prt` is the pointer that will accept the next list member.
+**Note**: using this macro with an empty list will produce **undefined behavior**.
 
-* `head` is the head of the list.
+Example:
 
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+```c
+typedef struct {
+  FIO_LIST_NODE node;
+  int value;
+} item_s;
 
-Note that using this macro with an empty list will produce **undefined behavior**.
+FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+// ... add items to list ...
+
+item_s *popped;
+FIO_LIST_POP(item_s, node, popped, &list);
+// popped now points to the first item, which has been removed from the list
+```
 
 #### `FIO_LIST_REMOVE`
 
@@ -2216,13 +2472,17 @@ Note that using this macro with an empty list will produce **undefined behavior*
 
 UNSAFE macro for removing a node from a list.
 
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+**Parameters:**
+- `n` - pointer to the node to remove (`FIO_LIST_NODE *`)
 
+**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+
+**Note**: after removal, the node's `next` and `prev` pointers still point to their old neighbors. Use `FIO_LIST_REMOVE_RESET` if you need the node to be self-referential after removal.
 
 #### `FIO_LIST_REMOVE_RESET`
 
 ```c
-#define FIO_LIST_REMOVE_RESET(n)                                                     \
+#define FIO_LIST_REMOVE_RESET(n)                                               \
   do {                                                                         \
     (n)->prev->next = (n)->next;                                               \
     (n)->next->prev = (n)->prev;                                               \
@@ -2230,9 +2490,12 @@ Note that this macro does not test that the list / data was initialized before r
   } while (0)
 ```
 
-UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
+UNSAFE macro for removing a node from a list and resetting its pointers to point to itself.
 
-Note that this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
+**Parameters:**
+- `n` - pointer to the node to remove (`FIO_LIST_NODE *`)
+
+**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
 #### `FIO_LIST_EACH`
 
@@ -2253,70 +2516,132 @@ Loops through every node in the linked list except the head.
 
 This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
 
-i.e.,
+**Parameters:**
+- `type` - the underlying `struct` type of the list members
+- `node_name` - the field name in `type` that is the `FIO_LIST_NODE`
+- `head` - pointer to the list head
+- `pos` - the variable name to use for the current position in the loop
+
+**Note**: it is safe to remove the current node (`pos`) during iteration.
+
+Example:
 
 ```c
 typedef struct {
-  void * data;
-  FIO_LIST_HEAD node;
+  FIO_LIST_NODE node;
+  void *data;
 } ptr_list_s;
 
 FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
 
-/* ... */
+// ... add items to list ...
 
 FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
   do_something_with(pos->data);
 }
 ```
 
+#### `FIO_LIST_EACH_REVERSED`
+
+```c
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)                     \
+  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),          \
+            *next____p_ls_##pos =                                              \
+                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);       \
+       pos != FIO_PTR_FROM_FIELD(type, node_name, (head));                     \
+       (pos = next____p_ls_##pos),                                             \
+            (next____p_ls_##pos =                                              \
+                 FIO_PTR_FROM_FIELD(type,                                      \
+                                    node_name,                                 \
+                                    next____p_ls_##pos->node_name.prev)))
+```
+
+Loops through every node in the linked list in reverse order (from tail to head).
+
+**Parameters:**
+- `type` - the underlying `struct` type of the list members
+- `node_name` - the field name in `type` that is the `FIO_LIST_NODE`
+- `head` - pointer to the list head
+- `pos` - the variable name to use for the current position in the loop
+
+**Note**: it is safe to remove the current node (`pos`) during iteration.
+
 #### `FIO_LIST_IS_EMPTY`
 
 ```c
-#define FIO_LIST_IS_EMPTY(head) (!(head) || (head)->next == (head)->prev)
+#define FIO_LIST_IS_EMPTY(head)                                                \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
 ```
 
 Macro for testing if a list is empty.
 
+**Parameters:**
+- `head` - pointer to the list head
 
-### Indexed Linked Lists Macros (always defined):
+**Returns:** non-zero (true) if the list is empty or `head` is NULL, zero (false) otherwise.
 
+-------------------------------------------------------------------------------
 
-Indexed linked lists are often used to either save memory or making it easier to reallocate the memory used for the whole list. This is performed by listing pointer offsets instead of the whole pointer, allowing the offsets to use smaller type sizes.
+### Indexed Linked Lists
 
-For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, than a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
+Indexed linked lists are often used to either save memory or make it easier to reallocate the memory used for the whole list. This is performed by storing index offsets instead of full pointers, allowing the offsets to use smaller type sizes.
 
-#### `FIO_INDEXED_LIST##_HEAD` / `FIO_INDEXED_LIST##_NODE`
+For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, then a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
+
+The "head" index is usually validated by reserving the value of `-1` (or the maximum value for the type) to indicate an empty list.
+
+-------------------------------------------------------------------------------
+
+### Indexed Linked List Types
+
+#### `FIO_INDEXED_LIST32_NODE` / `FIO_INDEXED_LIST32_HEAD`
 
 ```c
-/** A 32 bit indexed linked list node type */
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-/** A 16 bit indexed linked list node type */
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-/** An 8 bit indexed linked list node type */
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-
 /** A 32 bit indexed linked list node type */
 typedef struct fio_index32_node_s {
   uint32_t next;
   uint32_t prev;
 } fio_index32_node_s;
 
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+```
+
+A 32 bit indexed linked list node type, supporting up to 4,294,967,295 elements.
+
+#### `FIO_INDEXED_LIST16_NODE` / `FIO_INDEXED_LIST16_HEAD`
+
+```c
 /** A 16 bit indexed linked list node type */
 typedef struct fio_index16_node_s {
   uint16_t next;
   uint16_t prev;
 } fio_index16_node_s;
 
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+```
+
+A 16 bit indexed linked list node type, supporting up to 65,535 elements.
+
+#### `FIO_INDEXED_LIST8_NODE` / `FIO_INDEXED_LIST8_HEAD`
+
+```c
 /** An 8 bit indexed linked list node type */
 typedef struct fio_index8_node_s {
   uint8_t next;
   uint8_t prev;
 } fio_index8_node_s;
+
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
 ```
+
+An 8 bit indexed linked list node type, supporting up to 255 elements.
+
+-------------------------------------------------------------------------------
+
+### Indexed Linked List Macros
 
 #### `FIO_INDEXED_LIST_PUSH`
 
@@ -2326,12 +2651,40 @@ typedef struct fio_index8_node_s {
     register const size_t n__ = (i);                                           \
     (root)[n__].node_name.prev = (root)[(head)].node_name.prev;                \
     (root)[n__].node_name.next = (head);                                       \
-    (root)[(root)[(head)].node_name.prev].node_name.next = n__;                \
-    (root)[(head)].node_name.prev = n__;                                       \
+    (root)[(root)[(head)].node_name.prev].node_name.next = (n__);              \
+    (root)[(head)].node_name.prev = (n__);                                     \
   } while (0)
 ```
 
-UNSAFE macro for pushing a node to a list.
+UNSAFE macro for pushing a node to the end of an indexed list (before the head).
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `head` - the index of the list head
+- `i` - the index of the element to push
+
+#### `FIO_INDEXED_LIST_UNSHIFT`
+
+```c
+#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)                     \
+  do {                                                                         \
+    register const size_t n__ = (i);                                           \
+    (root)[n__].node_name.next = (root)[(head)].node_name.next;                \
+    (root)[n__].node_name.prev = (head);                                       \
+    (root)[(root)[(head)].node_name.next].node_name.prev = (n__);              \
+    (root)[(head)].node_name.next = (n__);                                     \
+    (head) = (n__);                                                            \
+  } while (0)
+```
+
+UNSAFE macro for adding a node to the beginning of an indexed list (making it the new head).
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `head` - the index of the list head (will be updated to the new head)
+- `i` - the index of the element to add
 
 #### `FIO_INDEXED_LIST_REMOVE`
 
@@ -2346,33 +2699,102 @@ UNSAFE macro for pushing a node to a list.
   } while (0)
 ```
 
-UNSAFE macro for removing a node from a list.
+UNSAFE macro for removing a node from an indexed list.
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `i` - the index of the element to remove
 
 #### `FIO_INDEXED_LIST_REMOVE_RESET`
 
 ```c
-#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                            \
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)                      \
   do {                                                                         \
     register const size_t n__ = (i);                                           \
     (root)[(root)[n__].node_name.prev].node_name.next =                        \
         (root)[n__].node_name.next;                                            \
     (root)[(root)[n__].node_name.next].node_name.prev =                        \
         (root)[n__].node_name.prev;                                            \
-    (root)[n__].node_name.next = (root)[n__].node_name.prev = n__;             \
+    (root)[n__].node_name.next = (root)[n__].node_name.prev = (n__);           \
   } while (0)
 ```
 
-UNSAFE macro for removing a node from a list. Resets node data so it links to itself.
+UNSAFE macro for removing a node from an indexed list and resetting its links to point to itself.
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `i` - the index of the element to remove
 
 #### `FIO_INDEXED_LIST_EACH`
 
 ```c
 #define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)                      \
-  for (size_t pos = (head), stopper___ils___ = 0; !stopper___ils___;           \
-       stopper___ils___ = ((pos = (root)[pos].node_name.next) == (head)))
+  for (size_t pos = (head),                                                    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0,                                            \
+              pos##___nxt = (root)[(head)].node_name.next;                     \
+       !stopper___ils___;                                                      \
+       (stopper___ils___ = ((pos = pos##___nxt) == stooper___hd)),             \
+              pos##___nxt = (root)[pos].node_name.next)
 ```
 
 Loops through every index in the indexed list, **assuming `head` is valid**.
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `head` - the index of the list head
+- `pos` - the variable name to use for the current index in the loop
+
+**Note**: it is safe to remove the current element during iteration.
+
+Example:
+
+```c
+typedef struct {
+  FIO_INDEXED_LIST32_NODE node;
+  int value;
+} indexed_item_s;
+
+indexed_item_s items[100];
+uint32_t head = 0;
+
+// Initialize head to point to itself
+items[0].node.next = items[0].node.prev = 0;
+
+// ... add items to list ...
+
+FIO_INDEXED_LIST_EACH(items, node, head, pos) {
+  printf("Item at index %zu has value %d\n", pos, items[pos].value);
+}
+```
+
+#### `FIO_INDEXED_LIST_EACH_REVERSED`
+
+```c
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)             \
+  for (size_t pos = ((root)[(head)].node_name.prev),                           \
+              pos##___nxt =                                                    \
+                  ((root)[((root)[(head)].node_name.prev)].node_name.prev),    \
+              stooper___hd = (head),                                           \
+              stopper___ils___ = 0;                                            \
+       !stopper___ils___;                                                      \
+       ((stopper___ils___ = (pos == stooper___hd)),                            \
+        (pos = pos##___nxt),                                                   \
+        (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
+```
+
+Loops through every index in the indexed list in reverse order, **assuming `head` is valid**.
+
+**Parameters:**
+- `root` - pointer to the array containing the list elements
+- `node_name` - the field name in the element type that is the indexed list node
+- `head` - the index of the list head
+- `pos` - the variable name to use for the current index in the loop
+
+**Note**: it is safe to remove the current element during iteration.
 
 -------------------------------------------------------------------------------
 ## Logging and Assertions
@@ -2382,109 +2804,394 @@ Loops through every index in the indexed list, **assuming `head` is valid**.
 #include "fio-stl.h"
 ```
 
-If the `FIO_LOG_LENGTH_LIMIT` macro is defined (it's recommended that it be greater than 128), than the `FIO_LOG2STDERR` (weak) function and the `FIO_LOG_WRITE` macro will be defined.
+The logging module provides heap-allocation-free logging macros and assertion utilities. When `FIO_LOG` is defined, the `FIO_LOG2STDERR` function and related logging macros become functional (otherwise they are no-ops).
 
-**Note:** `FIO_LOG` always uses `libc` functions and cannot be used for authoring apps without `libc` unless `memcpy` and `vsnprintf` are implemented separately (and shadowed by a macro before the module is included).
+**Note:** `FIO_LOG` uses `libc` functions (`memcpy`, `vsnprintf`, `fwrite`) and cannot be used for authoring apps without `libc` unless these functions are implemented separately and shadowed by macros before the module is included.
 
-**Note**: in **all** of the following `msg` **must** be a string literal (`const char *`).
+**Note:** in **all** logging macros, `msg` **must** be a string literal (`const char *`).
 
-#### `FIO_LOG_LEVEL_GET` and `FIO_LOG_LEVEL_SET`
+### Logging Levels
+
+The following logging level constants are always defined:
 
 ```c
-/** Sets the Logging Level */
-#define FIO_LOG_LEVEL_SET(new_level) (0)
-/** Returns the Logging Level */
-#define FIO_LOG_LEVEL_GET() (0)
+#define FIO_LOG_LEVEL_NONE    0  /* No logging */
+#define FIO_LOG_LEVEL_FATAL   1  /* Log fatal errors */
+#define FIO_LOG_LEVEL_ERROR   2  /* Log errors and fatal errors */
+#define FIO_LOG_LEVEL_WARNING 3  /* Log warnings, errors and fatal errors */
+#define FIO_LOG_LEVEL_INFO    4  /* Log info, warnings, errors and fatal errors */
+#define FIO_LOG_LEVEL_DEBUG   5  /* Log everything, including debug messages */
 ```
 
-An application wide integer get/set with a value of either:
+### Configuration Macros
 
-- `FIO_LOG_LEVEL_NONE` (0)
-- `FIO_LOG_LEVEL_FATAL` (1)
-- `FIO_LOG_LEVEL_ERROR` (2)
-- `FIO_LOG_LEVEL_WARNING` (3)
-- `FIO_LOG_LEVEL_INFO` (4)
-- `FIO_LOG_LEVEL_DEBUG` (5)
+#### `FIO_LOG_LENGTH_LIMIT`
 
-The initial value can be set using the `FIO_LOG_LEVEL_DEFAULT` macro. By default, the level is 4 (`FIO_LOG_LEVEL_INFO`) for normal compilation and 5 (`FIO_LOG_LEVEL_DEBUG`) for DEBUG compilation.
+```c
+#define FIO_LOG_LENGTH_LIMIT 1024
+```
 
-**Note:** although the integer itself is global and accessible, it shouldn't be used directly (in case `FIO_NO_LOG` is defined).
+Defines the maximum length of a log message. Messages exceeding this limit will be truncated. The default value is `1024`. It's recommended that this value be greater than 128.
 
-#### `FIO_LOG2STDERR(msg, ...)`
+#### `FIO_LOG_LEVEL_DEFAULT`
 
-This `printf` style **function** will log a message to `stderr`, without allocating any memory on the heap for the string (`fprintf` might).
+```c
+#ifndef FIO_LOG_LEVEL_DEFAULT
+#if DEBUG
+#define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_DEBUG
+#else
+#define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_INFO
+#endif
+#endif
+```
 
-The function is defined as `weak`, allowing it to be overridden during the linking stage, so logging could be diverted... although, it's recommended to divert `stderr` rather then the logging function.
+Sets the initial logging level. By default, the level is `FIO_LOG_LEVEL_INFO` (4) for normal compilation and `FIO_LOG_LEVEL_DEBUG` (5) when `DEBUG` is defined.
 
-#### `FIO_LOG_WRITE(msg, ...)`
+### Logging Level Control
 
-This macro routs to the `FIO_LOG2STDERR` function after prefixing the message with the file name and line number in which the error occurred.
+#### `FIO_LOG_LEVEL_GET`
 
-#### `FIO_LOG_FATAL(msg, ...)`
+```c
+#define FIO_LOG_LEVEL_GET() ((fio___log_level()))
+```
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_FATAL`.
+Returns the current application-wide logging level as an integer.
 
-#### `FIO_LOG_ERROR(msg, ...)`
+#### `FIO_LOG_LEVEL_SET`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_ERROR`.
+```c
+#define FIO_LOG_LEVEL_SET(new_level) fio___log_level_set(new_level)
+```
 
-#### `FIO_LOG_SECURITY(msg, ...)`
+Sets the application-wide logging level to `new_level`. Returns the new level.
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_ERROR`.
+Example:
 
-#### `FIO_LOG_WARNING(msg, ...)`
+```c
+FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_WARNING); // Only log warnings and above
+int level = FIO_LOG_LEVEL_GET();          // Returns 3
+```
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_WARNING`.
+### Core Logging Functions
 
-#### `FIO_LOG_INFO(msg, ...)`
+#### `FIO_LOG2STDERR`
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_INFO`.
+```c
+void FIO_LOG2STDERR(const char *format, ...);
+```
 
-#### `FIO_LOG_DEBUG(msg, ...)`
+A `printf`-style function that logs a message to `stderr` without allocating heap memory for the string (unlike `fprintf` which might).
 
-Logs `msg` **if** log level is equal or above requested log level of `FIO_LOG_LEVEL_DEBUG`.
+Messages exceeding `FIO_LOG_LENGTH_LIMIT` will be truncated with a warning.
 
-#### `FIO_LOG_DDEBUG(msg, ...)`
+**Note:** this function is defined as a static function, allowing it to be overridden by defining your own version before including the module.
 
-Same as `FIO_LOG_DEBUG` if `DEBUG` was defined. Otherwise a no-op.
+#### `FIO_LOG_WRITE`
 
-#### `FIO_ASSERT(cond, msg, ...)`
+```c
+#define FIO_LOG_WRITE(...) FIO_LOG2STDERR("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
+```
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and exiting the application using `SIGINT` followed by an `exit(-1)`.
+Routes to `FIO_LOG2STDERR` after prefixing the message with the file name and line number where the log statement occurs.
 
-The use of `SIGINT` should allow debuggers everywhere to pause execution before exiting the program.
+### Logging Macros
 
-#### `FIO_ASSERT_ALLOC(ptr)`
+All logging macros check the current log level before printing. If the log level is below the macro's threshold, the message is not printed.
 
-Reports a failure to allocate memory, exiting the program the same way as `FIO_ASSERT`.
+#### `FIO_LOG_FATAL`
 
-#### `FIO_ASSERT_DEBUG(cond, msg, ...)`
+```c
+#define FIO_LOG_FATAL(...) /* logs if level >= FIO_LOG_LEVEL_FATAL */
+```
+
+Logs a fatal error message **if** the log level is equal to or above `FIO_LOG_LEVEL_FATAL` (1).
+
+Output is prefixed with `FATAL:` in bold inverse text.
+
+#### `FIO_LOG_ERROR`
+
+```c
+#define FIO_LOG_ERROR(...) /* logs if level >= FIO_LOG_LEVEL_ERROR */
+```
+
+Logs an error message **if** the log level is equal to or above `FIO_LOG_LEVEL_ERROR` (2).
+
+Output is prefixed with `ERROR:` in bold text.
+
+#### `FIO_LOG_SECURITY`
+
+```c
+#define FIO_LOG_SECURITY(...) /* logs if level >= FIO_LOG_LEVEL_ERROR */
+```
+
+Logs a security-related message **if** the log level is equal to or above `FIO_LOG_LEVEL_ERROR` (2).
+
+Output is prefixed with `SECURITY:` in bold text.
+
+#### `FIO_LOG_WARNING`
+
+```c
+#define FIO_LOG_WARNING(...) /* logs if level >= FIO_LOG_LEVEL_WARNING */
+```
+
+Logs a warning message **if** the log level is equal to or above `FIO_LOG_LEVEL_WARNING` (3).
+
+Output is prefixed with `WARNING:` in dim text.
+
+#### `FIO_LOG_INFO`
+
+```c
+#define FIO_LOG_INFO(...) /* logs if level >= FIO_LOG_LEVEL_INFO */
+```
+
+Logs an informational message **if** the log level is equal to or above `FIO_LOG_LEVEL_INFO` (4).
+
+Output is prefixed with `INFO:`.
+
+#### `FIO_LOG_DEBUG`
+
+```c
+#define FIO_LOG_DEBUG(...) /* logs if level >= FIO_LOG_LEVEL_DEBUG */
+```
+
+Logs a debug message **if** the log level is equal to or above `FIO_LOG_LEVEL_DEBUG` (5).
+
+Output is prefixed with `DEBUG:` followed by the file name and line number.
+
+#### `FIO_LOG_DEBUG2`
+
+```c
+#define FIO_LOG_DEBUG2(...) /* logs if level >= FIO_LOG_LEVEL_DEBUG */
+```
+
+Same as `FIO_LOG_DEBUG` but without the file name and line number prefix.
+
+Output is prefixed with `DEBUG:` only.
+
+### Debug-Only Logging Macros
+
+These macros only produce output when `DEBUG` is defined at compile time. Otherwise, they are no-ops with zero runtime overhead.
+
+#### `FIO_LOG_DDEBUG`
+
+```c
+#define FIO_LOG_DDEBUG(...) /* FIO_LOG_DEBUG if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_DEBUG` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DDEBUG2`
+
+```c
+#define FIO_LOG_DDEBUG2(...) /* FIO_LOG_DEBUG2 if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_DEBUG2` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DERROR`
+
+```c
+#define FIO_LOG_DERROR(...) /* FIO_LOG_ERROR if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_ERROR` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DSECURITY`
+
+```c
+#define FIO_LOG_DSECURITY(...) /* FIO_LOG_SECURITY if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_SECURITY` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DWARNING`
+
+```c
+#define FIO_LOG_DWARNING(...) /* FIO_LOG_WARNING if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_WARNING` when `DEBUG` is defined. Otherwise a no-op.
+
+#### `FIO_LOG_DINFO`
+
+```c
+#define FIO_LOG_DINFO(...) /* FIO_LOG_INFO if DEBUG defined, else no-op */
+```
+
+Same as `FIO_LOG_INFO` when `DEBUG` is defined. Otherwise a no-op.
+
+### Assertion Macros
+
+#### `FIO_ASSERT`
+
+```c
+#define FIO_ASSERT(cond, ...)
+```
+
+Reports an error unless `cond` is true. If the assertion fails:
+
+1. Prints the message using `FIO_LOG_FATAL`
+2. Prints the current `errno` value and its string description
+3. Raises `SIGINT` (when `DEBUG` is defined) to allow debuggers to pause execution
+4. Calls `abort()` to terminate the program
+
+Example:
+
+```c
+void *ptr = malloc(size);
+FIO_ASSERT(ptr, "memory allocation of %zu bytes failed", size);
+```
+
+#### `FIO_ASSERT_ALLOC`
+
+```c
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
+```
+
+A convenience macro for testing allocation failures. Equivalent to `FIO_ASSERT(ptr, "memory allocation failed.")`.
+
+Example:
+
+```c
+void *ptr = malloc(size);
+FIO_ASSERT_ALLOC(ptr);
+```
+
+#### `FIO_ASSERT_DEBUG`
+
+```c
+#define FIO_ASSERT_DEBUG(cond, ...)
+```
 
 Ignored unless `DEBUG` is defined.
 
-Reports an error unless condition is met, printing out `msg` using `FIO_LOG_FATAL` and aborting (not exiting) the application.
+When `DEBUG` is defined, reports an error unless `cond` is true. If the assertion fails:
 
-Note, this macro will **only** raise a `SIGINT` signal, but will not exit the program. This is designed to allow debuggers to catch these occurrences and continue execution when possible.
+1. Prints the message using `FIO_LOG_FATAL` with file name and line number
+2. Prints the current `errno` value and its string description
+3. Raises `SIGINT` to allow debuggers to catch the failure
+4. Calls `exit(-1)` to terminate the program
 
-#### `FIO_ASSERT_STATIC(cond, msg)`
+**Note:** unlike `FIO_ASSERT`, this macro calls `exit(-1)` instead of `abort()`, and only raises `SIGINT` when `DEBUG` is defined.
 
-Performs static assertion test (tested during compile time). Note that `cond` **must** be a constant expression and `msg` cannot be formatted.
+#### `FIO_ASSERT_STATIC`
+
+```c
+#define FIO_ASSERT_STATIC(cond, msg)
+```
+
+Performs a static assertion test at compile time. If `cond` is false, compilation fails with the message `msg`.
+
+**Note:** `cond` **must** be a constant expression and `msg` cannot contain format specifiers.
+
+Example:
+
+```c
+FIO_ASSERT_STATIC(sizeof(int) >= 4, "int must be at least 32 bits");
+```
+
+### Example Usage
+
+```c
+#define FIO_LOG
+#include "fio-stl.h"
+
+int main(void) {
+  // Set logging level
+  FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_WARNING);
+  
+  // These will not print (below warning level)
+  FIO_LOG_INFO("This info message won't appear");
+  FIO_LOG_DEBUG("This debug message won't appear");
+  
+  // These will print
+  FIO_LOG_WARNING("number invalid: %d", 42);
+  FIO_LOG_ERROR("something went wrong");
+  
+  // Direct logging (always prints, ignores level)
+  FIO_LOG2STDERR("Direct message to stderr");
+  
+  // Assertions
+  void *ptr = malloc(100);
+  FIO_ASSERT_ALLOC(ptr);
+  
+  int value = 5;
+  FIO_ASSERT(value > 0, "value must be positive, got %d", value);
+  
+  free(ptr);
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
-## String / Number conversion
+## String / Number Conversion
 
 ```c
 #define FIO_ATOL
 #include "fio-stl.h"
 ```
 
-If the `FIO_ATOL` macro is defined, the following functions will be defined:
+If the `FIO_ATOL` macro is defined, the following functions will be defined for converting between strings and numbers.
 
 **Note**: all functions that write to a buffer also write a `NUL` terminator byte.
 
+### Configuration Macros
+
+#### `FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER`
+
+```c
+#define FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER 1
+```
+
+When set to `1` (default), allows underscores (`_`) to be used as digit separators when parsing numbers. For example, `1_000_000` would be parsed as `1000000`.
+
+Set to `0` to disable this feature.
+
+### Universal Number Parsing
+
+#### `fio_aton_s`
+
+```c
+typedef struct {
+  union {
+    int64_t i;
+    double f;
+    uint64_t u;
+  };
+  int is_float;
+  int err;
+} fio_aton_s;
+```
+
+Result type for `fio_aton`. Contains the parsed number value and metadata about the parsing result.
+
+**Members:**
+- `i` - The parsed value as a signed 64-bit integer
+- `f` - The parsed value as a double-precision float
+- `u` - The parsed value as an unsigned 64-bit integer
+- `is_float` - Non-zero if the parsed value is a floating-point number
+- `err` - Non-zero if a parsing or overflow error occurred
+
+#### `fio_aton`
+
+```c
+fio_aton_s fio_aton(char **pstr);
+```
+
+Converts a string to a number - either an integer or a float (double).
+
+- Skips white space at the beginning of the string
+- Auto detects binary and hex formats when prefix is provided (`0x` / `0b`)
+- Auto detects octal when number starts with zero
+- Auto detects the strings `"inf"`, `"infinity"` and `"nan"` as float values
+- The number's format and type are returned in the return type
+- If a numerical overflow or format error occurred, the `.err` flag is set
+
+**Note**: rounding errors may occur, as this is not an exact `strtod` match.
+
 ### Signed Number / String Conversion
 
-The most common use of number to string conversion (and string to number) relates to converting signed numbers. 
+The most common use of number to string conversion (and string to number) relates to converting signed numbers.
 
 However, consider using unsigned conversion where possible.
 
@@ -2518,9 +3225,9 @@ A helper function that writes a signed int64_t to a `NUL` terminated string.
 
 If `dest` is `NULL`, returns the number of bytes that would have been written.
 
-No overflow guard is provided, so either allow for plenty of headroom (at least 65 bytes) or pass `NULL` first and allocate appropriately.
+No overflow guard is provided, make sure there's at least 68 bytes available (for base 2).
 
-**Note**: special base prefixes for base 2 (binary) and base 16 (hex) are **NOT** added automatically. Consider adding any required prefix when possible (i.e.,`"0x"` for hex and `"0b"` for base 2).
+Offers special support for base 2 (binary), base 8 (octal), base 10 and base 16 (hex) where prefixes are automatically added if required (i.e., `"0x"` for hex, `"0b"` for base 2, and `"0"` for octal).
 
 Supports any base up to base 36 (using 0-9,A-Z).
 
@@ -2548,12 +3255,9 @@ A helper function that converts between a double to a string.
 
 Currently wraps `snprintf` with some special case handling.
 
-No overflow guard is provided, make sure there's at least 130 bytes available
-(for base 2).
+No overflow guard is provided, make sure there's at least 130 bytes available (for base 2).
 
-Supports base 2, base 10 and base 16. An unsupported base will silently default
-to base 10. Prefixes aren't added (i.e., no "0x" or "0b" at the beginning of the
-string).
+Supports base 2, base 10 and base 16. An unsupported base will silently default to base 10. Prefixes aren't added (i.e., no `"0x"` or `"0b"` at the beginning of the string).
 
 Returns the number of bytes actually written (excluding the NUL terminator).
 
@@ -2567,14 +3271,6 @@ Writes a signed number to `dest` using `digits` bytes (+ `NUL`). See also [`fio_
 
 ### Unsigned Number / String Conversion
 
-#### `fio_ltoa10`
-
-```c
-void fio_ltoa10(char *dest, uint64_t i, size_t digits);
-```
-
-Writes a signed number to `dest` using `digits` bytes (+ `NUL`).
-
 #### `fio_ltoa10u`
 
 ```c
@@ -2582,6 +3278,14 @@ void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
 ```
 
 Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`).
+
+#### `fio_ltoa8u`
+
+```c
+void fio_ltoa8u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in octal format (base 8).
 
 #### `fio_ltoa16u`
 
@@ -2591,7 +3295,7 @@ void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
 
 Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in hex format (base 16).
 
-Note: for hex based numeral facil.io assumes that `digits` are always even (2, 4, 6, 8, 10, 12, 14, 16).
+**Note**: for hex based numerals facil.io assumes that `digits` are always even (2, 4, 6, 8, 10, 12, 14, 16).
 
 #### `fio_ltoa_bin`
 
@@ -2631,7 +3335,7 @@ Reads an unsigned base 10 formatted number.
 uint64_t fio_atol16u(char **pstr);
 ```
 
-Reads an unsigned hex formatted number (possibly prefixed with "0x").
+Reads an unsigned hex formatted number (possibly prefixed with `"0x"`).
 
 #### `fio_atol_bin`
 
@@ -2639,7 +3343,7 @@ Reads an unsigned hex formatted number (possibly prefixed with "0x").
 uint64_t fio_atol_bin(char **pstr);
 ```
 
-Reads an unsigned binary formatted number (possibly prefixed with "0b").
+Reads an unsigned binary formatted number (possibly prefixed with `"0b"`).
 
 #### `fio_atol_xbase`
 
@@ -2663,6 +3367,18 @@ Out of bound values return 255.
 
 This allows calculations for up to base 36.
 
+#### `fio_i2c`
+
+```c
+uint8_t fio_i2c(unsigned char i);
+```
+
+Maps numeral values to alphanumerical characters, where numbers have their natural values (`0-9`) and `A-Z` are the values `10-35`.
+
+Accepts values up to 63. Returns zero for values over 35. Out of bound values produce undefined behavior.
+
+This allows printing of numerals for up to base 36.
+
 #### `fio_u2i_limit`
 
 ```c
@@ -2684,7 +3400,7 @@ This function can be used before allocating memory in order to predict the amoun
 #### `fio_digits10u`
 
 ```c
-size_t fio_digits10u(int64_t i);
+size_t fio_digits10u(uint64_t i);
 ```
 
 Returns the number of digits of the **unsigned** number when using base 10.
@@ -2694,7 +3410,7 @@ This function can be used before allocating memory in order to predict the amoun
 #### `fio_digits8u`
 
 ```c
-size_t fio_digits8u(int64_t i);
+size_t fio_digits8u(uint64_t i);
 ```
 
 Returns the number of digits of the **unsigned** number when using base 8.
@@ -2709,7 +3425,7 @@ size_t fio_digits16u(uint64_t i);
 
 Returns the number of digits in base 16 for an **unsigned** number.
 
-Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2,4,6,8,10,12,14 and 16.
+Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2, 4, 6, 8, 10, 12, 14 and 16.
 
 This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
 
@@ -2718,7 +3434,7 @@ This function can be used before allocating memory in order to predict the amoun
 #### `fio_digits_bin`
 
 ```c
-size_t fio_digits_bin(int64_t i);
+size_t fio_digits_bin(uint64_t i);
 ```
 
 Returns the number of digits of the **unsigned** number when using base 2.
@@ -2728,90 +3444,369 @@ This function can be used before allocating memory in order to predict the amoun
 #### `fio_digits_xbase`
 
 ```c
-size_t fio_digits_xbase(int64_t i);
+size_t fio_digits_xbase(uint64_t i, size_t base);
 ```
 
 Returns the number of digits of the **unsigned** number when using base `base`.
 
 This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
 
+### IEEE 754 Floating Point Helpers
+
+#### `fio_i2d`
+
+```c
+double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
+```
+
+Converts a 64 bit signed integer mantissa and a base-2 exponent to an IEEE 754 formatted double.
+
+#### `fio_u2d`
+
+```c
+double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
+```
+
+Converts a 64 bit unsigned integer mantissa and a base-2 exponent to an IEEE 754 formatted double.
+
+### Big Number Conversion
+
+These functions provide hex string conversion for large unsigned integer types.
+
+#### `fio_u128_hex_read`
+
+```c
+fio_u128 fio_u128_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 128-bit unsigned integer.
+
+#### `fio_u256_hex_read`
+
+```c
+fio_u256 fio_u256_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 256-bit unsigned integer.
+
+#### `fio_u512_hex_read`
+
+```c
+fio_u512 fio_u512_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 512-bit unsigned integer.
+
+#### `fio_u1024_hex_read`
+
+```c
+fio_u1024 fio_u1024_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 1024-bit unsigned integer.
+
+#### `fio_u2048_hex_read`
+
+```c
+fio_u2048 fio_u2048_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 2048-bit unsigned integer.
+
+#### `fio_u4096_hex_read`
+
+```c
+fio_u4096 fio_u4096_hex_read(char **pstr);
+```
+
+Reads a hex numeral string and initializes a 4096-bit unsigned integer.
+
+#### `fio_u128_hex_write`
+
+```c
+size_t fio_u128_hex_write(char *dest, const fio_u128 *u);
+```
+
+Writes a 128-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
+#### `fio_u256_hex_write`
+
+```c
+size_t fio_u256_hex_write(char *dest, const fio_u256 *u);
+```
+
+Writes a 256-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
+#### `fio_u512_hex_write`
+
+```c
+size_t fio_u512_hex_write(char *dest, const fio_u512 *u);
+```
+
+Writes a 512-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
+#### `fio_u1024_hex_write`
+
+```c
+size_t fio_u1024_hex_write(char *dest, const fio_u1024 *u);
+```
+
+Writes a 1024-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
+#### `fio_u2048_hex_write`
+
+```c
+size_t fio_u2048_hex_write(char *dest, const fio_u2048 *u);
+```
+
+Writes a 2048-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
+#### `fio_u4096_hex_write`
+
+```c
+size_t fio_u4096_hex_write(char *dest, const fio_u4096 *u);
+```
+
+Writes a 4096-bit unsigned integer to `dest` as a hex string.
+
+Returns the number of bytes written (excluding the NUL terminator).
+
 -------------------------------------------------------------------------------
-## Globe Matching
+## Glob Matching
 
 ```c
 #define FIO_GLOB_MATCH
 #include "fio-stl.h"
 ```
 
-By defining the macro `FIO_GLOB_MATCH` the following functions are defined:
+By defining the macro `FIO_GLOB_MATCH`, the following glob pattern matching function is defined. This provides a binary glob matching helper useful for filtering strings against wildcard patterns.
 
 #### `fio_glob_match`
 
 ```c
-uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str);
+uint8_t fio_glob_match(fio_str_info_s pattern, fio_str_info_s string);
 ```
 
-This function is a **binary** glob matching helper.
+A **binary** glob matching helper that tests if `string` matches the glob `pattern`.
 
-Returns 1 on a match, otherwise returns 0.
+**Parameters:**
 
-The following patterns are recognized:
+- `pattern` - the glob pattern to match against
+- `string` - the string to test
 
-* `*` - matches any string, including an empty string.
-		
-	i.e., the following patterns will match against the string `"String"`:
+**Returns:** `1` on a match, `0` otherwise.
 
-    `"*"`
+**Note**: this function operates on raw bytes and does **not** support UTF-8 multi-byte characters for single-character matching (`?` and `[...]`).
 
-    `"*String*"`
+### Supported Patterns
 
-    `"S*ing"`
+The following glob patterns are recognized:
 
-* `?` - matches any single **byte** (does NOT support UTF-8 characters).
-		
-	i.e., the following patterns will match against the string `"String"`:
+#### Wildcard `*`
 
-    `"?tring"`
+Matches any string, including an empty string.
 
-    `"Strin?"`
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("*"), FIO_STR_INFO1("String"));        /* matches */
+fio_glob_match(FIO_STR_INFO1("*String*"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("S*ing"), FIO_STR_INFO1("String"));    /* matches */
+```
 
-    `"St?ing"`
+#### Single Character `?`
 
-* `[!...]` or `[^...]` - matches any **byte** that is **not** withing the brackets (does **not** support UTF-8 characters).
+Matches any single **byte** (does NOT support UTF-8 characters).
 
-    Byte ranges are supported using `'-'` (i.e., `[!0-9]`)
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("?tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("Strin?"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("St?ing"), FIO_STR_INFO1("String")); /* matches */
+```
 
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
+#### Negated Character Class `[!...]` or `[^...]`
 
-    `"[!a-z]tring"`
+Matches any **byte** that is **not** within the brackets (does **not** support UTF-8 characters).
 
-    `"[^a-z]tring"`
+Byte ranges are supported using `-` (e.g., `[!0-9]` matches any non-digit).
 
-    `"[^F]tring"` (same as `"[!F]tring"`)
+Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
 
-* `[...]` - matches any **byte** that **is** withing the brackets (does **not** support UTF-8 characters).
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("[!a-z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[^a-z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[^F]tring"), FIO_STR_INFO1("String"));   /* matches */
+```
 
-	Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
-	
-	i.e., the following patterns will match against the string `"String"`:
+#### Character Class `[...]`
 
-    `"[A-Z]tring"`
+Matches any **byte** that **is** within the brackets (does **not** support UTF-8 characters).
 
-    `"[sS]tring"`
+Byte ranges are supported using `-` (e.g., `[a-z]` matches any lowercase letter).
 
+Use the backslash (`\`) to escape the special `]`, `-` and `\` characters when they are part of the list.
+
+```c
+/* The following patterns will match against the string "String": */
+fio_glob_match(FIO_STR_INFO1("[A-Z]tring"), FIO_STR_INFO1("String")); /* matches */
+fio_glob_match(FIO_STR_INFO1("[sS]tring"), FIO_STR_INFO1("String"));  /* matches */
+```
+
+#### Escape Character `\`
+
+The backslash can be used to escape special characters (`*`, `?`, `[`, `\`) so they are matched literally.
+
+```c
+/* Match a literal asterisk */
+fio_glob_match(FIO_STR_INFO1("file\\*"), FIO_STR_INFO1("file*")); /* matches */
+```
+
+### Example
+
+```c
+#define FIO_GLOB_MATCH
+#define FIO_STR
+#include "fio-stl.h"
+
+int main(void) {
+  fio_str_info_s pattern = FIO_STR_INFO1("*.txt");
+  fio_str_info_s filename = FIO_STR_INFO1("document.txt");
+
+  if (fio_glob_match(pattern, filename)) {
+    printf("File matches pattern!\n");
+  } else {
+    printf("No match.\n");
+  }
+
+  /* More examples */
+  fio_glob_match(FIO_STR_INFO1("test_*"), FIO_STR_INFO1("test_file"));   /* 1 */
+  fio_glob_match(FIO_STR_INFO1("data[0-9]"), FIO_STR_INFO1("data5"));    /* 1 */
+  fio_glob_match(FIO_STR_INFO1("log_????"), FIO_STR_INFO1("log_2024"));  /* 1 */
+  fio_glob_match(FIO_STR_INFO1("[A-Z]*"), FIO_STR_INFO1("Hello"));       /* 1 */
+  fio_glob_match(FIO_STR_INFO1("[!0-9]*"), FIO_STR_INFO1("abc"));        /* 1 */
+
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
-## iMap - an Index Mapped Array (Hash Map - Array Combo)
+## iMap - Index Mapped Array (Hash Map - Array Combo)
 
-The `FIO_TYPEDEF_IMAP_ARRAY` macro is one way to design a hash map and is **used internally** for some modules (to minimize dependencies or nested inclusions).
+```c
+#define FIO_IMAP_CORE
+#include "fio-stl.h"
+```
 
-It is used when both insertion order and iteration over the complete data set is of high priority, or when it is important to hold the same data as both an Array and a Hash Map.
+The iMap module provides an indexed array data structure that combines the benefits of both arrays and hash maps. It maintains insertion order while providing fast O(1) lookups through an index map.
 
-**Note**: there's no memory management when objects are removed or the iMap is destroyed.
+This is primarily **used internally** by other facil.io modules to minimize dependencies and avoid nested inclusions. For most use cases, it is recommended to use the `FIO_MAP_NAME` macro instead.
 
-**Note**: for most use cases it is much better to create a type with the `FIO_MAP_NAME` macro.
+**Key Features:**
+- Maintains insertion order for iteration
+- Fast hash-based lookups
+- Combines array storage with hash map indexing
+- Suitable when both ordered iteration and random access are needed
+
+**Note**: there is no automatic memory management when objects are removed or the iMap is destroyed. You must handle cleanup of stored objects manually.
+
+-------------------------------------------------------------------------------
+
+### Configuration Macros
+
+#### `FIO_TYPEDEF_IMAP_REALLOC`
+
+```c
+#define FIO_TYPEDEF_IMAP_REALLOC FIO_MEM_REALLOC
+```
+
+Defines the reallocation function used by iMap. Defaults to `FIO_MEM_REALLOC`.
+
+#### `FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE`
+
+```c
+#define FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE FIO_MEM_REALLOC_IS_SAFE
+```
+
+Indicates whether the reallocation function zeros out new memory. Defaults to `FIO_MEM_REALLOC_IS_SAFE`.
+
+#### `FIO_TYPEDEF_IMAP_FREE`
+
+```c
+#define FIO_TYPEDEF_IMAP_FREE FIO_MEM_FREE
+```
+
+Defines the deallocation function used by iMap. Defaults to `FIO_MEM_FREE`.
+
+-------------------------------------------------------------------------------
+
+### Helper Macros
+
+#### `FIO_IMAP_ALWAYS_VALID`
+
+```c
+#define FIO_IMAP_ALWAYS_VALID(o) (1)
+```
+
+A helper macro for simple iMap array types where all objects are considered valid.
+
+#### `FIO_IMAP_ALWAYS_CMP_TRUE`
+
+```c
+#define FIO_IMAP_ALWAYS_CMP_TRUE(a, b) (1)
+```
+
+A helper macro for simple iMap array types where all comparisons return true.
+
+#### `FIO_IMAP_ALWAYS_CMP_FALSE`
+
+```c
+#define FIO_IMAP_ALWAYS_CMP_FALSE(a, b) (0)
+```
+
+A helper macro for simple iMap array types where all comparisons return false.
+
+#### `FIO_IMAP_SIMPLE_CMP`
+
+```c
+#define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
+```
+
+A helper macro for simple iMap array types that compares the first element of two objects.
+
+#### `FIO_IMAP_EACH`
+
+```c
+#define FIO_IMAP_EACH(array_name, map_ptr, i)                                  \
+  for (size_t i = 0; i < (map_ptr)->w; ++i)                                    \
+    if (!FIO_NAME(array_name, is_valid)((map_ptr)->ary + i))                   \
+      continue;                                                                \
+    else
+```
+
+Iterates over all valid elements in the iMap array.
+
+Example:
+
+```c
+FIO_IMAP_EACH(my_array, &my_map, i) {
+  printf("Element at index %zu: %d\n", i, my_map.ary[i].value);
+}
+```
+
+-------------------------------------------------------------------------------
+
+### Type Definition Macro
 
 #### `FIO_TYPEDEF_IMAP_ARRAY`
 
@@ -2824,34 +3819,316 @@ It is used when both insertion order and iteration over the complete data set is
                                is_valid_fn)
 ```
 
-This MACRO defines the type and functions needed for an indexed array.
+This macro defines the type and functions needed for an indexed array.
 
-An indexed array is simple ordered array who's objects are indexed using an almost-hash map, allowing for easy seeking while also enjoying the advantages provided by the array structure.
+An indexed array is a simple ordered array whose objects are indexed using an almost-hash map, allowing for easy seeking while also enjoying the advantages provided by the array structure.
 
-The index map uses one `imap_type` (i.e., `uint64_t`) to store both the index in array and any leftover hash data (the first half being tested during the random access and the leftover during comparison). The reserved value `0` indicates a free slot. The reserved value `~0` indicates a freed item (a free slot that was previously used).
+The index map uses one `imap_type` (e.g., `uint64_t`) to store both the index in the array and any leftover hash data. The first half of the bits are tested during random access, and the remaining bits are used during comparison.
 
-This is mostly for internal use and documentation is poor (PR, anyone?).
+**Reserved Values:**
+- `0` - indicates a free slot
+- `~0` (all bits set) - indicates a freed item (a slot that was previously used)
 
-The macro defines the following:
+**Parameters:**
+- `array_name` - the prefix for all generated type and function names
+- `array_type` - the type of elements stored in the array
+- `imap_type` - the unsigned integer type for the index map (e.g., `uint32_t`, `uint64_t`)
+- `hash_fn(ptr)` - a function/macro that computes a hash from a pointer to an element
+- `cmp_fn(a_ptr, b_ptr)` - a function/macro that compares two elements by pointer
+- `is_valid_fn(ptr)` - a function/macro that returns non-zero if the element is valid
 
-- `array_name_s`        the main array container (.ary is the array itself)
+**Note**: `hash_fn`, `cmp_fn`, and `is_valid_fn` all accept **pointers** to elements and must dereference them to access the content.
 
-- `array_name_seeker_s` is a seeker type that finds objects.
-- `array_name_seek`     finds an object or its future position.
+-------------------------------------------------------------------------------
 
-- `array_name_reserve`  reserves a minimum imap storage capacity.
-- `array_name_capa`     the imap's theoretical storage capacity.
+### Generated Types
 
-- `array_name_set`      writes or overwrites data to the array.
-- `array_name_get`      returns a pointer to the object within the array.
-- `array_name_remove`   removes an object and resets its memory to zero.
+#### `array_name_s`
 
-- `array_name_rehash`   re-builds the imap (use after sorting).
+```c
+typedef struct {
+  array_type *ary;    /* Pointer to the array of elements */
+  imap_type count;    /* Number of valid elements in the array */
+  imap_type w;        /* Write position (next available index) */
+  uint32_t capa_bits; /* Log2 of the capacity */
+} array_name_s;
+```
 
+The main container type for the indexed array.
 
-Notes:
+**Members:**
+- `ary` - pointer to the array of stored elements
+- `count` - the number of valid (non-removed) elements
+- `w` - the write position, indicating the next available slot
+- `capa_bits` - the capacity expressed as a power of 2 (actual capacity is `1 << capa_bits`)
 
-- `hash_fn(ptr)`, `cmp_fn(a_ptr,b_ptr)` and `is_valid_fn(ptr)` accepts **pointers**  and needs to de-reference them in order to compare their content.
+#### `array_name_seeker_s`
+
+```c
+typedef struct {
+  imap_type pos;     /* Position in the array */
+  imap_type ipos;    /* Position in the index map */
+  imap_type set_val; /* Value to set in the index map */
+} array_name_seeker_s;
+```
+
+A seeker type returned by `array_name_seek` that contains position information.
+
+**Members:**
+- `pos` - the position of the element in the array (or `w` if not found)
+- `ipos` - the position in the index map
+- `set_val` - the value to write to the index map when inserting
+
+-------------------------------------------------------------------------------
+
+### Generated Functions
+
+#### `array_name_is_valid`
+
+```c
+int array_name_is_valid(array_type *pobj);
+```
+
+Returns non-zero if the object pointed to by `pobj` is valid.
+
+This is a wrapper around the `is_valid_fn` provided to `FIO_TYPEDEF_IMAP_ARRAY`.
+
+#### `array_name_capa`
+
+```c
+size_t array_name_capa(array_name_s *a);
+```
+
+Returns the theoretical storage capacity for the indexed array.
+
+The capacity is calculated as `1 << a->capa_bits`.
+
+#### `array_name_imap`
+
+```c
+imap_type *array_name_imap(array_name_s *a);
+```
+
+Returns a pointer to the index map.
+
+The index map is stored immediately after the array data in memory.
+
+#### `array_name_destroy`
+
+```c
+void array_name_destroy(array_name_s *a);
+```
+
+Deallocates all dynamic memory associated with the indexed array.
+
+**Note**: this does not call destructors on stored elements. You must clean up element resources before calling this function.
+
+#### `array_name_seek`
+
+```c
+array_name_seeker_s array_name_seek(array_name_s *a, array_type *pobj);
+```
+
+Finds an object in the array or determines its future position.
+
+**Parameters:**
+- `a` - pointer to the indexed array
+- `pobj` - pointer to the object to search for
+
+**Returns:** a seeker struct containing:
+- `pos` - the array index of the found element, or `a->w` if not found
+- `ipos` - the index map position, or `~0` if no suitable slot was found
+- `set_val` - the value to write to the index map when inserting
+
+#### `array_name_reserve`
+
+```c
+int array_name_reserve(array_name_s *a, imap_type min);
+```
+
+Reserves a minimum storage capacity for the indexed array.
+
+**Parameters:**
+- `a` - pointer to the indexed array
+- `min` - the minimum capacity to reserve
+
+**Returns:** `0` on success, `-1` on failure.
+
+#### `array_name_rehash`
+
+```c
+int array_name_rehash(array_name_s *a);
+```
+
+Rebuilds the index map from the current array contents.
+
+Use this function after sorting the array or after any operation that changes element positions without updating the index map.
+
+**Returns:** `0` on success, `-1` on failure.
+
+#### `array_name_set`
+
+```c
+array_type *array_name_set(array_name_s *a, array_type obj, int overwrite);
+```
+
+Writes or overwrites data in the array.
+
+**Parameters:**
+- `a` - pointer to the indexed array
+- `obj` - the object to insert
+- `overwrite` - if non-zero, overwrites existing data; otherwise returns existing element
+
+**Returns:** a pointer to the element in the array, or `NULL` on failure.
+
+#### `array_name_get`
+
+```c
+array_type *array_name_get(array_name_s *a, array_type obj);
+```
+
+Finds an object in the array using the index map.
+
+**Parameters:**
+- `a` - pointer to the indexed array
+- `obj` - an object with the key/hash to search for
+
+**Returns:** a pointer to the found element, or `NULL` if not found.
+
+#### `array_name_remove`
+
+```c
+int array_name_remove(array_name_s *a, array_type obj);
+```
+
+Removes an object from the array and zeros out its memory.
+
+**Parameters:**
+- `a` - pointer to the indexed array
+- `obj` - an object with the key/hash to remove
+
+**Returns:** `0` on success, `-1` if the object was not found.
+
+**Note**: the element's memory is zeroed, but no destructor is called. Handle resource cleanup before calling this function.
+
+-------------------------------------------------------------------------------
+
+### Internal Seeker Types
+
+The iMap module also provides internal seeker types and functions for different integer sizes. These are used internally by other facil.io modules.
+
+#### `fio___imapN_seeker_s`
+
+```c
+typedef struct {
+  uintN_t pos;     /* Position in the array */
+  uintN_t ipos;    /* Position in the index map */
+  uintN_t set_val; /* Value to set in the index map */
+  bool is_valid;   /* True if a valid element was found */
+} fio___imapN_seeker_s;
+```
+
+Where `N` is one of `8`, `16`, `32`, or `64`.
+
+#### `fio___imapN_seek`
+
+```c
+fio___imapN_seeker_s fio___imapN_seek(
+    void *ary,
+    uintN_t *imap,
+    const uintN_t capa_bits,
+    void *pobj,
+    uintN_t hash,
+    bool cmp_fn(void *ary, void *obj, uintN_t indx),
+    const size_t max_attempts);
+```
+
+A lower-level seek function that searches for an element in an index map.
+
+**Parameters:**
+- `ary` - pointer to the array
+- `imap` - pointer to the index map
+- `capa_bits` - log2 of the capacity
+- `pobj` - pointer to the object to search for
+- `hash` - the hash value of the object
+- `cmp_fn` - comparison function
+- `max_attempts` - maximum number of probing attempts
+
+#### `fio___imapN_set`
+
+```c
+void fio___imapN_set(uintN_t *imap, uintN_t ipos, uintN_t set_val);
+```
+
+Sets a value in the index map at the specified position.
+
+-------------------------------------------------------------------------------
+
+### Example
+
+```c
+#define FIO_IMAP_CORE
+#include "fio-stl.h"
+
+/* Define a simple key-value pair type */
+typedef struct {
+  uint64_t key;
+  int value;
+} my_kv_s;
+
+/* Hash function - takes a pointer, returns hash of the key */
+static uint64_t my_kv_hash(my_kv_s *p) {
+  return fio_risky_num(p->key, 0);
+}
+
+/* Comparison function - takes two pointers, returns true if keys match */
+static int my_kv_cmp(my_kv_s *a, my_kv_s *b) {
+  return a->key == b->key;
+}
+
+/* Validity function - takes a pointer, returns true if valid */
+static int my_kv_valid(my_kv_s *p) {
+  return p->key != 0;
+}
+
+/* Define the indexed array type */
+FIO_TYPEDEF_IMAP_ARRAY(my_kv,        /* array_name */
+                       my_kv_s,      /* array_type */
+                       uint32_t,     /* imap_type */
+                       my_kv_hash,   /* hash_fn */
+                       my_kv_cmp,    /* cmp_fn */
+                       my_kv_valid)  /* is_valid_fn */
+
+int main(void) {
+  my_kv_s map = {0};
+  
+  /* Insert some key-value pairs */
+  my_kv_set(&map, (my_kv_s){.key = 1, .value = 100}, 1);
+  my_kv_set(&map, (my_kv_s){.key = 2, .value = 200}, 1);
+  my_kv_set(&map, (my_kv_s){.key = 3, .value = 300}, 1);
+  
+  /* Look up a value */
+  my_kv_s *found = my_kv_get(&map, (my_kv_s){.key = 2});
+  if (found) {
+    printf("Found key 2 with value: %d\n", found->value);
+  }
+  
+  /* Iterate over all elements (in insertion order) */
+  FIO_IMAP_EACH(my_kv, &map, i) {
+    printf("Key: %llu, Value: %d\n", 
+           (unsigned long long)map.ary[i].key, 
+           map.ary[i].value);
+  }
+  
+  /* Remove an element */
+  my_kv_remove(&map, (my_kv_s){.key = 2});
+  
+  /* Clean up */
+  my_kv_destroy(&map);
+  
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
 ## Multi-Precision Math
@@ -2861,16 +4138,20 @@ Notes:
 #include "fio-stl.h"
 ```
 
-When requiring more than multi-precision ADD, SUB and MUL, `FIO_MATH` attempts to provide some commonly used (yet more advanced) operations.
+When requiring more than the core multi-precision ADD, SUB and MUL operations, `FIO_MATH` provides commonly used (yet more advanced) operations such as division, bit shifting, and bit index detection.
 
 Note that this implementation assumes that the CPU performs MUL in constant time (which may or may not be true).
 
-### Multi-Precision Math with Little Endian arrays
+**Note**: The core multi-precision math building blocks (`fio_math_add`, `fio_math_sub`, `fio_math_mul`, `fio_math_addc64`, etc.) and the vector helper types (`fio_u128`, `fio_u256`, etc.) are always available as part of the core module and do not require `FIO_MATH` to be defined. See the [Core Module documentation](000 core.md) for details on those functions.
 
-The following, somewhat naive, multi-precision math implementation focuses on constant time. It assumes an array of local endian 64bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
+-------------------------------------------------------------------------------
 
+### Multi-Precision Math with Little Endian Arrays
+
+The following multi-precision math implementation focuses on constant time operations (where possible). It assumes an array of local endian 64-bit numbers ordered within the array in little endian (word `0` contains the least significant bits and word `n-1` contains the most significant bits).
 
 #### `fio_math_div`
+
 ```c
 void fio_math_div(uint64_t *dest,
                   uint64_t *reminder,
@@ -2879,11 +4160,20 @@ void fio_math_div(uint64_t *dest,
                   const size_t number_array_length);
 ```
 
-Multi-precision DIV for `len*64` bit long a, b.
+Multi-precision DIV for `len*64` bit long numbers `a` and `b`.
 
-This is **NOT constant time**.
+Computes `a / b`, storing the quotient in `dest` and the remainder in `reminder`.
 
-The algorithm might be slow, as my math isn't that good and I couldn't understand faster division algorithms (such as Newton–Raphson division)... so this is sort of a factorized variation on long division.
+**Parameters:**
+- `dest` - destination array for the quotient (may be NULL if only remainder is needed)
+- `reminder` - destination array for the remainder (may be NULL if only quotient is needed)
+- `a` - the dividend (numerator)
+- `b` - the divisor (denominator)
+- `number_array_length` - the number of 64-bit words in each array
+
+**Note**: This is **NOT** constant time.
+
+**Note**: The algorithm might be slow, as it uses a factorized variation on long division rather than faster algorithms like Newton-Raphson division.
 
 #### `fio_math_shr`
 
@@ -2894,7 +4184,15 @@ void fio_math_shr(uint64_t *dest,
                   size_t number_array_length);
 ```
 
-Multi-precision shift right for `len` word number `n`.
+Multi-precision shift right for a `len` word number `n`.
+
+Shifts the multi-precision number `n` right by `right_shift_bits` bits, storing the result in `dest`.
+
+**Parameters:**
+- `dest` - destination array for the result
+- `n` - the number to shift
+- `right_shift_bits` - number of bits to shift right
+- `number_array_length` - the number of 64-bit words in the arrays
 
 #### `fio_math_shl`
 
@@ -2905,135 +4203,62 @@ void fio_math_shl(uint64_t *dest,
                   const size_t number_array_length);
 ```
 
-Multi-precision shift left for `len*64` bit number `n`.
+Multi-precision shift left for a `len*64` bit number `n`.
+
+Shifts the multi-precision number `n` left by `left_shift_bits` bits, storing the result in `dest`.
+
+**Parameters:**
+- `dest` - destination array for the result
+- `n` - the number to shift
+- `left_shift_bits` - number of bits to shift left
+- `number_array_length` - the number of 64-bit words in the arrays
 
 #### `fio_math_inv`
 
 ```c
 void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
-````
+```
 
-Multi-precision Inverse for `len*64` bit number `n` (i.e., turns `1` into `-1`).
+Multi-precision two's complement inverse for a `len*64` bit number `n`.
+
+Computes the two's complement negation (i.e., turns `1` into `-1` in two's complement representation).
+
+**Parameters:**
+- `dest` - destination array for the result
+- `n` - the number to invert
+- `len` - the number of 64-bit words in the arrays
 
 #### `fio_math_msb_index`
 
 ```c
 size_t fio_math_msb_index(uint64_t *n, const size_t len);
-````
+```
 
-Multi-precision - returns the index for the most significant bit or -1.
+Multi-precision - returns the index for the most significant bit, or `(size_t)-1` if the number is zero.
 
-This can be used to collect a number's bit length.
+This can be used to determine a number's bit length.
+
+**Parameters:**
+- `n` - the multi-precision number
+- `len` - the number of 64-bit words in the array
+
+**Returns:** The zero-based index of the most significant set bit, or `(size_t)-1` if all bits are zero.
 
 #### `fio_math_lsb_index`
 
 ```c
 size_t fio_math_lsb_index(uint64_t *n, const size_t len);
-````
+```
 
-Multi-precision - returns the index for the least significant bit or -1.
+Multi-precision - returns the index for the least significant bit, or `(size_t)-1` if the number is zero.
 
 This can be used to extract an exponent value in base 2.
 
-### Vector Math Helpers
+**Parameters:**
+- `n` - the multi-precision number
+- `len` - the number of 64-bit words in the array
 
-Vector helper functions start with the type of the vector. i.e. `fio_u128`. Next the operation name and the bit grouping are stated, i.e. `fio_u256_mul64`.
-
-When a vector operation is applied to a constant, the operation is prefixed with a `c`, i.e., `fio_u128_clrot32`.
-
-`fio_uxxx_load`, `fio_uxxx_load_le32` and `fio_uxxx_load_le64` functions are also provided.
-
-The following functions are available:
-
-* `fio_uxxx_mul##(vec_a, vec_b)` - performs the `mul` operation (`*`).
-* `fio_uxxx_add##(vec_a, vec_b)` - performs the `add` operation (`+`).
-* `fio_uxxx_sub##(vec_a, vec_b)` - performs the `sub` operation (`-`).
-* `fio_uxxx_div##(vec_a, vec_b)` - performs the `div` operation (`/`).
-* `fio_uxxx_reminder##(vec_a, vec_b)` - performs the `reminder` operation (`%`).
-
-
-* `fio_uxxx_cmul##(vec, single_element)` - performs the `mul` operation (`*`).
-* `fio_uxxx_cadd##(vec, single_element)` - performs the `add` operation (`+`).
-* `fio_uxxx_csub##(vec, single_element)` - performs the `sub` operation (`-`).
-* `fio_uxxx_cdiv##(vec, single_element)` - performs the `div` operation (`/`).
-* `fio_uxxx_creminder##(vec, single_element)` - performs the `reminder` operation (`%`).
-
-* `fio_uxxx_and(vec_a, vec_b)` - performs the `and` operation (`&`) on the whole vector.
-* `fio_uxxx_or(vec_a, vec_b)` - performs the `or` operation (`|`) on the whole vector.
-* `fio_uxxx_xor(vec_a, vec_b)` - performs the `xor` operation (`^`) on the whole vector.
-
-* `fio_uxxx_cand##(vec, single_element)` - performs the `and` operation (`&`) with an X bit constant.
-* `fio_uxxx_cor##(vec, single_element)` - performs the `or` operation (`|`) with an X bit constant.
-* `fio_uxxx_cxor##(vec, single_element)` - performs the `xor` operation (`^`) with an X bit constant.
-
-* `fio_uxxx_flip(vec)` - performs the `flip` bit operation (`~`).
-
-* `fio_uxxx_shuffle##(vec, index0, index1...)` - performs a limited `shuffle` operation on a single vector, reordering its members.
-
-* `fio_uxxx_load(const void * buffer)` loads data from the buffer, returning a properly aligned vector.
-
-* `fio_uxxx_load_le##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using little endian rather than local endian.
-
-* `fio_uxxx_load_be##(const void * buffer)` loads data from the buffer, returning a properly aligned vector. This variation performs a `bswap` operation on each bit group, so the data is loaded using big endian rather than local endian.
-
-Example use:
-
-```c
-fio_u256 const prime = {.u64 = {FIO_U64_HASH_PRIME0,
-                                FIO_U64_HASH_PRIME1,
-                                FIO_U64_HASH_PRIME2,
-                                FIO_U64_HASH_PRIME3}};
-fio_u256 u = fio_u256_load(buf), tmp;
-u = fio_u256_mul64(u, prime);
-tmp = fio_u256_clrot64(u, 31);
-u = fio_u256_xor64(u, tmp);
-// ...
-```
-
-**Note**: the implementation is portable and doesn't currently use any compiler vector builtins or types. We pray to the optimization gods instead (which don't always listen) and depend on compilation flags.
-
-#### Numeral Array Shuffling
-
-Numeral vector / array shuffling is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
-
-Vector / array shuffling is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
-
-The naming convention is `fio_PRxL_reshuffle` where `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl` and `L` is the length of the array in number of elements.
-
-**Note**: The use of **re**shuffle denotes that the shuffling occurs in-place, replacing current data (unlike the `fio_uxxx_shuffle##` math functions).
-
-i.e.: 
-
-```c
-void fio_u64x4_reshuffle(uint64_t * v, uint8_t[4]);
-void fio_u64x8_reshuffle(uint64_t * v, uint8_t[8]);
-void fio_u64x16_reshuffle(uint64_t *v, uint8_t[16]);
-#define fio_u64x4_reshuffle(v, ...)  fio_u64x4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_reshuffle(v, ...)  fio_u64x8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_reshuffle(v, ...) fio_u64x16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
-```
-
-#### Numeral Array Reduction
-
-Numeral vector / array reduction is available the numeral types `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`, as well as the `float` and `double` types.
-
-Vector / array reduction is available for any combinations of up to 256 bytes (i.e., `8x256` or `64x32`).
-
-The naming convention is `fio_PRxL_reduce_OP` where:
-
-- `PR` is either `u8`, `u16`, `u32`, `u64`, `float` or `dbl`
-
--  `L` is the length of the array in number of elements.
-
-- `OP` is the operation to be performed, one of: `add`, `mul` `xor`, `or`, `and`. Note that for `float` and `double` types, only `add` and `mul` are available.
-
-i.e.: 
-
-```c
-uint64_t fio_u64x4_reduce_add(uint64_t * v);
-uint64_t fio_u64x8_reduce_xor(uint64_t * v);
-uint64_t fio_u64x16_reduce_and(uint64_t * v);
-```
+**Returns:** The zero-based index of the least significant set bit, or `(size_t)-1` if all bits are zero.
 
 -------------------------------------------------------------------------------
 ## Pseudo Random Generation
@@ -3043,40 +4268,63 @@ uint64_t fio_u64x16_reduce_and(uint64_t * v);
 #include "fio-stl.h"
 ```
 
-If the `FIO_RAND` macro is defined, the following, non-cryptographic psedo-random generator and hash functions will be defined.
+If the `FIO_RAND` macro is defined, the following non-cryptographic pseudo-random generator and hash functions will be defined.
 
 The "random" data is initialized / seeded automatically using a small number of functional cycles that collect data and hash it, hopefully resulting in enough jitter entropy.
 
 The data is collected using `getrusage` (or the system clock if `getrusage` is unavailable) and hashed using RiskyHash. The data is then combined with the previous state / cycle.
 
-The CPU "jitter" within the calculation **should** effect `getrusage` in a way that makes it impossible for an attacker to determine the resulting random state (assuming jitter exists).
+The CPU "jitter" within the calculation **should** affect `getrusage` in a way that makes it impossible for an attacker to determine the resulting random state (assuming jitter exists).
 
 However, this is unlikely to prove cryptographically safe and isn't likely to produce a large number of entropy bits (even though a small number of bits have a large impact on the final state).
 
-The facil.io random generator functions appear both faster and more random then the standard `rand` on my computer (you can test it for yours).
+The facil.io random generator functions appear both faster and more random than the standard `rand` on my computer (you can test it for yours).
 
 I designed it in the hopes of achieving a cryptographically safe PRNG, but it wasn't cryptographically analyzed, lacks a good source of entropy and should be considered as a good enough non-cryptographic PRNG for general use.
 
 **Note**: bitwise operations (`FIO_BITWISE`), Risky Hash and Stable Hash are automatically defined along with `FIO_RAND`, since they are required by the algorithm.
 
-### Psedo-Random Generator Functions
+### Pseudo-Random Generator Functions
 
 #### `fio_rand64`
 
 ```c
-uint64_t fio_rand64(void)
+uint64_t fio_rand64(void);
 ```
 
-Returns 64 random bits. Probably **not** cryptographically safe.
+Returns 64 pseudo-random bits. Probably **not** cryptographically safe.
+
+#### `fio_rand128`
+
+```c
+fio_u128 fio_rand128(void);
+```
+
+Returns 128 pseudo-random bits. Probably **not** cryptographically safe.
+
+**Note**: returns a `fio_u128` type which is a 128-bit unsigned integer structure.
 
 #### `fio_rand_bytes`
 
 ```c
-void fio_rand_bytes(void *data_, size_t len)
+void fio_rand_bytes(void *target, size_t len);
 ```
 
-Writes `len` random Bytes to the buffer pointed to by `data`. Probably **not**
-cryptographically safe.
+Writes `len` bytes of pseudo-random data to the buffer pointed to by `target`. Probably **not** cryptographically safe.
+
+#### `fio_rand_bytes_secure`
+
+```c
+int fio_rand_bytes_secure(void *target, size_t len);
+```
+
+Writes `len` bytes of cryptographically secure random data to `target`.
+
+Uses the system CSPRNG: `arc4random_buf()` on BSD/macOS, or `/dev/urandom` as fallback on other POSIX systems.
+
+**Returns:** `0` on success, `-1` on failure.
+
+**Note**: Use this function for security-sensitive operations like key generation, nonces, or any cryptographic purpose. For non-security-critical random data, prefer `fio_rand_bytes` which is faster.
 
 #### `fio_rand_reseed`
 
@@ -3086,15 +4334,25 @@ void fio_rand_reseed(void);
 
 Forces the random generator state to rotate.
 
-SHOULD be called after `fork` to prevent the two processes from outputting the same random numbers (until a reseed is called automatically).
+**Note**: SHOULD be called after `fork` to prevent the two processes from outputting the same random numbers (until a reseed is called automatically).
 
-### Risky Hash / Stable Hash (data hashing):
+### Risky Hash / Stable Hash (data hashing)
 
 Stable Hash is a stable block hashing algorithm that can be used to hash non-ephemeral data. The hashing speeds are competitively fast, the algorithm is fairly simple with good avalanche dispersion and minimal bias.
 
-Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash maps keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with all the features 
+Risky Hash is a non-stable hashing algorithm that is aimed at ephemeral data hashing (i.e., hash map keys) and might be updated periodically to produce different hashing results. It too aims to balance security concerns with performance.
 
-Both algorithms are **non-cryptographic** and produce 64 bit hashes by default (though internally both use a 256 block that could be used to produce 128bit hashes). Both pass the SMHasher test suite for hashing functions.
+Both algorithms are **non-cryptographic** and produce 64-bit hashes by default (though internally both use a 256-bit block that could be used to produce 128-bit hashes). Both pass the SMHasher test suite for hashing functions.
+
+#### `FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH`
+
+```c
+#define FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH 0
+```
+
+When set to `1`, calls to `fio_risky_hash` will be redirected to `fio_stable_hash` instead. This can be useful when you need stable hashing behavior but are using code that calls `fio_risky_hash`.
+
+Default is `0` (disabled).
 
 #### `fio_stable_hash`
 
@@ -3102,7 +4360,9 @@ Both algorithms are **non-cryptographic** and produce 64 bit hashes by default (
 uint64_t fio_stable_hash(const void *data, size_t len, uint64_t seed);
 ```
 
-Computes a 64 bit facil.io Stable Hash (once version 1.0 is released, this algorithm will not be updated, even if broken).
+Computes a 64-bit facil.io Stable Hash.
+
+Once version 1.0 is released, this algorithm will not be updated, even if broken. This makes it suitable for persistent storage or cross-system communication where hash stability is required.
 
 #### `fio_stable_hash128`
 
@@ -3113,17 +4373,25 @@ void fio_stable_hash128(void *restrict dest,
                         uint64_t seed);
 ```
 
-Computes a 128 bit facil.io Stable Hash (once version 1 is released, this algorithm will not be updated, even if broken).
+Computes a 128-bit facil.io Stable Hash.
+
+Once version 1.0 is released, this algorithm will not be updated, even if broken.
+
+**Parameters:**
+- `dest` - pointer to a 16-byte buffer where the 128-bit hash will be written
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+- `seed` - seed value for the hash
 
 #### `fio_risky_hash`
 
 ```c
-uint64_t fio_risky_hash(const void *data, size_t len, uint64_t seed)
+uint64_t fio_risky_hash(const void *buf, size_t len, uint64_t seed);
 ```
 
 This is a non-streaming implementation of the RiskyHash v.3 algorithm.
 
-This function will produce a 64 bit hash for X bytes of data.
+This function will produce a 64-bit hash for the given data.
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
 
@@ -3135,7 +4403,7 @@ This function will produce a 64 bit hash for X bytes of data.
 uint64_t fio_risky_ptr(void *ptr);
 ```
 
-Adds a bit of entropy to pointer values.
+Adds a bit of entropy to pointer values. Designed to be unsafe (fast, not cryptographically secure).
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps.
 
@@ -3145,7 +4413,7 @@ Adds a bit of entropy to pointer values.
 uint64_t fio_risky_num(uint64_t number, uint64_t seed);
 ```
 
-Adds a bit of entropy to numeral values.
+Adds a bit of entropy to numeral values. Designed to be unsafe (fast, not cryptographically secure).
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps, but that's about it.
 
@@ -3161,11 +4429,31 @@ OS signal callbacks are very limited in the actions they are allowed to take. In
 
 The facil.io STL offers helpers that perform this very common pattern of declaring a flag, watching a signal, setting a flag and (later) calling a callback outside of the signal handler that would handle the actual event.
 
-When defining `FIO_SIGNAL`, the following function are defined.
+**Note**: Either POSIX or Windows is required for the `fio_signal` API.
+
+### Configuration Macros
+
+#### `FIO_SIGNAL_MONITOR_MAX`
+
+```c
+#ifndef FIO_SIGNAL_MONITOR_MAX
+/* The maximum number of signals the implementation will be able to monitor */
+#define FIO_SIGNAL_MONITOR_MAX 24
+#endif
+```
+
+Defines the maximum number of signals that can be monitored simultaneously. Defaults to `24`.
+
+### Signal Monitoring API
 
 #### `fio_signal_monitor`
 
 ```c
+int fio_signal_monitor(fio_signal_monitor_args_s args);
+/* Named arguments using macro. */
+#define fio_signal_monitor(...)                                                \
+  fio_signal_monitor((fio_signal_monitor_args_s){__VA_ARGS__})
+
 typedef struct {
   /** The signal number to listen for. */
   int sig;
@@ -3175,24 +4463,40 @@ typedef struct {
   void *udata;
   /** Should the signal propagate to existing handler(s)? */
   bool propagate;
-  /** Should the callback run immediately (signal safe code) or wait for `fio_signal_review`? */
+  /** Call (safe) callback immediately? or wait for `fio_signal_review`? */
   bool immediate;
 } fio_signal_monitor_args_s;
-
-SFUNC int fio_signal_monitor(fio_signal_monitor_args_s args);
-#define fio_signal_monitor(...)                                                \
-  fio_signal_monitor((fio_signal_monitor_args_s){__VA_ARGS__})
 ```
 
 Starts to monitor for the specified signal, setting an optional callback.
 
-If `callback` is `NULL`, the signal will be ignored.
+The function is shadowed by a macro, allowing it to accept named arguments:
 
-If the signal is already being monitored, the callback and `udata` pointers are updated.
+```c
+fio_signal_monitor(.sig = SIGINT,
+                   .callback = on_sigint,
+                   .udata = my_data);
+```
 
-If `propagate` is true and a previous signal handler was set, it will be called.
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `sig` | `int` | The signal number to listen for (required) |
+| `callback` | `void (*)(int, void *)` | The callback to run; leave `NULL` to ignore signal |
+| `udata` | `void *` | Opaque user data passed to the callback |
+| `propagate` | `bool` | If `true` and a previous handler was set, it will be called |
+| `immediate` | `bool` | If `true`, callback runs immediately in signal context; otherwise waits for `fio_signal_review` |
+
+**Returns:** `0` on success, `-1` on error.
+
+**Note**: if `callback` is `NULL`, the signal will be ignored.
+
+**Note**: if the signal is already being monitored, the callback and `udata` pointers are updated.
 
 **Note**: `udata` stands for "user data", it is an opaque pointer that is simply passed along to the callback.
+
+**Note**: when `immediate` is `true`, the callback must be signal-safe (async-signal-safe). Most operations are not safe to perform in a signal handler context.
 
 #### `fio_signal_review`
 
@@ -3200,7 +4504,9 @@ If `propagate` is true and a previous signal handler was set, it will be called.
 int fio_signal_review(void);
 ```
 
-Reviews all signals, calling any relevant callbacks.
+Reviews all signals, calling any relevant callbacks that were deferred (i.e., monitors where `immediate` was `false`).
+
+**Returns:** the number of callbacks that were called.
 
 #### `fio_signal_forget`
 
@@ -3208,19 +4514,59 @@ Reviews all signals, calling any relevant callbacks.
 int fio_signal_forget(int sig);
 ```
 
-Stops monitoring the specified signal.
+Stops monitoring the specified signal and restores the default signal handler.
+
+**Returns:** `0` on success, `-1` on error (e.g., signal was not being monitored).
+
+### Example
+
+```c
+#define FIO_SIGNAL
+#define FIO_LOG
+#include "fio-stl.h"
+
+static volatile int running = 1;
+
+static void on_sigint(int sig, void *udata) {
+  (void)sig;
+  (void)udata;
+  FIO_LOG_INFO("SIGINT received, shutting down...");
+  running = 0;
+}
+
+int main(void) {
+  /* Monitor SIGINT - callback deferred until fio_signal_review is called */
+  fio_signal_monitor(.sig = SIGINT,
+                     .callback = on_sigint,
+                     .udata = NULL);
+
+  FIO_LOG_INFO("Running... Press Ctrl+C to stop.");
+
+  while (running) {
+    /* Check for signals and call deferred callbacks */
+    fio_signal_review();
+    /* ... do work ... */
+  }
+
+  /* Stop monitoring */
+  fio_signal_forget(SIGINT);
+
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
 ## Quick Sort and Insert Sort
 
 ```c
-#define FIO_SORT_NAME
+#define FIO_SORT_NAME num
+#define FIO_SORT_TYPE size_t
 #include "fio-stl.h"
 ```
 
-If the `FIO_SORT_NAME` is defined (and named), the following functions will be defined.
+If `FIO_SORT_NAME` is defined, the following sorting functions will be defined. The `FIO_SORT_TYPE` macro **must** also be defined to specify the type of array elements to sort.
 
-This can be performed multiple times for multiple types.
+This module can be included multiple times to create sorting functions for different types.
 
 ### Sort Settings
 
@@ -3229,23 +4575,20 @@ The following macros define the behavior of the sorting algorithm.
 #### `FIO_SORT_NAME`
 
 ```c
-#define FIO_SORT_NAME num // will produce function names such as num_sort(...)
+#define FIO_SORT_NAME num // produces function names: num_sort, num_qsort, num_isort
 ```
 
 The prefix used for naming the sorting functions.
 
-**Note**: if not defined, than `FIO_SORT_NAME` will be defined as `FIO_SORT_TYPE##_vec`.
-
 #### `FIO_SORT_TYPE`
 
 ```c
-// i.e.
 #define FIO_SORT_TYPE size_t
 ```
 
 The type of the array members to be sorted.
 
-**Note**: this macro **MUST** be defined.
+**Note**: this macro **must** be defined.
 
 #### `FIO_SORT_IS_BIGGER`
 
@@ -3253,7 +4596,9 @@ The type of the array members to be sorted.
 #define FIO_SORT_IS_BIGGER(a, b) ((a) > (b))
 ```
 
-Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
+Comparison macro that **must** evaluate to `1` if `a > b`, and `0` if equal or smaller.
+
+The default implementation uses the `>` operator, which works for numeric types.
 
 #### `FIO_SORT_SWAP`
 
@@ -3266,7 +4611,9 @@ Equality test - **must** evaluate as 1 if a > b (zero if equal or smaller).
   } while (0)
 ```
 
-Swaps array members. Usually there is no need to override the default macro.
+Swaps two array members. The default implementation uses a temporary variable.
+
+Usually there is no need to override this macro.
 
 #### `FIO_SORT_THRESHOLD`
 
@@ -3274,43 +4621,49 @@ Swaps array members. Usually there is no need to override the default macro.
 #define FIO_SORT_THRESHOLD 96
 ```
 
-The threshold below which quick-sort delegates to insert sort. Usually there is no need to override the default macro.
+The threshold below which quick-sort delegates to insert sort. For small arrays, insert sort is faster due to lower overhead.
 
+Usually there is no need to override this macro.
 
 ### Sorting API
 
-#### `FIO_SORT_sort`
+The following functions are created using the `FIO_SORT_NAME` prefix. In the examples below, `FIO_SORT_NAME` is assumed to be `num`.
+
+#### `num_sort`
 
 ```c
-void FIO_SORT_sort(FIO_SORT_TYPE *array, size_t count);
+void num_sort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array`.
 
-Currently this wraps the [`FIO_SORT_qsort`](#fio_sort_qsort) function.
+This is the main sorting function and currently wraps `num_qsort` (quick-sort).
 
-#### `FIO_SORT_qsort`
+#### `num_qsort`
 
 ```c
-void FIO_SORT_qsort(FIO_SORT_TYPE *array, size_t count);
+void num_qsort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array` using quick-sort.
 
+The implementation is non-recursive, using an internal stack to avoid stack overflow on large arrays. For small partitions (below `FIO_SORT_THRESHOLD`), it delegates to insert sort for better performance.
 
-#### `FIO_SORT_isort`
+The algorithm uses median-of-three pivot selection for improved performance on partially sorted data.
+
+#### `num_isort`
 
 ```c
-void FIO_SORT_isort(FIO_SORT_TYPE *array, size_t count);
+void num_isort(FIO_SORT_TYPE *array, size_t count);
 ```
 
 Sorts the first `count` members of `array` using insert-sort.
 
-Use only with small arrays (unless you are a fan of inefficiency).
+Insert sort is efficient for small arrays but has O(n²) complexity. Use only with small arrays or when the data is nearly sorted.
 
 ### Sort Example
 
-The following example code creates an array of random strings and then sorts the array.
+The following example creates an array of random strings and then sorts the array:
 
 ```c
 #define FIO_STR_SMALL sstr
@@ -3345,6 +4698,27 @@ int main(int argc, char const *argv[]) {
 }
 ```
 
+A simpler example sorting integers:
+
+```c
+#define FIO_SORT_NAME int
+#define FIO_SORT_TYPE int
+#include "fio-stl.h"
+
+int main(void) {
+  int numbers[] = {5, 2, 8, 1, 9, 3, 7, 4, 6, 0};
+  size_t count = sizeof(numbers) / sizeof(numbers[0]);
+  
+  int_sort(numbers, count);
+  
+  for (size_t i = 0; i < count; ++i) {
+    printf("%d ", numbers[i]);
+  }
+  printf("\n"); /* Output: 0 1 2 3 4 5 6 7 8 9 */
+  return 0;
+}
+```
+
 -------------------------------------------------------------------------------
 ## Threads (portable)
 
@@ -3361,7 +4735,73 @@ Please note that due to thread return value and methodology differences, `FIO_TH
 
 The following methods are provided when the `FIO_THREADS` macro is defined before including the `fio-stl.h` header.
 
-### Process functions
+### Types
+
+#### `fio_thread_t`
+
+```c
+/* POSIX */
+typedef pthread_t fio_thread_t;
+
+/* Windows */
+typedef HANDLE fio_thread_t;
+```
+
+The thread type, representing a thread handle. Platform-specific implementation.
+
+#### `fio_thread_pid_t`
+
+```c
+/* POSIX */
+typedef pid_t fio_thread_pid_t;
+
+/* Windows */
+typedef DWORD fio_thread_pid_t;
+```
+
+The process ID type. Platform-specific implementation.
+
+#### `fio_thread_mutex_t`
+
+```c
+/* POSIX */
+typedef pthread_mutex_t fio_thread_mutex_t;
+
+/* Windows */
+typedef CRITICAL_SECTION fio_thread_mutex_t;
+```
+
+The mutex type. Platform-specific implementation.
+
+#### `fio_thread_cond_t`
+
+```c
+/* POSIX */
+typedef pthread_cond_t fio_thread_cond_t;
+
+/* Windows */
+typedef CONDITION_VARIABLE fio_thread_cond_t;
+```
+
+The conditional variable type. Platform-specific implementation.
+
+#### `fio_thread_priority_e`
+
+```c
+/** Possible thread priority values. */
+typedef enum {
+  FIO_THREAD_PRIORITY_ERROR = -1,
+  FIO_THREAD_PRIORITY_LOWEST = 0,
+  FIO_THREAD_PRIORITY_LOW,
+  FIO_THREAD_PRIORITY_NORMAL,
+  FIO_THREAD_PRIORITY_HIGH,
+  FIO_THREAD_PRIORITY_HIGHEST,
+} fio_thread_priority_e;
+```
+
+An enumeration of possible thread priority levels.
+
+### Process Functions
 
 #### `FIO_THREADS_FORK_BYO`
 
@@ -3379,6 +4819,8 @@ fio_thread_pid_t fio_thread_fork(void);
 
 Behaves (or should behave) the same as the POSIX system call `fork`.
 
+**Note**: on Windows, `fork` is not natively supported. The function will log an error and return `-1`.
+
 #### `fio_thread_getpid`
 
 ```c
@@ -3395,6 +4837,12 @@ int fio_thread_kill(fio_thread_pid_t pid, int sig);
 
 Behaves (or should behave) the same as the POSIX system call `kill`.
 
+**Parameters:**
+- `pid` - the process ID to send the signal to
+- `sig` - the signal to send
+
+**Returns:** `0` on success, `-1` on error.
+
 #### `fio_thread_waitpid`
 
 ```c
@@ -3403,7 +4851,14 @@ int fio_thread_waitpid(fio_thread_pid_t pid, int *stat_loc, int options);
 
 Behaves (or should behave) the same as the POSIX system call `waitpid`.
 
-### Thread functions
+**Parameters:**
+- `pid` - the process ID to wait for (or `-1` for any child process)
+- `stat_loc` - pointer to store the status information
+- `options` - options flags (e.g., `WNOHANG`)
+
+**Returns:** the process ID of the child that changed state, `0` if `WNOHANG` was specified and no child changed state, or `-1` on error.
+
+### Thread Functions
 
 #### `FIO_THREADS_BYO`
 
@@ -3414,27 +4869,48 @@ If this macro is defined, these thread functions are only declared, but they are
 The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `fio_thread_create`
+
 ```c
-int fio_thread_create(fio_thread_t *thread, void *(*start_function)(void *), void *arg);
+int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg);
 ```
 
-Starts a new thread, returns 0 on success and -1 on failure.
+Starts a new thread, returns `0` on success and `-1` on failure.
+
+**Parameters:**
+- `t` - pointer to the thread handle to initialize
+- `fn` - the function to execute in the new thread
+- `arg` - argument to pass to the thread function
+
+**Returns:** `0` on success, `-1` on failure.
 
 #### `fio_thread_join`
+
 ```c
-int fio_thread_join(fio_thread_t *thread);
+int fio_thread_join(fio_thread_t *t);
 ```
 
 Waits for the thread to finish.
 
+**Parameters:**
+- `t` - pointer to the thread handle
+
+**Returns:** `0` on success, `-1` on error.
+
 #### `fio_thread_detach`
+
 ```c
-int fio_thread_detach(fio_thread_t *thread);
+int fio_thread_detach(fio_thread_t *t);
 ```
 
 Detaches the thread, so thread resources are freed automatically.
 
+**Parameters:**
+- `t` - pointer to the thread handle
+
+**Returns:** `0` on success, `-1` on error.
+
 #### `fio_thread_exit`
+
 ```c
 void fio_thread_exit(void);
 ```
@@ -3442,13 +4918,21 @@ void fio_thread_exit(void);
 Ends the current running thread.
 
 #### `fio_thread_equal`
+
 ```c
 int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 ```
 
 Returns non-zero if both threads refer to the same thread.
 
+**Parameters:**
+- `a` - pointer to the first thread handle
+- `b` - pointer to the second thread handle
+
+**Returns:** non-zero if threads are equal, `0` otherwise.
+
 #### `fio_thread_current`
+
 ```c
 fio_thread_t fio_thread_current(void);
 ```
@@ -3456,11 +4940,12 @@ fio_thread_t fio_thread_current(void);
 Returns the current thread.
 
 #### `fio_thread_yield`
+
 ```c
 void fio_thread_yield(void);
 ```
 
-Yields thread execution.
+Yields thread execution, allowing other threads to run.
 
 #### `fio_thread_priority`
 
@@ -3470,17 +4955,7 @@ fio_thread_priority_e fio_thread_priority(void);
 
 Returns the current thread's priority level as a `fio_thread_priority_e` enum.
 
-```c
-/** Possible thread priority values. */
-typedef enum {
-  FIO_THREAD_PRIORITY_ERROR = -1,
-  FIO_THREAD_PRIORITY_LOWEST = 0,
-  FIO_THREAD_PRIORITY_LOW,
-  FIO_THREAD_PRIORITY_NORMAL,
-  FIO_THREAD_PRIORITY_HIGH,
-  FIO_THREAD_PRIORITY_HIGHEST,
-} fio_thread_priority_e;
-```
+**Returns:** the current thread's priority, or `FIO_THREAD_PRIORITY_ERROR` on error.
 
 #### `fio_thread_priority_set`
 
@@ -3488,9 +4963,14 @@ typedef enum {
 int fio_thread_priority_set(fio_thread_priority_e pr);
 ```
 
-Sets the current thread's priority level as a `fio_thread_priority_e` enum (see [`fio_thread_priority`](#fio_thread_priority)).
+Sets the current thread's priority level.
 
-### Mutex functions
+**Parameters:**
+- `pr` - the priority level to set (see [`fio_thread_priority_e`](#fio_thread_priority_e))
+
+**Returns:** `0` on success, `-1` on error.
+
+### Mutex Functions
 
 #### `FIO_THREADS_MUTEX_BYO`
 
@@ -3502,9 +4982,20 @@ The facil.io C STL implementation expects you to provide your own alternatives.
 
 #### `FIO_THREAD_MUTEX_INIT`
 
+```c
+#define FIO_THREAD_MUTEX_INIT /* platform specific */
+```
+
 Statically initializes a Mutex.
 
+Example:
+
+```c
+fio_thread_mutex_t my_mutex = FIO_THREAD_MUTEX_INIT;
+```
+
 #### `fio_thread_mutex_init`
+
 ```c
 int fio_thread_mutex_init(fio_thread_mutex_t *m);
 ```
@@ -3513,34 +5004,60 @@ Initializes a simple Mutex.
 
 Or use the static initialization value: `FIO_THREAD_MUTEX_INIT`
 
+**Parameters:**
+- `m` - pointer to the mutex to initialize
+
+**Returns:** `0` on success, non-zero on error.
+
 #### `fio_thread_mutex_lock`
+
 ```c
 int fio_thread_mutex_lock(fio_thread_mutex_t *m);
 ```
 
-Locks a simple Mutex, returning -1 on error.
+Locks a simple Mutex, blocking until the lock is acquired.
+
+**Parameters:**
+- `m` - pointer to the mutex
+
+**Returns:** `0` on success, `-1` on error.
 
 #### `fio_thread_mutex_trylock`
+
 ```c
 int fio_thread_mutex_trylock(fio_thread_mutex_t *m);
 ```
 
-Attempts to lock a simple Mutex, returning zero on success.
+Attempts to lock a simple Mutex without blocking.
+
+**Parameters:**
+- `m` - pointer to the mutex
+
+**Returns:** `0` on success (lock acquired), non-zero if the mutex is already locked.
 
 #### `fio_thread_mutex_unlock`
+
 ```c
 int fio_thread_mutex_unlock(fio_thread_mutex_t *m);
 ```
 
-Unlocks a simple Mutex, returning zero on success or -1 on error.
+Unlocks a simple Mutex.
+
+**Parameters:**
+- `m` - pointer to the mutex
+
+**Returns:** `0` on success, `-1` on error.
 
 #### `fio_thread_mutex_destroy`
+
 ```c
 void fio_thread_mutex_destroy(fio_thread_mutex_t *m);
 ```
 
 Destroys the simple Mutex (cleanup).
 
+**Parameters:**
+- `m` - pointer to the mutex to destroy
 
 ### Conditional Variable Functions
 
@@ -3560,13 +5077,45 @@ int fio_thread_cond_init(fio_thread_cond_t *c);
 
 Initializes a simple conditional variable.
 
+**Parameters:**
+- `c` - pointer to the conditional variable to initialize
+
+**Returns:** `0` on success, non-zero on error.
+
 #### `fio_thread_cond_wait`
 
 ```c
 int fio_thread_cond_wait(fio_thread_cond_t *c, fio_thread_mutex_t *m);
 ```
 
-Waits on a conditional variable (MUST be previously locked).
+Waits on a conditional variable. The mutex MUST be previously locked.
+
+**Parameters:**
+- `c` - pointer to the conditional variable
+- `m` - pointer to the mutex (must be locked before calling)
+
+**Returns:** `0` on success, non-zero on error.
+
+**Note**: the mutex is atomically released while waiting and re-acquired before returning.
+
+#### `fio_thread_cond_timedwait`
+
+```c
+int fio_thread_cond_timedwait(fio_thread_cond_t *c,
+                              fio_thread_mutex_t *m,
+                              size_t milliseconds);
+```
+
+Waits on a conditional variable with a timeout. The mutex MUST be previously locked.
+
+**Parameters:**
+- `c` - pointer to the conditional variable
+- `m` - pointer to the mutex (must be locked before calling)
+- `milliseconds` - maximum time to wait in milliseconds
+
+**Returns:** `0` on success (signaled), non-zero on timeout or error.
+
+**Note**: the mutex is atomically released while waiting and re-acquired before returning.
 
 #### `fio_thread_cond_signal`
 
@@ -3574,7 +5123,12 @@ Waits on a conditional variable (MUST be previously locked).
 int fio_thread_cond_signal(fio_thread_cond_t *c);
 ```
 
-Signals a simple conditional variable.
+Signals a simple conditional variable, waking one waiting thread.
+
+**Parameters:**
+- `c` - pointer to the conditional variable
+
+**Returns:** `0` on success, non-zero on error.
 
 #### `fio_thread_cond_destroy`
 
@@ -3584,9 +5138,78 @@ void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
 Destroys a simple conditional variable.
 
+**Parameters:**
+- `c` - pointer to the conditional variable to destroy
+
+### Multi-Threaded Memory Copy
+
+#### `FIO_MEMCPY_THREADS`
+
+```c
+#ifndef FIO_MEMCPY_THREADS
+#define FIO_MEMCPY_THREADS 8
+#endif
+```
+
+Defines the maximum number of threads to use for multi-threaded memory copy operations.
+
+Default value is `8`.
+
+#### `FIO_MEMCPY_THREADS___MINCPY`
+
+```c
+#ifndef FIO_MEMCPY_THREADS___MINCPY
+#define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
+#endif
+```
+
+Defines the minimum number of bytes required before multi-threaded copy is used.
+
+Default value is `8388608` bytes (8 MB). Below this threshold, a single-threaded copy is performed.
+
+#### `fio_thread_memcpy`
+
+```c
+size_t fio_thread_memcpy(const void *restrict dest,
+                         void *restrict src,
+                         size_t bytes);
+```
+
+Multi-threaded memcpy using up to `FIO_MEMCPY_THREADS` threads.
+
+For small copies (below `FIO_MEMCPY_THREADS___MINCPY` bytes), a single-threaded copy is performed.
+
+**Parameters:**
+- `dest` - destination buffer
+- `src` - source buffer
+- `bytes` - number of bytes to copy
+
+**Returns:** the number of threads used for the copy operation.
+
+Example:
+
+```c
+#define FIO_THREADS
+#include "fio-stl.h"
+
+void copy_large_buffer(void) {
+  char *src = malloc(16 * 1024 * 1024);  /* 16 MB */
+  char *dest = malloc(16 * 1024 * 1024);
+  
+  /* Fill source with data... */
+  
+  size_t threads_used = fio_thread_memcpy(dest, src, 16 * 1024 * 1024);
+  printf("Copy completed using %zu threads\n", threads_used);
+  
+  free(src);
+  free(dest);
+}
+```
+
+**Note**: this is a naive implementation intended for very large memory copies where parallelization may provide benefits.
 
 -------------------------------------------------------------------------------
-## URL (URI) parsing
+## URL (URI) Parsing
 
 ```c
 #define FIO_URL
@@ -3597,7 +5220,11 @@ URIs (Universal Resource Identifier), commonly referred to as URL (Uniform Resou
 
 A common use case for URIs is within the command line interface (CLI), allowing a client to point at a resource that may be local (i.e., `file:///users/etc/my.conf`) or remote (i.e. `http://example.com/conf`).
 
-By defining `FIO_URL`, the following types and functions will be defined:
+By defining `FIO_URL` (or `FIO_URI`), the following types and functions will be defined.
+
+**Note**: the parser is non-destructive, with zero-copy and zero-allocation. All returned strings are pointers into the original URL string and are **not NUL terminated**.
+
+### Types
 
 #### `fio_url_s`
 
@@ -3615,24 +5242,61 @@ typedef struct {
 } fio_url_s;
 ```
 
-The `fio_url_s` contains a information about a URL (or, URI).
+The `fio_url_s` contains information about a URL (or, URI).
 
 When the information is returned from `fio_url_parse`, the strings in the `fio_url_s` (i.e., `url.scheme.buf`) are **not NUL terminated**, since the parser is non-destructive, with zero-copy and zero-allocation.
 
-#### `fio_buf_info_s` - revisited
+**Members:**
+- `scheme` - The URL scheme (e.g., `http`, `https`, `file`)
+- `user` - The username, if provided
+- `password` - The password, if provided
+- `host` - The host name or IP address
+- `port` - The port number as a string
+- `path` - The path component
+- `query` - The query string (without the leading `?`)
+- `target` - The fragment/target (without the leading `#`)
 
-The `fio_buf_info_s` is used to return information about the parts of the URL's string buffers detailed above. Since the `fio_url_s` does not return NUL terminated strings, this returned data structure is used.
+**Note**: empty components will have both `.buf` set to `NULL` and `.len` set to `0`.
+
+#### `fio_url_tls_info_s`
 
 ```c
-typedef struct fio_buf_info_s {
-  /** The buffer's address (may be NULL if no buffer). */
-  char *buf;
-  /** The buffer's length, if any. */
-  size_t len;
-} fio_buf_info_s;
+/* Return type for `fio_url_is_tls` */
+typedef struct {
+  fio_buf_info_s key;   /* path or env variable name for the private key */
+  fio_buf_info_s cert;  /* path or env variable name for the certificate */
+  fio_buf_info_s pass;  /* password for decrypting key data */
+  bool tls;             /* true if TLS is requested according to the URL */
+} fio_url_tls_info_s;
 ```
 
-See [Binary Data Informational Types and Helpers](#binary-data-informational-types-and-helpers) for more details.
+Contains TLS-related information extracted from a URL.
+
+**Members:**
+- `key` - Path or environment variable name for the private key file
+- `cert` - Path or environment variable name for the public certificate file
+- `pass` - Password for decrypting key/cert data
+- `tls` - `true` if TLS is requested by the URL (either implicitly via scheme or explicitly via query parameters)
+
+#### `fio_url_query_each_s`
+
+```c
+/** The type used by the `FIO_URL_QUERY_EACH` iterator macro. */
+typedef struct {
+  fio_buf_info_s name;
+  fio_buf_info_s value;
+  fio_buf_info_s private___;
+} fio_url_query_each_s;
+```
+
+Iterator state type used by the `FIO_URL_QUERY_EACH` macro.
+
+**Members:**
+- `name` - The current query parameter name
+- `value` - The current query parameter value
+- `private___` - Internal state (do not access directly)
+
+### API Functions
 
 #### `fio_url_parse`
 
@@ -3640,9 +5304,9 @@ See [Binary Data Informational Types and Helpers](#binary-data-informational-typ
 fio_url_s fio_url_parse(const char *url, size_t len);
 ```
 
-Parses the URI returning it's components and their lengths (no decoding performed, **doesn't accept decoded URIs**).
+Parses the URI returning its components and their lengths (no decoding performed, **doesn't accept decoded URIs**).
 
-The returned string are **not NUL terminated**, they are merely locations within the original (unmodified) string.
+The returned strings are **not NUL terminated**, they are merely locations within the original (unmodified) string.
 
 This function attempts to accept many different formats, including any of the following:
 
@@ -3673,78 +5337,65 @@ This function attempts to accept many different formats, including any of the fo
 
 * `file://some/path`
 
-  i.e.: `file://./relative/path`
-  i.e.: `file:///absolute/path`
+  i.e.: `file://./relative/path` or `file:///absolute/path`
 
 Invalid formats might produce unexpected results. No error testing performed.
 
-The `file`, `unix` and `priv` schemas are special in the sense that they produce no `host` (only `path`) and are parsed as if they contain file path information.
-
+**Note**: the `file`, `unix` and `priv` schemas are special in the sense that they produce no `host` (only `path`) and are parsed as if they contain file path information.
 
 #### `fio_url_is_tls`
 
 ```c
 fio_url_tls_info_s fio_url_is_tls(fio_url_s u);
-/* Return type for  `fio_url_is_tls` */
-typedef struct {
-  fio_buf_info_s key;
-  fio_buf_info_s cert;
-  fio_buf_info_s pass;
-  bool tls; /* true if TLS is requested by according to the URL */
-} fio_url_tls_info_s;
 ```
 
 Returns TLS data associated with the URL.
 
-This function supports implicit TLS by scheme data for the following possible values:
+This function supports **implicit TLS** by scheme data for the following possible values:
 
-- `wss`   - Secure WebSockets.
-- `sses`  - Secure SSE (Server Sent Events).
-- `https` - Secure HTTP.
-- `tcps`  - Secure TCP/IP.
-- `tls`   - Secure TCP/IP.
-- `udps`  - Secure UDP.
-
-i.e.:
-
-- "tls://example.com/"
-- "tcps://example.com/"
-- "udps://example.com/"
-- "wss://example.com/"
-- "https://example.com/"
-- "sses://example.com/"
-
-This function also supports explicit TLS by query data for the following possible key-pair values:
-
-- `tls`                   - self-signed TLS (unless key / cert are provided).
-- `tls=true`              - self-signed TLS (unless key / cert are provided).
-- `tls=<file>`            - key and certificate files (same path / prefix, one ends with "key.pem" the other with "cert.pem").
-- `key=<file/env_data>`   - path or env variable name for the private key.
-- `cert=<file/env_data>`  - path or env variable name for the public certificate.
-- `pass`                  - password for decrypting key data.
+- `wss`   - Secure WebSockets
+- `sses`  - Secure SSE (Server Sent Events)
+- `ssse`  - Secure SSE (alternative spelling)
+- `https` - Secure HTTP
+- `tcps`  - Secure TCP/IP
+- `stcp`  - Secure TCP/IP (alternative spelling)
+- `tls`   - Secure TCP/IP
+- `ssl`   - Secure TCP/IP
+- `udps`  - Secure UDP
+- `sudp`  - Secure UDP (alternative spelling)
 
 i.e.:
 
-- "tcp://example.com/?tls"           (anonymous TLS)
-- "udp://example.com/?tls=true"      (anonymous TLS)
-- "https://example.com/?tls=key_cert_folder_or_prefix&pass=key_password"
-- "https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password"
-- "wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password"
-- "tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password"
+- `tls://example.com/`
+- `tcps://example.com/`
+- `udps://example.com/`
+- `wss://example.com/`
+- `https://example.com/`
+- `sses://example.com/`
+
+This function also supports **explicit TLS** by query data for the following possible key-pair values:
+
+- `tls`                   - self-signed TLS (unless key / cert are provided)
+- `tls=true`              - self-signed TLS (unless key / cert are provided)
+- `tls=<file>`            - key and certificate files (same path / prefix, one ends with "key.pem" the other with "cert.pem")
+- `key=<file/env_data>`   - path or env variable name for the private key
+- `cert=<file/env_data>`  - path or env variable name for the public certificate
+- `pass=<password>`       - password for decrypting key data
+
+i.e.:
+
+- `tcp://example.com/?tls` (anonymous TLS)
+- `udp://example.com/?tls=true` (anonymous TLS)
+- `https://example.com/?tls=key_cert_folder_or_prefix&pass=key_password`
+- `https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password`
+- `wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password`
+- `tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password`
+
+### Macros
 
 #### `FIO_URL_QUERY_EACH`
 
 ```c
-/** The type used by the `FIO_URL_QUERY_EACH` iterator macro. */
-typedef struct {
-  fio_buf_info_s name;
-  fio_buf_info_s value;
-  fio_buf_info_s private___;
-} fio_url_query_each_s;
-
-/** A helper function for the `FIO_URL_QUERY_EACH` macro implementation. */
-FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
-
 /** Iterates through each of the query elements. */
 #define FIO_URL_QUERY_EACH(query_buf, i)                                       \
   for (fio_url_query_each_s i = fio_url_query_each_next(                       \
@@ -3753,11 +5404,80 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
        i = fio_url_query_each_next(i))
 ```
 
+Iterates through each of the query elements in a URL query string.
+
 The macro accepts a `fio_buf_info_s` argument (`query_buf`) and iterates over each `name` and `value` pair in the query buffer.
+
+Example:
+
+```c
+fio_url_s url = fio_url_parse(my_url, strlen(my_url));
+FIO_URL_QUERY_EACH(url.query, param) {
+  printf("  %.*s = %.*s\n",
+         (int)param.name.len, param.name.buf,
+         (int)param.value.len, param.value.buf);
+}
+```
 
 **Note**: both `i.name` and `i.value` may be empty strings, with a valid `.buf` but with `.len` set to zero.
 
-**Note**: the iterator does not unescape URL escaped data. unescaping may be required before either `i.name` or `i.value` can be used.
+**Note**: the iterator does not unescape URL-encoded data. Unescaping may be required before either `i.name` or `i.value` can be used.
+
+### Helper Functions
+
+#### `fio_url_query_each_next`
+
+```c
+fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i);
+```
+
+A helper function for the `FIO_URL_QUERY_EACH` macro implementation.
+
+Advances the iterator to the next query parameter. Generally not called directly; use the `FIO_URL_QUERY_EACH` macro instead.
+
+### Example
+
+```c
+#define FIO_URL
+#include "fio-stl.h"
+
+int main(void) {
+  const char *url_str = "http://user:pass@example.com:8080/path?key=value#section";
+  fio_url_s url = fio_url_parse(url_str, strlen(url_str));
+  
+  printf("Parsed URL:\n");
+  printf("  scheme:   %.*s\n", (int)url.scheme.len, url.scheme.buf);
+  printf("  user:     %.*s\n", (int)url.user.len, url.user.buf);
+  printf("  password: %.*s\n", (int)url.password.len, url.password.buf);
+  printf("  host:     %.*s\n", (int)url.host.len, url.host.buf);
+  printf("  port:     %.*s\n", (int)url.port.len, url.port.buf);
+  printf("  path:     %.*s\n", (int)url.path.len, url.path.buf);
+  printf("  query:    %.*s\n", (int)url.query.len, url.query.buf);
+  printf("  target:   %.*s\n", (int)url.target.len, url.target.buf);
+  
+  /* Iterate query parameters */
+  if (url.query.buf) {
+    printf("Query parameters:\n");
+    FIO_URL_QUERY_EACH(url.query, param) {
+      printf("  %.*s = %.*s\n",
+             (int)param.name.len, param.name.buf,
+             (int)param.value.len, param.value.buf);
+    }
+  }
+  
+  /* Check for TLS */
+  fio_url_tls_info_s tls = fio_url_is_tls(url);
+  if (tls.tls) {
+    printf("TLS is enabled\n");
+    if (tls.key.buf)
+      printf("  key:  %.*s\n", (int)tls.key.len, tls.key.buf);
+    if (tls.cert.buf)
+      printf("  cert: %.*s\n", (int)tls.cert.len, tls.cert.buf);
+  }
+  
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
 ## File Utility Helpers
@@ -3767,96 +5487,13 @@ The macro accepts a `fio_buf_info_s` argument (`query_buf`) and iterates over ea
 #include "fio-stl.h"
 ```
 
-By defining the macro `FIO_FILES` the following file helper functions are defined:
+By defining the macro `FIO_FILES`, the following file helper functions, macros, and types are defined for common file operations using POSIX-style APIs.
 
-#### `fio_filename_open`
+### Types
 
-```c
-int fio_filename_open(const char *filename, int flags);
-```
-
-Opens `filename`, returning the same as values as `open` on POSIX systems.
-
-If `path` starts with a `"~/"` than it will be relative to the user's Home folder (on Windows, testing also for `"~\"`).
-
-#### `fio_filename_is_unsafe`
+#### `fio_filename_s`
 
 ```c
-int fio_filename_is_unsafe(const char *path);
-```
-
-Returns 1 if `path` possibly folds backwards (has "/../" or "//").
-
-#### `fio_filename_tmp`
-
-```c
-int fio_filename_tmp(void);
-```
-
-Creates a temporary file, returning its file descriptor.
-
-Returns -1 on error.
-
-#### `fio_file_dup`
-
-```c
-#if FIO_OS_WIN
-#define fio_file_dup(fd) _dup(fd)
-#else
-#define fio_file_dup(fd) dup(fd)
-#endif
-```
-
-Duplicates the file handle (int).
-
-#### `fio_filename_overwrite`
-
-```c
-int fio_filename_overwrite(const char *filename, const void *buf, size_t len);
-```
-
-Overwrites `filename` with the data in the buffer.
-
-If `path` starts with a `"~/"` than it will be relative to the user's home folder (on Windows, testing also for `"~\"`).
-
-Returns -1 on error or 0 on success. On error, the state of the file is undefined (may be doesn't exit / nothing written / partially written).
-
-#### `fio_fd_write`
-
-```c
-ssize_t fio_fd_write(int fd, const void *buf, size_t len);
-```
-
-Writes data to a file, returning the number of bytes written.
-
-Returns -1 on error.
-
-Since some systems have a limit on the number of bytes that can be written at a single time, this function fragments the system calls into smaller `write` blocks, allowing large data to be written.
-
-If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
-
-#### `fio_fd_read`
-
-```c
-size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
-```
-
-
-Reads up to `len` bytes from `fd` starting at `start_at` offset.
-
-Returns the number of bytes read.
-
-Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
-
-If the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
-
-**Note**: may (or may not) change the file's pointer (reading/writing position), depending on the OS.
-
-#### `fio_filename_parse`
-
-```c
-fio_filename_s fio_filename_parse(const char *filename);
-/** A result type for the filename parsing helper. */
 typedef struct {
   fio_buf_info_s folder;   /* folder name */
   fio_buf_info_s basename; /* base file name */
@@ -3864,15 +5501,16 @@ typedef struct {
 } fio_filename_s;
 ```
 
-Parses a file name to folder, base name and extension (zero-copy).
+A result type for the filename parsing helper functions.
 
-#### `fio_filename_parse2`
+**Members:**
+- `folder` - The folder/directory path component (includes trailing separator)
+- `basename` - The base file name (without extension)
+- `ext` - The file extension (without the leading `.`)
 
-```c
-fio_filename_s fio_filename_parse2(const char *filename, size_t len);
-```
+**Note**: all members are `fio_buf_info_s` types pointing into the original string (zero-copy). Empty components will have `.buf` set to `NULL` and `.len` set to `0`.
 
-Same as [`fio_filename_parse`](#fio_filename_parse), only limited to `len` characters - use in cases where the `filename` string might not end with a `NUL` character.
+### Macros
 
 #### `FIO_FOLDER_SEPARATOR`
 
@@ -3886,25 +5524,345 @@ Same as [`fio_filename_parse`](#fio_filename_parse), only limited to `len` chara
 
 Selects the folder separation character according to the detected OS.
 
-**Note**: on windows both separators will be tested for.
+**Note**: on Windows, both separators (`\` and `/`) will be tested for when parsing paths.
+
+#### `fio_file_dup`
+
+```c
+#if FIO_OS_WIN
+#define fio_file_dup(fd) _dup(fd)
+#else
+#define fio_file_dup(fd) dup(fd)
+#endif
+```
+
+Duplicates the file handle (int).
+
+#### `fio_filename_is_folder`
+
+```c
+#define fio_filename_is_folder(filename) (fio_filename_type((filename)) == S_IFDIR)
+```
+
+Tests if `filename` references a folder/directory.
+
+Returns non-zero if the path is a directory, `0` if it is not a directory, or `0` on error (when `fio_filename_type` returns `0`).
+
+#### `FIO_FD_FIND_EOF`
+
+```c
+#define FIO_FD_FIND_EOF ((size_t)-1)
+```
+
+End of file value returned by `fio_fd_find_next` when the token is not found before EOF.
+
+#### `FIO_FD_FIND_BLOCK`
+
+```c
+#ifndef FIO_FD_FIND_BLOCK
+#define FIO_FD_FIND_BLOCK 4096
+#endif
+```
+
+Size on the stack used by `fio_fd_find_next` for each read cycle. Can be overridden before including the header.
+
+### File Opening and Creation
+
+#### `fio_filename_open`
+
+```c
+int fio_filename_open(const char *filename, int flags);
+```
+
+Opens `filename`, returning the same values as `open` on POSIX systems.
+
+If `filename` starts with `"~/"` then it will be relative to the user's home folder (on Windows, also tests for `"~\"`).
+
+**Parameters:**
+- `filename` - path to the file to open
+- `flags` - file open flags (e.g., `O_RDONLY`, `O_RDWR | O_CREAT | O_TRUNC`)
+
+**Returns:** a file descriptor on success, or `-1` on error.
+
+#### `fio_filename_tmp`
+
+```c
+int fio_filename_tmp(void);
+```
+
+Creates a temporary file, returning its file descriptor.
+
+The function attempts to use the system's temporary directory (checking `TMPDIR`, `TMP`, `TEMP` environment variables, and `P_tmpdir` if defined). If no temporary directory is found, the current directory is used.
+
+**Returns:** a file descriptor on success, or `-1` on error.
+
+#### `fio_filename_overwrite`
+
+```c
+int fio_filename_overwrite(const char *filename, const void *buf, size_t len);
+```
+
+Overwrites `filename` with the data in the buffer.
+
+If `filename` starts with `"~/"` then it will be relative to the user's home folder (on Windows, also tests for `"~\"`).
+
+**Parameters:**
+- `filename` - path to the file to overwrite
+- `buf` - pointer to the data to write
+- `len` - number of bytes to write
+
+**Returns:** `0` on success, or `-1` on error. On error, the state of the file is undefined (may not exist, nothing written, or partially written).
+
+### File Reading and Writing
+
+#### `fio_fd_write`
+
+```c
+ssize_t fio_fd_write(int fd, const void *buf, size_t len);
+```
+
+Writes data to a file handle, returning the number of bytes written.
+
+Since some systems have a limit on the number of bytes that can be written at a single time, this function fragments the system calls into smaller `write` blocks, allowing large data to be written.
+
+**Parameters:**
+- `fd` - file descriptor to write to
+- `buf` - pointer to the data to write
+- `len` - number of bytes to write
+
+**Returns:** the number of bytes written, or `-1` on error.
+
+**Note**: if the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
+#### `fio_fd_read`
+
+```c
+size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+```
+
+Reads up to `len` bytes from `fd` starting at `start_at` offset.
+
+Since some systems have a limit on the number of bytes that can be read at a time, this function fragments the system calls into smaller `read` blocks, allowing larger data blocks to be read.
+
+**Parameters:**
+- `fd` - file descriptor to read from
+- `buf` - buffer to read data into
+- `len` - maximum number of bytes to read
+- `start_at` - offset in the file to start reading from (negative values read from end)
+
+**Returns:** the number of bytes read, or `0` if no bytes were read or on error.
+
+**Note**: if the file descriptor is non-blocking, test `errno` for `EAGAIN` / `EWOULDBLOCK`.
+
+**Note**: may (or may not) change the file's pointer (reading/writing position), depending on the OS and POSIX version.
+
+### File Information
+
+#### `fio_filename_size`
+
+```c
+size_t fio_filename_size(const char *filename);
+```
+
+Returns the file size for the given filename.
+
+**Parameters:**
+- `filename` - path to the file
+
+**Returns:** the file size in bytes, or `0` on both error and empty file.
+
+#### `fio_fd_size`
+
+```c
+size_t fio_fd_size(int fd);
+```
+
+Returns the file size for the given file descriptor.
+
+**Parameters:**
+- `fd` - file descriptor
+
+**Returns:** the file size in bytes, or `0` on both error and empty file.
+
+#### `fio_filename_type`
+
+```c
+size_t fio_filename_type(const char *filename);
+```
+
+Returns the file type for the given filename.
+
+**Parameters:**
+- `filename` - path to the file
+
+**Returns:** the file type as a bitmask (e.g., `S_IFREG` for regular file, `S_IFDIR` for directory), or `0` on error.
+
+See: https://www.man7.org/linux/man-pages/man7/inode.7.html for file type constants.
+
+#### `fio_fd_type`
+
+```c
+size_t fio_fd_type(int fd);
+```
+
+Returns the file type for the given file descriptor.
+
+**Parameters:**
+- `fd` - file descriptor
+
+**Returns:** the file type as a bitmask (e.g., `S_IFREG` for regular file, `S_IFDIR` for directory), or `0` on error.
+
+See: https://www.man7.org/linux/man-pages/man7/inode.7.html for file type constants.
+
+### Path Safety
+
+#### `fio_filename_is_unsafe`
+
+```c
+int fio_filename_is_unsafe(const char *path);
+```
+
+Returns `1` if `path` possibly folds backwards (path traversal attack detection).
+
+This function checks for patterns that could escape a base directory:
+- Leading `../` sequences
+- `/../` or `/..` at end (path traversal)
+- `//` (double separator, potential path confusion)
+
+The check is OS separator dependent (uses `\` on Windows, `/` on other systems).
+
+**Parameters:**
+- `path` - the path string to check
+
+**Returns:** `1` if the path is potentially unsafe, `0` if safe (or if `path` is `NULL`).
+
+#### `fio_filename_is_unsafe_url`
+
+```c
+int fio_filename_is_unsafe_url(const char *path);
+```
+
+Returns `1` if `path` possibly folds backwards using URL-style separators.
+
+Same as `fio_filename_is_unsafe`, but always uses `/` as the separator regardless of OS. Use this for validating URL paths.
+
+**Parameters:**
+- `path` - the path string to check
+
+**Returns:** `1` if the path is potentially unsafe, `0` if safe (or if `path` is `NULL`).
+
+### Filename Parsing
+
+#### `fio_filename_parse`
+
+```c
+fio_filename_s fio_filename_parse(const char *filename);
+```
+
+Parses a file name into folder, base name, and extension components (zero-copy).
+
+**Parameters:**
+- `filename` - NUL-terminated path string to parse
+
+**Returns:** a `fio_filename_s` struct with pointers into the original string.
+
+Example:
+
+```c
+fio_filename_s parts = fio_filename_parse("/path/to/file.txt");
+// parts.folder   -> "/path/to/"
+// parts.basename -> "file"
+// parts.ext      -> "txt"
+```
+
+#### `fio_filename_parse2`
+
+```c
+fio_filename_s fio_filename_parse2(const char *filename, size_t len);
+```
+
+Same as `fio_filename_parse`, but limited to `len` characters.
+
+Use this when the `filename` string might not end with a NUL character.
+
+**Parameters:**
+- `filename` - path string to parse
+- `len` - number of characters to parse
+
+**Returns:** a `fio_filename_s` struct with pointers into the original string.
+
+### File Search
 
 #### `fio_fd_find_next`
 
 ```c
 size_t fio_fd_find_next(int fd, char token, size_t start_at);
-/** End of file value for `fio_fd_find_next` */
-#define FIO_FD_FIND_EOF ((size_t)-1)
-/** Size on the stack used by `fio_fd_find_next` for each read cycle. */
-#define FIO_FD_FIND_BLOCK 4096
 ```
 
-Returns offset for the next `token` in `fd`, or -1 if reached  EOF.
+Returns the offset for the next occurrence of `token` in `fd`, or `FIO_FD_FIND_EOF` if reached EOF.
 
-This will use `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
+This function uses `FIO_FD_FIND_BLOCK` bytes on the stack to read the file in a loop.
+
+**Parameters:**
+- `fd` - file descriptor to search in
+- `token` - character to search for
+- `start_at` - offset to start searching from
+
+**Returns:** the offset of the next `token`, or `FIO_FD_FIND_EOF` (`(size_t)-1`) if not found.
 
 **Pros**: limits memory use and (re)allocations, easier overflow protection.
 
 **Cons**: may be slower, as data will most likely be copied again from the file.
+
+### Example
+
+```c
+#define FIO_FILES
+#include "fio-stl.h"
+
+int main(void) {
+  /* Parse a filename */
+  fio_filename_s parts = fio_filename_parse("/home/user/documents/report.pdf");
+  printf("Folder:   %.*s\n", (int)parts.folder.len, parts.folder.buf);
+  printf("Basename: %.*s\n", (int)parts.basename.len, parts.basename.buf);
+  printf("Extension: %.*s\n", (int)parts.ext.len, parts.ext.buf);
+
+  /* Check path safety */
+  const char *safe_path = "/var/www/index.html";
+  const char *unsafe_path = "/var/www/../etc/passwd";
+  printf("Safe path: %s -> %s\n", safe_path,
+         fio_filename_is_unsafe(safe_path) ? "UNSAFE" : "safe");
+  printf("Unsafe path: %s -> %s\n", unsafe_path,
+         fio_filename_is_unsafe(unsafe_path) ? "UNSAFE" : "safe");
+
+  /* Get file information */
+  const char *filename = "test.txt";
+  size_t size = fio_filename_size(filename);
+  if (size) {
+    printf("File size: %zu bytes\n", size);
+  }
+
+  /* Check if path is a directory */
+  if (fio_filename_is_folder("/tmp")) {
+    printf("/tmp is a directory\n");
+  }
+
+  /* Write and read a file */
+  const char *data = "Hello, World!";
+  if (fio_filename_overwrite("~/test.txt", data, strlen(data)) == 0) {
+    printf("File written successfully\n");
+  }
+
+  /* Create a temporary file */
+  int tmp_fd = fio_filename_tmp();
+  if (tmp_fd != -1) {
+    fio_fd_write(tmp_fd, "temporary data", 14);
+    close(tmp_fd);
+  }
+
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
 ## Custom JSON Parser
@@ -3918,117 +5876,204 @@ The facil.io JSON parser is a non-strict parser, with support for trailing comma
 
 The facil.io JSON parser should be considered **unsafe** as overflow protection depends on the `NUL` character appearing at the end of the string passed to the parser.
 
-**Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
+**Note**: this module depends on the `FIO_ATOL` module which will be automatically included.
+
+### Configuration Macros
 
 #### `FIO_JSON_MAX_DEPTH`
 
 ```c
 #ifndef FIO_JSON_MAX_DEPTH
-/** Maximum allowed JSON nesting level. Values above 64K might fail. */
-#define FIO_JSON_MAX_DEPTH 512
+/** Maximum allowed JSON nesting level. MUST be less than 65536. */
+#define FIO_JSON_MAX_DEPTH 128
 #endif
 ```
 
 To ensure the program's stack isn't abused, the parser will limit JSON nesting levels to a customizable `FIO_JSON_MAX_DEPTH` number of nesting levels.
 
-### JSON parser API
+Values above 65536 might cause the stack to overflow and cause a failure.
+
+#### `FIO_JSON_USE_FIO_ATON`
+
+```c
+#ifndef FIO_JSON_USE_FIO_ATON
+#define FIO_JSON_USE_FIO_ATON 0
+#endif
+```
+
+When set to `1`, the JSON parser will use `fio_aton` for number parsing instead of the default number parsing logic.
+
+The default value is `0`.
+
+### Types
 
 #### `fio_json_parser_callbacks_s`
 
 ```c
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
-  void *(*get_null)(void);
+  void *(*on_null)(void);
   /** TRUE object was detected. Returns new object as `void *`. */
-  void *(*get_true)(void);
+  void *(*on_true)(void);
   /** FALSE object was detected. Returns new object as `void *`. */
-  void *(*get_false)(void);
+  void *(*on_false)(void);
   /** Number was detected (long long). Returns new object as `void *`. */
-  void *(*get_number)(int64_t i);
-  /** Float was detected (double).Returns new object as `void *`.  */
-  void *(*get_float)(double f);
-  /** String was detected (int / float). update `pos` to point at ending */
-  void *(*get_string)(const void *start, size_t len);
+  void *(*on_number)(int64_t i);
+  /** Float was detected (double). Returns new object as `void *`. */
+  void *(*on_float)(double f);
+  /** (escaped) String was detected. Returns a new String as `void *`. */
+  void *(*on_string)(const void *start, size_t len);
+  /** (unescaped) String was detected. Returns a new String as `void *`. */
+  void *(*on_string_simple)(const void *start, size_t len);
   /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-  void *(*get_map)(void *ctx, void *at);
+  void *(*on_map)(void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
-  void *(*get_array)(void *ctx, void *at);
-  /** Array was detected. Returns non-zero on error. */
+  void *(*on_array)(void *ctx, void *at);
+  /** Map push. Returns non-zero on error. */
   int (*map_push)(void *ctx, void *key, void *value);
-  /** Array was detected. Returns non-zero on error. */
+  /** Array push. Returns non-zero on error. */
   int (*array_push)(void *ctx, void *value);
+  /** Called when an array object (`ctx`) appears done. */
+  int (*array_finished)(void *ctx);
+  /** Called when a map object (`ctx`) appears done. */
+  int (*map_finished)(void *ctx);
+  /** Called when context is expected to be an array (i.e., fio_json_parse_update). */
+  int (*is_array)(void *ctx);
+  /** Called when context is expected to be a map (i.e., fio_json_parse_update). */
+  int (*is_map)(void *ctx);
   /** Called for the `key` element in case of error or NULL value. */
   void (*free_unused_object)(void *ctx);
-  /** the JSON parsing encountered an error - what to do with ctx? */
+  /** The JSON parsing encountered an error - what to do with ctx? */
   void *(*on_error)(void *ctx);
 } fio_json_parser_callbacks_s;
 ```
 
 The JSON parser requires certain callbacks to create objects or perform actions based on JSON data.
 
-The following callbacks MUST be provided to the parser:
+**Required Callbacks:**
 
- - `void *(*get_null)(void)` - `NULL` object was detected. Returns NULL object as `void *`.
+The following callbacks **MUST** be provided to the parser:
 
- - `void *(*get_true)(void)` - `true` object was detected. Returns TRUE object as `void *`.
+- `on_null` - `NULL` object was detected. Returns NULL object as `void *`.
 
- - `void *(*get_false)(void)` - `false` object was detected. Returns FALSE object as `void *`.
+- `on_true` - `true` object was detected. Returns TRUE object as `void *`.
 
- - `void *(*get_number)(int64_t i)` - Number was detected (`int64_t`). Returns new number object as `void *`.
+- `on_false` - `false` object was detected. Returns FALSE object as `void *`.
 
- - `void *(*get_float)(double f)` - Float was detected (`double`). Returns new float object as `void *`. 
+- `on_number` - Number was detected (`int64_t`). Returns new number object as `void *`.
 
- - `void *(*get_string)(const void *start, size_t len)` - String was detected. `start` points to a JSON escaped String (remember to unescape). Returns a new String as `void *`.
+- `on_float` - Float was detected (`double`). Returns new float object as `void *`.
 
- - `void *(*get_map)(void *ctx, void *at)` - Dictionary was detected. Returns new `ctx` to hash map or `NULL` on error.
+- `on_string` - Escaped string was detected. `start` points to a JSON escaped String (remember to unescape). Returns a new String as `void *`.
 
- - `void *(*get_array)(void *ctx, void *at)` - Array was detected. Returns new `ctx` to array or `NULL` on error.
+- `on_map` - Dictionary was detected. `ctx` is the current context, `at` is the key (if any). Returns new `ctx` to hash map or `NULL` on error.
 
- - `int (*map_push)(void *ctx, void *key, void *value)` - Pushes data to Array. Returns non-zero on error.
+- `on_array` - Array was detected. `ctx` is the current context, `at` is the key (if any). Returns new `ctx` to array or `NULL` on error.
 
- - `int (*array_push)(void *ctx, void *value)` - Pushes data to Dictionary. Returns non-zero on error.
+- `map_push` - Pushes a key-value pair to a dictionary. Returns non-zero on error.
 
- - `void (*free_unused_object)(void *ctx)` - Called for the `key` element in case of error that caused `key` to be unused.
+- `array_push` - Pushes a value to an array. Returns non-zero on error.
 
- - `void *(*on_error)(void *ctx)` - the JSON parsing encountered an error - what to do with ctx?
+- `free_unused_object` - Called for the `key` element in case of error that caused `key` to be unused.
 
+**Optional Callbacks:**
 
-#### `fio_json_parse`
+The following callbacks are optional and will use default no-op implementations if not provided:
+
+- `on_string_simple` - Unescaped string was detected (no escape sequences). If not provided, falls back to `on_string`. If `on_string` is not provided but `on_string_simple` is, `on_string` will use `on_string_simple`.
+
+- `array_finished` - Called when an array object (`ctx`) appears done. Returns non-zero on error. Default: no-op returning 0.
+
+- `map_finished` - Called when a map object (`ctx`) appears done. Returns non-zero on error. Default: no-op returning 0.
+
+- `is_array` - Called to check if context is an array (used by `fio_json_parse_update`). Returns non-zero if true. Default: no-op returning 0.
+
+- `is_map` - Called to check if context is a map (used by `fio_json_parse_update`). Returns non-zero if true. Default: no-op returning 0.
+
+- `on_error` - The JSON parsing encountered an error. Receives the current context and returns what to do with it. Default: returns ctx unchanged.
+
+#### `fio_json_result_s`
 
 ```c
-/** The JSON return type. */
 typedef struct {
   void *ctx;
   size_t stop_pos;
   int err;
 } fio_json_result_s;
+```
 
+The JSON return type containing the parsing result.
+
+**Members:**
+
+- `ctx` - The top-most context/object in the JSON stream (the root object)
+- `stop_pos` - The number of bytes consumed before parsing stopped
+- `err` - Non-zero if the parsing stopped due to an error
+
+### JSON Parser API
+
+#### `fio_json_parse`
+
+```c
 fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
                                  const char *json_string,
                                  const size_t len);
 ```
 
+Parses a JSON string using the provided callbacks.
 
-The facil.io JSON parser is a non-strict parser, with support for trailing commas in collections, new-lines in strings, extended escape characters and octal, hex and binary numbers.
+The facil.io JSON parser is a non-strict parser, with support for:
 
-The parser allows for streaming data and decouples the parsing process from the resulting data-structure by calling the requested callbacks for JSON related events.
+- Trailing commas in collections
+- New-lines in strings
+- Extended escape characters
+- Comments (C-style `//` and `/* */`, and shell-style `#`)
+- Octal, hex, and binary number formats
+- `NaN` and `Infinity` float values
 
-Returns the result object which details the number of bytes consumed (stop position index `stop_pos`), if the parsing stopped due to an error (`err`) and the top most context / object in the JSON stream.
+The parser decouples the parsing process from the resulting data-structure by calling the requested callbacks for JSON related events.
+
+**Parameters:**
+
+- `callbacks` - Pointer to the callback structure defining how to handle JSON elements
+- `json_string` - The JSON string to parse
+- `len` - Length of the JSON string in bytes
+
+**Returns:** A `fio_json_result_s` containing:
+
+- `ctx` - The root object created by the callbacks
+- `stop_pos` - Number of bytes consumed (position where parsing stopped)
+- `err` - Non-zero if an error occurred
+
+**Note**: The parser automatically skips UTF-8 BOM (Byte Order Mark) if present at the beginning of the string.
 
 #### `fio_json_parse_update`
 
 ```c
-fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
+fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *callbacks,
                                         void *ctx,
-                                        const char *start,
+                                        const char *json_string,
                                         const size_t len);
 ```
 
-Use only when `ctx` is an object and JSON data is wrapped in an object (of the same type).
+Updates an existing object with data from a JSON string.
 
-i.e., update an array or hash map.
+Use only when `ctx` is an existing object (array or map) and the JSON data is wrapped in an object of the same type.
 
-### JSON Parsing Example - a JSON minifier
+This function is useful for merging JSON data into an existing data structure.
+
+**Parameters:**
+
+- `callbacks` - Pointer to the callback structure (must include `is_array` and `is_map` callbacks)
+- `ctx` - The existing object to update
+- `json_string` - The JSON string containing update data
+- `len` - Length of the JSON string in bytes
+
+**Returns:** A `fio_json_result_s` with the updated context.
+
+**Note**: The `is_array` and `is_map` callbacks **MUST** be provided when using this function, as they are used to verify that the existing context matches the JSON structure.
+
+### JSON Parsing Example
 
 The biggest question about parsing JSON is - where do we store the resulting data?
 
@@ -4036,9 +6081,9 @@ Different parsers solve this question in different ways.
 
 The `FIOBJ` soft-typed object system offers a very effective solution for data manipulation, as it creates a separate object for every JSON element.
 
-However, many parsers store the result in an internal data structure that can't be separated into different elements. These parser appear faster while actually deferring a lot of the heavy lifting to a later stage.
+However, many parsers store the result in an internal data structure that can't be separated into different elements. These parsers appear faster while actually deferring a lot of the heavy lifting to a later stage.
 
-Here is a short example that parses the data and writes it to a new minifed (compact) JSON String result.
+Here is a short example that parses JSON data and prints it back as minified JSON:
 
 ```c
 #define FIO_JSON
@@ -4046,116 +6091,256 @@ Here is a short example that parses the data and writes it to a new minifed (com
 #define FIO_LOG
 #include "fio-stl.h"
 
-#define FIO_CLI
-#include "fio-stl.h"
+/* Forward declarations for our object types */
+typedef struct my_json_obj_s my_json_obj_s;
 
-typedef struct {
-  fio_json_parser_s p;
-  fio_str_s out;
-  uint8_t counter;
-  uint8_t done;
-} my_json_parser_s;
+/* Simple tagged union for JSON values */
+typedef enum {
+  MY_JSON_NULL,
+  MY_JSON_TRUE,
+  MY_JSON_FALSE,
+  MY_JSON_NUMBER,
+  MY_JSON_FLOAT,
+  MY_JSON_STRING,
+  MY_JSON_ARRAY,
+  MY_JSON_MAP,
+} my_json_type_e;
 
-#define JSON_PARSER_CAST(ptr) FIO_PTR_FROM_FIELD(my_json_parser_s, p, ptr)
-#define JSON_PARSER2OUTPUT(p) (&JSON_PARSER_CAST(p)->out)
+struct my_json_obj_s {
+  my_json_type_e type;
+  union {
+    int64_t i;
+    double f;
+    fio_str_s str;
+    struct {
+      my_json_obj_s **items;
+      size_t len;
+      size_t capa;
+    } array;
+    struct {
+      my_json_obj_s **keys;
+      my_json_obj_s **values;
+      size_t len;
+      size_t capa;
+    } map;
+  };
+};
 
-FIO_IFUNC void my_json_write_seperator(fio_json_parser_s *p) {
-  my_json_parser_s *j = JSON_PARSER_CAST(p);
-  if (j->counter) {
-    switch (fio_json_parser_is_in_object(p)) {
-    case 0: /* array */
-      if (fio_json_parser_is_in_array(p))
-        fio_str_write(&j->out, ",", 1);
-      break;
-    case 1: /* object */
-      // note the reverse `if` statement due to operation ordering
-      fio_str_write(&j->out, (fio_json_parser_is_key(p) ? "," : ":"), 1);
-      break;
-    }
+/* Callback implementations */
+static void *my_on_null(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_NULL;
+  return o;
+}
+
+static void *my_on_true(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_TRUE;
+  return o;
+}
+
+static void *my_on_false(void) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_FALSE;
+  return o;
+}
+
+static void *my_on_number(int64_t i) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_NUMBER;
+  o->i = i;
+  return o;
+}
+
+static void *my_on_float(double f) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_FLOAT;
+  o->f = f;
+  return o;
+}
+
+static void *my_on_string(const void *start, size_t len) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_STRING;
+  /* Note: in production, you'd want to unescape the string */
+  fio_str_write(&o->str, start, len);
+  return o;
+}
+
+static void *my_on_array(void *ctx, void *at) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_ARRAY;
+  o->array.capa = 8;
+  o->array.items = calloc(o->array.capa, sizeof(void *));
+  (void)ctx;
+  (void)at;
+  return o;
+}
+
+static void *my_on_map(void *ctx, void *at) {
+  my_json_obj_s *o = calloc(1, sizeof(*o));
+  o->type = MY_JSON_MAP;
+  o->map.capa = 8;
+  o->map.keys = calloc(o->map.capa, sizeof(void *));
+  o->map.values = calloc(o->map.capa, sizeof(void *));
+  (void)ctx;
+  (void)at;
+  return o;
+}
+
+static int my_array_push(void *ctx, void *value) {
+  my_json_obj_s *arr = ctx;
+  if (arr->array.len >= arr->array.capa) {
+    arr->array.capa *= 2;
+    arr->array.items = realloc(arr->array.items, arr->array.capa * sizeof(void *));
   }
-  j->counter |= 1;
-}
-
-/** a NULL object was detected */
-FIO_JSON_CB void fio_json_on_null(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "null", 4);
-}
-/** a TRUE object was detected */
-static inline void fio_json_on_true(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "true", 4);
-}
-/** a FALSE object was detected */
-FIO_JSON_CB void fio_json_on_false(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "false", 4);
-}
-/** a Number was detected (long long). */
-FIO_JSON_CB void fio_json_on_number(fio_json_parser_s *p, long long i) {
-  my_json_write_seperator(p);
-  fio_str_write_i(JSON_PARSER2OUTPUT(p), i);
-}
-/** a Float was detected (double). */
-FIO_JSON_CB void fio_json_on_float(fio_json_parser_s *p, double f) {
-  my_json_write_seperator(p);
-  char buffer[256];
-  size_t len = fio_ftoa(buffer, f, 10);
-  fio_str_write(JSON_PARSER2OUTPUT(p), buffer, len);
-}
-/** a String was detected (int / float). update `pos` to point at ending */
-FIO_JSON_CB void
-fio_json_on_string(fio_json_parser_s *p, const void *start, size_t len) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "\"", 1);
-  fio_str_write(JSON_PARSER2OUTPUT(p), start, len);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "\"", 1);
-}
-/** a dictionary object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_object(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "{", 1);
-  JSON_PARSER_CAST(p)->counter = 0;
+  arr->array.items[arr->array.len++] = value;
   return 0;
 }
-/** a dictionary object closure detected */
-FIO_JSON_CB void fio_json_on_end_object(fio_json_parser_s *p) {
-  fio_str_write(JSON_PARSER2OUTPUT(p), "}", 1);
-  JSON_PARSER_CAST(p)->counter = 1;
-}
-/** an array object was detected, should return 0 unless error occurred. */
-FIO_JSON_CB int fio_json_on_start_array(fio_json_parser_s *p) {
-  my_json_write_seperator(p);
-  fio_str_write(JSON_PARSER2OUTPUT(p), "[", 1);
-  JSON_PARSER_CAST(p)->counter = 0;
+
+static int my_map_push(void *ctx, void *key, void *value) {
+  my_json_obj_s *map = ctx;
+  if (map->map.len >= map->map.capa) {
+    map->map.capa *= 2;
+    map->map.keys = realloc(map->map.keys, map->map.capa * sizeof(void *));
+    map->map.values = realloc(map->map.values, map->map.capa * sizeof(void *));
+  }
+  map->map.keys[map->map.len] = key;
+  map->map.values[map->map.len] = value;
+  map->map.len++;
   return 0;
 }
-/** an array closure was detected */
-FIO_JSON_CB void fio_json_on_end_array(fio_json_parser_s *p) {
-  fio_str_write(JSON_PARSER2OUTPUT(p), "]", 1);
-  JSON_PARSER_CAST(p)->counter = 1;
-}
-/** the JSON parsing is complete */
-FIO_JSON_CB void fio_json_on_json(fio_json_parser_s *p) {
-  JSON_PARSER_CAST(p)->done = 1;
-  (void)p;
-}
-/** the JSON parsing encountered an error */
-FIO_JSON_CB void fio_json_on_error(fio_json_parser_s *p) {
-  fio_str_write(
-      JSON_PARSER2OUTPUT(p), "--- ERROR, invalid JSON after this point.\0", 42);
+
+static void my_free_obj(void *ctx) {
+  my_json_obj_s *o = ctx;
+  if (!o)
+    return;
+  switch (o->type) {
+  case MY_JSON_STRING:
+    fio_str_destroy(&o->str);
+    break;
+  case MY_JSON_ARRAY:
+    for (size_t i = 0; i < o->array.len; i++)
+      my_free_obj(o->array.items[i]);
+    free(o->array.items);
+    break;
+  case MY_JSON_MAP:
+    for (size_t i = 0; i < o->map.len; i++) {
+      my_free_obj(o->map.keys[i]);
+      my_free_obj(o->map.values[i]);
+    }
+    free(o->map.keys);
+    free(o->map.values);
+    break;
+  default:
+    break;
+  }
+  free(o);
 }
 
-void run_my_json_minifier(char *json, size_t len) {
-  my_json_parser_s p = {{0}};
-  fio_json_parse(&p.p, json, len);
-  if (!p.done)
-    FIO_LOG_WARNING(
-        "JSON parsing was incomplete, minification output is partial");
-  fprintf(stderr, "%s\n", fio_str2ptr(&p.out));
-  fio_str_destroy(&p.out);
+/* Print JSON object as minified string */
+static void my_print_json(my_json_obj_s *o) {
+  if (!o)
+    return;
+  switch (o->type) {
+  case MY_JSON_NULL:
+    printf("null");
+    break;
+  case MY_JSON_TRUE:
+    printf("true");
+    break;
+  case MY_JSON_FALSE:
+    printf("false");
+    break;
+  case MY_JSON_NUMBER:
+    printf("%lld", (long long)o->i);
+    break;
+  case MY_JSON_FLOAT:
+    printf("%g", o->f);
+    break;
+  case MY_JSON_STRING:
+    printf("\"%s\"", fio_str2ptr(&o->str));
+    break;
+  case MY_JSON_ARRAY:
+    printf("[");
+    for (size_t i = 0; i < o->array.len; i++) {
+      if (i > 0)
+        printf(",");
+      my_print_json(o->array.items[i]);
+    }
+    printf("]");
+    break;
+  case MY_JSON_MAP:
+    printf("{");
+    for (size_t i = 0; i < o->map.len; i++) {
+      if (i > 0)
+        printf(",");
+      my_print_json(o->map.keys[i]);
+      printf(":");
+      my_print_json(o->map.values[i]);
+    }
+    printf("}");
+    break;
+  }
+}
+
+int main(void) {
+  const char *json = "{ \"name\": \"John\", \"age\": 30, \"active\": true, "
+                     "\"scores\": [100, 95, 87] }";
+
+  fio_json_parser_callbacks_s callbacks = {
+      .on_null = my_on_null,
+      .on_true = my_on_true,
+      .on_false = my_on_false,
+      .on_number = my_on_number,
+      .on_float = my_on_float,
+      .on_string = my_on_string,
+      .on_string_simple = my_on_string,
+      .on_array = my_on_array,
+      .on_map = my_on_map,
+      .array_push = my_array_push,
+      .map_push = my_map_push,
+      .free_unused_object = my_free_obj,
+  };
+
+  fio_json_result_s result = fio_json_parse(&callbacks, json, strlen(json));
+
+  if (result.err) {
+    FIO_LOG_ERROR("JSON parsing failed at position %zu", result.stop_pos);
+    return 1;
+  }
+
+  printf("Minified: ");
+  my_print_json(result.ctx);
+  printf("\n");
+
+  my_free_obj(result.ctx);
+  return 0;
 }
 ```
+
+### Supported JSON Extensions
+
+The facil.io JSON parser supports several extensions beyond strict JSON:
+
+**Comments:**
+- C-style single-line comments: `// comment`
+- C-style multi-line comments: `/* comment */`
+- Shell/Ruby-style comments: `# comment`
+
+**Numbers:**
+- Hexadecimal: `0x1A2B`
+- Binary: `0b1010`
+- Octal: `0755`
+- Infinity: `Infinity`, `inf`, `-Infinity`
+- NaN: `NaN`, `nan`
+- Leading plus sign: `+42`
+
+**Strings:**
+- New-lines within strings (non-strict)
+
+**Collections:**
+- Trailing commas: `[1, 2, 3,]` and `{"a": 1,}`
 
 -------------------------------------------------------------------------------
 ## Basic Socket / IO Helpers
@@ -4165,26 +6350,82 @@ void run_my_json_minifier(char *json, size_t len) {
 #include "fio-stl.h"
 ```
 
-The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems.
+The facil.io standard library provides a few simple IO / Sockets helpers for POSIX systems and Windows.
 
 By defining `FIO_SOCK`, the following functions will be defined.
 
-**Note**:
+**Note**: On Windows, `fd` is a 64-bit number with no promises made as to its value. On POSIX systems the `fd` is a 32-bit number which is sequential.
 
-On Windows that `fd` is a 64 bit number with no promises made as to its value. On POSIX systems the `fd` is a 32 bit number which is sequential. 
-
-Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32bit type limit set on POSIX machines.
+Since facil.io prefers the POSIX approach, it will validate the `fd` value for overflow and might fail to open / accept sockets when their value overflows the 32-bit type limit set on POSIX machines.
 
 However, for most implementations this should be a non-issue as it seems (from observation, not knowledge) that Windows maps `fd` values to a kernel array (rather than a process specific array) and it is unlikely that any Windows machine will actually open more than 2 Giga "handles" unless it's doing something wrong.
 
-**Note:** this module depends on the `FIO_URL` module which will be automatically included.
+**Note**: this module depends on the `FIO_URL` module which will be automatically included.
+
+### Configuration Macros
+
+#### `FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT`
+
+```c
+#ifndef FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT
+#define FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT (1ULL << 24)
+#endif
+```
+
+The default maximum limit used by `fio_sock_maximize_limits` when called with `0` as the argument.
+
+#### `FIO_SOCK_AVOID_UMASK`
+
+This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).
+
+Using `umask` in multi-threaded environments could cause `umask` data corruption due to race condition (as two calls are actually required, making the operation non-atomic).
+
+If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
+
+This, however, may affect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
+
+**Note**: on Windows facil.io behaves as if this flag was set.
+
+### Types
+
+#### `fio_sock_open_flags_e`
+
+```c
+typedef enum {
+  FIO_SOCK_SERVER = 0,        /* Server socket (binds to local address) */
+  FIO_SOCK_CLIENT = 1,        /* Client socket (connects to remote address) */
+  FIO_SOCK_NONBLOCK = 2,      /* Set socket to non-blocking mode */
+  FIO_SOCK_TCP = 4,           /* TCP/IP socket */
+  FIO_SOCK_UDP = 8,           /* UDP socket */
+  FIO_SOCK_UNIX = 16,         /* Unix domain socket (POSIX only) */
+  FIO_SOCK_UNIX_PRIVATE = 48, /* Unix socket with restricted permissions */
+} fio_sock_open_flags_e;
+```
+
+Socket type flags used with `fio_sock_open` and `fio_sock_open2`.
+
+**Values:**
+
+- `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
+- `FIO_SOCK_CLIENT` - Initializes a Client socket, calling `connect` using the `address` and `port` arguments.
+- `FIO_SOCK_NONBLOCK` - Sets the new socket to non-blocking mode.
+- `FIO_SOCK_TCP` - Creates a TCP/IP socket.
+- `FIO_SOCK_UDP` - Creates a UDP socket.
+- `FIO_SOCK_UNIX` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
+- `FIO_SOCK_UNIX_PRIVATE` - Same as `FIO_SOCK_UNIX`, only does not use `umask` and `chmod` to make the socket publicly available.
+
+**Note**: `FIO_SOCK_UNIX` and `FIO_SOCK_UNIX_PRIVATE` are only available on systems that support Unix domain sockets (defined as `0` otherwise).
+
+**Note**: if neither `FIO_SOCK_SERVER` nor `FIO_SOCK_CLIENT` are specified, the function will default to a server socket.
+
+### API Functions
 
 #### `fio_sock_open`
 
 ```c
 int fio_sock_open(const char *restrict address,
-                 const char *restrict port,
-                 uint16_t flags);
+                  const char *restrict port,
+                  uint16_t flags);
 ```
 
 Creates a new socket according to the provided flags.
@@ -4193,27 +6434,9 @@ The `port` string will be ignored when `FIO_SOCK_UNIX` is set.
 
 The `address` can be NULL for Server sockets (`FIO_SOCK_SERVER`) when binding to all available interfaces (this is actually recommended unless network filtering is desired).
 
-The `flag` integer can be a combination of any of the following flags:
+The `flags` integer can be a combination of any of the `fio_sock_open_flags_e` flags.
 
-*  `FIO_SOCK_TCP` - Creates a TCP/IP socket.
-
-*  `FIO_SOCK_UDP` - Creates a UDP socket.
-
-*  `FIO_SOCK_UNIX` - Creates a Unix socket (requires a POSIX system). If an existing file / Unix socket exists, they will be deleted and replaced.
-
-*  `FIO_SOCK_UNIX_PRIVATE` - Same as `FIO_SOCK_UNIX`, only does not use `umask` and `chmod` to make the socket publicly available.
-
-*  `FIO_SOCK_SERVER` - Initializes a Server socket. For TCP/IP and Unix sockets, the new socket will be listening for incoming connections (`listen` will be automatically called).
-
-*  `FIO_SOCK_CLIENT` - Initializes a Client socket, calling `connect` using the `address` and `port` arguments.
-
-*  `FIO_SOCK_NONBLOCK` - Sets the new socket to non-blocking mode.
-
-If neither `FIO_SOCK_SERVER` nor `FIO_SOCK_CLIENT` are specified, the function will default to a server socket.
-
-**Note**:
-
-UDP Server Sockets might need to handle traffic from multiple clients, which could require a significantly larger OS buffer then the default buffer offered.
+**Note**: UDP Server Sockets might need to handle traffic from multiple clients, which could require a significantly larger OS buffer than the default buffer offered.
 
 Consider (from [this SO answer](https://stackoverflow.com/questions/2090850/specifying-udp-receive-buffer-size-at-runtime-in-linux/2090902#2090902), see [this blog post](https://medium.com/@CameronSparr/increase-os-udp-buffers-to-improve-performance-51d167bb1360), [this article](http://fasterdata.es.net/network-tuning/udp-tuning/) and [this article](https://access.redhat.com/documentation/en-US/JBoss_Enterprise_Web_Platform/5/html/Administration_And_Configuration_Guide/jgroups-perf-udpbuffer.html)):
 
@@ -4223,81 +6446,22 @@ while (n >= (4*1024*1024) && setsockopt(socket, SOL_SOCKET, SO_RCVBUF, &n, sizeo
   /* failed - repeat attempt at 1Mb interval */
   if (n >= (4 * 1024 * 1024)) // OS may have returned max value
     n -= 1024 * 1024;
-
 }
 ```
 
 #### `fio_sock_open2`
 
 ```c
-int fio_sock_open(const char *url, uint16_t flags);
+int fio_sock_open2(const char *url, uint16_t flags);
 ```
 
 See [`fio_sock_open`](#fio_sock_open) for details. Accepts a single, URL style string instead of an address / port pair.
 
-The `tcp` / `udp` information **may** appear in the URL schema if missing from the flags (i.e., `tcp://localhost:3000/`);
+The `tcp` / `udp` information **may** appear in the URL schema if missing from the flags (i.e., `tcp://localhost:3000/`).
 
-If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or 
-`FIO_SOCK_UDP` that were originally given.
+If a Unix socket URL is detected on a POSIX system, a `FIO_SOCK_UNIX` socket flag will override any `FIO_SOCK_TCP` or `FIO_SOCK_UDP` that were originally given.
 
-**Note**: a `file://` or `unix://` (or even a simple `./file.sock`) URL will create a publicly available Unix Socket (permissions set to allow everyone RW access). To create a private Unix Socket (one with permissions equal to the processes `umask`), use a `prive://` schema (i.e., `priv://my.sock`).
-
-#### `fio_sock_write`, `fio_sock_read`, `fio_sock_close`
-
-```c
-#define fio_sock_write(fd, data, len) write((fd), (data), (len))
-#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
-#define fio_sock_close(fd)            close(fd)
-/* on Windows only */
-#define accept fio_sock_accept
-```
-
-Behaves the same as the POSIX function calls... however, on Windows these will be function wrappers around the WinSock2 API variants. It is better to use these macros / functions for portability.
-
-#### `fio_sock_wait_io`
-
-```c
-short fio_sock_wait_io(int fd, short events, int timeout)
-```
-
-Uses `poll` to wait until an IO device has one or more of the evens listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) have passed.
-
-Returns 0 on timeout, -1 on error or the events that are valid.
-
-Possible valid return values also include `POLLIN | POLLOUT | POLLHUP | POLLNVAL`
-
-#### `FIO_SOCK_WAIT_RW`
-
-```c
-#define FIO_SOCK_WAIT_RW(fd, timeout_) fio_sock_wait_io(fd, POLLIN | POLLOUT, timeout_)
-```
-
-A helper macro that waits on a single IO with no callbacks (0 = no event)
-
-#### `FIO_SOCK_WAIT_R`
-
-```c
-#define FIO_SOCK_WAIT_R(fd, timeout_) fio_sock_wait_io(fd, POLLIN, timeout_)
-```
-
-A helper macro that waits on a single IO with no callbacks (0 = no event)
-
-#### `FIO_SOCK_WAIT_W`
-
-```c
-#define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
-```
-
-A helper macro that waits on a single IO with no callbacks (0 = no event)
-
-#### `FIO_SOCK_IS_OPEN`
-
-```c
-#define FIO_SOCK_IS_OPEN(fd)                                                   \
-  (!(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
-```
-
-A helper macro that tests if a socket was remotely closed.
+**Note**: a `file://` or `unix://` (or even a simple `./file.sock`) URL will create a publicly available Unix Socket (permissions set to allow everyone RW access). To create a private Unix Socket (one with permissions equal to the process's `umask`), use a `priv://` schema (i.e., `priv://my.sock`).
 
 #### `fio_sock_address_new`
 
@@ -4312,6 +6476,12 @@ Attempts to resolve an address to a valid IP6 / IP4 address pointer.
 The `sock_type` element should be a socket type, such as `SOCK_DGRAM` (UDP) or `SOCK_STREAM` (TCP/IP).
 
 The address should be freed using `fio_sock_address_free`.
+
+**Note**: common web service names are automatically resolved to port numbers:
+- `ws` → `80`
+- `wss`, `sse`, `sses` → `443`
+- `http` → `80`
+- `https` → `443`
 
 #### `fio_sock_address_free`
 
@@ -4333,25 +6503,20 @@ On error, returns a NULL buffer with zero length.
 
 Buffer lengths are limited to 63 bytes.
 
-This function is limited in its thread safety to 128 threads / calls.
-
-
-
-#### `fio_sock_set_non_block`
-
-```c
-int fio_sock_set_non_block(int fd);
-```
-
-Sets a file descriptor / socket to non blocking state.
+**Note**: this function is limited in its thread safety to 128 threads / calls.
 
 #### `fio_sock_open_local`
 
 ```c
-int fio_sock_open_local(struct addrinfo *addr);
+int fio_sock_open_local(struct addrinfo *addr, int nonblock);
 ```
 
 Creates a new network socket and binds it to a local address.
+
+- `addr` - address information from `fio_sock_address_new`
+- `nonblock` - if non-zero, sets the socket to non-blocking mode
+
+Returns the file descriptor on success, or -1 on error.
 
 #### `fio_sock_open_remote`
 
@@ -4361,65 +6526,348 @@ int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
 Creates a new network socket and connects it to a remote address.
 
+- `addr` - address information from `fio_sock_address_new`
+- `nonblock` - if non-zero, sets the socket to non-blocking mode
+
+Returns the file descriptor on success, or -1 on error.
+
 #### `fio_sock_open_unix`
 
 ```c
-int fio_sock_open_unix(const char *address, int is_client, int nonblock);
+int fio_sock_open_unix(const char *address, uint16_t flags);
 ```
 
 Creates a new Unix socket and binds it to a local address.
 
+- `address` - the Unix socket path
+- `flags` - socket flags (see `fio_sock_open_flags_e`)
+
+Returns the file descriptor on success, or -1 on error.
+
 **Note**: not available on all systems. On Windows, when Unix Sockets are available (which isn't always), the permissions for the socket are system defined (facil.io doesn't change them).
 
+#### `fio_sock_set_non_block`
+
+```c
+int fio_sock_set_non_block(int fd);
+```
+
+Sets a file descriptor / socket to non-blocking state.
+
+Returns 0 on success, -1 on error.
 
 #### `fio_sock_maximize_limits`
 
 ```c
-size_t fio_sock_maximize_limits(size_t max_limit)
+size_t fio_sock_maximize_limits(size_t max_limit);
 ```
 
-Attempts to maximize the allowed open file limits (with values up to `max_limit`). Returns the new known limit.
+Attempts to maximize the allowed open file limits (with values up to `max_limit`).
 
-#### `FIO_SOCK_AVOID_UMASK`
+Returns the new known limit.
 
-This compilation flag, if defined before including the `FIO_SOCK` implementation, will avoid using `umask` (only using `chmod`).
+If `max_limit` is 0, uses `FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT`.
 
-Using `umask` in multi-threaded environments could cause `umask` data corruption due to race condition (as two calls are actually required, making the operation non-atomic).
+#### `fio_sock_wait_io`
 
-If more than one thread is expected to create Unix sockets or call `umask` at the same time, it is recommended that the `FIO_SOCK_AVOID_UMASK` be used.
+```c
+short fio_sock_wait_io(int fd, short events, int timeout);
+```
 
-This, however, may effect permissions on some systems (i.e., some Linux distributions) where calling `chmod` on a Unix socket file doesn't properly update access permissions.
+Uses `poll` to wait until an IO device has one or more of the events listed in `events` (`POLLIN | POLLOUT`) or `timeout` (in milliseconds) has passed.
 
-**Note**: on Windows facil.io behaves as if this flag was set.
+A zero timeout returns immediately.
+
+Returns 0 on timeout, -1 on error, or the events that are valid.
+
+Possible valid return values also include `POLLIN | POLLOUT | POLLHUP | POLLNVAL`.
+
+### Portability Macros
+
+These macros provide cross-platform compatibility between POSIX and Windows (WinSock2).
+
+#### `fio_sock_write`
+
+```c
+/* POSIX */
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
+/* Windows */
+#define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)
+```
+
+Acts as POSIX `write`. Use this macro for portability with WinSock2.
+
+#### `fio_sock_read`
+
+```c
+/* POSIX */
+#define fio_sock_read(fd, buf, len) read((fd), (buf), (len))
+/* Windows */
+#define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
+```
+
+Acts as POSIX `read`. Use this macro for portability with WinSock2.
+
+#### `fio_sock_close`
+
+```c
+/* POSIX */
+#define fio_sock_close(fd) close(fd)
+/* Windows */
+#define fio_sock_close(fd) closesocket(fd)
+```
+
+Acts as POSIX `close`. Use this macro for portability with WinSock2.
+
+#### `fio_sock_dup`
+
+```c
+/* POSIX */
+#define fio_sock_dup(fd) dup(fd)
+/* Windows - function wrapper */
+int fio_sock_dup(int original);
+```
+
+Acts as POSIX `dup`. Use this for portability with WinSock2.
+
+On Windows, this is a function that uses `WSADuplicateSocket` internally.
+
+#### `fio_sock_accept`
+
+```c
+/* POSIX */
+#define fio_sock_accept(fd, addr, addrlen) accept(fd, addr, addrlen)
+/* Windows - function wrapper */
+int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen);
+```
+
+Acts as POSIX `accept`. Use this macro for portability with WinSock2.
+
+On Windows, this is a function that validates the returned socket value doesn't overflow the portable int range.
+
+**Note**: on Windows, `accept` is redefined to `fio_sock_accept`.
+
+#### `FIO_SOCK_FD_ISVALID`
+
+```c
+/* POSIX */
+#define FIO_SOCK_FD_ISVALID(fd) ((int)(fd) != (int)-1)
+/* Windows */
+#define FIO_SOCK_FD_ISVALID(fd) ((size_t)(fd) <= (size_t)0x7FFFFFFF)
+```
+
+Tests if a file descriptor value is valid.
+
+On Windows, this also checks that the socket value fits within the portable 32-bit range.
+
+### Helper Macros
+
+#### `FIO_SOCK_WAIT_RW`
+
+```c
+#define FIO_SOCK_WAIT_RW(fd, timeout_) fio_sock_wait_io(fd, POLLIN | POLLOUT, timeout_)
+```
+
+A helper macro that waits on a single IO for both read and write readiness (0 = no event / timeout).
+
+#### `FIO_SOCK_WAIT_R`
+
+```c
+#define FIO_SOCK_WAIT_R(fd, timeout_) fio_sock_wait_io(fd, POLLIN, timeout_)
+```
+
+A helper macro that waits on a single IO for read readiness (0 = no event / timeout).
+
+#### `FIO_SOCK_WAIT_W`
+
+```c
+#define FIO_SOCK_WAIT_W(fd, timeout_) fio_sock_wait_io(fd, POLLOUT, timeout_)
+```
+
+A helper macro that waits on a single IO for write readiness (0 = no event / timeout).
+
+#### `FIO_SOCK_IS_OPEN`
+
+```c
+/* When POLLRDHUP is available */
+#define FIO_SOCK_IS_OPEN(fd)                                                   \
+  (!(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &                          \
+     (POLLRDHUP | POLLHUP | POLLNVAL)))
+/* Otherwise */
+#define FIO_SOCK_IS_OPEN(fd)                                                   \
+  (!(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
+```
+
+A helper macro that tests if a socket is still open (not remotely closed).
+
+Returns non-zero if the socket is open, zero if closed or invalid.
+
+### Example
+
+```c
+#define FIO_SOCK
+#define FIO_LOG
+#include "fio-stl.h"
+
+int main(void) {
+  /* Maximize file descriptor limits */
+  size_t max_fds = fio_sock_maximize_limits(0);
+  FIO_LOG_INFO("Maximum file descriptors: %zu", max_fds);
+
+  /* Create a TCP server socket */
+  int server_fd = fio_sock_open(NULL, "8080",
+                                FIO_SOCK_TCP | FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
+  if (server_fd == -1) {
+    FIO_LOG_ERROR("Failed to create server socket");
+    return 1;
+  }
+  FIO_LOG_INFO("Server listening on port 8080 (fd=%d)", server_fd);
+
+  /* Alternative: create socket using URL */
+  int server_fd2 = fio_sock_open2("tcp://0.0.0.0:8081",
+                                  FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
+  if (server_fd2 != -1) {
+    FIO_LOG_INFO("Server also listening on port 8081 (fd=%d)", server_fd2);
+  }
+
+  /* Wait for incoming connection (with 5 second timeout) */
+  short events = FIO_SOCK_WAIT_R(server_fd, 5000);
+  if (events & POLLIN) {
+    struct sockaddr_storage client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    int client_fd = fio_sock_accept(server_fd,
+                                    (struct sockaddr *)&client_addr,
+                                    (int *)&addr_len);
+    if (client_fd != -1) {
+      fio_buf_info_s peer = fio_sock_peer_addr(client_fd);
+      FIO_LOG_INFO("Accepted connection from %.*s", (int)peer.len, peer.buf);
+      
+      /* Set client to non-blocking */
+      fio_sock_set_non_block(client_fd);
+      
+      /* Send a response */
+      const char *response = "Hello, World!\n";
+      fio_sock_write(client_fd, response, strlen(response));
+      
+      /* Close client connection */
+      fio_sock_close(client_fd);
+    }
+  } else {
+    FIO_LOG_INFO("No connection received (timeout)");
+  }
+
+  /* Check if socket is still open */
+  if (FIO_SOCK_IS_OPEN(server_fd)) {
+    FIO_LOG_INFO("Server socket is still open");
+  }
+
+  /* Cleanup */
+  fio_sock_close(server_fd);
+  if (server_fd2 != -1)
+    fio_sock_close(server_fd2);
+
+  return 0;
+}
+```
+
+### Unix Socket Example
+
+```c
+#define FIO_SOCK
+#define FIO_LOG
+#include "fio-stl.h"
+
+int main(void) {
+  /* Create a Unix domain socket server */
+  int unix_fd = fio_sock_open("/tmp/my_app.sock", NULL,
+                              FIO_SOCK_UNIX | FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
+  if (unix_fd == -1) {
+    FIO_LOG_ERROR("Failed to create Unix socket");
+    return 1;
+  }
+  FIO_LOG_INFO("Unix socket server created at /tmp/my_app.sock");
+
+  /* Alternative: using URL syntax */
+  int unix_fd2 = fio_sock_open2("unix:///tmp/my_app2.sock",
+                                FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
+  
+  /* For a private socket (restricted permissions) */
+  int priv_fd = fio_sock_open2("priv:///tmp/my_private.sock",
+                               FIO_SOCK_SERVER | FIO_SOCK_NONBLOCK);
+
+  /* Cleanup */
+  fio_sock_close(unix_fd);
+  if (unix_fd2 != -1) fio_sock_close(unix_fd2);
+  if (priv_fd != -1) fio_sock_close(priv_fd);
+  
+  /* Remove socket files */
+  unlink("/tmp/my_app.sock");
+  unlink("/tmp/my_app2.sock");
+  unlink("/tmp/my_private.sock");
+
+  return 0;
+}
+```
+
+### Client Connection Example
+
+```c
+#define FIO_SOCK
+#define FIO_LOG
+#include "fio-stl.h"
+
+int main(void) {
+  /* Connect to a remote server */
+  int client_fd = fio_sock_open("example.com", "80",
+                                FIO_SOCK_TCP | FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
+  if (client_fd == -1) {
+    FIO_LOG_ERROR("Failed to connect");
+    return 1;
+  }
+
+  /* Wait for connection to complete */
+  if (FIO_SOCK_WAIT_W(client_fd, 5000) & POLLOUT) {
+    FIO_LOG_INFO("Connected to example.com:80");
+    
+    /* Send HTTP request */
+    const char *request = "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n";
+    fio_sock_write(client_fd, request, strlen(request));
+    
+    /* Wait for response */
+    if (FIO_SOCK_WAIT_R(client_fd, 5000) & POLLIN) {
+      char buffer[4096];
+      ssize_t bytes = fio_sock_read(client_fd, buffer, sizeof(buffer) - 1);
+      if (bytes > 0) {
+        buffer[bytes] = '\0';
+        FIO_LOG_INFO("Received %zd bytes:\n%s", bytes, buffer);
+      }
+    }
+  }
+
+  fio_sock_close(client_fd);
+  return 0;
+}
+```
 
 -------------------------------------------------------------------------------
 ## State Callbacks
 
-The state callback API, which is also used internally by stateful modules such as the memory allocator, allows callbacks to be registered for specific changes in the state of the app.
+```c
+#define FIO_STATE
+#include "fio-stl.h"
+```
 
-This allows modules to react to changes in the state of the program without requiring the functions that caused the change in state to know about each of the modules that wish to react, only requiting it to publish a notification by calling `fio_state_callback_force`.
+The state callback API allows callbacks to be registered for specific changes in the state of the application. This is also used internally by stateful modules such as the memory allocator.
+
+This allows modules to react to changes in the state of the program without requiring the functions that caused the change in state to know about each of the modules that wish to react, only requiring it to publish a notification by calling `fio_state_callback_force`.
 
 When using this module it is better if it is used as a global `FIO_EXTERN` module, so state notifications are not limited to the scope of the C file (the translation unit).
 
-By defining the `FIO_STATE` macro, the following are defined:
+**Note**: this module depends on the `FIO_RAND`, `FIO_ATOMIC`, and `FIO_IMAP_CORE` modules which will be automatically included.
 
-**Note:** this module depends on the `FIO_RAND`, `FIO_ATOMIC`, and `FIO_IMAP_CORE` modules which will be automatically included.
+### Event Types
 
-#### `fio_state_callback_add`
-
-```c
-void fio_state_callback_add(fio_state_event_type_e event,
-                            void (*func)(void *),
-                            void *arg);
-```
-
-Adds a callback to the list of callbacks to be called for the `event`.
-
-The callback should accept a single `void *` as an argument.
-
-Events are performed either in the order in which they were registered or in reverse order, depending on the context.
-
-These are the possible `event` values, note that some of them are only relevant in the context of the `FIO_SERVER` module and were designed for the server's use:
+#### `fio_state_event_type_e`
 
 ```c
 typedef enum {
@@ -4449,9 +6897,6 @@ typedef enum {
   FIO_CALL_ON_USER2,
   /** Called when facil.io enters idling mode. */
   FIO_CALL_ON_IDLE,
-
-  /* the following events are performed in reverse (LIFO): */
-
   /** A reversed user state event queue (unused, available for the user). */
   FIO_CALL_ON_USER1_REVERSE,
   /** A reversed user state event queue (unused, available for the user). */
@@ -4468,41 +6913,124 @@ typedef enum {
   FIO_CALL_ON_CHILD_CRUSH,
   /** Called by each worker thread in a Server Async queue as it ends. */
   FIO_CALL_ON_WORKER_THREAD_END,
-  /** Called when wither a *Worker* or *Master* stopped. */
+  /** Called when either a *Worker* or *Master* stopped. */
   FIO_CALL_ON_STOP,
   /** An alternative to the system's at_exit. */
   FIO_CALL_AT_EXIT,
   /** used for testing and array allocation - must be last. */
   FIO_CALL_NEVER
 } fio_state_event_type_e;
-
 ```
+
+An enumeration of event types that can be used with the state callback API.
+
+Events are performed either in the order in which they were registered (FIFO) or in reverse order (LIFO), depending on the event type:
+
+- Events where `event <= FIO_CALL_ON_IDLE` are called in order of registration (FIFO)
+- Events where `event >= FIO_CALL_ON_SHUTDOWN` are called in reverse order (LIFO)
+
+**Note**: some events are only relevant in the context of the `FIO_SERVER` module and were designed for the server's use.
+
+### State Callback API
+
+#### `fio_state_callback_add`
+
+```c
+void fio_state_callback_add(fio_state_event_type_e event,
+                            void (*func)(void *),
+                            void *arg);
+```
+
+Adds a callback to the list of callbacks to be called for the `event`.
+
+The callback should accept a single `void *` as an argument.
+
+**Parameters:**
+- `event` - the event type to register the callback for
+- `func` - the callback function to be called when the event occurs
+- `arg` - an opaque pointer that will be passed to the callback
+
+**Note**: if `FIO_CALL_ON_INITIALIZE` callbacks have already been performed and a new callback is added for that event, the callback will be executed immediately.
 
 #### `fio_state_callback_remove`
 
 ```c
-int fio_state_callback_remove(fio_state_event_type_e,
+int fio_state_callback_remove(fio_state_event_type_e event,
                               void (*func)(void *),
                               void *arg);
 ```
 
 Removes a callback from the list of callbacks to be called for the event.
 
-See also [`fio_state_callback_add`](#fio_state_callback_add) for details of possible events.
+**Parameters:**
+- `event` - the event type to remove the callback from
+- `func` - the callback function to remove
+- `arg` - the opaque pointer that was passed when adding the callback
+
+**Returns:** `0` on success, `-1` if the callback was not found or the event type is invalid.
+
+#### `fio_state_callback_clear`
+
+```c
+void fio_state_callback_clear(fio_state_event_type_e event);
+```
+
+Clears all the existing callbacks for the specified event.
+
+**Parameters:**
+- `event` - the event type to clear all callbacks for
 
 #### `fio_state_callback_force`
 
 ```c
-void fio_state_callback_force(fio_state_event_type_e);
+void fio_state_callback_force(fio_state_event_type_e event);
 ```
 
 Forces all the existing callbacks to run, as if the event occurred.
 
-Callbacks for all initialization / idling tasks are called in order of creation (where `fio_state_event_type_e` <= `FIO_CALL_ON_IDLE`).
+Callbacks for all initialization / idling tasks are called in order of creation (where `event <= FIO_CALL_ON_IDLE`).
 
-Callbacks for all cleanup oriented tasks are called in reverse order of creation (where `fio_state_event_type_e` >= `FIO_CALL_ON_USER1_REVERSE`).
+Callbacks for all cleanup oriented tasks are called in reverse order of creation (where `event >= FIO_CALL_ON_SHUTDOWN`).
 
-During an event, changes to the callback list are ignored (callbacks can't add or remove other callbacks for the same event).
+**Note**: during an event, changes to the callback list are ignored (callbacks can't add or remove other callbacks for the same event).
+
+**Note**: when `FIO_CALL_AFTER_FORK` is forced, all internal locks are re-initialized. When `FIO_CALL_IN_CHILD` is forced, the random generator is re-seeded.
+
+### Example
+
+```c
+#define FIO_STATE
+#define FIO_LOG
+#include "fio-stl.h"
+
+static void my_cleanup(void *arg) {
+  FIO_LOG_INFO("Cleanup called with arg: %p", arg);
+}
+
+static void my_startup(void *arg) {
+  FIO_LOG_INFO("Startup called with arg: %p", arg);
+}
+
+int main(void) {
+  /* Register a callback for when the application starts */
+  fio_state_callback_add(FIO_CALL_ON_START, my_startup, (void *)0x1234);
+  
+  /* Register a cleanup callback for when the application exits */
+  fio_state_callback_add(FIO_CALL_AT_EXIT, my_cleanup, (void *)0x5678);
+  
+  /* Force the ON_START event to run all registered callbacks */
+  fio_state_callback_force(FIO_CALL_ON_START);
+  
+  /* Remove a specific callback */
+  fio_state_callback_remove(FIO_CALL_ON_START, my_startup, (void *)0x1234);
+  
+  /* Clear all callbacks for a specific event */
+  fio_state_callback_clear(FIO_CALL_ON_USER1);
+  
+  return 0;
+  /* AT_EXIT callbacks will be called automatically on program exit */
+}
+```
 
 -------------------------------------------------------------------------------
 ## Time Helpers
@@ -4512,63 +7040,74 @@ During an event, changes to the callback list are ignored (callbacks can't add o
 #include "fio-stl.h"
 ```
 
-By defining `FIO_TIME` or `FIO_QUEUE`, the following time related helpers functions are defined:
+By defining `FIO_TIME` or `FIO_QUEUE`, the following time-related helper functions are defined.
 
-**Note:** this module depends on the `FIO_ATOL` module which will be automatically included.
+**Note**: this module depends on the `FIO_ATOL` module which will be automatically included.
+
+### Collecting Monotonic / Real Time
 
 #### `fio_time_real`
 
 ```c
-struct timespec fio_time_real();
+struct timespec fio_time_real(void);
 ```
 
-Returns human (watch) time... this value isn't as safe for measurements.
+Returns human (wall clock) time. This value isn't as safe for measurements since it can be affected by system time adjustments.
 
 #### `fio_time_mono`
 
 ```c
-struct timespec fio_time_mono();
+struct timespec fio_time_mono(void);
 ```
 
-Returns monotonic time.
+Returns monotonic time. This is the preferred time source for measuring elapsed time, as it is not affected by system time changes.
 
 #### `fio_time_nano`
 
 ```c
-uint64_t fio_time_nano();
+int64_t fio_time_nano(void);
 ```
 
-Returns monotonic time in nano-seconds (now in 1 micro of a second).
+Returns monotonic time in nanoseconds (1 billionth of a second).
 
 #### `fio_time_micro`
 
 ```c
-uint64_t fio_time_micro();
+int64_t fio_time_micro(void);
 ```
 
-Returns monotonic time in micro-seconds (now in 1 millionth of a second).
+Returns monotonic time in microseconds (1 millionth of a second).
 
 #### `fio_time_milli`
 
 ```c
-uint64_t fio_time_milli();
+int64_t fio_time_milli(void);
 ```
 
 Returns monotonic time in milliseconds.
 
+### Time Conversion Functions
 
 #### `fio_time2milli`
 
 ```c
-uint64_t fio_time2milli(struct timespec t);
+int64_t fio_time2milli(struct timespec t);
 ```
 
 Converts a `struct timespec` to milliseconds.
 
+#### `fio_time2micro`
+
+```c
+int64_t fio_time2micro(struct timespec t);
+```
+
+Converts a `struct timespec` to microseconds.
+
 #### `fio_time2gm`
 
 ```c
-struct tm fio_time2gm(time_t timer);
+struct tm fio_time2gm(time_t time);
 ```
 
 A faster (yet less localized) alternative to `gmtime_r`.
@@ -4577,17 +7116,56 @@ See the libc `gmtime_r` documentation for details.
 
 Returns a `struct tm` object filled with the date information.
 
-This function is used internally for the formatting functions: , `fio_time2rfc7231`, `fio_time2rfc2109`, and `fio_time2rfc2822`.
+Falls back to `gmtime_r` for dates before epoch.
+
+This function is used internally for the formatting functions: `fio_time2rfc7231`, `fio_time2rfc2109`, `fio_time2rfc2822`, `fio_time2log`, and `fio_time2iso`.
 
 #### `fio_gm2time`
 
 ```c
-time_t fio_gm2time(struct tm tm)
+time_t fio_gm2time(struct tm tm);
 ```
 
 Converts a `struct tm` to time in seconds (assuming UTC).
 
-This function is less localized then the `mktime` / `timegm` library functions.
+This function is less localized than the `mktime` / `timegm` library functions.
+
+### Time Arithmetic Functions
+
+#### `fio_time_add`
+
+```c
+struct timespec fio_time_add(struct timespec t, struct timespec t2);
+```
+
+Adds two `struct timespec` objects together.
+
+Returns a normalized `struct timespec` with the sum of both time values.
+
+#### `fio_time_add_milli`
+
+```c
+struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
+```
+
+Adds milliseconds to a `struct timespec` object.
+
+Returns a normalized `struct timespec` with the adjusted time value.
+
+#### `fio_time_cmp`
+
+```c
+int fio_time_cmp(struct timespec t1, struct timespec t2);
+```
+
+Compares two `struct timespec` objects.
+
+**Returns:**
+- `-1` if `t1 < t2`
+- `0` if `t1 == t2`
+- `1` if `t1 > t2`
+
+### Time Formatting Functions
 
 #### `fio_time2rfc7231`
 
@@ -4595,13 +7173,15 @@ This function is less localized then the `mktime` / `timegm` library functions.
 size_t fio_time2rfc7231(char *target, time_t time);
 ```
 
-Writes an RFC 7231 date representation (HTTP date format) to target.
+Writes an RFC 7231 date representation (HTTP date format) to `target`.
 
-Requires 29 characters (for positive, 4 digit years).
+Usually requires 29 characters, although this may vary.
 
-The format is similar to DDD, dd, MON, YYYY, HH:MM:SS GMT
+The format is: `DDD, dd MON YYYY HH:MM:SS GMT`
 
-i.e.: Sun, 06 Nov 1994 08:49:37 GMT
+i.e.: `Sun, 06 Nov 1994 08:49:37 GMT`
+
+**Returns:** the number of characters written (excluding NUL terminator).
 
 #### `fio_time2rfc2109`
 
@@ -4609,9 +7189,11 @@ i.e.: Sun, 06 Nov 1994 08:49:37 GMT
 size_t fio_time2rfc2109(char *target, time_t time);
 ```
 
-Writes an RFC 2109 date representation to target (HTTP Cookie Format).
+Writes an RFC 2109 date representation to `target` (HTTP Cookie format).
 
-Requires 31 characters (for positive, 4 digit years).
+Usually requires 31 characters, although this may vary.
+
+**Returns:** the number of characters written (excluding NUL terminator).
 
 #### `fio_time2rfc2822`
 
@@ -4619,9 +7201,11 @@ Requires 31 characters (for positive, 4 digit years).
 size_t fio_time2rfc2822(char *target, time_t time);
 ```
 
-Writes an RFC 2822 date representation to target.
+Writes an RFC 2822 date representation to `target` (Internet Message Format).
 
-Requires 28 or 29 characters (for positive, 4 digit years).
+Usually requires 28 to 29 characters, although this may vary.
+
+**Returns:** the number of characters written (excluding NUL terminator).
 
 #### `fio_time2log`
 
@@ -4629,9 +7213,13 @@ Requires 28 or 29 characters (for positive, 4 digit years).
 size_t fio_time2log(char *target, time_t time);
 ```
 
-Writes a date representation to target in common log format. i.e.: `[DD/MMM/yyyy:hh:mm:ss +0000]`
+Writes a date representation to `target` in common log format.
+
+Format: `[DD/MMM/yyyy:hh:mm:ss +0000]`
 
 Usually requires 29 characters (including square brackets and NUL).
+
+**Returns:** the number of characters written (excluding NUL terminator).
 
 #### `fio_time2iso`
 
@@ -4639,23 +7227,85 @@ Usually requires 29 characters (including square brackets and NUL).
 size_t fio_time2iso(char *target, time_t time);
 ```
 
-Writes a date representation to target in ISO 8601 format. i.e.: `YYYY-MM-DD HH:MM:SS`
+Writes a date representation to `target` in ISO 8601 format.
+
+Format: `YYYY-MMM-DD HH:MM:SS`
 
 Usually requires 20 characters (including NUL).
 
+**Note**: the month is written as a 3-letter abbreviation (e.g., `Jan`, `Feb`), not as a numeric value.
+
+**Returns:** the number of characters written (excluding NUL terminator).
+
+### Example
+
+```c
+#define FIO_TIME
+#include "fio-stl.h"
+
+int main(void) {
+  /* Get current time */
+  struct timespec mono = fio_time_mono();
+  struct timespec real = fio_time_real();
+  
+  /* Convert to different units */
+  int64_t ms = fio_time_milli();
+  int64_t us = fio_time_micro();
+  int64_t ns = fio_time_nano();
+  
+  printf("Monotonic time: %lld ms, %lld us, %lld ns\n",
+         (long long)ms, (long long)us, (long long)ns);
+  
+  /* Time arithmetic */
+  struct timespec future = fio_time_add_milli(mono, 5000); /* 5 seconds later */
+  if (fio_time_cmp(future, mono) > 0) {
+    printf("Future time is greater than current time\n");
+  }
+  
+  /* Format current time */
+  time_t now = real.tv_sec;
+  char buf[64];
+  
+  fio_time2rfc7231(buf, now);
+  printf("RFC 7231: %s\n", buf);
+  
+  fio_time2rfc2109(buf, now);
+  printf("RFC 2109: %s\n", buf);
+  
+  fio_time2rfc2822(buf, now);
+  printf("RFC 2822: %s\n", buf);
+  
+  fio_time2log(buf, now);
+  printf("Log format: %s\n", buf);
+  
+  fio_time2iso(buf, now);
+  printf("ISO 8601: %s\n", buf);
+  
+  /* Convert between struct tm and time_t */
+  struct tm tm = fio_time2gm(now);
+  printf("Year: %d, Month: %d, Day: %d\n",
+         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+  
+  time_t converted = fio_gm2time(tm);
+  printf("Converted back: %s", ctime(&converted));
+  
+  return 0;
+}
+```
+
 -------------------------------------------------------------------------------
-## CLI (command line interface)
+## CLI (Command Line Interface)
 
 ```c
 #define FIO_CLI
 #include "fio-stl.h"
 ```
 
-The facil.io library includes a CLI parser that provides a simpler API and few more features than the array iteration based `getopt`, such as:
+The facil.io library includes a CLI parser that provides a simpler API and more features than the array iteration based `getopt`, such as:
 
 * Auto-generation of the "help" / usage output.
 
-* Argument type testing (String, boolean, and integer types are supported).
+* Argument type testing (String, Boolean, and Integer types are supported).
 
 * Global Hash map storage and access to the parsed argument values (until `fio_cli_end` is called).
 
@@ -4665,67 +7315,201 @@ The facil.io library includes a CLI parser that provides a simpler API and few m
 
 By defining `FIO_CLI`, the following functions will be defined.
 
-In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP`, flags, since CLI parsing and cleanup depends on them.
+In addition, `FIO_CLI` automatically includes the `FIO_ATOL`, `FIO_RAND` and `FIO_IMAP` flags, since CLI parsing and cleanup depends on them.
 
-**Note**: the `fio_cli` is **NOT** thread-safe unless limited to reading once multi-threading had started (read is immutable, write is where things can go wrong).
+**Note**: the `fio_cli` module is **NOT** thread-safe unless limited to reading once multi-threading has started (reading is immutable, writing is where things can go wrong).
+
+-------------------------------------------------------------------------------
+
+### Types
+
+#### `fio_cli_arg_e`
+
+```c
+typedef enum {
+  FIO_CLI_ARG_STRING,       /* A String CLI argument */
+  FIO_CLI_ARG_BOOL,         /* A Boolean CLI argument */
+  FIO_CLI_ARG_INT,          /* An integer CLI argument */
+  FIO_CLI_ARG_PRINT,        /* Print text with offset */
+  FIO_CLI_ARG_PRINT_LINE,   /* Print text as-is */
+  FIO_CLI_ARG_PRINT_HEADER, /* Print text as header */
+} fio_cli_arg_e;
+
+#define FIO_CLI_ARG_NONE FIO_CLI_ARG_PRINT_HEADER
+```
+
+An enumeration of CLI argument types used internally and returned by `fio_cli_type`.
+
+**Values:**
+- `FIO_CLI_ARG_STRING` - A string argument that accepts any value
+- `FIO_CLI_ARG_BOOL` - A boolean flag (no value accepted)
+- `FIO_CLI_ARG_INT` - An integer argument (validated during parsing)
+- `FIO_CLI_ARG_PRINT` - Used for printing help text with offset
+- `FIO_CLI_ARG_PRINT_LINE` - Used for printing help text as-is
+- `FIO_CLI_ARG_PRINT_HEADER` - Used for printing section headers in help
+- `FIO_CLI_ARG_NONE` - Alias for `FIO_CLI_ARG_PRINT_HEADER`
+
+-------------------------------------------------------------------------------
+
+### Argument Definition Macros
+
+These macros are used within `fio_cli_start` to define command line arguments and help text formatting.
+
+#### `FIO_CLI_STRING`
+
+```c
+#define FIO_CLI_STRING(line) /* ... */
+```
+
+Indicates the CLI argument should be a String (default type).
+
+Example:
+
+```c
+FIO_CLI_STRING("-o -output (stdout) output file path")
+```
+
+#### `FIO_CLI_INT`
+
+```c
+#define FIO_CLI_INT(line) /* ... */
+```
+
+Indicates the CLI argument should be an Integer (numerical). The parser validates that the provided value is a valid integer.
+
+Example:
+
+```c
+FIO_CLI_INT("-p -port (8080) the port number to use")
+```
+
+#### `FIO_CLI_BOOL`
+
+```c
+#define FIO_CLI_BOOL(line) /* ... */
+```
+
+Indicates the CLI argument is a Boolean value (flag). Boolean arguments cannot have default values and do not accept values - their presence indicates `true`.
+
+Example:
+
+```c
+FIO_CLI_BOOL("-v -verbose enable verbose logging")
+```
+
+**Note**: Boolean flags can be chained, e.g., `-abc` is equivalent to `-a -b -c`.
+
+#### `FIO_CLI_PRINT`
+
+```c
+#define FIO_CLI_PRINT(line) /* ... */
+```
+
+Indicates the CLI string should be printed as-is with proper offset (indentation). Used to add extra information related to the previous argument.
+
+Example:
+
+```c
+FIO_CLI_INT("-p -port (8080) the port number"),
+FIO_CLI_PRINT("Set to 0 for Unix socket mode.")
+```
+
+#### `FIO_CLI_PRINT_LINE`
+
+```c
+#define FIO_CLI_PRINT_LINE(line) /* ... */
+```
+
+Indicates the CLI string should be printed as-is with no offset. Used for raw text output in help.
+
+Example:
+
+```c
+FIO_CLI_PRINT_LINE("Visit https://example.com for more information.")
+```
+
+#### `FIO_CLI_PRINT_HEADER`
+
+```c
+#define FIO_CLI_PRINT_HEADER(line) /* ... */
+```
+
+Indicates the CLI string should be printed as a section header (with underline formatting).
+
+Example:
+
+```c
+FIO_CLI_PRINT_HEADER("Network Options:")
+```
+
+-------------------------------------------------------------------------------
+
+### Initialization and Cleanup
 
 #### `fio_cli_start`
 
 ```c
 #define fio_cli_start(argc, argv, unnamed_min, unnamed_max, description, ...)  \
-  fio_cli_start((argc), (argv), (unnamed_min), (unnamed_max), (description),   \
-                (char const *[]){__VA_ARGS__, (char const *)NULL})
+  fio_cli_start((argc),                                                        \
+                (argv),                                                        \
+                (unnamed_min),                                                 \
+                (unnamed_max),                                                 \
+                (description),                                                 \
+                (fio___cli_line_s[]){__VA_ARGS__, {0}})
 
-/* the shadowed function: */
-void fio_cli_start   (int argc, char const *argv[],
-                      int unnamed_min, int unnamed_max,
-                      char const *description,
-                      char const **names);
+/* The shadowed function: */
+void fio_cli_start(int argc,
+                   char const *argv[],
+                   int unnamed_min,
+                   int unnamed_max,
+                   char const *description,
+                   fio___cli_line_s *arguments);
 ```
 
-The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed. i.e.,
+The `fio_cli_start` **macro** shadows the `fio_cli_start` function and defines the CLI interface to be parsed.
 
-The `fio_cli_start` macro accepts the `argc` and `argv`, as received by the `main` functions, a maximum and minimum number of unspecified CLI arguments (beneath which or after which the parser will fail), an application description string and a variable list of (specified) command line arguments.
+The macro accepts:
+- `argc` - command line argument count (from `main`)
+- `argv` - command line argument list (from `main`)
+- `unnamed_min` - the required minimum of unnamed arguments
+- `unnamed_max` - the maximum limit of unnamed arguments (use `-1` for unlimited)
+- `description` - a C string containing the program's description
+- `...` - a variable list of argument definitions using the `FIO_CLI_*` macros
 
-If the minimum number of unspecified CLI arguments is `-1`, there will be no maximum limit on the number of unnamed / unrecognized arguments allowed  
+If `unnamed_min` is set to `-1`, there will be no limit on the number of unnamed/unrecognized arguments allowed.
 
 The text `NAME` in the description (all capitals) will be replaced with the executable command invoking the application.
 
-Command line arguments can be either String, Integer or Boolean. Optionally, extra data could be added to the CLI help output. CLI arguments and information is added using any of the following macros:
+Argument names **must** start with the `-` character. The first word starting without the `-` character will begin the description for the CLI argument.
 
-* `FIO_CLI_STRING("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_INT("-arg [-alias] [(default_value)] desc.")`
-
-* `FIO_CLI_BOOL("-arg [-alias] desc.")` (cannot accept default values)
-
-* `FIO_CLI_PRINT_HEADER("header text (printed as a header)")`
-
-* `FIO_CLI_PRINT("argument related line (printed as part of the previous argument)")`
-
-* `FIO_CLI_PRINT_LINE("raw text line (printed as is, no spacing or offset)")`
+The arguments `-?`, `-h`, `-help` and `--help` are automatically handled unless overridden.
 
 **Note**: default values may optionally be provided by placing them in parenthesis immediately after the argument name and aliases. Default values that start with `(` must end with `)` (the surrounding parenthesis are ignored). Default values that start with `("` must end with `")` (the surrounding start and end markers are ignored).
+
+**Note**: this function is **NOT** thread-safe.
+
+Example:
 
 ```c
 #define FIO_CLI
 #include "fio-stl.h"
+
 int main(int argc, char const *argv[]) {
   fio_cli_start(argc, argv, 0, -1,
-                "this is a CLI example for the NAME application.\n"
+                "This is a CLI example for the NAME application.\n"
                 "This example allows for unlimited arguments that will be printed.",
                 FIO_CLI_PRINT_HEADER("CLI type validation"),
-                FIO_CLI_STRING("--str -s (my default string) any data goes here"),
-                FIO_CLI_INT("--int -i (42) integer data goes here"),
-                FIO_CLI_BOOL("--bool -b flag (boolean) only - no data"),
-                FIO_CLI_PRINT("boolean flags cannot have default values."),
+                FIO_CLI_STRING("-s -str (my default string) any string data"),
+                FIO_CLI_INT("-i -int (42) integer data"),
+                FIO_CLI_BOOL("-b -bool flag (boolean) only - no data"),
+                FIO_CLI_PRINT("Boolean flags cannot have default values."),
                 FIO_CLI_PRINT_LINE("We hope you enjoy the NAME example.")
                 );
+
   if (fio_cli_get("-s")) /* always true when default value is provided */
     fprintf(stderr, "String: %s\n", fio_cli_get("-s"));
 
   fprintf(stderr, "Integer: %d\n", (int)fio_cli_get_i("-i"));
-
   fprintf(stderr, "Boolean: %d\n", (int)fio_cli_get_i("-b"));
 
   if (fio_cli_unnamed_count()) {
@@ -4740,13 +7524,29 @@ int main(int argc, char const *argv[]) {
 }
 ```
 
+Arguments can be provided in multiple formats:
+
+```
+app -t=1 -p3000 -a localhost
+app -t 1 -p 3000 -a localhost
+app --threads=1 --port=3000 --address=localhost
+```
+
 #### `fio_cli_end`
 
 ```c
 void fio_cli_end(void);
 ```
 
-Clears the CLI data storage.
+Clears the CLI data storage and frees all memory used by the CLI parser.
+
+**Note**: this function has a destructor attribute and will be called automatically at program exit. However, calling it explicitly allows memory to be freed earlier.
+
+**Note**: this function is **NOT** thread-safe.
+
+-------------------------------------------------------------------------------
+
+### Getting Argument Values
 
 #### `fio_cli_get`
 
@@ -4754,7 +7554,21 @@ Clears the CLI data storage.
 char const *fio_cli_get(char const *name);
 ```
 
-Returns the argument's value as a string, or NULL if the argument wasn't provided.
+Returns the argument's value as a NUL-terminated C string, or `NULL` if the argument wasn't provided.
+
+If `name` is `NULL`, returns the first unnamed argument (equivalent to `fio_cli_unnamed(0)`).
+
+#### `fio_cli_get_str`
+
+```c
+fio_buf_info_s fio_cli_get_str(char const *name);
+```
+
+Returns the argument's value as a `fio_buf_info_s` structure containing both the string pointer and its length.
+
+If `name` is `NULL`, returns the first unnamed argument.
+
+Returns an empty `fio_buf_info_s` (with `NULL` buffer) if the argument wasn't provided.
 
 #### `fio_cli_get_i`
 
@@ -4762,9 +7576,9 @@ Returns the argument's value as a string, or NULL if the argument wasn't provide
 int64_t fio_cli_get_i(char const *name);
 ```
 
-Returns the argument's value as an integer, or 0 if the argument wasn't provided.
+Returns the argument's value as an integer, or `0` if the argument wasn't provided.
 
-**Note:** the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
+**Note**: the command-line accepts integers in base 10, base 16, base 8 and binary as long as they have the appropriate prefix (i.e., none, `0x`, `0`, `0b`).
 
 #### `fio_cli_get_bool`
 
@@ -4772,7 +7586,23 @@ Returns the argument's value as an integer, or 0 if the argument wasn't provided
 #define fio_cli_get_bool(name) (fio_cli_get((name)) != NULL)
 ```
 
-Evaluates to true (1) if the argument was boolean and provided. Otherwise evaluated to false (0).
+Evaluates to `true` (non-zero) if the argument was provided. Otherwise evaluates to `false` (0).
+
+This is typically used for boolean flags but works with any argument type.
+
+#### `fio_cli_type`
+
+```c
+fio_cli_arg_e fio_cli_type(char const *name);
+```
+
+Returns the argument's expected content type as defined during `fio_cli_start`.
+
+Returns `FIO_CLI_ARG_NONE` if the argument name is not recognized.
+
+-------------------------------------------------------------------------------
+
+### Unnamed Arguments
 
 #### `fio_cli_unnamed_count`
 
@@ -4780,7 +7610,7 @@ Evaluates to true (1) if the argument was boolean and provided. Otherwise evalua
 unsigned int fio_cli_unnamed_count(void);
 ```
 
-Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli_start`).
+Returns the number of unnamed arguments (arguments not matching any defined argument names).
 
 #### `fio_cli_unnamed`
 
@@ -4788,7 +7618,23 @@ Returns the number of unrecognized arguments (arguments unspecified, in `fio_cli
 char const *fio_cli_unnamed(unsigned int index);
 ```
 
-Returns a String containing the unrecognized argument at the stated `index` (indexes are zero based).
+Returns a NUL-terminated C string containing the unnamed argument at the stated `index` (indexes are zero-based).
+
+Returns `NULL` if `index` is out of bounds.
+
+#### `fio_cli_unnamed_str`
+
+```c
+fio_buf_info_s fio_cli_unnamed_str(unsigned int index);
+```
+
+Returns the unnamed argument at the stated `index` as a `fio_buf_info_s` structure containing both the string pointer and its length.
+
+Returns an empty `fio_buf_info_s` if `index` is out of bounds.
+
+-------------------------------------------------------------------------------
+
+### Setting Argument Values
 
 #### `fio_cli_set`
 
@@ -4796,7 +7642,11 @@ Returns a String containing the unrecognized argument at the stated `index` (ind
 void fio_cli_set(char const *name, char const *value);
 ```
 
-Sets a value for the named argument (value will propagate to named aliases).
+Sets a value for the named argument. The value will propagate to all named aliases.
+
+If `name` is `NULL`, adds `value` as a new unnamed argument.
+
+**Note**: this function is **NOT** thread-safe.
 
 #### `fio_cli_set_i`
 
@@ -4804,10 +7654,27 @@ Sets a value for the named argument (value will propagate to named aliases).
 void fio_cli_set_i(char const *name, int64_t i);
 ```
 
-Sets a numeral value for the named argument (but **not** it's aliases).
+Sets a numerical value for the named argument by converting it to a base-10 string representation.
 
-**Note**: this basically writes a string with a base 10 representation.
+**Note**: this function is **NOT** thread-safe.
 
+#### `fio_cli_set_unnamed`
+
+```c
+unsigned int fio_cli_set_unnamed(unsigned int index, const char *value);
+```
+
+Sets or adds an unnamed argument at the specified `index` in the array of unnamed elements.
+
+If `index` is greater than or equal to the current count of unnamed arguments, the value is appended to the end.
+
+Returns the actual index where the value was stored, or `(unsigned int)-1` if `value` is `NULL` or empty.
+
+**Note**: this function is **NOT** thread-safe.
+
+-------------------------------------------------------------------------------
+
+### Iteration
 
 #### `fio_cli_each`
 
@@ -4816,14 +7683,16 @@ size_t fio_cli_each(int (*task)(fio_buf_info_s name,
                                 fio_buf_info_s value,
                                 fio_cli_arg_e arg_type,
                                 void *udata),
-                          void *udata);
+                    void *udata);
 ```
 
-Calls `task` for every argument received, returning the number of times `task` was called.
+Calls `task` for every argument that was received (has a value), returning the number of times `task` was called.
 
-If `task` returns a non-zero value, iteration is stopped and `fio_cli_each` returns.
+If `task` returns a non-zero value, iteration stops early and `fio_cli_each` returns.
 
-The `udata` pointer is an opaque user pointer passed along.
+The `udata` pointer is an opaque user pointer passed to each invocation of `task`.
+
+For unnamed arguments, `name` will have a `NULL` buffer and zero length.
 
 -------------------------------------------------------------------------------
 ## Local Memory Allocation
@@ -4957,8 +7826,7 @@ If memory was allocator using a different allocator,behavior is undefined... i.e
 
 **Note**: the prefix `fio` will be different according to the `FIO_MEMORY_NAME` macro, it is used here because this is the prefix defined when using the `FIO_MALLOC` shortcut macro.
 
-**Note2**: if `fio_free` is called **after** the allocator had been "destroyed" (cleanup occurred.
-
+**Note**: if `fio_free` is called **after** the allocator had been "destroyed" (cleanup occurred), behavior is undefined.
 
 #### `fio_malloc_after_fork`
 
@@ -5148,7 +8016,7 @@ Zero / negative values will result in dynamic selection based on CPU core count.
 #### `FIO_MEMORY_ARENA_COUNT_FALLBACK`
 
 ```c
-#define FIO_MEMORY_ARENA_COUNT_FALLBACK 8
+#define FIO_MEMORY_ARENA_COUNT_FALLBACK 24
 ```
 
 Used when the dynamic arena count calculations fails.
@@ -5158,7 +8026,7 @@ Used when the dynamic arena count calculations fails.
 #### `FIO_MEMORY_ARENA_COUNT_MAX`
 
 ```c
-#define FIO_MEMORY_ARENA_COUNT_MAX 32
+#define FIO_MEMORY_ARENA_COUNT_MAX 64
 ```
 
 Defines the maximum number of arenas to allocate when using dynamic arena calculation.
@@ -5194,28 +8062,38 @@ If set to a number, will allocate memory on startup to the number of arenas indi
 
 It is usually better to avoid this unless using a single arena.
 
-#### `FIO_MEM_PAGE_ALLOC`, `FIO_MEM_PAGE_REALLOC` and `FIO_MEM_PAGE_FREE`
+#### `FIO_MEM_SYS_ALLOC`, `FIO_MEM_SYS_REALLOC` and `FIO_MEM_SYS_FREE`
 
 ```c
-#define FIO_MEM_PAGE_ALLOC(pages, alignment_log)                               \
-  FIO_MEM_PAGE_ALLOC_def_func((pages), (alignment_log))
+#define FIO_MEM_SYS_ALLOC(pages, alignment_log)                                \
+  FIO_MEM_SYS_ALLOC_def_func((pages), (alignment_log))
 
-#define FIO_MEM_PAGE_REALLOC(ptr, old_pages, new_pages, alignment_log)         \
-  FIO_MEM_PAGE_REALLOC_def_func((ptr), (old_pages), (new_pages), (alignment_log))
+#define FIO_MEM_SYS_REALLOC(ptr, old_pages, new_pages, alignment_log)          \
+  FIO_MEM_SYS_REALLOC_def_func((ptr), (old_pages), (new_pages), (alignment_log))
 
-#define FIO_MEM_PAGE_FREE(ptr, pages)                                          \
-  FIO_MEM_PAGE_FREE_def_func((ptr), (pages))
+#define FIO_MEM_SYS_FREE(ptr, pages)                                           \
+  FIO_MEM_SYS_FREE_def_func((ptr), (pages))
 ```
 
 These MACROS, when all of them are defined, allow the memory allocator to collect memory from the system using an alternative method.
 
 This allows the allocator to be used in situations where `mmap` is unavailable.
 
-**Note:** the alignment property for the allocated memory is essential and may me quite large (see `FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG`).
+**Note:** the alignment property for the allocated memory is essential and may be quite large (see `FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG`).
 
 ### Debugging the allocator
 
 The following functions will also be defined per-allocator. However, they should be considered experimental and unstable as they are linked to the allocator's internal workings.
+
+#### `fio_malloc_arenas`
+
+```c
+size_t fio_malloc_arenas(void);
+```
+
+Returns the number of arenas used by the allocator.
+
+**Note**: the prefix `fio` will be different according to the `FIO_MEMORY_NAME` macro, it is used here because this is the prefix defined when using the `FIO_MALLOC` shortcut macro.
 
 #### `fio_malloc_sys_alloc_size`
 
@@ -5281,6 +8159,14 @@ void fio_malloc_print_state(void);
 
 Prints information from the allocator's data structure. May be used for debugging.
 
+#### `fio_malloc_print_free_block_list`
+
+```c
+void fio_malloc_print_free_block_list(void);
+```
+
+Prints the allocator's free block list. May be used for debugging.
+
 #### `fio_malloc_print_settings`
 
 ```c
@@ -5324,7 +8210,7 @@ IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is anot
 
 The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
 
-"One-Shot" means that once a specific even has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file desciptor is waiting on multiple event, only those events that occurred will be removed from the monitored collection.
+"One-Shot" means that once a specific event has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file descriptor is waiting on multiple events, only those events that occurred will be removed from the monitored collection.
 
 There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
 
@@ -5333,8 +8219,6 @@ It is recommended to use the system specific polling "engine" (`epoll` / `kqueue
 By defining `FIO_POLL`, the following functions will be defined.
 
 **Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
-
-**Note**: when using `epoll` then the file descriptor (`fd`) will **NOT** be passed on to the callback (as `epoll` doesn't retain the data).
 
 ### `FIO_POLL` API
 
@@ -5350,16 +8234,10 @@ The `fio_poll_s` type should be considered opaque and should **not** be accessed
 #### `fio_poll_init`
 
 ```c
-fio_poll_s *fio_poll_new(fio_poll_settings_s settings);
-/* named argument support */
-#define fio_poll_new(...) fio_poll_new((fio_poll_settings_s){__VA_ARGS__})
-```
+void fio_poll_init(fio_poll_s *p, fio_poll_settings_s settings);
+/* Named arguments using macro. */
+#define fio_poll_init(p, ...) fio_poll_init((p), (fio_poll_settings_s){__VA_ARGS__})
 
-Creates a new polling object / queue.
-
-The settings arguments set the `on_data`, `on_ready` and `on_close` callbacks:
-
-```c
 typedef struct {
   /** callback for when data is available in the incoming buffer. */
   void (*on_data)(void *udata);
@@ -5369,6 +8247,28 @@ typedef struct {
   void (*on_close)(void *udata);
 } fio_poll_settings_s;
 ```
+
+Initializes a polling object, allocating its resources.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_poll_s poller;
+fio_poll_init(&poller,
+              .on_data = my_on_data_callback,
+              .on_ready = my_on_ready_callback,
+              .on_close = my_on_close_callback);
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `on_data` | `void (*)(void *)` | Callback for when data is available in the incoming buffer |
+| `on_ready` | `void (*)(void *)` | Callback for when the outgoing buffer allows a call to `write` |
+| `on_close` | `void (*)(void *)` | Callback for closed connections and/or connections with errors |
+
+**Note**: callbacks that are not provided will default to a no-op function.
 
 #### `fio_poll_destroy`
 
@@ -5399,28 +8299,55 @@ Returns -1 on error.
 #### `fio_poll_review`
 
 ```c
-int fio_poll_review(fio_poll_s *p, int timeout);
+int fio_poll_review(fio_poll_s *p, size_t timeout);
 ```
 
 Reviews if any of the monitored file descriptors has any events.
 
-`timeout` is in milliseconds.
+**Parameters:**
+- `p` - pointer to the polling object
+- `timeout` - timeout in milliseconds
 
-Returns the number of events called.
+**Returns:** the number of events called.
 
-**Note**:
-
-Polling is thread safe, but has different effects on different threads.
-
-Adding a new file descriptor from one thread while polling in a different thread will not poll that IO untill `fio_poll_review` is called again.
+**Note**: polling is thread safe, but has different effects on different threads. Adding a new file descriptor from one thread while polling in a different thread will not poll that IO until `fio_poll_review` is called again.
 
 #### `fio_poll_forget`
 
 ```c
-void *fio_poll_forget(fio_poll_s *p, int fd);
+int fio_poll_forget(fio_poll_s *p, int fd);
 ```
 
-Stops monitoring the specified file descriptor even if some of it's event's hadn't occurred just yet, returning its `udata` (if any).
+Stops monitoring the specified file descriptor even if some of its events hadn't occurred yet.
+
+**Parameters:**
+- `p` - pointer to the polling object
+- `fd` - the file descriptor to stop monitoring
+
+**Returns:** `0` on success, `-1` on error (e.g., if the file descriptor was not being monitored).
+
+#### `fio_poll_close_all`
+
+```c
+void fio_poll_close_all(fio_poll_s *p);
+```
+
+Closes all monitored sockets, calling the `on_close` callback for each.
+
+**Parameters:**
+- `p` - pointer to the polling object
+
+**Note**: this function is only available when using the `poll` engine (`FIO_POLL_ENGINE_POLL`).
+
+#### `fio_poll_engine`
+
+```c
+const char *fio_poll_engine(void);
+```
+
+Returns the system call used for polling as a constant string.
+
+**Returns:** `"poll"`, `"epoll"`, or `"kqueue"` depending on the selected engine.
 
 ### `FIO_POLL` Compile Time Macros
 
@@ -5434,11 +8361,13 @@ Stops monitoring the specified file descriptor even if some of it's event's hadn
 
 Allows for both the detection and the manual selection (override) of the underlying IO multiplexing API.
 
-When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses less system calls.
+When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses fewer system calls.
 
 ```c
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
 ```
+
+If `FIO_POLL_ENGINE` is not defined, the engine is automatically detected based on system availability (`epoll` on Linux, `kqueue` on BSD/macOS, `poll` as fallback).
 
 #### `FIO_POLL_ENGINE_STR`
 
@@ -5450,10 +8379,27 @@ When multiplexing a small number of IO sockets, using the `poll` engine might be
 #elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
 #define FIO_POLL_ENGINE_STR "kqueue"
 #endif
-
 ```
 
-A string MACRO representing the used IO multiplexing "engine".
+A string macro representing the used IO multiplexing "engine".
+
+#### `FIO_POLL_POSSIBLE_FLAGS`
+
+```c
+#define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
+```
+
+Defines the user flags that IO events recognize. This can be overridden before including the header.
+
+#### `FIO_POLL_MAX_EVENTS`
+
+```c
+#define FIO_POLL_MAX_EVENTS 128 /* or 256 on 32-bit systems */
+```
+
+Defines the maximum number of events per review call. This is relevant only for `epoll` and `kqueue` engines.
+
+The default value is `128` on 64-bit systems and `256` on 32-bit systems.
 
 -------------------------------------------------------------------------------
 ## Task Queue
@@ -5465,11 +8411,23 @@ A string MACRO representing the used IO multiplexing "engine".
 
 The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
 
-Since delayed processing is a common task, this queue is provides an easy way to schedule and perform delayed tasks.
+Since delayed processing is a common task, this queue provides an easy way to schedule and perform delayed tasks.
 
 In addition, a Timer type allows timed events to be scheduled and moved (according to their "due date") to an existing Task Queue.
 
-By `FIO_QUEUE`, the following task and timer related helpers are defined:
+By defining `FIO_QUEUE`, the following task and timer related helpers are defined:
+
+### Configuration Macros
+
+#### `FIO_QUEUE_TASKS_PER_ALLOC`
+
+```c
+#define FIO_QUEUE_TASKS_PER_ALLOC 168 /* or 338 on 32-bit systems */
+```
+
+Controls the number of tasks per allocation block in the queue's ring buffer. The default value is chosen to fit `fio_queue_s` in one memory page on most systems (168 for 64-bit, 338 for 32-bit).
+
+**Note**: This value cannot exceed 65535.
 
 ### Queue Related Types
 
@@ -5494,11 +8452,17 @@ The `fio_queue_task_s` type contains information about a delayed task. The infor
 ```c
 /** The queue object - should be considered opaque (or, at least, read only). */
 typedef struct {
+  /** task read pointer. */
   fio___task_ring_s *r;
+  /** task write pointer. */
   fio___task_ring_s *w;
-  /** the number of tasks waiting to be performed (read-only). */
-  size_t count;
-  fio_lock_i lock; /* unless FIO_USE_THREAD_MUTEX(_TMP) is true */
+  /** the number of tasks waiting to be performed. */
+  uint32_t count;
+  /** global queue lock. */
+  FIO___LOCK_TYPE lock;
+  /** linked lists of consumer threads. */
+  FIO_LIST_NODE consumers;
+  /** main ring buffer associated with the queue. */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```
@@ -5507,7 +8471,7 @@ The `fio_queue_s` object is the queue object.
 
 This object could be placed on the stack or allocated on the heap (using [`fio_queue_new`](#fio_queue_new)).
 
-Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destroy) (if placed on the stack) of [`fio_queue_free`](#fio_queue_free) (if allocated using [`fio_queue_new`](#fio_queue_new)).
+Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destroy) (if placed on the stack) or [`fio_queue_free`](#fio_queue_free) (if allocated using [`fio_queue_new`](#fio_queue_new)).
 
 ### Queue API
 
@@ -5533,12 +8497,17 @@ When using the optional `pthread_mutex_t` implementation or using timers on Wind
 
 ```c
 #define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  { .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT }
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT,               \
+    .consumers = FIO_LIST_INIT((queue).consumers),                             \
+  }
 ```
 
 May be used to initialize global, static memory, queues.
 
-**Note**: while the use `FIO_QUEUE_STATIC_INIT` is possible,  this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+**Note**: while the use of `FIO_QUEUE_STATIC_INIT` is possible, this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+
+**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
 
 #### `fio_queue_new`
 
@@ -5573,10 +8542,10 @@ For example:
 
 ```c
 void tsk(void *, void *);
-fio_queue_s q = FIO_QUEUE_INIT(q);
-fio_queue_push(q, .fn = tsk);
+fio_queue_s q = FIO_QUEUE_STATIC_INIT(q);
+fio_queue_push(&q, .fn = tsk);
 // ...
-fio_queue_destroy(q);
+fio_queue_destroy(&q);
 ```
 
 Returns 0 if `task.fn == NULL` or if the task was successfully added to the queue.
@@ -5631,10 +8600,60 @@ Performs all tasks in the queue.
 #### `fio_queue_count`
 
 ```c
-size_t fio_queue_count(fio_queue_s *q);
+uint32_t fio_queue_count(fio_queue_s *q);
 ```
 
 Returns the number of tasks in the queue.
+
+### Worker Thread API
+
+The queue supports consumer/worker threads that automatically perform tasks as they are added to the queue.
+
+#### `fio_queue_workers_add`
+
+```c
+int fio_queue_workers_add(fio_queue_s *q, size_t count);
+```
+
+Adds worker/consumer threads to perform the jobs in the queue.
+
+**Parameters:**
+- `q` - the queue to add workers to
+- `count` - the number of worker threads to add
+
+**Returns:** `0` on success, `-1` on error (thread creation failed).
+
+**Note**: Worker threads will automatically wake up when new tasks are added to the queue and sleep when the queue is empty.
+
+#### `fio_queue_workers_stop`
+
+```c
+void fio_queue_workers_stop(fio_queue_s *q);
+```
+
+Signals all worker threads to stop performing tasks and terminate.
+
+This function returns immediately without waiting for threads to finish. Use [`fio_queue_workers_join`](#fio_queue_workers_join) to wait for threads to complete.
+
+#### `fio_queue_workers_join`
+
+```c
+void fio_queue_workers_join(fio_queue_s *q);
+```
+
+Signals all worker threads to stop and waits for them to complete.
+
+This function blocks until all worker threads have terminated.
+
+#### `fio_queue_workers_wake`
+
+```c
+void fio_queue_workers_wake(fio_queue_s *q);
+```
+
+Signals all worker threads to wake up and check for new tasks.
+
+**Note**: This is typically called automatically when tasks are pushed to the queue, but can be called manually if needed.
 
 ### Timer Related Types
 
@@ -5643,7 +8662,7 @@ Returns the number of tasks in the queue.
 ```c
 typedef struct {
   fio___timer_event_s *next;
-  fio_lock_i lock;
+  FIO___LOCK_TYPE lock;
 } fio_timer_queue_s;
 ```
 
@@ -5660,12 +8679,19 @@ A timer could be allocated dynamically:
 ```c
 fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
 FIO_ASSERT_ALLOC(foo_timer);
-*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT(*foo_timer);
+*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
 ```
 
 #### `FIO_TIMER_QUEUE_INIT`
 
+```c
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO_LOCK_INIT }
+```
+
 This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
+
+**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
 
 ### Timer API
 
@@ -5674,13 +8700,10 @@ This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
 ```c
 void fio_timer_schedule(fio_timer_queue_s *timer_queue,
                         fio_timer_schedule_args_s args);
-```
+/* Named arguments using macro. */
+#define fio_timer_schedule(timer_queue, ...)                                   \
+  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
 
-Adds a time-bound event to the timer queue.
-
-Accepts named arguments using the following argument type and MACRO:
-
-```c
 typedef struct {
   /** The timer function. If it returns a non-zero value, the timer stops. */
   int (*fn)(void *, void *);
@@ -5695,33 +8718,56 @@ typedef struct {
   /** The number of times the timer should be performed. -1 == infinity. */
   int32_t repetitions;
   /** Millisecond at which to start. If missing, filled automatically. */
-  uint64_t start_at;
+  int64_t start_at;
 } fio_timer_schedule_args_s;
-
-#define fio_timer_schedule(timer_queue, ...)                                   \
-  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
 ```
 
-Note, the event will repeat every `every` milliseconds (or the same unites as `start_at` and `now`).
+Adds a time-bound event to the timer queue.
 
-It the scheduler is busy or the event is otherwise delayed, its next scheduling may compensate for the delay by being scheduled sooner.
-
-#### `fio_timer_push2queue` 
+The function is shadowed by a macro, allowing it to accept named arguments:
 
 ```c
-/**  */
+fio_timer_schedule(timer_queue,
+                   .fn = my_timer_callback,
+                   .udata1 = my_data,
+                   .every = 1000,        /* every 1000ms (1 second) */
+                   .repetitions = -1);   /* repeat forever */
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `fn` | `int (*)(void *, void *)` | Timer callback. Return non-zero to stop the timer. |
+| `udata1` | `void *` | Opaque user data passed to callbacks |
+| `udata2` | `void *` | Opaque user data passed to callbacks |
+| `on_finish` | `void (*)(void *, void *)` | Called when timer is done/stopped |
+| `every` | `uint32_t` | Timer interval in milliseconds |
+| `repetitions` | `int32_t` | Number of times to repeat; `-1` for infinite |
+| `start_at` | `int64_t` | Start time in milliseconds; `0` uses `fio_time_milli()` |
+
+**Note**: the event will repeat every `every` milliseconds (or the same units as `start_at` and `now`).
+
+**Note**: if the scheduler is busy or the event is otherwise delayed, its next scheduling may compensate for the delay by being scheduled sooner.
+
+#### `fio_timer_push2queue`
+
+```c
 size_t fio_timer_push2queue(fio_queue_s *queue,
                             fio_timer_queue_s *timer_queue,
-                            uint64_t now); // now is in milliseconds
+                            int64_t now_in_milliseconds);
 ```
 
 Pushes due events from the timer queue to an event queue.
 
-If `now` is `0`, than `fio_time_milli` will be called to supply `now`'s value.
+**Parameters:**
+- `queue` - the task queue to push due events to
+- `timer_queue` - the timer queue to check for due events
+- `now_in_milliseconds` - current time in milliseconds; if `0`, `fio_time_milli()` is called automatically
 
-**Note**: all the `start_at` values for all the events in the timer queue will be treated as if they use the same units as (and are relative to) `now`. By default, this unit should be milliseconds, to allow `now` to be zero.
+**Returns:** the number of tasks pushed to the queue. A value of `0` indicates no new tasks were scheduled.
 
-Returns the number of tasks pushed to the queue. A value of `0` indicates no new tasks were scheduled.
+**Note**: all the `start_at` values for all the events in the timer queue will be treated as if they use the same units as (and are relative to) `now_in_milliseconds`. By default, this unit should be milliseconds, to allow `now_in_milliseconds` to be zero.
 
 #### `fio_timer_next_at`
 
@@ -5767,11 +8813,33 @@ Data Streams offer a way to store / concat different data sources (static string
 
 By defining the macro `FIO_STREAM`, the following macros and functions will be defined.
 
+### Configuration Macros
+
+#### `FIO_STREAM_COPY_PER_PACKET`
+
+```c
+#define FIO_STREAM_COPY_PER_PACKET 98304
+```
+
+When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
+
+This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (98304 bytes).
+
+#### `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`
+
+```c
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
+```
+
+If the data added is less than this number of bytes, copying is preferred over referencing for better memory locality. By default, it is set to 116 bytes (or 8 bytes in DEBUG mode).
+
+### Types
+
 #### `fio_stream_s`
 
 ```c
 typedef struct {
-  /* do not directly acecss! */
+  /* do not directly access! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
   size_t consumed;
@@ -5785,15 +8853,15 @@ The `fio_stream_s` type should be considered opaque and only accessed through th
 
 The `fio_stream_packet_s` type should be considered opaque and only accessed through the following API.
 
-This type is used to separate data packing with any updates made to the stream object, allowing data packing to be performed concurrently with stream reading / updating (which requires a lock in multi-threaded applications).
+This type is used to separate data packing from any updates made to the stream object, allowing data packing to be performed concurrently with stream reading / updating (which requires a lock in multi-threaded applications).
 
+### Initialization and Destruction
 
-#### `FIO_STREAM_INIT(stream)`
+#### `FIO_STREAM_INIT`
 
 ```c
 #define FIO_STREAM_INIT(s)                                                     \
   { .next = NULL, .pos = &(s).next }
-#endif
 ```
 
 Object initialization macro.
@@ -5804,7 +8872,9 @@ Object initialization macro.
 fio_stream_s *fio_stream_new(void);
 ```
 
-Allocates a new object on the heap and initializes it's memory.
+Allocates a new object on the heap and initializes its memory.
+
+**Returns:** a pointer to the newly allocated stream, or NULL on allocation failure.
 
 #### `fio_stream_free`
 
@@ -5814,6 +8884,11 @@ int fio_stream_free(fio_stream_s *stream);
 
 Frees any internal data AND the object's container!
 
+**Parameters:**
+- `stream` - the stream object to free
+
+**Returns:** 0.
+
 #### `fio_stream_destroy`
 
 ```c
@@ -5822,27 +8897,42 @@ void fio_stream_destroy(fio_stream_s *stream);
 
 Destroys the object, reinitializing its container.
 
+**Parameters:**
+- `stream` - the stream object to destroy
+
+### Stream Information
+
 #### `fio_stream_any`
 
 ```c
 uint8_t fio_stream_any(fio_stream_s *stream);
-````
+```
 
 Returns true if there's any data in the stream.
 
-**Note**: this isn't thread safe, but it often doesn't matter if it is.
+**Parameters:**
+- `stream` - the stream object to check
+
+**Returns:** non-zero if there's data in the stream, 0 otherwise.
+
+**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
 
 #### `fio_stream_length`
 
 ```c
 size_t fio_stream_length(fio_stream_s *stream);
-````
+```
 
 Returns the number of bytes waiting in the stream.
 
-**Note**: this isn't thread safe, but it often doesn't matter if it is.
+**Parameters:**
+- `stream` - the stream object to query
 
-### Packing data into the stream
+**Returns:** the number of bytes in the stream.
+
+**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
+
+### Packing Data into the Stream
 
 #### `fio_stream_pack_data`
 
@@ -5856,15 +8946,37 @@ fio_stream_packet_s *fio_stream_pack_data(void *buf,
 
 Packs data into a `fio_stream_packet_s` container.
 
-Can be performed concurrently with other operations.
+**Parameters:**
+- `buf` - pointer to the data buffer
+- `len` - length of the data in bytes
+- `offset` - offset within the buffer to start from
+- `copy_buffer` - if non-zero, the data will be copied; otherwise, the buffer is referenced
+- `dealloc_func` - function to call to free the buffer when done (can be NULL)
+
+**Returns:** a pointer to the packet, or NULL on error.
+
+**Note**: can be performed concurrently with other stream operations. If `copy_buffer` is set or if `len` is less than `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`, the data will be copied. Large data blocks may be split into multiple packets based on `FIO_STREAM_COPY_PER_PACKET`. If `dealloc_func` is provided, it will be called even on error.
 
 #### `fio_stream_pack_fd`
 
 ```c
-fio_stream_packet_s * fio_stream_pack_fd(int fd, size_t len, size_t offset, uint8_t keep_open);
+fio_stream_packet_s *fio_stream_pack_fd(int fd,
+                                        size_t len,
+                                        size_t offset,
+                                        uint8_t keep_open);
 ```
 
-Packs a file descriptor into a `fio_stream_packet_s` container. 
+Packs a file descriptor into a `fio_stream_packet_s` container.
+
+**Parameters:**
+- `fd` - the file descriptor to pack
+- `len` - number of bytes to read from the file (0 to auto-detect from file size)
+- `offset` - offset within the file to start reading from
+- `keep_open` - if non-zero, the file descriptor will NOT be closed when the packet is freed
+
+**Returns:** a pointer to the packet, or NULL on error.
+
+**Note**: if `len` is 0, the file size will be queried and `len` will be set to `file_size - offset`. If `keep_open` is 0 and an error occurs, the file descriptor will be closed.
 
 #### `fio_stream_add`
 
@@ -5874,7 +8986,11 @@ void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
 
 Adds a packet to the stream.
 
-**Note**: this isn't thread safe.
+**Parameters:**
+- `stream` - the stream to add the packet to
+- `packet` - the packet to add
+
+**Note**: this isn't thread safe. If `stream` or `packet` is NULL, the packet will be freed.
 
 #### `fio_stream_pack_free`
 
@@ -5882,11 +8998,12 @@ Adds a packet to the stream.
 void fio_stream_pack_free(fio_stream_packet_s *packet);
 ```
 
-Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never added to the stream using `fio_stream_add`. 
+Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never added to the stream using `fio_stream_add`.
 
+**Parameters:**
+- `packet` - the packet to free
 
-### Reading / Consuming data from the Stream
-
+### Reading / Consuming Data from the Stream
 
 #### `fio_stream_read`
 
@@ -5894,13 +9011,18 @@ Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never
 void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
 ```
 
-Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance).
+Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance)).
 
 `buf` MUST point to a buffer with - at least - `len` bytes. This is required in case the packed data is fragmented or references a file and needs to be copied to an available buffer.
 
 On error, or if the stream is empty, `buf` will be set to NULL and `len` will be set to zero.
 
 Otherwise, `buf` may retain the same value or it may point directly to a memory address within the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
+
+**Parameters:**
+- `stream` - the stream to read from
+- `buf` - pointer to a buffer pointer (will be updated)
+- `len` - pointer to the buffer length (will be updated)
 
 **Note**: this isn't thread safe.
 
@@ -5912,20 +9034,13 @@ void fio_stream_advance(fio_stream_s *stream, size_t len);
 
 Advances the Stream, so the first `len` bytes are marked as consumed.
 
+**Parameters:**
+- `stream` - the stream to advance
+- `len` - number of bytes to mark as consumed
+
 **Note**: this isn't thread safe.
 
-### Stream configuration
-
-Besides the (recommended) use of a local allocator using the `FIO_MEMORY` or `FIO_MEM_REALLOC` macro families, the following configuration macros are supported:
-
-#### `FIO_STREAM_COPY_PER_PACKET`
-
-When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
-
-This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (which is neither here nor there).
-
 -------------------------------------------------------------------------------
-
 ## Binary Safe Core String Helpers
 
 ```c
@@ -5939,34 +9054,48 @@ The main difference between using the Core String API directly and defining a St
 
 **Note**: the `fio_string` functions might fail or truncate data if memory allocation fails. Test the returned value for failure (success returns `0`, failure returns `-1`).
 
+**Note:** this module depends on the `FIO_ATOL`, `FIO_ATOMIC`, `FIO_RAND`, and `FIO_FILES` modules which will be automatically included.
 
-**Note:** this module depends on the  `FIO_ATOL`,  `FIO_ATOMIC`, `FIO_RAND`, and `FIO_FILES` modules which will be automatically included.
+### Reallocation Callback Type
+
+#### `fio_string_realloc_fn`
+
+```c
+typedef int (*fio_string_realloc_fn)(fio_str_info_s *dest, size_t len);
+```
+
+A reallocation callback type for buffers in a `fio_str_info_s`.
+
+The callback MUST allocate at least `len + 1` bytes, setting the new capacity in `dest->capa`.
+
+**Returns:** `0` on success, `-1` on failure.
 
 ### Core String Authorship
 
 #### `fio_string_write`
 
 ```c
-static inline int fio_string_write(fio_str_info_s *dest,
-                               void (*reallocate)(fio_str_info_s *,
-                                                  size_t new_capa),
-                               const void *src,
-                               size_t len);
+int fio_string_write(fio_str_info_s *dest,
+                     fio_string_realloc_fn reallocate,
+                     const void *restrict src,
+                     size_t len);
 ```
 
-Writes data to the end of the string in the `fio_string_s` struct, returning an updated `fio_string_s` struct.
+Writes data to the end of the string in the `fio_str_info_s` struct.
 
 The returned string is NUL terminated if edited.
 
-* `dest` an `fio_string_s` struct containing the destination string.
+**Parameters:**
 
-* `reallocate` is a callback that attempts to reallocate more memory (i.e., using realloc) and returns an updated `fio_string_s` struct containing the updated capacity and buffer pointer (as well as the original length).
+- `dest` - an `fio_str_info_s` struct containing the destination string.
 
-    On failure the original `fio_string_s` should be returned. if `reallocate` is NULL or fails, the data copied will be truncated.
+- `reallocate` - a callback that attempts to reallocate more memory (i.e., using `realloc`) and returns `0` on success or `-1` on failure. If `reallocate` is NULL or fails, the data copied will be truncated.
 
-* `src` is the data to be written to the end of `dest`.
+- `src` - the data to be written to the end of `dest`.
 
-* `len` is the length of the data to be written to the end of `dest`.
+- `len` - the length of the data to be written to the end of `dest`.
+
+**Returns:** `0` on success, `-1` if memory reallocation was needed but failed (data may be truncated).
 
 **Note**: this function performs only minimal checks and assumes that `dest` is fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is valid, etc'.
 
@@ -5975,16 +9104,15 @@ The returned string is NUL terminated if edited.
 An example for a `reallocate` callback using the system's `realloc` function (or use `FIO_STRING_REALLOC` / `FIO_STRING_FREE`):
 
 ```c
-fio_str_info_s fio_string_realloc_system(fio_str_info_s dest,
-                                         size_t len) {
+int fio_string_realloc_system(fio_str_info_s *dest, size_t len) {
   /* must allocate at least len + 1 bytes. */
   const size_t new_capa = fio_string_capa4len(len);
-  void *tmp = realloc(dest.buf, new_capa);
+  void *tmp = realloc(dest->buf, new_capa);
   if (!tmp)
-    return dest;
-  dest.capa = new_capa;
-  dest.buf = (char *)tmp;
-  return dest;
+    return -1;
+  dest->capa = new_capa;
+  dest->buf = (char *)tmp;
+  return 0;
 }
 ```
 
@@ -6005,12 +9133,11 @@ void example(void) {
 
 ```c
 int fio_string_replace(fio_str_info_s *dest,
-                      void (*reallocate)(fio_str_info_s *,
-                                         size_t new_capa),
-                      intptr_t start_pos,
-                      size_t overwrite_len,
-                      const void *src,
-                      size_t len);
+                       fio_string_realloc_fn reallocate,
+                       intptr_t start_pos,
+                       size_t overwrite_len,
+                       const void *src,
+                       size_t len);
 ```
 
 Similar to `fio_string_write`, only replacing/inserting a sub-string in a specific location.
@@ -6029,9 +9156,8 @@ If `len == 0` than `src` will be ignored and the data marked for replacement wil
 
 ```c
 int fio_string_write2(fio_str_info_s *restrict dest,
-                      void (*reallocate)(fio_str_info_s *,
-                                         size_t new_capa),
-                      const fio_string_write_s sources[]);
+                      fio_string_realloc_fn reallocate,
+                      const fio_string_write_s srcs[]);
 /* Helper macro for fio_string_write2 */
 #define fio_string_write2(dest, reallocate, ...)                               \
   fio_string_write2((dest),                                                    \
@@ -6045,16 +9171,20 @@ Writes a group of objects (strings, numbers, etc') to `dest`.
 
 **Note**: `reallocate`, if called, will be called only once.
 
-`sources` is an array of `fio_string_write_s` structs, ending with a struct that's all set to 0. This array is usually populated using the following macros:
+`srcs` is an array of `fio_string_write_s` structs, ending with a struct that's all set to 0. This array is usually populated using the following macros:
 
 ```c
 /** Used to write raw string data to the string. */
 #define FIO_STRING_WRITE_STR1(str_)                                            \
   ((fio_string_write_s){.klass = 1,                                            \
-                        .info.str = {.len = strlen((str_)), .buf = (str_)}})
+                        .info.str = {.len = FIO_STRLEN((str_)), .buf = (str_)}})
 /** Used to write raw (possibly binary) string data to the string. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
   ((fio_string_write_s){.klass = 1, .info.str = {.len = (len_), .buf = (str_)}})
+/** Used to write a fio_str_info_s or fio_buf_info_s to the string. */
+#define FIO_STRING_WRITE_STR_INFO(str_)                                        \
+  ((fio_string_write_s){.klass = 1,                                            \
+                        .info.str = {.len = (str_).len, .buf = (str_).buf}})
 /** Used to write a signed number to the string. */
 #define FIO_STRING_WRITE_NUM(num)                                              \
   ((fio_string_write_s){.klass = 2, .info.i = (int64_t)(num)})
@@ -6093,7 +9223,10 @@ For this function, the facil.io C STL reserves and defines the following type:
 typedef struct {
   size_t klass;
   union {
-    fio_str_info_s str;
+    struct {
+      size_t len;
+      const char *buf;
+    } str;
     double f;
     int64_t i;
     uint64_t u;
@@ -6106,10 +9239,9 @@ typedef struct {
 #### `fio_string_write_i`
 
 ```c
-static inline int fio_string_write_i(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 int64_t i);
+int fio_string_write_i(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       int64_t i);
 ```
 
 Writes a signed number `i` to the String.
@@ -6119,10 +9251,9 @@ Writes a signed number `i` to the String.
 #### `fio_string_write_u`
 
 ```c
-static inline int fio_string_write_u(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 uint64_t u);
+int fio_string_write_u(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       uint64_t u);
 ```
 
 Writes an unsigned number `u` to the String.
@@ -6132,10 +9263,9 @@ Writes an unsigned number `u` to the String.
 #### `fio_string_write_hex`
 
 ```c
-static inline int fio_string_write_hex(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
+int fio_string_write_hex(fio_str_info_s *dest,
+                         fio_string_realloc_fn reallocate,
+                         uint64_t i);
 ```
 
 Writes a hex representation of `i` to the String.
@@ -6145,10 +9275,9 @@ Writes a hex representation of `i` to the String.
 #### `fio_string_write_bin`
 
 ```c
-static inline int fio_string_write_bin(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
+int fio_string_write_bin(fio_str_info_s *dest,
+                         fio_string_realloc_fn reallocate,
+                         uint64_t i);
 ```
 
 Writes a binary representation of `i` to the String.
@@ -6160,11 +9289,10 @@ Writes a binary representation of `i` to the String.
 #### `fio_string_printf`
 
 ```c
-static int fio_string_printf(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                const char *format,
-                                ...);
+int fio_string_printf(fio_str_info_s *dest,
+                      fio_string_realloc_fn reallocate,
+                      const char *format,
+                      ...);
 ```
 
 Similar to fio_string_write, only using printf semantics.
@@ -6172,11 +9300,10 @@ Similar to fio_string_write, only using printf semantics.
 #### `fio_string_vprintf`
 
 ```c
-inline int fio_string_vprintf(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 const char *format,
-                                 va_list argv);
+int fio_string_vprintf(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       const char *format,
+                       va_list argv);
 ```
 
 Similar to fio_string_write, only using vprintf semantics.
@@ -6193,23 +9320,41 @@ Calculates a 16 bytes boundary aligned capacity for `new_len`.
 
 The Core String API always allocates 16 byte aligned memory blocks, since most memory allocators will only allocate memory in multiples of 16 or more. By requesting the full 16 byte allocation, future allocations could be avoided without increasing memory usage.
 
+#### `FIO_STRING_SYS_REALLOC`
+
+```c
+#define FIO_STRING_SYS_REALLOC fio_string_sys_reallocate
+int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len);
+```
+
+Default reallocation callback implementation using libc `realloc`.
+
 #### `FIO_STRING_REALLOC`
 
 ```c
 #define FIO_STRING_REALLOC fio_string_default_reallocate
-void fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
+int fio_string_default_reallocate(fio_str_info_s *dest, size_t len);
 ```
 
-Default reallocation callback implementation
+Default reallocation callback implementation using the default allocator.
 
 #### `FIO_STRING_ALLOC_COPY`
 
 ```c
 #define FIO_STRING_ALLOC_COPY fio_string_default_allocate_copy
-void fio_string_default_allocate_copy(fio_str_info_s *dest, size_t new_capa);
+int fio_string_default_allocate_copy(fio_str_info_s *dest, size_t new_capa);
 ```
 
 Default reallocation callback for memory that mustn't be freed.
+
+#### `FIO_STRING_ALLOC_KEY`
+
+```c
+#define FIO_STRING_ALLOC_KEY fio_string_default_key_alloc
+void *fio_string_default_key_alloc(size_t len);
+```
+
+Default allocator for the `fio_keystr_s` string data.
 
 #### `FIO_STRING_FREE`
 
@@ -6229,11 +9374,20 @@ void fio_string_default_free2(fio_str_info_s str);
 
 Frees memory that was allocated with the default callbacks.
 
+#### `FIO_STRING_FREE_KEY`
+
+```c
+#define FIO_STRING_FREE_KEY fio_string_default_free_key
+void fio_string_default_free_key(void *buf, size_t capa);
+```
+
+Frees memory that was allocated for a key string with the default callback.
+
 #### `FIO_STRING_FREE_NOOP`
 
 ```c
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
-void fio_string_default_free_noop(void * str);
+void fio_string_default_free_noop(void *str);
 ```
 
 Does nothing. Made available for APIs that require a callback for memory management.
@@ -6283,10 +9437,10 @@ Compares two `fio_buf_info_s`, returning 1 if the data in buffer `a` is greater 
 #### `fio_string_utf8_valid`
 
 ```c
-size_t fio_string_utf8_valid(fio_str_info_s str);
+bool fio_string_utf8_valid(fio_str_info_s str);
 ```
 
-Returns 1 if the String is UTF-8 valid and 0 if not.
+Returns `true` (1) if the String is UTF-8 valid and `false` (0) if not.
 
 #### `fio_string_utf8_len`
 
@@ -6295,6 +9449,19 @@ size_t fio_string_utf8_len(fio_str_info_s str);
 ```
 
 Returns the String's length in UTF-8 characters or 0 on either an error or an empty string.
+
+#### `fio_string_utf8_valid_code_point`
+
+```c
+size_t fio_string_utf8_valid_code_point(const void *u8c, size_t buf_len);
+```
+
+Returns 0 if non-UTF-8 or returns 1-4 (the number of bytes in the UTF-8 character) if a valid UTF-8 character.
+
+**Parameters:**
+
+- `u8c` - pointer to the start of a potential UTF-8 character.
+- `buf_len` - the remaining buffer length (to avoid reading past the buffer).
 
 #### `fio_string_utf8_select`
 
@@ -6319,8 +9486,8 @@ Returns -1 on error and 0 on success.
 ```c
 int fio_string_write_escape(fio_str_info_s *restrict dest,
                             fio_string_realloc_fn reallocate,
-                            const void *src,
-                            size_t len);
+                            const void *raw,
+                            size_t raw_len);
 ```
 
 Writes data at the end of the String, escaping the data using JSON semantics.
@@ -6333,33 +9500,65 @@ String while making it easy to read and copy the string during debugging.
 ```c
 int fio_string_write_unescape(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
-                              const void *src,
-                              size_t len);
+                              const void *escaped,
+                              size_t escaped_len);
 ```
 
 Writes an escaped data into the string after un-escaping the data.
+
+### Core String Base32 support
+
+#### `fio_string_write_base32enc`
+
+```c
+int fio_string_write_base32enc(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *raw,
+                               size_t raw_len);
+```
+
+Writes data to String using Base32 encoding.
+
+#### `fio_string_write_base32dec`
+
+```c
+int fio_string_write_base32dec(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *encoded,
+                               size_t encoded_len);
+```
+
+Writes decoded Base32 data to String.
 
 ### Core String Base64 support
 
 #### `fio_string_write_base64enc`
 
 ```c
-SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
-                                     fio_string_realloc_fn reallocate,
-                                     const void *data,
-                                     size_t data_len,
-                                     uint8_t url_encoded);
+int fio_string_write_base64enc(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *raw,
+                               size_t raw_len,
+                               uint8_t url_encoded);
 ```
 
 Writes data to String using Base64 encoding.
 
+**Parameters:**
+
+- `dest` - destination string info.
+- `reallocate` - reallocation callback.
+- `raw` - raw data to encode.
+- `raw_len` - length of raw data.
+- `url_encoded` - if non-zero, uses URL-safe Base64 encoding (`-` and `_` instead of `+` and `/`).
+
 #### `fio_string_write_base64dec`
 
 ```c
-SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
-                                     fio_string_realloc_fn reallocate,
-                                     const void *encoded,
-                                     size_t encoded_len);
+int fio_string_write_base64dec(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *encoded,
+                               size_t encoded_len);
 ```
 
 Writes decoded base64 data to String.
@@ -6369,10 +9568,10 @@ Writes decoded base64 data to String.
 #### `fio_string_write_url_enc`
 
 ```c
-int fio_string_write_url_enc(fio_str_info_s *restrict dest,
+int fio_string_write_url_enc(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              const void *raw,
-                             size_t len);
+                             size_t raw_len);
 ```
 
 Writes data to String using URL encoding (a.k.a., percent encoding). Always encodes spaces as `%20` rather than `+`.
@@ -6383,7 +9582,7 @@ Writes data to String using URL encoding (a.k.a., percent encoding). Always enco
 int fio_string_write_url_dec(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              const void *encoded,
-                             size_t len);
+                             size_t encoded_len);
 ```
 
 Writes decoded URL data to String. Decodes "percent encoding" as well as spaces encoded using `+`.
@@ -6393,10 +9592,10 @@ Writes decoded URL data to String. Decodes "percent encoding" as well as spaces 
 #### `fio_string_write_path_dec`
 
 ```c
-int fio_string_write_url_dec(fio_str_info_s *dest,
-                             fio_string_realloc_fn reallocate,
-                             const void *encoded,
-                             size_t len);
+int fio_string_write_path_dec(fio_str_info_s *dest,
+                              fio_string_realloc_fn reallocate,
+                              const void *encoded,
+                              size_t encoded_len);
 ```
 
 Writes decoded URL data to String. Decodes "percent encoding" without converting `+` to spaces.
@@ -6408,10 +9607,10 @@ Writes decoded URL data to String. Decodes "percent encoding" without converting
 #### `fio_string_write_html_escape`
 
 ```c
-int fio_string_write_html_escape(fio_str_info_s *restrict dest,
+int fio_string_write_html_escape(fio_str_info_s *dest,
                                  fio_string_realloc_fn reallocate,
                                  const void *raw,
-                                 size_t len);
+                                 size_t raw_len);
 ```
 
 Writes HTML escaped data to a String.
@@ -6422,7 +9621,7 @@ Writes HTML escaped data to a String.
 int fio_string_write_html_unescape(fio_str_info_s *dest,
                                    fio_string_realloc_fn reallocate,
                                    const void *escaped,
-                                   size_t len);
+                                   size_t escaped_len);
 ```
 
 Writes HTML (mostly) un-escaped data to a String.
@@ -6442,7 +9641,7 @@ int fio_string_readfd(fio_str_info_s *dest,
                       fio_string_realloc_fn reallocate,
                       int fd,
                       intptr_t start_at,
-                      intptr_t limit);
+                      size_t limit);
 ```
 
 Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
@@ -6460,7 +9659,7 @@ int fio_string_readfile(fio_str_info_s *dest,
                         fio_string_realloc_fn reallocate,
                         const char *filename,
                         intptr_t start_at,
-                        intptr_t limit);
+                        size_t limit);
 ```
 
 Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
@@ -6472,11 +9671,11 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 ```c
 int fio_string_getdelim_fd(fio_str_info_s *dest,
-                          fio_string_realloc_fn reallocate,
-                          int fd,
-                          intptr_t start_at,
-                          char delim,
-                          size_t limit);
+                           fio_string_realloc_fn reallocate,
+                           int fd,
+                           intptr_t start_at,
+                           char delim,
+                           size_t limit);
 ```
 
 Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and ending either at the first occurrence of `delim` or at EOF.
@@ -6491,11 +9690,11 @@ If `start_at` is negative, position will be calculated from the end of the file 
 
 ```c
 int fio_string_getdelim_file(fio_str_info_s *dest,
-                            fio_string_realloc_fn reallocate,
-                            const char *filename,
-                            intptr_t start_at,
-                            char delim,
-                            size_t limit);
+                             fio_string_realloc_fn reallocate,
+                             const char *filename,
+                             intptr_t start_at,
+                             char delim,
+                             size_t limit);
 ```
 
 Opens the file `filename`, calls `fio_string_getdelim_fd` and closes the file.
@@ -6549,6 +9748,9 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 * `fio_bstr_write_base64enc` - see [`fio_string_write_base64enc`](#fio_string_write_base64enc) for details.
 * `fio_bstr_write_base64dec` - see [`fio_string_write_base64dec`](#fio_string_write_base64dec) for details.
 
+* `fio_bstr_write_url_enc` - see [`fio_string_write_url_enc`](#fio_string_write_url_enc) for details.
+* `fio_bstr_write_url_dec` - see [`fio_string_write_url_dec`](#fio_string_write_url_dec) for details.
+
 * `fio_bstr_write_html_escape` - see [`fio_string_write_html_escape`](#fio_string_write_html_escape) for details.
 * `fio_bstr_write_html_unescape` - see [`fio_string_write_html_unescape`](#fio_string_write_html_unescape) for details.
 
@@ -6594,10 +9796,20 @@ void fio_bstr_free(char *bstr);
 
 Frees a binary string allocated by a `fio_bstr` function (or decreases its reference count).
 
+#### `fio_bstr_reserve`
+
+```c
+char *fio_bstr_reserve(char *bstr, size_t len);
+```
+
+Reserves `len` bytes for future `write` operations (used to minimize realloc).
+
+Returns the (possibly updated) `fio_bstr` pointer.
+
 #### `fio_bstr_info`
 
 ```c
-fio_str_info_s fio_bstr_info(char *bstr);
+fio_str_info_s fio_bstr_info(const char *bstr);
 ```
 
 Returns information about the `fio_bstr` using the `fio_str_info_s` struct.
@@ -6605,7 +9817,7 @@ Returns information about the `fio_bstr` using the `fio_str_info_s` struct.
 #### `fio_bstr_buf`
 
 ```c
-fio_buf_info_s fio_bstr_buf(char *bstr);
+fio_buf_info_s fio_bstr_buf(const char *bstr);
 ```
 
 Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
@@ -6613,7 +9825,7 @@ Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
 #### `fio_bstr_len`
 
 ```c
-size_t fio_bstr_len(char *bstr);
+size_t fio_bstr_len(const char *bstr);
 ```
 
 Gets the length of the `fio_bstr`.
@@ -6629,6 +9841,26 @@ Sets the length of the `fio_bstr`.
 **Note**: `len` **must** be less then the capacity of the `bstr`, or the function call will quietly fail.
 
 Returns `bstr`.
+
+#### `fio_bstr_is_eq2info`
+
+```c
+int fio_bstr_is_eq2info(const char *a, fio_str_info_s b);
+```
+
+Compares a `fio_bstr` to a `fio_str_info_s` for equality.
+
+Returns 1 if equal, 0 if not.
+
+#### `fio_bstr_is_eq2buf`
+
+```c
+int fio_bstr_is_eq2buf(const char *a, fio_buf_info_s b);
+```
+
+Compares a `fio_bstr` to a `fio_buf_info_s` for equality.
+
+Returns 1 if equal, 0 if not.
 
 #### `fio_bstr_reallocate` - for internal use
 
@@ -6666,9 +9898,21 @@ a semi-opaque type used for the `fio_keystr` functions
 fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
 ```
 
-Returns the Key String.
+Returns the Key String as a `fio_buf_info_s`.
 
-#### `fio_keystr`
+**Note**: Key Strings are NOT NUL TERMINATED!
+
+#### `fio_keystr_info`
+
+```c
+fio_str_info_s fio_keystr_info(fio_keystr_s *str);
+```
+
+Returns the Key String as a `fio_str_info_s`.
+
+**Note**: Key Strings are NOT NUL TERMINATED!
+
+#### `fio_keystr_tmp`
 
 ```c
 fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len);
@@ -6700,11 +9944,33 @@ Destroys a copy of `fio_keystr_s` - used internally by the hash map.
 
 ```c
 int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
-int fio_keystr_is_eq2(fio_keystr_s a, fio_str_info_s b);
-int fio_keystr_is_eq3(fio_keystr_s a, fio_buf_info_s b);
 ```
 
 Compares two Key Strings - used internally by the hash map.
+
+#### `fio_keystr_is_eq2`
+
+```c
+int fio_keystr_is_eq2(fio_keystr_s a, fio_str_info_s b);
+```
+
+Compares a Key String to a `fio_str_info_s` - used internally by the hash map.
+
+#### `fio_keystr_is_eq3`
+
+```c
+int fio_keystr_is_eq3(fio_keystr_s a, fio_buf_info_s b);
+```
+
+Compares a Key String to a `fio_buf_info_s` - used internally by the hash map.
+
+#### `fio_keystr_hash`
+
+```c
+uint64_t fio_keystr_hash(fio_keystr_s a);
+```
+
+Returns a good-enough `fio_keystr_s` risky hash.
 
 #### `FIO_KEYSTR_CONST`
 
@@ -6743,6 +10009,537 @@ void map_keystr_example(void) {
 }
 ```
 -------------------------------------------------------------------------------
+## Mustache Template Engine
+
+```c
+#define FIO_MUSTACHE
+#include "fio-stl.h"
+```
+
+The facil.io library includes a Mustache-ish template engine that can be used to render dynamic content from templates.
+
+Mustache is a logic-less template syntax that can be used for HTML, config files, source code, or any text-based format. The templates consist of tags surrounded by mustache-style delimiters (double curly braces `{{` and `}}`).
+
+This implementation supports most standard Mustache features including variables, sections, inverted sections, partials, comments, and delimiter changes. It also includes support for YAML front matter in template files.
+
+**Note**: this module depends on `FIO_STR` and related modules which will be automatically included.
+
+### Configuration Macros
+
+#### `FIO_MUSTACHE_MAX_DEPTH`
+
+```c
+#ifndef FIO_MUSTACHE_MAX_DEPTH
+#define FIO_MUSTACHE_MAX_DEPTH 128
+#endif
+```
+
+The maximum depth of a template's context (nesting level for sections and partials).
+
+This prevents stack overflow from deeply nested templates or recursive partial includes.
+
+#### `FIO_MUSTACHE_PRESERVE_PADDING`
+
+```c
+#ifndef FIO_MUSTACHE_PRESERVE_PADDING
+#define FIO_MUSTACHE_PRESERVE_PADDING 0
+#endif
+```
+
+When enabled (set to `1`), preserves padding (leading whitespace) for stand-alone variables and partial templates.
+
+This is useful for generating properly indented output, especially when including partial templates that should maintain the indentation level of their inclusion point.
+
+#### `FIO_MUSTACHE_LAMBDA_SUPPORT`
+
+```c
+#ifndef FIO_MUSTACHE_LAMBDA_SUPPORT
+#define FIO_MUSTACHE_LAMBDA_SUPPORT 0
+#endif
+```
+
+When enabled (set to `1`), supports raw text for lambda-style template processing.
+
+Lambda support allows sections to receive the raw, unprocessed template text, enabling dynamic template manipulation at runtime.
+
+#### `FIO_MUSTACHE_ISOLATE_PARTIALS`
+
+```c
+#ifndef FIO_MUSTACHE_ISOLATE_PARTIALS
+#define FIO_MUSTACHE_ISOLATE_PARTIALS 1
+#endif
+```
+
+When enabled (set to `1`, the default), limits the scope of partial templates to the context of their section.
+
+This prevents partials from accessing variables outside their immediate context, providing better encapsulation.
+
+-------------------------------------------------------------------------------
+
+### Mustache Syntax
+
+The following Mustache syntax elements are supported:
+
+| Syntax | Description |
+|--------|-------------|
+| `{{variable}}` | HTML-escaped variable output |
+| `{{{variable}}}` | Raw (unescaped) variable output |
+| `{{&variable}}` | Raw (unescaped) variable output (alternative syntax) |
+| `{{#section}}...{{/section}}` | Section block (renders if truthy or iterates over arrays) |
+| `{{^section}}...{{/section}}` | Inverted section (renders if falsy or empty) |
+| `{{>partial}}` | Include a partial template |
+| `{{!comment}}` | Comment (ignored in output) |
+| `{{=<% %>=}}` | Change delimiters (example changes to `<%` and `%>`) |
+
+#### Variable Tags
+
+Variables are the most basic tag type. A `{{name}}` tag renders the value of the `name` key in the current context, with HTML escaping applied.
+
+To render unescaped HTML, use triple mustaches `{{{name}}}` or the ampersand syntax `{{&name}}`.
+
+Dot notation is supported for accessing nested values: `{{person.name}}` will look for a `name` key within the `person` object.
+
+The special variable `{{.}}` refers to the current context itself, useful when iterating over arrays of simple values.
+
+#### Section Tags
+
+Sections render blocks of text zero or more times, depending on the value of the key:
+
+- **Falsy values** (false, null, empty arrays): The section is not rendered.
+- **Truthy non-array values**: The section is rendered once with the value as the new context.
+- **Arrays**: The section is rendered once for each item, with the item as the context.
+
+```mustache
+{{#items}}
+  <li>{{name}}</li>
+{{/items}}
+```
+
+#### Inverted Sections
+
+Inverted sections render only when the value is falsy or an empty array:
+
+```mustache
+{{^items}}
+  <p>No items found.</p>
+{{/items}}
+```
+
+#### Partials
+
+Partials allow you to include other template files:
+
+```mustache
+{{>header}}
+<main>Content here</main>
+{{>footer}}
+```
+
+**Note**: Partial templates are loaded relative to the including template's directory. The engine will search for files with `.mustache`, `.html`, or no extension.
+
+#### Comments
+
+Comments are ignored and produce no output:
+
+```mustache
+{{! This is a comment }}
+```
+
+#### Delimiter Changes
+
+You can change the tag delimiters if the default `{{` and `}}` conflict with your content:
+
+```mustache
+{{=<% %>=}}
+<%variable%>
+<%={{ }}=%>
+```
+
+-------------------------------------------------------------------------------
+
+### Types
+
+#### `fio_mustache_s`
+
+```c
+typedef struct fio_mustache_s fio_mustache_s;
+```
+
+An opaque type representing a parsed Mustache template.
+
+Templates are reference counted and can be safely shared between threads (for reading). Use `fio_mustache_dup` to increase the reference count and `fio_mustache_free` to decrease it.
+
+#### `fio_mustache_load_args_s`
+
+```c
+typedef struct {
+  /** The file's content (if pre-loaded) */
+  fio_buf_info_s data;
+  /** The file's name (even if preloaded, used for partials load paths) */
+  fio_buf_info_s filename;
+  /** Loads the file's content, returning a `fio_buf_info_s` structure. */
+  fio_buf_info_s (*load_file_data)(fio_buf_info_s filename, void *udata);
+  /** Frees the file's content from its `fio_buf_info_s` structure. */
+  void (*free_file_data)(fio_buf_info_s file_data, void *udata);
+  /** Called when YAML front matter data was found. */
+  void (*on_yaml_front_matter)(fio_buf_info_s yaml_front_matter, void *udata);
+  /** Opaque user data. */
+  void *udata;
+} fio_mustache_load_args_s;
+```
+
+Arguments structure for loading and parsing a Mustache template.
+
+**Members:**
+
+- `data` - The template content as a buffer. If provided, the template is parsed from this data instead of loading from a file.
+- `filename` - The template file path. Used for loading the template (if `data` is not provided) and for resolving relative paths when loading partial templates.
+- `load_file_data` - Custom callback for loading file content. If not provided, a default implementation using `fio_bstr_readfile` is used.
+- `free_file_data` - Custom callback for freeing loaded file content. Must be provided if `load_file_data` is provided.
+- `on_yaml_front_matter` - Callback invoked when YAML front matter is detected at the beginning of a template. The front matter content (including delimiters) is passed to this callback.
+- `udata` - Opaque user data passed to all callbacks.
+
+#### `fio_mustache_bargs_s`
+
+```c
+typedef struct fio_mustache_bargs_s {
+  /* callback should write `txt` to output and return updated `udata.` */
+  void *(*write_text)(void *udata, fio_buf_info_s txt);
+  /* same as `write_text`, but should also HTML escape (sanitize) data. */
+  void *(*write_text_escaped)(void *udata, fio_buf_info_s raw);
+  /* callback should return a new context pointer with the value of `name`. */
+  void *(*get_var)(void *ctx, fio_buf_info_s name);
+  /* if context is an Array, should return its length. */
+  size_t (*array_length)(void *ctx);
+  /* if context is an Array, should return a context pointer @ index. */
+  void *(*get_var_index)(void *ctx, size_t index);
+  /* should return the String value of context `var` as a `fio_buf_info_s`. */
+  fio_buf_info_s (*var2str)(void *var);
+  /* should return non-zero if the context pointer refers to a valid value. */
+  int (*var_is_truthful)(void *ctx);
+  /* callback signals that the `ctx` context pointer is no longer in use. */
+  void (*release_var)(void *ctx);
+  /* returns non-zero if `ctx` is a lambda and handles section manually. */
+  int (*is_lambda)(void **udata, void *ctx, fio_buf_info_s raw_template_section);
+  /* the root context for finding named values. */
+  void *ctx;
+  /* opaque user data (settable as well as readable), the final return value. */
+  void *udata;
+} fio_mustache_bargs_s;
+```
+
+Arguments structure for building (rendering) a Mustache template.
+
+**Members:**
+
+- `write_text` - Callback to write raw text to the output. Should return the updated `udata` value.
+- `write_text_escaped` - Callback to write HTML-escaped text to the output. Used for `{{variable}}` tags. Should return the updated `udata` value.
+- `get_var` - Callback to retrieve a variable from the context by name. Returns a new context pointer representing the value, or `NULL` if not found.
+- `array_length` - Callback to get the length of an array context. Returns `0` for non-array contexts.
+- `get_var_index` - Callback to get an element from an array context by index.
+- `var2str` - Callback to convert a context/variable to its string representation.
+- `var_is_truthful` - Callback to determine if a context represents a truthy value. Returns non-zero for truthy values.
+- `release_var` - Callback to release a context pointer when it's no longer needed. Used for memory management.
+- `is_lambda` - Callback for lambda support. If the context is a lambda, this callback should handle the section rendering and return non-zero. Only called if `FIO_MUSTACHE_LAMBDA_SUPPORT` is enabled.
+- `ctx` - The root context object containing the data for template rendering.
+- `udata` - Opaque user data. This value is passed to callbacks and returned as the final result of `fio_mustache_build`.
+
+**Note**: If `write_text` and `write_text_escaped` are both `NULL`, default implementations are used that build a `fio_bstr` string, which is returned via `udata`.
+
+-------------------------------------------------------------------------------
+
+### Loading and Parsing API
+
+#### `fio_mustache_load`
+
+```c
+fio_mustache_s *fio_mustache_load(fio_mustache_load_args_s args);
+/* Named arguments using macro. */
+#define fio_mustache_load(...) fio_mustache_load((fio_mustache_load_args_s){__VA_ARGS__})
+```
+
+Loads and parses a Mustache template, returning a template object.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_mustache_s *template = fio_mustache_load(.filename = FIO_BUF_INFO1("template.mustache"));
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `data` | `fio_buf_info_s` | Template content (if pre-loaded) |
+| `filename` | `fio_buf_info_s` | Template file path |
+| `load_file_data` | `fio_buf_info_s (*)(fio_buf_info_s, void *)` | Custom file loader callback |
+| `free_file_data` | `void (*)(fio_buf_info_s, void *)` | Custom file data cleanup callback |
+| `on_yaml_front_matter` | `void (*)(fio_buf_info_s, void *)` | YAML front matter callback |
+| `udata` | `void *` | User data passed to callbacks |
+
+**Returns:** a pointer to the parsed template object, or `NULL` on error.
+
+**Note**: Either `data` or `filename` must be provided. If both are provided, `data` is used as the template content and `filename` is used only for resolving partial template paths.
+
+#### `fio_mustache_free`
+
+```c
+void fio_mustache_free(fio_mustache_s *m);
+```
+
+Frees the Mustache template object (or reduces its reference count).
+
+If the reference count reaches zero, the template and all its resources are freed.
+
+#### `fio_mustache_dup`
+
+```c
+fio_mustache_s *fio_mustache_dup(fio_mustache_s *m);
+```
+
+Increases the Mustache template's reference count and returns the same pointer.
+
+Use this when you need to share a template between multiple owners.
+
+-------------------------------------------------------------------------------
+
+### Building / Rendering API
+
+#### `fio_mustache_build`
+
+```c
+void *fio_mustache_build(fio_mustache_s *m, fio_mustache_bargs_s args);
+/* Named arguments using macro. */
+#define fio_mustache_build(m, ...) fio_mustache_build((m), ((fio_mustache_bargs_s){__VA_ARGS__}))
+```
+
+Builds (renders) the template with the provided context, returning the final value of `udata`.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+char *result = fio_mustache_build(template,
+                                  .ctx = my_data_context,
+                                  .udata = NULL);
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `write_text` | `void *(*)(void *, fio_buf_info_s)` | Raw text output callback |
+| `write_text_escaped` | `void *(*)(void *, fio_buf_info_s)` | HTML-escaped output callback |
+| `get_var` | `void *(*)(void *, fio_buf_info_s)` | Variable lookup callback |
+| `array_length` | `size_t (*)(void *)` | Array length callback |
+| `get_var_index` | `void *(*)(void *, size_t)` | Array element access callback |
+| `var2str` | `fio_buf_info_s (*)(void *)` | Variable to string conversion callback |
+| `var_is_truthful` | `int (*)(void *)` | Truthiness check callback |
+| `release_var` | `void (*)(void *)` | Variable release callback |
+| `is_lambda` | `int (*)(void **, void *, fio_buf_info_s)` | Lambda support callback |
+| `ctx` | `void *` | Root data context |
+| `udata` | `void *` | User data (becomes return value) |
+
+**Returns:** the final value of `udata` (or `NULL` if the template is `NULL`).
+
+**Note**: If no writer callbacks are provided, the function uses default implementations that build a `fio_bstr` string. In this case, the returned `udata` is the resulting string which must be freed with `fio_bstr_free`.
+
+-------------------------------------------------------------------------------
+
+### YAML Front Matter
+
+The Mustache engine supports YAML front matter at the beginning of template files. Front matter is delimited by `---` on its own line:
+
+```yaml
+---
+title: My Page
+author: John Doe
+---
+<html>
+<head><title>{{title}}</title></head>
+...
+```
+
+When front matter is detected, the `on_yaml_front_matter` callback is invoked with the complete front matter content (including the `---` delimiters). This allows you to parse metadata from templates for use in your application.
+
+**Note**: The front matter is stripped from the template content before parsing. The Mustache engine does not parse the YAML itself - you must provide your own YAML parser in the callback if needed.
+
+-------------------------------------------------------------------------------
+
+### Partial Template Loading
+
+When loading partial templates (via `{{>partial}}`), the engine searches for files in the following order:
+
+1. Relative to the including template's directory
+2. Relative to parent template directories (recursively)
+3. In the current working directory
+
+For each location, the engine tries the following file extensions:
+
+1. `.mustache`
+2. `.html`
+3. No extension (exact filename)
+
+**Example**: If `templates/page.mustache` includes `{{>header}}`, the engine will search for:
+- `templates/header.mustache`
+- `templates/header.html`
+- `templates/header`
+- `header.mustache`
+- `header.html`
+- `header`
+
+-------------------------------------------------------------------------------
+
+### Example - Basic Usage with FIOBJ
+
+The following example demonstrates using the Mustache engine with the FIOBJ type system:
+
+```c
+#define FIO_FIOBJ
+#define FIO_MUSTACHE
+#include "fio-stl.h"
+
+/* FIOBJ integration callbacks */
+static void *fiobj_mustache_get_var(void *ctx, fio_buf_info_s name) {
+  if (!ctx || !FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_HASH))
+    return NULL;
+  FIOBJ key = fiobj_str_new_cstr(name.buf, name.len);
+  FIOBJ val = fiobj_hash_get((FIOBJ)ctx, key);
+  fiobj_free(key);
+  return (void *)fiobj_dup(val);
+}
+
+static size_t fiobj_mustache_array_length(void *ctx) {
+  if (!ctx || !FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return 0;
+  return fiobj_array_count((FIOBJ)ctx);
+}
+
+static void *fiobj_mustache_get_var_index(void *ctx, size_t index) {
+  if (!ctx || !FIOBJ_TYPE_IS((FIOBJ)ctx, FIOBJ_T_ARRAY))
+    return NULL;
+  return (void *)fiobj_dup(fiobj_array_get((FIOBJ)ctx, index));
+}
+
+static fio_buf_info_s fiobj_mustache_var2str(void *var) {
+  return FIO_STR2BUF_INFO(fiobj2cstr((FIOBJ)var));
+}
+
+static int fiobj_mustache_var_is_truthful(void *ctx) {
+  if (!ctx)
+    return 0;
+  FIOBJ o = (FIOBJ)ctx;
+  switch (FIOBJ_TYPE(o)) {
+  case FIOBJ_T_NULL:
+  case FIOBJ_T_FALSE:
+    return 0;
+  case FIOBJ_T_ARRAY:
+    return fiobj_array_count(o) > 0;
+  default:
+    return 1;
+  }
+}
+
+static void fiobj_mustache_release_var(void *ctx) {
+  fiobj_free((FIOBJ)ctx);
+}
+
+void example(void) {
+  /* Load template */
+  fio_mustache_s *m = fio_mustache_load(
+      .filename = FIO_BUF_INFO1("template.mustache"));
+  if (!m) {
+    fprintf(stderr, "Failed to load template\n");
+    return;
+  }
+
+  /* Create data context */
+  FIOBJ data = fiobj_hash_new();
+  fiobj_hash_set2(data, "name", 4, fiobj_str_new_cstr("World", 5));
+  
+  FIOBJ items = fiobj_array_new();
+  fiobj_array_push(items, fiobj_str_new_cstr("Apple", 5));
+  fiobj_array_push(items, fiobj_str_new_cstr("Banana", 6));
+  fiobj_array_push(items, fiobj_str_new_cstr("Cherry", 6));
+  fiobj_hash_set2(data, "items", 5, items);
+
+  /* Render template */
+  char *result = fio_mustache_build(m,
+      .ctx = (void *)data,
+      .get_var = fiobj_mustache_get_var,
+      .array_length = fiobj_mustache_array_length,
+      .get_var_index = fiobj_mustache_get_var_index,
+      .var2str = fiobj_mustache_var2str,
+      .var_is_truthful = fiobj_mustache_var_is_truthful,
+      .release_var = fiobj_mustache_release_var);
+
+  /* Output result */
+  printf("%s\n", result);
+
+  /* Cleanup */
+  fio_bstr_free(result);
+  fiobj_free(data);
+  fio_mustache_free(m);
+}
+```
+
+With a template file `template.mustache`:
+
+```mustache
+Hello, {{name}}!
+
+Items:
+{{#items}}
+  - {{.}}
+{{/items}}
+{{^items}}
+  No items available.
+{{/items}}
+```
+
+Output:
+
+```
+Hello, World!
+
+Items:
+  - Apple
+  - Banana
+  - Cherry
+```
+
+-------------------------------------------------------------------------------
+
+### Example - Simple String Rendering
+
+For simple use cases where you just want to render a template to a string without a complex data context:
+
+```c
+#define FIO_MUSTACHE
+#include "fio-stl.h"
+
+void simple_example(void) {
+  /* Load template from string */
+  fio_mustache_s *m = fio_mustache_load(
+      .data = FIO_BUF_INFO1("Hello, {{name}}!"));
+  
+  if (!m) {
+    fprintf(stderr, "Failed to parse template\n");
+    return;
+  }
+
+  /* Render with default (empty) context - variables won't be replaced */
+  char *result = fio_mustache_build(m, .udata = NULL);
+  
+  printf("%s\n", result);  /* Output: Hello, ! */
+  
+  fio_bstr_free(result);
+  fio_mustache_free(m);
+}
+```
+
+**Note**: Without providing context callbacks, variables will render as empty strings. For meaningful output, you need to provide at least `ctx`, `get_var`, `var2str`, and `var_is_truthful` callbacks.
+
+-------------------------------------------------------------------------------
 ## ChaCha20 & Poly1305
 
 ```c
@@ -6756,80 +10553,117 @@ Non-streaming ChaCha20 and Poly1305 implementations are provided for cases when 
 
 **Note:** this module depends on the `FIO_MATH` module which will be automatically included.
 
+### ChaCha20Poly1305 API
+
 #### `fio_chacha20_poly1305_enc`
 
 ```c
-void fio_chacha20_poly1305_enc(void *mac,
-                               void *data,
+void fio_chacha20_poly1305_enc(void *restrict mac,
+                               void *restrict data,
                                size_t len,
-                               void *ad, /* additional data */
+                               const void *ad, /* additional data */
                                size_t adlen,
-                               void *key,
-                               void *nonce);
+                               const void *key,
+                               const void *nonce);
 ```
 
 Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
 
+* `mac`    MUST point to a buffer with (at least) 16 available bytes.
+* `data`   MAY be omitted, WILL be encrypted.
+* `len`    length of `data` in bytes.
+* `ad`     MAY be omitted, will NOT be encrypted.
+* `adlen`  length of `ad` in bytes.
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
 * `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
-* `ad`     MAY be omitted, will NOT be encrypted.
-* `data`   MAY be omitted, WILL be encrypted.
-* `mac`    MUST point to a buffer with (at least) 16 available bytes.
 
 #### `fio_chacha20_poly1305_dec`
 
 ```c
-int fio_chacha20_poly1305_dec(void *mac,
-                              void *data,
+int fio_chacha20_poly1305_dec(void *restrict mac,
+                              void *restrict data,
                               size_t len,
-                              void *ad, /* additional data */
+                              const void *ad, /* additional data */
                               size_t adlen,
-                              void *key,
-                              void *nonce);
+                              const void *key,
+                              const void *nonce);
 ```
 
 Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
 
+* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
+* `data`   MAY be omitted, WILL be decrypted.
+* `len`    length of `data` in bytes.
+* `ad`     MAY be omitted ONLY IF originally omitted.
+* `adlen`  length of `ad` in bytes.
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
 * `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
-* `ad`     MAY be omitted ONLY IF originally omitted.
-* `data`   MAY be omitted, WILL be decrypted.
-* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
 
-Returns `-1` on error (authentication failed).
+**Returns:** `0` on success, `-1` on error (authentication failed).
+
+#### `fio_chacha20_poly1305_auth`
+
+```c
+void fio_chacha20_poly1305_auth(void *restrict mac,
+                                void *restrict data,
+                                size_t len,
+                                const void *ad, /* additional data */
+                                size_t adlen,
+                                const void *key,
+                                const void *nonce);
+```
+
+Computes the Poly1305 authentication tag for already-encrypted data without performing decryption.
+
+This function is useful when you need to verify or compute the MAC for ciphertext that was encrypted using ChaCha20Poly1305, without decrypting the data.
+
+* `mac`    MUST point to a buffer with (at least) 16 available bytes for the computed MAC.
+* `data`   the encrypted data (ciphertext).
+* `len`    length of `data` in bytes.
+* `ad`     additional authenticated data (MAY be omitted).
+* `adlen`  length of `ad` in bytes.
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+
+### Using ChaCha20 and Poly1305 Separately
 
 #### `fio_chacha20`
 
 ```c
-void fio_chacha20(void *data,
+void fio_chacha20(void *restrict data,
                   size_t len,
-                  void *key,
-                  void *nonce,
+                  const void *key,
+                  const void *nonce,
                   uint32_t counter);
 ```
 
 Performs an in-place encryption/decryption of `data` using ChaCha20.
 
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce` MUST point to a  96 bit long memory address (12 Bytes).
+* `data`    the data to encrypt/decrypt in-place.
+* `len`     length of `data` in bytes.
+* `key`     MUST point to a 256 bit long memory address (32 Bytes).
+* `nonce`   MUST point to a  96 bit long memory address (12 Bytes).
 * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
-
 
 #### `fio_poly1305_auth`
 
 ```c
-void fio_poly1305_auth(void *mac_dest,
-                       void *key256bits,
-                       void *message,
+void fio_poly1305_auth(void *restrict mac,
+                       const void *key,
+                       void *restrict msg,
                        size_t len,
-                       void *additional_data,
-                       size_t additional_data_len);
+                       const void *ad,
+                       size_t ad_len);
 ```
 
-Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac_dest`.
+Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac`.
 
-* `mac_dest`      MUST point to a 128 bit long memory address (16 Bytes).
-* `key256bits`    MUST point to a 256 bit long memory address (32 Bytes).
+* `mac`    MUST point to a 128 bit long memory address (16 Bytes).
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `msg`    the message to authenticate.
+* `len`    length of `msg` in bytes.
+* `ad`     additional data to authenticate (MAY be omitted).
+* `ad_len` length of `ad` in bytes.
 
 -------------------------------------------------------------------------------
 ## SHA1
@@ -6839,9 +10673,28 @@ Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code f
 #include FIO_INCLUDE_FILE
 ```
 
-By defining the `FIO_SHA1`, the SHA1 a (broken) Cryptographic Hash functions will be defined and made available.
+By defining the `FIO_SHA1`, the SHA1 (broken) Cryptographic Hash functions will be defined and made available.
 
 **Warning(!) / Broken**: Do **NOT** use SHA1 for security concerns, it's broken and hopefully future cryptographic libraries won't include it in their packages... however, for some reason, some protocols require SHA1 (i.e., WebSockets).
+
+### SHA1 Types
+
+#### `fio_sha1_s`
+
+```c
+typedef union {
+  uint32_t v[5];
+  uint8_t digest[20];
+} fio_sha1_s;
+```
+
+The data type containing the SHA1 digest (result).
+
+**Members:**
+- `v` - The 5 x 32-bit words of the SHA1 state
+- `digest` - The 20-byte digest as raw bytes
+
+### SHA1 Functions
 
 #### `fio_sha1`
 
@@ -6850,6 +10703,33 @@ fio_sha1_s fio_sha1(const void *data, uint64_t len);
 ```
 
 A simple, non streaming, implementation of the SHA1 hashing algorithm.
+
+**Parameters:**
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+
+**Returns:** a `fio_sha1_s` containing the SHA1 digest.
+
+#### `fio_sha1_hmac`
+
+```c
+fio_sha1_s fio_sha1_hmac(const void *key,
+                         uint64_t key_len,
+                         const void *msg,
+                         uint64_t msg_len);
+```
+
+Computes HMAC-SHA1, resulting in a 20 byte authentication code.
+
+**Parameters:**
+- `key` - pointer to the secret key
+- `key_len` - length of the key in bytes
+- `msg` - pointer to the message to authenticate
+- `msg_len` - length of the message in bytes
+
+**Returns:** a `fio_sha1_s` containing the 20-byte HMAC authentication code.
+
+**Note**: if `key_len` exceeds 64 bytes, the key is first hashed with SHA1.
 
 #### `fio_sha1_len`
 
@@ -6865,18 +10745,24 @@ Returns the digest length of SHA1 in bytes (which is always 20).
 uint8_t *fio_sha1_digest(fio_sha1_s *s);
 ```
 
-Returns the digest of a SHA1 object. The digest is always 20 bytes long.
+Returns a pointer to the digest of a SHA1 object. The digest is always 20 bytes long.
+
+**Parameters:**
+- `s` - pointer to a `fio_sha1_s` object
+
+**Returns:** pointer to the 20-byte digest.
 
 -------------------------------------------------------------------------------
-## SHA1
+## SHA2
 
 ```c
 #define FIO_SHA2
 #include FIO_INCLUDE_FILE
 ```
 
-By defining the `FIO_SHA2`, the SHA2 Cryptographic Hash functions will be defined and made available.
+By defining `FIO_SHA2`, the SHA-2 family of cryptographic hash functions (SHA-256 and SHA-512) will be defined and made available, along with their HMAC variants.
 
+### Types
 
 #### `fio_sha256_s`
 
@@ -6888,7 +10774,7 @@ typedef struct {
 } fio_sha256_s;
 ```
 
-Streaming SHA-256 type.
+Streaming SHA-256 type. Used with `fio_sha256_init`, `fio_sha256_consume`, and `fio_sha256_finalize` for incremental hashing.
 
 #### `fio_sha512_s`
 
@@ -6900,66 +10786,521 @@ typedef struct {
 } fio_sha512_s;
 ```
 
-Streaming SHA-512 type.
+Streaming SHA-512 type. Used with `fio_sha512_init`, `fio_sha512_consume`, and `fio_sha512_finalize` for incremental hashing.
 
-##### `fio_sha256`
+### SHA-256 Functions
+
+#### `fio_sha256`
+
 ```c
 fio_u256 fio_sha256(const void *data, uint64_t len);
 ```
 
-A simple, non streaming, implementation of the SHA-256 hashing algorithm.
+A simple, non-streaming implementation of the SHA-256 hashing algorithm.
 
-##### `fio_sha256_init`
+**Parameters:**
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+
+**Returns:** a `fio_u256` containing the 256-bit (32-byte) hash result.
+
+#### `fio_sha256_init`
+
 ```c
 fio_sha256_s fio_sha256_init(void);
 ```
 
-Initializes a fio_u256 so the hash can consume streaming data.
+Initializes a `fio_sha256_s` so the hash can consume streaming data.
 
-##### `fio_sha256_consume`
+**Returns:** an initialized `fio_sha256_s` structure.
+
+#### `fio_sha256_consume`
+
 ```c
 void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len);
 ```
 
-Feed data into the hash
+Feeds data into the hash.
 
-##### `fio_sha256_finalize`
+**Parameters:**
+- `h` - pointer to the streaming hash state
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+
+#### `fio_sha256_finalize`
+
 ```c
 fio_u256 fio_sha256_finalize(fio_sha256_s *h);
 ```
 
-Finalizes a fio_u256 with the SHA 256 hash.
+Finalizes the streaming hash and returns the SHA-256 result.
 
-##### `fio_sha512`
+**Parameters:**
+- `h` - pointer to the streaming hash state
+
+**Returns:** a `fio_u256` containing the 256-bit (32-byte) hash result.
+
+**Note**: after finalization, the hash state should not be reused without re-initialization.
+
+### SHA-512 Functions
+
+#### `fio_sha512`
+
 ```c
 fio_u512 fio_sha512(const void *data, uint64_t len);
 ```
 
-A simple, non streaming, implementation of the SHA-512 hashing algorithm.
+A simple, non-streaming implementation of the SHA-512 hashing algorithm.
 
-##### `fio_sha512_init`
+**Parameters:**
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+
+**Returns:** a `fio_u512` containing the 512-bit (64-byte) hash result.
+
+#### `fio_sha512_init`
+
 ```c
 fio_sha512_s fio_sha512_init(void);
 ```
 
-Initializes a fio_u512 so the hash can consume streaming data.
+Initializes a `fio_sha512_s` so the hash can consume streaming data.
 
-##### `fio_sha512_consume`
+**Returns:** an initialized `fio_sha512_s` structure.
+
+#### `fio_sha512_consume`
+
 ```c
 void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
 ```
 
-Feed data into the hash
+Feeds data into the hash.
 
-##### `fio_sha512_finalize`
+**Parameters:**
+- `h` - pointer to the streaming hash state
+- `data` - pointer to the data to hash
+- `len` - length of the data in bytes
+
+#### `fio_sha512_finalize`
+
 ```c
 fio_u512 fio_sha512_finalize(fio_sha512_s *h);
 ```
 
-Finalizes a fio_u512 with the SHA 512 hash.
+Finalizes the streaming hash and returns the SHA-512 result.
 
+**Parameters:**
+- `h` - pointer to the streaming hash state
+
+**Returns:** a `fio_u512` containing the 512-bit (64-byte) hash result.
+
+**Note**: after finalization, the hash state should not be reused without re-initialization.
+
+### HMAC Functions
+
+#### `fio_sha256_hmac`
+
+```c
+fio_u256 fio_sha256_hmac(const void *key,
+                         uint64_t key_len,
+                         const void *msg,
+                         uint64_t msg_len);
+```
+
+Computes HMAC-SHA256, resulting in a 32-byte authentication code.
+
+**Parameters:**
+- `key` - pointer to the secret key
+- `key_len` - length of the key in bytes
+- `msg` - pointer to the message to authenticate
+- `msg_len` - length of the message in bytes
+
+**Returns:** a `fio_u256` containing the 256-bit (32-byte) HMAC result.
+
+**Note**: keys longer than 64 bytes are hashed first (per HMAC specification).
+
+#### `fio_sha512_hmac`
+
+```c
+fio_u512 fio_sha512_hmac(const void *key,
+                         uint64_t key_len,
+                         const void *msg,
+                         uint64_t msg_len);
+```
+
+Computes HMAC-SHA512, resulting in a 64-byte authentication code.
+
+**Parameters:**
+- `key` - pointer to the secret key
+- `key_len` - length of the key in bytes
+- `msg` - pointer to the message to authenticate
+- `msg_len` - length of the message in bytes
+
+**Returns:** a `fio_u512` containing the 512-bit (64-byte) HMAC result.
+
+**Note**: keys longer than 128 bytes are hashed first (per HMAC specification).
 
 -------------------------------------------------------------------------------
+## AES-GCM
+
+```c
+#define FIO_AES
+#include "fio-stl/include.h"
+```
+
+AES-GCM provides authenticated encryption with associated data (AEAD). This is the most common cipher suite for TLS 1.3 and is widely used in secure communications.
+
+The implementation automatically uses hardware acceleration when available:
+- **x86/x64**: AES-NI and PCLMULQDQ instructions
+- **ARM**: Crypto Extensions (PMULL)
+- **Fallback**: Portable software implementation using T-tables
+
+**Note:** the API matches `fio_chacha20_poly1305` for easy function pointer substitution, allowing applications to switch between cipher suites without code changes.
+
+**Note:** this module depends on the `FIO_MATH` module which will be automatically included.
+
+### AES-128-GCM
+
+#### `fio_aes128_gcm_enc`
+
+```c
+void fio_aes128_gcm_enc(void *restrict mac,
+                        void *restrict data,
+                        size_t len,
+                        const void *ad,
+                        size_t adlen,
+                        const void *key,
+                        const void *nonce);
+```
+
+Performs an in-place encryption of `data` using AES-128-GCM with additional data, producing a 16 byte message authentication code (MAC).
+
+* `mac`    MUST point to a buffer with (at least) 16 available bytes.
+* `key`    MUST point to a 128 bit long memory address (16 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted, will NOT be encrypted.
+* `data`   MAY be omitted, WILL be encrypted.
+
+**Note:** the nonce MUST be unique for each message encrypted with the same key. Reusing a nonce with the same key completely breaks the security of GCM.
+
+#### `fio_aes128_gcm_dec`
+
+```c
+int fio_aes128_gcm_dec(void *restrict mac,
+                       void *restrict data,
+                       size_t len,
+                       const void *ad,
+                       size_t adlen,
+                       const void *key,
+                       const void *nonce);
+```
+
+Performs an in-place decryption of `data` using AES-128-GCM after authenticating the message authentication code (MAC).
+
+* `mac`    MUST point to a buffer with the 16 byte MAC to verify.
+* `key`    MUST point to a 128 bit long memory address (16 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted ONLY IF originally omitted.
+* `data`   MAY be omitted, WILL be decrypted.
+
+Returns `-1` on error (authentication failed). When authentication fails, the data buffer is NOT modified.
+
+### AES-256-GCM
+
+#### `fio_aes256_gcm_enc`
+
+```c
+void fio_aes256_gcm_enc(void *restrict mac,
+                        void *restrict data,
+                        size_t len,
+                        const void *ad,
+                        size_t adlen,
+                        const void *key,
+                        const void *nonce);
+```
+
+Performs an in-place encryption of `data` using AES-256-GCM with additional data, producing a 16 byte message authentication code (MAC).
+
+* `mac`    MUST point to a buffer with (at least) 16 available bytes.
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted, will NOT be encrypted.
+* `data`   MAY be omitted, WILL be encrypted.
+
+**Note:** the nonce MUST be unique for each message encrypted with the same key. Reusing a nonce with the same key completely breaks the security of GCM.
+
+#### `fio_aes256_gcm_dec`
+
+```c
+int fio_aes256_gcm_dec(void *restrict mac,
+                       void *restrict data,
+                       size_t len,
+                       const void *ad,
+                       size_t adlen,
+                       const void *key,
+                       const void *nonce);
+```
+
+Performs an in-place decryption of `data` using AES-256-GCM after authenticating the message authentication code (MAC).
+
+* `mac`    MUST point to a buffer with the 16 byte MAC to verify.
+* `key`    MUST point to a 256 bit long memory address (32 Bytes).
+* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+* `ad`     MAY be omitted ONLY IF originally omitted.
+* `data`   MAY be omitted, WILL be decrypted.
+
+Returns `-1` on error (authentication failed). When authentication fails, the data buffer is NOT modified.
+
+### Security Considerations
+
+**Nonce Uniqueness:** GCM mode requires that each (key, nonce) pair is used only once. Reusing a nonce with the same key allows an attacker to recover the authentication key and forge messages. For random nonces with a 96-bit nonce space, the probability of collision becomes significant after approximately 2^32 messages.
+
+**Key Sizes:** AES-256-GCM provides a higher security margin than AES-128-GCM. While both are considered secure, AES-256 is recommended for long-term security and compliance with stricter security requirements.
+
+**TLS 1.3 Compatibility:** Both AES-128-GCM and AES-256-GCM are mandatory cipher suites in TLS 1.3 (`TLS_AES_128_GCM_SHA256` and `TLS_AES_256_GCM_SHA384`).
+
+------------------------------------------------------------
+## ED25519 & X25519
+
+```c
+#define FIO_ED25519
+#include "fio-stl.h"
+```
+
+This module provides elliptic curve cryptography using Curve25519, offering both digital signatures (Ed25519) and key exchange (X25519) with 128-bit security level. These are the minimal building blocks for secure inter-machine communication.
+
+**Note:** this implementation has not been audited. Use at your own risk. A tested cryptographic library (e.g., OpenSSL) is preferred when available.
+
+**Note:** this module depends on the `FIO_SHA2` module which will be automatically included.
+
+### Ed25519 Digital Signatures
+
+Ed25519 provides fast, secure digital signatures.
+
+- Secret key: 32 bytes
+- Public key: 32 bytes
+- Signature: 64 bytes
+
+#### `fio_ed25519_keypair`
+
+```c
+void fio_ed25519_keypair(uint8_t secret_key[32], uint8_t public_key[32]);
+```
+
+Generates a new random Ed25519 key pair.
+
+The secret key must be kept secret and securely erased when no longer needed. The public key can be freely shared.
+
+#### `fio_ed25519_public_key`
+
+```c
+void fio_ed25519_public_key(uint8_t public_key[32],
+                            const uint8_t secret_key[32]);
+```
+
+Derives the public key from an Ed25519 secret key.
+
+Useful when the secret key is loaded from storage and the public key needs to be recomputed.
+
+#### `fio_ed25519_sign`
+
+```c
+void fio_ed25519_sign(uint8_t signature[64],
+                      const void *message,
+                      size_t len,
+                      const uint8_t secret_key[32],
+                      const uint8_t public_key[32]);
+```
+
+Signs a message using Ed25519.
+
+* `signature`   MUST point to a 64 byte buffer for the output signature.
+* `message`     the message to sign (may be NULL if `len` is 0).
+* `len`         the length of the message in bytes.
+* `secret_key`  MUST point to a 32 byte secret key.
+* `public_key`  MUST point to a 32 byte public key.
+
+The signature is deterministic (same message + key = same signature).
+
+#### `fio_ed25519_verify`
+
+```c
+int fio_ed25519_verify(const uint8_t signature[64],
+                       const void *message,
+                       size_t len,
+                       const uint8_t public_key[32]);
+```
+
+Verifies an Ed25519 signature.
+
+* `signature`   MUST point to a 64 byte signature.
+* `message`     the message that was signed.
+* `len`         the length of the message in bytes.
+* `public_key`  MUST point to a 32 byte public key.
+
+Returns `0` on success (valid signature), `-1` on failure (invalid signature).
+
+### X25519 Key Exchange (ECDH)
+
+X25519 provides Elliptic Curve Diffie-Hellman key exchange. Two parties can derive a shared secret using their secret key and the other party's public key.
+
+- Secret key: 32 bytes
+- Public key: 32 bytes
+- Shared secret: 32 bytes
+
+#### `fio_x25519_keypair`
+
+```c
+void fio_x25519_keypair(uint8_t secret_key[32], uint8_t public_key[32]);
+```
+
+Generates a new random X25519 key pair.
+
+The secret key must be kept secret. The public key can be shared with the other party for key exchange.
+
+#### `fio_x25519_public_key`
+
+```c
+void fio_x25519_public_key(uint8_t public_key[32],
+                           const uint8_t secret_key[32]);
+```
+
+Derives the public key from an X25519 secret key.
+
+This performs scalar multiplication of the secret key with the base point.
+
+#### `fio_x25519_shared_secret`
+
+```c
+int fio_x25519_shared_secret(uint8_t shared_secret[32],
+                             const uint8_t secret_key[32],
+                             const uint8_t their_public_key[32]);
+```
+
+Computes a shared secret using X25519 (ECDH).
+
+Both parties compute the same shared secret:
+
+```c
+shared = X25519(my_secret, their_public)
+```
+
+* `shared_secret`    MUST point to a 32 byte buffer for the output.
+* `secret_key`       MUST point to your 32 byte secret key.
+* `their_public_key` MUST point to the other party's 32 byte public key.
+
+Returns `0` on success, `-1` on failure (e.g., if `their_public_key` is a low-order point, which would result in an all-zero shared secret).
+
+**Note:** the shared secret should be passed through a KDF (e.g., HKDF with SHA-256) before being used as an encryption key.
+
+### Key Conversion
+
+Ed25519 and X25519 use the same underlying curve but with different representations. These functions convert between the two formats, allowing a single key pair to be used for both signing and encryption.
+
+**Note:** converting keys is generally safe, but using the same key for both signing and encryption is debated. Consider using separate key pairs for maximum security.
+
+#### `fio_ed25519_sk_to_x25519`
+
+```c
+void fio_ed25519_sk_to_x25519(uint8_t x_secret_key[32],
+                              const uint8_t ed_secret_key[32]);
+```
+
+Converts an Ed25519 secret key to an X25519 secret key.
+
+This allows using an Ed25519 signing key for X25519 key exchange.
+
+#### `fio_ed25519_pk_to_x25519`
+
+```c
+void fio_ed25519_pk_to_x25519(uint8_t x_public_key[32],
+                              const uint8_t ed_public_key[32]);
+```
+
+Converts an Ed25519 public key to an X25519 public key.
+
+This allows encrypting to someone who has only shared their Ed25519 signing public key.
+
+### Public Key Encryption (ECIES)
+
+This provides asymmetric encryption where anyone can encrypt a message using only the recipient's public key, and only the recipient can decrypt it using their private key. No prior key exchange or handshake is required.
+
+The scheme uses:
+- X25519 for ephemeral key agreement
+- SHA-256 for key derivation
+- ChaCha20-Poly1305 or AES256-GCM for authenticated encryption
+
+Ciphertext format: `[32-byte ephemeral public key][16-byte MAC][encrypted data]`
+
+Total overhead: 48 bytes
+
+#### `FIO_X25519_CIPHERTEXT_LEN`
+
+```c
+#define FIO_X25519_CIPHERTEXT_LEN(message_len) ((message_len) + 48)
+```
+
+Returns the ciphertext length for a given plaintext length.
+
+Ciphertext = ephemeral_pk (32) + mac (16) + encrypted_message (message_len)
+
+#### `FIO_X25519_PLAINTEXT_LEN`
+
+```c
+#define FIO_X25519_PLAINTEXT_LEN(ciphertext_len) \
+  ((ciphertext_len) > 48 ? ((ciphertext_len) - 48) : 0)
+```
+
+Returns the plaintext length for a given ciphertext length.
+
+Returns `0` if `ciphertext_len < 48` (invalid ciphertext).
+
+#### `fio_x25519_encrypt`
+
+```c
+int fio_x25519_encrypt(uint8_t *ciphertext,
+                       const void *message,
+                       size_t message_len,
+                       fio_crypto_enc_fn encryption_function,
+                       const uint8_t recipient_pk[32]);
+```
+
+Encrypts a message using the recipient's X25519 public key.
+
+* `ciphertext`          MUST point to a buffer of at least `message_len + 48` bytes.
+* `message`             the plaintext message to encrypt.
+* `message_len`         the length of the message in bytes.
+* `encryption_function` the encryption function (e.g., `fio_chacha20_poly1305_enc`).
+* `recipient_pk`        MUST point to the recipient's 32 byte X25519 public key.
+
+The ciphertext includes:
+- 32 bytes: ephemeral public key (for key agreement)
+- 16 bytes: authentication tag (MAC)
+- N bytes: encrypted message
+
+Returns `0` on success, `-1` on failure.
+
+#### `fio_x25519_decrypt`
+
+```c
+int fio_x25519_decrypt(uint8_t *plaintext,
+                       const uint8_t *ciphertext,
+                       size_t ciphertext_len,
+                       fio_crypto_dec_fn decryption_function,
+                       const uint8_t recipient_sk[32]);
+```
+
+Decrypts a message using the recipient's X25519 secret key.
+
+* `plaintext`           MUST point to a buffer of at least `ciphertext_len - 48` bytes.
+* `ciphertext`          the ciphertext (ephemeral_pk || mac || encrypted_data).
+* `ciphertext_len`      the length of the ciphertext (must be >= 48).
+* `decryption_function` the decryption function (e.g., `fio_chacha20_poly1305_dec`).
+* `recipient_sk`        MUST point to the recipient's 32 byte X25519 secret key.
+
+Returns `0` on success, `-1` on failure (authentication failed or invalid input).
+
+------------------------------------------------------------
 ## OTP
 
 ```c
@@ -6969,7 +11310,35 @@ Finalizes a fio_u512 with the SHA 512 hash.
 
 By defining the `FIO_OTP`, a small T-OTP (Time based One Time Password) helper API will be provided. This requires the `FIO_SHA1` and `FIO_STR` modules.
 
-The following helper functions are defined:
+### OTP Settings
+
+#### `fio_otp_settings_s`
+
+```c
+typedef struct {
+  /** The time interval for TOTP rotation. */
+  size_t interval; /* 30 == Google OTP */
+  /** The number of digits in the OTP. */
+  size_t digits; /* 6 == Google OTP */
+  /** The time offset (in `interval` units) from the current time. */
+  int64_t offset; /* 0 == Google OTP */
+  /** Set to true if the secret / key is in Hex instead of Byte32 encoding. */
+  uint8_t is_hex;
+  /** Set to true if the secret / key is raw bit data (no encoding). */
+  uint8_t is_raw;
+} fio_otp_settings_s;
+```
+
+Settings structure for OTP generation.
+
+**Members:**
+- `interval` - The time interval for TOTP rotation (defaults to 30 seconds for Google OTP compatibility)
+- `digits` - The number of digits in the OTP (defaults to 6 for Google OTP compatibility)
+- `offset` - The time offset in `interval` units from the current time (defaults to 0 for current time)
+- `is_hex` - Set to true if the secret/key is in Hex encoding instead of Base32 encoding
+- `is_raw` - Set to true if the secret/key is raw bit data (no encoding)
+
+### OTP API
 
 #### `fio_otp_generate_key`
 
@@ -6977,52 +11346,98 @@ The following helper functions are defined:
 fio_u128 fio_otp_generate_key(void);
 ```
 
-Generates a random 128 bit key for TOTP processing.
+Generates a cryptographically secure random 128 bit key for TOTP processing.
 
-Random keys may be required when generating a new OTP secret for possible logins.
+Uses system CSPRNG via `fio_rand_bytes_secure()`. Random keys may be required when generating a new OTP secret for possible logins.
+
+**Returns:** A 128-bit random key suitable for TOTP secrets.
 
 #### `fio_otp_print_key`
 
 ```c
-size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len)
+size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len);
 ```
 
-Prints out an OTP secret (big endian number) as a Byte32 encoded String.
+Prints out an OTP secret (big endian number) as a Base32 encoded String.
 
 Printing out the OTP secret can be important when providing it to authentication apps.
+
+**Parameters:**
+- `dest` - destination buffer for the Base32 encoded string
+- `key` - pointer to the key bytes (if NULL, generates a new key)
+- `len` - length of the key in bytes
+
+**Returns:** The length of the encoded string written to `dest`.
 
 #### `fio_otp`
 
 ```c
 uint32_t fio_otp(fio_buf_info_s secret, fio_otp_settings_s settings);
+/* Named arguments using macro. */
 #define fio_otp(secret, ...) fio_otp(secret, (fio_otp_settings_s){__VA_ARGS__})
 ```
 
-Returns a TOTP based on `secret` and the OTP settings.
+Returns a TOTP based on `secret` and the OTP settings using the current time.
 
 This can be used to either validate an existing TOTP or generate a new one.
 
-Possible settings include:
-
-```c
-typedef struct {
-  /** The time interval for TOTP rotation. */
-  size_t interval; /* defaults to 30 == Google OTP */
-  /** The number of digits in the OTP. */
-  size_t digits; /* defaults to 6 == Google OTP */
-  /** The time offset (in `interval` units) from the current time. */
-  int64_t offset; /* defaults to 0 == now */
-  /** Set to true if the secret / key is is Hex instead of Byte32 encoding. */
-  uint8_t is_hex;
-} fio_otp_settings_s;
-```
-
-Example:
+The function is shadowed by a macro, allowing it to accept named arguments:
 
 ```c
 uint32_t totp_now = fio_otp(FIO_BUF_INFO1("My Secret"), .offset = 0);
-uint32_t previous = fio_otp(FIO_BUF_INFO1("My Secret"), .offset = 1);
+uint32_t previous = fio_otp(FIO_BUF_INFO1("My Secret"), .offset = -1);
 ```
+
+**Parameters:**
+- `secret` - the shared secret key as a `fio_buf_info_s`
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `interval` | `size_t` | Time interval for rotation; defaults to 30 |
+| `digits` | `size_t` | Number of digits in OTP; defaults to 6 |
+| `offset` | `int64_t` | Time offset in interval units; defaults to 0 |
+| `is_hex` | `uint8_t` | Set true if secret is Hex encoded |
+| `is_raw` | `uint8_t` | Set true if secret is raw bit data |
+
+**Returns:** The computed TOTP value as a `uint32_t`.
+
+#### `fio_otp_at`
+
+```c
+uint32_t fio_otp_at(fio_buf_info_s secret, uint64_t unix_time, fio_otp_settings_s settings);
+/* Named arguments using macro. */
+#define fio_otp_at(secret, unix_time, ...)                                     \
+  fio_otp_at(secret, unix_time, (fio_otp_settings_s){__VA_ARGS__})
+```
+
+Returns a TOTP for a specific unix timestamp.
+
+This is useful for verifying OTPs at specific times or for RFC test vectors.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+/* Compute OTP at a specific timestamp */
+uint32_t otp = fio_otp_at(FIO_BUF_INFO1("My Secret"), 1234567890);
+```
+
+**Parameters:**
+- `secret` - the shared secret key as a `fio_buf_info_s`
+- `unix_time` - the unix timestamp to compute the OTP for
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `interval` | `size_t` | Time interval for rotation; defaults to 30 |
+| `digits` | `size_t` | Number of digits in OTP; defaults to 6 |
+| `offset` | `int64_t` | Time offset in interval units; defaults to 0 |
+| `is_hex` | `uint8_t` | Set true if secret is Hex encoded |
+| `is_raw` | `uint8_t` | Set true if secret is raw bit data |
+
+**Returns:** The computed TOTP value as a `uint32_t`.
 
 -------------------------------------------------------------------------------
 ## Secrets
@@ -7038,18 +11453,67 @@ By defining the `FIO_SECRET`, a small secret helper API will be provided. This r
 
 Secrets should be kept secret. 
 
-Secrets should **not** be kept in source files, which too often end up end up exposed.
+Secrets should **not** be kept in source files, which too often end up exposed.
 
 Secrets should **not** be logged (such as in case of a crash or a core dump).
 
-Additionally, secrets should **not** be used directly if possible. It is better to use a hashed value of the secret, possible with some time based salt or spice. This way, if somehow information leaks regarding the secret, what is exposed is actually the hashed value and not the secret itself.
+Additionally, secrets should **not** be used directly if possible. It is better to use a hashed value of the secret, possibly with some time based salt or spice. This way, if somehow information leaks regarding the secret, what is exposed is actually the hashed value and not the secret itself.
 
 For this reason, the most common place to place a secret is as a hashed value in the OS environment (often as a Hex encoded String).
 
 **Note**: some secrets, such as TLS certificates, are often stored as system files somewhere separate from the source code.
 
+### Environment Variables
+
+The module automatically initializes the global secret from environment variables at startup:
+
+- `SECRET` - The secret value (can be Hex encoded or plain text)
+- `SECRET_LENGTH` - Optional; specifies the length of the secret. If not provided, `strlen` is used.
+
+If no `SECRET` environment variable is set, a random secret is generated.
+
+### Secret API
+
 To help with managing a program wide secret, the following helper functions are defined:
 
+#### `fio_secret_is_random`
+
+```c
+bool fio_secret_is_random(void);
+```
+
+Returns true if the secret was randomly generated.
+
+#### `fio_secret`
+
+```c
+fio_u512 fio_secret(void);
+```
+
+Gets the SHA512 of a (possibly shared) secret.
+
+Unless updated using `fio_secret_set`, this is either a random secret or the one derived from the `SECRET` environment variable.
+
+Please store the returned value on the stack or not at all. The secret is stored masked in memory and unmasked copies should be temporary with short life-spans.
+
+#### `fio_secret_set`
+
+```c
+void fio_secret_set(char *str, size_t len, bool is_random);
+```
+
+Sets a (possibly shared) secret and stores its SHA512 hash.
+
+**Parameters:**
+- `str` - the secret string (can be Hex encoded or plain text)
+- `len` - the length of the secret string
+- `is_random` - set to `true` if this is a randomly generated secret
+
+If `str` is Hex encoded, it will be decoded before it is hashed and white spaces will be ignored.
+
+If `str` is `NULL` or `len` is `0`, a random secret will be generated and `is_random` will be set to `true`.
+
+**Note**: the SHA512 hash is masked before it is stored, so that the final secret isn't logged in case of a core dump.
 
 #### `fio_secret_set_at`
 
@@ -7058,6 +11522,15 @@ void fio_secret_set_at(fio_u512 *secret, char *str, size_t len);
 ```
 
 Sets a (possibly shared) secret and stores its (masked) SHA512 hash in `secret`.
+
+**Parameters:**
+- `secret` - pointer to a `fio_u512` where the masked hash will be stored
+- `str` - the secret string (can be Hex encoded or plain text)
+- `len` - the length of the secret string
+
+If `str` is Hex encoded, it will be decoded before it is hashed and white spaces will be ignored.
+
+If `str` is `NULL` or `len` is `0`, a random secret will be generated.
 
 **Note**: the SHA512 hash in `secret` is masked before it is stored, so that the final secret isn't logged in case of a core dump.
 
@@ -7069,41 +11542,12 @@ fio_u512 fio_secret_at(fio_u512 *secret);
 
 Gets the SHA512 of a (possibly shared) masked secret stored in `secret`.
 
-Please store the returned value on the stack or not at all. The secret is stored masked in memory and unmasked copies should be temporary with short life-spans.
+**Parameters:**
+- `secret` - pointer to a `fio_u512` containing the masked secret
 
-#### `fio_secret`
-
-```c
-fio_u512 fio_secret(void);
-```
-
-Returns the SHA512 of a (possibly shared) secret.
-
-Unless updated using `fio_secret_set`, this is either a random secret or the one derived from the `SECRET` environment variable.
+**Returns:** the unmasked SHA512 hash of the secret.
 
 Please store the returned value on the stack or not at all. The secret is stored masked in memory and unmasked copies should be temporary with short life-spans.
-
-#### `fio_secret_set`
-
-```c
-void fio_secret_set(char *secret, size_t len, bool is_random);
-```
-
-Sets a (possibly shared) secret and stores its SHA512 hash.
-
-If `secret` is Hex encoded, it will be decoded before it is hashed and white spaces will be ignored.
-
-**Note**: the SHA512 hash is masked before it is stored, so that the final secret isn't logged in case of a core dump.
-
-
-#### `fio_secret_is_random`
-
-```c
-bool fio_secret_is_random(void);
-```
-
-Returns true if the secret was randomly generated.
-
 
 -------------------------------------------------------------------------------
 ## Dynamic Strings
@@ -7115,9 +11559,9 @@ Returns true if the secret was randomly generated.
 
 Dynamic Strings are extremely useful, since:
 
-* The can safely store binary data (unlike regular C strings).
+* They can safely store binary data (unlike regular C strings).
 
-* They make it easy to edit String data. Granted, the standard C library can do this too, but this approach offers some optimizations and safety measures that the C library cannot offer due to it's historical design.
+* They make it easy to edit String data. Granted, the standard C library can do this too, but this approach offers some optimizations and safety measures that the C library cannot offer due to its historical design.
 
 To create a dynamic string define the type name using the `FIO_STR_NAME` macro.
 
@@ -7125,9 +11569,9 @@ Alternatively, the type name could be defined using the `FIO_STR_SMALL` macro, r
 
 The type (`FIO_STR_NAME_s`) and the functions will be automatically defined.
 
-For brevities sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
+For brevity's sake, in this documentation they will be listed as `STR_*` functions / types (i.e., `STR_s`, `STR_new()`, etc').
 
-**Note:** this module depends on the  `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
+**Note:** this module depends on the `FIO_STR` module and all the modules required by `FIO_STR` which will be automatically included.
 
 ### Optimizations / Flavors
 
@@ -7333,6 +11777,42 @@ This could save memory when strings aren't short enough to be contained within t
 
 This could also save memory, potentially, if the string type will be wrapped / embedded within other data-types (i.e., using `FIO_REF_NAME` for reference counting).
 
+### Configuration Macros
+
+#### `FIO_STR_OPTIMIZE_EMBEDDED`
+
+```c
+#define FIO_STR_OPTIMIZE_EMBEDDED 0 /* default */
+```
+
+For each unit (0 by default), adds `sizeof(char *)` bytes to the type size, increasing the amount of strings that could be embedded within the type without additional memory allocation.
+
+For example, when using a reference counter wrapper on a 64bit system, it would make sense to set this value to 1 - allowing the type size to fully utilize a 16 byte memory allocation alignment.
+
+**Note**: Maximum value is 4 for default strings, or 1 for `FIO_STR_SMALL` / `FIO_STR_OPTIMIZE4IMMUTABILITY` strings.
+
+#### `FIO_STR_OPTIMIZE4IMMUTABILITY`
+
+```c
+#define FIO_STR_OPTIMIZE4IMMUTABILITY 0 /* default */
+```
+
+Minimizes the struct size, storing only string length and pointer.
+
+By avoiding extra (mutable related) data, such as the allocated memory's capacity, strings require less memory. However, this does introduce a performance penalty when editing the string data.
+
+**Note**: This is automatically set to `1` when using `FIO_STR_SMALL`.
+
+#### `FIO_STR_NO_ALIGN`
+
+```c
+#define FIO_STR_NO_ALIGN 0 /* default */
+```
+
+When set to `1`, prevents the default behavior of using extra alignment space for small strings.
+
+This could save memory when strings aren't short enough to be contained within the type, or when the string type will be wrapped / embedded within other data-types (i.e., using `FIO_REF_NAME` for reference counting).
+
 ### String API - Initialization and Destruction
 
 #### `FIO_STR_INIT`
@@ -7340,7 +11820,7 @@ This could also save memory, potentially, if the string type will be wrapped / e
 This value should be used for initialization. It should be considered opaque, but is defined as:
 
 ```c
-#define FIO_STR_INIT { .special = 1 }
+#define FIO_STR_INIT { .special = 0 }
 ```
 
 For example:
@@ -7374,8 +11854,13 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC(buffer)                                            \
-  { .special = 4, .buf = (char *)(buffer), .len = FIO_STRLEN((buffer)) }
+  {                                                                            \
+    .special = 4, .capa = FIO_STRLEN((buffer)), .len = FIO_STRLEN((buffer)),   \
+    .buf = (char *)(buffer)                                                    \
+  }
 ```
+
+**Note**: This macro isn't valid for `FIO_STR_SMALL` (or strings with the `FIO_STR_OPTIMIZE4IMMUTABILITY` optimization).
 
 #### `FIO_STR_INIT_STATIC2`
 
@@ -7383,8 +11868,10 @@ This macro allows the string container to be initialized with existing static da
 
 ```c
 #define FIO_STR_INIT_STATIC2(buffer, length)                                   \
-  { .buf = (char *)(buffer), .len = (length) }
+  { .special = 4, .capa = (length), .len = (length), .buf = (char *)(buffer) }
 ```
+
+**Note**: This macro isn't valid for `FIO_STR_SMALL` (or strings with the `FIO_STR_OPTIMIZE4IMMUTABILITY` optimization).
 
 
 #### `STR_init_const`
@@ -7485,7 +11972,15 @@ Frees the pointer returned by [`detach`](#str_detach).
 fio_str_info_s STR_info(const FIO_STR_PTR s);
 ```
 
-Returns the String's complete state (capacity, length and pointer). 
+Returns the String's complete state (capacity, length and pointer).
+
+#### `STR_buf`
+
+```c
+fio_buf_info_s STR_buf(const FIO_STR_PTR s);
+```
+
+Returns the String's partial state (length and pointer) as a `fio_buf_info_s`.
 
 #### `STR_len`
 
@@ -7546,12 +12041,16 @@ Binary comparison returns `1` if both strings are equal and `0` if not.
 #### `STR_hash`
 
 ```c
-uint64_t STR_hash(const FIO_STR_PTR s);
+uint64_t STR_hash(const FIO_STR_PTR s, uint64_t seed);
 ```
 
 Returns the string's Risky Hash value.
 
-Note: Hash algorithm might change without notice.
+**Parameters:**
+- `s` - the String pointer
+- `seed` - a seed value for the hash function
+
+**Note**: Hash algorithm might change without notice.
 
 ### String API - Memory management
 
@@ -7649,6 +12148,14 @@ Writes a number at the end of the String using Hex (base 16) notation.
 
 **Note**: the `0x` prefix **is automatically written** before the hex numerals.
 
+#### `STR_write_bin`
+
+```c
+fio_str_info_s STR_write_bin(FIO_STR_PTR s, int64_t num);
+```
+
+Writes a number at the end of the String using binary notation.
+
 #### `STR_concat` / `STR_join`
 
 ```c
@@ -7677,6 +12184,25 @@ Negative `start_pos` values are calculated backwards, `-1` == end of String.
 When `old_len` is zero, the function will insert the data at `start_pos`.
 
 If `src_len == 0` than `src` will be ignored and the data marked for replacement will be erased.
+
+#### `FIO_STR_WRITE2`
+
+```c
+#define FIO_STR_WRITE2(str_name, dest, ...)                                    \
+  FIO_NAME(str_name, __write2)(dest, (fio_string_write_s[]){__VA_ARGS__, {0}})
+```
+
+Writes data at the end of the String using the `fio_string_write2` interface.
+
+This macro allows multiple write operations to be performed in a single call using `fio_string_write_s` arguments.
+
+Example:
+
+```c
+FIO_STR_WRITE2(my_str, &str,
+               FIO_STRING_WRITE_STR1("Hello "),
+               FIO_STRING_WRITE_STR1("World!"));
+```
 
 #### `STR_vprintf`
 
@@ -7799,7 +12325,7 @@ fio_str_info_s STR_write_html_unescape(FIO_STR_PTR s,
 
 Writes HTML un-escaped data to a String - incomplete and minimal.
 
-**Note**: the un-escaping of HTML content includes a long list of named code-point. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
+**Note**: the un-escaping of HTML content includes a long list of named code-points. This list isn't handled here, instead only numerical and super-basic named code-points are supported.
 
 -------------------------------------------------------------------------------
 ## Dynamic Arrays
@@ -7859,6 +12385,8 @@ For complex types, define any (or all) of the following macros:
 #define FIO_ARRAY_TYPE_DESTROY(obj)     
 // set to adjust element comparison 
 #define FIO_ARRAY_TYPE_CMP(a, b)        
+// set to adjust element copying during concat operations
+#define FIO_ARRAY_TYPE_CONCAT_COPY(dest, src)
 // to be returned when `index` is out of bounds / holes 
 #define FIO_ARRAY_TYPE_INVALID 0 
 // set ONLY if the invalid element is all zero bytes 
@@ -7872,6 +12400,15 @@ For complex types, define any (or all) of the following macros:
 // optimizes small arrays (mostly tuplets and single item arrays).
 // note: values larger than 1 add a memory allocation cost to the array container
 #define FIO_ARRAY_ENABLE_EMBEDDED 1
+```
+
+For string arrays, the `FIO_ARRAY_TYPE_STR` macro can be used as a shortcut:
+
+```c
+// Automatically sets up FIO_ARRAY_TYPE, FIO_ARRAY_TYPE_COPY, 
+// FIO_ARRAY_TYPE_DESTROY, FIO_ARRAY_TYPE_CMP, and FIO_ARRAY_DESTROY_AFTER_COPY
+// for fio_keystr_s string types
+#define FIO_ARRAY_TYPE_STR
 ```
 
 To create the type and helper functions, include The facil.io library header.
@@ -7905,14 +12442,14 @@ void example(void) {
 
 ```c
 typedef struct {
-  FIO_ARRAY_TYPE *ary;
-  uint32_t capa;
-  uint32_t start;
-  uint32_t end;
+  uint32_t start;  /* the offset to the first item */
+  uint32_t end;    /* the offset to the first empty location */
+  uint32_t capa;   /* the array's capacity */
+  FIO_ARRAY_TYPE *ary;  /* pointer to the array's memory (if not embedded) */
 } FIO_NAME(FIO_ARRAY_NAME, s); /* ARY_s in these docs */
 ```
 
-The array type should be considered opaque. Use the helper functions to updated the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
+The array type should be considered opaque. Use the helper functions to update the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
 
 #### `FIO_ARRAY_INIT`
 
@@ -7961,6 +12498,22 @@ uint32_t ARY_capa(ARY_s * ary);
 ````
 
 Returns the current, temporary, array capacity (it's dynamic).
+
+#### `ARY_embedded`
+
+````c
+int ARY_embedded(ARY_s * ary);
+````
+
+Returns 1 if the array is embedded, 0 if it has memory allocated and -1 on an error.
+
+#### `ARY_ptr`
+
+````c
+FIO_ARRAY_TYPE * ARY_ptr(ARY_s * ary);
+````
+
+Returns a pointer to the C array containing the objects.
 
 #### `ARY_reserve`
 
@@ -8059,14 +12612,6 @@ void ARY_compact(ARY_s * ary);
 
 Attempts to lower the array's memory consumption.
 
-#### `ARY_to_a`
-
-```c
-FIO_ARRAY_TYPE * ARY_to_a(ARY_s * ary);
-```
-
-Returns a pointer to the C array containing the objects.
-
 #### `ARY_push`
 
 ```c
@@ -8114,13 +12659,13 @@ Returns -1 on error (Array is empty) and 0 on success.
 ```c
 uint32_t ARY_each(ARY_s * ary,
                   int (*task)(ARY_each_s * info),
-                  void *arg,
+                  void *udata,
                   int64_t start_at);
 ```
 
 Iteration using a callback for each entry in the array.
 
-The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
+The callback task function must accept an `ARY_each_s` pointer (name matches Array name).
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
@@ -8130,62 +12675,60 @@ The `ARY_each_s` data structure looks like this:
 
 ```c
 /** Iteration information structure passed to the callback. */
-typedef ARY_each_s {
-  /** The being iterated. Once set, cannot be safely changed. */
+typedef struct ARY_each_s {
+  /** The array iterated. Once set, cannot be safely changed. */
   FIO_ARRAY_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Always 1 and may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
-  int (*task)(ARY_each_s * info);
-  /** The argument passed along to the task. */
-  void *arg;
+  int (*task)(struct ARY_each_s * info);
+  /** Opaque user data. */
+  void *udata;
   /** The object / value at the current index. */
   FIO_ARRAY_TYPE value;
+  /* memory padding used for FIOBJ */
+  uint64_t padding;
 } ARY_each_s;
 ```
 
 #### `ARY_each_next`
 
 ```c
-FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
-                             FIO_ARRAY_TYPE **first,
-                             FIO_ARRAY_TYPE *pos);
-
+FIO_ARRAY_TYPE * ARY_each_next(ARY_s* ary,
+                               FIO_ARRAY_TYPE **first,
+                               FIO_ARRAY_TYPE *pos);
 ```
 
-Used internally by the `FIO_ARRAY_EACH` macro.
+Returns a pointer to the (next) object in the array.
 
-Returns a pointer to the first object if `pos == NULL` and there are objects
-in the array.
+Returns a pointer to the first object if `pos == NULL` and there are objects in the array.
 
-Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
-
-Returns `NULL` on error or if the array is empty.
-
-**Note**: 
 The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
 
-If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+If the object in `pos` (or an object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+
+Returns the next object if both `first` and `pos` are valid.
+
+Returns `NULL` if `pos` was the last object or no object exist.
+
+Returns the first object if either `first` or `pos` are invalid.
 
 #### `FIO_ARRAY_EACH`
 
 ```c
-#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
-  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
-           first___ = NULL,                                                    \
-           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
+  for (FIO_NAME(array_name, ____type_t)                                        \
+           *first___ai = NULL,                                                 \
+           *pos = FIO_NAME(array_name, each_next)((array), &first___ai, NULL); \
        pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
+       pos = FIO_NAME(array_name, each_next)((array), &first___ai, pos))
 ```
-
 
 Iterates through the array using a `for` loop.
 
 Access the object with the pointer `pos`. The `pos` variable can be named however you please.
 
-It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
+Avoid editing the array during a FOR loop, although I hope it's possible, I wouldn't count on it.
 
 **Note**: this macro supports automatic pointer tagging / untagging.
 
@@ -8333,6 +12876,20 @@ If `FIO_MAP_KEY` isn't set, or `FIO_MAP_KEY_KSTR` is explicitly defined, than a 
 
 Passing a key with `key.capa == (size_t)-1` will prevent a string copy and the map will assume that the string will stay in the same memory address for the whole of the map's lifetime.
 
+### Naming Shortcuts
+
+#### `FIO_OMAP_NAME` / `FIO_UMAP_NAME`
+
+```c
+#define FIO_OMAP_NAME my_ordered_map   /* creates an ordered map */
+#define FIO_UMAP_NAME my_unordered_map /* creates an unordered map */
+```
+
+These macros provide shortcuts for defining ordered or unordered maps without explicitly setting `FIO_MAP_ORDERED`:
+
+- `FIO_OMAP_NAME` - defines `FIO_MAP_NAME` and sets `FIO_MAP_ORDERED` to `1`
+- `FIO_UMAP_NAME` - defines `FIO_MAP_NAME` and sets `FIO_MAP_ORDERED` to `0`
+
 ### Defining the Map's Values
 
 Most often we want a dictionary or a hash map to retrieve a `value` based on its associated `key`.
@@ -8410,6 +12967,15 @@ The map implementation offers protection against too many full collisions or non
 
 This can be adjusted using the `FIO_MAP_ATTACK_LIMIT` macro which usually allows up to 16 full hash collisions before assuming the map is being attacked, thus giving leeway for faster yet less secure hashing functions.
 
+#### `FIO_MAP_ATTACK_LIMIT`
+
+```c
+/* default: */
+#define FIO_MAP_ATTACK_LIMIT 16
+```
+
+Sets the maximum number of full hash collisions allowed before the map assumes it is under attack and starts overwriting existing data instead of resolving collisions.
+
 When using unsafe input data as the Map `key`, it is still better to manually manage the hashing function by salting it with a map specific value (such as the map's pointer). Then helpers can be used to make sure the code remains DRY.
 
 For example:
@@ -8480,6 +13046,15 @@ This, of course, requires that the `FIO_MAP_HASH_FN(key)` macro be defined, or t
 
 **Default**: always remembers the hash value, unless both `FIO_MAP_RECALC_HASH` and `FIO_MAP_HASH_FN` are set.
 
+#### `FIO_MAP_CAPA_BITS_LIMIT`
+
+```c
+/* default: */
+#define FIO_MAP_CAPA_BITS_LIMIT 31
+```
+
+Sets the maximum number of bits used for map capacity. The default of 31 allows for maps with up to 2^31 (approximately 2 billion) elements. This cannot exceed 31 bits unless the internal code is rewritten.
+
 ### Ordering and Performance
 
 The facil.io implementation supports FIFO (First In First Out) and LRU (Least Recently Used) ordering scheme, allowing to `map_evict` any number of possibly "stale" elements, offering an initial caching solution that can be expanded upon.
@@ -8519,6 +13094,14 @@ i.e.,
 ### The Map Types
 
 Each template implementation defines the following main types (named here assuming `FIO_MAP_NAME` is defined as `map`).
+
+#### `FIO_MAP_INIT`
+
+```c
+#define FIO_MAP_INIT { 0 }
+```
+
+Initialization macro for stack-allocated or embedded map objects.
 
 #### `map_s`
 
@@ -8560,6 +13143,8 @@ typedef struct {
 
 ```c
 typedef struct {
+  /** the node in the internal map */
+  FIO_NAME(FIO_MAP_NAME, node_s) * node;
   /** the key in the current position */
   FIO_MAP_KEY key;
 #ifdef FIO_MAP_VALUE
@@ -8579,6 +13164,8 @@ typedef struct {
 ```
 
 An iterator type represents a specific object and position in the Hash. The object data is valid as long as the object was not removed from the Map and the position is valid for as long as the Map didn't reallocate the internal storage (avoid adding new objects to the map while iterating).
+
+The `node` field provides direct access to the internal node storage, which can be used with the `map_node2key`, `map_node2val`, and `map_node2hash` helper functions.
 
 ### Construction / Deconstruction
 
@@ -8631,6 +13218,85 @@ void map_reserve(FIO_MAP_PTR map, size_t capa);
 ```
 
 Reserves at minimum the capacity requested for new members. May reserve more than the capacity requested.
+
+### Node Helper Functions
+
+These functions help access data from node pointers returned by `map_get_ptr` or `map_set_ptr`.
+
+#### `map_node2key`
+
+```c
+FIO_MAP_KEY map_node2key(map_node_s *node);
+```
+
+Returns the key value associated with the node's pointer.
+
+**Parameters:**
+- `node` - pointer to a node in the map's internal storage
+
+**Returns:** the key value, or a zeroed key if `node` is NULL.
+
+#### `map_node2hash`
+
+```c
+uint64_t map_node2hash(map_node_s *node);
+```
+
+Returns the hash value associated with the node's pointer.
+
+**Parameters:**
+- `node` - pointer to a node in the map's internal storage
+
+**Returns:** the hash value, or 0 if `node` is NULL.
+
+**Note**: if `FIO_MAP_RECALC_HASH` is set, the hash is recalculated using `FIO_MAP_HASH_FN`.
+
+#### `map_node2val`
+
+```c
+FIO_MAP_VALUE map_node2val(map_node_s *node);
+/* For Sets (no FIO_MAP_VALUE defined), returns the key instead */
+FIO_MAP_KEY map_node2val(map_node_s *node);
+```
+
+Returns the value associated with the node's pointer. For Sets (where no `FIO_MAP_VALUE` is defined), this returns the key.
+
+**Parameters:**
+- `node` - pointer to a node in the map's internal storage
+
+**Returns:** the value (or key for Sets), or a zeroed value if `node` is NULL.
+
+#### `map_node2key_ptr`
+
+```c
+FIO_MAP_KEY_INTERNAL *map_node2key_ptr(map_node_s *node);
+```
+
+Returns a pointer to the internal key storage associated with the node.
+
+**Parameters:**
+- `node` - pointer to a node in the map's internal storage
+
+**Returns:** pointer to the internal key, or NULL if `node` is NULL.
+
+**Note**: this returns a pointer to the internal storage type, not the external API type.
+
+#### `map_node2val_ptr`
+
+```c
+FIO_MAP_VALUE_INTERNAL *map_node2val_ptr(map_node_s *node);
+/* For Sets (no FIO_MAP_VALUE defined), returns pointer to key instead */
+FIO_MAP_KEY_INTERNAL *map_node2val_ptr(map_node_s *node);
+```
+
+Returns a pointer to the internal value storage associated with the node. For Sets (where no `FIO_MAP_VALUE` is defined), this returns a pointer to the key.
+
+**Parameters:**
+- `node` - pointer to a node in the map's internal storage
+
+**Returns:** pointer to the internal value (or key for Sets), or NULL if `node` is NULL.
+
+**Note**: this returns a pointer to the internal storage type, not the external API type.
 
 ### Adding / Removing Elements from the Map
 
@@ -8798,35 +13464,60 @@ See notes in `map_get_next`.
 #### `map_iterator_is_valid`
 
 ```c
-int map_iterator_is_valid( map_iterator_s * iterator);
+int map_iterator_is_valid(map_iterator_s *iterator);
 ```
 
-Returns 1 if the iterator is out of bounds, otherwise returns 0.
+Returns 1 if the iterator points to a valid object, otherwise returns 0.
+
+**Note**: the iterator is invalid if it is NULL, if `map_validator` is 0, or if the iterator is out of bounds.
+
+#### `map_iterator2node`
+
+```c
+map_node_s *map_iterator2node(FIO_MAP_PTR map, map_iterator_s *iterator);
+```
+
+Returns a pointer to the node object in the internal map from an iterator.
+
+**Parameters:**
+- `map` - the map being iterated
+- `iterator` - a valid iterator object
+
+**Returns:** pointer to the internal node, or NULL if the iterator is invalid.
+
+**Note**: this function validates the iterator before returning the node pointer.
 
 #### `FIO_MAP_EACH`
 
 ```c
-#define FIO_MAP_EACH(map_name, map_ptr, pos)                            \
+#define FIO_MAP_EACH(map_name, map_ptr, i)                                     \
   for (FIO_NAME(map_name, iterator_s)                                          \
-           pos = FIO_NAME(map_name, get_next)(map_ptr, NULL);                  \
-       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
-       pos = FIO_NAME(map_name, get_next)(map_ptr, &pos))
+           i = FIO_NAME(map_name, get_next)(map_ptr, NULL);                    \
+       FIO_NAME(map_name, iterator_is_valid)(&i);                              \
+       i = FIO_NAME(map_name, get_next)(map_ptr, &i))
 ```
 
 Iterates through the map using an iterator object.
+
+Example:
+
+```c
+FIO_MAP_EACH(dict, &my_map, iter) {
+  printf("Key: %s, Value: %s\n", iter.key.buf, iter.value.buf);
+}
+```
 
 #### `FIO_MAP_EACH_REVERSED`
 
 ```c
-#define FIO_MAP_EACH_REVERSED(map_name, map_ptr, pos)                   \
+#define FIO_MAP_EACH_REVERSED(map_name, map_ptr, i)                            \
   for (FIO_NAME(map_name, iterator_s)                                          \
-           pos = FIO_NAME(map_name, get_prev)(map_ptr, NULL);                  \
-       FIO_NAME(map_name, iterator_is_valid)(&pos);                            \
-       pos = FIO_NAME(map_name, get_prev)(map_ptr, &pos))
-#endif
+           i = FIO_NAME(map_name, get_prev)(map_ptr, NULL);                    \
+       FIO_NAME(map_name, iterator_is_valid)(&i);                              \
+       i = FIO_NAME(map_name, get_prev)(map_ptr, &i))
 ```
 
-Iterates through the map using an iterator object.
+Iterates through the map in reverse order using an iterator object.
 
 #### `map_each`
 
@@ -8867,12 +13558,11 @@ typedef struct map_each_s {
 ```
 
 -------------------------------------------------------------------------------
-
 ## Reference Counting and Type Wrapping
 
 ```c
-#define FIO_STR_SMALL fio_str
-#define FIO_REF_NAME fio_str
+#define FIO_REF_NAME my_type
+#define FIO_REF_TYPE my_type_s
 #define FIO_REF_CONSTRUCTOR_ONLY
 #include "fio-stl.h"
 ```
@@ -8880,6 +13570,8 @@ typedef struct map_each_s {
 If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be defined for any named type.
 
 **Note**: requires the atomic operations to be defined (`FIO_ATOMIC`).
+
+**Note**: if `FIO_PTR_TAG_TYPE` is defined, the reference counting functions will use the tagged pointer type for parameters and return values instead of `FIO_REF_TYPE *`.
 
 ### Reference Counting Type Macros
 
@@ -8898,12 +13590,16 @@ By default, `FIO_REF_TYPE` will equal `FIO_REF_NAME_s`, using the naming convent
 #### `FIO_REF_INIT`
 
 ```c
-#define FIO_REF_INIT(obj) (obj) = (FIO_REF_TYPE){0}
+#define FIO_REF_INIT(obj)                                                      \
+  do {                                                                         \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (obj) = (FIO_REF_TYPE){0};                                               \
+  } while (0)
 ```
 
 Sets up the default object initializer.
 
-By default initializes the object's memory to zero.
+By default initializes the object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
 
 If `FIO_REF_FLEX_TYPE` is defined, the variable `members` may be used during initialization. It's value is the same as the value passed on to the `REF_new` function.
 
@@ -8942,10 +13638,14 @@ A pointer to this type sill be available using the `REF_metadata` function and w
 #### `FIO_REF_METADATA_INIT`
 
 ```c
-#define FIO_REF_METADATA_INIT(meta) (meta) = (FIO_REF_TYPE){0}
+#define FIO_REF_METADATA_INIT(meta)                                            \
+  do {                                                                         \
+    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
+      (meta) = (FIO_REF_METADATA){0};                                          \
+  } while (0)
 ```
 
-Sets up object's meta-data initialization (if any). Be default initializes the meta-data object's memory to zero.
+Sets up object's meta-data initialization (if any). By default initializes the meta-data object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
 
 #### `FIO_REF_METADATA_DESTROY`
 
@@ -8975,13 +13675,20 @@ Allocates a new reference counted object, initializing it using the `FIO_REF_INI
 
 If `FIO_REF_METADATA` is defined, than the metadata is initialized using the `FIO_REF_METADATA_INIT(metadata)` macro.
 
-#### `REF_dup`
+#### `REF_dup` / `REF_dup2`
 
 ```c
-FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * object)
+FIO_REF_TYPE * REF_dup2(FIO_REF_TYPE * wrapped)
+// or, if FIO_REF_CONSTRUCTOR_ONLY is defined
+FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * wrapped)
 ```
 
 Increases an object's reference count (an atomic operation, thread-safe).
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the same pointer passed in, or `NULL` if the input was `NULL`.
 
 #### `REF_free` / `REF_free2`
 
@@ -9000,10 +13707,43 @@ If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the 
 #### `REF_metadata`
 
 ```c
-FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * object)
+FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * wrapped)
 ```
 
-If `FIO_REF_METADATA` is defined, than the metadata is accessible using this inlined function.
+If `FIO_REF_METADATA` is defined, then the metadata is accessible using this inlined function.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** a pointer to the object's metadata.
+
+#### `REF_metadata_flex_len`
+
+```c
+uint32_t REF_metadata_flex_len(FIO_REF_TYPE * wrapped)
+```
+
+If `FIO_REF_FLEX_TYPE` is defined, this function returns the number of flex array members that were allocated with the object.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the number of flex array members allocated, or `0` if `wrapped` is `NULL`.
+
+#### `REF_references`
+
+```c
+size_t REF_references(FIO_REF_TYPE * wrapped)
+```
+
+A debugging helper that returns the current reference count for an object.
+
+**Parameters:**
+- `wrapped` - pointer to the reference counted object
+
+**Returns:** the current reference count, or `0` if `wrapped` is `NULL`.
+
+**Note**: the returned value is unstable and should not be used for program logic. It is intended for debugging purposes only.
 
 -------------------------------------------------------------------------------
 ## FIOBJ Soft Dynamic Types
@@ -9014,13 +13754,13 @@ If `FIO_REF_METADATA` is defined, than the metadata is accessible using this inl
 #include "fio-stl.h"
 ```
 
-The facil.io library includes a dynamic type system that makes it a easy to handle mixed-type tasks, such as JSON object construction.
+The facil.io library includes a dynamic type system that makes it easy to handle mixed-type tasks, such as JSON object construction.
 
-This soft type system included in the facil.io STL, it is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
+This soft type system included in the facil.io STL is based on the Core types mentioned above and it shares their API (Dynamic Strings, Dynamic Arrays, and Hash Maps).
 
-The soft type system also offers an (optional) * [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
+The soft type system also offers an (optional) [Local Memory allocator](#local-memory-allocation) for improved performance when defined with the `FIOBJ_MALLOC` macro defined.
 
-The `FIOBJ` API offers type generic functions in addition to the type specific API. An objects underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
+The `FIOBJ` API offers type generic functions in addition to the type specific API. An object's underlying type is easily identified using `FIOBJ_TYPE(obj)` or `FIOBJ_TYPE_IS(obj, type)`.
 
 The documentation regarding the `FIOBJ` soft-type system is divided as follows:  
 
@@ -9046,6 +13786,8 @@ The documentation regarding the `FIOBJ` soft-type system is divided as follows:
 
 * [JSON Helpers](#fiobj-json-helpers)
 
+* [Mustache Helpers](#fiobj-mustache-helpers)
+
 * [How to Extend the `FIOBJ` Type System](#how-to-extend-the-fiobj-type-system)
 
 In the facil.io web application framework, there are extensions to the core `FIOBJ` primitives, including:
@@ -9053,6 +13795,30 @@ In the facil.io web application framework, there are extensions to the core `FIO
 * [IO storage](fiobj_io)
 
 * [Mustache](fiobj_mustache)
+
+### `FIOBJ` Configuration Macros
+
+#### `FIOBJ_MAX_NESTING`
+
+```c
+#define FIOBJ_MAX_NESTING 512
+```
+
+Sets the limit on nesting level traversal by recursive functions.
+
+This affects JSON output/input and the `fiobj_each2` function since they are recursive.
+
+**Note**: this value will **NOT** affect the recursive `fiobj_free` which could (potentially) explode the stack if given malformed input such as cyclic data structures.
+
+Values should be less than 32K.
+
+#### `FIOBJ_JSON_APPEND`
+
+```c
+#define FIOBJ_JSON_APPEND 1
+```
+
+When set to `1` (default), JSON parsing will append to existing Arrays and Hash Maps when updating. When set to `0`, existing containers are replaced.
 
 ### `FIOBJ` General Considerations
 
@@ -9127,20 +13893,22 @@ The following functions / MACROs help identify a `FIOBJ` object's underlying typ
 #### `FIOBJ_TYPE_CLASS(o)`
 
 ```c
-#define FIOBJ_TYPE_CLASS(o) ((fiobj_class_en)(((uintptr_t)o) & 7UL))
+#define FIOBJ_TYPE_CLASS(o) ((fiobj_class_en)(((uintptr_t)(o)) & 7UL))
 ```
 
-Returns the object's type class. This is limited to one of the core types. `FIOBJ_T_PRIMITIVE` and `FIOBJ_T_OTHER` may be returned (they aren't expended to their underlying type).
+Returns the object's type class. This is limited to one of the core types. `FIOBJ_T_PRIMITIVE` and `FIOBJ_T_OTHER` may be returned (they aren't expanded to their underlying type).
 
 **Note**: some numbers (`FIOBJ_T_NUMBER` / `FIOBJ_T_FLOAT`) may return `FIOBJ_T_OTHER` when `FIOBJ_TYPE_CLASS` is used, but return their proper type when `FIOBJ_TYPE` is used. This is due to memory optimizations being unavailable for some numerical values.
 
 #### `FIOBJ_IS_INVALID(o)`
 
 ```c
-#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o)&7UL) == 0)
+#define FIOBJ_IS_INVALID(o) (((uintptr_t)(o) & 7UL) == 0)
 ```
 
-Tests if the object is (probably) a valid FIOBJ
+Tests if the object is (probably) an invalid FIOBJ (returns true if invalid).
+
+**Note**: A valid FIOBJ always has at least one of the lower 3 bits set due to pointer tagging.
 
 #### `FIOBJ_IS_NULL(o)`
 
@@ -9150,13 +13918,23 @@ Tests if the object is (probably) a valid FIOBJ
 
 Tests if the object is either a `NULL` `FIOBJ` object or an invalid object.
 
+#### `FIOBJ_PTR_TAG(o, klass)`
+
+```c
+#define FIOBJ_PTR_TAG(o, klass) ((uintptr_t)(((uintptr_t)(o)) | (klass)))
+```
+
+Adds a `FIOBJ` type tag to a pointer. The `klass` should be one of the `FIOBJ_T_*` type constants.
+
+This is made available for authoring `FIOBJ` extensions and **shouldn't** be normally used.
+
 #### `FIOBJ_PTR_UNTAG(o)`
 
 ```c
-#define FIOBJ_PTR_UNTAG(o) ((uintptr_t)o & (~7ULL))
+#define FIOBJ_PTR_UNTAG(o) ((uintptr_t)(((uintptr_t)(o)) & (~7ULL)))
 ```
 
-Removes the `FIOBJ` type tag from a `FIOBJ` objects, allowing access to the underlying pointer and possible type.
+Removes the `FIOBJ` type tag from a `FIOBJ` object, allowing access to the underlying pointer and possible type.
 
 This is made available for authoring `FIOBJ` extensions and **shouldn't** be normally used.
 
@@ -9216,7 +13994,7 @@ unsigned char fiobj_is_eq(FIOBJ a, FIOBJ b);
 
 Compares two objects.
 
-Note: objects that contain other objects (i.e., Hash Maps) don't support this equality check just yet (feel free to contribute a PR for this).
+**Note**: this function now supports deep equality checks for Arrays and Hash Maps.
 
 #### `fiobj2cstr`
 
@@ -9246,13 +14024,52 @@ double fiobj2f(FIOBJ o);
 
 Returns a float (double) representation for any FIOBJ object.
 
+#### `fiobj_hash` (was `fiobj2hash`)
+
+```c
+uint64_t fiobj_hash(FIOBJ o);
+```
+
+Calculates an object's hash value for a specific hash map object.
+
+### `FIOBJ` Iteration
+
+#### `fiobj_each_s`
+
+```c
+typedef struct fiobj_each_s {
+  /** The being iterated. Once set, cannot be safely changed. */
+  FIOBJ const parent;
+  /** The index to start at / the current object's index */
+  uint64_t index;
+  /** The callback / task called for each index, may be updated mid-cycle. */
+  int (*task)(struct fiobj_each_s *info);
+  /** The argument passed along to the task. */
+  void *udata;
+  /** The value of the current object in the Array or Hash Map */
+  FIOBJ value;
+  /* The key, if a Hash Map */
+  FIOBJ key;
+} fiobj_each_s;
+```
+
+Iteration information structure passed to the callback during `fiobj_each1` and `fiobj_each2` operations.
+
+**Members:**
+- `parent` - The object being iterated (read-only once set)
+- `index` - The current index position
+- `task` - The callback function (can be updated mid-iteration)
+- `udata` - User data passed to the task
+- `value` - The current element's value
+- `key` - The current element's key (for Hash Maps only)
 
 #### `fiobj_each1`
 
 ```c
-uint32_t fiobj_each1(FIOBJ o, int32_t start_at,
-                     int (*task)(FIOBJ child, void *arg),
-                     void *arg);
+uint32_t fiobj_each1(FIOBJ o,
+                     int (*task)(fiobj_each_s *info),
+                     void *udata,
+                     int32_t start_at);
 ```
 
 Performs a task for each element held by the FIOBJ object **directly** (but **not** itself).
@@ -9261,22 +14078,32 @@ If `task` returns -1, the `each` loop will break (stop).
 
 Returns the "stop" position - the number of elements processed + `start_at`.
 
+**Parameters:**
+- `o` - The FIOBJ container to iterate (Array or Hash Map)
+- `task` - Callback function receiving a `fiobj_each_s` pointer
+- `udata` - User data passed to the callback via `info->udata`
+- `start_at` - Starting index for iteration
 
 #### `fiobj_each2`
 
 ```c
 uint32_t fiobj_each2(FIOBJ o,
-                     int (*task)(FIOBJ obj, void *arg),
-                     void *arg);
+                     int (*task)(fiobj_each_s *info),
+                     void *udata);
 ```
 
-Performs a task for each element held by the FIOBJ object (directly or indirectly), **including** itself and any nested elements (a deep task).
+Performs a task for the object itself and each element held by the FIOBJ object or any of its elements (a deep task).
 
 The order of performance is by order of appearance, as if all nesting levels were flattened.
 
 If `task` returns -1, the `each` loop will break (stop).
 
 Returns the number of elements processed.
+
+**Parameters:**
+- `o` - The FIOBJ object to iterate deeply
+- `task` - Callback function receiving a `fiobj_each_s` pointer
+- `udata` - User data passed to the callback via `info->udata`
 
 **Note**:
 
@@ -9308,7 +14135,7 @@ i.e., `"name1.name2.name3"` will first be tested as the whole string (`"name1.na
 
 ```c
 #define fiobj_json_find2(object, str, length)                                  \
-  fiobj_json_find(object, (fio_str_info_s){.buf = str, .len = length})
+  fiobj_json_find(object, FIO_STR_INFO2(str, length))
 ```
 
 A macro helper for [`fiobj_json_find`](#fiobj_json_find).
@@ -9664,48 +14491,6 @@ These functions include:
 
 In addition, the following `fiobj_hash` functions and MACROs are defined:
 
-#### `fiobj2hash`
-
-```c
-uint64_t fiobj2hash(FIOBJ target_hash, FIOBJ value);
-```
-
-Calculates an object's hash value for a specific hash map object.
-
-#### `fiobj_hash_set`
-
-```c
-FIOBJ fiobj_hash_set2(FIOBJ hash, FIOBJ key, FIOBJ value);
-```
-
-Inserts a value to a hash map, with a default hash value calculation.
-
-#### `fiobj_hash_set_if_missing`
-
-```c
-FIOBJ fiobj_hash_set_if_missing2(FIOBJ hash, FIOBJ key, FIOBJ value);
-```
-
-Inserts a value to a hash map, with a default hash value calculation.
-
-If the key already exists in the Hash Map, the value will be freed instead.
-
-#### `fiobj_hash_get`
-
-```c
-FIOBJ fiobj_hash_get2(FIOBJ hash, FIOBJ key);
-```
-
-Finds a value in a hash map, with a default hash value calculation.
-
-#### `fiobj_hash_remove`
-
-```c
-int fiobj_hash_remove2(FIOBJ hash, FIOBJ key, FIOBJ *old);
-```
-
-Removes a value from a hash map, with a default hash value calculation.
-
 #### `fiobj_hash_set2`
 
 ```c
@@ -9713,6 +14498,14 @@ FIOBJ fiobj_hash_set2(FIOBJ hash, const char *key, size_t len, FIOBJ value);
 ```
 
 Sets a value in a hash map, allocating the key String and automatically calculating the hash value.
+
+**Parameters:**
+- `hash` - The hash map to modify
+- `key` - Pointer to the key string
+- `len` - Length of the key string
+- `value` - The FIOBJ value to store
+
+**Returns:** The previous value if the key existed, or `FIOBJ_INVALID`.
 
 #### `fiobj_hash_get2`
 
@@ -9722,6 +14515,13 @@ FIOBJ fiobj_hash_get2(FIOBJ hash, const char *buf, size_t len);
 
 Finds a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
 
+**Parameters:**
+- `hash` - The hash map to search
+- `buf` - Pointer to the key string
+- `len` - Length of the key string
+
+**Returns:** The value associated with the key, or `FIOBJ_INVALID` if not found.
+
 #### `fiobj_hash_remove2`
 
 ```c
@@ -9729,6 +14529,28 @@ int fiobj_hash_remove2(FIOBJ hash, const char *buf, size_t len, FIOBJ *old);
 ```
 
 Removes a String value in a hash map, using a temporary String as the key and automatically calculating the hash value.
+
+**Parameters:**
+- `hash` - The hash map to modify
+- `buf` - Pointer to the key string
+- `len` - Length of the key string
+- `old` - Optional pointer to store the removed value (pass NULL to discard)
+
+**Returns:** 0 on success, -1 if the key was not found.
+
+#### `fiobj_hash_update`
+
+```c
+void fiobj_hash_update(FIOBJ dest, FIOBJ src);
+```
+
+Updates a hash map using information from another Hash Map.
+
+For nested Hash Maps, the update is recursive (deep merge). For Arrays, elements are concatenated. For other types, values are overwritten.
+
+**Parameters:**
+- `dest` - The destination hash map to update
+- `src` - The source hash map to copy from
 
 #### `FIOBJ` Hash Map - Core Type Functions
 
@@ -9778,15 +14600,22 @@ This is in addition to `facil.io` support to some JSON extensions such as commen
 
 However, there are [faster alternatives as well as slower alternatives out there](json_performance.html) (i.e., the [Qajson4c library](https://github.com/DeHecht/qajson4c) is a wonderful alternative for embedded systems).
 
-#### `fiobj2json`
+#### `fiobj_json` (was `fiobj2json`)
 
 ```c
-FIOBJ fiobj2json(FIOBJ dest, FIOBJ o, uint8_t beautify);
+FIOBJ fiobj_json(FIOBJ dest, FIOBJ o, uint8_t beautify);
 ```
 
 Returns a JSON valid FIOBJ String, representing the object.
 
 If `dest` is an existing String, the formatted JSON data will be appended to the existing string.
+
+**Parameters:**
+- `dest` - Destination string (or `FIOBJ_INVALID` to create a new string)
+- `o` - The FIOBJ object to convert to JSON
+- `beautify` - If non-zero, adds indentation and newlines for readability
+
+**Returns:** A FIOBJ String containing the JSON representation.
 
 ```c
 FIOBJ result = fiobj_json_parse2("{\"name\":\"John\",\"surname\":\"Smith\",\"ID\":1}",40, NULL);
@@ -9794,7 +14623,7 @@ FIO_ASSERT( fiobj2cstr(fiobj_hash_get2(result, "name", 4)).len == 4 &&
             !memcmp(fiobj2cstr(fiobj_hash_get2(result, "name", 4)).buf, "John", 4), "result error");
 
 FIOBJ_STR_TEMP_VAR(json_str); /* places string on the stack */
-fiobj2json(json_str, result, 1);
+fiobj_json(json_str, result, 1);
 FIO_LOG_INFO("updated JSON data to look nicer:\n%s", fiobj2cstr(json_str).buf);
 fiobj_free(result);
 FIOBJ_STR_TEMP_DESTROY(json_str);
@@ -9823,8 +14652,8 @@ The `fiobj_hash_update_json2` function is a helper function, it calls `fiobj_has
 ```c
 FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed);
 
-#define fiobj_json_parse2(data_, len_, consumed)                      \
-  fiobj_json_parse((fio_str_info_s){.buf = data_, .len = len_}, consumed)
+#define fiobj_json_parse2(data_, len_, consumed)                               \
+  fiobj_json_parse(FIO_STR_INFO2(data_, len_), consumed)
 ```
 
 Parses a C string for JSON data. If `consumed` is not NULL, the `size_t` variable will contain the number of bytes consumed before the parser stopped (due to either error or end of a valid JSON data segment).
@@ -9834,6 +14663,41 @@ Returns a FIOBJ object matching the JSON valid C string `str`.
 If the parsing failed (no complete valid JSON data) `FIOBJ_INVALID` is returned.
 
 `fiobj_json_parse2` is a helper macro, it calls `fiobj_json_parse` with the provided string information.
+
+### `FIOBJ` Mustache Helpers
+
+FIOBJ provides integration with the Mustache templating system, allowing you to render Mustache templates using FIOBJ data structures (typically Hash Maps) as the context.
+
+#### `fiobj_mustache_build`
+
+```c
+FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
+```
+
+Builds a Mustache template using a FIOBJ context (usually a Hash).
+
+**Parameters:**
+- `m` - A compiled Mustache template (see Mustache documentation)
+- `ctx` - The FIOBJ context, typically a Hash Map with template variables
+
+**Returns:** A FIOBJ String with the rendered template. May return `FIOBJ_INVALID` if nothing was written.
+
+#### `fiobj_mustache_build2`
+
+```c
+FIOBJ fiobj_mustache_build2(fio_mustache_s *m, FIOBJ dest, FIOBJ ctx);
+```
+
+Builds a Mustache template using a FIOBJ context (usually a Hash).
+
+Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
+
+**Parameters:**
+- `m` - A compiled Mustache template
+- `dest` - Destination string to append to (or `FIOBJ_INVALID` to create new)
+- `ctx` - The FIOBJ context, typically a Hash Map with template variables
+
+**Returns:** `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was written and `dest` was empty.
 
 ### How to Extend the `FIOBJ` Type System
 
@@ -9888,10 +14752,14 @@ This is the structure of the virtual table:
 ```c
 /** FIOBJ types can be extended using virtual function tables. */
 typedef struct {
-  /** A unique number to identify object type. */
+  /**
+   * MUST return a unique number to identify object type.
+   *
+   * Numbers (type IDs) under 100 are reserved. Numbers under 40 are illegal.
+   */
   size_t type_id;
   /** Test for equality between two objects with the same `type_id` */
-  unsigned char (*is_eq)(FIOBJ a, FIOBJ b);
+  unsigned char (*is_eq)(FIOBJ restrict a, FIOBJ restrict b);
   /** Converts an object to a String */
   fio_str_info_s (*to_s)(FIOBJ o);
   /** Converts an object to an integer */
@@ -9901,16 +14769,15 @@ typedef struct {
   /** Returns the number of exposed elements held by the object, if any. */
   uint32_t (*count)(FIOBJ o);
   /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-  uint32_t (*each1)(FIOBJ o, int32_t start_at,
-                    int (*task)(FIOBJ child, void *arg), void *arg);
+  uint32_t (*each1)(FIOBJ o,
+                    int (*task)(fiobj_each_s *e),
+                    void *udata,
+                    int32_t start_at);
   /**
    * Decreases the reference count and/or frees the object, calling `free2` for
    * any nested objects.
-   *
-   * Returns 0 if the object is still alive or 1 if the object was freed. The
-   * return value is currently ignored, but this might change in the future.
    */
-  int (*free2)(FIOBJ o);
+  void (*free2)(FIOBJ o);
 } FIOBJ_class_vtable_s;
 ```
 
@@ -9970,7 +14837,7 @@ The Virtual Function Table (definitions and table)
 ***************************************************************************** */
 
 /** Test for equality between two objects with the same `type_id` */
-static unsigned char static_string_is_eq(FIOBJ a, FIOBJ b);
+static unsigned char static_string_is_eq(FIOBJ restrict a, FIOBJ restrict b);
 /** Converts an object to a String */
 static fio_str_info_s static_string_to_s(FIOBJ o);
 /** Converts an object to an integer */
@@ -9980,16 +14847,15 @@ static double static_string_to_f(FIOBJ o);
 /** Returns the number of exposed elements held by the object, if any. */
 static uint32_t static_string_count(FIOBJ o);
 /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-static uint32_t static_string_each1(FIOBJ o, int32_t start_at,
-                                    int (*task)(FIOBJ, void *), void *arg);
+static uint32_t static_string_each1(FIOBJ o,
+                                    int (*task)(fiobj_each_s *),
+                                    void *udata,
+                                    int32_t start_at);
 /**
  * Decreases the reference count and/or frees the object, calling `free2` for
  * any nested objects (which we don't have for this type).
- *
- * Returns 0 if the object is still alive or 1 if the object was freed. The
- * return value is currently ignored, but this might change in the future.
  */
-static int static_string_free2(FIOBJ o);
+static void static_string_free2(FIOBJ o);
 
 /** The virtual function table object. */
 static const FIOBJ_class_vtable_s FIOBJ___STATIC_STRING_VTABLE = {
@@ -10090,13 +14956,15 @@ static uint32_t static_string_count(FIOBJ o) {
   (void)o;
 }
 /** Iterates the exposed elements held by the object. See `fiobj_each1`. */
-static uint32_t static_string_each1(FIOBJ o, int32_t start_at,
-                                    int (*task)(FIOBJ, void *), void *arg) {
+static uint32_t static_string_each1(FIOBJ o,
+                                    int (*task)(fiobj_each_s *),
+                                    void *udata,
+                                    int32_t start_at) {
   return 0;
-  (void)o; (void)start_at; (void)task; (void)arg;
+  (void)o; (void)start_at; (void)task; (void)udata;
 }
 /** Decreases the reference count and/or frees the object. */
-static int static_string_free2(FIOBJ o) { return fiobj_static_string_free(o); }
+static void static_string_free2(FIOBJ o) { fiobj_static_string_free(o); }
 ```
 
 Example usage:
@@ -10119,7 +14987,6 @@ int main(void) {
 ```
 
 -------------------------------------------------------------------------------
-
 ## IO Reactor - an Evented, Single-Threaded, IO Reactor
 
 ```c
@@ -10213,7 +15080,7 @@ Controls the maximum and default timeout in milliseconds (5 minutes).
 #### `FIO_IO_SHUTDOWN_TIMEOUT`
 
 ```c
-#define FIO_IO_SHUTDOWN_TIMEOUT 10000
+#define FIO_IO_SHUTDOWN_TIMEOUT 15000
 ```
 
 Sets the hard timeout (in milliseconds) for the reactor's shutdown loop.
@@ -10406,6 +15273,7 @@ struct fio_io_async_s {
   fio_queue_s *q;
   uint32_t count;
   fio_queue_s queue;
+  fio_timer_queue_s timers;
   FIO_LIST_NODE node;
 };
 
@@ -10489,14 +15357,50 @@ int64_t fio_io_last_tick(void);
 
 Returns the last millisecond when the IO reactor polled for events.
 
+#### `fio_io_restart`
+
+```c
+void fio_io_restart(int workers);
+```
+
+Retires all existing workers and restarts with the number of workers.
+
+This function is only effective when called from the master process in cluster mode.
+
+#### `fio_io_restart_on_signal`
+
+```c
+void fio_io_restart_on_signal(int signal);
+```
+
+Sets a signal to listen to for a hot restart (see `fio_io_restart`).
+
+When the specified signal is received, the IO reactor will restart all workers.
+
+#### `fio_io_shutdown_timsout`
+
+```c
+size_t fio_io_shutdown_timsout(void);
+```
+
+Returns the shutdown timeout for the reactor in milliseconds.
+
+#### `fio_io_shutdown_timsout_set`
+
+```c
+size_t fio_io_shutdown_timsout_set(size_t milliseconds);
+```
+
+Sets the shutdown timeout for the reactor, returning the new value.
+
 ### Listening to Incoming Connections
 
 ```c
-fio_io_listener_s *fio_io_listen(fio_io_listen_args args);
+fio_io_listener_s *fio_io_listen(fio_io_listen_args_s args);
 /* Named arguments using macro. */
-#define fio_io_listen(...) fio_io_listen((fio_io_listen_args){__VA_ARGS__})
+#define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})
 
-typedef struct fio_io_listen_args {
+typedef struct fio_io_listen_args_s {
   /**
    * The binding address in URL format. Defaults to: tcp://0.0.0.0:3000
    *
@@ -10546,7 +15450,7 @@ typedef struct fio_io_listen_args {
   uint8_t on_root;
   /** Hides "started/stopped listening" messages from log (if set). */
   uint8_t hide_from_log;
-} fio_io_listen_args;
+} fio_io_listen_args_s;
 ```
 
 
@@ -10870,7 +15774,7 @@ Marks the IO for immediate closure.
 void fio_io_suspend(fio_io_s *io);
 ```
 
-Suspends future `on_data` events for the IO and **prevents** IO from being automatically closed during shutdown process (assumes IO object is waiting on an event or has a task scheduled).
+Suspends future `on_data` events for the IO.
 
 #### `fio_io_unsuspend`
 
@@ -10878,7 +15782,7 @@ Suspends future `on_data` events for the IO and **prevents** IO from being autom
 void fio_io_unsuspend(fio_io_s *io);
 ```
 
-Listens for future `on_data` events related to the IO, if shutting down, this will call `fio_io_close`).
+Listens for future `on_data` events related to the IO.
 
 #### `fio_io_is_suspended`
 
@@ -10904,6 +15808,13 @@ size_t fio_io_backlog(fio_io_s *io);
 
 Returns the approximate number of bytes in the outgoing buffer.
 
+#### `fio_io_noop`
+
+```c
+void fio_io_noop(fio_io_s *io);
+```
+
+Does nothing. This is a no-op function that can be used as a placeholder callback.
 
 ### Task Scheduling
 
@@ -11258,8 +16169,333 @@ fio_io_async_attach(&SLOW_HTTP_TASKS, 32);
 
 Pushes a task to an IO Async Queue (macro helper).
 
+#### `fio_io_async_every`
 
-## Pub/Sub 
+```c
+void fio_io_async_every(fio_io_async_s *q, fio_timer_schedule_args_s args);
+#define fio_io_async_every(async, ...)                                         \
+  fio_io_async_every(async, (fio_timer_schedule_args_s){__VA_ARGS__})
+```
+
+Schedules a timer bound task for the async queue, see `fio_timer_schedule`.
+
+Possible "named arguments" (`fio_timer_schedule_args_s` members) include:
+
+* The timer function. If it returns a non-zero value, the timer stops:
+  `int (*fn)(void *, void *)`
+* Opaque user data:
+  `void *udata1`
+* Opaque user data:
+  `void *udata2`
+* Called when the timer is done (finished):
+  `void (*on_stop)(void *, void *)`
+* Timer interval, in milliseconds:
+  `uint32_t every`
+* The number of times the timer should be performed. -1 == infinity:
+  `int32_t repetitions`
+
+-------------------------------------------------------------------------------
+## OpenSSL TLS Integration
+
+```c
+#define FIO_IO
+#include "fio-stl/include.h"
+```
+
+The OpenSSL module provides TLS (Transport Layer Security) integration for the facil.io IO reactor using OpenSSL 3.x. When OpenSSL is available, this module automatically registers itself as the default TLS implementation.
+
+**Note**: this module requires OpenSSL 3.x or later. It will not compile if `FIO_NO_TLS` is defined or if OpenSSL is unavailable.
+
+**Note**: this module is automatically included when `FIO_IO` is defined and OpenSSL headers are detected (via `HAVE_OPENSSL` or `__has_include("openssl/ssl.h")`).
+
+### Conditional Compilation
+
+The OpenSSL module compiles only when all of the following conditions are met:
+
+- `FIO_IO` is defined (the IO reactor module is included)
+- `FIO_NO_TLS` is **not** defined
+- OpenSSL 3.x headers are available (`HAVE_OPENSSL` defined or `openssl/ssl.h` exists)
+
+If OpenSSL is detected but the version is older than 3.x, a compiler warning is issued and the module falls back to the default (no-op) TLS functions.
+
+### Features
+
+The OpenSSL integration provides:
+
+- **TLS 1.3 Support**: Automatic TLS protocol negotiation via OpenSSL
+- **Self-Signed Certificates**: Automatic generation using ECDSA P-256 for development/testing
+- **Certificate Loading**: Load certificates and private keys from PEM files
+- **ALPN Protocol Negotiation**: Application-Layer Protocol Negotiation for HTTP/2, etc.
+- **Certificate Verification**: Peer verification with configurable trust store
+- **Non-Blocking I/O**: Seamless integration with the facil.io event-driven IO reactor
+
+### Usage with the IO Reactor
+
+The OpenSSL module integrates with the IO system through the `fio_io_tls_s` configuration object:
+
+```c
+#define FIO_IO
+#include "fio-stl.h"
+
+/* Create a TLS configuration object */
+fio_io_tls_s *tls = fio_io_tls_new();
+
+/* Optional: load certificates from PEM files */
+fio_io_tls_cert_add(tls,
+                    "www.example.com",  /* server name (SNI) */
+                    "cert.pem",         /* public certificate */
+                    "key.pem",          /* private key */
+                    NULL);              /* password (if key is encrypted) */
+
+/* Optional: add trusted CA certificates for peer verification */
+fio_io_tls_trust_add(tls, "ca.pem");
+
+/* Optional: configure ALPN protocol negotiation */
+fio_io_tls_alpn_add(tls, "h2", on_http2_selected);
+fio_io_tls_alpn_add(tls, "http/1.1", on_http1_selected);
+
+/* Start listening with TLS */
+fio_io_listen(.url = "0.0.0.0:443",
+              .protocol = &MY_PROTOCOL,
+              .tls = tls);
+
+/* The TLS object can be freed after fio_io_listen (it's reference counted) */
+fio_io_tls_free(tls);
+
+/* Start the IO reactor */
+fio_io_start(0);
+```
+
+### HTTPS Server Example
+
+A complete example of an HTTPS server:
+
+```c
+#define FIO_LOG
+#define FIO_IO
+#include "fio-stl.h"
+
+/* Protocol callbacks */
+FIO_SFUNC void on_data(fio_io_s *io) {
+  char buf[1024];
+  size_t len = fio_io_read(io, buf, sizeof(buf));
+  if (len) {
+    /* Echo back with HTTP response */
+    const char response[] = 
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 13\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Hello, TLS!\n";
+    fio_io_write(io, response, sizeof(response) - 1);
+    fio_io_close(io);
+  }
+}
+
+fio_io_protocol_s HTTPS_PROTOCOL = {
+    .on_data = on_data,
+    .on_timeout = fio_io_touch,
+};
+
+int main(void) {
+  /* Create TLS context - will use self-signed certificate */
+  fio_io_tls_s *tls = fio_io_tls_new();
+  
+  /* For production, load real certificates:
+   * fio_io_tls_cert_add(tls, "example.com", "cert.pem", "key.pem", NULL);
+   */
+  
+  fio_io_listen(.url = "0.0.0.0:8443",
+                .protocol = &HTTPS_PROTOCOL,
+                .tls = tls);
+  
+  fio_io_tls_free(tls);
+  
+  FIO_LOG_INFO("HTTPS server listening on port 8443");
+  FIO_LOG_INFO("Test with: curl -k https://localhost:8443/");
+  
+  fio_io_start(0);
+  return 0;
+}
+```
+
+### Self-Signed Certificates
+
+When no certificate is configured for a server, the OpenSSL module automatically generates a self-signed certificate with the following properties:
+
+| Property | Value |
+|----------|-------|
+| Algorithm | ECDSA with P-256 curve |
+| Security Level | 128-bit (equivalent to RSA-3072) |
+| Signature | SHA-256 |
+| Validity | 180 days |
+| Serial Number | 128-bit cryptographically random |
+| Key Generation | ~10ms (vs ~2000ms for RSA-4096) |
+
+**X.509v3 Extensions** (for browser compatibility):
+
+- **Basic Constraints**: `CA:FALSE` (not a CA certificate)
+- **Key Usage**: `digitalSignature`, `keyEncipherment`
+- **Extended Key Usage**: `serverAuth`
+- **Subject Alternative Name (SAN)**: DNS name matching the server name
+
+**Note**: Self-signed certificates are intended for development and testing only. Browsers will show security warnings. Use properly issued certificates from a trusted Certificate Authority (CA) in production.
+
+### API Reference
+
+#### `fio_openssl_io_functions`
+
+```c
+fio_io_functions_s fio_openssl_io_functions(void);
+```
+
+Returns the OpenSSL IO functions structure for TLS operations.
+
+This function is called automatically during module initialization to register OpenSSL as the default TLS implementation. You typically don't need to call this directly.
+
+**Returns:** A `fio_io_functions_s` structure containing:
+
+- `build_context` - Creates an SSL_CTX from `fio_io_tls_s` configuration
+- `free_context` - Frees the SSL_CTX and associated resources
+- `start` - Initializes TLS for a new connection (SSL_new, handshake)
+- `read` - Non-blocking TLS read (SSL_read)
+- `write` - Non-blocking TLS write (SSL_write)
+- `flush` - Flushes pending TLS data (no-op for OpenSSL)
+- `finish` - Initiates TLS shutdown (SSL_shutdown)
+- `cleanup` - Frees per-connection SSL object
+
+### TLS Configuration Functions
+
+The following functions from the IO module are used to configure TLS. See the [IO Reactor documentation](400%20io.md) for complete details.
+
+#### `fio_io_tls_new`
+
+```c
+fio_io_tls_s *fio_io_tls_new(void);
+```
+
+Creates a new TLS configuration object.
+
+#### `fio_io_tls_free`
+
+```c
+void fio_io_tls_free(fio_io_tls_s *tls);
+```
+
+Frees a TLS configuration object (reference counted).
+
+#### `fio_io_tls_cert_add`
+
+```c
+fio_io_tls_s *fio_io_tls_cert_add(fio_io_tls_s *tls,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password);
+```
+
+Adds a certificate to the TLS context. Supports SNI (Server Name Indication) for hosting multiple domains.
+
+- `server_name` - The server name for SNI matching
+- `public_cert_file` - Path to PEM-encoded certificate (or certificate chain)
+- `private_key_file` - Path to PEM-encoded private key
+- `pk_password` - Password for encrypted private keys (or NULL)
+
+If `public_cert_file` and `private_key_file` are both NULL, a self-signed certificate is generated.
+
+#### `fio_io_tls_trust_add`
+
+```c
+fio_io_tls_s *fio_io_tls_trust_add(fio_io_tls_s *tls,
+                                   const char *public_cert_file);
+```
+
+Adds a trusted CA certificate for peer verification.
+
+- `public_cert_file` - Path to PEM-encoded CA certificate, or NULL to use system defaults
+
+When trust certificates are added, peer verification is enabled (`SSL_VERIFY_PEER`).
+
+#### `fio_io_tls_alpn_add`
+
+```c
+fio_io_tls_s *fio_io_tls_alpn_add(fio_io_tls_s *tls,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_io_s *));
+```
+
+Registers an ALPN protocol and its selection callback.
+
+- `protocol_name` - Protocol identifier (e.g., "h2", "http/1.1")
+- `on_selected` - Callback invoked when this protocol is negotiated
+
+The first protocol added is the preferred/default protocol.
+
+### Security Considerations
+
+#### Certificate Verification
+
+- **Server Mode**: Certificate verification is typically not enabled (clients don't usually present certificates)
+
+- **Client Mode**: If no trust store is configured, verification is disabled with a security warning logged
+
+```c
+/* Enable certificate verification for client connections */
+fio_io_tls_s *tls = fio_io_tls_new();
+fio_io_tls_trust_add(tls, NULL);  /* Use system trust store */
+/* or */
+fio_io_tls_trust_add(tls, "ca-bundle.pem");  /* Use specific CA */
+```
+
+#### Production Recommendations
+
+1. **Use Real Certificates**: Obtain certificates from a trusted CA (e.g., Let's Encrypt)
+2. **Enable Verification**: Always configure trust stores for client connections
+3. **Keep OpenSSL Updated**: Security patches are released regularly
+4. **Protect Private Keys**: Use appropriate file permissions and consider encrypted keys
+
+#### SIGPIPE Handling
+
+The module automatically monitors `SIGPIPE` signals to prevent OpenSSL from crashing the application when writing to closed connections.
+
+### Non-Blocking I/O Integration
+
+The OpenSSL module configures SSL contexts for non-blocking operation:
+
+- `SSL_MODE_ENABLE_PARTIAL_WRITE` - Allow partial writes
+- `SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER` - Buffer can move between writes
+- `SSL_MODE_AUTO_RETRY` disabled - Return immediately on would-block
+
+TLS handshakes are performed asynchronously:
+- Server connections use `SSL_accept()`
+- Client connections use `SSL_connect()`
+
+Both return immediately and complete during subsequent read/write operations.
+
+### Error Handling
+
+OpenSSL errors are logged using the facil.io logging system:
+
+- `FIO_LOG_ERROR` - Critical failures (certificate loading, key generation)
+- `FIO_LOG_WARNING` - Non-fatal issues (trust store loading)
+- `FIO_LOG_SECURITY` - Security-relevant warnings (verification disabled)
+- `FIO_LOG_DEBUG2` - Detailed debugging information
+
+### Memory Management
+
+- SSL contexts (`SSL_CTX`) are reference counted and shared across connections
+- Per-connection SSL objects are allocated on connection start and freed on close
+- The global ECDSA private key (for self-signed certificates) is freed at program exit
+- Context cleanup is deferred to avoid blocking the IO reactor
+
+------------------------------------------------------------
+## Pub/Sub
+
+```c
+#define FIO_PUBSUB
+#include "fio-stl.h"
+```
 
 By defining `FIO_PUBSUB`, a Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
 
@@ -11292,8 +16528,8 @@ The internal Pub/Sub Letter Exchange Protocol imposes the following limitations 
 #### `fio_subscribe`
 
 ```c
-void fio_subscribe(subscribe_args_s args);
-#define fio_subscribe(...) fio_subscribe((subscribe_args_s){__VA_ARGS__})
+void fio_subscribe(fio_subscribe_args_s args);
+#define fio_subscribe(...) fio_subscribe((fio_subscribe_args_s){__VA_ARGS__})
 ```
 
 Subscribes to a channel / filter pair.
@@ -11316,11 +16552,11 @@ typedef struct {
    * subscription per channel for the global system unless managing the
    * subscription handle manually.
    */
-  fio_s *io;
+  fio_io_s *io;
   /**
-   * A named `channel` to which the subscriber subscribes.
+   * A named `channel` to which the message was sent.
    *
-   * Subscriptions require a match by both channel name and filter.
+   * Subscriptions require a match by both channel name and namespace filter.
    */
   fio_buf_info_s channel;
   /**
@@ -11333,6 +16569,8 @@ typedef struct {
   void *udata;
   /** The queue to which the callbacks should be routed. May be NULL. */
   fio_queue_s *queue;
+  /** Replay cached messages (if any) since supplied time in milliseconds. */
+  uint64_t replay_since;
   /**
    * OPTIONAL: subscription handle return value - should be NULL when using
    * automatic memory management with the IO or global environment.
@@ -11356,7 +16594,9 @@ typedef struct {
   int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
-} subscribe_args_s;
+  /** If set, subscription will be limited to the root / master process. */
+  uint8_t master_only;
+} fio_subscribe_args_s;
 ```
 
 The `fio_msg_s` struct in the `on_message` callback contains the following information:
@@ -11364,22 +16604,26 @@ The `fio_msg_s` struct in the `on_message` callback contains the following infor
 ```c
 typedef struct fio_msg_s {
   /** A connection (if any) to which the subscription belongs. */
-  fio_s *io;
+  fio_io_s *io;
+  /** The `udata` argument associated with the subscription. */
+  void *udata;
+  /** Message ID. */
+  uint64_t id;
+  /** Milliseconds since epoch. */
+  uint64_t published;
   /**
    * A channel name, allowing for pub/sub patterns.
    *
-   * NOTE: the channel and message strings should be considered immutable.
+   * NOTE: this is a shared copy - do NOT mutate the channel name string.
    */
-  fio_str_info_s channel;
+  fio_buf_info_s channel;
   /**
    * The actual message.
    *
-   * NOTE: the channel and message strings should be considered immutable.
+   * NOTE: this is a shared copy - do NOT mutate the message payload string.
    **/
-  fio_str_info_s message;
-  /** The `udata` argument associated with the subscription. */
-  void *udata;
-  /** A unique message type. Negative values are reserved, 0 == pub/sub. */
+  fio_buf_info_s message;
+  /** Channel name namespace. Negative values are reserved. */
   int16_t filter;
   /** flag indicating if the message is JSON data or binary/text. */
   uint8_t is_json;
@@ -11389,24 +16633,24 @@ typedef struct fio_msg_s {
 #### `fio_unsubscribe`
 
 ```c
-int fio_unsubscribe(subscribe_args_s args);
-#define fio_unsubscribe(...) fio_unsubscribe((subscribe_args_s){__VA_ARGS__})
+int fio_unsubscribe(fio_subscribe_args_s args);
+#define fio_unsubscribe(...) fio_unsubscribe((fio_subscribe_args_s){__VA_ARGS__})
 ```
 
 Cancels an existing subscriptions.
 
-Accepts the same arguments as [`fio_subscribe`](fio_subscribe), except the `udata`, and callback details are ignored (no need to provide `udata` or callback details).
+Accepts the same arguments as [`fio_subscribe`](#fio_subscribe), except the `udata`, and callback details are ignored (no need to provide `udata` or callback details).
 
 If a `subscription_handle_ptr` was provided it should contain the value of the subscription handle returned.
 
 Returns -1 if the subscription could not be found. Otherwise returns 0.
 
-The `fio_unsubscribe` macro shadows the `fio_unsubscribe` function and allows the same named arguments as the [`fio_subscribe`](fio_subscribe) function.
+The `fio_unsubscribe` macro shadows the `fio_unsubscribe` function and allows the same named arguments as the [`fio_subscribe`](#fio_subscribe) function.
 
-#### `fio_message_defer`
+#### `fio_pubsub_message_defer`
 
 ```c
-void fio_message_defer(fio_msg_s *msg);
+void fio_pubsub_message_defer(fio_msg_s *msg);
 ```
 
 Defers the current callback, so it will be called again for the same message.
@@ -11426,6 +16670,16 @@ The callback set **must** return 1 on a match or 0 if the string does not match 
 
 By default, the value is set to `fio_glob_match` (see facil.io's C STL).
 
+#### `FIO_ON_MESSAGE_SEND_MESSAGE`
+
+```c
+void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg);
+```
+
+A callback for IO subscriptions that sends raw message data.
+
+This can be used as the `on_message` callback when subscribing to forward the message payload directly to an IO connection.
+
 ### Publishing to Subscribers
 
 #### `fio_publish`
@@ -11437,15 +16691,15 @@ void fio_publish(fio_publish_args_s args);
 
 Publishes a message to the relevant subscribers (if any).
 
-By default the message is sent using the `FIO_PUBSUB_DEFAULT` engine (set by default to `FIO_PUBSUB_LOCAL` which publishes to all processes, including the calling process).
-
-If publishing to a channel with a non-zero `filter`, the pub/sub will default to `FIO_PUBSUB_LOCAL` and external engines will be ignored.
+By default the message is sent using the `FIO_PUBSUB_DEFAULT` engine (set by default to `FIO_PUBSUB_CLUSTER` which publishes to all processes and connected cluster peers).
 
 To limit the message only to other processes (exclude the calling process), use the `FIO_PUBSUB_SIBLINGS` engine.
 
 To limit the message only to the calling process, use the `FIO_PUBSUB_PROCESS` engine.
 
 To limit the message only to the root process, use the `FIO_PUBSUB_ROOT` engine.
+
+To limit the message to local processes only (no cluster peers), use the `FIO_PUBSUB_LOCAL` engine.
 
 The `fio_publish` macro shadows the `fio_publish` function and allows the following named arguments to be set:
 
@@ -11455,12 +16709,16 @@ typedef struct fio_publish_args_s {
   fio_pubsub_engine_s const *engine;
   /** If `from` is specified, it will be skipped (won't receive message)
    *  UNLESS a non-native `engine` is specified. */
-  fio_s *from;
-  /** The target named channel. Only published when filter == 0. */
+  fio_io_s *from;
+  /** Message ID (if missing, a random ID will be generated). */
+  uint64_t id;
+  /** Milliseconds since epoch (if missing, defaults to "now"). */
+  uint64_t published;
+  /** The target named channel. */
   fio_buf_info_s channel;
   /** The message body / content. */
   fio_buf_info_s message;
-  /** A numeral / internal channel. Negative values are reserved. */
+  /** A numeral namespace for channel names. Negative values are reserved. */
   int16_t filter;
   /** A flag indicating if the message is JSON data or not. */
   uint8_t is_json;
@@ -11471,14 +16729,14 @@ typedef struct fio_publish_args_s {
 
 The pub/sub system allows the delivery of messages through either internal or external services called "engines".
 
-The default pub/sub engine can be set by setting the global `FIO_PUBSUB_DEFAULT` variable which is set to `FIO_PUBSUB_LOCAL` by default.
+The default pub/sub engine can be set by setting the global `FIO_PUBSUB_DEFAULT` variable which is set to `FIO_PUBSUB_CLUSTER` by default.
 
 External engines are funneled to the root / master process before their `publish` function is called, which means that even if `from` is specified, it will be ignored for any external engine.
 
 #### `FIO_PUBSUB_ROOT`
 
 ```c
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_ROOT;
+#define FIO_PUBSUB_ROOT ((fio_pubsub_engine_s *)FIO___PUBSUB_ROOT)
 ```
 
 Used to publish the message exclusively to the root / master process.
@@ -11486,7 +16744,7 @@ Used to publish the message exclusively to the root / master process.
 #### `FIO_PUBSUB_PROCESS`
 
 ```c
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_PROCESS;
+#define FIO_PUBSUB_PROCESS ((fio_pubsub_engine_s *)FIO___PUBSUB_PROCESS)
 ```
 
 Used to publish the message only within the current process.
@@ -11494,7 +16752,7 @@ Used to publish the message only within the current process.
 #### `FIO_PUBSUB_SIBLINGS`
 
 ```c
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_SIBLINGS;
+#define FIO_PUBSUB_SIBLINGS ((fio_pubsub_engine_s *)FIO___PUBSUB_SIBLINGS)
 ```
 
 Used to publish the message except within the current process.
@@ -11502,10 +16760,20 @@ Used to publish the message except within the current process.
 #### `FIO_PUBSUB_LOCAL`
 
 ```c
-extern const fio_pubsub_engine_s *const FIO_PUBSUB_LOCAL;
+#define FIO_PUBSUB_LOCAL ((fio_pubsub_engine_s *)FIO___PUBSUB_LOCAL)
 ```
 
 Used to publish the message for this process, its siblings and root.
+
+#### `FIO_PUBSUB_CLUSTER`
+
+```c
+#define FIO_PUBSUB_CLUSTER ((fio_pubsub_engine_s *)FIO___PUBSUB_CLUSTER)
+```
+
+Used to publish the message to any possible publishers, including connected cluster peers.
+
+This is the default engine.
 
 #### `fio_pubsub_engine_s`
 
@@ -11514,18 +16782,23 @@ struct fio_pubsub_engine_s {
   /** Called after the engine was detached, may be used for cleanup. */
   void (*detached)(const fio_pubsub_engine_s *eng);
   /** Subscribes to a channel. Called ONLY in the Root (master) process. */
-  void (*subscribe)(const fio_pubsub_engine_s *eng, fio_str_info_s channel);
-  /** Unsubscribes to a channel. Called ONLY in the Root (master) process. */
-  void (*unsubscribe)(const fio_pubsub_engine_s *eng, fio_str_info_s channel);
+  void (*subscribe)(const fio_pubsub_engine_s *eng,
+                    fio_buf_info_s channel,
+                    int16_t filter);
   /** Subscribes to a pattern. Called ONLY in the Root (master) process. */
-  void (*psubscribe)(const fio_pubsub_engine_s *eng, fio_str_info_s channel);
+  void (*psubscribe)(const fio_pubsub_engine_s *eng,
+                     fio_buf_info_s channel,
+                     int16_t filter);
+  /** Unsubscribes to a channel. Called ONLY in the Root (master) process. */
+  void (*unsubscribe)(const fio_pubsub_engine_s *eng,
+                      fio_buf_info_s channel,
+                      int16_t filter);
   /** Unsubscribe to a pattern. Called ONLY in the Root (master) process. */
-  void (*punsubscribe)(const fio_pubsub_engine_s *eng, fio_str_info_s channel);
+  void (*punsubscribe)(const fio_pubsub_engine_s *eng,
+                       fio_buf_info_s channel,
+                       int16_t filter);
   /** Publishes a message through the engine. Called by any worker / thread. */
-  void (*publish)(const fio_pubsub_engine_s *eng,
-                  fio_str_info_s channel,
-                  fio_str_info_s msg,
-                  uint8_t is_json);
+  void (*publish)(const fio_pubsub_engine_s *eng, fio_msg_s *msg);
 };
 ```
 
@@ -11537,11 +16810,11 @@ Engines MUST provide the listed function pointers and should be attached using t
 
 Engines should disconnect / detach, before being destroyed, by using the `fio_pubsub_detach` function.
 
-When an engine received a message to publish, it should call the `pubsub_publish` function with the built-in engine to which the message is forwarded.
+When an engine received a message to publish, it should call the `fio_publish` function with the built-in engine to which the message is forwarded.
 i.e.:
 
 ```c
-pubsub_publish(
+fio_publish(
     .engine = FIO_PUBSUB_LOCAL,
     .channel = channel_name,
     .message = msg_body );
@@ -11549,7 +16822,7 @@ pubsub_publish(
 
 Since only the master process guarantees to be subscribed to all the channels in the cluster, only the master process calls the `(un)(p)subscribe` callbacks.
 
-**Note**: The `(un)(p)subscribe` callbacks might be called by the main (master) thread, so they should never block except by scheduling an external task using `fio_srv_defer`.
+**Note**: The callbacks will be called by the main IO thread, so they should never block. Long tasks should copy the data and schedule an external task (i.e., using `fio_io_defer`).
 
 #### `fio_pubsub_attach`
 
@@ -11561,8 +16834,11 @@ Attaches an engine, so it's callback can be called by facil.io.
 
 The `(p)subscribe` callback will be called for every existing channel.
 
-NOTE: the root (master) process will call `subscribe` for any channel in any process, while all the other processes will call `subscribe` only for their own channels. This allows engines to use the root (master) process as an exclusive subscription process.
+This can be called multiple times resulting in re-running the `(p)subscribe` callbacks.
 
+**Note**: engines are automatically detached from child processes but can be safely used even so - messages are always forwarded to the engine attached to the root (master) process.
+
+**Note**: engines should publish events to `FIO_PUBSUB_LOCAL`.
 
 #### `fio_pubsub_detach`
 
@@ -11570,41 +16846,19 @@ NOTE: the root (master) process will call `subscribe` for any channel in any pro
 void fio_pubsub_detach(fio_pubsub_engine_s *engine);
 ```
 
-Detaches an engine, so it could be safely destroyed.
-
-#### `fio_pubsub_resubscribe_all`
-
-```c
-void fio_pubsub_resubscribe_all(fio_pubsub_engine_s *eng);
-```
-
-Engines can ask facil.io to call the `(p)subscribe` callbacks for all active channels.
-
-This allows engines that lost their connection to their Pub/Sub service to resubscribe to all the currently active channels with the new connection.
-
-**CAUTION**: This is an evented task... try not to free the engine's memory while re-subscriptions are under way.
-
-**NOTE**: the root (master) process will call `(p)subscribe` for any channel in any process, while all the other processes will call `subscribe` only for their own channels. This allows engines to use the root (master) process as an exclusive subscription process.
-
-#### `fio_pubsub_is_attached`
-
-```c
-int fio_pubsub_is_attached(fio_pubsub_engine_s *engine);
-```
-
-Returns true (`1`) if the engine is attached to the system.
+Schedules an engine for Detachment, so it could be safely destroyed.
 
 ### User Defined Pub/Sub Message Metadata
 
 #### `fio_msg_metadata_fn`
 
 ```c
-typedef void *(*fio_msg_metadata_fn)(fio_str_info_s ch,
-                                     fio_str_info_s msg,
-                                     uint8_t is_json);
+typedef void *(*fio_msg_metadata_fn)(fio_msg_s *);
 ```
 
 Pub/Sub Metadata callback type.
+
+The callback receives the message and should return a `void *` pointer to the metadata.
 
 #### `fio_message_metadata_add`
 
@@ -11612,11 +16866,11 @@ Pub/Sub Metadata callback type.
 int fio_message_metadata_add(fio_msg_metadata_fn metadata_func, void (*cleanup)(void *));
 ```
 
-It's possible to attach metadata to facil.io named messages (filter == 0) before they are published.
+It's possible to attach metadata to facil.io pub/sub messages before they are published.
 
 This allows, for example, messages to be encoded as network packets for outgoing protocols (i.e., encoding for WebSocket transmissions), improving performance in large network based broadcasting.
 
-Up to `FIO_PUBSUB_METADATA_LIMIT` metadata callbacks can be attached.
+Up to `FIO___PUBSUB_METADATA_STORE_LIMIT` metadata callbacks can be attached (default is 4).
 
 The callback should return a `void *` pointer.
 
@@ -11634,7 +16888,6 @@ Multiple `fio_message_metadata_add` calls increase a reference count and should 
 void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func);
 ```
 
-
 Removed the metadata callback.
 
 Removal might be delayed if live metatdata exists.
@@ -11642,13 +16895,16 @@ Removal might be delayed if live metatdata exists.
 #### `fio_message_metadata`
 
 ```c
-void *fio_message_metadata(fio_msg_metadata_fn metadata_func);
+void *fio_message_metadata(fio_msg_s *msg, fio_msg_metadata_fn metadata_func);
 ```
-
 
 Finds the message's metadata, returning the data or NULL.
 
-Note: channels with non-zero filters don't have metadata attached.
+**Parameters:**
+- `msg` - the message to retrieve metadata from
+- `metadata_func` - the metadata callback function used when adding the metadata
+
+**Note**: channels with non-zero filters don't have metadata attached.
 
 ### Pub/Sub Connectivity Helpers
 
@@ -11658,7 +16914,7 @@ Note: channels with non-zero filters don't have metadata attached.
 int fio_pubsub_ipc_url_set(char *str, size_t len);
 ```
 
-Returns the current IPC socket address (cannot be changed after `fio_srv_start` was called).
+Sets the current IPC socket address (can't be changed while running).
 
 Returns -1 on error (i.e., server is already running or length is too long).
 
@@ -11668,7 +16924,24 @@ Returns -1 on error (i.e., server is already running or length is too long).
 const char *fio_pubsub_ipc_url(void);
 ```
 
-Returns the current IPC socket address (shouldn't be changed).
+Returns a pointer to the current IPC socket address.
+
+#### `fio_pubsub_broadcast_on_port`
+
+```c
+void fio_pubsub_broadcast_on_port(int16_t port);
+```
+
+Enables auto-peer detection and pub/sub multi-machine clustering using the specified `port`.
+
+This function sets up UDP broadcast for peer discovery and TCP connections for message exchange between cluster nodes.
+
+**Parameters:**
+- `port` - the port number to use for broadcasting and listening. If 0 or negative, defaults to 3333.
+
+**Note**: This requires a shared secret to be set (not a random secret) for peer validation. The secret can be set using `fio_secret_set`.
+
+**Note**: The `PUBSUB_PORT` environment variable can also be used to set the port automatically at startup.
 
 -------------------------------------------------------------------------------
 ## HTTP Server
@@ -11678,7 +16951,7 @@ Returns the current IPC socket address (shouldn't be changed).
 #### `fio_http_listen`
 
 ```c
-void * fio_http_listen(const char *url, fio_http_settings_s settings);
+fio_http_listener_s *fio_http_listen(const char *url, fio_http_settings_s settings);
 
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
@@ -11686,9 +16959,9 @@ void * fio_http_listen(const char *url, fio_http_settings_s settings);
 
 Listens to HTTP / WebSockets / SSE connections on `url`.
 
-The MACRO shadowing the function enables the used of named arguments for the `fio_http_settings_s`.
+The MACRO shadowing the function enables the use of named arguments for the `fio_http_settings_s`.
 
-Returns a listener handle (same as `fio_srv_listen`). Listening can be stopped using `fio_srv_listen_stop`.
+Returns a listener handle (`fio_http_listener_s *`). The listener can be used with `fio_http_route` to add route-specific handlers.
 
 ```c
 typedef struct fio_http_settings_s {
@@ -11852,15 +17125,16 @@ Returns a link to the settings matching `url`, as set by `fio_http_route`.
 
 ```c
 typedef enum {
-FIO_HTTP_RESOURCE_NONE,
-FIO_HTTP_RESOURCE_INDEX,
-FIO_HTTP_RESOURCE_SHOW,
-FIO_HTTP_RESOURCE_NEW,
-FIO_HTTP_RESOURCE_EDIT,
-FIO_HTTP_RESOURCE_CREATE,
-FIO_HTTP_RESOURCE_UPDATE,
-FIO_HTTP_RESOURCE_DELETE,
-} fio_http_route_resource_e;
+  FIO_HTTP_RESOURCE_NONE,
+  FIO_HTTP_RESOURCE_INDEX,
+  FIO_HTTP_RESOURCE_SHOW,
+  FIO_HTTP_RESOURCE_NEW,
+  FIO_HTTP_RESOURCE_EDIT,
+  FIO_HTTP_RESOURCE_CREATE,
+  FIO_HTTP_RESOURCE_UPDATE,
+  FIO_HTTP_RESOURCE_DELETE,
+} fio_http_resource_action_e;
+
 fio_http_resource_action_e fio_http_resource_action(fio_http_s *h);
 ```
 
@@ -11899,10 +17173,10 @@ If no REST / CRUD style action is detected, FIO_HTTP_RESOURCE_NONE is returned.
 #### `fio_http_listener_settings`
 
 ```c
-fio_http_settings_s *fio_http_listener_settings(void *listener);
+fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *listener);
 ```
 
-Returns the a pointer to the HTTP settings associated with the listener.
+Returns a pointer to the HTTP settings associated with the listener.
 
 **Note**: changing the settings for the root path should be performed using `fio_http_route` and not by altering the settings directly.
 
@@ -11917,9 +17191,9 @@ Allows all clients to connect to WebSockets / EventSource (SSE) connections (byp
 #### `fio_http_connect`
 
 ```c
-fio_s *fio_http_connect(const char *url,
-                              fio_http_s *h,
-                              fio_http_settings_s settings);
+fio_io_s *fio_http_connect(const char *url,
+                           fio_http_s *h,
+                           fio_http_settings_s settings);
 /* Shadow the function for named arguments */
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
@@ -11929,6 +17203,8 @@ fio_s *fio_http_connect(const char *url,
 Connects to HTTP / WebSockets / SSE connections on `url`.
 
 Accepts named arguments for the `fio_http_settings_s` settings.
+
+**Returns:** an IO handle (`fio_io_s *`) on success, or NULL on error.
 
 ### Creating an HTTP Handle
 
@@ -12021,7 +17297,7 @@ Sets a second opaque user pointer associated with the HTTP handle.
 #### `fio_http_io`
 
 ```c
-fio_s *fio_http_io(fio_http_s *);
+fio_io_s *fio_http_io(fio_http_s *);
 ```
 
 Returns the IO object associated with the HTTP object (request only).
@@ -12100,6 +17376,14 @@ int fio_http_is_sse(fio_http_s *);
 
 Returns true if the HTTP handle refers to an EventSource connection.
 
+#### `fio_http_is_freeing`
+
+```c
+int fio_http_is_freeing(fio_http_s *);
+```
+
+Returns true if the HTTP handle is in the process of freeing itself.
+
 ### HTTP Request Data
 
 #### `fio_http_received_at`
@@ -12171,6 +17455,24 @@ fio_str_info_s fio_http_path_set(fio_http_s *, fio_str_info_s);
 ```
 
 Sets the path information associated with the HTTP handle.
+
+#### `fio_http_opath`
+
+```c
+fio_str_info_s fio_http_opath(fio_http_s *);
+```
+
+Gets the original / first path associated with the HTTP handle.
+
+This is the path before any routing modifications were applied.
+
+#### `fio_http_opath_set`
+
+```c
+fio_str_info_s fio_http_opath_set(fio_http_s *, fio_str_info_s);
+```
+
+Sets the original / first path associated with the HTTP handle.
 
 #### `FIO_HTTP_PATH_EACH`
 
@@ -12350,6 +17652,16 @@ void fio_http_body_write(fio_http_s *, const void *data, size_t len);
 ```
 
 Writes `data` to the body (payload) associated with the HTTP handle.
+
+#### `fio_http_body_fd`
+
+```c
+int fio_http_body_fd(fio_http_s *);
+```
+
+If the body is stored in a temporary file, returns the file's handle.
+
+Otherwise returns -1.
 
 #### HTTP Cookies
 
@@ -12593,10 +17905,12 @@ Calls [`fio_http_write`](#fio_http_write) without any data to be sent.
 #### `fio_http_send_error_response`
 
 ```c
-void fio_http_send_error_response(fio_http_s *h, size_t status);
+int fio_http_send_error_response(fio_http_s *h, size_t status);
 ```
 
 Sends the requested error message and finishes the response.
+
+**Returns:** 0 on success, -1 on error (e.g., if headers were already sent).
 
 #### `fio_http_etag_is_match`
 
@@ -12640,6 +17954,38 @@ Logs an HTTP (response) to STDOUT using common log format:
 ```
 
 See also the `FIO_HTTP_LOG_X_REQUEST_START` and `FIO_HTTP_EXACT_LOGGING` compilation flags.
+
+#### `fio_http_date`
+
+```c
+fio_str_info_s fio_http_date(uint64_t now_in_seconds);
+```
+
+Returns a cached date/time string for HTTP date headers (RFC 7231 format).
+
+The string is cached and updated when the timestamp changes.
+
+#### `fio_http_log_time`
+
+```c
+fio_str_info_s fio_http_log_time(uint64_t now_in_seconds);
+```
+
+Returns a cached date/time string for HTTP logging.
+
+The string is cached and updated when the timestamp changes.
+
+#### `fio_http_clear_response`
+
+```c
+fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body);
+```
+
+Clears any response data from the HTTP handle.
+
+If `clear_body` is true, also clears the body data.
+
+Returns the HTTP handle.
 
 ### HTTP WebSocket / SSE Helpers
 
@@ -12757,18 +18103,20 @@ Closes a persistent HTTP connection (i.e., if upgraded).
 #### `fio_http_subscribe`
 
 ```c
-int fio_http_subscribe(fio_http_s *h, fio_subscribe_args_s args);
-
-#define fio_http_subscribe(h, ...) fio_http_subscribe((h), ((fio_subscribe_args_s){__VA_ARGS__}))
+#define fio_http_subscribe(h, ...)                                             \
+  fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 ```
 
-Subscribes the HTTP handle (WebSocket / SSE) to events. Requires an Upgraded connection.
+Macro helper for HTTP handle pub/sub subscriptions.
 
-Automatically sets the correct `io` object and the default callback if none was provided (either `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT` or `FIO_HTTP_SSE_SUBSCRIBE_DIRECT`).
+This macro wraps `fio_subscribe`, automatically setting the `io` argument to the IO object associated with the HTTP handle.
 
-Using a `NULL` HTTP handle (`fio_http_s *`) is the same as calling `fio_subscribe` without an `io` object.
+Example:
 
-Returns `-1` on error (i.e., upgrade still being negotiated).
+```c
+fio_http_subscribe(h, .channel = FIO_STR_INFO1("chat"),
+                      .on_message = my_on_message_callback);
+```
 
 #### `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT`
 
@@ -12996,11 +18344,11 @@ The HTTP handle will avoid caching strings longer than this value.
 
 The HTTP cache will use a mutex to allow headers to be set concurrently.
 
-#### `FIO_HTTP_CACHE_STATIC_HEADERS`
+#### `FIO_HTTP_PRE_CACHE_KNOWN_HEADERS`
 
 ```c
-#ifndef FIO_HTTP_CACHE_STATIC_HEADERS
-#define FIO_HTTP_CACHE_STATIC_HEADERS 1
+#ifndef FIO_HTTP_PRE_CACHE_KNOWN_HEADERS
+#define FIO_HTTP_PRE_CACHE_KNOWN_HEADERS 1
 #endif
 ```
 
@@ -13025,6 +18373,16 @@ The default file name when a static file response points to a folder.
 ```
 
 Attempts to auto-complete static file paths with missing extensions.
+
+#### `FIO_HTTP_ENFORCE_LOWERCASE_HEADERS`
+
+```c
+#ifndef FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+#define FIO_HTTP_ENFORCE_LOWERCASE_HEADERS 0
+#endif
+```
+
+If true, the HTTP handle will copy input header names to lower case.
 
 ### Compilation Flags and Default HTTP Connection Settings
 
@@ -13101,7 +18459,7 @@ UTF-8 validity tests will be performed only for data shorter than this.
 
 If true, logs longest WebSocket ping-pong round-trips (using `FIO_LOG_INFO`).
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ## Hash Function Testing
 
 During development I tested the Hash functions using [the SMHasher testing suite (@rurban's fork)](https://github.com/rurban/smhasher). The testing suite is often growing with more tests, so I do not know what the future may bring... but attached are the test results for Risky Hash, Stable Hash (64 and 128 bit variation) as they were at the time of (re)development (March, 2023).
@@ -13110,7 +18468,7 @@ During development I tested the Hash functions using [the SMHasher testing suite
 The following results were achieved on my personal computer when testing the facil.io Risky Hash (`fio_risky_hash`).
 
 ```txt
--------------------------------------------------------------------------------
+------------------------------------------------------------
 --- Testing Risky "facil.io Risky Hash" GOOD
 
 [[[ Sanity Tests ]]]
@@ -14249,16 +19607,16 @@ Testing collisions (low  28-44 bits) - Worst is 41 bits: 261/255 (1.02x)
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 681.305909 seconds
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ### Stable Hash 64bit SMHasher Results
 
 The following results were achieved on my personal computer when testing the 64bit variant of the facil.io Stable Hash (`fio_stable_hash`).
 
 ```txt
--------------------------------------------------------------------------------
+------------------------------------------------------------
 --- Testing Stable "facil.io Stable Hash 64bit" GOOD
 
 [[[ Sanity Tests ]]]
@@ -15397,16 +20755,16 @@ Testing collisions (low  28-44 bits) - Worst is 43 bits: 68/63 (1.06x)
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 755.424002 seconds
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ### Stable Hash 128bit SMHasher Results
 
 The following results were achieved on my personal computer when testing the 128bit variant of the facil.io Stable Hash (`fio_stable_hash128`).
 
 ```txt
--------------------------------------------------------------------------------
+------------------------------------------------------------
 --- Testing Stable128 "facil.io Stable Hash 128bit" GOOD
 
 [[[ Sanity Tests ]]]
@@ -16723,10 +22081,10 @@ Testing collisions (low  28-44 bits) - Worst is 43 bits: 85/63 (1.33x)
 
 Input vcode 0x00000001, Output vcode 0x00000001, Result vcode 0x00000001
 Verification value is 0x00000001 - Testing took 1063.513065 seconds
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ## Pseudo-Random Function Testing
 
 Testing the Pseudo-Random Number Generator (PRNG) Functions isn't somewhat of a chore, as a complete test could take a week or so to complete and my laptop wasn't designed for such long running intensive tasks.
@@ -16735,7 +22093,7 @@ Tests were conducted by utilizing [PractRand](https://pracrand.sourceforge.net) 
 
 Results are as follows:
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ### `fio_rand`
 
 The following are the tests for the core  `fio_rand64` and `fio_rand_bytes` functions provided when using `FIO_RAND`.
@@ -17485,7 +22843,7 @@ p = 0.526
 ------
 ```
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
 ### `FIO_DEFINE_RANDOM128_FN`
 
 The following are the tests for the built-in `FIO_DEFINE_RANDOM128_FN` macro using the deterministic PRNG (where the auto-reseeding `reseed_log` is set to `0`).
@@ -18234,6 +23592,7 @@ processed 4e+12 bytes in 1.18e+03 seconds (3.381 GB/s, 12.17 TB/h). Fri Feb 21 2
 p = 0.142
 ------
 ```
--------------------------------------------------------------------------------
 
--------------------------------------------------------------------------------
+------------------------------------------------------------
+
+------------------------------------------------------------

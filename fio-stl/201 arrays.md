@@ -55,6 +55,8 @@ For complex types, define any (or all) of the following macros:
 #define FIO_ARRAY_TYPE_DESTROY(obj)     
 // set to adjust element comparison 
 #define FIO_ARRAY_TYPE_CMP(a, b)        
+// set to adjust element copying during concat operations
+#define FIO_ARRAY_TYPE_CONCAT_COPY(dest, src)
 // to be returned when `index` is out of bounds / holes 
 #define FIO_ARRAY_TYPE_INVALID 0 
 // set ONLY if the invalid element is all zero bytes 
@@ -68,6 +70,15 @@ For complex types, define any (or all) of the following macros:
 // optimizes small arrays (mostly tuplets and single item arrays).
 // note: values larger than 1 add a memory allocation cost to the array container
 #define FIO_ARRAY_ENABLE_EMBEDDED 1
+```
+
+For string arrays, the `FIO_ARRAY_TYPE_STR` macro can be used as a shortcut:
+
+```c
+// Automatically sets up FIO_ARRAY_TYPE, FIO_ARRAY_TYPE_COPY, 
+// FIO_ARRAY_TYPE_DESTROY, FIO_ARRAY_TYPE_CMP, and FIO_ARRAY_DESTROY_AFTER_COPY
+// for fio_keystr_s string types
+#define FIO_ARRAY_TYPE_STR
 ```
 
 To create the type and helper functions, include The facil.io library header.
@@ -101,14 +112,14 @@ void example(void) {
 
 ```c
 typedef struct {
-  FIO_ARRAY_TYPE *ary;
-  uint32_t capa;
-  uint32_t start;
-  uint32_t end;
+  uint32_t start;  /* the offset to the first item */
+  uint32_t end;    /* the offset to the first empty location */
+  uint32_t capa;   /* the array's capacity */
+  FIO_ARRAY_TYPE *ary;  /* pointer to the array's memory (if not embedded) */
 } FIO_NAME(FIO_ARRAY_NAME, s); /* ARY_s in these docs */
 ```
 
-The array type should be considered opaque. Use the helper functions to updated the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
+The array type should be considered opaque. Use the helper functions to update the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
 
 #### `FIO_ARRAY_INIT`
 
@@ -157,6 +168,22 @@ uint32_t ARY_capa(ARY_s * ary);
 ````
 
 Returns the current, temporary, array capacity (it's dynamic).
+
+#### `ARY_embedded`
+
+````c
+int ARY_embedded(ARY_s * ary);
+````
+
+Returns 1 if the array is embedded, 0 if it has memory allocated and -1 on an error.
+
+#### `ARY_ptr`
+
+````c
+FIO_ARRAY_TYPE * ARY_ptr(ARY_s * ary);
+````
+
+Returns a pointer to the C array containing the objects.
 
 #### `ARY_reserve`
 
@@ -255,14 +282,6 @@ void ARY_compact(ARY_s * ary);
 
 Attempts to lower the array's memory consumption.
 
-#### `ARY_to_a`
-
-```c
-FIO_ARRAY_TYPE * ARY_to_a(ARY_s * ary);
-```
-
-Returns a pointer to the C array containing the objects.
-
 #### `ARY_push`
 
 ```c
@@ -310,13 +329,13 @@ Returns -1 on error (Array is empty) and 0 on success.
 ```c
 uint32_t ARY_each(ARY_s * ary,
                   int (*task)(ARY_each_s * info),
-                  void *arg,
+                  void *udata,
                   int64_t start_at);
 ```
 
 Iteration using a callback for each entry in the array.
 
-The callback task function must accept an an `ARY_each_s` pointer (name matches Array name).
+The callback task function must accept an `ARY_each_s` pointer (name matches Array name).
 
 If the callback returns -1, the loop is broken. Any other value is ignored.
 
@@ -326,62 +345,60 @@ The `ARY_each_s` data structure looks like this:
 
 ```c
 /** Iteration information structure passed to the callback. */
-typedef ARY_each_s {
-  /** The being iterated. Once set, cannot be safely changed. */
+typedef struct ARY_each_s {
+  /** The array iterated. Once set, cannot be safely changed. */
   FIO_ARRAY_PTR const parent;
   /** The current object's index */
   uint64_t index;
-  /** Always 1 and may be used to allow type detection. */
-  const int64_t items_at_index;
   /** The callback / task called for each index, may be updated mid-cycle. */
-  int (*task)(ARY_each_s * info);
-  /** The argument passed along to the task. */
-  void *arg;
+  int (*task)(struct ARY_each_s * info);
+  /** Opaque user data. */
+  void *udata;
   /** The object / value at the current index. */
   FIO_ARRAY_TYPE value;
+  /* memory padding used for FIOBJ */
+  uint64_t padding;
 } ARY_each_s;
 ```
 
 #### `ARY_each_next`
 
 ```c
-FIO_ARRAY_TYPE ARY_each_next(ARY_s* ary,
-                             FIO_ARRAY_TYPE **first,
-                             FIO_ARRAY_TYPE *pos);
-
+FIO_ARRAY_TYPE * ARY_each_next(ARY_s* ary,
+                               FIO_ARRAY_TYPE **first,
+                               FIO_ARRAY_TYPE *pos);
 ```
 
-Used internally by the `FIO_ARRAY_EACH` macro.
+Returns a pointer to the (next) object in the array.
 
-Returns a pointer to the first object if `pos == NULL` and there are objects
-in the array.
+Returns a pointer to the first object if `pos == NULL` and there are objects in the array.
 
-Returns a pointer to the (next) object in the array if `pos` and `first` are valid.
-
-Returns `NULL` on error or if the array is empty.
-
-**Note**: 
 The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
 
-If the object in `pos` (or any object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+If the object in `pos` (or an object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
+
+Returns the next object if both `first` and `pos` are valid.
+
+Returns `NULL` if `pos` was the last object or no object exist.
+
+Returns the first object if either `first` or `pos` are invalid.
 
 #### `FIO_ARRAY_EACH`
 
 ```c
-#define FIO_ARRAY_EACH(array_name, array, pos)                                               \
-  for (__typeof__(FIO_NAME2(array_name, ptr)((array)))                             \
-           first___ = NULL,                                                    \
-           pos = FIO_NAME(array_name, each_next)((array), &first___, NULL);    \
+#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
+  for (FIO_NAME(array_name, ____type_t)                                        \
+           *first___ai = NULL,                                                 \
+           *pos = FIO_NAME(array_name, each_next)((array), &first___ai, NULL); \
        pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___, pos))
+       pos = FIO_NAME(array_name, each_next)((array), &first___ai, pos))
 ```
-
 
 Iterates through the array using a `for` loop.
 
 Access the object with the pointer `pos`. The `pos` variable can be named however you please.
 
-It is possible to edit the array while iterating, however when deleting `pos`, or objects that are located before `pos`, using the proper array functions, the loop will skip the next item unless `pos` is set to `pos-1`.
+Avoid editing the array during a FOR loop, although I hope it's possible, I wouldn't count on it.
 
 **Note**: this macro supports automatic pointer tagging / untagging.
 

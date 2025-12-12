@@ -1281,16 +1281,24 @@ SIMD Vector Looping Helper
 
 /* Internal - bytes per constant iterative loop for compiler optimization  */
 #define FIO___SIMD_BYTES ((size_t)256U)
-/* Internal - looping macro that separates   */
-#define FIO_FOR_UNROLL(itterations, size_of_loop, i, action)                   \
+/**
+ * Unrolled `for` loop - separates for loops to make it easier for the compiler
+ * to optimize.
+ *
+ * @param iterations - the number of loop iterations to perform
+ * @param size_of_loop - the number of bytes consumed by each `action`
+ * @param i - the loop index variable name to use (accessible by `action`)
+ * @param action - an action to be performed each iteration (can be a macro)
+ * */
+#define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
   do {                                                                         \
     size_t i = 0;                                                              \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if ((itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))               \
-      for (; i < (itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i) \
+    if ((iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))                \
+      for (; i < (iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i)  \
         action;                                                                \
-    if (itterations)                                                           \
-      for (; i < itterations;)                                                 \
+    if (iterations)                                                            \
+      for (; i < iterations;)                                                  \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \

@@ -232,6 +232,26 @@ Translates to the STL's version as a string (i.e., `"0.8.0-beta.1"`).
 
 -------------------------------------------------------------------------------
 
+## OS Detection Macros
+
+#### `FIO_OS_POSIX`
+
+Set to `1` on POSIX systems (Linux, macOS, BSD, etc.), `0` otherwise.
+
+#### `FIO_OS_WIN`
+
+Set to `1` on Windows systems, `0` otherwise.
+
+#### `FIO_HAVE_UNIX_TOOLS`
+
+Set to a non-zero value when Unix-like tools are available. Values:
+- `0` - No Unix tools
+- `1` - Full POSIX
+- `2` - MinGW
+- `3` - Cygwin
+
+-------------------------------------------------------------------------------
+
 ### Default Memory Allocation
 
 By setting these macros, the memory allocator used by facil.io could be changed from the default allocator (either the custom allocator or, if missing, the system's allocator).
@@ -324,7 +344,7 @@ void my_type_free(my_type_s * t) {
 #define FIO_LEAK_COUNTER_COUNT(name)
 ```
 
-Returns the number of unfreed allocattions according to the named memory leak detector.
+Returns the number of unfreed allocations according to the named memory leak detector.
 
 Returned type is `size_t`
 
@@ -337,21 +357,12 @@ The core module provides a simple way to manage a "good enough" thread safe memo
 #### `FIO_STATIC_ALLOC_DEF`
 
 ```c
-#ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
-/* Maximum number of threads to be expected to call the allocator at once. */
-#define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
-#endif
-#define FIO_STATIC_ALLOC_DEF(function_name,                                             \
-                             type_T,                                           \
-                             size_per_allocation,                              \
-                             allocations_per_thread) /* ... */ 
+#define FIO_STATIC_ALLOC_DEF(function_name, type_T, size_per_allocation, allocations_per_thread)
 ```
-
 
 Defines a simple (almost naive) static memory allocator named `function_name` which accepts a single `size_t` argument `count`.
 
 The defined function returns a `type_T` pointer (`type_T *`) containing `sizeof(type_T) * count * size_per_allocation` in correct memory alignment for the requested type.
-
 
 ```c
 static type_T *function_name(size_t count);
@@ -364,40 +375,21 @@ The functions can safely allocate the following number of bytes before the funct
     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
         sizeof(type_T) * size_per_allocation
 
-The following example uses static memory to create a (zero allocation) number to string converter and then uses it to print out a number's value for logging:
+Example:
 
 ```c
 // Step 1: define the allocator:
-//
-// This will define a static allocator,
-// allocating 19 byte long strings per allocation.
-// Reserving 4,864 bytes in static memory.
 FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
 
 // Step 2: use the allocator
-//
-// example function that returns an unsigned number as a 16 digit hex string
 char * ntos16(uint16_t n) {
-  // allocates 19 bytes from the static memory pool.
-  char * n = numer2hex_allocator(1);
-  // Writes the number in hex + NUL byte.
-  n[0] = '0'; n[1] = 'x';
-  fio_ltoa16u(n+2, n, 16);
-  n[18] = 0;
-  // returns the string (a pointer to the 19 bytes).
-  return n;
+  char * buf = numer2hex_allocator(1);
+  buf[0] = '0'; buf[1] = 'x';
+  fio_ltoa16u(buf+2, n, 16);
+  buf[18] = 0;
+  return buf;
 }
-
-// Step 3: example use-case.
-void print_number_for_debugging(char * file, int line, char * var, uint16_t n) {
-  printf("(%s:%d) %s = %s", file, line, var_name, ntos16(n));
-}
-
-// Prints any number in hex, along with file location and variable name.
-#define LOG_PRINT_VAL(n) print_number_for_debugging(__FILE__, __LINE__, #n, n)
 ```
-
-A similar approach is use by `fiobj_num2cstr` in order to provide temporary conversions of FIOBJ to a C String without the caller having to reason about memory management.
 
 -------------------------------------------------------------------------------
 
@@ -407,7 +399,7 @@ A similar approach is use by `fiobj_num2cstr` in order to provide temporary conv
 
 ```c
 #define FIO_PTR_MATH_LMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & (((uintptr_t)1 << (bits)) - 1)))
+  ((T_type *)(((uintptr_t)(ptr)) & (((uintptr_t)1ULL << (bits)) - 1)))
 ```
 
 Masks a pointer's left-most bits, returning the right bits (i.e., `0x000000FF`).
@@ -416,7 +408,7 @@ Masks a pointer's left-most bits, returning the right bits (i.e., `0x000000FF`).
 
 ```c
 #define FIO_PTR_MATH_RMASK(T_type, ptr, bits)                                  \
-  ((T_type *)((uintptr_t)(ptr) & ((~(uintptr_t)0) << bits)))
+  ((T_type *)(((uintptr_t)(ptr)) & ((~(uintptr_t)0ULL) << (bits))))
 ```
 
 Masks a pointer's right-most bits, returning the left bits (i.e., `0xFFFFFF00`).
@@ -443,14 +435,14 @@ Subtract X bytes from pointer's address, updating the pointer's type.
 
 ```c
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type, ptr, (&((T_type *)0)->field))
+  FIO_PTR_MATH_SUB(T_type, ptr, (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
 ```
 
-Find the root object (of a `struct`) from a pointer to its field's (the field's address).
+Find the root object (of a `struct`) from a pointer to its field's address.
 
 -------------------------------------------------------------------------------
 
-## Pointer Tagging Support:
+## Pointer Tagging Support
 
 Pointer tagging allows types created using this library to have their pointers "tagged".
 
@@ -491,8 +483,7 @@ If the FIO_PTR_TAG_TYPE is defined, then functions returning a type's pointer wi
 #define FIO_PTR_TAG_VALIDATE(ptr) ((ptr) != NULL)
 ```
 
-If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing
-any code.
+If `FIO_PTR_TAG_VALIDATE` is defined, tagging will be verified before executing any code.
 
 `FIO_PTR_TAG_VALIDATE` **must** fail on NULL pointers.
 
@@ -516,18 +507,42 @@ Marks a function as `static`, `inline` and possibly unused.
 
 Marks a function as `static` and possibly unused.
 
+#### `FIO_MIFN`
+
+```c
+#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
+```
+
+Marks a function as `static`, `inline`, possibly unused, and warns if the return value is unused.
+
 #### `FIO_WEAK`
 
 ```c
 #define FIO_WEAK __attribute__((weak))
 ```
 
-Marks a function as weak
+Marks a function as weak.
+
+#### `FIO_ALIGN`
+
+```c
+#define FIO_ALIGN(bytes) __attribute__((aligned(bytes)))
+```
+
+Aligns a type or variable to the specified byte boundary.
+
+#### `DEPRECATED`
+
+```c
+#define DEPRECATED(reason) __attribute__((deprecated(reason)))
+```
+
+Marks a function or type as deprecated with an optional reason string.
 
 #### `FIO_CONSTRUCTOR(fname)`
 
 ```c
-#define FIO_CONSTRUCTOR(fname) FIO_SFUNC __attribute__((constructor)) void fname (void)
+#define FIO_CONSTRUCTOR(fname) static __attribute__((constructor)) void fname(void)
 ```
 
 Marks a function as a _constructor_ - **if supported**.
@@ -537,12 +552,21 @@ When supported by the compiler (i.e., `gcc` / `clang`), this function will execu
 #### `FIO_DESTRUCTOR(fname)`
 
 ```c
-#define FIO_DESTRUCTOR(fname) FIO_SFUNC __attribute__((destructor)) void fname (void)
+#define FIO_DESTRUCTOR(fname) static __attribute__((destructor)) void fname(void)
 ```
 
 Marks a function as a _destructor_ - **if supported**.
 
 When supported by the compiler (i.e., `gcc` / `clang`), this function will execute when the library is loaded or, if statically linked, after `main` returns.
+
+#### `FIO_LIKELY` / `FIO_UNLIKELY`
+
+```c
+#define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
+#define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
+```
+
+Branch prediction hints for the compiler. Use `FIO_LIKELY` when a condition is expected to be true most of the time, and `FIO_UNLIKELY` when it's expected to be false.
 
 #### `FIO_NOOP`
 
@@ -563,6 +587,14 @@ This is useful when a function name is shadowed by a macro (such as when named a
 An empty macro that does nothing.
 
 This is useful for creating macros that can have optional callbacks (`FIO_NOOP_FN` can be used instead of a callback in these cases).
+
+#### `FIO_NOOP_FN_NAME`
+
+```c
+#define FIO_NOOP_FN_NAME (void)
+```
+
+A macro for a No-Op function name that casts to void.
 
 #### `FIO_MACRO2STR`
 
@@ -623,18 +655,6 @@ int64_t FIO_NAME2(a, l)(const char * buf) {
 
 Sets naming convention for boolean functions, i.e.: foo_is_true
 
-i.e.:
-
-```c
-// typedef struct { long l; } number_s
-typedef struct { long l; } FIO_NAME(number, s)
-
-// int number_is_zero(number_s n)
-int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
-  return (!n.l);
-}
-```
-
 #### `FIO_NAME_TEST`
 
 ```c
@@ -643,96 +663,105 @@ int FIO_NAME2(number, zero)(FIO_NAME(number, s) n) {
 
 Used internally to name test functions.
 
-#### `FIO_DEF_GET_FUNC` / `FIO_DEF_GET_FUNC_DEF`
+#### `FIO_FOR`
 
 ```c
-#define FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, field_name)        \
-  /** Returns current value of property within the struct / union. */          \
-  static F_type FIO_NAME(namespace, field_name)(T_type * o) {                  \
-    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `get`!"); \
-    return o->field_name;                                                      \
-  }
-
-#define FIO_DEF_GET_FUNC_DEF(static, namespace, T_type, F_type, field_name)    \
-  /** Returns current value of property within the struct / union. */          \
-  static F_type FIO_NAME(namespace, field_name)(T_type * o);
+#define FIO_FOR(i, count) for (size_t i = 0; i < (count); ++i)
 ```
 
-Defines a `get` function for a field within a struct / union.
+Helper for simple `for` loops, where `i` is the variable name to use.
 
-This allows for consistent naming of `get` functions.
+-------------------------------------------------------------------------------
 
-**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
+## Compiler Guards and Memory Barriers
 
-#### `FIO_DEF_SET_FUNC` / `FIO_DEF_SET_FUNC_DEF`
+#### `FIO_COMPILER_GUARD`
 
 ```c
-#define FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)    \
-  /** Sets a new value, returning the old one */                               \
-  static F_type FIO_NAME(FIO_NAME(namespace, field_name),                      \
-                         set)(T_type * o, F_type new_value) {                  \
-    FIO_ASSERT_DEBUG(o, "NULL " FIO_MACRO2STR(namespace) " pointer @ `set`!"); \
-    F_type old_value = o->field_name;                                          \
-    o->field_name = new_value;                                                 \
-    on_set(o);                                                                 \
-    return old_value;                                                          \
-  }
-
-#define FIO_DEF_SET_FUNC_DEF(static, namespace, T_type, F_type, F_name)        \
-  /** Sets a new value, returning the old one */                               \
-  static F_type FIO_NAME(FIO_NAME(namespace, F_name), set)(T_type * o,         \
-                                                           F_type new_value);
+#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
 ```
 
-Defines a `set` function for a field within a struct / union.
+Clobber CPU registers and prevent compiler reordering optimizations.
 
-This allows for consistent naming of `set` functions.
-
-#### `FIO_DEF_GETSET_FUNC`
+#### `FIO_COMPILER_GUARD_INSTRUCTION`
 
 ```c
-#define FIO_DEF_GETSET_FUNC(static, namespace, T_type, F_type, F_name, on_set) \
-  FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, F_name)                  \
-  FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)
+#define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
 ```
 
-Defines `get` / `set` functions for a field within a struct / union.
+Prevent compiler instruction reordering without clobbering memory.
 
-#### `FIO_IFUNC_DEF_GET`
+-------------------------------------------------------------------------------
+
+## Thread Scheduling Macros
+
+#### `FIO_THREAD_WAIT`
 
 ```c
-#define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
-  FIO_DEF_GET_FUNC(FIO_IFUNC, namespace, T_type, F_type, field_name)
+#define FIO_THREAD_WAIT(nano_sec)
 ```
 
-Defines a `get` function for a field within a struct / union.
+Calls the system's sleep function with the requested nano-second count.
 
-This allows for consistent naming of `get` functions.
+On POSIX systems, calls `nanosleep`. On Windows, calls `Sleep`.
 
-**Note**: Normally, unlike `_set`, this function doesn't imply an action was taken or a side-effect occurred. This is why, by default, no `_get` postix is used. A `_get` postfix implies an action may be performed, such as lazy initialization, etc'.
-
-#### `FIO_IFUNC_DEF_SET`
+#### `FIO_THREAD_YIELD`
 
 ```c
-#define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)               \
-  FIO_DEF_SET_FUNC(FIO_IFUNC, namespace, T_type, F_type, F_name, on_set)
+#define FIO_THREAD_YIELD()
 ```
 
-Defines a `set` function for a field within a struct / union.
+Yields the thread, hinting to the processor about a spinlock loop.
 
-The `on_set` callback accepts a pointer to the updated struct and a pointer to the old value (in this order).
+Uses CPU-specific instructions (`pause` on x86, `yield` on ARM) when available.
 
-If no `on_set` is required, using `FIO_NOOP_FN` as the `on_set` value.
-
-#### `FIO_IFUNC_DEF_GETSET`
+#### `FIO_THREAD_RESCHEDULE`
 
 ```c
-#define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, F_name, on_set)        \
-  FIO_IFUNC_DEF_GET(namespace, T_type, F_type, F_name)                         \
-  FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)
+#define FIO_THREAD_RESCHEDULE() FIO_THREAD_WAIT(4)
 ```
 
-Shortcut for defining both a `get` and a `set` function for a field within a struct / union.
+Reschedules the thread by calling nanosleep for a few nanoseconds.
+
+In practice, the thread will probably sleep for 60ns or more. Seems to be faster than `FIO_THREAD_YIELD`, perhaps it prevents de-prioritization of the thread.
+
+-------------------------------------------------------------------------------
+
+## Assertions
+
+#### `FIO_ASSERT`
+
+```c
+#define FIO_ASSERT(cond, ...)
+```
+
+Asserts a condition is true, or kills the application using SIGINT.
+
+Prints the error message and errno information before aborting.
+
+#### `FIO_ASSERT_ALLOC`
+
+```c
+#define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
+```
+
+Tests for an allocation failure. The behavior can be overridden.
+
+#### `FIO_ASSERT_DEBUG`
+
+```c
+#define FIO_ASSERT_DEBUG(cond, ...)
+```
+
+If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP.
+
+#### `FIO_ASSERT_STATIC`
+
+```c
+#define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
+```
+
+Compile-time assertion. Uses C11 `_Static_assert` when available.
 
 -------------------------------------------------------------------------------
 
@@ -740,14 +769,12 @@ Shortcut for defining both a `get` and a `set` function for a field within a str
 
 The following macros are defined to allow for memory copying primitives of set sizes.
 
-In addition an overrideble `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
+In addition an overridable `FIO_MEMCPY` macro is provided that allows routing any variable sized memory copying to a different routine.
 
 #### `FIO_MEMCPY`
 
 ```c
-#ifndef
 #define FIO_MEMCPY memcpy // or __builtin_memcpy if available
-#endif
 ```
 
 This macro makes it easy to override the `memcpy` implementation used by the library.
@@ -757,9 +784,7 @@ By default this will be set to either `memcpy` or `__builtin_memcpy` (if availab
 #### `FIO_MEMMOVE`
 
 ```c
-#ifndef
 #define FIO_MEMMOVE memmove // or __builtin_memmove if available
-#endif
 ```
 
 This macro makes it easy to override the `memmove` implementation used by the library.
@@ -772,6 +797,7 @@ By default this will be set to either `memmove` or `__builtin_memmove` (if avail
 static void * fio_memcpy0(void *restrict dest, const void *restrict src); /* no-op */
 static void * fio_memcpy1(void *restrict dest, const void *restrict src);
 static void * fio_memcpy2(void *restrict dest, const void *restrict src);
+static void * fio_memcpy3(void *restrict dest, const void *restrict src);
 static void * fio_memcpy4(void *restrict dest, const void *restrict src);
 static void * fio_memcpy8(void *restrict dest, const void *restrict src);
 static void * fio_memcpy16(void *restrict dest, const void *restrict src);
@@ -780,14 +806,14 @@ static void * fio_memcpy64(void *restrict dest, const void *restrict src);
 // ... void * fio_memcpy4096
 ```
 
-Copies a pre-defined `n` bytes from `src` to `dest` whhere `n` is a power of 2 between 1 and 4096 (including).
+Copies a pre-defined `n` bytes from `src` to `dest` where `n` is a power of 2 between 1 and 4096 (including).
 
 **Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
 
 #### `fio_memcpy##x`
 
 ```c
-static void * fio_memcpy7x(void *restrict dest, const void *restrict src), size_t length;
+static void * fio_memcpy7x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy15x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy31x(void *restrict dest, const void *restrict src, size_t length);
 static void * fio_memcpy63x(void *restrict dest, const void *restrict src, size_t length);
@@ -817,9 +843,7 @@ On most of `libc` implementations the library call will be faster. On embedded s
 #### `FIO_MEMSET`
 
 ```c
-#ifndef
 #define FIO_MEMSET memset // or __builtin_memset if available
-#endif
 ```
 
 This macro makes it easy to override the `memset` implementation used by the library.
@@ -845,9 +869,7 @@ Returns `dest` (the pointer originally received).
 #### `FIO_MEMCHR`
 
 ```c
-#ifndef
 #define FIO_MEMCHR memchr // or __builtin_memchr if available
-#endif
 ```
 
 This macro makes it easy to override the `memchr` implementation used by the library.
@@ -871,9 +893,7 @@ On most of `libc` implementations the library call will be faster. Test before d
 #### `FIO_MEMCMP`
 
 ```c
-#ifndef
 #define FIO_MEMCMP memcmp // or __builtin_memcmp if available
-#endif
 ```
 
 This macro makes it easy to override the `memcmp` implementation used by the library.
@@ -895,9 +915,7 @@ Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
 #### `FIO_STRLEN`
 
 ```c
-#ifndef
-#define FIO_MEMCMP strlen // or __builtin_memstrlen if available
-#endif
+#define FIO_STRLEN strlen // or __builtin_strlen if available
 ```
 
 This macro makes it easy to override the `strlen` implementation used by the library.
@@ -920,31 +938,27 @@ If defined, defines all previously undefined memory macros to use facil.io's fal
 
 Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `fio_memcpy##` functions.
 
+-------------------------------------------------------------------------------
+
+## Security Related Functions
+
+#### `fio_secure_zero`
+
 ```c
-#ifdef FIO_MEMALT
-#ifndef FIO_MEMCPY
-#define FIO_MEMCPY fio_memcpy
-#endif
-#ifndef FIO_MEMMOVE
-#define FIO_MEMMOVE fio_memcpy
-#endif
-#ifndef FIO_MEMCMP
-#define FIO_MEMCMP fio_memcmp
-#endif
-#ifndef FIO_MEMCHR
-#define FIO_MEMCHR fio_memchr
-#endif
-#ifndef FIO_MEMSET
-#define FIO_MEMSET fio_memset
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#ifndef FIO_STRLEN
-#define FIO_STRLEN fio_strlen
-#endif
-#endif /* FIO_MEMALT */
+void fio_secure_zero(const void *a_, size_t bytes);
 ```
+
+Securely zeros memory, preventing compiler optimizations from removing the operation.
+
+Use this to clear sensitive data (passwords, keys, etc.) from memory.
+
+#### `FIO_MEM_STACK_WIPE`
+
+```c
+#define FIO_MEM_STACK_WIPE(pages)
+```
+
+Wipes stack memory by allocating and zeroing a volatile array of the specified number of pages (each page is 4096 bytes).
 
 -------------------------------------------------------------------------------
 
@@ -1025,6 +1039,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Big Endian**:
 
 - `fio_buf2u16_be(buffer)`
+- `fio_buf2u24_be(buffer)`
 - `fio_buf2u32_be(buffer)`
 - `fio_buf2u64_be(buffer)`
 - `fio_buf2u128_be(buffer)`
@@ -1032,6 +1047,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Little Endian**:
 
 - `fio_buf2u16_le(buffer)`
+- `fio_buf2u24_le(buffer)`
 - `fio_buf2u32_le(buffer)`
 - `fio_buf2u64_le(buffer)`
 - `fio_buf2u128_le(buffer)`
@@ -1039,6 +1055,7 @@ Reads a number from an unaligned memory buffer. The number or **bits** read from
 **Native (Unspecified) Byte Order**:
 
 - `fio_buf2u16u(buffer)`
+- `fio_buf2u24u(buffer)`
 - `fio_buf2u32u(buffer)`
 - `fio_buf2u64u(buffer)`
 - `fio_buf2u128u(buffer)`
@@ -1050,6 +1067,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Big Endian (default)**:
 
 - `fio_u2buf16_be(buffer, i)`
+- `fio_u2buf24_be(buffer, i)`
 - `fio_u2buf32_be(buffer, i)`
 - `fio_u2buf64_be(buffer, i)`
 - `fio_u2buf128_be(buffer, i)`
@@ -1057,6 +1075,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Little Endian**:
 
 - `fio_u2buf16_le(buffer, i)`
+- `fio_u2buf24_le(buffer, i)`
 - `fio_u2buf32_le(buffer, i)`
 - `fio_u2buf64_le(buffer, i)`
 - `fio_u2buf128_le(buffer, i)`
@@ -1064,6 +1083,7 @@ Writes a number to an unaligned memory buffer. The number or bits written to the
 **Native (Unspecified) Byte Order**:
 
 - `fio_u2buf16u(buffer, i)`
+- `fio_u2buf24u(buffer, i)`
 - `fio_u2buf32u(buffer, i)`
 - `fio_u2buf64u(buffer, i)`
 - `fio_u2buf128u(buffer, i)`
@@ -1078,34 +1098,158 @@ Masks data using a 64 bit mask.
 
 The function may perform significantly better when the buffer's memory is aligned.
 
-#### Constant Time Helpers
+#### `fio_xmask_cpy`
+
+```c
+void fio_xmask_cpy(char *restrict dest, const char *src, size_t len, uint64_t mask);
+```
+
+Masks data using a 64 bit mask while copying from `src` to `dest`.
+
+If `dest == src`, behaves like `fio_xmask`.
+
+-------------------------------------------------------------------------------
+
+## Constant Time Helpers
 
 Performs the operation indicated in constant time.
 
-- `fio_ct_true(condition)`
+#### `fio_ct_true`
 
-    Tests if `condition` is non-zero (returns `1` / `0`).
+```c
+uintmax_t fio_ct_true(uintmax_t cond);
+```
 
-- `fio_ct_false(condition)`
+Returns 1 if `cond` is non-zero, 0 otherwise.
 
-    Tests if `condition` is zero (returns `1` / `0`).
+#### `fio_ct_false`
 
-- `fio_ct_if_bool(bool, a_if_true, b_if_false)`
+```c
+uintmax_t fio_ct_false(uintmax_t cond);
+```
 
-    Tests if `bool == 1` (returns `a` if `true` and `b` if `false`).
+Returns 1 if `cond` is zero, 0 otherwise.
 
-- `fio_ct_if(condition, a_if_true, b_if_false)`
+#### `fio_ct_if_bool`
 
-    Tests if `condition` is non-zero (returns `a` / `b`).
+```c
+uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b);
+```
 
-- `fio_ct_max(a, b)`
+Returns `a` if `cond == 1`, returns `b` otherwise.
 
-    Returns `a` if a >= `b` (performs a **signed** comparison).
+#### `fio_ct_if`
 
+```c
+uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b);
+```
 
-- `fio_ct_is_eq(const void * a, const void * b, len)`
+Returns `a` if `cond` is non-zero, returns `b` otherwise.
 
-    Returns 1 if memory regions are equal. Should be resistant to timing attacks.
+#### `fio_ct_max`
+
+```c
+intmax_t fio_ct_max(intmax_t a, intmax_t b);
+```
+
+Returns `a` if `a >= b` (performs a **signed** comparison).
+
+#### `fio_ct_min`
+
+```c
+intmax_t fio_ct_min(intmax_t a, intmax_t b);
+```
+
+Returns `a` if `a <= b` (performs a **signed** comparison).
+
+#### `fio_ct_abs`
+
+```c
+uintmax_t fio_ct_abs(intmax_t i);
+```
+
+Returns the absolute value of `i`.
+
+#### `fio_ct_is_eq`
+
+```c
+_Bool fio_ct_is_eq(const void *a, const void *b, size_t len);
+```
+
+Returns 1 if memory regions are equal. Should be resistant to timing attacks.
+
+-------------------------------------------------------------------------------
+
+## Constant-Time Bitwise Selection Functions
+
+These functions perform bitwise selection operations in constant time. They are commonly used in cryptographic algorithms (SHA, AES, etc.) and can also be used for branchless programming.
+
+#### `fio_ct_mux32` / `fio_ct_mux64`
+
+```c
+uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "choose": for each bit, if x is set, return y's bit, else z's bit.
+
+Formula: `z ^ (x & (y ^ z))`
+
+Used in: SHA-1 (Ch), SHA-256 (Ch), SHA-512 (Ch), AES, etc.
+
+#### `fio_ct_maj32` / `fio_ct_maj64`
+
+```c
+uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "majority": for each bit position, return 1 if 2+ inputs have 1.
+
+Formula: `(x & y) | (z & (x | y))`
+
+Used in: SHA-1 (Maj), SHA-256 (Maj), SHA-512 (Maj), etc.
+
+#### `fio_ct_xor3_32` / `fio_ct_xor3_64`
+
+```c
+uint32_t fio_ct_xor3_32(uint32_t x, uint32_t y, uint32_t z);
+uint64_t fio_ct_xor3_64(uint64_t x, uint64_t y, uint64_t z);
+```
+
+Bitwise "parity": XOR of all three inputs (1 if odd number of 1s).
+
+Formula: `x ^ y ^ z`
+
+Used in: SHA-1 (Parity function for rounds 20-39 and 60-79)
+
+-------------------------------------------------------------------------------
+
+## Combined Rotation-XOR Operations
+
+These combine multiple rotations with XOR, which is a common pattern in SHA-2, BLAKE2, and other hash functions.
+
+#### `fio_xor_rrot3_32` / `fio_xor_rrot3_64`
+
+```c
+uint32_t fio_xor_rrot3_32(uint32_t x, uint8_t a, uint8_t b, uint8_t c);
+uint64_t fio_xor_rrot3_64(uint64_t x, uint8_t a, uint8_t b, uint8_t c);
+```
+
+XOR of three right rotations: `ROTR(x,a) ^ ROTR(x,b) ^ ROTR(x,c)`
+
+Common in SHA-256/SHA-512 Sigma functions.
+
+#### `fio_xor_rrot2_shr_32` / `fio_xor_rrot2_shr_64`
+
+```c
+uint32_t fio_xor_rrot2_shr_32(uint32_t x, uint8_t a, uint8_t b, uint8_t c);
+uint64_t fio_xor_rrot2_shr_64(uint64_t x, uint8_t a, uint8_t b, uint8_t c);
+```
+
+XOR of two right rotations and a right shift: `ROTR(x,a) ^ ROTR(x,b) ^ SHR(x,c)`
+
+Common in SHA-256/SHA-512 sigma (lowercase) functions for message schedule.
 
 -------------------------------------------------------------------------------
 
@@ -1115,17 +1259,93 @@ Performs the operation indicated in constant time.
 
 **Note**: for mutable shared data, please consider using the atomic operations.
 
-#### Bitmap helpers
+### Bitmap helpers
 
-- `fio_bit_get(void *map, size_t bit)`
+#### `fio_bit_get`
 
-- `fio_bit_set(void *map, size_t bit)`   (a **non-atomic** operation, **not** thread-safe)
+```c
+uint8_t fio_bit_get(void *map, size_t bit);
+```
 
-- `fio_bit_unset(void *map, size_t bit)` (a **non-atomic** operation, **not** thread-safe)
+Gets the state of a bit in a bitmap.
 
-Sets and un-sets bits in an arbitrary bitmap - non-atomic, **not** thread-safe.
+#### `fio_bit_set`
 
-#### `fio_popcount` and Hemming 
+```c
+void fio_bit_set(void *map, size_t bit);
+```
+
+Sets a bit in a bitmap (sets to 1). **Non-atomic**, not thread-safe.
+
+#### `fio_bit_unset`
+
+```c
+void fio_bit_unset(void *map, size_t bit);
+```
+
+Unsets a bit in a bitmap (sets to 0). **Non-atomic**, not thread-safe.
+
+#### `fio_bit_flip`
+
+```c
+void fio_bit_flip(void *map, size_t bit);
+```
+
+Flips a bit in a bitmap (sets to 0 if 1, sets to 1 if 0). **Non-atomic**, not thread-safe.
+
+### Bit Isolation and Indexing
+
+#### `fio_bits_lsb`
+
+```c
+uint64_t fio_bits_lsb(uint64_t i);
+```
+
+Isolates the least significant (lowest) bit.
+
+#### `fio_bits_msb`
+
+```c
+uint64_t fio_bits_msb(uint64_t i);
+```
+
+Isolates the most significant (highest) bit.
+
+#### `fio_bits_lsb_index`
+
+```c
+size_t fio_bits_lsb_index(uint64_t i);
+```
+
+Returns the index of the least significant (lowest) bit. Returns `(size_t)-1` if `i` is 0.
+
+#### `fio_bits_msb_index`
+
+```c
+size_t fio_bits_msb_index(uint64_t i);
+```
+
+Returns the index of the most significant (highest) bit. Returns `(size_t)-1` if `i` is 0.
+
+#### `fio_lsb_index_unsafe`
+
+```c
+size_t fio_lsb_index_unsafe(uint64_t i);
+```
+
+Returns the index of the least significant (lowest) bit. Undefined behavior if `i` is 0.
+
+#### `fio_msb_index_unsafe`
+
+```c
+size_t fio_msb_index_unsafe(uint64_t i);
+```
+
+Returns the index of the most significant (highest) bit. Undefined behavior if `i` is 0.
+
+### Popcount and Hamming Distance
+
+#### `fio_popcount`
 
 ```c
 int fio_popcount(uint64_t n);
@@ -1139,82 +1359,99 @@ Returns the number of set bits in the number `n`.
 #define fio_hemming_dist(n1, n2) fio_popcount(((uint64_t)(n1) ^ (uint64_t)(n2)))
 ```
 
-Returns the Hemming Distance between the number `n1` and the number `n2`.
+Returns the Hamming Distance between the number `n1` and the number `n2`.
 
-Hemming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
+Hamming Distance is the number of bits that need to be "flipped" in order for both numbers to be equal.
 
+### Byte Detection in Vectors
 
 #### `fio_has_full_byte32`
 
 ```c
-uint32_t fio_has_full_byte32(uint32_t row)
+uint32_t fio_has_full_byte32(uint32_t row);
 ```
 
-  Detects a byte where all the bits are set (`255`) within a 4 byte vector.
+Detects a byte where all the bits are set (`255`) within a 4 byte vector.
 
 #### `fio_has_zero_byte32`
 
 ```c
-uint32_t fio_has_zero_byte32(uint32_t row)
+uint32_t fio_has_zero_byte32(uint32_t row);
 ```
 
-  Detects a byte where no bits are set (0) within a 4 byte vector.
+Detects a byte where no bits are set (0) within a 4 byte vector.
 
 #### `fio_has_byte32`
 
 ```c
-uint32_t fio_has_byte32(uint32_t row, uint8_t byte)
+uint32_t fio_has_byte32(uint32_t row, uint8_t byte);
 ```
 
-  Detects if `byte` exists within a 4 byte vector.
+Detects if `byte` exists within a 4 byte vector.
 
 #### `fio_has_full_byte64`
 
 ```c
-uint64_t fio_has_full_byte64(uint64_t row)
+uint64_t fio_has_full_byte64(uint64_t row);
 ```
 
-  Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+Detects a byte where all the bits are set (`255`) within an 8 byte vector.
 
 #### `fio_has_zero_byte64`
 
 ```c
-uint64_t fio_has_zero_byte64(uint64_t row)
+uint64_t fio_has_zero_byte64(uint64_t row);
 ```
 
-  Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
+Detects a byte where no bits are set (byte == 0) within an 8 byte vector.
+
+#### `fio_has_zero_byte_alt64`
+
+```c
+uint64_t fio_has_zero_byte_alt64(uint64_t row);
+```
+
+Alternative version of `fio_has_zero_byte64`. Should NOT be used to build a bitmap, but may be used to detect the first occurrence.
 
 #### `fio_has_byte64`
 
 ```c
-uint64_t fio_has_byte64(uint64_t row, uint8_t byte)
+uint64_t fio_has_byte64(uint64_t row, uint8_t byte);
 ```
 
-  Detects if `byte` exists within an 8 byte vector.
+Detects if `byte` exists within an 8 byte vector.
+
+#### `fio_has_byte2bitmap`
+
+```c
+uint64_t fio_has_byte2bitmap(uint64_t result);
+```
+
+Converts a `fio_has_byteX` result to a bitmap.
 
 #### `fio_has_full_byte128`
 
 ```c
-__uint128_t fio_has_full_byte128(__uint128_t row)
+__uint128_t fio_has_full_byte128(__uint128_t row);
 ```
 
-    Detects a byte where all the bits are set (`255`) within an 8 byte vector.
+Detects a byte where all the bits are set (`255`) within a 16 byte vector.
 
 #### `fio_has_zero_byte128`
 
 ```c
-__uint128_t fio_has_zero_byte128(__uint128_t row)
+__uint128_t fio_has_zero_byte128(__uint128_t row);
 ```
 
-    Detects a byte where no bits are set (0) within an 8 byte vector.
+Detects a byte where no bits are set (0) within a 16 byte vector.
 
 #### `fio_has_byte128`
 
 ```c
-__uint128_t fio_has_byte128(__uint128_t row, uint8_t byte)
+__uint128_t fio_has_byte128(__uint128_t row, uint8_t byte);
 ```
 
-    Detects if `byte` exists within an 8 byte vector.
+Detects if `byte` exists within a 16 byte vector.
 
 -------------------------------------------------------------------------------
 
@@ -1268,7 +1505,7 @@ Subtract with carry.
 uint64_t fio_math_sub(uint64_t *dest,
                       const uint64_t *a,
                       const uint64_t *b,
-                      const size_t len)
+                      const size_t len);
 ```
 
 Multi-precision SUB for `len` 64 bit words a + b. Returns the borrow.
@@ -1291,7 +1528,7 @@ Multiply with carry out.
 void fio_math_mul(uint64_t *restrict dest,
                   const uint64_t *a,
                   const uint64_t *b,
-                  const size_t len)
+                  const size_t len);
 ```
 
 Multi-precision MUL for `len` 64 bit words.
@@ -1387,62 +1624,34 @@ void fio_u8x256_add(uint8_t * dest, uint8_t * a, uint8_t *b);
 
 void fio_u16x2_add(uint16_t * dest, uint16_t * a, uint16_t *b);
 void fio_u16x4_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x8_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x16_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x32_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x64_add(uint16_t * dest, uint16_t * a, uint16_t *b);
-void fio_u16x128_add(uint16_t * dest, uint16_t * a, uint16_t *b);
+// ... etc.
 
 void fio_u32x2_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x4_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x8_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x16_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x32_add(uint32_t * dest, uint32_t * a, uint32_t *b);
-void fio_u32x64_add(uint32_t * dest, uint32_t * a, uint32_t *b);
+// ... etc.
 
 void fio_u64x2_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x4_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x8_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x16_add(uint64_t * dest, uint64_t * a, uint64_t *b);
-void fio_u64x32_add(uint64_t * dest, uint64_t * a, uint64_t *b);
+// ... etc.
 ```
 
-The following operations are supported: `add`, `mul`, `and`, `or`, `xor`.
+The following operations are supported: `add`, `sub`, `mul`, `and`, `or`, `xor`.
 
-#### Vectorized Mathematical Summing (`fio_u##x#_OP`)
+#### Vectorized Mathematical Summing (`fio_u##x#_reduce_OP`)
 
 Sum vectors up using Add, Or, XOR, and more using any of the following (or similarly named):
 
 ```c
 uint8_t fio_u8x4_reduce_add(uint8_t * v);
 uint8_t fio_u8x8_reduce_add(uint8_t * v);
-uint8_t fio_u8x16_reduce_add(uint8_t * v);
-uint8_t fio_u8x32_reduce_add(uint8_t * v);
-uint8_t fio_u8x64_reduce_add(uint8_t * v);
-uint8_t fio_u8x128_reduce_add(uint8_t * v);
-uint8_t fio_u8x256_reduce_add(uint8_t * v);
+// ... etc.
 
 uint16_t fio_u16x2_reduce_add(uint16_t * v);
-uint16_t fio_u16x4_reduce_add(uint16_t * v);
-uint16_t fio_u16x8_reduce_add(uint16_t * v);
-uint16_t fio_u16x16_reduce_add(uint16_t * v);
-uint16_t fio_u16x32_reduce_add(uint16_t * v);
-uint16_t fio_u16x64_reduce_add(uint16_t * v);
-uint16_t fio_u16x128_reduce_add(uint16_t * v);
+// ... etc.
 
 uint32_t fio_u32x2_reduce_add(uint32_t * v);
-uint32_t fio_u32x4_reduce_add(uint32_t * v);
-uint32_t fio_u32x8_reduce_add(uint32_t * v);
-uint32_t fio_u32x16_reduce_add(uint32_t * v);
-uint32_t fio_u32x32_reduce_add(uint32_t * v);
-uint32_t fio_u32x64_reduce_add(uint32_t * v);
+// ... etc.
 
 uint64_t fio_u64x2_reduce_add(uint64_t * v);
-uint64_t fio_u64x4_reduce_add(uint64_t * v);
-uint64_t fio_u64x8_reduce_add(uint64_t * v);
-uint64_t fio_u64x16_reduce_add(uint64_t * v);
-uint64_t fio_u64x32_reduce_add(uint64_t * v);
-
+// ... etc.
 ```
 
 The following summation operations are supported: `max`, `min`, `add`, `mul`, `and`, `or`, `xor`.
@@ -1454,56 +1663,18 @@ Reorders the words inside the vector.
 ```c
 #define fio_u8x4_reshuffle(v, ...)     fio_u8x4_reshuffle(v,     (uint8_t[4]){__VA_ARGS__})
 #define fio_u8x8_reshuffle(v, ...)     fio_u8x8_reshuffle(v,     (uint8_t[8]){__VA_ARGS__})
-#define fio_u8x16_reshuffle(v, ...)    fio_u8x16_reshuffle(v,    (uint8_t[16]){__VA_ARGS__})
-#define fio_u8x32_reshuffle(v, ...)    fio_u8x32_reshuffle(v,    (uint8_t[32]){__VA_ARGS__})
-#define fio_u8x64_reshuffle(v, ...)    fio_u8x64_reshuffle(v,    (uint8_t[64]){__VA_ARGS__})
-#define fio_u8x128_reshuffle(v, ...)   fio_u8x128_reshuffle(v,   (uint8_t[128]){__VA_ARGS__})
-#define fio_u8x256_reshuffle(v, ...)   fio_u8x256_reshuffle(v,   (uint8_t[256]){__VA_ARGS__})
-#define fio_u16x2_reshuffle(v, ...)    fio_u16x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u16x4_reshuffle(v, ...)    fio_u16x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u16x8_reshuffle(v, ...)    fio_u16x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u16x16_reshuffle(v, ...)   fio_u16x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u16x32_reshuffle(v, ...)   fio_u16x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u16x64_reshuffle(v, ...)   fio_u16x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u16x128_reshuffle(v,...)   fio_u16x128_reshuffle(v,  (uint8_t[128]){__VA_ARGS__})
-#define fio_u32x2_reshuffle(v, ...)    fio_u32x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u32x4_reshuffle(v, ...)    fio_u32x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u32x8_reshuffle(v, ...)    fio_u32x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u32x16_reshuffle(v, ...)   fio_u32x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u32x32_reshuffle(v, ...)   fio_u32x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_u32x64_reshuffle(v, ...)   fio_u32x64_reshuffle(v,   (uint8_t[64]){__VA_ARGS__})
-#define fio_u64x2_reshuffle(v, ...)    fio_u64x2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_u64x4_reshuffle(v, ...)    fio_u64x4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_u64x8_reshuffle(v, ...)    fio_u64x8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_u64x16_reshuffle(v, ...)   fio_u64x16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_u64x32_reshuffle(v, ...)   fio_u64x32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx2_reshuffle(v, ...)  fio_floatx2_reshuffle(v,  (uint8_t[2]){__VA_ARGS__})
-#define fio_floatx4_reshuffle(v, ...)  fio_floatx4_reshuffle(v,  (uint8_t[4]){__VA_ARGS__})
-#define fio_floatx8_reshuffle(v, ...)  fio_floatx8_reshuffle(v,  (uint8_t[8]){__VA_ARGS__})
-#define fio_floatx16_reshuffle(v, ...) fio_floatx16_reshuffle(v, (uint8_t[16]){__VA_ARGS__})
-#define fio_floatx32_reshuffle(v, ...) fio_floatx32_reshuffle(v, (uint8_t[32]){__VA_ARGS__})
-#define fio_floatx64_reshuffle(v, ...) fio_floatx64_reshuffle(v, (uint8_t[64]){__VA_ARGS__})
-#define fio_dblx2_reshuffle(v, ...)    fio_dblx2_reshuffle(v,    (uint8_t[2]){__VA_ARGS__})
-#define fio_dblx4_reshuffle(v, ...)    fio_dblx4_reshuffle(v,    (uint8_t[4]){__VA_ARGS__})
-#define fio_dblx8_reshuffle(v, ...)    fio_dblx8_reshuffle(v,    (uint8_t[8]){__VA_ARGS__})
-#define fio_dblx16_reshuffle(v, ...)   fio_dblx16_reshuffle(v,   (uint8_t[16]){__VA_ARGS__})
-#define fio_dblx32_reshuffle(v, ...)   fio_dblx32_reshuffle(v,   (uint8_t[32]){__VA_ARGS__})
+// ... etc.
 ```
 
 -------------------------------------------------------------------------------
 
 ## Atomic Operations (Core)
 
-```c
-#define FIO_ATOMIC
-#include "fio-stl.h"
-```
-
 If the `FIO_ATOMIC` macro is defined than the following macros will be defined.
 
 In general, when a function returns a value, it is always the previous value - unless the function name ends with `fetch` or `load`.
 
-#### `fio_atomic_load(p_obj)`
+#### `fio_atomic_load(dest, p_obj)`
 
 Atomically loads and returns the value stored in the object pointed to by `p_obj`.
 
@@ -1594,13 +1765,13 @@ Returns 1 for successful exchange or 0 for failure.
 
 #### Atomic Bitmap helpers
 
-- `fio_atomic_bit_get(void *map, size_t bit)`
+- `fio_atomic_bit_get(void *map, size_t bit)` - Gets the state of a bit atomically.
 
-- `fio_atomic_bit_set(void *map, size_t bit)`   (an **atomic** operation, thread-safe)
+- `fio_atomic_bit_set(void *map, size_t bit)` - Sets a bit atomically (an **atomic** operation, thread-safe).
 
-- `fio_atomic_bit_unset(void *map, size_t bit)` (an **atomic** operation, thread-safe)
+- `fio_atomic_bit_unset(void *map, size_t bit)` - Unsets a bit atomically (an **atomic** operation, thread-safe).
 
-Gets / Sets bits an atomic thread-safe way.
+- `fio_atomic_bit_flip(void *map, size_t bit)` - Flips a bit atomically (an **atomic** operation, thread-safe).
 
 -------------------------------------------------------------------------------
 
@@ -1675,11 +1846,144 @@ Tries to lock all sub-locks. Returns 0 on success and 1 on failure.
 
 #### `fio_lock_full(fio_lock_i *lock)`
 
-Busy waits for all sub-locks to become available - not recommended.
+Busy waits for all sub lock to become available - not recommended.
 
 #### `fio_unlock_full(fio_lock_i *lock)`
 
-Unlocks all sub-locks, no matter which thread owns which lock.
+Unlocks all sub locks, no matter which thread owns which lock.
+
+-------------------------------------------------------------------------------
+
+## Linked Lists
+
+#### `fio_list_node_s`
+
+```c
+typedef struct fio_list_node_s {
+  struct fio_list_node_s *next;
+  struct fio_list_node_s *prev;
+} fio_list_node_s;
+```
+
+A linked list arch-type.
+
+#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
+
+```c
+#define FIO_LIST_NODE fio_list_node_s
+#define FIO_LIST_HEAD fio_list_node_s
+```
+
+Type aliases for linked list nodes and heads.
+
+#### `FIO_LIST_INIT`
+
+```c
+#define FIO_LIST_INIT(obj) (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
+```
+
+Allows initialization of FIO_LIST_HEAD objects.
+
+#### `FIO_LIST_EACH`
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list except the head.
+
+#### `FIO_LIST_EACH_REVERSED`
+
+```c
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list in reverse order except the head.
+
+#### `FIO_LIST_PUSH`
+
+```c
+#define FIO_LIST_PUSH(head, n)
+```
+
+UNSAFE macro for pushing a node to a list.
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)
+```
+
+UNSAFE macro for removing a node from a list.
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)
+```
+
+UNSAFE macro for removing a node from a list. Resets node data.
+
+#### `FIO_LIST_POP`
+
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)
+```
+
+UNSAFE macro for popping a node from a list.
+
+#### `FIO_LIST_IS_EMPTY`
+
+```c
+#define FIO_LIST_IS_EMPTY(head)
+```
+
+UNSAFE macro for testing if a list is empty.
+
+-------------------------------------------------------------------------------
+
+## Indexed Linked Lists
+
+Indexed Linked Lists can be used to create a linked list that uses is always relative to some root pointer (usually the root of an array). This:
+
+1. Allows easy reallocation of the list without requiring pointer updates.
+2. Could be used for memory optimization if the array limits are known.
+
+The "head" index is usually validated by reserving the value of `-1` to indicate an empty list.
+
+#### `fio_index32_node_s` / `fio_index16_node_s` / `fio_index8_node_s`
+
+```c
+typedef struct fio_index32_node_s { uint32_t next; uint32_t prev; } fio_index32_node_s;
+typedef struct fio_index16_node_s { uint16_t next; uint16_t prev; } fio_index16_node_s;
+typedef struct fio_index8_node_s { uint8_t next; uint8_t prev; } fio_index8_node_s;
+```
+
+Indexed linked list node types for different index sizes.
+
+#### `FIO_INDEXED_LIST_PUSH`
+
+```c
+#define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)
+```
+
+UNSAFE macro for pushing a node to an indexed list.
+
+#### `FIO_INDEXED_LIST_REMOVE`
+
+```c
+#define FIO_INDEXED_LIST_REMOVE(root, node_name, i)
+```
+
+UNSAFE macro for removing a node from an indexed list.
+
+#### `FIO_INDEXED_LIST_EACH`
+
+```c
+#define FIO_INDEXED_LIST_EACH(root, node_name, head, pos)
+```
+
+Loops through every index in the indexed list, assuming `head` is valid.
 
 -------------------------------------------------------------------------------
 
@@ -1694,36 +1998,18 @@ The following union types hold (little endian) arrays of unsigned 64 bit numbers
 - `fio_u2048`
 - `fio_u4096`
 
-The main ones are as follows (the rest follow the same pattern):
-
 #### `fio_u128`
 
 ```c
 typedef union {
-  /** unsigned native word size array, length is system dependent */
   size_t uz[16 / sizeof(size_t)];
-
-  /** known bit word arrays */
   uint64_t u64[2];
   uint32_t u32[4];
   uint16_t u16[8];
   uint8_t u8[16];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[1];
-  uint32x4_t x32[1];
-  uint16x8_t x16[1];
-  uint8x16_t x8[1];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(16)));
-  uint64_t x32 __attribute__((vector_size(16)));
-  uint64_t x16 __attribute__((vector_size(16)));
-  uint64_t x8 __attribute__((vector_size(16)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[1];
-#endif
+  int64_t i64[2];
+  int32_t i32[4];
+  // ... plus vector types if supported
 } fio_u128 FIO_ALIGN(16);
 ```
 
@@ -1731,74 +2017,9 @@ An unsigned 128 bit union type.
 
 #### `fio_u256`
 
-```c
-typedef union {
-  /** unsigned native word size array, length is system dependent */
-  size_t uz[32 / sizeof(size_t)];
-
-  /** known bit word arrays */
-  uint64_t u64[4];
-  uint32_t u32[8];
-  uint16_t u16[16];
-  uint8_t u8[32];
-
-  /* previous types */
-  fio_u128 u128[2];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[2];
-  uint32x4_t x32[2];
-  uint16x8_t x16[2];
-  uint8x16_t x8[2];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(32)));
-  uint64_t x32 __attribute__((vector_size(32)));
-  uint64_t x16 __attribute__((vector_size(32)));
-  uint64_t x8 __attribute__((vector_size(32)));
-#endif
-#if defined(__SIZEOF_INT128__)
-  __uint128_t alignment_for_u128_[2];
-#endif
-#if defined(__SIZEOF_INT256__)
-  __uint256_t alignment_for_u256_[1];
-#endif
-} fio_u256 FIO_ALIGN(16);
-```
-
-An unsigned 256 bit union type.
+An unsigned 256 bit union type. Same structure as `fio_u128` but with larger arrays.
 
 #### `fio_u512`
-
-```c
-typedef union {
-  /** unsigned native word size array, length is system dependent */
-  size_t uz[64 / sizeof(size_t)];
-
-  /** known bit word arrays */
-  uint64_t u64[8];
-  uint32_t u32[16];
-  uint16_t u16[32];
-  uint8_t u8[64];
-
-  /* previous types */
-  fio_u128 u128[4];
-  fio_u256 u256[2];
-
-  /** vector types, if supported */
-#if FIO___HAS_ARM_INTRIN
-  uint64x2_t x64[4];
-  uint32x4_t x32[4];
-  uint16x8_t x16[4];
-  uint8x16_t x8[4];
-#elif __has_attribute(vector_size)
-  uint64_t x64 __attribute__((vector_size(64)));
-  uint64_t x32 __attribute__((vector_size(64)));
-  uint64_t x16 __attribute__((vector_size(64)));
-  uint64_t x8 __attribute__((vector_size(64)));
-#endif
-} fio_u512 FIO_ALIGN(16);
-```
 
 An unsigned 512 bit union type.
 
@@ -1813,31 +2034,7 @@ Fast and easy macros are provided for these numeral helper initialization, initi
 #define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})
 #define fio_u128_init32(...) ((fio_u128){.u32 = {__VA_ARGS__}})
 #define fio_u128_init64(...) ((fio_u128){.u64 = {__VA_ARGS__}})
-
-#define fio_u256_init8(...)  ((fio_u256){.u8 = {__VA_ARGS__}})
-#define fio_u256_init16(...) ((fio_u256){.u16 = {__VA_ARGS__}})
-#define fio_u256_init32(...) ((fio_u256){.u32 = {__VA_ARGS__}})
-#define fio_u256_init64(...) ((fio_u256){.u64 = {__VA_ARGS__}})
-
-#define fio_u512_init8(...)  ((fio_u512){.u8 = {__VA_ARGS__}})
-#define fio_u512_init16(...) ((fio_u512){.u16 = {__VA_ARGS__}})
-#define fio_u512_init32(...) ((fio_u512){.u32 = {__VA_ARGS__}})
-#define fio_u512_init64(...) ((fio_u512){.u64 = {__VA_ARGS__}})
-
-#define fio_u1024_init8(...)  ((fio_u1024){.u8 = {__VA_ARGS__}})
-#define fio_u1024_init16(...) ((fio_u1024){.u16 = {__VA_ARGS__}})
-#define fio_u1024_init32(...) ((fio_u1024){.u32 = {__VA_ARGS__}})
-#define fio_u1024_init64(...) ((fio_u1024){.u64 = {__VA_ARGS__}})
-
-#define fio_u2048_init8(...)  ((fio_u2048){.u8 = {__VA_ARGS__}})
-#define fio_u2048_init16(...) ((fio_u2048){.u16 = {__VA_ARGS__}})
-#define fio_u2048_init32(...) ((fio_u2048){.u32 = {__VA_ARGS__}})
-#define fio_u2048_init64(...) ((fio_u2048){.u64 = {__VA_ARGS__}})
-
-#define fio_u4096_init8(...)  ((fio_u4096){.u8 = {__VA_ARGS__}})
-#define fio_u4096_init16(...) ((fio_u4096){.u16 = {__VA_ARGS__}})
-#define fio_u4096_init32(...) ((fio_u4096){.u32 = {__VA_ARGS__}})
-#define fio_u4096_init64(...) ((fio_u4096){.u64 = {__VA_ARGS__}})
+// ... similar for fio_u256, fio_u512, etc.
 ```
 
 ### Numeral / Vector Helper Type Load / Store
@@ -1846,74 +2043,44 @@ These numerals can be stored and loaded from memory using big endian / little en
 
 #### `fio_u128_load`, `fio_u256_load` ...
 
-- `fio_u128 fio_u128_load(const void *buf)`          - load in native ordering.
+- `fio_u128 fio_u128_load(const void *buf)` - load in native ordering.
 - `void fio_u128_store(void *buf, const fio_u128 a)` - store in native ordering.
 - `fio_u128 fio_u128_load_le16(const void *buf)` - load in little endian ordering using 16 bit words.
 - `fio_u128 fio_u128_load_be16(const void *buf)` - load in big endian ordering using 16 bit words.
-- `fio_u128 fio_u128_bswap16(const void *buf)`   - load in and byte-swap using 16 bit words (2 bytes).
-- `fio_u128 fio_u128_load_le32(const void *buf)` - load in little endian ordering using 32 bit words.
-- `fio_u128 fio_u128_load_be32(const void *buf)` - load in big endian ordering using 32 bit words.
-- `fio_u128 fio_u128_bswap32(const void *buf)`   - load in and byte-swap using 32 bit words (2 bytes).
-- `fio_u128 fio_u128_load_le64(const void *buf)` - load in little endian ordering using 64 bit words.
-- `fio_u128 fio_u128_load_be64(const void *buf)` - load in big endian ordering using 64 bit words.
-- `fio_u128 fio_u128_bswap64(const void *buf)`   - load in and byte-swap using 64 bit words (2 bytes).
-
-- `fio_u256 fio_u256_load(const void *buf)`          - load in native ordering.
-- `void fio_u256_store(void *buf, const fio_u256 a)` - store in native ordering.
-- ... (etc')
+- `fio_u128 fio_u128_bswap16(const void *buf)` - load in and byte-swap using 16 bit words.
+- ... similar for 32 and 64 bit words, and for larger types.
 
 ### Numeral / Vector Helper Type Operation
 
-Common mathematical operations are provided for the Vector Helper Types, much like they were provided for the Native C typed vectors.
+Common mathematical operations are provided for the Vector Helper Types.
 
 #### `fio_u128_add16`, `fio_u256_sub32`, `fio_u512_mul64` ...
 
 These functions follow the naming scheme of `fio_u##TOTAL_BITS##_##OP##WORD_BITS`, where `TOTAL_BITS` is the total number of bits, `OP` is the name of the operation (`add`, `sub`, `mul`, etc') and `WORD_BITS` is the number of bits in each vector "word".
 
-i.e:
-
-- `void fio_u128_add8(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs a modular 8 bit ADD (`+`) operation `a+b`.
-- `void fio_u256_sub16(fio_u256 *t, fio_u256 *a, fio_u256 *b)`  - performs a modular 16 bit SUB (`-`) operation `a-b`.
-- `void fio_u512_mul32(fio_u512 *t, fio_u512 *a, fio_u512 *b)`  - performs a modular 32 bit MUL (`*`) operation `a*b`.
-- `void fio_u1024_and(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit AND (`&`) operation `a&b`.
-- `void fio_u2048_or(fio_u512 *t, fio_u512 *a, fio_u512 *b)`    - performs a bit OR (`|`) operation `a|b`.
-- `void fio_u4096_xor(fio_u512 *t, fio_u512 *a, fio_u512 *b)`   - performs a bit XOR (`^`) operation `a^b`.
-
 Supported operations (`OP`) are: `add`, `sub`, `mul`, `and`, `or`, `xor`.
-
-For bitwise operations, the `WORD_BITS` part of the function name is optional.
-
-
-#### `fio_u128_cadd16`, `fio_u128_csub32`, `fio_u256_cmul64` ...
-
-These functions perform an operation `a OP b` where `b` is a constant rather than a vector.
-
-i.e.:
-
-- `void fio_u128_cadd8(fio_u128 *t, fio_u128 *a, uint8_t b)`     - performs a modular 8 bit ADD (`+`) operation `a+b`.
-- `void fio_u256_csub16(fio_u256 *t, fio_u256 *a, uint16_t b)`   - performs a modular 16 bit SUB (`-`) operation `a-b`.
-- `void fio_u512_cmul32(fio_u512 *t, fio_u512 *a, uint32_t b)`   - performs a modular 32 bit MUL (`*`) operation `a*b`.
-- `void fio_u1024_cand8(fio_u512 *t, fio_u512 *a, uint8_t b)`    - performs an 8 bit AND (`&`) operation `a&b`.
-- `void fio_u2048_cor16(fio_u512 *t, fio_u512 *a, uint16_t b)`   - performs a 16 bit OR (`|`) operation `a|b`.
-- `void fio_u4096_cxor32(fio_u512 *t, fio_u512 *a, uint32_t b)`  - performs a 32 bit XOR (`^`) operation `a^b`.
-
 
 #### Multi-Precision `fio_u128_add`, `fio_u256_sub`, `fio_u512_mul` ...
 
 These functions provide Multi-Precision operations for the Numeral / Vector Helper Types.
 
-The functions support up to 2048 bits of multi-precision. The 4096 bit type is mostly reserved for storing the result of multiplying two 2048 bit numerals (as storing the result requires bit expansion from 2048 bits to 4096 bits).
-
-- `bool fio_u128_add(fio_u128 *t, fio_u128 *a, fio_u128 *b)`   - performs ADD (`t=a+b`), returning the carry bit.
-- `bool fio_u256_sub(fio_u256 *t, fio_u256 *a, fio_u256 *b)`   - performs SUB (`t=a-b`), returning the borrow bit.
-- `void fio_u512_mul(fio_u512 *t, fio_u256 *a, fio_u256 *b)`   - performs MUL (`t=a*b`) operation.
-
+- `bool fio_u128_add(fio_u128 *t, fio_u128 *a, fio_u128 *b)` - performs ADD (`t=a+b`), returning the carry bit.
+- `bool fio_u256_sub(fio_u256 *t, fio_u256 *a, fio_u256 *b)` - performs SUB (`t=a-b`), returning the borrow bit.
+- `void fio_u512_mul(fio_u512 *t, fio_u256 *a, fio_u256 *b)` - performs MUL (`t=a*b`) operation.
 
 -------------------------------------------------------------------------------
 
 ## Core Randomness
 
 The core module provides macros for generating semi-deterministic Pseudo-Random Number Generator functions.
+
+#### `fio_cycle_counter`
+
+```c
+uint64_t fio_cycle_counter(void);
+```
+
+Returns the CPU cycle counter. Uses `rdtsc` on x86, `cntvct_el0` on ARM64, or returns 0 on unsupported platforms.
 
 #### `FIO_DEFINE_RANDOM128_FN`
 
@@ -1930,6 +2097,8 @@ extern fio_u128 name##128(void); // returns 128 bits
 extern uint64_t name##64(void);  // returns 64 bits (simply half of the 128 bit result)
 extern void name##_bytes(void *buffer, size_t len); // fills a buffer
 extern void name##_reset(void); // resets the state of the PRNG
+extern void name##_reseed(void); // reseeds the PRNG using time and jitter
+extern void name##_on_fork(void *is_null); // reseeds the PRNG (for fork safety)
 ```
 
 If `reseed_log` is non-zero and less than 64, the PNGR is no longer deterministic, as it will automatically re-seeds itself every `1 << reseed_log` iterations using a loop measuring both time and CPU 'jitter'.
@@ -1970,15 +2139,29 @@ typedef struct fio_buf_info_s {
 
 An information type for reporting/storing buffer data (no `capa`). Note that the buffer may contain binary data and is **not** likely to be NUL terminated.
 
+#### `FIO_STR_INFO0`
+
+```c
+#define FIO_STR_INFO0 ((fio_str_info_s){0})
+```
+
+A NULL fio_str_info_s.
+
 #### `FIO_STR_INFO_IS_EQ`
 
 ```c
-#define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
-  ((s1).len == (s2).len && (!(s1).len || (s1).buf == (s2).buf ||               \
-                            !memcmp((s1).buf, (s2).buf, (s1).len)))
+#define FIO_STR_INFO_IS_EQ(s1, s2)
 ```
 
-This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content content equality.
+This helper MACRO compares two `fio_str_info_s` / `fio_buf_info_s` objects for content equality.
+
+#### `FIO_BUF_INFO_IS_EQ`
+
+```c
+#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+```
+
+This helper MACRO compares two `fio_buf_info_s` objects for content equality.
 
 #### `FIO_STR_INFO1`
 
@@ -2007,6 +2190,32 @@ Converts a String with a known length into a `fio_str_info_s`.
 
 Converts a String with a known length and capacity into a `fio_str_info_s`.
 
+#### `FIO_BUF_INFO0`
+
+```c
+#define FIO_BUF_INFO0 ((fio_buf_info_s){0})
+```
+
+A NULL fio_buf_info_s.
+
+#### `FIO_BUF_INFO1`
+
+```c
+#define FIO_BUF_INFO1(str)                                                     \
+  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+```
+
+Converts a C String into a `fio_buf_info_s`.
+
+#### `FIO_BUF_INFO2`
+
+```c
+#define FIO_BUF_INFO2(str, length)                                             \
+  ((fio_buf_info_s){.len = (length), .buf = (str)})
+```
+
+Converts a String with a known length into a `fio_buf_info_s`.
+
 #### `FIO_BUF2STR_INFO`
 
 ```c
@@ -2023,20 +2232,30 @@ Converts a `fio_buf_info_s` into a `fio_str_info_s`.
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 ```
 
-Converts a `fio_buf_info_s` into a `fio_str_info_s`.
+Converts a `fio_str_info_s` into a `fio_buf_info_s`.
 
 #### `FIO_STR_INFO_TMP_VAR(name, capacity)`
 
 ```c
 #define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
   char fio___stack_mem___##name[(capacity) + 1];                               \
-  fio___stack_mem___##name[(capacity)] = 0; /* guard */                        \
+  fio___stack_mem___##name[0] = 0; /* guard */                                 \
   fio_str_info_s name = (fio_str_info_s) {                                     \
     .buf = fio___stack_mem___##name, .capa = (capacity)                        \
   }
 ```
 
 Creates a stack fio_str_info_s variable `name` with `capacity` bytes (including 1 extra byte for a `NUL` guard).
+
+#### `FIO_STR_INFO_TMP_IS_REALLOCATED`
+
+```c
+#define FIO_STR_INFO_TMP_IS_REALLOCATED(name) (fio___stack_mem___##name != name.buf)
+```
+
+Tests to see if memory reallocation happened for a `FIO_STR_INFO_TMP_VAR`.
+
+-------------------------------------------------------------------------------
 
 ### Core UTF-8 Support
 
@@ -2047,7 +2266,7 @@ However, they could be used for writing safe a UTF-8 implementation if used with
 #### `fio_utf8_code_len`
 
 ```c
-size_t fio_utf8_code_len(uint32_t u);
+unsigned fio_utf8_code_len(uint32_t u);
 ```
 
 Returns the number of bytes required to UTF-8 encoded a code point `u`.
@@ -2055,7 +2274,7 @@ Returns the number of bytes required to UTF-8 encoded a code point `u`.
 #### `fio_utf8_char_len_unsafe`
 
 ```c
-size_t fio_utf8_char_len_unsafe(uint8_t c);
+unsigned fio_utf8_char_len_unsafe(uint8_t c);
 ```
 
 Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid).
@@ -2065,20 +2284,20 @@ Use only to re-collect lost length information after a successful `fio_utf8_writ
 #### `fio_utf8_char_len`
 
 ```c
-size_t fio_utf8_char_len(const void *str);
+unsigned fio_utf8_char_len(const void *str);
 ```
 
 Returns the number of valid UTF-8 bytes used by first char at `str`.
 
 If `str` doesn't point to a valid UTF-8 encoded code-point, returns 0.
 
-**Note**: This function also tests all the following bytes that are part of the asme UTF-8 character.
+**Note**: This function also tests all the following bytes that are part of the same UTF-8 character.
 
 
-#### `fio_utf8_char_len`
+#### `fio_utf8_write`
 
 ```c
-size_t fio_utf8_write(void *dest, uint32_t u);
+unsigned fio_utf8_write(void *dest, uint32_t u);
 ```
 
 Writes code point to `dest` using UFT-8. Returns number of bytes written.
@@ -2103,10 +2322,11 @@ Advances the pointer at `str` by the number of bytes consumed (read).
 #### `fio_utf8_peek`
 
 ```c
-uint32_t fio_utf8_peek(char *str);
+uint32_t fio_utf8_peek(const char *str);
 ```
 
 Decodes the first UTF-8 char at `str` and returns its code point value.
 
 Unlike `fio_utf8_read`, the pointer does not change.
 
+-------------------------------------------------------------------------------

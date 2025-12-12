@@ -11,34 +11,48 @@ The main difference between using the Core String API directly and defining a St
 
 **Note**: the `fio_string` functions might fail or truncate data if memory allocation fails. Test the returned value for failure (success returns `0`, failure returns `-1`).
 
+**Note:** this module depends on the `FIO_ATOL`, `FIO_ATOMIC`, `FIO_RAND`, and `FIO_FILES` modules which will be automatically included.
 
-**Note:** this module depends on the  `FIO_ATOL`,  `FIO_ATOMIC`, `FIO_RAND`, and `FIO_FILES` modules which will be automatically included.
+### Reallocation Callback Type
+
+#### `fio_string_realloc_fn`
+
+```c
+typedef int (*fio_string_realloc_fn)(fio_str_info_s *dest, size_t len);
+```
+
+A reallocation callback type for buffers in a `fio_str_info_s`.
+
+The callback MUST allocate at least `len + 1` bytes, setting the new capacity in `dest->capa`.
+
+**Returns:** `0` on success, `-1` on failure.
 
 ### Core String Authorship
 
 #### `fio_string_write`
 
 ```c
-static inline int fio_string_write(fio_str_info_s *dest,
-                               void (*reallocate)(fio_str_info_s *,
-                                                  size_t new_capa),
-                               const void *src,
-                               size_t len);
+int fio_string_write(fio_str_info_s *dest,
+                     fio_string_realloc_fn reallocate,
+                     const void *restrict src,
+                     size_t len);
 ```
 
-Writes data to the end of the string in the `fio_string_s` struct, returning an updated `fio_string_s` struct.
+Writes data to the end of the string in the `fio_str_info_s` struct.
 
 The returned string is NUL terminated if edited.
 
-* `dest` an `fio_string_s` struct containing the destination string.
+**Parameters:**
 
-* `reallocate` is a callback that attempts to reallocate more memory (i.e., using realloc) and returns an updated `fio_string_s` struct containing the updated capacity and buffer pointer (as well as the original length).
+- `dest` - an `fio_str_info_s` struct containing the destination string.
 
-    On failure the original `fio_string_s` should be returned. if `reallocate` is NULL or fails, the data copied will be truncated.
+- `reallocate` - a callback that attempts to reallocate more memory (i.e., using `realloc`) and returns `0` on success or `-1` on failure. If `reallocate` is NULL or fails, the data copied will be truncated.
 
-* `src` is the data to be written to the end of `dest`.
+- `src` - the data to be written to the end of `dest`.
 
-* `len` is the length of the data to be written to the end of `dest`.
+- `len` - the length of the data to be written to the end of `dest`.
+
+**Returns:** `0` on success, `-1` if memory reallocation was needed but failed (data may be truncated).
 
 **Note**: this function performs only minimal checks and assumes that `dest` is fully valid - i.e., that `dest.capa >= dest.len`, that `dest.buf` is valid, etc'.
 
@@ -47,16 +61,15 @@ The returned string is NUL terminated if edited.
 An example for a `reallocate` callback using the system's `realloc` function (or use `FIO_STRING_REALLOC` / `FIO_STRING_FREE`):
 
 ```c
-fio_str_info_s fio_string_realloc_system(fio_str_info_s dest,
-                                         size_t len) {
+int fio_string_realloc_system(fio_str_info_s *dest, size_t len) {
   /* must allocate at least len + 1 bytes. */
   const size_t new_capa = fio_string_capa4len(len);
-  void *tmp = realloc(dest.buf, new_capa);
+  void *tmp = realloc(dest->buf, new_capa);
   if (!tmp)
-    return dest;
-  dest.capa = new_capa;
-  dest.buf = (char *)tmp;
-  return dest;
+    return -1;
+  dest->capa = new_capa;
+  dest->buf = (char *)tmp;
+  return 0;
 }
 ```
 
@@ -77,12 +90,11 @@ void example(void) {
 
 ```c
 int fio_string_replace(fio_str_info_s *dest,
-                      void (*reallocate)(fio_str_info_s *,
-                                         size_t new_capa),
-                      intptr_t start_pos,
-                      size_t overwrite_len,
-                      const void *src,
-                      size_t len);
+                       fio_string_realloc_fn reallocate,
+                       intptr_t start_pos,
+                       size_t overwrite_len,
+                       const void *src,
+                       size_t len);
 ```
 
 Similar to `fio_string_write`, only replacing/inserting a sub-string in a specific location.
@@ -101,9 +113,8 @@ If `len == 0` than `src` will be ignored and the data marked for replacement wil
 
 ```c
 int fio_string_write2(fio_str_info_s *restrict dest,
-                      void (*reallocate)(fio_str_info_s *,
-                                         size_t new_capa),
-                      const fio_string_write_s sources[]);
+                      fio_string_realloc_fn reallocate,
+                      const fio_string_write_s srcs[]);
 /* Helper macro for fio_string_write2 */
 #define fio_string_write2(dest, reallocate, ...)                               \
   fio_string_write2((dest),                                                    \
@@ -117,16 +128,20 @@ Writes a group of objects (strings, numbers, etc') to `dest`.
 
 **Note**: `reallocate`, if called, will be called only once.
 
-`sources` is an array of `fio_string_write_s` structs, ending with a struct that's all set to 0. This array is usually populated using the following macros:
+`srcs` is an array of `fio_string_write_s` structs, ending with a struct that's all set to 0. This array is usually populated using the following macros:
 
 ```c
 /** Used to write raw string data to the string. */
 #define FIO_STRING_WRITE_STR1(str_)                                            \
   ((fio_string_write_s){.klass = 1,                                            \
-                        .info.str = {.len = strlen((str_)), .buf = (str_)}})
+                        .info.str = {.len = FIO_STRLEN((str_)), .buf = (str_)}})
 /** Used to write raw (possibly binary) string data to the string. */
 #define FIO_STRING_WRITE_STR2(str_, len_)                                      \
   ((fio_string_write_s){.klass = 1, .info.str = {.len = (len_), .buf = (str_)}})
+/** Used to write a fio_str_info_s or fio_buf_info_s to the string. */
+#define FIO_STRING_WRITE_STR_INFO(str_)                                        \
+  ((fio_string_write_s){.klass = 1,                                            \
+                        .info.str = {.len = (str_).len, .buf = (str_).buf}})
 /** Used to write a signed number to the string. */
 #define FIO_STRING_WRITE_NUM(num)                                              \
   ((fio_string_write_s){.klass = 2, .info.i = (int64_t)(num)})
@@ -165,7 +180,10 @@ For this function, the facil.io C STL reserves and defines the following type:
 typedef struct {
   size_t klass;
   union {
-    fio_str_info_s str;
+    struct {
+      size_t len;
+      const char *buf;
+    } str;
     double f;
     int64_t i;
     uint64_t u;
@@ -178,10 +196,9 @@ typedef struct {
 #### `fio_string_write_i`
 
 ```c
-static inline int fio_string_write_i(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 int64_t i);
+int fio_string_write_i(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       int64_t i);
 ```
 
 Writes a signed number `i` to the String.
@@ -191,10 +208,9 @@ Writes a signed number `i` to the String.
 #### `fio_string_write_u`
 
 ```c
-static inline int fio_string_write_u(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 uint64_t u);
+int fio_string_write_u(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       uint64_t u);
 ```
 
 Writes an unsigned number `u` to the String.
@@ -204,10 +220,9 @@ Writes an unsigned number `u` to the String.
 #### `fio_string_write_hex`
 
 ```c
-static inline int fio_string_write_hex(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
+int fio_string_write_hex(fio_str_info_s *dest,
+                         fio_string_realloc_fn reallocate,
+                         uint64_t i);
 ```
 
 Writes a hex representation of `i` to the String.
@@ -217,10 +232,9 @@ Writes a hex representation of `i` to the String.
 #### `fio_string_write_bin`
 
 ```c
-static inline int fio_string_write_bin(fio_str_info_s *dest,
-                                   void (*reallocate)(fio_str_info_s *,
-                                                      size_t new_capa),
-                                   uint64_t i);
+int fio_string_write_bin(fio_str_info_s *dest,
+                         fio_string_realloc_fn reallocate,
+                         uint64_t i);
 ```
 
 Writes a binary representation of `i` to the String.
@@ -232,11 +246,10 @@ Writes a binary representation of `i` to the String.
 #### `fio_string_printf`
 
 ```c
-static int fio_string_printf(fio_str_info_s *dest,
-                                void (*reallocate)(fio_str_info_s *,
-                                                   size_t new_capa),
-                                const char *format,
-                                ...);
+int fio_string_printf(fio_str_info_s *dest,
+                      fio_string_realloc_fn reallocate,
+                      const char *format,
+                      ...);
 ```
 
 Similar to fio_string_write, only using printf semantics.
@@ -244,11 +257,10 @@ Similar to fio_string_write, only using printf semantics.
 #### `fio_string_vprintf`
 
 ```c
-inline int fio_string_vprintf(fio_str_info_s *dest,
-                                 void (*reallocate)(fio_str_info_s *,
-                                                    size_t new_capa),
-                                 const char *format,
-                                 va_list argv);
+int fio_string_vprintf(fio_str_info_s *dest,
+                       fio_string_realloc_fn reallocate,
+                       const char *format,
+                       va_list argv);
 ```
 
 Similar to fio_string_write, only using vprintf semantics.
@@ -265,23 +277,41 @@ Calculates a 16 bytes boundary aligned capacity for `new_len`.
 
 The Core String API always allocates 16 byte aligned memory blocks, since most memory allocators will only allocate memory in multiples of 16 or more. By requesting the full 16 byte allocation, future allocations could be avoided without increasing memory usage.
 
+#### `FIO_STRING_SYS_REALLOC`
+
+```c
+#define FIO_STRING_SYS_REALLOC fio_string_sys_reallocate
+int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len);
+```
+
+Default reallocation callback implementation using libc `realloc`.
+
 #### `FIO_STRING_REALLOC`
 
 ```c
 #define FIO_STRING_REALLOC fio_string_default_reallocate
-void fio_string_default_reallocate(fio_str_info_s *dest, size_t new_capa);
+int fio_string_default_reallocate(fio_str_info_s *dest, size_t len);
 ```
 
-Default reallocation callback implementation
+Default reallocation callback implementation using the default allocator.
 
 #### `FIO_STRING_ALLOC_COPY`
 
 ```c
 #define FIO_STRING_ALLOC_COPY fio_string_default_allocate_copy
-void fio_string_default_allocate_copy(fio_str_info_s *dest, size_t new_capa);
+int fio_string_default_allocate_copy(fio_str_info_s *dest, size_t new_capa);
 ```
 
 Default reallocation callback for memory that mustn't be freed.
+
+#### `FIO_STRING_ALLOC_KEY`
+
+```c
+#define FIO_STRING_ALLOC_KEY fio_string_default_key_alloc
+void *fio_string_default_key_alloc(size_t len);
+```
+
+Default allocator for the `fio_keystr_s` string data.
 
 #### `FIO_STRING_FREE`
 
@@ -301,11 +331,20 @@ void fio_string_default_free2(fio_str_info_s str);
 
 Frees memory that was allocated with the default callbacks.
 
+#### `FIO_STRING_FREE_KEY`
+
+```c
+#define FIO_STRING_FREE_KEY fio_string_default_free_key
+void fio_string_default_free_key(void *buf, size_t capa);
+```
+
+Frees memory that was allocated for a key string with the default callback.
+
 #### `FIO_STRING_FREE_NOOP`
 
 ```c
 #define FIO_STRING_FREE_NOOP fio_string_default_free_noop
-void fio_string_default_free_noop(void * str);
+void fio_string_default_free_noop(void *str);
 ```
 
 Does nothing. Made available for APIs that require a callback for memory management.
@@ -355,10 +394,10 @@ Compares two `fio_buf_info_s`, returning 1 if the data in buffer `a` is greater 
 #### `fio_string_utf8_valid`
 
 ```c
-size_t fio_string_utf8_valid(fio_str_info_s str);
+bool fio_string_utf8_valid(fio_str_info_s str);
 ```
 
-Returns 1 if the String is UTF-8 valid and 0 if not.
+Returns `true` (1) if the String is UTF-8 valid and `false` (0) if not.
 
 #### `fio_string_utf8_len`
 
@@ -367,6 +406,19 @@ size_t fio_string_utf8_len(fio_str_info_s str);
 ```
 
 Returns the String's length in UTF-8 characters or 0 on either an error or an empty string.
+
+#### `fio_string_utf8_valid_code_point`
+
+```c
+size_t fio_string_utf8_valid_code_point(const void *u8c, size_t buf_len);
+```
+
+Returns 0 if non-UTF-8 or returns 1-4 (the number of bytes in the UTF-8 character) if a valid UTF-8 character.
+
+**Parameters:**
+
+- `u8c` - pointer to the start of a potential UTF-8 character.
+- `buf_len` - the remaining buffer length (to avoid reading past the buffer).
 
 #### `fio_string_utf8_select`
 
@@ -391,8 +443,8 @@ Returns -1 on error and 0 on success.
 ```c
 int fio_string_write_escape(fio_str_info_s *restrict dest,
                             fio_string_realloc_fn reallocate,
-                            const void *src,
-                            size_t len);
+                            const void *raw,
+                            size_t raw_len);
 ```
 
 Writes data at the end of the String, escaping the data using JSON semantics.
@@ -405,33 +457,65 @@ String while making it easy to read and copy the string during debugging.
 ```c
 int fio_string_write_unescape(fio_str_info_s *dest,
                               fio_string_realloc_fn reallocate,
-                              const void *src,
-                              size_t len);
+                              const void *escaped,
+                              size_t escaped_len);
 ```
 
 Writes an escaped data into the string after un-escaping the data.
+
+### Core String Base32 support
+
+#### `fio_string_write_base32enc`
+
+```c
+int fio_string_write_base32enc(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *raw,
+                               size_t raw_len);
+```
+
+Writes data to String using Base32 encoding.
+
+#### `fio_string_write_base32dec`
+
+```c
+int fio_string_write_base32dec(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *encoded,
+                               size_t encoded_len);
+```
+
+Writes decoded Base32 data to String.
 
 ### Core String Base64 support
 
 #### `fio_string_write_base64enc`
 
 ```c
-SFUNC int fio_string_write_base64enc(fio_str_info_s *dest,
-                                     fio_string_realloc_fn reallocate,
-                                     const void *data,
-                                     size_t data_len,
-                                     uint8_t url_encoded);
+int fio_string_write_base64enc(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *raw,
+                               size_t raw_len,
+                               uint8_t url_encoded);
 ```
 
 Writes data to String using Base64 encoding.
 
+**Parameters:**
+
+- `dest` - destination string info.
+- `reallocate` - reallocation callback.
+- `raw` - raw data to encode.
+- `raw_len` - length of raw data.
+- `url_encoded` - if non-zero, uses URL-safe Base64 encoding (`-` and `_` instead of `+` and `/`).
+
 #### `fio_string_write_base64dec`
 
 ```c
-SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
-                                     fio_string_realloc_fn reallocate,
-                                     const void *encoded,
-                                     size_t encoded_len);
+int fio_string_write_base64dec(fio_str_info_s *dest,
+                               fio_string_realloc_fn reallocate,
+                               const void *encoded,
+                               size_t encoded_len);
 ```
 
 Writes decoded base64 data to String.
@@ -441,10 +525,10 @@ Writes decoded base64 data to String.
 #### `fio_string_write_url_enc`
 
 ```c
-int fio_string_write_url_enc(fio_str_info_s *restrict dest,
+int fio_string_write_url_enc(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              const void *raw,
-                             size_t len);
+                             size_t raw_len);
 ```
 
 Writes data to String using URL encoding (a.k.a., percent encoding). Always encodes spaces as `%20` rather than `+`.
@@ -455,7 +539,7 @@ Writes data to String using URL encoding (a.k.a., percent encoding). Always enco
 int fio_string_write_url_dec(fio_str_info_s *dest,
                              fio_string_realloc_fn reallocate,
                              const void *encoded,
-                             size_t len);
+                             size_t encoded_len);
 ```
 
 Writes decoded URL data to String. Decodes "percent encoding" as well as spaces encoded using `+`.
@@ -465,10 +549,10 @@ Writes decoded URL data to String. Decodes "percent encoding" as well as spaces 
 #### `fio_string_write_path_dec`
 
 ```c
-int fio_string_write_url_dec(fio_str_info_s *dest,
-                             fio_string_realloc_fn reallocate,
-                             const void *encoded,
-                             size_t len);
+int fio_string_write_path_dec(fio_str_info_s *dest,
+                              fio_string_realloc_fn reallocate,
+                              const void *encoded,
+                              size_t encoded_len);
 ```
 
 Writes decoded URL data to String. Decodes "percent encoding" without converting `+` to spaces.
@@ -480,10 +564,10 @@ Writes decoded URL data to String. Decodes "percent encoding" without converting
 #### `fio_string_write_html_escape`
 
 ```c
-int fio_string_write_html_escape(fio_str_info_s *restrict dest,
+int fio_string_write_html_escape(fio_str_info_s *dest,
                                  fio_string_realloc_fn reallocate,
                                  const void *raw,
-                                 size_t len);
+                                 size_t raw_len);
 ```
 
 Writes HTML escaped data to a String.
@@ -494,7 +578,7 @@ Writes HTML escaped data to a String.
 int fio_string_write_html_unescape(fio_str_info_s *dest,
                                    fio_string_realloc_fn reallocate,
                                    const void *escaped,
-                                   size_t len);
+                                   size_t escaped_len);
 ```
 
 Writes HTML (mostly) un-escaped data to a String.
@@ -514,7 +598,7 @@ int fio_string_readfd(fio_str_info_s *dest,
                       fio_string_realloc_fn reallocate,
                       int fd,
                       intptr_t start_at,
-                      intptr_t limit);
+                      size_t limit);
 ```
 
 Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at`.
@@ -532,7 +616,7 @@ int fio_string_readfile(fio_str_info_s *dest,
                         fio_string_realloc_fn reallocate,
                         const char *filename,
                         intptr_t start_at,
-                        intptr_t limit);
+                        size_t limit);
 ```
 
 Opens the file `filename` and pastes it's contents (or a slice ot it) at the end of the String. If `limit == 0`, than the data will be read until EOF.
@@ -544,11 +628,11 @@ If the file can't be located, opened or read, or if `start_at` is beyond the EOF
 
 ```c
 int fio_string_getdelim_fd(fio_str_info_s *dest,
-                          fio_string_realloc_fn reallocate,
-                          int fd,
-                          intptr_t start_at,
-                          char delim,
-                          size_t limit);
+                           fio_string_realloc_fn reallocate,
+                           int fd,
+                           intptr_t start_at,
+                           char delim,
+                           size_t limit);
 ```
 
 Writes up to `limit` bytes from `fd` into `dest`, starting at `start_at` and ending either at the first occurrence of `delim` or at EOF.
@@ -563,11 +647,11 @@ If `start_at` is negative, position will be calculated from the end of the file 
 
 ```c
 int fio_string_getdelim_file(fio_str_info_s *dest,
-                            fio_string_realloc_fn reallocate,
-                            const char *filename,
-                            intptr_t start_at,
-                            char delim,
-                            size_t limit);
+                             fio_string_realloc_fn reallocate,
+                             const char *filename,
+                             intptr_t start_at,
+                             char delim,
+                             size_t limit);
 ```
 
 Opens the file `filename`, calls `fio_string_getdelim_fd` and closes the file.
@@ -621,6 +705,9 @@ The `fio_bstr` functions wrap all `fio_string` core API, resulting in the follow
 * `fio_bstr_write_base64enc` - see [`fio_string_write_base64enc`](#fio_string_write_base64enc) for details.
 * `fio_bstr_write_base64dec` - see [`fio_string_write_base64dec`](#fio_string_write_base64dec) for details.
 
+* `fio_bstr_write_url_enc` - see [`fio_string_write_url_enc`](#fio_string_write_url_enc) for details.
+* `fio_bstr_write_url_dec` - see [`fio_string_write_url_dec`](#fio_string_write_url_dec) for details.
+
 * `fio_bstr_write_html_escape` - see [`fio_string_write_html_escape`](#fio_string_write_html_escape) for details.
 * `fio_bstr_write_html_unescape` - see [`fio_string_write_html_unescape`](#fio_string_write_html_unescape) for details.
 
@@ -666,10 +753,20 @@ void fio_bstr_free(char *bstr);
 
 Frees a binary string allocated by a `fio_bstr` function (or decreases its reference count).
 
+#### `fio_bstr_reserve`
+
+```c
+char *fio_bstr_reserve(char *bstr, size_t len);
+```
+
+Reserves `len` bytes for future `write` operations (used to minimize realloc).
+
+Returns the (possibly updated) `fio_bstr` pointer.
+
 #### `fio_bstr_info`
 
 ```c
-fio_str_info_s fio_bstr_info(char *bstr);
+fio_str_info_s fio_bstr_info(const char *bstr);
 ```
 
 Returns information about the `fio_bstr` using the `fio_str_info_s` struct.
@@ -677,7 +774,7 @@ Returns information about the `fio_bstr` using the `fio_str_info_s` struct.
 #### `fio_bstr_buf`
 
 ```c
-fio_buf_info_s fio_bstr_buf(char *bstr);
+fio_buf_info_s fio_bstr_buf(const char *bstr);
 ```
 
 Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
@@ -685,7 +782,7 @@ Returns information about the `fio_bstr` using the `fio_buf_info_s` struct.
 #### `fio_bstr_len`
 
 ```c
-size_t fio_bstr_len(char *bstr);
+size_t fio_bstr_len(const char *bstr);
 ```
 
 Gets the length of the `fio_bstr`.
@@ -701,6 +798,26 @@ Sets the length of the `fio_bstr`.
 **Note**: `len` **must** be less then the capacity of the `bstr`, or the function call will quietly fail.
 
 Returns `bstr`.
+
+#### `fio_bstr_is_eq2info`
+
+```c
+int fio_bstr_is_eq2info(const char *a, fio_str_info_s b);
+```
+
+Compares a `fio_bstr` to a `fio_str_info_s` for equality.
+
+Returns 1 if equal, 0 if not.
+
+#### `fio_bstr_is_eq2buf`
+
+```c
+int fio_bstr_is_eq2buf(const char *a, fio_buf_info_s b);
+```
+
+Compares a `fio_bstr` to a `fio_buf_info_s` for equality.
+
+Returns 1 if equal, 0 if not.
 
 #### `fio_bstr_reallocate` - for internal use
 
@@ -738,9 +855,21 @@ a semi-opaque type used for the `fio_keystr` functions
 fio_buf_info_s fio_keystr_buf(fio_keystr_s *str);
 ```
 
-Returns the Key String.
+Returns the Key String as a `fio_buf_info_s`.
 
-#### `fio_keystr`
+**Note**: Key Strings are NOT NUL TERMINATED!
+
+#### `fio_keystr_info`
+
+```c
+fio_str_info_s fio_keystr_info(fio_keystr_s *str);
+```
+
+Returns the Key String as a `fio_str_info_s`.
+
+**Note**: Key Strings are NOT NUL TERMINATED!
+
+#### `fio_keystr_tmp`
 
 ```c
 fio_keystr_s fio_keystr_tmp(const char *buf, uint32_t len);
@@ -772,11 +901,33 @@ Destroys a copy of `fio_keystr_s` - used internally by the hash map.
 
 ```c
 int fio_keystr_is_eq(fio_keystr_s a, fio_keystr_s b);
-int fio_keystr_is_eq2(fio_keystr_s a, fio_str_info_s b);
-int fio_keystr_is_eq3(fio_keystr_s a, fio_buf_info_s b);
 ```
 
 Compares two Key Strings - used internally by the hash map.
+
+#### `fio_keystr_is_eq2`
+
+```c
+int fio_keystr_is_eq2(fio_keystr_s a, fio_str_info_s b);
+```
+
+Compares a Key String to a `fio_str_info_s` - used internally by the hash map.
+
+#### `fio_keystr_is_eq3`
+
+```c
+int fio_keystr_is_eq3(fio_keystr_s a, fio_buf_info_s b);
+```
+
+Compares a Key String to a `fio_buf_info_s` - used internally by the hash map.
+
+#### `fio_keystr_hash`
+
+```c
+uint64_t fio_keystr_hash(fio_keystr_s a);
+```
+
+Returns a good-enough `fio_keystr_s` risky hash.
 
 #### `FIO_KEYSTR_CONST`
 
