@@ -65,6 +65,12 @@
 #ifdef FIO_RESP3
 #include "004 resp3.h"
 #endif
+#ifdef FIO_URL_ENCODED
+#include "004 urlencoded.h"
+#endif
+#ifdef FIO_MULTIPART
+#include "004 multipart.h"
+#endif
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"

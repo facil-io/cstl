@@ -11299,11 +11299,37 @@ typedef struct {
   /**
    * Called for each regular form field (no filename).
    * Returns user-defined context (can be NULL).
+   *
+   * Note: If on_field_start is provided, this callback is ignored and the
+   * streaming field callbacks (on_field_start/on_field_data/on_field_end)
+   * are used instead.
    */
   void *(*on_field)(void *udata,
                     fio_buf_info_s name,
                     fio_buf_info_s value,
                     fio_buf_info_s content_type);
+
+  /**
+   * Called when a large field starts (optional).
+   * If NULL but on_field exists, on_field is used instead (backward
+   * compatible). Returns context for this field (passed to
+   * on_field_data/on_field_end).
+   */
+  void *(*on_field_start)(void *udata,
+                          fio_buf_info_s name,
+                          fio_buf_info_s content_type);
+
+  /**
+   * Called with field data chunk.
+   * May be called multiple times per field for streaming.
+   * Returns non-zero to abort parsing.
+   */
+  int (*on_field_data)(void *udata, void *field_ctx, fio_buf_info_s data);
+
+  /**
+   * Called when field ends.
+   */
+  void (*on_field_end)(void *udata, void *field_ctx);
 
   /**
    * Called when a file upload starts.
@@ -11393,6 +11419,29 @@ FIO_IFUNC void *fio___multipart_noop_field(void *udata,
   return NULL;
 }
 
+FIO_IFUNC void *fio___multipart_noop_field_start(void *udata,
+                                                 fio_buf_info_s name,
+                                                 fio_buf_info_s content_type) {
+  (void)udata;
+  (void)name;
+  (void)content_type;
+  return NULL;
+}
+
+FIO_IFUNC int fio___multipart_noop_field_data(void *udata,
+                                              void *field_ctx,
+                                              fio_buf_info_s data) {
+  (void)udata;
+  (void)field_ctx;
+  (void)data;
+  return 0;
+}
+
+FIO_IFUNC void fio___multipart_noop_field_end(void *udata, void *field_ctx) {
+  (void)udata;
+  (void)field_ctx;
+}
+
 FIO_IFUNC void *fio___multipart_noop_file_start(void *udata,
                                                 fio_buf_info_s name,
                                                 fio_buf_info_s filename,
@@ -11429,6 +11478,11 @@ typedef struct {
                     fio_buf_info_s name,
                     fio_buf_info_s value,
                     fio_buf_info_s content_type);
+  void *(*on_field_start)(void *udata,
+                          fio_buf_info_s name,
+                          fio_buf_info_s content_type);
+  int (*on_field_data)(void *udata, void *field_ctx, fio_buf_info_s data);
+  void (*on_field_end)(void *udata, void *field_ctx);
   void *(*on_file_start)(void *udata,
                          fio_buf_info_s name,
                          fio_buf_info_s filename,
@@ -11436,6 +11490,8 @@ typedef struct {
   int (*on_file_data)(void *udata, void *file_ctx, fio_buf_info_s data);
   void (*on_file_end)(void *udata, void *file_ctx);
   void (*on_error)(void *udata);
+  /** Flag: use streaming field callbacks instead of on_field */
+  int use_field_streaming;
 } fio___multipart_cb_s;
 
 FIO_SFUNC fio___multipart_cb_s
@@ -11445,6 +11501,15 @@ fio___multipart_callbacks_validate(const fio_multipart_parser_callbacks_s *cb) {
   if (!cb)
     cb = &empty_cb;
   r.on_field = cb->on_field ? cb->on_field : fio___multipart_noop_field;
+  /* Streaming field callbacks: use if on_field_start is provided */
+  r.use_field_streaming = (cb->on_field_start != NULL);
+  r.on_field_start = cb->on_field_start ? cb->on_field_start
+                                        : fio___multipart_noop_field_start;
+  r.on_field_data =
+      cb->on_field_data ? cb->on_field_data : fio___multipart_noop_field_data;
+  r.on_field_end =
+      cb->on_field_end ? cb->on_field_end : fio___multipart_noop_field_end;
+  /* File callbacks */
   r.on_file_start =
       cb->on_file_start ? cb->on_file_start : fio___multipart_noop_file_start;
   r.on_file_data =
@@ -11522,10 +11587,8 @@ FIO_SFUNC int fio___multipart_prefix_icase(const char *str,
     char c1 = str[i];
     char c2 = prefix[i];
     /* Convert to lowercase */
-    if (c1 >= 'A' && c1 <= 'Z')
-      c1 += 32;
-    if (c2 >= 'A' && c2 <= 'Z')
-      c2 += 32;
+    c1 |= (char)((uint8_t)(c1 >= 'A' && c1 <= 'Z') << 5);
+    c2 |= (char)((uint8_t)(c2 >= 'A' && c2 <= 'Z') << 5);
     if (c1 != c2)
       return 0;
   }
@@ -11698,13 +11761,17 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
   const char *end = data + len;
 
   /* Build boundary markers:
-   * - delimiter: "\r\n--" + boundary
+   * - delimiter: "\r\n--" + boundary (for finding boundaries between parts)
    * - first_delimiter: "--" + boundary (at start of data)
-   * - close_delimiter: "\r\n--" + boundary + "--"
+   *
+   * Buffer layout: [\r][\n][-][-][boundary...]
+   *                 ^       ^
+   *                 |       +-- first_delimiter (offset 2)
+   *                 +---------- delimiter (offset 0)
    */
-  char delimiter_buf[256 + 6]; /* "--" + boundary + "\r\n" + "--" + NUL */
-  char *first_delimiter = delimiter_buf;
-  char *delimiter = delimiter_buf + 2;
+  char delimiter_buf[256 + 6]; /* "\r\n--" + boundary + NUL */
+  char *delimiter = delimiter_buf;
+  char *first_delimiter = delimiter_buf + 2;
   size_t first_delimiter_len = boundary.len + 2;
   size_t delimiter_len = boundary.len + 4;
 
@@ -11714,15 +11781,13 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
     return result;
   }
 
-  /* Build first delimiter: "--" + boundary */
-  first_delimiter[0] = '-';
-  first_delimiter[1] = '-';
-  FIO_MEMCPY(first_delimiter + 2, boundary.buf, boundary.len);
-
   /* Build delimiter: "\r\n--" + boundary */
   delimiter[0] = '\r';
   delimiter[1] = '\n';
-  /* delimiter + 2 already points to "--" + boundary from first_delimiter */
+  delimiter[2] = '-';
+  delimiter[3] = '-';
+  FIO_MEMCPY(delimiter + 4, boundary.buf, boundary.len);
+  /* first_delimiter now points to "--" + boundary (at offset 2) */
 
   /* Check for initial boundary */
   if ((size_t)(end - pos) < first_delimiter_len) {
@@ -11851,7 +11916,25 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
     } else {
       /* Regular form field */
       fio_buf_info_s value = FIO_BUF_INFO2((char *)body_start, body_len);
-      cb.on_field(udata, disposition.name, value, content_type);
+      if (cb.use_field_streaming) {
+        /* Use streaming field callbacks */
+        void *field_ctx =
+            cb.on_field_start(udata, disposition.name, content_type);
+
+        /* Send field data */
+        int abort = cb.on_field_data(udata, field_ctx, value);
+
+        cb.on_field_end(udata, field_ctx);
+
+        if (abort) {
+          result.err = -1;
+          result.consumed = (size_t)(next_boundary - data);
+          return result;
+        }
+      } else {
+        /* Use legacy on_field callback */
+        cb.on_field(udata, disposition.name, value, content_type);
+      }
       ++result.field_count;
     }
 
