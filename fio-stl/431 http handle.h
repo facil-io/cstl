@@ -597,8 +597,98 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
-HTTP Body Parsing Helpers (TODO!)
+HTTP Body Parsing Helpers
 ***************************************************************************** */
+
+/**
+ * HTTP body parser callbacks.
+ *
+ * All callbacks receive `udata` as first parameter.
+ * Primitive callbacks return the created object as `void *`.
+ * Container callbacks return a context for that container.
+ */
+typedef struct {
+  /* ===== Primitives ===== */
+
+  /** NULL / nil was detected. Returns new object. */
+  void *(*on_null)(void *udata);
+  /** TRUE was detected. Returns new object. */
+  void *(*on_true)(void *udata);
+  /** FALSE was detected. Returns new object. */
+  void *(*on_false)(void *udata);
+  /** Number was detected. Returns new object. */
+  void *(*on_number)(void *udata, int64_t num);
+  /** Float was detected. Returns new object. */
+  void *(*on_float)(void *udata, double num);
+  /** String was detected. Returns new object. */
+  void *(*on_string)(void *udata, const void *data, size_t len);
+
+  /* ===== Containers ===== */
+
+  /** Array was detected. Returns context for this array. */
+  void *(*on_array)(void *udata, void *parent);
+  /** Map / Object was detected. Returns context for this map. */
+  void *(*on_map)(void *udata, void *parent);
+  /** Push value to array. Returns non-zero on error. */
+  int (*array_push)(void *udata, void *array, void *value);
+  /** Set key-value pair in map. Returns non-zero on error. */
+  int (*map_set)(void *udata, void *map, void *key, void *value);
+  /** Called when array parsing is complete. */
+  void (*array_done)(void *udata, void *array);
+  /** Called when map parsing is complete. */
+  void (*map_done)(void *udata, void *map);
+
+  /* ===== File Uploads (multipart) ===== */
+
+  /**
+   * Called when a file upload starts.
+   *
+   * Return context for this file (e.g., fd, stream, buffer).
+   * Return NULL to skip this file (on_file_data/on_file_done won't be called).
+   */
+  void *(*on_file)(void *udata,
+                   fio_str_info_s name,
+                   fio_str_info_s filename,
+                   fio_str_info_s content_type);
+  /** Called for each chunk of file data. Return non-zero to abort. */
+  int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+  /** Called when file upload is complete. */
+  void (*on_file_done)(void *udata, void *file);
+
+  /* ===== Error Handling ===== */
+
+  /** Called on parse error. `partial` is the incomplete result, if any. */
+  void *(*on_error)(void *udata, void *partial);
+  /** Called to free an unused object (e.g., key when map_set fails). */
+  void (*free_unused)(void *udata, void *obj);
+
+} fio_http_body_parse_callbacks_s;
+
+/** HTTP body parse result. */
+typedef struct {
+  /** Top-level parsed object (caller responsible for freeing). */
+  void *result;
+  /** Number of bytes consumed from body. */
+  size_t consumed;
+  /** Error code: 0 = success. */
+  int err;
+} fio_http_body_parse_result_s;
+
+/**
+ * Parses the HTTP request body, auto-detecting content type.
+ *
+ * Supports JSON, URL-encoded, and multipart/form-data bodies.
+ * Calls the appropriate callbacks for each element found.
+ *
+ * @param h         The HTTP handle.
+ * @param callbacks Parser callbacks (designed to be static const).
+ * @param udata     User context passed to all callbacks.
+ * @return          Parse result with top-level object and status.
+ */
+SFUNC fio_http_body_parse_result_s
+fio_http_body_parse(fio_http_s *h,
+                    const fio_http_body_parse_callbacks_s *callbacks,
+                    void *udata);
 
 /* *****************************************************************************
 Header Parsing Helpers
@@ -3174,6 +3264,271 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
 /* *****************************************************************************
 Param Parsing (TODO! - parse query, parse mime/multipart parse text/json)
 ***************************************************************************** */
+
+/* *****************************************************************************
+HTTP Body Parsing - Primitive Type Detection
+***************************************************************************** */
+
+/** Primitive type enum for value identification. */
+typedef enum {
+  FIO___HTTP_BODY_PRIM_STRING = 0, /* Not a recognized primitive */
+  FIO___HTTP_BODY_PRIM_NULL,       /* "null" or "nil" */
+  FIO___HTTP_BODY_PRIM_TRUE,       /* "true" */
+  FIO___HTTP_BODY_PRIM_FALSE,      /* "false" */
+  FIO___HTTP_BODY_PRIM_NUMBER,     /* Integer like "123", "-456" */
+  FIO___HTTP_BODY_PRIM_FLOAT,      /* Float like "1.5", "-3.14", "1e10" */
+} fio___http_body_primitive_e;
+
+/**
+ * Identifies if a string represents a primitive value.
+ *
+ * Returns the primitive type and optionally parses the value.
+ * If `i_out` is not NULL and type is NUMBER, stores parsed int64_t.
+ * If `f_out` is not NULL and type is FLOAT, stores parsed double.
+ */
+FIO_SFUNC fio___http_body_primitive_e
+fio___http_body_identify_primitive(fio_buf_info_s str,
+                                   int64_t *i_out,
+                                   double *f_out) {
+  if (!str.len || !str.buf)
+    return FIO___HTTP_BODY_PRIM_STRING;
+
+  /* Check for "null" (4 chars) - case insensitive */
+  if (str.len == 4) {
+    uint32_t w = fio_buf2u32u(str.buf) | 0x20202020UL;
+    if (w == (fio_buf2u32u("null") | 0x20202020UL))
+      return FIO___HTTP_BODY_PRIM_NULL;
+    if (w == (fio_buf2u32u("true") | 0x20202020UL))
+      return FIO___HTTP_BODY_PRIM_TRUE;
+  }
+
+  /* Check for "nil" (3 chars) - case insensitive */
+  if (str.len == 3) {
+    uint32_t w = (fio_buf2u16u(str.buf) | 0x2020) |
+                 ((uint32_t)(str.buf[2] | 0x20) << 16);
+    uint32_t nil = (fio_buf2u16u("ni") | 0x2020) | ((uint32_t)('l') << 16);
+    if (w == nil)
+      return FIO___HTTP_BODY_PRIM_NULL;
+  }
+
+  /* Check for "false" (5 chars) - case insensitive */
+  if (str.len == 5) {
+    uint32_t w0 = fio_buf2u32u(str.buf) | 0x20202020UL;
+    if (w0 == (fio_buf2u32u("fals") | 0x20202020UL) &&
+        ((str.buf[4] | 0x20) == 'e'))
+      return FIO___HTTP_BODY_PRIM_FALSE;
+  }
+
+  /* Check for numeric values */
+  {
+    const char *p = str.buf;
+    const char *end = str.buf + str.len;
+    size_t is_neg = (p[0] == '-');
+
+    /* Must start with digit or '-' followed by digit */
+    if (!(((size_t)(p[0] - '0') < 10) ||
+          (is_neg && str.len > 1 && ((size_t)(p[1] - '0') < 10))))
+      return FIO___HTTP_BODY_PRIM_STRING;
+
+    /* Scan to determine if integer or float */
+    size_t has_dot = 0, has_exp = 0;
+    p += is_neg;
+
+    /* Scan integer part */
+    while (p < end && ((size_t)(*p - '0') < 10))
+      ++p;
+
+    /* Check for decimal point */
+    if (p < end && *p == '.') {
+      has_dot = 1;
+      ++p;
+      /* Must have at least one digit after dot */
+      if (p >= end || ((size_t)(*p - '0') >= 10))
+        return FIO___HTTP_BODY_PRIM_STRING;
+      while (p < end && ((size_t)(*p - '0') < 10))
+        ++p;
+    }
+
+    /* Check for exponent */
+    if (p < end && ((*p | 0x20) == 'e')) {
+      has_exp = 1;
+      ++p;
+      /* Optional sign */
+      p += (p < end && (*p == '+' || *p == '-'));
+      /* Must have at least one digit in exponent */
+      if (p >= end || ((size_t)(*p - '0') >= 10))
+        return FIO___HTTP_BODY_PRIM_STRING;
+      while (p < end && ((size_t)(*p - '0') < 10))
+        ++p;
+    }
+
+    /* If we didn't consume all characters, it's not a valid number */
+    if (p != end)
+      return FIO___HTTP_BODY_PRIM_STRING;
+
+    /* Parse and return appropriate type */
+    if (has_dot || has_exp) {
+      if (f_out) {
+        char *parse_ptr = str.buf;
+        *f_out = fio_atof(&parse_ptr);
+      }
+      return FIO___HTTP_BODY_PRIM_FLOAT;
+    }
+
+    /* Integer */
+    if (i_out) {
+      char *parse_ptr = str.buf;
+      *i_out = fio_atol10(&parse_ptr);
+    }
+    return FIO___HTTP_BODY_PRIM_NUMBER;
+  }
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Content-Type Detection
+***************************************************************************** */
+
+/** Content-type enum for body parsing. */
+typedef enum {
+  FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN = 0,
+  FIO___HTTP_BODY_CONTENT_TYPE_JSON,
+  FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED,
+  FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART,
+} fio___http_body_content_type_e;
+
+/** Detects the content type from the Content-Type header. */
+FIO_SFUNC fio___http_body_content_type_e
+fio___http_body_detect_content_type(fio_http_s *h) {
+  fio_str_info_s ct =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+  if (!ct.len)
+    return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
+
+  /* application/json */
+  if (ct.len >= 16) {
+    /* Check for "application/json" (case-insensitive for "application") */
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("ion/json") | 0x2020202020202020ULL))
+      return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
+  }
+
+  /* application/x-www-form-urlencoded */
+  if (ct.len >= 33) {
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    uint64_t w2 = fio_buf2u64u(ct.buf + 16) | 0x2020202020202020ULL;
+    uint64_t w3 = fio_buf2u64u(ct.buf + 24) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("ion/x-ww") | 0x2020202020202020ULL) &&
+        w2 == (fio_buf2u64u("w-form-u") | 0x2020202020202020ULL) &&
+        w3 == (fio_buf2u64u("rlencod") | 0x2020202020202020ULL))
+      return FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED;
+  }
+
+  /* multipart/form-data */
+  if (ct.len >= 19) {
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("multipar") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("t/form-d") | 0x2020202020202020ULL) &&
+        ((fio_buf2u16u(ct.buf + 16) | 0x2020) ==
+         (fio_buf2u16u("at") | 0x2020)) &&
+        ((ct.buf[18] | 0x20) == 'a'))
+      return FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART;
+  }
+
+  return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Stub Implementations
+***************************************************************************** */
+
+FIO_SFUNC fio_http_body_parse_result_s
+fio___http_body_parse_json(fio_http_s *h,
+                           const fio_http_body_parse_callbacks_s *callbacks,
+                           void *udata) {
+  /* TODO: implement JSON body parsing using fio_json_parse */
+  FIO_ASSERT(0, "fio___http_body_parse_json not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_urlencoded(
+    fio_http_s *h,
+    const fio_http_body_parse_callbacks_s *callbacks,
+    void *udata) {
+  /* TODO: implement URL-encoded body parsing */
+  FIO_ASSERT(0, "fio___http_body_parse_urlencoded not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_multipart(
+    fio_http_s *h,
+    const fio_http_body_parse_callbacks_s *callbacks,
+    void *udata) {
+  /* TODO: implement multipart/form-data body parsing */
+  FIO_ASSERT(0, "fio___http_body_parse_multipart not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Main Implementation
+***************************************************************************** */
+
+/**
+ * Parses the HTTP request body, auto-detecting content type.
+ *
+ * Supports JSON, URL-encoded, and multipart/form-data bodies.
+ * Calls the appropriate callbacks for each element found.
+ */
+SFUNC fio_http_body_parse_result_s
+fio_http_body_parse(fio_http_s *h,
+                    const fio_http_body_parse_callbacks_s *callbacks,
+                    void *udata) {
+  fio_http_body_parse_result_s result = {.result = NULL,
+                                         .consumed = 0,
+                                         .err = 0};
+
+  if (!h || !callbacks) {
+    result.err = -1;
+    return result;
+  }
+
+  /* Detect content type from header */
+  fio___http_body_content_type_e content_type =
+      fio___http_body_detect_content_type(h);
+
+  /* Route to appropriate parser */
+  switch (content_type) {
+  case FIO___HTTP_BODY_CONTENT_TYPE_JSON:
+    return fio___http_body_parse_json(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED:
+    return fio___http_body_parse_urlencoded(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
+    return fio___http_body_parse_multipart(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN: /* fall through */
+  default:
+    /* Unknown content type - return error */
+    result.err = -1;
+    if (callbacks->on_error)
+      result.result = callbacks->on_error(udata, NULL);
+    return result;
+  }
+}
 
 /* *****************************************************************************
 

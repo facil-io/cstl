@@ -11225,6 +11225,680 @@ missing_callback:
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_MULTIPART          /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                          MIME Multipart Parser Module
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_MULTIPART) && !defined(H___FIO_MULTIPART___H)
+#define H___FIO_MULTIPART___H
+
+/* *****************************************************************************
+MIME Multipart Parser - Overview
+
+This is a non-allocating, streaming callback-based MIME multipart parser
+implementing the multipart/form-data format as used in HTTP file uploads.
+
+The parser uses callbacks to handle form fields and file uploads:
+- Regular form fields (no filename) trigger on_field callback
+- File uploads trigger on_file_start, on_file_data, on_file_end callbacks
+
+Multipart Format:
+    --boundary\r\n
+    Content-Disposition: form-data; name="field1"\r\n
+    \r\n
+    value1\r\n
+    --boundary\r\n
+    Content-Disposition: form-data; name="file1"; filename="test.txt"\r\n
+    Content-Type: text/plain\r\n
+    \r\n
+    file content here\r\n
+    --boundary--\r\n
+
+Usage:
+    static const fio_multipart_parser_callbacks_s callbacks = {
+        .on_field = my_on_field,
+        .on_file_start = my_on_file_start,
+        .on_file_data = my_on_file_data,
+        .on_file_end = my_on_file_end,
+    };
+
+    fio_multipart_result_s result = fio_multipart_parse(
+        &callbacks,
+        my_context,
+        FIO_BUF_INFO2(boundary_str, boundary_len),
+        data,
+        data_len);
+
+    if (result.err == 0) {
+        // Success - all data parsed
+    } else if (result.err == -2) {
+        // Need more data - call again with more data
+    } else {
+        // Error
+    }
+
+***************************************************************************** */
+
+/* *****************************************************************************
+MIME Multipart Parser Types
+***************************************************************************** */
+
+/** The MIME multipart parser callbacks. */
+typedef struct {
+  /**
+   * Called for each regular form field (no filename).
+   * Returns user-defined context (can be NULL).
+   */
+  void *(*on_field)(void *udata,
+                    fio_buf_info_s name,
+                    fio_buf_info_s value,
+                    fio_buf_info_s content_type);
+
+  /**
+   * Called when a file upload starts.
+   * Returns context for this file (passed to on_file_data/on_file_end).
+   */
+  void *(*on_file_start)(void *udata,
+                         fio_buf_info_s name,
+                         fio_buf_info_s filename,
+                         fio_buf_info_s content_type);
+
+  /**
+   * Called with file data chunk.
+   * May be called multiple times per file for streaming.
+   * Returns non-zero to abort parsing.
+   */
+  int (*on_file_data)(void *udata, void *file_ctx, fio_buf_info_s data);
+
+  /**
+   * Called when file upload ends.
+   */
+  void (*on_file_end)(void *udata, void *file_ctx);
+
+  /**
+   * Called on parse error (optional).
+   */
+  void (*on_error)(void *udata);
+
+} fio_multipart_parser_callbacks_s;
+
+/** The MIME multipart parse result type. */
+typedef struct {
+  /** Number of bytes consumed from the input buffer. */
+  size_t consumed;
+  /** Number of form fields parsed. */
+  size_t field_count;
+  /** Number of files parsed. */
+  size_t file_count;
+  /** Error code: 0 = success, -1 = error, -2 = need more data. */
+  int err;
+} fio_multipart_result_s;
+
+/* *****************************************************************************
+MIME Multipart Parser API
+***************************************************************************** */
+
+/**
+ * Parse MIME multipart data.
+ *
+ * `callbacks` contains the callback functions (should be static const).
+ * `udata` is user data passed to all callbacks.
+ * `boundary` is the multipart boundary string (without leading "--").
+ * `data` is the data to parse.
+ * `len` is the length of the data.
+ *
+ * Returns a result struct containing:
+ * - `consumed`: Number of bytes consumed from the buffer
+ * - `field_count`: Number of form fields parsed
+ * - `file_count`: Number of files parsed
+ * - `err`: 0 = success, -1 = error, -2 = need more data
+ *
+ * For streaming, call again with remaining data appended to unconsumed data.
+ */
+SFUNC fio_multipart_result_s
+fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
+                    void *udata,
+                    fio_buf_info_s boundary,
+                    const char *data,
+                    size_t len);
+
+/* *****************************************************************************
+MIME Multipart Parser - Implementation
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Internal Helper: No-op callbacks
+***************************************************************************** */
+
+FIO_IFUNC void *fio___multipart_noop_field(void *udata,
+                                           fio_buf_info_s name,
+                                           fio_buf_info_s value,
+                                           fio_buf_info_s content_type) {
+  (void)udata;
+  (void)name;
+  (void)value;
+  (void)content_type;
+  return NULL;
+}
+
+FIO_IFUNC void *fio___multipart_noop_file_start(void *udata,
+                                                fio_buf_info_s name,
+                                                fio_buf_info_s filename,
+                                                fio_buf_info_s content_type) {
+  (void)udata;
+  (void)name;
+  (void)filename;
+  (void)content_type;
+  return NULL;
+}
+
+FIO_IFUNC int fio___multipart_noop_file_data(void *udata,
+                                             void *file_ctx,
+                                             fio_buf_info_s data) {
+  (void)udata;
+  (void)file_ctx;
+  (void)data;
+  return 0;
+}
+
+FIO_IFUNC void fio___multipart_noop_file_end(void *udata, void *file_ctx) {
+  (void)udata;
+  (void)file_ctx;
+}
+
+FIO_IFUNC void fio___multipart_noop_error(void *udata) { (void)udata; }
+
+/* *****************************************************************************
+Internal: Validated callbacks wrapper
+***************************************************************************** */
+
+typedef struct {
+  void *(*on_field)(void *udata,
+                    fio_buf_info_s name,
+                    fio_buf_info_s value,
+                    fio_buf_info_s content_type);
+  void *(*on_file_start)(void *udata,
+                         fio_buf_info_s name,
+                         fio_buf_info_s filename,
+                         fio_buf_info_s content_type);
+  int (*on_file_data)(void *udata, void *file_ctx, fio_buf_info_s data);
+  void (*on_file_end)(void *udata, void *file_ctx);
+  void (*on_error)(void *udata);
+} fio___multipart_cb_s;
+
+FIO_SFUNC fio___multipart_cb_s
+fio___multipart_callbacks_validate(const fio_multipart_parser_callbacks_s *cb) {
+  fio___multipart_cb_s r;
+  static const fio_multipart_parser_callbacks_s empty_cb = {0};
+  if (!cb)
+    cb = &empty_cb;
+  r.on_field = cb->on_field ? cb->on_field : fio___multipart_noop_field;
+  r.on_file_start =
+      cb->on_file_start ? cb->on_file_start : fio___multipart_noop_file_start;
+  r.on_file_data =
+      cb->on_file_data ? cb->on_file_data : fio___multipart_noop_file_data;
+  r.on_file_end =
+      cb->on_file_end ? cb->on_file_end : fio___multipart_noop_file_end;
+  r.on_error = cb->on_error ? cb->on_error : fio___multipart_noop_error;
+  return r;
+}
+
+/* *****************************************************************************
+Internal Helper: Find substring in buffer
+***************************************************************************** */
+
+FIO_SFUNC const char *fio___multipart_find(const char *haystack,
+                                           size_t haystack_len,
+                                           const char *needle,
+                                           size_t needle_len) {
+  if (!needle_len || needle_len > haystack_len)
+    return NULL;
+  const char *end = haystack + haystack_len - needle_len + 1;
+  for (const char *p = haystack; p < end; ++p) {
+    p = (const char *)FIO_MEMCHR(p, needle[0], (size_t)(end - p));
+    if (!p)
+      return NULL;
+    if (!FIO_MEMCMP(p, needle, needle_len))
+      return p;
+  }
+  return NULL;
+}
+
+/* *****************************************************************************
+Internal Helper: Skip whitespace
+***************************************************************************** */
+
+FIO_IFUNC const char *fio___multipart_skip_ws(const char *p, const char *end) {
+  while (p < end && (*p == ' ' || *p == '\t'))
+    ++p;
+  return p;
+}
+
+/* *****************************************************************************
+Internal Helper: Skip optional whitespace and CRLF
+***************************************************************************** */
+
+FIO_IFUNC const char *fio___multipart_skip_lwsp(const char *p,
+                                                const char *end) {
+  while (p < end) {
+    if (*p == ' ' || *p == '\t') {
+      ++p;
+      continue;
+    }
+    /* Check for folded header (CRLF followed by space/tab) */
+    if (p + 2 < end && p[0] == '\r' && p[1] == '\n' &&
+        (p[2] == ' ' || p[2] == '\t')) {
+      p += 3;
+      continue;
+    }
+    break;
+  }
+  return p;
+}
+
+/* *****************************************************************************
+Internal Helper: Case-insensitive prefix match
+***************************************************************************** */
+
+FIO_SFUNC int fio___multipart_prefix_icase(const char *str,
+                                           size_t str_len,
+                                           const char *prefix,
+                                           size_t prefix_len) {
+  if (str_len < prefix_len)
+    return 0;
+  for (size_t i = 0; i < prefix_len; ++i) {
+    char c1 = str[i];
+    char c2 = prefix[i];
+    /* Convert to lowercase */
+    if (c1 >= 'A' && c1 <= 'Z')
+      c1 += 32;
+    if (c2 >= 'A' && c2 <= 'Z')
+      c2 += 32;
+    if (c1 != c2)
+      return 0;
+  }
+  return 1;
+}
+
+/* *****************************************************************************
+Internal Helper: Extract quoted or unquoted value from header parameter
+***************************************************************************** */
+
+FIO_SFUNC fio_buf_info_s fio___multipart_extract_param(const char *header,
+                                                       size_t header_len,
+                                                       const char *param_name,
+                                                       size_t param_name_len) {
+  fio_buf_info_s result = FIO_BUF_INFO0;
+  const char *end = header + header_len;
+  const char *p = header;
+
+  /* Search for parameter name followed by '=' */
+  while (p < end) {
+    /* Find the parameter name */
+    const char *found =
+        fio___multipart_find(p, (size_t)(end - p), param_name, param_name_len);
+    if (!found)
+      return result;
+
+    /* Check if it's at start or preceded by ; or whitespace */
+    if (found > header) {
+      char prev = found[-1];
+      if (prev != ';' && prev != ' ' && prev != '\t') {
+        p = found + 1;
+        continue;
+      }
+    }
+
+    /* Skip parameter name */
+    p = found + param_name_len;
+    p = fio___multipart_skip_ws(p, end);
+
+    /* Expect '=' */
+    if (p >= end || *p != '=') {
+      continue;
+    }
+    ++p;
+    p = fio___multipart_skip_ws(p, end);
+
+    if (p >= end)
+      return result;
+
+    /* Extract value - quoted or unquoted */
+    if (*p == '"') {
+      /* Quoted value */
+      ++p;
+      const char *value_start = p;
+      while (p < end && *p != '"') {
+        if (*p == '\\' && p + 1 < end) {
+          p += 2; /* Skip escaped character */
+        } else {
+          ++p;
+        }
+      }
+      result.buf = (char *)value_start;
+      result.len = (size_t)(p - value_start);
+      return result;
+    } else {
+      /* Unquoted value - ends at ; or whitespace or end */
+      const char *value_start = p;
+      while (p < end && *p != ';' && *p != ' ' && *p != '\t' && *p != '\r' &&
+             *p != '\n') {
+        ++p;
+      }
+      result.buf = (char *)value_start;
+      result.len = (size_t)(p - value_start);
+      return result;
+    }
+  }
+
+  return result;
+}
+
+/* *****************************************************************************
+Internal Helper: Parse Content-Disposition header
+***************************************************************************** */
+
+typedef struct {
+  fio_buf_info_s name;
+  fio_buf_info_s filename;
+} fio___multipart_disposition_s;
+
+FIO_SFUNC fio___multipart_disposition_s
+fio___multipart_parse_disposition(const char *value, size_t value_len) {
+  fio___multipart_disposition_s result = {{0}, {0}};
+
+  result.name = fio___multipart_extract_param(value, value_len, "name", 4);
+  result.filename =
+      fio___multipart_extract_param(value, value_len, "filename", 8);
+
+  return result;
+}
+
+/* *****************************************************************************
+Internal Helper: Find header value in part headers
+***************************************************************************** */
+
+FIO_SFUNC fio_buf_info_s fio___multipart_find_header(const char *headers,
+                                                     size_t headers_len,
+                                                     const char *header_name,
+                                                     size_t header_name_len) {
+  fio_buf_info_s result = FIO_BUF_INFO0;
+  const char *p = headers;
+  const char *end = headers + headers_len;
+
+  while (p < end) {
+    /* Find end of current line */
+    const char *line_end = (const char *)FIO_MEMCHR(p, '\n', (size_t)(end - p));
+    if (!line_end)
+      line_end = end;
+
+    /* Calculate line length (excluding \r\n) */
+    size_t line_len = (size_t)(line_end - p);
+    if (line_len > 0 && p[line_len - 1] == '\r')
+      --line_len;
+
+    /* Check if this line starts with the header name */
+    if (fio___multipart_prefix_icase(p,
+                                     line_len,
+                                     header_name,
+                                     header_name_len)) {
+      const char *value_start = p + header_name_len;
+      /* Skip optional whitespace after colon */
+      if (value_start < p + line_len && *value_start == ':') {
+        ++value_start;
+        value_start = fio___multipart_skip_ws(value_start, p + line_len);
+        result.buf = (char *)value_start;
+        result.len = (size_t)((p + line_len) - value_start);
+        return result;
+      }
+    }
+
+    /* Move to next line */
+    p = line_end + 1;
+  }
+
+  return result;
+}
+
+/* *****************************************************************************
+MIME Multipart Main Parse Function
+***************************************************************************** */
+
+SFUNC fio_multipart_result_s
+fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
+                    void *udata,
+                    fio_buf_info_s boundary,
+                    const char *data,
+                    size_t len) {
+  fio_multipart_result_s result = {.consumed = 0,
+                                   .field_count = 0,
+                                   .file_count = 0,
+                                   .err = 0};
+
+  if (!data || !len || !boundary.buf || !boundary.len) {
+    result.err = -1;
+    return result;
+  }
+
+  fio___multipart_cb_s cb = fio___multipart_callbacks_validate(callbacks);
+
+  const char *pos = data;
+  const char *end = data + len;
+
+  /* Build boundary markers:
+   * - delimiter: "\r\n--" + boundary
+   * - first_delimiter: "--" + boundary (at start of data)
+   * - close_delimiter: "\r\n--" + boundary + "--"
+   */
+  char delimiter_buf[256 + 6]; /* "--" + boundary + "\r\n" + "--" + NUL */
+  char *first_delimiter = delimiter_buf;
+  char *delimiter = delimiter_buf + 2;
+  size_t first_delimiter_len = boundary.len + 2;
+  size_t delimiter_len = boundary.len + 4;
+
+  if (boundary.len > 250) {
+    result.err = -1;
+    cb.on_error(udata);
+    return result;
+  }
+
+  /* Build first delimiter: "--" + boundary */
+  first_delimiter[0] = '-';
+  first_delimiter[1] = '-';
+  FIO_MEMCPY(first_delimiter + 2, boundary.buf, boundary.len);
+
+  /* Build delimiter: "\r\n--" + boundary */
+  delimiter[0] = '\r';
+  delimiter[1] = '\n';
+  /* delimiter + 2 already points to "--" + boundary from first_delimiter */
+
+  /* Check for initial boundary */
+  if ((size_t)(end - pos) < first_delimiter_len) {
+    result.err = -2; /* Need more data */
+    return result;
+  }
+
+  /* First boundary may or may not have leading CRLF */
+  if (pos[0] == '\r' && pos[1] == '\n') {
+    pos += 2;
+  }
+
+  if ((size_t)(end - pos) < first_delimiter_len ||
+      FIO_MEMCMP(pos, first_delimiter, first_delimiter_len) != 0) {
+    result.err = -1;
+    cb.on_error(udata);
+    return result;
+  }
+
+  pos += first_delimiter_len;
+
+  /* Check for immediate close (empty multipart) */
+  if ((size_t)(end - pos) >= 2 && pos[0] == '-' && pos[1] == '-') {
+    /* Empty multipart - just the closing boundary */
+    pos += 2;
+    /* Skip optional trailing CRLF */
+    if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
+      pos += 2;
+    result.consumed = (size_t)(pos - data);
+    return result;
+  }
+
+  /* Expect CRLF after boundary */
+  if ((size_t)(end - pos) < 2) {
+    result.err = -2;
+    return result;
+  }
+  if (pos[0] != '\r' || pos[1] != '\n') {
+    result.err = -1;
+    cb.on_error(udata);
+    return result;
+  }
+  pos += 2;
+
+  /* Parse parts */
+  while (pos < end) {
+    /* Find end of headers (double CRLF) */
+    const char *headers_end =
+        fio___multipart_find(pos, (size_t)(end - pos), "\r\n\r\n", 4);
+    if (!headers_end) {
+      result.err = -2; /* Need more data */
+      result.consumed = (size_t)((pos - 2 - delimiter_len) - data);
+      if (result.consumed > len)
+        result.consumed = 0;
+      return result;
+    }
+
+    const char *headers_start = pos;
+    size_t headers_len = (size_t)(headers_end - headers_start);
+    const char *body_start = headers_end + 4;
+
+    /* Parse Content-Disposition header */
+    fio_buf_info_s disposition_value =
+        fio___multipart_find_header(headers_start,
+                                    headers_len,
+                                    "Content-Disposition",
+                                    19);
+
+    if (!disposition_value.buf) {
+      result.err = -1;
+      cb.on_error(udata);
+      return result;
+    }
+
+    fio___multipart_disposition_s disposition =
+        fio___multipart_parse_disposition(disposition_value.buf,
+                                          disposition_value.len);
+
+    /* Parse Content-Type header (optional) */
+    fio_buf_info_s content_type = fio___multipart_find_header(headers_start,
+                                                              headers_len,
+                                                              "Content-Type",
+                                                              12);
+
+    /* Find the next boundary to determine body end */
+    const char *next_boundary = fio___multipart_find(body_start,
+                                                     (size_t)(end - body_start),
+                                                     delimiter,
+                                                     delimiter_len);
+
+    if (!next_boundary) {
+      /* Check if we might have partial data */
+      /* We need at least delimiter_len bytes after body to be sure */
+      result.err = -2; /* Need more data */
+      /* Rewind to before this part's headers */
+      result.consumed = (size_t)((pos - 2 - delimiter_len) - data);
+      if (result.consumed > len)
+        result.consumed = 0;
+      return result;
+    }
+
+    /* Body is from body_start to next_boundary */
+    size_t body_len = (size_t)(next_boundary - body_start);
+
+    /* Determine if this is a file or field */
+    if (disposition.filename.buf && disposition.filename.len > 0) {
+      /* File upload */
+      void *file_ctx = cb.on_file_start(udata,
+                                        disposition.name,
+                                        disposition.filename,
+                                        content_type);
+
+      /* Send file data */
+      fio_buf_info_s file_data = FIO_BUF_INFO2((char *)body_start, body_len);
+      int abort = cb.on_file_data(udata, file_ctx, file_data);
+
+      cb.on_file_end(udata, file_ctx);
+
+      if (abort) {
+        result.err = -1;
+        result.consumed = (size_t)(next_boundary - data);
+        return result;
+      }
+
+      ++result.file_count;
+    } else {
+      /* Regular form field */
+      fio_buf_info_s value = FIO_BUF_INFO2((char *)body_start, body_len);
+      cb.on_field(udata, disposition.name, value, content_type);
+      ++result.field_count;
+    }
+
+    /* Move past the boundary */
+    pos = next_boundary + delimiter_len;
+
+    /* Check for closing boundary (--) or continuation (CRLF) */
+    if ((size_t)(end - pos) < 2) {
+      result.err = -2; /* Need more data */
+      result.consumed = (size_t)(next_boundary - data);
+      return result;
+    }
+
+    if (pos[0] == '-' && pos[1] == '-') {
+      /* Closing boundary */
+      pos += 2;
+      /* Skip optional trailing CRLF */
+      if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
+        pos += 2;
+      result.consumed = (size_t)(pos - data);
+      return result;
+    }
+
+    if (pos[0] != '\r' || pos[1] != '\n') {
+      result.err = -1;
+      cb.on_error(udata);
+      result.consumed = (size_t)(pos - data);
+      return result;
+    }
+
+    pos += 2; /* Skip CRLF, continue to next part */
+  }
+
+  /* Reached end of data without finding closing boundary */
+  result.err = -2;
+  return result;
+}
+
+/* *****************************************************************************
+MIME Multipart Parser - Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_MULTIPART
+#endif /* FIO_MULTIPART */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_RESP3              /* Development inclusion - ignore line */
 #define FIO_ATOL               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
@@ -14423,6 +15097,253 @@ Time Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_TIME
 #endif /* FIO_TIME */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_URL_ENCODED        /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                          URL-Encoded Parser Module
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_URL_ENCODED) && !defined(H___FIO_URL_ENCODED___H)
+#define H___FIO_URL_ENCODED___H
+
+/* *****************************************************************************
+URL-Encoded Parser - Overview
+
+This is a non-allocating, callback-based URL-encoded (application/x-www-form-
+urlencoded) parser.
+
+The parser finds boundaries between name=value pairs without decoding the data.
+Decoding is the caller's responsibility (use `fio_string_write_url_dec`).
+
+URL-encoded format:
+- Pairs separated by `&`
+- Name and value separated by `=`
+- Special characters are percent-encoded (%XX)
+
+Usage:
+    static void *my_on_pair(void *udata, fio_buf_info_s name, fio_buf_info_s
+value) {
+        // Process name=value pair
+        // name and value point directly into the original data
+        return udata;
+    }
+
+    static const fio_url_encoded_parser_callbacks_s callbacks = {
+        .on_pair = my_on_pair,
+    };
+
+    fio_url_encoded_result_s result = fio_url_encoded_parse(&callbacks,
+                                                            my_context,
+                                                            data,
+                                                            len);
+    if (result.err) { handle_error(); }
+    // result.consumed indicates bytes consumed
+    // result.count indicates number of pairs found
+
+***************************************************************************** */
+
+/* *****************************************************************************
+URL-Encoded Parser Types
+***************************************************************************** */
+
+/**
+ * The URL-encoded parser callbacks.
+ *
+ * Callbacks receive `udata` as their first argument.
+ */
+typedef struct {
+  /**
+   * Called for each name=value pair found.
+   *
+   * `name` and `value` point directly into the original input data.
+   * The data is NOT decoded - caller must decode if needed.
+   *
+   * Returns the (possibly updated) udata, or NULL to stop parsing.
+   */
+  void *(*on_pair)(void *udata, fio_buf_info_s name, fio_buf_info_s value);
+
+  /**
+   * Called on parsing error (optional).
+   *
+   * Currently not used since URL-encoded parsing is very permissive,
+   * but reserved for future use.
+   */
+  void (*on_error)(void *udata);
+
+} fio_url_encoded_parser_callbacks_s;
+
+/** The URL-encoded parse result type. */
+typedef struct {
+  /** Number of bytes consumed from the buffer. */
+  size_t consumed;
+  /** Number of name=value pairs found. */
+  size_t count;
+  /** Non-zero if an error occurred (callback returned NULL). */
+  int err;
+} fio_url_encoded_result_s;
+
+/* *****************************************************************************
+URL-Encoded Parser API
+***************************************************************************** */
+
+/**
+ * Parse URL-encoded data from buffer.
+ *
+ * `callbacks` contains the callback functions (should be static const).
+ * `udata` is user data passed to callbacks.
+ * `data` is the URL-encoded data to parse.
+ * `len` is the length of the data.
+ *
+ * Returns a result struct containing:
+ * - `consumed`: Number of bytes consumed from the buffer
+ * - `count`: Number of name=value pairs found
+ * - `err`: Non-zero if parsing was stopped (callback returned NULL)
+ *
+ * Parsing rules:
+ * - Pairs are separated by `&`
+ * - Name and value are separated by `=`
+ * - Empty value is valid: `name=` → value.len = 0
+ * - Missing `=` means value is empty: `name` → name="name", value.len = 0
+ * - Empty name with value: `=value` → name.len = 0, value="value"
+ * - Empty pairs (`&&`) are skipped
+ *
+ * Note: The parser does NOT decode percent-encoded characters.
+ * Use `fio_string_write_url_dec` to decode if needed.
+ */
+SFUNC fio_url_encoded_result_s
+fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
+                      void *udata,
+                      const char *data,
+                      size_t len);
+
+/* *****************************************************************************
+URL-Encoded Parser Implementation
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Internal Helper: No-op callbacks
+***************************************************************************** */
+
+FIO_IFUNC void *fio___url_encoded_noop_on_pair(void *udata,
+                                               fio_buf_info_s name,
+                                               fio_buf_info_s value) {
+  /* Return non-NULL sentinel to continue parsing even if udata is NULL */
+  return udata ? udata : (void *)(uintptr_t)1;
+  (void)name;
+  (void)value;
+}
+
+FIO_IFUNC void fio___url_encoded_noop_on_error(void *udata) { (void)udata; }
+
+/* *****************************************************************************
+Internal: Validated callbacks wrapper
+***************************************************************************** */
+
+typedef struct {
+  void *(*on_pair)(void *udata, fio_buf_info_s name, fio_buf_info_s value);
+  void (*on_error)(void *udata);
+} fio___url_encoded_cb_s;
+
+FIO_SFUNC fio___url_encoded_cb_s fio___url_encoded_callbacks_validate(
+    const fio_url_encoded_parser_callbacks_s *cb) {
+  fio___url_encoded_cb_s r;
+  static const fio_url_encoded_parser_callbacks_s empty_cb = {0};
+  if (!cb)
+    cb = &empty_cb;
+  r.on_pair = cb->on_pair ? cb->on_pair : fio___url_encoded_noop_on_pair;
+  r.on_error = cb->on_error ? cb->on_error : fio___url_encoded_noop_on_error;
+  return r;
+}
+
+/* *****************************************************************************
+URL-Encoded Main Parse Function
+***************************************************************************** */
+
+SFUNC fio_url_encoded_result_s
+fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
+                      void *udata,
+                      const char *data,
+                      size_t len) {
+  fio_url_encoded_result_s result = {.consumed = 0, .count = 0, .err = 0};
+  const char *pos = data;
+  const char *end = data + len;
+
+  fio___url_encoded_cb_s cb = fio___url_encoded_callbacks_validate(callbacks);
+
+  while (pos < end) {
+    /* Find the end of this pair (next '&' or end of data) */
+    const char *pair_end = pos;
+    while (pair_end < end && *pair_end != '&')
+      ++pair_end;
+
+    /* Skip empty pairs (e.g., "&&" or leading "&") */
+    if (pair_end == pos) {
+      ++pos;
+      continue;
+    }
+
+    /* Find the '=' separator within this pair */
+    const char *eq = pos;
+    while (eq < pair_end && *eq != '=')
+      ++eq;
+
+    fio_buf_info_s name;
+    fio_buf_info_s value;
+
+    if (eq < pair_end) {
+      /* Found '=' - split into name and value */
+      name.buf = (char *)pos;
+      name.len = (size_t)(eq - pos);
+      value.buf = (char *)(eq + 1);
+      value.len = (size_t)(pair_end - (eq + 1));
+    } else {
+      /* No '=' found - entire segment is the name, value is empty */
+      name.buf = (char *)pos;
+      name.len = (size_t)(pair_end - pos);
+      value.buf = (char *)pair_end; /* Points to end, len = 0 */
+      value.len = 0;
+    }
+
+    /* Call the callback */
+    udata = cb.on_pair(udata, name, value);
+    ++result.count;
+
+    /* Check if callback wants to stop parsing */
+    if (!udata) {
+      result.err = 1;
+      result.consumed = (size_t)(pair_end - data);
+      return result;
+    }
+
+    /* Move past this pair */
+    pos = pair_end;
+    if (pos < end && *pos == '&')
+      ++pos;
+  }
+
+  result.consumed = (size_t)(pos - data);
+  return result;
+}
+
+/* *****************************************************************************
+URL-Encoded Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_URL_ENCODED
+#endif /* FIO_URL_ENCODED */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -49868,8 +50789,98 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
-HTTP Body Parsing Helpers (TODO!)
+HTTP Body Parsing Helpers
 ***************************************************************************** */
+
+/**
+ * HTTP body parser callbacks.
+ *
+ * All callbacks receive `udata` as first parameter.
+ * Primitive callbacks return the created object as `void *`.
+ * Container callbacks return a context for that container.
+ */
+typedef struct {
+  /* ===== Primitives ===== */
+
+  /** NULL / nil was detected. Returns new object. */
+  void *(*on_null)(void *udata);
+  /** TRUE was detected. Returns new object. */
+  void *(*on_true)(void *udata);
+  /** FALSE was detected. Returns new object. */
+  void *(*on_false)(void *udata);
+  /** Number was detected. Returns new object. */
+  void *(*on_number)(void *udata, int64_t num);
+  /** Float was detected. Returns new object. */
+  void *(*on_float)(void *udata, double num);
+  /** String was detected. Returns new object. */
+  void *(*on_string)(void *udata, const void *data, size_t len);
+
+  /* ===== Containers ===== */
+
+  /** Array was detected. Returns context for this array. */
+  void *(*on_array)(void *udata, void *parent);
+  /** Map / Object was detected. Returns context for this map. */
+  void *(*on_map)(void *udata, void *parent);
+  /** Push value to array. Returns non-zero on error. */
+  int (*array_push)(void *udata, void *array, void *value);
+  /** Set key-value pair in map. Returns non-zero on error. */
+  int (*map_set)(void *udata, void *map, void *key, void *value);
+  /** Called when array parsing is complete. */
+  void (*array_done)(void *udata, void *array);
+  /** Called when map parsing is complete. */
+  void (*map_done)(void *udata, void *map);
+
+  /* ===== File Uploads (multipart) ===== */
+
+  /**
+   * Called when a file upload starts.
+   *
+   * Return context for this file (e.g., fd, stream, buffer).
+   * Return NULL to skip this file (on_file_data/on_file_done won't be called).
+   */
+  void *(*on_file)(void *udata,
+                   fio_str_info_s name,
+                   fio_str_info_s filename,
+                   fio_str_info_s content_type);
+  /** Called for each chunk of file data. Return non-zero to abort. */
+  int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+  /** Called when file upload is complete. */
+  void (*on_file_done)(void *udata, void *file);
+
+  /* ===== Error Handling ===== */
+
+  /** Called on parse error. `partial` is the incomplete result, if any. */
+  void *(*on_error)(void *udata, void *partial);
+  /** Called to free an unused object (e.g., key when map_set fails). */
+  void (*free_unused)(void *udata, void *obj);
+
+} fio_http_body_parse_callbacks_s;
+
+/** HTTP body parse result. */
+typedef struct {
+  /** Top-level parsed object (caller responsible for freeing). */
+  void *result;
+  /** Number of bytes consumed from body. */
+  size_t consumed;
+  /** Error code: 0 = success. */
+  int err;
+} fio_http_body_parse_result_s;
+
+/**
+ * Parses the HTTP request body, auto-detecting content type.
+ *
+ * Supports JSON, URL-encoded, and multipart/form-data bodies.
+ * Calls the appropriate callbacks for each element found.
+ *
+ * @param h         The HTTP handle.
+ * @param callbacks Parser callbacks (designed to be static const).
+ * @param udata     User context passed to all callbacks.
+ * @return          Parse result with top-level object and status.
+ */
+SFUNC fio_http_body_parse_result_s
+fio_http_body_parse(fio_http_s *h,
+                    const fio_http_body_parse_callbacks_s *callbacks,
+                    void *udata);
 
 /* *****************************************************************************
 Header Parsing Helpers
@@ -52445,6 +53456,271 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h) {
 /* *****************************************************************************
 Param Parsing (TODO! - parse query, parse mime/multipart parse text/json)
 ***************************************************************************** */
+
+/* *****************************************************************************
+HTTP Body Parsing - Primitive Type Detection
+***************************************************************************** */
+
+/** Primitive type enum for value identification. */
+typedef enum {
+  FIO___HTTP_BODY_PRIM_STRING = 0, /* Not a recognized primitive */
+  FIO___HTTP_BODY_PRIM_NULL,       /* "null" or "nil" */
+  FIO___HTTP_BODY_PRIM_TRUE,       /* "true" */
+  FIO___HTTP_BODY_PRIM_FALSE,      /* "false" */
+  FIO___HTTP_BODY_PRIM_NUMBER,     /* Integer like "123", "-456" */
+  FIO___HTTP_BODY_PRIM_FLOAT,      /* Float like "1.5", "-3.14", "1e10" */
+} fio___http_body_primitive_e;
+
+/**
+ * Identifies if a string represents a primitive value.
+ *
+ * Returns the primitive type and optionally parses the value.
+ * If `i_out` is not NULL and type is NUMBER, stores parsed int64_t.
+ * If `f_out` is not NULL and type is FLOAT, stores parsed double.
+ */
+FIO_SFUNC fio___http_body_primitive_e
+fio___http_body_identify_primitive(fio_buf_info_s str,
+                                   int64_t *i_out,
+                                   double *f_out) {
+  if (!str.len || !str.buf)
+    return FIO___HTTP_BODY_PRIM_STRING;
+
+  /* Check for "null" (4 chars) - case insensitive */
+  if (str.len == 4) {
+    uint32_t w = fio_buf2u32u(str.buf) | 0x20202020UL;
+    if (w == (fio_buf2u32u("null") | 0x20202020UL))
+      return FIO___HTTP_BODY_PRIM_NULL;
+    if (w == (fio_buf2u32u("true") | 0x20202020UL))
+      return FIO___HTTP_BODY_PRIM_TRUE;
+  }
+
+  /* Check for "nil" (3 chars) - case insensitive */
+  if (str.len == 3) {
+    uint32_t w = (fio_buf2u16u(str.buf) | 0x2020) |
+                 ((uint32_t)(str.buf[2] | 0x20) << 16);
+    uint32_t nil = (fio_buf2u16u("ni") | 0x2020) | ((uint32_t)('l') << 16);
+    if (w == nil)
+      return FIO___HTTP_BODY_PRIM_NULL;
+  }
+
+  /* Check for "false" (5 chars) - case insensitive */
+  if (str.len == 5) {
+    uint32_t w0 = fio_buf2u32u(str.buf) | 0x20202020UL;
+    if (w0 == (fio_buf2u32u("fals") | 0x20202020UL) &&
+        ((str.buf[4] | 0x20) == 'e'))
+      return FIO___HTTP_BODY_PRIM_FALSE;
+  }
+
+  /* Check for numeric values */
+  {
+    const char *p = str.buf;
+    const char *end = str.buf + str.len;
+    size_t is_neg = (p[0] == '-');
+
+    /* Must start with digit or '-' followed by digit */
+    if (!(((size_t)(p[0] - '0') < 10) ||
+          (is_neg && str.len > 1 && ((size_t)(p[1] - '0') < 10))))
+      return FIO___HTTP_BODY_PRIM_STRING;
+
+    /* Scan to determine if integer or float */
+    size_t has_dot = 0, has_exp = 0;
+    p += is_neg;
+
+    /* Scan integer part */
+    while (p < end && ((size_t)(*p - '0') < 10))
+      ++p;
+
+    /* Check for decimal point */
+    if (p < end && *p == '.') {
+      has_dot = 1;
+      ++p;
+      /* Must have at least one digit after dot */
+      if (p >= end || ((size_t)(*p - '0') >= 10))
+        return FIO___HTTP_BODY_PRIM_STRING;
+      while (p < end && ((size_t)(*p - '0') < 10))
+        ++p;
+    }
+
+    /* Check for exponent */
+    if (p < end && ((*p | 0x20) == 'e')) {
+      has_exp = 1;
+      ++p;
+      /* Optional sign */
+      p += (p < end && (*p == '+' || *p == '-'));
+      /* Must have at least one digit in exponent */
+      if (p >= end || ((size_t)(*p - '0') >= 10))
+        return FIO___HTTP_BODY_PRIM_STRING;
+      while (p < end && ((size_t)(*p - '0') < 10))
+        ++p;
+    }
+
+    /* If we didn't consume all characters, it's not a valid number */
+    if (p != end)
+      return FIO___HTTP_BODY_PRIM_STRING;
+
+    /* Parse and return appropriate type */
+    if (has_dot || has_exp) {
+      if (f_out) {
+        char *parse_ptr = str.buf;
+        *f_out = fio_atof(&parse_ptr);
+      }
+      return FIO___HTTP_BODY_PRIM_FLOAT;
+    }
+
+    /* Integer */
+    if (i_out) {
+      char *parse_ptr = str.buf;
+      *i_out = fio_atol10(&parse_ptr);
+    }
+    return FIO___HTTP_BODY_PRIM_NUMBER;
+  }
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Content-Type Detection
+***************************************************************************** */
+
+/** Content-type enum for body parsing. */
+typedef enum {
+  FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN = 0,
+  FIO___HTTP_BODY_CONTENT_TYPE_JSON,
+  FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED,
+  FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART,
+} fio___http_body_content_type_e;
+
+/** Detects the content type from the Content-Type header. */
+FIO_SFUNC fio___http_body_content_type_e
+fio___http_body_detect_content_type(fio_http_s *h) {
+  fio_str_info_s ct =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+  if (!ct.len)
+    return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
+
+  /* application/json */
+  if (ct.len >= 16) {
+    /* Check for "application/json" (case-insensitive for "application") */
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("ion/json") | 0x2020202020202020ULL))
+      return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
+  }
+
+  /* application/x-www-form-urlencoded */
+  if (ct.len >= 33) {
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    uint64_t w2 = fio_buf2u64u(ct.buf + 16) | 0x2020202020202020ULL;
+    uint64_t w3 = fio_buf2u64u(ct.buf + 24) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("ion/x-ww") | 0x2020202020202020ULL) &&
+        w2 == (fio_buf2u64u("w-form-u") | 0x2020202020202020ULL) &&
+        w3 == (fio_buf2u64u("rlencod") | 0x2020202020202020ULL))
+      return FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED;
+  }
+
+  /* multipart/form-data */
+  if (ct.len >= 19) {
+    uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
+    uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
+    if (w0 == (fio_buf2u64u("multipar") | 0x2020202020202020ULL) &&
+        w1 == (fio_buf2u64u("t/form-d") | 0x2020202020202020ULL) &&
+        ((fio_buf2u16u(ct.buf + 16) | 0x2020) ==
+         (fio_buf2u16u("at") | 0x2020)) &&
+        ((ct.buf[18] | 0x20) == 'a'))
+      return FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART;
+  }
+
+  return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Stub Implementations
+***************************************************************************** */
+
+FIO_SFUNC fio_http_body_parse_result_s
+fio___http_body_parse_json(fio_http_s *h,
+                           const fio_http_body_parse_callbacks_s *callbacks,
+                           void *udata) {
+  /* TODO: implement JSON body parsing using fio_json_parse */
+  FIO_ASSERT(0, "fio___http_body_parse_json not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_urlencoded(
+    fio_http_s *h,
+    const fio_http_body_parse_callbacks_s *callbacks,
+    void *udata) {
+  /* TODO: implement URL-encoded body parsing */
+  FIO_ASSERT(0, "fio___http_body_parse_urlencoded not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_multipart(
+    fio_http_s *h,
+    const fio_http_body_parse_callbacks_s *callbacks,
+    void *udata) {
+  /* TODO: implement multipart/form-data body parsing */
+  FIO_ASSERT(0, "fio___http_body_parse_multipart not implemented");
+  return (fio_http_body_parse_result_s){.err = -1};
+  (void)h;
+  (void)callbacks;
+  (void)udata;
+}
+
+/* *****************************************************************************
+HTTP Body Parsing - Main Implementation
+***************************************************************************** */
+
+/**
+ * Parses the HTTP request body, auto-detecting content type.
+ *
+ * Supports JSON, URL-encoded, and multipart/form-data bodies.
+ * Calls the appropriate callbacks for each element found.
+ */
+SFUNC fio_http_body_parse_result_s
+fio_http_body_parse(fio_http_s *h,
+                    const fio_http_body_parse_callbacks_s *callbacks,
+                    void *udata) {
+  fio_http_body_parse_result_s result = {.result = NULL,
+                                         .consumed = 0,
+                                         .err = 0};
+
+  if (!h || !callbacks) {
+    result.err = -1;
+    return result;
+  }
+
+  /* Detect content type from header */
+  fio___http_body_content_type_e content_type =
+      fio___http_body_detect_content_type(h);
+
+  /* Route to appropriate parser */
+  switch (content_type) {
+  case FIO___HTTP_BODY_CONTENT_TYPE_JSON:
+    return fio___http_body_parse_json(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED:
+    return fio___http_body_parse_urlencoded(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
+    return fio___http_body_parse_multipart(h, callbacks, udata);
+
+  case FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN: /* fall through */
+  default:
+    /* Unknown content type - return error */
+    result.err = -1;
+    if (callbacks->on_error)
+      result.result = callbacks->on_error(udata, NULL);
+    return result;
+  }
+}
 
 /* *****************************************************************************
 
@@ -57263,6 +58539,12 @@ Recursive inclusion / cleanup
 #endif
 #ifdef FIO_RESP3
 #include "004 resp3.h"
+#endif
+#ifdef FIO_URL_ENCODED
+#include "004 urlencoded.h"
+#endif
+#ifdef FIO_MULTIPART
+#include "004 multipart.h"
 #endif
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
