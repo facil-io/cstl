@@ -62,6 +62,9 @@
 #ifdef FIO_TIME
 #include "004 time.h"
 #endif
+#ifdef FIO_RESP3
+#include "004 resp3.h"
+#endif
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
@@ -150,6 +153,10 @@
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
+#endif
+
+#if defined(FIO_REDIS) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "422 redis.h"
 #endif
 
 #ifdef FIO_HTTP1_PARSER

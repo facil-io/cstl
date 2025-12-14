@@ -284,7 +284,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_IO
 #endif
 
-#if defined(FIO_HTTP)
+#if defined(FIO_HTTP) || defined(FIO_REDIS)
 #undef FIO_PUBSUB
 #define FIO_PUBSUB
 #endif
@@ -308,6 +308,10 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
+
+#if defined(FIO_REDIS)
+#define FIO_RESP3
+#endif
 
 #if defined(FIO_FIOBJ)
 #define FIO_MUSTACHE

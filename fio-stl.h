@@ -1318,16 +1318,24 @@ SIMD Vector Looping Helper
 
 /* Internal - bytes per constant iterative loop for compiler optimization  */
 #define FIO___SIMD_BYTES ((size_t)256U)
-/* Internal - looping macro that separates   */
-#define FIO_FOR_UNROLL(itterations, size_of_loop, i, action)                   \
+/**
+ * Unrolled `for` loop - separates for loops to make it easier for the compiler
+ * to optimize.
+ *
+ * @param iterations - the number of loop iterations to perform
+ * @param size_of_loop - the number of bytes consumed by each `action`
+ * @param i - the loop index variable name to use (accessible by `action`)
+ * @param action - an action to be performed each iteration (can be a macro)
+ * */
+#define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
   do {                                                                         \
     size_t i = 0;                                                              \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if ((itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))               \
-      for (; i < (itterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i) \
+    if ((iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))                \
+      for (; i < (iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i)  \
         action;                                                                \
-    if (itterations)                                                           \
-      for (; i < itterations;)                                                 \
+    if (iterations)                                                            \
+      for (; i < iterations;)                                                  \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
@@ -4346,7 +4354,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_IO
 #endif
 
-#if defined(FIO_HTTP)
+#if defined(FIO_HTTP) || defined(FIO_REDIS)
 #undef FIO_PUBSUB
 #define FIO_PUBSUB
 #endif
@@ -4370,6 +4378,10 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
+
+#if defined(FIO_REDIS)
+#define FIO_RESP3
+#endif
 
 #if defined(FIO_FIOBJ)
 #define FIO_MUSTACHE
@@ -4684,7 +4696,7 @@ Leak Counter Helpers
 #undef FIO_LEAK_COUNTER_ON_FREE
 #undef FIO_LEAK_COUNTER_COUNT
 
-#if (FIO_LEAK_COUNTER + 1) == 1
+#if ((FIO_LEAK_COUNTER + 1) == 1)
 /* No leak counting defined */
 #define FIO_LEAK_COUNTER_DEF(name)
 #define FIO_LEAK_COUNTER_ON_ALLOC(name) ((void)0)
@@ -11213,6 +11225,1526 @@ missing_callback:
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_RESP3              /* Development inclusion - ignore line */
+#define FIO_ATOL               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                RESP 3 Parser Module
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_RESP3) && !defined(FIO___RECURSIVE_INCLUDE) &&                 \
+    !defined(H___FIO_RESP3___H)
+#define H___FIO_RESP3___H
+
+/* *****************************************************************************
+RESP3 Parser - Overview
+
+This is a non-allocating, streaming callback-based RESP3 parser implementing
+the full RESP3 specification.
+
+The parser uses a context-stack pattern similar to the JSON parser, where:
+- Primitive callbacks return the created object as `void*`
+- Container callbacks receive parent context and return new context
+- Push callbacks add children to containers
+- The parser manages the context stack internally
+
+RESP3 Types Supported:
+- Simple types: +, -, :, _, ,, #, (
+- Blob types: $, !, =
+- Aggregate types: *, %, ~, >, |
+- Streaming: $?, *?, %?, ~?
+
+Usage:
+    static const fio_resp3_callbacks_s callbacks = {
+        .on_null = my_on_null,
+        .on_number = my_on_number,
+        .on_string = my_on_string,
+        .on_array = my_on_array,
+        .array_push = my_array_push,
+        // ... other callbacks ...
+    };
+
+    fio_resp3_parser_s parser = {.udata = my_context};
+    fio_resp3_result_s result = fio_resp3_parse(&parser, &callbacks, buf, len);
+    if (result.err) { handle_error(); }
+    // result.obj is the parsed top-level object
+    // result.consumed indicates bytes consumed
+
+***************************************************************************** */
+
+/* *****************************************************************************
+RESP3 Parser Settings
+***************************************************************************** */
+
+/** The maximum number of nested layers in object responses (2...32,768) */
+#ifndef FIO_RESP3_MAX_NESTING
+#define FIO_RESP3_MAX_NESTING 32
+#endif
+
+/* *****************************************************************************
+RESP3 Type Constants
+***************************************************************************** */
+
+/* Single Line Types */
+/** Simple String: `+<string>\r\n` */
+#define FIO_RESP3_SIMPLE_STR '+'
+/** Simple Error: `-<string>\r\n` */
+#define FIO_RESP3_SIMPLE_ERR '-'
+/** Number: `:<number>\r\n` */
+#define FIO_RESP3_NUMBER ':'
+/** Null: `_\r\n` */
+#define FIO_RESP3_NULL '_'
+/** Double: `,<floating-point-number>\r\n` */
+#define FIO_RESP3_DOUBLE ','
+/** Boolean: `#t\r\n` or `#f\r\n` */
+#define FIO_RESP3_BOOL '#'
+/** Big Number: `(<big number>\r\n` */
+#define FIO_RESP3_BIGNUM '('
+
+/* Blob Types */
+/** Blob String: `$<length>\r\n<bytes>\r\n` */
+#define FIO_RESP3_BLOB_STR '$'
+/** Blob Error: `!<length>\r\n<bytes>\r\n` */
+#define FIO_RESP3_BLOB_ERR '!'
+/** Verbatim String: `=<length>\r\n<type:><bytes>\r\n` */
+#define FIO_RESP3_VERBATIM '='
+
+/* Aggregate Types */
+/** Array: `*<count>\r\n...elements...` */
+#define FIO_RESP3_ARRAY '*'
+/** Map: `%<count>\r\n...key-value pairs...` */
+#define FIO_RESP3_MAP '%'
+/** Set: `~<count>\r\n...elements...` */
+#define FIO_RESP3_SET '~'
+/** Push: `><count>\r\n...elements...` */
+#define FIO_RESP3_PUSH '>'
+/** Attribute: `|<count>\r\n...key-value pairs...` */
+#define FIO_RESP3_ATTR '|'
+
+/* Streaming */
+/** Streamed string chunk: `;` */
+#define FIO_RESP3_STREAM_CHUNK ';'
+/** Streamed aggregate end: `.` */
+#define FIO_RESP3_STREAM_END '.'
+
+/* *****************************************************************************
+RESP3 Parser Types
+***************************************************************************** */
+
+/** Parser frame for tracking nested structures */
+typedef struct {
+  /** Context for this container (returned by on_array/on_map/etc) */
+  void *ctx;
+  /** For maps: the pending key waiting for its value */
+  void *key;
+  /** Expected remaining elements */
+  int64_t remaining;
+  /** Type of this frame */
+  uint8_t type;
+  /** Is this a streaming type? */
+  uint8_t streaming;
+  /** For maps: are we expecting a key (0) or value (1)? */
+  uint8_t expecting_value;
+  /** Set treated as map: need to duplicate values as key+value */
+  uint8_t set_as_map;
+} fio_resp3_frame_s;
+
+/** RESP3 parser state */
+typedef struct {
+  /** User data passed to all callbacks */
+  void *udata;
+  /** Current nesting depth */
+  uint32_t depth;
+  /** Protocol error flag */
+  uint8_t error;
+  /** Streaming string in progress flag */
+  uint8_t streaming_string;
+  /** Streaming string type (FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, etc.) */
+  uint8_t streaming_string_type;
+  /** Reserved */
+  uint8_t reserved[1];
+  /** Context for streaming string (from on_start_string) */
+  void *streaming_string_ctx;
+  /** Stack for nested structures */
+  fio_resp3_frame_s stack[FIO_RESP3_MAX_NESTING];
+} fio_resp3_parser_s;
+
+/**
+ * The RESP3 parser callbacks (designed to be static const).
+ *
+ * All callbacks receive `udata` from the parser state as their first argument.
+ */
+typedef struct {
+  /* ===== Primitive Callbacks - return the created object ===== */
+
+  /** Called when NULL (`_`) is received. Returns new object. */
+  void *(*on_null)(void *udata);
+
+  /** Called when Boolean (`#t` or `#f`) is received. Returns new object. */
+  void *(*on_bool)(void *udata, int is_true);
+
+  /** Called when a Number (`:`) is parsed. Returns new object. */
+  void *(*on_number)(void *udata, int64_t num);
+
+  /** Called when a Double (`,`) is parsed. Returns new object. */
+  void *(*on_double)(void *udata, double num);
+
+  /** Called when a Big Number (`(`) is parsed. Returns new object. */
+  void *(*on_bignum)(void *udata, const void *data, size_t len);
+
+  /**
+   * Called when a complete String is received.
+   * `type` is FIO_RESP3_SIMPLE_STR, FIO_RESP3_BLOB_STR, or FIO_RESP3_VERBATIM.
+   * Returns new object.
+   */
+  void *(*on_string)(void *udata, const void *data, size_t len, uint8_t type);
+
+  /**
+   * Called when an error message is received (simple `-` or blob `!`).
+   * `type` is FIO_RESP3_SIMPLE_ERR or FIO_RESP3_BLOB_ERR.
+   * Returns new object.
+   */
+  void *(*on_error)(void *udata, const void *data, size_t len, uint8_t type);
+
+  /* ===== Container Callbacks - receive parent ctx, return new ctx ===== */
+
+  /** Called when an Array starts. Returns new array context. */
+  void *(*on_array)(void *udata, void *parent_ctx, int64_t len);
+
+  /** Called when a Map starts. Returns new map context. */
+  void *(*on_map)(void *udata, void *parent_ctx, int64_t len);
+
+  /** Called when a Set starts. Returns new set context. */
+  void *(*on_set)(void *udata, void *parent_ctx, int64_t len);
+
+  /** Called when a Push message starts. Returns new push context. */
+  void *(*on_push)(void *udata, void *parent_ctx, int64_t len);
+
+  /** Called when an Attribute starts. Returns new attribute context. */
+  void *(*on_attr)(void *udata, void *parent_ctx, int64_t len);
+
+  /* ===== Push Callbacks - add child to container ===== */
+
+  /** Add value to array. Returns non-zero on error. */
+  int (*array_push)(void *udata, void *ctx, void *value);
+
+  /** Add key-value pair to map. Returns non-zero on error. */
+  int (*map_push)(void *udata, void *ctx, void *key, void *value);
+
+  /** Add value to set. Returns non-zero on error. */
+  int (*set_push)(void *udata, void *ctx, void *value);
+
+  /** Add value to push message. Returns non-zero on error. */
+  int (*push_push)(void *udata, void *ctx, void *value);
+
+  /** Add key-value pair to attribute. Returns non-zero on error. */
+  int (*attr_push)(void *udata, void *ctx, void *key, void *value);
+
+  /* ===== Done Callbacks (optional) - finalize container ===== */
+
+  /** Called when array is complete. Returns final object. */
+  void *(*array_done)(void *udata, void *ctx);
+
+  /** Called when map is complete. Returns final object. */
+  void *(*map_done)(void *udata, void *ctx);
+
+  /** Called when set is complete. Returns final object. */
+  void *(*set_done)(void *udata, void *ctx);
+
+  /** Called when push is complete. Returns final object. */
+  void *(*push_done)(void *udata, void *ctx);
+
+  /** Called when attribute is complete. Returns final object. */
+  void *(*attr_done)(void *udata, void *ctx);
+
+  /* ===== Error Handling ===== */
+
+  /** Free an unused object (e.g., orphaned key on error). */
+  void (*free_unused)(void *udata, void *obj);
+
+  /** Called on protocol error. */
+  void *(*on_error_protocol)(void *udata);
+
+  /* ===== Streaming String Callbacks (optional) ===== */
+
+  /**
+   * Called when a blob string starts (before data arrives).
+   * `len` is the declared length of the string ((size_t)-1 for streaming).
+   * `type` is FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, or FIO_RESP3_VERBATIM.
+   * Returns a context for the string being built (e.g., a string buffer).
+   * If NULL is returned, falls back to buffering and calling on_string when
+   * complete.
+   */
+  void *(*on_start_string)(void *udata, size_t len, uint8_t type);
+
+  /**
+   * Called with partial string data (may be called multiple times).
+   * `ctx` is the context returned by on_start_string.
+   * Returns 0 on success, non-zero to abort parsing.
+   */
+  int (*on_string_write)(void *udata, void *ctx, const void *data, size_t len);
+
+  /**
+   * Called when the string is complete.
+   * `ctx` is the context returned by on_start_string.
+   * Returns the final string object to be used as a value.
+   */
+  void *(*on_string_done)(void *udata, void *ctx, uint8_t type);
+
+} fio_resp3_callbacks_s;
+
+/** The RESP3 parse result type. */
+typedef struct {
+  /** The parsed top-level object (or NULL on error/incomplete) */
+  void *obj;
+  /** Number of bytes consumed from the buffer */
+  size_t consumed;
+  /** Non-zero if an error occurred */
+  int err;
+} fio_resp3_result_s;
+
+/* *****************************************************************************
+RESP3 Parser API
+***************************************************************************** */
+
+/**
+ * Parse RESP3 data from buffer.
+ *
+ * `parser` is the parser state. Initialize with `{.udata = my_data}` for first
+ *          call. For continuation after partial parse, pass the same parser.
+ * `callbacks` contains the callback functions (should be static const).
+ * `buf` is the data to parse.
+ * `len` is the length of the data.
+ *
+ * Returns a result struct containing:
+ * - `obj`: The parsed top-level object (NULL if incomplete or error)
+ * - `consumed`: Number of bytes consumed from the buffer
+ * - `err`: Non-zero if a protocol error occurred
+ *
+ * For partial data, the parser state is preserved. Call again with remaining
+ * data appended to unconsumed data.
+ */
+SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
+                                         const fio_resp3_callbacks_s *callbacks,
+                                         const void *buf,
+                                         size_t len);
+
+/* *****************************************************************************
+RESP3 Implementation
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Internal Helper: No-op callbacks
+***************************************************************************** */
+
+FIO_IFUNC void *fio___resp3_noop_obj(void *udata) {
+  return (void *)(uintptr_t)1; /* Return non-NULL sentinel */
+  (void)udata;
+}
+
+FIO_IFUNC void *fio___resp3_noop_bool(void *udata, int v) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)v;
+}
+
+FIO_IFUNC void *fio___resp3_noop_i64(void *udata, int64_t v) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)v;
+}
+
+FIO_IFUNC void *fio___resp3_noop_dbl(void *udata, double v) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)v;
+}
+
+FIO_IFUNC void *fio___resp3_noop_data(void *udata,
+                                      const void *d,
+                                      size_t l,
+                                      uint8_t t) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)d;
+  (void)l;
+  (void)t;
+}
+
+FIO_IFUNC void *fio___resp3_noop_bignum(void *udata, const void *d, size_t l) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)d;
+  (void)l;
+}
+
+FIO_IFUNC void *fio___resp3_noop_container(void *udata,
+                                           void *parent,
+                                           int64_t len) {
+  return (void *)(uintptr_t)1;
+  (void)udata;
+  (void)parent;
+  (void)len;
+}
+
+FIO_IFUNC int fio___resp3_noop_push(void *udata, void *ctx, void *value) {
+  return 0;
+  (void)udata;
+  (void)ctx;
+  (void)value;
+}
+
+FIO_IFUNC int fio___resp3_noop_push_kv(void *udata,
+                                       void *ctx,
+                                       void *key,
+                                       void *value) {
+  return 0;
+  (void)udata;
+  (void)ctx;
+  (void)key;
+  (void)value;
+}
+
+FIO_IFUNC void *fio___resp3_noop_done(void *udata, void *ctx) {
+  return ctx;
+  (void)udata;
+}
+
+FIO_IFUNC void fio___resp3_noop_free(void *udata, void *obj) {
+  (void)udata;
+  (void)obj;
+}
+
+FIO_IFUNC void *fio___resp3_noop_error(void *udata) {
+  return NULL;
+  (void)udata;
+}
+
+/* *****************************************************************************
+Internal: Validated callbacks wrapper
+***************************************************************************** */
+
+typedef struct {
+  void *(*on_null)(void *udata);
+  void *(*on_bool)(void *udata, int is_true);
+  void *(*on_number)(void *udata, int64_t num);
+  void *(*on_double)(void *udata, double num);
+  void *(*on_bignum)(void *udata, const void *data, size_t len);
+  void *(*on_string)(void *udata, const void *data, size_t len, uint8_t type);
+  void *(*on_error)(void *udata, const void *data, size_t len, uint8_t type);
+  void *(*on_array)(void *udata, void *parent_ctx, int64_t len);
+  void *(*on_map)(void *udata, void *parent_ctx, int64_t len);
+  void *(*on_set)(void *udata, void *parent_ctx, int64_t len);
+  void *(*on_push)(void *udata, void *parent_ctx, int64_t len);
+  void *(*on_attr)(void *udata, void *parent_ctx, int64_t len);
+  int (*array_push)(void *udata, void *ctx, void *value);
+  int (*map_push)(void *udata, void *ctx, void *key, void *value);
+  int (*set_push)(void *udata, void *ctx, void *value);
+  int (*push_push)(void *udata, void *ctx, void *value);
+  int (*attr_push)(void *udata, void *ctx, void *key, void *value);
+  void *(*array_done)(void *udata, void *ctx);
+  void *(*map_done)(void *udata, void *ctx);
+  void *(*set_done)(void *udata, void *ctx);
+  void *(*push_done)(void *udata, void *ctx);
+  void *(*attr_done)(void *udata, void *ctx);
+  void (*free_unused)(void *udata, void *obj);
+  void *(*on_error_protocol)(void *udata);
+  /* Streaming string callbacks (NULL if not provided) */
+  void *(*on_start_string)(void *udata, size_t len, uint8_t type);
+  int (*on_string_write)(void *udata, void *ctx, const void *data, size_t len);
+  void *(*on_string_done)(void *udata, void *ctx, uint8_t type);
+  /** Flag: treat sets as maps (when set callbacks are missing) */
+  uint8_t set_as_map;
+} fio___resp3_cb_s;
+
+FIO_SFUNC fio___resp3_cb_s
+fio___resp3_callbacks_validate(const fio_resp3_callbacks_s *cb) {
+  fio___resp3_cb_s r;
+  static const fio_resp3_callbacks_s empty_cb = {0};
+  if (!cb) {
+    cb = &empty_cb;
+  }
+  r.on_null = cb->on_null ? cb->on_null : fio___resp3_noop_obj;
+  r.on_bool = cb->on_bool ? cb->on_bool : fio___resp3_noop_bool;
+  r.on_number = cb->on_number ? cb->on_number : fio___resp3_noop_i64;
+  r.on_double = cb->on_double ? cb->on_double : fio___resp3_noop_dbl;
+  r.on_bignum = cb->on_bignum ? cb->on_bignum : fio___resp3_noop_bignum;
+  r.on_string = cb->on_string ? cb->on_string : fio___resp3_noop_data;
+  r.on_error = cb->on_error ? cb->on_error : fio___resp3_noop_data;
+  r.on_array = cb->on_array ? cb->on_array : fio___resp3_noop_container;
+  r.on_map = cb->on_map ? cb->on_map : fio___resp3_noop_container;
+  r.on_set = cb->on_set ? cb->on_set : fio___resp3_noop_container;
+  r.on_push = cb->on_push ? cb->on_push : fio___resp3_noop_container;
+  r.on_attr = cb->on_attr ? cb->on_attr : fio___resp3_noop_container;
+  r.array_push = cb->array_push ? cb->array_push : fio___resp3_noop_push;
+  r.map_push = cb->map_push ? cb->map_push : fio___resp3_noop_push_kv;
+  r.set_push = cb->set_push ? cb->set_push : fio___resp3_noop_push;
+  r.push_push = cb->push_push ? cb->push_push : fio___resp3_noop_push;
+  r.attr_push = cb->attr_push ? cb->attr_push : fio___resp3_noop_push_kv;
+  r.array_done = cb->array_done ? cb->array_done : fio___resp3_noop_done;
+  r.map_done = cb->map_done ? cb->map_done : fio___resp3_noop_done;
+  r.set_done = cb->set_done ? cb->set_done : fio___resp3_noop_done;
+  r.push_done = cb->push_done ? cb->push_done : fio___resp3_noop_done;
+  r.attr_done = cb->attr_done ? cb->attr_done : fio___resp3_noop_done;
+  r.free_unused = cb->free_unused ? cb->free_unused : fio___resp3_noop_free;
+  r.on_error_protocol =
+      cb->on_error_protocol ? cb->on_error_protocol : fio___resp3_noop_error;
+  /* Streaming string callbacks - keep NULL if not provided (no fallback) */
+  r.on_start_string = cb->on_start_string;
+  r.on_string_write = cb->on_string_write;
+  r.on_string_done = cb->on_string_done;
+  /* Treat sets as maps when set callbacks are missing but map callbacks exist
+   */
+  r.set_as_map = (!cb->on_set && !cb->set_push && !cb->set_done) &&
+                 (cb->on_map || cb->map_push || cb->map_done);
+  return r;
+}
+
+/* *****************************************************************************
+Internal Helper: Find newline
+***************************************************************************** */
+
+FIO_IFUNC const uint8_t *fio___resp3_find_eol(const uint8_t *pos,
+                                              const uint8_t *end) {
+  if (pos >= end)
+    return NULL;
+  const uint8_t *nl =
+      (const uint8_t *)FIO_MEMCHR(pos, '\n', (size_t)(end - pos));
+  return nl;
+}
+
+/* *****************************************************************************
+Internal Helper: Parse integer from buffer
+***************************************************************************** */
+
+FIO_IFUNC int64_t fio___resp3_parse_int(const uint8_t **pos,
+                                        const uint8_t *eol) {
+  int64_t result = 0;
+  int negative = 0;
+  const uint8_t *p = *pos;
+
+  if (p < eol && *p == '-') {
+    negative = 1;
+    ++p;
+  } else if (p < eol && *p == '+') {
+    ++p;
+  }
+
+  while (p < eol && *p >= '0' && *p <= '9') {
+    result = (result * 10) + (*p - '0');
+    ++p;
+  }
+
+  *pos = p;
+  return negative ? -result : result;
+}
+
+/* *****************************************************************************
+Internal Helper: Parse double from buffer
+***************************************************************************** */
+
+FIO_IFUNC double fio___resp3_parse_double(const uint8_t *start,
+                                          const uint8_t *eol) {
+  size_t len = (size_t)(eol - start);
+  if (len >= 3) {
+    if ((start[0] == 'i' || start[0] == 'I') &&
+        (start[1] == 'n' || start[1] == 'N') &&
+        (start[2] == 'f' || start[2] == 'F')) {
+      return (double)INFINITY;
+    }
+    if (start[0] == '-' && (start[1] == 'i' || start[1] == 'I') &&
+        (start[2] == 'n' || start[2] == 'N')) {
+      return (double)-INFINITY;
+    }
+    if ((start[0] == 'n' || start[0] == 'N') &&
+        (start[1] == 'a' || start[1] == 'A') &&
+        (start[2] == 'n' || start[2] == 'N')) {
+      return (double)NAN;
+    }
+  }
+  char *p = (char *)start;
+  return fio_atof(&p);
+}
+
+/* *****************************************************************************
+Internal Helper: Get parent context
+***************************************************************************** */
+
+FIO_IFUNC void *fio___resp3_parent_ctx(fio_resp3_parser_s *p) {
+  if (p->depth == 0)
+    return NULL;
+  return p->stack[p->depth - 1].ctx;
+}
+
+/* *****************************************************************************
+Internal Helper: Push value to current container
+***************************************************************************** */
+
+FIO_SFUNC int fio___resp3_push_value(fio_resp3_parser_s *p,
+                                     fio___resp3_cb_s *cb,
+                                     void *value) {
+  if (p->depth == 0)
+    return 0;
+
+  fio_resp3_frame_s *f = &p->stack[p->depth - 1];
+
+  switch (f->type) {
+  case FIO_RESP3_ARRAY: return cb->array_push(p->udata, f->ctx, value);
+  case FIO_RESP3_SET:
+    /* When set_as_map is enabled, treat set elements as map key=value pairs */
+    if (f->set_as_map)
+      return cb->map_push(p->udata, f->ctx, value, value);
+    return cb->set_push(p->udata, f->ctx, value);
+  case FIO_RESP3_PUSH: return cb->push_push(p->udata, f->ctx, value);
+  case FIO_RESP3_MAP:
+  case FIO_RESP3_ATTR:
+    if (!f->expecting_value) {
+      f->key = value;
+      f->expecting_value = 1;
+      return 0;
+    } else {
+      void *key = f->key;
+      f->key = NULL;
+      f->expecting_value = 0;
+      if (f->type == FIO_RESP3_MAP)
+        return cb->map_push(p->udata, f->ctx, key, value);
+      else
+        return cb->attr_push(p->udata, f->ctx, key, value);
+    }
+  default: return 0;
+  }
+}
+
+/* *****************************************************************************
+Internal Helper: Complete container and pop from stack
+***************************************************************************** */
+
+FIO_SFUNC void *fio___resp3_complete_frame(fio_resp3_parser_s *p,
+                                           fio___resp3_cb_s *cb) {
+  fio_resp3_frame_s *f = &p->stack[p->depth - 1];
+  void *result = f->ctx;
+
+  switch (f->type) {
+  case FIO_RESP3_ARRAY: result = cb->array_done(p->udata, f->ctx); break;
+  case FIO_RESP3_MAP: result = cb->map_done(p->udata, f->ctx); break;
+  case FIO_RESP3_SET:
+    /* When set_as_map is enabled, use map_done instead of set_done */
+    if (f->set_as_map)
+      result = cb->map_done(p->udata, f->ctx);
+    else
+      result = cb->set_done(p->udata, f->ctx);
+    break;
+  case FIO_RESP3_PUSH: result = cb->push_done(p->udata, f->ctx); break;
+  case FIO_RESP3_ATTR: result = cb->attr_done(p->udata, f->ctx); break;
+  default: break;
+  }
+
+  if (f->key) {
+    cb->free_unused(p->udata, f->key);
+    f->key = NULL;
+  }
+
+  --p->depth;
+  return result;
+}
+
+/* *****************************************************************************
+Internal Helper: Handle value completion and container unwinding
+***************************************************************************** */
+
+FIO_SFUNC void *fio___resp3_on_value(fio_resp3_parser_s *p,
+                                     fio___resp3_cb_s *cb,
+                                     void *value) {
+  int attr_completed_at_top = 0;
+
+  /* Push to parent if nested */
+  if (p->depth > 0) {
+    if (fio___resp3_push_value(p, cb, value)) {
+      p->error = 1;
+      return NULL;
+    }
+  }
+
+  /* Unwind completed containers */
+  while (p->depth > 0) {
+    fio_resp3_frame_s *f = &p->stack[p->depth - 1];
+
+    if (f->streaming)
+      return NULL; /* Wait for end marker */
+
+    if (f->remaining > 0)
+      --f->remaining;
+
+    if (f->remaining > 0)
+      return NULL; /* More elements expected */
+
+    /* Frame complete */
+    uint8_t type = f->type;
+    value = fio___resp3_complete_frame(p, cb);
+
+    /* Attributes don't count as elements */
+    if (type == FIO_RESP3_ATTR) {
+      if (p->depth == 0)
+        attr_completed_at_top = 1;
+      continue;
+    }
+
+    /* Push completed container to parent */
+    if (p->depth > 0) {
+      if (fio___resp3_push_value(p, cb, value)) {
+        p->error = 1;
+        return NULL;
+      }
+    }
+  }
+
+  /* If attribute completed at top level, return NULL to continue parsing */
+  if (attr_completed_at_top)
+    return NULL;
+
+  return value;
+}
+
+/* *****************************************************************************
+Internal Helper: Push new frame
+***************************************************************************** */
+
+FIO_IFUNC int fio___resp3_push_frame(fio_resp3_parser_s *p,
+                                     fio___resp3_cb_s *cb,
+                                     uint8_t type,
+                                     void *ctx,
+                                     int64_t count,
+                                     int streaming,
+                                     int set_as_map) {
+  if (p->depth >= FIO_RESP3_MAX_NESTING) {
+    p->error = 1;
+    cb->on_error_protocol(p->udata);
+    return -1;
+  }
+
+  fio_resp3_frame_s *f = &p->stack[p->depth];
+  f->type = type;
+  f->ctx = ctx;
+  f->key = NULL;
+  f->remaining = count;
+  f->streaming = (uint8_t)streaming;
+  f->expecting_value = 0;
+  f->set_as_map = (uint8_t)set_as_map;
+  ++p->depth;
+  return 0;
+}
+
+/* *****************************************************************************
+RESP3 Main Parse Function
+***************************************************************************** */
+
+SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
+                                         const fio_resp3_callbacks_s *callbacks,
+                                         const void *buf,
+                                         size_t len) {
+  fio_resp3_result_s result = {.obj = NULL, .consumed = 0, .err = 0};
+  const uint8_t *pos = (const uint8_t *)buf;
+  const uint8_t *start = pos;
+  const uint8_t *end = pos + len;
+  void *obj = NULL;
+
+  if (!parser) {
+    FIO_LOG_ERROR("RESP3 parser: parser state is NULL");
+    result.err = 1;
+    return result;
+  }
+
+  fio___resp3_cb_s cb = fio___resp3_callbacks_validate(callbacks);
+
+  if (parser->error) {
+    result.err = 1;
+    return result;
+  }
+
+  while (pos < end) {
+    const uint8_t *eol = fio___resp3_find_eol(pos, end);
+    if (!eol)
+      break; /* Need more data */
+
+    uint8_t type = *pos++;
+
+    switch (type) {
+    /* ===== Simple String: +<string>\r\n ===== */
+    case FIO_RESP3_SIMPLE_STR: {
+      const uint8_t *str_end = eol;
+      if (str_end > pos && *(str_end - 1) == '\r')
+        --str_end;
+      obj = cb.on_string(parser->udata,
+                         pos,
+                         (size_t)(str_end - pos),
+                         FIO_RESP3_SIMPLE_STR);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Simple Error: -<string>\r\n ===== */
+    case FIO_RESP3_SIMPLE_ERR: {
+      const uint8_t *str_end = eol;
+      if (str_end > pos && *(str_end - 1) == '\r')
+        --str_end;
+      obj = cb.on_error(parser->udata,
+                        pos,
+                        (size_t)(str_end - pos),
+                        FIO_RESP3_SIMPLE_ERR);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Number: :<number>\r\n ===== */
+    case FIO_RESP3_NUMBER: {
+      int64_t num = fio___resp3_parse_int(&pos, eol);
+      obj = cb.on_number(parser->udata, num);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Null: _\r\n ===== */
+    case FIO_RESP3_NULL: {
+      obj = cb.on_null(parser->udata);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Double: ,<double>\r\n ===== */
+    case FIO_RESP3_DOUBLE: {
+      const uint8_t *num_end = eol;
+      if (num_end > pos && *(num_end - 1) == '\r')
+        --num_end;
+      double num = fio___resp3_parse_double(pos, num_end);
+      obj = cb.on_double(parser->udata, num);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Boolean: #t\r\n or #f\r\n ===== */
+    case FIO_RESP3_BOOL: {
+      int is_true = (*pos == 't' || *pos == 'T');
+      obj = cb.on_bool(parser->udata, is_true);
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Big Number: (<big number>\r\n ===== */
+    case FIO_RESP3_BIGNUM: {
+      const uint8_t *num_end = eol;
+      if (num_end > pos && *(num_end - 1) == '\r')
+        --num_end;
+      obj = cb.on_bignum(parser->udata, pos, (size_t)(num_end - pos));
+      pos = eol + 1;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Blob String: $<length>\r\n<bytes>\r\n or $?\r\n (streaming) =====
+     */
+    case FIO_RESP3_BLOB_STR: {
+      /* Streaming blob string: $?\r\n followed by ;len\r\ndata... chunks */
+      if (*pos == '?') {
+        pos = eol + 1;
+        /* Start streaming string if callbacks available */
+        if (cb.on_start_string) {
+          void *ctx =
+              cb.on_start_string(parser->udata, (size_t)-1, FIO_RESP3_BLOB_STR);
+          if (ctx) {
+            parser->streaming_string = 1;
+            parser->streaming_string_type = FIO_RESP3_BLOB_STR;
+            parser->streaming_string_ctx = ctx;
+            break;
+          }
+        }
+        /* No streaming callbacks - error (can't buffer unknown length) */
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+
+      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      if (blob_len < 0) {
+        /* Null blob (RESP2 compat) */
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      /* Check if we have complete blob data */
+      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
+        /* Not enough data - rewind to start of this message */
+        pos = start + result.consumed;
+        goto done;
+      }
+
+      /* Use streaming callbacks if available */
+      if (cb.on_start_string) {
+        void *ctx = cb.on_start_string(parser->udata,
+                                       (size_t)blob_len,
+                                       FIO_RESP3_BLOB_STR);
+        if (ctx) {
+          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
+            parser->error = 1;
+            result.err = 1;
+            goto done;
+          }
+          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_BLOB_STR);
+          pos += blob_len;
+          if (pos < end && *pos == '\r')
+            ++pos;
+          if (pos < end && *pos == '\n')
+            ++pos;
+          obj = fio___resp3_on_value(parser, &cb, obj);
+          if (parser->error) {
+            result.err = 1;
+            goto done;
+          }
+          if (obj && parser->depth == 0) {
+            result.obj = obj;
+            goto done;
+          }
+          break;
+        }
+        /* on_start_string returned NULL, fall back to on_string */
+      }
+
+      obj = cb.on_string(parser->udata,
+                         pos,
+                         (size_t)blob_len,
+                         FIO_RESP3_BLOB_STR);
+      pos += blob_len;
+      if (pos < end && *pos == '\r')
+        ++pos;
+      if (pos < end && *pos == '\n')
+        ++pos;
+
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Blob Error: !<length>\r\n<bytes>\r\n ===== */
+    case FIO_RESP3_BLOB_ERR: {
+      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      if (blob_len <= 0) {
+        obj = cb.on_error(parser->udata, "", 0, FIO_RESP3_BLOB_ERR);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
+        pos = start + result.consumed;
+        goto done;
+      }
+
+      /* Use streaming callbacks if available */
+      if (cb.on_start_string) {
+        void *ctx = cb.on_start_string(parser->udata,
+                                       (size_t)blob_len,
+                                       FIO_RESP3_BLOB_ERR);
+        if (ctx) {
+          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
+            parser->error = 1;
+            result.err = 1;
+            goto done;
+          }
+          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_BLOB_ERR);
+          pos += blob_len;
+          if (pos < end && *pos == '\r')
+            ++pos;
+          if (pos < end && *pos == '\n')
+            ++pos;
+          obj = fio___resp3_on_value(parser, &cb, obj);
+          if (parser->error) {
+            result.err = 1;
+            goto done;
+          }
+          if (obj && parser->depth == 0) {
+            result.obj = obj;
+            goto done;
+          }
+          break;
+        }
+        /* on_start_string returned NULL, fall back to on_error */
+      }
+
+      obj =
+          cb.on_error(parser->udata, pos, (size_t)blob_len, FIO_RESP3_BLOB_ERR);
+      pos += blob_len;
+      if (pos < end && *pos == '\r')
+        ++pos;
+      if (pos < end && *pos == '\n')
+        ++pos;
+
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Verbatim String: =<length>\r\n<type:><bytes>\r\n ===== */
+    case FIO_RESP3_VERBATIM: {
+      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      if (blob_len < 0) {
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
+        pos = start + result.consumed;
+        goto done;
+      }
+
+      /* Use streaming callbacks if available */
+      if (cb.on_start_string) {
+        void *ctx = cb.on_start_string(parser->udata,
+                                       (size_t)blob_len,
+                                       FIO_RESP3_VERBATIM);
+        if (ctx) {
+          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
+            parser->error = 1;
+            result.err = 1;
+            goto done;
+          }
+          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_VERBATIM);
+          pos += blob_len;
+          if (pos < end && *pos == '\r')
+            ++pos;
+          if (pos < end && *pos == '\n')
+            ++pos;
+          obj = fio___resp3_on_value(parser, &cb, obj);
+          if (parser->error) {
+            result.err = 1;
+            goto done;
+          }
+          if (obj && parser->depth == 0) {
+            result.obj = obj;
+            goto done;
+          }
+          break;
+        }
+        /* on_start_string returned NULL, fall back to on_string */
+      }
+
+      obj = cb.on_string(parser->udata,
+                         pos,
+                         (size_t)blob_len,
+                         FIO_RESP3_VERBATIM);
+      pos += blob_len;
+      if (pos < end && *pos == '\r')
+        ++pos;
+      if (pos < end && *pos == '\n')
+        ++pos;
+
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Array: *<count>\r\n ===== */
+    case FIO_RESP3_ARRAY: {
+      int streaming = 0;
+      int64_t count;
+
+      if (*pos == '?') {
+        streaming = 1;
+        count = -1;
+      } else {
+        count = fio___resp3_parse_int(&pos, eol);
+      }
+      pos = eol + 1;
+
+      if (count < 0 && !streaming) {
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      void *parent = fio___resp3_parent_ctx(parser);
+      void *ctx = cb.on_array(parser->udata, parent, count);
+
+      if (count == 0) {
+        obj = cb.array_done(parser->udata, ctx);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if (fio___resp3_push_frame(parser,
+                                 &cb,
+                                 FIO_RESP3_ARRAY,
+                                 ctx,
+                                 count,
+                                 streaming,
+                                 0)) {
+        result.err = 1;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Map: %<count>\r\n ===== */
+    case FIO_RESP3_MAP: {
+      int streaming = 0;
+      int64_t count;
+
+      if (*pos == '?') {
+        streaming = 1;
+        count = -1;
+      } else {
+        count = fio___resp3_parse_int(&pos, eol);
+      }
+      pos = eol + 1;
+
+      if (count < 0 && !streaming) {
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      void *parent = fio___resp3_parent_ctx(parser);
+      void *ctx = cb.on_map(parser->udata, parent, count);
+
+      if (count == 0) {
+        obj = cb.map_done(parser->udata, ctx);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      /* Maps: count is pairs, need count*2 elements */
+      int64_t elements = streaming ? -1 : count * 2;
+      if (fio___resp3_push_frame(parser,
+                                 &cb,
+                                 FIO_RESP3_MAP,
+                                 ctx,
+                                 elements,
+                                 streaming,
+                                 0)) {
+        result.err = 1;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Set: ~<count>\r\n ===== */
+    case FIO_RESP3_SET: {
+      int streaming = 0;
+      int64_t count;
+
+      if (*pos == '?') {
+        streaming = 1;
+        count = -1;
+      } else {
+        count = fio___resp3_parse_int(&pos, eol);
+      }
+      pos = eol + 1;
+
+      if (count < 0 && !streaming) {
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      void *parent = fio___resp3_parent_ctx(parser);
+      /* When set_as_map is enabled, use on_map instead of on_set */
+      void *ctx = cb.set_as_map ? cb.on_map(parser->udata, parent, count)
+                                : cb.on_set(parser->udata, parent, count);
+
+      if (count == 0) {
+        /* When set_as_map is enabled, use map_done instead of set_done */
+        obj = cb.set_as_map ? cb.map_done(parser->udata, ctx)
+                            : cb.set_done(parser->udata, ctx);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if (fio___resp3_push_frame(parser,
+                                 &cb,
+                                 FIO_RESP3_SET,
+                                 ctx,
+                                 count,
+                                 streaming,
+                                 cb.set_as_map)) {
+        result.err = 1;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Push: ><count>\r\n ===== */
+    case FIO_RESP3_PUSH: {
+      int64_t count = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      if (count < 0) {
+        obj = cb.on_null(parser->udata);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      void *parent = fio___resp3_parent_ctx(parser);
+      void *ctx = cb.on_push(parser->udata, parent, count);
+
+      if (count == 0) {
+        obj = cb.push_done(parser->udata, ctx);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if (fio___resp3_push_frame(parser,
+                                 &cb,
+                                 FIO_RESP3_PUSH,
+                                 ctx,
+                                 count,
+                                 0,
+                                 0)) {
+        result.err = 1;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Attribute: |<count>\r\n ===== */
+    case FIO_RESP3_ATTR: {
+      int64_t count = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      if (count < 0) {
+        /* Skip null attribute */
+        break;
+      }
+
+      void *parent = fio___resp3_parent_ctx(parser);
+      void *ctx = cb.on_attr(parser->udata, parent, count);
+
+      if (count == 0) {
+        cb.attr_done(parser->udata, ctx);
+        break;
+      }
+
+      if (fio___resp3_push_frame(parser,
+                                 &cb,
+                                 FIO_RESP3_ATTR,
+                                 ctx,
+                                 count * 2,
+                                 0,
+                                 0)) {
+        result.err = 1;
+        goto done;
+      }
+      break;
+    }
+
+    /* ===== Streamed string chunk: ;<length>\r\n<bytes>\r\n ===== */
+    case FIO_RESP3_STREAM_CHUNK: {
+      /* This is only valid when we're in a streaming string */
+      if (!parser->streaming_string) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+
+      int64_t chunk_len = fio___resp3_parse_int(&pos, eol);
+      pos = eol + 1;
+
+      /* Length 0 means end of streaming string */
+      if (chunk_len == 0) {
+        obj = cb.on_string_done(parser->udata,
+                                parser->streaming_string_ctx,
+                                parser->streaming_string_type);
+        parser->streaming_string = 0;
+        parser->streaming_string_ctx = NULL;
+        parser->streaming_string_type = 0;
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      /* Check if we have complete chunk data */
+      if ((size_t)(end - pos) < (size_t)chunk_len + 2) {
+        /* Not enough data - rewind to start of this chunk */
+        pos = start + result.consumed;
+        goto done;
+      }
+
+      /* Write chunk data */
+      if (cb.on_string_write(parser->udata,
+                             parser->streaming_string_ctx,
+                             pos,
+                             (size_t)chunk_len)) {
+        parser->error = 1;
+        result.err = 1;
+        goto done;
+      }
+
+      pos += chunk_len;
+      if (pos < end && *pos == '\r')
+        ++pos;
+      if (pos < end && *pos == '\n')
+        ++pos;
+      break;
+    }
+
+    /* ===== Streamed aggregate end: .\r\n ===== */
+    case FIO_RESP3_STREAM_END: {
+      pos = eol + 1;
+
+      /* Handle streaming string end (alternative to ;0\r\n) */
+      if (parser->streaming_string) {
+        obj = cb.on_string_done(parser->udata,
+                                parser->streaming_string_ctx,
+                                parser->streaming_string_type);
+        parser->streaming_string = 0;
+        parser->streaming_string_ctx = NULL;
+        parser->streaming_string_type = 0;
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+        break;
+      }
+
+      if (parser->depth > 0 && parser->stack[parser->depth - 1].streaming) {
+        obj = fio___resp3_complete_frame(parser, &cb);
+        obj = fio___resp3_on_value(parser, &cb, obj);
+        if (parser->error) {
+          result.err = 1;
+          goto done;
+        }
+        if (obj && parser->depth == 0) {
+          result.obj = obj;
+          goto done;
+        }
+      }
+      break;
+    }
+
+    default:
+      parser->error = 1;
+      result.err = 1;
+      cb.on_error_protocol(parser->udata);
+      goto done;
+    }
+
+    /* Update consumed position after each complete element */
+    result.consumed = (size_t)(pos - start);
+  }
+
+done:
+  result.consumed = (size_t)(pos - start);
+  return result;
+}
+
+/* *****************************************************************************
+RESP3 Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_RESP3
+#endif /* FIO_RESP3 */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_SOCK               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -17147,9 +18679,9 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
   if (active_count > 0) {
     for (unsigned i = 0; i < (unsigned)active_count; i++) {
       // test for event(s) type
-      if ((events[i].filter & EVFILT_WRITE))
+      if (events[i].filter == EVFILT_WRITE)
         p->settings.on_ready(events[i].udata);
-      if ((events[i].filter & EVFILT_READ))
+      if (events[i].filter == EVFILT_READ)
         p->settings.on_data(events[i].udata);
       if (events[i].flags & (EV_EOF | EV_ERROR))
         p->settings.on_close(events[i].udata);
@@ -46355,8 +47887,7 @@ Pub/Sub Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_RESP3              /* Development inclusion - ignore line */
-#define FIO_ATOL               /* Development inclusion - ignore line */
+#define FIO_REDIS              /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -46364,755 +47895,1380 @@ Pub/Sub Cleanup
 
 
 
-                                RESP 3 Parser Module
+                          Redis Pub/Sub Engine Module
 
 
 
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(FIO_RESP3) && !defined(FIO___RECURSIVE_INCLUDE) &&                 \
-    !defined(H___FIO_RESP3___H)
-#define H___FIO_RESP3___H
+#if defined(FIO_REDIS) && !defined(FIO___RECURSIVE_INCLUDE) &&                 \
+    !defined(H___FIO_REDIS___H)
+#define H___FIO_REDIS___H
 
 /* *****************************************************************************
-RESP Parser Settings
+Redis Engine - Overview
+
+This module provides a Redis engine that can be used either as:
+1. A standalone database client (for GET/SET/INCR/etc. commands)
+2. A pub/sub engine when attached to facil.io's pub/sub system
+
+Features:
+- Command queue with callbacks for arbitrary Redis commands
+- Authentication support
+- Automatic reconnection on connection loss
+- Ping/pong keepalive
+- Optional pub/sub integration with SUBSCRIBE/PSUBSCRIBE/PUBLISH
+
+Thread Safety Model:
+====================
+The Redis engine is thread-safe. All internal state modifications are delegated
+to the IO queue using fio_io_defer(), ensuring single-threaded execution of
+state changes. This prevents race conditions without requiring locks.
+
+Public API thread safety:
+- fio_redis_new():   Thread-safe (defers connection to IO thread)
+- fio_redis_dup():   Thread-safe (uses atomic reference counting)
+- fio_redis_free():  Thread-safe (defers cleanup to IO thread)
+- fio_redis_send():  Thread-safe (defers command queuing to IO thread)
+
+Internal operations that run on the IO thread:
+- Command queue management (add, remove, send)
+- Connection state changes (connect, disconnect, reconnect)
+- Protocol callbacks (on_attach, on_data, on_close, on_timeout)
+- Pub/sub engine callbacks (subscribe, publish, etc.)
+
+Reference Counting Ownership Model:
+====================================
+The Redis engine uses reference counting for memory management:
+
+- fio_redis_new():   Creates engine with ref=1 (caller's reference)
+- fio_redis_dup():   Increments ref, returns engine
+- fio_redis_free():  Decrements ref, destroys when ref reaches 0
+
+Important: fio_pubsub_attach/detach do NOT affect reference counts.
+The caller is responsible for calling fio_redis_free() when done.
+
+Internal reference management:
+- Deferred tasks (connect, callbacks) increment ref before scheduling
+  and decrement after the task completes
+- Connection on_close callbacks decrement ref (balancing connect's ref)
+- The on_detached callback does NOT free memory; it only marks the
+  engine as detached
+
+Usage 1 - Database Only:
+    // Create engine - only the publishing connection is established
+    fio_pubsub_engine_s *redis = fio_redis_new(
+        .address = "localhost",
+        .port = "6379",
+        .auth = "password",  // optional
+        .ping_interval = 30  // seconds, optional
+    );
+
+    // Send database commands
+    FIOBJ cmd = fiobj_array_new();
+    fiobj_array_push(cmd, fiobj_str_new_cstr("GET", 3));
+    fiobj_array_push(cmd, fiobj_str_new_cstr("mykey", 5));
+    fio_redis_send(redis, cmd, my_callback, my_udata);
+    fiobj_free(cmd);
+
+    // Cleanup
+    fio_redis_free(redis);
+
+Usage 2 - With Pub/Sub:
+    fio_pubsub_engine_s *redis = fio_redis_new(
+        .address = "localhost",
+        .port = "6379"
+    );
+
+    // Explicitly attach to pub/sub system - this starts the subscription
+    // connection and enables SUBSCRIBE/PSUBSCRIBE/PUBLISH functionality
+    fio_pubsub_attach(redis);
+
+    // ... use pub/sub ...
+
+    // Explicitly detach before destroying if attached
+    fio_pubsub_detach(redis);
+    fio_redis_free(redis);
+
+Note: When used as a sub-engine for clustering, do NOT attach to pub/sub.
+The cluster engine will manage the Redis engine directly.
+
 ***************************************************************************** */
 
-/** The maximum number of nested layers in object responses (2...32,768)*/
-#define FIO_RESP3_MAX_NESTING 32
+/* *****************************************************************************
+Redis Engine Settings
+***************************************************************************** */
 
-/** RESP's parser settings – callbacks and object creation. */
+#ifndef FIO_REDIS_READ_BUFFER
+/** Size of the read buffer for Redis connections */
+#define FIO_REDIS_READ_BUFFER 32768
+#endif
+
+/* *****************************************************************************
+Redis Engine Types
+***************************************************************************** */
+
+/** Arguments for creating a Redis engine */
 typedef struct {
-  /** The value for NULL */
-  void *set_null;
-  /** The value for TRUE */
-  void *set_true;
-  /** The value for FALSE */
-  void *set_false;
-  /** Should return an object representing the number `i` */
-  void *(*get_number)(int64_t i);
-  /** Should return an object representing the float `f` */
-  void *(*get_float)(double f);
-  /** Should return an object representing the BIG number `i` */
-  void *(*get_bignum)(char *str, size_t len);
-  /** Should return an object representing the String */
-  void *(*get_string)(char *str, size_t len);
-  /** Should return an object representing a dynamic String */
-  void *(*string_start)(size_t soft_expected);
-  /** Should write data to the a dynamic String, perhaps reallocating it */
-  void *(*string_write)(void *dest, char *str, size_t len);
-  /** Should return an object representing a dynamic Array */
-  void *(*array_start)(size_t soft_expected);
-  /** Should push an object to the dynamic Array, perhaps reallocating it */
-  void *(*array_push)(void *array, void *value);
-  /** Should return an object representing a dynamic Map */
-  void *(*map_start)(size_t soft_expected);
-  /** Should push an object to the dynamic Map, perhaps reallocating it */
-  void *(*map_push)(void *map, void *key, void *value);
-  /** Called on object received. returns non-zero on error. */
-  int (*done)(void *udata, void *response);
-  /** Called on error response, NOT on protocol error. */
-  int (*error)(void *udata, void *response);
-  /** Called on out-of-bounds object received. returns non-zero on error. */
-  int (*push)(void *udata, void *response);
-  /** Called after either response callbacks or protocol error. */
-  void (*free_response)(void *obj);
-} fio_resp3_settings_s;
+  /** Redis server's address, defaults to "localhost" */
+  const char *address;
+  /** Redis server's port, defaults to "6379" */
+  const char *port;
+  /** Redis server's password, if any (for AUTH command) */
+  const char *auth;
+  /** Length of auth string (0 = auto-detect with strlen) */
+  size_t auth_len;
+  /** Ping interval in seconds (0 = default 300 seconds) */
+  uint8_t ping_interval;
+} fio_redis_args_s;
+
+/**
+ * Creates a Redis pub/sub engine with reference count = 1.
+ *
+ * The engine is active only after the IO reactor starts running.
+ *
+ * The caller owns the returned reference and must call fio_redis_free()
+ * when done. Attaching to pub/sub does NOT transfer ownership.
+ *
+ * Returns a pointer to the engine or NULL on error.
+ */
+SFUNC fio_pubsub_engine_s *fio_redis_new(fio_redis_args_s args);
+
+/** Creates a Redis pub/sub engine (named arguments helper macro). */
+#define fio_redis_new(...) fio_redis_new((fio_redis_args_s){__VA_ARGS__})
+
+/**
+ * Increments the reference count and returns the engine.
+ *
+ * Use this when you need to share the engine across multiple owners.
+ * Each call to fio_redis_dup() must be balanced with fio_redis_free().
+ */
+SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine);
+
+/**
+ * Decrements the reference count. When count reaches 0, destroys the engine.
+ *
+ * This function:
+ * - Decrements the reference count
+ * - If ref reaches 0:
+ *   - Closes all connections
+ *   - Frees all queued commands
+ *   - Frees the engine memory
+ *
+ * IMPORTANT: If the engine was attached to pub/sub via fio_pubsub_attach(),
+ * you MUST call fio_pubsub_detach() before calling fio_redis_free().
+ *
+ * Safe to call with NULL (no-op).
+ */
+SFUNC void fio_redis_free(fio_pubsub_engine_s *engine);
+
+/**
+ * Sends a Redis command through the engine's connection.
+ *
+ * The response will be sent back using the optional callback. `udata` is passed
+ * along untouched.
+ *
+ * The `command` should be a FIOBJ array containing the command and arguments.
+ *
+ * Note: NEVER call Pub/Sub commands (SUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE,
+ * PUNSUBSCRIBE) using this function, as it will violate the Redis connection's
+ * protocol.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
+                         FIOBJ command,
+                         void (*callback)(fio_pubsub_engine_s *e,
+                                          FIOBJ reply,
+                                          void *udata),
+                         void *udata);
 
 /* *****************************************************************************
-RESP Parser API
-***************************************************************************** */
 
-struct fio___resp3_frame_s {
-  /** Object in Frame */
-  void *obj;
-  /** Object Size */
-  uint32_t size;
-  /** Object Type */
-  uint8_t otype;
-  /** Streaming Object */
-  uint8_t streaming;
-  /** Object is finalized */
-  uint8_t finished;
-};
 
-/* RESP's parser type - do not access directly. */
-typedef struct fio_resp3_s {
-  /** callback settings. */
-  fio_resp3_settings_s settings;
-  void *udata;
-  uint32_t depth;
-  uint8_t perror; /* protocol error flag */
-  struct fio___resp3_frame_s stack[FIO_RESP3_MAX_NESTING];
-} fio_resp3_s;
 
-#define FIO_RESP3_INIT(...)                                                    \
-  (fio_resp3_s) {                                                              \
-    .settings = {__VA_ARGS__}, .private_data = {0}, .udata = NULL              \
-  }
 
-/** Returns an initialized parser. */
-FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
-                                     void *udata);
-/** Initializes the parser. */
-FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
-                               fio_resp3_settings_s *settings,
-                               void *udata);
+Redis Engine Implementation
 
-/** Parse `data`, returning the abount of bytes consumed. */
-FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser);
 
-/* *****************************************************************************
-RESP Implementation - possibly externed functions.
+
+
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/* Single Line Types */
-
-/** The general form is `+<string>\r\n` */
-#define FIO___RESP3_U8_SIMPLE ((unsigned char)'+')
-/** The general form is `-<string>\r\n` */
-#define FIO___RESP3_U8_ERROR ((unsigned char)'-')
-/** Big number `(<big number>\r\n` */
-#define FIO___RESP3_U8_BIGNUM ((unsigned char)'(')
-/** The general form is `:<number>\r\n` */
-#define FIO___RESP3_U8_NUMBER ((unsigned char)':')
-/** Null: `_\r\n` */
-#define FIO___RESP3_U8_NULL ((unsigned char)'_')
-/** Double: ,<floating-point-number>\r\n (inf, inf, nan, -nan) */
-#define FIO___RESP3_U8_FLOAT ((unsigned char)',')
-/** Boolean: `#t\r\n` and `#f\r\n` */
-#define FIO___RESP3_U8_BOOL ((unsigned char)'#')
-
-/* Blob Types */
-
-/** The general form is `$<length>\r\n<bytes>\r\n` */
-#define FIO___RESP3_U8_BLOB ((unsigned char)'$')
-/** Blob error: `!<length>\r\n<bytes>\r\n`.*/
-#define FIO___RESP3_U8_ERROR_BLOB ((unsigned char)'!')
-/** Verbatim string: first 3 bytes are the type `XXX:`,i.e., `txt:`  */
-#define FIO___RESP3_U8_VBLOB ((unsigned char)'=')
-
-/* <aggregate-type-char><numelements><CR><LF> */
-#define FIO___RESP3_U8_ARRAY ((unsigned char)'*')
-#define FIO___RESP3_U8_PUSH  ((unsigned char)'>')
-#define FIO___RESP3_U8_MAP   ((unsigned char)'%')
-#define FIO___RESP3_U8_ATTR  ((unsigned char)'|')
-#define FIO___RESP3_U8_SET   ((unsigned char)'~')
-
-/* Streamed Strings / Arrays / Maps */
-
-#define FIO___RESP3_U8_STR_STREAM_LEN    ((unsigned char)'?')
-#define FIO___RESP3_U8_STR_STREAM_PART   ((unsigned char)';')
-#define FIO___RESP3_U8_ARRAY_STREAM_STOP ((unsigned char)'.')
-
-// Basically the transfer starts with `$?`. We use the same prefix as normal
-// strings, that is `$`, but later instead of the count we use a question mark
-// in order to communicate the client that this is a chunked encoding transfer,
-// and we don't know the final size ye t.
-
-/** RESP3 Hello */
-#define FIO___RESP3_HELLO_STR_BUF "HELLO 3\r\n"
-#define FIO___RESP3_HELLO_STR_LEN (sizeof(FIO___RESP3_HELLO_STR_BUF) - 1)
-
 /* *****************************************************************************
-Validating RESP3 Settings.
+Internal Types
 ***************************************************************************** */
 
-/* clang-format off */
-static void *fio___resp3_get_number(int64_t i) { (void)i; }
-static void *fio___resp3_get_float(double f) { (void)f; }
-static void *fio___resp3_get_bignum(char *str, size_t len) { (void)str, (void)len; }
-static void *fio___resp3_get_string(char *str, size_t len) { (void)str, (void)len; }
-static void *fio___resp3_str_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_str(void *d, char *s, size_t l) { (void)d, (void)s, (void)l; }
-static void *fio___resp3_arr_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_arr_push(void *a, void *v) { (void)a, (void)v; }
-static void *fio___resp3_map_start(size_t soft_expected) { (void)soft_expected; }
-static void *fio___resp3_map(void *m, void *k, void *v) { (void)m, (void)k, (void)v; }
-static int fio___resp3_done(void *u, void *r) { (void)u, (void)r; }
-static void fio___resp3_free(void *r) { (void)r; }
-/* clang-format on */
+/** Command queue node */
+typedef struct fio_redis_cmd_s {
+  FIO_LIST_NODE node;
+  void (*callback)(fio_pubsub_engine_s *e, FIOBJ reply, void *udata);
+  void *udata;
+  size_t cmd_len;
+  uint8_t cmd[];
+} fio_redis_cmd_s;
 
-static void fio___resp3_validate_settings(fio_resp3_settings_s *settings) {
-  static const fio_resp3_settings_s defaults = {
-      .set_null = NULL,
-      .set_true = NULL,
-      .set_false = NULL,
-      .get_number = fio___resp3_get_number,
-      .get_float = fio___resp3_get_float,
-      .get_bignum = fio___resp3_get_bignum,
-      .get_string = fio___resp3_get_string,
-      .string_start = fio___resp3_str_start,
-      .string_write = fio___resp3_str,
-      .array_start = fio___resp3_arr_start,
-      .array_push = fio___resp3_arr_push,
-      .map_start = fio___resp3_map_start,
-      .map_push = fio___resp3_map,
-      .done = fio___resp3_done,
-      .error = fio___resp3_done,
-      .push = fio___resp3_done,
-      .free_response = fio___resp3_free,
-  };
-  union {
-    uintptr_t *ptr;
-    fio_resp3_settings_s *s;
-  } src, dest;
-  src.s = (fio_resp3_settings_s *)&defaults;
-  dest.s = settings;
-  for (size_t i = 0; i < sizeof(fio_resp3_settings_s) / sizeof(uintptr_t); ++i)
-    if (!dest.ptr[i])
-      dest.ptr[i] = src.ptr[i];
-}
+/** Internal connection state */
+typedef struct fio_redis_connection_s {
+  fio_io_s *io;
+  fio_resp3_parser_s parser;
+  FIOBJ building;   /* Object being built during parsing */
+  uint16_t buf_pos; /* Position in read buffer */
+  uint8_t is_sub;   /* Is this the subscription connection? */
+} fio_redis_connection_s;
 
-/* *****************************************************************************
-RESP3 Initialization
-***************************************************************************** */
+/**
+ * Redis engine structure.
+ *
+ * Reference counting ownership model:
+ * - fio_redis_new():  ref = 1 (caller owns this reference)
+ * - fio_redis_dup():  ref += 1 (returns engine)
+ * - fio_redis_free(): ref -= 1, if ref==0 calls fio___redis_destroy()
+ *
+ * Internal reference management:
+ * - fio_io_defer(fio___redis_connect, ...): ref += 1 before, ref -= 1 after
+ * - fio_io_defer(fio___redis_perform_callback, ...): ref += 1 before, ref -= 1
+ * after
+ * - on_close callbacks: ref -= 1 (balances the connect ref)
+ *
+ * Pub/Sub integration (NO ref changes):
+ * - fio_pubsub_attach(): does NOT increment ref
+ * - fio_pubsub_detach(): does NOT decrement ref
+ * - on_detached callback: only marks engine as detached, does NOT free
+ */
+typedef struct fio_redis_engine_s {
+  fio_pubsub_engine_s engine;      /* Must be first for casting */
+  fio_redis_connection_s pub_conn; /* Publishing connection */
+  fio_redis_connection_s sub_conn; /* Subscription connection */
+  char *address;
+  char *port;
+  char *auth_cmd; /* Pre-formatted AUTH command */
+  size_t auth_cmd_len;
+  FIOBJ last_channel;      /* Last received channel (dedup) */
+  FIO_LIST_HEAD cmd_queue; /* Command queue - accessed only from IO thread */
+  volatile size_t ref;     /* Reference counter - uses atomic operations */
+  uint8_t ping_interval;
+  volatile uint8_t pub_sent; /* Flag: command sent, awaiting reply */
+  volatile uint8_t running;  /* Flag: engine is active (for reconnection) */
+  volatile uint8_t attached; /* Flag: attached to pub/sub system */
+  uint8_t
+      buf[FIO_REDIS_READ_BUFFER * 2]; /* Read buffers for both connections */
+} fio_redis_engine_s;
 
-/** Returns an initialized parser. */
-FIO_IFUNC fio_resp3_s fio_resp3_init(fio_resp3_settings_s *settings,
-                                     void *udata) {
-  fio_resp3_s r;
-  fio___resp3_validate_settings(settings);
-  r.settings = *settings;
-  r.udata = udata;
-  r.depth = 0;
-  r.stack[0] = (struct fio___resp3_frame_s){0};
-  return r; /* return by value */
-}
-
-/** Initializes the parser. */
-FIO_IFUNC void fio_resp3_init2(fio_resp3_s *dest,
-                               fio_resp3_settings_s *settings,
-                               void *udata) {
-  fio___resp3_validate_settings(settings);
-  dest->settings = *settings;
-  dest->udata = udata;
-  dest->depth = 0;
-  dest->stack[0] = (struct fio___resp3_frame_s){0};
-}
+FIO_LEAK_COUNTER_DEF(fio___redis_engine)
+FIO_LEAK_COUNTER_DEF(fio___redis_cmd)
 
 /* *****************************************************************************
-RESP3 Stack Push/Pop
+RESP3 Callbacks for FIOBJ Building
 ***************************************************************************** */
 
-static void fio___resp3_stack_destroy(fio_resp3_s *p) {
-  while (p->depth) {
-    size_t i = p->depth--;
-    if (p->stack[i].obj)
-      p->settings.free_response(p->stack[i].obj);
-  }
-  if (p->stack[0].obj)
-    p->settings.free_response(p->stack[0].obj);
-  p->stack[0] = (struct fio___resp3_frame_s){0};
+FIO_SFUNC void *fio___redis_on_null(void *udata) {
+  (void)udata;
+  return (void *)fiobj_null();
 }
 
-static int fio___resp3_stack_push(fio_resp3_s *p) {
-  size_t i = ++p->depth;
-  if (i == FIO_RESP3_MAX_NESTING)
-    goto error;
-  p->stack[i] = (struct fio___resp3_frame_s){0};
-  return 0;
-error:
-  --p->depth;
-  fio___resp3_stack_destroy(p);
-  return -1;
+FIO_SFUNC void *fio___redis_on_bool(void *udata, int is_true) {
+  (void)udata;
+  return (void *)(is_true ? fiobj_true() : fiobj_false());
 }
 
-static int fio___resp3_stack_pop_or_push(fio_resp3_s *p) {
-  size_t v = p->depth;
-  size_t k = p->depth - 1;
-  size_t c = c;
-  /* ignore attributes */
-  if (p->stack[v].otype == FIO___RESP3_U8_ATTR) {
-    p->depth = c;
-    return 0;
-  }
-  /* if the container type is a map, we need another object */
-  switch (p->stack[c].otype) {
-  case FIO___RESP3_U8_MAP:
-    if (p->stack[c].size)
-      return fio___resp3_stack_push(p);
-    /* fall through / ignore? */
-  case FIO___RESP3_U8_ATTR: p->depth = c; return 0;
-  case FIO___RESP3_U8_SET: /* push key=true and  */
-    p->settings.map_push(p->stack[c].obj,
-                         p->stack[v].obj,
-                         p->settings.set_true);
-    p->depth = c;
-    if (--p->stack[c].size)
-      return fio___resp3_stack_push(p) - 1;
-    continue;
-
-  case FIO___RESP3_U8_ARRAY: /* fall through */
-  case FIO___RESP3_U8_PUSH:
-    p->settings.array_push(p->stack[c].obj, p->stack[v].obj);
-    p->depth = c;
-    if (--p->stack[c].size)
-      return fio___resp3_stack_push(p);
-    continue;
-
-  default:
-    /* if `c` (container) isn't a container, it may be a key in a map */
-    c -= !!c;
-    switch (p->stack[c].otype) {
-    case FIO___RESP3_U8_ATTR: /* TODO: FIXME: ignore attributes? */
-      if (p->stack[v].obj)
-        p->settings.free_response(p->stack[v].obj);
-      if (p->stack[k].obj)
-        p->settings.free_response(p->stack[k].obj);
-      break;
-      p->depth = c;
-      if (--p->stack[c].size)
-        return fio___resp3_stack_push(p);
-      continue;
-
-    case FIO___RESP3_U8_MAP:
-      /* push both key and value to map */
-      p->settings.map_push(p->stack[c].obj, p->stack[k].obj, p->stack[v].obj);
-      p->depth = c;
-      if (--p->stack[c].size)
-        return fio___resp3_stack_push(p);
-      continue;
-      break;
-    default: goto error;
-    }
-  }
-error:
-  fio___resp3_stack_destroy(p);
-  return -1;
+FIO_SFUNC void *fio___redis_on_number(void *udata, int64_t num) {
+  (void)udata;
+  return (void *)fiobj_num_new((intptr_t)num);
 }
 
-static int fio___resp3_stack_consume(fio_resp3_s *p) {
-  for (;;) {
-    int pnp = fio___resp3_stack_pop_or_push(p);
-    if (!pnp)
-      continue;
-    return pnp - (pnp == 1);
-  }
-  if (p->depth)
-    return 0;
-
-  /* ignore attributes, as they are not replies */
-  if (p->stack[0].otype == FIO___RESP3_U8_ATTR) {
-    p->stack[0] = (struct fio___resp3_frame_s){0};
-    return 0;
-  }
-  /* call the correct callback by offset (done == 0, err == 1, push == 2) */
-  (&(p->settings.done))[(
-      (uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_ERROR) |
-      (uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_ERROR_BLOB) |
-      ((uintptr_t)(p->stack[0].otype == FIO___RESP3_U8_PUSH) << 1))](
-      p->udata,
-      p->stack[0].obj);
-  /* free memory */
-  p->settings.free_response(p->stack[0].obj);
-  p->stack[0] = (struct fio___resp3_frame_s){0};
-  return 0;
+FIO_SFUNC void *fio___redis_on_double(void *udata, double num) {
+  (void)udata;
+  return (void *)fiobj_float_new(num);
 }
 
-static int fio___resp3_stack_pop(fio_resp3_s *p) {
-  p->depth -= !!p->depth;
-  return fio___resp3_stack_consume(p);
-}
-/* *****************************************************************************
-RESP Implementation - inline functions.
-***************************************************************************** */
-
-FIO_SFUNC size_t fio___resp3_parse_line(fio_resp3_s *p,
-                                        uint8_t *buf,
-                                        size_t len) {
-  uint8_t *const start = buf;
-  uint8_t *eol = (uint8_t *)FIO_MEMCHR(buf, '\n', len);
-  if (!eol)
-    return 0;
-  uint8_t *end = eol - (eol[0 - (eol > buf)] == '\r');
-  ++eol;
-  if (end == buf)
-    goto finished;
-  p->stack[p->depth].otype = buf[0];
-  switch (*buf) {
-  /** The general form is `+<string>\r\n` */
-  case FIO___RESP3_U8_SIMPLE: /* ((unsigned char)'+') */
-  /** The general form is `-<string>\r\n` */
-  case FIO___RESP3_U8_ERROR: /* ((unsigned char)'-') */
-  /** Big number `(<big number>\r\n` */
-  case FIO___RESP3_U8_BIGNUM: /* ((unsigned char)'(') */
-    ++buf;
-    p->stack[p->depth].obj = p->settings.get_string((char *)buf, end - buf);
-    goto finished;
-  /** The general form is `:<number>\r\n` */
-  case FIO___RESP3_U8_NUMBER: /* ((unsigned char)':') */
-    ++buf;
-    p->stack[p->depth].obj = p->settings.get_number(fio_atol((char **)&buf));
-    if (buf[buf[0] == '\r'] != '\n')
-      goto error;
-    goto finished;
-  /** Null: `_\r\n` */
-  case FIO___RESP3_U8_NULL: /* ((unsigned char)'_') */
-    p->stack[p->depth].obj = p->settings.set_null;
-    if (buf[buf[0] == '\r'] != '\n')
-      goto error;
-    goto finished;
-
-  /** Double: ,<floating-point-number>\r\n (inf, inf, nan, -nan) */
-  case FIO___RESP3_U8_FLOAT: /* ((unsigned char)',') */
-    ++buf;
-    p->stack[p->depth].obj = p->settings.get_float(fio_atof((char **)&buf));
-    if (buf[buf[0] == '\r'] != '\n')
-      goto error;
-    goto finished;
-  /** Boolean: `#t\r\n` and `#f\r\n` */
-  case FIO___RESP3_U8_BOOL: /* ((unsigned char)'#') */
-    ++buf;
-    switch ((buf[0] | 32)) {
-    case 't': p->stack[p->depth].obj = p->settings.set_true; break;
-    case 'f': p->stack[p->depth].obj = p->settings.set_false; break;
-    default: goto error;
-    }
-    if (buf[buf[0] == '\r'] != '\n')
-      goto error;
-    goto finished;
-
-  /* Blob Types */
-
-  /** The general form is `$<length>\r\n<bytes>\r\n` */
-  case FIO___RESP3_U8_BLOB: /* ((unsigned char)'$') */ /* fall through */
-  /** Blob error: `!<length>\r\n<bytes>\r\n`.*/
-  case FIO___RESP3_U8_ERROR_BLOB: /* ((unsigned char)'!') */ /* fall through */
-  /** Verbatim string: first 3 bytes are the type `XXX:`,i.e., `txt:`  */
-  case FIO___RESP3_U8_VBLOB: /* ((unsigned char)'=') */
-    p->stack[p->depth].obj = p->settings.string_start;
-
-  case FIO___RESP3_U8_ARRAY: /* ((unsigned char)'*') */ break;
-  case FIO___RESP3_U8_PUSH: /*  ((unsigned char)'>') */ break;
-  case FIO___RESP3_U8_MAP: /*   ((unsigned char)'%') */ break;
-  case FIO___RESP3_U8_ATTR: /*  ((unsigned char)'|') */ break;
-  case FIO___RESP3_U8_SET: /*   ((unsigned char)'~') */ break;
-  }
-
-get_length:
-  if (buf[1] == FIO___RESP3_U8_STR_STREAM_LEN) {
-    p->stack[p->depth].streaming = 1;
-  } else {
-    ++buf;
-    uint64_t l = (uint64_t)fio_atol((char **)buf);
-    if ((l >> 32))
-      goto error;
-    p->stack[p->depth].size = (uint32_t)l;
-    if (buf[buf[0] == '\r'] != '\n')
-      goto error;
-  }
-
-finished:
-  if (fio___resp3_stack_consume(p))
-    goto error;
-  return eol - start;
-push_finished:
-  return eol - start;
-error:
-  return eol - start;
+FIO_SFUNC void *fio___redis_on_bignum(void *udata,
+                                      const void *data,
+                                      size_t len) {
+  (void)udata;
+  /* Store big numbers as strings */
+  return (void *)fiobj_str_new_cstr((const char *)data, len);
 }
 
-FIO_SFUNC size_t fio___resp3_parse_router(fio_resp3_s *p,
-                                          uint8_t *buf,
+FIO_SFUNC void *fio___redis_on_string(void *udata,
+                                      const void *data,
+                                      size_t len,
+                                      uint8_t type) {
+  (void)udata;
+  (void)type;
+  return (void *)fiobj_str_new_cstr((const char *)data, len);
+}
+
+/**
+ * Called when a blob string starts.
+ * Pre-allocate FIOBJ string buffer if length is known.
+ */
+FIO_SFUNC void *fio___redis_on_start_string(void *udata,
+                                            size_t len,
+                                            uint8_t type) {
+  (void)udata;
+  (void)type;
+  /* Pre-allocate if length known, otherwise create empty string */
+  if (len != (size_t)-1 && len > 0)
+    return (void *)fiobj_str_new_buf(len);
+  return (void *)fiobj_str_new();
+}
+
+/**
+ * Called with partial string data - append to FIOBJ string.
+ */
+FIO_SFUNC int fio___redis_on_string_write(void *udata,
+                                          void *ctx,
+                                          const void *data,
                                           size_t len) {
-  switch (p->stack[p->depth].otype) {
-  case 0: return fio___resp3_parse_line(p, buf, len);
+  (void)udata;
+  fiobj_str_write((FIOBJ)ctx, (const char *)data, len);
+  return 0;
+}
+
+/**
+ * Called when string is complete - return the FIOBJ string.
+ */
+FIO_SFUNC void *fio___redis_on_string_done(void *udata,
+                                           void *ctx,
+                                           uint8_t type) {
+  (void)udata;
+  (void)type;
+  return ctx; /* Return the completed FIOBJ string */
+}
+
+FIO_SFUNC void *fio___redis_on_error(void *udata,
+                                     const void *data,
+                                     size_t len,
+                                     uint8_t type) {
+  (void)udata;
+  (void)type;
+  /* Store errors as strings - caller can check context */
+  FIOBJ err = fiobj_str_new_cstr((const char *)data, len);
+  FIO_LOG_WARNING("(redis) error response: %.*s", (int)len, (const char *)data);
+  return (void *)err;
+}
+
+FIO_SFUNC void *fio___redis_on_array(void *udata,
+                                     void *parent_ctx,
+                                     int64_t len) {
+  (void)udata;
+  (void)parent_ctx;
+  (void)len;
+  return (void *)fiobj_array_new();
+}
+
+FIO_SFUNC void *fio___redis_on_map(void *udata, void *parent_ctx, int64_t len) {
+  (void)udata;
+  (void)parent_ctx;
+  (void)len;
+  return (void *)fiobj_hash_new();
+}
+
+FIO_SFUNC void *fio___redis_on_push(void *udata,
+                                    void *parent_ctx,
+                                    int64_t len) {
+  /* Push messages are treated as arrays */
+  return fio___redis_on_array(udata, parent_ctx, len);
+}
+
+FIO_SFUNC int fio___redis_array_push(void *udata, void *ctx, void *value) {
+  (void)udata;
+  fiobj_array_push((FIOBJ)ctx, (FIOBJ)value);
+  return 0;
+}
+
+FIO_SFUNC int fio___redis_map_push(void *udata,
+                                   void *ctx,
+                                   void *key,
+                                   void *value) {
+  (void)udata;
+  fiobj_hash_set((FIOBJ)ctx, (FIOBJ)key, (FIOBJ)value, NULL);
+  if (key != value) /* in a set, both key and value are same and owned by set */
+    fiobj_free((FIOBJ)key);
+  return 0;
+}
+
+FIO_SFUNC void fio___redis_free_unused(void *udata, void *obj) {
+  (void)udata;
+  fiobj_free((FIOBJ)obj);
+}
+
+FIO_SFUNC void *fio___redis_on_error_protocol(void *udata) {
+  (void)udata;
+  FIO_LOG_ERROR("(redis) RESP protocol error");
+  return NULL;
+}
+
+/** RESP3 callbacks for building FIOBJ objects */
+static const fio_resp3_callbacks_s FIO___REDIS_RESP3_CALLBACKS = {
+    .on_null = fio___redis_on_null,
+    .on_bool = fio___redis_on_bool,
+    .on_number = fio___redis_on_number,
+    .on_double = fio___redis_on_double,
+    .on_bignum = fio___redis_on_bignum,
+    .on_string = fio___redis_on_string,
+    .on_error = fio___redis_on_error,
+    .on_array = fio___redis_on_array,
+    .on_map = fio___redis_on_map,
+    .on_push = fio___redis_on_push,
+    .array_push = fio___redis_array_push,
+    .push_push = fio___redis_array_push,
+    .map_push = fio___redis_map_push,
+    .free_unused = fio___redis_free_unused,
+    .on_error_protocol = fio___redis_on_error_protocol,
+    /* Streaming string callbacks for efficient large string handling */
+    .on_start_string = fio___redis_on_start_string,
+    .on_string_write = fio___redis_on_string_write,
+    .on_string_done = fio___redis_on_string_done,
+};
+
+/* *****************************************************************************
+RESP Formatting Helpers
+***************************************************************************** */
+
+/** Writes a FIOBJ to RESP format into a string */
+FIO_SFUNC void fio___redis_fiobj2resp(FIOBJ dest, FIOBJ obj) {
+  fio_str_info_s s;
+  switch (FIOBJ_TYPE(obj)) {
+  case FIOBJ_T_NULL: fiobj_str_write(dest, "$-1\r\n", 5); break;
+  case FIOBJ_T_TRUE: fiobj_str_write(dest, "$4\r\ntrue\r\n", 10); break;
+  case FIOBJ_T_FALSE: fiobj_str_write(dest, "$5\r\nfalse\r\n", 11); break;
+  case FIOBJ_T_ARRAY:
+    fiobj_str_write(dest, "*", 1);
+    fiobj_str_write_i(dest, (int64_t)fiobj_array_count(obj));
+    fiobj_str_write(dest, "\r\n", 2);
+    for (size_t i = 0; i < fiobj_array_count(obj); ++i) {
+      fio___redis_fiobj2resp(dest, fiobj_array_get(obj, (int32_t)i));
+    }
+    break;
+  case FIOBJ_T_HASH:
+    fiobj_str_write(dest, "*", 1);
+    fiobj_str_write_i(dest, (int64_t)(fiobj_hash_count(obj) * 2));
+    fiobj_str_write(dest, "\r\n", 2);
+    FIO_MAP_EACH(fiobj_hash, obj, pos) {
+      fio___redis_fiobj2resp(dest, pos.key);
+      fio___redis_fiobj2resp(dest, pos.value);
+    }
+    break;
+  case FIOBJ_T_NUMBER:
+  case FIOBJ_T_FLOAT:
+  case FIOBJ_T_STRING:
+  default:
+    s = fiobj2cstr(obj);
+    fiobj_str_write(dest, "$", 1);
+    fiobj_str_write_i(dest, (int64_t)s.len);
+    fiobj_str_write(dest, "\r\n", 2);
+    fiobj_str_write(dest, s.buf, s.len);
+    fiobj_str_write(dest, "\r\n", 2);
+    break;
   }
 }
 
-/** Parse `data`, returning the abount of bytes consumed. */
-FIO_IFUNC size_t fio_resp3_parse(fio_resp3_s *parser,
-                                 uint8_t *buf,
-                                 size_t len) {
-  size_t r = 0, tmp = 0;
-  if (!buf)
-    return r;
+/* *****************************************************************************
+Reference Counting and Cleanup
 
-  return r;
+Reference counting ownership model:
+- fio_redis_new():  ref = 1 (caller's reference)
+- fio_redis_dup():  ref += 1
+- fio_redis_free(): ref -= 1, if ref==0 calls fio___redis_destroy()
+
+Internal reference management:
+- fio_io_defer(fio___redis_connect, ...): ref += 1 before, ref -= 1 after
+- fio_io_defer(fio___redis_perform_callback, ...): ref += 1 before, ref -= 1
+after
+- on_close callbacks: ref -= 1 (balances the connect ref)
+
+Pub/Sub integration (NO ref changes):
+- fio_pubsub_attach(): does NOT increment ref
+- fio_pubsub_detach(): does NOT decrement ref
+- on_detached callback: only marks engine as detached, does NOT free
+***************************************************************************** */
+
+FIO_SFUNC void fio___redis_connection_reset(fio_redis_connection_s *conn) {
+  conn->buf_pos = 0;
+  /* Clean up any partially parsed streaming string */
+  if (conn->parser.streaming_string && conn->parser.streaming_string_ctx) {
+    fiobj_free((FIOBJ)conn->parser.streaming_string_ctx);
+  }
+  /* Clean up any partially built containers in the parser stack */
+  while (conn->parser.depth > 0) {
+    fio_resp3_frame_s *f = &conn->parser.stack[conn->parser.depth - 1];
+    if (f->key)
+      fiobj_free((FIOBJ)f->key);
+    if (f->ctx)
+      fiobj_free((FIOBJ)f->ctx);
+    --conn->parser.depth;
+  }
+  conn->parser = (fio_resp3_parser_s){0};
+  fiobj_free(conn->building);
+  conn->building = FIOBJ_INVALID;
+  conn->io = NULL;
+}
+
+/**
+ * Internal: Increment reference count.
+ * Called before scheduling deferred tasks.
+ */
+FIO_SFUNC void fio___redis_dup(fio_redis_engine_s *r) {
+  if (r)
+    fio_atomic_add(&r->ref, 1);
+}
+
+/**
+ * Internal: Decrement reference count and destroy if zero.
+ * Called after deferred tasks complete and from fio_redis_free().
+ */
+FIO_SFUNC void fio___redis_free(fio_redis_engine_s *r) {
+  if (!r)
+    return;
+  size_t old_ref = fio_atomic_sub(&r->ref, 1);
+  if (old_ref != 1)
+    return; /* ref was > 1, so after subtraction it's still > 0 */
+  /* ref reached 0 - perform actual cleanup */
+  FIO_LOG_DEBUG("(redis) destroying engine for %s:%s", r->address, r->port);
+
+  /* Free remaining resources */
+  fiobj_free(r->last_channel);
+  while (!FIO_LIST_IS_EMPTY(&r->cmd_queue)) {
+    fio_redis_cmd_s *cmd;
+    FIO_LIST_POP(fio_redis_cmd_s, node, cmd, &r->cmd_queue);
+    FIO_MEM_FREE(cmd, sizeof(*cmd) + cmd->cmd_len);
+    FIO_LEAK_COUNTER_ON_FREE(fio___redis_cmd);
+  }
+  FIO_MEM_FREE(r,
+               sizeof(*r) + strlen(r->address) + 1 + strlen(r->port) + 1 +
+                   r->auth_cmd_len + (FIO_REDIS_READ_BUFFER * 2));
+  FIO_LEAK_COUNTER_ON_FREE(fio___redis_engine);
+}
+
+/**
+ * Internal: Deferred task to close connections and release reference.
+ * Runs on IO thread to ensure thread-safety.
+ */
+FIO_SFUNC void fio___redis_free_task(void *engine_, void *ignr_) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
+  (void)ignr_;
+
+  /* Close connections - this will trigger on_close callbacks which will
+   * release the connection references and eventually free the engine */
+  if (r->pub_conn.io)
+    fio_io_close_now(r->pub_conn.io);
+  if (r->sub_conn.io)
+    fio_io_close_now(r->sub_conn.io);
+
+  /* Release the reference held for this deferred task */
+  fio___redis_free(r);
 }
 
 /* *****************************************************************************
-RESP Single Line Types
+Command Queue Management
+
+NOTE: All command queue operations MUST run on the IO thread to prevent race
+conditions. Use fio___redis_attach_cmd_task() via fio_io_defer() for thread-safe
+command queuing from any thread.
 ***************************************************************************** */
+
+/**
+ * Internal: Send the next command in the queue if ready.
+ * MUST be called from the IO thread only.
+ */
+FIO_SFUNC void fio___redis_send_next_cmd(fio_redis_engine_s *r) {
+  if (!r->pub_sent && !FIO_LIST_IS_EMPTY(&r->cmd_queue) && r->pub_conn.io) {
+    r->pub_sent = 1;
+    fio_redis_cmd_s *cmd =
+        FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, r->cmd_queue.next);
+    fio_io_write(r->pub_conn.io, cmd->cmd, cmd->cmd_len);
+  }
+}
+
+/**
+ * Internal: Deferred task to attach a command to the queue.
+ * Runs on the IO thread to ensure thread-safety.
+ */
+FIO_SFUNC void fio___redis_attach_cmd_task(void *engine_, void *cmd_) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
+  fio_redis_cmd_s *cmd = (fio_redis_cmd_s *)cmd_;
+
+  /* Check if engine is still running */
+  if (!r->running) {
+    /* Engine is shutting down, invoke callback with NULL reply */
+    if (cmd->callback)
+      cmd->callback((fio_pubsub_engine_s *)r, FIOBJ_INVALID, cmd->udata);
+    FIO_MEM_FREE(cmd, sizeof(*cmd) + cmd->cmd_len);
+    FIO_LEAK_COUNTER_ON_FREE(fio___redis_cmd);
+    fio___redis_free(r);
+    return;
+  }
+
+  /* Add command to queue and try to send */
+  FIO_LIST_PUSH(&r->cmd_queue, &cmd->node);
+  fio___redis_send_next_cmd(r);
+  fio___redis_free(r); /* Release the reference held for this deferred task */
+}
+
+/**
+ * Internal: Queue a command for execution.
+ * Thread-safe - defers the actual queue manipulation to the IO thread.
+ */
+FIO_SFUNC void fio___redis_attach_cmd(fio_redis_engine_s *r,
+                                      fio_redis_cmd_s *cmd) {
+  fio___redis_dup(r); /* Hold reference for deferred task */
+  fio_io_defer(fio___redis_attach_cmd_task, r, cmd);
+}
 
 /* *****************************************************************************
-RESP Parsing @ Root
+Callback Task for Command Replies
 ***************************************************************************** */
-static size_t fio___resp3_parse_start(fio_resp3_s *parser,
-                                      uint8_t *buf,
-                                      size_t len);
 
-#if defined(AI_REFERENCE_CODE)
+FIO_SFUNC void fio___redis_perform_callback(void *engine_, void *cmd_) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
+  fio_redis_cmd_s *cmd = (fio_redis_cmd_s *)cmd_;
+  FIOBJ reply = (FIOBJ)cmd->node.next;
+  if (cmd->callback)
+    cmd->callback((fio_pubsub_engine_s *)engine_, reply, cmd->udata);
+  fiobj_free(reply);
+  FIO_MEM_FREE(cmd, sizeof(*cmd) + cmd->cmd_len);
+  FIO_LEAK_COUNTER_ON_FREE(fio___redis_cmd);
+  fio___redis_free(r); /* Release the reference held for this deferred task */
+}
 
-size_t fio_resp3_parse(fio_resp3_s *parser, const char *data) {
-  size_t consumed = 0;
-  size_t len = strlen(data);
+/* *****************************************************************************
+Message Handlers
 
-  while (consumed < len) {
-    char type_specifier = data[consumed++];
+NOTE: These handlers are called from the IO thread via protocol callbacks
+(on_data), so they don't need locks for accessing engine state.
+***************************************************************************** */
 
-    switch (type_specifier) {
-    case '+': { // Simple String
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid simple string");
-        return consumed;
-      }
-      size_t str_len = end - (data + consumed);
-      // Handle simple string
-      // For example, process the data between 'consumed' and 'end'
-      consumed = end - data + 2; // Move past \r\n
-      break;
+/**
+ * Handle reply on publishing connection.
+ * Called from IO thread via on_data callback - no lock needed.
+ */
+FIO_SFUNC void fio___redis_on_pub_message(fio_redis_engine_s *r, FIOBJ msg) {
+  /* Dequeue the command that this reply is for */
+  FIO_LIST_NODE *node = r->cmd_queue.next;
+  if (node != &r->cmd_queue) {
+    FIO_LIST_REMOVE(node);
+  } else {
+    node = NULL;
+  }
+  r->pub_sent = 0;
+  fio___redis_send_next_cmd(r);
+
+  if (!node) {
+    FIO_LOG_WARNING("(redis) received reply with no pending command");
+    return;
+  }
+
+  fio_redis_cmd_s *cmd = FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, node);
+  cmd->node.next = (FIO_LIST_NODE *)fiobj_dup(msg);
+  fio___redis_dup(r); /* Hold reference for deferred callback */
+  fio_io_defer(fio___redis_perform_callback, r, cmd);
+}
+
+/**
+ * Handle message on subscription connection.
+ * Called from IO thread via on_data callback - no lock needed.
+ */
+FIO_SFUNC void fio___redis_on_sub_message(fio_redis_engine_s *r, FIOBJ msg) {
+  if (FIOBJ_TYPE(msg) != FIOBJ_T_ARRAY) {
+    /* Likely a PONG or status response */
+    fio_str_info_s s = fiobj2cstr(msg);
+    if (s.len != 4 || s.buf[0] != 'P') {
+      FIO_LOG_WARNING("(redis) unexpected subscription data: %.*s",
+                      (int)s.len,
+                      s.buf);
     }
-    case '-': { // Error
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid error");
-        return consumed;
-      }
-      size_t str_len = end - (data + consumed);
-      // Handle error
-      // For example, call the appropriate callback
-      consumed = end - data + 2; // Move past \r\n
-      break;
+    return;
+  }
+
+  size_t count = fiobj_array_count(msg);
+  if (count < 3)
+    return;
+
+  fio_str_info_s type = fiobj2cstr(fiobj_array_get(msg, 0));
+
+  if (type.len == 7 && !FIO_MEMCMP(type.buf, "message", 7)) {
+    /* Regular message: ["message", channel, data] */
+    FIOBJ channel = fiobj_array_get(msg, 1);
+    FIOBJ data = fiobj_array_get(msg, 2);
+    fiobj_free(r->last_channel);
+    r->last_channel = fiobj_dup(channel);
+    fio_str_info_s ch = fiobj2cstr(channel);
+    fio_str_info_s m = fiobj2cstr(data);
+    fio_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
+                .message = FIO_BUF_INFO2(m.buf, m.len),
+                .engine = FIO_PUBSUB_LOCAL);
+  } else if (type.len == 8 && !FIO_MEMCMP(type.buf, "pmessage", 8) &&
+             count >= 4) {
+    /* Pattern message: ["pmessage", pattern, channel, data] */
+    FIOBJ channel = fiobj_array_get(msg, 2);
+    FIOBJ data = fiobj_array_get(msg, 3);
+    /* Deduplicate if same channel as last message */
+    if (!fiobj_is_eq(r->last_channel, channel)) {
+      fio_str_info_s ch = fiobj2cstr(channel);
+      fio_str_info_s m = fiobj2cstr(data);
+      fio_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
+                  .message = FIO_BUF_INFO2(m.buf, m.len),
+                  .engine = FIO_PUBSUB_LOCAL);
     }
-    case ':': { // Integer
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid integer");
-        return consumed;
-      }
-      // Convert the string to an integer
-      char num_buf[end - (data + consumed) + 1];
-      memcpy(num_buf, data + consumed, end - (data + consumed));
-      num_buf[end - (data + consumed)] = '\0';
-      long number = strtol(num_buf, NULL, 10);
-      // Handle integer
-      consumed = end - data + 2; // Move past \r\n
-      break;
+  }
+  /* Ignore subscribe/unsubscribe confirmations */
+}
+
+/* *****************************************************************************
+Protocol Callbacks
+***************************************************************************** */
+
+FIO_SFUNC void fio___redis_on_attach(fio_io_s *io);
+FIO_SFUNC void fio___redis_on_data(fio_io_s *io);
+FIO_SFUNC void fio___redis_on_close_pub(void *buffer, void *udata);
+FIO_SFUNC void fio___redis_on_close_sub(void *buffer, void *udata);
+FIO_SFUNC void fio___redis_on_timeout(fio_io_s *io);
+FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_);
+
+/** Protocol for publishing connection */
+static fio_io_protocol_s FIO___REDIS_PUB_PROTOCOL = {
+    .on_attach = fio___redis_on_attach,
+    .on_data = fio___redis_on_data,
+    .on_close = fio___redis_on_close_pub,
+    .on_timeout = fio___redis_on_timeout,
+    .timeout = 300000, /* 5 minutes default */
+};
+
+/** Protocol for subscription connection */
+static fio_io_protocol_s FIO___REDIS_SUB_PROTOCOL = {
+    .on_attach = fio___redis_on_attach,
+    .on_data = fio___redis_on_data,
+    .on_close = fio___redis_on_close_sub,
+    .on_timeout = fio___redis_on_timeout,
+    .timeout = 300000,
+};
+
+/**
+ * Called when connection is attached to the protocol (connection ready).
+ * Runs on IO thread - no lock needed.
+ */
+FIO_SFUNC void fio___redis_on_attach(fio_io_s *io) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)fio_io_udata(io);
+  if (!r)
+    return;
+
+  /* Determine which connection this is based on protocol */
+  fio_io_protocol_s *pr = fio_io_protocol(io);
+  int is_sub = (pr == &FIO___REDIS_SUB_PROTOCOL);
+  fio_redis_connection_s *conn = is_sub ? &r->sub_conn : &r->pub_conn;
+
+  /* Store the IO handle now that connection is ready */
+  conn->io = io;
+  conn->is_sub = (uint8_t)is_sub;
+
+  /* Send AUTH if configured */
+  if (r->auth_cmd_len) {
+    fio_io_write(io, r->auth_cmd, r->auth_cmd_len);
+  }
+
+  if (is_sub) {
+    FIO_LOG_DEBUG("(redis) subscription connection established to %s:%s",
+                  r->address,
+                  r->port);
+    /* If attached to pub/sub, re-attach to trigger resubscription */
+    if (r->attached)
+      fio_pubsub_attach(&r->engine);
+  } else {
+    FIO_LOG_DEBUG("(redis) publishing connection established to %s:%s",
+                  r->address,
+                  r->port);
+    /* Send any queued commands - no lock needed, we're on IO thread */
+    r->pub_sent = 0;
+    fio___redis_send_next_cmd(r);
+
+    /* Start subscription connection only if attached to pub/sub */
+    if (r->attached && !r->sub_conn.io) {
+      fio___redis_dup(r); /* Increment ref for deferred task */
+      fio_io_defer(fio___redis_connect, r, &r->sub_conn);
     }
-    case '$': { // Bulk String
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid bulk string length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long str_len = strtol(len_buf, NULL, 10);
-      if (str_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "Bulk string length overflow");
-        return consumed;
-      }
-      if (str_len == -1) {
-        // Null bulk string
-        consumed = end - data + 2; // Move past \r\n
+  }
+}
+
+FIO_SFUNC void fio___redis_on_data(fio_io_s *io) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)fio_io_udata(io);
+  if (!r)
+    return;
+
+  fio_redis_connection_s *conn;
+  uint8_t *buf;
+  int is_sub;
+
+  if (io == r->sub_conn.io) {
+    conn = &r->sub_conn;
+    buf = r->buf + FIO_REDIS_READ_BUFFER;
+    is_sub = 1;
+  } else {
+    conn = &r->pub_conn;
+    buf = r->buf;
+    is_sub = 0;
+  }
+
+  /* Read data */
+  size_t available = FIO_REDIS_READ_BUFFER - conn->buf_pos;
+  size_t len = fio_io_read(io, buf + conn->buf_pos, available);
+  if (!len)
+    return;
+
+  conn->buf_pos += (uint16_t)len;
+
+  /* Parse RESP data - loop to process all complete messages in buffer */
+  for (;;) {
+    fio_resp3_result_s result = fio_resp3_parse(&conn->parser,
+                                                &FIO___REDIS_RESP3_CALLBACKS,
+                                                buf,
+                                                conn->buf_pos);
+
+    if (result.err) {
+      FIO_LOG_ERROR("(redis) parser error - closing connection");
+      fio_io_close_now(io);
+      return;
+    }
+
+    /* Move unconsumed data to start of buffer */
+    if (result.consumed && result.consumed < conn->buf_pos) {
+      size_t remaining = conn->buf_pos - result.consumed;
+      FIO_MEMMOVE(buf, buf + result.consumed, remaining);
+      conn->buf_pos = (uint16_t)remaining;
+    } else if (result.consumed) {
+      conn->buf_pos = 0;
+    }
+
+    if (result.obj) {
+      FIOBJ msg = (FIOBJ)result.obj;
+      if (is_sub) {
+        fio___redis_on_sub_message(r, msg);
       } else {
-        if (consumed + str_len + 2 > len) {
-          fio___resp3_handle_error(parser, "Bulk string too long");
-          return consumed;
-        }
-        // Handle bulk string
-        const char *bulk_str = data + end - (data + consumed) + 3;
-        // For example, process the data between 'bulk_str' and 'bulk_str +
-        // str_len'
-        consumed = end - data + 3 + str_len + 2; // Move past \r\n
+        fio___redis_on_pub_message(r, msg);
       }
-      break;
+      fiobj_free(msg);
+      /* Reset parser for next message and continue processing */
+      conn->parser = (fio_resp3_parser_s){0};
+      continue;
     }
-    case '*': { // Array
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid array length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long array_len = strtol(len_buf, NULL, 10);
-      if (array_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "Array length overflow");
-        return consumed;
-      }
-      if (array_len == -1) {
-        // Null array
-        consumed = end - data + 2; // Move past \r\n
-      } else {
-        if (parser->depth >= FIO_RESP3_MAX_NESTING) {
-          fio___resp3_handle_error(parser, "Array nesting too deep");
-          return consumed;
-        }
-        parser->stack[parser->depth++] =
-            (fio___resp3_frame_s){.otype = '*',
-                                  .size = array_len,
-                                  .streaming = 0,
-                                  .finished = 0};
-        consumed = end - data + 2; // Move past \r\n
-      }
-      break;
+
+    /* No complete message available, exit loop */
+    break;
+  }
+}
+
+/** Internal helper for connection close handling */
+FIO_SFUNC void fio___redis_on_close_internal(fio_redis_engine_s *r,
+                                             fio_redis_connection_s *conn,
+                                             int is_sub) {
+  fio___redis_connection_reset(conn);
+
+  if (r->running && fio_io_is_running()) {
+    FIO_LOG_WARNING("(redis) %s connection lost, reconnecting...",
+                    is_sub ? "subscription" : "publishing");
+    /* Increment ref for deferred reconnect task */
+    fio___redis_dup(r);
+    fio_io_defer(fio___redis_connect, r, conn);
+  }
+  /* Release the reference held by this connection */
+  fio___redis_free(r);
+}
+
+FIO_SFUNC void fio___redis_on_close_pub(void *buffer, void *udata) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)udata;
+  (void)buffer;
+  if (!r)
+    return;
+  fio___redis_on_close_internal(r, &r->pub_conn, 0);
+}
+
+FIO_SFUNC void fio___redis_on_close_sub(void *buffer, void *udata) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)udata;
+  (void)buffer;
+  if (!r)
+    return;
+  fio___redis_on_close_internal(r, &r->sub_conn, 1);
+}
+
+/**
+ * Handle connection timeout.
+ * Runs on IO thread - no lock needed for cmd_queue access.
+ */
+FIO_SFUNC void fio___redis_on_timeout(fio_io_s *io) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)fio_io_udata(io);
+  if (!r)
+    return;
+
+  if (io == r->sub_conn.io) {
+    /* Subscription connection - just send PING */
+    fio_io_write(io, "*1\r\n$4\r\nPING\r\n", 14);
+  } else {
+    /* Publishing connection - check for stuck commands */
+    if (!FIO_LIST_IS_EMPTY(&r->cmd_queue)) {
+      FIO_LOG_WARNING("(redis) server unresponsive, disconnecting");
+      fio_io_close_now(io);
+      return;
     }
-    case '%': { // Map
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid map length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long map_len = strtol(len_buf, NULL, 10);
-      if (map_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "Map length overflow");
-        return consumed;
-      }
-      if (map_len == -1) {
-        // Null map
-        consumed = end - data + 2; // Move past \r\n
-      } else {
-        if (parser->depth >= FIO_RESP3_MAX_NESTING) {
-          fio___resp3_handle_error(parser, "Map nesting too deep");
-          return consumed;
-        }
-        parser->stack[parser->depth++] = (fio___resp3_frame_s){.otype = '%',
-                                                               .size = map_len,
-                                                               .streaming = 0,
-                                                               .finished = 0};
-        consumed = end - data + 2; // Move past \r\n
-      }
-      break;
+    /* Queue a PING command */
+    fio_redis_cmd_s *cmd =
+        (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*cmd) + 15, 0);
+    if (cmd) {
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+      *cmd = (fio_redis_cmd_s){.cmd_len = 14};
+      FIO_MEMCPY(cmd->cmd, "*1\r\n$4\r\nPING\r\n", 15);
+      fio___redis_attach_cmd(r, cmd);
     }
-    case '~': { // Set
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid set length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long set_len = strtol(len_buf, NULL, 10);
-      if (set_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "Set length overflow");
-        return consumed;
-      }
-      if (set_len == -1) {
-        // Null set
-        consumed = end - data + 2; // Move past \r\n
-      } else {
-        if (parser->depth >= FIO_RESP3_MAX_NESTING) {
-          fio___resp3_handle_error(parser, "Set nesting too deep");
-          return consumed;
-        }
-        parser->stack[parser->depth++] = (fio___resp3_frame_s){.otype = '~',
-                                                               .size = set_len,
-                                                               .streaming = 0,
-                                                               .finished = 0};
-        consumed = end - data + 2; // Move past \r\n
-      }
-      break;
-    }
-    case '>': { // Push
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid push length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long push_len = strtol(len_buf, NULL, 10);
-      if (push_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "Push length overflow");
-        return consumed;
-      }
-      if (push_len == -1) {
-        // Null push
-        consumed = end - data + 2; // Move past \r\n
-      } else {
-        if (parser->depth >= FIO_RESP3_MAX_NESTING) {
-          fio___resp3_handle_error(parser, "Push nesting too deep");
-          return consumed;
-        }
-        parser->stack[parser->depth++] = (fio___resp3_frame_s){.otype = '>',
-                                                               .size = push_len,
-                                                               .streaming = 0,
-                                                               .finished = 0};
-        consumed = end - data + 2; // Move past \r\n
-      }
-      break;
-    }
-    case '#': { // Boolean/Null
-      if (consumed >= len) {
-        fio___resp3_handle_error(parser, "Invalid boolean/null");
-        return consumed;
-      }
-      if (data[consumed] == 't' && data[consumed + 1] == '\r' &&
-          data[consumed + 2] == '\n') {
-        // True
-        consumed += 3; // Move past 't\r\n'
-      } else if (data[consumed] == 'f' && data[consumed + 1] == '\r' &&
-                 data[consumed + 2] == '\n') {
-        // False
-        consumed += 3; // Move past 'f\r\n'
-      } else if (data[consumed] == '_' && data[consumed + 1] == '\r' &&
-                 data[consumed + 2] == '\n') {
-        // Null
-        consumed += 3; // Move past '_\r\n'
-      } else {
-        fio___resp3_handle_error(parser, "Invalid boolean/null");
-        return consumed;
-      }
-      break;
-    }
-    case '_': { // BLOB Error
-      const char *end = memchr(data + consumed, '\r', len - consumed);
-      if (!end || end[1] != '\n') {
-        fio___resp3_handle_error(parser, "Invalid BLOB error length");
-        return consumed;
-      }
-      char len_buf[end - (data + consumed) + 1];
-      memcpy(len_buf, data + consumed, end - (data + consumed));
-      len_buf[end - (data + consumed)] = '\0';
-      long blob_len = strtol(len_buf, NULL, 10);
-      if (blob_len == -1 && errno == ERANGE) {
-        fio___resp3_handle_error(parser, "BLOB error length overflow");
-        return consumed;
-      }
-      if (blob_len == -1) {
-        // Null BLOB error
-        consumed = end - data + 2; // Move past \r\n
-      } else {
-        if (consumed + blob_len + 2 > len) {
-          fio___resp3_handle_error(parser, "BLOB error too long");
-          return consumed;
-        }
-        // Handle BLOB error
-        const char *blob_err = data + end - (data + consumed) + 3;
-        // For example, process the data between 'blob_err' and 'blob_err +
-        // blob_len'
-        consumed = end - data + 3 + blob_len + 2; // Move past \r\n
-      }
-      break;
-    }
-    default:
-      fio___resp3_handle_error(parser, "Unknown type specifier");
-      return consumed;
+  }
+}
+
+/* *****************************************************************************
+Connection Management
+***************************************************************************** */
+
+FIO_SFUNC void fio___redis_on_connect(fio_io_s *io);
+FIO_SFUNC void fio___redis_on_connect_failed(fio_io_s *io);
+
+/** Timer callback wrapper for fio___redis_connect (returns int as required) */
+FIO_SFUNC int fio___redis_connect_timer(void *engine_, void *conn_);
+
+FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
+  fio_redis_connection_s *conn = (fio_redis_connection_s *)conn_;
+
+  if (!r->running || conn->io) {
+    fio___redis_free(r);
+    return;
+  }
+
+  int is_sub = (conn == &r->sub_conn);
+  conn->is_sub = is_sub;
+  fio_io_protocol_s *protocol =
+      is_sub ? &FIO___REDIS_SUB_PROTOCOL : &FIO___REDIS_PUB_PROTOCOL;
+
+  /* Build URL */
+  char url[512];
+  size_t url_len = 0;
+  url_len += (size_t)snprintf(url + url_len,
+                              sizeof(url) - url_len,
+                              "tcp://%s:%s",
+                              r->address,
+                              r->port);
+
+  FIO_LOG_DEBUG("(redis) connecting to %s:%s (%s)",
+                r->address,
+                r->port,
+                is_sub ? "subscription" : "publishing");
+
+  /* Start async connection - on_attach will be called when ready */
+  conn->io =
+      fio_io_connect(url, .protocol = protocol, .udata = r, .timeout = 30000);
+  if (!conn->io) {
+    FIO_LOG_ERROR("(redis) failed to initiate connection to %s:%s",
+                  r->address,
+                  r->port);
+    /* Retry after delay using proper timer callback signature */
+    fio_io_run_every(.fn = fio___redis_connect_timer,
+                     .udata1 = r,
+                     .udata2 = conn,
+                     .every = 1000,
+                     .repetitions = 1);
+    return;
+  }
+  /* Connection initiated - the ref added before connect is now held by the
+   * connection. It will be released in on_close when the connection closes. */
+}
+
+/** Timer callback wrapper - calls fio___redis_connect and returns 0 to stop */
+FIO_SFUNC int fio___redis_connect_timer(void *engine_, void *conn_) {
+  fio___redis_connect(engine_, conn_);
+  return 0; /* Don't repeat - fio___redis_connect handles its own retry */
+}
+
+/* *****************************************************************************
+Pub/Sub Engine Callbacks
+
+NOTE: All pub/sub engine callbacks are called from the IO thread by the pub/sub
+system, so they don't need locks for accessing engine state.
+***************************************************************************** */
+
+/**
+ * Called when engine is detached from pub/sub.
+ * Runs on IO thread - no lock needed.
+ *
+ * IMPORTANT: This callback does NOT free memory. It only marks the engine
+ * as detached. Memory is freed by fio_redis_free() when ref reaches 0.
+ */
+FIO_SFUNC void fio___redis_detached(const fio_pubsub_engine_s *eng) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  FIO_LOG_DEBUG("(redis) engine detached from pub/sub");
+  r->attached = 0;
+  /* Close subscription connection since we're no longer attached */
+  if (r->sub_conn.io) {
+    fio_io_close_now(r->sub_conn.io);
+  }
+  /* Do NOT free here - memory is managed by reference counting */
+}
+
+/**
+ * Subscribe to a channel.
+ * Runs on IO thread - no lock needed.
+ */
+FIO_SFUNC void fio___redis_subscribe(const fio_pubsub_engine_s *eng,
+                                     fio_buf_info_s channel,
+                                     int16_t filter) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  (void)filter;
+
+  /* Mark as attached and start subscription connection if needed */
+  if (!r->attached) {
+    r->attached = 1;
+    if (r->running && !r->sub_conn.io) {
+      fio___redis_dup(r);
+      fio_io_defer(fio___redis_connect, r, &r->sub_conn);
     }
   }
 
-  return consumed;
+  if (!r->sub_conn.io)
+    return;
+
+  /* Build SUBSCRIBE command */
+  FIOBJ cmd = fiobj_str_new_buf(32 + channel.len);
+  fiobj_str_write(cmd, "*2\r\n$9\r\nSUBSCRIBE\r\n$", 20);
+  fiobj_str_write_i(cmd, (int64_t)channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+  fiobj_str_write(cmd, channel.buf, channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+
+  fio_str_info_s s = fiobj2cstr(cmd);
+  fio_io_write(r->sub_conn.io, s.buf, s.len);
+  fiobj_free(cmd);
 }
-#endif
+
+/**
+ * Subscribe to a pattern.
+ * Runs on IO thread - no lock needed.
+ */
+FIO_SFUNC void fio___redis_psubscribe(const fio_pubsub_engine_s *eng,
+                                      fio_buf_info_s channel,
+                                      int16_t filter) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  (void)filter;
+
+  /* Mark as attached and start subscription connection if needed */
+  if (!r->attached) {
+    r->attached = 1;
+    if (r->running && !r->sub_conn.io) {
+      fio___redis_dup(r);
+      fio_io_defer(fio___redis_connect, r, &r->sub_conn);
+    }
+  }
+
+  if (!r->sub_conn.io)
+    return;
+
+  /* Build PSUBSCRIBE command */
+  FIOBJ cmd = fiobj_str_new_buf(32 + channel.len);
+  fiobj_str_write(cmd, "*2\r\n$10\r\nPSUBSCRIBE\r\n$", 22);
+  fiobj_str_write_i(cmd, (int64_t)channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+  fiobj_str_write(cmd, channel.buf, channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+
+  fio_str_info_s s = fiobj2cstr(cmd);
+  fio_io_write(r->sub_conn.io, s.buf, s.len);
+  fiobj_free(cmd);
+}
+
+/**
+ * Unsubscribe from a channel.
+ * Runs on IO thread - no lock needed.
+ */
+FIO_SFUNC void fio___redis_unsubscribe(const fio_pubsub_engine_s *eng,
+                                       fio_buf_info_s channel,
+                                       int16_t filter) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  (void)filter;
+
+  /* Skip if not attached or no connection */
+  if (!r->attached || !r->sub_conn.io)
+    return;
+
+  /* Build UNSUBSCRIBE command */
+  FIOBJ cmd = fiobj_str_new_buf(32 + channel.len);
+  fiobj_str_write(cmd, "*2\r\n$11\r\nUNSUBSCRIBE\r\n$", 23);
+  fiobj_str_write_i(cmd, (int64_t)channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+  fiobj_str_write(cmd, channel.buf, channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+
+  fio_str_info_s s = fiobj2cstr(cmd);
+  fio_io_write(r->sub_conn.io, s.buf, s.len);
+  fiobj_free(cmd);
+}
+
+/**
+ * Unsubscribe from a pattern.
+ * Runs on IO thread - no lock needed.
+ */
+FIO_SFUNC void fio___redis_punsubscribe(const fio_pubsub_engine_s *eng,
+                                        fio_buf_info_s channel,
+                                        int16_t filter) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  (void)filter;
+
+  /* Skip if not attached or no connection */
+  if (!r->attached || !r->sub_conn.io)
+    return;
+
+  /* Build PUNSUBSCRIBE command */
+  FIOBJ cmd = fiobj_str_new_buf(32 + channel.len);
+  fiobj_str_write(cmd, "*2\r\n$12\r\nPUNSUBSCRIBE\r\n$", 24);
+  fiobj_str_write_i(cmd, (int64_t)channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+  fiobj_str_write(cmd, channel.buf, channel.len);
+  fiobj_str_write(cmd, "\r\n", 2);
+
+  fio_str_info_s s = fiobj2cstr(cmd);
+  fio_io_write(r->sub_conn.io, s.buf, s.len);
+  fiobj_free(cmd);
+}
+
+/**
+ * Publish a message to Redis.
+ * Runs on IO thread - command queuing is thread-safe via
+ * fio___redis_attach_cmd.
+ */
+FIO_SFUNC void fio___redis_publish(const fio_pubsub_engine_s *eng,
+                                   fio_msg_s *msg) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+
+  /* Build PUBLISH command */
+  size_t cmd_size =
+      sizeof(fio_redis_cmd_s) + 64 + msg->channel.len + msg->message.len;
+  fio_redis_cmd_s *cmd =
+      (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, cmd_size, 0);
+  if (!cmd)
+    return;
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+
+  *cmd = (fio_redis_cmd_s){0};
+
+  char *buf = (char *)cmd->cmd;
+  size_t pos = 0;
+
+  /* *3\r\n$7\r\nPUBLISH\r\n$<channel_len>\r\n<channel>\r\n$<msg_len>\r\n<msg>\r\n
+   */
+  FIO_MEMCPY(buf + pos, "*3\r\n$7\r\nPUBLISH\r\n$", 18);
+  pos += 18;
+  pos += (size_t)fio_ltoa(buf + pos, (int64_t)msg->channel.len, 10);
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  FIO_MEMCPY(buf + pos, msg->channel.buf, msg->channel.len);
+  pos += msg->channel.len;
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  buf[pos++] = '$';
+  pos += (size_t)fio_ltoa(buf + pos, (int64_t)msg->message.len, 10);
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  FIO_MEMCPY(buf + pos, msg->message.buf, msg->message.len);
+  pos += msg->message.len;
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  buf[pos] = 0;
+
+  cmd->cmd_len = pos;
+  fio___redis_attach_cmd(r, cmd);
+}
+
 /* *****************************************************************************
-RESP Cleanup
+Public API
+***************************************************************************** */
+
+void fio_redis_new____(void); /* IDE marker */
+/**
+ * Creates a Redis pub/sub engine with reference count = 1.
+ *
+ * The caller owns the returned reference and must call fio_redis_free()
+ * when done. Attaching to pub/sub does NOT transfer ownership.
+ */
+SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
+  /* Validate and set defaults */
+  if (!args.address || !args.address[0])
+    args.address = "localhost";
+  if (!args.port || !args.port[0])
+    args.port = "6379";
+  if (!args.ping_interval)
+    args.ping_interval = 30;
+
+  size_t addr_len = strlen(args.address);
+  size_t port_len = strlen(args.port);
+  size_t auth_len = args.auth_len;
+  if (args.auth && !auth_len)
+    auth_len = strlen(args.auth);
+
+  /* Calculate AUTH command size if needed */
+  size_t auth_cmd_len = 0;
+  if (auth_len) {
+    /* *2\r\n$4\r\nAUTH\r\n$<len>\r\n<password>\r\n */
+    auth_cmd_len = 18 + 20 + auth_len; /* generous estimate */
+  }
+
+  /* Allocate engine */
+  size_t alloc_size = sizeof(fio_redis_engine_s) + addr_len + 1 + port_len + 1 +
+                      auth_cmd_len + (FIO_REDIS_READ_BUFFER * 2);
+  fio_redis_engine_s *r =
+      (fio_redis_engine_s *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
+  if (!r) {
+    FIO_LOG_ERROR("(redis) failed to allocate engine");
+    return NULL;
+  }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_engine);
+
+  /* Initialize with ref = 1 (caller's reference) */
+  *r = (fio_redis_engine_s){
+      .engine =
+          {
+              .detached = fio___redis_detached,
+              .subscribe = fio___redis_subscribe,
+              .psubscribe = fio___redis_psubscribe,
+              .unsubscribe = fio___redis_unsubscribe,
+              .punsubscribe = fio___redis_punsubscribe,
+              .publish = fio___redis_publish,
+          },
+      .cmd_queue = FIO_LIST_INIT(r->cmd_queue),
+      .ref = 1, /* Caller's reference */
+      .ping_interval = args.ping_interval,
+      .running = 1,
+  };
+
+  /* Set up string pointers after the struct */
+  char *str_ptr = (char *)(r + 1) + (FIO_REDIS_READ_BUFFER * 2);
+  r->address = str_ptr;
+  FIO_MEMCPY(r->address, args.address, addr_len + 1);
+  str_ptr += addr_len + 1;
+
+  r->port = str_ptr;
+  FIO_MEMCPY(r->port, args.port, port_len + 1);
+  str_ptr += port_len + 1;
+
+  /* Build AUTH command if needed */
+  if (auth_len) {
+    r->auth_cmd = str_ptr;
+    size_t pos = 0;
+    FIO_MEMCPY(r->auth_cmd + pos, "*2\r\n$4\r\nAUTH\r\n$", 15);
+    pos += 15;
+    pos += (size_t)fio_ltoa(r->auth_cmd + pos, (int64_t)auth_len, 10);
+    r->auth_cmd[pos++] = '\r';
+    r->auth_cmd[pos++] = '\n';
+    FIO_MEMCPY(r->auth_cmd + pos, args.auth, auth_len);
+    pos += auth_len;
+    r->auth_cmd[pos++] = '\r';
+    r->auth_cmd[pos++] = '\n';
+    r->auth_cmd[pos] = 0;
+    r->auth_cmd_len = pos;
+  }
+
+  /* Set timeout based on ping interval */
+  uint32_t timeout_ms = (uint32_t)args.ping_interval * 1000;
+  if (timeout_ms > FIO_IO_TIMEOUT_MAX)
+    timeout_ms = FIO_IO_TIMEOUT_MAX;
+  FIO___REDIS_PUB_PROTOCOL.timeout = timeout_ms;
+  FIO___REDIS_SUB_PROTOCOL.timeout = timeout_ms;
+
+  /* Start connection - increment ref for deferred task */
+  fio___redis_dup(r);
+  fio_io_defer(fio___redis_connect, r, &r->pub_conn);
+
+  FIO_LOG_DEBUG("(redis) engine created for %s:%s (ref=1)",
+                r->address,
+                r->port);
+  return &r->engine;
+}
+
+/**
+ * Increments the reference count and returns the engine.
+ */
+SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine) {
+  if (!engine)
+    return NULL;
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine;
+  fio___redis_dup(r);
+  return engine;
+}
+
+/**
+ * Decrements the reference count. When count reaches 0, destroys the engine.
+ * Thread-safe - defers connection closure to the IO thread.
+ */
+SFUNC void fio_redis_free(fio_pubsub_engine_s *engine) {
+  if (!engine)
+    return;
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine;
+
+  /* Mark as not running to prevent reconnection attempts.
+   * This is safe to do from any thread as it's a simple flag. */
+  r->running = 0;
+
+  /* Defer connection closure to IO thread for thread-safety */
+  fio___redis_dup(r); /* Hold reference for deferred task */
+  fio_io_defer(fio___redis_free_task, r, NULL);
+
+  /* Release caller's reference */
+  fio___redis_free(r);
+}
+
+/**
+ * Sends a Redis command.
+ * Thread-safe - command queuing is deferred to the IO thread.
+ */
+SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
+                         FIOBJ command,
+                         void (*callback)(fio_pubsub_engine_s *e,
+                                          FIOBJ reply,
+                                          void *udata),
+                         void *udata) {
+  if (!engine || FIOBJ_TYPE(command) != FIOBJ_T_ARRAY)
+    return -1;
+
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine;
+
+  /* Convert command to RESP format */
+  FIOBJ resp = fiobj_str_new_buf(256);
+  fio___redis_fiobj2resp(resp, command);
+  fio_str_info_s s = fiobj2cstr(resp);
+
+  /* Allocate command node */
+  fio_redis_cmd_s *cmd =
+      (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*cmd) + s.len + 1, 0);
+  if (!cmd) {
+    fiobj_free(resp);
+    return -1;
+  }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+
+  *cmd = (fio_redis_cmd_s){
+      .callback = callback,
+      .udata = udata,
+      .cmd_len = s.len,
+  };
+  FIO_MEMCPY(cmd->cmd, s.buf, s.len + 1);
+  fiobj_free(resp);
+
+  /* Queue command - thread-safe via fio_io_defer */
+  fio___redis_attach_cmd(r, cmd);
+  return 0;
+}
+
+/* *****************************************************************************
+Redis Module Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_RESP3
-#endif /* FIO_RESP */
+#undef FIO_REDIS
+#endif /* FIO_REDIS && !H___FIO_REDIS___H */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -55105,6 +57261,9 @@ Recursive inclusion / cleanup
 #ifdef FIO_TIME
 #include "004 time.h"
 #endif
+#ifdef FIO_RESP3
+#include "004 resp3.h"
+#endif
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
@@ -55193,6 +57352,10 @@ Recursive inclusion / cleanup
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
+#endif
+
+#if defined(FIO_REDIS) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "422 redis.h"
 #endif
 
 #ifdef FIO_HTTP1_PARSER

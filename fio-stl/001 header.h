@@ -174,7 +174,7 @@ Leak Counter Helpers
 #undef FIO_LEAK_COUNTER_ON_FREE
 #undef FIO_LEAK_COUNTER_COUNT
 
-#if (FIO_LEAK_COUNTER + 1) == 1
+#if ((FIO_LEAK_COUNTER + 1) == 1)
 /* No leak counting defined */
 #define FIO_LEAK_COUNTER_DEF(name)
 #define FIO_LEAK_COUNTER_ON_ALLOC(name) ((void)0)
