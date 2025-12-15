@@ -110,6 +110,9 @@
 #ifdef FIO_SHA2
 #include "152 sha2.h"
 #endif
+#ifdef FIO_HKDF
+#include "152 hkdf.h"
+#endif
 #ifdef FIO_BLAKE2
 #include "152 blake2.h"
 #endif

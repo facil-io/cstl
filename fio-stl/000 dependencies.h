@@ -144,6 +144,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
+#define FIO_HKDF
 #define FIO_OTP
 #define FIO_SECRET
 #define FIO_SHA1

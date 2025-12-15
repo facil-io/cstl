@@ -7,6 +7,7 @@ mode. Run with: make tests/performance-memalt
 
 #include "test-helpers.h"
 
+#undef FIO_MEMALT
 #define FIO_MEMALT
 #include FIO_INCLUDE_FILE
 

@@ -6,6 +6,8 @@ Test - Threads Module
 #define FIO_THREADS
 #include "../fio-stl/include.h"
 
+/* Priority is controlled by the OS and changes aren't always accepted */
+#define FIO___TEST_PRIORITY 1
 /* *****************************************************************************
 Test Helpers and Shared State
 ***************************************************************************** */
@@ -378,6 +380,7 @@ Thread Priority (if supported)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_thread_priority(void) {
+#if (FIO___TEST_PRIORITY - 1 + 1)
   fprintf(stderr, "\t* Testing thread priority.\n");
 
   /* Get current priority */
@@ -404,7 +407,9 @@ FIO_SFUNC void fio___test_thread_priority(void) {
   fio_thread_priority_e new_priority = fio_thread_priority();
   FIO_ASSERT(new_priority == FIO_THREAD_PRIORITY_NORMAL ||
                  new_priority == FIO_THREAD_PRIORITY_ERROR,
-             "Priority should be NORMAL after setting");
+             "Priority should be NORMAL after setting, but is %d",
+             (int)new_priority);
+#endif
 }
 
 /* *****************************************************************************

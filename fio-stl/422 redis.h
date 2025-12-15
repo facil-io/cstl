@@ -942,9 +942,6 @@ FIO_SFUNC void fio___redis_on_timeout(fio_io_s *io) {
 Connection Management
 ***************************************************************************** */
 
-FIO_SFUNC void fio___redis_on_connect(fio_io_s *io);
-FIO_SFUNC void fio___redis_on_connect_failed(fio_io_s *io);
-
 /** Timer callback wrapper for fio___redis_connect (returns int as required) */
 FIO_SFUNC int fio___redis_connect_timer(void *engine_, void *conn_);
 

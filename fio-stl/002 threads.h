@@ -283,7 +283,7 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
   int max = sched_get_priority_max(policy);
   size_t steps = (size_t)(max - min) / 5;
   size_t priority_value = (schd.sched_priority - min);
-  if(steps) priority_value /= steps;
+  if(steps) priority_value /= steps; else priority_value = 5;
   switch(priority_value) {
   case 0: return FIO_THREAD_PRIORITY_LOWEST;
   case 1: return FIO_THREAD_PRIORITY_LOW;  
