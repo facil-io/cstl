@@ -6,7 +6,7 @@ Test fast path performance
 
 #define BENCH_ITERATIONS 100000
 
-static void benchmark_256bit() {
+static void benchmark_256bit(void) {
   uint64_t a[4], b[4], result[8];
 
   // Initialize with random data
@@ -31,7 +31,7 @@ static void benchmark_256bit() {
                (int)us);
 }
 
-static void benchmark_512bit() {
+static void benchmark_512bit(void) {
   uint64_t a[8], b[8], result[16];
 
   for (int i = 0; i < 8; i++) {
@@ -54,7 +54,7 @@ static void benchmark_512bit() {
                (int)us);
 }
 
-static void benchmark_1024bit() {
+static void benchmark_1024bit(void) {
   uint64_t a[16], b[16], result[32];
 
   for (int i = 0; i < 16; i++) {

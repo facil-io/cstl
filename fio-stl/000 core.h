@@ -3635,11 +3635,11 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
 #endif
 
   /* Initialize all buffers to zero */
-  FIO_MEMSET(z0, 0, len * sizeof(uint64_t));
-  FIO_MEMSET(z2, 0, len * sizeof(uint64_t));
-  FIO_MEMSET(z1, 0, (len + 2) * sizeof(uint64_t));
-  FIO_MEMSET(sum_a, 0, (half + 1) * sizeof(uint64_t));
-  FIO_MEMSET(sum_b, 0, (half + 1) * sizeof(uint64_t));
+  for (size_t i = 0; i < len; ++i)
+    z1[i] = z2[i] = z0[i] = 0;
+  z1[len] = z1[len + 1] = 0;
+  for (size_t i = 0; i < (half + 1); ++i)
+    sum_a[i] = sum_b[i] = 0;
 
   /* z0 = a_lo * b_lo - non-recursive */
   fio___math_mul_norecurse(z0, a_lo, b_lo, half);
@@ -3648,11 +3648,11 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
   fio___math_mul_norecurse(z2, a_hi, b_hi, half);
 
   /* sum_a = a_lo + a_hi (with potential carry into extra word) */
-  FIO_MEMCPY(sum_a, a_lo, half * sizeof(uint64_t));
+  FIO_FOR_UNROLL(half, sizeof(uint64_t), i, sum_a[i] = a_lo[i]);
   sum_a[half] = (uint64_t)fio_math_add(sum_a, sum_a, a_hi, half);
 
   /* sum_b = b_lo + b_hi (with potential carry into extra word) */
-  FIO_MEMCPY(sum_b, b_lo, half * sizeof(uint64_t));
+  FIO_FOR_UNROLL(half, sizeof(uint64_t), i, sum_b[i] = b_lo[i]);
   sum_b[half] = (uint64_t)fio_math_add(sum_b, sum_b, b_hi, half);
 
   /* z1 = sum_a * sum_b - non-recursive
@@ -3684,10 +3684,10 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
    *   [0..len-1]     : low part (z0 contributes here, z1*B overlaps)
    *   [len..2*len-1] : high part (z2 contributes here, z1*B overlaps)
    */
-  FIO_MEMSET(dest, 0, 2 * len * sizeof(uint64_t));
-
-  /* Add z0 at position 0 */
-  FIO_MEMCPY(dest, z0, len * sizeof(uint64_t));
+  FIO_FOR_UNROLL(len,
+                 sizeof(uint64_t),
+                 i,
+                 ((dest[i] = z0[i]), (dest[len + i] = 0)));
 
   /* Add z1 at position half (z1 * B) */
   {
