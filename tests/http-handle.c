@@ -2,7 +2,6 @@
 Test
 ***************************************************************************** */
 #include "test-helpers.h"
-#define FIO_THREADS
 #define FIO_HTTP_HANDLE
 #include FIO_INCLUDE_FILE
 

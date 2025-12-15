@@ -923,7 +923,7 @@ FIO_IFUNC uint8_t fio_atomic_bit_get(void *map, size_t bit) {
 
 /** Sets the a bit in a bitmap (sets to 1). */
 FIO_IFUNC void fio_atomic_bit_set(void *map, size_t bit) {
-  fio_atomic_or((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
+  fio_atomic_or((uint8_t *)(map) + ((bit) >> 3), (uint8_t)(1UL << ((bit)&7)));
 }
 
 /** Unsets the a bit in a bitmap (sets to 0). */
@@ -934,7 +934,7 @@ FIO_IFUNC void fio_atomic_bit_unset(void *map, size_t bit) {
 
 /** Flips the a bit in a bitmap (sets to 0 if 1, sets to 1 if 0). */
 FIO_IFUNC void fio_atomic_bit_flip(void *map, size_t bit) {
-  fio_atomic_xor((uint8_t *)(map) + ((bit) >> 3), (1UL << ((bit)&7)));
+  fio_atomic_xor((uint8_t *)(map) + ((bit) >> 3), (uint8_t)(1UL << ((bit)&7)));
 }
 
 /* *****************************************************************************
@@ -1408,11 +1408,13 @@ FIO_IFUNC void *fio___memcpy_unsafe_63x(void *restrict d_,
 #undef FIO___MEMCPY_XX_GROUP
   if ((l & 4)) {
     fio_memcpy4(d, s);
-    (d += 4), (s += 4);
+    d += 4;
+    s += 4;
   }
   if ((l & 2)) {
     fio_memcpy2(d, s);
-    (d += 2), (s += 2);
+    d += 2;
+    s += 2;
   }
   if ((l & 1))
     *d++ = *s;
@@ -3881,7 +3883,7 @@ Vector Helpers - memory load operations (implementation starts here)
   }                                                                            \
   FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
       fio_u##total_bits a) {                                                   \
-    fio_u##total_bits r;                                                       \
+    fio_u##total_bits r = {{0}};                                               \
     for (size_t i = 0; i < (total_bits / bits); ++i)                           \
       r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
     return r;                                                                  \

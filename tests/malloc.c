@@ -54,8 +54,8 @@ Testing implementation
 
 #if TEST_WITH_REALLOC2
 FIO_SFUNC void *sys_realloc2(void *ptr, size_t new_size, size_t copy_len) {
-  return realloc(ptr, new_size);
   (void)copy_len;
+  return realloc(ptr, new_size);
 }
 typedef void *(*realloc_func_p)(void *, size_t, size_t);
 #define REALLOC_FUNC(func, ptr, new_size, copy_len)                            \
@@ -255,7 +255,7 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
   return clock_alloc + clock_realloc + clock_free + clock_calloc + clock_free2;
 }
 
-void *test_system_malloc(void *ignr) {
+static void *test_system_malloc(void *ignr) {
   (void)ignr;
 #if TEST_WITH_REALLOC2
   uintptr_t result = test_mem_functions(malloc, calloc, sys_realloc2, free);
@@ -264,7 +264,7 @@ void *test_system_malloc(void *ignr) {
 #endif
   return (void *)result;
 }
-void *test_facil_malloc(void *ignr) {
+static void *test_facil_malloc(void *ignr) {
   (void)ignr;
 #if TEST_WITH_REALLOC2
   uintptr_t result =

@@ -91,6 +91,11 @@ FIO_SFUNC void test_json_value_free(test_json_value_s *v) {
       FIO_MEM_FREE(v->data.map.values,
                    v->data.map.capa * sizeof(test_json_value_s *));
     break;
+  case TEST_JSON_NULL:   /* fall through */
+  case TEST_JSON_TRUE:   /* fall through */
+  case TEST_JSON_FALSE:  /* fall through */
+  case TEST_JSON_NUMBER: /* fall through */
+  case TEST_JSON_FLOAT:  /* fall through */
   default: break;
   }
   FIO_MEM_FREE(v, sizeof(*v));
@@ -161,9 +166,9 @@ FIO_SFUNC void *test_json_on_map(void *ctx, void *at) {
       0);
   FIO_ASSERT_ALLOC(v->data.map.keys);
   FIO_ASSERT_ALLOC(v->data.map.values);
-  return v;
   (void)ctx;
   (void)at;
+  return v;
 }
 
 FIO_SFUNC void *test_json_on_array(void *ctx, void *at) {
@@ -175,9 +180,9 @@ FIO_SFUNC void *test_json_on_array(void *ctx, void *at) {
       v->data.arr.capa * sizeof(test_json_value_s *),
       0);
   FIO_ASSERT_ALLOC(v->data.arr.items);
-  return v;
   (void)ctx;
   (void)at;
+  return v;
 }
 
 FIO_SFUNC int test_json_map_push(void *ctx, void *key, void *value) {
