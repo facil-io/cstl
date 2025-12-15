@@ -129,7 +129,7 @@ Hardware Intrinsics Detection
 /* *****************************************************************************
 x86 AES-NI Implementation
 ***************************************************************************** */
-#if FIO___HAS_X86_AES_INTRIN
+#if defined(FIO___HAS_X86_AES_INTRIN) && FIO___HAS_X86_AES_INTRIN
 
 /* AES-128 key expansion using AES-NI */
 FIO_IFUNC __m128i fio___aesni_key_expand_128(__m128i key, __m128i keygen) {

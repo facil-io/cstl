@@ -63,7 +63,7 @@ Implementation - possibly externed functions.
 
 FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
                                    uint32_t *w /* 16 words */) {
-#if FIO___HAS_X86_SHA_INTRIN
+#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-x86.c
    * Credit to Jeffrey Walton.

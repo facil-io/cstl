@@ -237,7 +237,7 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
     const size_t to_read = /* use read sizes of up to 27 bits */
         (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
     ssize_t act;
-#if (_POSIX_C_SOURCE + 1) > 200809L
+#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
     if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
       r += act;
       len -= act;

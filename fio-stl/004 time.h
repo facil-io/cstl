@@ -197,7 +197,7 @@ Time Implementation
 SFUNC struct tm fio_time2gm(time_t timer) {
   struct tm tm;
   ssize_t a, b;
-#if HAVE_TM_TM_ZONE || defined(BSD)
+#if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
   tm = (struct tm){
       .tm_isdst = 0,
       .tm_zone = (char *)"UTC",
@@ -311,7 +311,7 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   if (tm.tm_isdst > 0) {
     time -= 60 * 60;
   }
-#if HAVE_TM_TM_ZONE || defined(BSD)
+#if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
   if (tm.tm_gmtoff) {
     time += tm.tm_gmtoff;
   }

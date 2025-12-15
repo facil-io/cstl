@@ -16,10 +16,10 @@ Common cleanup
 #ifndef FIO___RECURSIVE_INCLUDE
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
-#if (FIO_EXTERN + 1) < 3
+#if !defined(FIO_EXTERN) || (FIO_EXTERN + 1) < 3
 #undef FIO_EXTERN
 #endif
-#if (FIO_EXTERN_COMPLETE + 1) < 3
+#if !defined(FIO_EXTERN_COMPLETE) || (FIO_EXTERN_COMPLETE + 1) < 3
 #undef FIO_EXTERN_COMPLETE
 #endif
 

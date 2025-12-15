@@ -72,7 +72,7 @@ FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
 
 /** The logging level */
 #ifndef FIO_LOG_LEVEL_DEFAULT
-#if DEBUG
+#if defined(DEBUG) && DEBUG
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_DEBUG
 #else
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_INFO

@@ -743,7 +743,7 @@ SFUNC FIO___ASAN_AVOID uint64_t fio_atol_bin(char **pstr) {
   uint64_t r = 0;
   *pstr += (**pstr == '0');
   *pstr += (**pstr | 32) == 'b' && (((size_t)(pstr[0][1]) - (size_t)'0') < 2);
-#if FIO___ASAN_DETECTED || 1
+#if (defined(FIO___ASAN_DETECTED) && FIO___ASAN_DETECTED) || 1
   for (;;) { /* Prevent safe overflow of allocated memory region */
     if ((r & UINT64_C(0x8000000000000000)))
       break;

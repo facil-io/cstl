@@ -201,7 +201,7 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 #define FIO_ALIGN(bytes)
 #endif
 
-#if _MSC_VER
+#if defined(_MSC_VER) && _MSC_VER
 
 #undef _CRT_SECURE_NO_WARNINGS
 /** We define this because Microsoft's naming scheme isn't portable */
@@ -279,8 +279,10 @@ Aligned Memory Access Selectors
 
 #ifndef FIO_UNALIGNED_MEMORY_ACCESS_ENABLED
 #if FIO_UNALIGNED_ACCESS &&                                                    \
-    (__amd64 || __amd64__ || __x86_64 || __x86_64__ || __i386 ||               \
-     __aarch64__ || _M_IX86 || _M_X64 || _M_ARM64 || __ARM_FEATURE_UNALIGNED)
+    (defined(__amd64) || defined(__amd64__) || defined(__x86_64) ||            \
+     defined(__x86_64__) || defined(__i386) || defined(__aarch64__) ||         \
+     defined(_M_IX86) || defined(_M_X64) || defined(_M_ARM64) ||               \
+     defined(__ARM_FEATURE_UNALIGNED))
 /** True when unaligned memory is allowed. */
 #define FIO_UNALIGNED_MEMORY_ACCESS_ENABLED 1
 #else
@@ -502,7 +504,7 @@ Function Attributes
 Constructors and Destructors
 ***************************************************************************** */
 
-#if _MSC_VER
+#if defined(_MSC_VER) && _MSC_VER
 
 #define FIO___COUNTER_RUNNER()                                                 \
   __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ + __COUNTER__ +        \
@@ -1430,10 +1432,10 @@ FIO_IFUNC void *fio___memcpy_unsafe_63x(void *restrict d_,
   const char *restrict s = (const char *restrict)s_;
 #define FIO___MEMCPY_XX_GROUP(bytes)                                           \
   do {                                                                         \
-    fio_memcpy##bytes((void *)d, (void *)s);                                   \
+    fio_memcpy##bytes((void *)d, (const void *)s);                             \
     d += l & (bytes - 1);                                                      \
     s += l & (bytes - 1);                                                      \
-    fio_memcpy##bytes((void *)d, (void *)s);                                   \
+    fio_memcpy##bytes((void *)d, (const void *)s);                             \
     return (void *)(d += bytes);                                               \
   } while (0)
   if (l > 31)
@@ -1467,7 +1469,7 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
     return fio___memcpy_unsafe_63x(d_, s_, l);
 #define FIO___MEMCPY_UNSAFE_STEP(bytes)                                        \
   do {                                                                         \
-    fio_memcpy##bytes((void *)d, (void *)s);                                   \
+    fio_memcpy##bytes((void *)d, (const void *)s);                             \
     (l -= bytes), (d += bytes), (s += bytes);                                  \
   } while (0)
 
@@ -1487,7 +1489,7 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
   s -= 64;
   d += l & 63U;
   s += l & 63U;
-  fio_memcpy64((void *)d, (void *)s);
+  fio_memcpy64((void *)d, (const void *)s);
   return (void *)(d += 64);
 }
 
@@ -1744,9 +1746,9 @@ FIO___MEMBUF_FN(8, 64, 64, fio_lton64, _be)
 
 /** Converts an unaligned byte stream to a 24 bit number. */
 FIO_IFUNC uint32_t fio_buf2u24_le(const void *c) {
-  uint32_t tmp = ((uint32_t)((uint8_t *)c)[0]) |
-                 ((uint32_t)((uint8_t *)c)[1] << 8) |
-                 ((uint32_t)((uint8_t *)c)[2] << 16);
+  uint32_t tmp = ((uint32_t)((const uint8_t *)c)[0]) |
+                 ((uint32_t)((const uint8_t *)c)[1] << 8) |
+                 ((uint32_t)((const uint8_t *)c)[2] << 16);
   return tmp;
 } /** Writes a 24 bit number to an unaligned buffer. */
 FIO_IFUNC void fio_u2buf24_le(void *buf, uint32_t i) {
@@ -1756,9 +1758,9 @@ FIO_IFUNC void fio_u2buf24_le(void *buf, uint32_t i) {
 }
 /** Converts an unaligned byte stream to a 24 bit number. */
 FIO_IFUNC uint32_t fio_buf2u24_be(const void *c) {
-  uint32_t tmp = ((uint32_t)((uint8_t *)c)[0] << 16) |
-                 ((uint32_t)((uint8_t *)c)[1] << 8) |
-                 ((uint32_t)((uint8_t *)c)[2]);
+  uint32_t tmp = ((uint32_t)((const uint8_t *)c)[0] << 16) |
+                 ((uint32_t)((const uint8_t *)c)[1] << 8) |
+                 ((uint32_t)((const uint8_t *)c)[2]);
   return tmp;
 }
 /** Writes a 24 bit number to an unaligned buffer. */
@@ -2275,8 +2277,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   return !flag;
 }
 
-/** A timing attack resistant memory comparison function. */
-FIO_IFUNC void fio_secure_zero(const void *a_, size_t bytes) {
+/** A timing attack resistant memory zeroing function. */
+FIO_IFUNC void fio_secure_zero(void *a_, size_t bytes) {
   volatile uint8_t *buf = (volatile uint8_t *)(a_);
   FIO_FOR_UNROLL(bytes, 1, i, buf[i] = 0);
 }
@@ -2341,7 +2343,7 @@ FIO_IFUNC FIO_CONST uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
 #else
 /** 8Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
-  return ((i >> (bits & 7UL)) | (i << ((-(bits)) & 7UL)));
+  return (uint8_t)((i >> (bits & 7U)) | (i << ((-(bits)) & 7U)));
 }
 #endif
 
@@ -2633,7 +2635,7 @@ FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
 /** Returns the index of the least significant (lowest) bit. */
 FIO_SFUNC FIO_CONST size_t fio_lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return __builtin_ctzll(i);
+  return (size_t)__builtin_ctzll(i);
 #else
   return fio___single_bit_index_unsafe(i & ((~i) + 1));
 #endif /* __builtin vs. map */
@@ -2642,7 +2644,7 @@ FIO_SFUNC FIO_CONST size_t fio_lsb_index_unsafe(uint64_t i) {
 /** Returns the index of the most significant (highest) bit. */
 FIO_SFUNC FIO_CONST size_t fio_msb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_clzll)
-  return 63 - __builtin_clzll(i);
+  return (size_t)(63 - __builtin_clzll(i));
 #else
   i |= i >> 1;
   i |= i >> 2;
@@ -4127,25 +4129,25 @@ The compiler auto-vectorizes these operations when possible.
 #define FIO___UXXX_SIMD_BINOP_DEF(bits)                                        \
   /** XOR two values, returning result by value. */                            \
   FIO_MIFN fio_u##bits fio_u##bits##_xorv(fio_u##bits a, fio_u##bits b) {      \
-    fio_u##bits r;                                                             \
+    fio_u##bits r = {0};                                                       \
     FIO_MATH_UXXX_OP(r, a, b, 64, ^);                                          \
     return r;                                                                  \
   }                                                                            \
   /** AND two values, returning result by value. */                            \
   FIO_MIFN fio_u##bits fio_u##bits##_andv(fio_u##bits a, fio_u##bits b) {      \
-    fio_u##bits r;                                                             \
+    fio_u##bits r = {0};                                                       \
     FIO_MATH_UXXX_OP(r, a, b, 64, &);                                          \
     return r;                                                                  \
   }                                                                            \
   /** OR two values, returning result by value. */                             \
   FIO_MIFN fio_u##bits fio_u##bits##_orv(fio_u##bits a, fio_u##bits b) {       \
-    fio_u##bits r;                                                             \
+    fio_u##bits r = {0};                                                       \
     FIO_MATH_UXXX_OP(r, a, b, 64, |);                                          \
     return r;                                                                  \
   }                                                                            \
   /** ADD two values as 64-bit lanes, returning result by value. */            \
   FIO_MIFN fio_u##bits fio_u##bits##_addv64(fio_u##bits a, fio_u##bits b) {    \
-    fio_u##bits r;                                                             \
+    fio_u##bits r = {0};                                                       \
     FIO_MATH_UXXX_OP(r, a, b, 64, +);                                          \
     return r;                                                                  \
   }
@@ -4560,7 +4562,7 @@ FIO_IFUNC FIO_CONST unsigned fio_utf8_char_len_unsafe(uint8_t c) {
 /** Returns the number of valid UTF-8 bytes used by first char at `str`. */
 FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
   unsigned r, tst;
-  const uint8_t *s = (uint8_t *)str_;
+  const uint8_t *s = (const uint8_t *)str_;
   r = fio_utf8_char_len_unsafe(*s) & 7;
 #if FIO_UTF8_ALLOW_IF
   if (r < 2)
@@ -4584,23 +4586,23 @@ FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
 
 /** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
 FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
-  const uint8_t len = fio_utf8_code_len(u);
+  const uint8_t len = (uint8_t)fio_utf8_code_len(u);
   uint8_t *dest = (uint8_t *)dest_;
 #if FIO_UTF8_ALLOW_IF
   if (len < 2) { /* writes, but doesn't report on len == 0 */
-    *dest = u;
+    *dest = (uint8_t)u;
     return len;
   }
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
+  const uint8_t offset = (uint8_t)(0xF0U << (4U - len));
+  const uint8_t head = (uint8_t)(0x80U << (len < 2));
   const uint8_t mask = 63U;
-  *(dest) = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  *(dest) = (uint8_t)(offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1))));
   (dest) += 1;
-  *(dest) = head | (((u) >> 12) & mask);
+  *(dest) = (uint8_t)(head | (((u) >> 12) & mask));
   (dest) += (len > 3);
-  *(dest) = head | (((u) >> 6) & mask);
+  *(dest) = (uint8_t)(head | (((u) >> 6) & mask));
   (dest) += (len > 2);
-  *(dest) = head | ((u)&mask);
+  *(dest) = (uint8_t)(head | ((u)&mask));
   return len;
 #else
   const uint8_t offset = 0xF0U << (4U - len);
@@ -4659,7 +4661,8 @@ FIO_IFUNC uint32_t fio_utf8_read(char **str) {
 
 /** Decodes the first UTF-8 char at `str` and returns its code point value. */
 FIO_IFUNC uint32_t fio_utf8_peek(const char *str) {
-  return fio_utf8_read((char **)&str);
+  char *tmp = (char *)(uintptr_t)str;
+  return fio_utf8_read(&tmp);
 }
 
 /* *****************************************************************************
@@ -5470,7 +5473,7 @@ FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
 
 /** The logging level */
 #ifndef FIO_LOG_LEVEL_DEFAULT
-#if DEBUG
+#if defined(DEBUG) && DEBUG
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_DEBUG
 #else
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_INFO
@@ -7229,7 +7232,7 @@ SFUNC FIO___ASAN_AVOID uint64_t fio_atol_bin(char **pstr) {
   uint64_t r = 0;
   *pstr += (**pstr == '0');
   *pstr += (**pstr | 32) == 'b' && (((size_t)(pstr[0][1]) - (size_t)'0') < 2);
-#if FIO___ASAN_DETECTED || 1
+#if (defined(FIO___ASAN_DETECTED) && FIO___ASAN_DETECTED) || 1
   for (;;) { /* Prevent safe overflow of allocated memory region */
     if ((r & UINT64_C(0x8000000000000000)))
       break;
@@ -10254,24 +10257,24 @@ Multi-Threaded `memcpy` (naive and slow)
 #define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
 #endif
 typedef struct {
-  const char *restrict dest;
-  void *restrict src;
+  char *restrict dest;
+  const char *restrict src;
   size_t bytes;
 } fio___thread_memcpy_s;
 
 FIO_SFUNC void *fio___thread_memcpy_task(void *v_) {
   fio___thread_memcpy_s *v = (fio___thread_memcpy_s *)v_;
-  FIO_MEMCPY((void *)(v->dest), (void *)(v->src), v->bytes);
+  FIO_MEMCPY(v->dest, (const void *)(v->src), v->bytes);
   return NULL;
 }
 
 /** Multi-threaded memcpy using up to FIO_MEMCPY_THREADS threads */
-FIO_SFUNC size_t fio_thread_memcpy(const void *restrict dest,
-                                   void *restrict src,
+FIO_SFUNC size_t fio_thread_memcpy(void *restrict dest,
+                                   const void *restrict src,
                                    size_t bytes) {
   size_t i = 0, r;
-  const char *restrict d = (const char *restrict)dest;
-  char *restrict s = (char *restrict)src;
+  char *restrict d = (char *restrict)dest;
+  const char *restrict s = (const char *restrict)src;
   fio_thread_t threads[FIO_MEMCPY_THREADS - 1];
   fio___thread_memcpy_s info[FIO_MEMCPY_THREADS - 1];
   size_t bytes_per_thread = bytes / FIO_MEMCPY_THREADS;
@@ -10288,7 +10291,7 @@ FIO_SFUNC size_t fio_thread_memcpy(const void *restrict dest,
   }
 finished_creating_thread:
   r = i + 1;
-  FIO_MEMCPY((void *)d, (void *)s, bytes); /* memcpy reminder */
+  FIO_MEMCPY(d, (const void *)s, bytes); /* memcpy reminder */
   while (i) {
     --i;
     fio_thread_join(threads + i);
@@ -11113,7 +11116,7 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
     const size_t to_read = /* use read sizes of up to 27 bits */
         (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
     ssize_t act;
-#if (_POSIX_C_SOURCE + 1) > 200809L
+#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
     if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
       r += act;
       len -= act;
@@ -15735,7 +15738,7 @@ Time Implementation
 SFUNC struct tm fio_time2gm(time_t timer) {
   struct tm tm;
   ssize_t a, b;
-#if HAVE_TM_TM_ZONE || defined(BSD)
+#if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
   tm = (struct tm){
       .tm_isdst = 0,
       .tm_zone = (char *)"UTC",
@@ -15849,7 +15852,7 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   if (tm.tm_isdst > 0) {
     time -= 60 * 60;
   }
-#if HAVE_TM_TM_ZONE || defined(BSD)
+#if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
   if (tm.tm_gmtoff) {
     time += tm.tm_gmtoff;
   }
@@ -17549,7 +17552,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
 /* Make sure the system's allocator is marked as unsafe. */
-#if FIO_MALLOC_TMP_USE_SYSTEM
+#if defined(FIO_MALLOC_TMP_USE_SYSTEM) && FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #endif
@@ -19075,7 +19078,7 @@ void fio___mem_block_new___(void);
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
   void *p = NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c = NULL;
-  size_t b;
+  size_t b = 0;
 
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 
@@ -28008,7 +28011,7 @@ Implementation - possibly externed functions.
 
 FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
                                    uint32_t *w /* 16 words */) {
-#if FIO___HAS_X86_SHA_INTRIN
+#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha1-x86.c
    * Credit to Jeffrey Walton.
@@ -28616,7 +28619,7 @@ Implementation - SHA-256
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
-#if FIO___HAS_X86_SHA_INTRIN
+#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c
    * Credit to Jeffrey Walton.
@@ -30013,7 +30016,7 @@ Hardware Intrinsics Detection
 /* *****************************************************************************
 x86 AES-NI Implementation
 ***************************************************************************** */
-#if FIO___HAS_X86_AES_INTRIN
+#if defined(FIO___HAS_X86_AES_INTRIN) && FIO___HAS_X86_AES_INTRIN
 
 /* AES-128 key expansion using AES-NI */
 FIO_IFUNC __m128i fio___aesni_key_expand_128(__m128i key, __m128i keygen) {
@@ -46255,7 +46258,7 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
 
 static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
-#if DEBUG
+#if defined(DEBUG) && DEBUG
   errno = 0;
 #endif
   fio_io_s *io = (fio_io_s *)io_;
@@ -46329,7 +46332,7 @@ finish:
   return;
 
 connection_error:
-#if DEBUG
+#if defined(DEBUG) && DEBUG
   if (fio_stream_any(&io->out))
     FIO_LOG_DERROR(
         "(%d) IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",
@@ -60552,7 +60555,8 @@ FIO_SFUNC void fio_websocket_on_protocol_ping(void *udata, fio_buf_info_s msg) {
 
 /** Called when a `pong` message was received. */
 FIO_SFUNC void fio_websocket_on_protocol_pong(void *udata, fio_buf_info_s msg) {
-#if (DEBUG - 1 + 1) || (FIO_WEBSOCKET_STATS - 1 + 1)
+#if (defined(DEBUG) && DEBUG) ||                                               \
+    (defined(FIO_WEBSOCKET_STATS) && FIO_WEBSOCKET_STATS)
   {
     char *pos = msg.buf;
     static uint64_t longest = 0;
@@ -61365,10 +61369,10 @@ Common cleanup
 #ifndef FIO___RECURSIVE_INCLUDE
 
 /* undefine FIO_EXTERN only if its value indicates it is temporary. */
-#if (FIO_EXTERN + 1) < 3
+#if !defined(FIO_EXTERN) || (FIO_EXTERN + 1) < 3
 #undef FIO_EXTERN
 #endif
-#if (FIO_EXTERN_COMPLETE + 1) < 3
+#if !defined(FIO_EXTERN_COMPLETE) || (FIO_EXTERN_COMPLETE + 1) < 3
 #undef FIO_EXTERN_COMPLETE
 #endif
 

@@ -890,7 +890,7 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
 
 static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
-#if DEBUG
+#if defined(DEBUG) && DEBUG
   errno = 0;
 #endif
   fio_io_s *io = (fio_io_s *)io_;
@@ -964,7 +964,7 @@ finish:
   return;
 
 connection_error:
-#if DEBUG
+#if defined(DEBUG) && DEBUG
   if (fio_stream_any(&io->out))
     FIO_LOG_DERROR(
         "(%d) IO write failed (%d), disconnecting: %p (fd %d)\n\tError: %s",

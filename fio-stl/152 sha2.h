@@ -110,7 +110,7 @@ Implementation - SHA-256
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
-#if FIO___HAS_X86_SHA_INTRIN
+#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c
    * Credit to Jeffrey Walton.

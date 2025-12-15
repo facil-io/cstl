@@ -121,7 +121,7 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 ***************************************************************************** */
 
 /* Make sure the system's allocator is marked as unsafe. */
-#if FIO_MALLOC_TMP_USE_SYSTEM
+#if defined(FIO_MALLOC_TMP_USE_SYSTEM) && FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #endif
@@ -1647,7 +1647,7 @@ void fio___mem_block_new___(void);
 FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_block_new)(void) {
   void *p = NULL;
   FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c = NULL;
-  size_t b;
+  size_t b = 0;
 
   FIO_MEMORY_LOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->lock);
 

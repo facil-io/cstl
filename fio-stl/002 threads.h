@@ -757,24 +757,24 @@ Multi-Threaded `memcpy` (naive and slow)
 #define FIO_MEMCPY_THREADS___MINCPY (1ULL << 23)
 #endif
 typedef struct {
-  const char *restrict dest;
-  void *restrict src;
+  char *restrict dest;
+  const char *restrict src;
   size_t bytes;
 } fio___thread_memcpy_s;
 
 FIO_SFUNC void *fio___thread_memcpy_task(void *v_) {
   fio___thread_memcpy_s *v = (fio___thread_memcpy_s *)v_;
-  FIO_MEMCPY((void *)(v->dest), (void *)(v->src), v->bytes);
+  FIO_MEMCPY(v->dest, (const void *)(v->src), v->bytes);
   return NULL;
 }
 
 /** Multi-threaded memcpy using up to FIO_MEMCPY_THREADS threads */
-FIO_SFUNC size_t fio_thread_memcpy(const void *restrict dest,
-                                   void *restrict src,
+FIO_SFUNC size_t fio_thread_memcpy(void *restrict dest,
+                                   const void *restrict src,
                                    size_t bytes) {
   size_t i = 0, r;
-  const char *restrict d = (const char *restrict)dest;
-  char *restrict s = (char *restrict)src;
+  char *restrict d = (char *restrict)dest;
+  const char *restrict s = (const char *restrict)src;
   fio_thread_t threads[FIO_MEMCPY_THREADS - 1];
   fio___thread_memcpy_s info[FIO_MEMCPY_THREADS - 1];
   size_t bytes_per_thread = bytes / FIO_MEMCPY_THREADS;
@@ -791,7 +791,7 @@ FIO_SFUNC size_t fio_thread_memcpy(const void *restrict dest,
   }
 finished_creating_thread:
   r = i + 1;
-  FIO_MEMCPY((void *)d, (void *)s, bytes); /* memcpy reminder */
+  FIO_MEMCPY(d, (const void *)s, bytes); /* memcpy reminder */
   while (i) {
     --i;
     fio_thread_join(threads + i);

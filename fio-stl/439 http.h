@@ -2191,7 +2191,8 @@ FIO_SFUNC void fio_websocket_on_protocol_ping(void *udata, fio_buf_info_s msg) {
 
 /** Called when a `pong` message was received. */
 FIO_SFUNC void fio_websocket_on_protocol_pong(void *udata, fio_buf_info_s msg) {
-#if (DEBUG - 1 + 1) || (FIO_WEBSOCKET_STATS - 1 + 1)
+#if (defined(DEBUG) && DEBUG) ||                                               \
+    (defined(FIO_WEBSOCKET_STATS) && FIO_WEBSOCKET_STATS)
   {
     char *pos = msg.buf;
     static uint64_t longest = 0;
