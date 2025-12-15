@@ -617,8 +617,10 @@ SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h) {
 Implementation - SHA-512
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
-  static const uint64_t sha512_consts[80] = {
+FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
+                                  const uint8_t *restrict block) {
+  /* SHA-512 round constants */
+  static const uint64_t K[80] = {
       0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
       0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
       0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
@@ -647,51 +649,163 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
       0x431D67C49C100D4CULL, 0x4CC5D4BECB3E42B6ULL, 0x597F299CFC657E2AULL,
       0x5FCB6FAB3AD6FAECULL, 0x6C44198C4A475817ULL};
 
-  /* copy original state */
-  uint64_t v[8] FIO_ALIGN(16);
-  for (size_t i = 0; i < 8; ++i)
-    v[i] = h->u64[i];
+  /* Load state into registers */
+  uint64_t a = h->u64[0], b = h->u64[1], c = h->u64[2], d = h->u64[3];
+  uint64_t e = h->u64[4], f = h->u64[5], g = h->u64[6], hv = h->u64[7];
 
-  /* read data as an array of 16 big endian 64 bit integers. */
-  uint64_t w[16] FIO_ALIGN(16);
-  fio_memcpy128(w, block);
-  for (size_t i = 0; i < 16; ++i)
-    w[i] = fio_lton64(w[i]); /* no-op on big endian systems */
+  /* Message schedule array */
+  uint64_t w[16];
 
-    /* SHA-512 round - processes one word */
-#define FIO___SHA512_ROUND(i, k)                                               \
+  /* Load and byte-swap message block - unrolled for better performance */
+  w[0] = fio_buf2u64_be(block);
+  w[1] = fio_buf2u64_be(block + 8);
+  w[2] = fio_buf2u64_be(block + 16);
+  w[3] = fio_buf2u64_be(block + 24);
+  w[4] = fio_buf2u64_be(block + 32);
+  w[5] = fio_buf2u64_be(block + 40);
+  w[6] = fio_buf2u64_be(block + 48);
+  w[7] = fio_buf2u64_be(block + 56);
+  w[8] = fio_buf2u64_be(block + 64);
+  w[9] = fio_buf2u64_be(block + 72);
+  w[10] = fio_buf2u64_be(block + 80);
+  w[11] = fio_buf2u64_be(block + 88);
+  w[12] = fio_buf2u64_be(block + 96);
+  w[13] = fio_buf2u64_be(block + 104);
+  w[14] = fio_buf2u64_be(block + 112);
+  w[15] = fio_buf2u64_be(block + 120);
+
+/* SHA-512 Sigma functions - using optimized helpers */
+#define FIO___S512_S0(x) fio_xor_rrot3_64(x, 28, 34, 39)
+#define FIO___S512_S1(x) fio_xor_rrot3_64(x, 14, 18, 41)
+#define FIO___S512_s0(x) fio_xor_rrot2_shr_64(x, 1, 8, 7)
+#define FIO___S512_s1(x) fio_xor_rrot2_shr_64(x, 19, 61, 6)
+
+/* Optimized Ch and Maj - fewer operations */
+#define FIO___S512_CH(e, f, g)  ((g) ^ ((e) & ((f) ^ (g))))
+#define FIO___S512_MAJ(a, b, c) (((a) & (b)) | ((c) & ((a) | (b))))
+
+/* SHA-512 round - rotates variables instead of copying */
+#define FIO___SHA512_RND(a, b, c, d, e, f, g, h, k, w)                         \
   do {                                                                         \
-    const uint64_t t1 = v[7] + (k) + w[(i)&15] +                               \
-                        fio_ct_mux64(v[4], v[5], v[6]) +                       \
-                        fio_xor_rrot3_64(v[4], 14, 18, 41);                    \
-    const uint64_t t2 =                                                        \
-        fio_ct_maj64(v[0], v[1], v[2]) + fio_xor_rrot3_64(v[0], 28, 34, 39);   \
-    v[7] = v[6];                                                               \
-    v[6] = v[5];                                                               \
-    v[5] = v[4];                                                               \
-    v[4] = v[3] + t1;                                                          \
-    v[3] = v[2];                                                               \
-    v[2] = v[1];                                                               \
-    v[1] = v[0];                                                               \
-    v[0] = t1 + t2;                                                            \
+    uint64_t t1 = (h) + FIO___S512_S1(e) + FIO___S512_CH(e, f, g) + (k) + (w); \
+    uint64_t t2 = FIO___S512_S0(a) + FIO___S512_MAJ(a, b, c);                  \
+    (d) += t1;                                                                 \
+    (h) = t1 + t2;                                                             \
   } while (0)
 
-  /* First 16 rounds - use message words directly */
-  for (size_t i = 0; i < 16; ++i)
-    FIO___SHA512_ROUND(i, sha512_consts[i]);
+/* Message schedule expansion */
+#define FIO___SHA512_SCHED(i)                                                  \
+  (w[(i)&15] += FIO___S512_s0(w[((i) + 1) & 15]) + w[((i) + 9) & 15] +         \
+                FIO___S512_s1(w[((i) + 14) & 15]))
 
-  /* Remaining 64 rounds - expand message schedule inline */
-  for (size_t i = 16; i < 80; ++i) {
-    w[i & 15] = fio_xor_rrot2_shr_64(w[(i + 14) & 15], 19, 61, 6) +
-                w[(i + 9) & 15] +
-                fio_xor_rrot2_shr_64(w[(i + 1) & 15], 1, 8, 7) + w[i & 15];
-    FIO___SHA512_ROUND(i, sha512_consts[i]);
-  }
-#undef FIO___SHA512_ROUND
+  /* Rounds 0-15 - use message words directly */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[0], w[0]);
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[1], w[1]);
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[2], w[2]);
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[3], w[3]);
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[4], w[4]);
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[5], w[5]);
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[6], w[6]);
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[7], w[7]);
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[8], w[8]);
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[9], w[9]);
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[10], w[10]);
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[11], w[11]);
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[12], w[12]);
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[13], w[13]);
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[14], w[14]);
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[15], w[15]);
 
-  /* Add compressed chunk to current hash value */
-  for (size_t i = 0; i < 8; ++i)
-    h->u64[i] += v[i];
+  /* Rounds 16-31 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[16], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[17], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[18], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[19], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[20], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[21], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[22], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[23], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[24], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[25], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[26], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[27], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[28], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[29], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[30], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[31], FIO___SHA512_SCHED(15));
+
+  /* Rounds 32-47 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[32], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[33], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[34], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[35], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[36], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[37], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[38], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[39], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[40], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[41], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[42], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[43], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[44], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[45], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[46], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[47], FIO___SHA512_SCHED(15));
+
+  /* Rounds 48-63 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[48], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[49], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[50], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[51], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[52], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[53], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[54], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[55], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[56], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[57], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[58], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[59], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[60], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[61], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[62], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[63], FIO___SHA512_SCHED(15));
+
+  /* Rounds 64-79 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[64], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[65], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[66], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[67], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[68], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[69], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[70], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[71], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[72], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[73], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[74], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[75], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[76], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[77], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[78], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[79], FIO___SHA512_SCHED(15));
+
+#undef FIO___S512_S0
+#undef FIO___S512_S1
+#undef FIO___S512_s0
+#undef FIO___S512_s1
+#undef FIO___S512_CH
+#undef FIO___S512_MAJ
+#undef FIO___SHA512_RND
+#undef FIO___SHA512_SCHED
+
+  /* Add to hash state */
+  h->u64[0] += a;
+  h->u64[1] += b;
+  h->u64[2] += c;
+  h->u64[3] += d;
+  h->u64[4] += e;
+  h->u64[5] += f;
+  h->u64[6] += g;
+  h->u64[7] += hv;
 }
 
 /** Feed data into the hash */

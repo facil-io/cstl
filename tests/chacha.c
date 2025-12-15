@@ -133,16 +133,16 @@ int main(void) {
       char key[33];
       char *msg;
       char *expected;
-    } tests[] = {
-        {
-            .key = "\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe"
-                   "\x42\xd5\x06\xa8\x01\x03\x80\x8a\xfb\x0d\xb2\xfd"
-                   "\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b",
-            .msg = (char *)"Cryptographic Forum Research Group",
-            .expected = (char *)"\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b"
-                                "\xaf\x0c\x01\x27\xa9",
-        },
-        {.expected = NULL}};
+    } tests[] = {{
+                     .key = "\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe"
+                            "\x42\xd5\x06\xa8\x01\x03\x80\x8a\xfb\x0d\xb2\xfd"
+                            "\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b",
+                     .msg = (char *)"Cryptographic Forum Research Group",
+                     .expected =
+                         (char *)"\xa8\x06\x1d\xc1\x30\x51\x36\xc6\xc2\x2b\x8b"
+                                 "\xaf\x0c\x01\x27\xa9",
+                 },
+                 {.expected = NULL}};
     char auth[24] = {0};
     char buf1[33] = {0};
     char buf2[33] = {0};
@@ -357,81 +357,5 @@ int main(void) {
                "chacha20_poly1305 roundtrip error!");
   }
 
-#if !DEBUG
-  fio_test_hash_function(fio__poly1305_speed_wrapper,
-                         (char *)"Poly1305",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(fio__poly1305_speed_wrapper,
-                         (char *)"Poly1305",
-                         13,
-                         0,
-                         0);
-  fio_test_hash_function(fio__poly1305_speed_wrapper,
-                         (char *)"Poly1305 (unaligned)",
-                         13,
-                         3,
-                         0);
-#if HAVE_OPENSSL && 0
-  fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                         (char *)"Poly1305",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                         (char *)"Poly1305",
-                         13,
-                         0,
-                         0);
-  fio_test_hash_function(__poly1305_open_ssl_wrapper,
-                         (char *)"Poly1305 (unaligned)",
-                         13,
-                         3,
-                         0);
-#endif /* HAVE_OPENSSL */
-  fprintf(stderr, "\n");
-  fio_test_hash_function(fio__chacha20_speed_wrapper,
-                         (char *)"ChaCha20",
-                         6,
-                         0,
-                         0);
-  fio_test_hash_function(fio__chacha20_speed_wrapper,
-                         (char *)"ChaCha20",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(fio__chacha20_speed_wrapper,
-                         (char *)"ChaCha20",
-                         13,
-                         0,
-                         0);
-  fio_test_hash_function(fio__chacha20_speed_wrapper,
-                         (char *)"ChaCha20 (unaligned)",
-                         13,
-                         3,
-                         0);
-  fprintf(stderr, "\n");
-  fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
-                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(fio__chacha20poly1305dec_speed_wrapper,
-                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
-                         13,
-                         0,
-                         0);
-  fprintf(stderr, "\n");
-  fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
-                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(fio__chacha20poly1305_speed_wrapper,
-                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
-                         13,
-                         0,
-                         0);
-#endif
+  /* Performance tests moved to tests/performance-crypto.c */
 }

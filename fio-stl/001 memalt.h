@@ -151,12 +151,46 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
 
-  if ((d == s) | !bytes | !d | !s) {
+  if (FIO_UNLIKELY((d == s) | !bytes | !d | !s)) {
     if (bytes && (d != s))
       FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return d;
   }
 
+  /* Fast path for small, non-overlapping copies (<=64 bytes) */
+  if (bytes <= 64 && (d + bytes <= s || s + bytes <= d)) {
+    if (bytes <= 8) {
+      /* Handle 1-8 bytes with overlapping copies */
+      if (bytes >= 4) {
+        fio_memcpy4(d, s);
+        fio_memcpy4(d + bytes - 4, s + bytes - 4);
+      } else if (bytes >= 2) {
+        fio_memcpy2(d, s);
+        fio_memcpy2(d + bytes - 2, s + bytes - 2);
+      } else {
+        *d = *s;
+      }
+      return dest_;
+    }
+    if (bytes <= 16) {
+      /* 9-16 bytes: two overlapping 8-byte copies */
+      fio_memcpy8(d, s);
+      fio_memcpy8(d + bytes - 8, s + bytes - 8);
+      return dest_;
+    }
+    if (bytes <= 32) {
+      /* 17-32 bytes: two overlapping 16-byte copies */
+      fio_memcpy16(d, s);
+      fio_memcpy16(d + bytes - 16, s + bytes - 16);
+      return dest_;
+    }
+    /* 33-64 bytes: two overlapping 32-byte copies */
+    fio_memcpy32(d, s);
+    fio_memcpy32(d + bytes - 32, s + bytes - 32);
+    return dest_;
+  }
+
+  /* Existing path for larger copies or overlapping memory */
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio___memcpy_unsafe_x(d, s, bytes);
@@ -182,7 +216,7 @@ SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-  if (bytes < 32)
+  if (FIO_UNLIKELY(bytes < 32))
     goto small_memset;
 
   /* 32 byte groups */
@@ -221,12 +255,10 @@ small_memset:
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
 
-/**
- * A token seeking function. This is a fallback for `memchr`, but `memchr`
- * should be faster.
- */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  // return (void *)memchr(buffer, token, len); /* FIXME */
+/* Scalar implementation - fallback for all platforms */
+FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
+                                    const char token,
+                                    size_t len) {
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
   uint64_t u[16] FIO_ALIGN(16) = {0};
@@ -236,7 +268,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
   umsk |= (umsk << 8);
-  if (len < 8)
+  if (FIO_UNLIKELY(len < 8))
     goto small_memchr;
   while (r < e) {
     fio_memcpy128(u, r);
@@ -281,11 +313,265 @@ found_in_8:
 }
 
 /* *****************************************************************************
+FIO_MEMCHR - SIMD implementations
+***************************************************************************** */
+
+#if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+/* SSE2 implementation - 16 bytes at a time */
+FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 16 bytes */
+  const __m128i needle = _mm_set1_epi8(token);
+
+  /* Handle unaligned head - process byte by byte until aligned */
+  while (((uintptr_t)r & 15) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 64 bytes (4x16) at a time for better throughput */
+  const uint8_t *e64 = e - 63;
+  while (r < e64) {
+    __m128i v0 = _mm_load_si128((const __m128i *)(r));
+    __m128i v1 = _mm_load_si128((const __m128i *)(r + 16));
+    __m128i v2 = _mm_load_si128((const __m128i *)(r + 32));
+    __m128i v3 = _mm_load_si128((const __m128i *)(r + 48));
+    __m128i cmp0 = _mm_cmpeq_epi8(v0, needle);
+    __m128i cmp1 = _mm_cmpeq_epi8(v1, needle);
+    __m128i cmp2 = _mm_cmpeq_epi8(v2, needle);
+    __m128i cmp3 = _mm_cmpeq_epi8(v3, needle);
+    /* Combine results to check if any match found */
+    __m128i or01 = _mm_or_si128(cmp0, cmp1);
+    __m128i or23 = _mm_or_si128(cmp2, cmp3);
+    __m128i orall = _mm_or_si128(or01, or23);
+    int mask = _mm_movemask_epi8(orall);
+    if (mask) {
+      /* Found a match - determine which 16-byte chunk */
+      int m0 = _mm_movemask_epi8(cmp0);
+      if (m0)
+        return (void *)(r + __builtin_ctz(m0));
+      int m1 = _mm_movemask_epi8(cmp1);
+      if (m1)
+        return (void *)(r + 16 + __builtin_ctz(m1));
+      int m2 = _mm_movemask_epi8(cmp2);
+      if (m2)
+        return (void *)(r + 32 + __builtin_ctz(m2));
+      int m3 = _mm_movemask_epi8(cmp3);
+      return (void *)(r + 48 + __builtin_ctz(m3));
+    }
+    r += 64;
+  }
+
+  /* Process remaining 16-byte chunks */
+  const uint8_t *e16 = e - 15;
+  while (r < e16) {
+    __m128i v = _mm_load_si128((const __m128i *)r);
+    __m128i cmp = _mm_cmpeq_epi8(v, needle);
+    int mask = _mm_movemask_epi8(cmp);
+    if (mask)
+      return (void *)(r + __builtin_ctz(mask));
+    r += 16;
+  }
+
+  /* Handle tail bytes */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* SSE2 */
+
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+/* AVX2 implementation - 32 bytes at a time */
+FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 32 bytes */
+  const __m256i needle = _mm256_set1_epi8(token);
+
+  /* Handle unaligned head - process byte by byte until 32-byte aligned */
+  while (((uintptr_t)r & 31) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 128 bytes (4x32) at a time for better throughput */
+  const uint8_t *e128 = e - 127;
+  while (r < e128) {
+    __m256i v0 = _mm256_load_si256((const __m256i *)(r));
+    __m256i v1 = _mm256_load_si256((const __m256i *)(r + 32));
+    __m256i v2 = _mm256_load_si256((const __m256i *)(r + 64));
+    __m256i v3 = _mm256_load_si256((const __m256i *)(r + 96));
+    __m256i cmp0 = _mm256_cmpeq_epi8(v0, needle);
+    __m256i cmp1 = _mm256_cmpeq_epi8(v1, needle);
+    __m256i cmp2 = _mm256_cmpeq_epi8(v2, needle);
+    __m256i cmp3 = _mm256_cmpeq_epi8(v3, needle);
+    /* Combine results to check if any match found */
+    __m256i or01 = _mm256_or_si256(cmp0, cmp1);
+    __m256i or23 = _mm256_or_si256(cmp2, cmp3);
+    __m256i orall = _mm256_or_si256(or01, or23);
+    int mask = _mm256_movemask_epi8(orall);
+    if (mask) {
+      /* Found a match - determine which 32-byte chunk */
+      int m0 = _mm256_movemask_epi8(cmp0);
+      if (m0)
+        return (void *)(r + __builtin_ctz(m0));
+      int m1 = _mm256_movemask_epi8(cmp1);
+      if (m1)
+        return (void *)(r + 32 + __builtin_ctz(m1));
+      int m2 = _mm256_movemask_epi8(cmp2);
+      if (m2)
+        return (void *)(r + 64 + __builtin_ctz(m2));
+      int m3 = _mm256_movemask_epi8(cmp3);
+      return (void *)(r + 96 + __builtin_ctz(m3));
+    }
+    r += 128;
+  }
+
+  /* Process remaining 32-byte chunks */
+  const uint8_t *e32 = e - 31;
+  while (r < e32) {
+    __m256i v = _mm256_load_si256((const __m256i *)r);
+    __m256i cmp = _mm256_cmpeq_epi8(v, needle);
+    int mask = _mm256_movemask_epi8(cmp);
+    if (mask)
+      return (void *)(r + __builtin_ctz(mask));
+    r += 32;
+  }
+
+  /* Handle tail bytes - fall through to SSE2 or scalar for remaining */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* AVX2 */
+
+#if defined(FIO___HAS_ARM_INTRIN)
+/* ARM NEON implementation - 16 bytes at a time */
+FIO_SFUNC void *fio___memchr_neon(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 16 bytes */
+  const uint8x16_t needle = vdupq_n_u8((uint8_t)token);
+
+  /* Handle unaligned head - process byte by byte until aligned */
+  while (((uintptr_t)r & 15) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 64 bytes (4x16) at a time for better throughput */
+  const uint8_t *e64 = e - 63;
+  while (r < e64) {
+    uint8x16_t v0 = vld1q_u8(r);
+    uint8x16_t v1 = vld1q_u8(r + 16);
+    uint8x16_t v2 = vld1q_u8(r + 32);
+    uint8x16_t v3 = vld1q_u8(r + 48);
+    uint8x16_t cmp0 = vceqq_u8(v0, needle);
+    uint8x16_t cmp1 = vceqq_u8(v1, needle);
+    uint8x16_t cmp2 = vceqq_u8(v2, needle);
+    uint8x16_t cmp3 = vceqq_u8(v3, needle);
+    /* Combine results using OR to check if any match found */
+    uint8x16_t or01 = vorrq_u8(cmp0, cmp1);
+    uint8x16_t or23 = vorrq_u8(cmp2, cmp3);
+    uint8x16_t orall = vorrq_u8(or01, or23);
+    /* Check if any byte is non-zero (match found) */
+    uint64x2_t orall64 = vreinterpretq_u64_u8(orall);
+    if (vgetq_lane_u64(orall64, 0) | vgetq_lane_u64(orall64, 1)) {
+      /* Found a match - determine which 16-byte chunk and position */
+      uint64x2_t cmp0_64 = vreinterpretq_u64_u8(cmp0);
+      if (vgetq_lane_u64(cmp0_64, 0) | vgetq_lane_u64(cmp0_64, 1)) {
+        /* Match in first chunk - find exact position */
+        for (size_t i = 0; i < 16; ++i)
+          if (r[i] == (uint8_t)token)
+            return (void *)(r + i);
+      }
+      uint64x2_t cmp1_64 = vreinterpretq_u64_u8(cmp1);
+      if (vgetq_lane_u64(cmp1_64, 0) | vgetq_lane_u64(cmp1_64, 1)) {
+        for (size_t i = 0; i < 16; ++i)
+          if (r[16 + i] == (uint8_t)token)
+            return (void *)(r + 16 + i);
+      }
+      uint64x2_t cmp2_64 = vreinterpretq_u64_u8(cmp2);
+      if (vgetq_lane_u64(cmp2_64, 0) | vgetq_lane_u64(cmp2_64, 1)) {
+        for (size_t i = 0; i < 16; ++i)
+          if (r[32 + i] == (uint8_t)token)
+            return (void *)(r + 32 + i);
+      }
+      for (size_t i = 0; i < 16; ++i)
+        if (r[48 + i] == (uint8_t)token)
+          return (void *)(r + 48 + i);
+    }
+    r += 64;
+  }
+
+  /* Process remaining 16-byte chunks */
+  const uint8_t *e16 = e - 15;
+  while (r < e16) {
+    uint8x16_t v = vld1q_u8(r);
+    uint8x16_t cmp = vceqq_u8(v, needle);
+    uint64x2_t cmp64 = vreinterpretq_u64_u8(cmp);
+    if (vgetq_lane_u64(cmp64, 0) | vgetq_lane_u64(cmp64, 1)) {
+      for (size_t i = 0; i < 16; ++i)
+        if (r[i] == (uint8_t)token)
+          return (void *)(r + i);
+    }
+    r += 16;
+  }
+
+  /* Handle tail bytes */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* ARM NEON */
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+  return fio___memchr_avx2(buffer, token, len);
+#elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+  return fio___memchr_sse2(buffer, token, len);
+#elif defined(FIO___HAS_ARM_INTRIN)
+  return fio___memchr_neon(buffer, token, len);
+#else
+  return fio___memchr_scalar(buffer, token, len);
+#endif
+}
+
+/* *****************************************************************************
 fio_strlen
 ***************************************************************************** */
 
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  if (!str)
+  if (FIO_UNLIKELY(!str))
     return 0;
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
@@ -338,7 +624,7 @@ fio_memcmp
 
 /** Same as `memcmp`. Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`. */
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  if (a_ == b_ || !len)
+  if (FIO_UNLIKELY(a_ == b_ || !len))
     return 0;
   uint64_t ua[8] FIO_ALIGN(16);
   uint64_t ub[8] FIO_ALIGN(16);
@@ -348,9 +634,9 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   char *e;
   if (*a != *b)
     return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
-  if (len < 8)
+  if (FIO_UNLIKELY(len < 8))
     goto fio_memcmp_mini;
-  if (len < 64)
+  if (FIO_UNLIKELY(len < 64))
     goto fio_memcmp_small;
 
   e = a + len - 63;

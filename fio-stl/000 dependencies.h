@@ -139,15 +139,16 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_SHA2
 #undef FIO_SECRET
 #undef FIO_OTP
-#define FIO_AES
 #define FIO_CRYPTO_CORE
+#define FIO_AES
+#define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
+#define FIO_OTP
+#define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
-#define FIO_SECRET
-#define FIO_OTP
-
+#define FIO_SHA3
 #endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
@@ -277,6 +278,15 @@ FIO_MAP Ordering & Naming Shortcut
 #if defined(FIO_HTTP)
 #undef FIO_HTTP_HANDLE
 #define FIO_HTTP_HANDLE
+#endif
+
+#if defined(FIO_HTTP_HANDLE)
+#undef FIO_JSON
+#define FIO_JSON
+#undef FIO_MULTIPART
+#define FIO_MULTIPART
+#undef FIO_URL_ENCODED
+#define FIO_URL_ENCODED
 #endif
 
 #if (defined(DEBUG) && defined(FIO_HTTP_HANDLE))

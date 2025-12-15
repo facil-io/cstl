@@ -59,31 +59,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
                "SHA1 mismatch for \"%s\"",
                data[i].str);
   }
-#if !DEBUG
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
-                         (char *)"fio_sha1",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_wrapper),
-                         (char *)"fio_sha1",
-                         13,
-                         0,
-                         1);
-#if HAVE_OPENSSL
-  fprintf(stderr, "\t* Comparing to " OPENSSL_VERSION_TEXT "\n");
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-1",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-1",
-                         13,
-                         0,
-                         1);
-#endif /* HAVE_OPENSSL */
-#endif /* !DEBUG */
+  /* Performance tests moved to tests/performance-crypto.c */
 }
 
 /* *****************************************************************************
@@ -402,51 +378,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
     FIO_ASSERT(fio_u512_is_eq(&s0, &s1), "Secret should be consistent");
     FIO_ASSERT(!fio_u512_is_eq(&s0, &fio___secret), "Secret should be masked");
   }
-#if !DEBUG
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
-                         (char *)"fio_sha256",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_wrapper),
-                         (char *)"fio_sha256",
-                         13,
-                         0,
-                         1);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-                         (char *)"fio_sha512",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_wrapper),
-                         (char *)"fio_sha512",
-                         13,
-                         0,
-                         1);
-#if HAVE_OPENSSL
-  fprintf(stderr, "\t* Comparing to " OPENSSL_VERSION_TEXT "\n");
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-256",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha256_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-256",
-                         13,
-                         0,
-                         1);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-512",
-                         5,
-                         0,
-                         0);
-  fio_test_hash_function(FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper),
-                         (char *)"OpenSSL SHA-512",
-                         13,
-                         0,
-                         1);
-#endif /* HAVE_OPENSSL */
-#endif /* !DEBUG */
+  /* Performance tests moved to tests/performance-crypto.c */
 }
 
 /* *****************************************************************************

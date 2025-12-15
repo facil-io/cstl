@@ -110,6 +110,12 @@
 #ifdef FIO_SHA2
 #include "152 sha2.h"
 #endif
+#ifdef FIO_BLAKE2
+#include "152 blake2.h"
+#endif
+#ifdef FIO_SHA3
+#include "152 sha3.h"
+#endif
 #ifdef FIO_CHACHA
 #include "152 chacha20poly1305.h"
 #endif

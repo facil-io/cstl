@@ -417,6 +417,24 @@ Function Attributes
 #define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
 #endif
 
+/** Marks a function as const (no side effects, result depends only on args) */
+#ifndef FIO_CONST
+#if __has_attribute(const) || defined(__GNUC__)
+#define FIO_CONST __attribute__((const))
+#else
+#define FIO_CONST
+#endif
+#endif
+
+/** Marks a function as pure (no side effects, may read global memory) */
+#ifndef FIO_PURE
+#if __has_attribute(pure) || defined(__GNUC__)
+#define FIO_PURE __attribute__((pure))
+#else
+#define FIO_PURE
+#endif
+#endif
+
 #ifndef FIO_WEAK
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
@@ -1347,7 +1365,7 @@ Memory Copying Primitives (the basis for unaligned memory access for numbers)
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy)
+#if __has_builtin(__builtin_memcpy) /* __builtin_memcpy isn't really better */
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
                                     const void *restrict s) {                  \
@@ -1358,8 +1376,7 @@ Memory Copying Primitives (the basis for unaligned memory access for numbers)
   FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
                                     const void *restrict s) {                  \
     void *const r = (char *)d + bytes;                                         \
-    for (size_t i = 0; i < bytes; ++i) /* compiler, please vectorize */        \
-      ((char *)d)[i] = ((const char *)s)[i];                                   \
+    FIO_FOR_UNROLL(bytes, 1, i, ((char *)d)[i] = ((const char *)s)[i]);        \
     return r;                                                                  \
   }
 #endif /* __has_builtin(__builtin_memcpy) */
@@ -1444,7 +1461,7 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
                                       size_t l) {
   char *restrict d = (char *restrict)d_;
   const char *restrict s = (const char *restrict)s_;
-  if (l < 64)
+  if (FIO_LIKELY(l < 64))
     return fio___memcpy_unsafe_63x(d_, s_, l);
 #define FIO___MEMCPY_UNSAFE_STEP(bytes)                                        \
   do {                                                                         \
@@ -1558,7 +1575,7 @@ Swapping byte's order (`bswap` variations)
 #if __has_builtin(__builtin_bswap16)
 #define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
 #else
-FIO_IFUNC uint16_t fio_bswap16(uint16_t i) {
+FIO_IFUNC FIO_CONST uint16_t fio_bswap16(uint16_t i) {
   return ((((i)&0xFFU) << 8) | (((i)&0xFF00U) >> 8));
 }
 #endif
@@ -1567,7 +1584,7 @@ FIO_IFUNC uint16_t fio_bswap16(uint16_t i) {
 #if __has_builtin(__builtin_bswap32)
 #define fio_bswap32(i) __builtin_bswap32((uint32_t)(i))
 #else
-FIO_IFUNC uint32_t fio_bswap32(uint32_t i) {
+FIO_IFUNC FIO_CONST uint32_t fio_bswap32(uint32_t i) {
   return ((((i)&0xFFUL) << 24) | (((i)&0xFF00UL) << 8) |
           (((i)&0xFF0000UL) >> 8) | (((i)&0xFF000000UL) >> 24));
 }
@@ -1577,7 +1594,7 @@ FIO_IFUNC uint32_t fio_bswap32(uint32_t i) {
 #if __has_builtin(__builtin_bswap64)
 #define fio_bswap64(i) __builtin_bswap64((uint64_t)(i))
 #else
-FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
+FIO_IFUNC FIO_CONST uint64_t fio_bswap64(uint64_t i) {
   return ((((i)&0xFFULL) << 56) | (((i)&0xFF00ULL) << 40) |
           (((i)&0xFF0000ULL) << 24) | (((i)&0xFF000000ULL) << 8) |
           (((i)&0xFF00000000ULL) >> 8) | (((i)&0xFF0000000000ULL) >> 24) |
@@ -1590,7 +1607,7 @@ FIO_IFUNC uint64_t fio_bswap64(uint64_t i) {
 #if __has_builtin(__builtin_bswap128)
 #define fio_bswap128(i) __builtin_bswap128((__uint128_t)(i))
 #else
-FIO_IFUNC __uint128_t fio_bswap128(__uint128_t i) {
+FIO_IFUNC FIO_CONST __uint128_t fio_bswap128(__uint128_t i) {
   return ((__uint128_t)fio_bswap64(i) << 64) | fio_bswap64(i >> 64);
 }
 #endif
@@ -2094,31 +2111,35 @@ Constant-Time Selectors
 ***************************************************************************** */
 
 /** Returns 1 if the expression is true (input isn't zero). */
-FIO_IFUNC uintmax_t fio_ct_true(uintmax_t cond) {
+FIO_IFUNC FIO_CONST uintmax_t fio_ct_true(uintmax_t cond) {
   // promise that the highest bit is set if any bits are set, than shift.
   return ((cond | (0 - cond)) >> ((sizeof(cond) << 3) - 1));
 }
 
 /** Returns 1 if the expression is false (input is zero). */
-FIO_IFUNC uintmax_t fio_ct_false(uintmax_t cond) {
+FIO_IFUNC FIO_CONST uintmax_t fio_ct_false(uintmax_t cond) {
   // fio_ct_true returns only one bit, XOR will inverse that bit.
   return fio_ct_true(cond) ^ 1;
 }
 
 /** Returns `a` if `cond` is boolean and true, returns b otherwise. */
-FIO_IFUNC uintmax_t fio_ct_if_bool(uintmax_t cond, uintmax_t a, uintmax_t b) {
+FIO_IFUNC FIO_CONST uintmax_t fio_ct_if_bool(uintmax_t cond,
+                                             uintmax_t a,
+                                             uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return (b ^ (((uintmax_t)0ULL - (cond & 1)) & (a ^ b)));
 }
 
 /** Returns `a` if `cond` isn't zero (uses fio_ct_true), returns b otherwise. */
-FIO_IFUNC uintmax_t fio_ct_if(uintmax_t cond, uintmax_t a, uintmax_t b) {
+FIO_IFUNC FIO_CONST uintmax_t fio_ct_if(uintmax_t cond,
+                                        uintmax_t a,
+                                        uintmax_t b) {
   // b^(a^b) cancels b out. 0-1 => sets all bits.
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
 /** Returns `a` if a >= `b`. */
-FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
+FIO_IFUNC FIO_CONST intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
   const uintmax_t a = a_, b = b_;
   return (
@@ -2126,7 +2147,7 @@ FIO_IFUNC intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
 }
 
 /** Returns `a` if a >= `b`. */
-FIO_IFUNC intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
+FIO_IFUNC FIO_CONST intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
   const uintmax_t a = a_, b = b_;
   return (
@@ -2134,7 +2155,7 @@ FIO_IFUNC intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
 }
 
 /** Returns absolute value. */
-FIO_IFUNC uintmax_t fio_ct_abs(intmax_t i_) {
+FIO_IFUNC FIO_CONST uintmax_t fio_ct_abs(intmax_t i_) {
   // if b - a is negative, a > b, unless both / one are negative.
   const uintmax_t i = i_;
   return (intmax_t)fio_ct_if_bool((i >> ((sizeof(i) << 3) - 1)), 0 - i, i);
@@ -2153,12 +2174,12 @@ can also be used for branchless programming.
  * Formula: (x & y) ^ (~x & z)  -or equivalently-  z ^ (x & (y ^ z))
  * Used in: SHA-1 (Ch), SHA-256 (Ch), SHA-512 (Ch), AES, etc.
  */
-FIO_IFUNC uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z) {
+FIO_IFUNC FIO_CONST uint32_t fio_ct_mux32(uint32_t x, uint32_t y, uint32_t z) {
   return z ^ (x & (y ^ z)); /* branchless ternary: x ? y : z (per bit) */
 }
 
 /** 64-bit version of bitwise choose/mux. */
-FIO_IFUNC uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z) {
+FIO_IFUNC FIO_CONST uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z) {
   return z ^ (x & (y ^ z));
 }
 
@@ -2167,12 +2188,12 @@ FIO_IFUNC uint64_t fio_ct_mux64(uint64_t x, uint64_t y, uint64_t z) {
  * Formula: (x & y) ^ (x & z) ^ (y & z)  -or-  (x & y) | (z & (x | y))
  * Used in: SHA-1 (Maj), SHA-256 (Maj), SHA-512 (Maj), etc.
  */
-FIO_IFUNC uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z) {
+FIO_IFUNC FIO_CONST uint32_t fio_ct_maj32(uint32_t x, uint32_t y, uint32_t z) {
   return (x & y) | (z & (x | y)); /* slightly fewer ops than XOR version */
 }
 
 /** 64-bit version of bitwise majority. */
-FIO_IFUNC uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z) {
+FIO_IFUNC FIO_CONST uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z) {
   return (x & y) | (z & (x | y));
 }
 
@@ -2181,12 +2202,16 @@ FIO_IFUNC uint64_t fio_ct_maj64(uint64_t x, uint64_t y, uint64_t z) {
  * Formula: x ^ y ^ z
  * Used in: SHA-1 (Parity function for rounds 20-39 and 60-79)
  */
-FIO_IFUNC uint32_t fio_ct_xor3_32(uint32_t x, uint32_t y, uint32_t z) {
+FIO_IFUNC FIO_CONST uint32_t fio_ct_xor3_32(uint32_t x,
+                                            uint32_t y,
+                                            uint32_t z) {
   return x ^ y ^ z;
 }
 
 /** 64-bit version of 3-way XOR. */
-FIO_IFUNC uint64_t fio_ct_xor3_64(uint64_t x, uint64_t y, uint64_t z) {
+FIO_IFUNC FIO_CONST uint64_t fio_ct_xor3_64(uint64_t x,
+                                            uint64_t y,
+                                            uint64_t z) {
   return x ^ y ^ z;
 }
 
@@ -2273,7 +2298,7 @@ Bit rotation
 #define fio_lrot8(i, bits) __builtin_rotateleft8(i, bits)
 #else
 /** 8Bit left rotation, inlined. */
-FIO_IFUNC uint8_t fio_lrot8(uint8_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint8_t fio_lrot8(uint8_t i, uint8_t bits) {
   return ((i << (bits & 7UL)) | (i >> ((-(bits)) & 7UL)));
 }
 #endif
@@ -2283,7 +2308,7 @@ FIO_IFUNC uint8_t fio_lrot8(uint8_t i, uint8_t bits) {
 #define fio_lrot16(i, bits) __builtin_rotateleft16(i, bits)
 #else
 /** 16Bit left rotation, inlined. */
-FIO_IFUNC uint16_t fio_lrot16(uint16_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint16_t fio_lrot16(uint16_t i, uint8_t bits) {
   return ((i << (bits & 15UL)) | (i >> ((-(bits)) & 15UL)));
 }
 #endif
@@ -2293,7 +2318,7 @@ FIO_IFUNC uint16_t fio_lrot16(uint16_t i, uint8_t bits) {
 #define fio_lrot32(i, bits) __builtin_rotateleft32(i, bits)
 #else
 /** 32Bit left rotation, inlined. */
-FIO_IFUNC uint32_t fio_lrot32(uint32_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint32_t fio_lrot32(uint32_t i, uint8_t bits) {
   return ((i << (bits & 31UL)) | (i >> ((-(bits)) & 31UL)));
 }
 #endif
@@ -2303,7 +2328,7 @@ FIO_IFUNC uint32_t fio_lrot32(uint32_t i, uint8_t bits) {
 #define fio_lrot64(i, bits) __builtin_rotateleft64(i, bits)
 #else
 /** 64Bit left rotation, inlined. */
-FIO_IFUNC uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
   return ((i << ((bits)&63UL)) | (i >> ((-(bits)) & 63UL)));
 }
 #endif
@@ -2313,7 +2338,7 @@ FIO_IFUNC uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
 #define fio_rrot8(i, bits) __builtin_rotateright8(i, bits)
 #else
 /** 8Bit right rotation, inlined. */
-FIO_IFUNC uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
   return ((i >> (bits & 7UL)) | (i << ((-(bits)) & 7UL)));
 }
 #endif
@@ -2323,7 +2348,7 @@ FIO_IFUNC uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
 #define fio_rrot16(i, bits) __builtin_rotateright16(i, bits)
 #else
 /** 16Bit right rotation, inlined. */
-FIO_IFUNC uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
   return ((i >> (bits & 15UL)) | (i << ((-(bits)) & 15UL)));
 }
 #endif
@@ -2333,7 +2358,7 @@ FIO_IFUNC uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
 #define fio_rrot32(i, bits) __builtin_rotateright32(i, bits)
 #else
 /** 32Bit right rotation, inlined. */
-FIO_IFUNC uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
   return ((i >> (bits & 31UL)) | (i << ((-(bits)) & 31UL)));
 }
 #endif
@@ -2343,7 +2368,7 @@ FIO_IFUNC uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
 #define fio_rrot64(i, bits) __builtin_rotateright64(i, bits)
 #else
 /** 64Bit right rotation, inlined. */
-FIO_IFUNC uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
   return ((i >> ((bits)&63UL)) | (i << ((-(bits)) & 63UL)));
 }
 #endif
@@ -2357,11 +2382,11 @@ FIO_IFUNC uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
 #define fio_rrot128(i, bits) __builtin_rotateright128(i, bits)
 #else
 /** 128Bit left rotation, inlined. */
-FIO_IFUNC __uint128_t fio_lrot128(__uint128_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST __uint128_t fio_lrot128(__uint128_t i, uint8_t bits) {
   return ((i << ((bits)&127UL)) | (i >> ((-(bits)) & 127UL)));
 }
 /** 128Bit right rotation, inlined. */
-FIO_IFUNC __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
+FIO_IFUNC FIO_CONST __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
   return ((i >> ((bits)&127UL)) | (i << ((-(bits)) & 127UL)));
 }
 #endif
@@ -2395,18 +2420,18 @@ allows the compiler to potentially optimize better than inline expressions.
  * XOR of three right rotations: ROTR(x,a) ^ ROTR(x,b) ^ ROTR(x,c)
  * Common in SHA-256/SHA-512 Sigma functions.
  */
-FIO_IFUNC uint32_t fio_xor_rrot3_32(uint32_t x,
-                                    uint8_t a,
-                                    uint8_t b,
-                                    uint8_t c) {
+FIO_IFUNC FIO_CONST uint32_t fio_xor_rrot3_32(uint32_t x,
+                                              uint8_t a,
+                                              uint8_t b,
+                                              uint8_t c) {
   return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ fio_rrot32(x, c);
 }
 
 /** 64-bit version of triple rotation XOR. */
-FIO_IFUNC uint64_t fio_xor_rrot3_64(uint64_t x,
-                                    uint8_t a,
-                                    uint8_t b,
-                                    uint8_t c) {
+FIO_IFUNC FIO_CONST uint64_t fio_xor_rrot3_64(uint64_t x,
+                                              uint8_t a,
+                                              uint8_t b,
+                                              uint8_t c) {
   return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ fio_rrot64(x, c);
 }
 
@@ -2415,18 +2440,18 @@ FIO_IFUNC uint64_t fio_xor_rrot3_64(uint64_t x,
  * SHR(x,c) Common in SHA-256/SHA-512 sigma (lowercase) functions for message
  * schedule.
  */
-FIO_IFUNC uint32_t fio_xor_rrot2_shr_32(uint32_t x,
-                                        uint8_t a,
-                                        uint8_t b,
-                                        uint8_t c) {
+FIO_IFUNC FIO_CONST uint32_t fio_xor_rrot2_shr_32(uint32_t x,
+                                                  uint8_t a,
+                                                  uint8_t b,
+                                                  uint8_t c) {
   return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ (x >> c);
 }
 
 /** 64-bit version of double rotation + shift XOR. */
-FIO_IFUNC uint64_t fio_xor_rrot2_shr_64(uint64_t x,
-                                        uint8_t a,
-                                        uint8_t b,
-                                        uint8_t c) {
+FIO_IFUNC FIO_CONST uint64_t fio_xor_rrot2_shr_64(uint64_t x,
+                                                  uint8_t a,
+                                                  uint8_t b,
+                                                  uint8_t c) {
   return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ (x >> c);
 }
 
@@ -2513,7 +2538,7 @@ Popcount (set bit counting) and Hemming Distance
 /** performs a `popcount` operation to count the set bits. */
 #define fio_popcount(n) __builtin_popcountll(n)
 #else
-FIO_IFUNC int fio_popcount(uint64_t n) {
+FIO_IFUNC FIO_CONST int fio_popcount(uint64_t n) {
   /* for logic, see Wikipedia: https://en.wikipedia.org/wiki/Hamming_weight */
   n = n - ((n >> 1) & 0x5555555555555555);
   n = (n & 0x3333333333333333) + ((n >> 2) & 0x3333333333333333);
@@ -2604,7 +2629,7 @@ FIO_SFUNC size_t fio___single_bit_index_unsafe(uint64_t i) {
 #endif /* __builtin_ctzll || __builtin_clzll */
 
 /** Returns the index of the least significant (lowest) bit. */
-FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
+FIO_SFUNC FIO_CONST size_t fio_lsb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(i);
 #else
@@ -2613,7 +2638,7 @@ FIO_SFUNC size_t fio_lsb_index_unsafe(uint64_t i) {
 }
 
 /** Returns the index of the most significant (highest) bit. */
-FIO_SFUNC size_t fio_msb_index_unsafe(uint64_t i) {
+FIO_SFUNC FIO_CONST size_t fio_msb_index_unsafe(uint64_t i) {
 #if defined(__has_builtin) && __has_builtin(__builtin_clzll)
   return 63 - __builtin_clzll(i);
 #else
@@ -2637,7 +2662,7 @@ Byte Value helpers
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
+FIO_IFUNC FIO_CONST uint32_t fio_has_zero_byte32(uint32_t row) {
   return (row - UINT32_C(0x01010101)) & (~row & UINT32_C(0x80808080));
 }
 
@@ -2646,7 +2671,7 @@ FIO_IFUNC uint32_t fio_has_zero_byte32(uint32_t row) {
  *
  * The requested byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
+FIO_IFUNC FIO_CONST uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
   return fio_has_zero_byte32((row ^ (UINT32_C(0x01010101) * byte)));
 }
 
@@ -2655,7 +2680,7 @@ FIO_IFUNC uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
  *
  * The full byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
+FIO_IFUNC FIO_CONST uint32_t fio_has_full_byte32(uint32_t row) {
   return fio_has_zero_byte32(row);
   // return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
   //        (row & UINT32_C(0x80808080));
@@ -2666,7 +2691,7 @@ FIO_IFUNC uint32_t fio_has_full_byte32(uint32_t row) {
  *
  * The zero byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
+FIO_IFUNC FIO_CONST uint64_t fio_has_zero_byte64(uint64_t row) {
 #define FIO_HAS_ZERO_BYTE64(row)                                               \
   (((row)-UINT64_C(0x0101010101010101)) &                                      \
    ((~(row)) & UINT64_C(0x8080808080808080)))
@@ -2679,7 +2704,7 @@ FIO_IFUNC uint64_t fio_has_zero_byte64(uint64_t row) {
  * This variation should NOT be used to build a bitmap, but May be used to
  * detect the first occurrence.
  */
-FIO_IFUNC uint64_t fio_has_zero_byte_alt64(uint64_t row) {
+FIO_IFUNC FIO_CONST uint64_t fio_has_zero_byte_alt64(uint64_t row) {
 #define FIO_HAS_ZERO_BYTE64(row)                                               \
   (((row)-UINT64_C(0x0101010101010101)) &                                      \
    ((~(row)) & UINT64_C(0x8080808080808080)))
@@ -2691,7 +2716,7 @@ FIO_IFUNC uint64_t fio_has_zero_byte_alt64(uint64_t row) {
  *
  * The requested byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
+FIO_IFUNC FIO_CONST uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
   return fio_has_zero_byte64((row ^ (UINT64_C(0x0101010101010101) * byte)));
 }
 
@@ -2700,7 +2725,7 @@ FIO_IFUNC uint64_t fio_has_byte64(uint64_t row, uint8_t byte) {
  *
  * The full byte will be be set to 0x80, all other bytes will be 0x0.
  */
-FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
+FIO_IFUNC FIO_CONST uint64_t fio_has_full_byte64(uint64_t row) {
 #define FIO_HAS_FULL_BYTE64(row)                                               \
   ((((row)&UINT64_C(0x7F7F7F7F7F7F7F7F)) + UINT64_C(0x0101010101010101)) &     \
    (row)&UINT64_C(0x8080808080808080))
@@ -2708,7 +2733,7 @@ FIO_IFUNC uint64_t fio_has_full_byte64(uint64_t row) {
 }
 
 /** Converts a `fio_has_byteX` result to a bitmap. */
-FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
+FIO_IFUNC FIO_CONST uint64_t fio_has_byte2bitmap(uint64_t result) {
 /** Converts a FIO_HAS_FULL_BYTE64 result to relative position bitmap. */
 #define FIO_HAS_BYTE2BITMAP(result, bit_index)                                 \
   do {                                                                         \
@@ -2724,10 +2749,12 @@ FIO_IFUNC uint64_t fio_has_byte2bitmap(uint64_t result) {
 }
 
 /** Isolates the least significant (lowest) bit. */
-FIO_IFUNC uint64_t fio_bits_lsb(uint64_t i) { return (i & ((~i) + 1)); }
+FIO_IFUNC FIO_CONST uint64_t fio_bits_lsb(uint64_t i) {
+  return (i & ((~i) + 1));
+}
 
 /** Isolates the most significant (highest) bit. */
-FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
+FIO_IFUNC FIO_CONST uint64_t fio_bits_msb(uint64_t i) {
   i |= i >> 1;
   i |= i >> 2;
   i |= i >> 4;
@@ -2739,7 +2766,7 @@ FIO_IFUNC uint64_t fio_bits_msb(uint64_t i) {
 }
 
 /** Returns the index of the most significant (highest) bit. */
-FIO_IFUNC size_t fio_bits_msb_index(uint64_t i) {
+FIO_IFUNC FIO_CONST size_t fio_bits_msb_index(uint64_t i) {
   if (!i)
     goto zero;
   return fio_msb_index_unsafe(i);
@@ -2748,7 +2775,7 @@ zero:
 }
 
 /** Returns the index of the least significant (lowest) bit. */
-FIO_IFUNC size_t fio_bits_lsb_index(uint64_t i) {
+FIO_IFUNC FIO_CONST size_t fio_bits_lsb_index(uint64_t i) {
   if (!i)
     goto zero;
   return fio_lsb_index_unsafe(i);
@@ -3146,46 +3173,383 @@ FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out) {
 }
 
 /**
+ * Optimized 256-bit (4 word) multiplication.
+ * Fully unrolled for maximum performance in ECC-256 and SHA-256 operations.
+ */
+FIO_IFUNC void fio___math_mul_256(uint64_t *restrict dest,
+                                  const uint64_t *a,
+                                  const uint64_t *b) {
+#ifdef __SIZEOF_INT128__
+  /* Use __uint128_t for efficient 64x64->128 multiply */
+  __uint128_t t0, t1, t2, t3, t4;
+
+  /* Zero out destination - we'll accumulate into it */
+  dest[0] = dest[1] = dest[2] = dest[3] = 0;
+  dest[4] = dest[5] = dest[6] = dest[7] = 0;
+
+  /* Row 0: a[0] * b[0..3] */
+  t0 = (__uint128_t)a[0] * b[0];
+  dest[0] = (uint64_t)t0;
+  t1 = t0 >> 64;
+
+  t2 = (__uint128_t)a[0] * b[1];
+  t1 += t2;
+  dest[1] = (uint64_t)t1;
+  t1 >>= 64;
+
+  t3 = (__uint128_t)a[0] * b[2];
+  t1 += t3;
+  dest[2] = (uint64_t)t1;
+  t1 >>= 64;
+
+  t4 = (__uint128_t)a[0] * b[3];
+  t1 += t4;
+  dest[3] = (uint64_t)t1;
+  dest[4] = (uint64_t)(t1 >> 64);
+
+  /* Row 1: a[1] * b[0..3] */
+  t0 = (__uint128_t)a[1] * b[0];
+  t1 = (__uint128_t)dest[1] + (uint64_t)t0;
+  dest[1] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t0 >> 64);
+
+  t2 = (__uint128_t)a[1] * b[1];
+  t1 += (__uint128_t)dest[2] + (uint64_t)t2;
+  dest[2] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t2 >> 64);
+
+  t3 = (__uint128_t)a[1] * b[2];
+  t1 += (__uint128_t)dest[3] + (uint64_t)t3;
+  dest[3] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t3 >> 64);
+
+  t4 = (__uint128_t)a[1] * b[3];
+  t1 += (__uint128_t)dest[4] + (uint64_t)t4;
+  dest[4] = (uint64_t)t1;
+  dest[5] = (uint64_t)((t1 >> 64) + (t4 >> 64));
+
+  /* Row 2: a[2] * b[0..3] */
+  t0 = (__uint128_t)a[2] * b[0];
+  t1 = (__uint128_t)dest[2] + (uint64_t)t0;
+  dest[2] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t0 >> 64);
+
+  t2 = (__uint128_t)a[2] * b[1];
+  t1 += (__uint128_t)dest[3] + (uint64_t)t2;
+  dest[3] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t2 >> 64);
+
+  t3 = (__uint128_t)a[2] * b[2];
+  t1 += (__uint128_t)dest[4] + (uint64_t)t3;
+  dest[4] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t3 >> 64);
+
+  t4 = (__uint128_t)a[2] * b[3];
+  t1 += (__uint128_t)dest[5] + (uint64_t)t4;
+  dest[5] = (uint64_t)t1;
+  dest[6] = (uint64_t)((t1 >> 64) + (t4 >> 64));
+
+  /* Row 3: a[3] * b[0..3] */
+  t0 = (__uint128_t)a[3] * b[0];
+  t1 = (__uint128_t)dest[3] + (uint64_t)t0;
+  dest[3] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t0 >> 64);
+
+  t2 = (__uint128_t)a[3] * b[1];
+  t1 += (__uint128_t)dest[4] + (uint64_t)t2;
+  dest[4] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t2 >> 64);
+
+  t3 = (__uint128_t)a[3] * b[2];
+  t1 += (__uint128_t)dest[5] + (uint64_t)t3;
+  dest[5] = (uint64_t)t1;
+  t1 = (t1 >> 64) + (t3 >> 64);
+
+  t4 = (__uint128_t)a[3] * b[3];
+  t1 += (__uint128_t)dest[6] + (uint64_t)t4;
+  dest[6] = (uint64_t)t1;
+  dest[7] = (uint64_t)((t1 >> 64) + (t4 >> 64));
+#else
+  /* Fallback for platforms without __uint128_t (MSVC) */
+  fio___math_mul_long(dest, a, b, 4);
+#endif
+}
+
+/**
+ * Optimized 512-bit (8 word) multiplication.
+ * Semi-unrolled for hash operations and intermediate crypto.
+ */
+FIO_IFUNC void fio___math_mul_512(uint64_t *restrict dest,
+                                  const uint64_t *a,
+                                  const uint64_t *b) {
+#ifdef __SIZEOF_INT128__
+  /* Use __uint128_t for efficient 64x64->128 multiply */
+  __uint128_t t0, t1;
+
+  /* Zero out destination */
+  for (size_t i = 0; i < 16; ++i)
+    dest[i] = 0;
+
+  /* Outer loop - process each word of 'a' */
+  for (size_t i = 0; i < 8; ++i) {
+    t1 = 0;
+    size_t j = 0;
+
+    /* Inner loop unrolled by 4 */
+    for (; j + 3 < 8; j += 4) {
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      t0 = (__uint128_t)a[i] * b[j];
+      t1 += (__uint128_t)dest[k] + (uint64_t)t0;
+      dest[k] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 1 */
+      t0 = (__uint128_t)a[i] * b[j + 1];
+      t1 += (__uint128_t)dest[k + 1] + (uint64_t)t0;
+      dest[k + 1] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 2 */
+      t0 = (__uint128_t)a[i] * b[j + 2];
+      t1 += (__uint128_t)dest[k + 2] + (uint64_t)t0;
+      dest[k + 2] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 3 */
+      t0 = (__uint128_t)a[i] * b[j + 3];
+      t1 += (__uint128_t)dest[k + 3] + (uint64_t)t0;
+      dest[k + 3] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+    }
+
+    /* Handle remainder */
+    for (; j < 8; ++j) {
+      size_t k = i + j;
+      t0 = (__uint128_t)a[i] * b[j];
+      t1 += (__uint128_t)dest[k] + (uint64_t)t0;
+      dest[k] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+    }
+
+    dest[i + 8] = (uint64_t)t1;
+  }
+#else
+  /* Fallback for platforms without __uint128_t (MSVC) */
+  fio___math_mul_long(dest, a, b, 8);
+#endif
+}
+
+/**
+ * Optimized 1024-bit (16 word) multiplication.
+ * Semi-unrolled for RSA-1024 and intermediate crypto operations.
+ */
+FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
+                                   const uint64_t *a,
+                                   const uint64_t *b) {
+#ifdef __SIZEOF_INT128__
+  /* Use __uint128_t for efficient 64x64->128 multiply */
+  __uint128_t t0, t1;
+
+  /* Zero out destination */
+  for (size_t i = 0; i < 32; ++i)
+    dest[i] = 0;
+
+  /* Outer loop - process each word of 'a' */
+  for (size_t i = 0; i < 16; ++i) {
+    t1 = 0;
+    size_t j = 0;
+
+    /* Inner loop unrolled by 4 */
+    for (; j + 3 < 16; j += 4) {
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      t0 = (__uint128_t)a[i] * b[j];
+      t1 += (__uint128_t)dest[k] + (uint64_t)t0;
+      dest[k] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 1 */
+      t0 = (__uint128_t)a[i] * b[j + 1];
+      t1 += (__uint128_t)dest[k + 1] + (uint64_t)t0;
+      dest[k + 1] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 2 */
+      t0 = (__uint128_t)a[i] * b[j + 2];
+      t1 += (__uint128_t)dest[k + 2] + (uint64_t)t0;
+      dest[k + 2] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+
+      /* Iteration 3 */
+      t0 = (__uint128_t)a[i] * b[j + 3];
+      t1 += (__uint128_t)dest[k + 3] + (uint64_t)t0;
+      dest[k + 3] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+    }
+
+    /* Handle remainder */
+    for (; j < 16; ++j) {
+      size_t k = i + j;
+      t0 = (__uint128_t)a[i] * b[j];
+      t1 += (__uint128_t)dest[k] + (uint64_t)t0;
+      dest[k] = (uint64_t)t1;
+      t1 = (t1 >> 64) + (t0 >> 64);
+    }
+
+    dest[i + 16] = (uint64_t)t1;
+  }
+#else
+  /* Fallback for platforms without __uint128_t (MSVC) */
+  fio___math_mul_long(dest, a, b, 16);
+#endif
+}
+
+/**
  * Multi-precision long multiplication for `len` 64 bit words.
  *
  * `dest` must be `len * 2` long to hold the result.
  *
  * `a` and `b` must be of equal `len`.
  *
- * This uses long multiplication, which may be slower for larger numbers.
+ * This uses long multiplication with loop unrolling for better performance.
  */
 FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
                                    const uint64_t *a,
                                    const uint64_t *b,
                                    const size_t len) {
-  for (size_t i = 0; i < len; ++i)
-    target[i] = 0; /* zero out result */
+  /* Zero out result */
+  for (size_t i = 0; i < len * 2; ++i)
+    target[i] = 0;
+
   for (size_t i = 0; i < len; ++i) {
 #ifdef __SIZEOF_INT128__
     __uint128_t carry = 0;
-    for (size_t j = 0; j < len; j++) {
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 for better performance */
+    for (; j + 3 < len; j += 4) {
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      __uint128_t prod0 = (__uint128_t)a[i] * b[j];
+      __uint128_t sum0 = (__uint128_t)target[k] + (uint64_t)prod0 + carry;
+      target[k] = (uint64_t)sum0;
+      carry = (prod0 >> 64) + (sum0 >> 64);
+
+      /* Iteration 1 */
+      __uint128_t prod1 = (__uint128_t)a[i] * b[j + 1];
+      __uint128_t sum1 = (__uint128_t)target[k + 1] + (uint64_t)prod1 + carry;
+      target[k + 1] = (uint64_t)sum1;
+      carry = (prod1 >> 64) + (sum1 >> 64);
+
+      /* Iteration 2 */
+      __uint128_t prod2 = (__uint128_t)a[i] * b[j + 2];
+      __uint128_t sum2 = (__uint128_t)target[k + 2] + (uint64_t)prod2 + carry;
+      target[k + 2] = (uint64_t)sum2;
+      carry = (prod2 >> 64) + (sum2 >> 64);
+
+      /* Iteration 3 */
+      __uint128_t prod3 = (__uint128_t)a[i] * b[j + 3];
+      __uint128_t sum3 = (__uint128_t)target[k + 3] + (uint64_t)prod3 + carry;
+      target[k + 3] = (uint64_t)sum3;
+      carry = (prod3 >> 64) + (sum3 >> 64);
+    }
+
+    /* Handle remainder */
+    for (; j < len; j++) {
       size_t k = i + j;
       __uint128_t product = (__uint128_t)a[i] * b[j];
-      __uint128_t sum =
-          (__uint128_t)target[k] + (product & 0xFFFFFFFFFFFFFFFF) + carry;
+      __uint128_t sum = (__uint128_t)target[k] + (uint64_t)product + carry;
       target[k] = (uint64_t)sum;
       carry = (product >> 64) + (sum >> 64);
     }
-    target[i + len] += (uint64_t)carry;
+
+    target[i + len] = (uint64_t)carry;
 #else
+    /* Optimized non-__uint128_t path with loop unrolling */
     uint64_t ch = 0, cl = 0;
-    for (size_t j = 0; j < len; ++j) {
-      /* Multiply hi and lo parts, getting a 128-bit result (hi:lo)  */
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 */
+    for (; j + 3 < len; j += 4) {
+      uint64_t hi0, lo0, hi1, lo1, hi2, lo2, hi3, lo3;
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      lo0 = fio_math_mulc64(a[i], b[j], &hi0);
+      target[k] = fio_math_addc64(target[k], lo0, cl, &cl);
+      target[k + 1] = fio_math_addc64(target[k + 1], hi0, ch, &ch);
+
+      /* Iteration 1 */
+      lo1 = fio_math_mulc64(a[i], b[j + 1], &hi1);
+      target[k + 1] = fio_math_addc64(target[k + 1], lo1, cl, &cl);
+      target[k + 2] = fio_math_addc64(target[k + 2], hi1, ch, &ch);
+
+      /* Iteration 2 */
+      lo2 = fio_math_mulc64(a[i], b[j + 2], &hi2);
+      target[k + 2] = fio_math_addc64(target[k + 2], lo2, cl, &cl);
+      target[k + 3] = fio_math_addc64(target[k + 3], hi2, ch, &ch);
+
+      /* Iteration 3 */
+      lo3 = fio_math_mulc64(a[i], b[j + 3], &hi3);
+      target[k + 3] = fio_math_addc64(target[k + 3], lo3, cl, &cl);
+      target[k + 4] = fio_math_addc64(target[k + 4], hi3, ch, &ch);
+    }
+
+    /* Handle remainder */
+    for (; j < len; ++j) {
       uint64_t hi, lo;
       lo = fio_math_mulc64(a[i], b[j], &hi);
-      /* add to result, propagate carry */
       target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
       target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
     }
-    target[len - 1] += cl;
+    target[i + len] += cl;
 #endif
   }
 }
+
+/**
+ * Karatsuba multiplication threshold (in 64-bit words).
+ *
+ * Below this threshold, schoolbook multiplication is faster.
+ * Empirical testing (tests/performance-core.c) shows:
+ *
+ *   Size          Schoolbook      Karatsuba       Winner
+ *   256-bit  (4w)  227 M ops/sec  22 M ops/sec   Schoolbook 10x faster
+ *   512-bit  (8w)  41 M ops/sec   13 M ops/sec   Schoolbook 3x faster
+ *   1024-bit (16w) 9 M ops/sec    5 M ops/sec    Schoolbook 2x faster
+ *   2048-bit (32w) 1.18 M ops/sec 1.34 M ops/sec Karatsuba 1.13x faster
+ *
+ * Crossover point: ~32 words (2048 bits) on modern CPUs.
+ * Conservative threshold accounts for platform variations (28-36 words).
+ *
+ * Override with: -DFIO___MATH_KARATSUBA_THRESHOLD=N for platform tuning.
+ */
+#ifndef FIO___MATH_KARATSUBA_THRESHOLD
+#define FIO___MATH_KARATSUBA_THRESHOLD 32
+#endif
+
+/**
+ * Karatsuba multiplication for large multi-precision numbers.
+ *
+ * For a = a_hi * B + a_lo and b = b_hi * B + b_lo (where B = 2^(half*64)):
+ *   z0 = a_lo * b_lo
+ *   z2 = a_hi * b_hi
+ *   z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2
+ *   result = z2 * B² + z1 * B + z0
+ *
+ * Uses 3 multiplications instead of 4, giving O(n^1.585) complexity.
+ *
+ * `dest` must be `len * 2` long. `a` and `b` must be `len` words each.
+ * `len` must be even.
+ */
+FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
+                                        const uint64_t *a,
+                                        const uint64_t *b,
+                                        const size_t len);
 
 /**
  * Multi-precision MUL for `len` 64 bit words.
@@ -3200,13 +3564,183 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
                             const size_t len) {
   if (!len) {
     dest[0] = 0;
+    return;
   }
-  if (len == 1) { /* route to the correct function */
+  if (len == 1) {
     dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
-  } else { // len < 16
-    fio___math_mul_long(dest, a, b, len);
+    return;
   }
-  /* FIXME!!! (len >= 16) ? Karatsuba-ish / FFT math? : long mul */
+
+  /* Fast paths for common crypto sizes - fully optimized */
+  if (len == 4) {
+    fio___math_mul_256(dest, a, b);
+    return;
+  }
+  if (len == 8) {
+    fio___math_mul_512(dest, a, b);
+    return;
+  }
+  /* Skip 1024-bit fast path - general optimized path is faster
+  if (len == 16) {
+    fio___math_mul_1024(dest, a, b);
+    return;
+  }
+  */
+
+  /* Large numbers: use Karatsuba if above threshold */
+  if (len >= FIO___MATH_KARATSUBA_THRESHOLD && !(len & 1)) {
+    fio___math_mul_karatsuba(dest, a, b, len);
+    return;
+  }
+
+  /* Default: optimized schoolbook multiplication */
+  fio___math_mul_long(dest, a, b, len);
+}
+/* Helper: non-recursive multiplication dispatcher for Karatsuba sub-tasks */
+FIO_IFUNC void fio___math_mul_norecurse(uint64_t *restrict dest,
+                                        const uint64_t *a,
+                                        const uint64_t *b,
+                                        const size_t len) {
+  if (!len) {
+    dest[0] = 0;
+    return;
+  }
+  if (len == 1) {
+    dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
+    return;
+  }
+
+  /* Fast paths for common crypto sizes */
+  if (len == 4) {
+    fio___math_mul_256(dest, a, b);
+    return;
+  }
+  if (len == 8) {
+    fio___math_mul_512(dest, a, b);
+    return;
+  }
+  /* Skip 1024-bit fast path - general optimized path is faster
+  if (len == 16) {
+    fio___math_mul_1024(dest, a, b);
+    return;
+  }
+  */
+
+  /* Always use optimized long multiplication - no recursion */
+  fio___math_mul_long(dest, a, b, len);
+}
+
+/* Karatsuba implementation - non-recursive iterative version */
+FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
+                                        const uint64_t *a,
+                                        const uint64_t *b,
+                                        const size_t len) {
+  const size_t half = len >> 1;
+
+  /* Pointers to halves (little-endian: low words first) */
+  const uint64_t *a_lo = a;
+  const uint64_t *a_hi = a + half;
+  const uint64_t *b_lo = b;
+  const uint64_t *b_hi = b + half;
+
+/* Stack allocation for small sizes, otherwise use heap */
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+  uint64_t z0_buf[len];         /* a_lo * b_lo result (len words) */
+  uint64_t z2_buf[len];         /* a_hi * b_hi result (len words) */
+  uint64_t z1_buf[len + 2];     /* (a_lo+a_hi) * (b_lo+b_hi) result */
+  uint64_t sum_a_buf[half + 1]; /* a_lo + a_hi with carry */
+  uint64_t sum_b_buf[half + 1]; /* b_lo + b_hi with carry */
+  uint64_t *z0 = z0_buf;
+  uint64_t *z2 = z2_buf;
+  uint64_t *z1 = z1_buf;
+  uint64_t *sum_a = sum_a_buf;
+  uint64_t *sum_b = sum_b_buf;
+#else
+  /* MSVC or old C++ - use fixed size with assertion */
+  uint64_t z0_buf[256];
+  uint64_t z2_buf[256];
+  uint64_t z1_buf[258];
+  uint64_t sum_a_buf[129];
+  uint64_t sum_b_buf[129];
+  uint64_t *z0 = z0_buf;
+  uint64_t *z2 = z2_buf;
+  uint64_t *z1 = z1_buf;
+  uint64_t *sum_a = sum_a_buf;
+  uint64_t *sum_b = sum_b_buf;
+  FIO_ASSERT(len <= 256,
+             "Karatsuba multiplication overflow at 16384 bit numbers");
+#endif
+
+  /* Initialize all buffers to zero */
+  FIO_MEMSET(z0, 0, len * sizeof(uint64_t));
+  FIO_MEMSET(z2, 0, len * sizeof(uint64_t));
+  FIO_MEMSET(z1, 0, (len + 2) * sizeof(uint64_t));
+  FIO_MEMSET(sum_a, 0, (half + 1) * sizeof(uint64_t));
+  FIO_MEMSET(sum_b, 0, (half + 1) * sizeof(uint64_t));
+
+  /* z0 = a_lo * b_lo - non-recursive */
+  fio___math_mul_norecurse(z0, a_lo, b_lo, half);
+
+  /* z2 = a_hi * b_hi - non-recursive */
+  fio___math_mul_norecurse(z2, a_hi, b_hi, half);
+
+  /* sum_a = a_lo + a_hi (with potential carry into extra word) */
+  FIO_MEMCPY(sum_a, a_lo, half * sizeof(uint64_t));
+  sum_a[half] = (uint64_t)fio_math_add(sum_a, sum_a, a_hi, half);
+
+  /* sum_b = b_lo + b_hi (with potential carry into extra word) */
+  FIO_MEMCPY(sum_b, b_lo, half * sizeof(uint64_t));
+  sum_b[half] = (uint64_t)fio_math_add(sum_b, sum_b, b_hi, half);
+
+  /* z1 = sum_a * sum_b - non-recursive
+   * Result is (half+1) * 2 = len+2 words */
+  fio___math_mul_norecurse(z1, sum_a, sum_b, half + 1);
+
+  /* z1 = z1 - z0 - z2
+   * Note: z1 is len+2 words, z0 and z2 are len words */
+  {
+    uint64_t borrow = fio_math_sub(z1, z1, z0, len);
+    /* Propagate borrow to upper words */
+    for (size_t i = len; i < len + 2 && borrow; ++i) {
+      uint64_t tmp = z1[i];
+      z1[i] = tmp - borrow;
+      borrow = (z1[i] > tmp);
+    }
+  }
+  {
+    uint64_t borrow = fio_math_sub(z1, z1, z2, len);
+    for (size_t i = len; i < len + 2 && borrow; ++i) {
+      uint64_t tmp = z1[i];
+      z1[i] = tmp - borrow;
+      borrow = (z1[i] > tmp);
+    }
+  }
+
+  /* Combine: dest = z2 * B² + z1 * B + z0
+   * dest layout (2*len words):
+   *   [0..len-1]     : low part (z0 contributes here, z1*B overlaps)
+   *   [len..2*len-1] : high part (z2 contributes here, z1*B overlaps)
+   */
+  FIO_MEMSET(dest, 0, 2 * len * sizeof(uint64_t));
+
+  /* Add z0 at position 0 */
+  FIO_MEMCPY(dest, z0, len * sizeof(uint64_t));
+
+  /* Add z1 at position half (z1 * B) */
+  {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < len + 2 && (half + i) < 2 * len; ++i) {
+      dest[half + i] = fio_math_addc64(dest[half + i], z1[i], carry, &carry);
+    }
+  }
+
+  /* Add z2 at position len (z2 * B²) */
+  {
+    uint64_t carry = 0;
+    for (size_t i = 0; i < len; ++i) {
+      dest[len + i] = fio_math_addc64(dest[len + i], z2[i], carry, &carry);
+    }
+  }
 }
 
 /* *****************************************************************************
@@ -3403,11 +3937,17 @@ FIO_MATH_TYPE_LOADER(4096, 512)
 
 /* *****************************************************************************
 Vector Helpers - Vector Math Operations
+
+The `bits` parameter selects which union member to access (.x64, .x32, etc.).
+The loop count is computed dynamically via sizeof, yielding:
+- GCC/Clang: 1 iteration (full-width vector in .x64[0])
+- ARM NEON: bits/128 iterations (128-bit vectors in .x64[])
+- Scalar: bits/64 iterations (64-bit scalars in .u64[])
 ***************************************************************************** */
 
 #if FIO_HAS_UX && !defined(DEBUG)
 
-/** Performs `a op b` (+,-, *, etc') as a vector of `bit` long words. */
+/** Performs `a op b` (+,-, *, etc') using vector member .x##bits[]. */
 #define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
@@ -3552,6 +4092,70 @@ FIO___UXXX_DEF_OP4T(4096)
 #undef FIO___UXXX_DEF_OP4T_INNER
 #undef FIO___UXXX_DEF_OP
 #undef FIO___UXXX_DEF_OP2
+
+/* *****************************************************************************
+SIMD-Optimized Vector Operations (XOR, AND, OR) - Value Semantics
+
+These provide return-by-value vector operations that leverage SIMD when
+available. The naming convention is fio_uXXX_<op>v (v = value semantics).
+
+Uses the existing FIO_MATH_UXXX_OP macro which correctly accesses union members:
+- .x64[], .x32[] etc. when FIO_HAS_UX is defined (vector types)
+- .u64[], .u32[] etc. otherwise (scalar fallback)
+
+IMPORTANT: The `64` parameter in FIO_MATH_UXXX_OP selects the union member
+(.x64), NOT the element size. The loop count is computed dynamically:
+
+  sizeof((t).x64) / sizeof((t).x64[0])
+
+This yields different iteration counts based on the platform:
+
+- GCC/Clang vector_size: x64[1] is a SINGLE full-width vector (128/256/512-bit)
+  so the loop runs ONCE, operating on the entire vector in one instruction.
+
+- ARM NEON: x64[bits/128] is an array of 128-bit vectors (uint64x2_t),
+  so the loop runs bits/128 times (e.g., 2 for 256-bit, 4 for 512-bit).
+
+- Scalar fallback: Uses .u64[bits/64] array, loop runs bits/64 times.
+
+The compiler auto-vectorizes these operations when possible.
+***************************************************************************** */
+
+/** Macro to define value-returning binary vector operations for a given size */
+#define FIO___UXXX_SIMD_BINOP_DEF(bits)                                        \
+  /** XOR two values, returning result by value. */                            \
+  FIO_MIFN fio_u##bits fio_u##bits##_xorv(fio_u##bits a, fio_u##bits b) {      \
+    fio_u##bits r;                                                             \
+    FIO_MATH_UXXX_OP(r, a, b, 64, ^);                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** AND two values, returning result by value. */                            \
+  FIO_MIFN fio_u##bits fio_u##bits##_andv(fio_u##bits a, fio_u##bits b) {      \
+    fio_u##bits r;                                                             \
+    FIO_MATH_UXXX_OP(r, a, b, 64, &);                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** OR two values, returning result by value. */                             \
+  FIO_MIFN fio_u##bits fio_u##bits##_orv(fio_u##bits a, fio_u##bits b) {       \
+    fio_u##bits r;                                                             \
+    FIO_MATH_UXXX_OP(r, a, b, 64, |);                                          \
+    return r;                                                                  \
+  }                                                                            \
+  /** ADD two values as 64-bit lanes, returning result by value. */            \
+  FIO_MIFN fio_u##bits fio_u##bits##_addv64(fio_u##bits a, fio_u##bits b) {    \
+    fio_u##bits r;                                                             \
+    FIO_MATH_UXXX_OP(r, a, b, 64, +);                                          \
+    return r;                                                                  \
+  }
+
+FIO___UXXX_SIMD_BINOP_DEF(128)
+FIO___UXXX_SIMD_BINOP_DEF(256)
+FIO___UXXX_SIMD_BINOP_DEF(512)
+FIO___UXXX_SIMD_BINOP_DEF(1024)
+FIO___UXXX_SIMD_BINOP_DEF(2048)
+FIO___UXXX_SIMD_BINOP_DEF(4096)
+
+#undef FIO___UXXX_SIMD_BINOP_DEF
 
 /* *****************************************************************************
 Vector Helpers - Multi-Precision Math
@@ -3925,7 +4529,7 @@ UTF-8 Support (basic)
 #endif
 
 /* Returns the number of bytes required to UTF-8 encoded a code point `u` */
-FIO_IFUNC unsigned fio_utf8_code_len(uint32_t u) {
+FIO_IFUNC FIO_CONST unsigned fio_utf8_code_len(uint32_t u) {
   uint32_t len = (1U + ((uint32_t)(u) > 127) + ((uint32_t)(u) > 2047) +
                   ((uint32_t)(u) > 65535));
   len &= (uint32_t)((uint32_t)(u) > ((1U << 21) - 1)) - 1;
@@ -3933,7 +4537,7 @@ FIO_IFUNC unsigned fio_utf8_code_len(uint32_t u) {
 }
 
 /** Returns 1-4 (UTF-8 char length), 8 (middle of a char) or 0 (invalid). */
-FIO_IFUNC unsigned fio_utf8_char_len_unsafe(uint8_t c) {
+FIO_IFUNC FIO_CONST unsigned fio_utf8_char_len_unsafe(uint8_t c) {
   /* Ruby script for map:
   map = [];
   32.times { | i |
@@ -4209,15 +4813,16 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_SHA2
 #undef FIO_SECRET
 #undef FIO_OTP
-#define FIO_AES
 #define FIO_CRYPTO_CORE
+#define FIO_AES
+#define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
+#define FIO_OTP
+#define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
-#define FIO_SECRET
-#define FIO_OTP
-
+#define FIO_SHA3
 #endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
@@ -4347,6 +4952,15 @@ FIO_MAP Ordering & Naming Shortcut
 #if defined(FIO_HTTP)
 #undef FIO_HTTP_HANDLE
 #define FIO_HTTP_HANDLE
+#endif
+
+#if defined(FIO_HTTP_HANDLE)
+#undef FIO_JSON
+#define FIO_JSON
+#undef FIO_MULTIPART
+#define FIO_MULTIPART
+#undef FIO_URL_ENCODED
+#define FIO_URL_ENCODED
 #endif
 
 #if (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
@@ -5026,12 +5640,46 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
   const char *s = (const char *)src_;
 
-  if ((d == s) | !bytes | !d | !s) {
+  if (FIO_UNLIKELY((d == s) | !bytes | !d | !s)) {
     if (bytes && (d != s))
       FIO_LOG_DEBUG2("fio_memcpy null error - ignored instruction");
     return d;
   }
 
+  /* Fast path for small, non-overlapping copies (<=64 bytes) */
+  if (bytes <= 64 && (d + bytes <= s || s + bytes <= d)) {
+    if (bytes <= 8) {
+      /* Handle 1-8 bytes with overlapping copies */
+      if (bytes >= 4) {
+        fio_memcpy4(d, s);
+        fio_memcpy4(d + bytes - 4, s + bytes - 4);
+      } else if (bytes >= 2) {
+        fio_memcpy2(d, s);
+        fio_memcpy2(d + bytes - 2, s + bytes - 2);
+      } else {
+        *d = *s;
+      }
+      return dest_;
+    }
+    if (bytes <= 16) {
+      /* 9-16 bytes: two overlapping 8-byte copies */
+      fio_memcpy8(d, s);
+      fio_memcpy8(d + bytes - 8, s + bytes - 8);
+      return dest_;
+    }
+    if (bytes <= 32) {
+      /* 17-32 bytes: two overlapping 16-byte copies */
+      fio_memcpy16(d, s);
+      fio_memcpy16(d + bytes - 16, s + bytes - 16);
+      return dest_;
+    }
+    /* 33-64 bytes: two overlapping 32-byte copies */
+    fio_memcpy32(d, s);
+    fio_memcpy32(d + bytes - 32, s + bytes - 32);
+    return dest_;
+  }
+
+  /* Existing path for larger copies or overlapping memory */
   if (s + bytes <= d || d + bytes <= s ||
       (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
     return fio___memcpy_unsafe_x(d, s, bytes);
@@ -5057,7 +5705,7 @@ SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
-  if (bytes < 32)
+  if (FIO_UNLIKELY(bytes < 32))
     goto small_memset;
 
   /* 32 byte groups */
@@ -5096,12 +5744,10 @@ small_memset:
 FIO_MEMCHR / fio_memchr - memchr fallbacks
 ***************************************************************************** */
 
-/**
- * A token seeking function. This is a fallback for `memchr`, but `memchr`
- * should be faster.
- */
-SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
-  // return (void *)memchr(buffer, token, len); /* FIXME */
+/* Scalar implementation - fallback for all platforms */
+FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
+                                    const char token,
+                                    size_t len) {
   const char *r = (const char *)buffer;
   const char *e = r + (len - 127);
   uint64_t u[16] FIO_ALIGN(16) = {0};
@@ -5111,7 +5757,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
   umsk |= (umsk << 8);
-  if (len < 8)
+  if (FIO_UNLIKELY(len < 8))
     goto small_memchr;
   while (r < e) {
     fio_memcpy128(u, r);
@@ -5156,11 +5802,265 @@ found_in_8:
 }
 
 /* *****************************************************************************
+FIO_MEMCHR - SIMD implementations
+***************************************************************************** */
+
+#if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+/* SSE2 implementation - 16 bytes at a time */
+FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 16 bytes */
+  const __m128i needle = _mm_set1_epi8(token);
+
+  /* Handle unaligned head - process byte by byte until aligned */
+  while (((uintptr_t)r & 15) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 64 bytes (4x16) at a time for better throughput */
+  const uint8_t *e64 = e - 63;
+  while (r < e64) {
+    __m128i v0 = _mm_load_si128((const __m128i *)(r));
+    __m128i v1 = _mm_load_si128((const __m128i *)(r + 16));
+    __m128i v2 = _mm_load_si128((const __m128i *)(r + 32));
+    __m128i v3 = _mm_load_si128((const __m128i *)(r + 48));
+    __m128i cmp0 = _mm_cmpeq_epi8(v0, needle);
+    __m128i cmp1 = _mm_cmpeq_epi8(v1, needle);
+    __m128i cmp2 = _mm_cmpeq_epi8(v2, needle);
+    __m128i cmp3 = _mm_cmpeq_epi8(v3, needle);
+    /* Combine results to check if any match found */
+    __m128i or01 = _mm_or_si128(cmp0, cmp1);
+    __m128i or23 = _mm_or_si128(cmp2, cmp3);
+    __m128i orall = _mm_or_si128(or01, or23);
+    int mask = _mm_movemask_epi8(orall);
+    if (mask) {
+      /* Found a match - determine which 16-byte chunk */
+      int m0 = _mm_movemask_epi8(cmp0);
+      if (m0)
+        return (void *)(r + __builtin_ctz(m0));
+      int m1 = _mm_movemask_epi8(cmp1);
+      if (m1)
+        return (void *)(r + 16 + __builtin_ctz(m1));
+      int m2 = _mm_movemask_epi8(cmp2);
+      if (m2)
+        return (void *)(r + 32 + __builtin_ctz(m2));
+      int m3 = _mm_movemask_epi8(cmp3);
+      return (void *)(r + 48 + __builtin_ctz(m3));
+    }
+    r += 64;
+  }
+
+  /* Process remaining 16-byte chunks */
+  const uint8_t *e16 = e - 15;
+  while (r < e16) {
+    __m128i v = _mm_load_si128((const __m128i *)r);
+    __m128i cmp = _mm_cmpeq_epi8(v, needle);
+    int mask = _mm_movemask_epi8(cmp);
+    if (mask)
+      return (void *)(r + __builtin_ctz(mask));
+    r += 16;
+  }
+
+  /* Handle tail bytes */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* SSE2 */
+
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+/* AVX2 implementation - 32 bytes at a time */
+FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 32 bytes */
+  const __m256i needle = _mm256_set1_epi8(token);
+
+  /* Handle unaligned head - process byte by byte until 32-byte aligned */
+  while (((uintptr_t)r & 31) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 128 bytes (4x32) at a time for better throughput */
+  const uint8_t *e128 = e - 127;
+  while (r < e128) {
+    __m256i v0 = _mm256_load_si256((const __m256i *)(r));
+    __m256i v1 = _mm256_load_si256((const __m256i *)(r + 32));
+    __m256i v2 = _mm256_load_si256((const __m256i *)(r + 64));
+    __m256i v3 = _mm256_load_si256((const __m256i *)(r + 96));
+    __m256i cmp0 = _mm256_cmpeq_epi8(v0, needle);
+    __m256i cmp1 = _mm256_cmpeq_epi8(v1, needle);
+    __m256i cmp2 = _mm256_cmpeq_epi8(v2, needle);
+    __m256i cmp3 = _mm256_cmpeq_epi8(v3, needle);
+    /* Combine results to check if any match found */
+    __m256i or01 = _mm256_or_si256(cmp0, cmp1);
+    __m256i or23 = _mm256_or_si256(cmp2, cmp3);
+    __m256i orall = _mm256_or_si256(or01, or23);
+    int mask = _mm256_movemask_epi8(orall);
+    if (mask) {
+      /* Found a match - determine which 32-byte chunk */
+      int m0 = _mm256_movemask_epi8(cmp0);
+      if (m0)
+        return (void *)(r + __builtin_ctz(m0));
+      int m1 = _mm256_movemask_epi8(cmp1);
+      if (m1)
+        return (void *)(r + 32 + __builtin_ctz(m1));
+      int m2 = _mm256_movemask_epi8(cmp2);
+      if (m2)
+        return (void *)(r + 64 + __builtin_ctz(m2));
+      int m3 = _mm256_movemask_epi8(cmp3);
+      return (void *)(r + 96 + __builtin_ctz(m3));
+    }
+    r += 128;
+  }
+
+  /* Process remaining 32-byte chunks */
+  const uint8_t *e32 = e - 31;
+  while (r < e32) {
+    __m256i v = _mm256_load_si256((const __m256i *)r);
+    __m256i cmp = _mm256_cmpeq_epi8(v, needle);
+    int mask = _mm256_movemask_epi8(cmp);
+    if (mask)
+      return (void *)(r + __builtin_ctz(mask));
+    r += 32;
+  }
+
+  /* Handle tail bytes - fall through to SSE2 or scalar for remaining */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* AVX2 */
+
+#if defined(FIO___HAS_ARM_INTRIN)
+/* ARM NEON implementation - 16 bytes at a time */
+FIO_SFUNC void *fio___memchr_neon(const void *buffer,
+                                  const char token,
+                                  size_t len) {
+  const uint8_t *r = (const uint8_t *)buffer;
+  const uint8_t *e = r + len;
+  /* Broadcast token to all 16 bytes */
+  const uint8x16_t needle = vdupq_n_u8((uint8_t)token);
+
+  /* Handle unaligned head - process byte by byte until aligned */
+  while (((uintptr_t)r & 15) && r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  if (r >= e)
+    return NULL;
+
+  /* Main loop: process 64 bytes (4x16) at a time for better throughput */
+  const uint8_t *e64 = e - 63;
+  while (r < e64) {
+    uint8x16_t v0 = vld1q_u8(r);
+    uint8x16_t v1 = vld1q_u8(r + 16);
+    uint8x16_t v2 = vld1q_u8(r + 32);
+    uint8x16_t v3 = vld1q_u8(r + 48);
+    uint8x16_t cmp0 = vceqq_u8(v0, needle);
+    uint8x16_t cmp1 = vceqq_u8(v1, needle);
+    uint8x16_t cmp2 = vceqq_u8(v2, needle);
+    uint8x16_t cmp3 = vceqq_u8(v3, needle);
+    /* Combine results using OR to check if any match found */
+    uint8x16_t or01 = vorrq_u8(cmp0, cmp1);
+    uint8x16_t or23 = vorrq_u8(cmp2, cmp3);
+    uint8x16_t orall = vorrq_u8(or01, or23);
+    /* Check if any byte is non-zero (match found) */
+    uint64x2_t orall64 = vreinterpretq_u64_u8(orall);
+    if (vgetq_lane_u64(orall64, 0) | vgetq_lane_u64(orall64, 1)) {
+      /* Found a match - determine which 16-byte chunk and position */
+      uint64x2_t cmp0_64 = vreinterpretq_u64_u8(cmp0);
+      if (vgetq_lane_u64(cmp0_64, 0) | vgetq_lane_u64(cmp0_64, 1)) {
+        /* Match in first chunk - find exact position */
+        for (size_t i = 0; i < 16; ++i)
+          if (r[i] == (uint8_t)token)
+            return (void *)(r + i);
+      }
+      uint64x2_t cmp1_64 = vreinterpretq_u64_u8(cmp1);
+      if (vgetq_lane_u64(cmp1_64, 0) | vgetq_lane_u64(cmp1_64, 1)) {
+        for (size_t i = 0; i < 16; ++i)
+          if (r[16 + i] == (uint8_t)token)
+            return (void *)(r + 16 + i);
+      }
+      uint64x2_t cmp2_64 = vreinterpretq_u64_u8(cmp2);
+      if (vgetq_lane_u64(cmp2_64, 0) | vgetq_lane_u64(cmp2_64, 1)) {
+        for (size_t i = 0; i < 16; ++i)
+          if (r[32 + i] == (uint8_t)token)
+            return (void *)(r + 32 + i);
+      }
+      for (size_t i = 0; i < 16; ++i)
+        if (r[48 + i] == (uint8_t)token)
+          return (void *)(r + 48 + i);
+    }
+    r += 64;
+  }
+
+  /* Process remaining 16-byte chunks */
+  const uint8_t *e16 = e - 15;
+  while (r < e16) {
+    uint8x16_t v = vld1q_u8(r);
+    uint8x16_t cmp = vceqq_u8(v, needle);
+    uint64x2_t cmp64 = vreinterpretq_u64_u8(cmp);
+    if (vgetq_lane_u64(cmp64, 0) | vgetq_lane_u64(cmp64, 1)) {
+      for (size_t i = 0; i < 16; ++i)
+        if (r[i] == (uint8_t)token)
+          return (void *)(r + i);
+    }
+    r += 16;
+  }
+
+  /* Handle tail bytes */
+  while (r < e) {
+    if (*r == (uint8_t)token)
+      return (void *)r;
+    ++r;
+  }
+  return NULL;
+}
+#endif /* ARM NEON */
+
+/**
+ * A token seeking function. This is a fallback for `memchr`, but `memchr`
+ * should be faster.
+ */
+SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+  return fio___memchr_avx2(buffer, token, len);
+#elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+  return fio___memchr_sse2(buffer, token, len);
+#elif defined(FIO___HAS_ARM_INTRIN)
+  return fio___memchr_neon(buffer, token, len);
+#else
+  return fio___memchr_scalar(buffer, token, len);
+#endif
+}
+
+/* *****************************************************************************
 fio_strlen
 ***************************************************************************** */
 
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  if (!str)
+  if (FIO_UNLIKELY(!str))
     return 0;
   uintptr_t start = (uintptr_t)str;
   /* we must align memory, to avoid crushing when nearing last page boundary */
@@ -5213,7 +6113,7 @@ fio_memcmp
 
 /** Same as `memcmp`. Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`. */
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  if (a_ == b_ || !len)
+  if (FIO_UNLIKELY(a_ == b_ || !len))
     return 0;
   uint64_t ua[8] FIO_ALIGN(16);
   uint64_t ub[8] FIO_ALIGN(16);
@@ -5223,9 +6123,9 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   char *e;
   if (*a != *b)
     return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
-  if (len < 8)
+  if (FIO_UNLIKELY(len < 8))
     goto fio_memcmp_mini;
-  if (len < 64)
+  if (FIO_UNLIKELY(len < 64))
     goto fio_memcmp_small;
 
   e = a + len - 63;
@@ -25619,6 +26519,530 @@ Module Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_BLAKE2             /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                  BLAKE2
+                        BLAKE2b (64-bit) and BLAKE2s (32-bit)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_BLAKE2) && !defined(H___FIO_BLAKE2___H)
+#define H___FIO_BLAKE2___H
+/* *****************************************************************************
+BLAKE2 API
+***************************************************************************** */
+
+/** Streaming BLAKE2b type (64-bit, up to 64-byte digest). */
+typedef struct {
+  uint64_t h[8];    /* state */
+  uint64_t t[2];    /* total bytes processed (128-bit counter) */
+  uint64_t f[2];    /* finalization flags */
+  uint8_t buf[128]; /* input buffer */
+  size_t buflen;    /* bytes in buffer */
+  size_t outlen;    /* digest length */
+} fio_blake2b_s;
+
+/** Streaming BLAKE2s type (32-bit, up to 32-byte digest). */
+typedef struct {
+  uint32_t h[8];   /* state */
+  uint32_t t[2];   /* total bytes processed (64-bit counter) */
+  uint32_t f[2];   /* finalization flags */
+  uint8_t buf[64]; /* input buffer */
+  size_t buflen;   /* bytes in buffer */
+  size_t outlen;   /* digest length */
+} fio_blake2s_s;
+
+/* *****************************************************************************
+BLAKE2b API (64-bit optimized, up to 64-byte digest)
+***************************************************************************** */
+
+/**
+ * A simple, non-streaming implementation of BLAKE2b.
+ *
+ * `out` must point to a buffer of at least `outlen` bytes.
+ * `outlen` must be between 1 and 64 (default 64 if 0).
+ * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+ */
+SFUNC void fio_blake2b(void *restrict out,
+                       size_t outlen,
+                       const void *restrict data,
+                       size_t len,
+                       const void *restrict key,
+                       size_t keylen);
+
+/** Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64). */
+SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen);
+
+/** Feed data into BLAKE2b hash. */
+SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
+                               const void *restrict data,
+                               size_t len);
+
+/** Finalize BLAKE2b hash. Writes `h->outlen` bytes to `out`. */
+SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out);
+
+/* *****************************************************************************
+BLAKE2s API (32-bit optimized, up to 32-byte digest)
+***************************************************************************** */
+
+/**
+ * A simple, non-streaming implementation of BLAKE2s.
+ *
+ * `out` must point to a buffer of at least `outlen` bytes.
+ * `outlen` must be between 1 and 32 (default 32 if 0).
+ * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+ */
+SFUNC void fio_blake2s(void *restrict out,
+                       size_t outlen,
+                       const void *restrict data,
+                       size_t len,
+                       const void *restrict key,
+                       size_t keylen);
+
+/** Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32). */
+SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen);
+
+/** Feed data into BLAKE2s hash. */
+SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
+                               const void *restrict data,
+                               size_t len);
+
+/** Finalize BLAKE2s hash. Writes `h->outlen` bytes to `out`. */
+SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out);
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+BLAKE2b Implementation (64-bit)
+***************************************************************************** */
+
+/* BLAKE2b initialization vector */
+static const uint64_t fio___blake2b_iv[8] = {0x6A09E667F3BCC908ULL,
+                                             0xBB67AE8584CAA73BULL,
+                                             0x3C6EF372FE94F82BULL,
+                                             0xA54FF53A5F1D36F1ULL,
+                                             0x510E527FADE682D1ULL,
+                                             0x9B05688C2B3E6C1FULL,
+                                             0x1F83D9ABFB41BD6BULL,
+                                             0x5BE0CD19137E2179ULL};
+
+/* BLAKE2b sigma permutation table */
+static const uint8_t fio___blake2b_sigma[12][16] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3},
+    {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4},
+    {7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8},
+    {9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13},
+    {2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9},
+    {12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11},
+    {13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10},
+    {6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5},
+    {10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0},
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3}};
+
+/* BLAKE2b G mixing function */
+#define FIO___BLAKE2B_G(r, i, a, b, c, d, m)                                   \
+  do {                                                                         \
+    (a) += (b) + m[fio___blake2b_sigma[r][2 * (i)]];                           \
+    (d) = fio_rrot64((d) ^ (a), 32);                                           \
+    (c) += (d);                                                                \
+    (b) = fio_rrot64((b) ^ (c), 24);                                           \
+    (a) += (b) + m[fio___blake2b_sigma[r][2 * (i) + 1]];                       \
+    (d) = fio_rrot64((d) ^ (a), 16);                                           \
+    (c) += (d);                                                                \
+    (b) = fio_rrot64((b) ^ (c), 63);                                           \
+  } while (0)
+
+/* BLAKE2b round function */
+#define FIO___BLAKE2B_ROUND(r, v, m)                                           \
+  do {                                                                         \
+    FIO___BLAKE2B_G(r, 0, v[0], v[4], v[8], v[12], m);                         \
+    FIO___BLAKE2B_G(r, 1, v[1], v[5], v[9], v[13], m);                         \
+    FIO___BLAKE2B_G(r, 2, v[2], v[6], v[10], v[14], m);                        \
+    FIO___BLAKE2B_G(r, 3, v[3], v[7], v[11], v[15], m);                        \
+    FIO___BLAKE2B_G(r, 4, v[0], v[5], v[10], v[15], m);                        \
+    FIO___BLAKE2B_G(r, 5, v[1], v[6], v[11], v[12], m);                        \
+    FIO___BLAKE2B_G(r, 6, v[2], v[7], v[8], v[13], m);                         \
+    FIO___BLAKE2B_G(r, 7, v[3], v[4], v[9], v[14], m);                         \
+  } while (0)
+
+/* BLAKE2b compression function */
+FIO_IFUNC void fio___blake2b_compress(fio_blake2b_s *restrict h,
+                                      const uint8_t *restrict block,
+                                      int is_last) {
+  uint64_t v[16] FIO_ALIGN(64);
+  uint64_t m[16] FIO_ALIGN(64);
+
+  /* Initialize working vector */
+  for (size_t i = 0; i < 8; ++i) {
+    v[i] = h->h[i];
+    v[i + 8] = fio___blake2b_iv[i];
+  }
+  v[12] ^= h->t[0];
+  v[13] ^= h->t[1];
+  if (is_last)
+    v[14] = ~v[14]; /* Invert finalization flag */
+
+  /* Load message block (little-endian) */
+  for (size_t i = 0; i < 16; ++i)
+    m[i] = fio_buf2u64_le(block + i * 8);
+
+  /* 12 rounds of mixing */
+  FIO___BLAKE2B_ROUND(0, v, m);
+  FIO___BLAKE2B_ROUND(1, v, m);
+  FIO___BLAKE2B_ROUND(2, v, m);
+  FIO___BLAKE2B_ROUND(3, v, m);
+  FIO___BLAKE2B_ROUND(4, v, m);
+  FIO___BLAKE2B_ROUND(5, v, m);
+  FIO___BLAKE2B_ROUND(6, v, m);
+  FIO___BLAKE2B_ROUND(7, v, m);
+  FIO___BLAKE2B_ROUND(8, v, m);
+  FIO___BLAKE2B_ROUND(9, v, m);
+  FIO___BLAKE2B_ROUND(10, v, m);
+  FIO___BLAKE2B_ROUND(11, v, m);
+
+  /* Finalize state */
+  for (size_t i = 0; i < 8; ++i)
+    h->h[i] ^= v[i] ^ v[i + 8];
+}
+
+#undef FIO___BLAKE2B_G
+#undef FIO___BLAKE2B_ROUND
+
+/** Initialize a BLAKE2b streaming context. */
+SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen) {
+  fio_blake2b_s h = {0};
+
+  /* Validate parameters */
+  if (outlen == 0)
+    outlen = 64;
+  if (outlen > 64)
+    outlen = 64;
+  if (keylen > 64)
+    keylen = 64;
+
+  h.outlen = outlen;
+
+  /* Initialize state with IV */
+  for (size_t i = 0; i < 8; ++i)
+    h.h[i] = fio___blake2b_iv[i];
+
+  /* XOR parameter block into state[0] */
+  /* Parameter block: fanout=1, depth=1, leaf_len=0, node_offset=0,
+   * node_depth=0, inner_len=0, reserved=0, salt=0, personal=0 */
+  h.h[0] ^= 0x01010000ULL ^ ((uint64_t)keylen << 8) ^ (uint64_t)outlen;
+
+  /* If keyed, pad key to 128 bytes and process as first block */
+  if (keylen > 0 && key) {
+    FIO_MEMSET(h.buf, 0, 128);
+    FIO_MEMCPY(h.buf, key, keylen);
+    h.buflen = 128;
+  }
+
+  return h;
+}
+
+/** Feed data into BLAKE2b hash. */
+SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
+                               const void *restrict data,
+                               size_t len) {
+  const uint8_t *p = (const uint8_t *)data;
+
+  /* If we have buffered data, try to complete a block */
+  if (h->buflen > 0) {
+    size_t fill = 128 - h->buflen;
+    if (len < fill) {
+      FIO_MEMCPY(h->buf + h->buflen, p, len);
+      h->buflen += len;
+      return;
+    }
+    FIO_MEMCPY(h->buf + h->buflen, p, fill);
+    h->t[0] += 128;
+    if (h->t[0] < 128)
+      h->t[1]++; /* Overflow */
+    fio___blake2b_compress(h, h->buf, 0);
+    h->buflen = 0;
+    p += fill;
+    len -= fill;
+  }
+
+  /* Process full blocks */
+  while (len > 128) {
+    h->t[0] += 128;
+    if (h->t[0] < 128)
+      h->t[1]++;
+    fio___blake2b_compress(h, p, 0);
+    p += 128;
+    len -= 128;
+  }
+
+  /* Buffer remaining data */
+  if (len > 0) {
+    FIO_MEMCPY(h->buf, p, len);
+    h->buflen = len;
+  }
+}
+
+/** Finalize BLAKE2b hash. */
+SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
+  /* Update counter with remaining bytes */
+  h->t[0] += h->buflen;
+  if (h->t[0] < h->buflen)
+    h->t[1]++;
+
+  /* Pad remaining buffer with zeros */
+  if (h->buflen < 128)
+    FIO_MEMSET(h->buf + h->buflen, 0, 128 - h->buflen);
+
+  /* Final compression */
+  fio___blake2b_compress(h, h->buf, 1);
+
+  /* Output hash (little-endian) */
+  uint8_t *o = (uint8_t *)out;
+  for (size_t i = 0; i < h->outlen; ++i)
+    o[i] = (uint8_t)(h->h[i / 8] >> (8 * (i % 8)));
+}
+
+/** Simple non-streaming BLAKE2b. */
+SFUNC void fio_blake2b(void *restrict out,
+                       size_t outlen,
+                       const void *restrict data,
+                       size_t len,
+                       const void *restrict key,
+                       size_t keylen) {
+  fio_blake2b_s h = fio_blake2b_init(outlen, key, keylen);
+  fio_blake2b_consume(&h, data, len);
+  fio_blake2b_finalize(&h, out);
+}
+
+/* *****************************************************************************
+BLAKE2s Implementation (32-bit)
+***************************************************************************** */
+
+/* BLAKE2s initialization vector */
+static const uint32_t fio___blake2s_iv[8] = {0x6A09E667UL,
+                                             0xBB67AE85UL,
+                                             0x3C6EF372UL,
+                                             0xA54FF53AUL,
+                                             0x510E527FUL,
+                                             0x9B05688CUL,
+                                             0x1F83D9ABUL,
+                                             0x5BE0CD19UL};
+
+/* BLAKE2s sigma permutation table (same as BLAKE2b) */
+static const uint8_t fio___blake2s_sigma[10][16] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3},
+    {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4},
+    {7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8},
+    {9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13},
+    {2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9},
+    {12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11},
+    {13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10},
+    {6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5},
+    {10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0}};
+
+/* BLAKE2s G mixing function */
+#define FIO___BLAKE2S_G(r, i, a, b, c, d, m)                                   \
+  do {                                                                         \
+    (a) += (b) + m[fio___blake2s_sigma[r][2 * (i)]];                           \
+    (d) = fio_rrot32((d) ^ (a), 16);                                           \
+    (c) += (d);                                                                \
+    (b) = fio_rrot32((b) ^ (c), 12);                                           \
+    (a) += (b) + m[fio___blake2s_sigma[r][2 * (i) + 1]];                       \
+    (d) = fio_rrot32((d) ^ (a), 8);                                            \
+    (c) += (d);                                                                \
+    (b) = fio_rrot32((b) ^ (c), 7);                                            \
+  } while (0)
+
+/* BLAKE2s round function */
+#define FIO___BLAKE2S_ROUND(r, v, m)                                           \
+  do {                                                                         \
+    FIO___BLAKE2S_G(r, 0, v[0], v[4], v[8], v[12], m);                         \
+    FIO___BLAKE2S_G(r, 1, v[1], v[5], v[9], v[13], m);                         \
+    FIO___BLAKE2S_G(r, 2, v[2], v[6], v[10], v[14], m);                        \
+    FIO___BLAKE2S_G(r, 3, v[3], v[7], v[11], v[15], m);                        \
+    FIO___BLAKE2S_G(r, 4, v[0], v[5], v[10], v[15], m);                        \
+    FIO___BLAKE2S_G(r, 5, v[1], v[6], v[11], v[12], m);                        \
+    FIO___BLAKE2S_G(r, 6, v[2], v[7], v[8], v[13], m);                         \
+    FIO___BLAKE2S_G(r, 7, v[3], v[4], v[9], v[14], m);                         \
+  } while (0)
+
+/* BLAKE2s compression function */
+FIO_IFUNC void fio___blake2s_compress(fio_blake2s_s *restrict h,
+                                      const uint8_t *restrict block,
+                                      int is_last) {
+  uint32_t v[16] FIO_ALIGN(64);
+  uint32_t m[16] FIO_ALIGN(64);
+
+  /* Initialize working vector */
+  for (size_t i = 0; i < 8; ++i) {
+    v[i] = h->h[i];
+    v[i + 8] = fio___blake2s_iv[i];
+  }
+  v[12] ^= h->t[0];
+  v[13] ^= h->t[1];
+  if (is_last)
+    v[14] = ~v[14];
+
+  /* Load message block (little-endian) */
+  for (size_t i = 0; i < 16; ++i)
+    m[i] = fio_buf2u32_le(block + i * 4);
+
+  /* 10 rounds of mixing */
+  FIO___BLAKE2S_ROUND(0, v, m);
+  FIO___BLAKE2S_ROUND(1, v, m);
+  FIO___BLAKE2S_ROUND(2, v, m);
+  FIO___BLAKE2S_ROUND(3, v, m);
+  FIO___BLAKE2S_ROUND(4, v, m);
+  FIO___BLAKE2S_ROUND(5, v, m);
+  FIO___BLAKE2S_ROUND(6, v, m);
+  FIO___BLAKE2S_ROUND(7, v, m);
+  FIO___BLAKE2S_ROUND(8, v, m);
+  FIO___BLAKE2S_ROUND(9, v, m);
+
+  /* Finalize state */
+  for (size_t i = 0; i < 8; ++i)
+    h->h[i] ^= v[i] ^ v[i + 8];
+}
+
+#undef FIO___BLAKE2S_G
+#undef FIO___BLAKE2S_ROUND
+
+/** Initialize a BLAKE2s streaming context. */
+SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen) {
+  fio_blake2s_s h = {0};
+
+  /* Validate parameters */
+  if (outlen == 0)
+    outlen = 32;
+  if (outlen > 32)
+    outlen = 32;
+  if (keylen > 32)
+    keylen = 32;
+
+  h.outlen = outlen;
+
+  /* Initialize state with IV */
+  for (size_t i = 0; i < 8; ++i)
+    h.h[i] = fio___blake2s_iv[i];
+
+  /* XOR parameter block into state[0] */
+  h.h[0] ^= 0x01010000UL ^ ((uint32_t)keylen << 8) ^ (uint32_t)outlen;
+
+  /* If keyed, pad key to 64 bytes and process as first block */
+  if (keylen > 0 && key) {
+    FIO_MEMSET(h.buf, 0, 64);
+    FIO_MEMCPY(h.buf, key, keylen);
+    h.buflen = 64;
+  }
+
+  return h;
+}
+
+/** Feed data into BLAKE2s hash. */
+SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
+                               const void *restrict data,
+                               size_t len) {
+  const uint8_t *p = (const uint8_t *)data;
+
+  /* If we have buffered data, try to complete a block */
+  if (h->buflen > 0) {
+    size_t fill = 64 - h->buflen;
+    if (len < fill) {
+      FIO_MEMCPY(h->buf + h->buflen, p, len);
+      h->buflen += len;
+      return;
+    }
+    FIO_MEMCPY(h->buf + h->buflen, p, fill);
+    h->t[0] += 64;
+    if (h->t[0] < 64)
+      h->t[1]++;
+    fio___blake2s_compress(h, h->buf, 0);
+    h->buflen = 0;
+    p += fill;
+    len -= fill;
+  }
+
+  /* Process full blocks */
+  while (len > 64) {
+    h->t[0] += 64;
+    if (h->t[0] < 64)
+      h->t[1]++;
+    fio___blake2s_compress(h, p, 0);
+    p += 64;
+    len -= 64;
+  }
+
+  /* Buffer remaining data */
+  if (len > 0) {
+    FIO_MEMCPY(h->buf, p, len);
+    h->buflen = len;
+  }
+}
+
+/** Finalize BLAKE2s hash. */
+SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
+  /* Update counter with remaining bytes */
+  h->t[0] += (uint32_t)h->buflen;
+  if (h->t[0] < h->buflen)
+    h->t[1]++;
+
+  /* Pad remaining buffer with zeros */
+  if (h->buflen < 64)
+    FIO_MEMSET(h->buf + h->buflen, 0, 64 - h->buflen);
+
+  /* Final compression */
+  fio___blake2s_compress(h, h->buf, 1);
+
+  /* Output hash (little-endian) */
+  uint8_t *o = (uint8_t *)out;
+  for (size_t i = 0; i < h->outlen; ++i)
+    o[i] = (uint8_t)(h->h[i / 4] >> (8 * (i % 4)));
+}
+
+/** Simple non-streaming BLAKE2s. */
+SFUNC void fio_blake2s(void *restrict out,
+                       size_t outlen,
+                       const void *restrict data,
+                       size_t len,
+                       const void *restrict key,
+                       size_t keylen) {
+  fio_blake2s_s h = fio_blake2s_init(outlen, key, keylen);
+  fio_blake2s_consume(&h, data, len);
+  fio_blake2s_finalize(&h, out);
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_BLAKE2 */
+#undef FIO_BLAKE2
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_CHACHA             /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -27447,8 +28871,10 @@ SFUNC fio_u256 fio_sha256_finalize(fio_sha256_s *h) {
 Implementation - SHA-512
 ***************************************************************************** */
 
-FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
-  static const uint64_t sha512_consts[80] = {
+FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
+                                  const uint8_t *restrict block) {
+  /* SHA-512 round constants */
+  static const uint64_t K[80] = {
       0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
       0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
       0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
@@ -27477,51 +28903,163 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *h, const uint8_t *block) {
       0x431D67C49C100D4CULL, 0x4CC5D4BECB3E42B6ULL, 0x597F299CFC657E2AULL,
       0x5FCB6FAB3AD6FAECULL, 0x6C44198C4A475817ULL};
 
-  /* copy original state */
-  uint64_t v[8] FIO_ALIGN(16);
-  for (size_t i = 0; i < 8; ++i)
-    v[i] = h->u64[i];
+  /* Load state into registers */
+  uint64_t a = h->u64[0], b = h->u64[1], c = h->u64[2], d = h->u64[3];
+  uint64_t e = h->u64[4], f = h->u64[5], g = h->u64[6], hv = h->u64[7];
 
-  /* read data as an array of 16 big endian 64 bit integers. */
-  uint64_t w[16] FIO_ALIGN(16);
-  fio_memcpy128(w, block);
-  for (size_t i = 0; i < 16; ++i)
-    w[i] = fio_lton64(w[i]); /* no-op on big endian systems */
+  /* Message schedule array */
+  uint64_t w[16];
 
-    /* SHA-512 round - processes one word */
-#define FIO___SHA512_ROUND(i, k)                                               \
+  /* Load and byte-swap message block - unrolled for better performance */
+  w[0] = fio_buf2u64_be(block);
+  w[1] = fio_buf2u64_be(block + 8);
+  w[2] = fio_buf2u64_be(block + 16);
+  w[3] = fio_buf2u64_be(block + 24);
+  w[4] = fio_buf2u64_be(block + 32);
+  w[5] = fio_buf2u64_be(block + 40);
+  w[6] = fio_buf2u64_be(block + 48);
+  w[7] = fio_buf2u64_be(block + 56);
+  w[8] = fio_buf2u64_be(block + 64);
+  w[9] = fio_buf2u64_be(block + 72);
+  w[10] = fio_buf2u64_be(block + 80);
+  w[11] = fio_buf2u64_be(block + 88);
+  w[12] = fio_buf2u64_be(block + 96);
+  w[13] = fio_buf2u64_be(block + 104);
+  w[14] = fio_buf2u64_be(block + 112);
+  w[15] = fio_buf2u64_be(block + 120);
+
+/* SHA-512 Sigma functions - using optimized helpers */
+#define FIO___S512_S0(x) fio_xor_rrot3_64(x, 28, 34, 39)
+#define FIO___S512_S1(x) fio_xor_rrot3_64(x, 14, 18, 41)
+#define FIO___S512_s0(x) fio_xor_rrot2_shr_64(x, 1, 8, 7)
+#define FIO___S512_s1(x) fio_xor_rrot2_shr_64(x, 19, 61, 6)
+
+/* Optimized Ch and Maj - fewer operations */
+#define FIO___S512_CH(e, f, g)  ((g) ^ ((e) & ((f) ^ (g))))
+#define FIO___S512_MAJ(a, b, c) (((a) & (b)) | ((c) & ((a) | (b))))
+
+/* SHA-512 round - rotates variables instead of copying */
+#define FIO___SHA512_RND(a, b, c, d, e, f, g, h, k, w)                         \
   do {                                                                         \
-    const uint64_t t1 = v[7] + (k) + w[(i)&15] +                               \
-                        fio_ct_mux64(v[4], v[5], v[6]) +                       \
-                        fio_xor_rrot3_64(v[4], 14, 18, 41);                    \
-    const uint64_t t2 =                                                        \
-        fio_ct_maj64(v[0], v[1], v[2]) + fio_xor_rrot3_64(v[0], 28, 34, 39);   \
-    v[7] = v[6];                                                               \
-    v[6] = v[5];                                                               \
-    v[5] = v[4];                                                               \
-    v[4] = v[3] + t1;                                                          \
-    v[3] = v[2];                                                               \
-    v[2] = v[1];                                                               \
-    v[1] = v[0];                                                               \
-    v[0] = t1 + t2;                                                            \
+    uint64_t t1 = (h) + FIO___S512_S1(e) + FIO___S512_CH(e, f, g) + (k) + (w); \
+    uint64_t t2 = FIO___S512_S0(a) + FIO___S512_MAJ(a, b, c);                  \
+    (d) += t1;                                                                 \
+    (h) = t1 + t2;                                                             \
   } while (0)
 
-  /* First 16 rounds - use message words directly */
-  for (size_t i = 0; i < 16; ++i)
-    FIO___SHA512_ROUND(i, sha512_consts[i]);
+/* Message schedule expansion */
+#define FIO___SHA512_SCHED(i)                                                  \
+  (w[(i)&15] += FIO___S512_s0(w[((i) + 1) & 15]) + w[((i) + 9) & 15] +         \
+                FIO___S512_s1(w[((i) + 14) & 15]))
 
-  /* Remaining 64 rounds - expand message schedule inline */
-  for (size_t i = 16; i < 80; ++i) {
-    w[i & 15] = fio_xor_rrot2_shr_64(w[(i + 14) & 15], 19, 61, 6) +
-                w[(i + 9) & 15] +
-                fio_xor_rrot2_shr_64(w[(i + 1) & 15], 1, 8, 7) + w[i & 15];
-    FIO___SHA512_ROUND(i, sha512_consts[i]);
-  }
-#undef FIO___SHA512_ROUND
+  /* Rounds 0-15 - use message words directly */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[0], w[0]);
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[1], w[1]);
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[2], w[2]);
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[3], w[3]);
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[4], w[4]);
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[5], w[5]);
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[6], w[6]);
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[7], w[7]);
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[8], w[8]);
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[9], w[9]);
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[10], w[10]);
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[11], w[11]);
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[12], w[12]);
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[13], w[13]);
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[14], w[14]);
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[15], w[15]);
 
-  /* Add compressed chunk to current hash value */
-  for (size_t i = 0; i < 8; ++i)
-    h->u64[i] += v[i];
+  /* Rounds 16-31 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[16], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[17], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[18], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[19], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[20], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[21], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[22], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[23], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[24], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[25], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[26], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[27], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[28], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[29], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[30], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[31], FIO___SHA512_SCHED(15));
+
+  /* Rounds 32-47 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[32], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[33], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[34], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[35], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[36], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[37], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[38], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[39], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[40], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[41], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[42], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[43], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[44], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[45], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[46], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[47], FIO___SHA512_SCHED(15));
+
+  /* Rounds 48-63 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[48], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[49], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[50], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[51], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[52], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[53], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[54], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[55], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[56], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[57], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[58], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[59], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[60], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[61], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[62], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[63], FIO___SHA512_SCHED(15));
+
+  /* Rounds 64-79 */
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[64], FIO___SHA512_SCHED(0));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[65], FIO___SHA512_SCHED(1));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[66], FIO___SHA512_SCHED(2));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[67], FIO___SHA512_SCHED(3));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[68], FIO___SHA512_SCHED(4));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[69], FIO___SHA512_SCHED(5));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[70], FIO___SHA512_SCHED(6));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[71], FIO___SHA512_SCHED(7));
+  FIO___SHA512_RND(a, b, c, d, e, f, g, hv, K[72], FIO___SHA512_SCHED(8));
+  FIO___SHA512_RND(hv, a, b, c, d, e, f, g, K[73], FIO___SHA512_SCHED(9));
+  FIO___SHA512_RND(g, hv, a, b, c, d, e, f, K[74], FIO___SHA512_SCHED(10));
+  FIO___SHA512_RND(f, g, hv, a, b, c, d, e, K[75], FIO___SHA512_SCHED(11));
+  FIO___SHA512_RND(e, f, g, hv, a, b, c, d, K[76], FIO___SHA512_SCHED(12));
+  FIO___SHA512_RND(d, e, f, g, hv, a, b, c, K[77], FIO___SHA512_SCHED(13));
+  FIO___SHA512_RND(c, d, e, f, g, hv, a, b, K[78], FIO___SHA512_SCHED(14));
+  FIO___SHA512_RND(b, c, d, e, f, g, hv, a, K[79], FIO___SHA512_SCHED(15));
+
+#undef FIO___S512_S0
+#undef FIO___S512_S1
+#undef FIO___S512_s0
+#undef FIO___S512_s1
+#undef FIO___S512_CH
+#undef FIO___S512_MAJ
+#undef FIO___SHA512_RND
+#undef FIO___SHA512_SCHED
+
+  /* Add to hash state */
+  h->u64[0] += a;
+  h->u64[1] += b;
+  h->u64[2] += c;
+  h->u64[3] += d;
+  h->u64[4] += e;
+  h->u64[5] += f;
+  h->u64[6] += g;
+  h->u64[7] += hv;
 }
 
 /** Feed data into the hash */
@@ -27674,6 +29212,424 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SHA2 */
 #undef FIO_SHA2
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_SHA3               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                    SHA-3
+                    SHA3-224, SHA3-256, SHA3-384, SHA3-512
+                          SHAKE128, SHAKE256
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_SHA3) && !defined(H___FIO_SHA3___H)
+#define H___FIO_SHA3___H
+/* *****************************************************************************
+SHA-3 API
+***************************************************************************** */
+
+/** Keccak state (1600 bits = 200 bytes = 25 x 64-bit words) */
+typedef struct {
+  uint64_t state[25];
+  uint8_t buf[200]; /* rate buffer (max rate = 1600 - 2*capacity) */
+  size_t buflen;    /* bytes in buffer */
+  size_t rate;      /* rate in bytes */
+  size_t outlen;    /* output length in bytes (0 for SHAKE) */
+  uint8_t delim;    /* domain separation byte */
+} fio_sha3_s;
+
+/* *****************************************************************************
+SHA3 Fixed-Output Functions API
+***************************************************************************** */
+
+/** Initialize SHA3-224 (28-byte output). */
+FIO_IFUNC fio_sha3_s fio_sha3_224_init(void);
+/** Initialize SHA3-256 (32-byte output). */
+FIO_IFUNC fio_sha3_s fio_sha3_256_init(void);
+/** Initialize SHA3-384 (48-byte output). */
+FIO_IFUNC fio_sha3_s fio_sha3_384_init(void);
+/** Initialize SHA3-512 (64-byte output). */
+FIO_IFUNC fio_sha3_s fio_sha3_512_init(void);
+
+/** Feed data into SHA3 hash. */
+SFUNC void fio_sha3_consume(fio_sha3_s *restrict h,
+                            const void *restrict data,
+                            size_t len);
+
+/** Finalize SHA3 hash. Writes h->outlen bytes to out. */
+SFUNC void fio_sha3_finalize(fio_sha3_s *restrict h, void *restrict out);
+
+/** Simple SHA3-224 (28-byte output). */
+SFUNC void fio_sha3_224(void *restrict out,
+                        const void *restrict data,
+                        size_t len);
+
+/** Simple SHA3-256 (32-byte output). */
+SFUNC void fio_sha3_256(void *restrict out,
+                        const void *restrict data,
+                        size_t len);
+
+/** Simple SHA3-384 (48-byte output). */
+SFUNC void fio_sha3_384(void *restrict out,
+                        const void *restrict data,
+                        size_t len);
+
+/** Simple SHA3-512 (64-byte output). */
+SFUNC void fio_sha3_512(void *restrict out,
+                        const void *restrict data,
+                        size_t len);
+
+/* *****************************************************************************
+SHAKE Extendable-Output Functions API
+***************************************************************************** */
+
+/** Initialize SHAKE128 (variable output length). */
+FIO_IFUNC fio_sha3_s fio_shake128_init(void);
+/** Initialize SHAKE256 (variable output length). */
+FIO_IFUNC fio_sha3_s fio_shake256_init(void);
+
+/** Feed data into SHAKE. */
+#define fio_shake_consume fio_sha3_consume
+
+/** Squeeze output from SHAKE. Can be called multiple times. */
+SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
+                             void *restrict out,
+                             size_t outlen);
+
+/** Simple SHAKE128 with specified output length. */
+SFUNC void fio_shake128(void *restrict out,
+                        size_t outlen,
+                        const void *restrict data,
+                        size_t len);
+
+/** Simple SHAKE256 with specified output length. */
+SFUNC void fio_shake256(void *restrict out,
+                        size_t outlen,
+                        const void *restrict data,
+                        size_t len);
+
+/* *****************************************************************************
+Implementation - inline functions
+***************************************************************************** */
+
+/** Initialize SHA3-224. */
+FIO_IFUNC fio_sha3_s fio_sha3_224_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 144; /* (1600 - 2*224) / 8 = 144 */
+  h.outlen = 28;
+  h.delim = 0x06; /* SHA3 domain separator */
+  return h;
+}
+
+/** Initialize SHA3-256. */
+FIO_IFUNC fio_sha3_s fio_sha3_256_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 136; /* (1600 - 2*256) / 8 = 136 */
+  h.outlen = 32;
+  h.delim = 0x06;
+  return h;
+}
+
+/** Initialize SHA3-384. */
+FIO_IFUNC fio_sha3_s fio_sha3_384_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 104; /* (1600 - 2*384) / 8 = 104 */
+  h.outlen = 48;
+  h.delim = 0x06;
+  return h;
+}
+
+/** Initialize SHA3-512. */
+FIO_IFUNC fio_sha3_s fio_sha3_512_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 72; /* (1600 - 2*512) / 8 = 72 */
+  h.outlen = 64;
+  h.delim = 0x06;
+  return h;
+}
+
+/** Initialize SHAKE128. */
+FIO_IFUNC fio_sha3_s fio_shake128_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 168;   /* (1600 - 2*128) / 8 = 168 */
+  h.outlen = 0;   /* variable output */
+  h.delim = 0x1F; /* SHAKE domain separator */
+  return h;
+}
+
+/** Initialize SHAKE256. */
+FIO_IFUNC fio_sha3_s fio_shake256_init(void) {
+  fio_sha3_s h = {0};
+  h.rate = 136; /* (1600 - 2*256) / 8 = 136 */
+  h.outlen = 0;
+  h.delim = 0x1F;
+  return h;
+}
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Keccak-f[1600] Permutation
+***************************************************************************** */
+
+/* Keccak round constants */
+static const uint64_t fio___keccak_rc[24] = {
+    0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL,
+    0x8000000080008000ULL, 0x000000000000808bULL, 0x0000000080000001ULL,
+    0x8000000080008081ULL, 0x8000000000008009ULL, 0x000000000000008aULL,
+    0x0000000000000088ULL, 0x0000000080008009ULL, 0x000000008000000aULL,
+    0x000000008000808bULL, 0x800000000000008bULL, 0x8000000000008089ULL,
+    0x8000000000008003ULL, 0x8000000000008002ULL, 0x8000000000000080ULL,
+    0x000000000000800aULL, 0x800000008000000aULL, 0x8000000080008081ULL,
+    0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL};
+
+/* Keccak rotation offsets */
+static const uint8_t fio___keccak_rot[25] = {
+    0,  1,  62, 28, 27, /* row 0 */
+    36, 44, 6,  55, 20, /* row 1 */
+    3,  10, 43, 25, 39, /* row 2 */
+    41, 45, 15, 21, 8,  /* row 3 */
+    18, 2,  61, 56, 14  /* row 4 */
+};
+
+/* Keccak-f[1600] permutation */
+FIO_IFUNC void fio___keccak_f1600(uint64_t *state) {
+  uint64_t C[5], D[5], B[25];
+
+  for (size_t round = 0; round < 24; ++round) {
+    /* Theta step */
+    C[0] = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20];
+    C[1] = state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21];
+    C[2] = state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22];
+    C[3] = state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23];
+    C[4] = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
+
+    D[0] = C[4] ^ fio_lrot64(C[1], 1);
+    D[1] = C[0] ^ fio_lrot64(C[2], 1);
+    D[2] = C[1] ^ fio_lrot64(C[3], 1);
+    D[3] = C[2] ^ fio_lrot64(C[4], 1);
+    D[4] = C[3] ^ fio_lrot64(C[0], 1);
+
+    for (size_t i = 0; i < 25; i += 5) {
+      state[i + 0] ^= D[0];
+      state[i + 1] ^= D[1];
+      state[i + 2] ^= D[2];
+      state[i + 3] ^= D[3];
+      state[i + 4] ^= D[4];
+    }
+
+    /* Rho and Pi steps combined */
+    B[0] = state[0];
+    B[1] = fio_lrot64(state[6], 44);
+    B[2] = fio_lrot64(state[12], 43);
+    B[3] = fio_lrot64(state[18], 21);
+    B[4] = fio_lrot64(state[24], 14);
+    B[5] = fio_lrot64(state[3], 28);
+    B[6] = fio_lrot64(state[9], 20);
+    B[7] = fio_lrot64(state[10], 3);
+    B[8] = fio_lrot64(state[16], 45);
+    B[9] = fio_lrot64(state[22], 61);
+    B[10] = fio_lrot64(state[1], 1);
+    B[11] = fio_lrot64(state[7], 6);
+    B[12] = fio_lrot64(state[13], 25);
+    B[13] = fio_lrot64(state[19], 8);
+    B[14] = fio_lrot64(state[20], 18);
+    B[15] = fio_lrot64(state[4], 27);
+    B[16] = fio_lrot64(state[5], 36);
+    B[17] = fio_lrot64(state[11], 10);
+    B[18] = fio_lrot64(state[17], 15);
+    B[19] = fio_lrot64(state[23], 56);
+    B[20] = fio_lrot64(state[2], 62);
+    B[21] = fio_lrot64(state[8], 55);
+    B[22] = fio_lrot64(state[14], 39);
+    B[23] = fio_lrot64(state[15], 41);
+    B[24] = fio_lrot64(state[21], 2);
+
+    /* Chi step */
+    for (size_t i = 0; i < 25; i += 5) {
+      state[i + 0] = B[i + 0] ^ ((~B[i + 1]) & B[i + 2]);
+      state[i + 1] = B[i + 1] ^ ((~B[i + 2]) & B[i + 3]);
+      state[i + 2] = B[i + 2] ^ ((~B[i + 3]) & B[i + 4]);
+      state[i + 3] = B[i + 3] ^ ((~B[i + 4]) & B[i + 0]);
+      state[i + 4] = B[i + 4] ^ ((~B[i + 0]) & B[i + 1]);
+    }
+
+    /* Iota step */
+    state[0] ^= fio___keccak_rc[round];
+  }
+}
+
+/* Absorb a block into the state */
+FIO_IFUNC void fio___sha3_absorb(fio_sha3_s *restrict h) {
+  /* XOR rate bytes into state (little-endian) */
+  size_t rate_words = h->rate / 8;
+  for (size_t i = 0; i < rate_words; ++i)
+    h->state[i] ^= fio_buf2u64_le(h->buf + i * 8);
+  fio___keccak_f1600(h->state);
+}
+
+/** Feed data into SHA3 hash. */
+SFUNC void fio_sha3_consume(fio_sha3_s *restrict h,
+                            const void *restrict data,
+                            size_t len) {
+  const uint8_t *p = (const uint8_t *)data;
+
+  /* Fill buffer if partially filled */
+  if (h->buflen > 0) {
+    size_t fill = h->rate - h->buflen;
+    if (len < fill) {
+      FIO_MEMCPY(h->buf + h->buflen, p, len);
+      h->buflen += len;
+      return;
+    }
+    FIO_MEMCPY(h->buf + h->buflen, p, fill);
+    fio___sha3_absorb(h);
+    h->buflen = 0;
+    p += fill;
+    len -= fill;
+  }
+
+  /* Process full blocks */
+  while (len >= h->rate) {
+    FIO_MEMCPY(h->buf, p, h->rate);
+    fio___sha3_absorb(h);
+    p += h->rate;
+    len -= h->rate;
+  }
+
+  /* Buffer remaining data */
+  if (len > 0) {
+    FIO_MEMCPY(h->buf, p, len);
+    h->buflen = len;
+  }
+}
+
+/** Finalize SHA3 hash (fixed output). */
+SFUNC void fio_sha3_finalize(fio_sha3_s *restrict h, void *restrict out) {
+  /* Pad: append domain separator, then 10*1 padding */
+  FIO_MEMSET(h->buf + h->buflen, 0, h->rate - h->buflen);
+  h->buf[h->buflen] = h->delim;
+  h->buf[h->rate - 1] |= 0x80;
+
+  /* Final absorb */
+  fio___sha3_absorb(h);
+
+  /* Squeeze output (little-endian) */
+  uint8_t *o = (uint8_t *)out;
+  for (size_t i = 0; i < h->outlen; ++i)
+    o[i] = (uint8_t)(h->state[i / 8] >> (8 * (i % 8)));
+}
+
+/** Squeeze output from SHAKE (can be called multiple times). */
+SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
+                             void *restrict out,
+                             size_t outlen) {
+  uint8_t *o = (uint8_t *)out;
+
+  /* First call: finalize padding */
+  if (h->outlen == 0) {
+    FIO_MEMSET(h->buf + h->buflen, 0, h->rate - h->buflen);
+    h->buf[h->buflen] = h->delim;
+    h->buf[h->rate - 1] |= 0x80;
+    fio___sha3_absorb(h);
+    h->buflen = 0;
+    h->outlen = 1; /* Mark as finalized */
+  }
+
+  /* Squeeze output */
+  while (outlen > 0) {
+    if (h->buflen == 0) {
+      /* Output from state */
+      size_t to_copy = (outlen < h->rate) ? outlen : h->rate;
+      for (size_t i = 0; i < to_copy; ++i)
+        o[i] = (uint8_t)(h->state[i / 8] >> (8 * (i % 8)));
+      o += to_copy;
+      outlen -= to_copy;
+      if (outlen > 0) {
+        fio___keccak_f1600(h->state);
+      }
+    } else {
+      /* Should not happen in normal use */
+      h->buflen = 0;
+    }
+  }
+}
+
+/** Simple SHA3-224. */
+SFUNC void fio_sha3_224(void *restrict out,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_sha3_224_init();
+  fio_sha3_consume(&h, data, len);
+  fio_sha3_finalize(&h, out);
+}
+
+/** Simple SHA3-256. */
+SFUNC void fio_sha3_256(void *restrict out,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_sha3_256_init();
+  fio_sha3_consume(&h, data, len);
+  fio_sha3_finalize(&h, out);
+}
+
+/** Simple SHA3-384. */
+SFUNC void fio_sha3_384(void *restrict out,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_sha3_384_init();
+  fio_sha3_consume(&h, data, len);
+  fio_sha3_finalize(&h, out);
+}
+
+/** Simple SHA3-512. */
+SFUNC void fio_sha3_512(void *restrict out,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_sha3_512_init();
+  fio_sha3_consume(&h, data, len);
+  fio_sha3_finalize(&h, out);
+}
+
+/** Simple SHAKE128. */
+SFUNC void fio_shake128(void *restrict out,
+                        size_t outlen,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_shake128_init();
+  fio_sha3_consume(&h, data, len);
+  fio_shake_squeeze(&h, out, outlen);
+}
+
+/** Simple SHAKE256. */
+SFUNC void fio_shake256(void *restrict out,
+                        size_t outlen,
+                        const void *restrict data,
+                        size_t len) {
+  fio_sha3_s h = fio_shake256_init();
+  fio_sha3_consume(&h, data, len);
+  fio_shake_squeeze(&h, out, outlen);
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_SHA3 */
+#undef FIO_SHA3
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -53721,40 +55677,707 @@ fio___http_body_detect_content_type(fio_http_s *h) {
 HTTP Body Parsing - Stub Implementations
 ***************************************************************************** */
 
+/* *****************************************************************************
+JSON Body Parsing - Adapter Implementation
+***************************************************************************** */
+
+/**
+ * Wrapper struct to hold HTTP body parse context for JSON adapter callbacks.
+ * We use a thread-local to pass context since JSON callbacks don't have udata.
+ */
+typedef struct {
+  const fio_http_body_parse_callbacks_s *callbacks;
+  void *udata;
+} fio___http_json_adapter_s;
+
+/** Thread-local adapter context - the JSON parser callbacks don't have udata */
+static __thread fio___http_json_adapter_s *fio___http_json_adapter_ctx;
+
+/* --- JSON to HTTP body adapter callbacks --- */
+
+FIO_SFUNC void *fio___http_json_on_null(void) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_null)
+    return NULL;
+  return a->callbacks->on_null(a->udata);
+}
+
+FIO_SFUNC void *fio___http_json_on_true(void) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_true)
+    return NULL;
+  return a->callbacks->on_true(a->udata);
+}
+
+FIO_SFUNC void *fio___http_json_on_false(void) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_false)
+    return NULL;
+  return a->callbacks->on_false(a->udata);
+}
+
+FIO_SFUNC void *fio___http_json_on_number(int64_t i) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_number)
+    return NULL;
+  return a->callbacks->on_number(a->udata, i);
+}
+
+FIO_SFUNC void *fio___http_json_on_float(double f) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_float)
+    return NULL;
+  return a->callbacks->on_float(a->udata, f);
+}
+
+/** Escaped string - needs unescaping before passing to callback */
+FIO_SFUNC void *fio___http_json_on_string(const void *start, size_t len) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_string)
+    return NULL;
+  /* Unescape JSON string */
+  fio_str_info_s unescaped = {0};
+  fio_string_write_unescape(&unescaped, FIO_STRING_REALLOC, start, len);
+  void *result =
+      a->callbacks->on_string(a->udata, unescaped.buf, unescaped.len);
+  FIO_STRING_FREE(unescaped.buf);
+  return result;
+}
+
+/** Simple (unescaped) string - pass through directly */
+FIO_SFUNC void *fio___http_json_on_string_simple(const void *start,
+                                                 size_t len) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_string)
+    return NULL;
+  return a->callbacks->on_string(a->udata, start, len);
+}
+
+/**
+ * Note: The JSON parser manages parent-child relationships via map_push/
+ * array_push callbacks. The `parent` parameter is passed as NULL since the
+ * JSON parser handles nesting internally and will call map_set/array_push
+ * with the correct container.
+ */
+FIO_SFUNC void *fio___http_json_on_map(void *ctx, void *at) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_map)
+    return NULL;
+  return a->callbacks->on_map(a->udata, NULL);
+  (void)ctx;
+  (void)at;
+}
+
+FIO_SFUNC void *fio___http_json_on_array(void *ctx, void *at) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->on_array)
+    return NULL;
+  return a->callbacks->on_array(a->udata, NULL);
+  (void)ctx;
+  (void)at;
+}
+
+FIO_SFUNC int fio___http_json_map_push(void *ctx, void *key, void *value) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->map_set)
+    return -1;
+  return a->callbacks->map_set(a->udata, ctx, key, value);
+}
+
+FIO_SFUNC int fio___http_json_array_push(void *ctx, void *value) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (!a || !a->callbacks->array_push)
+    return -1;
+  return a->callbacks->array_push(a->udata, ctx, value);
+}
+
+FIO_SFUNC int fio___http_json_array_finished(void *ctx) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (a && a->callbacks->array_done)
+    a->callbacks->array_done(a->udata, ctx);
+  return 0;
+}
+
+FIO_SFUNC int fio___http_json_map_finished(void *ctx) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (a && a->callbacks->map_done)
+    a->callbacks->map_done(a->udata, ctx);
+  return 0;
+}
+
+FIO_SFUNC void fio___http_json_free_unused(void *ctx) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (a && a->callbacks->free_unused)
+    a->callbacks->free_unused(a->udata, ctx);
+}
+
+FIO_SFUNC void *fio___http_json_on_error(void *ctx) {
+  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  if (a && a->callbacks->on_error)
+    return a->callbacks->on_error(a->udata, ctx);
+  return NULL;
+}
+
+/** Static callback adapter mapping JSON parser to HTTP body parse callbacks */
+static fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
+    .on_null = fio___http_json_on_null,
+    .on_true = fio___http_json_on_true,
+    .on_false = fio___http_json_on_false,
+    .on_number = fio___http_json_on_number,
+    .on_float = fio___http_json_on_float,
+    .on_string = fio___http_json_on_string,
+    .on_string_simple = fio___http_json_on_string_simple,
+    .on_map = fio___http_json_on_map,
+    .on_array = fio___http_json_on_array,
+    .map_push = fio___http_json_map_push,
+    .array_push = fio___http_json_array_push,
+    .array_finished = fio___http_json_array_finished,
+    .map_finished = fio___http_json_map_finished,
+    .free_unused_object = fio___http_json_free_unused,
+    .on_error = fio___http_json_on_error,
+};
+
 FIO_SFUNC fio_http_body_parse_result_s
 fio___http_body_parse_json(fio_http_s *h,
                            const fio_http_body_parse_callbacks_s *callbacks,
                            void *udata) {
-  /* TODO: implement JSON body parsing using fio_json_parse */
-  FIO_ASSERT(0, "fio___http_body_parse_json not implemented");
-  return (fio_http_body_parse_result_s){.err = -1};
-  (void)h;
-  (void)callbacks;
-  (void)udata;
+  fio_http_body_parse_result_s result = {.result = NULL,
+                                         .consumed = 0,
+                                         .err = 0};
+
+  /* Seek to body start */
+  fio_http_body_seek(h, 0);
+
+  /* Read entire body */
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  if (!body.len || !body.buf) {
+    /* Empty body - not necessarily an error, but nothing to parse */
+    return result;
+  }
+
+  /* Set up thread-local adapter context */
+  fio___http_json_adapter_s adapter = {
+      .callbacks = callbacks,
+      .udata = udata,
+  };
+  fio___http_json_adapter_s *old_ctx = fio___http_json_adapter_ctx;
+  fio___http_json_adapter_ctx = &adapter;
+
+  /* Parse JSON */
+  fio_json_result_s json_result =
+      fio_json_parse(&fio___http_json_adapter_callbacks, body.buf, body.len);
+
+  /* Restore old context */
+  fio___http_json_adapter_ctx = old_ctx;
+
+  /* Map results */
+  result.result = json_result.ctx;
+  result.consumed = json_result.stop_pos;
+  result.err = json_result.err;
+
+  return result;
 }
+
+/* *****************************************************************************
+URL-Encoded Body Parsing - Adapter Implementation
+***************************************************************************** */
+
+/** Adapter context for URL-encoded parsing. */
+typedef struct {
+  const fio_http_body_parse_callbacks_s *callbacks;
+  void *udata;
+  void *map;
+  int err;
+} fio___http_urlenc_adapter_s;
+
+/** Adapter callback for URL-encoded on_pair. */
+FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
+                                          fio_buf_info_s name,
+                                          fio_buf_info_s value) {
+  fio___http_urlenc_adapter_s *a = (fio___http_urlenc_adapter_s *)udata_;
+  if (!a || a->err || !a->callbacks)
+    return NULL;
+
+  const fio_http_body_parse_callbacks_s *cb = a->callbacks;
+
+  /* Decode name */
+  FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
+  fio_string_write_url_dec(&decoded_name,
+                           FIO_STRING_REALLOC,
+                           name.buf,
+                           name.len);
+
+  /* Decode value */
+  FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
+  fio_string_write_url_dec(&decoded_value,
+                           FIO_STRING_REALLOC,
+                           value.buf,
+                           value.len);
+
+  /* Create key string object */
+  void *key_obj = NULL;
+  if (cb->on_string) {
+    key_obj = cb->on_string(a->udata, decoded_name.buf, decoded_name.len);
+  }
+
+  /* Create value object - attempt primitive detection */
+  void *value_obj = NULL;
+  int64_t i_val = 0;
+  double f_val = 0.0;
+  fio___http_body_primitive_e prim =
+      fio___http_body_identify_primitive(FIO_STR2BUF_INFO(decoded_value),
+                                         &i_val,
+                                         &f_val);
+
+  switch (prim) {
+  case FIO___HTTP_BODY_PRIM_NULL:
+    if (cb->on_null)
+      value_obj = cb->on_null(a->udata);
+    break;
+  case FIO___HTTP_BODY_PRIM_TRUE:
+    if (cb->on_true)
+      value_obj = cb->on_true(a->udata);
+    break;
+  case FIO___HTTP_BODY_PRIM_FALSE:
+    if (cb->on_false)
+      value_obj = cb->on_false(a->udata);
+    break;
+  case FIO___HTTP_BODY_PRIM_NUMBER:
+    if (cb->on_number)
+      value_obj = cb->on_number(a->udata, i_val);
+    break;
+  case FIO___HTTP_BODY_PRIM_FLOAT:
+    if (cb->on_float)
+      value_obj = cb->on_float(a->udata, f_val);
+    break;
+  case FIO___HTTP_BODY_PRIM_STRING: /* fall through */
+  default:
+    if (cb->on_string)
+      value_obj = cb->on_string(a->udata, decoded_value.buf, decoded_value.len);
+    break;
+  }
+
+  /* Insert into map */
+  if (a->map && cb->map_set) {
+    int set_err = cb->map_set(a->udata, a->map, key_obj, value_obj);
+    if (set_err) {
+      /* On error, free unused objects if possible */
+      if (cb->free_unused) {
+        if (key_obj)
+          cb->free_unused(a->udata, key_obj);
+        if (value_obj)
+          cb->free_unused(a->udata, value_obj);
+      }
+      a->err = 1;
+    }
+  } else {
+    /* No map or no map_set - free created objects */
+    if (cb->free_unused) {
+      if (key_obj)
+        cb->free_unused(a->udata, key_obj);
+      if (value_obj)
+        cb->free_unused(a->udata, value_obj);
+    }
+  }
+
+  /* Free decoded buffers if they were reallocated */
+  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
+    FIO_STRING_FREE(decoded_name.buf);
+  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
+    FIO_STRING_FREE(decoded_value.buf);
+
+  /* Return non-NULL to continue parsing, NULL to stop */
+  return a->err ? NULL : a;
+}
+
+/** Adapter callback for URL-encoded on_error (optional). */
+FIO_SFUNC void fio___http_urlenc_on_error(void *udata_) {
+  fio___http_urlenc_adapter_s *a = (fio___http_urlenc_adapter_s *)udata_;
+  if (a)
+    a->err = 1;
+}
+
+/** Static adapter callbacks for URL-encoded parsing. */
+static const fio_url_encoded_parser_callbacks_s
+    fio___http_urlenc_adapter_callbacks = {
+        .on_pair = fio___http_urlenc_on_pair,
+        .on_error = fio___http_urlenc_on_error,
+};
 
 FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_urlencoded(
     fio_http_s *h,
     const fio_http_body_parse_callbacks_s *callbacks,
     void *udata) {
-  /* TODO: implement URL-encoded body parsing */
-  FIO_ASSERT(0, "fio___http_body_parse_urlencoded not implemented");
-  return (fio_http_body_parse_result_s){.err = -1};
-  (void)h;
-  (void)callbacks;
-  (void)udata;
+  fio_http_body_parse_result_s result = {.result = NULL,
+                                         .consumed = 0,
+                                         .err = 0};
+
+  if (!callbacks) {
+    result.err = -1;
+    return result;
+  }
+
+  /* Seek to body start */
+  fio_http_body_seek(h, 0);
+
+  /* Read entire body */
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  if (!body.len || !body.buf) {
+    /* Empty body - return empty map or nothing */
+    if (callbacks->on_map) {
+      result.result = callbacks->on_map(udata, NULL);
+      if (result.result && callbacks->map_done)
+        callbacks->map_done(udata, result.result);
+    }
+    return result;
+  }
+
+  /* Create the top-level map container */
+  void *map = NULL;
+  if (callbacks->on_map) {
+    map = callbacks->on_map(udata, NULL);
+    if (!map) {
+      result.err = -1;
+      return result;
+    }
+  }
+
+  /* Set up adapter context */
+  fio___http_urlenc_adapter_s adapter = {
+      .callbacks = callbacks,
+      .udata = udata,
+      .map = map,
+      .err = 0,
+  };
+
+  /* Parse URL-encoded data */
+  fio_url_encoded_result_s urlenc_result =
+      fio_url_encoded_parse(&fio___http_urlenc_adapter_callbacks,
+                            &adapter,
+                            body.buf,
+                            body.len);
+
+  /* Map results */
+  result.consumed = urlenc_result.consumed;
+  result.err = adapter.err ? -1 : urlenc_result.err;
+
+  /* Finalize the map */
+  if (map) {
+    if (result.err && callbacks->on_error) {
+      result.result = callbacks->on_error(udata, map);
+    } else {
+      if (callbacks->map_done)
+        callbacks->map_done(udata, map);
+      result.result = map;
+    }
+  }
+
+  return result;
 }
+
+/* *****************************************************************************
+Multipart Body Parsing - Adapter Context
+***************************************************************************** */
+
+/** Context passed to multipart parser callbacks. */
+typedef struct {
+  const fio_http_body_parse_callbacks_s *callbacks;
+  void *udata;
+  void *map;         /* The result map being built */
+  void *current_key; /* Key for current field (string object) */
+  int err;           /* Error flag */
+} fio___http_multipart_adapter_s;
+
+/* *****************************************************************************
+Multipart Body Parsing - Adapter Callbacks
+***************************************************************************** */
+
+/** Called for each regular form field (complete value). */
+FIO_SFUNC void *fio___http_multipart_on_field(void *udata,
+                                              fio_buf_info_s name,
+                                              fio_buf_info_s value,
+                                              fio_buf_info_s content_type) {
+  fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
+  if (!a || a->err || !a->callbacks)
+    return NULL;
+
+  /* Create key string from field name */
+  void *key = NULL;
+  if (a->callbacks->on_string)
+    key = a->callbacks->on_string(a->udata, name.buf, name.len);
+  if (!key)
+    return NULL;
+
+  /* Create value string */
+  void *val = NULL;
+  if (a->callbacks->on_string)
+    val = a->callbacks->on_string(a->udata, value.buf, value.len);
+
+  if (!val) {
+    if (a->callbacks->free_unused)
+      a->callbacks->free_unused(a->udata, key);
+    return NULL;
+  }
+
+  /* Insert into map */
+  if (a->map && a->callbacks->map_set) {
+    if (a->callbacks->map_set(a->udata, a->map, key, val)) {
+      a->err = -1;
+      if (a->callbacks->free_unused) {
+        a->callbacks->free_unused(a->udata, key);
+        a->callbacks->free_unused(a->udata, val);
+      }
+    }
+  } else {
+    /* No map - free the objects */
+    if (a->callbacks->free_unused) {
+      a->callbacks->free_unused(a->udata, key);
+      a->callbacks->free_unused(a->udata, val);
+    }
+  }
+
+  (void)content_type;
+  return NULL;
+}
+
+/** Called when a file upload starts. */
+FIO_SFUNC void *fio___http_multipart_on_file_start(
+    void *udata,
+    fio_buf_info_s name,
+    fio_buf_info_s filename,
+    fio_buf_info_s content_type) {
+  fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
+  if (!a || a->err || !a->callbacks)
+    return NULL;
+
+  /* Store key for later insertion */
+  if (a->callbacks->on_string)
+    a->current_key = a->callbacks->on_string(a->udata, name.buf, name.len);
+
+  /* Call user's on_file callback */
+  void *file_ctx = NULL;
+  if (a->callbacks->on_file) {
+    fio_str_info_s name_s = {.buf = name.buf, .len = name.len};
+    fio_str_info_s filename_s = {.buf = filename.buf, .len = filename.len};
+    fio_str_info_s ct_s = {.buf = content_type.buf, .len = content_type.len};
+    file_ctx = a->callbacks->on_file(a->udata, name_s, filename_s, ct_s);
+  }
+
+  return file_ctx;
+}
+
+/** Called with file data chunk. */
+FIO_SFUNC int fio___http_multipart_on_file_data(void *udata,
+                                                void *file_ctx,
+                                                fio_buf_info_s data) {
+  fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
+  if (!a || a->err || !a->callbacks)
+    return -1;
+
+  if (a->callbacks->on_file_data)
+    return a->callbacks->on_file_data(a->udata, file_ctx, data);
+
+  return 0;
+}
+
+/** Called when file upload ends. */
+FIO_SFUNC void fio___http_multipart_on_file_end(void *udata, void *file_ctx) {
+  fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
+  if (!a || !a->callbacks)
+    return;
+
+  /* Notify user that file is done */
+  if (a->callbacks->on_file_done)
+    a->callbacks->on_file_done(a->udata, file_ctx);
+
+  /* Insert file handle into map with stored key */
+  if (a->map && a->current_key && file_ctx && a->callbacks->map_set) {
+    if (a->callbacks->map_set(a->udata, a->map, a->current_key, file_ctx)) {
+      a->err = -1;
+      if (a->callbacks->free_unused) {
+        a->callbacks->free_unused(a->udata, a->current_key);
+        a->callbacks->free_unused(a->udata, file_ctx);
+      }
+    }
+  } else if (a->current_key && a->callbacks->free_unused) {
+    /* No map or no file_ctx - free the key */
+    a->callbacks->free_unused(a->udata, a->current_key);
+  }
+  a->current_key = NULL;
+}
+
+/** Called on parse error. */
+FIO_SFUNC void fio___http_multipart_on_error(void *udata) {
+  fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
+  if (a)
+    a->err = -1;
+}
+
+/** Static callback adapter mapping multipart parser to HTTP body parse. */
+static const fio_multipart_parser_callbacks_s
+    fio___http_multipart_adapter_callbacks = {
+        .on_field = fio___http_multipart_on_field,
+        .on_file_start = fio___http_multipart_on_file_start,
+        .on_file_data = fio___http_multipart_on_file_data,
+        .on_file_end = fio___http_multipart_on_file_end,
+        .on_error = fio___http_multipart_on_error,
+};
+
+/* *****************************************************************************
+Multipart Body Parsing - Helper: Extract boundary from Content-Type
+***************************************************************************** */
+
+/**
+ * Extracts the boundary parameter from a Content-Type header value.
+ * Returns empty fio_buf_info_s if boundary not found.
+ */
+FIO_SFUNC fio_buf_info_s
+fio___http_multipart_extract_boundary(fio_str_info_s content_type) {
+  fio_buf_info_s boundary = FIO_BUF_INFO0;
+  if (!content_type.buf || !content_type.len)
+    return boundary;
+
+  /* Search for "boundary=" (case-insensitive search for parameter) */
+  const char *p = content_type.buf;
+  const char *end = content_type.buf + content_type.len;
+
+  while (p < end) {
+    /* Skip to next semicolon or start */
+    while (p < end && *p != ';')
+      ++p;
+    if (p >= end)
+      break;
+    ++p; /* Skip ';' */
+
+    /* Skip whitespace */
+    while (p < end && (*p == ' ' || *p == '\t'))
+      ++p;
+
+    /* Check for "boundary" (case-insensitive, 8 chars) */
+    if ((size_t)(end - p) >= 9) { /* "boundary=" is 9 chars */
+      char c0 = p[0] | 0x20;
+      char c1 = p[1] | 0x20;
+      char c2 = p[2] | 0x20;
+      char c3 = p[3] | 0x20;
+      char c4 = p[4] | 0x20;
+      char c5 = p[5] | 0x20;
+      char c6 = p[6] | 0x20;
+      char c7 = p[7] | 0x20;
+      if (c0 == 'b' && c1 == 'o' && c2 == 'u' && c3 == 'n' && c4 == 'd' &&
+          c5 == 'a' && c6 == 'r' && c7 == 'y' && p[8] == '=') {
+        p += 9; /* Skip "boundary=" */
+
+        /* Skip optional whitespace after '=' */
+        while (p < end && (*p == ' ' || *p == '\t'))
+          ++p;
+
+        if (p >= end)
+          break;
+
+        /* Extract value - quoted or unquoted */
+        if (*p == '"') {
+          ++p;
+          const char *value_start = p;
+          while (p < end && *p != '"')
+            ++p;
+          boundary.buf = (char *)value_start;
+          boundary.len = (size_t)(p - value_start);
+        } else {
+          const char *value_start = p;
+          while (p < end && *p != ';' && *p != ' ' && *p != '\t' &&
+                 *p != '\r' && *p != '\n')
+            ++p;
+          boundary.buf = (char *)value_start;
+          boundary.len = (size_t)(p - value_start);
+        }
+        break;
+      }
+    }
+  }
+
+  return boundary;
+}
+
+/* *****************************************************************************
+Multipart Body Parsing - Main Implementation
+***************************************************************************** */
 
 FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_multipart(
     fio_http_s *h,
     const fio_http_body_parse_callbacks_s *callbacks,
     void *udata) {
-  /* TODO: implement multipart/form-data body parsing */
-  FIO_ASSERT(0, "fio___http_body_parse_multipart not implemented");
-  return (fio_http_body_parse_result_s){.err = -1};
-  (void)h;
-  (void)callbacks;
-  (void)udata;
+  fio_http_body_parse_result_s result = {.result = NULL,
+                                         .consumed = 0,
+                                         .err = 0};
+
+  if (!h || !callbacks) {
+    result.err = -1;
+    return result;
+  }
+
+  /* Get Content-Type header to extract boundary */
+  fio_str_info_s content_type =
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+
+  /* Extract boundary from Content-Type */
+  fio_buf_info_s boundary = fio___http_multipart_extract_boundary(content_type);
+  if (!boundary.buf || !boundary.len) {
+    result.err = -1;
+    if (callbacks->on_error)
+      result.result = callbacks->on_error(udata, NULL);
+    return result;
+  }
+
+  /* Seek to body start */
+  fio_http_body_seek(h, 0);
+
+  /* Read entire body */
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  if (!body.len || !body.buf) {
+    /* Empty body - not necessarily an error */
+    return result;
+  }
+
+  /* Create result map */
+  void *map = NULL;
+  if (callbacks->on_map)
+    map = callbacks->on_map(udata, NULL);
+
+  /* Set up adapter context */
+  fio___http_multipart_adapter_s adapter = {
+      .callbacks = callbacks,
+      .udata = udata,
+      .map = map,
+      .current_key = NULL,
+      .err = 0,
+  };
+
+  /* Parse multipart data */
+  fio_multipart_result_s mp_result =
+      fio_multipart_parse(&fio___http_multipart_adapter_callbacks,
+                          &adapter,
+                          boundary,
+                          body.buf,
+                          body.len);
+
+  /* Check for errors */
+  if (mp_result.err || adapter.err) {
+    result.err = mp_result.err ? mp_result.err : adapter.err;
+    if (callbacks->on_error)
+      result.result = callbacks->on_error(udata, map);
+    else
+      result.result = map; /* Return partial result */
+    result.consumed = mp_result.consumed;
+    return result;
+  }
+
+  /* Finalize map */
+  if (map && callbacks->map_done)
+    callbacks->map_done(udata, map);
+
+  result.result = map;
+  result.consumed = mp_result.consumed;
+  return result;
 }
 
 /* *****************************************************************************
@@ -58667,6 +61290,12 @@ Recursive inclusion / cleanup
 #endif
 #ifdef FIO_SHA2
 #include "152 sha2.h"
+#endif
+#ifdef FIO_BLAKE2
+#include "152 blake2.h"
+#endif
+#ifdef FIO_SHA3
+#include "152 sha3.h"
 #endif
 #ifdef FIO_CHACHA
 #include "152 chacha20poly1305.h"
