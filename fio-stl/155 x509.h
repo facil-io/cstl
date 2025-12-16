@@ -1118,8 +1118,24 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
 
   case FIO_X509_KEY_ECDSA_P256:
   case FIO_X509_KEY_ECDSA_P384: {
-    /* TODO: Implement ECDSA verification */
-    /* For now, return error - ECDSA not implemented yet */
+#if defined(FIO_P256)
+    /* ECDSA P-256 verification */
+    if (issuer->key_type == FIO_X509_KEY_ECDSA_P256) {
+      if (!issuer->pubkey.ecdsa.point || issuer->pubkey.ecdsa.point_len != 65)
+        return -1;
+
+      /* P-256 uses SHA-256, verify hash_len matches */
+      if (hash_len != 32)
+        return -1;
+
+      return fio_ecdsa_p256_verify(cert->signature,
+                                   cert->signature_len,
+                                   hash,
+                                   issuer->pubkey.ecdsa.point,
+                                   issuer->pubkey.ecdsa.point_len);
+    }
+#endif
+    /* P-384 not yet implemented */
     return -1;
   }
 

@@ -110,8 +110,13 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
                             const size_t len) {
-  if (!len || !bits || !n || !dest)
+  if (!len || !n || !dest)
     return;
+  /* Handle zero shift: just copy */
+  if (!bits) {
+    FIO_MEMCPY(dest, n, sizeof(uint64_t) * len);
+    return;
+  }
   const size_t offset = bits >> 6;
   bits &= 63;
   uint64_t c = 0, trash;
@@ -163,15 +168,34 @@ FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len) {
   return r[!a];
 }
 
-/** Multi-precision DIV for `len*64` bit long a, b. NOT
- * constant time. */
+/**
+ * Multi-precision DIV for `len*64` bit long a, b.
+ *
+ * This is NOT constant time.
+ *
+ * Uses binary long division: for each bit position from high to low,
+ * if shifted divisor <= remainder, subtract it and set the quotient bit.
+ */
 FIO_IFUNC void fio_math_div(uint64_t *dest,
-                            uint64_t *reminder,
+                            uint64_t *remainder,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
   if (!len)
     return;
+
+  /* Get MSB index of divisor (returns (size_t)-1 if zero) */
+  const size_t b_msb = fio_math_msb_index((uint64_t *)b, len);
+  if (b_msb == (size_t)-1) {
+    /* Division by zero */
+    FIO_LOG_ERROR("divide by zero!");
+    if (dest)
+      FIO_MEMSET(dest, 0xFF, sizeof(uint64_t) * len);
+    if (remainder)
+      FIO_MEMSET(remainder, 0xFF, sizeof(uint64_t) * len);
+    return;
+  }
+
 #if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t t[len];
   uint64_t r[len];
@@ -184,44 +208,55 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       len <= 256,
       "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
 #endif
+
+  /* Initialize: r = a (remainder starts as dividend), q = 0 */
   FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
   FIO_MEMSET(q, 0, sizeof(uint64_t) * len);
-  size_t rlen;
-  uint64_t c, mask, imask;
-  const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
-  if (!blen)
-    goto divide_by_zero; /* divide by zero! */
-  while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
-    const size_t delta = rlen - blen;
-    fio_math_shl(t, (uint64_t *)b, delta, len);
-    {
-      uint64_t ignr_ = fio_math_sub(r, (uint64_t *)r, t, len);
-      (void)ignr_;
+
+  /* Get initial MSB of remainder */
+  size_t r_msb = fio_math_msb_index((uint64_t *)r, len);
+
+  /* If dividend is zero or smaller than divisor, quotient is 0, remainder is a
+   */
+  if (!(r_msb == (size_t)-1 || r_msb < b_msb)) {
+    /* Binary long division: iterate from highest possible shift down to 0 */
+    size_t shift = r_msb - b_msb;
+    for (;;) {
+      /* Shift divisor left to current position */
+      fio_math_shl(t, (uint64_t *)b, shift, len);
+
+      /* Try to subtract: compute r - t */
+      uint64_t borrow = fio_math_sub(t, (uint64_t *)r, t, len);
+
+      if (!borrow) {
+        /* t <= r: subtraction succeeded, update remainder and set quotient bit
+         */
+        FIO_MEMCPY(r, t, sizeof(uint64_t) * len);
+        q[shift >> 6] |= (1ULL << (shift & 63));
+
+        /* Recalculate r_msb since remainder changed */
+        r_msb = fio_math_msb_index((uint64_t *)r, len);
+
+        /* If remainder is now zero or less than divisor, we're done */
+        if (r_msb == (size_t)-1 || r_msb < b_msb)
+          break;
+
+        /* Update shift based on new remainder's MSB */
+        shift = r_msb - b_msb;
+      } else {
+        /* t > r: can't subtract at this shift, try smaller shift */
+        if (shift == 0)
+          break;
+        --shift;
+      }
     }
-    q[delta >> 6] |= (1ULL << (delta & 63)); /* set the bit used */
   }
-  mask = (uint64_t)0ULL - fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
-  imask = ~mask; /* r was >= b */
-  q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
-  for (size_t i = 1; i < len; ++i) {
-    q[i] = fio_math_addc64(q[i], 0, c, &c);
-  }
-  if (dest) {
-    FIO_MEMCPY(dest, q, len * sizeof(uint64_t));
-  }
-  if (reminder) {
-    for (size_t i = 0; i < len; ++i) {
-      reminder[i] = (t[i] & imask) | (r[i] & mask);
-    }
-  }
-  return;
-divide_by_zero:
-  FIO_LOG_ERROR("divide by zero!");
+
+  /* Copy results to output */
   if (dest)
-    FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
-  if (reminder)
-    FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
-  return;
+    FIO_MEMCPY(dest, q, len * sizeof(uint64_t));
+  if (remainder)
+    FIO_MEMCPY(remainder, r, len * sizeof(uint64_t));
 }
 
 /* *****************************************************************************

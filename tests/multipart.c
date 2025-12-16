@@ -3,7 +3,7 @@ MIME Multipart Parser Tests
 ***************************************************************************** */
 #define FIO_LOG
 #define FIO_MULTIPART
-#include "fio-stl.h"
+#include "fio-stl/include.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,7 +1,7 @@
 #define FIO_CORE
 #define FIO_CLI
 #define FIO_THREADS
-#include <fio-stl.h>
+#include <fio-stl/include.h>
 /* use the fast-setup global allocator shortcut for FIO_MEMORY_NAME */
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
 #define FIO_MALLOC

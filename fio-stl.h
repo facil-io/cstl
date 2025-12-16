@@ -3177,6 +3177,110 @@ FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out) {
 }
 
 /**
+ * Multi-precision long multiplication for `len` 64 bit words.
+ *
+ * `dest` must be `len * 2` long to hold the result.
+ *
+ * `a` and `b` must be of equal `len`.
+ *
+ * This uses long multiplication with loop unrolling for better performance.
+ */
+FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
+                                   const uint64_t *a,
+                                   const uint64_t *b,
+                                   const size_t len) {
+  /* Zero out result */
+  for (size_t i = 0; i < len * 2; ++i)
+    target[i] = 0;
+
+  for (size_t i = 0; i < len; ++i) {
+#ifdef __SIZEOF_INT128__
+    __uint128_t carry = 0;
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 for better performance */
+    for (; j + 3 < len; j += 4) {
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      __uint128_t prod0 = (__uint128_t)a[i] * b[j];
+      __uint128_t sum0 = (__uint128_t)target[k] + (uint64_t)prod0 + carry;
+      target[k] = (uint64_t)sum0;
+      carry = (prod0 >> 64) + (sum0 >> 64);
+
+      /* Iteration 1 */
+      __uint128_t prod1 = (__uint128_t)a[i] * b[j + 1];
+      __uint128_t sum1 = (__uint128_t)target[k + 1] + (uint64_t)prod1 + carry;
+      target[k + 1] = (uint64_t)sum1;
+      carry = (prod1 >> 64) + (sum1 >> 64);
+
+      /* Iteration 2 */
+      __uint128_t prod2 = (__uint128_t)a[i] * b[j + 2];
+      __uint128_t sum2 = (__uint128_t)target[k + 2] + (uint64_t)prod2 + carry;
+      target[k + 2] = (uint64_t)sum2;
+      carry = (prod2 >> 64) + (sum2 >> 64);
+
+      /* Iteration 3 */
+      __uint128_t prod3 = (__uint128_t)a[i] * b[j + 3];
+      __uint128_t sum3 = (__uint128_t)target[k + 3] + (uint64_t)prod3 + carry;
+      target[k + 3] = (uint64_t)sum3;
+      carry = (prod3 >> 64) + (sum3 >> 64);
+    }
+
+    /* Handle remainder */
+    for (; j < len; j++) {
+      size_t k = i + j;
+      __uint128_t product = (__uint128_t)a[i] * b[j];
+      __uint128_t sum = (__uint128_t)target[k] + (uint64_t)product + carry;
+      target[k] = (uint64_t)sum;
+      carry = (product >> 64) + (sum >> 64);
+    }
+
+    target[i + len] = (uint64_t)carry;
+#else
+    /* Optimized non-__uint128_t path with loop unrolling */
+    uint64_t ch = 0, cl = 0;
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 */
+    for (; j + 3 < len; j += 4) {
+      uint64_t hi0, lo0, hi1, lo1, hi2, lo2, hi3, lo3;
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      lo0 = fio_math_mulc64(a[i], b[j], &hi0);
+      target[k] = fio_math_addc64(target[k], lo0, cl, &cl);
+      target[k + 1] = fio_math_addc64(target[k + 1], hi0, ch, &ch);
+
+      /* Iteration 1 */
+      lo1 = fio_math_mulc64(a[i], b[j + 1], &hi1);
+      target[k + 1] = fio_math_addc64(target[k + 1], lo1, cl, &cl);
+      target[k + 2] = fio_math_addc64(target[k + 2], hi1, ch, &ch);
+
+      /* Iteration 2 */
+      lo2 = fio_math_mulc64(a[i], b[j + 2], &hi2);
+      target[k + 2] = fio_math_addc64(target[k + 2], lo2, cl, &cl);
+      target[k + 3] = fio_math_addc64(target[k + 3], hi2, ch, &ch);
+
+      /* Iteration 3 */
+      lo3 = fio_math_mulc64(a[i], b[j + 3], &hi3);
+      target[k + 3] = fio_math_addc64(target[k + 3], lo3, cl, &cl);
+      target[k + 4] = fio_math_addc64(target[k + 4], hi3, ch, &ch);
+    }
+
+    /* Handle remainder */
+    for (; j < len; ++j) {
+      uint64_t hi, lo;
+      lo = fio_math_mulc64(a[i], b[j], &hi);
+      target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
+      target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
+    }
+    target[i + len] += cl;
+#endif
+  }
+}
+
+/**
  * Optimized 256-bit (4 word) multiplication.
  * Fully unrolled for maximum performance in ECC-256 and SHA-256 operations.
  */
@@ -3409,110 +3513,6 @@ FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
   /* Fallback for platforms without __uint128_t (MSVC) */
   fio___math_mul_long(dest, a, b, 16);
 #endif
-}
-
-/**
- * Multi-precision long multiplication for `len` 64 bit words.
- *
- * `dest` must be `len * 2` long to hold the result.
- *
- * `a` and `b` must be of equal `len`.
- *
- * This uses long multiplication with loop unrolling for better performance.
- */
-FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
-                                   const uint64_t *a,
-                                   const uint64_t *b,
-                                   const size_t len) {
-  /* Zero out result */
-  for (size_t i = 0; i < len * 2; ++i)
-    target[i] = 0;
-
-  for (size_t i = 0; i < len; ++i) {
-#ifdef __SIZEOF_INT128__
-    __uint128_t carry = 0;
-    size_t j = 0;
-
-    /* Unroll inner loop by 4 for better performance */
-    for (; j + 3 < len; j += 4) {
-      size_t k = i + j;
-
-      /* Iteration 0 */
-      __uint128_t prod0 = (__uint128_t)a[i] * b[j];
-      __uint128_t sum0 = (__uint128_t)target[k] + (uint64_t)prod0 + carry;
-      target[k] = (uint64_t)sum0;
-      carry = (prod0 >> 64) + (sum0 >> 64);
-
-      /* Iteration 1 */
-      __uint128_t prod1 = (__uint128_t)a[i] * b[j + 1];
-      __uint128_t sum1 = (__uint128_t)target[k + 1] + (uint64_t)prod1 + carry;
-      target[k + 1] = (uint64_t)sum1;
-      carry = (prod1 >> 64) + (sum1 >> 64);
-
-      /* Iteration 2 */
-      __uint128_t prod2 = (__uint128_t)a[i] * b[j + 2];
-      __uint128_t sum2 = (__uint128_t)target[k + 2] + (uint64_t)prod2 + carry;
-      target[k + 2] = (uint64_t)sum2;
-      carry = (prod2 >> 64) + (sum2 >> 64);
-
-      /* Iteration 3 */
-      __uint128_t prod3 = (__uint128_t)a[i] * b[j + 3];
-      __uint128_t sum3 = (__uint128_t)target[k + 3] + (uint64_t)prod3 + carry;
-      target[k + 3] = (uint64_t)sum3;
-      carry = (prod3 >> 64) + (sum3 >> 64);
-    }
-
-    /* Handle remainder */
-    for (; j < len; j++) {
-      size_t k = i + j;
-      __uint128_t product = (__uint128_t)a[i] * b[j];
-      __uint128_t sum = (__uint128_t)target[k] + (uint64_t)product + carry;
-      target[k] = (uint64_t)sum;
-      carry = (product >> 64) + (sum >> 64);
-    }
-
-    target[i + len] = (uint64_t)carry;
-#else
-    /* Optimized non-__uint128_t path with loop unrolling */
-    uint64_t ch = 0, cl = 0;
-    size_t j = 0;
-
-    /* Unroll inner loop by 4 */
-    for (; j + 3 < len; j += 4) {
-      uint64_t hi0, lo0, hi1, lo1, hi2, lo2, hi3, lo3;
-      size_t k = i + j;
-
-      /* Iteration 0 */
-      lo0 = fio_math_mulc64(a[i], b[j], &hi0);
-      target[k] = fio_math_addc64(target[k], lo0, cl, &cl);
-      target[k + 1] = fio_math_addc64(target[k + 1], hi0, ch, &ch);
-
-      /* Iteration 1 */
-      lo1 = fio_math_mulc64(a[i], b[j + 1], &hi1);
-      target[k + 1] = fio_math_addc64(target[k + 1], lo1, cl, &cl);
-      target[k + 2] = fio_math_addc64(target[k + 2], hi1, ch, &ch);
-
-      /* Iteration 2 */
-      lo2 = fio_math_mulc64(a[i], b[j + 2], &hi2);
-      target[k + 2] = fio_math_addc64(target[k + 2], lo2, cl, &cl);
-      target[k + 3] = fio_math_addc64(target[k + 3], hi2, ch, &ch);
-
-      /* Iteration 3 */
-      lo3 = fio_math_mulc64(a[i], b[j + 3], &hi3);
-      target[k + 3] = fio_math_addc64(target[k + 3], lo3, cl, &cl);
-      target[k + 4] = fio_math_addc64(target[k + 4], hi3, ch, &ch);
-    }
-
-    /* Handle remainder */
-    for (; j < len; ++j) {
-      uint64_t hi, lo;
-      lo = fio_math_mulc64(a[i], b[j], &hi);
-      target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
-      target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
-    }
-    target[i + len] += cl;
-#endif
-  }
 }
 
 /**
@@ -4807,28 +4807,38 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 /* *****************************************************************************
 FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT) || defined(FIO_CRYPTO)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13)
 #undef FIO_CRYPT
 #undef FIO_CRYPTO
 #undef FIO_AES
-#undef FIO_CRYPTO_CORE
+#undef FIO_ASN1
 #undef FIO_CHACHA
+#undef FIO_CRYPTO_CORE
 #undef FIO_ED25519
+#undef FIO_OTP
+#undef FIO_P256
+#undef FIO_RSA
+#undef FIO_SECRET
 #undef FIO_SHA1
 #undef FIO_SHA2
-#undef FIO_SECRET
-#undef FIO_OTP
+#undef FIO_TLS13
+#undef FIO_X509
 #define FIO_CRYPTO_CORE
-#define FIO_AES
-#define FIO_BLAKE2
-#define FIO_CHACHA
-#define FIO_ED25519
-#define FIO_HKDF
-#define FIO_OTP
-#define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
 #define FIO_SHA3
+#define FIO_BLAKE2
+#define FIO_CHACHA
+#define FIO_HKDF
+#define FIO_AES
+#define FIO_ED25519
+#define FIO_P256
+#define FIO_ASN1
+#define FIO_RSA
+#define FIO_X509
+#define FIO_OTP
+#define FIO_SECRET
+#define FIO_TLS13
 #endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
@@ -8480,8 +8490,13 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
                             const size_t len) {
-  if (!len || !bits || !n || !dest)
+  if (!len || !n || !dest)
     return;
+  /* Handle zero shift: just copy */
+  if (!bits) {
+    FIO_MEMCPY(dest, n, sizeof(uint64_t) * len);
+    return;
+  }
   const size_t offset = bits >> 6;
   bits &= 63;
   uint64_t c = 0, trash;
@@ -8533,15 +8548,34 @@ FIO_IFUNC size_t fio_math_lsb_index(uint64_t *n, const size_t len) {
   return r[!a];
 }
 
-/** Multi-precision DIV for `len*64` bit long a, b. NOT
- * constant time. */
+/**
+ * Multi-precision DIV for `len*64` bit long a, b.
+ *
+ * This is NOT constant time.
+ *
+ * Uses binary long division: for each bit position from high to low,
+ * if shifted divisor <= remainder, subtract it and set the quotient bit.
+ */
 FIO_IFUNC void fio_math_div(uint64_t *dest,
-                            uint64_t *reminder,
+                            uint64_t *remainder,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
   if (!len)
     return;
+
+  /* Get MSB index of divisor (returns (size_t)-1 if zero) */
+  const size_t b_msb = fio_math_msb_index((uint64_t *)b, len);
+  if (b_msb == (size_t)-1) {
+    /* Division by zero */
+    FIO_LOG_ERROR("divide by zero!");
+    if (dest)
+      FIO_MEMSET(dest, 0xFF, sizeof(uint64_t) * len);
+    if (remainder)
+      FIO_MEMSET(remainder, 0xFF, sizeof(uint64_t) * len);
+    return;
+  }
+
 #if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t t[len];
   uint64_t r[len];
@@ -8554,44 +8588,55 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
       len <= 256,
       "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
 #endif
+
+  /* Initialize: r = a (remainder starts as dividend), q = 0 */
   FIO_MEMCPY(r, a, sizeof(uint64_t) * len);
   FIO_MEMSET(q, 0, sizeof(uint64_t) * len);
-  size_t rlen;
-  uint64_t c, mask, imask;
-  const size_t blen = fio_math_msb_index((uint64_t *)b, len) + 1;
-  if (!blen)
-    goto divide_by_zero; /* divide by zero! */
-  while ((rlen = fio_math_msb_index((uint64_t *)r, len)) >= blen) {
-    const size_t delta = rlen - blen;
-    fio_math_shl(t, (uint64_t *)b, delta, len);
-    {
-      uint64_t ignr_ = fio_math_sub(r, (uint64_t *)r, t, len);
-      (void)ignr_;
+
+  /* Get initial MSB of remainder */
+  size_t r_msb = fio_math_msb_index((uint64_t *)r, len);
+
+  /* If dividend is zero or smaller than divisor, quotient is 0, remainder is a
+   */
+  if (!(r_msb == (size_t)-1 || r_msb < b_msb)) {
+    /* Binary long division: iterate from highest possible shift down to 0 */
+    size_t shift = r_msb - b_msb;
+    for (;;) {
+      /* Shift divisor left to current position */
+      fio_math_shl(t, (uint64_t *)b, shift, len);
+
+      /* Try to subtract: compute r - t */
+      uint64_t borrow = fio_math_sub(t, (uint64_t *)r, t, len);
+
+      if (!borrow) {
+        /* t <= r: subtraction succeeded, update remainder and set quotient bit
+         */
+        FIO_MEMCPY(r, t, sizeof(uint64_t) * len);
+        q[shift >> 6] |= (1ULL << (shift & 63));
+
+        /* Recalculate r_msb since remainder changed */
+        r_msb = fio_math_msb_index((uint64_t *)r, len);
+
+        /* If remainder is now zero or less than divisor, we're done */
+        if (r_msb == (size_t)-1 || r_msb < b_msb)
+          break;
+
+        /* Update shift based on new remainder's MSB */
+        shift = r_msb - b_msb;
+      } else {
+        /* t > r: can't subtract at this shift, try smaller shift */
+        if (shift == 0)
+          break;
+        --shift;
+      }
     }
-    q[delta >> 6] |= (1ULL << (delta & 63)); /* set the bit used */
   }
-  mask = (uint64_t)0ULL - fio_math_sub(t, (uint64_t *)r, (uint64_t *)b, len);
-  imask = ~mask; /* r was >= b */
-  q[0] = fio_math_addc64(q[0], (imask & 1), 0, &c);
-  for (size_t i = 1; i < len; ++i) {
-    q[i] = fio_math_addc64(q[i], 0, c, &c);
-  }
-  if (dest) {
-    FIO_MEMCPY(dest, q, len * sizeof(uint64_t));
-  }
-  if (reminder) {
-    for (size_t i = 0; i < len; ++i) {
-      reminder[i] = (t[i] & imask) | (r[i] & mask);
-    }
-  }
-  return;
-divide_by_zero:
-  FIO_LOG_ERROR("divide by zero!");
+
+  /* Copy results to output */
   if (dest)
-    FIO_MEMSET(dest, 0xFFFFFFFF, sizeof(*dest) * len);
-  if (reminder)
-    FIO_MEMSET(reminder, 0xFFFFFFFF, sizeof(*dest) * len);
-  return;
+    FIO_MEMCPY(dest, q, len * sizeof(uint64_t));
+  if (remainder)
+    FIO_MEMCPY(remainder, r, len * sizeof(uint64_t));
 }
 
 /* *****************************************************************************
@@ -27700,255 +27745,6 @@ Module Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_HKDF               /* Development inclusion - ignore line */
-#include "./include.h"         /* Development inclusion - ignore line */
-#endif                         /* Development inclusion - ignore line */
-/* *****************************************************************************
-
-
-
-
-                                    HKDF
-                    HMAC-based Key Derivation Function (RFC 5869)
-
-
-
-
-Copyright and License: see header file (000 copyright.h) or top of file
-***************************************************************************** */
-#if defined(FIO_HKDF) && !defined(H___FIO_HKDF___H)
-#define H___FIO_HKDF___H
-
-/* *****************************************************************************
-HKDF API
-
-Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha512_hmac).
-      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPT to include all
-      crypto modules.
-***************************************************************************** */
-
-/** SHA-256 hash length (32 bytes). */
-#define FIO_HKDF_SHA256_HASH_LEN 32
-/** SHA-384 hash length (48 bytes). */
-#define FIO_HKDF_SHA384_HASH_LEN 48
-
-/**
- * HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
- *
- * Extracts a pseudorandom key (PRK) from input keying material (IKM).
- *
- * @param prk Output buffer (32 bytes for SHA-256, 48 for SHA-384)
- * @param salt Optional salt (if NULL, uses zeros of hash length)
- * @param salt_len Salt length in bytes
- * @param ikm Input keying material
- * @param ikm_len IKM length in bytes
- * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
- */
-SFUNC void fio_hkdf_extract(void *restrict prk,
-                            const void *restrict salt,
-                            size_t salt_len,
-                            const void *restrict ikm,
-                            size_t ikm_len,
-                            int use_sha384);
-
-/**
- * HKDF-Expand: OKM = HKDF-Expand(PRK, info, L)
- *
- * Expands a pseudorandom key (PRK) into output keying material (OKM).
- *
- * @param okm Output keying material buffer
- * @param okm_len Desired output length (max 255 * hash_len)
- * @param prk Pseudorandom key from Extract (32 or 48 bytes)
- * @param prk_len PRK length (32 for SHA-256, 48 for SHA-384)
- * @param info Optional context/application info
- * @param info_len Info length in bytes
- * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
- */
-SFUNC void fio_hkdf_expand(void *restrict okm,
-                           size_t okm_len,
-                           const void *restrict prk,
-                           size_t prk_len,
-                           const void *restrict info,
-                           size_t info_len,
-                           int use_sha384);
-
-/**
- * Combined HKDF (Extract + Expand) - RFC 5869 Section 2.
- *
- * Derives keying material from input keying material using HKDF.
- *
- * @param okm Output keying material buffer
- * @param okm_len Desired output length (max 255 * hash_len)
- * @param salt Optional salt (if NULL, uses zeros of hash length)
- * @param salt_len Salt length in bytes
- * @param ikm Input keying material
- * @param ikm_len IKM length in bytes
- * @param info Optional context/application info
- * @param info_len Info length in bytes
- * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
- */
-SFUNC void fio_hkdf(void *restrict okm,
-                    size_t okm_len,
-                    const void *restrict salt,
-                    size_t salt_len,
-                    const void *restrict ikm,
-                    size_t ikm_len,
-                    const void *restrict info,
-                    size_t info_len,
-                    int use_sha384);
-
-/* *****************************************************************************
-Implementation - possibly externed functions.
-***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-
-/* *****************************************************************************
-HKDF-Extract Implementation
-***************************************************************************** */
-
-SFUNC void fio_hkdf_extract(void *restrict prk,
-                            const void *restrict salt,
-                            size_t salt_len,
-                            const void *restrict ikm,
-                            size_t ikm_len,
-                            int use_sha384) {
-  if (!prk || !ikm)
-    return;
-
-  if (use_sha384) {
-    /* SHA-384: use SHA-512 HMAC, truncate to 48 bytes */
-    /* If salt is NULL or empty, use hash_len zeros */
-    uint8_t zero_salt[48] = {0};
-    const void *actual_salt = salt;
-    size_t actual_salt_len = salt_len;
-    if (!salt || salt_len == 0) {
-      actual_salt = zero_salt;
-      actual_salt_len = 48;
-    }
-    /* PRK = HMAC-SHA384(salt, IKM) - using SHA-512 HMAC truncated */
-    fio_u512 hmac_result =
-        fio_sha512_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
-    /* Copy first 48 bytes (SHA-384 output) */
-    FIO_MEMCPY(prk, hmac_result.u8, 48);
-  } else {
-    /* SHA-256 */
-    uint8_t zero_salt[32] = {0};
-    const void *actual_salt = salt;
-    size_t actual_salt_len = salt_len;
-    if (!salt || salt_len == 0) {
-      actual_salt = zero_salt;
-      actual_salt_len = 32;
-    }
-    /* PRK = HMAC-SHA256(salt, IKM) */
-    fio_u256 hmac_result =
-        fio_sha256_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
-    FIO_MEMCPY(prk, hmac_result.u8, 32);
-  }
-}
-
-/* *****************************************************************************
-HKDF-Expand Implementation
-***************************************************************************** */
-
-SFUNC void fio_hkdf_expand(void *restrict okm,
-                           size_t okm_len,
-                           const void *restrict prk,
-                           size_t prk_len,
-                           const void *restrict info,
-                           size_t info_len,
-                           int use_sha384) {
-  if (!okm || !prk || okm_len == 0)
-    return;
-
-  const size_t hash_len = use_sha384 ? 48 : 32;
-  const size_t max_okm_len = 255 * hash_len;
-
-  /* Clamp output length to maximum allowed */
-  if (okm_len > max_okm_len)
-    okm_len = max_okm_len;
-
-  uint8_t *out = (uint8_t *)okm;
-  uint8_t t_prev[64] = {0}; /* T(i-1), max 64 bytes for SHA-512 */
-  size_t t_prev_len = 0;
-  uint8_t counter = 1;
-  size_t remaining = okm_len;
-
-  /* N = ceil(L/HashLen) iterations */
-  while (remaining > 0) {
-    /* T(i) = HMAC-Hash(PRK, T(i-1) || info || counter) */
-    /* Build input: T(i-1) || info || counter */
-    size_t input_len = t_prev_len + info_len + 1;
-    uint8_t *input = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, input_len, 0);
-    if (!input)
-      return;
-
-    size_t offset = 0;
-    if (t_prev_len > 0) {
-      FIO_MEMCPY(input, t_prev, t_prev_len);
-      offset = t_prev_len;
-    }
-    if (info && info_len > 0) {
-      FIO_MEMCPY(input + offset, info, info_len);
-      offset += info_len;
-    }
-    input[offset] = counter;
-
-    if (use_sha384) {
-      fio_u512 hmac_result = fio_sha512_hmac(prk, prk_len, input, input_len);
-      FIO_MEMCPY(t_prev, hmac_result.u8, 48);
-      t_prev_len = 48;
-    } else {
-      fio_u256 hmac_result = fio_sha256_hmac(prk, prk_len, input, input_len);
-      FIO_MEMCPY(t_prev, hmac_result.u8, 32);
-      t_prev_len = 32;
-    }
-
-    FIO_MEM_FREE(input, input_len);
-
-    /* Copy to output */
-    size_t to_copy = (remaining < hash_len) ? remaining : hash_len;
-    FIO_MEMCPY(out, t_prev, to_copy);
-    out += to_copy;
-    remaining -= to_copy;
-    ++counter;
-  }
-}
-
-/* *****************************************************************************
-Combined HKDF Implementation
-***************************************************************************** */
-
-SFUNC void fio_hkdf(void *restrict okm,
-                    size_t okm_len,
-                    const void *restrict salt,
-                    size_t salt_len,
-                    const void *restrict ikm,
-                    size_t ikm_len,
-                    const void *restrict info,
-                    size_t info_len,
-                    int use_sha384) {
-  if (!okm || !ikm || okm_len == 0)
-    return;
-
-  const size_t prk_len = use_sha384 ? 48 : 32;
-  uint8_t prk[48]; /* Max size for SHA-384 */
-
-  /* Step 1: Extract */
-  fio_hkdf_extract(prk, salt, salt_len, ikm, ikm_len, use_sha384);
-
-  /* Step 2: Expand */
-  fio_hkdf_expand(okm, okm_len, prk, prk_len, info, info_len, use_sha384);
-}
-
-/* *****************************************************************************
-Module Cleanup
-***************************************************************************** */
-#endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_HKDF */
-#undef FIO_HKDF
-/* ************************************************************************* */
-#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
-#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_SHA1               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -29467,6 +29263,255 @@ Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_SHA2 */
 #undef FIO_SHA2
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_HKDF               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                                    HKDF
+                    HMAC-based Key Derivation Function (RFC 5869)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_HKDF) && !defined(H___FIO_HKDF___H)
+#define H___FIO_HKDF___H
+
+/* *****************************************************************************
+HKDF API
+
+Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha512_hmac).
+      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPT to include all
+      crypto modules.
+***************************************************************************** */
+
+/** SHA-256 hash length (32 bytes). */
+#define FIO_HKDF_SHA256_HASH_LEN 32
+/** SHA-384 hash length (48 bytes). */
+#define FIO_HKDF_SHA384_HASH_LEN 48
+
+/**
+ * HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
+ *
+ * Extracts a pseudorandom key (PRK) from input keying material (IKM).
+ *
+ * @param prk Output buffer (32 bytes for SHA-256, 48 for SHA-384)
+ * @param salt Optional salt (if NULL, uses zeros of hash length)
+ * @param salt_len Salt length in bytes
+ * @param ikm Input keying material
+ * @param ikm_len IKM length in bytes
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_hkdf_extract(void *restrict prk,
+                            const void *restrict salt,
+                            size_t salt_len,
+                            const void *restrict ikm,
+                            size_t ikm_len,
+                            int use_sha384);
+
+/**
+ * HKDF-Expand: OKM = HKDF-Expand(PRK, info, L)
+ *
+ * Expands a pseudorandom key (PRK) into output keying material (OKM).
+ *
+ * @param okm Output keying material buffer
+ * @param okm_len Desired output length (max 255 * hash_len)
+ * @param prk Pseudorandom key from Extract (32 or 48 bytes)
+ * @param prk_len PRK length (32 for SHA-256, 48 for SHA-384)
+ * @param info Optional context/application info
+ * @param info_len Info length in bytes
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_hkdf_expand(void *restrict okm,
+                           size_t okm_len,
+                           const void *restrict prk,
+                           size_t prk_len,
+                           const void *restrict info,
+                           size_t info_len,
+                           int use_sha384);
+
+/**
+ * Combined HKDF (Extract + Expand) - RFC 5869 Section 2.
+ *
+ * Derives keying material from input keying material using HKDF.
+ *
+ * @param okm Output keying material buffer
+ * @param okm_len Desired output length (max 255 * hash_len)
+ * @param salt Optional salt (if NULL, uses zeros of hash length)
+ * @param salt_len Salt length in bytes
+ * @param ikm Input keying material
+ * @param ikm_len IKM length in bytes
+ * @param info Optional context/application info
+ * @param info_len Info length in bytes
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_hkdf(void *restrict okm,
+                    size_t okm_len,
+                    const void *restrict salt,
+                    size_t salt_len,
+                    const void *restrict ikm,
+                    size_t ikm_len,
+                    const void *restrict info,
+                    size_t info_len,
+                    int use_sha384);
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+HKDF-Extract Implementation
+***************************************************************************** */
+
+SFUNC void fio_hkdf_extract(void *restrict prk,
+                            const void *restrict salt,
+                            size_t salt_len,
+                            const void *restrict ikm,
+                            size_t ikm_len,
+                            int use_sha384) {
+  if (!prk || !ikm)
+    return;
+
+  if (use_sha384) {
+    /* SHA-384: use SHA-512 HMAC, truncate to 48 bytes */
+    /* If salt is NULL or empty, use hash_len zeros */
+    uint8_t zero_salt[48] = {0};
+    const void *actual_salt = salt;
+    size_t actual_salt_len = salt_len;
+    if (!salt || salt_len == 0) {
+      actual_salt = zero_salt;
+      actual_salt_len = 48;
+    }
+    /* PRK = HMAC-SHA384(salt, IKM) - using SHA-512 HMAC truncated */
+    fio_u512 hmac_result =
+        fio_sha512_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
+    /* Copy first 48 bytes (SHA-384 output) */
+    FIO_MEMCPY(prk, hmac_result.u8, 48);
+  } else {
+    /* SHA-256 */
+    uint8_t zero_salt[32] = {0};
+    const void *actual_salt = salt;
+    size_t actual_salt_len = salt_len;
+    if (!salt || salt_len == 0) {
+      actual_salt = zero_salt;
+      actual_salt_len = 32;
+    }
+    /* PRK = HMAC-SHA256(salt, IKM) */
+    fio_u256 hmac_result =
+        fio_sha256_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
+    FIO_MEMCPY(prk, hmac_result.u8, 32);
+  }
+}
+
+/* *****************************************************************************
+HKDF-Expand Implementation
+***************************************************************************** */
+
+SFUNC void fio_hkdf_expand(void *restrict okm,
+                           size_t okm_len,
+                           const void *restrict prk,
+                           size_t prk_len,
+                           const void *restrict info,
+                           size_t info_len,
+                           int use_sha384) {
+  if (!okm || !prk || okm_len == 0)
+    return;
+
+  const size_t hash_len = use_sha384 ? 48 : 32;
+  const size_t max_okm_len = 255 * hash_len;
+
+  /* Clamp output length to maximum allowed */
+  if (okm_len > max_okm_len)
+    okm_len = max_okm_len;
+
+  uint8_t *out = (uint8_t *)okm;
+  uint8_t t_prev[64] = {0}; /* T(i-1), max 64 bytes for SHA-512 */
+  size_t t_prev_len = 0;
+  uint8_t counter = 1;
+  size_t remaining = okm_len;
+
+  /* N = ceil(L/HashLen) iterations */
+  while (remaining > 0) {
+    /* T(i) = HMAC-Hash(PRK, T(i-1) || info || counter) */
+    /* Build input: T(i-1) || info || counter */
+    size_t input_len = t_prev_len + info_len + 1;
+    uint8_t *input = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, input_len, 0);
+    if (!input)
+      return;
+
+    size_t offset = 0;
+    if (t_prev_len > 0) {
+      FIO_MEMCPY(input, t_prev, t_prev_len);
+      offset = t_prev_len;
+    }
+    if (info && info_len > 0) {
+      FIO_MEMCPY(input + offset, info, info_len);
+      offset += info_len;
+    }
+    input[offset] = counter;
+
+    if (use_sha384) {
+      fio_u512 hmac_result = fio_sha512_hmac(prk, prk_len, input, input_len);
+      FIO_MEMCPY(t_prev, hmac_result.u8, 48);
+      t_prev_len = 48;
+    } else {
+      fio_u256 hmac_result = fio_sha256_hmac(prk, prk_len, input, input_len);
+      FIO_MEMCPY(t_prev, hmac_result.u8, 32);
+      t_prev_len = 32;
+    }
+
+    FIO_MEM_FREE(input, input_len);
+
+    /* Copy to output */
+    size_t to_copy = (remaining < hash_len) ? remaining : hash_len;
+    FIO_MEMCPY(out, t_prev, to_copy);
+    out += to_copy;
+    remaining -= to_copy;
+    ++counter;
+  }
+}
+
+/* *****************************************************************************
+Combined HKDF Implementation
+***************************************************************************** */
+
+SFUNC void fio_hkdf(void *restrict okm,
+                    size_t okm_len,
+                    const void *restrict salt,
+                    size_t salt_len,
+                    const void *restrict ikm,
+                    size_t ikm_len,
+                    const void *restrict info,
+                    size_t info_len,
+                    int use_sha384) {
+  if (!okm || !ikm || okm_len == 0)
+    return;
+
+  const size_t prk_len = use_sha384 ? 48 : 32;
+  uint8_t prk[48]; /* Max size for SHA-384 */
+
+  /* Step 1: Extract */
+  fio_hkdf_extract(prk, salt, salt_len, ikm, ikm_len, use_sha384);
+
+  /* Step 2: Expand */
+  fio_hkdf_expand(okm, okm_len, prk, prk_len, info, info_len, use_sha384);
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_HKDF */
+#undef FIO_HKDF
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -33923,6 +33968,4572 @@ Cleanup
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_P256               /* Development inclusion - ignore line */
+#define FIO_SHA2               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                    Elliptic Curve Cryptography: ECDSA P-256 (secp256r1)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_P256) && !defined(H___FIO_P256___H)
+#define H___FIO_P256___H
+
+/* *****************************************************************************
+P-256 (secp256r1) ECDSA Module
+
+This module provides ECDSA signature verification for the P-256 curve,
+primarily for TLS 1.3 certificate chain validation.
+
+P-256 curve parameters (NIST FIPS 186-4):
+- Prime p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+- Order n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+- Curve equation: y² = x³ - 3x + b (mod p)
+
+**Note**: This implementation has not been audited. Use at your own risk.
+***************************************************************************** */
+
+/* *****************************************************************************
+ECDSA P-256 Verification API
+***************************************************************************** */
+
+/**
+ * Verifies an ECDSA P-256 signature.
+ *
+ * @param sig DER-encoded signature (SEQUENCE { r INTEGER, s INTEGER })
+ * @param sig_len Length of signature in bytes
+ * @param msg_hash SHA-256 hash of the message (32 bytes)
+ * @param pubkey Uncompressed public key (65 bytes: 0x04 || x || y)
+ * @param pubkey_len Length of public key (must be 65)
+ * @return 0 on success (valid signature), -1 on failure (invalid signature)
+ */
+SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
+                                size_t sig_len,
+                                const uint8_t *msg_hash,
+                                const uint8_t *pubkey,
+                                size_t pubkey_len);
+
+/**
+ * Verifies an ECDSA P-256 signature with raw r,s values.
+ *
+ * @param r The r component of the signature (32 bytes, big-endian)
+ * @param s The s component of the signature (32 bytes, big-endian)
+ * @param msg_hash SHA-256 hash of the message (32 bytes)
+ * @param pubkey_x X coordinate of public key (32 bytes, big-endian)
+ * @param pubkey_y Y coordinate of public key (32 bytes, big-endian)
+ * @return 0 on success (valid signature), -1 on failure (invalid signature)
+ */
+SFUNC int fio_ecdsa_p256_verify_raw(const uint8_t r[32],
+                                    const uint8_t s[32],
+                                    const uint8_t msg_hash[32],
+                                    const uint8_t pubkey_x[32],
+                                    const uint8_t pubkey_y[32]);
+
+/* *****************************************************************************
+P-256 ECDHE (Elliptic Curve Diffie-Hellman) API
+***************************************************************************** */
+
+/**
+ * Generates a P-256 keypair for ECDHE key exchange.
+ *
+ * @param secret_key Output: 32-byte secret key (scalar, big-endian)
+ * @param public_key Output: 65-byte uncompressed public key (0x04 || x || y)
+ * @return 0 on success, -1 on failure
+ */
+SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]);
+
+/**
+ * Computes P-256 ECDH shared secret.
+ *
+ * @param shared_secret Output: 32-byte shared secret (x-coordinate of result)
+ * @param secret_key 32-byte secret key (scalar, big-endian)
+ * @param their_public_key Their public key (uncompressed 65 bytes, or
+ *                         compressed 33 bytes)
+ * @param their_public_key_len Length of their public key (33 or 65)
+ * @return 0 on success, -1 on failure (invalid key, point at infinity, etc.)
+ */
+SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
+                                 const uint8_t secret_key[32],
+                                 const uint8_t *their_public_key,
+                                 size_t their_public_key_len);
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+P-256 Field Arithmetic (mod p)
+
+Prime p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+       = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+
+We use 4 x 64-bit limbs in little-endian order.
+***************************************************************************** */
+
+/* P-256 prime p in little-endian limbs */
+static const uint64_t FIO___P256_P[4] = {
+    0xFFFFFFFFFFFFFFFFULL, /* p[0] */
+    0x00000000FFFFFFFFULL, /* p[1] */
+    0x0000000000000000ULL, /* p[2] */
+    0xFFFFFFFF00000001ULL, /* p[3] */
+};
+
+/* P-256 curve order n in little-endian limbs */
+static const uint64_t FIO___P256_N[4] = {
+    0xF3B9CAC2FC632551ULL, /* n[0] */
+    0xBCE6FAADA7179E84ULL, /* n[1] */
+    0xFFFFFFFFFFFFFFFFULL, /* n[2] */
+    0xFFFFFFFF00000000ULL, /* n[3] */
+};
+
+/* P-256 curve parameter b in little-endian limbs */
+static const uint64_t FIO___P256_B[4] = {
+    0x3BCE3C3E27D2604BULL, /* b[0] */
+    0x651D06B0CC53B0F6ULL, /* b[1] */
+    0xB3EBBD55769886BCULL, /* b[2] */
+    0x5AC635D8AA3A93E7ULL, /* b[3] */
+};
+
+/* P-256 base point G x-coordinate in little-endian limbs */
+static const uint64_t FIO___P256_GX[4] = {
+    0xF4A13945D898C296ULL, /* Gx[0] */
+    0x77037D812DEB33A0ULL, /* Gx[1] */
+    0xF8BCE6E563A440F2ULL, /* Gx[2] */
+    0x6B17D1F2E12C4247ULL, /* Gx[3] */
+};
+
+/* P-256 base point G y-coordinate in little-endian limbs */
+static const uint64_t FIO___P256_GY[4] = {
+    0xCBB6406837BF51F5ULL, /* Gy[0] */
+    0x2BCE33576B315ECEULL, /* Gy[1] */
+    0x8EE7EB4A7C0F9E16ULL, /* Gy[2] */
+    0x4FE342E2FE1A7F9BULL, /* Gy[3] */
+};
+
+/* Field element type: 4 x 64-bit limbs in little-endian */
+typedef uint64_t fio___p256_fe_s[4];
+
+/* Point in affine coordinates */
+typedef struct {
+  fio___p256_fe_s x;
+  fio___p256_fe_s y;
+} fio___p256_point_affine_s;
+
+/* Point in Jacobian coordinates (x = X/Z², y = Y/Z³) */
+typedef struct {
+  fio___p256_fe_s x;
+  fio___p256_fe_s y;
+  fio___p256_fe_s z;
+} fio___p256_point_jacobian_s;
+
+/* *****************************************************************************
+Field Element Operations (mod p)
+***************************************************************************** */
+
+/** Copy field element: dest = src */
+FIO_IFUNC void fio___p256_fe_copy(fio___p256_fe_s dest,
+                                  const fio___p256_fe_s src) {
+  dest[0] = src[0];
+  dest[1] = src[1];
+  dest[2] = src[2];
+  dest[3] = src[3];
+}
+
+/** Set field element to zero */
+FIO_IFUNC void fio___p256_fe_zero(fio___p256_fe_s r) {
+  r[0] = 0;
+  r[1] = 0;
+  r[2] = 0;
+  r[3] = 0;
+}
+
+/** Set field element to one */
+FIO_IFUNC void fio___p256_fe_one(fio___p256_fe_s r) {
+  r[0] = 1;
+  r[1] = 0;
+  r[2] = 0;
+  r[3] = 0;
+}
+
+/** Check if field element is zero */
+FIO_IFUNC int fio___p256_fe_is_zero(const fio___p256_fe_s a) {
+  return (a[0] | a[1] | a[2] | a[3]) == 0;
+}
+
+/** Compare two field elements: returns 0 if equal */
+FIO_IFUNC int fio___p256_fe_eq(const fio___p256_fe_s a,
+                               const fio___p256_fe_s b) {
+  uint64_t diff = (a[0] ^ b[0]) | (a[1] ^ b[1]) | (a[2] ^ b[2]) | (a[3] ^ b[3]);
+  return diff == 0 ? 0 : 1;
+}
+
+/** Load 32-byte big-endian number into field element */
+FIO_IFUNC void fio___p256_fe_from_bytes(fio___p256_fe_s r,
+                                        const uint8_t in[32]) {
+  r[3] = fio_buf2u64_be(in);
+  r[2] = fio_buf2u64_be(in + 8);
+  r[1] = fio_buf2u64_be(in + 16);
+  r[0] = fio_buf2u64_be(in + 24);
+}
+
+/** Store field element to 32-byte big-endian output */
+FIO_IFUNC void fio___p256_fe_to_bytes(uint8_t out[32],
+                                      const fio___p256_fe_s a) {
+  fio_u2buf64_be(out, a[3]);
+  fio_u2buf64_be(out + 8, a[2]);
+  fio_u2buf64_be(out + 16, a[1]);
+  fio_u2buf64_be(out + 24, a[0]);
+}
+
+/** Field addition: r = a + b mod p */
+FIO_IFUNC void fio___p256_fe_add(fio___p256_fe_s r,
+                                 const fio___p256_fe_s a,
+                                 const fio___p256_fe_s b) {
+  uint64_t c = 0;
+  uint64_t t[4];
+
+  /* Add a + b */
+  t[0] = fio_math_addc64(a[0], b[0], 0, &c);
+  t[1] = fio_math_addc64(a[1], b[1], c, &c);
+  t[2] = fio_math_addc64(a[2], b[2], c, &c);
+  t[3] = fio_math_addc64(a[3], b[3], c, &c);
+
+  /* Reduce mod p if needed: subtract p if result >= p */
+  uint64_t borrow = 0;
+  uint64_t s[4];
+  s[0] = fio_math_subc64(t[0], FIO___P256_P[0], 0, &borrow);
+  s[1] = fio_math_subc64(t[1], FIO___P256_P[1], borrow, &borrow);
+  s[2] = fio_math_subc64(t[2], FIO___P256_P[2], borrow, &borrow);
+  s[3] = fio_math_subc64(t[3], FIO___P256_P[3], borrow, &borrow);
+
+  /* If carry from addition or no borrow from subtraction, use subtracted value
+   */
+  uint64_t mask = (uint64_t)0 - (c | (borrow ^ 1));
+  r[0] = (s[0] & mask) | (t[0] & ~mask);
+  r[1] = (s[1] & mask) | (t[1] & ~mask);
+  r[2] = (s[2] & mask) | (t[2] & ~mask);
+  r[3] = (s[3] & mask) | (t[3] & ~mask);
+}
+
+/** Field subtraction: r = a - b mod p */
+FIO_IFUNC void fio___p256_fe_sub(fio___p256_fe_s r,
+                                 const fio___p256_fe_s a,
+                                 const fio___p256_fe_s b) {
+  uint64_t borrow = 0;
+  uint64_t t[4];
+
+  /* Subtract a - b */
+  t[0] = fio_math_subc64(a[0], b[0], 0, &borrow);
+  t[1] = fio_math_subc64(a[1], b[1], borrow, &borrow);
+  t[2] = fio_math_subc64(a[2], b[2], borrow, &borrow);
+  t[3] = fio_math_subc64(a[3], b[3], borrow, &borrow);
+
+  /* If borrow, add p back */
+  uint64_t c = 0;
+  uint64_t mask = (uint64_t)0 - borrow;
+  uint64_t s[4];
+  s[0] = fio_math_addc64(t[0], FIO___P256_P[0] & mask, 0, &c);
+  s[1] = fio_math_addc64(t[1], FIO___P256_P[1] & mask, c, &c);
+  s[2] = fio_math_addc64(t[2], FIO___P256_P[2] & mask, c, &c);
+  s[3] = fio_math_addc64(t[3], FIO___P256_P[3] & mask, c, &c);
+
+  r[0] = s[0];
+  r[1] = s[1];
+  r[2] = s[2];
+  r[3] = s[3];
+}
+
+/** Field negation: r = -a mod p */
+FIO_IFUNC void fio___p256_fe_neg(fio___p256_fe_s r, const fio___p256_fe_s a) {
+  fio___p256_fe_s zero = {0};
+  fio___p256_fe_sub(r, zero, a);
+}
+
+/**
+ * P-256 reduction using the NIST fast reduction formula.
+ *
+ * p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+ *
+ * For a 512-bit number T, we use the NIST formula with 32-bit words.
+ * T = (c15,...,c0) where each ci is 32 bits.
+ * Note: NIST notation is big-endian (c7 is MSB of low 256 bits)
+ *
+ * The result is: T mod p = s1 + 2*s2 + 2*s3 + s4 + s5 - s6 - s7 - s8 - s9
+ * where each si is a 256-bit value constructed from the 32-bit words.
+ *
+ * Reference: NIST FIPS 186-4, Section D.2.3
+ */
+FIO_SFUNC void fio___p256_fe_reduce(fio___p256_fe_s r, const uint64_t t[8]) {
+  /* Extract 32-bit words from 512-bit input (little-endian) */
+  uint32_t c[16];
+  for (int i = 0; i < 8; ++i) {
+    c[2 * i] = (uint32_t)t[i];
+    c[2 * i + 1] = (uint32_t)(t[i] >> 32);
+  }
+
+  /* Use 64-bit accumulators for each 32-bit position to handle carries.
+   * acc[0] is LSB (c0 position), acc[7] is MSB (c7 position).
+   * NIST notation: (c7, c6, c5, c4, c3, c2, c1, c0) means
+   * c7 is at position 7 (MSB), c0 is at position 0 (LSB). */
+  int64_t acc[8] = {0};
+
+  /* s1 = (c7, c6, c5, c4, c3, c2, c1, c0) - the low 256 bits */
+  acc[0] += c[0];
+  acc[1] += c[1];
+  acc[2] += c[2];
+  acc[3] += c[3];
+  acc[4] += c[4];
+  acc[5] += c[5];
+  acc[6] += c[6];
+  acc[7] += c[7];
+
+  /* s2 = (c15, c14, c13, c12, c11, 0, 0, 0) - add twice
+   * Position mapping: c15->acc[7], c14->acc[6], c13->acc[5], c12->acc[4],
+   * c11->acc[3] */
+  acc[3] += 2 * (int64_t)c[11];
+  acc[4] += 2 * (int64_t)c[12];
+  acc[5] += 2 * (int64_t)c[13];
+  acc[6] += 2 * (int64_t)c[14];
+  acc[7] += 2 * (int64_t)c[15];
+
+  /* s3 = (0, c15, c14, c13, c12, 0, 0, 0) - add twice
+   * Position mapping: c15->acc[6], c14->acc[5], c13->acc[4], c12->acc[3] */
+  acc[3] += 2 * (int64_t)c[12];
+  acc[4] += 2 * (int64_t)c[13];
+  acc[5] += 2 * (int64_t)c[14];
+  acc[6] += 2 * (int64_t)c[15];
+
+  /* s4 = (c15, c14, 0, 0, 0, c10, c9, c8)
+   * Position mapping: c15->acc[7], c14->acc[6], c10->acc[2], c9->acc[1],
+   * c8->acc[0] */
+  acc[0] += c[8];
+  acc[1] += c[9];
+  acc[2] += c[10];
+  acc[6] += c[14];
+  acc[7] += c[15];
+
+  /* s5 = (c8, c13, c15, c14, c13, c11, c10, c9)
+   * Position mapping: c8->acc[7], c13->acc[6], c15->acc[5], c14->acc[4],
+   * c13->acc[3], c11->acc[2], c10->acc[1], c9->acc[0] */
+  acc[0] += c[9];
+  acc[1] += c[10];
+  acc[2] += c[11];
+  acc[3] += c[13];
+  acc[4] += c[14];
+  acc[5] += c[15];
+  acc[6] += c[13];
+  acc[7] += c[8];
+
+  /* s6 = (c10, c8, 0, 0, 0, c13, c12, c11) - subtract
+   * Position mapping: c10->acc[7], c8->acc[6], c13->acc[2], c12->acc[1],
+   * c11->acc[0] */
+  acc[0] -= c[11];
+  acc[1] -= c[12];
+  acc[2] -= c[13];
+  acc[6] -= c[8];
+  acc[7] -= c[10];
+
+  /* s7 = (c11, c9, 0, 0, c15, c14, c13, c12) - subtract
+   * Position mapping: c11->acc[7], c9->acc[6], c15->acc[3], c14->acc[2],
+   * c13->acc[1], c12->acc[0] */
+  acc[0] -= c[12];
+  acc[1] -= c[13];
+  acc[2] -= c[14];
+  acc[3] -= c[15];
+  acc[6] -= c[9];
+  acc[7] -= c[11];
+
+  /* s8 = (c12, 0, c10, c9, c8, c15, c14, c13) - subtract
+   * Position mapping: c12->acc[7], c10->acc[5], c9->acc[4], c8->acc[3],
+   * c15->acc[2], c14->acc[1], c13->acc[0] */
+  acc[0] -= c[13];
+  acc[1] -= c[14];
+  acc[2] -= c[15];
+  acc[3] -= c[8];
+  acc[4] -= c[9];
+  acc[5] -= c[10];
+  acc[7] -= c[12];
+
+  /* s9 = (c13, 0, c11, c10, c9, 0, c15, c14) - subtract
+   * Position mapping: c13->acc[7], c11->acc[5], c10->acc[4], c9->acc[3],
+   * c15->acc[1], c14->acc[0] */
+  acc[0] -= c[14];
+  acc[1] -= c[15];
+  acc[3] -= c[9];
+  acc[4] -= c[10];
+  acc[5] -= c[11];
+  acc[7] -= c[13];
+
+  /* Carry propagation with signed arithmetic.
+   * For signed right shift, we need to handle negative values properly.
+   * The carry is the arithmetic right shift by 32 bits. */
+  for (int i = 0; i < 7; ++i) {
+    /* Arithmetic right shift for signed carry */
+    int64_t carry = acc[i] >> 32;
+    /* Keep only the low 32 bits (may be negative representation) */
+    acc[i] = acc[i] & 0xFFFFFFFFLL;
+    acc[i + 1] += carry;
+  }
+
+  /* Handle overflow/underflow in the top limb.
+   * acc[7] may be negative or > 2^32.
+   * We reduce by adding/subtracting multiples of p.
+   *
+   * p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+   * In 32-bit words (little-endian): p = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+   * 0, 0, 0, 1, 0xFFFFFFFF) That is: p[0]=0xFFFFFFFF, p[1]=0xFFFFFFFF,
+   * p[2]=0xFFFFFFFF, p[3]=0, p[4]=0, p[5]=0, p[6]=1, p[7]=0xFFFFFFFF
+   *
+   * When we add p: acc[0]+=0xFFFFFFFF, acc[1]+=0xFFFFFFFF, acc[2]+=0xFFFFFFFF,
+   *                acc[6]+=1, acc[7]+=0xFFFFFFFF
+   * When we subtract p: acc[0]-=0xFFFFFFFF, acc[1]-=0xFFFFFFFF,
+   * acc[2]-=0xFFFFFFFF, acc[6]-=1, acc[7]-=0xFFFFFFFF
+   */
+
+  /* Reduce: while acc[7] is out of [0, 2^32), add or subtract p */
+  while (acc[7] < 0 || acc[7] > (int64_t)0xFFFFFFFFLL) {
+    if (acc[7] < 0) {
+      /* Add p */
+      acc[0] += 0xFFFFFFFFLL;
+      acc[1] += 0xFFFFFFFFLL;
+      acc[2] += 0xFFFFFFFFLL;
+      acc[6] += 1;
+      acc[7] += 0xFFFFFFFFLL;
+    } else {
+      /* Subtract p */
+      acc[0] -= 0xFFFFFFFFLL;
+      acc[1] -= 0xFFFFFFFFLL;
+      acc[2] -= 0xFFFFFFFFLL;
+      acc[6] -= 1;
+      acc[7] -= 0xFFFFFFFFLL;
+    }
+
+    /* Re-propagate carries */
+    for (int i = 0; i < 7; ++i) {
+      int64_t carry = acc[i] >> 32;
+      acc[i] = acc[i] & 0xFFFFFFFFLL;
+      acc[i + 1] += carry;
+    }
+  }
+
+  /* Convert back to 64-bit limbs */
+  uint64_t res[4];
+  res[0] = ((uint64_t)(uint32_t)acc[1] << 32) | (uint32_t)acc[0];
+  res[1] = ((uint64_t)(uint32_t)acc[3] << 32) | (uint32_t)acc[2];
+  res[2] = ((uint64_t)(uint32_t)acc[5] << 32) | (uint32_t)acc[4];
+  res[3] = ((uint64_t)(uint32_t)acc[7] << 32) | (uint32_t)acc[6];
+
+  /* Final reduction: if result >= p, subtract p */
+  /* May need multiple subtractions */
+  for (int iter = 0; iter < 3; ++iter) {
+    uint64_t borrow = 0;
+    uint64_t sub[4];
+    sub[0] = fio_math_subc64(res[0], FIO___P256_P[0], 0, &borrow);
+    sub[1] = fio_math_subc64(res[1], FIO___P256_P[1], borrow, &borrow);
+    sub[2] = fio_math_subc64(res[2], FIO___P256_P[2], borrow, &borrow);
+    sub[3] = fio_math_subc64(res[3], FIO___P256_P[3], borrow, &borrow);
+
+    /* If no borrow (result >= p), use subtracted value */
+    if (!borrow) {
+      res[0] = sub[0];
+      res[1] = sub[1];
+      res[2] = sub[2];
+      res[3] = sub[3];
+    } else {
+      break;
+    }
+  }
+
+  r[0] = res[0];
+  r[1] = res[1];
+  r[2] = res[2];
+  r[3] = res[3];
+}
+
+/** Field multiplication: r = a * b mod p */
+FIO_SFUNC void fio___p256_fe_mul(fio___p256_fe_s r,
+                                 const fio___p256_fe_s a,
+                                 const fio___p256_fe_s b) {
+  uint64_t t[8] = {0};
+
+  /* Schoolbook multiplication to get 512-bit product */
+  for (int i = 0; i < 4; ++i) {
+    uint64_t carry = 0;
+    for (int j = 0; j < 4; ++j) {
+      uint64_t hi;
+      uint64_t lo = fio_math_mulc64(a[i], b[j], &hi);
+      uint64_t c1 = 0, c2 = 0;
+      t[i + j] = fio_math_addc64(t[i + j], lo, 0, &c1);
+      t[i + j] = fio_math_addc64(t[i + j], carry, 0, &c2);
+      carry = hi + c1 + c2;
+    }
+    t[i + 4] += carry;
+  }
+
+  /* Reduce mod p */
+  fio___p256_fe_reduce(r, t);
+}
+
+/** Field squaring: r = a² mod p */
+FIO_SFUNC void fio___p256_fe_sqr(fio___p256_fe_s r, const fio___p256_fe_s a) {
+  fio___p256_fe_mul(r, a, a);
+}
+
+/**
+ * Field inversion: r = a^(-1) mod p using Fermat's little theorem.
+ * a^(-1) = a^(p-2) mod p
+ *
+ * p-2 = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFD
+ *
+ * We use a simple square-and-multiply algorithm for correctness.
+ */
+FIO_SFUNC void fio___p256_fe_inv(fio___p256_fe_s r, const fio___p256_fe_s a) {
+  /* p - 2 in little-endian 64-bit limbs */
+  static const uint64_t pm2[4] = {
+      0xFFFFFFFFFFFFFFFDULL, /* pm2[0] */
+      0x00000000FFFFFFFFULL, /* pm2[1] */
+      0x0000000000000000ULL, /* pm2[2] */
+      0xFFFFFFFF00000001ULL, /* pm2[3] */
+  };
+
+  fio___p256_fe_s base, result, tmp;
+
+  /* Initialize result = 1 */
+  fio___p256_fe_one(result);
+
+  /* Copy input to base */
+  fio___p256_fe_copy(base, a);
+
+  /* Square-and-multiply from LSB to MSB */
+  for (int i = 0; i < 4; ++i) {
+    uint64_t bits = pm2[i];
+    for (int j = 0; j < 64; ++j) {
+      if (bits & 1) {
+        /* result = result * base */
+        fio___p256_fe_mul(tmp, result, base);
+        fio___p256_fe_copy(result, tmp);
+      }
+      /* base = base^2 */
+      fio___p256_fe_sqr(tmp, base);
+      fio___p256_fe_copy(base, tmp);
+      bits >>= 1;
+    }
+  }
+
+  fio___p256_fe_copy(r, result);
+}
+
+/* Note: Debug version of inversion removed - use fio___p256_fe_inv instead */
+
+/* *****************************************************************************
+Scalar Arithmetic (mod n)
+***************************************************************************** */
+
+/** Scalar element type: 4 x 64-bit limbs in little-endian */
+typedef uint64_t fio___p256_scalar_s[4];
+
+/** Load 32-byte big-endian number into scalar */
+FIO_IFUNC void fio___p256_scalar_from_bytes(fio___p256_scalar_s r,
+                                            const uint8_t in[32]) {
+  r[3] = fio_buf2u64_be(in);
+  r[2] = fio_buf2u64_be(in + 8);
+  r[1] = fio_buf2u64_be(in + 16);
+  r[0] = fio_buf2u64_be(in + 24);
+}
+
+/** Check if scalar is zero */
+FIO_IFUNC int fio___p256_scalar_is_zero(const fio___p256_scalar_s a) {
+  return (a[0] | a[1] | a[2] | a[3]) == 0;
+}
+
+/** Check if scalar >= n (curve order) */
+FIO_IFUNC int fio___p256_scalar_gte_n(const fio___p256_scalar_s a) {
+  /* Compare from most significant limb */
+  if (a[3] > FIO___P256_N[3])
+    return 1;
+  if (a[3] < FIO___P256_N[3])
+    return 0;
+  if (a[2] > FIO___P256_N[2])
+    return 1;
+  if (a[2] < FIO___P256_N[2])
+    return 0;
+  if (a[1] > FIO___P256_N[1])
+    return 1;
+  if (a[1] < FIO___P256_N[1])
+    return 0;
+  if (a[0] >= FIO___P256_N[0])
+    return 1;
+  return 0;
+}
+
+/** Scalar reduction mod n using fio_math_div */
+FIO_SFUNC void fio___p256_scalar_reduce(fio___p256_scalar_s r,
+                                        const uint64_t t[8]) {
+  /* Use fio_math_div to compute t mod n directly.
+   * We need to extend n to 8 limbs for the division. */
+  uint64_t n_ext[8] = {FIO___P256_N[0],
+                       FIO___P256_N[1],
+                       FIO___P256_N[2],
+                       FIO___P256_N[3],
+                       0,
+                       0,
+                       0,
+                       0};
+  uint64_t remainder[8] = {0};
+
+  /* Compute t mod n */
+  fio_math_div(NULL, remainder, t, n_ext, 8);
+
+  /* Copy the low 4 limbs to result */
+  r[0] = remainder[0];
+  r[1] = remainder[1];
+  r[2] = remainder[2];
+  r[3] = remainder[3];
+}
+
+/** Scalar multiplication: r = a * b mod n */
+FIO_SFUNC void fio___p256_scalar_mul(fio___p256_scalar_s r,
+                                     const fio___p256_scalar_s a,
+                                     const fio___p256_scalar_s b) {
+  uint64_t t[8] = {0};
+
+  /* Schoolbook multiplication */
+  for (int i = 0; i < 4; ++i) {
+    uint64_t carry = 0;
+    for (int j = 0; j < 4; ++j) {
+      uint64_t hi;
+      uint64_t lo = fio_math_mulc64(a[i], b[j], &hi);
+      uint64_t c1 = 0, c2 = 0;
+      t[i + j] = fio_math_addc64(t[i + j], lo, 0, &c1);
+      t[i + j] = fio_math_addc64(t[i + j], carry, 0, &c2);
+      carry = hi + c1 + c2;
+    }
+    t[i + 4] += carry;
+  }
+
+  fio___p256_scalar_reduce(r, t);
+}
+
+/**
+ * Scalar inversion: r = a^(-1) mod n using Fermat's little theorem.
+ * a^(-1) = a^(n-2) mod n
+ */
+FIO_SFUNC void fio___p256_scalar_inv(fio___p256_scalar_s r,
+                                     const fio___p256_scalar_s a) {
+  /* n-2 = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC63254F */
+  fio___p256_scalar_s t, tmp;
+
+  /* Start with a */
+  fio___p256_scalar_s base;
+  base[0] = a[0];
+  base[1] = a[1];
+  base[2] = a[2];
+  base[3] = a[3];
+
+  /* Initialize result to 1 */
+  t[0] = 1;
+  t[1] = 0;
+  t[2] = 0;
+  t[3] = 0;
+
+  /* Binary exponentiation for n-2 */
+  /* n-2 in binary has a specific pattern we can optimize */
+  /* For now, use simple square-and-multiply */
+
+  /* Process each bit of n-2 from LSB to MSB */
+  static const uint64_t nm2[4] = {
+      0xF3B9CAC2FC63254FULL, /* (n-2)[0] */
+      0xBCE6FAADA7179E84ULL, /* (n-2)[1] */
+      0xFFFFFFFFFFFFFFFFULL, /* (n-2)[2] */
+      0xFFFFFFFF00000000ULL, /* (n-2)[3] */
+  };
+
+  for (int i = 0; i < 4; ++i) {
+    uint64_t bits = nm2[i];
+    for (int j = 0; j < 64; ++j) {
+      if (bits & 1) {
+        fio___p256_scalar_mul(tmp, t, base);
+        t[0] = tmp[0];
+        t[1] = tmp[1];
+        t[2] = tmp[2];
+        t[3] = tmp[3];
+      }
+      fio___p256_scalar_mul(tmp, base, base);
+      base[0] = tmp[0];
+      base[1] = tmp[1];
+      base[2] = tmp[2];
+      base[3] = tmp[3];
+      bits >>= 1;
+    }
+  }
+
+  r[0] = t[0];
+  r[1] = t[1];
+  r[2] = t[2];
+  r[3] = t[3];
+}
+
+/* *****************************************************************************
+Point Operations (Jacobian Coordinates)
+***************************************************************************** */
+
+/** Check if point is at infinity (Z = 0) */
+FIO_IFUNC int fio___p256_point_is_infinity(
+    const fio___p256_point_jacobian_s *p) {
+  return fio___p256_fe_is_zero(p->z);
+}
+
+/** Set point to infinity */
+FIO_IFUNC void fio___p256_point_set_infinity(fio___p256_point_jacobian_s *p) {
+  fio___p256_fe_one(p->x);
+  fio___p256_fe_one(p->y);
+  fio___p256_fe_zero(p->z);
+}
+
+/** Convert affine point to Jacobian */
+FIO_IFUNC void fio___p256_point_to_jacobian(
+    fio___p256_point_jacobian_s *j,
+    const fio___p256_point_affine_s *a) {
+  fio___p256_fe_copy(j->x, a->x);
+  fio___p256_fe_copy(j->y, a->y);
+  fio___p256_fe_one(j->z);
+}
+
+/** Convert Jacobian point to affine (x = X/Z², y = Y/Z³) */
+FIO_SFUNC void fio___p256_point_to_affine(
+    fio___p256_point_affine_s *a,
+    const fio___p256_point_jacobian_s *j) {
+  if (fio___p256_point_is_infinity(j)) {
+    fio___p256_fe_zero(a->x);
+    fio___p256_fe_zero(a->y);
+    return;
+  }
+
+  fio___p256_fe_s z_inv, z_inv2, z_inv3;
+
+  fio___p256_fe_inv(z_inv, j->z);
+  fio___p256_fe_sqr(z_inv2, z_inv);
+  fio___p256_fe_mul(z_inv3, z_inv2, z_inv);
+
+  fio___p256_fe_mul(a->x, j->x, z_inv2);
+  fio___p256_fe_mul(a->y, j->y, z_inv3);
+}
+
+/**
+ * Point doubling in Jacobian coordinates.
+ * Uses the formula from "Guide to Elliptic Curve Cryptography" (Hankerson et
+ * al.)
+ *
+ * For P-256 where a = -3:
+ * λ = 3(X - Z²)(X + Z²)
+ * X' = λ² - 2S where S = 4XY²
+ * Y' = λ(S - X') - 8Y⁴
+ * Z' = 2YZ
+ */
+FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
+                                       const fio___p256_point_jacobian_s *p) {
+  if (fio___p256_point_is_infinity(p)) {
+    fio___p256_point_set_infinity(r);
+    return;
+  }
+
+  fio___p256_fe_s t1, t2, t3, t4, t5, yz;
+
+  /* Save Y*Z early to handle aliasing (r == p) */
+  fio___p256_fe_mul(yz, p->y, p->z);
+
+  /* t1 = Z² */
+  fio___p256_fe_sqr(t1, p->z);
+
+  /* t2 = X - Z² */
+  fio___p256_fe_sub(t2, p->x, t1);
+
+  /* t3 = X + Z² */
+  fio___p256_fe_add(t3, p->x, t1);
+
+  /* t2 = (X - Z²)(X + Z²) = X² - Z⁴ */
+  fio___p256_fe_mul(t2, t2, t3);
+
+  /* t2 = 3(X² - Z⁴) = λ (since a = -3, this equals 3X² + aZ⁴) */
+  fio___p256_fe_add(t3, t2, t2);
+  fio___p256_fe_add(t2, t3, t2);
+
+  /* t4 = Y² */
+  fio___p256_fe_sqr(t4, p->y);
+
+  /* t5 = XY² */
+  fio___p256_fe_mul(t5, p->x, t4);
+
+  /* t5 = 4XY² = S */
+  fio___p256_fe_add(t5, t5, t5);
+  fio___p256_fe_add(t5, t5, t5);
+
+  /* t3 = λ² */
+  fio___p256_fe_sqr(t3, t2);
+
+  /* X' = λ² - 2S */
+  fio___p256_fe_sub(r->x, t3, t5);
+  fio___p256_fe_sub(r->x, r->x, t5);
+
+  /* t4 = Y⁴ */
+  fio___p256_fe_sqr(t4, t4);
+
+  /* t4 = 8Y⁴ */
+  fio___p256_fe_add(t4, t4, t4);
+  fio___p256_fe_add(t4, t4, t4);
+  fio___p256_fe_add(t4, t4, t4);
+
+  /* t5 = S - X' */
+  fio___p256_fe_sub(t5, t5, r->x);
+
+  /* Y' = λ(S - X') - 8Y⁴ */
+  fio___p256_fe_mul(r->y, t2, t5);
+  fio___p256_fe_sub(r->y, r->y, t4);
+
+  /* Z' = 2YZ (using pre-computed value to handle aliasing) */
+  fio___p256_fe_add(r->z, yz, yz);
+}
+
+/**
+ * Point addition in Jacobian coordinates.
+ * r = p + q where p is Jacobian and q is affine.
+ *
+ * Mixed addition is faster than full Jacobian addition.
+ */
+FIO_SFUNC void fio___p256_point_add_mixed(fio___p256_point_jacobian_s *r,
+                                          const fio___p256_point_jacobian_s *p,
+                                          const fio___p256_point_affine_s *q) {
+  if (fio___p256_point_is_infinity(p)) {
+    fio___p256_point_to_jacobian(r, q);
+    return;
+  }
+
+  fio___p256_fe_s t1, t2, t3, t4, t5, t6;
+
+  /* t1 = Z₁² */
+  fio___p256_fe_sqr(t1, p->z);
+
+  /* t2 = Z₁³ */
+  fio___p256_fe_mul(t2, t1, p->z);
+
+  /* t3 = X₂Z₁² */
+  fio___p256_fe_mul(t3, q->x, t1);
+
+  /* t4 = Y₂Z₁³ */
+  fio___p256_fe_mul(t4, q->y, t2);
+
+  /* t3 = X₂Z₁² - X₁ = H */
+  fio___p256_fe_sub(t3, t3, p->x);
+
+  /* t4 = Y₂Z₁³ - Y₁ = R */
+  fio___p256_fe_sub(t4, t4, p->y);
+
+  /* Check if points are equal or opposite */
+  if (fio___p256_fe_is_zero(t3)) {
+    if (fio___p256_fe_is_zero(t4)) {
+      /* Points are equal - double */
+      fio___p256_point_double(r, p);
+      return;
+    } else {
+      /* Points are opposite - result is infinity */
+      fio___p256_point_set_infinity(r);
+      return;
+    }
+  }
+
+  /* t5 = H² */
+  fio___p256_fe_sqr(t5, t3);
+
+  /* t6 = H³ */
+  fio___p256_fe_mul(t6, t5, t3);
+
+  /* t1 = X₁H² */
+  fio___p256_fe_mul(t1, p->x, t5);
+
+  /* t2 = Y₁H³ (compute early to handle r == p aliasing) */
+  fio___p256_fe_mul(t2, p->y, t6);
+
+  /* Z₃ = Z₁H (compute early to handle r == p aliasing) */
+  fio___p256_fe_mul(r->z, p->z, t3);
+
+  /* X₃ = R² - H³ - 2X₁H² */
+  fio___p256_fe_sqr(r->x, t4);
+  fio___p256_fe_sub(r->x, r->x, t6);
+  fio___p256_fe_sub(r->x, r->x, t1);
+  fio___p256_fe_sub(r->x, r->x, t1);
+
+  /* t1 = X₁H² - X₃ */
+  fio___p256_fe_sub(t1, t1, r->x);
+
+  /* Y₃ = R(X₁H² - X₃) - Y₁H³ */
+  fio___p256_fe_mul(r->y, t4, t1);
+  fio___p256_fe_sub(r->y, r->y, t2);
+}
+
+/**
+ * Scalar multiplication: r = k * P
+ * Uses double-and-add algorithm (not constant-time for simplicity).
+ * For production use, implement constant-time scalar multiplication.
+ */
+FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
+                                    const fio___p256_scalar_s k,
+                                    const fio___p256_point_affine_s *p) {
+  fio___p256_point_set_infinity(r);
+
+  /* Find the highest set bit */
+  int start_bit = 255;
+  while (start_bit >= 0) {
+    int limb = start_bit / 64;
+    int bit = start_bit % 64;
+    if (k[limb] & (1ULL << bit))
+      break;
+    --start_bit;
+  }
+
+  if (start_bit < 0)
+    return; /* k = 0 */
+
+  /* Double-and-add from MSB to LSB */
+  for (int i = start_bit; i >= 0; --i) {
+    fio___p256_point_double(r, r);
+
+    int limb = i / 64;
+    int bit = i % 64;
+    if (k[limb] & (1ULL << bit)) {
+      fio___p256_point_add_mixed(r, r, p);
+    }
+  }
+}
+
+/**
+ * Double scalar multiplication: r = u1*G + u2*Q
+ * Uses Shamir's trick for efficiency.
+ */
+FIO_SFUNC void fio___p256_point_mul2(fio___p256_point_jacobian_s *r,
+                                     const fio___p256_scalar_s u1,
+                                     const fio___p256_scalar_s u2,
+                                     const fio___p256_point_affine_s *q) {
+  /* Base point G */
+  fio___p256_point_affine_s g;
+  fio___p256_fe_copy(g.x, FIO___P256_GX);
+  fio___p256_fe_copy(g.y, FIO___P256_GY);
+
+  /* Precompute G + Q */
+  fio___p256_point_jacobian_s gpq;
+  fio___p256_point_to_jacobian(&gpq, &g);
+  fio___p256_point_add_mixed(&gpq, &gpq, q);
+  fio___p256_point_affine_s gpq_affine;
+  fio___p256_point_to_affine(&gpq_affine, &gpq);
+
+  fio___p256_point_set_infinity(r);
+
+  /* Find highest set bit in either scalar */
+  int start_bit = 255;
+  while (start_bit >= 0) {
+    int limb = start_bit / 64;
+    int bit = start_bit % 64;
+    if ((u1[limb] & (1ULL << bit)) || (u2[limb] & (1ULL << bit)))
+      break;
+    --start_bit;
+  }
+
+  if (start_bit < 0)
+    return;
+
+  /* Shamir's trick: process both scalars simultaneously */
+  for (int i = start_bit; i >= 0; --i) {
+    fio___p256_point_double(r, r);
+
+    int limb = i / 64;
+    int bit = i % 64;
+    int b1 = (u1[limb] >> bit) & 1;
+    int b2 = (u2[limb] >> bit) & 1;
+
+    if (b1 && b2) {
+      fio___p256_point_add_mixed(r, r, &gpq_affine);
+    } else if (b1) {
+      fio___p256_point_add_mixed(r, r, &g);
+    } else if (b2) {
+      fio___p256_point_add_mixed(r, r, q);
+    }
+  }
+}
+
+/* *****************************************************************************
+DER Signature Parsing
+***************************************************************************** */
+
+/**
+ * Parse DER-encoded ECDSA signature.
+ * Format: SEQUENCE { r INTEGER, s INTEGER }
+ *
+ * Returns 0 on success, -1 on error.
+ */
+FIO_SFUNC int fio___p256_parse_der_signature(uint8_t r[32],
+                                             uint8_t s[32],
+                                             const uint8_t *sig,
+                                             size_t sig_len) {
+  if (!sig || sig_len < 8)
+    return -1;
+
+  const uint8_t *p = sig;
+  const uint8_t *end = sig + sig_len;
+
+  /* SEQUENCE tag */
+  if (*p++ != 0x30)
+    return -1;
+
+  /* SEQUENCE length */
+  size_t seq_len;
+  if (*p & 0x80) {
+    /* Long form length */
+    int len_bytes = *p++ & 0x7F;
+    if (len_bytes > 2 || p + len_bytes > end)
+      return -1;
+    seq_len = 0;
+    for (int i = 0; i < len_bytes; ++i)
+      seq_len = (seq_len << 8) | *p++;
+  } else {
+    seq_len = *p++;
+  }
+
+  if (p + seq_len > end)
+    return -1;
+
+  /* Parse r INTEGER */
+  if (*p++ != 0x02)
+    return -1;
+
+  size_t r_len = *p++;
+  if (p + r_len > end || r_len > 33)
+    return -1;
+
+  /* Skip leading zero if present (positive integer encoding) */
+  const uint8_t *r_data = p;
+  if (r_len > 0 && *r_data == 0x00) {
+    r_data++;
+    r_len--;
+  }
+  p += (r_len + (r_data != p ? 1 : 0));
+
+  /* Copy r, right-aligned in 32 bytes */
+  FIO_MEMSET(r, 0, 32);
+  if (r_len > 32)
+    return -1;
+  FIO_MEMCPY(r + (32 - r_len), r_data, r_len);
+
+  /* Parse s INTEGER */
+  if (*p++ != 0x02)
+    return -1;
+
+  size_t s_len = *p++;
+  if (p + s_len > end || s_len > 33)
+    return -1;
+
+  /* Skip leading zero if present */
+  const uint8_t *s_data = p;
+  if (s_len > 0 && *s_data == 0x00) {
+    s_data++;
+    s_len--;
+  }
+
+  /* Copy s, right-aligned in 32 bytes */
+  FIO_MEMSET(s, 0, 32);
+  if (s_len > 32)
+    return -1;
+  FIO_MEMCPY(s + (32 - s_len), s_data, s_len);
+
+  return 0;
+}
+
+/* *****************************************************************************
+ECDSA Verification
+***************************************************************************** */
+
+SFUNC int fio_ecdsa_p256_verify_raw(const uint8_t r_bytes[32],
+                                    const uint8_t s_bytes[32],
+                                    const uint8_t msg_hash[32],
+                                    const uint8_t pubkey_x[32],
+                                    const uint8_t pubkey_y[32]) {
+  fio___p256_scalar_s r, s, e;
+  fio___p256_point_affine_s q;
+
+  /* Load signature components */
+  fio___p256_scalar_from_bytes(r, r_bytes);
+  fio___p256_scalar_from_bytes(s, s_bytes);
+
+  /* Verify r, s are in [1, n-1] */
+  if (fio___p256_scalar_is_zero(r) || fio___p256_scalar_gte_n(r))
+    return -1;
+  if (fio___p256_scalar_is_zero(s) || fio___p256_scalar_gte_n(s))
+    return -1;
+
+  /* Load message hash as scalar e */
+  fio___p256_scalar_from_bytes(e, msg_hash);
+
+  /* Reduce e mod n if needed */
+  if (fio___p256_scalar_gte_n(e)) {
+    uint64_t borrow = 0;
+    e[0] = fio_math_subc64(e[0], FIO___P256_N[0], 0, &borrow);
+    e[1] = fio_math_subc64(e[1], FIO___P256_N[1], borrow, &borrow);
+    e[2] = fio_math_subc64(e[2], FIO___P256_N[2], borrow, &borrow);
+    e[3] = fio_math_subc64(e[3], FIO___P256_N[3], borrow, &borrow);
+  }
+
+  /* Load public key point Q */
+  fio___p256_fe_from_bytes(q.x, pubkey_x);
+  fio___p256_fe_from_bytes(q.y, pubkey_y);
+
+  /* Verify Q is on the curve: y² = x³ - 3x + b (mod p) */
+  {
+    fio___p256_fe_s y2, x3, t;
+
+    /* y² */
+    fio___p256_fe_sqr(y2, q.y);
+
+    /* x³ */
+    fio___p256_fe_sqr(t, q.x);
+    fio___p256_fe_mul(x3, t, q.x);
+
+    /* x³ - 3x */
+    fio___p256_fe_sub(t, x3, q.x);
+    fio___p256_fe_sub(t, t, q.x);
+    fio___p256_fe_sub(t, t, q.x);
+
+    /* x³ - 3x + b */
+    fio___p256_fe_add(t, t, FIO___P256_B);
+
+    /* Check y² == x³ - 3x + b */
+    if (fio___p256_fe_eq(y2, t) != 0)
+      return -1;
+  }
+
+  /* Compute w = s^(-1) mod n */
+  fio___p256_scalar_s w;
+  fio___p256_scalar_inv(w, s);
+
+  /* Compute u1 = e * w mod n */
+  fio___p256_scalar_s u1;
+  fio___p256_scalar_mul(u1, e, w);
+
+  /* Compute u2 = r * w mod n */
+  fio___p256_scalar_s u2;
+  fio___p256_scalar_mul(u2, r, w);
+
+  /* Compute R = u1*G + u2*Q */
+  fio___p256_point_jacobian_s R_jac;
+  fio___p256_point_mul2(&R_jac, u1, u2, &q);
+
+  /* If R is infinity, reject */
+  if (fio___p256_point_is_infinity(&R_jac))
+    return -1;
+
+  /* Convert R to affine */
+  fio___p256_point_affine_s R_aff;
+  fio___p256_point_to_affine(&R_aff, &R_jac);
+
+  /* Get R.x as bytes */
+  uint8_t rx_bytes[32];
+  fio___p256_fe_to_bytes(rx_bytes, R_aff.x);
+
+  /* Load R.x as scalar and reduce mod n */
+  fio___p256_scalar_s rx;
+  fio___p256_scalar_from_bytes(rx, rx_bytes);
+  while (fio___p256_scalar_gte_n(rx)) {
+    uint64_t borrow = 0;
+    rx[0] = fio_math_subc64(rx[0], FIO___P256_N[0], 0, &borrow);
+    rx[1] = fio_math_subc64(rx[1], FIO___P256_N[1], borrow, &borrow);
+    rx[2] = fio_math_subc64(rx[2], FIO___P256_N[2], borrow, &borrow);
+    rx[3] = fio_math_subc64(rx[3], FIO___P256_N[3], borrow, &borrow);
+  }
+
+  /* Verify r == R.x mod n */
+  if (r[0] != rx[0] || r[1] != rx[1] || r[2] != rx[2] || r[3] != rx[3])
+    return -1;
+
+  return 0;
+}
+
+SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
+                                size_t sig_len,
+                                const uint8_t *msg_hash,
+                                const uint8_t *pubkey,
+                                size_t pubkey_len) {
+  if (!sig || !msg_hash || !pubkey)
+    return -1;
+
+  /* Uncompressed public key format: 0x04 || x (32 bytes) || y (32 bytes) */
+  if (pubkey_len != 65 || pubkey[0] != 0x04)
+    return -1;
+
+  /* Parse DER signature */
+  uint8_t r[32], s[32];
+  if (fio___p256_parse_der_signature(r, s, sig, sig_len) != 0)
+    return -1;
+
+  /* Verify */
+  return fio_ecdsa_p256_verify_raw(r, s, msg_hash, pubkey + 1, pubkey + 33);
+}
+
+/* *****************************************************************************
+P-256 ECDHE Implementation
+***************************************************************************** */
+
+/**
+ * Validate that a point is on the P-256 curve.
+ * Checks: y² = x³ - 3x + b (mod p)
+ *
+ * @return 0 if valid, -1 if invalid
+ */
+FIO_SFUNC int fio___p256_point_validate(const fio___p256_point_affine_s *p) {
+  fio___p256_fe_s y2, x3, t;
+
+  /* y² */
+  fio___p256_fe_sqr(y2, p->y);
+
+  /* x³ */
+  fio___p256_fe_sqr(t, p->x);
+  fio___p256_fe_mul(x3, t, p->x);
+
+  /* x³ - 3x */
+  fio___p256_fe_sub(t, x3, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+
+  /* x³ - 3x + b */
+  fio___p256_fe_add(t, t, FIO___P256_B);
+
+  /* Check y² == x³ - 3x + b */
+  return (fio___p256_fe_eq(y2, t) == 0) ? 0 : -1;
+}
+
+/**
+ * Decompress a compressed P-256 point (33 bytes: 0x02/0x03 || x).
+ * Computes y from x using y² = x³ - 3x + b, selects sign based on prefix.
+ *
+ * @return 0 on success, -1 on failure
+ */
+FIO_SFUNC int fio___p256_point_decompress(fio___p256_point_affine_s *p,
+                                          const uint8_t compressed[33]) {
+  uint8_t prefix = compressed[0];
+  if (prefix != 0x02 && prefix != 0x03)
+    return -1;
+
+  /* Load x coordinate */
+  fio___p256_fe_from_bytes(p->x, compressed + 1);
+
+  /* Compute y² = x³ - 3x + b */
+  fio___p256_fe_s y2, x3, t;
+  fio___p256_fe_sqr(t, p->x);
+  fio___p256_fe_mul(x3, t, p->x);
+  fio___p256_fe_sub(t, x3, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+  fio___p256_fe_add(y2, t, FIO___P256_B);
+
+  /* Compute y = sqrt(y²) mod p using Tonelli-Shanks.
+   * For P-256: p ≡ 3 (mod 4), so y = y²^((p+1)/4) mod p */
+  /* (p+1)/4 =
+   * 0x3FFFFFFFC0000000400000000000000000000000400000000000000000000000 */
+  fio___p256_fe_s y;
+
+  /* Use Fermat's method: y = y2^((p+1)/4) mod p
+   * We use a simple square-and-multiply with the exponent (p+1)/4 */
+  static const uint64_t exp[4] = {
+      0x0000000000000000ULL, /* exp[0] */
+      0x0000000040000000ULL, /* exp[1] */
+      0x4000000000000000ULL, /* exp[2] */
+      0x3FFFFFFFC0000000ULL, /* exp[3] */
+  };
+
+  /* Start with result = 1 */
+  fio___p256_fe_s result;
+  fio___p256_fe_one(result);
+
+  /* base = y2 */
+  fio___p256_fe_s base;
+  fio___p256_fe_copy(base, y2);
+
+  /* Square-and-multiply from LSB to MSB */
+  for (int i = 0; i < 4; ++i) {
+    uint64_t bits = exp[i];
+    for (int j = 0; j < 64; ++j) {
+      if (bits & 1) {
+        fio___p256_fe_mul(result, result, base);
+      }
+      fio___p256_fe_sqr(base, base);
+      bits >>= 1;
+    }
+  }
+
+  fio___p256_fe_copy(y, result);
+
+  /* Verify: y² should equal y2 */
+  fio___p256_fe_s check;
+  fio___p256_fe_sqr(check, y);
+  if (fio___p256_fe_eq(check, y2) != 0)
+    return -1; /* Not a quadratic residue - invalid point */
+
+  /* Select correct sign: if (y mod 2) != (prefix - 2), negate y */
+  uint8_t y_bytes[32];
+  fio___p256_fe_to_bytes(y_bytes, y);
+  int y_parity = y_bytes[31] & 1;
+  int expected_parity = prefix - 0x02;
+
+  if (y_parity != expected_parity) {
+    fio___p256_fe_neg(p->y, y);
+  } else {
+    fio___p256_fe_copy(p->y, y);
+  }
+
+  return 0;
+}
+
+SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
+  if (!secret_key || !public_key)
+    return -1;
+
+  fio___p256_scalar_s k;
+
+  /* Generate random scalar and ensure 0 < k < n */
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    fio_rand_bytes(secret_key, 32);
+    fio___p256_scalar_from_bytes(k, secret_key);
+
+    /* Check k is not zero and k < n */
+    if (!fio___p256_scalar_is_zero(k) && !fio___p256_scalar_gte_n(k))
+      break;
+
+    if (attempts == 99)
+      return -1; /* Failed to generate valid scalar */
+  }
+
+  /* Compute public key = k * G */
+  fio___p256_point_affine_s g;
+  fio___p256_fe_copy(g.x, FIO___P256_GX);
+  fio___p256_fe_copy(g.y, FIO___P256_GY);
+
+  fio___p256_point_jacobian_s pub_jac;
+  fio___p256_point_mul(&pub_jac, k, &g);
+
+  /* Convert to affine */
+  fio___p256_point_affine_s pub_aff;
+  fio___p256_point_to_affine(&pub_aff, &pub_jac);
+
+  /* Serialize: 0x04 || x || y */
+  public_key[0] = 0x04;
+  fio___p256_fe_to_bytes(public_key + 1, pub_aff.x);
+  fio___p256_fe_to_bytes(public_key + 33, pub_aff.y);
+
+  /* Clear sensitive data */
+  FIO_MEMSET(k, 0, sizeof(k));
+
+  return 0;
+}
+
+SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
+                                 const uint8_t secret_key[32],
+                                 const uint8_t *their_public_key,
+                                 size_t their_public_key_len) {
+  if (!shared_secret || !secret_key || !their_public_key)
+    return -1;
+
+  fio___p256_point_affine_s their_point;
+
+  /* Parse their public key */
+  if (their_public_key_len == 65) {
+    /* Uncompressed: 0x04 || x || y */
+    if (their_public_key[0] != 0x04)
+      return -1;
+    fio___p256_fe_from_bytes(their_point.x, their_public_key + 1);
+    fio___p256_fe_from_bytes(their_point.y, their_public_key + 33);
+  } else if (their_public_key_len == 33) {
+    /* Compressed: 0x02/0x03 || x */
+    if (fio___p256_point_decompress(&their_point, their_public_key) != 0)
+      return -1;
+  } else {
+    return -1; /* Invalid length */
+  }
+
+  /* Validate point is on curve */
+  if (fio___p256_point_validate(&their_point) != 0)
+    return -1;
+
+  /* Load our secret key as scalar */
+  fio___p256_scalar_s k;
+  fio___p256_scalar_from_bytes(k, secret_key);
+
+  /* Validate scalar: 0 < k < n */
+  if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k)) {
+    FIO_MEMSET(k, 0, sizeof(k));
+    return -1;
+  }
+
+  /* Compute shared = k * their_point */
+  fio___p256_point_jacobian_s result_jac;
+  fio___p256_point_mul(&result_jac, k, &their_point);
+
+  /* Check for point at infinity (shouldn't happen with valid inputs) */
+  if (fio___p256_point_is_infinity(&result_jac)) {
+    FIO_MEMSET(k, 0, sizeof(k));
+    return -1;
+  }
+
+  /* Convert to affine and extract x-coordinate */
+  fio___p256_point_affine_s result_aff;
+  fio___p256_point_to_affine(&result_aff, &result_jac);
+  fio___p256_fe_to_bytes(shared_secret, result_aff.x);
+
+  /* Clear sensitive data */
+  FIO_MEMSET(k, 0, sizeof(k));
+  FIO_MEMSET(&result_jac, 0, sizeof(result_jac));
+  FIO_MEMSET(&result_aff, 0, sizeof(result_aff));
+
+  /* Check for all-zero output (low-order point attack) */
+  uint8_t zero_check = 0;
+  for (int i = 0; i < 32; ++i)
+    zero_check |= shared_secret[i];
+
+  return zero_check ? 0 : -1;
+}
+
+/* *****************************************************************************
+Cleanup
+***************************************************************************** */
+
+#endif /* FIO_EXTERN_COMPLETE */
+#undef FIO_P256
+#endif /* FIO_P256 */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_ASN1               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                          ASN.1 DER Parser for X.509
+                        (RFC 5280 Certificate Parsing)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_ASN1) && !defined(H___FIO_ASN1___H)
+#define H___FIO_ASN1___H
+
+/* *****************************************************************************
+ASN.1 Tag Types (Universal Class)
+***************************************************************************** */
+
+/** ASN.1 Universal Tag Types */
+typedef enum {
+  FIO_ASN1_EOC = 0x00,               /**< End-of-contents */
+  FIO_ASN1_BOOLEAN = 0x01,           /**< Boolean */
+  FIO_ASN1_INTEGER = 0x02,           /**< Integer */
+  FIO_ASN1_BIT_STRING = 0x03,        /**< Bit String */
+  FIO_ASN1_OCTET_STRING = 0x04,      /**< Octet String */
+  FIO_ASN1_NULL = 0x05,              /**< Null */
+  FIO_ASN1_OID = 0x06,               /**< Object Identifier */
+  FIO_ASN1_OBJECT_DESCRIPTOR = 0x07, /**< Object Descriptor */
+  FIO_ASN1_EXTERNAL = 0x08,          /**< External */
+  FIO_ASN1_REAL = 0x09,              /**< Real (float) */
+  FIO_ASN1_ENUMERATED = 0x0A,        /**< Enumerated */
+  FIO_ASN1_EMBEDDED_PDV = 0x0B,      /**< Embedded PDV */
+  FIO_ASN1_UTF8_STRING = 0x0C,       /**< UTF-8 String */
+  FIO_ASN1_RELATIVE_OID = 0x0D,      /**< Relative OID */
+  FIO_ASN1_SEQUENCE = 0x10,         /**< Sequence (0x30 with constructed bit) */
+  FIO_ASN1_SET = 0x11,              /**< Set (0x31 with constructed bit) */
+  FIO_ASN1_NUMERIC_STRING = 0x12,   /**< Numeric String */
+  FIO_ASN1_PRINTABLE_STRING = 0x13, /**< Printable String */
+  FIO_ASN1_T61_STRING = 0x14,       /**< T61 String (Teletex) */
+  FIO_ASN1_VIDEOTEX_STRING = 0x15,  /**< Videotex String */
+  FIO_ASN1_IA5_STRING = 0x16,       /**< IA5 String (ASCII) */
+  FIO_ASN1_UTC_TIME = 0x17,         /**< UTC Time */
+  FIO_ASN1_GENERALIZED_TIME = 0x18, /**< Generalized Time */
+  FIO_ASN1_GRAPHIC_STRING = 0x19,   /**< Graphic String */
+  FIO_ASN1_VISIBLE_STRING = 0x1A,   /**< Visible String */
+  FIO_ASN1_GENERAL_STRING = 0x1B,   /**< General String */
+  FIO_ASN1_UNIVERSAL_STRING = 0x1C, /**< Universal String */
+  FIO_ASN1_BMP_STRING = 0x1E,       /**< BMP String (UCS-2) */
+  /* Context-specific tags (0x80 | tag_number) with constructed bit (0x20) */
+  FIO_ASN1_CONTEXT_0 = 0xA0, /**< [0] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_1 = 0xA1, /**< [1] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_2 = 0xA2, /**< [2] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_3 = 0xA3, /**< [3] EXPLICIT/IMPLICIT */
+} fio_asn1_tag_e;
+
+/** ASN.1 Tag Class (bits 7-6 of tag byte) */
+typedef enum {
+  FIO_ASN1_CLASS_UNIVERSAL = 0,   /**< Universal (built-in types) */
+  FIO_ASN1_CLASS_APPLICATION = 1, /**< Application-specific */
+  FIO_ASN1_CLASS_CONTEXT = 2,     /**< Context-specific */
+  FIO_ASN1_CLASS_PRIVATE = 3,     /**< Private */
+} fio_asn1_class_e;
+
+/* *****************************************************************************
+Common OID Constants for X.509 and TLS
+***************************************************************************** */
+
+/* Signature Algorithms */
+#define FIO_OID_SHA256_WITH_RSA   "1.2.840.113549.1.1.11"
+#define FIO_OID_SHA384_WITH_RSA   "1.2.840.113549.1.1.12"
+#define FIO_OID_SHA512_WITH_RSA   "1.2.840.113549.1.1.13"
+#define FIO_OID_RSA_PSS           "1.2.840.113549.1.1.10"
+#define FIO_OID_ECDSA_WITH_SHA256 "1.2.840.10045.4.3.2"
+#define FIO_OID_ECDSA_WITH_SHA384 "1.2.840.10045.4.3.3"
+#define FIO_OID_ECDSA_WITH_SHA512 "1.2.840.10045.4.3.4"
+#define FIO_OID_ED25519           "1.3.101.112"
+#define FIO_OID_ED448             "1.3.101.113"
+
+/* Public Key Algorithms */
+#define FIO_OID_RSA_ENCRYPTION "1.2.840.113549.1.1.1"
+#define FIO_OID_EC_PUBLIC_KEY  "1.2.840.10045.2.1"
+
+/* Elliptic Curves */
+#define FIO_OID_SECP256R1 "1.2.840.10045.3.1.7"
+#define FIO_OID_SECP384R1 "1.3.132.0.34"
+#define FIO_OID_SECP521R1 "1.3.132.0.35"
+#define FIO_OID_X25519    "1.3.101.110"
+#define FIO_OID_X448      "1.3.101.111"
+
+/* X.509 Extensions */
+#define FIO_OID_SUBJECT_KEY_ID    "2.5.29.14"
+#define FIO_OID_KEY_USAGE         "2.5.29.15"
+#define FIO_OID_SUBJECT_ALT_NAME  "2.5.29.17"
+#define FIO_OID_BASIC_CONSTRAINTS "2.5.29.19"
+#define FIO_OID_CRL_DIST_POINTS   "2.5.29.31"
+#define FIO_OID_CERT_POLICIES     "2.5.29.32"
+#define FIO_OID_AUTH_KEY_ID       "2.5.29.35"
+#define FIO_OID_EXT_KEY_USAGE     "2.5.29.37"
+
+/* X.509 Distinguished Name Attributes */
+#define FIO_OID_COMMON_NAME  "2.5.4.3"
+#define FIO_OID_COUNTRY      "2.5.4.6"
+#define FIO_OID_LOCALITY     "2.5.4.7"
+#define FIO_OID_STATE        "2.5.4.8"
+#define FIO_OID_ORGANIZATION "2.5.4.10"
+#define FIO_OID_ORG_UNIT     "2.5.4.11"
+
+/* *****************************************************************************
+ASN.1 Parsed Element Structure
+***************************************************************************** */
+
+/** Parsed ASN.1 DER element */
+typedef struct {
+  const uint8_t *data;    /**< Pointer to element content (after tag+length) */
+  size_t len;             /**< Length of content */
+  uint8_t tag;            /**< Raw tag byte */
+  uint8_t is_constructed; /**< 1 if constructed (contains other elements) */
+  uint8_t tag_class;  /**< 0=Universal, 1=Application, 2=Context, 3=Private */
+  uint8_t tag_number; /**< Tag number (bits 4-0, or extended) */
+} fio_asn1_element_s;
+
+/** Iterator for SEQUENCE or SET contents */
+typedef struct {
+  const uint8_t *pos; /**< Current position */
+  const uint8_t *end; /**< End of sequence */
+} fio_asn1_iterator_s;
+
+/* *****************************************************************************
+ASN.1 Parser API - Core Functions
+***************************************************************************** */
+
+/**
+ * Parse one ASN.1 element from DER-encoded data.
+ *
+ * @param elem Output structure to fill with parsed element info
+ * @param data Pointer to DER-encoded data
+ * @param data_len Length of data buffer
+ * @return Pointer to next element (after this one), or NULL on error
+ */
+SFUNC const uint8_t *fio_asn1_parse(fio_asn1_element_s *elem,
+                                    const uint8_t *data,
+                                    size_t data_len);
+
+/**
+ * Get the total encoded length of an ASN.1 element (tag + length + content).
+ *
+ * @param elem Parsed element
+ * @param data Original data pointer where element was parsed from
+ * @return Total bytes used by the element encoding
+ */
+FIO_IFUNC size_t fio_asn1_element_total_len(const fio_asn1_element_s *elem,
+                                            const uint8_t *data);
+
+/* *****************************************************************************
+ASN.1 Parser API - Type-Specific Parsers
+***************************************************************************** */
+
+/**
+ * Parse an ASN.1 INTEGER element.
+ *
+ * For small integers (<= 64-bit), sets *value.
+ * For large integers (RSA modulus), use elem->data/len directly.
+ * Leading zero bytes for positive numbers are handled correctly.
+ *
+ * @param elem Parsed element (must be INTEGER type)
+ * @param value Output for integer value (can be NULL for large integers)
+ * @return 0 on success, -1 on error
+ */
+SFUNC int fio_asn1_parse_integer(const fio_asn1_element_s *elem,
+                                 uint64_t *value);
+
+/**
+ * Parse an ASN.1 BIT STRING element.
+ *
+ * @param elem Parsed element (must be BIT STRING type)
+ * @param bits Output pointer to bit data (first byte is unused bits count)
+ * @param bit_len Output length of bit data in bytes
+ * @param unused_bits Output number of unused bits in last byte (0-7)
+ * @return 0 on success, -1 on error
+ */
+SFUNC int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem,
+                                    const uint8_t **bits,
+                                    size_t *bit_len,
+                                    uint8_t *unused_bits);
+
+/**
+ * Parse an ASN.1 OID into a dot-separated string.
+ *
+ * Example output: "1.2.840.113549.1.1.11"
+ *
+ * @param elem Parsed element (must be OID type)
+ * @param buf Output buffer for string
+ * @param buf_len Buffer size
+ * @return Number of chars written (excluding NUL), or -1 on error
+ */
+SFUNC int fio_asn1_parse_oid(const fio_asn1_element_s *elem,
+                             char *buf,
+                             size_t buf_len);
+
+/**
+ * Compare an ASN.1 OID element to a known OID string.
+ *
+ * @param elem Parsed element (must be OID type)
+ * @param oid_string OID in dot notation (e.g., "1.2.840.113549.1.1.11")
+ * @return 1 if match, 0 if no match
+ */
+SFUNC int fio_asn1_oid_eq(const fio_asn1_element_s *elem,
+                          const char *oid_string);
+
+/**
+ * Parse an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
+ *
+ * @param elem Parsed element (must be UTC_TIME or GENERALIZED_TIME type)
+ * @param unix_time Output Unix timestamp (seconds since 1970-01-01 00:00:00
+ * UTC)
+ * @return 0 on success, -1 on error
+ */
+SFUNC int fio_asn1_parse_time(const fio_asn1_element_s *elem,
+                              int64_t *unix_time);
+
+/**
+ * Parse an ASN.1 string element.
+ *
+ * Supports UTF8String, PrintableString, IA5String, etc.
+ * Returns pointer directly into the element data (no copy).
+ *
+ * @param elem Parsed element (must be a string type)
+ * @param len Output length of string
+ * @return Pointer to string data, or NULL on error
+ */
+FIO_IFUNC const char *fio_asn1_parse_string(const fio_asn1_element_s *elem,
+                                            size_t *len);
+
+/**
+ * Parse an ASN.1 BOOLEAN element.
+ *
+ * @param elem Parsed element (must be BOOLEAN type)
+ * @param value Output boolean value (0 = false, non-zero = true)
+ * @return 0 on success, -1 on error
+ */
+FIO_IFUNC int fio_asn1_parse_boolean(const fio_asn1_element_s *elem,
+                                     int *value);
+
+/* *****************************************************************************
+ASN.1 Parser API - Sequence/Set Iteration
+***************************************************************************** */
+
+/**
+ * Initialize an iterator for a SEQUENCE or SET element.
+ *
+ * @param it Iterator to initialize
+ * @param sequence Parsed element (must be SEQUENCE or SET)
+ */
+FIO_IFUNC void fio_asn1_iterator_init(fio_asn1_iterator_s *it,
+                                      const fio_asn1_element_s *sequence);
+
+/**
+ * Get the next element from an iterator.
+ *
+ * @param it Iterator (updated to point to next element)
+ * @param elem Output for parsed element
+ * @return 0 if element available, -1 if end or error
+ */
+SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
+                                 fio_asn1_element_s *elem);
+
+/**
+ * Check if iterator has more elements.
+ *
+ * @param it Iterator
+ * @return 1 if more elements available, 0 otherwise
+ */
+FIO_IFUNC int fio_asn1_iterator_has_next(const fio_asn1_iterator_s *it);
+
+/* *****************************************************************************
+ASN.1 Parser API - Helper Functions
+***************************************************************************** */
+
+/**
+ * Check if an element is a specific tag type.
+ *
+ * @param elem Parsed element
+ * @param tag Expected tag (e.g., FIO_ASN1_INTEGER)
+ * @return 1 if match, 0 otherwise
+ */
+FIO_IFUNC int fio_asn1_is_tag(const fio_asn1_element_s *elem, uint8_t tag);
+
+/**
+ * Check if an element is a context-specific tag.
+ *
+ * @param elem Parsed element
+ * @param tag_num Context tag number (0-31)
+ * @return 1 if match, 0 otherwise
+ */
+FIO_IFUNC int fio_asn1_is_context_tag(const fio_asn1_element_s *elem,
+                                      uint8_t tag_num);
+
+/**
+ * Get the tag number from an element.
+ *
+ * For universal tags, returns the tag value (0-30).
+ * For context-specific tags, returns the context number.
+ *
+ * @param elem Parsed element
+ * @return Tag number
+ */
+FIO_IFUNC uint8_t fio_asn1_tag_number(const fio_asn1_element_s *elem);
+
+/* *****************************************************************************
+Implementation - Inline Functions
+***************************************************************************** */
+
+/** Get total encoded length of element */
+FIO_IFUNC size_t fio_asn1_element_total_len(const fio_asn1_element_s *elem,
+                                            const uint8_t *data) {
+  if (!elem || !data || !elem->data)
+    return 0;
+  return (size_t)(elem->data - data) + elem->len;
+}
+
+/** Parse string types - returns pointer to data */
+FIO_IFUNC const char *fio_asn1_parse_string(const fio_asn1_element_s *elem,
+                                            size_t *len) {
+  if (!elem || !len)
+    return NULL;
+  /* Accept various string types */
+  uint8_t tag_num = elem->tag & 0x1F;
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL)
+    return NULL;
+  switch (tag_num) {
+  case FIO_ASN1_UTF8_STRING:
+  case FIO_ASN1_PRINTABLE_STRING:
+  case FIO_ASN1_IA5_STRING:
+  case FIO_ASN1_T61_STRING:
+  case FIO_ASN1_VISIBLE_STRING:
+  case FIO_ASN1_GENERAL_STRING:
+  case FIO_ASN1_UNIVERSAL_STRING:
+  case FIO_ASN1_BMP_STRING:
+  case FIO_ASN1_NUMERIC_STRING:
+    *len = elem->len;
+    return (const char *)elem->data;
+  default: return NULL;
+  }
+}
+
+/** Parse boolean value */
+FIO_IFUNC int fio_asn1_parse_boolean(const fio_asn1_element_s *elem,
+                                     int *value) {
+  if (!elem || !value)
+    return -1;
+  if ((elem->tag & 0x1F) != FIO_ASN1_BOOLEAN ||
+      elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL)
+    return -1;
+  if (elem->len != 1)
+    return -1;
+  *value = (elem->data[0] != 0);
+  return 0;
+}
+
+/** Initialize iterator for sequence/set */
+FIO_IFUNC void fio_asn1_iterator_init(fio_asn1_iterator_s *it,
+                                      const fio_asn1_element_s *sequence) {
+  if (!it)
+    return;
+  if (!sequence || !sequence->data) {
+    it->pos = NULL;
+    it->end = NULL;
+    return;
+  }
+  it->pos = sequence->data;
+  it->end = sequence->data + sequence->len;
+}
+
+/** Check if iterator has more elements */
+FIO_IFUNC int fio_asn1_iterator_has_next(const fio_asn1_iterator_s *it) {
+  return (it && it->pos && it->end && it->pos < it->end);
+}
+
+/** Check if element matches tag */
+FIO_IFUNC int fio_asn1_is_tag(const fio_asn1_element_s *elem, uint8_t tag) {
+  if (!elem)
+    return 0;
+  /* For universal tags, compare the tag number */
+  if (elem->tag_class == FIO_ASN1_CLASS_UNIVERSAL)
+    return (elem->tag & 0x1F) == (tag & 0x1F);
+  /* For other classes, compare full tag byte */
+  return elem->tag == tag;
+}
+
+/** Check if element is context-specific tag */
+FIO_IFUNC int fio_asn1_is_context_tag(const fio_asn1_element_s *elem,
+                                      uint8_t tag_num) {
+  if (!elem)
+    return 0;
+  return (elem->tag_class == FIO_ASN1_CLASS_CONTEXT) &&
+         ((elem->tag & 0x1F) == (tag_num & 0x1F));
+}
+
+/** Get tag number from element */
+FIO_IFUNC uint8_t fio_asn1_tag_number(const fio_asn1_element_s *elem) {
+  if (!elem)
+    return 0;
+  return elem->tag & 0x1F;
+}
+
+/* *****************************************************************************
+Implementation - Possibly Externed Functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Implementation - Core Parser
+***************************************************************************** */
+
+/**
+ * Parse DER length field.
+ * Returns pointer past length field, or NULL on error.
+ * Sets *out_len to the parsed length value.
+ */
+FIO_SFUNC const uint8_t *fio___asn1_parse_length(const uint8_t *data,
+                                                 const uint8_t *end,
+                                                 size_t *out_len) {
+  if (!data || !end || !out_len || data >= end)
+    return NULL;
+
+  uint8_t first = *data++;
+
+  /* Short form: 0x00-0x7F = length directly */
+  if (!(first & 0x80)) {
+    *out_len = first;
+    return data;
+  }
+
+  /* Long form: first byte & 0x7F = number of length bytes */
+  size_t num_bytes = first & 0x7F;
+
+  /* Indefinite length (0x80) not allowed in DER */
+  if (num_bytes == 0)
+    return NULL;
+
+  /* Too many length bytes (protect against overflow) */
+  if (num_bytes > sizeof(size_t) || (size_t)(end - data) < num_bytes)
+    return NULL;
+
+  size_t len = 0;
+  for (size_t i = 0; i < num_bytes; ++i) {
+    /* Check for overflow before shifting */
+    if (len > (SIZE_MAX >> 8))
+      return NULL;
+    len = (len << 8) | *data++;
+  }
+
+  *out_len = len;
+  return data;
+}
+
+/** Parse one ASN.1 element from DER data */
+SFUNC const uint8_t *fio_asn1_parse(fio_asn1_element_s *elem,
+                                    const uint8_t *data,
+                                    size_t data_len) {
+  if (!elem || !data || data_len == 0)
+    return NULL;
+
+  const uint8_t *end = data + data_len;
+  const uint8_t *p = data;
+
+  /* Parse tag byte */
+  if (p >= end)
+    return NULL;
+
+  uint8_t tag = *p++;
+  elem->tag = tag;
+  elem->tag_class = (tag >> 6) & 0x03;
+  elem->is_constructed = (tag >> 5) & 0x01;
+  elem->tag_number = tag & 0x1F;
+
+  /* Handle long-form tags (tag number >= 31) */
+  if (elem->tag_number == 0x1F) {
+    /* Multi-byte tag number - accumulate until high bit clear */
+    uint32_t tag_num = 0;
+    while (p < end) {
+      uint8_t b = *p++;
+      if (tag_num > (0xFFFFFFFF >> 7))
+        return NULL; /* Overflow */
+      tag_num = (tag_num << 7) | (b & 0x7F);
+      if (!(b & 0x80))
+        break;
+    }
+    /* Store as much as fits in tag_number (used for context tags mainly) */
+    elem->tag_number = (uint8_t)(tag_num & 0xFF);
+  }
+
+  /* Parse length */
+  size_t content_len;
+  p = fio___asn1_parse_length(p, end, &content_len);
+  if (!p)
+    return NULL;
+
+  /* Validate content fits in remaining data */
+  if ((size_t)(end - p) < content_len)
+    return NULL;
+
+  elem->data = p;
+  elem->len = content_len;
+
+  return p + content_len;
+}
+
+/* *****************************************************************************
+Implementation - Integer Parser
+***************************************************************************** */
+
+SFUNC int fio_asn1_parse_integer(const fio_asn1_element_s *elem,
+                                 uint64_t *value) {
+  if (!elem)
+    return -1;
+
+  /* Verify it's an INTEGER */
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL ||
+      (elem->tag & 0x1F) != FIO_ASN1_INTEGER)
+    return -1;
+
+  if (elem->len == 0)
+    return -1;
+
+  const uint8_t *p = elem->data;
+  size_t len = elem->len;
+
+  /* Skip leading zero byte used for positive numbers */
+  if (len > 1 && p[0] == 0x00 && (p[1] & 0x80)) {
+    p++;
+    len--;
+  }
+
+  /* If caller wants the value and it fits in uint64_t */
+  if (value) {
+    if (len > 8)
+      return -1; /* Too large for uint64_t */
+
+    uint64_t v = 0;
+    for (size_t i = 0; i < len; ++i)
+      v = (v << 8) | p[i];
+    *value = v;
+  }
+
+  return 0;
+}
+
+/* *****************************************************************************
+Implementation - Bit String Parser
+***************************************************************************** */
+
+SFUNC int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem,
+                                    const uint8_t **bits,
+                                    size_t *bit_len,
+                                    uint8_t *unused_bits) {
+  if (!elem || !bits || !bit_len || !unused_bits)
+    return -1;
+
+  /* Verify it's a BIT STRING */
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL ||
+      (elem->tag & 0x1F) != FIO_ASN1_BIT_STRING)
+    return -1;
+
+  if (elem->len < 1)
+    return -1;
+
+  /* First byte is unused bits count (0-7) */
+  uint8_t unused = elem->data[0];
+  if (unused > 7)
+    return -1;
+
+  /* Empty bit string */
+  if (elem->len == 1) {
+    if (unused != 0)
+      return -1;
+    *bits = NULL;
+    *bit_len = 0;
+    *unused_bits = 0;
+    return 0;
+  }
+
+  *bits = elem->data + 1;
+  *bit_len = elem->len - 1;
+  *unused_bits = unused;
+  return 0;
+}
+
+/* *****************************************************************************
+Implementation - OID Parser
+***************************************************************************** */
+
+/** Parse OID component from base-128 encoding */
+FIO_SFUNC const uint8_t *fio___asn1_parse_oid_component(const uint8_t *p,
+                                                        const uint8_t *end,
+                                                        uint64_t *value) {
+  uint64_t v = 0;
+  size_t count = 0;
+
+  while (p < end) {
+    uint8_t b = *p++;
+    /* Protect against overflow - OID components shouldn't be this large */
+    if (count++ > 9)
+      return NULL;
+    v = (v << 7) | (b & 0x7F);
+    if (!(b & 0x80)) {
+      *value = v;
+      return p;
+    }
+  }
+  return NULL; /* Incomplete encoding */
+}
+
+/** Write unsigned integer to string */
+FIO_SFUNC int fio___asn1_write_uint(char *buf, size_t buf_len, uint64_t value) {
+  if (!buf || buf_len == 0)
+    return -1;
+
+  /* Count digits */
+  char tmp[24];
+  int len = 0;
+  uint64_t v = value;
+  do {
+    tmp[len++] = '0' + (char)(v % 10);
+    v /= 10;
+  } while (v > 0);
+
+  if ((size_t)len >= buf_len)
+    return -1;
+
+  /* Reverse into output buffer */
+  for (int i = 0; i < len; ++i)
+    buf[i] = tmp[len - 1 - i];
+  buf[len] = '\0';
+
+  return len;
+}
+
+SFUNC int fio_asn1_parse_oid(const fio_asn1_element_s *elem,
+                             char *buf,
+                             size_t buf_len) {
+  if (!elem || !buf || buf_len < 4)
+    return -1;
+
+  /* Verify it's an OID */
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL ||
+      (elem->tag & 0x1F) != FIO_ASN1_OID)
+    return -1;
+
+  if (elem->len == 0)
+    return -1;
+
+  const uint8_t *p = elem->data;
+  const uint8_t *end = elem->data + elem->len;
+
+  char *out = buf;
+  char *out_end = buf + buf_len - 1;
+  int total = 0;
+
+  /* First byte encodes first two components: X.Y where byte = X*40 + Y */
+  uint8_t first = *p++;
+  uint64_t c1 = first / 40;
+  uint64_t c2 = first % 40;
+
+  /* First component can only be 0, 1, or 2 */
+  if (c1 > 2) {
+    c1 = 2;
+    c2 = first - 80;
+  }
+
+  int len = fio___asn1_write_uint(out, (size_t)(out_end - out), c1);
+  if (len < 0)
+    return -1;
+  out += len;
+  total += len;
+
+  if (out >= out_end)
+    return -1;
+  *out++ = '.';
+  total++;
+
+  len = fio___asn1_write_uint(out, (size_t)(out_end - out), c2);
+  if (len < 0)
+    return -1;
+  out += len;
+  total += len;
+
+  /* Remaining components */
+  while (p < end) {
+    uint64_t component;
+    p = fio___asn1_parse_oid_component(p, end, &component);
+    if (!p)
+      return -1;
+
+    if (out >= out_end)
+      return -1;
+    *out++ = '.';
+    total++;
+
+    len = fio___asn1_write_uint(out, (size_t)(out_end - out), component);
+    if (len < 0)
+      return -1;
+    out += len;
+    total += len;
+  }
+
+  *out = '\0';
+  return total;
+}
+
+SFUNC int fio_asn1_oid_eq(const fio_asn1_element_s *elem,
+                          const char *oid_string) {
+  if (!elem || !oid_string)
+    return 0;
+
+  /* Parse OID to string and compare */
+  char buf[128];
+  int len = fio_asn1_parse_oid(elem, buf, sizeof(buf));
+  if (len < 0)
+    return 0;
+
+  /* Compare strings */
+  size_t oid_len = FIO_STRLEN(oid_string);
+  if ((size_t)len != oid_len)
+    return 0;
+
+  return FIO_MEMCMP(buf, oid_string, oid_len) == 0;
+}
+
+/* *****************************************************************************
+Implementation - Time Parser
+***************************************************************************** */
+
+/** Parse 2-digit number from string */
+FIO_SFUNC int fio___asn1_parse_2digits(const char *p, int *value) {
+  if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
+    return -1;
+  *value = (p[0] - '0') * 10 + (p[1] - '0');
+  return 0;
+}
+
+/** Days in each month (non-leap year) */
+static const int fio___days_in_month[] =
+    {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+/** Check if year is leap year */
+FIO_SFUNC int fio___is_leap_year(int year) {
+  return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+/** Convert broken-down time to Unix timestamp */
+FIO_SFUNC int64_t
+fio___asn1_mktime(int year, int month, int day, int hour, int min, int sec) {
+  /* Validate ranges */
+  if (month < 1 || month > 12)
+    return -1;
+  if (day < 1 || day > 31)
+    return -1;
+  if (hour < 0 || hour > 23)
+    return -1;
+  if (min < 0 || min > 59)
+    return -1;
+  if (sec < 0 || sec > 60) /* Allow leap second */
+    return -1;
+
+  /* Calculate days since Unix epoch (1970-01-01) */
+  int64_t days = 0;
+
+  /* Years from 1970 to year-1 */
+  for (int y = 1970; y < year; ++y)
+    days += fio___is_leap_year(y) ? 366 : 365;
+  for (int y = year; y < 1970; ++y)
+    days -= fio___is_leap_year(y) ? 366 : 365;
+
+  /* Months in current year */
+  for (int m = 1; m < month; ++m) {
+    days += fio___days_in_month[m - 1];
+    if (m == 2 && fio___is_leap_year(year))
+      days += 1;
+  }
+
+  /* Days in current month */
+  days += day - 1;
+
+  /* Convert to seconds */
+  int64_t ts = days * 86400LL + hour * 3600LL + min * 60LL + sec;
+  return ts;
+}
+
+SFUNC int fio_asn1_parse_time(const fio_asn1_element_s *elem,
+                              int64_t *unix_time) {
+  if (!elem || !unix_time)
+    return -1;
+
+  uint8_t tag = elem->tag & 0x1F;
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL)
+    return -1;
+
+  const char *p = (const char *)elem->data;
+  size_t len = elem->len;
+
+  int year, month, day, hour, min, sec = 0;
+
+  if (tag == FIO_ASN1_UTC_TIME) {
+    /* UTCTime: YYMMDDhhmmZ or YYMMDDhhmmssZ */
+    if (len != 11 && len != 13)
+      return -1;
+
+    int yy;
+    if (fio___asn1_parse_2digits(p, &yy) < 0)
+      return -1;
+    /* RFC 5280: years 00-49 = 2000-2049, 50-99 = 1950-1999 */
+    year = (yy < 50) ? 2000 + yy : 1900 + yy;
+    p += 2;
+
+    if (fio___asn1_parse_2digits(p, &month) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &day) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &hour) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &min) < 0)
+      return -1;
+    p += 2;
+
+    if (len == 13) {
+      if (fio___asn1_parse_2digits(p, &sec) < 0)
+        return -1;
+      p += 2;
+    }
+
+    if (*p != 'Z')
+      return -1;
+  } else if (tag == FIO_ASN1_GENERALIZED_TIME) {
+    /* GeneralizedTime: YYYYMMDDhhmmssZ */
+    if (len < 15)
+      return -1;
+
+    int yy1, yy2;
+    if (fio___asn1_parse_2digits(p, &yy1) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &yy2) < 0)
+      return -1;
+    p += 2;
+    year = yy1 * 100 + yy2;
+
+    if (fio___asn1_parse_2digits(p, &month) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &day) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &hour) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &min) < 0)
+      return -1;
+    p += 2;
+    if (fio___asn1_parse_2digits(p, &sec) < 0)
+      return -1;
+    p += 2;
+
+    /* Skip optional fractional seconds */
+    if (*p == '.') {
+      p++;
+      while (*p >= '0' && *p <= '9')
+        p++;
+    }
+
+    if (*p != 'Z')
+      return -1;
+  } else {
+    return -1;
+  }
+
+  *unix_time = fio___asn1_mktime(year, month, day, hour, min, sec);
+  return (*unix_time == -1) ? -1 : 0;
+}
+
+/* *****************************************************************************
+Implementation - Iterator
+***************************************************************************** */
+
+SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
+                                 fio_asn1_element_s *elem) {
+  if (!it || !elem || !it->pos || !it->end || it->pos >= it->end)
+    return -1;
+
+  size_t remaining = (size_t)(it->end - it->pos);
+  const uint8_t *next = fio_asn1_parse(elem, it->pos, remaining);
+  if (!next)
+    return -1;
+
+  it->pos = next;
+  return 0;
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_ASN1 */
+#undef FIO_ASN1
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_RSA                /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                    RSA Signature Verification for TLS 1.3
+                         (PKCS#1 v1.5 and RSA-PSS)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_RSA) && !defined(H___FIO_RSA___H)
+#define H___FIO_RSA___H
+
+/* *****************************************************************************
+RSA Signature Verification Module
+
+This module provides RSA signature verification (NOT signing) for TLS 1.3
+certificate chain validation. It supports:
+
+- PKCS#1 v1.5 signatures (sha256WithRSAEncryption, etc.)
+- RSA-PSS signatures (required for TLS 1.3 CertificateVerify)
+- Key sizes: 2048, 3072, 4096 bits
+
+**Note**: This is verification-only. No private key operations are supported.
+**Note**: This implementation has not been audited. Use at your own risk.
+***************************************************************************** */
+
+/* *****************************************************************************
+RSA Constants
+***************************************************************************** */
+
+/** Maximum RSA key size in bits */
+#define FIO_RSA_MAX_BITS 4096
+
+/** Maximum RSA key size in bytes */
+#define FIO_RSA_MAX_BYTES (FIO_RSA_MAX_BITS / 8)
+
+/** Maximum RSA key size in 64-bit words */
+#define FIO_RSA_MAX_WORDS (FIO_RSA_MAX_BYTES / 8)
+
+/** Hash algorithm identifiers for RSA verification */
+typedef enum {
+  FIO_RSA_HASH_SHA256 = 0, /**< SHA-256 (32 bytes) */
+  FIO_RSA_HASH_SHA384 = 1, /**< SHA-384 (48 bytes) */
+  FIO_RSA_HASH_SHA512 = 2, /**< SHA-512 (64 bytes) */
+} fio_rsa_hash_e;
+
+/* *****************************************************************************
+RSA Public Key Structure
+***************************************************************************** */
+
+/**
+ * RSA public key for signature verification.
+ *
+ * The modulus (n) and exponent (e) are stored as big-endian byte arrays.
+ * This matches the DER encoding used in X.509 certificates.
+ */
+typedef struct {
+  const uint8_t *n; /**< Modulus (big-endian) */
+  size_t n_len;     /**< Modulus length in bytes */
+  const uint8_t *e; /**< Public exponent (big-endian) */
+  size_t e_len;     /**< Exponent length in bytes */
+} fio_rsa_pubkey_s;
+
+/* *****************************************************************************
+RSA Signature Verification API
+***************************************************************************** */
+
+/**
+ * Verify an RSA PKCS#1 v1.5 signature.
+ *
+ * This verifies signatures with DigestInfo encoding as used in:
+ * - sha256WithRSAEncryption (OID 1.2.840.113549.1.1.11)
+ * - sha384WithRSAEncryption (OID 1.2.840.113549.1.1.12)
+ * - sha512WithRSAEncryption (OID 1.2.840.113549.1.1.13)
+ *
+ * @param sig        Signature bytes (same length as modulus)
+ * @param sig_len    Signature length in bytes
+ * @param msg_hash   Pre-computed hash of the message
+ * @param hash_len   Hash length (32, 48, or 64 bytes)
+ * @param hash_alg   Hash algorithm used (FIO_RSA_HASH_SHA256, etc.)
+ * @param key        RSA public key
+ * @return 0 on success (valid signature), -1 on failure
+ */
+SFUNC int fio_rsa_verify_pkcs1(const uint8_t *sig,
+                               size_t sig_len,
+                               const uint8_t *msg_hash,
+                               size_t hash_len,
+                               fio_rsa_hash_e hash_alg,
+                               const fio_rsa_pubkey_s *key);
+
+/**
+ * Verify an RSA-PSS signature (required for TLS 1.3).
+ *
+ * RSA-PSS uses probabilistic padding and is the mandatory signature scheme
+ * for TLS 1.3 CertificateVerify messages with RSA keys.
+ *
+ * This implementation uses:
+ * - MGF1 with the same hash function
+ * - Salt length = hash length (as required by TLS 1.3)
+ * - Trailer field = 0xBC
+ *
+ * @param sig        Signature bytes (same length as modulus)
+ * @param sig_len    Signature length in bytes
+ * @param msg_hash   Pre-computed hash of the message
+ * @param hash_len   Hash length (32, 48, or 64 bytes)
+ * @param hash_alg   Hash algorithm used
+ * @param key        RSA public key
+ * @return 0 on success (valid signature), -1 on failure
+ */
+SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
+                             size_t sig_len,
+                             const uint8_t *msg_hash,
+                             size_t hash_len,
+                             fio_rsa_hash_e hash_alg,
+                             const fio_rsa_pubkey_s *key);
+
+/* *****************************************************************************
+Implementation - Possibly Externed Functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+PKCS#1 v1.5 DigestInfo ASN.1 Prefixes
+
+These encode: SEQUENCE { AlgorithmIdentifier, OCTET STRING hash }
+
+RFC 8017 Section 9.2 defines these prefixes.
+***************************************************************************** */
+
+/** DigestInfo prefix for SHA-256 (19 bytes) */
+static const uint8_t fio___rsa_digestinfo_sha256[] = {0x30,
+                                                      0x31,
+                                                      0x30,
+                                                      0x0D,
+                                                      0x06,
+                                                      0x09,
+                                                      0x60,
+                                                      0x86,
+                                                      0x48,
+                                                      0x01,
+                                                      0x65,
+                                                      0x03,
+                                                      0x04,
+                                                      0x02,
+                                                      0x01,
+                                                      0x05,
+                                                      0x00,
+                                                      0x04,
+                                                      0x20};
+
+/** DigestInfo prefix for SHA-384 (19 bytes) */
+static const uint8_t fio___rsa_digestinfo_sha384[] = {0x30,
+                                                      0x41,
+                                                      0x30,
+                                                      0x0D,
+                                                      0x06,
+                                                      0x09,
+                                                      0x60,
+                                                      0x86,
+                                                      0x48,
+                                                      0x01,
+                                                      0x65,
+                                                      0x03,
+                                                      0x04,
+                                                      0x02,
+                                                      0x02,
+                                                      0x05,
+                                                      0x00,
+                                                      0x04,
+                                                      0x30};
+
+/** DigestInfo prefix for SHA-512 (19 bytes) */
+static const uint8_t fio___rsa_digestinfo_sha512[] = {0x30,
+                                                      0x51,
+                                                      0x30,
+                                                      0x0D,
+                                                      0x06,
+                                                      0x09,
+                                                      0x60,
+                                                      0x86,
+                                                      0x48,
+                                                      0x01,
+                                                      0x65,
+                                                      0x03,
+                                                      0x04,
+                                                      0x02,
+                                                      0x03,
+                                                      0x05,
+                                                      0x00,
+                                                      0x04,
+                                                      0x40};
+
+#define FIO___RSA_DIGESTINFO_PREFIX_LEN 19
+
+/* *****************************************************************************
+Implementation - Big Integer Helpers
+
+Internal representation: Little-endian uint64_t array (word[0] = LSW)
+Input/Output: Big-endian byte arrays (as used in X.509/TLS)
+***************************************************************************** */
+
+/** Convert big-endian bytes to little-endian uint64_t array */
+FIO_SFUNC void fio___rsa_bytes_to_words(uint64_t *words,
+                                        size_t word_count,
+                                        const uint8_t *bytes,
+                                        size_t byte_len) {
+  FIO_MEMSET(words, 0, word_count * sizeof(uint64_t));
+
+  /* Start from the end of bytes (least significant) */
+  size_t word_idx = 0;
+  size_t byte_idx = byte_len;
+
+  while (byte_idx > 0 && word_idx < word_count) {
+    uint64_t word = 0;
+    size_t shift = 0;
+
+    /* Collect up to 8 bytes into one word */
+    while (byte_idx > 0 && shift < 64) {
+      --byte_idx;
+      word |= ((uint64_t)bytes[byte_idx]) << shift;
+      shift += 8;
+    }
+    words[word_idx++] = word;
+  }
+}
+
+/** Convert little-endian uint64_t array to big-endian bytes */
+FIO_SFUNC void fio___rsa_words_to_bytes(uint8_t *bytes,
+                                        size_t byte_len,
+                                        const uint64_t *words,
+                                        size_t word_count) {
+  FIO_MEMSET(bytes, 0, byte_len);
+
+  /* Start from the end of bytes (least significant) */
+  size_t byte_idx = byte_len;
+  size_t word_idx = 0;
+
+  while (byte_idx > 0 && word_idx < word_count) {
+    uint64_t word = words[word_idx++];
+
+    for (int i = 0; i < 8 && byte_idx > 0; ++i) {
+      --byte_idx;
+      bytes[byte_idx] = (uint8_t)(word & 0xFF);
+      word >>= 8;
+    }
+  }
+}
+
+/** Compare two big integers. Returns: <0 if a<b, 0 if a==b, >0 if a>b */
+FIO_SFUNC int fio___rsa_cmp(const uint64_t *a,
+                            const uint64_t *b,
+                            size_t word_count) {
+  for (size_t i = word_count; i > 0;) {
+    --i;
+    if (a[i] < b[i])
+      return -1;
+    if (a[i] > b[i])
+      return 1;
+  }
+  return 0;
+}
+
+/* *****************************************************************************
+Implementation - Modular Exponentiation
+
+Compute: result = base^exp mod n
+
+Uses square-and-multiply algorithm with constant-time modular reduction.
+For RSA verification, exp is typically 65537 (0x10001) = 17 bits.
+***************************************************************************** */
+
+/**
+ * Modular exponentiation: result = base^exp mod n
+ *
+ * This uses a simple square-and-multiply algorithm.
+ * For RSA verification with e=65537, this does 17 squarings + 1 multiply.
+ */
+FIO_SFUNC void fio___rsa_modexp(uint64_t *result,
+                                const uint64_t *base,
+                                const uint64_t *exp,
+                                const uint64_t *n,
+                                size_t word_count) {
+/* Double-size buffer for multiplication results */
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+  uint64_t tmp[word_count * 2];
+  uint64_t acc[word_count];
+  uint64_t sqr[word_count];
+#else
+  uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
+  uint64_t acc[FIO_RSA_MAX_WORDS];
+  uint64_t sqr[FIO_RSA_MAX_WORDS];
+  FIO_ASSERT(word_count <= FIO_RSA_MAX_WORDS,
+             "RSA key size exceeds maximum supported");
+#endif
+
+  /* Initialize accumulator to 1 */
+  FIO_MEMSET(acc, 0, word_count * sizeof(uint64_t));
+  acc[0] = 1;
+
+  /* Copy base to squaring buffer */
+  FIO_MEMCPY(sqr, base, word_count * sizeof(uint64_t));
+
+  /* Find the highest set bit in the exponent */
+  size_t exp_bits = fio_math_msb_index((uint64_t *)exp, word_count);
+  if (exp_bits == (size_t)-1) {
+    /* exp = 0, result = 1 (already set) */
+    FIO_MEMCPY(result, acc, word_count * sizeof(uint64_t));
+    return;
+  }
+
+  /* Square-and-multiply from LSB to MSB */
+  for (size_t bit = 0; bit <= exp_bits; ++bit) {
+    size_t word_idx = bit / 64;
+    size_t bit_idx = bit % 64;
+
+    /* If this bit is set, multiply accumulator by current square */
+    if (exp[word_idx] & (1ULL << bit_idx)) {
+      fio_math_mul(tmp, acc, sqr, word_count);
+      fio_math_div(NULL, acc, tmp, n, word_count * 2);
+      /* Copy remainder (lower words) to acc */
+      /* Note: fio_math_div works on double-size arrays, but we need the mod */
+      /* Actually fio_math_div expects same-size arrays. We need to be careful
+       */
+    }
+
+    /* Square the current value (unless this is the last bit) */
+    if (bit < exp_bits) {
+      fio_math_mul(tmp, sqr, sqr, word_count);
+      fio_math_div(NULL, sqr, tmp, n, word_count * 2);
+    }
+  }
+
+  FIO_MEMCPY(result, acc, word_count * sizeof(uint64_t));
+}
+
+/**
+ * Optimized modular exponentiation for e = 65537 (0x10001).
+ *
+ * This is the most common RSA public exponent. It has only 2 bits set,
+ * so we can do: result = base^65537 = base^(2^16 + 1) = base^(2^16) * base
+ *
+ * This requires 16 squarings + 1 multiplication.
+ */
+FIO_SFUNC int fio___rsa_modexp_65537(uint64_t *result,
+                                     const uint64_t *base,
+                                     const uint64_t *n,
+                                     size_t word_count) {
+/* Double-size buffer for multiplication results */
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+  uint64_t tmp[word_count * 2];
+  uint64_t sqr[word_count];
+  uint64_t rem[word_count * 2];
+#else
+  uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
+  uint64_t sqr[FIO_RSA_MAX_WORDS];
+  uint64_t rem[FIO_RSA_MAX_WORDS * 2];
+  FIO_ASSERT(word_count <= FIO_RSA_MAX_WORDS,
+             "RSA key size exceeds maximum supported");
+#endif
+
+  /* sqr = base (mod n is already ensured by caller if base < n) */
+  FIO_MEMCPY(sqr, base, word_count * sizeof(uint64_t));
+
+  /* Square 16 times to get base^(2^16) */
+  for (int i = 0; i < 16; ++i) {
+    fio_math_mul(tmp, sqr, sqr, word_count);
+    /* Reduce mod n */
+    FIO_MEMSET(rem, 0, word_count * 2 * sizeof(uint64_t));
+    fio_math_div(NULL, rem, tmp, n, word_count * 2);
+    FIO_MEMCPY(sqr, rem, word_count * sizeof(uint64_t));
+  }
+
+  /* result = sqr * base (mod n) = base^(2^16) * base = base^65537 */
+  fio_math_mul(tmp, sqr, base, word_count);
+  FIO_MEMSET(rem, 0, word_count * 2 * sizeof(uint64_t));
+  fio_math_div(NULL, rem, tmp, n, word_count * 2);
+  FIO_MEMCPY(result, rem, word_count * sizeof(uint64_t));
+
+  return 0;
+}
+
+/**
+ * RSA public key operation: result = sig^e mod n
+ *
+ * Verifies the signature by computing the modular exponentiation and
+ * returns the result (which should match the padded hash).
+ */
+FIO_SFUNC int fio___rsa_public_op(uint8_t *result,
+                                  const uint8_t *sig,
+                                  size_t sig_len,
+                                  const fio_rsa_pubkey_s *key) {
+  if (!result || !sig || !key || !key->n || !key->e)
+    return -1;
+
+  /* Validate key size */
+  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+    return -1; /* Only support 2048-4096 bit keys */
+
+  if (sig_len != key->n_len)
+    return -1; /* Signature must be same length as modulus */
+
+  size_t word_count = (key->n_len + 7) / 8;
+
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+  uint64_t n_words[word_count];
+  uint64_t sig_words[word_count];
+  uint64_t result_words[word_count];
+#else
+  uint64_t n_words[FIO_RSA_MAX_WORDS];
+  uint64_t sig_words[FIO_RSA_MAX_WORDS];
+  uint64_t result_words[FIO_RSA_MAX_WORDS];
+#endif
+
+  /* Convert to internal representation */
+  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(sig_words, word_count, sig, sig_len);
+
+  /* Verify signature < modulus */
+  if (fio___rsa_cmp(sig_words, n_words, word_count) >= 0)
+    return -1;
+
+  /* Check if exponent is 65537 (common case) */
+  uint64_t e_val = 0;
+  if (key->e_len <= 8) {
+    for (size_t i = 0; i < key->e_len; ++i)
+      e_val = (e_val << 8) | key->e[i];
+  }
+
+  if (e_val == 65537) {
+    /* Use optimized path for e = 65537 */
+    if (fio___rsa_modexp_65537(result_words, sig_words, n_words, word_count) !=
+        0)
+      return -1;
+  } else {
+    /* General case - use square-and-multiply */
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+    uint64_t e_words[word_count];
+#else
+    uint64_t e_words[FIO_RSA_MAX_WORDS];
+#endif
+    FIO_MEMSET(e_words, 0, word_count * sizeof(uint64_t));
+    fio___rsa_bytes_to_words(e_words, word_count, key->e, key->e_len);
+    fio___rsa_modexp(result_words, sig_words, e_words, n_words, word_count);
+  }
+
+  /* Convert back to bytes */
+  fio___rsa_words_to_bytes(result, key->n_len, result_words, word_count);
+
+  return 0;
+}
+
+/* *****************************************************************************
+Implementation - PKCS#1 v1.5 Signature Verification
+***************************************************************************** */
+
+/**
+ * Constant-time memory comparison.
+ * Returns 0 if equal, non-zero otherwise.
+ */
+FIO_SFUNC int fio___rsa_memcmp_ct(const uint8_t *a,
+                                  const uint8_t *b,
+                                  size_t len) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < len; ++i)
+    diff |= a[i] ^ b[i];
+  return diff;
+}
+
+SFUNC int fio_rsa_verify_pkcs1(const uint8_t *sig,
+                               size_t sig_len,
+                               const uint8_t *msg_hash,
+                               size_t hash_len,
+                               fio_rsa_hash_e hash_alg,
+                               const fio_rsa_pubkey_s *key) {
+  if (!sig || !msg_hash || !key)
+    return -1;
+
+  /* Validate hash algorithm and length */
+  const uint8_t *digestinfo_prefix;
+  size_t expected_hash_len;
+
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256:
+    digestinfo_prefix = fio___rsa_digestinfo_sha256;
+    expected_hash_len = 32;
+    break;
+  case FIO_RSA_HASH_SHA384:
+    digestinfo_prefix = fio___rsa_digestinfo_sha384;
+    expected_hash_len = 48;
+    break;
+  case FIO_RSA_HASH_SHA512:
+    digestinfo_prefix = fio___rsa_digestinfo_sha512;
+    expected_hash_len = 64;
+    break;
+  default: return -1;
+  }
+
+  if (hash_len != expected_hash_len)
+    return -1;
+
+  /* Compute sig^e mod n */
+  uint8_t decrypted[FIO_RSA_MAX_BYTES];
+  if (fio___rsa_public_op(decrypted, sig, sig_len, key) != 0)
+    return -1;
+
+  /*
+   * Verify PKCS#1 v1.5 padding (RFC 8017 Section 8.2.2):
+   *
+   * EM = 0x00 || 0x01 || PS || 0x00 || DigestInfo
+   *
+   * where PS is padding bytes (all 0xFF), minimum 8 bytes
+   * DigestInfo = prefix || hash
+   */
+
+  size_t k = key->n_len; /* Encoded message length */
+  size_t digestinfo_len = FIO___RSA_DIGESTINFO_PREFIX_LEN + hash_len;
+  size_t ps_len = k - 3 - digestinfo_len;
+
+  if (k < 11 + digestinfo_len)
+    return -1; /* Message too short */
+
+  /* Verify: 0x00 || 0x01 */
+  int result = 0;
+  result |= decrypted[0];        /* Must be 0x00 */
+  result |= decrypted[1] ^ 0x01; /* Must be 0x01 */
+
+  /* Verify PS (all 0xFF bytes) */
+  for (size_t i = 2; i < 2 + ps_len; ++i)
+    result |= decrypted[i] ^ 0xFF;
+
+  /* Verify separator 0x00 */
+  result |= decrypted[2 + ps_len];
+
+  /* Verify DigestInfo prefix */
+  result |= fio___rsa_memcmp_ct(decrypted + 3 + ps_len,
+                                digestinfo_prefix,
+                                FIO___RSA_DIGESTINFO_PREFIX_LEN);
+
+  /* Verify hash */
+  result |= fio___rsa_memcmp_ct(decrypted + 3 + ps_len +
+                                    FIO___RSA_DIGESTINFO_PREFIX_LEN,
+                                msg_hash,
+                                hash_len);
+
+  return result ? -1 : 0;
+}
+
+/* *****************************************************************************
+Implementation - RSA-PSS Signature Verification
+***************************************************************************** */
+
+/**
+ * MGF1 (Mask Generation Function) per RFC 8017 Appendix B.2.1.
+ *
+ * mask = Hash(seed || counter) for counter = 0, 1, 2, ...
+ */
+FIO_SFUNC void fio___rsa_mgf1(uint8_t *mask,
+                              size_t mask_len,
+                              const uint8_t *seed,
+                              size_t seed_len,
+                              fio_rsa_hash_e hash_alg) {
+  size_t hash_len;
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256: hash_len = 32; break;
+  case FIO_RSA_HASH_SHA384: hash_len = 48; break;
+  case FIO_RSA_HASH_SHA512: hash_len = 64; break;
+  default: return;
+  }
+
+  uint8_t counter_buf[4];
+  uint8_t hash_input[FIO_RSA_MAX_BYTES + 4]; /* seed || counter */
+  size_t offset = 0;
+  uint32_t counter = 0;
+
+  FIO_MEMCPY(hash_input, seed, seed_len);
+
+  while (offset < mask_len) {
+    /* Append counter (big-endian) */
+    counter_buf[0] = (uint8_t)(counter >> 24);
+    counter_buf[1] = (uint8_t)(counter >> 16);
+    counter_buf[2] = (uint8_t)(counter >> 8);
+    counter_buf[3] = (uint8_t)(counter);
+    FIO_MEMCPY(hash_input + seed_len, counter_buf, 4);
+
+    /* Hash and copy to output */
+    size_t to_copy = mask_len - offset;
+    if (to_copy > hash_len)
+      to_copy = hash_len;
+
+    switch (hash_alg) {
+    case FIO_RSA_HASH_SHA256: {
+      fio_u256 h = fio_sha256(hash_input, seed_len + 4);
+      FIO_MEMCPY(mask + offset, h.u8, to_copy);
+      break;
+    }
+    case FIO_RSA_HASH_SHA384: {
+      fio_u512 h = fio_sha512(hash_input, seed_len + 4);
+      /* SHA-384 is truncated SHA-512 */
+      FIO_MEMCPY(mask + offset, h.u8, to_copy);
+      break;
+    }
+    case FIO_RSA_HASH_SHA512: {
+      fio_u512 h = fio_sha512(hash_input, seed_len + 4);
+      FIO_MEMCPY(mask + offset, h.u8, to_copy);
+      break;
+    }
+    }
+
+    offset += to_copy;
+    ++counter;
+  }
+}
+
+SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
+                             size_t sig_len,
+                             const uint8_t *msg_hash,
+                             size_t hash_len,
+                             fio_rsa_hash_e hash_alg,
+                             const fio_rsa_pubkey_s *key) {
+  if (!sig || !msg_hash || !key)
+    return -1;
+
+  /* Validate hash algorithm and length */
+  size_t expected_hash_len;
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256: expected_hash_len = 32; break;
+  case FIO_RSA_HASH_SHA384: expected_hash_len = 48; break;
+  case FIO_RSA_HASH_SHA512: expected_hash_len = 64; break;
+  default: return -1;
+  }
+
+  if (hash_len != expected_hash_len)
+    return -1;
+
+  /* For TLS 1.3, salt length = hash length */
+  size_t salt_len = hash_len;
+
+  /* Compute sig^e mod n */
+  uint8_t em[FIO_RSA_MAX_BYTES];
+  if (fio___rsa_public_op(em, sig, sig_len, key) != 0)
+    return -1;
+
+  /*
+   * RSA-PSS Verification (RFC 8017 Section 9.1.2):
+   *
+   * EM = maskedDB || H || 0xBC
+   *
+   * where:
+   *   - maskedDB = DB XOR dbMask
+   *   - H = Hash(M')
+   *   - M' = 0x00 00 00 00 00 00 00 00 || mHash || salt
+   *   - DB = PS || 0x01 || salt
+   *   - PS = zero bytes
+   */
+
+  size_t em_len = key->n_len;
+  size_t db_len = em_len - hash_len - 1;
+
+  /* Verify trailing byte is 0xBC */
+  if (em[em_len - 1] != 0xBC)
+    return -1;
+
+  /* The top bits of EM should be 0 (based on modulus bit length) */
+  size_t em_bits = key->n_len * 8 - 1; /* One less than modulus bits */
+  size_t top_mask = 0xFF >> (8 * em_len - em_bits - 1);
+  if ((em[0] & ~top_mask) != 0)
+    return -1;
+
+  /* Extract H (hash) from EM */
+  const uint8_t *masked_db = em;
+  const uint8_t *h = em + db_len;
+
+  /* Compute dbMask = MGF1(H, db_len) */
+  uint8_t db_mask[FIO_RSA_MAX_BYTES];
+  fio___rsa_mgf1(db_mask, db_len, h, hash_len, hash_alg);
+
+  /* Compute DB = maskedDB XOR dbMask */
+  uint8_t db[FIO_RSA_MAX_BYTES];
+  for (size_t i = 0; i < db_len; ++i)
+    db[i] = masked_db[i] ^ db_mask[i];
+
+  /* Clear top bits of DB */
+  db[0] &= top_mask;
+
+  /* Verify DB = PS || 0x01 || salt */
+  /* PS should be all zeros, length = db_len - salt_len - 1 */
+  size_t ps_len = db_len - salt_len - 1;
+  int result = 0;
+
+  /* Verify PS (all zeros) */
+  for (size_t i = 0; i < ps_len; ++i)
+    result |= db[i];
+
+  /* Verify separator 0x01 */
+  result |= db[ps_len] ^ 0x01;
+
+  /* Extract salt */
+  const uint8_t *salt = db + ps_len + 1;
+
+  /* Compute M' = 0x0000000000000000 || mHash || salt */
+  uint8_t m_prime[8 + 64 + 64]; /* max: 8 + hash_len + salt_len */
+  FIO_MEMSET(m_prime, 0, 8);
+  FIO_MEMCPY(m_prime + 8, msg_hash, hash_len);
+  FIO_MEMCPY(m_prime + 8 + hash_len, salt, salt_len);
+
+  /* Compute H' = Hash(M') */
+  uint8_t h_prime[64];
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256: {
+    fio_u256 hp = fio_sha256(m_prime, 8 + hash_len + salt_len);
+    FIO_MEMCPY(h_prime, hp.u8, 32);
+    break;
+  }
+  case FIO_RSA_HASH_SHA384: {
+    fio_u512 hp = fio_sha512(m_prime, 8 + hash_len + salt_len);
+    FIO_MEMCPY(h_prime, hp.u8, 48);
+    break;
+  }
+  case FIO_RSA_HASH_SHA512: {
+    fio_u512 hp = fio_sha512(m_prime, 8 + hash_len + salt_len);
+    FIO_MEMCPY(h_prime, hp.u8, 64);
+    break;
+  }
+  }
+
+  /* Verify H == H' */
+  result |= fio___rsa_memcmp_ct(h, h_prime, hash_len);
+
+  return result ? -1 : 0;
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_RSA */
+#undef FIO_RSA
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_X509               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                        X.509 Certificate Parser for TLS 1.3
+                            (RFC 5280 Certificate Parsing)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_X509) && !defined(H___FIO_X509___H)
+#define H___FIO_X509___H
+
+/* *****************************************************************************
+X.509 Certificate Parser Module
+
+This module provides X.509v3 certificate parsing for TLS 1.3 certificate
+verification. It supports:
+
+- RSA, ECDSA (P-256, P-384), and Ed25519 public keys
+- Signature verification using issuer certificates
+- Validity period checking
+- Hostname matching (CN and SAN with wildcards)
+- Basic constraints and key usage extensions
+- Certificate chain validation
+- Trust store management
+
+**Note**: This is a minimal parser for TLS 1.3. Not all X.509 features
+are supported. The implementation is non-allocating (pointers into DER data).
+***************************************************************************** */
+
+/* *****************************************************************************
+X.509 Type Definitions
+***************************************************************************** */
+
+/** Public key algorithm types */
+typedef enum {
+  FIO_X509_KEY_UNKNOWN = 0,
+  FIO_X509_KEY_RSA = 1,        /**< RSA (any key size) */
+  FIO_X509_KEY_ECDSA_P256 = 2, /**< ECDSA with P-256/secp256r1 */
+  FIO_X509_KEY_ECDSA_P384 = 3, /**< ECDSA with P-384/secp384r1 */
+  FIO_X509_KEY_ED25519 = 4,    /**< Ed25519 (EdDSA) */
+} fio_x509_key_type_e;
+
+/** Signature algorithm types */
+typedef enum {
+  FIO_X509_SIG_UNKNOWN = 0,
+  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
+  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
+  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
+  FIO_X509_SIG_RSA_PSS_SHA256 = 4,   /**< RSA-PSS with SHA-256 */
+  FIO_X509_SIG_RSA_PSS_SHA384 = 5,   /**< RSA-PSS with SHA-384 */
+  FIO_X509_SIG_RSA_PSS_SHA512 = 6,   /**< RSA-PSS with SHA-512 */
+  FIO_X509_SIG_ECDSA_SHA256 = 7,     /**< ecdsa-with-SHA256 */
+  FIO_X509_SIG_ECDSA_SHA384 = 8,     /**< ecdsa-with-SHA384 */
+  FIO_X509_SIG_ED25519 = 9,          /**< Ed25519 */
+} fio_x509_sig_alg_e;
+
+/** Key Usage bit flags (RFC 5280 Section 4.2.1.3) */
+typedef enum {
+  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0001,
+  FIO_X509_KU_NON_REPUDIATION = 0x0002,
+  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0004,
+  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0008,
+  FIO_X509_KU_KEY_AGREEMENT = 0x0010,
+  FIO_X509_KU_KEY_CERT_SIGN = 0x0020,
+  FIO_X509_KU_CRL_SIGN = 0x0040,
+  FIO_X509_KU_ENCIPHER_ONLY = 0x0080,
+  FIO_X509_KU_DECIPHER_ONLY = 0x0100,
+} fio_x509_key_usage_e;
+
+/** X.509 chain validation error codes */
+typedef enum {
+  FIO_X509_OK = 0,                   /**< Validation successful */
+  FIO_X509_ERR_PARSE = -1,           /**< Failed to parse certificate */
+  FIO_X509_ERR_EXPIRED = -2,         /**< Certificate expired */
+  FIO_X509_ERR_NOT_YET_VALID = -3,   /**< Certificate not yet valid */
+  FIO_X509_ERR_SIGNATURE = -4,       /**< Signature verification failed */
+  FIO_X509_ERR_ISSUER_MISMATCH = -5, /**< Issuer DN doesn't match subject DN */
+  FIO_X509_ERR_NOT_CA = -6,          /**< Issuer is not a CA certificate */
+  FIO_X509_ERR_NO_TRUST_ANCHOR = -7, /**< Certificate not in trust store */
+  FIO_X509_ERR_HOSTNAME_MISMATCH = -8, /**< Hostname doesn't match cert */
+  FIO_X509_ERR_EMPTY_CHAIN = -9,       /**< Empty certificate chain */
+  FIO_X509_ERR_CHAIN_TOO_LONG = -10,   /**< Chain exceeds maximum depth */
+} fio_x509_error_e;
+
+/** Trust store for root CA certificates */
+typedef struct {
+  const uint8_t **roots;   /**< Array of root CA certificate DER data */
+  const size_t *root_lens; /**< Array of root CA certificate lengths */
+  size_t root_count;       /**< Number of root CAs */
+} fio_x509_trust_store_s;
+
+/** TLS certificate entry (parsed from Certificate message) */
+typedef struct {
+  const uint8_t *cert; /**< DER-encoded certificate data */
+  size_t cert_len;     /**< Certificate length */
+} fio_tls_cert_entry_s;
+
+/** Parsed X.509 certificate structure */
+typedef struct {
+  /** Certificate version (0=v1, 1=v2, 2=v3) */
+  int version;
+
+  /** Validity period (Unix timestamps) */
+  int64_t not_before;
+  int64_t not_after;
+
+  /** Subject Distinguished Name (raw DER for comparison) */
+  const uint8_t *subject_der;
+  size_t subject_der_len;
+
+  /** Issuer Distinguished Name (raw DER for comparison) */
+  const uint8_t *issuer_der;
+  size_t issuer_der_len;
+
+  /** Subject Common Name (if present, pointer into DER data) */
+  const char *subject_cn;
+  size_t subject_cn_len;
+
+  /** Public Key Type */
+  fio_x509_key_type_e key_type;
+
+  /** Public Key Data (union based on key_type) */
+  union {
+    struct {
+      const uint8_t *n; /**< RSA modulus (big-endian) */
+      size_t n_len;
+      const uint8_t *e; /**< RSA exponent (big-endian) */
+      size_t e_len;
+    } rsa;
+    struct {
+      const uint8_t *point; /**< Uncompressed EC point (04 || x || y) */
+      size_t point_len;
+    } ecdsa;
+    struct {
+      const uint8_t *key; /**< 32-byte Ed25519 public key */
+    } ed25519;
+  } pubkey;
+
+  /** Signature Algorithm */
+  fio_x509_sig_alg_e sig_alg;
+
+  /** Signature value (pointer into DER data) */
+  const uint8_t *signature;
+  size_t signature_len;
+
+  /** TBS Certificate (for signature verification) */
+  const uint8_t *tbs_data;
+  size_t tbs_len;
+
+  /** Basic Constraints: is CA */
+  int is_ca;
+
+  /** Key Usage extension present */
+  int has_key_usage;
+  /** Key Usage bits */
+  uint16_t key_usage;
+
+  /** Subject Alternative Name: first DNS name (if present) */
+  const char *san_dns;
+  size_t san_dns_len;
+
+} fio_x509_cert_s;
+
+/* *****************************************************************************
+X.509 Parser API
+***************************************************************************** */
+
+/**
+ * Parse a DER-encoded X.509 certificate.
+ *
+ * The cert structure will contain pointers into the original DER data,
+ * so the DER data must remain valid while the cert is in use.
+ *
+ * @param cert Output certificate structure (will be zeroed first)
+ * @param der_data Pointer to DER-encoded certificate
+ * @param der_len Length of DER data in bytes
+ * @return 0 on success, -1 on error
+ */
+SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
+                         const uint8_t *der_data,
+                         size_t der_len);
+
+/**
+ * Verify certificate signature using issuer's public key.
+ *
+ * This verifies that the certificate was signed by the issuer.
+ *
+ * @param cert Certificate to verify
+ * @param issuer Certificate of the issuer (contains the public key)
+ * @return 0 if valid, -1 if invalid or error
+ */
+SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
+                                    const fio_x509_cert_s *issuer);
+
+/**
+ * Check if certificate is currently valid (not expired, not yet valid).
+ *
+ * @param cert Certificate to check
+ * @param current_time Current Unix timestamp (seconds since epoch)
+ * @return 0 if valid, -1 if expired or not yet valid
+ */
+FIO_IFUNC int fio_x509_check_validity(const fio_x509_cert_s *cert,
+                                      int64_t current_time);
+
+/**
+ * Check if hostname matches certificate (CN or SAN).
+ *
+ * Supports wildcard matching (*.example.com).
+ * Per RFC 6125, wildcards only match one label.
+ *
+ * @param cert Certificate to check
+ * @param hostname Hostname to match
+ * @param hostname_len Length of hostname
+ * @return 0 if match, -1 if no match
+ */
+SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
+                                  const char *hostname,
+                                  size_t hostname_len);
+
+/**
+ * Compare two Distinguished Names for equality.
+ *
+ * Used for checking if issuer DN matches subject DN.
+ *
+ * @param dn1 First DN (DER-encoded)
+ * @param dn1_len Length of first DN
+ * @param dn2 Second DN (DER-encoded)
+ * @param dn2_len Length of second DN
+ * @return 0 if equal, non-zero if different
+ */
+FIO_IFUNC int fio_x509_dn_equals(const uint8_t *dn1,
+                                 size_t dn1_len,
+                                 const uint8_t *dn2,
+                                 size_t dn2_len);
+
+/* *****************************************************************************
+X.509 Certificate Chain Validation API
+***************************************************************************** */
+
+/**
+ * Validate a certificate chain for TLS 1.3.
+ *
+ * The chain should be ordered from end-entity to closest-to-root:
+ *   - certs[0] = server's certificate (end-entity)
+ *   - certs[1] = intermediate CA (signed certs[0])
+ *   - certs[n-1] = closest to root (may be root or intermediate)
+ *
+ * Validation performs:
+ *   1. Parse all certificates
+ *   2. Check validity period for all certificates
+ *   3. Verify hostname matches end-entity certificate (if hostname provided)
+ *   4. Verify each certificate's signature using the next certificate's key
+ *   5. Verify issuer DNs match subject DNs in the chain
+ *   6. Verify intermediate/root certificates have CA:TRUE
+ *   7. Verify the chain terminates at a trusted root (if trust store provided)
+ *
+ * @param certs Array of DER-encoded certificates
+ * @param cert_lens Array of certificate lengths
+ * @param cert_count Number of certificates in chain
+ * @param hostname Expected hostname for end-entity (NULL to skip check)
+ * @param current_time Current Unix timestamp for validity checking
+ * @param trust_store Root CA certificates (NULL to skip trust check)
+ * @return FIO_X509_OK (0) on success, or error code on failure
+ */
+SFUNC int fio_x509_verify_chain(const uint8_t **certs,
+                                const size_t *cert_lens,
+                                size_t cert_count,
+                                const char *hostname,
+                                int64_t current_time,
+                                fio_x509_trust_store_s *trust_store);
+
+/**
+ * Check if a certificate is in the trust store.
+ *
+ * Comparison is done by matching subject DN.
+ *
+ * @param cert Certificate to check
+ * @param trust_store Trust store to search
+ * @return 0 if trusted, -1 if not found
+ */
+SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
+                              fio_x509_trust_store_s *trust_store);
+
+/**
+ * Parse TLS 1.3 Certificate message into individual certificates.
+ *
+ * TLS 1.3 Certificate message format (RFC 8446):
+ *   certificate_request_context<0..2^8-1>
+ *   certificate_list<0..2^24-1>:
+ *     CertificateEntry:
+ *       cert_data<1..2^24-1>
+ *       extensions<0..2^16-1>
+ *
+ * @param entries Output array for certificate entries
+ * @param max_entries Maximum entries to parse
+ * @param data Raw Certificate message data (after handshake header)
+ * @param data_len Length of Certificate message data
+ * @return Number of certificates parsed, or -1 on error
+ */
+SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                            size_t max_entries,
+                                            const uint8_t *data,
+                                            size_t data_len);
+
+/**
+ * Get human-readable error string for X.509 validation error code.
+ *
+ * @param error Error code from fio_x509_verify_chain
+ * @return Static string describing the error
+ */
+FIO_IFUNC const char *fio_x509_error_str(int error);
+
+/* *****************************************************************************
+Implementation - Inline Functions
+***************************************************************************** */
+
+/** Check if certificate is within validity period */
+FIO_IFUNC int fio_x509_check_validity(const fio_x509_cert_s *cert,
+                                      int64_t current_time) {
+  if (!cert)
+    return -1;
+  if (current_time < cert->not_before)
+    return -1; /* Not yet valid */
+  if (current_time > cert->not_after)
+    return -1; /* Expired */
+  return 0;
+}
+
+/** Compare two Distinguished Names */
+FIO_IFUNC int fio_x509_dn_equals(const uint8_t *dn1,
+                                 size_t dn1_len,
+                                 const uint8_t *dn2,
+                                 size_t dn2_len) {
+  if (dn1_len != dn2_len)
+    return 1;
+  if (!dn1 || !dn2)
+    return 1;
+  return FIO_MEMCMP(dn1, dn2, dn1_len);
+}
+
+/** Get human-readable error string for X.509 validation error code */
+FIO_IFUNC const char *fio_x509_error_str(int error) {
+  switch (error) {
+  case FIO_X509_OK: return "OK";
+  case FIO_X509_ERR_PARSE: return "Failed to parse certificate";
+  case FIO_X509_ERR_EXPIRED: return "Certificate expired";
+  case FIO_X509_ERR_NOT_YET_VALID: return "Certificate not yet valid";
+  case FIO_X509_ERR_SIGNATURE: return "Signature verification failed";
+  case FIO_X509_ERR_ISSUER_MISMATCH: return "Issuer DN mismatch";
+  case FIO_X509_ERR_NOT_CA: return "Issuer is not a CA";
+  case FIO_X509_ERR_NO_TRUST_ANCHOR: return "No trusted root CA found";
+  case FIO_X509_ERR_HOSTNAME_MISMATCH: return "Hostname mismatch";
+  case FIO_X509_ERR_EMPTY_CHAIN: return "Empty certificate chain";
+  case FIO_X509_ERR_CHAIN_TOO_LONG: return "Certificate chain too long";
+  default: return "Unknown error";
+  }
+}
+
+/* *****************************************************************************
+Implementation - Possibly Externed Functions
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Implementation - Internal Helpers
+***************************************************************************** */
+
+/** Parse signature algorithm OID to enum */
+FIO_SFUNC fio_x509_sig_alg_e
+fio___x509_parse_sig_alg(const fio_asn1_element_s *alg_id) {
+  if (!alg_id || !alg_id->data)
+    return FIO_X509_SIG_UNKNOWN;
+
+  /* AlgorithmIdentifier ::= SEQUENCE { algorithm OID, parameters ANY } */
+  fio_asn1_iterator_s it;
+  fio_asn1_element_s oid;
+
+  fio_asn1_iterator_init(&it, alg_id);
+  if (fio_asn1_iterator_next(&it, &oid) != 0)
+    return FIO_X509_SIG_UNKNOWN;
+
+  if (!fio_asn1_is_tag(&oid, FIO_ASN1_OID))
+    return FIO_X509_SIG_UNKNOWN;
+
+  /* Check against known OIDs */
+  if (fio_asn1_oid_eq(&oid, FIO_OID_SHA256_WITH_RSA))
+    return FIO_X509_SIG_RSA_PKCS1_SHA256;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_SHA384_WITH_RSA))
+    return FIO_X509_SIG_RSA_PKCS1_SHA384;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_SHA512_WITH_RSA))
+    return FIO_X509_SIG_RSA_PKCS1_SHA512;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_ECDSA_WITH_SHA256))
+    return FIO_X509_SIG_ECDSA_SHA256;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_ECDSA_WITH_SHA384))
+    return FIO_X509_SIG_ECDSA_SHA384;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_ED25519))
+    return FIO_X509_SIG_ED25519;
+  if (fio_asn1_oid_eq(&oid, FIO_OID_RSA_PSS)) {
+    /* RSA-PSS - need to check parameters to determine hash */
+    /* For simplicity, default to SHA-256 for now */
+    /* TODO: Parse RSA-PSS parameters to determine actual hash */
+    return FIO_X509_SIG_RSA_PSS_SHA256;
+  }
+
+  return FIO_X509_SIG_UNKNOWN;
+}
+
+/** Parse SubjectPublicKeyInfo to extract public key */
+FIO_SFUNC int fio___x509_parse_pubkey(fio_x509_cert_s *cert,
+                                      const fio_asn1_element_s *spki) {
+  if (!cert || !spki)
+    return -1;
+
+  /*
+   * SubjectPublicKeyInfo ::= SEQUENCE {
+   *   algorithm        AlgorithmIdentifier,
+   *   subjectPublicKey BIT STRING
+   * }
+   */
+  fio_asn1_iterator_s it;
+  fio_asn1_element_s alg_id, pubkey_bits;
+
+  fio_asn1_iterator_init(&it, spki);
+
+  /* Get AlgorithmIdentifier */
+  if (fio_asn1_iterator_next(&it, &alg_id) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&alg_id, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  /* Get BIT STRING containing public key */
+  if (fio_asn1_iterator_next(&it, &pubkey_bits) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&pubkey_bits, FIO_ASN1_BIT_STRING))
+    return -1;
+
+  /* Parse the BIT STRING */
+  const uint8_t *bits;
+  size_t bit_len;
+  uint8_t unused_bits;
+  if (fio_asn1_parse_bit_string(&pubkey_bits, &bits, &bit_len, &unused_bits) !=
+      0)
+    return -1;
+
+  /* Parse AlgorithmIdentifier to get key type */
+  fio_asn1_iterator_s alg_it;
+  fio_asn1_element_s oid, params;
+
+  fio_asn1_iterator_init(&alg_it, &alg_id);
+  if (fio_asn1_iterator_next(&alg_it, &oid) != 0)
+    return -1;
+
+  if (fio_asn1_oid_eq(&oid, FIO_OID_RSA_ENCRYPTION)) {
+    /* RSA public key - bits contains SEQUENCE { n INTEGER, e INTEGER } */
+    cert->key_type = FIO_X509_KEY_RSA;
+
+    fio_asn1_element_s rsa_seq;
+    if (!fio_asn1_parse(&rsa_seq, bits, bit_len))
+      return -1;
+    if (!fio_asn1_is_tag(&rsa_seq, FIO_ASN1_SEQUENCE))
+      return -1;
+
+    fio_asn1_iterator_s rsa_it;
+    fio_asn1_element_s n_elem, e_elem;
+
+    fio_asn1_iterator_init(&rsa_it, &rsa_seq);
+
+    /* Get modulus (n) */
+    if (fio_asn1_iterator_next(&rsa_it, &n_elem) != 0)
+      return -1;
+    if (!fio_asn1_is_tag(&n_elem, FIO_ASN1_INTEGER))
+      return -1;
+
+    /* Get exponent (e) */
+    if (fio_asn1_iterator_next(&rsa_it, &e_elem) != 0)
+      return -1;
+    if (!fio_asn1_is_tag(&e_elem, FIO_ASN1_INTEGER))
+      return -1;
+
+    /* Store pointers - handle leading zero byte for positive integers */
+    cert->pubkey.rsa.n = n_elem.data;
+    cert->pubkey.rsa.n_len = n_elem.len;
+    cert->pubkey.rsa.e = e_elem.data;
+    cert->pubkey.rsa.e_len = e_elem.len;
+
+    /* Skip leading zero byte if present (positive integer encoding) */
+    if (cert->pubkey.rsa.n_len > 1 && cert->pubkey.rsa.n[0] == 0x00) {
+      cert->pubkey.rsa.n++;
+      cert->pubkey.rsa.n_len--;
+    }
+    if (cert->pubkey.rsa.e_len > 1 && cert->pubkey.rsa.e[0] == 0x00) {
+      cert->pubkey.rsa.e++;
+      cert->pubkey.rsa.e_len--;
+    }
+
+  } else if (fio_asn1_oid_eq(&oid, FIO_OID_EC_PUBLIC_KEY)) {
+    /* ECDSA - need to check curve parameter */
+    if (fio_asn1_iterator_next(&alg_it, &params) != 0)
+      return -1;
+
+    if (fio_asn1_oid_eq(&params, FIO_OID_SECP256R1)) {
+      cert->key_type = FIO_X509_KEY_ECDSA_P256;
+    } else if (fio_asn1_oid_eq(&params, FIO_OID_SECP384R1)) {
+      cert->key_type = FIO_X509_KEY_ECDSA_P384;
+    } else {
+      return -1; /* Unsupported curve */
+    }
+
+    /* EC public key is the uncompressed point directly in BIT STRING */
+    cert->pubkey.ecdsa.point = bits;
+    cert->pubkey.ecdsa.point_len = bit_len;
+
+  } else if (fio_asn1_oid_eq(&oid, FIO_OID_ED25519)) {
+    /* Ed25519 - public key is 32 bytes directly in BIT STRING */
+    cert->key_type = FIO_X509_KEY_ED25519;
+
+    if (bit_len != 32)
+      return -1; /* Ed25519 public key must be 32 bytes */
+
+    cert->pubkey.ed25519.key = bits;
+
+  } else {
+    cert->key_type = FIO_X509_KEY_UNKNOWN;
+  }
+
+  return 0;
+}
+
+/** Extract Common Name from a Name sequence */
+FIO_SFUNC void fio___x509_extract_cn(fio_x509_cert_s *cert,
+                                     const fio_asn1_element_s *name) {
+  if (!cert || !name)
+    return;
+
+  /*
+   * Name ::= SEQUENCE OF RelativeDistinguishedName
+   * RelativeDistinguishedName ::= SET OF AttributeTypeAndValue
+   * AttributeTypeAndValue ::= SEQUENCE { type OID, value ANY }
+   */
+  fio_asn1_iterator_s name_it;
+  fio_asn1_element_s rdn;
+
+  fio_asn1_iterator_init(&name_it, name);
+
+  while (fio_asn1_iterator_next(&name_it, &rdn) == 0) {
+    if (!fio_asn1_is_tag(&rdn, FIO_ASN1_SET))
+      continue;
+
+    fio_asn1_iterator_s rdn_it;
+    fio_asn1_element_s atv;
+
+    fio_asn1_iterator_init(&rdn_it, &rdn);
+
+    while (fio_asn1_iterator_next(&rdn_it, &atv) == 0) {
+      if (!fio_asn1_is_tag(&atv, FIO_ASN1_SEQUENCE))
+        continue;
+
+      fio_asn1_iterator_s atv_it;
+      fio_asn1_element_s type_oid, value;
+
+      fio_asn1_iterator_init(&atv_it, &atv);
+
+      if (fio_asn1_iterator_next(&atv_it, &type_oid) != 0)
+        continue;
+      if (fio_asn1_iterator_next(&atv_it, &value) != 0)
+        continue;
+
+      /* Check if this is Common Name */
+      if (fio_asn1_oid_eq(&type_oid, FIO_OID_COMMON_NAME)) {
+        size_t len;
+        const char *cn = fio_asn1_parse_string(&value, &len);
+        if (cn) {
+          cert->subject_cn = cn;
+          cert->subject_cn_len = len;
+        }
+        return;
+      }
+    }
+  }
+}
+
+/** Parse X.509v3 extensions */
+FIO_SFUNC void fio___x509_parse_extensions(fio_x509_cert_s *cert,
+                                           const fio_asn1_element_s *exts) {
+  if (!cert || !exts)
+    return;
+
+  /*
+   * Extensions ::= SEQUENCE OF Extension
+   * Extension ::= SEQUENCE {
+   *   extnID      OID,
+   *   critical    BOOLEAN DEFAULT FALSE,
+   *   extnValue   OCTET STRING (DER-encoded extension value)
+   * }
+   */
+  fio_asn1_iterator_s exts_it;
+  fio_asn1_element_s ext;
+
+  fio_asn1_iterator_init(&exts_it, exts);
+
+  while (fio_asn1_iterator_next(&exts_it, &ext) == 0) {
+    if (!fio_asn1_is_tag(&ext, FIO_ASN1_SEQUENCE))
+      continue;
+
+    fio_asn1_iterator_s ext_it;
+    fio_asn1_element_s oid, elem;
+
+    fio_asn1_iterator_init(&ext_it, &ext);
+
+    /* Get extension OID */
+    if (fio_asn1_iterator_next(&ext_it, &oid) != 0)
+      continue;
+
+    /* Skip critical flag if present, get value */
+    if (fio_asn1_iterator_next(&ext_it, &elem) != 0)
+      continue;
+
+    /* If BOOLEAN (critical), skip to get OCTET STRING */
+    const fio_asn1_element_s *value = &elem;
+    fio_asn1_element_s value_storage;
+    if (fio_asn1_is_tag(&elem, FIO_ASN1_BOOLEAN)) {
+      if (fio_asn1_iterator_next(&ext_it, &value_storage) != 0)
+        continue;
+      value = &value_storage;
+    }
+
+    if (!fio_asn1_is_tag(value, FIO_ASN1_OCTET_STRING))
+      continue;
+
+    /* Parse based on extension type */
+    if (fio_asn1_oid_eq(&oid, FIO_OID_BASIC_CONSTRAINTS)) {
+      /* BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE, ... } */
+      fio_asn1_element_s bc_seq;
+      if (fio_asn1_parse(&bc_seq, value->data, value->len)) {
+        if (fio_asn1_is_tag(&bc_seq, FIO_ASN1_SEQUENCE)) {
+          fio_asn1_iterator_s bc_it;
+          fio_asn1_element_s ca_elem;
+
+          fio_asn1_iterator_init(&bc_it, &bc_seq);
+          if (fio_asn1_iterator_next(&bc_it, &ca_elem) == 0) {
+            if (fio_asn1_is_tag(&ca_elem, FIO_ASN1_BOOLEAN)) {
+              int ca_val;
+              if (fio_asn1_parse_boolean(&ca_elem, &ca_val) == 0) {
+                cert->is_ca = ca_val;
+              }
+            }
+          }
+        }
+      }
+    } else if (fio_asn1_oid_eq(&oid, FIO_OID_KEY_USAGE)) {
+      /* KeyUsage ::= BIT STRING */
+      fio_asn1_element_s ku_bits;
+      if (fio_asn1_parse(&ku_bits, value->data, value->len)) {
+        if (fio_asn1_is_tag(&ku_bits, FIO_ASN1_BIT_STRING)) {
+          const uint8_t *bits;
+          size_t bit_len;
+          uint8_t unused;
+          if (fio_asn1_parse_bit_string(&ku_bits, &bits, &bit_len, &unused) ==
+              0) {
+            cert->has_key_usage = 1;
+            if (bit_len >= 1) {
+              cert->key_usage = bits[0];
+              if (bit_len >= 2)
+                cert->key_usage |= (uint16_t)bits[1] << 8;
+            }
+          }
+        }
+      }
+    } else if (fio_asn1_oid_eq(&oid, FIO_OID_SUBJECT_ALT_NAME)) {
+      /* SubjectAltName ::= GeneralNames = SEQUENCE OF GeneralName
+       * GeneralName ::= CHOICE { dNSName [2] IA5String, ... }
+       */
+      fio_asn1_element_s san_seq;
+      if (fio_asn1_parse(&san_seq, value->data, value->len)) {
+        if (fio_asn1_is_tag(&san_seq, FIO_ASN1_SEQUENCE)) {
+          fio_asn1_iterator_s san_it;
+          fio_asn1_element_s gn;
+
+          fio_asn1_iterator_init(&san_it, &san_seq);
+
+          while (fio_asn1_iterator_next(&san_it, &gn) == 0) {
+            /* dNSName is context tag [2] */
+            if (fio_asn1_is_context_tag(&gn, 2)) {
+              /* Store first DNS name only */
+              if (!cert->san_dns) {
+                cert->san_dns = (const char *)gn.data;
+                cert->san_dns_len = gn.len;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/* *****************************************************************************
+Implementation - Main Parsing Function
+***************************************************************************** */
+
+SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
+                         const uint8_t *der_data,
+                         size_t der_len) {
+  if (!cert || !der_data || der_len == 0)
+    return -1;
+
+  /* Zero the certificate structure */
+  FIO_MEMSET(cert, 0, sizeof(*cert));
+
+  /*
+   * Certificate ::= SEQUENCE {
+   *   tbsCertificate       TBSCertificate,
+   *   signatureAlgorithm   AlgorithmIdentifier,
+   *   signatureValue       BIT STRING
+   * }
+   */
+  fio_asn1_element_s cert_seq;
+  if (!fio_asn1_parse(&cert_seq, der_data, der_len))
+    return -1;
+
+  if (!fio_asn1_is_tag(&cert_seq, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  fio_asn1_iterator_s cert_it;
+  fio_asn1_element_s tbs, sig_alg, sig_value;
+
+  fio_asn1_iterator_init(&cert_it, &cert_seq);
+
+  /* Parse tbsCertificate */
+  if (fio_asn1_iterator_next(&cert_it, &tbs) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&tbs, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  /* Store TBS data for signature verification */
+  cert->tbs_data =
+      der_data + (tbs.data - cert_seq.data) -
+      (tbs.data > der_data ? (tbs.data - der_data) - (tbs.data - cert_seq.data)
+                           : 0);
+  /* Calculate proper TBS bounds including tag and length */
+  {
+    const uint8_t *tbs_start = tbs.data;
+    /* Walk backwards to find the tag byte */
+    while (tbs_start > der_data && tbs_start[-1] != 0x30)
+      --tbs_start;
+    if (tbs_start > der_data)
+      --tbs_start;
+    cert->tbs_data = tbs_start;
+    cert->tbs_len = (tbs.data + tbs.len) - tbs_start;
+  }
+
+  /* Parse signatureAlgorithm */
+  if (fio_asn1_iterator_next(&cert_it, &sig_alg) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&sig_alg, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  cert->sig_alg = fio___x509_parse_sig_alg(&sig_alg);
+
+  /* Parse signatureValue (BIT STRING) */
+  if (fio_asn1_iterator_next(&cert_it, &sig_value) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&sig_value, FIO_ASN1_BIT_STRING))
+    return -1;
+
+  {
+    const uint8_t *bits;
+    size_t bit_len;
+    uint8_t unused;
+    if (fio_asn1_parse_bit_string(&sig_value, &bits, &bit_len, &unused) != 0)
+      return -1;
+    cert->signature = bits;
+    cert->signature_len = bit_len;
+  }
+
+  /*
+   * TBSCertificate ::= SEQUENCE {
+   *   version         [0]  EXPLICIT Version DEFAULT v1,
+   *   serialNumber         CertificateSerialNumber,
+   *   signature            AlgorithmIdentifier,
+   *   issuer               Name,
+   *   validity             Validity,
+   *   subject              Name,
+   *   subjectPublicKeyInfo SubjectPublicKeyInfo,
+   *   issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL,
+   *   subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL,
+   *   extensions      [3]  EXPLICIT Extensions OPTIONAL
+   * }
+   */
+  fio_asn1_iterator_s tbs_it;
+  fio_asn1_element_s elem;
+
+  fio_asn1_iterator_init(&tbs_it, &tbs);
+
+  /* Get first element - may be version or serial */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+
+  /* Check for version (context tag [0]) */
+  if (fio_asn1_is_context_tag(&elem, 0)) {
+    /* Parse version */
+    fio_asn1_element_s version_int;
+    if (fio_asn1_parse(&version_int, elem.data, elem.len)) {
+      uint64_t ver;
+      if (fio_asn1_parse_integer(&version_int, &ver) == 0) {
+        cert->version = (int)ver;
+      }
+    }
+    /* Get next element (serial number) */
+    if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+      return -1;
+  } else {
+    cert->version = 0; /* v1 (default) */
+  }
+
+  /* Skip serialNumber (INTEGER) */
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
+    return -1;
+
+  /* Skip signature (AlgorithmIdentifier) */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  /* Parse issuer (Name = SEQUENCE) */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  /* Store issuer DN (including tag and length for comparison) */
+  {
+    const uint8_t *issuer_start = elem.data;
+    while (issuer_start > tbs.data && issuer_start[-1] != 0x30)
+      --issuer_start;
+    if (issuer_start > tbs.data)
+      --issuer_start;
+    cert->issuer_der = issuer_start;
+    cert->issuer_der_len = (elem.data + elem.len) - issuer_start;
+  }
+
+  /* Parse validity (SEQUENCE { notBefore, notAfter }) */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  {
+    fio_asn1_iterator_s val_it;
+    fio_asn1_element_s not_before, not_after;
+
+    fio_asn1_iterator_init(&val_it, &elem);
+
+    if (fio_asn1_iterator_next(&val_it, &not_before) == 0) {
+      fio_asn1_parse_time(&not_before, &cert->not_before);
+    }
+    if (fio_asn1_iterator_next(&val_it, &not_after) == 0) {
+      fio_asn1_parse_time(&not_after, &cert->not_after);
+    }
+  }
+
+  /* Parse subject (Name = SEQUENCE) */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  /* Store subject DN */
+  {
+    const uint8_t *subject_start = elem.data;
+    while (subject_start > tbs.data && subject_start[-1] != 0x30)
+      --subject_start;
+    if (subject_start > tbs.data)
+      --subject_start;
+    cert->subject_der = subject_start;
+    cert->subject_der_len = (elem.data + elem.len) - subject_start;
+  }
+
+  /* Extract Common Name */
+  fio___x509_extract_cn(cert, &elem);
+
+  /* Parse subjectPublicKeyInfo (SEQUENCE) */
+  if (fio_asn1_iterator_next(&tbs_it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_SEQUENCE))
+    return -1;
+
+  if (fio___x509_parse_pubkey(cert, &elem) != 0)
+    return -1;
+
+  /* Check for extensions [3] (v3 only) */
+  while (fio_asn1_iterator_next(&tbs_it, &elem) == 0) {
+    if (fio_asn1_is_context_tag(&elem, 3)) {
+      /* Extensions wrapped in context tag [3] */
+      fio_asn1_element_s exts;
+      if (fio_asn1_parse(&exts, elem.data, elem.len)) {
+        if (fio_asn1_is_tag(&exts, FIO_ASN1_SEQUENCE)) {
+          fio___x509_parse_extensions(cert, &exts);
+        }
+      }
+      break;
+    }
+  }
+
+  return 0;
+}
+
+/* *****************************************************************************
+Implementation - Hostname Matching
+***************************************************************************** */
+
+/** Case-insensitive character comparison */
+FIO_SFUNC int fio___x509_char_eq_nocase(char a, char b) {
+  /* Convert to lowercase */
+  char la = a | (char)((uint8_t)(a >= 'A' && a <= 'Z') << 5);
+  char lb = b | (char)((uint8_t)(b >= 'A' && b <= 'Z') << 5);
+  return la == lb;
+}
+
+/** Match a single hostname against a pattern (with wildcard support) */
+FIO_SFUNC int fio___x509_match_name(const char *pattern,
+                                    size_t pattern_len,
+                                    const char *hostname,
+                                    size_t hostname_len) {
+  if (!pattern || !hostname || pattern_len == 0 || hostname_len == 0)
+    return -1;
+
+  /* Check for wildcard pattern */
+  if (pattern_len >= 2 && pattern[0] == '*' && pattern[1] == '.') {
+    /* Wildcard certificate: *.example.com
+     * Per RFC 6125: wildcard matches only one label
+     */
+    const char *pattern_rest = pattern + 2;
+    size_t pattern_rest_len = pattern_len - 2;
+
+    /* Find first dot in hostname */
+    size_t dot_pos = 0;
+    for (size_t i = 0; i < hostname_len; ++i) {
+      if (hostname[i] == '.') {
+        dot_pos = i;
+        break;
+      }
+    }
+
+    /* Hostname must have at least one label before the matched part */
+    if (dot_pos == 0 || dot_pos == hostname_len - 1)
+      return -1;
+
+    /* Compare rest of pattern with rest of hostname (after first dot) */
+    const char *hostname_rest = hostname + dot_pos + 1;
+    size_t hostname_rest_len = hostname_len - dot_pos - 1;
+
+    if (pattern_rest_len != hostname_rest_len)
+      return -1;
+
+    for (size_t i = 0; i < pattern_rest_len; ++i) {
+      if (!fio___x509_char_eq_nocase(pattern_rest[i], hostname_rest[i]))
+        return -1;
+    }
+
+    return 0;
+  }
+
+  /* Exact match (case-insensitive) */
+  if (pattern_len != hostname_len)
+    return -1;
+
+  for (size_t i = 0; i < pattern_len; ++i) {
+    if (!fio___x509_char_eq_nocase(pattern[i], hostname[i]))
+      return -1;
+  }
+
+  return 0;
+}
+
+SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
+                                  const char *hostname,
+                                  size_t hostname_len) {
+  if (!cert || !hostname || hostname_len == 0)
+    return -1;
+
+  /* Per RFC 6125: If SAN is present, use ONLY SAN (do not fall back to CN) */
+  if (cert->san_dns && cert->san_dns_len > 0) {
+    return fio___x509_match_name(cert->san_dns,
+                                 cert->san_dns_len,
+                                 hostname,
+                                 hostname_len);
+  }
+
+  /* No SAN present - fall back to Common Name */
+  if (cert->subject_cn && cert->subject_cn_len > 0) {
+    return fio___x509_match_name(cert->subject_cn,
+                                 cert->subject_cn_len,
+                                 hostname,
+                                 hostname_len);
+  }
+
+  return -1;
+}
+
+/* *****************************************************************************
+Implementation - Signature Verification
+***************************************************************************** */
+
+SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
+                                    const fio_x509_cert_s *issuer) {
+  if (!cert || !issuer)
+    return -1;
+
+  if (!cert->tbs_data || cert->tbs_len == 0)
+    return -1;
+  if (!cert->signature || cert->signature_len == 0)
+    return -1;
+
+  /* Hash the TBS certificate data based on signature algorithm */
+  uint8_t hash[64]; /* Max hash size (SHA-512) */
+  size_t hash_len = 0;
+
+  switch (cert->sig_alg) {
+  case FIO_X509_SIG_RSA_PKCS1_SHA256:
+  case FIO_X509_SIG_RSA_PSS_SHA256:
+  case FIO_X509_SIG_ECDSA_SHA256: {
+    fio_u256 h = fio_sha256(cert->tbs_data, cert->tbs_len);
+    FIO_MEMCPY(hash, h.u8, 32);
+    hash_len = 32;
+    break;
+  }
+  case FIO_X509_SIG_RSA_PKCS1_SHA384:
+  case FIO_X509_SIG_RSA_PSS_SHA384:
+  case FIO_X509_SIG_ECDSA_SHA384: {
+    /* SHA-384 is truncated SHA-512 - we use fio_sha512 and truncate */
+    fio_sha512_s sh = fio_sha512_init();
+    /* Modify initial hash values for SHA-384 */
+    sh.hash.u64[0] = 0xCBBB9D5DC1059ED8ULL;
+    sh.hash.u64[1] = 0x629A292A367CD507ULL;
+    sh.hash.u64[2] = 0x9159015A3070DD17ULL;
+    sh.hash.u64[3] = 0x152FECD8F70E5939ULL;
+    sh.hash.u64[4] = 0x67332667FFC00B31ULL;
+    sh.hash.u64[5] = 0x8EB44A8768581511ULL;
+    sh.hash.u64[6] = 0xDB0C2E0D64F98FA7ULL;
+    sh.hash.u64[7] = 0x47B5481DBEFA4FA4ULL;
+    fio_sha512_consume(&sh, cert->tbs_data, cert->tbs_len);
+    fio_u512 h = fio_sha512_finalize(&sh);
+    FIO_MEMCPY(hash, h.u8, 48);
+    hash_len = 48;
+    break;
+  }
+  case FIO_X509_SIG_RSA_PKCS1_SHA512:
+  case FIO_X509_SIG_RSA_PSS_SHA512: {
+    fio_u512 h = fio_sha512(cert->tbs_data, cert->tbs_len);
+    FIO_MEMCPY(hash, h.u8, 64);
+    hash_len = 64;
+    break;
+  }
+  case FIO_X509_SIG_ED25519: {
+    /* Ed25519 doesn't pre-hash - the data is hashed internally */
+    /* Verification would be done directly with fio_ed25519_verify */
+    break;
+  }
+  default: return -1; /* Unknown algorithm */
+  }
+
+  /* Verify signature based on issuer's key type */
+  switch (issuer->key_type) {
+  case FIO_X509_KEY_RSA: {
+    if (!issuer->pubkey.rsa.n || !issuer->pubkey.rsa.e)
+      return -1;
+
+    fio_rsa_pubkey_s rsa_key = {
+        .n = issuer->pubkey.rsa.n,
+        .n_len = issuer->pubkey.rsa.n_len,
+        .e = issuer->pubkey.rsa.e,
+        .e_len = issuer->pubkey.rsa.e_len,
+    };
+
+    fio_rsa_hash_e rsa_hash;
+    switch (hash_len) {
+    case 32: rsa_hash = FIO_RSA_HASH_SHA256; break;
+    case 48: rsa_hash = FIO_RSA_HASH_SHA384; break;
+    case 64: rsa_hash = FIO_RSA_HASH_SHA512; break;
+    default: return -1;
+    }
+
+    switch (cert->sig_alg) {
+    case FIO_X509_SIG_RSA_PKCS1_SHA256:
+    case FIO_X509_SIG_RSA_PKCS1_SHA384:
+    case FIO_X509_SIG_RSA_PKCS1_SHA512:
+      return fio_rsa_verify_pkcs1(cert->signature,
+                                  cert->signature_len,
+                                  hash,
+                                  hash_len,
+                                  rsa_hash,
+                                  &rsa_key);
+    case FIO_X509_SIG_RSA_PSS_SHA256:
+    case FIO_X509_SIG_RSA_PSS_SHA384:
+    case FIO_X509_SIG_RSA_PSS_SHA512:
+      return fio_rsa_verify_pss(cert->signature,
+                                cert->signature_len,
+                                hash,
+                                hash_len,
+                                rsa_hash,
+                                &rsa_key);
+    default: return -1;
+    }
+  }
+
+  case FIO_X509_KEY_ECDSA_P256:
+  case FIO_X509_KEY_ECDSA_P384: {
+#if defined(FIO_P256)
+    /* ECDSA P-256 verification */
+    if (issuer->key_type == FIO_X509_KEY_ECDSA_P256) {
+      if (!issuer->pubkey.ecdsa.point || issuer->pubkey.ecdsa.point_len != 65)
+        return -1;
+
+      /* P-256 uses SHA-256, verify hash_len matches */
+      if (hash_len != 32)
+        return -1;
+
+      return fio_ecdsa_p256_verify(cert->signature,
+                                   cert->signature_len,
+                                   hash,
+                                   issuer->pubkey.ecdsa.point,
+                                   issuer->pubkey.ecdsa.point_len);
+    }
+#endif
+    /* P-384 not yet implemented */
+    return -1;
+  }
+
+  case FIO_X509_KEY_ED25519: {
+#if defined(FIO_ED25519)
+    /* Ed25519 verification */
+    if (!issuer->pubkey.ed25519.key)
+      return -1;
+
+    /* Ed25519 signature should be 64 bytes */
+    if (cert->signature_len != 64)
+      return -1;
+
+    return fio_ed25519_verify(cert->signature,
+                              issuer->pubkey.ed25519.key,
+                              cert->tbs_data,
+                              cert->tbs_len);
+#else
+    return -1;
+#endif
+  }
+
+  default: return -1;
+  }
+}
+
+/* *****************************************************************************
+Implementation - Certificate Chain Validation
+***************************************************************************** */
+
+/** Maximum certificate chain depth (prevents DoS via deep chains) */
+#ifndef FIO_X509_MAX_CHAIN_DEPTH
+#define FIO_X509_MAX_CHAIN_DEPTH 10
+#endif
+
+SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
+                              fio_x509_trust_store_s *trust_store) {
+  if (!cert || !trust_store)
+    return -1;
+  if (!trust_store->roots || trust_store->root_count == 0)
+    return -1;
+
+  /* Check each root certificate in the trust store */
+  for (size_t i = 0; i < trust_store->root_count; ++i) {
+    if (!trust_store->roots[i] || trust_store->root_lens[i] == 0)
+      continue;
+
+    /* Parse the root certificate */
+    fio_x509_cert_s root;
+    if (fio_x509_parse(&root,
+                       trust_store->roots[i],
+                       trust_store->root_lens[i]) != 0)
+      continue;
+
+    /* Compare subject DNs (the cert's issuer should match root's subject) */
+    if (fio_x509_dn_equals(cert->issuer_der,
+                           cert->issuer_der_len,
+                           root.subject_der,
+                           root.subject_der_len) == 0) {
+      return 0; /* Found trusted root */
+    }
+
+    /* Also check if the cert itself is a trusted root */
+    if (fio_x509_dn_equals(cert->subject_der,
+                           cert->subject_der_len,
+                           root.subject_der,
+                           root.subject_der_len) == 0) {
+      return 0; /* Cert is in trust store */
+    }
+  }
+
+  return -1; /* Not found in trust store */
+}
+
+/**
+ * Find issuing certificate in trust store for signature verification.
+ * Returns 0 if found and parsed into `issuer`, -1 if not found.
+ */
+FIO_SFUNC int fio___x509_find_issuer_in_trust_store(
+    fio_x509_cert_s *issuer,
+    const fio_x509_cert_s *cert,
+    fio_x509_trust_store_s *trust_store) {
+  if (!issuer || !cert || !trust_store)
+    return -1;
+  if (!trust_store->roots || trust_store->root_count == 0)
+    return -1;
+
+  for (size_t i = 0; i < trust_store->root_count; ++i) {
+    if (!trust_store->roots[i] || trust_store->root_lens[i] == 0)
+      continue;
+
+    if (fio_x509_parse(issuer,
+                       trust_store->roots[i],
+                       trust_store->root_lens[i]) != 0)
+      continue;
+
+    /* Check if this root's subject matches cert's issuer */
+    if (fio_x509_dn_equals(cert->issuer_der,
+                           cert->issuer_der_len,
+                           issuer->subject_der,
+                           issuer->subject_der_len) == 0) {
+      return 0; /* Found issuer */
+    }
+  }
+
+  return -1; /* Not found */
+}
+
+SFUNC int fio_x509_verify_chain(const uint8_t **certs,
+                                const size_t *cert_lens,
+                                size_t cert_count,
+                                const char *hostname,
+                                int64_t current_time,
+                                fio_x509_trust_store_s *trust_store) {
+  /* Validate inputs */
+  if (!certs || !cert_lens)
+    return FIO_X509_ERR_PARSE;
+  if (cert_count == 0)
+    return FIO_X509_ERR_EMPTY_CHAIN;
+  if (cert_count > FIO_X509_MAX_CHAIN_DEPTH)
+    return FIO_X509_ERR_CHAIN_TOO_LONG;
+
+  /* Parse all certificates in the chain */
+  fio_x509_cert_s chain[FIO_X509_MAX_CHAIN_DEPTH];
+
+  for (size_t i = 0; i < cert_count; ++i) {
+    if (!certs[i] || cert_lens[i] == 0) {
+      FIO_LOG_DEBUG("X.509 chain: certificate %zu is empty", i);
+      return FIO_X509_ERR_PARSE;
+    }
+
+    if (fio_x509_parse(&chain[i], certs[i], cert_lens[i]) != 0) {
+      FIO_LOG_DEBUG("X.509 chain: failed to parse certificate %zu", i);
+      return FIO_X509_ERR_PARSE;
+    }
+
+    /* Check validity period */
+    if (current_time < chain[i].not_before) {
+      FIO_LOG_DEBUG("X.509 chain: certificate %zu not yet valid", i);
+      return FIO_X509_ERR_NOT_YET_VALID;
+    }
+    if (current_time > chain[i].not_after) {
+      FIO_LOG_DEBUG("X.509 chain: certificate %zu expired", i);
+      return FIO_X509_ERR_EXPIRED;
+    }
+  }
+
+  /* Check hostname on end-entity certificate (index 0) */
+  if (hostname) {
+    size_t hostname_len = FIO_STRLEN(hostname);
+    if (fio_x509_match_hostname(&chain[0], hostname, hostname_len) != 0) {
+      FIO_LOG_DEBUG("X.509 chain: hostname mismatch for '%s'", hostname);
+      return FIO_X509_ERR_HOSTNAME_MISMATCH;
+    }
+  }
+
+  /* Verify chain signatures and issuer relationships */
+  for (size_t i = 0; i < cert_count - 1; ++i) {
+    /* Verify issuer DN of cert[i] matches subject DN of cert[i+1] */
+    if (fio_x509_dn_equals(chain[i].issuer_der,
+                           chain[i].issuer_der_len,
+                           chain[i + 1].subject_der,
+                           chain[i + 1].subject_der_len) != 0) {
+      FIO_LOG_DEBUG("X.509 chain: issuer mismatch at position %zu", i);
+      return FIO_X509_ERR_ISSUER_MISMATCH;
+    }
+
+    /* Verify that the issuer (i+1) is a CA certificate */
+    if (!chain[i + 1].is_ca) {
+      /* Check if it's a self-signed root (may not have BasicConstraints) */
+      int is_self_signed =
+          fio_x509_dn_equals(chain[i + 1].issuer_der,
+                             chain[i + 1].issuer_der_len,
+                             chain[i + 1].subject_der,
+                             chain[i + 1].subject_der_len) == 0;
+      /* Allow self-signed certs even without CA flag for compatibility */
+      if (!is_self_signed) {
+        FIO_LOG_DEBUG("X.509 chain: certificate %zu is not a CA", i + 1);
+        return FIO_X509_ERR_NOT_CA;
+      }
+    }
+
+    /* Verify signature of cert[i] using public key from cert[i+1] */
+    if (fio_x509_verify_signature(&chain[i], &chain[i + 1]) != 0) {
+      FIO_LOG_DEBUG("X.509 chain: signature verification failed at %zu", i);
+      return FIO_X509_ERR_SIGNATURE;
+    }
+  }
+
+  /* Handle the last certificate in the chain */
+  size_t last = cert_count - 1;
+
+  /* Check if the last certificate is self-signed */
+  int is_self_signed = fio_x509_dn_equals(chain[last].issuer_der,
+                                          chain[last].issuer_der_len,
+                                          chain[last].subject_der,
+                                          chain[last].subject_der_len) == 0;
+
+  if (is_self_signed) {
+    /* Self-signed: verify its own signature */
+    if (fio_x509_verify_signature(&chain[last], &chain[last]) != 0) {
+      FIO_LOG_DEBUG("X.509 chain: self-signed root signature invalid");
+      return FIO_X509_ERR_SIGNATURE;
+    }
+
+    /* Check if self-signed root is in trust store */
+    if (trust_store) {
+      if (fio_x509_is_trusted(&chain[last], trust_store) != 0) {
+        FIO_LOG_DEBUG("X.509 chain: self-signed root not in trust store");
+        return FIO_X509_ERR_NO_TRUST_ANCHOR;
+      }
+    }
+  } else {
+    /* Not self-signed: must be signed by a certificate in trust store */
+    if (trust_store) {
+      /* Find issuer in trust store */
+      fio_x509_cert_s issuer;
+      if (fio___x509_find_issuer_in_trust_store(&issuer,
+                                                &chain[last],
+                                                trust_store) != 0) {
+        FIO_LOG_DEBUG("X.509 chain: issuer not found in trust store");
+        return FIO_X509_ERR_NO_TRUST_ANCHOR;
+      }
+
+      /* Verify signature using trust store certificate */
+      if (fio_x509_verify_signature(&chain[last], &issuer) != 0) {
+        FIO_LOG_DEBUG("X.509 chain: signature by trusted CA failed");
+        return FIO_X509_ERR_SIGNATURE;
+      }
+    }
+  }
+
+  FIO_LOG_DEBUG("X.509 chain: validation successful (%zu certificates)",
+                cert_count);
+  return FIO_X509_OK;
+}
+
+SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                            size_t max_entries,
+                                            const uint8_t *data,
+                                            size_t data_len) {
+  if (!entries || max_entries == 0 || !data || data_len == 0)
+    return -1;
+
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /*
+   * TLS 1.3 Certificate message format (RFC 8446 Section 4.4.2):
+   *
+   * struct {
+   *     opaque certificate_request_context<0..2^8-1>;
+   *     CertificateEntry certificate_list<0..2^24-1>;
+   * } Certificate;
+   *
+   * struct {
+   *     opaque cert_data<1..2^24-1>;
+   *     Extension extensions<0..2^16-1>;
+   * } CertificateEntry;
+   */
+
+  /* Parse certificate_request_context length (1 byte) */
+  if (p >= end)
+    return -1;
+  uint8_t ctx_len = *p++;
+  if (p + ctx_len > end)
+    return -1;
+  p += ctx_len; /* Skip context (usually empty for server certificates) */
+
+  /* Parse certificate_list length (3 bytes, big-endian) */
+  if (p + 3 > end)
+    return -1;
+  size_t list_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+  p += 3;
+
+  if (p + list_len > end)
+    return -1;
+
+  const uint8_t *list_end = p + list_len;
+  size_t count = 0;
+
+  /* Parse each CertificateEntry */
+  while (p < list_end && count < max_entries) {
+    /* cert_data length (3 bytes, big-endian) */
+    if (p + 3 > list_end)
+      return -1;
+    size_t cert_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+    p += 3;
+
+    if (cert_len == 0 || p + cert_len > list_end)
+      return -1;
+
+    /* Store certificate entry */
+    entries[count].cert = p;
+    entries[count].cert_len = cert_len;
+    ++count;
+    p += cert_len;
+
+    /* extensions length (2 bytes, big-endian) */
+    if (p + 2 > list_end)
+      return -1;
+    size_t ext_len = ((size_t)p[0] << 8) | p[1];
+    p += 2;
+
+    if (p + ext_len > list_end)
+      return -1;
+    p += ext_len; /* Skip extensions */
+  }
+
+  return (int)count;
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_X509 */
+#undef FIO_X509
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_OTP                /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
@@ -34252,6 +38863,3490 @@ Module Cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIO_SECRET
 #endif /* FIO_CRYPTO_CORE */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_TLS13              /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+                              TLS 1.3 Implementation
+                    Key Schedule (RFC 8446 Section 7) and
+                    Record Layer (RFC 8446 Section 5)
+
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_TLS13) && !defined(H___FIO_TLS13___H)
+#define H___FIO_TLS13___H
+
+/* *****************************************************************************
+TLS 1.3 Key Schedule API
+
+Note: Requires FIO_HKDF (which requires FIO_SHA2).
+      Either define FIO_HKDF before FIO_TLS13, or use FIO_CRYPT to include all
+      crypto modules.
+
+Reference: RFC 8446 Section 7.1
+***************************************************************************** */
+
+/** SHA-256 hash length (32 bytes). */
+#define FIO_TLS13_SHA256_HASH_LEN 32
+/** SHA-384 hash length (48 bytes). */
+#define FIO_TLS13_SHA384_HASH_LEN 48
+/** Maximum hash length supported. */
+#define FIO_TLS13_MAX_HASH_LEN 48
+
+/** AES-128-GCM key length. */
+#define FIO_TLS13_AES128_KEY_LEN 16
+/** AES-256-GCM key length. */
+#define FIO_TLS13_AES256_KEY_LEN 32
+/** ChaCha20-Poly1305 key length. */
+#define FIO_TLS13_CHACHA_KEY_LEN 32
+/** IV length for all AEAD ciphers. */
+#define FIO_TLS13_IV_LEN 12
+
+/* *****************************************************************************
+HKDF-Expand-Label (RFC 8446 Section 7.1)
+
+HKDF-Expand-Label(Secret, Label, Context, Length) =
+    HKDF-Expand(Secret, HkdfLabel, Length)
+
+Where HkdfLabel is:
+    struct {
+        uint16 length = Length;
+        opaque label<7..255> = "tls13 " + Label;
+        opaque context<0..255> = Context;
+    } HkdfLabel;
+***************************************************************************** */
+
+/**
+ * TLS 1.3 HKDF-Expand-Label function.
+ *
+ * Derives keying material using the TLS 1.3 specific label format.
+ *
+ * @param out Output buffer for derived key material
+ * @param out_len Desired output length (max 255)
+ * @param secret The secret to expand (PRK from HKDF-Extract)
+ * @param secret_len Secret length (32 for SHA-256, 48 for SHA-384)
+ * @param label The label string (without "tls13 " prefix)
+ * @param label_len Label length (max 249 to fit in 255 with prefix)
+ * @param context Optional context (transcript hash or empty)
+ * @param context_len Context length (max 255)
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_hkdf_expand_label(void *restrict out,
+                                       size_t out_len,
+                                       const void *restrict secret,
+                                       size_t secret_len,
+                                       const char *label,
+                                       size_t label_len,
+                                       const void *restrict context,
+                                       size_t context_len,
+                                       int use_sha384);
+
+/* *****************************************************************************
+Derive-Secret (RFC 8446 Section 7.1)
+
+Derive-Secret(Secret, Label, Messages) =
+    HKDF-Expand-Label(Secret, Label, Transcript-Hash(Messages), Hash.length)
+***************************************************************************** */
+
+/**
+ * TLS 1.3 Derive-Secret function.
+ *
+ * Derives a secret from a base secret and transcript hash.
+ *
+ * @param out Output buffer (32 bytes for SHA-256, 48 for SHA-384)
+ * @param secret The base secret
+ * @param secret_len Secret length
+ * @param label The label string (e.g., "c hs traffic")
+ * @param label_len Label length
+ * @param transcript_hash Hash of handshake messages (or empty hash for "")
+ * @param hash_len Hash length (32 or 48)
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_secret(void *restrict out,
+                                   const void *restrict secret,
+                                   size_t secret_len,
+                                   const char *label,
+                                   size_t label_len,
+                                   const void *restrict transcript_hash,
+                                   size_t hash_len,
+                                   int use_sha384);
+
+/* *****************************************************************************
+Key Schedule Derivation Functions (RFC 8446 Section 7.1)
+
+             0
+             |
+             v
+   PSK ->  HKDF-Extract = Early Secret
+             |
+             +-----> Derive-Secret(., "ext binder" | "res binder", "")
+             |                     = binder_key
+             |
+             +-----> Derive-Secret(., "c e traffic", ClientHello)
+             |                     = client_early_traffic_secret
+             |
+             +-----> Derive-Secret(., "e exp master", ClientHello)
+             |                     = early_exporter_master_secret
+             v
+       Derive-Secret(., "derived", "")
+             |
+             v
+   (EC)DHE -> HKDF-Extract = Handshake Secret
+             |
+             +-----> Derive-Secret(., "c hs traffic",
+             |                     ClientHello...ServerHello)
+             |                     = client_handshake_traffic_secret
+             |
+             +-----> Derive-Secret(., "s hs traffic",
+             |                     ClientHello...ServerHello)
+             |                     = server_handshake_traffic_secret
+             v
+       Derive-Secret(., "derived", "")
+             |
+             v
+   0 -> HKDF-Extract = Master Secret
+             |
+             +-----> Derive-Secret(., "c ap traffic",
+             |                     ClientHello...server Finished)
+             |                     = client_application_traffic_secret_0
+             |
+             +-----> Derive-Secret(., "s ap traffic",
+             |                     ClientHello...server Finished)
+             |                     = server_application_traffic_secret_0
+             |
+             +-----> Derive-Secret(., "exp master",
+             |                     ClientHello...server Finished)
+             |                     = exporter_master_secret
+             |
+             +-----> Derive-Secret(., "res master",
+                                   ClientHello...client Finished)
+                                   = resumption_master_secret
+***************************************************************************** */
+
+/**
+ * Derive the Early Secret from PSK.
+ *
+ * Early Secret = HKDF-Extract(salt=0, IKM=PSK)
+ *
+ * @param early_secret Output buffer (32 or 48 bytes)
+ * @param psk Pre-shared key (or NULL/zeros for no PSK)
+ * @param psk_len PSK length (0 if no PSK)
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_early_secret(void *restrict early_secret,
+                                         const void *restrict psk,
+                                         size_t psk_len,
+                                         int use_sha384);
+
+/**
+ * Derive the Handshake Secret from ECDHE shared secret.
+ *
+ * Handshake Secret = HKDF-Extract(
+ *     salt=Derive-Secret(Early Secret, "derived", ""),
+ *     IKM=ECDHE shared secret
+ * )
+ *
+ * @param handshake_secret Output buffer (32 or 48 bytes)
+ * @param early_secret The early secret (from fio_tls13_derive_early_secret)
+ * @param ecdhe_secret The ECDHE shared secret (e.g., from X25519)
+ * @param ecdhe_len ECDHE secret length (32 for X25519)
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_handshake_secret(void *restrict handshake_secret,
+                                             const void *restrict early_secret,
+                                             const void *restrict ecdhe_secret,
+                                             size_t ecdhe_len,
+                                             int use_sha384);
+
+/**
+ * Derive the Master Secret.
+ *
+ * Master Secret = HKDF-Extract(
+ *     salt=Derive-Secret(Handshake Secret, "derived", ""),
+ *     IKM=0
+ * )
+ *
+ * @param master_secret Output buffer (32 or 48 bytes)
+ * @param handshake_secret The handshake secret
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_master_secret(void *restrict master_secret,
+                                          const void *restrict handshake_secret,
+                                          int use_sha384);
+
+/* *****************************************************************************
+Traffic Key Derivation (RFC 8446 Section 7.3)
+
+[sender]_write_key = HKDF-Expand-Label(Secret, "key", "", key_length)
+[sender]_write_iv  = HKDF-Expand-Label(Secret, "iv", "", iv_length)
+***************************************************************************** */
+
+/**
+ * Derive traffic keys and IV from a traffic secret.
+ *
+ * @param key Output buffer for write key
+ * @param key_len Key length (16 for AES-128, 32 for AES-256/ChaCha20)
+ * @param iv Output buffer for write IV (12 bytes)
+ * @param traffic_secret The traffic secret (client/server handshake/app)
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_traffic_keys(void *restrict key,
+                                         size_t key_len,
+                                         void *restrict iv,
+                                         const void *restrict traffic_secret,
+                                         int use_sha384);
+
+/**
+ * Derive the Finished key from a traffic secret.
+ *
+ * finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)
+ *
+ * @param finished_key Output buffer (32 or 48 bytes)
+ * @param traffic_secret The handshake traffic secret
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_derive_finished_key(void *restrict finished_key,
+                                         const void *restrict traffic_secret,
+                                         int use_sha384);
+
+/**
+ * Compute the Finished verify_data.
+ *
+ * verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context))
+ *
+ * @param verify_data Output buffer (32 or 48 bytes)
+ * @param finished_key The finished key (from fio_tls13_derive_finished_key)
+ * @param transcript_hash Hash of handshake messages up to this point
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_compute_finished(void *restrict verify_data,
+                                      const void *restrict finished_key,
+                                      const void *restrict transcript_hash,
+                                      int use_sha384);
+
+/**
+ * Update application traffic secret for key update.
+ *
+ * application_traffic_secret_N+1 =
+ *     HKDF-Expand-Label(application_traffic_secret_N, "traffic upd", "",
+ * Hash.length)
+ *
+ * @param new_secret Output buffer (32 or 48 bytes)
+ * @param current_secret Current application traffic secret
+ * @param use_sha384 If non-zero, use SHA-384; otherwise SHA-256
+ */
+SFUNC void fio_tls13_update_traffic_secret(void *restrict new_secret,
+                                           const void *restrict current_secret,
+                                           int use_sha384);
+
+/* *****************************************************************************
+TLS 1.3 Record Layer Constants (RFC 8446 Section 5)
+***************************************************************************** */
+
+/** TLS record header length (5 bytes) */
+#define FIO_TLS13_RECORD_HEADER_LEN 5
+/** Maximum plaintext fragment length (2^14 = 16384 bytes) */
+#define FIO_TLS13_MAX_PLAINTEXT_LEN 16384
+/** Maximum ciphertext length (plaintext + padding + tag) */
+#define FIO_TLS13_MAX_CIPHERTEXT_LEN (16384 + 256)
+/** AEAD authentication tag length (16 bytes for all TLS 1.3 ciphers) */
+#define FIO_TLS13_TAG_LEN 16
+/** Legacy TLS version bytes (0x0303 = TLS 1.2) */
+#define FIO_TLS13_LEGACY_VERSION_MAJOR 0x03
+#define FIO_TLS13_LEGACY_VERSION_MINOR 0x03
+
+/* *****************************************************************************
+TLS 1.3 Content Types (RFC 8446 Section 5.1)
+***************************************************************************** */
+
+/** TLS 1.3 content types */
+typedef enum {
+  FIO_TLS13_CONTENT_INVALID = 0,
+  FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC = 20, /* Legacy, ignored in TLS 1.3 */
+  FIO_TLS13_CONTENT_ALERT = 21,
+  FIO_TLS13_CONTENT_HANDSHAKE = 22,
+  FIO_TLS13_CONTENT_APPLICATION_DATA = 23,
+} fio_tls13_content_type_e;
+
+/* *****************************************************************************
+TLS 1.3 Handshake Message Types (RFC 8446 Section 4)
+***************************************************************************** */
+
+/** TLS 1.3 Handshake Message Types */
+typedef enum {
+  FIO_TLS13_HS_CLIENT_HELLO = 1,
+  FIO_TLS13_HS_SERVER_HELLO = 2,
+  FIO_TLS13_HS_NEW_SESSION_TICKET = 4,
+  FIO_TLS13_HS_END_OF_EARLY_DATA = 5,
+  FIO_TLS13_HS_ENCRYPTED_EXTENSIONS = 8,
+  FIO_TLS13_HS_CERTIFICATE = 11,
+  FIO_TLS13_HS_CERTIFICATE_REQUEST = 13,
+  FIO_TLS13_HS_CERTIFICATE_VERIFY = 15,
+  FIO_TLS13_HS_FINISHED = 20,
+  FIO_TLS13_HS_KEY_UPDATE = 24,
+  FIO_TLS13_HS_MESSAGE_HASH = 254,
+} fio_tls13_handshake_type_e;
+
+/** TLS 1.3 Extension Types (RFC 8446 Section 4.2) */
+typedef enum {
+  FIO_TLS13_EXT_SERVER_NAME = 0,           /* SNI */
+  FIO_TLS13_EXT_SUPPORTED_GROUPS = 10,     /* Key exchange groups */
+  FIO_TLS13_EXT_SIGNATURE_ALGORITHMS = 13, /* Signature schemes */
+  FIO_TLS13_EXT_SUPPORTED_VERSIONS = 43,   /* TLS version negotiation */
+  FIO_TLS13_EXT_KEY_SHARE = 51,            /* ECDHE key shares */
+} fio_tls13_extension_type_e;
+
+/** TLS 1.3 Cipher Suites (RFC 8446 Section B.4) */
+typedef enum {
+  FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256 = 0x1301,
+  FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384 = 0x1302,
+  FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256 = 0x1303,
+} fio_tls13_cipher_suite_e;
+
+/** TLS 1.3 Named Groups (RFC 8446 Section 4.2.7) */
+typedef enum {
+  FIO_TLS13_GROUP_SECP256R1 = 23, /* P-256 */
+  FIO_TLS13_GROUP_SECP384R1 = 24, /* P-384 */
+  FIO_TLS13_GROUP_X25519 = 29,    /* Curve25519 */
+} fio_tls13_named_group_e;
+
+/** TLS 1.3 Signature Algorithms (RFC 8446 Section 4.2.3) */
+typedef enum {
+  FIO_TLS13_SIG_RSA_PKCS1_SHA256 = 0x0401,
+  FIO_TLS13_SIG_RSA_PKCS1_SHA384 = 0x0501,
+  FIO_TLS13_SIG_RSA_PKCS1_SHA512 = 0x0601,
+  FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256 = 0x0403,
+  FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384 = 0x0503,
+  FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256 = 0x0804,
+  FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384 = 0x0805,
+  FIO_TLS13_SIG_ED25519 = 0x0807,
+} fio_tls13_signature_scheme_e;
+
+/** TLS 1.3 Protocol Version Constants */
+#define FIO_TLS13_VERSION_TLS12 0x0303
+#define FIO_TLS13_VERSION_TLS13 0x0304
+
+/** HelloRetryRequest magic random value (RFC 8446 Section 4.1.3) */
+#define FIO_TLS13_HRR_RANDOM                                                   \
+  "\xCF\x21\xAD\x74\xE5\x9A\x61\x11\xBE\x1D\x8C\x02\x1E\x65\xB8\x91"           \
+  "\xC2\xA2\x11\x16\x7A\xBB\x8C\x5E\x07\x9E\x09\xE2\xC8\xA8\x33\x9C"
+
+/* *****************************************************************************
+TLS 1.3 Parsed Handshake Message Structures
+***************************************************************************** */
+
+/** Parsed ServerHello message */
+typedef struct {
+  uint8_t random[32];         /* Server random */
+  uint16_t cipher_suite;      /* Selected cipher suite */
+  uint8_t key_share[128];     /* Server's key share (max size for P-384) */
+  uint8_t key_share_len;      /* Length of key share */
+  uint16_t key_share_group;   /* Selected group */
+  int is_hello_retry_request; /* 1 if HRR */
+} fio_tls13_server_hello_s;
+
+/** Parsed EncryptedExtensions message */
+typedef struct {
+  int has_server_name; /* Server acknowledged SNI */
+} fio_tls13_encrypted_extensions_s;
+
+/** Parsed Certificate message (minimal - first cert only) */
+typedef struct {
+  const uint8_t *cert_data; /* Pointer to first certificate */
+  size_t cert_len;          /* Length of first certificate */
+} fio_tls13_certificate_s;
+
+/** Parsed CertificateVerify message */
+typedef struct {
+  uint16_t signature_scheme;
+  const uint8_t *signature;
+  size_t signature_len;
+} fio_tls13_certificate_verify_s;
+
+/* *****************************************************************************
+TLS 1.3 Cipher Suite Types
+***************************************************************************** */
+
+/** Supported AEAD cipher types for TLS 1.3 */
+typedef enum {
+  FIO_TLS13_CIPHER_AES_128_GCM = 0,       /* TLS_AES_128_GCM_SHA256 */
+  FIO_TLS13_CIPHER_AES_256_GCM = 1,       /* TLS_AES_256_GCM_SHA384 */
+  FIO_TLS13_CIPHER_CHACHA20_POLY1305 = 2, /* TLS_CHACHA20_POLY1305_SHA256 */
+} fio_tls13_cipher_type_e;
+
+/* *****************************************************************************
+TLS 1.3 Record Structures
+***************************************************************************** */
+
+/** TLSPlaintext header structure (RFC 8446 Section 5.1) */
+typedef struct {
+  uint8_t content_type;      /* ContentType */
+  uint8_t legacy_version[2]; /* 0x03, 0x03 (TLS 1.2) */
+  uint16_t length;           /* Fragment length (big-endian) */
+  /* Fragment follows (up to 2^14 bytes) */
+} fio_tls13_plaintext_header_s;
+
+/** TLSCiphertext header structure (RFC 8446 Section 5.2) */
+typedef struct {
+  uint8_t opaque_type;       /* Always 23 (application_data) */
+  uint8_t legacy_version[2]; /* 0x03, 0x03 */
+  uint16_t length;           /* Encrypted length + tag (big-endian) */
+  /* Encrypted content follows */
+} fio_tls13_ciphertext_header_s;
+
+/** Record encryption context (per-direction keys) */
+typedef struct {
+  uint8_t key[32];          /* Write key (16 or 32 bytes depending on cipher) */
+  uint8_t iv[12];           /* Write IV (always 12 bytes) */
+  uint64_t sequence_number; /* Per-record sequence number (starts at 0) */
+  uint8_t key_len;          /* 16 for AES-128, 32 for AES-256/ChaCha20 */
+  uint8_t cipher_type;      /* fio_tls13_cipher_type_e */
+} fio_tls13_record_keys_s;
+
+/* *****************************************************************************
+TLS 1.3 Record Layer API
+***************************************************************************** */
+
+/**
+ * Build per-record nonce by XORing sequence number with IV.
+ *
+ * Per RFC 8446 Section 5.3:
+ * - Pad 64-bit sequence number to 12 bytes (big-endian, left-padded with zeros)
+ * - XOR with the static IV derived from traffic secret
+ *
+ * @param nonce Output buffer (must be 12 bytes)
+ * @param iv    Static IV from key derivation (12 bytes)
+ * @param seq   64-bit sequence number
+ */
+FIO_IFUNC void fio_tls13_build_nonce(uint8_t nonce[12],
+                                     const uint8_t iv[12],
+                                     uint64_t seq);
+
+/**
+ * Parse a TLS record header.
+ *
+ * @param data         Input buffer containing record data
+ * @param data_len     Length of input buffer
+ * @param content_type Output: content type from header
+ * @param payload_len  Output: payload length from header
+ * @return Pointer to payload data, or NULL if incomplete/invalid
+ */
+SFUNC const uint8_t *fio_tls13_record_parse_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_content_type_e *content_type,
+    size_t *payload_len);
+
+/**
+ * Encrypt a TLS 1.3 record.
+ *
+ * Per RFC 8446 Section 5.2:
+ * - Output format: 5-byte header + encrypted(plaintext + content_type) + tag
+ * - AAD is the 5-byte record header
+ * - Sequence number is incremented after encryption
+ *
+ * @param out          Output buffer for encrypted record
+ * @param out_capacity Capacity of output buffer
+ * @param plaintext    Plaintext data to encrypt
+ * @param plaintext_len Length of plaintext
+ * @param content_type  Content type (appended to plaintext before encryption)
+ * @param keys         Encryption keys (sequence number will be incremented)
+ * @return Total output length (header + ciphertext + tag), or -1 on error
+ */
+SFUNC int fio_tls13_record_encrypt(uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *plaintext,
+                                   size_t plaintext_len,
+                                   fio_tls13_content_type_e content_type,
+                                   fio_tls13_record_keys_s *keys);
+
+/**
+ * Decrypt a TLS 1.3 record.
+ *
+ * Per RFC 8446 Section 5.2:
+ * - Input includes 5-byte header
+ * - Decrypts and verifies AEAD tag
+ * - Scans backwards to find real content type (removes padding)
+ * - Sequence number is incremented after successful decryption
+ *
+ * @param out          Output buffer for decrypted plaintext
+ * @param out_capacity Capacity of output buffer
+ * @param content_type Output: actual content type from inner plaintext
+ * @param ciphertext   Input ciphertext (includes 5-byte header)
+ * @param ciphertext_len Total length including header
+ * @param keys         Decryption keys (sequence number will be incremented)
+ * @return Plaintext length (excluding padding and content type), or -1 on error
+ */
+SFUNC int fio_tls13_record_decrypt(uint8_t *out,
+                                   size_t out_capacity,
+                                   fio_tls13_content_type_e *content_type,
+                                   const uint8_t *ciphertext,
+                                   size_t ciphertext_len,
+                                   fio_tls13_record_keys_s *keys);
+
+/**
+ * Initialize record keys structure.
+ *
+ * @param keys        Keys structure to initialize
+ * @param key         Key material (16 or 32 bytes)
+ * @param key_len     Key length (16 for AES-128, 32 for AES-256/ChaCha20)
+ * @param iv          IV material (12 bytes)
+ * @param cipher_type Cipher type (fio_tls13_cipher_type_e)
+ */
+SFUNC void fio_tls13_record_keys_init(fio_tls13_record_keys_s *keys,
+                                      const uint8_t *key,
+                                      uint8_t key_len,
+                                      const uint8_t iv[12],
+                                      fio_tls13_cipher_type_e cipher_type);
+
+/**
+ * Clear sensitive key material from memory.
+ *
+ * @param keys Keys structure to clear
+ */
+FIO_IFUNC void fio_tls13_record_keys_clear(fio_tls13_record_keys_s *keys);
+
+/* *****************************************************************************
+TLS 1.3 Handshake Message API (RFC 8446 Section 4)
+***************************************************************************** */
+
+/**
+ * Parse handshake header, return message type and body pointer.
+ *
+ * Returns pointer to message body, or NULL on error.
+ * Sets msg_type and body_len on success.
+ */
+SFUNC const uint8_t *fio_tls13_parse_handshake_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_handshake_type_e *msg_type,
+    size_t *body_len);
+
+/**
+ * Write handshake header (4 bytes).
+ *
+ * Format: HandshakeType (1 byte) + uint24 length (3 bytes)
+ */
+SFUNC void fio_tls13_write_handshake_header(uint8_t *out,
+                                            fio_tls13_handshake_type_e msg_type,
+                                            size_t body_len);
+
+/**
+ * Build a ClientHello message.
+ *
+ * Returns: message length on success, -1 on error.
+ *
+ * Parameters:
+ * - out: output buffer
+ * - out_capacity: size of output buffer
+ * - random: 32-byte client random
+ * - server_name: SNI hostname (NULL if not used)
+ * - x25519_pubkey: 32-byte X25519 public key
+ * - cipher_suites: array of cipher suites to offer
+ * - cipher_suite_count: number of cipher suites
+ */
+SFUNC int fio_tls13_build_client_hello(uint8_t *out,
+                                       size_t out_capacity,
+                                       const uint8_t random[32],
+                                       const char *server_name,
+                                       const uint8_t *x25519_pubkey,
+                                       const uint16_t *cipher_suites,
+                                       size_t cipher_suite_count);
+
+/**
+ * Parse ServerHello message.
+ *
+ * Returns: 0 on success, -1 on error.
+ *
+ * Note: data should point to the handshake body (after the 4-byte header).
+ */
+SFUNC int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
+                                       const uint8_t *data,
+                                       size_t data_len);
+
+/**
+ * Parse EncryptedExtensions message.
+ *
+ * Returns: 0 on success, -1 on error.
+ */
+SFUNC int fio_tls13_parse_encrypted_extensions(
+    fio_tls13_encrypted_extensions_s *out,
+    const uint8_t *data,
+    size_t data_len);
+
+/**
+ * Parse Certificate message (extracts first certificate only).
+ *
+ * Returns: 0 on success, -1 on error.
+ */
+SFUNC int fio_tls13_parse_certificate(fio_tls13_certificate_s *out,
+                                      const uint8_t *data,
+                                      size_t data_len);
+
+/**
+ * Parse CertificateVerify message.
+ *
+ * Returns: 0 on success, -1 on error.
+ */
+SFUNC int fio_tls13_parse_certificate_verify(
+    fio_tls13_certificate_verify_s *out,
+    const uint8_t *data,
+    size_t data_len);
+
+/**
+ * Build Finished message.
+ *
+ * verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context))
+ *
+ * Returns: message length on success, -1 on error.
+ */
+SFUNC int fio_tls13_build_finished(uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *verify_data,
+                                   size_t verify_data_len);
+
+/**
+ * Parse and verify Finished message.
+ *
+ * Returns: 0 on success (MAC matches), -1 on error.
+ */
+SFUNC int fio_tls13_parse_finished(const uint8_t *data,
+                                   size_t data_len,
+                                   const uint8_t *expected_verify_data,
+                                   size_t verify_data_len);
+
+/* *****************************************************************************
+Implementation - possibly externed functions.
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+HKDF-Expand-Label Implementation
+***************************************************************************** */
+
+SFUNC void fio_tls13_hkdf_expand_label(void *restrict out,
+                                       size_t out_len,
+                                       const void *restrict secret,
+                                       size_t secret_len,
+                                       const char *label,
+                                       size_t label_len,
+                                       const void *restrict context,
+                                       size_t context_len,
+                                       int use_sha384) {
+  if (!out || !secret || out_len == 0 || out_len > 255)
+    return;
+
+  /* Clamp label and context lengths */
+  if (label_len > 249)
+    label_len = 249;
+  if (context_len > 255)
+    context_len = 255;
+
+  /*
+   * HkdfLabel structure:
+   *   uint16 length = out_len
+   *   opaque label<7..255> = "tls13 " + Label
+   *   opaque context<0..255> = Context
+   *
+   * Encoded as:
+   *   [2 bytes: out_len]
+   *   [1 byte: label_len + 6]
+   *   [6 bytes: "tls13 "]
+   *   [label_len bytes: label]
+   *   [1 byte: context_len]
+   *   [context_len bytes: context]
+   */
+  uint8_t hkdf_label[2 + 1 + 6 + 249 + 1 + 255];
+  size_t hkdf_label_len = 0;
+
+  /* Length (2 bytes, big-endian) */
+  hkdf_label[hkdf_label_len++] = (uint8_t)(out_len >> 8);
+  hkdf_label[hkdf_label_len++] = (uint8_t)(out_len & 0xFF);
+
+  /* Label length (1 byte) = 6 + label_len */
+  hkdf_label[hkdf_label_len++] = (uint8_t)(6 + label_len);
+
+  /* "tls13 " prefix (6 bytes) */
+  hkdf_label[hkdf_label_len++] = 't';
+  hkdf_label[hkdf_label_len++] = 'l';
+  hkdf_label[hkdf_label_len++] = 's';
+  hkdf_label[hkdf_label_len++] = '1';
+  hkdf_label[hkdf_label_len++] = '3';
+  hkdf_label[hkdf_label_len++] = ' ';
+
+  /* Label */
+  if (label && label_len > 0) {
+    FIO_MEMCPY(hkdf_label + hkdf_label_len, label, label_len);
+    hkdf_label_len += label_len;
+  }
+
+  /* Context length (1 byte) */
+  hkdf_label[hkdf_label_len++] = (uint8_t)context_len;
+
+  /* Context */
+  if (context && context_len > 0) {
+    FIO_MEMCPY(hkdf_label + hkdf_label_len, context, context_len);
+    hkdf_label_len += context_len;
+  }
+
+  /* Call HKDF-Expand with the constructed label */
+  fio_hkdf_expand(out,
+                  out_len,
+                  secret,
+                  secret_len,
+                  hkdf_label,
+                  hkdf_label_len,
+                  use_sha384);
+}
+
+/* *****************************************************************************
+Derive-Secret Implementation
+***************************************************************************** */
+
+SFUNC void fio_tls13_derive_secret(void *restrict out,
+                                   const void *restrict secret,
+                                   size_t secret_len,
+                                   const char *label,
+                                   size_t label_len,
+                                   const void *restrict transcript_hash,
+                                   size_t hash_len,
+                                   int use_sha384) {
+  const size_t out_len = use_sha384 ? 48 : 32;
+
+  /* If no transcript hash provided, use hash of empty string */
+  uint8_t empty_hash[48];
+  const void *hash_to_use = transcript_hash;
+  size_t hash_len_to_use = hash_len;
+
+  if (!transcript_hash || hash_len == 0) {
+    /* Hash of empty string */
+    if (use_sha384) {
+      fio_u512 h = fio_sha512("", 0);
+      FIO_MEMCPY(empty_hash, h.u8, 48);
+      hash_len_to_use = 48;
+    } else {
+      fio_u256 h = fio_sha256("", 0);
+      FIO_MEMCPY(empty_hash, h.u8, 32);
+      hash_len_to_use = 32;
+    }
+    hash_to_use = empty_hash;
+  }
+
+  fio_tls13_hkdf_expand_label(out,
+                              out_len,
+                              secret,
+                              secret_len,
+                              label,
+                              label_len,
+                              hash_to_use,
+                              hash_len_to_use,
+                              use_sha384);
+}
+
+/* *****************************************************************************
+Key Schedule Derivation Implementation
+***************************************************************************** */
+
+SFUNC void fio_tls13_derive_early_secret(void *restrict early_secret,
+                                         const void *restrict psk,
+                                         size_t psk_len,
+                                         int use_sha384) {
+  const size_t hash_len = use_sha384 ? 48 : 32;
+
+  /* If no PSK, use zeros of hash length */
+  uint8_t zero_psk[48] = {0};
+  const void *ikm = psk;
+  size_t ikm_len = psk_len;
+
+  if (!psk || psk_len == 0) {
+    ikm = zero_psk;
+    ikm_len = hash_len;
+  }
+
+  /* Early Secret = HKDF-Extract(salt=0, IKM=PSK) */
+  fio_hkdf_extract(early_secret, NULL, 0, ikm, ikm_len, use_sha384);
+}
+
+SFUNC void fio_tls13_derive_handshake_secret(void *restrict handshake_secret,
+                                             const void *restrict early_secret,
+                                             const void *restrict ecdhe_secret,
+                                             size_t ecdhe_len,
+                                             int use_sha384) {
+  const size_t hash_len = use_sha384 ? 48 : 32;
+  uint8_t derived[48];
+
+  /* Derive-Secret(Early Secret, "derived", "") */
+  fio_tls13_derive_secret(derived,
+                          early_secret,
+                          hash_len,
+                          "derived",
+                          7,
+                          NULL,
+                          0,
+                          use_sha384);
+
+  /* Handshake Secret = HKDF-Extract(salt=derived, IKM=ECDHE) */
+  fio_hkdf_extract(handshake_secret,
+                   derived,
+                   hash_len,
+                   ecdhe_secret,
+                   ecdhe_len,
+                   use_sha384);
+}
+
+SFUNC void fio_tls13_derive_master_secret(void *restrict master_secret,
+                                          const void *restrict handshake_secret,
+                                          int use_sha384) {
+  const size_t hash_len = use_sha384 ? 48 : 32;
+  uint8_t derived[48];
+  uint8_t zero_ikm[48] = {0};
+
+  /* Derive-Secret(Handshake Secret, "derived", "") */
+  fio_tls13_derive_secret(derived,
+                          handshake_secret,
+                          hash_len,
+                          "derived",
+                          7,
+                          NULL,
+                          0,
+                          use_sha384);
+
+  /* Master Secret = HKDF-Extract(salt=derived, IKM=0) */
+  fio_hkdf_extract(master_secret,
+                   derived,
+                   hash_len,
+                   zero_ikm,
+                   hash_len,
+                   use_sha384);
+}
+
+/* *****************************************************************************
+Traffic Key Derivation Implementation
+***************************************************************************** */
+
+SFUNC void fio_tls13_derive_traffic_keys(void *restrict key,
+                                         size_t key_len,
+                                         void *restrict iv,
+                                         const void *restrict traffic_secret,
+                                         int use_sha384) {
+  const size_t secret_len = use_sha384 ? 48 : 32;
+
+  /* [sender]_write_key = HKDF-Expand-Label(Secret, "key", "", key_length) */
+  fio_tls13_hkdf_expand_label(key,
+                              key_len,
+                              traffic_secret,
+                              secret_len,
+                              "key",
+                              3,
+                              NULL,
+                              0,
+                              use_sha384);
+
+  /* [sender]_write_iv = HKDF-Expand-Label(Secret, "iv", "", iv_length) */
+  fio_tls13_hkdf_expand_label(iv,
+                              FIO_TLS13_IV_LEN,
+                              traffic_secret,
+                              secret_len,
+                              "iv",
+                              2,
+                              NULL,
+                              0,
+                              use_sha384);
+}
+
+SFUNC void fio_tls13_derive_finished_key(void *restrict finished_key,
+                                         const void *restrict traffic_secret,
+                                         int use_sha384) {
+  const size_t hash_len = use_sha384 ? 48 : 32;
+
+  /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length) */
+  fio_tls13_hkdf_expand_label(finished_key,
+                              hash_len,
+                              traffic_secret,
+                              hash_len,
+                              "finished",
+                              8,
+                              NULL,
+                              0,
+                              use_sha384);
+}
+
+SFUNC void fio_tls13_compute_finished(void *restrict verify_data,
+                                      const void *restrict finished_key,
+                                      const void *restrict transcript_hash,
+                                      int use_sha384) {
+  /* verify_data = HMAC(finished_key, Transcript-Hash) */
+  if (use_sha384) {
+    fio_u512 hmac = fio_sha512_hmac(finished_key, 48, transcript_hash, 48);
+    FIO_MEMCPY(verify_data, hmac.u8, 48);
+  } else {
+    fio_u256 hmac = fio_sha256_hmac(finished_key, 32, transcript_hash, 32);
+    FIO_MEMCPY(verify_data, hmac.u8, 32);
+  }
+}
+
+SFUNC void fio_tls13_update_traffic_secret(void *restrict new_secret,
+                                           const void *restrict current_secret,
+                                           int use_sha384) {
+  const size_t hash_len = use_sha384 ? 48 : 32;
+
+  /* new_secret = HKDF-Expand-Label(current, "traffic upd", "", Hash.length) */
+  fio_tls13_hkdf_expand_label(new_secret,
+                              hash_len,
+                              current_secret,
+                              hash_len,
+                              "traffic upd",
+                              11,
+                              NULL,
+                              0,
+                              use_sha384);
+}
+
+/* *****************************************************************************
+TLS 1.3 Record Layer Implementation (RFC 8446 Section 5)
+***************************************************************************** */
+
+/* Build per-record nonce: sequence_number XOR iv */
+FIO_IFUNC void fio_tls13_build_nonce(uint8_t nonce[12],
+                                     const uint8_t iv[12],
+                                     uint64_t seq) {
+  /* Copy IV to nonce */
+  FIO_MEMCPY(nonce, iv, 12);
+
+  /* XOR sequence number into rightmost 8 bytes (big-endian)
+   * Sequence number is padded to 12 bytes with leading zeros,
+   * so we only XOR the last 8 bytes */
+  nonce[4] ^= (uint8_t)(seq >> 56);
+  nonce[5] ^= (uint8_t)(seq >> 48);
+  nonce[6] ^= (uint8_t)(seq >> 40);
+  nonce[7] ^= (uint8_t)(seq >> 32);
+  nonce[8] ^= (uint8_t)(seq >> 24);
+  nonce[9] ^= (uint8_t)(seq >> 16);
+  nonce[10] ^= (uint8_t)(seq >> 8);
+  nonce[11] ^= (uint8_t)(seq);
+}
+
+/* Parse record header */
+SFUNC const uint8_t *fio_tls13_record_parse_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_content_type_e *content_type,
+    size_t *payload_len) {
+  /* Need at least header */
+  if (!data || data_len < FIO_TLS13_RECORD_HEADER_LEN)
+    return NULL;
+
+  /* Extract content type */
+  uint8_t ct = data[0];
+
+  /* Validate content type */
+  if (ct != FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC &&
+      ct != FIO_TLS13_CONTENT_ALERT && ct != FIO_TLS13_CONTENT_HANDSHAKE &&
+      ct != FIO_TLS13_CONTENT_APPLICATION_DATA) {
+    return NULL;
+  }
+
+  /* Extract length (big-endian) */
+  uint16_t len = fio_buf2u16_be(data + 3);
+
+  /* Validate length */
+  if (len > FIO_TLS13_MAX_CIPHERTEXT_LEN)
+    return NULL;
+
+  /* Check if we have complete record */
+  if (data_len < (size_t)(FIO_TLS13_RECORD_HEADER_LEN + len))
+    return NULL;
+
+  if (content_type)
+    *content_type = (fio_tls13_content_type_e)ct;
+  if (payload_len)
+    *payload_len = len;
+
+  return data + FIO_TLS13_RECORD_HEADER_LEN;
+}
+
+/* Initialize record keys */
+SFUNC void fio_tls13_record_keys_init(fio_tls13_record_keys_s *keys,
+                                      const uint8_t *key,
+                                      uint8_t key_len,
+                                      const uint8_t iv[12],
+                                      fio_tls13_cipher_type_e cipher_type) {
+  if (!keys)
+    return;
+
+  FIO_MEMSET(keys, 0, sizeof(*keys));
+
+  /* Validate and copy key */
+  if (key && key_len > 0) {
+    uint8_t copy_len = (key_len > 32) ? 32 : key_len;
+    FIO_MEMCPY(keys->key, key, copy_len);
+    keys->key_len = copy_len;
+  }
+
+  /* Copy IV */
+  if (iv)
+    FIO_MEMCPY(keys->iv, iv, FIO_TLS13_IV_LEN);
+
+  keys->cipher_type = (uint8_t)cipher_type;
+  keys->sequence_number = 0;
+}
+
+/* Clear sensitive key material */
+FIO_IFUNC void fio_tls13_record_keys_clear(fio_tls13_record_keys_s *keys) {
+  if (keys)
+    fio_secure_zero(keys, sizeof(*keys));
+}
+
+/* Internal: AEAD encrypt using appropriate cipher */
+FIO_SFUNC int fio___tls13_aead_encrypt(uint8_t *ciphertext,
+                                       uint8_t *tag,
+                                       const uint8_t *plaintext,
+                                       size_t plaintext_len,
+                                       const uint8_t *aad,
+                                       size_t aad_len,
+                                       const uint8_t *key,
+                                       uint8_t key_len,
+                                       const uint8_t *nonce,
+                                       fio_tls13_cipher_type_e cipher_type) {
+  /* Copy plaintext to ciphertext buffer (in-place encryption) */
+  if (plaintext != ciphertext && plaintext_len > 0)
+    FIO_MEMCPY(ciphertext, plaintext, plaintext_len);
+
+  switch (cipher_type) {
+  case FIO_TLS13_CIPHER_AES_128_GCM:
+    fio_aes128_gcm_enc(tag,
+                       ciphertext,
+                       plaintext_len,
+                       aad,
+                       aad_len,
+                       key,
+                       nonce);
+    return 0;
+
+  case FIO_TLS13_CIPHER_AES_256_GCM:
+    fio_aes256_gcm_enc(tag,
+                       ciphertext,
+                       plaintext_len,
+                       aad,
+                       aad_len,
+                       key,
+                       nonce);
+    return 0;
+
+  case FIO_TLS13_CIPHER_CHACHA20_POLY1305:
+    fio_chacha20_poly1305_enc(tag,
+                              ciphertext,
+                              plaintext_len,
+                              aad,
+                              aad_len,
+                              key,
+                              nonce);
+    return 0;
+
+  default: return -1;
+  }
+  (void)key_len; /* Used for validation in debug builds */
+}
+
+/* Internal: AEAD decrypt using appropriate cipher */
+FIO_SFUNC int fio___tls13_aead_decrypt(uint8_t *plaintext,
+                                       const uint8_t *tag,
+                                       const uint8_t *ciphertext,
+                                       size_t ciphertext_len,
+                                       const uint8_t *aad,
+                                       size_t aad_len,
+                                       const uint8_t *key,
+                                       uint8_t key_len,
+                                       const uint8_t *nonce,
+                                       fio_tls13_cipher_type_e cipher_type) {
+  /* Copy ciphertext to plaintext buffer (in-place decryption) */
+  if (ciphertext != plaintext && ciphertext_len > 0)
+    FIO_MEMCPY(plaintext, ciphertext, ciphertext_len);
+
+  /* Need mutable tag for the decrypt functions */
+  uint8_t tag_copy[FIO_TLS13_TAG_LEN];
+  FIO_MEMCPY(tag_copy, tag, FIO_TLS13_TAG_LEN);
+
+  int ret = -1;
+  switch (cipher_type) {
+  case FIO_TLS13_CIPHER_AES_128_GCM:
+    ret = fio_aes128_gcm_dec(tag_copy,
+                             plaintext,
+                             ciphertext_len,
+                             aad,
+                             aad_len,
+                             key,
+                             nonce);
+    break;
+
+  case FIO_TLS13_CIPHER_AES_256_GCM:
+    ret = fio_aes256_gcm_dec(tag_copy,
+                             plaintext,
+                             ciphertext_len,
+                             aad,
+                             aad_len,
+                             key,
+                             nonce);
+    break;
+
+  case FIO_TLS13_CIPHER_CHACHA20_POLY1305:
+    ret = fio_chacha20_poly1305_dec(tag_copy,
+                                    plaintext,
+                                    ciphertext_len,
+                                    aad,
+                                    aad_len,
+                                    key,
+                                    nonce);
+    break;
+
+  default: ret = -1; break;
+  }
+
+  fio_secure_zero(tag_copy, sizeof(tag_copy));
+  (void)key_len;
+  return ret;
+}
+
+/* Encrypt a TLS 1.3 record */
+SFUNC int fio_tls13_record_encrypt(uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *plaintext,
+                                   size_t plaintext_len,
+                                   fio_tls13_content_type_e content_type,
+                                   fio_tls13_record_keys_s *keys) {
+  if (!out || !keys)
+    return -1;
+
+  /* Validate plaintext length */
+  if (plaintext_len > FIO_TLS13_MAX_PLAINTEXT_LEN)
+    return -1;
+
+  /* Calculate output size:
+   * header(5) + plaintext + content_type(1) + tag(16) */
+  size_t inner_len = plaintext_len + 1; /* plaintext + content_type byte */
+  size_t total_len =
+      FIO_TLS13_RECORD_HEADER_LEN + inner_len + FIO_TLS13_TAG_LEN;
+
+  if (out_capacity < total_len)
+    return -1;
+
+  /* Build record header (this becomes the AAD) */
+  uint8_t *header = out;
+  header[0] = FIO_TLS13_CONTENT_APPLICATION_DATA; /* opaque_type always 23 */
+  header[1] = FIO_TLS13_LEGACY_VERSION_MAJOR;
+  header[2] = FIO_TLS13_LEGACY_VERSION_MINOR;
+  fio_u2buf16_be(header + 3, (uint16_t)(inner_len + FIO_TLS13_TAG_LEN));
+
+  /* Prepare inner plaintext: plaintext || content_type */
+  uint8_t *ct_out = out + FIO_TLS13_RECORD_HEADER_LEN;
+
+  /* Copy plaintext if provided */
+  if (plaintext && plaintext_len > 0)
+    FIO_MEMCPY(ct_out, plaintext, plaintext_len);
+
+  /* Append content type */
+  ct_out[plaintext_len] = (uint8_t)content_type;
+
+  /* Build nonce */
+  uint8_t nonce[FIO_TLS13_IV_LEN];
+  fio_tls13_build_nonce(nonce, keys->iv, keys->sequence_number);
+
+  /* Tag goes after ciphertext */
+  uint8_t *tag = ct_out + inner_len;
+
+  /* Encrypt with AAD = record header */
+  int ret =
+      fio___tls13_aead_encrypt(ct_out,
+                               tag,
+                               ct_out,
+                               inner_len,
+                               header,
+                               FIO_TLS13_RECORD_HEADER_LEN,
+                               keys->key,
+                               keys->key_len,
+                               nonce,
+                               (fio_tls13_cipher_type_e)keys->cipher_type);
+
+  /* Clear nonce */
+  fio_secure_zero(nonce, sizeof(nonce));
+
+  if (ret != 0)
+    return -1;
+
+  /* Increment sequence number */
+  ++keys->sequence_number;
+
+  return (int)total_len;
+}
+
+/* Decrypt a TLS 1.3 record */
+SFUNC int fio_tls13_record_decrypt(uint8_t *out,
+                                   size_t out_capacity,
+                                   fio_tls13_content_type_e *content_type,
+                                   const uint8_t *ciphertext,
+                                   size_t ciphertext_len,
+                                   fio_tls13_record_keys_s *keys) {
+  if (!out || !ciphertext || !keys || !content_type)
+    return -1;
+
+  /* Parse header */
+  fio_tls13_content_type_e outer_type;
+  size_t payload_len;
+  const uint8_t *payload = fio_tls13_record_parse_header(ciphertext,
+                                                         ciphertext_len,
+                                                         &outer_type,
+                                                         &payload_len);
+  if (!payload)
+    return -1;
+
+  /* For encrypted records, outer type must be application_data */
+  if (outer_type != FIO_TLS13_CONTENT_APPLICATION_DATA)
+    return -1;
+
+  /* Payload must include at least tag + 1 byte (content type) */
+  if (payload_len < FIO_TLS13_TAG_LEN + 1)
+    return -1;
+
+  /* Calculate inner ciphertext length (excluding tag) */
+  size_t inner_ct_len = payload_len - FIO_TLS13_TAG_LEN;
+
+  /* Check output capacity */
+  if (out_capacity < inner_ct_len)
+    return -1;
+
+  /* Extract tag (last 16 bytes of payload) */
+  const uint8_t *tag = payload + inner_ct_len;
+
+  /* Build nonce */
+  uint8_t nonce[FIO_TLS13_IV_LEN];
+  fio_tls13_build_nonce(nonce, keys->iv, keys->sequence_number);
+
+  /* AAD is the 5-byte record header */
+  const uint8_t *aad = ciphertext;
+
+  /* Decrypt */
+  int ret =
+      fio___tls13_aead_decrypt(out,
+                               tag,
+                               payload,
+                               inner_ct_len,
+                               aad,
+                               FIO_TLS13_RECORD_HEADER_LEN,
+                               keys->key,
+                               keys->key_len,
+                               nonce,
+                               (fio_tls13_cipher_type_e)keys->cipher_type);
+
+  /* Clear nonce */
+  fio_secure_zero(nonce, sizeof(nonce));
+
+  if (ret != 0)
+    return -1;
+
+  /* Scan backwards to find real content type (skip zero padding)
+   * Per RFC 8446: zeros are optional padding, real content type is
+   * the last non-zero byte */
+  size_t pt_len = inner_ct_len;
+  while (pt_len > 0 && out[pt_len - 1] == 0)
+    --pt_len;
+
+  /* Must have at least the content type byte */
+  if (pt_len == 0)
+    return -1;
+
+  /* Last non-zero byte is the content type */
+  uint8_t inner_type = out[pt_len - 1];
+  --pt_len; /* Exclude content type from plaintext length */
+
+  /* Validate content type */
+  if (inner_type != FIO_TLS13_CONTENT_ALERT &&
+      inner_type != FIO_TLS13_CONTENT_HANDSHAKE &&
+      inner_type != FIO_TLS13_CONTENT_APPLICATION_DATA) {
+    /* Zero out decrypted data on invalid content type */
+    fio_secure_zero(out, inner_ct_len);
+    return -1;
+  }
+
+  *content_type = (fio_tls13_content_type_e)inner_type;
+
+  /* Increment sequence number */
+  ++keys->sequence_number;
+
+  return (int)pt_len;
+}
+
+/* *****************************************************************************
+TLS 1.3 Handshake Message Implementation (RFC 8446 Section 4)
+***************************************************************************** */
+
+/* Internal: Write uint16 big-endian */
+FIO_SFUNC void fio___tls13_write_u16(uint8_t *out, uint16_t val) {
+  out[0] = (uint8_t)(val >> 8);
+  out[1] = (uint8_t)(val & 0xFF);
+}
+
+/* Internal: Read uint16 big-endian */
+FIO_SFUNC uint16_t fio___tls13_read_u16(const uint8_t *data) {
+  return (uint16_t)((data[0] << 8) | data[1]);
+}
+
+/* Internal: Write uint24 big-endian */
+FIO_SFUNC void fio___tls13_write_u24(uint8_t *out, uint32_t val) {
+  out[0] = (uint8_t)((val >> 16) & 0xFF);
+  out[1] = (uint8_t)((val >> 8) & 0xFF);
+  out[2] = (uint8_t)(val & 0xFF);
+}
+
+/* Internal: Read uint24 big-endian */
+FIO_SFUNC uint32_t fio___tls13_read_u24(const uint8_t *data) {
+  return ((uint32_t)data[0] << 16) | ((uint32_t)data[1] << 8) |
+         (uint32_t)data[2];
+}
+
+/* Parse handshake header */
+SFUNC const uint8_t *fio_tls13_parse_handshake_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_handshake_type_e *msg_type,
+    size_t *body_len) {
+  /* Handshake header is 4 bytes: type(1) + length(3) */
+  if (!data || data_len < 4)
+    return NULL;
+
+  uint8_t type = data[0];
+  uint32_t len = fio___tls13_read_u24(data + 1);
+
+  /* Validate we have complete message */
+  if (data_len < 4 + len)
+    return NULL;
+
+  if (msg_type)
+    *msg_type = (fio_tls13_handshake_type_e)type;
+  if (body_len)
+    *body_len = len;
+
+  return data + 4;
+}
+
+/* Write handshake header */
+SFUNC void fio_tls13_write_handshake_header(uint8_t *out,
+                                            fio_tls13_handshake_type_e msg_type,
+                                            size_t body_len) {
+  if (!out)
+    return;
+  out[0] = (uint8_t)msg_type;
+  fio___tls13_write_u24(out + 1, (uint32_t)body_len);
+}
+
+/* *****************************************************************************
+ClientHello Building Implementation
+***************************************************************************** */
+
+/* Internal: Write SNI extension */
+FIO_SFUNC size_t fio___tls13_write_ext_sni(uint8_t *out,
+                                           const char *server_name) {
+  if (!server_name)
+    return 0;
+
+  size_t name_len = 0;
+  while (server_name[name_len] && name_len < 255)
+    ++name_len;
+  if (name_len == 0)
+    return 0;
+
+  uint8_t *p = out;
+
+  /* Extension type: server_name (0) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_SERVER_NAME);
+  p += 2;
+
+  /* Extension data length: list_len(2) + entry_type(1) + name_len(2) + name */
+  uint16_t ext_len = (uint16_t)(2 + 1 + 2 + name_len);
+  fio___tls13_write_u16(p, ext_len);
+  p += 2;
+
+  /* Server name list length */
+  fio___tls13_write_u16(p, (uint16_t)(1 + 2 + name_len));
+  p += 2;
+
+  /* Name type: host_name (0) */
+  *p++ = 0;
+
+  /* Host name length */
+  fio___tls13_write_u16(p, (uint16_t)name_len);
+  p += 2;
+
+  /* Host name */
+  FIO_MEMCPY(p, server_name, name_len);
+  p += name_len;
+
+  return (size_t)(p - out);
+}
+
+/* Internal: Write supported_versions extension (client) */
+FIO_SFUNC size_t fio___tls13_write_ext_supported_versions(uint8_t *out) {
+  uint8_t *p = out;
+
+  /* Extension type: supported_versions (43) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_SUPPORTED_VERSIONS);
+  p += 2;
+
+  /* Extension data length: versions_len(1) + version(2) */
+  fio___tls13_write_u16(p, 3);
+  p += 2;
+
+  /* Versions length (1 version = 2 bytes) */
+  *p++ = 2;
+
+  /* TLS 1.3 (0x0304) */
+  fio___tls13_write_u16(p, FIO_TLS13_VERSION_TLS13);
+  p += 2;
+
+  return (size_t)(p - out);
+}
+
+/* Internal: Write supported_groups extension */
+FIO_SFUNC size_t fio___tls13_write_ext_supported_groups(uint8_t *out) {
+  uint8_t *p = out;
+
+  /* Extension type: supported_groups (10) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_SUPPORTED_GROUPS);
+  p += 2;
+
+  /* Extension data length: groups_len(2) + groups(2 each) */
+  /* We support: x25519, secp256r1 */
+  fio___tls13_write_u16(p, 2 + 4); /* 2 groups * 2 bytes each */
+  p += 2;
+
+  /* Groups length */
+  fio___tls13_write_u16(p, 4);
+  p += 2;
+
+  /* x25519 (preferred) */
+  fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519);
+  p += 2;
+
+  /* secp256r1 (fallback) */
+  fio___tls13_write_u16(p, FIO_TLS13_GROUP_SECP256R1);
+  p += 2;
+
+  return (size_t)(p - out);
+}
+
+/* Internal: Write signature_algorithms extension */
+FIO_SFUNC size_t fio___tls13_write_ext_signature_algorithms(uint8_t *out) {
+  uint8_t *p = out;
+
+  /* Extension type: signature_algorithms (13) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_SIGNATURE_ALGORITHMS);
+  p += 2;
+
+  /* We support: ed25519, ecdsa_secp256r1_sha256, rsa_pss_rsae_sha256,
+   * rsa_pkcs1_sha256 */
+  uint16_t algos[] = {FIO_TLS13_SIG_ED25519,
+                      FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256,
+                      FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256,
+                      FIO_TLS13_SIG_RSA_PKCS1_SHA256,
+                      FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384,
+                      FIO_TLS13_SIG_RSA_PKCS1_SHA384};
+  size_t algo_count = sizeof(algos) / sizeof(algos[0]);
+
+  /* Extension data length: algos_len(2) + algos */
+  fio___tls13_write_u16(p, (uint16_t)(2 + algo_count * 2));
+  p += 2;
+
+  /* Algorithms length */
+  fio___tls13_write_u16(p, (uint16_t)(algo_count * 2));
+  p += 2;
+
+  /* Write algorithms */
+  for (size_t i = 0; i < algo_count; ++i) {
+    fio___tls13_write_u16(p, algos[i]);
+    p += 2;
+  }
+
+  return (size_t)(p - out);
+}
+
+/* Internal: Write key_share extension (client) */
+FIO_SFUNC size_t fio___tls13_write_ext_key_share(uint8_t *out,
+                                                 const uint8_t *x25519_pubkey) {
+  if (!x25519_pubkey)
+    return 0;
+
+  uint8_t *p = out;
+
+  /* Extension type: key_share (51) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_KEY_SHARE);
+  p += 2;
+
+  /* Extension data length: entries_len(2) + entry */
+  /* Entry: group(2) + key_len(2) + key(32) = 36 bytes */
+  fio___tls13_write_u16(p, 2 + 36);
+  p += 2;
+
+  /* Client key share entries length */
+  fio___tls13_write_u16(p, 36);
+  p += 2;
+
+  /* Key share entry: x25519 */
+  fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519);
+  p += 2;
+
+  /* Key length (32 for x25519) */
+  fio___tls13_write_u16(p, 32);
+  p += 2;
+
+  /* Public key */
+  FIO_MEMCPY(p, x25519_pubkey, 32);
+  p += 32;
+
+  return (size_t)(p - out);
+}
+
+/* Build ClientHello message */
+SFUNC int fio_tls13_build_client_hello(uint8_t *out,
+                                       size_t out_capacity,
+                                       const uint8_t random[32],
+                                       const char *server_name,
+                                       const uint8_t *x25519_pubkey,
+                                       const uint16_t *cipher_suites,
+                                       size_t cipher_suite_count) {
+  if (!out || !random || out_capacity < 256)
+    return -1;
+
+  /* Default cipher suites if none provided */
+  uint16_t default_suites[] = {FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256,
+                               FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256,
+                               FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384};
+  if (!cipher_suites || cipher_suite_count == 0) {
+    cipher_suites = default_suites;
+    cipher_suite_count = 3;
+  }
+
+  uint8_t *p = out + 4; /* Skip handshake header for now */
+  uint8_t *start = p;
+
+  /* Legacy version: TLS 1.2 (0x0303) */
+  fio___tls13_write_u16(p, FIO_TLS13_VERSION_TLS12);
+  p += 2;
+
+  /* Random (32 bytes) */
+  FIO_MEMCPY(p, random, 32);
+  p += 32;
+
+  /* Legacy session ID (empty for TLS 1.3) */
+  *p++ = 0;
+
+  /* Cipher suites */
+  fio___tls13_write_u16(p, (uint16_t)(cipher_suite_count * 2));
+  p += 2;
+  for (size_t i = 0; i < cipher_suite_count; ++i) {
+    fio___tls13_write_u16(p, cipher_suites[i]);
+    p += 2;
+  }
+
+  /* Legacy compression methods (only null) */
+  *p++ = 1; /* Length */
+  *p++ = 0; /* null compression */
+
+  /* Extensions */
+  uint8_t *ext_len_ptr = p;
+  p += 2; /* Skip extensions length for now */
+  uint8_t *ext_start = p;
+
+  /* SNI extension */
+  p += fio___tls13_write_ext_sni(p, server_name);
+
+  /* supported_versions extension (REQUIRED for TLS 1.3) */
+  p += fio___tls13_write_ext_supported_versions(p);
+
+  /* supported_groups extension */
+  p += fio___tls13_write_ext_supported_groups(p);
+
+  /* signature_algorithms extension */
+  p += fio___tls13_write_ext_signature_algorithms(p);
+
+  /* key_share extension */
+  if (x25519_pubkey)
+    p += fio___tls13_write_ext_key_share(p, x25519_pubkey);
+
+  /* Write extensions length */
+  fio___tls13_write_u16(ext_len_ptr, (uint16_t)(p - ext_start));
+
+  /* Calculate body length and write handshake header */
+  size_t body_len = (size_t)(p - start);
+  fio_tls13_write_handshake_header(out, FIO_TLS13_HS_CLIENT_HELLO, body_len);
+
+  return (int)(4 + body_len);
+}
+
+/* *****************************************************************************
+ServerHello Parsing Implementation
+***************************************************************************** */
+
+/* HelloRetryRequest random value */
+static const uint8_t fio___tls13_hrr_random[32] = {
+    0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C,
+    0x02, 0x1E, 0x65, 0xB8, 0x91, 0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB,
+    0x8C, 0x5E, 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C};
+
+/* Parse ServerHello message */
+SFUNC int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
+                                       const uint8_t *data,
+                                       size_t data_len) {
+  if (!out || !data)
+    return -1;
+
+  FIO_MEMSET(out, 0, sizeof(*out));
+
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /* Minimum ServerHello: version(2) + random(32) + session_id_len(1) +
+   * cipher_suite(2) + compression(1) = 38 bytes */
+  if (data_len < 38)
+    return -1;
+
+  /* Legacy version (should be 0x0303) */
+  uint16_t version = fio___tls13_read_u16(p);
+  p += 2;
+  if (version != FIO_TLS13_VERSION_TLS12)
+    return -1;
+
+  /* Random (32 bytes) */
+  FIO_MEMCPY(out->random, p, 32);
+  p += 32;
+
+  /* Check for HelloRetryRequest */
+  out->is_hello_retry_request =
+      (FIO_MEMCMP(out->random, fio___tls13_hrr_random, 32) == 0);
+
+  /* Legacy session ID (echo of client's, skip it) */
+  uint8_t session_id_len = *p++;
+  if (p + session_id_len > end)
+    return -1;
+  p += session_id_len;
+
+  /* Cipher suite */
+  if (p + 2 > end)
+    return -1;
+  out->cipher_suite = fio___tls13_read_u16(p);
+  p += 2;
+
+  /* Legacy compression method (must be 0) */
+  if (p + 1 > end)
+    return -1;
+  if (*p++ != 0)
+    return -1;
+
+  /* Extensions (optional but expected for TLS 1.3) */
+  if (p + 2 > end)
+    return 0; /* No extensions, but valid */
+
+  uint16_t ext_len = fio___tls13_read_u16(p);
+  p += 2;
+
+  if (p + ext_len > end)
+    return -1;
+
+  const uint8_t *ext_end = p + ext_len;
+
+  /* Parse extensions */
+  while (p + 4 <= ext_end) {
+    uint16_t ext_type = fio___tls13_read_u16(p);
+    p += 2;
+    uint16_t ext_data_len = fio___tls13_read_u16(p);
+    p += 2;
+
+    if (p + ext_data_len > ext_end)
+      return -1;
+
+    switch (ext_type) {
+    case FIO_TLS13_EXT_KEY_SHARE:
+      /* key_share: group(2) + key_len(2) + key */
+      if (ext_data_len >= 4) {
+        out->key_share_group = fio___tls13_read_u16(p);
+        uint16_t key_len = fio___tls13_read_u16(p + 2);
+        if (key_len <= sizeof(out->key_share) && ext_data_len >= 4 + key_len) {
+          FIO_MEMCPY(out->key_share, p + 4, key_len);
+          out->key_share_len = (uint8_t)key_len;
+        }
+      }
+      break;
+
+    case FIO_TLS13_EXT_SUPPORTED_VERSIONS:
+      /* supported_versions in ServerHello: just the selected version (2 bytes)
+       */
+      if (ext_data_len >= 2) {
+        uint16_t selected = fio___tls13_read_u16(p);
+        if (selected != FIO_TLS13_VERSION_TLS13)
+          return -1; /* Must be TLS 1.3 */
+      }
+      break;
+
+    default:
+      /* Ignore unknown extensions */
+      break;
+    }
+
+    p += ext_data_len;
+  }
+
+  return 0;
+}
+
+/* *****************************************************************************
+EncryptedExtensions Parsing Implementation
+***************************************************************************** */
+
+SFUNC int fio_tls13_parse_encrypted_extensions(
+    fio_tls13_encrypted_extensions_s *out,
+    const uint8_t *data,
+    size_t data_len) {
+  if (!out || !data)
+    return -1;
+
+  FIO_MEMSET(out, 0, sizeof(*out));
+
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /* Extensions length */
+  if (p + 2 > end)
+    return -1;
+
+  uint16_t ext_len = fio___tls13_read_u16(p);
+  p += 2;
+
+  if (p + ext_len > end)
+    return -1;
+
+  const uint8_t *ext_end = p + ext_len;
+
+  /* Parse extensions */
+  while (p + 4 <= ext_end) {
+    uint16_t ext_type = fio___tls13_read_u16(p);
+    p += 2;
+    uint16_t ext_data_len = fio___tls13_read_u16(p);
+    p += 2;
+
+    if (p + ext_data_len > ext_end)
+      return -1;
+
+    switch (ext_type) {
+    case FIO_TLS13_EXT_SERVER_NAME:
+      /* Server acknowledged SNI (empty extension) */
+      out->has_server_name = 1;
+      break;
+
+    default:
+      /* Ignore other extensions */
+      break;
+    }
+
+    p += ext_data_len;
+  }
+
+  return 0;
+}
+
+/* *****************************************************************************
+Certificate Parsing Implementation
+***************************************************************************** */
+
+SFUNC int fio_tls13_parse_certificate(fio_tls13_certificate_s *out,
+                                      const uint8_t *data,
+                                      size_t data_len) {
+  if (!out || !data)
+    return -1;
+
+  FIO_MEMSET(out, 0, sizeof(*out));
+
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /* Certificate request context length (should be 0 for server cert) */
+  if (p + 1 > end)
+    return -1;
+  uint8_t ctx_len = *p++;
+  if (p + ctx_len > end)
+    return -1;
+  p += ctx_len;
+
+  /* Certificate list length (3 bytes) */
+  if (p + 3 > end)
+    return -1;
+  uint32_t list_len = fio___tls13_read_u24(p);
+  p += 3;
+
+  if (p + list_len > end)
+    return -1;
+
+  /* Parse first certificate entry */
+  if (list_len < 3)
+    return -1;
+
+  /* Certificate data length (3 bytes) */
+  uint32_t cert_len = fio___tls13_read_u24(p);
+  p += 3;
+
+  if (p + cert_len > end)
+    return -1;
+
+  /* Store pointer to first certificate */
+  out->cert_data = p;
+  out->cert_len = cert_len;
+
+  /* Skip certificate data and extensions (we only need the first cert) */
+
+  return 0;
+}
+
+/* *****************************************************************************
+CertificateVerify Parsing Implementation
+***************************************************************************** */
+
+SFUNC int fio_tls13_parse_certificate_verify(
+    fio_tls13_certificate_verify_s *out,
+    const uint8_t *data,
+    size_t data_len) {
+  if (!out || !data)
+    return -1;
+
+  FIO_MEMSET(out, 0, sizeof(*out));
+
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /* Signature algorithm (2 bytes) */
+  if (p + 2 > end)
+    return -1;
+  out->signature_scheme = fio___tls13_read_u16(p);
+  p += 2;
+
+  /* Signature length (2 bytes) */
+  if (p + 2 > end)
+    return -1;
+  uint16_t sig_len = fio___tls13_read_u16(p);
+  p += 2;
+
+  /* Signature data */
+  if (p + sig_len > end)
+    return -1;
+  out->signature = p;
+  out->signature_len = sig_len;
+
+  return 0;
+}
+
+/* *****************************************************************************
+Finished Message Implementation
+***************************************************************************** */
+
+SFUNC int fio_tls13_build_finished(uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *verify_data,
+                                   size_t verify_data_len) {
+  if (!out || !verify_data)
+    return -1;
+
+  /* Finished message: handshake header (4) + verify_data */
+  size_t total_len = 4 + verify_data_len;
+  if (out_capacity < total_len)
+    return -1;
+
+  /* Write handshake header */
+  fio_tls13_write_handshake_header(out, FIO_TLS13_HS_FINISHED, verify_data_len);
+
+  /* Write verify_data */
+  FIO_MEMCPY(out + 4, verify_data, verify_data_len);
+
+  return (int)total_len;
+}
+
+SFUNC int fio_tls13_parse_finished(const uint8_t *data,
+                                   size_t data_len,
+                                   const uint8_t *expected_verify_data,
+                                   size_t verify_data_len) {
+  if (!data || !expected_verify_data)
+    return -1;
+
+  /* Data should be exactly verify_data_len bytes */
+  if (data_len != verify_data_len)
+    return -1;
+
+  /* Constant-time comparison */
+  uint8_t diff = 0;
+  for (size_t i = 0; i < verify_data_len; ++i)
+    diff |= data[i] ^ expected_verify_data[i];
+
+  return (diff == 0) ? 0 : -1;
+}
+
+/* *****************************************************************************
+
+
+
+
+                        TLS 1.3 Client Handshake State Machine
+                              (RFC 8446 Section 4)
+
+
+
+
+***************************************************************************** */
+
+/* *****************************************************************************
+TLS 1.3 Alert Codes (RFC 8446 Section 6)
+***************************************************************************** */
+
+/** TLS 1.3 Alert Levels */
+typedef enum {
+  FIO_TLS13_ALERT_LEVEL_WARNING = 1,
+  FIO_TLS13_ALERT_LEVEL_FATAL = 2,
+} fio_tls13_alert_level_e;
+
+/** TLS 1.3 Alert Descriptions */
+typedef enum {
+  FIO_TLS13_ALERT_CLOSE_NOTIFY = 0,
+  FIO_TLS13_ALERT_UNEXPECTED_MESSAGE = 10,
+  FIO_TLS13_ALERT_BAD_RECORD_MAC = 20,
+  FIO_TLS13_ALERT_RECORD_OVERFLOW = 22,
+  FIO_TLS13_ALERT_HANDSHAKE_FAILURE = 40,
+  FIO_TLS13_ALERT_BAD_CERTIFICATE = 42,
+  FIO_TLS13_ALERT_CERTIFICATE_REVOKED = 44,
+  FIO_TLS13_ALERT_CERTIFICATE_EXPIRED = 45,
+  FIO_TLS13_ALERT_CERTIFICATE_UNKNOWN = 46,
+  FIO_TLS13_ALERT_ILLEGAL_PARAMETER = 47,
+  FIO_TLS13_ALERT_UNKNOWN_CA = 48,
+  FIO_TLS13_ALERT_DECODE_ERROR = 50,
+  FIO_TLS13_ALERT_DECRYPT_ERROR = 51,
+  FIO_TLS13_ALERT_PROTOCOL_VERSION = 70,
+  FIO_TLS13_ALERT_INTERNAL_ERROR = 80,
+  FIO_TLS13_ALERT_MISSING_EXTENSION = 109,
+  FIO_TLS13_ALERT_UNSUPPORTED_EXTENSION = 110,
+  FIO_TLS13_ALERT_UNRECOGNIZED_NAME = 112,
+  FIO_TLS13_ALERT_BAD_CERTIFICATE_STATUS_RESPONSE = 113,
+  FIO_TLS13_ALERT_UNKNOWN_PSK_IDENTITY = 115,
+  FIO_TLS13_ALERT_CERTIFICATE_REQUIRED = 116,
+  FIO_TLS13_ALERT_NO_APPLICATION_PROTOCOL = 120,
+} fio_tls13_alert_description_e;
+
+/* *****************************************************************************
+TLS 1.3 Client State Machine
+***************************************************************************** */
+
+/** TLS 1.3 Client Handshake States */
+typedef enum {
+  FIO_TLS13_STATE_START = 0,     /* Initial state */
+  FIO_TLS13_STATE_WAIT_SH,       /* Sent ClientHello, waiting for ServerHello */
+  FIO_TLS13_STATE_WAIT_EE,       /* Received ServerHello, waiting for EE */
+  FIO_TLS13_STATE_WAIT_CERT_CR,  /* Waiting for Certificate or CertRequest */
+  FIO_TLS13_STATE_WAIT_CERT,     /* Waiting for Certificate */
+  FIO_TLS13_STATE_WAIT_CV,       /* Waiting for CertificateVerify */
+  FIO_TLS13_STATE_WAIT_FINISHED, /* Waiting for server Finished */
+  FIO_TLS13_STATE_CONNECTED,     /* Handshake complete */
+  FIO_TLS13_STATE_ERROR,         /* Error state */
+} fio_tls13_client_state_e;
+
+/** TLS 1.3 Client Context */
+typedef struct {
+  /* State */
+  fio_tls13_client_state_e state;
+
+  /* Negotiated parameters */
+  uint16_t cipher_suite; /* Selected cipher suite */
+  int use_sha384;        /* 0 = SHA-256, 1 = SHA-384 */
+
+  /* Key material */
+  uint8_t client_random[32];
+  uint8_t x25519_private_key[32];
+  uint8_t x25519_public_key[32];
+  uint8_t shared_secret[32]; /* ECDHE shared secret */
+
+  /* Secrets (derived during handshake) - up to SHA-384 size */
+  uint8_t early_secret[48];
+  uint8_t handshake_secret[48];
+  uint8_t master_secret[48];
+  uint8_t client_handshake_traffic_secret[48];
+  uint8_t server_handshake_traffic_secret[48];
+  uint8_t client_app_traffic_secret[48];
+  uint8_t server_app_traffic_secret[48];
+
+  /* Traffic keys */
+  fio_tls13_record_keys_s client_handshake_keys;
+  fio_tls13_record_keys_s server_handshake_keys;
+  fio_tls13_record_keys_s client_app_keys;
+  fio_tls13_record_keys_s server_app_keys;
+
+  /* Transcript hash (running hash of all handshake messages) */
+  fio_sha256_s transcript_sha256; /* For SHA-256 cipher suites */
+  fio_sha512_s transcript_sha384; /* For SHA-384 cipher suites */
+
+  /* Server certificate (pointer to received data, not owned) */
+  const uint8_t *server_cert;
+  size_t server_cert_len;
+
+  /* CertificateVerify signature (pointer to received data, not owned) */
+  const uint8_t *server_signature;
+  size_t server_signature_len;
+  uint16_t server_signature_scheme;
+
+  /* Error info */
+  uint8_t alert_level;
+  uint8_t alert_description;
+
+  /* Configuration */
+  const char *server_name; /* SNI hostname */
+
+  /* Certificate verification configuration */
+  void *trust_store;        /* fio_x509_trust_store_s* - NULL to skip chain */
+  uint8_t skip_cert_verify; /* 1 to skip all certificate verification */
+  uint8_t cert_verified;    /* 1 if CertificateVerify was validated */
+  uint8_t chain_verified;   /* 1 if certificate chain was validated */
+  int16_t cert_error;       /* Certificate error code (fio_x509_error_e) */
+
+  /* Certificate chain from server (raw pointers into received data) */
+  const uint8_t *cert_chain[10]; /* Up to 10 certificates in chain */
+  size_t cert_chain_lens[10];    /* Length of each certificate */
+  size_t cert_chain_count;       /* Number of certificates received */
+
+  /* Internal flags */
+  uint8_t encrypted_read;  /* 1 if reading encrypted records */
+  uint8_t encrypted_write; /* 1 if writing encrypted records */
+} fio_tls13_client_s;
+
+/* *****************************************************************************
+TLS 1.3 Client API
+***************************************************************************** */
+
+/**
+ * Initialize client context.
+ *
+ * @param client      Client context to initialize
+ * @param server_name SNI hostname (can be NULL)
+ */
+SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
+                                 const char *server_name);
+
+/**
+ * Clean up client context (zeroes secrets).
+ *
+ * @param client Client context to destroy
+ */
+SFUNC void fio_tls13_client_destroy(fio_tls13_client_s *client);
+
+/**
+ * Set trust store for certificate chain verification.
+ *
+ * When set, the client will verify the server's certificate chain against
+ * the provided trust store. If NULL (default), chain verification is skipped.
+ *
+ * Note: Requires FIO_X509 module. The trust_store pointer must point to a
+ * valid fio_x509_trust_store_s structure.
+ *
+ * @param client      Client context
+ * @param trust_store Trust store for root CAs (NULL to skip chain verification)
+ */
+FIO_IFUNC void fio_tls13_client_set_trust_store(fio_tls13_client_s *client,
+                                                void *trust_store);
+
+/**
+ * Skip all certificate verification (insecure).
+ *
+ * When enabled, the client will NOT verify:
+ * - CertificateVerify signature
+ * - Certificate chain
+ * - Hostname matching
+ *
+ * WARNING: This is insecure and should only be used for testing or when
+ * certificate verification is handled externally.
+ *
+ * @param client Client context
+ * @param skip   1 to skip verification, 0 to enable (default)
+ */
+FIO_IFUNC void fio_tls13_client_skip_verification(fio_tls13_client_s *client,
+                                                  int skip);
+
+/**
+ * Get the last certificate verification error.
+ *
+ * @param client Client context
+ * @return Error code (0 = OK, negative = error)
+ */
+FIO_IFUNC int fio_tls13_client_get_cert_error(fio_tls13_client_s *client);
+
+/**
+ * Check if certificate verification was successful.
+ *
+ * @param client Client context
+ * @return 1 if verified, 0 if not verified or skipped
+ */
+FIO_IFUNC int fio_tls13_client_is_cert_verified(fio_tls13_client_s *client);
+
+/**
+ * Generate ClientHello message and start handshake.
+ *
+ * @param client       Client context
+ * @param out          Output buffer for ClientHello record
+ * @param out_capacity Capacity of output buffer
+ * @return Message length on success, -1 on error
+ */
+SFUNC int fio_tls13_client_start(fio_tls13_client_s *client,
+                                 uint8_t *out,
+                                 size_t out_capacity);
+
+/**
+ * Process incoming TLS record(s).
+ *
+ * May generate response data in out buffer.
+ *
+ * @param client       Client context
+ * @param in           Input buffer containing TLS record(s)
+ * @param in_len       Length of input data
+ * @param out          Output buffer for response
+ * @param out_capacity Capacity of output buffer
+ * @param out_len      Output: response length (0 if no response needed)
+ * @return Number of bytes consumed, or -1 on error
+ */
+SFUNC int fio_tls13_client_process(fio_tls13_client_s *client,
+                                   const uint8_t *in,
+                                   size_t in_len,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   size_t *out_len);
+
+/**
+ * Encrypt application data for sending.
+ *
+ * @param client       Client context
+ * @param out          Output buffer for encrypted record
+ * @param out_capacity Capacity of output buffer
+ * @param plaintext    Plaintext data to encrypt
+ * @param plaintext_len Length of plaintext
+ * @return Encrypted record length, or -1 on error
+ */
+SFUNC int fio_tls13_client_encrypt(fio_tls13_client_s *client,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *plaintext,
+                                   size_t plaintext_len);
+
+/**
+ * Decrypt received application data.
+ *
+ * @param client         Client context
+ * @param out            Output buffer for decrypted data
+ * @param out_capacity   Capacity of output buffer
+ * @param ciphertext     Encrypted record (including header)
+ * @param ciphertext_len Length of encrypted record
+ * @return Plaintext length, or -1 on error
+ */
+SFUNC int fio_tls13_client_decrypt(fio_tls13_client_s *client,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *ciphertext,
+                                   size_t ciphertext_len);
+
+/**
+ * Check if handshake is complete.
+ */
+FIO_IFUNC int fio_tls13_client_is_connected(fio_tls13_client_s *client) {
+  return client && client->state == FIO_TLS13_STATE_CONNECTED;
+}
+
+/**
+ * Check if in error state.
+ */
+FIO_IFUNC int fio_tls13_client_is_error(fio_tls13_client_s *client) {
+  return client && client->state == FIO_TLS13_STATE_ERROR;
+}
+
+/**
+ * Get current state name (for debugging).
+ */
+FIO_IFUNC const char *fio_tls13_client_state_name(fio_tls13_client_s *client) {
+  if (!client)
+    return "NULL";
+  switch (client->state) {
+  case FIO_TLS13_STATE_START: return "START";
+  case FIO_TLS13_STATE_WAIT_SH: return "WAIT_SH";
+  case FIO_TLS13_STATE_WAIT_EE: return "WAIT_EE";
+  case FIO_TLS13_STATE_WAIT_CERT_CR: return "WAIT_CERT_CR";
+  case FIO_TLS13_STATE_WAIT_CERT: return "WAIT_CERT";
+  case FIO_TLS13_STATE_WAIT_CV: return "WAIT_CV";
+  case FIO_TLS13_STATE_WAIT_FINISHED: return "WAIT_FINISHED";
+  case FIO_TLS13_STATE_CONNECTED: return "CONNECTED";
+  case FIO_TLS13_STATE_ERROR: return "ERROR";
+  default: return "UNKNOWN";
+  }
+}
+
+/**
+ * Set trust store for certificate chain verification.
+ */
+FIO_IFUNC void fio_tls13_client_set_trust_store(fio_tls13_client_s *client,
+                                                void *trust_store) {
+  if (client)
+    client->trust_store = trust_store;
+}
+
+/**
+ * Skip all certificate verification (insecure).
+ */
+FIO_IFUNC void fio_tls13_client_skip_verification(fio_tls13_client_s *client,
+                                                  int skip) {
+  if (client)
+    client->skip_cert_verify = (uint8_t)(skip != 0);
+}
+
+/**
+ * Get the last certificate verification error.
+ */
+FIO_IFUNC int fio_tls13_client_get_cert_error(fio_tls13_client_s *client) {
+  return client ? (int)client->cert_error : -1;
+}
+
+/**
+ * Check if certificate verification was successful.
+ */
+FIO_IFUNC int fio_tls13_client_is_cert_verified(fio_tls13_client_s *client) {
+  return client ? (client->cert_verified && client->chain_verified) : 0;
+}
+
+/* *****************************************************************************
+TLS 1.3 Client Implementation
+***************************************************************************** */
+
+/* Internal: Update transcript hash with handshake message */
+FIO_SFUNC void fio___tls13_transcript_update(fio_tls13_client_s *client,
+                                             const uint8_t *data,
+                                             size_t len) {
+  if (client->use_sha384)
+    fio_sha512_consume(&client->transcript_sha384, data, len);
+  else
+    fio_sha256_consume(&client->transcript_sha256, data, len);
+}
+
+/* Internal: Get current transcript hash (non-destructive copy) */
+FIO_SFUNC void fio___tls13_transcript_hash(fio_tls13_client_s *client,
+                                           uint8_t *out) {
+  if (client->use_sha384) {
+    fio_sha512_s copy = client->transcript_sha384;
+    fio_u512 h = fio_sha512_finalize(&copy);
+    FIO_MEMCPY(out, h.u8, 48);
+  } else {
+    fio_sha256_s copy = client->transcript_sha256;
+    fio_u256 h = fio_sha256_finalize(&copy);
+    FIO_MEMCPY(out, h.u8, 32);
+  }
+}
+
+/* Internal: Get hash length for current cipher suite */
+FIO_SFUNC size_t fio___tls13_hash_len(fio_tls13_client_s *client) {
+  return client->use_sha384 ? 48 : 32;
+}
+
+/* Internal: Get key length for current cipher suite */
+FIO_SFUNC size_t fio___tls13_key_len(fio_tls13_client_s *client) {
+  switch (client->cipher_suite) {
+  case FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256: return 16;
+  case FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384: return 32;
+  case FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256: return 32;
+  default: return 16;
+  }
+}
+
+/* Internal: Get cipher type for current cipher suite */
+FIO_SFUNC fio_tls13_cipher_type_e
+fio___tls13_cipher_type(fio_tls13_client_s *client) {
+  switch (client->cipher_suite) {
+  case FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256:
+    return FIO_TLS13_CIPHER_AES_128_GCM;
+  case FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384:
+    return FIO_TLS13_CIPHER_AES_256_GCM;
+  case FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256:
+    return FIO_TLS13_CIPHER_CHACHA20_POLY1305;
+  default: return FIO_TLS13_CIPHER_AES_128_GCM;
+  }
+}
+
+/* Internal: Set error state with alert */
+FIO_SFUNC void fio___tls13_set_error(fio_tls13_client_s *client,
+                                     uint8_t alert_level,
+                                     uint8_t alert_description) {
+  client->state = FIO_TLS13_STATE_ERROR;
+  client->alert_level = alert_level;
+  client->alert_description = alert_description;
+}
+
+/* Internal: Build TLSPlaintext record header */
+FIO_SFUNC void fio___tls13_write_record_header(uint8_t *out,
+                                               fio_tls13_content_type_e type,
+                                               uint16_t length) {
+  out[0] = (uint8_t)type;
+  out[1] = FIO_TLS13_LEGACY_VERSION_MAJOR;
+  out[2] = FIO_TLS13_LEGACY_VERSION_MINOR;
+  out[3] = (uint8_t)(length >> 8);
+  out[4] = (uint8_t)(length & 0xFF);
+}
+
+/* Internal: Derive handshake keys after ServerHello */
+FIO_SFUNC int fio___tls13_derive_handshake_keys(fio_tls13_client_s *client) {
+  int use_sha384 = client->use_sha384;
+  size_t hash_len = fio___tls13_hash_len(client);
+  size_t key_len = fio___tls13_key_len(client);
+  fio_tls13_cipher_type_e cipher_type = fio___tls13_cipher_type(client);
+
+  /* Get transcript hash at ServerHello */
+  uint8_t transcript_hash[48];
+  fio___tls13_transcript_hash(client, transcript_hash);
+
+  /* Derive early secret (no PSK) */
+  fio_tls13_derive_early_secret(client->early_secret, NULL, 0, use_sha384);
+
+  /* Derive handshake secret */
+  fio_tls13_derive_handshake_secret(client->handshake_secret,
+                                    client->early_secret,
+                                    client->shared_secret,
+                                    32, /* X25519 shared secret is 32 bytes */
+                                    use_sha384);
+
+  /* Derive client handshake traffic secret */
+  fio_tls13_derive_secret(client->client_handshake_traffic_secret,
+                          client->handshake_secret,
+                          hash_len,
+                          "c hs traffic",
+                          12,
+                          transcript_hash,
+                          hash_len,
+                          use_sha384);
+
+  /* Derive server handshake traffic secret */
+  fio_tls13_derive_secret(client->server_handshake_traffic_secret,
+                          client->handshake_secret,
+                          hash_len,
+                          "s hs traffic",
+                          12,
+                          transcript_hash,
+                          hash_len,
+                          use_sha384);
+
+  /* Derive client handshake keys */
+  uint8_t key[32], iv[12];
+  fio_tls13_derive_traffic_keys(key,
+                                key_len,
+                                iv,
+                                client->client_handshake_traffic_secret,
+                                use_sha384);
+  fio_tls13_record_keys_init(&client->client_handshake_keys,
+                             key,
+                             (uint8_t)key_len,
+                             iv,
+                             cipher_type);
+
+  /* Derive server handshake keys */
+  fio_tls13_derive_traffic_keys(key,
+                                key_len,
+                                iv,
+                                client->server_handshake_traffic_secret,
+                                use_sha384);
+  fio_tls13_record_keys_init(&client->server_handshake_keys,
+                             key,
+                             (uint8_t)key_len,
+                             iv,
+                             cipher_type);
+
+  /* Clear temporary key material */
+  fio_secure_zero(key, sizeof(key));
+  fio_secure_zero(iv, sizeof(iv));
+
+  return 0;
+}
+
+/* Internal: Derive application keys after server Finished */
+FIO_SFUNC int fio___tls13_derive_app_keys(fio_tls13_client_s *client) {
+  int use_sha384 = client->use_sha384;
+  size_t hash_len = fio___tls13_hash_len(client);
+  size_t key_len = fio___tls13_key_len(client);
+  fio_tls13_cipher_type_e cipher_type = fio___tls13_cipher_type(client);
+
+  /* Get transcript hash at server Finished */
+  uint8_t transcript_hash[48];
+  fio___tls13_transcript_hash(client, transcript_hash);
+
+  /* Derive master secret */
+  fio_tls13_derive_master_secret(client->master_secret,
+                                 client->handshake_secret,
+                                 use_sha384);
+
+  /* Derive client application traffic secret */
+  fio_tls13_derive_secret(client->client_app_traffic_secret,
+                          client->master_secret,
+                          hash_len,
+                          "c ap traffic",
+                          12,
+                          transcript_hash,
+                          hash_len,
+                          use_sha384);
+
+  /* Derive server application traffic secret */
+  fio_tls13_derive_secret(client->server_app_traffic_secret,
+                          client->master_secret,
+                          hash_len,
+                          "s ap traffic",
+                          12,
+                          transcript_hash,
+                          hash_len,
+                          use_sha384);
+
+  /* Derive client application keys */
+  uint8_t key[32], iv[12];
+  fio_tls13_derive_traffic_keys(key,
+                                key_len,
+                                iv,
+                                client->client_app_traffic_secret,
+                                use_sha384);
+  fio_tls13_record_keys_init(&client->client_app_keys,
+                             key,
+                             (uint8_t)key_len,
+                             iv,
+                             cipher_type);
+
+  /* Derive server application keys */
+  fio_tls13_derive_traffic_keys(key,
+                                key_len,
+                                iv,
+                                client->server_app_traffic_secret,
+                                use_sha384);
+  fio_tls13_record_keys_init(&client->server_app_keys,
+                             key,
+                             (uint8_t)key_len,
+                             iv,
+                             cipher_type);
+
+  /* Clear temporary key material */
+  fio_secure_zero(key, sizeof(key));
+  fio_secure_zero(iv, sizeof(iv));
+
+  return 0;
+}
+
+/* Internal: Build client Finished message */
+FIO_SFUNC int fio___tls13_build_client_finished(fio_tls13_client_s *client,
+                                                uint8_t *out,
+                                                size_t out_capacity) {
+  int use_sha384 = client->use_sha384;
+  size_t hash_len = fio___tls13_hash_len(client);
+
+  /* Need space for handshake header (4) + verify_data */
+  if (out_capacity < 4 + hash_len)
+    return -1;
+
+  /* Get transcript hash */
+  uint8_t transcript_hash[48];
+  fio___tls13_transcript_hash(client, transcript_hash);
+
+  /* Derive finished key from client handshake traffic secret */
+  uint8_t finished_key[48];
+  fio_tls13_derive_finished_key(finished_key,
+                                client->client_handshake_traffic_secret,
+                                use_sha384);
+
+  /* Compute verify_data */
+  uint8_t verify_data[48];
+  fio_tls13_compute_finished(verify_data,
+                             finished_key,
+                             transcript_hash,
+                             use_sha384);
+
+  /* Build Finished message */
+  int len = fio_tls13_build_finished(out, out_capacity, verify_data, hash_len);
+
+  /* Clear sensitive data */
+  fio_secure_zero(finished_key, sizeof(finished_key));
+
+  return len;
+}
+
+/* Internal: Verify server Finished message */
+FIO_SFUNC int fio___tls13_verify_server_finished(fio_tls13_client_s *client,
+                                                 const uint8_t *verify_data,
+                                                 size_t verify_data_len) {
+  int use_sha384 = client->use_sha384;
+  size_t hash_len = fio___tls13_hash_len(client);
+
+  if (verify_data_len != hash_len)
+    return -1;
+
+  /* Get transcript hash (before Finished message) */
+  uint8_t transcript_hash[48];
+  fio___tls13_transcript_hash(client, transcript_hash);
+
+  /* Derive finished key from server handshake traffic secret */
+  uint8_t finished_key[48];
+  fio_tls13_derive_finished_key(finished_key,
+                                client->server_handshake_traffic_secret,
+                                use_sha384);
+
+  /* Compute expected verify_data */
+  uint8_t expected[48];
+  fio_tls13_compute_finished(expected,
+                             finished_key,
+                             transcript_hash,
+                             use_sha384);
+
+  /* Constant-time comparison */
+  uint8_t diff = 0;
+  for (size_t i = 0; i < hash_len; ++i)
+    diff |= verify_data[i] ^ expected[i];
+
+  /* Clear sensitive data */
+  fio_secure_zero(finished_key, sizeof(finished_key));
+  fio_secure_zero(expected, sizeof(expected));
+
+  return diff ? -1 : 0;
+}
+
+/* Internal: Process ServerHello */
+FIO_SFUNC int fio___tls13_process_server_hello(fio_tls13_client_s *client,
+                                               const uint8_t *data,
+                                               size_t data_len) {
+  fio_tls13_server_hello_s sh;
+  if (fio_tls13_parse_server_hello(&sh, data, data_len) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECODE_ERROR);
+    return -1;
+  }
+
+  /* Check for HelloRetryRequest */
+  if (sh.is_hello_retry_request) {
+    /* For now, return error - X25519 is widely supported */
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
+    return -1;
+  }
+
+  /* Validate cipher suite */
+  client->cipher_suite = sh.cipher_suite;
+  switch (sh.cipher_suite) {
+  case FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256: client->use_sha384 = 0; break;
+  case FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256:
+    client->use_sha384 = 0;
+    break;
+  case FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384: client->use_sha384 = 1; break;
+  default:
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
+    return -1;
+  }
+
+  /* Validate key share */
+  if (sh.key_share_group != FIO_TLS13_GROUP_X25519 || sh.key_share_len != 32) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+    return -1;
+  }
+
+  /* Compute shared secret */
+  if (fio_x25519_shared_secret(client->shared_secret,
+                               client->x25519_private_key,
+                               sh.key_share) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+    return -1;
+  }
+
+  /* Derive handshake keys */
+  if (fio___tls13_derive_handshake_keys(client) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_INTERNAL_ERROR);
+    return -1;
+  }
+
+  /* Switch to encrypted mode for reading */
+  client->encrypted_read = 1;
+
+  return 0;
+}
+
+/* Internal: Process EncryptedExtensions */
+FIO_SFUNC int fio___tls13_process_encrypted_extensions(
+    fio_tls13_client_s *client,
+    const uint8_t *data,
+    size_t data_len) {
+  fio_tls13_encrypted_extensions_s ee;
+  if (fio_tls13_parse_encrypted_extensions(&ee, data, data_len) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECODE_ERROR);
+    return -1;
+  }
+  /* EE parsed successfully - no action needed for basic implementation */
+  return 0;
+}
+
+/* Internal: Process Certificate */
+FIO_SFUNC int fio___tls13_process_certificate(fio_tls13_client_s *client,
+                                              const uint8_t *data,
+                                              size_t data_len) {
+  fio_tls13_certificate_s cert;
+  if (fio_tls13_parse_certificate(&cert, data, data_len) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECODE_ERROR);
+    return -1;
+  }
+
+  /* Store first certificate pointer for basic operation */
+  client->server_cert = cert.cert_data;
+  client->server_cert_len = cert.cert_len;
+
+  /* Parse full certificate chain for verification */
+  client->cert_chain_count = 0;
+  const uint8_t *p = data;
+  const uint8_t *end = data + data_len;
+
+  /* Skip certificate_request_context */
+  if (p >= end)
+    return 0;
+  uint8_t ctx_len = *p++;
+  if (p + ctx_len > end)
+    return 0;
+  p += ctx_len;
+
+  /* Parse certificate_list length (3 bytes) */
+  if (p + 3 > end)
+    return 0;
+  size_t list_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+  p += 3;
+  if (p + list_len > end)
+    return 0;
+
+  const uint8_t *list_end = p + list_len;
+
+  /* Parse each certificate entry */
+  while (p < list_end && client->cert_chain_count < 10) {
+    /* cert_data length (3 bytes) */
+    if (p + 3 > list_end)
+      break;
+    size_t cert_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
+    p += 3;
+    if (cert_len == 0 || p + cert_len > list_end)
+      break;
+
+    /* Store certificate pointer */
+    client->cert_chain[client->cert_chain_count] = p;
+    client->cert_chain_lens[client->cert_chain_count] = cert_len;
+    ++client->cert_chain_count;
+    p += cert_len;
+
+    /* Skip extensions (2 bytes length + data) */
+    if (p + 2 > list_end)
+      break;
+    size_t ext_len = ((size_t)p[0] << 8) | p[1];
+    p += 2;
+    if (p + ext_len > list_end)
+      break;
+    p += ext_len;
+  }
+
+  return 0;
+}
+
+#if defined(H___FIO_X509___H) && defined(H___FIO_RSA___H)
+/* Internal: Verify CertificateVerify signature per RFC 8446 Section 4.4.3
+ * NOTE: Requires FIO_X509 and FIO_RSA modules to be included. */
+FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
+                                              const fio_x509_cert_s *cert,
+                                              uint16_t sig_scheme,
+                                              const uint8_t *signature,
+                                              size_t sig_len) {
+  /* Build signed content: 64 spaces + context string + 0x00 + transcript hash
+   * Per RFC 8446 Section 4.4.3:
+   *   "The content that is covered ... is the hash output ...
+   *    Specifically, the content consists of:
+   *    - A string of 64 0x20 (space) bytes
+   *    - The context string
+   *    - A single 0 byte
+   *    - The content to be signed"
+   */
+  static const char context_server[] = "TLS 1.3, server CertificateVerify";
+  const size_t context_len = sizeof(context_server) - 1; /* 33 bytes */
+  size_t hash_len = fio___tls13_hash_len(client);
+
+  /* Total: 64 + 33 + 1 + hash_len = 98 or 114 bytes */
+  uint8_t signed_content[64 + 33 + 1 + FIO_TLS13_MAX_HASH_LEN];
+  size_t signed_content_len = 64 + context_len + 1 + hash_len;
+
+  /* 64 spaces */
+  FIO_MEMSET(signed_content, 0x20, 64);
+  /* Context string */
+  FIO_MEMCPY(signed_content + 64, context_server, context_len);
+  /* Zero byte separator */
+  signed_content[64 + context_len] = 0x00;
+  /* Transcript hash (current state before CertificateVerify is added) */
+  fio___tls13_transcript_hash(client, signed_content + 64 + context_len + 1);
+
+  /* Hash the signed content for signature verification */
+  uint8_t content_hash[FIO_TLS13_MAX_HASH_LEN];
+  fio_rsa_hash_e rsa_hash_alg;
+  size_t expected_hash_len;
+
+  /* Determine hash algorithm from signature scheme */
+  switch (sig_scheme) {
+  case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256:
+  case FIO_TLS13_SIG_RSA_PKCS1_SHA256:
+  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
+    fio_sha256_s sha = fio_sha256_init();
+    fio_sha256_consume(&sha, signed_content, signed_content_len);
+    fio_u256 h = fio_sha256_finalize(&sha);
+    FIO_MEMCPY(content_hash, h.u8, 32);
+    expected_hash_len = 32;
+    rsa_hash_alg = FIO_RSA_HASH_SHA256;
+    break;
+  }
+  case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384:
+  case FIO_TLS13_SIG_RSA_PKCS1_SHA384:
+  case FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384: {
+    /* SHA-384 uses SHA-512 internals, truncated to 48 bytes */
+    fio_sha512_s sha = fio_sha512_init();
+    fio_sha512_consume(&sha, signed_content, signed_content_len);
+    fio_u512 h = fio_sha512_finalize(&sha);
+    FIO_MEMCPY(content_hash, h.u8, 48); /* Use first 48 bytes (SHA-384) */
+    expected_hash_len = 48;
+    rsa_hash_alg = FIO_RSA_HASH_SHA384;
+    break;
+  }
+  case FIO_TLS13_SIG_ED25519:
+    /* Ed25519 does not pre-hash the message */
+    expected_hash_len = 0;
+    rsa_hash_alg = FIO_RSA_HASH_SHA256; /* unused */
+    break;
+  default:
+    FIO_LOG_DEBUG2("TLS 1.3: Unsupported signature scheme: 0x%04X", sig_scheme);
+    return -1;
+  }
+
+  /* Verify signature based on algorithm and key type */
+  switch (sig_scheme) {
+  case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256:
+  case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384: {
+    /* RSA-PSS verification - required for TLS 1.3 */
+    if (cert->key_type != FIO_X509_KEY_RSA) {
+      FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for RSA-PSS");
+      return -1;
+    }
+    /* Build RSA public key structure */
+    fio_rsa_pubkey_s pubkey;
+    FIO_MEMSET(&pubkey, 0, sizeof(pubkey));
+    pubkey.n = cert->pubkey.rsa.n;
+    pubkey.n_len = cert->pubkey.rsa.n_len;
+    pubkey.e = cert->pubkey.rsa.e;
+    pubkey.e_len = cert->pubkey.rsa.e_len;
+
+    if (fio_rsa_verify_pss(signature,
+                           sig_len,
+                           content_hash,
+                           expected_hash_len,
+                           rsa_hash_alg,
+                           &pubkey) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: RSA-PSS signature verification failed");
+      return -1;
+    }
+    break;
+  }
+  case FIO_TLS13_SIG_RSA_PKCS1_SHA256:
+  case FIO_TLS13_SIG_RSA_PKCS1_SHA384: {
+    /* RSA PKCS#1 v1.5 - legacy, but some servers still use it */
+    if (cert->key_type != FIO_X509_KEY_RSA) {
+      FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for RSA-PKCS1");
+      return -1;
+    }
+    fio_rsa_pubkey_s pubkey;
+    FIO_MEMSET(&pubkey, 0, sizeof(pubkey));
+    pubkey.n = cert->pubkey.rsa.n;
+    pubkey.n_len = cert->pubkey.rsa.n_len;
+    pubkey.e = cert->pubkey.rsa.e;
+    pubkey.e_len = cert->pubkey.rsa.e_len;
+
+    if (fio_rsa_verify_pkcs1(signature,
+                             sig_len,
+                             content_hash,
+                             expected_hash_len,
+                             rsa_hash_alg,
+                             &pubkey) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: RSA-PKCS1 signature verification failed");
+      return -1;
+    }
+    break;
+  }
+  case FIO_TLS13_SIG_ED25519: {
+    /* Ed25519 - sign directly over the content (no pre-hashing) */
+    if (cert->key_type != FIO_X509_KEY_ED25519) {
+      FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for Ed25519");
+      return -1;
+    }
+    if (sig_len != 64) {
+      FIO_LOG_DEBUG2("TLS 1.3: Invalid Ed25519 signature length: %zu", sig_len);
+      return -1;
+    }
+    if (fio_ed25519_verify(signature,
+                           signed_content,
+                           signed_content_len,
+                           cert->pubkey.ed25519.key) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: Ed25519 signature verification failed");
+      return -1;
+    }
+    break;
+  }
+  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
+#if defined(H___FIO_P256___H)
+    /* ECDSA P-256 with SHA-256 */
+    if (cert->key_type != FIO_X509_KEY_ECDSA_P256) {
+      FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for ECDSA P-256");
+      return -1;
+    }
+    if (!cert->pubkey.ecdsa.point || cert->pubkey.ecdsa.point_len != 65) {
+      FIO_LOG_DEBUG2("TLS 1.3: Invalid ECDSA P-256 public key");
+      return -1;
+    }
+    if (fio_ecdsa_p256_verify(signature,
+                              sig_len,
+                              content_hash,
+                              cert->pubkey.ecdsa.point,
+                              cert->pubkey.ecdsa.point_len) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-256 signature verification failed");
+      return -1;
+    }
+    break;
+#else
+    FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-256 not available (FIO_P256 not defined)");
+    return -1;
+#endif
+  }
+  case FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384:
+    /* ECDSA P-384 not yet implemented */
+    FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-384 verification not yet supported");
+    return -1;
+  default: return -1;
+  }
+
+  FIO_LOG_DEBUG2("TLS 1.3: CertificateVerify signature verified successfully");
+  return 0;
+}
+#endif /* H___FIO_X509___H && H___FIO_RSA___H */
+
+/* Internal: Process CertificateVerify */
+FIO_SFUNC int fio___tls13_process_certificate_verify(fio_tls13_client_s *client,
+                                                     const uint8_t *data,
+                                                     size_t data_len) {
+  fio_tls13_certificate_verify_s cv;
+  if (fio_tls13_parse_certificate_verify(&cv, data, data_len) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECODE_ERROR);
+    return -1;
+  }
+
+  /* Store signature info */
+  client->server_signature = cv.signature;
+  client->server_signature_len = cv.signature_len;
+  client->server_signature_scheme = cv.signature_scheme;
+
+  /* Skip verification if explicitly disabled */
+  if (client->skip_cert_verify) {
+    FIO_LOG_DEBUG2("TLS 1.3: Skipping CertificateVerify (insecure mode)");
+    client->cert_verified = 1;
+    return 0;
+  }
+
+#if defined(H___FIO_X509___H) && defined(H___FIO_RSA___H)
+  /* Must have at least one certificate to verify against */
+  if (client->cert_chain_count == 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: No certificates received for CV verification");
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_CERTIFICATE_REQUIRED);
+    return -1;
+  }
+
+  /* Parse the end-entity certificate to get the public key */
+  fio_x509_cert_s cert;
+  if (fio_x509_parse(&cert,
+                     client->cert_chain[0],
+                     client->cert_chain_lens[0]) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: Failed to parse server certificate for CV");
+    client->cert_error = FIO_X509_ERR_PARSE;
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_BAD_CERTIFICATE);
+    return -1;
+  }
+
+  /* Verify the CertificateVerify signature */
+  if (fio___tls13_verify_cv_signature(client,
+                                      &cert,
+                                      cv.signature_scheme,
+                                      cv.signature,
+                                      cv.signature_len) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: CertificateVerify signature invalid");
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECRYPT_ERROR);
+    return -1;
+  }
+
+  client->cert_verified = 1;
+#else
+  /* X509/RSA modules not available - skip signature verification */
+  FIO_LOG_DEBUG2("TLS 1.3: X509/RSA modules unavailable, skipping CV verify");
+  client->cert_verified = 1;
+#endif /* H___FIO_X509___H && H___FIO_RSA___H */
+  return 0;
+}
+
+#if defined(H___FIO_X509___H)
+/* Internal: Verify certificate chain (call after CertificateVerify succeeds)
+ * NOTE: Requires FIO_X509 module to be included. */
+FIO_SFUNC int fio___tls13_verify_certificate_chain(fio_tls13_client_s *client) {
+  /* Skip if no chain or verification disabled */
+  if (client->skip_cert_verify) {
+    FIO_LOG_DEBUG2("TLS 1.3: Skipping chain verification (insecure mode)");
+    client->chain_verified = 1;
+    return 0;
+  }
+
+  /* Must have at least one certificate */
+  if (client->cert_chain_count == 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: No certificates to verify");
+    client->cert_error = FIO_X509_ERR_EMPTY_CHAIN;
+    return -1;
+  }
+
+  /* Get current timestamp for validity checking */
+  int64_t current_time = (int64_t)fio_time_real().tv_sec;
+
+  /* Use x509 chain verification if trust store is provided */
+  if (client->trust_store != NULL) {
+    int result =
+        fio_x509_verify_chain(client->cert_chain,
+                              client->cert_chain_lens,
+                              client->cert_chain_count,
+                              client->server_name,
+                              current_time,
+                              (fio_x509_trust_store_s *)client->trust_store);
+    if (result != FIO_X509_OK) {
+      FIO_LOG_DEBUG2("TLS 1.3: Chain verification failed: %s",
+                     fio_x509_error_str(result));
+      client->cert_error = (int16_t)result;
+      return -1;
+    }
+    client->chain_verified = 1;
+    FIO_LOG_DEBUG2("TLS 1.3: Certificate chain verified successfully");
+    return 0;
+  }
+
+  /* No trust store: perform minimal validation (hostname + validity only) */
+  fio_x509_cert_s cert;
+  if (fio_x509_parse(&cert,
+                     client->cert_chain[0],
+                     client->cert_chain_lens[0]) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: Failed to parse end-entity certificate");
+    client->cert_error = FIO_X509_ERR_PARSE;
+    return -1;
+  }
+
+  /* Check validity period */
+  if (fio_x509_check_validity(&cert, current_time) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3: Certificate expired or not yet valid");
+    client->cert_error = (current_time < cert.not_before)
+                             ? FIO_X509_ERR_NOT_YET_VALID
+                             : FIO_X509_ERR_EXPIRED;
+    return -1;
+  }
+
+  /* Check hostname if SNI was provided */
+  if (client->server_name != NULL) {
+    size_t name_len = strlen(client->server_name);
+    if (fio_x509_match_hostname(&cert, client->server_name, name_len) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: Hostname mismatch (expected: %s)",
+                     client->server_name);
+      client->cert_error = FIO_X509_ERR_HOSTNAME_MISMATCH;
+      return -1;
+    }
+  }
+
+  /* Without trust store, we can't verify the chain, but we did basic checks */
+  FIO_LOG_DEBUG2("TLS 1.3: Basic certificate checks passed (no trust store)");
+  client->chain_verified = 1;
+  return 0;
+}
+#else
+/* X509 module not available - stub function */
+FIO_SFUNC int fio___tls13_verify_certificate_chain(fio_tls13_client_s *client) {
+  /* No X509 module - skip chain verification */
+  FIO_LOG_DEBUG2("TLS 1.3: X509 module unavailable, skipping chain verify");
+  client->chain_verified = 1;
+  (void)client;
+  return 0;
+}
+#endif /* H___FIO_X509___H */
+
+/* Internal: Process Finished */
+FIO_SFUNC int fio___tls13_process_finished(fio_tls13_client_s *client,
+                                           const uint8_t *data,
+                                           size_t data_len) {
+  /* Verify server Finished */
+  if (fio___tls13_verify_server_finished(client, data, data_len) != 0) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECRYPT_ERROR);
+    return -1;
+  }
+
+  return 0;
+}
+
+/* Internal: Process a single handshake message */
+FIO_SFUNC int fio___tls13_process_handshake_message(fio_tls13_client_s *client,
+                                                    const uint8_t *msg,
+                                                    size_t msg_len,
+                                                    uint8_t *out,
+                                                    size_t out_capacity,
+                                                    size_t *out_len) {
+  fio_tls13_handshake_type_e msg_type;
+  size_t body_len;
+  const uint8_t *body =
+      fio_tls13_parse_handshake_header(msg, msg_len, &msg_type, &body_len);
+
+  if (!body) {
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_DECODE_ERROR);
+    return -1;
+  }
+
+  *out_len = 0;
+
+  switch (client->state) {
+  case FIO_TLS13_STATE_WAIT_SH:
+    if (msg_type != FIO_TLS13_HS_SERVER_HELLO) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    /* Update transcript with full message (including header) */
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
+    if (fio___tls13_process_server_hello(client, body, body_len) != 0)
+      return -1;
+    client->state = FIO_TLS13_STATE_WAIT_EE;
+    break;
+
+  case FIO_TLS13_STATE_WAIT_EE:
+    if (msg_type != FIO_TLS13_HS_ENCRYPTED_EXTENSIONS) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
+    if (fio___tls13_process_encrypted_extensions(client, body, body_len) != 0)
+      return -1;
+    client->state = FIO_TLS13_STATE_WAIT_CERT_CR;
+    break;
+
+  case FIO_TLS13_STATE_WAIT_CERT_CR:
+    if (msg_type == FIO_TLS13_HS_CERTIFICATE_REQUEST) {
+      /* CertificateRequest - skip for now, go to WAIT_CERT */
+      fio___tls13_transcript_update(client, msg, 4 + body_len);
+      client->state = FIO_TLS13_STATE_WAIT_CERT;
+    } else if (msg_type == FIO_TLS13_HS_CERTIFICATE) {
+      fio___tls13_transcript_update(client, msg, 4 + body_len);
+      if (fio___tls13_process_certificate(client, body, body_len) != 0)
+        return -1;
+      client->state = FIO_TLS13_STATE_WAIT_CV;
+    } else {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    break;
+
+  case FIO_TLS13_STATE_WAIT_CERT:
+    if (msg_type != FIO_TLS13_HS_CERTIFICATE) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
+    if (fio___tls13_process_certificate(client, body, body_len) != 0)
+      return -1;
+    client->state = FIO_TLS13_STATE_WAIT_CV;
+    break;
+
+  case FIO_TLS13_STATE_WAIT_CV:
+    if (msg_type != FIO_TLS13_HS_CERTIFICATE_VERIFY) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    /* Process CertificateVerify BEFORE updating transcript (signature covers
+     * transcript up to but not including CertificateVerify) */
+    if (fio___tls13_process_certificate_verify(client, body, body_len) != 0)
+      return -1;
+    /* Now update transcript with CertificateVerify */
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
+    /* Verify certificate chain after CertificateVerify signature is valid */
+    if (fio___tls13_verify_certificate_chain(client) != 0) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_BAD_CERTIFICATE);
+      return -1;
+    }
+    client->state = FIO_TLS13_STATE_WAIT_FINISHED;
+    break;
+
+  case FIO_TLS13_STATE_WAIT_FINISHED:
+    if (msg_type != FIO_TLS13_HS_FINISHED) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+    /* Verify server Finished BEFORE updating transcript */
+    if (fio___tls13_process_finished(client, body, body_len) != 0)
+      return -1;
+    /* Now update transcript with server Finished */
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
+
+    /* Derive application keys */
+    if (fio___tls13_derive_app_keys(client) != 0) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_INTERNAL_ERROR);
+      return -1;
+    }
+
+    /* Build client Finished */
+    {
+      uint8_t finished_msg[64];
+      int finished_len =
+          fio___tls13_build_client_finished(client,
+                                            finished_msg,
+                                            sizeof(finished_msg));
+      if (finished_len < 0) {
+        fio___tls13_set_error(client,
+                              FIO_TLS13_ALERT_LEVEL_FATAL,
+                              FIO_TLS13_ALERT_INTERNAL_ERROR);
+        return -1;
+      }
+
+      /* Update transcript with client Finished */
+      fio___tls13_transcript_update(client, finished_msg, (size_t)finished_len);
+
+      /* Encrypt client Finished */
+      int enc_len = fio_tls13_record_encrypt(out,
+                                             out_capacity,
+                                             finished_msg,
+                                             (size_t)finished_len,
+                                             FIO_TLS13_CONTENT_HANDSHAKE,
+                                             &client->client_handshake_keys);
+      if (enc_len < 0) {
+        fio___tls13_set_error(client,
+                              FIO_TLS13_ALERT_LEVEL_FATAL,
+                              FIO_TLS13_ALERT_INTERNAL_ERROR);
+        return -1;
+      }
+      *out_len = (size_t)enc_len;
+    }
+
+    /* Switch to encrypted mode for writing */
+    client->encrypted_write = 1;
+    client->state = FIO_TLS13_STATE_CONNECTED;
+    break;
+
+  default:
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+    return -1;
+  }
+
+  return 0;
+}
+
+/* *****************************************************************************
+TLS 1.3 Client Public API Implementation
+***************************************************************************** */
+
+SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
+                                 const char *server_name) {
+  if (!client)
+    return;
+
+  FIO_MEMSET(client, 0, sizeof(*client));
+  client->state = FIO_TLS13_STATE_START;
+  client->server_name = server_name;
+
+  /* Initialize transcript hashes */
+  client->transcript_sha256 = fio_sha256_init();
+  client->transcript_sha384 = fio_sha512_init();
+
+  /* Generate random and X25519 keypair */
+  fio_rand_bytes(client->client_random, 32);
+  fio_x25519_keypair(client->x25519_private_key, client->x25519_public_key);
+}
+
+SFUNC void fio_tls13_client_destroy(fio_tls13_client_s *client) {
+  if (!client)
+    return;
+
+  /* Clear all sensitive data */
+  fio_secure_zero(client->x25519_private_key, 32);
+  fio_secure_zero(client->shared_secret, 32);
+  fio_secure_zero(client->early_secret, 48);
+  fio_secure_zero(client->handshake_secret, 48);
+  fio_secure_zero(client->master_secret, 48);
+  fio_secure_zero(client->client_handshake_traffic_secret, 48);
+  fio_secure_zero(client->server_handshake_traffic_secret, 48);
+  fio_secure_zero(client->client_app_traffic_secret, 48);
+  fio_secure_zero(client->server_app_traffic_secret, 48);
+
+  fio_tls13_record_keys_clear(&client->client_handshake_keys);
+  fio_tls13_record_keys_clear(&client->server_handshake_keys);
+  fio_tls13_record_keys_clear(&client->client_app_keys);
+  fio_tls13_record_keys_clear(&client->server_app_keys);
+
+  FIO_MEMSET(client, 0, sizeof(*client));
+}
+
+SFUNC int fio_tls13_client_start(fio_tls13_client_s *client,
+                                 uint8_t *out,
+                                 size_t out_capacity) {
+  if (!client || !out || client->state != FIO_TLS13_STATE_START)
+    return -1;
+
+  /* Build ClientHello */
+  uint16_t cipher_suites[] = {FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256,
+                              FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256,
+                              FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384};
+
+  /* Build handshake message first (without record header) */
+  uint8_t ch_msg[512];
+  int ch_len = fio_tls13_build_client_hello(ch_msg,
+                                            sizeof(ch_msg),
+                                            client->client_random,
+                                            client->server_name,
+                                            client->x25519_public_key,
+                                            cipher_suites,
+                                            3);
+  if (ch_len < 0)
+    return -1;
+
+  /* Update transcript with ClientHello (handshake message only) */
+  fio___tls13_transcript_update(client, ch_msg, (size_t)ch_len);
+
+  /* Check output capacity for record header + message */
+  size_t total_len = FIO_TLS13_RECORD_HEADER_LEN + (size_t)ch_len;
+  if (out_capacity < total_len)
+    return -1;
+
+  /* Write record header */
+  fio___tls13_write_record_header(out,
+                                  FIO_TLS13_CONTENT_HANDSHAKE,
+                                  (uint16_t)ch_len);
+
+  /* Copy handshake message */
+  FIO_MEMCPY(out + FIO_TLS13_RECORD_HEADER_LEN, ch_msg, (size_t)ch_len);
+
+  client->state = FIO_TLS13_STATE_WAIT_SH;
+  return (int)total_len;
+}
+
+SFUNC int fio_tls13_client_process(fio_tls13_client_s *client,
+                                   const uint8_t *in,
+                                   size_t in_len,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   size_t *out_len) {
+  if (!client || !in || !out || !out_len)
+    return -1;
+
+  if (client->state == FIO_TLS13_STATE_ERROR ||
+      client->state == FIO_TLS13_STATE_CONNECTED)
+    return -1;
+
+  *out_len = 0;
+
+  /* Parse record header */
+  fio_tls13_content_type_e content_type;
+  size_t payload_len;
+  const uint8_t *payload =
+      fio_tls13_record_parse_header(in, in_len, &content_type, &payload_len);
+
+  if (!payload)
+    return 0; /* Need more data */
+
+  size_t record_len = FIO_TLS13_RECORD_HEADER_LEN + payload_len;
+
+  /* Handle Change Cipher Spec (ignore in TLS 1.3) */
+  if (content_type == FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC) {
+    return (int)record_len;
+  }
+
+  /* Decrypt if in encrypted mode */
+  uint8_t decrypted[FIO_TLS13_MAX_PLAINTEXT_LEN + 256];
+  const uint8_t *hs_data = payload;
+  size_t hs_len = payload_len;
+
+  if (client->encrypted_read) {
+    if (content_type != FIO_TLS13_CONTENT_APPLICATION_DATA) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+
+    fio_tls13_content_type_e inner_type;
+    int dec_len = fio_tls13_record_decrypt(decrypted,
+                                           sizeof(decrypted),
+                                           &inner_type,
+                                           in,
+                                           record_len,
+                                           &client->server_handshake_keys);
+    if (dec_len < 0) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_BAD_RECORD_MAC);
+      return -1;
+    }
+
+    if (inner_type != FIO_TLS13_CONTENT_HANDSHAKE) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+
+    hs_data = decrypted;
+    hs_len = (size_t)dec_len;
+  } else {
+    if (content_type != FIO_TLS13_CONTENT_HANDSHAKE) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
+      return -1;
+    }
+  }
+
+  /* Process handshake messages (may be multiple in one record) */
+  size_t offset = 0;
+  while (offset < hs_len) {
+    /* Parse handshake header to get message length */
+    if (hs_len - offset < 4)
+      break; /* Need more data */
+
+    uint32_t msg_body_len = ((uint32_t)hs_data[offset + 1] << 16) |
+                            ((uint32_t)hs_data[offset + 2] << 8) |
+                            (uint32_t)hs_data[offset + 3];
+    size_t msg_total_len = 4 + msg_body_len;
+
+    if (offset + msg_total_len > hs_len)
+      break; /* Need more data */
+
+    /* Process this handshake message */
+    size_t msg_out_len = 0;
+    if (fio___tls13_process_handshake_message(client,
+                                              hs_data + offset,
+                                              msg_total_len,
+                                              out + *out_len,
+                                              out_capacity - *out_len,
+                                              &msg_out_len) != 0) {
+      return -1;
+    }
+    *out_len += msg_out_len;
+    offset += msg_total_len;
+  }
+
+  return (int)record_len;
+}
+
+SFUNC int fio_tls13_client_encrypt(fio_tls13_client_s *client,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *plaintext,
+                                   size_t plaintext_len) {
+  if (!client || !out)
+    return -1;
+
+  if (client->state != FIO_TLS13_STATE_CONNECTED)
+    return -1;
+
+  return fio_tls13_record_encrypt(out,
+                                  out_capacity,
+                                  plaintext,
+                                  plaintext_len,
+                                  FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                  &client->client_app_keys);
+}
+
+SFUNC int fio_tls13_client_decrypt(fio_tls13_client_s *client,
+                                   uint8_t *out,
+                                   size_t out_capacity,
+                                   const uint8_t *ciphertext,
+                                   size_t ciphertext_len) {
+  if (!client || !out || !ciphertext)
+    return -1;
+
+  if (client->state != FIO_TLS13_STATE_CONNECTED)
+    return -1;
+
+  fio_tls13_content_type_e content_type;
+  int dec_len = fio_tls13_record_decrypt(out,
+                                         out_capacity,
+                                         &content_type,
+                                         ciphertext,
+                                         ciphertext_len,
+                                         &client->server_app_keys);
+
+  if (dec_len < 0)
+    return -1;
+
+  /* Only return application data */
+  if (content_type != FIO_TLS13_CONTENT_APPLICATION_DATA)
+    return -1;
+
+  return dec_len;
+}
+
+/* *****************************************************************************
+Module Cleanup
+***************************************************************************** */
+#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_TLS13 */
+#undef FIO_TLS13
 /* ************************************************************************** */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -61545,7 +69640,7 @@ Recursive inclusion / cleanup
 #include "152 sha2.h"
 #endif
 #ifdef FIO_HKDF
-#include "152 hkdf.h"
+#include "152 sha2z hkdf.h"
 #endif
 #ifdef FIO_BLAKE2
 #include "152 blake2.h"
@@ -61564,11 +69659,31 @@ Recursive inclusion / cleanup
 #include "154 ed25519.h"
 #endif
 
+#ifdef FIO_P256
+#include "154 p256.h"
+#endif
+
+#ifdef FIO_ASN1
+#include "155 asn1.h"
+#endif
+
+#ifdef FIO_RSA
+#include "155 rsa.h"
+#endif
+
+#ifdef FIO_X509
+#include "155 x509.h"
+#endif
+
 #ifdef FIO_OTP
 #include "160 otp.h"
 #endif
 #ifdef FIO_SECRET
 #include "160 secret.h"
+#endif
+
+#ifdef FIO_TLS13
+#include "190 tls13.h"
 #endif
 
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)

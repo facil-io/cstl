@@ -11301,6 +11301,1129 @@ Decrypts a message using the recipient's X25519 secret key.
 Returns `0` on success, `-1` on failure (authentication failed or invalid input).
 
 ------------------------------------------------------------
+## ASN.1 DER Parser
+
+```c
+#define FIO_ASN1
+#include FIO_INCLUDE_FILE
+```
+
+By defining `FIO_ASN1`, an ASN.1 DER (Distinguished Encoding Rules) parser is made available. This module provides parsing capabilities for X.509 certificates and other DER-encoded data structures commonly used in TLS and cryptographic applications.
+
+The parser is non-allocating - all returned pointers reference the original DER data, which must remain valid while the parsed structures are in use.
+
+### Types
+
+#### `fio_asn1_tag_e`
+
+```c
+typedef enum {
+  FIO_ASN1_EOC = 0x00,               /* End-of-contents */
+  FIO_ASN1_BOOLEAN = 0x01,           /* Boolean */
+  FIO_ASN1_INTEGER = 0x02,           /* Integer */
+  FIO_ASN1_BIT_STRING = 0x03,        /* Bit String */
+  FIO_ASN1_OCTET_STRING = 0x04,      /* Octet String */
+  FIO_ASN1_NULL = 0x05,              /* Null */
+  FIO_ASN1_OID = 0x06,               /* Object Identifier */
+  FIO_ASN1_UTF8_STRING = 0x0C,       /* UTF-8 String */
+  FIO_ASN1_SEQUENCE = 0x10,          /* Sequence (0x30 with constructed bit) */
+  FIO_ASN1_SET = 0x11,               /* Set (0x31 with constructed bit) */
+  FIO_ASN1_PRINTABLE_STRING = 0x13,  /* Printable String */
+  FIO_ASN1_IA5_STRING = 0x16,        /* IA5 String (ASCII) */
+  FIO_ASN1_UTC_TIME = 0x17,          /* UTC Time */
+  FIO_ASN1_GENERALIZED_TIME = 0x18,  /* Generalized Time */
+  FIO_ASN1_CONTEXT_0 = 0xA0,         /* [0] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_1 = 0xA1,         /* [1] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_2 = 0xA2,         /* [2] EXPLICIT/IMPLICIT */
+  FIO_ASN1_CONTEXT_3 = 0xA3,         /* [3] EXPLICIT/IMPLICIT */
+} fio_asn1_tag_e;
+```
+
+ASN.1 Universal Tag Types used to identify element types in DER-encoded data.
+
+#### `fio_asn1_class_e`
+
+```c
+typedef enum {
+  FIO_ASN1_CLASS_UNIVERSAL = 0,   /* Universal (built-in types) */
+  FIO_ASN1_CLASS_APPLICATION = 1, /* Application-specific */
+  FIO_ASN1_CLASS_CONTEXT = 2,     /* Context-specific */
+  FIO_ASN1_CLASS_PRIVATE = 3,     /* Private */
+} fio_asn1_class_e;
+```
+
+ASN.1 Tag Class values (bits 7-6 of the tag byte).
+
+#### `fio_asn1_element_s`
+
+```c
+typedef struct {
+  const uint8_t *data;    /* Pointer to element content (after tag+length) */
+  size_t len;             /* Length of content */
+  uint8_t tag;            /* Raw tag byte */
+  uint8_t is_constructed; /* 1 if constructed (contains other elements) */
+  uint8_t tag_class;      /* 0=Universal, 1=Application, 2=Context, 3=Private */
+  uint8_t tag_number;     /* Tag number (bits 4-0, or extended) */
+} fio_asn1_element_s;
+```
+
+Parsed ASN.1 DER element structure.
+
+**Members:**
+- `data` - pointer to the element's content bytes (after tag and length fields)
+- `len` - length of the content in bytes
+- `tag` - the raw tag byte as it appears in the DER encoding
+- `is_constructed` - 1 if the element contains nested elements, 0 for primitive
+- `tag_class` - the tag class (Universal, Application, Context, or Private)
+- `tag_number` - the tag number within its class
+
+#### `fio_asn1_iterator_s`
+
+```c
+typedef struct {
+  const uint8_t *pos; /* Current position */
+  const uint8_t *end; /* End of sequence */
+} fio_asn1_iterator_s;
+```
+
+Iterator for traversing SEQUENCE or SET contents.
+
+**Members:**
+- `pos` - current position within the sequence
+- `end` - pointer to the end of the sequence data
+
+### OID Constants
+
+The module defines commonly used OID string constants for X.509 and TLS:
+
+```c
+/* Signature Algorithms */
+#define FIO_OID_SHA256_WITH_RSA   "1.2.840.113549.1.1.11"
+#define FIO_OID_SHA384_WITH_RSA   "1.2.840.113549.1.1.12"
+#define FIO_OID_SHA512_WITH_RSA   "1.2.840.113549.1.1.13"
+#define FIO_OID_RSA_PSS           "1.2.840.113549.1.1.10"
+#define FIO_OID_ECDSA_WITH_SHA256 "1.2.840.10045.4.3.2"
+#define FIO_OID_ED25519           "1.3.101.112"
+
+/* Public Key Algorithms */
+#define FIO_OID_RSA_ENCRYPTION "1.2.840.113549.1.1.1"
+#define FIO_OID_EC_PUBLIC_KEY  "1.2.840.10045.2.1"
+
+/* Elliptic Curves */
+#define FIO_OID_SECP256R1 "1.2.840.10045.3.1.7"
+#define FIO_OID_SECP384R1 "1.3.132.0.34"
+#define FIO_OID_X25519    "1.3.101.110"
+
+/* X.509 Extensions */
+#define FIO_OID_BASIC_CONSTRAINTS "2.5.29.19"
+#define FIO_OID_KEY_USAGE         "2.5.29.15"
+#define FIO_OID_SUBJECT_ALT_NAME  "2.5.29.17"
+
+/* Distinguished Name Attributes */
+#define FIO_OID_COMMON_NAME  "2.5.4.3"
+#define FIO_OID_ORGANIZATION "2.5.4.10"
+```
+
+### Core Parser Functions
+
+#### `fio_asn1_parse`
+
+```c
+const uint8_t *fio_asn1_parse(fio_asn1_element_s *elem,
+                              const uint8_t *data,
+                              size_t data_len);
+```
+
+Parses one ASN.1 element from DER-encoded data.
+
+**Parameters:**
+- `elem` - output structure to fill with parsed element info
+- `data` - pointer to DER-encoded data
+- `data_len` - length of data buffer
+
+**Returns:** pointer to the next element (after this one), or NULL on error.
+
+Example:
+
+```c
+fio_asn1_element_s elem;
+const uint8_t *next = fio_asn1_parse(&elem, der_data, der_len);
+if (next) {
+  printf("Tag: 0x%02X, Length: %zu\n", elem.tag, elem.len);
+}
+```
+
+#### `fio_asn1_element_total_len`
+
+```c
+size_t fio_asn1_element_total_len(const fio_asn1_element_s *elem,
+                                  const uint8_t *data);
+```
+
+Gets the total encoded length of an ASN.1 element (tag + length + content).
+
+**Parameters:**
+- `elem` - parsed element
+- `data` - original data pointer where element was parsed from
+
+**Returns:** total bytes used by the element encoding.
+
+### Type-Specific Parsers
+
+#### `fio_asn1_parse_integer`
+
+```c
+int fio_asn1_parse_integer(const fio_asn1_element_s *elem, uint64_t *value);
+```
+
+Parses an ASN.1 INTEGER element.
+
+For small integers (<= 64-bit), sets `*value`. For large integers (e.g., RSA modulus), use `elem->data` and `elem->len` directly. Leading zero bytes for positive numbers are handled correctly.
+
+**Parameters:**
+- `elem` - parsed element (must be INTEGER type)
+- `value` - output for integer value (can be NULL for large integers)
+
+**Returns:** 0 on success, -1 on error.
+
+#### `fio_asn1_parse_bit_string`
+
+```c
+int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem,
+                              const uint8_t **bits,
+                              size_t *bit_len,
+                              uint8_t *unused_bits);
+```
+
+Parses an ASN.1 BIT STRING element.
+
+**Parameters:**
+- `elem` - parsed element (must be BIT STRING type)
+- `bits` - output pointer to bit data
+- `bit_len` - output length of bit data in bytes
+- `unused_bits` - output number of unused bits in last byte (0-7)
+
+**Returns:** 0 on success, -1 on error.
+
+#### `fio_asn1_parse_oid`
+
+```c
+int fio_asn1_parse_oid(const fio_asn1_element_s *elem,
+                       char *buf,
+                       size_t buf_len);
+```
+
+Parses an ASN.1 OID into a dot-separated string.
+
+**Parameters:**
+- `elem` - parsed element (must be OID type)
+- `buf` - output buffer for string
+- `buf_len` - buffer size
+
+**Returns:** number of characters written (excluding NUL), or -1 on error.
+
+Example:
+
+```c
+char oid_str[128];
+int len = fio_asn1_parse_oid(&elem, oid_str, sizeof(oid_str));
+if (len > 0) {
+  printf("OID: %s\n", oid_str);  /* e.g., "1.2.840.113549.1.1.11" */
+}
+```
+
+#### `fio_asn1_oid_eq`
+
+```c
+int fio_asn1_oid_eq(const fio_asn1_element_s *elem, const char *oid_string);
+```
+
+Compares an ASN.1 OID element to a known OID string.
+
+**Parameters:**
+- `elem` - parsed element (must be OID type)
+- `oid_string` - OID in dot notation (e.g., "1.2.840.113549.1.1.11")
+
+**Returns:** 1 if match, 0 if no match.
+
+Example:
+
+```c
+if (fio_asn1_oid_eq(&elem, FIO_OID_SHA256_WITH_RSA)) {
+  printf("Signature algorithm: SHA-256 with RSA\n");
+}
+```
+
+#### `fio_asn1_parse_time`
+
+```c
+int fio_asn1_parse_time(const fio_asn1_element_s *elem, int64_t *unix_time);
+```
+
+Parses an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
+
+**Parameters:**
+- `elem` - parsed element (must be UTC_TIME or GENERALIZED_TIME type)
+- `unix_time` - output Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
+
+**Returns:** 0 on success, -1 on error.
+
+#### `fio_asn1_parse_string`
+
+```c
+const char *fio_asn1_parse_string(const fio_asn1_element_s *elem, size_t *len);
+```
+
+Parses an ASN.1 string element.
+
+Supports UTF8String, PrintableString, IA5String, and other string types. Returns a pointer directly into the element data (no copy).
+
+**Parameters:**
+- `elem` - parsed element (must be a string type)
+- `len` - output length of string
+
+**Returns:** pointer to string data, or NULL on error.
+
+#### `fio_asn1_parse_boolean`
+
+```c
+int fio_asn1_parse_boolean(const fio_asn1_element_s *elem, int *value);
+```
+
+Parses an ASN.1 BOOLEAN element.
+
+**Parameters:**
+- `elem` - parsed element (must be BOOLEAN type)
+- `value` - output boolean value (0 = false, non-zero = true)
+
+**Returns:** 0 on success, -1 on error.
+
+### Sequence/Set Iteration
+
+#### `fio_asn1_iterator_init`
+
+```c
+void fio_asn1_iterator_init(fio_asn1_iterator_s *it,
+                            const fio_asn1_element_s *sequence);
+```
+
+Initializes an iterator for a SEQUENCE or SET element.
+
+**Parameters:**
+- `it` - iterator to initialize
+- `sequence` - parsed element (must be SEQUENCE or SET)
+
+#### `fio_asn1_iterator_next`
+
+```c
+int fio_asn1_iterator_next(fio_asn1_iterator_s *it, fio_asn1_element_s *elem);
+```
+
+Gets the next element from an iterator.
+
+**Parameters:**
+- `it` - iterator (updated to point to next element)
+- `elem` - output for parsed element
+
+**Returns:** 0 if element available, -1 if end or error.
+
+#### `fio_asn1_iterator_has_next`
+
+```c
+int fio_asn1_iterator_has_next(const fio_asn1_iterator_s *it);
+```
+
+Checks if iterator has more elements.
+
+**Parameters:**
+- `it` - iterator
+
+**Returns:** 1 if more elements available, 0 otherwise.
+
+Example:
+
+```c
+fio_asn1_iterator_s it;
+fio_asn1_element_s child;
+
+fio_asn1_iterator_init(&it, &sequence_elem);
+while (fio_asn1_iterator_next(&it, &child) == 0) {
+  printf("Child tag: 0x%02X\n", child.tag);
+}
+```
+
+### Helper Functions
+
+#### `fio_asn1_is_tag`
+
+```c
+int fio_asn1_is_tag(const fio_asn1_element_s *elem, uint8_t tag);
+```
+
+Checks if an element is a specific tag type.
+
+**Parameters:**
+- `elem` - parsed element
+- `tag` - expected tag (e.g., `FIO_ASN1_INTEGER`)
+
+**Returns:** 1 if match, 0 otherwise.
+
+#### `fio_asn1_is_context_tag`
+
+```c
+int fio_asn1_is_context_tag(const fio_asn1_element_s *elem, uint8_t tag_num);
+```
+
+Checks if an element is a context-specific tag.
+
+**Parameters:**
+- `elem` - parsed element
+- `tag_num` - context tag number (0-31)
+
+**Returns:** 1 if match, 0 otherwise.
+
+Example:
+
+```c
+/* Check for X.509 version field [0] */
+if (fio_asn1_is_context_tag(&elem, 0)) {
+  /* Parse version number */
+}
+```
+
+#### `fio_asn1_tag_number`
+
+```c
+uint8_t fio_asn1_tag_number(const fio_asn1_element_s *elem);
+```
+
+Gets the tag number from an element.
+
+For universal tags, returns the tag value (0-30). For context-specific tags, returns the context number.
+
+**Parameters:**
+- `elem` - parsed element
+
+**Returns:** tag number.
+
+### Example: Parsing an X.509 Certificate
+
+```c
+#define FIO_ASN1
+#include "fio-stl/include.h"
+
+void parse_certificate(const uint8_t *der, size_t der_len) {
+  fio_asn1_element_s cert_seq;
+  
+  /* Parse outer SEQUENCE */
+  if (!fio_asn1_parse(&cert_seq, der, der_len)) {
+    printf("Failed to parse certificate\n");
+    return;
+  }
+  
+  if (!fio_asn1_is_tag(&cert_seq, FIO_ASN1_SEQUENCE)) {
+    printf("Not a valid certificate\n");
+    return;
+  }
+  
+  /* Iterate through certificate fields */
+  fio_asn1_iterator_s it;
+  fio_asn1_element_s tbs, sig_alg, sig_value;
+  
+  fio_asn1_iterator_init(&it, &cert_seq);
+  
+  /* TBSCertificate */
+  if (fio_asn1_iterator_next(&it, &tbs) != 0) return;
+  
+  /* SignatureAlgorithm */
+  if (fio_asn1_iterator_next(&it, &sig_alg) != 0) return;
+  
+  /* SignatureValue */
+  if (fio_asn1_iterator_next(&it, &sig_value) != 0) return;
+  
+  printf("Certificate parsed successfully\n");
+  printf("TBS length: %zu bytes\n", tbs.len);
+}
+```
+
+------------------------------------------------------------
+## RSA Signature Verification
+
+```c
+#define FIO_RSA
+#include FIO_INCLUDE_FILE
+```
+
+By defining `FIO_RSA`, RSA signature verification functions are made available. This module provides verification-only operations for TLS 1.3 certificate chain validation.
+
+**Supported Features:**
+- PKCS#1 v1.5 signatures (sha256WithRSAEncryption, sha384WithRSAEncryption, sha512WithRSAEncryption)
+- RSA-PSS signatures (required for TLS 1.3 CertificateVerify)
+- Key sizes: 2048, 3072, 4096 bits
+
+**Note**: This module is verification-only. No private key operations (signing, decryption) are supported.
+
+**Note**: This implementation has not been audited. Use at your own risk for security-critical applications.
+
+### Constants
+
+```c
+#define FIO_RSA_MAX_BITS  4096  /* Maximum RSA key size in bits */
+#define FIO_RSA_MAX_BYTES 512   /* Maximum RSA key size in bytes */
+```
+
+### Types
+
+#### `fio_rsa_hash_e`
+
+```c
+typedef enum {
+  FIO_RSA_HASH_SHA256 = 0, /* SHA-256 (32 bytes) */
+  FIO_RSA_HASH_SHA384 = 1, /* SHA-384 (48 bytes) */
+  FIO_RSA_HASH_SHA512 = 2, /* SHA-512 (64 bytes) */
+} fio_rsa_hash_e;
+```
+
+Hash algorithm identifiers for RSA verification.
+
+#### `fio_rsa_pubkey_s`
+
+```c
+typedef struct {
+  const uint8_t *n; /* Modulus (big-endian) */
+  size_t n_len;     /* Modulus length in bytes */
+  const uint8_t *e; /* Public exponent (big-endian) */
+  size_t e_len;     /* Exponent length in bytes */
+} fio_rsa_pubkey_s;
+```
+
+RSA public key for signature verification.
+
+The modulus (n) and exponent (e) are stored as big-endian byte arrays, matching the DER encoding used in X.509 certificates.
+
+**Members:**
+- `n` - pointer to the RSA modulus in big-endian format
+- `n_len` - length of the modulus in bytes (256 for 2048-bit, 384 for 3072-bit, 512 for 4096-bit)
+- `e` - pointer to the public exponent in big-endian format (typically 65537 = 0x010001)
+- `e_len` - length of the exponent in bytes
+
+### Signature Verification Functions
+
+#### `fio_rsa_verify_pkcs1`
+
+```c
+int fio_rsa_verify_pkcs1(const uint8_t *sig,
+                         size_t sig_len,
+                         const uint8_t *msg_hash,
+                         size_t hash_len,
+                         fio_rsa_hash_e hash_alg,
+                         const fio_rsa_pubkey_s *key);
+```
+
+Verifies an RSA PKCS#1 v1.5 signature.
+
+This verifies signatures with DigestInfo encoding as used in:
+- sha256WithRSAEncryption (OID 1.2.840.113549.1.1.11)
+- sha384WithRSAEncryption (OID 1.2.840.113549.1.1.12)
+- sha512WithRSAEncryption (OID 1.2.840.113549.1.1.13)
+
+**Parameters:**
+- `sig` - signature bytes (same length as modulus)
+- `sig_len` - signature length in bytes
+- `msg_hash` - pre-computed hash of the message
+- `hash_len` - hash length (32, 48, or 64 bytes)
+- `hash_alg` - hash algorithm used (`FIO_RSA_HASH_SHA256`, etc.)
+- `key` - RSA public key
+
+**Returns:** 0 on success (valid signature), -1 on failure.
+
+Example:
+
+```c
+/* Verify a PKCS#1 v1.5 signature */
+fio_rsa_pubkey_s pubkey = {
+  .n = modulus_bytes,
+  .n_len = 256,  /* 2048-bit key */
+  .e = exponent_bytes,
+  .e_len = 3     /* 65537 = 0x010001 */
+};
+
+/* Hash the message first */
+fio_u256 hash = fio_sha256(message, message_len);
+
+/* Verify signature */
+if (fio_rsa_verify_pkcs1(signature, 256, hash.u8, 32,
+                         FIO_RSA_HASH_SHA256, &pubkey) == 0) {
+  printf("Signature is valid\n");
+} else {
+  printf("Signature verification failed\n");
+}
+```
+
+#### `fio_rsa_verify_pss`
+
+```c
+int fio_rsa_verify_pss(const uint8_t *sig,
+                       size_t sig_len,
+                       const uint8_t *msg_hash,
+                       size_t hash_len,
+                       fio_rsa_hash_e hash_alg,
+                       const fio_rsa_pubkey_s *key);
+```
+
+Verifies an RSA-PSS signature (required for TLS 1.3).
+
+RSA-PSS uses probabilistic padding and is the mandatory signature scheme for TLS 1.3 CertificateVerify messages with RSA keys.
+
+This implementation uses:
+- MGF1 with the same hash function
+- Salt length = hash length (as required by TLS 1.3)
+- Trailer field = 0xBC
+
+**Parameters:**
+- `sig` - signature bytes (same length as modulus)
+- `sig_len` - signature length in bytes
+- `msg_hash` - pre-computed hash of the message
+- `hash_len` - hash length (32, 48, or 64 bytes)
+- `hash_alg` - hash algorithm used
+- `key` - RSA public key
+
+**Returns:** 0 on success (valid signature), -1 on failure.
+
+Example:
+
+```c
+/* Verify an RSA-PSS signature (TLS 1.3 CertificateVerify) */
+fio_rsa_pubkey_s pubkey = {
+  .n = cert->pubkey.rsa.n,
+  .n_len = cert->pubkey.rsa.n_len,
+  .e = cert->pubkey.rsa.e,
+  .e_len = cert->pubkey.rsa.e_len
+};
+
+/* The message hash is computed over the TLS 1.3 signed content */
+if (fio_rsa_verify_pss(signature, sig_len, content_hash, 32,
+                       FIO_RSA_HASH_SHA256, &pubkey) == 0) {
+  printf("RSA-PSS signature verified\n");
+}
+```
+
+### Usage with X.509 Certificates
+
+The RSA module is typically used together with the X.509 module for certificate verification:
+
+```c
+#define FIO_X509
+#define FIO_RSA
+#include "fio-stl/include.h"
+
+int verify_certificate_signature(const fio_x509_cert_s *cert,
+                                 const fio_x509_cert_s *issuer) {
+  /* Check that issuer has an RSA key */
+  if (issuer->key_type != FIO_X509_KEY_RSA)
+    return -1;
+  
+  /* Build RSA public key from issuer certificate */
+  fio_rsa_pubkey_s pubkey = {
+    .n = issuer->pubkey.rsa.n,
+    .n_len = issuer->pubkey.rsa.n_len,
+    .e = issuer->pubkey.rsa.e,
+    .e_len = issuer->pubkey.rsa.e_len
+  };
+  
+  /* Hash the TBS (To-Be-Signed) certificate data */
+  fio_u256 hash = fio_sha256(cert->tbs_data, cert->tbs_len);
+  
+  /* Verify based on signature algorithm */
+  switch (cert->sig_alg) {
+  case FIO_X509_SIG_RSA_PKCS1_SHA256:
+    return fio_rsa_verify_pkcs1(cert->signature, cert->signature_len,
+                                hash.u8, 32, FIO_RSA_HASH_SHA256, &pubkey);
+  case FIO_X509_SIG_RSA_PSS_SHA256:
+    return fio_rsa_verify_pss(cert->signature, cert->signature_len,
+                              hash.u8, 32, FIO_RSA_HASH_SHA256, &pubkey);
+  default:
+    return -1;
+  }
+}
+```
+
+### Security Considerations
+
+1. **Verification Only**: This module only supports signature verification. Private key operations are not implemented.
+
+2. **Constant-Time Operations**: The implementation uses constant-time comparison for signature verification to prevent timing attacks.
+
+3. **Key Size**: Only 2048-bit and larger keys are supported. Smaller keys are rejected as insecure.
+
+4. **No Auditing**: This implementation has not undergone a formal security audit. For production use in security-critical applications, consider using a well-audited cryptographic library.
+
+------------------------------------------------------------
+## X.509 Certificate Parser
+
+```c
+#define FIO_X509
+#include FIO_INCLUDE_FILE
+```
+
+By defining `FIO_X509`, an X.509v3 certificate parser is made available for TLS 1.3 certificate verification. This module provides parsing and validation capabilities for DER-encoded certificates.
+
+**Supported Features:**
+- RSA, ECDSA (P-256, P-384), and Ed25519 public keys
+- Signature verification using issuer certificates
+- Validity period checking
+- Hostname matching (CN and SAN with wildcards)
+- Basic constraints and key usage extensions
+- Certificate chain validation
+- Trust store management
+
+**Note**: This is a minimal parser for TLS 1.3. Not all X.509 features are supported. The implementation is non-allocating (pointers into DER data).
+
+### Types
+
+#### `fio_x509_key_type_e`
+
+```c
+typedef enum {
+  FIO_X509_KEY_UNKNOWN = 0,
+  FIO_X509_KEY_RSA = 1,        /* RSA (any key size) */
+  FIO_X509_KEY_ECDSA_P256 = 2, /* ECDSA with P-256/secp256r1 */
+  FIO_X509_KEY_ECDSA_P384 = 3, /* ECDSA with P-384/secp384r1 */
+  FIO_X509_KEY_ED25519 = 4,    /* Ed25519 (EdDSA) */
+} fio_x509_key_type_e;
+```
+
+Public key algorithm types supported in certificates.
+
+#### `fio_x509_sig_alg_e`
+
+```c
+typedef enum {
+  FIO_X509_SIG_UNKNOWN = 0,
+  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /* sha256WithRSAEncryption */
+  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /* sha384WithRSAEncryption */
+  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /* sha512WithRSAEncryption */
+  FIO_X509_SIG_RSA_PSS_SHA256 = 4,   /* RSA-PSS with SHA-256 */
+  FIO_X509_SIG_RSA_PSS_SHA384 = 5,   /* RSA-PSS with SHA-384 */
+  FIO_X509_SIG_RSA_PSS_SHA512 = 6,   /* RSA-PSS with SHA-512 */
+  FIO_X509_SIG_ECDSA_SHA256 = 7,     /* ecdsa-with-SHA256 */
+  FIO_X509_SIG_ECDSA_SHA384 = 8,     /* ecdsa-with-SHA384 */
+  FIO_X509_SIG_ED25519 = 9,          /* Ed25519 */
+} fio_x509_sig_alg_e;
+```
+
+Signature algorithm types used in certificate signatures.
+
+#### `fio_x509_key_usage_e`
+
+```c
+typedef enum {
+  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0001,
+  FIO_X509_KU_NON_REPUDIATION = 0x0002,
+  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0004,
+  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0008,
+  FIO_X509_KU_KEY_AGREEMENT = 0x0010,
+  FIO_X509_KU_KEY_CERT_SIGN = 0x0020,
+  FIO_X509_KU_CRL_SIGN = 0x0040,
+  FIO_X509_KU_ENCIPHER_ONLY = 0x0080,
+  FIO_X509_KU_DECIPHER_ONLY = 0x0100,
+} fio_x509_key_usage_e;
+```
+
+Key Usage bit flags (RFC 5280 Section 4.2.1.3).
+
+#### `fio_x509_error_e`
+
+```c
+typedef enum {
+  FIO_X509_OK = 0,                     /* Validation successful */
+  FIO_X509_ERR_PARSE = -1,             /* Failed to parse certificate */
+  FIO_X509_ERR_EXPIRED = -2,           /* Certificate expired */
+  FIO_X509_ERR_NOT_YET_VALID = -3,     /* Certificate not yet valid */
+  FIO_X509_ERR_SIGNATURE = -4,         /* Signature verification failed */
+  FIO_X509_ERR_ISSUER_MISMATCH = -5,   /* Issuer DN doesn't match subject DN */
+  FIO_X509_ERR_NOT_CA = -6,            /* Issuer is not a CA certificate */
+  FIO_X509_ERR_NO_TRUST_ANCHOR = -7,   /* Certificate not in trust store */
+  FIO_X509_ERR_HOSTNAME_MISMATCH = -8, /* Hostname doesn't match cert */
+  FIO_X509_ERR_EMPTY_CHAIN = -9,       /* Empty certificate chain */
+  FIO_X509_ERR_CHAIN_TOO_LONG = -10,   /* Chain exceeds maximum depth */
+} fio_x509_error_e;
+```
+
+Certificate chain validation error codes.
+
+#### `fio_x509_trust_store_s`
+
+```c
+typedef struct {
+  const uint8_t **roots;   /* Array of root CA certificate DER data */
+  const size_t *root_lens; /* Array of root CA certificate lengths */
+  size_t root_count;       /* Number of root CAs */
+} fio_x509_trust_store_s;
+```
+
+Trust store for root CA certificates.
+
+**Members:**
+- `roots` - array of pointers to DER-encoded root CA certificates
+- `root_lens` - array of lengths for each root certificate
+- `root_count` - number of root CAs in the trust store
+
+#### `fio_x509_cert_s`
+
+```c
+typedef struct {
+  /* Certificate version (0=v1, 1=v2, 2=v3) */
+  int version;
+
+  /* Validity period (Unix timestamps) */
+  int64_t not_before;
+  int64_t not_after;
+
+  /* Subject Distinguished Name (raw DER for comparison) */
+  const uint8_t *subject_der;
+  size_t subject_der_len;
+
+  /* Issuer Distinguished Name (raw DER for comparison) */
+  const uint8_t *issuer_der;
+  size_t issuer_der_len;
+
+  /* Subject Common Name (if present, pointer into DER data) */
+  const char *subject_cn;
+  size_t subject_cn_len;
+
+  /* Public Key Type */
+  fio_x509_key_type_e key_type;
+
+  /* Public Key Data (union based on key_type) */
+  union {
+    struct {
+      const uint8_t *n;  /* RSA modulus (big-endian) */
+      size_t n_len;
+      const uint8_t *e;  /* RSA exponent (big-endian) */
+      size_t e_len;
+    } rsa;
+    struct {
+      const uint8_t *point;  /* Uncompressed EC point (04 || x || y) */
+      size_t point_len;
+    } ecdsa;
+    struct {
+      const uint8_t *key;  /* 32-byte Ed25519 public key */
+    } ed25519;
+  } pubkey;
+
+  /* Signature Algorithm */
+  fio_x509_sig_alg_e sig_alg;
+
+  /* Signature value (pointer into DER data) */
+  const uint8_t *signature;
+  size_t signature_len;
+
+  /* TBS Certificate (for signature verification) */
+  const uint8_t *tbs_data;
+  size_t tbs_len;
+
+  /* Basic Constraints: is CA */
+  int is_ca;
+
+  /* Key Usage extension present */
+  int has_key_usage;
+  /* Key Usage bits */
+  uint16_t key_usage;
+
+  /* Subject Alternative Name: first DNS name (if present) */
+  const char *san_dns;
+  size_t san_dns_len;
+} fio_x509_cert_s;
+```
+
+Parsed X.509 certificate structure.
+
+**Note**: All pointers reference the original DER data, which must remain valid while the certificate structure is in use.
+
+### Certificate Parsing Functions
+
+#### `fio_x509_parse`
+
+```c
+int fio_x509_parse(fio_x509_cert_s *cert,
+                   const uint8_t *der_data,
+                   size_t der_len);
+```
+
+Parses a DER-encoded X.509 certificate.
+
+The cert structure will contain pointers into the original DER data, so the DER data must remain valid while the cert is in use.
+
+**Parameters:**
+- `cert` - output certificate structure (will be zeroed first)
+- `der_data` - pointer to DER-encoded certificate
+- `der_len` - length of DER data in bytes
+
+**Returns:** 0 on success, -1 on error.
+
+Example:
+
+```c
+fio_x509_cert_s cert;
+if (fio_x509_parse(&cert, der_data, der_len) == 0) {
+  printf("Subject CN: %.*s\n", (int)cert.subject_cn_len, cert.subject_cn);
+  printf("Key type: %d\n", cert.key_type);
+  printf("Is CA: %s\n", cert.is_ca ? "yes" : "no");
+}
+```
+
+#### `fio_x509_verify_signature`
+
+```c
+int fio_x509_verify_signature(const fio_x509_cert_s *cert,
+                              const fio_x509_cert_s *issuer);
+```
+
+Verifies certificate signature using issuer's public key.
+
+This verifies that the certificate was signed by the issuer.
+
+**Parameters:**
+- `cert` - certificate to verify
+- `issuer` - certificate of the issuer (contains the public key)
+
+**Returns:** 0 if valid, -1 if invalid or error.
+
+**Note**: Requires `FIO_RSA` module for RSA signatures and `FIO_ED25519` for Ed25519 signatures.
+
+#### `fio_x509_check_validity`
+
+```c
+int fio_x509_check_validity(const fio_x509_cert_s *cert, int64_t current_time);
+```
+
+Checks if certificate is currently valid (not expired, not yet valid).
+
+**Parameters:**
+- `cert` - certificate to check
+- `current_time` - current Unix timestamp (seconds since epoch)
+
+**Returns:** 0 if valid, -1 if expired or not yet valid.
+
+#### `fio_x509_match_hostname`
+
+```c
+int fio_x509_match_hostname(const fio_x509_cert_s *cert,
+                            const char *hostname,
+                            size_t hostname_len);
+```
+
+Checks if hostname matches certificate (CN or SAN).
+
+Supports wildcard matching (*.example.com). Per RFC 6125, wildcards only match one label.
+
+**Parameters:**
+- `cert` - certificate to check
+- `hostname` - hostname to match
+- `hostname_len` - length of hostname
+
+**Returns:** 0 if match, -1 if no match.
+
+Example:
+
+```c
+if (fio_x509_match_hostname(&cert, "www.example.com", 15) == 0) {
+  printf("Hostname matches certificate\n");
+}
+```
+
+#### `fio_x509_dn_equals`
+
+```c
+int fio_x509_dn_equals(const uint8_t *dn1, size_t dn1_len,
+                       const uint8_t *dn2, size_t dn2_len);
+```
+
+Compares two Distinguished Names for equality.
+
+Used for checking if issuer DN matches subject DN.
+
+**Parameters:**
+- `dn1` - first DN (DER-encoded)
+- `dn1_len` - length of first DN
+- `dn2` - second DN (DER-encoded)
+- `dn2_len` - length of second DN
+
+**Returns:** 0 if equal, non-zero if different.
+
+### Certificate Chain Validation
+
+#### `fio_x509_verify_chain`
+
+```c
+int fio_x509_verify_chain(const uint8_t **certs,
+                          const size_t *cert_lens,
+                          size_t cert_count,
+                          const char *hostname,
+                          int64_t current_time,
+                          fio_x509_trust_store_s *trust_store);
+```
+
+Validates a certificate chain for TLS 1.3.
+
+The chain should be ordered from end-entity to closest-to-root:
+- `certs[0]` = server's certificate (end-entity)
+- `certs[1]` = intermediate CA (signed certs[0])
+- `certs[n-1]` = closest to root (may be root or intermediate)
+
+**Validation performs:**
+1. Parse all certificates
+2. Check validity period for all certificates
+3. Verify hostname matches end-entity certificate (if hostname provided)
+4. Verify each certificate's signature using the next certificate's key
+5. Verify issuer DNs match subject DNs in the chain
+6. Verify intermediate/root certificates have CA:TRUE
+7. Verify the chain terminates at a trusted root (if trust store provided)
+
+**Parameters:**
+- `certs` - array of DER-encoded certificates
+- `cert_lens` - array of certificate lengths
+- `cert_count` - number of certificates in chain
+- `hostname` - expected hostname for end-entity (NULL to skip check)
+- `current_time` - current Unix timestamp for validity checking
+- `trust_store` - root CA certificates (NULL to skip trust check)
+
+**Returns:** `FIO_X509_OK` (0) on success, or error code on failure.
+
+Example:
+
+```c
+/* Set up trust store with root CAs */
+const uint8_t *roots[] = { root_ca_der };
+const size_t root_lens[] = { root_ca_len };
+fio_x509_trust_store_s trust_store = {
+  .roots = roots,
+  .root_lens = root_lens,
+  .root_count = 1
+};
+
+/* Verify certificate chain */
+int result = fio_x509_verify_chain(
+  cert_chain, cert_lens, cert_count,
+  "www.example.com",
+  time(NULL),
+  &trust_store
+);
+
+if (result == FIO_X509_OK) {
+  printf("Certificate chain is valid\n");
+} else {
+  printf("Validation failed: %s\n", fio_x509_error_str(result));
+}
+```
+
+#### `fio_x509_is_trusted`
+
+```c
+int fio_x509_is_trusted(const fio_x509_cert_s *cert,
+                        fio_x509_trust_store_s *trust_store);
+```
+
+Checks if a certificate is in the trust store.
+
+Comparison is done by matching subject DN.
+
+**Parameters:**
+- `cert` - certificate to check
+- `trust_store` - trust store to search
+
+**Returns:** 0 if trusted, -1 if not found.
+
+#### `fio_x509_error_str`
+
+```c
+const char *fio_x509_error_str(int error);
+```
+
+Gets human-readable error string for X.509 validation error code.
+
+**Parameters:**
+- `error` - error code from `fio_x509_verify_chain`
+
+**Returns:** static string describing the error.
+
+### TLS Certificate Message Parsing
+
+#### `fio_tls_cert_entry_s`
+
+```c
+typedef struct {
+  const uint8_t *cert; /* DER-encoded certificate data */
+  size_t cert_len;     /* Certificate length */
+} fio_tls_cert_entry_s;
+```
+
+TLS certificate entry (parsed from Certificate message).
+
+#### `fio_tls_parse_certificate_message`
+
+```c
+int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                      size_t max_entries,
+                                      const uint8_t *data,
+                                      size_t data_len);
+```
+
+Parses TLS 1.3 Certificate message into individual certificates.
+
+**Parameters:**
+- `entries` - output array for certificate entries
+- `max_entries` - maximum entries to parse
+- `data` - raw Certificate message data (after handshake header)
+- `data_len` - length of Certificate message data
+
+**Returns:** number of certificates parsed, or -1 on error.
+
+### Complete Example
+
+```c
+#define FIO_X509
+#define FIO_RSA
+#define FIO_ASN1
+#include "fio-stl/include.h"
+
+int verify_server_certificate(const uint8_t **chain, const size_t *lens,
+                              size_t count, const char *hostname) {
+  /* Set up trust store (in practice, load from system or file) */
+  fio_x509_trust_store_s trust_store = {
+    .roots = trusted_roots,
+    .root_lens = trusted_root_lens,
+    .root_count = trusted_root_count
+  };
+  
+  /* Get current time */
+  int64_t now = (int64_t)time(NULL);
+  
+  /* Verify the chain */
+  int result = fio_x509_verify_chain(chain, lens, count,
+                                     hostname, now, &trust_store);
+  
+  if (result != FIO_X509_OK) {
+    fprintf(stderr, "Certificate verification failed: %s\n",
+            fio_x509_error_str(result));
+    return -1;
+  }
+  
+  printf("Certificate chain verified successfully\n");
+  
+  /* Optionally, extract information from the end-entity certificate */
+  fio_x509_cert_s cert;
+  if (fio_x509_parse(&cert, chain[0], lens[0]) == 0) {
+    printf("Server: %.*s\n", (int)cert.subject_cn_len, cert.subject_cn);
+    printf("Valid until: %lld\n", (long long)cert.not_after);
+  }
+  
+  return 0;
+}
+```
+
+------------------------------------------------------------
 ## OTP
 
 ```c
@@ -11550,6 +12673,854 @@ Gets the SHA512 of a (possibly shared) masked secret stored in `secret`.
 Please store the returned value on the stack or not at all. The secret is stored masked in memory and unmasked copies should be temporary with short life-spans.
 
 -------------------------------------------------------------------------------
+## TLS 1.3 Client
+
+```c
+#define FIO_TLS13
+#include FIO_INCLUDE_FILE
+```
+
+By defining `FIO_TLS13`, a TLS 1.3 client implementation is made available. This module provides the complete TLS 1.3 handshake protocol, record layer encryption/decryption, and key schedule derivation functions.
+
+**Requirements:**
+- `FIO_HKDF` (which requires `FIO_SHA2`) for key derivation
+- `FIO_AES` for AES-GCM cipher suites
+- `FIO_CHACHA` for ChaCha20-Poly1305 cipher suite
+- `FIO_X25519` for key exchange
+- `FIO_X509` and `FIO_RSA` for certificate verification (optional)
+
+**Supported Features:**
+- Cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
+- Key exchange: X25519
+- Signature algorithms: RSA-PSS, RSA-PKCS1, Ed25519, ECDSA (P-256, P-384)
+- Server Name Indication (SNI)
+- Certificate chain verification (when FIO_X509 is included)
+
+**Note**: This implementation has not been audited. Use at your own risk for security-critical applications.
+
+------------------------------------------------------------
+
+### Constants
+
+```c
+/* Hash lengths */
+#define FIO_TLS13_SHA256_HASH_LEN 32
+#define FIO_TLS13_SHA384_HASH_LEN 48
+#define FIO_TLS13_MAX_HASH_LEN    48
+
+/* Key lengths */
+#define FIO_TLS13_AES128_KEY_LEN 16
+#define FIO_TLS13_AES256_KEY_LEN 32
+#define FIO_TLS13_CHACHA_KEY_LEN 32
+#define FIO_TLS13_IV_LEN         12
+
+/* Record layer */
+#define FIO_TLS13_RECORD_HEADER_LEN  5
+#define FIO_TLS13_MAX_PLAINTEXT_LEN  16384
+#define FIO_TLS13_MAX_CIPHERTEXT_LEN (16384 + 256)
+#define FIO_TLS13_TAG_LEN            16
+```
+
+------------------------------------------------------------
+
+### Types
+
+#### `fio_tls13_content_type_e`
+
+```c
+typedef enum {
+  FIO_TLS13_CONTENT_INVALID = 0,
+  FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC = 20, /* Legacy, ignored in TLS 1.3 */
+  FIO_TLS13_CONTENT_ALERT = 21,
+  FIO_TLS13_CONTENT_HANDSHAKE = 22,
+  FIO_TLS13_CONTENT_APPLICATION_DATA = 23,
+} fio_tls13_content_type_e;
+```
+
+TLS 1.3 content types (RFC 8446 Section 5.1).
+
+#### `fio_tls13_handshake_type_e`
+
+```c
+typedef enum {
+  FIO_TLS13_HS_CLIENT_HELLO = 1,
+  FIO_TLS13_HS_SERVER_HELLO = 2,
+  FIO_TLS13_HS_NEW_SESSION_TICKET = 4,
+  FIO_TLS13_HS_END_OF_EARLY_DATA = 5,
+  FIO_TLS13_HS_ENCRYPTED_EXTENSIONS = 8,
+  FIO_TLS13_HS_CERTIFICATE = 11,
+  FIO_TLS13_HS_CERTIFICATE_REQUEST = 13,
+  FIO_TLS13_HS_CERTIFICATE_VERIFY = 15,
+  FIO_TLS13_HS_FINISHED = 20,
+  FIO_TLS13_HS_KEY_UPDATE = 24,
+} fio_tls13_handshake_type_e;
+```
+
+TLS 1.3 handshake message types (RFC 8446 Section 4).
+
+#### `fio_tls13_cipher_suite_e`
+
+```c
+typedef enum {
+  FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256 = 0x1301,
+  FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384 = 0x1302,
+  FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256 = 0x1303,
+} fio_tls13_cipher_suite_e;
+```
+
+TLS 1.3 cipher suites (RFC 8446 Section B.4).
+
+#### `fio_tls13_cipher_type_e`
+
+```c
+typedef enum {
+  FIO_TLS13_CIPHER_AES_128_GCM = 0,
+  FIO_TLS13_CIPHER_AES_256_GCM = 1,
+  FIO_TLS13_CIPHER_CHACHA20_POLY1305 = 2,
+} fio_tls13_cipher_type_e;
+```
+
+Supported AEAD cipher types for TLS 1.3.
+
+#### `fio_tls13_record_keys_s`
+
+```c
+typedef struct {
+  uint8_t key[32];          /* Write key (16 or 32 bytes depending on cipher) */
+  uint8_t iv[12];           /* Write IV (always 12 bytes) */
+  uint64_t sequence_number; /* Per-record sequence number (starts at 0) */
+  uint8_t key_len;          /* 16 for AES-128, 32 for AES-256/ChaCha20 */
+  uint8_t cipher_type;      /* fio_tls13_cipher_type_e */
+} fio_tls13_record_keys_s;
+```
+
+Record encryption context (per-direction keys).
+
+#### `fio_tls13_client_state_e`
+
+```c
+typedef enum {
+  FIO_TLS13_STATE_START = 0,     /* Initial state */
+  FIO_TLS13_STATE_WAIT_SH,       /* Sent ClientHello, waiting for ServerHello */
+  FIO_TLS13_STATE_WAIT_EE,       /* Received ServerHello, waiting for EE */
+  FIO_TLS13_STATE_WAIT_CERT_CR,  /* Waiting for Certificate or CertRequest */
+  FIO_TLS13_STATE_WAIT_CERT,     /* Waiting for Certificate */
+  FIO_TLS13_STATE_WAIT_CV,       /* Waiting for CertificateVerify */
+  FIO_TLS13_STATE_WAIT_FINISHED, /* Waiting for server Finished */
+  FIO_TLS13_STATE_CONNECTED,     /* Handshake complete */
+  FIO_TLS13_STATE_ERROR,         /* Error state */
+} fio_tls13_client_state_e;
+```
+
+TLS 1.3 client handshake states.
+
+#### `fio_tls13_client_s`
+
+```c
+typedef struct {
+  /* State */
+  fio_tls13_client_state_e state;
+
+  /* Negotiated parameters */
+  uint16_t cipher_suite;
+  int use_sha384;
+
+  /* Key material */
+  uint8_t client_random[32];
+  uint8_t x25519_private_key[32];
+  uint8_t x25519_public_key[32];
+  uint8_t shared_secret[32];
+
+  /* Traffic keys */
+  fio_tls13_record_keys_s client_handshake_keys;
+  fio_tls13_record_keys_s server_handshake_keys;
+  fio_tls13_record_keys_s client_app_keys;
+  fio_tls13_record_keys_s server_app_keys;
+
+  /* Server certificate info */
+  const uint8_t *server_cert;
+  size_t server_cert_len;
+
+  /* Error info */
+  uint8_t alert_level;
+  uint8_t alert_description;
+
+  /* Configuration */
+  const char *server_name;
+  void *trust_store;
+  uint8_t skip_cert_verify;
+  /* ... additional internal fields ... */
+} fio_tls13_client_s;
+```
+
+TLS 1.3 client context containing all state for a connection.
+
+------------------------------------------------------------
+
+### Key Schedule Functions (RFC 8446 Section 7)
+
+#### `fio_tls13_hkdf_expand_label`
+
+```c
+void fio_tls13_hkdf_expand_label(void *restrict out,
+                                 size_t out_len,
+                                 const void *restrict secret,
+                                 size_t secret_len,
+                                 const char *label,
+                                 size_t label_len,
+                                 const void *restrict context,
+                                 size_t context_len,
+                                 int use_sha384);
+```
+
+TLS 1.3 HKDF-Expand-Label function.
+
+Derives keying material using the TLS 1.3 specific label format:
+```
+HKDF-Expand-Label(Secret, Label, Context, Length) =
+    HKDF-Expand(Secret, HkdfLabel, Length)
+```
+
+**Parameters:**
+- `out` - output buffer for derived key material
+- `out_len` - desired output length (max 255)
+- `secret` - the secret to expand (PRK from HKDF-Extract)
+- `secret_len` - secret length (32 for SHA-256, 48 for SHA-384)
+- `label` - the label string (without "tls13 " prefix)
+- `label_len` - label length (max 249)
+- `context` - optional context (transcript hash or empty)
+- `context_len` - context length (max 255)
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_secret`
+
+```c
+void fio_tls13_derive_secret(void *restrict out,
+                             const void *restrict secret,
+                             size_t secret_len,
+                             const char *label,
+                             size_t label_len,
+                             const void *restrict transcript_hash,
+                             size_t hash_len,
+                             int use_sha384);
+```
+
+TLS 1.3 Derive-Secret function.
+
+```
+Derive-Secret(Secret, Label, Messages) =
+    HKDF-Expand-Label(Secret, Label, Transcript-Hash(Messages), Hash.length)
+```
+
+**Parameters:**
+- `out` - output buffer (32 bytes for SHA-256, 48 for SHA-384)
+- `secret` - the base secret
+- `secret_len` - secret length
+- `label` - the label string (e.g., "c hs traffic")
+- `label_len` - label length
+- `transcript_hash` - hash of handshake messages (or NULL for empty hash)
+- `hash_len` - hash length (32 or 48)
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_early_secret`
+
+```c
+void fio_tls13_derive_early_secret(void *restrict early_secret,
+                                   const void *restrict psk,
+                                   size_t psk_len,
+                                   int use_sha384);
+```
+
+Derives the Early Secret from PSK.
+
+```
+Early Secret = HKDF-Extract(salt=0, IKM=PSK)
+```
+
+**Parameters:**
+- `early_secret` - output buffer (32 or 48 bytes)
+- `psk` - pre-shared key (or NULL for no PSK)
+- `psk_len` - PSK length (0 if no PSK)
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_handshake_secret`
+
+```c
+void fio_tls13_derive_handshake_secret(void *restrict handshake_secret,
+                                       const void *restrict early_secret,
+                                       const void *restrict ecdhe_secret,
+                                       size_t ecdhe_len,
+                                       int use_sha384);
+```
+
+Derives the Handshake Secret from ECDHE shared secret.
+
+**Parameters:**
+- `handshake_secret` - output buffer (32 or 48 bytes)
+- `early_secret` - the early secret
+- `ecdhe_secret` - the ECDHE shared secret (e.g., from X25519)
+- `ecdhe_len` - ECDHE secret length (32 for X25519)
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_master_secret`
+
+```c
+void fio_tls13_derive_master_secret(void *restrict master_secret,
+                                    const void *restrict handshake_secret,
+                                    int use_sha384);
+```
+
+Derives the Master Secret.
+
+**Parameters:**
+- `master_secret` - output buffer (32 or 48 bytes)
+- `handshake_secret` - the handshake secret
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_traffic_keys`
+
+```c
+void fio_tls13_derive_traffic_keys(void *restrict key,
+                                   size_t key_len,
+                                   void *restrict iv,
+                                   const void *restrict traffic_secret,
+                                   int use_sha384);
+```
+
+Derives traffic keys and IV from a traffic secret.
+
+**Parameters:**
+- `key` - output buffer for write key
+- `key_len` - key length (16 for AES-128, 32 for AES-256/ChaCha20)
+- `iv` - output buffer for write IV (12 bytes)
+- `traffic_secret` - the traffic secret
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_derive_finished_key`
+
+```c
+void fio_tls13_derive_finished_key(void *restrict finished_key,
+                                   const void *restrict traffic_secret,
+                                   int use_sha384);
+```
+
+Derives the Finished key from a traffic secret.
+
+**Parameters:**
+- `finished_key` - output buffer (32 or 48 bytes)
+- `traffic_secret` - the handshake traffic secret
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_compute_finished`
+
+```c
+void fio_tls13_compute_finished(void *restrict verify_data,
+                                const void *restrict finished_key,
+                                const void *restrict transcript_hash,
+                                int use_sha384);
+```
+
+Computes the Finished verify_data.
+
+```
+verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context))
+```
+
+**Parameters:**
+- `verify_data` - output buffer (32 or 48 bytes)
+- `finished_key` - the finished key
+- `transcript_hash` - hash of handshake messages up to this point
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+#### `fio_tls13_update_traffic_secret`
+
+```c
+void fio_tls13_update_traffic_secret(void *restrict new_secret,
+                                     const void *restrict current_secret,
+                                     int use_sha384);
+```
+
+Updates application traffic secret for key update.
+
+**Parameters:**
+- `new_secret` - output buffer (32 or 48 bytes)
+- `current_secret` - current application traffic secret
+- `use_sha384` - if non-zero, use SHA-384; otherwise SHA-256
+
+------------------------------------------------------------
+
+### Record Layer Functions (RFC 8446 Section 5)
+
+#### `fio_tls13_build_nonce`
+
+```c
+void fio_tls13_build_nonce(uint8_t nonce[12],
+                           const uint8_t iv[12],
+                           uint64_t seq);
+```
+
+Builds per-record nonce by XORing sequence number with IV.
+
+**Parameters:**
+- `nonce` - output buffer (must be 12 bytes)
+- `iv` - static IV from key derivation (12 bytes)
+- `seq` - 64-bit sequence number
+
+#### `fio_tls13_record_parse_header`
+
+```c
+const uint8_t *fio_tls13_record_parse_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_content_type_e *content_type,
+    size_t *payload_len);
+```
+
+Parses a TLS record header.
+
+**Parameters:**
+- `data` - input buffer containing record data
+- `data_len` - length of input buffer
+- `content_type` - output: content type from header
+- `payload_len` - output: payload length from header
+
+**Returns:** pointer to payload data, or NULL if incomplete/invalid.
+
+#### `fio_tls13_record_encrypt`
+
+```c
+int fio_tls13_record_encrypt(uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *plaintext,
+                             size_t plaintext_len,
+                             fio_tls13_content_type_e content_type,
+                             fio_tls13_record_keys_s *keys);
+```
+
+Encrypts a TLS 1.3 record.
+
+Output format: 5-byte header + encrypted(plaintext + content_type) + tag
+
+**Parameters:**
+- `out` - output buffer for encrypted record
+- `out_capacity` - capacity of output buffer
+- `plaintext` - plaintext data to encrypt
+- `plaintext_len` - length of plaintext
+- `content_type` - content type (appended to plaintext before encryption)
+- `keys` - encryption keys (sequence number will be incremented)
+
+**Returns:** total output length (header + ciphertext + tag), or -1 on error.
+
+#### `fio_tls13_record_decrypt`
+
+```c
+int fio_tls13_record_decrypt(uint8_t *out,
+                             size_t out_capacity,
+                             fio_tls13_content_type_e *content_type,
+                             const uint8_t *ciphertext,
+                             size_t ciphertext_len,
+                             fio_tls13_record_keys_s *keys);
+```
+
+Decrypts a TLS 1.3 record.
+
+**Parameters:**
+- `out` - output buffer for decrypted plaintext
+- `out_capacity` - capacity of output buffer
+- `content_type` - output: actual content type from inner plaintext
+- `ciphertext` - input ciphertext (includes 5-byte header)
+- `ciphertext_len` - total length including header
+- `keys` - decryption keys (sequence number will be incremented)
+
+**Returns:** plaintext length (excluding padding and content type), or -1 on error.
+
+#### `fio_tls13_record_keys_init`
+
+```c
+void fio_tls13_record_keys_init(fio_tls13_record_keys_s *keys,
+                                const uint8_t *key,
+                                uint8_t key_len,
+                                const uint8_t iv[12],
+                                fio_tls13_cipher_type_e cipher_type);
+```
+
+Initializes record keys structure.
+
+**Parameters:**
+- `keys` - keys structure to initialize
+- `key` - key material (16 or 32 bytes)
+- `key_len` - key length
+- `iv` - IV material (12 bytes)
+- `cipher_type` - cipher type
+
+#### `fio_tls13_record_keys_clear`
+
+```c
+void fio_tls13_record_keys_clear(fio_tls13_record_keys_s *keys);
+```
+
+Clears sensitive key material from memory.
+
+------------------------------------------------------------
+
+### Handshake Message Functions
+
+#### `fio_tls13_parse_handshake_header`
+
+```c
+const uint8_t *fio_tls13_parse_handshake_header(
+    const uint8_t *data,
+    size_t data_len,
+    fio_tls13_handshake_type_e *msg_type,
+    size_t *body_len);
+```
+
+Parses handshake header, returns message type and body pointer.
+
+**Returns:** pointer to message body, or NULL on error.
+
+#### `fio_tls13_write_handshake_header`
+
+```c
+void fio_tls13_write_handshake_header(uint8_t *out,
+                                      fio_tls13_handshake_type_e msg_type,
+                                      size_t body_len);
+```
+
+Writes handshake header (4 bytes): HandshakeType (1 byte) + uint24 length (3 bytes).
+
+#### `fio_tls13_build_client_hello`
+
+```c
+int fio_tls13_build_client_hello(uint8_t *out,
+                                 size_t out_capacity,
+                                 const uint8_t random[32],
+                                 const char *server_name,
+                                 const uint8_t *x25519_pubkey,
+                                 const uint16_t *cipher_suites,
+                                 size_t cipher_suite_count);
+```
+
+Builds a ClientHello message.
+
+**Parameters:**
+- `out` - output buffer
+- `out_capacity` - size of output buffer
+- `random` - 32-byte client random
+- `server_name` - SNI hostname (NULL if not used)
+- `x25519_pubkey` - 32-byte X25519 public key
+- `cipher_suites` - array of cipher suites to offer
+- `cipher_suite_count` - number of cipher suites
+
+**Returns:** message length on success, -1 on error.
+
+#### `fio_tls13_parse_server_hello`
+
+```c
+int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
+                                 const uint8_t *data,
+                                 size_t data_len);
+```
+
+Parses ServerHello message.
+
+**Returns:** 0 on success, -1 on error.
+
+#### `fio_tls13_build_finished`
+
+```c
+int fio_tls13_build_finished(uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *verify_data,
+                             size_t verify_data_len);
+```
+
+Builds Finished message.
+
+**Returns:** message length on success, -1 on error.
+
+#### `fio_tls13_parse_finished`
+
+```c
+int fio_tls13_parse_finished(const uint8_t *data,
+                             size_t data_len,
+                             const uint8_t *expected_verify_data,
+                             size_t verify_data_len);
+```
+
+Parses and verifies Finished message.
+
+**Returns:** 0 on success (MAC matches), -1 on error.
+
+------------------------------------------------------------
+
+### Client API
+
+#### `fio_tls13_client_init`
+
+```c
+void fio_tls13_client_init(fio_tls13_client_s *client, const char *server_name);
+```
+
+Initializes client context.
+
+**Parameters:**
+- `client` - client context to initialize
+- `server_name` - SNI hostname (can be NULL)
+
+#### `fio_tls13_client_destroy`
+
+```c
+void fio_tls13_client_destroy(fio_tls13_client_s *client);
+```
+
+Cleans up client context (zeroes secrets).
+
+#### `fio_tls13_client_set_trust_store`
+
+```c
+void fio_tls13_client_set_trust_store(fio_tls13_client_s *client,
+                                      void *trust_store);
+```
+
+Sets trust store for certificate chain verification.
+
+When set, the client will verify the server's certificate chain against the provided trust store. If NULL (default), chain verification is skipped.
+
+**Note**: Requires `FIO_X509` module. The trust_store pointer must point to a valid `fio_x509_trust_store_s` structure.
+
+#### `fio_tls13_client_skip_verification`
+
+```c
+void fio_tls13_client_skip_verification(fio_tls13_client_s *client, int skip);
+```
+
+Skips all certificate verification (insecure).
+
+When enabled, the client will NOT verify CertificateVerify signature, certificate chain, or hostname matching.
+
+**Warning**: This is insecure and should only be used for testing.
+
+#### `fio_tls13_client_start`
+
+```c
+int fio_tls13_client_start(fio_tls13_client_s *client,
+                           uint8_t *out,
+                           size_t out_capacity);
+```
+
+Generates ClientHello message and starts handshake.
+
+**Parameters:**
+- `client` - client context
+- `out` - output buffer for ClientHello record
+- `out_capacity` - capacity of output buffer
+
+**Returns:** message length on success, -1 on error.
+
+#### `fio_tls13_client_process`
+
+```c
+int fio_tls13_client_process(fio_tls13_client_s *client,
+                             const uint8_t *in,
+                             size_t in_len,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             size_t *out_len);
+```
+
+Processes incoming TLS record(s).
+
+May generate response data in out buffer.
+
+**Parameters:**
+- `client` - client context
+- `in` - input buffer containing TLS record(s)
+- `in_len` - length of input data
+- `out` - output buffer for response
+- `out_capacity` - capacity of output buffer
+- `out_len` - output: response length (0 if no response needed)
+
+**Returns:** number of bytes consumed, or -1 on error.
+
+#### `fio_tls13_client_encrypt`
+
+```c
+int fio_tls13_client_encrypt(fio_tls13_client_s *client,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *plaintext,
+                             size_t plaintext_len);
+```
+
+Encrypts application data for sending.
+
+**Parameters:**
+- `client` - client context
+- `out` - output buffer for encrypted record
+- `out_capacity` - capacity of output buffer
+- `plaintext` - plaintext data to encrypt
+- `plaintext_len` - length of plaintext
+
+**Returns:** encrypted record length, or -1 on error.
+
+#### `fio_tls13_client_decrypt`
+
+```c
+int fio_tls13_client_decrypt(fio_tls13_client_s *client,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *ciphertext,
+                             size_t ciphertext_len);
+```
+
+Decrypts received application data.
+
+**Parameters:**
+- `client` - client context
+- `out` - output buffer for decrypted data
+- `out_capacity` - capacity of output buffer
+- `ciphertext` - encrypted record (including header)
+- `ciphertext_len` - length of encrypted record
+
+**Returns:** plaintext length, or -1 on error.
+
+#### `fio_tls13_client_is_connected`
+
+```c
+int fio_tls13_client_is_connected(fio_tls13_client_s *client);
+```
+
+Checks if handshake is complete.
+
+**Returns:** 1 if connected, 0 otherwise.
+
+#### `fio_tls13_client_is_error`
+
+```c
+int fio_tls13_client_is_error(fio_tls13_client_s *client);
+```
+
+Checks if in error state.
+
+**Returns:** 1 if error, 0 otherwise.
+
+#### `fio_tls13_client_state_name`
+
+```c
+const char *fio_tls13_client_state_name(fio_tls13_client_s *client);
+```
+
+Gets current state name (for debugging).
+
+**Returns:** state name string.
+
+#### `fio_tls13_client_get_cert_error`
+
+```c
+int fio_tls13_client_get_cert_error(fio_tls13_client_s *client);
+```
+
+Gets the last certificate verification error.
+
+**Returns:** error code (0 = OK, negative = error).
+
+#### `fio_tls13_client_is_cert_verified`
+
+```c
+int fio_tls13_client_is_cert_verified(fio_tls13_client_s *client);
+```
+
+Checks if certificate verification was successful.
+
+**Returns:** 1 if verified, 0 if not verified or skipped.
+
+------------------------------------------------------------
+
+### Complete Example
+
+```c
+#define FIO_TLS13
+#define FIO_X509
+#define FIO_RSA
+#define FIO_SOCK
+#include "fio-stl/include.h"
+
+int tls_connect(const char *hostname, int port) {
+  /* Connect TCP socket */
+  int fd = /* ... establish TCP connection ... */;
+  
+  /* Initialize TLS client */
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, hostname);
+  
+  /* Optional: Set trust store for certificate verification */
+  fio_x509_trust_store_s trust_store = { /* ... */ };
+  fio_tls13_client_set_trust_store(&client, &trust_store);
+  
+  /* Start handshake - send ClientHello */
+  uint8_t out_buf[4096];
+  int out_len = fio_tls13_client_start(&client, out_buf, sizeof(out_buf));
+  if (out_len < 0) {
+    fprintf(stderr, "Failed to create ClientHello\n");
+    return -1;
+  }
+  send(fd, out_buf, out_len, 0);
+  
+  /* Process handshake messages until connected */
+  uint8_t in_buf[16384];
+  while (!fio_tls13_client_is_connected(&client)) {
+    if (fio_tls13_client_is_error(&client)) {
+      fprintf(stderr, "TLS handshake error\n");
+      return -1;
+    }
+    
+    /* Receive data */
+    ssize_t recv_len = recv(fd, in_buf, sizeof(in_buf), 0);
+    if (recv_len <= 0) break;
+    
+    /* Process received data */
+    size_t response_len = 0;
+    int consumed = fio_tls13_client_process(&client, in_buf, recv_len,
+                                            out_buf, sizeof(out_buf),
+                                            &response_len);
+    if (consumed < 0) {
+      fprintf(stderr, "TLS processing error\n");
+      return -1;
+    }
+    
+    /* Send any response (e.g., client Finished) */
+    if (response_len > 0) {
+      send(fd, out_buf, response_len, 0);
+    }
+  }
+  
+  printf("TLS 1.3 handshake complete!\n");
+  printf("Cipher suite: 0x%04X\n", client.cipher_suite);
+  
+  /* Send encrypted application data */
+  const char *request = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
+  int enc_len = fio_tls13_client_encrypt(&client, out_buf, sizeof(out_buf),
+                                         (uint8_t*)request, strlen(request));
+  send(fd, out_buf, enc_len, 0);
+  
+  /* Receive and decrypt response */
+  ssize_t recv_len = recv(fd, in_buf, sizeof(in_buf), 0);
+  int dec_len = fio_tls13_client_decrypt(&client, out_buf, sizeof(out_buf),
+                                         in_buf, recv_len);
+  if (dec_len > 0) {
+    printf("Response: %.*s\n", dec_len, out_buf);
+  }
+  
+  /* Clean up */
+  fio_tls13_client_destroy(&client);
+  close(fd);
+  
+  return 0;
+}
+```
+
+------------------------------------------------------------
 ## Dynamic Strings
 
 ```c

@@ -130,6 +130,10 @@
 #include "154 ed25519.h"
 #endif
 
+#ifdef FIO_P256
+#include "154 p256.h"
+#endif
+
 #ifdef FIO_ASN1
 #include "155 asn1.h"
 #endif

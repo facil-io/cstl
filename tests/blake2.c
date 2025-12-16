@@ -1,9 +1,10 @@
 /* *****************************************************************************
 BLAKE2 Tests
 ***************************************************************************** */
+#include "test-helpers.h"
 #define FIO_LOG
 #define FIO_BLAKE2
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 /* Test vectors from RFC 7693 and BLAKE2 reference implementation */
 

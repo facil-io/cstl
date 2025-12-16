@@ -2852,13 +2852,35 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
     }
     break;
   }
-  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256:
+  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
+#if defined(H___FIO_P256___H)
+    /* ECDSA P-256 with SHA-256 */
+    if (cert->key_type != FIO_X509_KEY_ECDSA_P256) {
+      FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for ECDSA P-256");
+      return -1;
+    }
+    if (!cert->pubkey.ecdsa.point || cert->pubkey.ecdsa.point_len != 65) {
+      FIO_LOG_DEBUG2("TLS 1.3: Invalid ECDSA P-256 public key");
+      return -1;
+    }
+    if (fio_ecdsa_p256_verify(signature,
+                              sig_len,
+                              content_hash,
+                              cert->pubkey.ecdsa.point,
+                              cert->pubkey.ecdsa.point_len) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-256 signature verification failed");
+      return -1;
+    }
+    break;
+#else
+    FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-256 not available (FIO_P256 not defined)");
+    return -1;
+#endif
+  }
   case FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384:
-    /* ECDSA verification - not fully implemented yet */
-    FIO_LOG_DEBUG2("TLS 1.3: ECDSA signature verification not yet supported");
-    /* For now, allow connection to proceed without ECDSA verification */
-    /* TODO: Implement ECDSA P-256 and P-384 verification */
-    return 0;
+    /* ECDSA P-384 not yet implemented */
+    FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-384 verification not yet supported");
+    return -1;
   default: return -1;
   }
 
@@ -3125,9 +3147,12 @@ FIO_SFUNC int fio___tls13_process_handshake_message(fio_tls13_client_s *client,
                             FIO_TLS13_ALERT_UNEXPECTED_MESSAGE);
       return -1;
     }
-    fio___tls13_transcript_update(client, msg, 4 + body_len);
+    /* Process CertificateVerify BEFORE updating transcript (signature covers
+     * transcript up to but not including CertificateVerify) */
     if (fio___tls13_process_certificate_verify(client, body, body_len) != 0)
       return -1;
+    /* Now update transcript with CertificateVerify */
+    fio___tls13_transcript_update(client, msg, 4 + body_len);
     /* Verify certificate chain after CertificateVerify signature is valid */
     if (fio___tls13_verify_certificate_chain(client) != 0) {
       fio___tls13_set_error(client,
