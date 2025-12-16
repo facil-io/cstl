@@ -111,7 +111,7 @@
 #include "152 sha2.h"
 #endif
 #ifdef FIO_HKDF
-#include "152 hkdf.h"
+#include "152 sha2z hkdf.h"
 #endif
 #ifdef FIO_BLAKE2
 #include "152 blake2.h"
@@ -130,11 +130,27 @@
 #include "154 ed25519.h"
 #endif
 
+#ifdef FIO_ASN1
+#include "155 asn1.h"
+#endif
+
+#ifdef FIO_RSA
+#include "155 rsa.h"
+#endif
+
+#ifdef FIO_X509
+#include "155 x509.h"
+#endif
+
 #ifdef FIO_OTP
 #include "160 otp.h"
 #endif
 #ifdef FIO_SECRET
 #include "160 secret.h"
+#endif
+
+#ifdef FIO_TLS13
+#include "190 tls13.h"
 #endif
 
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)

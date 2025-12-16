@@ -3140,6 +3140,110 @@ FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out) {
 }
 
 /**
+ * Multi-precision long multiplication for `len` 64 bit words.
+ *
+ * `dest` must be `len * 2` long to hold the result.
+ *
+ * `a` and `b` must be of equal `len`.
+ *
+ * This uses long multiplication with loop unrolling for better performance.
+ */
+FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
+                                   const uint64_t *a,
+                                   const uint64_t *b,
+                                   const size_t len) {
+  /* Zero out result */
+  for (size_t i = 0; i < len * 2; ++i)
+    target[i] = 0;
+
+  for (size_t i = 0; i < len; ++i) {
+#ifdef __SIZEOF_INT128__
+    __uint128_t carry = 0;
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 for better performance */
+    for (; j + 3 < len; j += 4) {
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      __uint128_t prod0 = (__uint128_t)a[i] * b[j];
+      __uint128_t sum0 = (__uint128_t)target[k] + (uint64_t)prod0 + carry;
+      target[k] = (uint64_t)sum0;
+      carry = (prod0 >> 64) + (sum0 >> 64);
+
+      /* Iteration 1 */
+      __uint128_t prod1 = (__uint128_t)a[i] * b[j + 1];
+      __uint128_t sum1 = (__uint128_t)target[k + 1] + (uint64_t)prod1 + carry;
+      target[k + 1] = (uint64_t)sum1;
+      carry = (prod1 >> 64) + (sum1 >> 64);
+
+      /* Iteration 2 */
+      __uint128_t prod2 = (__uint128_t)a[i] * b[j + 2];
+      __uint128_t sum2 = (__uint128_t)target[k + 2] + (uint64_t)prod2 + carry;
+      target[k + 2] = (uint64_t)sum2;
+      carry = (prod2 >> 64) + (sum2 >> 64);
+
+      /* Iteration 3 */
+      __uint128_t prod3 = (__uint128_t)a[i] * b[j + 3];
+      __uint128_t sum3 = (__uint128_t)target[k + 3] + (uint64_t)prod3 + carry;
+      target[k + 3] = (uint64_t)sum3;
+      carry = (prod3 >> 64) + (sum3 >> 64);
+    }
+
+    /* Handle remainder */
+    for (; j < len; j++) {
+      size_t k = i + j;
+      __uint128_t product = (__uint128_t)a[i] * b[j];
+      __uint128_t sum = (__uint128_t)target[k] + (uint64_t)product + carry;
+      target[k] = (uint64_t)sum;
+      carry = (product >> 64) + (sum >> 64);
+    }
+
+    target[i + len] = (uint64_t)carry;
+#else
+    /* Optimized non-__uint128_t path with loop unrolling */
+    uint64_t ch = 0, cl = 0;
+    size_t j = 0;
+
+    /* Unroll inner loop by 4 */
+    for (; j + 3 < len; j += 4) {
+      uint64_t hi0, lo0, hi1, lo1, hi2, lo2, hi3, lo3;
+      size_t k = i + j;
+
+      /* Iteration 0 */
+      lo0 = fio_math_mulc64(a[i], b[j], &hi0);
+      target[k] = fio_math_addc64(target[k], lo0, cl, &cl);
+      target[k + 1] = fio_math_addc64(target[k + 1], hi0, ch, &ch);
+
+      /* Iteration 1 */
+      lo1 = fio_math_mulc64(a[i], b[j + 1], &hi1);
+      target[k + 1] = fio_math_addc64(target[k + 1], lo1, cl, &cl);
+      target[k + 2] = fio_math_addc64(target[k + 2], hi1, ch, &ch);
+
+      /* Iteration 2 */
+      lo2 = fio_math_mulc64(a[i], b[j + 2], &hi2);
+      target[k + 2] = fio_math_addc64(target[k + 2], lo2, cl, &cl);
+      target[k + 3] = fio_math_addc64(target[k + 3], hi2, ch, &ch);
+
+      /* Iteration 3 */
+      lo3 = fio_math_mulc64(a[i], b[j + 3], &hi3);
+      target[k + 3] = fio_math_addc64(target[k + 3], lo3, cl, &cl);
+      target[k + 4] = fio_math_addc64(target[k + 4], hi3, ch, &ch);
+    }
+
+    /* Handle remainder */
+    for (; j < len; ++j) {
+      uint64_t hi, lo;
+      lo = fio_math_mulc64(a[i], b[j], &hi);
+      target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
+      target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
+    }
+    target[i + len] += cl;
+#endif
+  }
+}
+
+/**
  * Optimized 256-bit (4 word) multiplication.
  * Fully unrolled for maximum performance in ECC-256 and SHA-256 operations.
  */
@@ -3372,110 +3476,6 @@ FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
   /* Fallback for platforms without __uint128_t (MSVC) */
   fio___math_mul_long(dest, a, b, 16);
 #endif
-}
-
-/**
- * Multi-precision long multiplication for `len` 64 bit words.
- *
- * `dest` must be `len * 2` long to hold the result.
- *
- * `a` and `b` must be of equal `len`.
- *
- * This uses long multiplication with loop unrolling for better performance.
- */
-FIO_IFUNC void fio___math_mul_long(uint64_t *restrict target,
-                                   const uint64_t *a,
-                                   const uint64_t *b,
-                                   const size_t len) {
-  /* Zero out result */
-  for (size_t i = 0; i < len * 2; ++i)
-    target[i] = 0;
-
-  for (size_t i = 0; i < len; ++i) {
-#ifdef __SIZEOF_INT128__
-    __uint128_t carry = 0;
-    size_t j = 0;
-
-    /* Unroll inner loop by 4 for better performance */
-    for (; j + 3 < len; j += 4) {
-      size_t k = i + j;
-
-      /* Iteration 0 */
-      __uint128_t prod0 = (__uint128_t)a[i] * b[j];
-      __uint128_t sum0 = (__uint128_t)target[k] + (uint64_t)prod0 + carry;
-      target[k] = (uint64_t)sum0;
-      carry = (prod0 >> 64) + (sum0 >> 64);
-
-      /* Iteration 1 */
-      __uint128_t prod1 = (__uint128_t)a[i] * b[j + 1];
-      __uint128_t sum1 = (__uint128_t)target[k + 1] + (uint64_t)prod1 + carry;
-      target[k + 1] = (uint64_t)sum1;
-      carry = (prod1 >> 64) + (sum1 >> 64);
-
-      /* Iteration 2 */
-      __uint128_t prod2 = (__uint128_t)a[i] * b[j + 2];
-      __uint128_t sum2 = (__uint128_t)target[k + 2] + (uint64_t)prod2 + carry;
-      target[k + 2] = (uint64_t)sum2;
-      carry = (prod2 >> 64) + (sum2 >> 64);
-
-      /* Iteration 3 */
-      __uint128_t prod3 = (__uint128_t)a[i] * b[j + 3];
-      __uint128_t sum3 = (__uint128_t)target[k + 3] + (uint64_t)prod3 + carry;
-      target[k + 3] = (uint64_t)sum3;
-      carry = (prod3 >> 64) + (sum3 >> 64);
-    }
-
-    /* Handle remainder */
-    for (; j < len; j++) {
-      size_t k = i + j;
-      __uint128_t product = (__uint128_t)a[i] * b[j];
-      __uint128_t sum = (__uint128_t)target[k] + (uint64_t)product + carry;
-      target[k] = (uint64_t)sum;
-      carry = (product >> 64) + (sum >> 64);
-    }
-
-    target[i + len] = (uint64_t)carry;
-#else
-    /* Optimized non-__uint128_t path with loop unrolling */
-    uint64_t ch = 0, cl = 0;
-    size_t j = 0;
-
-    /* Unroll inner loop by 4 */
-    for (; j + 3 < len; j += 4) {
-      uint64_t hi0, lo0, hi1, lo1, hi2, lo2, hi3, lo3;
-      size_t k = i + j;
-
-      /* Iteration 0 */
-      lo0 = fio_math_mulc64(a[i], b[j], &hi0);
-      target[k] = fio_math_addc64(target[k], lo0, cl, &cl);
-      target[k + 1] = fio_math_addc64(target[k + 1], hi0, ch, &ch);
-
-      /* Iteration 1 */
-      lo1 = fio_math_mulc64(a[i], b[j + 1], &hi1);
-      target[k + 1] = fio_math_addc64(target[k + 1], lo1, cl, &cl);
-      target[k + 2] = fio_math_addc64(target[k + 2], hi1, ch, &ch);
-
-      /* Iteration 2 */
-      lo2 = fio_math_mulc64(a[i], b[j + 2], &hi2);
-      target[k + 2] = fio_math_addc64(target[k + 2], lo2, cl, &cl);
-      target[k + 3] = fio_math_addc64(target[k + 3], hi2, ch, &ch);
-
-      /* Iteration 3 */
-      lo3 = fio_math_mulc64(a[i], b[j + 3], &hi3);
-      target[k + 3] = fio_math_addc64(target[k + 3], lo3, cl, &cl);
-      target[k + 4] = fio_math_addc64(target[k + 4], hi3, ch, &ch);
-    }
-
-    /* Handle remainder */
-    for (; j < len; ++j) {
-      uint64_t hi, lo;
-      lo = fio_math_mulc64(a[i], b[j], &hi);
-      target[i + j] = fio_math_addc64(target[i + j], lo, cl, &cl);
-      target[i + j + 1] = fio_math_addc64(target[i + j + 1], hi, ch, &ch);
-    }
-    target[i + len] += cl;
-#endif
-  }
 }
 
 /**

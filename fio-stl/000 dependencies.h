@@ -128,7 +128,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 /* *****************************************************************************
 FIO_CRYPT             Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT) || defined(FIO_CRYPTO)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13)
 #undef FIO_CRYPT
 #undef FIO_CRYPTO
 #undef FIO_AES
@@ -139,6 +139,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #undef FIO_SHA2
 #undef FIO_SECRET
 #undef FIO_OTP
+#undef FIO_TLS13
 #define FIO_CRYPTO_CORE
 #define FIO_AES
 #define FIO_BLAKE2
@@ -150,6 +151,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_SHA1
 #define FIO_SHA2
 #define FIO_SHA3
+#define FIO_TLS13
 #endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
 
 /* *****************************************************************************
