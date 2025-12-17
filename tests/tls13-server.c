@@ -1,0 +1,768 @@
+/* *****************************************************************************
+TLS 1.3 Server Tests
+
+Tests for the TLS 1.3 server handshake state machine.
+
+Test Categories:
+1. Unit tests - Server state machine, message building/parsing
+2. Integration tests - Client-server handshake (local loopback)
+***************************************************************************** */
+#define FIO_LOG
+#define FIO_CRYPT
+#define FIO_TLS13
+#include "fio-stl.h"
+
+/* *****************************************************************************
+Test Certificate and Private Key (Ed25519)
+
+This is a self-signed test certificate for testing purposes only.
+Generated specifically for these tests - DO NOT use in production.
+***************************************************************************** */
+
+/* Ed25519 private key (32-byte seed) */
+static const uint8_t test_ed25519_private_key[32] = {
+    0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a,
+    0xf4, 0x92, 0xec, 0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32,
+    0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60};
+
+/* Ed25519 public key (derived from private key) */
+static uint8_t test_ed25519_public_key[32];
+
+/* Minimal self-signed X.509 certificate (DER-encoded)
+ * This is a simplified certificate structure for testing.
+ * In production, use properly generated certificates. */
+static uint8_t test_certificate[512];
+static size_t test_certificate_len = 0;
+
+/* Build a minimal self-signed certificate for testing */
+FIO_SFUNC void build_test_certificate(void) {
+  /* Derive public key from private key */
+  fio_ed25519_public_key(test_ed25519_public_key, test_ed25519_private_key);
+
+  /* Build a minimal X.509 certificate structure
+   * This is a simplified version - real certificates are more complex */
+  uint8_t *p = test_certificate;
+
+  /* SEQUENCE (Certificate) */
+  *p++ = 0x30;
+  uint8_t *cert_len_ptr = p++;
+  uint8_t *cert_start = p;
+
+  /* SEQUENCE (TBSCertificate) */
+  *p++ = 0x30;
+  uint8_t *tbs_len_ptr = p++;
+  uint8_t *tbs_start = p;
+
+  /* Version: v3 (2) - [0] EXPLICIT INTEGER */
+  *p++ = 0xA0;
+  *p++ = 0x03;
+  *p++ = 0x02;
+  *p++ = 0x01;
+  *p++ = 0x02;
+
+  /* Serial Number: INTEGER */
+  *p++ = 0x02;
+  *p++ = 0x01;
+  *p++ = 0x01;
+
+  /* Signature Algorithm: Ed25519 (1.3.101.112) */
+  *p++ = 0x30;
+  *p++ = 0x05;
+  *p++ = 0x06;
+  *p++ = 0x03;
+  *p++ = 0x2B;
+  *p++ = 0x65;
+  *p++ = 0x70;
+
+  /* Issuer: CN=test */
+  *p++ = 0x30;
+  *p++ = 0x0F;
+  *p++ = 0x31;
+  *p++ = 0x0D;
+  *p++ = 0x30;
+  *p++ = 0x0B;
+  *p++ = 0x06;
+  *p++ = 0x03;
+  *p++ = 0x55;
+  *p++ = 0x04;
+  *p++ = 0x03;
+  *p++ = 0x0C;
+  *p++ = 0x04;
+  *p++ = 't';
+  *p++ = 'e';
+  *p++ = 's';
+  *p++ = 't';
+
+  /* Validity: UTCTime (not before/after) */
+  *p++ = 0x30;
+  *p++ = 0x1E;
+  /* Not Before: 240101000000Z */
+  *p++ = 0x17;
+  *p++ = 0x0D;
+  FIO_MEMCPY(p, "240101000000Z", 13);
+  p += 13;
+  /* Not After: 341231235959Z */
+  *p++ = 0x17;
+  *p++ = 0x0D;
+  FIO_MEMCPY(p, "341231235959Z", 13);
+  p += 13;
+
+  /* Subject: CN=test (same as issuer for self-signed) */
+  *p++ = 0x30;
+  *p++ = 0x0F;
+  *p++ = 0x31;
+  *p++ = 0x0D;
+  *p++ = 0x30;
+  *p++ = 0x0B;
+  *p++ = 0x06;
+  *p++ = 0x03;
+  *p++ = 0x55;
+  *p++ = 0x04;
+  *p++ = 0x03;
+  *p++ = 0x0C;
+  *p++ = 0x04;
+  *p++ = 't';
+  *p++ = 'e';
+  *p++ = 's';
+  *p++ = 't';
+
+  /* SubjectPublicKeyInfo: Ed25519 */
+  *p++ = 0x30;
+  *p++ = 0x2A;
+  /* Algorithm: Ed25519 */
+  *p++ = 0x30;
+  *p++ = 0x05;
+  *p++ = 0x06;
+  *p++ = 0x03;
+  *p++ = 0x2B;
+  *p++ = 0x65;
+  *p++ = 0x70;
+  /* Public Key: BIT STRING */
+  *p++ = 0x03;
+  *p++ = 0x21;
+  *p++ = 0x00; /* No unused bits */
+  FIO_MEMCPY(p, test_ed25519_public_key, 32);
+  p += 32;
+
+  /* Update TBS length */
+  *tbs_len_ptr = (uint8_t)(p - tbs_start);
+
+  /* Signature Algorithm: Ed25519 */
+  *p++ = 0x30;
+  *p++ = 0x05;
+  *p++ = 0x06;
+  *p++ = 0x03;
+  *p++ = 0x2B;
+  *p++ = 0x65;
+  *p++ = 0x70;
+
+  /* Signature: BIT STRING (Ed25519 signature over TBS) */
+  uint8_t signature[64];
+  fio_ed25519_sign(signature,
+                   tbs_start - 2, /* Include SEQUENCE header */
+                   (size_t)(p - tbs_start + 2),
+                   test_ed25519_private_key,
+                   test_ed25519_public_key);
+
+  *p++ = 0x03;
+  *p++ = 0x41;
+  *p++ = 0x00; /* No unused bits */
+  FIO_MEMCPY(p, signature, 64);
+  p += 64;
+
+  /* Update certificate length */
+  *cert_len_ptr = (uint8_t)(p - cert_start);
+
+  test_certificate_len = (size_t)(p - test_certificate);
+}
+
+/* *****************************************************************************
+Test: Server Initialization and Cleanup
+***************************************************************************** */
+FIO_SFUNC void test_server_init_destroy(void) {
+  fprintf(stderr, "\t* Testing server init/destroy\n");
+
+  fio_tls13_server_s server;
+
+  /* Test initialization */
+  fio_tls13_server_init(&server);
+  FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_START,
+             "Initial state should be START");
+  FIO_ASSERT(!fio_tls13_server_is_connected(&server),
+             "Should not be connected");
+  FIO_ASSERT(!fio_tls13_server_is_error(&server), "Should not be in error");
+
+  /* Test state name */
+  FIO_ASSERT(strcmp(fio_tls13_server_state_name(&server), "START") == 0,
+             "State name should be START");
+
+  /* Test destroy */
+  fio_tls13_server_destroy(&server);
+
+  /* Verify secrets are zeroed */
+  uint8_t zeros[32] = {0};
+  FIO_ASSERT(FIO_MEMCMP(server.shared_secret, zeros, 32) == 0,
+             "Shared secret should be zeroed after destroy");
+
+  fprintf(stderr, "\t  - Server init/destroy tests passed\n");
+}
+
+/* *****************************************************************************
+Test: Server Certificate Configuration
+***************************************************************************** */
+FIO_SFUNC void test_server_cert_config(void) {
+  fprintf(stderr, "\t* Testing server certificate configuration\n");
+
+  build_test_certificate();
+
+  fio_tls13_server_s server;
+  fio_tls13_server_init(&server);
+
+  /* Set certificate chain */
+  const uint8_t *certs[] = {test_certificate};
+  size_t cert_lens[] = {test_certificate_len};
+  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+
+  FIO_ASSERT(server.cert_chain_count == 1, "Should have 1 certificate");
+  FIO_ASSERT(server.cert_chain[0] == test_certificate,
+             "Certificate pointer should match");
+  FIO_ASSERT(server.cert_chain_lens[0] == test_certificate_len,
+             "Certificate length should match");
+
+  /* Set private key */
+  fio_tls13_server_set_private_key(&server,
+                                   test_ed25519_private_key,
+                                   32,
+                                   FIO_TLS13_SIG_ED25519);
+
+  FIO_ASSERT(server.private_key == test_ed25519_private_key,
+             "Private key pointer should match");
+  FIO_ASSERT(server.private_key_len == 32, "Private key length should be 32");
+  FIO_ASSERT(server.private_key_type == FIO_TLS13_SIG_ED25519,
+             "Private key type should be Ed25519");
+
+  fio_tls13_server_destroy(&server);
+
+  fprintf(stderr, "\t  - Server certificate configuration tests passed\n");
+}
+
+/* *****************************************************************************
+Test: ClientHello Parsing
+***************************************************************************** */
+FIO_SFUNC void test_client_hello_parsing(void) {
+  fprintf(stderr, "\t* Testing ClientHello parsing\n");
+
+  /* Build a ClientHello using the client API */
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "test.example.com");
+
+  uint8_t ch_record[512];
+  int ch_len = fio_tls13_client_start(&client, ch_record, sizeof(ch_record));
+  FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
+
+  /* Parse the ClientHello (skip record header) */
+  fio_tls13_client_hello_s ch;
+  const uint8_t *ch_msg = ch_record + 5; /* Skip 5-byte record header */
+  size_t ch_msg_len = (size_t)ch_len - 5;
+
+  /* Skip handshake header to get body */
+  FIO_ASSERT(ch_msg[0] == FIO_TLS13_HS_CLIENT_HELLO,
+             "Should be ClientHello message");
+  const uint8_t *ch_body = ch_msg + 4;
+  size_t ch_body_len = ch_msg_len - 4;
+
+  int ret = fio___tls13_parse_client_hello(&ch, ch_body, ch_body_len);
+  FIO_ASSERT(ret == 0, "ClientHello parsing should succeed");
+
+  /* Verify parsed data */
+  FIO_ASSERT(ch.cipher_suite_count >= 1, "Should have at least 1 cipher suite");
+  FIO_ASSERT(ch.has_supported_versions == 1, "Should support TLS 1.3");
+  FIO_ASSERT(ch.key_share_count >= 1, "Should have at least 1 key share");
+  FIO_ASSERT(ch.server_name != NULL, "Should have SNI");
+  FIO_ASSERT(ch.server_name_len == 16, "SNI length should be 16");
+  FIO_ASSERT(FIO_MEMCMP(ch.server_name, "test.example.com", 16) == 0,
+             "SNI should match");
+
+  /* Check for X25519 key share */
+  int found_x25519 = 0;
+  for (size_t i = 0; i < ch.key_share_count; ++i) {
+    if (ch.key_share_groups[i] == FIO_TLS13_GROUP_X25519) {
+      found_x25519 = 1;
+      FIO_ASSERT(ch.key_share_lens[i] == 32, "X25519 key should be 32 bytes");
+      break;
+    }
+  }
+  FIO_ASSERT(found_x25519, "Should have X25519 key share");
+
+  fio_tls13_client_destroy(&client);
+
+  fprintf(stderr, "\t  - ClientHello parsing tests passed\n");
+}
+
+/* *****************************************************************************
+Test: Server Message Building
+***************************************************************************** */
+FIO_SFUNC void test_server_message_building(void) {
+  fprintf(stderr, "\t* Testing server message building\n");
+
+  build_test_certificate();
+
+  fio_tls13_server_s server;
+  fio_tls13_server_init(&server);
+
+  /* Configure server */
+  const uint8_t *certs[] = {test_certificate};
+  size_t cert_lens[] = {test_certificate_len};
+  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  fio_tls13_server_set_private_key(&server,
+                                   test_ed25519_private_key,
+                                   32,
+                                   FIO_TLS13_SIG_ED25519);
+
+  /* Set negotiated parameters */
+  server.cipher_suite = FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256;
+  server.key_share_group = FIO_TLS13_GROUP_X25519;
+  server.signature_scheme = FIO_TLS13_SIG_ED25519;
+  server.use_sha384 = 0;
+
+  /* Generate random and keypair */
+  fio_rand_bytes(server.server_random, 32);
+  fio_x25519_keypair(server.x25519_private_key, server.x25519_public_key);
+
+  /* Test ServerHello building */
+  uint8_t sh_buf[256];
+  int sh_len = fio___tls13_build_server_hello(&server, sh_buf, sizeof(sh_buf));
+  FIO_ASSERT(sh_len > 0, "ServerHello building should succeed");
+  FIO_ASSERT(sh_buf[0] == FIO_TLS13_HS_SERVER_HELLO,
+             "Should be ServerHello message");
+
+  /* Test EncryptedExtensions building */
+  uint8_t ee_buf[64];
+  int ee_len =
+      fio___tls13_build_encrypted_extensions(&server, ee_buf, sizeof(ee_buf));
+  FIO_ASSERT(ee_len > 0, "EncryptedExtensions building should succeed");
+  FIO_ASSERT(ee_buf[0] == FIO_TLS13_HS_ENCRYPTED_EXTENSIONS,
+             "Should be EncryptedExtensions message");
+
+  /* Test Certificate building */
+  uint8_t cert_buf[1024];
+  int cert_len =
+      fio___tls13_build_certificate(&server, cert_buf, sizeof(cert_buf));
+  FIO_ASSERT(cert_len > 0, "Certificate building should succeed");
+  FIO_ASSERT(cert_buf[0] == FIO_TLS13_HS_CERTIFICATE,
+             "Should be Certificate message");
+
+  fio_tls13_server_destroy(&server);
+
+  fprintf(stderr, "\t  - Server message building tests passed\n");
+}
+
+/* *****************************************************************************
+Test: Full Client-Server Handshake (Loopback)
+***************************************************************************** */
+FIO_SFUNC void test_client_server_handshake(void) {
+  fprintf(stderr, "\t* Testing full client-server handshake\n");
+
+  build_test_certificate();
+
+  /* Initialize client */
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "test.example.com");
+  fio_tls13_client_skip_verification(&client, 1); /* Skip cert verification */
+
+  /* Initialize server */
+  fio_tls13_server_s server;
+  fio_tls13_server_init(&server);
+
+  const uint8_t *certs[] = {test_certificate};
+  size_t cert_lens[] = {test_certificate_len};
+  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  fio_tls13_server_set_private_key(&server,
+                                   test_ed25519_private_key,
+                                   32,
+                                   FIO_TLS13_SIG_ED25519);
+
+  /* Buffers for message exchange */
+  uint8_t client_out[8192];
+  uint8_t server_out[8192];
+  size_t out_len;
+
+  /* Step 1: Client generates ClientHello */
+  int ch_len = fio_tls13_client_start(&client, client_out, sizeof(client_out));
+  FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
+  FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
+             "Client should be in WAIT_SH state");
+  fprintf(stderr, "\t  - ClientHello generated (%d bytes)\n", ch_len);
+
+  /* Step 2: Server processes ClientHello and generates response */
+  out_len = 0;
+  int consumed = fio_tls13_server_process(&server,
+                                          client_out,
+                                          (size_t)ch_len,
+                                          server_out,
+                                          sizeof(server_out),
+                                          &out_len);
+  FIO_ASSERT(consumed == ch_len, "Server should consume entire ClientHello");
+  FIO_ASSERT(out_len > 0, "Server should generate response");
+  FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_WAIT_FINISHED,
+             "Server should be in WAIT_FINISHED state");
+  fprintf(
+      stderr,
+      "\t  - Server processed ClientHello, generated response (%zu bytes)\n",
+      out_len);
+
+  /* Verify SNI was captured */
+  FIO_ASSERT(server.client_sni_len == 16, "SNI length should be 16");
+  FIO_ASSERT(strcmp(server.client_sni, "test.example.com") == 0,
+             "SNI should match");
+
+  /* Step 3: Client processes server response */
+  size_t client_response_len = 0;
+  size_t offset = 0;
+  while (offset < out_len && !fio_tls13_client_is_connected(&client) &&
+         !fio_tls13_client_is_error(&client)) {
+    size_t msg_out_len = 0;
+    int proc =
+        fio_tls13_client_process(&client,
+                                 server_out + offset,
+                                 out_len - offset,
+                                 client_out + client_response_len,
+                                 sizeof(client_out) - client_response_len,
+                                 &msg_out_len);
+    if (proc <= 0)
+      break;
+    offset += (size_t)proc;
+    client_response_len += msg_out_len;
+  }
+
+  FIO_ASSERT(!fio_tls13_client_is_error(&client),
+             "Client should not be in error state");
+  FIO_ASSERT(fio_tls13_client_is_connected(&client),
+             "Client should be connected");
+  FIO_ASSERT(client_response_len > 0, "Client should generate Finished");
+  fprintf(stderr,
+          "\t  - Client processed server response, generated Finished (%zu "
+          "bytes)\n",
+          client_response_len);
+
+  /* Step 4: Server processes client Finished */
+  out_len = 0;
+  consumed = fio_tls13_server_process(&server,
+                                      client_out,
+                                      client_response_len,
+                                      server_out,
+                                      sizeof(server_out),
+                                      &out_len);
+  FIO_ASSERT(consumed == (int)client_response_len,
+             "Server should consume client Finished");
+  FIO_ASSERT(fio_tls13_server_is_connected(&server),
+             "Server should be connected");
+  fprintf(stderr, "\t  - Server processed client Finished\n");
+
+  /* Step 5: Test application data exchange */
+  const char *test_message = "Hello from client!";
+  size_t test_message_len = strlen(test_message);
+
+  /* Client encrypts message */
+  int enc_len = fio_tls13_client_encrypt(&client,
+                                         client_out,
+                                         sizeof(client_out),
+                                         (const uint8_t *)test_message,
+                                         test_message_len);
+  FIO_ASSERT(enc_len > 0, "Client encryption should succeed");
+  fprintf(stderr, "\t  - Client encrypted message (%d bytes)\n", enc_len);
+
+  /* Server decrypts message */
+  uint8_t decrypted[256];
+  int dec_len = fio_tls13_server_decrypt(&server,
+                                         decrypted,
+                                         sizeof(decrypted),
+                                         client_out,
+                                         (size_t)enc_len);
+  FIO_ASSERT(dec_len == (int)test_message_len, "Decrypted length should match");
+  FIO_ASSERT(FIO_MEMCMP(decrypted, test_message, test_message_len) == 0,
+             "Decrypted message should match");
+  fprintf(stderr, "\t  - Server decrypted message successfully\n");
+
+  /* Server sends response */
+  const char *response = "Hello from server!";
+  size_t response_len = strlen(response);
+
+  enc_len = fio_tls13_server_encrypt(&server,
+                                     server_out,
+                                     sizeof(server_out),
+                                     (const uint8_t *)response,
+                                     response_len);
+  FIO_ASSERT(enc_len > 0, "Server encryption should succeed");
+
+  /* Client decrypts response */
+  dec_len = fio_tls13_client_decrypt(&client,
+                                     decrypted,
+                                     sizeof(decrypted),
+                                     server_out,
+                                     (size_t)enc_len);
+  FIO_ASSERT(dec_len == (int)response_len, "Decrypted length should match");
+  FIO_ASSERT(FIO_MEMCMP(decrypted, response, response_len) == 0,
+             "Decrypted response should match");
+  fprintf(stderr, "\t  - Client decrypted server response successfully\n");
+
+  /* Cleanup */
+  fio_tls13_client_destroy(&client);
+  fio_tls13_server_destroy(&server);
+
+  fprintf(stderr, "\t  - Full client-server handshake tests passed\n");
+}
+
+/* *****************************************************************************
+Test: Multiple Cipher Suites
+***************************************************************************** */
+FIO_SFUNC void test_cipher_suite_negotiation(void) {
+  fprintf(stderr, "\t* Testing cipher suite negotiation\n");
+
+  build_test_certificate();
+
+  /* Test each supported cipher suite */
+  uint16_t cipher_suites[] = {
+      FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256,
+      FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256,
+      FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384,
+  };
+  const char *cipher_names[] = {
+      "AES-128-GCM-SHA256",
+      "ChaCha20-Poly1305-SHA256",
+      "AES-256-GCM-SHA384",
+  };
+
+  for (size_t i = 0; i < sizeof(cipher_suites) / sizeof(cipher_suites[0]);
+       ++i) {
+    fprintf(stderr, "\t  - Testing %s\n", cipher_names[i]);
+
+    /* Initialize client and server */
+    fio_tls13_client_s client;
+    fio_tls13_client_init(&client, "test");
+    fio_tls13_client_skip_verification(&client, 1);
+
+    fio_tls13_server_s server;
+    fio_tls13_server_init(&server);
+
+    const uint8_t *certs[] = {test_certificate};
+    size_t cert_lens[] = {test_certificate_len};
+    fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+    fio_tls13_server_set_private_key(&server,
+                                     test_ed25519_private_key,
+                                     32,
+                                     FIO_TLS13_SIG_ED25519);
+
+    /* Perform handshake */
+    uint8_t client_out[8192];
+    uint8_t server_out[8192];
+    size_t out_len;
+
+    int ch_len =
+        fio_tls13_client_start(&client, client_out, sizeof(client_out));
+    FIO_ASSERT(ch_len > 0, "ClientHello should succeed");
+
+    out_len = 0;
+    int consumed = fio_tls13_server_process(&server,
+                                            client_out,
+                                            (size_t)ch_len,
+                                            server_out,
+                                            sizeof(server_out),
+                                            &out_len);
+    FIO_ASSERT(consumed > 0, "Server should process ClientHello");
+
+    /* Process server response */
+    size_t client_response_len = 0;
+    size_t offset = 0;
+    while (offset < out_len && !fio_tls13_client_is_connected(&client)) {
+      size_t msg_out_len = 0;
+      int proc =
+          fio_tls13_client_process(&client,
+                                   server_out + offset,
+                                   out_len - offset,
+                                   client_out + client_response_len,
+                                   sizeof(client_out) - client_response_len,
+                                   &msg_out_len);
+      if (proc <= 0)
+        break;
+      offset += (size_t)proc;
+      client_response_len += msg_out_len;
+    }
+
+    FIO_ASSERT(fio_tls13_client_is_connected(&client),
+               "Client should be connected");
+
+    /* Process client Finished */
+    out_len = 0;
+    consumed = fio_tls13_server_process(&server,
+                                        client_out,
+                                        client_response_len,
+                                        server_out,
+                                        sizeof(server_out),
+                                        &out_len);
+    FIO_ASSERT(fio_tls13_server_is_connected(&server),
+               "Server should be connected");
+
+    /* Verify negotiated cipher suite */
+    FIO_ASSERT(client.cipher_suite == server.cipher_suite,
+               "Cipher suites should match");
+
+    fio_tls13_client_destroy(&client);
+    fio_tls13_server_destroy(&server);
+  }
+
+  fprintf(stderr, "\t  - Cipher suite negotiation tests passed\n");
+}
+
+/* *****************************************************************************
+Test: Error Handling
+***************************************************************************** */
+FIO_SFUNC void test_error_handling(void) {
+  fprintf(stderr, "\t* Testing error handling\n");
+
+  fio_tls13_server_s server;
+  fio_tls13_server_init(&server);
+
+  /* Test processing garbage data */
+  uint8_t garbage[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  uint8_t out[256];
+  size_t out_len;
+
+  int ret = fio_tls13_server_process(&server,
+                                     garbage,
+                                     sizeof(garbage),
+                                     out,
+                                     sizeof(out),
+                                     &out_len);
+  /* Should fail or need more data */
+  FIO_ASSERT(ret <= 0 || server.state == FIO_TLS13_SERVER_STATE_START,
+             "Garbage should be rejected");
+
+  /* Test encryption before connected */
+  uint8_t plaintext[] = "test";
+  ret = fio_tls13_server_encrypt(&server,
+                                 out,
+                                 sizeof(out),
+                                 plaintext,
+                                 sizeof(plaintext));
+  FIO_ASSERT(ret == -1, "Encryption should fail when not connected");
+
+  /* Test decryption before connected */
+  ret = fio_tls13_server_decrypt(&server,
+                                 out,
+                                 sizeof(out),
+                                 garbage,
+                                 sizeof(garbage));
+  FIO_ASSERT(ret == -1, "Decryption should fail when not connected");
+
+  fio_tls13_server_destroy(&server);
+
+  fprintf(stderr, "\t  - Error handling tests passed\n");
+}
+
+/* *****************************************************************************
+Test: State Machine Transitions
+***************************************************************************** */
+FIO_SFUNC void test_state_machine(void) {
+  fprintf(stderr, "\t* Testing state machine transitions\n");
+
+  build_test_certificate();
+
+  fio_tls13_server_s server;
+  fio_tls13_server_init(&server);
+
+  const uint8_t *certs[] = {test_certificate};
+  size_t cert_lens[] = {test_certificate_len};
+  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  fio_tls13_server_set_private_key(&server,
+                                   test_ed25519_private_key,
+                                   32,
+                                   FIO_TLS13_SIG_ED25519);
+
+  /* Verify initial state */
+  FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_START,
+             "Initial state should be START");
+
+  /* Generate ClientHello */
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "test");
+  fio_tls13_client_skip_verification(&client, 1);
+
+  uint8_t client_out[8192];
+  uint8_t server_out[8192];
+  size_t out_len;
+
+  int ch_len = fio_tls13_client_start(&client, client_out, sizeof(client_out));
+  FIO_ASSERT(ch_len > 0, "ClientHello should succeed");
+
+  /* Process ClientHello - should transition to WAIT_FINISHED */
+  out_len = 0;
+  int consumed = fio_tls13_server_process(&server,
+                                          client_out,
+                                          (size_t)ch_len,
+                                          server_out,
+                                          sizeof(server_out),
+                                          &out_len);
+  FIO_ASSERT(consumed > 0, "Should process ClientHello");
+  FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_WAIT_FINISHED,
+             "State should be WAIT_FINISHED after processing ClientHello");
+
+  /* Process server response on client side */
+  size_t client_response_len = 0;
+  size_t offset = 0;
+  while (offset < out_len && !fio_tls13_client_is_connected(&client)) {
+    size_t msg_out_len = 0;
+    int proc =
+        fio_tls13_client_process(&client,
+                                 server_out + offset,
+                                 out_len - offset,
+                                 client_out + client_response_len,
+                                 sizeof(client_out) - client_response_len,
+                                 &msg_out_len);
+    if (proc <= 0)
+      break;
+    offset += (size_t)proc;
+    client_response_len += msg_out_len;
+  }
+
+  /* Process client Finished - should transition to CONNECTED */
+  out_len = 0;
+  consumed = fio_tls13_server_process(&server,
+                                      client_out,
+                                      client_response_len,
+                                      server_out,
+                                      sizeof(server_out),
+                                      &out_len);
+  FIO_ASSERT(consumed > 0, "Should process client Finished");
+  FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_CONNECTED,
+             "State should be CONNECTED after processing client Finished");
+
+  fio_tls13_client_destroy(&client);
+  fio_tls13_server_destroy(&server);
+
+  fprintf(stderr, "\t  - State machine transition tests passed\n");
+}
+
+/* *****************************************************************************
+Main
+***************************************************************************** */
+int main(void) {
+  fprintf(stderr, "\n=== TLS 1.3 Server Tests ===\n\n");
+
+  /* Unit tests */
+  fprintf(stderr, "Unit Tests:\n");
+  test_server_init_destroy();
+  test_server_cert_config();
+  test_client_hello_parsing();
+  test_server_message_building();
+  test_state_machine();
+  test_error_handling();
+
+  /* Integration tests */
+  fprintf(stderr, "\nIntegration Tests:\n");
+  test_client_server_handshake();
+  test_cipher_suite_negotiation();
+
+  fprintf(stderr, "\n=== All TLS 1.3 Server Tests PASSED ===\n\n");
+  return 0;
+}

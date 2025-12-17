@@ -908,6 +908,594 @@ SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
 }
 
 /* *****************************************************************************
+ASN.1 DER Encoding API
+***************************************************************************** */
+
+/**
+ * Encode DER length field.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param len Length value to encode
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_length(uint8_t *buf, size_t len);
+
+/**
+ * Encode an ASN.1 INTEGER.
+ *
+ * Handles positive integers with proper leading zero byte when needed.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param data Integer data in big-endian format
+ * @param data_len Length of integer data
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_integer(uint8_t *buf,
+                                     const uint8_t *data,
+                                     size_t data_len);
+
+/**
+ * Encode an ASN.1 INTEGER from a small value.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param value Integer value (up to 64-bit)
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_integer_small(uint8_t *buf, uint64_t value);
+
+/**
+ * Encode an ASN.1 OID from dot notation string.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param oid_string OID in dot notation (e.g., "1.2.840.113549.1.1.11")
+ * @return Number of bytes written/needed, or 0 on error
+ */
+SFUNC size_t fio_asn1_encode_oid(uint8_t *buf, const char *oid_string);
+
+/**
+ * Encode an ASN.1 UTF8String.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param str String data
+ * @param str_len String length
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_utf8_string(uint8_t *buf,
+                                         const char *str,
+                                         size_t str_len);
+
+/**
+ * Encode an ASN.1 PrintableString.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param str String data
+ * @param str_len String length
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_printable_string(uint8_t *buf,
+                                              const char *str,
+                                              size_t str_len);
+
+/**
+ * Encode an ASN.1 BIT STRING.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param bits Bit data
+ * @param bit_len Length of bit data in bytes
+ * @param unused_bits Number of unused bits in last byte (0-7)
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_bit_string(uint8_t *buf,
+                                        const uint8_t *bits,
+                                        size_t bit_len,
+                                        uint8_t unused_bits);
+
+/**
+ * Encode an ASN.1 OCTET STRING.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param data Octet data
+ * @param data_len Length of data
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_octet_string(uint8_t *buf,
+                                          const uint8_t *data,
+                                          size_t data_len);
+
+/**
+ * Encode an ASN.1 SEQUENCE wrapper around existing content.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param content_len Length of content that will follow
+ * @return Number of bytes written/needed for tag+length only
+ */
+SFUNC size_t fio_asn1_encode_sequence_header(uint8_t *buf, size_t content_len);
+
+/**
+ * Encode an ASN.1 SET wrapper around existing content.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param content_len Length of content that will follow
+ * @return Number of bytes written/needed for tag+length only
+ */
+SFUNC size_t fio_asn1_encode_set_header(uint8_t *buf, size_t content_len);
+
+/**
+ * Encode an ASN.1 context-specific tag wrapper.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param tag_num Context tag number (0-30)
+ * @param content_len Length of content that will follow
+ * @param constructed 1 if constructed (contains other elements), 0 if primitive
+ * @return Number of bytes written/needed for tag+length only
+ */
+SFUNC size_t fio_asn1_encode_context_header(uint8_t *buf,
+                                            uint8_t tag_num,
+                                            size_t content_len,
+                                            int constructed);
+
+/**
+ * Encode an ASN.1 NULL.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @return Number of bytes written/needed (always 2)
+ */
+SFUNC size_t fio_asn1_encode_null(uint8_t *buf);
+
+/**
+ * Encode an ASN.1 BOOLEAN.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param value Boolean value (0 = false, non-zero = true)
+ * @return Number of bytes written/needed (always 3)
+ */
+SFUNC size_t fio_asn1_encode_boolean(uint8_t *buf, int value);
+
+/**
+ * Encode an ASN.1 UTCTime from Unix timestamp.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param unix_time Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_utc_time(uint8_t *buf, int64_t unix_time);
+
+/**
+ * Encode an ASN.1 GeneralizedTime from Unix timestamp.
+ *
+ * @param buf Output buffer (can be NULL to calculate length only)
+ * @param unix_time Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
+ * @return Number of bytes written/needed
+ */
+SFUNC size_t fio_asn1_encode_generalized_time(uint8_t *buf, int64_t unix_time);
+
+/* *****************************************************************************
+Implementation - ASN.1 Encoding Functions
+***************************************************************************** */
+
+/** Encode DER length field */
+SFUNC size_t fio_asn1_encode_length(uint8_t *buf, size_t len) {
+  if (len < 128) {
+    /* Short form */
+    if (buf)
+      buf[0] = (uint8_t)len;
+    return 1;
+  }
+
+  /* Long form - count bytes needed */
+  size_t num_bytes = 0;
+  size_t tmp = len;
+  while (tmp > 0) {
+    ++num_bytes;
+    tmp >>= 8;
+  }
+
+  if (buf) {
+    buf[0] = (uint8_t)(0x80 | num_bytes);
+    for (size_t i = num_bytes; i > 0; --i)
+      buf[i] = (uint8_t)(len >> ((num_bytes - i) * 8));
+  }
+
+  return 1 + num_bytes;
+}
+
+/** Encode ASN.1 INTEGER */
+SFUNC size_t fio_asn1_encode_integer(uint8_t *buf,
+                                     const uint8_t *data,
+                                     size_t data_len) {
+  if (!data || data_len == 0)
+    return 0;
+
+  /* Skip leading zeros (but keep at least one byte) */
+  while (data_len > 1 && data[0] == 0) {
+    ++data;
+    --data_len;
+  }
+
+  /* Check if we need a leading zero (positive number with high bit set) */
+  int need_zero = (data[0] & 0x80) ? 1 : 0;
+  size_t content_len = data_len + need_zero;
+
+  /* Calculate total length */
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes + content_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_INTEGER;
+    fio_asn1_encode_length(buf + 1, content_len);
+    size_t offset = 1 + len_bytes;
+    if (need_zero)
+      buf[offset++] = 0x00;
+    FIO_MEMCPY(buf + offset, data, data_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 INTEGER from small value */
+SFUNC size_t fio_asn1_encode_integer_small(uint8_t *buf, uint64_t value) {
+  uint8_t tmp[9];
+  size_t len = 0;
+
+  /* Convert to big-endian bytes */
+  if (value == 0) {
+    tmp[0] = 0;
+    len = 1;
+  } else {
+    /* Find number of bytes needed */
+    uint64_t v = value;
+    while (v > 0) {
+      ++len;
+      v >>= 8;
+    }
+    /* Write big-endian */
+    for (size_t i = 0; i < len; ++i)
+      tmp[i] = (uint8_t)(value >> ((len - 1 - i) * 8));
+  }
+
+  return fio_asn1_encode_integer(buf, tmp, len);
+}
+
+/** Encode ASN.1 OID from dot notation */
+SFUNC size_t fio_asn1_encode_oid(uint8_t *buf, const char *oid_string) {
+  if (!oid_string)
+    return 0;
+
+  /* Parse OID components */
+  uint64_t components[32];
+  size_t num_components = 0;
+  const char *p = oid_string;
+
+  while (*p && num_components < 32) {
+    uint64_t val = 0;
+    while (*p >= '0' && *p <= '9') {
+      val = val * 10 + (*p - '0');
+      ++p;
+    }
+    components[num_components++] = val;
+    if (*p == '.')
+      ++p;
+    else if (*p != '\0')
+      return 0; /* Invalid character */
+  }
+
+  if (num_components < 2)
+    return 0;
+
+  /* Calculate encoded length */
+  /* First two components encoded as single byte: X*40 + Y */
+  size_t content_len = 1;
+
+  /* Remaining components in base-128 */
+  for (size_t i = 2; i < num_components; ++i) {
+    uint64_t v = components[i];
+    if (v == 0) {
+      content_len += 1;
+    } else {
+      size_t bytes = 0;
+      while (v > 0) {
+        ++bytes;
+        v >>= 7;
+      }
+      content_len += bytes;
+    }
+  }
+
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes + content_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_OID;
+    fio_asn1_encode_length(buf + 1, content_len);
+    size_t offset = 1 + len_bytes;
+
+    /* First two components */
+    buf[offset++] = (uint8_t)(components[0] * 40 + components[1]);
+
+    /* Remaining components in base-128 */
+    for (size_t i = 2; i < num_components; ++i) {
+      uint64_t v = components[i];
+      if (v == 0) {
+        buf[offset++] = 0;
+      } else {
+        /* Count bytes needed */
+        size_t bytes = 0;
+        uint64_t tmp = v;
+        while (tmp > 0) {
+          ++bytes;
+          tmp >>= 7;
+        }
+        /* Write base-128 with continuation bits */
+        for (size_t j = bytes; j > 0; --j) {
+          uint8_t b = (uint8_t)((v >> ((j - 1) * 7)) & 0x7F);
+          if (j > 1)
+            b |= 0x80;
+          buf[offset++] = b;
+        }
+      }
+    }
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 UTF8String */
+SFUNC size_t fio_asn1_encode_utf8_string(uint8_t *buf,
+                                         const char *str,
+                                         size_t str_len) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, str_len);
+  size_t total = 1 + len_bytes + str_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_UTF8_STRING;
+    fio_asn1_encode_length(buf + 1, str_len);
+    if (str_len > 0)
+      FIO_MEMCPY(buf + 1 + len_bytes, str, str_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 PrintableString */
+SFUNC size_t fio_asn1_encode_printable_string(uint8_t *buf,
+                                              const char *str,
+                                              size_t str_len) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, str_len);
+  size_t total = 1 + len_bytes + str_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_PRINTABLE_STRING;
+    fio_asn1_encode_length(buf + 1, str_len);
+    if (str_len > 0)
+      FIO_MEMCPY(buf + 1 + len_bytes, str, str_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 BIT STRING */
+SFUNC size_t fio_asn1_encode_bit_string(uint8_t *buf,
+                                        const uint8_t *bits,
+                                        size_t bit_len,
+                                        uint8_t unused_bits) {
+  size_t content_len = 1 + bit_len; /* unused bits byte + data */
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes + content_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_BIT_STRING;
+    fio_asn1_encode_length(buf + 1, content_len);
+    buf[1 + len_bytes] = unused_bits;
+    if (bit_len > 0)
+      FIO_MEMCPY(buf + 2 + len_bytes, bits, bit_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 OCTET STRING */
+SFUNC size_t fio_asn1_encode_octet_string(uint8_t *buf,
+                                          const uint8_t *data,
+                                          size_t data_len) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, data_len);
+  size_t total = 1 + len_bytes + data_len;
+
+  if (buf) {
+    buf[0] = FIO_ASN1_OCTET_STRING;
+    fio_asn1_encode_length(buf + 1, data_len);
+    if (data && data_len > 0)
+      FIO_MEMCPY(buf + 1 + len_bytes, data, data_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 SEQUENCE header */
+SFUNC size_t fio_asn1_encode_sequence_header(uint8_t *buf, size_t content_len) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes;
+
+  if (buf) {
+    buf[0] = 0x30; /* SEQUENCE tag (constructed) */
+    fio_asn1_encode_length(buf + 1, content_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 SET header */
+SFUNC size_t fio_asn1_encode_set_header(uint8_t *buf, size_t content_len) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes;
+
+  if (buf) {
+    buf[0] = 0x31; /* SET tag (constructed) */
+    fio_asn1_encode_length(buf + 1, content_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 context-specific tag header */
+SFUNC size_t fio_asn1_encode_context_header(uint8_t *buf,
+                                            uint8_t tag_num,
+                                            size_t content_len,
+                                            int constructed) {
+  size_t len_bytes = fio_asn1_encode_length(NULL, content_len);
+  size_t total = 1 + len_bytes;
+
+  if (buf) {
+    buf[0] = (uint8_t)(0x80 | (constructed ? 0x20 : 0) | (tag_num & 0x1F));
+    fio_asn1_encode_length(buf + 1, content_len);
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 NULL */
+SFUNC size_t fio_asn1_encode_null(uint8_t *buf) {
+  if (buf) {
+    buf[0] = FIO_ASN1_NULL;
+    buf[1] = 0x00;
+  }
+  return 2;
+}
+
+/** Encode ASN.1 BOOLEAN */
+SFUNC size_t fio_asn1_encode_boolean(uint8_t *buf, int value) {
+  if (buf) {
+    buf[0] = FIO_ASN1_BOOLEAN;
+    buf[1] = 0x01;
+    buf[2] = value ? 0xFF : 0x00;
+  }
+  return 3;
+}
+
+/** Helper: convert Unix timestamp to broken-down time */
+FIO_SFUNC void fio___asn1_gmtime(int64_t unix_time,
+                                 int *year,
+                                 int *month,
+                                 int *day,
+                                 int *hour,
+                                 int *min,
+                                 int *sec) {
+  /* Days since epoch */
+  int64_t days = unix_time / 86400;
+  int64_t rem = unix_time % 86400;
+  if (rem < 0) {
+    --days;
+    rem += 86400;
+  }
+
+  *hour = (int)(rem / 3600);
+  rem %= 3600;
+  *min = (int)(rem / 60);
+  *sec = (int)(rem % 60);
+
+  /* Calculate year and day of year */
+  int y = 1970;
+  while (days >= (fio___is_leap_year(y) ? 366 : 365)) {
+    days -= fio___is_leap_year(y) ? 366 : 365;
+    ++y;
+  }
+  while (days < 0) {
+    --y;
+    days += fio___is_leap_year(y) ? 366 : 365;
+  }
+  *year = y;
+
+  /* Calculate month and day */
+  int m = 1;
+  while (days >= fio___days_in_month[m - 1] +
+                     (m == 2 && fio___is_leap_year(y) ? 1 : 0)) {
+    days -=
+        fio___days_in_month[m - 1] + (m == 2 && fio___is_leap_year(y) ? 1 : 0);
+    ++m;
+  }
+  *month = m;
+  *day = (int)days + 1;
+}
+
+/** Encode ASN.1 UTCTime */
+SFUNC size_t fio_asn1_encode_utc_time(uint8_t *buf, int64_t unix_time) {
+  /* UTCTime format: YYMMDDhhmmssZ (13 bytes) */
+  size_t content_len = 13;
+  size_t total = 1 + 1 + content_len; /* tag + length + content */
+
+  if (buf) {
+    int year, month, day, hour, min, sec;
+    fio___asn1_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec);
+
+    buf[0] = FIO_ASN1_UTC_TIME;
+    buf[1] = (uint8_t)content_len;
+
+    /* Year (2 digits) */
+    int yy = year % 100;
+    buf[2] = (uint8_t)('0' + yy / 10);
+    buf[3] = (uint8_t)('0' + yy % 10);
+    /* Month */
+    buf[4] = (uint8_t)('0' + month / 10);
+    buf[5] = (uint8_t)('0' + month % 10);
+    /* Day */
+    buf[6] = (uint8_t)('0' + day / 10);
+    buf[7] = (uint8_t)('0' + day % 10);
+    /* Hour */
+    buf[8] = (uint8_t)('0' + hour / 10);
+    buf[9] = (uint8_t)('0' + hour % 10);
+    /* Minute */
+    buf[10] = (uint8_t)('0' + min / 10);
+    buf[11] = (uint8_t)('0' + min % 10);
+    /* Second */
+    buf[12] = (uint8_t)('0' + sec / 10);
+    buf[13] = (uint8_t)('0' + sec % 10);
+    /* Zulu */
+    buf[14] = 'Z';
+  }
+
+  return total;
+}
+
+/** Encode ASN.1 GeneralizedTime */
+SFUNC size_t fio_asn1_encode_generalized_time(uint8_t *buf, int64_t unix_time) {
+  /* GeneralizedTime format: YYYYMMDDhhmmssZ (15 bytes) */
+  size_t content_len = 15;
+  size_t total = 1 + 1 + content_len; /* tag + length + content */
+
+  if (buf) {
+    int year, month, day, hour, min, sec;
+    fio___asn1_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec);
+
+    buf[0] = FIO_ASN1_GENERALIZED_TIME;
+    buf[1] = (uint8_t)content_len;
+
+    /* Year (4 digits) */
+    buf[2] = (uint8_t)('0' + (year / 1000) % 10);
+    buf[3] = (uint8_t)('0' + (year / 100) % 10);
+    buf[4] = (uint8_t)('0' + (year / 10) % 10);
+    buf[5] = (uint8_t)('0' + year % 10);
+    /* Month */
+    buf[6] = (uint8_t)('0' + month / 10);
+    buf[7] = (uint8_t)('0' + month % 10);
+    /* Day */
+    buf[8] = (uint8_t)('0' + day / 10);
+    buf[9] = (uint8_t)('0' + day % 10);
+    /* Hour */
+    buf[10] = (uint8_t)('0' + hour / 10);
+    buf[11] = (uint8_t)('0' + hour % 10);
+    /* Minute */
+    buf[12] = (uint8_t)('0' + min / 10);
+    buf[13] = (uint8_t)('0' + min % 10);
+    /* Second */
+    buf[14] = (uint8_t)('0' + sec / 10);
+    buf[15] = (uint8_t)('0' + sec % 10);
+    /* Zulu */
+    buf[16] = 'Z';
+  }
+
+  return total;
+}
+
+/* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */

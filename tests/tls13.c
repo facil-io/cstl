@@ -335,23 +335,107 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
                request_len,
                len);
 
-  /* 6. Receive HTTP response */
-  ssize_t received =
-      tls13_read_with_timeout(fd, buf, TLS13_BUF_SIZE, TLS13_READ_TIMEOUT_MS);
-  if (received <= 0) {
-    FIO_LOG_ERROR("  No response received");
-    goto cleanup;
-  }
-
-  FIO_LOG_DEBUG2("  Received %zd bytes of encrypted response", received);
-
-  /* Decrypt response */
+  /* 6. Receive HTTP response (may include post-handshake messages) */
   uint8_t plaintext[TLS13_BUF_SIZE];
-  int plain_len = fio_tls13_client_decrypt(&client,
+  int plain_len = -1;
+  size_t response_buf_len = 0;
+  int read_attempts = 0;
+  const int max_read_attempts = 10;
+
+  while (plain_len <= 0 && read_attempts < max_read_attempts) {
+    /* Read more data if buffer is empty or we need more for a complete record
+     */
+    int need_more_data = (response_buf_len == 0);
+    if (!need_more_data && response_buf_len >= 5) {
+      /* Check if we have a complete record */
+      uint16_t record_payload_len = ((uint16_t)buf[3] << 8) | buf[4];
+      size_t record_total_len = 5 + record_payload_len;
+      if (response_buf_len < record_total_len)
+        need_more_data = 1;
+    } else if (response_buf_len > 0 && response_buf_len < 5) {
+      need_more_data = 1;
+    }
+
+    if (need_more_data) {
+      ssize_t received =
+          tls13_read_with_timeout(fd,
+                                  buf + response_buf_len,
+                                  TLS13_BUF_SIZE - response_buf_len,
+                                  TLS13_READ_TIMEOUT_MS);
+      if (received <= 0) {
+        if (read_attempts == 0 && response_buf_len == 0) {
+          FIO_LOG_ERROR("  No response received");
+          goto cleanup;
+        }
+        break; /* No more data */
+      }
+      response_buf_len += (size_t)received;
+      FIO_LOG_DEBUG2("  Received %zd bytes (total buffered: %zu)",
+                     received,
+                     response_buf_len);
+    }
+
+    /* Process records in the buffer */
+    size_t offset = 0;
+    while (offset < response_buf_len) {
+      /* Check if we have a complete record header */
+      if (response_buf_len - offset < 5)
+        break;
+
+      /* Parse record length from header */
+      uint16_t record_payload_len =
+          ((uint16_t)buf[offset + 3] << 8) | buf[offset + 4];
+      size_t record_total_len = 5 + record_payload_len;
+
+      /* Check if we have the complete record */
+      if (response_buf_len - offset < record_total_len)
+        break;
+
+      FIO_LOG_DEBUG2("    Processing record at offset %zu (type=%02x, len=%u)",
+                     offset,
+                     buf[offset],
+                     record_payload_len);
+
+      /* Try to decrypt this record */
+      plain_len = fio_tls13_client_decrypt(&client,
                                            plaintext,
                                            sizeof(plaintext) - 1,
-                                           buf,
-                                           (size_t)received);
+                                           buf + offset,
+                                           record_total_len);
+
+      offset += record_total_len;
+
+      if (plain_len > 0) {
+        /* Got application data! */
+        break;
+      } else if (plain_len == 0) {
+        /* Post-handshake message (e.g., NewSessionTicket), continue */
+        FIO_LOG_DEBUG2("    Skipped post-handshake message");
+        continue;
+      } else {
+        /* Decryption error */
+        FIO_LOG_ERROR("  Failed to decrypt record");
+        tls13_print_hex("Record data",
+                        buf + offset - record_total_len,
+                        record_total_len > 64 ? 64 : record_total_len);
+        goto cleanup;
+      }
+    }
+
+    /* Move remaining data to beginning of buffer */
+    if (offset > 0 && offset < response_buf_len) {
+      FIO_MEMMOVE(buf, buf + offset, response_buf_len - offset);
+      response_buf_len -= offset;
+    } else if (offset >= response_buf_len) {
+      response_buf_len = 0;
+    }
+
+    /* If we got application data, we're done */
+    if (plain_len > 0)
+      break;
+
+    ++read_attempts;
+  }
 
   if (plain_len > 0) {
     plaintext[plain_len] = '\0';
@@ -380,10 +464,12 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
       result = 1; /* Still consider it a pass - encryption/decryption worked */
     }
   } else {
-    FIO_LOG_ERROR("  Failed to decrypt response");
-    tls13_print_hex("Encrypted data",
-                    buf,
-                    (size_t)received > 64 ? 64 : (size_t)received);
+    FIO_LOG_ERROR("  Failed to decrypt response (no application data found)");
+    if (response_buf_len > 0) {
+      tls13_print_hex("Remaining data",
+                      buf,
+                      response_buf_len > 64 ? 64 : response_buf_len);
+    }
   }
 
 cleanup:
