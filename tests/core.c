@@ -527,7 +527,7 @@ FIO_SFUNC void fio___test_core_multiprecision_basic(void) {
           "\t* Testing Basic Multi-Precision add / sub / mul for fio_uXXX "
           "(fio_u256).\n");
 
-  char *buf[1024];
+  char buf[1024];
 
   fio_u256 a = fio_u256_init64(2);
   fio_u256 b = fio_u256_init64(3);

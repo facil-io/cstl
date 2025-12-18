@@ -58,7 +58,7 @@ FIO_SFUNC uintptr_t fio___perf_poly1305_wrapper(char *msg, size_t len) {
                       "\xd5\x06\xa8"
                       "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41"
                       "\x49\xf5\x1b";
-  fio_poly1305_auth(result, key, msg, len, NULL, 0);
+  fio_poly1305_auth(result, msg, len, NULL, 0, key);
   return (uintptr_t)result[0];
 }
 
@@ -97,7 +97,7 @@ FIO_SFUNC uintptr_t fio___perf_chacha20poly1305_dec_wrapper(char *msg,
                       "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
                       "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
-  fio_poly1305_auth(result, key, msg, len, NULL, 0);
+  fio_poly1305_auth(result, msg, len, NULL, 0, key);
   fio_chacha20(msg, len, key, nounce, 1);
   return (uintptr_t)result[0];
 }

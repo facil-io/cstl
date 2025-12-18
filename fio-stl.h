@@ -62857,7 +62857,7 @@ FIO_IFUNC fio_u512 fio___pubsub_broadcast_compose(uint64_t tick) {
   u.u64[1] = FIO___PUBSUB_POSTOFFICE.uuid.u64[1];
   u.u64[2] = fio_ltole64(hello_rand); /* persistent endienes required for k */
   u.u64[3] = fio_ltole64(tick);
-  fio_poly1305_auth(u.u64 + 4, k, NULL, 0, u.u64, 32);
+  fio_poly1305_auth(u.u64 + 4, u.u64, 32, NULL, 0, k);
   return u;
 }
 
@@ -62924,7 +62924,7 @@ FIO_SFUNC int fio___pubsub_broadcast_hello_validate(uint64_t *hello) {
   }
   /* test MAC */
   const void *k = fio___pubsub_secret_key(&key_buf, fio_ltole64(hello[2]));
-  fio_poly1305_auth(mac, k, NULL, 0, hello, 32);
+  fio_poly1305_auth(mac, hello, 32, NULL, 0, k);
   if (mac[0] != hello[4] || mac[1] != hello[5]) {
     FIO_LOG_SECURITY("(%d) pub/sub-broadcast MAC failure - under attack?",
                      fio_io_pid());
