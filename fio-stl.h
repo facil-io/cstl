@@ -11530,7 +11530,15 @@ FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536, "FIO_JSON_MAX_DEPTH too big");
 #define FIO_JSON_USE_FIO_ATON 0
 #endif
 
-/** The JSON parser settings. */
+/**
+ * The JSON parser settings (callbacks).
+ *
+ * **Ownership**: Callbacks that return `void *` objects transfer ownership to
+ * the parser. The parser will either pass these objects to `map_push` /
+ * `array_push` (transferring ownership to the container), or call
+ * `free_unused_object` if the object is not used (e.g., on error or NULL map
+ * key). The `on_error` callback receives ownership of any partial result.
+ */
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
   void *(*on_null)(void);
@@ -11550,9 +11558,9 @@ typedef struct {
   void *(*on_map)(void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
   void *(*on_array)(void *ctx, void *at);
-  /** Array was detected. Returns non-zero on error. */
+  /** Map entry detected. Returns non-zero on error. Owns key and value. */
   int (*map_push)(void *ctx, void *key, void *value);
-  /** Array was detected. Returns non-zero on error. */
+  /** Array entry detected. Returns non-zero on error. Owns value. */
   int (*array_push)(void *ctx, void *value);
   /** Called when an array object (`ctx`) appears done. */
   int (*array_finished)(void *ctx);
@@ -11562,9 +11570,9 @@ typedef struct {
   int (*is_array)(void *ctx);
   /** Called when context is expected to be a map (i.e., fio_json_update). */
   int (*is_map)(void *ctx);
-  /** Called for the `key` element in case of error or NULL value. */
+  /** Called for unused objects (e.g., key on error). Must free the object. */
   void (*free_unused_object)(void *ctx);
-  /** the JSON parsing encountered an error - what to do with ctx? */
+  /** The JSON parsing encountered an error. Owns ctx, should free or return. */
   void *(*on_error)(void *ctx);
 } fio_json_parser_callbacks_s;
 
@@ -27175,14 +27183,17 @@ SFUNC void fio_chacha20(void *restrict data,
  * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
  * poly message and additional data into `mac_dest`.
  *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ * * `mac_dest` MUST point to a buffer with (at least) 16 available bytes.
+ * * `message`  MAY be omitted.
+ * * `ad`       MAY be omitted (additional data).
+ * * `key`      MUST point to a 256 bit long memory address (32 Bytes).
  */
 SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             const void *key256bits,
                              void *restrict message,
                              size_t len,
-                             const void *additional_data,
-                             size_t additional_data_len);
+                             const void *ad,
+                             size_t ad_len,
+                             const void *key256bits);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
@@ -27407,11 +27418,11 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 
 /* Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
-                             const void *key,
                              void *restrict msg,
                              size_t len,
                              const void *ad,
-                             size_t ad_len) {
+                             size_t ad_len,
+                             const void *key) {
   fio___poly_s pl = fio___poly_init(key);
   fio___poly_consume_msg(&pl, (uint8_t *)ad, ad_len);
   fio___poly_consume_msg(&pl, (uint8_t *)msg, len);
@@ -37962,6 +37973,9 @@ SFUNC int fio_x509_verify_chain(const uint8_t **certs,
 SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
                               fio_x509_trust_store_s *trust_store);
 
+/** Error value for fio_tls_parse_certificate_message */
+#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
+
 /**
  * Parse TLS 1.3 Certificate message into individual certificates.
  *
@@ -37976,12 +37990,12 @@ SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
  * @param max_entries Maximum entries to parse
  * @param data Raw Certificate message data (after handshake header)
  * @param data_len Length of Certificate message data
- * @return Number of certificates parsed, or -1 on error
+ * @return Number of certificates parsed, or FIO_TLS_CERT_PARSE_ERROR on error
  */
-SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
-                                            size_t max_entries,
-                                            const uint8_t *data,
-                                            size_t data_len);
+SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                               size_t max_entries,
+                                               const uint8_t *data,
+                                               size_t data_len);
 
 /**
  * Get human-readable error string for X.509 validation error code.
@@ -39101,12 +39115,12 @@ SFUNC int fio_x509_verify_chain(const uint8_t **certs,
   return FIO_X509_OK;
 }
 
-SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
-                                            size_t max_entries,
-                                            const uint8_t *data,
-                                            size_t data_len) {
+SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                               size_t max_entries,
+                                               const uint8_t *data,
+                                               size_t data_len) {
   if (!entries || max_entries == 0 || !data || data_len == 0)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
 
   const uint8_t *p = data;
   const uint8_t *end = data + data_len;
@@ -39127,20 +39141,20 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
 
   /* Parse certificate_request_context length (1 byte) */
   if (p >= end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   uint8_t ctx_len = *p++;
   if (p + ctx_len > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   p += ctx_len; /* Skip context (usually empty for server certificates) */
 
   /* Parse certificate_list length (3 bytes, big-endian) */
   if (p + 3 > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   size_t list_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
   p += 3;
 
   if (p + list_len > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
 
   const uint8_t *list_end = p + list_len;
   size_t count = 0;
@@ -39149,12 +39163,12 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
   while (p < list_end && count < max_entries) {
     /* cert_data length (3 bytes, big-endian) */
     if (p + 3 > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     size_t cert_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
     p += 3;
 
     if (cert_len == 0 || p + cert_len > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
 
     /* Store certificate entry */
     entries[count].cert = p;
@@ -39164,16 +39178,16 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
 
     /* extensions length (2 bytes, big-endian) */
     if (p + 2 > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     size_t ext_len = ((size_t)p[0] << 8) | p[1];
     p += 2;
 
     if (p + ext_len > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     p += ext_len; /* Skip extensions */
   }
 
-  return (int)count;
+  return count;
 }
 
 /* *****************************************************************************

@@ -33,7 +33,15 @@ FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536, "FIO_JSON_MAX_DEPTH too big");
 #define FIO_JSON_USE_FIO_ATON 0
 #endif
 
-/** The JSON parser settings. */
+/**
+ * The JSON parser settings (callbacks).
+ *
+ * **Ownership**: Callbacks that return `void *` objects transfer ownership to
+ * the parser. The parser will either pass these objects to `map_push` /
+ * `array_push` (transferring ownership to the container), or call
+ * `free_unused_object` if the object is not used (e.g., on error or NULL map
+ * key). The `on_error` callback receives ownership of any partial result.
+ */
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
   void *(*on_null)(void);
@@ -53,9 +61,9 @@ typedef struct {
   void *(*on_map)(void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
   void *(*on_array)(void *ctx, void *at);
-  /** Array was detected. Returns non-zero on error. */
+  /** Map entry detected. Returns non-zero on error. Owns key and value. */
   int (*map_push)(void *ctx, void *key, void *value);
-  /** Array was detected. Returns non-zero on error. */
+  /** Array entry detected. Returns non-zero on error. Owns value. */
   int (*array_push)(void *ctx, void *value);
   /** Called when an array object (`ctx`) appears done. */
   int (*array_finished)(void *ctx);
@@ -65,9 +73,9 @@ typedef struct {
   int (*is_array)(void *ctx);
   /** Called when context is expected to be a map (i.e., fio_json_update). */
   int (*is_map)(void *ctx);
-  /** Called for the `key` element in case of error or NULL value. */
+  /** Called for unused objects (e.g., key on error). Must free the object. */
   void (*free_unused_object)(void *ctx);
-  /** the JSON parsing encountered an error - what to do with ctx? */
+  /** The JSON parsing encountered an error. Owns ctx, should free or return. */
   void *(*on_error)(void *ctx);
 } fio_json_parser_callbacks_s;
 

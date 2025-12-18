@@ -112,7 +112,14 @@ Logo contributed by ([Area55](https://github.com/area55git)) under a [Creative C
       `#define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})`
   - Argument structs: `_args_s` suffix (e.g., `fio_subscribe_args_s`)
   - Property naming (getter / setter): `<namespace>_<property>(_set)` pattern (e.g., `fio_bstr_len`, `fio_bstr_len_set`)
+     The setter functions SHOULD return the value that was set, unless it requires memory allocations or causes other performance issues (i.e., when the inner representation doesn't much the setter input).
   - Data retrieval: `<namespace>_<property>_get` - avoid - implies non-trivial data retrieval with possible side effects.
+  - Use `object_new`/`object_free` for heap allocations and `object_init`/`object_destroy` for supporting stack allocations. the `object_destroy` should re-initialize memory.
+
+- Function Parameters / Arguments:
+  - If parameters have possible defaults, use named arguments pattern.
+  - "target" or "destination" parameter should be first (i.e., when writing to a buffer).
+  - If a `this` style parameter exists it MUST ALWAYS be first (then a target parameter, if exists).
 
 ##  Error Handling
 

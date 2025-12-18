@@ -296,6 +296,9 @@ SFUNC int fio_x509_verify_chain(const uint8_t **certs,
 SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
                               fio_x509_trust_store_s *trust_store);
 
+/** Error value for fio_tls_parse_certificate_message */
+#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
+
 /**
  * Parse TLS 1.3 Certificate message into individual certificates.
  *
@@ -310,12 +313,12 @@ SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
  * @param max_entries Maximum entries to parse
  * @param data Raw Certificate message data (after handshake header)
  * @param data_len Length of Certificate message data
- * @return Number of certificates parsed, or -1 on error
+ * @return Number of certificates parsed, or FIO_TLS_CERT_PARSE_ERROR on error
  */
-SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
-                                            size_t max_entries,
-                                            const uint8_t *data,
-                                            size_t data_len);
+SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                               size_t max_entries,
+                                               const uint8_t *data,
+                                               size_t data_len);
 
 /**
  * Get human-readable error string for X.509 validation error code.
@@ -1435,12 +1438,12 @@ SFUNC int fio_x509_verify_chain(const uint8_t **certs,
   return FIO_X509_OK;
 }
 
-SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
-                                            size_t max_entries,
-                                            const uint8_t *data,
-                                            size_t data_len) {
+SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                               size_t max_entries,
+                                               const uint8_t *data,
+                                               size_t data_len) {
   if (!entries || max_entries == 0 || !data || data_len == 0)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
 
   const uint8_t *p = data;
   const uint8_t *end = data + data_len;
@@ -1461,20 +1464,20 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
 
   /* Parse certificate_request_context length (1 byte) */
   if (p >= end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   uint8_t ctx_len = *p++;
   if (p + ctx_len > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   p += ctx_len; /* Skip context (usually empty for server certificates) */
 
   /* Parse certificate_list length (3 bytes, big-endian) */
   if (p + 3 > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
   size_t list_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
   p += 3;
 
   if (p + list_len > end)
-    return -1;
+    return FIO_TLS_CERT_PARSE_ERROR;
 
   const uint8_t *list_end = p + list_len;
   size_t count = 0;
@@ -1483,12 +1486,12 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
   while (p < list_end && count < max_entries) {
     /* cert_data length (3 bytes, big-endian) */
     if (p + 3 > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     size_t cert_len = ((size_t)p[0] << 16) | ((size_t)p[1] << 8) | p[2];
     p += 3;
 
     if (cert_len == 0 || p + cert_len > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
 
     /* Store certificate entry */
     entries[count].cert = p;
@@ -1498,16 +1501,16 @@ SFUNC int fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
 
     /* extensions length (2 bytes, big-endian) */
     if (p + 2 > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     size_t ext_len = ((size_t)p[0] << 8) | p[1];
     p += 2;
 
     if (p + ext_len > list_end)
-      return -1;
+      return FIO_TLS_CERT_PARSE_ERROR;
     p += ext_len; /* Skip extensions */
   }
 
-  return (int)count;
+  return count;
 }
 
 /* *****************************************************************************

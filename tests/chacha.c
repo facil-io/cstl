@@ -23,7 +23,7 @@ FIO_SFUNC uintptr_t fio__poly1305_speed_wrapper(char *msg, size_t len) {
                       "\xd5\x06\xa8"
                       "\x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41"
                       "\x49\xf5\x1b";
-  fio_poly1305_auth(result, key, msg, len, NULL, 0);
+  fio_poly1305_auth(result, msg, len, NULL, 0, key);
   return (uintptr_t)result[0];
 }
 
@@ -58,7 +58,7 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
                       "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
                       "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
-  fio_poly1305_auth(result, key, msg, len, NULL, 0);
+  fio_poly1305_auth(result, msg, len, NULL, 0, key);
   fio_chacha20(msg, len, key, nounce, 1);
   return (uintptr_t)result[0];
 }
@@ -148,11 +148,11 @@ int main(void) {
     char buf2[33] = {0};
     for (size_t t = 0; tests[t].expected; ++t) {
       fio_poly1305_auth(auth,
-                        tests[t].key,
                         tests[t].msg,
                         FIO_STRLEN(tests[t].msg),
                         NULL,
-                        0);
+                        0,
+                        tests[t].key);
       for (size_t i = 0; i < 16; ++i) {
         buf1[(i << 1)] = fio_i2c(((auth[i] >> 4) & 0xF));
         buf1[(i << 1) + 1] = fio_i2c(((auth[i]) & 0xF));

@@ -81,14 +81,17 @@ SFUNC void fio_chacha20(void *restrict data,
  * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
  * poly message and additional data into `mac_dest`.
  *
- * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
+ * * `mac_dest` MUST point to a buffer with (at least) 16 available bytes.
+ * * `message`  MAY be omitted.
+ * * `ad`       MAY be omitted (additional data).
+ * * `key`      MUST point to a 256 bit long memory address (32 Bytes).
  */
 SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             const void *key256bits,
                              void *restrict message,
                              size_t len,
-                             const void *additional_data,
-                             size_t additional_data_len);
+                             const void *ad,
+                             size_t ad_len,
+                             const void *key256bits);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
@@ -313,11 +316,11 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 
 /* Given a Poly1305 key, writes a MAC into `mac_dest`. */
 SFUNC void fio_poly1305_auth(void *restrict mac,
-                             const void *key,
                              void *restrict msg,
                              size_t len,
                              const void *ad,
-                             size_t ad_len) {
+                             size_t ad_len,
+                             const void *key) {
   fio___poly_s pl = fio___poly_init(key);
   fio___poly_consume_msg(&pl, (uint8_t *)ad, ad_len);
   fio___poly_consume_msg(&pl, (uint8_t *)msg, len);
