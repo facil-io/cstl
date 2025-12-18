@@ -38705,6 +38705,23 @@ SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
     return -1;
   }
 
+  /* Check if san_dns is set directly (without raw extension data) */
+  if (cert->san_dns && cert->san_dns_len > 0) {
+    FIO_LOG_DEBUG2("X.509 hostname match: SAN DNS set directly: '%.*s'",
+                   (int)cert->san_dns_len,
+                   cert->san_dns);
+    if (fio___x509_match_name(cert->san_dns,
+                              cert->san_dns_len,
+                              hostname,
+                              hostname_len) == 0) {
+      FIO_LOG_DEBUG2("X.509 hostname match: MATCH FOUND");
+      return 0;
+    }
+    /* SAN present but no match - do NOT fall back to CN */
+    FIO_LOG_DEBUG2("X.509 hostname match: no SAN match found");
+    return -1;
+  }
+
   /* No SAN extension present - fall back to Common Name */
   FIO_LOG_DEBUG2("X.509 hostname match: no SAN, checking CN");
   if (cert->subject_cn && cert->subject_cn_len > 0) {
