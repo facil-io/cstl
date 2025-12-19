@@ -35,7 +35,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_callback)(int sig, void *udata) {
 Test: Basic signal monitor registration and cleanup
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_basic)(void) {
-  fprintf(stderr, "* Testing signal monitor registration and cleanup.\n");
+  FIO_LOG_DDEBUG("Testing signal monitor registration and cleanup.");
 
   /* Test registering a signal monitor */
   int result =
@@ -61,14 +61,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_basic)(void) {
   result = fio_signal_forget(SIGUSR1);
   FIO_ASSERT(result == 0, "fio_signal_forget should succeed for SIGUSR1");
 
-  fprintf(stderr, "  - Basic registration/cleanup: PASSED\n");
+  FIO_LOG_DDEBUG("Basic registration/cleanup: PASSED");
 }
 
 /* *****************************************************************************
 Test: Edge cases and error handling
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_edge_cases)(void) {
-  fprintf(stderr, "* Testing signal monitor edge cases.\n");
+  FIO_LOG_DDEBUG("Testing signal monitor edge cases.");
 
   /* Test: sig=0 should fail */
   int result =
@@ -92,14 +92,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_edge_cases)(void) {
              "fio_signal_monitor should succeed with NULL callback (ignore)");
   fio_signal_forget(SIGUSR1);
 
-  fprintf(stderr, "  - Edge cases: PASSED\n");
+  FIO_LOG_DDEBUG("Edge cases: PASSED");
 }
 
 /* *****************************************************************************
 Test: fio_signal_review with no pending signals
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_review)(void) {
-  fprintf(stderr, "* Testing fio_signal_review with no pending signals.\n");
+  FIO_LOG_DDEBUG("Testing fio_signal_review with no pending signals.");
 
   /* Register a monitor */
   size_t counter = 0;
@@ -121,14 +121,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_review)(void) {
   /* Cleanup */
   fio_signal_forget(SIGUSR1);
 
-  fprintf(stderr, "  - Signal review (no pending): PASSED\n");
+  FIO_LOG_DDEBUG("Signal review (no pending): PASSED");
 }
 
 /* *****************************************************************************
 Test: Multiple signal monitors
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_multiple)(void) {
-  fprintf(stderr, "* Testing multiple signal monitors.\n");
+  FIO_LOG_DDEBUG("Testing multiple signal monitors.");
 
   /* Common signals available on both POSIX and Windows */
   int signals[] = {SIGINT, SIGILL, SIGABRT, SIGSEGV, SIGTERM};
@@ -153,7 +153,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_multiple)(void) {
                signals[i]);
   }
 
-  fprintf(stderr, "  - Multiple monitors: PASSED\n");
+  FIO_LOG_DDEBUG("Multiple monitors: PASSED");
 }
 
 #if FIO_OS_POSIX
@@ -161,7 +161,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_multiple)(void) {
 Test: POSIX-specific signals
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_posix)(void) {
-  fprintf(stderr, "* Testing POSIX-specific signal monitors.\n");
+  FIO_LOG_DDEBUG("Testing POSIX-specific signal monitors.");
 
   /* POSIX-only signals */
   int signals[] = {SIGQUIT,
@@ -193,7 +193,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_posix)(void) {
                signals[i]);
   }
 
-  fprintf(stderr, "  - POSIX signals: PASSED\n");
+  FIO_LOG_DDEBUG("POSIX signals: PASSED");
 }
 #endif /* FIO_OS_POSIX */
 
@@ -201,12 +201,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_posix)(void) {
 Main
 ***************************************************************************** */
 int main(void) {
-  fprintf(
-      stderr,
-      "Testing Signal Monitoring Module\n"
-      "================================\n"
-      "NOTE: These tests verify API behavior without sending actual signals.\n"
-      "      Full signal handling requires integration/manual testing.\n\n");
+  FIO_LOG_DDEBUG("Testing Signal Monitoring Module");
+  FIO_LOG_DDEBUG("================================");
+  FIO_LOG_DDEBUG("NOTE: These tests verify API behavior without sending actual "
+                 "signals.");
+  FIO_LOG_DDEBUG("Full signal handling requires integration/manual testing.");
 
   FIO_NAME_TEST(stl, signal_basic)();
   FIO_NAME_TEST(stl, signal_edge_cases)();
@@ -216,14 +215,13 @@ int main(void) {
   FIO_NAME_TEST(stl, signal_posix)();
 #endif
 
-  fprintf(stderr,
-          "\n================================\n"
-          "Signal monitoring tests complete.\n"
-          "\nLimitations (not tested - require integration testing):\n"
-          "  - Actual signal delivery and callback invocation\n"
-          "  - Signal propagation to previous handlers\n"
-          "  - Immediate vs deferred callback behavior\n"
-          "  - Race conditions in signal handling\n");
+  FIO_LOG_DDEBUG("================================");
+  FIO_LOG_DDEBUG("Signal monitoring tests complete.");
+  FIO_LOG_DDEBUG("Limitations (not tested - require integration testing):");
+  FIO_LOG_DDEBUG("  - Actual signal delivery and callback invocation");
+  FIO_LOG_DDEBUG("  - Signal propagation to previous handlers");
+  FIO_LOG_DDEBUG("  - Immediate vs deferred callback behavior");
+  FIO_LOG_DDEBUG("  - Race conditions in signal handling");
 
   return 0;
 }

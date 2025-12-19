@@ -5,7 +5,8 @@ Test ATOL
 
 FIO_SFUNC double fio___aton_float_wrapper(char **pstr) {
   fio_aton_s r = fio_aton(pstr);
-  if (r.is_float) return r.f;
+  if (r.is_float)
+    return r.f;
   return (double)r.i;
 }
 
@@ -76,7 +77,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       char *tmp2 = (char *)floats[n_i];
       u2.f = to_test[fn_i].fn(&tmp2);
       if (tmp2 == tmp) {
-        if ((isnan(u1.f) && isnan(u2.f)) || u1.u64 == u2.u64) continue;
+        if ((isnan(u1.f) && isnan(u2.f)) || u1.u64 == u2.u64)
+          continue;
         rounding_errors_detected = 1;
 #ifdef DEBUG
         FIO_LOG_WARNING("Rounding error for %s:\n\t%.17g ?= %.17g",
@@ -84,8 +86,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
                         u1.f,
                         u2.f);
 #endif
-        if (u1.u64 + 1 == u2.u64) continue;
-        if (u2.u64 + 1 == u1.u64) continue;
+        if (u1.u64 + 1 == u2.u64)
+          continue;
+        if (u2.u64 + 1 == u1.u64)
+          continue;
       }
       FIO_ASSERT(tmp2 == tmp && u1.u64 == u2.u64,
                  "Sanity test failed for %s\n\t %.17g ?!= %.17g\n\t %s ?!= %s",
@@ -113,13 +117,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
     fprintf(stderr, "%lld us\n", (long long int)(end - start));
   }
   if (rounding_errors_detected)
-    FIO_LOG_WARNING(
-        "Single bit rounding errors detected when comparing "
-        "`fio_aton` to `strtod`.\n");
+    FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
+                    "`fio_aton` to `strtod`.\n");
 }
 
 int main(void) {
-  fprintf(stderr, "\t* Testing fio_atol and fio_ltoa.\n");
+  FIO_LOG_DDEBUG("Testing fio_atol and fio_ltoa.");
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
@@ -231,64 +234,64 @@ int main(void) {
     fprintf(stderr, "\t- fio_u2d: %zuus\n", (size_t)(end - start));
   }
 #endif
-  fprintf(stderr, "\t* Testing fio_atol samples.\n");
-#define TEST_ATOL(s_, n)                                                      \
-  do {                                                                        \
-    char *s = (char *)s_;                                                     \
-    char *p = (char *)(s);                                                    \
-    int64_t r = fio_atol(&p);                                                 \
-    FIO_ASSERT(r == (n),                                                      \
-               "fio_atol test error! %s => %zd (not %zd)",                    \
-               ((char *)(s)),                                                 \
-               (size_t)r,                                                     \
-               (size_t)n);                                                    \
-    FIO_ASSERT((s) + FIO_STRLEN((s)) == p,                                    \
-               "fio_atol test error! %s reading position not at end "         \
-               "(!%zu == %zu)\n\t0x%p - 0x%p",                                \
-               (s),                                                           \
-               (size_t)FIO_STRLEN((s)),                                       \
-               (size_t)(p - (s)),                                             \
-               (void *)p,                                                     \
-               (void *)s);                                                    \
-    char buf[96];                                                             \
-    buf[0] = '0';                                                             \
-    buf[1] = 'b';                                                             \
-    buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                     \
-    p = buf;                                                                  \
-    FIO_ASSERT(fio_atol(&p) == (n),                                           \
-               "fio_ltoa base 2 test error! "                                 \
-               "%s != %s (%zd)",                                              \
-               buf,                                                           \
-               ((char *)(s)),                                                 \
-               (size_t)((p = buf), fio_atol(&p)));                            \
-    fio_ltoa(buf, n, 8);                                                      \
-    p = buf;                                                                  \
-    p += buf[0] == '-';                                                       \
-    FIO_ASSERT(                                                               \
-        (r = (int64_t)fio_atol8u(&p)) == ((buf[0] == '-') ? (0 - (n)) : (n)), \
-        "fio_ltoa base 8 test error! "                                        \
-        "%s != %s (%zd)",                                                     \
-        buf,                                                                  \
-        ((char *)(s)),                                                        \
-        (size_t)r);                                                           \
-    buf[fio_ltoa(buf, n, 10)] = 0;                                            \
-    p = buf;                                                                  \
-    FIO_ASSERT(fio_atol(&p) == (n),                                           \
-               "fio_ltoa base 10 test error! "                                \
-               "%s != %s (%zd)",                                              \
-               buf,                                                           \
-               ((char *)(s)),                                                 \
-               (size_t)((p = buf), fio_atol(&p)));                            \
-    buf[0] = '0';                                                             \
-    buf[1] = 'x';                                                             \
-    buf[fio_ltoa(buf + 2, n, 16) + 2] = 0;                                    \
-    p = buf;                                                                  \
-    FIO_ASSERT(fio_atol(&p) == (n),                                           \
-               "fio_ltoa base 16 test error! "                                \
-               "%s != %s (%zd)",                                              \
-               buf,                                                           \
-               ((char *)(s)),                                                 \
-               (size_t)((p = buf), fio_atol(&p)));                            \
+  FIO_LOG_DDEBUG("Testing fio_atol samples.");
+#define TEST_ATOL(s_, n)                                                       \
+  do {                                                                         \
+    char *s = (char *)s_;                                                      \
+    char *p = (char *)(s);                                                     \
+    int64_t r = fio_atol(&p);                                                  \
+    FIO_ASSERT(r == (n),                                                       \
+               "fio_atol test error! %s => %zd (not %zd)",                     \
+               ((char *)(s)),                                                  \
+               (size_t)r,                                                      \
+               (size_t)n);                                                     \
+    FIO_ASSERT((s) + FIO_STRLEN((s)) == p,                                     \
+               "fio_atol test error! %s reading position not at end "          \
+               "(!%zu == %zu)\n\t0x%p - 0x%p",                                 \
+               (s),                                                            \
+               (size_t)FIO_STRLEN((s)),                                        \
+               (size_t)(p - (s)),                                              \
+               (void *)p,                                                      \
+               (void *)s);                                                     \
+    char buf[96];                                                              \
+    buf[0] = '0';                                                              \
+    buf[1] = 'b';                                                              \
+    buf[fio_ltoa(buf + 2, n, 2) + 2] = 0;                                      \
+    p = buf;                                                                   \
+    FIO_ASSERT(fio_atol(&p) == (n),                                            \
+               "fio_ltoa base 2 test error! "                                  \
+               "%s != %s (%zd)",                                               \
+               buf,                                                            \
+               ((char *)(s)),                                                  \
+               (size_t)((p = buf), fio_atol(&p)));                             \
+    fio_ltoa(buf, n, 8);                                                       \
+    p = buf;                                                                   \
+    p += buf[0] == '-';                                                        \
+    FIO_ASSERT((r = (int64_t)fio_atol8u(&p)) ==                                \
+                   ((buf[0] == '-') ? (0 - (n)) : (n)),                        \
+               "fio_ltoa base 8 test error! "                                  \
+               "%s != %s (%zd)",                                               \
+               buf,                                                            \
+               ((char *)(s)),                                                  \
+               (size_t)r);                                                     \
+    buf[fio_ltoa(buf, n, 10)] = 0;                                             \
+    p = buf;                                                                   \
+    FIO_ASSERT(fio_atol(&p) == (n),                                            \
+               "fio_ltoa base 10 test error! "                                 \
+               "%s != %s (%zd)",                                               \
+               buf,                                                            \
+               ((char *)(s)),                                                  \
+               (size_t)((p = buf), fio_atol(&p)));                             \
+    buf[0] = '0';                                                              \
+    buf[1] = 'x';                                                              \
+    buf[fio_ltoa(buf + 2, n, 16) + 2] = 0;                                     \
+    p = buf;                                                                   \
+    FIO_ASSERT(fio_atol(&p) == (n),                                            \
+               "fio_ltoa base 16 test error! "                                 \
+               "%s != %s (%zd)",                                               \
+               buf,                                                            \
+               ((char *)(s)),                                                  \
+               (size_t)((p = buf), fio_atol(&p)));                             \
   } while (0)
 
   TEST_ATOL("0x1", 1);
@@ -312,14 +315,14 @@ int main(void) {
             9223372036854775806LL); /* almost INT64_MAX */
 #undef TEST_ATOL
 
-#define TEST_LTOA_DIGITS10(num, digits)                                    \
-  FIO_ASSERT(fio_digits10(num) == digits,                                  \
-             "fio_digits10 failed for " #num " != (%zu)",                  \
-             (size_t)fio_digits10(num));                                   \
-  {                                                                        \
-    char *number_str__ = (char *)#num;                                     \
-    char *pstr__ = number_str__;                                           \
-    FIO_ASSERT(fio_atol10(&pstr__) == num, "fio_atol10 failed for " #num); \
+#define TEST_LTOA_DIGITS10(num, digits)                                        \
+  FIO_ASSERT(fio_digits10(num) == digits,                                      \
+             "fio_digits10 failed for " #num " != (%zu)",                      \
+             (size_t)fio_digits10(num));                                       \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol10(&pstr__) == num, "fio_atol10 failed for " #num);     \
   }
   TEST_LTOA_DIGITS10(1LL, 1);
   TEST_LTOA_DIGITS10(22LL, 2);
@@ -342,16 +345,16 @@ int main(void) {
   TEST_LTOA_DIGITS10(-9223372036854775807LL, (19 + 1));
 #undef TEST_LTOA_DIGITS10
 
-#define TEST_LTOA_DIGITS16(num, digits)                                  \
-  FIO_ASSERT(fio_digits16u(num) == digits,                               \
-             "fio_digits16u failed for " #num " != (%zu)",               \
-             (size_t)fio_digits16u(num));                                \
-  {                                                                      \
-    char *number_str__ = (char *)#num;                                   \
-    char *pstr__ = number_str__;                                         \
-    FIO_ASSERT(fio_atol16u(&pstr__) == (uint64_t)(num),                  \
-               "fio_atol16u failed for " #num " != %zu",                 \
-               ((pstr__ = number_str__), (size_t)fio_atol16u(&pstr__))); \
+#define TEST_LTOA_DIGITS16(num, digits)                                        \
+  FIO_ASSERT(fio_digits16u(num) == digits,                                     \
+             "fio_digits16u failed for " #num " != (%zu)",                     \
+             (size_t)fio_digits16u(num));                                      \
+  {                                                                            \
+    char *number_str__ = (char *)#num;                                         \
+    char *pstr__ = number_str__;                                               \
+    FIO_ASSERT(fio_atol16u(&pstr__) == (uint64_t)(num),                        \
+               "fio_atol16u failed for " #num " != %zu",                       \
+               ((pstr__ = number_str__), (size_t)fio_atol16u(&pstr__)));       \
   }
   TEST_LTOA_DIGITS16(0x00ULL, 2);
   TEST_LTOA_DIGITS16(0x10ULL, 2);
@@ -367,9 +370,9 @@ int main(void) {
   TEST_LTOA_DIGITS16(0xFF00000000000000ULL, 16);
 #undef TEST_LTOA_DIGITS16
 
-#define TEST_LTOA_DIGITS_BIN(num, digits)                   \
-  FIO_ASSERT(fio_digits_bin(num) == digits,                 \
-             "fio_digits_bin failed for " #num " != (%zu)", \
+#define TEST_LTOA_DIGITS_BIN(num, digits)                                      \
+  FIO_ASSERT(fio_digits_bin(num) == digits,                                    \
+             "fio_digits_bin failed for " #num " != (%zu)",                    \
              (size_t)fio_digits_bin(num));
 
   TEST_LTOA_DIGITS_BIN(0x00ULL, 1);
@@ -396,81 +399,80 @@ int main(void) {
   ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
   FIO_NAME_TEST(stl, aton_speed)();
 
-#define TEST_DOUBLE(s, d, stop)                                               \
-  do {                                                                        \
-    union {                                                                   \
-      double d_;                                                              \
-      uint64_t as_i;                                                          \
-    } pn, pn1, pn2;                                                           \
-    pn2.d_ = (double)d;                                                       \
-    char *start = (char *)(s);                                                \
-    char *p = start;                                                          \
-    char *p1 = start;                                                         \
-    char *p2 = start;                                                         \
-    double r = fio_atof(&p);                                                  \
-    fio_aton_s num_result = fio_aton(&p1);                                    \
-    double r2 = num_result.is_float ? num_result.f : (double)num_result.i;    \
-    double std = strtod(p2, &p2);                                             \
-    (void)std;                                                                \
-    pn.d_ = r;                                                                \
-    pn1.d_ = r2;                                                              \
-    FIO_ASSERT(                                                               \
-        *p == stop || p == p2 || ((FIO_OS_WIN - 1 + 1) && p == start),        \
-        "atof float parsing didn't stop at correct position! %x != %x\n%s",   \
-        *p,                                                                   \
-        stop,                                                                 \
-        (s));                                                                 \
-    FIO_ASSERT(*p1 == stop || p1 == p2,                                       \
-               "aton float parsing didn't stop at correct position!\n\t%s"    \
-               "\n\t%x != %x",                                                \
-               s,                                                             \
-               *p1,                                                           \
-               stop);                                                         \
-    if (((double)d == r && (double)d == r2) || (r == std && r2 == std)) {     \
-      /** fprintf(stderr, "Okay for %s\n", s); */                             \
-    } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {    \
-      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                               \
-        FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",     \
-                        ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),            \
-                        s);                                                   \
-    } else if ((pn1.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn1.as_i) {    \
-      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                               \
-        FIO_LOG_WARNING(                                                      \
-            "aton Single bit rounding error detected (%s1): %s\n"             \
-            "\t%g != %g",                                                     \
-            ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),                        \
-            s,                                                                \
-            r2,                                                               \
-            std);                                                             \
-    } else if (r == 0.0 && (double)d != 0.0 && !isnan((double)d)) {           \
-      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                               \
-        FIO_LOG_WARNING("float range limit marked before: %s\n", s);          \
-    } else if (r2 == 0.0 && (double)d != 0.0 && !isnan((double)d)) {          \
-      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                               \
-        FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);     \
-    } else {                                                                  \
-      char f_buf[256];                                                        \
-      pn.d_ = std;                                                            \
-      pn2.d_ = r;                                                             \
-      size_t tmp_pos = fio_ltoa(f_buf, pn2.as_i, 2);                          \
-      f_buf[tmp_pos++] = '\n';                                                \
-      tmp_pos += fio_ltoa(f_buf + tmp_pos, pn.as_i, 2);                       \
-      f_buf[tmp_pos++] = '\n';                                                \
-      fio_ltoa(f_buf + tmp_pos, pn1.as_i, 2);                                 \
-      FIO_ASSERT(0,                                                           \
-                 "Float error bigger than a single bit rounding error."       \
-                 "\n\tString: %s"                                             \
-                 "\n\texp. "                                                  \
-                 "vs. act.:\nstd %.19g\natof %.19g\naton %.19g\nBinary:\n%s", \
-                 s,                                                           \
-                 std,                                                         \
-                 r,                                                           \
-                 r2,                                                          \
-                 f_buf);                                                      \
-    }                                                                         \
+#define TEST_DOUBLE(s, d, stop)                                                \
+  do {                                                                         \
+    union {                                                                    \
+      double d_;                                                               \
+      uint64_t as_i;                                                           \
+    } pn, pn1, pn2;                                                            \
+    pn2.d_ = (double)d;                                                        \
+    char *start = (char *)(s);                                                 \
+    char *p = start;                                                           \
+    char *p1 = start;                                                          \
+    char *p2 = start;                                                          \
+    double r = fio_atof(&p);                                                   \
+    fio_aton_s num_result = fio_aton(&p1);                                     \
+    double r2 = num_result.is_float ? num_result.f : (double)num_result.i;     \
+    double std = strtod(p2, &p2);                                              \
+    (void)std;                                                                 \
+    pn.d_ = r;                                                                 \
+    pn1.d_ = r2;                                                               \
+    FIO_ASSERT(                                                                \
+        *p == stop || p == p2 || ((FIO_OS_WIN - 1 + 1) && p == start),         \
+        "atof float parsing didn't stop at correct position! %x != %x\n%s",    \
+        *p,                                                                    \
+        stop,                                                                  \
+        (s));                                                                  \
+    FIO_ASSERT(*p1 == stop || p1 == p2,                                        \
+               "aton float parsing didn't stop at correct position!\n\t%s"     \
+               "\n\t%x != %x",                                                 \
+               s,                                                              \
+               *p1,                                                            \
+               stop);                                                          \
+    if (((double)d == r && (double)d == r2) || (r == std && r2 == std)) {      \
+      /** fprintf(stderr, "Okay for %s\n", s); */                              \
+    } else if ((pn2.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn2.as_i) {     \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("Single bit rounding error detected (%s1): %s\n",      \
+                        ((pn2.as_i + 1) == (pn.as_i) ? "-" : "+"),             \
+                        s);                                                    \
+    } else if ((pn1.as_i + 1) == (pn.as_i) || (pn.as_i + 1) == pn1.as_i) {     \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("aton Single bit rounding error detected (%s1): %s\n"  \
+                        "\t%g != %g",                                          \
+                        ((pn1.as_i + 1) == (pn.as_i) ? "-" : "+"),             \
+                        s,                                                     \
+                        r2,                                                    \
+                        std);                                                  \
+    } else if (r == 0.0 && (double)d != 0.0 && !isnan((double)d)) {            \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("float range limit marked before: %s\n", s);           \
+    } else if (r2 == 0.0 && (double)d != 0.0 && !isnan((double)d)) {           \
+      if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_DEBUG)                                \
+        FIO_LOG_WARNING("aton float range limit marked before: %s\n", s);      \
+    } else {                                                                   \
+      char f_buf[256];                                                         \
+      pn.d_ = std;                                                             \
+      pn2.d_ = r;                                                              \
+      size_t tmp_pos = fio_ltoa(f_buf, pn2.as_i, 2);                           \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      tmp_pos += fio_ltoa(f_buf + tmp_pos, pn.as_i, 2);                        \
+      f_buf[tmp_pos++] = '\n';                                                 \
+      fio_ltoa(f_buf + tmp_pos, pn1.as_i, 2);                                  \
+      FIO_ASSERT(0,                                                            \
+                 "Float error bigger than a single bit rounding error."        \
+                 "\n\tString: %s"                                              \
+                 "\n\texp. "                                                   \
+                 "vs. act.:\nstd %.19g\natof %.19g\naton %.19g\nBinary:\n%s",  \
+                 s,                                                            \
+                 std,                                                          \
+                 r,                                                            \
+                 r2,                                                           \
+                 f_buf);                                                       \
+    }                                                                          \
   } while (0)
 
-  fprintf(stderr, "\t* Testing fio_atof & fio_aton samples.\n");
+  FIO_LOG_DDEBUG("Testing fio_atof & fio_aton samples.");
 
   /* A few hex-float examples  */
   TEST_DOUBLE("0x10.1p0", 0x10.1p0, 0);
@@ -528,11 +530,10 @@ int main(void) {
   TEST_DOUBLE("3.1416", 3.1416, 0);
   TEST_DOUBLE("1E10", 1E10, 0);
   TEST_DOUBLE("1e10", 1e10, 0);
-  TEST_DOUBLE(
-      "100000000000000000000000000000000000000000000000000000000000"
-      "000000000000000000000",
-      1E80,
-      0);
+  TEST_DOUBLE("100000000000000000000000000000000000000000000000000000000000"
+              "000000000000000000000",
+              1E80,
+              0);
   TEST_DOUBLE("1E+10", 1E+10, 0);
   TEST_DOUBLE("1E-10", 1E-10, 0);
   TEST_DOUBLE("-1E10", -1E10, 0);

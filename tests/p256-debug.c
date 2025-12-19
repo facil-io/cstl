@@ -9,15 +9,19 @@ P-256 Step-by-Step Debug Test
 #include FIO_INCLUDE_FILE
 
 FIO_SFUNC void print_fe(const char *name, const uint64_t fe[4]) {
-  fprintf(stderr, "%s: ", name);
-  for (int i = 3; i >= 0; --i)
-    fprintf(stderr, "%016llx", (unsigned long long)fe[i]);
-  fprintf(stderr, "\n");
+  (void)name; /* Used only in debug logging */
+  (void)fe;   /* Used only in debug logging */
+  FIO_LOG_DDEBUG("%s: %016llx%016llx%016llx%016llx",
+                 name,
+                 (unsigned long long)fe[3],
+                 (unsigned long long)fe[2],
+                 (unsigned long long)fe[1],
+                 (unsigned long long)fe[0]);
 }
 
 /* Test: compute k*G step by step and verify intermediate results */
 int main(void) {
-  fprintf(stderr, "=== P-256 Step-by-Step Debug ===\n");
+  FIO_LOG_DDEBUG("=== P-256 Step-by-Step Debug ===");
 
   /* Base point G */
   fio___p256_point_affine_s g;
@@ -28,7 +32,7 @@ int main(void) {
   fio___p256_point_jacobian_s acc;
   fio___p256_point_to_jacobian(&acc, &g); /* acc = 1*G */
 
-  fprintf(stderr, "\n=== Small multiples k*G ===\n");
+  FIO_LOG_DDEBUG("=== Small multiples k*G ===");
   for (int k = 2; k <= 16; k++) {
     fio___p256_point_add_mixed(&acc, &acc, &g); /* acc = k*G */
 
@@ -45,17 +49,17 @@ int main(void) {
     /* Check if they match */
     int match = (fio___p256_fe_eq(acc_aff.x, scalar_aff.x) == 0 &&
                  fio___p256_fe_eq(acc_aff.y, scalar_aff.y) == 0);
+    (void)match; /* Used only in debug logging */
 
-    fprintf(stderr,
-            "%2d*G: add=%016llx... scalar=%016llx... %s\n",
-            k,
-            (unsigned long long)acc_aff.x[3],
-            (unsigned long long)scalar_aff.x[3],
-            match ? "OK" : "MISMATCH!");
+    FIO_LOG_DDEBUG("%2d*G: add=%016llx... scalar=%016llx... %s",
+                   k,
+                   (unsigned long long)acc_aff.x[3],
+                   (unsigned long long)scalar_aff.x[3],
+                   match ? "OK" : "MISMATCH!");
   }
 
   /* Now test larger scalars - powers of 2 */
-  fprintf(stderr, "\n=== Powers of 2 ===\n");
+  FIO_LOG_DDEBUG("=== Powers of 2 ===");
   for (int exp = 8; exp <= 200; exp += 8) {
     /* Compute 2^exp * G by repeated doubling */
     fio___p256_point_jacobian_s doubled;
@@ -82,12 +86,11 @@ int main(void) {
     int match = (fio___p256_fe_eq(doubled_aff.x, scalar_aff.x) == 0 &&
                  fio___p256_fe_eq(doubled_aff.y, scalar_aff.y) == 0);
 
-    fprintf(stderr,
-            "2^%3d*G: double=%016llx... scalar=%016llx... %s\n",
-            exp,
-            (unsigned long long)doubled_aff.x[3],
-            (unsigned long long)scalar_aff.x[3],
-            match ? "OK" : "MISMATCH!");
+    FIO_LOG_DDEBUG("2^%3d*G: double=%016llx... scalar=%016llx... %s",
+                   exp,
+                   (unsigned long long)doubled_aff.x[3],
+                   (unsigned long long)scalar_aff.x[3],
+                   match ? "OK" : "MISMATCH!");
 
     if (!match) {
       print_fe("  doubled.x", doubled_aff.x);
@@ -97,7 +100,7 @@ int main(void) {
   }
 
   /* Test: compute 0x100 * G (256) step by step */
-  fprintf(stderr, "\n=== 256*G (0x100) step by step ===\n");
+  FIO_LOG_DDEBUG("=== 256*G (0x100) step by step ===");
   {
     /* Method 1: scalar mul */
     fio___p256_scalar_s k256 = {256, 0, 0, 0};
@@ -131,16 +134,18 @@ int main(void) {
     int match12 = fio___p256_fe_eq(aff1.x, aff2.x) == 0;
     int match13 = fio___p256_fe_eq(aff1.x, aff3.x) == 0;
     int match23 = fio___p256_fe_eq(aff2.x, aff3.x) == 0;
+    (void)match12; /* Used only in debug logging */
+    (void)match13; /* Used only in debug logging */
+    (void)match23; /* Used only in debug logging */
 
-    fprintf(stderr,
-            "scalar==add: %s, scalar==double: %s, add==double: %s\n",
-            match12 ? "OK" : "FAIL",
-            match13 ? "OK" : "FAIL",
-            match23 ? "OK" : "FAIL");
+    FIO_LOG_DDEBUG("scalar==add: %s, scalar==double: %s, add==double: %s",
+                   match12 ? "OK" : "FAIL",
+                   match13 ? "OK" : "FAIL",
+                   match23 ? "OK" : "FAIL");
   }
 
   /* Test with the specific failing scalar d */
-  fprintf(stderr, "\n=== Test d*G ===\n");
+  FIO_LOG_DDEBUG("=== Test d*G ===");
   static const uint8_t d_bytes[32] = {
       0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16, 0x6b, 0x5c, 0x21,
       0x57, 0x67, 0xb1, 0xd6, 0x93, 0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8,
@@ -171,9 +176,9 @@ int main(void) {
   print_fe("d*G.x (expected)", exp_x);
 
   if (fio___p256_fe_eq(dG_aff.x, exp_x) == 0) {
-    fprintf(stderr, "d*G: PASS\n");
+    FIO_LOG_DDEBUG("d*G: PASS");
   } else {
-    fprintf(stderr, "d*G: FAIL\n");
+    FIO_LOG_DDEBUG("d*G: FAIL");
   }
 
   return 0;

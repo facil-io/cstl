@@ -11,7 +11,7 @@ Test Ed25519 Key Pair Generation
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_keypair_ed25519(void) {
-  fprintf(stderr, "\t* Testing Ed25519 key pair generation\n");
+  FIO_LOG_DDEBUG("Testing Ed25519 key pair generation");
 
   fio_x509_keypair_s kp;
   int result = fio_x509_keypair_ed25519(&kp);
@@ -33,7 +33,7 @@ FIO_SFUNC void fio___test_x509_keypair_ed25519(void) {
   fio_x509_keypair_clear(&kp);
   FIO_ASSERT(kp.type == 0, "Key pair not cleared");
 
-  fprintf(stderr, "\t  Ed25519 key pair generation tests passed\n");
+  FIO_LOG_DDEBUG("  Ed25519 key pair generation tests passed");
 }
 
 /* *****************************************************************************
@@ -41,7 +41,7 @@ Test P-256 Key Pair Generation
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_keypair_p256(void) {
-  fprintf(stderr, "\t* Testing P-256 key pair generation\n");
+  FIO_LOG_DDEBUG("Testing P-256 key pair generation");
 
   fio_x509_keypair_s kp;
   int result = fio_x509_keypair_p256(&kp);
@@ -57,7 +57,7 @@ FIO_SFUNC void fio___test_x509_keypair_p256(void) {
   fio_x509_keypair_clear(&kp);
   FIO_ASSERT(kp.type == 0, "Key pair not cleared");
 
-  fprintf(stderr, "\t  P-256 key pair generation tests passed\n");
+  FIO_LOG_DDEBUG("  P-256 key pair generation tests passed");
 }
 
 /* *****************************************************************************
@@ -65,7 +65,7 @@ Test ASN.1 Encoding Functions
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_asn1_encoding(void) {
-  fprintf(stderr, "\t* Testing ASN.1 encoding functions\n");
+  FIO_LOG_DDEBUG("Testing ASN.1 encoding functions");
 
   uint8_t buf[256];
 
@@ -194,7 +194,7 @@ FIO_SFUNC void fio___test_asn1_encoding(void) {
                buf + 2);
   }
 
-  fprintf(stderr, "\t  ASN.1 encoding tests passed\n");
+  FIO_LOG_DDEBUG("  ASN.1 encoding tests passed");
 }
 
 /* *****************************************************************************
@@ -202,7 +202,7 @@ Test Self-Signed Certificate Generation (Ed25519)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_self_signed_ed25519(void) {
-  fprintf(stderr, "\t* Testing Ed25519 self-signed certificate generation\n");
+  FIO_LOG_DDEBUG("Testing Ed25519 self-signed certificate generation");
 
   /* Generate key pair */
   fio_x509_keypair_s kp;
@@ -223,7 +223,7 @@ FIO_SFUNC void fio___test_x509_self_signed_ed25519(void) {
   /* Calculate required buffer size */
   size_t cert_len = fio_x509_self_signed_cert(NULL, 0, &kp, &opts);
   FIO_ASSERT(cert_len > 0, "Certificate size calculation failed");
-  fprintf(stderr, "\t  Certificate size: %zu bytes\n", cert_len);
+  FIO_LOG_DDEBUG("  Certificate size: %zu bytes", cert_len);
 
   /* Allocate buffer and generate certificate */
   uint8_t *cert_buf = malloc(cert_len + 100); /* Extra space for safety */
@@ -285,7 +285,7 @@ FIO_SFUNC void fio___test_x509_self_signed_ed25519(void) {
   free(cert_buf);
   fio_x509_keypair_clear(&kp);
 
-  fprintf(stderr, "\t  Ed25519 self-signed certificate tests passed\n");
+  FIO_LOG_DDEBUG("  Ed25519 self-signed certificate tests passed");
 }
 
 /* *****************************************************************************
@@ -293,7 +293,7 @@ Test Self-Signed Certificate Generation (P-256)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_self_signed_p256(void) {
-  fprintf(stderr, "\t* Testing P-256 self-signed certificate generation\n");
+  FIO_LOG_DDEBUG("Testing P-256 self-signed certificate generation");
 
   /* Generate key pair */
   fio_x509_keypair_s kp;
@@ -308,7 +308,7 @@ FIO_SFUNC void fio___test_x509_self_signed_p256(void) {
   /* Calculate required buffer size */
   size_t cert_len = fio_x509_self_signed_cert(NULL, 0, &kp, &opts);
   FIO_ASSERT(cert_len > 0, "Certificate size calculation failed");
-  fprintf(stderr, "\t  Certificate size: %zu bytes\n", cert_len);
+  FIO_LOG_DDEBUG("  Certificate size: %zu bytes", cert_len);
 
   /* Allocate buffer and generate certificate */
   uint8_t *cert_buf = malloc(cert_len + 100); /* Extra space for safety */
@@ -340,7 +340,7 @@ FIO_SFUNC void fio___test_x509_self_signed_p256(void) {
   free(cert_buf);
   fio_x509_keypair_clear(&kp);
 
-  fprintf(stderr, "\t  P-256 self-signed certificate tests passed\n");
+  FIO_LOG_DDEBUG("  P-256 self-signed certificate tests passed");
 }
 
 /* *****************************************************************************
@@ -348,7 +348,7 @@ Test CA Certificate Generation
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_ca_certificate(void) {
-  fprintf(stderr, "\t* Testing CA certificate generation\n");
+  FIO_LOG_DDEBUG("Testing CA certificate generation");
 
   /* Generate key pair */
   fio_x509_keypair_s kp;
@@ -389,7 +389,7 @@ FIO_SFUNC void fio___test_x509_ca_certificate(void) {
   free(cert_buf);
   fio_x509_keypair_clear(&kp);
 
-  fprintf(stderr, "\t  CA certificate tests passed\n");
+  FIO_LOG_DDEBUG("  CA certificate tests passed");
 }
 
 /* *****************************************************************************
@@ -397,7 +397,7 @@ Test Certificate Chain Validation with Generated Certificates
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_chain_validation(void) {
-  fprintf(stderr, "\t* Testing certificate chain with generated certs\n");
+  FIO_LOG_DDEBUG("Testing certificate chain with generated certs");
 
   /* Generate CA key pair and certificate */
   fio_x509_keypair_s ca_kp;
@@ -441,7 +441,7 @@ FIO_SFUNC void fio___test_x509_chain_validation(void) {
   free(ca_buf);
   fio_x509_keypair_clear(&ca_kp);
 
-  fprintf(stderr, "\t  Certificate chain validation tests passed\n");
+  FIO_LOG_DDEBUG("  Certificate chain validation tests passed");
 }
 
 /* *****************************************************************************
@@ -449,7 +449,7 @@ Test Error Handling
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_error_handling(void) {
-  fprintf(stderr, "\t* Testing error handling\n");
+  FIO_LOG_DDEBUG("Testing error handling");
 
   fio_x509_keypair_s kp;
   fio_x509_cert_options_s opts = {0};
@@ -479,7 +479,7 @@ FIO_SFUNC void fio___test_x509_error_handling(void) {
 
   fio_x509_keypair_clear(&kp);
 
-  fprintf(stderr, "\t  Error handling tests passed\n");
+  FIO_LOG_DDEBUG("  Error handling tests passed");
 }
 
 /* *****************************************************************************
@@ -487,7 +487,7 @@ Test Hostname Matching with Generated Certificate
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_x509_hostname_matching(void) {
-  fprintf(stderr, "\t* Testing hostname matching with generated cert\n");
+  FIO_LOG_DDEBUG("Testing hostname matching with generated cert");
 
   fio_x509_keypair_s kp;
   FIO_ASSERT(fio_x509_keypair_ed25519(&kp) == 0, "Key pair generation failed");
@@ -527,7 +527,7 @@ FIO_SFUNC void fio___test_x509_hostname_matching(void) {
   free(cert_buf);
   fio_x509_keypair_clear(&kp);
 
-  fprintf(stderr, "\t  Hostname matching tests passed\n");
+  FIO_LOG_DDEBUG("  Hostname matching tests passed");
 }
 
 /* *****************************************************************************
@@ -535,7 +535,7 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "* Testing X.509 Certificate Generation\n");
+  FIO_LOG_DDEBUG("Testing X.509 Certificate Generation");
 
   fio___test_asn1_encoding();
   fio___test_x509_keypair_ed25519();
@@ -547,6 +547,6 @@ int main(void) {
   fio___test_x509_error_handling();
   fio___test_x509_hostname_matching();
 
-  fprintf(stderr, "* All X.509 certificate generation tests passed!\n");
+  FIO_LOG_DDEBUG("All X.509 certificate generation tests passed!");
   return 0;
 }

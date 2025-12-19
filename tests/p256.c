@@ -24,7 +24,7 @@ FIO_SFUNC void print_fe(const char *name, const uint64_t fe[4]) {
 Test P-256 curve constants
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_constants)(void) {
-  fprintf(stderr, "\t* Testing P-256 curve constants\n");
+  FIO_LOG_DDEBUG("Testing P-256 curve constants");
 
   /* Verify prime p = 2^256 - 2^224 + 2^192 + 2^96 - 1 */
   /* p = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF */
@@ -40,14 +40,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_constants)(void) {
   FIO_ASSERT(FIO___P256_N[2] == 0xFFFFFFFFFFFFFFFFULL, "N[2] incorrect");
   FIO_ASSERT(FIO___P256_N[3] == 0xFFFFFFFF00000000ULL, "N[3] incorrect");
 
-  fprintf(stderr, "\t  Curve constants verified.\n");
+  FIO_LOG_DDEBUG("  Curve constants verified.");
 }
 
 /* *****************************************************************************
 Test field arithmetic
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_field_ops)(void) {
-  fprintf(stderr, "\t* Testing P-256 field arithmetic\n");
+  FIO_LOG_DDEBUG("Testing P-256 field arithmetic");
 
   fio___p256_fe_s a, b, c;
 
@@ -85,7 +85,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_field_ops)(void) {
              "Field squaring 4^2 failed");
 
   /* Test inversion: a * a^(-1) = 1 */
-  fprintf(stderr, "\t  Testing field inversion...\n");
+  FIO_LOG_DDEBUG("  Testing field inversion...");
 
   /* First verify squaring works */
   a[0] = 7;
@@ -195,14 +195,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_field_ops)(void) {
   FIO_ASSERT(c[0] == 1 && c[1] == 0 && c[2] == 0 && c[3] == 0,
              "Field inversion Gx * Gx^(-1) != 1");
 
-  fprintf(stderr, "\t  Field arithmetic tests passed.\n");
+  FIO_LOG_DDEBUG("  Field arithmetic tests passed.");
 }
 
 /* *****************************************************************************
 Test that base point G is on the curve
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_base_point)(void) {
-  fprintf(stderr, "\t* Testing P-256 base point is on curve\n");
+  FIO_LOG_DDEBUG("Testing P-256 base point is on curve");
 
   fio___p256_fe_s y2, x3, t, x2;
 
@@ -232,14 +232,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_base_point)(void) {
   FIO_ASSERT(fio___p256_fe_eq(y2, t) == 0,
              "Base point G is not on the P-256 curve!");
 
-  fprintf(stderr, "\t  Base point verified on curve.\n");
+  FIO_LOG_DDEBUG("  Base point verified on curve.");
 }
 
 /* *****************************************************************************
 Test scalar multiplication with base point
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_mul)(void) {
-  fprintf(stderr, "\t* Testing P-256 scalar multiplication\n");
+  FIO_LOG_DDEBUG("Testing P-256 scalar multiplication");
 
   /* Test: 1 * G = G */
   fio___p256_scalar_s one = {1, 0, 0, 0};
@@ -264,7 +264,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_mul)(void) {
              "1*G y-coordinate mismatch");
 
   /* Test: 2 * G using point_double directly */
-  fprintf(stderr, "\t  Testing point doubling directly...\n");
+  FIO_LOG_DDEBUG("  Testing point doubling directly...");
   fio___p256_point_jacobian_s g_jac, doubled;
   fio___p256_point_to_jacobian(&g_jac, &g);
   fio___p256_point_double(&doubled, &g_jac);
@@ -290,7 +290,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_mul)(void) {
              "2*G (doubled) is not on the curve!");
 
   /* Test: 2 * G via scalar multiplication */
-  fprintf(stderr, "\t  Testing 2*G via scalar multiplication...\n");
+  FIO_LOG_DDEBUG("  Testing 2*G via scalar multiplication...");
   fio___p256_scalar_s two = {2, 0, 0, 0};
   fio___p256_point_mul(&result, two, &g);
   fio___p256_point_to_affine(&result_affine, &result);
@@ -308,7 +308,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_mul)(void) {
   fio___p256_fe_add(t, t, FIO___P256_B);
   FIO_ASSERT(fio___p256_fe_eq(y2, t) == 0, "2*G is not on the curve!");
 
-  fprintf(stderr, "\t  Scalar multiplication tests passed.\n");
+  FIO_LOG_DDEBUG("  Scalar multiplication tests passed.");
 }
 
 /* *****************************************************************************
@@ -325,7 +325,7 @@ FIO_SFUNC void print_scalar(const char *name, const uint64_t s[4]) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
-  fprintf(stderr, "\t* Testing ECDSA P-256 with NIST test vectors\n");
+  FIO_LOG_DDEBUG("Testing ECDSA P-256 with NIST test vectors");
 
   /* RFC 6979 A.2.5 P-256 SHA-256 test vector */
   /* Private key:
@@ -376,7 +376,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
   /* clang-format on */
 
   /* Debug: first test fio_math_div directly */
-  fprintf(stderr, "\t  Debug: testing fio_math_div...\n");
+  FIO_LOG_DDEBUG("  Debug: testing fio_math_div...");
   {
     /* Test: 100 mod 7 = 2 */
     uint64_t a[4] = {100, 0, 0, 0};
@@ -443,7 +443,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
   }
 
   /* Debug: test scalar multiplication */
-  fprintf(stderr, "\t  Debug: testing scalar multiplication...\n");
+  FIO_LOG_DDEBUG("  Debug: testing scalar multiplication...");
   {
     fio___p256_scalar_s a = {7, 0, 0, 0};
     fio___p256_scalar_s b = {11, 0, 0, 0};
@@ -561,7 +561,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
   }
 
   /* Debug: manually trace the verification */
-  fprintf(stderr, "\t  Debug: tracing ECDSA verification...\n");
+  FIO_LOG_DDEBUG("  Debug: tracing ECDSA verification...");
 
   fio___p256_scalar_s r, s, e;
   fio___p256_point_affine_s q;
@@ -1028,14 +1028,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       fio_ecdsa_p256_verify_raw(r1, s1, msg_hash1, pubkey1 + 1, pubkey1 + 33);
   FIO_ASSERT(result == 0, "NIST ECDSA P-256 test vector 1 failed");
 
-  fprintf(stderr, "\t  NIST test vectors passed.\n");
+  FIO_LOG_DDEBUG("  NIST test vectors passed.");
 }
 
 /* *****************************************************************************
 Test DER signature parsing
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_der_parsing)(void) {
-  fprintf(stderr, "\t* Testing DER signature parsing\n");
+  FIO_LOG_DDEBUG("Testing DER signature parsing");
 
   /* Create a DER-encoded signature from RFC 6979 test vector */
   /* R = EFD48B2AACB6A8FD1140DD9CD45E81D69D2C877B56AAF991C34D0EA84EAF3716 */
@@ -1084,14 +1084,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_der_parsing)(void) {
       fio_ecdsa_p256_verify(der_sig, sizeof(der_sig), msg_hash, pubkey, 65);
   FIO_ASSERT(result == 0, "DER signature verification failed");
 
-  fprintf(stderr, "\t  DER parsing tests passed.\n");
+  FIO_LOG_DDEBUG("  DER parsing tests passed.");
 }
 
 /* *****************************************************************************
 Test invalid signatures
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_invalid_sigs)(void) {
-  fprintf(stderr, "\t* Testing ECDSA P-256 rejects invalid signatures\n");
+  FIO_LOG_DDEBUG("Testing ECDSA P-256 rejects invalid signatures");
 
   /* Use RFC 6979 test vector for consistent testing */
   /* clang-format off */
@@ -1173,7 +1173,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_invalid_sigs)(void) {
       fio_ecdsa_p256_verify_raw(r, zero, msg_hash, pubkey + 1, pubkey + 33);
   FIO_ASSERT(result != 0, "Should reject s = 0");
 
-  fprintf(stderr, "\t  Invalid signature tests passed.\n");
+  FIO_LOG_DDEBUG("  Invalid signature tests passed.");
 }
 
 /* *****************************************************************************
@@ -1181,11 +1181,11 @@ Performance test
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_performance)(void) {
 #ifdef DEBUG
-  fprintf(stderr, "\t* Skipping performance test in DEBUG mode\n");
+  FIO_LOG_DDEBUG("Skipping performance test in DEBUG mode");
   return;
 #endif
 
-  fprintf(stderr, "\t* Testing ECDSA P-256 performance\n");
+  FIO_LOG_DDEBUG("Testing ECDSA P-256 performance");
 
   /* Use RFC 6979 test vector */
   /* clang-format off */
@@ -1254,7 +1254,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_performance)(void) {
 Test P-256 ECDHE Key Exchange
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_keypair)(void) {
-  fprintf(stderr, "\t* Testing P-256 ECDHE keypair generation\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE keypair generation");
 
   uint8_t sk1[32], pk1[65];
   uint8_t sk2[32], pk2[65];
@@ -1278,11 +1278,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_keypair)(void) {
   result = fio_p256_shared_secret(shared, sk1, pk1, 65);
   FIO_ASSERT(result == 0, "Self-shared secret computation should succeed");
 
-  fprintf(stderr, "\t  Keypair generation verified.\n");
+  FIO_LOG_DDEBUG("  Keypair generation verified.");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_shared_secret)(void) {
-  fprintf(stderr, "\t* Testing P-256 ECDHE shared secret\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE shared secret");
 
   uint8_t sk_alice[32], pk_alice[65];
   uint8_t sk_bob[32], pk_bob[65];
@@ -1311,11 +1311,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_shared_secret)(void) {
     zero_check |= shared_alice[i];
   FIO_ASSERT(zero_check != 0, "Shared secret should not be all zeros");
 
-  fprintf(stderr, "\t  Shared secret exchange verified.\n");
+  FIO_LOG_DDEBUG("  Shared secret exchange verified.");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_invalid_inputs)(void) {
-  fprintf(stderr, "\t* Testing P-256 ECDHE with invalid inputs\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE with invalid inputs");
 
   uint8_t sk[32], pk[65], shared[32];
 
@@ -1351,11 +1351,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_invalid_inputs)(void) {
   FIO_ASSERT(fio_p256_shared_secret(shared, sk, bad_pk, 65) == -1,
              "Point not on curve should fail");
 
-  fprintf(stderr, "\t  Invalid input handling verified.\n");
+  FIO_LOG_DDEBUG("  Invalid input handling verified.");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_compressed)(void) {
-  fprintf(stderr, "\t* Testing P-256 ECDHE with compressed public keys\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE with compressed public keys");
 
   uint8_t sk_alice[32], pk_alice[65];
   uint8_t sk_bob[32], pk_bob[65];
@@ -1385,11 +1385,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_compressed)(void) {
   FIO_ASSERT(memcmp(shared_uncomp, shared_comp, 32) == 0,
              "Compressed and uncompressed should give same shared secret");
 
-  fprintf(stderr, "\t  Compressed public key support verified.\n");
+  FIO_LOG_DDEBUG("  Compressed public key support verified.");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_performance)(void) {
-  fprintf(stderr, "\t* Testing P-256 ECDHE performance\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE performance");
 
   uint8_t sk[32], pk[65], shared[32];
   const size_t iterations = 50;
@@ -1441,7 +1441,7 @@ Main Test Function
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p256)(void) {
-  fprintf(stderr, "* Testing ECDSA P-256 (secp256r1) implementation\n");
+  FIO_LOG_DDEBUG("Testing ECDSA P-256 (secp256r1) implementation");
   FIO_NAME_TEST(stl, p256_constants)();
   FIO_NAME_TEST(stl, p256_field_ops)();
   FIO_NAME_TEST(stl, p256_base_point)();
@@ -1451,14 +1451,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256)(void) {
   FIO_NAME_TEST(stl, p256_invalid_sigs)();
   FIO_NAME_TEST(stl, p256_performance)();
 
-  fprintf(stderr, "* Testing P-256 ECDHE key exchange\n");
+  FIO_LOG_DDEBUG("Testing P-256 ECDHE key exchange");
   FIO_NAME_TEST(stl, p256_ecdhe_keypair)();
   FIO_NAME_TEST(stl, p256_ecdhe_shared_secret)();
   FIO_NAME_TEST(stl, p256_ecdhe_invalid_inputs)();
   FIO_NAME_TEST(stl, p256_ecdhe_compressed)();
   FIO_NAME_TEST(stl, p256_ecdhe_performance)();
 
-  fprintf(stderr, "* P-256 tests complete.\n");
+  FIO_LOG_DDEBUG("P-256 tests complete.");
 }
 
 /* *****************************************************************************

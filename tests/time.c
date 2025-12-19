@@ -16,13 +16,14 @@ Test
 #if FIO_OS_WIN && !defined(gmtime_r)
 FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
   struct tm *t = gmtime(timep);
-  if (t && result) *result = *t;
+  if (t && result)
+    *result = *t;
   return result;
 }
 #endif
 
 int main(void) {
-  fprintf(stderr, "\t* Testing facil.io fio_time2gm vs gmtime_r\n");
+  FIO_LOG_DDEBUG("Testing facil.io fio_time2gm vs gmtime_r");
   struct tm tm1 = {0}, tm2 = {0};
   const time_t now = fio_time_real().tv_sec;
 #if FIO_OS_WIN

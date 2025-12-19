@@ -20,7 +20,7 @@ int main(void) {
       result);
   fio_bstr_free(result);
   fio_mustache_free(m);
-  fprintf(stderr, "\terror should print on next line.\n");
+  FIO_LOG_DDEBUG("error should print on next line.");
   m = fio_mustache_load(.data = FIO_BUF_INFO1(example2));
   FIO_ASSERT(!m, "invalid example load returned an object.");
   fio_mustache_free(m);

@@ -214,7 +214,7 @@ FIO_SFUNC void fio___test_asn1_parse_element(void) {
   fio_asn1_element_s elem;
   const uint8_t *next;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 element parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 element parsing...");
 
   /* Test INTEGER parsing */
   next = fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42));
@@ -256,7 +256,7 @@ FIO_SFUNC void fio___test_asn1_parse_element(void) {
   FIO_ASSERT((elem.tag & 0x1F) == 0, "Wrong tag number for [0]");
   FIO_ASSERT(elem.is_constructed == 1, "[0] should be constructed");
 
-  FIO_LOG_DEBUG2("ASN.1 element parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 element parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -267,7 +267,7 @@ FIO_SFUNC void fio___test_asn1_parse_integer(void) {
   fio_asn1_element_s elem;
   uint64_t value;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 INTEGER parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 INTEGER parsing...");
 
   /* Test small positive integer */
   FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)),
@@ -306,7 +306,7 @@ FIO_SFUNC void fio___test_asn1_parse_integer(void) {
              "Wrong value for large INTEGER: 0x%" PRIX64,
              value);
 
-  FIO_LOG_DEBUG2("ASN.1 INTEGER parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 INTEGER parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -317,7 +317,7 @@ FIO_SFUNC void fio___test_asn1_parse_boolean(void) {
   fio_asn1_element_s elem;
   int value;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 BOOLEAN parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 BOOLEAN parsing...");
 
   /* Test TRUE */
   FIO_ASSERT(fio_asn1_parse(&elem, test_bool_true, sizeof(test_bool_true)),
@@ -333,7 +333,7 @@ FIO_SFUNC void fio___test_asn1_parse_boolean(void) {
              "Failed to extract BOOLEAN FALSE");
   FIO_ASSERT(value == 0, "BOOLEAN FALSE should be zero");
 
-  FIO_LOG_DEBUG2("ASN.1 BOOLEAN parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 BOOLEAN parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -346,7 +346,7 @@ FIO_SFUNC void fio___test_asn1_parse_bit_string(void) {
   size_t bit_len;
   uint8_t unused_bits;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 BIT STRING parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 BIT STRING parsing...");
 
   /* Test non-empty bit string */
   FIO_ASSERT(fio_asn1_parse(&elem, test_bitstring, sizeof(test_bitstring)),
@@ -369,7 +369,7 @@ FIO_SFUNC void fio___test_asn1_parse_bit_string(void) {
   FIO_ASSERT(bit_len == 0, "Empty BIT STRING should have zero length");
   FIO_ASSERT(unused_bits == 0, "Empty BIT STRING should have zero unused bits");
 
-  FIO_LOG_DEBUG2("ASN.1 BIT STRING parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 BIT STRING parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -381,7 +381,7 @@ FIO_SFUNC void fio___test_asn1_parse_oid(void) {
   char oid_buf[128];
   int len;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 OID parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 OID parsing...");
 
   /* Test SHA-256 with RSA OID: 1.2.840.113549.1.1.11 */
   FIO_ASSERT(
@@ -422,7 +422,7 @@ FIO_SFUNC void fio___test_asn1_parse_oid(void) {
   FIO_ASSERT(fio_asn1_oid_eq(&elem, FIO_OID_ED25519),
              "OID comparison failed for Ed25519");
 
-  FIO_LOG_DEBUG2("ASN.1 OID parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 OID parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -434,7 +434,7 @@ FIO_SFUNC void fio___test_asn1_parse_string(void) {
   const char *str;
   size_t len;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 string parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 string parsing...");
 
   /* Test UTF8String */
   FIO_ASSERT(fio_asn1_parse(&elem, test_utf8_string, sizeof(test_utf8_string)),
@@ -456,7 +456,7 @@ FIO_SFUNC void fio___test_asn1_parse_string(void) {
   FIO_ASSERT(FIO_MEMCMP(str, "example", 7) == 0,
              "Wrong PrintableString content");
 
-  FIO_LOG_DEBUG2("ASN.1 string parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 string parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -467,7 +467,7 @@ FIO_SFUNC void fio___test_asn1_parse_time(void) {
   fio_asn1_element_s elem;
   int64_t unix_time;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 time parsing...");
+  FIO_LOG_DDEBUG("Testing ASN.1 time parsing...");
 
   /* Test UTC Time: 231225123045Z = 2023-12-25 12:30:45 UTC */
   FIO_ASSERT(fio_asn1_parse(&elem, test_utc_time, sizeof(test_utc_time)),
@@ -491,7 +491,7 @@ FIO_SFUNC void fio___test_asn1_parse_time(void) {
              gen_unix_time,
              unix_time);
 
-  FIO_LOG_DEBUG2("ASN.1 time parsing tests passed");
+  FIO_LOG_DDEBUG("ASN.1 time parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -503,7 +503,7 @@ FIO_SFUNC void fio___test_asn1_iterator(void) {
   fio_asn1_iterator_s it;
   uint64_t int_value;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 iterator...");
+  FIO_LOG_DDEBUG("Testing ASN.1 iterator...");
 
   /* Parse SEQUENCE containing INTEGER(42) and NULL */
   FIO_ASSERT(
@@ -536,7 +536,7 @@ FIO_SFUNC void fio___test_asn1_iterator(void) {
   FIO_ASSERT(fio_asn1_iterator_next(&it, &elem) != 0,
              "Should fail to get element from exhausted iterator");
 
-  FIO_LOG_DEBUG2("ASN.1 iterator tests passed");
+  FIO_LOG_DDEBUG("ASN.1 iterator tests passed");
 }
 
 /* *****************************************************************************
@@ -547,7 +547,7 @@ FIO_SFUNC void fio___test_asn1_nested(void) {
   fio_asn1_element_s outer, inner, elem;
   fio_asn1_iterator_s it_outer, it_inner;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 nested structures...");
+  FIO_LOG_DDEBUG("Testing ASN.1 nested structures...");
 
   /* Parse outer SEQUENCE */
   FIO_ASSERT(fio_asn1_parse(&outer, test_nested_seq, sizeof(test_nested_seq)),
@@ -583,7 +583,7 @@ FIO_SFUNC void fio___test_asn1_nested(void) {
   FIO_ASSERT(fio_asn1_is_tag(&inner, FIO_ASN1_SEQUENCE),
              "Name should be SEQUENCE");
 
-  FIO_LOG_DEBUG2("ASN.1 nested structure tests passed");
+  FIO_LOG_DDEBUG("ASN.1 nested structure tests passed");
 }
 
 /* *****************************************************************************
@@ -593,7 +593,7 @@ Helper Function Tests
 FIO_SFUNC void fio___test_asn1_helpers(void) {
   fio_asn1_element_s elem;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 helper functions...");
+  FIO_LOG_DDEBUG("Testing ASN.1 helper functions...");
 
   /* Test fio_asn1_is_tag */
   FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)),
@@ -624,7 +624,7 @@ FIO_SFUNC void fio___test_asn1_helpers(void) {
              total,
              sizeof(test_int_42));
 
-  FIO_LOG_DEBUG2("ASN.1 helper function tests passed");
+  FIO_LOG_DDEBUG("ASN.1 helper function tests passed");
 }
 
 /* *****************************************************************************
@@ -636,7 +636,7 @@ FIO_SFUNC void fio___test_asn1_errors(void) {
   uint64_t value;
   int bool_val;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 error handling...");
+  FIO_LOG_DDEBUG("Testing ASN.1 error handling...");
 
   /* Test NULL inputs */
   FIO_ASSERT(fio_asn1_parse(NULL, test_int_42, sizeof(test_int_42)) == NULL,
@@ -658,7 +658,7 @@ FIO_SFUNC void fio___test_asn1_errors(void) {
   FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, 1) == NULL,
              "Should fail on truncated data");
 
-  FIO_LOG_DEBUG2("ASN.1 error handling tests passed");
+  FIO_LOG_DDEBUG("ASN.1 error handling tests passed");
 }
 
 /* *****************************************************************************
@@ -668,7 +668,7 @@ Long Form Length Tests
 FIO_SFUNC void fio___test_asn1_long_length(void) {
   fio_asn1_element_s elem;
 
-  FIO_LOG_DEBUG2("Testing ASN.1 long-form length encoding...");
+  FIO_LOG_DDEBUG("Testing ASN.1 long-form length encoding...");
 
   /* Create a buffer with long-form length and enough content */
   uint8_t buf[260];
@@ -685,7 +685,7 @@ FIO_SFUNC void fio___test_asn1_long_length(void) {
   FIO_ASSERT(elem.len == 256, "Wrong length for long-form: %zu", elem.len);
   FIO_ASSERT(elem.data[0] == 0xAB, "Wrong content byte");
 
-  FIO_LOG_DEBUG2("ASN.1 long-form length tests passed");
+  FIO_LOG_DDEBUG("ASN.1 long-form length tests passed");
 }
 
 /* *****************************************************************************
@@ -693,7 +693,7 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "* Testing ASN.1 DER Parser\n");
+  FIO_LOG_DDEBUG("Testing ASN.1 DER Parser");
 
   fio___test_asn1_parse_element();
   fio___test_asn1_parse_integer();
@@ -708,6 +708,6 @@ int main(void) {
   fio___test_asn1_errors();
   fio___test_asn1_long_length();
 
-  fprintf(stderr, "* All ASN.1 tests passed!\n");
+  FIO_LOG_DDEBUG("All ASN.1 tests passed!");
   return 0;
 }

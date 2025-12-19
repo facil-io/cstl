@@ -522,6 +522,38 @@ Conditional Likelihood
 #endif
 
 /* *****************************************************************************
+Cache Prefetch Hints
+***************************************************************************** */
+/**
+ * Cache prefetch macros - hint to CPU to load data into cache before use.
+ *
+ * FIO_PREFETCH(ptr)      - Prefetch for read, all cache levels, temporal
+ * FIO_PREFETCH_W(ptr)    - Prefetch for write (exclusive access)
+ * FIO_PREFETCH_NT(ptr)   - Prefetch non-temporal (streaming, minimize
+ * pollution)
+ *
+ * These are hints only - they do nothing if prefetching is unavailable.
+ * Typical prefetch distance is 1-2 cache lines (64-128 bytes) ahead.
+ */
+#if __has_builtin(__builtin_prefetch)
+/** Prefetch data for reading into all cache levels. */
+#define FIO_PREFETCH(ptr) __builtin_prefetch((ptr), 0, 3)
+/** Prefetch data for writing (exclusive cache line ownership). */
+#define FIO_PREFETCH_W(ptr) __builtin_prefetch((ptr), 1, 3)
+/** Prefetch non-temporal (streaming data, minimize cache pollution). */
+#define FIO_PREFETCH_NT(ptr) __builtin_prefetch((ptr), 0, 0)
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <intrin.h>
+#define FIO_PREFETCH(ptr)    _mm_prefetch((const char *)(ptr), _MM_HINT_T0)
+#define FIO_PREFETCH_W(ptr)  _mm_prefetch((const char *)(ptr), _MM_HINT_T0)
+#define FIO_PREFETCH_NT(ptr) _mm_prefetch((const char *)(ptr), _MM_HINT_NTA)
+#else
+#define FIO_PREFETCH(ptr)    ((void)(ptr))
+#define FIO_PREFETCH_W(ptr)  ((void)(ptr))
+#define FIO_PREFETCH_NT(ptr) ((void)(ptr))
+#endif
+
+/* *****************************************************************************
 Macro Stringifier
 ***************************************************************************** */
 #ifndef FIO_MACRO2STR

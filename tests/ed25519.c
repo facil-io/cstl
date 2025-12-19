@@ -13,7 +13,7 @@ https://www.rfc-editor.org/rfc/rfc8032#section-7.1
 
 /* Test field arithmetic */
 FIO_SFUNC void FIO_NAME_TEST(stl, fe25519_basic)(void) {
-  fprintf(stderr, "\t* Testing field arithmetic basics\n");
+  FIO_LOG_DDEBUG("Testing field arithmetic basics");
 
   /* Test: load and store identity */
   // {
@@ -22,11 +22,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fe25519_basic)(void) {
   //   /* This would require exposing internal functions, skip for now */
   // }
 
-  fprintf(stderr, "\t  Field arithmetic tests skipped (internal functions)\n");
+  FIO_LOG_DDEBUG("Field arithmetic tests skipped (internal functions)");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_rfc8032)(void) {
-  fprintf(stderr, "\t* Testing Ed25519 (RFC 8032 test vectors)\n");
+  FIO_LOG_DDEBUG("Testing Ed25519 (RFC 8032 test vectors)");
 
   /* Test Vector 1: Empty message */
   {
@@ -216,7 +216,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_rfc8032)(void) {
         "Ed25519 verification should fail for wrong message");
   }
 
-  fprintf(stderr, "\t  Ed25519 tests passed.\n");
+  FIO_LOG_DDEBUG("Ed25519 tests passed.");
 }
 
 /* *****************************************************************************
@@ -225,7 +225,7 @@ https://www.rfc-editor.org/rfc/rfc7748#section-5.2
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x25519_rfc7748)(void) {
-  fprintf(stderr, "\t* Testing X25519 (RFC 7748 test vectors)\n");
+  FIO_LOG_DDEBUG("Testing X25519 (RFC 7748 test vectors)");
 
   /* Test Vector 1 */
   {
@@ -330,7 +330,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_rfc7748)(void) {
                "X25519 ECDH key exchange failed - shared secrets don't match");
   }
 
-  fprintf(stderr, "\t  X25519 tests passed.\n");
+  FIO_LOG_DDEBUG("X25519 tests passed.");
 }
 
 /* *****************************************************************************
@@ -338,7 +338,7 @@ Key Conversion Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_x25519_conversion)(void) {
-  fprintf(stderr, "\t* Testing Ed25519 <-> X25519 key conversion\n");
+  FIO_LOG_DDEBUG("Testing Ed25519 <-> X25519 key conversion");
 
   /* Test that converted keys work for ECDH */
   {
@@ -369,7 +369,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_x25519_conversion)(void) {
         "ECDH with converted Ed25519 keys failed - shared secrets don't match");
   }
 
-  fprintf(stderr, "\t  Key conversion tests passed.\n");
+  FIO_LOG_DDEBUG("Key conversion tests passed.");
 }
 
 /* *****************************************************************************
@@ -377,7 +377,7 @@ ECIES Public Key Encryption Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
-  fprintf(stderr, "\t* Testing X25519 ECIES (public key encryption)\n");
+  FIO_LOG_DDEBUG("Testing X25519 ECIES (public key encryption)");
 
   /* Test basic encryption/decryption */
   {
@@ -631,7 +631,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     free(plaintext);
   }
 
-  fprintf(stderr, "\t  ECIES tests passed.\n");
+  FIO_LOG_DDEBUG("ECIES tests passed.");
 }
 
 /* *****************************************************************************
@@ -1194,7 +1194,7 @@ Main Test Function
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
-  fprintf(stderr, "\t* Testing Ed25519 / X25519 implementation\n");
+  FIO_LOG_DDEBUG("Testing Ed25519 / X25519 implementation");
   FIO_NAME_TEST(stl, ed25519_rfc8032)();
   FIO_NAME_TEST(stl, x25519_rfc7748)();
   FIO_NAME_TEST(stl, ed25519_x25519_conversion)();
@@ -1202,7 +1202,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
 #if !DEBUG
   FIO_NAME_TEST(stl, ed25519_performance)();
 #endif
-  fprintf(stderr, "\t* Ed25519 / X25519 tests complete.\n");
+  FIO_LOG_DDEBUG("Ed25519 / X25519 tests complete.");
 }
 
 /* *****************************************************************************

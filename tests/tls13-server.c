@@ -180,7 +180,7 @@ FIO_SFUNC void build_test_certificate(void) {
 Test: Server Initialization and Cleanup
 ***************************************************************************** */
 FIO_SFUNC void test_server_init_destroy(void) {
-  fprintf(stderr, "\t* Testing server init/destroy\n");
+  FIO_LOG_DDEBUG("Testing server init/destroy\n");
 
   fio_tls13_server_s server;
 
@@ -204,14 +204,14 @@ FIO_SFUNC void test_server_init_destroy(void) {
   FIO_ASSERT(FIO_MEMCMP(server.shared_secret, zeros, 32) == 0,
              "Shared secret should be zeroed after destroy");
 
-  fprintf(stderr, "\t  - Server init/destroy tests passed\n");
+  FIO_LOG_DDEBUG("  - Server init/destroy tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server Certificate Configuration
 ***************************************************************************** */
 FIO_SFUNC void test_server_cert_config(void) {
-  fprintf(stderr, "\t* Testing server certificate configuration\n");
+  FIO_LOG_DDEBUG("Testing server certificate configuration\n");
 
   build_test_certificate();
 
@@ -243,14 +243,14 @@ FIO_SFUNC void test_server_cert_config(void) {
 
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "\t  - Server certificate configuration tests passed\n");
+  FIO_LOG_DDEBUG("  - Server certificate configuration tests passed\n");
 }
 
 /* *****************************************************************************
 Test: ClientHello Parsing
 ***************************************************************************** */
 FIO_SFUNC void test_client_hello_parsing(void) {
-  fprintf(stderr, "\t* Testing ClientHello parsing\n");
+  FIO_LOG_DDEBUG("Testing ClientHello parsing\n");
 
   /* Build a ClientHello using the client API */
   fio_tls13_client_s client;
@@ -296,14 +296,14 @@ FIO_SFUNC void test_client_hello_parsing(void) {
 
   fio_tls13_client_destroy(&client);
 
-  fprintf(stderr, "\t  - ClientHello parsing tests passed\n");
+  FIO_LOG_DDEBUG("  - ClientHello parsing tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server Message Building
 ***************************************************************************** */
 FIO_SFUNC void test_server_message_building(void) {
-  fprintf(stderr, "\t* Testing server message building\n");
+  FIO_LOG_DDEBUG("Testing server message building\n");
 
   build_test_certificate();
 
@@ -354,14 +354,14 @@ FIO_SFUNC void test_server_message_building(void) {
 
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "\t  - Server message building tests passed\n");
+  FIO_LOG_DDEBUG("  - Server message building tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Full Client-Server Handshake (Loopback)
 ***************************************************************************** */
 FIO_SFUNC void test_client_server_handshake(void) {
-  fprintf(stderr, "\t* Testing full client-server handshake\n");
+  FIO_LOG_DDEBUG("Testing full client-server handshake\n");
 
   build_test_certificate();
 
@@ -392,7 +392,7 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
              "Client should be in WAIT_SH state");
-  fprintf(stderr, "\t  - ClientHello generated (%d bytes)\n", ch_len);
+  FIO_LOG_DDEBUG("  - ClientHello generated (%d bytes)\n", ch_len);
 
   /* Step 2: Server processes ClientHello and generates response */
   out_len = 0;
@@ -457,7 +457,7 @@ FIO_SFUNC void test_client_server_handshake(void) {
              "Server should consume client Finished");
   FIO_ASSERT(fio_tls13_server_is_connected(&server),
              "Server should be connected");
-  fprintf(stderr, "\t  - Server processed client Finished\n");
+  FIO_LOG_DDEBUG("  - Server processed client Finished\n");
 
   /* Step 5: Test application data exchange */
   const char *test_message = "Hello from client!";
@@ -470,7 +470,7 @@ FIO_SFUNC void test_client_server_handshake(void) {
                                          (const uint8_t *)test_message,
                                          test_message_len);
   FIO_ASSERT(enc_len > 0, "Client encryption should succeed");
-  fprintf(stderr, "\t  - Client encrypted message (%d bytes)\n", enc_len);
+  FIO_LOG_DDEBUG("  - Client encrypted message (%d bytes)\n", enc_len);
 
   /* Server decrypts message */
   uint8_t decrypted[256];
@@ -482,7 +482,7 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(dec_len == (int)test_message_len, "Decrypted length should match");
   FIO_ASSERT(FIO_MEMCMP(decrypted, test_message, test_message_len) == 0,
              "Decrypted message should match");
-  fprintf(stderr, "\t  - Server decrypted message successfully\n");
+  FIO_LOG_DDEBUG("  - Server decrypted message successfully\n");
 
   /* Server sends response */
   const char *response = "Hello from server!";
@@ -504,20 +504,20 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(dec_len == (int)response_len, "Decrypted length should match");
   FIO_ASSERT(FIO_MEMCMP(decrypted, response, response_len) == 0,
              "Decrypted response should match");
-  fprintf(stderr, "\t  - Client decrypted server response successfully\n");
+  FIO_LOG_DDEBUG("  - Client decrypted server response successfully\n");
 
   /* Cleanup */
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "\t  - Full client-server handshake tests passed\n");
+  FIO_LOG_DDEBUG("  - Full client-server handshake tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Multiple Cipher Suites
 ***************************************************************************** */
 FIO_SFUNC void test_cipher_suite_negotiation(void) {
-  fprintf(stderr, "\t* Testing cipher suite negotiation\n");
+  FIO_LOG_DDEBUG("Testing cipher suite negotiation\n");
 
   build_test_certificate();
 
@@ -532,10 +532,11 @@ FIO_SFUNC void test_cipher_suite_negotiation(void) {
       "ChaCha20-Poly1305-SHA256",
       "AES-256-GCM-SHA384",
   };
+  (void)cipher_names; /* Used only in debug logging */
 
   for (size_t i = 0; i < sizeof(cipher_suites) / sizeof(cipher_suites[0]);
        ++i) {
-    fprintf(stderr, "\t  - Testing %s\n", cipher_names[i]);
+    FIO_LOG_DDEBUG("  - Testing %s\n", cipher_names[i]);
 
     /* Initialize client and server */
     fio_tls13_client_s client;
@@ -611,14 +612,14 @@ FIO_SFUNC void test_cipher_suite_negotiation(void) {
     fio_tls13_server_destroy(&server);
   }
 
-  fprintf(stderr, "\t  - Cipher suite negotiation tests passed\n");
+  FIO_LOG_DDEBUG("  - Cipher suite negotiation tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Error Handling
 ***************************************************************************** */
 FIO_SFUNC void test_error_handling(void) {
-  fprintf(stderr, "\t* Testing error handling\n");
+  FIO_LOG_DDEBUG("Testing error handling\n");
 
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
@@ -657,14 +658,14 @@ FIO_SFUNC void test_error_handling(void) {
 
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "\t  - Error handling tests passed\n");
+  FIO_LOG_DDEBUG("  - Error handling tests passed\n");
 }
 
 /* *****************************************************************************
 Test: State Machine Transitions
 ***************************************************************************** */
 FIO_SFUNC void test_state_machine(void) {
-  fprintf(stderr, "\t* Testing state machine transitions\n");
+  FIO_LOG_DDEBUG("Testing state machine transitions\n");
 
   build_test_certificate();
 
@@ -740,17 +741,17 @@ FIO_SFUNC void test_state_machine(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "\t  - State machine transition tests passed\n");
+  FIO_LOG_DDEBUG("  - State machine transition tests passed\n");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  fprintf(stderr, "\n=== TLS 1.3 Server Tests ===\n\n");
+  FIO_LOG_DDEBUG("=== TLS 1.3 Server Tests ===\n\n");
 
   /* Unit tests */
-  fprintf(stderr, "Unit Tests:\n");
+  FIO_LOG_DDEBUG("Unit Tests:");
   test_server_init_destroy();
   test_server_cert_config();
   test_client_hello_parsing();
@@ -759,10 +760,10 @@ int main(void) {
   test_error_handling();
 
   /* Integration tests */
-  fprintf(stderr, "\nIntegration Tests:\n");
+  FIO_LOG_DDEBUG("Integration Tests:");
   test_client_server_handshake();
   test_cipher_suite_negotiation();
 
-  fprintf(stderr, "\n=== All TLS 1.3 Server Tests PASSED ===\n\n");
+  FIO_LOG_DDEBUG("=== All TLS 1.3 Server Tests PASSED ===\n\n");
   return 0;
 }

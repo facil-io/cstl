@@ -65,7 +65,7 @@ FIO_SFUNC int fio___queue_test_timer_task(void *i_count, void *unused2) {
 }
 
 int main(void) {
-  fprintf(stderr, "\t* Testing facil.io task scheduling (fio_queue)\n");
+  FIO_LOG_DDEBUG("Testing facil.io task scheduling (fio_queue)");
   /* ************** testing queue ************** */
   fio_queue_s *q = fio_queue_new();
   fio_queue_s q2;
@@ -206,7 +206,7 @@ int main(void) {
              "queue library didn't release dynamic queue (should be static)");
   fio_queue_free(q);
   {
-    fprintf(stderr, "\t* Testing urgent insertion\n");
+    FIO_LOG_DDEBUG("Testing urgent insertion");
     fio_queue_init(&q2);
     for (size_t i = 0; i < (FIO_QUEUE_TASKS_PER_ALLOC * 3); ++i) {
       FIO_ASSERT(!fio_queue_push_urgent(&q2,
@@ -232,9 +232,8 @@ int main(void) {
   }
   /* ************** testing timers ************** */
   {
-    fprintf(stderr,
-            "\t* Testing facil.io timer scheduling (fio_timer_queue_s)\n");
-    fprintf(stderr, "\tNote: Errors SHOULD print out to the log.\n");
+    FIO_LOG_DDEBUG("Testing facil.io timer scheduling (fio_timer_queue_s)");
+    FIO_LOG_DDEBUG("Note: Errors SHOULD print out to the log.");
     fio_queue_init(&q2);
     volatile uintptr_t tester = 0;
     fio_timer_queue_s tq = FIO_TIMER_QUEUE_INIT;
@@ -265,7 +264,7 @@ int main(void) {
                        .repetitions = -1);
     FIO_ASSERT(tester == 1,
                "fio_timer_schedule should have called `on_finish`");
-    fprintf(stderr, "\tNote: no more errors should print for this test.\n");
+    FIO_LOG_DDEBUG("Note: no more errors should print for this test.");
 
     /* test endless task */
     tester = 0;

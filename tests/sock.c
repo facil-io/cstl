@@ -31,7 +31,7 @@ int main(void) {
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
     errno = 0;
-    fprintf(stderr, "\t* Testing %s socket API\n", server_tests[i].msg);
+    FIO_LOG_DDEBUG("Testing %s socket API", server_tests[i].msg);
     int srv = fio_sock_open(server_tests[i].address,
                             server_tests[i].port,
                             server_tests[i].flag | FIO_SOCK_SERVER);
@@ -100,12 +100,13 @@ int main(void) {
                (int)POLLNVAL,
                (int)POLLERR);
 #ifdef AF_UNIX
-    if (FIO_SOCK_UNIX == server_tests[i].flag) unlink(server_tests[i].address);
+    if (FIO_SOCK_UNIX == server_tests[i].flag)
+      unlink(server_tests[i].address);
 #endif
   }
   {
     /* UDP semi test */
-    fprintf(stderr, "\t* Testing UDP socket (abbreviated test)\n");
+    FIO_LOG_DDEBUG("Testing UDP socket (abbreviated test)");
     int srv =
         fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
     int n = 0;
@@ -117,14 +118,15 @@ int main(void) {
     sn = sizeof(n);
     while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) == -1) {
       /* failed - repeat attempt at 0.5Mb interval */
-      if (n >= (1024 * 1024))  // OS may have returned max value
+      if (n >= (1024 * 1024)) // OS may have returned max value
         n -= 512 * 1024;
       else
         break;
     }
     do {
       n += 16 * 1024; /* at 16Kb at a time */
-      if (n >= 32 * 1024 * 1024) break;
+      if (n >= 32 * 1024 * 1024)
+        break;
     } while (setsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, sn) != -1);
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
@@ -132,20 +134,20 @@ int main(void) {
     FIO_ASSERT(srv != -1,
                "Couldn't open UDP server socket: %s",
                strerror(errno));
-    FIO_LOG_INFO("Opening client UDP socket.");
+    FIO_LOG_DDEBUG("Opening client UDP socket.");
     int cl = fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
     FIO_ASSERT(cl != -1,
                "Couldn't open UDP client socket: %s",
                strerror(errno));
-    FIO_LOG_INFO("Starting UDP roundtrip.");
+    FIO_LOG_DDEBUG("Starting UDP roundtrip.");
     FIO_ASSERT(fio_sock_write(cl, "hello", 5) != -1,
                "couldn't send datagram from client");
     char buf[64];
-    FIO_LOG_INFO("Receiving UDP msg.");
+    FIO_LOG_DDEBUG("Receiving UDP msg.");
     FIO_ASSERT(recvfrom(srv, buf, 64, 0, NULL, NULL) != -1,
                "couldn't read datagram");
     FIO_ASSERT(!memcmp(buf, "hello", 5), "transmission error");
-    FIO_LOG_INFO("cleaning up UDP sockets.");
+    FIO_LOG_DDEBUG("cleaning up UDP sockets.");
     fio_sock_close(srv);
     fio_sock_close(cl);
   }

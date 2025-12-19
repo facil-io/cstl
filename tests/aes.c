@@ -56,21 +56,21 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 int main(void) {
-  fprintf(stderr, "\t* Testing AES-GCM implementation\n");
+  FIO_LOG_DDEBUG("Testing AES-GCM implementation");
 #if FIO___HAS_X86_AES_INTRIN
-  fprintf(stderr, "\t(using x86 AES-NI)\n");
+  FIO_LOG_DDEBUG("(using x86 AES-NI)");
 #elif FIO___HAS_ARM_AES_INTRIN
-  fprintf(stderr, "\t(using ARM Crypto Extensions)\n");
+  FIO_LOG_DDEBUG("(using ARM Crypto Extensions)");
 
 #else
-  fprintf(stderr, "\t(using software fallback)\n");
+  FIO_LOG_DDEBUG("(using software fallback)");
 #endif
 
   /* **************************************************************************
    * Test AES-128-GCM (NIST SP 800-38D test vectors)
    * *************************************************************************/
   {
-    fprintf(stderr, "\t* Testing AES-128-GCM (NIST test vectors)\n");
+    FIO_LOG_DDEBUG("Testing AES-128-GCM (NIST test vectors)");
 
     /* Test Case 1: Empty plaintext, no AAD */
     {
@@ -318,7 +318,7 @@ int main(void) {
    * Test AES-256-GCM (NIST SP 800-38D test vectors)
    * *************************************************************************/
   {
-    fprintf(stderr, "\t* Testing AES-256-GCM (NIST test vectors)\n");
+    FIO_LOG_DDEBUG("Testing AES-256-GCM (NIST test vectors)");
 
     /* Test Case 13: Empty plaintext, no AAD (AES-256) */
     {
@@ -542,7 +542,7 @@ int main(void) {
    * Test authentication failure detection
    * *************************************************************************/
   {
-    fprintf(stderr, "\t* Testing AES-GCM authentication failure detection\n");
+    FIO_LOG_DDEBUG("Testing AES-GCM authentication failure detection");
     uint8_t key[16] = {0};
     uint8_t nonce[12] = {0};
     uint8_t plaintext[16] = {0};
@@ -566,7 +566,7 @@ int main(void) {
    * Test roundtrip with random data
    * *************************************************************************/
   {
-    fprintf(stderr, "\t* Testing AES-GCM roundtrip with random data\n");
+    FIO_LOG_DDEBUG("Testing AES-GCM roundtrip with random data");
     uint8_t key[32];
     uint8_t nonce[12];
     uint8_t aad[64];
@@ -607,7 +607,7 @@ int main(void) {
    * Test various message lengths
    * *************************************************************************/
   {
-    fprintf(stderr, "\t* Testing AES-GCM with various message lengths\n");
+    FIO_LOG_DDEBUG("Testing AES-GCM with various message lengths");
     uint8_t key[16] = {0x00,
                        0x01,
                        0x02,
@@ -676,7 +676,7 @@ int main(void) {
     }
   }
 
-  fprintf(stderr, "\t* AES-GCM tests passed!\n");
+  FIO_LOG_DDEBUG("AES-GCM tests passed!");
 
   /* Performance tests moved to tests/performance-crypto.c */
 

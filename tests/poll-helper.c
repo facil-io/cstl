@@ -8,21 +8,18 @@ Test
 
 #if FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
 int main(void) {
-  fprintf(stderr,
-          "\t* SKIPPED testing file descriptor polling (engine: epoll).\n");
+  FIO_LOG_DDEBUG("SKIPPED testing file descriptor polling (engine: epoll).");
 }
 
 #elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
 int main(void) {
-  fprintf(stderr,
-          "\t* SKIPPED testing file descriptor polling (engine: kqueue).\n");
+  FIO_LOG_DDEBUG("SKIPPED testing file descriptor polling (engine: kqueue).");
 }
 
 #elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
 int main(void) {
-  fprintf(
-      stderr,
-      "\t* Testing file descriptor monitoring (poll setup / cleanup only).\n");
+  FIO_LOG_DDEBUG(
+      "Testing file descriptor monitoring (poll setup / cleanup only).");
   fio_poll_s p;
   fio_poll_init(&p, NULL);
   short events[4] = {POLLOUT, POLLIN, POLLOUT | POLLIN, POLLOUT | POLLIN};

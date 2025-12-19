@@ -36,7 +36,7 @@ FIO_SFUNC void *fio___test_thread_simple_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_basic(void) {
-  fprintf(stderr, "\t* Testing basic thread creation and joining.\n");
+  FIO_LOG_DDEBUG("Testing basic thread creation and joining.");
 
   int value = 0;
   fio_thread_t thread;
@@ -67,7 +67,7 @@ FIO_SFUNC void *fio___test_thread_identity_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_identity(void) {
-  fprintf(stderr, "\t* Testing thread identity and comparison.\n");
+  FIO_LOG_DDEBUG("Testing thread identity and comparison.");
 
   fio_thread_t main_thread = fio_thread_current();
   fio_thread_t child_thread;
@@ -107,7 +107,7 @@ FIO_SFUNC void *fio___test_thread_yield_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_yield(void) {
-  fprintf(stderr, "\t* Testing thread yield.\n");
+  FIO_LOG_DDEBUG("Testing thread yield.");
 
   volatile int counter = 0;
   fio_thread_t thread;
@@ -145,7 +145,7 @@ FIO_SFUNC void *fio___test_thread_detach_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_detach(void) {
-  fprintf(stderr, "\t* Testing thread detach.\n");
+  FIO_LOG_DDEBUG("Testing thread detach.");
 
   volatile int flag = 0;
   fio_thread_t thread;
@@ -164,7 +164,7 @@ FIO_SFUNC void fio___test_thread_detach(void) {
 
   /* Note: We can't guarantee the detached thread completed, but we can verify
    * detach didn't crash */
-  fprintf(stderr, "\t  - Detach completed (flag=%d).\n", flag);
+  FIO_LOG_DDEBUG("Detach completed (flag=%d).", flag);
 }
 
 /* *****************************************************************************
@@ -172,7 +172,7 @@ Mutex Basic Operations
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_mutex_basic(void) {
-  fprintf(stderr, "\t* Testing basic mutex operations.\n");
+  FIO_LOG_DDEBUG("Testing basic mutex operations.");
 
   fio_thread_mutex_t mutex;
   int result;
@@ -211,7 +211,7 @@ Mutex Static Initialization
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_mutex_static_init(void) {
-  fprintf(stderr, "\t* Testing static mutex initialization.\n");
+  FIO_LOG_DDEBUG("Testing static mutex initialization.");
 
   fio_thread_mutex_t mutex = FIO_THREAD_MUTEX_INIT;
   int result;
@@ -248,7 +248,7 @@ FIO_SFUNC void *fio___test_mutex_contention_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_mutex_contention(void) {
-  fprintf(stderr, "\t* Testing mutex contention with multiple threads.\n");
+  FIO_LOG_DDEBUG("Testing mutex contention with multiple threads.");
 
   const size_t num_threads = 4;
   const size_t iterations_per_thread = 1000;
@@ -302,7 +302,7 @@ FIO_SFUNC void *fio___test_cond_wait_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_cond_basic(void) {
-  fprintf(stderr, "\t* Testing condition variable basic operations.\n");
+  FIO_LOG_DDEBUG("Testing condition variable basic operations.");
 
   fio_thread_mutex_t mutex;
   fio_thread_t thread;
@@ -347,7 +347,7 @@ Condition Variable Timed Wait
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_cond_timedwait(void) {
-  fprintf(stderr, "\t* Testing condition variable timed wait.\n");
+  FIO_LOG_DDEBUG("Testing condition variable timed wait.");
 
   fio_thread_mutex_t mutex;
   fio_thread_cond_t cond;
@@ -381,25 +381,24 @@ Thread Priority (if supported)
 
 FIO_SFUNC void fio___test_thread_priority(void) {
 #if (FIO___TEST_PRIORITY - 1 + 1)
-  fprintf(stderr, "\t* Testing thread priority.\n");
+  FIO_LOG_DDEBUG("Testing thread priority.");
 
   /* Get current priority */
   fio_thread_priority_e priority = fio_thread_priority();
 
   /* Priority might return error on some systems, that's OK */
   if (priority == FIO_THREAD_PRIORITY_ERROR) {
-    fprintf(stderr, "\t  - Thread priority not supported on this system.\n");
+    FIO_LOG_DDEBUG("Thread priority not supported on this system.");
     return;
   }
 
-  fprintf(stderr, "\t  - Current priority: %d\n", (int)priority);
+  FIO_LOG_DDEBUG("Current priority: %d", (int)priority);
 
   /* Try to set priority to normal */
   int result = fio_thread_priority_set(FIO_THREAD_PRIORITY_NORMAL);
   if (result != 0) {
-    fprintf(stderr,
-            "\t  - Setting thread priority not supported or requires "
-            "privileges.\n");
+    FIO_LOG_DDEBUG("Setting thread priority not supported or requires "
+                   "privileges.");
     return;
   }
 
@@ -425,7 +424,7 @@ FIO_SFUNC void *fio___test_stress_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_stress(void) {
-  fprintf(stderr, "\t* Testing thread stress (many threads).\n");
+  FIO_LOG_DDEBUG("Testing thread stress (many threads).");
 
   const size_t num_threads = 64;
   fio_thread_t threads[64];
@@ -466,7 +465,7 @@ FIO_SFUNC void *fio___test_atomic_counter_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_atomic_counter(void) {
-  fprintf(stderr, "\t* Testing atomic counter with multiple threads.\n");
+  FIO_LOG_DDEBUG("Testing atomic counter with multiple threads.");
 
   const size_t num_threads = 8;
   fio_thread_t threads[8];
@@ -577,7 +576,7 @@ FIO_SFUNC void *fio___test_consumer_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_producer_consumer(void) {
-  fprintf(stderr, "\t* Testing producer-consumer pattern.\n");
+  FIO_LOG_DDEBUG("Testing producer-consumer pattern.");
 
   fio___test_queue_s queue = {0};
   fio_thread_t producer, consumer;
@@ -616,7 +615,7 @@ Multi-threaded memcpy Test
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_thread_memcpy(void) {
-  fprintf(stderr, "\t* Testing fio_thread_memcpy.\n");
+  FIO_LOG_DDEBUG("Testing fio_thread_memcpy.");
 
   /* Test with small buffer (should use single thread) */
   {
@@ -643,10 +642,10 @@ FIO_SFUNC void fio___test_thread_memcpy(void) {
       FIO_MEMSET(dst, 0, size);
 
       size_t threads_used = fio_thread_memcpy(dst, src, size);
-      fprintf(stderr,
-              "\t  - Used %zu thread(s) for %zu byte copy.\n",
-              threads_used,
-              size);
+      (void)threads_used; /* Used only in debug logging */
+      FIO_LOG_DDEBUG("Used %zu thread(s) for %zu byte copy.",
+                     threads_used,
+                     size);
 
       FIO_ASSERT(!FIO_MEMCMP(src, dst, size),
                  "fio_thread_memcpy should copy data correctly (large)");
@@ -654,8 +653,7 @@ FIO_SFUNC void fio___test_thread_memcpy(void) {
       FIO_MEM_FREE(src, size);
       FIO_MEM_FREE(dst, size);
     } else {
-      fprintf(stderr,
-              "\t  - Skipping large buffer test (allocation failed).\n");
+      FIO_LOG_DDEBUG("Skipping large buffer test (allocation failed).");
       if (src)
         FIO_MEM_FREE(src, size);
       if (dst)
@@ -670,7 +668,7 @@ Fork Test (POSIX only)
 
 #if FIO_OS_POSIX
 FIO_SFUNC void fio___test_fork(void) {
-  fprintf(stderr, "\t* Testing fork operations.\n");
+  FIO_LOG_DDEBUG("Testing fork operations.");
 
   fio_thread_pid_t parent_pid = fio_thread_getpid();
   FIO_ASSERT(parent_pid > 0, "fio_thread_getpid should return positive PID");
@@ -703,8 +701,8 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "Testing Threads Module\n");
-  fprintf(stderr, "======================\n");
+  FIO_LOG_DDEBUG("Testing Threads Module");
+  FIO_LOG_DDEBUG("======================");
 
   /* Basic thread operations */
   fio___test_thread_basic();
@@ -739,6 +737,6 @@ int main(void) {
   fio___test_fork();
 #endif
 
-  fprintf(stderr, "\nAll thread tests passed!\n");
+  FIO_LOG_DDEBUG("All thread tests passed!");
   return 0;
 }

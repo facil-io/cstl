@@ -6,5 +6,5 @@
 
 int main(int argc, char const *argv[]) {
   (void)argc, (void)argv;
-  FIO_LOG_DEBUG("Doing Nothing");
+  FIO_LOG_DDEBUG("Doing Nothing");
 }

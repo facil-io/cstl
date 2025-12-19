@@ -69,7 +69,7 @@ Test: Byte Conversion Helpers
 ***************************************************************************** */
 
 static void test_rsa_byte_conversion(void) {
-  FIO_LOG_INFO("Testing RSA byte conversion helpers...");
+  FIO_LOG_DDEBUG("Testing RSA byte conversion helpers...");
 
   /* Test big-endian to little-endian conversion */
   uint8_t bytes[16] = {0x01,
@@ -111,7 +111,7 @@ static void test_rsa_byte_conversion(void) {
   FIO_ASSERT(FIO_MEMCMP(bytes, bytes2, 16) == 0,
              "Round-trip conversion failed");
 
-  FIO_LOG_INFO("  Byte conversion: PASSED");
+  FIO_LOG_DDEBUG("  Byte conversion: PASSED");
 }
 
 /* *****************************************************************************
@@ -124,7 +124,7 @@ For e = 65537, this should give predictable results.
 ***************************************************************************** */
 
 static void test_rsa_modexp(void) {
-  FIO_LOG_INFO("Testing RSA modular exponentiation...");
+  FIO_LOG_DDEBUG("Testing RSA modular exponentiation...");
 
   /* Simple test: 2^65537 mod (2^64 + 1) using small numbers */
   /* Actually, let's just test that the function doesn't crash
@@ -161,7 +161,7 @@ static void test_rsa_modexp(void) {
   }
   FIO_ASSERT(!all_zero, "RSA public op returned all zeros");
 
-  FIO_LOG_INFO("  Modular exponentiation: PASSED");
+  FIO_LOG_DDEBUG("  Modular exponentiation: PASSED");
 }
 
 /* *****************************************************************************
@@ -175,7 +175,7 @@ For now, we test the padding verification logic with synthetic data.
 ***************************************************************************** */
 
 static void test_rsa_pkcs1_padding(void) {
-  FIO_LOG_INFO("Testing PKCS#1 v1.5 padding verification...");
+  FIO_LOG_DDEBUG("Testing PKCS#1 v1.5 padding verification...");
 
   /* Create a properly formatted PKCS#1 v1.5 message:
    * EM = 0x00 || 0x01 || PS || 0x00 || DigestInfo || Hash
@@ -253,7 +253,7 @@ static void test_rsa_pkcs1_padding(void) {
   FIO_ASSERT(FIO_MEMCMP(em + 3 + ps_len + 19, test_hash, 32) == 0,
              "Hash mismatch");
 
-  FIO_LOG_INFO("  PKCS#1 v1.5 padding format: PASSED");
+  FIO_LOG_DDEBUG("  PKCS#1 v1.5 padding format: PASSED");
 }
 
 /* *****************************************************************************
@@ -263,7 +263,7 @@ Test the RSA-PSS padding structure without a real signature.
 ***************************************************************************** */
 
 static void test_rsa_pss_structure(void) {
-  FIO_LOG_INFO("Testing RSA-PSS structure...");
+  FIO_LOG_DDEBUG("Testing RSA-PSS structure...");
 
   /* RSA-PSS EM format:
    * EM = maskedDB || H || 0xBC
@@ -298,7 +298,7 @@ static void test_rsa_pss_structure(void) {
              total,
              em_len);
 
-  FIO_LOG_INFO("  RSA-PSS structure: PASSED");
+  FIO_LOG_DDEBUG("  RSA-PSS structure: PASSED");
 }
 
 /* *****************************************************************************
@@ -306,7 +306,7 @@ Test: MGF1 (Mask Generation Function)
 ***************************************************************************** */
 
 static void test_rsa_mgf1(void) {
-  FIO_LOG_INFO("Testing MGF1 mask generation...");
+  FIO_LOG_DDEBUG("Testing MGF1 mask generation...");
 
   /* Test MGF1 with a known seed */
   uint8_t seed[32];
@@ -337,7 +337,7 @@ static void test_rsa_mgf1(void) {
   FIO_ASSERT(FIO_MEMCMP(mask, mask2, 64) != 0,
              "Different seeds should produce different masks");
 
-  FIO_LOG_INFO("  MGF1: PASSED");
+  FIO_LOG_DDEBUG("  MGF1: PASSED");
 }
 
 /* *****************************************************************************
@@ -345,7 +345,7 @@ Test: Invalid Inputs
 ***************************************************************************** */
 
 static void test_rsa_invalid_inputs(void) {
-  FIO_LOG_INFO("Testing RSA invalid input handling...");
+  FIO_LOG_DDEBUG("Testing RSA invalid input handling...");
 
   uint8_t sig[256], hash[32];
   FIO_MEMSET(sig, 0, sizeof(sig));
@@ -379,7 +379,7 @@ static void test_rsa_invalid_inputs(void) {
       fio_rsa_verify_pkcs1(sig, 128, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
       "Signature length mismatch should fail");
 
-  FIO_LOG_INFO("  Invalid inputs: PASSED");
+  FIO_LOG_DDEBUG("  Invalid inputs: PASSED");
 }
 
 /* *****************************************************************************
@@ -393,7 +393,7 @@ verification logic.
 ***************************************************************************** */
 
 static void test_rsa_synthetic_pkcs1(void) {
-  FIO_LOG_INFO("Testing synthetic PKCS#1 v1.5 verification...");
+  FIO_LOG_DDEBUG("Testing synthetic PKCS#1 v1.5 verification...");
 
   /* We can't easily create a real RSA signature without a private key,
      but we can test the modular exponentiation and verify that an
@@ -414,7 +414,7 @@ static void test_rsa_synthetic_pkcs1(void) {
       fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key);
   FIO_ASSERT(result == -1, "Random signature should fail verification");
 
-  FIO_LOG_INFO("  Synthetic PKCS#1 v1.5: PASSED");
+  FIO_LOG_DDEBUG("  Synthetic PKCS#1 v1.5: PASSED");
 }
 
 /* *****************************************************************************
@@ -422,7 +422,7 @@ Main
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_INFO("=== RSA Signature Verification Tests ===\n");
+  FIO_LOG_DDEBUG("=== RSA Signature Verification Tests ===");
 
   test_rsa_byte_conversion();
   test_rsa_modexp();
@@ -432,6 +432,6 @@ int main(void) {
   test_rsa_invalid_inputs();
   test_rsa_synthetic_pkcs1();
 
-  FIO_LOG_INFO("\n=== All RSA tests passed! ===");
+  FIO_LOG_DDEBUG("=== All RSA tests passed! ===");
   return 0;
 }

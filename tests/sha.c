@@ -31,7 +31,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
 #endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
-  fprintf(stderr, "\t* Testing SHA-1\n");
+  FIO_LOG_DDEBUG("Testing SHA-1");
   struct {
     const char *str;
     const char *sha1;
@@ -96,7 +96,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
 #endif /* HAVE_OPENSSL */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
-  fprintf(stderr, "\t* Testing SHA-2\n");
+  FIO_LOG_DDEBUG("Testing SHA-2");
 
   /* Test SHA-256 for various input sizes around block boundaries */
 #if HAVE_OPENSSL
@@ -370,7 +370,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   }
 
   {
-    fprintf(stderr, "\t- Testing SHA-2 based secret.\n");
+    FIO_LOG_DDEBUG("Testing SHA-2 based secret.");
     fio_u512 s0 = {0};
     fio_u512 s1 = fio_secret();
     FIO_ASSERT(!fio_u512_is_eq(&s0, &s1), "Secret is zero?!");
@@ -387,7 +387,7 @@ https://www.rfc-editor.org/rfc/rfc4231
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
-  fprintf(stderr, "\t* Testing HMAC-SHA256 / HMAC-SHA512 (RFC 4231)\n");
+  FIO_LOG_DDEBUG("Testing HMAC-SHA256 / HMAC-SHA512 (RFC 4231)");
 
   /* RFC 4231 Test Case 1 */
   {
@@ -615,7 +615,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
 #if HAVE_OPENSSL
   /* Compare with OpenSSL for random inputs */
   {
-    fprintf(stderr, "\t- Comparing HMAC with OpenSSL\n");
+    FIO_LOG_DDEBUG("Comparing HMAC with OpenSSL");
     uint8_t key[64];
     uint8_t data[256];
     fio_rand_bytes(key, sizeof(key));
@@ -640,7 +640,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
   }
 #endif
 
-  fprintf(stderr, "\t  HMAC tests passed.\n");
+  FIO_LOG_DDEBUG("HMAC tests passed.");
 }
 
 int main(void) {

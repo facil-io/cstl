@@ -8,7 +8,7 @@ Functional Tests
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
-  fprintf(stderr, "\t* Testing fio_memcpy primitives.\n");
+  FIO_LOG_DDEBUG("Testing fio_memcpy primitives.");
   {
     struct {
       void *(*fn)(void *, const void *, size_t);
@@ -51,7 +51,7 @@ FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
 }
 
 FIO_SFUNC void fio___test_core_byte_swap(void) {
-  fprintf(stderr, "\t* Testing fio_bswapX macros.\n");
+  FIO_LOG_DDEBUG("Testing fio_bswapX macros.");
   FIO_ASSERT(fio_bswap16(0x0102) == (uint16_t)0x0201, "fio_bswap16 failed");
   FIO_ASSERT(fio_bswap32(0x01020304) == (uint32_t)0x04030201,
              "fio_bswap32 failed");
@@ -69,7 +69,7 @@ FIO_SFUNC void fio___test_core_byte_swap(void) {
 }
 
 FIO_SFUNC void fio___test_core_bit_rotation(void) {
-  fprintf(stderr, "\t* Testing fio_lrotX and fio_rrotX macros.\n");
+  FIO_LOG_DDEBUG("Testing fio_lrotX and fio_rrotX macros.");
   {
     uint64_t tmp = 1;
     tmp = FIO_RROT(tmp, 1);
@@ -111,7 +111,7 @@ FIO_SFUNC void fio___test_core_bit_rotation(void) {
 }
 
 FIO_SFUNC void fio___test_core_bit_index(void) {
-  fprintf(stderr, "\t* Testing bit index functions.\n");
+  FIO_LOG_DDEBUG("Testing bit index functions.");
   for (size_t i = 0; i < 63; ++i) {
 #if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
     !__has_builtin(__builtin_clzll)
@@ -137,7 +137,7 @@ FIO_SFUNC void fio___test_core_bit_index(void) {
 }
 
 FIO_SFUNC void fio___test_core_buf_helpers(void) {
-  fprintf(stderr, "\t* Testing fio_buf2uX and fio_u2bufX helpers.\n");
+  FIO_LOG_DDEBUG("Testing fio_buf2uX and fio_u2bufX helpers.");
 #define FIO___BITMAP_TEST_BITS(itype, utype, bits)                             \
   for (size_t i = 0; i < (bits); ++i) {                                        \
     char tmp_buf[32];                                                          \
@@ -160,7 +160,7 @@ FIO_SFUNC void fio___test_core_buf_helpers(void) {
 }
 
 FIO_SFUNC void fio___test_core_ct_operations(void) {
-  fprintf(stderr, "\t* Testing constant-time helpers.\n");
+  FIO_LOG_DDEBUG("Testing constant-time helpers.");
   /* fio_ct_true */
   FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
   for (uintptr_t i = 1; i; i <<= 1) {
@@ -234,7 +234,7 @@ FIO_SFUNC void fio___test_core_ct_operations(void) {
 }
 
 FIO_SFUNC void fio___test_core_ct_bitwise(void) {
-  fprintf(stderr, "\t* Testing constant-time bitwise selection functions.\n");
+  FIO_LOG_DDEBUG("Testing constant-time bitwise selection functions.");
   /* fio_ct_mux32/64 - choose: (x & y) ^ (~x & z) */
   FIO_ASSERT(fio_ct_mux32(0xFFFFFFFF, 0xAAAAAAAA, 0x55555555) == 0xAAAAAAAA,
              "fio_ct_mux32 all-ones selector failed");
@@ -275,7 +275,7 @@ FIO_SFUNC void fio___test_core_ct_bitwise(void) {
 }
 
 FIO_SFUNC void fio___test_core_bitmap(void) {
-  fprintf(stderr, "\t* Testing bitmap helpers.\n");
+  FIO_LOG_DDEBUG("Testing bitmap helpers.");
   uint8_t bitmap[1024];
   FIO_MEMSET(bitmap, 0, 1024);
   FIO_ASSERT(!fio_bit_get(bitmap, 97), "fio_bit_get should be 0.");
@@ -300,7 +300,7 @@ FIO_SFUNC void fio___test_core_bitmap(void) {
 }
 
 FIO_SFUNC void fio___test_core_atomic_bitmap(void) {
-  fprintf(stderr, "\t* Testing atomic bitmap helpers.\n");
+  FIO_LOG_DDEBUG("Testing atomic bitmap helpers.");
   uint8_t bitmap[1024];
   FIO_MEMSET(bitmap, 0, 1024);
   FIO_ASSERT(!fio_atomic_bit_get(bitmap, 97),
@@ -328,7 +328,7 @@ FIO_SFUNC void fio___test_core_atomic_bitmap(void) {
 }
 
 FIO_SFUNC void fio___test_core_popcount(void) {
-  fprintf(stderr, "\t* Testing popcount and hemming distance calculation.\n");
+  FIO_LOG_DDEBUG("Testing popcount and hemming distance calculation.");
   for (int i = 0; i < 64; ++i) {
     FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
                "fio_popcount error for 1 bit");
@@ -353,7 +353,7 @@ FIO_SFUNC void fio___test_core_popcount(void) {
 }
 
 FIO_SFUNC void fio___test_core_has_byte(void) {
-  fprintf(stderr, "\t* Testing fio_has_zero_byte and fio_has_byte.\n");
+  FIO_LOG_DDEBUG("Testing fio_has_zero_byte and fio_has_byte.");
   /* fio_has_zero_byte32 */
   FIO_ASSERT(fio_has_zero_byte32(0x00112233) != 0,
              "fio_has_zero_byte32 should detect zero byte");
@@ -395,7 +395,7 @@ FIO_SFUNC void fio___test_core_ptr_from_field(void) {
 }
 
 FIO_SFUNC void fio___test_core_xmask(void) {
-  fprintf(stderr, "\t* Testing fio_xmask.\n");
+  FIO_LOG_DDEBUG("Testing fio_xmask.");
   char data[128], buf[256];
   uint64_t mask;
   uint64_t counter;
@@ -427,7 +427,7 @@ FIO_SFUNC void fio___test_core_xmask(void) {
 }
 
 FIO_SFUNC void fio___test_core_utf8(void) {
-  fprintf(stderr, "\t* Testing Core UTF-8 Support (Macros).\n");
+  FIO_LOG_DDEBUG("Testing Core UTF-8 Support (Macros).");
   struct {
     const char *buf;
     size_t clen;
@@ -523,9 +523,8 @@ FIO_SFUNC void fio___test_core_utf8(void) {
 }
 
 FIO_SFUNC void fio___test_core_multiprecision_basic(void) {
-  fprintf(stderr,
-          "\t* Testing Basic Multi-Precision add / sub / mul for fio_uXXX "
-          "(fio_u256).\n");
+  FIO_LOG_DDEBUG("Testing Basic Multi-Precision add / sub / mul for fio_uXXX "
+                 "(fio_u256).");
 
   char buf[1024];
 
@@ -584,8 +583,7 @@ FIO_SFUNC void fio___test_core_multiprecision_basic(void) {
 }
 
 FIO_SFUNC void fio___test_core_vector_operations(void) {
-  fprintf(stderr,
-          "\t* Testing Basic vector operations for fio_uXXX (fio_u256).\n");
+  FIO_LOG_DDEBUG("Testing Basic vector operations for fio_uXXX (fio_u256).");
   for (uint64_t a = 1; a; a = ((a << 2) | (((a >> 62) & 1) ^ 1))) {
     for (uint64_t b = 2; b; b = ((b << 2) | (((b >> 62) & 2) ^ 2))) {
       uint64_t expected[8] = {1, ~0, 4, ~0};
@@ -662,9 +660,8 @@ FIO_SFUNC void fio___test_core_vector_operations(void) {
 }
 
 FIO_SFUNC void fio___test_core_simd_value_ops(void) {
-  fprintf(stderr,
-          "\t* Testing value-returning SIMD operations (_xorv, _andv, _orv, "
-          "_addv64).\n");
+  FIO_LOG_DDEBUG("Testing value-returning SIMD operations (_xorv, _andv, _orv, "
+                 "_addv64).");
   /* Test fio_u128 */
   {
     fio_u128 a = fio_u128_init64(0xAAAAAAAAAAAAAAAAULL, 0x5555555555555555ULL);
@@ -830,7 +827,7 @@ Main Test Entry Point
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "Testing Core Module\n");
+  FIO_LOG_DDEBUG("Testing Core Module");
 
   /* Run all functional tests */
   fio___test_core_memcpy_primitives();
@@ -851,7 +848,7 @@ int main(void) {
   fio___test_core_vector_operations();
   fio___test_core_simd_value_ops();
 
-  fprintf(stderr, "\nCore Module tests complete.\n");
-  fprintf(stderr, "(Performance tests moved to tests/performance-core.c)\n");
+  FIO_LOG_DDEBUG("Core Module tests complete.");
+  FIO_LOG_DDEBUG("(Performance tests moved to tests/performance-core.c)");
   return 0;
 }

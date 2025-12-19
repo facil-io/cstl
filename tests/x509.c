@@ -130,7 +130,7 @@ Test: Certificate Parsing
 ***************************************************************************** */
 
 static void test_x509_parse_basic(void) {
-  FIO_LOG_INFO("Testing X.509 basic parsing...");
+  FIO_LOG_DDEBUG("Testing X.509 basic parsing...");
 
   fio_x509_cert_s cert;
   int ret = fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert));
@@ -182,7 +182,7 @@ static void test_x509_parse_basic(void) {
   FIO_ASSERT(cert.issuer_der != NULL, "Issuer DN not captured");
   FIO_ASSERT(cert.subject_der != NULL, "Subject DN not captured");
 
-  FIO_LOG_INFO("  Basic parsing: PASSED");
+  FIO_LOG_DDEBUG("  Basic parsing: PASSED");
 }
 
 /* *****************************************************************************
@@ -190,7 +190,7 @@ Test: Validity Period Checking
 ***************************************************************************** */
 
 static void test_x509_validity(void) {
-  FIO_LOG_INFO("Testing X.509 validity period...");
+  FIO_LOG_DDEBUG("Testing X.509 validity period...");
 
   fio_x509_cert_s cert;
   int ret = fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert));
@@ -213,7 +213,7 @@ static void test_x509_validity(void) {
   FIO_ASSERT(fio_x509_check_validity(&cert, early_time) == -1,
              "Certificate should not be valid yet");
 
-  FIO_LOG_INFO("  Validity checking: PASSED");
+  FIO_LOG_DDEBUG("  Validity checking: PASSED");
 }
 
 /* *****************************************************************************
@@ -221,7 +221,7 @@ Test: Hostname Matching
 ***************************************************************************** */
 
 static void test_x509_hostname_matching(void) {
-  FIO_LOG_INFO("Testing X.509 hostname matching...");
+  FIO_LOG_DDEBUG("Testing X.509 hostname matching...");
 
   fio_x509_cert_s cert;
   FIO_MEMSET(&cert, 0, sizeof(cert));
@@ -263,7 +263,7 @@ static void test_x509_hostname_matching(void) {
   FIO_ASSERT(fio_x509_match_hostname(&cert, "wrong.example.com", 17) != 0,
              "CN should not match when SAN is present");
 
-  FIO_LOG_INFO("  Hostname matching: PASSED");
+  FIO_LOG_DDEBUG("  Hostname matching: PASSED");
 }
 
 /* *****************************************************************************
@@ -271,7 +271,7 @@ Test: DN Comparison
 ***************************************************************************** */
 
 static void test_x509_dn_comparison(void) {
-  FIO_LOG_INFO("Testing X.509 DN comparison...");
+  FIO_LOG_DDEBUG("Testing X.509 DN comparison...");
 
   /* Test equal DNs */
   uint8_t dn1[] = {0x30,
@@ -334,7 +334,7 @@ static void test_x509_dn_comparison(void) {
   FIO_ASSERT(fio_x509_dn_equals(dn1, sizeof(dn1), dn1, sizeof(dn1) - 1) != 0,
              "Different length DNs should not be equal");
 
-  FIO_LOG_INFO("  DN comparison: PASSED");
+  FIO_LOG_DDEBUG("  DN comparison: PASSED");
 }
 
 /* *****************************************************************************
@@ -342,7 +342,7 @@ Test: Key Type Parsing
 ***************************************************************************** */
 
 static void test_x509_key_types(void) {
-  FIO_LOG_INFO("Testing X.509 key type parsing...");
+  FIO_LOG_DDEBUG("Testing X.509 key type parsing...");
 
   /* Test RSA key (already tested above) */
   fio_x509_cert_s cert;
@@ -357,7 +357,7 @@ static void test_x509_key_types(void) {
                "RSA exponent should be 65537");
   }
 
-  FIO_LOG_INFO("  Key type parsing: PASSED");
+  FIO_LOG_DDEBUG("  Key type parsing: PASSED");
 }
 
 /* *****************************************************************************
@@ -365,7 +365,7 @@ Test: Extensions Parsing
 ***************************************************************************** */
 
 static void test_x509_extensions(void) {
-  FIO_LOG_INFO("Testing X.509 extensions parsing...");
+  FIO_LOG_DDEBUG("Testing X.509 extensions parsing...");
 
   fio_x509_cert_s cert;
   int ret = fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert));
@@ -383,7 +383,7 @@ static void test_x509_extensions(void) {
                "SAN DNS should be 'www'");
   }
 
-  FIO_LOG_INFO("  Extensions parsing: PASSED");
+  FIO_LOG_DDEBUG("  Extensions parsing: PASSED");
 }
 
 /* *****************************************************************************
@@ -391,7 +391,7 @@ Test: Invalid Input Handling
 ***************************************************************************** */
 
 static void test_x509_invalid_inputs(void) {
-  FIO_LOG_INFO("Testing X.509 invalid input handling...");
+  FIO_LOG_DDEBUG("Testing X.509 invalid input handling...");
 
   fio_x509_cert_s cert;
 
@@ -420,7 +420,7 @@ static void test_x509_invalid_inputs(void) {
   FIO_ASSERT(fio_x509_check_validity(NULL, 1000000) == -1,
              "NULL cert validity check should fail");
 
-  FIO_LOG_INFO("  Invalid input handling: PASSED");
+  FIO_LOG_DDEBUG("  Invalid input handling: PASSED");
 }
 
 /* *****************************************************************************
@@ -428,7 +428,7 @@ Test: Self-Signed Certificate Properties
 ***************************************************************************** */
 
 static void test_x509_self_signed(void) {
-  FIO_LOG_INFO("Testing X.509 self-signed detection...");
+  FIO_LOG_DDEBUG("Testing X.509 self-signed detection...");
 
   fio_x509_cert_s cert;
   int ret = fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert));
@@ -446,7 +446,7 @@ static void test_x509_self_signed(void) {
                                           cert.subject_der_len) == 0;
   FIO_ASSERT(is_self_signed, "Certificate should be self-signed");
 
-  FIO_LOG_INFO("  Self-signed detection: PASSED");
+  FIO_LOG_DDEBUG("  Self-signed detection: PASSED");
 }
 
 /* *****************************************************************************
@@ -454,7 +454,7 @@ Test: Signature Algorithm Detection
 ***************************************************************************** */
 
 static void test_x509_sig_algorithms(void) {
-  FIO_LOG_INFO("Testing X.509 signature algorithm detection...");
+  FIO_LOG_DDEBUG("Testing X.509 signature algorithm detection...");
 
   fio_x509_cert_s cert;
   int ret = fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert));
@@ -465,7 +465,7 @@ static void test_x509_sig_algorithms(void) {
              "Should detect sha256WithRSAEncryption, got: %d",
              cert.sig_alg);
 
-  FIO_LOG_INFO("  Signature algorithm detection: PASSED");
+  FIO_LOG_DDEBUG("  Signature algorithm detection: PASSED");
 }
 
 /* *****************************************************************************
@@ -473,7 +473,7 @@ Test: Chain Validation - Error Codes
 ***************************************************************************** */
 
 static void test_x509_error_strings(void) {
-  FIO_LOG_INFO("Testing X.509 error strings...");
+  FIO_LOG_DDEBUG("Testing X.509 error strings...");
 
   FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(FIO_X509_OK)) > 0,
              "OK should have description");
@@ -498,7 +498,7 @@ static void test_x509_error_strings(void) {
   FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(-999)) > 0,
              "Unknown error should have description");
 
-  FIO_LOG_INFO("  Error strings: PASSED");
+  FIO_LOG_DDEBUG("  Error strings: PASSED");
 }
 
 /* *****************************************************************************
@@ -506,7 +506,7 @@ Test: Chain Validation - Single Self-Signed Certificate
 ***************************************************************************** */
 
 static void test_x509_chain_single_self_signed(void) {
-  FIO_LOG_INFO("Testing X.509 chain validation (single self-signed)...");
+  FIO_LOG_DDEBUG("Testing X.509 chain validation (single self-signed)...");
 
   /* Use the minimal test cert (self-signed) */
   const uint8_t *certs[1] = {test_minimal_cert};
@@ -524,7 +524,7 @@ static void test_x509_chain_single_self_signed(void) {
   /* Note: With our test cert, signature verification may fail because
    * the signature is fake. We're testing the chain logic. */
   if (ret == FIO_X509_ERR_SIGNATURE) {
-    FIO_LOG_INFO("  (Signature verification expected to fail for test cert)");
+    FIO_LOG_DDEBUG("  (Signature verification expected to fail for test cert)");
   }
 
   /* Test with trust store containing the self-signed cert */
@@ -549,7 +549,7 @@ static void test_x509_chain_single_self_signed(void) {
              ret,
              fio_x509_error_str(ret));
 
-  FIO_LOG_INFO("  Single self-signed chain: PASSED");
+  FIO_LOG_DDEBUG("  Single self-signed chain: PASSED");
 }
 
 /* *****************************************************************************
@@ -557,7 +557,7 @@ Test: Chain Validation - Invalid Inputs
 ***************************************************************************** */
 
 static void test_x509_chain_invalid_inputs(void) {
-  FIO_LOG_INFO("Testing X.509 chain validation (invalid inputs)...");
+  FIO_LOG_DDEBUG("Testing X.509 chain validation (invalid inputs)...");
 
   const uint8_t *certs[1] = {test_minimal_cert};
   const size_t cert_lens[1] = {sizeof(test_minimal_cert)};
@@ -581,7 +581,7 @@ static void test_x509_chain_invalid_inputs(void) {
              "Empty chain should return EMPTY_CHAIN error, got: %d",
              ret);
 
-  FIO_LOG_INFO("  Invalid chain inputs: PASSED");
+  FIO_LOG_DDEBUG("  Invalid chain inputs: PASSED");
 }
 
 /* *****************************************************************************
@@ -589,7 +589,7 @@ Test: Chain Validation - Expired Certificate
 ***************************************************************************** */
 
 static void test_x509_chain_expired(void) {
-  FIO_LOG_INFO("Testing X.509 chain validation (expired certificate)...");
+  FIO_LOG_DDEBUG("Testing X.509 chain validation (expired certificate)...");
 
   const uint8_t *certs[1] = {test_minimal_cert};
   const size_t cert_lens[1] = {sizeof(test_minimal_cert)};
@@ -610,7 +610,7 @@ static void test_x509_chain_expired(void) {
              "Not-yet-valid cert should return NOT_YET_VALID error, got: %d",
              ret);
 
-  FIO_LOG_INFO("  Expired certificate handling: PASSED");
+  FIO_LOG_DDEBUG("  Expired certificate handling: PASSED");
 }
 
 /* *****************************************************************************
@@ -618,7 +618,7 @@ Test: Chain Validation - Hostname Mismatch
 ***************************************************************************** */
 
 static void test_x509_chain_hostname(void) {
-  FIO_LOG_INFO("Testing X.509 chain validation (hostname matching)...");
+  FIO_LOG_DDEBUG("Testing X.509 chain validation (hostname matching)...");
 
   const uint8_t *certs[1] = {test_minimal_cert};
   const size_t cert_lens[1] = {sizeof(test_minimal_cert)};
@@ -643,7 +643,7 @@ static void test_x509_chain_hostname(void) {
              ret,
              fio_x509_error_str(ret));
 
-  FIO_LOG_INFO("  Hostname matching in chain: PASSED");
+  FIO_LOG_DDEBUG("  Hostname matching in chain: PASSED");
 }
 
 /* *****************************************************************************
@@ -651,7 +651,7 @@ Test: Trust Store Functions
 ***************************************************************************** */
 
 static void test_x509_trust_store(void) {
-  FIO_LOG_INFO("Testing X.509 trust store...");
+  FIO_LOG_DDEBUG("Testing X.509 trust store...");
 
   /* Parse the test certificate */
   fio_x509_cert_s cert;
@@ -689,7 +689,7 @@ static void test_x509_trust_store(void) {
   ret = fio_x509_is_trusted(&cert, NULL);
   FIO_ASSERT(ret == -1, "NULL trust store should fail");
 
-  FIO_LOG_INFO("  Trust store: PASSED");
+  FIO_LOG_DDEBUG("  Trust store: PASSED");
 }
 
 /* *****************************************************************************
@@ -697,7 +697,7 @@ Test: TLS Certificate Message Parsing
 ***************************************************************************** */
 
 static void test_tls_certificate_message_parsing(void) {
-  FIO_LOG_INFO("Testing TLS Certificate message parsing...");
+  FIO_LOG_DDEBUG("Testing TLS Certificate message parsing...");
 
   /* Build a minimal TLS Certificate message:
    * - context length: 0 (1 byte)
@@ -768,7 +768,7 @@ static void test_tls_certificate_message_parsing(void) {
 
   free(msg);
 
-  FIO_LOG_INFO("  TLS Certificate message parsing: PASSED");
+  FIO_LOG_DDEBUG("  TLS Certificate message parsing: PASSED");
 }
 
 /* *****************************************************************************
@@ -776,7 +776,7 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_INFO("=== X.509 Certificate Parser Tests ===\n");
+  FIO_LOG_DDEBUG("=== X.509 Certificate Parser Tests ===\n");
 
   /* Basic X.509 parsing tests */
   test_x509_parse_basic();
@@ -798,6 +798,6 @@ int main(void) {
   test_x509_trust_store();
   test_tls_certificate_message_parsing();
 
-  FIO_LOG_INFO("\n=== All X.509 tests passed! ===");
+  FIO_LOG_DDEBUG("\n=== All X.509 tests passed! ===");
   return 0;
 }

@@ -69,7 +69,7 @@ static void fio___test_hkdf_rfc5869_case1(void) {
   FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 42),
              "HKDF combined test case 1 failed");
 
-  FIO_LOG_DEBUG("HKDF RFC 5869 Test Case 1: PASSED");
+  FIO_LOG_DDEBUG("HKDF RFC 5869 Test Case 1: PASSED");
 }
 
 /* Test Case 2: Test with SHA-256 and longer inputs/outputs */
@@ -132,7 +132,7 @@ static void fio___test_hkdf_rfc5869_case2(void) {
   FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 82),
              "HKDF combined test case 2 failed");
 
-  FIO_LOG_DEBUG("HKDF RFC 5869 Test Case 2: PASSED");
+  FIO_LOG_DDEBUG("HKDF RFC 5869 Test Case 2: PASSED");
 }
 
 /* Test Case 3: Test with SHA-256 and zero-length salt/info */
@@ -174,7 +174,7 @@ static void fio___test_hkdf_rfc5869_case3(void) {
   FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 42),
              "HKDF combined test case 3 failed");
 
-  FIO_LOG_DEBUG("HKDF RFC 5869 Test Case 3: PASSED");
+  FIO_LOG_DDEBUG("HKDF RFC 5869 Test Case 3: PASSED");
 }
 
 /* Test Case 4: Basic test case with SHA-1 (we use SHA-256 as fallback) */
@@ -231,7 +231,7 @@ static void fio___test_hkdf_sha384(void) {
   FIO_ASSERT(FIO_MEMCMP(okm, zero_okm, 64) != 0,
              "HKDF SHA-384 produced zero output");
 
-  FIO_LOG_DEBUG("HKDF SHA-384 basic test: PASSED");
+  FIO_LOG_DDEBUG("HKDF SHA-384 basic test: PASSED");
 }
 
 /* Test edge cases */
@@ -275,7 +275,7 @@ static void fio___test_hkdf_edge_cases(void) {
   fio_hkdf(okm, 255, NULL, 0, ikm, sizeof(ikm), NULL, 0, 0);
   FIO_ASSERT(FIO_MEMCMP(okm, zero, 255) != 0, "HKDF 255-byte output failed");
 
-  FIO_LOG_DEBUG("HKDF edge cases: PASSED");
+  FIO_LOG_DDEBUG("HKDF edge cases: PASSED");
 }
 
 /* Test determinism - same inputs should produce same outputs */
@@ -324,26 +324,26 @@ static void fio___test_hkdf_determinism(void) {
 
   FIO_ASSERT(!FIO_MEMCMP(okm1, okm2, 64), "HKDF determinism test failed");
 
-  FIO_LOG_DEBUG("HKDF determinism test: PASSED");
+  FIO_LOG_DDEBUG("HKDF determinism test: PASSED");
 }
 
 int main(void) {
-  FIO_LOG_INFO("Testing HKDF implementation (RFC 5869)...\n");
+  FIO_LOG_DDEBUG("Testing HKDF implementation (RFC 5869)...");
 
-  FIO_LOG_INFO("=== RFC 5869 Test Vectors ===");
+  FIO_LOG_DDEBUG("=== RFC 5869 Test Vectors ===");
   fio___test_hkdf_rfc5869_case1();
   fio___test_hkdf_rfc5869_case2();
   fio___test_hkdf_rfc5869_case3();
 
-  FIO_LOG_INFO("=== SHA-384 Variant Tests ===");
+  FIO_LOG_DDEBUG("=== SHA-384 Variant Tests ===");
   fio___test_hkdf_sha384();
 
-  FIO_LOG_INFO("=== Edge Case Tests ===");
+  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
   fio___test_hkdf_edge_cases();
 
-  FIO_LOG_INFO("=== Determinism Tests ===");
+  FIO_LOG_DDEBUG("=== Determinism Tests ===");
   fio___test_hkdf_determinism();
 
-  FIO_LOG_INFO("\nAll HKDF tests passed!");
+  FIO_LOG_DDEBUG("All HKDF tests passed!");
   return 0;
 }

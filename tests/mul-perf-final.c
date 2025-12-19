@@ -31,11 +31,11 @@ Accurate performance benchmark matching original methodology
 #define FIO_PERF_ITERATIONS 10000
 
 int main(void) {
-  FIO_LOG_INFO("==================================");
-  FIO_LOG_INFO("Schoolbook Multiplication Performance");
-  FIO_LOG_INFO("Testing via fio_math_mul() dispatcher");
-  FIO_LOG_INFO("==================================");
-  FIO_LOG_INFO("");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("Schoolbook Multiplication Performance");
+  FIO_LOG_DDEBUG("Testing via fio_math_mul() dispatcher");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("");
 
   /* 256-bit (4 words) */
   {
@@ -85,8 +85,8 @@ int main(void) {
                        (void)0);
   }
 
-  FIO_LOG_INFO("");
-  FIO_LOG_INFO("==================================");
-  FIO_LOG_INFO("Benchmark complete!");
+  FIO_LOG_DDEBUG("");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("Benchmark complete!");
   return 0;
 }

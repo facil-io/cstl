@@ -14,13 +14,19 @@
 static size_t tests_passed = 0;
 static size_t tests_failed = 0;
 
-/* Helper: print a multi-precision number in hex (big-endian display) */
+/* Helper: print a multi-precision number in hex (big-endian display) - for
+ * errors */
 static void print_mp(const char *name, const uint64_t *n, size_t len) {
-  fprintf(stderr, "%s = 0x", name);
-  for (size_t i = len; i > 0; --i) {
-    fprintf(stderr, "%016llx", (unsigned long long)n[i - 1]);
+  char buf[1024];
+  char *p = buf;
+  p += snprintf(p, sizeof(buf), "%s = 0x", name);
+  for (size_t i = len; i > 0 && (size_t)(p - buf) < sizeof(buf) - 20; --i) {
+    p += snprintf(p,
+                  sizeof(buf) - (size_t)(p - buf),
+                  "%016llx",
+                  (unsigned long long)n[i - 1]);
   }
-  fprintf(stderr, "\n");
+  FIO_LOG_ERROR("%s", buf);
 }
 
 /* Helper: check if a multi-precision number is zero */
@@ -54,7 +60,7 @@ static int verify_division(const uint64_t *dividend,
   uint64_t result[32] = {0};
 
   if (len > 32) {
-    fprintf(stderr, "ERROR: verify_division len too large\n");
+    FIO_LOG_ERROR("ERROR: verify_division len too large");
     return 0;
   }
 
@@ -69,7 +75,7 @@ static int verify_division(const uint64_t *dividend,
 
   /* Check if result == dividend */
   if (mp_cmp(result, dividend, len) != 0) {
-    fprintf(stderr, "VERIFICATION FAILED:\n");
+    FIO_LOG_ERROR("VERIFICATION FAILED:");
     print_mp("  dividend ", dividend, len);
     print_mp("  divisor  ", divisor, len);
     print_mp("  quotient ", quotient, len);
@@ -81,7 +87,7 @@ static int verify_division(const uint64_t *dividend,
 
   /* Also verify remainder < divisor */
   if (mp_cmp(remainder, divisor, len) >= 0) {
-    fprintf(stderr, "VERIFICATION FAILED: remainder >= divisor\n");
+    FIO_LOG_ERROR("VERIFICATION FAILED: remainder >= divisor");
     print_mp("  remainder", remainder, len);
     print_mp("  divisor  ", divisor, len);
     return 0;
@@ -95,10 +101,10 @@ static int verify_division(const uint64_t *dividend,
   do {                                                                         \
     if (cond) {                                                                \
       tests_passed++;                                                          \
-      fprintf(stderr, "    PASS: %s\n", name);                                 \
+      FIO_LOG_DDEBUG("    PASS: %s", name);                                    \
     } else {                                                                   \
       tests_failed++;                                                          \
-      fprintf(stderr, "*** FAIL: %s\n", name);                                 \
+      FIO_LOG_ERROR("*** FAIL: %s", name);                                     \
     }                                                                          \
   } while (0)
 
@@ -108,7 +114,7 @@ static int verify_division(const uint64_t *dividend,
 
 /* Test 1: Simple division 100 / 7 = 14 remainder 2 */
 static void test_simple_division(void) {
-  fprintf(stderr, "  Testing simple division (100 / 7)...\n");
+  FIO_LOG_DDEBUG("  Testing simple division (100 / 7)...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -123,7 +129,7 @@ static void test_simple_division(void) {
 
 /* Test 2: Division by 1 */
 static void test_division_by_one(void) {
-  fprintf(stderr, "  Testing division by 1...\n");
+  FIO_LOG_DDEBUG("  Testing division by 1...");
   uint64_t a[4] = {0x123456789ABCDEF0ULL, 0xFEDCBA9876543210ULL, 0, 0};
   uint64_t b[4] = {1, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -139,7 +145,7 @@ static void test_division_by_one(void) {
 
 /* Test 3: Division by self */
 static void test_division_by_self(void) {
-  fprintf(stderr, "  Testing division by self...\n");
+  FIO_LOG_DDEBUG("  Testing division by self...");
   uint64_t a[4] = {0xDEADBEEFCAFEBABEULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t b[4] = {0xDEADBEEFCAFEBABEULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t q[4] = {0};
@@ -154,7 +160,7 @@ static void test_division_by_self(void) {
 
 /* Test 4: Dividend < Divisor */
 static void test_dividend_less_than_divisor(void) {
-  fprintf(stderr, "  Testing dividend < divisor...\n");
+  FIO_LOG_DDEBUG("  Testing dividend < divisor...");
   uint64_t a[4] = {42, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -170,7 +176,7 @@ static void test_dividend_less_than_divisor(void) {
 
 /* Test 5: Large numbers - 2^192 / 2^64 */
 static void test_large_power_of_two(void) {
-  fprintf(stderr, "  Testing large power of two division...\n");
+  FIO_LOG_DDEBUG("  Testing large power of two division...");
   uint64_t a[4] = {0, 0, 0, 1}; /* 2^192 */
   uint64_t b[4] = {0, 1, 0, 0}; /* 2^64 */
   uint64_t q[4] = {0};
@@ -187,7 +193,7 @@ static void test_large_power_of_two(void) {
 
 /* Test 6: Division by power of 2 */
 static void test_division_by_power_of_two(void) {
-  fprintf(stderr, "  Testing division by power of 2...\n");
+  FIO_LOG_DDEBUG("  Testing division by power of 2...");
   uint64_t a[4] = {0x8000000000000000ULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t b[4] = {0x100, 0, 0, 0}; /* 256 = 2^8 */
   uint64_t q[4] = {0};
@@ -201,7 +207,7 @@ static void test_division_by_power_of_two(void) {
 
 /* Test 7: Edge case - divisor with high bit set */
 static void test_high_bit_divisor(void) {
-  fprintf(stderr, "  Testing high bit divisor...\n");
+  FIO_LOG_DDEBUG("  Testing high bit divisor...");
   uint64_t a[4] = {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL, 0, 0};
   uint64_t b[4] = {0x8000000000000000ULL, 0, 0, 0}; /* 2^63 */
   uint64_t q[4] = {0};
@@ -214,7 +220,7 @@ static void test_high_bit_divisor(void) {
 
 /* Test 8: Single word operands */
 static void test_single_word(void) {
-  fprintf(stderr, "  Testing single word operands...\n");
+  FIO_LOG_DDEBUG("  Testing single word operands...");
   uint64_t a[1] = {1000000007ULL};
   uint64_t b[1] = {12345ULL};
   uint64_t q[1] = {0};
@@ -232,7 +238,7 @@ static void test_single_word(void) {
 
 /* Test 9: Two word operands */
 static void test_two_word(void) {
-  fprintf(stderr, "  Testing two word operands...\n");
+  FIO_LOG_DDEBUG("  Testing two word operands...");
   uint64_t a[2] = {0xFFFFFFFFFFFFFFFFULL, 0x00000000FFFFFFFFULL};
   uint64_t b[2] = {0x100000000ULL, 0}; /* 2^32 */
   uint64_t q[2] = {0};
@@ -245,7 +251,7 @@ static void test_two_word(void) {
 
 /* Test 10: Random test vectors */
 static void test_random_vectors(void) {
-  fprintf(stderr, "  Testing random vectors (100 iterations)...\n");
+  FIO_LOG_DDEBUG("  Testing random vectors (100 iterations)...");
   /* Use a simple PRNG for reproducibility */
   uint64_t seed = 0x123456789ABCDEF0ULL;
 #define NEXT_RAND()                                                            \
@@ -268,13 +274,13 @@ static void test_random_vectors(void) {
     fio_math_div(q, r, a, b, 4);
 
     if (!verify_division(a, b, q, r, 4)) {
-      fprintf(stderr, "*** FAIL: random test %d\n", test);
+      FIO_LOG_ERROR("*** FAIL: random test %d", test);
       all_passed = 0;
       tests_failed++;
     }
   }
   if (all_passed) {
-    fprintf(stderr, "    PASS: all 100 random tests\n");
+    FIO_LOG_DDEBUG("    PASS: all 100 random tests");
     tests_passed++;
   }
 #undef NEXT_RAND
@@ -282,7 +288,7 @@ static void test_random_vectors(void) {
 
 /* Test 11: 256-bit numbers (crypto relevant) */
 static void test_256bit(void) {
-  fprintf(stderr, "  Testing 256-bit numbers...\n");
+  FIO_LOG_DDEBUG("  Testing 256-bit numbers...");
   /* P-256 prime: 2^256 - 2^224 + 2^192 + 2^96 - 1 */
   uint64_t p256[4] = {0xFFFFFFFFFFFFFFFFULL,
                       0x00000000FFFFFFFFULL,
@@ -305,7 +311,7 @@ static void test_256bit(void) {
 
 /* Test 12: 512-bit numbers */
 static void test_512bit(void) {
-  fprintf(stderr, "  Testing 512-bit numbers...\n");
+  FIO_LOG_DDEBUG("  Testing 512-bit numbers...");
   uint64_t a[8] = {0xFFFFFFFFFFFFFFFFULL,
                    0xFFFFFFFFFFFFFFFFULL,
                    0xFFFFFFFFFFFFFFFFULL,
@@ -338,7 +344,7 @@ static void test_512bit(void) {
 
 /* Test 13: Edge case - dividend equals divisor minus 1 */
 static void test_dividend_one_less(void) {
-  fprintf(stderr, "  Testing dividend = divisor - 1...\n");
+  FIO_LOG_DDEBUG("  Testing dividend = divisor - 1...");
   uint64_t a[4] = {99, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -353,7 +359,7 @@ static void test_dividend_one_less(void) {
 
 /* Test 14: Edge case - dividend equals divisor plus 1 */
 static void test_dividend_one_more(void) {
-  fprintf(stderr, "  Testing dividend = divisor + 1...\n");
+  FIO_LOG_DDEBUG("  Testing dividend = divisor + 1...");
   uint64_t a[4] = {101, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -368,7 +374,7 @@ static void test_dividend_one_more(void) {
 
 /* Test 15: NULL dest pointer (only compute remainder) */
 static void test_null_dest(void) {
-  fprintf(stderr, "  Testing NULL dest pointer...\n");
+  FIO_LOG_DDEBUG("  Testing NULL dest pointer...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t r[4] = {0};
@@ -380,7 +386,7 @@ static void test_null_dest(void) {
 
 /* Test 16: NULL remainder pointer (only compute quotient) */
 static void test_null_remainder(void) {
-  fprintf(stderr, "  Testing NULL remainder pointer...\n");
+  FIO_LOG_DDEBUG("  Testing NULL remainder pointer...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -392,7 +398,7 @@ static void test_null_remainder(void) {
 
 /* Test 17: Multi-word divisor with leading zeros in high words */
 static void test_leading_zeros(void) {
-  fprintf(stderr, "  Testing leading zeros...\n");
+  FIO_LOG_DDEBUG("  Testing leading zeros...");
   uint64_t a[4] = {0, 0, 0x100, 0};
   uint64_t b[4] = {0, 0x10, 0, 0};
   uint64_t q[4] = {0};
@@ -405,7 +411,7 @@ static void test_leading_zeros(void) {
 
 /* Test 18: Maximum values */
 static void test_max_values(void) {
-  fprintf(stderr, "  Testing maximum values...\n");
+  FIO_LOG_DDEBUG("  Testing maximum values...");
   uint64_t a[4] = {~0ULL, ~0ULL, ~0ULL, ~0ULL};
   uint64_t b[4] = {~0ULL, ~0ULL, 0, 0};
   uint64_t q[4] = {0};
@@ -418,7 +424,7 @@ static void test_max_values(void) {
 
 /* Test 19: Edge case - same MSB position but different values */
 static void test_same_msb_different_values(void) {
-  fprintf(stderr, "  Testing same MSB position but different values...\n");
+  FIO_LOG_DDEBUG("  Testing same MSB position but different values...");
   /* Both have MSB at position 127 (bit 63 of word 1) */
   uint64_t a[4] = {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL, 0, 0};
   uint64_t b[4] = {0x0000000000000001ULL, 0x8000000000000000ULL, 0, 0};
@@ -432,7 +438,7 @@ static void test_same_msb_different_values(void) {
 
 /* Test 20: Regression test - potential off-by-one in quotient estimation */
 static void test_quotient_estimation(void) {
-  fprintf(stderr, "  Testing quotient estimation edge cases...\n");
+  FIO_LOG_DDEBUG("  Testing quotient estimation edge cases...");
   /* This tests the case where initial quotient estimate might be off */
   uint64_t a[4] = {0, 0x8000000000000000ULL, 0, 0};
   uint64_t b[4] = {1, 0x4000000000000000ULL, 0, 0};
@@ -490,7 +496,7 @@ static void benchmark_division(const char *name,
 }
 
 static void run_benchmarks(void) {
-  fprintf(stderr, "\n=== Division Benchmarks ===\n");
+  FIO_LOG_DDEBUG("=== Division Benchmarks ===");
 
   benchmark_division("256-bit / 128-bit (4 words)", 4, 100000);
   benchmark_division("512-bit / 256-bit (8 words)", 8, 50000);
@@ -506,7 +512,7 @@ int main(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
 
-  fprintf(stderr, "=== fio_math_div Test Suite ===\n\n");
+  FIO_LOG_DDEBUG("=== fio_math_div Test Suite ===");
 
   /* Run all tests */
   test_simple_division();
@@ -530,9 +536,9 @@ int main(int argc, char *argv[]) {
   test_same_msb_different_values();
   test_quotient_estimation();
 
-  fprintf(stderr, "\n=== Test Results ===\n");
-  fprintf(stderr, "Passed: %zu\n", tests_passed);
-  fprintf(stderr, "Failed: %zu\n", tests_failed);
+  FIO_LOG_DDEBUG("=== Test Results ===");
+  FIO_LOG_DDEBUG("Passed: %zu", tests_passed);
+  FIO_LOG_DDEBUG("Failed: %zu", tests_failed);
 
   /* Run benchmarks if all tests pass */
   if (tests_failed == 0) {

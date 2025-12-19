@@ -87,7 +87,7 @@ Test Cases
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_multipart_basic(void) {
-  FIO_LOG_DEBUG("Testing basic multipart parsing...");
+  FIO_LOG_DDEBUG("Testing basic multipart parsing...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -121,7 +121,7 @@ FIO_SFUNC void fio___test_multipart_basic(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_file_upload(void) {
-  FIO_LOG_DEBUG("Testing multipart file upload...");
+  FIO_LOG_DDEBUG("Testing multipart file upload...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -162,7 +162,7 @@ FIO_SFUNC void fio___test_multipart_file_upload(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_empty(void) {
-  FIO_LOG_DEBUG("Testing empty multipart...");
+  FIO_LOG_DDEBUG("Testing empty multipart...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -183,7 +183,7 @@ FIO_SFUNC void fio___test_multipart_empty(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_quoted_filename(void) {
-  FIO_LOG_DEBUG("Testing quoted filename with special chars...");
+  FIO_LOG_DDEBUG("Testing quoted filename with special chars...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -212,7 +212,7 @@ FIO_SFUNC void fio___test_multipart_quoted_filename(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_need_more_data(void) {
-  FIO_LOG_DEBUG("Testing partial data (need more)...");
+  FIO_LOG_DDEBUG("Testing partial data (need more)...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -235,7 +235,7 @@ FIO_SFUNC void fio___test_multipart_need_more_data(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_multiple_files(void) {
-  FIO_LOG_DEBUG("Testing multiple file uploads...");
+  FIO_LOG_DDEBUG("Testing multiple file uploads...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -274,7 +274,7 @@ FIO_SFUNC void fio___test_multipart_multiple_files(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_mixed_content(void) {
-  FIO_LOG_DEBUG("Testing mixed fields and files...");
+  FIO_LOG_DDEBUG("Testing mixed fields and files...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -319,7 +319,7 @@ FIO_SFUNC void fio___test_multipart_mixed_content(void) {
 }
 
 FIO_SFUNC void fio___test_multipart_with_crlf_prefix(void) {
-  FIO_LOG_DEBUG("Testing multipart with CRLF prefix...");
+  FIO_LOG_DDEBUG("Testing multipart with CRLF prefix...");
 
   test_multipart_ctx_s ctx = {0};
 
@@ -428,7 +428,7 @@ Streaming Tests
  * to track progress.
  */
 FIO_SFUNC void fio___test_multipart_chunked_parsing(void) {
-  FIO_LOG_DEBUG("Testing chunked multipart parsing...");
+  FIO_LOG_DDEBUG("Testing chunked multipart parsing...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -512,7 +512,7 @@ FIO_SFUNC void fio___test_multipart_chunked_parsing(void) {
  * the parser correctly processes complete parts and returns consumed count.
  */
 FIO_SFUNC void fio___test_multipart_incremental_parts(void) {
-  FIO_LOG_DEBUG("Testing incremental part parsing...");
+  FIO_LOG_DDEBUG("Testing incremental part parsing...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -578,7 +578,7 @@ FIO_SFUNC void fio___test_multipart_incremental_parts(void) {
  * large data is correctly passed through.
  */
 FIO_SFUNC void fio___test_multipart_large_file(void) {
-  FIO_LOG_DEBUG("Testing large file handling...");
+  FIO_LOG_DDEBUG("Testing large file handling...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -636,7 +636,7 @@ FIO_SFUNC void fio___test_multipart_large_file(void) {
  * The actual boundary must be preceded by CRLF.
  */
 FIO_SFUNC void fio___test_multipart_boundary_in_content(void) {
-  FIO_LOG_DEBUG("Testing boundary-like content in file data...");
+  FIO_LOG_DDEBUG("Testing boundary-like content in file data...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -678,7 +678,7 @@ FIO_SFUNC void fio___test_multipart_boundary_in_content(void) {
  * Current implementation passes entire value to on_field callback.
  */
 FIO_SFUNC void fio___test_multipart_large_field_value(void) {
-  FIO_LOG_DEBUG("Testing large form field value...");
+  FIO_LOG_DDEBUG("Testing large form field value...");
 
   /* Use streaming callbacks to track field */
   streaming_test_ctx_s ctx = {0};
@@ -727,7 +727,7 @@ FIO_SFUNC void fio___test_multipart_large_field_value(void) {
  * a boundary marker.
  */
 FIO_SFUNC void fio___test_multipart_chunk_split_at_boundary(void) {
-  FIO_LOG_DEBUG("Testing chunk split at boundary...");
+  FIO_LOG_DDEBUG("Testing chunk split at boundary...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -798,7 +798,7 @@ FIO_SFUNC void fio___test_multipart_chunk_split_at_boundary(void) {
  * and \r\n--boundary. For an empty file, there's no content between them.
  */
 FIO_SFUNC void fio___test_multipart_empty_file(void) {
-  FIO_LOG_DEBUG("Testing empty file upload...");
+  FIO_LOG_DDEBUG("Testing empty file upload...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -835,7 +835,7 @@ FIO_SFUNC void fio___test_multipart_empty_file(void) {
  * Verifies that result.consumed accurately reflects bytes processed.
  */
 FIO_SFUNC void fio___test_multipart_consumed_tracking(void) {
-  FIO_LOG_DEBUG("Testing consumed bytes tracking...");
+  FIO_LOG_DDEBUG("Testing consumed bytes tracking...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -868,7 +868,7 @@ FIO_SFUNC void fio___test_multipart_consumed_tracking(void) {
  * Tests that binary data (including NUL bytes) is handled correctly.
  */
 FIO_SFUNC void fio___test_multipart_binary_content(void) {
-  FIO_LOG_DEBUG("Testing binary file content...");
+  FIO_LOG_DDEBUG("Testing binary file content...");
 
   streaming_test_ctx_s ctx = {0};
 
@@ -1027,7 +1027,7 @@ Streaming Field Callback Tests
  * Verifies that streaming field callbacks work correctly for small fields.
  */
 FIO_SFUNC void fio___test_multipart_streaming_field_small(void) {
-  FIO_LOG_DEBUG("Testing streaming field callbacks with small field...");
+  FIO_LOG_DDEBUG("Testing streaming field callbacks with small field...");
 
   streaming_field_ctx_s ctx = {0};
 
@@ -1075,7 +1075,8 @@ FIO_SFUNC void fio___test_multipart_streaming_field_small(void) {
  * Verifies that streaming field callbacks work correctly for large fields.
  */
 FIO_SFUNC void fio___test_multipart_streaming_field_large(void) {
-  FIO_LOG_DEBUG("Testing streaming field callbacks with large field (2KB+)...");
+  FIO_LOG_DDEBUG(
+      "Testing streaming field callbacks with large field (2KB+)...");
 
   streaming_field_ctx_s ctx = {0};
 
@@ -1139,7 +1140,7 @@ FIO_SFUNC void fio___test_multipart_streaming_field_large(void) {
  * NULL.
  */
 FIO_SFUNC void fio___test_multipart_streaming_field_backward_compat(void) {
-  FIO_LOG_DEBUG(
+  FIO_LOG_DDEBUG(
       "Testing backward compatibility (on_field without streaming)...");
 
   test_multipart_ctx_s ctx = {0};
@@ -1184,7 +1185,7 @@ FIO_SFUNC void fio___test_multipart_streaming_field_backward_compat(void) {
  * callbacks.
  */
 FIO_SFUNC void fio___test_multipart_streaming_field_mixed(void) {
-  FIO_LOG_DEBUG("Testing mixed streaming (fields and files)...");
+  FIO_LOG_DDEBUG("Testing mixed streaming (fields and files)...");
 
   streaming_field_ctx_s ctx = {0};
 
@@ -1253,7 +1254,7 @@ static int aborting_field_data(void *udata,
 }
 
 FIO_SFUNC void fio___test_multipart_streaming_field_abort(void) {
-  FIO_LOG_DEBUG("Testing streaming field abort...");
+  FIO_LOG_DDEBUG("Testing streaming field abort...");
 
   streaming_field_ctx_s ctx = {0};
 
@@ -1299,7 +1300,7 @@ FIO_SFUNC void fio___test_multipart_streaming_field_abort(void) {
  * Verifies that multiple fields are handled correctly with streaming callbacks.
  */
 FIO_SFUNC void fio___test_multipart_streaming_field_multiple(void) {
-  FIO_LOG_DEBUG("Testing multiple fields with streaming callbacks...");
+  FIO_LOG_DDEBUG("Testing multiple fields with streaming callbacks...");
 
   streaming_field_ctx_s ctx = {0};
 
@@ -1351,7 +1352,7 @@ Main Test Entry Point
 ***************************************************************************** */
 
 void fio_test_multipart(void) {
-  FIO_LOG_INFO("Testing MIME Multipart Parser");
+  FIO_LOG_DDEBUG("Testing MIME Multipart Parser");
 
   /* Basic tests */
   fio___test_multipart_basic();
@@ -1382,7 +1383,7 @@ void fio_test_multipart(void) {
   fio___test_multipart_streaming_field_abort();
   fio___test_multipart_streaming_field_multiple();
 
-  FIO_LOG_INFO("MIME Multipart Parser Tests PASSED");
+  FIO_LOG_DDEBUG("MIME Multipart Parser Tests PASSED");
 }
 
 #ifndef FIO_TEST_ALL

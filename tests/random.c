@@ -122,7 +122,7 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 
 /* tests Risky Hash and Stable Hash... takes a while (speed tests as well) */
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
-  fprintf(stderr, "\t Testing Risky Hash and Risky Mask (sanity).\n");
+  FIO_LOG_DDEBUG("Testing Risky Hash and Risky Mask (sanity).");
   {
     char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = FIO_STRLEN(str);
@@ -322,11 +322,9 @@ int main(void) {
   const size_t test_len = (1UL << 21);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
-  fprintf(
-      stderr,
-      "\t * Testing randomness "
-      "- bit frequency / hemming distance / chi-square (%zu random bytes).\n",
-      (size_t)(sizeof(*rs) * test_len));
+  FIO_LOG_DDEBUG("Testing randomness - bit frequency / hemming distance / "
+                 "chi-square (%zu random bytes).",
+                 (size_t)(sizeof(*rs) * test_len));
   clock_t start, end;
   FIO_ASSERT_ALLOC(rs);
 

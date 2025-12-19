@@ -11,7 +11,7 @@ Encryption Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_encryption)(void) {
-  fprintf(stderr, "\t* Testing pub/sub encryption / decryption.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub encryption / decryption.");
   fio_publish_args_s origin = {.channel = FIO_BUF_INFO1((char *)"my channel"),
                                .message = FIO_BUF_INFO1((char *)"my message"),
                                .filter = 0xAA,
@@ -61,7 +61,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_on_unsubscribe)(void *udata) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_roundtrip)(void) {
-  fprintf(stderr, "\t* Testing pub/sub round-trip.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub round-trip.");
   uintptr_t sub_handle = 0;
   int state = 0, expected = 0, delta = 0;
   fio_buf_info_s test_channel = FIO_BUF_INFO1((char *)"pubsub_test_channel");
@@ -128,7 +128,7 @@ Channel Isolation Testing - subscribers only receive their channel's messages
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_channel_isolation)(void) {
-  fprintf(stderr, "\t* Testing pub/sub channel isolation.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub channel isolation.");
   int state_a = 0, state_b = 0;
   fio_buf_info_s channel_a = FIO_BUF_INFO1((char *)"channel_a");
   fio_buf_info_s channel_b = FIO_BUF_INFO1((char *)"channel_b");
@@ -177,7 +177,7 @@ Filter Namespace Testing - different filters are isolated
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_filter_isolation)(void) {
-  fprintf(stderr, "\t* Testing pub/sub filter namespace isolation.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub filter namespace isolation.");
   int state_f1 = 0, state_f2 = 0;
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"filter_test_channel");
 
@@ -219,8 +219,7 @@ No Subscribers Testing - publish to empty channel should not crash
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_no_subscribers)(void) {
-  fprintf(stderr,
-          "\t* Testing pub/sub publish to channel with no subscribers.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub publish to channel with no subscribers.");
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"empty_channel");
 
   /* Publish to a channel with no subscribers - should not crash */
@@ -239,7 +238,7 @@ Empty Channel Name Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_empty_channel)(void) {
-  fprintf(stderr, "\t* Testing pub/sub with empty channel name.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub with empty channel name.");
   int state = 0;
   fio_buf_info_s empty_channel = FIO_BUF_INFO2((char *)"", 0);
 
@@ -278,7 +277,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_large_on_message)(fio_msg_s *msg) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_large_message)(void) {
-  fprintf(stderr, "\t* Testing pub/sub with large message payload.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub with large message payload.");
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"large_msg_channel");
 
   /* Create a large message (64KB) */
@@ -320,7 +319,7 @@ Rapid Subscribe/Unsubscribe Cycles Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_rapid_cycles)(void) {
-  fprintf(stderr, "\t* Testing pub/sub rapid subscribe/unsubscribe cycles.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub rapid subscribe/unsubscribe cycles.");
   int state = 0;
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"rapid_cycle_channel");
   const int cycles = 100;
@@ -352,7 +351,7 @@ Subscription Handle Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_subscription_handle)(void) {
-  fprintf(stderr, "\t* Testing pub/sub subscription handle management.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub subscription handle management.");
   int state = 0;
   uintptr_t handle = 0;
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"handle_test_channel");
@@ -432,7 +431,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl,
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_engine)(void) {
-  fprintf(stderr, "\t* Testing pub/sub engine attachment/detachment.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub engine attachment/detachment.");
 
   /* Reset counters */
   FIO_NAME_TEST(stl, engine_subscribe_called) = 0;
@@ -515,7 +514,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_content_on_message)(fio_msg_s *msg) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_message_content)(void) {
-  fprintf(stderr, "\t* Testing pub/sub message content verification.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub message content verification.");
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"content_test_channel");
   fio_buf_info_s message = FIO_BUF_INFO1((char *)"Hello, Pub/Sub World!");
 
@@ -572,8 +571,7 @@ Multiple Subscribers Same Channel Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_multiple_subscribers)(void) {
-  fprintf(stderr,
-          "\t* Testing pub/sub multiple subscribers to same channel.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub multiple subscribers to same channel.");
   int state1 = 0, state2 = 0, state3 = 0;
   uintptr_t handle1 = 0, handle2 = 0, handle3 = 0;
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"multi_sub_channel");
@@ -646,7 +644,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_pattern_on_message)(fio_msg_s *msg) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_pattern_matching)(void) {
-  fprintf(stderr, "\t* Testing pub/sub pattern matching.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub pattern matching.");
 
   FIO_NAME_TEST(stl, pubsub_pattern_count) = 0;
 
@@ -702,7 +700,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_id_on_message)(fio_msg_s *msg) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_message_id)(void) {
-  fprintf(stderr, "\t* Testing pub/sub message ID and timestamp.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub message ID and timestamp.");
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"id_test_channel");
 
   FIO_NAME_TEST(stl, pubsub_received_id) = 0;
@@ -742,7 +740,7 @@ Custom ID and Timestamp Testing
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_custom_id)(void) {
-  fprintf(stderr, "\t* Testing pub/sub custom message ID and timestamp.\n");
+  FIO_LOG_DDEBUG("Testing pub/sub custom message ID and timestamp.");
   fio_buf_info_s channel = FIO_BUF_INFO1((char *)"custom_id_channel");
   uint64_t custom_id = 0xDEADBEEF12345678ULL;
   uint64_t custom_time = 1234567890123ULL;
@@ -779,7 +777,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_custom_id)(void) {
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "* Testing Pub/Sub module.\n");
+  FIO_LOG_DDEBUG("Testing Pub/Sub module.");
   FIO_NAME_TEST(stl, pubsub_encryption)();
   FIO_NAME_TEST(stl, pubsub_roundtrip)();
   FIO_NAME_TEST(stl, pubsub_channel_isolation)();
@@ -795,6 +793,6 @@ int main(void) {
   FIO_NAME_TEST(stl, pubsub_pattern_matching)();
   FIO_NAME_TEST(stl, pubsub_message_id)();
   FIO_NAME_TEST(stl, pubsub_custom_id)();
-  fprintf(stderr, "* Pub/Sub tests complete.\n");
+  FIO_LOG_DDEBUG("Pub/Sub tests complete.");
   fio___io_cleanup_at_exit(NULL);
 }

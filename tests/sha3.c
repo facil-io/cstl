@@ -18,7 +18,7 @@ static void fio___test_sha3_256_empty(void) {
   fio_sha3_256(out, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32),
              "SHA3-256 empty string test failed");
-  FIO_LOG_DEBUG("SHA3-256 empty string: PASSED");
+  FIO_LOG_DDEBUG("SHA3-256 empty string: PASSED");
 }
 
 static void fio___test_sha3_256_abc(void) {
@@ -30,7 +30,7 @@ static void fio___test_sha3_256_abc(void) {
   uint8_t out[32];
   fio_sha3_256(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "SHA3-256 'abc' test failed");
-  FIO_LOG_DEBUG("SHA3-256 'abc': PASSED");
+  FIO_LOG_DDEBUG("SHA3-256 'abc': PASSED");
 }
 
 /* SHA3-512 test vectors */
@@ -47,7 +47,7 @@ static void fio___test_sha3_512_empty(void) {
   fio_sha3_512(out, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64),
              "SHA3-512 empty string test failed");
-  FIO_LOG_DEBUG("SHA3-512 empty string: PASSED");
+  FIO_LOG_DDEBUG("SHA3-512 empty string: PASSED");
 }
 
 static void fio___test_sha3_512_abc(void) {
@@ -62,7 +62,7 @@ static void fio___test_sha3_512_abc(void) {
   uint8_t out[64];
   fio_sha3_512(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "SHA3-512 'abc' test failed");
-  FIO_LOG_DEBUG("SHA3-512 'abc': PASSED");
+  FIO_LOG_DDEBUG("SHA3-512 'abc': PASSED");
 }
 
 /* SHA3-224 test */
@@ -75,7 +75,7 @@ static void fio___test_sha3_224_abc(void) {
   uint8_t out[28];
   fio_sha3_224(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 28), "SHA3-224 'abc' test failed");
-  FIO_LOG_DEBUG("SHA3-224 'abc': PASSED");
+  FIO_LOG_DDEBUG("SHA3-224 'abc': PASSED");
 }
 
 /* SHA3-384 test */
@@ -89,7 +89,7 @@ static void fio___test_sha3_384_abc(void) {
   uint8_t out[48];
   fio_sha3_384(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 48), "SHA3-384 'abc' test failed");
-  FIO_LOG_DEBUG("SHA3-384 'abc': PASSED");
+  FIO_LOG_DDEBUG("SHA3-384 'abc': PASSED");
 }
 
 /* SHAKE128 test */
@@ -102,7 +102,7 @@ static void fio___test_shake128(void) {
   uint8_t out[32];
   fio_shake128(out, 32, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "SHAKE128 'abc' test failed");
-  FIO_LOG_DEBUG("SHAKE128 'abc' (32 bytes): PASSED");
+  FIO_LOG_DDEBUG("SHAKE128 'abc' (32 bytes): PASSED");
 }
 
 /* SHAKE256 test */
@@ -118,7 +118,7 @@ static void fio___test_shake256(void) {
   uint8_t out[64];
   fio_shake256(out, 64, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "SHAKE256 'abc' test failed");
-  FIO_LOG_DEBUG("SHAKE256 'abc' (64 bytes): PASSED");
+  FIO_LOG_DDEBUG("SHAKE256 'abc' (64 bytes): PASSED");
 }
 
 /* Streaming test */
@@ -138,36 +138,36 @@ static void fio___test_sha3_streaming(void) {
   fio_sha3_finalize(&h, out2);
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "SHA3-256 streaming test failed");
-  FIO_LOG_DEBUG("SHA3-256 streaming: PASSED");
+  FIO_LOG_DDEBUG("SHA3-256 streaming: PASSED");
 }
 
 int main(void) {
-  FIO_LOG_INFO("Testing SHA-3 implementation...\n");
+  FIO_LOG_DDEBUG("Testing SHA-3 implementation...");
 
   /* SHA3 tests */
-  FIO_LOG_INFO("=== SHA3-224 Tests ===");
+  FIO_LOG_DDEBUG("=== SHA3-224 Tests ===");
   fio___test_sha3_224_abc();
 
-  FIO_LOG_INFO("=== SHA3-256 Tests ===");
+  FIO_LOG_DDEBUG("=== SHA3-256 Tests ===");
   fio___test_sha3_256_empty();
   fio___test_sha3_256_abc();
 
-  FIO_LOG_INFO("=== SHA3-384 Tests ===");
+  FIO_LOG_DDEBUG("=== SHA3-384 Tests ===");
   fio___test_sha3_384_abc();
 
-  FIO_LOG_INFO("=== SHA3-512 Tests ===");
+  FIO_LOG_DDEBUG("=== SHA3-512 Tests ===");
   fio___test_sha3_512_empty();
   fio___test_sha3_512_abc();
 
   /* SHAKE tests */
-  FIO_LOG_INFO("=== SHAKE Tests ===");
+  FIO_LOG_DDEBUG("=== SHAKE Tests ===");
   fio___test_shake128();
   fio___test_shake256();
 
   /* Streaming test */
-  FIO_LOG_INFO("=== Streaming Tests ===");
+  FIO_LOG_DDEBUG("=== Streaming Tests ===");
   fio___test_sha3_streaming();
 
-  FIO_LOG_INFO("\nAll SHA-3 tests passed!");
+  FIO_LOG_DDEBUG("All SHA-3 tests passed!");
   return 0;
 }

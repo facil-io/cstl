@@ -22,7 +22,7 @@ static void fio___test_blake2b_empty(void) {
   fio_blake2b(out, 64, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64),
              "BLAKE2b-512 empty string test failed");
-  FIO_LOG_DEBUG("BLAKE2b-512 empty string: PASSED");
+  FIO_LOG_DDEBUG("BLAKE2b-512 empty string: PASSED");
 }
 
 static void fio___test_blake2b_abc(void) {
@@ -37,7 +37,7 @@ static void fio___test_blake2b_abc(void) {
   uint8_t out[64];
   fio_blake2b(out, 64, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 'abc' test failed");
-  FIO_LOG_DEBUG("BLAKE2b-512 'abc': PASSED");
+  FIO_LOG_DDEBUG("BLAKE2b-512 'abc': PASSED");
 }
 
 static void fio___test_blake2b_keyed(void) {
@@ -61,7 +61,7 @@ static void fio___test_blake2b_keyed(void) {
   uint8_t out[64];
   fio_blake2b(out, 64, msg, 255, key, 64);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 keyed test failed");
-  FIO_LOG_DEBUG("BLAKE2b-512 keyed (64-byte key, 255-byte msg): PASSED");
+  FIO_LOG_DDEBUG("BLAKE2b-512 keyed (64-byte key, 255-byte msg): PASSED");
 }
 
 static void fio___test_blake2b_streaming(void) {
@@ -81,7 +81,7 @@ static void fio___test_blake2b_streaming(void) {
   fio_blake2b_finalize(&h, out2);
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64), "BLAKE2b streaming test failed");
-  FIO_LOG_DEBUG("BLAKE2b-512 streaming: PASSED");
+  FIO_LOG_DDEBUG("BLAKE2b-512 streaming: PASSED");
 }
 
 /* BLAKE2s test vectors */
@@ -95,7 +95,7 @@ static void fio___test_blake2s_empty(void) {
   fio_blake2s(out, 32, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32),
              "BLAKE2s-256 empty string test failed");
-  FIO_LOG_DEBUG("BLAKE2s-256 empty string: PASSED");
+  FIO_LOG_DDEBUG("BLAKE2s-256 empty string: PASSED");
 }
 
 static void fio___test_blake2s_abc(void) {
@@ -107,7 +107,7 @@ static void fio___test_blake2s_abc(void) {
   uint8_t out[32];
   fio_blake2s(out, 32, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "BLAKE2s-256 'abc' test failed");
-  FIO_LOG_DEBUG("BLAKE2s-256 'abc': PASSED");
+  FIO_LOG_DDEBUG("BLAKE2s-256 'abc': PASSED");
 }
 
 static void fio___test_blake2s_streaming(void) {
@@ -127,25 +127,25 @@ static void fio___test_blake2s_streaming(void) {
   fio_blake2s_finalize(&h, out2);
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "BLAKE2s streaming test failed");
-  FIO_LOG_DEBUG("BLAKE2s-256 streaming: PASSED");
+  FIO_LOG_DDEBUG("BLAKE2s-256 streaming: PASSED");
 }
 
 int main(void) {
-  FIO_LOG_INFO("Testing BLAKE2 implementation...\n");
+  FIO_LOG_DDEBUG("Testing BLAKE2 implementation...");
 
   /* BLAKE2b tests */
-  FIO_LOG_INFO("=== BLAKE2b Tests ===");
+  FIO_LOG_DDEBUG("=== BLAKE2b Tests ===");
   fio___test_blake2b_empty();
   fio___test_blake2b_abc();
   fio___test_blake2b_keyed();
   fio___test_blake2b_streaming();
 
   /* BLAKE2s tests */
-  FIO_LOG_INFO("=== BLAKE2s Tests ===");
+  FIO_LOG_DDEBUG("=== BLAKE2s Tests ===");
   fio___test_blake2s_empty();
   fio___test_blake2s_abc();
   fio___test_blake2s_streaming();
 
-  FIO_LOG_INFO("\nAll BLAKE2 tests passed!");
+  FIO_LOG_DDEBUG("All BLAKE2 tests passed!");
   return 0;
 }

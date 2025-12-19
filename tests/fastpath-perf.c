@@ -25,10 +25,11 @@ static void benchmark_256bit(void) {
 
   double us = (double)(end - start) * 1000000 / CLOCKS_PER_SEC;
   double ops_per_sec = (BENCH_ITERATIONS * 1000000.0) / us;
+  (void)ops_per_sec; /* Used only in debug logging */
 
-  FIO_LOG_INFO("256-bit (via dispatcher): %.2f M ops/sec (%d us)",
-               ops_per_sec / 1000000.0,
-               (int)us);
+  FIO_LOG_DDEBUG("256-bit (via dispatcher): %.2f M ops/sec (%d us)",
+                 ops_per_sec / 1000000.0,
+                 (int)us);
 }
 
 static void benchmark_512bit(void) {
@@ -48,10 +49,11 @@ static void benchmark_512bit(void) {
 
   double us = (double)(end - start) * 1000000 / CLOCKS_PER_SEC;
   double ops_per_sec = (BENCH_ITERATIONS * 1000000.0) / us;
+  (void)ops_per_sec; /* Used only in debug logging */
 
-  FIO_LOG_INFO("512-bit (via dispatcher): %.2f M ops/sec (%d us)",
-               ops_per_sec / 1000000.0,
-               (int)us);
+  FIO_LOG_DDEBUG("512-bit (via dispatcher): %.2f M ops/sec (%d us)",
+                 ops_per_sec / 1000000.0,
+                 (int)us);
 }
 
 static void benchmark_1024bit(void) {
@@ -71,22 +73,23 @@ static void benchmark_1024bit(void) {
 
   double us = (double)(end - start) * 1000000 / CLOCKS_PER_SEC;
   double ops_per_sec = (BENCH_ITERATIONS * 1000000.0) / us;
+  (void)ops_per_sec; /* Used only in debug logging */
 
-  FIO_LOG_INFO("1024-bit (via dispatcher): %.2f M ops/sec (%d us)",
-               ops_per_sec / 1000000.0,
-               (int)us);
+  FIO_LOG_DDEBUG("1024-bit (via dispatcher): %.2f M ops/sec (%d us)",
+                 ops_per_sec / 1000000.0,
+                 (int)us);
 }
 
 int main(void) {
-  FIO_LOG_INFO("==================================");
-  FIO_LOG_INFO("Fast Path Performance Test");
-  FIO_LOG_INFO("==================================");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("Fast Path Performance Test");
+  FIO_LOG_DDEBUG("==================================");
 
   benchmark_256bit();
   benchmark_512bit();
   benchmark_1024bit();
 
-  FIO_LOG_INFO("==================================");
-  FIO_LOG_INFO("All benchmarks complete!");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("All benchmarks complete!");
   return 0;
 }

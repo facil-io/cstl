@@ -65,7 +65,7 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
 
 int main(void) {
   { /* test ChaCha20 independently */
-    fprintf(stderr, "\t* Testing ChaCha20 separately\n");
+    FIO_LOG_DDEBUG("Testing ChaCha20 separately");
     struct {
       char key[33];
       char nounce[13];
@@ -128,7 +128,7 @@ int main(void) {
     }
   }
   { /* test Poly1305 independently */
-    fprintf(stderr, "\t* Testing Poly1305 separately\n");
+    FIO_LOG_DDEBUG("Testing Poly1305 separately");
     struct {
       char key[33];
       char *msg;
@@ -168,7 +168,7 @@ int main(void) {
     }
   }
   { /* test ChaCha20Poly1305 */
-    fprintf(stderr, "\t* Testing ChaCha20Poly1305 together\n");
+    FIO_LOG_DDEBUG("Testing ChaCha20Poly1305 together");
     struct {
       char key[33];
       char nounce[13];
@@ -310,7 +310,7 @@ int main(void) {
     }
   }
   { /* test roundtrip */
-    fprintf(stderr, "\t* Testing ChaCha20Poly1305 round-trip.\n");
+    FIO_LOG_DDEBUG("Testing ChaCha20Poly1305 round-trip.");
     fio_u256 key =
         fio_u256_init64(fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64());
     FIO_STR_INFO_TMP_VAR(ad, 128);

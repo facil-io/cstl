@@ -74,7 +74,7 @@ Key Generation Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_generation)(void) {
-  fprintf(stderr, "\t* Testing OTP key generation\n");
+  FIO_LOG_DDEBUG("Testing OTP key generation");
 
   /* Test that generated keys are non-zero */
   for (int i = 0; i < 10; ++i) {
@@ -103,7 +103,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_generation)(void) {
     }
   }
 
-  fprintf(stderr, "\t\t- Key generation: PASSED\n");
+  FIO_LOG_DDEBUG("  Key generation: PASSED");
 }
 
 /* *****************************************************************************
@@ -111,7 +111,7 @@ Key Printing (Base32 encoding) Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_printing)(void) {
-  fprintf(stderr, "\t* Testing OTP key printing (Base32 encoding)\n");
+  FIO_LOG_DDEBUG("Testing OTP key printing (Base32 encoding)");
 
   /* Test printing a known key */
   {
@@ -121,7 +121,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_printing)(void) {
     size_t len = fio_otp_print_key(output, test_key, 10);
     OTP_TEST_ASSERT(len > 0, "fio_otp_print_key should return non-zero length");
     OTP_TEST_ASSERT(output[0] != 0, "Output should not be empty");
-    fprintf(stderr, "\t\t- Test key Base32: %s (len=%zu)\n", output, len);
+    FIO_LOG_DDEBUG("  Test key Base32: %s (len=%zu)", output, len);
   }
 
   /* Test with NULL key (should generate a new key) */
@@ -137,7 +137,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_printing)(void) {
                     "Generated keys should be different");
   }
 
-  fprintf(stderr, "\t\t- Key printing: PASSED\n");
+  FIO_LOG_DDEBUG("  Key printing: PASSED");
 }
 
 /* *****************************************************************************
@@ -145,7 +145,7 @@ TOTP Basic Functionality Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_basic)(void) {
-  fprintf(stderr, "\t* Testing OTP basic functionality\n");
+  FIO_LOG_DDEBUG("Testing OTP basic functionality");
 
   /* Test with raw secret */
   {
@@ -166,7 +166,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_basic)(void) {
                     "6-digit OTP should be less than 1000000: got %u",
                     otp1);
 
-    fprintf(stderr, "\t\t- Current 6-digit TOTP: %06u\n", otp1);
+    FIO_LOG_DDEBUG("  Current 6-digit TOTP: %06u", otp1);
   }
 
   /* Test different digit counts (1-9, as 10 digits overflows uint32_t) */
@@ -187,7 +187,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_basic)(void) {
     }
   }
 
-  fprintf(stderr, "\t\t- Basic functionality: PASSED\n");
+  FIO_LOG_DDEBUG("  Basic functionality: PASSED");
 }
 
 /* *****************************************************************************
@@ -195,7 +195,7 @@ TOTP Time Offset Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_time_offset)(void) {
-  fprintf(stderr, "\t* Testing OTP time offset\n");
+  FIO_LOG_DDEBUG("Testing OTP time offset");
 
   const char *secret = "12345678901234567890";
   fio_buf_info_s secret_buf = FIO_BUF_INFO1((char *)secret);
@@ -209,11 +209,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_time_offset)(void) {
   /* Get next time window OTP */
   uint32_t otp_next = fio_otp(secret_buf, .is_raw = 1, .offset = -1);
 
-  fprintf(stderr,
-          "\t\t- Previous: %06u, Current: %06u, Next: %06u\n",
-          otp_prev,
-          otp_current,
-          otp_next);
+  FIO_LOG_DDEBUG("  Previous: %06u, Current: %06u, Next: %06u",
+                 otp_prev,
+                 otp_current,
+                 otp_next);
 
   /* They should all be valid 6-digit codes */
   OTP_TEST_ASSERT(otp_current < 1000000, "Current OTP out of range");
@@ -223,7 +222,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_time_offset)(void) {
   /* In most cases, they should be different (unless we hit a boundary) */
   /* Note: This is probabilistic - in rare cases they could be the same */
 
-  fprintf(stderr, "\t\t- Time offset: PASSED\n");
+  FIO_LOG_DDEBUG("  Time offset: PASSED");
 }
 
 /* *****************************************************************************
@@ -231,7 +230,7 @@ TOTP Interval Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_interval)(void) {
-  fprintf(stderr, "\t* Testing OTP interval settings\n");
+  FIO_LOG_DDEBUG("Testing OTP interval settings");
 
   const char *secret = "12345678901234567890";
   fio_buf_info_s secret_buf = FIO_BUF_INFO1((char *)secret);
@@ -241,6 +240,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_interval)(void) {
 
   /* 60 second interval */
   uint32_t otp_60s = fio_otp(secret_buf, .is_raw = 1, .interval = 60);
+  (void)otp_60s; /* Used only in debug output */
 
   /* With 0 interval (should default to 30) */
   uint32_t otp_default = fio_otp(secret_buf, .is_raw = 1, .interval = 0);
@@ -248,12 +248,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_interval)(void) {
   OTP_TEST_ASSERT(otp_30s == otp_default,
                   "Zero interval should default to 30 seconds");
 
-  fprintf(stderr,
-          "\t\t- 30s interval: %06u, 60s interval: %06u\n",
-          otp_30s,
-          otp_60s);
+  FIO_LOG_DDEBUG("  30s interval: %06u, 60s interval: %06u", otp_30s, otp_60s);
 
-  fprintf(stderr, "\t\t- Interval settings: PASSED\n");
+  FIO_LOG_DDEBUG("  Interval settings: PASSED");
 }
 
 /* *****************************************************************************
@@ -261,7 +258,7 @@ Base32 Encoded Secret Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_base32)(void) {
-  fprintf(stderr, "\t* Testing OTP with Base32 encoded secrets\n");
+  FIO_LOG_DDEBUG("Testing OTP with Base32 encoded secrets");
 
   /* "Hello!" in Base32 is "JBSWY3DPEE" (padded) or similar */
   /* Let's use a known Base32 encoded secret */
@@ -276,7 +273,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_base32)(void) {
     fio_str_info_s b32 = FIO_STR_INFO3(base32_secret, 0, sizeof(base32_secret));
     fio_string_write_base32enc(&b32, NULL, raw_secret, 10);
 
-    fprintf(stderr, "\t\t- Base32 encoded secret: %s\n", base32_secret);
+    FIO_LOG_DDEBUG("  Base32 encoded secret: %s", base32_secret);
 
     /* Get OTP with raw secret */
     fio_buf_info_s raw_buf = FIO_BUF_INFO2((char *)raw_secret, 10);
@@ -292,13 +289,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_base32)(void) {
                     otp_raw,
                     otp_b32);
 
-    fprintf(stderr,
-            "\t\t- OTP from raw: %06u, from Base32: %06u\n",
-            otp_raw,
-            otp_b32);
+    FIO_LOG_DDEBUG("  OTP from raw: %06u, from Base32: %06u", otp_raw, otp_b32);
   }
 
-  fprintf(stderr, "\t\t- Base32 encoding: PASSED\n");
+  FIO_LOG_DDEBUG("  Base32 encoding: PASSED");
 }
 
 /* *****************************************************************************
@@ -306,7 +300,7 @@ Hex Encoded Secret Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_hex)(void) {
-  fprintf(stderr, "\t* Testing OTP with Hex encoded secrets\n");
+  FIO_LOG_DDEBUG("Testing OTP with Hex encoded secrets");
 
   {
     /* Raw secret bytes */
@@ -330,10 +324,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_hex)(void) {
                     otp_raw,
                     otp_hex);
 
-    fprintf(stderr,
-            "\t\t- OTP from raw: %06u, from hex: %06u\n",
-            otp_raw,
-            otp_hex);
+    FIO_LOG_DDEBUG("  OTP from raw: %06u, from hex: %06u", otp_raw, otp_hex);
   }
 
   /* Test hex with separators */
@@ -352,10 +343,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_hex)(void) {
                     otp_raw,
                     otp_hex);
 
-    fprintf(stderr, "\t\t- Hex with separators: PASSED\n");
+    FIO_LOG_DDEBUG("  Hex with separators: PASSED");
   }
 
-  fprintf(stderr, "\t\t- Hex encoding: PASSED\n");
+  FIO_LOG_DDEBUG("  Hex encoding: PASSED");
 }
 
 /* *****************************************************************************
@@ -363,7 +354,7 @@ Consistency Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_consistency)(void) {
-  fprintf(stderr, "\t* Testing OTP consistency\n");
+  FIO_LOG_DDEBUG("Testing OTP consistency");
 
   const char *secret = "CONSISTENCYTEST1234567890";
   fio_buf_info_s secret_buf = FIO_BUF_INFO1((char *)secret);
@@ -382,8 +373,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_consistency)(void) {
                     i);
   }
 
-  fprintf(stderr, "\t\t- 100 consecutive calls returned: %06u\n", results[0]);
-  fprintf(stderr, "\t\t- Consistency: PASSED\n");
+  FIO_LOG_DDEBUG("  100 consecutive calls returned: %06u", results[0]);
+  FIO_LOG_DDEBUG("  Consistency: PASSED");
 }
 
 /* *****************************************************************************
@@ -391,7 +382,7 @@ Edge Cases
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_edge_cases)(void) {
-  fprintf(stderr, "\t* Testing OTP edge cases\n");
+  FIO_LOG_DDEBUG("Testing OTP edge cases");
 
   /* Minimum secret length */
   {
@@ -400,7 +391,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_edge_cases)(void) {
     uint32_t otp = fio_otp(buf, .is_raw = 1);
     OTP_TEST_ASSERT(otp < 1000000,
                     "Short secret should still produce valid OTP");
-    fprintf(stderr, "\t\t- Single byte secret: %06u\n", otp);
+    FIO_LOG_DDEBUG("  Single byte secret: %06u", otp);
   }
 
   /* Default settings (0 values should use defaults) */
@@ -423,10 +414,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_edge_cases)(void) {
     OTP_TEST_ASSERT(otp < 100000000,
                     "8-digit OTP should be less than 100000000: got %u",
                     otp);
-    fprintf(stderr, "\t\t- 8-digit OTP: %08u\n", otp);
+    FIO_LOG_DDEBUG("  8-digit OTP: %08u", otp);
   }
 
-  fprintf(stderr, "\t\t- Edge cases: PASSED\n");
+  FIO_LOG_DDEBUG("  Edge cases: PASSED");
 }
 
 /* *****************************************************************************
@@ -434,7 +425,7 @@ RFC 6238 Test Vector Verification
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_rfc6238)(void) {
-  fprintf(stderr, "\t* Testing RFC 6238 test vectors\n");
+  FIO_LOG_DDEBUG("Testing RFC 6238 test vectors");
 
   /*
    * RFC 6238 Appendix B specifies:
@@ -460,16 +451,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_rfc6238)(void) {
                     actual);
 
     if (actual == expected) {
-      fprintf(stderr,
-              "\t\t- Time %llu: %08u PASSED\n",
-              (unsigned long long)test_time,
-              actual);
+      FIO_LOG_DDEBUG("  Time %llu: %08u PASSED",
+                     (unsigned long long)test_time,
+                     actual);
     } else {
-      fprintf(stderr,
-              "\t\t- Time %llu: expected %08u, got %08u FAILED\n",
-              (unsigned long long)test_time,
-              expected,
-              actual);
+      FIO_LOG_DDEBUG("  Time %llu: expected %08u, got %08u FAILED",
+                     (unsigned long long)test_time,
+                     expected,
+                     actual);
     }
   }
 }
@@ -479,7 +468,7 @@ Google Authenticator Compatibility Test
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_google_auth_compat)(void) {
-  fprintf(stderr, "\t* Testing Google Authenticator compatibility\n");
+  FIO_LOG_DDEBUG("Testing Google Authenticator compatibility");
 
   /*
    * Google Authenticator uses:
@@ -506,24 +495,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_google_auth_compat)(void) {
 
   OTP_TEST_ASSERT(otp < 1000000,
                   "Google Auth compatible OTP should be 6 digits");
-  fprintf(stderr,
-          "\t\t- Current GA-compatible OTP for '%s': %06u\n",
-          ga_secret,
-          otp);
+  FIO_LOG_DDEBUG("  Current GA-compatible OTP for '%s': %06u", ga_secret, otp);
 
   /* Also test previous and next windows (common for verification) */
   uint32_t otp_prev =
       fio_otp(secret_buf, .interval = 30, .digits = 6, .offset = 1);
   uint32_t otp_next =
       fio_otp(secret_buf, .interval = 30, .digits = 6, .offset = -1);
+  (void)otp_prev; /* Used only in debug output */
+  (void)otp_next; /* Used only in debug output */
 
-  fprintf(stderr,
-          "\t\t- Window -1: %06u, Current: %06u, Window +1: %06u\n",
-          otp_prev,
-          otp,
-          otp_next);
+  FIO_LOG_DDEBUG("  Window -1: %06u, Current: %06u, Window +1: %06u",
+                 otp_prev,
+                 otp,
+                 otp_next);
 
-  fprintf(stderr, "\t\t- Google Authenticator compatibility: PASSED\n");
+  FIO_LOG_DDEBUG("  Google Authenticator compatibility: PASSED");
 }
 
 /* *****************************************************************************
@@ -531,7 +518,7 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "* Testing OTP (One-Time Password) Module\n");
+  FIO_LOG_DDEBUG("Testing OTP (One-Time Password) Module");
 
   FIO_NAME_TEST(stl, otp_key_generation)();
   FIO_NAME_TEST(stl, otp_key_printing)();
@@ -546,16 +533,16 @@ int main(void) {
   FIO_NAME_TEST(stl, otp_google_auth_compat)();
 
   size_t total = OTP_TEST_RESULTS.passed + OTP_TEST_RESULTS.failed;
-  fprintf(stderr,
-          "\n* OTP tests: %zu passed, %zu failed (out of %zu)\n",
-          OTP_TEST_RESULTS.passed,
-          OTP_TEST_RESULTS.failed,
-          total);
+  (void)total; /* Used only in debug output */
+  FIO_LOG_DDEBUG("OTP tests: %zu passed, %zu failed (out of %zu)",
+                 OTP_TEST_RESULTS.passed,
+                 OTP_TEST_RESULTS.failed,
+                 total);
 
   if (OTP_TEST_RESULTS.failed) {
-    fprintf(stderr, "* OTP tests FAILED!\n");
+    FIO_LOG_DDEBUG("OTP tests FAILED!");
   } else {
-    fprintf(stderr, "* OTP tests completed successfully!\n");
+    FIO_LOG_DDEBUG("OTP tests completed successfully!");
   }
 
   return (int)OTP_TEST_RESULTS.failed;

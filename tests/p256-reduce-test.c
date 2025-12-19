@@ -10,17 +10,29 @@ Test the fio___p256_fe_reduce function in isolation
 #include FIO_INCLUDE_FILE
 
 FIO_SFUNC void print_fe(const char *name, const uint64_t fe[4]) {
-  fprintf(stderr, "%s: ", name);
-  for (int i = 3; i >= 0; --i)
-    fprintf(stderr, "%016llx", (unsigned long long)fe[i]);
-  fprintf(stderr, "\n");
+  (void)name; /* Used only in debug logging */
+  (void)fe;   /* Used only in debug logging */
+  FIO_LOG_DDEBUG("%s: %016llx%016llx%016llx%016llx",
+                 name,
+                 (unsigned long long)fe[3],
+                 (unsigned long long)fe[2],
+                 (unsigned long long)fe[1],
+                 (unsigned long long)fe[0]);
 }
 
 FIO_SFUNC void print_512(const char *name, const uint64_t t[8]) {
-  fprintf(stderr, "%s: ", name);
-  for (int i = 7; i >= 0; --i)
-    fprintf(stderr, "%016llx", (unsigned long long)t[i]);
-  fprintf(stderr, "\n");
+  (void)name; /* Used only in debug logging */
+  (void)t;    /* Used only in debug logging */
+  FIO_LOG_DDEBUG("%s: %016llx%016llx%016llx%016llx%016llx%016llx%016llx%016llx",
+                 name,
+                 (unsigned long long)t[7],
+                 (unsigned long long)t[6],
+                 (unsigned long long)t[5],
+                 (unsigned long long)t[4],
+                 (unsigned long long)t[3],
+                 (unsigned long long)t[2],
+                 (unsigned long long)t[1],
+                 (unsigned long long)t[0]);
 }
 
 /* Simple reduction using repeated subtraction - reference implementation */
@@ -102,10 +114,10 @@ FIO_SFUNC void simple_reduce(uint64_t r[4], const uint64_t t[8]) {
 }
 
 int main(void) {
-  fprintf(stderr, "=== P-256 NIST Fast Reduction Debug ===\n\n");
+  FIO_LOG_DDEBUG("=== P-256 NIST Fast Reduction Debug ===");
 
   /* Test 1: Reduce a small value (should be unchanged) */
-  fprintf(stderr, "=== Test 1: Small value (unchanged) ===\n");
+  FIO_LOG_DDEBUG("=== Test 1: Small value (unchanged) ===");
   {
     uint64_t t[8] = {0x123456789ABCDEF0ULL,
                      0x0FEDCBA987654321ULL,
@@ -119,11 +131,11 @@ int main(void) {
     fio___p256_fe_reduce(result, t);
     print_512("Input (512-bit)", t);
     print_fe("Output (256-bit)", result);
-    fprintf(stderr, "Expected: same as input low 256 bits\n\n");
+    FIO_LOG_DDEBUG("Expected: same as input low 256 bits");
   }
 
   /* Test 2: Reduce p itself (should become 0) */
-  fprintf(stderr, "=== Test 2: Reduce p (should be 0) ===\n");
+  FIO_LOG_DDEBUG("=== Test 2: Reduce p (should be 0) ===");
   {
     uint64_t t[8] = {0xFFFFFFFFFFFFFFFFULL,
                      0x00000000FFFFFFFFULL,
@@ -137,11 +149,11 @@ int main(void) {
     fio___p256_fe_reduce(result, t);
     print_512("Input (p)", t);
     print_fe("Output", result);
-    fprintf(stderr, "Expected: 0\n\n");
+    FIO_LOG_DDEBUG("Expected: 0");
   }
 
   /* Test 3: Reduce 2*p (should be 0) */
-  fprintf(stderr, "=== Test 3: Reduce 2*p (should be 0) ===\n");
+  FIO_LOG_DDEBUG("=== Test 3: Reduce 2*p (should be 0) ===");
   {
     /* 2*p = 0x1fffffffe00000002000000000000000000000001fffffffffffffffffffffffe
      */
@@ -158,11 +170,11 @@ int main(void) {
     fio___p256_fe_reduce(result, t);
     print_512("Input (2*p)", t);
     print_fe("Output", result);
-    fprintf(stderr, "Expected: 0\n\n");
+    FIO_LOG_DDEBUG("Expected: 0");
   }
 
   /* Test 4: Compute G.x^2 mod p using fe_sqr and verify */
-  fprintf(stderr, "=== Test 4: G.x^2 mod p ===\n");
+  FIO_LOG_DDEBUG("=== Test 4: G.x^2 mod p ===");
   {
     fio___p256_fe_s gx, gx_sqr;
     fio___p256_fe_copy(gx, FIO___P256_GX);
@@ -176,14 +188,14 @@ int main(void) {
     print_fe("G.x * G.x mod p", gx_mul);
 
     if (fio___p256_fe_eq(gx_sqr, gx_mul) == 0) {
-      fprintf(stderr, "sqr == mul: OK\n");
+      FIO_LOG_DDEBUG("sqr == mul: OK");
     } else {
-      fprintf(stderr, "sqr != mul: FAIL\n");
+      FIO_LOG_DDEBUG("sqr != mul: FAIL");
     }
   }
 
   /* Test 5: Verify a * a^(-1) = 1 */
-  fprintf(stderr, "\n=== Test 5: G.x * G.x^(-1) = 1 ===\n");
+  FIO_LOG_DDEBUG("=== Test 5: G.x * G.x^(-1) = 1 ===");
   {
     fio___p256_fe_s gx, gx_inv, result;
     fio___p256_fe_copy(gx, FIO___P256_GX);
@@ -196,14 +208,14 @@ int main(void) {
     fio___p256_fe_s one;
     fio___p256_fe_one(one);
     if (fio___p256_fe_eq(result, one) == 0) {
-      fprintf(stderr, "G.x * G.x^(-1) == 1: OK\n");
+      FIO_LOG_DDEBUG("G.x * G.x^(-1) == 1: OK");
     } else {
-      fprintf(stderr, "G.x * G.x^(-1) != 1: FAIL\n");
+      FIO_LOG_DDEBUG("G.x * G.x^(-1) != 1: FAIL");
     }
   }
 
   /* Test 6: Known multiplication result from OpenSSL/reference */
-  fprintf(stderr, "\n=== Test 6: Specific 512-bit reduction test ===\n");
+  FIO_LOG_DDEBUG("=== Test 6: Specific 512-bit reduction test ===");
   {
     /* Compute G.x * G.y to get a 512-bit product, then reduce */
     /* First, let's manually compute the product */
@@ -241,14 +253,14 @@ int main(void) {
     print_fe("fe_mul result", expected);
 
     if (fio___p256_fe_eq(result, expected) == 0) {
-      fprintf(stderr, "NIST reduce == fe_mul: OK\n");
+      FIO_LOG_DDEBUG("NIST reduce == fe_mul: OK");
     } else {
-      fprintf(stderr, "NIST reduce != fe_mul: FAIL\n");
+      FIO_LOG_DDEBUG("NIST reduce != fe_mul: FAIL");
     }
   }
 
   /* Test 7: Test with max values (close to overflow) */
-  fprintf(stderr, "\n=== Test 7: Large values near 2^512 ===\n");
+  FIO_LOG_DDEBUG("=== Test 7: Large values near 2^512 ===");
   {
     uint64_t t[8] = {0xFFFFFFFFFFFFFFFFULL,
                      0xFFFFFFFFFFFFFFFFULL,
@@ -273,11 +285,12 @@ int main(void) {
         break;
       }
     }
-    fprintf(stderr, "Result < p: %s\n", valid ? "OK" : "FAIL");
+    (void)valid; /* Used only in debug logging */
+    FIO_LOG_DDEBUG("Result < p: %s", valid ? "OK" : "FAIL");
   }
 
   /* Test 8: Trace through one step of scalar multiplication */
-  fprintf(stderr, "\n=== Test 8: Trace d*G step by step ===\n");
+  FIO_LOG_DDEBUG("=== Test 8: Trace d*G step by step ===");
   {
     /* The failing scalar d */
     static const uint8_t d_bytes[32] = {
@@ -298,12 +311,11 @@ int main(void) {
     /* So we start at bit 255 (which is 1), then double, bit 254 (1), double,
        bit 253 (0), ... */
 
-    fprintf(stderr,
-            "d = 0x%016llx%016llx%016llx%016llx\n",
-            (unsigned long long)d[3],
-            (unsigned long long)d[2],
-            (unsigned long long)d[1],
-            (unsigned long long)d[0]);
+    FIO_LOG_DDEBUG("d = 0x%016llx%016llx%016llx%016llx",
+                   (unsigned long long)d[3],
+                   (unsigned long long)d[2],
+                   (unsigned long long)d[1],
+                   (unsigned long long)d[0]);
 
     /* Find highest bit */
     int start_bit = 255;
@@ -314,7 +326,7 @@ int main(void) {
         break;
       --start_bit;
     }
-    fprintf(stderr, "Start bit: %d\n", start_bit);
+    FIO_LOG_DDEBUG("Start bit: %d", start_bit);
 
     /* Do just the first 8 iterations and trace */
     fio___p256_point_jacobian_s acc;
@@ -326,7 +338,6 @@ int main(void) {
       int limb = i / 64;
       int bit = i % 64;
       int b = (d[limb] >> bit) & 1;
-      fprintf(stderr, "  bit %d = %d, ", i, b);
 
       if (b) {
         fio___p256_point_add_mixed(&acc, &acc, &g);
@@ -335,7 +346,10 @@ int main(void) {
       /* Convert to affine for display */
       fio___p256_point_affine_s aff;
       fio___p256_point_to_affine(&aff, &acc);
-      fprintf(stderr, "acc.x = %016llx...\n", (unsigned long long)aff.x[3]);
+      FIO_LOG_DDEBUG("  bit %d = %d, acc.x = %016llx...",
+                     i,
+                     b,
+                     (unsigned long long)aff.x[3]);
     }
   }
 

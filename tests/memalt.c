@@ -33,8 +33,7 @@ int main(void) {
   uint64_t start, end;
 
   { /* test fio_memcpy small copy fast paths (1-64 bytes) */
-    fprintf(stderr,
-            "\t* testing fio_memcpy small copy fast paths (1-64 bytes)\n");
+    FIO_LOG_DDEBUG("testing fio_memcpy small copy fast paths (1-64 bytes)");
     uint8_t src[128];
     uint8_t dst[128];
     /* Initialize source with known pattern */
@@ -69,8 +68,7 @@ int main(void) {
                "amounts of bytes.");
   }
   { /* test fio_memcpy as memmove */
-    fprintf(stderr,
-            "\t* testing fio_memcpy with overlapping memory (memmove)\n");
+    FIO_LOG_DDEBUG("testing fio_memcpy with overlapping memory (memmove)");
     char *msg = (char *)"fio_memcpy should work also as memmove, "
                         "so undefined behavior should not occur. "
                         "Should be true for larger offsets too. At least over "

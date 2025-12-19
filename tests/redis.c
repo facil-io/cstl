@@ -114,13 +114,13 @@ FIO_SFUNC void redis_on_ping_reply(fio_pubsub_engine_s *e,
   if (FIOBJ_TYPE(reply) == FIOBJ_T_STRING) {
     fio_str_info_s s = fiobj2cstr(reply);
     if (s.len == 4 && !memcmp(s.buf, "PONG", 4)) {
-      fprintf(stderr, "\t  PASS: PING returned PONG\n");
+      FIO_LOG_DDEBUG("  PASS: PING returned PONG");
       test_state.phase = TEST_PHASE_SET;
       redis_run_next_test();
       return;
     }
   }
-  fprintf(stderr, "\t  FAIL: PING did not return PONG\n");
+  FIO_LOG_ERROR("  FAIL: PING did not return PONG");
   test_state.test_failed = 1;
   fio_io_stop();
 }
@@ -140,7 +140,7 @@ FIO_SFUNC void redis_on_set_reply(fio_pubsub_engine_s *e,
       return;
     }
   }
-  fprintf(stderr, "\t  FAIL: SET did not return OK\n");
+  FIO_LOG_ERROR("  FAIL: SET did not return OK");
   test_state.test_failed = 1;
   fio_io_stop();
 }
@@ -159,13 +159,12 @@ FIO_SFUNC void redis_on_get_reply(fio_pubsub_engine_s *e,
       redis_run_next_test();
       return;
     }
-    fprintf(stderr,
-            "\t  FAIL: GET value mismatch: got '%.*s', expected '%s'\n",
-            (int)s.len,
-            s.buf,
-            TEST_VALUE);
+    FIO_LOG_ERROR("  FAIL: GET value mismatch: got '%.*s', expected '%s'",
+                  (int)s.len,
+                  s.buf,
+                  TEST_VALUE);
   } else {
-    fprintf(stderr, "\t  FAIL: GET did not return string\n");
+    FIO_LOG_ERROR("  FAIL: GET did not return string");
   }
   test_state.test_failed = 1;
   fio_io_stop();
@@ -179,12 +178,12 @@ FIO_SFUNC void redis_on_del_reply(fio_pubsub_engine_s *e,
 
   /* DEL returns integer - we don't care about the value */
   if (FIOBJ_TYPE(reply) == FIOBJ_T_NUMBER) {
-    fprintf(stderr, "\t  PASS: SET/GET working correctly\n");
+    FIO_LOG_DDEBUG("  PASS: SET/GET working correctly");
     test_state.phase = TEST_PHASE_INCR_DEL;
     redis_run_next_test();
     return;
   }
-  fprintf(stderr, "\t  FAIL: DEL did not return integer\n");
+  FIO_LOG_ERROR("  FAIL: DEL did not return integer");
   test_state.test_failed = 1;
   fio_io_stop();
 }
@@ -213,7 +212,7 @@ FIO_SFUNC void redis_on_incr_reply(fio_pubsub_engine_s *e,
     redis_run_next_test();
     return;
   }
-  fprintf(stderr, "\t  FAIL: INCR did not return integer\n");
+  FIO_LOG_ERROR("  FAIL: INCR did not return integer");
   test_state.test_failed = 1;
   fio_io_stop();
 }
@@ -225,7 +224,7 @@ FIO_SFUNC void redis_on_incr_cleanup_reply(fio_pubsub_engine_s *e,
   (void)reply;
   (void)udata;
 
-  fprintf(stderr, "\t  PASS: INCR working correctly\n");
+  FIO_LOG_DDEBUG("  PASS: INCR working correctly");
   test_state.phase = TEST_PHASE_PUBSUB_ROUNDTRIP;
   redis_run_next_test();
 }
@@ -251,7 +250,7 @@ FIO_SFUNC void redis_pubsub_roundtrip_on_message(fio_msg_s *msg) {
   if (msg->message.len == strlen(PUBSUB_TEST_MESSAGE) &&
       !memcmp(msg->message.buf, PUBSUB_TEST_MESSAGE, msg->message.len)) {
     test_state.pubsub_msg_received = 1;
-    fprintf(stderr, "\t  PASS: Pub/Sub roundtrip message received\n");
+    FIO_LOG_DDEBUG("  PASS: Pub/Sub roundtrip message received");
     /* Add a small delay before starting dedup test */
     fio_io_run_every(.fn = redis_start_dedup_test,
                      .every = 100,
@@ -323,16 +322,15 @@ FIO_SFUNC int redis_pubsub_dedup_verify(void *udata1, void *udata2) {
 
     /* We expect 2 messages - one per subscription (channel + pattern) */
     if (test_state.pubsub_dedup_msg_count == 2) {
-      fprintf(stderr,
-              "\t  PASS: Deduplication working (2 messages, one per "
-              "subscription)\n");
+      FIO_LOG_DDEBUG("  PASS: Deduplication working (2 messages, one per "
+                     "subscription)");
       test_state.phase = TEST_PHASE_DONE;
       redis_run_next_test();
     } else if (test_state.pubsub_dedup_msg_count > 2) {
-      fprintf(stderr,
-              "\t  FAIL: Deduplication failed - received %d messages (expected "
-              "2)\n",
-              test_state.pubsub_dedup_msg_count);
+      FIO_LOG_ERROR(
+          "  FAIL: Deduplication failed - received %d messages (expected "
+          "2)",
+          test_state.pubsub_dedup_msg_count);
       test_state.test_failed = 1;
       fio_io_stop();
     } else {
@@ -380,20 +378,20 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_PING:
-    fprintf(stderr, "\t* Testing Redis PING command\n");
+    FIO_LOG_DDEBUG("Testing Redis PING command");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("PING", 4));
     r = fio_redis_send(redis, cmd, redis_on_ping_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: fio_redis_send returned %d\n", r);
+      FIO_LOG_ERROR("  FAIL: fio_redis_send returned %d", r);
       test_state.test_failed = 1;
       fio_io_stop();
     }
     break;
 
   case TEST_PHASE_SET:
-    fprintf(stderr, "\t* Testing Redis SET/GET commands\n");
+    FIO_LOG_DDEBUG("Testing Redis SET/GET commands");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("SET", 3));
     fiobj_array_push(cmd, fiobj_str_new_cstr(TEST_KEY, strlen(TEST_KEY)));
@@ -401,7 +399,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_set_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: SET send failed\n");
+      FIO_LOG_ERROR("  FAIL: SET send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
@@ -414,7 +412,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_get_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: GET send failed\n");
+      FIO_LOG_ERROR("  FAIL: GET send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
@@ -427,14 +425,14 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_del_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: DEL send failed\n");
+      FIO_LOG_ERROR("  FAIL: DEL send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
     break;
 
   case TEST_PHASE_INCR_DEL:
-    fprintf(stderr, "\t* Testing Redis INCR command\n");
+    FIO_LOG_DDEBUG("Testing Redis INCR command");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("DEL", 3));
     fiobj_array_push(
@@ -443,7 +441,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_incr_del_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: DEL (before INCR) send failed\n");
+      FIO_LOG_ERROR("  FAIL: DEL (before INCR) send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
@@ -458,7 +456,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_incr_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: INCR send failed\n");
+      FIO_LOG_ERROR("  FAIL: INCR send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
@@ -473,14 +471,14 @@ FIO_SFUNC void redis_run_next_test(void) {
     r = fio_redis_send(redis, cmd, redis_on_incr_cleanup_reply, NULL);
     fiobj_free(cmd);
     if (r != 0) {
-      fprintf(stderr, "\t  FAIL: DEL (cleanup) send failed\n");
+      FIO_LOG_ERROR("  FAIL: DEL (cleanup) send failed");
       test_state.test_failed = 1;
       fio_io_stop();
     }
     break;
 
   case TEST_PHASE_PUBSUB_ROUNDTRIP:
-    fprintf(stderr, "\t* Testing Redis Pub/Sub roundtrip\n");
+    FIO_LOG_DDEBUG("Testing Redis Pub/Sub roundtrip");
     /* Reset state */
     test_state.pubsub_msg_received = 0;
 
@@ -505,7 +503,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_PUBSUB_PATTERN_DEDUP:
-    fprintf(stderr, "\t* Testing Redis Pub/Sub pattern deduplication\n");
+    FIO_LOG_DDEBUG("Testing Redis Pub/Sub pattern deduplication");
 
     /* Reset state */
     test_state.pubsub_dedup_msg_count = 0;
@@ -536,7 +534,7 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_DONE:
-    fprintf(stderr, "* Redis tests complete!\n");
+    FIO_LOG_DDEBUG("Redis tests complete!");
 
     /* Cleanup pub/sub subscriptions */
     if (test_state.pubsub_sub_handle) {
@@ -589,7 +587,7 @@ FIO_SFUNC void on_start(void *udata) {
   fio_pubsub_engine_s *redis =
       fio_redis_new(.address = "localhost", .port = "6379");
   if (!redis) {
-    fprintf(stderr, "FAIL: fio_redis_new returned NULL\n");
+    FIO_LOG_ERROR("FAIL: fio_redis_new returned NULL");
     test_state.test_failed = 1;
     fio_io_stop();
     return;
@@ -621,15 +619,15 @@ Main
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "==================================\n");
-  fprintf(stderr, "* Testing Redis Module\n");
+  FIO_LOG_DDEBUG("==================================");
+  FIO_LOG_DDEBUG("Testing Redis Module");
 
   if (!redis_is_available()) {
     fprintf(stderr, "SKIPPED! no local redis database to test against\n");
     return 0;
   }
 
-  fprintf(stderr, "\t(Redis detected on localhost:6379)\n");
+  FIO_LOG_DDEBUG("(Redis detected on localhost:6379)");
 
   /* Register callbacks */
   fio_state_callback_add(FIO_CALL_ON_START, on_start, NULL);
@@ -640,7 +638,7 @@ int main(void) {
 
   /* Check if tests completed successfully */
   if (test_state.test_failed || test_state.phase != TEST_PHASE_DONE) {
-    fprintf(stderr, "FAIL: Tests did not complete successfully\n");
+    FIO_LOG_ERROR("FAIL: Tests did not complete successfully");
     return 1;
   }
 

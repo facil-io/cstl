@@ -1247,6 +1247,12 @@ Main Test Runner
 ***************************************************************************** */
 
 int main(void) {
+#if defined(DEBUG) && (DEBUG)
+  if (1) {
+    fprintf(stderr, "\t- Skipped in DEBUG\n");
+    return 0
+  }
+#endif
   fprintf(stderr,
           "\n"
           "=======================================================\n"

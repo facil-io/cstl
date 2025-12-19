@@ -10,10 +10,14 @@ Find exactly where scalar multiplication diverges from expected
 #include FIO_INCLUDE_FILE
 
 FIO_SFUNC void print_fe(const char *name, const uint64_t fe[4]) {
-  fprintf(stderr, "%s: ", name);
-  for (int i = 3; i >= 0; --i)
-    fprintf(stderr, "%016llx", (unsigned long long)fe[i]);
-  fprintf(stderr, "\n");
+  (void)name; /* Used only in debug logging */
+  (void)fe;   /* Used only in debug logging */
+  FIO_LOG_DDEBUG("%s: %016llx%016llx%016llx%016llx",
+                 name,
+                 (unsigned long long)fe[3],
+                 (unsigned long long)fe[2],
+                 (unsigned long long)fe[1],
+                 (unsigned long long)fe[0]);
 }
 
 /* Compute k*G using manual double-and-add, step by step */
@@ -54,7 +58,7 @@ FIO_SFUNC void manual_scalar_mul(fio___p256_point_affine_s *result,
 }
 
 int main(void) {
-  fprintf(stderr, "=== P-256 Binary Decomposition Debug ===\n\n");
+  FIO_LOG_DDEBUG("=== P-256 Binary Decomposition Debug ===");
 
   /* Base point G */
   fio___p256_point_affine_s g;
@@ -69,15 +73,14 @@ int main(void) {
   fio___p256_scalar_s d;
   fio___p256_scalar_from_bytes(d, d_bytes);
 
-  fprintf(stderr,
-          "d = %016llx%016llx%016llx%016llx\n",
-          (unsigned long long)d[3],
-          (unsigned long long)d[2],
-          (unsigned long long)d[1],
-          (unsigned long long)d[0]);
+  FIO_LOG_DDEBUG("d = %016llx%016llx%016llx%016llx",
+                 (unsigned long long)d[3],
+                 (unsigned long long)d[2],
+                 (unsigned long long)d[1],
+                 (unsigned long long)d[0]);
 
   /* Test partial scalars - take first N bits of d */
-  fprintf(stderr, "\n=== Partial scalar tests (first N bits of d) ===\n");
+  FIO_LOG_DDEBUG("=== Partial scalar tests (first N bits of d) ===");
 
   int all_match = 1;
   for (int nbits = 8; nbits <= 256; nbits += 8) {
@@ -115,13 +118,12 @@ int main(void) {
                  fio___p256_fe_eq(aff_lib.y, aff_manual.y) == 0);
 
     if (!match) {
-      fprintf(stderr, "FIRST MISMATCH at %d bits!\n", nbits);
-      fprintf(stderr,
-              "partial = %016llx%016llx%016llx%016llx\n",
-              (unsigned long long)partial[3],
-              (unsigned long long)partial[2],
-              (unsigned long long)partial[1],
-              (unsigned long long)partial[0]);
+      FIO_LOG_DDEBUG("FIRST MISMATCH at %d bits!", nbits);
+      FIO_LOG_DDEBUG("partial = %016llx%016llx%016llx%016llx",
+                     (unsigned long long)partial[3],
+                     (unsigned long long)partial[2],
+                     (unsigned long long)partial[1],
+                     (unsigned long long)partial[0]);
       print_fe("  library.x", aff_lib.x);
       print_fe("  manual.x ", aff_manual.x);
       all_match = 0;
@@ -130,28 +132,26 @@ int main(void) {
 
     /* Every 32 bits, print progress */
     if (nbits % 32 == 0) {
-      fprintf(stderr,
-              "%3d bits: lib=%016llx... manual=%016llx... OK\n",
-              nbits,
-              (unsigned long long)aff_lib.x[3],
-              (unsigned long long)aff_manual.x[3]);
+      FIO_LOG_DDEBUG("%3d bits: lib=%016llx... manual=%016llx... OK",
+                     nbits,
+                     (unsigned long long)aff_lib.x[3],
+                     (unsigned long long)aff_manual.x[3]);
     }
   }
 
   if (all_match) {
-    fprintf(stderr, "\nAll partial scalars match!\n");
-    fprintf(stderr, "This means manual_scalar_mul == fio___p256_point_mul\n");
-    fprintf(
-        stderr,
-        "The bug is NOT in point_mul - both produce the same wrong answer.\n");
-    fprintf(stderr, "\nThe bug must be in:\n");
-    fprintf(stderr, "  1. Point doubling (fio___p256_point_double)\n");
-    fprintf(stderr, "  2. Point addition (fio___p256_point_add_mixed)\n");
-    fprintf(stderr, "  3. Field arithmetic (fio___p256_fe_*)\n");
-    fprintf(stderr, "  4. Affine conversion (fio___p256_point_to_affine)\n");
+    FIO_LOG_DDEBUG("All partial scalars match!");
+    FIO_LOG_DDEBUG("This means manual_scalar_mul == fio___p256_point_mul");
+    FIO_LOG_DDEBUG(
+        "The bug is NOT in point_mul - both produce the same wrong answer.");
+    FIO_LOG_DDEBUG("The bug must be in:");
+    FIO_LOG_DDEBUG("  1. Point doubling (fio___p256_point_double)");
+    FIO_LOG_DDEBUG("  2. Point addition (fio___p256_point_add_mixed)");
+    FIO_LOG_DDEBUG("  3. Field arithmetic (fio___p256_fe_*)");
+    FIO_LOG_DDEBUG("  4. Affine conversion (fio___p256_point_to_affine)");
 
     /* Let's verify the expected Q is on the curve */
-    fprintf(stderr, "\n=== Verify expected Q is on curve ===\n");
+    FIO_LOG_DDEBUG("=== Verify expected Q is on curve ===");
     /* Expected Q = d*G from RFC 6979 A.2.5 (P-256 with SHA-256)
      * Ux = 60FED4BA255A9D31C961EB74C6356D68C049B8923B61FA6CE669622E60F29FB6
      * Uy = 7903FE1008B8BC99A41AE9E95628BC64F2F1B20C2D7E9F5177A3C294D4462299
@@ -180,10 +180,10 @@ int main(void) {
     fio___p256_fe_add(t, t, FIO___P256_B);
 
     if (fio___p256_fe_eq(y2, t) == 0) {
-      fprintf(stderr, "Expected Q IS on the curve.\n");
+      FIO_LOG_DDEBUG("Expected Q IS on the curve.");
     } else {
-      fprintf(stderr,
-              "ERROR: Expected Q is NOT on the curve! Test vector is wrong.\n");
+      FIO_LOG_ERROR(
+          "ERROR: Expected Q is NOT on the curve! Test vector is wrong.");
     }
 
     /* Compute d*G and check if result is on curve */
@@ -201,9 +201,9 @@ int main(void) {
     fio___p256_fe_add(t, t, FIO___P256_B);
 
     if (fio___p256_fe_eq(y2, t) == 0) {
-      fprintf(stderr, "Computed d*G IS on the curve.\n");
+      FIO_LOG_DDEBUG("Computed d*G IS on the curve.");
     } else {
-      fprintf(stderr, "ERROR: Computed d*G is NOT on the curve!\n");
+      FIO_LOG_ERROR("ERROR: Computed d*G is NOT on the curve!");
     }
 
     print_fe("Computed d*G.x", dG_aff.x);
