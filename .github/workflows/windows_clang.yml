@@ -23,10 +23,10 @@ jobs:
       run: |
         echo "CI=false" >> "$GITHUB_ENV"
     - name: Test No-Op (debug)
-      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && ./noop.exe
+      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && echo "Compiled test, now running..." && ./noop.exe
     - name: Test STL (debug) - no allocators
-      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\core.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./core_d.exe && ./core_d.exe
+      run: clang -O0 -Wno-#pragma-messages -fstack-protector-all tests\core.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./core_d.exe && echo "Compiled test, now running..." && ./core_d.exe
     - name: Test fio_malloc speed
-      run: clang -O3 -Wno-#pragma-messages -march=native tests\malloc.c -I. -o ./malloc_spd_tst.exe && ./malloc_spd_tst.exe
+      run: clang -O3 -Wno-#pragma-messages -march=native tests\malloc.c -I. -o ./malloc_spd_tst.exe && echo "Compiled test, now running..." && ./malloc_spd_tst.exe
     - name: Test STL
-      run: clang -O3 -Wno-#pragma-messages -march=native tests\core.c -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -I. -o ./core_o.exe && ./core_o.exe
+      run: clang -O3 -Wno-#pragma-messages -march=native tests\core.c -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -I. -o ./core_o.exe && echo "Compiled test, now running..." && ./core_o.exe
