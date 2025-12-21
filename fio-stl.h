@@ -5748,6 +5748,8 @@ FIO_MEMSET / fio_memset - memset fallbacks
 
 /** an 8 byte value memset implementation. */
 SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
+  if (FIO_UNLIKELY(!dest_))
+    return NULL;
   char *d = (char *)dest_;
   if (data < 0x100) { /* if a single byte value, match memset */
     data |= (data << 8);
@@ -6093,6 +6095,8 @@ FIO_SFUNC void *fio___memchr_neon(const void *buffer,
  * should be faster.
  */
 SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
+  if (FIO_UNLIKELY(!buffer || !len))
+    return NULL;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return fio___memchr_avx2(buffer, token, len);
 #elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
@@ -6111,6 +6115,8 @@ fio_strlen - (trust the compiler to optimize)
 /** An alternative to `strlen` - though really, strlen should be much better. */
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   const char *start = str;
+  if (FIO_UNLIKELY(!str))
+    return 0;
   for (; *str;) /* compiler, please vectorize */
     ++str;
   return (str - start);
