@@ -21,12 +21,12 @@ jobs:
       run: |
         echo "CI=false" >> "$GITHUB_ENV"
     - name: Test No-Op (debug)
-      run: cl /Od /RTCsu /TC tests\noop.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./noop.exe && ./noop.exe
+      run: cl /Od /RTCsu /TC tests\noop.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./noop.exe && echo "Compiled test, now running..." && ./noop.exe
     - name: Test STL (debug) - no allocators
-      run: cl /Od /RTCsu /TC tests\core.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./cored.exe && ./cored.exe
+      run: cl /Od /RTCsu /TC tests\core.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./cored.exe && echo "Compiled test, now running..." && ./cored.exe
     - name: Test Mustache Compliance (debug) - no allocators
-      run: cl /Od /RTCsu /TC tests\mustache.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stld.exe && ./stld.exe
+      run: cl /Od /RTCsu /TC tests\mustache.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./stld.exe && echo "Compiled test, now running..." && ./stld.exe
     - name: Test fio_malloc speed
-      run: cl /O2 /Oi /TC tests\malloc.c /I. /Fe./malloc.exe && ./malloc.exe
+      run: cl /O2 /Oi /TC tests\malloc.c /I. /Fe./malloc.exe && echo "Compiled test, now running..." && ./malloc.exe
     - name: Test STL
-      run: cl /O2 /Oi /TC tests\core.c /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /I. /Fe./core.exe && ./core.exe
+      run: cl /O2 /Oi /TC tests\core.c /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /I. /Fe./core.exe && echo "Compiled test, now running..." && ./core.exe
