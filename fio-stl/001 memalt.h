@@ -567,200 +567,36 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len) {
 }
 
 /* *****************************************************************************
-fio_strlen - SIMD implementations
+fio_strlen - (trust the compiler to optimize)
 ***************************************************************************** */
 
-#if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-/* SSE2 implementation - 16 bytes at a time */
-FIO_SFUNC FIO___ASAN_AVOID size_t fio___strlen_sse2(const char *str) {
-  const char *start = str;
-  const __m128i zero = _mm_setzero_si128();
-
-  /* Handle unaligned head - process byte by byte until 16-byte aligned */
-  while (((uintptr_t)str & 15)) {
-    if (*str == 0)
-      return (size_t)(str - start);
-    ++str;
-  }
-
-  /* Main loop: process 64 bytes (4x16) at a time */
-  for (;;) {
-    __m128i v0 = _mm_load_si128((const __m128i *)(str));
-    __m128i v1 = _mm_load_si128((const __m128i *)(str + 16));
-    __m128i v2 = _mm_load_si128((const __m128i *)(str + 32));
-    __m128i v3 = _mm_load_si128((const __m128i *)(str + 48));
-    __m128i cmp0 = _mm_cmpeq_epi8(v0, zero);
-    __m128i cmp1 = _mm_cmpeq_epi8(v1, zero);
-    __m128i cmp2 = _mm_cmpeq_epi8(v2, zero);
-    __m128i cmp3 = _mm_cmpeq_epi8(v3, zero);
-    /* Combine results to check if any NUL found */
-    __m128i or01 = _mm_or_si128(cmp0, cmp1);
-    __m128i or23 = _mm_or_si128(cmp2, cmp3);
-    __m128i orall = _mm_or_si128(or01, or23);
-    int mask = _mm_movemask_epi8(orall);
-    if (mask) {
-      /* Found NUL - determine which 16-byte chunk */
-      int m0 = _mm_movemask_epi8(cmp0);
-      if (m0)
-        return (size_t)(str - start) + (size_t)__builtin_ctz(m0);
-      int m1 = _mm_movemask_epi8(cmp1);
-      if (m1)
-        return (size_t)(str - start) + 16 + (size_t)__builtin_ctz(m1);
-      int m2 = _mm_movemask_epi8(cmp2);
-      if (m2)
-        return (size_t)(str - start) + 32 + (size_t)__builtin_ctz(m2);
-      int m3 = _mm_movemask_epi8(cmp3);
-      return (size_t)(str - start) + 48 + (size_t)__builtin_ctz(m3);
-    }
-    str += 64;
-  }
-}
-#endif /* SSE2 */
-
-#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-/* AVX2 implementation - 32 bytes at a time */
-FIO_SFUNC FIO___ASAN_AVOID size_t fio___strlen_avx2(const char *str) {
-  const char *start = str;
-  const __m256i zero = _mm256_setzero_si256();
-
-  /* Handle unaligned head - process byte by byte until 32-byte aligned */
-  while (((uintptr_t)str & 31)) {
-    if (*str == 0)
-      return (size_t)(str - start);
-    ++str;
-  }
-
-  /* Main loop: process 128 bytes (4x32) at a time */
-  for (;;) {
-    __m256i v0 = _mm256_load_si256((const __m256i *)(str));
-    __m256i v1 = _mm256_load_si256((const __m256i *)(str + 32));
-    __m256i v2 = _mm256_load_si256((const __m256i *)(str + 64));
-    __m256i v3 = _mm256_load_si256((const __m256i *)(str + 96));
-    __m256i cmp0 = _mm256_cmpeq_epi8(v0, zero);
-    __m256i cmp1 = _mm256_cmpeq_epi8(v1, zero);
-    __m256i cmp2 = _mm256_cmpeq_epi8(v2, zero);
-    __m256i cmp3 = _mm256_cmpeq_epi8(v3, zero);
-    /* Combine results to check if any NUL found */
-    __m256i or01 = _mm256_or_si256(cmp0, cmp1);
-    __m256i or23 = _mm256_or_si256(cmp2, cmp3);
-    __m256i orall = _mm256_or_si256(or01, or23);
-    int mask = _mm256_movemask_epi8(orall);
-    if (mask) {
-      /* Found NUL - determine which 32-byte chunk */
-      int m0 = _mm256_movemask_epi8(cmp0);
-      if (m0)
-        return (size_t)(str - start) + (size_t)__builtin_ctz(m0);
-      int m1 = _mm256_movemask_epi8(cmp1);
-      if (m1)
-        return (size_t)(str - start) + 32 + (size_t)__builtin_ctz(m1);
-      int m2 = _mm256_movemask_epi8(cmp2);
-      if (m2)
-        return (size_t)(str - start) + 64 + (size_t)__builtin_ctz(m2);
-      int m3 = _mm256_movemask_epi8(cmp3);
-      return (size_t)(str - start) + 96 + (size_t)__builtin_ctz(m3);
-    }
-    str += 128;
-  }
-}
-#endif /* AVX2 */
-
-#if defined(FIO___HAS_ARM_INTRIN)
-/* ARM NEON implementation - 64-byte loop with prefetch */
-FIO_SFUNC FIO___ASAN_AVOID size_t fio___strlen_neon(const char *str) {
-  const char *start = str;
-  const uint8x16_t zero = vdupq_n_u8(0);
-  uint64_t lo, hi;
-
-  /* Handle unaligned head */
-  while (((uintptr_t)str & 15)) {
-    if (*str == 0)
-      return (size_t)(str - start);
-    ++str;
-  }
-
-  /* Main loop: 64 bytes at a time with prefetch */
-  for (;;) {
-    FIO_PREFETCH(str + 128);
-    /* Load and compare 4 vectors */
-    uint8x16_t v0 = vld1q_u8((const uint8_t *)str);
-    uint8x16_t v1 = vld1q_u8((const uint8_t *)(str + 16));
-    uint8x16_t v2 = vld1q_u8((const uint8_t *)(str + 32));
-    uint8x16_t v3 = vld1q_u8((const uint8_t *)(str + 48));
-    uint8x16_t cmp0 = vceqq_u8(v0, zero);
-    uint8x16_t cmp1 = vceqq_u8(v1, zero);
-    uint8x16_t cmp2 = vceqq_u8(v2, zero);
-    uint8x16_t cmp3 = vceqq_u8(v3, zero);
-    /* OR all comparisons for fast rejection */
-    uint8x16_t or01 = vorrq_u8(cmp0, cmp1);
-    uint8x16_t or23 = vorrq_u8(cmp2, cmp3);
-    uint8x16_t orall = vorrq_u8(or01, or23);
-    lo = vgetq_lane_u64(vreinterpretq_u64_u8(orall), 0);
-    hi = vgetq_lane_u64(vreinterpretq_u64_u8(orall), 1);
-    if (lo | hi) {
-      /* Found NUL - check each vector */
-      lo = vgetq_lane_u64(vreinterpretq_u64_u8(cmp0), 0);
-      if (lo)
-        return (size_t)(str - start) + (size_t)(__builtin_ctzll(lo) >> 3);
-      hi = vgetq_lane_u64(vreinterpretq_u64_u8(cmp0), 1);
-      if (hi)
-        return (size_t)(str - start) + 8 + (size_t)(__builtin_ctzll(hi) >> 3);
-      lo = vgetq_lane_u64(vreinterpretq_u64_u8(cmp1), 0);
-      if (lo)
-        return (size_t)(str - start) + 16 + (size_t)(__builtin_ctzll(lo) >> 3);
-      hi = vgetq_lane_u64(vreinterpretq_u64_u8(cmp1), 1);
-      if (hi)
-        return (size_t)(str - start) + 24 + (size_t)(__builtin_ctzll(hi) >> 3);
-      lo = vgetq_lane_u64(vreinterpretq_u64_u8(cmp2), 0);
-      if (lo)
-        return (size_t)(str - start) + 32 + (size_t)(__builtin_ctzll(lo) >> 3);
-      hi = vgetq_lane_u64(vreinterpretq_u64_u8(cmp2), 1);
-      if (hi)
-        return (size_t)(str - start) + 40 + (size_t)(__builtin_ctzll(hi) >> 3);
-      lo = vgetq_lane_u64(vreinterpretq_u64_u8(cmp3), 0);
-      if (lo)
-        return (size_t)(str - start) + 48 + (size_t)(__builtin_ctzll(lo) >> 3);
-      hi = vgetq_lane_u64(vreinterpretq_u64_u8(cmp3), 1);
-      return (size_t)(str - start) + 56 + (size_t)(__builtin_ctzll(hi) >> 3);
-    }
-    str += 64;
-  }
-}
-#endif /* ARM NEON */
-
-/* Scalar fallback - simple 8-byte loop, best for short strings */
-FIO_SFUNC FIO___ASAN_AVOID size_t fio___strlen_scalar(const char *str) {
-  const char *start = str;
-  uint64_t h;
-
-  /* Align to 8 bytes */
-  while (((uintptr_t)str & 7)) {
-    if (*str == 0)
-      return (size_t)(str - start);
-    ++str;
-  }
-
-  /* Main loop: simple 8-byte checks */
-  for (;;) {
-    h = fio_has_zero_byte64(*(const uint64_t *)str);
-    if (h)
-      return (size_t)(str - start) + (size_t)(__builtin_ctzll(h) >> 3);
-    str += 8;
-  }
-}
-
-/** An alternative to `strlen` - optimized for both short and long strings. */
+/** An alternative to `strlen` - though really, strlen should be much better. */
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  if (FIO_UNLIKELY(!str))
-    return 0;
-#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  return fio___strlen_avx2(str);
-#elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  return fio___strlen_sse2(str);
-#else
-  /* Use scalar version - it's fastest for short strings which are most common.
-   * For long strings (255+ chars), system strlen is much faster anyway. */
-  return fio___strlen_scalar(str);
-#endif
+  const char *start = str;
+  for (; *str;) /* compiler, please vectorize */
+    ++str;
+  return (str - start);
+  //   const char *r = (const char *)str;
+  //   uint64_t u[16] FIO_ALIGN(16) = {0};
+  //   uint64_t flag = 0;
+  //   for (;;) {
+  //     fio_memcpy128(u, r);
+  //     for (size_t i = 0; i < 16; ++i) {
+  //       flag |= (u[i] = fio_has_zero_byte64(u[i]));
+  //     }
+  //     if (flag)
+  //       goto found_in_map;
+  //     r += 128;
+  //   }
+  // found_in_map:
+  //   flag = u[0];
+  //   for (size_t i = 0; i < 7; ++i) {
+  //     if (!flag) {
+  //       r += 8;
+  //       flag = u[i + 1];
+  //     }
+  //   }
+  //   return ((r - str) + fio_lsb_index_unsafe(flag));
 }
 
 /* *****************************************************************************

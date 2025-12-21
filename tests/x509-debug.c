@@ -148,6 +148,7 @@ int main(void) {
       if (fio_asn1_parse_integer(&version_int, &ver) == 0) {
         version = (int)ver;
         FIO_LOG_DDEBUG("Step 4b: Version = %d", version);
+        (void)version;
       }
     }
     /* Get serial */

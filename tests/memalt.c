@@ -3,6 +3,7 @@ Test
 ***************************************************************************** */
 #include "test-helpers.h"
 
+#undef FIO_MEMALT
 #define FIO_MEMALT
 #include FIO_INCLUDE_FILE
 

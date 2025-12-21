@@ -1350,7 +1350,7 @@ SIMD Vector Looping Helper
       for (; i < (iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i)  \
         action;                                                                \
     if (iterations)                                                            \
-      for (; i < iterations;)                                                  \
+      for (; !(iterations + 1) || (i < iterations);)                           \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
@@ -3917,7 +3917,7 @@ Vector Helpers - memory load operations (implementation starts here)
   }                                                                            \
   FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
       fio_u##total_bits a) {                                                   \
-    fio_u##total_bits r = {{0}};                                               \
+    fio_u##total_bits r = {0};                                                 \
     for (size_t i = 0; i < (total_bits / bits); ++i)                           \
       r.u##bits[i] = fio_bswap##bits(a.u##bits[i]);                            \
     return r;                                                                  \
