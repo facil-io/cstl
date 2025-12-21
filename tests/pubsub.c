@@ -265,6 +265,38 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_empty_channel)(void) {
 }
 
 /* *****************************************************************************
+NULL Channel Buffer Testing - tests the edge case of NULL buf with len=0
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, pubsub_null_channel_buf)(void) {
+  FIO_LOG_DDEBUG("Testing pub/sub with NULL channel buffer (len=0).");
+  int state = 0;
+  /* This is the edge case that can cause UB: NULL buffer with length 0 */
+  fio_buf_info_s null_channel = FIO_BUF_INFO2(NULL, 0);
+
+  /* Subscribe to NULL channel - should work same as empty string */
+  fio_subscribe(.channel = null_channel,
+                .on_message = FIO_NAME_TEST(stl, pubsub_on_message),
+                .on_unsubscribe = FIO_NAME_TEST(stl, pubsub_on_unsubscribe),
+                .udata = &state,
+                .filter = -111);
+
+  /* Publish to NULL channel */
+  fio_publish(.engine = FIO_PUBSUB_CLUSTER,
+              .channel = null_channel,
+              .filter = -111);
+  fio_queue_perform_all(fio_io_queue());
+
+  FIO_ASSERT(state == 1, "NULL channel subscriber should receive message");
+
+  /* Cleanup */
+  fio_unsubscribe(.channel = null_channel, .filter = -111);
+  fio_queue_perform_all(fio_io_queue());
+
+  FIO_ASSERT(state == 0, "NULL channel unsubscribe callback should fire");
+}
+
+/* *****************************************************************************
 Large Message Payload Testing
 ***************************************************************************** */
 
@@ -793,6 +825,7 @@ int main(void) {
   FIO_NAME_TEST(stl, pubsub_pattern_matching)();
   FIO_NAME_TEST(stl, pubsub_message_id)();
   FIO_NAME_TEST(stl, pubsub_custom_id)();
+  FIO_NAME_TEST(stl, pubsub_null_channel_buf)();
   FIO_LOG_DDEBUG("Pub/Sub tests complete.");
   fio___io_cleanup_at_exit(NULL);
 }

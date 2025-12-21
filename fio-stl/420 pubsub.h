@@ -628,7 +628,8 @@ FIO_IFUNC fio_channel_s *fio___channel_new_for_map(fio_str_info_s s) {
       .filter = (int16_t)(s.capa & 0xFFFFUL),
       .is_pattern = (uint8_t)(s.capa >> 16),
   };
-  FIO_MEMCPY(ch->name, s.buf, s.len);
+  if (s.buf && s.len) /* avoid UB: memcpy with NULL src even when len==0 */
+    FIO_MEMCPY(ch->name, s.buf, s.len);
   ch->name[s.len] = 0;
   fio___channel_on_create(ch);
   return ch;
@@ -1206,7 +1207,7 @@ error_not_on_master:
       "(%d) master-only subscription attempt on a non-master process: %.*s",
       fio_io_pid(),
       (int)args.channel.len,
-      args.channel.buf);
+      (args.channel.buf ? args.channel.buf : (char *)""));
   return;
 
 sub_error:
@@ -1215,7 +1216,7 @@ sub_error:
                 fio_io_pid(),
                 args.channel.len,
                 (int)(args.channel.len > 10 ? 7 : args.channel.len),
-                args.channel.buf);
+                (args.channel.buf ? args.channel.buf : (char *)""));
   FIO_LOG_ERROR("failed to allocate a new subscription");
   if (args.on_unsubscribe) {
     union {
