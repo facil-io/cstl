@@ -262,7 +262,8 @@ FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
                                     const char token,
                                     size_t len) {
   const char *r = (const char *)buffer;
-  const char *e = r + (len - 127);
+  const char *const end = r + len; /* absolute end of buffer */
+  const char *e;
   uint64_t u[16] FIO_ALIGN(16) = {0};
   uint64_t flag = 0;
   size_t i;
@@ -270,8 +271,9 @@ FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
   umsk |= (umsk << 32); /* make each byte in umsk == token */
   umsk |= (umsk << 16);
   umsk |= (umsk << 8);
-  if (FIO_UNLIKELY(len < 8))
+  if (FIO_UNLIKELY(len < 128))
     goto small_memchr;
+  e = end - 127; /* safe: len >= 128, so end - 127 >= r */
   while (r < e) {
     fio_memcpy128(u, r);
     for (i = 0; i < 16; ++i) {
@@ -282,7 +284,7 @@ FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
       goto found_in_map;
     r += 128;
   }
-  e += 120;
+  e = end - 7; /* process remaining 8-byte chunks */
   i = 0;
   while (r < e) {
     fio_memcpy8(u, r);
@@ -293,15 +295,12 @@ FIO_SFUNC void *fio___memchr_scalar(const void *buffer,
     r += 8;
   }
 small_memchr:
-  switch ((len & 7)) { /* clang-format off */
-    case 7: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 6: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 5: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 4: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 3: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 2: if (*r == token) return (void *)r; ++r; /* fall through */
-    case 1: if (*r == token) return (void *)r; ++r;
-    } /* clang-format on */
+  /* Handle remaining bytes */
+  while (r < end) {
+    if (*r == token)
+      return (void *)r;
+    ++r;
+  }
   return NULL;
 found_in_map:
   flag = 0;
