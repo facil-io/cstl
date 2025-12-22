@@ -11944,9 +11944,9 @@ FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
     return -1;
   }
   if ((len > 3 && s->pos[0] == '/' && s->pos[1] == '*')) {
-    const char *tmp = s->pos;
+    const char *tmp = s->pos + 2; /* skip past the opening slash-star */
     while (tmp < s->end &&
-           (tmp = (const char *)FIO_MEMCHR(s->pos, '/', s->end - tmp))) {
+           (tmp = (const char *)FIO_MEMCHR(tmp, '/', s->end - tmp))) {
       s->pos = ++tmp;
       if (tmp[-2] == '*')
         return 0;
@@ -32324,11 +32324,9 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
+    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
+    for (size_t i = 0; i < 16; ++i)
+      p[i] ^= keystream[i];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
@@ -32396,11 +32394,9 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
+    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
+    for (size_t i = 0; i < 16; ++i)
+      p[i] ^= keystream[i];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
@@ -33672,7 +33668,7 @@ FIO_SFUNC void fio___sc_reduce(uint8_t s[32], const uint8_t r[64]) {
     for (j = i - 32; j < i - 12; ++j) {
       x[j] += carry - 16 * x[i] * l[j - (i - 32)];
       carry = (x[j] + 128) >> 8;
-      x[j] -= carry << 8;
+      x[j] -= carry * 256; /* avoid UB from left-shifting negative values */
     }
     x[j] += carry;
     x[i] = 0;
@@ -37243,13 +37239,19 @@ FIO_SFUNC void fio___rsa_modexp(uint64_t *result,
   uint64_t tmp[word_count * 2];
   uint64_t acc[word_count];
   uint64_t sqr[word_count];
+  uint64_t n_ext[word_count * 2];
 #else
   uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
   uint64_t acc[FIO_RSA_MAX_WORDS];
   uint64_t sqr[FIO_RSA_MAX_WORDS];
+  uint64_t n_ext[FIO_RSA_MAX_WORDS * 2];
   FIO_ASSERT(word_count <= FIO_RSA_MAX_WORDS,
              "RSA key size exceeds maximum supported");
 #endif
+
+  /* Zero-extend n to double size for use with fio_math_div */
+  FIO_MEMCPY(n_ext, n, word_count * sizeof(uint64_t));
+  FIO_MEMSET(n_ext + word_count, 0, word_count * sizeof(uint64_t));
 
   /* Initialize accumulator to 1 */
   FIO_MEMSET(acc, 0, word_count * sizeof(uint64_t));
@@ -37274,17 +37276,13 @@ FIO_SFUNC void fio___rsa_modexp(uint64_t *result,
     /* If this bit is set, multiply accumulator by current square */
     if (exp[word_idx] & (1ULL << bit_idx)) {
       fio_math_mul(tmp, acc, sqr, word_count);
-      fio_math_div(NULL, acc, tmp, n, word_count * 2);
-      /* Copy remainder (lower words) to acc */
-      /* Note: fio_math_div works on double-size arrays, but we need the mod */
-      /* Actually fio_math_div expects same-size arrays. We need to be careful
-       */
+      fio_math_div(NULL, acc, tmp, n_ext, word_count * 2);
     }
 
     /* Square the current value (unless this is the last bit) */
     if (bit < exp_bits) {
       fio_math_mul(tmp, sqr, sqr, word_count);
-      fio_math_div(NULL, sqr, tmp, n, word_count * 2);
+      fio_math_div(NULL, sqr, tmp, n_ext, word_count * 2);
     }
   }
 
@@ -37308,13 +37306,19 @@ FIO_SFUNC int fio___rsa_modexp_65537(uint64_t *result,
   uint64_t tmp[word_count * 2];
   uint64_t sqr[word_count];
   uint64_t rem[word_count * 2];
+  uint64_t n_ext[word_count * 2];
 #else
   uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
   uint64_t sqr[FIO_RSA_MAX_WORDS];
   uint64_t rem[FIO_RSA_MAX_WORDS * 2];
+  uint64_t n_ext[FIO_RSA_MAX_WORDS * 2];
   FIO_ASSERT(word_count <= FIO_RSA_MAX_WORDS,
              "RSA key size exceeds maximum supported");
 #endif
+
+  /* Zero-extend n to double size for use with fio_math_div */
+  FIO_MEMCPY(n_ext, n, word_count * sizeof(uint64_t));
+  FIO_MEMSET(n_ext + word_count, 0, word_count * sizeof(uint64_t));
 
   /* sqr = base (mod n is already ensured by caller if base < n) */
   FIO_MEMCPY(sqr, base, word_count * sizeof(uint64_t));
@@ -37324,14 +37328,14 @@ FIO_SFUNC int fio___rsa_modexp_65537(uint64_t *result,
     fio_math_mul(tmp, sqr, sqr, word_count);
     /* Reduce mod n */
     FIO_MEMSET(rem, 0, word_count * 2 * sizeof(uint64_t));
-    fio_math_div(NULL, rem, tmp, n, word_count * 2);
+    fio_math_div(NULL, rem, tmp, n_ext, word_count * 2);
     FIO_MEMCPY(sqr, rem, word_count * sizeof(uint64_t));
   }
 
   /* result = sqr * base (mod n) = base^(2^16) * base = base^65537 */
   fio_math_mul(tmp, sqr, base, word_count);
   FIO_MEMSET(rem, 0, word_count * 2 * sizeof(uint64_t));
-  fio_math_div(NULL, rem, tmp, n, word_count * 2);
+  fio_math_div(NULL, rem, tmp, n_ext, word_count * 2);
   FIO_MEMCPY(result, rem, word_count * sizeof(uint64_t));
 
   return 0;

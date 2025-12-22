@@ -429,9 +429,9 @@ FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
     return -1;
   }
   if ((len > 3 && s->pos[0] == '/' && s->pos[1] == '*')) {
-    const char *tmp = s->pos;
+    const char *tmp = s->pos + 2; /* skip past the opening slash-star */
     while (tmp < s->end &&
-           (tmp = (const char *)FIO_MEMCHR(s->pos, '/', s->end - tmp))) {
+           (tmp = (const char *)FIO_MEMCHR(tmp, '/', s->end - tmp))) {
       s->pos = ++tmp;
       if (tmp[-2] == '*')
         return 0;

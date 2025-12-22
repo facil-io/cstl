@@ -1062,7 +1062,7 @@ FIO_SFUNC void fio___sc_reduce(uint8_t s[32], const uint8_t r[64]) {
     for (j = i - 32; j < i - 12; ++j) {
       x[j] += carry - 16 * x[i] * l[j - (i - 32)];
       carry = (x[j] + 128) >> 8;
-      x[j] -= carry << 8;
+      x[j] -= carry * 256; /* avoid UB from left-shifting negative values */
     }
     x[j] += carry;
     x[i] = 0;

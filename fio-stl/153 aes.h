@@ -2362,11 +2362,9 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
+    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
+    for (size_t i = 0; i < 16; ++i)
+      p[i] ^= keystream[i];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
@@ -2434,11 +2432,9 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
+    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
+    for (size_t i = 0; i < 16; ++i)
+      p[i] ^= keystream[i];
     fio___gcm_ghash_block(tag, p, &htbl);
     p += 16;
     len -= 16;
