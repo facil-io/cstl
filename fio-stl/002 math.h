@@ -201,12 +201,12 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   uint64_t r[len];
   uint64_t q[len];
 #else
-  uint64_t t[256];
-  uint64_t r[256];
-  uint64_t q[256];
+  uint64_t t[1024];
+  uint64_t r[1024];
+  uint64_t q[1024];
   FIO_ASSERT(
-      len <= 256,
-      "Multi Precision DIV (fio_math_div) overflows at 16384 bit numbers");
+      len <= 1024,
+      "Multi Precision DIV (fio_math_div) overflows at 32768 bit numbers");
 #endif
 
   /* Initialize: r = a (remainder starts as dividend), q = 0 */
