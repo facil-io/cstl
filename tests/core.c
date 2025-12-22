@@ -504,6 +504,7 @@ FIO_SFUNC void fio___test_core_utf8(void) {
     char output[32];
     pos = output;
     pos += fio_utf8_write(pos, value);
+    *pos = 0;
     FIO_ASSERT(val_len == utf8_core_tests[i].clen,
                "fio_utf8_read + fio_utf8_code_len failed on %s / %p (%zu "
                "len => %zu != %zu)",
