@@ -1269,7 +1269,7 @@ FIO_IFUNC uint8x16_t fio___arm_gcm_inc_ctr(uint8x16_t ctr) {
    * We need to: extract, byte-swap, increment, byte-swap, insert */
   uint32x4_t ctr32 = vreinterpretq_u32_u8(ctr);
   uint32_t c = vgetq_lane_u32(ctr32, 3);
-  c = __builtin_bswap32(__builtin_bswap32(c) + 1);
+  c = fio_bswap32(fio_bswap32(c) + 1);
   return vreinterpretq_u8_u32(vsetq_lane_u32(c, ctr32, 3));
 }
 

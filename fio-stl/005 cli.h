@@ -455,9 +455,9 @@ FIO_SFUNC uint32_t fio___cli_data_get_index(fio_buf_info_s key) {
 CLI Destruction
 ***************************************************************************** */
 
-SFUNC void __attribute__((destructor)) fio_cli_end(void) {
-  fio___cli_data_destroy();
-}
+SFUNC void fio_cli_end(void) { fio___cli_data_destroy(); }
+
+FIO_DESTRUCTOR(fio___cli_end_destructor) { fio_cli_end(); }
 
 /* *****************************************************************************
 CLI Public Get/Set API

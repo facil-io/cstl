@@ -162,8 +162,8 @@ Recursive inclusion management
 /* SFUNC_ - internal helper types are always `static` */
 #undef SFUNC
 #undef IFUNC
-#define SFUNC static __attribute__((unused))
-#define IFUNC static inline __attribute__((unused))
+#define SFUNC static FIO_MAYBE_UNUSED
+#define IFUNC static inline FIO_MAYBE_UNUSED
 #endif /* SFUNC_ vs FIO___RECURSIVE_INCLUDE*/
 
 /* *****************************************************************************

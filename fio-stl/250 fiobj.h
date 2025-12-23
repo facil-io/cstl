@@ -106,8 +106,8 @@ General Requirements / Macros
 #define FIOBJ_EXTERN_OBJ     extern
 #define FIOBJ_EXTERN_OBJ_IMP FIO_WEAK
 #else
-#define FIOBJ_EXTERN_OBJ     static __attribute__((unused))
-#define FIOBJ_EXTERN_OBJ_IMP static __attribute__((unused))
+#define FIOBJ_EXTERN_OBJ     static FIO_MAYBE_UNUSED
+#define FIOBJ_EXTERN_OBJ_IMP static FIO_MAYBE_UNUSED
 #endif
 /* *****************************************************************************
 Debugging / Leak Detection

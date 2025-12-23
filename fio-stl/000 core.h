@@ -311,8 +311,11 @@ OS Specific includes and Macros
 #define FIO___PRINTF_STYLE(string_index, check_index)                          \
   __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
 #else
+/* Pure MSVC (not MinGW/Cygwin) */
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
+/* MSVC doesn't support __attribute__, use empty macro */
+#define FIO___PRINTF_STYLE(string_index, check_index)
 #endif /* __CYGWIN__ __MINGW32__ */
 
 #if _MSC_VER
@@ -368,9 +371,14 @@ typedef SSIZE_T ssize_t;
 Function Attributes
 ***************************************************************************** */
 
+#if __has_attribute(unused) || defined(__GNUC__) || defined(__clang__)
+#define FIO_MAYBE_UNUSED __attribute__((unused))
+#else
+#define FIO_MAYBE_UNUSED
+#endif
+
 #ifndef FIO_SFUNC
-/** Marks a function as `static` and possibly unused. */
-#define FIO_SFUNC static __attribute__((unused))
+#define FIO_SFUNC static FIO_MAYBE_UNUSED
 #endif
 
 #ifndef FIO_IFUNC
@@ -378,8 +386,19 @@ Function Attributes
 #define FIO_IFUNC FIO_SFUNC inline
 #endif
 
+#ifndef FIO_WARN_UNUSED
+/** Attribute for functions whose return value should not be ignored. */
+#if __has_attribute(warn_unused_result) || defined(__GNUC__) ||                \
+    defined(__clang__)
+#define FIO_WARN_UNUSED __attribute__((warn_unused_result))
+#else
+#define FIO_WARN_UNUSED
+#endif
+#endif
+
 #ifndef FIO_MIFN
-#define FIO_MIFN FIO_IFUNC __attribute__((warn_unused_result))
+/** Marks a function as inline with warn_unused_result (for math functions). */
+#define FIO_MIFN FIO_IFUNC FIO_WARN_UNUSED
 #endif
 
 /** Marks a function as const (no side effects, result depends only on args) */
@@ -507,7 +526,8 @@ FIO_SFUNC int fio___msv_run_counter_macro_to_3_digits(void) {
 #define FIO_CONSTRUCTOR(fname)                                                 \
   static __attribute__((constructor)) void fname(void)
 /** Marks a function as a destructor - if supported. Consider using atexit() */
-#define FIO_DESTRUCTOR(fname) static __attribute__((destructor)) void name(void)
+#define FIO_DESTRUCTOR(fname)                                                  \
+  static __attribute__((destructor)) void fname(void)
 #endif
 
 /* *****************************************************************************
@@ -1027,7 +1047,7 @@ memory address to be returned if needed (valid until concurrency max calls).
                              type_T,                                           \
                              size_per_allocation,                              \
                              allocations_per_thread)                           \
-  FIO_SFUNC __attribute__((warn_unused_result)) type_T *name(size_t count) {   \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {                       \
     static type_T name##buffer[sizeof(type_T) *                                \
                                FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *         \
                                size_per_allocation * allocations_per_thread];  \
@@ -4337,7 +4357,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
       0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
       0x95561f0927ad7ecdULL,                                                   \
       0};                                                                      \
-  extern __attribute__((unused)) void name##_reset(void) {                     \
+  extern FIO_MAYBE_UNUSED void name##_reset(void) {                            \
     name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;                   \
     name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
@@ -4366,12 +4386,12 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
     }                                                                          \
   }                                                                            \
   /** Re-seeds the PNGR so forked processes don't match. */                    \
-  extern __attribute__((unused)) void name##_on_fork(void *is_null) {          \
+  extern FIO_MAYBE_UNUSED void name##_on_fork(void *is_null) {                 \
     (void)is_null;                                                             \
     name##_reseed();                                                           \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  extern __attribute__((unused)) fio_u128 name##128(void) {                    \
+  extern FIO_MAYBE_UNUSED fio_u128 name##128(void) {                           \
     fio_u256 r;                                                                \
     if (!(fio_atomic_add(name##___state + 4, 1) &                              \
           ((1ULL << reseed_log) - 1)) &&                                       \
@@ -4416,7 +4436,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
     return r.u128[0];                                                          \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
-  extern __attribute__((unused)) uint64_t name##64(void) {                     \
+  extern FIO_MAYBE_UNUSED uint64_t name##64(void) {                            \
     static size_t counter;                                                     \
     static fio_u128 r;                                                         \
     if (!((counter++) & 1))                                                    \
@@ -4424,7 +4444,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
     return r.u64[counter & 1];                                                 \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
-  extern __attribute__((unused)) void name##_bytes(void *dest, size_t len) {   \
+  extern FIO_MAYBE_UNUSED void name##_bytes(void *dest, size_t len) {          \
     if (!dest || !len)                                                         \
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \
