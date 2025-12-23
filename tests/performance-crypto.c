@@ -568,9 +568,9 @@ FIO_SFUNC void openssl_bench_aes256_gcm(void) {
 
 /* Run all OpenSSL benchmarks */
 FIO_SFUNC void fio___perf_openssl(void) {
-  fprintf(stderr, "\n===========================================\n");
-  fprintf(stderr, "OpenSSL Comparison Benchmarks\n");
-  fprintf(stderr, "===========================================\n\n");
+  fprintf(stderr, "\n\t===========================================\n");
+  fprintf(stderr, "\tOpenSSL Comparison Benchmarks\n");
+  fprintf(stderr, "\t===========================================\n\n");
 
   fprintf(stderr, "\t* OpenSSL SHA Hash Functions:\n");
   fprintf(stderr, "\n\t  OpenSSL SHA-1:\n");
@@ -592,9 +592,9 @@ FIO_SFUNC void fio___perf_openssl(void) {
   fprintf(stderr, "\n\t  OpenSSL AES-256-GCM:\n");
   openssl_bench_aes256_gcm();
 
-  fprintf(stderr, "\n===========================================\n");
-  fprintf(stderr, "OpenSSL benchmarks complete\n");
-  fprintf(stderr, "===========================================\n");
+  fprintf(stderr, "\n\t===========================================\n");
+  fprintf(stderr, "\tOpenSSL benchmarks complete\n");
+  fprintf(stderr, "\t===========================================\n");
 }
 
 #endif /* HAVE_OPENSSL */
@@ -610,38 +610,23 @@ int main(void) {
     return 0;
   }
 #endif
-  fprintf(stderr, "===========================================\n");
-  fprintf(stderr, "Performance Tests: Cryptographic Operations\n");
-  fprintf(stderr, "===========================================\n\n");
+  fprintf(stderr, "\t===========================================\n");
+  fprintf(stderr, "\tPerformance Tests: Cryptographic Operations\n");
+  fprintf(stderr, "\t===========================================\n\n");
 
-  fprintf(stderr, "facil.io Implementation:\n");
-  fprintf(stderr, "===========================================\n\n");
+  fprintf(stderr, "\tfacil.io Implementation:\n");
+  fprintf(stderr, "\t===========================================\n\n");
 
   fio___perf_sha();
   fio___perf_chacha();
   fio___perf_aes();
 
-  fprintf(stderr, "\n===========================================\n");
-  fprintf(stderr, "facil.io benchmarks complete.\n");
-  fprintf(stderr, "===========================================\n");
+  fprintf(stderr, "\n\t===========================================\n");
+  fprintf(stderr, "\tfacil.io benchmarks complete.\n");
+  fprintf(stderr, "\t===========================================\n");
 
 #ifdef HAVE_OPENSSL
   fio___perf_openssl();
-
-  fprintf(stderr, "\n===========================================\n");
-  fprintf(stderr, "Comparison Summary\n");
-  fprintf(stderr, "===========================================\n\n");
-  fprintf(stderr, "  ✓ Direct head-to-head comparison complete\n");
-  fprintf(stderr, "  ✓ Both libraries tested on identical hardware\n");
-  fprintf(stderr, "  ✓ Same compiler optimization level\n");
-  fprintf(stderr, "\n  Compare the results above to see relative\n");
-  fprintf(stderr, "  performance of facil.io vs OpenSSL.\n");
-  fprintf(stderr, "\n===========================================\n");
-#else
-  fprintf(stderr, "\n===========================================\n");
-  fprintf(stderr, "Note: OpenSSL comparison benchmarks skipped\n");
-  fprintf(stderr, "      (compile with HAVE_OPENSSL to enable)\n");
-  fprintf(stderr, "===========================================\n");
 #endif
 
   return 0;
