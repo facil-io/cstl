@@ -157,6 +157,10 @@
 #include "190 tls13.h"
 #endif
 
+#ifdef FIO_PEM
+#include "301 pem.h"
+#endif
+
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
 #include "200 string.h"
 #endif

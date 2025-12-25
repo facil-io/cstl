@@ -206,15 +206,140 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
                                     const char *pk_password) {
   fio___tls13_context_s *ctx = (fio___tls13_context_s *)e->udata;
 
-  /* For now, we only support self-signed certificates or pre-loaded DER */
-  /* TODO: Add PEM file loading support */
+#if defined(H___FIO_PEM___H) && defined(H___FIO_X509___H)
+  /* Try to load certificate and key from PEM files */
   if (public_cert_file && private_key_file) {
-    FIO_LOG_WARNING("TLS 1.3: PEM file loading not yet implemented, "
-                    "using self-signed certificate");
+    FIO_LOG_DEBUG2("TLS 1.3: loading certificate from %s", public_cert_file);
+    FIO_LOG_DEBUG2("TLS 1.3: loading private key from %s", private_key_file);
+
+    /* Read certificate file */
+    char *cert_pem = fio_bstr_readfile(NULL, public_cert_file, 0, 0);
+    if (!cert_pem) {
+      FIO_LOG_ERROR("TLS 1.3: failed to read certificate file: %s",
+                    public_cert_file);
+      goto use_self_signed;
+    }
+
+    /* Read private key file */
+    char *key_pem = fio_bstr_readfile(NULL, private_key_file, 0, 0);
+    if (!key_pem) {
+      FIO_LOG_ERROR("TLS 1.3: failed to read private key file: %s",
+                    private_key_file);
+      fio_bstr_free(cert_pem);
+      goto use_self_signed;
+    }
+
+    /* Allocate buffer for DER-encoded certificate */
+    size_t cert_pem_len = fio_bstr_len(cert_pem);
+    size_t der_buf_len = cert_pem_len; /* Conservative estimate */
+    ctx->cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_buf_len, 0);
+    if (!ctx->cert_der) {
+      FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
+      fio_bstr_free(cert_pem);
+      fio_bstr_free(key_pem);
+      return -1;
+    }
+
+    /* Extract DER from PEM */
+    ctx->cert_der_len = fio_pem_get_certificate_der(ctx->cert_der,
+                                                    der_buf_len,
+                                                    cert_pem,
+                                                    cert_pem_len);
+    fio_bstr_free(cert_pem);
+
+    if (ctx->cert_der_len == 0) {
+      FIO_LOG_ERROR("TLS 1.3: failed to parse certificate PEM");
+      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
+      ctx->cert_der = NULL;
+      fio_bstr_free(key_pem);
+      goto use_self_signed;
+    }
+
+    /* Parse private key */
+    fio_pem_private_key_s pkey;
+    size_t key_pem_len = fio_bstr_len(key_pem);
+    if (fio_pem_parse_private_key(&pkey, key_pem, key_pem_len) != 0) {
+      FIO_LOG_ERROR("TLS 1.3: failed to parse private key PEM");
+      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
+      ctx->cert_der = NULL;
+      ctx->cert_der_len = 0;
+      fio_bstr_free(key_pem);
+      goto use_self_signed;
+    }
+    fio_bstr_free(key_pem);
+
+    /* Copy private key based on type */
+    switch (pkey.type) {
+    case FIO_PEM_KEY_ECDSA_P256:
+      FIO_MEMCPY(ctx->private_key, pkey.ecdsa_p256.private_key, 32);
+      if (pkey.ecdsa_p256.has_public_key) {
+        FIO_MEMCPY(ctx->public_key, pkey.ecdsa_p256.public_key, 65);
+      } else {
+        /* Derive public key from private key */
+#if defined(H___FIO_P256___H)
+        uint8_t tmp_secret[32];
+        FIO_MEMCPY(tmp_secret, pkey.ecdsa_p256.private_key, 32);
+        fio_p256_keypair(tmp_secret, ctx->public_key);
+        fio_secure_zero(tmp_secret, 32);
+#else
+        FIO_LOG_ERROR("TLS 1.3: P-256 module required for key derivation");
+        fio_pem_private_key_clear(&pkey);
+        FIO_MEM_FREE(ctx->cert_der, der_buf_len);
+        ctx->cert_der = NULL;
+        ctx->cert_der_len = 0;
+        goto use_self_signed;
+#endif
+      }
+      ctx->private_key_len = 32;
+      ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
+      FIO_LOG_DEBUG2("TLS 1.3: loaded P-256 private key from PEM");
+      break;
+
+    case FIO_PEM_KEY_ED25519:
+      FIO_MEMCPY(ctx->private_key, pkey.ed25519.private_key, 32);
+      ctx->private_key_len = 32;
+      ctx->private_key_type = FIO_TLS13_SIG_ED25519;
+      FIO_LOG_DEBUG2("TLS 1.3: loaded Ed25519 private key from PEM");
+      break;
+
+    case FIO_PEM_KEY_RSA:
+      /* RSA signing not yet supported in TLS 1.3 implementation */
+      FIO_LOG_WARNING(
+          "TLS 1.3: RSA private keys not yet supported for signing");
+      fio_pem_private_key_clear(&pkey);
+      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
+      ctx->cert_der = NULL;
+      ctx->cert_der_len = 0;
+      goto use_self_signed;
+
+    default:
+      FIO_LOG_ERROR("TLS 1.3: unsupported private key type");
+      fio_pem_private_key_clear(&pkey);
+      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
+      ctx->cert_der = NULL;
+      ctx->cert_der_len = 0;
+      goto use_self_signed;
+    }
+
+    fio_pem_private_key_clear(&pkey);
+    FIO_LOG_DEBUG2("TLS 1.3: certificate loaded successfully (%zu bytes)",
+                   ctx->cert_der_len);
+    (void)pk_password;
+    (void)server_name;
+    return 0;
   }
 
+use_self_signed:
+#endif /* H___FIO_PEM___H && H___FIO_X509___H */
+
 #if defined(H___FIO_X509___H)
-  /* Generate self-signed certificate if needed */
+  /* Generate self-signed certificate if no PEM files provided or loading failed
+   */
+  if (public_cert_file && private_key_file) {
+    FIO_LOG_WARNING(
+        "TLS 1.3: PEM loading failed, using self-signed certificate");
+  }
+
   if (fio___tls13_make_self_signed(server_name) != 0) {
     FIO_LOG_ERROR("TLS 1.3: failed to create self-signed certificate");
     return -1;
