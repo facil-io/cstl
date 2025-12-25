@@ -24,7 +24,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 HKDF API
 
 Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha512_hmac).
-      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPT to include all
+      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPTO to include all
       crypto modules.
 ***************************************************************************** */
 

@@ -184,6 +184,7 @@
 #if defined(HAVE_OPENSSL)
 #include "411 openssl.h"
 #endif
+#include "412 tls13.h"
 #endif /* FIO_IO */
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)

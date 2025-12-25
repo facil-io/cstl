@@ -64,7 +64,7 @@ Everything Inclusion
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
-#define FIO_CRYPT
+#define FIO_CRYPTO
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_THREADS
@@ -97,7 +97,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define H___FIO_BASIC_ROUND1___H
 #undef FIO_CLI
 #undef FIO_CORE
-#undef FIO_CRYPT
+#undef FIO_CRYPTO
 #undef FIO_FIOBJ
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
@@ -105,7 +105,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
-#define FIO_CRYPT
+#define FIO_CRYPTO
 #define FIO_THREADS
 
 #elif !defined(H___FIO_BASIC_ROUND2___H)
@@ -126,9 +126,10 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define FIO___INCLUDE_AGAIN
 #endif /* FIO_BASIC */
 /* *****************************************************************************
-FIO_CRYPT             Poor-man's Cryptographic Elements
+FIO_CRYPTO            Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13) ||         \
+    defined(FIO_IO)
 #undef FIO_CRYPT
 #undef FIO_CRYPTO
 #undef FIO_AES
@@ -160,7 +161,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_OTP
 #define FIO_SECRET
 #define FIO_TLS13
-#endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
+#endif /* FIO_CRYPTO */
 
 /* *****************************************************************************
 FIO_CORE                        Core Inclusion
@@ -300,7 +301,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_URL_ENCODED
 #endif
 
-#if (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
+#if defined(FIO_PUBSUB) || (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
 #undef FIO_IO
 #define FIO_IO
 #endif

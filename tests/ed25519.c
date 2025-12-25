@@ -334,6 +334,138 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_rfc7748)(void) {
 }
 
 /* *****************************************************************************
+Ed25519 Signature Edge Cases
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_signature_edge_cases)(void) {
+  FIO_LOG_DDEBUG("Testing Ed25519 signature edge cases");
+
+  uint8_t sk[32], pk[32], sig[64];
+  fio_ed25519_keypair(sk, pk);
+
+  const char *message = "Test message for edge case verification";
+  size_t message_len = strlen(message);
+
+  /* Generate a valid signature */
+  fio_ed25519_sign(sig, message, message_len, sk, pk);
+  FIO_ASSERT(fio_ed25519_verify(sig, message, message_len, pk) == 0,
+             "Valid signature should verify");
+
+  /* Test: Flip each byte of signature - all should fail */
+  for (size_t i = 0; i < 64; ++i) {
+    uint8_t corrupted_sig[64];
+    memcpy(corrupted_sig, sig, 64);
+    corrupted_sig[i] ^= 0x01;
+    FIO_ASSERT(fio_ed25519_verify(corrupted_sig, message, message_len, pk) != 0,
+               "Corrupted signature (byte %zu flipped) should fail",
+               i);
+  }
+  FIO_LOG_DDEBUG("  All 64 byte-flip corruptions detected");
+
+  /* Test: All-zero signature should fail */
+  {
+    uint8_t zero_sig[64] = {0};
+    FIO_ASSERT(fio_ed25519_verify(zero_sig, message, message_len, pk) != 0,
+               "All-zero signature should fail");
+  }
+
+  /* Test: All-ones signature should fail */
+  {
+    uint8_t ones_sig[64];
+    memset(ones_sig, 0xFF, 64);
+    FIO_ASSERT(fio_ed25519_verify(ones_sig, message, message_len, pk) != 0,
+               "All-ones signature should fail");
+  }
+
+  /* Test: Signature with R = 0 (first 32 bytes zero) should fail */
+  {
+    uint8_t bad_sig[64];
+    memset(bad_sig, 0, 32);
+    memcpy(bad_sig + 32, sig + 32, 32);
+    FIO_ASSERT(fio_ed25519_verify(bad_sig, message, message_len, pk) != 0,
+               "Signature with R=0 should fail");
+  }
+
+  /* Test: Signature with S = 0 (last 32 bytes zero) should fail */
+  {
+    uint8_t bad_sig[64];
+    memcpy(bad_sig, sig, 32);
+    memset(bad_sig + 32, 0, 32);
+    FIO_ASSERT(fio_ed25519_verify(bad_sig, message, message_len, pk) != 0,
+               "Signature with S=0 should fail");
+  }
+
+  /* Test: Empty message signature */
+  {
+    uint8_t empty_sig[64];
+    fio_ed25519_sign(empty_sig, "", 0, sk, pk);
+    FIO_ASSERT(fio_ed25519_verify(empty_sig, "", 0, pk) == 0,
+               "Empty message signature should verify");
+    /* Corrupted empty message signature should fail */
+    empty_sig[0] ^= 0x01;
+    FIO_ASSERT(fio_ed25519_verify(empty_sig, "", 0, pk) != 0,
+               "Corrupted empty message signature should fail");
+  }
+
+  /* Test: Large message (64KB) */
+  {
+    size_t large_len = 65536;
+    uint8_t *large_msg = malloc(large_len);
+    FIO_ASSERT(large_msg != NULL, "Failed to allocate large message");
+    for (size_t i = 0; i < large_len; ++i)
+      large_msg[i] = (uint8_t)(i & 0xFF);
+
+    uint8_t large_sig[64];
+    fio_ed25519_sign(large_sig, large_msg, large_len, sk, pk);
+    FIO_ASSERT(fio_ed25519_verify(large_sig, large_msg, large_len, pk) == 0,
+               "Large message signature should verify");
+
+    /* Modify one byte in the middle of the message */
+    large_msg[large_len / 2] ^= 0x01;
+    FIO_ASSERT(fio_ed25519_verify(large_sig, large_msg, large_len, pk) != 0,
+               "Modified large message should fail verification");
+
+    free(large_msg);
+  }
+
+  /* Test: Signature is deterministic */
+  {
+    uint8_t sig2[64];
+    fio_ed25519_sign(sig2, message, message_len, sk, pk);
+    FIO_ASSERT(memcmp(sig, sig2, 64) == 0,
+               "Ed25519 signatures should be deterministic");
+  }
+
+  /* Test: Different messages produce different signatures */
+  {
+    const char *message2 = "Different test message";
+    uint8_t sig2[64];
+    fio_ed25519_sign(sig2, message2, strlen(message2), sk, pk);
+    FIO_ASSERT(memcmp(sig, sig2, 64) != 0,
+               "Different messages should produce different signatures");
+  }
+
+  /* Test: Different keys produce different signatures */
+  {
+    uint8_t sk2[32], pk2[32], sig2[64];
+    fio_ed25519_keypair(sk2, pk2);
+    fio_ed25519_sign(sig2, message, message_len, sk2, pk2);
+    FIO_ASSERT(memcmp(sig, sig2, 64) != 0,
+               "Different keys should produce different signatures");
+  }
+
+  /* Test: Signature from one key doesn't verify with another key */
+  {
+    uint8_t sk2[32], pk2[32];
+    fio_ed25519_keypair(sk2, pk2);
+    FIO_ASSERT(fio_ed25519_verify(sig, message, message_len, pk2) != 0,
+               "Signature should not verify with wrong public key");
+  }
+
+  FIO_LOG_DDEBUG("Ed25519 signature edge cases passed.");
+}
+
+/* *****************************************************************************
 Key Conversion Tests
 ***************************************************************************** */
 
@@ -1196,6 +1328,7 @@ Main Test Function
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
   FIO_LOG_DDEBUG("Testing Ed25519 / X25519 implementation");
   FIO_NAME_TEST(stl, ed25519_rfc8032)();
+  FIO_NAME_TEST(stl, ed25519_signature_edge_cases)();
   FIO_NAME_TEST(stl, x25519_rfc7748)();
   FIO_NAME_TEST(stl, ed25519_x25519_conversion)();
   FIO_NAME_TEST(stl, x25519_ecies)();

@@ -130,6 +130,277 @@ static void fio___test_blake2s_streaming(void) {
   FIO_LOG_DDEBUG("BLAKE2s-256 streaming: PASSED");
 }
 
+/* Edge case tests */
+static void fio___test_blake2_edge_cases(void) {
+  FIO_LOG_DDEBUG("Testing BLAKE2 edge cases...");
+
+  /* Test: Single byte input */
+  {
+    FIO_LOG_DDEBUG("  Testing single byte input...");
+    uint8_t data[1] = {0x00};
+    uint8_t out_b[64], out_s[32];
+
+    fio_blake2b(out_b, 64, data, 1, NULL, 0);
+    fio_blake2s(out_s, 32, data, 1, NULL, 0);
+
+    int zero_b = 1, zero_s = 1;
+    for (int i = 0; i < 64; ++i)
+      if (out_b[i] != 0)
+        zero_b = 0;
+    for (int i = 0; i < 32; ++i)
+      if (out_s[i] != 0)
+        zero_s = 0;
+
+    FIO_ASSERT(!zero_b, "BLAKE2b single byte should not be all zeros");
+    FIO_ASSERT(!zero_s, "BLAKE2s single byte should not be all zeros");
+  }
+
+  /* Test: Block boundary inputs (BLAKE2b block = 128 bytes, BLAKE2s = 64 bytes)
+   */
+  {
+    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
+    size_t test_sizes[] = {63, 64, 65, 127, 128, 129};
+
+    for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); ++i) {
+      size_t len = test_sizes[i];
+      uint8_t *data = (uint8_t *)malloc(len);
+      uint8_t out_b[64], out_s[32];
+      FIO_ASSERT(data, "Memory allocation failed");
+      FIO_MEMSET(data, 'A', len);
+
+      fio_blake2b(out_b, 64, data, len, NULL, 0);
+      fio_blake2s(out_s, 32, data, len, NULL, 0);
+
+      int zero_b = 1, zero_s = 1;
+      for (int j = 0; j < 64; ++j)
+        if (out_b[j] != 0)
+          zero_b = 0;
+      for (int j = 0; j < 32; ++j)
+        if (out_s[j] != 0)
+          zero_s = 0;
+
+      FIO_ASSERT(!zero_b, "BLAKE2b at %zu bytes should not be all zeros", len);
+      FIO_ASSERT(!zero_s, "BLAKE2s at %zu bytes should not be all zeros", len);
+
+      free(data);
+    }
+  }
+
+  /* Test: Variable output lengths */
+  {
+    FIO_LOG_DDEBUG("  Testing variable output lengths...");
+    uint8_t data[] = "test input";
+    size_t data_len = sizeof(data) - 1;
+
+    /* BLAKE2b: 1 to 64 bytes output */
+    size_t b_lens[] = {1, 16, 32, 48, 64};
+    for (size_t i = 0; i < sizeof(b_lens) / sizeof(b_lens[0]); ++i) {
+      size_t out_len = b_lens[i];
+      uint8_t out[64];
+      FIO_MEMSET(out, 0, 64);
+
+      fio_blake2b(out, out_len, data, data_len, NULL, 0);
+
+      int zero = 1;
+      for (size_t j = 0; j < out_len; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "BLAKE2b %zu-byte output should not be all zeros",
+                 out_len);
+    }
+
+    /* BLAKE2s: 1 to 32 bytes output */
+    size_t s_lens[] = {1, 8, 16, 24, 32};
+    for (size_t i = 0; i < sizeof(s_lens) / sizeof(s_lens[0]); ++i) {
+      size_t out_len = s_lens[i];
+      uint8_t out[32];
+      FIO_MEMSET(out, 0, 32);
+
+      fio_blake2s(out, out_len, data, data_len, NULL, 0);
+
+      int zero = 1;
+      for (size_t j = 0; j < out_len; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "BLAKE2s %zu-byte output should not be all zeros",
+                 out_len);
+    }
+  }
+
+  /* Test: Keyed hashing with various key lengths */
+  {
+    FIO_LOG_DDEBUG("  Testing keyed hashing with various key lengths...");
+    uint8_t data[] = "test message";
+    size_t data_len = sizeof(data) - 1;
+
+    /* BLAKE2b: key up to 64 bytes */
+    size_t b_key_lens[] = {1, 16, 32, 64};
+    for (size_t i = 0; i < sizeof(b_key_lens) / sizeof(b_key_lens[0]); ++i) {
+      size_t key_len = b_key_lens[i];
+      uint8_t key[64];
+      uint8_t out[64];
+      FIO_MEMSET(key, (int)i, key_len);
+
+      fio_blake2b(out, 64, data, data_len, key, key_len);
+
+      int zero = 1;
+      for (int j = 0; j < 64; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "BLAKE2b with %zu-byte key should not be all zeros",
+                 key_len);
+    }
+
+    /* BLAKE2s: key up to 32 bytes */
+    size_t s_key_lens[] = {1, 8, 16, 32};
+    for (size_t i = 0; i < sizeof(s_key_lens) / sizeof(s_key_lens[0]); ++i) {
+      size_t key_len = s_key_lens[i];
+      uint8_t key[32];
+      uint8_t out[32];
+      FIO_MEMSET(key, (int)i, key_len);
+
+      fio_blake2s(out, 32, data, data_len, key, key_len);
+
+      int zero = 1;
+      for (int j = 0; j < 32; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "BLAKE2s with %zu-byte key should not be all zeros",
+                 key_len);
+    }
+  }
+
+  /* Test: Empty key (should work like unkeyed) */
+  {
+    FIO_LOG_DDEBUG("  Testing empty key...");
+    uint8_t data[] = "test";
+    uint8_t out1[64], out2[64];
+
+    fio_blake2b(out1, 64, data, 4, NULL, 0);
+    fio_blake2b(out2, 64, data, 4, (uint8_t *)"", 0);
+
+    FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64), "Empty key should equal no key");
+  }
+
+  /* Test: Large input (1MB) */
+  {
+    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
+    size_t len = 1024 * 1024;
+    uint8_t *data = (uint8_t *)malloc(len);
+    uint8_t out[64];
+    FIO_ASSERT(data, "Memory allocation failed");
+
+    for (size_t i = 0; i < len; ++i)
+      data[i] = (uint8_t)(i & 0xFF);
+
+    fio_blake2b(out, 64, data, len, NULL, 0);
+
+    int zero = 1;
+    for (int i = 0; i < 64; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "BLAKE2b 1MB should not be all zeros");
+
+    /* Verify determinism */
+    uint8_t out2[64];
+    fio_blake2b(out2, 64, data, len, NULL, 0);
+    FIO_ASSERT(!FIO_MEMCMP(out, out2, 64), "BLAKE2b should be deterministic");
+
+    free(data);
+  }
+
+  /* Test: Incremental with various chunk sizes */
+  {
+    FIO_LOG_DDEBUG("  Testing incremental with various chunk sizes...");
+    uint8_t data[1000];
+    for (size_t i = 0; i < 1000; ++i)
+      data[i] = (uint8_t)(i & 0xFF);
+
+    uint8_t out1[64], out2[64];
+
+    /* One-shot */
+    fio_blake2b(out1, 64, data, 1000, NULL, 0);
+
+    /* Incremental - single byte at a time */
+    fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
+    for (size_t i = 0; i < 1000; ++i) {
+      fio_blake2b_consume(&h, data + i, 1);
+    }
+    fio_blake2b_finalize(&h, out2);
+
+    FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64),
+               "BLAKE2b incremental (1 byte) mismatch");
+  }
+
+  /* Test: All zeros input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-zeros input...");
+    uint8_t data[64] = {0};
+    uint8_t out[64];
+
+    fio_blake2b(out, 64, data, 64, NULL, 0);
+
+    int zero = 1;
+    for (int i = 0; i < 64; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "BLAKE2b of zeros should not be all zeros");
+  }
+
+  /* Test: All ones input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-ones input...");
+    uint8_t data[64];
+    uint8_t out[64];
+    FIO_MEMSET(data, 0xFF, 64);
+
+    fio_blake2b(out, 64, data, 64, NULL, 0);
+
+    int zero = 1;
+    for (int i = 0; i < 64; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "BLAKE2b of ones should not be all zeros");
+  }
+
+  /* Test: Different keys produce different outputs */
+  {
+    FIO_LOG_DDEBUG("  Testing different keys produce different outputs...");
+    uint8_t data[] = "test";
+    uint8_t key1[32] = {0};
+    uint8_t key2[32] = {0};
+    key2[0] = 1;
+
+    uint8_t out1[64], out2[64];
+    fio_blake2b(out1, 64, data, 4, key1, 32);
+    fio_blake2b(out2, 64, data, 4, key2, 32);
+
+    FIO_ASSERT(FIO_MEMCMP(out1, out2, 64) != 0,
+               "Different keys should produce different outputs");
+  }
+
+  /* Test: Different output lengths produce different prefixes */
+  {
+    FIO_LOG_DDEBUG("  Testing different output lengths...");
+    uint8_t data[] = "test";
+    uint8_t out32[32], out64[64];
+
+    fio_blake2b(out32, 32, data, 4, NULL, 0);
+    fio_blake2b(out64, 64, data, 4, NULL, 0);
+
+    /* The 32-byte output should NOT be a prefix of the 64-byte output */
+    /* (BLAKE2 encodes output length in the hash) */
+    FIO_ASSERT(FIO_MEMCMP(out32, out64, 32) != 0,
+               "Different output lengths should produce different hashes");
+  }
+
+  FIO_LOG_DDEBUG("BLAKE2 edge case tests passed!");
+}
+
 int main(void) {
   FIO_LOG_DDEBUG("Testing BLAKE2 implementation...");
 
@@ -145,6 +416,10 @@ int main(void) {
   fio___test_blake2s_empty();
   fio___test_blake2s_abc();
   fio___test_blake2s_streaming();
+
+  /* Edge case tests */
+  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
+  fio___test_blake2_edge_cases();
 
   FIO_LOG_DDEBUG("All BLAKE2 tests passed!");
   return 0;

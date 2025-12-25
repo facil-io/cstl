@@ -55,6 +55,22 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
                                 size_t pubkey_len);
 
 /**
+ * Signs a message hash using ECDSA P-256.
+ *
+ * @param sig Output: DER-encoded signature (max 72 bytes)
+ * @param sig_len Output: actual signature length
+ * @param sig_capacity Capacity of signature buffer (should be >= 72)
+ * @param msg_hash SHA-256 hash of the message (32 bytes)
+ * @param secret_key 32-byte secret key (scalar, big-endian)
+ * @return 0 on success, -1 on failure
+ */
+SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[32],
+                              const uint8_t secret_key[32]);
+
+/**
  * Verifies an ECDSA P-256 signature with raw r,s values.
  *
  * @param r The r component of the signature (32 bytes, big-endian)
@@ -1215,6 +1231,201 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
 
   /* Verify */
   return fio_ecdsa_p256_verify_raw(r, s, msg_hash, pubkey + 1, pubkey + 33);
+}
+
+/* *****************************************************************************
+ECDSA P-256 Signing Implementation
+***************************************************************************** */
+
+/**
+ * Encode a 32-byte integer as DER INTEGER (handles leading zero for positive).
+ * Returns number of bytes written.
+ */
+FIO_SFUNC size_t fio___p256_encode_der_integer(uint8_t *out,
+                                               const uint8_t val[32]) {
+  /* Skip leading zeros */
+  size_t start = 0;
+  while (start < 31 && val[start] == 0)
+    ++start;
+
+  /* Need leading zero if high bit is set (to keep positive) */
+  int need_zero = (val[start] & 0x80) != 0;
+  size_t len = 32 - start + (need_zero ? 1 : 0);
+
+  out[0] = 0x02; /* INTEGER tag */
+  out[1] = (uint8_t)len;
+  size_t offset = 2;
+  if (need_zero)
+    out[offset++] = 0x00;
+  FIO_MEMCPY(out + offset, val + start, 32 - start);
+
+  return 2 + len;
+}
+
+SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[32],
+                              const uint8_t secret_key[32]) {
+  if (!sig || !sig_len || !msg_hash || !secret_key || sig_capacity < 72)
+    return -1;
+
+  fio___p256_scalar_s d, e, k, r_scalar, s_scalar, tmp;
+
+  /* Load secret key as scalar d */
+  fio___p256_scalar_from_bytes(d, secret_key);
+
+  /* Validate d: 0 < d < n */
+  if (fio___p256_scalar_is_zero(d) || fio___p256_scalar_gte_n(d)) {
+    fio_secure_zero(d, sizeof(d));
+    return -1;
+  }
+
+  /* Load message hash as scalar e */
+  fio___p256_scalar_from_bytes(e, msg_hash);
+
+  /* Reduce e mod n if needed */
+  if (fio___p256_scalar_gte_n(e)) {
+    uint64_t borrow = 0;
+    e[0] = fio_math_subc64(e[0], FIO___P256_N[0], 0, &borrow);
+    e[1] = fio_math_subc64(e[1], FIO___P256_N[1], borrow, &borrow);
+    e[2] = fio_math_subc64(e[2], FIO___P256_N[2], borrow, &borrow);
+    e[3] = fio_math_subc64(e[3], FIO___P256_N[3], borrow, &borrow);
+  }
+
+  /* Generate random k and compute signature */
+  /* Try up to 100 times to get valid k (should succeed on first try) */
+  uint8_t k_bytes[32];
+  uint8_t r_bytes[32], s_bytes[32];
+
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    /* Generate random k */
+    fio_rand_bytes(k_bytes, 32);
+    fio___p256_scalar_from_bytes(k, k_bytes);
+
+    /* Ensure 0 < k < n */
+    if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k))
+      continue;
+
+    /* Compute R = k * G */
+    fio___p256_point_affine_s g;
+    fio___p256_fe_copy(g.x, FIO___P256_GX);
+    fio___p256_fe_copy(g.y, FIO___P256_GY);
+
+    fio___p256_point_jacobian_s R_jac;
+    fio___p256_point_mul(&R_jac, k, &g);
+
+    if (fio___p256_point_is_infinity(&R_jac))
+      continue;
+
+    /* Convert R to affine */
+    fio___p256_point_affine_s R_aff;
+    fio___p256_point_to_affine(&R_aff, &R_jac);
+
+    /* r = R.x mod n */
+    fio___p256_fe_to_bytes(r_bytes, R_aff.x);
+    fio___p256_scalar_from_bytes(r_scalar, r_bytes);
+
+    /* Reduce r mod n if needed */
+    while (fio___p256_scalar_gte_n(r_scalar)) {
+      uint64_t borrow = 0;
+      r_scalar[0] = fio_math_subc64(r_scalar[0], FIO___P256_N[0], 0, &borrow);
+      r_scalar[1] =
+          fio_math_subc64(r_scalar[1], FIO___P256_N[1], borrow, &borrow);
+      r_scalar[2] =
+          fio_math_subc64(r_scalar[2], FIO___P256_N[2], borrow, &borrow);
+      r_scalar[3] =
+          fio_math_subc64(r_scalar[3], FIO___P256_N[3], borrow, &borrow);
+    }
+
+    /* If r == 0, try again */
+    if (fio___p256_scalar_is_zero(r_scalar))
+      continue;
+
+    /* Compute s = k^(-1) * (e + r*d) mod n */
+    /* First: r*d mod n */
+    fio___p256_scalar_mul(tmp, r_scalar, d);
+
+    /* Then: e + r*d mod n */
+    /* Add e to tmp */
+    uint64_t carry = 0;
+    tmp[0] = fio_math_addc64(tmp[0], e[0], 0, &carry);
+    tmp[1] = fio_math_addc64(tmp[1], e[1], carry, &carry);
+    tmp[2] = fio_math_addc64(tmp[2], e[2], carry, &carry);
+    tmp[3] = fio_math_addc64(tmp[3], e[3], carry, &carry);
+
+    /* Reduce mod n if needed */
+    while (carry || fio___p256_scalar_gte_n(tmp)) {
+      uint64_t borrow = 0;
+      tmp[0] = fio_math_subc64(tmp[0], FIO___P256_N[0], 0, &borrow);
+      tmp[1] = fio_math_subc64(tmp[1], FIO___P256_N[1], borrow, &borrow);
+      tmp[2] = fio_math_subc64(tmp[2], FIO___P256_N[2], borrow, &borrow);
+      tmp[3] = fio_math_subc64(tmp[3], FIO___P256_N[3], borrow, &borrow);
+      carry = 0;
+    }
+
+    /* Compute k^(-1) mod n */
+    fio___p256_scalar_s k_inv;
+    fio___p256_scalar_inv(k_inv, k);
+
+    /* s = k^(-1) * (e + r*d) mod n */
+    fio___p256_scalar_mul(s_scalar, k_inv, tmp);
+
+    /* If s == 0, try again */
+    if (fio___p256_scalar_is_zero(s_scalar))
+      continue;
+
+    /* Convert r and s to bytes (big-endian) */
+    /* r_scalar to r_bytes */
+    fio_u2buf64_be(r_bytes, r_scalar[3]);
+    fio_u2buf64_be(r_bytes + 8, r_scalar[2]);
+    fio_u2buf64_be(r_bytes + 16, r_scalar[1]);
+    fio_u2buf64_be(r_bytes + 24, r_scalar[0]);
+
+    /* s_scalar to s_bytes */
+    fio_u2buf64_be(s_bytes, s_scalar[3]);
+    fio_u2buf64_be(s_bytes + 8, s_scalar[2]);
+    fio_u2buf64_be(s_bytes + 16, s_scalar[1]);
+    fio_u2buf64_be(s_bytes + 24, s_scalar[0]);
+
+    /* Encode as DER: SEQUENCE { r INTEGER, s INTEGER } */
+    uint8_t r_der[34], s_der[34];
+    FIO_MEMSET(r_der, 0, sizeof(r_der));
+    FIO_MEMSET(s_der, 0, sizeof(s_der));
+    size_t r_der_len = fio___p256_encode_der_integer(r_der, r_bytes);
+    size_t s_der_len = fio___p256_encode_der_integer(s_der, s_bytes);
+
+    size_t seq_content_len = r_der_len + s_der_len;
+    size_t total_len =
+        2 + seq_content_len; /* SEQUENCE tag + length + content */
+
+    if (total_len > sig_capacity) {
+      fio_secure_zero(d, sizeof(d));
+      fio_secure_zero(k, sizeof(k));
+      fio_secure_zero(k_inv, sizeof(k_inv));
+      return -1;
+    }
+
+    /* Write SEQUENCE header */
+    sig[0] = 0x30; /* SEQUENCE tag */
+    sig[1] = (uint8_t)seq_content_len;
+    FIO_MEMCPY(sig + 2, r_der, r_der_len);
+    FIO_MEMCPY(sig + 2 + r_der_len, s_der, s_der_len);
+
+    *sig_len = total_len;
+
+    /* Clear sensitive data */
+    fio_secure_zero(d, sizeof(d));
+    fio_secure_zero(k, sizeof(k));
+    fio_secure_zero(k_inv, sizeof(k_inv));
+    fio_secure_zero(k_bytes, sizeof(k_bytes));
+
+    return 0;
+  }
+
+  /* Failed to generate valid signature after 100 attempts */
+  fio_secure_zero(d, sizeof(d));
+  return -1;
 }
 
 /* *****************************************************************************

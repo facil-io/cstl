@@ -169,9 +169,9 @@ When `FIO_CORE` is defined, all core modules are included, such as `FIO_STR`, `F
 
 When `FIO_BASIC` is defined, the `FIOBJ` types, multi threading, and CLI modules are included in addition to the core modules.
 
-#### `FIO_CRYPT`
+#### `FIO_CRYPTO`
 
-When `FIO_CRYPT` is defined, all hash and cryptographic modules are included.
+When `FIO_CRYPTO` is defined, all hash and cryptographic modules are included.
 
 **Note**: do NOT use these cryptographic unless you have no other choice. Always prefer tested cryptographic libraries such as OpenSSL.
 

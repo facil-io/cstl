@@ -87,6 +87,7 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_INT("--timeout -t (50) ongoing connection timeout in seconds."),
       FIO_CLI_INT("--wait -w (5) connection attempt timeout in seconds."),
       FIO_CLI_BOOL("--body -b print out body only, ignore headers."),
+      FIO_CLI_BOOL("--tls-mini -mtls uses the minimal TLS 1.3 fallback."),
       FIO_CLI_BOOL("--verbose -V -d print out debugging messages."),
       FIO_CLI_PRINT_HEADER("\nUse:"),
       FIO_CLI_PRINT_LINE("\tNAME <url>\n"
@@ -115,6 +116,15 @@ int main(int argc, char const *argv[]) {
   /* review connection timeout */
   if (fio_cli_get_i("-t") > 0)
     CLIENT_PROTOCOL.timeout = (uint32_t)fio_cli_get_i("-t") * 1000;
+
+  /* review TLS fallback */
+  if (fio_cli_get_bool("-mtls")) {
+    fio_io_functions_s io_fn;
+    io_fn = fio_tls13_io_functions();
+    fio_io_tls_default_functions(&io_fn);
+    fio_cli_set("-tls", "1");
+    FIO_LOG_DEBUG2("TLS 1.3 registered as default TLS implementation");
+  }
 
   void *is_http = NULL;
 

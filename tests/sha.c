@@ -643,8 +643,329 @@ FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
   FIO_LOG_DDEBUG("HMAC tests passed.");
 }
 
+/* *****************************************************************************
+SHA Edge Case Tests
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
+  FIO_LOG_DDEBUG("Testing SHA edge cases...");
+
+  /* Test: Empty input (0 bytes) - known values */
+  {
+    FIO_LOG_DDEBUG("  Testing empty input...");
+    /* SHA-1("") = da39a3ee5e6b4b0d3255bfef95601890afd80709 */
+    static const uint8_t sha1_empty[20] = {
+        0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
+        0xbf, 0xef, 0x95, 0x60, 0x18, 0x90, 0xaf, 0xd8, 0x07, 0x09};
+    /* SHA-256("") =
+     * e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 */
+    static const uint8_t sha256_empty[32] = {
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4,
+        0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b,
+        0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55};
+    /* SHA-512("") =
+     * cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+     */
+    static const uint8_t sha512_empty[64] = {
+        0xcf, 0x83, 0xe1, 0x35, 0x7e, 0xef, 0xb8, 0xbd, 0xf1, 0x54, 0x28,
+        0x50, 0xd6, 0x6d, 0x80, 0x07, 0xd6, 0x20, 0xe4, 0x05, 0x0b, 0x57,
+        0x15, 0xdc, 0x83, 0xf4, 0xa9, 0x21, 0xd3, 0x6c, 0xe9, 0xce, 0x47,
+        0xd0, 0xd1, 0x3c, 0x5d, 0x85, 0xf2, 0xb0, 0xff, 0x83, 0x18, 0xd2,
+        0x87, 0x7e, 0xec, 0x2f, 0x63, 0xb9, 0x31, 0xbd, 0x47, 0x41, 0x7a,
+        0x81, 0xa5, 0x38, 0x32, 0x7a, 0xf9, 0x27, 0xda, 0x3e};
+
+    fio_sha1_s sha1 = fio_sha1(NULL, 0);
+    FIO_ASSERT(!memcmp(sha1.digest, sha1_empty, 20),
+               "SHA-1 empty input failed");
+
+    fio_u256 sha256 = fio_sha256(NULL, 0);
+    FIO_ASSERT(!memcmp(sha256.u8, sha256_empty, 32),
+               "SHA-256 empty input failed");
+
+    fio_u512 sha512 = fio_sha512(NULL, 0);
+    FIO_ASSERT(!memcmp(sha512.u8, sha512_empty, 64),
+               "SHA-512 empty input failed");
+  }
+
+  /* Test: Single byte input */
+  {
+    FIO_LOG_DDEBUG("  Testing single byte input...");
+    uint8_t data[1] = {0x00};
+
+    fio_sha1_s sha1 = fio_sha1(data, 1);
+    fio_u256 sha256 = fio_sha256(data, 1);
+    fio_u512 sha512 = fio_sha512(data, 1);
+
+    /* Just verify they produce non-zero output */
+    int sha1_zero = 1, sha256_zero = 1, sha512_zero = 1;
+    for (int i = 0; i < 20; ++i)
+      if (sha1.digest[i] != 0)
+        sha1_zero = 0;
+    for (int i = 0; i < 32; ++i)
+      if (sha256.u8[i] != 0)
+        sha256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (sha512.u8[i] != 0)
+        sha512_zero = 0;
+
+    FIO_ASSERT(!sha1_zero, "SHA-1 single byte should not be all zeros");
+    FIO_ASSERT(!sha256_zero, "SHA-256 single byte should not be all zeros");
+    FIO_ASSERT(!sha512_zero, "SHA-512 single byte should not be all zeros");
+  }
+
+  /* Test: Inputs at block boundaries */
+  {
+    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
+    /* SHA-256 block size = 64 bytes, SHA-512 block size = 128 bytes */
+    size_t test_sizes[] = {63, 64, 65, 127, 128, 129};
+
+    for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); ++i) {
+      size_t len = test_sizes[i];
+      uint8_t *data = (uint8_t *)malloc(len);
+      FIO_ASSERT(data, "Memory allocation failed");
+      FIO_MEMSET(data, 'A', len);
+
+      fio_u256 sha256 = fio_sha256(data, len);
+      fio_u512 sha512 = fio_sha512(data, len);
+
+      /* Verify non-zero output */
+      int sha256_zero = 1, sha512_zero = 1;
+      for (int j = 0; j < 32; ++j)
+        if (sha256.u8[j] != 0)
+          sha256_zero = 0;
+      for (int j = 0; j < 64; ++j)
+        if (sha512.u8[j] != 0)
+          sha512_zero = 0;
+
+      FIO_ASSERT(!sha256_zero,
+                 "SHA-256 at %zu bytes should not be all zeros",
+                 len);
+      FIO_ASSERT(!sha512_zero,
+                 "SHA-512 at %zu bytes should not be all zeros",
+                 len);
+
+      free(data);
+    }
+  }
+
+  /* Test: Incremental hashing vs one-shot */
+  {
+    FIO_LOG_DDEBUG("  Testing incremental vs one-shot hashing...");
+    uint8_t data[1000];
+    fio_rand_bytes(data, 1000);
+
+    /* One-shot SHA-256 */
+    fio_u256 hash1 = fio_sha256(data, 1000);
+
+    /* Incremental SHA-256 - various chunk sizes */
+    {
+      fio_sha256_s ctx = fio_sha256_init();
+      fio_sha256_consume(&ctx, data, 100);
+      fio_sha256_consume(&ctx, data + 100, 400);
+      fio_sha256_consume(&ctx, data + 500, 500);
+      fio_u256 hash2 = fio_sha256_finalize(&ctx);
+      FIO_ASSERT(!memcmp(hash1.u8, hash2.u8, 32),
+                 "SHA-256 incremental (100+400+500) mismatch");
+    }
+
+    /* Incremental SHA-256 - single byte at a time */
+    {
+      fio_sha256_s ctx = fio_sha256_init();
+      for (size_t i = 0; i < 1000; ++i) {
+        fio_sha256_consume(&ctx, data + i, 1);
+      }
+      fio_u256 hash2 = fio_sha256_finalize(&ctx);
+      FIO_ASSERT(!memcmp(hash1.u8, hash2.u8, 32),
+                 "SHA-256 incremental (1 byte at a time) mismatch");
+    }
+
+    /* One-shot SHA-512 */
+    fio_u512 hash512_1 = fio_sha512(data, 1000);
+
+    /* Incremental SHA-512 */
+    {
+      fio_sha512_s ctx = fio_sha512_init();
+      fio_sha512_consume(&ctx, data, 100);
+      fio_sha512_consume(&ctx, data + 100, 400);
+      fio_sha512_consume(&ctx, data + 500, 500);
+      fio_u512 hash512_2 = fio_sha512_finalize(&ctx);
+      FIO_ASSERT(!memcmp(hash512_1.u8, hash512_2.u8, 64),
+                 "SHA-512 incremental mismatch");
+    }
+  }
+
+  /* Test: Large input (1MB) */
+  {
+    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
+    size_t len = 1024 * 1024;
+    uint8_t *data = (uint8_t *)malloc(len);
+    FIO_ASSERT(data, "Memory allocation failed");
+    fio_rand_bytes(data, len);
+
+    fio_u256 sha256 = fio_sha256(data, len);
+    fio_u512 sha512 = fio_sha512(data, len);
+
+    /* Verify non-zero output */
+    int sha256_zero = 1, sha512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (sha256.u8[i] != 0)
+        sha256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (sha512.u8[i] != 0)
+        sha512_zero = 0;
+
+    FIO_ASSERT(!sha256_zero, "SHA-256 1MB should not be all zeros");
+    FIO_ASSERT(!sha512_zero, "SHA-512 1MB should not be all zeros");
+
+    /* Verify determinism */
+    fio_u256 sha256_2 = fio_sha256(data, len);
+    FIO_ASSERT(!memcmp(sha256.u8, sha256_2.u8, 32),
+               "SHA-256 should be deterministic");
+
+    free(data);
+  }
+
+  /* Test: All zeros input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-zeros input...");
+    uint8_t data[64] = {0};
+
+    fio_u256 sha256 = fio_sha256(data, 64);
+    fio_u512 sha512 = fio_sha512(data, 64);
+
+    /* Verify non-zero output (hash of zeros is not zeros) */
+    int sha256_zero = 1, sha512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (sha256.u8[i] != 0)
+        sha256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (sha512.u8[i] != 0)
+        sha512_zero = 0;
+
+    FIO_ASSERT(!sha256_zero, "SHA-256 of zeros should not be all zeros");
+    FIO_ASSERT(!sha512_zero, "SHA-512 of zeros should not be all zeros");
+  }
+
+  /* Test: All ones input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-ones input...");
+    uint8_t data[64];
+    FIO_MEMSET(data, 0xFF, 64);
+
+    fio_u256 sha256 = fio_sha256(data, 64);
+    fio_u512 sha512 = fio_sha512(data, 64);
+
+    /* Verify non-zero output */
+    int sha256_zero = 1, sha512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (sha256.u8[i] != 0)
+        sha256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (sha512.u8[i] != 0)
+        sha512_zero = 0;
+
+    FIO_ASSERT(!sha256_zero, "SHA-256 of ones should not be all zeros");
+    FIO_ASSERT(!sha512_zero, "SHA-512 of ones should not be all zeros");
+  }
+
+  /* Test: Different inputs produce different hashes */
+  {
+    FIO_LOG_DDEBUG("  Testing different inputs produce different hashes...");
+    uint8_t data1[32] = {0};
+    uint8_t data2[32] = {0};
+    data2[0] = 1; /* Single bit difference */
+
+    fio_u256 hash1 = fio_sha256(data1, 32);
+    fio_u256 hash2 = fio_sha256(data2, 32);
+
+    FIO_ASSERT(memcmp(hash1.u8, hash2.u8, 32) != 0,
+               "Different inputs should produce different SHA-256 hashes");
+
+    fio_u512 hash512_1 = fio_sha512(data1, 32);
+    fio_u512 hash512_2 = fio_sha512(data2, 32);
+
+    FIO_ASSERT(memcmp(hash512_1.u8, hash512_2.u8, 64) != 0,
+               "Different inputs should produce different SHA-512 hashes");
+  }
+
+  /* Test: HMAC with empty key */
+  {
+    FIO_LOG_DDEBUG("  Testing HMAC with empty key...");
+    uint8_t data[32];
+    fio_rand_bytes(data, 32);
+
+    /* Empty key should still produce valid HMAC */
+    fio_u256 hmac256 = fio_sha256_hmac(NULL, 0, data, 32);
+    fio_u512 hmac512 = fio_sha512_hmac(NULL, 0, data, 32);
+
+    int hmac256_zero = 1, hmac512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (hmac256.u8[i] != 0)
+        hmac256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (hmac512.u8[i] != 0)
+        hmac512_zero = 0;
+
+    FIO_ASSERT(!hmac256_zero,
+               "HMAC-SHA256 with empty key should not be all zeros");
+    FIO_ASSERT(!hmac512_zero,
+               "HMAC-SHA512 with empty key should not be all zeros");
+  }
+
+  /* Test: HMAC with empty message */
+  {
+    FIO_LOG_DDEBUG("  Testing HMAC with empty message...");
+    uint8_t key[32];
+    fio_rand_bytes(key, 32);
+
+    fio_u256 hmac256 = fio_sha256_hmac(key, 32, NULL, 0);
+    fio_u512 hmac512 = fio_sha512_hmac(key, 32, NULL, 0);
+
+    int hmac256_zero = 1, hmac512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (hmac256.u8[i] != 0)
+        hmac256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (hmac512.u8[i] != 0)
+        hmac512_zero = 0;
+
+    FIO_ASSERT(!hmac256_zero,
+               "HMAC-SHA256 with empty message should not be all zeros");
+    FIO_ASSERT(!hmac512_zero,
+               "HMAC-SHA512 with empty message should not be all zeros");
+  }
+
+  /* Test: HMAC with key longer than block size */
+  {
+    FIO_LOG_DDEBUG("  Testing HMAC with long key...");
+    uint8_t key[256]; /* Much longer than block size */
+    uint8_t data[32];
+    fio_rand_bytes(key, 256);
+    fio_rand_bytes(data, 32);
+
+    fio_u256 hmac256 = fio_sha256_hmac(key, 256, data, 32);
+    fio_u512 hmac512 = fio_sha512_hmac(key, 256, data, 32);
+
+    int hmac256_zero = 1, hmac512_zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (hmac256.u8[i] != 0)
+        hmac256_zero = 0;
+    for (int i = 0; i < 64; ++i)
+      if (hmac512.u8[i] != 0)
+        hmac512_zero = 0;
+
+    FIO_ASSERT(!hmac256_zero,
+               "HMAC-SHA256 with long key should not be all zeros");
+    FIO_ASSERT(!hmac512_zero,
+               "HMAC-SHA512 with long key should not be all zeros");
+  }
+
+  FIO_LOG_DDEBUG("SHA edge case tests passed!");
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, sha1)();
   FIO_NAME_TEST(stl, sha2)();
   FIO_NAME_TEST(stl, hmac)();
+  FIO_NAME_TEST(stl, sha_edge_cases)();
 }

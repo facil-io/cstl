@@ -278,6 +278,105 @@ static void fio___test_hkdf_edge_cases(void) {
   FIO_LOG_DDEBUG("HKDF edge cases: PASSED");
 }
 
+/* Test additional edge cases */
+static void fio___test_hkdf_additional_edge_cases(void) {
+  uint8_t okm1[64], okm2[64];
+  uint8_t zero[64] = {0};
+
+  /* Test: Single-byte IKM (minimal non-empty input) */
+  static const uint8_t ikm_single[1] = {0x42};
+  FIO_MEMSET(okm1, 0, sizeof(okm1));
+  fio_hkdf(okm1, 32, NULL, 0, ikm_single, 1, NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, zero, 32) != 0,
+             "HKDF with single-byte IKM should produce non-zero output");
+
+  /* Test: Single-byte IKM is deterministic */
+  FIO_MEMSET(okm2, 0, sizeof(okm2));
+  fio_hkdf(okm2, 32, NULL, 0, ikm_single, 1, NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, okm2, 32) == 0,
+             "HKDF with single-byte IKM should be deterministic");
+
+  /* Test: Different IKM produces different output */
+  static const uint8_t ikm1[16] = {0x01,
+                                   0x02,
+                                   0x03,
+                                   0x04,
+                                   0x05,
+                                   0x06,
+                                   0x07,
+                                   0x08,
+                                   0x09,
+                                   0x0a,
+                                   0x0b,
+                                   0x0c,
+                                   0x0d,
+                                   0x0e,
+                                   0x0f,
+                                   0x10};
+  static const uint8_t ikm2[16] = {0x11,
+                                   0x12,
+                                   0x13,
+                                   0x14,
+                                   0x15,
+                                   0x16,
+                                   0x17,
+                                   0x18,
+                                   0x19,
+                                   0x1a,
+                                   0x1b,
+                                   0x1c,
+                                   0x1d,
+                                   0x1e,
+                                   0x1f,
+                                   0x20};
+
+  fio_hkdf(okm1, 32, NULL, 0, ikm1, sizeof(ikm1), NULL, 0, 0);
+  fio_hkdf(okm2, 32, NULL, 0, ikm2, sizeof(ikm2), NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, okm2, 32) != 0,
+             "Different IKM should produce different output");
+
+  /* Test: Different salt produces different output */
+  static const uint8_t salt1[8] =
+      {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+  static const uint8_t salt2[8] =
+      {0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18};
+
+  fio_hkdf(okm1, 32, salt1, sizeof(salt1), ikm1, sizeof(ikm1), NULL, 0, 0);
+  fio_hkdf(okm2, 32, salt2, sizeof(salt2), ikm1, sizeof(ikm1), NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, okm2, 32) != 0,
+             "Different salt should produce different output");
+
+  /* Test: Different info produces different output */
+  static const uint8_t info1[4] = {0x01, 0x02, 0x03, 0x04};
+  static const uint8_t info2[4] = {0x11, 0x12, 0x13, 0x14};
+
+  fio_hkdf(okm1, 32, NULL, 0, ikm1, sizeof(ikm1), info1, sizeof(info1), 0);
+  fio_hkdf(okm2, 32, NULL, 0, ikm1, sizeof(ikm1), info2, sizeof(info2), 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, okm2, 32) != 0,
+             "Different info should produce different output");
+
+  /* Test: SHA-256 and SHA-384 produce different outputs */
+  fio_hkdf(okm1, 32, NULL, 0, ikm1, sizeof(ikm1), NULL, 0, 0);
+  fio_hkdf(okm2, 32, NULL, 0, ikm1, sizeof(ikm1), NULL, 0, 1);
+  FIO_ASSERT(FIO_MEMCMP(okm1, okm2, 32) != 0,
+             "SHA-256 and SHA-384 should produce different output");
+
+  /* Test: Output length boundary (exactly hash_len * 2 = 64 bytes) */
+  FIO_MEMSET(okm1, 0, sizeof(okm1));
+  fio_hkdf(okm1, 64, NULL, 0, ikm1, sizeof(ikm1), NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm1, zero, 64) != 0,
+             "HKDF 64-byte output (2 * hash_len) failed");
+
+  /* Test: Output length boundary (hash_len + 1 = 33 bytes) */
+  uint8_t okm33[33] = {0};
+  uint8_t zero33[33] = {0};
+  fio_hkdf(okm33, 33, NULL, 0, ikm1, sizeof(ikm1), NULL, 0, 0);
+  FIO_ASSERT(FIO_MEMCMP(okm33, zero33, 33) != 0,
+             "HKDF 33-byte output (hash_len + 1) failed");
+
+  FIO_LOG_DDEBUG("HKDF additional edge cases: PASSED");
+}
+
 /* Test determinism - same inputs should produce same outputs */
 static void fio___test_hkdf_determinism(void) {
   static const uint8_t ikm[16] = {0x01,
@@ -340,6 +439,7 @@ int main(void) {
 
   FIO_LOG_DDEBUG("=== Edge Case Tests ===");
   fio___test_hkdf_edge_cases();
+  fio___test_hkdf_additional_edge_cases();
 
   FIO_LOG_DDEBUG("=== Determinism Tests ===");
   fio___test_hkdf_determinism();

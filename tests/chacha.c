@@ -358,4 +358,428 @@ int main(void) {
   }
 
   /* Performance tests moved to tests/performance-crypto.c */
+
+  /* **************************************************************************
+   * Edge Case Tests for ChaCha20-Poly1305 AEAD
+   * *************************************************************************/
+  FIO_LOG_DDEBUG("Testing ChaCha20-Poly1305 edge cases...");
+
+  /* Test: Empty plaintext (0 bytes) - should still produce valid tag */
+  {
+    FIO_LOG_DDEBUG("  Testing empty plaintext...");
+    char key[32] = {0};
+    char nonce[12] = {0};
+    char mac[16] = {0};
+    char aad[] = "additional data";
+
+    /* Encrypt empty message */
+    fio_chacha20_poly1305_enc(mac, NULL, 0, aad, sizeof(aad) - 1, key, nonce);
+
+    /* MAC should not be all zeros */
+    int all_zero = 1;
+    for (int i = 0; i < 16; ++i) {
+      if (mac[i] != 0) {
+        all_zero = 0;
+        break;
+      }
+    }
+    FIO_ASSERT(!all_zero, "Empty plaintext should produce non-zero MAC");
+
+    /* Decrypt should succeed */
+    int ret = fio_chacha20_poly1305_dec(mac,
+                                        NULL,
+                                        0,
+                                        aad,
+                                        sizeof(aad) - 1,
+                                        key,
+                                        nonce);
+    FIO_ASSERT(ret == 0, "Empty plaintext decryption should succeed");
+  }
+
+  /* Test: Empty AAD (0 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing empty AAD...");
+    char key[32] = {0};
+    char nonce[12] = {0};
+    char plaintext[] = "Hello, World!";
+    char buffer[64];
+    char mac[16] = {0};
+
+    FIO_MEMCPY(buffer, plaintext, sizeof(plaintext));
+    fio_chacha20_poly1305_enc(mac,
+                              buffer,
+                              sizeof(plaintext),
+                              NULL,
+                              0,
+                              key,
+                              nonce);
+
+    int ret = fio_chacha20_poly1305_dec(mac,
+                                        buffer,
+                                        sizeof(plaintext),
+                                        NULL,
+                                        0,
+                                        key,
+                                        nonce);
+    FIO_ASSERT(ret == 0, "Empty AAD decryption should succeed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, sizeof(plaintext)),
+               "Empty AAD roundtrip failed");
+  }
+
+  /* Test: Both plaintext and AAD empty */
+  {
+    FIO_LOG_DDEBUG("  Testing both plaintext and AAD empty...");
+    char key[32] = {0};
+    char nonce[12] = {0};
+    char mac[16] = {0};
+
+    fio_chacha20_poly1305_enc(mac, NULL, 0, NULL, 0, key, nonce);
+
+    int ret = fio_chacha20_poly1305_dec(mac, NULL, 0, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "Both empty decryption should succeed");
+  }
+
+  /* Test: Plaintext at block boundary (64 bytes for ChaCha) */
+  {
+    FIO_LOG_DDEBUG("  Testing plaintext at block boundary (64 bytes)...");
+    char key[32];
+    char nonce[12];
+    char plaintext[64];
+    char buffer[64];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 64);
+    FIO_MEMCPY(buffer, plaintext, 64);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 64, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 64, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "64-byte plaintext decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 64), "64-byte roundtrip failed");
+  }
+
+  /* Test: Plaintext one byte before block boundary (63 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing plaintext at 63 bytes...");
+    char key[32];
+    char nonce[12];
+    char plaintext[63];
+    char buffer[63];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 63);
+    FIO_MEMCPY(buffer, plaintext, 63);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 63, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 63, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "63-byte plaintext decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 63), "63-byte roundtrip failed");
+  }
+
+  /* Test: Plaintext one byte after block boundary (65 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing plaintext at 65 bytes...");
+    char key[32];
+    char nonce[12];
+    char plaintext[65];
+    char buffer[65];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 65);
+    FIO_MEMCPY(buffer, plaintext, 65);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 65, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 65, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "65-byte plaintext decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 65), "65-byte roundtrip failed");
+  }
+
+  /* Test: AAD at various sizes (1, 16, 17, 256) */
+  {
+    FIO_LOG_DDEBUG("  Testing various AAD sizes...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+    char aad[256];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    fio_rand_bytes(aad, 256);
+
+    size_t aad_sizes[] = {1, 16, 17, 256};
+    for (size_t i = 0; i < sizeof(aad_sizes) / sizeof(aad_sizes[0]); ++i) {
+      FIO_MEMCPY(buffer, plaintext, 32);
+      fio_chacha20_poly1305_enc(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
+      int ret = fio_chacha20_poly1305_dec(mac,
+                                          buffer,
+                                          32,
+                                          aad,
+                                          aad_sizes[i],
+                                          key,
+                                          nonce);
+      FIO_ASSERT(ret == 0, "AAD size %zu decryption failed", aad_sizes[i]);
+      FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+                 "AAD size %zu roundtrip failed",
+                 aad_sizes[i]);
+    }
+  }
+
+  /* Test: Tag verification failure (corrupted ciphertext) */
+  {
+    FIO_LOG_DDEBUG("  Testing corrupted ciphertext detection...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Corrupt ciphertext */
+    buffer[0] ^= 0x01;
+
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "Corrupted ciphertext should fail verification");
+  }
+
+  /* Test: Tag verification failure (corrupted tag) */
+  {
+    FIO_LOG_DDEBUG("  Testing corrupted tag detection...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Corrupt tag */
+    mac[0] ^= 0x01;
+
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "Corrupted tag should fail verification");
+  }
+
+  /* Test: Tag verification failure (corrupted AAD) */
+  {
+    FIO_LOG_DDEBUG("  Testing corrupted AAD detection...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+    char aad[16];
+    char bad_aad[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    fio_rand_bytes(aad, 16);
+    FIO_MEMCPY(bad_aad, aad, 16);
+    bad_aad[0] ^= 0x01;
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, aad, 16, key, nonce);
+
+    /* Decrypt with corrupted AAD */
+    int ret =
+        fio_chacha20_poly1305_dec(mac, buffer, 32, bad_aad, 16, key, nonce);
+    FIO_ASSERT(ret != 0, "Corrupted AAD should fail verification");
+  }
+
+  /* Test: Wrong key decryption */
+  {
+    FIO_LOG_DDEBUG("  Testing wrong key detection...");
+    char key1[32];
+    char key2[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key1, 32);
+    fio_rand_bytes(key2, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key1, nonce);
+
+    /* Decrypt with wrong key */
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key2, nonce);
+    FIO_ASSERT(ret != 0, "Wrong key should fail verification");
+  }
+
+  /* Test: Single byte plaintext */
+  {
+    FIO_LOG_DDEBUG("  Testing single byte plaintext...");
+    char key[32];
+    char nonce[12];
+    char plaintext[1] = {0x42};
+    char buffer[1];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    FIO_MEMCPY(buffer, plaintext, 1);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 1, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 1, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "Single byte decryption failed");
+    FIO_ASSERT(buffer[0] == plaintext[0], "Single byte roundtrip failed");
+  }
+
+  /* Test: Large plaintext (16KB - TLS max) */
+  {
+    FIO_LOG_DDEBUG("  Testing large plaintext (16KB)...");
+    char key[32];
+    char nonce[12];
+    size_t len = 16384;
+    char *plaintext = (char *)malloc(len);
+    char *buffer = (char *)malloc(len);
+    char mac[16];
+
+    FIO_ASSERT(plaintext && buffer, "Memory allocation failed");
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, len);
+    FIO_MEMCPY(buffer, plaintext, len);
+
+    fio_chacha20_poly1305_enc(mac, buffer, len, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, len, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "16KB decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, len), "16KB roundtrip failed");
+
+    free(plaintext);
+    free(buffer);
+  }
+
+  /* Test: Deterministic encryption (same inputs = same outputs) */
+  {
+    FIO_LOG_DDEBUG("  Testing deterministic encryption...");
+    char key[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+                    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                    0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20};
+    char nonce[12] = {0x00,
+                      0x01,
+                      0x02,
+                      0x03,
+                      0x04,
+                      0x05,
+                      0x06,
+                      0x07,
+                      0x08,
+                      0x09,
+                      0x0a,
+                      0x0b};
+    char plaintext[32] = "deterministic test message!!!!!";
+    char buffer1[32], buffer2[32];
+    char mac1[16], mac2[16];
+
+    FIO_MEMCPY(buffer1, plaintext, 32);
+    FIO_MEMCPY(buffer2, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac1, buffer1, 32, NULL, 0, key, nonce);
+    fio_chacha20_poly1305_enc(mac2, buffer2, 32, NULL, 0, key, nonce);
+
+    FIO_ASSERT(!memcmp(buffer1, buffer2, 32),
+               "Encryption should be deterministic");
+    FIO_ASSERT(!memcmp(mac1, mac2, 16), "MAC should be deterministic");
+  }
+
+  /* Test: All-zero key and nonce */
+  {
+    FIO_LOG_DDEBUG("  Testing all-zero key and nonce...");
+    char key[32] = {0};
+    char nonce[12] = {0};
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "All-zero key/nonce decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+               "All-zero key/nonce roundtrip failed");
+  }
+
+  /* Test: All-ones key and nonce */
+  {
+    FIO_LOG_DDEBUG("  Testing all-ones key and nonce...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    FIO_MEMSET(key, 0xFF, 32);
+    FIO_MEMSET(nonce, 0xFF, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+    int ret = fio_chacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "All-ones key/nonce decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+               "All-ones key/nonce roundtrip failed");
+  }
+
+  /* Test: Flip each byte of signature to ensure detection */
+  {
+    FIO_LOG_DDEBUG("  Testing tag bit-flip detection...");
+    char key[32];
+    char nonce[12];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+    char bad_mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_chacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Flip each byte of the MAC and verify detection */
+    for (int i = 0; i < 16; ++i) {
+      FIO_MEMCPY(bad_mac, mac, 16);
+      bad_mac[i] ^= 0x01;
+      char test_buffer[32];
+      FIO_MEMCPY(test_buffer, buffer, 32);
+      int ret = fio_chacha20_poly1305_dec(bad_mac,
+                                          test_buffer,
+                                          32,
+                                          NULL,
+                                          0,
+                                          key,
+                                          nonce);
+      FIO_ASSERT(ret != 0, "Flipped MAC byte %d should fail verification", i);
+    }
+  }
+
+  FIO_LOG_DDEBUG("ChaCha20-Poly1305 edge case tests passed!");
 }

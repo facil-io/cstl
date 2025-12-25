@@ -418,6 +418,183 @@ static void test_rsa_synthetic_pkcs1(void) {
 }
 
 /* *****************************************************************************
+Test: Signature Edge Cases
+***************************************************************************** */
+
+static void test_rsa_signature_edge_cases(void) {
+  FIO_LOG_DDEBUG("Testing RSA signature edge cases...");
+
+  uint8_t sig[256], hash[32];
+  FIO_MEMSET(hash, 0xAB, sizeof(hash));
+
+  uint8_t n[256], e[3];
+  hex_to_bytes(n, sizeof(n), test_rsa2048_n_hex);
+  hex_to_bytes(e, sizeof(e), test_rsa2048_e_hex);
+
+  fio_rsa_pubkey_s key = {.n = n, .n_len = 256, .e = e, .e_len = 3};
+
+  /* Test: All-zero signature should fail */
+  FIO_MEMSET(sig, 0, sizeof(sig));
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "All-zero signature should fail");
+
+  /* Test: All-ones signature should fail */
+  FIO_MEMSET(sig, 0xFF, sizeof(sig));
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "All-ones signature should fail");
+
+  /* Test: Signature with first byte = 0x00 (valid PKCS#1 start) but rest
+   * garbage */
+  FIO_MEMSET(sig, 0x42, sizeof(sig));
+  sig[0] = 0x00;
+  sig[1] = 0x01; /* PKCS#1 v1.5 block type */
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "Garbage signature with valid header should fail");
+
+  /* Test: Different hash algorithms should produce different results */
+  {
+    uint8_t hash256[32], hash384[48], hash512[64];
+    FIO_MEMSET(hash256, 0xAB, 32);
+    FIO_MEMSET(hash384, 0xAB, 48);
+    FIO_MEMSET(hash512, 0xAB, 64);
+
+    /* All should fail with random signature, but shouldn't crash */
+    FIO_MEMSET(sig, 0x42, sizeof(sig));
+    fio_rsa_verify_pkcs1(sig, 256, hash256, 32, FIO_RSA_HASH_SHA256, &key);
+    fio_rsa_verify_pkcs1(sig, 256, hash384, 48, FIO_RSA_HASH_SHA384, &key);
+    fio_rsa_verify_pkcs1(sig, 256, hash512, 64, FIO_RSA_HASH_SHA512, &key);
+  }
+
+  /* Test: Wrong hash length for algorithm should fail */
+  FIO_MEMSET(sig, 0x42, sizeof(sig));
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 48, FIO_RSA_HASH_SHA256, &key) == -1,
+      "Wrong hash length (48 for SHA256) should fail");
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA384, &key) == -1,
+      "Wrong hash length (32 for SHA384) should fail");
+  FIO_ASSERT(
+      fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA512, &key) == -1,
+      "Wrong hash length (32 for SHA512) should fail");
+
+  /* Test: Signature >= modulus should fail */
+  {
+    /* Set signature to be larger than modulus */
+    FIO_MEMSET(sig, 0xFF, sizeof(sig));
+    FIO_ASSERT(
+        fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) ==
+            -1,
+        "Signature >= modulus should fail");
+  }
+
+  /* Test: Empty modulus should fail */
+  {
+    fio_rsa_pubkey_s bad_key = {.n = n, .n_len = 0, .e = e, .e_len = 3};
+    FIO_MEMSET(sig, 0x42, sizeof(sig));
+    FIO_ASSERT(fio_rsa_verify_pkcs1(sig,
+                                    256,
+                                    hash,
+                                    32,
+                                    FIO_RSA_HASH_SHA256,
+                                    &bad_key) == -1,
+               "Empty modulus should fail");
+  }
+
+  /* Test: Empty exponent should fail */
+  {
+    fio_rsa_pubkey_s bad_key = {.n = n, .n_len = 256, .e = e, .e_len = 0};
+    FIO_MEMSET(sig, 0x42, sizeof(sig));
+    FIO_ASSERT(fio_rsa_verify_pkcs1(sig,
+                                    256,
+                                    hash,
+                                    32,
+                                    FIO_RSA_HASH_SHA256,
+                                    &bad_key) == -1,
+               "Empty exponent should fail");
+  }
+
+  /* Test: NULL modulus should fail */
+  {
+    fio_rsa_pubkey_s bad_key = {.n = NULL, .n_len = 256, .e = e, .e_len = 3};
+    FIO_MEMSET(sig, 0x42, sizeof(sig));
+    FIO_ASSERT(fio_rsa_verify_pkcs1(sig,
+                                    256,
+                                    hash,
+                                    32,
+                                    FIO_RSA_HASH_SHA256,
+                                    &bad_key) == -1,
+               "NULL modulus should fail");
+  }
+
+  /* Test: NULL exponent should fail */
+  {
+    fio_rsa_pubkey_s bad_key = {.n = n, .n_len = 256, .e = NULL, .e_len = 3};
+    FIO_MEMSET(sig, 0x42, sizeof(sig));
+    FIO_ASSERT(fio_rsa_verify_pkcs1(sig,
+                                    256,
+                                    hash,
+                                    32,
+                                    FIO_RSA_HASH_SHA256,
+                                    &bad_key) == -1,
+               "NULL exponent should fail");
+  }
+
+  FIO_LOG_DDEBUG("  Signature edge cases: PASSED");
+}
+
+/* *****************************************************************************
+Test: RSA-PSS Edge Cases
+***************************************************************************** */
+
+static void test_rsa_pss_edge_cases(void) {
+  FIO_LOG_DDEBUG("Testing RSA-PSS edge cases...");
+
+  uint8_t sig[256], hash[32];
+  FIO_MEMSET(hash, 0xAB, sizeof(hash));
+
+  uint8_t n[256], e[3];
+  hex_to_bytes(n, sizeof(n), test_rsa2048_n_hex);
+  hex_to_bytes(e, sizeof(e), test_rsa2048_e_hex);
+
+  fio_rsa_pubkey_s key = {.n = n, .n_len = 256, .e = e, .e_len = 3};
+
+  /* Test: All-zero signature should fail PSS verification */
+  FIO_MEMSET(sig, 0, sizeof(sig));
+  FIO_ASSERT(
+      fio_rsa_verify_pss(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "All-zero signature should fail PSS");
+
+  /* Test: All-ones signature should fail PSS verification */
+  FIO_MEMSET(sig, 0xFF, sizeof(sig));
+  FIO_ASSERT(
+      fio_rsa_verify_pss(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "All-ones signature should fail PSS");
+
+  /* Test: Signature without 0xBC trailer should fail */
+  FIO_MEMSET(sig, 0x42, sizeof(sig));
+  sig[255] = 0x00; /* Wrong trailer */
+  FIO_ASSERT(
+      fio_rsa_verify_pss(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "Signature without 0xBC trailer should fail PSS");
+
+  /* Test: NULL inputs should fail */
+  FIO_ASSERT(
+      fio_rsa_verify_pss(NULL, 256, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "NULL sig should fail PSS");
+  FIO_ASSERT(
+      fio_rsa_verify_pss(sig, 256, NULL, 32, FIO_RSA_HASH_SHA256, &key) == -1,
+      "NULL hash should fail PSS");
+  FIO_ASSERT(
+      fio_rsa_verify_pss(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, NULL) == -1,
+      "NULL key should fail PSS");
+
+  FIO_LOG_DDEBUG("  RSA-PSS edge cases: PASSED");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
@@ -431,6 +608,8 @@ int main(void) {
   test_rsa_mgf1();
   test_rsa_invalid_inputs();
   test_rsa_synthetic_pkcs1();
+  test_rsa_signature_edge_cases();
+  test_rsa_pss_edge_cases();
 
   FIO_LOG_DDEBUG("=== All RSA tests passed! ===");
   return 0;

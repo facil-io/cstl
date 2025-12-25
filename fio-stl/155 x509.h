@@ -65,17 +65,23 @@ typedef enum {
   FIO_X509_SIG_ED25519 = 9,          /**< Ed25519 */
 } fio_x509_sig_alg_e;
 
-/** Key Usage bit flags (RFC 5280 Section 4.2.1.3) */
+/** Key Usage bit flags (RFC 5280 Section 4.2.1.3)
+ *
+ * ASN.1 BIT STRING uses MSB-first bit ordering:
+ * - Bit 0 = MSB of first byte (0x80)
+ * - Bit 1 = 0x40, Bit 2 = 0x20, etc.
+ * - Bits 8+ are in the second byte
+ */
 typedef enum {
-  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0001,
-  FIO_X509_KU_NON_REPUDIATION = 0x0002,
-  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0004,
-  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0008,
-  FIO_X509_KU_KEY_AGREEMENT = 0x0010,
-  FIO_X509_KU_KEY_CERT_SIGN = 0x0020,
-  FIO_X509_KU_CRL_SIGN = 0x0040,
-  FIO_X509_KU_ENCIPHER_ONLY = 0x0080,
-  FIO_X509_KU_DECIPHER_ONLY = 0x0100,
+  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0080, /* bit 0 = MSB of byte 0 */
+  FIO_X509_KU_NON_REPUDIATION = 0x0040,   /* bit 1 */
+  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0020,  /* bit 2 */
+  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0010, /* bit 3 */
+  FIO_X509_KU_KEY_AGREEMENT = 0x0008,     /* bit 4 */
+  FIO_X509_KU_KEY_CERT_SIGN = 0x0004,     /* bit 5 */
+  FIO_X509_KU_CRL_SIGN = 0x0002,          /* bit 6 */
+  FIO_X509_KU_ENCIPHER_ONLY = 0x0001,     /* bit 7 */
+  FIO_X509_KU_DECIPHER_ONLY = 0x8000,     /* bit 8 = MSB of byte 1 */
 } fio_x509_key_usage_e;
 
 /** X.509 chain validation error codes */
@@ -1970,6 +1976,53 @@ FIO_SFUNC size_t fio___x509_encode_ext_san(uint8_t *buf,
   return total;
 }
 
+/** Helper: encode Extended Key Usage extension (serverAuth for TLS servers) */
+FIO_SFUNC size_t fio___x509_encode_ext_eku(uint8_t *buf, int is_ca) {
+  /* For CA certificates, we don't add EKU (it's for end-entity certs) */
+  if (is_ca)
+    return 0;
+
+  /*
+   * ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
+   * KeyPurposeId ::= OBJECT IDENTIFIER
+   *
+   * For TLS servers, we need serverAuth (1.3.6.1.5.5.7.3.1)
+   */
+  size_t server_auth_oid_len =
+      fio_asn1_encode_oid(NULL, FIO_OID_EKU_SERVER_AUTH);
+  size_t eku_content = server_auth_oid_len;
+  size_t eku_len =
+      fio_asn1_encode_sequence_header(NULL, eku_content) + eku_content;
+
+  /* Wrap in OCTET STRING */
+  size_t octet_len = fio_asn1_encode_octet_string(NULL, NULL, eku_len);
+
+  /* Extension: SEQUENCE { OID, value OCTET STRING } (not critical) */
+  size_t oid_len = fio_asn1_encode_oid(NULL, FIO_OID_EXT_KEY_USAGE);
+  size_t ext_content = oid_len + octet_len;
+  size_t total =
+      fio_asn1_encode_sequence_header(NULL, ext_content) + ext_content;
+
+  if (buf) {
+    size_t offset = 0;
+    offset += fio_asn1_encode_sequence_header(buf + offset, ext_content);
+    offset += fio_asn1_encode_oid(buf + offset, FIO_OID_EXT_KEY_USAGE);
+
+    /* OCTET STRING containing EKU SEQUENCE */
+    size_t octet_hdr =
+        fio_asn1_encode_octet_string(buf + offset, NULL, eku_len);
+    uint8_t *eku_buf = buf + offset + octet_hdr - eku_len;
+    size_t eku_off = 0;
+    eku_off += fio_asn1_encode_sequence_header(eku_buf + eku_off, eku_content);
+    eku_off += fio_asn1_encode_oid(eku_buf + eku_off, FIO_OID_EKU_SERVER_AUTH);
+    (void)eku_off;
+    offset += octet_hdr;
+    (void)offset;
+  }
+
+  return total;
+}
+
 /** Helper: encode Extensions wrapper */
 FIO_SFUNC size_t
 fio___x509_encode_extensions(uint8_t *buf,
@@ -1984,14 +2037,23 @@ fio___x509_encode_extensions(uint8_t *buf,
   /* KeyUsage */
   uint16_t ku = opts->key_usage;
   if (ku == 0) {
-    /* Default key usage based on certificate type */
+    /* Default key usage based on certificate type and key algorithm */
     if (opts->is_ca) {
       ku = FIO_X509_KU_KEY_CERT_SIGN | FIO_X509_KU_CRL_SIGN;
     } else {
-      ku = FIO_X509_KU_DIGITAL_SIGNATURE | FIO_X509_KU_KEY_ENCIPHERMENT;
+      /*
+       * For ECDSA/Ed25519 certificates: digitalSignature only
+       * KEY_ENCIPHERMENT is for RSA key exchange, NOT for ECDSA!
+       * Using KEY_ENCIPHERMENT with ECDSA causes Chrome to reject with
+       * ERR_SSL_KEY_USAGE_INCOMPATIBLE
+       */
+      ku = FIO_X509_KU_DIGITAL_SIGNATURE;
     }
   }
   ext_content += fio___x509_encode_ext_key_usage(NULL, ku);
+
+  /* Extended Key Usage (serverAuth for TLS server certificates) */
+  ext_content += fio___x509_encode_ext_eku(NULL, opts->is_ca);
 
   /* SubjectAltName */
   if (opts->san_dns && opts->san_dns_count > 0)
@@ -2013,6 +2075,7 @@ fio___x509_encode_extensions(uint8_t *buf,
     offset +=
         fio___x509_encode_ext_basic_constraints(buf + offset, opts->is_ca);
     offset += fio___x509_encode_ext_key_usage(buf + offset, ku);
+    offset += fio___x509_encode_ext_eku(buf + offset, opts->is_ca);
     if (opts->san_dns && opts->san_dns_count > 0)
       offset += fio___x509_encode_ext_san(buf + offset,
                                           opts->san_dns,
@@ -2237,60 +2300,13 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
     /* Hash the TBS with SHA-256 */
     fio_u256 hash = fio_sha256(tbs_start, tbs_len);
 
-    /* For P-256, we need to implement ECDSA signing.
-     * This is a simplified implementation - production code should use
-     * a proper ECDSA signing function with RFC 6979 deterministic k. */
-
-    /* Generate deterministic k using RFC 6979 (simplified) */
-    uint8_t k_data[64];
-    fio_sha256_s sha = fio_sha256_init();
-    fio_sha256_consume(&sha, keypair->secret_key, 32);
-    fio_sha256_consume(&sha, hash.u8, 32);
-    fio_u256 k_hash = fio_sha256_finalize(&sha);
-    FIO_MEMCPY(k_data, k_hash.u8, 32);
-
-    /* For now, use a random k (not ideal for production) */
-    fio_rand_bytes(k_data, 32);
-
-    /* Compute signature point R = k * G */
-    uint8_t R_pub[65];
-    uint8_t k_scalar[32];
-    FIO_MEMCPY(k_scalar, k_data, 32);
-
-    /* Ensure k is valid (0 < k < n) */
-    k_scalar[0] &= 0x7F;
-    if (k_scalar[0] == 0)
-      k_scalar[0] = 1;
-
-    /* Compute R = k * G */
-    if (fio_p256_keypair(k_scalar, R_pub) != 0)
+    /* Sign using proper ECDSA P-256 (returns DER-encoded signature) */
+    if (fio_ecdsa_p256_sign(signature,
+                            &actual_sig_len,
+                            sizeof(signature),
+                            hash.u8,
+                            keypair->secret_key) != 0)
       return 0;
-
-    /* r = R.x mod n */
-    uint8_t r[32];
-    FIO_MEMCPY(r, R_pub + 1, 32);
-
-    /* s = k^(-1) * (hash + r * d) mod n */
-    /* This requires modular arithmetic which is complex.
-     * For simplicity, we'll create a placeholder signature.
-     * A real implementation would need proper scalar arithmetic. */
-
-    /* Create DER-encoded signature */
-    /* SEQUENCE { r INTEGER, s INTEGER } */
-    size_t r_int_len = fio_asn1_encode_integer(NULL, r, 32);
-    size_t s_int_len =
-        fio_asn1_encode_integer(NULL, hash.u8, 32); /* placeholder */
-    size_t sig_content = r_int_len + s_int_len;
-    size_t sig_seq_len =
-        fio_asn1_encode_sequence_header(NULL, sig_content) + sig_content;
-
-    size_t sig_off = 0;
-    sig_off +=
-        fio_asn1_encode_sequence_header(signature + sig_off, sig_content);
-    sig_off += fio_asn1_encode_integer(signature + sig_off, r, 32);
-    sig_off += fio_asn1_encode_integer(signature + sig_off, hash.u8, 32);
-    actual_sig_len = sig_off;
-    (void)sig_seq_len;
 #else
     return 0;
 #endif

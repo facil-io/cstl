@@ -79,6 +79,11 @@ static int heartbeat(void *i1, void *i2) {
   FIO_LOG_INFO("(%d) heartbeat", fio_io_pid());
   return 0;
 }
+static int autostop(void *i1, void *i2) {
+  (void)i1, (void)i2;
+  fio_io_stop();
+  return -1;
+}
 
 /* *****************************************************************************
 Main
@@ -151,6 +156,8 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_STRING("--tls-key -key The SSL/TLS private key .pem file."),
       FIO_CLI_STRING(
           "--tls-password -tls-pass The SSL/TLS password for the private key."),
+      FIO_CLI_BOOL("--tls-mini -mtls uses fallback TLS 1.3, as if OpenSSL is "
+                   "unavailable."),
 
       FIO_CLI_PRINT_HEADER("Clustering Pub/Sub"),
       FIO_CLI_INT("--broadcast -bp Cluster Broadcast Port."),
@@ -167,19 +174,30 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_PRINT("the IPC Unix Socket might need to be placed in `/tmp`."),
       FIO_CLI_INT("--heartbeat -ph Prints a heartbeat every requested number "
                   "of seconds."),
+      FIO_CLI_INT(
+          "--auto-stop -stop stops the server after said number of seconds."),
       FIO_CLI_BOOL("-phw Prints the heartbeat also on worker processes."));
 
   /* review CLI for logging */
   if (fio_cli_get_bool("-V")) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
   }
+
   if (fio_cli_get_bool("-phw") && !fio_cli_get_i("-ph"))
     fio_cli_set_i("-ph", 1);
+
   /* schedule heartbeat */
   if (fio_cli_get_i("-ph"))
     fio_io_run_every(.every = (fio_cli_get_i("-ph") * 1000),
                      .fn = heartbeat,
                      .udata1 = (void *)(uintptr_t)fio_cli_get_bool("-phw"),
+                     .repetitions = -1);
+
+  /* schedule server stop */
+  if (fio_cli_get_i("-stop"))
+    fio_io_run_every(.every = (fio_cli_get_i("-stop") * 1000),
+                     .fn = autostop,
+                     .udata1 = NULL,
                      .repetitions = -1);
 
   if (fio_cli_get_bool("-C")) { /* container - place pub/sub socket in tmp */
@@ -210,6 +228,15 @@ int main(int argc, char const *argv[]) {
     fio_buf_info_s scrt = FIO_BUF_INFO1((char *)fio_cli_get("-scrt"));
     fio_secret_set(scrt.buf, scrt.len, 0);
     fio_pubsub_broadcast_on_port(fio_cli_get_i("-bp"));
+  }
+
+  /* review TLS fallback */
+  if (fio_cli_get_bool("-mtls")) {
+    fio_io_functions_s io_fn;
+    io_fn = fio_tls13_io_functions();
+    fio_io_tls_default_functions(&io_fn);
+    fio_cli_set("-tls", "1");
+    FIO_LOG_DEBUG2("TLS 1.3 registered as default TLS implementation");
   }
 
   /* Test for TLS */

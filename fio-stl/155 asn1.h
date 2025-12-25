@@ -105,6 +105,10 @@ Common OID Constants for X.509 and TLS
 #define FIO_OID_AUTH_KEY_ID       "2.5.29.35"
 #define FIO_OID_EXT_KEY_USAGE     "2.5.29.37"
 
+/* Extended Key Usage OIDs (RFC 5280 Section 4.2.1.12) */
+#define FIO_OID_EKU_SERVER_AUTH "1.3.6.1.5.5.7.3.1"
+#define FIO_OID_EKU_CLIENT_AUTH "1.3.6.1.5.5.7.3.2"
+
 /* X.509 Distinguished Name Attributes */
 #define FIO_OID_COMMON_NAME  "2.5.4.3"
 #define FIO_OID_COUNTRY      "2.5.4.6"

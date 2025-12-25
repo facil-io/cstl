@@ -25,7 +25,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 TLS 1.3 Key Schedule API
 
 Note: Requires FIO_HKDF (which requires FIO_SHA2).
-      Either define FIO_HKDF before FIO_TLS13, or use FIO_CRYPT to include all
+      Either define FIO_HKDF before FIO_TLS13, or use FIO_CRYPTO to include all
       crypto modules.
 
 Reference: RFC 8446 Section 7.1
@@ -337,8 +337,9 @@ typedef enum {
   FIO_TLS13_EXT_SERVER_NAME = 0,           /* SNI */
   FIO_TLS13_EXT_SUPPORTED_GROUPS = 10,     /* Key exchange groups */
   FIO_TLS13_EXT_SIGNATURE_ALGORITHMS = 13, /* Signature schemes */
-  FIO_TLS13_EXT_SUPPORTED_VERSIONS = 43,   /* TLS version negotiation */
-  FIO_TLS13_EXT_KEY_SHARE = 51,            /* ECDHE key shares */
+  FIO_TLS13_EXT_ALPN = 16, /* Application-Layer Protocol Negotiation */
+  FIO_TLS13_EXT_SUPPORTED_VERSIONS = 43, /* TLS version negotiation */
+  FIO_TLS13_EXT_KEY_SHARE = 51,          /* ECDHE key shares */
 } fio_tls13_extension_type_e;
 
 /** TLS 1.3 Cipher Suites (RFC 8446 Section B.4) */
@@ -1212,8 +1213,8 @@ SFUNC int fio_tls13_record_encrypt(uint8_t *out,
                                nonce,
                                (fio_tls13_cipher_type_e)keys->cipher_type);
 
-  /* Clear nonce */
-  fio_secure_zero(nonce, sizeof(nonce));
+  /* Note: nonce is not secret (derived from IV and sequence number which
+   * remain in memory), so no need to zero it for security. */
 
   if (ret != 0)
     return -1;
@@ -1282,8 +1283,8 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
                                nonce,
                                (fio_tls13_cipher_type_e)keys->cipher_type);
 
-  /* Clear nonce */
-  fio_secure_zero(nonce, sizeof(nonce));
+  /* Note: nonce is not secret (derived from IV and sequence number which
+   * remain in memory), so no need to zero it for security. */
 
   if (ret != 0)
     return -1;
@@ -3596,6 +3597,8 @@ typedef enum {
 /** Parsed ClientHello message */
 typedef struct {
   uint8_t random[32];                /* Client random */
+  uint8_t legacy_session_id[32];     /* Legacy session ID (for middlebox) */
+  uint8_t legacy_session_id_len;     /* Length of legacy session ID */
   uint16_t cipher_suites[16];        /* Offered cipher suites */
   size_t cipher_suite_count;         /* Number of cipher suites */
   uint16_t supported_groups[8];      /* Offered key exchange groups */
@@ -3611,6 +3614,10 @@ typedef struct {
   const char *server_name;           /* SNI hostname (pointer into data) */
   size_t server_name_len;            /* SNI hostname length */
   int has_supported_versions;        /* 1 if TLS 1.3 supported */
+  /* ALPN (Application-Layer Protocol Negotiation) */
+  const char *alpn_protocols[8]; /* ALPN protocol names (pointers into data) */
+  size_t alpn_protocol_lens[8];  /* ALPN protocol name lengths */
+  size_t alpn_protocol_count;    /* Number of ALPN protocols */
 } fio_tls13_client_hello_s;
 
 /** TLS 1.3 Server Context */
@@ -3654,14 +3661,25 @@ typedef struct {
   const size_t *cert_chain_lens; /* Array of certificate lengths */
   size_t cert_chain_count;       /* Number of certificates */
 
-  /* Private key for signing (Ed25519 or RSA) */
+  /* Private key for signing (Ed25519, P-256, or RSA) */
   const uint8_t *private_key; /* Private key data */
   size_t private_key_len;     /* Private key length */
   uint16_t private_key_type;  /* Key type (signature scheme) */
+  /* Public key for P-256 signing (65 bytes: 0x04 || x || y) */
+  uint8_t public_key[65];
 
   /* Client info (from ClientHello) */
-  char client_sni[256];  /* Client's SNI hostname */
-  size_t client_sni_len; /* SNI length */
+  char client_sni[256];          /* Client's SNI hostname */
+  size_t client_sni_len;         /* SNI length */
+  uint8_t legacy_session_id[32]; /* Client's legacy session ID (to echo) */
+  uint8_t legacy_session_id_len; /* Length of legacy session ID */
+
+  /* ALPN (Application-Layer Protocol Negotiation) */
+  char selected_alpn[256];          /* Selected ALPN protocol name */
+  size_t selected_alpn_len;         /* Selected ALPN protocol length */
+  const char **alpn_protocols;      /* Server's supported ALPN protocols */
+  const size_t *alpn_protocol_lens; /* Server's ALPN protocol lengths */
+  size_t alpn_protocol_count;       /* Number of server's ALPN protocols */
 
   /* Error info */
   uint8_t alert_level;
@@ -4042,10 +4060,13 @@ FIO_SFUNC int fio___tls13_parse_client_hello(fio_tls13_client_hello_s *ch,
   FIO_MEMCPY(ch->random, p, 32);
   p += 32;
 
-  /* Legacy session ID */
+  /* Legacy session ID (must be echoed in ServerHello for middlebox compat) */
   uint8_t session_id_len = *p++;
-  if (p + session_id_len > end)
+  if (p + session_id_len > end || session_id_len > 32)
     return -1;
+  ch->legacy_session_id_len = session_id_len;
+  if (session_id_len > 0)
+    FIO_MEMCPY(ch->legacy_session_id, p, session_id_len);
   p += session_id_len;
 
   /* Cipher suites */
@@ -4169,8 +4190,12 @@ FIO_SFUNC int fio___tls13_build_server_hello(fio_tls13_server_s *server,
   FIO_MEMCPY(p, server->server_random, 32);
   p += 32;
 
-  /* Legacy session ID (empty) */
-  *p++ = 0;
+  /* Legacy session ID (echo client's for middlebox compatibility) */
+  *p++ = server->legacy_session_id_len;
+  if (server->legacy_session_id_len > 0) {
+    FIO_MEMCPY(p, server->legacy_session_id, server->legacy_session_id_len);
+    p += server->legacy_session_id_len;
+  }
 
   /* Cipher suite */
   fio___tls13_write_u16(p, server->cipher_suite);
@@ -4317,14 +4342,27 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
     if (server->private_key_len != 32)
       return -1;
     /* Ed25519 signs directly over the content */
-    uint8_t public_key[32];
-    fio_ed25519_public_key(public_key, server->private_key);
+    uint8_t ed_public_key[32];
+    fio_ed25519_public_key(ed_public_key, server->private_key);
     fio_ed25519_sign(signature,
                      signed_content,
                      signed_content_len,
                      server->private_key,
-                     public_key);
+                     ed_public_key);
     sig_len = 64;
+    break;
+  }
+  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
+    if (server->private_key_len != 32)
+      return -1;
+    /* P-256 ECDSA: hash the signed content with SHA-256, then sign */
+    fio_u256 msg_hash = fio_sha256(signed_content, signed_content_len);
+    if (fio_ecdsa_p256_sign(signature,
+                            &sig_len,
+                            sizeof(signature),
+                            msg_hash.u8,
+                            server->private_key) != 0)
+      return -1;
     break;
   }
   default:
@@ -4355,6 +4393,10 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
 
   /* Signature */
   FIO_MEMCPY(p, signature, sig_len);
+
+  FIO_LOG_DDEBUG("TLS 1.3 Server: CertificateVerify scheme=0x%04x sig_len=%zu",
+                 server->signature_scheme,
+                 sig_len);
 
   return (int)(4 + body_len);
 }
@@ -4596,14 +4638,21 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   /* Parse ClientHello */
   fio_tls13_client_hello_s ch;
   if (fio___tls13_parse_client_hello(&ch, ch_msg + 4, ch_msg_len - 4) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ClientHello parse failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_DECODE_ERROR);
     return -1;
   }
 
+  FIO_LOG_DDEBUG("TLS 1.3 Server: ClientHello ciphers=%zu sigs=%zu keys=%zu",
+                 ch.cipher_suite_count,
+                 ch.signature_algorithm_count,
+                 ch.key_share_count);
+
   /* Verify TLS 1.3 is supported */
   if (!ch.has_supported_versions) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: client does not support TLS 1.3");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_PROTOCOL_VERSION);
@@ -4620,8 +4669,17 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
     server->client_sni_len = copy_len;
   }
 
+  /* Store legacy session ID (must echo in ServerHello for middlebox compat) */
+  server->legacy_session_id_len = ch.legacy_session_id_len;
+  if (ch.legacy_session_id_len > 0) {
+    FIO_MEMCPY(server->legacy_session_id,
+               ch.legacy_session_id,
+               ch.legacy_session_id_len);
+  }
+
   /* Select cipher suite */
   if (fio___tls13_server_select_cipher(server, &ch) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: no common cipher suite");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -4635,6 +4693,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                           &ch,
                                           &client_key_share,
                                           &client_key_share_len) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: no common key share group");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -4643,6 +4702,8 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Select signature algorithm */
   if (fio___tls13_server_select_signature(server, &ch) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: sig algorithm mismatch (key=0x%04x)",
+                   server->private_key_type);
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -4657,6 +4718,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   if (fio_x25519_shared_secret(server->shared_secret,
                                server->x25519_private_key,
                                client_key_share) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ECDHE shared secret failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
@@ -4670,6 +4732,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   uint8_t sh_msg[256];
   int sh_len = fio___tls13_build_server_hello(server, sh_msg, sizeof(sh_msg));
   if (sh_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ServerHello build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4681,6 +4744,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Derive handshake keys */
   if (fio___tls13_server_derive_handshake_keys(server) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake key derivation failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4697,6 +4761,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                              hs_msgs + hs_msgs_len,
                                              sizeof(hs_msgs) - hs_msgs_len);
   if (ee_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: EncryptedExtensions build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4712,6 +4777,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                                hs_msgs + hs_msgs_len,
                                                sizeof(hs_msgs) - hs_msgs_len);
   if (cert_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: Certificate build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4728,6 +4794,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                            hs_msgs + hs_msgs_len,
                                            sizeof(hs_msgs) - hs_msgs_len);
   if (cv_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: CertificateVerify build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4744,6 +4811,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                         hs_msgs + hs_msgs_len,
                                         sizeof(hs_msgs) - hs_msgs_len);
   if (fin_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: Finished build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4756,13 +4824,14 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Derive application keys (after server Finished is in transcript) */
   if (fio___tls13_server_derive_app_keys(server) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: app key derivation failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
     return -1;
   }
 
-  /* Build output: ServerHello record + encrypted handshake record */
+  /* Build output: ServerHello record + CCS + encrypted handshake record */
   size_t offset = 0;
 
   /* ServerHello record (plaintext) */
@@ -4775,6 +4844,16 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   FIO_MEMCPY(out + offset, sh_msg, (size_t)sh_len);
   offset += (size_t)sh_len;
 
+  /* Change Cipher Spec (for middlebox compatibility, RFC 8446 Section 5) */
+  if (offset + 6 > out_capacity)
+    return -1;
+  out[offset++] = FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC;
+  out[offset++] = 0x03;
+  out[offset++] = 0x03; /* Legacy version TLS 1.2 */
+  out[offset++] = 0x00;
+  out[offset++] = 0x01; /* Length: 1 byte */
+  out[offset++] = 0x01; /* CCS message: 1 */
+
   /* Encrypted handshake messages */
   int enc_len = fio_tls13_record_encrypt(out + offset,
                                          out_capacity - offset,
@@ -4783,6 +4862,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                          FIO_TLS13_CONTENT_HANDSHAKE,
                                          &server->server_handshake_keys);
   if (enc_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake encryption failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -4962,6 +5042,7 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                                 out_len) != 0) {
       return -1;
     }
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ClientHello processed, sent ServerHello");
     break;
   }
 
@@ -4984,12 +5065,22 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                            record_len,
                                            &server->client_handshake_keys);
     if (dec_len < 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: client Finished decryption failed");
       fio___tls13_server_set_error(server,
                                    FIO_TLS13_ALERT_LEVEL_FATAL,
                                    FIO_TLS13_ALERT_BAD_RECORD_MAC);
       return -1;
     }
 
+    if (inner_type == FIO_TLS13_CONTENT_ALERT && dec_len >= 2) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: alert level=%d desc=%d",
+                     decrypted[0],
+                     decrypted[1]);
+      fio___tls13_server_set_error(server,
+                                   FIO_TLS13_ALERT_LEVEL_FATAL,
+                                   decrypted[1]);
+      return -1;
+    }
     if (inner_type != FIO_TLS13_CONTENT_HANDSHAKE) {
       fio___tls13_server_set_error(server,
                                    FIO_TLS13_ALERT_LEVEL_FATAL,
@@ -5003,6 +5094,7 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                                    (size_t)dec_len) != 0) {
       return -1;
     }
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake complete");
     break;
   }
 
@@ -5066,9 +5158,14 @@ SFUNC int fio_tls13_server_decrypt(fio_tls13_server_s *server,
   /* Handle alerts */
   if (content_type == FIO_TLS13_CONTENT_ALERT) {
     if (dec_len >= 2) {
+      uint8_t level = out[0];
+      uint8_t desc = out[1];
       FIO_LOG_DEBUG2("TLS 1.3 Server: Received alert: level=%d, desc=%d",
-                     out[0],
-                     out[1]);
+                     level,
+                     desc);
+      /* close_notify (0) is a graceful shutdown, return 0 (EOF) */
+      if (desc == 0)
+        return 0;
     }
     return -1;
   }

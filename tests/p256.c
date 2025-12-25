@@ -1177,6 +1177,125 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_invalid_sigs)(void) {
 }
 
 /* *****************************************************************************
+Additional signature edge cases
+***************************************************************************** */
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_signature_edge_cases)(void) {
+  FIO_LOG_DDEBUG("Testing ECDSA P-256 signature edge cases");
+
+  /* Use RFC 6979 test vector */
+  /* clang-format off */
+
+  /* SHA-256("sample") */
+  static const uint8_t msg_hash[32] = {
+    0xaf, 0x2b, 0xdb, 0xe1, 0xaa, 0x9b, 0x6e, 0xc1,
+    0xe2, 0xad, 0xe1, 0xd6, 0x94, 0xf4, 0x1f, 0xc7,
+    0x1a, 0x83, 0x1d, 0x02, 0x68, 0xe9, 0x89, 0x15,
+    0x62, 0x11, 0x3d, 0x8a, 0x62, 0xad, 0xd1, 0xbf
+  };
+
+  /* Qx = 60FED4BA..., Qy = 7903FE10... */
+  static const uint8_t pubkey[65] = {
+    0x04,
+    0x60, 0xfe, 0xd4, 0xba, 0x25, 0x5a, 0x9d, 0x31,
+    0xc9, 0x61, 0xeb, 0x74, 0xc6, 0x35, 0x6d, 0x68,
+    0xc0, 0x49, 0xb8, 0x92, 0x3b, 0x61, 0xfa, 0x6c,
+    0xe6, 0x69, 0x62, 0x2e, 0x60, 0xf2, 0x9f, 0xb6,
+    0x79, 0x03, 0xfe, 0x10, 0x08, 0xb8, 0xbc, 0x99,
+    0xa4, 0x1a, 0xe9, 0xe9, 0x56, 0x28, 0xbc, 0x64,
+    0xf2, 0xf1, 0xb2, 0x0c, 0x2d, 0x7e, 0x9f, 0x51,
+    0x77, 0xa3, 0xc2, 0x94, 0xd4, 0x46, 0x22, 0x99
+  };
+
+  /* R = EFD48B2A... */
+  static const uint8_t r[32] = {
+    0xef, 0xd4, 0x8b, 0x2a, 0xac, 0xb6, 0xa8, 0xfd,
+    0x11, 0x40, 0xdd, 0x9c, 0xd4, 0x5e, 0x81, 0xd6,
+    0x9d, 0x2c, 0x87, 0x7b, 0x56, 0xaa, 0xf9, 0x91,
+    0xc3, 0x4d, 0x0e, 0xa8, 0x4e, 0xaf, 0x37, 0x16
+  };
+
+  /* S = F7CB1C94... */
+  static const uint8_t s[32] = {
+    0xf7, 0xcb, 0x1c, 0x94, 0x2d, 0x65, 0x7c, 0x41,
+    0xd4, 0x36, 0xc7, 0xa1, 0xb6, 0xe2, 0x9f, 0x65,
+    0xf3, 0xe9, 0x00, 0xdb, 0xb9, 0xaf, 0xf4, 0x06,
+    0x4d, 0xc4, 0xab, 0x2f, 0x84, 0x3a, 0xcd, 0xa8
+  };
+  /* clang-format on */
+
+  /* Test: Flip each byte of r - all should fail */
+  for (size_t i = 0; i < 32; ++i) {
+    uint8_t bad_r[32];
+    FIO_MEMCPY(bad_r, r, 32);
+    bad_r[i] ^= 0x01;
+    int result =
+        fio_ecdsa_p256_verify_raw(bad_r, s, msg_hash, pubkey + 1, pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject r with byte %zu flipped", i);
+  }
+  FIO_LOG_DDEBUG("  All 32 r byte-flip corruptions detected");
+
+  /* Test: Flip each byte of s - all should fail */
+  for (size_t i = 0; i < 32; ++i) {
+    uint8_t bad_s[32];
+    FIO_MEMCPY(bad_s, s, 32);
+    bad_s[i] ^= 0x01;
+    int result =
+        fio_ecdsa_p256_verify_raw(r, bad_s, msg_hash, pubkey + 1, pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject s with byte %zu flipped", i);
+  }
+  FIO_LOG_DDEBUG("  All 32 s byte-flip corruptions detected");
+
+  /* Test: All-ones r should fail */
+  {
+    uint8_t ones_r[32];
+    FIO_MEMSET(ones_r, 0xFF, 32);
+    int result =
+        fio_ecdsa_p256_verify_raw(ones_r, s, msg_hash, pubkey + 1, pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject all-ones r");
+  }
+
+  /* Test: All-ones s should fail */
+  {
+    uint8_t ones_s[32];
+    FIO_MEMSET(ones_s, 0xFF, 32);
+    int result =
+        fio_ecdsa_p256_verify_raw(r, ones_s, msg_hash, pubkey + 1, pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject all-ones s");
+  }
+
+  /* Test: r >= n should fail (r = n) */
+  {
+    /* n = FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551 */
+    uint8_t n_bytes[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                           0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84,
+                           0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51};
+    int result = fio_ecdsa_p256_verify_raw(n_bytes,
+                                           s,
+                                           msg_hash,
+                                           pubkey + 1,
+                                           pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject r = n");
+  }
+
+  /* Test: s >= n should fail (s = n) */
+  {
+    uint8_t n_bytes[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+                           0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                           0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84,
+                           0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51};
+    int result = fio_ecdsa_p256_verify_raw(r,
+                                           n_bytes,
+                                           msg_hash,
+                                           pubkey + 1,
+                                           pubkey + 33);
+    FIO_ASSERT(result != 0, "Should reject s = n");
+  }
+
+  FIO_LOG_DDEBUG("  Signature edge cases passed.");
+}
+
+/* *****************************************************************************
 Performance test
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p256_performance)(void) {
@@ -1449,6 +1568,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256)(void) {
   FIO_NAME_TEST(stl, p256_ecdsa_nist)();
   FIO_NAME_TEST(stl, p256_der_parsing)();
   FIO_NAME_TEST(stl, p256_invalid_sigs)();
+  FIO_NAME_TEST(stl, p256_signature_edge_cases)();
   FIO_NAME_TEST(stl, p256_performance)();
 
   FIO_LOG_DDEBUG("Testing P-256 ECDHE key exchange");

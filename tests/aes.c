@@ -678,6 +678,365 @@ int main(void) {
 
   FIO_LOG_DDEBUG("AES-GCM tests passed!");
 
+  /* **************************************************************************
+   * Edge Case Tests for AES-GCM
+   * *************************************************************************/
+  FIO_LOG_DDEBUG("Testing AES-GCM edge cases...");
+
+  /* Test: Single byte plaintext */
+  {
+    FIO_LOG_DDEBUG("  Testing single byte plaintext...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[1] = {0x42};
+    uint8_t buffer[1];
+    uint8_t mac[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    FIO_MEMCPY(buffer, plaintext, 1);
+
+    fio_aes128_gcm_enc(mac, buffer, 1, NULL, 0, key, nonce);
+    int ret = fio_aes128_gcm_dec(mac, buffer, 1, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "Single byte AES-128-GCM decryption failed");
+    FIO_ASSERT(buffer[0] == plaintext[0], "Single byte roundtrip failed");
+  }
+
+  /* Test: Plaintext one byte before block boundary (15 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing 15-byte plaintext...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[15];
+    uint8_t buffer[15];
+    uint8_t mac[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 15);
+    FIO_MEMCPY(buffer, plaintext, 15);
+
+    fio_aes128_gcm_enc(mac, buffer, 15, NULL, 0, key, nonce);
+    int ret = fio_aes128_gcm_dec(mac, buffer, 15, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "15-byte decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 15), "15-byte roundtrip failed");
+  }
+
+  /* Test: Plaintext one byte after block boundary (17 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing 17-byte plaintext...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[17];
+    uint8_t buffer[17];
+    uint8_t mac[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 17);
+    FIO_MEMCPY(buffer, plaintext, 17);
+
+    fio_aes128_gcm_enc(mac, buffer, 17, NULL, 0, key, nonce);
+    int ret = fio_aes128_gcm_dec(mac, buffer, 17, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "17-byte decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 17), "17-byte roundtrip failed");
+  }
+
+  /* Test: Both plaintext and AAD empty */
+  {
+    FIO_LOG_DDEBUG("  Testing both plaintext and AAD empty...");
+    uint8_t key[16] = {0};
+    uint8_t nonce[12] = {0};
+    uint8_t mac1[16], mac2[16];
+
+    fio_aes128_gcm_enc(mac1, NULL, 0, NULL, 0, key, nonce);
+    fio_aes256_gcm_enc(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
+
+    /* MACs should not be all zeros */
+    int all_zero1 = 1, all_zero2 = 1;
+    for (int i = 0; i < 16; ++i) {
+      if (mac1[i] != 0)
+        all_zero1 = 0;
+      if (mac2[i] != 0)
+        all_zero2 = 0;
+    }
+    FIO_ASSERT(!all_zero1, "AES-128-GCM empty should produce non-zero MAC");
+    FIO_ASSERT(!all_zero2, "AES-256-GCM empty should produce non-zero MAC");
+
+    /* Decryption should succeed */
+    int ret1 = fio_aes128_gcm_dec(mac1, NULL, 0, NULL, 0, key, nonce);
+    int ret2 =
+        fio_aes256_gcm_dec(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
+    FIO_ASSERT(ret1 == 0, "AES-128-GCM empty decryption failed");
+    FIO_ASSERT(ret2 == 0, "AES-256-GCM empty decryption failed");
+  }
+
+  /* Test: AAD at various sizes */
+  {
+    FIO_LOG_DDEBUG("  Testing various AAD sizes...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+    uint8_t aad[256];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    fio_rand_bytes(aad, 256);
+
+    size_t aad_sizes[] = {1, 15, 16, 17, 31, 32, 33, 256};
+    for (size_t i = 0; i < sizeof(aad_sizes) / sizeof(aad_sizes[0]); ++i) {
+      FIO_MEMCPY(buffer, plaintext, 32);
+      fio_aes128_gcm_enc(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
+      int ret =
+          fio_aes128_gcm_dec(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
+      FIO_ASSERT(ret == 0, "AAD size %zu decryption failed", aad_sizes[i]);
+      FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+                 "AAD size %zu roundtrip failed",
+                 aad_sizes[i]);
+    }
+  }
+
+  /* Test: Tag verification failure (corrupted ciphertext) */
+  {
+    FIO_LOG_DDEBUG("  Testing corrupted ciphertext detection...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Corrupt ciphertext */
+    buffer[0] ^= 0x01;
+
+    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "Corrupted ciphertext should fail verification");
+  }
+
+  /* Test: Tag verification failure (corrupted AAD) */
+  {
+    FIO_LOG_DDEBUG("  Testing corrupted AAD detection...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+    uint8_t aad[16];
+    uint8_t bad_aad[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    fio_rand_bytes(aad, 16);
+    FIO_MEMCPY(bad_aad, aad, 16);
+    bad_aad[0] ^= 0x01;
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac, buffer, 32, aad, 16, key, nonce);
+
+    int ret = fio_aes128_gcm_dec(mac, buffer, 32, bad_aad, 16, key, nonce);
+    FIO_ASSERT(ret != 0, "Corrupted AAD should fail verification");
+  }
+
+  /* Test: Wrong key decryption */
+  {
+    FIO_LOG_DDEBUG("  Testing wrong key detection...");
+    uint8_t key1[16], key2[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+
+    fio_rand_bytes(key1, 16);
+    fio_rand_bytes(key2, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key1, nonce);
+
+    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key2, nonce);
+    FIO_ASSERT(ret != 0, "Wrong key should fail verification");
+  }
+
+  /* Test: Large plaintext (16KB - TLS max) */
+  {
+    FIO_LOG_DDEBUG("  Testing large plaintext (16KB)...");
+    uint8_t key[32];
+    uint8_t nonce[12];
+    size_t len = 16384;
+    uint8_t *plaintext = (uint8_t *)malloc(len);
+    uint8_t *buffer = (uint8_t *)malloc(len);
+    uint8_t mac[16];
+
+    FIO_ASSERT(plaintext && buffer, "Memory allocation failed");
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, len);
+    FIO_MEMCPY(buffer, plaintext, len);
+
+    /* Test AES-256-GCM with large data */
+    fio_aes256_gcm_enc(mac, buffer, len, NULL, 0, key, nonce);
+    int ret = fio_aes256_gcm_dec(mac, buffer, len, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "16KB AES-256-GCM decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, len), "16KB roundtrip failed");
+
+    free(plaintext);
+    free(buffer);
+  }
+
+  /* Test: Deterministic encryption */
+  {
+    FIO_LOG_DDEBUG("  Testing deterministic encryption...");
+    uint8_t key[16] = {0x01,
+                       0x02,
+                       0x03,
+                       0x04,
+                       0x05,
+                       0x06,
+                       0x07,
+                       0x08,
+                       0x09,
+                       0x0a,
+                       0x0b,
+                       0x0c,
+                       0x0d,
+                       0x0e,
+                       0x0f,
+                       0x10};
+    uint8_t nonce[12] = {0x00,
+                         0x01,
+                         0x02,
+                         0x03,
+                         0x04,
+                         0x05,
+                         0x06,
+                         0x07,
+                         0x08,
+                         0x09,
+                         0x0a,
+                         0x0b};
+    uint8_t plaintext[32] = "deterministic test message!!!!!";
+    uint8_t buffer1[32], buffer2[32];
+    uint8_t mac1[16], mac2[16];
+
+    FIO_MEMCPY(buffer1, plaintext, 32);
+    FIO_MEMCPY(buffer2, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac1, buffer1, 32, NULL, 0, key, nonce);
+    fio_aes128_gcm_enc(mac2, buffer2, 32, NULL, 0, key, nonce);
+
+    FIO_ASSERT(!memcmp(buffer1, buffer2, 32),
+               "Encryption should be deterministic");
+    FIO_ASSERT(!memcmp(mac1, mac2, 16), "MAC should be deterministic");
+  }
+
+  /* Test: All-zero key and nonce */
+  {
+    FIO_LOG_DDEBUG("  Testing all-zero key and nonce...");
+    uint8_t key[16] = {0};
+    uint8_t nonce[12] = {0};
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "All-zero key/nonce decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+               "All-zero key/nonce roundtrip failed");
+  }
+
+  /* Test: All-ones key and nonce */
+  {
+    FIO_LOG_DDEBUG("  Testing all-ones key and nonce...");
+    uint8_t key[32];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+
+    FIO_MEMSET(key, 0xFF, 32);
+    FIO_MEMSET(nonce, 0xFF, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes256_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+    int ret = fio_aes256_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0, "All-ones key/nonce decryption failed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+               "All-ones key/nonce roundtrip failed");
+  }
+
+  /* Test: Flip each byte of tag to ensure detection */
+  {
+    FIO_LOG_DDEBUG("  Testing tag bit-flip detection...");
+    uint8_t key[16];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer[32];
+    uint8_t mac[16];
+    uint8_t bad_mac[16];
+
+    fio_rand_bytes(key, 16);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    for (int i = 0; i < 16; ++i) {
+      FIO_MEMCPY(bad_mac, mac, 16);
+      bad_mac[i] ^= 0x01;
+      uint8_t test_buffer[32];
+      FIO_MEMCPY(test_buffer, buffer, 32);
+      int ret =
+          fio_aes128_gcm_dec(bad_mac, test_buffer, 32, NULL, 0, key, nonce);
+      FIO_ASSERT(ret != 0, "Flipped MAC byte %d should fail verification", i);
+    }
+  }
+
+  /* Test: AES-128 vs AES-256 produce different results */
+  {
+    FIO_LOG_DDEBUG("  Testing AES-128 vs AES-256 produce different results...");
+    uint8_t key[32];
+    uint8_t nonce[12];
+    uint8_t plaintext[32];
+    uint8_t buffer128[32], buffer256[32];
+    uint8_t mac128[16], mac256[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 12);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer128, plaintext, 32);
+    FIO_MEMCPY(buffer256, plaintext, 32);
+
+    fio_aes128_gcm_enc(mac128, buffer128, 32, NULL, 0, key, nonce);
+    fio_aes256_gcm_enc(mac256, buffer256, 32, NULL, 0, key, nonce);
+
+    /* Ciphertexts should be different */
+    FIO_ASSERT(memcmp(buffer128, buffer256, 32) != 0,
+               "AES-128 and AES-256 should produce different ciphertexts");
+    /* MACs should be different */
+    FIO_ASSERT(memcmp(mac128, mac256, 16) != 0,
+               "AES-128 and AES-256 should produce different MACs");
+  }
+
+  FIO_LOG_DDEBUG("AES-GCM edge case tests passed!");
+
   /* Performance tests moved to tests/performance-crypto.c */
 
   return 0;

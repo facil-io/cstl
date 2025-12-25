@@ -141,6 +141,235 @@ static void fio___test_sha3_streaming(void) {
   FIO_LOG_DDEBUG("SHA3-256 streaming: PASSED");
 }
 
+/* Edge case tests */
+static void fio___test_sha3_edge_cases(void) {
+  FIO_LOG_DDEBUG("Testing SHA-3 edge cases...");
+
+  /* Test: Single byte input */
+  {
+    FIO_LOG_DDEBUG("  Testing single byte input...");
+    uint8_t data[1] = {0x00};
+    uint8_t out256[32], out512[64];
+
+    fio_sha3_256(out256, data, 1);
+    fio_sha3_512(out512, data, 1);
+
+    /* Verify non-zero output */
+    int zero256 = 1, zero512 = 1;
+    for (int i = 0; i < 32; ++i)
+      if (out256[i] != 0)
+        zero256 = 0;
+    for (int i = 0; i < 64; ++i)
+      if (out512[i] != 0)
+        zero512 = 0;
+
+    FIO_ASSERT(!zero256, "SHA3-256 single byte should not be all zeros");
+    FIO_ASSERT(!zero512, "SHA3-512 single byte should not be all zeros");
+  }
+
+  /* Test: Block boundary inputs (SHA3-256 rate = 136 bytes) */
+  {
+    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
+    size_t test_sizes[] = {135, 136, 137, 271, 272, 273};
+
+    for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); ++i) {
+      size_t len = test_sizes[i];
+      uint8_t *data = (uint8_t *)malloc(len);
+      uint8_t out[32];
+      FIO_ASSERT(data, "Memory allocation failed");
+      FIO_MEMSET(data, 'A', len);
+
+      fio_sha3_256(out, data, len);
+
+      int zero = 1;
+      for (int j = 0; j < 32; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero, "SHA3-256 at %zu bytes should not be all zeros", len);
+
+      free(data);
+    }
+  }
+
+  /* Test: Incremental vs one-shot with various chunk sizes */
+  {
+    FIO_LOG_DDEBUG("  Testing incremental vs one-shot...");
+    uint8_t data[1000];
+    for (size_t i = 0; i < 1000; ++i)
+      data[i] = (uint8_t)(i & 0xFF);
+
+    uint8_t out1[32], out2[32];
+
+    /* One-shot */
+    fio_sha3_256(out1, data, 1000);
+
+    /* Incremental - various chunk sizes */
+    fio_sha3_s h = fio_sha3_256_init();
+    fio_sha3_consume(&h, data, 100);
+    fio_sha3_consume(&h, data + 100, 400);
+    fio_sha3_consume(&h, data + 500, 500);
+    fio_sha3_finalize(&h, out2);
+
+    FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "SHA3-256 incremental mismatch");
+  }
+
+  /* Test: Large input (1MB) */
+  {
+    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
+    size_t len = 1024 * 1024;
+    uint8_t *data = (uint8_t *)malloc(len);
+    uint8_t out[32];
+    FIO_ASSERT(data, "Memory allocation failed");
+
+    for (size_t i = 0; i < len; ++i)
+      data[i] = (uint8_t)(i & 0xFF);
+
+    fio_sha3_256(out, data, len);
+
+    int zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "SHA3-256 1MB should not be all zeros");
+
+    /* Verify determinism */
+    uint8_t out2[32];
+    fio_sha3_256(out2, data, len);
+    FIO_ASSERT(!FIO_MEMCMP(out, out2, 32), "SHA3-256 should be deterministic");
+
+    free(data);
+  }
+
+  /* Test: SHAKE variable output lengths */
+  {
+    FIO_LOG_DDEBUG("  Testing SHAKE variable output lengths...");
+    uint8_t data[] = "test input";
+    size_t data_len = sizeof(data) - 1;
+
+    /* Test various output lengths for SHAKE128 */
+    size_t out_lens[] = {1, 16, 32, 64, 128, 256};
+    for (size_t i = 0; i < sizeof(out_lens) / sizeof(out_lens[0]); ++i) {
+      size_t out_len = out_lens[i];
+      uint8_t *out = (uint8_t *)malloc(out_len);
+      FIO_ASSERT(out, "Memory allocation failed");
+
+      fio_shake128(out, out_len, data, data_len);
+
+      int zero = 1;
+      for (size_t j = 0; j < out_len; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "SHAKE128 %zu-byte output should not be all zeros",
+                 out_len);
+
+      free(out);
+    }
+
+    /* Test various output lengths for SHAKE256 */
+    for (size_t i = 0; i < sizeof(out_lens) / sizeof(out_lens[0]); ++i) {
+      size_t out_len = out_lens[i];
+      uint8_t *out = (uint8_t *)malloc(out_len);
+      FIO_ASSERT(out, "Memory allocation failed");
+
+      fio_shake256(out, out_len, data, data_len);
+
+      int zero = 1;
+      for (size_t j = 0; j < out_len; ++j)
+        if (out[j] != 0)
+          zero = 0;
+      FIO_ASSERT(!zero,
+                 "SHAKE256 %zu-byte output should not be all zeros",
+                 out_len);
+
+      free(out);
+    }
+  }
+
+  /* Test: SHAKE with 1 byte output */
+  {
+    FIO_LOG_DDEBUG("  Testing SHAKE with 1 byte output...");
+    uint8_t data[] = "test";
+    uint8_t out128[1], out256[1];
+
+    fio_shake128(out128, 1, data, 4);
+    fio_shake256(out256, 1, data, 4);
+
+    /* Just verify it doesn't crash and produces output */
+    FIO_LOG_DDEBUG("    SHAKE128(1 byte) = 0x%02x", out128[0]);
+    FIO_LOG_DDEBUG("    SHAKE256(1 byte) = 0x%02x", out256[0]);
+  }
+
+  /* Test: All zeros input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-zeros input...");
+    uint8_t data[64] = {0};
+    uint8_t out[32];
+
+    fio_sha3_256(out, data, 64);
+
+    int zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "SHA3-256 of zeros should not be all zeros");
+  }
+
+  /* Test: All ones input */
+  {
+    FIO_LOG_DDEBUG("  Testing all-ones input...");
+    uint8_t data[64];
+    uint8_t out[32];
+    FIO_MEMSET(data, 0xFF, 64);
+
+    fio_sha3_256(out, data, 64);
+
+    int zero = 1;
+    for (int i = 0; i < 32; ++i)
+      if (out[i] != 0)
+        zero = 0;
+    FIO_ASSERT(!zero, "SHA3-256 of ones should not be all zeros");
+  }
+
+  /* Test: Different inputs produce different hashes */
+  {
+    FIO_LOG_DDEBUG("  Testing different inputs produce different hashes...");
+    uint8_t data1[32] = {0};
+    uint8_t data2[32] = {0};
+    data2[0] = 1;
+
+    uint8_t hash1[32], hash2[32];
+    fio_sha3_256(hash1, data1, 32);
+    fio_sha3_256(hash2, data2, 32);
+
+    FIO_ASSERT(FIO_MEMCMP(hash1, hash2, 32) != 0,
+               "Different inputs should produce different hashes");
+  }
+
+  /* Test: All SHA3 variants produce different outputs for same input */
+  {
+    FIO_LOG_DDEBUG("  Testing all SHA3 variants produce different outputs...");
+    uint8_t data[] = "test input for all variants";
+    size_t data_len = sizeof(data) - 1;
+
+    uint8_t out224[28], out256[32], out384[48], out512[64];
+    fio_sha3_224(out224, data, data_len);
+    fio_sha3_256(out256, data, data_len);
+    fio_sha3_384(out384, data, data_len);
+    fio_sha3_512(out512, data, data_len);
+
+    /* Compare first 28 bytes (minimum common length) */
+    FIO_ASSERT(FIO_MEMCMP(out224, out256, 28) != 0,
+               "SHA3-224 and SHA3-256 should differ");
+    FIO_ASSERT(FIO_MEMCMP(out256, out384, 28) != 0,
+               "SHA3-256 and SHA3-384 should differ");
+    FIO_ASSERT(FIO_MEMCMP(out384, out512, 28) != 0,
+               "SHA3-384 and SHA3-512 should differ");
+  }
+
+  FIO_LOG_DDEBUG("SHA-3 edge case tests passed!");
+}
+
 int main(void) {
   FIO_LOG_DDEBUG("Testing SHA-3 implementation...");
 
@@ -167,6 +396,10 @@ int main(void) {
   /* Streaming test */
   FIO_LOG_DDEBUG("=== Streaming Tests ===");
   fio___test_sha3_streaming();
+
+  /* Edge case tests */
+  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
+  fio___test_sha3_edge_cases();
 
   FIO_LOG_DDEBUG("All SHA-3 tests passed!");
   return 0;

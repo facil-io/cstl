@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Copyright: Boaz Segev, 2019-2025
+Copyright: Boaz Segev, 2019-2026
 License: ISC / MIT (choose your license)
 
 Feel free to copy, use and enjoy according to the license provided.
@@ -4795,7 +4795,7 @@ Everything Inclusion
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
-#define FIO_CRYPT
+#define FIO_CRYPTO
 #define FIO_SIGNAL
 #define FIO_SOCK
 #define FIO_THREADS
@@ -4828,7 +4828,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define H___FIO_BASIC_ROUND1___H
 #undef FIO_CLI
 #undef FIO_CORE
-#undef FIO_CRYPT
+#undef FIO_CRYPTO
 #undef FIO_FIOBJ
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
@@ -4836,7 +4836,7 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
-#define FIO_CRYPT
+#define FIO_CRYPTO
 #define FIO_THREADS
 
 #elif !defined(H___FIO_BASIC_ROUND2___H)
@@ -4857,9 +4857,10 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define FIO___INCLUDE_AGAIN
 #endif /* FIO_BASIC */
 /* *****************************************************************************
-FIO_CRYPT             Poor-man's Cryptographic Elements
+FIO_CRYPTO            Poor-man's Cryptographic Elements
 ***************************************************************************** */
-#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13)
+#if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13) ||         \
+    defined(FIO_IO)
 #undef FIO_CRYPT
 #undef FIO_CRYPTO
 #undef FIO_AES
@@ -4891,7 +4892,7 @@ FIO_CRYPT             Poor-man's Cryptographic Elements
 #define FIO_OTP
 #define FIO_SECRET
 #define FIO_TLS13
-#endif /* FIO_CRYPT || defined(FIO_CRYPTO) */
+#endif /* FIO_CRYPTO */
 
 /* *****************************************************************************
 FIO_CORE                        Core Inclusion
@@ -5031,7 +5032,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_URL_ENCODED
 #endif
 
-#if (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
+#if defined(FIO_PUBSUB) || (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
 #undef FIO_IO
 #define FIO_IO
 #endif
@@ -29339,7 +29340,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 HKDF API
 
 Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha512_hmac).
-      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPT to include all
+      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPTO to include all
       crypto modules.
 ***************************************************************************** */
 
@@ -34068,6 +34069,22 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
                                 size_t pubkey_len);
 
 /**
+ * Signs a message hash using ECDSA P-256.
+ *
+ * @param sig Output: DER-encoded signature (max 72 bytes)
+ * @param sig_len Output: actual signature length
+ * @param sig_capacity Capacity of signature buffer (should be >= 72)
+ * @param msg_hash SHA-256 hash of the message (32 bytes)
+ * @param secret_key 32-byte secret key (scalar, big-endian)
+ * @return 0 on success, -1 on failure
+ */
+SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[32],
+                              const uint8_t secret_key[32]);
+
+/**
  * Verifies an ECDSA P-256 signature with raw r,s values.
  *
  * @param r The r component of the signature (32 bytes, big-endian)
@@ -35231,6 +35248,201 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
 }
 
 /* *****************************************************************************
+ECDSA P-256 Signing Implementation
+***************************************************************************** */
+
+/**
+ * Encode a 32-byte integer as DER INTEGER (handles leading zero for positive).
+ * Returns number of bytes written.
+ */
+FIO_SFUNC size_t fio___p256_encode_der_integer(uint8_t *out,
+                                               const uint8_t val[32]) {
+  /* Skip leading zeros */
+  size_t start = 0;
+  while (start < 31 && val[start] == 0)
+    ++start;
+
+  /* Need leading zero if high bit is set (to keep positive) */
+  int need_zero = (val[start] & 0x80) != 0;
+  size_t len = 32 - start + (need_zero ? 1 : 0);
+
+  out[0] = 0x02; /* INTEGER tag */
+  out[1] = (uint8_t)len;
+  size_t offset = 2;
+  if (need_zero)
+    out[offset++] = 0x00;
+  FIO_MEMCPY(out + offset, val + start, 32 - start);
+
+  return 2 + len;
+}
+
+SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[32],
+                              const uint8_t secret_key[32]) {
+  if (!sig || !sig_len || !msg_hash || !secret_key || sig_capacity < 72)
+    return -1;
+
+  fio___p256_scalar_s d, e, k, r_scalar, s_scalar, tmp;
+
+  /* Load secret key as scalar d */
+  fio___p256_scalar_from_bytes(d, secret_key);
+
+  /* Validate d: 0 < d < n */
+  if (fio___p256_scalar_is_zero(d) || fio___p256_scalar_gte_n(d)) {
+    fio_secure_zero(d, sizeof(d));
+    return -1;
+  }
+
+  /* Load message hash as scalar e */
+  fio___p256_scalar_from_bytes(e, msg_hash);
+
+  /* Reduce e mod n if needed */
+  if (fio___p256_scalar_gte_n(e)) {
+    uint64_t borrow = 0;
+    e[0] = fio_math_subc64(e[0], FIO___P256_N[0], 0, &borrow);
+    e[1] = fio_math_subc64(e[1], FIO___P256_N[1], borrow, &borrow);
+    e[2] = fio_math_subc64(e[2], FIO___P256_N[2], borrow, &borrow);
+    e[3] = fio_math_subc64(e[3], FIO___P256_N[3], borrow, &borrow);
+  }
+
+  /* Generate random k and compute signature */
+  /* Try up to 100 times to get valid k (should succeed on first try) */
+  uint8_t k_bytes[32];
+  uint8_t r_bytes[32], s_bytes[32];
+
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    /* Generate random k */
+    fio_rand_bytes(k_bytes, 32);
+    fio___p256_scalar_from_bytes(k, k_bytes);
+
+    /* Ensure 0 < k < n */
+    if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k))
+      continue;
+
+    /* Compute R = k * G */
+    fio___p256_point_affine_s g;
+    fio___p256_fe_copy(g.x, FIO___P256_GX);
+    fio___p256_fe_copy(g.y, FIO___P256_GY);
+
+    fio___p256_point_jacobian_s R_jac;
+    fio___p256_point_mul(&R_jac, k, &g);
+
+    if (fio___p256_point_is_infinity(&R_jac))
+      continue;
+
+    /* Convert R to affine */
+    fio___p256_point_affine_s R_aff;
+    fio___p256_point_to_affine(&R_aff, &R_jac);
+
+    /* r = R.x mod n */
+    fio___p256_fe_to_bytes(r_bytes, R_aff.x);
+    fio___p256_scalar_from_bytes(r_scalar, r_bytes);
+
+    /* Reduce r mod n if needed */
+    while (fio___p256_scalar_gte_n(r_scalar)) {
+      uint64_t borrow = 0;
+      r_scalar[0] = fio_math_subc64(r_scalar[0], FIO___P256_N[0], 0, &borrow);
+      r_scalar[1] =
+          fio_math_subc64(r_scalar[1], FIO___P256_N[1], borrow, &borrow);
+      r_scalar[2] =
+          fio_math_subc64(r_scalar[2], FIO___P256_N[2], borrow, &borrow);
+      r_scalar[3] =
+          fio_math_subc64(r_scalar[3], FIO___P256_N[3], borrow, &borrow);
+    }
+
+    /* If r == 0, try again */
+    if (fio___p256_scalar_is_zero(r_scalar))
+      continue;
+
+    /* Compute s = k^(-1) * (e + r*d) mod n */
+    /* First: r*d mod n */
+    fio___p256_scalar_mul(tmp, r_scalar, d);
+
+    /* Then: e + r*d mod n */
+    /* Add e to tmp */
+    uint64_t carry = 0;
+    tmp[0] = fio_math_addc64(tmp[0], e[0], 0, &carry);
+    tmp[1] = fio_math_addc64(tmp[1], e[1], carry, &carry);
+    tmp[2] = fio_math_addc64(tmp[2], e[2], carry, &carry);
+    tmp[3] = fio_math_addc64(tmp[3], e[3], carry, &carry);
+
+    /* Reduce mod n if needed */
+    while (carry || fio___p256_scalar_gte_n(tmp)) {
+      uint64_t borrow = 0;
+      tmp[0] = fio_math_subc64(tmp[0], FIO___P256_N[0], 0, &borrow);
+      tmp[1] = fio_math_subc64(tmp[1], FIO___P256_N[1], borrow, &borrow);
+      tmp[2] = fio_math_subc64(tmp[2], FIO___P256_N[2], borrow, &borrow);
+      tmp[3] = fio_math_subc64(tmp[3], FIO___P256_N[3], borrow, &borrow);
+      carry = 0;
+    }
+
+    /* Compute k^(-1) mod n */
+    fio___p256_scalar_s k_inv;
+    fio___p256_scalar_inv(k_inv, k);
+
+    /* s = k^(-1) * (e + r*d) mod n */
+    fio___p256_scalar_mul(s_scalar, k_inv, tmp);
+
+    /* If s == 0, try again */
+    if (fio___p256_scalar_is_zero(s_scalar))
+      continue;
+
+    /* Convert r and s to bytes (big-endian) */
+    /* r_scalar to r_bytes */
+    fio_u2buf64_be(r_bytes, r_scalar[3]);
+    fio_u2buf64_be(r_bytes + 8, r_scalar[2]);
+    fio_u2buf64_be(r_bytes + 16, r_scalar[1]);
+    fio_u2buf64_be(r_bytes + 24, r_scalar[0]);
+
+    /* s_scalar to s_bytes */
+    fio_u2buf64_be(s_bytes, s_scalar[3]);
+    fio_u2buf64_be(s_bytes + 8, s_scalar[2]);
+    fio_u2buf64_be(s_bytes + 16, s_scalar[1]);
+    fio_u2buf64_be(s_bytes + 24, s_scalar[0]);
+
+    /* Encode as DER: SEQUENCE { r INTEGER, s INTEGER } */
+    uint8_t r_der[34], s_der[34];
+    FIO_MEMSET(r_der, 0, sizeof(r_der));
+    FIO_MEMSET(s_der, 0, sizeof(s_der));
+    size_t r_der_len = fio___p256_encode_der_integer(r_der, r_bytes);
+    size_t s_der_len = fio___p256_encode_der_integer(s_der, s_bytes);
+
+    size_t seq_content_len = r_der_len + s_der_len;
+    size_t total_len =
+        2 + seq_content_len; /* SEQUENCE tag + length + content */
+
+    if (total_len > sig_capacity) {
+      fio_secure_zero(d, sizeof(d));
+      fio_secure_zero(k, sizeof(k));
+      fio_secure_zero(k_inv, sizeof(k_inv));
+      return -1;
+    }
+
+    /* Write SEQUENCE header */
+    sig[0] = 0x30; /* SEQUENCE tag */
+    sig[1] = (uint8_t)seq_content_len;
+    FIO_MEMCPY(sig + 2, r_der, r_der_len);
+    FIO_MEMCPY(sig + 2 + r_der_len, s_der, s_der_len);
+
+    *sig_len = total_len;
+
+    /* Clear sensitive data */
+    fio_secure_zero(d, sizeof(d));
+    fio_secure_zero(k, sizeof(k));
+    fio_secure_zero(k_inv, sizeof(k_inv));
+    fio_secure_zero(k_bytes, sizeof(k_bytes));
+
+    return 0;
+  }
+
+  /* Failed to generate valid signature after 100 attempts */
+  fio_secure_zero(d, sizeof(d));
+  return -1;
+}
+
+/* *****************************************************************************
 P-256 ECDHE Implementation
 ***************************************************************************** */
 
@@ -35565,6 +35777,10 @@ Common OID Constants for X.509 and TLS
 #define FIO_OID_CERT_POLICIES     "2.5.29.32"
 #define FIO_OID_AUTH_KEY_ID       "2.5.29.35"
 #define FIO_OID_EXT_KEY_USAGE     "2.5.29.37"
+
+/* Extended Key Usage OIDs (RFC 5280 Section 4.2.1.12) */
+#define FIO_OID_EKU_SERVER_AUTH "1.3.6.1.5.5.7.3.1"
+#define FIO_OID_EKU_CLIENT_AUTH "1.3.6.1.5.5.7.3.2"
 
 /* X.509 Distinguished Name Attributes */
 #define FIO_OID_COMMON_NAME  "2.5.4.3"
@@ -37784,17 +38000,23 @@ typedef enum {
   FIO_X509_SIG_ED25519 = 9,          /**< Ed25519 */
 } fio_x509_sig_alg_e;
 
-/** Key Usage bit flags (RFC 5280 Section 4.2.1.3) */
+/** Key Usage bit flags (RFC 5280 Section 4.2.1.3)
+ *
+ * ASN.1 BIT STRING uses MSB-first bit ordering:
+ * - Bit 0 = MSB of first byte (0x80)
+ * - Bit 1 = 0x40, Bit 2 = 0x20, etc.
+ * - Bits 8+ are in the second byte
+ */
 typedef enum {
-  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0001,
-  FIO_X509_KU_NON_REPUDIATION = 0x0002,
-  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0004,
-  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0008,
-  FIO_X509_KU_KEY_AGREEMENT = 0x0010,
-  FIO_X509_KU_KEY_CERT_SIGN = 0x0020,
-  FIO_X509_KU_CRL_SIGN = 0x0040,
-  FIO_X509_KU_ENCIPHER_ONLY = 0x0080,
-  FIO_X509_KU_DECIPHER_ONLY = 0x0100,
+  FIO_X509_KU_DIGITAL_SIGNATURE = 0x0080, /* bit 0 = MSB of byte 0 */
+  FIO_X509_KU_NON_REPUDIATION = 0x0040,   /* bit 1 */
+  FIO_X509_KU_KEY_ENCIPHERMENT = 0x0020,  /* bit 2 */
+  FIO_X509_KU_DATA_ENCIPHERMENT = 0x0010, /* bit 3 */
+  FIO_X509_KU_KEY_AGREEMENT = 0x0008,     /* bit 4 */
+  FIO_X509_KU_KEY_CERT_SIGN = 0x0004,     /* bit 5 */
+  FIO_X509_KU_CRL_SIGN = 0x0002,          /* bit 6 */
+  FIO_X509_KU_ENCIPHER_ONLY = 0x0001,     /* bit 7 */
+  FIO_X509_KU_DECIPHER_ONLY = 0x8000,     /* bit 8 = MSB of byte 1 */
 } fio_x509_key_usage_e;
 
 /** X.509 chain validation error codes */
@@ -39689,6 +39911,53 @@ FIO_SFUNC size_t fio___x509_encode_ext_san(uint8_t *buf,
   return total;
 }
 
+/** Helper: encode Extended Key Usage extension (serverAuth for TLS servers) */
+FIO_SFUNC size_t fio___x509_encode_ext_eku(uint8_t *buf, int is_ca) {
+  /* For CA certificates, we don't add EKU (it's for end-entity certs) */
+  if (is_ca)
+    return 0;
+
+  /*
+   * ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
+   * KeyPurposeId ::= OBJECT IDENTIFIER
+   *
+   * For TLS servers, we need serverAuth (1.3.6.1.5.5.7.3.1)
+   */
+  size_t server_auth_oid_len =
+      fio_asn1_encode_oid(NULL, FIO_OID_EKU_SERVER_AUTH);
+  size_t eku_content = server_auth_oid_len;
+  size_t eku_len =
+      fio_asn1_encode_sequence_header(NULL, eku_content) + eku_content;
+
+  /* Wrap in OCTET STRING */
+  size_t octet_len = fio_asn1_encode_octet_string(NULL, NULL, eku_len);
+
+  /* Extension: SEQUENCE { OID, value OCTET STRING } (not critical) */
+  size_t oid_len = fio_asn1_encode_oid(NULL, FIO_OID_EXT_KEY_USAGE);
+  size_t ext_content = oid_len + octet_len;
+  size_t total =
+      fio_asn1_encode_sequence_header(NULL, ext_content) + ext_content;
+
+  if (buf) {
+    size_t offset = 0;
+    offset += fio_asn1_encode_sequence_header(buf + offset, ext_content);
+    offset += fio_asn1_encode_oid(buf + offset, FIO_OID_EXT_KEY_USAGE);
+
+    /* OCTET STRING containing EKU SEQUENCE */
+    size_t octet_hdr =
+        fio_asn1_encode_octet_string(buf + offset, NULL, eku_len);
+    uint8_t *eku_buf = buf + offset + octet_hdr - eku_len;
+    size_t eku_off = 0;
+    eku_off += fio_asn1_encode_sequence_header(eku_buf + eku_off, eku_content);
+    eku_off += fio_asn1_encode_oid(eku_buf + eku_off, FIO_OID_EKU_SERVER_AUTH);
+    (void)eku_off;
+    offset += octet_hdr;
+    (void)offset;
+  }
+
+  return total;
+}
+
 /** Helper: encode Extensions wrapper */
 FIO_SFUNC size_t
 fio___x509_encode_extensions(uint8_t *buf,
@@ -39703,14 +39972,23 @@ fio___x509_encode_extensions(uint8_t *buf,
   /* KeyUsage */
   uint16_t ku = opts->key_usage;
   if (ku == 0) {
-    /* Default key usage based on certificate type */
+    /* Default key usage based on certificate type and key algorithm */
     if (opts->is_ca) {
       ku = FIO_X509_KU_KEY_CERT_SIGN | FIO_X509_KU_CRL_SIGN;
     } else {
-      ku = FIO_X509_KU_DIGITAL_SIGNATURE | FIO_X509_KU_KEY_ENCIPHERMENT;
+      /*
+       * For ECDSA/Ed25519 certificates: digitalSignature only
+       * KEY_ENCIPHERMENT is for RSA key exchange, NOT for ECDSA!
+       * Using KEY_ENCIPHERMENT with ECDSA causes Chrome to reject with
+       * ERR_SSL_KEY_USAGE_INCOMPATIBLE
+       */
+      ku = FIO_X509_KU_DIGITAL_SIGNATURE;
     }
   }
   ext_content += fio___x509_encode_ext_key_usage(NULL, ku);
+
+  /* Extended Key Usage (serverAuth for TLS server certificates) */
+  ext_content += fio___x509_encode_ext_eku(NULL, opts->is_ca);
 
   /* SubjectAltName */
   if (opts->san_dns && opts->san_dns_count > 0)
@@ -39732,6 +40010,7 @@ fio___x509_encode_extensions(uint8_t *buf,
     offset +=
         fio___x509_encode_ext_basic_constraints(buf + offset, opts->is_ca);
     offset += fio___x509_encode_ext_key_usage(buf + offset, ku);
+    offset += fio___x509_encode_ext_eku(buf + offset, opts->is_ca);
     if (opts->san_dns && opts->san_dns_count > 0)
       offset += fio___x509_encode_ext_san(buf + offset,
                                           opts->san_dns,
@@ -39956,60 +40235,13 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
     /* Hash the TBS with SHA-256 */
     fio_u256 hash = fio_sha256(tbs_start, tbs_len);
 
-    /* For P-256, we need to implement ECDSA signing.
-     * This is a simplified implementation - production code should use
-     * a proper ECDSA signing function with RFC 6979 deterministic k. */
-
-    /* Generate deterministic k using RFC 6979 (simplified) */
-    uint8_t k_data[64];
-    fio_sha256_s sha = fio_sha256_init();
-    fio_sha256_consume(&sha, keypair->secret_key, 32);
-    fio_sha256_consume(&sha, hash.u8, 32);
-    fio_u256 k_hash = fio_sha256_finalize(&sha);
-    FIO_MEMCPY(k_data, k_hash.u8, 32);
-
-    /* For now, use a random k (not ideal for production) */
-    fio_rand_bytes(k_data, 32);
-
-    /* Compute signature point R = k * G */
-    uint8_t R_pub[65];
-    uint8_t k_scalar[32];
-    FIO_MEMCPY(k_scalar, k_data, 32);
-
-    /* Ensure k is valid (0 < k < n) */
-    k_scalar[0] &= 0x7F;
-    if (k_scalar[0] == 0)
-      k_scalar[0] = 1;
-
-    /* Compute R = k * G */
-    if (fio_p256_keypair(k_scalar, R_pub) != 0)
+    /* Sign using proper ECDSA P-256 (returns DER-encoded signature) */
+    if (fio_ecdsa_p256_sign(signature,
+                            &actual_sig_len,
+                            sizeof(signature),
+                            hash.u8,
+                            keypair->secret_key) != 0)
       return 0;
-
-    /* r = R.x mod n */
-    uint8_t r[32];
-    FIO_MEMCPY(r, R_pub + 1, 32);
-
-    /* s = k^(-1) * (hash + r * d) mod n */
-    /* This requires modular arithmetic which is complex.
-     * For simplicity, we'll create a placeholder signature.
-     * A real implementation would need proper scalar arithmetic. */
-
-    /* Create DER-encoded signature */
-    /* SEQUENCE { r INTEGER, s INTEGER } */
-    size_t r_int_len = fio_asn1_encode_integer(NULL, r, 32);
-    size_t s_int_len =
-        fio_asn1_encode_integer(NULL, hash.u8, 32); /* placeholder */
-    size_t sig_content = r_int_len + s_int_len;
-    size_t sig_seq_len =
-        fio_asn1_encode_sequence_header(NULL, sig_content) + sig_content;
-
-    size_t sig_off = 0;
-    sig_off +=
-        fio_asn1_encode_sequence_header(signature + sig_off, sig_content);
-    sig_off += fio_asn1_encode_integer(signature + sig_off, r, 32);
-    sig_off += fio_asn1_encode_integer(signature + sig_off, hash.u8, 32);
-    actual_sig_len = sig_off;
-    (void)sig_seq_len;
 #else
     return 0;
 #endif
@@ -40412,7 +40644,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 TLS 1.3 Key Schedule API
 
 Note: Requires FIO_HKDF (which requires FIO_SHA2).
-      Either define FIO_HKDF before FIO_TLS13, or use FIO_CRYPT to include all
+      Either define FIO_HKDF before FIO_TLS13, or use FIO_CRYPTO to include all
       crypto modules.
 
 Reference: RFC 8446 Section 7.1
@@ -40724,8 +40956,9 @@ typedef enum {
   FIO_TLS13_EXT_SERVER_NAME = 0,           /* SNI */
   FIO_TLS13_EXT_SUPPORTED_GROUPS = 10,     /* Key exchange groups */
   FIO_TLS13_EXT_SIGNATURE_ALGORITHMS = 13, /* Signature schemes */
-  FIO_TLS13_EXT_SUPPORTED_VERSIONS = 43,   /* TLS version negotiation */
-  FIO_TLS13_EXT_KEY_SHARE = 51,            /* ECDHE key shares */
+  FIO_TLS13_EXT_ALPN = 16, /* Application-Layer Protocol Negotiation */
+  FIO_TLS13_EXT_SUPPORTED_VERSIONS = 43, /* TLS version negotiation */
+  FIO_TLS13_EXT_KEY_SHARE = 51,          /* ECDHE key shares */
 } fio_tls13_extension_type_e;
 
 /** TLS 1.3 Cipher Suites (RFC 8446 Section B.4) */
@@ -41599,8 +41832,8 @@ SFUNC int fio_tls13_record_encrypt(uint8_t *out,
                                nonce,
                                (fio_tls13_cipher_type_e)keys->cipher_type);
 
-  /* Clear nonce */
-  fio_secure_zero(nonce, sizeof(nonce));
+  /* Note: nonce is not secret (derived from IV and sequence number which
+   * remain in memory), so no need to zero it for security. */
 
   if (ret != 0)
     return -1;
@@ -41669,8 +41902,8 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
                                nonce,
                                (fio_tls13_cipher_type_e)keys->cipher_type);
 
-  /* Clear nonce */
-  fio_secure_zero(nonce, sizeof(nonce));
+  /* Note: nonce is not secret (derived from IV and sequence number which
+   * remain in memory), so no need to zero it for security. */
 
   if (ret != 0)
     return -1;
@@ -43983,6 +44216,8 @@ typedef enum {
 /** Parsed ClientHello message */
 typedef struct {
   uint8_t random[32];                /* Client random */
+  uint8_t legacy_session_id[32];     /* Legacy session ID (for middlebox) */
+  uint8_t legacy_session_id_len;     /* Length of legacy session ID */
   uint16_t cipher_suites[16];        /* Offered cipher suites */
   size_t cipher_suite_count;         /* Number of cipher suites */
   uint16_t supported_groups[8];      /* Offered key exchange groups */
@@ -43998,6 +44233,10 @@ typedef struct {
   const char *server_name;           /* SNI hostname (pointer into data) */
   size_t server_name_len;            /* SNI hostname length */
   int has_supported_versions;        /* 1 if TLS 1.3 supported */
+  /* ALPN (Application-Layer Protocol Negotiation) */
+  const char *alpn_protocols[8]; /* ALPN protocol names (pointers into data) */
+  size_t alpn_protocol_lens[8];  /* ALPN protocol name lengths */
+  size_t alpn_protocol_count;    /* Number of ALPN protocols */
 } fio_tls13_client_hello_s;
 
 /** TLS 1.3 Server Context */
@@ -44041,14 +44280,25 @@ typedef struct {
   const size_t *cert_chain_lens; /* Array of certificate lengths */
   size_t cert_chain_count;       /* Number of certificates */
 
-  /* Private key for signing (Ed25519 or RSA) */
+  /* Private key for signing (Ed25519, P-256, or RSA) */
   const uint8_t *private_key; /* Private key data */
   size_t private_key_len;     /* Private key length */
   uint16_t private_key_type;  /* Key type (signature scheme) */
+  /* Public key for P-256 signing (65 bytes: 0x04 || x || y) */
+  uint8_t public_key[65];
 
   /* Client info (from ClientHello) */
-  char client_sni[256];  /* Client's SNI hostname */
-  size_t client_sni_len; /* SNI length */
+  char client_sni[256];          /* Client's SNI hostname */
+  size_t client_sni_len;         /* SNI length */
+  uint8_t legacy_session_id[32]; /* Client's legacy session ID (to echo) */
+  uint8_t legacy_session_id_len; /* Length of legacy session ID */
+
+  /* ALPN (Application-Layer Protocol Negotiation) */
+  char selected_alpn[256];          /* Selected ALPN protocol name */
+  size_t selected_alpn_len;         /* Selected ALPN protocol length */
+  const char **alpn_protocols;      /* Server's supported ALPN protocols */
+  const size_t *alpn_protocol_lens; /* Server's ALPN protocol lengths */
+  size_t alpn_protocol_count;       /* Number of server's ALPN protocols */
 
   /* Error info */
   uint8_t alert_level;
@@ -44429,10 +44679,13 @@ FIO_SFUNC int fio___tls13_parse_client_hello(fio_tls13_client_hello_s *ch,
   FIO_MEMCPY(ch->random, p, 32);
   p += 32;
 
-  /* Legacy session ID */
+  /* Legacy session ID (must be echoed in ServerHello for middlebox compat) */
   uint8_t session_id_len = *p++;
-  if (p + session_id_len > end)
+  if (p + session_id_len > end || session_id_len > 32)
     return -1;
+  ch->legacy_session_id_len = session_id_len;
+  if (session_id_len > 0)
+    FIO_MEMCPY(ch->legacy_session_id, p, session_id_len);
   p += session_id_len;
 
   /* Cipher suites */
@@ -44556,8 +44809,12 @@ FIO_SFUNC int fio___tls13_build_server_hello(fio_tls13_server_s *server,
   FIO_MEMCPY(p, server->server_random, 32);
   p += 32;
 
-  /* Legacy session ID (empty) */
-  *p++ = 0;
+  /* Legacy session ID (echo client's for middlebox compatibility) */
+  *p++ = server->legacy_session_id_len;
+  if (server->legacy_session_id_len > 0) {
+    FIO_MEMCPY(p, server->legacy_session_id, server->legacy_session_id_len);
+    p += server->legacy_session_id_len;
+  }
 
   /* Cipher suite */
   fio___tls13_write_u16(p, server->cipher_suite);
@@ -44704,14 +44961,27 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
     if (server->private_key_len != 32)
       return -1;
     /* Ed25519 signs directly over the content */
-    uint8_t public_key[32];
-    fio_ed25519_public_key(public_key, server->private_key);
+    uint8_t ed_public_key[32];
+    fio_ed25519_public_key(ed_public_key, server->private_key);
     fio_ed25519_sign(signature,
                      signed_content,
                      signed_content_len,
                      server->private_key,
-                     public_key);
+                     ed_public_key);
     sig_len = 64;
+    break;
+  }
+  case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
+    if (server->private_key_len != 32)
+      return -1;
+    /* P-256 ECDSA: hash the signed content with SHA-256, then sign */
+    fio_u256 msg_hash = fio_sha256(signed_content, signed_content_len);
+    if (fio_ecdsa_p256_sign(signature,
+                            &sig_len,
+                            sizeof(signature),
+                            msg_hash.u8,
+                            server->private_key) != 0)
+      return -1;
     break;
   }
   default:
@@ -44742,6 +45012,10 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
 
   /* Signature */
   FIO_MEMCPY(p, signature, sig_len);
+
+  FIO_LOG_DDEBUG("TLS 1.3 Server: CertificateVerify scheme=0x%04x sig_len=%zu",
+                 server->signature_scheme,
+                 sig_len);
 
   return (int)(4 + body_len);
 }
@@ -44983,14 +45257,21 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   /* Parse ClientHello */
   fio_tls13_client_hello_s ch;
   if (fio___tls13_parse_client_hello(&ch, ch_msg + 4, ch_msg_len - 4) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ClientHello parse failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_DECODE_ERROR);
     return -1;
   }
 
+  FIO_LOG_DDEBUG("TLS 1.3 Server: ClientHello ciphers=%zu sigs=%zu keys=%zu",
+                 ch.cipher_suite_count,
+                 ch.signature_algorithm_count,
+                 ch.key_share_count);
+
   /* Verify TLS 1.3 is supported */
   if (!ch.has_supported_versions) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: client does not support TLS 1.3");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_PROTOCOL_VERSION);
@@ -45007,8 +45288,17 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
     server->client_sni_len = copy_len;
   }
 
+  /* Store legacy session ID (must echo in ServerHello for middlebox compat) */
+  server->legacy_session_id_len = ch.legacy_session_id_len;
+  if (ch.legacy_session_id_len > 0) {
+    FIO_MEMCPY(server->legacy_session_id,
+               ch.legacy_session_id,
+               ch.legacy_session_id_len);
+  }
+
   /* Select cipher suite */
   if (fio___tls13_server_select_cipher(server, &ch) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: no common cipher suite");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -45022,6 +45312,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                           &ch,
                                           &client_key_share,
                                           &client_key_share_len) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: no common key share group");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -45030,6 +45321,8 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Select signature algorithm */
   if (fio___tls13_server_select_signature(server, &ch) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: sig algorithm mismatch (key=0x%04x)",
+                   server->private_key_type);
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
@@ -45044,6 +45337,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   if (fio_x25519_shared_secret(server->shared_secret,
                                server->x25519_private_key,
                                client_key_share) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ECDHE shared secret failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
@@ -45057,6 +45351,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   uint8_t sh_msg[256];
   int sh_len = fio___tls13_build_server_hello(server, sh_msg, sizeof(sh_msg));
   if (sh_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ServerHello build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45068,6 +45363,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Derive handshake keys */
   if (fio___tls13_server_derive_handshake_keys(server) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake key derivation failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45084,6 +45380,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                              hs_msgs + hs_msgs_len,
                                              sizeof(hs_msgs) - hs_msgs_len);
   if (ee_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: EncryptedExtensions build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45099,6 +45396,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                                hs_msgs + hs_msgs_len,
                                                sizeof(hs_msgs) - hs_msgs_len);
   if (cert_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: Certificate build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45115,6 +45413,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                            hs_msgs + hs_msgs_len,
                                            sizeof(hs_msgs) - hs_msgs_len);
   if (cv_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: CertificateVerify build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45131,6 +45430,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                         hs_msgs + hs_msgs_len,
                                         sizeof(hs_msgs) - hs_msgs_len);
   if (fin_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: Finished build failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45143,13 +45443,14 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
 
   /* Derive application keys (after server Finished is in transcript) */
   if (fio___tls13_server_derive_app_keys(server) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: app key derivation failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
     return -1;
   }
 
-  /* Build output: ServerHello record + encrypted handshake record */
+  /* Build output: ServerHello record + CCS + encrypted handshake record */
   size_t offset = 0;
 
   /* ServerHello record (plaintext) */
@@ -45162,6 +45463,16 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   FIO_MEMCPY(out + offset, sh_msg, (size_t)sh_len);
   offset += (size_t)sh_len;
 
+  /* Change Cipher Spec (for middlebox compatibility, RFC 8446 Section 5) */
+  if (offset + 6 > out_capacity)
+    return -1;
+  out[offset++] = FIO_TLS13_CONTENT_CHANGE_CIPHER_SPEC;
+  out[offset++] = 0x03;
+  out[offset++] = 0x03; /* Legacy version TLS 1.2 */
+  out[offset++] = 0x00;
+  out[offset++] = 0x01; /* Length: 1 byte */
+  out[offset++] = 0x01; /* CCS message: 1 */
+
   /* Encrypted handshake messages */
   int enc_len = fio_tls13_record_encrypt(out + offset,
                                          out_capacity - offset,
@@ -45170,6 +45481,7 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
                                          FIO_TLS13_CONTENT_HANDSHAKE,
                                          &server->server_handshake_keys);
   if (enc_len < 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake encryption failed");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -45349,6 +45661,7 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                                 out_len) != 0) {
       return -1;
     }
+    FIO_LOG_DEBUG2("TLS 1.3 Server: ClientHello processed, sent ServerHello");
     break;
   }
 
@@ -45371,12 +45684,22 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                            record_len,
                                            &server->client_handshake_keys);
     if (dec_len < 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: client Finished decryption failed");
       fio___tls13_server_set_error(server,
                                    FIO_TLS13_ALERT_LEVEL_FATAL,
                                    FIO_TLS13_ALERT_BAD_RECORD_MAC);
       return -1;
     }
 
+    if (inner_type == FIO_TLS13_CONTENT_ALERT && dec_len >= 2) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: alert level=%d desc=%d",
+                     decrypted[0],
+                     decrypted[1]);
+      fio___tls13_server_set_error(server,
+                                   FIO_TLS13_ALERT_LEVEL_FATAL,
+                                   decrypted[1]);
+      return -1;
+    }
     if (inner_type != FIO_TLS13_CONTENT_HANDSHAKE) {
       fio___tls13_server_set_error(server,
                                    FIO_TLS13_ALERT_LEVEL_FATAL,
@@ -45390,6 +45713,7 @@ SFUNC int fio_tls13_server_process(fio_tls13_server_s *server,
                                                    (size_t)dec_len) != 0) {
       return -1;
     }
+    FIO_LOG_DEBUG2("TLS 1.3 Server: handshake complete");
     break;
   }
 
@@ -45453,9 +45777,14 @@ SFUNC int fio_tls13_server_decrypt(fio_tls13_server_s *server,
   /* Handle alerts */
   if (content_type == FIO_TLS13_CONTENT_ALERT) {
     if (dec_len >= 2) {
+      uint8_t level = out[0];
+      uint8_t desc = out[1];
       FIO_LOG_DEBUG2("TLS 1.3 Server: Received alert: level=%d, desc=%d",
-                     out[0],
-                     out[1]);
+                     level,
+                     desc);
+      /* close_notify (0) is a graceful shutdown, return 0 (EOF) */
+      if (desc == 0)
+        return 0;
     }
     return -1;
   }
@@ -60067,9 +60396,8 @@ OpenSSL Helpers Cleanup
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if defined(H___FIO_IO___H) && !defined(FIO_NO_TLS) &&                         \
-    defined(H___FIO_TLS13___H) && !defined(H___FIO_TLS13_IO___H) &&            \
-    !defined(FIO___RECURSIVE_INCLUDE)
+#if defined(H___FIO_IO___H) && defined(H___FIO_TLS13___H) &&                   \
+    !defined(H___FIO_TLS13_IO___H) && !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_TLS13_IO___H 1
 /* *****************************************************************************
 TLS 1.3 IO Function Getter
@@ -60094,10 +60422,14 @@ typedef struct {
   /* Certificate chain (DER-encoded) for server */
   uint8_t *cert_der;
   size_t cert_der_len;
-  /* Private key for server (Ed25519 seed) */
+  /* Private key for server (P-256: 32-byte scalar, Ed25519: 32-byte seed) */
   uint8_t private_key[32];
+  /* Public key for P-256 signing (65 bytes: 0x04 || x || y) */
+  uint8_t public_key[65];
   size_t private_key_len;
   uint16_t private_key_type;
+  /* SNI hostname for client connections */
+  char server_name[256];
 } fio___tls13_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
@@ -60112,7 +60444,8 @@ typedef struct {
   uint8_t handshake_complete;
   /* Buffered incoming data (partial records) */
   uint8_t *recv_buf;
-  size_t recv_buf_len;
+  size_t recv_buf_len; /* Total data length in recv_buf */
+  size_t recv_buf_pos; /* Current read position (lazy compaction) */
   size_t recv_buf_cap;
   /* Buffered decrypted data (ready to read) */
   uint8_t *app_buf;
@@ -60124,8 +60457,14 @@ typedef struct {
   size_t send_buf_len;
   size_t send_buf_cap;
   size_t send_buf_pos; /* Write position in send_buf */
+  /* Pre-allocated encryption buffer (avoids stack allocation in write path) */
+  uint8_t enc_buf[FIO_TLS13_MAX_CIPHERTEXT_LEN + FIO_TLS13_RECORD_HEADER_LEN +
+                  FIO_TLS13_TAG_LEN + 16];
   /* Parent context (for certificate chain) */
   fio___tls13_context_s *ctx;
+  /* Certificate chain storage (for server - pointers must outlive handshake) */
+  const uint8_t *cert_ptr;
+  size_t cert_len;
 } fio___tls13_connection_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_connection_s)
@@ -60135,7 +60474,7 @@ TLS 1.3 Context Builder - Self-Signed Certificate Generation
 ***************************************************************************** */
 
 #if defined(H___FIO_X509___H)
-/** Global Ed25519 keypair for self-signed certificates */
+/** Global P-256 keypair for self-signed certificates */
 static fio_x509_keypair_s fio___tls13_self_signed_keypair;
 static uint8_t *fio___tls13_self_signed_cert = NULL;
 static size_t fio___tls13_self_signed_cert_len = 0;
@@ -60162,11 +60501,11 @@ FIO_SFUNC int fio___tls13_make_self_signed(const char *server_name) {
     return 0; /* Already generated */
   }
 
-  FIO_LOG_DEBUG2("generating Ed25519 self-signed certificate for TLS 1.3...");
+  FIO_LOG_DEBUG2("generating P-256 self-signed certificate for TLS 1.3...");
 
-  /* Generate Ed25519 keypair */
-  if (fio_x509_keypair_ed25519(&fio___tls13_self_signed_keypair) != 0) {
-    FIO_LOG_ERROR("TLS 1.3: failed to generate Ed25519 keypair");
+  /* Generate P-256 keypair (universally supported by browsers/curl) */
+  if (fio_x509_keypair_p256(&fio___tls13_self_signed_keypair) != 0) {
+    FIO_LOG_ERROR("TLS 1.3: failed to generate P-256 keypair");
     fio_unlock(&lock);
     return -1;
   }
@@ -60226,7 +60565,7 @@ FIO_SFUNC int fio___tls13_make_self_signed(const char *server_name) {
   /* Register cleanup callback */
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___tls13_clear_self_signed, NULL);
 
-  FIO_LOG_DEBUG2("Ed25519 self-signed certificate generated successfully "
+  FIO_LOG_DEBUG2("P-256 self-signed certificate generated successfully "
                  "(%zu bytes)",
                  fio___tls13_self_signed_cert_len);
   fio_unlock(&lock);
@@ -60273,12 +60612,14 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
                fio___tls13_self_signed_cert_len);
     ctx->cert_der_len = fio___tls13_self_signed_cert_len;
 
-    /* Copy private key */
+    /* Copy private key (P-256 scalar) */
     FIO_MEMCPY(ctx->private_key,
                fio___tls13_self_signed_keypair.secret_key,
                32);
+    /* Copy public key (P-256 uncompressed point for signing) */
+    FIO_MEMCPY(ctx->public_key, fio___tls13_self_signed_keypair.public_key, 65);
     ctx->private_key_len = 32;
-    ctx->private_key_type = FIO_TLS13_SIG_ED25519;
+    ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
   }
 #else
   FIO_LOG_ERROR(
@@ -60304,8 +60645,18 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
   ctx->tls = fio_io_tls_dup(tls);
   ctx->is_client = is_client;
 
-  /* For server, load certificates */
-  if (!is_client) {
+  /* For client, extract server name from TLS object for SNI */
+  if (is_client) {
+    FIO_IMAP_EACH(fio___io_tls_cert_map, &tls->cert, i) {
+      fio_buf_info_s nm = fio_keystr_buf(&tls->cert.ary[i].nm);
+      if (nm.buf && nm.len > 0 && nm.len < sizeof(ctx->server_name)) {
+        FIO_MEMCPY(ctx->server_name, nm.buf, nm.len);
+        ctx->server_name[nm.len] = '\0';
+        FIO_LOG_DEBUG2("TLS 1.3: extracted SNI hostname: %s", ctx->server_name);
+        break;
+      }
+    }
+  } else { /* For server, load certificates */
     /* Check if certificates are configured */
     if (!fio_io_tls_cert_count(tls)) {
       /* No certificates configured - use self-signed */
@@ -60324,11 +60675,16 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
                  fio___tls13_self_signed_cert,
                  fio___tls13_self_signed_cert_len);
       ctx->cert_der_len = fio___tls13_self_signed_cert_len;
+      /* Copy private key (P-256 scalar) */
       FIO_MEMCPY(ctx->private_key,
                  fio___tls13_self_signed_keypair.secret_key,
                  32);
+      /* Copy public key (P-256 uncompressed point for signing) */
+      FIO_MEMCPY(ctx->public_key,
+                 fio___tls13_self_signed_keypair.public_key,
+                 65);
       ctx->private_key_len = 32;
-      ctx->private_key_type = FIO_TLS13_SIG_ED25519;
+      ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
 #else
       FIO_LOG_ERROR("TLS 1.3: X509 module required for server certificates");
       goto error;
@@ -60478,9 +60834,9 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
                   conn->is_client ? "client" : "server");
 
   if (conn->is_client) {
-    /* Initialize client and start handshake */
-    /* Note: server_name would come from context, but we don't have it here */
-    fio_tls13_client_init(&conn->state.client, NULL);
+    /* Initialize client and start handshake with SNI */
+    const char *sni = ctx->server_name[0] ? ctx->server_name : NULL;
+    fio_tls13_client_init(&conn->state.client, sni);
     fio_tls13_client_skip_verification(&conn->state.client,
                                        1); /* TODO: proper verification */
 
@@ -60498,11 +60854,15 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
     /* Initialize server */
     fio_tls13_server_init(&conn->state.server);
 
-    /* Set certificate chain */
+    /* Set certificate chain - use pointers stored in connection struct */
     if (ctx->cert_der && ctx->cert_der_len > 0) {
-      const uint8_t *certs[] = {ctx->cert_der};
-      size_t cert_lens[] = {ctx->cert_der_len};
-      fio_tls13_server_set_cert_chain(&conn->state.server, certs, cert_lens, 1);
+      /* Store cert pointer and length in connection for lifetime management */
+      conn->cert_ptr = ctx->cert_der;
+      conn->cert_len = ctx->cert_der_len;
+      fio_tls13_server_set_cert_chain(&conn->state.server,
+                                      &conn->cert_ptr,
+                                      &conn->cert_len,
+                                      1);
     }
 
     /* Set private key */
@@ -60511,6 +60871,10 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
                                        ctx->private_key,
                                        ctx->private_key_len,
                                        ctx->private_key_type);
+      /* Copy public key for P-256 signing */
+      if (ctx->private_key_type == FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256) {
+        FIO_MEMCPY(conn->state.server.public_key, ctx->public_key, 65);
+      }
     }
   }
 }
@@ -60543,11 +60907,28 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
     return (ssize_t)to_copy;
   }
 
+  /* Calculate available space in recv_buf and compact if needed */
+  size_t recv_data_len = conn->recv_buf_len - conn->recv_buf_pos;
+  size_t recv_space = conn->recv_buf_cap - conn->recv_buf_len;
+
+  /* Lazy compaction: only compact when buffer is >50% consumed AND
+   * we don't have enough space for a new record */
+  if (conn->recv_buf_pos > (conn->recv_buf_cap >> 1) &&
+      recv_space < FIO_TLS13_MAX_CIPHERTEXT_LEN) {
+    if (recv_data_len > 0) {
+      FIO_MEMMOVE(conn->recv_buf,
+                  conn->recv_buf + conn->recv_buf_pos,
+                  recv_data_len);
+    }
+    conn->recv_buf_len = recv_data_len;
+    conn->recv_buf_pos = 0;
+    recv_space = conn->recv_buf_cap - conn->recv_buf_len;
+  }
+
   /* Read raw data from socket */
   errno = 0;
-  ssize_t raw_read = read(fd,
-                          conn->recv_buf + conn->recv_buf_len,
-                          conn->recv_buf_cap - conn->recv_buf_len);
+  ssize_t raw_read =
+      fio_sock_read(fd, conn->recv_buf + conn->recv_buf_len, recv_space);
   if (raw_read <= 0) {
     if (raw_read == 0)
       return 0; /* EOF */
@@ -60556,15 +60937,16 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
     return raw_read;
   }
   conn->recv_buf_len += (size_t)raw_read;
+  recv_data_len = conn->recv_buf_len - conn->recv_buf_pos;
 
   /* Process received data */
-  while (conn->recv_buf_len >= FIO_TLS13_RECORD_HEADER_LEN) {
+  uint8_t *recv_ptr = conn->recv_buf + conn->recv_buf_pos;
+  while (recv_data_len >= FIO_TLS13_RECORD_HEADER_LEN) {
     /* Check if we have a complete record */
-    uint16_t record_len =
-        ((uint16_t)conn->recv_buf[3] << 8) | conn->recv_buf[4];
+    uint16_t record_len = ((uint16_t)recv_ptr[3] << 8) | recv_ptr[4];
     size_t total_record_len = FIO_TLS13_RECORD_HEADER_LEN + record_len;
 
-    if (conn->recv_buf_len < total_record_len)
+    if (recv_data_len < total_record_len)
       break; /* Need more data */
 
     if (!conn->handshake_complete) {
@@ -60575,15 +60957,15 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
 
       if (conn->is_client) {
         consumed = fio_tls13_client_process(&conn->state.client,
-                                            conn->recv_buf,
-                                            conn->recv_buf_len,
+                                            recv_ptr,
+                                            recv_data_len,
                                             out_buf,
                                             sizeof(out_buf),
                                             &out_len);
       } else {
         consumed = fio_tls13_server_process(&conn->state.server,
-                                            conn->recv_buf,
-                                            conn->recv_buf_len,
+                                            recv_ptr,
+                                            recv_data_len,
                                             out_buf,
                                             sizeof(out_buf),
                                             &out_len);
@@ -60601,16 +60983,31 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
           FIO_MEMCPY(conn->send_buf + conn->send_buf_len, out_buf, out_len);
           conn->send_buf_len += out_len;
         }
+        /* Immediately try to send handshake response */
+        while (conn->send_buf_pos < conn->send_buf_len) {
+          errno = 0;
+          ssize_t hs_written =
+              fio_sock_write(fd,
+                             conn->send_buf + conn->send_buf_pos,
+                             conn->send_buf_len - conn->send_buf_pos);
+          if (hs_written <= 0) {
+            if (errno == EWOULDBLOCK || errno == EAGAIN)
+              break; /* Will retry later */
+            break;
+          }
+          conn->send_buf_pos += (size_t)hs_written;
+        }
+        if (conn->send_buf_pos >= conn->send_buf_len) {
+          conn->send_buf_len = 0;
+          conn->send_buf_pos = 0;
+        }
       }
 
-      /* Remove consumed data from buffer */
-      if (consumed > 0 && (size_t)consumed <= conn->recv_buf_len) {
-        conn->recv_buf_len -= (size_t)consumed;
-        if (conn->recv_buf_len > 0) {
-          FIO_MEMMOVE(conn->recv_buf,
-                      conn->recv_buf + consumed,
-                      conn->recv_buf_len);
-        }
+      /* Advance read position (lazy compaction) */
+      if (consumed > 0 && (size_t)consumed <= recv_data_len) {
+        conn->recv_buf_pos += (size_t)consumed;
+        recv_ptr += consumed;
+        recv_data_len -= (size_t)consumed;
       }
 
       /* Check if handshake is complete */
@@ -60636,20 +61033,38 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
     } else {
       /* Decrypt application data */
       int dec_len;
-      if (conn->is_client) {
-        dec_len =
-            fio_tls13_client_decrypt(&conn->state.client,
-                                     conn->app_buf + conn->app_buf_len,
-                                     conn->app_buf_cap - conn->app_buf_len,
-                                     conn->recv_buf,
-                                     total_record_len);
+
+      /* OPTIMIZATION: If user buffer is large enough and app_buf is empty,
+       * decrypt directly into user buffer to avoid double copy */
+      size_t expected_plaintext_len = record_len > (FIO_TLS13_TAG_LEN + 1)
+                                          ? record_len - FIO_TLS13_TAG_LEN - 1
+                                          : 0;
+      uint8_t *decrypt_target;
+      size_t decrypt_capacity;
+
+      if (len >= expected_plaintext_len && conn->app_buf_len == 0 &&
+          conn->app_buf_pos == 0) {
+        /* Decrypt directly to user buffer */
+        decrypt_target = (uint8_t *)buf;
+        decrypt_capacity = len;
       } else {
-        dec_len =
-            fio_tls13_server_decrypt(&conn->state.server,
-                                     conn->app_buf + conn->app_buf_len,
-                                     conn->app_buf_cap - conn->app_buf_len,
-                                     conn->recv_buf,
-                                     total_record_len);
+        /* Use app_buf as intermediate buffer */
+        decrypt_target = conn->app_buf + conn->app_buf_len;
+        decrypt_capacity = conn->app_buf_cap - conn->app_buf_len;
+      }
+
+      if (conn->is_client) {
+        dec_len = fio_tls13_client_decrypt(&conn->state.client,
+                                           decrypt_target,
+                                           decrypt_capacity,
+                                           recv_ptr,
+                                           total_record_len);
+      } else {
+        dec_len = fio_tls13_server_decrypt(&conn->state.server,
+                                           decrypt_target,
+                                           decrypt_capacity,
+                                           recv_ptr,
+                                           total_record_len);
       }
 
       if (dec_len < 0) {
@@ -60658,16 +61073,18 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
         return -1;
       }
 
+      /* Advance read position (lazy compaction) */
+      conn->recv_buf_pos += total_record_len;
+      recv_ptr += total_record_len;
+      recv_data_len -= total_record_len;
+
+      /* If we decrypted directly to user buffer, return immediately */
+      if (decrypt_target == (uint8_t *)buf && dec_len > 0) {
+        return (ssize_t)dec_len;
+      }
+
       if (dec_len > 0)
         conn->app_buf_len += (size_t)dec_len;
-
-      /* Remove consumed record from buffer */
-      conn->recv_buf_len -= total_record_len;
-      if (conn->recv_buf_len > 0) {
-        FIO_MEMMOVE(conn->recv_buf,
-                    conn->recv_buf + total_record_len,
-                    conn->recv_buf_len);
-      }
     }
   }
 
@@ -60709,25 +61126,44 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
     return -1;
   }
 
-  /* Encrypt and send data */
-  uint8_t enc_buf[FIO_TLS13_MAX_CIPHERTEXT_LEN + FIO_TLS13_RECORD_HEADER_LEN +
-                  FIO_TLS13_TAG_LEN + 16];
+  /* Flush any pending handshake data (e.g., client Finished) before sending
+   * application data. The server must receive the client Finished before it
+   * can process application data encrypted with application keys. */
+  while (conn->send_buf_pos < conn->send_buf_len) {
+    errno = 0;
+    ssize_t hs_written =
+        fio_sock_write(fd,
+                       conn->send_buf + conn->send_buf_pos,
+                       conn->send_buf_len - conn->send_buf_pos);
+    if (hs_written <= 0) {
+      /* Can't send handshake data yet, so can't send app data either */
+      errno = EWOULDBLOCK;
+      return -1;
+    }
+    conn->send_buf_pos += (size_t)hs_written;
+  }
+  /* Reset send buffer after handshake data is fully sent */
+  if (conn->send_buf_pos >= conn->send_buf_len) {
+    conn->send_buf_len = 0;
+    conn->send_buf_pos = 0;
+  }
 
   /* Limit to max plaintext size */
   if (len > FIO_TLS13_MAX_PLAINTEXT_LEN)
     len = FIO_TLS13_MAX_PLAINTEXT_LEN;
 
+  /* Encrypt data using pre-allocated buffer (avoids stack allocation) */
   int enc_len;
   if (conn->is_client) {
     enc_len = fio_tls13_client_encrypt(&conn->state.client,
-                                       enc_buf,
-                                       sizeof(enc_buf),
+                                       conn->enc_buf,
+                                       sizeof(conn->enc_buf),
                                        (const uint8_t *)buf,
                                        len);
   } else {
     enc_len = fio_tls13_server_encrypt(&conn->state.server,
-                                       enc_buf,
-                                       sizeof(enc_buf),
+                                       conn->enc_buf,
+                                       sizeof(conn->enc_buf),
                                        (const uint8_t *)buf,
                                        len);
   }
@@ -60740,7 +61176,7 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
 
   /* Write encrypted data to socket */
   errno = 0;
-  ssize_t written = write(fd, enc_buf, (size_t)enc_len);
+  ssize_t written = fio_sock_write(fd, conn->enc_buf, (size_t)enc_len);
   if (written <= 0) {
     if (errno == EWOULDBLOCK || errno == EAGAIN)
       return -1;
@@ -60770,9 +61206,9 @@ FIO_SFUNC int fio___tls13_flush(int fd, void *tls_ctx) {
   /* Send any buffered handshake data */
   while (conn->send_buf_pos < conn->send_buf_len) {
     errno = 0;
-    ssize_t written = write(fd,
-                            conn->send_buf + conn->send_buf_pos,
-                            conn->send_buf_len - conn->send_buf_pos);
+    ssize_t written = fio_sock_write(fd,
+                                     conn->send_buf + conn->send_buf_pos,
+                                     conn->send_buf_len - conn->send_buf_pos);
     if (written <= 0) {
       if (errno == EWOULDBLOCK || errno == EAGAIN)
         return -1; /* Would block, try again later */
@@ -60826,7 +61262,7 @@ FIO_SFUNC void fio___tls13_finish(int fd, void *tls_ctx) {
 
     if (enc_len > 0) {
       /* Best effort send, ignore errors */
-      (void)write(fd, alert, (size_t)enc_len);
+      (void)fio_sock_write(fd, alert, (size_t)enc_len);
     }
   }
   (void)fd;
@@ -73671,6 +74107,7 @@ Recursive inclusion / cleanup
 #if defined(HAVE_OPENSSL)
 #include "411 openssl.h"
 #endif
+#include "412 tls13.h"
 #endif /* FIO_IO */
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
