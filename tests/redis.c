@@ -584,8 +584,7 @@ FIO_SFUNC void on_start(void *udata) {
   (void)udata;
 
   /* Create Redis engine */
-  fio_pubsub_engine_s *redis =
-      fio_redis_new(.address = "localhost", .port = "6379");
+  fio_pubsub_engine_s *redis = fio_redis_new(.url = "redis://localhost:6379");
   if (!redis) {
     FIO_LOG_ERROR("FAIL: fio_redis_new returned NULL");
     test_state.test_failed = 1;

@@ -40,8 +40,7 @@ void on_message(fio_msg_s *msg) {
 int main(void) {
   /* Create Redis engine (ref count = 1) */
   fio_pubsub_engine_s *redis = fio_redis_new(
-      .address = "localhost",
-      .port = "6379"
+      .url = "redis://localhost:6379"
   );
   
   /* Attach to pub/sub system (does NOT take ownership) */
@@ -82,10 +81,17 @@ Each Redis engine allocates two read buffers (one for each connection), so the t
 
 ```c
 typedef struct {
-  /** Redis server's address, defaults to "localhost" */
-  const char *address;
-  /** Redis server's port, defaults to "6379" */
-  const char *port;
+  /**
+   * Redis server URL.
+   *
+   * Supported formats:
+   * - "redis://host:port"
+   * - "redis://host" (default port 6379)
+   * - "host:port" (no scheme)
+   * - "host" (no scheme, default port 6379)
+   * - NULL or empty → defaults to "localhost:6379"
+   */
+  const char *url;
   /** Redis server's password, if any (for AUTH command) */
   const char *auth;
   /** Length of auth string (0 = auto-detect with strlen) */
@@ -98,8 +104,7 @@ typedef struct {
 Arguments for creating a Redis pub/sub engine.
 
 **Members:**
-- `address` - Redis server hostname or IP address. Defaults to `"localhost"` if NULL or empty.
-- `port` - Redis server port as a string. Defaults to `"6379"` if NULL or empty.
+- `url` - Redis server URL. Supports various formats including `redis://host:port`, `host:port`, or just `host`. Defaults to `"localhost:6379"` if NULL or empty.
 - `auth` - Optional password for Redis AUTH command. Set to NULL if no authentication is required.
 - `auth_len` - Length of the auth string. If 0, `strlen()` is used to determine the length.
 - `ping_interval` - Keepalive ping interval in seconds. Defaults to 300 seconds (5 minutes) if 0.
@@ -118,7 +123,7 @@ The Redis engine uses reference counting for memory management:
 
 ```c
 /* Example: sharing engine across multiple owners */
-fio_pubsub_engine_s *redis = fio_redis_new(.address = "localhost");
+fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost");
 
 /* Share with another component */
 fio_pubsub_engine_s *shared = fio_redis_dup(redis);  /* ref = 2 */
@@ -151,8 +156,7 @@ The function is shadowed by a macro, allowing it to accept named arguments:
 
 ```c
 fio_pubsub_engine_s *redis = fio_redis_new(
-    .address = "redis.example.com",
-    .port = "6379",
+    .url = "redis://redis.example.com:6379",
     .auth = "secret_password",
     .ping_interval = 30
 );
@@ -162,8 +166,7 @@ fio_pubsub_engine_s *redis = fio_redis_new(
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `address` | `const char *` | Redis server address; defaults to `"localhost"` |
-| `port` | `const char *` | Redis server port; defaults to `"6379"` |
+| `url` | `const char *` | Redis server URL; defaults to `"localhost:6379"` |
 | `auth` | `const char *` | Optional authentication password |
 | `auth_len` | `size_t` | Length of auth string; 0 for auto-detect |
 | `ping_interval` | `uint8_t` | Keepalive interval in seconds; defaults to 300 |
@@ -355,7 +358,7 @@ void broadcast_message(const char *channel, const char *message) {
 
 int main(void) {
   /* Create Redis engine (ref count = 1) */
-  redis_engine = fio_redis_new(.address = "localhost", .port = "6379");
+  redis_engine = fio_redis_new(.url = "redis://localhost:6379");
   if (!redis_engine) {
     FIO_LOG_FATAL("Failed to create Redis engine");
     return 1;
@@ -386,8 +389,7 @@ int main(void) {
 int main(void) {
   /* Connect with password authentication */
   fio_pubsub_engine_s *redis = fio_redis_new(
-      .address = "redis.example.com",
-      .port = "6379",
+      .url = "redis://redis.example.com:6379",
       .auth = "my_redis_password"
   );
   

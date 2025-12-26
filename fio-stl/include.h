@@ -134,6 +134,10 @@
 #include "154 p256.h"
 #endif
 
+#ifdef FIO_P384
+#include "154 p384.h"
+#endif
+
 #ifdef FIO_ASN1
 #include "155 asn1.h"
 #endif

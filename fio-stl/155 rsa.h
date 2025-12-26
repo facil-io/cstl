@@ -21,16 +21,16 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_RSA___H
 
 /* *****************************************************************************
-RSA Signature Verification Module
+RSA Signature Module
 
-This module provides RSA signature verification (NOT signing) for TLS 1.3
-certificate chain validation. It supports:
+This module provides RSA signature verification and signing for TLS 1.3.
+It supports:
 
 - PKCS#1 v1.5 signatures (sha256WithRSAEncryption, etc.)
 - RSA-PSS signatures (required for TLS 1.3 CertificateVerify)
 - Key sizes: 2048, 3072, 4096 bits
+- Signing with RSA-PSS (for TLS 1.3 server CertificateVerify)
 
-**Note**: This is verification-only. No private key operations are supported.
 **Note**: This implementation has not been audited. Use at your own risk.
 ***************************************************************************** */
 
@@ -70,6 +70,22 @@ typedef struct {
   const uint8_t *e; /**< Public exponent (big-endian) */
   size_t e_len;     /**< Exponent length in bytes */
 } fio_rsa_pubkey_s;
+
+/**
+ * RSA private key for signature generation.
+ *
+ * The modulus (n) and private exponent (d) are stored as big-endian byte
+ * arrays. This matches the DER encoding used in PKCS#8 private keys.
+ *
+ * Note: This is a minimal representation. CRT parameters (p, q, dP, dQ, qInv)
+ * are not used - we compute m^d mod n directly.
+ */
+typedef struct {
+  const uint8_t *n; /**< Modulus (big-endian) */
+  size_t n_len;     /**< Modulus length in bytes (256, 384, or 512) */
+  const uint8_t *d; /**< Private exponent (big-endian) */
+  size_t d_len;     /**< Private exponent length in bytes */
+} fio_rsa_privkey_s;
 
 /* *****************************************************************************
 RSA Signature Verification API
@@ -123,6 +139,37 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
                              size_t hash_len,
                              fio_rsa_hash_e hash_alg,
                              const fio_rsa_pubkey_s *key);
+
+/* *****************************************************************************
+RSA Signature Generation API (for TLS 1.3 Server CertificateVerify)
+***************************************************************************** */
+
+/**
+ * Generate an RSA-PSS signature (RSASSA-PSS-SIGN per RFC 8017 Section 8.1.1).
+ *
+ * This is required for TLS 1.3 server CertificateVerify messages when using
+ * RSA certificates. PKCS#1 v1.5 signatures are NOT allowed for
+ * CertificateVerify in TLS 1.3.
+ *
+ * This implementation uses:
+ * - MGF1 with the same hash function
+ * - Salt length = hash length (as required by TLS 1.3)
+ * - Trailer field = 0xBC
+ *
+ * @param signature  Output buffer for signature (must be key->n_len bytes)
+ * @param sig_len    Output: actual signature length (equals key->n_len)
+ * @param msg_hash   Pre-computed hash of the message to sign
+ * @param hash_len   Hash length (32, 48, or 64 bytes)
+ * @param hash_alg   Hash algorithm (FIO_RSA_HASH_SHA256, etc.)
+ * @param key        RSA private key
+ * @return 0 on success, -1 on error
+ */
+SFUNC int fio_rsa_sign_pss(uint8_t *signature,
+                           size_t *sig_len,
+                           const uint8_t *msg_hash,
+                           size_t hash_len,
+                           fio_rsa_hash_e hash_alg,
+                           const fio_rsa_privkey_s *key);
 
 /* *****************************************************************************
 Implementation - Possibly Externed Functions
@@ -726,7 +773,7 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
   switch (hash_alg) {
   case FIO_RSA_HASH_SHA256: {
     fio_u256 hp = fio_sha256(m_prime, 8 + hash_len + salt_len);
-    FIO_MEMCPY(h_prime, hp.u8, 32);
+    fio_memcpy32(h_prime, hp.u8);
     break;
   }
   case FIO_RSA_HASH_SHA384: {
@@ -736,7 +783,7 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
   }
   case FIO_RSA_HASH_SHA512: {
     fio_u512 hp = fio_sha512(m_prime, 8 + hash_len + salt_len);
-    FIO_MEMCPY(h_prime, hp.u8, 64);
+    fio_memcpy64(h_prime, hp.u8);
     break;
   }
   }
@@ -745,6 +792,222 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
   result |= fio___rsa_memcmp_ct(h, h_prime, hash_len);
 
   return result ? -1 : 0;
+}
+
+/* *****************************************************************************
+Implementation - RSA-PSS Signature Generation (RFC 8017 Section 8.1)
+***************************************************************************** */
+
+/**
+ * RSA private key operation: result = m^d mod n (RSASP1 per RFC 8017)
+ *
+ * This computes the modular exponentiation using the private exponent.
+ * Unlike the public key operation which uses e=65537 (optimized path),
+ * the private exponent d is typically the same size as the modulus.
+ */
+FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
+                                   const uint8_t *message,
+                                   size_t msg_len,
+                                   const fio_rsa_privkey_s *key) {
+  if (!result || !message || !key || !key->n || !key->d)
+    return -1;
+
+  /* Validate key size */
+  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+    return -1; /* Only support 2048-4096 bit keys */
+
+  if (msg_len != key->n_len)
+    return -1; /* Message must be same length as modulus */
+
+  size_t word_count = (key->n_len + 7) / 8;
+
+#if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
+  uint64_t n_words[word_count];
+  uint64_t d_words[word_count];
+  uint64_t msg_words[word_count];
+  uint64_t result_words[word_count];
+#else
+  uint64_t n_words[FIO_RSA_MAX_WORDS];
+  uint64_t d_words[FIO_RSA_MAX_WORDS];
+  uint64_t msg_words[FIO_RSA_MAX_WORDS];
+  uint64_t result_words[FIO_RSA_MAX_WORDS];
+#endif
+
+  /* Convert to internal representation */
+  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(d_words, word_count, key->d, key->d_len);
+  fio___rsa_bytes_to_words(msg_words, word_count, message, msg_len);
+
+  /* Verify message < modulus */
+  if (fio___rsa_cmp(msg_words, n_words, word_count) >= 0)
+    return -1;
+
+  /* Compute m^d mod n using general modexp */
+  fio___rsa_modexp(result_words, msg_words, d_words, n_words, word_count);
+
+  /* Convert back to bytes */
+  fio___rsa_words_to_bytes(result, key->n_len, result_words, word_count);
+
+  /* Clear sensitive data */
+  fio_secure_zero(d_words, sizeof(d_words));
+  fio_secure_zero(msg_words, sizeof(msg_words));
+  fio_secure_zero(result_words, sizeof(result_words));
+
+  return 0;
+}
+
+/**
+ * EMSA-PSS-ENCODE per RFC 8017 Section 9.1.1
+ *
+ * Encodes a message hash into the PSS format for signing.
+ *
+ * @param em        Output buffer for encoded message (em_len bytes)
+ * @param em_len    Encoded message length (same as modulus length)
+ * @param msg_hash  Pre-computed hash of the message
+ * @param hash_len  Hash length (32, 48, or 64 bytes)
+ * @param hash_alg  Hash algorithm used
+ * @return 0 on success, -1 on error
+ */
+FIO_SFUNC int fio___rsa_emsa_pss_encode(uint8_t *em,
+                                        size_t em_len,
+                                        const uint8_t *msg_hash,
+                                        size_t hash_len,
+                                        fio_rsa_hash_e hash_alg) {
+  if (!em || !msg_hash)
+    return -1;
+
+  /* For TLS 1.3, salt length = hash length */
+  size_t salt_len = hash_len;
+
+  /* Validate sizes:
+   * em_len >= hash_len + salt_len + 2
+   * For 2048-bit key (256 bytes) with SHA-256 (32 bytes):
+   *   256 >= 32 + 32 + 2 = 66 ✓ */
+  if (em_len < hash_len + salt_len + 2)
+    return -1;
+
+  /* Calculate DB length: em_len - hash_len - 1 */
+  size_t db_len = em_len - hash_len - 1;
+
+  /* Generate random salt using secure random */
+  uint8_t salt[64]; /* Max salt length = max hash length */
+  if (fio_rand_bytes_secure(salt, salt_len) != 0) {
+    /* Fallback to pseudo-random if secure random fails */
+    fio_rand_bytes(salt, salt_len);
+  }
+
+  /* Step 3: M' = (0x00 * 8) || mHash || salt */
+  uint8_t m_prime[8 + 64 + 64]; /* 8 zeros + hash + salt */
+  FIO_MEMSET(m_prime, 0, 8);
+  FIO_MEMCPY(m_prime + 8, msg_hash, hash_len);
+  FIO_MEMCPY(m_prime + 8 + hash_len, salt, salt_len);
+
+  /* Step 4: H = Hash(M') */
+  uint8_t h[64];
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256: {
+    fio_u256 hp = fio_sha256(m_prime, 8 + hash_len + salt_len);
+    fio_memcpy32(h, hp.u8);
+    break;
+  }
+  case FIO_RSA_HASH_SHA384: {
+    fio_sha512_s sha = fio_sha512_init();
+    fio_sha512_consume(&sha, m_prime, 8 + hash_len + salt_len);
+    fio_u512 hp = fio_sha512_finalize(&sha);
+    FIO_MEMCPY(h, hp.u8, 48);
+    break;
+  }
+  case FIO_RSA_HASH_SHA512: {
+    fio_u512 hp = fio_sha512(m_prime, 8 + hash_len + salt_len);
+    fio_memcpy64(h, hp.u8);
+    break;
+  }
+  default: return -1;
+  }
+
+  /* Step 5: DB = PS || 0x01 || salt
+   * PS = zeros of length (db_len - salt_len - 1) */
+  uint8_t db[FIO_RSA_MAX_BYTES];
+  size_t ps_len = db_len - salt_len - 1;
+  FIO_MEMSET(db, 0, ps_len); /* PS = zeros */
+  db[ps_len] = 0x01;         /* Separator */
+  FIO_MEMCPY(db + ps_len + 1, salt, salt_len);
+
+  /* Step 6: dbMask = MGF1(H, db_len) */
+  uint8_t db_mask[FIO_RSA_MAX_BYTES];
+  fio___rsa_mgf1(db_mask, db_len, h, hash_len, hash_alg);
+
+  /* Step 7: maskedDB = DB XOR dbMask */
+  for (size_t i = 0; i < db_len; ++i)
+    em[i] = db[i] ^ db_mask[i];
+
+  /* Step 8: Set leftmost bits of maskedDB to zero
+   * For byte-aligned modulus (which is always the case for RSA),
+   * we need to clear the top bit to ensure EM < n */
+  size_t em_bits = em_len * 8 - 1; /* One less than modulus bits */
+  size_t top_mask = 0xFF >> (8 * em_len - em_bits - 1);
+  em[0] &= top_mask;
+
+  /* Step 9: EM = maskedDB || H || 0xBC */
+  FIO_MEMCPY(em + db_len, h, hash_len);
+  em[em_len - 1] = 0xBC;
+
+  /* Clear sensitive data */
+  fio_secure_zero(salt, sizeof(salt));
+  fio_secure_zero(m_prime, sizeof(m_prime));
+  fio_secure_zero(db, sizeof(db));
+
+  return 0;
+}
+
+/**
+ * RSA-PSS signature generation (RSASSA-PSS-SIGN per RFC 8017 Section 8.1.1)
+ */
+SFUNC int fio_rsa_sign_pss(uint8_t *signature,
+                           size_t *sig_len,
+                           const uint8_t *msg_hash,
+                           size_t hash_len,
+                           fio_rsa_hash_e hash_alg,
+                           const fio_rsa_privkey_s *key) {
+  if (!signature || !sig_len || !msg_hash || !key)
+    return -1;
+
+  /* Validate hash algorithm and length */
+  size_t expected_hash_len;
+  switch (hash_alg) {
+  case FIO_RSA_HASH_SHA256: expected_hash_len = 32; break;
+  case FIO_RSA_HASH_SHA384: expected_hash_len = 48; break;
+  case FIO_RSA_HASH_SHA512: expected_hash_len = 64; break;
+  default: return -1;
+  }
+
+  if (hash_len != expected_hash_len)
+    return -1;
+
+  /* Validate key size */
+  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+    return -1;
+
+  /* Step 1: EMSA-PSS-ENCODE */
+  uint8_t em[FIO_RSA_MAX_BYTES];
+  if (fio___rsa_emsa_pss_encode(em, key->n_len, msg_hash, hash_len, hash_alg) !=
+      0) {
+    return -1;
+  }
+
+  /* Step 2-4: RSASP1 - compute s = m^d mod n */
+  if (fio___rsa_private_op(signature, em, key->n_len, key) != 0) {
+    fio_secure_zero(em, sizeof(em));
+    return -1;
+  }
+
+  *sig_len = key->n_len;
+
+  /* Clear sensitive data */
+  fio_secure_zero(em, sizeof(em));
+
+  FIO_LOG_DEBUG2("RSA-PSS: Generated %zu-byte signature", *sig_len);
+  return 0;
 }
 
 /* *****************************************************************************

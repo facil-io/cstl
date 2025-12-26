@@ -51,6 +51,9 @@ typedef struct {
   uint16_t private_key_type;
   /* SNI hostname for client connections */
   char server_name[256];
+  /* ALPN protocols (comma-separated) for server */
+  char alpn_protocols[256];
+  size_t alpn_protocols_len;
 } fio___tls13_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
@@ -198,6 +201,39 @@ FIO_SFUNC int fio___tls13_make_self_signed(const char *server_name) {
 TLS 1.3 Context Builder
 ***************************************************************************** */
 
+/** Callback for iterating ALPN protocols in fio_io_tls_s */
+FIO_SFUNC int fio___tls13_each_alpn(struct fio_io_tls_each_s *e,
+                                    const char *protocol_name,
+                                    void (*on_selected)(fio_io_s *)) {
+  fio___tls13_context_s *ctx = (fio___tls13_context_s *)e->udata;
+  if (!protocol_name || !protocol_name[0])
+    return 0;
+
+  size_t len = FIO_STRLEN(protocol_name);
+  if (len == 0 || len > 255) {
+    FIO_LOG_ERROR("TLS 1.3: ALPN protocol name invalid length: %zu", len);
+    return -1;
+  }
+
+  /* Append to comma-separated list */
+  size_t needed = len + (ctx->alpn_protocols_len > 0 ? 1 : 0);
+  if (ctx->alpn_protocols_len + needed >= sizeof(ctx->alpn_protocols)) {
+    FIO_LOG_ERROR("TLS 1.3: ALPN protocol list overflow");
+    return -1;
+  }
+
+  if (ctx->alpn_protocols_len > 0) {
+    ctx->alpn_protocols[ctx->alpn_protocols_len++] = ',';
+  }
+  FIO_MEMCPY(ctx->alpn_protocols + ctx->alpn_protocols_len, protocol_name, len);
+  ctx->alpn_protocols_len += len;
+  ctx->alpn_protocols[ctx->alpn_protocols_len] = '\0';
+
+  FIO_LOG_DDEBUG("TLS 1.3: added ALPN protocol: %s", protocol_name);
+  (void)on_selected;
+  return 0;
+}
+
 /** Callback for iterating certificates in fio_io_tls_s */
 FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
                                     const char *server_name,
@@ -271,14 +307,14 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
     /* Copy private key based on type */
     switch (pkey.type) {
     case FIO_PEM_KEY_ECDSA_P256:
-      FIO_MEMCPY(ctx->private_key, pkey.ecdsa_p256.private_key, 32);
+      fio_memcpy32(ctx->private_key, pkey.ecdsa_p256.private_key);
       if (pkey.ecdsa_p256.has_public_key) {
         FIO_MEMCPY(ctx->public_key, pkey.ecdsa_p256.public_key, 65);
       } else {
         /* Derive public key from private key */
 #if defined(H___FIO_P256___H)
         uint8_t tmp_secret[32];
-        FIO_MEMCPY(tmp_secret, pkey.ecdsa_p256.private_key, 32);
+        fio_memcpy32(tmp_secret, pkey.ecdsa_p256.private_key);
         fio_p256_keypair(tmp_secret, ctx->public_key);
         fio_secure_zero(tmp_secret, 32);
 #else
@@ -296,7 +332,7 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
       break;
 
     case FIO_PEM_KEY_ED25519:
-      FIO_MEMCPY(ctx->private_key, pkey.ed25519.private_key, 32);
+      fio_memcpy32(ctx->private_key, pkey.ed25519.private_key);
       ctx->private_key_len = 32;
       ctx->private_key_type = FIO_TLS13_SIG_ED25519;
       FIO_LOG_DEBUG2("TLS 1.3: loaded Ed25519 private key from PEM");
@@ -359,9 +395,7 @@ use_self_signed:
     ctx->cert_der_len = fio___tls13_self_signed_cert_len;
 
     /* Copy private key (P-256 scalar) */
-    FIO_MEMCPY(ctx->private_key,
-               fio___tls13_self_signed_keypair.secret_key,
-               32);
+    fio_memcpy32(ctx->private_key, fio___tls13_self_signed_keypair.secret_key);
     /* Copy public key (P-256 uncompressed point for signing) */
     FIO_MEMCPY(ctx->public_key, fio___tls13_self_signed_keypair.public_key, 65);
     ctx->private_key_len = 32;
@@ -422,9 +456,8 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
                  fio___tls13_self_signed_cert_len);
       ctx->cert_der_len = fio___tls13_self_signed_cert_len;
       /* Copy private key (P-256 scalar) */
-      FIO_MEMCPY(ctx->private_key,
-                 fio___tls13_self_signed_keypair.secret_key,
-                 32);
+      fio_memcpy32(ctx->private_key,
+                   fio___tls13_self_signed_keypair.secret_key);
       /* Copy public key (P-256 uncompressed point for signing) */
       FIO_MEMCPY(ctx->public_key,
                  fio___tls13_self_signed_keypair.public_key,
@@ -442,6 +475,20 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
                           .each_cert = fio___tls13_each_cert)) {
         FIO_LOG_ERROR("TLS 1.3: failed to configure certificates");
         goto error;
+      }
+    }
+
+    /* Collect ALPN protocols for server */
+    if (fio_io_tls_alpn_count(tls)) {
+      if (fio_io_tls_each(tls,
+                          .udata = ctx,
+                          .each_alpn = fio___tls13_each_alpn)) {
+        FIO_LOG_ERROR("TLS 1.3: failed to configure ALPN protocols");
+        goto error;
+      }
+      if (ctx->alpn_protocols_len > 0) {
+        FIO_LOG_DEBUG2("TLS 1.3: ALPN protocols configured: %s",
+                       ctx->alpn_protocols);
       }
     }
   }
@@ -621,6 +668,11 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
       if (ctx->private_key_type == FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256) {
         FIO_MEMCPY(conn->state.server.public_key, ctx->public_key, 65);
       }
+    }
+
+    /* Set ALPN protocols if configured */
+    if (ctx->alpn_protocols_len > 0) {
+      fio_tls13_server_alpn_set(&conn->state.server, ctx->alpn_protocols);
     }
   }
 }
@@ -892,6 +944,65 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
   if (conn->send_buf_pos >= conn->send_buf_len) {
     conn->send_buf_len = 0;
     conn->send_buf_pos = 0;
+  }
+
+  /* RFC 8446 Section 4.6.3: Send KeyUpdate response before Application Data
+   * if one is pending. The response MUST be encrypted with OLD sending keys,
+   * then we update our sending keys. */
+  if (conn->is_client && conn->state.client.key_update_pending) {
+    uint8_t ku_response[64];
+    size_t key_len = fio___tls13_key_len(&conn->state.client);
+    fio_tls13_cipher_type_e cipher_type =
+        fio___tls13_cipher_type(&conn->state.client);
+
+    int ku_len = fio_tls13_send_key_update_response(
+        ku_response,
+        sizeof(ku_response),
+        conn->state.client.client_app_traffic_secret,
+        &conn->state.client.client_app_keys,
+        &conn->state.client.key_update_pending,
+        conn->state.client.use_sha384,
+        key_len,
+        cipher_type);
+
+    if (ku_len > 0) {
+      /* Send KeyUpdate response */
+      errno = 0;
+      ssize_t ku_written = fio_sock_write(fd, ku_response, (size_t)ku_len);
+      if (ku_written <= 0) {
+        /* Can't send KeyUpdate, can't send app data either */
+        errno = EWOULDBLOCK;
+        return -1;
+      }
+      FIO_LOG_DEBUG2("TLS 1.3 Client: Sent KeyUpdate response");
+    }
+  } else if (!conn->is_client && conn->state.server.key_update_pending) {
+    uint8_t ku_response[64];
+    size_t key_len = fio___tls13_server_key_len(&conn->state.server);
+    fio_tls13_cipher_type_e cipher_type =
+        fio___tls13_server_cipher_type(&conn->state.server);
+
+    int ku_len = fio_tls13_send_key_update_response(
+        ku_response,
+        sizeof(ku_response),
+        conn->state.server.server_app_traffic_secret,
+        &conn->state.server.server_app_keys,
+        &conn->state.server.key_update_pending,
+        conn->state.server.use_sha384,
+        key_len,
+        cipher_type);
+
+    if (ku_len > 0) {
+      /* Send KeyUpdate response */
+      errno = 0;
+      ssize_t ku_written = fio_sock_write(fd, ku_response, (size_t)ku_len);
+      if (ku_written <= 0) {
+        /* Can't send KeyUpdate, can't send app data either */
+        errno = EWOULDBLOCK;
+        return -1;
+      }
+      FIO_LOG_DEBUG2("TLS 1.3 Server: Sent KeyUpdate response");
+    }
   }
 
   /* Limit to max plaintext size */

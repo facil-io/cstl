@@ -139,6 +139,7 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #undef FIO_ED25519
 #undef FIO_OTP
 #undef FIO_P256
+#undef FIO_P384
 #undef FIO_PEM
 #undef FIO_RSA
 #undef FIO_SECRET
@@ -156,6 +157,7 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #define FIO_AES
 #define FIO_ED25519
 #define FIO_P256
+#define FIO_P384
 #define FIO_ASN1
 #define FIO_RSA
 #define FIO_X509

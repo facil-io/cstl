@@ -1104,7 +1104,7 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
   case FIO_X509_SIG_RSA_PSS_SHA256:
   case FIO_X509_SIG_ECDSA_SHA256: {
     fio_u256 h = fio_sha256(cert->tbs_data, cert->tbs_len);
-    FIO_MEMCPY(hash, h.u8, 32);
+    fio_memcpy32(hash, h.u8);
     hash_len = 32;
     break;
   }
@@ -1131,7 +1131,7 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
   case FIO_X509_SIG_RSA_PKCS1_SHA512:
   case FIO_X509_SIG_RSA_PSS_SHA512: {
     fio_u512 h = fio_sha512(cert->tbs_data, cert->tbs_len);
-    FIO_MEMCPY(hash, h.u8, 64);
+    fio_memcpy64(hash, h.u8);
     hash_len = 64;
     break;
   }
@@ -1206,7 +1206,24 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
                                    issuer->pubkey.ecdsa.point_len);
     }
 #endif
-    /* P-384 not yet implemented */
+#if defined(H___FIO_P384___H)
+    /* ECDSA P-384 verification */
+    if (issuer->key_type == FIO_X509_KEY_ECDSA_P384) {
+      if (!issuer->pubkey.ecdsa.point || issuer->pubkey.ecdsa.point_len != 97)
+        return -1;
+
+      /* P-384 uses SHA-384, verify hash_len matches */
+      if (hash_len != 48)
+        return -1;
+
+      return fio_ecdsa_p384_verify(cert->signature,
+                                   cert->signature_len,
+                                   hash,
+                                   issuer->pubkey.ecdsa.point,
+                                   issuer->pubkey.ecdsa.point_len);
+    }
+#endif
+    /* Unsupported ECDSA curve */
     return -1;
   }
 

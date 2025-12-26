@@ -2358,7 +2358,7 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
 
   fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
 
-  FIO_MEMCPY(counter, j0, 16);
+  fio_memcpy16(counter, j0);
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
@@ -2428,7 +2428,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
 
   fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
 
-  FIO_MEMCPY(counter, j0, 16);
+  fio_memcpy16(counter, j0);
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);
@@ -2523,7 +2523,7 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  FIO_MEMCPY(counter, j0, 16);
+  fio_memcpy16(counter, j0);
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes128_encrypt_block(keystream, counter, rk);
@@ -2606,7 +2606,7 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  FIO_MEMCPY(counter, j0, 16);
+  fio_memcpy16(counter, j0);
   while (len >= 16) {
     fio___gcm_inc_counter(counter);
     fio___aes256_encrypt_block(keystream, counter, rk);

@@ -542,7 +542,7 @@ FIO_SFUNC int fio___pem_parse_pkcs8(fio_pem_private_key_s *key,
       if (ec_elem.len != 32)
         return -1;
 
-      FIO_MEMCPY(key->ecdsa_p256.private_key, ec_elem.data, 32);
+      fio_memcpy32(key->ecdsa_p256.private_key, ec_elem.data);
 
       /* Optional: publicKey [1] BIT STRING */
       key->ecdsa_p256.has_public_key = 0;
@@ -588,7 +588,7 @@ FIO_SFUNC int fio___pem_parse_pkcs8(fio_pem_private_key_s *key,
     if (seed.len != 32)
       return -1;
 
-    FIO_MEMCPY(key->ed25519.private_key, seed.data, 32);
+    fio_memcpy32(key->ed25519.private_key, seed.data);
     key->ed25519.has_public_key = 0;
 
     return 0;
@@ -764,7 +764,7 @@ FIO_SFUNC int fio___pem_parse_ec_private_key(fio_pem_private_key_s *key,
   if (elem.len == 32) {
     /* Assume P-256 based on key length */
     key->type = FIO_PEM_KEY_ECDSA_P256;
-    FIO_MEMCPY(key->ecdsa_p256.private_key, elem.data, 32);
+    fio_memcpy32(key->ecdsa_p256.private_key, elem.data);
     key->ecdsa_p256.has_public_key = 0;
 
     /* Look for parameters [0] to confirm curve */

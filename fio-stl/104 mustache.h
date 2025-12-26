@@ -936,16 +936,30 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   for (; buf.len &&
          (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t');)
     --buf.len;
-  if (!buf.len) {
-    FIO_LOG_ERROR("(mustache) template tags must contain a value!");
-    return -1;
-  }
 
-  while (buf.buf[0] == ' ' || buf.buf[0] == '\t') {
+  while (buf.len && (buf.buf[0] == ' ' || buf.buf[0] == '\t')) {
     ++buf.buf;
     --buf.len;
   }
+  /* empty comments ({{!}}) are valid per Mustache spec */
+  if (!buf.len)
+    return fio___mustache_parse_comment(p, buf);
   char id = buf.buf[0];
+  /* allow {{!}} empty comment - check for comment marker before content check
+   */
+  if (id == '!')
+    return fio___mustache_parse_comment(
+        p,
+        FIO_BUF_INFO2(buf.buf + 1, buf.len - 1));
+  /* detect malformed triple mustache: {{{name}} (missing closing brace) */
+  if (id == '{' && buf.buf[buf.len - 1] != '}') {
+    FIO_LOG_ERROR(
+        "(mustache) malformed triple mustache tag (missing closing brace): "
+        "{{{%.*s}}",
+        (int)(buf.len - 1),
+        buf.buf + 1);
+    return -1;
+  }
   if (!(id == '/' || id == '#' || id == '^' || id == '>' || id == '!' ||
         id == '&' || (id == '=' && buf.buf[buf.len - 1] == '=') ||
         (id == '{' && buf.buf[buf.len - 1] == '}')))
@@ -992,8 +1006,17 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
   /* consume each line (in case it's a stand alone line) */
   for (;;) {
     p->backwards.len = (size_t)(p->forwards.buf - p->backwards.buf);
-    if (p->forwards.buf >= end)
+    if (p->forwards.buf >= end) {
+      /* check for unclosed sections at EOF - only if we're inside a section
+       * (not a partial). Sections are marked by ARY or MISSING instructions. */
+      if (p->prev) {
+        char *section_start = p->root + p->starts_at;
+        if (*section_start == FIO___MUSTACHE_I_ARY ||
+            *section_start == FIO___MUSTACHE_I_MISSING)
+          goto unclosed_section_error;
+      }
       break;
+    }
     if (FIO_UNLIKELY(*p->forwards.buf == p->delim.in.buf[0] &&
                      p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
@@ -1059,6 +1082,10 @@ empty_tag_error:
                           ? (int)32
                           : (int)(end - (p->backwards.buf + p->backwards.len))),
                 (p->backwards.buf + p->backwards.len));
+  return (r = -1);
+unclosed_section_error:
+  FIO_LOG_ERROR("(mustache) template error, unclosed section (missing closing "
+                "tag)");
   return (r = -1);
 }
 

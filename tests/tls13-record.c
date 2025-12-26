@@ -593,6 +593,338 @@ FIO_SFUNC void test_content_types(void) {
 }
 
 /* *****************************************************************************
+Test: Record Size Limits (RFC 8446 Section 5.1) - T087
+***************************************************************************** */
+FIO_SFUNC void test_record_size_limits(void) {
+  FIO_LOG_DDEBUG("Testing record size limits (RFC 8446 §5.1)");
+
+  uint8_t key[16];
+  uint8_t iv[12];
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(iv, 12);
+
+  fio_tls13_record_keys_s keys;
+  fio_tls13_record_keys_init(&keys, key, 16, iv, FIO_TLS13_CIPHER_AES_128_GCM);
+
+  /* Test 1: Plaintext at limit (16384 bytes) - should succeed */
+  {
+    uint8_t *plaintext = (uint8_t *)malloc(FIO_TLS13_MAX_PLAINTEXT_LEN);
+    FIO_ASSERT(plaintext, "Failed to allocate plaintext buffer");
+    fio_rand_bytes(plaintext, FIO_TLS13_MAX_PLAINTEXT_LEN);
+
+    size_t max_ct_len = FIO_TLS13_RECORD_HEADER_LEN +
+                        FIO_TLS13_MAX_PLAINTEXT_LEN + 1 + FIO_TLS13_TAG_LEN;
+    uint8_t *ciphertext = (uint8_t *)malloc(max_ct_len);
+    FIO_ASSERT(ciphertext, "Failed to allocate ciphertext buffer");
+
+    int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                          max_ct_len,
+                                          plaintext,
+                                          FIO_TLS13_MAX_PLAINTEXT_LEN,
+                                          FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                          &keys);
+    FIO_ASSERT(ct_len > 0, "Plaintext at limit (16384) should succeed");
+
+    free(plaintext);
+    free(ciphertext);
+  }
+
+  /* Test 2: Plaintext over limit (16385 bytes) - should fail */
+  {
+    fio_tls13_record_keys_init(&keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+
+    uint8_t *plaintext = (uint8_t *)malloc(FIO_TLS13_MAX_PLAINTEXT_LEN + 1);
+    FIO_ASSERT(plaintext, "Failed to allocate plaintext buffer");
+
+    size_t max_ct_len = FIO_TLS13_RECORD_HEADER_LEN +
+                        FIO_TLS13_MAX_PLAINTEXT_LEN + 2 + FIO_TLS13_TAG_LEN;
+    uint8_t *ciphertext = (uint8_t *)malloc(max_ct_len);
+    FIO_ASSERT(ciphertext, "Failed to allocate ciphertext buffer");
+
+    int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                          max_ct_len,
+                                          plaintext,
+                                          FIO_TLS13_MAX_PLAINTEXT_LEN + 1,
+                                          FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                          &keys);
+    FIO_ASSERT(ct_len == -1,
+               "Plaintext over limit (16385) should fail with record_overflow");
+
+    free(plaintext);
+    free(ciphertext);
+  }
+
+  /* Test 3: Ciphertext at limit (16640 bytes) - should succeed in parsing */
+  {
+    /* Create a fake record header with length at limit */
+    uint8_t header[5] = {0x17, 0x03, 0x03, 0x00, 0x00};
+    /* Length = 16640 = 0x4100 */
+    header[3] = 0x41;
+    header[4] = 0x00;
+
+    /* Allocate buffer for header + payload */
+    size_t total_len =
+        FIO_TLS13_RECORD_HEADER_LEN + FIO_TLS13_MAX_CIPHERTEXT_LEN;
+    uint8_t *record = (uint8_t *)malloc(total_len);
+    FIO_ASSERT(record, "Failed to allocate record buffer");
+    FIO_MEMCPY(record, header, 5);
+    FIO_MEMSET(record + 5, 0, FIO_TLS13_MAX_CIPHERTEXT_LEN);
+
+    fio_tls13_content_type_e ct;
+    size_t payload_len;
+    const uint8_t *p =
+        fio_tls13_record_parse_header(record, total_len, &ct, &payload_len);
+    FIO_ASSERT(p != NULL, "Ciphertext at limit (16640) should parse");
+    FIO_ASSERT(payload_len == FIO_TLS13_MAX_CIPHERTEXT_LEN,
+               "Payload length should be 16640");
+
+    free(record);
+  }
+
+  /* Test 4: Ciphertext over limit (16641 bytes) - should fail */
+  {
+    /* Create a fake record header with length over limit */
+    uint8_t header[5] = {0x17, 0x03, 0x03, 0x00, 0x00};
+    /* Length = 16641 = 0x4101 */
+    header[3] = 0x41;
+    header[4] = 0x01;
+
+    /* Allocate buffer for header + payload */
+    size_t total_len =
+        FIO_TLS13_RECORD_HEADER_LEN + FIO_TLS13_MAX_CIPHERTEXT_LEN + 1;
+    uint8_t *record = (uint8_t *)malloc(total_len);
+    FIO_ASSERT(record, "Failed to allocate record buffer");
+    FIO_MEMCPY(record, header, 5);
+    FIO_MEMSET(record + 5, 0, FIO_TLS13_MAX_CIPHERTEXT_LEN + 1);
+
+    fio_tls13_content_type_e ct;
+    size_t payload_len;
+    const uint8_t *p =
+        fio_tls13_record_parse_header(record, total_len, &ct, &payload_len);
+    FIO_ASSERT(
+        p == NULL,
+        "Ciphertext over limit (16641) should fail with record_overflow");
+
+    free(record);
+  }
+
+  fio_tls13_record_keys_clear(&keys);
+  FIO_LOG_DDEBUG("  Record size limit tests passed");
+}
+
+/* *****************************************************************************
+Test: Padding Validation (RFC 8446 Section 5.4) - T088
+***************************************************************************** */
+FIO_SFUNC void test_padding_validation(void) {
+  FIO_LOG_DDEBUG("Testing padding validation (RFC 8446 §5.4)");
+
+  uint8_t key[16];
+  uint8_t iv[12];
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(iv, 12);
+
+  fio_tls13_record_keys_s enc_keys, dec_keys;
+
+  /* Test 1: Valid record with no padding - should succeed */
+  {
+    fio_tls13_record_keys_init(&enc_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    fio_tls13_record_keys_init(&dec_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+
+    uint8_t plaintext[16] = "Hello, TLS 1.3!";
+    uint8_t ciphertext[64];
+    int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                          sizeof(ciphertext),
+                                          plaintext,
+                                          16,
+                                          FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                          &enc_keys);
+    FIO_ASSERT(ct_len > 0, "Encryption should succeed");
+
+    uint8_t decrypted[64];
+    fio_tls13_content_type_e ct;
+    int dec_len = fio_tls13_record_decrypt(decrypted,
+                                           sizeof(decrypted),
+                                           &ct,
+                                           ciphertext,
+                                           ct_len,
+                                           &dec_keys);
+    FIO_ASSERT(dec_len == 16, "Decryption should succeed with length 16");
+    FIO_ASSERT(ct == FIO_TLS13_CONTENT_APPLICATION_DATA,
+               "Content type should be application_data");
+  }
+
+  /* Test 2: Valid record with zero-length content - should succeed
+   * (content type byte is still present) */
+  {
+    fio_tls13_record_keys_init(&enc_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    fio_tls13_record_keys_init(&dec_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+
+    uint8_t ciphertext[64];
+    int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                          sizeof(ciphertext),
+                                          NULL,
+                                          0,
+                                          FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                          &enc_keys);
+    FIO_ASSERT(ct_len > 0, "Encryption of empty content should succeed");
+
+    uint8_t decrypted[64];
+    fio_tls13_content_type_e ct;
+    int dec_len = fio_tls13_record_decrypt(decrypted,
+                                           sizeof(decrypted),
+                                           &ct,
+                                           ciphertext,
+                                           ct_len,
+                                           &dec_keys);
+    FIO_ASSERT(dec_len == 0, "Decryption should succeed with length 0");
+    FIO_ASSERT(ct == FIO_TLS13_CONTENT_APPLICATION_DATA,
+               "Content type should be application_data");
+  }
+
+  /* Test 3: All-zero record (no content type) - should fail
+   * This simulates a malformed record where the inner plaintext is all zeros.
+   * We need to craft this manually since encrypt() always adds content type.
+   *
+   * Per RFC 8446 §5.4: "If a receiving implementation does not find a
+   * non-zero octet in the cleartext, it MUST terminate the connection
+   * with an 'unexpected_message' alert."
+   */
+  {
+    fio_tls13_record_keys_init(&enc_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    fio_tls13_record_keys_init(&dec_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+
+    /* Create a record with all-zero inner plaintext (no content type) */
+    /* We'll encrypt zeros and then the content type will be 0 (invalid) */
+    /* Actually, we need to manually construct this since encrypt() adds
+     * a valid content type. Let's use the AEAD directly. */
+
+    /* Build record header */
+    uint8_t record[64];
+    record[0] = FIO_TLS13_CONTENT_APPLICATION_DATA;
+    record[1] = 0x03;
+    record[2] = 0x03;
+    /* Inner plaintext: 16 zeros (no valid content type) */
+    size_t inner_len = 16;
+    record[3] = (uint8_t)((inner_len + FIO_TLS13_TAG_LEN) >> 8);
+    record[4] = (uint8_t)((inner_len + FIO_TLS13_TAG_LEN) & 0xFF);
+
+    /* All-zero inner plaintext */
+    uint8_t inner[16] = {0};
+
+    /* Build nonce */
+    uint8_t nonce[12];
+    fio_tls13_build_nonce(nonce, iv, 0);
+
+    /* Encrypt using AES-128-GCM directly */
+    uint8_t *ct_out = record + 5;
+    uint8_t *tag = ct_out + inner_len;
+    FIO_MEMCPY(ct_out, inner, inner_len);
+    fio_aes128_gcm_enc(tag, ct_out, inner_len, record, 5, key, nonce);
+
+    size_t total_len = 5 + inner_len + FIO_TLS13_TAG_LEN;
+
+    /* Try to decrypt - should fail because all zeros = no content type */
+    uint8_t decrypted[64];
+    fio_tls13_content_type_e ct;
+    int dec_len = fio_tls13_record_decrypt(decrypted,
+                                           sizeof(decrypted),
+                                           &ct,
+                                           record,
+                                           total_len,
+                                           &dec_keys);
+    FIO_ASSERT(dec_len == -1,
+               "All-zero record should fail with unexpected_message");
+  }
+
+  /* Test 4: Record with valid padding (zeros before content type) - should
+   * succeed */
+  {
+    fio_tls13_record_keys_init(&enc_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    fio_tls13_record_keys_init(&dec_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+
+    /* Build record header */
+    uint8_t record[64];
+    record[0] = FIO_TLS13_CONTENT_APPLICATION_DATA;
+    record[1] = 0x03;
+    record[2] = 0x03;
+
+    /* Inner plaintext: "Hi" + content_type(23) + 5 zeros padding */
+    /* Format: plaintext || content_type || padding */
+    uint8_t inner[8] = {'H', 'i', 0x17, 0x00, 0x00, 0x00, 0x00, 0x00};
+    size_t inner_len = 8;
+    record[3] = (uint8_t)((inner_len + FIO_TLS13_TAG_LEN) >> 8);
+    record[4] = (uint8_t)((inner_len + FIO_TLS13_TAG_LEN) & 0xFF);
+
+    /* Build nonce */
+    uint8_t nonce[12];
+    fio_tls13_build_nonce(nonce, iv, 0);
+
+    /* Encrypt using AES-128-GCM directly */
+    uint8_t *ct_out = record + 5;
+    uint8_t *tag = ct_out + inner_len;
+    FIO_MEMCPY(ct_out, inner, inner_len);
+    fio_aes128_gcm_enc(tag, ct_out, inner_len, record, 5, key, nonce);
+
+    size_t total_len = 5 + inner_len + FIO_TLS13_TAG_LEN;
+
+    /* Decrypt - should succeed, stripping padding */
+    uint8_t decrypted[64];
+    fio_tls13_content_type_e ct;
+    int dec_len = fio_tls13_record_decrypt(decrypted,
+                                           sizeof(decrypted),
+                                           &ct,
+                                           record,
+                                           total_len,
+                                           &dec_keys);
+    FIO_ASSERT(dec_len == 2, "Decrypted length should be 2 (padding stripped)");
+    FIO_ASSERT(ct == FIO_TLS13_CONTENT_APPLICATION_DATA,
+               "Content type should be application_data (23)");
+    FIO_ASSERT(decrypted[0] == 'H' && decrypted[1] == 'i',
+               "Decrypted content should be 'Hi'");
+  }
+
+  fio_tls13_record_keys_clear(&enc_keys);
+  fio_tls13_record_keys_clear(&dec_keys);
+  FIO_LOG_DDEBUG("  Padding validation tests passed");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
@@ -623,6 +955,12 @@ int main(void) {
 
   /* Test content type handling */
   test_content_types();
+
+  /* Test record size limits (RFC 8446 §5.1) - T087 */
+  test_record_size_limits();
+
+  /* Test padding validation (RFC 8446 §5.4) - T088 */
+  test_padding_validation();
 
   FIO_LOG_DDEBUG("All TLS 1.3 Record Layer tests passed!");
   return 0;

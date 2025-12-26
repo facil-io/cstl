@@ -143,7 +143,7 @@ SFUNC void fio_hkdf_extract(void *restrict prk,
     /* PRK = HMAC-SHA256(salt, IKM) */
     fio_u256 hmac_result =
         fio_sha256_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
-    FIO_MEMCPY(prk, hmac_result.u8, 32);
+    fio_memcpy32(prk, hmac_result.u8);
   }
 }
 
@@ -200,7 +200,7 @@ SFUNC void fio_hkdf_expand(void *restrict okm,
       t_prev_len = 48;
     } else {
       fio_u256 hmac_result = fio_sha256_hmac(prk, prk_len, input, input_len);
-      FIO_MEMCPY(t_prev, hmac_result.u8, 32);
+      fio_memcpy32(t_prev, hmac_result.u8);
       t_prev_len = 32;
     }
 

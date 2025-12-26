@@ -12675,30 +12675,78 @@ Gets the SHA512 of a (possibly shared) masked secret stored in `secret`.
 Please store the returned value on the stack or not at all. The secret is stored masked in memory and unmasked copies should be temporary with short life-spans.
 
 -------------------------------------------------------------------------------
-## TLS 1.3 Client
+## TLS 1.3 Module
 
 ```c
 #define FIO_TLS13
 #include FIO_INCLUDE_FILE
 ```
 
-By defining `FIO_TLS13`, a TLS 1.3 client implementation is made available. This module provides the complete TLS 1.3 handshake protocol, record layer encryption/decryption, and key schedule derivation functions.
-
-**Requirements:**
-- `FIO_HKDF` (which requires `FIO_SHA2`) for key derivation
-- `FIO_AES` for AES-GCM cipher suites
-- `FIO_CHACHA` for ChaCha20-Poly1305 cipher suite
-- `FIO_X25519` for key exchange
-- `FIO_X509` and `FIO_RSA` for certificate verification (optional)
-
-**Supported Features:**
-- Cipher suites: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256
-- Key exchange: X25519
-- Signature algorithms: RSA-PSS, RSA-PKCS1, Ed25519, ECDSA (P-256, P-384)
-- Server Name Indication (SNI)
-- Certificate chain verification (when FIO_X509 is included)
+By defining `FIO_TLS13`, a complete TLS 1.3 implementation is made available. This module provides RFC 8446 compliant TLS 1.3 with no external dependencies - all cryptographic primitives are implemented natively.
 
 **Note**: This implementation has not been audited. Use at your own risk for security-critical applications.
+
+------------------------------------------------------------
+
+### Overview
+
+The TLS 1.3 module provides:
+
+- **Full TLS 1.3 client and server support**
+- **RFC 8446 compliant** handshake and record layer
+- **No external dependencies** - OpenSSL optional, not required
+- **Native cryptographic primitives** - all crypto implemented in facil.io STL
+- **Automatic key derivation** - complete key schedule implementation
+- **Post-handshake messages** - KeyUpdate support for long-lived connections
+
+### Requirements
+
+The TLS 1.3 module requires the following crypto modules (automatically included with `FIO_CRYPTO`):
+
+| Module | Purpose |
+|--------|---------|
+| `FIO_HKDF` | Key derivation (requires `FIO_SHA2`) |
+| `FIO_AES` | AES-GCM cipher suites |
+| `FIO_CHACHA` | ChaCha20-Poly1305 cipher suite |
+| `FIO_X25519` | X25519 key exchange |
+| `FIO_P256` | P-256 key exchange (for HelloRetryRequest) |
+| `FIO_ED25519` | Ed25519 signatures |
+| `FIO_X509` | Certificate parsing and verification (optional) |
+| `FIO_RSA` | RSA signature verification (optional) |
+| `FIO_PEM` | PEM file parsing (optional) |
+
+------------------------------------------------------------
+
+### Supported Algorithms
+
+#### Cipher Suites
+
+| Cipher Suite | Code | Hash | Key Length |
+|--------------|------|------|------------|
+| TLS_AES_128_GCM_SHA256 | 0x1301 | SHA-256 | 16 bytes |
+| TLS_AES_256_GCM_SHA384 | 0x1302 | SHA-384 | 32 bytes |
+| TLS_CHACHA20_POLY1305_SHA256 | 0x1303 | SHA-256 | 32 bytes |
+
+#### Key Exchange Groups
+
+| Group | Code | Key Size |
+|-------|------|----------|
+| X25519 | 29 | 32 bytes |
+| secp256r1 (P-256) | 23 | 65 bytes (uncompressed) |
+| secp384r1 (P-384) | 24 | 97 bytes (uncompressed) |
+
+#### Signature Algorithms
+
+| Algorithm | Code | Notes |
+|-----------|------|-------|
+| ecdsa_secp256r1_sha256 | 0x0403 | P-256 ECDSA |
+| ecdsa_secp384r1_sha384 | 0x0503 | P-384 ECDSA |
+| ed25519 | 0x0807 | EdDSA |
+| rsa_pss_rsae_sha256 | 0x0804 | RSA-PSS (required for TLS 1.3) |
+| rsa_pss_rsae_sha384 | 0x0805 | RSA-PSS |
+| rsa_pss_rsae_sha512 | 0x0806 | RSA-PSS |
+| rsa_pkcs1_sha256 | 0x0401 | Legacy (certificates only) |
+| rsa_pkcs1_sha384 | 0x0501 | Legacy (certificates only) |
 
 ------------------------------------------------------------
 
@@ -12755,6 +12803,7 @@ typedef enum {
   FIO_TLS13_HS_CERTIFICATE_VERIFY = 15,
   FIO_TLS13_HS_FINISHED = 20,
   FIO_TLS13_HS_KEY_UPDATE = 24,
+  FIO_TLS13_HS_MESSAGE_HASH = 254,
 } fio_tls13_handshake_type_e;
 ```
 
@@ -12804,6 +12853,7 @@ Record encryption context (per-direction keys).
 typedef enum {
   FIO_TLS13_STATE_START = 0,     /* Initial state */
   FIO_TLS13_STATE_WAIT_SH,       /* Sent ClientHello, waiting for ServerHello */
+  FIO_TLS13_STATE_WAIT_SH2,      /* Sent ClientHello2 after HRR, waiting for SH */
   FIO_TLS13_STATE_WAIT_EE,       /* Received ServerHello, waiting for EE */
   FIO_TLS13_STATE_WAIT_CERT_CR,  /* Waiting for Certificate or CertRequest */
   FIO_TLS13_STATE_WAIT_CERT,     /* Waiting for Certificate */
@@ -12856,6 +12906,76 @@ typedef struct {
 ```
 
 TLS 1.3 client context containing all state for a connection.
+
+#### `fio_tls13_server_state_e`
+
+```c
+typedef enum {
+  FIO_TLS13_SERVER_STATE_START = 0,        /* Initial state, waiting for CH */
+  FIO_TLS13_SERVER_STATE_RECVD_CH,         /* Received ClientHello, parsing */
+  FIO_TLS13_SERVER_STATE_NEGOTIATED,       /* Negotiated params, building SH */
+  FIO_TLS13_SERVER_STATE_WAIT_FLIGHT2,     /* Sent SH..Fin, waiting for client */
+  FIO_TLS13_SERVER_STATE_WAIT_CLIENT_CERT, /* Waiting for client Certificate */
+  FIO_TLS13_SERVER_STATE_WAIT_CERT_VERIFY, /* Waiting for client CertVerify */
+  FIO_TLS13_SERVER_STATE_WAIT_FINISHED,    /* Waiting for client Finished */
+  FIO_TLS13_SERVER_STATE_CONNECTED,        /* Handshake complete */
+  FIO_TLS13_SERVER_STATE_ERROR,            /* Error state */
+} fio_tls13_server_state_e;
+```
+
+TLS 1.3 server handshake states.
+
+#### `fio_tls13_server_s`
+
+```c
+typedef struct {
+  /* State */
+  fio_tls13_server_state_e state;
+
+  /* Negotiated parameters */
+  uint16_t cipher_suite;
+  uint16_t key_share_group;
+  uint16_t signature_scheme;
+  int use_sha384;
+
+  /* Key material */
+  uint8_t server_random[32];
+  uint8_t x25519_private_key[32];
+  uint8_t x25519_public_key[32];
+  uint8_t shared_secret[32];
+
+  /* Traffic keys */
+  fio_tls13_record_keys_s client_handshake_keys;
+  fio_tls13_record_keys_s server_handshake_keys;
+  fio_tls13_record_keys_s client_app_keys;
+  fio_tls13_record_keys_s server_app_keys;
+
+  /* Certificate chain */
+  const uint8_t **cert_chain;
+  const size_t *cert_chain_lens;
+  size_t cert_chain_count;
+
+  /* Private key for signing */
+  const uint8_t *private_key;
+  size_t private_key_len;
+  uint16_t private_key_type;
+
+  /* Client info */
+  char client_sni[256];
+  size_t client_sni_len;
+
+  /* ALPN */
+  char selected_alpn[256];
+  size_t selected_alpn_len;
+
+  /* Error info */
+  uint8_t alert_level;
+  uint8_t alert_description;
+  /* ... additional internal fields ... */
+} fio_tls13_server_s;
+```
+
+TLS 1.3 server context containing all state for a connection.
 
 ------------------------------------------------------------
 
@@ -13042,7 +13162,7 @@ void fio_tls13_update_traffic_secret(void *restrict new_secret,
                                      int use_sha384);
 ```
 
-Updates application traffic secret for key update.
+Updates application traffic secret for key update (RFC 8446 Section 4.6.3).
 
 **Parameters:**
 - `new_secret` - output buffer (32 or 48 bytes)
@@ -13165,94 +13285,126 @@ Clears sensitive key material from memory.
 
 ------------------------------------------------------------
 
-### Handshake Message Functions
+### Alert Functions (RFC 8446 Section 6)
 
-#### `fio_tls13_parse_handshake_header`
-
-```c
-const uint8_t *fio_tls13_parse_handshake_header(
-    const uint8_t *data,
-    size_t data_len,
-    fio_tls13_handshake_type_e *msg_type,
-    size_t *body_len);
-```
-
-Parses handshake header, returns message type and body pointer.
-
-**Returns:** pointer to message body, or NULL on error.
-
-#### `fio_tls13_write_handshake_header`
+#### `fio_tls13_build_alert`
 
 ```c
-void fio_tls13_write_handshake_header(uint8_t *out,
-                                      fio_tls13_handshake_type_e msg_type,
-                                      size_t body_len);
+int fio_tls13_build_alert(uint8_t *out,
+                          size_t out_capacity,
+                          uint8_t alert_level,
+                          uint8_t alert_desc);
 ```
 
-Writes handshake header (4 bytes): HandshakeType (1 byte) + uint24 length (3 bytes).
+Builds an alert message (2 bytes: level + description).
 
-#### `fio_tls13_build_client_hello`
+**Returns:** 2 on success, -1 on error.
+
+#### `fio_tls13_send_alert`
 
 ```c
-int fio_tls13_build_client_hello(uint8_t *out,
-                                 size_t out_capacity,
-                                 const uint8_t random[32],
-                                 const char *server_name,
-                                 const uint8_t *x25519_pubkey,
-                                 const uint16_t *cipher_suites,
-                                 size_t cipher_suite_count);
+int fio_tls13_send_alert(uint8_t *out,
+                         size_t out_capacity,
+                         uint8_t alert_level,
+                         uint8_t alert_desc,
+                         fio_tls13_record_keys_s *keys);
 ```
 
-Builds a ClientHello message.
+Builds an encrypted alert record.
+
+**Returns:** encrypted record length, or -1 on error.
+
+#### `fio_tls13_send_alert_plaintext`
+
+```c
+int fio_tls13_send_alert_plaintext(uint8_t *out,
+                                   size_t out_capacity,
+                                   uint8_t alert_level,
+                                   uint8_t alert_desc);
+```
+
+Builds an unencrypted alert record (for use before encryption is enabled).
+
+**Returns:** record length (7 bytes), or -1 on error.
+
+#### `fio_tls13_alert_name`
+
+```c
+const char *fio_tls13_alert_name(uint8_t alert_desc);
+```
+
+Gets human-readable name for an alert description.
+
+**Returns:** static string with alert name.
+
+------------------------------------------------------------
+
+### KeyUpdate Functions (RFC 8446 Section 4.6.3)
+
+KeyUpdate is used to update traffic keys for long-lived connections.
+
+#### `fio_tls13_build_key_update`
+
+```c
+int fio_tls13_build_key_update(uint8_t *out,
+                               size_t out_capacity,
+                               int request_update);
+```
+
+Builds a KeyUpdate message.
 
 **Parameters:**
-- `out` - output buffer
-- `out_capacity` - size of output buffer
-- `random` - 32-byte client random
-- `server_name` - SNI hostname (NULL if not used)
-- `x25519_pubkey` - 32-byte X25519 public key
-- `cipher_suites` - array of cipher suites to offer
-- `cipher_suite_count` - number of cipher suites
+- `out` - output buffer for the handshake message (not encrypted)
+- `out_capacity` - capacity of output buffer
+- `request_update` - 0 = update_not_requested, 1 = update_requested
 
-**Returns:** message length on success, -1 on error.
+**Returns:** message length (5 bytes), or -1 on error.
 
-#### `fio_tls13_parse_server_hello`
+#### `fio_tls13_parse_key_update`
 
 ```c
-int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
-                                 const uint8_t *data,
-                                 size_t data_len);
+int fio_tls13_parse_key_update(const uint8_t *data,
+                               size_t data_len,
+                               int *request_update);
 ```
 
-Parses ServerHello message.
+Parses a KeyUpdate message.
 
 **Returns:** 0 on success, -1 on error.
 
-#### `fio_tls13_build_finished`
+#### `fio_tls13_process_key_update`
 
 ```c
-int fio_tls13_build_finished(uint8_t *out,
-                             size_t out_capacity,
-                             const uint8_t *verify_data,
-                             size_t verify_data_len);
+int fio_tls13_process_key_update(uint8_t *traffic_secret,
+                                 fio_tls13_record_keys_s *keys,
+                                 const uint8_t *data,
+                                 size_t data_len,
+                                 uint8_t *key_update_pending,
+                                 int use_sha384,
+                                 size_t key_len,
+                                 fio_tls13_cipher_type_e cipher_type);
 ```
 
-Builds Finished message.
+Processes a received KeyUpdate and updates receiving keys.
 
-**Returns:** message length on success, -1 on error.
+**Returns:** 0 on success, -1 on error.
 
-#### `fio_tls13_parse_finished`
+#### `fio_tls13_send_key_update_response`
 
 ```c
-int fio_tls13_parse_finished(const uint8_t *data,
-                             size_t data_len,
-                             const uint8_t *expected_verify_data,
-                             size_t verify_data_len);
+int fio_tls13_send_key_update_response(uint8_t *out,
+                                       size_t out_capacity,
+                                       uint8_t *traffic_secret,
+                                       fio_tls13_record_keys_s *keys,
+                                       uint8_t *key_update_pending,
+                                       int use_sha384,
+                                       size_t key_len,
+                                       fio_tls13_cipher_type_e cipher_type);
 ```
 
-Parses and verifies Finished message.
+Sends KeyUpdate response and updates sending keys.
 
-**Returns:** 0 on success (MAC matches), -1 on error.
+**Returns:** encrypted record length, or -1 on error.
 
 ------------------------------------------------------------
 
@@ -13437,9 +13589,242 @@ Checks if certificate verification was successful.
 
 **Returns:** 1 if verified, 0 if not verified or skipped.
 
+#### `fio_tls13_client_alpn_set`
+
+```c
+void fio_tls13_client_alpn_set(fio_tls13_client_s *client,
+                               const char *protocols);
+```
+
+Sets ALPN protocols for client (comma-separated list).
+
+Example: `"h2,http/1.1"` offers HTTP/2 first, then HTTP/1.1.
+
+#### `fio_tls13_client_alpn_get`
+
+```c
+const char *fio_tls13_client_alpn_get(fio_tls13_client_s *client);
+```
+
+Gets negotiated ALPN protocol after handshake.
+
+**Returns:** selected protocol string, or NULL if none negotiated.
+
+#### `fio_tls13_client_set_cert`
+
+```c
+void fio_tls13_client_set_cert(fio_tls13_client_s *client,
+                               const uint8_t *cert,
+                               size_t cert_len,
+                               const uint8_t *private_key,
+                               size_t key_len,
+                               uint16_t key_type);
+```
+
+Sets client certificate for mutual TLS (mTLS) authentication.
+
+When the server requests client authentication (CertificateRequest), the client will send this certificate and sign with the private key.
+
 ------------------------------------------------------------
 
-### Complete Example
+### Server API
+
+#### `fio_tls13_server_init`
+
+```c
+void fio_tls13_server_init(fio_tls13_server_s *server);
+```
+
+Initializes server context.
+
+#### `fio_tls13_server_destroy`
+
+```c
+void fio_tls13_server_destroy(fio_tls13_server_s *server);
+```
+
+Cleans up server context (zeroes secrets).
+
+#### `fio_tls13_server_set_cert_chain`
+
+```c
+void fio_tls13_server_set_cert_chain(fio_tls13_server_s *server,
+                                     const uint8_t **certs,
+                                     const size_t *cert_lens,
+                                     size_t cert_count);
+```
+
+Sets certificate chain for server authentication.
+
+**Parameters:**
+- `server` - server context
+- `certs` - array of DER-encoded certificate pointers
+- `cert_lens` - array of certificate lengths
+- `cert_count` - number of certificates (first is end-entity)
+
+#### `fio_tls13_server_set_private_key`
+
+```c
+void fio_tls13_server_set_private_key(fio_tls13_server_s *server,
+                                      const uint8_t *private_key,
+                                      size_t key_len,
+                                      uint16_t key_type);
+```
+
+Sets private key for server authentication.
+
+**Parameters:**
+- `server` - server context
+- `private_key` - private key data (Ed25519: 32 bytes seed, P-256: 32 bytes scalar)
+- `key_len` - private key length
+- `key_type` - key type (FIO_TLS13_SIG_ED25519, FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256, etc.)
+
+#### `fio_tls13_server_process`
+
+```c
+int fio_tls13_server_process(fio_tls13_server_s *server,
+                             const uint8_t *in,
+                             size_t in_len,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             size_t *out_len);
+```
+
+Processes incoming TLS record(s).
+
+May generate response data in out buffer.
+
+**Returns:** number of bytes consumed, or -1 on error.
+
+#### `fio_tls13_server_encrypt`
+
+```c
+int fio_tls13_server_encrypt(fio_tls13_server_s *server,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *plaintext,
+                             size_t plaintext_len);
+```
+
+Encrypts application data for sending.
+
+**Returns:** encrypted record length, or -1 on error.
+
+#### `fio_tls13_server_decrypt`
+
+```c
+int fio_tls13_server_decrypt(fio_tls13_server_s *server,
+                             uint8_t *out,
+                             size_t out_capacity,
+                             const uint8_t *ciphertext,
+                             size_t ciphertext_len);
+```
+
+Decrypts received application data.
+
+**Returns:** plaintext length, or -1 on error.
+
+#### `fio_tls13_server_is_connected`
+
+```c
+int fio_tls13_server_is_connected(fio_tls13_server_s *server);
+```
+
+Checks if handshake is complete.
+
+**Returns:** 1 if connected, 0 otherwise.
+
+#### `fio_tls13_server_is_error`
+
+```c
+int fio_tls13_server_is_error(fio_tls13_server_s *server);
+```
+
+Checks if in error state.
+
+**Returns:** 1 if error, 0 otherwise.
+
+#### `fio_tls13_server_state_name`
+
+```c
+const char *fio_tls13_server_state_name(fio_tls13_server_s *server);
+```
+
+Gets current state name (for debugging).
+
+#### `fio_tls13_server_get_sni`
+
+```c
+const char *fio_tls13_server_get_sni(fio_tls13_server_s *server);
+```
+
+Gets client's SNI hostname.
+
+**Returns:** SNI hostname, or NULL if not provided.
+
+#### `fio_tls13_server_alpn_set`
+
+```c
+void fio_tls13_server_alpn_set(fio_tls13_server_s *server,
+                               const char *protocols);
+```
+
+Sets ALPN protocols for server (comma-separated list).
+
+Server will select first matching protocol from client's offer.
+
+#### `fio_tls13_server_alpn_get`
+
+```c
+const char *fio_tls13_server_alpn_get(fio_tls13_server_s *server);
+```
+
+Gets negotiated ALPN protocol after handshake.
+
+#### `fio_tls13_server_require_client_cert`
+
+```c
+void fio_tls13_server_require_client_cert(fio_tls13_server_s *server, int mode);
+```
+
+Requires client certificate authentication (mutual TLS / mTLS).
+
+**Parameters:**
+- `server` - server context
+- `mode` - 0=none (default), 1=optional, 2=required
+
+#### `fio_tls13_server_client_cert_received`
+
+```c
+int fio_tls13_server_client_cert_received(fio_tls13_server_s *server);
+```
+
+Checks if client provided a certificate.
+
+**Returns:** 1 if client sent a certificate, 0 otherwise.
+
+#### `fio_tls13_server_client_cert_verified`
+
+```c
+int fio_tls13_server_client_cert_verified(fio_tls13_server_s *server);
+```
+
+Checks if client certificate was verified successfully.
+
+#### `fio_tls13_server_get_client_cert`
+
+```c
+const uint8_t *fio_tls13_server_get_client_cert(fio_tls13_server_s *server,
+                                                size_t *cert_len);
+```
+
+Gets client's certificate (first in chain).
+
+**Returns:** pointer to DER-encoded certificate, or NULL if none.
+
+------------------------------------------------------------
+
+### Complete Client Example
 
 ```c
 #define FIO_TLS13
@@ -13521,6 +13906,43 @@ int tls_connect(const char *hostname, int port) {
   return 0;
 }
 ```
+
+------------------------------------------------------------
+
+### RFC 8446 Conformance Status
+
+| RFC 8446 Section | Feature | Status |
+|------------------|---------|--------|
+| 2 | Protocol Overview | ✅ Implemented |
+| 4.1.2 | ClientHello | ✅ Implemented |
+| 4.1.3 | ServerHello | ✅ Implemented |
+| 4.1.4 | HelloRetryRequest | ✅ Implemented |
+| 4.2 | Extensions | ✅ Core extensions |
+| 4.2.1 | supported_versions | ✅ Implemented |
+| 4.2.3 | signature_algorithms | ✅ Implemented |
+| 4.2.7 | supported_groups | ✅ Implemented |
+| 4.2.8 | key_share | ✅ Implemented |
+| 4.2.9 | server_name (SNI) | ✅ Implemented |
+| 4.3.2 | CertificateRequest | ✅ Implemented |
+| 4.4.2 | Certificate | ✅ Implemented |
+| 4.4.3 | CertificateVerify | ✅ Implemented |
+| 4.4.4 | Finished | ✅ Implemented |
+| 4.6.1 | NewSessionTicket | ⚠️ Parsed, not used |
+| 4.6.3 | KeyUpdate | ✅ Implemented |
+| 5 | Record Layer | ✅ Implemented |
+| 5.2 | Record Encryption | ✅ Implemented |
+| 5.3 | Per-Record Nonce | ✅ Implemented |
+| 6 | Alerts | ✅ Implemented |
+| 7 | Key Schedule | ✅ Implemented |
+| 7.1 | HKDF-Expand-Label | ✅ Implemented |
+| 7.3 | Traffic Key Derivation | ✅ Implemented |
+| B.4 | Cipher Suites | ✅ All 3 mandatory |
+| RFC 7301 | ALPN | ✅ Implemented |
+
+**Legend:**
+- ✅ Fully implemented
+- ⚠️ Partially implemented
+- ❌ Not implemented
 
 ------------------------------------------------------------
 ## Dynamic Strings
@@ -18463,6 +18885,435 @@ OpenSSL errors are logged using the facil.io logging system:
 - Context cleanup is deferred to avoid blocking the IO reactor
 
 ------------------------------------------------------------
+## TLS 1.3 IO Integration
+
+```c
+#define FIO_IO
+#include "fio-stl/include.h"
+```
+
+The TLS 1.3 IO module provides seamless integration between the native TLS 1.3 implementation and the facil.io IO reactor. When OpenSSL is not available, this module automatically registers as the default TLS implementation.
+
+**Note**: This module is automatically included when `FIO_IO` is defined and `FIO_TLS13` is available. It requires the TLS 1.3 module (`190 tls13.h`) and the IO reactor module (`400 io.h`).
+
+------------------------------------------------------------
+
+### Overview
+
+The TLS 1.3 IO integration provides:
+
+- **Drop-in TLS support** - Works with existing `fio_io_tls_s` configuration
+- **Automatic fallback** - Used when OpenSSL is not available
+- **Self-signed certificates** - Automatic generation for development/testing
+- **PEM file loading** - Load certificates and keys from PEM files
+- **ALPN support** - Application-Layer Protocol Negotiation
+- **Non-blocking I/O** - Seamless integration with the event-driven reactor
+
+### Conditional Compilation
+
+The TLS 1.3 IO module compiles when:
+
+- `FIO_IO` is defined (the IO reactor module is included)
+- `FIO_TLS13` is defined (the TLS 1.3 module is included)
+- `FIO_NO_TLS` is **not** defined
+
+When OpenSSL is not detected (`HAVE_OPENSSL` not defined and `openssl/ssl.h` not found), the TLS 1.3 module automatically registers as the default TLS implementation.
+
+------------------------------------------------------------
+
+### Features
+
+#### Self-Signed Certificates
+
+When no certificate is configured for a server, the module automatically generates a self-signed certificate:
+
+| Property | Value |
+|----------|-------|
+| Algorithm | ECDSA with P-256 curve |
+| Security Level | 128-bit (equivalent to RSA-3072) |
+| Signature | SHA-256 |
+| Key Generation | ~10ms (vs ~2000ms for RSA-4096) |
+
+**Note**: Self-signed certificates are intended for development and testing only. Use properly issued certificates from a trusted Certificate Authority (CA) in production.
+
+#### Certificate Loading
+
+The module supports loading certificates and private keys from PEM files:
+
+- **P-256 ECDSA** - 32-byte private key scalar
+- **Ed25519** - 32-byte private key seed
+- **RSA** - Not yet supported for signing (verification only)
+
+#### ALPN Protocol Negotiation
+
+Application-Layer Protocol Negotiation (RFC 7301) is supported for:
+
+- HTTP/2 (`h2`)
+- HTTP/1.1 (`http/1.1`)
+- Custom protocols
+
+------------------------------------------------------------
+
+### Usage with the IO Reactor
+
+The TLS 1.3 module integrates with the IO system through the `fio_io_tls_s` configuration object:
+
+```c
+#define FIO_IO
+#include "fio-stl.h"
+
+/* Create a TLS configuration object */
+fio_io_tls_s *tls = fio_io_tls_new();
+
+/* Optional: load certificates from PEM files */
+fio_io_tls_cert_add(tls,
+                    "www.example.com",  /* server name (SNI) */
+                    "cert.pem",         /* public certificate */
+                    "key.pem",          /* private key */
+                    NULL);              /* password (if key is encrypted) */
+
+/* Optional: configure ALPN protocol negotiation */
+fio_io_tls_alpn_add(tls, "h2", on_http2_selected);
+fio_io_tls_alpn_add(tls, "http/1.1", on_http1_selected);
+
+/* Start listening with TLS */
+fio_io_listen(.url = "0.0.0.0:443",
+              .protocol = &MY_PROTOCOL,
+              .tls = tls);
+
+/* The TLS object can be freed after fio_io_listen (it's reference counted) */
+fio_io_tls_free(tls);
+
+/* Start the IO reactor */
+fio_io_start(0);
+```
+
+------------------------------------------------------------
+
+### HTTPS Server Example
+
+A complete example of an HTTPS server using the native TLS 1.3 implementation:
+
+```c
+#define FIO_LOG
+#define FIO_IO
+#include "fio-stl.h"
+
+/* Protocol callbacks */
+FIO_SFUNC void on_data(fio_io_s *io) {
+  char buf[1024];
+  size_t len = fio_io_read(io, buf, sizeof(buf));
+  if (len) {
+    /* Echo back with HTTP response */
+    const char response[] = 
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 13\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "Hello, TLS!\n";
+    fio_io_write(io, response, sizeof(response) - 1);
+    fio_io_close(io);
+  }
+}
+
+fio_io_protocol_s HTTPS_PROTOCOL = {
+    .on_data = on_data,
+    .on_timeout = fio_io_touch,
+};
+
+int main(void) {
+  /* Create TLS context - will use self-signed certificate */
+  fio_io_tls_s *tls = fio_io_tls_new();
+  
+  /* For production, load real certificates:
+   * fio_io_tls_cert_add(tls, "example.com", "cert.pem", "key.pem", NULL);
+   */
+  
+  fio_io_listen(.url = "0.0.0.0:8443",
+                .protocol = &HTTPS_PROTOCOL,
+                .tls = tls);
+  
+  fio_io_tls_free(tls);
+  
+  FIO_LOG_INFO("HTTPS server listening on port 8443");
+  FIO_LOG_INFO("Test with: curl -k https://localhost:8443/");
+  
+  fio_io_start(0);
+  return 0;
+}
+```
+
+------------------------------------------------------------
+
+### TLS Client Example
+
+Using TLS 1.3 for outgoing connections:
+
+```c
+#define FIO_LOG
+#define FIO_IO
+#include "fio-stl.h"
+
+FIO_SFUNC void on_connect(fio_io_s *io) {
+  FIO_LOG_INFO("TLS connection established!");
+  
+  /* Send HTTP request */
+  const char request[] = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
+  fio_io_write(io, request, sizeof(request) - 1);
+}
+
+FIO_SFUNC void on_data(fio_io_s *io) {
+  char buf[4096];
+  size_t len = fio_io_read(io, buf, sizeof(buf) - 1);
+  if (len) {
+    buf[len] = '\0';
+    FIO_LOG_INFO("Received: %s", buf);
+    fio_io_close(io);
+  }
+}
+
+fio_io_protocol_s CLIENT_PROTOCOL = {
+    .on_attach = on_connect,
+    .on_data = on_data,
+    .on_timeout = fio_io_touch,
+};
+
+int main(void) {
+  /* Create TLS context for client */
+  fio_io_tls_s *tls = fio_io_tls_new();
+  
+  /* Add server name for SNI */
+  fio_io_tls_cert_add(tls, "example.com", NULL, NULL, NULL);
+  
+  /* Connect with TLS */
+  fio_io_connect(.url = "example.com:443",
+                 .protocol = &CLIENT_PROTOCOL,
+                 .tls = tls);
+  
+  fio_io_tls_free(tls);
+  
+  fio_io_start(0);
+  return 0;
+}
+```
+
+------------------------------------------------------------
+
+### API Reference
+
+#### `fio_tls13_io_functions`
+
+```c
+fio_io_functions_s fio_tls13_io_functions(void);
+```
+
+Returns the TLS 1.3 IO functions structure for TLS operations.
+
+This function is called automatically during module initialization to register TLS 1.3 as the default TLS implementation (when OpenSSL is not available). You typically don't need to call this directly.
+
+**Returns:** A `fio_io_functions_s` structure containing:
+
+| Function | Purpose |
+|----------|---------|
+| `build_context` | Creates TLS context from `fio_io_tls_s` configuration |
+| `free_context` | Frees the TLS context and associated resources |
+| `start` | Initializes TLS for a new connection |
+| `read` | Non-blocking TLS read (decryption) |
+| `write` | Non-blocking TLS write (encryption) |
+| `flush` | Flushes pending handshake data |
+| `finish` | Sends close_notify alert |
+| `cleanup` | Frees per-connection TLS state |
+
+------------------------------------------------------------
+
+### TLS Configuration Functions
+
+The following functions from the IO module are used to configure TLS. See the [IO Reactor documentation](400%20io.md) for complete details.
+
+#### `fio_io_tls_new`
+
+```c
+fio_io_tls_s *fio_io_tls_new(void);
+```
+
+Creates a new TLS configuration object.
+
+#### `fio_io_tls_free`
+
+```c
+void fio_io_tls_free(fio_io_tls_s *tls);
+```
+
+Frees a TLS configuration object (reference counted).
+
+#### `fio_io_tls_cert_add`
+
+```c
+fio_io_tls_s *fio_io_tls_cert_add(fio_io_tls_s *tls,
+                                  const char *server_name,
+                                  const char *public_cert_file,
+                                  const char *private_key_file,
+                                  const char *pk_password);
+```
+
+Adds a certificate to the TLS context.
+
+**Parameters:**
+- `server_name` - The server name for SNI matching (client) or certificate selection (server)
+- `public_cert_file` - Path to PEM-encoded certificate (or NULL for self-signed)
+- `private_key_file` - Path to PEM-encoded private key (or NULL for self-signed)
+- `pk_password` - Password for encrypted private keys (or NULL)
+
+**Supported key types:**
+- P-256 ECDSA (recommended)
+- Ed25519
+
+#### `fio_io_tls_alpn_add`
+
+```c
+fio_io_tls_s *fio_io_tls_alpn_add(fio_io_tls_s *tls,
+                                  const char *protocol_name,
+                                  void (*on_selected)(fio_io_s *));
+```
+
+Registers an ALPN protocol and its selection callback.
+
+**Parameters:**
+- `protocol_name` - Protocol identifier (e.g., "h2", "http/1.1")
+- `on_selected` - Callback invoked when this protocol is negotiated
+
+The first protocol added is the preferred/default protocol.
+
+------------------------------------------------------------
+
+### Internal Architecture
+
+The TLS 1.3 IO integration uses a layered architecture:
+
+```
+┌─────────────────────────────────────┐
+│         Application Layer           │
+│    (fio_io_read, fio_io_write)      │
+├─────────────────────────────────────┤
+│         IO Reactor Layer            │
+│    (fio_io_functions_s callbacks)   │
+├─────────────────────────────────────┤
+│      TLS 1.3 IO Integration         │
+│    (fio___tls13_read/write)         │
+├─────────────────────────────────────┤
+│       TLS 1.3 Record Layer          │
+│  (fio_tls13_record_encrypt/decrypt) │
+├─────────────────────────────────────┤
+│        AEAD Cipher Layer            │
+│   (AES-GCM, ChaCha20-Poly1305)      │
+├─────────────────────────────────────┤
+│          Socket Layer               │
+│     (fio_sock_read/write)           │
+└─────────────────────────────────────┘
+```
+
+#### Connection State
+
+Each TLS connection maintains:
+
+| Buffer | Purpose | Size |
+|--------|---------|------|
+| `recv_buf` | Incoming encrypted data | ~17KB |
+| `app_buf` | Decrypted application data | 16KB |
+| `send_buf` | Outgoing handshake data | 8KB |
+| `enc_buf` | Pre-allocated encryption buffer | ~17KB |
+
+#### Handshake Flow
+
+**Server:**
+1. `start` - Initialize server state, wait for ClientHello
+2. `read` - Receive ClientHello, send ServerHello..Finished
+3. `read` - Receive client Finished
+4. Connection established
+
+**Client:**
+1. `start` - Initialize client state, send ClientHello
+2. `read` - Receive ServerHello..Finished, send client Finished
+3. Connection established
+
+------------------------------------------------------------
+
+### Security Considerations
+
+#### Certificate Verification
+
+- **Server Mode**: Certificate verification is typically not enabled (clients don't usually present certificates)
+- **Client Mode**: By default, certificate verification is **skipped** with a warning logged
+
+To enable certificate verification for client connections, a trust store must be configured (not yet exposed through the IO API).
+
+#### Production Recommendations
+
+1. **Use Real Certificates**: Obtain certificates from a trusted CA (e.g., Let's Encrypt)
+2. **Avoid Self-Signed**: Self-signed certificates should only be used for development
+3. **Keep Updated**: Security patches may be released for the TLS implementation
+4. **Protect Private Keys**: Use appropriate file permissions
+
+#### Memory Safety
+
+- All sensitive key material is zeroed on cleanup using `fio_secure_zero`
+- Connection state is properly freed on close
+- Buffer overflows are prevented by size checks
+
+------------------------------------------------------------
+
+### Comparison with OpenSSL
+
+| Feature | TLS 1.3 Native | OpenSSL |
+|---------|----------------|---------|
+| Dependencies | None | OpenSSL 3.x |
+| Binary Size | Smaller | Larger |
+| TLS Versions | 1.3 only | 1.0-1.3 |
+| Cipher Suites | 3 (TLS 1.3) | Many |
+| Certificate Types | P-256, Ed25519 | All |
+| Session Resumption | Not yet | Yes |
+| 0-RTT | Not yet | Yes |
+| OCSP Stapling | No | Yes |
+| Client Certificates | Yes | Yes |
+
+**When to use TLS 1.3 Native:**
+- Minimal dependencies required
+- Only TLS 1.3 clients expected
+- Embedded or resource-constrained environments
+
+**When to use OpenSSL:**
+- Legacy TLS version support needed
+- Full certificate type support required
+- Session resumption important
+- OCSP stapling required
+
+------------------------------------------------------------
+
+### Error Handling
+
+TLS errors are logged using the facil.io logging system:
+
+| Log Level | Purpose |
+|-----------|---------|
+| `FIO_LOG_ERROR` | Critical failures (certificate loading, key generation) |
+| `FIO_LOG_WARNING` | Non-fatal issues (trust store loading) |
+| `FIO_LOG_DEBUG2` | Detailed debugging information |
+
+Connection errors result in the connection being closed with an appropriate TLS alert.
+
+------------------------------------------------------------
+
+### Memory Management
+
+- **Context** (`fio___tls13_context_s`): Shared across connections, reference counted
+- **Connection** (`fio___tls13_connection_s`): Per-connection, freed on close
+- **Certificates**: Copied to context, freed with context
+- **Self-signed key**: Global, freed at program exit
+
+Leak counters are enabled in debug builds to detect memory leaks.
+
+------------------------------------------------------------
 ## Pub/Sub
 
 ```c
@@ -18959,8 +19810,7 @@ void on_message(fio_msg_s *msg) {
 int main(void) {
   /* Create Redis engine (ref count = 1) */
   fio_pubsub_engine_s *redis = fio_redis_new(
-      .address = "localhost",
-      .port = "6379"
+      .url = "redis://localhost:6379"
   );
   
   /* Attach to pub/sub system (does NOT take ownership) */
@@ -19001,10 +19851,17 @@ Each Redis engine allocates two read buffers (one for each connection), so the t
 
 ```c
 typedef struct {
-  /** Redis server's address, defaults to "localhost" */
-  const char *address;
-  /** Redis server's port, defaults to "6379" */
-  const char *port;
+  /**
+   * Redis server URL.
+   *
+   * Supported formats:
+   * - "redis://host:port"
+   * - "redis://host" (default port 6379)
+   * - "host:port" (no scheme)
+   * - "host" (no scheme, default port 6379)
+   * - NULL or empty → defaults to "localhost:6379"
+   */
+  const char *url;
   /** Redis server's password, if any (for AUTH command) */
   const char *auth;
   /** Length of auth string (0 = auto-detect with strlen) */
@@ -19017,8 +19874,7 @@ typedef struct {
 Arguments for creating a Redis pub/sub engine.
 
 **Members:**
-- `address` - Redis server hostname or IP address. Defaults to `"localhost"` if NULL or empty.
-- `port` - Redis server port as a string. Defaults to `"6379"` if NULL or empty.
+- `url` - Redis server URL. Supports various formats including `redis://host:port`, `host:port`, or just `host`. Defaults to `"localhost:6379"` if NULL or empty.
 - `auth` - Optional password for Redis AUTH command. Set to NULL if no authentication is required.
 - `auth_len` - Length of the auth string. If 0, `strlen()` is used to determine the length.
 - `ping_interval` - Keepalive ping interval in seconds. Defaults to 300 seconds (5 minutes) if 0.
@@ -19037,7 +19893,7 @@ The Redis engine uses reference counting for memory management:
 
 ```c
 /* Example: sharing engine across multiple owners */
-fio_pubsub_engine_s *redis = fio_redis_new(.address = "localhost");
+fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost");
 
 /* Share with another component */
 fio_pubsub_engine_s *shared = fio_redis_dup(redis);  /* ref = 2 */
@@ -19070,8 +19926,7 @@ The function is shadowed by a macro, allowing it to accept named arguments:
 
 ```c
 fio_pubsub_engine_s *redis = fio_redis_new(
-    .address = "redis.example.com",
-    .port = "6379",
+    .url = "redis://redis.example.com:6379",
     .auth = "secret_password",
     .ping_interval = 30
 );
@@ -19081,8 +19936,7 @@ fio_pubsub_engine_s *redis = fio_redis_new(
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `address` | `const char *` | Redis server address; defaults to `"localhost"` |
-| `port` | `const char *` | Redis server port; defaults to `"6379"` |
+| `url` | `const char *` | Redis server URL; defaults to `"localhost:6379"` |
 | `auth` | `const char *` | Optional authentication password |
 | `auth_len` | `size_t` | Length of auth string; 0 for auto-detect |
 | `ping_interval` | `uint8_t` | Keepalive interval in seconds; defaults to 300 |
@@ -19274,7 +20128,7 @@ void broadcast_message(const char *channel, const char *message) {
 
 int main(void) {
   /* Create Redis engine (ref count = 1) */
-  redis_engine = fio_redis_new(.address = "localhost", .port = "6379");
+  redis_engine = fio_redis_new(.url = "redis://localhost:6379");
   if (!redis_engine) {
     FIO_LOG_FATAL("Failed to create Redis engine");
     return 1;
@@ -19305,8 +20159,7 @@ int main(void) {
 int main(void) {
   /* Connect with password authentication */
   fio_pubsub_engine_s *redis = fio_redis_new(
-      .address = "redis.example.com",
-      .port = "6379",
+      .url = "redis://redis.example.com:6379",
       .auth = "my_redis_password"
   );
   

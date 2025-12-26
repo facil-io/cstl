@@ -73,8 +73,7 @@ Internal reference management:
 Usage 1 - Database Only:
     // Create engine - only the publishing connection is established
     fio_pubsub_engine_s *redis = fio_redis_new(
-        .address = "localhost",
-        .port = "6379",
+        .url = "redis://localhost:6379",
         .auth = "password",  // optional
         .ping_interval = 30  // seconds, optional
     );
@@ -91,8 +90,7 @@ Usage 1 - Database Only:
 
 Usage 2 - With Pub/Sub:
     fio_pubsub_engine_s *redis = fio_redis_new(
-        .address = "localhost",
-        .port = "6379"
+        .url = "localhost:6379"
     );
 
     // Explicitly attach to pub/sub system - this starts the subscription
@@ -125,10 +123,17 @@ Redis Engine Types
 
 /** Arguments for creating a Redis engine */
 typedef struct {
-  /** Redis server's address, defaults to "localhost" */
-  const char *address;
-  /** Redis server's port, defaults to "6379" */
-  const char *port;
+  /**
+   * Redis server URL.
+   *
+   * Supported formats:
+   * - "redis://host:port"
+   * - "redis://host" (default port 6379)
+   * - "host:port" (no scheme)
+   * - "host" (no scheme, default port 6379)
+   * - NULL or empty → defaults to "localhost:6379"
+   */
+  const char *url;
   /** Redis server's password, if any (for AUTH command) */
   const char *auth;
   /** Length of auth string (0 = auto-detect with strlen) */
@@ -1207,16 +1212,31 @@ void fio_redis_new____(void); /* IDE marker */
  * when done. Attaching to pub/sub does NOT transfer ownership.
  */
 SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
-  /* Validate and set defaults */
-  if (!args.address || !args.address[0])
-    args.address = "localhost";
-  if (!args.port || !args.port[0])
-    args.port = "6379";
+  /* Default URL if not provided */
+  static const char *default_host = "localhost";
+  static const char *default_port = "6379";
+
+  /* Parse URL to extract host and port */
+  const char *host = default_host;
+  size_t host_len = 9; /* strlen("localhost") */
+  const char *port = default_port;
+  size_t port_len = 4; /* strlen("6379") */
+
+  if (args.url && args.url[0]) {
+    fio_url_s u = fio_url_parse(args.url, strlen(args.url));
+    if (u.host.buf && u.host.len) {
+      host = u.host.buf;
+      host_len = u.host.len;
+    }
+    if (u.port.buf && u.port.len) {
+      port = u.port.buf;
+      port_len = u.port.len;
+    }
+  }
+
   if (!args.ping_interval)
     args.ping_interval = 30;
 
-  size_t addr_len = strlen(args.address);
-  size_t port_len = strlen(args.port);
   size_t auth_len = args.auth_len;
   if (args.auth && !auth_len)
     auth_len = strlen(args.auth);
@@ -1229,7 +1249,7 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
   }
 
   /* Allocate engine */
-  size_t alloc_size = sizeof(fio_redis_engine_s) + addr_len + 1 + port_len + 1 +
+  size_t alloc_size = sizeof(fio_redis_engine_s) + host_len + 1 + port_len + 1 +
                       auth_cmd_len + (FIO_REDIS_READ_BUFFER * 2);
   fio_redis_engine_s *r =
       (fio_redis_engine_s *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
@@ -1259,11 +1279,13 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
   /* Set up string pointers after the struct */
   char *str_ptr = (char *)(r + 1) + (FIO_REDIS_READ_BUFFER * 2);
   r->address = str_ptr;
-  FIO_MEMCPY(r->address, args.address, addr_len + 1);
-  str_ptr += addr_len + 1;
+  FIO_MEMCPY(r->address, host, host_len);
+  r->address[host_len] = '\0';
+  str_ptr += host_len + 1;
 
   r->port = str_ptr;
-  FIO_MEMCPY(r->port, args.port, port_len + 1);
+  FIO_MEMCPY(r->port, port, port_len);
+  r->port[port_len] = '\0';
   str_ptr += port_len + 1;
 
   /* Build AUTH command if needed */
