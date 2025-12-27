@@ -408,7 +408,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA1
 #endif
 
-#if defined(FIO_PUBSUB) || defined(FIO_SECRET)
+#if defined(FIO_PUBSUB) || defined(FIO_SECRET) || defined(FIO_OTP)
 #define FIO_SHA2
 #endif
 

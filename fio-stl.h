@@ -5139,7 +5139,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA1
 #endif
 
-#if defined(FIO_PUBSUB) || defined(FIO_SECRET)
+#if defined(FIO_PUBSUB) || defined(FIO_SECRET) || defined(FIO_OTP)
 #define FIO_SHA2
 #endif
 
@@ -42209,26 +42209,60 @@ FIO_SFUNC uint32_t fio___otp_compute(fio_buf_info_s key,
   /* t should be big endian */
   t = fio_lton64(t);
 
-  if (settings.is_raw)
-    secret = FIO_BUF2STR_INFO(key);
-  else if (settings.is_hex) {
+  if (settings.is_raw) {
+    /* raw key - hash if too long for HMAC-SHA1 (block size 64 bytes) */
+    if (key.len > 64) {
+      s.u512[0] = fio_sha512(key.buf, key.len);
+      secret.len = 64;
+      FIO_LOG_WARNING("OTP hex key too long (%zu bytes), hashing to 64 bytes",
+                      key.len);
+    } else {
+      secret = FIO_BUF2STR_INFO(key);
+    }
+  } else if (settings.is_hex) {
     /* decode Hex key input OTP */
-    FIO_ASSERT(key.len < (1024 / (8 * 2)), "key too long");
+    if (key.len >= (1024 / (8 * 2))) {
+      FIO_LOG_WARNING("OTP hex key too long (%zu bytes), hashing to 64 bytes",
+                      key.len);
+    }
     size_t written = 0; /* fun times... */
     for (size_t i = 0; i < key.len; ++i) {
       if (key.buf[i] == '-' || key.buf[i] == ' ' || key.buf[i] == '\n')
         continue;
       const size_t pos = written >> 1;
+      if (pos >= (1024 / 8))
+        break; /* stop if we exceed buffer */
       if (!(written & 1))
         secret.buf[pos] = 0;
       secret.buf[pos] |= (fio_c2i(key.buf[i]) << (((++written) & 1) << 2));
     }
     secret.len = (written >> 1) + (written & 1);
+    /* if decoded key is too long for HMAC-SHA1, hash it */
+    if (secret.len > 64) {
+      fio_u512 tmp = fio_sha512(secret.buf, secret.len);
+      s.u512[0] = tmp;
+      secret.len = 64;
+    }
   } else {
     /* decode Byte32 key input OTP */
-    FIO_ASSERT(key.len < ((64 * 8) / 5), "key too long");
     if (fio_string_write_base32dec(&secret, NULL, key.buf, key.len))
       return -1;
+    /* if decoded key is too long for HMAC-SHA1, hash it */
+    if (secret.len > 64) {
+      FIO_LOG_WARNING(
+          "OTP base32 key too long (%zu bytes), truncating decode buffer",
+          key.len);
+      fio_u512 tmp = fio_sha512(secret.buf, secret.len);
+      s.u512[0] = tmp;
+      secret.len = 64;
+      if (key.len >= ((64 * 8) / 5)) {
+        fio_sha1_s h = fio_sha1(key.buf, key.len);
+        for (int i = 0; i < 5; ++i)
+          s.u32[i] ^= h.v[i];
+        for (int i = 0; i < 5; ++i)
+          s.u32[i + 7] ^= h.v[i];
+      }
+    }
   }
 
   /* compute HMAC (HOTP of T / TOTP)  */
