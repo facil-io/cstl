@@ -782,4 +782,472 @@ int main(void) {
   }
 
   FIO_LOG_DDEBUG("ChaCha20-Poly1305 edge case tests passed!");
+
+  /* **************************************************************************
+   * XChaCha20-Poly1305 Tests (Extended Nonce Variant)
+   * *************************************************************************/
+  FIO_LOG_DDEBUG("Testing XChaCha20-Poly1305 (extended nonce)...");
+
+  /* Test: HChaCha20 test vector from draft-irtf-cfrg-xchacha */
+  {
+    FIO_LOG_DDEBUG("  Testing HChaCha20 key derivation...");
+    /* Test vector from XChaCha20 draft RFC */
+    const uint8_t key[32] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                             0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                             0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
+    const uint8_t nonce16[16] = {0x00,
+                                 0x00,
+                                 0x00,
+                                 0x09,
+                                 0x00,
+                                 0x00,
+                                 0x00,
+                                 0x4a,
+                                 0x00,
+                                 0x00,
+                                 0x00,
+                                 0x00,
+                                 0x31,
+                                 0x41,
+                                 0x59,
+                                 0x27};
+    const uint8_t expected_subkey[32] = {
+        0x82, 0x41, 0x3b, 0x42, 0x27, 0xb2, 0x7b, 0xfe, 0xd3, 0x0e, 0x42,
+        0x50, 0x8a, 0x87, 0x7d, 0x73, 0xa0, 0xf9, 0xe4, 0xd5, 0x8a, 0x74,
+        0xa8, 0x53, 0xc1, 0x2e, 0xc4, 0x13, 0x26, 0xd3, 0xec, 0xdc};
+    uint8_t subkey[32];
+
+    /* Call the internal HChaCha20 function via XChaCha20 construction test */
+    /* We verify indirectly by testing XChaCha20 produces correct output */
+    extern void fio___hchacha20(void *restrict subkey,
+                                const void *key,
+                                const void *nonce16);
+    fio___hchacha20(subkey, key, nonce16);
+
+    FIO_ASSERT(!memcmp(subkey, expected_subkey, 32),
+               "HChaCha20 subkey derivation failed");
+  }
+
+  /* Test: XChaCha20 test vector from draft-irtf-cfrg-xchacha */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20 stream cipher...");
+    const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+                             0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
+                             0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+                             0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f};
+    /* Note: nonce ends with 0x58 not 0x57 per RFC draft test vector */
+    const uint8_t nonce[24] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+                               0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
+                               0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x58};
+    const char *plaintext =
+        "The dhole (pronounced \"dole\") is also known as the Asiatic wild "
+        "dog, "
+        "red dog, and whistling dog. It is about the size of a German shepherd "
+        "but looks more like a long-legged fox. This highly elusive and "
+        "skilled "
+        "jumper is classified with wolves, coyotes, jackals, and foxes in the "
+        "taxonomic family Canidae.";
+    /* Expected ciphertext (first 64 bytes from RFC draft, counter=0) */
+    const uint8_t expected_start[64] = {
+        0x45, 0x59, 0xab, 0xba, 0x4e, 0x48, 0xc1, 0x61, 0x02, 0xe8, 0xbb,
+        0x2c, 0x05, 0xe6, 0x94, 0x7f, 0x50, 0xa7, 0x86, 0xde, 0x16, 0x2f,
+        0x9b, 0x0b, 0x7e, 0x59, 0x2a, 0x9b, 0x53, 0xd0, 0xd4, 0xe9, 0x8d,
+        0x8d, 0x64, 0x10, 0xd5, 0x40, 0xa1, 0xa6, 0x37, 0x5b, 0x26, 0xd8,
+        0x0d, 0xac, 0xe4, 0xfa, 0xb5, 0x23, 0x84, 0xc7, 0x31, 0xac, 0xbf,
+        0x16, 0xa5, 0x92, 0x3c, 0x0c, 0x48, 0xd3, 0x57, 0x5d};
+
+    size_t len = strlen(plaintext);
+    char buffer[512];
+    FIO_MEMCPY(buffer, plaintext, len);
+
+    /* Use counter=0 to match RFC draft test vector */
+    fio_xchacha20(buffer, len, key, nonce, 0);
+
+    FIO_ASSERT(!memcmp(buffer, expected_start, 64),
+               "XChaCha20 encryption failed (first 64 bytes mismatch)");
+
+    /* Verify decryption roundtrip */
+    fio_xchacha20(buffer, len, key, nonce, 0);
+    FIO_ASSERT(!memcmp(buffer, plaintext, len),
+               "XChaCha20 decryption roundtrip failed");
+  }
+
+  /* Test: XChaCha20-Poly1305 test vector (from RFC draft) */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 AEAD...");
+    const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+                             0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
+                             0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
+                             0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f};
+    /* 24-byte nonce from RFC draft AEAD test vector */
+    const uint8_t nonce[24] = {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+                               0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
+                               0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57};
+    const uint8_t aad[12] = {0x50,
+                             0x51,
+                             0x52,
+                             0x53,
+                             0xc0,
+                             0xc1,
+                             0xc2,
+                             0xc3,
+                             0xc4,
+                             0xc5,
+                             0xc6,
+                             0xc7};
+    const char *plaintext =
+        "Ladies and Gentlemen of the class of '99: If I could offer you only "
+        "one tip for the future, sunscreen would be it.";
+    /* Expected tag from RFC draft */
+    const uint8_t expected_tag[16] = {0xc0,
+                                      0x87,
+                                      0x59,
+                                      0x24,
+                                      0xc1,
+                                      0xc7,
+                                      0x98,
+                                      0x79,
+                                      0x47,
+                                      0xde,
+                                      0xaf,
+                                      0xd8,
+                                      0x78,
+                                      0x0a,
+                                      0xcf,
+                                      0x49};
+    /* Expected ciphertext from RFC draft */
+    const uint8_t expected_ciphertext[] = {
+        0xbd, 0x6d, 0x17, 0x9d, 0x3e, 0x83, 0xd4, 0x3b, 0x95, 0x76, 0x57, 0x94,
+        0x93, 0xc0, 0xe9, 0x39, 0x57, 0x2a, 0x17, 0x00, 0x25, 0x2b, 0xfa, 0xcc,
+        0xbe, 0xd2, 0x90, 0x2c, 0x21, 0x39, 0x6c, 0xbb, 0x73, 0x1c, 0x7f, 0x1b,
+        0x0b, 0x4a, 0xa6, 0x44, 0x0b, 0xf3, 0xa8, 0x2f, 0x4e, 0xda, 0x7e, 0x39,
+        0xae, 0x64, 0xc6, 0x70, 0x8c, 0x54, 0xc2, 0x16, 0xcb, 0x96, 0xb7, 0x2e,
+        0x12, 0x13, 0xb4, 0x52, 0x2f, 0x8c, 0x9b, 0xa4, 0x0d, 0xb5, 0xd9, 0x45,
+        0xb1, 0x1b, 0x69, 0xb9, 0x82, 0xc1, 0xbb, 0x9e, 0x3f, 0x3f, 0xac, 0x2b,
+        0xc3, 0x69, 0x48, 0x8f, 0x76, 0xb2, 0x38, 0x35, 0x65, 0xd3, 0xff, 0xf9,
+        0x21, 0xf9, 0x66, 0x4c, 0x97, 0x63, 0x7d, 0xa9, 0x76, 0x88, 0x12, 0xf6,
+        0x15, 0xc6, 0x8b, 0x13, 0xb5, 0x2e};
+
+    size_t len = strlen(plaintext);
+    char buffer[256];
+    char mac[16];
+    FIO_MEMCPY(buffer, plaintext, len);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, len, aad, sizeof(aad), key, nonce);
+
+    FIO_ASSERT(!memcmp(buffer, expected_ciphertext, len),
+               "XChaCha20-Poly1305 ciphertext mismatch");
+    FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+               "XChaCha20-Poly1305 authentication tag mismatch");
+
+    /* Verify decryption */
+    int ret = fio_xchacha20_poly1305_dec(mac,
+                                         buffer,
+                                         len,
+                                         aad,
+                                         sizeof(aad),
+                                         key,
+                                         nonce);
+    FIO_ASSERT(ret == 0, "XChaCha20-Poly1305 decryption should succeed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, len),
+               "XChaCha20-Poly1305 decryption roundtrip failed");
+  }
+
+  /* Test: XChaCha20-Poly1305 roundtrip with random data */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 roundtrip...");
+    char key[32];
+    char nonce[24];
+    char plaintext[256];
+    char buffer[256];
+    char mac[16];
+    char aad[32];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 256);
+    fio_rand_bytes(aad, 32);
+    FIO_MEMCPY(buffer, plaintext, 256);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 256, aad, 32, key, nonce);
+    FIO_ASSERT(memcmp(buffer, plaintext, 256),
+               "XChaCha20-Poly1305 ciphertext should differ from plaintext");
+
+    int ret = fio_xchacha20_poly1305_dec(mac, buffer, 256, aad, 32, key, nonce);
+    FIO_ASSERT(ret == 0, "XChaCha20-Poly1305 decryption should succeed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, 256),
+               "XChaCha20-Poly1305 roundtrip failed");
+  }
+
+  /* Test: XChaCha20-Poly1305 empty plaintext */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 empty plaintext...");
+    char key[32];
+    char nonce[24];
+    char mac[16] = {0};
+    char aad[] = "additional data";
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+
+    fio_xchacha20_poly1305_enc(mac, NULL, 0, aad, sizeof(aad) - 1, key, nonce);
+
+    /* MAC should not be all zeros */
+    int all_zero = 1;
+    for (int i = 0; i < 16; ++i) {
+      if (mac[i] != 0) {
+        all_zero = 0;
+        break;
+      }
+    }
+    FIO_ASSERT(!all_zero,
+               "XChaCha20-Poly1305 empty plaintext MAC should be non-zero");
+
+    int ret = fio_xchacha20_poly1305_dec(mac,
+                                         NULL,
+                                         0,
+                                         aad,
+                                         sizeof(aad) - 1,
+                                         key,
+                                         nonce);
+    FIO_ASSERT(ret == 0,
+               "XChaCha20-Poly1305 empty plaintext decryption should succeed");
+  }
+
+  /* Test: XChaCha20-Poly1305 empty AAD */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 empty AAD...");
+    char key[32];
+    char nonce[24];
+    char plaintext[] = "Hello, XChaCha20!";
+    char buffer[64];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    FIO_MEMCPY(buffer, plaintext, sizeof(plaintext));
+
+    fio_xchacha20_poly1305_enc(mac,
+                               buffer,
+                               sizeof(plaintext),
+                               NULL,
+                               0,
+                               key,
+                               nonce);
+
+    int ret = fio_xchacha20_poly1305_dec(mac,
+                                         buffer,
+                                         sizeof(plaintext),
+                                         NULL,
+                                         0,
+                                         key,
+                                         nonce);
+    FIO_ASSERT(ret == 0,
+               "XChaCha20-Poly1305 empty AAD decryption should succeed");
+    FIO_ASSERT(!memcmp(buffer, plaintext, sizeof(plaintext)),
+               "XChaCha20-Poly1305 empty AAD roundtrip failed");
+  }
+
+  /* Test: XChaCha20-Poly1305 corrupted ciphertext detection */
+  {
+    FIO_LOG_DDEBUG(
+        "  Testing XChaCha20-Poly1305 corrupted ciphertext detection...");
+    char key[32];
+    char nonce[24];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Corrupt ciphertext */
+    buffer[0] ^= 0x01;
+
+    int ret = fio_xchacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "XChaCha20-Poly1305 corrupted ciphertext should fail");
+  }
+
+  /* Test: XChaCha20-Poly1305 corrupted tag detection */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 corrupted tag detection...");
+    char key[32];
+    char nonce[24];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+    /* Corrupt tag */
+    mac[0] ^= 0x01;
+
+    int ret = fio_xchacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "XChaCha20-Poly1305 corrupted tag should fail");
+  }
+
+  /* Test: XChaCha20-Poly1305 corrupted AAD detection */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 corrupted AAD detection...");
+    char key[32];
+    char nonce[24];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+    char aad[16];
+    char bad_aad[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 32);
+    fio_rand_bytes(aad, 16);
+    FIO_MEMCPY(bad_aad, aad, 16);
+    bad_aad[0] ^= 0x01;
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 32, aad, 16, key, nonce);
+
+    int ret =
+        fio_xchacha20_poly1305_dec(mac, buffer, 32, bad_aad, 16, key, nonce);
+    FIO_ASSERT(ret != 0, "XChaCha20-Poly1305 corrupted AAD should fail");
+  }
+
+  /* Test: XChaCha20-Poly1305 wrong key detection */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 wrong key detection...");
+    char key1[32];
+    char key2[32];
+    char nonce[24];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key1, 32);
+    fio_rand_bytes(key2, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key1, nonce);
+
+    int ret = fio_xchacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key2, nonce);
+    FIO_ASSERT(ret != 0, "XChaCha20-Poly1305 wrong key should fail");
+  }
+
+  /* Test: XChaCha20-Poly1305 wrong nonce detection */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 wrong nonce detection...");
+    char key[32];
+    char nonce1[24];
+    char nonce2[24];
+    char plaintext[32];
+    char buffer[32];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce1, 24);
+    fio_rand_bytes(nonce2, 24);
+    fio_rand_bytes(plaintext, 32);
+    FIO_MEMCPY(buffer, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac, buffer, 32, NULL, 0, key, nonce1);
+
+    int ret = fio_xchacha20_poly1305_dec(mac, buffer, 32, NULL, 0, key, nonce2);
+    FIO_ASSERT(ret != 0, "XChaCha20-Poly1305 wrong nonce should fail");
+  }
+
+  /* Test: XChaCha20-Poly1305 at various plaintext sizes */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 various sizes...");
+    char key[32];
+    char nonce[24];
+    char mac[16];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+
+    size_t sizes[] =
+        {1, 15, 16, 17, 63, 64, 65, 127, 128, 129, 255, 256, 1024, 4096};
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+      size_t len = sizes[i];
+      char *plaintext = (char *)malloc(len);
+      char *buffer = (char *)malloc(len);
+      FIO_ASSERT(plaintext && buffer, "Memory allocation failed");
+
+      fio_rand_bytes(plaintext, len);
+      FIO_MEMCPY(buffer, plaintext, len);
+
+      fio_xchacha20_poly1305_enc(mac, buffer, len, NULL, 0, key, nonce);
+      int ret =
+          fio_xchacha20_poly1305_dec(mac, buffer, len, NULL, 0, key, nonce);
+      FIO_ASSERT(ret == 0,
+                 "XChaCha20-Poly1305 size %zu decryption failed",
+                 len);
+      FIO_ASSERT(!memcmp(buffer, plaintext, len),
+                 "XChaCha20-Poly1305 size %zu roundtrip failed",
+                 len);
+
+      free(plaintext);
+      free(buffer);
+    }
+  }
+
+  /* Test: XChaCha20-Poly1305 determinism */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 determinism...");
+    char key[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+                    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                    0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20};
+    char nonce[24] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                      0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                      0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
+    char plaintext[32] = "deterministic xchacha20 test!!!";
+    char buffer1[32], buffer2[32];
+    char mac1[16], mac2[16];
+
+    FIO_MEMCPY(buffer1, plaintext, 32);
+    FIO_MEMCPY(buffer2, plaintext, 32);
+
+    fio_xchacha20_poly1305_enc(mac1, buffer1, 32, NULL, 0, key, nonce);
+    fio_xchacha20_poly1305_enc(mac2, buffer2, 32, NULL, 0, key, nonce);
+
+    FIO_ASSERT(!memcmp(buffer1, buffer2, 32),
+               "XChaCha20-Poly1305 encryption should be deterministic");
+    FIO_ASSERT(!memcmp(mac1, mac2, 16),
+               "XChaCha20-Poly1305 MAC should be deterministic");
+  }
+
+  /* Test: XChaCha20 standalone roundtrip */
+  {
+    FIO_LOG_DDEBUG("  Testing XChaCha20 standalone roundtrip...");
+    char key[32];
+    char nonce[24];
+    char plaintext[128];
+    char buffer[128];
+
+    fio_rand_bytes(key, 32);
+    fio_rand_bytes(nonce, 24);
+    fio_rand_bytes(plaintext, 128);
+    FIO_MEMCPY(buffer, plaintext, 128);
+
+    fio_xchacha20(buffer, 128, key, nonce, 0);
+    FIO_ASSERT(memcmp(buffer, plaintext, 128),
+               "XChaCha20 ciphertext should differ from plaintext");
+
+    fio_xchacha20(buffer, 128, key, nonce, 0);
+    FIO_ASSERT(!memcmp(buffer, plaintext, 128), "XChaCha20 roundtrip failed");
+  }
+
+  FIO_LOG_DDEBUG("XChaCha20-Poly1305 tests passed!");
 }
