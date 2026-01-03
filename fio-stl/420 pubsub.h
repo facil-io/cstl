@@ -230,11 +230,76 @@ SFUNC void fio_publish(fio_publish_args_s args);
 SFUNC void fio_pubsub_message_defer(fio_msg_s *msg);
 
 /* *****************************************************************************
-Pub/Sub - History and Event Replay - TODO!!!
+Pub/Sub - History and Event Replay
 ***************************************************************************** */
 
-/** Sets the maximum number of messages to be stored in the history store. */
-// SFUNC void fio_pubsub_store_limit(size_t messages);
+/** Default history configuration values. */
+#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES
+#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES 1024
+#endif
+#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS
+#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS 3600000ULL /* 1 hour */
+#endif
+
+/** History configuration struct. */
+typedef struct {
+  size_t max_messages; /* 0 = default (1024) */
+  uint64_t max_age_ms; /* 0 = default (3600000 = 1 hour) */
+} fio_pubsub_history_config_s;
+
+/**
+ * Enable history globally - MASTER PROCESS ONLY stores history.
+ *
+ * Worker processes do NOT store history duplicates - they request history
+ * from the master process via IPC when a subscription with `replay_since`
+ * is created.
+ */
+SFUNC void fio_pubsub_history_enable(fio_pubsub_history_config_s config);
+
+/** Enable history with named arguments. */
+#define fio_pubsub_history_enable(...)                                         \
+  fio_pubsub_history_enable((fio_pubsub_history_config_s){__VA_ARGS__})
+
+/** Disable history globally. */
+SFUNC void fio_pubsub_history_disable(void);
+
+/** Per-channel history configuration. */
+typedef struct {
+  fio_buf_info_s channel;
+  int16_t filter;
+  size_t max_messages; /* 0 = use global default */
+  uint64_t max_age_ms; /* 0 = use global default */
+} fio_pubsub_history_channel_args_s;
+
+/**
+ * Set per-channel history configuration.
+ *
+ * Returns 0 on success, -1 if channel not found.
+ */
+SFUNC int fio_pubsub_history_channel_set(
+    fio_pubsub_history_channel_args_s args);
+
+/** Set per-channel history configuration with named arguments. */
+#define fio_pubsub_history_channel_set(...)                                    \
+  fio_pubsub_history_channel_set(                                              \
+      (fio_pubsub_history_channel_args_s){__VA_ARGS__})
+
+/** Arguments for querying oldest available timestamp. */
+typedef struct {
+  fio_buf_info_s channel;
+  int16_t filter;
+} fio_pubsub_history_oldest_args_s;
+
+/**
+ * Get the oldest available message timestamp for a channel.
+ *
+ * Returns 0 if no history is available or channel not found.
+ */
+SFUNC uint64_t fio_pubsub_history_oldest(fio_pubsub_history_oldest_args_s args);
+
+/** Get oldest timestamp with named arguments. */
+#define fio_pubsub_history_oldest(...)                                         \
+  fio_pubsub_history_oldest((fio_pubsub_history_oldest_args_s){__VA_ARGS__})
 
 /* *****************************************************************************
 Pub/Sub - defaults and builtin pub/sub engines
@@ -505,6 +570,12 @@ PostOffice Distribution types - Channel and Subscription Core Types
 typedef struct fio_channel_s {
   FIO_LIST_HEAD subscriptions;
   FIO_LIST_HEAD history;
+  struct {
+    size_t max_messages;       /* 0 = use global default */
+    uint64_t max_age_ms;       /* 0 = use global default */
+    size_t count;              /* Current message count in history */
+    uint64_t oldest_timestamp; /* Cached for O(1) lookup */
+  } history_config;
   uint32_t name_len;
   int16_t filter;
   uint8_t is_pattern;
@@ -555,6 +626,7 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy(fio_subscription_s *sub);
 /** The Message Container */
 typedef struct {
   fio_msg_s data;
+  FIO_LIST_NODE history_node; /* For per-channel history list */
   void *metadata[FIO___PUBSUB_METADATA_STORE_LIMIT];
   uint8_t metadata_is_initialized; /* to compact this we need to change all? */
   char buf[];
@@ -782,6 +854,11 @@ static struct FIO___PUBSUB_POSTOFFICE {
     void (*cleanup)(void *);
     size_t ref;
   } metadata[FIO___PUBSUB_METADATA_STORE_LIMIT];
+  struct {
+    _Bool enabled;
+    size_t default_max_messages; /* Default: 1024 */
+    uint64_t default_max_age_ms; /* Default: 3600000 (1 hour) */
+  } history;
   char ipc_url[FIO___IPC_LEN];
 } FIO___PUBSUB_POSTOFFICE = {
     .filter =
@@ -866,6 +943,154 @@ FIO_SFUNC void fio___pubub_on_history_end(void *ignr_1, void *ignr_2) {
                 s) {
     FIO_LIST_REMOVE(&s->history);
     FIO_LIST_REMOVE(&s->history_active);
+  }
+}
+
+/* *****************************************************************************
+Postoffice History API Implementation
+***************************************************************************** */
+
+/* Forward declaration for subscription message task */
+FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *m_);
+
+/** Enable history globally - MASTER PROCESS ONLY stores history. */
+void fio_pubsub_history_enable___(void); /* SublimeText marker */
+SFUNC void fio_pubsub_history_enable
+FIO_NOOP(fio_pubsub_history_config_s config) {
+  FIO___PUBSUB_POSTOFFICE.history.enabled = 1;
+  FIO___PUBSUB_POSTOFFICE.history.default_max_messages =
+      config.max_messages ? config.max_messages
+                          : FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES;
+  FIO___PUBSUB_POSTOFFICE.history.default_max_age_ms =
+      config.max_age_ms ? config.max_age_ms
+                        : FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS;
+  FIO_LOG_DEBUG2("(%d) pub/sub history enabled (max_messages=%zu, max_age=%zu)",
+                 fio_io_pid(),
+                 FIO___PUBSUB_POSTOFFICE.history.default_max_messages,
+                 (size_t)FIO___PUBSUB_POSTOFFICE.history.default_max_age_ms);
+}
+
+/** Disable history globally. */
+SFUNC void fio_pubsub_history_disable(void) {
+  FIO___PUBSUB_POSTOFFICE.history.enabled = 0;
+  /* Clear all history from all channels */
+  FIO_MAP_EACH(fio___channel_map, &FIO___PUBSUB_POSTOFFICE.channels, i) {
+    fio_channel_s *ch = i.node->key;
+    while (!FIO_LIST_IS_EMPTY(&ch->history)) {
+      FIO_LIST_NODE *node = ch->history.next;
+      FIO_LIST_REMOVE(node);
+      fio___pubsub_message_s *m =
+          FIO_PTR_FROM_FIELD(fio___pubsub_message_s, history_node, node);
+      fio___pubsub_message_free(m);
+    }
+    ch->history_config.count = 0;
+    ch->history_config.oldest_timestamp = 0;
+  }
+  FIO_LOG_DEBUG2("(%d) pub/sub history disabled", fio_io_pid());
+}
+
+/** Set per-channel history configuration. */
+void fio_pubsub_history_channel_set___(void); /* SublimeText marker */
+SFUNC int fio_pubsub_history_channel_set
+FIO_NOOP(fio_pubsub_history_channel_args_s args) {
+  fio_str_info_s ch_name =
+      FIO_STR_INFO3(args.channel.buf,
+                    args.channel.len,
+                    FIO___PUBSUB_CHANNEL_ENCODE_CAPA(args.filter, 0));
+  fio_channel_s **ch_ptr = fio___channel_map_node2key_ptr(
+      fio___channel_map_get_ptr(&FIO___PUBSUB_POSTOFFICE.channels, ch_name));
+  if (!ch_ptr)
+    return -1;
+  fio_channel_s *ch = *ch_ptr;
+  ch->history_config.max_messages = args.max_messages;
+  ch->history_config.max_age_ms = args.max_age_ms;
+  return 0;
+}
+
+/** Get the oldest available message timestamp for a channel. */
+void fio_pubsub_history_oldest___(void); /* SublimeText marker */
+SFUNC uint64_t fio_pubsub_history_oldest
+FIO_NOOP(fio_pubsub_history_oldest_args_s args) {
+  fio_str_info_s ch_name =
+      FIO_STR_INFO3(args.channel.buf,
+                    args.channel.len,
+                    FIO___PUBSUB_CHANNEL_ENCODE_CAPA(args.filter, 0));
+  fio_channel_s **ch_ptr = fio___channel_map_node2key_ptr(
+      fio___channel_map_get_ptr(&FIO___PUBSUB_POSTOFFICE.channels, ch_name));
+  if (!ch_ptr)
+    return 0;
+  return (*ch_ptr)->history_config.oldest_timestamp;
+}
+
+/** Store a message in channel history (master only, called during publish). */
+FIO_SFUNC void fio___pubsub_history_store(fio_channel_s *ch,
+                                          fio___pubsub_message_s *m) {
+  if (!FIO___PUBSUB_POSTOFFICE.history.enabled || !fio_io_is_master())
+    return;
+
+  /* Get effective limits */
+  size_t max_messages =
+      ch->history_config.max_messages
+          ? ch->history_config.max_messages
+          : FIO___PUBSUB_POSTOFFICE.history.default_max_messages;
+  uint64_t max_age_ms =
+      ch->history_config.max_age_ms
+          ? ch->history_config.max_age_ms
+          : FIO___PUBSUB_POSTOFFICE.history.default_max_age_ms;
+  uint64_t now = m->data.published;
+  uint64_t oldest_allowed = (now > max_age_ms) ? (now - max_age_ms) : 0;
+
+  /* Evict old messages (lazy eviction on publish) */
+  while (!FIO_LIST_IS_EMPTY(&ch->history)) {
+    FIO_LIST_NODE *oldest_node = ch->history.next;
+    fio___pubsub_message_s *oldest =
+        FIO_PTR_FROM_FIELD(fio___pubsub_message_s, history_node, oldest_node);
+    /* Evict if too old or count exceeded */
+    if (oldest->data.published < oldest_allowed ||
+        ch->history_config.count >= max_messages) {
+      FIO_LIST_REMOVE(oldest_node);
+      fio___pubsub_message_free(oldest);
+      --ch->history_config.count;
+    } else {
+      break;
+    }
+  }
+
+  /* Add new message to history (at tail = newest) */
+  FIO_LIST_PUSH(&ch->history, &m->history_node);
+  fio___pubsub_message_dup(m);
+  ++ch->history_config.count;
+
+  /* Update oldest timestamp cache */
+  if (!FIO_LIST_IS_EMPTY(&ch->history)) {
+    FIO_LIST_NODE *oldest_node = ch->history.next;
+    fio___pubsub_message_s *oldest =
+        FIO_PTR_FROM_FIELD(fio___pubsub_message_s, history_node, oldest_node);
+    ch->history_config.oldest_timestamp = oldest->data.published;
+  } else {
+    ch->history_config.oldest_timestamp = 0;
+  }
+}
+
+/** Replay history to a subscription (master process). */
+FIO_SFUNC void fio___pubsub_history_replay(fio_subscription_s *sub) {
+  if (!FIO___PUBSUB_POSTOFFICE.history.enabled || !sub->channel)
+    return;
+
+  fio_channel_s *ch = sub->channel;
+  uint64_t since = sub->replay_since;
+
+  FIO_LIST_EACH(fio___pubsub_message_s, history_node, &ch->history, m) {
+    if (m->data.published >= since) {
+      /* Create a copy with REPLAY flag for delivery */
+      fio___pubsub_message_s *replay = fio___pubsub_message_dup(m);
+      replay->data.is_json |= FIO___PUBSUB_REPLAY;
+      fio_queue_push(
+          sub->queue,
+          (void (*)(void *, void *))fio___subscription_on_message_task,
+          fio___subscription_dup(sub),
+          replay);
+    }
   }
 }
 
@@ -976,8 +1201,26 @@ FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.remote_messages);
   fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
+  fio___channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.channels);
+  fio___channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.patterns);
   FIO___LOCK_DESTROY(FIO___PUBSUB_POSTOFFICE.lock);
   fio_queue_perform_all(fio_io_queue());
+}
+
+/**
+ * Helper to free subscriptions from a channel in child process cleanup.
+ * Subscriptions are not freed by fio___channel_on_destroy, so we do it here.
+ */
+FIO_SFUNC void fio___pubsub_free_channel_subscriptions(fio_channel_s *ch) {
+  while (!FIO_LIST_IS_EMPTY(&ch->subscriptions)) {
+    fio_subscription_s *sub =
+        FIO_PTR_FROM_FIELD(fio_subscription_s, node, ch->subscriptions.next);
+    FIO_LIST_REMOVE(&sub->node);
+    FIO_LIST_REMOVE(&sub->history);
+    FIO_LIST_REMOVE(&sub->history_active);
+    sub->channel = NULL;
+    fio___subscription_free(sub);
+  }
 }
 
 /** Callback called by the letter protocol entering a child processes. */
@@ -994,6 +1237,41 @@ FIO_SFUNC void fio___pubsub_on_enter_child(void *ignr_) {
   FIO___PUBSUB_POSTOFFICE.filter.remote = 0;
   fio___postoffice_msmap_destroy(&FIO___PUBSUB_POSTOFFICE.master_subscriptions);
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
+
+  /*
+   * Properly free inherited pub/sub data structures.
+   *
+   * After fork(), the child process has its own COPY of the master's memory
+   * (due to copy-on-write). This memory belongs to the child and must be
+   * freed when the child exits, otherwise it's a real memory leak.
+   *
+   * Note: fio___channel_on_destroy frees history messages but NOT
+   * subscriptions. Subscriptions are normally freed via unsubscribe. We must
+   * free them here.
+   */
+
+  /* Clear history tracking lists - these reference subscriptions being freed */
+  FIO___PUBSUB_POSTOFFICE.history_active =
+      FIO_LIST_INIT(FIO___PUBSUB_POSTOFFICE.history_active);
+  FIO___PUBSUB_POSTOFFICE.history_waiting =
+      FIO_LIST_INIT(FIO___PUBSUB_POSTOFFICE.history_waiting);
+
+  /* Free subscriptions from all inherited channels before destroying them */
+  FIO_MAP_EACH(fio___channel_map, &FIO___PUBSUB_POSTOFFICE.channels, i) {
+    fio___pubsub_free_channel_subscriptions(i.node->key);
+  }
+  FIO_MAP_EACH(fio___channel_map, &FIO___PUBSUB_POSTOFFICE.patterns, i) {
+    fio___pubsub_free_channel_subscriptions(i.node->key);
+  }
+
+  /* Now destroy channels/patterns (frees history messages and channel structs)
+   */
+  fio___channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.channels);
+  fio___channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.patterns);
+
+  /* Properly destroy inherited history messages */
+  fio___pubsub_message_map_destroy(&FIO___PUBSUB_POSTOFFICE.history_messages);
+
   if (!fio_io_attach_fd(fio_sock_open2(FIO___PUBSUB_POSTOFFICE.ipc_url,
                                        FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
                         &FIO___PUBSUB_POSTOFFICE.protocol.ipc,
@@ -1054,6 +1332,12 @@ FIO_CONSTRUCTOR(fio_postoffice_init) {
 Subscription Setup
 ***************************************************************************** */
 
+/* Forward declarations for functions used in subscription setup */
+FIO_IFUNC fio___pubsub_message_s *fio___pubsub_message_author(
+    fio_publish_args_s args);
+FIO_IFUNC void fio___pubsub_message_write2io(fio_io_s *io, void *m_);
+FIO_IFUNC void fio___subscription_on_message_task(void *s_, void *m_);
+
 /** Completes the subscription request. */
 FIO_IFUNC void fio___pubsub_subscribe_task(void *sub_, void *ignr_) {
   fio_subscription_s *sub = (fio_subscription_s *)sub_;
@@ -1075,8 +1359,26 @@ FIO_IFUNC void fio___pubsub_subscribe_task(void *sub_, void *ignr_) {
   sub->channel = ch_ptr[0];
   FIO_LIST_PUSH(&(ch_ptr[0]->subscriptions), &sub->node);
   if (sub->replay_since) {
-    FIO_LIST_PUSH(&FIO___PUBSUB_POSTOFFICE.history_waiting, &sub->history);
-    /* TODO: publish history request event to the cluster. */
+    if (fio_io_is_master()) {
+      /* Master process: replay history directly */
+      fio___pubsub_history_replay(sub);
+    } else {
+      /* Worker process: request history from master via IPC */
+      FIO_LIST_PUSH(&FIO___PUBSUB_POSTOFFICE.history_waiting, &sub->history);
+      fio___pubsub_message_s *m =
+          fio___pubsub_message_author((fio_publish_args_s){
+              .id = sub->replay_since,
+              .channel = FIO_BUF_INFO2(ch_ptr[0]->name, ch_ptr[0]->name_len),
+              .filter = ch_ptr[0]->filter,
+              .is_json = FIO___PUBSUB_HISTORY_START,
+          });
+      if (m) {
+        fio_io_protocol_each(&FIO___PUBSUB_POSTOFFICE.protocol.ipc,
+                             fio___pubsub_message_write2io,
+                             m);
+        fio___pubsub_message_free(m);
+      }
+    }
   }
   return;
 no_channel:
@@ -1095,7 +1397,10 @@ FIO_IFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
   if (FIO_UNLIKELY(!ch))
     goto no_channel;
 
-  if (FIO_LIST_IS_EMPTY(&ch->subscriptions)) {
+  /* Only destroy channel if no subscribers AND no history */
+  if (FIO_LIST_IS_EMPTY(&ch->subscriptions) &&
+      (!FIO___PUBSUB_POSTOFFICE.history.enabled ||
+       FIO_LIST_IS_EMPTY(&ch->history))) {
     map = &FIO___PUBSUB_POSTOFFICE.channels + ch->is_pattern;
     fio___channel_map_remove(map, FIO___PUBSUB_CHANNEL2STR(ch), NULL);
     if (!fio___channel_map_count(map))
@@ -1319,13 +1624,20 @@ SFUNC void fio_pubsub_message_defer(fio_msg_s *msg) {
 FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
   fio_channel_s *ch = (fio_channel_s *)ch_;
   fio___pubsub_message_s *m = (fio___pubsub_message_s *)m_;
-  FIO_LIST_HEAD *head = (&ch->subscriptions);
-  _Bool is_history = !!(m->data.is_json & FIO___PUBSUB_REPLAY);
-  head += is_history;
+  _Bool is_replay = !!(m->data.is_json & FIO___PUBSUB_REPLAY);
+
+  /* Store in history if not a replay message (master only) */
+  if (!is_replay)
+    fio___pubsub_history_store(ch, m);
+
+  /* Deliver to all subscribers */
   if (m->data.io) { /* move as many `if` statements as possible out of loops. */
-    if (is_history) {
-      FIO_LIST_EACH(fio_subscription_s, node, head, s) {
-        if (m->data.io != s->io && m->data.published >= s->replay_since)
+    if (is_replay) {
+      /* Replay messages: only deliver to subscribers with matching replay_since
+       */
+      FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
+        if (m->data.io != s->io && s->replay_since &&
+            m->data.published >= s->replay_since)
           fio_queue_push(
               s->queue,
               (void (*)(void *, void *))fio___subscription_on_message_task,
@@ -1333,7 +1645,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
               fio___pubsub_message_dup(m));
       }
     } else {
-      FIO_LIST_EACH(fio_subscription_s, node, head, s) {
+      FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
         if (m->data.io != s->io)
           fio_queue_push(
               s->queue,
@@ -1343,9 +1655,11 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
       }
     }
   } else {
-    if (is_history) {
-      FIO_LIST_EACH(fio_subscription_s, node, head, s) {
-        if (m->data.published >= s->replay_since)
+    if (is_replay) {
+      /* Replay messages: only deliver to subscribers with matching replay_since
+       */
+      FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
+        if (s->replay_since && m->data.published >= s->replay_since)
           fio_queue_push(
               s->queue,
               (void (*)(void *, void *))fio___subscription_on_message_task,
@@ -1353,7 +1667,7 @@ FIO_SFUNC void fio___pubsub_channel_deliver_task(void *ch_, void *m_) {
               fio___pubsub_message_dup(m));
       }
     } else {
-      FIO_LIST_EACH(fio_subscription_s, node, head, s) {
+      FIO_LIST_EACH(fio_subscription_s, node, &ch->subscriptions, s) {
         fio_queue_push(
             s->queue,
             (void (*)(void *, void *))fio___subscription_on_message_task,
@@ -1679,12 +1993,63 @@ is_special_message:
   case FIO___PUBSUB_HISTORY_START:
     FIO_LOG_DDEBUG2("(%d) pub/sub internal history start message received",
                     fio_io_pid());
-    /* TODO! */
+    if (fio_io_is_master()) {
+      /* Master: replay history to requesting worker */
+      fio_str_info_s ch_name =
+          FIO_STR_INFO3(m->data.channel.buf,
+                        m->data.channel.len,
+                        FIO___PUBSUB_CHANNEL_ENCODE_CAPA(m->data.filter, 0));
+      fio_channel_s **ch_ptr = fio___channel_map_node2key_ptr(
+          fio___channel_map_get_ptr(&FIO___PUBSUB_POSTOFFICE.channels,
+                                    ch_name));
+      if (ch_ptr) {
+        fio_channel_s *ch = *ch_ptr;
+        uint64_t since = m->data.id; /* replay_since stored in id */
+        /* Send history messages to the requesting worker */
+        FIO_LIST_EACH(fio___pubsub_message_s, history_node, &ch->history, hm) {
+          if (hm->data.published >= since) {
+            fio___pubsub_message_s *replay = fio___pubsub_message_dup(hm);
+            replay->data.is_json |= FIO___PUBSUB_REPLAY;
+            /* Mark as dirty so it gets re-encrypted with new flags */
+            fio___pubsub_message_is_dirty(replay);
+            fio___pubsub_message_write2io(m->data.io, replay);
+            fio___pubsub_message_free(replay);
+          }
+        }
+      }
+      /* Send history end marker */
+      fio___pubsub_message_s *end_msg =
+          fio___pubsub_message_author((fio_publish_args_s){
+              .channel = m->data.channel,
+              .filter = m->data.filter,
+              .is_json = FIO___PUBSUB_HISTORY_END,
+          });
+      if (end_msg) {
+        fio___pubsub_message_write2io(m->data.io, end_msg);
+        fio___pubsub_message_free(end_msg);
+      }
+    }
     return;
   case FIO___PUBSUB_HISTORY_END:
     FIO_LOG_DDEBUG2("(%d) pub/sub internal history end message received",
                     fio_io_pid());
-    /* TODO! */
+    if (!fio_io_is_master()) {
+      /* Worker: remove subscription from waiting list */
+      FIO_LIST_EACH(fio_subscription_s,
+                    history,
+                    &FIO___PUBSUB_POSTOFFICE.history_waiting,
+                    sub) {
+        if (sub->channel && sub->channel->filter == m->data.filter &&
+            sub->channel->name_len == m->data.channel.len &&
+            FIO_MEMCMP(sub->channel->name,
+                       m->data.channel.buf,
+                       m->data.channel.len) == 0) {
+          FIO_LIST_REMOVE(&sub->history);
+          sub->history = FIO_LIST_INIT(sub->history);
+          break;
+        }
+      }
+    }
     return;
   }
   return;
@@ -1972,6 +2337,16 @@ FIO_IFUNC void fio___channel_on_create(fio_channel_s *ch) {
 /** Callback for when a channel is destroy. */
 FIO_IFUNC void fio___channel_on_destroy(fio_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
+
+  /* Free all history messages for this channel */
+  while (!FIO_LIST_IS_EMPTY(&ch->history)) {
+    FIO_LIST_NODE *node = ch->history.next;
+    FIO_LIST_REMOVE(node);
+    fio___pubsub_message_s *m =
+        FIO_PTR_FROM_FIELD(fio___pubsub_message_s, history_node, node);
+    fio___pubsub_message_free(m);
+  }
+  ch->history_config.count = 0;
 
   FIO_MAP_EACH(fio___pubsub_engines, &FIO___PUBSUB_POSTOFFICE.engines, i) {
     (&i.key->unsubscribe + ch->is_pattern)[0](i.key, name, ch->filter);
