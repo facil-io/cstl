@@ -233,6 +233,332 @@ typedef struct fio_publish_args_s {
 } fio_publish_args_s;
 ```
 
+### History and Message Buffering
+
+The pub/sub system supports optional message history that allows late-joining subscribers to replay messages published before their subscription.
+
+#### Overview
+
+History functionality enables:
+
+* **Catch-up subscriptions**: Subscribers can replay missed messages using `replay_since` timestamp
+* **Per-channel buffering**: Each channel maintains its own message history
+* **Configurable retention**: Control history size by message count and/or age
+* **Master-only storage**: History is stored only in the master process to avoid duplication
+* **Worker IPC replay**: Worker processes request history from master via IPC
+* **Automatic eviction**: Old messages are lazily evicted based on count and age limits
+
+#### Storage Architecture
+
+History storage has these key characteristics:
+
+* **Master-only storage**: Only the master process (`fio_io_is_master()`) stores history to prevent memory duplication across worker processes
+* **Per-channel linked lists**: Each channel maintains its own FIFO list of messages
+* **Reference counting**: Messages are reference-counted and shared between history and active subscriptions
+* **Lazy eviction**: Old messages are evicted during publish, not on a timer (O(1) operation)
+* **Oldest timestamp cache**: Each channel caches the oldest message timestamp for O(1) lookup
+
+#### Configuration
+
+History can be configured globally with defaults that apply to all channels, and then overridden on a per-channel basis.
+
+##### Configuration Macros
+
+```c
+#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES
+#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES 1024
+#endif
+
+#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS
+#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS 3600000ULL /* 1 hour */
+#endif
+```
+
+These macros define the default limits when history is enabled without explicit configuration.
+
+#### `fio_pubsub_history_enable`
+
+```c
+void fio_pubsub_history_enable(fio_pubsub_history_config_s config);
+/* Named arguments using macro. */
+#define fio_pubsub_history_enable(...) \
+  fio_pubsub_history_enable((fio_pubsub_history_config_s){__VA_ARGS__})
+
+typedef struct {
+  size_t max_messages; /* 0 = default (1024) */
+  uint64_t max_age_ms; /* 0 = default (3600000 = 1 hour) */
+} fio_pubsub_history_config_s;
+```
+
+Enables history globally for all channels with the specified configuration.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+/* Enable with defaults */
+fio_pubsub_history_enable(0);
+
+/* Enable with custom limits */
+fio_pubsub_history_enable(.max_messages = 500, .max_age_ms = 300000);
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `max_messages` | `size_t` | Maximum messages per channel; 0 uses `FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES` (1024) |
+| `max_age_ms` | `uint64_t` | Maximum message age in milliseconds; 0 uses `FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS` (1 hour) |
+
+**Note**: History is stored only in the master process. Worker processes request history from the master via IPC when a subscription with `replay_since` is created.
+
+**Note**: Both limits are enforced - messages are evicted when either limit is exceeded.
+
+#### `fio_pubsub_history_disable`
+
+```c
+void fio_pubsub_history_disable(void);
+```
+
+Disables history globally and frees all cached messages.
+
+This clears history from all channels and prevents new messages from being stored.
+
+#### `fio_pubsub_history_channel_set`
+
+```c
+int fio_pubsub_history_channel_set(fio_pubsub_history_channel_args_s args);
+/* Named arguments using macro. */
+#define fio_pubsub_history_channel_set(...) \
+  fio_pubsub_history_channel_set((fio_pubsub_history_channel_args_s){__VA_ARGS__})
+
+typedef struct {
+  fio_buf_info_s channel;
+  int16_t filter;
+  size_t max_messages; /* 0 = use global default */
+  uint64_t max_age_ms; /* 0 = use global default */
+} fio_pubsub_history_channel_args_s;
+```
+
+Sets per-channel history configuration, overriding global defaults.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+/* Override limits for a specific channel */
+fio_pubsub_history_channel_set(
+    .channel = FIO_BUF_INFO1("important_channel"),
+    .filter = 0,
+    .max_messages = 10000,
+    .max_age_ms = 7200000);  /* 2 hours */
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `channel` | `fio_buf_info_s` | The channel name to configure |
+| `filter` | `int16_t` | The channel's numerical namespace filter |
+| `max_messages` | `size_t` | Maximum messages for this channel; 0 uses global default |
+| `max_age_ms` | `uint64_t` | Maximum message age for this channel; 0 uses global default |
+
+**Returns:** 0 on success, -1 if the channel was not found.
+
+**Note**: The channel must exist (have at least one subscriber) before configuration can be set.
+
+#### `fio_pubsub_history_oldest`
+
+```c
+uint64_t fio_pubsub_history_oldest(fio_pubsub_history_oldest_args_s args);
+/* Named arguments using macro. */
+#define fio_pubsub_history_oldest(...) \
+  fio_pubsub_history_oldest((fio_pubsub_history_oldest_args_s){__VA_ARGS__})
+
+typedef struct {
+  fio_buf_info_s channel;
+  int16_t filter;
+} fio_pubsub_history_oldest_args_s;
+```
+
+Gets the oldest available message timestamp for a channel in milliseconds since epoch.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+uint64_t oldest = fio_pubsub_history_oldest(
+    .channel = FIO_BUF_INFO1("my_channel"),
+    .filter = 0);
+
+if (oldest) {
+  /* Use oldest timestamp for replay_since */
+  fio_subscribe(.channel = FIO_BUF_INFO1("my_channel"),
+                .replay_since = oldest,
+                .on_message = my_callback);
+}
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `channel` | `fio_buf_info_s` | The channel name to query |
+| `filter` | `int16_t` | The channel's numerical namespace filter |
+
+**Returns:** The oldest available message timestamp in milliseconds since epoch, or 0 if:
+- History is disabled
+- The channel does not exist
+- The channel has no messages in history
+
+**Note**: This operation is O(1) as the oldest timestamp is cached per-channel.
+
+### History Usage Examples
+
+#### Basic History Usage
+
+```c
+/* Enable history at startup */
+fio_pubsub_history_enable(.max_messages = 1000, .max_age_ms = 3600000);
+
+/* Publish some messages */
+for (int i = 0; i < 10; i++) {
+  fio_publish(.channel = FIO_BUF_INFO1("news"),
+              .message = FIO_BUF_INFO1("News update"));
+}
+
+/* Late subscriber replays all history */
+fio_subscribe(.channel = FIO_BUF_INFO1("news"),
+              .replay_since = 1,  /* Replay from beginning */
+              .on_message = on_news);
+```
+
+#### Subscribing with Timestamp-Based Replay
+
+```c
+/* Get current time before going offline */
+uint64_t disconnect_time = fio_time2milli(fio_time_real());
+
+/* ... later, reconnect and replay missed messages */
+
+fio_subscribe(.channel = FIO_BUF_INFO1("chat"),
+              .replay_since = disconnect_time,
+              .on_message = on_chat_message);
+```
+
+#### Per-Channel Configuration
+
+```c
+/* Enable history with moderate defaults */
+fio_pubsub_history_enable(.max_messages = 100, .max_age_ms = 600000);
+
+/* Create channels first by subscribing */
+fio_subscribe(.channel = FIO_BUF_INFO1("critical"),
+              .on_message = on_critical);
+fio_subscribe(.channel = FIO_BUF_INFO1("debug"),
+              .on_message = on_debug);
+
+/* Configure critical channel to keep more history */
+fio_pubsub_history_channel_set(
+    .channel = FIO_BUF_INFO1("critical"),
+    .max_messages = 10000,
+    .max_age_ms = 86400000);  /* 24 hours */
+
+/* Configure debug channel to keep minimal history */
+fio_pubsub_history_channel_set(
+    .channel = FIO_BUF_INFO1("debug"),
+    .max_messages = 10,
+    .max_age_ms = 60000);  /* 1 minute */
+```
+
+#### Query Oldest Available Timestamp
+
+```c
+/* Check what history is available before subscribing */
+uint64_t oldest = fio_pubsub_history_oldest(
+    .channel = FIO_BUF_INFO1("events"),
+    .filter = 0);
+
+if (oldest == 0) {
+  /* No history available */
+  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
+                .on_message = on_event);
+} else if (oldest > my_last_seen) {
+  /* Gap in history - some messages were evicted */
+  FIO_LOG_WARNING("History gap detected, %llu messages may be lost",
+                  (unsigned long long)(my_last_seen - oldest));
+  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
+                .replay_since = oldest,
+                .on_message = on_event);
+} else {
+  /* Full history available */
+  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
+                .replay_since = my_last_seen,
+                .on_message = on_event);
+}
+```
+
+#### Multi-Process History Replay
+
+```c
+/* In master process: enable history and publish messages */
+if (fio_io_is_master()) {
+  fio_pubsub_history_enable(.max_messages = 500);
+  
+  fio_subscribe(.channel = FIO_BUF_INFO1("status"),
+                .on_message = on_status);
+  
+  /* Publish periodic status updates */
+  fio_run_every(.every = 1000, .fn = publish_status, .repetitions = -1);
+}
+
+/* In worker process: subscribe with replay */
+fio_state_callback_add(FIO_CALL_ON_START, worker_subscribe, NULL);
+
+void worker_subscribe(void *udata) {
+  if (fio_io_is_worker()) {
+    /* Worker requests history from master via IPC */
+    fio_subscribe(.channel = FIO_BUF_INFO1("status"),
+                  .replay_since = 1,  /* Replay all available history */
+                  .on_message = on_status);
+  }
+}
+```
+
+### History IPC Architecture
+
+When a worker process subscribes with `replay_since`, the following IPC exchange occurs:
+
+1. **Worker sends history request**: Worker sends `FIO___PUBSUB_HISTORY_START` message to master with:
+   - Channel name and filter
+   - `replay_since` timestamp in the message ID field
+
+2. **Master replays history**: Master iterates its channel history and sends matching messages:
+   - Each message is marked with `FIO___PUBSUB_REPLAY` flag
+   - Messages with `published >= replay_since` are sent
+
+3. **Master sends completion marker**: Master sends `FIO___PUBSUB_HISTORY_END` message
+
+4. **Worker processes replay**: Worker receives and delivers replay messages to subscriber
+
+This design ensures workers don't duplicate history storage while still providing full replay functionality.
+
+### Memory Management and Cleanup
+
+#### Automatic Cleanup
+
+- **Channel destruction**: When a channel has no subscribers and no history (or history is disabled), it is automatically destroyed
+- **Fork handling**: Child processes properly free inherited memory to prevent leaks:
+  - History messages are cleared via `fio___channel_on_destroy`
+  - Subscriptions are explicitly freed via `fio___pubsub_free_channel_subscriptions`
+  - Channel structures are destroyed after subscription cleanup
+
+#### Reference Counting
+
+Messages in history are reference-counted:
+- Each history entry holds one reference
+- Each active subscription delivery holds one reference
+- Messages are freed only when all references are released
+
+This prevents use-after-free and ensures proper memory lifecycle management.
+
 ### Pub/Sub Engines
 
 The pub/sub system allows the delivery of messages through either internal or external services called "engines".
