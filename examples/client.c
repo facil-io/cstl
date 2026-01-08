@@ -230,9 +230,9 @@ FIO_SFUNC void attach_stdin(void) {
   FIO_LOG_DEBUG2("listening to user input on STDIN.");
   fio_io_attach_fd(fileno(stdin), &STDIN_PROTOCOL, NULL, NULL);
   if (fio_cli_get_bool("-V"))
-    fio_subscribe(.channel = FIO_BUF_INFO1("client"),
-                  .on_message = debug_subscriber,
-                  .master_only = 1);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("client"),
+                         .on_message = debug_subscriber,
+                         .master_only = 1);
 }
 
 /* *****************************************************************************
@@ -241,7 +241,7 @@ IO callback(s)
 
 /** Called When the client socket is attached to the server. */
 FIO_SFUNC void on_attach(fio_io_s *io) {
-  fio_subscribe(.io = io, .channel = FIO_BUF_INFO1("client"));
+  fio_pubsub_subscribe(.io = io, .channel = FIO_BUF_INFO1("client"));
   fio_io_udata_set(io, (void *)1);
   FIO_LOG_DEBUG2("* connection established.\n");
   FIO_LOG_DEBUG2("Connected client IO to pub/sub");

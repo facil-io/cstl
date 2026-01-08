@@ -802,6 +802,17 @@ Returns `bstr`.
 #### `fio_bstr_is_eq2info`
 
 ```c
+int fio_bstr_is_eq(const char *a, const char *b);
+```
+
+Tests two `fio_bstr` objects for equality.
+
+Returns 1 if equal, 0 if not.
+
+
+#### `fio_bstr_is_eq2info`
+
+```c
 int fio_bstr_is_eq2info(const char *a, fio_str_info_s b);
 ```
 

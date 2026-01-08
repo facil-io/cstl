@@ -364,8 +364,6 @@ FIO_SFUNC void fio___test_tls13_alpn_client_hello_roundtrip(void) {
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_INFO("Testing TLS 1.3 ALPN Extension (RFC 7301)...");
-
   fio___test_tls13_alpn_build();
   fio___test_tls13_alpn_parse();
   fio___test_tls13_alpn_select();
@@ -373,7 +371,5 @@ int main(void) {
   fio___test_tls13_client_alpn_api();
   fio___test_tls13_server_alpn_api();
   fio___test_tls13_alpn_client_hello_roundtrip();
-
-  FIO_LOG_INFO("All TLS 1.3 ALPN tests passed!");
   return 0;
 }

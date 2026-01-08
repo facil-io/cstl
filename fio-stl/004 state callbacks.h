@@ -32,14 +32,14 @@ typedef enum {
   FIO_CALL_ON_INITIALIZE,
   /** Called once before starting up the IO reactor. */
   FIO_CALL_PRE_START,
-  /** Called before each time the IO reactor forks a new worker. */
+  /** Called before forking starts for a worker group. */
   FIO_CALL_BEFORE_FORK,
-  /** Called after each fork (both parent and child), before FIO_CALL_IN_XXX */
-  FIO_CALL_AFTER_FORK,
-  /** Called by a worker process right after forking. */
+  /** Called by a child worker process right after it was forked. */
   FIO_CALL_IN_CHILD,
-  /** Called by the master process after spawning a worker (after forking). */
+  /** Called by the master process right after spawning a worker. */
   FIO_CALL_IN_MASTER,
+  /** Called after forking ends for a worker group. */
+  FIO_CALL_AFTER_FORK,
   /** Called by each worker thread in a Server Async queue as it starts. */
   FIO_CALL_ON_WORKER_THREAD_START,
   /** Called every time a *Worker* process starts. */
@@ -74,6 +74,8 @@ typedef enum {
   FIO_CALL_ON_STOP,
   /** An alternative to the system's at_exit. */
   FIO_CALL_AT_EXIT,
+  /** Use after cleanup (e.g., leak testing). */
+  FIO_CALL_AFTER_EXIT,
   /** used for testing and array allocation - must be last. */
   FIO_CALL_NEVER
 } fio_state_event_type_e;
@@ -246,9 +248,11 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
       FIO___STATE_TASKS_ARRAY_LOCK[i] = FIO_LOCK_INIT;
     }
+    fio_rand_reseed(); /* re-seed shifted random state */
   }
-  if (e == FIO_CALL_IN_CHILD)
-    fio_rand_reseed(); /* re-seed random state in child processes */
+  if (e == FIO_CALL_IN_CHILD) {
+    fio_rand_reseed(); /* re-seed random state in child processes (twice) */
+  }
   fio___state_task_s *ary = NULL;
   size_t ary_capa = (sizeof(*ary) * FIO___STATE_TASKS_ARRAY[e].count);
   size_t len = 0;
@@ -318,13 +322,14 @@ FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
+  fio_state_callback_add(FIO_CALL_AFTER_EXIT,
                          fio___state_cleanup_task_at_exit,
                          NULL);
 }
 
 FIO_DESTRUCTOR(fio___state_at_exit_hook) {
   fio_state_callback_force(FIO_CALL_AT_EXIT);
+  fio_state_callback_force(FIO_CALL_AFTER_EXIT);
 }
 
 /* *****************************************************************************

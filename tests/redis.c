@@ -246,7 +246,7 @@ FIO_SFUNC int redis_start_dedup_test(void *udata1, void *udata2) {
 }
 
 /** Callback for pub/sub roundtrip test - receives the message */
-FIO_SFUNC void redis_pubsub_roundtrip_on_message(fio_msg_s *msg) {
+FIO_SFUNC void redis_pubsub_roundtrip_on_message(fio_pubsub_msg_s *msg) {
   if (msg->message.len == strlen(PUBSUB_TEST_MESSAGE) &&
       !memcmp(msg->message.buf, PUBSUB_TEST_MESSAGE, msg->message.len)) {
     test_state.pubsub_msg_received = 1;
@@ -281,7 +281,7 @@ static const char *DEDUP_TEST_PATTERN = "test.--.fio_stl.dedup*";
 static const char *DEDUP_TEST_MESSAGE = "dedup_test_message";
 
 /** Callback for pattern dedup test - counts messages received */
-FIO_SFUNC void redis_pubsub_dedup_on_message(fio_msg_s *msg) {
+FIO_SFUNC void redis_pubsub_dedup_on_message(fio_pubsub_msg_s *msg) {
   if (msg->message.len == strlen(DEDUP_TEST_MESSAGE) &&
       !memcmp(msg->message.buf, DEDUP_TEST_MESSAGE, msg->message.len)) {
     fio_atomic_add(&test_state.pubsub_dedup_msg_count, 1);
@@ -347,9 +347,9 @@ FIO_SFUNC int redis_pubsub_dedup_verify(void *udata1, void *udata2) {
 FIO_SFUNC int redis_pubsub_roundtrip_publish(void *udata1, void *udata2) {
   (void)udata1;
   (void)udata2;
-  fio_publish(.engine = test_state.redis,
-              .channel = FIO_BUF_INFO1((char *)PUBSUB_TEST_CHANNEL),
-              .message = FIO_BUF_INFO1((char *)PUBSUB_TEST_MESSAGE));
+  fio_pubsub_publish(.engine = test_state.redis,
+                     .channel = FIO_BUF_INFO1((char *)PUBSUB_TEST_CHANNEL),
+                     .message = FIO_BUF_INFO1((char *)PUBSUB_TEST_MESSAGE));
   return -1; /* Don't repeat */
 }
 
@@ -357,9 +357,9 @@ FIO_SFUNC int redis_pubsub_roundtrip_publish(void *udata1, void *udata2) {
 FIO_SFUNC int redis_pubsub_dedup_publish(void *udata1, void *udata2) {
   (void)udata1;
   (void)udata2;
-  fio_publish(.engine = test_state.redis,
-              .channel = FIO_BUF_INFO1((char *)DEDUP_TEST_CHANNEL),
-              .message = FIO_BUF_INFO1((char *)DEDUP_TEST_MESSAGE));
+  fio_pubsub_publish(.engine = test_state.redis,
+                     .channel = FIO_BUF_INFO1((char *)DEDUP_TEST_CHANNEL),
+                     .message = FIO_BUF_INFO1((char *)DEDUP_TEST_MESSAGE));
   return -1; /* Don't repeat */
 }
 
@@ -483,12 +483,13 @@ FIO_SFUNC void redis_run_next_test(void) {
     test_state.pubsub_msg_received = 0;
 
     /* Attach Redis engine to pub/sub system */
-    fio_pubsub_attach(redis);
+    fio_pubsub_engine_attach(redis);
 
     /* Subscribe to test channel with our callback */
-    fio_subscribe(.channel = FIO_BUF_INFO1((char *)PUBSUB_TEST_CHANNEL),
-                  .on_message = redis_pubsub_roundtrip_on_message,
-                  .subscription_handle_ptr = &test_state.pubsub_sub_handle);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1((char *)PUBSUB_TEST_CHANNEL),
+                         .on_message = redis_pubsub_roundtrip_on_message,
+                         .subscription_handle_ptr =
+                             &test_state.pubsub_sub_handle);
 
     /* Schedule publish after a short delay to allow subscription to propagate
      */
@@ -512,14 +513,16 @@ FIO_SFUNC void redis_run_next_test(void) {
      * When we publish to the channel, Redis will send both a "message" and
      * a "pmessage". The deduplication logic should prevent duplicate local
      * publishes, so we expect exactly 2 messages (one per subscription). */
-    fio_subscribe(.channel = FIO_BUF_INFO1((char *)DEDUP_TEST_PATTERN),
-                  .on_message = redis_pubsub_dedup_on_message,
-                  .is_pattern = 1,
-                  .subscription_handle_ptr = &test_state.pubsub_pattern_handle);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1((char *)DEDUP_TEST_PATTERN),
+                         .on_message = redis_pubsub_dedup_on_message,
+                         .is_pattern = 1,
+                         .subscription_handle_ptr =
+                             &test_state.pubsub_pattern_handle);
 
-    fio_subscribe(.channel = FIO_BUF_INFO1((char *)DEDUP_TEST_CHANNEL),
-                  .on_message = redis_pubsub_dedup_on_message,
-                  .subscription_handle_ptr = &test_state.pubsub_channel_handle);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1((char *)DEDUP_TEST_CHANNEL),
+                         .on_message = redis_pubsub_dedup_on_message,
+                         .subscription_handle_ptr =
+                             &test_state.pubsub_channel_handle);
 
     /* Schedule verification timer */
     fio_io_run_every(.fn = redis_pubsub_dedup_verify,
@@ -538,23 +541,24 @@ FIO_SFUNC void redis_run_next_test(void) {
 
     /* Cleanup pub/sub subscriptions */
     if (test_state.pubsub_sub_handle) {
-      fio_unsubscribe(.subscription_handle_ptr = &test_state.pubsub_sub_handle);
+      fio_pubsub_unsubscribe(.subscription_handle_ptr =
+                                 &test_state.pubsub_sub_handle);
       test_state.pubsub_sub_handle = 0;
     }
     if (test_state.pubsub_channel_handle) {
-      fio_unsubscribe(.subscription_handle_ptr =
-                          &test_state.pubsub_channel_handle);
+      fio_pubsub_unsubscribe(.subscription_handle_ptr =
+                                 &test_state.pubsub_channel_handle);
       test_state.pubsub_channel_handle = 0;
     }
     if (test_state.pubsub_pattern_handle) {
-      fio_unsubscribe(.subscription_handle_ptr =
-                          &test_state.pubsub_pattern_handle,
-                      .is_pattern = 1);
+      fio_pubsub_unsubscribe(.subscription_handle_ptr =
+                                 &test_state.pubsub_pattern_handle,
+                             .is_pattern = 1);
       test_state.pubsub_pattern_handle = 0;
     }
 
     /* Detach Redis from pub/sub before cleanup */
-    fio_pubsub_detach(redis);
+    fio_pubsub_engine_detach(redis);
 
     fio_io_stop();
     break;

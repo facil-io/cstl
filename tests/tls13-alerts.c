@@ -617,9 +617,6 @@ FIO_SFUNC void fio___test_tls13_second_hrr_alert(void) {
 Main Test Runner
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_INFO("Starting TLS 1.3 Alert Tests (RFC 8446 Section 6)");
-  FIO_LOG_INFO("=================================================");
-
   fio___test_tls13_alert_constants();
   fio___test_tls13_alert_names();
   fio___test_tls13_build_alert();
@@ -631,9 +628,6 @@ int main(void) {
   fio___test_tls13_client_error_alerts();
   fio___test_tls13_server_error_alerts();
   fio___test_tls13_second_hrr_alert();
-
-  FIO_LOG_INFO("=================================================");
-  FIO_LOG_INFO("All TLS 1.3 Alert Tests PASSED!");
 
   return 0;
 }

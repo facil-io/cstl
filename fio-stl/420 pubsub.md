@@ -1,780 +1,801 @@
-## Pub/Sub
+## Pub/Sub - Publish/Subscribe Messaging
 
 ```c
 #define FIO_PUBSUB
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 ```
 
-By defining `FIO_PUBSUB`, a Publisher / Subscriber extension can be added to the `FIO_SERVER`, resulting in powerful IPC and real-time data updates.
+The Pub/Sub module provides a publish/subscribe messaging system for facil.io applications. It enables decoupled communication between components through named channels, with support for pattern matching, message history, and cluster-wide distribution.
 
-The [pub/sub paradigm](https://en.wikipedia.org/wiki/Publish–subscribe_pattern) allows for any number of real-time applications, including message-bus backends, chat applications (private / group chats), broadcasting, games, etc'.
+**Note**: The Pub/Sub module requires the IPC module (`FIO_IPC`) for inter-process communication. When using `include.h`, this dependency is handled automatically.
 
-### Paradigm
+### Key Features
 
-Publishers publish messages to delivery Channels, without any information about the potential recipients (if any).
+- **Channel-based messaging**: Subscribe to named channels and receive messages published to those channels
+- **Pattern subscriptions**: Subscribe using glob patterns to match multiple channels
+- **Process-local and cluster-wide**: Messages can be distributed to local workers or across all machines in a cluster
+- **Message history**: Built-in caching with replay support for late-joining subscribers
+- **IO integration**: Subscriptions can be tied to IO connections for automatic cleanup
+- **Custom engines**: Extensible architecture for integrating external message brokers
 
-Subscribers "listen" to messages from specific delivery Channels without any information about the publishers (if any).
+### Pub/Sub Types
 
-Messages are broadcasted through delivery Channels to the different Subscribers.
-
-Delivery Channels in facil.io are a combination of a named channel and a 16 bit numerical filter, allowing for 32,768 namespaces of named channels (negative numbers are reserved).
-
-### Limitations
-
-The internal Pub/Sub Letter Exchange Protocol imposes the following limitations on message exchange:
-
-* Distribution Channel Names are limited to 2^16 bytes (65,536 bytes).
-
-* Message payload is limited to 2^24 bytes (16,777,216 bytes == about 16Mb).
-
-* Empty messages (no numerical filters, no channel, no message payload, no flags) are ignored.
-
-* Subscriptions match delivery matches by both channel name (or pattern) and the numerical filter.
-
-### Subscriptions - Receiving Messages
-
-#### `fio_subscribe`
+#### `fio_pubsub_msg_s`
 
 ```c
-void fio_subscribe(fio_subscribe_args_s args);
-#define fio_subscribe(...) fio_subscribe((fio_subscribe_args_s){__VA_ARGS__})
+typedef struct fio_pubsub_msg_s {
+  /** A connection (if any) to which the subscription belongs. */
+  fio_io_s *io;
+  /** The `udata` argument associated with the subscription. */
+  void *udata;
+  /** Milliseconds since epoch. */
+  uint64_t timestamp;
+  /** Message ID. */
+  uint64_t id;
+  /** Channel name (shared copy - do NOT mutate). */
+  fio_buf_info_s channel;
+  /** Message payload (shared copy - do NOT mutate). */
+  fio_buf_info_s message;
+  /** Channel namespace. Negative values are reserved. */
+  int16_t filter;
+} fio_pubsub_msg_s;
 ```
 
-Subscribes to a channel / filter pair.
+The message structure received by subscription callbacks.
 
-The `on_unsubscribe` callback will be called on failure.
+**Members:**
+- `io` - The IO connection associated with the subscription (may be NULL)
+- `udata` - User data associated with the subscription
+- `timestamp` - Message timestamp in milliseconds since epoch
+- `id` - Unique message identifier
+- `channel` - Channel name buffer (read-only, do not modify)
+- `message` - Message payload buffer (read-only, do not modify)
+- `filter` - Numerical namespace filter (negative values reserved for internal use)
 
-The `fio_subscribe` macro shadows the `fio_subscribe` function and allows the following named arguments to be set:
+**Note**: The `channel` and `message` buffers are shared copies. Do NOT mutate them.
+
+#### `fio_pubsub_subscribe_args_s`
 
 ```c
 typedef struct {
-  /**
-   * The subscription owner - if none, the subscription is owned by the system.
-   *
-   * Note:
-   *
-   * Both the system and the `io` objects each manage channel listing
-   * which allows only a single subscription to the same channel.
-   *
-   * This means a single subscription per channel per IO and a single
-   * subscription per channel for the global system unless managing the
-   * subscription handle manually.
-   */
+  /** The subscription owner - if none, the subscription is owned by the system. */
   fio_io_s *io;
-  /**
-   * A named `channel` to which the message was sent.
-   *
-   * Subscriptions require a match by both channel name and namespace filter.
-   */
+  /** A named channel to which the message was sent. */
   fio_buf_info_s channel;
-  /**
-   * The callback to be called for each message forwarded to the subscription.
-   */
-  void (*on_message)(fio_msg_s *msg);
+  /** The callback to be called for each message forwarded to the subscription. */
+  void (*on_message)(fio_pubsub_msg_s *msg);
   /** An optional callback for when a subscription is canceled. */
   void (*on_unsubscribe)(void *udata);
   /** The opaque udata value is ignored and made available to the callbacks. */
   void *udata;
   /** The queue to which the callbacks should be routed. May be NULL. */
   fio_queue_s *queue;
+  /** OPTIONAL: subscription handle return value for manual management. */
+  uintptr_t *subscription_handle_ptr;
   /** Replay cached messages (if any) since supplied time in milliseconds. */
   uint64_t replay_since;
-  /**
-   * OPTIONAL: subscription handle return value - should be NULL when using
-   * automatic memory management with the IO or global environment.
-   *
-   * When set, the `io` pointer will be ignored and the subscription object
-   * handle will be written to the `subscription_handle_ptr` which MUST be
-   * used when unsubscribing.
-   *
-   * NOTE: this could cause subscriptions and memory leaks unless properly
-   * handled.
-   */
-  uintptr_t *subscription_handle_ptr;
-  /**
-   * A numerical namespace `filter` subscribers need to match.
-   *
-   * Negative values are reserved for facil.io framework extensions.
-   *
-   * Filer channels are bound to the processes and workers, they are NOT
-   * forwarded to engines and can be used for inter process communication (IPC).
-   */
+  /** A numerical namespace filter subscribers need to match. */
   int16_t filter;
   /** If set, pattern matching will be used (name is a pattern). */
   uint8_t is_pattern;
   /** If set, subscription will be limited to the root / master process. */
   uint8_t master_only;
-} fio_subscribe_args_s;
+} fio_pubsub_subscribe_args_s;
 ```
 
-The `fio_msg_s` struct in the `on_message` callback contains the following information:
+Arguments for subscribing to a channel.
+
+**Members:**
+- `io` - Optional IO connection owner. If set, subscription is cleaned up when the IO closes
+- `channel` - Channel name to subscribe to
+- `on_message` - Callback invoked for each received message
+- `on_unsubscribe` - Optional callback when subscription is canceled
+- `udata` - User data passed to callbacks
+- `queue` - Optional queue for callback execution (defaults to IO queue)
+- `subscription_handle_ptr` - If set, returns handle for manual subscription management
+- `replay_since` - Request message replay from history since this timestamp
+- `filter` - Numerical namespace filter (must match publisher's filter)
+- `is_pattern` - If true, channel name is treated as a glob pattern
+- `master_only` - If true, subscription exists only in the master process
+
+**Note**: When `io` is set, only one subscription per channel/filter/pattern combination is allowed per IO. When `io` is NULL, the subscription is global.
+
+#### `fio_pubsub_publish_args_s`
 
 ```c
-typedef struct fio_msg_s {
-  /** A connection (if any) to which the subscription belongs. */
-  fio_io_s *io;
-  /** The `udata` argument associated with the subscription. */
-  void *udata;
-  /** Message ID. */
+typedef struct {
+  struct fio_pubsub_engine_s const *engine;
+  fio_io_s *from;
   uint64_t id;
-  /** Milliseconds since epoch. */
-  uint64_t published;
-  /**
-   * A channel name, allowing for pub/sub patterns.
-   *
-   * NOTE: this is a shared copy - do NOT mutate the channel name string.
-   */
+  uint64_t timestamp;
   fio_buf_info_s channel;
-  /**
-   * The actual message.
-   *
-   * NOTE: this is a shared copy - do NOT mutate the message payload string.
-   **/
   fio_buf_info_s message;
-  /** Channel name namespace. Negative values are reserved. */
   int16_t filter;
-  /** flag indicating if the message is JSON data or binary/text. */
-  uint8_t is_json;
-} fio_msg_s;
+} fio_pubsub_publish_args_s;
 ```
 
-#### `fio_unsubscribe`
+Arguments for publishing a message.
+
+**Members:**
+- `engine` - Publishing engine (NULL = default engine)
+- `from` - Optional source IO (excluded from receiving the message)
+- `id` - Optional message ID (0 = auto-generate)
+- `timestamp` - Optional timestamp (0 = current time)
+- `channel` - Channel name to publish to
+- `message` - Message payload
+- `filter` - Numerical namespace filter
+
+### Subscribe / Unsubscribe
+
+#### `fio_pubsub_subscribe`
 
 ```c
-int fio_unsubscribe(fio_subscribe_args_s args);
-#define fio_unsubscribe(...) fio_unsubscribe((fio_subscribe_args_s){__VA_ARGS__})
+void fio_pubsub_subscribe(fio_pubsub_subscribe_args_s args);
+#define fio_pubsub_subscribe(...)                                              \
+  fio_pubsub_subscribe((fio_pubsub_subscribe_args_s){__VA_ARGS__})
 ```
 
-Cancels an existing subscriptions.
+Subscribe to a channel.
 
-Accepts the same arguments as [`fio_subscribe`](#fio_subscribe), except the `udata`, and callback details are ignored (no need to provide `udata` or callback details).
-
-If a `subscription_handle_ptr` was provided it should contain the value of the subscription handle returned.
-
-Returns -1 if the subscription could not be found. Otherwise returns 0.
-
-The `fio_unsubscribe` macro shadows the `fio_unsubscribe` function and allows the same named arguments as the [`fio_subscribe`](#fio_subscribe) function.
-
-#### `fio_pubsub_message_defer`
+The function is shadowed by a macro, allowing it to accept named arguments:
 
 ```c
-void fio_pubsub_message_defer(fio_msg_s *msg);
+/* Simple subscription */
+fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("events"),
+                     .on_message = handle_event);
+
+/* Subscription tied to an IO connection */
+fio_pubsub_subscribe(.io = client_io,
+                     .channel = FIO_BUF_INFO1("user:123"),
+                     .on_message = handle_user_message,
+                     .udata = user_context);
+
+/* Pattern subscription */
+fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("chat:*"),
+                     .on_message = handle_chat,
+                     .is_pattern = 1);
+
+/* Subscription with history replay */
+fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("news"),
+                     .on_message = handle_news,
+                     .replay_since = last_seen_timestamp);
 ```
 
-Defers the current callback, so it will be called again for the same message.
+**Note**: In worker processes, subscriptions are tracked by the master process for proper message routing.
 
-After calling this function, the `msg` object must NOT be accessed again.
-
-#### `FIO_PUBSUB_PATTERN_MATCH`
+#### `fio_pubsub_unsubscribe`
 
 ```c
-extern uint8_t (*FIO_PUBSUB_PATTERN_MATCH)(fio_str_info_s pattern,
-                                           fio_str_info_s channel);
+int fio_pubsub_unsubscribe(fio_pubsub_subscribe_args_s args);
+#define fio_pubsub_unsubscribe(...)                                            \
+  fio_pubsub_unsubscribe((fio_pubsub_subscribe_args_s){__VA_ARGS__})
 ```
 
-A global variable controlling the pattern matching callback used for pattern matching.
+Unsubscribe from a channel.
 
-The callback set **must** return 1 on a match or 0 if the string does not match the pattern.
+The function is shadowed by a macro, allowing it to accept named arguments:
 
-By default, the value is set to `fio_glob_match` (see facil.io's C STL).
+```c
+/* Unsubscribe from a channel */
+fio_pubsub_unsubscribe(.io = client_io,
+                       .channel = FIO_BUF_INFO1("user:123"),
+                       .filter = 0);
+```
+
+**Returns:** 0 on success, -1 if subscription not found.
+
+**Note**: The `on_message` callback is ignored during unsubscription. Only `io`, `channel`, `filter`, and `is_pattern` are used for matching.
+
+### Publish
+
+#### `fio_pubsub_publish`
+
+```c
+void fio_pubsub_publish(fio_pubsub_publish_args_s args);
+#define fio_pubsub_publish(...)                                                \
+  fio_pubsub_publish((fio_pubsub_publish_args_s){__VA_ARGS__})
+```
+
+Publish a message to a channel.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+/* Simple publish */
+fio_pubsub_publish(.channel = FIO_BUF_INFO1("events"),
+                   .message = FIO_BUF_INFO1("something happened"));
+
+/* Publish with filter namespace */
+fio_pubsub_publish(.channel = FIO_BUF_INFO1("updates"),
+                   .message = FIO_BUF_INFO2(data, data_len),
+                   .filter = 42);
+
+/* Publish excluding sender */
+fio_pubsub_publish(.channel = FIO_BUF_INFO1("chat:room1"),
+                   .message = FIO_BUF_INFO1("hello"),
+                   .from = sender_io);
+
+/* Publish via cluster engine (all machines) */
+fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
+                   .channel = FIO_BUF_INFO1("global"),
+                   .message = FIO_BUF_INFO1("cluster-wide message"));
+```
+
+**Note**: The default engine is `fio_pubsub_engine_ipc()` (local machine only). Use `fio_pubsub_engine_cluster()` for cluster-wide distribution.
+
+#### `fio_pubsub_defer`
+
+```c
+void fio_pubsub_defer(fio_pubsub_msg_s *msg);
+```
+
+Pushes execution of the `on_message` callback to the end of the queue.
+
+Call this from within an `on_message` callback to defer processing:
+
+```c
+void handle_message(fio_pubsub_msg_s *msg) {
+  if (should_defer()) {
+    fio_pubsub_defer(msg);
+    return;
+  }
+  // Process message...
+}
+```
+
+**Note**: The message and subscription references are automatically managed.
+
+### IO Callback Helper
 
 #### `FIO_ON_MESSAGE_SEND_MESSAGE`
 
 ```c
-void FIO_ON_MESSAGE_SEND_MESSAGE(fio_msg_s *msg);
+void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg);
 ```
 
-A callback for IO subscriptions that sends raw message data.
+A pre-built callback for IO subscriptions that sends the raw message data to the IO connection.
 
-This can be used as the `on_message` callback when subscribing to forward the message payload directly to an IO connection.
-
-### Publishing to Subscribers
-
-#### `fio_publish`
+Use this as the `on_pubsub` callback in your protocol or as the `on_message` callback for subscriptions:
 
 ```c
-void fio_publish(fio_publish_args_s args);
-#define fio_publish(...) fio_publish((fio_publish_args_s){__VA_ARGS__})
+/* In protocol definition */
+fio_io_protocol_s MY_PROTOCOL = {
+    .on_attach = my_on_attach,
+    .on_data = my_on_data,
+    .on_pubsub = FIO_ON_MESSAGE_SEND_MESSAGE,  /* Auto-send messages to client */
+};
+
+/* Or in subscription */
+fio_pubsub_subscribe(.io = client_io,
+                     .channel = FIO_BUF_INFO1("updates"),
+                     .on_message = FIO_ON_MESSAGE_SEND_MESSAGE);
 ```
 
-Publishes a message to the relevant subscribers (if any).
+### Engines
 
-By default the message is sent using the `FIO_PUBSUB_DEFAULT` engine (set by default to `FIO_PUBSUB_CLUSTER` which publishes to all processes and connected cluster peers).
+Engines control how messages are distributed. The module provides two built-in engines:
 
-To limit the message only to other processes (exclude the calling process), use the `FIO_PUBSUB_SIBLINGS` engine.
-
-To limit the message only to the calling process, use the `FIO_PUBSUB_PROCESS` engine.
-
-To limit the message only to the root process, use the `FIO_PUBSUB_ROOT` engine.
-
-To limit the message to local processes only (no cluster peers), use the `FIO_PUBSUB_LOCAL` engine.
-
-The `fio_publish` macro shadows the `fio_publish` function and allows the following named arguments to be set:
+#### `fio_pubsub_engine_ipc`
 
 ```c
-typedef struct fio_publish_args_s {
-  /** The pub/sub engine that should be used to forward this message. */
-  fio_pubsub_engine_s const *engine;
-  /** If `from` is specified, it will be skipped (won't receive message)
-   *  UNLESS a non-native `engine` is specified. */
-  fio_io_s *from;
-  /** Message ID (if missing, a random ID will be generated). */
-  uint64_t id;
-  /** Milliseconds since epoch (if missing, defaults to "now"). */
-  uint64_t published;
-  /** The target named channel. */
-  fio_buf_info_s channel;
-  /** The message body / content. */
-  fio_buf_info_s message;
-  /** A numeral namespace for channel names. Negative values are reserved. */
-  int16_t filter;
-  /** A flag indicating if the message is JSON data or not. */
-  uint8_t is_json;
-} fio_publish_args_s;
+fio_pubsub_engine_s const *fio_pubsub_engine_ipc(void);
 ```
 
-### History and Message Buffering
+Returns the built-in engine for publishing to the local process group (master + workers).
 
-The pub/sub system supports optional message history that allows late-joining subscribers to replay messages published before their subscription.
+Messages are distributed via IPC to all processes on the local machine only.
 
-#### Overview
+**Returns:** Pointer to the IPC engine.
 
-History functionality enables:
-
-* **Catch-up subscriptions**: Subscribers can replay missed messages using `replay_since` timestamp
-* **Per-channel buffering**: Each channel maintains its own message history
-* **Configurable retention**: Control history size by message count and/or age
-* **Master-only storage**: History is stored only in the master process to avoid duplication
-* **Worker IPC replay**: Worker processes request history from master via IPC
-* **Automatic eviction**: Old messages are lazily evicted based on count and age limits
-
-#### Storage Architecture
-
-History storage has these key characteristics:
-
-* **Master-only storage**: Only the master process (`fio_io_is_master()`) stores history to prevent memory duplication across worker processes
-* **Per-channel linked lists**: Each channel maintains its own FIFO list of messages
-* **Reference counting**: Messages are reference-counted and shared between history and active subscriptions
-* **Lazy eviction**: Old messages are evicted during publish, not on a timer (O(1) operation)
-* **Oldest timestamp cache**: Each channel caches the oldest message timestamp for O(1) lookup
-
-#### Configuration
-
-History can be configured globally with defaults that apply to all channels, and then overridden on a per-channel basis.
-
-##### Configuration Macros
+#### `fio_pubsub_engine_cluster`
 
 ```c
-#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES
-#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES 1024
-#endif
-
-#ifndef FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS
-#define FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS 3600000ULL /* 1 hour */
-#endif
+fio_pubsub_engine_s const *fio_pubsub_engine_cluster(void);
 ```
 
-These macros define the default limits when history is enabled without explicit configuration.
+Returns the built-in engine for multi-machine cluster publishing.
 
-#### `fio_pubsub_history_enable`
+Messages are distributed to all processes on all machines in the cluster. Requires `fio_ipc_cluster_listen()` to be called for cluster connectivity.
+
+**Returns:** Pointer to the cluster engine.
+
+#### `fio_pubsub_engine_default`
 
 ```c
-void fio_pubsub_history_enable(fio_pubsub_history_config_s config);
-/* Named arguments using macro. */
-#define fio_pubsub_history_enable(...) \
-  fio_pubsub_history_enable((fio_pubsub_history_config_s){__VA_ARGS__})
-
-typedef struct {
-  size_t max_messages; /* 0 = default (1024) */
-  uint64_t max_age_ms; /* 0 = default (3600000 = 1 hour) */
-} fio_pubsub_history_config_s;
+fio_pubsub_engine_s const *fio_pubsub_engine_default(void);
 ```
 
-Enables history globally for all channels with the specified configuration.
+Returns the current default engine.
 
-The function is shadowed by a macro, allowing it to accept named arguments:
+**Returns:** Pointer to the current default engine.
+
+**Note**: The default engine is automatically set to the cluster engine when `fio_ipc_cluster_listen()` is called before `fio_io_start()`.
+
+#### `fio_pubsub_engine_default_set`
 
 ```c
-/* Enable with defaults */
-fio_pubsub_history_enable(0);
-
-/* Enable with custom limits */
-fio_pubsub_history_enable(.max_messages = 500, .max_age_ms = 300000);
+fio_pubsub_engine_s const *fio_pubsub_engine_default_set(
+    fio_pubsub_engine_s const *engine);
 ```
 
-**Named Arguments:**
+Sets the default engine for publishing.
 
-| Argument | Type | Description |
-|----------|------|-------------|
-| `max_messages` | `size_t` | Maximum messages per channel; 0 uses `FIO_PUBSUB_HISTORY_DEFAULT_MAX_MESSAGES` (1024) |
-| `max_age_ms` | `uint64_t` | Maximum message age in milliseconds; 0 uses `FIO_PUBSUB_HISTORY_DEFAULT_MAX_AGE_MS` (1 hour) |
+**Parameters:**
+- `engine` - The engine to use as default (NULL restores to IPC engine)
 
-**Note**: History is stored only in the master process. Worker processes request history from the master via IPC when a subscription with `replay_since` is created.
-
-**Note**: Both limits are enforced - messages are evicted when either limit is exceeded.
-
-#### `fio_pubsub_history_disable`
+**Returns:** The engine that was set.
 
 ```c
-void fio_pubsub_history_disable(void);
+/* Use cluster engine by default */
+fio_pubsub_engine_default_set(fio_pubsub_engine_cluster());
+
+/* Restore to local IPC */
+fio_pubsub_engine_default_set(NULL);
 ```
 
-Disables history globally and frees all cached messages.
-
-This clears history from all channels and prevents new messages from being stored.
-
-#### `fio_pubsub_history_channel_set`
-
-```c
-int fio_pubsub_history_channel_set(fio_pubsub_history_channel_args_s args);
-/* Named arguments using macro. */
-#define fio_pubsub_history_channel_set(...) \
-  fio_pubsub_history_channel_set((fio_pubsub_history_channel_args_s){__VA_ARGS__})
-
-typedef struct {
-  fio_buf_info_s channel;
-  int16_t filter;
-  size_t max_messages; /* 0 = use global default */
-  uint64_t max_age_ms; /* 0 = use global default */
-} fio_pubsub_history_channel_args_s;
-```
-
-Sets per-channel history configuration, overriding global defaults.
-
-The function is shadowed by a macro, allowing it to accept named arguments:
-
-```c
-/* Override limits for a specific channel */
-fio_pubsub_history_channel_set(
-    .channel = FIO_BUF_INFO1("important_channel"),
-    .filter = 0,
-    .max_messages = 10000,
-    .max_age_ms = 7200000);  /* 2 hours */
-```
-
-**Named Arguments:**
-
-| Argument | Type | Description |
-|----------|------|-------------|
-| `channel` | `fio_buf_info_s` | The channel name to configure |
-| `filter` | `int16_t` | The channel's numerical namespace filter |
-| `max_messages` | `size_t` | Maximum messages for this channel; 0 uses global default |
-| `max_age_ms` | `uint64_t` | Maximum message age for this channel; 0 uses global default |
-
-**Returns:** 0 on success, -1 if the channel was not found.
-
-**Note**: The channel must exist (have at least one subscriber) before configuration can be set.
-
-#### `fio_pubsub_history_oldest`
-
-```c
-uint64_t fio_pubsub_history_oldest(fio_pubsub_history_oldest_args_s args);
-/* Named arguments using macro. */
-#define fio_pubsub_history_oldest(...) \
-  fio_pubsub_history_oldest((fio_pubsub_history_oldest_args_s){__VA_ARGS__})
-
-typedef struct {
-  fio_buf_info_s channel;
-  int16_t filter;
-} fio_pubsub_history_oldest_args_s;
-```
-
-Gets the oldest available message timestamp for a channel in milliseconds since epoch.
-
-The function is shadowed by a macro, allowing it to accept named arguments:
-
-```c
-uint64_t oldest = fio_pubsub_history_oldest(
-    .channel = FIO_BUF_INFO1("my_channel"),
-    .filter = 0);
-
-if (oldest) {
-  /* Use oldest timestamp for replay_since */
-  fio_subscribe(.channel = FIO_BUF_INFO1("my_channel"),
-                .replay_since = oldest,
-                .on_message = my_callback);
-}
-```
-
-**Named Arguments:**
-
-| Argument | Type | Description |
-|----------|------|-------------|
-| `channel` | `fio_buf_info_s` | The channel name to query |
-| `filter` | `int16_t` | The channel's numerical namespace filter |
-
-**Returns:** The oldest available message timestamp in milliseconds since epoch, or 0 if:
-- History is disabled
-- The channel does not exist
-- The channel has no messages in history
-
-**Note**: This operation is O(1) as the oldest timestamp is cached per-channel.
-
-### History Usage Examples
-
-#### Basic History Usage
-
-```c
-/* Enable history at startup */
-fio_pubsub_history_enable(.max_messages = 1000, .max_age_ms = 3600000);
-
-/* Publish some messages */
-for (int i = 0; i < 10; i++) {
-  fio_publish(.channel = FIO_BUF_INFO1("news"),
-              .message = FIO_BUF_INFO1("News update"));
-}
-
-/* Late subscriber replays all history */
-fio_subscribe(.channel = FIO_BUF_INFO1("news"),
-              .replay_since = 1,  /* Replay from beginning */
-              .on_message = on_news);
-```
-
-#### Subscribing with Timestamp-Based Replay
-
-```c
-/* Get current time before going offline */
-uint64_t disconnect_time = fio_time2milli(fio_time_real());
-
-/* ... later, reconnect and replay missed messages */
-
-fio_subscribe(.channel = FIO_BUF_INFO1("chat"),
-              .replay_since = disconnect_time,
-              .on_message = on_chat_message);
-```
-
-#### Per-Channel Configuration
-
-```c
-/* Enable history with moderate defaults */
-fio_pubsub_history_enable(.max_messages = 100, .max_age_ms = 600000);
-
-/* Create channels first by subscribing */
-fio_subscribe(.channel = FIO_BUF_INFO1("critical"),
-              .on_message = on_critical);
-fio_subscribe(.channel = FIO_BUF_INFO1("debug"),
-              .on_message = on_debug);
-
-/* Configure critical channel to keep more history */
-fio_pubsub_history_channel_set(
-    .channel = FIO_BUF_INFO1("critical"),
-    .max_messages = 10000,
-    .max_age_ms = 86400000);  /* 24 hours */
-
-/* Configure debug channel to keep minimal history */
-fio_pubsub_history_channel_set(
-    .channel = FIO_BUF_INFO1("debug"),
-    .max_messages = 10,
-    .max_age_ms = 60000);  /* 1 minute */
-```
-
-#### Query Oldest Available Timestamp
-
-```c
-/* Check what history is available before subscribing */
-uint64_t oldest = fio_pubsub_history_oldest(
-    .channel = FIO_BUF_INFO1("events"),
-    .filter = 0);
-
-if (oldest == 0) {
-  /* No history available */
-  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
-                .on_message = on_event);
-} else if (oldest > my_last_seen) {
-  /* Gap in history - some messages were evicted */
-  FIO_LOG_WARNING("History gap detected, %llu messages may be lost",
-                  (unsigned long long)(my_last_seen - oldest));
-  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
-                .replay_since = oldest,
-                .on_message = on_event);
-} else {
-  /* Full history available */
-  fio_subscribe(.channel = FIO_BUF_INFO1("events"),
-                .replay_since = my_last_seen,
-                .on_message = on_event);
-}
-```
-
-#### Multi-Process History Replay
-
-```c
-/* In master process: enable history and publish messages */
-if (fio_io_is_master()) {
-  fio_pubsub_history_enable(.max_messages = 500);
-  
-  fio_subscribe(.channel = FIO_BUF_INFO1("status"),
-                .on_message = on_status);
-  
-  /* Publish periodic status updates */
-  fio_run_every(.every = 1000, .fn = publish_status, .repetitions = -1);
-}
-
-/* In worker process: subscribe with replay */
-fio_state_callback_add(FIO_CALL_ON_START, worker_subscribe, NULL);
-
-void worker_subscribe(void *udata) {
-  if (fio_io_is_worker()) {
-    /* Worker requests history from master via IPC */
-    fio_subscribe(.channel = FIO_BUF_INFO1("status"),
-                  .replay_since = 1,  /* Replay all available history */
-                  .on_message = on_status);
-  }
-}
-```
-
-### History IPC Architecture
-
-When a worker process subscribes with `replay_since`, the following IPC exchange occurs:
-
-1. **Worker sends history request**: Worker sends `FIO___PUBSUB_HISTORY_START` message to master with:
-   - Channel name and filter
-   - `replay_since` timestamp in the message ID field
-
-2. **Master replays history**: Master iterates its channel history and sends matching messages:
-   - Each message is marked with `FIO___PUBSUB_REPLAY` flag
-   - Messages with `published >= replay_since` are sent
-
-3. **Master sends completion marker**: Master sends `FIO___PUBSUB_HISTORY_END` message
-
-4. **Worker processes replay**: Worker receives and delivers replay messages to subscriber
-
-This design ensures workers don't duplicate history storage while still providing full replay functionality.
-
-### Memory Management and Cleanup
-
-#### Automatic Cleanup
-
-- **Channel destruction**: When a channel has no subscribers and no history (or history is disabled), it is automatically destroyed
-- **Fork handling**: Child processes properly free inherited memory to prevent leaks:
-  - History messages are cleared via `fio___channel_on_destroy`
-  - Subscriptions are explicitly freed via `fio___pubsub_free_channel_subscriptions`
-  - Channel structures are destroyed after subscription cleanup
-
-#### Reference Counting
-
-Messages in history are reference-counted:
-- Each history entry holds one reference
-- Each active subscription delivery holds one reference
-- Messages are freed only when all references are released
-
-This prevents use-after-free and ensures proper memory lifecycle management.
-
-### Pub/Sub Engines
-
-The pub/sub system allows the delivery of messages through either internal or external services called "engines".
-
-The default pub/sub engine can be set by setting the global `FIO_PUBSUB_DEFAULT` variable which is set to `FIO_PUBSUB_CLUSTER` by default.
-
-External engines are funneled to the root / master process before their `publish` function is called, which means that even if `from` is specified, it will be ignored for any external engine.
-
-#### `FIO_PUBSUB_ROOT`
-
-```c
-#define FIO_PUBSUB_ROOT ((fio_pubsub_engine_s *)FIO___PUBSUB_ROOT)
-```
-
-Used to publish the message exclusively to the root / master process.
-
-#### `FIO_PUBSUB_PROCESS`
-
-```c
-#define FIO_PUBSUB_PROCESS ((fio_pubsub_engine_s *)FIO___PUBSUB_PROCESS)
-```
-
-Used to publish the message only within the current process.
-
-#### `FIO_PUBSUB_SIBLINGS`
-
-```c
-#define FIO_PUBSUB_SIBLINGS ((fio_pubsub_engine_s *)FIO___PUBSUB_SIBLINGS)
-```
-
-Used to publish the message except within the current process.
-
-#### `FIO_PUBSUB_LOCAL`
-
-```c
-#define FIO_PUBSUB_LOCAL ((fio_pubsub_engine_s *)FIO___PUBSUB_LOCAL)
-```
-
-Used to publish the message for this process, its siblings and root.
-
-#### `FIO_PUBSUB_CLUSTER`
-
-```c
-#define FIO_PUBSUB_CLUSTER ((fio_pubsub_engine_s *)FIO___PUBSUB_CLUSTER)
-```
-
-Used to publish the message to any possible publishers, including connected cluster peers.
-
-This is the default engine.
+### Custom Engines
 
 #### `fio_pubsub_engine_s`
 
 ```c
-struct fio_pubsub_engine_s {
-  /** Called after the engine was detached, may be used for cleanup. */
-  void (*detached)(const fio_pubsub_engine_s *eng);
-  /** Subscribes to a channel. Called ONLY in the Root (master) process. */
-  void (*subscribe)(const fio_pubsub_engine_s *eng,
-                    fio_buf_info_s channel,
+typedef struct fio_pubsub_engine_s {
+  /** Called when engine is detached */
+  void (*detached)(const struct fio_pubsub_engine_s *eng);
+  /** Called when a subscription is created */
+  void (*subscribe)(const struct fio_pubsub_engine_s *eng,
+                    const fio_buf_info_s channel,
                     int16_t filter);
-  /** Subscribes to a pattern. Called ONLY in the Root (master) process. */
-  void (*psubscribe)(const fio_pubsub_engine_s *eng,
+  /** Called when a pattern subscription is created */
+  void (*psubscribe)(const struct fio_pubsub_engine_s *eng,
+                     const fio_buf_info_s channel,
+                     int16_t filter);
+  /** Called when a subscription is removed */
+  void (*unsubscribe)(const struct fio_pubsub_engine_s *eng,
+                      const fio_buf_info_s channel,
+                      int16_t filter);
+  /** Called when a pattern subscription is removed */
+  void (*punsubscribe)(const struct fio_pubsub_engine_s *eng,
+                       const fio_buf_info_s channel,
+                       int16_t filter);
+  /** Called when a message is published */
+  void (*publish)(const struct fio_pubsub_engine_s *eng,
+                  const fio_pubsub_msg_s *msg);
+} fio_pubsub_engine_s;
+```
+
+Engine structure for external pub/sub backends (e.g., Redis, NATS).
+
+**Callbacks:**
+- `detached` - Called when the engine is detached from the system
+- `subscribe` - Called when a new channel subscription is created
+- `psubscribe` - Called when a new pattern subscription is created
+- `unsubscribe` - Called when a channel subscription is removed
+- `punsubscribe` - Called when a pattern subscription is removed
+- `publish` - Called when a message is published via this engine
+
+**Execution Context:**
+- The `publish` callback can be called from any thread/process
+- Subscription callbacks are called from the MASTER process only
+- Subscription callbacks are called from the main event loop thread
+- Callbacks MUST NOT block (defer long operations)
+
+#### `fio_pubsub_engine_attach`
+
+```c
+void fio_pubsub_engine_attach(fio_pubsub_engine_s *engine);
+```
+
+Attach an engine to the pub/sub system.
+
+**Parameters:**
+- `engine` - The engine to attach
+
+The engine will be notified of all existing subscriptions upon attachment.
+
+**Note**: Missing callbacks are automatically filled with no-op defaults.
+
+#### `fio_pubsub_engine_detach`
+
+```c
+void fio_pubsub_engine_detach(fio_pubsub_engine_s *engine);
+```
+
+Detach an engine from the pub/sub system.
+
+**Parameters:**
+- `engine` - The engine to detach
+
+The engine's `detached` callback will be called after removal.
+
+### History Management
+
+The history system allows caching messages for replay to late-joining subscribers.
+
+#### `fio_pubsub_history_s`
+
+```c
+typedef struct fio_pubsub_history_s {
+  /** Cleanup callback - called when history manager is detached */
+  void (*detached)(const struct fio_pubsub_history_s *hist);
+  /** Stores a message in history. Returns 0 on success, -1 on error. */
+  int (*push)(const struct fio_pubsub_history_s *hist, fio_pubsub_msg_s *msg);
+  /** Replay messages since timestamp. Returns 0 if handled, -1 if cannot replay. */
+  int (*replay)(const struct fio_pubsub_history_s *hist,
+                fio_buf_info_s channel,
+                int16_t filter,
+                uint64_t since,
+                void (*on_message)(fio_pubsub_msg_s *msg, void *udata),
+                void (*on_done)(void *udata),
+                void *udata);
+  /** Get oldest available timestamp. Returns UINT64_MAX if no history. */
+  uint64_t (*oldest)(const struct fio_pubsub_history_s *hist,
                      fio_buf_info_s channel,
                      int16_t filter);
-  /** Unsubscribes to a channel. Called ONLY in the Root (master) process. */
-  void (*unsubscribe)(const fio_pubsub_engine_s *eng,
-                      fio_buf_info_s channel,
-                      int16_t filter);
-  /** Unsubscribe to a pattern. Called ONLY in the Root (master) process. */
-  void (*punsubscribe)(const fio_pubsub_engine_s *eng,
-                       fio_buf_info_s channel,
-                       int16_t filter);
-  /** Publishes a message through the engine. Called by any worker / thread. */
-  void (*publish)(const fio_pubsub_engine_s *eng, fio_msg_s *msg);
+} fio_pubsub_history_s;
+```
+
+History storage interface for message caching and replay.
+
+**Callbacks:**
+- `detached` - Called when the history manager is detached
+- `push` - Store a message in history (called on publish)
+- `replay` - Replay messages since a timestamp to a callback
+- `oldest` - Get the oldest available message timestamp
+
+**Execution Context:**
+- All callbacks are called from the MASTER process only
+- Callbacks are called from the main event loop thread
+- Callbacks MUST NOT block (defer long operations)
+
+#### `fio_pubsub_history_attach`
+
+```c
+int fio_pubsub_history_attach(const fio_pubsub_history_s *manager, uint8_t priority);
+```
+
+Attach a history manager with the given priority.
+
+**Parameters:**
+- `manager` - The history manager to attach
+- `priority` - Priority level (higher = tried first for replay)
+
+**Returns:** 0 on success, -1 on error.
+
+Multiple history managers can be attached. All managers receive `push()` calls. For `replay()`, managers are tried in priority order until one handles the request.
+
+#### `fio_pubsub_history_detach`
+
+```c
+void fio_pubsub_history_detach(const fio_pubsub_history_s *manager);
+```
+
+Detach a history manager.
+
+**Parameters:**
+- `manager` - The history manager to detach
+
+#### `fio_pubsub_history_cache`
+
+```c
+const fio_pubsub_history_s *fio_pubsub_history_cache(size_t size_limit);
+```
+
+Get the built-in in-memory history manager.
+
+**Parameters:**
+- `size_limit` - Maximum cache size in bytes (0 = use default)
+
+**Returns:** Pointer to the built-in cache history manager.
+
+The default size limit is determined by:
+1. `WEBSITE_MEMORY_LIMIT_MB` environment variable (in MB)
+2. `WEBSITE_MEMORY_LIMIT_KB` environment variable (in KB)
+3. `WEBSITE_MEMORY_LIMIT` environment variable (in bytes)
+4. `FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT` (256 MB)
+
+```c
+/* Use built-in cache with 64MB limit */
+fio_pubsub_history_attach(fio_pubsub_history_cache(64 * 1024 * 1024), 100);
+```
+
+#### `fio_pubsub_history_push_all`
+
+```c
+void fio_pubsub_history_push_all(fio_pubsub_msg_s *msg);
+```
+
+Pushes a message to all history containers.
+
+Use this from a custom engine if the message needs to be saved to history but is never delivered locally.
+
+**Parameters:**
+- `msg` - The message to push to history
+
+### Pattern Matching
+
+#### `fio_pubsub_match_fn_set`
+
+```c
+void fio_pubsub_match_fn_set(uint8_t (*match_cb)(fio_str_info_s pattern,
+                                                  fio_str_info_s name));
+```
+
+Sets the pattern matching function for pattern subscriptions.
+
+**Parameters:**
+- `match_cb` - Pattern matching function (NULL restores default)
+
+**Returns:** Nothing.
+
+The default pattern matching function is `fio_glob_match`, which supports:
+- `*` - Match any sequence of characters
+- `?` - Match any single character
+- `[abc]` - Match any character in the set
+- `[a-z]` - Match any character in the range
+
+```c
+/* Use custom pattern matching */
+uint8_t my_matcher(fio_str_info_s pattern, fio_str_info_s name) {
+  // Custom matching logic...
+  return matches ? 1 : 0;
+}
+fio_pubsub_match_fn_set(my_matcher);
+
+/* Restore default glob matching */
+fio_pubsub_match_fn_set(NULL);
+```
+
+### Advanced: IPC Message Access
+
+#### `fio_pubsub_msg2ipc`
+
+```c
+fio_ipc_s *fio_pubsub_msg2ipc(fio_pubsub_msg_s *msg);
+```
+
+Returns the underlying IPC message buffer carrying the message data.
+
+**Parameters:**
+- `msg` - The pub/sub message
+
+**Returns:** Pointer to the underlying IPC message.
+
+This allows message deferral (use `fio_ipc_dup`) and tighter control over the message's lifetime.
+
+**Note**: The IPC message is detached from its originating IO.
+
+#### `fio_pubsub_ipc2msg`
+
+```c
+fio_pubsub_msg_s fio_pubsub_ipc2msg(fio_ipc_s *ipc);
+```
+
+Extract a pub/sub message from an IPC message.
+
+**Parameters:**
+- `ipc` - The IPC message
+
+**Returns:** A `fio_pubsub_msg_s` structure with fields populated from the IPC message.
+
+### Configuration Macros
+
+#### `FIO_PUBSUB_FUTURE_LIMIT_MS`
+
+```c
+#ifndef FIO_PUBSUB_FUTURE_LIMIT_MS
+#define FIO_PUBSUB_FUTURE_LIMIT_MS 60000ULL
+#endif
+```
+
+Maximum time in milliseconds to allow "future" messages to be delivered.
+
+Messages with timestamps beyond this limit are not delivered to subscribers but are still pushed to history managers for future delivery.
+
+#### `FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT`
+
+```c
+#ifndef FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT
+#define FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT (1ULL << 28)
+#endif
+```
+
+Default cache size limit for the built-in history manager (256 MB).
+
+### Examples
+
+#### Basic Pub/Sub
+
+```c
+#define FIO_LOG
+#define FIO_PUBSUB
+#include FIO_INCLUDE_FILE
+
+void on_message(fio_pubsub_msg_s *msg) {
+  printf("Received on '%.*s': %.*s\n",
+         (int)msg->channel.len, msg->channel.buf,
+         (int)msg->message.len, msg->message.buf);
+}
+
+void on_start(void *arg) {
+  (void)arg;
+  /* Subscribe to channel */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("events"),
+                       .on_message = on_message);
+}
+
+int publish_event(void *a, void *b) {
+  (void)a; (void)b;
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("events"),
+                     .message = FIO_BUF_INFO1("hello world"));
+  return -1;  /* One-shot timer */
+}
+
+int main(void) {
+  fio_state_callback_add(FIO_CALL_ON_START, on_start, NULL);
+  fio_io_run_every(.fn = publish_event, .every = 100, .repetitions = 1);
+  fio_io_start(2);
+  return 0;
+}
+```
+
+#### Time Server with Pub/Sub
+
+```c
+#define FIO_LOG
+#define FIO_PUBSUB
+#define FIO_TIME
+#include FIO_INCLUDE_FILE
+
+/* Protocol subscribes clients to time channel */
+void time_on_attach(fio_io_s *io) {
+  fio_pubsub_subscribe(.io = io,
+                       .channel = FIO_BUF_INFO1("time"),
+                       .on_message = FIO_ON_MESSAGE_SEND_MESSAGE);
+}
+
+fio_io_protocol_s TIME_PROTOCOL = {
+    .on_attach = time_on_attach,
+    .on_timeout = fio_io_touch,
 };
+
+/* Timer publishes current time */
+int publish_time(void *a, void *b) {
+  (void)a; (void)b;
+  char buf[32];
+  size_t len = fio_time2iso(buf, fio_time_real().tv_sec);
+  buf[len++] = '\r';
+  buf[len++] = '\n';
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("time"),
+                     .message = FIO_BUF_INFO2(buf, len));
+  return 0;
+}
+
+int main(void) {
+  fio_io_run_every(.fn = publish_time, .every = 1000, .repetitions = -1);
+  fio_io_listen(.protocol = &TIME_PROTOCOL);
+  fio_io_start(0);
+  return 0;
+}
 ```
 
-This is the (internal) structure of a facil.io pub/sub engine.
-
-Only messages and unfiltered subscriptions (where filter == 0) will be forwarded to these "engines".
-
-Engines MUST provide the listed function pointers and should be attached using the `fio_pubsub_attach` function.
-
-Engines should disconnect / detach, before being destroyed, by using the `fio_pubsub_detach` function.
-
-When an engine received a message to publish, it should call the `fio_publish` function with the built-in engine to which the message is forwarded.
-i.e.:
+#### Pattern Subscriptions
 
 ```c
-fio_publish(
-    .engine = FIO_PUBSUB_LOCAL,
-    .channel = channel_name,
-    .message = msg_body );
+#define FIO_PUBSUB
+#include FIO_INCLUDE_FILE
+
+void on_chat_message(fio_pubsub_msg_s *msg) {
+  printf("Chat [%.*s]: %.*s\n",
+         (int)msg->channel.len, msg->channel.buf,
+         (int)msg->message.len, msg->message.buf);
+}
+
+void setup_subscriptions(void *arg) {
+  (void)arg;
+  /* Subscribe to all chat rooms using pattern */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("chat:*"),
+                       .on_message = on_chat_message,
+                       .is_pattern = 1);
+}
+
+void send_chat(const char *room, const char *message) {
+  char channel[64];
+  int len = snprintf(channel, sizeof(channel), "chat:%s", room);
+  fio_pubsub_publish(.channel = FIO_BUF_INFO2(channel, (size_t)len),
+                     .message = FIO_BUF_INFO1(message));
+}
+
+int main(void) {
+  fio_state_callback_add(FIO_CALL_ON_START, setup_subscriptions, NULL);
+  fio_io_start(2);
+  return 0;
+}
 ```
 
-Since only the master process guarantees to be subscribed to all the channels in the cluster, only the master process calls the `(un)(p)subscribe` callbacks.
-
-**Note**: The callbacks will be called by the main IO thread, so they should never block. Long tasks should copy the data and schedule an external task (i.e., using `fio_io_defer`).
-
-#### `fio_pubsub_attach`
+#### Cluster-Wide Pub/Sub
 
 ```c
-void fio_pubsub_attach(fio_pubsub_engine_s *engine);
+#define FIO_PUBSUB
+#include FIO_INCLUDE_FILE
+
+void on_cluster_message(fio_pubsub_msg_s *msg) {
+  printf("[%d] Cluster message: %.*s\n",
+         fio_io_pid(),
+         (int)msg->message.len, msg->message.buf);
+}
+
+void setup(void *arg) {
+  (void)arg;
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("cluster-events"),
+                       .on_message = on_cluster_message);
+}
+
+int main(void) {
+  /* Enable cluster communication */
+  fio_ipc_cluster_listen(9999);
+  
+  /* Default engine will be cluster engine */
+  fio_state_callback_add(FIO_CALL_ON_START, setup, NULL);
+  fio_io_start(4);
+  return 0;
+}
 ```
 
-Attaches an engine, so it's callback can be called by facil.io.
-
-The `(p)subscribe` callback will be called for every existing channel.
-
-This can be called multiple times resulting in re-running the `(p)subscribe` callbacks.
-
-**Note**: engines are automatically detached from child processes but can be safely used even so - messages are always forwarded to the engine attached to the root (master) process.
-
-**Note**: engines should publish events to `FIO_PUBSUB_LOCAL`.
-
-#### `fio_pubsub_detach`
+#### History Replay
 
 ```c
-void fio_pubsub_detach(fio_pubsub_engine_s *engine);
+#define FIO_PUBSUB
+#include FIO_INCLUDE_FILE
+
+void on_message(fio_pubsub_msg_s *msg) {
+  printf("[%llu] %.*s\n",
+         (unsigned long long)msg->timestamp,
+         (int)msg->message.len, msg->message.buf);
+}
+
+void late_subscriber(void *arg) {
+  (void)arg;
+  uint64_t five_minutes_ago = fio_io_last_tick() - (5 * 60 * 1000);
+  
+  /* Subscribe and replay messages from the last 5 minutes */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("news"),
+                       .on_message = on_message,
+                       .replay_since = five_minutes_ago);
+}
+
+int main(void) {
+  /* Attach built-in cache history manager */
+  fio_pubsub_history_attach(fio_pubsub_history_cache(0), 100);
+  
+  fio_state_callback_add(FIO_CALL_ON_START, late_subscriber, NULL);
+  fio_io_start(2);
+  return 0;
+}
 ```
 
-Schedules an engine for Detachment, so it could be safely destroyed.
+### Thread Safety and Execution Context
 
-### User Defined Pub/Sub Message Metadata
+- `fio_pubsub_subscribe`, `fio_pubsub_unsubscribe`, and `fio_pubsub_publish` are thread-safe
+- Subscription callbacks (`on_message`, `on_unsubscribe`) execute on the IO reactor thread
+- Engine callbacks execute on the MASTER process only
+- History manager callbacks execute on the MASTER process only
+- Callbacks MUST NOT block - defer long operations using `fio_io_defer`
 
-#### `fio_msg_metadata_fn`
+### Migration from Previous API
 
-```c
-typedef void *(*fio_msg_metadata_fn)(fio_msg_s *);
-```
+The Pub/Sub module was completely rewritten. Key changes:
 
-Pub/Sub Metadata callback type.
+| Old API | New API |
+|---------|---------|
+| `fio_msg_s` | `fio_pubsub_msg_s` |
+| `msg->published` | `msg->timestamp` |
+| `msg->is_json` | Removed (deprecated) |
+| `fio_subscribe()` | `fio_pubsub_subscribe()` |
+| `fio_unsubscribe()` | `fio_pubsub_unsubscribe()` |
+| `fio_publish()` | `fio_pubsub_publish()` |
+| `FIO_PUBSUB_ROOT` | Use `fio_pubsub_engine_ipc()` |
+| `FIO_PUBSUB_CLUSTER` | Use `fio_pubsub_engine_cluster()` |
+| `fio_pubsub_ipc_url_set()` | Use `fio_ipc_url_set()` |
+| `fio_pubsub_broadcast_on_port()` | Use `fio_ipc_cluster_listen()` |
 
-The callback receives the message and should return a `void *` pointer to the metadata.
-
-#### `fio_message_metadata_add`
-
-```c
-int fio_message_metadata_add(fio_msg_metadata_fn metadata_func, void (*cleanup)(void *));
-```
-
-It's possible to attach metadata to facil.io pub/sub messages before they are published.
-
-This allows, for example, messages to be encoded as network packets for outgoing protocols (i.e., encoding for WebSocket transmissions), improving performance in large network based broadcasting.
-
-Up to `FIO___PUBSUB_METADATA_STORE_LIMIT` metadata callbacks can be attached (default is 4).
-
-The callback should return a `void *` pointer.
-
-To remove a callback, call `fio_message_metadata_remove` with the returned value.
-
-The cluster messaging system allows some messages to be flagged as JSON and this flag is available to the metadata callback.
-
-Returns zero (0) on success or -1 on failure.
-
-Multiple `fio_message_metadata_add` calls increase a reference count and should be matched by the same number of `fio_message_metadata_remove`.
-
-#### `fio_message_metadata_remove`
-
-```c
-void fio_message_metadata_remove(fio_msg_metadata_fn metadata_func);
-```
-
-Removed the metadata callback.
-
-Removal might be delayed if live metatdata exists.
-
-#### `fio_message_metadata`
-
-```c
-void *fio_message_metadata(fio_msg_s *msg, fio_msg_metadata_fn metadata_func);
-```
-
-Finds the message's metadata, returning the data or NULL.
-
-**Parameters:**
-- `msg` - the message to retrieve metadata from
-- `metadata_func` - the metadata callback function used when adding the metadata
-
-**Note**: channels with non-zero filters don't have metadata attached.
-
-### Pub/Sub Connectivity Helpers
-
-#### `fio_pubsub_ipc_url_set`
-
-```c
-int fio_pubsub_ipc_url_set(char *str, size_t len);
-```
-
-Sets the current IPC socket address (can't be changed while running).
-
-Returns -1 on error (i.e., server is already running or length is too long).
-
-#### `fio_pubsub_ipc_url`
-
-```c
-const char *fio_pubsub_ipc_url(void);
-```
-
-Returns a pointer to the current IPC socket address.
-
-#### `fio_pubsub_broadcast_on_port`
-
-```c
-void fio_pubsub_broadcast_on_port(int16_t port);
-```
-
-Enables auto-peer detection and pub/sub multi-machine clustering using the specified `port`.
-
-This function sets up UDP broadcast for peer discovery and TCP connections for message exchange between cluster nodes.
-
-**Parameters:**
-- `port` - the port number to use for broadcasting and listening. If 0 or negative, defaults to 3333.
-
-**Note**: This requires a shared secret to be set (not a random secret) for peer validation. The secret can be set using `fio_secret_set`.
-
-**Note**: The `PUBSUB_PORT` environment variable can also be used to set the port automatically at startup.
-
--------------------------------------------------------------------------------
+------------------------------------------------------------

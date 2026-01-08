@@ -69,7 +69,7 @@ typedef struct fio_io_s fio_io_s;
 typedef struct fio_io_tls_s fio_io_tls_s;
 
 /** Message structure, as received by the `on_message` subscription callback. */
-typedef struct fio_msg_s fio_msg_s;
+typedef struct fio_pubsub_msg_s fio_pubsub_msg_s;
 
 /** The IO Async Queue type. */
 typedef struct fio_io_async_s fio_io_async_s;
@@ -94,10 +94,10 @@ SFUNC void fio_io_restart(int workers);
 SFUNC void fio_io_restart_on_signal(int signal);
 
 /** Returns the shutdown timeout for the reactor. */
-SFUNC size_t fio_io_shutdown_timsout(void);
+SFUNC size_t fio_io_shutdown_timeout(void);
 
 /** Sets the shutdown timeout for the reactor, returning the new value. */
-SFUNC size_t fio_io_shutdown_timsout_set(size_t milliseconds);
+SFUNC size_t fio_io_shutdown_timeout_set(size_t milliseconds);
 
 /* *****************************************************************************
 The IO Reactor's State
@@ -519,7 +519,7 @@ struct fio_io_protocol_s {
   /** Called after the connection was closed (once per IO). */
   void (*on_close)(void *iobuf, void *udata);
 
-  void (*on_pubsub)(struct fio_msg_s *msg);
+  void (*on_pubsub)(struct fio_pubsub_msg_s *msg);
   /** Allows user specific protocol agnostic callbacks. */
   void (*on_user1)(fio_io_s *io, void *user_data);
   /** Allows user specific protocol agnostic callbacks. */

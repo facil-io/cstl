@@ -2,7 +2,7 @@
 
 ```c
 #define FIO_REDIS
-#include "fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 ```
 
 The Redis module provides a pub/sub engine that integrates with facil.io's pub/sub system, enabling distributed messaging across multiple server instances through Redis.
@@ -28,10 +28,10 @@ This module is designed for horizontal scaling scenarios where multiple applicat
 ```c
 #define FIO_LOG
 #define FIO_REDIS
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 /* Message handler */
-void on_message(fio_msg_s *msg) {
+void on_message(fio_pubsub_msg_s *msg) {
   FIO_LOG_INFO("Received on channel '%.*s': %.*s",
                (int)msg->channel.len, msg->channel.buf,
                (int)msg->message.len, msg->message.buf);
@@ -44,16 +44,17 @@ int main(void) {
   );
   
   /* Attach to pub/sub system (does NOT take ownership) */
-  fio_pubsub_attach(redis);
+  fio_pubsub_engine_attach(redis);
   
   /* Subscribe to a channel */
-  fio_subscribe(.channel = FIO_BUF_INFO1("my-channel"),
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("my-channel"),
                 .on_message = on_message);
   
   /* Start the IO reactor */
   fio_io_start(0);
   
-  /* Cleanup - caller is responsible for freeing */
+  /* Cleanup - detach before freeing if attached */
+  fio_pubsub_engine_detach(redis);
   fio_redis_free(redis);
   return 0;
 }
@@ -66,10 +67,10 @@ int main(void) {
 #### `FIO_REDIS_READ_BUFFER`
 
 ```c
-#define FIO_REDIS_READ_BUFFER 8192
+#define FIO_REDIS_READ_BUFFER 32768
 ```
 
-Size of the read buffer for Redis connections in bytes.
+Size of the read buffer for Redis connections in bytes. Default is 32768 (32KB).
 
 Each Redis engine allocates two read buffers (one for each connection), so the total memory usage per engine is `FIO_REDIS_READ_BUFFER * 2` bytes plus overhead.
 
@@ -96,7 +97,7 @@ typedef struct {
   const char *auth;
   /** Length of auth string (0 = auto-detect with strlen) */
   size_t auth_len;
-  /** Ping interval in seconds (0 = default 300 seconds) */
+  /** Ping interval in seconds (0 = default 30 seconds) */
   uint8_t ping_interval;
 } fio_redis_args_s;
 ```
@@ -107,7 +108,7 @@ Arguments for creating a Redis pub/sub engine.
 - `url` - Redis server URL. Supports various formats including `redis://host:port`, `host:port`, or just `host`. Defaults to `"localhost:6379"` if NULL or empty.
 - `auth` - Optional password for Redis AUTH command. Set to NULL if no authentication is required.
 - `auth_len` - Length of the auth string. If 0, `strlen()` is used to determine the length.
-- `ping_interval` - Keepalive ping interval in seconds. Defaults to 300 seconds (5 minutes) if 0.
+- `ping_interval` - Keepalive ping interval in seconds. Defaults to 30 seconds if 0.
 
 ------------------------------------------------------------
 
@@ -119,7 +120,7 @@ The Redis engine uses reference counting for memory management:
 - `fio_redis_dup` increments the reference count and returns the engine
 - `fio_redis_free` decrements the reference count; frees the engine when count reaches 0
 
-**Important**: `fio_pubsub_attach()` and `fio_pubsub_detach()` do **NOT** affect the reference count. The caller who created the engine is responsible for calling `fio_redis_free()` when done.
+**Important**: `fio_pubsub_engine_attach()` and `fio_pubsub_engine_detach()` do **NOT** affect the reference count. The caller who created the engine is responsible for calling `fio_redis_free()` when done.
 
 ```c
 /* Example: sharing engine across multiple owners */
@@ -129,12 +130,13 @@ fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost");
 fio_pubsub_engine_s *shared = fio_redis_dup(redis);  /* ref = 2 */
 
 /* Attach to pub/sub (does NOT increment ref) */
-fio_pubsub_attach(redis);
+fio_pubsub_engine_attach(redis);
 
 /* ... later, first owner is done ... */
 fio_redis_free(redis);   /* ref = 1, engine still alive */
 
-/* ... later, second owner is done ... */
+/* ... later, second owner is done - must detach before final free ... */
+fio_pubsub_engine_detach(shared);
 fio_redis_free(shared);  /* ref = 0, engine destroyed */
 ```
 
@@ -169,7 +171,7 @@ fio_pubsub_engine_s *redis = fio_redis_new(
 | `url` | `const char *` | Redis server URL; defaults to `"localhost:6379"` |
 | `auth` | `const char *` | Optional authentication password |
 | `auth_len` | `size_t` | Length of auth string; 0 for auto-detect |
-| `ping_interval` | `uint8_t` | Keepalive interval in seconds; defaults to 300 |
+| `ping_interval` | `uint8_t` | Keepalive interval in seconds; defaults to 30 |
 
 **Returns:** A pointer to the pub/sub engine on success, or NULL on error.
 
@@ -211,10 +213,11 @@ Decrements the reference count. When count reaches 0, destroys the engine.
 This function:
 1. Decrements the reference count
 2. If ref reaches 0:
-   - Detaches the engine from the pub/sub system if still attached
    - Closes both Redis connections (publishing and subscription)
    - Frees any queued commands
    - Releases all allocated memory
+
+**Important**: If the engine was attached to pub/sub via `fio_pubsub_engine_attach()`, you **MUST** call `fio_pubsub_engine_detach()` before calling `fio_redis_free()`.
 
 **Note**: Safe to call with NULL (no-op).
 
@@ -268,7 +271,7 @@ The `reply` parameter is a FIOBJ object representing the Redis response:
 ```c
 #define FIO_LOG
 #define FIO_REDIS
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 /* Callback for GET command */
 void on_get_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
@@ -323,12 +326,12 @@ void send_redis_commands(fio_pubsub_engine_s *redis) {
 ```c
 #define FIO_LOG
 #define FIO_REDIS
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 static fio_pubsub_engine_s *redis_engine = NULL;
 
 /* Handle incoming pub/sub messages */
-void on_pubsub_message(fio_msg_s *msg) {
+void on_pubsub_message(fio_pubsub_msg_s *msg) {
   FIO_LOG_INFO("Channel: %.*s | Message: %.*s",
                (int)msg->channel.len, msg->channel.buf,
                (int)msg->message.len, msg->message.buf);
@@ -339,10 +342,10 @@ void on_start(void *udata) {
   (void)udata;
   
   /* Subscribe to channels - Redis engine handles SUBSCRIBE automatically */
-  fio_subscribe(.channel = FIO_BUF_INFO1("notifications"),
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("notifications"),
                 .on_message = on_pubsub_message);
   
-  fio_subscribe(.channel = FIO_BUF_INFO1("events:*"),
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("events:*"),
                 .on_message = on_pubsub_message,
                 .is_pattern = 1);  /* Pattern subscription uses PSUBSCRIBE */
   
@@ -351,7 +354,7 @@ void on_start(void *udata) {
 
 /* Publish a message (from any worker process) */
 void broadcast_message(const char *channel, const char *message) {
-  fio_publish(.channel = FIO_BUF_INFO1(channel),
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(channel),
               .message = FIO_BUF_INFO1(message),
               .engine = FIO_PUBSUB_CLUSTER);  /* Uses Redis if attached */
 }
@@ -365,7 +368,7 @@ int main(void) {
   }
   
   /* Attach to pub/sub (does NOT take ownership) */
-  fio_pubsub_attach(redis_engine);
+  fio_pubsub_engine_attach(redis_engine);
   
   /* Register startup callback */
   fio_state_callback_add(FIO_CALL_ON_START, on_start, NULL);
@@ -373,7 +376,8 @@ int main(void) {
   /* Start the server */
   fio_io_start(0);
   
-  /* Cleanup - caller must free the engine */
+  /* Cleanup - detach before freeing if attached */
+  fio_pubsub_engine_detach(redis_engine);
   fio_redis_free(redis_engine);
   return 0;
 }
@@ -384,7 +388,7 @@ int main(void) {
 ```c
 #define FIO_LOG
 #define FIO_REDIS
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 int main(void) {
   /* Connect with password authentication */
@@ -401,8 +405,9 @@ int main(void) {
   /* For Redis 6+ ACL authentication (username:password), 
    * you may need to send AUTH command manually after connection */
   
-  fio_pubsub_attach(redis);
+  fio_pubsub_engine_attach(redis);
   fio_io_start(0);
+  fio_pubsub_engine_detach(redis);
   fio_redis_free(redis);
   return 0;
 }
@@ -413,7 +418,7 @@ int main(void) {
 ```c
 #define FIO_LOG
 #define FIO_REDIS
-#include "fio-stl.h"
+#include FIO_INCLUDE_FILE
 
 /* Handle HGETALL reply (returns array of field-value pairs) */
 void on_hgetall_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
@@ -493,9 +498,9 @@ This separation is required by the Redis protocol - a connection in subscription
 
 #### Ownership and Attach/Detach
 
-The `fio_pubsub_attach()` and `fio_pubsub_detach()` functions do **NOT** transfer ownership of the engine. They simply register or unregister the engine with the pub/sub system.
+The `fio_pubsub_engine_attach()` and `fio_pubsub_engine_detach()` functions do **NOT** transfer ownership of the engine. They simply register or unregister the engine with the pub/sub system.
 
-The caller who created the engine with `fio_redis_new()` is responsible for calling `fio_redis_free()` when the engine is no longer needed. If the engine is still attached when `fio_redis_free()` is called and the reference count reaches 0, the engine will automatically detach itself before being destroyed.
+The caller who created the engine with `fio_redis_new()` is responsible for calling `fio_redis_free()` when the engine is no longer needed. **Important**: If the engine was attached via `fio_pubsub_engine_attach()`, you **MUST** call `fio_pubsub_engine_detach()` before calling `fio_redis_free()`.
 
 #### Command Queue
 
@@ -513,7 +518,7 @@ When a connection is lost:
 
 1. The engine logs a warning message
 2. Automatic reconnection is attempted after a brief delay
-3. On the subscription connection, all active subscriptions are re-established via `fio_pubsub_attach()`
+3. On the subscription connection, all active subscriptions are re-established via `fio_pubsub_engine_attach()`
 4. Queued commands on the publishing connection are sent after reconnection
 
 #### Authentication Failures
@@ -536,9 +541,21 @@ The Redis module uses facil.io's logging system:
 
 ### Thread Safety
 
-The Redis engine uses internal locking to protect the command queue, making it safe to call `fio_redis_send()` from multiple threads simultaneously.
+The Redis engine is thread-safe. All internal state modifications are delegated to the IO queue using `fio_io_defer()`, ensuring single-threaded execution of state changes. This prevents race conditions without requiring locks.
 
-However, the FIOBJ objects passed to callbacks are **not** thread-safe. If you need to share reply data across threads, make a copy of the data within the callback.
+**Public API thread safety:**
+- `fio_redis_new()` - Thread-safe (defers connection to IO thread)
+- `fio_redis_dup()` - Thread-safe (uses atomic reference counting)
+- `fio_redis_free()` - Thread-safe (defers cleanup to IO thread)
+- `fio_redis_send()` - Thread-safe (defers command queuing to IO thread)
+
+**Internal operations that run on the IO thread:**
+- Command queue management (add, remove, send)
+- Connection state changes (connect, disconnect, reconnect)
+- Protocol callbacks (on_attach, on_data, on_close, on_timeout)
+- Pub/sub engine callbacks (subscribe, publish, etc.)
+
+The FIOBJ objects passed to callbacks are **not** thread-safe. If you need to share reply data across threads, make a copy of the data within the callback.
 
 **Note**: The pub/sub callbacks (`on_message`) are called from the IO reactor thread. Long-running operations should be deferred to avoid blocking the reactor.
 
@@ -555,11 +572,11 @@ struct fio_pubsub_engine_s {
   void (*psubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
   void (*unsubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
   void (*punsubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
-  void (*publish)(const fio_pubsub_engine_s *eng, fio_msg_s *msg);
+  void (*publish)(const fio_pubsub_engine_s *eng, fio_pubsub_msg_s *msg);
 };
 ```
 
-When attached via `fio_pubsub_attach()`:
+When attached via `fio_pubsub_engine_attach()`:
 
 - `subscribe` sends Redis `SUBSCRIBE` command
 - `psubscribe` sends Redis `PSUBSCRIBE` command  
@@ -567,7 +584,7 @@ When attached via `fio_pubsub_attach()`:
 - `punsubscribe` sends Redis `PUNSUBSCRIBE` command
 - `publish` sends Redis `PUBLISH` command via the command queue
 
-Messages received from Redis subscriptions are forwarded to local subscribers via `fio_publish()` with `FIO_PUBSUB_LOCAL` engine.
+Messages received from Redis subscriptions are forwarded to local subscribers via `fio_pubsub_publish()` with `fio_pubsub_engine_ipc()` engine.
 
 **Note**: The `filter` parameter is ignored by the Redis engine. Redis does not support facil.io's numeric filter namespaces.
 

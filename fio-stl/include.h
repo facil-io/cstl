@@ -195,6 +195,10 @@
 #include "412 tls13.h"
 #endif /* FIO_IO */
 
+#if defined(FIO_IPC) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "404 ipc.h"
+#endif
+
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
 #endif

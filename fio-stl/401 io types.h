@@ -123,7 +123,9 @@ Protocol Type Initialization
 
 SFUNC void fio_io_noop(fio_io_s *io) { (void)(io); }
 
-static void fio___io_on_ev_pubsub_mock(struct fio_msg_s *msg) { (void)(msg); }
+static void fio___io_on_ev_pubsub_mock(struct fio_pubsub_msg_s *msg) {
+  (void)(msg);
+}
 static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
   (void)io, (void)i_;
 }
@@ -374,10 +376,10 @@ SFUNC void fio_io_restart_on_signal(int signal) {
 }
 
 /** Returns the shutdown timeout for the reactor. */
-SFUNC size_t fio_io_shutdown_timsout(void) { return FIO___IO.shutdown_timeout; }
+SFUNC size_t fio_io_shutdown_timeout(void) { return FIO___IO.shutdown_timeout; }
 
 /** Sets the shutdown timeout for the reactor, returning the new value. */
-SFUNC size_t fio_io_shutdown_timsout_set(size_t milliseconds) {
+SFUNC size_t fio_io_shutdown_timeout_set(size_t milliseconds) {
   return (FIO___IO.shutdown_timeout = milliseconds);
 }
 
@@ -1643,10 +1645,11 @@ FIO_SFUNC void fio___io_cleanup_at_exit(void *ignr_) {
   FIO___LOCK_DESTROY(FIO___IO.lock);
   fio___io_after_fork(ignr_);
   fio_poll_destroy(&FIO___IO.poll);
-  fio___io_env_safe_destroy(&FIO___IO.env);
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   fio_queue_perform_all(&FIO___IO.queue);
   fio_timer_destroy(&FIO___IO.timer);
+  fio_queue_perform_all(&FIO___IO.queue);
+  fio___io_env_safe_destroy(&FIO___IO.env);
   fio_queue_perform_all(&FIO___IO.queue);
 }
 

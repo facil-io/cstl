@@ -6,18 +6,10 @@
 
 ```c
 fio_http_listener_s *fio_http_listen(const char *url, fio_http_settings_s settings);
-
+/* Named arguments using macro. */
 #define fio_http_listen(url, ...)                                              \
   fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
-```
 
-Listens to HTTP / WebSockets / SSE connections on `url`.
-
-The MACRO shadowing the function enables the use of named arguments for the `fio_http_settings_s`.
-
-Returns a listener handle (`fio_http_listener_s *`). The listener can be used with `fio_http_route` to add route-specific handlers.
-
-```c
 typedef struct fio_http_settings_s {
   /** Called before body uploads, when a client sends an `Expect` header. */
   void (*pre_http_body)(fio_http_s *h);
@@ -25,15 +17,12 @@ typedef struct fio_http_settings_s {
   void (*on_http)(fio_http_s *h);
   /** Called when a request / response cycle is finished with no Upgrade. */
   void (*on_finish)(fio_http_s *h);
-
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
   int (*on_authenticate_sse)(fio_http_s *h);
   /** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
   int (*on_authenticate_websocket)(fio_http_s *h);
-
   /** Called once a WebSocket / SSE connection upgrade is complete. */
   void (*on_open)(fio_http_s *h);
-
   /** Called when a WebSocket message is received. */
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
   /** Called when an EventSource event is received. */
@@ -43,95 +32,43 @@ typedef struct fio_http_settings_s {
                          fio_buf_info_s data);
   /** Called when an EventSource reconnect event requests an ID. */
   void (*on_eventsource_reconnect)(fio_http_s *h, fio_buf_info_s id);
-
   /** Called for WebSocket / SSE connections when outgoing buffer is empty. */
   void (*on_ready)(fio_http_s *h);
   /** Called for open WebSocket / SSE connections during shutting down. */
   void (*on_shutdown)(fio_http_s *h);
   /** Called after a WebSocket / SSE connection is closed (for cleanup). */
   void (*on_close)(fio_http_s *h);
-
   /** (optional) the callback to be performed when the HTTP service closes. */
   void (*on_stop)(struct fio_http_settings_s *settings);
-
   /** Default opaque user data for HTTP handles (fio_http_s). */
   void *udata;
-
   /** Optional SSL/TLS support. */
   fio_io_functions_s *tls_io_func;
   /** Optional SSL/TLS support. */
   fio_io_tls_s *tls;
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
   fio_io_async_s *queue;
-  /**
-   * A public folder for file transfers - allows to circumvent any application
-   * layer logic and simply serve static files.
-   *
-   * Supports automatic `gz` pre-compressed alternatives.
-   */
+  /** A public folder for file transfers - serves static files. */
   fio_str_info_s public_folder;
-  /**
-   * The max-age value (in seconds) for caching static files send from
-   * `public_folder`.
-   *
-   * Defaults to 0 (not sent).
-   */
+  /** Max-age value (in seconds) for caching static files. Defaults to 0. */
   size_t max_age;
-  /**
-   * The maximum total of bytes for the overall size of the request string and
-   * headers, combined.
-   *
-   * Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE bytes.
-   */
+  /** Maximum total bytes for request string and headers. */
   uint32_t max_header_size;
-  /**
-   * The maximum number of bytes allowed per header / request line.
-   *
-   * Defaults to FIO_HTTP_DEFAULT_MAX_LINE_LEN bytes.
-   */
+  /** Maximum bytes allowed per header / request line. */
   uint32_t max_line_len;
-  /**
-   * The maximum size of an HTTP request's body (posting / downloading).
-   *
-   * Defaults to FIO_HTTP_DEFAULT_MAX_BODY_SIZE bytes.
-   */
+  /** Maximum size of an HTTP request's body. */
   size_t max_body_size;
-  /**
-   * The maximum WebSocket message size/buffer (in bytes) for Websocket
-   * connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
-   */
+  /** Maximum WebSocket message size/buffer (in bytes). */
   size_t ws_max_msg_size;
   /** reserved for future use. */
   intptr_t reserved1;
   /** reserved for future use. */
   intptr_t reserved2;
-  /**
-   * An HTTP/1.x connection timeout.
-   *
-   * Defaults to FIO_HTTP_DEFAULT_TIMEOUT seconds.
-   *
-   * Note: the connection might be closed (by other side) before timeout occurs.
-   */
+  /** HTTP/1.x connection timeout in seconds. */
   uint8_t timeout;
-  /**
-   * Timeout for the WebSocket connections in seconds. Defaults to
-   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
-   *
-   * A ping will be sent whenever the timeout is reached.
-   *
-   * Connections are only closed when a ping cannot be sent (the network layer
-   * fails). Pongs are ignored.
-   */
+  /** WebSocket connection timeout in seconds. */
   uint8_t ws_timeout;
-  /**
-   * Timeout for EventSource (SSE) connections in seconds. Defaults to
-   * FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
-   *
-   * A ping will be sent whenever the timeout is reached.
-   *
-   * Connections are only closed when a ping cannot be sent (the network layer
-   * fails).
-   */
+  /** EventSource (SSE) connection timeout in seconds. */
   uint8_t sse_timeout;
   /** Timeout for client connections (only relevant in client mode). */
   uint8_t connect_timeout;
@@ -140,27 +77,83 @@ typedef struct fio_http_settings_s {
 } fio_http_settings_s;
 ```
 
+Listens to HTTP / WebSockets / SSE connections on `url`.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_http_listener_s *listener = fio_http_listen("0.0.0.0:3000",
+                                                .on_http = my_http_handler,
+                                                .log = 1);
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `pre_http_body` | `void (*)(fio_http_s *)` | Called before body uploads when client sends `Expect` header |
+| `on_http` | `void (*)(fio_http_s *)` | Callback for HTTP requests (server) or responses (client) |
+| `on_finish` | `void (*)(fio_http_s *)` | Called when request/response cycle finishes with no Upgrade |
+| `on_authenticate_sse` | `int (*)(fio_http_s *)` | Authenticate SSE requests; return non-zero to deny |
+| `on_authenticate_websocket` | `int (*)(fio_http_s *)` | Authenticate WebSocket requests; return non-zero to deny |
+| `on_open` | `void (*)(fio_http_s *)` | Called once WebSocket/SSE upgrade is complete |
+| `on_message` | `void (*)(fio_http_s *, fio_buf_info_s, uint8_t)` | Called when WebSocket message is received |
+| `on_eventsource` | `void (*)(...)` | Called when EventSource event is received |
+| `on_eventsource_reconnect` | `void (*)(fio_http_s *, fio_buf_info_s)` | Called when SSE reconnect requests an ID |
+| `on_ready` | `void (*)(fio_http_s *)` | Called when outgoing buffer is empty (WS/SSE) |
+| `on_shutdown` | `void (*)(fio_http_s *)` | Called for open WS/SSE connections during shutdown |
+| `on_close` | `void (*)(fio_http_s *)` | Called after WS/SSE connection is closed |
+| `on_stop` | `void (*)(fio_http_settings_s *)` | Called when HTTP service closes |
+| `udata` | `void *` | Default opaque user data for HTTP handles |
+| `tls_io_func` | `fio_io_functions_s *` | Optional SSL/TLS IO functions |
+| `tls` | `fio_io_tls_s *` | Optional SSL/TLS support |
+| `queue` | `fio_io_async_s *` | Optional HTTP task queue for multi-threading |
+| `public_folder` | `fio_str_info_s` | Public folder for static file serving |
+| `max_age` | `size_t` | Max-age for static file caching (seconds); defaults to 0 |
+| `max_header_size` | `uint32_t` | Max bytes for request + headers; defaults to `FIO_HTTP_DEFAULT_MAX_HEADER_SIZE` |
+| `max_line_len` | `uint32_t` | Max bytes per header line; defaults to `FIO_HTTP_DEFAULT_MAX_LINE_LEN` |
+| `max_body_size` | `size_t` | Max body size; defaults to `FIO_HTTP_DEFAULT_MAX_BODY_SIZE` |
+| `ws_max_msg_size` | `size_t` | Max WebSocket message size; defaults to `FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE` |
+| `timeout` | `uint8_t` | HTTP/1.x timeout in seconds; defaults to `FIO_HTTP_DEFAULT_TIMEOUT` |
+| `ws_timeout` | `uint8_t` | WebSocket timeout in seconds; defaults to `FIO_HTTP_DEFAULT_TIMEOUT_LONG` |
+| `sse_timeout` | `uint8_t` | SSE timeout in seconds; defaults to `FIO_HTTP_DEFAULT_TIMEOUT_LONG` |
+| `connect_timeout` | `uint8_t` | Client connection timeout (client mode only) |
+| `log` | `uint8_t` | Set to TRUE to log HTTP requests |
+
+**Returns:** a listener handle (`fio_http_listener_s *`) on success, or NULL on error. The listener can be used with `fio_http_route` to add route-specific handlers.
+
 #### `fio_http_route`
 
 ```c
 int fio_http_route(fio_http_listener_s *listener,
-                         const char *url,
-                         fio_http_settings_s settings);
+                   const char *url,
+                   fio_http_settings_s settings);
+/* Named arguments using macro. */
 #define fio_http_route(listener, url, ...)                                     \
   fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
 ```
 
 Adds a route prefix to the HTTP handler.
 
-The order in which `fio_http_route` are called is irrelevant (unless overwriting an existing route).
+The function is shadowed by a macro, allowing it to accept named arguments:
 
-Matching is performed as a best-prefix match. i.e.:
+```c
+fio_http_route(listener, "/api",
+               .on_http = my_api_handler,
+               .log = 1);
+```
 
-- All paths match the prefix `"/*"` (the default prefix).
+The order in which `fio_http_route` is called is irrelevant (unless overwriting an existing route).
 
-- Partial URL matches are only valid if the `/` character is the one following the partial match. For example: setting `"/user"` will match `"/user"` and all `"/user/*"` paths but not `"/user*"`
+Matching is performed as a best-prefix match:
 
-- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route `"/user/new"` and `"/user/new/*"` to `"/user/new"`. Otherwise, the `"/user"` route will continue to behave the same.
+- All paths match the route `"/"` (the default prefix).
+
+- Partial URL matches are only valid if the `/` character is the one following the partial match. For example: setting `"/user"` will match `"/user"` and all `"/user/..."` paths but not `"/user..."`
+
+- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the `"/user"` route will continue to behave the same.
+
+**Returns:** 0 on success, -1 on error.
 
 **Note**: the `udata`, `on_finish`, `public_folder` and `log` properties are all inherited (if missing) from the default HTTP settings used to create the listener.
 
@@ -204,7 +197,7 @@ If no REST / CRUD style action is detected, FIO_HTTP_RESOURCE_NONE is returned.
 
     Should show selected item(s).
 
-- `FIO_HTTP_RESOURCE_NEW`: will be returned on `GET/new`.
+- `FIO_HTTP_RESOURCE_NEW`: will be returned on `GET` `/new`.
 
     Should return a form for creating an item.
 
@@ -248,17 +241,28 @@ Allows all clients to connect to WebSockets / EventSource (SSE) connections (byp
 fio_io_s *fio_http_connect(const char *url,
                            fio_http_s *h,
                            fio_http_settings_s settings);
-/* Shadow the function for named arguments */
+/* Named arguments using macro. */
 #define fio_http_connect(url, h, ...)                                          \
   fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
-
 ```
 
 Connects to HTTP / WebSockets / SSE connections on `url`.
 
-Accepts named arguments for the `fio_http_settings_s` settings.
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_io_s *io = fio_http_connect("wss://example.com/ws", NULL,
+                                .on_open = my_on_open,
+                                .on_message = my_on_message);
+```
+
+- `url` - The URL to connect to. Supports `http://`, `https://`, `ws://`, `wss://`, `sse://`, `sses://` schemes.
+- `h` - An optional pre-configured HTTP handle. If NULL, a new handle is created.
+- `settings` - Connection settings (see `fio_http_settings_s`).
 
 **Returns:** an IO handle (`fio_io_s *`) on success, or NULL on error.
+
+**Note**: For WebSocket connections, use `ws://` or `wss://` scheme. For SSE connections, use `sse://` or `sses://` scheme.
 
 ### Creating an HTTP Handle
 
@@ -286,7 +290,7 @@ Creates a copy of an existing handle, copying only its request data.
 fio_http_s *fio_http_destroy(fio_http_s *h);
 ```
 
-Destroyed the HTTP handle object, freeing all allocated resources.
+Destroys the HTTP handle object, freeing all allocated resources.
 
 #### `fio_http_start_time_set`
 
@@ -347,6 +351,43 @@ void *fio_http_udata2_set(fio_http_s *, void *);
 ```
 
 Sets a second opaque user pointer associated with the HTTP handle.
+
+#### `fio_http_cdata`
+
+```c
+void *fio_http_cdata(fio_http_s *h);
+```
+
+Returns the existing controller data (`void *` pointer).
+
+This is used internally by the HTTP module to store connection-specific data.
+
+#### `fio_http_cdata_set`
+
+```c
+void *fio_http_cdata_set(fio_http_s *h, void *cdata);
+```
+
+Sets a new controller data (`void *` pointer).
+
+This is used internally by the HTTP module to store connection-specific data.
+
+#### `fio_http_controller`
+
+```c
+fio_http_controller_s *fio_http_controller(fio_http_s *h);
+```
+
+Gets the HTTP Controller associated with the HTTP handle.
+
+#### `fio_http_controller_set`
+
+```c
+fio_http_controller_s *fio_http_controller_set(fio_http_s *h,
+                                               fio_http_controller_s *controller);
+```
+
+Sets the HTTP Controller associated with the HTTP handle.
 
 #### `fio_http_io`
 
@@ -534,7 +575,7 @@ Sets the original / first path associated with the HTTP handle.
 #define FIO_HTTP_PATH_EACH(path, pos)
 ```
 
-Loops over each section of `path`, decrypting percent encoding as necessary.
+Loops over each section of `path`, decoding percent encoding as necessary.
 
 The macro accepts the following:
 
@@ -716,6 +757,95 @@ int fio_http_body_fd(fio_http_s *);
 If the body is stored in a temporary file, returns the file's handle.
 
 Otherwise returns -1.
+
+### HTTP Body Parsing
+
+#### `fio_http_body_parse`
+
+```c
+fio_http_body_parse_result_s fio_http_body_parse(
+    fio_http_s *h,
+    const fio_http_body_parse_callbacks_s *callbacks,
+    void *udata);
+```
+
+Parses the HTTP request body, auto-detecting content type.
+
+Supports JSON, URL-encoded, and multipart/form-data bodies. Calls the appropriate callbacks for each element found.
+
+- `h` - The HTTP handle.
+- `callbacks` - Parser callbacks (designed to be static const).
+- `udata` - User context passed to all callbacks.
+
+**Returns:** Parse result with top-level object and status.
+
+#### `fio_http_body_parse_callbacks_s`
+
+```c
+typedef struct {
+  /* ===== Primitives ===== */
+  /** NULL / nil was detected. Returns new object. */
+  void *(*on_null)(void *udata);
+  /** TRUE was detected. Returns new object. */
+  void *(*on_true)(void *udata);
+  /** FALSE was detected. Returns new object. */
+  void *(*on_false)(void *udata);
+  /** Number was detected. Returns new object. */
+  void *(*on_number)(void *udata, int64_t num);
+  /** Float was detected. Returns new object. */
+  void *(*on_float)(void *udata, double num);
+  /** String was detected. Returns new object. */
+  void *(*on_string)(void *udata, const void *data, size_t len);
+
+  /* ===== Containers ===== */
+  /** Array was detected. Returns context for this array. */
+  void *(*on_array)(void *udata, void *parent);
+  /** Map / Object was detected. Returns context for this map. */
+  void *(*on_map)(void *udata, void *parent);
+  /** Push value to array. Returns non-zero on error. */
+  int (*array_push)(void *udata, void *array, void *value);
+  /** Set key-value pair in map. Returns non-zero on error. */
+  int (*map_set)(void *udata, void *map, void *key, void *value);
+  /** Called when array parsing is complete. */
+  void (*array_done)(void *udata, void *array);
+  /** Called when map parsing is complete. */
+  void (*map_done)(void *udata, void *map);
+
+  /* ===== File Uploads (multipart) ===== */
+  /** Called when a file upload starts. Return NULL to skip this file. */
+  void *(*on_file)(void *udata,
+                   fio_str_info_s name,
+                   fio_str_info_s filename,
+                   fio_str_info_s content_type);
+  /** Called for each chunk of file data. Return non-zero to abort. */
+  int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+  /** Called when file upload is complete. */
+  void (*on_file_done)(void *udata, void *file);
+
+  /* ===== Error Handling ===== */
+  /** Called on parse error. `partial` is the incomplete result, if any. */
+  void *(*on_error)(void *udata, void *partial);
+  /** Called to free an unused object (e.g., key when map_set fails). */
+  void (*free_unused)(void *udata, void *obj);
+} fio_http_body_parse_callbacks_s;
+```
+
+HTTP body parser callbacks. All callbacks receive `udata` as first parameter.
+
+#### `fio_http_body_parse_result_s`
+
+```c
+typedef struct {
+  /** Top-level parsed object (caller responsible for freeing). */
+  void *result;
+  /** Number of bytes consumed from body. */
+  size_t consumed;
+  /** Error code: 0 = success. */
+  int err;
+} fio_http_body_parse_result_s;
+```
+
+HTTP body parse result.
 
 #### HTTP Cookies
 
@@ -919,7 +1049,7 @@ void fio_http_write(fio_http_s *, fio_http_write_args_s args);
 
 Writes `data` to the response body associated with the HTTP handle after sending all headers (no further headers may be sent).
 
-Accepts the followung (possibly named) arguments:
+Accepts the following (possibly named) arguments:
 
 ```c
 /** Arguments for the fio_http_write function. */
@@ -1051,6 +1181,16 @@ int fio_http_websocket_requested(fio_http_s *);
 
 Returns non-zero if request headers ask for a WebSockets Upgrade.
 
+#### `fio_http_websocket_accepted`
+
+```c
+int fio_http_websocket_accepted(fio_http_s *h);
+```
+
+Returns non-zero if the response accepts a WebSocket upgrade request.
+
+This is useful for client-side code to check if the server accepted the WebSocket upgrade.
+
 #### `fio_http_upgrade_websocket`
 
 ```c
@@ -1074,6 +1214,16 @@ int fio_http_sse_requested(fio_http_s *);
 ```
 
 Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.
+
+#### `fio_http_sse_accepted`
+
+```c
+int fio_http_sse_accepted(fio_http_s *h);
+```
+
+Returns non-zero if the response accepts an SSE request.
+
+This is useful for client-side code to check if the server accepted the SSE upgrade.
 
 #### `fio_http_upgrade_sse`
 
@@ -1158,12 +1308,12 @@ Closes a persistent HTTP connection (i.e., if upgraded).
 
 ```c
 #define fio_http_subscribe(h, ...)                                             \
-  fio_subscribe(.io = fio_http_io(h), __VA_ARGS__)
+  fio_pubsub_subscribe(.io = fio_http_io(h), __VA_ARGS__)
 ```
 
 Macro helper for HTTP handle pub/sub subscriptions.
 
-This macro wraps `fio_subscribe`, automatically setting the `io` argument to the IO object associated with the HTTP handle.
+This macro wraps `fio_pubsub_subscribe`, automatically setting the `io` argument to the IO object associated with the HTTP handle.
 
 Example:
 
@@ -1175,7 +1325,7 @@ fio_http_subscribe(h, .channel = FIO_STR_INFO1("chat"),
 #### `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT`
 
 ```c
-void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_msg_s *msg);
+void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT(fio_pubsub_msg_s *msg);
 ```
 
 Optional WebSocket subscription callback that directly writes the content of the published message to the WebSocket connection.
@@ -1183,7 +1333,7 @@ Optional WebSocket subscription callback that directly writes the content of the
 #### `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT`
 
 ```c
-void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT(fio_msg_s *msg);
+void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT(fio_pubsub_msg_s *msg);
 ```
 
 Optional WebSocket subscription callback that directly writes the content of the published message to the WebSocket connection - this callback assumes that all messages are UTF-8 valid.
@@ -1191,7 +1341,7 @@ Optional WebSocket subscription callback that directly writes the content of the
 #### `FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY`
 
 ```c
-void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY(fio_msg_s *msg);
+void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_BINARY(fio_pubsub_msg_s *msg);
 ```
 
 Optional WebSocket subscription callback that directly writes the content of the published message to the WebSocket connection - this callback assumes that all messages are binary (non-UTF-8).
@@ -1199,7 +1349,7 @@ Optional WebSocket subscription callback that directly writes the content of the
 #### `FIO_HTTP_SSE_SUBSCRIBE_DIRECT`
 
 ```c
-void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_msg_s *msg);
+void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_pubsub_msg_s *msg);
 ```
 
 An optional EventSource subscription callback - messages MUST be UTF-8.
@@ -1290,7 +1440,7 @@ i.e.:
               header_name)))                                                   \
   FIO_HTTP_PARSED_HEADER_EACH(fio___buf__##value##__str, value) /* loop */
 
-/** Iterated through the properties associated with a parsed header values. */
+/** Iterates through the properties associated with a parsed header value. */
 #define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(/* fio_str_info_s   */ value,      \
                                             /* chosen var named */ property)
 
@@ -1326,6 +1476,45 @@ fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 ```
 
 Finds the Mime-Type associated with the file extension (if registered).
+
+### HTTP Controller
+
+The HTTP Controller manages all the callbacks required by the HTTP Handler in order for HTTP responses and requests to be sent.
+
+This allows the HTTP Handler to be somewhat protocol agnostic.
+
+#### `fio_http_controller_s`
+
+```c
+struct fio_http_controller_s {
+  /* MUST be initialized to zero, used internally by the HTTP Handle. */
+  uintptr_t private_flags;
+  /** Called when an HTTP handle is freed. */
+  void (*on_destroyed)(fio_http_s *h);
+  /** Informs the controller that request / response headers must be sent. */
+  void (*send_headers)(fio_http_s *h);
+  /** called by the HTTP handle for each body chunk, or to finish a response. */
+  void (*write_body)(fio_http_s *h, fio_http_write_args_s args);
+  /** called once a request / response had finished */
+  void (*on_finish)(fio_http_s *h);
+  /** called to close an HTTP connection */
+  void (*close_io)(fio_http_s *h);
+  /** called when the file descriptor is directly required */
+  int (*get_fd)(fio_http_s *h);
+};
+```
+
+**Members:**
+
+- `private_flags` - Internal use only; must be initialized to zero.
+- `on_destroyed` - Called when an HTTP handle is freed.
+- `send_headers` - Informs the controller that request/response headers must be sent.
+- `write_body` - Called by the HTTP handle for each body chunk, or to finish a response.
+- `on_finish` - Called once a request/response had finished.
+- `close_io` - Called to close an HTTP connection.
+- `get_fd` - Called when the file descriptor is directly required.
+
+**Note**: if the controller callbacks aren't thread-safe, then the `fio_http_write` function MUST NOT be called from any thread except the thread that the controller is expecting.
 
 ### Compilation Flags and Default HTTP Handle Behavior
 
@@ -1511,6 +1700,6 @@ UTF-8 validity tests will be performed only for data shorter than this.
 #endif
 ```
 
-If true, logs longest WebSocket ping-pong round-trips (using `FIO_LOG_INFO`).
+If true, logs longest WebSocket round-trips (using `FIO_LOG_INFO`).
 
 ------------------------------------------------------------

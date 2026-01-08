@@ -48,6 +48,8 @@ Sort Settings
 
 /* *****************************************************************************
 Sort API
+
+Note: Sorts in ascending order (bigger is later)
 ***************************************************************************** */
 
 /* Sorts a `FIO_SORT_TYPE` array with `count` members (quicksort). */

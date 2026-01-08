@@ -60,7 +60,7 @@ The Redis engine uses reference counting for memory management:
 - fio_redis_dup():   Increments ref, returns engine
 - fio_redis_free():  Decrements ref, destroys when ref reaches 0
 
-Important: fio_pubsub_attach/detach do NOT affect reference counts.
+Important: fio_pubsub_engine_attach/detach do NOT affect reference counts.
 The caller is responsible for calling fio_redis_free() when done.
 
 Internal reference management:
@@ -95,12 +95,12 @@ Usage 2 - With Pub/Sub:
 
     // Explicitly attach to pub/sub system - this starts the subscription
     // connection and enables SUBSCRIBE/PSUBSCRIBE/PUBLISH functionality
-    fio_pubsub_attach(redis);
+    fio_pubsub_engine_attach(redis);
 
     // ... use pub/sub ...
 
     // Explicitly detach before destroying if attached
-    fio_pubsub_detach(redis);
+    fio_pubsub_engine_detach(redis);
     fio_redis_free(redis);
 
 Note: When used as a sub-engine for clustering, do NOT attach to pub/sub.
@@ -175,8 +175,9 @@ SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine);
  *   - Frees all queued commands
  *   - Frees the engine memory
  *
- * IMPORTANT: If the engine was attached to pub/sub via fio_pubsub_attach(),
- * you MUST call fio_pubsub_detach() before calling fio_redis_free().
+ * IMPORTANT: If the engine was attached to pub/sub via
+ * fio_pubsub_engine_attach(), you MUST call fio_pubsub_engine_detach() before
+ * calling fio_redis_free().
  *
  * Safe to call with NULL (no-op).
  */
@@ -253,8 +254,8 @@ typedef struct fio_redis_connection_s {
  * - on_close callbacks: ref -= 1 (balances the connect ref)
  *
  * Pub/Sub integration (NO ref changes):
- * - fio_pubsub_attach(): does NOT increment ref
- * - fio_pubsub_detach(): does NOT decrement ref
+ * - fio_pubsub_engine_attach(): does NOT increment ref
+ * - fio_pubsub_engine_detach(): does NOT decrement ref
  * - on_detached callback: only marks engine as detached, does NOT free
  */
 typedef struct fio_redis_engine_s {
@@ -501,8 +502,8 @@ after
 - on_close callbacks: ref -= 1 (balances the connect ref)
 
 Pub/Sub integration (NO ref changes):
-- fio_pubsub_attach(): does NOT increment ref
-- fio_pubsub_detach(): does NOT decrement ref
+- fio_pubsub_engine_attach(): does NOT increment ref
+- fio_pubsub_engine_detach(): does NOT decrement ref
 - on_detached callback: only marks engine as detached, does NOT free
 ***************************************************************************** */
 
@@ -717,9 +718,9 @@ FIO_SFUNC void fio___redis_on_sub_message(fio_redis_engine_s *r, FIOBJ msg) {
     r->last_channel = fiobj_dup(channel);
     fio_str_info_s ch = fiobj2cstr(channel);
     fio_str_info_s m = fiobj2cstr(data);
-    fio_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
-                .message = FIO_BUF_INFO2(m.buf, m.len),
-                .engine = FIO_PUBSUB_LOCAL);
+    fio_pubsub_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
+                       .message = FIO_BUF_INFO2(m.buf, m.len),
+                       .engine = fio_pubsub_engine_ipc());
   } else if (type.len == 8 && !FIO_MEMCMP(type.buf, "pmessage", 8) &&
              count >= 4) {
     /* Pattern message: ["pmessage", pattern, channel, data] */
@@ -729,9 +730,9 @@ FIO_SFUNC void fio___redis_on_sub_message(fio_redis_engine_s *r, FIOBJ msg) {
     if (!fiobj_is_eq(r->last_channel, channel)) {
       fio_str_info_s ch = fiobj2cstr(channel);
       fio_str_info_s m = fiobj2cstr(data);
-      fio_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
-                  .message = FIO_BUF_INFO2(m.buf, m.len),
-                  .engine = FIO_PUBSUB_LOCAL);
+      fio_pubsub_publish(.channel = FIO_BUF_INFO2(ch.buf, ch.len),
+                         .message = FIO_BUF_INFO2(m.buf, m.len),
+                         .engine = fio_pubsub_engine_ipc());
     }
   }
   /* Ignore subscribe/unsubscribe confirmations */
@@ -795,7 +796,7 @@ FIO_SFUNC void fio___redis_on_attach(fio_io_s *io) {
                   r->port);
     /* If attached to pub/sub, re-attach to trigger resubscription */
     if (r->attached)
-      fio_pubsub_attach(&r->engine);
+      fio_pubsub_engine_attach(&r->engine);
   } else {
     FIO_LOG_DEBUG("(redis) publishing connection established to %s:%s",
                   r->address,
@@ -1158,7 +1159,7 @@ FIO_SFUNC void fio___redis_punsubscribe(const fio_pubsub_engine_s *eng,
  * fio___redis_attach_cmd.
  */
 FIO_SFUNC void fio___redis_publish(const fio_pubsub_engine_s *eng,
-                                   fio_msg_s *msg) {
+                                   const fio_pubsub_msg_s *msg) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
 
   /* Build PUBLISH command */

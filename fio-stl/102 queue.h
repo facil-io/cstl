@@ -643,8 +643,7 @@ FIO_IFUNC fio___timer_event_s *fio___timer_event_new(
   if (!t)
     goto init_error;
   FIO_LEAK_COUNTER_ON_ALLOC(fio___timer_event_s);
-  if (!args.repetitions)
-    args.repetitions = 1;
+  args.repetitions += !args.repetitions;
   *t = (fio___timer_event_s){
       .fn = args.fn,
       .udata1 = args.udata1,

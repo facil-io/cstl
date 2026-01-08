@@ -1,5 +1,50 @@
 # Change Log
 
+### v.0.8.0.rc.01 (2026-01-19)
+
+**Breaking Change**: (`pubsub`) Complete rewrite of the Pub/Sub module with a new IPC-first architecture.
+
+The Pub/Sub module has been completely rewritten to use the IPC module (`FIO_IPC`) for inter-process communication instead of a custom protocol. This provides better integration with the cluster system and simplifies the codebase.
+
+**API Changes** (`pubsub`):
+
+- **Types renamed**:
+  - `fio_msg_s` -> `fio_pubsub_msg_s`
+  - Message field `published` -> `timestamp`
+  - Removed `is_json` field (deprecated)
+
+- **Functions renamed**:
+  - `fio_subscribe()` -> `fio_pubsub_subscribe()`
+  - `fio_unsubscribe()` -> `fio_pubsub_unsubscribe()`
+  - `fio_publish()` -> `fio_pubsub_publish()`
+
+- **Engine API**:
+  - `fio_pubsub_engine_ipc()` - Get IPC engine (local machine: master + workers)
+  - `fio_pubsub_engine_cluster()` - Get cluster engine (all machines)
+  - `fio_pubsub_engine_default()` / `fio_pubsub_engine_default_set()` - Manage default engine
+  - `fio_pubsub_engine_attach()` / `fio_pubsub_engine_detach()` - Custom engine management
+
+- **New History Manager Interface**:
+  - `fio_pubsub_history_s` - Interface for message history/caching
+  - `fio_pubsub_history_attach()` / `fio_pubsub_history_detach()` - Attach/detach history managers
+  - `fio_pubsub_history_cache()` - Built-in in-memory cache with configurable size limit
+  - Subscriptions can request message replay via `replay_since` argument
+
+- **Removed/Deprecated**:
+  - `FIO_PUBSUB_ROOT`, `FIO_PUBSUB_PROCESS`, `FIO_PUBSUB_SIBLINGS` engines
+  - `fio_pubsub_ipc_url_set()`, `fio_pubsub_ipc_url()` - Use `fio_ipc_url_set()` instead
+  - `fio_pubsub_broadcast_on_port()` - Use `fio_ipc_cluster_listen()` instead
+  - `fio_message_metadata_*()` - Metadata API removed
+  - `is_json` flag - No longer supported
+
+**New Feature**: (`pubsub`) Cluster support via IPC broadcast. When `fio_ipc_cluster_listen()` is called before `fio_io_start()`, the default pub/sub engine automatically switches to the cluster engine for cross-machine message distribution.
+
+**New Feature**: (`pubsub`) Message history with replay support. Late-joining subscribers can request message replay from a specified timestamp using the `replay_since` argument.
+
+**Update**: (`ipc`) The IPC module now provides the transport layer for pub/sub messaging, enabling seamless integration between local IPC and cluster-wide RPC.
+
+---
+
 ### v.0.8.0.beta4
 
 - The 0.8.x versions is a **total rewrite** with a **new API**, totally revised and redesigned. Why?

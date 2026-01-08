@@ -509,6 +509,8 @@ FIO_IFUNC char *fio_bstr_len_set(char *bstr, size_t len);
 
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
 FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b);
+/** Compares to see if fio_bstr a is equal to another fio_bstr. */
+FIO_SFUNC int fio_bstr_is_eq(const char *a, const char *b);
 /** Compares to see if fio_bstr a is equal to another String. */
 FIO_SFUNC int fio_bstr_is_eq2info(const char *a_, fio_str_info_s b);
 /** Compares to see if fio_bstr a is equal to another String. */
@@ -829,6 +831,7 @@ FIO_IFUNC char *fio_bstr_replace(char *bstr,
   return fio_bstr___len_set(i.buf, i.len);
 }
 
+void fio_bstr_write2____(void); /* IDE Marker */
 /** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
 FIO_IFUNC char *fio_bstr_write2 FIO_NOOP(char *bstr,
                                          const fio_string_write_s srcs[]) {
@@ -991,6 +994,13 @@ FIO_IFUNC char *fio_bstr_getdelim_fd(char *bstr,
 /** Compares to see if fio_bstr a is greater than fio_bstr b (for FIO_SORT). */
 FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b) {
   return fio_string_is_greater_buf(fio_bstr_buf(a), fio_bstr_buf(b));
+}
+
+/** Compares to see if fio_bstr a is equal to another fio_bstr. */
+FIO_SFUNC int fio_bstr_is_eq(const char *a_, const char *b_) {
+  fio_buf_info_s a = fio_bstr_buf(a_);
+  fio_buf_info_s b = fio_bstr_buf(b_);
+  return FIO_STR_INFO_IS_EQ(a, b);
 }
 
 /** Compares to see if fio_bstr a is equal to another String. */

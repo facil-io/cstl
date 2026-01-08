@@ -37,7 +37,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "alpha.10"
+#define FIO_VERSION_BUILD "rc.01"
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -625,10 +625,12 @@ Pointer Math
   ((T_type *)((uintptr_t)(ptr) - (uintptr_t)(offset)))
 
 /** Find the root object (of a struct) from it's field (with sanitizer fix). */
+#define FIO_PTR_FIELD_OFFSET(T_type, field)                                    \
+  ((uintptr_t)((&((T_type *)0xFF00)->field)) - 0xFF00)
+
+/** Find the root object (of a struct) from it's field (with sanitizer fix). */
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type,                                                     \
-                   ptr,                                                        \
-                   (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
+  FIO_PTR_MATH_SUB(T_type, ptr, FIO_PTR_FIELD_OFFSET(T_type, field))
 
 /* *****************************************************************************
 Sleep / Thread Scheduling Macros
@@ -1573,7 +1575,7 @@ Memory Leak Detection
   }                                                                            \
   FIO_CONSTRUCTOR(FIO_NAME(fio___leak_counter_const, name)) {                  \
     if (!FIO_LEAK_COUNTER_SKIP_EXIT)                                           \
-      fio_state_callback_add(FIO_CALL_AT_EXIT,                                 \
+      fio_state_callback_add(FIO_CALL_AFTER_EXIT,                              \
                              FIO_NAME(fio___leak_counter_cleanup, name),       \
                              NULL);                                            \
   }
@@ -1581,6 +1583,8 @@ Memory Leak Detection
 #define FIO___LEAK_COUNTER_ON_ALLOC(name) FIO_NAME(fio___leak_counter, name)(1)
 #define FIO___LEAK_COUNTER_ON_FREE(name)                                       \
   FIO_NAME(fio___leak_counter, name)(((size_t)-1))
+#define FIO___LEAK_COUNTER_REPORT(name)                                        \
+  FIO_NAME(fio___leak_counter_cleanup, name)(NULL)
 #endif
 
 /* *****************************************************************************
@@ -1799,6 +1803,19 @@ FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_le(buf, i); }
 #warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
 #endif
 
+#if SIZE_T_MAX == UINT64_MAX
+/** Converts an unaligned byte stream to a size_t - local endieness. */
+FIO_IFUNC size_t fio_buf2zu(const void *c) { return (size_t)fio_buf2u64u(c); }
+/** Writes a size_t to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf64u(buf, i); }
+#elif SIZE_T_MAX == UINT32_MAX
+/** Converts an unaligned byte stream to a size_t - local endieness. */
+FIO_IFUNC size_t fio_buf2zu(const void *c) { return (size_t)fio_buf2u32u(c); }
+/** Writes a size_t to an unaligned buffer - in local endieness. */
+FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf32u(buf, i); }
+#else
+#warning "Couldn't calculate local version for fio_buf2zu and fio_u2bufzu"
+#endif
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
 ***************************************************************************** */
@@ -4351,7 +4368,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
  * If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
  */
 #define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)         \
-  static uint64_t name##___state[8] FIO_ALIGN(64) = {                          \
+  static uint64_t name##___state[9] FIO_ALIGN(64) = {                          \
       0x9c65875be1fce7b9ULL + seed_offset,                                     \
       0x7cc568e838f6a40dULL,                                                   \
       0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
@@ -4362,7 +4379,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
     name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
     name##___state[3] = 0x95561f0927ad7ecdULL;                                 \
-    name##___state[4] = 0;                                                     \
+    name##___state[8] = name##___state[4] = 0;                                 \
   }                                                                            \
   extern void name##_reseed(void) {                                            \
     const size_t jitter_samples = 16 | (name##___state[0] & 15);               \
@@ -4384,6 +4401,7 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
       name##___state[2] += clk[0] + fio_cycle_counter();                       \
       name##___state[3] += clk[1] + fio_cycle_counter();                       \
     }                                                                          \
+    name##___state[8] += ((name##___state[8] & 7) + (name##___state[0] & 30)); \
   }                                                                            \
   /** Re-seeds the PNGR so forked processes don't match. */                    \
   extern FIO_MAYBE_UNUSED void name##_on_fork(void *is_null) {                 \
@@ -4437,9 +4455,9 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
   extern FIO_MAYBE_UNUSED uint64_t name##64(void) {                            \
-    static size_t counter;                                                     \
     static fio_u128 r;                                                         \
-    if (!((counter++) & 1))                                                    \
+    size_t counter = fio_atomic_add(name##___state + 8, 1);                    \
+    if (!(counter & 1))                                                        \
       r = name##128();                                                         \
     return r.u64[counter & 1];                                                 \
   }                                                                            \

@@ -23,13 +23,15 @@ Copyright: Boaz Segev, 2019-2021; License: ISC / MIT (choose your license)
 iMap Helper Macros
 ***************************************************************************** */
 
-/** Helper macro for simple iMap array types. */
+/** Helper macro for simple iMap array types - always valid. */
 #define FIO_IMAP_ALWAYS_VALID(o) (1)
-/** Helper macro for simple iMap array types. */
+/** Helper macro for simple iMap array types - valid if nonzero. */
+#define FIO_IMAP_VALID_NON_ZERO(o) (!!(o))
+/** Helper macro for simple iMap array types - type comparison always true. */
 #define FIO_IMAP_ALWAYS_CMP_TRUE(a, b) (1)
-/** Helper macro for simple iMap array types. */
+/** Helper macro for simple iMap array types - type comparison always false. */
 #define FIO_IMAP_ALWAYS_CMP_FALSE(a, b) (0)
-/** Helper macro for simple iMap array types. */
+/** Helper macro for simple iMap array types - simple comparison. */
 #define FIO_IMAP_SIMPLE_CMP(a, b) ((a)[0] == (b)[0])
 /** Helper macro for simple iMap array types. */
 #define FIO_IMAP_EACH(array_name, map_ptr, i)                                  \
@@ -67,6 +69,7 @@ iMap Creation Macro
  * - `array_name_remove`   removes an object and resets its memory to zero.
  * - `array_name_reserve`  reserves a minimum imap storage capacity.
  * - `array_name_rehash`   re-builds the imap (use after sorting).
+ * - `array_name_destroy`  de-allocates internal dynamic memory.
  */
 #define FIO_TYPEDEF_IMAP_ARRAY(array_name,                                     \
                                array_type,                                     \

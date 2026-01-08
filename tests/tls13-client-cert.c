@@ -706,9 +706,6 @@ FIO_SFUNC void test_server_state_names(void) {
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_INFO("TLS 1.3 Client Certificate Authentication Tests\n");
-  FIO_LOG_INFO("================================================\n");
-
   test_certificate_request_build_parse();
   test_server_require_client_cert();
   test_client_set_cert();
@@ -716,9 +713,5 @@ int main(void) {
   test_mtls_handshake();
   test_mtls_empty_client_cert();
   test_mtls_empty_client_cert_required();
-
-  FIO_LOG_INFO("\n================================================\n");
-  FIO_LOG_INFO("All TLS 1.3 Client Certificate tests passed!\n");
-
   return 0;
 }

@@ -305,17 +305,18 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_URL_ENCODED
 #endif
 
-#if defined(FIO_PUBSUB) || (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
-#undef FIO_IO
-#define FIO_IO
-#endif
-
 #if defined(FIO_HTTP) || defined(FIO_REDIS)
 #undef FIO_PUBSUB
 #define FIO_PUBSUB
 #endif
 
-#if defined(FIO_HTTP) || defined(FIO_PUBSUB)
+#if defined(FIO_PUBSUB)
+#undef FIO_IPC
+#define FIO_IPC
+#endif
+
+#if defined(FIO_HTTP) || defined(FIO_IPC) ||                                   \
+    (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
 #undef FIO_IO
 #define FIO_IO
 #endif
@@ -369,7 +370,8 @@ FIO_MAP Ordering & Naming Shortcut
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
-    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP)
+    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP) ||     \
+    defined(FIO_PUBSUB)
 #undef FIO_STR
 #define FIO_STR
 #endif
@@ -399,7 +401,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
-#if defined(FIO_PUBSUB)
+#if defined(IPC)
 #define FIO_CHACHA
 #define FIO_SECRET
 #endif
@@ -445,7 +447,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_POLL) ||       \
-    defined(FIO_STATE) || defined(FIO_HTTP_HANDLE)
+    defined(FIO_STATE) || defined(FIO_HTTP_HANDLE) || defined(FIO_PUBSUB)
 #undef FIO_IMAP_CORE
 #define FIO_IMAP_CORE
 #endif

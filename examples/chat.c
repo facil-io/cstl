@@ -203,7 +203,7 @@ FIO_SFUNC void on_data_login(fio_io_s *io) {
   if (on_data_process_line(io, on_data_first_line))
     return;
   fio_io_protocol_set(io, &CHAT_PROTOCOL_CHAT);
-  fio_subscribe(.io = io);
+  fio_pubsub_subscribe(.io = io);
   on_data_chat(io);
 }
 
@@ -255,7 +255,7 @@ int main(int argc, char const *argv[]) {
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
 
   if (fio_cli_get_bool("-v"))
-    fio_subscribe(.on_message = print_chat, .master_only = 1);
+    fio_pubsub_subscribe(.on_message = print_chat, .master_only = 1);
 
   /* review CLI connection address (in URL format) */
   FIO_ASSERT(fio_io_listen(.url = fio_cli_unnamed(0),

@@ -110,7 +110,7 @@ For example, in the header (i.e., `mymem.h`), use:
 ```c
 #define FIO_EXTERN
 #define FIO_MALLOC
-#include "fio-stl/include.h" /* or "fio-stl.h" */
+#include FIO_INCLUDE_FILE
 /* FIO_EXTERN automatically undefined in this case */
 ```
 
@@ -431,14 +431,54 @@ Add offset bytes to pointer's address, updating the pointer's type.
 
 Subtract X bytes from pointer's address, updating the pointer's type.
 
+#### `FIO_PTR_FIELD_OFFSET`
+
+```c
+#define FIO_PTR_FIELD_OFFSET(T_type, field)                                    \
+  ((uintptr_t)((&((T_type *)0xFF00)->field)) - 0xFF00)
+```
+
+Calculates the byte offset of a field within a struct type.
+
+**Note**: Uses `0xFF00` as a base address instead of `0` to avoid undefined behavior with address sanitizers and strict aliasing rules.
+
+Example:
+
+```c
+typedef struct {
+  int a;
+  char b;
+  double c;
+} my_struct_s;
+
+size_t offset = FIO_PTR_FIELD_OFFSET(my_struct_s, c);
+// offset now contains the byte offset of field 'c' within my_struct_s
+```
+
 #### `FIO_PTR_FROM_FIELD`
 
 ```c
 #define FIO_PTR_FROM_FIELD(T_type, field, ptr)                                 \
-  FIO_PTR_MATH_SUB(T_type, ptr, (uintptr_t)(&((T_type *)0xFF00)->field) - 0xFF00)
+  FIO_PTR_MATH_SUB(T_type, ptr, FIO_PTR_FIELD_OFFSET(T_type, field))
 ```
 
 Find the root object (of a `struct`) from a pointer to its field's address.
+
+**Note**: Uses `FIO_PTR_FIELD_OFFSET` internally, which uses `0xFF00` as a base address to avoid undefined behavior with address sanitizers.
+
+Example:
+
+```c
+typedef struct {
+  int id;
+  fio_list_node_s node;
+  char *name;
+} my_item_s;
+
+// Given a pointer to the 'node' field, get the containing struct
+fio_list_node_s *node_ptr = /* ... */;
+my_item_s *item = FIO_PTR_FROM_FIELD(my_item_s, node, node_ptr);
+```
 
 -------------------------------------------------------------------------------
 
@@ -829,10 +869,10 @@ This is provided to allow for easy "tail" processing.
 #### `fio_memcpy`
 
 ```c
-static void *fio_memcpy(void *dest, const void *src, size_t length);
+void *fio_memcpy(void *dest, const void *src, size_t bytes);
 ```
 
-A fallback for `memcpy` and `memmove`, copies `length` bytes from `src` to `dest`.
+A fallback for `memcpy` and `memmove`, copies `bytes` bytes from `src` to `dest`.
 
 Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
 
@@ -853,12 +893,12 @@ By default this will be set to either `memset` or `__builtin_memset` (if availab
 #### `fio_memset`
 
 ```c
-static void *fio_memset(void *restrict dest, uint64_t token, size_t length);
+void *fio_memset(void *restrict dest, uint64_t data, size_t bytes);
 ```
 
-A fallback for `memset`. Sets `length` bytes in the `dest` buffer to `token`.
+A fallback for `memset`. Sets `bytes` bytes in the `dest` buffer to `data`.
 
-The `token` can be either a single byte - in which case all bytes in `dest` will be set to `token` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
+The `data` can be either a single byte - in which case all bytes in `dest` will be set to `data` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
 
 On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
 
@@ -879,7 +919,7 @@ By default this will be set to either `memchr` or `__builtin_memchr` (if availab
 #### `fio_memchr`
 
 ```c
-static void *fio_memchr(const void *buffer, const char token, size_t len);
+void *fio_memchr(const void *buffer, const char token, size_t len);
 ```
 
 A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
@@ -903,7 +943,7 @@ By default this will be set to either `memcmp` or `__builtin_memcmp` (if availab
 #### `fio_memcmp`
 
 ```c
-static int fio_memcmp(const void *a, const void *b, size_t len);
+int fio_memcmp(const void *a, const void *b, size_t len);
 ```
 
 A fallback for `memcmp`, comparing two memory regions by byte values.
@@ -925,7 +965,7 @@ By default this will be set to either `strlen` or `__builtin_strlen` (if availab
 #### `fio_strlen`
 
 ```c
-static size_t fio_strlen(const char *str);
+size_t fio_strlen(const char *str);
 ```
 
 A fallback for `strlen`, returning the length of the string.
@@ -945,7 +985,7 @@ Note that this will also cause `__builtin_memcpy` to be bypassed for the fixed `
 #### `fio_secure_zero`
 
 ```c
-void fio_secure_zero(const void *a_, size_t bytes);
+void fio_secure_zero(void *a_, size_t bytes);
 ```
 
 Securely zeros memory, preventing compiler optimizations from removing the operation.
@@ -1173,7 +1213,7 @@ Returns the absolute value of `i`.
 #### `fio_ct_is_eq`
 
 ```c
-_Bool fio_ct_is_eq(const void *a, const void *b, size_t len);
+_Bool fio_ct_is_eq(const void *a, const void *b, size_t bytes);
 ```
 
 Returns 1 if memory regions are equal. Should be resistant to timing attacks.
@@ -1856,6 +1896,8 @@ Unlocks all sub locks, no matter which thread owns which lock.
 
 ## Linked Lists
 
+The facil.io C STL provides a doubly-linked list implementation using macros. These are intrusive linked lists, meaning the list node is embedded within your data structure.
+
 #### `fio_list_node_s`
 
 ```c
@@ -1865,7 +1907,7 @@ typedef struct fio_list_node_s {
 } fio_list_node_s;
 ```
 
-A linked list arch-type.
+A linked list arch-type. This struct should be embedded in your data structures to enable linked list functionality.
 
 #### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
 
@@ -1874,7 +1916,7 @@ A linked list arch-type.
 #define FIO_LIST_HEAD fio_list_node_s
 ```
 
-Type aliases for linked list nodes and heads.
+Type aliases for linked list nodes and heads. Both are the same type - the distinction is semantic (a "head" is a sentinel node that marks the beginning/end of the list).
 
 #### `FIO_LIST_INIT`
 
@@ -1882,23 +1924,13 @@ Type aliases for linked list nodes and heads.
 #define FIO_LIST_INIT(obj) (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
 ```
 
-Allows initialization of FIO_LIST_HEAD objects.
+Initializes a `FIO_LIST_HEAD` object to an empty list state (pointing to itself).
 
-#### `FIO_LIST_EACH`
-
-```c
-#define FIO_LIST_EACH(type, node_name, head, pos)
-```
-
-Loops through every node in the linked list except the head.
-
-#### `FIO_LIST_EACH_REVERSED`
+Example:
 
 ```c
-#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)
+FIO_LIST_HEAD my_list = FIO_LIST_INIT(my_list);
 ```
-
-Loops through every node in the linked list in reverse order except the head.
 
 #### `FIO_LIST_PUSH`
 
@@ -1906,23 +1938,24 @@ Loops through every node in the linked list in reverse order except the head.
 #define FIO_LIST_PUSH(head, n)
 ```
 
-UNSAFE macro for pushing a node to a list.
+UNSAFE macro for pushing a node to the end of a list (before the head).
 
-#### `FIO_LIST_REMOVE`
+**Parameters:**
+- `head` - pointer to the list head (`fio_list_node_s *`)
+- `n` - pointer to the node to push (`fio_list_node_s *`)
 
-```c
-#define FIO_LIST_REMOVE(n)
-```
-
-UNSAFE macro for removing a node from a list.
-
-#### `FIO_LIST_REMOVE_RESET`
+Example:
 
 ```c
-#define FIO_LIST_REMOVE_RESET(n)
-```
+typedef struct {
+  int value;
+  fio_list_node_s node;
+} my_item_s;
 
-UNSAFE macro for removing a node from a list. Resets node data.
+FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+my_item_s item = {.value = 42};
+FIO_LIST_PUSH(&list, &item.node);
+```
 
 #### `FIO_LIST_POP`
 
@@ -1930,21 +1963,121 @@ UNSAFE macro for removing a node from a list. Resets node data.
 #define FIO_LIST_POP(type, node_name, dest_ptr, head)
 ```
 
-UNSAFE macro for popping a node from a list.
+UNSAFE macro for popping a node from the front of a list.
+
+**Parameters:**
+- `type` - the type of the containing struct
+- `node_name` - the name of the `fio_list_node_s` field within the struct
+- `dest_ptr` - a pointer variable that will receive the popped item
+- `head` - pointer to the list head (`fio_list_node_s *`)
+
+Example:
+
+```c
+my_item_s *popped;
+FIO_LIST_POP(my_item_s, node, popped, &list);
+// popped now points to the first item (or the head if list was empty)
+```
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)
+```
+
+UNSAFE macro for removing a node from a list. Does not reset the node's pointers.
+
+**Parameters:**
+- `n` - pointer to the node to remove (`fio_list_node_s *`)
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)
+```
+
+UNSAFE macro for removing a node from a list and resetting its pointers to point to itself.
+
+**Parameters:**
+- `n` - pointer to the node to remove (`fio_list_node_s *`)
 
 #### `FIO_LIST_IS_EMPTY`
 
 ```c
-#define FIO_LIST_IS_EMPTY(head)
+#define FIO_LIST_IS_EMPTY(head) \
+  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
 ```
 
 UNSAFE macro for testing if a list is empty.
+
+**Parameters:**
+- `head` - pointer to the list head (`fio_list_node_s *`)
+
+**Returns:** non-zero if the list is empty, zero otherwise.
+
+#### `FIO_LIST_EACH`
+
+```c
+#define FIO_LIST_EACH(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list except the head, from first to last.
+
+**Parameters:**
+- `type` - the type of the containing struct
+- `node_name` - the name of the `fio_list_node_s` field within the struct
+- `head` - pointer to the list head (`fio_list_node_s *`)
+- `pos` - the variable name to use for the current item pointer
+
+**Note**: Safe to use when removing the current node during iteration.
+
+Example:
+
+```c
+typedef struct {
+  int value;
+  fio_list_node_s node;
+} my_item_s;
+
+FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+// ... add items to list ...
+
+FIO_LIST_EACH(my_item_s, node, &list, item) {
+  printf("Value: %d\n", item->value);
+  // Safe to remove current item:
+  // FIO_LIST_REMOVE(&item->node);
+}
+```
+
+#### `FIO_LIST_EACH_REVERSED`
+
+```c
+#define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)
+```
+
+Loops through every node in the linked list in reverse order (from last to first), except the head.
+
+**Parameters:**
+- `type` - the type of the containing struct
+- `node_name` - the name of the `fio_list_node_s` field within the struct
+- `head` - pointer to the list head (`fio_list_node_s *`)
+- `pos` - the variable name to use for the current item pointer
+
+**Note**: Safe to use when removing the current node during iteration.
+
+Example:
+
+```c
+FIO_LIST_EACH_REVERSED(my_item_s, node, &list, item) {
+  printf("Value (reversed): %d\n", item->value);
+}
+```
 
 -------------------------------------------------------------------------------
 
 ## Indexed Linked Lists
 
-Indexed Linked Lists can be used to create a linked list that uses is always relative to some root pointer (usually the root of an array). This:
+Indexed Linked Lists can be used to create a linked list that uses indices relative to some root pointer (usually the root of an array) instead of absolute pointers. This:
 
 1. Allows easy reallocation of the list without requiring pointer updates.
 2. Could be used for memory optimization if the array limits are known.
@@ -1959,7 +2092,20 @@ typedef struct fio_index16_node_s { uint16_t next; uint16_t prev; } fio_index16_
 typedef struct fio_index8_node_s { uint8_t next; uint8_t prev; } fio_index8_node_s;
 ```
 
-Indexed linked list node types for different index sizes.
+Indexed linked list node types for different index sizes (32-bit, 16-bit, and 8-bit indices).
+
+#### `FIO_INDEXED_LIST32_NODE` / `FIO_INDEXED_LIST16_NODE` / `FIO_INDEXED_LIST8_NODE`
+
+```c
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+```
+
+Type aliases for indexed linked list nodes and heads.
 
 #### `FIO_INDEXED_LIST_PUSH`
 
@@ -1967,7 +2113,27 @@ Indexed linked list node types for different index sizes.
 #define FIO_INDEXED_LIST_PUSH(root, node_name, head, i)
 ```
 
-UNSAFE macro for pushing a node to an indexed list.
+UNSAFE macro for pushing a node to the end of an indexed list (before the head).
+
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `head` - the index of the list head
+- `i` - the index of the node to push
+
+#### `FIO_INDEXED_LIST_UNSHIFT`
+
+```c
+#define FIO_INDEXED_LIST_UNSHIFT(root, node_name, head, i)
+```
+
+UNSAFE macro for adding a node to the beginning of an indexed list (updates head).
+
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `head` - the index of the list head (will be updated to `i`)
+- `i` - the index of the node to add
 
 #### `FIO_INDEXED_LIST_REMOVE`
 
@@ -1977,6 +2143,24 @@ UNSAFE macro for pushing a node to an indexed list.
 
 UNSAFE macro for removing a node from an indexed list.
 
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `i` - the index of the node to remove
+
+#### `FIO_INDEXED_LIST_REMOVE_RESET`
+
+```c
+#define FIO_INDEXED_LIST_REMOVE_RESET(root, node_name, i)
+```
+
+UNSAFE macro for removing a node from an indexed list and resetting its indices to point to itself.
+
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `i` - the index of the node to remove
+
 #### `FIO_INDEXED_LIST_EACH`
 
 ```c
@@ -1984,6 +2168,26 @@ UNSAFE macro for removing a node from an indexed list.
 ```
 
 Loops through every index in the indexed list, assuming `head` is valid.
+
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `head` - the index of the list head
+- `pos` - the variable name to use for the current index
+
+#### `FIO_INDEXED_LIST_EACH_REVERSED`
+
+```c
+#define FIO_INDEXED_LIST_EACH_REVERSED(root, node_name, head, pos)
+```
+
+Loops through every index in the indexed list in reverse order, assuming `head` is valid.
+
+**Parameters:**
+- `root` - pointer to the array of structs containing the indexed list nodes
+- `node_name` - the name of the indexed list node field within the struct
+- `head` - the index of the list head
+- `pos` - the variable name to use for the current index
 
 -------------------------------------------------------------------------------
 

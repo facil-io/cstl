@@ -144,6 +144,7 @@ FIO_SFUNC void fio___io_shutdown(void) {
   FIO_LOG_DEBUG2("(%d) IO Reactor shutdown timeout/done with %zu clients",
                  fio_io_pid(),
                  connected);
+  (void)connected; /* if no logger */
   /* perform remaining tasks. */
   fio_queue_perform_all(&FIO___IO.queue);
 }
@@ -295,9 +296,9 @@ is_worker_process:
 
   if (FIO___IO.stop)
     goto skip_work;
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
-  fio_queue_perform_all(&FIO___IO.queue);
   fio_state_callback_force(FIO_CALL_IN_CHILD);
+  fio_queue_perform_all(&FIO___IO.queue);
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
   fio_queue_perform_all(&FIO___IO.queue);
   fio___io_work(1);
   FIO_LOG_INFO("(%d) worker exiting.", fio_io_pid());
@@ -329,17 +330,17 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
 
   /* perform forking procedure with the stop flag reset. */
   fio_atomic_and_fetch(&FIO___IO.stop, 1);
-  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
 
+  fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* perform actual fork */
   do {
     fio___io_spawn_worker();
+    fio_state_callback_force(FIO_CALL_IN_MASTER);
   } while (fio_atomic_sub_fetch(&FIO___IO.to_spawn, 1));
+  fio_state_callback_force(FIO_CALL_AFTER_FORK);
 
   /* finish up */
-  fio_state_callback_force(FIO_CALL_AFTER_FORK);
-  fio_state_callback_force(FIO_CALL_IN_MASTER);
   if ((FIO___IO.flags & FIO___IO_FLAG_CYCLING)) {
     fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
     FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
@@ -505,17 +506,22 @@ static fio___io_listen_s *fio___io_listen_dup(fio___io_listen_s *l) {
   return l;
 }
 
+FIO_SFUNC void fio___io_listen_attach_task(void *l_);
 static void fio___io_listen_free(void *l_) {
   fio___io_listen_s *l = (fio___io_listen_s *)l_;
-  if (l->io)
+  if (l->io) {
     fio_io_close(l->io);
+    l->io = NULL;
+  }
   if (fio_atomic_sub(&l->ref_count, 1))
     return;
 
   fio_state_callback_remove(FIO_CALL_AT_EXIT, fio___io_listen_free, (void *)l);
-  fio_state_callback_remove(FIO_CALL_ON_START, fio___io_listen_free, (void *)l);
+  fio_state_callback_remove(FIO_CALL_ON_START,
+                            fio___io_listen_attach_task,
+                            (void *)l);
   fio_state_callback_remove(FIO_CALL_PRE_START,
-                            fio___io_listen_free,
+                            fio___io_listen_attach_task,
                             (void *)l);
   fio___io_func_free_context_caller(l->protocol->io_functions.free_context,
                                     l->tls_ctx);

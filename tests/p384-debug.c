@@ -896,7 +896,7 @@ FIO_SFUNC void test_ecdsa_equation(void) {
   /* Verify the signature equation: s = k^(-1) * (e + r*d) mod n */
   FIO_LOG_INFO("  Verifying signature equation: s = k^(-1) * (e + r*d) mod n");
   {
-    fio___p384_scalar_s k_inv, rd, e_plus_rd, computed_s;
+    fio___p384_scalar_s k_inv, rd;
 
     /* k^(-1) */
     fio___p384_scalar_inv(k_inv, k);

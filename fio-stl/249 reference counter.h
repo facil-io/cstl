@@ -99,8 +99,8 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void);
 #endif /* FIO_REF_FLEX_TYPE */
 
 /** Increases the reference count. */
-FIO_IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
-                                    FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped);
+FIO_IFUNC FIO_REF_TYPE_PTR
+    FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(const FIO_REF_TYPE_PTR wrapped);
 
 /** Frees a reference counted object (or decreases the reference count). */
 IFUNC void FIO_NAME(FIO_REF_NAME, FIO_REF_DESTRUCTOR)(FIO_REF_TYPE_PTR wrapped);
@@ -121,14 +121,14 @@ Inline Implementation
 ***************************************************************************** */
 /** Increases the reference count. */
 FIO_IFUNC FIO_REF_TYPE_PTR
-FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(FIO_REF_TYPE_PTR wrapped_) {
-  FIO_REF_TYPE *wrapped = (FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
+FIO_NAME(FIO_REF_NAME, FIO_REF_DUPNAME)(const FIO_REF_TYPE_PTR wrapped_) {
+  const FIO_REF_TYPE *wrapped = (const FIO_REF_TYPE *)(FIO_PTR_UNTAG(wrapped_));
   if (!wrapped || !wrapped_)
     return 0;
   FIO_NAME(FIO_REF_NAME, _wrapper_s) *o =
       ((FIO_NAME(FIO_REF_NAME, _wrapper_s) *)wrapped) - 1;
   fio_atomic_add(&o->ref, 1);
-  return wrapped_;
+  return (FIO_REF_TYPE_PTR)wrapped_;
 }
 
 /** Debugging helper, do not use for data, as returned value is unstable. */

@@ -7892,6 +7892,7 @@ SFUNC int fio_tls13_server_decrypt(fio_tls13_server_s *server,
       FIO_LOG_DEBUG2("TLS 1.3 Server: Received alert: level=%d, desc=%d",
                      level,
                      desc);
+      (void)level; /* if unused by logger */
       /* close_notify (0) is a graceful shutdown, return 0 (EOF) */
       if (desc == 0)
         return 0;
