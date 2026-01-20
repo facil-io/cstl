@@ -335,6 +335,7 @@ typedef SSIZE_T ssize_t;
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1803,18 +1804,19 @@ FIO_IFUNC void fio_u2buf24u(void *buf, uint32_t i) { fio_u2buf24_le(buf, i); }
 #warning "Couldn't calculate local version for fio_buf2u24u and fio_u2buf24u"
 #endif
 
-#if SIZE_T_MAX == UINT64_MAX
+#if SIZE_MAX > 0xFFFFFFFF || SIZE_MAX == UINT64_MAX || SIZE_WIDTH == 64
 /** Converts an unaligned byte stream to a size_t - local endieness. */
 FIO_IFUNC size_t fio_buf2zu(const void *c) { return (size_t)fio_buf2u64u(c); }
 /** Writes a size_t to an unaligned buffer - in local endieness. */
 FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf64u(buf, i); }
-#elif SIZE_T_MAX == UINT32_MAX
+#elif SIZE_MAX > 0xFFFF || SIZE_MAX == UINT32_MAX || SIZE_WIDTH == 32
 /** Converts an unaligned byte stream to a size_t - local endieness. */
 FIO_IFUNC size_t fio_buf2zu(const void *c) { return (size_t)fio_buf2u32u(c); }
 /** Writes a size_t to an unaligned buffer - in local endieness. */
 FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf32u(buf, i); }
 #else
-#warning "Couldn't calculate local version for fio_buf2zu and fio_u2bufzu"
+#warning                                                                       \
+    "Couldn't calculate local version for fio_buf2zu and fio_u2bufzu\n\tSIZE_T_MAX == "##SIZE_T_MAX
 #endif
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
