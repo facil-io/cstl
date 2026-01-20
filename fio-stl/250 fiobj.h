@@ -37,7 +37,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_FIOBJ) && !defined(H___FIO_FIOBJ___H) &&                       \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_FIOBJ___H
-#define FIO___RECURSIVE_INCLUDE 99 /* 99 keeps EXTERN rules */
+#undef FIO_FIOBJ
+#define FIO___RECURSIVE_INCLUDE 99 /* 99 keeps EXTERN rules the same */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -2259,5 +2260,4 @@ FIOBJ cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#undef FIO_FIOBJ
 #endif /* FIO_FIOBJ */

@@ -19,6 +19,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_REDIS) && !defined(FIO___RECURSIVE_INCLUDE) &&                 \
     !defined(H___FIO_REDIS___H)
 #define H___FIO_REDIS___H
+#undef FIO_REDIS
 
 /* *****************************************************************************
 Redis Engine - Overview
@@ -1401,5 +1402,4 @@ SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
 Redis Module Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_REDIS
 #endif /* FIO_REDIS && !H___FIO_REDIS___H */

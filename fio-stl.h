@@ -4806,10 +4806,10 @@ Everything Inclusion
 #define H___FIO_EVERYTHING1___H
 #undef FIO_FIOBJ
 #undef FIO_HTTP
+#undef FIO_IO
 #undef FIO_MALLOC
 #undef FIO_MUSTACHE
 #undef FIO_PUBSUB
-#undef FIO_IO
 #undef FIOBJ_MALLOC
 #define FIO_CLI
 #define FIO_CORE
@@ -4827,10 +4827,10 @@ Everything Inclusion
 #define FIO_HTTP
 #define FIO_IO
 #define FIO_MALLOC
+#define FIO_MEMALT
 #define FIO_MUSTACHE
 #define FIO_PUBSUB
-#define FIO_MEMALT
-
+#define FIO_REDIS
 #endif
 
 #define FIO___INCLUDE_AGAIN
@@ -4861,8 +4861,8 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 #define H___FIO_BASIC_ROUND2___H
 #define FIO_FIOBJ
 #define FIO_MUSTACHE
-#define FIOBJ_MALLOC
 #define FIO_OTP
+#define FIOBJ_MALLOC
 
 #else
 #define H___FIO_BASIC___H
@@ -4879,11 +4879,11 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13) ||         \
     defined(FIO_IO)
-#undef FIO_CRYPT
-#undef FIO_CRYPTO
 #undef FIO_AES
 #undef FIO_ASN1
 #undef FIO_CHACHA
+#undef FIO_CRYPT
+#undef FIO_CRYPTO
 #undef FIO_CRYPTO_CORE
 #undef FIO_ED25519
 #undef FIO_OTP
@@ -4897,23 +4897,23 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #undef FIO_TLS13
 #undef FIO_X509
 #define FIO_CRYPTO_CORE
+#define FIO_AES
+#define FIO_ASN1
+#define FIO_BLAKE2
+#define FIO_CHACHA
+#define FIO_ED25519
+#define FIO_HKDF
+#define FIO_OTP
+#define FIO_P256
+#define FIO_P384
+#define FIO_PEM
+#define FIO_RSA
+#define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
 #define FIO_SHA3
-#define FIO_BLAKE2
-#define FIO_CHACHA
-#define FIO_HKDF
-#define FIO_AES
-#define FIO_ED25519
-#define FIO_P256
-#define FIO_P384
-#define FIO_ASN1
-#define FIO_RSA
-#define FIO_X509
-#define FIO_PEM
-#define FIO_OTP
-#define FIO_SECRET
 #define FIO_TLS13
+#define FIO_X509
 #endif /* FIO_CRYPTO */
 
 /* *****************************************************************************
@@ -4921,6 +4921,7 @@ FIO_CORE                        Core Inclusion
 ***************************************************************************** */
 #if defined(FIO_CORE)
 #undef FIO_ATOL
+#undef FIO_CORE
 #undef FIO_FILES
 #undef FIO_GLOB_MATCH
 #undef FIO_LOG
@@ -4929,7 +4930,6 @@ FIO_CORE                        Core Inclusion
 #undef FIO_STATE
 #undef FIO_TIME
 #undef FIO_URL
-#undef FIO_CORE
 #define FIO_ATOL
 #define FIO_FILES
 #define FIO_GLOB_MATCH
@@ -5064,15 +5064,19 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_IPC
 #endif
 
-#if defined(FIO_HTTP) || defined(FIO_IPC) ||                                   \
-    (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
+#if defined(FIO_IPC) || (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
 #undef FIO_IO
 #define FIO_IO
 #endif
 
-#if defined(FIO_HTTP) || defined(FIO_IO)
+#if defined(FIO_IO)
 #undef FIO_POLL
 #define FIO_POLL
+#endif
+
+#if defined(FIO_REDIS)
+#undef FIO_FIOBJ
+#define FIO_FIOBJ
 #endif
 
 /* *****************************************************************************
@@ -58461,7 +58465,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_FIOBJ) && !defined(H___FIO_FIOBJ___H) &&                       \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_FIOBJ___H
-#define FIO___RECURSIVE_INCLUDE 99 /* 99 keeps EXTERN rules */
+#undef FIO_FIOBJ
+#define FIO___RECURSIVE_INCLUDE 99 /* 99 keeps EXTERN rules the same */
 /* *****************************************************************************
 FIOBJ compilation settings (type names and JSON nesting limits).
 
@@ -60683,7 +60688,6 @@ FIOBJ cleanup
 #endif /* FIO_EXTERN_COMPLETE */
 #undef FIOBJ_EXTERN_OBJ
 #undef FIOBJ_EXTERN_OBJ_IMP
-#undef FIO_FIOBJ
 #endif /* FIO_FIOBJ */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
@@ -67058,6 +67062,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_IPC) && !defined(H___FIO_IPC___H) &&                           \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_IPC___H
+#undef FIO_IPC
 
 #ifndef FIO_IPC_URL_MAX_LENGTH
 #define FIO_IPC_URL_MAX_LENGTH 1024
@@ -67379,19 +67384,19 @@ typedef struct fio___ipc_metadata_s {
 #define FIO_REF_FLEX_TYPE        char
 #include FIO_INCLUDE_FILE
 
-FIO_IFUNC size_t fio___ipc_sizeof_header(void) {
-  return (FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
-          FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
+FIO_IFUNC uint32_t fio___ipc_sizeof_header(void) {
+  return (uint32_t)(FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
+                    FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
 }
-FIO_IFUNC size_t fio___ipc_sizeof_enc(uint32_t len) {
-  return (FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
-          FIO_PTR_FIELD_OFFSET(fio_ipc_s, call)) +
+FIO_IFUNC uint32_t fio___ipc_sizeof_enc(uint32_t len) {
+  return (uint32_t)(FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
+                    FIO_PTR_FIELD_OFFSET(fio_ipc_s, call)) +
          len;
 }
 
-FIO_IFUNC size_t fio___ipc_wire_length(uint32_t len) {
+FIO_IFUNC uint32_t fio___ipc_wire_length(uint32_t len) {
   /* includes the 16 byte MAC and data */
-  return (fio___ipc_sizeof_header() + len + 16);
+  return (uint32_t)(fio___ipc_sizeof_header() + len + 16);
 }
 
 /* *****************************************************************************
@@ -68664,7 +68669,6 @@ IPC - Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_IPC */
-#undef FIO_IPC
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -70771,6 +70775,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_PUBSUB___H
+#undef FIO_PUBSUB
 
 /* FIO_PUBSUB requires FIO_IPC for inter-process communication.
  * If FIO_IPC is not already included, we trigger an error.
@@ -70923,7 +70928,7 @@ Pub/Sub2 - available IO on_pubsub callback
 ***************************************************************************** */
 
 /** A callback for IO subscriptions - sends raw message data. */
-FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg);
+SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg);
 
 /* *****************************************************************************
 Pub/Sub2 - Fragile - access the underlying implementation for advance use-cases
@@ -72012,6 +72017,14 @@ FIO_SFUNC void fio___pubsub_subscription_env_unsubscribe(void *sub_) {
 
 int fio_pubsub_unsubscribe___(void); /* IDE Marker */
 SFUNC int fio_pubsub_unsubscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
+  /* Handle subscriptions created with subscription_handle_ptr */
+  if (args.subscription_handle_ptr && *args.subscription_handle_ptr) {
+    fio_pubsub_subscription_s *sub =
+        (fio_pubsub_subscription_s *)*args.subscription_handle_ptr;
+    *args.subscription_handle_ptr = 0;
+    fio___pubsub_subscription_env_unsubscribe(sub);
+    return 0;
+  }
   return fio_io_env_remove(
       args.io,
       .type = fio___pubsub_channel_env_type(args.filter, !!args.is_pattern),
@@ -72024,7 +72037,7 @@ Subscribe Implementation
 FIO_SFUNC void fio___pubsub_request_history(fio_pubsub_subscription_s *sub);
 
 /* A callback for IO subscriptions - sends raw message data. */
-FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg) {
+SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg) {
   if (!msg || !msg->message.len)
     return;
   fio_ipc_s *ipc = fio___pubsub_msg2ipc(msg);
@@ -72642,7 +72655,6 @@ Pub/Sub2 - Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_PUBSUB */
-#undef FIO_PUBSUB
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
@@ -72664,6 +72676,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_REDIS) && !defined(FIO___RECURSIVE_INCLUDE) &&                 \
     !defined(H___FIO_REDIS___H)
 #define H___FIO_REDIS___H
+#undef FIO_REDIS
 
 /* *****************************************************************************
 Redis Engine - Overview
@@ -74046,7 +74059,6 @@ SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
 Redis Module Cleanup
 ***************************************************************************** */
 #endif /* FIO_EXTERN_COMPLETE */
-#undef FIO_REDIS
 #endif /* FIO_REDIS && !H___FIO_REDIS___H */
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */

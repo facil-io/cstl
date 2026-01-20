@@ -19,6 +19,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_IPC) && !defined(H___FIO_IPC___H) &&                           \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_IPC___H
+#undef FIO_IPC
 
 #ifndef FIO_IPC_URL_MAX_LENGTH
 #define FIO_IPC_URL_MAX_LENGTH 1024
@@ -340,19 +341,19 @@ typedef struct fio___ipc_metadata_s {
 #define FIO_REF_FLEX_TYPE        char
 #include FIO_INCLUDE_FILE
 
-FIO_IFUNC size_t fio___ipc_sizeof_header(void) {
-  return (FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
-          FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
+FIO_IFUNC uint32_t fio___ipc_sizeof_header(void) {
+  return (uint32_t)(FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
+                    FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
 }
-FIO_IFUNC size_t fio___ipc_sizeof_enc(uint32_t len) {
-  return (FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
-          FIO_PTR_FIELD_OFFSET(fio_ipc_s, call)) +
+FIO_IFUNC uint32_t fio___ipc_sizeof_enc(uint32_t len) {
+  return (uint32_t)(FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -
+                    FIO_PTR_FIELD_OFFSET(fio_ipc_s, call)) +
          len;
 }
 
-FIO_IFUNC size_t fio___ipc_wire_length(uint32_t len) {
+FIO_IFUNC uint32_t fio___ipc_wire_length(uint32_t len) {
   /* includes the 16 byte MAC and data */
-  return (fio___ipc_sizeof_header() + len + 16);
+  return (uint32_t)(fio___ipc_sizeof_header() + len + 16);
 }
 
 /* *****************************************************************************
@@ -1625,4 +1626,3 @@ IPC - Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_IPC */
-#undef FIO_IPC

@@ -19,6 +19,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_PUBSUB) && !defined(H___FIO_PUBSUB___H) &&                     \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_PUBSUB___H
+#undef FIO_PUBSUB
 
 /* FIO_PUBSUB requires FIO_IPC for inter-process communication.
  * If FIO_IPC is not already included, we trigger an error.
@@ -171,7 +172,7 @@ Pub/Sub2 - available IO on_pubsub callback
 ***************************************************************************** */
 
 /** A callback for IO subscriptions - sends raw message data. */
-FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg);
+SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg);
 
 /* *****************************************************************************
 Pub/Sub2 - Fragile - access the underlying implementation for advance use-cases
@@ -1260,6 +1261,14 @@ FIO_SFUNC void fio___pubsub_subscription_env_unsubscribe(void *sub_) {
 
 int fio_pubsub_unsubscribe___(void); /* IDE Marker */
 SFUNC int fio_pubsub_unsubscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
+  /* Handle subscriptions created with subscription_handle_ptr */
+  if (args.subscription_handle_ptr && *args.subscription_handle_ptr) {
+    fio_pubsub_subscription_s *sub =
+        (fio_pubsub_subscription_s *)*args.subscription_handle_ptr;
+    *args.subscription_handle_ptr = 0;
+    fio___pubsub_subscription_env_unsubscribe(sub);
+    return 0;
+  }
   return fio_io_env_remove(
       args.io,
       .type = fio___pubsub_channel_env_type(args.filter, !!args.is_pattern),
@@ -1272,7 +1281,7 @@ Subscribe Implementation
 FIO_SFUNC void fio___pubsub_request_history(fio_pubsub_subscription_s *sub);
 
 /* A callback for IO subscriptions - sends raw message data. */
-FIO_SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg) {
+SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg) {
   if (!msg || !msg->message.len)
     return;
   fio_ipc_s *ipc = fio___pubsub_msg2ipc(msg);
@@ -1890,4 +1899,3 @@ Pub/Sub2 - Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_PUBSUB */
-#undef FIO_PUBSUB
