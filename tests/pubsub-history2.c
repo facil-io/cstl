@@ -11,6 +11,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define WORKERS                10
 #define START_OFFSET_MILLI     250
 #define SUBSCRIBE_OFFSET_MILLI 10
+#define CLEANUP_MILLI          1500
 #define LISTENERS              (WORKERS + 1)
 
 static struct {
@@ -137,7 +138,9 @@ static int publish_message(void *ignr_, void *ignr__) {
   if (numerator == MESSAGES_PER_PUBLISHER) {
     /* last message from this publisher, add some roudtrip time and stop */
     if (fio_io_is_master())
-      fio_io_run_every(.fn = stop_io_timeout, .every = 1500, .repetitions = 0);
+      fio_io_run_every(.fn = stop_io_timeout,
+                       .every = CLEANUP_MILLI,
+                       .repetitions = 0);
     return -1;
   }
   return 0;
@@ -171,12 +174,13 @@ static void history_replay_on_message(fio_pubsub_msg_s *msg, void *udata) {
 
 int main(void) {
   int r = 0;
-  FIO_LOG_LEVEL = FIO_LOG_LEVEL_WARNING;
+  if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_INFO)
+    FIO_LOG_LEVEL = FIO_LOG_LEVEL_WARNING;
   size_t sent_count = 0;
   size_t received_count = 0;
   /* setup timeout */
   fio_io_run_every(.fn = stop_io_timeout,
-                   .every = 2500,
+                   .every = (CLEANUP_MILLI + 2000),
                    .repetitions = 0,
                    .start_at = fio_time_milli());
   /* attach history manager for replay_since to work */
@@ -229,40 +233,43 @@ int main(void) {
     if (eol)
       fprintf(stderr, "\n");
   }
-  if (r) { /* make sure all sent messages are in the history */
-    fio_pubsub_history_cache(0)->replay(fio_pubsub_history_cache(0),
-                                        TEST_CHANNEL,
-                                        0,
-                                        1,
-                                        history_replay_on_message,
-                                        NULL,
-                                        NULL);
-    size_t history_count = 0;
-    if (FIO_MEMCMP(sent.to, history.to, sizeof(sent.to[0]))) {
-      FIO_LOG_FATAL("History doesn't match sent message registry!");
-      for (size_t from = 0; from < LISTENERS; ++from) {
-        for (size_t n = 0; n < MESSAGES_PER_PUBLISHER; ++n) {
-          history_count += history.to[0].from[from].counter[n];
-          if (history.to[0].from[from].counter[n] > 1) {
-            FIO_LOG_ERROR(
-                "History message duplicate! %s[%zu].Message[%zu] x %zu",
-                (from ? "Worker" : "Master"),
-                from,
-                n,
-                history.to[0].from[from].counter[n]);
-          }
-          if (sent.to[0].from[from].counter[n] ==
-              history.to[0].from[from].counter[n])
-            continue;
-          FIO_LOG_ERROR("%s/%s %s[%zu].Message[%zu]",
-                        (history.to[0].from[from].counter[n] ? "✅" : "❌"),
-                        (sent.to[0].from[from].counter[n] ? "✅" : "❌"),
+  /* make sure all sent messages are in the history */
+  fio_pubsub_history_cache(0)->replay(fio_pubsub_history_cache(0),
+                                      TEST_CHANNEL,
+                                      0,
+                                      1,
+                                      history_replay_on_message,
+                                      NULL,
+                                      NULL);
+  size_t history_count = 0;
+  if (FIO_MEMCMP(sent.to, history.to, sizeof(sent.to[0]))) {
+    FIO_LOG_FATAL("History doesn't match sent message registry!");
+    for (size_t from = 0; from < LISTENERS; ++from) {
+      for (size_t n = 0; n < MESSAGES_PER_PUBLISHER; ++n) {
+        history_count += history.to[0].from[from].counter[n];
+        if (history.to[0].from[from].counter[n] > 1) {
+          r |= 1;
+          FIO_LOG_ERROR("History message duplicate! %s[%zu].Message[%zu] x %zu",
                         (from ? "Worker" : "Master"),
                         from,
-                        n);
+                        n,
+                        history.to[0].from[from].counter[n]);
         }
+        if (sent.to[0].from[from].counter[n] ==
+            history.to[0].from[from].counter[n])
+          continue;
+        r |= 1;
+        FIO_LOG_ERROR("%s/%s %s[%zu].Message[%zu]",
+                      (history.to[0].from[from].counter[n] ? "✅" : "❌"),
+                      (sent.to[0].from[from].counter[n] ? "✅" : "❌"),
+                      (from ? "Worker" : "Master"),
+                      from,
+                      n);
       }
     }
+  }
+  r |= !!history_count;
+  if (r) {
     FIO_LOG_WARNING("Received: %zu    /    Sent: %zu    /    History: %zu",
                     received_count,
                     sent_count,

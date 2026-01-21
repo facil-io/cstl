@@ -67637,6 +67637,14 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
   }
 }
 
+FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
+  fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
+  FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
+  if (cpy->from != FIO_IPC_EXCLUDE_SELF)
+    cpy->from = fio_io_dup(cpy->from);
+  return cpy;
+}
+
 FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
                                           uint16_t routing_flags) {
 
@@ -67898,7 +67906,10 @@ SFUNC void fio_ipc_send(fio_ipc_s *ipc) {
   /* Master */
   if (fio_io_is_master()) {
     if (ipc->from != FIO_IPC_EXCLUDE_SELF) {
-      fio_ipc_after_send(ipc, fio___ipc_execute_task, NULL);
+      /* on master we can't risk slow clients preventing execution */
+      fio_io_defer((void (*)(void *, void *))fio___ipc_execute_task,
+                   fio___ipc_copy(ipc),
+                   NULL);
     }
     if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS) &&
         !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER))
@@ -68006,14 +68017,13 @@ FIO_SFUNC void fio___ipc_on_ipc_master(void *ipc_, void *io_) {
     if (ipc->udata == FIO_IPC_EXCLUDE_SELF &&
         FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER)) {
       /* cluster messages with FIO_IPC_EXCLUDE_SELF are excluded from master */
-      fio_io_free(ipc->from);
-      ipc->from = FIO_IPC_EXCLUDE_SELF;
+      fio_ipc_encrypt(ipc);
+      fio___ipc_send_master_task(ipc, NULL);
+      return;
     }
-    if (ipc->from != FIO_IPC_EXCLUDE_SELF) {
-      fio_ipc_after_send(ipc, fio___ipc_execute_task, NULL);
-    }
-    fio___ipc_send_master_task(ipc, NULL);
-    return;
+    fio_ipc_s *cpy = fio___ipc_copy(ipc);
+    fio_ipc_encrypt(cpy);
+    fio___ipc_send_master_task(cpy, NULL);
   }
   fio___ipc_execute_task(ipc, io_);
   return;
