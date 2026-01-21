@@ -736,7 +736,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
   }
 
   args.tls = fio_io_tls_from_url(args.tls, url);
-  fio___io_init_protocol_test(args.protocol, !!args.tls);
+  fio___io_protocol_init_test(args.protocol, !!args.tls);
   built_tls = args.protocol->io_functions.build_context(args.tls, 0);
   fio_buf_info_s url_buf = FIO_BUF_INFO2((char *)args.url, url_alt.len);
   /* remove query details from URL */
@@ -838,7 +838,7 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   size_t url_len = strlen(args.url);
   fio_url_s url = fio_url_parse(args.url, url_len);
   args.tls = fio_io_tls_from_url(args.tls, url);
-  fio___io_init_protocol(args.protocol, !!args.tls);
+  fio___io_protocol_init(args.protocol, !!args.tls);
   if (url.query.len)
     url_len = url.query.buf - (args.url + 1);
   else if (url.target.len)

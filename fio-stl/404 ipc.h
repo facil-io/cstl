@@ -320,9 +320,6 @@ Implementation
 #define FIO_IPC_BUFFER_LEN 8192
 #endif
 
-/* forward declarations */
-FIO_SFUNC void fio___ipc_listen(void);
-
 /* *****************************************************************************
 IPC Message Helpers
 ***************************************************************************** */
@@ -440,7 +437,7 @@ IPC Global State
 /* Global state */
 static struct {
   size_t max_length;
-  fio_io_listener_s *listener;          /* Needs to be reset sometimes? */
+  fio_io_s *listener;                   /* Needs to be reset sometimes? */
   fio_io_s *worker_connection;          /* Worker's connection to master */
   fio_io_protocol_s protocol_ipc;       /* IPC protocol */
   fio_io_protocol_s protocol_rpc;       /* RPC protocol */
@@ -476,19 +473,36 @@ SFUNC int fio_ipc_url_set(const char *url) {
       return -1;
     FIO_MEMCPY(FIO___IPC.ipc_url, url, len);
     FIO___IPC.ipc_url[len] = 0;
-    if (len < 3 || len > (FIO_IPC_URL_MAX_LENGTH >> 1) ||
-        !((url[len - 3] == '.' && url[len - 2] == '.' && url[len - 1] == '.') ||
-          (url[len - 3] == 'X' && url[len - 2] == 'X' && url[len - 1] == 'X')))
-      goto restart_listenr;
-    len -= 3;
   } else {
-    len = 15;
-    FIO_MEMCPY(FIO___IPC.ipc_url, "unix://fio_tmp_", 15);
+    fio_str_info_s str =
+        FIO_STR_INFO3(FIO___IPC.ipc_url, 0, FIO_IPC_URL_MAX_LENGTH);
+    const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
+    const char *tmpdir = NULL;
+    for (size_t i = 0; !tmpdir && options[i]; ++i) {
+      tmpdir = getenv(options[i]);
+    }
+    size_t tmplen = tmpdir ? FIO_STRLEN(tmpdir) : 0;
+    if (!tmpdir || tmplen > 128) {
+      tmpdir = "/tmp/";
+      tmplen = FIO_STRLEN(tmpdir);
+    }
+
+    fio_string_write2(&str,
+                      NULL,
+                      FIO_STRING_WRITE_STR1("unix://"),
+                      FIO_STRING_WRITE_STR1(tmpdir),
+                      FIO_STRING_WRITE_STR2("/", (tmpdir[tmplen - 1] != '/')),
+                      FIO_STRING_WRITE_STR1("fio_tmp_"),
+                      FIO_STRING_WRITE_HEX((fio_rand64() >> 32)),
+                      FIO_STRING_WRITE_STR1(".sock"));
   }
-  fio_ltoa16u(FIO___IPC.ipc_url + len, fio_rand64(), 12);
-  FIO_MEMCPY(FIO___IPC.ipc_url + (len + 12), ".sock", 6);
-restart_listenr:
-  fio___ipc_listen();
+
+  if (FIO___IPC.listener) {
+    fio_queue_perform_all(fio_io_queue());
+    fio_io_close(FIO___IPC.listener);
+    FIO___IPC.listener = NULL;
+  }
+
   return 0;
 }
 
@@ -1175,24 +1189,64 @@ FIO_SFUNC void fio___ipc_on_close(void *buffer, void *udata) {
   (void)udata;
 }
 
-FIO_SFUNC void fio___ipc_listen(void) {
-  if (FIO___IPC.listener) {
-    fio_queue_perform_all(fio_io_queue());
-    fio_io_listen_stop(FIO___IPC.listener);
+/* *****************************************************************************
+IPC - Listening / Connecting
+***************************************************************************** */
+
+FIO_SFUNC void fio___ipc_listen_on_stop(void *iobuf, void *udata) {
+  (void)iobuf;
+  (void)udata;
+  FIO___IPC.listener = NULL;
+}
+
+FIO_SFUNC void fio___ipc_connect_on_failed(fio_io_protocol_s *protocol,
+                                           void *udata) {
+  (void)protocol;
+  (void)udata;
+  FIO_LOG_FATAL("Couldn't connect to IPC @ %s", FIO___IPC.ipc_url);
+  fio_io_stop();
+}
+
+static void fio___ipc_listen_on_data(fio_io_s *io) {
+  int fd;
+  fio_io_protocol_s *protocol = (fio_io_protocol_s *)fio_io_udata(io);
+  while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
+    FIO_LOG_DDEBUG2("(%d) accepted new IPC connection with fd %d",
+                    fio_io_pid(),
+                    fd);
+    fio_io_attach_fd(fd, protocol, NULL, NULL);
   }
+}
+
+FIO_SFUNC void fio___ipc_listen(void *ignr_) {
+  if (FIO___IPC.listener)
+    return;
+  static fio_io_protocol_s listening_protocol = {
+      .on_data = fio___ipc_listen_on_data,
+      .on_timeout = fio_io_touch,
+      .on_close = fio___ipc_listen_on_stop,
+  };
+  fio_url_s url =
+      fio_url_parse(FIO___IPC.ipc_url, FIO_STRLEN(FIO___IPC.ipc_url));
+  fio_url_tls_info_s tls_info = fio_url_is_tls(url);
+  if (tls_info.tls) {
+    FIO_LOG_SECURITY(
+        "IPC URL error - ignoring TLS (using internal encryption): %s",
+        FIO___IPC.ipc_url);
+  }
+
+  int fd = fio_sock_open2(FIO___IPC.ipc_url,
+                          FIO_SOCK_SERVER | FIO_SOCK_TCP | FIO_SOCK_NONBLOCK);
+
+  FIO_ASSERT(fd != -1,
+             "(%d) failed to start IPC listening @ %s",
+             fio_io_pid(),
+             FIO___IPC.ipc_url);
   FIO_LOG_DDEBUG2("(%d) starting IPC listening socket at: %s",
                   fio_io_pid(),
                   FIO___IPC.ipc_url);
-  /* Create listening socket */
-  FIO___IPC.listener = fio_io_listen(.url = FIO___IPC.ipc_url,
-                                     .protocol = &FIO___IPC.protocol_ipc,
-                                     .on_root = 1,
-                                     .hide_from_log = 1);
-
-  FIO_ASSERT(FIO___IPC.listener,
-             "Failed to create IPC listening socket: %.*s...",
-             (int)16,
-             FIO___IPC.ipc_url);
+  fio_io_attach_fd(fd, &listening_protocol, &FIO___IPC.protocol_ipc, NULL);
+  (void)ignr_;
 }
 
 /* *****************************************************************************
@@ -1569,8 +1623,6 @@ FIO_SFUNC void fio___ipc_destroy(void *ignr_) {
 /* Worker initialization - called after fork */
 FIO_SFUNC void fio___ipc_on_fork(void *ignr_) {
   (void)ignr_;
-  if (fio_io_is_master())
-    return;
   /* Cleanup master's resources - except opcodes (clients may use) */
   fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
   fio___ipc_cluster_filter_destroy(&FIO___IPC.peers);
@@ -1580,7 +1632,9 @@ FIO_SFUNC void fio___ipc_on_fork(void *ignr_) {
 
   /* Connect to master's IPC socket */
   FIO___IPC.worker_connection =
-      fio_io_connect(FIO___IPC.ipc_url, .protocol = &FIO___IPC.protocol_ipc);
+      fio_io_connect(FIO___IPC.ipc_url,
+                     .protocol = &FIO___IPC.protocol_ipc,
+                     .on_failed = fio___ipc_connect_on_failed);
 
   if (!FIO___IPC.worker_connection) {
     FIO_LOG_ERROR("Failed to connect to master IPC socket: %s",
@@ -1607,9 +1661,11 @@ FIO_CONSTRUCTOR(fio___ipc_init) {
       .buffer_size =
           sizeof(fio_u128) + sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
   };
+  fio_io_protocol_set(NULL, &FIO___IPC.protocol_ipc); /* initialize - safety */
+  fio_io_protocol_set(NULL, &FIO___IPC.protocol_rpc); /* initialize - safety */
   FIO___IPC.uuid = fio_u128_init64(fio_rand64(), fio_rand64());
   fio_ipc_url_set(NULL);
-  fio___ipc_listen();
+  fio_state_callback_add(FIO_CALL_BEFORE_FORK, fio___ipc_listen, NULL);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___ipc_on_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___ipc_destroy, NULL);
 }

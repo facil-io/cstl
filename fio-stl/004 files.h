@@ -407,13 +407,10 @@ SFUNC int fio_filename_tmp(void) {
   size_t len = 0;
   const char sep = FIO_FOLDER_SEPARATOR;
   const char *tmp = NULL;
-
-  if (!tmp)
-    tmp = getenv("TMPDIR");
-  if (!tmp)
-    tmp = getenv("TMP");
-  if (!tmp)
-    tmp = getenv("TEMP");
+  const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
+  for (size_t i = 0; !tmp && options[i]; ++i) {
+    tmp = getenv(options[i]);
+  }
 #if defined(P_tmpdir)
   if (!tmp && sizeof(P_tmpdir) < 464 && sizeof(P_tmpdir) > 0) {
     tmp = P_tmpdir;

@@ -4282,7 +4282,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc)(void) {
   fprintf(stderr, "\t* IPC structure size:   \t%zu bytes\n", sizeof(fio_ipc_s));
   fprintf(stderr,
           "\t* IPC Wire Header + MAC:\t%zu bytes\n",
-          fio___ipc_sizeof_header() + 16);
+          ((size_t)fio___ipc_sizeof_header() + 16));
   fprintf(stderr,
           "\t* IPC Encrypted size:   \t%zu bytes\n",
           (FIO_PTR_FIELD_OFFSET(fio_ipc_s, data) -

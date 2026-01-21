@@ -673,13 +673,14 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   int fd =
       socket(AF_UNIX, (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM, 0);
   if (fd == -1) {
-    FIO_LOG_DEBUG("couldn't open unix socket (flags == %d) %s",
+    FIO_LOG_ERROR("couldn't open unix socket (flags == %d) %s\n\t%s",
                   (int)flags,
-                  strerror(errno));
+                  strerror(errno),
+                  address);
     return -1;
   }
   if ((flags & FIO_SOCK_NONBLOCK) && fio_sock_set_non_block(fd) == -1) {
-    FIO_LOG_DEBUG("couldn't set socket to non-blocking mode");
+    FIO_LOG_ERROR("couldn't set socket to non-blocking mode");
     fio_sock_close(fd);
     unlink(addr.sun_path);
     return -1;
@@ -687,7 +688,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
   if ((flags & FIO_SOCK_CLIENT)) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
         errno != EINPROGRESS) {
-      FIO_LOG_DEBUG("couldn't connect unix client @ %s : %s",
+      FIO_LOG_ERROR("couldn't connect unix client @ %s : %s",
                     addr.sun_path,
                     strerror(errno));
       fio_sock_close(fd);
@@ -709,7 +710,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
 #endif /* FIO_SOCK_AVOID_UMASK */
       /* else */ btmp = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (btmp == -1) {
-      FIO_LOG_DEBUG("couldn't bind unix socket to %s\n\terrno(%d): %s",
+      FIO_LOG_ERROR("couldn't bind unix socket to %s\n\terrno(%d): %s",
                     address,
                     errno,
                     strerror(errno));
@@ -724,7 +725,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
     }
 #endif
     if (!(flags & FIO_SOCK_UDP) && listen(fd, SOMAXCONN) < 0) {
-      FIO_LOG_DEBUG("couldn't start listening to unix socket at %s", address);
+      FIO_LOG_ERROR("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
       unlink(addr.sun_path);
       return -1;

@@ -186,6 +186,9 @@ typedef struct fio_io_listener_s fio_io_listener_s;
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
+ *
+ * NOTE: this schedules a task and should NOT be called within a PRE_START or
+ * ON_START state callback.
  */
 SFUNC fio_io_listener_s *fio_io_listen(fio_io_listen_args_s args);
 #define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})

@@ -200,7 +200,7 @@ static void fio___io_func_free_context_caller(void (*free_context)(void *),
                  context);
 }
 
-FIO_SFUNC void fio___io_init_protocol(fio_io_protocol_s *pr, _Bool has_tls) {
+FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
   pr->reserved.protocols = FIO_LIST_INIT(pr->reserved.protocols);
   pr->reserved.ios = FIO_LIST_INIT(pr->reserved.ios);
   fio_io_functions_s io_fn = {
@@ -262,10 +262,10 @@ FIO_SFUNC void fio___io_init_protocol(fio_io_protocol_s *pr, _Bool has_tls) {
 /* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
 static fio_io_protocol_s FIO___IO_MOCK_PROTOCOL;
 
-FIO_IFUNC void fio___io_init_protocol_test(fio_io_protocol_s *pr,
+FIO_IFUNC void fio___io_protocol_init_test(fio_io_protocol_s *pr,
                                            _Bool has_tls) {
   if (!fio_atomic_or(&pr->reserved.flags, 1))
-    fio___io_init_protocol(pr, has_tls);
+    fio___io_protocol_init(pr, has_tls);
 }
 
 /* *****************************************************************************
@@ -510,7 +510,7 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
   fio_io_protocol_s *old = io->pr;
   if (!pr)
     pr = &FIO___IO_MOCK_PROTOCOL;
-  fio___io_init_protocol_test(pr, (io->tls != NULL));
+  fio___io_protocol_init_test(pr, (io->tls != NULL));
   FIO_LIST_REMOVE(&io->node);
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
     FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
@@ -583,7 +583,15 @@ error:
 /** Sets a new protocol object. `NULL` is a valid "only-write" protocol. */
 SFUNC fio_io_protocol_s *fio_io_protocol_set(fio_io_s *io,
                                              fio_io_protocol_s *pr) {
+  uintptr_t old_flags;
+  if (!io)
+    goto init;
   fio_io_defer(fio___io_protocol_set, (void *)fio___io_dup2(io), (void *)pr);
+  return pr;
+init:
+  old_flags = pr->reserved.flags;
+  fio___io_protocol_init_test(pr, 0);
+  pr->reserved.flags = old_flags;
   return pr;
 }
 
@@ -1663,12 +1671,12 @@ FIO_CONSTRUCTOR(fio___io) {
   FIO___IO.root_pid = FIO___IO.pid = fio_thread_getpid();
   FIO___IO.async = FIO_LIST_INIT(FIO___IO.async);
   FIO___IO.pids = FIO_LIST_INIT(FIO___IO.pids);
-  fio___io_init_protocol(&FIO___IO_MOCK_PROTOCOL, 0);
+  fio___io_protocol_init(&FIO___IO_MOCK_PROTOCOL, 0);
   fio_poll_init(&FIO___IO.poll,
                 .on_data = fio___io_poll_on_data_schd,
                 .on_ready = fio___io_poll_on_ready_schd,
                 .on_close = fio___io_poll_on_close_schd);
-  fio___io_init_protocol_test(&FIO___IO_MOCK_PROTOCOL, 0);
+  fio___io_protocol_init_test(&FIO___IO_MOCK_PROTOCOL, 0);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___io_after_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___io_cleanup_at_exit, NULL);
 }

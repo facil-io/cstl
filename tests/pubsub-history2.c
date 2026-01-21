@@ -9,9 +9,9 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define TEST_CHANNEL           FIO_BUF_INFO1("test")
 #define MESSAGES_PER_PUBLISHER 50
 #define WORKERS                10
-#define LISTENERS              (WORKERS + 1)
 #define START_OFFSET_MILLI     250
 #define SUBSCRIBE_OFFSET_MILLI 10
+#define LISTENERS              (WORKERS + 1)
 
 static struct {
   struct {
