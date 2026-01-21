@@ -473,6 +473,15 @@ SFUNC int fio_ipc_url_set(const char *url) {
       return -1;
     FIO_MEMCPY(FIO___IPC.ipc_url, url, len);
     FIO___IPC.ipc_url[len] = 0;
+    size_t rnd = 0;
+    for (size_t i = 0; i < len; ++i) {
+      if (FIO___IPC.ipc_url[i] != 'X' && FIO___IPC.ipc_url[i] != '#')
+        continue;
+      if (rnd)
+        rnd = fio_rand64();
+      FIO___IPC.ipc_url[i] = fio_i2c(rnd & 15);
+      rnd >>= 4;
+    }
   } else {
     fio_str_info_s str =
         FIO_STR_INFO3(FIO___IPC.ipc_url, 0, FIO_IPC_URL_MAX_LENGTH);
@@ -493,7 +502,7 @@ SFUNC int fio_ipc_url_set(const char *url) {
                       FIO_STRING_WRITE_STR1(tmpdir),
                       FIO_STRING_WRITE_STR2("/", (tmpdir[tmplen - 1] != '/')),
                       FIO_STRING_WRITE_STR1("fio_tmp_"),
-                      FIO_STRING_WRITE_HEX((fio_rand64() >> 32)),
+                      FIO_STRING_WRITE_HEX((fio_rand64() >> 24)),
                       FIO_STRING_WRITE_STR1(".sock"));
   }
 
