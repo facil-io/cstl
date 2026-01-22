@@ -26,7 +26,7 @@ iMap Helper Macros
 /** Helper macro for simple iMap array types - always valid. */
 #define FIO_IMAP_ALWAYS_VALID(o) (1)
 /** Helper macro for simple iMap array types - valid if nonzero. */
-#define FIO_IMAP_VALID_NON_ZERO(o) (!!(o))
+#define FIO_IMAP_VALID_NON_ZERO(o) (!!((o)[0]))
 /** Helper macro for simple iMap array types - type comparison always true. */
 #define FIO_IMAP_ALWAYS_CMP_TRUE(a, b) (1)
 /** Helper macro for simple iMap array types - type comparison always false. */
@@ -264,14 +264,8 @@ iMap Creation Macro
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
-    if (!a)                                                                    \
+    if (!a || !is_valid_fn((&obj)))                                            \
       return NULL;                                                             \
-    {                                                                          \
-      array_type *pobj__ = &obj;                                               \
-      if (!is_valid_fn(pobj__))                                                \
-        return NULL;                                                           \
-      (void)pobj__;                                                            \
-    }                                                                          \
     {                                                                          \
       size_t capa = FIO_NAME(array_name, capa)(a);                             \
       if (a->w == capa)                                                        \

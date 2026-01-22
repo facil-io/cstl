@@ -624,7 +624,7 @@ FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
   m->len = (uint32_t)(data_len);
   m->flags = args->flags;
   m->timestamp =
-      (args->timestamp ? (uint64_t)args->timestamp : fio_io_last_tick());
+      (uint64_t)(args->timestamp ? args->timestamp : fio_io_last_tick());
   m->id = (args->id ? args->id : fio_rand64());
   if (args->opcode) {
     routing_flags |= FIO_IPC_FLAG_OPCODE;

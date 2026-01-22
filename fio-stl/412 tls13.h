@@ -725,8 +725,9 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
 
   /* Read raw data from socket */
   errno = 0;
-  ssize_t raw_read =
-      fio_sock_read(fd, conn->recv_buf + conn->recv_buf_len, recv_space);
+  ssize_t raw_read = fio_sock_read(fd,
+                                   (char *)conn->recv_buf + conn->recv_buf_len,
+                                   recv_space);
   if (raw_read <= 0) {
     if (raw_read == 0)
       return 0; /* EOF */
@@ -786,7 +787,7 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
           errno = 0;
           ssize_t hs_written =
               fio_sock_write(fd,
-                             conn->send_buf + conn->send_buf_pos,
+                             (char *)conn->send_buf + conn->send_buf_pos,
                              conn->send_buf_len - conn->send_buf_pos);
           if (hs_written <= 0) {
             if (errno == EWOULDBLOCK || errno == EAGAIN)
@@ -931,7 +932,7 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
     errno = 0;
     ssize_t hs_written =
         fio_sock_write(fd,
-                       conn->send_buf + conn->send_buf_pos,
+                       (char *)conn->send_buf + conn->send_buf_pos,
                        conn->send_buf_len - conn->send_buf_pos);
     if (hs_written <= 0) {
       /* Can't send handshake data yet, so can't send app data either */
@@ -968,7 +969,8 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
     if (ku_len > 0) {
       /* Send KeyUpdate response */
       errno = 0;
-      ssize_t ku_written = fio_sock_write(fd, ku_response, (size_t)ku_len);
+      ssize_t ku_written =
+          fio_sock_write(fd, (char *)ku_response, (size_t)ku_len);
       if (ku_written <= 0) {
         /* Can't send KeyUpdate, can't send app data either */
         errno = EWOULDBLOCK;
@@ -995,7 +997,8 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
     if (ku_len > 0) {
       /* Send KeyUpdate response */
       errno = 0;
-      ssize_t ku_written = fio_sock_write(fd, ku_response, (size_t)ku_len);
+      ssize_t ku_written =
+          fio_sock_write(fd, (char *)ku_response, (size_t)ku_len);
       if (ku_written <= 0) {
         /* Can't send KeyUpdate, can't send app data either */
         errno = EWOULDBLOCK;
@@ -1033,7 +1036,7 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
 
   /* Write encrypted data to socket */
   errno = 0;
-  ssize_t written = fio_sock_write(fd, conn->enc_buf, (size_t)enc_len);
+  ssize_t written = fio_sock_write(fd, (char *)conn->enc_buf, (size_t)enc_len);
   if (written <= 0) {
     if (errno == EWOULDBLOCK || errno == EAGAIN)
       return -1;
@@ -1063,9 +1066,10 @@ FIO_SFUNC int fio___tls13_flush(int fd, void *tls_ctx) {
   /* Send any buffered handshake data */
   while (conn->send_buf_pos < conn->send_buf_len) {
     errno = 0;
-    ssize_t written = fio_sock_write(fd,
-                                     conn->send_buf + conn->send_buf_pos,
-                                     conn->send_buf_len - conn->send_buf_pos);
+    ssize_t written =
+        fio_sock_write(fd,
+                       (char *)conn->send_buf + conn->send_buf_pos,
+                       conn->send_buf_len - conn->send_buf_pos);
     if (written <= 0) {
       if (errno == EWOULDBLOCK || errno == EAGAIN)
         return -1; /* Would block, try again later */
@@ -1119,7 +1123,7 @@ FIO_SFUNC void fio___tls13_finish(int fd, void *tls_ctx) {
 
     if (enc_len > 0) {
       /* Best effort send, ignore errors */
-      (void)fio_sock_write(fd, alert, (size_t)enc_len);
+      (void)fio_sock_write(fd, (char *)alert, (size_t)enc_len);
     }
   }
   (void)fd;
