@@ -1168,8 +1168,8 @@ FIO_SFUNC void fio___pubsub_attach_task(void *e, void *_ignr) {
 FIO_SFUNC void fio___pubsub_detach_task(void *e, void *_ignr) {
   (void)_ignr;
   fio_pubsub_engine_s *engine = (fio_pubsub_engine_s *)e;
-  fio___pubsub_engines_remove(&FIO___PUBSUB_POSTOFFICE.engines, engine);
-  if (engine->detached)
+  if (fio___pubsub_engines_remove(&FIO___PUBSUB_POSTOFFICE.engines, engine) &&
+      engine->detached)
     engine->detached(engine);
 }
 

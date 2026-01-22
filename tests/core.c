@@ -2,6 +2,7 @@
 Test - Core Module
 ***************************************************************************** */
 #undef FIO_MEMALT
+#define FIO_LOG
 #define FIO_MEMALT /* Enable fio_memcpy, fio_memset, fio_memchr, etc. */
 #include "test-helpers.h"
 

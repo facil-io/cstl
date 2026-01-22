@@ -17,7 +17,8 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H) &&         \
-    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+    !defined(FIO___RECURSIVE_INCLUDE)
 /* *****************************************************************************
 The HTTP/1.1 provides static functions only, always as part or implementation.
 ***************************************************************************** */

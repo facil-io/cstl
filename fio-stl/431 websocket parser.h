@@ -19,7 +19,8 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_WEBSOCKET_PARSER) && !defined(H___FIO_WEBSOCKET_PARSER___H) && \
-    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
+    !defined(FIO___RECURSIVE_INCLUDE)
 /* *****************************************************************************
 The parser provides static functions only, always as part or implementation.
 ***************************************************************************** */

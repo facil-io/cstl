@@ -207,10 +207,10 @@
 #include "422 redis.h"
 #endif
 
-#ifdef FIO_HTTP1_PARSER
+#if defined(FIO_HTTP1_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "431 http1 parser.h"
 #endif
-#ifdef FIO_WEBSOCKET_PARSER
+#if defined(FIO_WEBSOCKET_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "431 websocket parser.h"
 #endif
 

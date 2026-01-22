@@ -482,8 +482,8 @@ FIO_SFUNC void redis_run_next_test(void) {
     /* Reset state */
     test_state.pubsub_msg_received = 0;
 
-    /* Attach Redis engine to pub/sub system */
-    fio_pubsub_engine_attach(redis);
+    /* Attach Redis engine to pub/sub system, keep a reference for use here */
+    fio_pubsub_engine_attach(fio_redis_dup(redis));
 
     /* Subscribe to test channel with our callback */
     fio_pubsub_subscribe(.channel = FIO_BUF_INFO1((char *)PUBSUB_TEST_CHANNEL),
@@ -584,39 +584,6 @@ FIO_SFUNC int redis_start_tests_timer(void *udata1, void *udata2) {
 On Start Callback - Called when IO reactor starts
 ***************************************************************************** */
 
-FIO_SFUNC void on_start(void *udata) {
-  (void)udata;
-
-  /* Create Redis engine */
-  fio_pubsub_engine_s *redis = fio_redis_new(.url = "redis://localhost:6379");
-  if (!redis) {
-    FIO_LOG_ERROR("FAIL: fio_redis_new returned NULL");
-    test_state.test_failed = 1;
-    fio_io_stop();
-    return;
-  }
-  test_state.redis = redis;
-
-  /* Start timeout watchdog - checks every 3 seconds for progress */
-  fio_io_run_every(.fn = redis_timeout_watchdog,
-                   .every = 3000,
-                   .repetitions = -1); /* Run until stopped */
-
-  /* Schedule tests to run after a short delay to allow connection */
-  fio_io_run_every(.fn = redis_start_tests_timer,
-                   .every = 500,
-                   .repetitions = 1);
-}
-
-FIO_SFUNC void on_stop(void *udata) {
-  (void)udata;
-  if (test_state.redis) {
-    fio_redis_free(test_state.redis);
-    test_state.redis = NULL;
-  }
-  fio_queue_perform_all(fio_io_queue());
-}
-
 /* *****************************************************************************
 Main
 ***************************************************************************** */
@@ -632,12 +599,24 @@ int main(void) {
 
   FIO_LOG_DDEBUG("(Redis detected on localhost:6379)");
 
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START, on_start, NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP, on_stop, NULL);
+  /* Create Redis engine */
+  fio_pubsub_engine_s *redis = fio_redis_new(.url = "redis://localhost:6379");
+  FIO_ASSERT_ALLOC(redis);
+  test_state.redis = redis;
+
+  /* Start timeout watchdog - checks every 3 seconds for progress */
+  fio_io_run_every(.fn = redis_timeout_watchdog,
+                   .every = 3000,
+                   .repetitions = -1); /* Run until stopped */
+
+  /* Schedule tests to run after a short delay to allow connection */
+  fio_io_run_every(.fn = redis_start_tests_timer,
+                   .every = 500,
+                   .repetitions = 1);
 
   /* Start the IO reactor (this blocks until fio_io_stop is called) */
   fio_io_start(0);
+  fio_redis_free(redis);
 
   /* Check if tests completed successfully */
   if (test_state.test_failed || test_state.phase != TEST_PHASE_DONE) {

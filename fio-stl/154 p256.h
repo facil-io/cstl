@@ -1389,7 +1389,7 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
     fio_u2buf64_be(s_bytes + 24, s_scalar[0]);
 
     /* Encode as DER: SEQUENCE { r INTEGER, s INTEGER } */
-    uint8_t r_der[34], s_der[34];
+    uint8_t r_der[35], s_der[35];
     FIO_MEMSET(r_der, 0, sizeof(r_der));
     FIO_MEMSET(s_der, 0, sizeof(s_der));
     size_t r_der_len = fio___p256_encode_der_integer(r_der, r_bytes);

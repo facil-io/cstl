@@ -145,9 +145,9 @@ static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_INITIALIZE] = "ON_INITIALIZE",
     [FIO_CALL_PRE_START] = "PRE_START",
     [FIO_CALL_BEFORE_FORK] = "BEFORE_FORK",
-    [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
     [FIO_CALL_IN_CHILD] = "IN_CHILD",
     [FIO_CALL_IN_MASTER] = "IN_MASTER",
+    [FIO_CALL_AFTER_FORK] = "AFTER_FORK",
     [FIO_CALL_ON_WORKER_THREAD_START] = "ON_WORKER_THREAD_START",
     [FIO_CALL_ON_START] = "ON_START",
     [FIO_CALL_RESERVED1] = "RESERVED1",
@@ -165,6 +165,7 @@ static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
     [FIO_CALL_ON_WORKER_THREAD_END] = "ON_WORKER_THREAD_END",
     [FIO_CALL_ON_STOP] = "ON_STOP",
     [FIO_CALL_AT_EXIT] = "AT_EXIT",
+    [FIO_CALL_AFTER_EXIT] = "AFTER_EXIT",
     [FIO_CALL_NEVER] = "NEVER",
 };
 
@@ -178,6 +179,7 @@ FIO_WEAK fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
+    FIO___STATE_TASKS_ARRAY[i] = (fio___state_map_s){0};
   }
   FIO_LOG_DEBUG2("(%d) fio_state_callback maps have been cleared.",
                  fio_getpid());
@@ -243,32 +245,31 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
 
   if ((uintptr_t)e >= FIO_CALL_NEVER)
     return;
-  if (e == FIO_CALL_AFTER_FORK) {
-    /* make sure the `after_fork` events re-initializes all locks. */
+  if (e == FIO_CALL_IN_CHILD) {
+    /* make sure the `in_child` events re-initializes all locks (child only). */
     for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
       FIO___STATE_TASKS_ARRAY_LOCK[i] = FIO_LOCK_INIT;
     }
+    fio_rand_reseed(); /* re-seed random state in child processes */
+  }
+  if (e == FIO_CALL_AFTER_FORK) {
     fio_rand_reseed(); /* re-seed shifted random state */
   }
-  if (e == FIO_CALL_IN_CHILD) {
-    fio_rand_reseed(); /* re-seed random state in child processes (twice) */
-  }
   fio___state_task_s *ary = NULL;
-  size_t ary_capa = (sizeof(*ary) * FIO___STATE_TASKS_ARRAY[e].count);
+  size_t ary_capa = 0;
   size_t len = 0;
   if (e == FIO_CALL_ON_INITIALIZE) {
     fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER);
   }
 
+  /* copy task queue while holding the lock */
+  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
   FIO_LOG_DEBUG2("(%d) scheduling %s callbacks (%zu tasks).",
                  (int)(fio_getpid()),
                  FIO___STATE_TASKS_NAMES[e],
                  (size_t)FIO___STATE_TASKS_ARRAY[e].count);
-  if (!FIO___STATE_TASKS_ARRAY[e].count)
-    return;
-  /* copy task queue */
-  fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
   if (FIO___STATE_TASKS_ARRAY[e].w) {
+    ary_capa = (sizeof(*ary) * FIO___STATE_TASKS_ARRAY[e].count);
     ary = (fio___state_task_s *)FIO_MEM_REALLOC(NULL, 0, ary_capa, 0);
     FIO_ASSERT_ALLOC(ary);
     for (size_t i = 0; i < FIO___STATE_TASKS_ARRAY[e].w; ++i) {
@@ -278,6 +279,8 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     }
   }
   fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  if (!len)
+    return;
 
   /* perform copied tasks in correct order */
   if (e <= FIO_CALL_ON_IDLE) {
@@ -321,6 +324,11 @@ FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
 
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
+  /* Pre-allocate commonly used event arrays to reduce reallocation races */
+  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_ON_STOP, 32);
+  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_ON_START, 32);
+  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_IN_CHILD, 32);
+  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_AFTER_FORK, 32);
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
   fio_state_callback_add(FIO_CALL_AFTER_EXIT,
                          fio___state_cleanup_task_at_exit,

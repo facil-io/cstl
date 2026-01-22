@@ -59,12 +59,10 @@ Alternatives - Implementation
 FIO_MEMCPY / fio_memcpy - memcpy fallback
 ***************************************************************************** */
 
-/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
-FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
-                                        const void *restrict s_,
-                                        size_t l) {
-  char *restrict d = (char *restrict)d_;
-  const char *restrict s = (const char *restrict)s_;
+/** a buffered memcpy for overlapping memory (forward copy: dest < src) */
+FIO_SFUNC void *fio___memcpy_buffered_x(void *d_, const void *s_, size_t l) {
+  char *d = (char *)d_;
+  const char *s = (const char *)s_;
   uint64_t t[8] FIO_ALIGN(16);
   while (l > 63) {
     fio_memcpy64(t, s);
@@ -98,7 +96,7 @@ FIO_SFUNC void *fio___memcpy_buffered_x(void *restrict d_,
   return (void *)d;
 }
 
-/** an unsafe memcpy (no checks + assumes no overlapping memory regions)*/
+/** a buffered memcpy for overlapping memory (backward copy: dest > src) */
 FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
                                                  const void *s_,
                                                  size_t l) {

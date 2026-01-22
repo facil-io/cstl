@@ -623,8 +623,8 @@ FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
     m->from = FIO_IPC_EXCLUDE_SELF;
   m->len = (uint32_t)(data_len);
   m->flags = args->flags;
-  m->timestamp =
-      (uint64_t)(args->timestamp ? args->timestamp : fio_io_last_tick());
+  m->timestamp = (uint64_t)(args->timestamp ? args->timestamp
+                                            : (uint64_t)fio_io_last_tick());
   m->id = (args->id ? args->id : fio_rand64());
   if (args->opcode) {
     routing_flags |= FIO_IPC_FLAG_OPCODE;
@@ -905,13 +905,6 @@ SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *m) {
 
   /* Encrypt message */
   fio_ipc_encrypt(m);
-  FIO_LOG_DDEBUG2("(%d) IPC wire bytes: %02x %02x %02x %02x (len=%u)",
-                  fio_io_pid(),
-                  ((uint8_t *)&m->len)[0],
-                  ((uint8_t *)&m->len)[1],
-                  ((uint8_t *)&m->len)[2],
-                  ((uint8_t *)&m->len)[3],
-                  m->len);
   fio_io_write2(to,
                 .buf = m,
                 .offset = FIO_PTR_FIELD_OFFSET(fio_ipc_s, len),
@@ -1204,6 +1197,7 @@ FIO_SFUNC void fio___ipc_on_close(void *buffer, void *udata) {
   fio___ipc_parser_destroy(p);
   if (!fio_io_is_master()) {
     FIO_LOG_DEBUG2("(%d) lost ICP connection", fio_io_pid());
+    FIO___IPC.worker_connection = NULL;
     fio_io_stop();
   }
   (void)udata;

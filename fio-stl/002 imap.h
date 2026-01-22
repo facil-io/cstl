@@ -125,9 +125,9 @@ iMap Creation Macro
     size_t old_capa = FIO_NAME(array_name, capa)(a);                           \
     array_type *tmp = (array_type *)FIO_TYPEDEF_IMAP_REALLOC(                  \
         a->ary,                                                                \
-        (a->bits ? (old_capa * (sizeof(array_type)) +                          \
-                    (old_capa * (sizeof(imap_type))))                          \
-                 : 0),                                                         \
+        (a->capa_bits ? (old_capa * (sizeof(array_type)) +                     \
+                         (old_capa * (sizeof(imap_type))))                     \
+                      : 0),                                                    \
         (capa * (sizeof(array_type)) + (capa * (sizeof(imap_type)))),          \
         (a->w * (sizeof(array_type))));                                        \
     (void)old_capa; /* if unused */                                            \

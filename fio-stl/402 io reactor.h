@@ -203,6 +203,9 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2);
 static void fio___io_wait_for_worker(void *thr_) {
   fio_thread_t t = (fio_thread_t)thr_;
   fio_thread_join(&t);
+  fio_state_callback_remove(FIO_CALL_ON_STOP,
+                            fio___io_wait_for_worker,
+                            (void *)t);
 }
 
 /** Worker sentinel */
@@ -240,10 +243,7 @@ static void *fio___io_worker_sentinel(void *pid_data) {
     FIO_ASSERT_DEBUG(
         0,
         "DEBUG mode prevents worker re-spawning, now crashing parent.");
-    fio_state_callback_remove(FIO_CALL_ON_STOP,
-                              fio___io_wait_for_worker,
-                              (void *)thr);
-    fio_thread_detach(&thr);
+    // fio_thread_detach(&thr);
     FIO_LOG_WARNING("(%d) worker exit detected, replacing worker %d",
                     FIO___IO.pid,
                     sentinal.pid);

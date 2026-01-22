@@ -337,16 +337,16 @@ FIO_SFUNC void fio___rsa_modexp(uint64_t *result,
                                 const uint64_t *exp,
                                 const uint64_t *n,
                                 size_t word_count) {
-/* Double-size buffer for multiplication results */
+/* Double-size buffers for multiplication results and div remainder */
 #if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t tmp[word_count * 2];
-  uint64_t acc[word_count];
-  uint64_t sqr[word_count];
+  uint64_t acc[word_count * 2];
+  uint64_t sqr[word_count * 2];
   uint64_t n_ext[word_count * 2];
 #else
   uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
-  uint64_t acc[FIO_RSA_MAX_WORDS];
-  uint64_t sqr[FIO_RSA_MAX_WORDS];
+  uint64_t acc[FIO_RSA_MAX_WORDS * 2];
+  uint64_t sqr[FIO_RSA_MAX_WORDS * 2];
   uint64_t n_ext[FIO_RSA_MAX_WORDS * 2];
   FIO_ASSERT(word_count <= FIO_RSA_MAX_WORDS,
              "RSA key size exceeds maximum supported");
@@ -356,11 +356,12 @@ FIO_SFUNC void fio___rsa_modexp(uint64_t *result,
   FIO_MEMCPY(n_ext, n, word_count * sizeof(uint64_t));
   FIO_MEMSET(n_ext + word_count, 0, word_count * sizeof(uint64_t));
 
-  /* Initialize accumulator to 1 */
-  FIO_MEMSET(acc, 0, word_count * sizeof(uint64_t));
+  /* Initialize accumulator to 1 (zero the full double-size buffer) */
+  FIO_MEMSET(acc, 0, word_count * 2 * sizeof(uint64_t));
   acc[0] = 1;
 
-  /* Copy base to squaring buffer */
+  /* Copy base to squaring buffer (zero upper half) */
+  FIO_MEMSET(sqr, 0, word_count * 2 * sizeof(uint64_t));
   FIO_MEMCPY(sqr, base, word_count * sizeof(uint64_t));
 
   /* Find the highest set bit in the exponent */
