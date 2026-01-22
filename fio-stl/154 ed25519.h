@@ -931,7 +931,7 @@ FIO_IFUNC void fio___ge_scalarmult_base(fio___ge_p3_s r,
   for (int i = 255; i >= 0; --i) {
     uint8_t b = (scalar[i >> 3] >> (i & 7)) & 1;
     fio___ge_p3_cswap(p, q, b);
-    fio___ge_p3_add(q, p);
+    fio___ge_p3_add(q, (const fio___gf_s *)p);
     fio___ge_p3_dbl(p);
     fio___ge_p3_cswap(p, q, b);
   }
@@ -963,7 +963,7 @@ FIO_SFUNC void fio___ge_scalarmult(fio___ge_p3_s r,
   for (int i = 255; i >= 0; --i) {
     uint8_t b = (scalar[i >> 3] >> (i & 7)) & 1;
     fio___ge_p3_cswap(p, q, b);
-    fio___ge_p3_add(q, p);
+    fio___ge_p3_add(q, (const fio___gf_s *)p);
     fio___ge_p3_dbl(p);
     fio___ge_p3_cswap(p, q, b);
   }
@@ -1226,7 +1226,7 @@ SFUNC int fio_ed25519_verify(const uint8_t signature[64],
   fio___gf_neg(ka[3], ka[3]);
 
   /* add sb + (-ka) */
-  fio___ge_p3_add(sb, ka);
+  fio___ge_p3_add(sb, (const fio___gf_s *)ka);
 
   /* encode result and compare with r */
   uint8_t check[32];

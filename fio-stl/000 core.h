@@ -1368,14 +1368,16 @@ SIMD Vector Looping Helper
 #define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
   do {                                                                         \
     size_t i = 0;                                                              \
+    const size_t fio___unroll_remainder__ =                                    \
+        ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));            \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if ((iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))                \
-      for (; i < (iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i)  \
+    if (fio___unroll_remainder__)                                              \
+      for (; i < fio___unroll_remainder__; ++i)                                \
         action;                                                                \
     if (iterations)                                                            \
-      for (; !(iterations + 1) || (i < iterations);)                           \
+      for (; !((iterations) + 1) || (i < (iterations));)                       \
         for (size_t j__loop__ = 0;                                             \
-             j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
+             j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
           action;                                                              \
   } while (0)

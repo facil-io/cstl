@@ -2132,7 +2132,7 @@ FIO_SFUNC int fio___tls13_parse_alpn_extension(const uint8_t *data,
 
   /* Read protocol name list length */
   uint16_t list_len = fio___tls13_read_u16(data);
-  if (list_len + 2 > data_len)
+  if ((size_t)list_len + 2 > data_len)
     return -1;
 
   const uint8_t *p = data + 2;
@@ -2213,7 +2213,7 @@ FIO_SFUNC int fio___tls13_parse_alpn_response(const uint8_t *data,
 
   /* Read protocol name list length */
   uint16_t list_len = fio___tls13_read_u16(data);
-  if (list_len + 2 > data_len || list_len < 2)
+  if ((size_t)list_len + 2 > data_len || list_len < 2)
     return -1;
 
   /* Read single protocol */
@@ -2705,7 +2705,7 @@ SFUNC int fio_tls13_parse_certificate_request(
   if (p + 1 > end)
     return -1;
   uint8_t ctx_len = *p++;
-  if (p + ctx_len > end || ctx_len > 255)
+  if (p + ctx_len > end)
     return -1;
 
   /* Copy context */
@@ -7393,7 +7393,7 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
   uint16_t sig_scheme = ((uint16_t)body[0] << 8) | body[1];
   uint16_t sig_len = ((uint16_t)body[2] << 8) | body[3];
 
-  if (4 + sig_len > body_len) {
+  if (4 + (size_t)sig_len > body_len) {
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_DECODE_ERROR);

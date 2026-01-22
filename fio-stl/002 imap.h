@@ -264,8 +264,14 @@ iMap Creation Macro
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
-    if (!a || !is_valid_fn((&obj)))                                            \
+    if (!a)                                                                    \
       return NULL;                                                             \
+    {                                                                          \
+      array_type *pobj__ = &obj;                                               \
+      if (!is_valid_fn(pobj__))                                                \
+        return NULL;                                                           \
+      (void)pobj__;                                                            \
+    }                                                                          \
     {                                                                          \
       size_t capa = FIO_NAME(array_name, capa)(a);                             \
       if (a->w == capa)                                                        \

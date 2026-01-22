@@ -454,14 +454,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_data_integrity)(void) {
 
   /* Test: Binary data with null bytes */
   {
-    char binary_data[] = {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
+    unsigned char binary_data[] =
+        {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
     size_t binary_len = sizeof(binary_data);
 
     fio_ipc_call(.call = fio___test_ipc_call_capture,
                  .on_reply = NULL,
                  .on_done = NULL,
                  .udata = NULL,
-                 .data = FIO_IPC_DATA(FIO_BUF_INFO2(binary_data, binary_len)));
+                 .data = FIO_IPC_DATA(
+                     FIO_BUF_INFO2((char *)binary_data, binary_len)));
 
     fio_queue_perform_all(fio_io_queue());
 
@@ -1050,20 +1052,22 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_memory_safety)(void) {
       refs[i] = fio_ipc_dup(msg);
     }
 
-    /* Free in random order */
-    fio_ipc_free(refs[5]);
-    fio_ipc_free(refs[2]);
-    fio_ipc_free(refs[8]);
-    fio_ipc_free(refs[0]);
-    fio_ipc_free(refs[9]);
-    fio_ipc_free(refs[3]);
-    fio_ipc_free(refs[7]);
-    fio_ipc_free(refs[1]);
-    fio_ipc_free(refs[4]);
-    fio_ipc_free(refs[6]);
+    /* Free in random order - use fio___ipc_free directly since reactor isn't
+     * running. fio_ipc_free() defers to IO thread which won't process without
+     * reactor. */
+    fio___ipc_free(refs[5]);
+    fio___ipc_free(refs[2]);
+    fio___ipc_free(refs[8]);
+    fio___ipc_free(refs[0]);
+    fio___ipc_free(refs[9]);
+    fio___ipc_free(refs[3]);
+    fio___ipc_free(refs[7]);
+    fio___ipc_free(refs[1]);
+    fio___ipc_free(refs[4]);
+    fio___ipc_free(refs[6]);
 
     /* Final free */
-    fio_ipc_free(msg);
+    fio___ipc_free(msg);
   }
 
   FIO_LOG_DEBUG2("IPC memory safety tests passed.");
@@ -1822,12 +1826,13 @@ FIO_SFUNC void fio___test_mp_binary_worker_start(void *ignr_) {
 
   FIO_LOG_DEBUG2("(%d) [Worker] Sending binary data with nulls", fio_io_pid());
 
-  char binary_data[] = {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
+  unsigned char binary_data[] =
+      {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
   fio_ipc_call(.call = fio___test_mp_binary_master_handler,
                .on_reply = fio___test_mp_binary_worker_on_reply,
                .on_done = fio___test_mp_binary_worker_on_done,
                .data = FIO_IPC_DATA(
-                   FIO_BUF_INFO2(binary_data, sizeof(binary_data))));
+                   FIO_BUF_INFO2((char *)binary_data, sizeof(binary_data))));
 }
 
 /* Timeout for binary test */
@@ -3470,6 +3475,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_opcode_registration)(void) {
 
     fio___ipc_opcode_task(msg, NULL);
 
+    /* Process any deferred tasks from the handler */
+    fio_queue_perform_all(fio_io_queue());
+
     FIO_ASSERT(fio___test_rpc_opcode_called == 1,
                "second op-code handler should be called");
     FIO_ASSERT(fio___test_rpc_opcode_udata == NULL,
@@ -3496,6 +3504,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_opcode_registration)(void) {
             "      (expect WARNING about illegal op-code %u)\n",
             test_opcode);
     fio___ipc_opcode_task(msg, NULL);
+
+    /* Process any deferred tasks */
+    fio_queue_perform_all(fio_io_queue());
 
     FIO_ASSERT(fio___test_rpc_opcode_called == 0,
                "removed op-code should not call handler");

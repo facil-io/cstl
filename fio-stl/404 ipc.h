@@ -595,7 +595,7 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
 FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
-  if (cpy->from != FIO_IPC_EXCLUDE_SELF)
+  if ((uintptr_t)(cpy->from) + 1 > 1) /* tests exclude + NULL*/
     cpy->from = fio_io_dup(cpy->from);
   return cpy;
 }
@@ -623,7 +623,8 @@ FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
     m->from = FIO_IPC_EXCLUDE_SELF;
   m->len = (uint32_t)(data_len);
   m->flags = args->flags;
-  m->timestamp = (args->timestamp ? args->timestamp : fio_io_last_tick());
+  m->timestamp =
+      (args->timestamp ? (uint64_t)args->timestamp : fio_io_last_tick());
   m->id = (args->id ? args->id : fio_rand64());
   if (args->opcode) {
     routing_flags |= FIO_IPC_FLAG_OPCODE;

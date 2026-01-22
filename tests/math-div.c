@@ -71,7 +71,9 @@ static int verify_division(const uint64_t *dividend,
   for (size_t i = 0; i < len; ++i) {
     result[i] = product[i];
   }
-  (void)fio_math_add(result, result, remainder, len);
+  /* Intentionally ignore return value - we only care about the sum */
+  if (fio_math_add(result, result, remainder, len)) { /* overflow is ok here */
+  }
 
   /* Check if result == dividend */
   if (mp_cmp(result, dividend, len) != 0) {
@@ -336,7 +338,9 @@ static void test_512bit(void) {
   fio_math_mul(product, q, b, 8);
   for (size_t i = 0; i < 8; ++i)
     result[i] = product[i];
-  (void)fio_math_add(result, result, r, 8);
+  /* Intentionally ignore return value - we only care about the sum */
+  if (fio_math_add(result, result, r, 8)) { /* overflow is ok here */
+  }
 
   TEST("512-bit verification", mp_cmp(result, a, 8) == 0);
   TEST("512-bit remainder < divisor", mp_cmp(r, b, 8) < 0);

@@ -1210,7 +1210,8 @@ SFUNC void fio_pubsub_publish FIO_NOOP(fio_pubsub_publish_args_s args) {
   fio_pubsub_msg_s msg = {
       .io = args.from,
       .id = args.id ? args.id : fio_rand64(),
-      .timestamp = args.timestamp ? args.timestamp : fio_io_last_tick(),
+      .timestamp =
+          args.timestamp ? (uint64_t)args.timestamp : fio_io_last_tick(),
       .channel = args.channel,
       .message = args.message,
       .filter = args.filter,

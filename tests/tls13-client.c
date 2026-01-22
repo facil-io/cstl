@@ -118,7 +118,7 @@ FIO_SFUNC void test_client_hello_generation(void) {
 
   /* Verify length consistency */
   uint16_t record_len = ((uint16_t)out[3] << 8) | out[4];
-  FIO_ASSERT((size_t)len == 5 + record_len,
+  FIO_ASSERT(len == (int)(5 + record_len),
              "Total length should match record header");
 
   /* Test with insufficient buffer */

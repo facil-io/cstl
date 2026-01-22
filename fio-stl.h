@@ -1405,14 +1405,16 @@ SIMD Vector Looping Helper
 #define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
   do {                                                                         \
     size_t i = 0;                                                              \
+    const size_t fio___unroll_remainder__ =                                    \
+        ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));            \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if ((iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)))                \
-      for (; i < (iterations & ((FIO___SIMD_BYTES / size_of_loop) - 1)); ++i)  \
+    if (fio___unroll_remainder__)                                              \
+      for (; i < fio___unroll_remainder__; ++i)                                \
         action;                                                                \
     if (iterations)                                                            \
-      for (; !(iterations + 1) || (i < iterations);)                           \
+      for (; !((iterations) + 1) || (i < (iterations));)                       \
         for (size_t j__loop__ = 0;                                             \
-             j__loop__ < (FIO___SIMD_BYTES / size_of_loop);                    \
+             j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
           action;                                                              \
   } while (0)
@@ -8302,8 +8304,14 @@ iMap Creation Macro
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a, \
                                                   array_type obj,              \
                                                   int overwrite) {             \
-    if (!a || !is_valid_fn((&obj)))                                            \
+    if (!a)                                                                    \
       return NULL;                                                             \
+    {                                                                          \
+      array_type *pobj__ = &obj;                                               \
+      if (!is_valid_fn(pobj__))                                                \
+        return NULL;                                                           \
+      (void)pobj__;                                                            \
+    }                                                                          \
     {                                                                          \
       size_t capa = FIO_NAME(array_name, capa)(a);                             \
       if (a->w == capa)                                                        \
@@ -33846,7 +33854,7 @@ FIO_IFUNC void fio___ge_scalarmult_base(fio___ge_p3_s r,
   for (int i = 255; i >= 0; --i) {
     uint8_t b = (scalar[i >> 3] >> (i & 7)) & 1;
     fio___ge_p3_cswap(p, q, b);
-    fio___ge_p3_add(q, p);
+    fio___ge_p3_add(q, (const fio___gf_s *)p);
     fio___ge_p3_dbl(p);
     fio___ge_p3_cswap(p, q, b);
   }
@@ -33878,7 +33886,7 @@ FIO_SFUNC void fio___ge_scalarmult(fio___ge_p3_s r,
   for (int i = 255; i >= 0; --i) {
     uint8_t b = (scalar[i >> 3] >> (i & 7)) & 1;
     fio___ge_p3_cswap(p, q, b);
-    fio___ge_p3_add(q, p);
+    fio___ge_p3_add(q, (const fio___gf_s *)p);
     fio___ge_p3_dbl(p);
     fio___ge_p3_cswap(p, q, b);
   }
@@ -34141,7 +34149,7 @@ SFUNC int fio_ed25519_verify(const uint8_t signature[64],
   fio___gf_neg(ka[3], ka[3]);
 
   /* add sb + (-ka) */
-  fio___ge_p3_add(sb, ka);
+  fio___ge_p3_add(sb, (const fio___gf_s *)ka);
 
   /* encode result and compare with r */
   uint8_t check[32];
@@ -44632,7 +44640,7 @@ FIO_SFUNC int fio___tls13_parse_alpn_extension(const uint8_t *data,
 
   /* Read protocol name list length */
   uint16_t list_len = fio___tls13_read_u16(data);
-  if (list_len + 2 > data_len)
+  if ((size_t)list_len + 2 > data_len)
     return -1;
 
   const uint8_t *p = data + 2;
@@ -44713,7 +44721,7 @@ FIO_SFUNC int fio___tls13_parse_alpn_response(const uint8_t *data,
 
   /* Read protocol name list length */
   uint16_t list_len = fio___tls13_read_u16(data);
-  if (list_len + 2 > data_len || list_len < 2)
+  if ((size_t)list_len + 2 > data_len || list_len < 2)
     return -1;
 
   /* Read single protocol */
@@ -45205,7 +45213,7 @@ SFUNC int fio_tls13_parse_certificate_request(
   if (p + 1 > end)
     return -1;
   uint8_t ctx_len = *p++;
-  if (p + ctx_len > end || ctx_len > 255)
+  if (p + ctx_len > end)
     return -1;
 
   /* Copy context */
@@ -49893,7 +49901,7 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
   uint16_t sig_scheme = ((uint16_t)body[0] << 8) | body[1];
   uint16_t sig_len = ((uint16_t)body[2] << 8) | body[3];
 
-  if (4 + sig_len > body_len) {
+  if (4 + (size_t)sig_len > body_len) {
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
                                  FIO_TLS13_ALERT_DECODE_ERROR);
@@ -67649,7 +67657,7 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
 FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
-  if (cpy->from != FIO_IPC_EXCLUDE_SELF)
+  if ((uintptr_t)(cpy->from) + 1 > 1) /* tests exclude + NULL*/
     cpy->from = fio_io_dup(cpy->from);
   return cpy;
 }
@@ -67677,7 +67685,8 @@ FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
     m->from = FIO_IPC_EXCLUDE_SELF;
   m->len = (uint32_t)(data_len);
   m->flags = args->flags;
-  m->timestamp = (args->timestamp ? args->timestamp : fio_io_last_tick());
+  m->timestamp =
+      (args->timestamp ? (uint64_t)args->timestamp : fio_io_last_tick());
   m->id = (args->id ? args->id : fio_rand64());
   if (args->opcode) {
     routing_flags |= FIO_IPC_FLAG_OPCODE;
@@ -72052,7 +72061,8 @@ SFUNC void fio_pubsub_publish FIO_NOOP(fio_pubsub_publish_args_s args) {
   fio_pubsub_msg_s msg = {
       .io = args.from,
       .id = args.id ? args.id : fio_rand64(),
-      .timestamp = args.timestamp ? args.timestamp : fio_io_last_tick(),
+      .timestamp =
+          args.timestamp ? (uint64_t)args.timestamp : fio_io_last_tick(),
       .channel = args.channel,
       .message = args.message,
       .filter = args.filter,
