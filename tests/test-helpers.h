@@ -1,6 +1,7 @@
 #ifndef H___TEST_HELPERS___H
 #define H___TEST_HELPERS___H
 
+#define FIO_LOG
 #define FIO_CORE
 #include "../fio-stl/include.h"
 
