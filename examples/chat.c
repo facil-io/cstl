@@ -95,7 +95,7 @@ FIO_SFUNC void on_close(void *buf, void *udata) {
                     NULL,
                     FIO_STRING_WRITE_STR2(c->name, c->name[31]),
                     FIO_STRING_WRITE_STR1(" left the chat.\n"));
-  fio_publish(.message = FIO_STR2BUF_INFO(s));
+  fio_pubsub_publish(.message = FIO_STR2BUF_INFO(s));
   client_free(c);
   (void)buf;
 }
@@ -153,7 +153,7 @@ FIO_SFUNC void on_data_message_line(fio_io_s *io, char *msg, size_t len) {
                               FIO_STRING_WRITE_STR2(c->name, c->name[31]),
                               FIO_STRING_WRITE_STR2(": ", 2),
                               FIO_STRING_WRITE_STR2(msg, len));
-  fio_publish(.message = fio_bstr_buf(buf), /* .from = io */);
+  fio_pubsub_publish(.message = fio_bstr_buf(buf) /* .from = io */);
   fio_bstr_free(buf);
   if (((len == 4 || len == 5) &&
        (((msg[0] | 32) == 'b') & ((msg[1] | 32) == 'y') &
@@ -224,7 +224,7 @@ FIO_SFUNC void on_shutdown(fio_io_s *io) {
 Starting the program - main()
 ***************************************************************************** */
 
-static void print_chat(fio_msg_s *m) {
+static void print_chat(fio_pubsub_msg_s *m) {
   printf("%.*s", (int)m->message.len, m->message.buf);
 }
 

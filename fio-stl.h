@@ -74185,6 +74185,7 @@ SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
 /* *****************************************************************************
 Redis Module Cleanup
 ***************************************************************************** */
+#undef FIO___RECURSIVE_INCLUDE
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_REDIS && !H___FIO_REDIS___H */
 /* ************************************************************************* */

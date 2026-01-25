@@ -52,7 +52,7 @@ static void websocket_on_open(fio_http_s *h) { /* also for SSE connections */
 static void websocket_on_message(fio_http_s *h,
                                  fio_buf_info_s msg,
                                  uint8_t is_text) {
-  fio_publish(.filter = 1, .message = msg);
+  fio_pubsub_publish(.filter = 1, .message = msg);
   (void)h, (void)is_text;
 }
 
@@ -201,7 +201,7 @@ int main(int argc, char const *argv[]) {
                      .repetitions = -1);
 
   if (fio_cli_get_bool("-C")) { /* container - place pub/sub socket in tmp */
-    char *u = (char *)fio_pubsub_ipc_url();
+    char *u = (char *)fio_ipc_url();
     memcpy((void *)(u + 7), "/tmp/", 5);
   }
 
@@ -227,7 +227,7 @@ int main(int argc, char const *argv[]) {
   if (fio_cli_get_i("-bp") > 0) {
     fio_buf_info_s scrt = FIO_BUF_INFO1((char *)fio_cli_get("-scrt"));
     fio_secret_set(scrt.buf, scrt.len, 0);
-    fio_pubsub_broadcast_on_port(fio_cli_get_i("-bp"));
+    fio_ipc_cluster_listen((uint16_t)fio_cli_get_i("-bp"));
   }
 
   /* review TLS fallback */
@@ -480,20 +480,20 @@ FIO_SFUNC void logger_detached(const fio_pubsub_engine_s *eng) {
   FIO_LOG_INFO("%d (logger) detached", fio_io_pid());
   (void)eng;
 }
-FIO_SFUNC void logger_on_msg(fio_msg_s *msg) {
+FIO_SFUNC void logger_on_msg(fio_pubsub_msg_s *msg) {
   FIO_LOG_INFO("%d (logger) pub/sub message for %s (%d):\n%s",
                fio_io_pid(),
                (msg->channel.len ? msg->channel.buf : "<null>"),
                (int)msg->filter,
                (msg->message.len ? msg->message.buf : "<null>"));
 }
-FIO_SFUNC void logger_publish(const fio_pubsub_engine_s *eng, fio_msg_s *msg) {
-  logger_on_msg(msg);
-  fio_publish(.engine = FIO_PUBSUB_CLUSTER,
-              .channel = msg->channel,
-              .message = msg->message,
-              .filter = msg->filter,
-              .is_json = msg->is_json);
+FIO_SFUNC void logger_publish(const fio_pubsub_engine_s *eng,
+                              const fio_pubsub_msg_s *msg) {
+  logger_on_msg((fio_pubsub_msg_s *)msg);
+  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
+                     .channel = msg->channel,
+                     .message = msg->message,
+                     .filter = msg->filter);
   (void)eng;
 }
 
@@ -503,8 +503,8 @@ fio_pubsub_engine_s FIO_PUBSUB_LOGGER = {
 };
 
 FIO_CONSTRUCTOR(pubsub_logger) {
-  FIO_PUBSUB_DEFAULT = &FIO_PUBSUB_LOGGER;
-  fio_pubsub_attach(&FIO_PUBSUB_LOGGER);
+  fio_pubsub_engine_default_set(&FIO_PUBSUB_LOGGER);
+  fio_pubsub_engine_attach(&FIO_PUBSUB_LOGGER);
   fio_pubsub_subscribe(.filter = 1, .on_message = logger_on_msg);
 }
 #endif

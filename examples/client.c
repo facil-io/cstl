@@ -205,9 +205,9 @@ FIO_SFUNC void on_input(fio_io_s *io) {
     if (!info.len)
       return;
     FIO_LOG_DEBUG2("Publishing: %.*s", (int)info.len, info.buf);
-    fio_publish(.from = io,
-                .channel = FIO_BUF_INFO1("client"),
-                .message = FIO_BUF_INFO2(info.buf, info.len));
+    fio_pubsub_publish(.from = io,
+                       .channel = FIO_BUF_INFO1("client"),
+                       .message = FIO_BUF_INFO2(info.buf, info.len));
   }
 }
 
@@ -219,9 +219,9 @@ FIO_SFUNC void on_input_closed(void *buf, void *udata) {
 }
 
 /* Debug messages for STDIN round-trip */
-FIO_SFUNC void debug_subscriber(fio_msg_s *msg) {
+FIO_SFUNC void debug_subscriber(fio_pubsub_msg_s *msg) {
   FIO_LOG_DEBUG2("Subscriber received: %.*s",
-                 msg->message.len,
+                 (int)msg->message.len,
                  msg->message.buf);
 }
 
