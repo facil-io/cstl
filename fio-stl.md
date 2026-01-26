@@ -19701,7 +19701,7 @@ The IPC module provides functions with different execution scopes:
 | `fio_ipc_broadcast` | `.workers = 1, .cluster = 1` | ALL processes on ALL machines |
 | `fio_ipc_reply` | N/A | Caller only (reply to request) |
 
-**Note**: Use `.others = true` to exclude the calling process from execution.
+**Note**: Use `.exclude = FIO_IPC_EXCLUDE_SELF` to exclude the calling process from execution.
 
 ### IPC Message Types
 
@@ -19752,13 +19752,13 @@ typedef struct {
   void (*call)(fio_ipc_s *);     /** Function to execute on target process */
   void (*on_reply)(fio_ipc_s *); /** Callback when reply received */
   void (*on_done)(fio_ipc_s *);  /** Callback when all replies done */
+  fio_io_s *exclude;             /** Optional: IO to exclude from delivery */
   uint64_t timestamp;            /** Optional: force timestamp (0 = current time) */
   uint64_t id;                   /** Optional: force ID (0 = random) */
   uint32_t opcode;               /** Replaces `call` with op-code if non-zero */
   uint16_t flags;                /** User-settable flags */
   bool cluster;                  /** If set, intended for all machines in cluster */
   bool workers;                  /** If set, intended for master + workers */
-  bool others;                   /** If set, will not run on calling process */
   void *udata;                   /** Opaque user data (caller-side only) */
   fio_buf_info_s *data;          /** Array of buffers for message payload */
 } fio_ipc_args_s;
@@ -19776,7 +19776,7 @@ Arguments structure for creating IPC messages. Used by `fio_ipc_new` and the mai
 | `opcode` | `uint32_t` | Op-code for cluster RPC. Replaces `call` if non-zero. |
 | `cluster` | `bool` | Send to remote machines in cluster. |
 | `workers` | `bool` | Send to master + all workers on local machine. |
-| `others` | `bool` | Exclude calling process from execution. |
+| `exclude` | `fio_io_s*` | Exclude IO (if known) / self from execution. |
 | `udata` | `void *` | Opaque user data (not transmitted). |
 | `data` | `fio_buf_info_s *` | Message payload. Use `FIO_IPC_DATA()` macro. |
 
@@ -19877,7 +19877,7 @@ fio_ipc_call(.call = my_handler,
 #define FIO_IPC_EXCLUDE_SELF ((fio_io_s *)((char *)-1LL))
 ```
 
-Special value that can be set in `ipc->from` before calling `fio_ipc_send` to exclude the current process from receiving the message. Alternatively, use `.others = true` in `fio_ipc_args_s`.
+Special value that can be set in `ipc->from` before calling `fio_ipc_send` to exclude the current process from receiving the message. Alternatively, use `.exclude = FIO_IPC_EXCLUDE_SELF` in `fio_ipc_args_s`.
 
 ### Main API
 
@@ -19920,8 +19920,8 @@ fio_ipc_local(.call = handle_local_broadcast,
               .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"local_data")));
 
 /* Broadcast to all local processes EXCEPT self */
-fio_ipc_local(.others = true,
-              .call = handle_local_broadcast,
+fio_ipc_local(.call = handle_local_broadcast,
+              .exclude = FIO_IPC_EXCLUDE_SELF,
               .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"to_others")));
 ```
 
@@ -19964,7 +19964,7 @@ fio_ipc_broadcast(.opcode = OP_CACHE_INVALIDATE,
 
 /* Broadcast to all except current process */
 fio_ipc_broadcast(.opcode = OP_CONFIG_UPDATE,
-                  .others = true,
+                  .exclude = FIO_IPC_EXCLUDE_SELF,
                   .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"config_data")));
 ```
 
@@ -20586,8 +20586,8 @@ void notify_handler(fio_ipc_s *msg) {
 
 /* Method 1: Use .others = true */
 void notify_others_method1(const char *data) {
-  fio_ipc_local(.others = true,
-                .call = notify_handler,
+  fio_ipc_local(.call = notify_handler,
+                .exclude = FIO_IPC_EXCLUDE_SELF,
                 .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)data)));
 }
 

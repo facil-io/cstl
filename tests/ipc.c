@@ -2134,7 +2134,7 @@ FIO_SFUNC int fio___test_mp_bcast_exclude_trigger(void *ignr_1, void *ignr_2) {
 
   const char *data = "exclude_test_data";
   fio_ipc_local(
-          /* no .others = all workers receive + master executes */
+          /* no .exclude workers receive + master executes */
           .call = fio___test_mp_bcast_exclude_handler,
           .data = FIO_IPC_DATA(FIO_BUF_INFO2((char *)data, FIO_STRLEN(data))));
   return -1; /* One-shot */
@@ -2364,7 +2364,7 @@ FIO_SFUNC void fio___test_mp_child_bcast_worker_start(void *ignr_) {
                    fio_io_pid());
 
     const char *data = "child_broadcast_data";
-    /* no .others - should run on master AND all workers including caller */
+    /* no .exclude - should run on master AND all workers including caller */
     fio_ipc_local(.call = fio___test_mp_child_bcast_handler,
                   .data = FIO_IPC_DATA(
                       FIO_BUF_INFO2((char *)data, FIO_STRLEN(data))));
@@ -2488,9 +2488,9 @@ FIO_SFUNC void fio___test_mp_child_excl_worker_start(void *ignr_) {
                    fio_io_pid());
 
     const char *data = "child_excl_data";
-    /* .others = true - should NOT run on caller */
-    fio_ipc_local(.others = true,
-                  .call = fio___test_mp_child_excl_handler,
+    /* .exclude = true - should NOT run on caller */
+    fio_ipc_local(.call = fio___test_mp_child_excl_handler,
+                  .exclude = FIO_IPC_EXCLUDE_SELF,
                   .data = FIO_IPC_DATA(
                       FIO_BUF_INFO2((char *)data, FIO_STRLEN(data))));
   }
@@ -3041,8 +3041,8 @@ FIO_SFUNC void fio___test_mp_redist_worker_start(void *ignr_) {
 
     const char *data = "redistribution_test";
     /* Worker publishes with self-exclusion - master should receive */
-    fio_ipc_local(.others = true,
-                  .call = fio___test_mp_redist_handler,
+    fio_ipc_local(.call = fio___test_mp_redist_handler,
+                  .exclude = FIO_IPC_EXCLUDE_SELF,
                   .data = FIO_IPC_DATA(
                       FIO_BUF_INFO2((char *)data, FIO_STRLEN(data))));
   }
@@ -3177,7 +3177,7 @@ FIO_SFUNC void fio___test_mp_worker_bcast_worker_start(void *ignr_) {
                    fio_io_pid());
 
     const char *data = "worker_mistaken_broadcast";
-    /* Worker calls local broadcast without .others - this is the "mistake"
+    /* Worker calls local broadcast without .exclude - this is the "mistake"
      * scenario According to docs: behaves like fio_ipc_call + executes locally
      */
     fio_ipc_local(.call = fio___test_mp_worker_bcast_handler,

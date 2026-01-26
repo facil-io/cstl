@@ -1085,6 +1085,7 @@ FIO_SFUNC void fio___pubsub_engine_ipc_publish(const fio_pubsub_engine_s *eng,
    * fio_ipc_local sends to master + all workers on local machine.
    */
   fio_ipc_local(.call = fio___pubsub_engine_ipc_publish_deliver,
+                .exclude = msg->io,
                 .timestamp = msg->timestamp,
                 .id = msg->id,
                 .flags = (uint16_t)msg->filter,
@@ -1106,6 +1107,7 @@ FIO_SFUNC void fio___pubsub_engine_cluster_publish(
    * fio_ipc_local sends to master + all workers on local machine.
    */
   fio_ipc_broadcast(.opcode = FIO___PUBSUB_OPCODE_PUBLISH,
+                    .exclude = msg->io,
                     .timestamp = msg->timestamp,
                     .id = msg->id,
                     .flags = (uint16_t)msg->filter,
