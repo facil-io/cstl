@@ -12,6 +12,8 @@ Includes OpenSSL head-to-head comparison when HAVE_OPENSSL is defined.
 #define FIO_RAND
 #define FIO_CRYPT
 #define FIO_AES
+#define FIO_LYRA2
+#define FIO_ARGON2
 #include "test-helpers.h"
 
 /* OpenSSL Integration (Conditional Compilation) */
@@ -49,6 +51,20 @@ FIO_SFUNC uintptr_t fio___perf_sha256_wrapper(char *data, size_t len) {
 FIO_SFUNC uintptr_t fio___perf_sha512_wrapper(char *data, size_t len) {
   fio_u512 h = fio_sha512((const void *)data, (uint64_t)len);
   return (uintptr_t)(h.u64[0]);
+}
+
+/* Blake2b wrapper */
+FIO_SFUNC uintptr_t fio___perf_blake2b_wrapper(char *data, size_t len) {
+  uint64_t out[8];
+  fio_blake2b(out, 64, (const void *)data, len, NULL, 0);
+  return (uintptr_t)(out[0]);
+}
+
+/* Blake2s wrapper */
+FIO_SFUNC uintptr_t fio___perf_blake2s_wrapper(char *data, size_t len) {
+  uint32_t out[8];
+  fio_blake2s(out, 32, (const void *)data, len, NULL, 0);
+  return (uintptr_t)(out[0]);
 }
 
 /* Poly1305 wrapper */
@@ -191,6 +207,50 @@ FIO_SFUNC void fio___perf_sha(void) {
 }
 
 /* *****************************************************************************
+Performance Tests: Blake2
+***************************************************************************** */
+
+FIO_SFUNC void fio___perf_blake2(void) {
+  fprintf(stderr, "\t* Benchmarking Blake2 hash functions...\n");
+
+  /* Blake2b */
+  fprintf(stderr, "\n\t  Blake2b:\n");
+  fio_test_hash_function(fio___perf_blake2b_wrapper,
+                         (char *)"fio_blake2b",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2b_wrapper,
+                         (char *)"fio_blake2b",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2b_wrapper,
+                         (char *)"fio_blake2b",
+                         13,
+                         0,
+                         1);
+
+  /* Blake2s */
+  fprintf(stderr, "\n\t  Blake2s:\n");
+  fio_test_hash_function(fio___perf_blake2s_wrapper,
+                         (char *)"fio_blake2s",
+                         5,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2s_wrapper,
+                         (char *)"fio_blake2s",
+                         7,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2s_wrapper,
+                         (char *)"fio_blake2s",
+                         13,
+                         0,
+                         1);
+}
+
+/* *****************************************************************************
 Performance Tests: ChaCha20/Poly1305
 ***************************************************************************** */
 
@@ -302,6 +362,151 @@ FIO_SFUNC void fio___perf_aes(void) {
                          13,
                          0,
                          0);
+}
+
+/* *****************************************************************************
+Performance Tests: Password Hashing (KDF)
+***************************************************************************** */
+
+/* Lyra2 benchmark configuration */
+typedef struct {
+  const char *name;
+  uint32_t t_cost;
+  uint32_t m_cost;
+  uint32_t n_cols;
+  uint32_t outlen;
+} fio___perf_lyra2_config_s;
+
+/* Argon2 benchmark configuration */
+typedef struct {
+  const char *name;
+  uint32_t t_cost;
+  uint32_t m_cost;
+  uint32_t parallelism;
+  uint32_t outlen;
+  fio_argon2_type_e type;
+} fio___perf_argon2_config_s;
+
+FIO_SFUNC void fio___perf_kdf(void) {
+  fprintf(stderr, "\t* Benchmarking Password Hashing (KDF)...\n");
+
+  const char *pwd = "password";
+  const size_t pwd_len = 8;
+  const char *salt = "saltsaltsaltsalt";
+  const size_t salt_len = 16;
+
+  /* BLOCK_LEN_BYTES = 12 uint64_t * 8 = 96 bytes per column */
+  static const size_t lyra2_block_bytes = 12 * sizeof(uint64_t);
+
+  /*
+   * Memory tiers for fair comparison (Lyra2 matrix = m_cost * n_cols * 96):
+   *   ~2.4 MB:  Lyra2 m=100  c=256 -> 2400 KB   |  Argon2 m_cost=2400
+   *   ~6   MB:  Lyra2 m=256  c=256 -> 6144 KB   |  Argon2 m_cost=6144
+   *   ~24  MB:  Lyra2 m=1024 c=256 -> 24000 KB  |  Argon2 m_cost=24000
+   *   ~64  MB:  Lyra2 m=2731 c=256 -> 65546 KB  |  Argon2 m_cost=65536
+   */
+
+  /* ---- Lyra2 ---- */
+  fprintf(stderr, "\n\t  Lyra2:\n");
+  fprintf(stderr,
+          "\t  %-45s %10s  %10s\n",
+          "Configuration",
+          "ops/sec",
+          "memory KB");
+  fprintf(stderr,
+          "\t  -----------------------------------------------------------"
+          "--------\n");
+
+  static const fio___perf_lyra2_config_s lyra2_configs[] = {
+      {"Lyra2  (t=1, ~2.4MB)", 1, 100, 256, 32},
+      {"Lyra2  (t=1, ~6MB)", 1, 256, 256, 32},
+      {"Lyra2  (t=1, ~24MB)", 1, 1024, 256, 32},
+      {"Lyra2  (t=1, ~64MB)", 1, 2731, 256, 32},
+      {"Lyra2  (t=3, ~2.4MB)", 3, 100, 256, 32},
+      {"Lyra2  (t=3, ~6MB)", 3, 256, 256, 32},
+  };
+
+  for (size_t i = 0; i < sizeof(lyra2_configs) / sizeof(lyra2_configs[0]);
+       ++i) {
+    const fio___perf_lyra2_config_s *cfg = &lyra2_configs[i];
+    size_t matrix_bytes = (size_t)cfg->m_cost * cfg->n_cols * lyra2_block_bytes;
+    double matrix_kb = (double)matrix_bytes / 1024.0;
+
+    uint64_t iterations = 0;
+    clock_t start = clock();
+    clock_t min_duration = CLOCKS_PER_SEC;
+    for (;;) {
+      fio_u512 r = fio_lyra2(.password = FIO_BUF_INFO2((char *)pwd, pwd_len),
+                             .salt = FIO_BUF_INFO2((char *)salt, salt_len),
+                             .t_cost = cfg->t_cost,
+                             .m_cost = cfg->m_cost,
+                             .n_cols = cfg->n_cols,
+                             .outlen = cfg->outlen);
+      (void)r;
+      FIO_COMPILER_GUARD;
+      ++iterations;
+      if (iterations >= 4 && (clock() - start) >= min_duration)
+        break;
+    }
+    clock_t end = clock();
+    double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
+    double ops_sec = (double)iterations / (elapsed > 0.0 ? elapsed : 0.0001);
+
+    fprintf(stderr,
+            "\t    %-45s %10.2f  %10.1f\n",
+            cfg->name,
+            ops_sec,
+            matrix_kb);
+  }
+
+  /* ---- Argon2 (matching memory tiers, p=1 for single-threaded comparison) */
+  fprintf(stderr, "\n\t  Argon2:\n");
+  fprintf(stderr,
+          "\t  %-45s %10s  %10s\n",
+          "Configuration",
+          "ops/sec",
+          "memory KB");
+  fprintf(stderr,
+          "\t  -----------------------------------------------------------"
+          "--------\n");
+
+  static const fio___perf_argon2_config_s argon2_configs[] = {
+      {"Argon2id (t=1, ~2.4MB, p=1)", 1, 2400, 1, 32, FIO_ARGON2ID},
+      {"Argon2id (t=1, ~6MB,   p=1)", 1, 6144, 1, 32, FIO_ARGON2ID},
+      {"Argon2id (t=1, ~24MB,  p=1)", 1, 24000, 1, 32, FIO_ARGON2ID},
+      {"Argon2id (t=1, ~64MB,  p=1)", 1, 65536, 1, 32, FIO_ARGON2ID},
+      {"Argon2id (t=3, ~2.4MB, p=1)", 3, 2400, 1, 32, FIO_ARGON2ID},
+      {"Argon2id (t=3, ~6MB,   p=1)", 3, 6144, 1, 32, FIO_ARGON2ID},
+  };
+
+  for (size_t i = 0; i < sizeof(argon2_configs) / sizeof(argon2_configs[0]);
+       ++i) {
+    const fio___perf_argon2_config_s *cfg = &argon2_configs[i];
+    double mem_kb = (double)cfg->m_cost;
+
+    uint64_t iterations = 0;
+    clock_t start = clock();
+    clock_t min_duration = CLOCKS_PER_SEC;
+    for (;;) {
+      fio_u512 r = fio_argon2(.password = FIO_BUF_INFO2((char *)pwd, pwd_len),
+                              .salt = FIO_BUF_INFO2((char *)salt, salt_len),
+                              .t_cost = cfg->t_cost,
+                              .m_cost = cfg->m_cost,
+                              .parallelism = cfg->parallelism,
+                              .outlen = cfg->outlen,
+                              .type = cfg->type);
+      (void)r;
+      FIO_COMPILER_GUARD;
+      ++iterations;
+      if (iterations >= 4 && (clock() - start) >= min_duration)
+        break;
+    }
+    clock_t end = clock();
+    double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
+    double ops_sec = (double)iterations / (elapsed > 0.0 ? elapsed : 0.0001);
+
+    fprintf(stderr, "\t    %-45s %10.2f  %10.1f\n", cfg->name, ops_sec, mem_kb);
+  }
 }
 
 /* *****************************************************************************
@@ -566,6 +771,169 @@ FIO_SFUNC void openssl_bench_aes256_gcm(void) {
   EVP_CIPHER_CTX_free(ctx);
 }
 
+/* OpenSSL Argon2id benchmark (requires OpenSSL 3.2+) */
+#include <openssl/opensslv.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30200000L
+#include <openssl/core_names.h>
+#include <openssl/kdf.h>
+#include <openssl/params.h>
+#define FIO___PERF_HAS_OPENSSL_ARGON2 1
+
+typedef struct {
+  const char *name;
+  uint32_t t_cost;
+  uint32_t m_cost_kb;
+  uint32_t threads;
+  uint32_t outlen;
+} fio___perf_openssl_argon2_config_s;
+
+FIO_SFUNC void openssl_bench_argon2id(void) {
+  /* Matching memory tiers for fair comparison with facil.io Lyra2/Argon2 */
+  static const fio___perf_openssl_argon2_config_s configs[] = {
+      {"OpenSSL Argon2id (t=1, ~2.4MB, p=1)", 1, 2400, 1, 32},
+      {"OpenSSL Argon2id (t=1, ~6MB,   p=1)", 1, 6144, 1, 32},
+      {"OpenSSL Argon2id (t=1, ~24MB,  p=1)", 1, 24000, 1, 32},
+      {"OpenSSL Argon2id (t=1, ~64MB,  p=1)", 1, 65536, 1, 32},
+      {"OpenSSL Argon2id (t=3, ~2.4MB, p=1)", 3, 2400, 1, 32},
+      {"OpenSSL Argon2id (t=3, ~6MB,   p=1)", 3, 6144, 1, 32},
+  };
+  static const size_t n_configs = sizeof(configs) / sizeof(configs[0]);
+
+  const char *pwd = "password";
+  const size_t pwd_len = 8;
+  const char *salt = "saltsaltsaltsalt";
+  const size_t salt_len = 16;
+
+  fprintf(stderr,
+          "\t  %-45s %10s  %10s\n",
+          "Configuration",
+          "ops/sec",
+          "mem KB");
+  fprintf(stderr,
+          "\t  -----------------------------------------------------------"
+          "--------\n");
+
+  for (size_t i = 0; i < n_configs; ++i) {
+    const fio___perf_openssl_argon2_config_s *cfg = &configs[i];
+
+    EVP_KDF *kdf = EVP_KDF_fetch(NULL, "ARGON2ID", NULL);
+    if (!kdf) {
+      fprintf(stderr, "\t    %-45s %10s  %10s\n", cfg->name, "N/A", "N/A");
+      fprintf(stderr, "\t    (OpenSSL Argon2id not available in this build)\n");
+      return;
+    }
+
+    uint64_t iterations = 0;
+    clock_t start = clock();
+    clock_t min_duration = CLOCKS_PER_SEC;
+    for (;;) {
+      EVP_KDF_CTX *ctx = EVP_KDF_CTX_new(kdf);
+      uint8_t out[64];
+      uint32_t threads = cfg->threads;
+      uint32_t m_cost = cfg->m_cost_kb;
+      uint32_t t_cost = cfg->t_cost;
+      OSSL_PARAM params[] = {
+          OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD,
+                                            (void *)pwd,
+                                            pwd_len),
+          OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT,
+                                            (void *)salt,
+                                            salt_len),
+          OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_THREADS, &threads),
+          OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &threads),
+          OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &m_cost),
+          OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &t_cost),
+          OSSL_PARAM_END,
+      };
+      EVP_KDF_derive(ctx, out, cfg->outlen, params);
+      EVP_KDF_CTX_free(ctx);
+      FIO_COMPILER_GUARD;
+      ++iterations;
+      if (iterations >= 4 && (clock() - start) >= min_duration)
+        break;
+    }
+    EVP_KDF_free(kdf);
+    clock_t end = clock();
+    double elapsed = (double)(end - start) / CLOCKS_PER_SEC;
+    double ops_sec = (double)iterations / (elapsed > 0.0 ? elapsed : 0.0001);
+
+    fprintf(stderr,
+            "\t    %-45s %10.2f  %10.1f\n",
+            cfg->name,
+            ops_sec,
+            (double)cfg->m_cost_kb);
+  }
+}
+#endif /* OPENSSL_VERSION_NUMBER >= 0x30200000L */
+
+/* OpenSSL Blake2b benchmark */
+FIO_SFUNC void openssl_bench_blake2b(void) {
+  unsigned char data_16[16];
+  unsigned char data_128[128];
+  unsigned char data_8192[8192];
+  unsigned char digest[64];
+  unsigned int digest_len;
+  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+
+  fio_rand_bytes(data_16, sizeof(data_16));
+  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_8192, sizeof(data_8192));
+
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (16 bytes)", 16, {
+    EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
+    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (128 bytes)", 128, {
+    EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
+    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (8192 bytes)", 8192, {
+    EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
+    EVP_DigestUpdate(ctx, data_8192, 8192);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  EVP_MD_CTX_free(ctx);
+}
+
+/* OpenSSL Blake2s benchmark */
+FIO_SFUNC void openssl_bench_blake2s(void) {
+  unsigned char data_16[16];
+  unsigned char data_128[128];
+  unsigned char data_8192[8192];
+  unsigned char digest[32];
+  unsigned int digest_len;
+  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+
+  fio_rand_bytes(data_16, sizeof(data_16));
+  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_8192, sizeof(data_8192));
+
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (16 bytes)", 16, {
+    EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
+    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (128 bytes)", 128, {
+    EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
+    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (8192 bytes)", 8192, {
+    EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
+    EVP_DigestUpdate(ctx, data_8192, 8192);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  EVP_MD_CTX_free(ctx);
+}
+
 /* Run all OpenSSL benchmarks */
 FIO_SFUNC void fio___perf_openssl(void) {
   fprintf(stderr, "\n\t===========================================\n");
@@ -582,6 +950,13 @@ FIO_SFUNC void fio___perf_openssl(void) {
   fprintf(stderr, "\n\t  OpenSSL SHA-512:\n");
   openssl_bench_sha512();
 
+  fprintf(stderr, "\n\t* OpenSSL Blake2 Hash Functions:\n");
+  fprintf(stderr, "\n\t  OpenSSL Blake2b-512:\n");
+  openssl_bench_blake2b();
+
+  fprintf(stderr, "\n\t  OpenSSL Blake2s-256:\n");
+  openssl_bench_blake2s();
+
   fprintf(stderr, "\n\t* OpenSSL ChaCha20-Poly1305:\n\n");
   openssl_bench_chacha20_poly1305();
 
@@ -591,6 +966,11 @@ FIO_SFUNC void fio___perf_openssl(void) {
 
   fprintf(stderr, "\n\t  OpenSSL AES-256-GCM:\n");
   openssl_bench_aes256_gcm();
+
+#ifdef FIO___PERF_HAS_OPENSSL_ARGON2
+  fprintf(stderr, "\n\t* OpenSSL Argon2id (KDF comparison):\n\n");
+  openssl_bench_argon2id();
+#endif
 
   fprintf(stderr, "\n\t===========================================\n");
   fprintf(stderr, "\tOpenSSL benchmarks complete\n");
@@ -618,8 +998,10 @@ int main(void) {
   fprintf(stderr, "\t===========================================\n\n");
 
   fio___perf_sha();
+  fio___perf_blake2();
   fio___perf_chacha();
   fio___perf_aes();
+  fio___perf_kdf();
 
   fprintf(stderr, "\n\t===========================================\n");
   fprintf(stderr, "\tfacil.io benchmarks complete.\n");

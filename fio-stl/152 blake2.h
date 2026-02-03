@@ -124,89 +124,195 @@ static const uint64_t fio___blake2b_iv[8] = {0x6A09E667F3BCC908ULL,
                                              0x1F83D9ABFB41BD6BULL,
                                              0x5BE0CD19137E2179ULL};
 
-/* BLAKE2b sigma permutation table */
-static const uint8_t fio___blake2b_sigma[12][16] = {
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3},
-    {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4},
-    {7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8},
-    {9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13},
-    {2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9},
-    {12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11},
-    {13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10},
-    {6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5},
-    {10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0},
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3}};
-
-/* BLAKE2b G mixing function */
-#define FIO___BLAKE2B_G(r, i, a, b, c, d, m)                                   \
+/* BLAKE2b G mixing function with hardcoded message word indices */
+#define FIO___BLAKE2B_G(a, b, c, d, mx, my)                                    \
   do {                                                                         \
-    (a) += (b) + m[fio___blake2b_sigma[r][2 * (i)]];                           \
+    (a) += (b) + (mx);                                                         \
     (d) = fio_rrot64((d) ^ (a), 32);                                           \
     (c) += (d);                                                                \
     (b) = fio_rrot64((b) ^ (c), 24);                                           \
-    (a) += (b) + m[fio___blake2b_sigma[r][2 * (i) + 1]];                       \
+    (a) += (b) + (my);                                                         \
     (d) = fio_rrot64((d) ^ (a), 16);                                           \
     (c) += (d);                                                                \
     (b) = fio_rrot64((b) ^ (c), 63);                                           \
   } while (0)
 
-/* BLAKE2b round function */
-#define FIO___BLAKE2B_ROUND(r, v, m)                                           \
-  do {                                                                         \
-    FIO___BLAKE2B_G(r, 0, v[0], v[4], v[8], v[12], m);                         \
-    FIO___BLAKE2B_G(r, 1, v[1], v[5], v[9], v[13], m);                         \
-    FIO___BLAKE2B_G(r, 2, v[2], v[6], v[10], v[14], m);                        \
-    FIO___BLAKE2B_G(r, 3, v[3], v[7], v[11], v[15], m);                        \
-    FIO___BLAKE2B_G(r, 4, v[0], v[5], v[10], v[15], m);                        \
-    FIO___BLAKE2B_G(r, 5, v[1], v[6], v[11], v[12], m);                        \
-    FIO___BLAKE2B_G(r, 6, v[2], v[7], v[8], v[13], m);                         \
-    FIO___BLAKE2B_G(r, 7, v[3], v[4], v[9], v[14], m);                         \
-  } while (0)
-
-/* BLAKE2b compression function */
+/* BLAKE2b compression function - sigma indices fully hardcoded per round */
 FIO_IFUNC void fio___blake2b_compress(fio_blake2b_s *restrict h,
                                       const uint8_t *restrict block,
                                       int is_last) {
   uint64_t v[16] FIO_ALIGN(64);
   uint64_t m[16] FIO_ALIGN(64);
 
-  /* Initialize working vector */
-  for (size_t i = 0; i < 8; ++i) {
-    v[i] = h->h[i];
-    v[i + 8] = fio___blake2b_iv[i];
-  }
-  v[12] ^= h->t[0];
-  v[13] ^= h->t[1];
-  if (is_last)
-    v[14] = ~v[14]; /* Invert finalization flag */
+  /* Initialize working vector - unrolled */
+  v[0] = h->h[0];
+  v[1] = h->h[1];
+  v[2] = h->h[2];
+  v[3] = h->h[3];
+  v[4] = h->h[4];
+  v[5] = h->h[5];
+  v[6] = h->h[6];
+  v[7] = h->h[7];
+  v[8] = fio___blake2b_iv[0];
+  v[9] = fio___blake2b_iv[1];
+  v[10] = fio___blake2b_iv[2];
+  v[11] = fio___blake2b_iv[3];
+  v[12] = fio___blake2b_iv[4] ^ h->t[0];
+  v[13] = fio___blake2b_iv[5] ^ h->t[1];
+  v[14] = is_last ? ~fio___blake2b_iv[6] : fio___blake2b_iv[6];
+  v[15] = fio___blake2b_iv[7];
 
-  /* Load message block (little-endian) */
-  for (size_t i = 0; i < 16; ++i)
-    m[i] = fio_buf2u64_le(block + i * 8);
+  /* Load message block (little-endian) - unrolled */
+  m[0] = fio_buf2u64_le(block);
+  m[1] = fio_buf2u64_le(block + 8);
+  m[2] = fio_buf2u64_le(block + 16);
+  m[3] = fio_buf2u64_le(block + 24);
+  m[4] = fio_buf2u64_le(block + 32);
+  m[5] = fio_buf2u64_le(block + 40);
+  m[6] = fio_buf2u64_le(block + 48);
+  m[7] = fio_buf2u64_le(block + 56);
+  m[8] = fio_buf2u64_le(block + 64);
+  m[9] = fio_buf2u64_le(block + 72);
+  m[10] = fio_buf2u64_le(block + 80);
+  m[11] = fio_buf2u64_le(block + 88);
+  m[12] = fio_buf2u64_le(block + 96);
+  m[13] = fio_buf2u64_le(block + 104);
+  m[14] = fio_buf2u64_le(block + 112);
+  m[15] = fio_buf2u64_le(block + 120);
 
-  /* 12 rounds of mixing */
-  FIO___BLAKE2B_ROUND(0, v, m);
-  FIO___BLAKE2B_ROUND(1, v, m);
-  FIO___BLAKE2B_ROUND(2, v, m);
-  FIO___BLAKE2B_ROUND(3, v, m);
-  FIO___BLAKE2B_ROUND(4, v, m);
-  FIO___BLAKE2B_ROUND(5, v, m);
-  FIO___BLAKE2B_ROUND(6, v, m);
-  FIO___BLAKE2B_ROUND(7, v, m);
-  FIO___BLAKE2B_ROUND(8, v, m);
-  FIO___BLAKE2B_ROUND(9, v, m);
-  FIO___BLAKE2B_ROUND(10, v, m);
-  FIO___BLAKE2B_ROUND(11, v, m);
+  /* 12 rounds with hardcoded sigma permutation indices */
+  /* Round 0: sigma = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[0], m[1]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[2], m[3]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[4], m[5]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[6], m[7]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[8], m[9]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[10], m[11]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[12], m[13]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[14], m[15]);
 
-  /* Finalize state */
-  for (size_t i = 0; i < 8; ++i)
-    h->h[i] ^= v[i] ^ v[i + 8];
+  /* Round 1: sigma = {14,10,4,8,9,15,13,6,1,12,0,2,11,7,5,3} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[14], m[10]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[4], m[8]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[9], m[15]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[13], m[6]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[1], m[12]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[0], m[2]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[11], m[7]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[5], m[3]);
+
+  /* Round 2: sigma = {11,8,12,0,5,2,15,13,10,14,3,6,7,1,9,4} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[11], m[8]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[12], m[0]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[5], m[2]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[15], m[13]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[10], m[14]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[3], m[6]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[7], m[1]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[9], m[4]);
+
+  /* Round 3: sigma = {7,9,3,1,13,12,11,14,2,6,5,10,4,0,15,8} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[7], m[9]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[3], m[1]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[13], m[12]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[11], m[14]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[2], m[6]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[5], m[10]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[4], m[0]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[15], m[8]);
+
+  /* Round 4: sigma = {9,0,5,7,2,4,10,15,14,1,11,12,6,8,3,13} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[9], m[0]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[5], m[7]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[2], m[4]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[10], m[15]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[14], m[1]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[11], m[12]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[6], m[8]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[3], m[13]);
+
+  /* Round 5: sigma = {2,12,6,10,0,11,8,3,4,13,7,5,15,14,1,9} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[2], m[12]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[6], m[10]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[0], m[11]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[8], m[3]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[4], m[13]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[7], m[5]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[15], m[14]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[1], m[9]);
+
+  /* Round 6: sigma = {12,5,1,15,14,13,4,10,0,7,6,3,9,2,8,11} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[12], m[5]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[1], m[15]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[14], m[13]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[4], m[10]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[0], m[7]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[6], m[3]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[9], m[2]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[8], m[11]);
+
+  /* Round 7: sigma = {13,11,7,14,12,1,3,9,5,0,15,4,8,6,2,10} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[13], m[11]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[7], m[14]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[12], m[1]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[3], m[9]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[5], m[0]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[15], m[4]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[8], m[6]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[2], m[10]);
+
+  /* Round 8: sigma = {6,15,14,9,11,3,0,8,12,2,13,7,1,4,10,5} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[6], m[15]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[14], m[9]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[11], m[3]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[0], m[8]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[12], m[2]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[13], m[7]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[1], m[4]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[10], m[5]);
+
+  /* Round 9: sigma = {10,2,8,4,7,6,1,5,15,11,9,14,3,12,13,0} */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[10], m[2]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[8], m[4]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[7], m[6]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[1], m[5]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[15], m[11]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[9], m[14]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[3], m[12]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[13], m[0]);
+
+  /* Round 10: sigma = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15} (same as 0) */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[0], m[1]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[2], m[3]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[4], m[5]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[6], m[7]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[8], m[9]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[10], m[11]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[12], m[13]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[14], m[15]);
+
+  /* Round 11: sigma = {14,10,4,8,9,15,13,6,1,12,0,2,11,7,5,3} (same as 1) */
+  FIO___BLAKE2B_G(v[0], v[4], v[8], v[12], m[14], m[10]);
+  FIO___BLAKE2B_G(v[1], v[5], v[9], v[13], m[4], m[8]);
+  FIO___BLAKE2B_G(v[2], v[6], v[10], v[14], m[9], m[15]);
+  FIO___BLAKE2B_G(v[3], v[7], v[11], v[15], m[13], m[6]);
+  FIO___BLAKE2B_G(v[0], v[5], v[10], v[15], m[1], m[12]);
+  FIO___BLAKE2B_G(v[1], v[6], v[11], v[12], m[0], m[2]);
+  FIO___BLAKE2B_G(v[2], v[7], v[8], v[13], m[11], m[7]);
+  FIO___BLAKE2B_G(v[3], v[4], v[9], v[14], m[5], m[3]);
+
+  /* Finalize state - unrolled */
+  h->h[0] ^= v[0] ^ v[8];
+  h->h[1] ^= v[1] ^ v[9];
+  h->h[2] ^= v[2] ^ v[10];
+  h->h[3] ^= v[3] ^ v[11];
+  h->h[4] ^= v[4] ^ v[12];
+  h->h[5] ^= v[5] ^ v[13];
+  h->h[6] ^= v[6] ^ v[14];
+  h->h[7] ^= v[7] ^ v[15];
 }
 
 #undef FIO___BLAKE2B_G
-#undef FIO___BLAKE2B_ROUND
 
 /** Initialize a BLAKE2b streaming context. */
 SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
@@ -224,13 +330,17 @@ SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
 
   h.outlen = outlen;
 
-  /* Initialize state with IV */
-  for (size_t i = 0; i < 8; ++i)
-    h.h[i] = fio___blake2b_iv[i];
+  /* Initialize state with IV - unrolled */
+  h.h[0] = fio___blake2b_iv[0];
+  h.h[1] = fio___blake2b_iv[1];
+  h.h[2] = fio___blake2b_iv[2];
+  h.h[3] = fio___blake2b_iv[3];
+  h.h[4] = fio___blake2b_iv[4];
+  h.h[5] = fio___blake2b_iv[5];
+  h.h[6] = fio___blake2b_iv[6];
+  h.h[7] = fio___blake2b_iv[7];
 
   /* XOR parameter block into state[0] */
-  /* Parameter block: fanout=1, depth=1, leaf_len=0, node_offset=0,
-   * node_depth=0, inner_len=0, reserved=0, salt=0, personal=0 */
   h.h[0] ^= 0x01010000ULL ^ ((uint64_t)keylen << 8) ^ (uint64_t)outlen;
 
   /* If keyed, pad key to 128 bytes and process as first block */
@@ -298,10 +408,20 @@ SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
   /* Final compression */
   fio___blake2b_compress(h, h->buf, 1);
 
-  /* Output hash (little-endian) */
+  /* Output hash (little-endian) - word-sized writes */
   uint8_t *o = (uint8_t *)out;
-  for (size_t i = 0; i < h->outlen; ++i)
-    o[i] = (uint8_t)(h->h[i / 8] >> (8 * (i % 8)));
+  size_t full_words = h->outlen >> 3; /* outlen / 8 */
+  size_t i;
+  for (i = 0; i < full_words; ++i)
+    fio_u2buf64_le(o + (i << 3), h->h[i]);
+  /* Handle remaining bytes (outlen not multiple of 8) */
+  size_t remaining = h->outlen & 7;
+  if (remaining) {
+    uint64_t last = h->h[i];
+    uint8_t *dst = o + (i << 3);
+    for (size_t j = 0; j < remaining; ++j)
+      dst[j] = (uint8_t)(last >> (8 * j));
+  }
 }
 
 /** Simple non-streaming BLAKE2b. */
@@ -330,85 +450,175 @@ static const uint32_t fio___blake2s_iv[8] = {0x6A09E667UL,
                                              0x1F83D9ABUL,
                                              0x5BE0CD19UL};
 
-/* BLAKE2s sigma permutation table (same as BLAKE2b) */
-static const uint8_t fio___blake2s_sigma[10][16] = {
-    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-    {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3},
-    {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4},
-    {7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8},
-    {9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13},
-    {2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9},
-    {12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11},
-    {13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10},
-    {6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5},
-    {10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0}};
-
-/* BLAKE2s G mixing function */
-#define FIO___BLAKE2S_G(r, i, a, b, c, d, m)                                   \
+/* BLAKE2s G mixing function with hardcoded message word indices */
+#define FIO___BLAKE2S_G(a, b, c, d, mx, my)                                    \
   do {                                                                         \
-    (a) += (b) + m[fio___blake2s_sigma[r][2 * (i)]];                           \
+    (a) += (b) + (mx);                                                         \
     (d) = fio_rrot32((d) ^ (a), 16);                                           \
     (c) += (d);                                                                \
     (b) = fio_rrot32((b) ^ (c), 12);                                           \
-    (a) += (b) + m[fio___blake2s_sigma[r][2 * (i) + 1]];                       \
+    (a) += (b) + (my);                                                         \
     (d) = fio_rrot32((d) ^ (a), 8);                                            \
     (c) += (d);                                                                \
     (b) = fio_rrot32((b) ^ (c), 7);                                            \
   } while (0)
 
-/* BLAKE2s round function */
-#define FIO___BLAKE2S_ROUND(r, v, m)                                           \
-  do {                                                                         \
-    FIO___BLAKE2S_G(r, 0, v[0], v[4], v[8], v[12], m);                         \
-    FIO___BLAKE2S_G(r, 1, v[1], v[5], v[9], v[13], m);                         \
-    FIO___BLAKE2S_G(r, 2, v[2], v[6], v[10], v[14], m);                        \
-    FIO___BLAKE2S_G(r, 3, v[3], v[7], v[11], v[15], m);                        \
-    FIO___BLAKE2S_G(r, 4, v[0], v[5], v[10], v[15], m);                        \
-    FIO___BLAKE2S_G(r, 5, v[1], v[6], v[11], v[12], m);                        \
-    FIO___BLAKE2S_G(r, 6, v[2], v[7], v[8], v[13], m);                         \
-    FIO___BLAKE2S_G(r, 7, v[3], v[4], v[9], v[14], m);                         \
-  } while (0)
-
-/* BLAKE2s compression function */
+/* BLAKE2s compression function - sigma indices fully hardcoded per round */
 FIO_IFUNC void fio___blake2s_compress(fio_blake2s_s *restrict h,
                                       const uint8_t *restrict block,
                                       int is_last) {
   uint32_t v[16] FIO_ALIGN(64);
   uint32_t m[16] FIO_ALIGN(64);
 
-  /* Initialize working vector */
-  for (size_t i = 0; i < 8; ++i) {
-    v[i] = h->h[i];
-    v[i + 8] = fio___blake2s_iv[i];
-  }
-  v[12] ^= h->t[0];
-  v[13] ^= h->t[1];
-  if (is_last)
-    v[14] = ~v[14];
+  /* Initialize working vector - unrolled */
+  v[0] = h->h[0];
+  v[1] = h->h[1];
+  v[2] = h->h[2];
+  v[3] = h->h[3];
+  v[4] = h->h[4];
+  v[5] = h->h[5];
+  v[6] = h->h[6];
+  v[7] = h->h[7];
+  v[8] = fio___blake2s_iv[0];
+  v[9] = fio___blake2s_iv[1];
+  v[10] = fio___blake2s_iv[2];
+  v[11] = fio___blake2s_iv[3];
+  v[12] = fio___blake2s_iv[4] ^ h->t[0];
+  v[13] = fio___blake2s_iv[5] ^ h->t[1];
+  v[14] = is_last ? ~fio___blake2s_iv[6] : fio___blake2s_iv[6];
+  v[15] = fio___blake2s_iv[7];
 
-  /* Load message block (little-endian) */
-  for (size_t i = 0; i < 16; ++i)
-    m[i] = fio_buf2u32_le(block + i * 4);
+  /* Load message block (little-endian) - unrolled */
+  m[0] = fio_buf2u32_le(block);
+  m[1] = fio_buf2u32_le(block + 4);
+  m[2] = fio_buf2u32_le(block + 8);
+  m[3] = fio_buf2u32_le(block + 12);
+  m[4] = fio_buf2u32_le(block + 16);
+  m[5] = fio_buf2u32_le(block + 20);
+  m[6] = fio_buf2u32_le(block + 24);
+  m[7] = fio_buf2u32_le(block + 28);
+  m[8] = fio_buf2u32_le(block + 32);
+  m[9] = fio_buf2u32_le(block + 36);
+  m[10] = fio_buf2u32_le(block + 40);
+  m[11] = fio_buf2u32_le(block + 44);
+  m[12] = fio_buf2u32_le(block + 48);
+  m[13] = fio_buf2u32_le(block + 52);
+  m[14] = fio_buf2u32_le(block + 56);
+  m[15] = fio_buf2u32_le(block + 60);
 
-  /* 10 rounds of mixing */
-  FIO___BLAKE2S_ROUND(0, v, m);
-  FIO___BLAKE2S_ROUND(1, v, m);
-  FIO___BLAKE2S_ROUND(2, v, m);
-  FIO___BLAKE2S_ROUND(3, v, m);
-  FIO___BLAKE2S_ROUND(4, v, m);
-  FIO___BLAKE2S_ROUND(5, v, m);
-  FIO___BLAKE2S_ROUND(6, v, m);
-  FIO___BLAKE2S_ROUND(7, v, m);
-  FIO___BLAKE2S_ROUND(8, v, m);
-  FIO___BLAKE2S_ROUND(9, v, m);
+  /* 10 rounds with hardcoded sigma permutation indices */
+  /* Round 0: sigma = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[0], m[1]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[2], m[3]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[4], m[5]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[6], m[7]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[8], m[9]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[10], m[11]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[12], m[13]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[14], m[15]);
 
-  /* Finalize state */
-  for (size_t i = 0; i < 8; ++i)
-    h->h[i] ^= v[i] ^ v[i + 8];
+  /* Round 1: sigma = {14,10,4,8,9,15,13,6,1,12,0,2,11,7,5,3} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[14], m[10]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[4], m[8]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[9], m[15]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[13], m[6]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[1], m[12]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[0], m[2]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[11], m[7]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[5], m[3]);
+
+  /* Round 2: sigma = {11,8,12,0,5,2,15,13,10,14,3,6,7,1,9,4} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[11], m[8]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[12], m[0]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[5], m[2]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[15], m[13]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[10], m[14]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[3], m[6]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[7], m[1]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[9], m[4]);
+
+  /* Round 3: sigma = {7,9,3,1,13,12,11,14,2,6,5,10,4,0,15,8} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[7], m[9]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[3], m[1]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[13], m[12]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[11], m[14]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[2], m[6]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[5], m[10]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[4], m[0]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[15], m[8]);
+
+  /* Round 4: sigma = {9,0,5,7,2,4,10,15,14,1,11,12,6,8,3,13} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[9], m[0]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[5], m[7]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[2], m[4]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[10], m[15]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[14], m[1]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[11], m[12]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[6], m[8]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[3], m[13]);
+
+  /* Round 5: sigma = {2,12,6,10,0,11,8,3,4,13,7,5,15,14,1,9} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[2], m[12]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[6], m[10]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[0], m[11]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[8], m[3]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[4], m[13]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[7], m[5]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[15], m[14]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[1], m[9]);
+
+  /* Round 6: sigma = {12,5,1,15,14,13,4,10,0,7,6,3,9,2,8,11} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[12], m[5]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[1], m[15]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[14], m[13]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[4], m[10]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[0], m[7]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[6], m[3]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[9], m[2]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[8], m[11]);
+
+  /* Round 7: sigma = {13,11,7,14,12,1,3,9,5,0,15,4,8,6,2,10} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[13], m[11]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[7], m[14]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[12], m[1]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[3], m[9]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[5], m[0]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[15], m[4]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[8], m[6]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[2], m[10]);
+
+  /* Round 8: sigma = {6,15,14,9,11,3,0,8,12,2,13,7,1,4,10,5} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[6], m[15]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[14], m[9]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[11], m[3]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[0], m[8]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[12], m[2]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[13], m[7]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[1], m[4]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[10], m[5]);
+
+  /* Round 9: sigma = {10,2,8,4,7,6,1,5,15,11,9,14,3,12,13,0} */
+  FIO___BLAKE2S_G(v[0], v[4], v[8], v[12], m[10], m[2]);
+  FIO___BLAKE2S_G(v[1], v[5], v[9], v[13], m[8], m[4]);
+  FIO___BLAKE2S_G(v[2], v[6], v[10], v[14], m[7], m[6]);
+  FIO___BLAKE2S_G(v[3], v[7], v[11], v[15], m[1], m[5]);
+  FIO___BLAKE2S_G(v[0], v[5], v[10], v[15], m[15], m[11]);
+  FIO___BLAKE2S_G(v[1], v[6], v[11], v[12], m[9], m[14]);
+  FIO___BLAKE2S_G(v[2], v[7], v[8], v[13], m[3], m[12]);
+  FIO___BLAKE2S_G(v[3], v[4], v[9], v[14], m[13], m[0]);
+
+  /* Finalize state - unrolled */
+  h->h[0] ^= v[0] ^ v[8];
+  h->h[1] ^= v[1] ^ v[9];
+  h->h[2] ^= v[2] ^ v[10];
+  h->h[3] ^= v[3] ^ v[11];
+  h->h[4] ^= v[4] ^ v[12];
+  h->h[5] ^= v[5] ^ v[13];
+  h->h[6] ^= v[6] ^ v[14];
+  h->h[7] ^= v[7] ^ v[15];
 }
 
 #undef FIO___BLAKE2S_G
-#undef FIO___BLAKE2S_ROUND
 
 /** Initialize a BLAKE2s streaming context. */
 SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
@@ -426,9 +636,15 @@ SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
 
   h.outlen = outlen;
 
-  /* Initialize state with IV */
-  for (size_t i = 0; i < 8; ++i)
-    h.h[i] = fio___blake2s_iv[i];
+  /* Initialize state with IV - unrolled */
+  h.h[0] = fio___blake2s_iv[0];
+  h.h[1] = fio___blake2s_iv[1];
+  h.h[2] = fio___blake2s_iv[2];
+  h.h[3] = fio___blake2s_iv[3];
+  h.h[4] = fio___blake2s_iv[4];
+  h.h[5] = fio___blake2s_iv[5];
+  h.h[6] = fio___blake2s_iv[6];
+  h.h[7] = fio___blake2s_iv[7];
 
   /* XOR parameter block into state[0] */
   h.h[0] ^= 0x01010000UL ^ ((uint32_t)keylen << 8) ^ (uint32_t)outlen;
@@ -498,10 +714,20 @@ SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
   /* Final compression */
   fio___blake2s_compress(h, h->buf, 1);
 
-  /* Output hash (little-endian) */
+  /* Output hash (little-endian) - word-sized writes */
   uint8_t *o = (uint8_t *)out;
-  for (size_t i = 0; i < h->outlen; ++i)
-    o[i] = (uint8_t)(h->h[i / 4] >> (8 * (i % 4)));
+  size_t full_words = h->outlen >> 2; /* outlen / 4 */
+  size_t i;
+  for (i = 0; i < full_words; ++i)
+    fio_u2buf32_le(o + (i << 2), h->h[i]);
+  /* Handle remaining bytes (outlen not multiple of 4) */
+  size_t remaining = h->outlen & 3;
+  if (remaining) {
+    uint32_t last = h->h[i];
+    uint8_t *dst = o + (i << 2);
+    for (size_t j = 0; j < remaining; ++j)
+      dst[j] = (uint8_t)(last >> (8 * j));
+  }
 }
 
 /** Simple non-streaming BLAKE2s. */

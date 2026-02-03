@@ -335,20 +335,19 @@ SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
     h->outlen = 1; /* Mark as finalized */
   }
 
-  /* Squeeze output */
+  /* Squeeze output — buflen tracks offset within current Keccak state */
   while (outlen > 0) {
-    if (h->buflen == 0) {
-      /* Output from state */
-      size_t to_copy = (outlen < h->rate) ? outlen : h->rate;
-      for (size_t i = 0; i < to_copy; ++i)
-        o[i] = (uint8_t)(h->state[i / 8] >> (8 * (i % 8)));
-      o += to_copy;
-      outlen -= to_copy;
-      if (outlen > 0) {
-        fio___keccak_f1600(h->state);
-      }
-    } else {
-      /* Should not happen in normal use */
+    size_t available = h->rate - h->buflen;
+    size_t to_copy = (outlen < available) ? outlen : available;
+    for (size_t i = 0; i < to_copy; ++i) {
+      size_t pos = h->buflen + i;
+      o[i] = (uint8_t)(h->state[pos / 8] >> (8 * (pos % 8)));
+    }
+    o += to_copy;
+    outlen -= to_copy;
+    h->buflen += to_copy;
+    if (h->buflen == h->rate) {
+      fio___keccak_f1600(h->state);
       h->buflen = 0;
     }
   }

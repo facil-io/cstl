@@ -150,11 +150,21 @@
 #include "155 x509.h"
 #endif
 
+#ifdef FIO_MLKEM
+#include "156 mlkem.h"
+#endif
+
 #ifdef FIO_OTP
 #include "160 otp.h"
 #endif
 #ifdef FIO_SECRET
 #include "160 secret.h"
+#endif
+#ifdef FIO_LYRA2
+#include "160 lyra2.h"
+#endif
+#ifdef FIO_ARGON2
+#include "161 argon2.h"
 #endif
 
 #ifdef FIO_TLS13

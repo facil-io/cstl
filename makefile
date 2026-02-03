@@ -288,9 +288,9 @@ TEST4SQLITE3:=    # HAVE_SQLITE3
 # TRY_COMPILE_AND_RUN returns the program's shell code as string.
 #############################################################################
 TRY_RUN=$(shell $(1) >> /dev/null 2> /dev/null; echo $$?;)
-TRY_COMPILE=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(2) >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
-TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o ./___$(NAME)_tmp_test_ - $(LDFLAGS) $(2) 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___$(NAME)_tmp_test_ 2> /dev/null)
-TRY_HEADER_AND_FUNC= $(shell printf "\#include <$(strip $(1))>\\nint main(void) {(void)($(strip $(2)));}" | $(CC) $(INCLUDE_STR) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(3) >> /dev/null 2> /dev/null; echo $$? 2> /dev/null)
+TRY_COMPILE=$(shell printf $(1) | $(CC) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(2) >> /dev/null 2> /dev/null ; echo $$? 2> /dev/null)
+TRY_COMPILE_AND_RUN=$(shell printf $(1) | $(CC) $(CFLAGS) -xc -o ./___$(NAME)_tmp_test_ - $(LDFLAGS) $(2) 2> /dev/null ; ./___fio_tmp_test_ >> /dev/null 2> /dev/null; echo $$?; rm ./___$(NAME)_tmp_test_ 2> /dev/null)
+TRY_HEADER_AND_FUNC= $(shell printf "\#include <$(strip $(1))>\\nint main(void) {(void)($(strip $(2)));}" | $(CC) $(CFLAGS) -xc -o /dev/null - $(LDFLAGS) $(3) >> /dev/null 2> /dev/null; echo $$? 2> /dev/null)
 EMPTY_STRING:=
 # pkg-config
 PKG_CONFIG?=pkg-config

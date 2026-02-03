@@ -159,6 +159,8 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #define FIO_P384
 #define FIO_PEM
 #define FIO_RSA
+#define FIO_LYRA2
+#define FIO_ARGON2
 #define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
@@ -418,7 +420,12 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA2
 #endif
 
-#if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2)
+#if defined(FIO_LYRA2) || defined(FIO_ARGON2)
+#define FIO_BLAKE2
+#endif
+
+#if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2) ||           \
+    defined(FIO_BLAKE2)
 #undef FIO_CRYPTO_CORE
 #define FIO_CRYPTO_CORE
 #endif
