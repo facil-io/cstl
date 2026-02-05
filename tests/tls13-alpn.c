@@ -331,7 +331,7 @@ FIO_SFUNC void fio___test_tls13_alpn_client_hello_roundtrip(void) {
   /* Set ALPN protocols AFTER init (init clears the struct) */
   fio_tls13_client_alpn_set(&client, "h2,http/1.1");
 
-  uint8_t ch_buf[1024];
+  uint8_t ch_buf[2048];
   int ch_len = fio_tls13_client_start(&client, ch_buf, sizeof(ch_buf));
   FIO_ASSERT(ch_len > 0, "ClientHello should be generated");
 

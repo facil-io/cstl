@@ -2,8 +2,6 @@
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MLKEM              /* Development inclusion - ignore line */
-#define FIO_SHA3               /* Development inclusion - ignore line */
-#define FIO_ED25519            /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -469,7 +467,7 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta1(
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA1 * FIO___MLKEM_N / 4]; /* 128 bytes */
   uint8_t extseed[FIO___MLKEM_SYMBYTES + 1];
-  FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(extseed, seed);
   extseed[FIO___MLKEM_SYMBYTES] = nonce;
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
   fio___mlkem_cbd2(r, buf);
@@ -482,7 +480,7 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta2(
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA2 * FIO___MLKEM_N / 4]; /* 128 bytes */
   uint8_t extseed[FIO___MLKEM_SYMBYTES + 1];
-  FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(extseed, seed);
   extseed[FIO___MLKEM_SYMBYTES] = nonce;
   /* PRF(s, b) = SHAKE256(s || b, 64*eta) */
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
@@ -727,7 +725,7 @@ FIO_IFUNC void fio___mlkem_gen_matrix(fio___mlkem_polyvec *a,
   for (i = 0; i < FIO___MLKEM_K; i++) {
     for (j = 0; j < FIO___MLKEM_K; j++) {
       uint8_t extseed[FIO___MLKEM_SYMBYTES + 2];
-      FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+      fio_memcpy32(extseed, seed);
       if (transposed) {
         extseed[FIO___MLKEM_SYMBYTES] = (uint8_t)i;
         extseed[FIO___MLKEM_SYMBYTES + 1] = (uint8_t)j;
@@ -831,7 +829,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   /* G(d || k) = (rho, sigma) — FIPS 203 requires appending k as a byte */
   {
     uint8_t gbuf[FIO___MLKEM_SYMBYTES + 1];
-    FIO_MEMCPY(gbuf, coins, FIO___MLKEM_SYMBYTES);
+    fio_memcpy32(gbuf, coins);
     gbuf[FIO___MLKEM_SYMBYTES] = FIO___MLKEM_K;
     fio_sha3_512(buf, gbuf, sizeof(gbuf));
   }
@@ -860,7 +858,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   fio___mlkem_polyvec_tobytes(sk, &skpv);
   /* Pack public key: t || rho */
   fio___mlkem_polyvec_tobytes(pk, &pkpv);
-  FIO_MEMCPY(pk + FIO___MLKEM_POLYVECBYTES, publicseed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(pk + FIO___MLKEM_POLYVECBYTES, publicseed);
 
   /* Zero sensitive stack data */
   FIO_MEMSET(buf, 0, sizeof(buf));
@@ -886,7 +884,7 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
 
   /* Unpack public key */
   fio___mlkem_polyvec_frombytes(&pkpv, pk);
-  FIO_MEMCPY(seed, pk + FIO___MLKEM_POLYVECBYTES, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(seed, pk + FIO___MLKEM_POLYVECBYTES);
 
   /* Generate A^T */
   fio___mlkem_gen_matrix(at, seed, 1);
@@ -1022,7 +1020,7 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
     return -1;
 
   /* buf = m || H(pk) */
-  FIO_MEMCPY(buf, coins, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(buf, coins);
   fio_sha3_256(buf + FIO___MLKEM_SYMBYTES,
                pk,
                FIO___MLKEM_INDCPA_PUBLICKEYBYTES);
@@ -1034,7 +1032,7 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
   fio___mlkem_indcpa_enc(ct, buf, pk, kr + FIO___MLKEM_SYMBYTES);
 
   /* K = KDF(K || H(c)) — but FIPS 203 just uses K directly */
-  FIO_MEMCPY(ss, kr, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(ss, kr);
 
   /* Zero sensitive stack data */
   FIO_MEMSET(buf, 0, sizeof(buf));
@@ -1085,7 +1083,7 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
   fio___mlkem_indcpa_dec(buf, ct, sk);
 
   /* buf = m' || H(pk) */
-  FIO_MEMCPY(buf + FIO___MLKEM_SYMBYTES, hpk, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(buf + FIO___MLKEM_SYMBYTES, hpk);
 
   /* (K', r') = G(m' || H(pk)) */
   fio_sha3_512(kr, buf, sizeof(buf));
@@ -1106,7 +1104,7 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
     fio_shake_squeeze(&state, k_bar, FIO___MLKEM_SYMBYTES);
 
     /* Constant-time select: ss = fail ? k_bar : kr */
-    FIO_MEMCPY(ss, kr, FIO___MLKEM_SYMBYTES);
+    fio_memcpy32(ss, kr);
     fio___mlkem_cmov(ss, k_bar, FIO___MLKEM_SYMBYTES, fail);
     FIO_MEMSET(k_bar, 0, sizeof(k_bar));
   }

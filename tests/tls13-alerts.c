@@ -429,8 +429,8 @@ FIO_SFUNC void fio___test_tls13_client_error_alerts(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
-  /* Start handshake */
-  uint8_t ch_buf[512];
+  /* Start handshake - need 1536+ bytes for X25519MLKEM768 hybrid ClientHello */
+  uint8_t ch_buf[2048];
   int ch_len = fio_tls13_client_start(&client, ch_buf, sizeof(ch_buf));
   FIO_ASSERT(ch_len > 0, "ClientHello should be generated");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,

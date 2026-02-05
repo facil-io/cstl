@@ -4882,14 +4882,16 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 FIO_CRYPTO            Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13) ||         \
-    defined(FIO_IO)
+    defined(FIO_IO) || defined(FIO_MLKEM)
 #undef FIO_AES
+#undef FIO_ARGON2
 #undef FIO_ASN1
+#undef FIO_BLAKE2
 #undef FIO_CHACHA
-#undef FIO_CRYPT
-#undef FIO_CRYPTO
-#undef FIO_CRYPTO_CORE
 #undef FIO_ED25519
+#undef FIO_HKDF
+#undef FIO_LYRA2
+#undef FIO_MLKEM
 #undef FIO_OTP
 #undef FIO_P256
 #undef FIO_P384
@@ -4898,22 +4900,24 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #undef FIO_SECRET
 #undef FIO_SHA1
 #undef FIO_SHA2
+#undef FIO_SHA3
 #undef FIO_TLS13
 #undef FIO_X509
 #define FIO_CRYPTO_CORE
 #define FIO_AES
+#define FIO_ARGON2
 #define FIO_ASN1
 #define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_HKDF
+#define FIO_LYRA2
+#define FIO_MLKEM
 #define FIO_OTP
 #define FIO_P256
 #define FIO_P384
 #define FIO_PEM
 #define FIO_RSA
-#define FIO_LYRA2
-#define FIO_ARGON2
 #define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2
@@ -42377,7 +42381,6 @@ Module Cleanup
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MLKEM              /* Development inclusion - ignore line */
-#define FIO_SHA3               /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -42472,6 +42475,71 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
 SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
                               const uint8_t ct[1088],
                               const uint8_t sk[2400]);
+
+/* *****************************************************************************
+X25519MLKEM768 Hybrid API (TLS 1.3 NamedGroup 0x11ec)
+
+This is the hybrid key exchange combining classical X25519 with post-quantum
+ML-KEM-768, as specified in draft-ietf-tls-ecdhe-mlkem for TLS 1.3.
+
+Key format (per IETF draft-ietf-tls-ecdhe-mlkem-03 Section 4):
+  - Public key:  ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes
+  - Secret key:  ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes
+  - Ciphertext:  ML-KEM-768_ct (1088) || X25519_pk (32) = 1120 bytes
+  - Shared secret: ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+
+NOTE: The group name "X25519MLKEM768" does NOT reflect the concatenation order.
+The ML-KEM component comes FIRST in all concatenations (Section 4 note).
+
+Browser support: Chrome 131+, Firefox 132+, Safari iOS 26+
+Server adoption: 8.6% of top 1M sites as of early 2026
+
+Note: This implementation requires FIO_ED25519 for X25519 support.
+***************************************************************************** */
+
+/** X25519MLKEM768 hybrid constants */
+#define FIO_X25519MLKEM768_PUBLICKEYBYTES  (32 + 1184) /* 1216 */
+#define FIO_X25519MLKEM768_SECRETKEYBYTES  (32 + 2400) /* 2432 */
+#define FIO_X25519MLKEM768_CIPHERTEXTBYTES (32 + 1088) /* 1120 */
+#define FIO_X25519MLKEM768_SSBYTES         64
+
+/**
+ * Generate X25519MLKEM768 hybrid keypair.
+ *
+ * Generates both X25519 and ML-KEM-768 keypairs using system CSPRNG.
+ * The public key is ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes.
+ * The secret key is ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+SFUNC int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]);
+
+/**
+ * X25519MLKEM768 hybrid encapsulation.
+ *
+ * Performs both X25519 key exchange and ML-KEM-768 encapsulation.
+ * The ciphertext is ML-KEM-768_ct (1088) || X25519_ephemeral_pk (32) = 1120
+ * bytes. The shared secret is ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
+                                    uint8_t ss[64],
+                                    const uint8_t pk[1216]);
+
+/**
+ * X25519MLKEM768 hybrid decapsulation.
+ *
+ * Performs both X25519 shared secret derivation and ML-KEM-768 decapsulation.
+ * The shared secret is ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes.
+ *
+ * Returns 0 on success, -1 if X25519 shared secret computation fails
+ * (low-order point). ML-KEM-768 uses implicit rejection for invalid
+ * ciphertexts.
+ */
+SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
+                                    const uint8_t ct[1120],
+                                    const uint8_t sk[2432]);
 
 /* *****************************************************************************
 ML-KEM-768 Internal Constants
@@ -42778,7 +42846,7 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta1(
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA1 * FIO___MLKEM_N / 4]; /* 128 bytes */
   uint8_t extseed[FIO___MLKEM_SYMBYTES + 1];
-  FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(extseed, seed);
   extseed[FIO___MLKEM_SYMBYTES] = nonce;
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
   fio___mlkem_cbd2(r, buf);
@@ -42791,7 +42859,7 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta2(
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA2 * FIO___MLKEM_N / 4]; /* 128 bytes */
   uint8_t extseed[FIO___MLKEM_SYMBYTES + 1];
-  FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(extseed, seed);
   extseed[FIO___MLKEM_SYMBYTES] = nonce;
   /* PRF(s, b) = SHAKE256(s || b, 64*eta) */
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
@@ -43036,7 +43104,7 @@ FIO_IFUNC void fio___mlkem_gen_matrix(fio___mlkem_polyvec *a,
   for (i = 0; i < FIO___MLKEM_K; i++) {
     for (j = 0; j < FIO___MLKEM_K; j++) {
       uint8_t extseed[FIO___MLKEM_SYMBYTES + 2];
-      FIO_MEMCPY(extseed, seed, FIO___MLKEM_SYMBYTES);
+      fio_memcpy32(extseed, seed);
       if (transposed) {
         extseed[FIO___MLKEM_SYMBYTES] = (uint8_t)i;
         extseed[FIO___MLKEM_SYMBYTES + 1] = (uint8_t)j;
@@ -43140,7 +43208,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   /* G(d || k) = (rho, sigma) — FIPS 203 requires appending k as a byte */
   {
     uint8_t gbuf[FIO___MLKEM_SYMBYTES + 1];
-    FIO_MEMCPY(gbuf, coins, FIO___MLKEM_SYMBYTES);
+    fio_memcpy32(gbuf, coins);
     gbuf[FIO___MLKEM_SYMBYTES] = FIO___MLKEM_K;
     fio_sha3_512(buf, gbuf, sizeof(gbuf));
   }
@@ -43169,7 +43237,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   fio___mlkem_polyvec_tobytes(sk, &skpv);
   /* Pack public key: t || rho */
   fio___mlkem_polyvec_tobytes(pk, &pkpv);
-  FIO_MEMCPY(pk + FIO___MLKEM_POLYVECBYTES, publicseed, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(pk + FIO___MLKEM_POLYVECBYTES, publicseed);
 
   /* Zero sensitive stack data */
   FIO_MEMSET(buf, 0, sizeof(buf));
@@ -43195,7 +43263,7 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
 
   /* Unpack public key */
   fio___mlkem_polyvec_frombytes(&pkpv, pk);
-  FIO_MEMCPY(seed, pk + FIO___MLKEM_POLYVECBYTES, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(seed, pk + FIO___MLKEM_POLYVECBYTES);
 
   /* Generate A^T */
   fio___mlkem_gen_matrix(at, seed, 1);
@@ -43331,7 +43399,7 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
     return -1;
 
   /* buf = m || H(pk) */
-  FIO_MEMCPY(buf, coins, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(buf, coins);
   fio_sha3_256(buf + FIO___MLKEM_SYMBYTES,
                pk,
                FIO___MLKEM_INDCPA_PUBLICKEYBYTES);
@@ -43343,7 +43411,7 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
   fio___mlkem_indcpa_enc(ct, buf, pk, kr + FIO___MLKEM_SYMBYTES);
 
   /* K = KDF(K || H(c)) — but FIPS 203 just uses K directly */
-  FIO_MEMCPY(ss, kr, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(ss, kr);
 
   /* Zero sensitive stack data */
   FIO_MEMSET(buf, 0, sizeof(buf));
@@ -43394,7 +43462,7 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
   fio___mlkem_indcpa_dec(buf, ct, sk);
 
   /* buf = m' || H(pk) */
-  FIO_MEMCPY(buf + FIO___MLKEM_SYMBYTES, hpk, FIO___MLKEM_SYMBYTES);
+  fio_memcpy32(buf + FIO___MLKEM_SYMBYTES, hpk);
 
   /* (K', r') = G(m' || H(pk)) */
   fio_sha3_512(kr, buf, sizeof(buf));
@@ -43415,7 +43483,7 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
     fio_shake_squeeze(&state, k_bar, FIO___MLKEM_SYMBYTES);
 
     /* Constant-time select: ss = fail ? k_bar : kr */
-    FIO_MEMCPY(ss, kr, FIO___MLKEM_SYMBYTES);
+    fio_memcpy32(ss, kr);
     fio___mlkem_cmov(ss, k_bar, FIO___MLKEM_SYMBYTES, fail);
     FIO_MEMSET(k_bar, 0, sizeof(k_bar));
   }
@@ -43429,8 +43497,104 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
 }
 
 /* *****************************************************************************
-Cleanup - Internal Macros
+X25519MLKEM768 Hybrid Implementation
 ***************************************************************************** */
+
+/**
+ * Generate X25519MLKEM768 hybrid keypair.
+ *
+ * Layout (per IETF draft-ietf-tls-ecdhe-mlkem-03):
+ *   pk = ML-KEM-768_ek (1184 bytes) || X25519_pk (32 bytes) = 1216 bytes
+ *   sk = ML-KEM-768_dk (2400 bytes) || X25519_sk (32 bytes) = 2432 bytes
+ */
+SFUNC int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]) {
+  if (!pk || !sk)
+    return -1;
+
+  /* Generate ML-KEM-768 keypair: pk[0..1183], sk[0..2399] */
+  if (fio_mlkem768_keypair(pk, sk) != 0) {
+    FIO_MEMSET(pk, 0, 1216);
+    FIO_MEMSET(sk, 0, 2432);
+    return -1;
+  }
+
+  /* Generate X25519 keypair: sk[2400..2431] = private, pk[1184..1215] = public
+   */
+  fio_x25519_keypair(sk + 2400, pk + 1184);
+
+  return 0;
+}
+
+/**
+ * X25519MLKEM768 hybrid encapsulation.
+ *
+ * Layout (per IETF draft-ietf-tls-ecdhe-mlkem-03):
+ *   pk (input)  = ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes
+ *   ct (output) = ML-KEM-768_ct (1088) || X25519_eph_pk (32) = 1120 bytes
+ *   ss (output) = ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+ */
+SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
+                                    uint8_t ss[64],
+                                    const uint8_t pk[1216]) {
+  uint8_t x25519_eph_sk[32];
+
+  if (!ct || !ss || !pk)
+    return -1;
+
+  /* ML-KEM-768 encapsulation: ct[0..1087], ss[0..31] */
+  if (fio_mlkem768_encaps(ct, ss, pk) != 0) {
+    FIO_MEMSET(ct, 0, 1120);
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  /* Generate ephemeral X25519 keypair: ct[1088..1119] = ephemeral public key */
+  fio_x25519_keypair(x25519_eph_sk, ct + 1088);
+
+  /* Compute X25519 shared secret: ss[32..63] = X25519(eph_sk, pk[1184..1215])
+   */
+  if (fio_x25519_shared_secret(ss + 32, x25519_eph_sk, pk + 1184) != 0) {
+    /* Low-order point - should not happen with valid public keys */
+    FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+    FIO_MEMSET(ct, 0, 1120);
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  /* Zero sensitive ephemeral private key */
+  FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+
+  return 0;
+}
+
+/**
+ * X25519MLKEM768 hybrid decapsulation (IETF draft-ietf-tls-ecdhe-mlkem-03).
+ *
+ * Layout (ML-KEM FIRST per IETF Section 4):
+ *   ct (input) = ML-KEM-768_ct (1088) || X25519_eph_pk (32) = 1120 bytes
+ *   sk (input) = ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes
+ *   ss (output) = ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+ */
+SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
+                                    const uint8_t ct[1120],
+                                    const uint8_t sk[2432]) {
+  if (!ss || !ct || !sk)
+    return -1;
+
+  /* ML-KEM-768 decapsulation: ss[0..31] from ct[0..1087] using sk[0..2399]
+   * Note: ML-KEM uses implicit rejection, so this always "succeeds" */
+  fio_mlkem768_decaps(ss, ct, sk);
+
+  /* X25519 shared secret: ss[32..63] = X25519(sk[2400..2431], ct[1088..1119])
+   */
+  if (fio_x25519_shared_secret(ss + 32, sk + 2400, ct + 1088) != 0) {
+    /* Low-order point - indicates invalid/malicious ciphertext */
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  return 0;
+}
 
 /* *****************************************************************************
 Cleanup
@@ -45441,11 +45605,14 @@ typedef enum {
   FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256 = 0x1303,
 } fio_tls13_cipher_suite_e;
 
-/** TLS 1.3 Named Groups (RFC 8446 Section 4.2.7) */
+/** TLS 1.3 Named Groups (RFC 8446 Section 4.2.7, draft-ietf-tls-hybrid-design)
+ */
 typedef enum {
   FIO_TLS13_GROUP_SECP256R1 = 23, /* P-256 */
   FIO_TLS13_GROUP_SECP384R1 = 24, /* P-384 */
   FIO_TLS13_GROUP_X25519 = 29,    /* Curve25519 */
+  FIO_TLS13_GROUP_X25519MLKEM768 =
+      0x11ec, /* X25519 + ML-KEM-768 hybrid (PQC) */
 } fio_tls13_named_group_e;
 
 /** TLS 1.3 Signature Algorithms (RFC 8446 Section 4.2.3) */
@@ -45475,10 +45642,11 @@ TLS 1.3 Parsed Handshake Message Structures
 
 /** Parsed ServerHello message */
 typedef struct {
-  uint8_t random[32];         /* Server random */
-  uint16_t cipher_suite;      /* Selected cipher suite */
-  uint8_t key_share[128];     /* Server's key share (max size for P-384) */
-  uint8_t key_share_len;      /* Length of key share */
+  uint8_t random[32];    /* Server random */
+  uint16_t cipher_suite; /* Selected cipher suite */
+  uint8_t
+      key_share[1120];    /* Server's key share (max size for X25519MLKEM768) */
+  uint16_t key_share_len; /* Length of key share */
   uint16_t key_share_group;   /* Selected group */
   int is_hello_retry_request; /* 1 if HRR */
 } fio_tls13_server_hello_s;
@@ -47014,7 +47182,8 @@ FIO_SFUNC size_t fio___tls13_write_ext_supported_versions(uint8_t *out) {
 }
 
 /* Internal: Write supported_groups extension */
-FIO_SFUNC size_t fio___tls13_write_ext_supported_groups(uint8_t *out) {
+FIO_SFUNC size_t fio___tls13_write_ext_supported_groups(uint8_t *out,
+                                                        int include_hybrid) {
   uint8_t *p = out;
 
   /* Extension type: supported_groups (10) */
@@ -47022,15 +47191,22 @@ FIO_SFUNC size_t fio___tls13_write_ext_supported_groups(uint8_t *out) {
   p += 2;
 
   /* Extension data length: groups_len(2) + groups(2 each) */
-  /* We support: x25519, secp256r1 */
-  fio___tls13_write_u16(p, 2 + 4); /* 2 groups * 2 bytes each */
+  /* We support: x25519mlkem768 (if enabled), x25519, secp256r1 */
+  int group_count = include_hybrid ? 3 : 2;
+  fio___tls13_write_u16(p, (uint16_t)(2 + group_count * 2));
   p += 2;
 
   /* Groups length */
-  fio___tls13_write_u16(p, 4);
+  fio___tls13_write_u16(p, (uint16_t)(group_count * 2));
   p += 2;
 
-  /* x25519 (preferred) */
+  /* X25519MLKEM768 (preferred if PQC enabled - post-quantum) */
+  if (include_hybrid) {
+    fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519MLKEM768);
+    p += 2;
+  }
+
+  /* x25519 (classical preferred, fallback if PQC not supported) */
   fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519);
   p += 2;
 
@@ -47076,7 +47252,7 @@ FIO_SFUNC size_t fio___tls13_write_ext_signature_algorithms(uint8_t *out) {
   return (size_t)(p - out);
 }
 
-/* Internal: Write key_share extension (client) */
+/* Internal: Write key_share extension (client) - X25519 only */
 FIO_SFUNC size_t fio___tls13_write_ext_key_share(uint8_t *out,
                                                  const uint8_t *x25519_pubkey) {
   if (!x25519_pubkey)
@@ -47106,6 +47282,58 @@ FIO_SFUNC size_t fio___tls13_write_ext_key_share(uint8_t *out,
   p += 2;
 
   /* Public key */
+  fio_memcpy32(p, x25519_pubkey);
+  p += 32;
+
+  return (size_t)(p - out);
+}
+
+/* Internal: Write key_share extension with X25519MLKEM768 hybrid (client)
+ * Per draft-ietf-tls-hybrid-design:
+ * - Hybrid public key is X25519_pk (32) || ML-KEM-768_ek (1184) = 1216 bytes
+ * - We send BOTH hybrid and X25519 key shares for maximum compatibility
+ */
+FIO_SFUNC size_t
+fio___tls13_write_ext_key_share_hybrid(uint8_t *out,
+                                       const uint8_t *hybrid_pubkey,
+                                       const uint8_t *x25519_pubkey) {
+  if (!hybrid_pubkey || !x25519_pubkey)
+    return 0;
+
+  uint8_t *p = out;
+
+  /* Extension type: key_share (51) */
+  fio___tls13_write_u16(p, FIO_TLS13_EXT_KEY_SHARE);
+  p += 2;
+
+  /* Calculate total key share entries length:
+   * Entry 1 (X25519MLKEM768): group(2) + key_len(2) + key(1216) = 1220 bytes
+   * Entry 2 (X25519): group(2) + key_len(2) + key(32) = 36 bytes
+   * Total entries: 1256 bytes
+   */
+  uint16_t entries_len = (2 + 2 + 1216) + (2 + 2 + 32);
+
+  /* Extension data length: entries_len(2) + entries */
+  fio___tls13_write_u16(p, (uint16_t)(2 + entries_len));
+  p += 2;
+
+  /* Client key share entries length */
+  fio___tls13_write_u16(p, entries_len);
+  p += 2;
+
+  /* Key share entry 1: X25519MLKEM768 (preferred) */
+  fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519MLKEM768);
+  p += 2;
+  fio___tls13_write_u16(p, 1216); /* hybrid public key length */
+  p += 2;
+  FIO_MEMCPY(p, hybrid_pubkey, 1216);
+  p += 1216;
+
+  /* Key share entry 2: X25519 (fallback for servers without PQC) */
+  fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519);
+  p += 2;
+  fio___tls13_write_u16(p, 32);
+  p += 2;
   fio_memcpy32(p, x25519_pubkey);
   p += 32;
 
@@ -47430,8 +47658,8 @@ SFUNC int fio_tls13_build_client_hello(uint8_t *out,
   /* supported_versions extension (REQUIRED for TLS 1.3) */
   p += fio___tls13_write_ext_supported_versions(p);
 
-  /* supported_groups extension */
-  p += fio___tls13_write_ext_supported_groups(p);
+  /* supported_groups extension (no hybrid in standalone function) */
+  p += fio___tls13_write_ext_supported_groups(p, 0);
 
   /* signature_algorithms extension */
   p += fio___tls13_write_ext_signature_algorithms(p);
@@ -47534,7 +47762,8 @@ SFUNC int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
     switch (ext_type) {
     case FIO_TLS13_EXT_KEY_SHARE:
       /* In ServerHello: group(2) + key_len(2) + key
-       * In HelloRetryRequest: just group(2) per RFC 8446 Section 4.2.8 */
+       * In HelloRetryRequest: just group(2) per RFC 8446 Section 4.2.8
+       * Key sizes: X25519=32, P-256=65, X25519MLKEM768=1120 */
       if (ext_data_len >= 2) {
         out->key_share_group = fio___tls13_read_u16(p);
         if (ext_data_len >= 4) {
@@ -47543,7 +47772,7 @@ SFUNC int fio_tls13_parse_server_hello(fio_tls13_server_hello_s *out,
           if (key_len <= sizeof(out->key_share) &&
               ext_data_len >= 4 + key_len) {
             FIO_MEMCPY(out->key_share, p + 4, key_len);
-            out->key_share_len = (uint8_t)key_len;
+            out->key_share_len = key_len;
           }
         }
         /* If ext_data_len == 2, it's HRR with just the group */
@@ -48062,7 +48291,14 @@ typedef struct {
   uint8_t client_random[32];
   uint8_t x25519_private_key[32];
   uint8_t x25519_public_key[32];
-  uint8_t shared_secret[32]; /* ECDHE shared secret */
+  uint8_t shared_secret[64]; /* ECDHE shared secret (32 for X25519, 64 for
+                                hybrid) */
+  size_t shared_secret_len;  /* 32 for X25519/P-256, 64 for X25519MLKEM768 */
+
+  /* X25519MLKEM768 hybrid key material (post-quantum) */
+  uint8_t hybrid_private_key[2432]; /* X25519_sk[32] || ML-KEM-768_dk[2400] */
+  uint8_t hybrid_public_key[1216];  /* X25519_pk[32] || ML-KEM-768_ek[1184] */
+  uint8_t use_hybrid;               /* 1 if X25519MLKEM768 is enabled */
 
   /* Secrets (derived during handshake) - up to SHA-384 size */
   uint8_t early_secret[48];
@@ -48587,11 +48823,12 @@ FIO_SFUNC int fio___tls13_derive_handshake_keys(fio_tls13_client_s *client) {
   /* Derive early secret (no PSK) */
   fio_tls13_derive_early_secret(client->early_secret, NULL, 0, use_sha384);
 
-  /* Derive handshake secret */
+  /* Derive handshake secret
+   * Note: shared_secret_len is 32 for X25519/P-256, 64 for X25519MLKEM768 */
   fio_tls13_derive_handshake_secret(client->handshake_secret,
                                     client->early_secret,
                                     client->shared_secret,
-                                    32, /* X25519 shared secret is 32 bytes */
+                                    client->shared_secret_len,
                                     use_sha384);
 
   /* Derive client handshake traffic secret */
@@ -49241,8 +49478,31 @@ FIO_SFUNC int fio___tls13_process_server_hello(fio_tls13_client_s *client,
     return -1;
   }
 
-  /* Validate key share - support both X25519 and P-256 */
-  if (sh.key_share_group == FIO_TLS13_GROUP_X25519 && sh.key_share_len == 32) {
+  /* Validate key share - support X25519MLKEM768, X25519, and P-256 */
+  if (sh.key_share_group == FIO_TLS13_GROUP_X25519MLKEM768 &&
+      sh.key_share_len == 1120) {
+#if defined(H___FIO_MLKEM___H)
+    /* X25519MLKEM768 hybrid - server's key share is (IETF, ML-KEM first):
+     * ML-KEM-768_ciphertext (1088) || X25519_ephemeral_pk (32) = 1120 bytes
+     * Decapsulate to get 64-byte shared secret */
+    if (fio_x25519mlkem768_decaps(client->shared_secret,
+                                  sh.key_share,
+                                  client->hybrid_private_key) != 0) {
+      fio___tls13_set_error(client,
+                            FIO_TLS13_ALERT_LEVEL_FATAL,
+                            FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+      return -1;
+    }
+    client->shared_secret_len = 64;
+    FIO_LOG_DEBUG2("TLS 1.3: X25519MLKEM768 hybrid key exchange completed");
+#else
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+    return -1;
+#endif
+  } else if (sh.key_share_group == FIO_TLS13_GROUP_X25519 &&
+             sh.key_share_len == 32) {
     /* X25519 - compute shared secret */
     if (fio_x25519_shared_secret(client->shared_secret,
                                  client->x25519_private_key,
@@ -49252,6 +49512,7 @@ FIO_SFUNC int fio___tls13_process_server_hello(fio_tls13_client_s *client,
                             FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
       return -1;
     }
+    client->shared_secret_len = 32;
   } else if (sh.key_share_group == FIO_TLS13_GROUP_SECP256R1 &&
              sh.key_share_len == 65) {
 #if defined(H___FIO_P256___H)
@@ -49265,6 +49526,7 @@ FIO_SFUNC int fio___tls13_process_server_hello(fio_tls13_client_s *client,
                             FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
       return -1;
     }
+    client->shared_secret_len = 32;
 #else
     fio___tls13_set_error(client,
                           FIO_TLS13_ALERT_LEVEL_FATAL,
@@ -50132,8 +50394,8 @@ FIO_SFUNC int fio___tls13_build_client_hello2(fio_tls13_client_s *client,
   /* supported_versions extension (REQUIRED for TLS 1.3) */
   p += fio___tls13_write_ext_supported_versions(p);
 
-  /* supported_groups extension */
-  p += fio___tls13_write_ext_supported_groups(p);
+  /* supported_groups extension (include hybrid if enabled) */
+  p += fio___tls13_write_ext_supported_groups(p, client->use_hybrid);
 
   /* signature_algorithms extension */
   p += fio___tls13_write_ext_signature_algorithms(p);
@@ -50239,6 +50501,7 @@ SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
   FIO_MEMSET(client, 0, sizeof(*client));
   client->state = FIO_TLS13_STATE_START;
   client->server_name = server_name;
+  client->shared_secret_len = 32; /* Default for X25519/P-256 */
 
   /* Initialize transcript hashes */
   client->transcript_sha256 = fio_sha256_init();
@@ -50247,6 +50510,15 @@ SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
   /* Generate random and X25519 keypair */
   fio_rand_bytes(client->client_random, 32);
   fio_x25519_keypair(client->x25519_private_key, client->x25519_public_key);
+
+#if defined(H___FIO_MLKEM___H)
+  /* Generate X25519MLKEM768 hybrid keypair for post-quantum protection */
+  if (fio_x25519mlkem768_keypair(client->hybrid_public_key,
+                                 client->hybrid_private_key) == 0) {
+    client->use_hybrid = 1;
+    FIO_LOG_DEBUG2("TLS 1.3: X25519MLKEM768 hybrid key generated");
+  }
+#endif
 }
 
 SFUNC void fio_tls13_client_destroy(fio_tls13_client_s *client) {
@@ -50271,7 +50543,9 @@ SFUNC void fio_tls13_client_destroy(fio_tls13_client_s *client) {
   /* Clear all sensitive data */
   fio_secure_zero(client->x25519_private_key, 32);
   fio_secure_zero(client->p256_private_key, 32);
-  fio_secure_zero(client->shared_secret, 32);
+  fio_secure_zero(client->shared_secret, 64);
+  fio_secure_zero(client->hybrid_private_key, 2432);
+  fio_secure_zero(client->hybrid_public_key, 1216);
   fio_secure_zero(client->early_secret, 48);
   fio_secure_zero(client->handshake_secret, 48);
   fio_secure_zero(client->master_secret, 48);
@@ -50351,8 +50625,12 @@ FIO_SFUNC int fio___tls13_build_client_hello_full(uint8_t *out,
   /* supported_versions extension (REQUIRED for TLS 1.3) */
   p += fio___tls13_write_ext_supported_versions(p);
 
-  /* supported_groups extension */
-  p += fio___tls13_write_ext_supported_groups(p);
+  /* supported_groups extension (include hybrid if module available) */
+#if defined(H___FIO_MLKEM___H)
+  p += fio___tls13_write_ext_supported_groups(p, 1);
+#else
+  p += fio___tls13_write_ext_supported_groups(p, 0);
+#endif
 
   /* signature_algorithms extension */
   p += fio___tls13_write_ext_signature_algorithms(p);
@@ -50381,25 +50659,82 @@ SFUNC int fio_tls13_client_start(fio_tls13_client_s *client,
   if (!client || !out || client->state != FIO_TLS13_STATE_START)
     return -1;
 
-  /* Build ClientHello */
+  /* Build ClientHello directly to support hybrid key share */
   uint16_t cipher_suites[] = {FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256,
                               FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256,
                               FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384};
-
-  /* Build handshake message first (without record header) */
-  uint8_t ch_msg[1024]; /* Increased for ALPN */
-  const char *alpn =
+  size_t cipher_suite_count = 3;
+  const char *alpn_protocols =
       client->alpn_protocols_len > 0 ? client->alpn_protocols : NULL;
-  int ch_len = fio___tls13_build_client_hello_full(ch_msg,
-                                                   sizeof(ch_msg),
-                                                   client->client_random,
-                                                   client->server_name,
-                                                   client->x25519_public_key,
-                                                   cipher_suites,
-                                                   3,
-                                                   alpn);
-  if (ch_len < 0)
-    return -1;
+
+  /* Build handshake message: need space for hybrid key share (1216 bytes)
+   * Max size: ~1600 bytes with all extensions */
+  uint8_t ch_msg[2048];
+  uint8_t *p = ch_msg + 4; /* Skip handshake header */
+  uint8_t *start = p;
+
+  /* Legacy version: TLS 1.2 (0x0303) */
+  fio___tls13_write_u16(p, FIO_TLS13_VERSION_TLS12);
+  p += 2;
+
+  /* Random (32 bytes) */
+  fio_memcpy32(p, client->client_random);
+  p += 32;
+
+  /* Legacy session ID (empty for TLS 1.3) */
+  *p++ = 0;
+
+  /* Cipher suites */
+  fio___tls13_write_u16(p, (uint16_t)(cipher_suite_count * 2));
+  p += 2;
+  for (size_t i = 0; i < cipher_suite_count; ++i) {
+    fio___tls13_write_u16(p, cipher_suites[i]);
+    p += 2;
+  }
+
+  /* Legacy compression methods (only null) */
+  *p++ = 1;
+  *p++ = 0;
+
+  /* Extensions */
+  uint8_t *ext_len_ptr = p;
+  p += 2;
+  uint8_t *ext_start = p;
+
+  /* SNI extension */
+  p += fio___tls13_write_ext_sni(p, client->server_name);
+
+  /* supported_versions extension (REQUIRED for TLS 1.3) */
+  p += fio___tls13_write_ext_supported_versions(p);
+
+  /* supported_groups extension (include hybrid if enabled) */
+  p += fio___tls13_write_ext_supported_groups(p, client->use_hybrid);
+
+  /* signature_algorithms extension */
+  p += fio___tls13_write_ext_signature_algorithms(p);
+
+  /* ALPN extension (RFC 7301) */
+  if (alpn_protocols && alpn_protocols[0])
+    p += fio___tls13_write_ext_alpn(p, alpn_protocols);
+
+  /* key_share extension - include hybrid if available */
+  if (client->use_hybrid) {
+    p += fio___tls13_write_ext_key_share_hybrid(p,
+                                                client->hybrid_public_key,
+                                                client->x25519_public_key);
+    FIO_LOG_DEBUG2("TLS 1.3: ClientHello includes X25519MLKEM768 key share");
+  } else {
+    p += fio___tls13_write_ext_key_share(p, client->x25519_public_key);
+  }
+
+  /* Write extensions length */
+  fio___tls13_write_u16(ext_len_ptr, (uint16_t)(p - ext_start));
+
+  /* Calculate body length and write handshake header */
+  size_t body_len = (size_t)(p - start);
+  fio_tls13_write_handshake_header(ch_msg, FIO_TLS13_HS_CLIENT_HELLO, body_len);
+
+  int ch_len = (int)(4 + body_len);
 
   /* Update transcript with ClientHello (handshake message only) */
   fio___tls13_transcript_update(client, ch_msg, (size_t)ch_len);
@@ -50685,15 +51020,16 @@ typedef struct {
   size_t supported_group_count;      /* Number of groups */
   uint16_t signature_algorithms[16]; /* Offered signature algorithms */
   size_t signature_algorithm_count;  /* Number of signature algorithms */
-  uint8_t key_shares[256];           /* Key share data */
-  size_t key_share_len;              /* Total key share data length */
-  uint16_t key_share_groups[4];      /* Groups for key shares */
-  uint8_t key_share_offsets[4];      /* Offsets into key_shares */
-  uint8_t key_share_lens[4];         /* Lengths of each key share */
-  size_t key_share_count;            /* Number of key shares */
-  const char *server_name;           /* SNI hostname (pointer into data) */
-  size_t server_name_len;            /* SNI hostname length */
-  int has_supported_versions;        /* 1 if TLS 1.3 supported */
+  uint8_t key_shares[2560]; /* Key share data (1216*2 + margin for hybrid) */
+  size_t key_share_len;     /* Total key share data length */
+  uint16_t key_share_groups[4];  /* Groups for key shares */
+  uint16_t key_share_offsets[4]; /* Offsets into key_shares */
+  uint16_t
+      key_share_lens[4]; /* Lengths of each key share (up to 1216 for hybrid) */
+  size_t key_share_count;     /* Number of key shares */
+  const char *server_name;    /* SNI hostname (pointer into data) */
+  size_t server_name_len;     /* SNI hostname length */
+  int has_supported_versions; /* 1 if TLS 1.3 supported */
   /* ALPN (Application-Layer Protocol Negotiation) */
   const char *alpn_protocols[8]; /* ALPN protocol names (pointers into data) */
   size_t alpn_protocol_lens[8];  /* ALPN protocol name lengths */
@@ -50715,7 +51051,11 @@ typedef struct {
   uint8_t server_random[32];
   uint8_t x25519_private_key[32];
   uint8_t x25519_public_key[32];
-  uint8_t shared_secret[32]; /* ECDHE shared secret */
+  uint8_t
+      hybrid_ciphertext[1120]; /* X25519MLKEM768 ciphertext for ServerHello */
+  uint8_t shared_secret[64];   /* ECDHE shared secret (32 for X25519, 64 for
+                                  hybrid) */
+  size_t shared_secret_len;    /* 32 for X25519/P-256, 64 for X25519MLKEM768 */
 
   /* Secrets (derived during handshake) - up to SHA-384 size */
   uint8_t early_secret[48];
@@ -51206,8 +51546,8 @@ FIO_SFUNC int fio___tls13_parse_ch_extensions(fio_tls13_client_hello_s *ch,
           break;
         if (offset + key_len <= sizeof(ch->key_shares)) {
           ch->key_share_groups[ch->key_share_count] = group;
-          ch->key_share_offsets[ch->key_share_count] = (uint8_t)offset;
-          ch->key_share_lens[ch->key_share_count] = (uint8_t)key_len;
+          ch->key_share_offsets[ch->key_share_count] = (uint16_t)offset;
+          ch->key_share_lens[ch->key_share_count] = key_len;
           FIO_MEMCPY(ch->key_shares + offset, shares, key_len);
           offset += key_len;
           ++ch->key_share_count;
@@ -51346,7 +51686,20 @@ FIO_SFUNC int fio___tls13_server_select_key_share(
     const fio_tls13_client_hello_s *ch,
     const uint8_t **client_key_share,
     size_t *client_key_share_len) {
-  /* We only support X25519 for now */
+  /* Prefer X25519MLKEM768 (post-quantum hybrid) if available */
+#if defined(H___FIO_MLKEM___H)
+  for (size_t i = 0; i < ch->key_share_count; ++i) {
+    if (ch->key_share_groups[i] == FIO_TLS13_GROUP_X25519MLKEM768 &&
+        ch->key_share_lens[i] == 1216) {
+      server->key_share_group = FIO_TLS13_GROUP_X25519MLKEM768;
+      *client_key_share = ch->key_shares + ch->key_share_offsets[i];
+      *client_key_share_len = 1216;
+      return 0;
+    }
+  }
+#endif
+
+  /* Fall back to X25519 (classical) */
   for (size_t i = 0; i < ch->key_share_count; ++i) {
     if (ch->key_share_groups[i] == FIO_TLS13_GROUP_X25519 &&
         ch->key_share_lens[i] == 32) {
@@ -51383,7 +51736,12 @@ TLS 1.3 Server Implementation - Message Building
 FIO_SFUNC int fio___tls13_build_server_hello(fio_tls13_server_s *server,
                                              uint8_t *out,
                                              size_t out_capacity) {
-  if (out_capacity < 256)
+  /* Check buffer capacity based on key share group:
+   * - X25519MLKEM768 needs ~1200 bytes (1120 byte key share)
+   * - X25519 needs ~100 bytes (32 byte key share) */
+  size_t min_capacity =
+      (server->key_share_group == FIO_TLS13_GROUP_X25519MLKEM768) ? 1280 : 256;
+  if (out_capacity < min_capacity)
     return -1;
 
   uint8_t *p = out + 4; /* Skip handshake header */
@@ -51427,15 +51785,28 @@ FIO_SFUNC int fio___tls13_build_server_hello(fio_tls13_server_s *server,
   /* key_share extension */
   fio___tls13_write_u16(p, FIO_TLS13_EXT_KEY_SHARE);
   p += 2;
-  fio___tls13_write_u16(p,
-                        36); /* Extension length: group(2) + len(2) + key(32) */
-  p += 2;
-  fio___tls13_write_u16(p, server->key_share_group);
-  p += 2;
-  fio___tls13_write_u16(p, 32); /* X25519 key length */
-  p += 2;
-  fio_memcpy32(p, server->x25519_public_key);
-  p += 32;
+
+  if (server->key_share_group == FIO_TLS13_GROUP_X25519MLKEM768) {
+    /* X25519MLKEM768: 1120-byte ciphertext */
+    fio___tls13_write_u16(p, 1124); /* group(2) + len(2) + ct(1120) */
+    p += 2;
+    fio___tls13_write_u16(p, FIO_TLS13_GROUP_X25519MLKEM768);
+    p += 2;
+    fio___tls13_write_u16(p, 1120); /* Ciphertext length */
+    p += 2;
+    FIO_MEMCPY(p, server->hybrid_ciphertext, 1120);
+    p += 1120;
+  } else {
+    /* X25519: 32-byte public key */
+    fio___tls13_write_u16(p, 36); /* group(2) + len(2) + key(32) */
+    p += 2;
+    fio___tls13_write_u16(p, server->key_share_group);
+    p += 2;
+    fio___tls13_write_u16(p, 32); /* X25519 key length */
+    p += 2;
+    fio_memcpy32(p, server->x25519_public_key);
+    p += 32;
+  }
 
   /* Write extensions length */
   fio___tls13_write_u16(ext_len_ptr, (uint16_t)(p - ext_start));
@@ -51778,11 +52149,12 @@ FIO_SFUNC int fio___tls13_server_derive_handshake_keys(
   /* Derive early secret (no PSK) */
   fio_tls13_derive_early_secret(server->early_secret, NULL, 0, use_sha384);
 
-  /* Derive handshake secret */
+  /* Derive handshake secret
+   * Note: shared_secret_len is 32 for X25519, 64 for X25519MLKEM768 */
   fio_tls13_derive_handshake_secret(server->handshake_secret,
                                     server->early_secret,
                                     server->shared_secret,
-                                    32, /* X25519 shared secret is 32 bytes */
+                                    server->shared_secret_len,
                                     use_sha384);
 
   /* Derive client handshake traffic secret */
@@ -52059,26 +52431,52 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
     return -1;
   }
 
-  /* Generate server random and X25519 keypair */
+  /* Generate server random */
   fio_rand_bytes(server->server_random, 32);
-  fio_x25519_keypair(server->x25519_private_key, server->x25519_public_key);
 
-  /* Compute shared secret */
-  if (fio_x25519_shared_secret(server->shared_secret,
-                               server->x25519_private_key,
-                               client_key_share) != 0) {
-    FIO_LOG_DEBUG2("TLS 1.3 Server: ECDHE shared secret failed");
+  /* Compute shared secret based on selected key share group */
+  if (server->key_share_group == FIO_TLS13_GROUP_X25519MLKEM768) {
+#if defined(H___FIO_MLKEM___H)
+    /* X25519MLKEM768: Encapsulate to client's public key (IETF, ML-KEM first)
+     * client_key_share is 1216 bytes: ML-KEM-768_ek[1184] || X25519_pk[32]
+     * Server generates ciphertext (1120 bytes) and shared secret (64 bytes) */
+    if (fio_x25519mlkem768_encaps(server->hybrid_ciphertext,
+                                  server->shared_secret,
+                                  client_key_share) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: X25519MLKEM768 encapsulation failed");
+      fio___tls13_server_set_error(server,
+                                   FIO_TLS13_ALERT_LEVEL_FATAL,
+                                   FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+      return -1;
+    }
+    server->shared_secret_len = 64;
+    FIO_LOG_DEBUG2("TLS 1.3 Server: X25519MLKEM768 hybrid key exchange");
+#else
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
-                                 FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+                                 FIO_TLS13_ALERT_INTERNAL_ERROR);
     return -1;
+#endif
+  } else {
+    /* X25519: Generate keypair and compute shared secret */
+    fio_x25519_keypair(server->x25519_private_key, server->x25519_public_key);
+    if (fio_x25519_shared_secret(server->shared_secret,
+                                 server->x25519_private_key,
+                                 client_key_share) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: ECDHE shared secret failed");
+      fio___tls13_server_set_error(server,
+                                   FIO_TLS13_ALERT_LEVEL_FATAL,
+                                   FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
+      return -1;
+    }
+    server->shared_secret_len = 32;
   }
 
   /* Update transcript with ClientHello */
   fio___tls13_server_transcript_update(server, ch_msg, ch_msg_len);
 
-  /* Build ServerHello */
-  uint8_t sh_msg[256];
+  /* Build ServerHello (needs 1280+ bytes for X25519MLKEM768) */
+  uint8_t sh_msg[1536];
   int sh_len = fio___tls13_build_server_hello(server, sh_msg, sizeof(sh_msg));
   if (sh_len < 0) {
     FIO_LOG_DEBUG2("TLS 1.3 Server: ServerHello build failed");
@@ -52635,7 +53033,8 @@ SFUNC void fio_tls13_server_destroy(fio_tls13_server_s *server) {
 
   /* Clear all sensitive data */
   fio_secure_zero(server->x25519_private_key, 32);
-  fio_secure_zero(server->shared_secret, 32);
+  fio_secure_zero(server->hybrid_ciphertext, 1120);
+  fio_secure_zero(server->shared_secret, 64);
   fio_secure_zero(server->early_secret, 48);
   fio_secure_zero(server->handshake_secret, 48);
   fio_secure_zero(server->master_secret, 48);

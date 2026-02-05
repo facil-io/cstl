@@ -502,8 +502,9 @@ FIO_SFUNC void test_rfc8448_vectors(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "server");
 
-  /* Verify ClientHello can be generated */
-  uint8_t ch_buf[512];
+  /* Verify ClientHello can be generated - need 2048 for X25519MLKEM768 hybrid
+   */
+  uint8_t ch_buf[2048];
   int ch_len = fio_tls13_client_start(&client, ch_buf, sizeof(ch_buf));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
@@ -547,8 +548,8 @@ FIO_SFUNC void test_state_machine(void) {
              "Should not be connected");
   FIO_ASSERT(!fio_tls13_client_is_error(&client), "Should not be in error");
 
-  /* Test transition to WAIT_SH */
-  uint8_t buf[512];
+  /* Test transition to WAIT_SH - need 2048 for X25519MLKEM768 hybrid */
+  uint8_t buf[2048];
   int len = fio_tls13_client_start(&client, buf, sizeof(buf));
   FIO_ASSERT(len > 0, "Start should succeed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
@@ -581,8 +582,8 @@ FIO_SFUNC void test_error_cleanup(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
 
-  /* Start handshake */
-  uint8_t buf[512];
+  /* Start handshake - need 2048 for X25519MLKEM768 hybrid */
+  uint8_t buf[2048];
   fio_tls13_client_start(&client, buf, sizeof(buf));
 
   /* Simulate receiving garbage data */
@@ -618,7 +619,7 @@ FIO_SFUNC void test_cipher_suite_support(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
 
-  uint8_t buf[512];
+  uint8_t buf[2048];
   int len = fio_tls13_client_start(&client, buf, sizeof(buf));
   FIO_ASSERT(len > 0, "ClientHello should be generated");
 

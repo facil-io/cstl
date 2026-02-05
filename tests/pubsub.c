@@ -469,7 +469,7 @@ FIO_SFUNC void fio___test_ps2_wpub_worker_on_message(fio_pubsub_msg_s *msg) {
                    FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
 }
 
-/* Worker startup - subscribes */
+/* Worker startup - subscribes to channel (same pattern as Test 2) */
 FIO_SFUNC void fio___test_ps2_wpub_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
@@ -480,12 +480,11 @@ FIO_SFUNC void fio___test_ps2_wpub_worker_start(void *ignr_) {
                        .on_message = fio___test_ps2_wpub_worker_on_message);
 }
 
-/* Master subscribes */
+/* Master subscribes via timer (50ms after start) */
 FIO_SFUNC int fio___test_ps2_wpub_master_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
   FIO_LOG_DEBUG2("(%d) [Master] Subscribing to pub-channel", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("pub-channel"),
                        .on_message = fio___test_ps2_wpub_master_on_message);
@@ -553,18 +552,19 @@ FIO_SFUNC void fio___pubsub_test_worker_publish(void) {
   fio___test_ps2_wpub_worker_confirms = 0;
   fio___test_ps2_wpub_published = 0;
 
-  /* Register callbacks */
+  /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
+   * 2) */
   fio_state_callback_add(FIO_CALL_ON_START,
                          fio___test_ps2_wpub_worker_start,
                          NULL);
   fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_wpub_on_finish, NULL);
 
-  /* Master subscribes at 50ms */
+  /* Master subscribes at 50ms (give workers time to subscribe first) */
   fio_io_run_every(.fn = fio___test_ps2_wpub_master_subscribe,
                    .every = 50,
                    .repetitions = 1);
 
-  /* Worker publishes at 200ms */
+  /* Worker publishes at 200ms (gives time for subscriptions to be active) */
   fio_io_run_every(.fn = fio___test_ps2_wpub_worker_publish,
                    .every = 200,
                    .repetitions = 1);
@@ -1847,7 +1847,7 @@ FIO_SFUNC void fio___test_ps2_wcluster_worker_on_message(
                    FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
 }
 
-/* Worker startup - subscribes */
+/* Worker startup - subscribes to channel (same pattern as Test 3) */
 FIO_SFUNC void fio___test_ps2_wcluster_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
@@ -1859,13 +1859,12 @@ FIO_SFUNC void fio___test_ps2_wcluster_worker_start(void *ignr_) {
                        .on_message = fio___test_ps2_wcluster_worker_on_message);
 }
 
-/* Master subscribes */
+/* Master subscribes via timer (50ms after start) */
 FIO_SFUNC int fio___test_ps2_wcluster_master_subscribe(void *ignr_1,
                                                        void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
   FIO_LOG_DEBUG2("(%d) [Master] Subscribing to worker-cluster-channel",
                  fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-cluster-channel"),
@@ -1939,7 +1938,8 @@ FIO_SFUNC void fio___pubsub_test_worker_cluster_publish(void) {
   fio___test_ps2_wcluster_worker_confirms = 0;
   fio___test_ps2_wcluster_published = 0;
 
-  /* Register callbacks */
+  /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
+   * 3) */
   fio_state_callback_add(FIO_CALL_ON_START,
                          fio___test_ps2_wcluster_worker_start,
                          NULL);
@@ -1947,14 +1947,14 @@ FIO_SFUNC void fio___pubsub_test_worker_cluster_publish(void) {
                          fio___test_ps2_wcluster_on_finish,
                          NULL);
 
-  /* Master subscribes at 50ms */
+  /* Master subscribes at 150ms (give workers time to subscribe first) */
   fio_io_run_every(.fn = fio___test_ps2_wcluster_master_subscribe,
-                   .every = 50,
+                   .every = 150,
                    .repetitions = 1);
 
-  /* Worker publishes at 200ms */
+  /* Worker publishes at 500ms (gives time for subscriptions to be active) */
   fio_io_run_every(.fn = fio___test_ps2_wcluster_worker_publish,
-                   .every = 200,
+                   .every = 500,
                    .repetitions = 1);
 
   /* Timeout at 2 seconds */
