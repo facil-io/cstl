@@ -129,14 +129,16 @@ FIO_BASIC                   Basic Kitchen Sink Inclusion
 FIO_CRYPTO            Poor-man's Cryptographic Elements
 ***************************************************************************** */
 #if defined(FIO_CRYPT) || defined(FIO_CRYPTO) || defined(FIO_TLS13) ||         \
-    defined(FIO_IO)
+    defined(FIO_IO) || defined(FIO_MLKEM)
 #undef FIO_AES
+#undef FIO_ARGON2
 #undef FIO_ASN1
+#undef FIO_BLAKE2
 #undef FIO_CHACHA
-#undef FIO_CRYPT
-#undef FIO_CRYPTO
-#undef FIO_CRYPTO_CORE
 #undef FIO_ED25519
+#undef FIO_HKDF
+#undef FIO_LYRA2
+#undef FIO_MLKEM
 #undef FIO_OTP
 #undef FIO_P256
 #undef FIO_P384
@@ -145,22 +147,24 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #undef FIO_SECRET
 #undef FIO_SHA1
 #undef FIO_SHA2
+#undef FIO_SHA3
 #undef FIO_TLS13
 #undef FIO_X509
 #define FIO_CRYPTO_CORE
 #define FIO_AES
+#define FIO_ARGON2
 #define FIO_ASN1
 #define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
 #define FIO_HKDF
+#define FIO_LYRA2
+#define FIO_MLKEM
 #define FIO_OTP
 #define FIO_P256
 #define FIO_P384
 #define FIO_PEM
 #define FIO_RSA
-#define FIO_LYRA2
-#define FIO_ARGON2
 #define FIO_SECRET
 #define FIO_SHA1
 #define FIO_SHA2

@@ -99,7 +99,8 @@ FIO_SFUNC void test_client_hello_generation(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
-  uint8_t out[512];
+  /* Buffer must be large enough for hybrid ClientHello (~1400 bytes) */
+  uint8_t out[2048];
   int len = fio_tls13_client_start(&client, out, sizeof(out));
 
   FIO_ASSERT(len > 0, "ClientHello generation should succeed");
@@ -586,8 +587,8 @@ FIO_SFUNC void test_mock_handshake_flow(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
-  /* Step 1: Generate ClientHello */
-  uint8_t ch_out[512];
+  /* Step 1: Generate ClientHello (buffer must hold hybrid ~1400 bytes) */
+  uint8_t ch_out[2048];
   int ch_len = fio_tls13_client_start(&client, ch_out, sizeof(ch_out));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
@@ -662,8 +663,8 @@ FIO_SFUNC void test_ccs_handling(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
-  /* Start handshake */
-  uint8_t ch_out[512];
+  /* Start handshake (buffer must hold hybrid ~1400 bytes) */
+  uint8_t ch_out[2048];
   fio_tls13_client_start(&client, ch_out, sizeof(ch_out));
 
   /* CCS record (should be ignored in TLS 1.3) */

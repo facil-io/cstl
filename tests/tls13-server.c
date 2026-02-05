@@ -256,7 +256,8 @@ FIO_SFUNC void test_client_hello_parsing(void) {
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
 
-  uint8_t ch_record[512];
+  /* Buffer must be large enough for hybrid ClientHello (~1400 bytes) */
+  uint8_t ch_record[2048];
   int ch_len = fio_tls13_client_start(&client, ch_record, sizeof(ch_record));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
 
@@ -931,18 +932,18 @@ FIO_SFUNC void test_state_machine(void) {
 }
 
 /* *****************************************************************************
-Test: Browser ClientHello with GREASE + Kyber + X25519
+Test: Browser ClientHello with GREASE + X25519MLKEM768 (Kyber) + X25519
 
 Modern browsers send key shares in this order:
 1. GREASE (random group, small key) - to test server ignores unknown groups
-2. Kyber (0x11ec, 1216 bytes) - post-quantum key exchange
-3. X25519 (0x001d, 32 bytes) - classical key exchange
+2. X25519MLKEM768 (0x11ec, 1216 bytes) - post-quantum hybrid key exchange
+3. X25519 (0x001d, 32 bytes) - classical key exchange (fallback)
 
-The Kyber key share is too large for our 256-byte buffer, so it gets skipped.
-This tests that we correctly parse X25519 after skipping the large Kyber share.
+This tests that all 3 key shares are correctly parsed and stored.
 ***************************************************************************** */
 FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
-  FIO_LOG_DDEBUG("Testing browser ClientHello with GREASE + Kyber + X25519\n");
+  FIO_LOG_DDEBUG(
+      "Testing browser ClientHello with GREASE + X25519MLKEM768 + X25519\n");
 
   /* Generate known X25519 key for verification */
   uint8_t x25519_key[32];
@@ -951,7 +952,7 @@ FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
 
   /* Build a minimal ClientHello with 3 key shares:
    * 1. GREASE (0x0a0a, 1 byte)
-   * 2. Kyber (0x11ec, 1216 bytes) - will be skipped
+   * 2. X25519MLKEM768 (0x11ec, 1216 bytes) - post-quantum hybrid
    * 3. X25519 (0x001d, 32 bytes)
    */
   uint8_t ch_body[2048];
@@ -1057,10 +1058,10 @@ FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
   int ret = fio___tls13_parse_client_hello(&ch, ch_body, ch_body_len);
   FIO_ASSERT(ret == 0, "ClientHello parsing should succeed");
 
-  /* We should have 2 key shares stored (GREASE + X25519, Kyber skipped) */
-  FIO_ASSERT(ch.key_share_count == 2,
-             "Should have 2 key shares (got %zu) - GREASE + X25519, Kyber "
-             "skipped due to buffer overflow",
+  /* We should have 3 key shares stored (GREASE + X25519MLKEM768 + X25519) */
+  FIO_ASSERT(ch.key_share_count == 3,
+             "Should have 3 key shares (got %zu) - GREASE + X25519MLKEM768 + "
+             "X25519",
              ch.key_share_count);
 
   /* Verify GREASE key share */
@@ -1074,19 +1075,30 @@ FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
              "GREASE offset should be 0 (got %u)",
              (unsigned)ch.key_share_offsets[0]);
 
-  /* Verify X25519 key share */
-  FIO_ASSERT(ch.key_share_groups[1] == FIO_TLS13_GROUP_X25519,
-             "Second key share should be X25519 (got 0x%04x)",
+  /* Verify X25519MLKEM768 key share */
+  FIO_ASSERT(ch.key_share_groups[1] == FIO_TLS13_GROUP_X25519MLKEM768,
+             "Second key share should be X25519MLKEM768 (got 0x%04x)",
              ch.key_share_groups[1]);
-  FIO_ASSERT(ch.key_share_lens[1] == 32,
-             "X25519 key should be 32 bytes (got %u)",
+  FIO_ASSERT(ch.key_share_lens[1] == 1216,
+             "X25519MLKEM768 key should be 1216 bytes (got %u)",
              (unsigned)ch.key_share_lens[1]);
   FIO_ASSERT(ch.key_share_offsets[1] == 1,
-             "X25519 offset should be 1 (got %u)",
+             "X25519MLKEM768 offset should be 1 (got %u)",
              (unsigned)ch.key_share_offsets[1]);
 
-  /* CRITICAL: Verify X25519 key DATA is correct, not garbage from Kyber */
-  const uint8_t *stored_x25519 = ch.key_shares + ch.key_share_offsets[1];
+  /* Verify X25519 key share */
+  FIO_ASSERT(ch.key_share_groups[2] == FIO_TLS13_GROUP_X25519,
+             "Third key share should be X25519 (got 0x%04x)",
+             ch.key_share_groups[2]);
+  FIO_ASSERT(ch.key_share_lens[2] == 32,
+             "X25519 key should be 32 bytes (got %u)",
+             (unsigned)ch.key_share_lens[2]);
+  FIO_ASSERT(ch.key_share_offsets[2] == 1217,
+             "X25519 offset should be 1217 (1 + 1216) (got %u)",
+             (unsigned)ch.key_share_offsets[2]);
+
+  /* CRITICAL: Verify X25519 key DATA is correct */
+  const uint8_t *stored_x25519 = ch.key_shares + ch.key_share_offsets[2];
   FIO_ASSERT(FIO_MEMCMP(stored_x25519, x25519_key, 32) == 0,
              "X25519 key data should match! First bytes: %02x %02x %02x %02x "
              "(expected %02x %02x %02x %02x)",
@@ -1119,16 +1131,27 @@ FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
                                             &client_key_share,
                                             &client_key_share_len);
   FIO_ASSERT(ret == 0, "Key share selection should succeed");
+
+  /* Server now prefers X25519MLKEM768 when available (post-quantum security) */
+#if defined(H___FIO_MLKEM___H)
+  FIO_ASSERT(server.key_share_group == FIO_TLS13_GROUP_X25519MLKEM768,
+             "Should select X25519MLKEM768 group (got 0x%04x)",
+             server.key_share_group);
+  FIO_ASSERT(client_key_share_len == 1216,
+             "Selected key should be 1216 bytes (got %zu)",
+             client_key_share_len);
+#else
   FIO_ASSERT(server.key_share_group == FIO_TLS13_GROUP_X25519,
              "Should select X25519 group");
   FIO_ASSERT(client_key_share_len == 32, "Selected key should be 32 bytes");
   FIO_ASSERT(FIO_MEMCMP(client_key_share, x25519_key, 32) == 0,
              "Selected key data should match X25519 key");
+#endif
 
   fio_tls13_server_destroy(&server);
 
-  FIO_LOG_DDEBUG(
-      "  - Browser GREASE + Kyber + X25519 ClientHello tests passed\n");
+  FIO_LOG_DDEBUG("  - Browser GREASE + X25519MLKEM768 + X25519 ClientHello "
+                 "tests passed\n");
 }
 
 /* *****************************************************************************

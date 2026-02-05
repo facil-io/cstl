@@ -3,6 +3,7 @@
 #define FIO___DEV___           /* Development inclusion - ignore line */
 #define FIO_MLKEM              /* Development inclusion - ignore line */
 #define FIO_SHA3               /* Development inclusion - ignore line */
+#define FIO_ED25519            /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -97,6 +98,71 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
 SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
                               const uint8_t ct[1088],
                               const uint8_t sk[2400]);
+
+/* *****************************************************************************
+X25519MLKEM768 Hybrid API (TLS 1.3 NamedGroup 0x11ec)
+
+This is the hybrid key exchange combining classical X25519 with post-quantum
+ML-KEM-768, as specified in draft-ietf-tls-ecdhe-mlkem for TLS 1.3.
+
+Key format (per IETF draft-ietf-tls-ecdhe-mlkem-03 Section 4):
+  - Public key:  ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes
+  - Secret key:  ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes
+  - Ciphertext:  ML-KEM-768_ct (1088) || X25519_pk (32) = 1120 bytes
+  - Shared secret: ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+
+NOTE: The group name "X25519MLKEM768" does NOT reflect the concatenation order.
+The ML-KEM component comes FIRST in all concatenations (Section 4 note).
+
+Browser support: Chrome 131+, Firefox 132+, Safari iOS 26+
+Server adoption: 8.6% of top 1M sites as of early 2026
+
+Note: This implementation requires FIO_ED25519 for X25519 support.
+***************************************************************************** */
+
+/** X25519MLKEM768 hybrid constants */
+#define FIO_X25519MLKEM768_PUBLICKEYBYTES  (32 + 1184) /* 1216 */
+#define FIO_X25519MLKEM768_SECRETKEYBYTES  (32 + 2400) /* 2432 */
+#define FIO_X25519MLKEM768_CIPHERTEXTBYTES (32 + 1088) /* 1120 */
+#define FIO_X25519MLKEM768_SSBYTES         64
+
+/**
+ * Generate X25519MLKEM768 hybrid keypair.
+ *
+ * Generates both X25519 and ML-KEM-768 keypairs using system CSPRNG.
+ * The public key is ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes.
+ * The secret key is ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+SFUNC int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]);
+
+/**
+ * X25519MLKEM768 hybrid encapsulation.
+ *
+ * Performs both X25519 key exchange and ML-KEM-768 encapsulation.
+ * The ciphertext is ML-KEM-768_ct (1088) || X25519_ephemeral_pk (32) = 1120
+ * bytes. The shared secret is ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes.
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
+                                    uint8_t ss[64],
+                                    const uint8_t pk[1216]);
+
+/**
+ * X25519MLKEM768 hybrid decapsulation.
+ *
+ * Performs both X25519 shared secret derivation and ML-KEM-768 decapsulation.
+ * The shared secret is ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes.
+ *
+ * Returns 0 on success, -1 if X25519 shared secret computation fails
+ * (low-order point). ML-KEM-768 uses implicit rejection for invalid
+ * ciphertexts.
+ */
+SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
+                                    const uint8_t ct[1120],
+                                    const uint8_t sk[2432]);
 
 /* *****************************************************************************
 ML-KEM-768 Internal Constants
@@ -1054,8 +1120,104 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
 }
 
 /* *****************************************************************************
-Cleanup - Internal Macros
+X25519MLKEM768 Hybrid Implementation
 ***************************************************************************** */
+
+/**
+ * Generate X25519MLKEM768 hybrid keypair.
+ *
+ * Layout (per IETF draft-ietf-tls-ecdhe-mlkem-03):
+ *   pk = ML-KEM-768_ek (1184 bytes) || X25519_pk (32 bytes) = 1216 bytes
+ *   sk = ML-KEM-768_dk (2400 bytes) || X25519_sk (32 bytes) = 2432 bytes
+ */
+SFUNC int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]) {
+  if (!pk || !sk)
+    return -1;
+
+  /* Generate ML-KEM-768 keypair: pk[0..1183], sk[0..2399] */
+  if (fio_mlkem768_keypair(pk, sk) != 0) {
+    FIO_MEMSET(pk, 0, 1216);
+    FIO_MEMSET(sk, 0, 2432);
+    return -1;
+  }
+
+  /* Generate X25519 keypair: sk[2400..2431] = private, pk[1184..1215] = public
+   */
+  fio_x25519_keypair(sk + 2400, pk + 1184);
+
+  return 0;
+}
+
+/**
+ * X25519MLKEM768 hybrid encapsulation.
+ *
+ * Layout (per IETF draft-ietf-tls-ecdhe-mlkem-03):
+ *   pk (input)  = ML-KEM-768_ek (1184) || X25519_pk (32) = 1216 bytes
+ *   ct (output) = ML-KEM-768_ct (1088) || X25519_eph_pk (32) = 1120 bytes
+ *   ss (output) = ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+ */
+SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
+                                    uint8_t ss[64],
+                                    const uint8_t pk[1216]) {
+  uint8_t x25519_eph_sk[32];
+
+  if (!ct || !ss || !pk)
+    return -1;
+
+  /* ML-KEM-768 encapsulation: ct[0..1087], ss[0..31] */
+  if (fio_mlkem768_encaps(ct, ss, pk) != 0) {
+    FIO_MEMSET(ct, 0, 1120);
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  /* Generate ephemeral X25519 keypair: ct[1088..1119] = ephemeral public key */
+  fio_x25519_keypair(x25519_eph_sk, ct + 1088);
+
+  /* Compute X25519 shared secret: ss[32..63] = X25519(eph_sk, pk[1184..1215])
+   */
+  if (fio_x25519_shared_secret(ss + 32, x25519_eph_sk, pk + 1184) != 0) {
+    /* Low-order point - should not happen with valid public keys */
+    FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+    FIO_MEMSET(ct, 0, 1120);
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  /* Zero sensitive ephemeral private key */
+  FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+
+  return 0;
+}
+
+/**
+ * X25519MLKEM768 hybrid decapsulation (IETF draft-ietf-tls-ecdhe-mlkem-03).
+ *
+ * Layout (ML-KEM FIRST per IETF Section 4):
+ *   ct (input) = ML-KEM-768_ct (1088) || X25519_eph_pk (32) = 1120 bytes
+ *   sk (input) = ML-KEM-768_dk (2400) || X25519_sk (32) = 2432 bytes
+ *   ss (output) = ML-KEM-768_ss (32) || X25519_ss (32) = 64 bytes
+ */
+SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
+                                    const uint8_t ct[1120],
+                                    const uint8_t sk[2432]) {
+  if (!ss || !ct || !sk)
+    return -1;
+
+  /* ML-KEM-768 decapsulation: ss[0..31] from ct[0..1087] using sk[0..2399]
+   * Note: ML-KEM uses implicit rejection, so this always "succeeds" */
+  fio_mlkem768_decaps(ss, ct, sk);
+
+  /* X25519 shared secret: ss[32..63] = X25519(sk[2400..2431], ct[1088..1119])
+   */
+  if (fio_x25519_shared_secret(ss + 32, sk + 2400, ct + 1088) != 0) {
+    /* Low-order point - indicates invalid/malicious ciphertext */
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
+
+  return 0;
+}
 
 /* *****************************************************************************
 Cleanup
