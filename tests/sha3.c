@@ -3,7 +3,7 @@ SHA-3 Tests
 ***************************************************************************** */
 #define FIO_LOG
 #define FIO_SHA3
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* Test vectors from NIST FIPS 202 */
 

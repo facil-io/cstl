@@ -5181,6 +5181,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_BLAKE2
 #endif
 
+#if defined(FIO_MLKEM)
+#define FIO_SHA3
+#define FIO_ED25519
+#endif
+
 #if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2) ||           \
     defined(FIO_BLAKE2)
 #undef FIO_CRYPTO_CORE
@@ -26337,7 +26342,8 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   case '{':
     do /* it is known that (buf.buf ends as '=' or '}')*/
       --buf.len;
-    while (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t');
+    while (buf.len &&
+           (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t'));
 
     if (id == '=')
       return fio___mustache_parse_set_delim(p, buf); /* fall through */
@@ -27067,6 +27073,8 @@ SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
 SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
                                const void *restrict data,
                                size_t len) {
+  if (!len)
+    return;
   const uint8_t *p = (const uint8_t *)data;
 
   /* If we have buffered data, try to complete a block */
@@ -27373,6 +27381,8 @@ SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
 SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
                                const void *restrict data,
                                size_t len) {
+  if (!len)
+    return;
   const uint8_t *p = (const uint8_t *)data;
 
   /* If we have buffered data, try to complete a block */
@@ -29457,6 +29467,8 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
 
 /** consume data and feed it to hash. */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
+  if (!len)
+    return;
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;
@@ -29701,6 +29713,8 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
 SFUNC void fio_sha512_consume(fio_sha512_s *restrict h,
                               const void *restrict data,
                               uint64_t len) {
+  if (!len)
+    return;
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;
@@ -42571,15 +42585,10 @@ ML-KEM-768 Internal Constants
 
 /* *****************************************************************************
 ML-KEM-768 Internal Types
+
+A polynomial is int16_t[256] (256 coefficients, 512 bytes).
+A polyvec is int16_t[k][256] = int16_t[3][256] (3 polynomials).
 ***************************************************************************** */
-
-typedef struct {
-  int16_t coeffs[FIO___MLKEM_N];
-} fio___mlkem_poly;
-
-typedef struct {
-  fio___mlkem_poly vec[FIO___MLKEM_K];
-} fio___mlkem_polyvec;
 
 /* *****************************************************************************
 Implementation
@@ -42695,19 +42704,19 @@ FIO_SFUNC void fio___mlkem_basemul(int16_t r[2],
 }
 
 /* *****************************************************************************
-Polynomial Operations
+Polynomial Operations (poly = int16_t[256])
 ***************************************************************************** */
 
 /** Serialize polynomial to bytes (12-bit coefficients packed into bytes). */
 FIO_SFUNC void fio___mlkem_poly_tobytes(uint8_t r[FIO___MLKEM_POLYBYTES],
-                                        const fio___mlkem_poly *a) {
+                                        const int16_t a[256]) {
   unsigned int i;
   uint16_t t0, t1;
   for (i = 0; i < FIO___MLKEM_N / 2; i++) {
     /* Map to positive representative */
-    t0 = (uint16_t)a->coeffs[2 * i];
+    t0 = (uint16_t)a[2 * i];
     t0 = (uint16_t)(t0 + ((uint16_t)((int16_t)t0 >> 15) & FIO___MLKEM_Q));
-    t1 = (uint16_t)a->coeffs[2 * i + 1];
+    t1 = (uint16_t)a[2 * i + 1];
     t1 = (uint16_t)(t1 + ((uint16_t)((int16_t)t1 >> 15) & FIO___MLKEM_Q));
     r[3 * i + 0] = (uint8_t)(t0 >> 0);
     r[3 * i + 1] = (uint8_t)((t0 >> 8) | (t1 << 4));
@@ -42717,16 +42726,16 @@ FIO_SFUNC void fio___mlkem_poly_tobytes(uint8_t r[FIO___MLKEM_POLYBYTES],
 
 /** Deserialize polynomial from bytes. */
 FIO_SFUNC void fio___mlkem_poly_frombytes(
-    fio___mlkem_poly *r,
+    int16_t r[256],
     const uint8_t a[FIO___MLKEM_POLYBYTES]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_N / 2; i++) {
-    r->coeffs[2 * i] = (int16_t)(((uint16_t)(a[3 * i + 0] >> 0) |
-                                  ((uint16_t)(a[3 * i + 1]) << 8)) &
-                                 0xFFF);
-    r->coeffs[2 * i + 1] = (int16_t)(((uint16_t)(a[3 * i + 1] >> 4) |
-                                      ((uint16_t)(a[3 * i + 2]) << 4)) &
-                                     0xFFF);
+    r[2 * i] = (int16_t)(((uint16_t)(a[3 * i + 0] >> 0) |
+                          ((uint16_t)(a[3 * i + 1]) << 8)) &
+                         0xFFF);
+    r[2 * i + 1] = (int16_t)(((uint16_t)(a[3 * i + 1] >> 4) |
+                              ((uint16_t)(a[3 * i + 2]) << 4)) &
+                             0xFFF);
   }
 }
 
@@ -42736,14 +42745,14 @@ FIO_SFUNC void fio___mlkem_poly_frombytes(
  */
 FIO_SFUNC void fio___mlkem_poly_compress(
     uint8_t r[FIO___MLKEM_POLYCOMPRESSEDBYTES],
-    const fio___mlkem_poly *a) {
+    const int16_t a[256]) {
   unsigned int i, j;
   uint8_t t[8];
 
   for (i = 0; i < FIO___MLKEM_N / 8; i++) {
     for (j = 0; j < 8; j++) {
       /* Map to positive representative */
-      int16_t u = a->coeffs[8 * i + j];
+      int16_t u = a[8 * i + j];
       u = (int16_t)(u + ((u >> 15) & FIO___MLKEM_Q));
       /* Compress: round(2^4 / q * u) mod 2^4, via multiply-shift (no division)
        * 80635 ≈ ceil(2^28 / 3329), avoiding KyberSlash timing leak */
@@ -42762,14 +42771,14 @@ FIO_SFUNC void fio___mlkem_poly_compress(
 
 /** Decompress polynomial (d_v = 4 bits). */
 FIO_SFUNC void fio___mlkem_poly_decompress(
-    fio___mlkem_poly *r,
+    int16_t r[256],
     const uint8_t a[FIO___MLKEM_POLYCOMPRESSEDBYTES]) {
   unsigned int i;
 
   for (i = 0; i < FIO___MLKEM_N / 2; i++) {
-    r->coeffs[2 * i + 0] =
+    r[2 * i + 0] =
         (int16_t)((((uint16_t)(a[i] & 15) * FIO___MLKEM_Q) + 8) >> 4);
-    r->coeffs[2 * i + 1] =
+    r[2 * i + 1] =
         (int16_t)((((uint16_t)(a[i] >> 4) * FIO___MLKEM_Q) + 8) >> 4);
   }
 }
@@ -42777,10 +42786,9 @@ FIO_SFUNC void fio___mlkem_poly_decompress(
 /**
  * Convert message bytes to polynomial.
  * Each bit of the 32-byte message maps to a coefficient: 0 or q/2.
- * Uses constant-time cmov_int16.
  */
 FIO_SFUNC void fio___mlkem_poly_frommsg(
-    fio___mlkem_poly *r,
+    int16_t r[256],
     const uint8_t msg[FIO___MLKEM_INDCPA_MSGBYTES]) {
   unsigned int i, j;
   int16_t mask;
@@ -42788,8 +42796,7 @@ FIO_SFUNC void fio___mlkem_poly_frommsg(
   for (i = 0; i < FIO___MLKEM_N / 8; i++) {
     for (j = 0; j < 8; j++) {
       mask = (int16_t) - (int16_t)((msg[i] >> j) & 1);
-      r->coeffs[8 * i + j] =
-          (int16_t)(mask & (int16_t)((FIO___MLKEM_Q + 1) / 2));
+      r[8 * i + j] = (int16_t)(mask & (int16_t)((FIO___MLKEM_Q + 1) / 2));
     }
   }
 }
@@ -42799,14 +42806,14 @@ FIO_SFUNC void fio___mlkem_poly_frommsg(
  * Uses multiply-shift to avoid division by q.
  */
 FIO_SFUNC void fio___mlkem_poly_tomsg(uint8_t msg[FIO___MLKEM_INDCPA_MSGBYTES],
-                                      const fio___mlkem_poly *a) {
+                                      const int16_t a[256]) {
   unsigned int i, j;
   uint32_t t;
 
   for (i = 0; i < FIO___MLKEM_N / 8; i++) {
     msg[i] = 0;
     for (j = 0; j < 8; j++) {
-      int16_t u = a->coeffs[8 * i + j];
+      int16_t u = a[8 * i + j];
       u = (int16_t)(u + ((u >> 15) & FIO___MLKEM_Q));
       /* Compress to 1 bit: round(2/q * u) mod 2 */
       t = (uint32_t)u;
@@ -42821,7 +42828,7 @@ FIO_SFUNC void fio___mlkem_poly_tomsg(uint8_t msg[FIO___MLKEM_INDCPA_MSGBYTES],
 }
 
 /** CBD eta=2 sampling from uniform bytes. */
-FIO_SFUNC void fio___mlkem_cbd2(fio___mlkem_poly *r,
+FIO_SFUNC void fio___mlkem_cbd2(int16_t r[256],
                                 const uint8_t buf[2 * FIO___MLKEM_N / 4]) {
   unsigned int i, j;
   uint32_t t, d;
@@ -42834,14 +42841,14 @@ FIO_SFUNC void fio___mlkem_cbd2(fio___mlkem_poly *r,
     for (j = 0; j < 8; j++) {
       a = (int16_t)((d >> (4 * j + 0)) & 0x3);
       b = (int16_t)((d >> (4 * j + 2)) & 0x3);
-      r->coeffs[8 * i + j] = (int16_t)(a - b);
+      r[8 * i + j] = (int16_t)(a - b);
     }
   }
 }
 
 /** Sample noise polynomial using SHAKE256 PRF (eta1 = 2 for ML-KEM-768). */
 FIO_SFUNC void fio___mlkem_poly_getnoise_eta1(
-    fio___mlkem_poly *r,
+    int16_t r[256],
     const uint8_t seed[FIO___MLKEM_SYMBYTES],
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA1 * FIO___MLKEM_N / 4]; /* 128 bytes */
@@ -42854,7 +42861,7 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta1(
 
 /** Sample noise polynomial using SHAKE256 PRF (eta2 = 2 for ML-KEM-768). */
 FIO_SFUNC void fio___mlkem_poly_getnoise_eta2(
-    fio___mlkem_poly *r,
+    int16_t r[256],
     const uint8_t seed[FIO___MLKEM_SYMBYTES],
     uint8_t nonce) {
   uint8_t buf[FIO___MLKEM_ETA2 * FIO___MLKEM_N / 4]; /* 128 bytes */
@@ -42866,68 +42873,58 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta2(
   fio___mlkem_cbd2(r, buf);
 }
 
-/** Apply forward NTT to polynomial. */
-FIO_SFUNC void fio___mlkem_poly_ntt(fio___mlkem_poly *r) {
-  fio___mlkem_ntt(r->coeffs);
-}
-
-/** Apply inverse NTT to polynomial. */
-FIO_SFUNC void fio___mlkem_poly_invntt_tomont(fio___mlkem_poly *r) {
-  fio___mlkem_invntt(r->coeffs);
-}
-
 /** Pointwise multiplication of polynomials in NTT domain. */
-FIO_SFUNC void fio___mlkem_poly_basemul_montgomery(fio___mlkem_poly *r,
-                                                   const fio___mlkem_poly *a,
-                                                   const fio___mlkem_poly *b) {
+FIO_SFUNC void fio___mlkem_poly_basemul_montgomery(int16_t r[256],
+                                                   const int16_t a[256],
+                                                   const int16_t b[256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_N / 4; i++) {
-    fio___mlkem_basemul(&r->coeffs[4 * i],
-                        &a->coeffs[4 * i],
-                        &b->coeffs[4 * i],
+    fio___mlkem_basemul(&r[4 * i],
+                        &a[4 * i],
+                        &b[4 * i],
                         fio___mlkem_zetas[64 + i]);
-    fio___mlkem_basemul(&r->coeffs[4 * i + 2],
-                        &a->coeffs[4 * i + 2],
-                        &b->coeffs[4 * i + 2],
+    fio___mlkem_basemul(&r[4 * i + 2],
+                        &a[4 * i + 2],
+                        &b[4 * i + 2],
                         (int16_t)-fio___mlkem_zetas[64 + i]);
   }
 }
 
 /** Convert polynomial to Montgomery domain. */
-FIO_SFUNC void fio___mlkem_poly_tomont(fio___mlkem_poly *r) {
+FIO_SFUNC void fio___mlkem_poly_tomont(int16_t r[256]) {
   unsigned int i;
   const int16_t f = (int16_t)((1ULL << 32) % FIO___MLKEM_Q);
   for (i = 0; i < FIO___MLKEM_N; i++)
-    r->coeffs[i] = fio___mlkem_montgomery_reduce((int32_t)r->coeffs[i] * f);
+    r[i] = fio___mlkem_montgomery_reduce((int32_t)r[i] * f);
 }
 
 /** Reduce all coefficients to canonical range. */
-FIO_SFUNC void fio___mlkem_poly_reduce(fio___mlkem_poly *r) {
+FIO_SFUNC void fio___mlkem_poly_reduce(int16_t r[256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_N; i++)
-    r->coeffs[i] = fio___mlkem_barrett_reduce(r->coeffs[i]);
+    r[i] = fio___mlkem_barrett_reduce(r[i]);
 }
 
 /** Add two polynomials. */
-FIO_SFUNC void fio___mlkem_poly_add(fio___mlkem_poly *r,
-                                    const fio___mlkem_poly *a,
-                                    const fio___mlkem_poly *b) {
+FIO_SFUNC void fio___mlkem_poly_add(int16_t r[256],
+                                    const int16_t a[256],
+                                    const int16_t b[256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_N; i++)
-    r->coeffs[i] = (int16_t)(a->coeffs[i] + b->coeffs[i]);
+    r[i] = (int16_t)(a[i] + b[i]);
 }
 
 /** Subtract two polynomials: r = a - b. */
-FIO_SFUNC void fio___mlkem_poly_sub(fio___mlkem_poly *r,
-                                    const fio___mlkem_poly *a,
-                                    const fio___mlkem_poly *b) {
+FIO_SFUNC void fio___mlkem_poly_sub(int16_t r[256],
+                                    const int16_t a[256],
+                                    const int16_t b[256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_N; i++)
-    r->coeffs[i] = (int16_t)(a->coeffs[i] - b->coeffs[i]);
+    r[i] = (int16_t)(a[i] - b[i]);
 }
 
 /* *****************************************************************************
-Polyvec Operations
+Polyvec Operations (polyvec = int16_t[k][256])
 ***************************************************************************** */
 
 /**
@@ -42936,14 +42933,14 @@ Polyvec Operations
  */
 FIO_SFUNC void fio___mlkem_polyvec_compress(
     uint8_t r[FIO___MLKEM_POLYVECCOMPRESSEDBYTES],
-    const fio___mlkem_polyvec *a) {
+    const int16_t a[FIO___MLKEM_K][256]) {
   unsigned int i, j, k;
   uint16_t t[4];
 
   for (i = 0; i < FIO___MLKEM_K; i++) {
     for (j = 0; j < FIO___MLKEM_N / 4; j++) {
       for (k = 0; k < 4; k++) {
-        int16_t u = a->vec[i].coeffs[4 * j + k];
+        int16_t u = a[i][4 * j + k];
         u = (int16_t)(u + ((u >> 15) & FIO___MLKEM_Q));
         /* Compress: round(2^10 / q * u) mod 2^10, via multiply-shift
          * 1290167 ≈ ceil(2^32 / 3329), avoiding KyberSlash timing leak */
@@ -42965,7 +42962,7 @@ FIO_SFUNC void fio___mlkem_polyvec_compress(
 
 /** Decompress polyvec (d_u = 10 bits per coefficient). */
 FIO_SFUNC void fio___mlkem_polyvec_decompress(
-    fio___mlkem_polyvec *r,
+    int16_t r[FIO___MLKEM_K][256],
     const uint8_t a[FIO___MLKEM_POLYVECCOMPRESSEDBYTES]) {
   unsigned int i, j;
   uint16_t t[4];
@@ -42977,79 +42974,81 @@ FIO_SFUNC void fio___mlkem_polyvec_decompress(
       t[2] = (uint16_t)(((uint16_t)(a[2]) >> 4) | ((uint16_t)(a[3]) << 4));
       t[3] = (uint16_t)(((uint16_t)(a[3]) >> 6) | ((uint16_t)(a[4]) << 2));
       a += 5;
-      r->vec[i].coeffs[4 * j + 0] =
+      r[i][4 * j + 0] =
           (int16_t)(((uint32_t)(t[0] & 0x3FF) * FIO___MLKEM_Q + 512) >> 10);
-      r->vec[i].coeffs[4 * j + 1] =
+      r[i][4 * j + 1] =
           (int16_t)(((uint32_t)(t[1] & 0x3FF) * FIO___MLKEM_Q + 512) >> 10);
-      r->vec[i].coeffs[4 * j + 2] =
+      r[i][4 * j + 2] =
           (int16_t)(((uint32_t)(t[2] & 0x3FF) * FIO___MLKEM_Q + 512) >> 10);
-      r->vec[i].coeffs[4 * j + 3] =
+      r[i][4 * j + 3] =
           (int16_t)(((uint32_t)(t[3] & 0x3FF) * FIO___MLKEM_Q + 512) >> 10);
     }
   }
 }
 
 /** Serialize polyvec to bytes. */
-FIO_SFUNC void fio___mlkem_polyvec_tobytes(uint8_t r[FIO___MLKEM_POLYVECBYTES],
-                                           const fio___mlkem_polyvec *a) {
+FIO_SFUNC void fio___mlkem_polyvec_tobytes(
+    uint8_t r[FIO___MLKEM_POLYVECBYTES],
+    const int16_t a[FIO___MLKEM_K][256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_tobytes(r + i * FIO___MLKEM_POLYBYTES, &a->vec[i]);
+    fio___mlkem_poly_tobytes(r + i * FIO___MLKEM_POLYBYTES, a[i]);
 }
 
 /** Deserialize polyvec from bytes. */
 FIO_SFUNC void fio___mlkem_polyvec_frombytes(
-    fio___mlkem_polyvec *r,
+    int16_t r[FIO___MLKEM_K][256],
     const uint8_t a[FIO___MLKEM_POLYVECBYTES]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_frombytes(&r->vec[i], a + i * FIO___MLKEM_POLYBYTES);
+    fio___mlkem_poly_frombytes(r[i], a + i * FIO___MLKEM_POLYBYTES);
 }
 
 /** Apply NTT to all polynomials in polyvec. */
-FIO_SFUNC void fio___mlkem_polyvec_ntt(fio___mlkem_polyvec *r) {
+FIO_SFUNC void fio___mlkem_polyvec_ntt(int16_t r[FIO___MLKEM_K][256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_ntt(&r->vec[i]);
+    fio___mlkem_ntt(r[i]);
 }
 
 /** Apply inverse NTT to all polynomials in polyvec. */
-FIO_SFUNC void fio___mlkem_polyvec_invntt_tomont(fio___mlkem_polyvec *r) {
+FIO_SFUNC void fio___mlkem_polyvec_invntt_tomont(
+    int16_t r[FIO___MLKEM_K][256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_invntt_tomont(&r->vec[i]);
+    fio___mlkem_invntt(r[i]);
 }
 
 /** Pointwise multiply-accumulate: r = sum(a[i] * b[i]). */
 FIO_SFUNC void fio___mlkem_polyvec_basemul_acc_montgomery(
-    fio___mlkem_poly *r,
-    const fio___mlkem_polyvec *a,
-    const fio___mlkem_polyvec *b) {
+    int16_t r[256],
+    const int16_t a[FIO___MLKEM_K][256],
+    const int16_t b[FIO___MLKEM_K][256]) {
   unsigned int i;
-  fio___mlkem_poly t;
+  int16_t t[256];
 
-  fio___mlkem_poly_basemul_montgomery(r, &a->vec[0], &b->vec[0]);
+  fio___mlkem_poly_basemul_montgomery(r, a[0], b[0]);
   for (i = 1; i < FIO___MLKEM_K; i++) {
-    fio___mlkem_poly_basemul_montgomery(&t, &a->vec[i], &b->vec[i]);
-    fio___mlkem_poly_add(r, r, &t);
+    fio___mlkem_poly_basemul_montgomery(t, a[i], b[i]);
+    fio___mlkem_poly_add(r, r, t);
   }
   fio___mlkem_poly_reduce(r);
 }
 
 /** Reduce all coefficients in polyvec. */
-FIO_SFUNC void fio___mlkem_polyvec_reduce(fio___mlkem_polyvec *r) {
+FIO_SFUNC void fio___mlkem_polyvec_reduce(int16_t r[FIO___MLKEM_K][256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_reduce(&r->vec[i]);
+    fio___mlkem_poly_reduce(r[i]);
 }
 
 /** Add two polyvecs. */
-FIO_SFUNC void fio___mlkem_polyvec_add(fio___mlkem_polyvec *r,
-                                       const fio___mlkem_polyvec *a,
-                                       const fio___mlkem_polyvec *b) {
+FIO_SFUNC void fio___mlkem_polyvec_add(int16_t r[FIO___MLKEM_K][256],
+                                       const int16_t a[FIO___MLKEM_K][256],
+                                       const int16_t b[FIO___MLKEM_K][256]) {
   unsigned int i;
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_add(&r->vec[i], &a->vec[i], &b->vec[i]);
+    fio___mlkem_poly_add(r[i], a[i], b[i]);
 }
 
 /* *****************************************************************************
@@ -43059,13 +43058,16 @@ Matrix Generation (Rejection Sampling via SHAKE128 XOF)
 /**
  * Parse uniform random bytes from SHAKE128 stream into polynomial coefficients.
  * Rejection sampling: accept 12-bit values < q.
+ * Uses branchless constant-time pattern without requiring overflow space.
  */
 FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
                                                unsigned int len,
                                                const uint8_t *buf,
                                                unsigned int buflen) {
   unsigned int ctr, pos;
-  uint16_t val0, val1, tmp;
+  uint16_t val0, val1;
+  unsigned int accept0, accept1, idx;
+  int16_t tmp;
 
   ctr = pos = 0;
   while (ctr < len && pos + 3 <= buflen) {
@@ -43076,12 +43078,18 @@ FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
                       0xFFF);
     pos += 3;
 
+    /* Process val0: branchless write and conditional increment */
+    accept0 = (val0 < FIO___MLKEM_Q) & (ctr < len);
     tmp = r[ctr];
-    r[ctr] = (int16_t)val0;
-    ctr += (int)(val0 < FIO___MLKEM_Q);
-    r[ctr] = (int16_t)val1;
-    ctr += (int)((unsigned)(ctr < len) & (unsigned)(val1 < FIO___MLKEM_Q));
-    r[ctr] = tmp;
+    r[ctr] = (int16_t)((accept0 * val0) | ((1 - accept0) * (unsigned)tmp));
+    ctr += accept0;
+
+    /* Process val1: branchless write and conditional increment */
+    accept1 = (val1 < FIO___MLKEM_Q) & (ctr < len);
+    idx = ctr - (ctr >= len); /* Clamp index to valid range */
+    tmp = r[idx];
+    r[idx] = (int16_t)((accept1 * val1) | ((1 - accept1) * (unsigned)tmp));
+    ctr += accept1;
   }
   return ctr;
 }
@@ -43092,10 +43100,12 @@ FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
 /**
  * Generate matrix A (or A^T) from seed rho using SHAKE128.
  * If transposed != 0, generate A^T instead.
+ * Matrix is k x k polynomials stored as int16_t[K][K][256].
  */
-FIO_IFUNC void fio___mlkem_gen_matrix(fio___mlkem_polyvec *a,
-                                      const uint8_t seed[FIO___MLKEM_SYMBYTES],
-                                      int transposed) {
+FIO_IFUNC void fio___mlkem_gen_matrix(
+    int16_t a[FIO___MLKEM_K][FIO___MLKEM_K][FIO___MLKEM_N],
+    const uint8_t seed[FIO___MLKEM_SYMBYTES],
+    int transposed) {
   unsigned int ctr, i, j;
   unsigned int buflen;
   uint8_t buf[FIO___MLKEM_GEN_MATRIX_NBLOCKS * 168 + 2];
@@ -43119,14 +43129,11 @@ FIO_IFUNC void fio___mlkem_gen_matrix(fio___mlkem_polyvec *a,
       buflen = FIO___MLKEM_GEN_MATRIX_NBLOCKS * 168;
       fio_shake_squeeze(&state, buf, buflen);
 
-      ctr = fio___mlkem_rej_uniform(a[i].vec[j].coeffs,
-                                    FIO___MLKEM_N,
-                                    buf,
-                                    buflen);
+      ctr = fio___mlkem_rej_uniform(a[i][j], FIO___MLKEM_N, buf, buflen);
 
       while (ctr < FIO___MLKEM_N) {
         fio_shake_squeeze(&state, buf, 168);
-        ctr += fio___mlkem_rej_uniform(a[i].vec[j].coeffs + ctr,
+        ctr += fio___mlkem_rej_uniform(a[i][j] + ctr,
                                        FIO___MLKEM_N - ctr,
                                        buf,
                                        168);
@@ -43173,18 +43180,6 @@ FIO_SFUNC void fio___mlkem_cmov(uint8_t *restrict dst,
     dst[i] ^= b & (dst[i] ^ src[i]);
 }
 
-/**
- * Constant-time conditional move for int16_t arrays.
- * If b != 0, copy v to r. Otherwise do nothing.
- */
-FIO_SFUNC void fio___mlkem_cmov_int16(int16_t *r, int16_t v, uint16_t b) {
-  b = (uint16_t)(-b); /* 0x0000 or 0xFFFF */
-#if defined(__GNUC__) || defined(__clang__)
-  __asm__ __volatile__("" : "+r"(b) : : "memory");
-#endif
-  *r ^= (int16_t)(b & ((*r) ^ v));
-}
-
 /* *****************************************************************************
 IND-CPA PKE (Internal)
 ***************************************************************************** */
@@ -43202,8 +43197,10 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   uint8_t buf[2 * FIO___MLKEM_SYMBYTES];
   const uint8_t *publicseed = buf;
   const uint8_t *noiseseed = buf + FIO___MLKEM_SYMBYTES;
-  fio___mlkem_polyvec a[FIO___MLKEM_K], e, pkpv, skpv;
   uint8_t nonce = 0;
+  int16_t a[FIO___MLKEM_K][FIO___MLKEM_K][FIO___MLKEM_N];
+  int16_t e[FIO___MLKEM_K][256];
+  int16_t pkpv[FIO___MLKEM_K][256], skpv[FIO___MLKEM_K][256];
 
   /* G(d || k) = (rho, sigma) — FIPS 203 requires appending k as a byte */
   {
@@ -43216,33 +43213,35 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   fio___mlkem_gen_matrix(a, publicseed, 0);
 
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_getnoise_eta1(&skpv.vec[i], noiseseed, nonce++);
+    fio___mlkem_poly_getnoise_eta1(skpv[i], noiseseed, nonce++);
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_getnoise_eta1(&e.vec[i], noiseseed, nonce++);
+    fio___mlkem_poly_getnoise_eta1(e[i], noiseseed, nonce++);
 
-  fio___mlkem_polyvec_ntt(&skpv);
-  fio___mlkem_polyvec_ntt(&e);
+  fio___mlkem_polyvec_ntt(skpv);
+  fio___mlkem_polyvec_ntt(e);
 
   /* Compute t = A*s + e */
   for (i = 0; i < FIO___MLKEM_K; i++) {
-    fio___mlkem_polyvec_basemul_acc_montgomery(&pkpv.vec[i], &a[i], &skpv);
-    fio___mlkem_poly_tomont(&pkpv.vec[i]);
+    fio___mlkem_polyvec_basemul_acc_montgomery(pkpv[i], a[i], skpv);
+    fio___mlkem_poly_tomont(pkpv[i]);
   }
 
-  fio___mlkem_polyvec_add(&pkpv, &pkpv, &e);
-  fio___mlkem_polyvec_reduce(&pkpv);
+  fio___mlkem_polyvec_add(pkpv, pkpv, e);
+  fio___mlkem_polyvec_reduce(pkpv);
 
   /* Pack secret key (NTT domain) — reduce first for 12-bit packing */
-  fio___mlkem_polyvec_reduce(&skpv);
-  fio___mlkem_polyvec_tobytes(sk, &skpv);
+  fio___mlkem_polyvec_reduce(skpv);
+  fio___mlkem_polyvec_tobytes(sk, skpv);
   /* Pack public key: t || rho */
-  fio___mlkem_polyvec_tobytes(pk, &pkpv);
+  fio___mlkem_polyvec_tobytes(pk, pkpv);
   fio_memcpy32(pk + FIO___MLKEM_POLYVECBYTES, publicseed);
 
-  /* Zero sensitive stack data */
+  /* Zero sensitive data */
   FIO_MEMSET(buf, 0, sizeof(buf));
-  FIO_MEMSET(&skpv, 0, sizeof(skpv));
-  FIO_MEMSET(&e, 0, sizeof(e));
+  fio_secure_zero(a, sizeof(a));
+  fio_secure_zero(e, sizeof(e));
+  fio_secure_zero(pkpv, sizeof(pkpv));
+  fio_secure_zero(skpv, sizeof(skpv));
 }
 
 /**
@@ -43256,13 +43255,16 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
     const uint8_t pk[FIO___MLKEM_INDCPA_PUBLICKEYBYTES],
     const uint8_t coins[FIO___MLKEM_SYMBYTES]) {
   unsigned int i;
-  fio___mlkem_polyvec sp, pkpv, ep, at[FIO___MLKEM_K], b;
-  fio___mlkem_poly v, k, epp;
   uint8_t seed[FIO___MLKEM_SYMBYTES];
   uint8_t nonce = 0;
+  int16_t sp[FIO___MLKEM_K][256], pkpv[FIO___MLKEM_K][256],
+      ep[FIO___MLKEM_K][256];
+  int16_t at[FIO___MLKEM_K][FIO___MLKEM_K][FIO___MLKEM_N];
+  int16_t b[FIO___MLKEM_K][256];
+  int16_t v[256], k[256], epp[256];
 
   /* Unpack public key */
-  fio___mlkem_polyvec_frombytes(&pkpv, pk);
+  fio___mlkem_polyvec_frombytes(pkpv, pk);
   fio_memcpy32(seed, pk + FIO___MLKEM_POLYVECBYTES);
 
   /* Generate A^T */
@@ -43270,37 +43272,43 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
 
   /* Sample r (eta1), e1 (eta2), e2 (eta2) */
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_getnoise_eta1(&sp.vec[i], coins, nonce++);
+    fio___mlkem_poly_getnoise_eta1(sp[i], coins, nonce++);
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_poly_getnoise_eta2(&ep.vec[i], coins, nonce++);
-  fio___mlkem_poly_getnoise_eta2(&epp, coins, nonce++);
+    fio___mlkem_poly_getnoise_eta2(ep[i], coins, nonce++);
+  fio___mlkem_poly_getnoise_eta2(epp, coins, nonce++);
 
-  fio___mlkem_polyvec_ntt(&sp);
+  fio___mlkem_polyvec_ntt(sp);
 
   /* Compute u = A^T * r + e1 */
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_polyvec_basemul_acc_montgomery(&b.vec[i], &at[i], &sp);
+    fio___mlkem_polyvec_basemul_acc_montgomery(b[i], at[i], sp);
 
-  fio___mlkem_polyvec_invntt_tomont(&b);
-  fio___mlkem_polyvec_add(&b, &b, &ep);
-  fio___mlkem_polyvec_reduce(&b);
+  fio___mlkem_polyvec_invntt_tomont(b);
+  fio___mlkem_polyvec_add(b, b, ep);
+  fio___mlkem_polyvec_reduce(b);
 
   /* Compute v = t^T * r + e2 + Decompress(Decode(m)) */
-  fio___mlkem_polyvec_basemul_acc_montgomery(&v, &pkpv, &sp);
-  fio___mlkem_poly_invntt_tomont(&v);
+  fio___mlkem_polyvec_basemul_acc_montgomery(v, pkpv, sp);
+  fio___mlkem_invntt(v);
 
-  fio___mlkem_poly_frommsg(&k, msg);
-  fio___mlkem_poly_add(&v, &v, &epp);
-  fio___mlkem_poly_add(&v, &v, &k);
-  fio___mlkem_poly_reduce(&v);
+  fio___mlkem_poly_frommsg(k, msg);
+  fio___mlkem_poly_add(v, v, epp);
+  fio___mlkem_poly_add(v, v, k);
+  fio___mlkem_poly_reduce(v);
 
   /* Pack ciphertext: Compress(u) || Compress(v) */
-  fio___mlkem_polyvec_compress(ct, &b);
-  fio___mlkem_poly_compress(ct + FIO___MLKEM_POLYVECCOMPRESSEDBYTES, &v);
+  fio___mlkem_polyvec_compress(ct, b);
+  fio___mlkem_poly_compress(ct + FIO___MLKEM_POLYVECCOMPRESSEDBYTES, v);
 
-  /* Zero sensitive stack data */
-  FIO_MEMSET(&sp, 0, sizeof(sp));
-  FIO_MEMSET(&k, 0, sizeof(k));
+  /* Zero sensitive data */
+  fio_secure_zero(sp, sizeof(sp));
+  fio_secure_zero(pkpv, sizeof(pkpv));
+  fio_secure_zero(ep, sizeof(ep));
+  fio_secure_zero(at, sizeof(at));
+  fio_secure_zero(b, sizeof(b));
+  fio_secure_zero(v, sizeof(v));
+  fio_secure_zero(k, sizeof(k));
+  fio_secure_zero(epp, sizeof(epp));
 }
 
 /**
@@ -43312,26 +43320,26 @@ FIO_SFUNC void fio___mlkem_indcpa_dec(
     uint8_t msg[FIO___MLKEM_INDCPA_MSGBYTES],
     const uint8_t ct[FIO___MLKEM_INDCPA_BYTES],
     const uint8_t sk[FIO___MLKEM_INDCPA_SECRETKEYBYTES]) {
-  fio___mlkem_polyvec b, skpv;
-  fio___mlkem_poly v, mp;
+  int16_t b[FIO___MLKEM_K][256], skpv[FIO___MLKEM_K][256];
+  int16_t v[256], mp[256];
 
   /* Unpack ciphertext */
-  fio___mlkem_polyvec_decompress(&b, ct);
-  fio___mlkem_poly_decompress(&v, ct + FIO___MLKEM_POLYVECCOMPRESSEDBYTES);
+  fio___mlkem_polyvec_decompress(b, ct);
+  fio___mlkem_poly_decompress(v, ct + FIO___MLKEM_POLYVECCOMPRESSEDBYTES);
 
   /* Unpack secret key */
-  fio___mlkem_polyvec_frombytes(&skpv, sk);
+  fio___mlkem_polyvec_frombytes(skpv, sk);
 
-  fio___mlkem_polyvec_ntt(&b);
+  fio___mlkem_polyvec_ntt(b);
 
   /* Compute m = v - s^T * u */
-  fio___mlkem_polyvec_basemul_acc_montgomery(&mp, &skpv, &b);
-  fio___mlkem_poly_invntt_tomont(&mp);
+  fio___mlkem_polyvec_basemul_acc_montgomery(mp, skpv, b);
+  fio___mlkem_invntt(mp);
 
-  fio___mlkem_poly_sub(&mp, &v, &mp);
-  fio___mlkem_poly_reduce(&mp);
+  fio___mlkem_poly_sub(mp, v, mp);
+  fio___mlkem_poly_reduce(mp);
 
-  fio___mlkem_poly_tomsg(msg, &mp);
+  fio___mlkem_poly_tomsg(msg, mp);
 }
 
 /* *****************************************************************************
@@ -57948,6 +57956,8 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
                             __imap)(FIO_NAME(FIO_MAP_NAME, s) const *o) {
+  if (!o->map)
+    return NULL;
   return (uint8_t *)(o->map + FIO_MAP_CAPA(o->bits));
 }
 
@@ -57985,12 +57995,12 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
                                     int (*fn)(FIO_NAME(FIO_MAP_NAME,
                                                        __each_node_s) *),
                                     void *udata) {
-  FIO_NAME(FIO_MAP_NAME, __each_node_s)
-  each = {.map = o, .fn = fn, .udata = udata};
-  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   size_t counter = o->count;
   if (!counter)
     return 0;
+  FIO_NAME(FIO_MAP_NAME, __each_node_s)
+  each = {.map = o, .fn = fn, .udata = udata};
+  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
 #if FIO_MAP_ORDERED
   FIO_INDEXED_LIST_EACH(o->map, node, o->head, pos) {
     each.node = o->map + pos;
@@ -60000,7 +60010,7 @@ Internal Helpers
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP2_NAME,
                             __imap)(FIO_NAME(FIO_MAP2_NAME, s) * o) {
-  // FIO_ASSERT(o && o->map, "shouldn't have been called.");
+  FIO_ASSERT_DEBUG(o && o->map, "shouldn't have been called.");
   return (uint8_t *)(o->map + FIO_MAP2_CAPA(o->bits));
 }
 

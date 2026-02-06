@@ -6,7 +6,7 @@ Tests for alert message building, sending, and error condition handling.
 #define FIO_LOG
 #define FIO_CRYPT
 #define FIO_TLS13
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test: Alert Constants

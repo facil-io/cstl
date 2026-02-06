@@ -17,7 +17,7 @@ Test Categories:
 #define FIO_LOG
 #define FIO_CRYPT
 #define FIO_TLS13
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test Certificate and Private Key (Ed25519)

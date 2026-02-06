@@ -758,6 +758,8 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP_NAME,
                             __imap)(FIO_NAME(FIO_MAP_NAME, s) const *o) {
+  if (!o->map)
+    return NULL;
   return (uint8_t *)(o->map + FIO_MAP_CAPA(o->bits));
 }
 
@@ -795,12 +797,12 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
                                     int (*fn)(FIO_NAME(FIO_MAP_NAME,
                                                        __each_node_s) *),
                                     void *udata) {
-  FIO_NAME(FIO_MAP_NAME, __each_node_s)
-  each = {.map = o, .fn = fn, .udata = udata};
-  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
   size_t counter = o->count;
   if (!counter)
     return 0;
+  FIO_NAME(FIO_MAP_NAME, __each_node_s)
+  each = {.map = o, .fn = fn, .udata = udata};
+  uint8_t *imap = FIO_NAME(FIO_MAP_NAME, __imap)(o);
 #if FIO_MAP_ORDERED
   FIO_INDEXED_LIST_EACH(o->map, node, o->head, pos) {
     each.node = o->map + pos;

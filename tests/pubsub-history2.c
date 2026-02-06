@@ -160,12 +160,13 @@ static int subscribe_timer_setup(void *ignr_, void *ignr__) {
 /* --- History Validation Callbacks --- */
 
 static void history_replay_on_message(fio_pubsub_msg_s *msg, void *udata) {
-  payload_s *data = (payload_s *)msg->message.buf;
-  FIO_ASSERT(msg->message.len == sizeof(*data),
+  payload_s data;
+  FIO_ASSERT(msg->message.len == sizeof(data),
              "Test code error - wrong payload size");
+  FIO_MEMCPY(&data, msg->message.buf, sizeof(data));
   for (size_t i = 0; i < LISTENERS; ++i) {
-    history.to[i].from[data->from].counter[data->numerator] += 1;
-    history.to[i].from[data->from].total += 1;
+    history.to[i].from[data.from].counter[data.numerator] += 1;
+    history.to[i].from[data.from].total += 1;
   }
   (void)udata;
 }

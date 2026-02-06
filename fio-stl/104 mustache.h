@@ -985,7 +985,8 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   case '{':
     do /* it is known that (buf.buf ends as '=' or '}')*/
       --buf.len;
-    while (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t');
+    while (buf.len &&
+           (buf.buf[buf.len - 1] == ' ' || buf.buf[buf.len - 1] == '\t'));
 
     if (id == '=')
       return fio___mustache_parse_set_delim(p, buf); /* fall through */

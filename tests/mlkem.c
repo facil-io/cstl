@@ -1,8 +1,8 @@
+#define FIO_LOG
 #define FIO_MLKEM
 #define FIO_SHA3
 #define FIO_SHA2
 #define FIO_ED25519
-#define FIO_TEST
 #include "../fio-stl/include.h"
 
 #include <stdio.h>

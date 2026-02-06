@@ -1,7 +1,7 @@
 /* URL-Encoded Parser Tests */
 #define FIO_LOG
 #define FIO_URL_ENCODED
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 #include <stdio.h>
 

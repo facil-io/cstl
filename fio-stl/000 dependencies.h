@@ -428,6 +428,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_BLAKE2
 #endif
 
+#if defined(FIO_MLKEM)
+#define FIO_SHA3
+#define FIO_ED25519
+#endif
+
 #if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2) ||           \
     defined(FIO_BLAKE2)
 #undef FIO_CRYPTO_CORE

@@ -721,7 +721,7 @@ Internal Helpers
 /* The number of objects in the map capacity. */
 FIO_IFUNC uint8_t *FIO_NAME(FIO_MAP2_NAME,
                             __imap)(FIO_NAME(FIO_MAP2_NAME, s) * o) {
-  // FIO_ASSERT(o && o->map, "shouldn't have been called.");
+  FIO_ASSERT_DEBUG(o && o->map, "shouldn't have been called.");
   return (uint8_t *)(o->map + FIO_MAP2_CAPA(o->bits));
 }
 

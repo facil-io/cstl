@@ -357,6 +357,8 @@ SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
 SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
                                const void *restrict data,
                                size_t len) {
+  if (!len)
+    return;
   const uint8_t *p = (const uint8_t *)data;
 
   /* If we have buffered data, try to complete a block */
@@ -663,6 +665,8 @@ SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
 SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
                                const void *restrict data,
                                size_t len) {
+  if (!len)
+    return;
   const uint8_t *p = (const uint8_t *)data;
 
   /* If we have buffered data, try to complete a block */

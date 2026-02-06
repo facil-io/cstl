@@ -568,6 +568,8 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
 
 /** consume data and feed it to hash. */
 SFUNC void fio_sha256_consume(fio_sha256_s *h, const void *data, uint64_t len) {
+  if (!len)
+    return;
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;
@@ -812,6 +814,8 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
 SFUNC void fio_sha512_consume(fio_sha512_s *restrict h,
                               const void *restrict data,
                               uint64_t len) {
+  if (!len)
+    return;
   const uint8_t *r = (const uint8_t *)data;
   const size_t old_total = h->total_len;
   const size_t new_total = len + h->total_len;

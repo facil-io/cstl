@@ -6,7 +6,7 @@ Tests for RFC 8446 Section 4.1.4 HelloRetryRequest handling.
 #define FIO_LOG
 #define FIO_CRYPT
 #define FIO_TLS13
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test: HRR Random Detection

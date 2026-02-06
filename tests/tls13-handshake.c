@@ -6,7 +6,7 @@ Tests for handshake message building and parsing functions.
 #define FIO_LOG
 #define FIO_CRYPT
 #define FIO_TLS13
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test: Handshake Header
@@ -28,12 +28,15 @@ FIO_SFUNC void fio___test_tls13_handshake_header(void) {
   fio_tls13_handshake_type_e msg_type;
   size_t body_len;
 
-  /* Need to provide enough data for the body too */
-  uint8_t full_msg[4 + 0x123456];
+  /* Need to provide enough data for the body too - use heap to avoid stack
+   * overflow */
+  size_t full_msg_len = 4 + 0x123456;
+  uint8_t *full_msg = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, full_msg_len, 0);
+  FIO_ASSERT(full_msg != NULL, "Memory allocation should succeed");
   FIO_MEMCPY(full_msg, header, 4);
 
   const uint8_t *body = fio_tls13_parse_handshake_header(full_msg,
-                                                         sizeof(full_msg),
+                                                         full_msg_len,
                                                          &msg_type,
                                                          &body_len);
 
@@ -42,6 +45,8 @@ FIO_SFUNC void fio___test_tls13_handshake_header(void) {
              "Parsed type should be ClientHello");
   FIO_ASSERT(body_len == 0x123456, "Parsed length should be 0x123456");
   FIO_ASSERT(body == full_msg + 4, "Body should point after header");
+
+  FIO_MEM_FREE(full_msg, full_msg_len);
 
   /* Test incomplete data */
   body = fio_tls13_parse_handshake_header(header, 3, &msg_type, &body_len);

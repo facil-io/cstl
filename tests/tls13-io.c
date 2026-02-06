@@ -11,7 +11,7 @@ Tests the fio_io_functions_s interface for TLS 1.3.
 #define FIO_TLS13
 #define FIO_X509
 #define FIO_IO
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test Helpers
