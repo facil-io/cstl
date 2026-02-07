@@ -74890,10 +74890,10 @@ FIO_SFUNC void fio___pubsub_engine_ipc_publish_deliver(fio_ipc_s *ipc) {
                                        ch_name));
 
   if (ch_ptr) {
-    FIO_LOG_DDEBUG2("(%d) channel found, delivering to %.*s",
-                    fio_io_pid(),
-                    (int)ch_ptr[0]->name_len,
-                    ch_ptr[0]->name);
+    // FIO_LOG_DDEBUG2("(%d) channel found, delivering to %.*s",
+    //                 fio_io_pid(),
+    //                 (int)ch_ptr[0]->name_len,
+    //                 ch_ptr[0]->name);
     fio___pubsub_engine_ipc_deliver2channel(*ch_ptr, ipc);
   }
 
@@ -75068,12 +75068,12 @@ FIO_SFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
   sub->node = FIO_LIST_INIT(sub->node);
   sub->on_message = fio___pubsub_on_message_stub;
 
-  FIO_LOG_DDEBUG2("(%d) unsubscribed performed for %p -> %.*s (ref: %zu)",
-                  fio_io_pid(),
-                  (void *)sub,
-                  (int)sub->channel->name_len,
-                  sub->channel->name,
-                  fio_pubsub_subscription_references(sub));
+  // FIO_LOG_DDEBUG2("(%d) unsubscribed performed for %p -> %.*s (ref: %zu)",
+  //                 fio_io_pid(),
+  //                 (void *)sub,
+  //                 (int)sub->channel->name_len,
+  //                 sub->channel->name,
+  //                 fio_pubsub_subscription_references(sub));
 
   fio_pubsub_subscription_free2(sub);
   /* fio_pubsub_channel_free(ch) - called by `destroy` when freed */
@@ -75084,12 +75084,12 @@ FIO_SFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
 FIO_SFUNC void fio___pubsub_subscription_env_unsubscribe(void *sub_) {
   fio_pubsub_subscription_s *sub = (fio_pubsub_subscription_s *)sub_;
   sub->on_message = fio___pubsub_on_message_stub;
-  FIO_LOG_DDEBUG2("(%d) unsubscribed called for %p -> %.*s (ref: %zu)",
-                  fio_io_pid(),
-                  (void *)sub,
-                  (int)sub->channel->name_len,
-                  sub->channel->name,
-                  fio_pubsub_subscription_references(sub));
+  // FIO_LOG_DDEBUG2("(%d) unsubscribed called for %p -> %.*s (ref: %zu)",
+  //                 fio_io_pid(),
+  //                 (void *)sub,
+  //                 (int)sub->channel->name_len,
+  //                 sub->channel->name,
+  //                 fio_pubsub_subscription_references(sub));
 
   fio_queue_push(fio_io_queue(),
                  fio___pubsub_unsubscribe_task,
@@ -75169,12 +75169,12 @@ FIO_SFUNC void fio___pubsub_subscribe_task(void *sub_, void *bstr_) {
           ch_ptr[0]->name);
   }
 
-  FIO_LOG_DDEBUG2("(%d) subscribed for %p -> %.*s (ref: %zu)",
-                  fio_io_pid(),
-                  (void *)sub,
-                  (int)sub->channel->name_len,
-                  sub->channel->name,
-                  fio_pubsub_subscription_references(sub));
+  // FIO_LOG_DDEBUG2("(%d) subscribed for %p -> %.*s (ref: %zu)",
+  //                 fio_io_pid(),
+  //                 (void *)sub,
+  //                 (int)sub->channel->name_len,
+  //                 sub->channel->name,
+  //                 fio_pubsub_subscription_references(sub));
   fio_pubsub_subscription_free2(sub);
   return;
 
