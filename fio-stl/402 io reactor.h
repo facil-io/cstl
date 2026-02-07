@@ -599,9 +599,9 @@ static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)fio_io_udata(io);
   fio_io_unsuspend(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
-    FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
-                    fio_io_pid(),
-                    fd);
+    // FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
+    //                 fio_io_pid(),
+    //                 fd);
     fio_io_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
   fio___io_free2(io);

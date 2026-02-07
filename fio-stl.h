@@ -65822,9 +65822,9 @@ struct fio_io_s {
 };
 
 FIO_IFUNC void fio___io_monitor_in(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (io->flags & (FIO___IO_FLAG_PREVENT_ON_DATA | FIO___IO_FLAG_CLOSED_ALL))
     return;
   if ((FIO___IO_FLAG_SET(io, FIO___IO_FLAG_POLLIN_SET) &
@@ -65832,30 +65832,30 @@ FIO_IFUNC void fio___io_monitor_in(fio_io_s *io) {
     return;
   }
   fio_poll_monitor(&FIO___IO.poll, io->fd, (void *)io, POLLIN);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d", fio_io_pid(), io->fd);
 }
 FIO_IFUNC void fio___io_monitor_out(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (io->flags & FIO___IO_FLAG_WRITE_SCHD)
     return;
   if ((FIO___IO_FLAG_SET(io, FIO___IO_FLAG_POLLOUT_SET) &
        FIO___IO_FLAG_POLLOUT_SET))
     return;
   fio_poll_monitor(&FIO___IO.poll, io->fd, (void *)io, POLLOUT);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d", fio_io_pid(), io->fd);
 }
 
 FIO_IFUNC void fio___io_monitor_forget(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (!(FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLL_SET) &
         FIO___IO_FLAG_POLL_SET))
     return;
   fio_poll_forget(&FIO___IO.poll, io->fd);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d", fio_io_pid(), io->fd);
 }
 
 FIO_SFUNC void fio___io_destroy(fio_io_s *io) {
@@ -66302,9 +66302,9 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   size_t total = 0;
   FIO___IO_FLAG_UNSET(io,
                       (FIO___IO_FLAG_POLLOUT_SET | FIO___IO_FLAG_WRITE_SCHD));
-  FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
-                  fio_io_pid(),
-                  fio_io_fd(io));
+  // FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
+  //                 fio_io_pid(),
+  //                 fio_io_fd(io));
   if (!(io->flags & FIO___IO_FLAG_OPEN))
     goto finish;
   for (;;) {
@@ -66315,10 +66315,10 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       break;
     ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
     if (r > 0) {
-      FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
-                      FIO___IO.pid,
-                      (size_t)r,
-                      io->fd);
+      // FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
+      //                 FIO___IO.pid,
+      //                 (size_t)r,
+      //                 io->fd);
       total += r;
       fio_stream_advance(&io->out, r);
       continue;
@@ -66355,11 +66355,11 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_THROTTLED);
       fio___io_monitor_in(io);
     }
-    FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
-                    FIO___IO.pid,
-                    (void *)io,
-                    io->fd,
-                    fio_stream_length(&io->out));
+    // FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
+    //                 FIO___IO.pid,
+    //                 (void *)io,
+    //                 io->fd,
+    //                 fio_stream_length(&io->out));
     io->pr->on_ready(io);
   }
 
@@ -66413,9 +66413,9 @@ Event scheduling
 ***************************************************************************** */
 
 static void fio___io_poll_on_data_schd(void *io) {
-  FIO_LOG_DDEBUG2("(%d) `on_data` scheduled for fd %d.",
-                  fio_io_pid(),
-                  fio_io_fd((fio_io_s *)io));
+  // FIO_LOG_DDEBUG2("(%d) `on_data` scheduled for fd %d.",
+  //                 fio_io_pid(),
+  //                 fio_io_fd((fio_io_s *)io));
   // FIO___IO_FLAG_POLLIN_SET
   fio___io_defer_no_wakeup(fio___io_poll_on_data,
                            (void *)fio___io_dup2((fio_io_s *)io),
@@ -66424,18 +66424,18 @@ static void fio___io_poll_on_data_schd(void *io) {
 static void fio___io_poll_on_ready_schd(void *io) {
   if (!(FIO___IO_FLAG_SET((fio_io_s *)io, FIO___IO_FLAG_WRITE_SCHD) &
         FIO___IO_FLAG_WRITE_SCHD)) {
-    FIO_LOG_DDEBUG2("(%d) `on_ready` scheduled for fd %d.",
-                    fio_io_pid(),
-                    fio_io_fd((fio_io_s *)io));
+    // FIO_LOG_DDEBUG2("(%d) `on_ready` scheduled for fd %d.",
+    //                 fio_io_pid(),
+    //                 fio_io_fd((fio_io_s *)io));
     fio___io_defer_no_wakeup(fio___io_poll_on_ready,
                              (void *)fio___io_dup2((fio_io_s *)io),
                              NULL);
   }
 }
 static void fio___io_poll_on_close_schd(void *io) {
-  FIO_LOG_DDEBUG2("(%d) remote closure for fd %d.",
-                  fio_io_pid(),
-                  fio_io_fd((fio_io_s *)io));
+  // FIO_LOG_DDEBUG2("(%d) remote closure for fd %d.",
+  //                 fio_io_pid(),
+  //                 fio_io_fd((fio_io_s *)io));
   fio___io_defer_no_wakeup(fio___io_poll_on_close,
                            (void *)fio___io_dup2((fio_io_s *)io),
                            NULL);
@@ -66467,10 +66467,10 @@ static int fio___io_review_timeouts(void) {
       FIO_ASSERT_DEBUG(io->pr == pr, "IO protocol ownership error");
       if (io->active >= limit)
         break;
-      FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
-                      FIO___IO.pid,
-                      (void *)io,
-                      io->fd);
+      // FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
+      //                 FIO___IO.pid,
+      //                 (void *)io,
+      //                 io->fd);
       fio___io_defer_no_wakeup(fio___io_poll_on_timeout,
                                (void *)fio___io_dup2(io),
                                NULL);
@@ -67680,9 +67680,9 @@ static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)fio_io_udata(io);
   fio_io_unsuspend(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
-    FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
-                    fio_io_pid(),
-                    fd);
+    // FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
+    //                 fio_io_pid(),
+    //                 fd);
     fio_io_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
   }
   fio___io_free2(io);
@@ -70593,7 +70593,7 @@ after_send:
 SFUNC void fio_ipc_free(fio_ipc_s *msg) {
   if (!msg)
     return;
-  fio_io_defer(fio___ipc_free_task, msg, NULL);
+  fio_queue_push(fio_io_queue(), fio___ipc_free_task, msg, NULL);
 }
 
 /** Free message (decrement ref count) */
@@ -70744,10 +70744,10 @@ SFUNC void fio_ipc_encrypt(fio_ipc_s *m) {
   fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
   m->routing_flags |= FIO_IPC_FLAG_ENCRYPTED; /* runs on IO thread */
 
-  FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-                  fio_io_pid(),
-                  fio___ipc_sizeof_enc(m->len),
-                  fio___ipc_wire_length(m->len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
+  //                 fio_io_pid(),
+  //                 fio___ipc_sizeof_enc(m->len),
+  //                 fio___ipc_wire_length(m->len));
 
   /* Encrypt in-place (everything after first 16 bytes) */
   fio_chacha20_poly1305_enc((m->data + m->len),           /* MAC output */
@@ -70769,10 +70769,10 @@ FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m) {
   m->len = fio_ltole32(m->len);
   fio_u256 key_buf = fio___ipc_get_encryption_key(m);
   fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
-  FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-                  fio_io_pid(),
-                  fio___ipc_sizeof_enc(m->len),
-                  fio___ipc_wire_length(m->len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
+  //                 fio_io_pid(),
+  //                 fio___ipc_sizeof_enc(m->len),
+  //                 fio___ipc_wire_length(m->len));
   /* Decrypt and verify MAC */
   r = fio_chacha20_poly1305_dec((m->data + m->len), /* MAC output */
                                 ((char *)&m->call), /* Data to decrypt */
@@ -70890,10 +70890,10 @@ FIO_SFUNC void fio___ipc_send_master_task(void *ipc_, void *ignr_) {
     count += fio_io_protocol_each(&FIO___IPC.protocol_rpc,
                                   fio___ipc_send_each_task,
                                   ipc);
-  FIO_LOG_DDEBUG2("(%d) [%s] sent IPC/RPC to %zu peers",
-                  fio_io_pid(),
-                  (fio_io_is_master() ? "Master" : "Worker"),
-                  count);
+  // FIO_LOG_DDEBUG2("(%d) [%s] sent IPC/RPC to %zu peers",
+  //                 fio_io_pid(),
+  //                 (fio_io_is_master() ? "Master" : "Worker"),
+  //                 count);
   fio___ipc_free_task(ipc, NULL);
   (void)count; /* if unused by logger */
   (void)ignr_;
@@ -70929,7 +70929,7 @@ SFUNC void fio_ipc_send(fio_ipc_s *ipc) {
     fio_ipc_after_send(ipc, fio___ipc_execute_task, NULL);
   }
   fio_ipc_send_to(FIO___IPC.worker_connection, ipc);
-  FIO_LOG_DDEBUG2("(%d) [Worker] sent IPC/RPC to 1 Master", fio_io_pid());
+  // FIO_LOG_DDEBUG2("(%d) [Worker] sent IPC/RPC to 1 Master", fio_io_pid());
   return;
 master_only:
   fio_ipc_free(ipc); /* we might not be in the IO thread */
@@ -70942,11 +70942,12 @@ SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *m) {
   if (!to)
     goto free_send;
 
-  FIO_LOG_DDEBUG2("(%d) IPC sending %zu (data length %zu) bytes (offset %zu)",
-                  fio_io_pid(),
-                  fio___ipc_wire_length(m->len),
-                  (size_t)m->len,
-                  (size_t)FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sending %zu (data length %zu) bytes (offset
+  // %zu)",
+  //                 fio_io_pid(),
+  //                 fio___ipc_wire_length(m->len),
+  //                 (size_t)m->len,
+  //                 (size_t)FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
 
   /* Encrypt message */
   fio_ipc_encrypt(m);
@@ -71144,7 +71145,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
                                      p->expected_len - p->msg_received);
       if (p->expected_len != p->msg_received)
         return;
-      fio_io_defer(fn, msg, fio_io_dup(io));
+      fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
       fio___ipc_parser_init(p);
       return; /* don't read more messages for now */
     }
@@ -71158,16 +71159,17 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         break;
       p->expected_len =
           fio___ipc_wire_length(fio_buf2u32_le(p->buffer + consumed));
-      FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x "
-                     "%02x %02x %02x)",
-                     fio_io_pid(),
-                     p->expected_len,
-                     p->buf_len,
-                     fio_buf2u32u(p->buffer + consumed),
-                     (uint8_t)p->buffer[consumed],
-                     (uint8_t)p->buffer[consumed + 1],
-                     (uint8_t)p->buffer[consumed + 2],
-                     (uint8_t)p->buffer[consumed + 3]);
+      // FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x
+      // "
+      //                "%02x %02x %02x)",
+      //                fio_io_pid(),
+      //                p->expected_len,
+      //                p->buf_len,
+      //                fio_buf2u32u(p->buffer + consumed),
+      //                (uint8_t)p->buffer[consumed],
+      //                (uint8_t)p->buffer[consumed + 1],
+      //                (uint8_t)p->buffer[consumed + 2],
+      //                (uint8_t)p->buffer[consumed + 3]);
       if (p->expected_len > FIO___IPC.max_length) { /* oversized? */
         FIO_LOG_SECURITY("(%d) Invalid IPC message length: %u (buf: %zu)",
                          fio_io_pid(),
@@ -71178,15 +71180,15 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
       }
 
       if (p->buf_len >= consumed + p->expected_len) {
-        FIO_LOG_DEBUG2("(%d) routing small IPC message:%u/%u",
-                       fio_io_pid(),
-                       p->expected_len,
-                       p->buf_len);
+        // FIO_LOG_DEBUG2("(%d) routing small IPC message:%u/%u",
+        //                fio_io_pid(),
+        //                p->expected_len,
+        //                p->buf_len);
         msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
         msg->from = io;
         FIO_MEMCPY(&msg->len, p->buffer + consumed, p->expected_len);
         consumed += p->expected_len;
-        fio_io_defer(fn, msg, fio_io_dup(io));
+        fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
         had_messages |= 1;
         continue;
       }
@@ -74235,7 +74237,7 @@ FIO_SFUNC void fio___pubsub_subscription_free_task(void *s, void *ignr_) {
 }
 
 FIO_SFUNC void fio_pubsub_subscription_free(fio_pubsub_subscription_s *s) {
-  fio_io_defer(fio___pubsub_subscription_free_task, s, NULL);
+  fio_queue_push(fio_io_queue(), fio___pubsub_subscription_free_task, s, NULL);
 }
 
 FIO_IFUNC fio_pubsub_subscription_s *fio_pubsub_subscription_dup(
@@ -74852,12 +74854,12 @@ FIO_SFUNC void fio___pubsub_engine_ipc_sub_noop(const fio_pubsub_engine_s *eng,
 /** Distributes an IPC message to all of a channel's subscribers */
 FIO_SFUNC void fio___pubsub_engine_ipc_deliver2channel(fio_pubsub_channel_s *ch,
                                                        fio_ipc_s *ipc) {
-  FIO_LOG_DEBUG2(
-      "(%d) channel_deliver_ipc: ch=%p subscriptions.next=%p .prev=%p",
-      fio_io_pid(),
-      (void *)ch,
-      (void *)ch->subscriptions.next,
-      (void *)ch->subscriptions.prev);
+  // FIO_LOG_DEBUG2(
+  //     "(%d) channel_deliver_ipc: ch=%p subscriptions.next=%p .prev=%p",
+  //     fio_io_pid(),
+  //     (void *)ch,
+  //     (void *)ch->subscriptions.next,
+  //     (void *)ch->subscriptions.prev);
   const fio_io_s *skip = ipc->from;
   FIO_LIST_EACH(fio_pubsub_subscription_s, node, &ch->subscriptions, s) {
     /* Skip if publisher is sending to itself (IO is set)*/
@@ -75310,10 +75312,10 @@ FIO_SFUNC void fio___pubsub_worker_on_history_reply(fio_ipc_s *ipc) {
     return;
   }
 
-  FIO_LOG_DEBUG2("(%d) worker_on_history_reply: channel=%.*s",
-                 fio_io_pid(),
-                 (int)(fio_buf2u32u(ipc->data)),
-                 ipc->data + sizeof(uint32_t[2]));
+  // FIO_LOG_DEBUG2("(%d) worker_on_history_reply: channel=%.*s",
+  //                fio_io_pid(),
+  //                (int)(fio_buf2u32u(ipc->data)),
+  //                ipc->data + sizeof(uint32_t[2]));
 
   fio_queue_push(((fio_pubsub_subscription_s *)ipc->udata)->queue,
                  fio___pubsub_subscription_ipc_deliver,

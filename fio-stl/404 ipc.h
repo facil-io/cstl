@@ -547,7 +547,7 @@ after_send:
 SFUNC void fio_ipc_free(fio_ipc_s *msg) {
   if (!msg)
     return;
-  fio_io_defer(fio___ipc_free_task, msg, NULL);
+  fio_queue_push(fio_io_queue(), fio___ipc_free_task, msg, NULL);
 }
 
 /** Free message (decrement ref count) */
@@ -698,10 +698,10 @@ SFUNC void fio_ipc_encrypt(fio_ipc_s *m) {
   fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
   m->routing_flags |= FIO_IPC_FLAG_ENCRYPTED; /* runs on IO thread */
 
-  FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-                  fio_io_pid(),
-                  fio___ipc_sizeof_enc(m->len),
-                  fio___ipc_wire_length(m->len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
+  //                 fio_io_pid(),
+  //                 fio___ipc_sizeof_enc(m->len),
+  //                 fio___ipc_wire_length(m->len));
 
   /* Encrypt in-place (everything after first 16 bytes) */
   fio_chacha20_poly1305_enc((m->data + m->len),           /* MAC output */
@@ -723,10 +723,10 @@ FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m) {
   m->len = fio_ltole32(m->len);
   fio_u256 key_buf = fio___ipc_get_encryption_key(m);
   fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
-  FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-                  fio_io_pid(),
-                  fio___ipc_sizeof_enc(m->len),
-                  fio___ipc_wire_length(m->len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
+  //                 fio_io_pid(),
+  //                 fio___ipc_sizeof_enc(m->len),
+  //                 fio___ipc_wire_length(m->len));
   /* Decrypt and verify MAC */
   r = fio_chacha20_poly1305_dec((m->data + m->len), /* MAC output */
                                 ((char *)&m->call), /* Data to decrypt */
@@ -844,10 +844,10 @@ FIO_SFUNC void fio___ipc_send_master_task(void *ipc_, void *ignr_) {
     count += fio_io_protocol_each(&FIO___IPC.protocol_rpc,
                                   fio___ipc_send_each_task,
                                   ipc);
-  FIO_LOG_DDEBUG2("(%d) [%s] sent IPC/RPC to %zu peers",
-                  fio_io_pid(),
-                  (fio_io_is_master() ? "Master" : "Worker"),
-                  count);
+  // FIO_LOG_DDEBUG2("(%d) [%s] sent IPC/RPC to %zu peers",
+  //                 fio_io_pid(),
+  //                 (fio_io_is_master() ? "Master" : "Worker"),
+  //                 count);
   fio___ipc_free_task(ipc, NULL);
   (void)count; /* if unused by logger */
   (void)ignr_;
@@ -883,7 +883,7 @@ SFUNC void fio_ipc_send(fio_ipc_s *ipc) {
     fio_ipc_after_send(ipc, fio___ipc_execute_task, NULL);
   }
   fio_ipc_send_to(FIO___IPC.worker_connection, ipc);
-  FIO_LOG_DDEBUG2("(%d) [Worker] sent IPC/RPC to 1 Master", fio_io_pid());
+  // FIO_LOG_DDEBUG2("(%d) [Worker] sent IPC/RPC to 1 Master", fio_io_pid());
   return;
 master_only:
   fio_ipc_free(ipc); /* we might not be in the IO thread */
@@ -896,11 +896,12 @@ SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *m) {
   if (!to)
     goto free_send;
 
-  FIO_LOG_DDEBUG2("(%d) IPC sending %zu (data length %zu) bytes (offset %zu)",
-                  fio_io_pid(),
-                  fio___ipc_wire_length(m->len),
-                  (size_t)m->len,
-                  (size_t)FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
+  // FIO_LOG_DDEBUG2("(%d) IPC sending %zu (data length %zu) bytes (offset
+  // %zu)",
+  //                 fio_io_pid(),
+  //                 fio___ipc_wire_length(m->len),
+  //                 (size_t)m->len,
+  //                 (size_t)FIO_PTR_FIELD_OFFSET(fio_ipc_s, len));
 
   /* Encrypt message */
   fio_ipc_encrypt(m);
@@ -1098,7 +1099,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
                                      p->expected_len - p->msg_received);
       if (p->expected_len != p->msg_received)
         return;
-      fio_io_defer(fn, msg, fio_io_dup(io));
+      fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
       fio___ipc_parser_init(p);
       return; /* don't read more messages for now */
     }
@@ -1112,16 +1113,17 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         break;
       p->expected_len =
           fio___ipc_wire_length(fio_buf2u32_le(p->buffer + consumed));
-      FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x "
-                     "%02x %02x %02x)",
-                     fio_io_pid(),
-                     p->expected_len,
-                     p->buf_len,
-                     fio_buf2u32u(p->buffer + consumed),
-                     (uint8_t)p->buffer[consumed],
-                     (uint8_t)p->buffer[consumed + 1],
-                     (uint8_t)p->buffer[consumed + 2],
-                     (uint8_t)p->buffer[consumed + 3]);
+      // FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x
+      // "
+      //                "%02x %02x %02x)",
+      //                fio_io_pid(),
+      //                p->expected_len,
+      //                p->buf_len,
+      //                fio_buf2u32u(p->buffer + consumed),
+      //                (uint8_t)p->buffer[consumed],
+      //                (uint8_t)p->buffer[consumed + 1],
+      //                (uint8_t)p->buffer[consumed + 2],
+      //                (uint8_t)p->buffer[consumed + 3]);
       if (p->expected_len > FIO___IPC.max_length) { /* oversized? */
         FIO_LOG_SECURITY("(%d) Invalid IPC message length: %u (buf: %zu)",
                          fio_io_pid(),
@@ -1132,15 +1134,15 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
       }
 
       if (p->buf_len >= consumed + p->expected_len) {
-        FIO_LOG_DEBUG2("(%d) routing small IPC message:%u/%u",
-                       fio_io_pid(),
-                       p->expected_len,
-                       p->buf_len);
+        // FIO_LOG_DEBUG2("(%d) routing small IPC message:%u/%u",
+        //                fio_io_pid(),
+        //                p->expected_len,
+        //                p->buf_len);
         msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
         msg->from = io;
         FIO_MEMCPY(&msg->len, p->buffer + consumed, p->expected_len);
         consumed += p->expected_len;
-        fio_io_defer(fn, msg, fio_io_dup(io));
+        fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
         had_messages |= 1;
         continue;
       }

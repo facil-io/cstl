@@ -402,7 +402,7 @@ FIO_SFUNC void fio___pubsub_subscription_free_task(void *s, void *ignr_) {
 }
 
 FIO_SFUNC void fio_pubsub_subscription_free(fio_pubsub_subscription_s *s) {
-  fio_io_defer(fio___pubsub_subscription_free_task, s, NULL);
+  fio_queue_push(fio_io_queue(), fio___pubsub_subscription_free_task, s, NULL);
 }
 
 FIO_IFUNC fio_pubsub_subscription_s *fio_pubsub_subscription_dup(
@@ -1019,12 +1019,12 @@ FIO_SFUNC void fio___pubsub_engine_ipc_sub_noop(const fio_pubsub_engine_s *eng,
 /** Distributes an IPC message to all of a channel's subscribers */
 FIO_SFUNC void fio___pubsub_engine_ipc_deliver2channel(fio_pubsub_channel_s *ch,
                                                        fio_ipc_s *ipc) {
-  FIO_LOG_DEBUG2(
-      "(%d) channel_deliver_ipc: ch=%p subscriptions.next=%p .prev=%p",
-      fio_io_pid(),
-      (void *)ch,
-      (void *)ch->subscriptions.next,
-      (void *)ch->subscriptions.prev);
+  // FIO_LOG_DEBUG2(
+  //     "(%d) channel_deliver_ipc: ch=%p subscriptions.next=%p .prev=%p",
+  //     fio_io_pid(),
+  //     (void *)ch,
+  //     (void *)ch->subscriptions.next,
+  //     (void *)ch->subscriptions.prev);
   const fio_io_s *skip = ipc->from;
   FIO_LIST_EACH(fio_pubsub_subscription_s, node, &ch->subscriptions, s) {
     /* Skip if publisher is sending to itself (IO is set)*/
@@ -1477,10 +1477,10 @@ FIO_SFUNC void fio___pubsub_worker_on_history_reply(fio_ipc_s *ipc) {
     return;
   }
 
-  FIO_LOG_DEBUG2("(%d) worker_on_history_reply: channel=%.*s",
-                 fio_io_pid(),
-                 (int)(fio_buf2u32u(ipc->data)),
-                 ipc->data + sizeof(uint32_t[2]));
+  // FIO_LOG_DEBUG2("(%d) worker_on_history_reply: channel=%.*s",
+  //                fio_io_pid(),
+  //                (int)(fio_buf2u32u(ipc->data)),
+  //                ipc->data + sizeof(uint32_t[2]));
 
   fio_queue_push(((fio_pubsub_subscription_s *)ipc->udata)->queue,
                  fio___pubsub_subscription_ipc_deliver,

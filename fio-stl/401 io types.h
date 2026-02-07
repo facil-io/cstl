@@ -428,9 +428,9 @@ struct fio_io_s {
 };
 
 FIO_IFUNC void fio___io_monitor_in(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (io->flags & (FIO___IO_FLAG_PREVENT_ON_DATA | FIO___IO_FLAG_CLOSED_ALL))
     return;
   if ((FIO___IO_FLAG_SET(io, FIO___IO_FLAG_POLLIN_SET) &
@@ -438,30 +438,30 @@ FIO_IFUNC void fio___io_monitor_in(fio_io_s *io) {
     return;
   }
   fio_poll_monitor(&FIO___IO.poll, io->fd, (void *)io, POLLIN);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Input for %d", fio_io_pid(), io->fd);
 }
 FIO_IFUNC void fio___io_monitor_out(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (io->flags & FIO___IO_FLAG_WRITE_SCHD)
     return;
   if ((FIO___IO_FLAG_SET(io, FIO___IO_FLAG_POLLOUT_SET) &
        FIO___IO_FLAG_POLLOUT_SET))
     return;
   fio_poll_monitor(&FIO___IO.poll, io->fd, (void *)io, POLLOUT);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Output for %d", fio_io_pid(), io->fd);
 }
 
 FIO_IFUNC void fio___io_monitor_forget(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d (called)",
-                  fio_io_pid(),
-                  io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d (called)",
+  //                 fio_io_pid(),
+  //                 io->fd);
   if (!(FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLL_SET) &
         FIO___IO_FLAG_POLL_SET))
     return;
   fio_poll_forget(&FIO___IO.poll, io->fd);
-  FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d", fio_io_pid(), io->fd);
+  // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d", fio_io_pid(), io->fd);
 }
 
 FIO_SFUNC void fio___io_destroy(fio_io_s *io) {
@@ -908,9 +908,9 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   size_t total = 0;
   FIO___IO_FLAG_UNSET(io,
                       (FIO___IO_FLAG_POLLOUT_SET | FIO___IO_FLAG_WRITE_SCHD));
-  FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
-                  fio_io_pid(),
-                  fio_io_fd(io));
+  // FIO_LOG_DDEBUG2("(%d) poll_on_ready callback for fd %d",
+  //                 fio_io_pid(),
+  //                 fio_io_fd(io));
   if (!(io->flags & FIO___IO_FLAG_OPEN))
     goto finish;
   for (;;) {
@@ -921,10 +921,10 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       break;
     ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
     if (r > 0) {
-      FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
-                      FIO___IO.pid,
-                      (size_t)r,
-                      io->fd);
+      // FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
+      //                 FIO___IO.pid,
+      //                 (size_t)r,
+      //                 io->fd);
       total += r;
       fio_stream_advance(&io->out, r);
       continue;
@@ -961,11 +961,11 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
       FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_THROTTLED);
       fio___io_monitor_in(io);
     }
-    FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
-                    FIO___IO.pid,
-                    (void *)io,
-                    io->fd,
-                    fio_stream_length(&io->out));
+    // FIO_LOG_DDEBUG2("(%d) calling on_ready for %p (fd %d) - %zu data left.",
+    //                 FIO___IO.pid,
+    //                 (void *)io,
+    //                 io->fd,
+    //                 fio_stream_length(&io->out));
     io->pr->on_ready(io);
   }
 
@@ -1019,9 +1019,9 @@ Event scheduling
 ***************************************************************************** */
 
 static void fio___io_poll_on_data_schd(void *io) {
-  FIO_LOG_DDEBUG2("(%d) `on_data` scheduled for fd %d.",
-                  fio_io_pid(),
-                  fio_io_fd((fio_io_s *)io));
+  // FIO_LOG_DDEBUG2("(%d) `on_data` scheduled for fd %d.",
+  //                 fio_io_pid(),
+  //                 fio_io_fd((fio_io_s *)io));
   // FIO___IO_FLAG_POLLIN_SET
   fio___io_defer_no_wakeup(fio___io_poll_on_data,
                            (void *)fio___io_dup2((fio_io_s *)io),
@@ -1030,18 +1030,18 @@ static void fio___io_poll_on_data_schd(void *io) {
 static void fio___io_poll_on_ready_schd(void *io) {
   if (!(FIO___IO_FLAG_SET((fio_io_s *)io, FIO___IO_FLAG_WRITE_SCHD) &
         FIO___IO_FLAG_WRITE_SCHD)) {
-    FIO_LOG_DDEBUG2("(%d) `on_ready` scheduled for fd %d.",
-                    fio_io_pid(),
-                    fio_io_fd((fio_io_s *)io));
+    // FIO_LOG_DDEBUG2("(%d) `on_ready` scheduled for fd %d.",
+    //                 fio_io_pid(),
+    //                 fio_io_fd((fio_io_s *)io));
     fio___io_defer_no_wakeup(fio___io_poll_on_ready,
                              (void *)fio___io_dup2((fio_io_s *)io),
                              NULL);
   }
 }
 static void fio___io_poll_on_close_schd(void *io) {
-  FIO_LOG_DDEBUG2("(%d) remote closure for fd %d.",
-                  fio_io_pid(),
-                  fio_io_fd((fio_io_s *)io));
+  // FIO_LOG_DDEBUG2("(%d) remote closure for fd %d.",
+  //                 fio_io_pid(),
+  //                 fio_io_fd((fio_io_s *)io));
   fio___io_defer_no_wakeup(fio___io_poll_on_close,
                            (void *)fio___io_dup2((fio_io_s *)io),
                            NULL);
@@ -1073,10 +1073,10 @@ static int fio___io_review_timeouts(void) {
       FIO_ASSERT_DEBUG(io->pr == pr, "IO protocol ownership error");
       if (io->active >= limit)
         break;
-      FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
-                      FIO___IO.pid,
-                      (void *)io,
-                      io->fd);
+      // FIO_LOG_DDEBUG2("(%d) scheduling timeout for %p (fd %d)",
+      //                 FIO___IO.pid,
+      //                 (void *)io,
+      //                 io->fd);
       fio___io_defer_no_wakeup(fio___io_poll_on_timeout,
                                (void *)fio___io_dup2(io),
                                NULL);

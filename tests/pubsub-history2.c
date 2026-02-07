@@ -11,7 +11,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define WORKERS                17
 #define START_OFFSET_MILLI     250
 #define SUBSCRIBE_OFFSET_MILLI 10
-#define CLEANUP_MILLI          1500
+#define CLEANUP_MILLI          2500
 #define LISTENERS              (WORKERS + 1)
 
 static struct {
