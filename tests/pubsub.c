@@ -296,7 +296,7 @@ FIO_SFUNC void fio___pubsub_test_basic(void) {
                    .repetitions = 1);
   fio_io_run_every(.fn = fio___test_ps2_basic_check,
                    .every = 50,
-                   .repetitions = 0); /* Repeat until stopped */
+                   .repetitions = -1); /* Repeat until stopped */
   fio_io_run_every(.fn = fio___test_ps2_basic_timeout,
                    .every = 2000,
                    .repetitions = 1);
@@ -314,7 +314,6 @@ Test 2: Worker Subscribes, Master Publishes, Worker Receives
 ***************************************************************************** */
 
 static volatile int fio___test_ps2_w2m_master_confirms = 0;
-static volatile int fio___test_ps2_w2m_worker_received = 0;
 
 /* Master handler for worker confirmation */
 FIO_SFUNC void fio___test_ps2_w2m_confirm_handler(fio_ipc_s *ipc) {
@@ -327,7 +326,6 @@ FIO_SFUNC void fio___test_ps2_w2m_confirm_handler(fio_ipc_s *ipc) {
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_w2m_on_message(fio_pubsub_msg_s *msg) {
-  fio___test_ps2_w2m_worker_received++;
   FIO_LOG_DEBUG2("(%d) [Worker] Received message: channel=%.*s message=%.*s",
                  fio_io_pid(),
                  (int)msg->channel.len,
@@ -394,7 +392,6 @@ FIO_SFUNC void fio___pubsub_test_worker_subscribe(void) {
 
   /* Reset */
   fio___test_ps2_w2m_master_confirms = 0;
-  fio___test_ps2_w2m_worker_received = 0;
 
   /* Register callbacks */
   fio_state_callback_add(FIO_CALL_ON_START,
@@ -491,17 +488,11 @@ FIO_SFUNC int fio___test_ps2_wpub_master_subscribe(void *ignr_1, void *ignr_2) {
   return -1;
 }
 
-/* First worker publishes */
-static volatile int fio___test_ps2_wpub_published = 0;
+/* Worker publishes - each worker publishes once */
 FIO_SFUNC int fio___test_ps2_wpub_worker_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-
-  /* Only one worker should publish */
-  if (fio___test_ps2_wpub_published)
-    return -1;
-  fio___test_ps2_wpub_published = 1;
 
   FIO_LOG_DEBUG2("(%d) [Worker] Publishing to pub-channel", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("pub-channel"),
@@ -550,7 +541,6 @@ FIO_SFUNC void fio___pubsub_test_worker_publish(void) {
   /* Reset */
   fio___test_ps2_wpub_master_received = 0;
   fio___test_ps2_wpub_worker_confirms = 0;
-  fio___test_ps2_wpub_published = 0;
 
   /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
    * 2) */
@@ -844,19 +834,6 @@ FIO_SFUNC void fio___test_ps2_unsub_on_unsub(void *udata) {
   fio___test_ps2_unsub_callback_called++;
   FIO_LOG_DEBUG2("(%d) Unsubscribe callback called", fio_io_pid());
   (void)udata;
-}
-
-/* Subscribe */
-FIO_SFUNC int fio___test_ps2_unsub_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to unsub-channel", fio_io_pid());
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("unsub-channel"),
-                       .on_message = fio___test_ps2_unsub_on_message,
-                       .on_unsubscribe = fio___test_ps2_unsub_on_unsub);
-  return -1;
 }
 
 /* Unsubscribe */
@@ -1439,7 +1416,6 @@ Uses workers to verify message delivery via opcode-based routing.
 ***************************************************************************** */
 
 static volatile int fio___test_ps2_cluster_master_confirms = 0;
-static volatile int fio___test_ps2_cluster_worker_received = 0;
 
 /* Master handler for worker confirmation */
 FIO_SFUNC void fio___test_ps2_cluster_confirm_handler(fio_ipc_s *ipc) {
@@ -1452,7 +1428,6 @@ FIO_SFUNC void fio___test_ps2_cluster_confirm_handler(fio_ipc_s *ipc) {
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_cluster_on_message(fio_pubsub_msg_s *msg) {
-  fio___test_ps2_cluster_worker_received++;
   FIO_LOG_DEBUG2(
       "(%d) [Worker] Cluster test: received message: channel=%.*s message=%.*s",
       fio_io_pid(),
@@ -1525,7 +1500,6 @@ FIO_SFUNC void fio___pubsub_test_cluster_engine_publish(void) {
 
   /* Reset */
   fio___test_ps2_cluster_master_confirms = 0;
-  fio___test_ps2_cluster_worker_received = 0;
 
   /* Register callbacks */
   fio_state_callback_add(FIO_CALL_ON_START,
@@ -1872,18 +1846,12 @@ FIO_SFUNC int fio___test_ps2_wcluster_master_subscribe(void *ignr_1,
   return -1;
 }
 
-/* First worker publishes using cluster engine */
-static volatile int fio___test_ps2_wcluster_published = 0;
+/* Worker publishes using cluster engine - each worker publishes once */
 FIO_SFUNC int fio___test_ps2_wcluster_worker_publish(void *ignr_1,
                                                      void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-
-  /* Only one worker should publish */
-  if (fio___test_ps2_wcluster_published)
-    return -1;
-  fio___test_ps2_wcluster_published = 1;
 
   FIO_LOG_DEBUG2(
       "(%d) [Worker] Publishing to worker-cluster-channel via cluster engine",
@@ -1936,7 +1904,6 @@ FIO_SFUNC void fio___pubsub_test_worker_cluster_publish(void) {
   /* Reset */
   fio___test_ps2_wcluster_master_received = 0;
   fio___test_ps2_wcluster_worker_confirms = 0;
-  fio___test_ps2_wcluster_published = 0;
 
   /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
    * 3) */

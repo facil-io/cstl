@@ -263,6 +263,10 @@ Intrinsic Availability Flags
 #include <arm_acle.h>
 #include <arm_neon.h>
 #define FIO___HAS_ARM_INTRIN 1
+#if defined(__ARM_FEATURE_SHA3) /* ARMv8.2-A SHA3 extension                    \
+                                   (EOR3/RAX1/XAR/BCAX) */
+#define FIO___HAS_ARM_SHA3_INTRIN 1
+#endif
 #elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
 #define FIO___HAS_X86_INTRIN 1
 #include <immintrin.h>
@@ -2305,8 +2309,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(16) = {0};
-    uint64_t ub[8] FIO_ALIGN(16) = {0};
+    uint64_t ua[8] FIO_ALIGN(64) = {0};
+    uint64_t ub[8] FIO_ALIGN(64) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -2338,8 +2342,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(16);
-    uint64_t ub[8] FIO_ALIGN(16);
+    uint64_t ua[8] FIO_ALIGN(64);
+    uint64_t ub[8] FIO_ALIGN(64);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -3823,10 +3827,6 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
 /* *****************************************************************************
 Vector Types (SIMD / Math)
 ***************************************************************************** */
-#if FIO___HAS_ARM_INTRIN || __has_attribute(vector_size)
-#define FIO_HAS_UX 1
-#endif
-
 #if FIO___HAS_ARM_INTRIN
 /** defines a vector group for a fio_uXXX union */
 #define FIO___UXXX_XGRP_DEF(bits)                                              \
@@ -3887,14 +3887,14 @@ typedef union fio_u256 {
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
-} fio_u256 FIO_ALIGN(16);
+} fio_u256 FIO_ALIGN(32);
 
 /** An unsigned 512bit union type. */
 typedef union fio_u512 {
   fio_u128 u128[4];
   fio_u256 u256[2];
   FIO___UXXX_UGRP_DEF(512);
-} fio_u512 FIO_ALIGN(16);
+} fio_u512 FIO_ALIGN(64);
 
 /** An unsigned 1024bit union type. */
 typedef union fio_u1024 {
@@ -3902,7 +3902,7 @@ typedef union fio_u1024 {
   fio_u256 u256[4];
   fio_u512 u512[2];
   FIO___UXXX_UGRP_DEF(1024);
-} fio_u1024 FIO_ALIGN(16);
+} fio_u1024 FIO_ALIGN(64);
 
 /** An unsigned 2048bit union type. */
 typedef union fio_u2048 {
@@ -3911,7 +3911,7 @@ typedef union fio_u2048 {
   fio_u512 u512[4];
   fio_u1024 u1024[2];
   FIO___UXXX_UGRP_DEF(2048);
-} fio_u2048 FIO_ALIGN(16);
+} fio_u2048 FIO_ALIGN(64);
 
 /** An unsigned 4096bit union type. */
 typedef union fio_u4096 {
@@ -3921,7 +3921,7 @@ typedef union fio_u4096 {
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
   FIO___UXXX_UGRP_DEF(4096);
-} fio_u4096 FIO_ALIGN(16);
+} fio_u4096 FIO_ALIGN(64);
 
 #undef FIO___UXXX_XGRP_DEF
 #undef FIO___UXXX_UGRP_DEF
@@ -4022,8 +4022,6 @@ The loop count is computed dynamically via sizeof, yielding:
 - Scalar: bits/64 iterations (64-bit scalars in .u64[])
 ***************************************************************************** */
 
-#if FIO_HAS_UX && !defined(DEBUG)
-
 /** Performs `a op b` (+,-, *, etc') using vector member .x##bits[]. */
 #define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
   do {                                                                         \
@@ -4046,27 +4044,19 @@ The loop count is computed dynamically via sizeof, yielding:
       (t).x##bits[i__] = op(a).x##bits[i__];                                   \
   } while (0)
 
-#else /* FIO_HAS_UX */
+/** Performs ternary `t = f(a, b, c)` lane-wise using vector .x##bits[]. */
+#define FIO_MATH_UXXX_TOP(t, a, b, c, bits, expr)                              \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
+         ++i__)                                                                \
+      (t).x##bits[i__] =                                                       \
+          expr((a).x##bits[i__], (b).x##bits[i__], (c).x##bits[i__]);          \
+  } while (0)
 
-#define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = (a).u##bits[i__] op(b).u##bits[i__];                  \
-  } while (0)
-#define FIO_MATH_UXXX_COP(t, a, b, bits, op)                                   \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = (a).u##bits[i__] op(b);                               \
-  } while (0)
-#define FIO_MATH_UXXX_SOP(t, a, bits, op)                                      \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = op((a).u##bits[i__]);                                 \
-  } while (0)
-#endif /* FIO_HAS_UX */
+/* Ternary expression helpers for FIO_MATH_UXXX_TOP */
+#define FIO___EXPR_MUX(x, y, z)  ((z) ^ ((x) & ((y) ^ (z))))
+#define FIO___EXPR_MAJ(x, y, z)  (((x) & (y)) | ((z) & ((x) | (y))))
+#define FIO___EXPR_XOR3(x, y, z) ((x) ^ (y) ^ (z))
 
 /** Performs vector reduction for using `op` (+,-, *, etc'), storing to `t`. */
 #define FIO_MATH_UXXX_REDUCE(t, a, bits, op)                                   \
@@ -4118,6 +4108,32 @@ The loop count is computed dynamically via sizeof, yielding:
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }
 
+#define FIO___UXXX_DEF_TOP(total_bits, bits, opnm, expr)                       \
+  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(                             \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const fio_u##total_bits *b,                                              \
+      const fio_u##total_bits *c) {                                            \
+    FIO_MATH_UXXX_TOP(((target)[0]),                                           \
+                      ((a)[0]),                                                \
+                      ((b)[0]),                                                \
+                      ((c)[0]),                                                \
+                      bits,                                                    \
+                      expr);                                                   \
+  }
+#define FIO___UXXX_DEF_TOP2(total_bits, bits, opnm, expr)                      \
+  FIO_IFUNC void fio_u##total_bits##_##opnm(fio_u##total_bits *target,         \
+                                            const fio_u##total_bits *a,        \
+                                            const fio_u##total_bits *b,        \
+                                            const fio_u##total_bits *c) {      \
+    FIO_MATH_UXXX_TOP(((target)[0]),                                           \
+                      ((a)[0]),                                                \
+                      ((b)[0]),                                                \
+                      ((c)[0]),                                                \
+                      bits,                                                    \
+                      expr);                                                   \
+  }
+
 #define FIO___UXXX_DEF_OP4T_INNER(total_bits, opnm, op)                        \
   FIO___UXXX_DEF_OP(total_bits, 8, opnm, op)                                   \
   FIO___UXXX_DEF_OP(total_bits, 16, opnm, op)                                  \
@@ -4156,7 +4172,17 @@ The loop count is computed dynamically via sizeof, yielding:
     fio_u##total_bits##_cand64(&mask, &mask, (uint64_t)0ULL - cond);           \
     fio_u##total_bits##_xor(a, a, &mask);                                      \
     fio_u##total_bits##_xor(b, b, &mask);                                      \
-  }
+  }                                                                            \
+  /* Ternary operations: mux (choose/Ch), maj (majority/Maj), 3xor (parity) */ \
+  FIO___UXXX_DEF_TOP(total_bits, 32, mux, FIO___EXPR_MUX)                      \
+  FIO___UXXX_DEF_TOP(total_bits, 64, mux, FIO___EXPR_MUX)                      \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, mux, FIO___EXPR_MUX)                     \
+  FIO___UXXX_DEF_TOP(total_bits, 32, maj, FIO___EXPR_MAJ)                      \
+  FIO___UXXX_DEF_TOP(total_bits, 64, maj, FIO___EXPR_MAJ)                      \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, maj, FIO___EXPR_MAJ)                     \
+  FIO___UXXX_DEF_TOP(total_bits, 32, 3xor, FIO___EXPR_XOR3)                    \
+  FIO___UXXX_DEF_TOP(total_bits, 64, 3xor, FIO___EXPR_XOR3)                    \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, 3xor, FIO___EXPR_XOR3)
 
 FIO___UXXX_DEF_OP4T(128)
 FIO___UXXX_DEF_OP4T(256)
@@ -4169,6 +4195,11 @@ FIO___UXXX_DEF_OP4T(4096)
 #undef FIO___UXXX_DEF_OP4T_INNER
 #undef FIO___UXXX_DEF_OP
 #undef FIO___UXXX_DEF_OP2
+#undef FIO___UXXX_DEF_TOP
+#undef FIO___UXXX_DEF_TOP2
+#undef FIO___EXPR_MUX
+#undef FIO___EXPR_MAJ
+#undef FIO___EXPR_XOR3
 
 /* *****************************************************************************
 SIMD-Optimized Vector Operations (XOR, AND, OR) - Value Semantics
@@ -4177,8 +4208,7 @@ These provide return-by-value vector operations that leverage SIMD when
 available. The naming convention is fio_uXXX_<op>v (v = value semantics).
 
 Uses the existing FIO_MATH_UXXX_OP macro which correctly accesses union members:
-- .x64[], .x32[] etc. when FIO_HAS_UX is defined (vector types)
-- .u64[], .u32[] etc. otherwise (scalar fallback)
+- .x64[], .x32[] etc. vector types or scalar arrays (depending on availability)
 
 IMPORTANT: The `64` parameter in FIO_MATH_UXXX_OP selects the union member
 (.x64), NOT the element size. The loop count is computed dynamically:
@@ -27646,7 +27676,7 @@ typedef struct {
   uint64_t s[2];
   /* Accumulator should not exceed 131 bits at the end of every cycle. */
   uint64_t a[3];
-} FIO_ALIGN(16) fio___poly_s;
+} FIO_ALIGN(64) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
   static const uint64_t defkey[4] = {0};
@@ -27865,22 +27895,6 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
 ChaCha20 (encryption)
 ***************************************************************************** */
 
-#define FIO___CHACHA_VROUND(count, a, b, c, d)                                 \
-  for (size_t i = 0; i < count; ++i) {                                         \
-    a[i] += b[i];                                                              \
-    d[i] ^= a[i];                                                              \
-    d[i] = fio_lrot32(d[i], 16);                                               \
-    c[i] += d[i];                                                              \
-    b[i] ^= c[i];                                                              \
-    b[i] = fio_lrot32(b[i], 12);                                               \
-    a[i] += b[i];                                                              \
-    d[i] ^= a[i];                                                              \
-    d[i] = fio_lrot32(d[i], 8);                                                \
-    c[i] += d[i];                                                              \
-    b[i] ^= c[i];                                                              \
-    b[i] = fio_lrot32(b[i], 7);                                                \
-  }
-
 FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
                                      const void *nonce,
                                      uint32_t counter) {
@@ -27906,97 +27920,291 @@ FIO_IFUNC fio_u512 fio___chacha_init(const void *key,
   return o;
 }
 
+/* Single-block ChaCha20: processes 64 bytes with explicit diagonal indexing. */
 FIO_SFUNC void fio___chacha_vround20(const fio_u512 c, uint8_t *restrict data) {
   uint32_t v[16];
-  for (size_t i = 0; i < 16; ++i) {
+  for (size_t i = 0; i < 16; ++i)
     v[i] = c.u32[i];
+
+/* Quarter round macro for a single block with explicit indices */
+#define FIO___CHACHA_QR1(a, b, c, d)                                           \
+  do {                                                                         \
+    v[a] += v[b];                                                              \
+    v[d] ^= v[a];                                                              \
+    v[d] = fio_lrot32(v[d], 16);                                               \
+    v[c] += v[d];                                                              \
+    v[b] ^= v[c];                                                              \
+    v[b] = fio_lrot32(v[b], 12);                                               \
+    v[a] += v[b];                                                              \
+    v[d] ^= v[a];                                                              \
+    v[d] = fio_lrot32(v[d], 8);                                                \
+    v[c] += v[d];                                                              \
+    v[b] ^= v[c];                                                              \
+    v[b] = fio_lrot32(v[b], 7);                                                \
+  } while (0)
+
+  for (size_t round__ = 0; round__ < 10; ++round__) {
+    /* Column rounds */
+    FIO___CHACHA_QR1(0, 4, 8, 12);
+    FIO___CHACHA_QR1(1, 5, 9, 13);
+    FIO___CHACHA_QR1(2, 6, 10, 14);
+    FIO___CHACHA_QR1(3, 7, 11, 15);
+    /* Diagonal rounds */
+    FIO___CHACHA_QR1(0, 5, 10, 15);
+    FIO___CHACHA_QR1(1, 6, 11, 12);
+    FIO___CHACHA_QR1(2, 7, 8, 13);
+    FIO___CHACHA_QR1(3, 4, 9, 14);
   }
-  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
-    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_reshuffle((v + 4), 1, 2, 3, 0);
-    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_reshuffle((v + 12), 3, 0, 1, 2);
-    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_reshuffle((v + 4), 3, 0, 1, 2);
-    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_reshuffle((v + 12), 1, 2, 3, 0);
-  }
-  for (size_t i = 0; i < 16; ++i) {
+#undef FIO___CHACHA_QR1
+
+  for (size_t i = 0; i < 16; ++i)
     v[i] += c.u32[i];
+
+#if __BIG_ENDIAN__
+  for (size_t i = 0; i < 16; ++i)
+    v[i] = fio_bswap32(v[i]);
+#endif
+  {
+    uint32_t d[16];
+    fio_memcpy64(d, data);
+    for (size_t i = 0; i < 16; ++i)
+      d[i] ^= v[i];
+    fio_memcpy64(data, d);
   }
+}
+
+/* 2-block ChaCha20: processes 128 bytes using explicit diagonal indexing.
+ * Avoids all shuffle operations by directly addressing diagonal elements.
+ * Layout: v[0..15] = block 0, v[16..31] = block 1 (flat, no interleaving). */
+FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
+  /* Two separate blocks in flat layout */
+  uint32_t v0[16], v1[16];
+  for (size_t i = 0; i < 16; ++i) {
+    v0[i] = c.u32[i];
+    v1[i] = c.u32[i];
+  }
+  ++v1[12]; /* second block has counter+1 */
+
+/* Quarter round macro for a single block with explicit indices */
+#define FIO___CHACHA_QR(s, a, b, c, d)                                         \
+  do {                                                                         \
+    s[a] += s[b];                                                              \
+    s[d] ^= s[a];                                                              \
+    s[d] = fio_lrot32(s[d], 16);                                               \
+    s[c] += s[d];                                                              \
+    s[b] ^= s[c];                                                              \
+    s[b] = fio_lrot32(s[b], 12);                                               \
+    s[a] += s[b];                                                              \
+    s[d] ^= s[a];                                                              \
+    s[d] = fio_lrot32(s[d], 8);                                                \
+    s[c] += s[d];                                                              \
+    s[b] ^= s[c];                                                              \
+    s[b] = fio_lrot32(s[b], 7);                                                \
+  } while (0)
+
+  for (size_t round__ = 0; round__ < 10; ++round__) {
+    /* Column rounds */
+    FIO___CHACHA_QR(v0, 0, 4, 8, 12);
+    FIO___CHACHA_QR(v0, 1, 5, 9, 13);
+    FIO___CHACHA_QR(v0, 2, 6, 10, 14);
+    FIO___CHACHA_QR(v0, 3, 7, 11, 15);
+    FIO___CHACHA_QR(v1, 0, 4, 8, 12);
+    FIO___CHACHA_QR(v1, 1, 5, 9, 13);
+    FIO___CHACHA_QR(v1, 2, 6, 10, 14);
+    FIO___CHACHA_QR(v1, 3, 7, 11, 15);
+    /* Diagonal rounds — no shuffle needed, just different indices */
+    FIO___CHACHA_QR(v0, 0, 5, 10, 15);
+    FIO___CHACHA_QR(v0, 1, 6, 11, 12);
+    FIO___CHACHA_QR(v0, 2, 7, 8, 13);
+    FIO___CHACHA_QR(v0, 3, 4, 9, 14);
+    FIO___CHACHA_QR(v1, 0, 5, 10, 15);
+    FIO___CHACHA_QR(v1, 1, 6, 11, 12);
+    FIO___CHACHA_QR(v1, 2, 7, 8, 13);
+    FIO___CHACHA_QR(v1, 3, 4, 9, 14);
+  }
+#undef FIO___CHACHA_QR
+
+  /* Add initial state and XOR with data */
+  for (size_t i = 0; i < 16; ++i)
+    v0[i] += c.u32[i];
+  ++c.u32[12];
+  for (size_t i = 0; i < 16; ++i)
+    v1[i] += c.u32[i];
 
 #if __BIG_ENDIAN__
   for (size_t i = 0; i < 16; ++i) {
-    v[i] = fio_bswap32(v[i]);
+    v0[i] = fio_bswap32(v0[i]);
+    v1[i] = fio_bswap32(v1[i]);
   }
 #endif
   {
     uint32_t d[16];
     fio_memcpy64(d, data);
-    for (size_t i = 0; i < 16; ++i) {
-      d[i] ^= v[i];
-    }
+    for (size_t i = 0; i < 16; ++i)
+      d[i] ^= v0[i];
     fio_memcpy64(data, d);
+
+    fio_memcpy64(d, data + 64);
+    for (size_t i = 0; i < 16; ++i)
+      d[i] ^= v1[i];
+    fio_memcpy64(data + 64, d);
   }
 }
 
-FIO_SFUNC void fio___chacha_vround20x2(fio_u512 c, uint8_t *restrict data) {
-  uint32_t v[32];
-  for (size_t i = 0; i < 16; ++i) {
-    v[i + (i & (4 | 8))] = c.u32[i];
-    v[i + 4 + (i & (4 | 8))] = c.u32[i];
-  }
-  ++v[28];
-  for (size_t round__ = 0; round__ < 10; ++round__) { /* 2 rounds per loop */
-    FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_reshuffle((v + 8), 1, 2, 3, 0, 5, 6, 7, 4);
-    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_reshuffle((v + 24), 3, 0, 1, 2, 7, 4, 5, 6);
-    FIO___CHACHA_VROUND(8, v, (v + 8), (v + 16), (v + 24));
-    fio_u32x8_reshuffle((v + 8), 3, 0, 1, 2, 7, 4, 5, 6);
-    fio_u32x8_reshuffle((v + 16), 2, 3, 0, 1, 6, 7, 4, 5);
-    fio_u32x8_reshuffle((v + 24), 1, 2, 3, 0, 5, 6, 7, 4);
-  }
-  for (size_t i = 0; i < 16; ++i) {
-    v[i + (i & (4 | 8))] += c.u32[i];
-    v[i + 4 + (i & (4 | 8))] += c.u32[i];
-  }
-  ++v[28];
+/* *****************************************************************************
+NEON 4-Block ChaCha20 (ARM NEON - processes 256 bytes per call)
+***************************************************************************** */
+#if FIO___HAS_ARM_INTRIN
 
-#if __BIG_ENDIAN__
-  for (size_t i = 0; i < 32; ++i) {
-    v[i] = fio_bswap32(v[i]);
-  }
-#endif
+/**
+ * Quarter round macro for NEON vertical layout.
+ * Each uint32x4_t holds the same word position from 4 different blocks.
+ *
+ * ROT16: vrev32q_u16 is a single REV32.8H instruction.
+ * ROT8:  vqtbl1q_u8 with rotation table is a single TBL instruction.
+ * ROT12/ROT7: shift+or (NEON has single-cycle shifts).
+ */
+#define FIO___CHACHA_QR_NEON(a, b, c, d)                                       \
+  do {                                                                         \
+    a = vaddq_u32(a, b);                                                       \
+    d = veorq_u32(d, a);                                                       \
+    d = vreinterpretq_u32_u16(vrev32q_u16(vreinterpretq_u16_u32(d)));          \
+    c = vaddq_u32(c, d);                                                       \
+    b = veorq_u32(b, c);                                                       \
+    b = vorrq_u32(vshlq_n_u32(b, 12), vshrq_n_u32(b, 20));                     \
+    a = vaddq_u32(a, b);                                                       \
+    d = veorq_u32(d, a);                                                       \
+    d = vreinterpretq_u32_u8(                                                  \
+        vqtbl1q_u8(vreinterpretq_u8_u32(d), fio___chacha_rot8_tbl));           \
+    c = vaddq_u32(c, d);                                                       \
+    b = veorq_u32(b, c);                                                       \
+    b = vorrq_u32(vshlq_n_u32(b, 7), vshrq_n_u32(b, 25));                      \
+  } while (0)
+
+/**
+ * Processes 4 ChaCha20 blocks (256 bytes) using ARM NEON intrinsics.
+ *
+ * Uses "vertical" SIMD layout: each uint32x4_t holds the same word position
+ * from 4 different blocks. v[w] = {block0[w], block1[w], block2[w], block3[w]}.
+ *
+ * Counter words get {ctr, ctr+1, ctr+2, ctr+3} for the 4 blocks.
+ */
+FIO_SFUNC void fio___chacha_vround20x4(fio_u512 c, uint8_t *restrict data) {
+  /* Byte rotation table for ROT8: rotate each 32-bit word left by 8 bits */
+  static const uint8x16_t fio___chacha_rot8_tbl =
+      {3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14};
+  /* 16 state vectors — one per ChaCha20 state word, across 4 blocks */
+  uint32x4_t v0, v1, v2, v3, v4, v5, v6, v7;
+  uint32x4_t v8, v9, v10, v11, v12, v13, v14, v15;
+
+  /* Initialize: broadcast each state word across 4 lanes */
+  v0 = vdupq_n_u32(c.u32[0]);
+  v1 = vdupq_n_u32(c.u32[1]);
+  v2 = vdupq_n_u32(c.u32[2]);
+  v3 = vdupq_n_u32(c.u32[3]);
+  v4 = vdupq_n_u32(c.u32[4]);
+  v5 = vdupq_n_u32(c.u32[5]);
+  v6 = vdupq_n_u32(c.u32[6]);
+  v7 = vdupq_n_u32(c.u32[7]);
+  v8 = vdupq_n_u32(c.u32[8]);
+  v9 = vdupq_n_u32(c.u32[9]);
+  v10 = vdupq_n_u32(c.u32[10]);
+  v11 = vdupq_n_u32(c.u32[11]);
+  /* Counter word: {ctr, ctr+1, ctr+2, ctr+3} */
   {
-    fio_u32x8_reshuffle((v + 4), 4, 5, 6, 7, 0, 1, 2, 3);
-    fio_u32x8_reshuffle((v + 20), 4, 5, 6, 7, 0, 1, 2, 3);
-    uint32_t d[8];
-    fio_memcpy32(d, data);
-    for (size_t i = 0; i < 8; ++i) {
-      d[i] ^= v[i];
-    }
-    fio_memcpy32(data, d);
-
-    fio_memcpy32(d, data + 32);
-    for (size_t i = 0; i < 8; ++i) {
-      d[i] ^= v[16 + i];
-    }
-    fio_memcpy32(data + 32, d);
-
-    fio_memcpy32(d, data + 64);
-    for (size_t i = 0; i < 8; ++i) {
-      d[i] ^= v[8 + i];
-    }
-    fio_memcpy32(data + 64, d);
-
-    fio_memcpy32(d, data + 96);
-    for (size_t i = 0; i < 8; ++i) {
-      d[i] ^= v[24 + i];
-    }
-    fio_memcpy32(data + 96, d);
+    static const uint32_t ctr_inc[4] = {0, 1, 2, 3};
+    v12 = vaddq_u32(vdupq_n_u32(c.u32[12]), vld1q_u32(ctr_inc));
   }
+  v13 = vdupq_n_u32(c.u32[13]);
+  v14 = vdupq_n_u32(c.u32[14]);
+  v15 = vdupq_n_u32(c.u32[15]);
+
+  /* Save initial state for final addition */
+  const uint32x4_t s0 = v0, s1 = v1, s2 = v2, s3 = v3;
+  const uint32x4_t s4 = v4, s5 = v5, s6 = v6, s7 = v7;
+  const uint32x4_t s8 = v8, s9 = v9, s10 = v10, s11 = v11;
+  const uint32x4_t s12 = v12, s13 = v13, s14 = v14, s15 = v15;
+
+  /* 10 double rounds (20 quarter rounds total) */
+  for (int i = 0; i < 10; ++i) {
+    /* Column round */
+    FIO___CHACHA_QR_NEON(v0, v4, v8, v12);
+    FIO___CHACHA_QR_NEON(v1, v5, v9, v13);
+    FIO___CHACHA_QR_NEON(v2, v6, v10, v14);
+    FIO___CHACHA_QR_NEON(v3, v7, v11, v15);
+    /* Diagonal round */
+    FIO___CHACHA_QR_NEON(v0, v5, v10, v15);
+    FIO___CHACHA_QR_NEON(v1, v6, v11, v12);
+    FIO___CHACHA_QR_NEON(v2, v7, v8, v13);
+    FIO___CHACHA_QR_NEON(v3, v4, v9, v14);
+  }
+
+  /* Add initial state */
+  v0 = vaddq_u32(v0, s0);
+  v1 = vaddq_u32(v1, s1);
+  v2 = vaddq_u32(v2, s2);
+  v3 = vaddq_u32(v3, s3);
+  v4 = vaddq_u32(v4, s4);
+  v5 = vaddq_u32(v5, s5);
+  v6 = vaddq_u32(v6, s6);
+  v7 = vaddq_u32(v7, s7);
+  v8 = vaddq_u32(v8, s8);
+  v9 = vaddq_u32(v9, s9);
+  v10 = vaddq_u32(v10, s10);
+  v11 = vaddq_u32(v11, s11);
+  v12 = vaddq_u32(v12, s12);
+  v13 = vaddq_u32(v13, s13);
+  v14 = vaddq_u32(v14, s14);
+  v15 = vaddq_u32(v15, s15);
+
+  /* Deinterleave from vertical layout and XOR with data.
+   * Each v[w] holds {block0[w], block1[w], block2[w], block3[w]}.
+   * We need to store block b at data[b*64 .. b*64+63].
+   *
+   * Strategy: for each block, extract lane b from all 16 vectors,
+   * build 4 uint32x4_t output vectors (words 0-3, 4-7, 8-11, 12-15),
+   * XOR with data, and store.
+   */
+#define FIO___CHACHA_NEON_XORBLOCK(lane, offset)                               \
+  do {                                                                         \
+    uint32x4_t out0 = {vgetq_lane_u32(v0, lane),                               \
+                       vgetq_lane_u32(v1, lane),                               \
+                       vgetq_lane_u32(v2, lane),                               \
+                       vgetq_lane_u32(v3, lane)};                              \
+    uint32x4_t out1 = {vgetq_lane_u32(v4, lane),                               \
+                       vgetq_lane_u32(v5, lane),                               \
+                       vgetq_lane_u32(v6, lane),                               \
+                       vgetq_lane_u32(v7, lane)};                              \
+    uint32x4_t out2 = {vgetq_lane_u32(v8, lane),                               \
+                       vgetq_lane_u32(v9, lane),                               \
+                       vgetq_lane_u32(v10, lane),                              \
+                       vgetq_lane_u32(v11, lane)};                             \
+    uint32x4_t out3 = {vgetq_lane_u32(v12, lane),                              \
+                       vgetq_lane_u32(v13, lane),                              \
+                       vgetq_lane_u32(v14, lane),                              \
+                       vgetq_lane_u32(v15, lane)};                             \
+    out0 = veorq_u32(out0, vld1q_u32((const uint32_t *)(data + (offset))));    \
+    out1 =                                                                     \
+        veorq_u32(out1, vld1q_u32((const uint32_t *)(data + (offset) + 16)));  \
+    out2 =                                                                     \
+        veorq_u32(out2, vld1q_u32((const uint32_t *)(data + (offset) + 32)));  \
+    out3 =                                                                     \
+        veorq_u32(out3, vld1q_u32((const uint32_t *)(data + (offset) + 48)));  \
+    vst1q_u32((uint32_t *)(data + (offset)), out0);                            \
+    vst1q_u32((uint32_t *)(data + (offset) + 16), out1);                       \
+    vst1q_u32((uint32_t *)(data + (offset) + 32), out2);                       \
+    vst1q_u32((uint32_t *)(data + (offset) + 48), out3);                       \
+  } while (0)
+
+  FIO___CHACHA_NEON_XORBLOCK(0, 0);
+  FIO___CHACHA_NEON_XORBLOCK(1, 64);
+  FIO___CHACHA_NEON_XORBLOCK(2, 128);
+  FIO___CHACHA_NEON_XORBLOCK(3, 192);
+#undef FIO___CHACHA_NEON_XORBLOCK
 }
+
+#undef FIO___CHACHA_QR_NEON
+#endif /* FIO___HAS_ARM_INTRIN */
 
 SFUNC void fio_chacha20(void *restrict data,
                         size_t len,
@@ -28004,11 +28212,24 @@ SFUNC void fio_chacha20(void *restrict data,
                         const void *nonce,
                         uint32_t counter) {
   fio_u512 c = fio___chacha_init(key, nonce, counter);
+#if FIO___HAS_ARM_INTRIN
+  for (size_t pos = 255; pos < len; pos += 256) {
+    fio___chacha_vround20x4(c, (uint8_t *)data);
+    c.u32[12] += 4; /* block counter */
+    data = (void *)((uint8_t *)data + 256);
+  }
+  if ((len & 128)) {
+    fio___chacha_vround20x2(c, (uint8_t *)data);
+    c.u32[12] += 2; /* block counter */
+    data = (void *)((uint8_t *)data + 128);
+  }
+#else
   for (size_t pos = 127; pos < len; pos += 128) {
     fio___chacha_vround20x2(c, (uint8_t *)data);
     c.u32[12] += 2; /* block counter */
     data = (void *)((uint8_t *)data + 128);
   }
+#endif
   if ((len & 64)) {
     fio___chacha_vround20(c, (uint8_t *)data);
     data = (void *)((uint8_t *)data + 64);
@@ -28059,6 +28280,22 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     fio_memcpy15x(tmp, ad, adlen);
     fio___poly_consume128bit(&pl, (uint8_t *)tmp, 1);
   }
+#if FIO___HAS_ARM_INTRIN
+  for (size_t i = 255; i < len; i += 256) {
+    fio___chacha_vround20x4(c, (uint8_t *)data);
+    for (size_t j = 0; j < 256; j += 16)
+      fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + j), 1);
+    c.u32[12] += 4; /* block counter */
+    data = (void *)((uint8_t *)data + 256);
+  }
+  if ((len & 128)) {
+    fio___chacha_vround20x2(c, (uint8_t *)data);
+    for (size_t j = 0; j < 128; j += 16)
+      fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + j), 1);
+    c.u32[12] += 2; /* block counter */
+    data = (void *)((uint8_t *)data + 128);
+  }
+#else
   for (size_t i = 127; i < len; i += 128) {
     fio___chacha_vround20x2(c, (uint8_t *)data);
     fio___poly_consume128bit(&pl, data, 1);
@@ -28072,6 +28309,7 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
     c.u32[12] += 2; /* block counter */
     data = (void *)((uint8_t *)data + 128);
   }
+#endif
   if ((len & 64)) {
     fio___chacha_vround20(c, (uint8_t *)data);
     fio___poly_consume128bit(&pl, data, 1);
@@ -28163,17 +28401,113 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     size_t adlen,
                                     const void *key,
                                     const void *nonce) {
-  uint64_t auth[2];
-  fio_chacha20_poly1305_auth(&auth, data, len, ad, adlen, key, nonce);
-  /* Use constant-time comparison to prevent timing side-channel attacks.
-   * Even though early return stops communication with attacker, timing
-   * differences could leak information about the correct MAC value. */
-  if (!fio_ct_is_eq(auth, mac, 16)) {
-    fio_secure_zero(auth, sizeof(auth));
+  void *data_start = data;
+  fio_u512 c = fio___chacha_init(key, nonce, 0);
+  fio___poly_s pl;
+  {
+    fio_u512 c2 = fio___chacha20_mixround(c);
+    pl = fio___poly_init(&c2);
+  }
+  ++c.u32[12]; /* block counter */
+  /* Authenticate additional data (same as enc) */
+  for (size_t i = 31; i < adlen; i += 32) {
+    fio___poly_consume128bit(&pl, (uint8_t *)ad, 1);
+    fio___poly_consume128bit(&pl, (uint8_t *)ad + 16, 1);
+    ad = (void *)((uint8_t *)ad + 32);
+  }
+  if (adlen & 16) {
+    fio___poly_consume128bit(&pl, (uint8_t *)ad, 1);
+    ad = (void *)((uint8_t *)ad + 16);
+  }
+  if (adlen & 15) {
+    uint64_t tmp[2] = {0}; /* 16 byte pad */
+    fio_memcpy15x(tmp, ad, adlen);
+    fio___poly_consume128bit(&pl, (uint8_t *)tmp, 1);
+  }
+  /* Fused loop: Poly1305 over ciphertext, then ChaCha20 XOR to decrypt */
+#if FIO___HAS_ARM_INTRIN
+  for (size_t i = 255; i < len; i += 256) {
+    for (size_t j = 0; j < 256; j += 16)
+      fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + j), 1);
+    fio___chacha_vround20x4(c, (uint8_t *)data);
+    c.u32[12] += 4; /* block counter */
+    data = (void *)((uint8_t *)data + 256);
+  }
+  if ((len & 128)) {
+    for (size_t j = 0; j < 128; j += 16)
+      fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + j), 1);
+    fio___chacha_vround20x2(c, (uint8_t *)data);
+    c.u32[12] += 2; /* block counter */
+    data = (void *)((uint8_t *)data + 128);
+  }
+#else
+  for (size_t i = 127; i < len; i += 128) {
+    fio___poly_consume128bit(&pl, data, 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 16), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 32), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 48), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 64), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 80), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 96), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 112), 1);
+    fio___chacha_vround20x2(c, (uint8_t *)data);
+    c.u32[12] += 2; /* block counter */
+    data = (void *)((uint8_t *)data + 128);
+  }
+#endif
+  if ((len & 64)) {
+    fio___poly_consume128bit(&pl, data, 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 16), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 32), 1);
+    fio___poly_consume128bit(&pl, (void *)((uint8_t *)data + 48), 1);
+    fio___chacha_vround20(c, (uint8_t *)data);
+    ++c.u32[12]; /* block counter */
+    data = (void *)((uint8_t *)data + 64);
+  }
+  if ((len & 63)) {
+    /* Poly1305 over ciphertext tail (with zero padding) */
+    fio_u512 ct;
+    FIO_MEMSET(ct.u8, 0, 64);
+    fio_memcpy63x(ct.u8, data, len);
+    uint8_t *p = ct.u8;
+    if ((len & 32)) {
+      fio___poly_consume128bit(&pl, p, 1);
+      fio___poly_consume128bit(&pl, (p + 16), 1);
+      p += 32;
+    }
+    if ((len & 16)) {
+      fio___poly_consume128bit(&pl, p, 1);
+      p += 16;
+    }
+    if ((len & 15)) {
+      /* zero padding already set by FIO_MEMSET above */
+      fio___poly_consume128bit(&pl, p, 1);
+    }
+    /* ChaCha20 XOR to decrypt tail in-place */
+    fio_u512 dest;
+    fio_memcpy63x(dest.u8, data, len);
+    fio___chacha_vround20(c, dest.u8);
+    fio_memcpy63x(data, dest.u8, len);
+  }
+  /* Finalize Poly1305 */
+  {
+    uint64_t mac_data[2] = {fio_ltole64(adlen), fio_ltole64(len)};
+    fio___poly_consume128bit(&pl, (uint8_t *)mac_data, 1);
+  }
+  fio___poly_finilize(&pl);
+  uint8_t computed_mac[16];
+  fio_u2buf64_le(computed_mac, pl.a[0]);
+  fio_u2buf64_le(computed_mac + 8, pl.a[1]);
+  fio_secure_zero(&pl, sizeof(pl));
+  /* Constant-time MAC comparison */
+  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+    /* MAC mismatch: zero decrypted output to prevent use of unauthenticated
+     * plaintext, then return error. */
+    fio_secure_zero(data_start, len);
+    fio_secure_zero(computed_mac, sizeof(computed_mac));
     return -1;
   }
-  fio_secure_zero(auth, sizeof(auth));
-  fio_chacha20(data, len, key, nonce, 1);
+  fio_secure_zero(computed_mac, sizeof(computed_mac));
   return 0;
 }
 
@@ -28210,17 +28544,37 @@ FIO_IFUNC void fio___hchacha20(void *restrict subkey,
       // clang-format on
   };
 
+/* Quarter round macro for HChaCha20 */
+#define FIO___HCHACHA_QR(a, b, c, d)                                           \
+  do {                                                                         \
+    v[a] += v[b];                                                              \
+    v[d] ^= v[a];                                                              \
+    v[d] = fio_lrot32(v[d], 16);                                               \
+    v[c] += v[d];                                                              \
+    v[b] ^= v[c];                                                              \
+    v[b] = fio_lrot32(v[b], 12);                                               \
+    v[a] += v[b];                                                              \
+    v[d] ^= v[a];                                                              \
+    v[d] = fio_lrot32(v[d], 8);                                                \
+    v[c] += v[d];                                                              \
+    v[b] ^= v[c];                                                              \
+    v[b] = fio_lrot32(v[b], 7);                                                \
+  } while (0)
+
   /* Run 10 double-rounds (20 quarter-rounds total) */
   for (size_t round__ = 0; round__ < 10; ++round__) {
-    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_reshuffle((v + 4), 1, 2, 3, 0);
-    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_reshuffle((v + 12), 3, 0, 1, 2);
-    FIO___CHACHA_VROUND(4, v, (v + 4), (v + 8), (v + 12));
-    fio_u32x4_reshuffle((v + 4), 3, 0, 1, 2);
-    fio_u32x4_reshuffle((v + 8), 2, 3, 0, 1);
-    fio_u32x4_reshuffle((v + 12), 1, 2, 3, 0);
+    /* Column rounds */
+    FIO___HCHACHA_QR(0, 4, 8, 12);
+    FIO___HCHACHA_QR(1, 5, 9, 13);
+    FIO___HCHACHA_QR(2, 6, 10, 14);
+    FIO___HCHACHA_QR(3, 7, 11, 15);
+    /* Diagonal rounds */
+    FIO___HCHACHA_QR(0, 5, 10, 15);
+    FIO___HCHACHA_QR(1, 6, 11, 12);
+    FIO___HCHACHA_QR(2, 7, 8, 13);
+    FIO___HCHACHA_QR(3, 4, 9, 14);
   }
+#undef FIO___HCHACHA_QR
 
   /* Output words 0-3 and 12-15 as the 256-bit subkey (NO state addition!) */
   fio_u2buf32_le(subkey, v[0]);
@@ -29554,26 +29908,13 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
   uint64_t a = h->u64[0], b = h->u64[1], c = h->u64[2], d = h->u64[3];
   uint64_t e = h->u64[4], f = h->u64[5], g = h->u64[6], hv = h->u64[7];
 
-  /* Message schedule array */
-  uint64_t w[16];
-
-  /* Load and byte-swap message block - unrolled for better performance */
-  w[0] = fio_buf2u64_be(block);
-  w[1] = fio_buf2u64_be(block + 8);
-  w[2] = fio_buf2u64_be(block + 16);
-  w[3] = fio_buf2u64_be(block + 24);
-  w[4] = fio_buf2u64_be(block + 32);
-  w[5] = fio_buf2u64_be(block + 40);
-  w[6] = fio_buf2u64_be(block + 48);
-  w[7] = fio_buf2u64_be(block + 56);
-  w[8] = fio_buf2u64_be(block + 64);
-  w[9] = fio_buf2u64_be(block + 72);
-  w[10] = fio_buf2u64_be(block + 80);
-  w[11] = fio_buf2u64_be(block + 88);
-  w[12] = fio_buf2u64_be(block + 96);
-  w[13] = fio_buf2u64_be(block + 104);
-  w[14] = fio_buf2u64_be(block + 112);
-  w[15] = fio_buf2u64_be(block + 120);
+  /* Message schedule — use fio_u1024 for aligned storage */
+  fio_u1024 wv;
+  fio_memcpy128(wv.u8, block);
+  /* Byte-swap to big-endian (no-op on big-endian systems) */
+  for (size_t i = 0; i < 16; ++i)
+    wv.u64[i] = fio_lton64(wv.u64[i]);
+  uint64_t *w = wv.u64;
 
 /* SHA-512 Sigma functions - using optimized helpers */
 #define FIO___S512_S0(x) fio_xor_rrot3_64(x, 28, 34, 39)
@@ -30294,88 +30635,144 @@ static const uint64_t fio___keccak_rc[24] = {
     0x000000000000800aULL, 0x800000008000000aULL, 0x8000000080008081ULL,
     0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL};
 
-/* Keccak rotation offsets */
-static const uint8_t fio___keccak_rot[25] = {
-    0,  1,  62, 28, 27, /* row 0 */
-    36, 44, 6,  55, 20, /* row 1 */
-    3,  10, 43, 25, 39, /* row 2 */
-    41, 45, 15, 21, 8,  /* row 3 */
-    18, 2,  61, 56, 14  /* row 4 */
-};
-
-/* Keccak-f[1600] permutation */
+/* Keccak-f[1600] permutation — optimized scalar implementation.
+ *
+ * Fuses theta+rho+pi per-row, then applies chi with 5 temporaries per row.
+ * Eliminates the B[25] temporary array. State values that would be clobbered
+ * by earlier rows' chi are saved before processing.
+ *
+ * Note: ARM SHA3 NEON (EOR3/RAX1/BCAX) was attempted but regressed ~50% due
+ * to GPR↔NEON transfer overhead. Pure scalar compiles to excellent ARM64 code
+ * with clang -O3 (all state words in GPRs, fully unrolled). */
 FIO_IFUNC void fio___keccak_f1600(uint64_t *state) {
-  uint64_t C[5], D[5], B[25];
+  uint64_t C[5], t0, t1, t2, t3, t4;
+  /* Save slots for state values clobbered by earlier rows' chi.
+   * Row 0 writes [0..4]:  save s1(row2), s2(row4), s3(row1), s4(row3)
+   * Row 1 writes [5..9]:  save s5(row3), s7(row2), s8(row4)
+   * Row 2 writes [10..14]: save s11(row3), s14(row4)
+   * Row 3 writes [15..19]: save s15(row4) */
+  uint64_t s1, s2, s3, s4, s5, s7, s8, s11, s14, s15;
 
   for (size_t round = 0; round < 24; ++round) {
-    /* Theta step */
+    /* Theta: compute column parities */
     C[0] = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20];
     C[1] = state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21];
     C[2] = state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22];
     C[3] = state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23];
     C[4] = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
 
-    D[0] = C[4] ^ fio_lrot64(C[1], 1);
-    D[1] = C[0] ^ fio_lrot64(C[2], 1);
-    D[2] = C[1] ^ fio_lrot64(C[3], 1);
-    D[3] = C[2] ^ fio_lrot64(C[4], 1);
-    D[4] = C[3] ^ fio_lrot64(C[0], 1);
+    t0 = C[4] ^ fio_lrot64(C[1], 1); /* D[0] */
+    t1 = C[0] ^ fio_lrot64(C[2], 1); /* D[1] */
+    t2 = C[1] ^ fio_lrot64(C[3], 1); /* D[2] */
+    t3 = C[2] ^ fio_lrot64(C[4], 1); /* D[3] */
+    t4 = C[3] ^ fio_lrot64(C[0], 1); /* D[4] */
 
-    for (size_t i = 0; i < 25; i += 5) {
-      state[i + 0] ^= D[0];
-      state[i + 1] ^= D[1];
-      state[i + 2] ^= D[2];
-      state[i + 3] ^= D[3];
-      state[i + 4] ^= D[4];
-    }
+    /* Apply theta to state and save values needed by later rows */
+    state[0] ^= t0;
+    s1 = state[1] ^ t1;
+    s2 = state[2] ^ t2;
+    s3 = state[3] ^ t3;
+    s4 = state[4] ^ t4;
+    s5 = state[5] ^ t0;
+    state[6] ^= t1;
+    s7 = state[7] ^ t2;
+    s8 = state[8] ^ t3;
+    state[9] ^= t4;
+    state[10] ^= t0;
+    s11 = state[11] ^ t1;
+    state[12] ^= t2;
+    state[13] ^= t3;
+    s14 = state[14] ^ t4;
+    s15 = state[15] ^ t0;
+    state[16] ^= t1;
+    state[17] ^= t2;
+    state[18] ^= t3;
+    state[19] ^= t4;
+    state[20] ^= t0;
+    state[21] ^= t1;
+    state[22] ^= t2;
+    state[23] ^= t3;
+    state[24] ^= t4;
 
-    /* Rho and Pi steps combined */
-    B[0] = state[0];
-    B[1] = fio_lrot64(state[6], 44);
-    B[2] = fio_lrot64(state[12], 43);
-    B[3] = fio_lrot64(state[18], 21);
-    B[4] = fio_lrot64(state[24], 14);
-    B[5] = fio_lrot64(state[3], 28);
-    B[6] = fio_lrot64(state[9], 20);
-    B[7] = fio_lrot64(state[10], 3);
-    B[8] = fio_lrot64(state[16], 45);
-    B[9] = fio_lrot64(state[22], 61);
-    B[10] = fio_lrot64(state[1], 1);
-    B[11] = fio_lrot64(state[7], 6);
-    B[12] = fio_lrot64(state[13], 25);
-    B[13] = fio_lrot64(state[19], 8);
-    B[14] = fio_lrot64(state[20], 18);
-    B[15] = fio_lrot64(state[4], 27);
-    B[16] = fio_lrot64(state[5], 36);
-    B[17] = fio_lrot64(state[11], 10);
-    B[18] = fio_lrot64(state[17], 15);
-    B[19] = fio_lrot64(state[23], 56);
-    B[20] = fio_lrot64(state[2], 62);
-    B[21] = fio_lrot64(state[8], 55);
-    B[22] = fio_lrot64(state[14], 39);
-    B[23] = fio_lrot64(state[15], 41);
-    B[24] = fio_lrot64(state[21], 2);
+    /* Row 0: rho+pi then chi+iota */
+    t0 = state[0];
+    t1 = fio_lrot64(state[6], 44);
+    t2 = fio_lrot64(state[12], 43);
+    t3 = fio_lrot64(state[18], 21);
+    t4 = fio_lrot64(state[24], 14);
+    state[0] = t0 ^ ((~t1) & t2) ^ fio___keccak_rc[round];
+    state[1] = t1 ^ ((~t2) & t3);
+    state[2] = t2 ^ ((~t3) & t4);
+    state[3] = t3 ^ ((~t4) & t0);
+    state[4] = t4 ^ ((~t0) & t1);
 
-    /* Chi step */
-    for (size_t i = 0; i < 25; i += 5) {
-      state[i + 0] = B[i + 0] ^ ((~B[i + 1]) & B[i + 2]);
-      state[i + 1] = B[i + 1] ^ ((~B[i + 2]) & B[i + 3]);
-      state[i + 2] = B[i + 2] ^ ((~B[i + 3]) & B[i + 4]);
-      state[i + 3] = B[i + 3] ^ ((~B[i + 4]) & B[i + 0]);
-      state[i + 4] = B[i + 4] ^ ((~B[i + 0]) & B[i + 1]);
-    }
+    /* Row 1: uses saved s3 (was state[3]) */
+    t0 = fio_lrot64(s3, 28);
+    t1 = fio_lrot64(state[9], 20);
+    t2 = fio_lrot64(state[10], 3);
+    t3 = fio_lrot64(state[16], 45);
+    t4 = fio_lrot64(state[22], 61);
+    state[5] = t0 ^ ((~t1) & t2);
+    state[6] = t1 ^ ((~t2) & t3);
+    state[7] = t2 ^ ((~t3) & t4);
+    state[8] = t3 ^ ((~t4) & t0);
+    state[9] = t4 ^ ((~t0) & t1);
 
-    /* Iota step */
-    state[0] ^= fio___keccak_rc[round];
+    /* Row 2: uses saved s1 (was state[1]), s7 (was state[7]) */
+    t0 = fio_lrot64(s1, 1);
+    t1 = fio_lrot64(s7, 6);
+    t2 = fio_lrot64(state[13], 25);
+    t3 = fio_lrot64(state[19], 8);
+    t4 = fio_lrot64(state[20], 18);
+    state[10] = t0 ^ ((~t1) & t2);
+    state[11] = t1 ^ ((~t2) & t3);
+    state[12] = t2 ^ ((~t3) & t4);
+    state[13] = t3 ^ ((~t4) & t0);
+    state[14] = t4 ^ ((~t0) & t1);
+
+    /* Row 3: uses saved s4, s5, s11 (were state[4], state[5], state[11]) */
+    t0 = fio_lrot64(s4, 27);
+    t1 = fio_lrot64(s5, 36);
+    t2 = fio_lrot64(s11, 10);
+    t3 = fio_lrot64(state[17], 15);
+    t4 = fio_lrot64(state[23], 56);
+    state[15] = t0 ^ ((~t1) & t2);
+    state[16] = t1 ^ ((~t2) & t3);
+    state[17] = t2 ^ ((~t3) & t4);
+    state[18] = t3 ^ ((~t4) & t0);
+    state[19] = t4 ^ ((~t0) & t1);
+
+    /* Row 4: uses saved s2, s8, s14, s15 */
+    t0 = fio_lrot64(s2, 62);
+    t1 = fio_lrot64(s8, 55);
+    t2 = fio_lrot64(s14, 39);
+    t3 = fio_lrot64(s15, 41);
+    t4 = fio_lrot64(state[21], 2);
+    state[20] = t0 ^ ((~t1) & t2);
+    state[21] = t1 ^ ((~t2) & t3);
+    state[22] = t2 ^ ((~t3) & t4);
+    state[23] = t3 ^ ((~t4) & t0);
+    state[24] = t4 ^ ((~t0) & t1);
   }
 }
 
-/* Absorb a block into the state */
-FIO_IFUNC void fio___sha3_absorb(fio_sha3_s *restrict h) {
-  /* XOR rate bytes into state (little-endian) */
-  size_t rate_words = h->rate / 8;
+/* Absorb: XOR rate bytes from buf into state, then permute.
+ * On little-endian (ARM64, x86), state words are already in native order,
+ * so we can XOR directly as uint64_t without byte-swapping. */
+FIO_IFUNC void fio___sha3_absorb_buf(fio_sha3_s *restrict h) {
+  const size_t rate_words = h->rate >> 3;
+  const uint64_t *w = (const uint64_t *)h->buf;
   for (size_t i = 0; i < rate_words; ++i)
-    h->state[i] ^= fio_buf2u64_le(h->buf + i * 8);
+    h->state[i] ^= fio_ltole64(w[i]);
+  fio___keccak_f1600(h->state);
+}
+
+/* Absorb directly from input pointer (avoids copy to buf for full blocks) */
+FIO_IFUNC void fio___sha3_absorb_ptr(fio_sha3_s *restrict h,
+                                     const uint8_t *restrict p) {
+  const size_t rate_words = h->rate >> 3;
+  for (size_t i = 0; i < rate_words; ++i)
+    h->state[i] ^= fio_buf2u64_le(p + (i << 3));
   fio___keccak_f1600(h->state);
 }
 
@@ -30394,16 +30791,15 @@ SFUNC void fio_sha3_consume(fio_sha3_s *restrict h,
       return;
     }
     FIO_MEMCPY(h->buf + h->buflen, p, fill);
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_buf(h);
     h->buflen = 0;
     p += fill;
     len -= fill;
   }
 
-  /* Process full blocks */
+  /* Process full blocks directly from input (no copy to buf) */
   while (len >= h->rate) {
-    FIO_MEMCPY(h->buf, p, h->rate);
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_ptr(h, p);
     p += h->rate;
     len -= h->rate;
   }
@@ -30423,12 +30819,20 @@ SFUNC void fio_sha3_finalize(fio_sha3_s *restrict h, void *restrict out) {
   h->buf[h->rate - 1] |= 0x80;
 
   /* Final absorb */
-  fio___sha3_absorb(h);
+  fio___sha3_absorb_buf(h);
 
-  /* Squeeze output (little-endian) */
+  /* Squeeze output — copy full words then handle remainder.
+   * State is in native (little-endian) order on LE platforms. */
   uint8_t *o = (uint8_t *)out;
-  for (size_t i = 0; i < h->outlen; ++i)
-    o[i] = (uint8_t)(h->state[i / 8] >> (8 * (i % 8)));
+  const size_t full_words = h->outlen >> 3;
+  for (size_t i = 0; i < full_words; ++i)
+    fio_u2buf64_le(o + (i << 3), h->state[i]);
+  /* Handle remaining bytes (outlen not multiple of 8) */
+  const size_t rem = h->outlen & 7;
+  if (rem) {
+    uint64_t last = fio_ltole64(h->state[full_words]);
+    FIO_MEMCPY(o + (full_words << 3), &last, rem);
+  }
 }
 
 /** Squeeze output from SHAKE (can be called multiple times). */
@@ -30442,18 +30846,41 @@ SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
     FIO_MEMSET(h->buf + h->buflen, 0, h->rate - h->buflen);
     h->buf[h->buflen] = h->delim;
     h->buf[h->rate - 1] |= 0x80;
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_buf(h);
     h->buflen = 0;
     h->outlen = 1; /* Mark as finalized */
   }
 
-  /* Squeeze output — buflen tracks offset within current Keccak state */
+  /* Squeeze output — buflen tracks byte offset within current Keccak state.
+   * Copy full words where possible, byte-by-byte only at boundaries. */
   while (outlen > 0) {
     size_t available = h->rate - h->buflen;
     size_t to_copy = (outlen < available) ? outlen : available;
-    for (size_t i = 0; i < to_copy; ++i) {
-      size_t pos = h->buflen + i;
-      o[i] = (uint8_t)(h->state[pos / 8] >> (8 * (pos % 8)));
+    /* Copy squeeze output using word-aligned access where possible */
+    size_t pos = h->buflen;
+    size_t copied = 0;
+    /* Handle leading partial word */
+    if ((pos & 7) && copied < to_copy) {
+      size_t word_rem = 8 - (pos & 7);
+      if (word_rem > to_copy - copied)
+        word_rem = to_copy - copied;
+      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      for (size_t j = 0; j < word_rem; ++j)
+        o[copied + j] = (uint8_t)(w >> (8 * ((pos + j) & 7)));
+      copied += word_rem;
+      pos += word_rem;
+    }
+    /* Copy full words */
+    while (copied + 8 <= to_copy) {
+      fio_u2buf64_le(o + copied, h->state[pos >> 3]);
+      copied += 8;
+      pos += 8;
+    }
+    /* Handle trailing partial word */
+    if (copied < to_copy) {
+      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      for (size_t j = 0; copied < to_copy; ++j, ++copied)
+        o[copied] = (uint8_t)(w >> (8 * j));
     }
     o += to_copy;
     outlen -= to_copy;
@@ -70710,16 +71137,11 @@ IPC Core - Encryption/Decryption
 
 FIO_IFUNC fio_u256 fio___ipc_get_encryption_key(fio_ipc_s *m) {
   fio_u512 secret = fio_secret();
-  fio_u256 key;
-  /* folding - mix / encrypt secret using secret offset as key */
-  /* this creates a safe ephemeral key */
-  fio_chacha20(secret.u8,
-               sizeof(secret),
-               (secret.u8 + (m->id & 31) + 1),
-               ((char *)&m->timestamp + 4),
-               (m->id & 1023) + m->len);
-  /* use an impossible to predict key offset to derive final key */
-  fio_memcpy32(key.u8, secret.u8 + (secret.u8[2] & 31));
+  /* half step HDKF to derive a safe ephemeral key */
+  fio_u256 key = fio_sha256_hmac((secret.u8 + (m->id & 31) + 1),
+                                 32,
+                                 (char *)&m->timestamp,
+                                 16);
   // FIO_LOG_DDEBUG2("(%d) IPC key: %p...%p",
   //                 fio_io_pid(),
   //                 (void *)(uintptr_t)key.u64[0],

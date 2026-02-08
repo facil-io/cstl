@@ -226,6 +226,10 @@ Intrinsic Availability Flags
 #include <arm_acle.h>
 #include <arm_neon.h>
 #define FIO___HAS_ARM_INTRIN 1
+#if defined(__ARM_FEATURE_SHA3) /* ARMv8.2-A SHA3 extension                    \
+                                   (EOR3/RAX1/XAR/BCAX) */
+#define FIO___HAS_ARM_SHA3_INTRIN 1
+#endif
 #elif defined(__x86_64) && __has_include("immintrin.h") /* x64 Intrinsics? */
 #define FIO___HAS_X86_INTRIN 1
 #include <immintrin.h>
@@ -2268,8 +2272,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   /* any uneven bytes? */
   if (bytes & 63) {
     /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(16) = {0};
-    uint64_t ub[8] FIO_ALIGN(16) = {0};
+    uint64_t ua[8] FIO_ALIGN(64) = {0};
+    uint64_t ub[8] FIO_ALIGN(64) = {0};
     /* all these if statements can run in parallel */
     if (bytes & 32) {
       fio_memcpy32(ua, a);
@@ -2301,8 +2305,8 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     b += bytes & 63;
   }
   while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(16);
-    uint64_t ub[8] FIO_ALIGN(16);
+    uint64_t ua[8] FIO_ALIGN(64);
+    uint64_t ub[8] FIO_ALIGN(64);
     fio_memcpy64(ua, a);
     fio_memcpy64(ub, b);
     for (size_t i = 0; i < 8; ++i)
@@ -3786,10 +3790,6 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
 /* *****************************************************************************
 Vector Types (SIMD / Math)
 ***************************************************************************** */
-#if FIO___HAS_ARM_INTRIN || __has_attribute(vector_size)
-#define FIO_HAS_UX 1
-#endif
-
 #if FIO___HAS_ARM_INTRIN
 /** defines a vector group for a fio_uXXX union */
 #define FIO___UXXX_XGRP_DEF(bits)                                              \
@@ -3850,14 +3850,14 @@ typedef union fio_u256 {
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
-} fio_u256 FIO_ALIGN(16);
+} fio_u256 FIO_ALIGN(32);
 
 /** An unsigned 512bit union type. */
 typedef union fio_u512 {
   fio_u128 u128[4];
   fio_u256 u256[2];
   FIO___UXXX_UGRP_DEF(512);
-} fio_u512 FIO_ALIGN(16);
+} fio_u512 FIO_ALIGN(64);
 
 /** An unsigned 1024bit union type. */
 typedef union fio_u1024 {
@@ -3865,7 +3865,7 @@ typedef union fio_u1024 {
   fio_u256 u256[4];
   fio_u512 u512[2];
   FIO___UXXX_UGRP_DEF(1024);
-} fio_u1024 FIO_ALIGN(16);
+} fio_u1024 FIO_ALIGN(64);
 
 /** An unsigned 2048bit union type. */
 typedef union fio_u2048 {
@@ -3874,7 +3874,7 @@ typedef union fio_u2048 {
   fio_u512 u512[4];
   fio_u1024 u1024[2];
   FIO___UXXX_UGRP_DEF(2048);
-} fio_u2048 FIO_ALIGN(16);
+} fio_u2048 FIO_ALIGN(64);
 
 /** An unsigned 4096bit union type. */
 typedef union fio_u4096 {
@@ -3884,7 +3884,7 @@ typedef union fio_u4096 {
   fio_u1024 u1024[4];
   fio_u2048 u2048[2];
   FIO___UXXX_UGRP_DEF(4096);
-} fio_u4096 FIO_ALIGN(16);
+} fio_u4096 FIO_ALIGN(64);
 
 #undef FIO___UXXX_XGRP_DEF
 #undef FIO___UXXX_UGRP_DEF
@@ -3985,8 +3985,6 @@ The loop count is computed dynamically via sizeof, yielding:
 - Scalar: bits/64 iterations (64-bit scalars in .u64[])
 ***************************************************************************** */
 
-#if FIO_HAS_UX && !defined(DEBUG)
-
 /** Performs `a op b` (+,-, *, etc') using vector member .x##bits[]. */
 #define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
   do {                                                                         \
@@ -4009,27 +4007,19 @@ The loop count is computed dynamically via sizeof, yielding:
       (t).x##bits[i__] = op(a).x##bits[i__];                                   \
   } while (0)
 
-#else /* FIO_HAS_UX */
+/** Performs ternary `t = f(a, b, c)` lane-wise using vector .x##bits[]. */
+#define FIO_MATH_UXXX_TOP(t, a, b, c, bits, expr)                              \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t).x##bits) / sizeof((t).x##bits[0])); \
+         ++i__)                                                                \
+      (t).x##bits[i__] =                                                       \
+          expr((a).x##bits[i__], (b).x##bits[i__], (c).x##bits[i__]);          \
+  } while (0)
 
-#define FIO_MATH_UXXX_OP(t, a, b, bits, op)                                    \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = (a).u##bits[i__] op(b).u##bits[i__];                  \
-  } while (0)
-#define FIO_MATH_UXXX_COP(t, a, b, bits, op)                                   \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = (a).u##bits[i__] op(b);                               \
-  } while (0)
-#define FIO_MATH_UXXX_SOP(t, a, bits, op)                                      \
-  do {                                                                         \
-    for (size_t i__ = 0; i__ < (sizeof((t).u##bits) / sizeof((t).u##bits[0])); \
-         ++i__)                                                                \
-      (t).u##bits[i__] = op((a).u##bits[i__]);                                 \
-  } while (0)
-#endif /* FIO_HAS_UX */
+/* Ternary expression helpers for FIO_MATH_UXXX_TOP */
+#define FIO___EXPR_MUX(x, y, z)  ((z) ^ ((x) & ((y) ^ (z))))
+#define FIO___EXPR_MAJ(x, y, z)  (((x) & (y)) | ((z) & ((x) | (y))))
+#define FIO___EXPR_XOR3(x, y, z) ((x) ^ (y) ^ (z))
 
 /** Performs vector reduction for using `op` (+,-, *, etc'), storing to `t`. */
 #define FIO_MATH_UXXX_REDUCE(t, a, bits, op)                                   \
@@ -4081,6 +4071,32 @@ The loop count is computed dynamically via sizeof, yielding:
     FIO_MATH_UXXX_OP(((target)[0]), ((a)[0]), ((b)[0]), bits, op);             \
   }
 
+#define FIO___UXXX_DEF_TOP(total_bits, bits, opnm, expr)                       \
+  FIO_IFUNC void fio_u##total_bits##_##opnm##bits(                             \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const fio_u##total_bits *b,                                              \
+      const fio_u##total_bits *c) {                                            \
+    FIO_MATH_UXXX_TOP(((target)[0]),                                           \
+                      ((a)[0]),                                                \
+                      ((b)[0]),                                                \
+                      ((c)[0]),                                                \
+                      bits,                                                    \
+                      expr);                                                   \
+  }
+#define FIO___UXXX_DEF_TOP2(total_bits, bits, opnm, expr)                      \
+  FIO_IFUNC void fio_u##total_bits##_##opnm(fio_u##total_bits *target,         \
+                                            const fio_u##total_bits *a,        \
+                                            const fio_u##total_bits *b,        \
+                                            const fio_u##total_bits *c) {      \
+    FIO_MATH_UXXX_TOP(((target)[0]),                                           \
+                      ((a)[0]),                                                \
+                      ((b)[0]),                                                \
+                      ((c)[0]),                                                \
+                      bits,                                                    \
+                      expr);                                                   \
+  }
+
 #define FIO___UXXX_DEF_OP4T_INNER(total_bits, opnm, op)                        \
   FIO___UXXX_DEF_OP(total_bits, 8, opnm, op)                                   \
   FIO___UXXX_DEF_OP(total_bits, 16, opnm, op)                                  \
@@ -4119,7 +4135,17 @@ The loop count is computed dynamically via sizeof, yielding:
     fio_u##total_bits##_cand64(&mask, &mask, (uint64_t)0ULL - cond);           \
     fio_u##total_bits##_xor(a, a, &mask);                                      \
     fio_u##total_bits##_xor(b, b, &mask);                                      \
-  }
+  }                                                                            \
+  /* Ternary operations: mux (choose/Ch), maj (majority/Maj), 3xor (parity) */ \
+  FIO___UXXX_DEF_TOP(total_bits, 32, mux, FIO___EXPR_MUX)                      \
+  FIO___UXXX_DEF_TOP(total_bits, 64, mux, FIO___EXPR_MUX)                      \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, mux, FIO___EXPR_MUX)                     \
+  FIO___UXXX_DEF_TOP(total_bits, 32, maj, FIO___EXPR_MAJ)                      \
+  FIO___UXXX_DEF_TOP(total_bits, 64, maj, FIO___EXPR_MAJ)                      \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, maj, FIO___EXPR_MAJ)                     \
+  FIO___UXXX_DEF_TOP(total_bits, 32, 3xor, FIO___EXPR_XOR3)                    \
+  FIO___UXXX_DEF_TOP(total_bits, 64, 3xor, FIO___EXPR_XOR3)                    \
+  FIO___UXXX_DEF_TOP2(total_bits, 64, 3xor, FIO___EXPR_XOR3)
 
 FIO___UXXX_DEF_OP4T(128)
 FIO___UXXX_DEF_OP4T(256)
@@ -4132,6 +4158,11 @@ FIO___UXXX_DEF_OP4T(4096)
 #undef FIO___UXXX_DEF_OP4T_INNER
 #undef FIO___UXXX_DEF_OP
 #undef FIO___UXXX_DEF_OP2
+#undef FIO___UXXX_DEF_TOP
+#undef FIO___UXXX_DEF_TOP2
+#undef FIO___EXPR_MUX
+#undef FIO___EXPR_MAJ
+#undef FIO___EXPR_XOR3
 
 /* *****************************************************************************
 SIMD-Optimized Vector Operations (XOR, AND, OR) - Value Semantics
@@ -4140,8 +4171,7 @@ These provide return-by-value vector operations that leverage SIMD when
 available. The naming convention is fio_uXXX_<op>v (v = value semantics).
 
 Uses the existing FIO_MATH_UXXX_OP macro which correctly accesses union members:
-- .x64[], .x32[] etc. when FIO_HAS_UX is defined (vector types)
-- .u64[], .u32[] etc. otherwise (scalar fallback)
+- .x64[], .x32[] etc. vector types or scalar arrays (depending on availability)
 
 IMPORTANT: The `64` parameter in FIO_MATH_UXXX_OP selects the union member
 (.x64), NOT the element size. The loop count is computed dynamically:

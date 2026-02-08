@@ -182,88 +182,144 @@ static const uint64_t fio___keccak_rc[24] = {
     0x000000000000800aULL, 0x800000008000000aULL, 0x8000000080008081ULL,
     0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL};
 
-/* Keccak rotation offsets */
-static const uint8_t fio___keccak_rot[25] = {
-    0,  1,  62, 28, 27, /* row 0 */
-    36, 44, 6,  55, 20, /* row 1 */
-    3,  10, 43, 25, 39, /* row 2 */
-    41, 45, 15, 21, 8,  /* row 3 */
-    18, 2,  61, 56, 14  /* row 4 */
-};
-
-/* Keccak-f[1600] permutation */
+/* Keccak-f[1600] permutation — optimized scalar implementation.
+ *
+ * Fuses theta+rho+pi per-row, then applies chi with 5 temporaries per row.
+ * Eliminates the B[25] temporary array. State values that would be clobbered
+ * by earlier rows' chi are saved before processing.
+ *
+ * Note: ARM SHA3 NEON (EOR3/RAX1/BCAX) was attempted but regressed ~50% due
+ * to GPR↔NEON transfer overhead. Pure scalar compiles to excellent ARM64 code
+ * with clang -O3 (all state words in GPRs, fully unrolled). */
 FIO_IFUNC void fio___keccak_f1600(uint64_t *state) {
-  uint64_t C[5], D[5], B[25];
+  uint64_t C[5], t0, t1, t2, t3, t4;
+  /* Save slots for state values clobbered by earlier rows' chi.
+   * Row 0 writes [0..4]:  save s1(row2), s2(row4), s3(row1), s4(row3)
+   * Row 1 writes [5..9]:  save s5(row3), s7(row2), s8(row4)
+   * Row 2 writes [10..14]: save s11(row3), s14(row4)
+   * Row 3 writes [15..19]: save s15(row4) */
+  uint64_t s1, s2, s3, s4, s5, s7, s8, s11, s14, s15;
 
   for (size_t round = 0; round < 24; ++round) {
-    /* Theta step */
+    /* Theta: compute column parities */
     C[0] = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20];
     C[1] = state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21];
     C[2] = state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22];
     C[3] = state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23];
     C[4] = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
 
-    D[0] = C[4] ^ fio_lrot64(C[1], 1);
-    D[1] = C[0] ^ fio_lrot64(C[2], 1);
-    D[2] = C[1] ^ fio_lrot64(C[3], 1);
-    D[3] = C[2] ^ fio_lrot64(C[4], 1);
-    D[4] = C[3] ^ fio_lrot64(C[0], 1);
+    t0 = C[4] ^ fio_lrot64(C[1], 1); /* D[0] */
+    t1 = C[0] ^ fio_lrot64(C[2], 1); /* D[1] */
+    t2 = C[1] ^ fio_lrot64(C[3], 1); /* D[2] */
+    t3 = C[2] ^ fio_lrot64(C[4], 1); /* D[3] */
+    t4 = C[3] ^ fio_lrot64(C[0], 1); /* D[4] */
 
-    for (size_t i = 0; i < 25; i += 5) {
-      state[i + 0] ^= D[0];
-      state[i + 1] ^= D[1];
-      state[i + 2] ^= D[2];
-      state[i + 3] ^= D[3];
-      state[i + 4] ^= D[4];
-    }
+    /* Apply theta to state and save values needed by later rows */
+    state[0] ^= t0;
+    s1 = state[1] ^ t1;
+    s2 = state[2] ^ t2;
+    s3 = state[3] ^ t3;
+    s4 = state[4] ^ t4;
+    s5 = state[5] ^ t0;
+    state[6] ^= t1;
+    s7 = state[7] ^ t2;
+    s8 = state[8] ^ t3;
+    state[9] ^= t4;
+    state[10] ^= t0;
+    s11 = state[11] ^ t1;
+    state[12] ^= t2;
+    state[13] ^= t3;
+    s14 = state[14] ^ t4;
+    s15 = state[15] ^ t0;
+    state[16] ^= t1;
+    state[17] ^= t2;
+    state[18] ^= t3;
+    state[19] ^= t4;
+    state[20] ^= t0;
+    state[21] ^= t1;
+    state[22] ^= t2;
+    state[23] ^= t3;
+    state[24] ^= t4;
 
-    /* Rho and Pi steps combined */
-    B[0] = state[0];
-    B[1] = fio_lrot64(state[6], 44);
-    B[2] = fio_lrot64(state[12], 43);
-    B[3] = fio_lrot64(state[18], 21);
-    B[4] = fio_lrot64(state[24], 14);
-    B[5] = fio_lrot64(state[3], 28);
-    B[6] = fio_lrot64(state[9], 20);
-    B[7] = fio_lrot64(state[10], 3);
-    B[8] = fio_lrot64(state[16], 45);
-    B[9] = fio_lrot64(state[22], 61);
-    B[10] = fio_lrot64(state[1], 1);
-    B[11] = fio_lrot64(state[7], 6);
-    B[12] = fio_lrot64(state[13], 25);
-    B[13] = fio_lrot64(state[19], 8);
-    B[14] = fio_lrot64(state[20], 18);
-    B[15] = fio_lrot64(state[4], 27);
-    B[16] = fio_lrot64(state[5], 36);
-    B[17] = fio_lrot64(state[11], 10);
-    B[18] = fio_lrot64(state[17], 15);
-    B[19] = fio_lrot64(state[23], 56);
-    B[20] = fio_lrot64(state[2], 62);
-    B[21] = fio_lrot64(state[8], 55);
-    B[22] = fio_lrot64(state[14], 39);
-    B[23] = fio_lrot64(state[15], 41);
-    B[24] = fio_lrot64(state[21], 2);
+    /* Row 0: rho+pi then chi+iota */
+    t0 = state[0];
+    t1 = fio_lrot64(state[6], 44);
+    t2 = fio_lrot64(state[12], 43);
+    t3 = fio_lrot64(state[18], 21);
+    t4 = fio_lrot64(state[24], 14);
+    state[0] = t0 ^ ((~t1) & t2) ^ fio___keccak_rc[round];
+    state[1] = t1 ^ ((~t2) & t3);
+    state[2] = t2 ^ ((~t3) & t4);
+    state[3] = t3 ^ ((~t4) & t0);
+    state[4] = t4 ^ ((~t0) & t1);
 
-    /* Chi step */
-    for (size_t i = 0; i < 25; i += 5) {
-      state[i + 0] = B[i + 0] ^ ((~B[i + 1]) & B[i + 2]);
-      state[i + 1] = B[i + 1] ^ ((~B[i + 2]) & B[i + 3]);
-      state[i + 2] = B[i + 2] ^ ((~B[i + 3]) & B[i + 4]);
-      state[i + 3] = B[i + 3] ^ ((~B[i + 4]) & B[i + 0]);
-      state[i + 4] = B[i + 4] ^ ((~B[i + 0]) & B[i + 1]);
-    }
+    /* Row 1: uses saved s3 (was state[3]) */
+    t0 = fio_lrot64(s3, 28);
+    t1 = fio_lrot64(state[9], 20);
+    t2 = fio_lrot64(state[10], 3);
+    t3 = fio_lrot64(state[16], 45);
+    t4 = fio_lrot64(state[22], 61);
+    state[5] = t0 ^ ((~t1) & t2);
+    state[6] = t1 ^ ((~t2) & t3);
+    state[7] = t2 ^ ((~t3) & t4);
+    state[8] = t3 ^ ((~t4) & t0);
+    state[9] = t4 ^ ((~t0) & t1);
 
-    /* Iota step */
-    state[0] ^= fio___keccak_rc[round];
+    /* Row 2: uses saved s1 (was state[1]), s7 (was state[7]) */
+    t0 = fio_lrot64(s1, 1);
+    t1 = fio_lrot64(s7, 6);
+    t2 = fio_lrot64(state[13], 25);
+    t3 = fio_lrot64(state[19], 8);
+    t4 = fio_lrot64(state[20], 18);
+    state[10] = t0 ^ ((~t1) & t2);
+    state[11] = t1 ^ ((~t2) & t3);
+    state[12] = t2 ^ ((~t3) & t4);
+    state[13] = t3 ^ ((~t4) & t0);
+    state[14] = t4 ^ ((~t0) & t1);
+
+    /* Row 3: uses saved s4, s5, s11 (were state[4], state[5], state[11]) */
+    t0 = fio_lrot64(s4, 27);
+    t1 = fio_lrot64(s5, 36);
+    t2 = fio_lrot64(s11, 10);
+    t3 = fio_lrot64(state[17], 15);
+    t4 = fio_lrot64(state[23], 56);
+    state[15] = t0 ^ ((~t1) & t2);
+    state[16] = t1 ^ ((~t2) & t3);
+    state[17] = t2 ^ ((~t3) & t4);
+    state[18] = t3 ^ ((~t4) & t0);
+    state[19] = t4 ^ ((~t0) & t1);
+
+    /* Row 4: uses saved s2, s8, s14, s15 */
+    t0 = fio_lrot64(s2, 62);
+    t1 = fio_lrot64(s8, 55);
+    t2 = fio_lrot64(s14, 39);
+    t3 = fio_lrot64(s15, 41);
+    t4 = fio_lrot64(state[21], 2);
+    state[20] = t0 ^ ((~t1) & t2);
+    state[21] = t1 ^ ((~t2) & t3);
+    state[22] = t2 ^ ((~t3) & t4);
+    state[23] = t3 ^ ((~t4) & t0);
+    state[24] = t4 ^ ((~t0) & t1);
   }
 }
 
-/* Absorb a block into the state */
-FIO_IFUNC void fio___sha3_absorb(fio_sha3_s *restrict h) {
-  /* XOR rate bytes into state (little-endian) */
-  size_t rate_words = h->rate / 8;
+/* Absorb: XOR rate bytes from buf into state, then permute.
+ * On little-endian (ARM64, x86), state words are already in native order,
+ * so we can XOR directly as uint64_t without byte-swapping. */
+FIO_IFUNC void fio___sha3_absorb_buf(fio_sha3_s *restrict h) {
+  const size_t rate_words = h->rate >> 3;
+  const uint64_t *w = (const uint64_t *)h->buf;
   for (size_t i = 0; i < rate_words; ++i)
-    h->state[i] ^= fio_buf2u64_le(h->buf + i * 8);
+    h->state[i] ^= fio_ltole64(w[i]);
+  fio___keccak_f1600(h->state);
+}
+
+/* Absorb directly from input pointer (avoids copy to buf for full blocks) */
+FIO_IFUNC void fio___sha3_absorb_ptr(fio_sha3_s *restrict h,
+                                     const uint8_t *restrict p) {
+  const size_t rate_words = h->rate >> 3;
+  for (size_t i = 0; i < rate_words; ++i)
+    h->state[i] ^= fio_buf2u64_le(p + (i << 3));
   fio___keccak_f1600(h->state);
 }
 
@@ -282,16 +338,15 @@ SFUNC void fio_sha3_consume(fio_sha3_s *restrict h,
       return;
     }
     FIO_MEMCPY(h->buf + h->buflen, p, fill);
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_buf(h);
     h->buflen = 0;
     p += fill;
     len -= fill;
   }
 
-  /* Process full blocks */
+  /* Process full blocks directly from input (no copy to buf) */
   while (len >= h->rate) {
-    FIO_MEMCPY(h->buf, p, h->rate);
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_ptr(h, p);
     p += h->rate;
     len -= h->rate;
   }
@@ -311,12 +366,20 @@ SFUNC void fio_sha3_finalize(fio_sha3_s *restrict h, void *restrict out) {
   h->buf[h->rate - 1] |= 0x80;
 
   /* Final absorb */
-  fio___sha3_absorb(h);
+  fio___sha3_absorb_buf(h);
 
-  /* Squeeze output (little-endian) */
+  /* Squeeze output — copy full words then handle remainder.
+   * State is in native (little-endian) order on LE platforms. */
   uint8_t *o = (uint8_t *)out;
-  for (size_t i = 0; i < h->outlen; ++i)
-    o[i] = (uint8_t)(h->state[i / 8] >> (8 * (i % 8)));
+  const size_t full_words = h->outlen >> 3;
+  for (size_t i = 0; i < full_words; ++i)
+    fio_u2buf64_le(o + (i << 3), h->state[i]);
+  /* Handle remaining bytes (outlen not multiple of 8) */
+  const size_t rem = h->outlen & 7;
+  if (rem) {
+    uint64_t last = fio_ltole64(h->state[full_words]);
+    FIO_MEMCPY(o + (full_words << 3), &last, rem);
+  }
 }
 
 /** Squeeze output from SHAKE (can be called multiple times). */
@@ -330,18 +393,41 @@ SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
     FIO_MEMSET(h->buf + h->buflen, 0, h->rate - h->buflen);
     h->buf[h->buflen] = h->delim;
     h->buf[h->rate - 1] |= 0x80;
-    fio___sha3_absorb(h);
+    fio___sha3_absorb_buf(h);
     h->buflen = 0;
     h->outlen = 1; /* Mark as finalized */
   }
 
-  /* Squeeze output — buflen tracks offset within current Keccak state */
+  /* Squeeze output — buflen tracks byte offset within current Keccak state.
+   * Copy full words where possible, byte-by-byte only at boundaries. */
   while (outlen > 0) {
     size_t available = h->rate - h->buflen;
     size_t to_copy = (outlen < available) ? outlen : available;
-    for (size_t i = 0; i < to_copy; ++i) {
-      size_t pos = h->buflen + i;
-      o[i] = (uint8_t)(h->state[pos / 8] >> (8 * (pos % 8)));
+    /* Copy squeeze output using word-aligned access where possible */
+    size_t pos = h->buflen;
+    size_t copied = 0;
+    /* Handle leading partial word */
+    if ((pos & 7) && copied < to_copy) {
+      size_t word_rem = 8 - (pos & 7);
+      if (word_rem > to_copy - copied)
+        word_rem = to_copy - copied;
+      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      for (size_t j = 0; j < word_rem; ++j)
+        o[copied + j] = (uint8_t)(w >> (8 * ((pos + j) & 7)));
+      copied += word_rem;
+      pos += word_rem;
+    }
+    /* Copy full words */
+    while (copied + 8 <= to_copy) {
+      fio_u2buf64_le(o + copied, h->state[pos >> 3]);
+      copied += 8;
+      pos += 8;
+    }
+    /* Handle trailing partial word */
+    if (copied < to_copy) {
+      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      for (size_t j = 0; copied < to_copy; ++j, ++copied)
+        o[copied] = (uint8_t)(w >> (8 * j));
     }
     o += to_copy;
     outlen -= to_copy;

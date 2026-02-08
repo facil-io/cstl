@@ -655,26 +655,13 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
   uint64_t a = h->u64[0], b = h->u64[1], c = h->u64[2], d = h->u64[3];
   uint64_t e = h->u64[4], f = h->u64[5], g = h->u64[6], hv = h->u64[7];
 
-  /* Message schedule array */
-  uint64_t w[16];
-
-  /* Load and byte-swap message block - unrolled for better performance */
-  w[0] = fio_buf2u64_be(block);
-  w[1] = fio_buf2u64_be(block + 8);
-  w[2] = fio_buf2u64_be(block + 16);
-  w[3] = fio_buf2u64_be(block + 24);
-  w[4] = fio_buf2u64_be(block + 32);
-  w[5] = fio_buf2u64_be(block + 40);
-  w[6] = fio_buf2u64_be(block + 48);
-  w[7] = fio_buf2u64_be(block + 56);
-  w[8] = fio_buf2u64_be(block + 64);
-  w[9] = fio_buf2u64_be(block + 72);
-  w[10] = fio_buf2u64_be(block + 80);
-  w[11] = fio_buf2u64_be(block + 88);
-  w[12] = fio_buf2u64_be(block + 96);
-  w[13] = fio_buf2u64_be(block + 104);
-  w[14] = fio_buf2u64_be(block + 112);
-  w[15] = fio_buf2u64_be(block + 120);
+  /* Message schedule — use fio_u1024 for aligned storage */
+  fio_u1024 wv;
+  fio_memcpy128(wv.u8, block);
+  /* Byte-swap to big-endian (no-op on big-endian systems) */
+  for (size_t i = 0; i < 16; ++i)
+    wv.u64[i] = fio_lton64(wv.u64[i]);
+  uint64_t *w = wv.u64;
 
 /* SHA-512 Sigma functions - using optimized helpers */
 #define FIO___S512_S0(x) fio_xor_rrot3_64(x, 28, 34, 39)

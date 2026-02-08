@@ -664,16 +664,11 @@ IPC Core - Encryption/Decryption
 
 FIO_IFUNC fio_u256 fio___ipc_get_encryption_key(fio_ipc_s *m) {
   fio_u512 secret = fio_secret();
-  fio_u256 key;
-  /* folding - mix / encrypt secret using secret offset as key */
-  /* this creates a safe ephemeral key */
-  fio_chacha20(secret.u8,
-               sizeof(secret),
-               (secret.u8 + (m->id & 31) + 1),
-               ((char *)&m->timestamp + 4),
-               (m->id & 1023) + m->len);
-  /* use an impossible to predict key offset to derive final key */
-  fio_memcpy32(key.u8, secret.u8 + (secret.u8[2] & 31));
+  /* half step HDKF to derive a safe ephemeral key */
+  fio_u256 key = fio_sha256_hmac((secret.u8 + (m->id & 31) + 1),
+                                 32,
+                                 (char *)&m->timestamp,
+                                 16);
   // FIO_LOG_DDEBUG2("(%d) IPC key: %p...%p",
   //                 fio_io_pid(),
   //                 (void *)(uintptr_t)key.u64[0],

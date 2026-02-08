@@ -104,18 +104,21 @@ FIO_SFUNC uintptr_t fio___perf_chacha20poly1305_enc_wrapper(char *msg,
   return (uintptr_t)result[0];
 }
 
-/* ChaCha20-Poly1305 decrypt wrapper */
+/* ChaCha20-Poly1305 decrypt wrapper
+ * Calls auth + chacha20 directly to replicate the exact work of a successful
+ * fio_chacha20_poly1305_dec without needing a pre-computed valid MAC tag.
+ * This avoids calling enc inside the wrapper (which would measure enc+dec). */
 FIO_SFUNC uintptr_t fio___perf_chacha20poly1305_dec_wrapper(char *msg,
                                                             size_t len) {
-  uint64_t result[2] = {0};
+  uint64_t mac[2] = {0};
   char *key = (char *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c"
                       "\x0d\x0e\x0f"
                       "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c"
                       "\x1d\x1e\x1f";
   char *nounce = (char *)"\x00\x00\x00\x00\x00\x00\x00\x4a\x00\x00\x00\x00";
-  fio_poly1305_auth(result, msg, len, NULL, 0, key);
+  fio_chacha20_poly1305_auth(mac, msg, len, NULL, 0, key, nounce);
   fio_chacha20(msg, len, key, nounce, 1);
-  return (uintptr_t)result[0];
+  return (uintptr_t)mac[0];
 }
 
 /* AES-128-GCM wrapper */
@@ -165,25 +168,31 @@ FIO_SFUNC void fio___perf_sha(void) {
 
   /* SHA-1 */
   fprintf(stderr, "\n\t  SHA-1:\n");
-  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 5, 0, 0);
-  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 7, 0, 0);
-  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 13, 0, 1);
+  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 6, 0, 0);
+  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 10, 0, 0);
+  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 13, 0, 0);
+  fio_test_hash_function(fio___perf_sha1_wrapper, (char *)"fio_sha1", 16, 0, 1);
 
   /* SHA-256 */
   fprintf(stderr, "\n\t  SHA-256:\n");
   fio_test_hash_function(fio___perf_sha256_wrapper,
                          (char *)"fio_sha256",
-                         5,
+                         6,
                          0,
                          0);
   fio_test_hash_function(fio___perf_sha256_wrapper,
                          (char *)"fio_sha256",
-                         7,
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_sha256_wrapper,
                          (char *)"fio_sha256",
                          13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_sha256_wrapper,
+                         (char *)"fio_sha256",
+                         16,
                          0,
                          1);
 
@@ -191,17 +200,22 @@ FIO_SFUNC void fio___perf_sha(void) {
   fprintf(stderr, "\n\t  SHA-512:\n");
   fio_test_hash_function(fio___perf_sha512_wrapper,
                          (char *)"fio_sha512",
-                         5,
+                         6,
                          0,
                          0);
   fio_test_hash_function(fio___perf_sha512_wrapper,
                          (char *)"fio_sha512",
-                         7,
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_sha512_wrapper,
                          (char *)"fio_sha512",
                          13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_sha512_wrapper,
+                         (char *)"fio_sha512",
+                         16,
                          0,
                          1);
 }
@@ -217,17 +231,22 @@ FIO_SFUNC void fio___perf_blake2(void) {
   fprintf(stderr, "\n\t  Blake2b:\n");
   fio_test_hash_function(fio___perf_blake2b_wrapper,
                          (char *)"fio_blake2b",
-                         5,
+                         6,
                          0,
                          0);
   fio_test_hash_function(fio___perf_blake2b_wrapper,
                          (char *)"fio_blake2b",
-                         7,
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_blake2b_wrapper,
                          (char *)"fio_blake2b",
                          13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2b_wrapper,
+                         (char *)"fio_blake2b",
+                         16,
                          0,
                          1);
 
@@ -235,17 +254,22 @@ FIO_SFUNC void fio___perf_blake2(void) {
   fprintf(stderr, "\n\t  Blake2s:\n");
   fio_test_hash_function(fio___perf_blake2s_wrapper,
                          (char *)"fio_blake2s",
-                         5,
+                         6,
                          0,
                          0);
   fio_test_hash_function(fio___perf_blake2s_wrapper,
                          (char *)"fio_blake2s",
-                         7,
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_blake2s_wrapper,
                          (char *)"fio_blake2s",
                          13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_blake2s_wrapper,
+                         (char *)"fio_blake2s",
+                         16,
                          0,
                          1);
 }
@@ -261,7 +285,12 @@ FIO_SFUNC void fio___perf_chacha(void) {
   fprintf(stderr, "\n\t  Poly1305:\n");
   fio_test_hash_function(fio___perf_poly1305_wrapper,
                          (char *)"fio_poly1305",
-                         7,
+                         6,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_poly1305_wrapper,
+                         (char *)"fio_poly1305",
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_poly1305_wrapper,
@@ -270,9 +299,9 @@ FIO_SFUNC void fio___perf_chacha(void) {
                          0,
                          0);
   fio_test_hash_function(fio___perf_poly1305_wrapper,
-                         (char *)"fio_poly1305 (unaligned)",
-                         13,
-                         3,
+                         (char *)"fio_poly1305",
+                         16,
+                         0,
                          0);
 
   /* ChaCha20 */
@@ -284,7 +313,7 @@ FIO_SFUNC void fio___perf_chacha(void) {
                          0);
   fio_test_hash_function(fio___perf_chacha20_wrapper,
                          (char *)"fio_chacha20",
-                         7,
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_chacha20_wrapper,
@@ -293,16 +322,41 @@ FIO_SFUNC void fio___perf_chacha(void) {
                          0,
                          0);
   fio_test_hash_function(fio___perf_chacha20_wrapper,
-                         (char *)"fio_chacha20 (unaligned)",
-                         13,
-                         3,
+                         (char *)"fio_chacha20",
+                         16,
+                         0,
                          0);
 
   /* ChaCha20-Poly1305 */
   fprintf(stderr, "\n\t  ChaCha20-Poly1305:\n");
+  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
+                         6,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
+                         10,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
+                         13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
+                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
+                         16,
+                         0,
+                         0);
   fio_test_hash_function(fio___perf_chacha20poly1305_dec_wrapper,
                          (char *)"ChaCha20Poly1305 (auth+decrypt)",
-                         7,
+                         6,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_chacha20poly1305_dec_wrapper,
+                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_chacha20poly1305_dec_wrapper,
@@ -310,14 +364,9 @@ FIO_SFUNC void fio___perf_chacha(void) {
                          13,
                          0,
                          0);
-  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
-                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
-                         7,
-                         0,
-                         0);
-  fio_test_hash_function(fio___perf_chacha20poly1305_enc_wrapper,
-                         (char *)"ChaCha20Poly1305 (encrypt+MAC)",
-                         13,
+  fio_test_hash_function(fio___perf_chacha20poly1305_dec_wrapper,
+                         (char *)"ChaCha20Poly1305 (auth+decrypt)",
+                         16,
                          0,
                          0);
 }
@@ -341,7 +390,12 @@ FIO_SFUNC void fio___perf_aes(void) {
   fprintf(stderr, "\n\t  AES-128-GCM:\n");
   fio_test_hash_function(fio___perf_aes128_gcm_wrapper,
                          (char *)"fio_aes128_gcm",
-                         7,
+                         6,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_aes128_gcm_wrapper,
+                         (char *)"fio_aes128_gcm",
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_aes128_gcm_wrapper,
@@ -349,17 +403,32 @@ FIO_SFUNC void fio___perf_aes(void) {
                          13,
                          0,
                          0);
+  fio_test_hash_function(fio___perf_aes128_gcm_wrapper,
+                         (char *)"fio_aes128_gcm",
+                         16,
+                         0,
+                         0);
 
   /* AES-256-GCM */
   fprintf(stderr, "\n\t  AES-256-GCM:\n");
   fio_test_hash_function(fio___perf_aes256_gcm_wrapper,
                          (char *)"fio_aes256_gcm",
-                         7,
+                         6,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_aes256_gcm_wrapper,
+                         (char *)"fio_aes256_gcm",
+                         10,
                          0,
                          0);
   fio_test_hash_function(fio___perf_aes256_gcm_wrapper,
                          (char *)"fio_aes256_gcm",
                          13,
+                         0,
+                         0);
+  fio_test_hash_function(fio___perf_aes256_gcm_wrapper,
+                         (char *)"fio_aes256_gcm",
+                         16,
                          0,
                          0);
 }
@@ -516,6 +585,7 @@ OpenSSL Comparison Benchmarks (Conditional Compilation)
 #ifdef HAVE_OPENSSL
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/params.h>
 
 /* Benchmarking macro for OpenSSL */
 #define OPENSSL_BENCH(name_str, size_bytes, code_block)                        \
@@ -542,26 +612,28 @@ OpenSSL Comparison Benchmarks (Conditional Compilation)
 
 /* OpenSSL SHA-1 benchmark */
 FIO_SFUNC void openssl_bench_sha1(void) {
-  unsigned char data_16[16];
-  unsigned char data_128[128];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
   unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
   unsigned char digest[20];
   unsigned int digest_len;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  fio_rand_bytes(data_16, sizeof(data_16));
-  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
-  OPENSSL_BENCH("OpenSSL SHA-1 (16 bytes)", 16, {
+  OPENSSL_BENCH("OpenSSL SHA-1 (64 bytes)", 64, {
     EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
-    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestUpdate(ctx, data_64, 64);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
-  OPENSSL_BENCH("OpenSSL SHA-1 (128 bytes)", 128, {
+  OPENSSL_BENCH("OpenSSL SHA-1 (1024 bytes)", 1024, {
     EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
-    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestUpdate(ctx, data_1024, 1024);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
@@ -571,31 +643,39 @@ FIO_SFUNC void openssl_bench_sha1(void) {
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
+  OPENSSL_BENCH("OpenSSL SHA-1 (65536 bytes)", 65536, {
+    EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
+    EVP_DigestUpdate(ctx, data_65536, 65536);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
   EVP_MD_CTX_free(ctx);
 }
 
 /* OpenSSL SHA-256 benchmark */
 FIO_SFUNC void openssl_bench_sha256(void) {
-  unsigned char data_16[16];
-  unsigned char data_128[128];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
   unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
   unsigned char digest[32];
   unsigned int digest_len;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  fio_rand_bytes(data_16, sizeof(data_16));
-  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
-  OPENSSL_BENCH("OpenSSL SHA-256 (16 bytes)", 16, {
+  OPENSSL_BENCH("OpenSSL SHA-256 (64 bytes)", 64, {
     EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestUpdate(ctx, data_64, 64);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
-  OPENSSL_BENCH("OpenSSL SHA-256 (128 bytes)", 128, {
+  OPENSSL_BENCH("OpenSSL SHA-256 (1024 bytes)", 1024, {
     EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestUpdate(ctx, data_1024, 1024);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
@@ -605,37 +685,51 @@ FIO_SFUNC void openssl_bench_sha256(void) {
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
+  OPENSSL_BENCH("OpenSSL SHA-256 (65536 bytes)", 65536, {
+    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
+    EVP_DigestUpdate(ctx, data_65536, 65536);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
   EVP_MD_CTX_free(ctx);
 }
 
 /* OpenSSL SHA-512 benchmark */
 FIO_SFUNC void openssl_bench_sha512(void) {
-  unsigned char data_16[16];
-  unsigned char data_128[128];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
   unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
   unsigned char digest[64];
   unsigned int digest_len;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  fio_rand_bytes(data_16, sizeof(data_16));
-  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
-  OPENSSL_BENCH("OpenSSL SHA-512 (16 bytes)", 16, {
+  OPENSSL_BENCH("OpenSSL SHA-512 (64 bytes)", 64, {
     EVP_DigestInit_ex(ctx, EVP_sha512(), NULL);
-    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestUpdate(ctx, data_64, 64);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
-  OPENSSL_BENCH("OpenSSL SHA-512 (128 bytes)", 128, {
+  OPENSSL_BENCH("OpenSSL SHA-512 (1024 bytes)", 1024, {
     EVP_DigestInit_ex(ctx, EVP_sha512(), NULL);
-    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestUpdate(ctx, data_1024, 1024);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
   OPENSSL_BENCH("OpenSSL SHA-512 (8192 bytes)", 8192, {
     EVP_DigestInit_ex(ctx, EVP_sha512(), NULL);
     EVP_DigestUpdate(ctx, data_8192, 8192);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL SHA-512 (65536 bytes)", 65536, {
+    EVP_DigestInit_ex(ctx, EVP_sha512(), NULL);
+    EVP_DigestUpdate(ctx, data_65536, 65536);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
@@ -649,7 +743,8 @@ FIO_SFUNC void openssl_bench_chacha20_poly1305(void) {
   unsigned char data_64[64];
   unsigned char data_1024[1024];
   unsigned char data_8192[8192];
-  unsigned char ciphertext[8192 + 16]; /* +16 for tag */
+  unsigned char data_65536[65536];
+  unsigned char ciphertext[65536 + 16]; /* +16 for tag */
   unsigned char tag[16];
   int len;
 
@@ -658,6 +753,7 @@ FIO_SFUNC void openssl_bench_chacha20_poly1305(void) {
   fio_rand_bytes(data_64, sizeof(data_64));
   fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 
@@ -682,6 +778,195 @@ FIO_SFUNC void openssl_bench_chacha20_poly1305(void) {
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
   });
 
+  OPENSSL_BENCH("OpenSSL ChaCha20-Poly1305 encrypt (65536 bytes)", 65536, {
+    EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_65536, 65536);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
+  });
+
+  EVP_CIPHER_CTX_free(ctx);
+}
+
+/* OpenSSL Poly1305 standalone MAC benchmark */
+FIO_SFUNC void openssl_bench_poly1305(void) {
+  unsigned char key[32];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
+  unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
+  unsigned char mac[16];
+  size_t mac_len = sizeof(mac);
+
+  fio_rand_bytes(key, sizeof(key));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
+  fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
+
+  EVP_MAC *evp_mac = EVP_MAC_fetch(NULL, "POLY1305", NULL);
+  if (!evp_mac) {
+    fprintf(stderr, "\t    OpenSSL Poly1305 not available\n");
+    return;
+  }
+
+  EVP_MAC_CTX *ctx = EVP_MAC_CTX_new(evp_mac);
+  OSSL_PARAM params[] = {OSSL_PARAM_END};
+
+  OPENSSL_BENCH("OpenSSL Poly1305 (64 bytes)", 64, {
+    EVP_MAC_init(ctx, key, sizeof(key), params);
+    EVP_MAC_update(ctx, data_64, sizeof(data_64));
+    EVP_MAC_final(ctx, mac, &mac_len, sizeof(mac));
+  });
+
+  OPENSSL_BENCH("OpenSSL Poly1305 (1024 bytes)", 1024, {
+    EVP_MAC_init(ctx, key, sizeof(key), params);
+    EVP_MAC_update(ctx, data_1024, sizeof(data_1024));
+    EVP_MAC_final(ctx, mac, &mac_len, sizeof(mac));
+  });
+
+  OPENSSL_BENCH("OpenSSL Poly1305 (8192 bytes)", 8192, {
+    EVP_MAC_init(ctx, key, sizeof(key), params);
+    EVP_MAC_update(ctx, data_8192, sizeof(data_8192));
+    EVP_MAC_final(ctx, mac, &mac_len, sizeof(mac));
+  });
+
+  OPENSSL_BENCH("OpenSSL Poly1305 (65536 bytes)", 65536, {
+    EVP_MAC_init(ctx, key, sizeof(key), params);
+    EVP_MAC_update(ctx, data_65536, sizeof(data_65536));
+    EVP_MAC_final(ctx, mac, &mac_len, sizeof(mac));
+  });
+
+  EVP_MAC_CTX_free(ctx);
+  EVP_MAC_free(evp_mac);
+}
+
+/* OpenSSL ChaCha20 standalone cipher benchmark */
+FIO_SFUNC void openssl_bench_chacha20(void) {
+  unsigned char key[32];
+  unsigned char
+      iv[16]; /* ChaCha20 uses 16-byte IV: 4-byte counter + 12-byte nonce */
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
+  unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
+  unsigned char ciphertext[65536];
+  int len;
+
+  fio_rand_bytes(key, sizeof(key));
+  fio_rand_bytes(iv, sizeof(iv));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
+  fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
+
+  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+
+  OPENSSL_BENCH("OpenSSL ChaCha20 (64 bytes)", 64, {
+    EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_64, 64);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20 (1024 bytes)", 1024, {
+    EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_1024, 1024);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20 (8192 bytes)", 8192, {
+    EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_8192, 8192);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20 (65536 bytes)", 65536, {
+    EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_65536, 65536);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+  });
+
+  EVP_CIPHER_CTX_free(ctx);
+}
+
+/* OpenSSL ChaCha20-Poly1305 decrypt benchmark */
+FIO_SFUNC void openssl_bench_chacha20_poly1305_decrypt(void) {
+  unsigned char key[32];
+  unsigned char nonce[12];
+  unsigned char plaintext_64[64];
+  unsigned char plaintext_1024[1024];
+  unsigned char plaintext_8192[8192];
+  unsigned char plaintext_65536[65536];
+  unsigned char ciphertext_64[64];
+  unsigned char ciphertext_1024[1024];
+  unsigned char ciphertext_8192[8192];
+  unsigned char ciphertext_65536[65536];
+  unsigned char decrypted[65536];
+  unsigned char tag_64[16];
+  unsigned char tag_1024[16];
+  unsigned char tag_8192[16];
+  unsigned char tag_65536[16];
+  int len, tmplen;
+
+  fio_rand_bytes(key, sizeof(key));
+  fio_rand_bytes(nonce, sizeof(nonce));
+  fio_rand_bytes(plaintext_64, sizeof(plaintext_64));
+  fio_rand_bytes(plaintext_1024, sizeof(plaintext_1024));
+  fio_rand_bytes(plaintext_8192, sizeof(plaintext_8192));
+  fio_rand_bytes(plaintext_65536, sizeof(plaintext_65536));
+
+  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+
+  /* Pre-encrypt data to get valid ciphertext and tags for decryption */
+  EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+  EVP_EncryptUpdate(ctx, ciphertext_64, &len, plaintext_64, 64);
+  EVP_EncryptFinal_ex(ctx, ciphertext_64 + len, &tmplen);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag_64);
+
+  EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+  EVP_EncryptUpdate(ctx, ciphertext_1024, &len, plaintext_1024, 1024);
+  EVP_EncryptFinal_ex(ctx, ciphertext_1024 + len, &tmplen);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag_1024);
+
+  EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+  EVP_EncryptUpdate(ctx, ciphertext_8192, &len, plaintext_8192, 8192);
+  EVP_EncryptFinal_ex(ctx, ciphertext_8192 + len, &tmplen);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag_8192);
+
+  EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+  EVP_EncryptUpdate(ctx, ciphertext_65536, &len, plaintext_65536, 65536);
+  EVP_EncryptFinal_ex(ctx, ciphertext_65536 + len, &tmplen);
+  EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag_65536);
+
+  /* Benchmark decryption */
+  OPENSSL_BENCH("OpenSSL ChaCha20-Poly1305 decrypt (64 bytes)", 64, {
+    EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag_64);
+    EVP_DecryptUpdate(ctx, decrypted, &len, ciphertext_64, 64);
+    EVP_DecryptFinal_ex(ctx, decrypted + len, &tmplen);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20-Poly1305 decrypt (1024 bytes)", 1024, {
+    EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag_1024);
+    EVP_DecryptUpdate(ctx, decrypted, &len, ciphertext_1024, 1024);
+    EVP_DecryptFinal_ex(ctx, decrypted + len, &tmplen);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20-Poly1305 decrypt (8192 bytes)", 8192, {
+    EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag_8192);
+    EVP_DecryptUpdate(ctx, decrypted, &len, ciphertext_8192, 8192);
+    EVP_DecryptFinal_ex(ctx, decrypted + len, &tmplen);
+  });
+
+  OPENSSL_BENCH("OpenSSL ChaCha20-Poly1305 decrypt (65536 bytes)", 65536, {
+    EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag_65536);
+    EVP_DecryptUpdate(ctx, decrypted, &len, ciphertext_65536, 65536);
+    EVP_DecryptFinal_ex(ctx, decrypted + len, &tmplen);
+  });
+
   EVP_CIPHER_CTX_free(ctx);
 }
 
@@ -692,7 +977,8 @@ FIO_SFUNC void openssl_bench_aes128_gcm(void) {
   unsigned char data_64[64];
   unsigned char data_1024[1024];
   unsigned char data_8192[8192];
-  unsigned char ciphertext[8192 + 16];
+  unsigned char data_65536[65536];
+  unsigned char ciphertext[65536 + 16];
   unsigned char tag[16];
   int len;
 
@@ -701,6 +987,7 @@ FIO_SFUNC void openssl_bench_aes128_gcm(void) {
   fio_rand_bytes(data_64, sizeof(data_64));
   fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 
@@ -725,6 +1012,13 @@ FIO_SFUNC void openssl_bench_aes128_gcm(void) {
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
   });
 
+  OPENSSL_BENCH("OpenSSL AES-128-GCM encrypt (65536 bytes)", 65536, {
+    EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), NULL, key, nonce);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_65536, 65536);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
+  });
+
   EVP_CIPHER_CTX_free(ctx);
 }
 
@@ -735,7 +1029,8 @@ FIO_SFUNC void openssl_bench_aes256_gcm(void) {
   unsigned char data_64[64];
   unsigned char data_1024[1024];
   unsigned char data_8192[8192];
-  unsigned char ciphertext[8192 + 16];
+  unsigned char data_65536[65536];
+  unsigned char ciphertext[65536 + 16];
   unsigned char tag[16];
   int len;
 
@@ -744,6 +1039,7 @@ FIO_SFUNC void openssl_bench_aes256_gcm(void) {
   fio_rand_bytes(data_64, sizeof(data_64));
   fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
 
@@ -764,6 +1060,13 @@ FIO_SFUNC void openssl_bench_aes256_gcm(void) {
   OPENSSL_BENCH("OpenSSL AES-256-GCM encrypt (8192 bytes)", 8192, {
     EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce);
     EVP_EncryptUpdate(ctx, ciphertext, &len, data_8192, 8192);
+    EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
+  });
+
+  OPENSSL_BENCH("OpenSSL AES-256-GCM encrypt (65536 bytes)", 65536, {
+    EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, nonce);
+    EVP_EncryptUpdate(ctx, ciphertext, &len, data_65536, 65536);
     EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag);
   });
@@ -868,26 +1171,28 @@ FIO_SFUNC void openssl_bench_argon2id(void) {
 
 /* OpenSSL Blake2b benchmark */
 FIO_SFUNC void openssl_bench_blake2b(void) {
-  unsigned char data_16[16];
-  unsigned char data_128[128];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
   unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
   unsigned char digest[64];
   unsigned int digest_len;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  fio_rand_bytes(data_16, sizeof(data_16));
-  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
-  OPENSSL_BENCH("OpenSSL Blake2b-512 (16 bytes)", 16, {
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (64 bytes)", 64, {
     EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
-    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestUpdate(ctx, data_64, 64);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
-  OPENSSL_BENCH("OpenSSL Blake2b-512 (128 bytes)", 128, {
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (1024 bytes)", 1024, {
     EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
-    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestUpdate(ctx, data_1024, 1024);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
@@ -897,37 +1202,51 @@ FIO_SFUNC void openssl_bench_blake2b(void) {
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
+  OPENSSL_BENCH("OpenSSL Blake2b-512 (65536 bytes)", 65536, {
+    EVP_DigestInit_ex(ctx, EVP_blake2b512(), NULL);
+    EVP_DigestUpdate(ctx, data_65536, 65536);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
   EVP_MD_CTX_free(ctx);
 }
 
 /* OpenSSL Blake2s benchmark */
 FIO_SFUNC void openssl_bench_blake2s(void) {
-  unsigned char data_16[16];
-  unsigned char data_128[128];
+  unsigned char data_64[64];
+  unsigned char data_1024[1024];
   unsigned char data_8192[8192];
+  unsigned char data_65536[65536];
   unsigned char digest[32];
   unsigned int digest_len;
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
 
-  fio_rand_bytes(data_16, sizeof(data_16));
-  fio_rand_bytes(data_128, sizeof(data_128));
+  fio_rand_bytes(data_64, sizeof(data_64));
+  fio_rand_bytes(data_1024, sizeof(data_1024));
   fio_rand_bytes(data_8192, sizeof(data_8192));
+  fio_rand_bytes(data_65536, sizeof(data_65536));
 
-  OPENSSL_BENCH("OpenSSL Blake2s-256 (16 bytes)", 16, {
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (64 bytes)", 64, {
     EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
-    EVP_DigestUpdate(ctx, data_16, 16);
+    EVP_DigestUpdate(ctx, data_64, 64);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
-  OPENSSL_BENCH("OpenSSL Blake2s-256 (128 bytes)", 128, {
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (1024 bytes)", 1024, {
     EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
-    EVP_DigestUpdate(ctx, data_128, 128);
+    EVP_DigestUpdate(ctx, data_1024, 1024);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
   OPENSSL_BENCH("OpenSSL Blake2s-256 (8192 bytes)", 8192, {
     EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
     EVP_DigestUpdate(ctx, data_8192, 8192);
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+  });
+
+  OPENSSL_BENCH("OpenSSL Blake2s-256 (65536 bytes)", 65536, {
+    EVP_DigestInit_ex(ctx, EVP_blake2s256(), NULL);
+    EVP_DigestUpdate(ctx, data_65536, 65536);
     EVP_DigestFinal_ex(ctx, digest, &digest_len);
   });
 
@@ -957,8 +1276,17 @@ FIO_SFUNC void fio___perf_openssl(void) {
   fprintf(stderr, "\n\t  OpenSSL Blake2s-256:\n");
   openssl_bench_blake2s();
 
+  fprintf(stderr, "\n\t* OpenSSL Poly1305 (standalone MAC):\n\n");
+  openssl_bench_poly1305();
+
+  fprintf(stderr, "\n\t* OpenSSL ChaCha20 (standalone cipher):\n\n");
+  openssl_bench_chacha20();
+
   fprintf(stderr, "\n\t* OpenSSL ChaCha20-Poly1305:\n\n");
   openssl_bench_chacha20_poly1305();
+
+  fprintf(stderr, "\n\t* OpenSSL ChaCha20-Poly1305 Decrypt:\n\n");
+  openssl_bench_chacha20_poly1305_decrypt();
 
   fprintf(stderr, "\n\t* OpenSSL AES-GCM:\n");
   fprintf(stderr, "\n\t  OpenSSL AES-128-GCM:\n");
