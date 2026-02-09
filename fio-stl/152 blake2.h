@@ -47,19 +47,28 @@ typedef struct {
 BLAKE2b API (64-bit optimized, up to 64-byte digest)
 ***************************************************************************** */
 
+/** One-shot BLAKE2b hash with max-length (64 byte) digest. */
+FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len);
+
 /**
- * A simple, non-streaming implementation of BLAKE2b.
+ * Flexible-output BLAKE2b hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 64 (default 64 if 0).
  * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
  */
-SFUNC void fio_blake2b(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen);
+SFUNC void fio_blake2b_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen);
+
+/** HMAC-BLAKE2b (64 byte key, 64 byte digest), compatible with SHA HMAC. */
+SFUNC fio_u512 fio_blake2b_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len);
 
 /** Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64). */
 SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
@@ -71,26 +80,35 @@ SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
                                const void *restrict data,
                                size_t len);
 
-/** Finalize BLAKE2b hash. Writes `h->outlen` bytes to `out`. */
-SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out);
+/** Finalize BLAKE2b hash. Returns result in fio_u512 (valid bytes = outlen). */
+SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h);
 
 /* *****************************************************************************
 BLAKE2s API (32-bit optimized, up to 32-byte digest)
 ***************************************************************************** */
 
+/** One-shot BLAKE2s hash with max-length (32 byte) digest. */
+FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len);
+
 /**
- * A simple, non-streaming implementation of BLAKE2s.
+ * Flexible-output BLAKE2s hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 32 (default 32 if 0).
  * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
  */
-SFUNC void fio_blake2s(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen);
+SFUNC void fio_blake2s_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen);
+
+/** HMAC-BLAKE2s (32 byte key, 32 byte digest), compatible with SHA HMAC. */
+SFUNC fio_u256 fio_blake2s_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len);
 
 /** Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32). */
 SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
@@ -102,8 +120,8 @@ SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
                                const void *restrict data,
                                size_t len);
 
-/** Finalize BLAKE2s hash. Writes `h->outlen` bytes to `out`. */
-SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out);
+/** Finalize BLAKE2s hash. Returns result in fio_u256 (valid bytes = outlen). */
+SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h);
 
 /* *****************************************************************************
 Implementation - possibly externed functions.
@@ -396,8 +414,9 @@ SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
   }
 }
 
-/** Finalize BLAKE2b hash. */
-SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
+/** Finalize BLAKE2b hash. Returns result in fio_u512 (valid bytes = outlen). */
+SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h) {
+  fio_u512 r = {0};
   /* Update counter with remaining bytes */
   h->t[0] += h->buflen;
   if (h->t[0] < h->buflen)
@@ -411,31 +430,76 @@ SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
   fio___blake2b_compress(h, h->buf, 1);
 
   /* Output hash (little-endian) - word-sized writes */
-  uint8_t *o = (uint8_t *)out;
   size_t full_words = h->outlen >> 3; /* outlen / 8 */
   size_t i;
   for (i = 0; i < full_words; ++i)
-    fio_u2buf64_le(o + (i << 3), h->h[i]);
+    fio_u2buf64_le(r.u8 + (i << 3), h->h[i]);
   /* Handle remaining bytes (outlen not multiple of 8) */
   size_t remaining = h->outlen & 7;
   if (remaining) {
     uint64_t last = h->h[i];
-    uint8_t *dst = o + (i << 3);
+    uint8_t *dst = r.u8 + (i << 3);
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  return r;
 }
 
-/** Simple non-streaming BLAKE2b. */
-SFUNC void fio_blake2b(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen) {
+/** Flexible-output non-streaming BLAKE2b. */
+SFUNC void fio_blake2b_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen) {
   fio_blake2b_s h = fio_blake2b_init(outlen, key, keylen);
   fio_blake2b_consume(&h, data, len);
-  fio_blake2b_finalize(&h, out);
+  fio_u512 r = fio_blake2b_finalize(&h);
+  FIO_MEMCPY(out, r.u8, h.outlen);
+}
+
+/** One-shot BLAKE2b hash with max-length (64 byte) digest. */
+FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len) {
+  fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&h, data, (size_t)len);
+  return fio_blake2b_finalize(&h);
+}
+
+/** HMAC-BLAKE2b (standard HMAC construction, 64-byte digest). */
+SFUNC fio_u512 fio_blake2b_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len) {
+  uint64_t k_padded[16] = {0};
+  /* If key > block size, hash it first */
+  if (key_len > 128) {
+    fio_blake2b_s hk = fio_blake2b_init(64, NULL, 0);
+    fio_blake2b_consume(&hk, key, (size_t)key_len);
+    fio_u512 hashed = fio_blake2b_finalize(&hk);
+    fio_memcpy64(&k_padded, hashed.u8);
+  } else if (key_len) {
+    FIO_MEMCPY(&k_padded, key, (size_t)key_len);
+  }
+
+  /* Inner hash: H((padded_key ^ 0x36) || msg) */
+  for (size_t i = 0; i < 16; ++i)
+    k_padded[i] ^= (uint64_t)0x3636363636363636ULL;
+  fio_blake2b_s inner = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&inner, k_padded, 128);
+  fio_blake2b_consume(&inner, msg, (size_t)msg_len);
+  fio_u512 inner_hash = fio_blake2b_finalize(&inner);
+
+  /* Outer hash: H((padded_key ^ 0x5C) || inner_hash) */
+  for (size_t i = 0; i < 16; ++i)
+    k_padded[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+  fio_blake2b_s outer = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&outer, k_padded, 128);
+  fio_blake2b_consume(&outer, inner_hash.u8, 64);
+  fio_u512 result = fio_blake2b_finalize(&outer);
+  fio_secure_zero(&k_padded, sizeof(k_padded));
+  fio_secure_zero(&inner_hash, sizeof(inner_hash));
+  return result;
 }
 
 /* *****************************************************************************
@@ -704,8 +768,9 @@ SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
   }
 }
 
-/** Finalize BLAKE2s hash. */
-SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
+/** Finalize BLAKE2s hash. Returns result in fio_u256 (valid bytes = outlen). */
+SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h) {
+  fio_u256 r = {0};
   /* Update counter with remaining bytes */
   h->t[0] += (uint32_t)h->buflen;
   if (h->t[0] < h->buflen)
@@ -719,31 +784,78 @@ SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
   fio___blake2s_compress(h, h->buf, 1);
 
   /* Output hash (little-endian) - word-sized writes */
-  uint8_t *o = (uint8_t *)out;
   size_t full_words = h->outlen >> 2; /* outlen / 4 */
   size_t i;
   for (i = 0; i < full_words; ++i)
-    fio_u2buf32_le(o + (i << 2), h->h[i]);
+    fio_u2buf32_le(r.u8 + (i << 2), h->h[i]);
   /* Handle remaining bytes (outlen not multiple of 4) */
   size_t remaining = h->outlen & 3;
   if (remaining) {
     uint32_t last = h->h[i];
-    uint8_t *dst = o + (i << 2);
+    uint8_t *dst = r.u8 + (i << 2);
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  return r;
 }
 
-/** Simple non-streaming BLAKE2s. */
-SFUNC void fio_blake2s(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen) {
+/** Flexible-output non-streaming BLAKE2s. */
+SFUNC void fio_blake2s_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen) {
   fio_blake2s_s h = fio_blake2s_init(outlen, key, keylen);
   fio_blake2s_consume(&h, data, len);
-  fio_blake2s_finalize(&h, out);
+  fio_u256 r = fio_blake2s_finalize(&h);
+  FIO_MEMCPY(out, r.u8, h.outlen);
+}
+
+/** One-shot BLAKE2s hash with max-length (32 byte) digest. */
+FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len) {
+  fio_blake2s_s h = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&h, data, (size_t)len);
+  return fio_blake2s_finalize(&h);
+}
+
+/** HMAC-BLAKE2s (standard HMAC construction, 32-byte digest). */
+SFUNC fio_u256 fio_blake2s_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len) {
+  uint64_t k_padded[8] = {0};
+  /* If key > block size, hash it first */
+  if (key_len > 64) {
+    fio_blake2s_s hk = fio_blake2s_init(32, NULL, 0);
+    fio_blake2s_consume(&hk, key, (size_t)key_len);
+    fio_u256 hashed = fio_blake2s_finalize(&hk);
+    FIO_MEMCPY(k_padded, hashed.u8, 32);
+  } else if (key_len) {
+    FIO_MEMCPY(k_padded, key, (size_t)key_len);
+  }
+
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^= (uint64_t)0x3636363636363636ULL;
+
+  /* Inner hash: H(i_pad || msg) */
+  fio_blake2s_s inner = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&inner, k_padded, 64);
+  fio_blake2s_consume(&inner, msg, (size_t)msg_len);
+  fio_u256 inner_hash = fio_blake2s_finalize(&inner);
+
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+
+  /* Outer hash: H(o_pad || inner_hash) */
+  fio_blake2s_s outer = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&outer, k_padded, 64);
+  fio_blake2s_consume(&outer, inner_hash.u8, 32);
+  fio_u256 result = fio_blake2s_finalize(&outer);
+  fio_secure_zero(k_padded, sizeof(k_padded));
+  fio_secure_zero(&inner_hash, sizeof(inner_hash));
+  return result;
 }
 
 /* *****************************************************************************

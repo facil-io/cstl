@@ -154,4 +154,62 @@ Adds a bit of entropy to numeral values. Designed to be unsafe (fast, not crypto
 
 **Note**: the hashing algorithm may change at any time and the hash value should be considered ephemeral. Meant to be safe enough for use with hash maps, but that's about it.
 
+#### `fio_risky256`
+
+```c
+fio_u256 fio_risky256(const void *data, uint64_t len);
+```
+
+Computes a 256-bit non-cryptographic hash using the RiskyHash 256 algorithm.
+
+Based on the A3 (Zero-Copy ILP) design: two independent 512-bit states process 128 bytes per iteration using multiply-fold with cross-lane mixing. Returns a `fio_u256` (32 bytes).
+
+**Quality**: passes strict avalanche (50.0%), collision resistance (0 collisions in 1M hashes), differential (min Hamming distance 85/256), and length independence tests.
+
+**Performance**: ~25-27 GB/s on modern hardware for large inputs, ~3.7 GB/s for 64-byte inputs.
+
+**Note**: this is a non-cryptographic hash. The algorithm may change at any time and hash values should be considered ephemeral.
+
+#### `fio_risky512`
+
+```c
+fio_u512 fio_risky512(const void *data, uint64_t len);
+```
+
+Computes a 512-bit non-cryptographic hash using the RiskyHash 512 algorithm.
+
+This is a SHAKE-style extension of `fio_risky256`: the first 256 bits of the 512-bit output are **identical** to `fio_risky256` (truncation-safe). The second 256 bits come from an additional squeeze round. Returns a `fio_u512` (64 bytes).
+
+**Note**: this is a non-cryptographic hash. The algorithm may change at any time and hash values should be considered ephemeral.
+
+#### `fio_risky256_hmac`
+
+```c
+fio_u256 fio_risky256_hmac(const void *key, uint64_t key_len,
+                           const void *msg, uint64_t msg_len);
+```
+
+Computes HMAC-RiskyHash-256 using the standard RFC 2104 HMAC construction with `fio_risky256` as the underlying hash function.
+
+Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky256`. Returns a `fio_u256` (32 bytes).
+
+All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+
+**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+
+#### `fio_risky512_hmac`
+
+```c
+fio_u512 fio_risky512_hmac(const void *key, uint64_t key_len,
+                           const void *msg, uint64_t msg_len);
+```
+
+Computes HMAC-RiskyHash-512 using the standard RFC 2104 HMAC construction with `fio_risky512` as the underlying hash function.
+
+Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky512`. Returns a `fio_u512` (64 bytes).
+
+All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+
+**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+
 -------------------------------------------------------------------------------

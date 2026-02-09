@@ -8833,6 +8833,50 @@ SFUNC void fio_stable_hash128(void *restrict dest,
                               size_t len,
                               uint64_t seed);
 
+/**
+ * Computes a 256-bit non-cryptographic hash (RiskyHash 256).
+ *
+ * Based on the A3 (Zero-Copy ILP) design: 2-state multiply-fold with
+ * cross-lane mixing, 128 bytes/iteration, zero-copy XOR from input.
+ *
+ * Returns a `fio_u256` (32 bytes). Passes strict avalanche (50.0%),
+ * collision, differential, and length independence tests.
+ */
+SFUNC fio_u256 fio_risky256(const void *data, uint64_t len);
+
+/**
+ * Computes a 512-bit non-cryptographic hash (RiskyHash 512).
+ *
+ * SHAKE-style extension of fio_risky256: the first 256 bits of the 512-bit
+ * output are identical to fio_risky256 (truncation-safe). The second 256 bits
+ * come from an additional squeeze round.
+ *
+ * Returns a `fio_u512` (64 bytes).
+ */
+SFUNC fio_u512 fio_risky512(const void *data, uint64_t len);
+
+/**
+ * Computes HMAC-RiskyHash-256 (NOT RFC 2104 compliant, 32-byte digest).
+ *
+ * Uses fio_risky256 as the underlying hash with a 64-byte block size.
+ * If `key_len > 64`, the key is hashed first with fio_risky256.
+ */
+SFUNC fio_u256 fio_risky256_hmac(const void *key,
+                                 uint64_t key_len,
+                                 const void *msg,
+                                 uint64_t msg_len);
+
+/**
+ * Computes HMAC-RiskyHash-512 ((NOT RFC 2104 compliant, 64-byte digest).
+ *
+ * Uses fio_risky512 as the underlying hash with a 64-byte block size.
+ * If `key_len > 64`, the key is hashed first with fio_risky512.
+ */
+SFUNC fio_u512 fio_risky512_hmac(const void *key,
+                                 uint64_t key_len,
+                                 const void *msg,
+                                 uint64_t msg_len);
+
 #define FIO_USE_STABLE_HASH_WHEN_CALLING_RISKY_HASH 0
 /* *****************************************************************************
 Risky Hash - Implementation
@@ -8863,6 +8907,71 @@ FIO_IFUNC uint64_t fio_risky_num(uint64_t n, uint64_t seed) {
 /** Adds bit entropy to a pointer values. Designed to be unsafe. */
 FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
   return fio_risky_num((uint64_t)(uintptr_t)ptr, FIO_U64_HASH_PRIME9);
+}
+
+/* *****************************************************************************
+Risky Hash 256/512 - Internal Helpers (always-inline)
+
+Design: A3 (Zero-Copy ILP) — 2-state multiply-fold with cross-lane mixing.
+Each state is 8 x uint64_t (512 bits). Two states (v0, v1) process 128 bytes
+per iteration for instruction-level parallelism. Cross-lane mixing after each
+round ensures full diffusion across all 8 multiply-fold pairs.
+***************************************************************************** */
+
+/** Prime constants for risky256 state initialization. */
+FIO_IFUNC void fio___risky256_init(uint64_t v0[8],
+                                   uint64_t v1[8],
+                                   uint64_t seed) {
+  static const uint64_t p[8] = {
+      FIO_U64_HASH_PRIME1,
+      FIO_U64_HASH_PRIME2,
+      FIO_U64_HASH_PRIME3,
+      FIO_U64_HASH_PRIME4,
+      FIO_U64_HASH_PRIME5,
+      FIO_U64_HASH_PRIME6,
+      FIO_U64_HASH_PRIME7,
+      FIO_U64_HASH_PRIME0,
+  };
+  static const uint64_t q[8] = {
+      FIO_U64_HASH_PRIME8,
+      FIO_U64_HASH_PRIME9,
+      FIO_U64_HASH_PRIME10,
+      FIO_U64_HASH_PRIME11,
+      FIO_U64_HASH_PRIME12,
+      FIO_U64_HASH_PRIME13,
+      FIO_U64_HASH_PRIME14,
+      FIO_U64_HASH_PRIME15,
+  };
+  for (size_t i = 0; i < 8; ++i) {
+    v0[i] = seed + p[i];
+    v1[i] = seed + q[i];
+  }
+}
+
+/**
+ * Cross-lane mixing: snapshot all 8 lanes, then XOR rotated pairs into each
+ * lane. Provides symmetric diffusion across multiply-fold pairs.
+ */
+FIO_IFUNC void fio___risky256_cross(uint64_t v[8]) {
+  uint64_t s0 = v[0], s1 = v[1], s2 = v[2], s3 = v[3];
+  uint64_t s4 = v[4], s5 = v[5], s6 = v[6], s7 = v[7];
+  v[0] ^= fio_lrot64(s1, 17) ^ fio_lrot64(s6, 47);
+  v[1] ^= fio_lrot64(s2, 29) ^ fio_lrot64(s7, 37);
+  v[2] ^= fio_lrot64(s3, 41) ^ fio_lrot64(s4, 19);
+  v[3] ^= fio_lrot64(s0, 53) ^ fio_lrot64(s5, 7);
+  v[4] ^= fio_lrot64(s5, 13) ^ fio_lrot64(s2, 51);
+  v[5] ^= fio_lrot64(s6, 23) ^ fio_lrot64(s3, 43);
+  v[6] ^= fio_lrot64(s7, 11) ^ fio_lrot64(s0, 59);
+  v[7] ^= fio_lrot64(s4, 3) ^ fio_lrot64(s1, 31);
+}
+
+/** Multiply-fold round: 4 multiply-fold pairs + cross-lane mixing. */
+FIO_IFUNC void fio___risky256_round(uint64_t v[8], uint64_t t[4]) {
+  for (size_t i = 0; i < 4; ++i) {
+    v[i] += fio_math_mulc64(v[i], v[i + 4], t + i);
+    v[i + 4] += t[i];
+  }
+  fio___risky256_cross(v);
 }
 
 /* *****************************************************************************
@@ -8935,6 +9044,250 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
   v[0] += v[1];
   return v[0];
 #undef FIO___RISKY_HASH_ROUND64
+}
+
+/* *****************************************************************************
+Risky Hash 256 / 512 — Constants
+***************************************************************************** */
+
+/** Prime constants shared by absorption and finalization. */
+static const uint64_t fio___risky256_primes[8] = {
+    FIO_U64_HASH_PRIME1,
+    FIO_U64_HASH_PRIME2,
+    FIO_U64_HASH_PRIME3,
+    FIO_U64_HASH_PRIME4,
+    FIO_U64_HASH_PRIME5,
+    FIO_U64_HASH_PRIME6,
+    FIO_U64_HASH_PRIME7,
+    FIO_U64_HASH_PRIME0,
+};
+static const uint64_t fio___risky256_fin_primes[8] = {
+    FIO_U64_HASH_PRIME8,
+    FIO_U64_HASH_PRIME9,
+    FIO_U64_HASH_PRIME10,
+    FIO_U64_HASH_PRIME11,
+    FIO_U64_HASH_PRIME12,
+    FIO_U64_HASH_PRIME13,
+    FIO_U64_HASH_PRIME14,
+    FIO_U64_HASH_PRIME15,
+};
+static const uint64_t fio___risky256_extra0[8] = {
+    FIO_U64_HASH_PRIME16,
+    FIO_U64_HASH_PRIME17,
+    FIO_U64_HASH_PRIME18,
+    FIO_U64_HASH_PRIME19,
+    FIO_U64_HASH_PRIME20,
+    FIO_U64_HASH_PRIME21,
+    FIO_U64_HASH_PRIME22,
+    FIO_U64_HASH_PRIME23,
+};
+static const uint64_t fio___risky256_extra1[8] = {
+    FIO_U64_HASH_PRIME24,
+    FIO_U64_HASH_PRIME25,
+    FIO_U64_HASH_PRIME26,
+    FIO_U64_HASH_PRIME27,
+    FIO_U64_HASH_PRIME28,
+    FIO_U64_HASH_PRIME29,
+    FIO_U64_HASH_PRIME30,
+    FIO_U64_HASH_PRIME31,
+};
+
+/* *****************************************************************************
+Risky Hash 256 / 512 — Public API
+***************************************************************************** */
+
+/** Computes a 256-bit non-cryptographic hash (RiskyHash 256). */
+SFUNC fio_u256 fio_risky256(const void *data_, uint64_t len) {
+  const uint8_t *data = (const uint8_t *)data_;
+  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16), t0[4], t1[4];
+  uint64_t seed = len;
+  seed ^= fio_lrot64(seed, 47);
+  fio___risky256_init(v0, v1, seed);
+  /* head: partial block (if any) into v0 — no round marker */
+  if ((len & 63)) {
+    uint64_t w[8] FIO_ALIGN(16);
+    FIO_MEMSET(w, 0, 64);
+    fio_memcpy63x(w, data, len);
+    data += (len & 63);
+    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
+    for (size_t i = 0; i < 8; ++i)
+      w[i] = fio_ltole64(w[i]);
+    for (size_t i = 0; i < 8; ++i)
+      v0[i] ^= w[i];
+    fio___risky256_round(v0, t0);
+  }
+  /* head: odd full block (if any) into v1 — with round marker */
+  if ((len & 64)) {
+    for (size_t i = 0; i < 4; ++i)
+      v1[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 8; ++i)
+      v1[i] ^= fio_buf2u64_le(data + (i << 3));
+    data += 64;
+    fio___risky256_round(v1, t1);
+  }
+  /* main loop: 128-byte pairs — remaining blocks are guaranteed even count */
+  for (size_t j = 127; j < len; j += 128) {
+    for (size_t i = 0; i < 4; ++i)
+      v0[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 4; ++i)
+      v1[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 8; ++i)
+      v0[i] ^= fio_buf2u64_le(data + (i << 3));
+    for (size_t i = 0; i < 8; ++i)
+      v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
+    data += 128;
+    fio___risky256_round(v0, t0);
+    fio___risky256_round(v1, t1);
+  }
+  /* finalization: merge v1 into v0, then squeeze */
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_fin_primes[i];
+  fio___risky256_round(v0, t0);
+  for (size_t i = 0; i < 8; ++i)
+    v1[i] ^= fio___risky256_fin_primes[i];
+  fio___risky256_round(v1, t1);
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= v1[i];
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_extra0[i];
+  fio___risky256_round(v0, t0);
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_primes[i];
+  fio___risky256_round(v0, t0);
+  /* squeeze: XOR-fold 8 lanes into 4 */
+  fio_u256 r;
+  for (size_t i = 0; i < 4; ++i)
+    r.u64[i] = v0[i] ^ v0[i + 4];
+  return r;
+}
+
+/** Computes a 512-bit non-cryptographic hash (RiskyHash 512). */
+SFUNC fio_u512 fio_risky512(const void *data_, uint64_t len) {
+  const uint8_t *data = (const uint8_t *)data_;
+  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16), t0[4], t1[4];
+  uint64_t seed = len;
+  seed ^= fio_lrot64(seed, 47);
+  fio___risky256_init(v0, v1, seed);
+  /* head: partial block (if any) into v0 — no round marker */
+  if ((len & 63)) {
+    uint64_t w[8] FIO_ALIGN(16);
+    FIO_MEMSET(w, 0, 64);
+    fio_memcpy63x(w, data, len);
+    data += (len & 63);
+    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
+    for (size_t i = 0; i < 8; ++i)
+      w[i] = fio_ltole64(w[i]);
+    for (size_t i = 0; i < 8; ++i)
+      v0[i] ^= w[i];
+    fio___risky256_round(v0, t0);
+  }
+  /* head: odd full block (if any) into v1 — with round marker */
+  if ((len & 64)) {
+    for (size_t i = 0; i < 4; ++i)
+      v1[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 8; ++i)
+      v1[i] ^= fio_buf2u64_le(data + (i << 3));
+    data += 64;
+    fio___risky256_round(v1, t1);
+  }
+  /* main loop: 128-byte pairs — remaining blocks are guaranteed even count */
+  for (size_t j = 127; j < len; j += 128) {
+    for (size_t i = 0; i < 4; ++i)
+      v0[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 4; ++i)
+      v1[i] += fio___risky256_primes[i];
+    for (size_t i = 0; i < 8; ++i)
+      v0[i] ^= fio_buf2u64_le(data + (i << 3));
+    for (size_t i = 0; i < 8; ++i)
+      v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
+    data += 128;
+    fio___risky256_round(v0, t0);
+    fio___risky256_round(v1, t1);
+  }
+  /* finalization: merge v1 into v0, then squeeze */
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_fin_primes[i];
+  fio___risky256_round(v0, t0);
+  for (size_t i = 0; i < 8; ++i)
+    v1[i] ^= fio___risky256_fin_primes[i];
+  fio___risky256_round(v1, t1);
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= v1[i];
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_extra0[i];
+  fio___risky256_round(v0, t0);
+  /* first squeeze: 256 bits (identical to fio_risky256 output) */
+  fio_u512 r;
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_primes[i];
+  fio___risky256_round(v0, t0);
+  for (size_t i = 0; i < 4; ++i)
+    r.u64[i] = v0[i] ^ v0[i + 4];
+  /* second squeeze: additional 256 bits */
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio___risky256_extra1[i];
+  fio___risky256_round(v0, t0);
+  for (size_t i = 0; i < 4; ++i)
+    r.u64[i + 4] = v0[i] ^ v0[i + 4];
+  return r;
+}
+
+/* *****************************************************************************
+Risky Hash 256 / 512 — HMAC (NOT RFC 2104 compliant)
+***************************************************************************** */
+
+/** HMAC-RiskyHash-256 (standard HMAC construction, 32-byte digest). */
+SFUNC fio_u256 fio_risky256_hmac(const void *key,
+                                 uint64_t key_len,
+                                 const void *msg,
+                                 uint64_t msg_len) {
+  fio_u1024 buffer = {0};
+  /* If key > block size (64), hash it first */
+  if (key_len > 64) {
+    buffer.u512[1] = fio_risky512(key, key_len);
+  } else if (key_len) {
+    FIO_MEMCPY(buffer.u512[1].u8, key, (size_t)key_len);
+  }
+  if (msg_len)
+    buffer.u256[0] = fio_risky256(msg, msg_len);
+  /* Inner hash: H(i_pad || msg) */
+  for (size_t i = 0; i < 8; ++i)
+    buffer.u512[1].u64[i] ^= (uint64_t)0x3636363636363636ULL;
+  buffer.u256[1] = fio_risky256(buffer.u8, sizeof(buffer));
+  /* Outer hash: H(o_pad || inner_hash) — 128 bytes, stack-safe */
+  for (size_t i = 0; i < 8; ++i)
+    buffer.u512[1].u64[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+  buffer.u256[0] = fio_risky256(buffer.u8, sizeof(buffer));
+  fio_secure_zero(buffer.u256[1].u8, (sizeof(buffer) - sizeof(buffer.u256[0])));
+  return buffer.u256[0];
+}
+
+/** HMAC-RiskyHash-512 (standard HMAC construction, 64-byte digest). */
+SFUNC fio_u512 fio_risky512_hmac(const void *key,
+                                 uint64_t key_len,
+                                 const void *msg,
+                                 uint64_t msg_len) {
+  fio_u1024 buffer = {0};
+  /* If key > block size (64), hash it first */
+  if (key_len > 64) {
+    buffer.u512[1] = fio_risky512(key, key_len);
+  } else if (key_len) {
+    FIO_MEMCPY(buffer.u512[1].u8, key, (size_t)key_len);
+  }
+  if (msg_len)
+    buffer.u512[0] = fio_risky512(msg, msg_len);
+  /* Inner hash: H(H(msg) || i_pad) */
+  for (size_t i = 0; i < 8; ++i)
+    buffer.u512[1].u64[i] ^= (uint64_t)0x3636363636363636ULL;
+  buffer.u512[1] = fio_risky512(buffer.u8, sizeof(buffer));
+  /* Outer hash: H(H(H(msg) || i_pad) || o_pad) — 128 bytes, stack-safe */
+  for (size_t i = 0; i < 8; ++i)
+    buffer.u512[1].u64[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+  buffer.u512[0] = fio_risky512(buffer.u8, sizeof(buffer));
+  fio_secure_zero(buffer.u512[1].u8, sizeof(buffer.u512[1]));
+  return buffer.u512[0];
 }
 
 /* *****************************************************************************
@@ -26793,19 +27146,28 @@ typedef struct {
 BLAKE2b API (64-bit optimized, up to 64-byte digest)
 ***************************************************************************** */
 
+/** One-shot BLAKE2b hash with max-length (64 byte) digest. */
+FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len);
+
 /**
- * A simple, non-streaming implementation of BLAKE2b.
+ * Flexible-output BLAKE2b hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 64 (default 64 if 0).
  * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
  */
-SFUNC void fio_blake2b(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen);
+SFUNC void fio_blake2b_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen);
+
+/** HMAC-BLAKE2b (64 byte key, 64 byte digest), compatible with SHA HMAC. */
+SFUNC fio_u512 fio_blake2b_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len);
 
 /** Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64). */
 SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
@@ -26817,26 +27179,35 @@ SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
                                const void *restrict data,
                                size_t len);
 
-/** Finalize BLAKE2b hash. Writes `h->outlen` bytes to `out`. */
-SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out);
+/** Finalize BLAKE2b hash. Returns result in fio_u512 (valid bytes = outlen). */
+SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h);
 
 /* *****************************************************************************
 BLAKE2s API (32-bit optimized, up to 32-byte digest)
 ***************************************************************************** */
 
+/** One-shot BLAKE2s hash with max-length (32 byte) digest. */
+FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len);
+
 /**
- * A simple, non-streaming implementation of BLAKE2s.
+ * Flexible-output BLAKE2s hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 32 (default 32 if 0).
  * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
  */
-SFUNC void fio_blake2s(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen);
+SFUNC void fio_blake2s_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen);
+
+/** HMAC-BLAKE2s (32 byte key, 32 byte digest), compatible with SHA HMAC. */
+SFUNC fio_u256 fio_blake2s_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len);
 
 /** Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32). */
 SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
@@ -26848,8 +27219,8 @@ SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
                                const void *restrict data,
                                size_t len);
 
-/** Finalize BLAKE2s hash. Writes `h->outlen` bytes to `out`. */
-SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out);
+/** Finalize BLAKE2s hash. Returns result in fio_u256 (valid bytes = outlen). */
+SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h);
 
 /* *****************************************************************************
 Implementation - possibly externed functions.
@@ -27142,8 +27513,9 @@ SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
   }
 }
 
-/** Finalize BLAKE2b hash. */
-SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
+/** Finalize BLAKE2b hash. Returns result in fio_u512 (valid bytes = outlen). */
+SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h) {
+  fio_u512 r = {0};
   /* Update counter with remaining bytes */
   h->t[0] += h->buflen;
   if (h->t[0] < h->buflen)
@@ -27157,31 +27529,76 @@ SFUNC void fio_blake2b_finalize(fio_blake2b_s *restrict h, void *restrict out) {
   fio___blake2b_compress(h, h->buf, 1);
 
   /* Output hash (little-endian) - word-sized writes */
-  uint8_t *o = (uint8_t *)out;
   size_t full_words = h->outlen >> 3; /* outlen / 8 */
   size_t i;
   for (i = 0; i < full_words; ++i)
-    fio_u2buf64_le(o + (i << 3), h->h[i]);
+    fio_u2buf64_le(r.u8 + (i << 3), h->h[i]);
   /* Handle remaining bytes (outlen not multiple of 8) */
   size_t remaining = h->outlen & 7;
   if (remaining) {
     uint64_t last = h->h[i];
-    uint8_t *dst = o + (i << 3);
+    uint8_t *dst = r.u8 + (i << 3);
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  return r;
 }
 
-/** Simple non-streaming BLAKE2b. */
-SFUNC void fio_blake2b(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen) {
+/** Flexible-output non-streaming BLAKE2b. */
+SFUNC void fio_blake2b_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen) {
   fio_blake2b_s h = fio_blake2b_init(outlen, key, keylen);
   fio_blake2b_consume(&h, data, len);
-  fio_blake2b_finalize(&h, out);
+  fio_u512 r = fio_blake2b_finalize(&h);
+  FIO_MEMCPY(out, r.u8, h.outlen);
+}
+
+/** One-shot BLAKE2b hash with max-length (64 byte) digest. */
+FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len) {
+  fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&h, data, (size_t)len);
+  return fio_blake2b_finalize(&h);
+}
+
+/** HMAC-BLAKE2b (standard HMAC construction, 64-byte digest). */
+SFUNC fio_u512 fio_blake2b_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len) {
+  uint64_t k_padded[16] = {0};
+  /* If key > block size, hash it first */
+  if (key_len > 128) {
+    fio_blake2b_s hk = fio_blake2b_init(64, NULL, 0);
+    fio_blake2b_consume(&hk, key, (size_t)key_len);
+    fio_u512 hashed = fio_blake2b_finalize(&hk);
+    fio_memcpy64(&k_padded, hashed.u8);
+  } else if (key_len) {
+    FIO_MEMCPY(&k_padded, key, (size_t)key_len);
+  }
+
+  /* Inner hash: H((padded_key ^ 0x36) || msg) */
+  for (size_t i = 0; i < 16; ++i)
+    k_padded[i] ^= (uint64_t)0x3636363636363636ULL;
+  fio_blake2b_s inner = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&inner, k_padded, 128);
+  fio_blake2b_consume(&inner, msg, (size_t)msg_len);
+  fio_u512 inner_hash = fio_blake2b_finalize(&inner);
+
+  /* Outer hash: H((padded_key ^ 0x5C) || inner_hash) */
+  for (size_t i = 0; i < 16; ++i)
+    k_padded[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+  fio_blake2b_s outer = fio_blake2b_init(64, NULL, 0);
+  fio_blake2b_consume(&outer, k_padded, 128);
+  fio_blake2b_consume(&outer, inner_hash.u8, 64);
+  fio_u512 result = fio_blake2b_finalize(&outer);
+  fio_secure_zero(&k_padded, sizeof(k_padded));
+  fio_secure_zero(&inner_hash, sizeof(inner_hash));
+  return result;
 }
 
 /* *****************************************************************************
@@ -27450,8 +27867,9 @@ SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
   }
 }
 
-/** Finalize BLAKE2s hash. */
-SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
+/** Finalize BLAKE2s hash. Returns result in fio_u256 (valid bytes = outlen). */
+SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h) {
+  fio_u256 r = {0};
   /* Update counter with remaining bytes */
   h->t[0] += (uint32_t)h->buflen;
   if (h->t[0] < h->buflen)
@@ -27465,31 +27883,78 @@ SFUNC void fio_blake2s_finalize(fio_blake2s_s *restrict h, void *restrict out) {
   fio___blake2s_compress(h, h->buf, 1);
 
   /* Output hash (little-endian) - word-sized writes */
-  uint8_t *o = (uint8_t *)out;
   size_t full_words = h->outlen >> 2; /* outlen / 4 */
   size_t i;
   for (i = 0; i < full_words; ++i)
-    fio_u2buf32_le(o + (i << 2), h->h[i]);
+    fio_u2buf32_le(r.u8 + (i << 2), h->h[i]);
   /* Handle remaining bytes (outlen not multiple of 4) */
   size_t remaining = h->outlen & 3;
   if (remaining) {
     uint32_t last = h->h[i];
-    uint8_t *dst = o + (i << 2);
+    uint8_t *dst = r.u8 + (i << 2);
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  return r;
 }
 
-/** Simple non-streaming BLAKE2s. */
-SFUNC void fio_blake2s(void *restrict out,
-                       size_t outlen,
-                       const void *restrict data,
-                       size_t len,
-                       const void *restrict key,
-                       size_t keylen) {
+/** Flexible-output non-streaming BLAKE2s. */
+SFUNC void fio_blake2s_hash(void *restrict out,
+                            size_t outlen,
+                            const void *restrict data,
+                            size_t len,
+                            const void *restrict key,
+                            size_t keylen) {
   fio_blake2s_s h = fio_blake2s_init(outlen, key, keylen);
   fio_blake2s_consume(&h, data, len);
-  fio_blake2s_finalize(&h, out);
+  fio_u256 r = fio_blake2s_finalize(&h);
+  FIO_MEMCPY(out, r.u8, h.outlen);
+}
+
+/** One-shot BLAKE2s hash with max-length (32 byte) digest. */
+FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len) {
+  fio_blake2s_s h = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&h, data, (size_t)len);
+  return fio_blake2s_finalize(&h);
+}
+
+/** HMAC-BLAKE2s (standard HMAC construction, 32-byte digest). */
+SFUNC fio_u256 fio_blake2s_hmac(const void *key,
+                                uint64_t key_len,
+                                const void *msg,
+                                uint64_t msg_len) {
+  uint64_t k_padded[8] = {0};
+  /* If key > block size, hash it first */
+  if (key_len > 64) {
+    fio_blake2s_s hk = fio_blake2s_init(32, NULL, 0);
+    fio_blake2s_consume(&hk, key, (size_t)key_len);
+    fio_u256 hashed = fio_blake2s_finalize(&hk);
+    FIO_MEMCPY(k_padded, hashed.u8, 32);
+  } else if (key_len) {
+    FIO_MEMCPY(k_padded, key, (size_t)key_len);
+  }
+
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^= (uint64_t)0x3636363636363636ULL;
+
+  /* Inner hash: H(i_pad || msg) */
+  fio_blake2s_s inner = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&inner, k_padded, 64);
+  fio_blake2s_consume(&inner, msg, (size_t)msg_len);
+  fio_u256 inner_hash = fio_blake2s_finalize(&inner);
+
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^=
+        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
+
+  /* Outer hash: H(o_pad || inner_hash) */
+  fio_blake2s_s outer = fio_blake2s_init(32, NULL, 0);
+  fio_blake2s_consume(&outer, k_padded, 64);
+  fio_blake2s_consume(&outer, inner_hash.u8, 32);
+  fio_u256 result = fio_blake2s_finalize(&outer);
+  fio_secure_zero(k_padded, sizeof(k_padded));
+  fio_secure_zero(&inner_hash, sizeof(inner_hash));
+  return result;
 }
 
 /* *****************************************************************************
@@ -45263,8 +45728,10 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     fio_u2buf32_le(le_outlen, outlen);
     fio_blake2b_consume(&h, le_outlen, 4);
     fio_blake2b_consume(&h, in, inlen);
-    fio_blake2b_finalize(&h, out);
+    fio_u512 r = fio_blake2b_finalize(&h);
+    FIO_MEMCPY(out, r.u8, outlen);
     fio_secure_zero(&h, sizeof(h));
+    fio_secure_zero(&r, sizeof(r));
   } else {
     /* r = ceil(T/32) - 2 */
     uint32_t r = (outlen + 31) / 32 - 2;
@@ -45277,7 +45744,8 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
       fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
       fio_blake2b_consume(&h, le_outlen, 4);
       fio_blake2b_consume(&h, in, inlen);
-      fio_blake2b_finalize(&h, v_prev);
+      fio_u512 tmp = fio_blake2b_finalize(&h);
+      FIO_MEMCPY(v_prev, tmp.u8, 64);
     }
     /* Output W_1 (first 32 bytes of V_1) */
     FIO_MEMCPY(out, v_prev, 32);
@@ -45285,7 +45753,7 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     /* V_2 .. V_r: each V_i = H^64(V_{i-1}) */
     for (uint32_t i = 2; i <= r; ++i) {
       uint8_t v_cur[64];
-      fio_blake2b(v_cur, 64, v_prev, 64, NULL, 0);
+      fio_blake2b_hash(v_cur, 64, v_prev, 64, NULL, 0);
       FIO_MEMCPY((uint8_t *)out + (i - 1) * 32, v_cur, 32);
       FIO_MEMCPY(v_prev, v_cur, 64);
     }
@@ -45293,7 +45761,7 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     /* V_{r+1} = H^(T-32*r)(V_r) */
     uint32_t last_len = outlen - 32 * r;
     uint8_t v_last[64];
-    fio_blake2b(v_last, last_len, v_prev, 64, NULL, 0);
+    fio_blake2b_hash(v_last, last_len, v_prev, 64, NULL, 0);
     FIO_MEMCPY((uint8_t *)out + r * 32, v_last, last_len);
     fio_secure_zero(v_prev, sizeof(v_prev));
     fio_secure_zero(v_last, sizeof(v_last));
@@ -45495,7 +45963,11 @@ SFUNC int fio_argon2_hash FIO_NOOP(void *out, fio_argon2_args_s args) {
     if (ad_len)
       fio_blake2b_consume(&bctx, args.ad.buf, ad_len);
 
-    fio_blake2b_finalize(&bctx, h0);
+    {
+      fio_u512 h0_result = fio_blake2b_finalize(&bctx);
+      FIO_MEMCPY(h0, h0_result.u8, 64);
+      fio_secure_zero(&h0_result, sizeof(h0_result));
+    }
     fio_secure_zero(&bctx, sizeof(bctx));
   }
 

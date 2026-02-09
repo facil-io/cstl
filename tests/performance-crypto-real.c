@@ -94,75 +94,115 @@ FIO_SFUNC void fio_bench_ed25519_sign(void) {
   fprintf(stderr, "    * Ed25519 Signature Generation:\n");
 
   uint8_t sk[32], pk[32], sig[64];
-  uint8_t msg[128];
+  uint8_t *msg_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *msg_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *msg_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *msg_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
 
   fio_rand_bytes(sk, 32);
-  fio_rand_bytes(msg, 128);
+  fio_rand_bytes(msg_small, 64);
+  fio_rand_bytes(msg_medium, 1024);
+  fio_rand_bytes(msg_large, 8192);
+  fio_rand_bytes(msg_xlarge, 65536);
   fio_ed25519_public_key(pk, sk);
 
-  /* Sign empty message */
-  FIO_BENCH_CRYPTO(
-      "Ed25519 sign (0 bytes)", 2000, fio_ed25519_sign(sig, "", 0, sk, pk);
-      sk[0] ^= sig[0];);
-
   /* Sign 64 byte message */
-  FIO_BENCH_CRYPTO(
-      "Ed25519 sign (64 bytes)", 2000, fio_ed25519_sign(sig, msg, 64, sk, pk);
-      sk[0] ^= sig[0];);
+  FIO_BENCH_CRYPTO("Ed25519 sign (64 bytes)",
+                   2000,
+                   fio_ed25519_sign(sig, msg_small, 64, sk, pk);
+                   sk[0] ^= sig[0];);
 
-  /* Sign 128 byte message */
-  FIO_BENCH_CRYPTO(
-      "Ed25519 sign (128 bytes)", 2000, fio_ed25519_sign(sig, msg, 128, sk, pk);
-      sk[0] ^= sig[0];);
+  /* Sign 1024 byte message */
+  FIO_BENCH_CRYPTO("Ed25519 sign (1024 bytes)",
+                   2000,
+                   fio_ed25519_sign(sig, msg_medium, 1024, sk, pk);
+                   sk[0] ^= sig[0];);
+
+  /* Sign 8192 byte message */
+  FIO_BENCH_CRYPTO("Ed25519 sign (8192 bytes)",
+                   2000,
+                   fio_ed25519_sign(sig, msg_large, 8192, sk, pk);
+                   sk[0] ^= sig[0];);
+
+  /* Sign 65536 byte message */
+  FIO_BENCH_CRYPTO("Ed25519 sign (65536 bytes)",
+                   2000,
+                   fio_ed25519_sign(sig, msg_xlarge, 65536, sk, pk);
+                   sk[0] ^= sig[0];);
+
+  FIO_MEM_FREE(msg_small, 64);
+  FIO_MEM_FREE(msg_medium, 1024);
+  FIO_MEM_FREE(msg_large, 8192);
+  FIO_MEM_FREE(msg_xlarge, 65536);
 }
 
 FIO_SFUNC void fio_bench_ed25519_verify(void) {
   fprintf(stderr, "    * Ed25519 Signature Verification:\n");
 
   uint8_t sk[32], pk[32], sig[64];
-  uint8_t msg[128];
+  uint8_t *msg_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *msg_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *msg_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *msg_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
 
   fio_rand_bytes(sk, 32);
-  fio_rand_bytes(msg, 128);
+  fio_rand_bytes(msg_small, 64);
+  fio_rand_bytes(msg_medium, 1024);
+  fio_rand_bytes(msg_large, 8192);
+  fio_rand_bytes(msg_xlarge, 65536);
   fio_ed25519_public_key(pk, sk);
 
-  /* Verify empty message */
-  fio_ed25519_sign(sig, "", 0, sk, pk);
-  FIO_BENCH_CRYPTO("Ed25519 verify (0 bytes)",
-                   2000,
-                   int result = fio_ed25519_verify(sig, "", 0, pk);
-                   pk[0] ^= (uint8_t)result;);
-
   /* Verify 64 byte message */
-  fio_ed25519_sign(sig, msg, 64, sk, pk);
+  fio_ed25519_sign(sig, msg_small, 64, sk, pk);
   FIO_BENCH_CRYPTO("Ed25519 verify (64 bytes)",
                    2000,
-                   int result = fio_ed25519_verify(sig, msg, 64, pk);
+                   int result = fio_ed25519_verify(sig, msg_small, 64, pk);
                    pk[0] ^= (uint8_t)result;);
 
-  /* Verify 128 byte message */
-  fio_ed25519_sign(sig, msg, 128, sk, pk);
-  FIO_BENCH_CRYPTO("Ed25519 verify (128 bytes)",
+  /* Verify 1024 byte message */
+  fio_ed25519_sign(sig, msg_medium, 1024, sk, pk);
+  FIO_BENCH_CRYPTO("Ed25519 verify (1024 bytes)",
                    2000,
-                   int result = fio_ed25519_verify(sig, msg, 128, pk);
+                   int result = fio_ed25519_verify(sig, msg_medium, 1024, pk);
                    pk[0] ^= (uint8_t)result;);
+
+  /* Verify 8192 byte message */
+  fio_ed25519_sign(sig, msg_large, 8192, sk, pk);
+  FIO_BENCH_CRYPTO("Ed25519 verify (8192 bytes)",
+                   2000,
+                   int result = fio_ed25519_verify(sig, msg_large, 8192, pk);
+                   pk[0] ^= (uint8_t)result;);
+
+  /* Verify 65536 byte message */
+  fio_ed25519_sign(sig, msg_xlarge, 65536, sk, pk);
+  FIO_BENCH_CRYPTO("Ed25519 verify (65536 bytes)",
+                   2000,
+                   int result = fio_ed25519_verify(sig, msg_xlarge, 65536, pk);
+                   pk[0] ^= (uint8_t)result;);
+
+  FIO_MEM_FREE(msg_small, 64);
+  FIO_MEM_FREE(msg_medium, 1024);
+  FIO_MEM_FREE(msg_large, 8192);
+  FIO_MEM_FREE(msg_xlarge, 65536);
 }
 
 FIO_SFUNC void fio_bench_ed25519_roundtrip(void) {
   fprintf(stderr, "    * Ed25519 Sign+Verify Roundtrip:\n");
 
   uint8_t sk[32], pk[32], sig[64];
-  uint8_t msg[1024];
+  uint8_t *msg = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
 
   fio_rand_bytes(sk, 32);
   fio_rand_bytes(msg, 1024);
   fio_ed25519_public_key(pk, sk);
 
-  FIO_BENCH_CRYPTO("Ed25519 sign+verify roundtrip (256 bytes)",
+  FIO_BENCH_CRYPTO("Ed25519 sign+verify roundtrip (1024 bytes)",
                    2000,
-                   fio_ed25519_sign(sig, msg, 256, sk, pk);
-                   int result = fio_ed25519_verify(sig, msg, 256, pk);
+                   fio_ed25519_sign(sig, msg, 1024, sk, pk);
+                   int result = fio_ed25519_verify(sig, msg, 1024, pk);
                    sk[0] ^= (uint8_t)result;);
+
+  FIO_MEM_FREE(msg, 1024);
 }
 
 /* *****************************************************************************
@@ -379,6 +419,164 @@ FIO_SFUNC void fio_bench_chacha20_poly1305_throughput(void) {
 }
 
 /* *****************************************************************************
+RiskyHash Profiling - Non-Cryptographic Hash (Reference)
+***************************************************************************** */
+
+/* RiskyHash is a fast non-cryptographic hash function:
+ * - 64-bit output, optimized for hash tables and checksums
+ * - NOT suitable for cryptographic use (no collision resistance guarantee)
+ * - Included as a speed reference to contextualize crypto hash overhead
+ */
+
+FIO_SFUNC void fio_bench_risky_hash(void) {
+  fprintf(stderr,
+          "    * RiskyHash (non-crypto, reference only):\n"
+          "      NOTE: NOT a cryptographic hash — included for speed "
+          "reference\n");
+
+  uint8_t *data_small = NULL;
+  uint8_t *data_medium = NULL;
+  uint8_t *data_large = NULL;
+  uint8_t *data_xlarge = NULL;
+  uint64_t hash = 0;
+
+  /* Allocate buffers */
+  data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  /* 64 byte hash */
+  FIO_BENCH_CRYPTO(
+      "RiskyHash (64 bytes)", 2000, hash = fio_risky_hash(data_small, 64, hash);
+      data_small[0] ^= (uint8_t)hash;);
+
+  /* 1024 byte hash */
+  FIO_BENCH_CRYPTO("RiskyHash (1024 bytes)",
+                   2000,
+                   hash = fio_risky_hash(data_medium, 1024, hash);
+                   data_medium[0] ^= (uint8_t)hash;);
+
+  /* 8192 byte hash */
+  FIO_BENCH_CRYPTO("RiskyHash (8192 bytes)",
+                   2000,
+                   hash = fio_risky_hash(data_large, 8192, hash);
+                   data_large[0] ^= (uint8_t)hash;);
+
+  /* 65536 byte hash */
+  FIO_BENCH_CRYPTO("RiskyHash (65536 bytes)",
+                   2000,
+                   hash = fio_risky_hash(data_xlarge, 65536, hash);
+                   data_xlarge[0] ^= (uint8_t)hash;);
+
+  /* --- RiskyHash 256-bit --- */
+  {
+    fio_u256 h256;
+    fprintf(stderr, "    * RiskyHash-256 Throughput:\n");
+    FIO_BENCH_CRYPTO(
+        "RiskyHash-256 (64 bytes)", 2000, h256 = fio_risky256(data_small, 64);
+        data_small[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-256 (1024 bytes)",
+                     2000,
+                     h256 = fio_risky256(data_medium, 1024);
+                     data_medium[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-256 (8192 bytes)",
+                     2000,
+                     h256 = fio_risky256(data_large, 8192);
+                     data_large[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-256 (65536 bytes)",
+                     2000,
+                     h256 = fio_risky256(data_xlarge, 65536);
+                     data_xlarge[0] ^= h256.u8[0];);
+  }
+
+  /* --- RiskyHash 512-bit --- */
+  {
+    fio_u512 h512;
+    fprintf(stderr, "    * RiskyHash-512 Throughput:\n");
+    FIO_BENCH_CRYPTO(
+        "RiskyHash-512 (64 bytes)", 2000, h512 = fio_risky512(data_small, 64);
+        data_small[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-512 (1024 bytes)",
+                     2000,
+                     h512 = fio_risky512(data_medium, 1024);
+                     data_medium[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-512 (8192 bytes)",
+                     2000,
+                     h512 = fio_risky512(data_large, 8192);
+                     data_large[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("RiskyHash-512 (65536 bytes)",
+                     2000,
+                     h512 = fio_risky512(data_xlarge, 65536);
+                     data_xlarge[0] ^= h512.u8[0];);
+  }
+
+  /* --- HMAC-RiskyHash-256 --- */
+  {
+    static const uint8_t hmac_key[32] = {
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+    };
+    fio_u256 h256;
+    fprintf(stderr, "    * HMAC-RiskyHash-256 Throughput:\n");
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (64B msg)",
+                     2000,
+                     h256 = fio_risky256_hmac(hmac_key, 32, data_small, 64);
+                     data_small[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (1024B msg)",
+                     2000,
+                     h256 = fio_risky256_hmac(hmac_key, 32, data_medium, 1024);
+                     data_medium[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (8192B msg)",
+                     2000,
+                     h256 = fio_risky256_hmac(hmac_key, 32, data_large, 8192);
+                     data_large[0] ^= h256.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (65536B msg)",
+                     2000,
+                     h256 = fio_risky256_hmac(hmac_key, 32, data_xlarge, 65536);
+                     data_xlarge[0] ^= h256.u8[0];);
+  }
+
+  /* --- HMAC-RiskyHash-512 --- */
+  {
+    static const uint8_t hmac_key[32] = {
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+    };
+    fio_u512 h512;
+    fprintf(stderr, "    * HMAC-RiskyHash-512 Throughput:\n");
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (64B msg)",
+                     2000,
+                     h512 = fio_risky512_hmac(hmac_key, 32, data_small, 64);
+                     data_small[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (1024B msg)",
+                     2000,
+                     h512 = fio_risky512_hmac(hmac_key, 32, data_medium, 1024);
+                     data_medium[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (8192B msg)",
+                     2000,
+                     h512 = fio_risky512_hmac(hmac_key, 32, data_large, 8192);
+                     data_large[0] ^= h512.u8[0];);
+    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (65536B msg)",
+                     2000,
+                     h512 = fio_risky512_hmac(hmac_key, 32, data_xlarge, 65536);
+                     data_xlarge[0] ^= h512.u8[0];);
+  }
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+/* *****************************************************************************
 BLAKE2 Profiling - Fast Cryptographic Hash
 ***************************************************************************** */
 
@@ -395,7 +593,7 @@ FIO_SFUNC void fio_bench_blake2b(void) {
   uint8_t *data_medium = NULL;
   uint8_t *data_large = NULL;
   uint8_t *data_xlarge = NULL;
-  uint8_t out[64];
+  fio_u512 out;
 
   /* Allocate buffers */
   data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
@@ -409,28 +607,27 @@ FIO_SFUNC void fio_bench_blake2b(void) {
   fio_rand_bytes(data_xlarge, 65536);
 
   /* 64 byte hash */
-  FIO_BENCH_CRYPTO("BLAKE2b-512 hash (64 bytes)",
-                   2000,
-                   fio_blake2b(out, 64, data_small, 64, NULL, 0);
-                   data_small[0] ^= out[0];);
+  FIO_BENCH_CRYPTO(
+      "BLAKE2b-512 hash (64 bytes)", 2000, out = fio_blake2b(data_small, 64);
+      data_small[0] ^= out.u8[0];);
 
   /* 1024 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2b-512 hash (1024 bytes)",
                    2000,
-                   fio_blake2b(out, 64, data_medium, 1024, NULL, 0);
-                   data_medium[0] ^= out[0];);
+                   out = fio_blake2b(data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
 
   /* 8192 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2b-512 hash (8192 bytes)",
                    2000,
-                   fio_blake2b(out, 64, data_large, 8192, NULL, 0);
-                   data_large[0] ^= out[0];);
+                   out = fio_blake2b(data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
 
   /* 65536 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2b-512 hash (65536 bytes)",
                    2000,
-                   fio_blake2b(out, 64, data_xlarge, 65536, NULL, 0);
-                   data_xlarge[0] ^= out[0];);
+                   out = fio_blake2b(data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
 
   FIO_MEM_FREE(data_small, 64);
   FIO_MEM_FREE(data_medium, 1024);
@@ -445,7 +642,7 @@ FIO_SFUNC void fio_bench_blake2s(void) {
   uint8_t *data_medium = NULL;
   uint8_t *data_large = NULL;
   uint8_t *data_xlarge = NULL;
-  uint8_t out[32];
+  fio_u256 out;
 
   /* Allocate buffers */
   data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
@@ -459,28 +656,27 @@ FIO_SFUNC void fio_bench_blake2s(void) {
   fio_rand_bytes(data_xlarge, 65536);
 
   /* 64 byte hash */
-  FIO_BENCH_CRYPTO("BLAKE2s-256 hash (64 bytes)",
-                   2000,
-                   fio_blake2s(out, 32, data_small, 64, NULL, 0);
-                   data_small[0] ^= out[0];);
+  FIO_BENCH_CRYPTO(
+      "BLAKE2s-256 hash (64 bytes)", 2000, out = fio_blake2s(data_small, 64);
+      data_small[0] ^= out.u8[0];);
 
   /* 1024 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2s-256 hash (1024 bytes)",
                    2000,
-                   fio_blake2s(out, 32, data_medium, 1024, NULL, 0);
-                   data_medium[0] ^= out[0];);
+                   out = fio_blake2s(data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
 
   /* 8192 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2s-256 hash (8192 bytes)",
                    2000,
-                   fio_blake2s(out, 32, data_large, 8192, NULL, 0);
-                   data_large[0] ^= out[0];);
+                   out = fio_blake2s(data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
 
   /* 65536 byte hash */
   FIO_BENCH_CRYPTO("BLAKE2s-256 hash (65536 bytes)",
                    2000,
-                   fio_blake2s(out, 32, data_xlarge, 65536, NULL, 0);
-                   data_xlarge[0] ^= out[0];);
+                   out = fio_blake2s(data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
 
   FIO_MEM_FREE(data_small, 64);
   FIO_MEM_FREE(data_medium, 1024);
@@ -692,7 +888,6 @@ OpenSSL Comparison Benchmarks - Direct Head-to-Head
 ***************************************************************************** */
 
 #ifdef HAVE_OPENSSL
-
 /* OpenSSL Ed25519 Key Generation */
 FIO_SFUNC void openssl_bench_ed25519_keygen(void) {
   fprintf(stderr, "    * OpenSSL Ed25519 Key Generation:\n");
@@ -719,7 +914,6 @@ FIO_SFUNC void openssl_bench_ed25519_sign(void) {
   EVP_MD_CTX *md_ctx = NULL;
   unsigned char sig[64];
   size_t sig_len;
-  unsigned char msg[128];
 
   /* Generate Ed25519 key pair */
   pkey_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
@@ -743,31 +937,52 @@ FIO_SFUNC void openssl_bench_ed25519_sign(void) {
     return;
   }
 
-  fio_rand_bytes(msg, 128);
+  unsigned char *msg_small = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  unsigned char *msg_medium =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  unsigned char *msg_large = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  unsigned char *msg_xlarge =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
 
-  /* Benchmark empty message signing */
-  FIO_BENCH_CRYPTO(
-      "OpenSSL Ed25519 sign (0 bytes)", 2000, sig_len = sizeof(sig);
-      EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey);
-      EVP_DigestSign(md_ctx, sig, &sig_len, (unsigned char *)"", 0);
-      EVP_MD_CTX_reset(md_ctx););
+  fio_rand_bytes(msg_small, 64);
+  fio_rand_bytes(msg_medium, 1024);
+  fio_rand_bytes(msg_large, 8192);
+  fio_rand_bytes(msg_xlarge, 65536);
 
   /* Benchmark 64 byte message signing */
   FIO_BENCH_CRYPTO(
       "OpenSSL Ed25519 sign (64 bytes)", 2000, sig_len = sizeof(sig);
       EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey);
-      EVP_DigestSign(md_ctx, sig, &sig_len, msg, 64);
+      EVP_DigestSign(md_ctx, sig, &sig_len, msg_small, 64);
       EVP_MD_CTX_reset(md_ctx););
 
-  /* Benchmark 128 byte message signing */
+  /* Benchmark 1024 byte message signing */
   FIO_BENCH_CRYPTO(
-      "OpenSSL Ed25519 sign (128 bytes)", 2000, sig_len = sizeof(sig);
+      "OpenSSL Ed25519 sign (1024 bytes)", 2000, sig_len = sizeof(sig);
       EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey);
-      EVP_DigestSign(md_ctx, sig, &sig_len, msg, 128);
+      EVP_DigestSign(md_ctx, sig, &sig_len, msg_medium, 1024);
+      EVP_MD_CTX_reset(md_ctx););
+
+  /* Benchmark 8192 byte message signing */
+  FIO_BENCH_CRYPTO(
+      "OpenSSL Ed25519 sign (8192 bytes)", 2000, sig_len = sizeof(sig);
+      EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey);
+      EVP_DigestSign(md_ctx, sig, &sig_len, msg_large, 8192);
+      EVP_MD_CTX_reset(md_ctx););
+
+  /* Benchmark 65536 byte message signing */
+  FIO_BENCH_CRYPTO(
+      "OpenSSL Ed25519 sign (65536 bytes)", 2000, sig_len = sizeof(sig);
+      EVP_DigestSignInit(md_ctx, NULL, NULL, NULL, pkey);
+      EVP_DigestSign(md_ctx, sig, &sig_len, msg_xlarge, 65536);
       EVP_MD_CTX_reset(md_ctx););
 
   EVP_MD_CTX_free(md_ctx);
   EVP_PKEY_free(pkey);
+  FIO_MEM_FREE(msg_small, 64);
+  FIO_MEM_FREE(msg_medium, 1024);
+  FIO_MEM_FREE(msg_large, 8192);
+  FIO_MEM_FREE(msg_xlarge, 65536);
 }
 
 /* OpenSSL Ed25519 Signature Verification */
@@ -780,7 +995,6 @@ FIO_SFUNC void openssl_bench_ed25519_verify(void) {
   EVP_MD_CTX *sign_ctx = NULL;
   unsigned char sig[64];
   size_t sig_len = sizeof(sig);
-  unsigned char msg[128];
 
   /* Generate key and prepare contexts */
   pkey_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
@@ -795,48 +1009,74 @@ FIO_SFUNC void openssl_bench_ed25519_verify(void) {
 
   md_ctx = EVP_MD_CTX_new();
   sign_ctx = EVP_MD_CTX_new();
-  fio_rand_bytes(msg, 128);
 
-  /* Sign 0 byte message for verification benchmark */
-  sig_len = sizeof(sig);
-  EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
-  EVP_DigestSign(sign_ctx, sig, &sig_len, (unsigned char *)"", 0);
-  EVP_MD_CTX_reset(sign_ctx);
+  unsigned char *msg_small = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  unsigned char *msg_medium =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  unsigned char *msg_large = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  unsigned char *msg_xlarge =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
 
-  FIO_BENCH_CRYPTO(
-      "OpenSSL Ed25519 verify (0 bytes)",
-      2000,
-      EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey);
-      EVP_DigestVerify(md_ctx, sig, sig_len, (unsigned char *)"", 0);
-      EVP_MD_CTX_reset(md_ctx););
+  fio_rand_bytes(msg_small, 64);
+  fio_rand_bytes(msg_medium, 1024);
+  fio_rand_bytes(msg_large, 8192);
+  fio_rand_bytes(msg_xlarge, 65536);
 
   /* Sign 64 byte message for verification benchmark */
   sig_len = sizeof(sig);
   EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
-  EVP_DigestSign(sign_ctx, sig, &sig_len, msg, 64);
+  EVP_DigestSign(sign_ctx, sig, &sig_len, msg_small, 64);
   EVP_MD_CTX_reset(sign_ctx);
 
   FIO_BENCH_CRYPTO("OpenSSL Ed25519 verify (64 bytes)",
                    2000,
                    EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey);
-                   EVP_DigestVerify(md_ctx, sig, sig_len, msg, 64);
+                   EVP_DigestVerify(md_ctx, sig, sig_len, msg_small, 64);
                    EVP_MD_CTX_reset(md_ctx););
 
-  /* Sign 128 byte message for verification benchmark */
+  /* Sign 1024 byte message for verification benchmark */
   sig_len = sizeof(sig);
   EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
-  EVP_DigestSign(sign_ctx, sig, &sig_len, msg, 128);
+  EVP_DigestSign(sign_ctx, sig, &sig_len, msg_medium, 1024);
   EVP_MD_CTX_reset(sign_ctx);
 
-  FIO_BENCH_CRYPTO("OpenSSL Ed25519 verify (128 bytes)",
+  FIO_BENCH_CRYPTO("OpenSSL Ed25519 verify (1024 bytes)",
                    2000,
                    EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey);
-                   EVP_DigestVerify(md_ctx, sig, sig_len, msg, 128);
+                   EVP_DigestVerify(md_ctx, sig, sig_len, msg_medium, 1024);
+                   EVP_MD_CTX_reset(md_ctx););
+
+  /* Sign 8192 byte message for verification benchmark */
+  sig_len = sizeof(sig);
+  EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
+  EVP_DigestSign(sign_ctx, sig, &sig_len, msg_large, 8192);
+  EVP_MD_CTX_reset(sign_ctx);
+
+  FIO_BENCH_CRYPTO("OpenSSL Ed25519 verify (8192 bytes)",
+                   2000,
+                   EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey);
+                   EVP_DigestVerify(md_ctx, sig, sig_len, msg_large, 8192);
+                   EVP_MD_CTX_reset(md_ctx););
+
+  /* Sign 65536 byte message for verification benchmark */
+  sig_len = sizeof(sig);
+  EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
+  EVP_DigestSign(sign_ctx, sig, &sig_len, msg_xlarge, 65536);
+  EVP_MD_CTX_reset(sign_ctx);
+
+  FIO_BENCH_CRYPTO("OpenSSL Ed25519 verify (65536 bytes)",
+                   2000,
+                   EVP_DigestVerifyInit(md_ctx, NULL, NULL, NULL, pkey);
+                   EVP_DigestVerify(md_ctx, sig, sig_len, msg_xlarge, 65536);
                    EVP_MD_CTX_reset(md_ctx););
 
   EVP_MD_CTX_free(sign_ctx);
   EVP_MD_CTX_free(md_ctx);
   EVP_PKEY_free(pkey);
+  FIO_MEM_FREE(msg_small, 64);
+  FIO_MEM_FREE(msg_medium, 1024);
+  FIO_MEM_FREE(msg_large, 8192);
+  FIO_MEM_FREE(msg_xlarge, 65536);
 }
 
 /* OpenSSL Ed25519 Sign+Verify Roundtrip */
@@ -849,7 +1089,6 @@ FIO_SFUNC void openssl_bench_ed25519_roundtrip(void) {
   EVP_MD_CTX *verify_ctx = NULL;
   unsigned char sig[64];
   size_t sig_len;
-  unsigned char msg[1024];
 
   /* Generate key */
   pkey_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
@@ -859,24 +1098,42 @@ FIO_SFUNC void openssl_bench_ed25519_roundtrip(void) {
 
   sign_ctx = EVP_MD_CTX_new();
   verify_ctx = EVP_MD_CTX_new();
+
+  unsigned char *msg = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
   fio_rand_bytes(msg, 1024);
 
-  FIO_BENCH_CRYPTO("OpenSSL Ed25519 sign+verify roundtrip (256 bytes)",
+  FIO_BENCH_CRYPTO("OpenSSL Ed25519 sign+verify roundtrip (1024 bytes)",
                    2000,
                    sig_len = sizeof(sig);
                    EVP_DigestSignInit(sign_ctx, NULL, NULL, NULL, pkey);
-                   EVP_DigestSign(sign_ctx, sig, &sig_len, msg, 256);
+                   EVP_DigestSign(sign_ctx, sig, &sig_len, msg, 1024);
                    EVP_MD_CTX_reset(sign_ctx);
                    EVP_DigestVerifyInit(verify_ctx, NULL, NULL, NULL, pkey);
-                   EVP_DigestVerify(verify_ctx, sig, sig_len, msg, 256);
+                   EVP_DigestVerify(verify_ctx, sig, sig_len, msg, 1024);
                    EVP_MD_CTX_reset(verify_ctx););
 
   EVP_MD_CTX_free(sign_ctx);
   EVP_MD_CTX_free(verify_ctx);
   EVP_PKEY_free(pkey);
+  FIO_MEM_FREE(msg, 1024);
 }
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_ed25519_keygen(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_ed25519_sign(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_ed25519_verify(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_ed25519_roundtrip(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* OpenSSL X25519 Key Exchange */
+#ifdef HAVE_OPENSSL
 FIO_SFUNC void openssl_bench_x25519(void) {
   fprintf(stderr, "    * OpenSSL X25519 Key Exchange:\n");
 
@@ -961,8 +1218,14 @@ FIO_SFUNC void openssl_bench_x25519(void) {
                    pkey1 = NULL;
                    pkey2 = NULL;);
 }
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_x25519(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* OpenSSL ChaCha20-Poly1305 AEAD Encryption */
+#ifdef HAVE_OPENSSL
 FIO_SFUNC void openssl_bench_chacha20_poly1305_enc(void) {
   fprintf(stderr, "    * OpenSSL ChaCha20-Poly1305 Encryption:\n");
 
@@ -1197,8 +1460,20 @@ FIO_SFUNC void openssl_bench_chacha20_poly1305_throughput(void) {
   EVP_CIPHER_CTX_free(ctx);
   FIO_MEM_FREE(data, sizes[(sizeof(sizes) / sizeof(sizes[0])) - 1]);
 }
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_chacha20_poly1305_enc(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_chacha20_poly1305_dec(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_chacha20_poly1305_throughput(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* OpenSSL BLAKE2 Hash Functions */
+#ifdef HAVE_OPENSSL
 FIO_SFUNC void openssl_bench_blake2(void) {
   fprintf(stderr, "    * OpenSSL BLAKE2b-512 Throughput:\n");
 
@@ -1389,8 +1664,17 @@ FIO_SFUNC void openssl_bench_sha3(void) {
   FIO_MEM_FREE(data_large, 8192);
   FIO_MEM_FREE(data_xlarge, 65536);
 }
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_blake2(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_sha3(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* OpenSSL BIGNUM Multiplication */
+#ifdef HAVE_OPENSSL
 FIO_SFUNC void openssl_bench_bn_multiplication(void) {
   fprintf(stderr, "    * OpenSSL BIGNUM Multiplication:\n");
 
@@ -1440,14 +1724,18 @@ FIO_SFUNC void openssl_bench_bn_multiplication(void) {
   BN_free(result);
   BN_CTX_free(bn_ctx);
 }
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_bn_multiplication(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* *****************************************************************************
 OpenSSL ML-KEM-768 Benchmarks (requires OpenSSL 3.5+)
 ***************************************************************************** */
 
-#ifdef FIO___PERF_HAS_OPENSSL_MLKEM
-
 /* OpenSSL X25519 Baseline (for KEM comparison, one-side only) */
+#ifdef FIO___PERF_HAS_OPENSSL_MLKEM
 FIO_SFUNC void openssl_bench_x25519_baseline(void) {
   fprintf(stderr, "    * OpenSSL X25519 Baseline (for KEM comparison):\n");
 
@@ -1501,8 +1789,18 @@ FIO_SFUNC void openssl_bench_x25519_baseline(void) {
   EVP_PKEY_free(pkey1);
   EVP_PKEY_free(pkey2);
 }
+#elif defined(HAVE_OPENSSL)
+FIO_SFUNC void openssl_bench_x25519_baseline(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable - requires OpenSSL 3.5+)\n");
+}
+#else
+FIO_SFUNC void openssl_bench_x25519_baseline(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif
 
 /* OpenSSL ML-KEM-768 Key Generation */
+#ifdef FIO___PERF_HAS_OPENSSL_MLKEM
 FIO_SFUNC void openssl_bench_mlkem768_keypair(void) {
   fprintf(stderr, "    * OpenSSL ML-KEM-768 Key Generation:\n");
 
@@ -1654,10 +1952,33 @@ FIO_SFUNC void openssl_bench_mlkem768_roundtrip(void) {
       enc_ctx = NULL;
       dec_ctx = NULL;);
 }
-
-#endif /* FIO___PERF_HAS_OPENSSL_MLKEM */
-
-#endif /* HAVE_OPENSSL */
+#elif defined(HAVE_OPENSSL)
+FIO_SFUNC void openssl_bench_mlkem768_keypair(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable - requires OpenSSL 3.5+)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_encaps(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable - requires OpenSSL 3.5+)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_decaps(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable - requires OpenSSL 3.5+)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_roundtrip(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable - requires OpenSSL 3.5+)\n");
+}
+#else
+FIO_SFUNC void openssl_bench_mlkem768_keypair(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_encaps(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_decaps(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_mlkem768_roundtrip(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif
 
 /* *****************************************************************************
 X25519 Profiling - Elliptic Curve Diffie-Hellman
@@ -1914,216 +2235,15 @@ FIO_SFUNC void fio_bench_kem_key_sizes(void) {
 }
 
 /* *****************************************************************************
-Main Test Runner
+Platform / Build Info Helper
 ***************************************************************************** */
 
-int main(void) {
-#if defined(DEBUG) && (DEBUG)
-  if (1) {
-    fprintf(stderr, "\t- Skipped in DEBUG\n");
-    return 0;
-  }
-#endif
+FIO_SFUNC void fio_bench_print_platform_info(void) {
   fprintf(stderr,
           "\n"
           "=======================================================\n"
-          "  Crypto Performance: facil.io vs OpenSSL\n"
-          "  Real-World Performance Comparison\n"
+          "  Platform / Compiler / OpenSSL Info\n"
           "=======================================================\n\n");
-
-  fprintf(stderr, "Multiplication is heavily used in:\n");
-  fprintf(stderr,
-          "  - Ed25519: ~25 mulc64 per field mul, ~250 field muls per "
-          "sign/verify\n");
-  fprintf(stderr, "  - Poly1305: ~9 mulc64 per 16-byte block processed\n");
-  fprintf(stderr, "  - X25519: Similar to Ed25519 (scalar multiplication)\n\n");
-
-  /* ===================================================================
-     facil.io Implementation Benchmarks
-     =================================================================== */
-  fprintf(stderr,
-          "\n"
-          "=======================================================\n"
-          "  facil.io Implementation\n"
-          "=======================================================\n");
-
-  /* Ed25519 Digital Signatures */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  Ed25519 Digital Signatures (256-bit field ops)\n"
-          "---------------------------------------------------\n");
-  fio_bench_ed25519_keygen();
-  fio_bench_ed25519_sign();
-  fio_bench_ed25519_verify();
-  fio_bench_ed25519_roundtrip();
-
-  /* X25519 Key Exchange */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  X25519 Key Exchange (256-bit scalar mul)\n"
-          "---------------------------------------------------\n");
-  fio_bench_x25519();
-
-  /* X25519 Baseline (one-side, for KEM comparison) */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  X25519 Baseline (one-side, for KEM comparison)\n"
-          "---------------------------------------------------\n");
-  fio_bench_x25519_baseline();
-
-  /* ML-KEM-768 Post-Quantum KEM */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  ML-KEM-768 Key Encapsulation (Post-Quantum)\n"
-          "---------------------------------------------------\n");
-  fio_bench_mlkem768_keypair();
-  fio_bench_mlkem768_encaps();
-  fio_bench_mlkem768_decaps();
-  fio_bench_mlkem768_roundtrip();
-
-  /* X25519MLKEM768 Hybrid Key Exchange */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  X25519MLKEM768 Hybrid Key Exchange (TLS 1.3)\n"
-          "---------------------------------------------------\n");
-  fio_bench_x25519mlkem768_keypair();
-  fio_bench_x25519mlkem768_encaps();
-  fio_bench_x25519mlkem768_decaps();
-  fio_bench_x25519mlkem768_roundtrip();
-
-  /* ChaCha20-Poly1305 AEAD */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  ChaCha20-Poly1305 AEAD (130-bit field ops)\n"
-          "---------------------------------------------------\n");
-  fio_bench_chacha20_poly1305_enc();
-  fio_bench_chacha20_poly1305_dec();
-  fio_bench_chacha20_poly1305_throughput();
-
-  /* BLAKE2 Hash Functions */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  BLAKE2 Hash Functions (Fast Cryptographic Hash)\n"
-          "---------------------------------------------------\n");
-  fio_bench_blake2b();
-  fio_bench_blake2s();
-
-  /* SHA-3 Hash Functions */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  SHA-3 Hash Functions (NIST Standard)\n"
-          "---------------------------------------------------\n");
-  fio_bench_sha3_256();
-  fio_bench_sha3_512();
-
-  /* Isolated multiplication benchmarks */
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  Isolated Multiplication (Crypto-Relevant Sizes)\n"
-          "---------------------------------------------------\n");
-  fio_bench_mul_crypto_sizes();
-
-  /* ===================================================================
-     OpenSSL Implementation Benchmarks (if available)
-     =================================================================== */
-#ifdef HAVE_OPENSSL
-  fprintf(stderr,
-          "\n"
-          "=======================================================\n"
-          "  OpenSSL Implementation (Head-to-Head Comparison)\n"
-          "=======================================================\n");
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  Ed25519 Digital Signatures\n"
-          "---------------------------------------------------\n");
-  openssl_bench_ed25519_keygen();
-  openssl_bench_ed25519_sign();
-  openssl_bench_ed25519_verify();
-  openssl_bench_ed25519_roundtrip();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  X25519 Key Exchange\n"
-          "---------------------------------------------------\n");
-  openssl_bench_x25519();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  ChaCha20-Poly1305 AEAD\n"
-          "---------------------------------------------------\n");
-  openssl_bench_chacha20_poly1305_enc();
-  openssl_bench_chacha20_poly1305_dec();
-  openssl_bench_chacha20_poly1305_throughput();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  BLAKE2 Hash Functions\n"
-          "---------------------------------------------------\n");
-  openssl_bench_blake2();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  SHA-3 Hash Functions\n"
-          "---------------------------------------------------\n");
-  openssl_bench_sha3();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  BIGNUM Multiplication (Crypto Sizes)\n"
-          "---------------------------------------------------\n");
-  openssl_bench_bn_multiplication();
-
-#ifdef FIO___PERF_HAS_OPENSSL_MLKEM
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  X25519 Baseline (OpenSSL, for KEM comparison)\n"
-          "---------------------------------------------------\n");
-  openssl_bench_x25519_baseline();
-
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  ML-KEM-768 Key Encapsulation (OpenSSL 3.5+)\n"
-          "---------------------------------------------------\n");
-  openssl_bench_mlkem768_keypair();
-  openssl_bench_mlkem768_encaps();
-  openssl_bench_mlkem768_decaps();
-  openssl_bench_mlkem768_roundtrip();
-#else
-  fprintf(stderr,
-          "\n"
-          "---------------------------------------------------\n"
-          "  ML-KEM-768: Skipped (requires OpenSSL 3.5+)\n"
-          "---------------------------------------------------\n");
-#endif /* FIO___PERF_HAS_OPENSSL_MLKEM */
-
-  /* Comparison Summary */
-  fprintf(stderr,
-          "\n"
-          "=======================================================\n"
-          "  Comparison Summary\n"
-          "=======================================================\n\n");
-  fprintf(stderr, "  ✓ Direct head-to-head comparison complete\n");
-  fprintf(stderr, "  ✓ Both libraries tested on identical hardware\n");
-  fprintf(stderr, "  ✓ Same compiler optimization level\n\n");
-
   fprintf(stderr, "  Platform: ");
 #if defined(__APPLE__)
   fprintf(stderr, "macOS");
@@ -2157,26 +2277,170 @@ int main(void) {
   fprintf(stderr, "unknown");
 #endif
 
-  fprintf(stderr, "\n  OpenSSL: %s\n", OPENSSL_VERSION_TEXT);
-  fprintf(stderr, "\n");
-
+#ifdef HAVE_OPENSSL
+  fprintf(stderr, "\n  OpenSSL: %s\n\n", OPENSSL_VERSION_TEXT);
 #else
-  /* OpenSSL not available */
+  fprintf(stderr, "\n  OpenSSL: (unavailable)\n\n");
+#endif
+}
+
+/* *****************************************************************************
+Main Test Runner
+***************************************************************************** */
+
+int main(void) {
+#if defined(DEBUG) && (DEBUG)
+  if (1) {
+    fprintf(stderr, "\t- Skipped in DEBUG\n");
+    return 0;
+  }
+#endif
   fprintf(stderr,
           "\n"
           "=======================================================\n"
-          "  OpenSSL Not Available\n"
+          "  Crypto Performance: facil.io vs OpenSSL\n"
+          "  Real-World Performance Comparison\n"
           "=======================================================\n\n");
-  fprintf(stderr,
-          "  ⚠  OpenSSL not detected - skipping comparison benchmarks\n");
-  fprintf(stderr,
-          "  ℹ  Install OpenSSL development libraries for "
-          "head-to-head comparison\n");
-  fprintf(stderr, "  ℹ  Build with: make HAVE_OPENSSL=1\n\n");
-#endif
 
-  /* Key size summary for KEM algorithms */
+  fprintf(stderr, "Multiplication is heavily used in:\n");
+  fprintf(stderr,
+          "  - Ed25519: ~25 mulc64 per field mul, ~250 field muls per "
+          "sign/verify\n");
+  fprintf(stderr, "  - Poly1305: ~9 mulc64 per 16-byte block processed\n");
+  fprintf(stderr, "  - X25519: Similar to Ed25519 (scalar multiplication)\n\n");
+
+  /* ===================================================================
+     Ed25519 Digital Signatures
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  Ed25519 Digital Signatures (256-bit field ops)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_ed25519_keygen();
+  fio_bench_ed25519_sign();
+  fio_bench_ed25519_verify();
+  fio_bench_ed25519_roundtrip();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_ed25519_keygen();
+  openssl_bench_ed25519_sign();
+  openssl_bench_ed25519_verify();
+  openssl_bench_ed25519_roundtrip();
+
+  /* ===================================================================
+     X25519 Key Exchange
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  X25519 Key Exchange (256-bit scalar mul)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_x25519();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_x25519();
+
+  /* ===================================================================
+     ChaCha20-Poly1305 AEAD
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  ChaCha20-Poly1305 AEAD (130-bit field ops)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_chacha20_poly1305_enc();
+  fio_bench_chacha20_poly1305_dec();
+  fio_bench_chacha20_poly1305_throughput();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_chacha20_poly1305_enc();
+  openssl_bench_chacha20_poly1305_dec();
+  openssl_bench_chacha20_poly1305_throughput();
+
+  /* ===================================================================
+     Hash Functions
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  Hash Functions\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_risky_hash();
+  fio_bench_blake2b();
+  fio_bench_blake2s();
+  fio_bench_sha3_256();
+  fio_bench_sha3_512();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_blake2();
+  openssl_bench_sha3();
+
+  /* ===================================================================
+     Big Number Multiplication
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  Multiplication (Crypto-Relevant Sizes)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_mul_crypto_sizes();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_bn_multiplication();
+
+  /* ===================================================================
+     X25519 Baseline (for KEM comparison)
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  X25519 Baseline (one-side, for KEM comparison)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_x25519_baseline();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_x25519_baseline();
+
+  /* ===================================================================
+     ML-KEM-768 Post-Quantum KEM
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  ML-KEM-768 Key Encapsulation (Post-Quantum)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_mlkem768_keypair();
+  fio_bench_mlkem768_encaps();
+  fio_bench_mlkem768_decaps();
+  fio_bench_mlkem768_roundtrip();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_mlkem768_keypair();
+  openssl_bench_mlkem768_encaps();
+  openssl_bench_mlkem768_decaps();
+  openssl_bench_mlkem768_roundtrip();
+
+  /* ===================================================================
+     X25519MLKEM768 Hybrid Key Exchange
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  X25519MLKEM768 Hybrid Key Exchange (TLS 1.3)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_x25519mlkem768_keypair();
+  fio_bench_x25519mlkem768_encaps();
+  fio_bench_x25519mlkem768_decaps();
+  fio_bench_x25519mlkem768_roundtrip();
+  fprintf(stderr, "  (no OpenSSL equivalent)\n");
+
+  /* ===================================================================
+     Summary
+     =================================================================== */
   fio_bench_kem_key_sizes();
+  fio_bench_print_platform_info();
 
   return 0;
 }

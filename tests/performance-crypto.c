@@ -55,16 +55,14 @@ FIO_SFUNC uintptr_t fio___perf_sha512_wrapper(char *data, size_t len) {
 
 /* Blake2b wrapper */
 FIO_SFUNC uintptr_t fio___perf_blake2b_wrapper(char *data, size_t len) {
-  uint64_t out[8];
-  fio_blake2b(out, 64, (const void *)data, len, NULL, 0);
-  return (uintptr_t)(out[0]);
+  fio_u512 h = fio_blake2b((const void *)data, (uint64_t)len);
+  return (uintptr_t)(h.u64[0]);
 }
 
 /* Blake2s wrapper */
 FIO_SFUNC uintptr_t fio___perf_blake2s_wrapper(char *data, size_t len) {
-  uint32_t out[8];
-  fio_blake2s(out, 32, (const void *)data, len, NULL, 0);
-  return (uintptr_t)(out[0]);
+  fio_u256 h = fio_blake2s((const void *)data, (uint64_t)len);
+  return (uintptr_t)(h.u64[0]);
 }
 
 /* Poly1305 wrapper */

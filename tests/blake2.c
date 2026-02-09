@@ -19,7 +19,7 @@ static void fio___test_blake2b_empty(void) {
       0x93, 0x4e, 0xb0, 0x4b, 0x90, 0x3a, 0x68, 0x5b, 0x14, 0x48, 0xb7,
       0x55, 0xd5, 0x6f, 0x70, 0x1a, 0xfe, 0x9b, 0xe2, 0xce};
   uint8_t out[64];
-  fio_blake2b(out, 64, NULL, 0, NULL, 0);
+  fio_blake2b_hash(out, 64, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64),
              "BLAKE2b-512 empty string test failed");
   FIO_LOG_DDEBUG("BLAKE2b-512 empty string: PASSED");
@@ -35,7 +35,7 @@ static void fio___test_blake2b_abc(void) {
       0x45, 0x33, 0xcc, 0x95, 0x18, 0xd3, 0x8a, 0xa8, 0xdb, 0xf1, 0x92,
       0x5a, 0xb9, 0x23, 0x86, 0xed, 0xd4, 0x00, 0x99, 0x23};
   uint8_t out[64];
-  fio_blake2b(out, 64, "abc", 3, NULL, 0);
+  fio_blake2b_hash(out, 64, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 'abc' test failed");
   FIO_LOG_DDEBUG("BLAKE2b-512 'abc': PASSED");
 }
@@ -59,7 +59,7 @@ static void fio___test_blake2b_keyed(void) {
       0xb6, 0xa4, 0x10, 0x6e, 0x0a, 0x7b, 0xf9, 0x80, 0x0d, 0x37, 0x3d,
       0x6d, 0xee, 0x2d, 0x46, 0xd6, 0x2e, 0xf2, 0xa4, 0x61};
   uint8_t out[64];
-  fio_blake2b(out, 64, msg, 255, key, 64);
+  fio_blake2b_hash(out, 64, msg, 255, key, 64);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 keyed test failed");
   FIO_LOG_DDEBUG("BLAKE2b-512 keyed (64-byte key, 255-byte msg): PASSED");
 }
@@ -72,13 +72,16 @@ static void fio___test_blake2b_streaming(void) {
   uint8_t out1[64], out2[64];
 
   /* One-shot */
-  fio_blake2b(out1, 64, msg, len, NULL, 0);
+  fio_blake2b_hash(out1, 64, msg, len, NULL, 0);
 
   /* Streaming - feed one byte at a time */
   fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
   for (size_t i = 0; i < len; ++i)
     fio_blake2b_consume(&h, msg + i, 1);
-  fio_blake2b_finalize(&h, out2);
+  {
+    fio_u512 result = fio_blake2b_finalize(&h);
+    FIO_MEMCPY(out2, result.u8, 64);
+  }
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64), "BLAKE2b streaming test failed");
   FIO_LOG_DDEBUG("BLAKE2b-512 streaming: PASSED");
@@ -92,7 +95,7 @@ static void fio___test_blake2s_empty(void) {
       0xd0, 0x42, 0x35, 0x4a, 0x7c, 0x1f, 0x55, 0xb6, 0x48, 0x2c, 0xa1,
       0xa5, 0x1e, 0x1b, 0x25, 0x0d, 0xfd, 0x1e, 0xd0, 0xee, 0xf9};
   uint8_t out[32];
-  fio_blake2s(out, 32, NULL, 0, NULL, 0);
+  fio_blake2s_hash(out, 32, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32),
              "BLAKE2s-256 empty string test failed");
   FIO_LOG_DDEBUG("BLAKE2s-256 empty string: PASSED");
@@ -105,7 +108,7 @@ static void fio___test_blake2s_abc(void) {
       0xa3, 0x4e, 0xeb, 0x45, 0x2f, 0x37, 0x45, 0x8b, 0x20, 0x9e, 0xd6,
       0x3a, 0x29, 0x4d, 0x99, 0x9b, 0x4c, 0x86, 0x67, 0x59, 0x82};
   uint8_t out[32];
-  fio_blake2s(out, 32, "abc", 3, NULL, 0);
+  fio_blake2s_hash(out, 32, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "BLAKE2s-256 'abc' test failed");
   FIO_LOG_DDEBUG("BLAKE2s-256 'abc': PASSED");
 }
@@ -118,13 +121,16 @@ static void fio___test_blake2s_streaming(void) {
   uint8_t out1[32], out2[32];
 
   /* One-shot */
-  fio_blake2s(out1, 32, msg, len, NULL, 0);
+  fio_blake2s_hash(out1, 32, msg, len, NULL, 0);
 
   /* Streaming - feed one byte at a time */
   fio_blake2s_s h = fio_blake2s_init(32, NULL, 0);
   for (size_t i = 0; i < len; ++i)
     fio_blake2s_consume(&h, msg + i, 1);
-  fio_blake2s_finalize(&h, out2);
+  {
+    fio_u256 result = fio_blake2s_finalize(&h);
+    FIO_MEMCPY(out2, result.u8, 32);
+  }
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "BLAKE2s streaming test failed");
   FIO_LOG_DDEBUG("BLAKE2s-256 streaming: PASSED");
@@ -140,8 +146,8 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t data[1] = {0x00};
     uint8_t out_b[64], out_s[32];
 
-    fio_blake2b(out_b, 64, data, 1, NULL, 0);
-    fio_blake2s(out_s, 32, data, 1, NULL, 0);
+    fio_blake2b_hash(out_b, 64, data, 1, NULL, 0);
+    fio_blake2s_hash(out_s, 32, data, 1, NULL, 0);
 
     int zero_b = 1, zero_s = 1;
     for (int i = 0; i < 64; ++i)
@@ -168,8 +174,8 @@ static void fio___test_blake2_edge_cases(void) {
       FIO_ASSERT(data, "Memory allocation failed");
       FIO_MEMSET(data, 'A', len);
 
-      fio_blake2b(out_b, 64, data, len, NULL, 0);
-      fio_blake2s(out_s, 32, data, len, NULL, 0);
+      fio_blake2b_hash(out_b, 64, data, len, NULL, 0);
+      fio_blake2s_hash(out_s, 32, data, len, NULL, 0);
 
       int zero_b = 1, zero_s = 1;
       for (int j = 0; j < 64; ++j)
@@ -199,7 +205,7 @@ static void fio___test_blake2_edge_cases(void) {
       uint8_t out[64];
       FIO_MEMSET(out, 0, 64);
 
-      fio_blake2b(out, out_len, data, data_len, NULL, 0);
+      fio_blake2b_hash(out, out_len, data, data_len, NULL, 0);
 
       int zero = 1;
       for (size_t j = 0; j < out_len; ++j)
@@ -217,7 +223,7 @@ static void fio___test_blake2_edge_cases(void) {
       uint8_t out[32];
       FIO_MEMSET(out, 0, 32);
 
-      fio_blake2s(out, out_len, data, data_len, NULL, 0);
+      fio_blake2s_hash(out, out_len, data, data_len, NULL, 0);
 
       int zero = 1;
       for (size_t j = 0; j < out_len; ++j)
@@ -243,7 +249,7 @@ static void fio___test_blake2_edge_cases(void) {
       uint8_t out[64];
       FIO_MEMSET(key, (int)i, key_len);
 
-      fio_blake2b(out, 64, data, data_len, key, key_len);
+      fio_blake2b_hash(out, 64, data, data_len, key, key_len);
 
       int zero = 1;
       for (int j = 0; j < 64; ++j)
@@ -262,7 +268,7 @@ static void fio___test_blake2_edge_cases(void) {
       uint8_t out[32];
       FIO_MEMSET(key, (int)i, key_len);
 
-      fio_blake2s(out, 32, data, data_len, key, key_len);
+      fio_blake2s_hash(out, 32, data, data_len, key, key_len);
 
       int zero = 1;
       for (int j = 0; j < 32; ++j)
@@ -280,8 +286,8 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t data[] = "test";
     uint8_t out1[64], out2[64];
 
-    fio_blake2b(out1, 64, data, 4, NULL, 0);
-    fio_blake2b(out2, 64, data, 4, (uint8_t *)"", 0);
+    fio_blake2b_hash(out1, 64, data, 4, NULL, 0);
+    fio_blake2b_hash(out2, 64, data, 4, (uint8_t *)"", 0);
 
     FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64), "Empty key should equal no key");
   }
@@ -297,7 +303,7 @@ static void fio___test_blake2_edge_cases(void) {
     for (size_t i = 0; i < len; ++i)
       data[i] = (uint8_t)(i & 0xFF);
 
-    fio_blake2b(out, 64, data, len, NULL, 0);
+    fio_blake2b_hash(out, 64, data, len, NULL, 0);
 
     int zero = 1;
     for (int i = 0; i < 64; ++i)
@@ -307,7 +313,7 @@ static void fio___test_blake2_edge_cases(void) {
 
     /* Verify determinism */
     uint8_t out2[64];
-    fio_blake2b(out2, 64, data, len, NULL, 0);
+    fio_blake2b_hash(out2, 64, data, len, NULL, 0);
     FIO_ASSERT(!FIO_MEMCMP(out, out2, 64), "BLAKE2b should be deterministic");
 
     free(data);
@@ -323,14 +329,17 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t out1[64], out2[64];
 
     /* One-shot */
-    fio_blake2b(out1, 64, data, 1000, NULL, 0);
+    fio_blake2b_hash(out1, 64, data, 1000, NULL, 0);
 
     /* Incremental - single byte at a time */
     fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
     for (size_t i = 0; i < 1000; ++i) {
       fio_blake2b_consume(&h, data + i, 1);
     }
-    fio_blake2b_finalize(&h, out2);
+    {
+      fio_u512 result = fio_blake2b_finalize(&h);
+      FIO_MEMCPY(out2, result.u8, 64);
+    }
 
     FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64),
                "BLAKE2b incremental (1 byte) mismatch");
@@ -342,7 +351,7 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t data[64] = {0};
     uint8_t out[64];
 
-    fio_blake2b(out, 64, data, 64, NULL, 0);
+    fio_blake2b_hash(out, 64, data, 64, NULL, 0);
 
     int zero = 1;
     for (int i = 0; i < 64; ++i)
@@ -358,7 +367,7 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t out[64];
     FIO_MEMSET(data, 0xFF, 64);
 
-    fio_blake2b(out, 64, data, 64, NULL, 0);
+    fio_blake2b_hash(out, 64, data, 64, NULL, 0);
 
     int zero = 1;
     for (int i = 0; i < 64; ++i)
@@ -376,8 +385,8 @@ static void fio___test_blake2_edge_cases(void) {
     key2[0] = 1;
 
     uint8_t out1[64], out2[64];
-    fio_blake2b(out1, 64, data, 4, key1, 32);
-    fio_blake2b(out2, 64, data, 4, key2, 32);
+    fio_blake2b_hash(out1, 64, data, 4, key1, 32);
+    fio_blake2b_hash(out2, 64, data, 4, key2, 32);
 
     FIO_ASSERT(FIO_MEMCMP(out1, out2, 64) != 0,
                "Different keys should produce different outputs");
@@ -389,8 +398,8 @@ static void fio___test_blake2_edge_cases(void) {
     uint8_t data[] = "test";
     uint8_t out32[32], out64[64];
 
-    fio_blake2b(out32, 32, data, 4, NULL, 0);
-    fio_blake2b(out64, 64, data, 4, NULL, 0);
+    fio_blake2b_hash(out32, 32, data, 4, NULL, 0);
+    fio_blake2b_hash(out64, 64, data, 4, NULL, 0);
 
     /* The 32-byte output should NOT be a prefix of the 64-byte output */
     /* (BLAKE2 encodes output length in the hash) */

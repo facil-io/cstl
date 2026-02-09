@@ -225,8 +225,10 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     fio_u2buf32_le(le_outlen, outlen);
     fio_blake2b_consume(&h, le_outlen, 4);
     fio_blake2b_consume(&h, in, inlen);
-    fio_blake2b_finalize(&h, out);
+    fio_u512 r = fio_blake2b_finalize(&h);
+    FIO_MEMCPY(out, r.u8, outlen);
     fio_secure_zero(&h, sizeof(h));
+    fio_secure_zero(&r, sizeof(r));
   } else {
     /* r = ceil(T/32) - 2 */
     uint32_t r = (outlen + 31) / 32 - 2;
@@ -239,7 +241,8 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
       fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
       fio_blake2b_consume(&h, le_outlen, 4);
       fio_blake2b_consume(&h, in, inlen);
-      fio_blake2b_finalize(&h, v_prev);
+      fio_u512 tmp = fio_blake2b_finalize(&h);
+      FIO_MEMCPY(v_prev, tmp.u8, 64);
     }
     /* Output W_1 (first 32 bytes of V_1) */
     FIO_MEMCPY(out, v_prev, 32);
@@ -247,7 +250,7 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     /* V_2 .. V_r: each V_i = H^64(V_{i-1}) */
     for (uint32_t i = 2; i <= r; ++i) {
       uint8_t v_cur[64];
-      fio_blake2b(v_cur, 64, v_prev, 64, NULL, 0);
+      fio_blake2b_hash(v_cur, 64, v_prev, 64, NULL, 0);
       FIO_MEMCPY((uint8_t *)out + (i - 1) * 32, v_cur, 32);
       FIO_MEMCPY(v_prev, v_cur, 64);
     }
@@ -255,7 +258,7 @@ FIO_SFUNC void fio___argon2_hash_prime(void *out,
     /* V_{r+1} = H^(T-32*r)(V_r) */
     uint32_t last_len = outlen - 32 * r;
     uint8_t v_last[64];
-    fio_blake2b(v_last, last_len, v_prev, 64, NULL, 0);
+    fio_blake2b_hash(v_last, last_len, v_prev, 64, NULL, 0);
     FIO_MEMCPY((uint8_t *)out + r * 32, v_last, last_len);
     fio_secure_zero(v_prev, sizeof(v_prev));
     fio_secure_zero(v_last, sizeof(v_last));
@@ -457,7 +460,11 @@ SFUNC int fio_argon2_hash FIO_NOOP(void *out, fio_argon2_args_s args) {
     if (ad_len)
       fio_blake2b_consume(&bctx, args.ad.buf, ad_len);
 
-    fio_blake2b_finalize(&bctx, h0);
+    {
+      fio_u512 h0_result = fio_blake2b_finalize(&bctx);
+      FIO_MEMCPY(h0, h0_result.u8, 64);
+      fio_secure_zero(&h0_result, sizeof(h0_result));
+    }
     fio_secure_zero(&bctx, sizeof(bctx));
   }
 
