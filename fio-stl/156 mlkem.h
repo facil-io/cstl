@@ -914,7 +914,7 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
   fio___mlkem_poly_reduce(v);
 
   /* Pack ciphertext: Compress(u) || Compress(v) */
-  fio___mlkem_polyvec_compress(ct, b);
+  fio___mlkem_polyvec_compress(ct, (const int16_t(*)[256])b);
   fio___mlkem_poly_compress(ct + FIO___MLKEM_POLYVECCOMPRESSEDBYTES, v);
 
   /* Zero sensitive data */
