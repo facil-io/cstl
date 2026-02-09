@@ -575,15 +575,15 @@ Sets the original / first path associated with the HTTP handle.
 #define FIO_HTTP_PATH_EACH(path, pos)
 ```
 
-Loops over each section of `path`, decoding percent encoding as necessary.
+Loops over each section of `path`, decoding percent encoding as necessary. This uses 4096 bytes on the stack.
 
 The macro accepts the following:
 
 - `path`: the path string as a `fio_str_info_s` or `fio_buf_info_s` object (see [`fio_http_path(h)`](#fio_http_path)).
 
-- `pos` : the name of the variable to use for accessing the section.
+- `pos` : the name of the variable to use for accessing the section. The variable `pos` is a `fio_buf_info_s`.
 
-The variable `pos` is a `fio_buf_info_s`.
+- `pos_reminder` : automatically available inside the loop body, this `fio_buf_info_s` variable points to the rest of the path (the portion not yet iterated).
 
 **Note**: the macro will break if any path's section length is greater than (about) 4063 bytes.
 
@@ -939,7 +939,7 @@ size_t fio_http_cookie_each(fio_http_s *,
 
 Iterates through all cookies. A non-zero return will stop iteration.
 
-#### fio_http_set_cookie_each
+#### `fio_http_set_cookie_each`
 
 ```c
 size_t fio_http_set_cookie_each(fio_http_s *h,

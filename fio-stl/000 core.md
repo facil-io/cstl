@@ -868,17 +868,7 @@ This is provided to allow for easy "tail" processing.
 
 #### `fio_memcpy`
 
-```c
-void *fio_memcpy(void *dest, const void *src, size_t bytes);
-```
-
-A fallback for `memcpy` and `memmove`, copies `bytes` bytes from `src` to `dest`.
-
-Behaves as `memmove`, allowing for copy between overlapping memory buffers. 
-
-On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than libc, depending on the compiler and available instruction sets / optimizations.
+See [Alternative Memory Functions](001 memalt.md) for full documentation.
 
 #### `FIO_MEMSET`
 
@@ -892,19 +882,7 @@ By default this will be set to either `memset` or `__builtin_memset` (if availab
 
 #### `fio_memset`
 
-```c
-void *fio_memset(void *restrict dest, uint64_t data, size_t bytes);
-```
-
-A fallback for `memset`. Sets `bytes` bytes in the `dest` buffer to `data`.
-
-The `data` can be either a single byte - in which case all bytes in `dest` will be set to `data` - or a 64 bit value which will be written repeatedly all over `dest` in local endian format (last copy may be partial).
-
-On most of `libc` implementations the library call will be faster. On embedded systems, test before deciding.
-
-Returns `dest` (the pointer originally received).
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
+See [Alternative Memory Functions](001 memalt.md) for full documentation.
 
 #### `FIO_MEMCHR`
 
@@ -918,17 +896,7 @@ By default this will be set to either `memchr` or `__builtin_memchr` (if availab
 
 #### `fio_memchr`
 
-```c
-void *fio_memchr(const void *buffer, const char token, size_t len);
-```
-
-A fallback for `memchr`, seeking a `token` in the number of `bytes` starting at the address of `mem`.
-
-If `token` is found, returns the address of the token's first appearance. Otherwise returns `NULL`.
-
-On most of `libc` implementations the library call will be faster. Test before deciding.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
+See [Alternative Memory Functions](001 memalt.md) for full documentation.
 
 #### `FIO_MEMCMP`
 
@@ -942,15 +910,7 @@ By default this will be set to either `memcmp` or `__builtin_memcmp` (if availab
 
 #### `fio_memcmp`
 
-```c
-int fio_memcmp(const void *a, const void *b, size_t len);
-```
-
-A fallback for `memcmp`, comparing two memory regions by byte values.
-
-Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
+See [Alternative Memory Functions](001 memalt.md) for full documentation.
 
 #### `FIO_STRLEN`
 
@@ -964,13 +924,7 @@ By default this will be set to either `strlen` or `__builtin_strlen` (if availab
 
 #### `fio_strlen`
 
-```c
-size_t fio_strlen(const char *str);
-```
-
-A fallback for `strlen`, returning the length of the string.
-
-**Note**: Implementation relies heavily on compiler auto-vectorization. Resulting code may run faster or slower than `libc`, depending on the compiler and available instruction sets / optimizations.
+See [Alternative Memory Functions](001 memalt.md) for full documentation.
 
 #### `FIO_MEMALT`
 
