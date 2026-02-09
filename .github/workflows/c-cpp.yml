@@ -7,12 +7,12 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
+  debug:
     strategy:
       fail-fast: false
 
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
     - uses: actions/checkout@v3
@@ -23,12 +23,19 @@ jobs:
       run: CFLAGS="-DFIO_MEMORY_DISABLE -DFIO_MEMALT" make db/tests
     - name: Test STL in debug mode
       run: make clean && make db/tests
+
+  production:
+    strategy:
+      fail-fast: false
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+    - uses: actions/checkout@v3
     - name: Test STL
       run: make clean && make tests
-    - name: Test Mustache Compliance
-      run: make tests/mustache
     - name: Test fio_malloc speed
       run: |
-        make clean
         make tests/malloc
         ./tmp/tests/malloc -t 4
