@@ -44397,14 +44397,16 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
     fio___mlkem_poly_tomont(pkpv[i]);
   }
 
-  fio___mlkem_polyvec_add(pkpv, pkpv, e);
+  fio___mlkem_polyvec_add(pkpv,
+                          (const int16_t(*)[256])pkpv,
+                          (const int16_t(*)[256])e);
   fio___mlkem_polyvec_reduce(pkpv);
 
   /* Pack secret key (NTT domain) — reduce first for 12-bit packing */
   fio___mlkem_polyvec_reduce(skpv);
-  fio___mlkem_polyvec_tobytes(sk, skpv);
+  fio___mlkem_polyvec_tobytes(sk, (const int16_t(*)[256])skpv);
   /* Pack public key: t || rho */
-  fio___mlkem_polyvec_tobytes(pk, pkpv);
+  fio___mlkem_polyvec_tobytes(pk, (const int16_t(*)[256])pkpv);
   fio_memcpy32(pk + FIO___MLKEM_POLYVECBYTES, publicseed);
 
   /* Zero sensitive data */
@@ -44457,7 +44459,9 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
                                                (const int16_t(*)[256])sp);
 
   fio___mlkem_polyvec_invntt_tomont(b);
-  fio___mlkem_polyvec_add(b, b, ep);
+  fio___mlkem_polyvec_add(b,
+                          (const int16_t(*)[256])b,
+                          (const int16_t(*)[256])ep);
   fio___mlkem_polyvec_reduce(b);
 
   /* Compute v = t^T * r + e2 + Decompress(Decode(m)) */

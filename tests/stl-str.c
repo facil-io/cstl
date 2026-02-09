@@ -359,7 +359,7 @@ FIO_SFUNC void test_string_utf8(void) {
   /* Invalid UTF-8 */
   {
     const char invalid[] = {(char)0xFF, (char)0xFE, 0};
-    fio_str_info_s s = FIO_STR_INFO1((char *)invalid);
+    fio_str_info_s s = FIO_STR_INFO2((char *)invalid, (sizeof(invalid) - 1));
     FIO_ASSERT(!fio_string_utf8_valid(s), "Invalid bytes should fail");
   }
 
