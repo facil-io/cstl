@@ -15,7 +15,7 @@ FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
 #define FIO_TEST_REPEAT (1ULL << 12U)
 
 FIO_CONSTRUCTOR(fio____test_stack_poisener) {
-#define FIO___STACK_POISON_LENGTH (1ULL << 18)
+#define FIO___STACK_POISON_LENGTH (1ULL << 15)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
   FIO_COMPILER_GUARD;
   FIO_MEMSET(buf, (int)(0xA0U), FIO___STACK_POISON_LENGTH);

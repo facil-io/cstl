@@ -4326,7 +4326,7 @@ SIMD Vector Operations
   FIO_FOR_UNROLL(len, sizeof(*a), i__, result[i__] = a[i__] op b[i__])
 /** A math operation `op` between a scalar and a vector */
 #define FIO_VEC_SCALAR_OP(result, v, sclr, len, op)                            \
-  FIO_FOR_UNROLL(len, sizeof(*v), i__, result[i__] = vec[i__] op scalar)
+  FIO_FOR_UNROLL(len, sizeof(*(v)), i__, (result)[i__] = (v)[i__] op(sclr))
 /** A math operation `op` between all vector members */
 #define FIO_VEC_REDUCE_OP(result, vec, len, op)                                \
   FIO_FOR_UNROLL(len, sizeof(*vec), i__, result = result op vec[i__])

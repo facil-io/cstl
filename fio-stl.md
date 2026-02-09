@@ -4118,9 +4118,7 @@ Performs `result[i] = a[i] op b[i]` for `len` elements using `FIO_FOR_UNROLL`.
 #define FIO_VEC_SCALAR_OP(result, v, sclr, len, op)
 ```
 
-Performs `result[i] = vec[i] op scalar` for `len` elements using `FIO_FOR_UNROLL`.
-
-**Warning**: the macro's parameter names are `v` and `sclr`, but the expansion body uses the hardcoded identifiers `vec` and `scalar` instead. This means callers of `FIO_VEC_SCALAR_OP` (and the high-level macros `FIO_VEC_SCALAR_ADD`, `FIO_VEC_SCALAR_SUB`, `FIO_VEC_SCALAR_MUL` that wrap it) **must** name their variables `vec` and `scalar` for the macro to work correctly. Using different variable names will cause a compilation error.
+Performs `result[i] = v[i] op sclr` for `len` elements using `FIO_FOR_UNROLL`.
 
 #### `FIO_VEC_REDUCE_OP`
 
