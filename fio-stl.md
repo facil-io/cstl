@@ -5723,13 +5723,13 @@ fio_u256 fio_risky256_hmac(const void *key, uint64_t key_len,
                            const void *msg, uint64_t msg_len);
 ```
 
-Computes HMAC-RiskyHash-256 using the standard RFC 2104 HMAC construction with `fio_risky256` as the underlying hash function.
+Computes HMAC-RiskyHash-256 using the RFC 2104 construction with `fio_risky256` as the underlying hash function. Uses a 64-byte block size with standard ipad (0x36) and opad (0x5C) padding.
 
-Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky256`. Returns a `fio_u256` (32 bytes).
+If `key_len > 64`, the key is first hashed with `fio_risky256`. Returns a `fio_u256` (32 bytes).
 
-All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+All sensitive intermediates (padded key, inner hash, buffers) are securely zeroed after use.
 
-**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+**Note**: while this uses the standard RFC 2104 HMAC construction, the underlying hash is non-cryptographic, so the standard HMAC security proofs do not apply. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
 
 #### `fio_risky512_hmac`
 
@@ -5738,13 +5738,13 @@ fio_u512 fio_risky512_hmac(const void *key, uint64_t key_len,
                            const void *msg, uint64_t msg_len);
 ```
 
-Computes HMAC-RiskyHash-512 using the standard RFC 2104 HMAC construction with `fio_risky512` as the underlying hash function.
+Computes HMAC-RiskyHash-512 using the RFC 2104 construction with `fio_risky512` as the underlying hash function. Uses a 64-byte block size with standard ipad (0x36) and opad (0x5C) padding.
 
-Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky512`. Returns a `fio_u512` (64 bytes).
+If `key_len > 64`, the key is first hashed with `fio_risky512`. Returns a `fio_u512` (64 bytes).
 
-All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+All sensitive intermediates (padded key, inner hash, buffers) are securely zeroed after use.
 
-**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+**Note**: while this uses the standard RFC 2104 HMAC construction, the underlying hash is non-cryptographic, so the standard HMAC security proofs do not apply. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
 
 -------------------------------------------------------------------------------
 ## Signal Monitoring
@@ -22333,7 +22333,7 @@ typedef struct fio_ipc_s {
   /* ----- wire format starts here ----- */
   uint32_t len;   /* Length of data[] (AAD - authenticated, unencrypted) */
   uint16_t flags; /* User settable flags (AAD - authenticated, unencrypted) */
-  uint16_t private_flags; /* Internal (AAD - authenticated, unencrypted) */
+  uint16_t routing_flags; /* Internal (AAD - authenticated, unencrypted) */
   uint64_t timestamp;     /* timestamp (unencrypted, used for nonce) */
   uint64_t id;            /* 8 random bytes (unencrypted, used for nonce) */
   union {
@@ -22354,7 +22354,7 @@ The IPC message structure contains all information needed for a request/response
 - `from` - Pointer to the caller's IO connection (set by receiver, used for replies; not transmitted)
 - `len` - Length of the `data[]` payload in bytes (part of authenticated additional data)
 - `flags` - User-settable flags, preserved through the call/reply cycle (part of AAD)
-- `private_flags` - Internal flags used by the IPC system (do not modify)
+- `routing_flags` - Internal routing flags used by the IPC system (do not modify)
 - `timestamp` - Millisecond timestamp, used as part of the encryption nonce
 - `id` - Random 64-bit identifier, used as part of the encryption nonce
 - `call` / `opcode` - Union: function pointer for local IPC, or op-code for cluster RPC
@@ -23226,7 +23226,7 @@ void notify_others_method2(const char *data) {
 All IPC messages are encrypted using ChaCha20-Poly1305 AEAD (Authenticated Encryption with Associated Data):
 
 - **Encrypted fields**: `call`/`opcode`, `on_reply`, `on_done`, `udata`, and `data`
-- **Authenticated (AAD)**: `len`, `flags`, `private_flags`
+- **Authenticated (AAD)**: `len`, `flags`, `routing_flags`
 - **Nonce**: Derived from `timestamp` and `id` fields
 - **Key**: Derived from the process secret (set at startup)
 

@@ -516,60 +516,6 @@ FIO_SFUNC void fio_bench_risky_hash(void) {
                      data_xlarge[0] ^= h512.u8[0];);
   }
 
-  /* --- HMAC-RiskyHash-256 --- */
-  {
-    static const uint8_t hmac_key[32] = {
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-    };
-    fio_u256 h256;
-    fprintf(stderr, "    * HMAC-RiskyHash-256 Throughput:\n");
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (64B msg)",
-                     2000,
-                     h256 = fio_risky256_hmac(hmac_key, 32, data_small, 64);
-                     data_small[0] ^= h256.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (1024B msg)",
-                     2000,
-                     h256 = fio_risky256_hmac(hmac_key, 32, data_medium, 1024);
-                     data_medium[0] ^= h256.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (8192B msg)",
-                     2000,
-                     h256 = fio_risky256_hmac(hmac_key, 32, data_large, 8192);
-                     data_large[0] ^= h256.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (65536B msg)",
-                     2000,
-                     h256 = fio_risky256_hmac(hmac_key, 32, data_xlarge, 65536);
-                     data_xlarge[0] ^= h256.u8[0];);
-  }
-
-  /* --- HMAC-RiskyHash-512 --- */
-  {
-    static const uint8_t hmac_key[32] = {
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-        0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
-    };
-    fio_u512 h512;
-    fprintf(stderr, "    * HMAC-RiskyHash-512 Throughput:\n");
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (64B msg)",
-                     2000,
-                     h512 = fio_risky512_hmac(hmac_key, 32, data_small, 64);
-                     data_small[0] ^= h512.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (1024B msg)",
-                     2000,
-                     h512 = fio_risky512_hmac(hmac_key, 32, data_medium, 1024);
-                     data_medium[0] ^= h512.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (8192B msg)",
-                     2000,
-                     h512 = fio_risky512_hmac(hmac_key, 32, data_large, 8192);
-                     data_large[0] ^= h512.u8[0];);
-    FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (65536B msg)",
-                     2000,
-                     h512 = fio_risky512_hmac(hmac_key, 32, data_xlarge, 65536);
-                     data_xlarge[0] ^= h512.u8[0];);
-  }
-
   FIO_MEM_FREE(data_small, 64);
   FIO_MEM_FREE(data_medium, 1024);
   FIO_MEM_FREE(data_large, 8192);
@@ -787,6 +733,434 @@ FIO_SFUNC void fio_bench_sha3_512(void) {
   FIO_MEM_FREE(data_large, 8192);
   FIO_MEM_FREE(data_xlarge, 65536);
 }
+
+/* *****************************************************************************
+HMAC Functions Profiling
+***************************************************************************** */
+
+/* HMAC (Hash-based Message Authentication Code) provides message authentication
+ * using a cryptographic hash function combined with a secret key.
+ * Standard sizes: 64B (small), 1024B (medium), 8192B (large), 65536B (xlarge)
+ */
+
+FIO_SFUNC void fio_bench_hmac_blake2b(void) {
+  fprintf(stderr, "    * HMAC-BLAKE2b-512 Throughput:\n");
+
+  static const uint8_t hmac_key[64] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u512 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2b-512 (64B msg)",
+                   2000,
+                   out = fio_blake2b_hmac(hmac_key, 64, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2b-512 (1024B msg)",
+                   2000,
+                   out = fio_blake2b_hmac(hmac_key, 64, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2b-512 (8192B msg)",
+                   2000,
+                   out = fio_blake2b_hmac(hmac_key, 64, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2b-512 (65536B msg)",
+                   2000,
+                   out = fio_blake2b_hmac(hmac_key, 64, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+FIO_SFUNC void fio_bench_hmac_blake2s(void) {
+  fprintf(stderr, "    * HMAC-BLAKE2s-256 Throughput:\n");
+
+  static const uint8_t hmac_key[32] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u256 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2s-256 (64B msg)",
+                   2000,
+                   out = fio_blake2s_hmac(hmac_key, 32, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2s-256 (1024B msg)",
+                   2000,
+                   out = fio_blake2s_hmac(hmac_key, 32, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2s-256 (8192B msg)",
+                   2000,
+                   out = fio_blake2s_hmac(hmac_key, 32, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-BLAKE2s-256 (65536B msg)",
+                   2000,
+                   out = fio_blake2s_hmac(hmac_key, 32, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+FIO_SFUNC void fio_bench_hmac_sha256(void) {
+  fprintf(stderr, "    * HMAC-SHA256 Throughput:\n");
+
+  static const uint8_t hmac_key[32] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u256 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA256 (64B msg)",
+                   2000,
+                   out = fio_sha256_hmac(hmac_key, 32, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA256 (1024B msg)",
+                   2000,
+                   out = fio_sha256_hmac(hmac_key, 32, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA256 (8192B msg)",
+                   2000,
+                   out = fio_sha256_hmac(hmac_key, 32, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA256 (65536B msg)",
+                   2000,
+                   out = fio_sha256_hmac(hmac_key, 32, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+FIO_SFUNC void fio_bench_hmac_sha512(void) {
+  fprintf(stderr, "    * HMAC-SHA512 Throughput:\n");
+
+  static const uint8_t hmac_key[64] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u512 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA512 (64B msg)",
+                   2000,
+                   out = fio_sha512_hmac(hmac_key, 64, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA512 (1024B msg)",
+                   2000,
+                   out = fio_sha512_hmac(hmac_key, 64, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA512 (8192B msg)",
+                   2000,
+                   out = fio_sha512_hmac(hmac_key, 64, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-SHA512 (65536B msg)",
+                   2000,
+                   out = fio_sha512_hmac(hmac_key, 64, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+/* RiskyHash HMAC Functions (non-cryptographic, for comparison only) */
+
+FIO_SFUNC void fio_bench_hmac_risky256(void) {
+  fprintf(stderr, "    * HMAC-RiskyHash-256 (non-cryptographic) Throughput:\n");
+
+  static const uint8_t hmac_key[32] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u256 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (64B msg)",
+                   2000,
+                   out = fio_risky256_hmac(hmac_key, 32, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (1024B msg)",
+                   2000,
+                   out = fio_risky256_hmac(hmac_key, 32, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (8192B msg)",
+                   2000,
+                   out = fio_risky256_hmac(hmac_key, 32, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-256 (65536B msg)",
+                   2000,
+                   out = fio_risky256_hmac(hmac_key, 32, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+FIO_SFUNC void fio_bench_hmac_risky512(void) {
+  fprintf(stderr, "    * HMAC-RiskyHash-512 (non-cryptographic) Throughput:\n");
+
+  static const uint8_t hmac_key[32] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  uint8_t *data_small = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  uint8_t *data_medium = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  uint8_t *data_large = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  uint8_t *data_xlarge = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  fio_u512 out;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (64B msg)",
+                   2000,
+                   out = fio_risky512_hmac(hmac_key, 32, data_small, 64);
+                   data_small[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (1024B msg)",
+                   2000,
+                   out = fio_risky512_hmac(hmac_key, 32, data_medium, 1024);
+                   data_medium[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (8192B msg)",
+                   2000,
+                   out = fio_risky512_hmac(hmac_key, 32, data_large, 8192);
+                   data_large[0] ^= out.u8[0];);
+
+  FIO_BENCH_CRYPTO("HMAC-RiskyHash-512 (65536B msg)",
+                   2000,
+                   out = fio_risky512_hmac(hmac_key, 32, data_xlarge, 65536);
+                   data_xlarge[0] ^= out.u8[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+/* OpenSSL HMAC Functions */
+#ifdef HAVE_OPENSSL
+#include <openssl/hmac.h>
+
+FIO_SFUNC void openssl_bench_hmac_sha256(void) {
+  fprintf(stderr, "    * OpenSSL HMAC-SHA256 Throughput:\n");
+
+  static const unsigned char hmac_key[32] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  unsigned char *data_small = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  unsigned char *data_medium =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  unsigned char *data_large =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  unsigned char *data_xlarge =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  unsigned char out[32];
+  unsigned int out_len;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA256 (64B msg)",
+      2000,
+      HMAC(EVP_sha256(), hmac_key, 32, data_small, 64, out, &out_len);
+      data_small[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA256 (1024B msg)",
+      2000,
+      HMAC(EVP_sha256(), hmac_key, 32, data_medium, 1024, out, &out_len);
+      data_medium[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA256 (8192B msg)",
+      2000,
+      HMAC(EVP_sha256(), hmac_key, 32, data_large, 8192, out, &out_len);
+      data_large[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA256 (65536B msg)",
+      2000,
+      HMAC(EVP_sha256(), hmac_key, 32, data_xlarge, 65536, out, &out_len);
+      data_xlarge[0] ^= out[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+FIO_SFUNC void openssl_bench_hmac_sha512(void) {
+  fprintf(stderr, "    * OpenSSL HMAC-SHA512 Throughput:\n");
+
+  static const unsigned char hmac_key[64] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+  };
+
+  unsigned char *data_small = (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 64, 0);
+  unsigned char *data_medium =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 1024, 0);
+  unsigned char *data_large =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 8192, 0);
+  unsigned char *data_xlarge =
+      (unsigned char *)FIO_MEM_REALLOC(NULL, 0, 65536, 0);
+  unsigned char out[64];
+  unsigned int out_len;
+
+  fio_rand_bytes(data_small, 64);
+  fio_rand_bytes(data_medium, 1024);
+  fio_rand_bytes(data_large, 8192);
+  fio_rand_bytes(data_xlarge, 65536);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA512 (64B msg)",
+      2000,
+      HMAC(EVP_sha512(), hmac_key, 64, data_small, 64, out, &out_len);
+      data_small[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA512 (1024B msg)",
+      2000,
+      HMAC(EVP_sha512(), hmac_key, 64, data_medium, 1024, out, &out_len);
+      data_medium[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA512 (8192B msg)",
+      2000,
+      HMAC(EVP_sha512(), hmac_key, 64, data_large, 8192, out, &out_len);
+      data_large[0] ^= out[0];);
+
+  FIO_BENCH_CRYPTO(
+      "OpenSSL HMAC-SHA512 (65536B msg)",
+      2000,
+      HMAC(EVP_sha512(), hmac_key, 64, data_xlarge, 65536, out, &out_len);
+      data_xlarge[0] ^= out[0];);
+
+  FIO_MEM_FREE(data_small, 64);
+  FIO_MEM_FREE(data_medium, 1024);
+  FIO_MEM_FREE(data_large, 8192);
+  FIO_MEM_FREE(data_xlarge, 65536);
+}
+
+/* Note: OpenSSL does not support HMAC-BLAKE2 in the standard HMAC API.
+ * BLAKE2 has its own keyed mode which is different from HMAC construction.
+ * OpenSSL's EVP_blake2b512/EVP_blake2s256 don't work with HMAC(). */
+FIO_SFUNC void openssl_bench_hmac_blake2(void) {
+  fprintf(stderr,
+          "      [OpenSSL]  HMAC-BLAKE2 (unavailable - BLAKE2 uses native "
+          "keying, not HMAC)\n");
+}
+#else  /* !HAVE_OPENSSL */
+FIO_SFUNC void openssl_bench_hmac_sha256(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_hmac_sha512(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+FIO_SFUNC void openssl_bench_hmac_blake2(void) {
+  fprintf(stderr, "      [OpenSSL]  (unavailable)\n");
+}
+#endif /* HAVE_OPENSSL */
 
 /* *****************************************************************************
 Synthetic Multiplication Profiling in Crypto Context
@@ -2375,6 +2749,26 @@ int main(void) {
   fprintf(stderr, "  [OpenSSL]\n");
   openssl_bench_blake2();
   openssl_bench_sha3();
+
+  /* ===================================================================
+     HMAC Functions
+     =================================================================== */
+  fprintf(stderr,
+          "\n"
+          "---------------------------------------------------\n"
+          "  HMAC Functions (Message Authentication)\n"
+          "---------------------------------------------------\n");
+  fprintf(stderr, "  [fio-stl]\n");
+  fio_bench_hmac_blake2b();
+  fio_bench_hmac_blake2s();
+  fio_bench_hmac_sha256();
+  fio_bench_hmac_sha512();
+  fio_bench_hmac_risky256();
+  fio_bench_hmac_risky512();
+  fprintf(stderr, "  [OpenSSL]\n");
+  openssl_bench_hmac_blake2();
+  openssl_bench_hmac_sha256();
+  openssl_bench_hmac_sha512();
 
   /* ===================================================================
      Big Number Multiplication

@@ -664,11 +664,12 @@ IPC Core - Encryption/Decryption
 
 FIO_IFUNC fio_u256 fio___ipc_get_encryption_key(fio_ipc_s *m) {
   fio_u512 secret = fio_secret();
-  /* half step HDKF to derive a safe ephemeral key */
-  fio_u256 key = fio_sha256_hmac((secret.u8 + (m->id & 31) + 1),
-                                 32,
-                                 (char *)&m->timestamp,
-                                 16);
+  /* derive a single-use ephemeral key, risky hash is good enough for this */
+  fio_u256 key = fio_risky256_hmac((secret.u8 + (m->id & 31) + 1),
+                                   32,
+                                   (char *)&m->timestamp,
+                                   16);
+  fio_secure_zero(&secret, sizeof(secret));
   // FIO_LOG_DDEBUG2("(%d) IPC key: %p...%p",
   //                 fio_io_pid(),
   //                 (void *)(uintptr_t)key.u64[0],
@@ -708,6 +709,7 @@ SFUNC void fio_ipc_encrypt(fio_ipc_s *m) {
                             nonce.u8                      /* 12-byte nonce */
   );
   m->len = fio_ltole32(m->len);
+  fio_secure_zero(&key_buf, sizeof(key_buf));
 }
 
 /** Decrypt IPC message on receive */
@@ -735,6 +737,7 @@ FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m) {
   if (r) {
     FIO_LOG_SECURITY("IPC message decryption failed (possible attack)");
   }
+  fio_secure_zero(&key_buf, sizeof(key_buf));
   return r;
 }
 

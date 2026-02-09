@@ -1123,7 +1123,8 @@ FIO_SFUNC void fio___tls13_finish(int fd, void *tls_ctx) {
 
     if (enc_len > 0) {
       /* Best effort send, ignore errors */
-      (void)fio_sock_write(fd, (char *)alert, (size_t)enc_len);
+      int ignr_ = fio_sock_write(fd, (char *)alert, (size_t)enc_len);
+      (void)ignr_;
     }
   }
   (void)fd;

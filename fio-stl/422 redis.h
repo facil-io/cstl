@@ -937,7 +937,7 @@ FIO_SFUNC void fio___redis_on_timeout(fio_io_s *io) {
 
   if (io == r->sub_conn.io) {
     /* Subscription connection - just send PING */
-    fio_io_write(io, "*1\r\n$4\r\nPING\r\n", 14);
+    fio_io_write(io, (char *)"*1\r\n$4\r\nPING\r\n", 14);
   } else {
     /* Publishing connection - check for stuck commands */
     if (!FIO_LIST_IS_EMPTY(&r->cmd_queue)) {

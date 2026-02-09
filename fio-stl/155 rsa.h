@@ -742,6 +742,7 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
 
   /* Compute DB = maskedDB XOR dbMask */
   uint8_t db[FIO_RSA_MAX_BYTES];
+  db[0] = 0;
   for (size_t i = 0; i < db_len; ++i)
     db[i] = masked_db[i] ^ db_mask[i];
 

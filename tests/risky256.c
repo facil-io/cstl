@@ -241,9 +241,15 @@ FIO_SFUNC int fio___test_risky256_sanity(void) {
 
 FIO_SFUNC int fio___test_risky256_avalanche(void) {
   int failures = 0;
-  fprintf(stderr, "  * [2] Avalanche Test (strict, 50K inputs x 512 bits)\n");
-
+#if DEBUG
+  const int N = 5000; /* reduced for unoptimized builds */
+  fprintf(stderr,
+          "  * [2] Avalanche Test (strict, 5K inputs x 512 bits)"
+          " [DEBUG reduced]\n");
+#else
   const int N = 50000;
+  fprintf(stderr, "  * [2] Avalanche Test (strict, 50K inputs x 512 bits)\n");
+#endif
   const int INPUT_BITS = 512; /* 64 bytes */
   const int OUTPUT_BITS = 256;
   const int OUTPUT_BYTES = OUTPUT_BITS / 8;
@@ -337,8 +343,15 @@ FIO_SFUNC int fio___test_risky256_avalanche(void) {
 
 FIO_SFUNC int fio___test_risky256_collisions(void) {
   int failures = 0;
+#if DEBUG
+  const int N = 1 << 16; /* 64K hashes — reduced for unoptimized builds */
+#else
   const int N = 1 << 20; /* 1M hashes */
-  fprintf(stderr, "  * [3] Collision Resistance (%d random hashes)\n", N);
+#endif
+  fprintf(stderr,
+          "  * [3] Collision Resistance (%d random hashes)%s\n",
+          N,
+          (N < (1 << 20)) ? " [DEBUG reduced]" : "");
 
   /* Allocate hash storage */
   fio_u256 *hashes =
@@ -417,10 +430,16 @@ FIO_SFUNC int fio___test_risky256_collisions(void) {
 
 FIO_SFUNC int fio___test_risky256_differential(void) {
   int failures = 0;
+#if DEBUG
+  const int N = 1000; /* reduced for unoptimized builds */
+  fprintf(stderr,
+          "  * [4] Differential Test (1K inputs, structured deltas)"
+          " [DEBUG reduced]\n");
+#else
+  const int N = 10000;
   fprintf(stderr,
           "  * [4] Differential Test (10K inputs, structured deltas)\n");
-
-  const int N = 10000;
+#endif
   const int INPUT_LEN = 64;
   int min_hamming = 256; /* Track minimum Hamming distance in output */
 

@@ -743,8 +743,8 @@ FIO_IFUNC void fio___x25519_scalarmult(uint8_t out[32],
 
   for (int i = 254; i >= 0; --i) {
     int64_t r = (z[i >> 3] >> (i & 7)) & 1;
-    fio___gf_cswap(a, b, r);
-    fio___gf_cswap(c, d, r);
+    fio___gf_cswap(a, b, (int)r);
+    fio___gf_cswap(c, d, (int)r);
     fio___gf_add(e, a, c);
     fio___gf_sub(a, a, c);
     fio___gf_add(c, b, d);
@@ -763,8 +763,8 @@ FIO_IFUNC void fio___x25519_scalarmult(uint8_t out[32],
     fio___gf_mul(a, d, f);
     fio___gf_mul(d, b, x);
     fio___gf_sqr(b, e);
-    fio___gf_cswap(a, b, r);
-    fio___gf_cswap(c, d, r);
+    fio___gf_cswap(a, b, (int)r);
+    fio___gf_cswap(c, d, (int)r);
   }
 
   fio___gf_inv(c, c);

@@ -90,10 +90,13 @@ SFUNC fio_u256 fio_risky256(const void *data, uint64_t len);
 SFUNC fio_u512 fio_risky512(const void *data, uint64_t len);
 
 /**
- * Computes HMAC-RiskyHash-256 (NOT RFC 2104 compliant, 32-byte digest).
+ * Computes HMAC-RiskyHash-256 (RFC 2104 construction, 32-byte digest).
  *
  * Uses fio_risky256 as the underlying hash with a 64-byte block size.
  * If `key_len > 64`, the key is hashed first with fio_risky256.
+ *
+ * NOTE: The underlying hash is non-cryptographic, so standard HMAC
+ * security proofs do not apply. For cryptographic HMAC, use blake2.
  */
 SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t key_len,
@@ -101,10 +104,13 @@ SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t msg_len);
 
 /**
- * Computes HMAC-RiskyHash-512 ((NOT RFC 2104 compliant, 64-byte digest).
+ * Computes HMAC-RiskyHash-512 (RFC 2104 construction, 64-byte digest).
  *
  * Uses fio_risky512 as the underlying hash with a 64-byte block size.
  * If `key_len > 64`, the key is hashed first with fio_risky512.
+ *
+ * NOTE: The underlying hash is non-cryptographic, so standard HMAC
+ * security proofs do not apply. For cryptographic HMAC, use blake2.
  */
 SFUNC fio_u512 fio_risky512_hmac(const void *key,
                                  uint64_t key_len,
@@ -150,12 +156,66 @@ Design: A3 (Zero-Copy ILP) — 2-state multiply-fold with cross-lane mixing.
 Each state is 8 x uint64_t (512 bits). Two states (v0, v1) process 128 bytes
 per iteration for instruction-level parallelism. Cross-lane mixing after each
 round ensures full diffusion across all 8 multiply-fold pairs.
+
+Streaming-Compatible Absorption Order:
+1. Main loop (128-byte pairs) → v0, v1 alternating — processed FIRST
+2. Odd block (64 bytes if total_len & 64) → v1 — processed SECOND
+3. Partial block (0-63 bytes at END) → v0 — processed LAST
+
+This order enables streaming: data is processed in forward order, with the
+partial block coming from the logical END of the message.
+
+Streaming API for HMAC:
+- fio___risky256_init(v0, v1, total_len) — init with TOTAL message length
+- fio___risky256_consume(state, data, len) — absorb streaming chunks
+- fio___risky256_finish(state) — finalize and return fio_u256
+- fio___risky512_finish(state) — finalize and return fio_u512
 ***************************************************************************** */
 
-/** Prime constants for risky256 state initialization. */
+/**
+ * Cross-lane mixing: snapshot all 8 lanes, then XOR rotated pairs into each
+ * lane. Provides symmetric diffusion across multiply-fold pairs.
+ */
+FIO_IFUNC void fio___risky256_cross(uint64_t v[8]) {
+  uint64_t s0 = v[0], s1 = v[1], s2 = v[2], s3 = v[3];
+  uint64_t s4 = v[4], s5 = v[5], s6 = v[6], s7 = v[7];
+  v[0] ^= fio_lrot64(s1, 17) ^ fio_lrot64(s6, 47);
+  v[1] ^= fio_lrot64(s2, 29) ^ fio_lrot64(s7, 37);
+  v[2] ^= fio_lrot64(s3, 41) ^ fio_lrot64(s4, 19);
+  v[3] ^= fio_lrot64(s0, 53) ^ fio_lrot64(s5, 7);
+  v[4] ^= fio_lrot64(s5, 13) ^ fio_lrot64(s2, 51);
+  v[5] ^= fio_lrot64(s6, 23) ^ fio_lrot64(s3, 43);
+  v[6] ^= fio_lrot64(s7, 11) ^ fio_lrot64(s0, 59);
+  v[7] ^= fio_lrot64(s4, 3) ^ fio_lrot64(s1, 31);
+}
+
+/** Multiply-fold round: 4 multiply-fold pairs + cross-lane mixing. */
+FIO_IFUNC void fio___risky256_round(uint64_t v[8]) {
+  uint64_t t[4];
+  for (size_t i = 0; i < 4; ++i) {
+    v[i] += fio_math_mulc64(v[i], v[i + 4], t + i);
+    v[i + 4] += t[i];
+  }
+  fio___risky256_cross(v);
+}
+
+/**
+ * Streaming state for RiskyHash 256/512.
+ * Allows incremental absorption of data chunks.
+ */
+typedef struct {
+  uint64_t v0[8];     /* First state vector */
+  uint64_t v1[8];     /* Second state vector */
+  uint64_t total_len; /* Total message length (must be known upfront) */
+  uint64_t absorbed;  /* Bytes absorbed so far */
+  uint8_t buf[128];   /* Buffer for partial data (up to 127 bytes) */
+  uint8_t buf_len;    /* Bytes in buffer */
+} fio___risky256_stream_s;
+
+/** Initialize state with total message length (does seed expansion). */
 FIO_IFUNC void fio___risky256_init(uint64_t v0[8],
                                    uint64_t v1[8],
-                                   uint64_t seed) {
+                                   uint64_t len) {
   static const uint64_t p[8] = {
       FIO_U64_HASH_PRIME1,
       FIO_U64_HASH_PRIME2,
@@ -176,36 +236,22 @@ FIO_IFUNC void fio___risky256_init(uint64_t v0[8],
       FIO_U64_HASH_PRIME14,
       FIO_U64_HASH_PRIME15,
   };
+  /* Seed expansion from length */
+  uint64_t seed = len;
+  seed ^= fio_lrot64(seed, 47);
   for (size_t i = 0; i < 8; ++i) {
     v0[i] = seed + p[i];
     v1[i] = seed + q[i];
   }
 }
 
-/**
- * Cross-lane mixing: snapshot all 8 lanes, then XOR rotated pairs into each
- * lane. Provides symmetric diffusion across multiply-fold pairs.
- */
-FIO_IFUNC void fio___risky256_cross(uint64_t v[8]) {
-  uint64_t s0 = v[0], s1 = v[1], s2 = v[2], s3 = v[3];
-  uint64_t s4 = v[4], s5 = v[5], s6 = v[6], s7 = v[7];
-  v[0] ^= fio_lrot64(s1, 17) ^ fio_lrot64(s6, 47);
-  v[1] ^= fio_lrot64(s2, 29) ^ fio_lrot64(s7, 37);
-  v[2] ^= fio_lrot64(s3, 41) ^ fio_lrot64(s4, 19);
-  v[3] ^= fio_lrot64(s0, 53) ^ fio_lrot64(s5, 7);
-  v[4] ^= fio_lrot64(s5, 13) ^ fio_lrot64(s2, 51);
-  v[5] ^= fio_lrot64(s6, 23) ^ fio_lrot64(s3, 43);
-  v[6] ^= fio_lrot64(s7, 11) ^ fio_lrot64(s0, 59);
-  v[7] ^= fio_lrot64(s4, 3) ^ fio_lrot64(s1, 31);
-}
-
-/** Multiply-fold round: 4 multiply-fold pairs + cross-lane mixing. */
-FIO_IFUNC void fio___risky256_round(uint64_t v[8], uint64_t t[4]) {
-  for (size_t i = 0; i < 4; ++i) {
-    v[i] += fio_math_mulc64(v[i], v[i + 4], t + i);
-    v[i + 4] += t[i];
-  }
-  fio___risky256_cross(v);
+/** Initialize streaming state with total message length. */
+FIO_IFUNC void fio___risky256_stream_init(fio___risky256_stream_s *s,
+                                          uint64_t total_len) {
+  fio___risky256_init(s->v0, s->v1, total_len);
+  s->total_len = total_len;
+  s->absorbed = 0;
+  s->buf_len = 0;
 }
 
 /* *****************************************************************************
@@ -327,201 +373,431 @@ static const uint64_t fio___risky256_extra1[8] = {
 };
 
 /* *****************************************************************************
-Risky Hash 256 / 512 — Public API
+Risky Hash 256 / 512 — Streaming Absorb (internal)
+
+Absorption order (streaming-compatible):
+1. Main loop (128-byte pairs) → v0, v1 alternating — FIRST
+2. Odd block (64 bytes if total_len & 64) → v1 — SECOND
+3. Partial block (0-63 bytes at END) → v0 — LAST
+
+This order processes data in forward order, enabling true streaming.
+The partial block contains the TAIL bytes of the message.
 ***************************************************************************** */
 
-/** Computes a 256-bit non-cryptographic hash (RiskyHash 256). */
-SFUNC fio_u256 fio_risky256(const void *data_, uint64_t len) {
+/** Absorb a 128-byte pair into v0 and v1. */
+FIO_IFUNC void fio___risky256_absorb_pair(uint64_t v0[8],
+                                          uint64_t v1[8],
+                                          const uint8_t *data) {
+  for (size_t i = 0; i < 4; ++i)
+    v0[i] += fio___risky256_primes[i];
+  for (size_t i = 0; i < 4; ++i)
+    v1[i] += fio___risky256_primes[i];
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= fio_buf2u64_le(data + (i << 3));
+  for (size_t i = 0; i < 8; ++i)
+    v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
+  fio___risky256_round(v0);
+  fio___risky256_round(v1);
+}
+
+/** Absorb a 64-byte odd block into v1. */
+FIO_IFUNC void fio___risky256_absorb_odd(uint64_t v1[8], const uint8_t *data) {
+  for (size_t i = 0; i < 4; ++i)
+    v1[i] += fio___risky256_primes[i];
+  for (size_t i = 0; i < 8; ++i)
+    v1[i] ^= fio_buf2u64_le(data + (i << 3));
+  fio___risky256_round(v1);
+}
+
+/** Absorb a partial block (0-63 bytes) into v0. */
+FIO_IFUNC void fio___risky256_absorb_partial(uint64_t v0[8],
+                                             const uint8_t *data,
+                                             uint64_t partial_len) {
+  uint64_t w[8] FIO_ALIGN(16);
+  FIO_MEMSET(w, 0, 64);
+  fio_memcpy63x(w, data, partial_len);
+  ((uint8_t *)w)[63] = (uint8_t)partial_len;
+  for (size_t i = 0; i < 8; ++i)
+    w[i] = fio_ltole64(w[i]);
+  for (size_t i = 0; i < 8; ++i)
+    v0[i] ^= w[i];
+  fio___risky256_round(v0);
+}
+
+/**
+ * Streaming consume: absorb data chunks in forward order.
+ * Call multiple times with consecutive chunks, then call finish.
+ */
+FIO_SFUNC void fio___risky256_consume(fio___risky256_stream_s *s,
+                                      const void *data_,
+                                      uint64_t len) {
   const uint8_t *data = (const uint8_t *)data_;
-  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16), t0[4], t1[4];
-  uint64_t seed = len;
-  seed ^= fio_lrot64(seed, 47);
-  fio___risky256_init(v0, v1, seed);
-  /* head: partial block (if any) into v0 — no round marker */
-  if ((len & 63)) {
-    uint64_t w[8] FIO_ALIGN(16);
-    FIO_MEMSET(w, 0, 64);
-    fio_memcpy63x(w, data, len);
-    data += (len & 63);
-    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
-    for (size_t i = 0; i < 8; ++i)
-      w[i] = fio_ltole64(w[i]);
-    for (size_t i = 0; i < 8; ++i)
-      v0[i] ^= w[i];
-    fio___risky256_round(v0, t0);
+  uint64_t total = s->total_len;
+  uint64_t main_end = (total >> 7) << 7; /* End of 128-byte pairs region */
+  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0); /* End of odd block */
+
+  /* If we have buffered data, try to complete a block */
+  if (s->buf_len > 0) {
+    uint64_t need = 0;
+    if (s->absorbed < main_end) {
+      /* In main loop region: need 128 bytes total */
+      need = 128 - s->buf_len;
+      if (s->absorbed + 128 > main_end)
+        need = main_end - s->absorbed - s->buf_len;
+    } else if (s->absorbed < odd_end) {
+      /* In odd block region: need 64 bytes total */
+      need = 64 - s->buf_len;
+    }
+    /* Partial region: buffer until finish */
+
+    if (need > 0 && len >= need) {
+      FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)need);
+      data += need;
+      len -= need;
+
+      if (s->absorbed < main_end && s->buf_len + need == 128) {
+        fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
+        s->absorbed += 128;
+        s->buf_len = 0;
+      } else if (s->absorbed >= main_end && s->absorbed < odd_end &&
+                 s->buf_len + need == 64) {
+        fio___risky256_absorb_odd(s->v1, s->buf);
+        s->absorbed += 64;
+        s->buf_len = 0;
+      } else {
+        s->buf_len += (uint8_t)need;
+      }
+    } else if (need > 0) {
+      /* Not enough data to complete block, buffer it */
+      FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)len);
+      s->buf_len += (uint8_t)len;
+      return;
+    }
   }
-  /* head: odd full block (if any) into v1 — with round marker */
-  if ((len & 64)) {
-    for (size_t i = 0; i < 4; ++i)
-      v1[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 8; ++i)
-      v1[i] ^= fio_buf2u64_le(data + (i << 3));
-    data += 64;
-    fio___risky256_round(v1, t1);
-  }
-  /* main loop: 128-byte pairs — remaining blocks are guaranteed even count */
-  for (size_t j = 127; j < len; j += 128) {
-    for (size_t i = 0; i < 4; ++i)
-      v0[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 4; ++i)
-      v1[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 8; ++i)
-      v0[i] ^= fio_buf2u64_le(data + (i << 3));
-    for (size_t i = 0; i < 8; ++i)
-      v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
+
+  /* Process full 128-byte pairs directly from input */
+  while (s->absorbed + 128 <= main_end && len >= 128) {
+    fio___risky256_absorb_pair(s->v0, s->v1, data);
     data += 128;
-    fio___risky256_round(v0, t0);
-    fio___risky256_round(v1, t1);
+    len -= 128;
+    s->absorbed += 128;
   }
-  /* finalization: merge v1 into v0, then squeeze */
+
+  /* Process odd block if we're at that boundary */
+  if (s->absorbed == main_end && (total & 64) && len >= 64) {
+    fio___risky256_absorb_odd(s->v1, data);
+    data += 64;
+    len -= 64;
+    s->absorbed += 64;
+  }
+
+  /* Buffer remaining data for partial block or incomplete block */
+  if (len > 0) {
+    FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)len);
+    s->buf_len += (uint8_t)len;
+  }
+}
+
+/**
+ * Streaming finish: absorb any remaining buffered data and finalize.
+ * Returns 256-bit hash.
+ */
+FIO_SFUNC fio_u256 fio___risky256_finish(fio___risky256_stream_s *s);
+
+/**
+ * Streaming finish: absorb any remaining buffered data and finalize.
+ * Returns 512-bit hash.
+ */
+FIO_SFUNC fio_u512 fio___risky512_finish(fio___risky256_stream_s *s);
+
+/**
+ * One-shot absorb: absorbs entire message into state.
+ * Uses the new streaming-compatible order (main → odd → partial).
+ */
+FIO_SFUNC void fio___risky256_absorb(uint64_t v0[8],
+                                     uint64_t v1[8],
+                                     const void *data_,
+                                     uint64_t len) {
+  const uint8_t *data = (const uint8_t *)data_;
+  uint64_t main_pairs = len >> 7; /* Number of 128-byte pairs */
+
+  /* 1. Main loop: 128-byte pairs */
+  for (uint64_t i = 0; i < main_pairs; ++i) {
+    fio___risky256_absorb_pair(v0, v1, data);
+    data += 128;
+  }
+
+  /* 2. Odd block: 64 bytes if (len & 64) */
+  if (len & 64) {
+    fio___risky256_absorb_odd(v1, data);
+    data += 64;
+  }
+
+  /* 3. Partial block: 0-63 bytes at END */
+  if (len & 63) {
+    fio___risky256_absorb_partial(v0, data, len & 63);
+  }
+}
+
+/**
+ * Finalize state and return 256-bit hash.
+ * Merges v1 into v0, applies finalization rounds, and squeezes output.
+ */
+FIO_SFUNC fio_u256 fio___risky256_finalize(uint64_t v0[8], uint64_t v1[8]) {
+  /* Finalization: merge v1 into v0 */
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v0, t0);
+  fio___risky256_round(v0);
   for (size_t i = 0; i < 8; ++i)
     v1[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v1, t1);
+  fio___risky256_round(v1);
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= v1[i];
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_extra0[i];
-  fio___risky256_round(v0, t0);
+  fio___risky256_round(v0);
+  /* Squeeze: XOR-fold 8 lanes into 4 */
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_primes[i];
-  fio___risky256_round(v0, t0);
-  /* squeeze: XOR-fold 8 lanes into 4 */
+  fio___risky256_round(v0);
   fio_u256 r;
   for (size_t i = 0; i < 4; ++i)
     r.u64[i] = v0[i] ^ v0[i + 4];
   return r;
 }
 
-/** Computes a 512-bit non-cryptographic hash (RiskyHash 512). */
-SFUNC fio_u512 fio_risky512(const void *data_, uint64_t len) {
-  const uint8_t *data = (const uint8_t *)data_;
-  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16), t0[4], t1[4];
-  uint64_t seed = len;
-  seed ^= fio_lrot64(seed, 47);
-  fio___risky256_init(v0, v1, seed);
-  /* head: partial block (if any) into v0 — no round marker */
-  if ((len & 63)) {
-    uint64_t w[8] FIO_ALIGN(16);
-    FIO_MEMSET(w, 0, 64);
-    fio_memcpy63x(w, data, len);
-    data += (len & 63);
-    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
-    for (size_t i = 0; i < 8; ++i)
-      w[i] = fio_ltole64(w[i]);
-    for (size_t i = 0; i < 8; ++i)
-      v0[i] ^= w[i];
-    fio___risky256_round(v0, t0);
-  }
-  /* head: odd full block (if any) into v1 — with round marker */
-  if ((len & 64)) {
-    for (size_t i = 0; i < 4; ++i)
-      v1[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 8; ++i)
-      v1[i] ^= fio_buf2u64_le(data + (i << 3));
-    data += 64;
-    fio___risky256_round(v1, t1);
-  }
-  /* main loop: 128-byte pairs — remaining blocks are guaranteed even count */
-  for (size_t j = 127; j < len; j += 128) {
-    for (size_t i = 0; i < 4; ++i)
-      v0[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 4; ++i)
-      v1[i] += fio___risky256_primes[i];
-    for (size_t i = 0; i < 8; ++i)
-      v0[i] ^= fio_buf2u64_le(data + (i << 3));
-    for (size_t i = 0; i < 8; ++i)
-      v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
-    data += 128;
-    fio___risky256_round(v0, t0);
-    fio___risky256_round(v1, t1);
-  }
-  /* finalization: merge v1 into v0, then squeeze */
+/**
+ * Finalize state and return 512-bit hash.
+ * Same as fio___risky256_finalize but does 2 squeezes for 512 bits.
+ */
+FIO_SFUNC fio_u512 fio___risky512_finalize(uint64_t v0[8], uint64_t v1[8]) {
+  /* Finalization: merge v1 into v0 */
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v0, t0);
+  fio___risky256_round(v0);
   for (size_t i = 0; i < 8; ++i)
     v1[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v1, t1);
+  fio___risky256_round(v1);
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= v1[i];
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_extra0[i];
-  fio___risky256_round(v0, t0);
-  /* first squeeze: 256 bits (identical to fio_risky256 output) */
+  fio___risky256_round(v0);
+  /* First squeeze: 256 bits */
   fio_u512 r;
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_primes[i];
-  fio___risky256_round(v0, t0);
+  fio___risky256_round(v0);
   for (size_t i = 0; i < 4; ++i)
     r.u64[i] = v0[i] ^ v0[i + 4];
-  /* second squeeze: additional 256 bits */
+  /* Second squeeze: additional 256 bits */
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_extra1[i];
-  fio___risky256_round(v0, t0);
+  fio___risky256_round(v0);
   for (size_t i = 0; i < 4; ++i)
     r.u64[i + 4] = v0[i] ^ v0[i + 4];
   return r;
 }
 
 /* *****************************************************************************
-Risky Hash 256 / 512 — HMAC (NOT RFC 2104 compliant)
+Risky Hash 256 / 512 — Streaming Finish (implementations)
 ***************************************************************************** */
 
-/** HMAC-RiskyHash-256 (standard HMAC construction, 32-byte digest). */
+/** Streaming finish: process buffered data and finalize to 256 bits. */
+FIO_SFUNC fio_u256 fio___risky256_finish(fio___risky256_stream_s *s) {
+  uint64_t total = s->total_len;
+  uint64_t main_end = (total >> 7) << 7;
+  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0);
+
+  /* Process any remaining buffered data */
+  if (s->buf_len > 0) {
+    if (s->absorbed < main_end) {
+      /* Incomplete 128-byte pair — should not happen if total_len is correct */
+      /* Pad with zeros and absorb as pair */
+      FIO_MEMSET(s->buf + s->buf_len, 0, 128 - s->buf_len);
+      fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
+      s->absorbed = main_end;
+      s->buf_len = 0;
+    }
+    if (s->absorbed < odd_end && s->absorbed >= main_end) {
+      /* Incomplete odd block — pad and absorb */
+      if (s->buf_len < 64) {
+        FIO_MEMSET(s->buf + s->buf_len, 0, 64 - s->buf_len);
+      }
+      fio___risky256_absorb_odd(s->v1, s->buf);
+      s->absorbed = odd_end;
+      s->buf_len = 0;
+    }
+    if (s->absorbed >= odd_end && s->buf_len > 0) {
+      /* Partial block at end */
+      fio___risky256_absorb_partial(s->v0, s->buf, s->buf_len);
+      s->buf_len = 0;
+    }
+  }
+
+  return fio___risky256_finalize(s->v0, s->v1);
+}
+
+/** Streaming finish: process buffered data and finalize to 512 bits. */
+FIO_SFUNC fio_u512 fio___risky512_finish(fio___risky256_stream_s *s) {
+  uint64_t total = s->total_len;
+  uint64_t main_end = (total >> 7) << 7;
+  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0);
+
+  /* Process any remaining buffered data */
+  if (s->buf_len > 0) {
+    if (s->absorbed < main_end) {
+      /* Incomplete 128-byte pair — pad and absorb */
+      FIO_MEMSET(s->buf + s->buf_len, 0, 128 - s->buf_len);
+      fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
+      s->absorbed = main_end;
+      s->buf_len = 0;
+    }
+    if (s->absorbed < odd_end && s->absorbed >= main_end) {
+      /* Incomplete odd block — pad and absorb */
+      if (s->buf_len < 64) {
+        FIO_MEMSET(s->buf + s->buf_len, 0, 64 - s->buf_len);
+      }
+      fio___risky256_absorb_odd(s->v1, s->buf);
+      s->absorbed = odd_end;
+      s->buf_len = 0;
+    }
+    if (s->absorbed >= odd_end && s->buf_len > 0) {
+      /* Partial block at end */
+      fio___risky256_absorb_partial(s->v0, s->buf, s->buf_len);
+      s->buf_len = 0;
+    }
+  }
+
+  return fio___risky512_finalize(s->v0, s->v1);
+}
+
+/* *****************************************************************************
+Risky Hash 256 / 512 — Public API
+***************************************************************************** */
+
+/** Computes a 256-bit non-cryptographic hash (RiskyHash 256). */
+SFUNC fio_u256 fio_risky256(const void *data_, uint64_t len) {
+  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio___risky256_init(v0, v1, len);
+  fio___risky256_absorb(v0, v1, data_, len);
+  return fio___risky256_finalize(v0, v1);
+}
+
+/** Computes a 512-bit non-cryptographic hash (RiskyHash 512). */
+SFUNC fio_u512 fio_risky512(const void *data_, uint64_t len) {
+  uint64_t v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio___risky256_init(v0, v1, len);
+  fio___risky256_absorb(v0, v1, data_, len);
+  return fio___risky512_finalize(v0, v1);
+}
+
+/* *****************************************************************************
+Risky Hash 256 / 512 — HMAC (RFC 2104 compliant, allocation-free)
+
+Uses streaming API for the inner hash:
+  Inner: H(K ^ ipad || msg) — streaming: feed k_ipad, then msg
+  Outer: H(K ^ opad || inner_hash) — fixed 96/128 bytes on stack
+
+Block size is 64 bytes. Keys > 64 bytes are hashed first.
+***************************************************************************** */
+
+/** HMAC-RiskyHash-256 (RFC 2104 compliant, 32-byte digest, allocation-free).
+ *
+ * Memory layout uses fio_u1024 (128 bytes) for zero-copy outer hash:
+ *   buf.u64[0..7]  = k_padded (64 bytes) - key XOR'd with ipad/opad
+ *   buf.u64[8..11] = inner hash result (32 bytes)
+ * This gives contiguous k_opad||inner_hash for outer hash input.
+ */
 SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t key_len,
                                  const void *msg,
                                  uint64_t msg_len) {
-  fio_u1024 buffer = {0};
-  /* If key > block size (64), hash it first */
+  fio_u1024 buf = {0};
+  uint64_t *k_padded = buf.u64;       /* bytes 0-63 */
+  fio_u256 *inner_ptr = buf.u256 + 2; /* bytes 64-95 (buf.u64[8..11]) */
+
+  /* Key preparation: truncate or hash if > 64 bytes */
   if (key_len > 64) {
-    buffer.u512[1] = fio_risky512(key, key_len);
+    fio_u256 hk = fio_risky256(key, key_len);
+    FIO_MEMCPY(k_padded, hk.u64, 32);
+    fio_secure_zero(hk.u8, sizeof(hk));
   } else if (key_len) {
-    FIO_MEMCPY(buffer.u512[1].u8, key, (size_t)key_len);
+    FIO_MEMCPY(k_padded, key, (size_t)key_len);
   }
+
+  /* Inner hash: H(K ^ ipad || msg) using streaming API */
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^= 0x3636363636363636ULL;
+
+  fio___risky256_stream_s state;
+  fio___risky256_stream_init(&state, 64 + msg_len);
+  fio___risky256_consume(&state, k_padded, 64);
   if (msg_len)
-    buffer.u256[0] = fio_risky256(msg, msg_len);
-  /* Inner hash: H(i_pad || msg) */
+    fio___risky256_consume(&state, msg, msg_len);
+  *inner_ptr =
+      fio___risky256_finish(&state); /* write directly to buf[64..95] */
+
+  /* Toggle ipad→opad: XOR with 0x6A (0x36 ^ 0x5C) */
   for (size_t i = 0; i < 8; ++i)
-    buffer.u512[1].u64[i] ^= (uint64_t)0x3636363636363636ULL;
-  buffer.u256[1] = fio_risky256(buffer.u8, sizeof(buffer));
-  /* Outer hash: H(o_pad || inner_hash) — 128 bytes, stack-safe */
-  for (size_t i = 0; i < 8; ++i)
-    buffer.u512[1].u64[i] ^=
-        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
-  buffer.u256[0] = fio_risky256(buffer.u8, sizeof(buffer));
-  fio_secure_zero(buffer.u256[1].u8, (sizeof(buffer) - sizeof(buffer.u256[0])));
-  return buffer.u256[0];
+    k_padded[i] ^= 0x6A6A6A6A6A6A6A6AULL;
+
+  /* Outer hash: H(K ^ opad || inner_hash) — contiguous 96 bytes in buf */
+  fio_u256 result = fio_risky256(buf.u8, 96);
+
+  /* Secure cleanup */
+  fio_secure_zero(&state, sizeof(state));
+  fio_secure_zero(buf.u8, 96);
+  return result;
 }
 
-/** HMAC-RiskyHash-512 (standard HMAC construction, 64-byte digest). */
+/** HMAC-RiskyHash-512 (RFC 2104 compliant, 64-byte digest, allocation-free).
+ *
+ * Memory layout uses fio_u1024 (128 bytes) for zero-copy outer hash:
+ *   buf.u64[0..7]  = k_padded (64 bytes) - key XOR'd with ipad/opad
+ *   buf.u64[8..15] = inner hash result (64 bytes)
+ * This gives contiguous k_opad||inner_hash for outer hash input.
+ */
 SFUNC fio_u512 fio_risky512_hmac(const void *key,
                                  uint64_t key_len,
                                  const void *msg,
                                  uint64_t msg_len) {
-  fio_u1024 buffer = {0};
-  /* If key > block size (64), hash it first */
+  fio_u1024 buf = {0};
+  uint64_t *k_padded = buf.u64;       /* bytes 0-63 */
+  fio_u512 *inner_ptr = buf.u512 + 1; /* bytes 64-127 (buf.u64[8..15]) */
+
+  /* Key preparation: truncate or hash if > 64 bytes */
   if (key_len > 64) {
-    buffer.u512[1] = fio_risky512(key, key_len);
+    fio_u512 hk = fio_risky512(key, key_len);
+    FIO_MEMCPY(k_padded, hk.u64, 64);
+    fio_secure_zero(hk.u8, sizeof(hk));
   } else if (key_len) {
-    FIO_MEMCPY(buffer.u512[1].u8, key, (size_t)key_len);
+    FIO_MEMCPY(k_padded, key, (size_t)key_len);
   }
+
+  /* Inner hash: H(K ^ ipad || msg) using streaming API */
+  for (size_t i = 0; i < 8; ++i)
+    k_padded[i] ^= 0x3636363636363636ULL;
+
+  fio___risky256_stream_s state;
+  fio___risky256_stream_init(&state, 64 + msg_len);
+  fio___risky256_consume(&state, k_padded, 64);
   if (msg_len)
-    buffer.u512[0] = fio_risky512(msg, msg_len);
-  /* Inner hash: H(H(msg) || i_pad) */
+    fio___risky256_consume(&state, msg, msg_len);
+  *inner_ptr =
+      fio___risky512_finish(&state); /* write directly to buf[64..127] */
+
+  /* Toggle ipad→opad: XOR with 0x6A (0x36 ^ 0x5C) */
   for (size_t i = 0; i < 8; ++i)
-    buffer.u512[1].u64[i] ^= (uint64_t)0x3636363636363636ULL;
-  buffer.u512[1] = fio_risky512(buffer.u8, sizeof(buffer));
-  /* Outer hash: H(H(H(msg) || i_pad) || o_pad) — 128 bytes, stack-safe */
-  for (size_t i = 0; i < 8; ++i)
-    buffer.u512[1].u64[i] ^=
-        (uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL;
-  buffer.u512[0] = fio_risky512(buffer.u8, sizeof(buffer));
-  fio_secure_zero(buffer.u512[1].u8, sizeof(buffer.u512[1]));
-  return buffer.u512[0];
+    k_padded[i] ^= 0x6A6A6A6A6A6A6A6AULL;
+
+  /* Outer hash: H(K ^ opad || inner_hash) — contiguous 128 bytes in buf */
+  fio_u512 result = fio_risky512(buf.u8, 128);
+
+  /* Secure cleanup */
+  fio_secure_zero(&state, sizeof(state));
+  fio_secure_zero(buf.u8, 128);
+  return result;
 }
 
 /* *****************************************************************************

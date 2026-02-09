@@ -829,7 +829,9 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
 
   /* Compute t = A*s + e */
   for (i = 0; i < FIO___MLKEM_K; i++) {
-    fio___mlkem_polyvec_basemul_acc_montgomery(pkpv[i], a[i], skpv);
+    fio___mlkem_polyvec_basemul_acc_montgomery(pkpv[i],
+                                               (const int16_t(*)[256])a[i],
+                                               (const int16_t(*)[256])skpv);
     fio___mlkem_poly_tomont(pkpv[i]);
   }
 
@@ -888,14 +890,18 @@ FIO_SFUNC void fio___mlkem_indcpa_enc(
 
   /* Compute u = A^T * r + e1 */
   for (i = 0; i < FIO___MLKEM_K; i++)
-    fio___mlkem_polyvec_basemul_acc_montgomery(b[i], at[i], sp);
+    fio___mlkem_polyvec_basemul_acc_montgomery(b[i],
+                                               (const int16_t(*)[256])at[i],
+                                               (const int16_t(*)[256])sp);
 
   fio___mlkem_polyvec_invntt_tomont(b);
   fio___mlkem_polyvec_add(b, b, ep);
   fio___mlkem_polyvec_reduce(b);
 
   /* Compute v = t^T * r + e2 + Decompress(Decode(m)) */
-  fio___mlkem_polyvec_basemul_acc_montgomery(v, pkpv, sp);
+  fio___mlkem_polyvec_basemul_acc_montgomery(v,
+                                             (const int16_t(*)[256])pkpv,
+                                             (const int16_t(*)[256])sp);
   fio___mlkem_invntt(v);
 
   fio___mlkem_poly_frommsg(k, msg);
@@ -940,7 +946,9 @@ FIO_SFUNC void fio___mlkem_indcpa_dec(
   fio___mlkem_polyvec_ntt(b);
 
   /* Compute m = v - s^T * u */
-  fio___mlkem_polyvec_basemul_acc_montgomery(mp, skpv, b);
+  fio___mlkem_polyvec_basemul_acc_montgomery(mp,
+                                             (const int16_t(*)[256])skpv,
+                                             (const int16_t(*)[256])b);
   fio___mlkem_invntt(mp);
 
   fio___mlkem_poly_sub(mp, v, mp);

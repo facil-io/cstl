@@ -189,13 +189,13 @@ fio_u256 fio_risky256_hmac(const void *key, uint64_t key_len,
                            const void *msg, uint64_t msg_len);
 ```
 
-Computes HMAC-RiskyHash-256 using the standard RFC 2104 HMAC construction with `fio_risky256` as the underlying hash function.
+Computes HMAC-RiskyHash-256 using the RFC 2104 construction with `fio_risky256` as the underlying hash function. Uses a 64-byte block size with standard ipad (0x36) and opad (0x5C) padding.
 
-Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky256`. Returns a `fio_u256` (32 bytes).
+If `key_len > 64`, the key is first hashed with `fio_risky256`. Returns a `fio_u256` (32 bytes).
 
-All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+All sensitive intermediates (padded key, inner hash, buffers) are securely zeroed after use.
 
-**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+**Note**: while this uses the standard RFC 2104 HMAC construction, the underlying hash is non-cryptographic, so the standard HMAC security proofs do not apply. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
 
 #### `fio_risky512_hmac`
 
@@ -204,12 +204,12 @@ fio_u512 fio_risky512_hmac(const void *key, uint64_t key_len,
                            const void *msg, uint64_t msg_len);
 ```
 
-Computes HMAC-RiskyHash-512 using the standard RFC 2104 HMAC construction with `fio_risky512` as the underlying hash function.
+Computes HMAC-RiskyHash-512 using the RFC 2104 construction with `fio_risky512` as the underlying hash function. Uses a 64-byte block size with standard ipad (0x36) and opad (0x5C) padding.
 
-Uses a 64-byte block size. If `key_len > 64`, the key is first hashed with `fio_risky512`. Returns a `fio_u512` (64 bytes).
+If `key_len > 64`, the key is first hashed with `fio_risky512`. Returns a `fio_u512` (64 bytes).
 
-All sensitive intermediates (padded key, inner hash) are securely zeroed after use.
+All sensitive intermediates (padded key, inner hash, buffers) are securely zeroed after use.
 
-**Note**: this uses a non-cryptographic hash internally. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
+**Note**: while this uses the standard RFC 2104 HMAC construction, the underlying hash is non-cryptographic, so the standard HMAC security proofs do not apply. For cryptographic HMAC, use `fio_blake2b_hmac` or `fio_blake2s_hmac`.
 
 -------------------------------------------------------------------------------
