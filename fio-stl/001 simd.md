@@ -291,9 +291,74 @@ fio_u256_store(local_buf, val);
 
 That is 11 functions x 6 sizes = **66 functions** total.
 
+### Vector Definition Macros
+
+These macros define the platform-specific SIMD vector members (`.x64`, `.x32`, `.x16`, `.x8`) used inside the `fio_uXXX` union types. They are used internally by `FIO___UXXX_UGRP_DEF` to build the union, but are also available as public macros for defining standalone vector variables of a given bit width.
+
+#### `FIO_UXXX_X64_DEF`
+
+```c
+#define FIO_UXXX_X64_DEF(name, bits) /* platform-specific */
+```
+
+Defines a `bits`-long vector named `name` using unsigned 64-bit words.
+
+- **ARM NEON**: `uint64x2_t name[bits / 128]` (array of 128-bit NEON vectors)
+- **GCC `vector_size`**: `uint64_t __attribute__((vector_size(bits / 8))) name[1]` (single full-width vector)
+- **Scalar fallback**: `uint64_t name[bits / 64]` (plain array)
+
+#### `FIO_UXXX_X32_DEF`
+
+```c
+#define FIO_UXXX_X32_DEF(name, bits) /* platform-specific */
+```
+
+Defines a `bits`-long vector named `name` using unsigned 32-bit words.
+
+- **ARM NEON**: `uint32x4_t name[bits / 128]`
+- **GCC `vector_size`**: `uint32_t __attribute__((vector_size(bits / 8))) name[1]`
+- **Scalar fallback**: `uint32_t name[bits / 32]`
+
+#### `FIO_UXXX_X16_DEF`
+
+```c
+#define FIO_UXXX_X16_DEF(name, bits) /* platform-specific */
+```
+
+Defines a `bits`-long vector named `name` using unsigned 16-bit words.
+
+- **ARM NEON**: `uint16x8_t name[bits / 128]`
+- **GCC `vector_size`**: `uint16_t __attribute__((vector_size(bits / 8))) name[1]`
+- **Scalar fallback**: `uint16_t name[bits / 16]`
+
+#### `FIO_UXXX_X8_DEF`
+
+```c
+#define FIO_UXXX_X8_DEF(name, bits) /* platform-specific */
+```
+
+Defines a `bits`-long vector named `name` using unsigned 8-bit words.
+
+- **ARM NEON**: `uint8x16_t name[bits / 128]`
+- **GCC `vector_size`**: `uint8_t __attribute__((vector_size(bits / 8))) name[1]`
+- **Scalar fallback**: `uint8_t name[bits / 8]`
+
+**Note**: these macros are used internally to define the `.x64`, `.x32`, `.x16`, `.x8` members of each `fio_uXXX` union. They can also be used directly to declare standalone SIMD-aware vector variables:
+
+```c
+/* Declare a 256-bit vector of 64-bit words */
+FIO_UXXX_X64_DEF(my_vec, 256);
+/* On GCC: uint64_t __attribute__((vector_size(32))) my_vec[1]; */
+/* On NEON: uint64x2_t my_vec[2]; */
+/* Scalar: uint64_t my_vec[4]; */
+```
+
 ### Low-Level Vector Helper Macros
 
-These macros form the building blocks for all higher-level `fio_uXXX` vector operations. `FIO_MATH_UXXX_OP`, `COP`, `SOP`, and `TOP` operate on the `.xN[]` SIMD vector members (benefiting from hardware SIMD when available). `FIO_MATH_UXXX_REDUCE` and `FIO_MATH_UXXX_SUFFLE` operate on the `.uN[]` unsigned integer array members instead.
+These macros form the building blocks for all higher-level `fio_uXXX` vector operations. They operate on **raw arrays** (not `fio_uXXX` union values directly). When used with `fio_uXXX` types, pass the appropriate union member:
+
+- `FIO_MATH_UXXX_OP`, `COP`, `SOP`, and `TOP` — pass `.xN` vector members (e.g., `r.x64`, `a.x32`) to benefit from hardware SIMD.
+- `FIO_MATH_UXXX_REDUCE` and `FIO_MATH_UXXX_SUFFLE` — pass `.uN` scalar array members (e.g., `a.u64`, `var.u32`).
 
 #### `FIO_MATH_UXXX_OP`
 
@@ -301,12 +366,22 @@ These macros form the building blocks for all higher-level `fio_uXXX` vector ope
 #define FIO_MATH_UXXX_OP(t, a, b, bits, op)
 ```
 
-Lane-wise binary operation: `t.xN[i] = a.xN[i] op b.xN[i]` for each lane `i`.
+Lane-wise binary operation: `t[i] = a[i] op b[i]` for each element `i`.
 
-- `t` - target `fio_uXXX` value (modified in place)
-- `a`, `b` - source `fio_uXXX` values
-- `bits` - selects the union member (64 for `.x64`, 32 for `.x32`, etc.)
+- `t` - target array (modified in place)
+- `a`, `b` - source arrays
+- `bits` - vestigial for this macro (loop bounds are computed from `sizeof(t) / sizeof(t[0])`)
 - `op` - C binary operator (`+`, `-`, `*`, `&`, `|`, `^`)
+
+Example:
+
+```c
+fio_u256 r, a, b;
+/* XOR using 64-bit SIMD vectors */
+FIO_MATH_UXXX_OP(r.x64, a.x64, b.x64, 64, ^);
+/* ADD using 32-bit SIMD vectors */
+FIO_MATH_UXXX_OP(r.x32, a.x32, b.x32, 32, +);
+```
 
 #### `FIO_MATH_UXXX_COP`
 
@@ -314,10 +389,21 @@ Lane-wise binary operation: `t.xN[i] = a.xN[i] op b.xN[i]` for each lane `i`.
 #define FIO_MATH_UXXX_COP(t, a, b, bits, op)
 ```
 
-Lane-wise operation with a scalar constant: `t.xN[i] = a.xN[i] op b` for each lane `i`.
+Lane-wise operation with a scalar constant: `t[i] = a[i] op b` for each element `i`.
 
-- `b` - a scalar constant (not a `fio_uXXX` value)
-- All other parameters are the same as `FIO_MATH_UXXX_OP`.
+- `t` - target array (modified in place)
+- `a` - source array
+- `b` - a scalar constant (not an array)
+- `bits` - vestigial for this macro
+- `op` - C binary operator
+
+Example:
+
+```c
+fio_u256 target, src;
+/* AND each 64-bit SIMD lane with a constant mask */
+FIO_MATH_UXXX_COP(target.x64, src.x64, (uint64_t)0xFF, 64, &);
+```
 
 #### `FIO_MATH_UXXX_SOP`
 
@@ -325,9 +411,20 @@ Lane-wise operation with a scalar constant: `t.xN[i] = a.xN[i] op b` for each la
 #define FIO_MATH_UXXX_SOP(t, a, bits, op)
 ```
 
-Lane-wise unary operation: `t.xN[i] = op a.xN[i]` for each lane `i`.
+Lane-wise unary operation: `t[i] = op a[i]` for each element `i`.
 
+- `t` - target array (modified in place)
+- `a` - source array
+- `bits` - vestigial for this macro
 - `op` - C unary operator (e.g., `~` for bitwise NOT)
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Bitwise NOT */
+FIO_MATH_UXXX_SOP(target.x64, src.x64, 64, ~);
+```
 
 #### `FIO_MATH_UXXX_TOP`
 
@@ -335,9 +432,19 @@ Lane-wise unary operation: `t.xN[i] = op a.xN[i]` for each lane `i`.
 #define FIO_MATH_UXXX_TOP(t, a, b, c, bits, expr)
 ```
 
-Lane-wise ternary operation: `t.xN[i] = expr(a.xN[i], b.xN[i], c.xN[i])` for each lane `i`.
+Lane-wise ternary operation: `t[i] = expr(a[i], b[i], c[i])` for each element `i`.
 
-- `expr` - a function-like macro taking three arguments (e.g., a macro expanding to `(z) ^ ((x) & ((y) ^ (z)))` for mux/choose)
+- `t`, `a`, `b`, `c` - arrays (target and three sources)
+- `bits` - vestigial for this macro
+- `expr` - a function-like macro taking three arguments (e.g., `FIO___EXPR_MUX` expanding to `(z) ^ ((x) & ((y) ^ (z)))`)
+
+Example:
+
+```c
+fio_u256 t, a, b, c;
+/* Mux/choose: t[i] = c[i] ^ (a[i] & (b[i] ^ c[i])) */
+FIO_MATH_UXXX_TOP(t.x64, a.x64, b.x64, c.x64, 64, FIO___EXPR_MUX);
+```
 
 #### `FIO_MATH_UXXX_REDUCE`
 
@@ -345,10 +452,26 @@ Lane-wise ternary operation: `t.xN[i] = expr(a.xN[i], b.xN[i], c.xN[i])` for eac
 #define FIO_MATH_UXXX_REDUCE(t, a, bits, op)
 ```
 
-Horizontal reduction across all lanes: `t = a.uN[0] op a.uN[1] op ... op a.uN[last]`.
+Horizontal reduction across all elements: `t = a[0] op a[1] op ... op a[last]`.
 
 - `t` - scalar result variable
-- Uses `.uN[]` (unsigned integer array), not `.xN[]` (vector array)
+- `a` - source array (pass `.uN` scalar array members, **not** `.xN` vector members)
+- `bits` - used to declare the temporary variable type (`uint##bits##_t`)
+- `op` - C binary operator
+
+Example:
+
+```c
+fio_u256 val;
+uint64_t sum;
+/* Sum all 64-bit words */
+FIO_MATH_UXXX_REDUCE(sum, val.u64, 64, +);
+/* OR-reduce all 64-bit words */
+uint64_t any_set;
+FIO_MATH_UXXX_REDUCE(any_set, val.u64, 64, |);
+```
+
+**Note**: the `bits` parameter is **not** vestigial for `REDUCE` — it is needed to declare the type of the temporary variable used in the reduction loop.
 
 #### `FIO_MATH_UXXX_SUFFLE`
 
@@ -356,15 +479,37 @@ Horizontal reduction across all lanes: `t = a.uN[0] op a.uN[1] op ... op a.uN[la
 #define FIO_MATH_UXXX_SUFFLE(var, bits, ...)
 ```
 
-Reorders lanes by index array: `var.uN[i] = var.uN[index[i]]` for each lane `i`. Uses the `.u##bits[]` unsigned integer array member (not the `.x##bits[]` vector member).
+Reorders elements by index array: `var[i] = var[index[i]]` for each element `i`. Pass `.uN` scalar array members (not `.xN` vector members).
 
-- `var` - the `fio_uXXX` value to shuffle (modified in place)
-- `bits` - selects the word width for shuffling (accesses `.u##bits[]`)
+- `var` - the array to shuffle (modified in place; pass `.uN` member)
+- `bits` - used to declare the temporary array type (`uint##bits##_t`)
 - `...` - comma-separated index values
+
+Example:
+
+```c
+fio_u256 val = fio_u256_init64(10, 20, 30, 40);
+/* Reverse the 64-bit words */
+FIO_MATH_UXXX_SUFFLE(val.u64, 64, 3, 2, 1, 0);
+/* val.u64 is now {40, 30, 20, 10} */
+```
 
 **Note**: the macro name is intentionally misspelled as "SUFFLE" (not "SHUFFLE"). When searching the codebase for shuffle operations, look for `SUFFLE`.
 
-**Note**: for `FIO_MATH_UXXX_OP`, `COP`, `SOP`, and `TOP`, the `bits` parameter selects the `.x##bits[]` vector union member, **NOT** the element size. The loop count is `sizeof(t.xN) / sizeof(t.xN[0])`, which varies by platform: 1 for GCC `vector_size`, `bits/128` for NEON, `bits/64` (or `bits/32`, etc.) for scalar fallback. For `REDUCE` and `SUFFLE`, the `bits` parameter selects the `.u##bits[]` scalar array member instead.
+**Note**: the `bits` parameter is **not** vestigial for `SUFFLE` — it is needed to declare the type of the temporary array used during shuffling.
+
+#### Summary of Parameter Semantics
+
+| Macro | Pass which member? | `bits` parameter role |
+|-------|-------------------|----------------------|
+| `FIO_MATH_UXXX_OP` | `.xN` (vector) | Vestigial — loop bounds from `sizeof(t)/sizeof(t[0])` |
+| `FIO_MATH_UXXX_COP` | `.xN` (vector) | Vestigial |
+| `FIO_MATH_UXXX_SOP` | `.xN` (vector) | Vestigial |
+| `FIO_MATH_UXXX_TOP` | `.xN` (vector) | Vestigial |
+| `FIO_MATH_UXXX_REDUCE` | `.uN` (scalar array) | Declares `uint##bits##_t` temp variable |
+| `FIO_MATH_UXXX_SUFFLE` | `.uN` (scalar array) | Declares `uint##bits##_t` temp array |
+
+The loop count for `OP`/`COP`/`SOP`/`TOP` is `sizeof(t) / sizeof(t[0])`, which varies by platform: 1 for GCC `vector_size`, `bits/128` for NEON, `bits/64` (or `bits/32`, etc.) for scalar fallback.
 
 ### Lane-Wise Operations (Pointer-Based)
 
@@ -949,11 +1094,13 @@ The `fio_uXXX` types and their operations provide a portable SIMD abstraction. T
 
 #### How It Works
 
-The `.xN[]` union members (`.x64`, `.x32`, `.x16`, `.x8`) are defined differently depending on the platform:
+The `.xN[]` union members (`.x64`, `.x32`, `.x16`, `.x8`) are defined by the `FIO_UXXX_X{64,32,16,8}_DEF` macros, which produce different types depending on the platform:
 
 **ARM NEON** (when NEON + crypto intrinsics are available):
 ```c
+/* FIO_UXXX_X64_DEF(x64, bits) expands to: */
 uint64x2_t x64[bits / 128];  /* array of 128-bit NEON vectors */
+/* FIO_UXXX_X32_DEF(x32, bits) expands to: */
 uint32x4_t x32[bits / 128];
 uint16x8_t x16[bits / 128];
 uint8x16_t x8[bits / 128];
@@ -961,6 +1108,7 @@ uint8x16_t x8[bits / 128];
 
 **GCC/Clang `vector_size`** (`__has_attribute(vector_size)`):
 ```c
+/* FIO_UXXX_X64_DEF(x64, bits) expands to: */
 uint64_t __attribute__((vector_size(bits / 8))) x64[1];  /* single full-width vector */
 uint32_t __attribute__((vector_size(bits / 8))) x32[1];
 uint16_t __attribute__((vector_size(bits / 8))) x16[1];
@@ -969,13 +1117,14 @@ uint8_t  __attribute__((vector_size(bits / 8))) x8[1];
 
 **Scalar fallback**:
 ```c
+/* FIO_UXXX_X64_DEF(x64, bits) expands to: */
 uint64_t x64[bits / 64];  /* plain arrays */
 uint32_t x32[bits / 32];
 uint16_t x16[bits / 16];
 uint8_t  x8[bits / 8];
 ```
 
-The `FIO_MATH_UXXX_OP` macro (and friends) iterate over `sizeof(t.xN) / sizeof(t.xN[0])` elements. This yields:
+The `FIO_MATH_UXXX_OP` macro (and friends) iterate over `sizeof(t) / sizeof(t[0])` elements (where `t` is the raw array passed in, e.g., `r.x64`). This yields:
 
 | Platform | Loop iterations for `fio_u256` with `.x64` |
 |----------|---------------------------------------------|
@@ -983,7 +1132,7 @@ The `FIO_MATH_UXXX_OP` macro (and friends) iterate over `sizeof(t.xN) / sizeof(t
 | ARM NEON | **2** (two 128-bit NEON operations) |
 | Scalar | **4** (four 64-bit scalar operations) |
 
-This means the same `FIO_MATH_UXXX_OP(r, a, b, 64, ^)` call compiles to a single vector XOR on GCC, two `veorq_u64` on NEON, or four scalar XORs on the fallback -- all from the same source code.
+This means the same `FIO_MATH_UXXX_OP(r.x64, a.x64, b.x64, 64, ^)` call compiles to a single vector XOR on GCC, two `veorq_u64` on NEON, or four scalar XORs on the fallback -- all from the same source code.
 
 ### Examples
 

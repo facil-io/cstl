@@ -621,8 +621,368 @@ Implementation - SHA-512
 
 FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
                                   const uint8_t *restrict block) {
+#if defined(FIO___HAS_ARM_SHA512_INTRIN) && FIO___HAS_ARM_SHA512_INTRIN
+  /* ARM SHA512 intrinsics implementation (ARMv8.4-A+)
+   * Based on Simon Tatham's implementation for PuTTY (MIT/Apache 2.0)
+   * Uses vsha512hq_u64, vsha512h2q_u64, vsha512su0q_u64, vsha512su1q_u64
+   */
+  static const uint64_t K[80] FIO_ALIGN(16) = {
+      0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
+      0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
+      0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
+      0x12835B0145706FBEULL, 0x243185BE4EE4B28CULL, 0x550C7DC3D5FFB4E2ULL,
+      0x72BE5D74F27B896FULL, 0x80DEB1FE3B1696B1ULL, 0x9BDC06A725C71235ULL,
+      0xC19BF174CF692694ULL, 0xE49B69C19EF14AD2ULL, 0xEFBE4786384F25E3ULL,
+      0x0FC19DC68B8CD5B5ULL, 0x240CA1CC77AC9C65ULL, 0x2DE92C6F592B0275ULL,
+      0x4A7484AA6EA6E483ULL, 0x5CB0A9DCBD41FBD4ULL, 0x76F988DA831153B5ULL,
+      0x983E5152EE66DFABULL, 0xA831C66D2DB43210ULL, 0xB00327C898FB213FULL,
+      0xBF597FC7BEEF0EE4ULL, 0xC6E00BF33DA88FC2ULL, 0xD5A79147930AA725ULL,
+      0x06CA6351E003826FULL, 0x142929670A0E6E70ULL, 0x27B70A8546D22FFCULL,
+      0x2E1B21385C26C926ULL, 0x4D2C6DFC5AC42AEDULL, 0x53380D139D95B3DFULL,
+      0x650A73548BAF63DEULL, 0x766A0ABB3C77B2A8ULL, 0x81C2C92E47EDAEE6ULL,
+      0x92722C851482353BULL, 0xA2BFE8A14CF10364ULL, 0xA81A664BBC423001ULL,
+      0xC24B8B70D0F89791ULL, 0xC76C51A30654BE30ULL, 0xD192E819D6EF5218ULL,
+      0xD69906245565A910ULL, 0xF40E35855771202AULL, 0x106AA07032BBD1B8ULL,
+      0x19A4C116B8D2D0C8ULL, 0x1E376C085141AB53ULL, 0x2748774CDF8EEB99ULL,
+      0x34B0BCB5E19B48A8ULL, 0x391C0CB3C5C95A63ULL, 0x4ED8AA4AE3418ACBULL,
+      0x5B9CCA4F7763E373ULL, 0x682E6FF3D6B2B8A3ULL, 0x748F82EE5DEFB2FCULL,
+      0x78A5636F43172F60ULL, 0x84C87814A1F0AB72ULL, 0x8CC702081A6439ECULL,
+      0x90BEFFFA23631E28ULL, 0xA4506CEBDE82BDE9ULL, 0xBEF9A3F7B2C67915ULL,
+      0xC67178F2E372532BULL, 0xCA273ECEEA26619CULL, 0xD186B8C721C0C207ULL,
+      0xEADA7DD6CDE0EB1EULL, 0xF57D4F7FEE6ED178ULL, 0x06F067AA72176FBAULL,
+      0x0A637DC5A2C898A6ULL, 0x113F9804BEF90DAEULL, 0x1B710B35131C471BULL,
+      0x28DB77F523047D84ULL, 0x32CAAB7B40C72493ULL, 0x3C9EBE0A15C9BEBCULL,
+      0x431D67C49C100D4CULL, 0x4CC5D4BECB3E42B6ULL, 0x597F299CFC657E2AULL,
+      0x5FCB6FAB3AD6FAECULL, 0x6C44198C4A475817ULL};
+
+  /* SHA-512 state: 4 vectors of 2x64-bit each = 512 bits total
+   * State layout: ab={a,b}, cd={c,d}, ef={e,f}, gh={g,h}
+   */
+  uint64x2_t ab, cd, ef, gh;
+  uint64x2_t ab_orig, cd_orig, ef_orig, gh_orig;
+  /* Message schedule: 8 vectors of 2x64-bit each = 16 words */
+  uint64x2_t s0, s1, s2, s3, s4, s5, s6, s7;
+  uint64x2_t initial_sum, sum, intermed;
+
+  /* Load state */
+  ab = vld1q_u64(&h->u64[0]);
+  cd = vld1q_u64(&h->u64[2]);
+  ef = vld1q_u64(&h->u64[4]);
+  gh = vld1q_u64(&h->u64[6]);
+
+  /* Save state for final addition */
+  ab_orig = ab;
+  cd_orig = cd;
+  ef_orig = ef;
+  gh_orig = gh;
+
+  /* Load and byte-swap message (SHA-512 uses big-endian) */
+  s0 = vreinterpretq_u64_u8(
+      vrev64q_u8(vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)block))));
+  s1 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 16)))));
+  s2 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 32)))));
+  s3 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 48)))));
+  s4 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 64)))));
+  s5 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 80)))));
+  s6 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 96)))));
+  s7 = vreinterpretq_u64_u8(vrev64q_u8(
+      vreinterpretq_u8_u64(vld1q_u64((const uint64_t *)(block + 112)))));
+
+  /* Rounds 0 and 1 */
+  initial_sum = vaddq_u64(s0, vld1q_u64(&K[0]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), gh);
+  intermed = vsha512hq_u64(sum, vextq_u64(ef, gh, 1), vextq_u64(cd, ef, 1));
+  gh = vsha512h2q_u64(intermed, cd, ab);
+  cd = vaddq_u64(cd, intermed);
+
+  /* Rounds 2 and 3 */
+  initial_sum = vaddq_u64(s1, vld1q_u64(&K[2]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ef);
+  intermed = vsha512hq_u64(sum, vextq_u64(cd, ef, 1), vextq_u64(ab, cd, 1));
+  ef = vsha512h2q_u64(intermed, ab, gh);
+  ab = vaddq_u64(ab, intermed);
+
+  /* Rounds 4 and 5 */
+  initial_sum = vaddq_u64(s2, vld1q_u64(&K[4]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), cd);
+  intermed = vsha512hq_u64(sum, vextq_u64(ab, cd, 1), vextq_u64(gh, ab, 1));
+  cd = vsha512h2q_u64(intermed, gh, ef);
+  gh = vaddq_u64(gh, intermed);
+
+  /* Rounds 6 and 7 */
+  initial_sum = vaddq_u64(s3, vld1q_u64(&K[6]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ab);
+  intermed = vsha512hq_u64(sum, vextq_u64(gh, ab, 1), vextq_u64(ef, gh, 1));
+  ab = vsha512h2q_u64(intermed, ef, cd);
+  ef = vaddq_u64(ef, intermed);
+
+  /* Rounds 8 and 9 */
+  initial_sum = vaddq_u64(s4, vld1q_u64(&K[8]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), gh);
+  intermed = vsha512hq_u64(sum, vextq_u64(ef, gh, 1), vextq_u64(cd, ef, 1));
+  gh = vsha512h2q_u64(intermed, cd, ab);
+  cd = vaddq_u64(cd, intermed);
+
+  /* Rounds 10 and 11 */
+  initial_sum = vaddq_u64(s5, vld1q_u64(&K[10]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ef);
+  intermed = vsha512hq_u64(sum, vextq_u64(cd, ef, 1), vextq_u64(ab, cd, 1));
+  ef = vsha512h2q_u64(intermed, ab, gh);
+  ab = vaddq_u64(ab, intermed);
+
+  /* Rounds 12 and 13 */
+  initial_sum = vaddq_u64(s6, vld1q_u64(&K[12]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), cd);
+  intermed = vsha512hq_u64(sum, vextq_u64(ab, cd, 1), vextq_u64(gh, ab, 1));
+  cd = vsha512h2q_u64(intermed, gh, ef);
+  gh = vaddq_u64(gh, intermed);
+
+  /* Rounds 14 and 15 */
+  initial_sum = vaddq_u64(s7, vld1q_u64(&K[14]));
+  sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ab);
+  intermed = vsha512hq_u64(sum, vextq_u64(gh, ab, 1), vextq_u64(ef, gh, 1));
+  ab = vsha512h2q_u64(intermed, ef, cd);
+  ef = vaddq_u64(ef, intermed);
+
+  /* Rounds 16-79: message schedule expansion + rounds */
+  for (unsigned int t = 16; t < 80; t += 16) {
+    /* Rounds t and t + 1 */
+    s0 = vsha512su1q_u64(vsha512su0q_u64(s0, s1), s7, vextq_u64(s4, s5, 1));
+    initial_sum = vaddq_u64(s0, vld1q_u64(&K[t]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), gh);
+    intermed = vsha512hq_u64(sum, vextq_u64(ef, gh, 1), vextq_u64(cd, ef, 1));
+    gh = vsha512h2q_u64(intermed, cd, ab);
+    cd = vaddq_u64(cd, intermed);
+
+    /* Rounds t + 2 and t + 3 */
+    s1 = vsha512su1q_u64(vsha512su0q_u64(s1, s2), s0, vextq_u64(s5, s6, 1));
+    initial_sum = vaddq_u64(s1, vld1q_u64(&K[t + 2]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ef);
+    intermed = vsha512hq_u64(sum, vextq_u64(cd, ef, 1), vextq_u64(ab, cd, 1));
+    ef = vsha512h2q_u64(intermed, ab, gh);
+    ab = vaddq_u64(ab, intermed);
+
+    /* Rounds t + 4 and t + 5 */
+    s2 = vsha512su1q_u64(vsha512su0q_u64(s2, s3), s1, vextq_u64(s6, s7, 1));
+    initial_sum = vaddq_u64(s2, vld1q_u64(&K[t + 4]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), cd);
+    intermed = vsha512hq_u64(sum, vextq_u64(ab, cd, 1), vextq_u64(gh, ab, 1));
+    cd = vsha512h2q_u64(intermed, gh, ef);
+    gh = vaddq_u64(gh, intermed);
+
+    /* Rounds t + 6 and t + 7 */
+    s3 = vsha512su1q_u64(vsha512su0q_u64(s3, s4), s2, vextq_u64(s7, s0, 1));
+    initial_sum = vaddq_u64(s3, vld1q_u64(&K[t + 6]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ab);
+    intermed = vsha512hq_u64(sum, vextq_u64(gh, ab, 1), vextq_u64(ef, gh, 1));
+    ab = vsha512h2q_u64(intermed, ef, cd);
+    ef = vaddq_u64(ef, intermed);
+
+    /* Rounds t + 8 and t + 9 */
+    s4 = vsha512su1q_u64(vsha512su0q_u64(s4, s5), s3, vextq_u64(s0, s1, 1));
+    initial_sum = vaddq_u64(s4, vld1q_u64(&K[t + 8]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), gh);
+    intermed = vsha512hq_u64(sum, vextq_u64(ef, gh, 1), vextq_u64(cd, ef, 1));
+    gh = vsha512h2q_u64(intermed, cd, ab);
+    cd = vaddq_u64(cd, intermed);
+
+    /* Rounds t + 10 and t + 11 */
+    s5 = vsha512su1q_u64(vsha512su0q_u64(s5, s6), s4, vextq_u64(s1, s2, 1));
+    initial_sum = vaddq_u64(s5, vld1q_u64(&K[t + 10]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ef);
+    intermed = vsha512hq_u64(sum, vextq_u64(cd, ef, 1), vextq_u64(ab, cd, 1));
+    ef = vsha512h2q_u64(intermed, ab, gh);
+    ab = vaddq_u64(ab, intermed);
+
+    /* Rounds t + 12 and t + 13 */
+    s6 = vsha512su1q_u64(vsha512su0q_u64(s6, s7), s5, vextq_u64(s2, s3, 1));
+    initial_sum = vaddq_u64(s6, vld1q_u64(&K[t + 12]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), cd);
+    intermed = vsha512hq_u64(sum, vextq_u64(ab, cd, 1), vextq_u64(gh, ab, 1));
+    cd = vsha512h2q_u64(intermed, gh, ef);
+    gh = vaddq_u64(gh, intermed);
+
+    /* Rounds t + 14 and t + 15 */
+    s7 = vsha512su1q_u64(vsha512su0q_u64(s7, s0), s6, vextq_u64(s3, s4, 1));
+    initial_sum = vaddq_u64(s7, vld1q_u64(&K[t + 14]));
+    sum = vaddq_u64(vextq_u64(initial_sum, initial_sum, 1), ab);
+    intermed = vsha512hq_u64(sum, vextq_u64(gh, ab, 1), vextq_u64(ef, gh, 1));
+    ab = vsha512h2q_u64(intermed, ef, cd);
+    ef = vaddq_u64(ef, intermed);
+  }
+
+  /* Combine state */
+  ab = vaddq_u64(ab, ab_orig);
+  cd = vaddq_u64(cd, cd_orig);
+  ef = vaddq_u64(ef, ef_orig);
+  gh = vaddq_u64(gh, gh_orig);
+
+  /* Save state */
+  vst1q_u64(&h->u64[0], ab);
+  vst1q_u64(&h->u64[2], cd);
+  vst1q_u64(&h->u64[4], ef);
+  vst1q_u64(&h->u64[6], gh);
+
+#elif defined(FIO___HAS_X86_SHA512_INTRIN) && FIO___HAS_X86_SHA512_INTRIN
+  /* x86 SHA-512 intrinsics implementation (Arrow Lake / Lunar Lake 2024+)
+   * Uses _mm256_sha512rnds2_epi64, _mm256_sha512msg1_epi64,
+   * _mm256_sha512msg2_epi64
+   *
+   * SHA-512 state: 8 x 64-bit words = 512 bits
+   * Layout: state0 = {a, b, c, d}, state1 = {e, f, g, h}
+   * Each __m256i holds 4 x 64-bit words
+   *
+   * _mm256_sha512rnds2_epi64 performs 2 rounds using lower 128 bits of k
+   * _mm256_sha512msg1_epi64 computes sigma0 for message schedule
+   * _mm256_sha512msg2_epi64 computes sigma1 for message schedule
+   */
+  static const uint64_t K[80] FIO_ALIGN(32) = {
+      0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
+      0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
+      0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
+      0x12835B0145706FBEULL, 0x243185BE4EE4B28CULL, 0x550C7DC3D5FFB4E2ULL,
+      0x72BE5D74F27B896FULL, 0x80DEB1FE3B1696B1ULL, 0x9BDC06A725C71235ULL,
+      0xC19BF174CF692694ULL, 0xE49B69C19EF14AD2ULL, 0xEFBE4786384F25E3ULL,
+      0x0FC19DC68B8CD5B5ULL, 0x240CA1CC77AC9C65ULL, 0x2DE92C6F592B0275ULL,
+      0x4A7484AA6EA6E483ULL, 0x5CB0A9DCBD41FBD4ULL, 0x76F988DA831153B5ULL,
+      0x983E5152EE66DFABULL, 0xA831C66D2DB43210ULL, 0xB00327C898FB213FULL,
+      0xBF597FC7BEEF0EE4ULL, 0xC6E00BF33DA88FC2ULL, 0xD5A79147930AA725ULL,
+      0x06CA6351E003826FULL, 0x142929670A0E6E70ULL, 0x27B70A8546D22FFCULL,
+      0x2E1B21385C26C926ULL, 0x4D2C6DFC5AC42AEDULL, 0x53380D139D95B3DFULL,
+      0x650A73548BAF63DEULL, 0x766A0ABB3C77B2A8ULL, 0x81C2C92E47EDAEE6ULL,
+      0x92722C851482353BULL, 0xA2BFE8A14CF10364ULL, 0xA81A664BBC423001ULL,
+      0xC24B8B70D0F89791ULL, 0xC76C51A30654BE30ULL, 0xD192E819D6EF5218ULL,
+      0xD69906245565A910ULL, 0xF40E35855771202AULL, 0x106AA07032BBD1B8ULL,
+      0x19A4C116B8D2D0C8ULL, 0x1E376C085141AB53ULL, 0x2748774CDF8EEB99ULL,
+      0x34B0BCB5E19B48A8ULL, 0x391C0CB3C5C95A63ULL, 0x4ED8AA4AE3418ACBULL,
+      0x5B9CCA4F7763E373ULL, 0x682E6FF3D6B2B8A3ULL, 0x748F82EE5DEFB2FCULL,
+      0x78A5636F43172F60ULL, 0x84C87814A1F0AB72ULL, 0x8CC702081A6439ECULL,
+      0x90BEFFFA23631E28ULL, 0xA4506CEBDE82BDE9ULL, 0xBEF9A3F7B2C67915ULL,
+      0xC67178F2E372532BULL, 0xCA273ECEEA26619CULL, 0xD186B8C721C0C207ULL,
+      0xEADA7DD6CDE0EB1EULL, 0xF57D4F7FEE6ED178ULL, 0x06F067AA72176FBAULL,
+      0x0A637DC5A2C898A6ULL, 0x113F9804BEF90DAEULL, 0x1B710B35131C471BULL,
+      0x28DB77F523047D84ULL, 0x32CAAB7B40C72493ULL, 0x3C9EBE0A15C9BEBCULL,
+      0x431D67C49C100D4CULL, 0x4CC5D4BECB3E42B6ULL, 0x597F299CFC657E2AULL,
+      0x5FCB6FAB3AD6FAECULL, 0x6C44198C4A475817ULL};
+
+  /* Byte-swap mask for big-endian conversion (64-bit word swap) */
+  const __m256i shuf_mask = _mm256_set_epi8(8,
+                                            9,
+                                            10,
+                                            11,
+                                            12,
+                                            13,
+                                            14,
+                                            15,
+                                            0,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7,
+                                            8,
+                                            9,
+                                            10,
+                                            11,
+                                            12,
+                                            13,
+                                            14,
+                                            15,
+                                            0,
+                                            1,
+                                            2,
+                                            3,
+                                            4,
+                                            5,
+                                            6,
+                                            7);
+
+  /* Load state: state0 = {a, b, c, d}, state1 = {e, f, g, h} */
+  __m256i state0 = _mm256_loadu_si256((const __m256i *)&h->u64[0]);
+  __m256i state1 = _mm256_loadu_si256((const __m256i *)&h->u64[4]);
+
+  /* Save original state for final addition */
+  const __m256i state0_save = state0;
+  const __m256i state1_save = state1;
+
+  /* Load and byte-swap message (SHA-512 uses big-endian) */
+  __m256i w0 =
+      _mm256_shuffle_epi8(_mm256_loadu_si256((const __m256i *)(block + 0)),
+                          shuf_mask);
+  __m256i w1 =
+      _mm256_shuffle_epi8(_mm256_loadu_si256((const __m256i *)(block + 32)),
+                          shuf_mask);
+  __m256i w2 =
+      _mm256_shuffle_epi8(_mm256_loadu_si256((const __m256i *)(block + 64)),
+                          shuf_mask);
+  __m256i w3 =
+      _mm256_shuffle_epi8(_mm256_loadu_si256((const __m256i *)(block + 96)),
+                          shuf_mask);
+
+  __m256i wk;
+
+/* Macro for 2 rounds: uses lower 128 bits of wk for round constants */
+#define FIO___SHA512_2RNDS(s0, s1, w, kptr)                                    \
+  do {                                                                         \
+    wk = _mm256_add_epi64(w, _mm256_loadu_si256((const __m256i *)(kptr)));     \
+    s1 = _mm256_sha512rnds2_epi64(s1, s0, wk);                                 \
+    wk = _mm256_permute4x64_epi64(wk, 0x4E);                                   \
+    s0 = _mm256_sha512rnds2_epi64(s0, s1, wk);                                 \
+  } while (0)
+
+/* Macro for message schedule: W[i] = sigma1(W[i-2]) + W[i-7] + sigma0(W[i-15])
+ * + W[i-16] */
+#define FIO___SHA512_MSG_SCHED(w, w1, w2, w3)                                  \
+  do {                                                                         \
+    __m256i t0 = _mm256_sha512msg1_epi64(w, w1);                               \
+    __m256i t1 = _mm256_alignr_epi8(w3, w2, 8);                                \
+    t0 = _mm256_add_epi64(t0, t1);                                             \
+    w = _mm256_sha512msg2_epi64(t0, w3);                                       \
+  } while (0)
+
+  /* Rounds 0-15: use initial message words directly */
+  FIO___SHA512_2RNDS(state0, state1, w0, &K[0]);
+  FIO___SHA512_2RNDS(state0, state1, w1, &K[4]);
+  FIO___SHA512_2RNDS(state0, state1, w2, &K[8]);
+  FIO___SHA512_2RNDS(state0, state1, w3, &K[12]);
+
+  /* Rounds 16-79: message schedule expansion + rounds */
+  for (unsigned int t = 16; t < 80; t += 16) {
+    FIO___SHA512_MSG_SCHED(w0, w1, w2, w3);
+    FIO___SHA512_2RNDS(state0, state1, w0, &K[t]);
+
+    FIO___SHA512_MSG_SCHED(w1, w2, w3, w0);
+    FIO___SHA512_2RNDS(state0, state1, w1, &K[t + 4]);
+
+    FIO___SHA512_MSG_SCHED(w2, w3, w0, w1);
+    FIO___SHA512_2RNDS(state0, state1, w2, &K[t + 8]);
+
+    FIO___SHA512_MSG_SCHED(w3, w0, w1, w2);
+    FIO___SHA512_2RNDS(state0, state1, w3, &K[t + 12]);
+  }
+
+#undef FIO___SHA512_2RNDS
+#undef FIO___SHA512_MSG_SCHED
+
+  /* Combine state */
+  state0 = _mm256_add_epi64(state0, state0_save);
+  state1 = _mm256_add_epi64(state1, state1_save);
+
+  /* Save state */
+  _mm256_storeu_si256((__m256i *)&h->u64[0], state0);
+  _mm256_storeu_si256((__m256i *)&h->u64[4], state1);
+
+#else /* Portable implementation */
   /* SHA-512 round constants */
-  static const uint64_t K[80] = {
+  static const uint64_t K[80] FIO_ALIGN(64) = {
       0x428A2F98D728AE22ULL, 0x7137449123EF65CDULL, 0xB5C0FBCFEC4D3B2FULL,
       0xE9B5DBA58189DBBCULL, 0x3956C25BF348B538ULL, 0x59F111F1B605D019ULL,
       0x923F82A4AF194F9BULL, 0xAB1C5ED5DA6D8118ULL, 0xD807AA98A3030242ULL,
@@ -664,10 +1024,10 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
   uint64_t *w = wv.u64;
 
 /* SHA-512 Sigma functions - using optimized helpers */
-#define FIO___S512_S0(x) fio_xor_rrot3_64(x, 28, 34, 39)
-#define FIO___S512_S1(x) fio_xor_rrot3_64(x, 14, 18, 41)
-#define FIO___S512_s0(x) fio_xor_rrot2_shr_64(x, 1, 8, 7)
-#define FIO___S512_s1(x) fio_xor_rrot2_shr_64(x, 19, 61, 6)
+#define FIO___S512_S0(x)        fio_xor_rrot3_64(x, 28, 34, 39)
+#define FIO___S512_S1(x)        fio_xor_rrot3_64(x, 14, 18, 41)
+#define FIO___S512_s0(x)        fio_xor_rrot2_shr_64(x, 1, 8, 7)
+#define FIO___S512_s1(x)        fio_xor_rrot2_shr_64(x, 19, 61, 6)
 
 /* Optimized Ch and Maj - fewer operations */
 #define FIO___S512_CH(e, f, g)  ((g) ^ ((e) & ((f) ^ (g))))
@@ -795,6 +1155,8 @@ FIO_IFUNC void fio___sha512_round(fio_u512 *restrict h,
   h->u64[5] += f;
   h->u64[6] += g;
   h->u64[7] += hv;
+
+#endif /* FIO___HAS_ARM_SHA512_INTRIN */
 }
 
 /** Feed data into the hash */

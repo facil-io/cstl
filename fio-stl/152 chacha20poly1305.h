@@ -591,8 +591,9 @@ NEON 4-Block ChaCha20 (ARM NEON - processes 256 bytes per call)
  */
 FIO_SFUNC void fio___chacha_vround20x4(fio_u512 c, uint8_t *restrict data) {
   /* Byte rotation table for ROT8: rotate each 32-bit word left by 8 bits */
-  static const uint8x16_t fio___chacha_rot8_tbl =
+  static const uint8_t fio___chacha_rot8_data[] =
       {3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14};
+  const uint8x16_t fio___chacha_rot8_tbl = vld1q_u8(fio___chacha_rot8_data);
   /* 16 state vectors — one per ChaCha20 state word, across 4 blocks */
   uint32x4_t v0, v1, v2, v3, v4, v5, v6, v7;
   uint32x4_t v8, v9, v10, v11, v12, v13, v14, v15;

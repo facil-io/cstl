@@ -255,8 +255,555 @@ FIO_IFUNC int16_t fio___mlkem_fqmul(int16_t a, int16_t b) {
 NTT / Inverse NTT / Base Multiplication
 ***************************************************************************** */
 
-/** Forward NTT in-place. Input in standard order, output in bit-reversed. */
-FIO_SFUNC void fio___mlkem_ntt(int16_t r[256]) {
+/* *****************************************************************************
+SIMD-Optimized NTT Implementation
+
+The NTT butterfly operation is: (a, b) -> (a + t, a - t) where t = b * zeta
+Montgomery reduction: t = (a * b * R^-1) mod q, where R = 2^16, q = 3329
+
+SIMD Strategy:
+- NEON: int16x8_t processes 8 coefficients in parallel
+- AVX2: __m256i processes 16 coefficients in parallel
+- Vectorize Montgomery reduction and butterfly operations
+- Process multiple butterflies per SIMD instruction
+
+NTT layers (256 coefficients):
+- Layer 0: len=128, 1 group,  128 butterflies, stride=128
+- Layer 1: len=64,  2 groups, 64 butterflies each, stride=64
+- Layer 2: len=32,  4 groups, 32 butterflies each, stride=32
+- Layer 3: len=16,  8 groups, 16 butterflies each, stride=16
+- Layer 4: len=8,   16 groups, 8 butterflies each, stride=8
+- Layer 5: len=4,   32 groups, 4 butterflies each, stride=4
+- Layer 6: len=2,   64 groups, 2 butterflies each, stride=2
+
+For NEON (8-wide), layers 0-4 can be fully vectorized.
+For AVX2 (16-wide), layers 0-3 can be fully vectorized.
+***************************************************************************** */
+
+#if FIO___HAS_ARM_INTRIN
+/* *****************************************************************************
+ARM NEON Vectorized NTT
+***************************************************************************** */
+
+/**
+ * Vectorized Montgomery reduction for NEON.
+ * Input: 8 x int32_t products in two int32x4_t vectors (lo, hi)
+ * Output: 8 x int16_t reduced values in int16x8_t
+ *
+ * Montgomery reduction: t = (a * QINV) mod 2^16; result = (a - t*Q) >> 16
+ */
+FIO_IFUNC int16x8_t fio___mlkem_neon_montgomery_reduce(int32x4_t lo,
+                                                       int32x4_t hi) {
+  const int32x4_t q_vec = vdupq_n_s32(FIO___MLKEM_Q);
+  const int32x4_t qinv_vec = vdupq_n_s32(FIO___MLKEM_QINV);
+
+  /* t = (int16_t)(a * QINV) - take low 16 bits of product */
+  int32x4_t t_lo = vmulq_s32(lo, qinv_vec);
+  int32x4_t t_hi = vmulq_s32(hi, qinv_vec);
+
+  /* t = (int16_t)t - sign extend low 16 bits */
+  t_lo = vmovl_s16(vmovn_s32(t_lo));
+  t_hi = vmovl_s16(vmovn_s32(t_hi));
+
+  /* result = (a - t * Q) >> 16 */
+  int32x4_t r_lo = vsubq_s32(lo, vmulq_s32(t_lo, q_vec));
+  int32x4_t r_hi = vsubq_s32(hi, vmulq_s32(t_hi, q_vec));
+
+  /* Arithmetic right shift by 16 and narrow to int16 */
+  int16x4_t narrow_lo = vshrn_n_s32(r_lo, 16);
+  int16x4_t narrow_hi = vshrn_n_s32(r_hi, 16);
+
+  return vcombine_s16(narrow_lo, narrow_hi);
+}
+
+/**
+ * Vectorized field multiplication: a * b * R^-1 mod q
+ * Processes 8 multiplications in parallel.
+ */
+FIO_IFUNC int16x8_t fio___mlkem_neon_fqmul(int16x8_t a, int16x8_t b) {
+  /* Widen to 32-bit and multiply */
+  int32x4_t prod_lo = vmull_s16(vget_low_s16(a), vget_low_s16(b));
+  int32x4_t prod_hi = vmull_s16(vget_high_s16(a), vget_high_s16(b));
+
+  return fio___mlkem_neon_montgomery_reduce(prod_lo, prod_hi);
+}
+
+/**
+ * Vectorized Barrett reduction: reduce a mod q to range (-q, q).
+ * Processes 8 reductions in parallel.
+ *
+ * Barrett constant v = floor(2^26 / q) + 1 = 20159
+ * t = ((v * a + 2^25) >> 26) * q
+ * result = a - t
+ */
+FIO_IFUNC int16x8_t fio___mlkem_neon_barrett_reduce(int16x8_t a) {
+  const int16x8_t q_vec = vdupq_n_s16(FIO___MLKEM_Q);
+  const int32x4_t v_vec = vdupq_n_s32(20159); /* Barrett constant */
+  const int32x4_t half = vdupq_n_s32(1 << 25);
+
+  /* Widen a to 32-bit */
+  int32x4_t a_lo = vmovl_s16(vget_low_s16(a));
+  int32x4_t a_hi = vmovl_s16(vget_high_s16(a));
+
+  /* t = (v * a + 2^25) >> 26 */
+  int32x4_t t_lo = vshrq_n_s32(vaddq_s32(vmulq_s32(v_vec, a_lo), half), 26);
+  int32x4_t t_hi = vshrq_n_s32(vaddq_s32(vmulq_s32(v_vec, a_hi), half), 26);
+
+  /* Narrow t back to 16-bit and multiply by q */
+  int16x8_t t = vcombine_s16(vmovn_s32(t_lo), vmovn_s32(t_hi));
+  int16x8_t tq = vmulq_s16(t, q_vec);
+
+  return vsubq_s16(a, tq);
+}
+
+/**
+ * NEON-optimized forward NTT.
+ *
+ * Vectorizes layers 0-4 (stride >= 8) using 8-wide SIMD.
+ * Falls back to scalar for layers 5-6 (stride < 8).
+ */
+FIO_SFUNC void fio___mlkem_ntt_neon(int16_t r[256]) {
+  unsigned int len, start, j, k;
+  int16_t zeta;
+
+  k = 1;
+
+  /* Layer 0: len=128, 1 group, 128 butterflies */
+  {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k++]);
+    for (j = 0; j < 128; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 128]);
+      int16x8_t t = fio___mlkem_neon_fqmul(zeta_vec, b);
+      vst1q_s16(&r[j], vaddq_s16(a, t));
+      vst1q_s16(&r[j + 128], vsubq_s16(a, t));
+    }
+  }
+
+  /* Layer 1: len=64, 2 groups, 64 butterflies each */
+  for (start = 0; start < 256; start += 128) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k++]);
+    for (j = start; j < start + 64; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 64]);
+      int16x8_t t = fio___mlkem_neon_fqmul(zeta_vec, b);
+      vst1q_s16(&r[j], vaddq_s16(a, t));
+      vst1q_s16(&r[j + 64], vsubq_s16(a, t));
+    }
+  }
+
+  /* Layer 2: len=32, 4 groups, 32 butterflies each */
+  for (start = 0; start < 256; start += 64) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k++]);
+    for (j = start; j < start + 32; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 32]);
+      int16x8_t t = fio___mlkem_neon_fqmul(zeta_vec, b);
+      vst1q_s16(&r[j], vaddq_s16(a, t));
+      vst1q_s16(&r[j + 32], vsubq_s16(a, t));
+    }
+  }
+
+  /* Layer 3: len=16, 8 groups, 16 butterflies each */
+  for (start = 0; start < 256; start += 32) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k++]);
+    for (j = start; j < start + 16; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 16]);
+      int16x8_t t = fio___mlkem_neon_fqmul(zeta_vec, b);
+      vst1q_s16(&r[j], vaddq_s16(a, t));
+      vst1q_s16(&r[j + 16], vsubq_s16(a, t));
+    }
+  }
+
+  /* Layer 4: len=8, 16 groups, 8 butterflies each */
+  for (start = 0; start < 256; start += 16) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k++]);
+    int16x8_t a = vld1q_s16(&r[start]);
+    int16x8_t b = vld1q_s16(&r[start + 8]);
+    int16x8_t t = fio___mlkem_neon_fqmul(zeta_vec, b);
+    vst1q_s16(&r[start], vaddq_s16(a, t));
+    vst1q_s16(&r[start + 8], vsubq_s16(a, t));
+  }
+
+  /* Layers 5-6: len=4,2 - scalar fallback (stride < 8) */
+  for (len = 4; len >= 2; len >>= 1) {
+    for (start = 0; start < 256; start += 2 * len) {
+      zeta = fio___mlkem_zetas[k++];
+      for (j = start; j < start + len; j++) {
+        int16_t t = fio___mlkem_fqmul(zeta, r[j + len]);
+        r[j + len] = (int16_t)(r[j] - t);
+        r[j] = (int16_t)(r[j] + t);
+      }
+    }
+  }
+}
+
+/**
+ * NEON-optimized inverse NTT.
+ *
+ * Vectorizes layers with stride >= 8 using 8-wide SIMD.
+ * Falls back to scalar for smaller strides.
+ */
+FIO_SFUNC void fio___mlkem_invntt_neon(int16_t r[256]) {
+  unsigned int start, len, j, k;
+  int16_t zeta;
+  const int16_t f = 1441; /* mont^2 / 128 */
+
+  k = 127;
+
+  /* Layers 0-1: len=2,4 - scalar (stride < 8) */
+  for (len = 2; len <= 4; len <<= 1) {
+    for (start = 0; start < 256; start += 2 * len) {
+      zeta = fio___mlkem_zetas[k--];
+      for (j = start; j < start + len; j++) {
+        int16_t t = r[j];
+        r[j] = fio___mlkem_barrett_reduce((int16_t)(t + r[j + len]));
+        r[j + len] = (int16_t)(r[j + len] - t);
+        r[j + len] = fio___mlkem_fqmul(zeta, r[j + len]);
+      }
+    }
+  }
+
+  /* Layer 2: len=8, 16 groups, 8 butterflies each */
+  for (start = 0; start < 256; start += 16) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k--]);
+    int16x8_t a = vld1q_s16(&r[start]);
+    int16x8_t b = vld1q_s16(&r[start + 8]);
+    int16x8_t t = a;
+    int16x8_t sum = vaddq_s16(t, b);
+    int16x8_t diff = vsubq_s16(b, t);
+    vst1q_s16(&r[start], fio___mlkem_neon_barrett_reduce(sum));
+    vst1q_s16(&r[start + 8], fio___mlkem_neon_fqmul(zeta_vec, diff));
+  }
+
+  /* Layer 3: len=16, 8 groups, 16 butterflies each */
+  for (start = 0; start < 256; start += 32) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k--]);
+    for (j = start; j < start + 16; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 16]);
+      int16x8_t t = a;
+      int16x8_t sum = vaddq_s16(t, b);
+      int16x8_t diff = vsubq_s16(b, t);
+      vst1q_s16(&r[j], fio___mlkem_neon_barrett_reduce(sum));
+      vst1q_s16(&r[j + 16], fio___mlkem_neon_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Layer 4: len=32, 4 groups, 32 butterflies each */
+  for (start = 0; start < 256; start += 64) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k--]);
+    for (j = start; j < start + 32; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 32]);
+      int16x8_t t = a;
+      int16x8_t sum = vaddq_s16(t, b);
+      int16x8_t diff = vsubq_s16(b, t);
+      vst1q_s16(&r[j], fio___mlkem_neon_barrett_reduce(sum));
+      vst1q_s16(&r[j + 32], fio___mlkem_neon_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Layer 5: len=64, 2 groups, 64 butterflies each */
+  for (start = 0; start < 256; start += 128) {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k--]);
+    for (j = start; j < start + 64; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 64]);
+      int16x8_t t = a;
+      int16x8_t sum = vaddq_s16(t, b);
+      int16x8_t diff = vsubq_s16(b, t);
+      vst1q_s16(&r[j], fio___mlkem_neon_barrett_reduce(sum));
+      vst1q_s16(&r[j + 64], fio___mlkem_neon_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Layer 6: len=128, 1 group, 128 butterflies */
+  {
+    int16x8_t zeta_vec = vdupq_n_s16(fio___mlkem_zetas[k--]);
+    for (j = 0; j < 128; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      int16x8_t b = vld1q_s16(&r[j + 128]);
+      int16x8_t t = a;
+      int16x8_t sum = vaddq_s16(t, b);
+      int16x8_t diff = vsubq_s16(b, t);
+      vst1q_s16(&r[j], fio___mlkem_neon_barrett_reduce(sum));
+      vst1q_s16(&r[j + 128], fio___mlkem_neon_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Final scaling by f = mont^2/128 */
+  {
+    int16x8_t f_vec = vdupq_n_s16(f);
+    for (j = 0; j < 256; j += 8) {
+      int16x8_t a = vld1q_s16(&r[j]);
+      vst1q_s16(&r[j], fio___mlkem_neon_fqmul(a, f_vec));
+    }
+  }
+}
+
+#endif /* FIO___HAS_ARM_INTRIN */
+
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+/* *****************************************************************************
+x86 AVX2 Vectorized NTT
+***************************************************************************** */
+
+/**
+ * Vectorized Montgomery reduction for AVX2.
+ * Input: 16 x int32_t products in two __m256i vectors (lo, hi)
+ * Output: 16 x int16_t reduced values in __m256i
+ *
+ * Montgomery reduction: t = (a * QINV) mod 2^16; result = (a - t*Q) >> 16
+ */
+FIO_IFUNC __m256i fio___mlkem_avx2_montgomery_reduce(__m256i lo, __m256i hi) {
+  const __m256i q_vec = _mm256_set1_epi32(FIO___MLKEM_Q);
+  const __m256i qinv_vec = _mm256_set1_epi32(FIO___MLKEM_QINV);
+
+  /* t = (int16_t)(a * QINV) - multiply and take low 16 bits */
+  __m256i t_lo = _mm256_mullo_epi32(lo, qinv_vec);
+  __m256i t_hi = _mm256_mullo_epi32(hi, qinv_vec);
+
+  /* Sign-extend low 16 bits: shift left 16, then arithmetic shift right 16 */
+  t_lo = _mm256_srai_epi32(_mm256_slli_epi32(t_lo, 16), 16);
+  t_hi = _mm256_srai_epi32(_mm256_slli_epi32(t_hi, 16), 16);
+
+  /* result = (a - t * Q) >> 16 */
+  __m256i r_lo = _mm256_sub_epi32(lo, _mm256_mullo_epi32(t_lo, q_vec));
+  __m256i r_hi = _mm256_sub_epi32(hi, _mm256_mullo_epi32(t_hi, q_vec));
+
+  /* Arithmetic right shift by 16 */
+  r_lo = _mm256_srai_epi32(r_lo, 16);
+  r_hi = _mm256_srai_epi32(r_hi, 16);
+
+  /* Pack 32-bit to 16-bit: packs interleaves, so we need to fix the order */
+  __m256i packed = _mm256_packs_epi32(r_lo, r_hi);
+  /* Fix lane ordering: packs gives [lo0-3, hi0-3, lo4-7, hi4-7] */
+  return _mm256_permute4x64_epi64(packed, 0xD8); /* 0b11011000 = 3,1,2,0 */
+}
+
+/**
+ * Vectorized field multiplication: a * b * R^-1 mod q
+ * Processes 16 multiplications in parallel.
+ */
+FIO_IFUNC __m256i fio___mlkem_avx2_fqmul(__m256i a, __m256i b) {
+  /* Widen to 32-bit and multiply */
+  __m256i a_lo = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(a));
+  __m256i a_hi = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(a, 1));
+  __m256i b_lo = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(b));
+  __m256i b_hi = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(b, 1));
+
+  __m256i prod_lo = _mm256_mullo_epi32(a_lo, b_lo);
+  __m256i prod_hi = _mm256_mullo_epi32(a_hi, b_hi);
+
+  return fio___mlkem_avx2_montgomery_reduce(prod_lo, prod_hi);
+}
+
+/**
+ * Vectorized Barrett reduction for AVX2.
+ * Processes 16 reductions in parallel.
+ */
+FIO_IFUNC __m256i fio___mlkem_avx2_barrett_reduce(__m256i a) {
+  const __m256i q_vec = _mm256_set1_epi16(FIO___MLKEM_Q);
+  const __m256i v_vec = _mm256_set1_epi32(20159); /* Barrett constant */
+  const __m256i half = _mm256_set1_epi32(1 << 25);
+
+  /* Widen a to 32-bit */
+  __m256i a_lo = _mm256_cvtepi16_epi32(_mm256_castsi256_si128(a));
+  __m256i a_hi = _mm256_cvtepi16_epi32(_mm256_extracti128_si256(a, 1));
+
+  /* t = (v * a + 2^25) >> 26 */
+  __m256i t_lo =
+      _mm256_srai_epi32(_mm256_add_epi32(_mm256_mullo_epi32(v_vec, a_lo), half),
+                        26);
+  __m256i t_hi =
+      _mm256_srai_epi32(_mm256_add_epi32(_mm256_mullo_epi32(v_vec, a_hi), half),
+                        26);
+
+  /* Pack t back to 16-bit */
+  __m256i t = _mm256_packs_epi32(t_lo, t_hi);
+  t = _mm256_permute4x64_epi64(t, 0xD8);
+
+  /* result = a - t * q */
+  return _mm256_sub_epi16(a, _mm256_mullo_epi16(t, q_vec));
+}
+
+/**
+ * AVX2-optimized forward NTT.
+ *
+ * Vectorizes layers 0-3 (stride >= 16) using 16-wide SIMD.
+ * Falls back to scalar for layers 4-6 (stride < 16).
+ */
+FIO_SFUNC void fio___mlkem_ntt_avx2(int16_t r[256]) {
+  unsigned int len, start, j, k;
+  int16_t zeta;
+
+  k = 1;
+
+  /* Layer 0: len=128, 1 group, 128 butterflies */
+  {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k++]);
+    for (j = 0; j < 128; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 128]);
+      __m256i t = fio___mlkem_avx2_fqmul(zeta_vec, b);
+      _mm256_storeu_si256((__m256i *)&r[j], _mm256_add_epi16(a, t));
+      _mm256_storeu_si256((__m256i *)&r[j + 128], _mm256_sub_epi16(a, t));
+    }
+  }
+
+  /* Layer 1: len=64, 2 groups, 64 butterflies each */
+  for (start = 0; start < 256; start += 128) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k++]);
+    for (j = start; j < start + 64; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 64]);
+      __m256i t = fio___mlkem_avx2_fqmul(zeta_vec, b);
+      _mm256_storeu_si256((__m256i *)&r[j], _mm256_add_epi16(a, t));
+      _mm256_storeu_si256((__m256i *)&r[j + 64], _mm256_sub_epi16(a, t));
+    }
+  }
+
+  /* Layer 2: len=32, 4 groups, 32 butterflies each */
+  for (start = 0; start < 256; start += 64) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k++]);
+    for (j = start; j < start + 32; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 32]);
+      __m256i t = fio___mlkem_avx2_fqmul(zeta_vec, b);
+      _mm256_storeu_si256((__m256i *)&r[j], _mm256_add_epi16(a, t));
+      _mm256_storeu_si256((__m256i *)&r[j + 32], _mm256_sub_epi16(a, t));
+    }
+  }
+
+  /* Layer 3: len=16, 8 groups, 16 butterflies each */
+  for (start = 0; start < 256; start += 32) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k++]);
+    __m256i a = _mm256_loadu_si256((const __m256i *)&r[start]);
+    __m256i b = _mm256_loadu_si256((const __m256i *)&r[start + 16]);
+    __m256i t = fio___mlkem_avx2_fqmul(zeta_vec, b);
+    _mm256_storeu_si256((__m256i *)&r[start], _mm256_add_epi16(a, t));
+    _mm256_storeu_si256((__m256i *)&r[start + 16], _mm256_sub_epi16(a, t));
+  }
+
+  /* Layers 4-6: len=8,4,2 - scalar fallback (stride < 16) */
+  for (len = 8; len >= 2; len >>= 1) {
+    for (start = 0; start < 256; start += 2 * len) {
+      zeta = fio___mlkem_zetas[k++];
+      for (j = start; j < start + len; j++) {
+        int16_t t = fio___mlkem_fqmul(zeta, r[j + len]);
+        r[j + len] = (int16_t)(r[j] - t);
+        r[j] = (int16_t)(r[j] + t);
+      }
+    }
+  }
+}
+
+/**
+ * AVX2-optimized inverse NTT.
+ */
+FIO_SFUNC void fio___mlkem_invntt_avx2(int16_t r[256]) {
+  unsigned int start, len, j, k;
+  int16_t zeta;
+  const int16_t f = 1441; /* mont^2 / 128 */
+
+  k = 127;
+
+  /* Layers 0-2: len=2,4,8 - scalar (stride < 16) */
+  for (len = 2; len <= 8; len <<= 1) {
+    for (start = 0; start < 256; start += 2 * len) {
+      zeta = fio___mlkem_zetas[k--];
+      for (j = start; j < start + len; j++) {
+        int16_t t = r[j];
+        r[j] = fio___mlkem_barrett_reduce((int16_t)(t + r[j + len]));
+        r[j + len] = (int16_t)(r[j + len] - t);
+        r[j + len] = fio___mlkem_fqmul(zeta, r[j + len]);
+      }
+    }
+  }
+
+  /* Layer 3: len=16, 8 groups, 16 butterflies each */
+  for (start = 0; start < 256; start += 32) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k--]);
+    __m256i a = _mm256_loadu_si256((const __m256i *)&r[start]);
+    __m256i b = _mm256_loadu_si256((const __m256i *)&r[start + 16]);
+    __m256i t = a;
+    __m256i sum = _mm256_add_epi16(t, b);
+    __m256i diff = _mm256_sub_epi16(b, t);
+    _mm256_storeu_si256((__m256i *)&r[start],
+                        fio___mlkem_avx2_barrett_reduce(sum));
+    _mm256_storeu_si256((__m256i *)&r[start + 16],
+                        fio___mlkem_avx2_fqmul(zeta_vec, diff));
+  }
+
+  /* Layer 4: len=32, 4 groups, 32 butterflies each */
+  for (start = 0; start < 256; start += 64) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k--]);
+    for (j = start; j < start + 32; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 32]);
+      __m256i t = a;
+      __m256i sum = _mm256_add_epi16(t, b);
+      __m256i diff = _mm256_sub_epi16(b, t);
+      _mm256_storeu_si256((__m256i *)&r[j],
+                          fio___mlkem_avx2_barrett_reduce(sum));
+      _mm256_storeu_si256((__m256i *)&r[j + 32],
+                          fio___mlkem_avx2_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Layer 5: len=64, 2 groups, 64 butterflies each */
+  for (start = 0; start < 256; start += 128) {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k--]);
+    for (j = start; j < start + 64; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 64]);
+      __m256i t = a;
+      __m256i sum = _mm256_add_epi16(t, b);
+      __m256i diff = _mm256_sub_epi16(b, t);
+      _mm256_storeu_si256((__m256i *)&r[j],
+                          fio___mlkem_avx2_barrett_reduce(sum));
+      _mm256_storeu_si256((__m256i *)&r[j + 64],
+                          fio___mlkem_avx2_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Layer 6: len=128, 1 group, 128 butterflies */
+  {
+    __m256i zeta_vec = _mm256_set1_epi16(fio___mlkem_zetas[k--]);
+    for (j = 0; j < 128; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      __m256i b = _mm256_loadu_si256((const __m256i *)&r[j + 128]);
+      __m256i t = a;
+      __m256i sum = _mm256_add_epi16(t, b);
+      __m256i diff = _mm256_sub_epi16(b, t);
+      _mm256_storeu_si256((__m256i *)&r[j],
+                          fio___mlkem_avx2_barrett_reduce(sum));
+      _mm256_storeu_si256((__m256i *)&r[j + 128],
+                          fio___mlkem_avx2_fqmul(zeta_vec, diff));
+    }
+  }
+
+  /* Final scaling by f = mont^2/128 */
+  {
+    __m256i f_vec = _mm256_set1_epi16(f);
+    for (j = 0; j < 256; j += 16) {
+      __m256i a = _mm256_loadu_si256((const __m256i *)&r[j]);
+      _mm256_storeu_si256((__m256i *)&r[j], fio___mlkem_avx2_fqmul(a, f_vec));
+    }
+  }
+}
+
+#endif /* FIO___HAS_X86_INTRIN && __AVX2__ */
+
+/* *****************************************************************************
+Scalar NTT Implementation (Fallback)
+***************************************************************************** */
+
+/** Forward NTT in-place (scalar). Input in standard order, output bit-reversed.
+ */
+FIO_SFUNC void fio___mlkem_ntt_scalar(int16_t r[256]) {
   unsigned int len, start, j, k;
   int16_t t, zeta;
 
@@ -273,8 +820,8 @@ FIO_SFUNC void fio___mlkem_ntt(int16_t r[256]) {
   }
 }
 
-/** Inverse NTT in-place. Input in bit-reversed order, output in standard. */
-FIO_SFUNC void fio___mlkem_invntt(int16_t r[256]) {
+/** Inverse NTT in-place (scalar). Input bit-reversed, output standard order. */
+FIO_SFUNC void fio___mlkem_invntt_scalar(int16_t r[256]) {
   unsigned int start, len, j, k;
   int16_t t, zeta;
   const int16_t f = 1441; /* mont^2 / 128 */
@@ -293,6 +840,32 @@ FIO_SFUNC void fio___mlkem_invntt(int16_t r[256]) {
   }
   for (j = 0; j < 256; j++)
     r[j] = fio___mlkem_fqmul(r[j], f);
+}
+
+/* *****************************************************************************
+NTT Dispatch Functions - Select best implementation at compile time
+***************************************************************************** */
+
+/** Forward NTT in-place. Input in standard order, output in bit-reversed. */
+FIO_SFUNC void fio___mlkem_ntt(int16_t r[256]) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+  fio___mlkem_ntt_avx2(r);
+#elif FIO___HAS_ARM_INTRIN
+  fio___mlkem_ntt_neon(r);
+#else
+  fio___mlkem_ntt_scalar(r);
+#endif
+}
+
+/** Inverse NTT in-place. Input in bit-reversed order, output in standard. */
+FIO_SFUNC void fio___mlkem_invntt(int16_t r[256]) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+  fio___mlkem_invntt_avx2(r);
+#elif FIO___HAS_ARM_INTRIN
+  fio___mlkem_invntt_neon(r);
+#else
+  fio___mlkem_invntt_scalar(r);
+#endif
 }
 
 /**

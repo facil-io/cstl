@@ -1238,17 +1238,17 @@ static uint64_t fio___http_str_cached_hash(char *str, size_t len) {
   fio_u256_cxor64(s.u256, s.u256, hash);
   hash += fio_u256_reduce_add64(s.u256);
 #else
-  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], 0x2020202020202020ULL, 64, |);
-  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], (uint16_t)len, 16, +);
+  FIO_MATH_UXXX_COP(s.u256[0].x64, s.u256[0].x64, 0x2020202020202020ULL, 64, |);
+  FIO_MATH_UXXX_COP(s.u256[0].x16, s.u256[0].x16, (uint16_t)len, 16, +);
   for (size_t i = 0; i < 4; ++i) {
     s.u64[i] = fio_math_mulc64(s.u64[i], primes.u64[i], s.u64 + 4 + i);
   }
   uint64_t tmp;
-  FIO_MATH_UXXX_REDUCE(hash, s.u256[1], 64, +);
-  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0], 64, +);
+  FIO_MATH_UXXX_REDUCE(hash, s.u256[1].u64, 64, +);
+  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0].u64, 64, +);
   hash ^= tmp;
-  FIO_MATH_UXXX_COP(s.u256[0], s.u256[0], hash, 64, ^);
-  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0], 64, +);
+  FIO_MATH_UXXX_COP(s.u256[0].x64, s.u256[0].x64, hash, 64, ^);
+  FIO_MATH_UXXX_REDUCE(tmp, s.u256[0].u64, 64, +);
   hash += tmp;
 #endif
   // hash += hash >> 4;

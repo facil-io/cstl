@@ -56,7 +56,7 @@ all: everything___
 	@echo "Library headers installed to $(BUILD_DIR)/include/"
 
 # Build main executable (only if source files exist)
-ifneq ($(strip $(SOURCES)),)
+ifneq ($(strip $($(strip $(SOURCES)))),)
 $(PROJECT): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 endif
@@ -196,11 +196,8 @@ $(TEST_DIR): test;
 #############################################################################
 # Examples
 #############################################################################
-# Test files
-EXAMPLES_SOURCES = $(shell find $(EXAMPLES_DIR) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
-EXAMPLES_BINS = $(EXAMPLES_SOURCES:$(EXAMPLES_DIR)/%.c=$(BUILD_DIR)/$(EXAMPLES_DIR)/%)
 
-# Build test binaries (each test file becomes a separate executable)
+# Build example binary (each C file becomes a separate executable)
 $(BUILD_DIR)/$(EXAMPLES_DIR)/%: $(EXAMPLES_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	@echo "* Compiling Example: $*.c"
@@ -229,6 +226,39 @@ $(EXAMPLES_DIR): $(EXAMPLES_BINS)
 
 
 .NOTINTERMEDIATE: $(BUILD_DIR)/$(EXAMPLES_DIR)/% $(EXAMPLES_DIR)/%
+
+#############################################################################
+# Experiments & Extras - use for testing new ideas or temporary tests
+#############################################################################
+
+# Build extra binary (each C file becomes a separate executable)
+$(BUILD_DIR)/extras/%: extras/%.c $(OBJECTS) | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	@echo "* Compiling Example: $*.c"
+	@$(CC) $(CFLAGS) -o $@ $< $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(LDFLAGS)
+
+extras/%: $(BUILD_DIR)/extras/%
+	@echo "Running $(BUILD_DIR)/$@"
+	@echo "=================================="
+	@$(BUILD_DIR)/$@
+
+extras: $(EXAMPLES_BINS)
+	@if [ -n "$(EXAMPLES_BINS)" ]; then \
+		for e_bin in $(EXAMPLES_BINS); do \
+		  echo "";                        \
+			echo "=================================="; \
+			echo "Running $$e_bin";         \
+			echo "=================================="; \
+			$$e_bin;                        \
+		done;                             \
+		echo "";                          \
+		echo " ✓ Done";                   \
+		echo "";                          \
+	else                                \
+		echo "No example files found in: extras/"; \
+	fi
+
+.NOTINTERMEDIATE: $(BUILD_DIR)/extras/% extras/%
 
 #############################################################################
 # Combining single-file library
@@ -274,7 +304,7 @@ endif # LIB_CONCAT_FOLDER
 TEST4SOCKET:=     # --- tests for socket library linker flags
 TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
 TEST4CRYPTO:=1    # HAVE_OPENSSL / HAVE_SODIUM
-TEST4ZLIB:=1      # HAVE_ZLIB
+TEST4ZLIB:=       # HAVE_ZLIB
 TEST4PG:=         # HAVE_POSTGRESQL
 TEST4SQLITE3:=    # HAVE_SQLITE3
 
@@ -299,7 +329,7 @@ PKG_CONFIG?=pkg-config
 # Detecting SystemV socket libraries
 # (no need to edit)
 #############################################################################
-ifdef TEST4SOCKET
+ifneq ($(strip $(TEST4SOCKET)),)
 
 FIO_TEST_SOCKET_AND_NETWORK_SERVICE:="\\n\
 \#include <sys/types.h>\\n\
@@ -326,7 +356,7 @@ endif
 
 endif # TEST4SOCKET
 
-ifdef TEST4POLL
+ifneq ($(strip $(TEST4POLL)),)
 
 FIO_POLL_TEST_KQUEUE:="\\n\
 \#define _GNU_SOURCE\\n\
@@ -392,7 +422,7 @@ endif # TEST4POLL
 # SSL/ TLS Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4CRYPTO
+ifneq ($(strip $(TEST4CRYPTO)),)
 
 # OpenSSL requirement C application code
 FIO_TLS_TEST_OPENSSL:="\\n\
@@ -451,7 +481,7 @@ endif # TEST4CRYPTO
 # ZLib Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4ZLIB
+ifneq ($(strip $($(strip $(TEST4ZLIB)))),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, zlib.h, 0, -lz) , 0)
   $(info * Detected the zlib library, setting HAVE_ZLIB)
@@ -464,7 +494,7 @@ endif #TEST4ZLIB
 # PostgreSQL Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4PG
+ifneq ($(strip $($(strip $(TEST4PG)))),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, libpq-fe.h, 0, -lpg) , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
@@ -481,7 +511,7 @@ endif # TEST4PG
 # SQLite3 Library Detection
 # (no need to edit)
 #############################################################################
-ifdef TEST4SQLITE3
+ifneq ($(strip $($(strip $(TEST4SQLITE3)))),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, sqlite3.h, sqlite3_open, -lsqlite3) , 0)
   $(info * Detected the SQLite3 library, setting HAVE_SQLITE3)
