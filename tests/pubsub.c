@@ -1,11 +1,31 @@
 /* *****************************************************************************
 FIO_PUBSUB - Compilation, Unit Tests, and Multi-Process Integration Tests
+
+Refactored to consolidate tests under fewer fio_io_start calls:
+- Non-forking group: Tests that run with 0 workers (master-only)
+- Forking group: Tests that require workers (uses 3 workers for all)
+
+Each test uses unique channel names to avoid collisions.
+Atomic counters track results across processes.
 ***************************************************************************** */
 #include "test-helpers.h"
 
 #define FIO_PUBSUB
 #define FIO_LOG
 #include FIO_INCLUDE_FILE
+
+/* *****************************************************************************
+Constants and Configuration
+***************************************************************************** */
+
+/* Worker startup can take up to 250ms */
+#define WORKER_STARTUP_DELAY_MS 300
+/* Additional time for message delivery */
+#define MESSAGE_DELIVERY_MS 100
+/* Timeout for entire test group */
+#define TEST_TIMEOUT_MS 3000
+/* Number of workers for forking tests (use max needed) */
+#define FORKING_TEST_WORKERS 3
 
 /* *****************************************************************************
 Test Helpers
@@ -145,1039 +165,7 @@ FIO_SFUNC void fio___pubsub_test_history_api(void) {
 }
 
 /* *****************************************************************************
-Multi-Process Integration Tests
-*****************************************************************************
-These tests fork worker processes and test real pub/sub over IPC.
-CRITICAL: All assertions must be on master only - worker crashes don't fail
-test.
-***************************************************************************** */
-
-/* *****************************************************************************
-Test 1: Basic Subscribe/Publish in Single Process (Master Only)
-***************************************************************************** */
-
-static volatile int fio___test_ps2_basic_received = 0;
-static char fio___test_ps2_basic_channel[64];
-static char fio___test_ps2_basic_message[64];
-
-FIO_SFUNC void fio___test_ps2_basic_on_message(fio_pubsub_msg_s *msg) {
-  fio___test_ps2_basic_received++;
-  if (msg->channel.len < 64) {
-    FIO_MEMCPY((void *)fio___test_ps2_basic_channel,
-               msg->channel.buf,
-               msg->channel.len);
-    fio___test_ps2_basic_channel[msg->channel.len] = '\0';
-  }
-  if (msg->message.len < 64) {
-    FIO_MEMCPY((void *)fio___test_ps2_basic_message,
-               msg->message.buf,
-               msg->message.len);
-    fio___test_ps2_basic_message[msg->message.len] = '\0';
-  }
-}
-
-FIO_SFUNC void fio___test_ps2_basic_on_unsub(void *udata) { (void)udata; }
-
-/* Timer to trigger subscribe after reactor starts */
-FIO_SFUNC int fio___test_ps2_basic_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("test-channel"),
-                       .on_message = fio___test_ps2_basic_on_message,
-                       .on_unsubscribe = fio___test_ps2_basic_on_unsub);
-  return -1; /* One-shot */
-}
-
-/* Timer to trigger publish after subscribe */
-FIO_SFUNC int fio___test_ps2_basic_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("test-channel"),
-                     .message = FIO_BUF_INFO1("hello-world"));
-  return -1; /* One-shot */
-}
-
-/* Check if message was received and stop */
-FIO_SFUNC int fio___test_ps2_basic_check(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-
-  /* Check every 50ms if we received the message */
-  if (fio___test_ps2_basic_received > 0) {
-    fio_io_stop();
-    return -1; /* Stop checking */
-  }
-  return 0; /* Keep checking */
-}
-
-/* Timer to stop reactor (timeout) */
-FIO_SFUNC int fio___test_ps2_basic_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify results */
-FIO_SFUNC void fio___test_ps2_basic_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  FIO_ASSERT(fio___test_ps2_basic_received >= 1,
-             "[Master] Should receive at least 1 message (got %d)",
-             fio___test_ps2_basic_received);
-  FIO_ASSERT(FIO_STRLEN(fio___test_ps2_basic_channel) == 12 &&
-                 FIO_MEMCMP(fio___test_ps2_basic_channel, "test-channel", 12) ==
-                     0,
-             "[Master] Channel should be 'test-channel' (got '%s')",
-             fio___test_ps2_basic_channel);
-  FIO_ASSERT(FIO_STRLEN(fio___test_ps2_basic_message) == 11 &&
-                 FIO_MEMCMP(fio___test_ps2_basic_message, "hello-world", 11) ==
-                     0,
-             "[Master] Message should be 'hello-world' (got '%s')",
-             fio___test_ps2_basic_message);
-}
-
-FIO_SFUNC void fio___pubsub_test_basic(void) {
-  fprintf(stderr,
-          "* Testing FIO_PUBSUB basic subscribe/publish (master only).\n");
-
-  /* Reset state */
-  fio___test_ps2_basic_received = 0;
-  FIO_MEMSET((void *)fio___test_ps2_basic_channel,
-             0,
-             sizeof(fio___test_ps2_basic_channel));
-  FIO_MEMSET((void *)fio___test_ps2_basic_message,
-             0,
-             sizeof(fio___test_ps2_basic_message));
-
-  /* Schedule: subscribe at 50ms, publish at 100ms, check every 50ms, timeout at
-   * 2s */
-  fio_io_run_every(.fn = fio___test_ps2_basic_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_basic_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_basic_check,
-                   .every = 50,
-                   .repetitions = -1); /* Repeat until stopped */
-  fio_io_run_every(.fn = fio___test_ps2_basic_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start reactor with 0 workers (master only) */
-  fio_io_start(0);
-  /* Test Assertions */
-  fio___test_ps2_basic_on_finish(NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB basic test passed.\n");
-}
-
-/* *****************************************************************************
-Test 2: Worker Subscribes, Master Publishes, Worker Receives
-***************************************************************************** */
-
-static volatile int fio___test_ps2_w2m_master_confirms = 0;
-
-/* Master handler for worker confirmation */
-FIO_SFUNC void fio___test_ps2_w2m_confirm_handler(fio_ipc_s *ipc) {
-  (void)ipc;
-  fio___test_ps2_w2m_master_confirms++;
-}
-
-/* Worker message callback - reports to master */
-FIO_SFUNC void fio___test_ps2_w2m_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Report to master via IPC */
-  const char *confirm = "received";
-  fio_ipc_call(.call = fio___test_ps2_w2m_confirm_handler,
-               .data = FIO_IPC_DATA(
-                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
-}
-
-/* Worker startup - subscribes to channel */
-FIO_SFUNC void fio___test_ps2_w2m_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-channel"),
-                       .on_message = fio___test_ps2_w2m_on_message);
-}
-
-/* Master publishes after workers connect */
-FIO_SFUNC int fio___test_ps2_w2m_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("worker-channel"),
-                     .message = FIO_BUF_INFO1("master-message"));
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_w2m_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_w2m_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  FIO_ASSERT(
-      fio___test_ps2_w2m_master_confirms >= 1,
-      "[Master] Should receive at least 1 confirmation from worker (got %d)",
-      fio___test_ps2_w2m_master_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_worker_subscribe(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB worker subscribe, master publish.\n");
-
-  /* Reset */
-  fio___test_ps2_w2m_master_confirms = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_w2m_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_w2m_on_finish, NULL);
-
-  /* Publish after 200ms (give workers time to subscribe) */
-  fio_io_run_every(.fn = fio___test_ps2_w2m_publish,
-                   .every = 200,
-                   .repetitions = 1);
-
-  /* Timeout after 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_w2m_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 1 worker */
-  fio_io_start(1);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_w2m_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_w2m_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB worker subscribe test passed.\n");
-}
-
-/* *****************************************************************************
-Test 3: Worker Publishes, Master and Other Workers Receive
-***************************************************************************** */
-
-static volatile int fio___test_ps2_wpub_master_received = 0;
-static volatile int fio___test_ps2_wpub_worker_confirms = 0;
-
-/* Master handler for worker confirmations */
-FIO_SFUNC void fio___test_ps2_wpub_confirm_handler(fio_ipc_s *ipc) {
-  (void)ipc;
-  fio___test_ps2_wpub_worker_confirms++;
-}
-
-/* Master message callback */
-FIO_SFUNC void fio___test_ps2_wpub_master_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  fio___test_ps2_wpub_master_received++;
-}
-
-/* Worker message callback - reports to master */
-FIO_SFUNC void fio___test_ps2_wpub_worker_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Report to master */
-  const char *confirm = "worker_received";
-  fio_ipc_call(.call = fio___test_ps2_wpub_confirm_handler,
-               .data = FIO_IPC_DATA(
-                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
-}
-
-/* Worker startup - subscribes to channel (same pattern as Test 2) */
-FIO_SFUNC void fio___test_ps2_wpub_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("pub-channel"),
-                       .on_message = fio___test_ps2_wpub_worker_on_message);
-}
-
-/* Master subscribes via timer (50ms after start) */
-FIO_SFUNC int fio___test_ps2_wpub_master_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("pub-channel"),
-                       .on_message = fio___test_ps2_wpub_master_on_message);
-  return -1;
-}
-
-/* Worker publishes - each worker publishes once */
-FIO_SFUNC int fio___test_ps2_wpub_worker_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_worker())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("pub-channel"),
-                     .message = FIO_BUF_INFO1("worker-message"));
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_wpub_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_wpub_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Master should receive the message */
-  FIO_ASSERT(fio___test_ps2_wpub_master_received >= 1,
-             "[Master] Should receive at least 1 message (got %d)",
-             fio___test_ps2_wpub_master_received);
-
-  /* Other worker should also receive (2 workers total, 1 publishes, 1 receives)
-   */
-  /* Note: The publishing worker also receives its own message via local
-   * delivery */
-  FIO_ASSERT(fio___test_ps2_wpub_worker_confirms >= 1,
-             "[Master] Should receive worker confirmation (got %d)",
-             fio___test_ps2_wpub_worker_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_worker_publish(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB worker publishes, master receives.\n");
-
-  /* Reset */
-  fio___test_ps2_wpub_master_received = 0;
-  fio___test_ps2_wpub_worker_confirms = 0;
-
-  /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
-   * 2) */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_wpub_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_wpub_on_finish, NULL);
-
-  /* Master subscribes at 50ms (give workers time to subscribe first) */
-  fio_io_run_every(.fn = fio___test_ps2_wpub_master_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-
-  /* Worker publishes at 200ms (gives time for subscriptions to be active) */
-  fio_io_run_every(.fn = fio___test_ps2_wpub_worker_publish,
-                   .every = 200,
-                   .repetitions = 1);
-
-  /* Timeout at 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_wpub_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 2 workers */
-  fio_io_start(2);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_wpub_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_wpub_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB worker publish test passed.\n");
-}
-
-/* *****************************************************************************
-Test 4: Pattern Matching (Glob)
-***************************************************************************** */
-
-static volatile int fio___test_ps2_pattern_received = 0;
-static char fio___test_ps2_pattern_channels[4][64];
-
-/* Message callback for pattern subscription */
-FIO_SFUNC void fio___test_ps2_pattern_on_message(fio_pubsub_msg_s *msg) {
-  int idx = fio___test_ps2_pattern_received++;
-  if (idx < 4 && msg->channel.len < 64) {
-    FIO_MEMCPY((void *)fio___test_ps2_pattern_channels[idx],
-               msg->channel.buf,
-               msg->channel.len);
-    fio___test_ps2_pattern_channels[idx][msg->channel.len] = '\0';
-  }
-}
-
-/* Subscribe with pattern */
-FIO_SFUNC int fio___test_ps2_pattern_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("news/*"),
-                       .on_message = fio___test_ps2_pattern_on_message,
-                       .is_pattern = 1);
-  return -1;
-}
-
-/* Publish to various channels */
-FIO_SFUNC int fio___test_ps2_pattern_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("news/sports"),
-                     .message = FIO_BUF_INFO1("sports-news"));
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("news/tech"),
-                     .message = FIO_BUF_INFO1("tech-news"));
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("weather/rain"),
-                     .message =
-                         FIO_BUF_INFO1("rain-forecast")); /* Should NOT match */
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_pattern_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_pattern_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Should receive exactly 2 messages (news/sports and news/tech) */
-  FIO_ASSERT(fio___test_ps2_pattern_received == 2,
-             "[Master] Pattern should match exactly 2 messages (got %d)",
-             fio___test_ps2_pattern_received);
-}
-
-FIO_SFUNC void fio___pubsub_test_pattern(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB pattern matching (glob).\n");
-
-  /* Reset */
-  fio___test_ps2_pattern_received = 0;
-  FIO_MEMSET((void *)fio___test_ps2_pattern_channels,
-             0,
-             sizeof(fio___test_ps2_pattern_channels));
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_pattern_on_finish,
-                         NULL);
-
-  /* Subscribe at 50ms, publish at 100ms, stop at 500ms */
-  fio_io_run_every(.fn = fio___test_ps2_pattern_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_pattern_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_pattern_timeout,
-                   .every = 500,
-                   .repetitions = 1);
-
-  /* Master only */
-  fio_io_start(0);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_pattern_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB pattern test passed.\n");
-}
-
-/* *****************************************************************************
-Test 5: Filter Namespace Separation
-***************************************************************************** */
-
-static volatile int fio___test_ps2_filter_received_0 = 0;
-static volatile int fio___test_ps2_filter_received_1 = 0;
-
-/* Message callback for filter 0 */
-FIO_SFUNC void fio___test_ps2_filter0_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  fio___test_ps2_filter_received_0++;
-}
-
-/* Message callback for filter 1 */
-FIO_SFUNC void fio___test_ps2_filter1_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  fio___test_ps2_filter_received_1++;
-}
-
-/* Subscribe to same channel with different filters */
-FIO_SFUNC int fio___test_ps2_filter_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("data"),
-                       .on_message = fio___test_ps2_filter0_on_message,
-                       .filter = 0);
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("data"),
-                       .on_message = fio___test_ps2_filter1_on_message,
-                       .filter = 1);
-  return -1;
-}
-
-/* Publish to filter 0 only */
-FIO_SFUNC int fio___test_ps2_filter_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("data"),
-                     .message = FIO_BUF_INFO1("filter0-message"),
-                     .filter = 0);
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_filter_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_filter_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Only filter 0 subscription should receive */
-  FIO_ASSERT(fio___test_ps2_filter_received_0 == 1,
-             "[Master] Filter 0 should receive exactly 1 message (got %d)",
-             fio___test_ps2_filter_received_0);
-  FIO_ASSERT(fio___test_ps2_filter_received_1 == 0,
-             "[Master] Filter 1 should receive 0 messages (got %d)",
-             fio___test_ps2_filter_received_1);
-}
-
-FIO_SFUNC void fio___pubsub_test_filter(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB filter namespace separation.\n");
-
-  /* Reset */
-  fio___test_ps2_filter_received_0 = 0;
-  fio___test_ps2_filter_received_1 = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_filter_on_finish,
-                         NULL);
-
-  /* Subscribe at 50ms, publish at 100ms, stop at 500ms */
-  fio_io_run_every(.fn = fio___test_ps2_filter_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_filter_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_filter_timeout,
-                   .every = 500,
-                   .repetitions = 1);
-
-  /* Master only */
-  fio_io_start(0);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_filter_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB filter test passed.\n");
-}
-
-/* *****************************************************************************
-Test 6: Unsubscribe
-***************************************************************************** */
-
-static volatile int fio___test_ps2_unsub_received = 0;
-static volatile int fio___test_ps2_unsub_callback_called = 0;
-
-/* Message callback */
-FIO_SFUNC void fio___test_ps2_unsub_on_message(fio_pubsub_msg_s *msg) {
-  fio___test_ps2_unsub_received++;
-  (void)msg;
-}
-
-/* Unsubscribe callback */
-FIO_SFUNC void fio___test_ps2_unsub_on_unsub(void *udata) {
-  fio___test_ps2_unsub_callback_called++;
-  (void)udata;
-}
-
-/* Unsubscribe */
-FIO_SFUNC int fio___test_ps2_unsub_unsubscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  (void)fio_pubsub_unsubscribe(.channel = FIO_BUF_INFO1("unsub-channel"));
-  return -1;
-}
-
-/* Publish after unsubscribe */
-FIO_SFUNC int fio___test_ps2_unsub_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("unsub-channel"),
-                     .message = FIO_BUF_INFO1("after-unsub"));
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_unsub_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_unsub_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Should not receive any messages (unsubscribed before publish) */
-  FIO_ASSERT(fio___test_ps2_unsub_received == 0,
-             "[Master] Should not receive messages after unsubscribe (got %d)",
-             fio___test_ps2_unsub_received);
-
-  /* Unsubscribe callback should have been called */
-  FIO_ASSERT(fio___test_ps2_unsub_callback_called == 1,
-             "[Master] Unsubscribe callback should be called once (got %d)",
-             fio___test_ps2_unsub_callback_called);
-}
-
-/* Subscribe on startup (runs in IO thread context) */
-FIO_SFUNC void fio___test_ps2_unsub_on_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("unsub-channel"),
-                       .on_message = fio___test_ps2_unsub_on_message,
-                       .on_unsubscribe = fio___test_ps2_unsub_on_unsub);
-}
-
-FIO_SFUNC void fio___pubsub_test_unsubscribe(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB unsubscribe.\n");
-
-  /* Reset */
-  fio___test_ps2_unsub_received = 0;
-  fio___test_ps2_unsub_callback_called = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_unsub_on_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_unsub_on_finish,
-                         NULL);
-
-  /* Subscribe happens on startup. Then:
-   * unsubscribe at 100ms, publish at 200ms, stop at 500ms */
-  fio_io_run_every(.fn = fio___test_ps2_unsub_unsubscribe,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_unsub_publish,
-                   .every = 200,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_unsub_timeout,
-                   .every = 500,
-                   .repetitions = 1);
-
-  /* Master only */
-  fio_io_start(0);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_unsub_on_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_unsub_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB unsubscribe test passed.\n");
-}
-
-/* *****************************************************************************
-Test 7: Broadcast to Multiple Workers
-***************************************************************************** */
-
-static volatile int fio___test_ps2_bcast_master_confirms = 0;
-
-/* Master handler for worker confirmations */
-FIO_SFUNC void fio___test_ps2_bcast_confirm_handler(fio_ipc_s *ipc) {
-  (void)ipc;
-  fio___test_ps2_bcast_master_confirms++;
-}
-
-/* Worker message callback */
-FIO_SFUNC void fio___test_ps2_bcast_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Confirm to master */
-  char buf[64];
-  int len = snprintf(buf, sizeof(buf), "worker_%d_received", fio_io_pid());
-  fio_ipc_call(.call = fio___test_ps2_bcast_confirm_handler,
-               .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
-}
-
-/* Worker startup */
-FIO_SFUNC void fio___test_ps2_bcast_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("broadcast-channel"),
-                       .on_message = fio___test_ps2_bcast_on_message);
-}
-
-/* Master publishes */
-FIO_SFUNC int fio___test_ps2_bcast_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("broadcast-channel"),
-                     .message = FIO_BUF_INFO1("broadcast-message"));
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_bcast_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_bcast_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* All 3 workers should confirm receipt */
-  FIO_ASSERT(fio___test_ps2_bcast_master_confirms >= 3,
-             "[Master] Should receive 3 confirmations (got %d)",
-             fio___test_ps2_bcast_master_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_broadcast(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB broadcast to multiple workers.\n");
-
-  /* Reset */
-  fio___test_ps2_bcast_master_confirms = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_bcast_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_bcast_on_finish,
-                         NULL);
-
-  /* Publish after 300ms (give workers time to subscribe and IPC to complete) */
-  fio_io_run_every(.fn = fio___test_ps2_bcast_publish,
-                   .every = 300,
-                   .repetitions = 1);
-
-  /* Timeout at 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_bcast_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 3 workers */
-  fio_io_start(3);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_bcast_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_bcast_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB broadcast test passed.\n");
-}
-
-/* *****************************************************************************
-Test 8: Message Data Integrity (Large Messages)
-***************************************************************************** */
-
-static volatile int fio___test_ps2_data_verified = 0;
-
-/* Message callback - verifies data integrity */
-FIO_SFUNC void fio___test_ps2_data_on_message(fio_pubsub_msg_s *msg) {
-  /* Verify pattern: each byte = (index & 0xFF) */
-  int valid = 1;
-  for (size_t i = 0; i < msg->message.len && valid; ++i) {
-    if ((uint8_t)msg->message.buf[i] != (uint8_t)(i & 0xFF))
-      valid = 0;
-  }
-
-  if (valid && msg->message.len == 65536) {
-    fio___test_ps2_data_verified = 1;
-  } else {
-    FIO_LOG_ERROR("(%d) Data integrity FAILED! len=%zu valid=%d",
-                  fio_io_pid(),
-                  msg->message.len,
-                  valid);
-  }
-}
-
-/* Subscribe */
-FIO_SFUNC int fio___test_ps2_data_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("data-channel"),
-                       .on_message = fio___test_ps2_data_on_message);
-  return -1;
-}
-
-/* Publish large message */
-FIO_SFUNC int fio___test_ps2_data_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-
-  /* Create 64KB message with pattern */
-  size_t size = 65536;
-  char *data = (char *)FIO_MEM_REALLOC(NULL, 0, size, 0);
-  if (!data)
-    return -1;
-
-  for (size_t i = 0; i < size; ++i) {
-    data[i] = (char)(i & 0xFF);
-  }
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("data-channel"),
-                     .message = FIO_BUF_INFO2(data, size));
-
-  FIO_MEM_FREE(data, size);
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_data_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_data_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  FIO_ASSERT(fio___test_ps2_data_verified == 1,
-             "[Master] 64KB message data integrity should be verified");
-}
-
-FIO_SFUNC void fio___pubsub_test_data_integrity(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB data integrity (64KB message).\n");
-
-  /* Reset */
-  fio___test_ps2_data_verified = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_data_on_finish, NULL);
-
-  /* Subscribe at 50ms, publish at 100ms, stop at 1 second */
-  fio_io_run_every(.fn = fio___test_ps2_data_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_data_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_data_timeout,
-                   .every = 1000,
-                   .repetitions = 1);
-
-  /* Master only */
-  fio_io_start(0);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_data_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB data integrity test passed.\n");
-}
-
-/* *****************************************************************************
-Test 9: Worker History Replay via IPC
-*****************************************************************************
-Master publishes messages to history, then worker subscribes with replay_since.
-Worker should receive historical messages via IPC from master.
-***************************************************************************** */
-
-static volatile int fio___test_ps2_hist_master_confirms = 0;
-static volatile int fio___test_ps2_hist_messages_published = 0;
-
-/* Master handler for worker confirmation */
-FIO_SFUNC void fio___test_ps2_hist_confirm_handler(fio_ipc_s *ipc) {
-  fio___test_ps2_hist_master_confirms++;
-  (void)ipc;
-}
-
-/* Worker message callback - reports to master */
-FIO_SFUNC void fio___test_ps2_hist_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Report each message to master via IPC */
-  const char *confirm = "history_received";
-  fio_ipc_call(.call = fio___test_ps2_hist_confirm_handler,
-               .data = FIO_IPC_DATA(
-                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
-}
-
-/* Master publishes messages to history */
-FIO_SFUNC int fio___test_ps2_hist_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-
-  /* Publish 3 messages to history */
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("history-channel"),
-                     .message = FIO_BUF_INFO1("history-msg-1"));
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("history-channel"),
-                     .message = FIO_BUF_INFO1("history-msg-2"));
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1("history-channel"),
-                     .message = FIO_BUF_INFO1("history-msg-3"));
-  fio___test_ps2_hist_messages_published = 3;
-  return -1;
-}
-
-/* Worker subscribes with replay_since - called from timer after worker starts
- */
-FIO_SFUNC int fio___test_ps2_hist_worker_subscribe(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_worker())
-    return -1;
-  /* Subscribe with replay_since = 1 (replay all history) */
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("history-channel"),
-                       .on_message = fio___test_ps2_hist_on_message,
-                       .replay_since = 1);
-  return -1;
-}
-
-/* Worker startup - schedules subscription after a delay to ensure master has
- * published */
-FIO_SFUNC void fio___test_ps2_hist_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-
-  /* Schedule subscription 200ms after worker starts - this ensures:
-   * 1. Worker is fully initialized
-   * 2. Master has had time to publish (master publishes at 100ms from start)
-   */
-  fio_io_run_every(.fn = fio___test_ps2_hist_worker_subscribe,
-                   .every = 200,
-                   .repetitions = 1);
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_hist_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_hist_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Worker should have received all 3 historical messages */
-  FIO_ASSERT(
-      fio___test_ps2_hist_master_confirms >= 3,
-      "[Master] Worker should receive at least 3 history messages (got %d)",
-      fio___test_ps2_hist_master_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_worker_history_replay(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB worker history replay via IPC.\n");
-
-  /* Reset */
-  fio___test_ps2_hist_master_confirms = 0;
-  fio___test_ps2_hist_messages_published = 0;
-
-  /* Attach history manager BEFORE starting reactor - this ensures it's ready
-   * before any workers start or timers fire */
-  fio_pubsub_history_attach((fio_pubsub_history_s *)fio_pubsub_history_cache(0),
-                            100);
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_hist_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_hist_on_finish, NULL);
-
-  /* Timeline:
-   * BEFORE fio_io_start: History manager attached
-   * 100ms: Master publishes 3 messages to history
-   * ON_START (worker): Worker schedules subscription for 200ms later
-   * ~200ms after worker start: Worker subscribes with replay_since
-   * 2000ms: Timeout
-   */
-  fio_io_run_every(.fn = fio___test_ps2_hist_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_hist_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 1 worker */
-  fio_io_start(1);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_hist_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_hist_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB worker history replay test passed.\n");
-}
-
-/* *****************************************************************************
-Test 10: Cluster Engine Unit Tests
-*****************************************************************************
-Tests that the cluster engine getter returns a valid engine with proper
-callbacks.
+Unit Tests - Cluster Engine
 ***************************************************************************** */
 
 FIO_SFUNC void fio___pubsub_test_cluster_engine_unit(void) {
@@ -1243,265 +231,207 @@ FIO_SFUNC void fio___pubsub_test_cluster_engine_unit(void) {
 }
 
 /* *****************************************************************************
-Test 11: Cluster Engine Explicit Publish
+Non-Forking Integration Tests - Consolidated
 *****************************************************************************
-Tests publishing with the cluster engine explicitly specified.
-Uses workers to verify message delivery via opcode-based routing.
+All master-only tests run under a single fio_io_start(0) call.
+Each test uses unique channel names to avoid collisions.
 ***************************************************************************** */
 
-static volatile int fio___test_ps2_cluster_master_confirms = 0;
+/* --- Test State (Atomic Counters) --- */
 
-/* Master handler for worker confirmation */
-FIO_SFUNC void fio___test_ps2_cluster_confirm_handler(fio_ipc_s *ipc) {
-  (void)ipc;
-  fio___test_ps2_cluster_master_confirms++;
-}
+/* Test: Basic Subscribe/Publish */
+static volatile size_t nf_basic_received = 0;
+static char nf_basic_channel[64];
+static char nf_basic_message[64];
 
-/* Worker message callback - reports to master */
-FIO_SFUNC void fio___test_ps2_cluster_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Report to master via IPC */
-  const char *confirm = "cluster_received";
-  fio_ipc_call(.call = fio___test_ps2_cluster_confirm_handler,
-               .data = FIO_IPC_DATA(
-                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
-}
+/* Test: Pattern Matching */
+static volatile size_t nf_pattern_received = 0;
 
-/* Worker startup - subscribes to channel */
-FIO_SFUNC void fio___test_ps2_cluster_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("cluster-test-channel"),
-                       .on_message = fio___test_ps2_cluster_on_message);
-}
+/* Test: Filter Namespace */
+static volatile size_t nf_filter0_received = 0;
+static volatile size_t nf_filter1_received = 0;
 
-/* Master publishes using cluster engine explicitly */
-FIO_SFUNC int fio___test_ps2_cluster_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  /* Explicitly use cluster engine */
-  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
-                     .channel = FIO_BUF_INFO1("cluster-test-channel"),
-                     .message = FIO_BUF_INFO1("cluster-message"));
-  return -1;
-}
+/* Test: Unsubscribe */
+static volatile size_t nf_unsub_received = 0;
+static volatile size_t nf_unsub_callback = 0;
 
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_cluster_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
+/* Test: Data Integrity */
+static volatile size_t nf_data_verified = 0;
 
-/* Verify */
-FIO_SFUNC void fio___test_ps2_cluster_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
+/* Test: Engine Comparison */
+static volatile size_t nf_cmp_ipc_received = 0;
+static volatile size_t nf_cmp_cluster_received = 0;
 
-  FIO_ASSERT(fio___test_ps2_cluster_master_confirms >= 1,
-             "[Master] Cluster test: should receive at least 1 confirmation "
-             "from worker (got %d)",
-             fio___test_ps2_cluster_master_confirms);
-}
+/* --- Channel Names (Unique per test) --- */
+#define NF_BASIC_CHANNEL   "nf-basic-ch"
+#define NF_PATTERN_CHANNEL "nf-news/*"
+#define NF_FILTER_CHANNEL  "nf-filter-ch"
+#define NF_UNSUB_CHANNEL   "nf-unsub-ch"
+#define NF_DATA_CHANNEL    "nf-data-ch"
+#define NF_CMP_CHANNEL     "nf-cmp-ch"
 
-FIO_SFUNC void fio___pubsub_test_cluster_engine_publish(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB cluster engine explicit publish.\n");
+/* --- Callbacks --- */
 
-  /* Reset */
-  fio___test_ps2_cluster_master_confirms = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_cluster_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_cluster_on_finish,
-                         NULL);
-
-  /* Publish after 200ms (give workers time to subscribe) */
-  fio_io_run_every(.fn = fio___test_ps2_cluster_publish,
-                   .every = 200,
-                   .repetitions = 1);
-
-  /* Timeout after 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_cluster_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 1 worker */
-  fio_io_start(1);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_cluster_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_cluster_on_finish,
-                            NULL);
-
-  fprintf(stderr,
-          "* FIO_PUBSUB cluster engine explicit publish test passed.\n");
-}
-
-/* *****************************************************************************
-Test 12: Cluster Engine Broadcast to Multiple Workers
-*****************************************************************************
-Tests that cluster engine broadcasts messages to all workers correctly.
-Similar to Test 7 but explicitly uses cluster engine.
-***************************************************************************** */
-
-static volatile int fio___test_ps2_cluster_bcast_confirms = 0;
-
-/* Master handler for worker confirmations */
-FIO_SFUNC void fio___test_ps2_cluster_bcast_confirm_handler(fio_ipc_s *ipc) {
-  (void)ipc;
-  fio___test_ps2_cluster_bcast_confirms++;
-}
-
-/* Worker message callback */
-FIO_SFUNC void fio___test_ps2_cluster_bcast_on_message(fio_pubsub_msg_s *msg) {
-  (void)msg;
-  /* Confirm to master */
-  char buf[64];
-  int len =
-      snprintf(buf, sizeof(buf), "cluster_worker_%d_received", fio_io_pid());
-  fio_ipc_call(.call = fio___test_ps2_cluster_bcast_confirm_handler,
-               .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
-}
-
-/* Worker startup */
-FIO_SFUNC void fio___test_ps2_cluster_bcast_worker_start(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_worker())
-    return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("cluster-broadcast-channel"),
-                       .on_message = fio___test_ps2_cluster_bcast_on_message);
-}
-
-/* Master publishes using cluster engine */
-FIO_SFUNC int fio___test_ps2_cluster_bcast_publish(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
-                     .channel = FIO_BUF_INFO1("cluster-broadcast-channel"),
-                     .message = FIO_BUF_INFO1("cluster-broadcast-message"));
-  return -1;
-}
-
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_cluster_bcast_timeout(void *ignr_1, void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_io_stop();
-  return -1;
-}
-
-/* Verify */
-FIO_SFUNC void fio___test_ps2_cluster_bcast_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* All 3 workers should confirm receipt */
-  FIO_ASSERT(fio___test_ps2_cluster_bcast_confirms >= 3,
-             "[Master] Cluster broadcast: should receive 3 confirmations (got "
-             "%d)",
-             fio___test_ps2_cluster_bcast_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_cluster_engine_broadcast(void) {
-  fprintf(stderr,
-          "* Testing FIO_PUBSUB cluster engine broadcast to multiple "
-          "workers.\n");
-
-  /* Reset */
-  fio___test_ps2_cluster_bcast_confirms = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_cluster_bcast_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_cluster_bcast_on_finish,
-                         NULL);
-
-  /* Publish after 300ms (give workers time to subscribe and IPC to complete) */
-  fio_io_run_every(.fn = fio___test_ps2_cluster_bcast_publish,
-                   .every = 300,
-                   .repetitions = 1);
-
-  /* Timeout at 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_cluster_bcast_timeout,
-                   .every = 2000,
-                   .repetitions = 1);
-
-  /* Start with 3 workers */
-  fio_io_start(3);
-
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_cluster_bcast_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_cluster_bcast_on_finish,
-                            NULL);
-
-  fprintf(stderr, "* FIO_PUBSUB cluster engine broadcast test passed.\n");
-}
-
-/* *****************************************************************************
-Test 13: Cluster vs IPC Engine Comparison
-*****************************************************************************
-Tests that both cluster and IPC engines deliver messages correctly.
-Publishes with both engines and verifies both are received.
-***************************************************************************** */
-
-static volatile int fio___test_ps2_cmp_ipc_received = 0;
-static volatile int fio___test_ps2_cmp_cluster_received = 0;
-
-/* Message callback - distinguishes by message content */
-FIO_SFUNC void fio___test_ps2_cmp_on_message(fio_pubsub_msg_s *msg) {
-  if (msg->message.len >= 3 && FIO_MEMCMP(msg->message.buf, "ipc", 3) == 0) {
-    fio___test_ps2_cmp_ipc_received++;
-  } else if (msg->message.len >= 7 &&
-             FIO_MEMCMP(msg->message.buf, "cluster", 7) == 0) {
-    fio___test_ps2_cmp_cluster_received++;
+FIO_SFUNC void nf_basic_on_message(fio_pubsub_msg_s *msg) {
+  fio_atomic_add(&nf_basic_received, 1);
+  if (msg->channel.len < 64) {
+    FIO_MEMCPY((void *)nf_basic_channel, msg->channel.buf, msg->channel.len);
+    nf_basic_channel[msg->channel.len] = '\0';
+  }
+  if (msg->message.len < 64) {
+    FIO_MEMCPY((void *)nf_basic_message, msg->message.buf, msg->message.len);
+    nf_basic_message[msg->message.len] = '\0';
   }
 }
 
-/* Subscribe */
-FIO_SFUNC int fio___test_ps2_cmp_subscribe(void *ignr_1, void *ignr_2) {
+FIO_SFUNC void nf_pattern_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&nf_pattern_received, 1);
+}
+
+FIO_SFUNC void nf_filter0_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&nf_filter0_received, 1);
+}
+
+FIO_SFUNC void nf_filter1_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&nf_filter1_received, 1);
+}
+
+FIO_SFUNC void nf_unsub_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&nf_unsub_received, 1);
+}
+
+FIO_SFUNC void nf_unsub_on_unsub(void *udata) {
+  (void)udata;
+  fio_atomic_add(&nf_unsub_callback, 1);
+}
+
+FIO_SFUNC void nf_data_on_message(fio_pubsub_msg_s *msg) {
+  /* Verify pattern: each byte = (index & 0xFF) */
+  int valid = 1;
+  for (size_t i = 0; i < msg->message.len && valid; ++i) {
+    if ((uint8_t)msg->message.buf[i] != (uint8_t)(i & 0xFF))
+      valid = 0;
+  }
+  if (valid && msg->message.len == 65536) {
+    fio_atomic_add(&nf_data_verified, 1);
+  }
+}
+
+FIO_SFUNC void nf_cmp_on_message(fio_pubsub_msg_s *msg) {
+  if (msg->message.len >= 3 && FIO_MEMCMP(msg->message.buf, "ipc", 3) == 0) {
+    fio_atomic_add(&nf_cmp_ipc_received, 1);
+  } else if (msg->message.len >= 7 &&
+             FIO_MEMCMP(msg->message.buf, "cluster", 7) == 0) {
+    fio_atomic_add(&nf_cmp_cluster_received, 1);
+  }
+}
+
+/* --- Timer: Subscribe all channels (50ms) --- */
+FIO_SFUNC int nf_subscribe_all(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("comparison-channel"),
-                       .on_message = fio___test_ps2_cmp_on_message);
+
+  /* Basic */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_BASIC_CHANNEL),
+                       .on_message = nf_basic_on_message);
+
+  /* Pattern */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_PATTERN_CHANNEL),
+                       .on_message = nf_pattern_on_message,
+                       .is_pattern = 1);
+
+  /* Filter (two subscriptions, same channel, different filters) */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_FILTER_CHANNEL),
+                       .on_message = nf_filter0_on_message,
+                       .filter = 0);
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_FILTER_CHANNEL),
+                       .on_message = nf_filter1_on_message,
+                       .filter = 1);
+
+  /* Unsubscribe test - subscribe now, unsubscribe later */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_UNSUB_CHANNEL),
+                       .on_message = nf_unsub_on_message,
+                       .on_unsubscribe = nf_unsub_on_unsub);
+
+  /* Data integrity */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_DATA_CHANNEL),
+                       .on_message = nf_data_on_message);
+
+  /* Engine comparison */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(NF_CMP_CHANNEL),
+                       .on_message = nf_cmp_on_message);
+
+  return -1; /* One-shot */
+}
+
+/* --- Timer: Unsubscribe for unsub test (100ms) --- */
+FIO_SFUNC int nf_unsubscribe(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  if (!fio_io_is_master())
+    return -1;
+  (void)fio_pubsub_unsubscribe(.channel = FIO_BUF_INFO1(NF_UNSUB_CHANNEL));
   return -1;
 }
 
-/* Publish with both engines */
-FIO_SFUNC int fio___test_ps2_cmp_publish(void *ignr_1, void *ignr_2) {
+/* --- Timer: Publish all messages (150ms) --- */
+FIO_SFUNC int nf_publish_all(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
+
+  /* Basic */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(NF_BASIC_CHANNEL),
+                     .message = FIO_BUF_INFO1("hello-world"));
+
+  /* Pattern - publish to channels that match and don't match */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("nf-news/sports"),
+                     .message = FIO_BUF_INFO1("sports-news"));
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("nf-news/tech"),
+                     .message = FIO_BUF_INFO1("tech-news"));
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("nf-weather/rain"),
+                     .message = FIO_BUF_INFO1("rain-forecast")); /* No match */
+
+  /* Filter - publish to filter 0 only */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(NF_FILTER_CHANNEL),
+                     .message = FIO_BUF_INFO1("filter0-message"),
+                     .filter = 0);
+
+  /* Unsubscribe test - publish after unsubscribe (should not receive) */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(NF_UNSUB_CHANNEL),
+                     .message = FIO_BUF_INFO1("after-unsub"));
+
+  /* Data integrity - 64KB message with pattern */
+  {
+    size_t size = 65536;
+    char *data = (char *)FIO_MEM_REALLOC(NULL, 0, size, 0);
+    if (data) {
+      for (size_t i = 0; i < size; ++i) {
+        data[i] = (char)(i & 0xFF);
+      }
+      fio_pubsub_publish(.channel = FIO_BUF_INFO1(NF_DATA_CHANNEL),
+                         .message = FIO_BUF_INFO2(data, size));
+      FIO_MEM_FREE(data, size);
+    }
+  }
+
+  /* Engine comparison - publish with both engines */
   fio_pubsub_publish(.engine = fio_pubsub_engine_ipc(),
-                     .channel = FIO_BUF_INFO1("comparison-channel"),
+                     .channel = FIO_BUF_INFO1(NF_CMP_CHANNEL),
                      .message = FIO_BUF_INFO1("ipc-message"));
   fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
-                     .channel = FIO_BUF_INFO1("comparison-channel"),
+                     .channel = FIO_BUF_INFO1(NF_CMP_CHANNEL),
                      .message = FIO_BUF_INFO1("cluster-message"));
-  return -1;
+
+  return -1; /* One-shot */
 }
 
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_cmp_timeout(void *ignr_1, void *ignr_2) {
+/* --- Timer: Timeout (500ms) --- */
+FIO_SFUNC int nf_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
@@ -1509,121 +439,372 @@ FIO_SFUNC int fio___test_ps2_cmp_timeout(void *ignr_1, void *ignr_2) {
   return -1;
 }
 
-/* Verify */
-FIO_SFUNC void fio___test_ps2_cmp_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
+/* --- Run Non-Forking Tests --- */
+FIO_SFUNC void fio___pubsub_test_nonforking_group(void) {
+  fprintf(stderr,
+          "* Testing FIO_PUBSUB non-forking tests (consolidated group).\n");
 
-  /* Both engines should deliver messages */
-  FIO_ASSERT(fio___test_ps2_cmp_ipc_received >= 1,
-             "[Master] IPC engine should deliver message (got %d)",
-             fio___test_ps2_cmp_ipc_received);
-  FIO_ASSERT(fio___test_ps2_cmp_cluster_received >= 1,
-             "[Master] Cluster engine should deliver message (got %d)",
-             fio___test_ps2_cmp_cluster_received);
-}
+  /* Reset all state */
+  nf_basic_received = 0;
+  FIO_MEMSET((void *)nf_basic_channel, 0, sizeof(nf_basic_channel));
+  FIO_MEMSET((void *)nf_basic_message, 0, sizeof(nf_basic_message));
+  nf_pattern_received = 0;
+  nf_filter0_received = 0;
+  nf_filter1_received = 0;
+  nf_unsub_received = 0;
+  nf_unsub_callback = 0;
+  nf_data_verified = 0;
+  nf_cmp_ipc_received = 0;
+  nf_cmp_cluster_received = 0;
 
-FIO_SFUNC void fio___pubsub_test_engine_comparison(void) {
-  fprintf(stderr, "* Testing FIO_PUBSUB cluster vs IPC engine comparison.\n");
+  /* Schedule timers:
+   * 50ms: Subscribe all
+   * 100ms: Unsubscribe (for unsub test)
+   * 150ms: Publish all
+   * 500ms: Timeout
+   */
+  fio_io_run_every(.fn = nf_subscribe_all, .every = 50, .repetitions = 1);
+  fio_io_run_every(.fn = nf_unsubscribe, .every = 100, .repetitions = 1);
+  fio_io_run_every(.fn = nf_publish_all, .every = 150, .repetitions = 1);
+  fio_io_run_every(.fn = nf_timeout, .every = 500, .repetitions = 1);
 
-  /* Reset */
-  fio___test_ps2_cmp_ipc_received = 0;
-  fio___test_ps2_cmp_cluster_received = 0;
-
-  /* Register callbacks */
-  fio_state_callback_add(FIO_CALL_ON_STOP, fio___test_ps2_cmp_on_finish, NULL);
-
-  /* Subscribe at 50ms, publish at 100ms, stop at 500ms */
-  fio_io_run_every(.fn = fio___test_ps2_cmp_subscribe,
-                   .every = 50,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_cmp_publish,
-                   .every = 100,
-                   .repetitions = 1);
-  fio_io_run_every(.fn = fio___test_ps2_cmp_timeout,
-                   .every = 500,
-                   .repetitions = 1);
-
-  /* Master only */
+  /* Start reactor with 0 workers (master only) */
   fio_io_start(0);
 
-  /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_cmp_on_finish,
-                            NULL);
+  /* Verify results */
+  fprintf(stderr, "  - Basic subscribe/publish: ");
+  FIO_ASSERT(nf_basic_received >= 1,
+             "Should receive at least 1 message (got %zu)",
+             nf_basic_received);
+  FIO_ASSERT(FIO_STRLEN(nf_basic_channel) == 11 &&
+                 FIO_MEMCMP(nf_basic_channel, NF_BASIC_CHANNEL, 11) == 0,
+             "Channel should be '%s' (got '%s')",
+             NF_BASIC_CHANNEL,
+             nf_basic_channel);
+  FIO_ASSERT(FIO_STRLEN(nf_basic_message) == 11 &&
+                 FIO_MEMCMP(nf_basic_message, "hello-world", 11) == 0,
+             "Message should be 'hello-world' (got '%s')",
+             nf_basic_message);
+  fprintf(stderr, "PASS\n");
 
-  fprintf(stderr, "* FIO_PUBSUB engine comparison test passed.\n");
+  fprintf(stderr, "  - Pattern matching: ");
+  FIO_ASSERT(nf_pattern_received == 2,
+             "Pattern should match exactly 2 messages (got %zu)",
+             nf_pattern_received);
+  fprintf(stderr, "PASS\n");
+
+  fprintf(stderr, "  - Filter namespace: ");
+  FIO_ASSERT(nf_filter0_received == 1,
+             "Filter 0 should receive exactly 1 message (got %zu)",
+             nf_filter0_received);
+  FIO_ASSERT(nf_filter1_received == 0,
+             "Filter 1 should receive 0 messages (got %zu)",
+             nf_filter1_received);
+  fprintf(stderr, "PASS\n");
+
+  fprintf(stderr, "  - Unsubscribe: ");
+  FIO_ASSERT(nf_unsub_received == 0,
+             "Should not receive messages after unsubscribe (got %zu)",
+             nf_unsub_received);
+  FIO_ASSERT(nf_unsub_callback == 1,
+             "Unsubscribe callback should be called once (got %zu)",
+             nf_unsub_callback);
+  fprintf(stderr, "PASS\n");
+
+  fprintf(stderr, "  - Data integrity (64KB): ");
+  FIO_ASSERT(nf_data_verified == 1,
+             "64KB message data integrity should be verified (got %zu)",
+             nf_data_verified);
+  fprintf(stderr, "PASS\n");
+
+  fprintf(stderr, "  - Engine comparison: ");
+  FIO_ASSERT(nf_cmp_ipc_received >= 1,
+             "IPC engine should deliver message (got %zu)",
+             nf_cmp_ipc_received);
+  FIO_ASSERT(nf_cmp_cluster_received >= 1,
+             "Cluster engine should deliver message (got %zu)",
+             nf_cmp_cluster_received);
+  fprintf(stderr, "PASS\n");
+
+  fprintf(stderr, "* FIO_PUBSUB non-forking tests passed.\n");
 }
 
 /* *****************************************************************************
-Test 14: Worker Publishes via Cluster Engine
+Forking Integration Tests - Consolidated
 *****************************************************************************
-Tests that workers can publish using the cluster engine and messages
-are delivered to master and other workers.
+All multi-process tests run under a single fio_io_start(3) call.
+Each test uses unique channel names to avoid collisions.
+Uses atomic counters for cross-process result tracking via IPC.
+Accounts for 250ms+ worker startup delay.
 ***************************************************************************** */
 
-static volatile int fio___test_ps2_wcluster_master_received = 0;
-static volatile int fio___test_ps2_wcluster_worker_confirms = 0;
+/* --- Test State (Atomic Counters) --- */
 
-/* Master handler for worker confirmations */
-FIO_SFUNC void fio___test_ps2_wcluster_confirm_handler(fio_ipc_s *ipc) {
+/* Test: Worker Subscribe (master publishes, worker receives) */
+static volatile size_t f_wsub_confirms = 0;
+
+/* Test: Worker Publish (worker publishes, master receives) */
+static volatile size_t f_wpub_master_received = 0;
+static volatile size_t f_wpub_worker_confirms = 0;
+
+/* Test: Broadcast (master publishes, all workers receive) */
+static volatile size_t f_bcast_confirms = 0;
+
+/* Test: History Replay (worker subscribes with replay_since) */
+static volatile size_t f_hist_confirms = 0;
+
+/* Test: Cluster Engine Publish (master publishes via cluster engine) */
+static volatile size_t f_cluster_confirms = 0;
+
+/* Test: Cluster Broadcast (master publishes via cluster, all workers receive)
+ */
+static volatile size_t f_cluster_bcast_confirms = 0;
+
+/* Test: Worker Cluster Publish (worker publishes via cluster engine) */
+static volatile size_t f_wcluster_master_received = 0;
+static volatile size_t f_wcluster_worker_confirms = 0;
+
+/* --- Channel Names (Unique per test) --- */
+#define F_WSUB_CHANNEL          "f-wsub-ch"
+#define F_WPUB_CHANNEL          "f-wpub-ch"
+#define F_BCAST_CHANNEL         "f-bcast-ch"
+#define F_HIST_CHANNEL          "f-hist-ch"
+#define F_CLUSTER_CHANNEL       "f-cluster-ch"
+#define F_CLUSTER_BCAST_CHANNEL "f-cluster-bcast-ch"
+#define F_WCLUSTER_CHANNEL      "f-wcluster-ch"
+
+/* --- IPC Handlers (run on master) --- */
+
+FIO_SFUNC void f_wsub_confirm_handler(fio_ipc_s *ipc) {
   (void)ipc;
-  fio___test_ps2_wcluster_worker_confirms++;
+  fio_atomic_add(&f_wsub_confirms, 1);
 }
 
-/* Master message callback */
-FIO_SFUNC void fio___test_ps2_wcluster_master_on_message(
-    fio_pubsub_msg_s *msg) {
-  (void)msg;
-  fio___test_ps2_wcluster_master_received++;
+FIO_SFUNC void f_wpub_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_wpub_worker_confirms, 1);
 }
 
-/* Worker message callback - reports to master */
-FIO_SFUNC void fio___test_ps2_wcluster_worker_on_message(
-    fio_pubsub_msg_s *msg) {
+FIO_SFUNC void f_bcast_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_bcast_confirms, 1);
+}
+
+FIO_SFUNC void f_hist_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_hist_confirms, 1);
+}
+
+FIO_SFUNC void f_cluster_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_cluster_confirms, 1);
+}
+
+FIO_SFUNC void f_cluster_bcast_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_cluster_bcast_confirms, 1);
+}
+
+FIO_SFUNC void f_wcluster_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
+  fio_atomic_add(&f_wcluster_worker_confirms, 1);
+}
+
+/* --- Worker Message Callbacks --- */
+
+FIO_SFUNC void f_wsub_on_message(fio_pubsub_msg_s *msg) {
   (void)msg;
-  /* Report to master */
-  const char *confirm = "worker_cluster_received";
-  fio_ipc_call(.call = fio___test_ps2_wcluster_confirm_handler,
+  const char *confirm = "wsub_received";
+  fio_ipc_call(.call = f_wsub_confirm_handler,
                .data = FIO_IPC_DATA(
                    FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
 }
 
-/* Worker startup - subscribes to channel (same pattern as Test 3) */
-FIO_SFUNC void fio___test_ps2_wcluster_worker_start(void *ignr_) {
+FIO_SFUNC void f_wpub_worker_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  const char *confirm = "wpub_worker_received";
+  fio_ipc_call(.call = f_wpub_confirm_handler,
+               .data = FIO_IPC_DATA(
+                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
+}
+
+FIO_SFUNC void f_wpub_master_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&f_wpub_master_received, 1);
+}
+
+FIO_SFUNC void f_bcast_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  char buf[64];
+  int len = snprintf(buf, sizeof(buf), "bcast_worker_%d", fio_io_pid());
+  fio_ipc_call(.call = f_bcast_confirm_handler,
+               .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
+}
+
+FIO_SFUNC void f_hist_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  const char *confirm = "hist_received";
+  fio_ipc_call(.call = f_hist_confirm_handler,
+               .data = FIO_IPC_DATA(
+                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
+}
+
+FIO_SFUNC void f_cluster_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  const char *confirm = "cluster_received";
+  fio_ipc_call(.call = f_cluster_confirm_handler,
+               .data = FIO_IPC_DATA(
+                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
+}
+
+FIO_SFUNC void f_cluster_bcast_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  char buf[64];
+  int len = snprintf(buf, sizeof(buf), "cluster_bcast_worker_%d", fio_io_pid());
+  fio_ipc_call(.call = f_cluster_bcast_confirm_handler,
+               .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
+}
+
+FIO_SFUNC void f_wcluster_worker_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  const char *confirm = "wcluster_worker_received";
+  fio_ipc_call(.call = f_wcluster_confirm_handler,
+               .data = FIO_IPC_DATA(
+                   FIO_BUF_INFO2((char *)confirm, FIO_STRLEN(confirm))));
+}
+
+FIO_SFUNC void f_wcluster_master_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
+  fio_atomic_add(&f_wcluster_master_received, 1);
+}
+
+/* --- Worker Startup (FIO_CALL_ON_START) --- */
+FIO_SFUNC void f_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-cluster-channel"),
-                       .on_message = fio___test_ps2_wcluster_worker_on_message);
+
+  /* Worker Subscribe test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_WSUB_CHANNEL),
+                       .on_message = f_wsub_on_message);
+
+  /* Worker Publish test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_WPUB_CHANNEL),
+                       .on_message = f_wpub_worker_on_message);
+
+  /* Broadcast test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_BCAST_CHANNEL),
+                       .on_message = f_bcast_on_message);
+
+  /* Cluster engine test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_CLUSTER_CHANNEL),
+                       .on_message = f_cluster_on_message);
+
+  /* Cluster broadcast test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_CLUSTER_BCAST_CHANNEL),
+                       .on_message = f_cluster_bcast_on_message);
+
+  /* Worker cluster publish test */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_WCLUSTER_CHANNEL),
+                       .on_message = f_wcluster_worker_on_message);
 }
 
-/* Master subscribes via timer (50ms after start) */
-FIO_SFUNC int fio___test_ps2_wcluster_master_subscribe(void *ignr_1,
-                                                       void *ignr_2) {
-  (void)ignr_1, (void)ignr_2;
-  if (!fio_io_is_master())
-    return -1;
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-cluster-channel"),
-                       .on_message = fio___test_ps2_wcluster_master_on_message);
-  return -1;
-}
-
-/* Worker publishes using cluster engine - each worker publishes once */
-FIO_SFUNC int fio___test_ps2_wcluster_worker_publish(void *ignr_1,
-                                                     void *ignr_2) {
+/* --- Timer: Worker subscribes to history channel (after master publishes) ---
+ */
+FIO_SFUNC int f_hist_worker_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
-                     .channel = FIO_BUF_INFO1("worker-cluster-channel"),
-                     .message = FIO_BUF_INFO1("worker-cluster-message"));
+  /* Subscribe with replay_since = 1 (replay all history) */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_HIST_CHANNEL),
+                       .on_message = f_hist_on_message,
+                       .replay_since = 1);
   return -1;
 }
 
-/* Timeout */
-FIO_SFUNC int fio___test_ps2_wcluster_timeout(void *ignr_1, void *ignr_2) {
+/* --- Timer: Master subscribes (WORKER_STARTUP_DELAY_MS) --- */
+FIO_SFUNC int f_master_subscribe(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  if (!fio_io_is_master())
+    return -1;
+
+  /* Worker Publish test - master subscribes */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_WPUB_CHANNEL),
+                       .on_message = f_wpub_master_on_message);
+
+  /* Worker Cluster Publish test - master subscribes */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(F_WCLUSTER_CHANNEL),
+                       .on_message = f_wcluster_master_on_message);
+
+  return -1;
+}
+
+/* --- Timer: Master publishes history messages (100ms - before workers
+ * subscribe) --- */
+FIO_SFUNC int f_hist_publish(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  if (!fio_io_is_master())
+    return -1;
+
+  /* Publish 3 messages to history */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_HIST_CHANNEL),
+                     .message = FIO_BUF_INFO1("history-msg-1"));
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_HIST_CHANNEL),
+                     .message = FIO_BUF_INFO1("history-msg-2"));
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_HIST_CHANNEL),
+                     .message = FIO_BUF_INFO1("history-msg-3"));
+  return -1;
+}
+
+/* --- Timer: Master publishes to workers (WORKER_STARTUP_DELAY_MS +
+ * MESSAGE_DELIVERY_MS) --- */
+FIO_SFUNC int f_master_publish(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  if (!fio_io_is_master())
+    return -1;
+
+  /* Worker Subscribe test */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_WSUB_CHANNEL),
+                     .message = FIO_BUF_INFO1("master-message"));
+
+  /* Broadcast test */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_BCAST_CHANNEL),
+                     .message = FIO_BUF_INFO1("broadcast-message"));
+
+  /* Cluster engine test */
+  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
+                     .channel = FIO_BUF_INFO1(F_CLUSTER_CHANNEL),
+                     .message = FIO_BUF_INFO1("cluster-message"));
+
+  /* Cluster broadcast test */
+  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
+                     .channel = FIO_BUF_INFO1(F_CLUSTER_BCAST_CHANNEL),
+                     .message = FIO_BUF_INFO1("cluster-broadcast-message"));
+
+  return -1;
+}
+
+/* --- Timer: Worker publishes (WORKER_STARTUP_DELAY_MS + 2*MESSAGE_DELIVERY_MS)
+ * --- */
+FIO_SFUNC int f_worker_publish(void *ignr_1, void *ignr_2) {
+  (void)ignr_1, (void)ignr_2;
+  if (!fio_io_is_worker())
+    return -1;
+
+  /* Worker Publish test */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1(F_WPUB_CHANNEL),
+                     .message = FIO_BUF_INFO1("worker-message"));
+
+  /* Worker Cluster Publish test */
+  fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
+                     .channel = FIO_BUF_INFO1(F_WCLUSTER_CHANNEL),
+                     .message = FIO_BUF_INFO1("worker-cluster-message"));
+
+  return -1;
+}
+
+/* --- Timer: Timeout --- */
+FIO_SFUNC int f_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
@@ -1631,69 +812,125 @@ FIO_SFUNC int fio___test_ps2_wcluster_timeout(void *ignr_1, void *ignr_2) {
   return -1;
 }
 
-/* Verify */
-FIO_SFUNC void fio___test_ps2_wcluster_on_finish(void *ignr_) {
-  (void)ignr_;
-  if (!fio_io_is_master())
-    return;
-
-  /* Master should receive the message */
-  FIO_ASSERT(fio___test_ps2_wcluster_master_received >= 1,
-             "[Master] Worker cluster publish: should receive at least 1 "
-             "message (got %d)",
-             fio___test_ps2_wcluster_master_received);
-
-  /* Other worker should also receive */
-  FIO_ASSERT(fio___test_ps2_wcluster_worker_confirms >= 1,
-             "[Master] Worker cluster publish: should receive worker "
-             "confirmation (got %d)",
-             fio___test_ps2_wcluster_worker_confirms);
-}
-
-FIO_SFUNC void fio___pubsub_test_worker_cluster_publish(void) {
+/* --- Run Forking Tests --- */
+FIO_SFUNC void fio___pubsub_test_forking_group(void) {
   fprintf(stderr,
-          "* Testing FIO_PUBSUB worker publishes via cluster engine.\n");
+          "* Testing FIO_PUBSUB forking tests (consolidated group, %d "
+          "workers).\n",
+          FORKING_TEST_WORKERS);
 
-  /* Reset */
-  fio___test_ps2_wcluster_master_received = 0;
-  fio___test_ps2_wcluster_worker_confirms = 0;
+  /* Reset all state */
+  f_wsub_confirms = 0;
+  f_wpub_master_received = 0;
+  f_wpub_worker_confirms = 0;
+  f_bcast_confirms = 0;
+  f_hist_confirms = 0;
+  f_cluster_confirms = 0;
+  f_cluster_bcast_confirms = 0;
+  f_wcluster_master_received = 0;
+  f_wcluster_worker_confirms = 0;
 
-  /* Register callbacks - workers subscribe via FIO_CALL_ON_START (same as Test
-   * 3) */
-  fio_state_callback_add(FIO_CALL_ON_START,
-                         fio___test_ps2_wcluster_worker_start,
-                         NULL);
-  fio_state_callback_add(FIO_CALL_ON_STOP,
-                         fio___test_ps2_wcluster_on_finish,
-                         NULL);
+  /* Attach history manager for replay_since to work */
+  fio_pubsub_history_attach((fio_pubsub_history_s *)fio_pubsub_history_cache(0),
+                            100);
 
-  /* Master subscribes at 150ms (give workers time to subscribe first) */
-  fio_io_run_every(.fn = fio___test_ps2_wcluster_master_subscribe,
-                   .every = 150,
+  /* Register worker startup callback */
+  fio_state_callback_add(FIO_CALL_ON_START, f_worker_start, NULL);
+
+  /* Schedule timers:
+   * Timeline accounts for 250ms+ worker startup delay
+   *
+   * 100ms: Master publishes history messages (before workers subscribe)
+   * 300ms (WORKER_STARTUP_DELAY_MS): Master subscribes, workers ready
+   * 400ms: Master publishes to workers
+   * 500ms: Workers subscribe to history (with replay_since)
+   * 600ms: Workers publish
+   * 3000ms: Timeout
+   */
+  fio_io_run_every(.fn = f_hist_publish, .every = 100, .repetitions = 1);
+
+  fio_io_run_every(.fn = f_master_subscribe,
+                   .every = WORKER_STARTUP_DELAY_MS,
                    .repetitions = 1);
 
-  /* Worker publishes at 500ms (gives time for subscriptions to be active) */
-  fio_io_run_every(.fn = fio___test_ps2_wcluster_worker_publish,
-                   .every = 500,
+  fio_io_run_every(.fn = f_master_publish,
+                   .every = WORKER_STARTUP_DELAY_MS + MESSAGE_DELIVERY_MS,
                    .repetitions = 1);
 
-  /* Timeout at 2 seconds */
-  fio_io_run_every(.fn = fio___test_ps2_wcluster_timeout,
-                   .every = 2000,
+  fio_io_run_every(.fn = f_hist_worker_subscribe,
+                   .every = WORKER_STARTUP_DELAY_MS + MESSAGE_DELIVERY_MS + 100,
                    .repetitions = 1);
 
-  /* Start with 2 workers */
-  fio_io_start(2);
+  fio_io_run_every(.fn = f_worker_publish,
+                   .every = WORKER_STARTUP_DELAY_MS + 2 * MESSAGE_DELIVERY_MS,
+                   .repetitions = 1);
+
+  fio_io_run_every(.fn = f_timeout, .every = TEST_TIMEOUT_MS, .repetitions = 1);
+
+  /* Start reactor with workers */
+  fio_io_start(FORKING_TEST_WORKERS);
 
   /* Cleanup */
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___test_ps2_wcluster_worker_start,
-                            NULL);
-  fio_state_callback_remove(FIO_CALL_ON_STOP,
-                            fio___test_ps2_wcluster_on_finish,
-                            NULL);
+  fio_state_callback_remove(FIO_CALL_ON_START, f_worker_start, NULL);
 
-  fprintf(stderr, "* FIO_PUBSUB worker cluster publish test passed.\n");
+  /* Verify results */
+  fprintf(stderr, "  - Worker subscribe (master publishes): ");
+  FIO_ASSERT(f_wsub_confirms >= 1,
+             "Should receive at least 1 confirmation from worker (got %zu)",
+             f_wsub_confirms);
+  fprintf(stderr, "PASS (got %zu confirms)\n", f_wsub_confirms);
+
+  fprintf(stderr, "  - Worker publish (worker publishes, master receives): ");
+  FIO_ASSERT(f_wpub_master_received >= 1,
+             "Master should receive at least 1 message (got %zu)",
+             f_wpub_master_received);
+  FIO_ASSERT(f_wpub_worker_confirms >= 1,
+             "Should receive worker confirmation (got %zu)",
+             f_wpub_worker_confirms);
+  fprintf(stderr,
+          "PASS (master: %zu, workers: %zu)\n",
+          f_wpub_master_received,
+          f_wpub_worker_confirms);
+
+  fprintf(stderr, "  - Broadcast (master publishes, all workers receive): ");
+  FIO_ASSERT(f_bcast_confirms >= FORKING_TEST_WORKERS,
+             "Should receive %d confirmations (got %zu)",
+             FORKING_TEST_WORKERS,
+             f_bcast_confirms);
+  fprintf(stderr, "PASS (got %zu confirms)\n", f_bcast_confirms);
+
+  fprintf(stderr, "  - History replay (worker subscribes with replay_since): ");
+  FIO_ASSERT(f_hist_confirms >= 3,
+             "Worker should receive at least 3 history messages (got %zu)",
+             f_hist_confirms);
+  fprintf(stderr, "PASS (got %zu confirms)\n", f_hist_confirms);
+
+  fprintf(stderr, "  - Cluster engine publish: ");
+  FIO_ASSERT(f_cluster_confirms >= 1,
+             "Should receive at least 1 confirmation from worker (got %zu)",
+             f_cluster_confirms);
+  fprintf(stderr, "PASS (got %zu confirms)\n", f_cluster_confirms);
+
+  fprintf(stderr, "  - Cluster broadcast: ");
+  FIO_ASSERT(f_cluster_bcast_confirms >= FORKING_TEST_WORKERS,
+             "Should receive %d confirmations (got %zu)",
+             FORKING_TEST_WORKERS,
+             f_cluster_bcast_confirms);
+  fprintf(stderr, "PASS (got %zu confirms)\n", f_cluster_bcast_confirms);
+
+  fprintf(stderr, "  - Worker cluster publish: ");
+  FIO_ASSERT(f_wcluster_master_received >= 1,
+             "Master should receive at least 1 message (got %zu)",
+             f_wcluster_master_received);
+  FIO_ASSERT(f_wcluster_worker_confirms >= 1,
+             "Should receive worker confirmation (got %zu)",
+             f_wcluster_worker_confirms);
+  fprintf(stderr,
+          "PASS (master: %zu, workers: %zu)\n",
+          f_wcluster_master_received,
+          f_wcluster_worker_confirms);
+
+  fprintf(stderr, "* FIO_PUBSUB forking tests passed.\n");
 }
 
 /* *****************************************************************************
@@ -1704,30 +941,17 @@ int main(int argc, char const *argv[]) {
   if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_INFO)
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_WARNING;
 
-  /* Unit tests */
+  /* Unit tests (no fio_io_start) */
   fio___pubsub_test_types();
   fio___pubsub_test_env_type();
   fio___pubsub_test_history_api();
   fio___pubsub_test_cluster_engine_unit();
 
-  /* Integration tests (master only) */
-  fio___pubsub_test_basic();
-  fio___pubsub_test_pattern();
-  fio___pubsub_test_filter();
-  fio___pubsub_test_unsubscribe();
-  fio___pubsub_test_data_integrity();
-  fio___pubsub_test_engine_comparison();
+  /* Non-forking integration tests (single fio_io_start(0)) */
+  fio___pubsub_test_nonforking_group();
 
-  /* Multi-process tests */
-  fio___pubsub_test_worker_subscribe();
-  fio___pubsub_test_worker_publish();
-  fio___pubsub_test_broadcast();
-  fio___pubsub_test_worker_history_replay();
-
-  /* Cluster engine tests */
-  fio___pubsub_test_cluster_engine_publish();
-  fio___pubsub_test_cluster_engine_broadcast();
-  fio___pubsub_test_worker_cluster_publish();
+  /* Forking integration tests (single fio_io_start(3)) */
+  fio___pubsub_test_forking_group();
 
   (void)argc;
   (void)argv;

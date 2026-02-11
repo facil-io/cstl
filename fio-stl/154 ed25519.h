@@ -1772,7 +1772,7 @@ FIO_SFUNC void fio___ge_double_scalarmult(fio___ge_p3_s r,
       fio___ge_p3_add(points_a[i], (const fio___gf_s *)A);
     }
     for (int i = 0; i < 16; i++)
-      fio___ge_p3_to_pniels(&table_a[i], points_a[i]);
+      fio___ge_p3_to_pniels(&table_a[i], (const fio___gf_s *)points_a[i]);
   }
 
   /* r = identity point (0, 1, 1, 0) */
