@@ -321,17 +321,67 @@ FIO_IFUNC void fio___x86_ghash_precompute(__m128i h, __m128i *htbl) {
   htbl[3] = fio___ghash_mult_pclmul(htbl[1], htbl[1]); /* H⁴ */
 }
 
-/* 4-way parallel GHASH: compute (X0·H⁴) ^ (X1·H³) ^ (X2·H²) ^ (X3·H) */
+/* 4-way parallel GHASH with deferred reduction.
+ * Accumulates Karatsuba partial products across all 4 multiplies,
+ * then performs a single reduction. Saves 3 reductions per 4-block batch. */
 FIO_IFUNC __m128i fio___x86_ghash_mult4(__m128i x0,
                                         __m128i x1,
                                         __m128i x2,
                                         __m128i x3,
                                         const __m128i *htbl) {
-  __m128i r0 = fio___ghash_mult_pclmul(x0, htbl[3]); /* X0 · H⁴ */
-  __m128i r1 = fio___ghash_mult_pclmul(x1, htbl[2]); /* X1 · H³ */
-  __m128i r2 = fio___ghash_mult_pclmul(x2, htbl[1]); /* X2 · H² */
-  __m128i r3 = fio___ghash_mult_pclmul(x3, htbl[0]); /* X3 · H  */
-  return _mm_xor_si128(_mm_xor_si128(r0, r1), _mm_xor_si128(r2, r3));
+  /* Block 0: x0 * H^4 */
+  __m128i lo = _mm_clmulepi64_si128(x0, htbl[3], 0x00);
+  __m128i hi = _mm_clmulepi64_si128(x0, htbl[3], 0x11);
+  __m128i m1 = _mm_clmulepi64_si128(x0, htbl[3], 0x01);
+  __m128i m2 = _mm_clmulepi64_si128(x0, htbl[3], 0x10);
+
+  /* Block 1: x1 * H^3 — accumulate via XOR */
+  lo = _mm_xor_si128(lo, _mm_clmulepi64_si128(x1, htbl[2], 0x00));
+  hi = _mm_xor_si128(hi, _mm_clmulepi64_si128(x1, htbl[2], 0x11));
+  m1 = _mm_xor_si128(m1, _mm_clmulepi64_si128(x1, htbl[2], 0x01));
+  m2 = _mm_xor_si128(m2, _mm_clmulepi64_si128(x1, htbl[2], 0x10));
+
+  /* Block 2: x2 * H^2 */
+  lo = _mm_xor_si128(lo, _mm_clmulepi64_si128(x2, htbl[1], 0x00));
+  hi = _mm_xor_si128(hi, _mm_clmulepi64_si128(x2, htbl[1], 0x11));
+  m1 = _mm_xor_si128(m1, _mm_clmulepi64_si128(x2, htbl[1], 0x01));
+  m2 = _mm_xor_si128(m2, _mm_clmulepi64_si128(x2, htbl[1], 0x10));
+
+  /* Block 3: x3 * H^1 */
+  lo = _mm_xor_si128(lo, _mm_clmulepi64_si128(x3, htbl[0], 0x00));
+  hi = _mm_xor_si128(hi, _mm_clmulepi64_si128(x3, htbl[0], 0x11));
+  m1 = _mm_xor_si128(m1, _mm_clmulepi64_si128(x3, htbl[0], 0x01));
+  m2 = _mm_xor_si128(m2, _mm_clmulepi64_si128(x3, htbl[0], 0x10));
+
+  /* Single Karatsuba combination on accumulated sums */
+  __m128i mid = _mm_xor_si128(m1, m2);
+  lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
+  hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
+
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 */
+  __m128i tmp6 = _mm_srli_epi32(lo, 31);
+  __m128i tmp7 = _mm_srli_epi32(lo, 30);
+  __m128i tmp8 = _mm_srli_epi32(lo, 25);
+  tmp6 = _mm_xor_si128(tmp6, tmp7);
+  tmp6 = _mm_xor_si128(tmp6, tmp8);
+  tmp7 = _mm_shuffle_epi32(tmp6, 0x93);
+  tmp6 = _mm_and_si128(tmp7, _mm_set_epi32(0, ~0, ~0, ~0));
+  tmp7 = _mm_and_si128(tmp7, _mm_set_epi32(~0, 0, 0, 0));
+  lo = _mm_xor_si128(lo, tmp6);
+  hi = _mm_xor_si128(hi, tmp7);
+
+  __m128i tmp9 = _mm_slli_epi32(lo, 1);
+  lo = _mm_xor_si128(lo, tmp9);
+  tmp9 = _mm_slli_epi32(lo, 2);
+  lo = _mm_xor_si128(lo, tmp9);
+  tmp9 = _mm_slli_epi32(lo, 7);
+  lo = _mm_xor_si128(lo, tmp9);
+  tmp7 = _mm_srli_si128(lo, 12);
+  lo = _mm_slli_si128(lo, 4);
+  hi = _mm_xor_si128(hi, lo);
+  hi = _mm_xor_si128(hi, tmp7);
+
+  return hi;
 }
 
 /* Increment counter (last 32 bits, big-endian) */
@@ -360,8 +410,11 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___x86_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___x86_ghash_precompute(h, htbl);
+  else
+    htbl[0] = h; /* Only H^1 needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
@@ -509,8 +562,11 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___x86_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___x86_ghash_precompute(h, htbl);
+  else
+    htbl[0] = h; /* Only H^1 needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
@@ -656,8 +712,11 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___x86_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___x86_ghash_precompute(h, htbl);
+  else
+    htbl[0] = h; /* Only H^1 needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
@@ -815,8 +874,11 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___x86_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___x86_ghash_precompute(h, htbl);
+  else
+    htbl[0] = h; /* Only H^1 needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
@@ -962,36 +1024,41 @@ ARM Crypto Extensions Implementation
 ***************************************************************************** */
 #elif FIO___HAS_ARM_AES_INTRIN
 
-/* AES S-box for key expansion SubWord */
-static const uint8_t FIO___AES_SBOX_ARM[256] = {
-    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b,
-    0xfe, 0xd7, 0xab, 0x76, 0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0,
-    0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0, 0xb7, 0xfd, 0x93, 0x26,
-    0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
-    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2,
-    0xeb, 0x27, 0xb2, 0x75, 0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0,
-    0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84, 0x53, 0xd1, 0x00, 0xed,
-    0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
-    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f,
-    0x50, 0x3c, 0x9f, 0xa8, 0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5,
-    0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2, 0xcd, 0x0c, 0x13, 0xec,
-    0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
-    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14,
-    0xde, 0x5e, 0x0b, 0xdb, 0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c,
-    0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79, 0xe7, 0xc8, 0x37, 0x6d,
-    0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
-    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f,
-    0x4b, 0xbd, 0x8b, 0x8a, 0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e,
-    0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e, 0xe1, 0xf8, 0x98, 0x11,
-    0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
-    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f,
-    0xb0, 0x54, 0xbb, 0x16};
-
+/**
+ * Constant-time SubWord using ARM AES hardware instructions.
+ *
+ * vaeseq_u8(data, zero) computes ShiftRows(SubBytes(data)).
+ * By placing the 4 input bytes at positions {0, 5, 10, 15} (the diagonal),
+ * ShiftRows maps them to column 0 (bytes {0, 1, 2, 3}).
+ * This eliminates the S-box lookup table (cache-timing side channel).
+ */
 FIO_IFUNC uint32_t fio___arm_subword(uint32_t w) {
-  return ((uint32_t)FIO___AES_SBOX_ARM[(w >> 0) & 0xFF] << 0) |
-         ((uint32_t)FIO___AES_SBOX_ARM[(w >> 8) & 0xFF] << 8) |
-         ((uint32_t)FIO___AES_SBOX_ARM[(w >> 16) & 0xFF] << 16) |
-         ((uint32_t)FIO___AES_SBOX_ARM[(w >> 24) & 0xFF] << 24);
+  /* Place bytes on the diagonal: positions {0, 5, 10, 15}.
+   * Index 0xFF in vqtbl1q_u8 produces 0 (out-of-range → zero). */
+  static const uint8_t diag_idx[16] = {0,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       1,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       2,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       0xFF,
+                                       3};
+  /* Broadcast the 4-byte word into lane 0 of a 128-bit register */
+  uint8x16_t src = vreinterpretq_u8_u32(vdupq_n_u32(w));
+  /* Scatter to diagonal using TBL (out-of-range indices → 0) */
+  uint8x16_t block = vqtbl1q_u8(src, vld1q_u8(diag_idx));
+  /* vaeseq_u8 computes ShiftRows(SubBytes(block XOR zero)) */
+  block = vaeseq_u8(block, vdupq_n_u8(0));
+  /* Result: SubBytes output is now in bytes {0, 1, 2, 3} */
+  return vgetq_lane_u32(vreinterpretq_u32_u8(block), 0);
 }
 
 FIO_IFUNC uint32_t fio___arm_rotword(uint32_t w) {
@@ -1139,36 +1206,117 @@ FIO_IFUNC uint8x16_t fio___arm_aes256_encrypt(uint8x16_t block,
 
 /* GHASH multiplication in GF(2^128) using ARM PMULL
  *
- * GCM bit ordering: byte[0] bit 7 = x^0, byte[15] bit 0 = x^127
- * GCM byte ordering: bytes 0-7 are HIGH (x^0 to x^63), bytes 8-15 are LOW (x^64
- * to x^127)
+ * All internal GHASH operations work in "bit-reversed" domain:
+ * - H powers are stored pre-reversed (vrbitq_u8 applied once at precompute)
+ * - The GHASH accumulator (tag) stays in bit-reversed form between iterations
+ * - Input data blocks are reversed on entry (unavoidable)
+ * - Final vrbitq_u8 converts back to GCM format only when extracting the tag
  *
- * After vrbitq_u8:
- * - byte[0] bit 0 = x^0, byte[7] bit 7 = x^63 (lane 0 = x^0 to x^63)
- * - byte[8] bit 0 = x^64, byte[15] bit 7 = x^127 (lane 1 = x^64 to x^127)
+ * This eliminates redundant vrbitq_u8 calls: instead of 3 per multiply
+ * (2 inputs + 1 output), we only reverse input data blocks.
  *
- * So lane 0 contains LOW powers (x^0 to x^63) and lane 1 contains HIGH powers
- * (x^64 to x^127). This is the OPPOSITE of what we want for standard polynomial
- * multiplication!
+ * GF(2^128) reduction is done entirely in NEON registers using 64-bit
+ * shift + XOR instructions, avoiding expensive NEON↔scalar transfers.
+ * Reduction polynomial: x^128 + x^7 + x^2 + x + 1.
  */
-FIO_IFUNC uint8x16_t fio___arm_ghash_mult_pmull(uint8x16_t x_vec,
-                                                uint8x16_t h_vec) {
-  /* Reverse bits within each byte */
-  uint8x16_t a = vrbitq_u8(x_vec);
-  uint8x16_t b = vrbitq_u8(h_vec);
 
-  /* lane 0 = x^0 to x^63 (low), lane 1 = x^64 to x^127 (high)
-   * For polynomial (a_hi*x^64 + a_lo), we have:
-   * a_lo = lane 0 (coefficients of x^0 to x^63)
-   * a_hi = lane 1 (coefficients of x^64 to x^127) */
-  poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(a), 0);
-  poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(a), 1);
-  poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(b), 0);
-  poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(b), 1);
+/**
+ * NEON-only GF(2^128) reduction of a 256-bit product.
+ * Input: lo (bits 0-127), hi (bits 128-255) of the product.
+ * Output: 128-bit reduced result.
+ * All operations use NEON 64-bit shift + XOR — no scalar extraction.
+ */
+FIO_IFUNC uint8x16_t fio___arm_ghash_reduce(uint64x2_t lo, uint64x2_t hi) {
+  /* 256-bit product layout:
+   * lo = {r0, r1} where r0 = bits 0-63, r1 = bits 64-127
+   * hi = {r2, r3} where r2 = bits 128-191, r3 = bits 192-255
+   *
+   * Fold r3 into r2:r1 using x^128 ≡ x^7 + x^2 + x + 1 */
+
+  /* Extract r3 as a vector for shifting */
+  uint64x2_t r3 = vdupq_laneq_u64(hi, 1); /* {r3, r3} */
+
+  /* r1 ^= r3 ^ (r3 << 7) ^ (r3 << 2) ^ (r3 << 1) */
+  uint64x2_t r3_s7 = vshlq_n_u64(r3, 7);
+  uint64x2_t r3_s2 = vshlq_n_u64(r3, 2);
+  uint64x2_t r3_s1 = vshlq_n_u64(r3, 1);
+  /* r2 ^= (r3 >> 57) ^ (r3 >> 62) ^ (r3 >> 63) */
+  uint64x2_t r3_r57 = vshrq_n_u64(r3, 57);
+  uint64x2_t r3_r62 = vshrq_n_u64(r3, 62);
+  uint64x2_t r3_r63 = vshrq_n_u64(r3, 63);
+
+  /* Apply r3 fold: update hi lane 0 (r2) and lo lane 1 (r1) */
+  /* For r1: XOR r3, r3<<7, r3<<2, r3<<1 into lo lane 1 */
+  /* For r2: XOR r3>>57, r3>>62, r3>>63 into hi lane 0 */
+  uint64x2_t fold_lo = veorq_u64(r3, r3_s7);
+  fold_lo = veorq_u64(fold_lo, r3_s2);
+  fold_lo = veorq_u64(fold_lo, r3_s1);
+  uint64x2_t fold_hi = veorq_u64(r3_r57, r3_r62);
+  fold_hi = veorq_u64(fold_hi, r3_r63);
+
+  /* lo lane 1 (r1) ^= fold_lo lane 0 */
+  /* hi lane 0 (r2) ^= fold_hi lane 0 */
+  /* Use vextq to create {fold_lo[0], 0} and XOR into lo at lane 1 position */
+  uint64x2_t zero = vdupq_n_u64(0);
+  uint64x2_t fold_r1 = vextq_u64(zero, fold_lo, 1); /* {0, fold_lo[0]} -> wrong
+                                                     */
+  /* Actually: vextq_u64(zero, fold_lo, 1) = {zero[1], fold_lo[0]} = {0,
+   * fold_lo[0]} That puts fold_lo[0] in lane 1 — correct for r1! */
+  lo = veorq_u64(lo, fold_r1);
+
+  /* For hi: fold_hi[0] goes into hi lane 0 (r2).
+   * Since r3 is broadcast, fold_hi = {val, val}. XOR into both lanes is fine
+   * since we only use lane 0 after this. */
+  hi = veorq_u64(hi, fold_hi);
+
+  /* Now fold r2 (hi lane 0) into r1:r0 (lo)
+   * r2 is in hi lane 0. */
+  uint64x2_t r2 = vdupq_laneq_u64(hi, 0); /* {r2, r2} */
+
+  uint64x2_t r2_s7 = vshlq_n_u64(r2, 7);
+  uint64x2_t r2_s2 = vshlq_n_u64(r2, 2);
+  uint64x2_t r2_s1 = vshlq_n_u64(r2, 1);
+  uint64x2_t r2_r57 = vshrq_n_u64(r2, 57);
+  uint64x2_t r2_r62 = vshrq_n_u64(r2, 62);
+  uint64x2_t r2_r63 = vshrq_n_u64(r2, 63);
+
+  /* r0 ^= r2 ^ (r2 << 7) ^ (r2 << 2) ^ (r2 << 1) — into lo lane 0 */
+  uint64x2_t fold2_lo = veorq_u64(r2, r2_s7);
+  fold2_lo = veorq_u64(fold2_lo, r2_s2);
+  fold2_lo = veorq_u64(fold2_lo, r2_s1);
+  /* r1 ^= (r2 >> 57) ^ (r2 >> 62) ^ (r2 >> 63) — into lo lane 1 */
+  uint64x2_t fold2_hi = veorq_u64(r2_r57, r2_r62);
+  fold2_hi = veorq_u64(fold2_hi, r2_r63);
+
+  /* fold2_lo[0] -> lo lane 0, fold2_hi[0] -> lo lane 1 */
+  /* Since r2 is broadcast, fold2_lo = {val_lo, val_lo}, fold2_hi = {val_hi,
+   * val_hi} */
+  /* We need: lo[0] ^= val_lo, lo[1] ^= val_hi */
+  /* Construct {val_lo, val_hi} using vzip/vcombine */
+  uint64x2_t fold2_combined =
+      vcombine_u64(vget_low_u64(fold2_lo), vget_low_u64(fold2_hi));
+  lo = veorq_u64(lo, fold2_combined);
+
+  return vreinterpretq_u8_u64(lo);
+}
+
+/**
+ * Single-block GHASH multiply in bit-reversed domain.
+ * Both inputs (a, b) must already be in bit-reversed form.
+ * Result is in bit-reversed form (no vrbitq_u8 on input or output).
+ * Uses Karatsuba decomposition (3 PMULL) + NEON-only reduction.
+ */
+FIO_IFUNC uint8x16_t fio___arm_ghash_mult_br(uint8x16_t a_br, uint8x16_t b_br) {
+  /* In bit-reversed form:
+   * lane 0 = x^0 to x^63 (low), lane 1 = x^64 to x^127 (high) */
+  poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(a_br), 0);
+  poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(a_br), 1);
+  poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(b_br), 0);
+  poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(b_br), 1);
 
   /* Karatsuba: (a_hi*x^64 + a_lo) * (b_hi*x^64 + b_lo) */
-  poly128_t p_ll = vmull_p64(a_lo, b_lo); /* x^0 to x^126 */
-  poly128_t p_hh = vmull_p64(a_hi, b_hi); /* x^128 to x^254 */
+  poly128_t p_ll = vmull_p64(a_lo, b_lo);
+  poly128_t p_hh = vmull_p64(a_hi, b_hi);
   poly128_t p_mid = vmull_p64((poly64_t)(a_lo ^ a_hi), (poly64_t)(b_lo ^ b_hi));
 
   uint64x2_t ll = vreinterpretq_u64_p128(p_ll);
@@ -1177,83 +1325,130 @@ FIO_IFUNC uint8x16_t fio___arm_ghash_mult_pmull(uint8x16_t x_vec,
   mm = veorq_u64(mm, ll);
   mm = veorq_u64(mm, hh);
 
-  /* 256-bit product: r3:r2:r1:r0 where r0 is bits 0-63, r3 is bits 192-255 */
-  uint64_t r0 = vgetq_lane_u64(ll, 0);
-  uint64_t r1 = vgetq_lane_u64(ll, 1) ^ vgetq_lane_u64(mm, 0);
-  uint64_t r2 = vgetq_lane_u64(hh, 0) ^ vgetq_lane_u64(mm, 1);
-  uint64_t r3 = vgetq_lane_u64(hh, 1);
+  /* Assemble 256-bit product into lo (bits 0-127) and hi (bits 128-255) */
+  /* lo = {ll[0], ll[1] ^ mm[0]}, hi = {hh[0] ^ mm[1], hh[1]} */
+  uint64x2_t lo = veorq_u64(ll, vextq_u64(vdupq_n_u64(0), mm, 1));
+  uint64x2_t hi = veorq_u64(hh, vextq_u64(mm, vdupq_n_u64(0), 1));
 
-  /* Reduce modulo x^128 + x^7 + x^2 + x + 1
-   * x^128 ≡ x^7 + x^2 + x + 1
-   *
-   * For a bit at position 128+k (in r2 or r3), we need to XOR into position k
-   * plus the polynomial terms at k+7, k+2, k+1.
-   *
-   * r2 contains bits 128-191 (x^128 to x^191)
-   * r3 contains bits 192-255 (x^192 to x^255)
-   *
-   * Bit k of r2 represents x^(128+k), which reduces to x^k + x^(k+7) + x^(k+2)
-   * + x^(k+1) These go into r0 (for k < 64) and r1 (for k+7 >= 64, etc.) */
-
-  /* Fold r3 (bits 192-255) into r2:r1:r0
-   * Bit k of r3 = x^(192+k) ≡ x^(64+k) + x^(71+k) + x^(66+k) + x^(65+k)
-   * x^(64+k) goes to r1 bit k
-   * x^(71+k) goes to r1 bit (k+7) if k+7 < 64, else r2 bit (k+7-64)
-   * etc. */
-  r1 ^= r3;         /* x^(64+k) */
-  r1 ^= (r3 << 7);  /* x^(71+k) for k < 57 */
-  r2 ^= (r3 >> 57); /* x^(71+k) for k >= 57, wraps to r2 */
-  r1 ^= (r3 << 2);  /* x^(66+k) for k < 62 */
-  r2 ^= (r3 >> 62); /* x^(66+k) for k >= 62 */
-  r1 ^= (r3 << 1);  /* x^(65+k) for k < 63 */
-  r2 ^= (r3 >> 63); /* x^(65+k) for k = 63 */
-
-  /* Fold r2 (bits 128-191) into r1:r0
-   * Bit k of r2 = x^(128+k) ≡ x^k + x^(k+7) + x^(k+2) + x^(k+1)
-   * x^k goes to r0 bit k
-   * x^(k+7) goes to r0 bit (k+7) if k+7 < 64, else r1 bit (k+7-64)
-   * etc. */
-  r0 ^= r2;         /* x^k */
-  r0 ^= (r2 << 7);  /* x^(k+7) for k < 57 */
-  r1 ^= (r2 >> 57); /* x^(k+7) for k >= 57 */
-  r0 ^= (r2 << 2);  /* x^(k+2) for k < 62 */
-  r1 ^= (r2 >> 62); /* x^(k+2) for k >= 62 */
-  r0 ^= (r2 << 1);  /* x^(k+1) for k < 63 */
-  r1 ^= (r2 >> 63); /* x^(k+1) for k = 63 */
-
-  /* Result is r1:r0 where r0 = x^0 to x^63, r1 = x^64 to x^127
-   * This maps to: lane 0 = r0, lane 1 = r1
-   * Then vrbitq_u8 converts back to GCM format */
-  uint64x2_t result = vcombine_u64(vcreate_u64(r0), vcreate_u64(r1));
-  return vrbitq_u8(vreinterpretq_u8_u64(result));
+  return fio___arm_ghash_reduce(lo, hi);
 }
 
-/* Wrapper for the PMULL implementation */
+/**
+ * GHASH multiply with GCM-format inputs (applies vrbitq_u8 to both inputs).
+ * Used for single-block GHASH where tag is in GCM format.
+ * Result is in GCM format.
+ */
 FIO_IFUNC uint8x16_t fio___arm_ghash_mult(uint8x16_t x_vec, uint8x16_t h_vec) {
-  return fio___arm_ghash_mult_pmull(x_vec, h_vec);
+  uint8x16_t result =
+      fio___arm_ghash_mult_br(vrbitq_u8(x_vec), vrbitq_u8(h_vec));
+  return vrbitq_u8(result);
 }
 
-/* Precompute H powers for parallel GHASH: H, H², H³, H⁴ */
+/**
+ * Precompute H powers for parallel GHASH: H, H², H³, H⁴.
+ * All stored in bit-reversed form for use with fio___arm_ghash_mult_br.
+ * htbl[0] = H^1_br, htbl[1] = H^2_br, htbl[2] = H^3_br, htbl[3] = H^4_br.
+ */
 FIO_IFUNC void fio___arm_ghash_precompute(uint8x16_t h, uint8x16_t *htbl) {
-  htbl[0] = h;                                      /* H */
-  htbl[1] = fio___arm_ghash_mult(h, h);             /* H² */
-  htbl[2] = fio___arm_ghash_mult(htbl[1], h);       /* H³ */
-  htbl[3] = fio___arm_ghash_mult(htbl[1], htbl[1]); /* H⁴ */
+  uint8x16_t h_br = vrbitq_u8(h);
+  htbl[0] = h_br;                                      /* H_br */
+  htbl[1] = fio___arm_ghash_mult_br(h_br, h_br);       /* H²_br */
+  htbl[2] = fio___arm_ghash_mult_br(htbl[1], h_br);    /* H³_br */
+  htbl[3] = fio___arm_ghash_mult_br(htbl[1], htbl[1]); /* H⁴_br */
 }
 
-/* 4-way parallel GHASH: compute (X0·H⁴) ^ (X1·H³) ^ (X2·H²) ^ (X3·H)
- * This processes 4 blocks at once using precomputed H powers */
+/**
+ * 4-way parallel GHASH with deferred reduction.
+ * Inputs x0..x3 are in bit-reversed form, htbl contains bit-reversed H powers.
+ * Accumulates all 4 Karatsuba partial products, then does a single reduction.
+ * Saves 3 reductions per 4-block batch vs calling fio___arm_ghash_mult_br 4x.
+ *
+ * htbl[3] = H^4_br (for x0), htbl[2] = H^3_br, htbl[1] = H^2_br,
+ * htbl[0] = H^1_br (for x3).
+ */
 FIO_IFUNC uint8x16_t fio___arm_ghash_mult4(uint8x16_t x0,
                                            uint8x16_t x1,
                                            uint8x16_t x2,
                                            uint8x16_t x3,
                                            const uint8x16_t *htbl) {
-  /* Compute all 4 products and XOR them together */
-  uint8x16_t r0 = fio___arm_ghash_mult(x0, htbl[3]); /* X0 · H⁴ */
-  uint8x16_t r1 = fio___arm_ghash_mult(x1, htbl[2]); /* X1 · H³ */
-  uint8x16_t r2 = fio___arm_ghash_mult(x2, htbl[1]); /* X2 · H² */
-  uint8x16_t r3 = fio___arm_ghash_mult(x3, htbl[0]); /* X3 · H  */
-  return veorq_u8(veorq_u8(r0, r1), veorq_u8(r2, r3));
+  uint64x2_t acc_lo, acc_hi, acc_mm;
+
+  /* Block 0: x0 * H^4 */
+  {
+    poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x0), 0);
+    poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x0), 1);
+    poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[3]), 0);
+    poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[3]), 1);
+    acc_lo = vreinterpretq_u64_p128(vmull_p64(a_lo, b_lo));
+    acc_hi = vreinterpretq_u64_p128(vmull_p64(a_hi, b_hi));
+    acc_mm = vreinterpretq_u64_p128(
+        vmull_p64((poly64_t)(a_lo ^ a_hi), (poly64_t)(b_lo ^ b_hi)));
+  }
+
+  /* Block 1: x1 * H^3 — accumulate via XOR */
+  {
+    poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x1), 0);
+    poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x1), 1);
+    poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[2]), 0);
+    poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[2]), 1);
+    acc_lo = veorq_u64(acc_lo, vreinterpretq_u64_p128(vmull_p64(a_lo, b_lo)));
+    acc_hi = veorq_u64(acc_hi, vreinterpretq_u64_p128(vmull_p64(a_hi, b_hi)));
+    acc_mm =
+        veorq_u64(acc_mm,
+                  vreinterpretq_u64_p128(vmull_p64((poly64_t)(a_lo ^ a_hi),
+                                                   (poly64_t)(b_lo ^ b_hi))));
+  }
+
+  /* Block 2: x2 * H^2 */
+  {
+    poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x2), 0);
+    poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x2), 1);
+    poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[1]), 0);
+    poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[1]), 1);
+    acc_lo = veorq_u64(acc_lo, vreinterpretq_u64_p128(vmull_p64(a_lo, b_lo)));
+    acc_hi = veorq_u64(acc_hi, vreinterpretq_u64_p128(vmull_p64(a_hi, b_hi)));
+    acc_mm =
+        veorq_u64(acc_mm,
+                  vreinterpretq_u64_p128(vmull_p64((poly64_t)(a_lo ^ a_hi),
+                                                   (poly64_t)(b_lo ^ b_hi))));
+  }
+
+  /* Block 3: x3 * H^1 */
+  {
+    poly64_t a_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x3), 0);
+    poly64_t a_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(x3), 1);
+    poly64_t b_lo = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[0]), 0);
+    poly64_t b_hi = (poly64_t)vgetq_lane_u64(vreinterpretq_u64_u8(htbl[0]), 1);
+    acc_lo = veorq_u64(acc_lo, vreinterpretq_u64_p128(vmull_p64(a_lo, b_lo)));
+    acc_hi = veorq_u64(acc_hi, vreinterpretq_u64_p128(vmull_p64(a_hi, b_hi)));
+    acc_mm =
+        veorq_u64(acc_mm,
+                  vreinterpretq_u64_p128(vmull_p64((poly64_t)(a_lo ^ a_hi),
+                                                   (poly64_t)(b_lo ^ b_hi))));
+  }
+
+  /* Karatsuba combination on accumulated sums */
+  acc_mm = veorq_u64(acc_mm, acc_lo);
+  acc_mm = veorq_u64(acc_mm, acc_hi);
+
+  /* Assemble 256-bit product: lo = {acc_lo[0], acc_lo[1]^acc_mm[0]},
+   *                           hi = {acc_hi[0]^acc_mm[1], acc_hi[1]} */
+  uint64x2_t zero = vdupq_n_u64(0);
+  uint64x2_t lo = veorq_u64(acc_lo, vextq_u64(zero, acc_mm, 1));
+  uint64x2_t hi = veorq_u64(acc_hi, vextq_u64(acc_mm, zero, 1));
+
+  /* Single reduction for all 4 blocks */
+  return fio___arm_ghash_reduce(lo, hi);
+}
+
+/**
+ * Single-block GHASH multiply for the GCM API.
+ * tag_br is in bit-reversed form, h_br is bit-reversed H^1.
+ * Returns result in bit-reversed form.
+ */
+FIO_IFUNC uint8x16_t fio___arm_ghash_mult1_br(uint8x16_t tag_br,
+                                              const uint8x16_t *htbl) {
+  return fio___arm_ghash_mult_br(tag_br, htbl[0]);
 }
 
 /* Byte reverse for GCM (convert between big-endian and native) */
@@ -1281,7 +1476,7 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
                               const void *key,
                               const void *nonce) {
   uint8x16_t rk[11];
-  uint8x16_t h, htbl[4], tag, ctr, j0;
+  uint8x16_t htbl[4], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
   const uint8_t *aad = (const uint8_t *)ad;
   size_t orig_len = len;
@@ -1289,79 +1484,78 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
 
   fio___arm_aes128_key_expand(rk, (const uint8_t *)key);
   uint8x16_t zero = vdupq_n_u8(0);
-  h = fio___arm_aes128_encrypt(zero, rk);
+  uint8x16_t h = fio___arm_aes128_encrypt(zero, rk);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___arm_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___arm_ghash_precompute(h, htbl);
+  else
+    htbl[0] = vrbitq_u8(h); /* Only H^1_br needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = vld1q_u8(j0_bytes);
   ctr = j0;
-  tag = vdupq_n_u8(0);
+  tag_br =
+      vdupq_n_u8(0); /* tag in bit-reversed domain (zero is self-inverse) */
 
-  /* GHASH over AAD - process 4 blocks at a time */
+  /* GHASH over AAD - process 4 blocks at a time (bit-reversed domain) */
   while (adlen >= 64) {
-    uint8x16_t a0 = vld1q_u8(aad);
-    uint8x16_t a1 = vld1q_u8(aad + 16);
-    uint8x16_t a2 = vld1q_u8(aad + 32);
-    uint8x16_t a3 = vld1q_u8(aad + 48);
-    a0 = veorq_u8(tag, a0);
-    tag = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
+    uint8x16_t a0 = vrbitq_u8(vld1q_u8(aad));
+    uint8x16_t a1 = vrbitq_u8(vld1q_u8(aad + 16));
+    uint8x16_t a2 = vrbitq_u8(vld1q_u8(aad + 32));
+    uint8x16_t a3 = vrbitq_u8(vld1q_u8(aad + 48));
+    a0 = veorq_u8(tag_br, a0);
+    tag_br = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    uint8x16_t aad_block = vld1q_u8(aad);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    uint8x16_t aad_block = vrbitq_u8(vld1q_u8(aad));
+    tag_br = veorq_u8(tag_br, aad_block);
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    uint8x16_t aad_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    uint8x16_t aad_block = vrbitq_u8(vld1q_u8(tmp));
+    tag_br = veorq_u8(tag_br, aad_block);
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
   /* Encrypt and GHASH - process 4 blocks at a time with interleaving */
   while (len >= 64) {
-    /* Generate 4 counters */
     uint8x16_t ctr0 = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t ctr1 = fio___arm_gcm_inc_ctr(ctr0);
     uint8x16_t ctr2 = fio___arm_gcm_inc_ctr(ctr1);
     uint8x16_t ctr3 = fio___arm_gcm_inc_ctr(ctr2);
     ctr = ctr3;
 
-    /* Encrypt 4 blocks (AES operations can be pipelined by CPU) */
     uint8x16_t ks0 = fio___arm_aes128_encrypt(ctr0, rk);
     uint8x16_t ks1 = fio___arm_aes128_encrypt(ctr1, rk);
     uint8x16_t ks2 = fio___arm_aes128_encrypt(ctr2, rk);
     uint8x16_t ks3 = fio___arm_aes128_encrypt(ctr3, rk);
 
-    /* Load plaintext and XOR with keystream */
-    uint8x16_t pt0 = vld1q_u8(p);
-    uint8x16_t pt1 = vld1q_u8(p + 16);
-    uint8x16_t pt2 = vld1q_u8(p + 32);
-    uint8x16_t pt3 = vld1q_u8(p + 48);
+    uint8x16_t ct0 = veorq_u8(vld1q_u8(p), ks0);
+    uint8x16_t ct1 = veorq_u8(vld1q_u8(p + 16), ks1);
+    uint8x16_t ct2 = veorq_u8(vld1q_u8(p + 32), ks2);
+    uint8x16_t ct3 = veorq_u8(vld1q_u8(p + 48), ks3);
 
-    uint8x16_t ct0 = veorq_u8(pt0, ks0);
-    uint8x16_t ct1 = veorq_u8(pt1, ks1);
-    uint8x16_t ct2 = veorq_u8(pt2, ks2);
-    uint8x16_t ct3 = veorq_u8(pt3, ks3);
-
-    /* Store ciphertext */
     vst1q_u8(p, ct0);
     vst1q_u8(p + 16, ct1);
     vst1q_u8(p + 32, ct2);
     vst1q_u8(p + 48, ct3);
 
-    /* GHASH 4 blocks in parallel */
-    ct0 = veorq_u8(tag, ct0);
-    tag = fio___arm_ghash_mult4(ct0, ct1, ct2, ct3, htbl);
+    /* GHASH 4 blocks: bit-reverse ciphertext, XOR tag into first block */
+    uint8x16_t ct0_br = veorq_u8(tag_br, vrbitq_u8(ct0));
+    tag_br = fio___arm_ghash_mult4(ct0_br,
+                                   vrbitq_u8(ct1),
+                                   vrbitq_u8(ct2),
+                                   vrbitq_u8(ct3),
+                                   htbl);
 
     p += 64;
     len -= 64;
@@ -1371,11 +1565,10 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   while (len >= 16) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t keystream = fio___arm_aes128_encrypt(ctr, rk);
-    uint8x16_t plaintext = vld1q_u8(p);
-    uint8x16_t ciphertext = veorq_u8(plaintext, keystream);
+    uint8x16_t ciphertext = veorq_u8(vld1q_u8(p), keystream);
     vst1q_u8(p, ciphertext);
-    tag = veorq_u8(tag, ciphertext);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(ciphertext));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     p += 16;
     len -= 16;
   }
@@ -1390,20 +1583,19 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
       p[i] ^= ks_bytes[i];
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
-    uint8x16_t ct_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
   /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  uint8x16_t len_blk = vld1q_u8(len_block);
-  tag = veorq_u8(tag, len_blk);
-  tag = fio___arm_ghash_mult(tag, h);
+  tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(len_block)));
+  tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
 
-  /* Final tag */
+  /* Final tag: convert back from bit-reversed domain */
+  uint8x16_t tag = vrbitq_u8(tag_br);
   uint8x16_t s = fio___arm_aes128_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   vst1q_u8((uint8_t *)mac, tag);
@@ -1422,7 +1614,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
                               const void *key,
                               const void *nonce) {
   uint8x16_t rk[15];
-  uint8x16_t h, htbl[4], tag, ctr, j0;
+  uint8x16_t htbl[4], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
   const uint8_t *aad = (const uint8_t *)ad;
   size_t orig_len = len;
@@ -1430,98 +1622,89 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
 
   fio___arm_aes256_key_expand(rk, (const uint8_t *)key);
   uint8x16_t zero = vdupq_n_u8(0);
-  h = fio___arm_aes256_encrypt(zero, rk);
+  uint8x16_t h = fio___arm_aes256_encrypt(zero, rk);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___arm_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___arm_ghash_precompute(h, htbl);
+  else
+    htbl[0] = vrbitq_u8(h); /* Only H^1_br needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = vld1q_u8(j0_bytes);
   ctr = j0;
-  tag = vdupq_n_u8(0);
+  tag_br = vdupq_n_u8(0);
 
-  /* GHASH over AAD - process 4 blocks at a time */
+  /* GHASH over AAD (bit-reversed domain) */
   while (adlen >= 64) {
-    uint8x16_t a0 = vld1q_u8(aad);
-    uint8x16_t a1 = vld1q_u8(aad + 16);
-    uint8x16_t a2 = vld1q_u8(aad + 32);
-    uint8x16_t a3 = vld1q_u8(aad + 48);
-    a0 = veorq_u8(tag, a0);
-    tag = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
+    uint8x16_t a0 = vrbitq_u8(vld1q_u8(aad));
+    uint8x16_t a1 = vrbitq_u8(vld1q_u8(aad + 16));
+    uint8x16_t a2 = vrbitq_u8(vld1q_u8(aad + 32));
+    uint8x16_t a3 = vrbitq_u8(vld1q_u8(aad + 48));
+    a0 = veorq_u8(tag_br, a0);
+    tag_br = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    uint8x16_t aad_block = vld1q_u8(aad);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(aad)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    uint8x16_t aad_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
-  /* Encrypt and GHASH - process 4 blocks at a time with interleaving */
+  /* Encrypt and GHASH */
   while (len >= 64) {
-    /* Generate 4 counters */
     uint8x16_t ctr0 = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t ctr1 = fio___arm_gcm_inc_ctr(ctr0);
     uint8x16_t ctr2 = fio___arm_gcm_inc_ctr(ctr1);
     uint8x16_t ctr3 = fio___arm_gcm_inc_ctr(ctr2);
     ctr = ctr3;
 
-    /* Encrypt 4 blocks (AES operations can be pipelined by CPU) */
     uint8x16_t ks0 = fio___arm_aes256_encrypt(ctr0, rk);
     uint8x16_t ks1 = fio___arm_aes256_encrypt(ctr1, rk);
     uint8x16_t ks2 = fio___arm_aes256_encrypt(ctr2, rk);
     uint8x16_t ks3 = fio___arm_aes256_encrypt(ctr3, rk);
 
-    /* Load plaintext and XOR with keystream */
-    uint8x16_t pt0 = vld1q_u8(p);
-    uint8x16_t pt1 = vld1q_u8(p + 16);
-    uint8x16_t pt2 = vld1q_u8(p + 32);
-    uint8x16_t pt3 = vld1q_u8(p + 48);
+    uint8x16_t ct0 = veorq_u8(vld1q_u8(p), ks0);
+    uint8x16_t ct1 = veorq_u8(vld1q_u8(p + 16), ks1);
+    uint8x16_t ct2 = veorq_u8(vld1q_u8(p + 32), ks2);
+    uint8x16_t ct3 = veorq_u8(vld1q_u8(p + 48), ks3);
 
-    uint8x16_t ct0 = veorq_u8(pt0, ks0);
-    uint8x16_t ct1 = veorq_u8(pt1, ks1);
-    uint8x16_t ct2 = veorq_u8(pt2, ks2);
-    uint8x16_t ct3 = veorq_u8(pt3, ks3);
-
-    /* Store ciphertext */
     vst1q_u8(p, ct0);
     vst1q_u8(p + 16, ct1);
     vst1q_u8(p + 32, ct2);
     vst1q_u8(p + 48, ct3);
 
-    /* GHASH 4 blocks in parallel */
-    ct0 = veorq_u8(tag, ct0);
-    tag = fio___arm_ghash_mult4(ct0, ct1, ct2, ct3, htbl);
-
+    uint8x16_t ct0_br = veorq_u8(tag_br, vrbitq_u8(ct0));
+    tag_br = fio___arm_ghash_mult4(ct0_br,
+                                   vrbitq_u8(ct1),
+                                   vrbitq_u8(ct2),
+                                   vrbitq_u8(ct3),
+                                   htbl);
     p += 64;
     len -= 64;
   }
 
-  /* Handle remaining full blocks */
   while (len >= 16) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
-    uint8x16_t keystream = fio___arm_aes256_encrypt(ctr, rk);
-    uint8x16_t plaintext = vld1q_u8(p);
-    uint8x16_t ciphertext = veorq_u8(plaintext, keystream);
+    uint8x16_t ciphertext =
+        veorq_u8(vld1q_u8(p), fio___arm_aes256_encrypt(ctr, rk));
     vst1q_u8(p, ciphertext);
-    tag = veorq_u8(tag, ciphertext);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(ciphertext));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     p += 16;
     len -= 16;
   }
 
-  /* Handle partial final block */
   if (len > 0) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t keystream = fio___arm_aes256_encrypt(ctr, rk);
@@ -1531,25 +1714,23 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
       p[i] ^= ks_bytes[i];
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
-    uint8x16_t ct_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
   /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  uint8x16_t len_blk = vld1q_u8(len_block);
-  tag = veorq_u8(tag, len_blk);
-  tag = fio___arm_ghash_mult(tag, h);
+  tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(len_block)));
+  tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
 
-  /* Final tag */
+  /* Final tag: convert back from bit-reversed domain */
+  uint8x16_t tag = vrbitq_u8(tag_br);
   uint8x16_t s = fio___arm_aes256_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   vst1q_u8((uint8_t *)mac, tag);
 
-  /* Clear sensitive data */
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
@@ -1563,7 +1744,7 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              const void *key,
                              const void *nonce) {
   uint8x16_t rk[11];
-  uint8x16_t h, htbl[4], tag, ctr, j0;
+  uint8x16_t htbl[4], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
   const uint8_t *aad = (const uint8_t *)ad;
   size_t orig_len = len;
@@ -1571,81 +1752,80 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
 
   fio___arm_aes128_key_expand(rk, (const uint8_t *)key);
   uint8x16_t zero = vdupq_n_u8(0);
-  h = fio___arm_aes128_encrypt(zero, rk);
+  uint8x16_t h = fio___arm_aes128_encrypt(zero, rk);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___arm_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___arm_ghash_precompute(h, htbl);
+  else
+    htbl[0] = vrbitq_u8(h); /* Only H^1_br needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = vld1q_u8(j0_bytes);
   ctr = j0;
-  tag = vdupq_n_u8(0);
+  tag_br = vdupq_n_u8(0);
 
-  /* GHASH over AAD - process 4 blocks at a time */
+  /* GHASH over AAD (bit-reversed domain) */
   while (adlen >= 64) {
-    uint8x16_t a0 = vld1q_u8(aad);
-    uint8x16_t a1 = vld1q_u8(aad + 16);
-    uint8x16_t a2 = vld1q_u8(aad + 32);
-    uint8x16_t a3 = vld1q_u8(aad + 48);
-    a0 = veorq_u8(tag, a0);
-    tag = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
+    uint8x16_t a0 = vrbitq_u8(vld1q_u8(aad));
+    uint8x16_t a1 = vrbitq_u8(vld1q_u8(aad + 16));
+    uint8x16_t a2 = vrbitq_u8(vld1q_u8(aad + 32));
+    uint8x16_t a3 = vrbitq_u8(vld1q_u8(aad + 48));
+    a0 = veorq_u8(tag_br, a0);
+    tag_br = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    uint8x16_t aad_block = vld1q_u8(aad);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(aad)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    uint8x16_t aad_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
-  /* GHASH over ciphertext - process 4 blocks at a time */
+  /* GHASH over ciphertext (bit-reversed domain) */
   const uint8_t *ct = p;
   size_t ct_len = orig_len;
   while (ct_len >= 64) {
-    uint8x16_t c0 = vld1q_u8(ct);
-    uint8x16_t c1 = vld1q_u8(ct + 16);
-    uint8x16_t c2 = vld1q_u8(ct + 32);
-    uint8x16_t c3 = vld1q_u8(ct + 48);
-    c0 = veorq_u8(tag, c0);
-    tag = fio___arm_ghash_mult4(c0, c1, c2, c3, htbl);
+    uint8x16_t c0 = vrbitq_u8(vld1q_u8(ct));
+    uint8x16_t c1 = vrbitq_u8(vld1q_u8(ct + 16));
+    uint8x16_t c2 = vrbitq_u8(vld1q_u8(ct + 32));
+    uint8x16_t c3 = vrbitq_u8(vld1q_u8(ct + 48));
+    c0 = veorq_u8(tag_br, c0);
+    tag_br = fio___arm_ghash_mult4(c0, c1, c2, c3, htbl);
     ct += 64;
     ct_len -= 64;
   }
   while (ct_len >= 16) {
-    uint8x16_t ct_block = vld1q_u8(ct);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(ct)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     ct += 16;
     ct_len -= 16;
   }
   if (ct_len > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, ct, ct_len);
-    uint8x16_t ct_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
   /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  uint8x16_t len_blk = vld1q_u8(len_block);
-  tag = veorq_u8(tag, len_blk);
-  tag = fio___arm_ghash_mult(tag, h);
+  tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(len_block)));
+  tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
 
   /* Compute and verify tag */
+  uint8x16_t tag = vrbitq_u8(tag_br);
   uint8x16_t s = fio___arm_aes128_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   uint8_t computed_mac[16];
@@ -1659,7 +1839,7 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  /* Decrypt - process 4 blocks at a time */
+  /* Decrypt */
   while (len >= 64) {
     uint8x16_t ctr0 = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t ctr1 = fio___arm_gcm_inc_ctr(ctr0);
@@ -1667,43 +1847,31 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     uint8x16_t ctr3 = fio___arm_gcm_inc_ctr(ctr2);
     ctr = ctr3;
 
-    uint8x16_t ks0 = fio___arm_aes128_encrypt(ctr0, rk);
-    uint8x16_t ks1 = fio___arm_aes128_encrypt(ctr1, rk);
-    uint8x16_t ks2 = fio___arm_aes128_encrypt(ctr2, rk);
-    uint8x16_t ks3 = fio___arm_aes128_encrypt(ctr3, rk);
-
-    uint8x16_t c0 = vld1q_u8(p);
-    uint8x16_t c1 = vld1q_u8(p + 16);
-    uint8x16_t c2 = vld1q_u8(p + 32);
-    uint8x16_t c3 = vld1q_u8(p + 48);
-
-    vst1q_u8(p, veorq_u8(c0, ks0));
-    vst1q_u8(p + 16, veorq_u8(c1, ks1));
-    vst1q_u8(p + 32, veorq_u8(c2, ks2));
-    vst1q_u8(p + 48, veorq_u8(c3, ks3));
+    vst1q_u8(p, veorq_u8(vld1q_u8(p), fio___arm_aes128_encrypt(ctr0, rk)));
+    vst1q_u8(p + 16,
+             veorq_u8(vld1q_u8(p + 16), fio___arm_aes128_encrypt(ctr1, rk)));
+    vst1q_u8(p + 32,
+             veorq_u8(vld1q_u8(p + 32), fio___arm_aes128_encrypt(ctr2, rk)));
+    vst1q_u8(p + 48,
+             veorq_u8(vld1q_u8(p + 48), fio___arm_aes128_encrypt(ctr3, rk)));
 
     p += 64;
     len -= 64;
   }
   while (len >= 16) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
-    uint8x16_t keystream = fio___arm_aes128_encrypt(ctr, rk);
-    uint8x16_t ciphertext = vld1q_u8(p);
-    uint8x16_t plaintext = veorq_u8(ciphertext, keystream);
-    vst1q_u8(p, plaintext);
+    vst1q_u8(p, veorq_u8(vld1q_u8(p), fio___arm_aes128_encrypt(ctr, rk)));
     p += 16;
     len -= 16;
   }
   if (len > 0) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
-    uint8x16_t keystream = fio___arm_aes128_encrypt(ctr, rk);
     uint8_t ks_bytes[16];
-    vst1q_u8(ks_bytes, keystream);
+    vst1q_u8(ks_bytes, fio___arm_aes128_encrypt(ctr, rk));
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
 
-  /* Clear sensitive data */
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
@@ -1718,7 +1886,7 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              const void *key,
                              const void *nonce) {
   uint8x16_t rk[15];
-  uint8x16_t h, htbl[4], tag, ctr, j0;
+  uint8x16_t htbl[4], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
   const uint8_t *aad = (const uint8_t *)ad;
   size_t orig_len = len;
@@ -1726,81 +1894,80 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
 
   fio___arm_aes256_key_expand(rk, (const uint8_t *)key);
   uint8x16_t zero = vdupq_n_u8(0);
-  h = fio___arm_aes256_encrypt(zero, rk);
+  uint8x16_t h = fio___arm_aes256_encrypt(zero, rk);
 
-  /* Precompute H powers for parallel GHASH */
-  fio___arm_ghash_precompute(h, htbl);
+  /* Precompute H powers only if 4-block GHASH will be used */
+  if (len >= 64 || adlen >= 64)
+    fio___arm_ghash_precompute(h, htbl);
+  else
+    htbl[0] = vrbitq_u8(h); /* Only H^1_br needed for single-block path */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = vld1q_u8(j0_bytes);
   ctr = j0;
-  tag = vdupq_n_u8(0);
+  tag_br = vdupq_n_u8(0);
 
-  /* GHASH over AAD - process 4 blocks at a time */
+  /* GHASH over AAD (bit-reversed domain) */
   while (adlen >= 64) {
-    uint8x16_t a0 = vld1q_u8(aad);
-    uint8x16_t a1 = vld1q_u8(aad + 16);
-    uint8x16_t a2 = vld1q_u8(aad + 32);
-    uint8x16_t a3 = vld1q_u8(aad + 48);
-    a0 = veorq_u8(tag, a0);
-    tag = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
+    uint8x16_t a0 = vrbitq_u8(vld1q_u8(aad));
+    uint8x16_t a1 = vrbitq_u8(vld1q_u8(aad + 16));
+    uint8x16_t a2 = vrbitq_u8(vld1q_u8(aad + 32));
+    uint8x16_t a3 = vrbitq_u8(vld1q_u8(aad + 48));
+    a0 = veorq_u8(tag_br, a0);
+    tag_br = fio___arm_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    uint8x16_t aad_block = vld1q_u8(aad);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(aad)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    uint8x16_t aad_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, aad_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
-  /* GHASH over ciphertext - process 4 blocks at a time */
+  /* GHASH over ciphertext (bit-reversed domain) */
   const uint8_t *ct = p;
   size_t ct_len = orig_len;
   while (ct_len >= 64) {
-    uint8x16_t c0 = vld1q_u8(ct);
-    uint8x16_t c1 = vld1q_u8(ct + 16);
-    uint8x16_t c2 = vld1q_u8(ct + 32);
-    uint8x16_t c3 = vld1q_u8(ct + 48);
-    c0 = veorq_u8(tag, c0);
-    tag = fio___arm_ghash_mult4(c0, c1, c2, c3, htbl);
+    uint8x16_t c0 = vrbitq_u8(vld1q_u8(ct));
+    uint8x16_t c1 = vrbitq_u8(vld1q_u8(ct + 16));
+    uint8x16_t c2 = vrbitq_u8(vld1q_u8(ct + 32));
+    uint8x16_t c3 = vrbitq_u8(vld1q_u8(ct + 48));
+    c0 = veorq_u8(tag_br, c0);
+    tag_br = fio___arm_ghash_mult4(c0, c1, c2, c3, htbl);
     ct += 64;
     ct_len -= 64;
   }
   while (ct_len >= 16) {
-    uint8x16_t ct_block = vld1q_u8(ct);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(ct)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
     ct += 16;
     ct_len -= 16;
   }
   if (ct_len > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, ct, ct_len);
-    uint8x16_t ct_block = vld1q_u8(tmp);
-    tag = veorq_u8(tag, ct_block);
-    tag = fio___arm_ghash_mult(tag, h);
+    tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
+    tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
   }
 
   /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  uint8x16_t len_blk = vld1q_u8(len_block);
-  tag = veorq_u8(tag, len_blk);
-  tag = fio___arm_ghash_mult(tag, h);
+  tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(len_block)));
+  tag_br = fio___arm_ghash_mult1_br(tag_br, htbl);
 
   /* Compute and verify tag */
+  uint8x16_t tag = vrbitq_u8(tag_br);
   uint8x16_t s = fio___arm_aes256_encrypt(j0, rk);
   tag = veorq_u8(tag, s);
   uint8_t computed_mac[16];
@@ -1814,7 +1981,7 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  /* Decrypt - process 4 blocks at a time */
+  /* Decrypt */
   while (len >= 64) {
     uint8x16_t ctr0 = fio___arm_gcm_inc_ctr(ctr);
     uint8x16_t ctr1 = fio___arm_gcm_inc_ctr(ctr0);
@@ -1822,42 +1989,31 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     uint8x16_t ctr3 = fio___arm_gcm_inc_ctr(ctr2);
     ctr = ctr3;
 
-    uint8x16_t ks0 = fio___arm_aes256_encrypt(ctr0, rk);
-    uint8x16_t ks1 = fio___arm_aes256_encrypt(ctr1, rk);
-    uint8x16_t ks2 = fio___arm_aes256_encrypt(ctr2, rk);
-    uint8x16_t ks3 = fio___arm_aes256_encrypt(ctr3, rk);
-
-    uint8x16_t c0 = vld1q_u8(p);
-    uint8x16_t c1 = vld1q_u8(p + 16);
-    uint8x16_t c2 = vld1q_u8(p + 32);
-    uint8x16_t c3 = vld1q_u8(p + 48);
-
-    vst1q_u8(p, veorq_u8(c0, ks0));
-    vst1q_u8(p + 16, veorq_u8(c1, ks1));
-    vst1q_u8(p + 32, veorq_u8(c2, ks2));
-    vst1q_u8(p + 48, veorq_u8(c3, ks3));
+    vst1q_u8(p, veorq_u8(vld1q_u8(p), fio___arm_aes256_encrypt(ctr0, rk)));
+    vst1q_u8(p + 16,
+             veorq_u8(vld1q_u8(p + 16), fio___arm_aes256_encrypt(ctr1, rk)));
+    vst1q_u8(p + 32,
+             veorq_u8(vld1q_u8(p + 32), fio___arm_aes256_encrypt(ctr2, rk)));
+    vst1q_u8(p + 48,
+             veorq_u8(vld1q_u8(p + 48), fio___arm_aes256_encrypt(ctr3, rk)));
 
     p += 64;
     len -= 64;
   }
   while (len >= 16) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
-    uint8x16_t keystream = fio___arm_aes256_encrypt(ctr, rk);
-    uint8x16_t ciphertext = vld1q_u8(p);
-    uint8x16_t plaintext = veorq_u8(ciphertext, keystream);
-    vst1q_u8(p, plaintext);
+    vst1q_u8(p, veorq_u8(vld1q_u8(p), fio___arm_aes256_encrypt(ctr, rk)));
     p += 16;
     len -= 16;
   }
   if (len > 0) {
     ctr = fio___arm_gcm_inc_ctr(ctr);
-    uint8x16_t keystream = fio___arm_aes256_encrypt(ctr, rk);
     uint8_t ks_bytes[16];
-    vst1q_u8(ks_bytes, keystream);
+    vst1q_u8(ks_bytes, fio___arm_aes256_encrypt(ctr, rk));
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
   }
-  /* Clear sensitive data */
+
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
