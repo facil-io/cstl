@@ -23,7 +23,7 @@ jobs:
       run: |
         echo "CI=false" >> "$GITHUB_ENV"
     - name: Test No-Op (debug)
-      run: clang -O0 -Wno-deprecated-declarations -Wno-#pragma-messages -fstack-protector-all tests\noop.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && echo "Compiled test, now running..." && ./noop.exe
+      run: clang -O0 -Wno-deprecated-declarations -Wno-#pragma-messages -fstack-protector-all tests\compile-check.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && echo "Compiled test, now running..." && ./noop.exe
     - name: Test STL (debug) - no allocators
       run: clang -O0 -Wno-deprecated-declarations -Wno-#pragma-messages -fstack-protector-all tests\core.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./core_d.exe && echo "Compiled test, now running..." && ./core_d.exe
     - name: Test fio_malloc speed
