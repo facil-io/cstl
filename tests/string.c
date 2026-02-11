@@ -10,8 +10,6 @@ Test - Comprehensive FIO_STR String Core Tests
  * Test: FIO_STR_INFO and FIO_BUF_INFO macros
  * ========================================================================== */
 FIO_SFUNC void test_str_info_macros(void) {
-  FIO_LOG_DDEBUG("Testing FIO_STR_INFO and FIO_BUF_INFO macros");
-
   /* FIO_STR_INFO1 - from NUL-terminated string */
   {
     char *s = "Hello";
@@ -60,8 +58,6 @@ FIO_SFUNC void test_str_info_macros(void) {
  * Test: fio_string_write - edge cases
  * ========================================================================== */
 FIO_SFUNC void test_string_write(void) {
-  FIO_LOG_DDEBUG("Testing fio_string_write");
-
   /* Basic write */
   {
     char buf[64];
@@ -118,8 +114,6 @@ FIO_SFUNC void test_string_write(void) {
  * Test: fio_string_replace - comprehensive
  * ========================================================================== */
 FIO_SFUNC void test_string_replace(void) {
-  FIO_LOG_DDEBUG("Testing fio_string_replace");
-
   /* Insert at beginning */
   {
     char buf[64];
@@ -178,8 +172,6 @@ FIO_SFUNC void test_string_replace(void) {
  * Test: fio_string_write2 - format specifiers
  * ========================================================================== */
 FIO_SFUNC void test_string_write2(void) {
-  FIO_LOG_DDEBUG("Testing fio_string_write2");
-
   /* String specifiers */
   {
     char buf[64];
@@ -234,8 +226,6 @@ FIO_SFUNC void test_string_write2(void) {
  * Test: Numeral functions - boundary testing
  * ========================================================================== */
 FIO_SFUNC void test_string_numerals(void) {
-  FIO_LOG_DDEBUG("Testing numeral functions");
-
   /* fio_string_write_i */
   {
     char buf[64];
@@ -302,8 +292,6 @@ FIO_SFUNC void test_string_numerals(void) {
  * Test: printf/vprintf
  * ========================================================================== */
 FIO_SFUNC void test_string_printf(void) {
-  FIO_LOG_DDEBUG("Testing fio_string_printf");
-
   {
     char buf[64];
     fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
@@ -327,8 +315,6 @@ FIO_SFUNC void test_string_printf(void) {
  * Test: UTF-8 functions
  * ========================================================================== */
 FIO_SFUNC void test_string_utf8(void) {
-  FIO_LOG_DDEBUG("Testing UTF-8 functions");
-
   /* Valid UTF-8 */
   {
     fio_str_info_s ascii = FIO_STR_INFO1("Hello");
@@ -380,8 +366,6 @@ FIO_SFUNC void test_string_utf8(void) {
  * Test: Escape/Unescape
  * ========================================================================== */
 FIO_SFUNC void test_string_escape(void) {
-  FIO_LOG_DDEBUG("Testing escape/unescape");
-
   /* Escape special characters */
   {
     char buf[128];
@@ -427,8 +411,6 @@ FIO_SFUNC void test_string_escape(void) {
  * Test: Base64 encoding/decoding
  * ========================================================================== */
 FIO_SFUNC void test_string_base64(void) {
-  FIO_LOG_DDEBUG("Testing Base64");
-
   /* Known vectors */
   struct {
     const char *plain;
@@ -494,8 +476,6 @@ FIO_SFUNC void test_string_base64(void) {
  * Test: Base32 encoding/decoding
  * ========================================================================== */
 FIO_SFUNC void test_string_base32(void) {
-  FIO_LOG_DDEBUG("Testing Base32");
-
   /* Roundtrip with simple data */
   {
     char enc_buf[256], dec_buf[256];
@@ -524,8 +504,6 @@ FIO_SFUNC void test_string_base32(void) {
  * Test: URL encoding/decoding
  * ========================================================================== */
 FIO_SFUNC void test_string_url(void) {
-  FIO_LOG_DDEBUG("Testing URL encoding");
-
   /* Encode special chars */
   {
     char buf[256];
@@ -574,8 +552,6 @@ FIO_SFUNC void test_string_url(void) {
  * Test: HTML escaping/unescaping
  * ========================================================================== */
 FIO_SFUNC void test_string_html(void) {
-  FIO_LOG_DDEBUG("Testing HTML escape/unescape");
-
   /* Escape */
   {
     char buf[256];
@@ -616,8 +592,6 @@ FIO_SFUNC void test_string_html(void) {
  * Test: fio_bstr - binary string type
  * ========================================================================== */
 FIO_SFUNC void test_bstr(void) {
-  FIO_LOG_DDEBUG("Testing fio_bstr");
-
   /* Basic write */
   {
     char *s = fio_bstr_write(NULL, "Hello", 5);
@@ -725,8 +699,6 @@ FIO_SFUNC void test_bstr(void) {
  * Test: fio_keystr - key string type
  * ========================================================================== */
 FIO_SFUNC void test_keystr(void) {
-  FIO_LOG_DDEBUG("Testing fio_keystr");
-
   /* Small string (embedded) - fio_keystr_s is ~16 bytes, can embed ~11 chars */
   {
     fio_keystr_s k = fio_keystr_tmp("Hi", 2);
@@ -769,8 +741,6 @@ FIO_SFUNC void test_keystr(void) {
  * Test: String comparison
  * ========================================================================== */
 FIO_SFUNC void test_string_comparison(void) {
-  FIO_LOG_DDEBUG("Testing string comparison");
-
   /* Equal strings */
   {
     fio_buf_info_s a = FIO_BUF_INFO1("hello");
@@ -809,8 +779,6 @@ FIO_SFUNC void test_string_comparison(void) {
  * Test: Memory helpers
  * ========================================================================== */
 FIO_SFUNC void test_string_memory(void) {
-  FIO_LOG_DDEBUG("Testing memory helpers");
-
   /* fio_string_capa4len - 16-byte alignment */
   {
     FIO_ASSERT(fio_string_capa4len(0) >= 1, "capa4len(0) >= 1");
@@ -824,8 +792,6 @@ FIO_SFUNC void test_string_memory(void) {
  * Test: File operations
  * ========================================================================== */
 FIO_SFUNC void test_string_files(void) {
-  FIO_LOG_DDEBUG("Testing file operations");
-
   /* Read this file */
   {
     char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
@@ -864,8 +830,6 @@ FIO_SFUNC void test_string_files(void) {
  * Main
  * ========================================================================== */
 int main(void) {
-  FIO_LOG_DDEBUG("=== Comprehensive FIO_STR String Core Tests ===");
-
   test_str_info_macros();
   test_string_write();
   test_string_replace();
@@ -883,7 +847,5 @@ int main(void) {
   test_string_comparison();
   test_string_memory();
   test_string_files();
-
-  FIO_LOG_DDEBUG("=== All FIO_STR tests passed! ===");
   return 0;
 }

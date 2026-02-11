@@ -122,7 +122,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing fio_atol and fio_ltoa.");
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
     size_t tmp = fio_ltoa(buffer, i, 0);
@@ -234,7 +233,6 @@ int main(void) {
     fprintf(stderr, "\t- fio_u2d: %zuus\n", (size_t)(end - start));
   }
 #endif
-  FIO_LOG_DDEBUG("Testing fio_atol samples.");
 #define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \
     char *s = (char *)s_;                                                      \
@@ -471,9 +469,6 @@ int main(void) {
                  f_buf);                                                       \
     }                                                                          \
   } while (0)
-
-  FIO_LOG_DDEBUG("Testing fio_atof & fio_aton samples.");
-
   /* A few hex-float examples  */
   TEST_DOUBLE("0x10.1p0", 0x10.1p0, 0);
   TEST_DOUBLE("0x1.8p1", 0x1.8p1, 0);

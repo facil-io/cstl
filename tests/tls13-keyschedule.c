@@ -41,8 +41,6 @@ FIO_SFUNC void fio___test_tls13_hkdf_expand_label_basic(void) {
 
   FIO_ASSERT(FIO_MEMCMP(output, zero, 32) != 0,
              "HKDF-Expand-Label produced zero output");
-
-  FIO_LOG_DDEBUG("TLS 1.3 HKDF-Expand-Label basic test: PASSED");
 }
 
 /* *****************************************************************************
@@ -61,8 +59,6 @@ FIO_SFUNC void fio___test_tls13_derive_secret_basic(void) {
 
   FIO_ASSERT(FIO_MEMCMP(output, zero, 32) != 0,
              "Derive-Secret produced zero output");
-
-  FIO_LOG_DDEBUG("TLS 1.3 Derive-Secret basic test: PASSED");
 }
 
 /* *****************************************************************************
@@ -219,8 +215,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
 
   FIO_ASSERT(!FIO_MEMCMP(handshake_secret, rfc8448_handshake_secret, 32),
              "Handshake secret mismatch");
-  FIO_LOG_DDEBUG("  Handshake Secret: PASSED");
-
   /* Step 3: Derive client handshake traffic secret */
   fio_tls13_derive_secret(client_hs_traffic,
                           handshake_secret,
@@ -234,8 +228,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
   FIO_ASSERT(
       !FIO_MEMCMP(client_hs_traffic, rfc8448_client_hs_traffic_secret, 32),
       "Client handshake traffic secret mismatch");
-  FIO_LOG_DDEBUG("  Client HS Traffic Secret: PASSED");
-
   /* Step 4: Derive server handshake traffic secret */
   fio_tls13_derive_secret(server_hs_traffic,
                           handshake_secret,
@@ -249,8 +241,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
   FIO_ASSERT(
       !FIO_MEMCMP(server_hs_traffic, rfc8448_server_hs_traffic_secret, 32),
       "Server handshake traffic secret mismatch");
-  FIO_LOG_DDEBUG("  Server HS Traffic Secret: PASSED");
-
   /* Step 5: Derive client handshake keys */
   fio_tls13_derive_traffic_keys(key, 16, iv, client_hs_traffic, 0);
 
@@ -258,8 +248,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
              "Client handshake key mismatch");
   FIO_ASSERT(!FIO_MEMCMP(iv, rfc8448_client_hs_iv, 12),
              "Client handshake IV mismatch");
-  FIO_LOG_DDEBUG("  Client HS Key/IV: PASSED");
-
   /* Step 6: Derive server handshake keys */
   fio_tls13_derive_traffic_keys(key, 16, iv, server_hs_traffic, 0);
 
@@ -267,15 +255,11 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
              "Server handshake key mismatch");
   FIO_ASSERT(!FIO_MEMCMP(iv, rfc8448_server_hs_iv, 12),
              "Server handshake IV mismatch");
-  FIO_LOG_DDEBUG("  Server HS Key/IV: PASSED");
-
   /* Step 7: Derive Master Secret */
   fio_tls13_derive_master_secret(master_secret, handshake_secret, 0);
 
   FIO_ASSERT(!FIO_MEMCMP(master_secret, rfc8448_master_secret, 32),
              "Master secret mismatch");
-  FIO_LOG_DDEBUG("  Master Secret: PASSED");
-
   /* Step 8: Derive client application traffic secret */
   fio_tls13_derive_secret(client_app_traffic,
                           master_secret,
@@ -289,8 +273,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
   FIO_ASSERT(
       !FIO_MEMCMP(client_app_traffic, rfc8448_client_app_traffic_secret, 32),
       "Client application traffic secret mismatch");
-  FIO_LOG_DDEBUG("  Client App Traffic Secret: PASSED");
-
   /* Step 9: Derive server application traffic secret */
   fio_tls13_derive_secret(server_app_traffic,
                           master_secret,
@@ -304,8 +286,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
   FIO_ASSERT(
       !FIO_MEMCMP(server_app_traffic, rfc8448_server_app_traffic_secret, 32),
       "Server application traffic secret mismatch");
-  FIO_LOG_DDEBUG("  Server App Traffic Secret: PASSED");
-
   /* Step 10: Derive client application keys */
   fio_tls13_derive_traffic_keys(key, 16, iv, client_app_traffic, 0);
 
@@ -313,8 +293,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
              "Client application key mismatch");
   FIO_ASSERT(!FIO_MEMCMP(iv, rfc8448_client_app_iv, 12),
              "Client application IV mismatch");
-  FIO_LOG_DDEBUG("  Client App Key/IV: PASSED");
-
   /* Step 11: Derive server application keys */
   fio_tls13_derive_traffic_keys(key, 16, iv, server_app_traffic, 0);
 
@@ -322,9 +300,6 @@ FIO_SFUNC void fio___test_tls13_rfc8448_key_schedule(void) {
              "Server application key mismatch");
   FIO_ASSERT(!FIO_MEMCMP(iv, rfc8448_server_app_iv, 12),
              "Server application IV mismatch");
-  FIO_LOG_DDEBUG("  Server App Key/IV: PASSED");
-
-  FIO_LOG_DDEBUG("TLS 1.3 RFC 8448 Key Schedule: ALL PASSED");
 }
 
 /* *****************************************************************************
@@ -348,8 +323,6 @@ FIO_SFUNC void fio___test_tls13_finished_key(void) {
 
   FIO_ASSERT(FIO_MEMCMP(finished_key, zero, 32) != 0,
              "Server finished key is zero");
-
-  FIO_LOG_DDEBUG("TLS 1.3 Finished Key derivation: PASSED");
 }
 
 /* *****************************************************************************
@@ -368,8 +341,6 @@ FIO_SFUNC void fio___test_tls13_traffic_update(void) {
              "Updated traffic secret is zero");
   FIO_ASSERT(FIO_MEMCMP(new_secret, rfc8448_client_app_traffic_secret, 32) != 0,
              "Updated traffic secret unchanged");
-
-  FIO_LOG_DDEBUG("TLS 1.3 Traffic Secret Update: PASSED");
 }
 
 /* *****************************************************************************
@@ -431,8 +402,6 @@ FIO_SFUNC void fio___test_tls13_sha384_variant(void) {
   fio_tls13_derive_traffic_keys(key, 32, iv, traffic_secret, 1);
   FIO_ASSERT(FIO_MEMCMP(key, zero32, 32) != 0, "SHA-384 traffic key is zero");
   FIO_ASSERT(FIO_MEMCMP(iv, zero12, 12) != 0, "SHA-384 traffic IV is zero");
-
-  FIO_LOG_DDEBUG("TLS 1.3 SHA-384 variant: PASSED");
 }
 
 /* *****************************************************************************
@@ -467,8 +436,6 @@ FIO_SFUNC void fio___test_tls13_determinism(void) {
 
   FIO_ASSERT(!FIO_MEMCMP(key1, key2, 16), "Traffic key not deterministic");
   FIO_ASSERT(!FIO_MEMCMP(iv1, iv2, 12), "Traffic IV not deterministic");
-
-  FIO_LOG_DDEBUG("TLS 1.3 Determinism: PASSED");
 }
 
 /* *****************************************************************************
@@ -518,38 +485,19 @@ FIO_SFUNC void fio___test_tls13_edge_cases(void) {
                               32,
                               0);
   FIO_ASSERT(FIO_MEMCMP(output, zero, 32) != 0, "Output with context is zero");
-
-  FIO_LOG_DDEBUG("TLS 1.3 Edge Cases: PASSED");
 }
 
 /* *****************************************************************************
 Main test runner
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Key Schedule (RFC 8446 Section 7.1)...\n");
-
-  FIO_LOG_DDEBUG("=== Basic Functionality Tests ===");
   fio___test_tls13_hkdf_expand_label_basic();
   fio___test_tls13_derive_secret_basic();
-
-  FIO_LOG_DDEBUG("=== RFC 8448 Test Vectors ===");
   fio___test_tls13_rfc8448_key_schedule();
-
-  FIO_LOG_DDEBUG("=== Finished Key Tests ===");
   fio___test_tls13_finished_key();
-
-  FIO_LOG_DDEBUG("=== Traffic Update Tests ===");
   fio___test_tls13_traffic_update();
-
-  FIO_LOG_DDEBUG("=== SHA-384 Variant Tests ===");
   fio___test_tls13_sha384_variant();
-
-  FIO_LOG_DDEBUG("=== Determinism Tests ===");
   fio___test_tls13_determinism();
-
-  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
   fio___test_tls13_edge_cases();
-
-  FIO_LOG_DDEBUG("\nAll TLS 1.3 Key Schedule tests passed!");
   return 0;
 }

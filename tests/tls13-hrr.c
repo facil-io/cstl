@@ -12,8 +12,6 @@ Tests for RFC 8446 Section 4.1.4 HelloRetryRequest handling.
 Test: HRR Random Detection
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hrr_detection(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 HRR detection...");
-
   /* HRR magic random value from RFC 8446 */
   static const uint8_t hrr_random[32] = {
       0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11, 0xBE, 0x1D, 0x8C,
@@ -95,16 +93,12 @@ FIO_SFUNC void fio___test_tls13_hrr_detection(void) {
   ret = fio_tls13_parse_server_hello(&sh, hrr_data, hrr_len);
   FIO_ASSERT(ret == 0, "Normal SH parse should succeed");
   FIO_ASSERT(sh.is_hello_retry_request == 0, "Should NOT detect HRR");
-
-  FIO_LOG_DDEBUG("  PASS: HRR detection tests");
 }
 
 /* *****************************************************************************
 Test: Transcript Hash with message_hash
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hrr_transcript(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 HRR transcript hash...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -146,16 +140,12 @@ FIO_SFUNC void fio___test_tls13_hrr_transcript(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_client_destroy(&client2);
-
-  FIO_LOG_DDEBUG("  PASS: HRR transcript hash tests");
 }
 
 /* *****************************************************************************
 Test: Second HRR Rejection
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hrr_second_rejection(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 second HRR rejection...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -212,16 +202,12 @@ FIO_SFUNC void fio___test_tls13_hrr_second_rejection(void) {
              "Alert should be unexpected_message");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  PASS: Second HRR rejection tests");
 }
 
 /* *****************************************************************************
 Test: HRR No Change Detection
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hrr_no_change(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 HRR no-change detection...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -276,16 +262,12 @@ FIO_SFUNC void fio___test_tls13_hrr_no_change(void) {
              "Alert should be illegal_parameter");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  PASS: HRR no-change detection tests");
 }
 
 /* *****************************************************************************
 Test: Cookie Handling
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hrr_cookie(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 HRR cookie handling...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -397,16 +379,12 @@ FIO_SFUNC void fio___test_tls13_hrr_cookie(void) {
 #endif
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  PASS: HRR cookie handling tests");
 }
 
 /* *****************************************************************************
 Test: ClientHello2 Building
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_client_hello2(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ClientHello2 building...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -437,16 +415,12 @@ FIO_SFUNC void fio___test_tls13_client_hello2(void) {
              "Random should be same as original");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  PASS: ClientHello2 building tests");
 }
 
 /* *****************************************************************************
 Test: ClientHello2 with Cookie
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_client_hello2_cookie(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ClientHello2 with cookie...");
-
   /* Initialize a client */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -478,16 +452,12 @@ FIO_SFUNC void fio___test_tls13_client_hello2_cookie(void) {
   FIO_ASSERT(found_cookie, "ClientHello2 should contain the cookie");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  PASS: ClientHello2 with cookie tests");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("=== TLS 1.3 HelloRetryRequest Tests ===\n");
-
   fio___test_tls13_hrr_detection();
   fio___test_tls13_hrr_transcript();
   fio___test_tls13_hrr_second_rejection();
@@ -495,7 +465,5 @@ int main(void) {
   fio___test_tls13_hrr_cookie();
   fio___test_tls13_client_hello2();
   fio___test_tls13_client_hello2_cookie();
-
-  FIO_LOG_DDEBUG("\n=== All TLS 1.3 HRR Tests PASSED ===");
   return 0;
 }

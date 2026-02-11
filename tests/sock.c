@@ -31,7 +31,6 @@ int main(void) {
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
     errno = 0;
-    FIO_LOG_DDEBUG("Testing %s socket API", server_tests[i].msg);
     int srv = fio_sock_open(server_tests[i].address,
                             server_tests[i].port,
                             server_tests[i].flag | FIO_SOCK_SERVER);
@@ -106,7 +105,6 @@ int main(void) {
   }
   {
     /* UDP semi test */
-    FIO_LOG_DDEBUG("Testing UDP socket (abbreviated test)");
     int srv =
         fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
     int n = 0;
@@ -134,20 +132,16 @@ int main(void) {
     FIO_ASSERT(srv != -1,
                "Couldn't open UDP server socket: %s",
                strerror(errno));
-    FIO_LOG_DDEBUG("Opening client UDP socket.");
     int cl = fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
     FIO_ASSERT(cl != -1,
                "Couldn't open UDP client socket: %s",
                strerror(errno));
-    FIO_LOG_DDEBUG("Starting UDP roundtrip.");
     FIO_ASSERT(fio_sock_write(cl, "hello", 5) != -1,
                "couldn't send datagram from client");
     char buf[64];
-    FIO_LOG_DDEBUG("Receiving UDP msg.");
     FIO_ASSERT(recvfrom(srv, buf, 64, 0, NULL, NULL) != -1,
                "couldn't read datagram");
     FIO_ASSERT(!memcmp(buf, "hello", 5), "transmission error");
-    FIO_LOG_DDEBUG("cleaning up UDP sockets.");
     fio_sock_close(srv);
     fio_sock_close(cl);
   }

@@ -31,7 +31,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha1_open_ssl_wrapper)(char *data,
 #endif
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha1)(void) {
-  FIO_LOG_DDEBUG("Testing SHA-1");
   struct {
     const char *str;
     const char *sha1;
@@ -96,8 +95,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, __sha512_open_ssl_wrapper)(char *data,
 #endif /* HAVE_OPENSSL */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
-  FIO_LOG_DDEBUG("Testing SHA-2");
-
   /* Test SHA-256 for various input sizes around block boundaries */
 #if HAVE_OPENSSL
   {
@@ -200,7 +197,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
       },
   };
 #if HAVE_OPENSSL
-  FIO_LOG_DEBUG2("Testing against OpenSSL SHA512 and SHA256");
 #endif
   for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
     if (!data[i].str)
@@ -370,7 +366,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2)(void) {
   }
 
   {
-    FIO_LOG_DDEBUG("Testing SHA-2 based secret.");
     fio_u512 s0 = {0};
     fio_u512 s1 = fio_secret();
     FIO_ASSERT(!fio_u512_is_eq(&s0, &s1), "Secret is zero?!");
@@ -387,8 +382,6 @@ https://www.rfc-editor.org/rfc/rfc4231
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
-  FIO_LOG_DDEBUG("Testing HMAC-SHA256 / HMAC-SHA512 (RFC 4231)");
-
   /* RFC 4231 Test Case 1 */
   {
     /* clang-format off */
@@ -615,7 +608,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
 #if HAVE_OPENSSL
   /* Compare with OpenSSL for random inputs */
   {
-    FIO_LOG_DDEBUG("Comparing HMAC with OpenSSL");
     uint8_t key[64];
     uint8_t data[256];
     fio_rand_bytes(key, sizeof(key));
@@ -639,8 +631,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, hmac)(void) {
                "HMAC-SHA512 mismatch with OpenSSL");
   }
 #endif
-
-  FIO_LOG_DDEBUG("HMAC tests passed.");
 }
 
 /* *****************************************************************************
@@ -648,11 +638,8 @@ SHA Edge Case Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
-  FIO_LOG_DDEBUG("Testing SHA edge cases...");
-
   /* Test: Empty input (0 bytes) - known values */
   {
-    FIO_LOG_DDEBUG("  Testing empty input...");
     /* SHA-1("") = da39a3ee5e6b4b0d3255bfef95601890afd80709 */
     static const uint8_t sha1_empty[20] = {
         0xda, 0x39, 0xa3, 0xee, 0x5e, 0x6b, 0x4b, 0x0d, 0x32, 0x55,
@@ -689,7 +676,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: Single byte input */
   {
-    FIO_LOG_DDEBUG("  Testing single byte input...");
     uint8_t data[1] = {0x00};
 
     fio_sha1_s sha1 = fio_sha1(data, 1);
@@ -715,7 +701,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: Inputs at block boundaries */
   {
-    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
     /* SHA-256 block size = 64 bytes, SHA-512 block size = 128 bytes */
     size_t test_sizes[] = {63, 64, 65, 127, 128, 129};
 
@@ -750,7 +735,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: Incremental hashing vs one-shot */
   {
-    FIO_LOG_DDEBUG("  Testing incremental vs one-shot hashing...");
     uint8_t data[1000];
     fio_rand_bytes(data, 1000);
 
@@ -796,7 +780,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: Large input (1MB) */
   {
-    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
     size_t len = 1024 * 1024;
     uint8_t *data = (uint8_t *)malloc(len);
     FIO_ASSERT(data, "Memory allocation failed");
@@ -827,7 +810,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: All zeros input */
   {
-    FIO_LOG_DDEBUG("  Testing all-zeros input...");
     uint8_t data[64] = {0};
 
     fio_u256 sha256 = fio_sha256(data, 64);
@@ -848,7 +830,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: All ones input */
   {
-    FIO_LOG_DDEBUG("  Testing all-ones input...");
     uint8_t data[64];
     FIO_MEMSET(data, 0xFF, 64);
 
@@ -870,7 +851,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: Different inputs produce different hashes */
   {
-    FIO_LOG_DDEBUG("  Testing different inputs produce different hashes...");
     uint8_t data1[32] = {0};
     uint8_t data2[32] = {0};
     data2[0] = 1; /* Single bit difference */
@@ -890,7 +870,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: HMAC with empty key */
   {
-    FIO_LOG_DDEBUG("  Testing HMAC with empty key...");
     uint8_t data[32];
     fio_rand_bytes(data, 32);
 
@@ -914,7 +893,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: HMAC with empty message */
   {
-    FIO_LOG_DDEBUG("  Testing HMAC with empty message...");
     uint8_t key[32];
     fio_rand_bytes(key, 32);
 
@@ -937,7 +915,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 
   /* Test: HMAC with key longer than block size */
   {
-    FIO_LOG_DDEBUG("  Testing HMAC with long key...");
     uint8_t key[256]; /* Much longer than block size */
     uint8_t data[32];
     fio_rand_bytes(key, 256);
@@ -959,8 +936,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
     FIO_ASSERT(!hmac512_zero,
                "HMAC-SHA512 with long key should not be all zeros");
   }
-
-  FIO_LOG_DDEBUG("SHA edge case tests passed!");
 }
 
 int main(void) {

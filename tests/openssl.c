@@ -26,8 +26,6 @@ int main(void) {
 Test: fio_openssl_io_functions returns valid structure
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_io_functions)(void) {
-  FIO_LOG_DDEBUG("Testing fio_openssl_io_functions()");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   FIO_ASSERT(funcs.build_context != NULL,
@@ -46,16 +44,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_io_functions)(void) {
              "fio_openssl_io_functions: finish should not be NULL");
   FIO_ASSERT(funcs.cleanup != NULL,
              "fio_openssl_io_functions: cleanup should not be NULL");
-
-  FIO_LOG_DDEBUG("  fio_openssl_io_functions() - PASS");
 }
 
 /* *****************************************************************************
 Test: TLS context creation and destruction
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_context)(void) {
-  FIO_LOG_DDEBUG("Testing TLS context creation/destruction");
-
   /* Test basic TLS context creation */
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls != NULL, "fio_io_tls_new() should return non-NULL");
@@ -67,16 +61,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_context)(void) {
   /* Free both references */
   fio_io_tls_free(tls_dup);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  TLS context creation/destruction - PASS");
 }
 
 /* *****************************************************************************
 Test: Self-signed certificate generation (via context build)
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_self_signed)(void) {
-  FIO_LOG_DDEBUG("Testing self-signed certificate generation");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   /* Create TLS config without certificates - should trigger self-signed */
@@ -95,16 +85,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_self_signed)(void) {
   /* Clean up */
   funcs.free_context(ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Self-signed certificate generation - PASS");
 }
 
 /* *****************************************************************************
 Test: Self-signed certificate with custom server name
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_self_signed_named)(void) {
-  FIO_LOG_DDEBUG("Testing self-signed certificate with server name");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   /* Create TLS config with server name but no cert files */
@@ -126,8 +112,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_self_signed_named)(void) {
   /* Clean up */
   funcs.free_context(ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Self-signed certificate with server name - PASS");
 }
 
 /* *****************************************************************************
@@ -136,8 +120,6 @@ Test: ALPN protocol configuration
 FIO_SFUNC void fio___test_alpn_callback(fio_io_s *io) { (void)io; }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_alpn)(void) {
-  FIO_LOG_DDEBUG("Testing ALPN protocol configuration");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   fio_io_tls_s *tls = fio_io_tls_new();
@@ -163,16 +145,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_alpn)(void) {
   /* Clean up */
   funcs.free_context(ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  ALPN protocol configuration - PASS");
 }
 
 /* *****************************************************************************
 Test: Trust store configuration
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_trust)(void) {
-  FIO_LOG_DDEBUG("Testing trust store configuration");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   fio_io_tls_s *tls = fio_io_tls_new();
@@ -214,16 +192,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_trust)(void) {
 
   /* Clean up */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Trust store configuration - PASS");
 }
 
 /* *****************************************************************************
 Test: Client context creation
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_client_context)(void) {
-  FIO_LOG_DDEBUG("Testing client context creation");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   fio_io_tls_s *tls = fio_io_tls_new();
@@ -236,16 +210,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_client_context)(void) {
   /* Clean up */
   funcs.free_context(ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Client context creation - PASS");
 }
 
 /* *****************************************************************************
 Test: Multiple certificate entries
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_multi_cert)(void) {
-  FIO_LOG_DDEBUG("Testing multiple certificate entries");
-
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls != NULL, "fio_io_tls_new() failed");
 
@@ -259,16 +229,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_multi_cert)(void) {
 
   /* Clean up */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Multiple certificate entries - PASS");
 }
 
 /* *****************************************************************************
 Test: TLS default functions registration
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_default_registration)(void) {
-  FIO_LOG_DDEBUG("Testing OpenSSL as default TLS implementation");
-
   /* Get current default functions */
   fio_io_functions_s defaults = fio_io_tls_default_functions(NULL);
 
@@ -279,16 +245,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_default_registration)(void) {
              "Default TLS functions should have read set");
   FIO_ASSERT(defaults.write != NULL,
              "Default TLS functions should have write set");
-
-  FIO_LOG_DDEBUG("  OpenSSL as default TLS implementation - PASS");
 }
 
 /* *****************************************************************************
 Test: Trust store with explicit file path (count verification)
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_trust_explicit)(void) {
-  FIO_LOG_DDEBUG("Testing trust store with explicit paths");
-
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls != NULL, "fio_io_tls_new() failed");
 
@@ -311,8 +273,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_trust_explicit)(void) {
 
   /* Clean up - don't build context since files don't exist */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  Trust store with explicit paths - PASS");
 }
 
 /* *****************************************************************************
@@ -355,8 +315,6 @@ FIO_SFUNC int fio___test_each_trust_cb(struct fio_io_tls_each_s *e,
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_each)(void) {
-  FIO_LOG_DDEBUG("Testing fio_io_tls_each() iteration");
-
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls != NULL, "fio_io_tls_new() failed");
 
@@ -397,16 +355,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_each)(void) {
 
   /* Clean up */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  fio_io_tls_each() iteration - PASS");
 }
 
 /* *****************************************************************************
 Test: Context build with full configuration
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_full_config)(void) {
-  FIO_LOG_DDEBUG("Testing full TLS configuration");
-
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
   /* Test server configuration (self-signed cert + ALPN) */
@@ -445,16 +399,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_full_config)(void) {
 
     fio_io_tls_free(tls);
   }
-
-  FIO_LOG_DDEBUG("  Full TLS configuration - PASS");
 }
 
 /* *****************************************************************************
 Test: Empty ALPN protocol name handling
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_alpn_edge_cases)(void) {
-  FIO_LOG_DDEBUG("Testing ALPN edge cases");
-
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls != NULL, "fio_io_tls_new() failed");
 
@@ -475,16 +425,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_alpn_edge_cases)(void) {
 
   /* Clean up */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  ALPN edge cases - PASS");
 }
 
 /* *****************************************************************************
 Test: TLS from URL parsing
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_from_url)(void) {
-  FIO_LOG_DDEBUG("Testing fio_io_tls_from_url()");
-
   /* Test HTTPS URL - should create TLS context */
   {
     fio_url_s url = fio_url_parse("https://example.com:443/path", 28);
@@ -510,8 +456,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_from_url)(void) {
                "fio_io_tls_from_url() should create TLS for wss URL");
     fio_io_tls_free(tls);
   }
-
-  FIO_LOG_DDEBUG("  fio_io_tls_from_url() - PASS");
 }
 
 /* *****************************************************************************
@@ -524,9 +468,6 @@ that don't run the reactor, the deferred cleanup tasks never execute.
 This is acceptable for unit testing purposes.
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("Testing OpenSSL TLS Module");
-  FIO_LOG_DDEBUG("  (OpenSSL version: %s)", OPENSSL_VERSION_TEXT);
-
   FIO_NAME_TEST(stl, openssl_io_functions)();
   FIO_NAME_TEST(stl, openssl_tls_context)();
   FIO_NAME_TEST(stl, openssl_self_signed)();
@@ -541,11 +482,6 @@ int main(void) {
   FIO_NAME_TEST(stl, openssl_full_config)();
   FIO_NAME_TEST(stl, openssl_alpn_edge_cases)();
   FIO_NAME_TEST(stl, openssl_tls_from_url)();
-
-  FIO_LOG_DDEBUG("OpenSSL TLS Module tests complete.");
-  FIO_LOG_DDEBUG(
-      "  (Note: leak counter warnings for fio___openssl_context_s are expected "
-      "because free_context uses fio_io_defer which requires the IO reactor)");
   return 0;
 }
 

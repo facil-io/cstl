@@ -15,18 +15,11 @@ static volatile int test_message_received = 0;
 static volatile int test_unsubscribe_called = 0;
 
 static void test_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("Message received on channel: %.*s",
-                 (int)msg->channel.len,
-                 msg->channel.buf);
-  FIO_LOG_DEBUG2("Message content: %.*s",
-                 (int)msg->message.len,
-                 msg->message.buf);
   test_message_received = 1;
   (void)msg;
 }
 
 static void test_on_unsubscribe(void *udata) {
-  FIO_LOG_DEBUG2("Unsubscribe callback called with udata: %p", udata);
   test_unsubscribe_called = 1;
   (void)udata;
 }
@@ -181,28 +174,15 @@ FIO_SFUNC void fio___test_ps2_basic_on_message(fio_pubsub_msg_s *msg) {
                msg->message.len);
     fio___test_ps2_basic_message[msg->message.len] = '\0';
   }
-  FIO_LOG_DEBUG2("(%d) basic_on_message: channel=%.*s message=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->message.len,
-                 msg->message.buf);
 }
 
-FIO_SFUNC void fio___test_ps2_basic_on_unsub(void *udata) {
-  FIO_LOG_DEBUG2("(%d) basic_on_unsub called with udata=%p",
-                 fio_io_pid(),
-                 udata);
-  (void)udata;
-}
+FIO_SFUNC void fio___test_ps2_basic_on_unsub(void *udata) { (void)udata; }
 
 /* Timer to trigger subscribe after reactor starts */
 FIO_SFUNC int fio___test_ps2_basic_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to test-channel", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("test-channel"),
                        .on_message = fio___test_ps2_basic_on_message,
                        .on_unsubscribe = fio___test_ps2_basic_on_unsub);
@@ -214,8 +194,6 @@ FIO_SFUNC int fio___test_ps2_basic_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing to test-channel", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("test-channel"),
                      .message = FIO_BUF_INFO1("hello-world"));
   return -1; /* One-shot */
@@ -229,8 +207,6 @@ FIO_SFUNC int fio___test_ps2_basic_check(void *ignr_1, void *ignr_2) {
 
   /* Check every 50ms if we received the message */
   if (fio___test_ps2_basic_received > 0) {
-    FIO_LOG_DEBUG2("(%d) [Master] Message received, stopping reactor",
-                   fio_io_pid());
     fio_io_stop();
     return -1; /* Stop checking */
   }
@@ -242,7 +218,6 @@ FIO_SFUNC int fio___test_ps2_basic_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Master] Timeout - stopping reactor", fio_io_pid());
   fio_io_stop();
   return -1;
 }
@@ -266,11 +241,6 @@ FIO_SFUNC void fio___test_ps2_basic_on_finish(void *ignr_) {
                      0,
              "[Master] Message should be 'hello-world' (got '%s')",
              fio___test_ps2_basic_message);
-  FIO_LOG_DEBUG2("(%d) [Master] Basic test: received=%d channel=%s message=%s",
-                 fio_io_pid(),
-                 fio___test_ps2_basic_received,
-                 fio___test_ps2_basic_channel,
-                 fio___test_ps2_basic_message);
 }
 
 FIO_SFUNC void fio___pubsub_test_basic(void) {
@@ -317,22 +287,13 @@ static volatile int fio___test_ps2_w2m_master_confirms = 0;
 
 /* Master handler for worker confirmation */
 FIO_SFUNC void fio___test_ps2_w2m_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_w2m_master_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Worker confirmed receipt: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_w2m_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Received message: channel=%.*s message=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->message.len,
-                 msg->message.buf);
-
+  (void)msg;
   /* Report to master via IPC */
   const char *confirm = "received";
   fio_ipc_call(.call = fio___test_ps2_w2m_confirm_handler,
@@ -345,8 +306,6 @@ FIO_SFUNC void fio___test_ps2_w2m_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to worker-channel", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-channel"),
                        .on_message = fio___test_ps2_w2m_on_message);
 }
@@ -356,8 +315,6 @@ FIO_SFUNC int fio___test_ps2_w2m_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing to worker-channel", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("worker-channel"),
                      .message = FIO_BUF_INFO1("master-message"));
   return -1;
@@ -382,9 +339,6 @@ FIO_SFUNC void fio___test_ps2_w2m_on_finish(void *ignr_) {
       fio___test_ps2_w2m_master_confirms >= 1,
       "[Master] Should receive at least 1 confirmation from worker (got %d)",
       fio___test_ps2_w2m_master_confirms);
-  FIO_LOG_DEBUG2("(%d) [Master] W2M test: confirms=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_w2m_master_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_worker_subscribe(void) {
@@ -432,33 +386,19 @@ static volatile int fio___test_ps2_wpub_worker_confirms = 0;
 
 /* Master handler for worker confirmations */
 FIO_SFUNC void fio___test_ps2_wpub_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_wpub_worker_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Worker confirmed: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Master message callback */
 FIO_SFUNC void fio___test_ps2_wpub_master_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
   fio___test_ps2_wpub_master_received++;
-  FIO_LOG_DEBUG2("(%d) [Master] Received message: channel=%.*s message=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->message.len,
-                 msg->message.buf);
 }
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_wpub_worker_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Received message: channel=%.*s message=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->message.len,
-                 msg->message.buf);
-
+  (void)msg;
   /* Report to master */
   const char *confirm = "worker_received";
   fio_ipc_call(.call = fio___test_ps2_wpub_confirm_handler,
@@ -471,8 +411,6 @@ FIO_SFUNC void fio___test_ps2_wpub_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to pub-channel", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("pub-channel"),
                        .on_message = fio___test_ps2_wpub_worker_on_message);
 }
@@ -482,7 +420,6 @@ FIO_SFUNC int fio___test_ps2_wpub_master_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to pub-channel", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("pub-channel"),
                        .on_message = fio___test_ps2_wpub_master_on_message);
   return -1;
@@ -493,8 +430,6 @@ FIO_SFUNC int fio___test_ps2_wpub_worker_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Publishing to pub-channel", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("pub-channel"),
                      .message = FIO_BUF_INFO1("worker-message"));
   return -1;
@@ -527,12 +462,6 @@ FIO_SFUNC void fio___test_ps2_wpub_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_wpub_worker_confirms >= 1,
              "[Master] Should receive worker confirmation (got %d)",
              fio___test_ps2_wpub_worker_confirms);
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] WPUB test: master_received=%d worker_confirms=%d",
-      fio_io_pid(),
-      fio___test_ps2_wpub_master_received,
-      fio___test_ps2_wpub_worker_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_worker_publish(void) {
@@ -594,10 +523,6 @@ FIO_SFUNC void fio___test_ps2_pattern_on_message(fio_pubsub_msg_s *msg) {
                msg->channel.len);
     fio___test_ps2_pattern_channels[idx][msg->channel.len] = '\0';
   }
-  FIO_LOG_DEBUG2("(%d) Pattern received: channel=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf);
 }
 
 /* Subscribe with pattern */
@@ -605,8 +530,6 @@ FIO_SFUNC int fio___test_ps2_pattern_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to pattern: news/*", fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("news/*"),
                        .on_message = fio___test_ps2_pattern_on_message,
                        .is_pattern = 1);
@@ -618,10 +541,6 @@ FIO_SFUNC int fio___test_ps2_pattern_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Publishing to news/sports, news/tech, weather/rain",
-      fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("news/sports"),
                      .message = FIO_BUF_INFO1("sports-news"));
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("news/tech"),
@@ -651,10 +570,6 @@ FIO_SFUNC void fio___test_ps2_pattern_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_pattern_received == 2,
              "[Master] Pattern should match exactly 2 messages (got %d)",
              fio___test_ps2_pattern_received);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Pattern test: received=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_pattern_received);
 }
 
 FIO_SFUNC void fio___pubsub_test_pattern(void) {
@@ -702,22 +617,14 @@ static volatile int fio___test_ps2_filter_received_1 = 0;
 
 /* Message callback for filter 0 */
 FIO_SFUNC void fio___test_ps2_filter0_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
   fio___test_ps2_filter_received_0++;
-  FIO_LOG_DEBUG2("(%d) Filter 0 received: channel=%.*s filter=%d",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->filter);
 }
 
 /* Message callback for filter 1 */
 FIO_SFUNC void fio___test_ps2_filter1_on_message(fio_pubsub_msg_s *msg) {
+  (void)msg;
   fio___test_ps2_filter_received_1++;
-  FIO_LOG_DEBUG2("(%d) Filter 1 received: channel=%.*s filter=%d",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf,
-                 (int)msg->filter);
 }
 
 /* Subscribe to same channel with different filters */
@@ -725,10 +632,6 @@ FIO_SFUNC int fio___test_ps2_filter_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Subscribing to 'data' with filter=0 and filter=1",
-      fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("data"),
                        .on_message = fio___test_ps2_filter0_on_message,
                        .filter = 0);
@@ -743,9 +646,6 @@ FIO_SFUNC int fio___test_ps2_filter_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing to 'data' with filter=0",
-                 fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("data"),
                      .message = FIO_BUF_INFO1("filter0-message"),
                      .filter = 0);
@@ -774,11 +674,6 @@ FIO_SFUNC void fio___test_ps2_filter_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_filter_received_1 == 0,
              "[Master] Filter 1 should receive 0 messages (got %d)",
              fio___test_ps2_filter_received_1);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Filter test: filter0=%d filter1=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_filter_received_0,
-                 fio___test_ps2_filter_received_1);
 }
 
 FIO_SFUNC void fio___pubsub_test_filter(void) {
@@ -825,14 +720,12 @@ static volatile int fio___test_ps2_unsub_callback_called = 0;
 /* Message callback */
 FIO_SFUNC void fio___test_ps2_unsub_on_message(fio_pubsub_msg_s *msg) {
   fio___test_ps2_unsub_received++;
-  FIO_LOG_DEBUG2("(%d) Unsub test received message", fio_io_pid());
   (void)msg;
 }
 
 /* Unsubscribe callback */
 FIO_SFUNC void fio___test_ps2_unsub_on_unsub(void *udata) {
   fio___test_ps2_unsub_callback_called++;
-  FIO_LOG_DEBUG2("(%d) Unsubscribe callback called", fio_io_pid());
   (void)udata;
 }
 
@@ -841,11 +734,7 @@ FIO_SFUNC int fio___test_ps2_unsub_unsubscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Unsubscribing from unsub-channel",
-                 fio_io_pid());
-  int r = fio_pubsub_unsubscribe(.channel = FIO_BUF_INFO1("unsub-channel"));
-  FIO_LOG_DEBUG2("(%d) [Master] Unsubscribe returned: %d", fio_io_pid(), r);
+  (void)fio_pubsub_unsubscribe(.channel = FIO_BUF_INFO1("unsub-channel"));
   return -1;
 }
 
@@ -854,10 +743,6 @@ FIO_SFUNC int fio___test_ps2_unsub_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Publishing to unsub-channel (should not be received)",
-      fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("unsub-channel"),
                      .message = FIO_BUF_INFO1("after-unsub"));
   return -1;
@@ -887,11 +772,6 @@ FIO_SFUNC void fio___test_ps2_unsub_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_unsub_callback_called == 1,
              "[Master] Unsubscribe callback should be called once (got %d)",
              fio___test_ps2_unsub_callback_called);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Unsub test: received=%d callback=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_unsub_received,
-                 fio___test_ps2_unsub_callback_called);
 }
 
 /* Subscribe on startup (runs in IO thread context) */
@@ -899,9 +779,6 @@ FIO_SFUNC void fio___test_ps2_unsub_on_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_master())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to unsub-channel (on_start)",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("unsub-channel"),
                        .on_message = fio___test_ps2_unsub_on_message,
                        .on_unsubscribe = fio___test_ps2_unsub_on_unsub);
@@ -956,20 +833,13 @@ static volatile int fio___test_ps2_bcast_master_confirms = 0;
 
 /* Master handler for worker confirmations */
 FIO_SFUNC void fio___test_ps2_bcast_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_bcast_master_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcast confirm from worker: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Worker message callback */
 FIO_SFUNC void fio___test_ps2_bcast_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Broadcast received: channel=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf);
-
+  (void)msg;
   /* Confirm to master */
   char buf[64];
   int len = snprintf(buf, sizeof(buf), "worker_%d_received", fio_io_pid());
@@ -982,9 +852,6 @@ FIO_SFUNC void fio___test_ps2_bcast_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to broadcast-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("broadcast-channel"),
                        .on_message = fio___test_ps2_bcast_on_message);
 }
@@ -994,8 +861,6 @@ FIO_SFUNC int fio___test_ps2_bcast_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing to broadcast-channel", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("broadcast-channel"),
                      .message = FIO_BUF_INFO1("broadcast-message"));
   return -1;
@@ -1020,10 +885,6 @@ FIO_SFUNC void fio___test_ps2_bcast_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_bcast_master_confirms >= 3,
              "[Master] Should receive 3 confirmations (got %d)",
              fio___test_ps2_bcast_master_confirms);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcast test: confirms=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_bcast_master_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_broadcast(void) {
@@ -1081,8 +942,6 @@ FIO_SFUNC void fio___test_ps2_data_on_message(fio_pubsub_msg_s *msg) {
 
   if (valid && msg->message.len == 65536) {
     fio___test_ps2_data_verified = 1;
-    FIO_LOG_DEBUG2("(%d) Data integrity verified for 64KB message",
-                   fio_io_pid());
   } else {
     FIO_LOG_ERROR("(%d) Data integrity FAILED! len=%zu valid=%d",
                   fio_io_pid(),
@@ -1117,8 +976,6 @@ FIO_SFUNC int fio___test_ps2_data_publish(void *ignr_1, void *ignr_2) {
   for (size_t i = 0; i < size; ++i) {
     data[i] = (char)(i & 0xFF);
   }
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing 64KB message", fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("data-channel"),
                      .message = FIO_BUF_INFO2(data, size));
 
@@ -1143,10 +1000,6 @@ FIO_SFUNC void fio___test_ps2_data_on_finish(void *ignr_) {
 
   FIO_ASSERT(fio___test_ps2_data_verified == 1,
              "[Master] 64KB message data integrity should be verified");
-
-  FIO_LOG_DEBUG2("(%d) [Master] Data integrity test: verified=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_data_verified);
 }
 
 FIO_SFUNC void fio___pubsub_test_data_integrity(void) {
@@ -1193,22 +1046,12 @@ static volatile int fio___test_ps2_hist_messages_published = 0;
 /* Master handler for worker confirmation */
 FIO_SFUNC void fio___test_ps2_hist_confirm_handler(fio_ipc_s *ipc) {
   fio___test_ps2_hist_master_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Worker confirmed history receipt: count=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_hist_master_confirms);
   (void)ipc;
 }
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_hist_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2(
-      "(%d) [Worker] Received history message: channel=%.*s msg=%.*s",
-      fio_io_pid(),
-      (int)msg->channel.len,
-      msg->channel.buf,
-      (int)msg->message.len,
-      msg->message.buf);
-
+  (void)msg;
   /* Report each message to master via IPC */
   const char *confirm = "history_received";
   fio_ipc_call(.call = fio___test_ps2_hist_confirm_handler,
@@ -1223,8 +1066,6 @@ FIO_SFUNC int fio___test_ps2_hist_publish(void *ignr_1, void *ignr_2) {
     return -1;
 
   /* Publish 3 messages to history */
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing 3 messages to history-channel",
-                 fio_io_pid());
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("history-channel"),
                      .message = FIO_BUF_INFO1("history-msg-1"));
   fio_pubsub_publish(.channel = FIO_BUF_INFO1("history-channel"),
@@ -1241,9 +1082,6 @@ FIO_SFUNC int fio___test_ps2_hist_worker_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to history-channel with replay",
-                 fio_io_pid());
   /* Subscribe with replay_since = 1 (replay all history) */
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("history-channel"),
                        .on_message = fio___test_ps2_hist_on_message,
@@ -1287,10 +1125,6 @@ FIO_SFUNC void fio___test_ps2_hist_on_finish(void *ignr_) {
       fio___test_ps2_hist_master_confirms >= 3,
       "[Master] Worker should receive at least 3 history messages (got %d)",
       fio___test_ps2_hist_master_confirms);
-
-  FIO_LOG_DEBUG2("(%d) [Master] History replay test: confirms=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_hist_master_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_worker_history_replay(void) {
@@ -1419,23 +1253,13 @@ static volatile int fio___test_ps2_cluster_master_confirms = 0;
 
 /* Master handler for worker confirmation */
 FIO_SFUNC void fio___test_ps2_cluster_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_cluster_master_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Cluster test: worker confirmed receipt: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_cluster_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2(
-      "(%d) [Worker] Cluster test: received message: channel=%.*s message=%.*s",
-      fio_io_pid(),
-      (int)msg->channel.len,
-      msg->channel.buf,
-      (int)msg->message.len,
-      msg->message.buf);
-
+  (void)msg;
   /* Report to master via IPC */
   const char *confirm = "cluster_received";
   fio_ipc_call(.call = fio___test_ps2_cluster_confirm_handler,
@@ -1448,9 +1272,6 @@ FIO_SFUNC void fio___test_ps2_cluster_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to cluster-test-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("cluster-test-channel"),
                        .on_message = fio___test_ps2_cluster_on_message);
 }
@@ -1460,10 +1281,6 @@ FIO_SFUNC int fio___test_ps2_cluster_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Publishing to cluster-test-channel via cluster engine",
-      fio_io_pid());
   /* Explicitly use cluster engine */
   fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
                      .channel = FIO_BUF_INFO1("cluster-test-channel"),
@@ -1490,9 +1307,6 @@ FIO_SFUNC void fio___test_ps2_cluster_on_finish(void *ignr_) {
              "[Master] Cluster test: should receive at least 1 confirmation "
              "from worker (got %d)",
              fio___test_ps2_cluster_master_confirms);
-  FIO_LOG_DEBUG2("(%d) [Master] Cluster engine test: confirms=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_cluster_master_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_cluster_engine_publish(void) {
@@ -1545,20 +1359,13 @@ static volatile int fio___test_ps2_cluster_bcast_confirms = 0;
 
 /* Master handler for worker confirmations */
 FIO_SFUNC void fio___test_ps2_cluster_bcast_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_cluster_bcast_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Cluster broadcast confirm from worker: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Worker message callback */
 FIO_SFUNC void fio___test_ps2_cluster_bcast_on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Cluster broadcast received: channel=%.*s",
-                 fio_io_pid(),
-                 (int)msg->channel.len,
-                 msg->channel.buf);
-
+  (void)msg;
   /* Confirm to master */
   char buf[64];
   int len =
@@ -1572,9 +1379,6 @@ FIO_SFUNC void fio___test_ps2_cluster_bcast_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to cluster-broadcast-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("cluster-broadcast-channel"),
                        .on_message = fio___test_ps2_cluster_bcast_on_message);
 }
@@ -1584,10 +1388,6 @@ FIO_SFUNC int fio___test_ps2_cluster_bcast_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcasting to cluster-broadcast-channel via "
-                 "cluster engine",
-                 fio_io_pid());
   fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
                      .channel = FIO_BUF_INFO1("cluster-broadcast-channel"),
                      .message = FIO_BUF_INFO1("cluster-broadcast-message"));
@@ -1614,10 +1414,6 @@ FIO_SFUNC void fio___test_ps2_cluster_bcast_on_finish(void *ignr_) {
              "[Master] Cluster broadcast: should receive 3 confirmations (got "
              "%d)",
              fio___test_ps2_cluster_bcast_confirms);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Cluster broadcast test: confirms=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_cluster_bcast_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_cluster_engine_broadcast(void) {
@@ -1674,12 +1470,9 @@ static volatile int fio___test_ps2_cmp_cluster_received = 0;
 FIO_SFUNC void fio___test_ps2_cmp_on_message(fio_pubsub_msg_s *msg) {
   if (msg->message.len >= 3 && FIO_MEMCMP(msg->message.buf, "ipc", 3) == 0) {
     fio___test_ps2_cmp_ipc_received++;
-    FIO_LOG_DEBUG2("(%d) Comparison test: IPC message received", fio_io_pid());
   } else if (msg->message.len >= 7 &&
              FIO_MEMCMP(msg->message.buf, "cluster", 7) == 0) {
     fio___test_ps2_cmp_cluster_received++;
-    FIO_LOG_DEBUG2("(%d) Comparison test: Cluster message received",
-                   fio_io_pid());
   }
 }
 
@@ -1688,9 +1481,6 @@ FIO_SFUNC int fio___test_ps2_cmp_subscribe(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to comparison-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("comparison-channel"),
                        .on_message = fio___test_ps2_cmp_on_message);
   return -1;
@@ -1701,13 +1491,9 @@ FIO_SFUNC int fio___test_ps2_cmp_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing with IPC engine", fio_io_pid());
   fio_pubsub_publish(.engine = fio_pubsub_engine_ipc(),
                      .channel = FIO_BUF_INFO1("comparison-channel"),
                      .message = FIO_BUF_INFO1("ipc-message"));
-
-  FIO_LOG_DEBUG2("(%d) [Master] Publishing with cluster engine", fio_io_pid());
   fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
                      .channel = FIO_BUF_INFO1("comparison-channel"),
                      .message = FIO_BUF_INFO1("cluster-message"));
@@ -1736,11 +1522,6 @@ FIO_SFUNC void fio___test_ps2_cmp_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_ps2_cmp_cluster_received >= 1,
              "[Master] Cluster engine should deliver message (got %d)",
              fio___test_ps2_cmp_cluster_received);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Engine comparison test: ipc=%d cluster=%d",
-                 fio_io_pid(),
-                 fio___test_ps2_cmp_ipc_received,
-                 fio___test_ps2_cmp_cluster_received);
 }
 
 FIO_SFUNC void fio___pubsub_test_engine_comparison(void) {
@@ -1787,33 +1568,21 @@ static volatile int fio___test_ps2_wcluster_worker_confirms = 0;
 
 /* Master handler for worker confirmations */
 FIO_SFUNC void fio___test_ps2_wcluster_confirm_handler(fio_ipc_s *ipc) {
+  (void)ipc;
   fio___test_ps2_wcluster_worker_confirms++;
-  FIO_LOG_DEBUG2("(%d) [Master] Worker cluster publish confirmed: %.*s",
-                 fio_io_pid(),
-                 (int)ipc->len,
-                 ipc->data);
 }
 
 /* Master message callback */
 FIO_SFUNC void fio___test_ps2_wcluster_master_on_message(
     fio_pubsub_msg_s *msg) {
+  (void)msg;
   fio___test_ps2_wcluster_master_received++;
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Worker cluster publish: received message: channel=%.*s",
-      fio_io_pid(),
-      (int)msg->channel.len,
-      msg->channel.buf);
 }
 
 /* Worker message callback - reports to master */
 FIO_SFUNC void fio___test_ps2_wcluster_worker_on_message(
     fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2(
-      "(%d) [Worker] Worker cluster publish: received message: channel=%.*s",
-      fio_io_pid(),
-      (int)msg->channel.len,
-      msg->channel.buf);
-
+  (void)msg;
   /* Report to master */
   const char *confirm = "worker_cluster_received";
   fio_ipc_call(.call = fio___test_ps2_wcluster_confirm_handler,
@@ -1826,9 +1595,6 @@ FIO_SFUNC void fio___test_ps2_wcluster_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Subscribing to worker-cluster-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-cluster-channel"),
                        .on_message = fio___test_ps2_wcluster_worker_on_message);
 }
@@ -1839,8 +1605,6 @@ FIO_SFUNC int fio___test_ps2_wcluster_master_subscribe(void *ignr_1,
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Master] Subscribing to worker-cluster-channel",
-                 fio_io_pid());
   fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("worker-cluster-channel"),
                        .on_message = fio___test_ps2_wcluster_master_on_message);
   return -1;
@@ -1852,10 +1616,6 @@ FIO_SFUNC int fio___test_ps2_wcluster_worker_publish(void *ignr_1,
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
     return -1;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Worker] Publishing to worker-cluster-channel via cluster engine",
-      fio_io_pid());
   fio_pubsub_publish(.engine = fio_pubsub_engine_cluster(),
                      .channel = FIO_BUF_INFO1("worker-cluster-channel"),
                      .message = FIO_BUF_INFO1("worker-cluster-message"));
@@ -1888,13 +1648,6 @@ FIO_SFUNC void fio___test_ps2_wcluster_on_finish(void *ignr_) {
              "[Master] Worker cluster publish: should receive worker "
              "confirmation (got %d)",
              fio___test_ps2_wcluster_worker_confirms);
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Worker cluster publish test: master_received=%d "
-      "worker_confirms=%d",
-      fio_io_pid(),
-      fio___test_ps2_wcluster_master_received,
-      fio___test_ps2_wcluster_worker_confirms);
 }
 
 FIO_SFUNC void fio___pubsub_test_worker_cluster_publish(void) {

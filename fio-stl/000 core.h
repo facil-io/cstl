@@ -3799,13 +3799,16 @@ Vector Types (SIMD / Math)
 ***************************************************************************** */
 #if FIO___HAS_ARM_INTRIN
 /** Defines a `bits` long vector using unsigned 64bit words */
-#define FIO_UXXX_X64_DEF(name, bits) uint64x2_t name[bits / 128]
+#define FIO_UXXX_X64_DEF(name, bits)                                           \
+  uint64x2_t name[(bits / 128) + (bits < 128)]
 /** Defines a `bits` long vector using unsigned 32bit words */
-#define FIO_UXXX_X32_DEF(name, bits) uint32x4_t name[bits / 128]
+#define FIO_UXXX_X32_DEF(name, bits)                                           \
+  uint32x4_t name[(bits / 128) + (bits < 128)]
 /** Defines a `bits` long vector using unsigned 16bit words */
-#define FIO_UXXX_X16_DEF(name, bits) uint16x8_t name[bits / 128]
+#define FIO_UXXX_X16_DEF(name, bits)                                           \
+  uint16x8_t name[(bits / 128) + (bits < 128)]
 /** Defines a `bits` long vector using unsigned 8bit words */
-#define FIO_UXXX_X8_DEF(name, bits) uint8x16_t name[bits / 128]
+#define FIO_UXXX_X8_DEF(name, bits) uint8x16_t name[(bits / 128) + (bits < 128)]
 
 #elif __has_attribute(vector_size)
 
@@ -3996,7 +3999,6 @@ FIO_MATH_TYPE_LOADER(4096, 512)
 #undef FIO_MATH_TYPE_LOADER
 #undef FIO_VECTOR_LOADER_ENDIAN_FUNC
 #undef FIO_VECTOR_LOADER_ENDIAN
-
 /* *****************************************************************************
 Vector Helpers - Vector Math Operations
 
@@ -4025,6 +4027,34 @@ The loop count is computed dynamically via sizeof, yielding:
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
       (t)[i__] = op(a)[i__];                                                   \
   } while (0)
+/** Performs `(a >> b) | (a << (bits - b))` (right rotation) in a loop. */
+#define FIO_MATH_UXXX_OP_RROT(t, a, b, bits)                                   \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
+      (t)[i__] = ((a)[i__] >> (b)[i__]) |                                      \
+                 ((a)[i__] << ((bits - (b)[i__]) & ((bits)-1)));               \
+  } while (0)
+/** Performs `(a >> c) | (a << (bits - c))` (const right rotation) in a loop. */
+#define FIO_MATH_UXXX_OP_CRROT(t, a, c, bits)                                  \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
+      (t)[i__] =                                                               \
+          ((a)[i__] >> (c)) | ((a)[i__] << ((bits - (c)) & ((bits)-1)));       \
+  } while (0)
+/** Performs `(a << b) | (a >> (bits - b))` (left rotation) in a loop. */
+#define FIO_MATH_UXXX_OP_LROT(t, a, b, bits)                                   \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
+      (t)[i__] = ((a)[i__] << (b)[i__]) |                                      \
+                 ((a)[i__] >> ((bits - (b)[i__]) & ((bits)-1)));               \
+  } while (0)
+/** Performs `(a << c) | (a >> (bits - c))` (const left rotation) in a loop. */
+#define FIO_MATH_UXXX_OP_CLROT(t, a, c, bits)                                  \
+  do {                                                                         \
+    for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
+      (t)[i__] =                                                               \
+          ((a)[i__] << (c)) | ((a)[i__] >> ((bits - (c)) & ((bits)-1)));       \
+  } while (0)
 
 /** Performs ternary `t = f(a, b, c)` lane-wise using easily vectorized loop. */
 #define FIO_MATH_UXXX_TOP(t, a, b, c, bits, expr)                              \
@@ -4032,7 +4062,6 @@ The loop count is computed dynamically via sizeof, yielding:
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
       (t)[i__] = expr((a)[i__], (b)[i__], (c)[i__]);                           \
   } while (0)
-
 /* Ternary expression helpers for FIO_MATH_UXXX_TOP */
 #define FIO___EXPR_MUX(x, y, z)  ((z) ^ ((x) & ((y) ^ (z))))
 #define FIO___EXPR_MAJ(x, y, z)  (((x) & (y)) | ((z) & ((x) | (y))))
@@ -4088,6 +4117,35 @@ The loop count is computed dynamically via sizeof, yielding:
                      ((b)->x##bits),                                           \
                      bits,                                                     \
                      op);                                                      \
+  }
+#define FIO___UXXX_DEF_RROT(total_bits, bits)                                  \
+  FIO_IFUNC void fio_u##total_bits##_rrot##bits(                               \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const uint8_t rotations[(total_bits / bits)]) {                          \
+    FIO_MATH_UXXX_OP_RROT(((target)->x##bits),                                 \
+                          ((a)->x##bits),                                      \
+                          rotations,                                           \
+                          bits);                                               \
+  }                                                                            \
+  FIO_IFUNC void fio_u##total_bits##_crrot##bits(fio_u##total_bits *target,    \
+                                                 const fio_u##total_bits *a,   \
+                                                 const uint8_t bts) {          \
+    FIO_MATH_UXXX_OP_CRROT(((target)->x##bits), ((a)->x##bits), bts, bits);    \
+  }                                                                            \
+  FIO_IFUNC void fio_u##total_bits##_lrot##bits(                               \
+      fio_u##total_bits *target,                                               \
+      const fio_u##total_bits *a,                                              \
+      const uint8_t rotations[(total_bits / bits)]) {                          \
+    FIO_MATH_UXXX_OP_LROT(((target)->x##bits),                                 \
+                          ((a)->x##bits),                                      \
+                          rotations,                                           \
+                          bits);                                               \
+  }                                                                            \
+  FIO_IFUNC void fio_u##total_bits##_clrot##bits(fio_u##total_bits *target,    \
+                                                 const fio_u##total_bits *a,   \
+                                                 const uint8_t bts) {          \
+    FIO_MATH_UXXX_OP_CLROT(((target)->x##bits), ((a)->x##bits), bts, bits);    \
   }
 
 #define FIO___UXXX_DEF_TOP(total_bits, bits, opnm, expr)                       \
@@ -4155,6 +4213,11 @@ The loop count is computed dynamically via sizeof, yielding:
     fio_u##total_bits##_xor(a, a, &mask);                                      \
     fio_u##total_bits##_xor(b, b, &mask);                                      \
   }                                                                            \
+  /* Right Roll vectors */                                                     \
+  FIO___UXXX_DEF_RROT(total_bits, 8)                                           \
+  FIO___UXXX_DEF_RROT(total_bits, 16)                                          \
+  FIO___UXXX_DEF_RROT(total_bits, 32)                                          \
+  FIO___UXXX_DEF_RROT(total_bits, 64)                                          \
   /* Ternary operations: mux (choose/Ch), maj (majority/Maj), 3xor (parity) */ \
   FIO___UXXX_DEF_TOP(total_bits, 32, mux, FIO___EXPR_MUX)                      \
   FIO___UXXX_DEF_TOP(total_bits, 64, mux, FIO___EXPR_MUX)                      \
@@ -4182,6 +4245,7 @@ FIO___UXXX_DEF_OP4T(4096)
 #undef FIO___EXPR_MUX
 #undef FIO___EXPR_MAJ
 #undef FIO___EXPR_XOR3
+#undef FIO___UXXX_UGRP_DEF
 
 /* *****************************************************************************
 SIMD-Optimized Vector Operations (XOR, AND, OR) - Value Semantics

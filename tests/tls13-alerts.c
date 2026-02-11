@@ -12,8 +12,6 @@ Tests for alert message building, sending, and error condition handling.
 Test: Alert Constants
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alert_constants(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 alert constants...");
-
   /* Verify alert codes match RFC 8446 Section 6 */
   FIO_ASSERT(FIO_TLS13_ALERT_CLOSE_NOTIFY == 0, "close_notify should be 0");
   FIO_ASSERT(FIO_TLS13_ALERT_UNEXPECTED_MESSAGE == 10,
@@ -42,16 +40,12 @@ FIO_SFUNC void fio___test_tls13_alert_constants(void) {
   /* Verify alert levels */
   FIO_ASSERT(FIO_TLS13_ALERT_LEVEL_WARNING == 1, "warning level should be 1");
   FIO_ASSERT(FIO_TLS13_ALERT_LEVEL_FATAL == 2, "fatal level should be 2");
-
-  FIO_LOG_DDEBUG("  PASS: Alert constants");
 }
 
 /* *****************************************************************************
 Test: Alert Name Function
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alert_names(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 alert name function...");
-
   /* Test known alerts */
   FIO_ASSERT(strcmp(fio_tls13_alert_name(FIO_TLS13_ALERT_CLOSE_NOTIFY),
                     "close_notify") == 0,
@@ -78,16 +72,12 @@ FIO_SFUNC void fio___test_tls13_alert_names(void) {
   /* Test unknown alert */
   FIO_ASSERT(strcmp(fio_tls13_alert_name(255), "unknown_alert") == 0,
              "unknown alert should return 'unknown_alert'");
-
-  FIO_LOG_DDEBUG("  PASS: Alert names");
 }
 
 /* *****************************************************************************
 Test: Build Alert Message
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_build_alert(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 build_alert...");
-
   uint8_t buf[8];
 
   /* Test building a fatal alert */
@@ -118,16 +108,12 @@ FIO_SFUNC void fio___test_tls13_build_alert(void) {
   /* Test with NULL buffer */
   len = fio_tls13_build_alert(NULL, 8, FIO_TLS13_ALERT_LEVEL_FATAL, 0);
   FIO_ASSERT(len == -1, "Should fail with NULL buffer");
-
-  FIO_LOG_DDEBUG("  PASS: Build alert");
 }
 
 /* *****************************************************************************
 Test: Plaintext Alert Record
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_plaintext_alert(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 plaintext alert record...");
-
   uint8_t buf[16];
 
   /* Build a plaintext alert record */
@@ -154,16 +140,12 @@ FIO_SFUNC void fio___test_tls13_plaintext_alert(void) {
   /* Test with insufficient buffer */
   len = fio_tls13_send_alert_plaintext(buf, 6, FIO_TLS13_ALERT_LEVEL_FATAL, 0);
   FIO_ASSERT(len == -1, "Should fail with insufficient buffer");
-
-  FIO_LOG_DDEBUG("  PASS: Plaintext alert record");
 }
 
 /* *****************************************************************************
 Test: Encrypted Alert Record
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_encrypted_alert(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 encrypted alert record...");
-
   /* Set up test keys */
   uint8_t key[16] = {0x01,
                      0x02,
@@ -232,15 +214,12 @@ FIO_SFUNC void fio___test_tls13_encrypted_alert(void) {
              "Alert description should be bad_record_mac");
 
   fio_tls13_record_keys_clear(&keys);
-  FIO_LOG_DDEBUG("  PASS: Encrypted alert record");
 }
 
 /* *****************************************************************************
 Test: Record Overflow Detection
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_record_overflow(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 record overflow detection...");
-
   /* Create a record header with length exceeding max ciphertext length */
   uint8_t oversized_record[10] = {
       FIO_TLS13_CONTENT_APPLICATION_DATA, /* Content type */
@@ -285,16 +264,12 @@ FIO_SFUNC void fio___test_tls13_record_overflow(void) {
 
   /* Should fail because we don't have the full payload */
   FIO_ASSERT(payload == NULL, "Incomplete record should be rejected");
-
-  FIO_LOG_DDEBUG("  PASS: Record overflow detection");
 }
 
 /* *****************************************************************************
 Test: AEAD Decryption Failure Alert
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_aead_failure_alert(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 AEAD decryption failure...");
-
   /* Set up test keys */
   uint8_t key[16] = {0x01,
                      0x02,
@@ -350,15 +325,12 @@ FIO_SFUNC void fio___test_tls13_aead_failure_alert(void) {
   FIO_ASSERT(dec_len == -1, "Decryption of corrupted record should fail");
 
   fio_tls13_record_keys_clear(&keys);
-  FIO_LOG_DDEBUG("  PASS: AEAD decryption failure");
 }
 
 /* *****************************************************************************
 Test: No Content Type After Padding
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_no_content_type(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 no content type after padding...");
-
   /* Set up test keys */
   uint8_t key[16] = {0x01,
                      0x02,
@@ -417,15 +389,12 @@ FIO_SFUNC void fio___test_tls13_no_content_type(void) {
              "Content type should be application_data");
 
   fio_tls13_record_keys_clear(&keys);
-  FIO_LOG_DDEBUG("  PASS: Content type handling");
 }
 
 /* *****************************************************************************
 Test: Client Error State Alerts
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_client_error_alerts(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 client error state alerts...");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
@@ -464,15 +433,12 @@ FIO_SFUNC void fio___test_tls13_client_error_alerts(void) {
              client.alert_description);
 
   fio_tls13_client_destroy(&client);
-  FIO_LOG_DDEBUG("  PASS: Client error state alerts");
 }
 
 /* *****************************************************************************
 Test: Server Error State Alerts
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_server_error_alerts(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 server error state alerts...");
-
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
@@ -504,15 +470,12 @@ FIO_SFUNC void fio___test_tls13_server_error_alerts(void) {
              server.alert_description);
 
   fio_tls13_server_destroy(&server);
-  FIO_LOG_DDEBUG("  PASS: Server error state alerts");
 }
 
 /* *****************************************************************************
 Test: HelloRetryRequest Second HRR Alert
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_second_hrr_alert(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 second HelloRetryRequest alert...");
-
   /* This test verifies that receiving a second HelloRetryRequest
    * triggers an unexpected_message alert per RFC 8446 Section 4.1.4 */
 
@@ -610,7 +573,6 @@ FIO_SFUNC void fio___test_tls13_second_hrr_alert(void) {
              client.alert_description);
 
   fio_tls13_client_destroy(&client);
-  FIO_LOG_DDEBUG("  PASS: Second HRR alert");
 }
 
 /* *****************************************************************************

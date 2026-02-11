@@ -263,7 +263,6 @@ Test: Basic Types
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_null(void) {
-  FIO_LOG_DDEBUG("Testing JSON null parsing.");
   test_json_value_s *v = test_json_parse("null", 4);
   FIO_ASSERT(v, "JSON null parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_NULL, "JSON null type mismatch");
@@ -282,8 +281,6 @@ FIO_SFUNC void fio___test_json_null(void) {
 }
 
 FIO_SFUNC void fio___test_json_booleans(void) {
-  FIO_LOG_DDEBUG("Testing JSON boolean parsing.");
-
   test_json_value_s *v = test_json_parse("true", 4);
   FIO_ASSERT(v, "JSON true parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_TRUE, "JSON true type mismatch");
@@ -307,8 +304,6 @@ FIO_SFUNC void fio___test_json_booleans(void) {
 }
 
 FIO_SFUNC void fio___test_json_numbers(void) {
-  FIO_LOG_DDEBUG("Testing JSON number parsing.");
-
   /* Positive integers */
   test_json_value_s *v = test_json_parse("0", 1);
   FIO_ASSERT(v, "JSON 0 parsing failed");
@@ -362,8 +357,6 @@ FIO_SFUNC void fio___test_json_numbers(void) {
 }
 
 FIO_SFUNC void fio___test_json_floats(void) {
-  FIO_LOG_DDEBUG("Testing JSON float parsing.");
-
   test_json_value_s *v = test_json_parse("3.14", 4);
   FIO_ASSERT(v, "JSON 3.14 parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_FLOAT, "JSON 3.14 type mismatch");
@@ -414,8 +407,6 @@ FIO_SFUNC void fio___test_json_floats(void) {
 }
 
 FIO_SFUNC void fio___test_json_special_floats(void) {
-  FIO_LOG_DDEBUG("Testing JSON special float values (NaN, Infinity).");
-
   /* NaN - non-standard but supported */
   test_json_value_s *v = test_json_parse("NaN", 3);
   FIO_ASSERT(v, "JSON NaN parsing failed");
@@ -440,8 +431,6 @@ FIO_SFUNC void fio___test_json_special_floats(void) {
 }
 
 FIO_SFUNC void fio___test_json_strings(void) {
-  FIO_LOG_DDEBUG("Testing JSON string parsing.");
-
   /* Empty string */
   test_json_value_s *v = test_json_parse("\"\"", 2);
   FIO_ASSERT(v, "JSON empty string parsing failed");
@@ -469,8 +458,6 @@ FIO_SFUNC void fio___test_json_strings(void) {
 }
 
 FIO_SFUNC void fio___test_json_escaped_strings(void) {
-  FIO_LOG_DDEBUG("Testing JSON escaped string parsing.");
-
   /* Escaped quote */
   test_json_value_s *v = test_json_parse("\"hello\\\"world\"", 14);
   FIO_ASSERT(v, "JSON escaped quote parsing failed");
@@ -531,8 +518,6 @@ FIO_SFUNC void fio___test_json_escaped_strings(void) {
 }
 
 FIO_SFUNC void fio___test_json_unicode_strings(void) {
-  FIO_LOG_DDEBUG("Testing JSON unicode escape sequences.");
-
   /* Simple unicode escape - ASCII 'A' */
   test_json_value_s *v = test_json_parse("\"\\u0041\"", 8);
   FIO_ASSERT(v, "JSON unicode \\u0041 parsing failed");
@@ -561,8 +546,6 @@ Test: Arrays
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_empty_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON empty array parsing.");
-
   test_json_value_s *v = test_json_parse("[]", 2);
   FIO_ASSERT(v, "JSON empty array parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_ARRAY, "JSON empty array type mismatch");
@@ -580,8 +563,6 @@ FIO_SFUNC void fio___test_json_empty_array(void) {
 }
 
 FIO_SFUNC void fio___test_json_simple_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON simple array parsing.");
-
   /* Single element */
   test_json_value_s *v = test_json_parse("[1]", 3);
   FIO_ASSERT(v, "JSON single element array parsing failed");
@@ -615,8 +596,6 @@ FIO_SFUNC void fio___test_json_simple_array(void) {
 }
 
 FIO_SFUNC void fio___test_json_mixed_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON mixed type array parsing.");
-
   test_json_value_s *v =
       test_json_parse("[1, \"hello\", true, null, 3.14]", 30);
   FIO_ASSERT(v, "JSON mixed array parsing failed");
@@ -648,8 +627,6 @@ FIO_SFUNC void fio___test_json_mixed_array(void) {
 }
 
 FIO_SFUNC void fio___test_json_nested_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON nested array parsing.");
-
   test_json_value_s *v = test_json_parse("[[1, 2], [3, 4]]", 16);
   FIO_ASSERT(v, "JSON nested array parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_ARRAY, "JSON nested array type mismatch");
@@ -671,8 +648,6 @@ FIO_SFUNC void fio___test_json_nested_array(void) {
 }
 
 FIO_SFUNC void fio___test_json_trailing_comma_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON array with trailing comma (non-strict).");
-
   /* facil.io JSON parser supports trailing commas */
   test_json_value_s *v = test_json_parse("[1, 2, 3,]", 10);
   FIO_ASSERT(v, "JSON array with trailing comma parsing failed");
@@ -689,8 +664,6 @@ Test: Objects
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_empty_object(void) {
-  FIO_LOG_DDEBUG("Testing JSON empty object parsing.");
-
   test_json_value_s *v = test_json_parse("{}", 2);
   FIO_ASSERT(v, "JSON empty object parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_MAP, "JSON empty object type mismatch");
@@ -708,8 +681,6 @@ FIO_SFUNC void fio___test_json_empty_object(void) {
 }
 
 FIO_SFUNC void fio___test_json_simple_object(void) {
-  FIO_LOG_DDEBUG("Testing JSON simple object parsing.");
-
   /* Single key-value */
   test_json_value_s *v = test_json_parse("{\"key\": 42}", 11);
   FIO_ASSERT(v, "JSON single key-value object parsing failed");
@@ -738,8 +709,6 @@ FIO_SFUNC void fio___test_json_simple_object(void) {
 }
 
 FIO_SFUNC void fio___test_json_nested_object(void) {
-  FIO_LOG_DDEBUG("Testing JSON nested object parsing.");
-
   test_json_value_s *v = test_json_parse("{\"outer\": {\"inner\": 42}}", 24);
   FIO_ASSERT(v, "JSON nested object parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_MAP, "JSON nested object type mismatch");
@@ -759,8 +728,6 @@ FIO_SFUNC void fio___test_json_nested_object(void) {
 }
 
 FIO_SFUNC void fio___test_json_trailing_comma_object(void) {
-  FIO_LOG_DDEBUG("Testing JSON object with trailing comma (non-strict).");
-
   /* facil.io JSON parser supports trailing commas */
   test_json_value_s *v = test_json_parse("{\"a\": 1, \"b\": 2,}", 17);
   FIO_ASSERT(v, "JSON object with trailing comma parsing failed");
@@ -777,8 +744,6 @@ Test: Mixed Nested Structures
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_object_with_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON object containing array.");
-
   test_json_value_s *v = test_json_parse("{\"numbers\": [1, 2, 3]}", 22);
   FIO_ASSERT(v, "JSON object with array parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_MAP, "JSON object with array type mismatch");
@@ -793,8 +758,6 @@ FIO_SFUNC void fio___test_json_object_with_array(void) {
 }
 
 FIO_SFUNC void fio___test_json_array_with_object(void) {
-  FIO_LOG_DDEBUG("Testing JSON array containing objects.");
-
   test_json_value_s *v = test_json_parse("[{\"a\": 1}, {\"b\": 2}]", 20);
   FIO_ASSERT(v, "JSON array with objects parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_ARRAY,
@@ -810,8 +773,6 @@ FIO_SFUNC void fio___test_json_array_with_object(void) {
 }
 
 FIO_SFUNC void fio___test_json_complex_nested(void) {
-  FIO_LOG_DDEBUG("Testing JSON complex nested structure.");
-
   const char *json = "{"
                      "\"name\": \"test\","
                      "\"values\": [1, 2, {\"nested\": true}],"
@@ -834,8 +795,6 @@ Test: Whitespace Handling
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_whitespace(void) {
-  FIO_LOG_DDEBUG("Testing JSON whitespace handling.");
-
   /* Leading whitespace */
   test_json_value_s *v = test_json_parse("   42", 5);
   FIO_ASSERT(v, "JSON with leading whitespace parsing failed");
@@ -868,8 +827,6 @@ Test: Comments (non-standard)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_comments(void) {
-  FIO_LOG_DDEBUG("Testing JSON comment support (non-standard).");
-
   /* C-style single line comment */
   test_json_value_s *v = test_json_parse("// comment\n42", 13);
   FIO_ASSERT(v, "JSON with // comment parsing failed");
@@ -898,8 +855,6 @@ Test: Hex and Binary Numbers (non-standard)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_hex_binary(void) {
-  FIO_LOG_DDEBUG("Testing JSON hex/binary number support (non-standard).");
-
   /* Hex number */
   test_json_value_s *v = test_json_parse("0xFF", 4);
   FIO_ASSERT(v, "JSON hex 0xFF parsing failed");
@@ -924,8 +879,6 @@ Test: Error Cases
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_errors(void) {
-  FIO_LOG_DDEBUG("Testing JSON error handling.");
-
   /* Empty input */
   test_json_value_s *v = test_json_parse("", 0);
   FIO_ASSERT(!v, "JSON empty input should fail");
@@ -968,8 +921,6 @@ Test: BOM Handling
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_bom(void) {
-  FIO_LOG_DDEBUG("Testing JSON BOM (Byte Order Mark) handling.");
-
   /* UTF-8 BOM followed by JSON */
   const char json_with_bom[] = "\xEF\xBB\xBF"
                                "42";
@@ -992,8 +943,6 @@ Test: Stop Position
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_stop_position(void) {
-  FIO_LOG_DDEBUG("Testing JSON stop position reporting.");
-
   /* Parse stops after first complete value */
   const char *json = "42 extra";
   fio_json_result_s r = fio_json_parse(&test_json_callbacks, json, 8);
@@ -1020,8 +969,6 @@ Test: Depth Limits
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_depth(void) {
-  FIO_LOG_DDEBUG("Testing JSON nesting depth handling.");
-
   /* Moderately nested structure (should succeed) */
   const char *nested_10 = "[[[[[[[[[[42]]]]]]]]]]";
   test_json_value_s *v = test_json_parse(nested_10, FIO_STRLEN(nested_10));
@@ -1042,8 +989,6 @@ Test: Large Arrays
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_large_array(void) {
-  FIO_LOG_DDEBUG("Testing JSON large array parsing.");
-
   /* Build a large array string */
   char buf[4096];
   fio_str_info_s s = FIO_STR_INFO3(buf, 0, sizeof(buf));
@@ -1076,8 +1021,6 @@ Test: Real-world JSON Examples
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_realworld(void) {
-  FIO_LOG_DDEBUG("Testing JSON real-world examples.");
-
   /* Package.json style */
   const char *package_json = "{"
                              "\"name\": \"my-package\","
@@ -1128,8 +1071,6 @@ Main Test Entry Point
 ***************************************************************************** */
 
 FIO_SFUNC void fio_test_json(void) {
-  FIO_LOG_DDEBUG("Testing JSON parser.");
-
   /* Basic types */
   fio___test_json_null();
   fio___test_json_booleans();
@@ -1178,8 +1119,6 @@ FIO_SFUNC void fio_test_json(void) {
 
   /* Real-world examples */
   fio___test_json_realworld();
-
-  FIO_LOG_DDEBUG("JSON parser tests complete.");
 }
 
 #ifndef FIO_TEST_ALL

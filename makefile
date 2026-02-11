@@ -49,7 +49,7 @@ INSTALL_INCLUDE = $(INSTALL_PREFIX)/include/$(NAME)
 #############################################################################
 
 # Targets
-.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags $(TEST_DIR) $(TEST_DIR)/%
+.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags $(TEST_DIR) $(TEST_DIR)/% $(EXAMPLES_DIR) $(EXAMPLES_DIR)/% extras extras/%
 
 # Default target
 all: everything___
@@ -196,6 +196,10 @@ $(TEST_DIR): test;
 #############################################################################
 # Examples
 #############################################################################
+EXAMPLES_SOURCES:=$(shell find $(EXAMPLES_DIR) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
+EXAMPLES_BINS:=$(EXAMPLES_SOURCES:%.c=$(BUILD_DIR)/%)
+
+.PHONY: $(EXAMPLES_DIR) $(EXAMPLES_DIR)/%
 
 # Build example binary (each C file becomes a separate executable)
 $(BUILD_DIR)/$(EXAMPLES_DIR)/%: $(EXAMPLES_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
@@ -208,28 +212,15 @@ $(EXAMPLES_DIR)/%: $(BUILD_DIR)/$(EXAMPLES_DIR)/%
 	@echo "=================================="
 	@$(BUILD_DIR)/$@
 
-$(EXAMPLES_DIR): $(EXAMPLES_BINS)
-	@if [ -n "$(EXAMPLES_BINS)" ]; then \
-		for e_bin in $(EXAMPLES_BINS); do \
-		  echo "";                        \
-			echo "=================================="; \
-			echo "Running $$e_bin";         \
-			echo "=================================="; \
-			$$e_bin;                        \
-		done;                             \
-		echo "";                          \
-		echo " ✓ Done";                   \
-		echo "";                          \
-	else                                \
-		echo "No example files found in: $(EXAMPLES_DIR)/"; \
-	fi
-
-
-.NOTINTERMEDIATE: $(BUILD_DIR)/$(EXAMPLES_DIR)/% $(EXAMPLES_DIR)/%
+$(EXAMPLES_DIR): $(EXAMPLES_BINS);
 
 #############################################################################
 # Experiments & Extras - use for testing new ideas or temporary tests
 #############################################################################
+EXTRAS_SOURCES:=$(shell find extras -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
+EXTRAS_BINS:=$(EXTRAS_SOURCES:%.c=$(BUILD_DIR)/%)
+
+.PHONY: $(BUILD_DIR)/extras/% extras/%
 
 # Build extra binary (each C file becomes a separate executable)
 $(BUILD_DIR)/extras/%: extras/%.c $(OBJECTS) | $(BUILD_DIR)
@@ -242,23 +233,7 @@ extras/%: $(BUILD_DIR)/extras/%
 	@echo "=================================="
 	@$(BUILD_DIR)/$@
 
-extras: $(EXAMPLES_BINS)
-	@if [ -n "$(EXAMPLES_BINS)" ]; then \
-		for e_bin in $(EXAMPLES_BINS); do \
-		  echo "";                        \
-			echo "=================================="; \
-			echo "Running $$e_bin";         \
-			echo "=================================="; \
-			$$e_bin;                        \
-		done;                             \
-		echo "";                          \
-		echo " ✓ Done";                   \
-		echo "";                          \
-	else                                \
-		echo "No example files found in: extras/"; \
-	fi
-
-.NOTINTERMEDIATE: $(BUILD_DIR)/extras/% extras/%
+extras: $(EXTRA_BINS) ;
 
 #############################################################################
 # Combining single-file library

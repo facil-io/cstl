@@ -11,7 +11,6 @@ Functional Tests
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpy primitives.");
   {
     struct {
       void *(*fn)(void *, const void *, size_t);
@@ -54,7 +53,6 @@ FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
 }
 
 FIO_SFUNC void fio___test_core_byte_swap(void) {
-  FIO_LOG_DDEBUG("Testing fio_bswapX macros.");
   FIO_ASSERT(fio_bswap16(0x0102) == (uint16_t)0x0201, "fio_bswap16 failed");
   FIO_ASSERT(fio_bswap32(0x01020304) == (uint32_t)0x04030201,
              "fio_bswap32 failed");
@@ -72,7 +70,6 @@ FIO_SFUNC void fio___test_core_byte_swap(void) {
 }
 
 FIO_SFUNC void fio___test_core_bit_rotation(void) {
-  FIO_LOG_DDEBUG("Testing fio_lrotX and fio_rrotX macros.");
   {
     uint64_t tmp = 1;
     tmp = FIO_RROT(tmp, 1);
@@ -114,7 +111,6 @@ FIO_SFUNC void fio___test_core_bit_rotation(void) {
 }
 
 FIO_SFUNC void fio___test_core_bit_index(void) {
-  FIO_LOG_DDEBUG("Testing bit index functions.");
   for (size_t i = 0; i < 63; ++i) {
 #if !defined(__has_builtin) || !__has_builtin(__builtin_ctzll) ||              \
     !__has_builtin(__builtin_clzll)
@@ -140,7 +136,6 @@ FIO_SFUNC void fio___test_core_bit_index(void) {
 }
 
 FIO_SFUNC void fio___test_core_buf_helpers(void) {
-  FIO_LOG_DDEBUG("Testing fio_buf2uX and fio_u2bufX helpers.");
 #define FIO___BITMAP_TEST_BITS(itype, utype, bits)                             \
   for (size_t i = 0; i < (bits); ++i) {                                        \
     char tmp_buf[32];                                                          \
@@ -163,7 +158,6 @@ FIO_SFUNC void fio___test_core_buf_helpers(void) {
 }
 
 FIO_SFUNC void fio___test_core_ct_operations(void) {
-  FIO_LOG_DDEBUG("Testing constant-time helpers.");
   /* fio_ct_true */
   FIO_ASSERT(fio_ct_true(0) == 0, "fio_ct_true(0) should be zero!");
   for (uintptr_t i = 1; i; i <<= 1) {
@@ -237,7 +231,6 @@ FIO_SFUNC void fio___test_core_ct_operations(void) {
 }
 
 FIO_SFUNC void fio___test_core_ct_bitwise(void) {
-  FIO_LOG_DDEBUG("Testing constant-time bitwise selection functions.");
   /* fio_ct_mux32/64 - choose: (x & y) ^ (~x & z) */
   FIO_ASSERT(fio_ct_mux32(0xFFFFFFFF, 0xAAAAAAAA, 0x55555555) == 0xAAAAAAAA,
              "fio_ct_mux32 all-ones selector failed");
@@ -278,7 +271,6 @@ FIO_SFUNC void fio___test_core_ct_bitwise(void) {
 }
 
 FIO_SFUNC void fio___test_core_bitmap(void) {
-  FIO_LOG_DDEBUG("Testing bitmap helpers.");
   uint8_t bitmap[1024];
   FIO_MEMSET(bitmap, 0, 1024);
   FIO_ASSERT(!fio_bit_get(bitmap, 97), "fio_bit_get should be 0.");
@@ -303,7 +295,6 @@ FIO_SFUNC void fio___test_core_bitmap(void) {
 }
 
 FIO_SFUNC void fio___test_core_atomic_bitmap(void) {
-  FIO_LOG_DDEBUG("Testing atomic bitmap helpers.");
   uint8_t bitmap[1024];
   FIO_MEMSET(bitmap, 0, 1024);
   FIO_ASSERT(!fio_atomic_bit_get(bitmap, 97),
@@ -331,7 +322,6 @@ FIO_SFUNC void fio___test_core_atomic_bitmap(void) {
 }
 
 FIO_SFUNC void fio___test_core_popcount(void) {
-  FIO_LOG_DDEBUG("Testing popcount and hemming distance calculation.");
   for (int i = 0; i < 64; ++i) {
     FIO_ASSERT(fio_popcount((uint64_t)1 << i) == 1,
                "fio_popcount error for 1 bit");
@@ -356,7 +346,6 @@ FIO_SFUNC void fio___test_core_popcount(void) {
 }
 
 FIO_SFUNC void fio___test_core_has_byte(void) {
-  FIO_LOG_DDEBUG("Testing fio_has_zero_byte and fio_has_byte.");
   /* fio_has_zero_byte32 */
   FIO_ASSERT(fio_has_zero_byte32(0x00112233) != 0,
              "fio_has_zero_byte32 should detect zero byte");
@@ -398,7 +387,6 @@ FIO_SFUNC void fio___test_core_ptr_from_field(void) {
 }
 
 FIO_SFUNC void fio___test_core_xmask(void) {
-  FIO_LOG_DDEBUG("Testing fio_xmask.");
   char data[128], buf[256];
   uint64_t mask;
   uint64_t counter;
@@ -430,7 +418,6 @@ FIO_SFUNC void fio___test_core_xmask(void) {
 }
 
 FIO_SFUNC void fio___test_core_utf8(void) {
-  FIO_LOG_DDEBUG("Testing Core UTF-8 Support (Macros).");
   struct {
     const char *buf;
     size_t clen;
@@ -527,9 +514,6 @@ FIO_SFUNC void fio___test_core_utf8(void) {
 }
 
 FIO_SFUNC void fio___test_core_multiprecision_basic(void) {
-  FIO_LOG_DDEBUG("Testing Basic Multi-Precision add / sub / mul for fio_uXXX "
-                 "(fio_u256).");
-
   char buf[1024];
 
   fio_u256 a = fio_u256_init64(2);
@@ -587,7 +571,6 @@ FIO_SFUNC void fio___test_core_multiprecision_basic(void) {
 }
 
 FIO_SFUNC void fio___test_core_vector_operations(void) {
-  FIO_LOG_DDEBUG("Testing Basic vector operations for fio_uXXX (fio_u256).");
   for (uint64_t a = 1; a; a = ((a << 2) | (((a >> 62) & 1) ^ 1))) {
     for (uint64_t b = 2; b; b = ((b << 2) | (((b >> 62) & 2) ^ 2))) {
       uint64_t expected[8] = {1, ~0, 4, ~0};
@@ -668,8 +651,6 @@ Memory Function Edge Case Tests (FIO_MEMALT)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_memcpy_overlap(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpy overlap handling.");
-
   /* Forward overlap: dest < src < dest+len (should use buffered copy) */
   {
     char buf[256];
@@ -766,8 +747,6 @@ FIO_SFUNC void fio___test_memcpy_overlap(void) {
 }
 
 FIO_SFUNC void fio___test_memcpy_null_handling(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpy NULL pointer handling.");
-
   char buf[64];
   fio_rand_bytes(buf, 64);
   char expected[64];
@@ -784,8 +763,6 @@ FIO_SFUNC void fio___test_memcpy_null_handling(void) {
 }
 
 FIO_SFUNC void fio___test_memcpy_size_boundaries(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpy size boundaries.");
-
   /* Test sizes: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 31, 32, 33,
    * 63, 64, 65, 127, 128, 129, 255, 256, 257 */
   size_t test_sizes[] = {0,  1,   2,   3,   4,   5,   6,   7,   8,
@@ -823,8 +800,6 @@ FIO_SFUNC void fio___test_memcpy_size_boundaries(void) {
 }
 
 FIO_SFUNC void fio___test_memcpy_alignment(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpy alignment variations.");
-
   char buf[256 + 16] FIO_ALIGN(16);
   char src[256 + 16] FIO_ALIGN(16);
   fio_rand_bytes(src, sizeof(src));
@@ -845,8 +820,6 @@ FIO_SFUNC void fio___test_memcpy_alignment(void) {
 }
 
 FIO_SFUNC void fio___test_memset_size_boundaries(void) {
-  FIO_LOG_DDEBUG("Testing fio_memset size boundaries.");
-
   size_t test_sizes[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 63, 64, 127, 128};
   size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
 
@@ -881,8 +854,6 @@ FIO_SFUNC void fio___test_memset_size_boundaries(void) {
 }
 
 FIO_SFUNC void fio___test_memset_data_patterns(void) {
-  FIO_LOG_DDEBUG("Testing fio_memset data patterns.");
-
   char buf[128];
 
   /* data = 0 (all zeros) */
@@ -948,8 +919,6 @@ FIO_SFUNC void fio___test_memset_data_patterns(void) {
 }
 
 FIO_SFUNC void fio___test_memset_alignment(void) {
-  FIO_LOG_DDEBUG("Testing fio_memset alignment variations.");
-
   char buf[128 + 16] FIO_ALIGN(16);
 
   /* Test dest unaligned by 1-7 bytes */
@@ -974,8 +943,6 @@ FIO_SFUNC void fio___test_memset_alignment(void) {
 }
 
 FIO_SFUNC void fio___test_memchr_token_position(void) {
-  FIO_LOG_DDEBUG("Testing fio_memchr token position.");
-
   char buf[256];
   FIO_MEMSET(buf, 'X', sizeof(buf));
 
@@ -1024,8 +991,6 @@ FIO_SFUNC void fio___test_memchr_token_position(void) {
 }
 
 FIO_SFUNC void fio___test_memchr_token_values(void) {
-  FIO_LOG_DDEBUG("Testing fio_memchr token values.");
-
   char buf[128];
   FIO_MEMSET(buf, 0x55, sizeof(buf));
 
@@ -1063,8 +1028,6 @@ FIO_SFUNC void fio___test_memchr_token_values(void) {
 }
 
 FIO_SFUNC void fio___test_memchr_size_boundaries(void) {
-  FIO_LOG_DDEBUG("Testing fio_memchr size boundaries.");
-
   char buf[256];
   FIO_MEMSET(buf, 'X', sizeof(buf));
 
@@ -1090,8 +1053,6 @@ FIO_SFUNC void fio___test_memchr_size_boundaries(void) {
 }
 
 FIO_SFUNC void fio___test_memchr_simd_boundaries(void) {
-  FIO_LOG_DDEBUG("Testing fio_memchr SIMD boundary cases.");
-
   char buf[256] FIO_ALIGN(32);
   FIO_MEMSET(buf, 'X', sizeof(buf));
 
@@ -1128,8 +1089,6 @@ FIO_SFUNC void fio___test_memchr_simd_boundaries(void) {
 }
 
 FIO_SFUNC void fio___test_memcmp_equal_buffers(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcmp equal buffers.");
-
   char a[128], b[128];
   fio_rand_bytes(a, sizeof(a));
   FIO_MEMCPY(b, a, sizeof(b));
@@ -1148,8 +1107,6 @@ FIO_SFUNC void fio___test_memcmp_equal_buffers(void) {
 }
 
 FIO_SFUNC void fio___test_memcmp_difference_position(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcmp difference position.");
-
   char a[128], b[128];
 
   /* First byte differs (a > b) */
@@ -1222,8 +1179,6 @@ FIO_SFUNC void fio___test_memcmp_difference_position(void) {
 }
 
 FIO_SFUNC void fio___test_memcmp_same_pointer(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcmp same pointer.");
-
   char buf[64];
   fio_rand_bytes(buf, sizeof(buf));
 
@@ -1232,8 +1187,6 @@ FIO_SFUNC void fio___test_memcmp_same_pointer(void) {
 }
 
 FIO_SFUNC void fio___test_memcmp_byte_value_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcmp byte value edge cases.");
-
   char a[8], b[8];
 
   /* 0x7F vs 0x80 (sign bit boundary - must use unsigned comparison) */
@@ -1267,8 +1220,6 @@ FIO_SFUNC void fio___test_memcmp_byte_value_edge_cases(void) {
 }
 
 FIO_SFUNC void fio___test_strlen_lengths(void) {
-  FIO_LOG_DDEBUG("Testing fio_strlen string lengths.");
-
   /* Empty string "" (return 0) */
   FIO_ASSERT(fio_strlen("") == 0, "fio_strlen(\"\") should return 0");
 
@@ -1306,15 +1257,11 @@ FIO_SFUNC void fio___test_strlen_lengths(void) {
 }
 
 FIO_SFUNC void fio___test_strlen_null_pointer(void) {
-  FIO_LOG_DDEBUG("Testing fio_strlen NULL pointer.");
-
   size_t result = fio_strlen(NULL);
   FIO_ASSERT(result == 0, "fio_strlen(NULL) should return 0");
 }
 
 FIO_SFUNC void fio___test_strlen_alignment(void) {
-  FIO_LOG_DDEBUG("Testing fio_strlen alignment variations.");
-
   char buf[128 + 16] FIO_ALIGN(16);
   FIO_MEMSET(buf, 'B', sizeof(buf) - 1);
   buf[sizeof(buf) - 1] = '\0';
@@ -1335,8 +1282,6 @@ FIO_SFUNC void fio___test_strlen_alignment(void) {
 }
 
 FIO_SFUNC void fio___test_strlen_simd_boundaries(void) {
-  FIO_LOG_DDEBUG("Testing fio_strlen SIMD boundary cases.");
-
   char buf[256] FIO_ALIGN(32);
 
   /* NUL at SIMD vector boundaries: 15, 16, 31, 32, 63, 64 */
@@ -1361,8 +1306,6 @@ FIO_SFUNC void fio___test_strlen_simd_boundaries(void) {
 }
 
 FIO_SFUNC void fio___test_memcpyXx_masking(void) {
-  FIO_LOG_DDEBUG("Testing fio_memcpyXx masking behavior.");
-
   char src[256];
   char dest[256];
   char guard = (char)0xDD;
@@ -1463,8 +1406,6 @@ FIO_SFUNC void fio___test_memcpyXx_masking(void) {
 }
 
 FIO_SFUNC void fio___test_core_simd_value_ops(void) {
-  FIO_LOG_DDEBUG("Testing value-returning SIMD operations (_xorv, _andv, _orv, "
-                 "_addv64).");
   /* Test fio_u128 */
   {
     fio_u128 a = fio_u128_init64(0xAAAAAAAAAAAAAAAAULL, 0x5555555555555555ULL);
@@ -1626,12 +1567,539 @@ FIO_SFUNC void fio___test_core_simd_value_ops(void) {
 }
 
 /* *****************************************************************************
+Rotation Function Tests (RROT/LROT)
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_core_rotation_basic_correctness(void) {
+  /* Test fio_u128 right rotation with known values */
+  {
+    fio_u128 src =
+        fio_u128_init64(0x8000000000000001ULL, 0x0000000000000001ULL);
+    fio_u128 target;
+
+    /* Right rotate by 1: 0x8000000000000001 >> 1 = 0xC000000000000000 */
+    fio_u128_crrot64(&target, &src, 1);
+    FIO_ASSERT(
+        target.u64[0] == 0xC000000000000000ULL,
+        "fio_u128_crrot64 by 1 failed: got 0x%llx, expected 0xC000000000000000",
+        (unsigned long long)target.u64[0]);
+    FIO_ASSERT(target.u64[1] == 0x8000000000000000ULL,
+               "fio_u128_crrot64 by 1 lane 1 failed");
+  }
+
+  /* Test fio_u128 left rotation with known values */
+  {
+    fio_u128 src =
+        fio_u128_init64(0x8000000000000001ULL, 0x0000000000000001ULL);
+    fio_u128 target;
+
+    /* Left rotate by 1: 0x8000000000000001 << 1 = 0x0000000000000003 */
+    fio_u128_clrot64(&target, &src, 1);
+    FIO_ASSERT(
+        target.u64[0] == 0x0000000000000003ULL,
+        "fio_u128_clrot64 by 1 failed: got 0x%llx, expected 0x0000000000000003",
+        (unsigned long long)target.u64[0]);
+    FIO_ASSERT(target.u64[1] == 0x0000000000000002ULL,
+               "fio_u128_clrot64 by 1 lane 1 failed");
+  }
+
+  /* Test 32-bit rotations */
+  {
+    fio_u128 src =
+        fio_u128_init32(0x80000001, 0x80000001, 0x80000001, 0x80000001);
+    fio_u128 target;
+
+    /* Right rotate 32-bit by 1 */
+    fio_u128_crrot32(&target, &src, 1);
+    FIO_ASSERT(target.u32[0] == 0xC0000000,
+               "fio_u128_crrot32 by 1 failed: got 0x%x, expected 0xC0000000",
+               target.u32[0]);
+
+    /* Left rotate 32-bit by 1 */
+    fio_u128_clrot32(&target, &src, 1);
+    FIO_ASSERT(target.u32[0] == 0x00000003,
+               "fio_u128_clrot32 by 1 failed: got 0x%x, expected 0x00000003",
+               target.u32[0]);
+  }
+
+  /* Test 16-bit rotations */
+  {
+    fio_u128 src = fio_u128_init16(0x8001,
+                                   0x8001,
+                                   0x8001,
+                                   0x8001,
+                                   0x8001,
+                                   0x8001,
+                                   0x8001,
+                                   0x8001);
+    fio_u128 target;
+
+    /* Right rotate 16-bit by 1 */
+    fio_u128_crrot16(&target, &src, 1);
+    FIO_ASSERT(target.u16[0] == 0xC000,
+               "fio_u128_crrot16 by 1 failed: got 0x%x, expected 0xC000",
+               target.u16[0]);
+
+    /* Left rotate 16-bit by 1 */
+    fio_u128_clrot16(&target, &src, 1);
+    FIO_ASSERT(target.u16[0] == 0x0003,
+               "fio_u128_clrot16 by 1 failed: got 0x%x, expected 0x0003",
+               target.u16[0]);
+  }
+
+  /* Test 8-bit rotations */
+  {
+    fio_u128 src;
+    for (int i = 0; i < 16; ++i)
+      src.u8[i] = 0x81;
+    fio_u128 target;
+
+    /* Right rotate 8-bit by 1 */
+    fio_u128_crrot8(&target, &src, 1);
+    FIO_ASSERT(target.u8[0] == 0xC0,
+               "fio_u128_crrot8 by 1 failed: got 0x%x, expected 0xC0",
+               target.u8[0]);
+
+    /* Left rotate 8-bit by 1 */
+    fio_u128_clrot8(&target, &src, 1);
+    FIO_ASSERT(target.u8[0] == 0x03,
+               "fio_u128_clrot8 by 1 failed: got 0x%x, expected 0x03",
+               target.u8[0]);
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_zero(void) {
+  /* Test that rotation by 0 returns the original value */
+  {
+    fio_u256 src = fio_u256_init64(0x123456789ABCDEF0ULL,
+                                   0xFEDCBA9876543210ULL,
+                                   0x0F0F0F0F0F0F0F0FULL,
+                                   0xF0F0F0F0F0F0F0F0ULL);
+    fio_u256 target;
+
+    /* Right rotate by 0 */
+    fio_u256_crrot64(&target, &src, 0);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot64 by 0 should return original value");
+
+    /* Left rotate by 0 */
+    fio_u256_clrot64(&target, &src, 0);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot64 by 0 should return original value");
+
+    /* 32-bit rotations by 0 */
+    fio_u256_crrot32(&target, &src, 0);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot32 by 0 should return original value");
+
+    fio_u256_clrot32(&target, &src, 0);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot32 by 0 should return original value");
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_full_width(void) {
+  /* Test that rotation by full width returns the original value */
+  {
+    fio_u256 src = fio_u256_init64(0x123456789ABCDEF0ULL,
+                                   0xFEDCBA9876543210ULL,
+                                   0x0F0F0F0F0F0F0F0FULL,
+                                   0xF0F0F0F0F0F0F0F0ULL);
+    fio_u256 target;
+
+    /* Right rotate 64-bit by 64 (should wrap to 0) */
+    fio_u256_crrot64(&target, &src, 64);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot64 by 64 should return original value");
+
+    /* Left rotate 64-bit by 64 (should wrap to 0) */
+    fio_u256_clrot64(&target, &src, 64);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot64 by 64 should return original value");
+
+    /* 32-bit rotations by 32 */
+    fio_u256_crrot32(&target, &src, 32);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot32 by 32 should return original value");
+
+    fio_u256_clrot32(&target, &src, 32);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot32 by 32 should return original value");
+
+    /* 16-bit rotations by 16 */
+    fio_u256_crrot16(&target, &src, 16);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot16 by 16 should return original value");
+
+    fio_u256_clrot16(&target, &src, 16);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot16 by 16 should return original value");
+
+    /* 8-bit rotations by 8 */
+    fio_u256_crrot8(&target, &src, 8);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_crrot8 by 8 should return original value");
+
+    fio_u256_clrot8(&target, &src, 8);
+    FIO_ASSERT(!memcmp(&target, &src, sizeof(fio_u256)),
+               "fio_u256_clrot8 by 8 should return original value");
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_inverse(void) {
+  /* Test that lrot(rrot(x, n), n) == x */
+  {
+    fio_u512 src = fio_u512_init64(0x123456789ABCDEF0ULL,
+                                   0xFEDCBA9876543210ULL,
+                                   0x0F0F0F0F0F0F0F0FULL,
+                                   0xF0F0F0F0F0F0F0F0ULL,
+                                   0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL,
+                                   0x0123456789ABCDEFULL,
+                                   0xFEDCBA9876543210ULL);
+    fio_u512 temp, result;
+
+    /* Test various rotation amounts for 64-bit lanes */
+    uint8_t test_amounts[] = {1, 7, 13, 17, 31, 32, 33, 63};
+    for (size_t i = 0; i < sizeof(test_amounts); ++i) {
+      uint8_t n = test_amounts[i];
+
+      /* rrot then lrot */
+      fio_u512_crrot64(&temp, &src, n);
+      fio_u512_clrot64(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: lrot64(rrot64(x, %u), %u) != x",
+                 n,
+                 n);
+
+      /* lrot then rrot */
+      fio_u512_clrot64(&temp, &src, n);
+      fio_u512_crrot64(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: rrot64(lrot64(x, %u), %u) != x",
+                 n,
+                 n);
+    }
+
+    /* Test 32-bit lanes */
+    uint8_t test_amounts_32[] = {1, 7, 15, 16, 17, 31};
+    for (size_t i = 0; i < sizeof(test_amounts_32); ++i) {
+      uint8_t n = test_amounts_32[i];
+
+      fio_u512_crrot32(&temp, &src, n);
+      fio_u512_clrot32(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: lrot32(rrot32(x, %u), %u) != x",
+                 n,
+                 n);
+
+      fio_u512_clrot32(&temp, &src, n);
+      fio_u512_crrot32(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: rrot32(lrot32(x, %u), %u) != x",
+                 n,
+                 n);
+    }
+
+    /* Test 16-bit lanes */
+    uint8_t test_amounts_16[] = {1, 7, 8, 15};
+    for (size_t i = 0; i < sizeof(test_amounts_16); ++i) {
+      uint8_t n = test_amounts_16[i];
+
+      fio_u512_crrot16(&temp, &src, n);
+      fio_u512_clrot16(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: lrot16(rrot16(x, %u), %u) != x",
+                 n,
+                 n);
+
+      fio_u512_clrot16(&temp, &src, n);
+      fio_u512_crrot16(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: rrot16(lrot16(x, %u), %u) != x",
+                 n,
+                 n);
+    }
+
+    /* Test 8-bit lanes */
+    uint8_t test_amounts_8[] = {1, 3, 4, 7};
+    for (size_t i = 0; i < sizeof(test_amounts_8); ++i) {
+      uint8_t n = test_amounts_8[i];
+
+      fio_u512_crrot8(&temp, &src, n);
+      fio_u512_clrot8(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: lrot8(rrot8(x, %u), %u) != x",
+                 n,
+                 n);
+
+      fio_u512_clrot8(&temp, &src, n);
+      fio_u512_crrot8(&result, &temp, n);
+      FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+                 "fio_u512: rrot8(lrot8(x, %u), %u) != x",
+                 n,
+                 n);
+    }
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_per_lane(void) {
+  /*
+   * Note: Per-lane rotation functions (fio_uXXX_rrotN, fio_uXXX_lrotN) have
+   * platform-dependent behavior when using SIMD backends:
+   * - On GCC vector_size: the .xN member is a single full-width vector, so
+   *   only rotations[0] is used for all lanes.
+   * - On NEON: the .xN member is an array of 128-bit vectors.
+   * - On scalar fallback: the .xN member is a plain array matching .uN.
+   *
+   * For consistent cross-platform behavior, use the constant rotation
+   * functions (crrotN, clrotN) or the low-level macros directly on .uN arrays.
+   *
+   * This test verifies the macros work correctly on scalar arrays.
+   */
+
+  /* Test the low-level macros directly on scalar arrays for per-lane rotation
+   */
+  {
+    uint64_t src[4] = {0x8000000000000001ULL,
+                       0x8000000000000001ULL,
+                       0x8000000000000001ULL,
+                       0x8000000000000001ULL};
+    uint64_t target[4];
+    uint8_t rotations[4] = {1, 2, 3, 4};
+
+    /* Right rotate with per-lane amounts using macro directly */
+    FIO_MATH_UXXX_OP_RROT(target, src, rotations, 64);
+
+    /* Verify each lane was rotated by its specific amount */
+    FIO_ASSERT(target[0] == fio_rrot64(0x8000000000000001ULL, 1),
+               "FIO_MATH_UXXX_OP_RROT per-lane[0] failed");
+    FIO_ASSERT(target[1] == fio_rrot64(0x8000000000000001ULL, 2),
+               "FIO_MATH_UXXX_OP_RROT per-lane[1] failed");
+    FIO_ASSERT(target[2] == fio_rrot64(0x8000000000000001ULL, 3),
+               "FIO_MATH_UXXX_OP_RROT per-lane[2] failed");
+    FIO_ASSERT(target[3] == fio_rrot64(0x8000000000000001ULL, 4),
+               "FIO_MATH_UXXX_OP_RROT per-lane[3] failed");
+
+    /* Left rotate with per-lane amounts using macro directly */
+    FIO_MATH_UXXX_OP_LROT(target, src, rotations, 64);
+
+    /* Verify each lane was rotated by its specific amount */
+    FIO_ASSERT(target[0] == fio_lrot64(0x8000000000000001ULL, 1),
+               "FIO_MATH_UXXX_OP_LROT per-lane[0] failed");
+    FIO_ASSERT(target[1] == fio_lrot64(0x8000000000000001ULL, 2),
+               "FIO_MATH_UXXX_OP_LROT per-lane[1] failed");
+    FIO_ASSERT(target[2] == fio_lrot64(0x8000000000000001ULL, 3),
+               "FIO_MATH_UXXX_OP_LROT per-lane[2] failed");
+    FIO_ASSERT(target[3] == fio_lrot64(0x8000000000000001ULL, 4),
+               "FIO_MATH_UXXX_OP_LROT per-lane[3] failed");
+  }
+
+  /* Test 32-bit per-lane rotation using macros */
+  {
+    uint32_t src[8] = {0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001};
+    uint32_t target[8];
+    uint8_t rotations[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    FIO_MATH_UXXX_OP_RROT(target, src, rotations, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_rrot32(0x80000001, rotations[i]),
+                 "FIO_MATH_UXXX_OP_RROT (32-bit) per-lane[%d] failed",
+                 i);
+    }
+
+    FIO_MATH_UXXX_OP_LROT(target, src, rotations, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_lrot32(0x80000001, rotations[i]),
+                 "FIO_MATH_UXXX_OP_LROT (32-bit) per-lane[%d] failed",
+                 i);
+    }
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_all_sizes(void) {
+  /* Test fio_u128 */
+  {
+    fio_u128 src =
+        fio_u128_init64(0xAAAAAAAAAAAAAAAAULL, 0x5555555555555555ULL);
+    fio_u128 temp, result;
+
+    fio_u128_crrot64(&temp, &src, 7);
+    fio_u128_clrot64(&result, &temp, 7);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u128)),
+               "fio_u128 rotation roundtrip failed");
+  }
+
+  /* Test fio_u256 */
+  {
+    fio_u256 src = fio_u256_init64(0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL,
+                                   0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL);
+    fio_u256 temp, result;
+
+    fio_u256_crrot64(&temp, &src, 13);
+    fio_u256_clrot64(&result, &temp, 13);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u256)),
+               "fio_u256 rotation roundtrip failed");
+  }
+
+  /* Test fio_u512 */
+  {
+    fio_u512 src = fio_u512_init64(0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL,
+                                   0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL,
+                                   0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL,
+                                   0xAAAAAAAAAAAAAAAAULL,
+                                   0x5555555555555555ULL);
+    fio_u512 temp, result;
+
+    fio_u512_crrot64(&temp, &src, 17);
+    fio_u512_clrot64(&result, &temp, 17);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u512)),
+               "fio_u512 rotation roundtrip failed");
+  }
+
+  /* Test fio_u1024 */
+  {
+    fio_u1024 src;
+    for (int i = 0; i < 16; ++i)
+      src.u64[i] = (i & 1) ? 0x5555555555555555ULL : 0xAAAAAAAAAAAAAAAAULL;
+    fio_u1024 temp, result;
+
+    fio_u1024_crrot64(&temp, &src, 23);
+    fio_u1024_clrot64(&result, &temp, 23);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u1024)),
+               "fio_u1024 rotation roundtrip failed");
+  }
+
+  /* Test fio_u2048 */
+  {
+    fio_u2048 src;
+    for (int i = 0; i < 32; ++i)
+      src.u64[i] = (i & 1) ? 0x5555555555555555ULL : 0xAAAAAAAAAAAAAAAAULL;
+    fio_u2048 temp, result;
+
+    fio_u2048_crrot64(&temp, &src, 29);
+    fio_u2048_clrot64(&result, &temp, 29);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u2048)),
+               "fio_u2048 rotation roundtrip failed");
+  }
+
+  /* Test fio_u4096 */
+  {
+    fio_u4096 src;
+    for (int i = 0; i < 64; ++i)
+      src.u64[i] = (i & 1) ? 0x5555555555555555ULL : 0xAAAAAAAAAAAAAAAAULL;
+    fio_u4096 temp, result;
+
+    fio_u4096_crrot64(&temp, &src, 31);
+    fio_u4096_clrot64(&result, &temp, 31);
+    FIO_ASSERT(!memcmp(&result, &src, sizeof(fio_u4096)),
+               "fio_u4096 rotation roundtrip failed");
+  }
+}
+
+FIO_SFUNC void fio___test_core_rotation_macros(void) {
+  /* Test the low-level macros directly */
+  {
+    uint64_t src[4] = {0x8000000000000001ULL,
+                       0x8000000000000001ULL,
+                       0x8000000000000001ULL,
+                       0x8000000000000001ULL};
+    uint64_t target[4];
+    uint8_t rotations[4] = {1, 2, 3, 4};
+
+    /* Test FIO_MATH_UXXX_OP_RROT */
+    FIO_MATH_UXXX_OP_RROT(target, src, rotations, 64);
+    for (int i = 0; i < 4; ++i) {
+      FIO_ASSERT(target[i] == fio_rrot64(src[i], rotations[i]),
+                 "FIO_MATH_UXXX_OP_RROT failed at lane %d",
+                 i);
+    }
+
+    /* Test FIO_MATH_UXXX_OP_LROT */
+    FIO_MATH_UXXX_OP_LROT(target, src, rotations, 64);
+    for (int i = 0; i < 4; ++i) {
+      FIO_ASSERT(target[i] == fio_lrot64(src[i], rotations[i]),
+                 "FIO_MATH_UXXX_OP_LROT failed at lane %d",
+                 i);
+    }
+
+    /* Test FIO_MATH_UXXX_OP_CRROT */
+    FIO_MATH_UXXX_OP_CRROT(target, src, 7, 64);
+    for (int i = 0; i < 4; ++i) {
+      FIO_ASSERT(target[i] == fio_rrot64(src[i], 7),
+                 "FIO_MATH_UXXX_OP_CRROT failed at lane %d",
+                 i);
+    }
+
+    /* Test FIO_MATH_UXXX_OP_CLROT */
+    FIO_MATH_UXXX_OP_CLROT(target, src, 7, 64);
+    for (int i = 0; i < 4; ++i) {
+      FIO_ASSERT(target[i] == fio_lrot64(src[i], 7),
+                 "FIO_MATH_UXXX_OP_CLROT failed at lane %d",
+                 i);
+    }
+  }
+
+  /* Test 32-bit macros */
+  {
+    uint32_t src[8] = {0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001,
+                       0x80000001};
+    uint32_t target[8];
+    uint8_t rotations[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+
+    FIO_MATH_UXXX_OP_RROT(target, src, rotations, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_rrot32(src[i], rotations[i]),
+                 "FIO_MATH_UXXX_OP_RROT (32-bit) failed at lane %d",
+                 i);
+    }
+
+    FIO_MATH_UXXX_OP_LROT(target, src, rotations, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_lrot32(src[i], rotations[i]),
+                 "FIO_MATH_UXXX_OP_LROT (32-bit) failed at lane %d",
+                 i);
+    }
+
+    FIO_MATH_UXXX_OP_CRROT(target, src, 11, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_rrot32(src[i], 11),
+                 "FIO_MATH_UXXX_OP_CRROT (32-bit) failed at lane %d",
+                 i);
+    }
+
+    FIO_MATH_UXXX_OP_CLROT(target, src, 11, 32);
+    for (int i = 0; i < 8; ++i) {
+      FIO_ASSERT(target[i] == fio_lrot32(src[i], 11),
+                 "FIO_MATH_UXXX_OP_CLROT (32-bit) failed at lane %d",
+                 i);
+    }
+  }
+}
+
+/* *****************************************************************************
 Main Test Entry Point
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing Core Module");
-
   /* Run all functional tests */
   fio___test_core_memcpy_primitives();
   fio___test_core_byte_swap();
@@ -1673,7 +2141,13 @@ int main(void) {
   fio___test_strlen_simd_boundaries();
   fio___test_memcpyXx_masking();
 
-  FIO_LOG_DDEBUG("Core Module tests complete.");
-  FIO_LOG_DDEBUG("(Performance tests moved to tests/performance-core.c)");
+  /* Rotation function tests (RROT/LROT) */
+  fio___test_core_rotation_basic_correctness();
+  fio___test_core_rotation_zero();
+  fio___test_core_rotation_full_width();
+  fio___test_core_rotation_inverse();
+  fio___test_core_rotation_per_lane();
+  fio___test_core_rotation_all_sizes();
+  fio___test_core_rotation_macros();
   return 0;
 }

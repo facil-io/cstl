@@ -206,8 +206,6 @@ FIO_SFUNC void init_test_certificates(void) {
 Test: CertificateRequest Building and Parsing
 ***************************************************************************** */
 FIO_SFUNC void test_certificate_request_build_parse(void) {
-  FIO_LOG_DDEBUG("Testing CertificateRequest building and parsing\n");
-
   /* Build a CertificateRequest message */
   uint8_t cr_msg[256];
   uint8_t context[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
@@ -242,16 +240,12 @@ FIO_SFUNC void test_certificate_request_build_parse(void) {
     FIO_ASSERT(cr.signature_algorithms[i] == sig_algs[i],
                "Signature algorithm should match");
   }
-
-  FIO_LOG_DDEBUG("  - CertificateRequest build/parse tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server Require Client Cert API
 ***************************************************************************** */
 FIO_SFUNC void test_server_require_client_cert(void) {
-  FIO_LOG_DDEBUG("Testing server require_client_cert API\n");
-
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
@@ -281,16 +275,12 @@ FIO_SFUNC void test_server_require_client_cert(void) {
   FIO_ASSERT(cert_len == 0, "Cert length should be 0");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Server require_client_cert API tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Client Set Certificate API
 ***************************************************************************** */
 FIO_SFUNC void test_client_set_cert(void) {
-  FIO_LOG_DDEBUG("Testing client set_cert API\n");
-
   init_test_certificates();
 
   fio_tls13_client_s client;
@@ -314,16 +304,12 @@ FIO_SFUNC void test_client_set_cert(void) {
              "No cert request received yet");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Client set_cert API tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Full mTLS Handshake (Client-Server Integration)
 ***************************************************************************** */
 FIO_SFUNC void test_mtls_handshake(void) {
-  FIO_LOG_DDEBUG("Testing full mTLS handshake\n");
-
   init_test_certificates();
 
   /* Initialize server with client cert required */
@@ -358,8 +344,6 @@ FIO_SFUNC void test_mtls_handshake(void) {
   /* Step 1: Client sends ClientHello */
   int ch_len = fio_tls13_client_start(&client, client_out, sizeof(client_out));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
-  FIO_LOG_DDEBUG("  - ClientHello: %d bytes\n", ch_len);
-
   /* Step 2: Server processes ClientHello, sends ServerHello..Finished */
   int consumed = fio_tls13_server_process(&server,
                                           client_out,
@@ -369,8 +353,6 @@ FIO_SFUNC void test_mtls_handshake(void) {
                                           &server_out_len);
   FIO_ASSERT(consumed == ch_len, "Server should consume entire ClientHello");
   FIO_ASSERT(server_out_len > 0, "Server should generate response");
-  FIO_LOG_DDEBUG("  - Server response: %zu bytes\n", server_out_len);
-
   /* Server should now be waiting for client certificate */
   FIO_ASSERT(server.state == FIO_TLS13_SERVER_STATE_WAIT_CLIENT_CERT,
              "Server should be in WAIT_CLIENT_CERT state (got %s)",
@@ -387,13 +369,6 @@ FIO_SFUNC void test_mtls_handshake(void) {
                                         sizeof(client_out),
                                         &client_out_len);
     if (proc <= 0) {
-      FIO_LOG_DEBUG2("  - Client process returned %d at offset %zu/%zu, "
-                     "state=%s, error=%d",
-                     proc,
-                     offset,
-                     server_out_len,
-                     fio_tls13_client_state_name(&client),
-                     fio_tls13_client_is_error(&client));
     }
     FIO_ASSERT(proc > 0,
                "Client should process server records (proc=%d)",
@@ -407,9 +382,6 @@ FIO_SFUNC void test_mtls_handshake(void) {
 
   /* Client should have generated Certificate + CertificateVerify + Finished */
   FIO_ASSERT(client_out_len > 0, "Client should generate response");
-  FIO_LOG_DDEBUG("  - Client response (Cert+CV+Fin): %zu bytes\n",
-                 client_out_len);
-
   /* Step 4: Server processes client Certificate */
   offset = 0;
   while (offset < client_out_len &&
@@ -423,9 +395,6 @@ FIO_SFUNC void test_mtls_handshake(void) {
     if (consumed <= 0)
       break;
     offset += (size_t)consumed;
-    FIO_LOG_DDEBUG("  - Server processed %d bytes, state=%s\n",
-                   consumed,
-                   fio_tls13_server_state_name(&server));
   }
 
   /* Verify handshake completed */
@@ -476,17 +445,12 @@ FIO_SFUNC void test_mtls_handshake(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Full mTLS handshake tests passed\n");
 }
 
 /* *****************************************************************************
 Test: mTLS with Empty Client Certificate (Optional Mode)
 ***************************************************************************** */
 FIO_SFUNC void test_mtls_empty_client_cert(void) {
-  FIO_LOG_DDEBUG(
-      "Testing mTLS with empty client certificate (optional mode)\n");
-
   init_test_certificates();
 
   /* Initialize server with client cert optional */
@@ -573,17 +537,12 @@ FIO_SFUNC void test_mtls_empty_client_cert(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - mTLS empty client cert tests passed\n");
 }
 
 /* *****************************************************************************
 Test: mTLS with Empty Client Certificate (Required Mode - Should Fail)
 ***************************************************************************** */
 FIO_SFUNC void test_mtls_empty_client_cert_required(void) {
-  FIO_LOG_DDEBUG(
-      "Testing mTLS with empty client certificate (required mode)\n");
-
   init_test_certificates();
 
   /* Initialize server with client cert required */
@@ -661,16 +620,12 @@ FIO_SFUNC void test_mtls_empty_client_cert_required(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - mTLS empty client cert (required) tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server State Names Include New States
 ***************************************************************************** */
 FIO_SFUNC void test_server_state_names(void) {
-  FIO_LOG_DDEBUG("Testing server state names\n");
-
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
@@ -698,8 +653,6 @@ FIO_SFUNC void test_server_state_names(void) {
              "CONNECTED state name");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Server state name tests passed\n");
 }
 
 /* *****************************************************************************

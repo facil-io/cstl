@@ -3777,7 +3777,7 @@ Defines a `bits`-long vector named `name` using unsigned 8-bit words.
 - **GCC `vector_size`**: `uint8_t __attribute__((vector_size(bits / 8))) name[1]`
 - **Scalar fallback**: `uint8_t name[bits / 8]`
 
-**Note**: these macros are used internally to define the `.x64`, `.x32`, `.x16`, `.x8` members of each `fio_uXXX` union. They can also be used directly to declare standalone SIMD-aware vector variables:
+**Note**: these macros are used internally to define the `.x64`, `.x32`, `.x16`, `.x8` members of each `fio_uXXX` union. They can also be used directly to declare standalone SIMD-aware vector variables of **any bit width** -- not limited to the predefined 128/256/512/1024/2048/4096 sizes:
 
 ```c
 /* Declare a 256-bit vector of 64-bit words */
@@ -3785,6 +3785,25 @@ FIO_UXXX_X64_DEF(my_vec, 256);
 /* On GCC: uint64_t __attribute__((vector_size(32))) my_vec[1]; */
 /* On NEON: uint64x2_t my_vec[2]; */
 /* Scalar: uint64_t my_vec[4]; */
+```
+
+**Custom-length vectors**: Use these macros to define vectors of arbitrary length for domain-specific data layouts. The resulting arrays work with all `FIO_MATH_UXXX_*` operation macros:
+
+```c
+/* 384-bit vector of 32-bit words (12 elements) -- e.g., for Lyra2 state rows */
+FIO_UXXX_X32_DEF(row, 384);
+/* Scalar: uint32_t row[12]; */
+/* GCC vector: uint32_t __attribute__((vector_size(48))) row[1]; */
+
+/* 768-bit vector of 64-bit words (12 elements) -- e.g., for wide state arrays */
+FIO_UXXX_X64_DEF(state, 768);
+
+/* All FIO_MATH_UXXX_* macros work on these custom-length vectors */
+FIO_UXXX_X32_DEF(a, 384);
+FIO_UXXX_X32_DEF(b, 384);
+FIO_UXXX_X32_DEF(r, 384);
+FIO_MATH_UXXX_OP(r, a, b, 32, ^);        /* element-wise XOR */
+FIO_MATH_UXXX_OP_CRROT(r, a, 7, 32);     /* right-rotate all elements by 7 */
 ```
 
 ### Low-Level Vector Helper Macros
@@ -3880,6 +3899,79 @@ fio_u256 t, a, b, c;
 FIO_MATH_UXXX_TOP(t.x64, a.x64, b.x64, c.x64, 64, FIO___EXPR_MUX);
 ```
 
+#### `FIO_MATH_UXXX_OP_RROT`
+
+```c
+#define FIO_MATH_UXXX_OP_RROT(t, a, b, bits)
+```
+
+Lane-wise right rotation: `t[i] = (a[i] >> b[i]) | (a[i] << (bits - b[i]))` for each element `i`.
+
+- `t` - target array (modified in place)
+- `a` - source array of values to rotate
+- `b` - array of rotation amounts (one per lane)
+- `bits` - the bit width of each element (8, 16, 32, or 64) — **not vestigial**, used in the rotation formula
+
+Example:
+
+```c
+fio_u256 target, src;
+uint8_t rotations[4] = {3, 7, 11, 15};  /* different rotation per 64-bit lane */
+FIO_MATH_UXXX_OP_RROT(target.x64, src.x64, rotations, 64);
+```
+
+**Note**: the rotation amounts in `b` are masked with `(bits - 1)` to handle rotations >= `bits`.
+
+**Note**: when using SIMD backends (GCC `vector_size` or NEON), the loop count is determined by `sizeof(t)/sizeof(t[0])`, which may be 1 for full-width vectors. For consistent per-lane rotation across all platforms, use the macro directly on `.uN` scalar arrays instead of `.xN` vector members.
+
+#### `FIO_MATH_UXXX_OP_LROT`
+
+```c
+#define FIO_MATH_UXXX_OP_LROT(t, a, b, bits)
+```
+
+Lane-wise left rotation: `t[i] = (a[i] << b[i]) | (a[i] >> (bits - b[i]))` for each element `i`.
+
+- `t` - target array (modified in place)
+- `a` - source array of values to rotate
+- `b` - array of rotation amounts (one per lane)
+- `bits` - the bit width of each element (8, 16, 32, or 64) — **not vestigial**, used in the rotation formula
+
+Example:
+
+```c
+fio_u256 target, src;
+uint8_t rotations[4] = {3, 7, 11, 15};  /* different rotation per 64-bit lane */
+FIO_MATH_UXXX_OP_LROT(target.x64, src.x64, rotations, 64);
+```
+
+**Note**: the rotation amounts in `b` are masked with `(bits - 1)` to handle rotations >= `bits`.
+
+**Note**: when using SIMD backends (GCC `vector_size` or NEON), the loop count is determined by `sizeof(t)/sizeof(t[0])`, which may be 1 for full-width vectors. For consistent per-lane rotation across all platforms, use the macro directly on `.uN` scalar arrays instead of `.xN` vector members.
+
+#### `FIO_MATH_UXXX_OP_CLROT`
+
+```c
+#define FIO_MATH_UXXX_OP_CLROT(t, a, c, bits)
+```
+
+Lane-wise left rotation by a constant: `t[i] = (a[i] << c) | (a[i] >> (bits - c))` for each element `i`.
+
+- `t` - target array (modified in place)
+- `a` - source array of values to rotate
+- `c` - a scalar constant rotation amount (applied to all lanes)
+- `bits` - the bit width of each element (8, 16, 32, or 64) — **not vestigial**, used in the rotation formula
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Rotate all 64-bit lanes left by 17 bits */
+FIO_MATH_UXXX_OP_CLROT(target.x64, src.x64, 17, 64);
+```
+
+**Note**: the constant `c` is masked with `(bits - 1)` to handle rotations >= `bits`.
+
 #### `FIO_MATH_UXXX_REDUCE`
 
 ```c
@@ -3940,6 +4032,10 @@ FIO_MATH_UXXX_SUFFLE(val.u64, 64, 3, 2, 1, 0);
 | `FIO_MATH_UXXX_COP` | `.xN` (vector) | Vestigial |
 | `FIO_MATH_UXXX_SOP` | `.xN` (vector) | Vestigial |
 | `FIO_MATH_UXXX_TOP` | `.xN` (vector) | Vestigial |
+| `FIO_MATH_UXXX_OP_RROT` | `.xN` (vector) | **Required** — used in rotation formula `(bits - b[i])` |
+| `FIO_MATH_UXXX_OP_CRROT` | `.xN` (vector) | **Required** — used in rotation formula `(bits - c)` |
+| `FIO_MATH_UXXX_OP_LROT` | `.xN` (vector) | **Required** — used in rotation formula `(bits - b[i])` |
+| `FIO_MATH_UXXX_OP_CLROT` | `.xN` (vector) | **Required** — used in rotation formula `(bits - c)` |
 | `FIO_MATH_UXXX_REDUCE` | `.uN` (scalar array) | Declares `uint##bits##_t` temp variable |
 | `FIO_MATH_UXXX_SUFFLE` | `.uN` (scalar array) | Declares `uint##bits##_t` temp array |
 
@@ -4146,6 +4242,117 @@ void fio_uXXX_mux(fio_uXXX *t, const fio_uXXX *a, const fio_uXXX *b, const fio_u
 | `fio_uXXX_mux32`, `fio_uXXX_mux64`, `fio_uXXX_mux` | 32-bit, 64-bit, untyped | 128, 256, 512, 1024, 2048, 4096 |
 | `fio_uXXX_maj32`, `fio_uXXX_maj64`, `fio_uXXX_maj` | 32-bit, 64-bit, untyped | 128, 256, 512, 1024, 2048, 4096 |
 | `fio_uXXX_3xor32`, `fio_uXXX_3xor64`, `fio_uXXX_3xor` | 32-bit, 64-bit, untyped | 128, 256, 512, 1024, 2048, 4096 |
+
+### Rotation Operations (Pointer-Based)
+
+These functions perform lane-wise rotation on `fio_uXXX` types. Rotation operations are commonly used in cryptographic algorithms (SHA-2, ChaCha20, BLAKE2, etc.).
+
+#### `fio_uXXX_rrotN`
+
+```c
+void fio_uXXX_rrotN(fio_uXXX *target, const fio_uXXX *a, const uint8_t rotations[(XXX / N)]);
+```
+
+Lane-wise right rotation with per-lane rotation amounts. Each lane `i` is rotated right by `rotations[i]` bits.
+
+- `target` - destination for rotated values
+- `a` - source values to rotate
+- `rotations` - array of rotation amounts, one per lane
+
+Where `N` is one of `8`, `16`, `32`, `64` (the lane width in bits).
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Rotate each 64-bit lane by a different amount */
+uint8_t rotations[4] = {7, 11, 13, 17};
+fio_u256_rrot64(&target, &src, rotations);
+```
+
+#### `fio_uXXX_crrotN`
+
+```c
+void fio_uXXX_crrotN(fio_uXXX *target, const fio_uXXX *a, uint8_t bits);
+```
+
+Lane-wise right rotation by a constant amount. All lanes are rotated right by the same number of bits.
+
+- `target` - destination for rotated values
+- `a` - source values to rotate
+- `bits` - rotation amount (applied to all lanes)
+
+Where `N` is one of `8`, `16`, `32`, `64` (the lane width in bits).
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Rotate all 32-bit lanes right by 7 bits */
+fio_u256_crrot32(&target, &src, 7);
+```
+
+#### `fio_uXXX_lrotN`
+
+```c
+void fio_uXXX_lrotN(fio_uXXX *target, const fio_uXXX *a, const uint8_t rotations[(XXX / N)]);
+```
+
+Lane-wise left rotation with per-lane rotation amounts. Each lane `i` is rotated left by `rotations[i]` bits.
+
+- `target` - destination for rotated values
+- `a` - source values to rotate
+- `rotations` - array of rotation amounts, one per lane
+
+Where `N` is one of `8`, `16`, `32`, `64` (the lane width in bits).
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Rotate each 64-bit lane left by a different amount */
+uint8_t rotations[4] = {7, 11, 13, 17};
+fio_u256_lrot64(&target, &src, rotations);
+```
+
+#### `fio_uXXX_clrotN`
+
+```c
+void fio_uXXX_clrotN(fio_uXXX *target, const fio_uXXX *a, uint8_t bits);
+```
+
+Lane-wise left rotation by a constant amount. All lanes are rotated left by the same number of bits.
+
+- `target` - destination for rotated values
+- `a` - source values to rotate
+- `bits` - rotation amount (applied to all lanes)
+
+Where `N` is one of `8`, `16`, `32`, `64` (the lane width in bits).
+
+Example:
+
+```c
+fio_u256 target, src;
+/* Rotate all 32-bit lanes left by 7 bits */
+fio_u256_clrot32(&target, &src, 7);
+```
+
+#### Complete Function List (4 ops x 4 widths x 6 sizes = 96 functions)
+
+| Pattern | Word widths | Sizes |
+|---------|-------------|-------|
+| `fio_uXXX_rrotN` | 8, 16, 32, 64 | 128, 256, 512, 1024, 2048, 4096 |
+| `fio_uXXX_crrotN` | 8, 16, 32, 64 | 128, 256, 512, 1024, 2048, 4096 |
+| `fio_uXXX_lrotN` | 8, 16, 32, 64 | 128, 256, 512, 1024, 2048, 4096 |
+| `fio_uXXX_clrotN` | 8, 16, 32, 64 | 128, 256, 512, 1024, 2048, 4096 |
+
+For example: `fio_u256_rrot32`, `fio_u512_crrot64`, `fio_u128_lrot8`, `fio_u256_clrot32`, etc.
+
+**Note**: the rotation amount is masked with `(N - 1)` internally, so rotations >= `N` wrap correctly.
+
+**Note**: left rotation by `n` bits is equivalent to right rotation by `(width - n)` bits. The library provides both for convenience and clarity in cryptographic code.
+
+**Note**: the per-lane rotation functions (`fio_uXXX_rrotN`, `fio_uXXX_lrotN`) use the `.xN` vector members internally, which have platform-dependent array lengths. On GCC `vector_size` backends, the entire vector is a single element, so only `rotations[0]` is used. For consistent per-lane rotation across all platforms, use the `FIO_MATH_UXXX_OP_RROT`/`FIO_MATH_UXXX_OP_LROT` macros directly on `.uN` scalar arrays. The constant rotation functions (`fio_uXXX_crrotN`, `fio_uXXX_clrotN`) work correctly on all platforms.
 
 ### Multi-Precision Math
 

@@ -643,8 +643,6 @@ Test Functions
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_string)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 simple string (+)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -678,8 +676,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_string)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_error)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 simple error (-)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -695,8 +691,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_error)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_number)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 number (:)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -725,8 +719,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_number)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_null)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 null (_)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -740,8 +732,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_null)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_double)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 double (,)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -778,8 +768,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_double)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_bool)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 boolean (#)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -817,8 +805,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_bignum)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_blob_string)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 blob string ($)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -846,8 +832,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_blob_string)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_blob_error)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 blob error (!)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -862,8 +846,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_blob_error)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_verbatim)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 verbatim string (=)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -879,8 +861,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_verbatim)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_array)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 array (*)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -929,8 +909,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_array)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_map)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 map (%%)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -957,8 +935,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_map)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_set)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 set (~)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -972,8 +948,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_set)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_push)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 push (>)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -988,8 +962,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_push)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_attr)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 attribute (|)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1005,8 +977,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_attr)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_array)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming array (*?)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1023,8 +993,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_array)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_map)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming map (%%?)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1039,8 +1007,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_map)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_partial)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 partial parsing");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1062,8 +1028,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_partial)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_mixed_array)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 mixed type array");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1089,8 +1053,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_mixed_array)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_deep_nesting)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 deep nesting");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1112,8 +1074,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_deep_nesting)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_error_handling)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 error handling");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1127,8 +1087,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_error_handling)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_udata)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 udata passing");
-
   int custom_data = 12345;
   fio_resp3_parser_s parser = {.udata = &custom_data};
 
@@ -1154,8 +1112,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_udata)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_context_stack)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 context stack (parent_ctx)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1364,8 +1320,6 @@ static const fio_resp3_callbacks_s set_as_map_callbacks = {
 };
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_set_as_map_fallback)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 set-as-map fallback");
-
   /* Test 1: Simple set with strings should become map with key=value */
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -1555,8 +1509,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_set_as_map_fallback)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_set_with_callbacks)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 set with explicit callbacks (no fallback)");
-
   /* When set callbacks ARE provided, sets should work normally */
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -1583,8 +1535,6 @@ Test: Streaming String Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_blob)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming string callbacks (blob $)");
-
   /* Test 1: Blob string with streaming callbacks */
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -1643,8 +1593,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_blob)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_error)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming string callbacks (blob error !)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1675,8 +1623,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_error)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_verbatim)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming string callbacks (verbatim =)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1707,8 +1653,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_verbatim)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_chunked)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming string ($? with chunks)");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1747,8 +1691,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_chunked)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_in_array)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming strings in array");
-
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
 
@@ -1782,8 +1724,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_in_array)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_fallback)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 streaming string fallback to on_string");
-
   /* When streaming callbacks are NOT provided, should fall back to on_string */
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -1812,8 +1752,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_fallback)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 simple strings don't use streaming callbacks");
-
   /* Simple strings (+) should always use on_string, not streaming callbacks */
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -1843,8 +1781,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)(void) {
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing RESP3 Parser (context stack pattern)");
-
   FIO_NAME_TEST(stl, resp3_simple_string)();
   FIO_NAME_TEST(stl, resp3_simple_error)();
   FIO_NAME_TEST(stl, resp3_number)();
@@ -1877,7 +1813,5 @@ int main(void) {
   FIO_NAME_TEST(stl, resp3_streaming_string_in_array)();
   FIO_NAME_TEST(stl, resp3_streaming_string_fallback)();
   FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)();
-
-  FIO_LOG_DDEBUG("RESP3 Parser tests complete!");
   return 0;
 }

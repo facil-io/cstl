@@ -4,7 +4,6 @@ Test
 #include "test-helpers.h"
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing atomic operation macros.");
   struct fio___atomic_test_s {
     size_t w;
     unsigned long l;

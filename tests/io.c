@@ -42,8 +42,6 @@ Test: Reactor State API (without starting reactor)
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_reactor_state)(void) {
-  FIO_LOG_DEBUG2("Testing IO reactor state API...");
-
   /* Test: Initial state (before reactor starts) */
   {
     FIO_ASSERT(fio_io_is_running() == 0,
@@ -71,7 +69,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_reactor_state)(void) {
 
     uint16_t wn1 = fio_io_workers(-1);
     FIO_ASSERT(wn1 >= 1, "fio_io_workers(-1) should return at least 1");
-    FIO_LOG_DEBUG2("  fio_io_workers(-1) = %u", (unsigned)wn1);
   }
 
   /* Test: Shutdown timeout */
@@ -90,8 +87,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_reactor_state)(void) {
     fio_queue_s *q = fio_io_queue();
     FIO_ASSERT(q != NULL, "fio_io_queue should return non-NULL");
   }
-
-  FIO_LOG_DEBUG2("IO reactor state API tests passed.");
 }
 
 /* *****************************************************************************
@@ -129,8 +124,6 @@ FIO_SFUNC int fio___test_io_tls_each_trust(fio_io_tls_each_s *e,
 FIO_SFUNC void fio___test_io_tls_alpn_selected(fio_io_s *io) { (void)io; }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_tls_helpers)(void) {
-  FIO_LOG_DEBUG2("Testing IO TLS helpers...");
-
   /* Test: TLS object lifecycle */
   {
     fio_io_tls_s *tls = fio_io_tls_new();
@@ -253,8 +246,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_tls_helpers)(void) {
       fio_io_tls_free(tls);
     }
   }
-
-  FIO_LOG_DEBUG2("IO TLS helpers tests passed.");
 }
 
 /* *****************************************************************************
@@ -269,8 +260,6 @@ FIO_SFUNC void fio___test_io_env_on_close(void *udata) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_env)(void) {
-  FIO_LOG_DEBUG2("Testing IO environment (env) API...");
-
   /* Test: Global environment (io = NULL) */
   {
     fio___test_io_env_close_count = 0;
@@ -352,8 +341,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_env)(void) {
                       .name = FIO_BUF_INFO1((char *)"replace"),
                       .type = 1);
   }
-
-  FIO_LOG_DEBUG2("IO environment (env) API tests passed.");
 }
 
 /* *****************************************************************************
@@ -361,11 +348,7 @@ Test: Protocol Structure
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_protocol_init)(void) {
-  FIO_LOG_DEBUG2("Testing IO protocol structure...");
-
   {
-    FIO_LOG_DEBUG2("  sizeof(fio_io_protocol_s) = %zu bytes",
-                   sizeof(fio_io_protocol_s));
     FIO_ASSERT(sizeof(fio_io_protocol_s) >= 64,
                "protocol struct should be at least 64 bytes");
   }
@@ -382,8 +365,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_protocol_init)(void) {
     FIO_ASSERT(pr.timeout == 5000, "timeout error");
     FIO_ASSERT(pr.buffer_size == 1024, "buffer_size error");
   }
-
-  FIO_LOG_DEBUG2("IO protocol structure tests passed.");
 }
 
 /* *****************************************************************************
@@ -401,8 +382,6 @@ FIO_SFUNC void fio___test_io_defer_task(void *udata1, void *udata2) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_defer)(void) {
-  FIO_LOG_DEBUG2("Testing IO deferred task scheduling...");
-
   fio___test_io_defer_count = 0;
   fio___test_io_defer_udata1 = NULL;
   fio___test_io_defer_udata2 = NULL;
@@ -422,19 +401,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_defer)(void) {
   fio_queue_perform_all(fio_io_queue());
 
   FIO_ASSERT(fio___test_io_defer_count == 3, "3 deferred tasks should execute");
-
-  FIO_LOG_DEBUG2("IO deferred task scheduling tests passed.");
 }
 
 /* *****************************************************************************
 Test: fio_io_noop
 ***************************************************************************** */
 
-FIO_SFUNC void FIO_NAME_TEST(stl, io_noop)(void) {
-  FIO_LOG_DEBUG2("Testing fio_io_noop...");
-  fio_io_noop(NULL);
-  FIO_LOG_DEBUG2("fio_io_noop tests passed.");
-}
+FIO_SFUNC void FIO_NAME_TEST(stl, io_noop)(void) { fio_io_noop(NULL); }
 
 /* *****************************************************************************
 Test: fio_io_protocol_each
@@ -448,8 +421,6 @@ FIO_SFUNC void fio___test_protocol_each_task(fio_io_s *io, void *udata) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_protocol_each)(void) {
-  FIO_LOG_DEBUG2("Testing fio_io_protocol_each...");
-
   {
     size_t count =
         fio_io_protocol_each(NULL, fio___test_protocol_each_task, NULL);
@@ -463,8 +434,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_protocol_each)(void) {
     FIO_ASSERT(count == 0,
                "protocol_each with uninit protocol should return 0");
   }
-
-  FIO_LOG_DEBUG2("fio_io_protocol_each tests passed.");
 }
 
 /* *****************************************************************************
@@ -474,7 +443,7 @@ Integration Test: Roundtrip Message Exchange + IO Operations
 /* Server protocol callbacks */
 FIO_SFUNC void fio___test_server_on_attach(fio_io_s *io) {
   ++fio___test_io_on_attach_count;
-  FIO_LOG_DEBUG2("  server: on_attach (fd=%d)", fio_io_fd(io));
+  (void)io;
 }
 
 FIO_SFUNC void fio___test_server_on_data(fio_io_s *io) {
@@ -483,7 +452,6 @@ FIO_SFUNC void fio___test_server_on_data(fio_io_s *io) {
   size_t r = fio_io_read(io, buf, sizeof(buf) - 1);
   if (r > 0) {
     buf[r] = '\0';
-    FIO_LOG_DEBUG2("  server: received %zu bytes: %s", r, buf);
     char reply[1100];
     int len = snprintf(reply, sizeof(reply), "ECHO:%s", buf);
     fio_io_write(io, reply, len);
@@ -492,12 +460,11 @@ FIO_SFUNC void fio___test_server_on_data(fio_io_s *io) {
 
 FIO_SFUNC void fio___test_server_on_ready(fio_io_s *io) {
   ++fio___test_io_on_ready_count;
-  FIO_LOG_DEBUG2("  server: on_ready (fd=%d)", fio_io_fd(io));
+  (void)io;
 }
 
 FIO_SFUNC void fio___test_server_on_close(void *buffer, void *udata) {
   ++fio___test_io_on_close_count;
-  FIO_LOG_DEBUG2("  server: on_close");
   (void)buffer, (void)udata;
 }
 
@@ -512,7 +479,6 @@ static fio_io_protocol_s fio___test_server_protocol = {
 
 /* Client protocol callbacks */
 FIO_SFUNC void fio___test_client_on_attach(fio_io_s *io) {
-  FIO_LOG_DEBUG2("  client: on_attach (fd=%d)", fio_io_fd(io));
   fio___test_io_client = io;
 
   /* Test IO object functions */
@@ -534,8 +500,8 @@ FIO_SFUNC void fio___test_client_on_attach(fio_io_s *io) {
   void *buf = fio_io_buffer(io);
   FIO_ASSERT(buf != NULL, "fio_io_buffer should return non-NULL");
   size_t buf_len = fio_io_buffer_len(io);
-  FIO_LOG_DEBUG2("    buffer_len = %zu", buf_len);
-
+  FIO_ASSERT(buf_len >= pr->buffer_size,
+             "IO object should have, at least, length set");
   /* Mark connected and send message immediately
    * Note: For fio_io_connect, on_attach is called AFTER connection is
    * established, not before. The on_ready callback may not be called
@@ -544,7 +510,6 @@ FIO_SFUNC void fio___test_client_on_attach(fio_io_s *io) {
   fio___test_io_client_connected = 1;
 
   /* Send the test message */
-  FIO_LOG_DEBUG2("  client: sending test message from on_attach");
   const char *msg = "Hello, IO!";
   fio_io_write(io, (void *)msg, FIO_STRLEN(msg));
 }
@@ -554,7 +519,6 @@ FIO_SFUNC void fio___test_client_on_data(fio_io_s *io) {
   size_t r = fio_io_read(io, buf, sizeof(buf) - 1);
   if (r > 0) {
     buf[r] = '\0';
-    FIO_LOG_DEBUG2("  client: received %zu bytes: %s", r, buf);
     if (r < sizeof(fio___test_io_received_data)) {
       FIO_MEMCPY(fio___test_io_received_data, buf, r);
       fio___test_io_received_len = r;
@@ -567,8 +531,6 @@ FIO_SFUNC void fio___test_client_on_ready(fio_io_s *io) {
   /* Note: For fio_io_connect, on_ready may not be called on the user's protocol
    * because the protocol switch happens after the socket is already ready.
    * This is expected behavior - on_attach is the reliable callback to use. */
-  FIO_LOG_DEBUG2("  client: on_ready (fd=%d) - unexpectedly called",
-                 fio_io_fd(io));
   ++fio___test_io_on_ready_count;
 
   /* Test additional IO functions if we get here */
@@ -584,7 +546,6 @@ FIO_SFUNC void fio___test_client_on_ready(fio_io_s *io) {
 }
 
 FIO_SFUNC void fio___test_client_on_close(void *buffer, void *udata) {
-  FIO_LOG_DEBUG2("  client: on_close");
   fio___test_io_client = NULL;
   (void)buffer, (void)udata;
 }
@@ -603,7 +564,6 @@ static fio_io_protocol_s fio___test_client_protocol = {
 static fio_io_listener_s *fio___test_listener = NULL;
 
 FIO_SFUNC void fio___test_listener_on_start(fio_io_protocol_s *pr, void *ud) {
-  FIO_LOG_DEBUG2("  listener: started");
   fio___test_io_server_ready = 1;
   (void)pr, (void)ud;
 }
@@ -611,7 +571,6 @@ FIO_SFUNC void fio___test_listener_on_start(fio_io_protocol_s *pr, void *ud) {
 /* Timer callbacks */
 FIO_SFUNC int fio___test_connect_client(void *u1, void *u2) {
   (void)u1, (void)u2;
-  FIO_LOG_DEBUG2("  connecting client...");
   fio_io_connect("tcp://127.0.0.1:19876",
                  .protocol = &fio___test_client_protocol,
                  .udata = (void *)0xABCD,
@@ -622,7 +581,6 @@ FIO_SFUNC int fio___test_connect_client(void *u1, void *u2) {
 FIO_SFUNC int fio___test_check_done(void *u1, void *u2) {
   (void)u1, (void)u2;
   if (fio___test_io_exchange_complete) {
-    FIO_LOG_DEBUG2("  exchange complete, stopping reactor...");
     fio_io_stop();
     return -1;
   }
@@ -638,14 +596,11 @@ FIO_SFUNC int fio___test_timeout(void *u1, void *u2) {
 
 FIO_SFUNC void fio___test_on_start(void *ignr_) {
   (void)ignr_;
-  FIO_LOG_DEBUG2("  reactor started, listener should be ready");
   /* The listener was set up before fio_io_start, so it should be ready now */
   fio___test_io_server_ready = 1;
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
-  FIO_LOG_DEBUG2("Testing IO roundtrip message exchange...");
-
   /* Reset state */
   fio___test_io_on_attach_count = 0;
   fio___test_io_on_data_count = 0;
@@ -662,7 +617,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   fio___test_listener = NULL;
 
   /* Set up listener BEFORE reactor starts (like pubsub tests) */
-  FIO_LOG_DEBUG2("  setting up listener on tcp://127.0.0.1:19876");
   fio___test_listener = fio_io_listen(.url = "tcp://127.0.0.1:19876",
                                       .protocol = &fio___test_server_protocol,
                                       .udata = (void *)0x9999,
@@ -684,8 +638,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
 
   fio_buf_info_s url = fio_io_listener_url(fio___test_listener);
   FIO_ASSERT(url.len > 0, "listener URL should not be empty");
-  FIO_LOG_DEBUG2("  listener URL: %.*s", (int)url.len, url.buf);
-
   int is_tls = fio_io_listener_is_tls(fio___test_listener);
   FIO_ASSERT(is_tls == 0, "listener should not be TLS");
 
@@ -702,7 +654,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   fio_io_run_every(.fn = fio___test_timeout, .every = 5000, .repetitions = 1);
 
   /* Start reactor in single-process mode */
-  FIO_LOG_DEBUG2("  starting reactor...");
   fio_io_start(0);
 
   /* Clean up state callback */
@@ -733,10 +684,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   /* Note: on_ready may not be called for client protocol after fio_io_connect
    * because the protocol switch happens after the socket is already ready.
    * on_ready IS called for server (accepted) connections. */
-  FIO_LOG_DEBUG2("  on_ready count: %d (may be 0 for client protocol)",
-                 fio___test_io_on_ready_count);
-
-  FIO_LOG_DEBUG2("IO roundtrip message exchange tests passed.");
 }
 
 /* *****************************************************************************

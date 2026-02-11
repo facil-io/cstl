@@ -1869,463 +1869,1963 @@ Portable (Software) Implementation - Fallback
 ***************************************************************************** */
 #else /* No hardware acceleration */
 
-/* clang-format off */
-/* AES forward S-box */
-static const uint8_t FIO___AES_SBOX[256] = {
-    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
-    0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
-    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0,
-    0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
-    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc,
-    0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
-    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a,
-    0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
-    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0,
-    0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
-    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b,
-    0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
-    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85,
-    0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
-    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5,
-    0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
-    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17,
-    0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
-    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88,
-    0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
-    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c,
-    0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
-    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9,
-    0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
-    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6,
-    0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
-    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e,
-    0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
-    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94,
-    0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
-    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68,
-    0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
-};
+/* *****************************************************************************
+Bitsliced AES Helper Functions (Constant-Time Software Fallback)
 
-/* AES round constants */
-static const uint8_t FIO___AES_RCON[11] = {
-    0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36
-};
+Based on BearSSL ct64 (Thomas Pornin, MIT License) and Boyar-Peralta S-box.
+Adapted for facil.io FIO_MATH_UXXX vector types.
 
-/* Pre-computed T-tables for AES encryption */
-static const uint32_t FIO___AES_TE0[256] = {
-    0xc66363a5, 0xf87c7c84, 0xee777799, 0xf67b7b8d, 0xfff2f20d, 0xd66b6bbd, 0xde6f6fb1, 0x91c5c554,
-    0x60303050, 0x02010103, 0xce6767a9, 0x562b2b7d, 0xe7fefe19, 0xb5d7d762, 0x4dababe6, 0xec76769a,
-    0x8fcaca45, 0x1f82829d, 0x89c9c940, 0xfa7d7d87, 0xeffafa15, 0xb25959eb, 0x8e4747c9, 0xfbf0f00b,
-    0x41adadec, 0xb3d4d467, 0x5fa2a2fd, 0x45afafea, 0x239c9cbf, 0x53a4a4f7, 0xe4727296, 0x9bc0c05b,
-    0x75b7b7c2, 0xe1fdfd1c, 0x3d9393ae, 0x4c26266a, 0x6c36365a, 0x7e3f3f41, 0xf5f7f702, 0x83cccc4f,
-    0x6834345c, 0x51a5a5f4, 0xd1e5e534, 0xf9f1f108, 0xe2717193, 0xabd8d873, 0x62313153, 0x2a15153f,
-    0x0804040c, 0x95c7c752, 0x46232365, 0x9dc3c35e, 0x30181828, 0x379696a1, 0x0a05050f, 0x2f9a9ab5,
-    0x0e070709, 0x24121236, 0x1b80809b, 0xdfe2e23d, 0xcdebeb26, 0x4e272769, 0x7fb2b2cd, 0xea75759f,
-    0x1209091b, 0x1d83839e, 0x582c2c74, 0x341a1a2e, 0x361b1b2d, 0xdc6e6eb2, 0xb45a5aee, 0x5ba0a0fb,
-    0xa45252f6, 0x763b3b4d, 0xb7d6d661, 0x7db3b3ce, 0x5229297b, 0xdde3e33e, 0x5e2f2f71, 0x13848497,
-    0xa65353f5, 0xb9d1d168, 0x00000000, 0xc1eded2c, 0x40202060, 0xe3fcfc1f, 0x79b1b1c8, 0xb65b5bed,
-    0xd46a6abe, 0x8dcbcb46, 0x67bebed9, 0x7239394b, 0x944a4ade, 0x984c4cd4, 0xb05858e8, 0x85cfcf4a,
-    0xbbd0d06b, 0xc5efef2a, 0x4faaaae5, 0xedfbfb16, 0x864343c5, 0x9a4d4dd7, 0x66333355, 0x11858594,
-    0x8a4545cf, 0xe9f9f910, 0x04020206, 0xfe7f7f81, 0xa05050f0, 0x783c3c44, 0x259f9fba, 0x4ba8a8e3,
-    0xa25151f3, 0x5da3a3fe, 0x804040c0, 0x058f8f8a, 0x3f9292ad, 0x219d9dbc, 0x70383848, 0xf1f5f504,
-    0x63bcbcdf, 0x77b6b6c1, 0xafdada75, 0x42212163, 0x20101030, 0xe5ffff1a, 0xfdf3f30e, 0xbfd2d26d,
-    0x81cdcd4c, 0x180c0c14, 0x26131335, 0xc3ecec2f, 0xbe5f5fe1, 0x359797a2, 0x884444cc, 0x2e171739,
-    0x93c4c457, 0x55a7a7f2, 0xfc7e7e82, 0x7a3d3d47, 0xc86464ac, 0xba5d5de7, 0x3219192b, 0xe6737395,
-    0xc06060a0, 0x19818198, 0x9e4f4fd1, 0xa3dcdc7f, 0x44222266, 0x542a2a7e, 0x3b9090ab, 0x0b888883,
-    0x8c4646ca, 0xc7eeee29, 0x6bb8b8d3, 0x2814143c, 0xa7dede79, 0xbc5e5ee2, 0x160b0b1d, 0xaddbdb76,
-    0xdbe0e03b, 0x64323256, 0x743a3a4e, 0x140a0a1e, 0x924949db, 0x0c06060a, 0x4824246c, 0xb85c5ce4,
-    0x9fc2c25d, 0xbdd3d36e, 0x43acacef, 0xc46262a6, 0x399191a8, 0x319595a4, 0xd3e4e437, 0xf279798b,
-    0xd5e7e732, 0x8bc8c843, 0x6e373759, 0xda6d6db7, 0x018d8d8c, 0xb1d5d564, 0x9c4e4ed2, 0x49a9a9e0,
-    0xd86c6cb4, 0xac5656fa, 0xf3f4f407, 0xcfeaea25, 0xca6565af, 0xf47a7a8e, 0x47aeaee9, 0x10080818,
-    0x6fbabad5, 0xf0787888, 0x4a25256f, 0x5c2e2e72, 0x381c1c24, 0x57a6a6f1, 0x73b4b4c7, 0x97c6c651,
-    0xcbe8e823, 0xa1dddd7c, 0xe874749c, 0x3e1f1f21, 0x964b4bdd, 0x61bdbddc, 0x0d8b8b86, 0x0f8a8a85,
-    0xe0707090, 0x7c3e3e42, 0x71b5b5c4, 0xcc6666aa, 0x904848d8, 0x06030305, 0xf7f6f601, 0x1c0e0e12,
-    0xc26161a3, 0x6a35355f, 0xae5757f9, 0x69b9b9d0, 0x17868691, 0x99c1c158, 0x3a1d1d27, 0x279e9eb9,
-    0xd9e1e138, 0xebf8f813, 0x2b9898b3, 0x22111133, 0xd26969bb, 0xa9d9d970, 0x078e8e89, 0x339494a7,
-    0x2d9b9bb6, 0x3c1e1e22, 0x15878792, 0xc9e9e920, 0x87cece49, 0xaa5555ff, 0x50282878, 0xa5dfdf7a,
-    0x038c8c8f, 0x59a1a1f8, 0x09898980, 0x1a0d0d17, 0x65bfbfda, 0xd7e6e631, 0x844242c6, 0xd06868b8,
-    0x824141c3, 0x299999b0, 0x5a2d2d77, 0x1e0f0f11, 0x7bb0b0cb, 0xa85454fc, 0x6dbbbbd6, 0x2c16163a
-};
+Two engines:
+- 4-block engine: uint64_t q[8], processes 4 AES blocks per call.
+  Used for H/J0 computation, CTR tail, and optionally all data.
+- 16-block engine: fio_u256 q[8], processes 16 AES blocks per call.
+  Used for large data (>=256 bytes) when FIO___AES_BS_WIDE=1.
 
-static const uint32_t FIO___AES_TE1[256] = {
-    0xa5c66363, 0x84f87c7c, 0x99ee7777, 0x8df67b7b, 0x0dfff2f2, 0xbdd66b6b, 0xb1de6f6f, 0x5491c5c5,
-    0x50603030, 0x03020101, 0xa9ce6767, 0x7d562b2b, 0x19e7fefe, 0x62b5d7d7, 0xe64dabab, 0x9aec7676,
-    0x458fcaca, 0x9d1f8282, 0x4089c9c9, 0x87fa7d7d, 0x15effafa, 0xebb25959, 0xc98e4747, 0x0bfbf0f0,
-    0xec41adad, 0x67b3d4d4, 0xfd5fa2a2, 0xea45afaf, 0xbf239c9c, 0xf753a4a4, 0x96e47272, 0x5b9bc0c0,
-    0xc275b7b7, 0x1ce1fdfd, 0xae3d9393, 0x6a4c2626, 0x5a6c3636, 0x417e3f3f, 0x02f5f7f7, 0x4f83cccc,
-    0x5c683434, 0xf451a5a5, 0x34d1e5e5, 0x08f9f1f1, 0x93e27171, 0x73abd8d8, 0x53623131, 0x3f2a1515,
-    0x0c080404, 0x5295c7c7, 0x65462323, 0x5e9dc3c3, 0x28301818, 0xa1379696, 0x0f0a0505, 0xb52f9a9a,
-    0x090e0707, 0x36241212, 0x9b1b8080, 0x3ddfe2e2, 0x26cdebeb, 0x694e2727, 0xcd7fb2b2, 0x9fea7575,
-    0x1b120909, 0x9e1d8383, 0x74582c2c, 0x2e341a1a, 0x2d361b1b, 0xb2dc6e6e, 0xeeb45a5a, 0xfb5ba0a0,
-    0xf6a45252, 0x4d763b3b, 0x61b7d6d6, 0xce7db3b3, 0x7b522929, 0x3edde3e3, 0x715e2f2f, 0x97138484,
-    0xf5a65353, 0x68b9d1d1, 0x00000000, 0x2cc1eded, 0x60402020, 0x1fe3fcfc, 0xc879b1b1, 0xedb65b5b,
-    0xbed46a6a, 0x468dcbcb, 0xd967bebe, 0x4b723939, 0xde944a4a, 0xd4984c4c, 0xe8b05858, 0x4a85cfcf,
-    0x6bbbd0d0, 0x2ac5efef, 0xe54faaaa, 0x16edfbfb, 0xc5864343, 0xd79a4d4d, 0x55663333, 0x94118585,
-    0xcf8a4545, 0x10e9f9f9, 0x06040202, 0x81fe7f7f, 0xf0a05050, 0x44783c3c, 0xba259f9f, 0xe34ba8a8,
-    0xf3a25151, 0xfe5da3a3, 0xc0804040, 0x8a058f8f, 0xad3f9292, 0xbc219d9d, 0x48703838, 0x04f1f5f5,
-    0xdf63bcbc, 0xc177b6b6, 0x75afdada, 0x63422121, 0x30201010, 0x1ae5ffff, 0x0efdf3f3, 0x6dbfd2d2,
-    0x4c81cdcd, 0x14180c0c, 0x35261313, 0x2fc3ecec, 0xe1be5f5f, 0xa2359797, 0xcc884444, 0x392e1717,
-    0x5793c4c4, 0xf255a7a7, 0x82fc7e7e, 0x477a3d3d, 0xacc86464, 0xe7ba5d5d, 0x2b321919, 0x95e67373,
-    0xa0c06060, 0x98198181, 0xd19e4f4f, 0x7fa3dcdc, 0x66442222, 0x7e542a2a, 0xab3b9090, 0x830b8888,
-    0xca8c4646, 0x29c7eeee, 0xd36bb8b8, 0x3c281414, 0x79a7dede, 0xe2bc5e5e, 0x1d160b0b, 0x76addbdb,
-    0x3bdbe0e0, 0x56643232, 0x4e743a3a, 0x1e140a0a, 0xdb924949, 0x0a0c0606, 0x6c482424, 0xe4b85c5c,
-    0x5d9fc2c2, 0x6ebdd3d3, 0xef43acac, 0xa6c46262, 0xa8399191, 0xa4319595, 0x37d3e4e4, 0x8bf27979,
-    0x32d5e7e7, 0x438bc8c8, 0x596e3737, 0xb7da6d6d, 0x8c018d8d, 0x64b1d5d5, 0xd29c4e4e, 0xe049a9a9,
-    0xb4d86c6c, 0xfaac5656, 0x07f3f4f4, 0x25cfeaea, 0xafca6565, 0x8ef47a7a, 0xe947aeae, 0x18100808,
-    0xd56fbaba, 0x88f07878, 0x6f4a2525, 0x725c2e2e, 0x24381c1c, 0xf157a6a6, 0xc773b4b4, 0x5197c6c6,
-    0x23cbe8e8, 0x7ca1dddd, 0x9ce87474, 0x213e1f1f, 0xdd964b4b, 0xdc61bdbd, 0x860d8b8b, 0x850f8a8a,
-    0x90e07070, 0x427c3e3e, 0xc471b5b5, 0xaacc6666, 0xd8904848, 0x05060303, 0x01f7f6f6, 0x121c0e0e,
-    0xa3c26161, 0x5f6a3535, 0xf9ae5757, 0xd069b9b9, 0x91178686, 0x5899c1c1, 0x273a1d1d, 0xb9279e9e,
-    0x38d9e1e1, 0x13ebf8f8, 0xb32b9898, 0x33221111, 0xbbd26969, 0x70a9d9d9, 0x89078e8e, 0xa7339494,
-    0xb62d9b9b, 0x223c1e1e, 0x92158787, 0x20c9e9e9, 0x4987cece, 0xffaa5555, 0x78502828, 0x7aa5dfdf,
-    0x8f038c8c, 0xf859a1a1, 0x80098989, 0x171a0d0d, 0xda65bfbf, 0x31d7e6e6, 0xc6844242, 0xb8d06868,
-    0xc3824141, 0xb0299999, 0x775a2d2d, 0x111e0f0f, 0xcb7bb0b0, 0xfca85454, 0xd66dbbbb, 0x3a2c1616
-};
+Set FIO___AES_BS_WIDE=0 to use only the 4-block engine (for testing).
+***************************************************************************** */
 
-static const uint32_t FIO___AES_TE2[256] = {
-    0x63a5c663, 0x7c84f87c, 0x7799ee77, 0x7b8df67b, 0xf20dfff2, 0x6bbdd66b, 0x6fb1de6f, 0xc55491c5,
-    0x30506030, 0x01030201, 0x67a9ce67, 0x2b7d562b, 0xfe19e7fe, 0xd762b5d7, 0xabe64dab, 0x769aec76,
-    0xca458fca, 0x829d1f82, 0xc94089c9, 0x7d87fa7d, 0xfa15effa, 0x59ebb259, 0x47c98e47, 0xf00bfbf0,
-    0xadec41ad, 0xd467b3d4, 0xa2fd5fa2, 0xafea45af, 0x9cbf239c, 0xa4f753a4, 0x7296e472, 0xc05b9bc0,
-    0xb7c275b7, 0xfd1ce1fd, 0x93ae3d93, 0x266a4c26, 0x365a6c36, 0x3f417e3f, 0xf702f5f7, 0xcc4f83cc,
-    0x345c6834, 0xa5f451a5, 0xe534d1e5, 0xf108f9f1, 0x7193e271, 0xd873abd8, 0x31536231, 0x153f2a15,
-    0x040c0804, 0xc75295c7, 0x23654623, 0xc35e9dc3, 0x18283018, 0x96a13796, 0x050f0a05, 0x9ab52f9a,
-    0x07090e07, 0x12362412, 0x809b1b80, 0xe23ddfe2, 0xeb26cdeb, 0x27694e27, 0xb2cd7fb2, 0x759fea75,
-    0x091b1209, 0x839e1d83, 0x2c74582c, 0x1a2e341a, 0x1b2d361b, 0x6eb2dc6e, 0x5aeeb45a, 0xa0fb5ba0,
-    0x52f6a452, 0x3b4d763b, 0xd661b7d6, 0xb3ce7db3, 0x297b5229, 0xe33edde3, 0x2f715e2f, 0x84971384,
-    0x53f5a653, 0xd168b9d1, 0x00000000, 0xed2cc1ed, 0x20604020, 0xfc1fe3fc, 0xb1c879b1, 0x5bedb65b,
-    0x6abed46a, 0xcb468dcb, 0xbed967be, 0x394b7239, 0x4ade944a, 0x4cd4984c, 0x58e8b058, 0xcf4a85cf,
-    0xd06bbbd0, 0xef2ac5ef, 0xaae54faa, 0xfb16edfb, 0x43c58643, 0x4dd79a4d, 0x33556633, 0x85941185,
-    0x45cf8a45, 0xf910e9f9, 0x02060402, 0x7f81fe7f, 0x50f0a050, 0x3c44783c, 0x9fba259f, 0xa8e34ba8,
-    0x51f3a251, 0xa3fe5da3, 0x40c08040, 0x8f8a058f, 0x92ad3f92, 0x9dbc219d, 0x38487038, 0xf504f1f5,
-    0xbcdf63bc, 0xb6c177b6, 0xda75afda, 0x21634221, 0x10302010, 0xff1ae5ff, 0xf30efdf3, 0xd26dbfd2,
-    0xcd4c81cd, 0x0c14180c, 0x13352613, 0xec2fc3ec, 0x5fe1be5f, 0x97a23597, 0x44cc8844, 0x17392e17,
-    0xc45793c4, 0xa7f255a7, 0x7e82fc7e, 0x3d477a3d, 0x64acc864, 0x5de7ba5d, 0x192b3219, 0x7395e673,
-    0x60a0c060, 0x81981981, 0x4fd19e4f, 0xdc7fa3dc, 0x22664422, 0x2a7e542a, 0x90ab3b90, 0x88830b88,
-    0x46ca8c46, 0xee29c7ee, 0xb8d36bb8, 0x143c2814, 0xde79a7de, 0x5ee2bc5e, 0x0b1d160b, 0xdb76addb,
-    0xe03bdbe0, 0x32566432, 0x3a4e743a, 0x0a1e140a, 0x49db9249, 0x060a0c06, 0x246c4824, 0x5ce4b85c,
-    0xc25d9fc2, 0xd36ebdd3, 0xacef43ac, 0x62a6c462, 0x91a83991, 0x95a43195, 0xe437d3e4, 0x798bf279,
-    0xe732d5e7, 0xc8438bc8, 0x37596e37, 0x6db7da6d, 0x8d8c018d, 0xd564b1d5, 0x4ed29c4e, 0xa9e049a9,
-    0x6cb4d86c, 0x56faac56, 0xf407f3f4, 0xea25cfea, 0x65afca65, 0x7a8ef47a, 0xaee947ae, 0x08181008,
-    0xbad56fba, 0x7888f078, 0x256f4a25, 0x2e725c2e, 0x1c24381c, 0xa6f157a6, 0xb4c773b4, 0xc65197c6,
-    0xe823cbe8, 0xdd7ca1dd, 0x749ce874, 0x1f213e1f, 0x4bdd964b, 0xbddc61bd, 0x8b860d8b, 0x8a850f8a,
-    0x7090e070, 0x3e427c3e, 0xb5c471b5, 0x66aacc66, 0x48d89048, 0x03050603, 0xf601f7f6, 0x0e121c0e,
-    0x61a3c261, 0x355f6a35, 0x57f9ae57, 0xb9d069b9, 0x86911786, 0xc15899c1, 0x1d273a1d, 0x9eb9279e,
-    0xe138d9e1, 0xf813ebf8, 0x98b32b98, 0x11332211, 0x69bbd269, 0xd970a9d9, 0x8e89078e, 0x94a73394,
-    0x9bb62d9b, 0x1e223c1e, 0x87921587, 0xe920c9e9, 0xce4987ce, 0x55ffaa55, 0x28785028, 0xdf7aa5df,
-    0x8c8f038c, 0xa1f859a1, 0x89800989, 0x0d171a0d, 0xbfda65bf, 0xe631d7e6, 0x42c68442, 0x68b8d068,
-    0x41c38241, 0x99b02999, 0x2d775a2d, 0x0f111e0f, 0xb0cb7bb0, 0x54fca854, 0xbbd66dbb, 0x163a2c16
-};
+#ifndef FIO___AES_BS_WIDE
+#define FIO___AES_BS_WIDE 1 /* 1 = use 16-block fio_u256 for large data */
+#endif
 
-static const uint32_t FIO___AES_TE3[256] = {
-    0x6363a5c6, 0x7c7c84f8, 0x777799ee, 0x7b7b8df6, 0xf2f20dff, 0x6b6bbdd6, 0x6f6fb1de, 0xc5c55491,
-    0x30305060, 0x01010302, 0x6767a9ce, 0x2b2b7d56, 0xfefe19e7, 0xd7d762b5, 0xababe64d, 0x76769aec,
-    0xcaca458f, 0x82829d1f, 0xc9c94089, 0x7d7d87fa, 0xfafa15ef, 0x5959ebb2, 0x4747c98e, 0xf0f00bfb,
-    0xadadec41, 0xd4d467b3, 0xa2a2fd5f, 0xafafea45, 0x9c9cbf23, 0xa4a4f753, 0x727296e4, 0xc0c05b9b,
-    0xb7b7c275, 0xfdfd1ce1, 0x9393ae3d, 0x26266a4c, 0x36365a6c, 0x3f3f417e, 0xf7f702f5, 0xcccc4f83,
-    0x34345c68, 0xa5a5f451, 0xe5e534d1, 0xf1f108f9, 0x717193e2, 0xd8d873ab, 0x31315362, 0x15153f2a,
-    0x04040c08, 0xc7c75295, 0x23236546, 0xc3c35e9d, 0x18182830, 0x9696a137, 0x05050f0a, 0x9a9ab52f,
-    0x0707090e, 0x12123624, 0x80809b1b, 0xe2e23ddf, 0xebeb26cd, 0x2727694e, 0xb2b2cd7f, 0x75759fea,
-    0x09091b12, 0x83839e1d, 0x2c2c7458, 0x1a1a2e34, 0x1b1b2d36, 0x6e6eb2dc, 0x5a5aeeb4, 0xa0a0fb5b,
-    0x5252f6a4, 0x3b3b4d76, 0xd6d661b7, 0xb3b3ce7d, 0x29297b52, 0xe3e33edd, 0x2f2f715e, 0x84849713,
-    0x5353f5a6, 0xd1d168b9, 0x00000000, 0xeded2cc1, 0x20206040, 0xfcfc1fe3, 0xb1b1c879, 0x5b5bedb6,
-    0x6a6abed4, 0xcbcb468d, 0xbebed967, 0x39394b72, 0x4a4ade94, 0x4c4cd498, 0x5858e8b0, 0xcfcf4a85,
-    0xd0d06bbb, 0xefef2ac5, 0xaaaae54f, 0xfbfb16ed, 0x4343c586, 0x4d4dd79a, 0x33335566, 0x85859411,
-    0x4545cf8a, 0xf9f910e9, 0x02020604, 0x7f7f81fe, 0x5050f0a0, 0x3c3c4478, 0x9f9fba25, 0xa8a8e34b,
-    0x5151f3a2, 0xa3a3fe5d, 0x4040c080, 0x8f8f8a05, 0x9292ad3f, 0x9d9dbc21, 0x38384870, 0xf5f504f1,
-    0xbcbcdf63, 0xb6b6c177, 0xdada75af, 0x21216342, 0x10103020, 0xffff1ae5, 0xf3f30efd, 0xd2d26dbf,
-    0xcdcd4c81, 0x0c0c1418, 0x13133526, 0xecec2fc3, 0x5f5fe1be, 0x9797a235, 0x4444cc88, 0x1717392e,
-    0xc4c45793, 0xa7a7f255, 0x7e7e82fc, 0x3d3d477a, 0x6464acc8, 0x5d5de7ba, 0x19192b32, 0x737395e6,
-    0x6060a0c0, 0x81819819, 0x4f4fd19e, 0xdcdc7fa3, 0x22226644, 0x2a2a7e54, 0x9090ab3b, 0x8888830b,
-    0x4646ca8c, 0xeeee29c7, 0xb8b8d36b, 0x14143c28, 0xdede79a7, 0x5e5ee2bc, 0x0b0b1d16, 0xdbdb76ad,
-    0xe0e03bdb, 0x32325664, 0x3a3a4e74, 0x0a0a1e14, 0x4949db92, 0x06060a0c, 0x24246c48, 0x5c5ce4b8,
-    0xc2c25d9f, 0xd3d36ebd, 0xacacef43, 0x6262a6c4, 0x9191a839, 0x9595a431, 0xe4e437d3, 0x79798bf2,
-    0xe7e732d5, 0xc8c8438b, 0x3737596e, 0x6d6db7da, 0x8d8d8c01, 0xd5d564b1, 0x4e4ed29c, 0xa9a9e049,
-    0x6c6cb4d8, 0x5656faac, 0xf4f407f3, 0xeaea25cf, 0x6565afca, 0x7a7a8ef4, 0xaeaee947, 0x08081810,
-    0xbabad56f, 0x787888f0, 0x25256f4a, 0x2e2e725c, 0x1c1c2438, 0xa6a6f157, 0xb4b4c773, 0xc6c65197,
-    0xe8e823cb, 0xdddd7ca1, 0x74749ce8, 0x1f1f213e, 0x4b4bdd96, 0xbdbddc61, 0x8b8b860d, 0x8a8a850f,
-    0x707090e0, 0x3e3e427c, 0xb5b5c471, 0x6666aacc, 0x4848d890, 0x03030506, 0xf6f601f7, 0x0e0e121c,
-    0x6161a3c2, 0x35355f6a, 0x5757f9ae, 0xb9b9d069, 0x86869117, 0xc1c15899, 0x1d1d273a, 0x9e9eb927,
-    0xe1e138d9, 0xf8f813eb, 0x9898b32b, 0x11113322, 0x6969bbd2, 0xd9d970a9, 0x8e8e8907, 0x9494a733,
-    0x9b9bb62d, 0x1e1e223c, 0x87879215, 0xe9e920c9, 0xcece4987, 0x5555ffaa, 0x28287850, 0xdfdf7aa5,
-    0x8c8c8f03, 0xa1a1f859, 0x89898009, 0x0d0d171a, 0xbfbfda65, 0xe6e631d7, 0x4242c684, 0x6868b8d0,
-    0x4141c382, 0x9999b029, 0x2d2d775a, 0x0f0f111e, 0xb0b0cb7b, 0x5454fca8, 0xbbbbd66d, 0x16163a2c
-};
-/* clang-format on */
+/* ============================================================================
+ * 1. Interleave: pack/unpack AES block between 4×uint32_t LE and 2×uint64_t
+ * ========================================================================= */
 
-/* SubWord: apply S-box to each byte of a 32-bit word */
-FIO_IFUNC uint32_t fio___aes_subword(uint32_t w) {
-  return ((uint32_t)FIO___AES_SBOX[(w >> 0) & 0xFF] << 0) |
-         ((uint32_t)FIO___AES_SBOX[(w >> 8) & 0xFF] << 8) |
-         ((uint32_t)FIO___AES_SBOX[(w >> 16) & 0xFF] << 16) |
-         ((uint32_t)FIO___AES_SBOX[(w >> 24) & 0xFF] << 24);
+/**
+ * Pack one AES block (4 little-endian uint32_t words) into two uint64_t
+ * values in the column-interleaved format used by the bitsliced pipeline.
+ *
+ * After interleave_in + ortho, data is in true bitsliced form.
+ */
+FIO_IFUNC void fio___aes_bs_interleave_in(uint64_t *q0,
+                                          uint64_t *q1,
+                                          const uint32_t *w) {
+  uint64_t x0, x1, x2, x3;
+  x0 = w[0];
+  x1 = w[1];
+  x2 = w[2];
+  x3 = w[3];
+  /* Spread each 32-bit word so bytes are in 16-bit groups */
+  x0 |= (x0 << 16);
+  x1 |= (x1 << 16);
+  x2 |= (x2 << 16);
+  x3 |= (x3 << 16);
+  x0 &= (uint64_t)0x0000FFFF0000FFFF;
+  x1 &= (uint64_t)0x0000FFFF0000FFFF;
+  x2 &= (uint64_t)0x0000FFFF0000FFFF;
+  x3 &= (uint64_t)0x0000FFFF0000FFFF;
+  /* Further spread so bytes are in 8-bit groups */
+  x0 |= (x0 << 8);
+  x1 |= (x1 << 8);
+  x2 |= (x2 << 8);
+  x3 |= (x3 << 8);
+  x0 &= (uint64_t)0x00FF00FF00FF00FF;
+  x1 &= (uint64_t)0x00FF00FF00FF00FF;
+  x2 &= (uint64_t)0x00FF00FF00FF00FF;
+  x3 &= (uint64_t)0x00FF00FF00FF00FF;
+  /* Combine: even columns in q0, odd columns in q1 */
+  *q0 = x0 | (x2 << 8);
+  *q1 = x1 | (x3 << 8);
 }
 
-FIO_IFUNC void fio___aes128_key_expand(uint32_t *w, const uint8_t key[16]) {
-  for (int i = 0; i < 4; ++i)
-    w[i] = fio_buf2u32_be(key + 4 * i);
-  for (int i = 4; i < 44; ++i) {
-    uint32_t tmp = w[i - 1];
-    if ((i & 3) == 0)
-      tmp = fio___aes_subword(fio_rrot32(tmp, 24)) ^
-            ((uint32_t)FIO___AES_RCON[i / 4] << 24);
-    w[i] = w[i - 4] ^ tmp;
+/**
+ * Unpack two uint64_t values back to 4 little-endian uint32_t words.
+ * Inverse of fio___aes_bs_interleave_in.
+ */
+FIO_IFUNC void fio___aes_bs_interleave_out(uint32_t *w,
+                                           uint64_t q0,
+                                           uint64_t q1) {
+  uint64_t x0, x1, x2, x3;
+  x0 = q0 & (uint64_t)0x00FF00FF00FF00FF;
+  x1 = q1 & (uint64_t)0x00FF00FF00FF00FF;
+  x2 = (q0 >> 8) & (uint64_t)0x00FF00FF00FF00FF;
+  x3 = (q1 >> 8) & (uint64_t)0x00FF00FF00FF00FF;
+  x0 |= (x0 >> 8);
+  x1 |= (x1 >> 8);
+  x2 |= (x2 >> 8);
+  x3 |= (x3 >> 8);
+  x0 &= (uint64_t)0x0000FFFF0000FFFF;
+  x1 &= (uint64_t)0x0000FFFF0000FFFF;
+  x2 &= (uint64_t)0x0000FFFF0000FFFF;
+  x3 &= (uint64_t)0x0000FFFF0000FFFF;
+  w[0] = (uint32_t)x0 | (uint32_t)(x0 >> 16);
+  w[1] = (uint32_t)x1 | (uint32_t)(x1 >> 16);
+  w[2] = (uint32_t)x2 | (uint32_t)(x2 >> 16);
+  w[3] = (uint32_t)x3 | (uint32_t)(x3 >> 16);
+}
+
+/* ============================================================================
+ * 2. Ortho: bit transpose on uint64_t q[8] (self-inverse butterfly)
+ * ========================================================================= */
+
+/**
+ * Transpose 8 uint64_t registers between byte-oriented and bitsliced form.
+ * Self-inverse: apply before encryption to bitslice, after to un-bitslice.
+ */
+FIO_IFUNC void fio___aes_bs_ortho(uint64_t *q) {
+#define FIO___AES_BS_SWAPN(cl, ch, s, x, y)                                    \
+  do {                                                                         \
+    uint64_t a_, b_;                                                           \
+    a_ = (x);                                                                  \
+    b_ = (y);                                                                  \
+    (x) = (a_ & (uint64_t)(cl)) | ((b_ & (uint64_t)(cl)) << (s));              \
+    (y) = ((a_ & (uint64_t)(ch)) >> (s)) | (b_ & (uint64_t)(ch));              \
+  } while (0)
+
+#define FIO___AES_BS_SWAP2(x, y)                                               \
+  FIO___AES_BS_SWAPN(0x5555555555555555ULL, 0xAAAAAAAAAAAAAAAAULL, 1, x, y)
+#define FIO___AES_BS_SWAP4(x, y)                                               \
+  FIO___AES_BS_SWAPN(0x3333333333333333ULL, 0xCCCCCCCCCCCCCCCCULL, 2, x, y)
+#define FIO___AES_BS_SWAP8(x, y)                                               \
+  FIO___AES_BS_SWAPN(0x0F0F0F0F0F0F0F0FULL, 0xF0F0F0F0F0F0F0F0ULL, 4, x, y)
+
+  FIO___AES_BS_SWAP2(q[0], q[1]);
+  FIO___AES_BS_SWAP2(q[2], q[3]);
+  FIO___AES_BS_SWAP2(q[4], q[5]);
+  FIO___AES_BS_SWAP2(q[6], q[7]);
+
+  FIO___AES_BS_SWAP4(q[0], q[2]);
+  FIO___AES_BS_SWAP4(q[1], q[3]);
+  FIO___AES_BS_SWAP4(q[4], q[6]);
+  FIO___AES_BS_SWAP4(q[5], q[7]);
+
+  FIO___AES_BS_SWAP8(q[0], q[4]);
+  FIO___AES_BS_SWAP8(q[1], q[5]);
+  FIO___AES_BS_SWAP8(q[2], q[6]);
+  FIO___AES_BS_SWAP8(q[3], q[7]);
+
+#undef FIO___AES_BS_SWAP8
+#undef FIO___AES_BS_SWAP4
+#undef FIO___AES_BS_SWAP2
+#undef FIO___AES_BS_SWAPN
+}
+
+/* ============================================================================
+ * 3. Boyar-Peralta S-box on fio_u256 q[8] (vectorized, 16 blocks)
+ *
+ * Input:  x0=q[7], x1=q[6], ..., x7=q[0]  (MSB first)
+ * Output: q[7]=s0, q[6]=s1, ..., q[0]=s7
+ *
+ * 107 operations: 32 AND, 71 XOR, 4 XNOR (complement via XOR with all-ones)
+ * ========================================================================= */
+
+/* Helper macros for vectorized bitwise operations on fio_u256 */
+#define FIO___AES_BS_XOR(dst, a, b)                                            \
+  FIO_MATH_UXXX_OP((dst).x64, (a).x64, (b).x64, 64, ^)
+#define FIO___AES_BS_AND(dst, a, b)                                            \
+  FIO_MATH_UXXX_OP((dst).x64, (a).x64, (b).x64, 64, &)
+/* XNOR: dst = a ^ b ^ all_ones = ~(a ^ b) */
+#define FIO___AES_BS_XNOR(dst, a, b)                                           \
+  do {                                                                         \
+    FIO_MATH_UXXX_OP((dst).x64, (a).x64, (b).x64, 64, ^);                      \
+    FIO_MATH_UXXX_COP((dst).x64, (dst).x64, ~(uint64_t)0, 64, ^);              \
+  } while (0)
+
+FIO_IFUNC void fio___aes_bs_sbox(fio_u256 *q) {
+  fio_u256 x0, x1, x2, x3, x4, x5, x6, x7;
+  fio_u256 y1, y2, y3, y4, y5, y6, y7, y8, y9;
+  fio_u256 y10, y11, y12, y13, y14, y15, y16, y17, y18, y19;
+  fio_u256 y20, y21;
+  fio_u256 z0, z1, z2, z3, z4, z5, z6, z7, z8, z9;
+  fio_u256 z10, z11, z12, z13, z14, z15, z16, z17;
+  fio_u256 t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+  fio_u256 t10, t11, t12, t13, t14, t15, t16, t17, t18, t19;
+  fio_u256 t20, t21, t22, t23, t24, t25, t26, t27, t28, t29;
+  fio_u256 t30, t31, t32, t33, t34, t35, t36, t37, t38, t39;
+  fio_u256 t40, t41, t42, t43, t44, t45, t46, t47, t48, t49;
+  fio_u256 t50, t51, t52, t53, t54, t55, t56, t57, t58, t59;
+  fio_u256 t60, t61, t62, t63, t64, t65, t66, t67;
+  fio_u256 s0, s1, s2, s3, s4, s5, s6, s7;
+
+  x0 = q[7];
+  x1 = q[6];
+  x2 = q[5];
+  x3 = q[4];
+  x4 = q[3];
+  x5 = q[2];
+  x6 = q[1];
+  x7 = q[0];
+
+  /* ===== TOP LINEAR TRANSFORMATION (23 XOR gates) ===== */
+  FIO___AES_BS_XOR(y14, x3, x5);
+  FIO___AES_BS_XOR(y13, x0, x6);
+  FIO___AES_BS_XOR(y9, x0, x3);
+  FIO___AES_BS_XOR(y8, x0, x5);
+  FIO___AES_BS_XOR(t0, x1, x2);
+  FIO___AES_BS_XOR(y1, t0, x7);
+  FIO___AES_BS_XOR(y4, y1, x3);
+  FIO___AES_BS_XOR(y12, y13, y14);
+  FIO___AES_BS_XOR(y2, y1, x0);
+  FIO___AES_BS_XOR(y5, y1, x6);
+  FIO___AES_BS_XOR(y3, y5, y8);
+  FIO___AES_BS_XOR(t1, x4, y12);
+  FIO___AES_BS_XOR(y15, t1, x5);
+  FIO___AES_BS_XOR(y20, t1, x1);
+  FIO___AES_BS_XOR(y6, y15, x7);
+  FIO___AES_BS_XOR(y10, y15, t0);
+  FIO___AES_BS_XOR(y11, y20, y9);
+  FIO___AES_BS_XOR(y7, x7, y11);
+  FIO___AES_BS_XOR(y17, y10, y11);
+  FIO___AES_BS_XOR(y19, y10, y8);
+  FIO___AES_BS_XOR(y16, t0, y11);
+  FIO___AES_BS_XOR(y21, y13, y16);
+  FIO___AES_BS_XOR(y18, x0, y16);
+
+  /* ===== NON-LINEAR SECTION (32 AND + 22 XOR = 54 gates) ===== */
+  FIO___AES_BS_AND(t2, y12, y15);
+  FIO___AES_BS_AND(t3, y3, y6);
+  FIO___AES_BS_XOR(t4, t3, t2);
+  FIO___AES_BS_AND(t5, y4, x7);
+  FIO___AES_BS_XOR(t6, t5, t2);
+  FIO___AES_BS_AND(t7, y13, y16);
+  FIO___AES_BS_AND(t8, y5, y1);
+  FIO___AES_BS_XOR(t9, t8, t7);
+  FIO___AES_BS_AND(t10, y2, y7);
+  FIO___AES_BS_XOR(t11, t10, t7);
+  FIO___AES_BS_AND(t12, y9, y11);
+  FIO___AES_BS_AND(t13, y14, y17);
+  FIO___AES_BS_XOR(t14, t13, t12);
+  FIO___AES_BS_AND(t15, y8, y10);
+  FIO___AES_BS_XOR(t16, t15, t12);
+  FIO___AES_BS_XOR(t17, t4, y20);
+  FIO___AES_BS_XOR(t18, t6, t16);
+  FIO___AES_BS_XOR(t19, t9, t14);
+  FIO___AES_BS_XOR(t20, t11, t16);
+  FIO___AES_BS_XOR(t21, t17, t14);
+  FIO___AES_BS_XOR(t22, t18, y19);
+  FIO___AES_BS_XOR(t23, t19, y21);
+  FIO___AES_BS_XOR(t24, t20, y18);
+
+  /* GF(2^4) inversion core */
+  FIO___AES_BS_XOR(t25, t21, t22);
+  FIO___AES_BS_AND(t26, t21, t23);
+  FIO___AES_BS_XOR(t27, t24, t26);
+  FIO___AES_BS_AND(t28, t25, t27);
+  FIO___AES_BS_XOR(t29, t28, t22);
+  FIO___AES_BS_XOR(t30, t23, t24);
+  FIO___AES_BS_XOR(t31, t22, t26);
+  FIO___AES_BS_AND(t32, t31, t30);
+  FIO___AES_BS_XOR(t33, t32, t24);
+  FIO___AES_BS_XOR(t34, t23, t33);
+  FIO___AES_BS_XOR(t35, t27, t33);
+  FIO___AES_BS_AND(t36, t24, t35);
+  FIO___AES_BS_XOR(t37, t36, t34);
+  FIO___AES_BS_XOR(t38, t27, t36);
+  FIO___AES_BS_AND(t39, t29, t38);
+  FIO___AES_BS_XOR(t40, t25, t39);
+
+  /* Combine inversion results */
+  FIO___AES_BS_XOR(t41, t40, t37);
+  FIO___AES_BS_XOR(t42, t29, t33);
+  FIO___AES_BS_XOR(t43, t29, t40);
+  FIO___AES_BS_XOR(t44, t33, t37);
+  FIO___AES_BS_XOR(t45, t42, t41);
+
+  /* Multiply by input shares (18 AND gates) */
+  FIO___AES_BS_AND(z0, t44, y15);
+  FIO___AES_BS_AND(z1, t37, y6);
+  FIO___AES_BS_AND(z2, t33, x7);
+  FIO___AES_BS_AND(z3, t43, y16);
+  FIO___AES_BS_AND(z4, t40, y1);
+  FIO___AES_BS_AND(z5, t29, y7);
+  FIO___AES_BS_AND(z6, t42, y11);
+  FIO___AES_BS_AND(z7, t45, y17);
+  FIO___AES_BS_AND(z8, t41, y10);
+  FIO___AES_BS_AND(z9, t44, y12);
+  FIO___AES_BS_AND(z10, t37, y3);
+  FIO___AES_BS_AND(z11, t33, y4);
+  FIO___AES_BS_AND(z12, t43, y13);
+  FIO___AES_BS_AND(z13, t40, y5);
+  FIO___AES_BS_AND(z14, t29, y2);
+  FIO___AES_BS_AND(z15, t42, y9);
+  FIO___AES_BS_AND(z16, t45, y14);
+  FIO___AES_BS_AND(z17, t41, y8);
+
+  /* ===== BOTTOM LINEAR TRANSFORMATION (26 XOR + 4 XNOR = 30 gates) ===== */
+  FIO___AES_BS_XOR(t46, z15, z16);
+  FIO___AES_BS_XOR(t47, z10, z11);
+  FIO___AES_BS_XOR(t48, z5, z13);
+  FIO___AES_BS_XOR(t49, z9, z10);
+  FIO___AES_BS_XOR(t50, z2, z12);
+  FIO___AES_BS_XOR(t51, z2, z5);
+  FIO___AES_BS_XOR(t52, z7, z8);
+  FIO___AES_BS_XOR(t53, z0, z3);
+  FIO___AES_BS_XOR(t54, z6, z7);
+  FIO___AES_BS_XOR(t55, z16, z17);
+  FIO___AES_BS_XOR(t56, z12, t48);
+  FIO___AES_BS_XOR(t57, t50, t53);
+  FIO___AES_BS_XOR(t58, z4, t46);
+  FIO___AES_BS_XOR(t59, z3, t54);
+  FIO___AES_BS_XOR(t60, t46, t57);
+  FIO___AES_BS_XOR(t61, z14, t57);
+  FIO___AES_BS_XOR(t62, t52, t58);
+  FIO___AES_BS_XOR(t63, t49, t58);
+  FIO___AES_BS_XOR(t64, z4, t59);
+  FIO___AES_BS_XOR(t65, t61, t62);
+  FIO___AES_BS_XOR(t66, z1, t63);
+  FIO___AES_BS_XOR(s0, t59, t63);
+  FIO___AES_BS_XNOR(s6, t56, t62);
+  FIO___AES_BS_XNOR(s7, t48, t60);
+  FIO___AES_BS_XOR(t67, t64, t65);
+  FIO___AES_BS_XOR(s3, t53, t66);
+  FIO___AES_BS_XOR(s4, t51, t66);
+  FIO___AES_BS_XOR(s5, t47, t65);
+  FIO___AES_BS_XNOR(s1, t64, s3);
+  FIO___AES_BS_XNOR(s2, t55, t67);
+
+  q[7] = s0;
+  q[6] = s1;
+  q[5] = s2;
+  q[4] = s3;
+  q[3] = s4;
+  q[2] = s5;
+  q[1] = s6;
+  q[0] = s7;
+}
+
+#undef FIO___AES_BS_XOR
+#undef FIO___AES_BS_AND
+#undef FIO___AES_BS_XNOR
+
+/* ============================================================================
+ * 4. ShiftRows on fio_u256 q[8]
+ *
+ * Each bit plane is processed identically. Within each uint64_t lane:
+ *   Row 0 (bits 0-3 per 16-bit block): no shift
+ *   Row 1 (bits 4-7): rotate left by 1 column (4-bit nibble shift)
+ *   Row 2 (bits 8-11): rotate left by 2 columns (8-bit shift)
+ *   Row 3 (bits 12-15): rotate left by 3 columns (12-bit shift)
+ * ========================================================================= */
+
+FIO_IFUNC void fio___aes_bs_shift_rows(fio_u256 *q) {
+  for (int i = 0; i < 8; ++i) {
+    for (size_t lane = 0; lane < 4; ++lane) {
+      uint64_t x = q[i].u64[lane];
+      q[i].u64[lane] = (x & (uint64_t)0x000000000000FFFFULL) |
+                       ((x & (uint64_t)0x00000000FFF00000ULL) >> 4) |
+                       ((x & (uint64_t)0x00000000000F0000ULL) << 12) |
+                       ((x & (uint64_t)0x0000FF0000000000ULL) >> 8) |
+                       ((x & (uint64_t)0x000000FF00000000ULL) << 8) |
+                       ((x & (uint64_t)0xF000000000000000ULL) >> 12) |
+                       ((x & (uint64_t)0x0FFF000000000000ULL) << 4);
+    }
   }
 }
 
-FIO_IFUNC void fio___aes256_key_expand(uint32_t *w, const uint8_t key[32]) {
-  for (int i = 0; i < 8; ++i)
-    w[i] = fio_buf2u32_be(key + 4 * i);
-  for (int i = 8; i < 60; ++i) {
-    uint32_t tmp = w[i - 1];
-    if ((i & 7) == 0)
-      tmp = fio___aes_subword(fio_rrot32(tmp, 24)) ^
-            ((uint32_t)FIO___AES_RCON[i / 8] << 24);
-    else if ((i & 7) == 4)
-      tmp = fio___aes_subword(tmp);
-    w[i] = w[i - 8] ^ tmp;
+/* ============================================================================
+ * 5. MixColumns on fio_u256 q[8]
+ *
+ * Per uint64_t lane: 16-bit left rotation for r[i], 32-bit half-swap for
+ * rotr32. XOR formula implements the AES MixColumns polynomial
+ * {03}x^3 + {01}x^2 + {01}x + {02} with xtime reduction via q7 feedback
+ * to bits 0, 1, 3, 4 (polynomial x^8 + x^4 + x^3 + x + 1).
+ * ========================================================================= */
+
+FIO_IFUNC void fio___aes_bs_mix_columns(fio_u256 *q) {
+  fio_u256 q0, q1, q2, q3, q4, q5, q6, q7;
+  fio_u256 r0, r1, r2, r3, r4, r5, r6, r7;
+
+  q0 = q[0];
+  q1 = q[1];
+  q2 = q[2];
+  q3 = q[3];
+  q4 = q[4];
+  q5 = q[5];
+  q6 = q[6];
+  q7 = q[7];
+
+  /* r[i] = rotate q[i] left by 16 bits (per uint64_t lane) */
+  for (size_t lane = 0; lane < 4; ++lane) {
+    r0.u64[lane] = (q0.u64[lane] >> 16) | (q0.u64[lane] << 48);
+    r1.u64[lane] = (q1.u64[lane] >> 16) | (q1.u64[lane] << 48);
+    r2.u64[lane] = (q2.u64[lane] >> 16) | (q2.u64[lane] << 48);
+    r3.u64[lane] = (q3.u64[lane] >> 16) | (q3.u64[lane] << 48);
+    r4.u64[lane] = (q4.u64[lane] >> 16) | (q4.u64[lane] << 48);
+    r5.u64[lane] = (q5.u64[lane] >> 16) | (q5.u64[lane] << 48);
+    r6.u64[lane] = (q6.u64[lane] >> 16) | (q6.u64[lane] << 48);
+    r7.u64[lane] = (q7.u64[lane] >> 16) | (q7.u64[lane] << 48);
+  }
+
+  /*
+   * q'[i] = q[i-1] ^ r[i-1] ^ r[i] ^ rotr32(q[i] ^ r[i])
+   * where rotr32 swaps the two 32-bit halves of each uint64_t lane.
+   * Bits 1, 3, 4 also XOR in q7^r7 (AES irreducible polynomial feedback).
+   */
+  for (size_t lane = 0; lane < 4; ++lane) {
+    uint64_t qr0 = q0.u64[lane] ^ r0.u64[lane];
+    uint64_t qr1 = q1.u64[lane] ^ r1.u64[lane];
+    uint64_t qr2 = q2.u64[lane] ^ r2.u64[lane];
+    uint64_t qr3 = q3.u64[lane] ^ r3.u64[lane];
+    uint64_t qr4 = q4.u64[lane] ^ r4.u64[lane];
+    uint64_t qr5 = q5.u64[lane] ^ r5.u64[lane];
+    uint64_t qr6 = q6.u64[lane] ^ r6.u64[lane];
+    uint64_t qr7 = q7.u64[lane] ^ r7.u64[lane];
+    uint64_t q7r7 = qr7; /* q7 ^ r7 for polynomial reduction */
+
+    q[0].u64[lane] = q7.u64[lane] ^ r7.u64[lane] ^ r0.u64[lane] ^
+                     ((qr0 << 32) | (qr0 >> 32));
+    q[1].u64[lane] = q0.u64[lane] ^ r0.u64[lane] ^ q7r7 ^ r1.u64[lane] ^
+                     ((qr1 << 32) | (qr1 >> 32));
+    q[2].u64[lane] = q1.u64[lane] ^ r1.u64[lane] ^ r2.u64[lane] ^
+                     ((qr2 << 32) | (qr2 >> 32));
+    q[3].u64[lane] = q2.u64[lane] ^ r2.u64[lane] ^ q7r7 ^ r3.u64[lane] ^
+                     ((qr3 << 32) | (qr3 >> 32));
+    q[4].u64[lane] = q3.u64[lane] ^ r3.u64[lane] ^ q7r7 ^ r4.u64[lane] ^
+                     ((qr4 << 32) | (qr4 >> 32));
+    q[5].u64[lane] = q4.u64[lane] ^ r4.u64[lane] ^ r5.u64[lane] ^
+                     ((qr5 << 32) | (qr5 >> 32));
+    q[6].u64[lane] = q5.u64[lane] ^ r5.u64[lane] ^ r6.u64[lane] ^
+                     ((qr6 << 32) | (qr6 >> 32));
+    q[7].u64[lane] = q6.u64[lane] ^ r6.u64[lane] ^ r7.u64[lane] ^
+                     ((qr7 << 32) | (qr7 >> 32));
   }
 }
 
-FIO_IFUNC void fio___aes_encrypt_round(uint32_t *state, const uint32_t *rk) {
-  uint32_t s0 = state[0], s1 = state[1], s2 = state[2], s3 = state[3];
-  state[0] =
-      FIO___AES_TE0[(s0 >> 24) & 0xFF] ^ FIO___AES_TE1[(s1 >> 16) & 0xFF] ^
-      FIO___AES_TE2[(s2 >> 8) & 0xFF] ^ FIO___AES_TE3[(s3 >> 0) & 0xFF] ^ rk[0];
-  state[1] =
-      FIO___AES_TE0[(s1 >> 24) & 0xFF] ^ FIO___AES_TE1[(s2 >> 16) & 0xFF] ^
-      FIO___AES_TE2[(s3 >> 8) & 0xFF] ^ FIO___AES_TE3[(s0 >> 0) & 0xFF] ^ rk[1];
-  state[2] =
-      FIO___AES_TE0[(s2 >> 24) & 0xFF] ^ FIO___AES_TE1[(s3 >> 16) & 0xFF] ^
-      FIO___AES_TE2[(s0 >> 8) & 0xFF] ^ FIO___AES_TE3[(s1 >> 0) & 0xFF] ^ rk[2];
-  state[3] =
-      FIO___AES_TE0[(s3 >> 24) & 0xFF] ^ FIO___AES_TE1[(s0 >> 16) & 0xFF] ^
-      FIO___AES_TE2[(s1 >> 8) & 0xFF] ^ FIO___AES_TE3[(s2 >> 0) & 0xFF] ^ rk[3];
+/* ============================================================================
+ * 6. AddRoundKey: XOR 8 bit planes with 8 round key vectors
+ * ========================================================================= */
+
+/**
+ * XOR round key into state. The round key sk[0..7] must already be in
+ * expanded form (one uint64_t per bit plane, broadcast across all lanes).
+ */
+FIO_IFUNC void fio___aes_bs_add_round_key(fio_u256 *q, const uint64_t *sk) {
+  for (int i = 0; i < 8; ++i) {
+    FIO_MATH_UXXX_COP(q[i].x64, q[i].x64, sk[i], 64, ^);
+  }
 }
 
-FIO_IFUNC void fio___aes_encrypt_final_round(uint32_t *state,
-                                             const uint32_t *rk) {
-  uint32_t s0 = state[0], s1 = state[1], s2 = state[2], s3 = state[3];
-  state[0] = ((uint32_t)FIO___AES_SBOX[(s0 >> 24) & 0xFF] << 24) ^
-             ((uint32_t)FIO___AES_SBOX[(s1 >> 16) & 0xFF] << 16) ^
-             ((uint32_t)FIO___AES_SBOX[(s2 >> 8) & 0xFF] << 8) ^
-             ((uint32_t)FIO___AES_SBOX[(s3 >> 0) & 0xFF] << 0) ^ rk[0];
-  state[1] = ((uint32_t)FIO___AES_SBOX[(s1 >> 24) & 0xFF] << 24) ^
-             ((uint32_t)FIO___AES_SBOX[(s2 >> 16) & 0xFF] << 16) ^
-             ((uint32_t)FIO___AES_SBOX[(s3 >> 8) & 0xFF] << 8) ^
-             ((uint32_t)FIO___AES_SBOX[(s0 >> 0) & 0xFF] << 0) ^ rk[1];
-  state[2] = ((uint32_t)FIO___AES_SBOX[(s2 >> 24) & 0xFF] << 24) ^
-             ((uint32_t)FIO___AES_SBOX[(s3 >> 16) & 0xFF] << 16) ^
-             ((uint32_t)FIO___AES_SBOX[(s0 >> 8) & 0xFF] << 8) ^
-             ((uint32_t)FIO___AES_SBOX[(s1 >> 0) & 0xFF] << 0) ^ rk[2];
-  state[3] = ((uint32_t)FIO___AES_SBOX[(s3 >> 24) & 0xFF] << 24) ^
-             ((uint32_t)FIO___AES_SBOX[(s0 >> 16) & 0xFF] << 16) ^
-             ((uint32_t)FIO___AES_SBOX[(s1 >> 8) & 0xFF] << 8) ^
-             ((uint32_t)FIO___AES_SBOX[(s2 >> 0) & 0xFF] << 0) ^ rk[3];
-}
-
-FIO_IFUNC void fio___aes128_encrypt_block(uint8_t out[16],
-                                          const uint8_t in[16],
-                                          const uint32_t *rk) {
-  uint32_t state[4];
-  fio_memcpy16(state, in);
-  state[0] = fio_lton32(state[0]) ^ rk[0];
-  state[1] = fio_lton32(state[1]) ^ rk[1];
-  state[2] = fio_lton32(state[2]) ^ rk[2];
-  state[3] = fio_lton32(state[3]) ^ rk[3];
-  for (int round = 1; round < 10; ++round)
-    fio___aes_encrypt_round(state, rk + round * 4);
-  fio___aes_encrypt_final_round(state, rk + 40);
-  state[0] = fio_lton32(state[0]);
-  state[1] = fio_lton32(state[1]);
-  state[2] = fio_lton32(state[2]);
-  state[3] = fio_lton32(state[3]);
-  fio_memcpy16(out, state);
-}
-
-FIO_IFUNC void fio___aes256_encrypt_block(uint8_t out[16],
-                                          const uint8_t in[16],
-                                          const uint32_t *rk) {
-  uint32_t state[4];
-  fio_memcpy16(state, in);
-  state[0] = fio_lton32(state[0]) ^ rk[0];
-  state[1] = fio_lton32(state[1]) ^ rk[1];
-  state[2] = fio_lton32(state[2]) ^ rk[2];
-  state[3] = fio_lton32(state[3]) ^ rk[3];
-  for (int round = 1; round < 14; ++round)
-    fio___aes_encrypt_round(state, rk + round * 4);
-  fio___aes_encrypt_final_round(state, rk + 56);
-  state[0] = fio_lton32(state[0]);
-  state[1] = fio_lton32(state[1]);
-  state[2] = fio_lton32(state[2]);
-  state[3] = fio_lton32(state[3]);
-  fio_memcpy16(out, state);
-}
-
-/* 4-bit table-based GHASH using Shoup's method
+/* ============================================================================
+ * 7. sub_word: pack single uint32_t through S-box for key expansion
  *
- * We precompute 16 entries: M[i] = i * H for i=0..15
- * This gives us 256 bytes of tables and 32 iterations per block.
+ * Uses scalar uint64_t q[8] with ortho + sbox_scalar + ortho.
+ * ========================================================================= */
+
+/** Scalar S-box on uint64_t q[8] (processes 4 blocks packed in uint64_t). */
+FIO_SFUNC void fio___aes_bs_sbox_scalar(uint64_t *q) {
+  uint64_t x0, x1, x2, x3, x4, x5, x6, x7;
+  uint64_t y1, y2, y3, y4, y5, y6, y7, y8, y9;
+  uint64_t y10, y11, y12, y13, y14, y15, y16, y17, y18, y19;
+  uint64_t y20, y21;
+  uint64_t z0, z1, z2, z3, z4, z5, z6, z7, z8, z9;
+  uint64_t z10, z11, z12, z13, z14, z15, z16, z17;
+  uint64_t t0, t1, t2, t3, t4, t5, t6, t7, t8, t9;
+  uint64_t t10, t11, t12, t13, t14, t15, t16, t17, t18, t19;
+  uint64_t t20, t21, t22, t23, t24, t25, t26, t27, t28, t29;
+  uint64_t t30, t31, t32, t33, t34, t35, t36, t37, t38, t39;
+  uint64_t t40, t41, t42, t43, t44, t45, t46, t47, t48, t49;
+  uint64_t t50, t51, t52, t53, t54, t55, t56, t57, t58, t59;
+  uint64_t t60, t61, t62, t63, t64, t65, t66, t67;
+  uint64_t s0, s1, s2, s3, s4, s5, s6, s7;
+
+  x0 = q[7];
+  x1 = q[6];
+  x2 = q[5];
+  x3 = q[4];
+  x4 = q[3];
+  x5 = q[2];
+  x6 = q[1];
+  x7 = q[0];
+
+  /* Top linear */
+  y14 = x3 ^ x5;
+  y13 = x0 ^ x6;
+  y9 = x0 ^ x3;
+  y8 = x0 ^ x5;
+  t0 = x1 ^ x2;
+  y1 = t0 ^ x7;
+  y4 = y1 ^ x3;
+  y12 = y13 ^ y14;
+  y2 = y1 ^ x0;
+  y5 = y1 ^ x6;
+  y3 = y5 ^ y8;
+  t1 = x4 ^ y12;
+  y15 = t1 ^ x5;
+  y20 = t1 ^ x1;
+  y6 = y15 ^ x7;
+  y10 = y15 ^ t0;
+  y11 = y20 ^ y9;
+  y7 = x7 ^ y11;
+  y17 = y10 ^ y11;
+  y19 = y10 ^ y8;
+  y16 = t0 ^ y11;
+  y21 = y13 ^ y16;
+  y18 = x0 ^ y16;
+
+  /* Non-linear */
+  t2 = y12 & y15;
+  t3 = y3 & y6;
+  t4 = t3 ^ t2;
+  t5 = y4 & x7;
+  t6 = t5 ^ t2;
+  t7 = y13 & y16;
+  t8 = y5 & y1;
+  t9 = t8 ^ t7;
+  t10 = y2 & y7;
+  t11 = t10 ^ t7;
+  t12 = y9 & y11;
+  t13 = y14 & y17;
+  t14 = t13 ^ t12;
+  t15 = y8 & y10;
+  t16 = t15 ^ t12;
+  t17 = t4 ^ y20;
+  t18 = t6 ^ t16;
+  t19 = t9 ^ t14;
+  t20 = t11 ^ t16;
+  t21 = t17 ^ t14;
+  t22 = t18 ^ y19;
+  t23 = t19 ^ y21;
+  t24 = t20 ^ y18;
+
+  t25 = t21 ^ t22;
+  t26 = t21 & t23;
+  t27 = t24 ^ t26;
+  t28 = t25 & t27;
+  t29 = t28 ^ t22;
+  t30 = t23 ^ t24;
+  t31 = t22 ^ t26;
+  t32 = t31 & t30;
+  t33 = t32 ^ t24;
+  t34 = t23 ^ t33;
+  t35 = t27 ^ t33;
+  t36 = t24 & t35;
+  t37 = t36 ^ t34;
+  t38 = t27 ^ t36;
+  t39 = t29 & t38;
+  t40 = t25 ^ t39;
+
+  t41 = t40 ^ t37;
+  t42 = t29 ^ t33;
+  t43 = t29 ^ t40;
+  t44 = t33 ^ t37;
+  t45 = t42 ^ t41;
+
+  z0 = t44 & y15;
+  z1 = t37 & y6;
+  z2 = t33 & x7;
+  z3 = t43 & y16;
+  z4 = t40 & y1;
+  z5 = t29 & y7;
+  z6 = t42 & y11;
+  z7 = t45 & y17;
+  z8 = t41 & y10;
+  z9 = t44 & y12;
+  z10 = t37 & y3;
+  z11 = t33 & y4;
+  z12 = t43 & y13;
+  z13 = t40 & y5;
+  z14 = t29 & y2;
+  z15 = t42 & y9;
+  z16 = t45 & y14;
+  z17 = t41 & y8;
+
+  /* Bottom linear */
+  t46 = z15 ^ z16;
+  t47 = z10 ^ z11;
+  t48 = z5 ^ z13;
+  t49 = z9 ^ z10;
+  t50 = z2 ^ z12;
+  t51 = z2 ^ z5;
+  t52 = z7 ^ z8;
+  t53 = z0 ^ z3;
+  t54 = z6 ^ z7;
+  t55 = z16 ^ z17;
+  t56 = z12 ^ t48;
+  t57 = t50 ^ t53;
+  t58 = z4 ^ t46;
+  t59 = z3 ^ t54;
+  t60 = t46 ^ t57;
+  t61 = z14 ^ t57;
+  t62 = t52 ^ t58;
+  t63 = t49 ^ t58;
+  t64 = z4 ^ t59;
+  t65 = t61 ^ t62;
+  t66 = z1 ^ t63;
+  s0 = t59 ^ t63;
+  s6 = t56 ^ t62;
+  s6 = ~s6;
+  s7 = t48 ^ t60;
+  s7 = ~s7;
+  t67 = t64 ^ t65;
+  s3 = t53 ^ t66;
+  s4 = t51 ^ t66;
+  s5 = t47 ^ t65;
+  s1 = t64 ^ s3;
+  s1 = ~s1;
+  s2 = t55 ^ t67;
+  s2 = ~s2;
+
+  q[7] = s0;
+  q[6] = s1;
+  q[5] = s2;
+  q[4] = s3;
+  q[3] = s4;
+  q[2] = s5;
+  q[1] = s6;
+  q[0] = s7;
+}
+
+/**
+ * Apply S-box to a single 32-bit word (for key expansion).
+ * Packs the word into scalar bitsliced form, applies S-box, unpacks.
+ */
+FIO_SFUNC uint32_t fio___aes_bs_sub_word(uint32_t x) {
+  uint64_t q[8];
+  FIO_MEMSET(q, 0, sizeof(q));
+  q[0] = x;
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_sbox_scalar(q);
+  fio___aes_bs_ortho(q);
+  return (uint32_t)q[0];
+}
+
+/**
+ * Apply S-box to 4 words simultaneously using the 4-block engine.
+ * Each word occupies one block slot. Returns 4 substituted words.
+ * This amortizes the ortho + sbox cost across 4 words.
+ */
+FIO_SFUNC void fio___aes_bs_sub_word4(uint32_t out[4], const uint32_t in[4]) {
+  uint64_t q[8];
+  FIO_MEMSET(q, 0, sizeof(q));
+  /* Pack each word into its own block slot via interleave_in */
+  fio___aes_bs_interleave_in(&q[0], &q[4], in);
+  /* Broadcast to all 4 slots (all words get same treatment) */
+  /* Actually, interleave_in packs 4 uint32_t as one AES block.
+   * For sub_word we need each uint32_t as a separate "block".
+   * Use the same approach as sub_word but pack 4 values. */
+
+  /* Reset and pack properly: each word in its own slot */
+  FIO_MEMSET(q, 0, sizeof(q));
+  q[0] = (uint64_t)in[0];
+  q[1] = (uint64_t)in[1];
+  q[2] = (uint64_t)in[2];
+  q[3] = (uint64_t)in[3];
+  /* q[4..7] = 0 */
+
+  /* Ortho transposes bit planes across all 8 registers.
+   * With data only in q[0..3], the SWAP8 step moves nibble-level
+   * data between q[0..3] and q[4..7]. This is correct. */
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_sbox_scalar(q);
+  fio___aes_bs_ortho(q);
+
+  out[0] = (uint32_t)q[0];
+  out[1] = (uint32_t)q[1];
+  out[2] = (uint32_t)q[2];
+  out[3] = (uint32_t)q[3];
+}
+
+/* ============================================================================
+ * 7b. 4-block scalar engine: ShiftRows, MixColumns, AddRoundKey, Encrypt
  *
- * We process nibbles from least significant to most significant:
- *   Z = Z * x^4 + nibble * H
+ * Operates on uint64_t q[8] directly (4 AES blocks per uint64_t).
+ * Much lighter than the 16-block fio_u256 engine for small workloads.
+ * ========================================================================= */
+
+/** ShiftRows on uint64_t q[8] (4 blocks). */
+FIO_IFUNC void fio___aes_bs_shift_rows4(uint64_t *q) {
+  for (int i = 0; i < 8; ++i) {
+    uint64_t x = q[i];
+    q[i] = (x & (uint64_t)0x000000000000FFFFULL) |
+           ((x & (uint64_t)0x00000000FFF00000ULL) >> 4) |
+           ((x & (uint64_t)0x00000000000F0000ULL) << 12) |
+           ((x & (uint64_t)0x0000FF0000000000ULL) >> 8) |
+           ((x & (uint64_t)0x000000FF00000000ULL) << 8) |
+           ((x & (uint64_t)0xF000000000000000ULL) >> 12) |
+           ((x & (uint64_t)0x0FFF000000000000ULL) << 4);
+  }
+}
+
+/** MixColumns on uint64_t q[8] (4 blocks). */
+FIO_IFUNC void fio___aes_bs_mix_columns4(uint64_t *q) {
+  uint64_t q0, q1, q2, q3, q4, q5, q6, q7;
+  uint64_t r0, r1, r2, r3, r4, r5, r6, r7;
+
+  q0 = q[0];
+  q1 = q[1];
+  q2 = q[2];
+  q3 = q[3];
+  q4 = q[4];
+  q5 = q[5];
+  q6 = q[6];
+  q7 = q[7];
+
+  /* r[i] = rotate q[i] left by 16 bits */
+  r0 = (q0 >> 16) | (q0 << 48);
+  r1 = (q1 >> 16) | (q1 << 48);
+  r2 = (q2 >> 16) | (q2 << 48);
+  r3 = (q3 >> 16) | (q3 << 48);
+  r4 = (q4 >> 16) | (q4 << 48);
+  r5 = (q5 >> 16) | (q5 << 48);
+  r6 = (q6 >> 16) | (q6 << 48);
+  r7 = (q7 >> 16) | (q7 << 48);
+
+  /* MixColumns formula with rotr32 = 32-bit half swap */
+  {
+    uint64_t qr0 = q0 ^ r0, qr1 = q1 ^ r1, qr2 = q2 ^ r2, qr3 = q3 ^ r3;
+    uint64_t qr4 = q4 ^ r4, qr5 = q5 ^ r5, qr6 = q6 ^ r6, qr7 = q7 ^ r7;
+    uint64_t q7r7 = qr7;
+
+    q[0] = q7 ^ r7 ^ r0 ^ ((qr0 << 32) | (qr0 >> 32));
+    q[1] = q0 ^ r0 ^ q7r7 ^ r1 ^ ((qr1 << 32) | (qr1 >> 32));
+    q[2] = q1 ^ r1 ^ r2 ^ ((qr2 << 32) | (qr2 >> 32));
+    q[3] = q2 ^ r2 ^ q7r7 ^ r3 ^ ((qr3 << 32) | (qr3 >> 32));
+    q[4] = q3 ^ r3 ^ q7r7 ^ r4 ^ ((qr4 << 32) | (qr4 >> 32));
+    q[5] = q4 ^ r4 ^ r5 ^ ((qr5 << 32) | (qr5 >> 32));
+    q[6] = q5 ^ r5 ^ r6 ^ ((qr6 << 32) | (qr6 >> 32));
+    q[7] = q6 ^ r6 ^ r7 ^ ((qr7 << 32) | (qr7 >> 32));
+  }
+}
+
+/** AddRoundKey on uint64_t q[8] (4 blocks). sk[0..7] are expanded keys. */
+FIO_IFUNC void fio___aes_bs_add_round_key4(uint64_t *q, const uint64_t *sk) {
+  q[0] ^= sk[0];
+  q[1] ^= sk[1];
+  q[2] ^= sk[2];
+  q[3] ^= sk[3];
+  q[4] ^= sk[4];
+  q[5] ^= sk[5];
+  q[6] ^= sk[6];
+  q[7] ^= sk[7];
+}
+
+/**
+ * Expand one compressed key pair to 8 uint64_t round key values.
+ * The (x<<4)-x trick broadcasts each bit to fill its 4-bit nibble.
+ */
+FIO_IFUNC void fio___aes_bs_expand_key_pair(uint64_t sk_out[8],
+                                            uint64_t ck0,
+                                            uint64_t ck1) {
+  uint64_t x0, x1, x2, x3;
+  x0 = x1 = x2 = x3 = ck0;
+  x0 &= 0x1111111111111111ULL;
+  x1 &= 0x2222222222222222ULL;
+  x2 &= 0x4444444444444444ULL;
+  x3 &= 0x8888888888888888ULL;
+  x1 >>= 1;
+  x2 >>= 2;
+  x3 >>= 3;
+  sk_out[0] = (x0 << 4) - x0;
+  sk_out[1] = (x1 << 4) - x1;
+  sk_out[2] = (x2 << 4) - x2;
+  sk_out[3] = (x3 << 4) - x3;
+
+  x0 = x1 = x2 = x3 = ck1;
+  x0 &= 0x1111111111111111ULL;
+  x1 &= 0x2222222222222222ULL;
+  x2 &= 0x4444444444444444ULL;
+  x3 &= 0x8888888888888888ULL;
+  x1 >>= 1;
+  x2 >>= 2;
+  x3 >>= 3;
+  sk_out[4] = (x0 << 4) - x0;
+  sk_out[5] = (x1 << 4) - x1;
+  sk_out[6] = (x2 << 4) - x2;
+  sk_out[7] = (x3 << 4) - x3;
+}
+
+/**
+ * Pre-expand ALL round keys for the 4-block engine.
+ * Output: sk_exp4[(num_rounds+1)*8] uint64_t values.
+ */
+FIO_SFUNC void fio___aes_bs_expand_all_keys4(uint64_t *sk_exp4,
+                                             unsigned num_rounds,
+                                             const uint64_t *comp_skey) {
+  for (unsigned u = 0; u <= num_rounds; ++u)
+    fio___aes_bs_expand_key_pair(sk_exp4 + u * 8,
+                                 comp_skey[u << 1],
+                                 comp_skey[(u << 1) + 1]);
+}
+
+/**
+ * Encrypt 4 blocks using the scalar 4-block engine.
+ * sk_exp4: pre-expanded keys, (num_rounds+1)*8 uint64_t values.
+ */
+FIO_SFUNC void fio___aes_bs_encrypt4(unsigned num_rounds,
+                                     const uint64_t *sk_exp4,
+                                     uint64_t q[8]) {
+  unsigned u;
+  fio___aes_bs_add_round_key4(q, sk_exp4);
+  for (u = 1; u < num_rounds; ++u) {
+    fio___aes_bs_sbox_scalar(q);
+    fio___aes_bs_shift_rows4(q);
+    fio___aes_bs_mix_columns4(q);
+    fio___aes_bs_add_round_key4(q, sk_exp4 + (u << 3));
+  }
+  fio___aes_bs_sbox_scalar(q);
+  fio___aes_bs_shift_rows4(q);
+  fio___aes_bs_add_round_key4(q, sk_exp4 + (num_rounds << 3));
+}
+
+/**
+ * Encrypt 4 blocks using compressed keys (on-the-fly expansion).
+ * Avoids the need for a pre-expanded key array, saving ~700 bytes of
+ * stack space and the corresponding secure_zero cost.
+ * comp_skey: compressed round keys, 2 uint64_t per round.
+ */
+FIO_SFUNC void fio___aes_bs_encrypt4_comp(unsigned num_rounds,
+                                          const uint64_t *comp_skey,
+                                          uint64_t q[8]) {
+  uint64_t sk[8];
+  unsigned u;
+  fio___aes_bs_expand_key_pair(sk, comp_skey[0], comp_skey[1]);
+  fio___aes_bs_add_round_key4(q, sk);
+  for (u = 1; u < num_rounds; ++u) {
+    fio___aes_bs_sbox_scalar(q);
+    fio___aes_bs_shift_rows4(q);
+    fio___aes_bs_mix_columns4(q);
+    fio___aes_bs_expand_key_pair(sk,
+                                 comp_skey[u << 1],
+                                 comp_skey[(u << 1) + 1]);
+    fio___aes_bs_add_round_key4(q, sk);
+  }
+  fio___aes_bs_sbox_scalar(q);
+  fio___aes_bs_shift_rows4(q);
+  fio___aes_bs_expand_key_pair(sk,
+                               comp_skey[num_rounds << 1],
+                               comp_skey[(num_rounds << 1) + 1]);
+  fio___aes_bs_add_round_key4(q, sk);
+  fio_secure_zero(sk, sizeof(sk));
+}
+
+/**
+ * Encrypt a single AES block using the 4-block engine.
+ * Much faster than fio___aes_bs_encrypt_block which uses the 16-block engine.
+ */
+FIO_SFUNC void fio___aes_bs_encrypt_block4(uint32_t out[4],
+                                           const uint32_t in[4],
+                                           unsigned num_rounds,
+                                           const uint64_t *sk_exp4) {
+  uint64_t q[8];
+  FIO_MEMSET(q, 0, sizeof(q));
+  fio___aes_bs_interleave_in(&q[0], &q[4], in);
+  q[1] = q[0];
+  q[2] = q[0];
+  q[3] = q[0];
+  q[5] = q[4];
+  q[6] = q[4];
+  q[7] = q[4];
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_encrypt4(num_rounds, sk_exp4, q);
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_interleave_out(out, q[0], q[4]);
+}
+
+/**
+ * Encrypt two blocks in one 4-block call (H + J0 batched).
+ * Block 0 = in0 -> q[0]/q[4], Block 1 = in1 -> q[1]/q[5].
+ * Remaining slots duplicate block 0 (don't care, just need valid data).
+ */
+FIO_SFUNC void fio___aes_bs_encrypt_2blocks(uint32_t out0[4],
+                                            uint32_t out1[4],
+                                            const uint32_t in0[4],
+                                            const uint32_t in1[4],
+                                            unsigned num_rounds,
+                                            const uint64_t *sk_exp4) {
+  uint64_t q[8];
+  /* Block 0 -> slot 0, Block 1 -> slot 1, slots 2-3 = copies of block 0 */
+  fio___aes_bs_interleave_in(&q[0], &q[4], in0);
+  fio___aes_bs_interleave_in(&q[1], &q[5], in1);
+  q[2] = q[0];
+  q[3] = q[0];
+  q[6] = q[4];
+  q[7] = q[4];
+
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_encrypt4(num_rounds, sk_exp4, q);
+  fio___aes_bs_ortho(q);
+
+  /* Extract block 0 from slot 0, block 1 from slot 1 */
+  fio___aes_bs_interleave_out(out0, q[0], q[4]);
+  fio___aes_bs_interleave_out(out1, q[1], q[5]);
+}
+
+/**
+ * Encrypt 4 counter blocks and produce 64 bytes of keystream.
+ * Uses the 4-block scalar engine.
+ */
+FIO_SFUNC void fio___aes_bs_ctr_encrypt4_ks(uint8_t ks[64],
+                                            const uint32_t w[16],
+                                            unsigned num_rounds,
+                                            const uint64_t *sk_exp4) {
+  uint64_t q[8];
+
+  /* Pack 4 blocks: block b -> interleave_in(&q[b], &q[b+4]) */
+  for (unsigned b = 0; b < 4; ++b)
+    fio___aes_bs_interleave_in(&q[b], &q[b + 4], w + b * 4);
+
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_encrypt4(num_rounds, sk_exp4, q);
+  fio___aes_bs_ortho(q);
+
+  /* Unpack 4 blocks */
+  for (unsigned b = 0; b < 4; ++b) {
+    uint32_t out_w[4];
+    fio___aes_bs_interleave_out(out_w, q[b], q[b + 4]);
+    fio_u2buf32_le(ks + b * 16, out_w[0]);
+    fio_u2buf32_le(ks + b * 16 + 4, out_w[1]);
+    fio_u2buf32_le(ks + b * 16 + 8, out_w[2]);
+    fio_u2buf32_le(ks + b * 16 + 12, out_w[3]);
+  }
+}
+
+/** Prepare 4 counter blocks as 16 uint32_t words. */
+FIO_SFUNC void fio___aes_bs_ctr_prepare4(uint32_t w[16],
+                                         const uint32_t nonce_w[3],
+                                         uint32_t ctr_start) {
+  for (unsigned b = 0; b < 4; ++b) {
+    w[b * 4 + 0] = nonce_w[0];
+    w[b * 4 + 1] = nonce_w[1];
+    w[b * 4 + 2] = nonce_w[2];
+    w[b * 4 + 3] = fio_lton32(ctr_start + b);
+  }
+}
+
+/* ============================================================================
+ * 8. Key Expansion: AES-128 and AES-256
  *
- * The multiplication by x^4 is a right shift by 4 bits with reduction.
- * We use a 16-entry reduction table for the nibble that falls off.
+ * Phase 1: Standard AES key schedule using sub_word (bitsliced S-box)
+ * Phase 2: Convert expanded key to compressed bitsliced format
+ *          (2 uint64_t per round key)
+ * ========================================================================= */
+
+/* AES round constants for key expansion (Rcon[1..10], little-endian byte 0) */
+static const uint32_t FIO___AES_BS_RCON[] =
+    {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36};
+
+/**
+ * AES-128 key expansion to compressed bitsliced round keys.
+ * Output: comp_skey[22] (2 uint64_t per round × 11 rounds)
+ */
+FIO_SFUNC void fio___aes_bs_key_expand128(uint64_t comp_skey[22],
+                                          const uint8_t key[16]) {
+  uint32_t skey[44];
+  int i;
+
+  /* Phase 1: standard AES-128 key schedule (little-endian words) */
+  skey[0] = fio_buf2u32_le(key);
+  skey[1] = fio_buf2u32_le(key + 4);
+  skey[2] = fio_buf2u32_le(key + 8);
+  skey[3] = fio_buf2u32_le(key + 12);
+
+  for (i = 4; i < 44; ++i) {
+    uint32_t tmp = skey[i - 1];
+    if ((i & 3) == 0) {
+      /* RotWord: rotate left by 1 byte (LE uint32_t: shift right 8) */
+      tmp = (tmp << 24) | (tmp >> 8);
+      /* SubWord: apply S-box via bitsliced circuit */
+      tmp = fio___aes_bs_sub_word(tmp);
+      /* XOR with Rcon (only affects lowest byte in LE representation) */
+      tmp ^= FIO___AES_BS_RCON[(i >> 2) - 1];
+    }
+    skey[i] = skey[i - 4] ^ tmp;
+  }
+
+  /* Phase 2: compress into bitsliced format */
+  for (i = 0; i < 44; i += 4) {
+    uint64_t q[8];
+    int j = (i >> 1); /* i/4 * 2 = i/2 */
+    fio___aes_bs_interleave_in(&q[0], &q[4], skey + i);
+    q[1] = q[0];
+    q[2] = q[0];
+    q[3] = q[0];
+    q[5] = q[4];
+    q[6] = q[4];
+    q[7] = q[4];
+    fio___aes_bs_ortho(q);
+    comp_skey[j + 0] = (q[0] & (uint64_t)0x1111111111111111ULL) |
+                       (q[1] & (uint64_t)0x2222222222222222ULL) |
+                       (q[2] & (uint64_t)0x4444444444444444ULL) |
+                       (q[3] & (uint64_t)0x8888888888888888ULL);
+    comp_skey[j + 1] = (q[4] & (uint64_t)0x1111111111111111ULL) |
+                       (q[5] & (uint64_t)0x2222222222222222ULL) |
+                       (q[6] & (uint64_t)0x4444444444444444ULL) |
+                       (q[7] & (uint64_t)0x8888888888888888ULL);
+  }
+}
+
+/**
+ * AES-256 key expansion to compressed bitsliced round keys.
+ * Output: comp_skey[30] (2 uint64_t per round × 15 rounds)
+ */
+FIO_SFUNC void fio___aes_bs_key_expand256(uint64_t comp_skey[30],
+                                          const uint8_t key[32]) {
+  uint32_t skey[60];
+  int i;
+
+  /* Phase 1: standard AES-256 key schedule (little-endian words) */
+  for (i = 0; i < 8; ++i)
+    skey[i] = fio_buf2u32_le(key + 4 * i);
+
+  for (i = 8; i < 60; ++i) {
+    uint32_t tmp = skey[i - 1];
+    if ((i & 7) == 0) {
+      /* RotWord + SubWord + Rcon */
+      tmp = (tmp << 24) | (tmp >> 8);
+      tmp = fio___aes_bs_sub_word(tmp);
+      tmp ^= FIO___AES_BS_RCON[(i >> 3) - 1];
+    } else if ((i & 7) == 4) {
+      /* SubWord only (AES-256 extra step) */
+      tmp = fio___aes_bs_sub_word(tmp);
+    }
+    skey[i] = skey[i - 8] ^ tmp;
+  }
+
+  /* Phase 2: compress into bitsliced format */
+  for (i = 0; i < 60; i += 4) {
+    uint64_t q[8];
+    int j = (i >> 1);
+    fio___aes_bs_interleave_in(&q[0], &q[4], skey + i);
+    q[1] = q[0];
+    q[2] = q[0];
+    q[3] = q[0];
+    q[5] = q[4];
+    q[6] = q[4];
+    q[7] = q[4];
+    fio___aes_bs_ortho(q);
+    comp_skey[j + 0] = (q[0] & (uint64_t)0x1111111111111111ULL) |
+                       (q[1] & (uint64_t)0x2222222222222222ULL) |
+                       (q[2] & (uint64_t)0x4444444444444444ULL) |
+                       (q[3] & (uint64_t)0x8888888888888888ULL);
+    comp_skey[j + 1] = (q[4] & (uint64_t)0x1111111111111111ULL) |
+                       (q[5] & (uint64_t)0x2222222222222222ULL) |
+                       (q[6] & (uint64_t)0x4444444444444444ULL) |
+                       (q[7] & (uint64_t)0x8888888888888888ULL);
+  }
+}
+
+/* ============================================================================
+ * 9. Full bitsliced encryption (16-block fio_u256 engine)
+ *
+ * Uses pre-expanded keys for the 16-block path.
+ * For each round: Sbox → ShiftRows → MixColumns → AddRoundKey
+ * Last round omits MixColumns.
+ * ========================================================================= */
+
+#if FIO___AES_BS_WIDE
+
+/**
+ * Encrypt bitsliced state q[8] (fio_u256, 16 blocks) using num_rounds rounds.
+ * sk_exp4: pre-expanded round keys (same format as 4-block, broadcast to all
+ * lanes).
+ */
+FIO_SFUNC void fio___aes_bs_encrypt(unsigned num_rounds,
+                                    const uint64_t *sk_exp4,
+                                    fio_u256 *q) {
+  unsigned u;
+  fio___aes_bs_add_round_key(q, sk_exp4);
+  for (u = 1; u < num_rounds; ++u) {
+    fio___aes_bs_sbox(q);
+    fio___aes_bs_shift_rows(q);
+    fio___aes_bs_mix_columns(q);
+    fio___aes_bs_add_round_key(q, sk_exp4 + (u << 3));
+  }
+  fio___aes_bs_sbox(q);
+  fio___aes_bs_shift_rows(q);
+  fio___aes_bs_add_round_key(q, sk_exp4 + (num_rounds << 3));
+}
+
+#endif /* FIO___AES_BS_WIDE */
+
+/* ============================================================================
+ * 10. Constant-time carryless multiply (bmul64) and bit reversal (rev64)
+ *
+ * Used by GHASH. The "holes in integers" technique: split each operand into
+ * 4 groups of every-4th-bit, multiply with regular integer multiply (the
+ * 3 zero bits between data bits absorb carries), then mask and recombine.
+ * ========================================================================= */
+
+/** Constant-time carryless (polynomial) multiplication of two 64-bit values. */
+FIO_IFUNC uint64_t fio___bmul64(uint64_t x, uint64_t y) {
+  uint64_t x0, x1, x2, x3;
+  uint64_t y0, y1, y2, y3;
+  uint64_t z0, z1, z2, z3;
+
+  x0 = x & 0x1111111111111111ULL;
+  x1 = x & 0x2222222222222222ULL;
+  x2 = x & 0x4444444444444444ULL;
+  x3 = x & 0x8888888888888888ULL;
+  y0 = y & 0x1111111111111111ULL;
+  y1 = y & 0x2222222222222222ULL;
+  y2 = y & 0x4444444444444444ULL;
+  y3 = y & 0x8888888888888888ULL;
+
+  z0 = (x0 * y0) ^ (x1 * y3) ^ (x2 * y2) ^ (x3 * y1);
+  z1 = (x0 * y1) ^ (x1 * y0) ^ (x2 * y3) ^ (x3 * y2);
+  z2 = (x0 * y2) ^ (x1 * y1) ^ (x2 * y0) ^ (x3 * y3);
+  z3 = (x0 * y3) ^ (x1 * y2) ^ (x2 * y1) ^ (x3 * y0);
+
+  z0 &= 0x1111111111111111ULL;
+  z1 &= 0x2222222222222222ULL;
+  z2 &= 0x4444444444444444ULL;
+  z3 &= 0x8888888888888888ULL;
+
+  return z0 | z1 | z2 | z3;
+}
+
+/** Reverse all 64 bits of x. Used for GHASH bit-reversed representation. */
+FIO_IFUNC uint64_t fio___rev64(uint64_t x) {
+  x = ((x & 0x5555555555555555ULL) << 1) | ((x >> 1) & 0x5555555555555555ULL);
+  x = ((x & 0x3333333333333333ULL) << 2) | ((x >> 2) & 0x3333333333333333ULL);
+  x = ((x & 0x0F0F0F0F0F0F0F0FULL) << 4) | ((x >> 4) & 0x0F0F0F0F0F0F0F0FULL);
+  x = ((x & 0x00FF00FF00FF00FFULL) << 8) | ((x >> 8) & 0x00FF00FF00FF00FFULL);
+  x = ((x & 0x0000FFFF0000FFFFULL) << 16) | ((x >> 16) & 0x0000FFFF0000FFFFULL);
+  return (x << 32) | (x >> 32);
+}
+
+/* ============================================================================
+ * 11. Constant-time GHASH multiplication (ctmul64)
+ *
+ * Full GHASH block multiplication using Karatsuba decomposition + bmul64.
+ * Processes one 16-byte block at a time.
+ *
+ * GHASH accumulator y[0..1] (big-endian halves), hash key h[0..1].
+ * Reduction polynomial: x^128 + x^7 + x^2 + x + 1.
+ * ========================================================================= */
+
+/**
+ * Precomputed GHASH hash key entry for ctmul64.
+ * Stores h0, h1 (big-endian halves) and their bit-reversed forms,
+ * plus h2 = h0^h1 for Karatsuba.
  */
 typedef struct {
-  uint64_t hl[16]; /* Low 64 bits of i*H for i=0..15 */
-  uint64_t hh[16]; /* High 64 bits of i*H for i=0..15 */
-} fio___gcm_htable_s;
+  uint64_t h0, h1;   /* hash key halves (big-endian) */
+  uint64_t h0r, h1r; /* bit-reversed hash key halves */
+  uint64_t h2, h2r;  /* h0 ^ h1 and rev(h0) ^ rev(h1) for Karatsuba */
+} fio___ghash_ctmul_entry_s;
 
-/* Reduction table: when shifting right by 4, the low nibble falls off.
- * Entry i contains the XOR value for the high word when nibble i falls off.
- * Computed as: i * (x^128 mod P) where P = x^128 + x^7 + x^2 + x + 1 */
-/* clang-format off */
-static const uint64_t FIO___GCM_REDUCE4[16] = {
-    0x0000000000000000ULL, 0x1C20000000000000ULL,
-    0x3840000000000000ULL, 0x2460000000000000ULL,
-    0x7080000000000000ULL, 0x6CA0000000000000ULL,
-    0x48C0000000000000ULL, 0x54E0000000000000ULL,
-    0xE100000000000000ULL, 0xFD20000000000000ULL,
-    0xD940000000000000ULL, 0xC560000000000000ULL,
-    0x9180000000000000ULL, 0x8DA0000000000000ULL,
-    0xA9C0000000000000ULL, 0xB5E0000000000000ULL
-};
-/* clang-format on */
+/**
+ * Precomputed GHASH key table: H^1, H^2, H^3, H^4 for 4-block aggregation.
+ * hk[0] = H^4, hk[1] = H^3, hk[2] = H^2, hk[3] = H^1.
+ * Ordering: block[0] multiplied by H^4, block[3] by H^1.
+ */
+typedef struct {
+  fio___ghash_ctmul_entry_s hk[4]; /* H^4, H^3, H^2, H^1 */
+} fio___ghash_ctmul_key_s;
 
-/* Precompute the 16-entry multiplication table: M[i] = i * H */
-FIO_IFUNC void fio___gcm_precompute_htable(fio___gcm_htable_s *ctx,
-                                           const uint8_t h[16]) {
-  uint64_t h0 = fio_buf2u64_be(h);
-  uint64_t h1 = fio_buf2u64_be(h + 8);
-
-  ctx->hh[0] = 0;
-  ctx->hl[0] = 0;
-  ctx->hh[8] = h0;
-  ctx->hl[8] = h1;
-
-  /* Powers of x times H: M[4] = x*H, M[2] = x^2*H, M[1] = x^3*H */
-  uint64_t carry = h1 & 1;
-  ctx->hl[4] = (h1 >> 1) | (h0 << 63);
-  ctx->hh[4] = (h0 >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
-
-  carry = ctx->hl[4] & 1;
-  ctx->hl[2] = (ctx->hl[4] >> 1) | (ctx->hh[4] << 63);
-  ctx->hh[2] = (ctx->hh[4] >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
-
-  carry = ctx->hl[2] & 1;
-  ctx->hl[1] = (ctx->hl[2] >> 1) | (ctx->hh[2] << 63);
-  ctx->hh[1] = (ctx->hh[2] >> 1) ^ (carry ? 0xE100000000000000ULL : 0);
-
-  /* Build remaining entries using XOR (linearity of GF multiplication) */
-  ctx->hh[3] = ctx->hh[1] ^ ctx->hh[2];
-  ctx->hl[3] = ctx->hl[1] ^ ctx->hl[2];
-  ctx->hh[5] = ctx->hh[1] ^ ctx->hh[4];
-  ctx->hl[5] = ctx->hl[1] ^ ctx->hl[4];
-  ctx->hh[6] = ctx->hh[2] ^ ctx->hh[4];
-  ctx->hl[6] = ctx->hl[2] ^ ctx->hl[4];
-  ctx->hh[7] = ctx->hh[1] ^ ctx->hh[6];
-  ctx->hl[7] = ctx->hl[1] ^ ctx->hl[6];
-  ctx->hh[9] = ctx->hh[1] ^ ctx->hh[8];
-  ctx->hl[9] = ctx->hl[1] ^ ctx->hl[8];
-  ctx->hh[10] = ctx->hh[2] ^ ctx->hh[8];
-  ctx->hl[10] = ctx->hl[2] ^ ctx->hl[8];
-  ctx->hh[11] = ctx->hh[3] ^ ctx->hh[8];
-  ctx->hl[11] = ctx->hl[3] ^ ctx->hl[8];
-  ctx->hh[12] = ctx->hh[4] ^ ctx->hh[8];
-  ctx->hl[12] = ctx->hl[4] ^ ctx->hl[8];
-  ctx->hh[13] = ctx->hh[5] ^ ctx->hh[8];
-  ctx->hl[13] = ctx->hl[5] ^ ctx->hl[8];
-  ctx->hh[14] = ctx->hh[6] ^ ctx->hh[8];
-  ctx->hl[14] = ctx->hl[6] ^ ctx->hl[8];
-  ctx->hh[15] = ctx->hh[7] ^ ctx->hh[8];
-  ctx->hl[15] = ctx->hl[7] ^ ctx->hl[8];
+/** Initialize a single GHASH key entry from h0, h1 values. */
+FIO_IFUNC void fio___ghash_ctmul_entry_init(fio___ghash_ctmul_entry_s *e,
+                                            uint64_t h0,
+                                            uint64_t h1) {
+  e->h0 = h0;
+  e->h1 = h1;
+  e->h0r = fio___rev64(h0);
+  e->h1r = fio___rev64(h1);
+  e->h2 = h0 ^ h1;
+  e->h2r = e->h0r ^ e->h1r;
 }
 
-/* GHASH multiplication: result = x * H using 4-bit table
- * Process nibbles from byte 15 down to byte 0, low nibble first
- *
- * Unrolled for better performance - processes 2 bytes (4 nibbles) per iteration
+/**
+ * GF(2^128) multiply: result = a * b (no XOR with accumulator).
+ * Used for computing H powers. Returns result in out[0] (high), out[1] (low).
  */
-FIO_IFUNC void fio___gcm_ghash_mult(uint64_t z[2],
-                                    const uint8_t x[16],
-                                    const fio___gcm_htable_s *ctx) {
-  uint64_t z0 = 0, z1 = 0;
-  uint64_t rem;
+FIO_SFUNC void fio___ghash_ctmul_gmul(uint64_t out[2],
+                                      const uint64_t a[2],
+                                      const fio___ghash_ctmul_entry_s *bk) {
+  uint64_t a0, a1, a0r, a1r, a2, a2r;
+  uint64_t z0, z1, z2, z0h, z1h, z2h;
+  uint64_t v0, v1, v2, v3;
 
-  /* Unroll: process 2 bytes at a time */
-  for (int i = 14; i >= 0; i -= 2) {
-    uint8_t b0 = x[i + 1]; /* Lower byte first */
-    uint8_t b1 = x[i];
+  a1 = a[0]; /* high half */
+  a0 = a[1]; /* low half */
+  a0r = fio___rev64(a0);
+  a1r = fio___rev64(a1);
+  a2 = a0 ^ a1;
+  a2r = a0r ^ a1r;
 
-    /* Byte 0, low nibble */
-    rem = z1 & 0xF;
-    z1 = (z1 >> 4) | (z0 << 60);
-    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[b0 & 0xF];
-    z1 ^= ctx->hl[b0 & 0xF];
+  z0 = fio___bmul64(a0, bk->h0);
+  z1 = fio___bmul64(a1, bk->h1);
+  z2 = fio___bmul64(a2, bk->h2);
+  z0h = fio___bmul64(a0r, bk->h0r);
+  z1h = fio___bmul64(a1r, bk->h1r);
+  z2h = fio___bmul64(a2r, bk->h2r);
 
-    /* Byte 0, high nibble */
-    rem = z1 & 0xF;
-    z1 = (z1 >> 4) | (z0 << 60);
-    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[b0 >> 4];
-    z1 ^= ctx->hl[b0 >> 4];
+  z2 ^= z0 ^ z1;
+  z2h ^= z0h ^ z1h;
+  z0h = fio___rev64(z0h) >> 1;
+  z1h = fio___rev64(z1h) >> 1;
+  z2h = fio___rev64(z2h) >> 1;
 
-    /* Byte 1, low nibble */
-    rem = z1 & 0xF;
-    z1 = (z1 >> 4) | (z0 << 60);
-    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[b1 & 0xF];
-    z1 ^= ctx->hl[b1 & 0xF];
+  v0 = z0;
+  v1 = z0h ^ z2;
+  v2 = z1 ^ z2h;
+  v3 = z1h;
 
-    /* Byte 1, high nibble */
-    rem = z1 & 0xF;
-    z1 = (z1 >> 4) | (z0 << 60);
-    z0 = (z0 >> 4) ^ FIO___GCM_REDUCE4[rem];
-    z0 ^= ctx->hh[b1 >> 4];
-    z1 ^= ctx->hl[b1 >> 4];
+  v3 = (v3 << 1) | (v2 >> 63);
+  v2 = (v2 << 1) | (v1 >> 63);
+  v1 = (v1 << 1) | (v0 >> 63);
+  v0 = (v0 << 1);
+
+  v2 ^= v0 ^ (v0 >> 1) ^ (v0 >> 2) ^ (v0 >> 7);
+  v1 ^= (v0 << 63) ^ (v0 << 62) ^ (v0 << 57);
+  v3 ^= v1 ^ (v1 >> 1) ^ (v1 >> 2) ^ (v1 >> 7);
+  v2 ^= (v1 << 63) ^ (v1 << 62) ^ (v1 << 57);
+
+  out[0] = v3;
+  out[1] = v2;
+}
+
+/** Precompute GHASH key table (H^1 through H^4) for ctmul64.
+ * BearSSL convention: h1 = high half (first 8 bytes), h0 = low half. */
+FIO_IFUNC void fio___ghash_ctmul_precompute(fio___ghash_ctmul_key_s *key,
+                                            const uint8_t h[16]) {
+  uint64_t h1 = fio_buf2u64_be(h);     /* high half (first 8 bytes) */
+  uint64_t h0 = fio_buf2u64_be(h + 8); /* low half (last 8 bytes) */
+
+  /* H^1 stored at index 3 (used for last block in 4-block batch) */
+  fio___ghash_ctmul_entry_init(&key->hk[3], h0, h1);
+
+  /* H^2 = H * H */
+  uint64_t hp[2] = {h1, h0}; /* {high, low} */
+  uint64_t h2v[2];
+  fio___ghash_ctmul_gmul(h2v, hp, &key->hk[3]);
+  fio___ghash_ctmul_entry_init(&key->hk[2], h2v[1], h2v[0]);
+
+  /* H^3 = H^2 * H */
+  uint64_t h3v[2];
+  fio___ghash_ctmul_gmul(h3v, h2v, &key->hk[3]);
+  fio___ghash_ctmul_entry_init(&key->hk[1], h3v[1], h3v[0]);
+
+  /* H^4 = H^3 * H */
+  uint64_t h4v[2];
+  fio___ghash_ctmul_gmul(h4v, h3v, &key->hk[3]);
+  fio___ghash_ctmul_entry_init(&key->hk[0], h4v[1], h4v[0]);
+}
+
+/**
+ * GHASH multiply: y = (y XOR block) * H
+ *
+ * Uses Karatsuba decomposition (3 bmul64 calls instead of 4) with
+ * bit-reversal for the GHASH reflected representation.
+ */
+FIO_SFUNC void fio___ghash_ctmul(uint64_t y[2],
+                                 const uint8_t block[16],
+                                 const fio___ghash_ctmul_key_s *key) {
+  const fio___ghash_ctmul_entry_s *hk = &key->hk[3]; /* H^1 */
+  uint64_t y0, y1, y0r, y1r, y2, y2r;
+  uint64_t z0, z1, z2, z0h, z1h, z2h;
+  uint64_t v0, v1, v2, v3;
+
+  /* XOR input block into accumulator */
+  y1 = y[0] ^ fio_buf2u64_be(block);
+  y0 = y[1] ^ fio_buf2u64_be(block + 8);
+
+  /* Bit-reverse accumulator halves */
+  y0r = fio___rev64(y0);
+  y1r = fio___rev64(y1);
+  y2 = y0 ^ y1;
+  y2r = y0r ^ y1r;
+
+  /* Three Karatsuba multiplications (forward and reversed) */
+  z0 = fio___bmul64(y0, hk->h0);
+  z1 = fio___bmul64(y1, hk->h1);
+  z2 = fio___bmul64(y2, hk->h2);
+  z0h = fio___bmul64(y0r, hk->h0r);
+  z1h = fio___bmul64(y1r, hk->h1r);
+  z2h = fio___bmul64(y2r, hk->h2r);
+
+  /* Karatsuba combination */
+  z2 ^= z0 ^ z1;
+  z2h ^= z0h ^ z1h;
+
+  /* Reverse the "high" halves to recover missing bits */
+  z0h = fio___rev64(z0h) >> 1;
+  z1h = fio___rev64(z1h) >> 1;
+  z2h = fio___rev64(z2h) >> 1;
+
+  /* Assemble 256-bit product */
+  v0 = z0;
+  v1 = z0h ^ z2;
+  v2 = z1 ^ z2h;
+  v3 = z1h;
+
+  /* Left shift by 1 (GHASH bit-reversed representation) */
+  v3 = (v3 << 1) | (v2 >> 63);
+  v2 = (v2 << 1) | (v1 >> 63);
+  v1 = (v1 << 1) | (v0 >> 63);
+  v0 = (v0 << 1);
+
+  /* Reduction modulo x^128 + x^7 + x^2 + x + 1 */
+  /* Reduce v0 */
+  v2 ^= v0 ^ (v0 >> 1) ^ (v0 >> 2) ^ (v0 >> 7);
+  v1 ^= (v0 << 63) ^ (v0 << 62) ^ (v0 << 57);
+  /* Reduce v1 */
+  v3 ^= v1 ^ (v1 >> 1) ^ (v1 >> 2) ^ (v1 >> 7);
+  v2 ^= (v1 << 63) ^ (v1 << 62) ^ (v1 << 57);
+
+  /* Result in v2:v3 */
+  y[0] = v3;
+  y[1] = v2;
+}
+
+/**
+ * Aggregated 4-block GHASH: y = (y XOR C0) * H^4 XOR C1 * H^3 XOR C2 * H^2
+ * XOR C3 * H^1
+ *
+ * Fully unrolled with maximally deferred post-processing:
+ * - 4 Karatsuba multiplications (24 bmul64 + 8 rev64 for inputs)
+ * - Accumulate raw z0/z1/z2/z0h/z1h/z2h across all 4 blocks
+ * - Single Karatsuba combination + 3 rev64 + assembly + shift + reduction
+ * Saves 9 rev64 calls and 3 reductions vs 4 separate single-block calls.
+ *
+ * blocks must point to exactly 64 bytes (4 × 16-byte blocks).
+ */
+FIO_SFUNC void fio___ghash_ctmul4(uint64_t y[2],
+                                  const uint8_t blocks[64],
+                                  const fio___ghash_ctmul_key_s *key) {
+  uint64_t sz0, sz1, sz2, sz0h, sz1h, sz2h;
+  uint64_t v0, v1, v2, v3;
+
+  /* --- Block 0: (y XOR C0) * H^4 --- */
+  {
+    const fio___ghash_ctmul_entry_s *hk = &key->hk[0];
+    uint64_t a1 = y[0] ^ fio_buf2u64_be(blocks);
+    uint64_t a0 = y[1] ^ fio_buf2u64_be(blocks + 8);
+    uint64_t a0r = fio___rev64(a0);
+    uint64_t a1r = fio___rev64(a1);
+    uint64_t a2 = a0 ^ a1;
+    uint64_t a2r = a0r ^ a1r;
+    sz0 = fio___bmul64(a0, hk->h0);
+    sz1 = fio___bmul64(a1, hk->h1);
+    sz2 = fio___bmul64(a2, hk->h2);
+    sz0h = fio___bmul64(a0r, hk->h0r);
+    sz1h = fio___bmul64(a1r, hk->h1r);
+    sz2h = fio___bmul64(a2r, hk->h2r);
   }
 
-  z[0] = z0;
-  z[1] = z1;
+  /* --- Block 1: C1 * H^3 --- */
+  {
+    const fio___ghash_ctmul_entry_s *hk = &key->hk[1];
+    uint64_t a1 = fio_buf2u64_be(blocks + 16);
+    uint64_t a0 = fio_buf2u64_be(blocks + 24);
+    uint64_t a0r = fio___rev64(a0);
+    uint64_t a1r = fio___rev64(a1);
+    uint64_t a2 = a0 ^ a1;
+    uint64_t a2r = a0r ^ a1r;
+    sz0 ^= fio___bmul64(a0, hk->h0);
+    sz1 ^= fio___bmul64(a1, hk->h1);
+    sz2 ^= fio___bmul64(a2, hk->h2);
+    sz0h ^= fio___bmul64(a0r, hk->h0r);
+    sz1h ^= fio___bmul64(a1r, hk->h1r);
+    sz2h ^= fio___bmul64(a2r, hk->h2r);
+  }
+
+  /* --- Block 2: C2 * H^2 --- */
+  {
+    const fio___ghash_ctmul_entry_s *hk = &key->hk[2];
+    uint64_t a1 = fio_buf2u64_be(blocks + 32);
+    uint64_t a0 = fio_buf2u64_be(blocks + 40);
+    uint64_t a0r = fio___rev64(a0);
+    uint64_t a1r = fio___rev64(a1);
+    uint64_t a2 = a0 ^ a1;
+    uint64_t a2r = a0r ^ a1r;
+    sz0 ^= fio___bmul64(a0, hk->h0);
+    sz1 ^= fio___bmul64(a1, hk->h1);
+    sz2 ^= fio___bmul64(a2, hk->h2);
+    sz0h ^= fio___bmul64(a0r, hk->h0r);
+    sz1h ^= fio___bmul64(a1r, hk->h1r);
+    sz2h ^= fio___bmul64(a2r, hk->h2r);
+  }
+
+  /* --- Block 3: C3 * H^1 --- */
+  {
+    const fio___ghash_ctmul_entry_s *hk = &key->hk[3];
+    uint64_t a1 = fio_buf2u64_be(blocks + 48);
+    uint64_t a0 = fio_buf2u64_be(blocks + 56);
+    uint64_t a0r = fio___rev64(a0);
+    uint64_t a1r = fio___rev64(a1);
+    uint64_t a2 = a0 ^ a1;
+    uint64_t a2r = a0r ^ a1r;
+    sz0 ^= fio___bmul64(a0, hk->h0);
+    sz1 ^= fio___bmul64(a1, hk->h1);
+    sz2 ^= fio___bmul64(a2, hk->h2);
+    sz0h ^= fio___bmul64(a0r, hk->h0r);
+    sz1h ^= fio___bmul64(a1r, hk->h1r);
+    sz2h ^= fio___bmul64(a2r, hk->h2r);
+  }
+
+  /* Single Karatsuba combination on accumulated sums */
+  sz2 ^= sz0 ^ sz1;
+  sz2h ^= sz0h ^ sz1h;
+
+  /* Single set of 3 rev64 calls (instead of 4 × 3 = 12) */
+  sz0h = fio___rev64(sz0h) >> 1;
+  sz1h = fio___rev64(sz1h) >> 1;
+  sz2h = fio___rev64(sz2h) >> 1;
+
+  /* Assemble 256-bit product */
+  v0 = sz0;
+  v1 = sz0h ^ sz2;
+  v2 = sz1 ^ sz2h;
+  v3 = sz1h;
+
+  /* Single left shift by 1 on the accumulated 256-bit product */
+  v3 = (v3 << 1) | (v2 >> 63);
+  v2 = (v2 << 1) | (v1 >> 63);
+  v1 = (v1 << 1) | (v0 >> 63);
+  v0 = (v0 << 1);
+
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 */
+  v2 ^= v0 ^ (v0 >> 1) ^ (v0 >> 2) ^ (v0 >> 7);
+  v1 ^= (v0 << 63) ^ (v0 << 62) ^ (v0 << 57);
+  v3 ^= v1 ^ (v1 >> 1) ^ (v1 >> 2) ^ (v1 >> 7);
+  v2 ^= (v1 << 63) ^ (v1 << 62) ^ (v1 << 57);
+
+  y[0] = v3;
+  y[1] = v2;
 }
 
-/* GHASH a block: tag = (tag XOR block) * H
- * Optimized to use 64-bit XOR operations */
-FIO_IFUNC void fio___gcm_ghash_block(uint64_t tag[2],
-                                     const uint8_t block[16],
-                                     const fio___gcm_htable_s *ctx) {
-  uint8_t tmp[16];
-  uint64_t b0 = fio_buf2u64_be(block);
-  uint64_t b1 = fio_buf2u64_be(block + 8);
-  fio_u2buf64_be(tmp, tag[0] ^ b0);
-  fio_u2buf64_be(tmp + 8, tag[1] ^ b1);
-  fio___gcm_ghash_mult(tag, tmp, ctx);
+/* ============================================================================
+ * 12-14. CTR counter block preparation and encryption
+ *
+ * 16-block engine (fio_u256) for large data, 4-block engine for tail.
+ * ========================================================================= */
+
+#if FIO___AES_BS_WIDE
+
+/** Prepare 16 counter blocks for bitsliced CTR mode. */
+FIO_SFUNC void fio___aes_bs_ctr_prepare16(uint32_t w[64],
+                                          const uint32_t nonce_w[3],
+                                          uint32_t ctr_start) {
+  for (unsigned b = 0; b < 16; ++b) {
+    w[b * 4 + 0] = nonce_w[0];
+    w[b * 4 + 1] = nonce_w[1];
+    w[b * 4 + 2] = nonce_w[2];
+    w[b * 4 + 3] = fio_lton32(ctr_start + b);
+  }
 }
 
-/* GHASH over data */
-FIO_IFUNC void fio___gcm_ghash(uint64_t tag[2],
-                               const fio___gcm_htable_s *ctx,
-                               const uint8_t *data,
-                               size_t len) {
+/** Encrypt 16 counter blocks and produce 256 bytes of keystream. */
+FIO_SFUNC void fio___aes_bs_ctr_encrypt16(uint8_t ks[256],
+                                          const uint32_t w[64],
+                                          unsigned num_rounds,
+                                          const uint64_t *sk_exp4) {
+  fio_u256 q[8];
+  uint64_t tmp[8];
+
+  for (unsigned g = 0; g < 4; ++g) {
+    for (unsigned b = 0; b < 4; ++b) {
+      unsigned blk_idx = g * 4 + b;
+      fio___aes_bs_interleave_in(&q[b].u64[g],
+                                 &q[b + 4].u64[g],
+                                 w + blk_idx * 4);
+    }
+  }
+
+  for (size_t lane = 0; lane < 4; ++lane) {
+    for (int i = 0; i < 8; ++i)
+      tmp[i] = q[i].u64[lane];
+    fio___aes_bs_ortho(tmp);
+    for (int i = 0; i < 8; ++i)
+      q[i].u64[lane] = tmp[i];
+  }
+
+  fio___aes_bs_encrypt(num_rounds, sk_exp4, q);
+
+  for (size_t lane = 0; lane < 4; ++lane) {
+    for (int i = 0; i < 8; ++i)
+      tmp[i] = q[i].u64[lane];
+    fio___aes_bs_ortho(tmp);
+    for (int i = 0; i < 8; ++i)
+      q[i].u64[lane] = tmp[i];
+  }
+
+  for (unsigned g = 0; g < 4; ++g) {
+    for (unsigned b = 0; b < 4; ++b) {
+      unsigned blk_idx = g * 4 + b;
+      uint32_t out_w[4];
+      fio___aes_bs_interleave_out(out_w, q[b].u64[g], q[b + 4].u64[g]);
+      fio_u2buf32_le(ks + blk_idx * 16, out_w[0]);
+      fio_u2buf32_le(ks + blk_idx * 16 + 4, out_w[1]);
+      fio_u2buf32_le(ks + blk_idx * 16 + 8, out_w[2]);
+      fio_u2buf32_le(ks + blk_idx * 16 + 12, out_w[3]);
+    }
+  }
+}
+
+#endif /* FIO___AES_BS_WIDE */
+
+/* ============================================================================
+ * 15. GHASH helpers for GCM
+ * ========================================================================= */
+
+/** GHASH over arbitrary-length data (full blocks + optional partial).
+ * Uses 4-block aggregation for ≥64 bytes, single-block for tail. */
+FIO_SFUNC void fio___aes_bs_ghash(uint64_t y[2],
+                                  const fio___ghash_ctmul_key_s *hk,
+                                  const uint8_t *data,
+                                  size_t len) {
+  while (len >= 64) {
+    fio___ghash_ctmul4(y, data, hk);
+    data += 64;
+    len -= 64;
+  }
   while (len >= 16) {
-    fio___gcm_ghash_block(tag, data, ctx);
+    fio___ghash_ctmul(y, data, hk);
     data += 16;
     len -= 16;
   }
   if (len > 0) {
     uint8_t block[16] = {0};
     FIO_MEMCPY(block, data, len);
-    fio___gcm_ghash_block(tag, block, ctx);
+    fio___ghash_ctmul(y, block, hk);
   }
 }
 
-FIO_IFUNC void fio___gcm_inc_counter(uint8_t counter[16]) {
-  uint32_t c = fio_buf2u32_be(counter + 12);
-  c++;
-  fio_u2buf32_be(counter + 12, c);
+/* ============================================================================
+ * 16. Shared GCM CTR processing (encrypt/decrypt XOR loop)
+ *
+ * Uses 16-block engine for >=256B chunks (when FIO___AES_BS_WIDE=1),
+ * then 4-block engine for remaining data.
+ * ========================================================================= */
+
+/**
+ * CTR-mode XOR processing with optional GHASH of output.
+ * If ghash_output is true, GHASH is applied to the data AFTER XOR (encryption).
+ * If ghash_output is false, no GHASH is done here (decryption does it
+ * separately).
+ */
+FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
+                                            size_t len,
+                                            const uint32_t nonce_w[3],
+                                            uint32_t *ctr,
+                                            unsigned num_rounds,
+                                            const uint64_t *sk_exp4,
+                                            uint64_t ghash_y[2],
+                                            const fio___ghash_ctmul_key_s *hk,
+                                            int ghash_output) {
+#if FIO___AES_BS_WIDE
+  /* Process 16 blocks (256 bytes) at a time using wide engine */
+  while (len >= 256) {
+    uint32_t w[64];
+    uint8_t ks[256];
+    fio___aes_bs_ctr_prepare16(w, nonce_w, *ctr);
+    fio___aes_bs_ctr_encrypt16(ks, w, num_rounds, sk_exp4);
+    for (size_t i = 0; i < 256; i += 8) {
+      uint64_t d, k;
+      FIO_MEMCPY(&d, p + i, 8);
+      FIO_MEMCPY(&k, ks + i, 8);
+      d ^= k;
+      FIO_MEMCPY(p + i, &d, 8);
+    }
+    if (ghash_output) {
+      for (size_t i = 0; i < 256; i += 64)
+        fio___ghash_ctmul4(ghash_y, p + i, hk);
+    }
+    *ctr += 16;
+    p += 256;
+    len -= 256;
+  }
+#endif /* FIO___AES_BS_WIDE */
+
+  /* Process 4 blocks (64 bytes) at a time using 4-block engine */
+  while (len >= 64) {
+    uint32_t w4[16];
+    uint8_t ks4[64];
+    fio___aes_bs_ctr_prepare4(w4, nonce_w, *ctr);
+    fio___aes_bs_ctr_encrypt4_ks(ks4, w4, num_rounds, sk_exp4);
+    for (size_t i = 0; i < 64; i += 8) {
+      uint64_t d, k;
+      FIO_MEMCPY(&d, p + i, 8);
+      FIO_MEMCPY(&k, ks4 + i, 8);
+      d ^= k;
+      FIO_MEMCPY(p + i, &d, 8);
+    }
+    if (ghash_output) {
+      fio___ghash_ctmul4(ghash_y, p, hk);
+    }
+    *ctr += 4;
+    p += 64;
+    len -= 64;
+  }
+
+  /* Handle remaining data (< 64 bytes) using 4-block engine */
+  if (len > 0) {
+    uint32_t w4[16];
+    uint8_t ks4[64];
+    fio___aes_bs_ctr_prepare4(w4, nonce_w, *ctr);
+    fio___aes_bs_ctr_encrypt4_ks(ks4, w4, num_rounds, sk_exp4);
+
+    size_t full_blocks = len & ~(size_t)15;
+    for (size_t i = 0; i < full_blocks; i += 8) {
+      uint64_t d, k;
+      FIO_MEMCPY(&d, p + i, 8);
+      FIO_MEMCPY(&k, ks4 + i, 8);
+      d ^= k;
+      FIO_MEMCPY(p + i, &d, 8);
+    }
+    if (ghash_output) {
+      for (size_t i = 0; i < full_blocks; i += 16)
+        fio___ghash_ctmul(ghash_y, p + i, hk);
+    }
+
+    size_t tail = len - full_blocks;
+    if (tail > 0) {
+      for (size_t i = 0; i < tail; ++i)
+        p[full_blocks + i] ^= ks4[full_blocks + i];
+      if (ghash_output) {
+        uint8_t block[16] = {0};
+        FIO_MEMCPY(block, p + full_blocks, tail);
+        fio___ghash_ctmul(ghash_y, block, hk);
+      }
+    }
+    *ctr += (uint32_t)((len + 15) >> 4);
+  }
+}
+
+/* ============================================================================
+ * 17. AES-GCM public API (bitsliced constant-time implementation)
+ *
+ * Fused small-message path: for messages ≤ 64 bytes, H + J0 + first 2 CTR
+ * blocks are batched in a single 4-block engine call, saving one full
+ * ortho+interleave round-trip vs the separate init + CTR approach.
+ * ========================================================================= */
+
+/**
+ * Shared GCM init: key expand + pre-expand keys + batch H & J0 computation.
+ * Returns j0_enc[16] (encrypted J0 for final tag).
+ */
+FIO_SFUNC void fio___aes_bs_gcm_init(uint64_t *sk_exp4,
+                                     fio___ghash_ctmul_key_s *hk,
+                                     uint8_t j0_enc[16],
+                                     uint32_t nonce_w[3],
+                                     unsigned num_rounds,
+                                     const uint64_t *comp_skey,
+                                     const void *nonce) {
+  uint32_t h_w[4] = {0}, j0_w[4];
+  uint32_t h_out[4], j0_out[4];
+  uint8_t h_bytes[16];
+
+  /* Pre-expand all round keys once */
+  fio___aes_bs_expand_all_keys4(sk_exp4, num_rounds, comp_skey);
+
+  /* Nonce words */
+  nonce_w[0] = fio_buf2u32_le((const uint8_t *)nonce);
+  nonce_w[1] = fio_buf2u32_le((const uint8_t *)nonce + 4);
+  nonce_w[2] = fio_buf2u32_le((const uint8_t *)nonce + 8);
+
+  /* Batch H + J0: encrypt zeros (for H) and nonce||1 (for J0) in one call */
+  j0_w[0] = nonce_w[0];
+  j0_w[1] = nonce_w[1];
+  j0_w[2] = nonce_w[2];
+  j0_w[3] = fio_lton32(1);
+  fio___aes_bs_encrypt_2blocks(h_out, j0_out, h_w, j0_w, num_rounds, sk_exp4);
+
+  /* H -> GHASH key */
+  fio_u2buf32_le(h_bytes, h_out[0]);
+  fio_u2buf32_le(h_bytes + 4, h_out[1]);
+  fio_u2buf32_le(h_bytes + 8, h_out[2]);
+  fio_u2buf32_le(h_bytes + 12, h_out[3]);
+  fio___ghash_ctmul_precompute(hk, h_bytes);
+
+  /* J0 -> encrypted for final tag */
+  fio_u2buf32_le(j0_enc, j0_out[0]);
+  fio_u2buf32_le(j0_enc + 4, j0_out[1]);
+  fio_u2buf32_le(j0_enc + 8, j0_out[2]);
+  fio_u2buf32_le(j0_enc + 12, j0_out[3]);
+
+  fio_secure_zero(h_bytes, sizeof(h_bytes));
+}
+
+/**
+ * Fused GCM init + first 2 CTR blocks: encrypts H, J0, CTR[2], CTR[3] in a
+ * single 4-block engine call using compressed keys (no sk_exp4 needed).
+ * Returns 32 bytes of keystream in ks_out[0..31].
+ * For messages ≤ 32 bytes, this is the only engine call needed for CTR.
+ */
+FIO_SFUNC void fio___aes_bs_gcm_init_with_ctr(fio___ghash_ctmul_key_s *hk,
+                                              uint8_t j0_enc[16],
+                                              uint8_t ks_out[32],
+                                              uint32_t nonce_w[3],
+                                              unsigned num_rounds,
+                                              const uint64_t *comp_skey,
+                                              const void *nonce) {
+  uint32_t h_w[4] = {0}, j0_w[4], ctr2_w[4], ctr3_w[4];
+  uint64_t q[8];
+  uint8_t h_bytes[16];
+
+  /* Nonce words */
+  nonce_w[0] = fio_buf2u32_le((const uint8_t *)nonce);
+  nonce_w[1] = fio_buf2u32_le((const uint8_t *)nonce + 4);
+  nonce_w[2] = fio_buf2u32_le((const uint8_t *)nonce + 8);
+
+  /* Prepare 4 blocks: H (zeros), J0 (nonce||1), CTR[2], CTR[3] */
+  j0_w[0] = nonce_w[0];
+  j0_w[1] = nonce_w[1];
+  j0_w[2] = nonce_w[2];
+  j0_w[3] = fio_lton32(1);
+  ctr2_w[0] = nonce_w[0];
+  ctr2_w[1] = nonce_w[1];
+  ctr2_w[2] = nonce_w[2];
+  ctr2_w[3] = fio_lton32(2);
+  ctr3_w[0] = nonce_w[0];
+  ctr3_w[1] = nonce_w[1];
+  ctr3_w[2] = nonce_w[2];
+  ctr3_w[3] = fio_lton32(3);
+
+  /* Pack all 4 blocks into q[8] */
+  fio___aes_bs_interleave_in(&q[0], &q[4], h_w);
+  fio___aes_bs_interleave_in(&q[1], &q[5], j0_w);
+  fio___aes_bs_interleave_in(&q[2], &q[6], ctr2_w);
+  fio___aes_bs_interleave_in(&q[3], &q[7], ctr3_w);
+
+  /* Single engine call for all 4 blocks, on-the-fly key expansion */
+  fio___aes_bs_ortho(q);
+  fio___aes_bs_encrypt4_comp(num_rounds, comp_skey, q);
+  fio___aes_bs_ortho(q);
+
+  /* Extract H (slot 0) */
+  {
+    uint32_t h_out[4];
+    fio___aes_bs_interleave_out(h_out, q[0], q[4]);
+    fio_u2buf32_le(h_bytes, h_out[0]);
+    fio_u2buf32_le(h_bytes + 4, h_out[1]);
+    fio_u2buf32_le(h_bytes + 8, h_out[2]);
+    fio_u2buf32_le(h_bytes + 12, h_out[3]);
+    fio___ghash_ctmul_precompute(hk, h_bytes);
+  }
+
+  /* Extract J0 (slot 1) */
+  {
+    uint32_t j0_out[4];
+    fio___aes_bs_interleave_out(j0_out, q[1], q[5]);
+    fio_u2buf32_le(j0_enc, j0_out[0]);
+    fio_u2buf32_le(j0_enc + 4, j0_out[1]);
+    fio_u2buf32_le(j0_enc + 8, j0_out[2]);
+    fio_u2buf32_le(j0_enc + 12, j0_out[3]);
+  }
+
+  /* Extract CTR[2] keystream (slot 2) -> ks_out[0..15] */
+  {
+    uint32_t out_w[4];
+    fio___aes_bs_interleave_out(out_w, q[2], q[6]);
+    fio_u2buf32_le(ks_out, out_w[0]);
+    fio_u2buf32_le(ks_out + 4, out_w[1]);
+    fio_u2buf32_le(ks_out + 8, out_w[2]);
+    fio_u2buf32_le(ks_out + 12, out_w[3]);
+  }
+
+  /* Extract CTR[3] keystream (slot 3) -> ks_out[16..31] */
+  {
+    uint32_t out_w[4];
+    fio___aes_bs_interleave_out(out_w, q[3], q[7]);
+    fio_u2buf32_le(ks_out + 16, out_w[0]);
+    fio_u2buf32_le(ks_out + 20, out_w[1]);
+    fio_u2buf32_le(ks_out + 24, out_w[2]);
+    fio_u2buf32_le(ks_out + 28, out_w[3]);
+  }
+
+  fio_secure_zero(h_bytes, sizeof(h_bytes));
+}
+
+/**
+ * Compute GHASH length block and final tag, XOR with j0_enc.
+ * Writes 16-byte tag to mac_out.
+ */
+FIO_IFUNC void fio___aes_bs_gcm_finalize(uint8_t *mac_out,
+                                         uint64_t ghash_y[2],
+                                         const fio___ghash_ctmul_key_s *hk,
+                                         const uint8_t j0_enc[16],
+                                         uint64_t adlen,
+                                         uint64_t datalen) {
+  uint8_t len_block[16];
+  fio_u2buf64_be(len_block, adlen * 8);
+  fio_u2buf64_be(len_block + 8, datalen * 8);
+  fio___ghash_ctmul(ghash_y, len_block, hk);
+
+  fio_u2buf64_be(mac_out, ghash_y[0]);
+  fio_u2buf64_be(mac_out + 8, ghash_y[1]);
+  {
+    uint64_t t0, t1, j0, j1;
+    FIO_MEMCPY(&t0, mac_out, 8);
+    FIO_MEMCPY(&j0, j0_enc, 8);
+    t0 ^= j0;
+    FIO_MEMCPY(mac_out, &t0, 8);
+    FIO_MEMCPY(&t1, mac_out + 8, 8);
+    FIO_MEMCPY(&j1, j0_enc + 8, 8);
+    t1 ^= j1;
+    FIO_MEMCPY(mac_out + 8, &t1, 8);
+  }
+}
+
+/**
+ * Fused AES-GCM encrypt for small messages (≤ 64 bytes).
+ * Batches H + J0 + first 2 CTR blocks in one 4-block engine call.
+ * For ≤ 32 bytes: 1 engine call total. For 33-64 bytes: 2 engine calls.
+ * Returns via enc_fn pointer pattern for code sharing between 128/256.
+ */
+FIO_SFUNC void fio___aes_bs_gcm_enc_small(void *restrict mac,
+                                          uint8_t *restrict p,
+                                          size_t len,
+                                          const void *ad,
+                                          size_t adlen,
+                                          unsigned num_rounds,
+                                          const uint64_t *comp_skey,
+                                          const void *nonce) {
+  fio___ghash_ctmul_key_s hk;
+  uint64_t ghash_y[2] = {0, 0};
+  uint32_t nonce_w[3];
+  uint8_t j0_enc[16];
+  uint8_t ks[96]; /* 32 from init + up to 64 from second call */
+
+  /* Init + first 2 CTR blocks in one engine call (no sk_exp4 needed) */
+  fio___aes_bs_gcm_init_with_ctr(&hk,
+                                 j0_enc,
+                                 ks,
+                                 nonce_w,
+                                 num_rounds,
+                                 comp_skey,
+                                 nonce);
+
+  /* If we need more than 32 bytes of keystream, generate CTR[4..7] */
+  if (len > 32) {
+    uint32_t w4[16];
+    uint64_t q[8];
+    fio___aes_bs_ctr_prepare4(w4, nonce_w, 4);
+    /* Use on-the-fly key expansion for second engine call too */
+    for (unsigned b = 0; b < 4; ++b)
+      fio___aes_bs_interleave_in(&q[b], &q[b + 4], w4 + b * 4);
+    fio___aes_bs_ortho(q);
+    fio___aes_bs_encrypt4_comp(num_rounds, comp_skey, q);
+    fio___aes_bs_ortho(q);
+    for (unsigned b = 0; b < 4; ++b) {
+      uint32_t out_w[4];
+      fio___aes_bs_interleave_out(out_w, q[b], q[b + 4]);
+      fio_u2buf32_le(ks + 32 + b * 16, out_w[0]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 4, out_w[1]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 8, out_w[2]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 12, out_w[3]);
+    }
+  }
+
+  /* GHASH AAD */
+  fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+
+  /* XOR keystream with data + GHASH ciphertext */
+  {
+    size_t full_blocks = len & ~(size_t)15;
+    for (size_t i = 0; i < full_blocks; i += 8) {
+      uint64_t d, k;
+      FIO_MEMCPY(&d, p + i, 8);
+      FIO_MEMCPY(&k, ks + i, 8);
+      d ^= k;
+      FIO_MEMCPY(p + i, &d, 8);
+    }
+    for (size_t i = 0; i < full_blocks; i += 16)
+      fio___ghash_ctmul(ghash_y, p + i, &hk);
+
+    size_t tail = len - full_blocks;
+    if (tail > 0) {
+      for (size_t i = 0; i < tail; ++i)
+        p[full_blocks + i] ^= ks[full_blocks + i];
+      uint8_t block[16] = {0};
+      FIO_MEMCPY(block, p + full_blocks, tail);
+      fio___ghash_ctmul(ghash_y, block, &hk);
+    }
+  }
+
+  /* Finalize tag */
+  fio___aes_bs_gcm_finalize((uint8_t *)mac,
+                            ghash_y,
+                            &hk,
+                            j0_enc,
+                            (uint64_t)adlen,
+                            (uint64_t)len);
+
+  fio_secure_zero(&hk, sizeof(hk));
+  fio_secure_zero(j0_enc, sizeof(j0_enc));
+  fio_secure_zero(ks, sizeof(ks));
+}
+
+/**
+ * Fused AES-GCM decrypt for small messages (≤ 64 bytes).
+ * Same batching strategy as encrypt.
+ */
+FIO_SFUNC int fio___aes_bs_gcm_dec_small(void *restrict mac,
+                                         uint8_t *restrict p,
+                                         size_t len,
+                                         const void *ad,
+                                         size_t adlen,
+                                         unsigned num_rounds,
+                                         const uint64_t *comp_skey,
+                                         const void *nonce) {
+  fio___ghash_ctmul_key_s hk;
+  uint64_t ghash_y[2] = {0, 0};
+  uint32_t nonce_w[3];
+  uint8_t j0_enc[16];
+  uint8_t ks[96];
+  int result = 0;
+
+  /* Init + first 2 CTR blocks in one engine call (no sk_exp4 needed) */
+  fio___aes_bs_gcm_init_with_ctr(&hk,
+                                 j0_enc,
+                                 ks,
+                                 nonce_w,
+                                 num_rounds,
+                                 comp_skey,
+                                 nonce);
+
+  /* GHASH AAD + ciphertext + length block, then verify tag */
+  fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+  fio___aes_bs_ghash(ghash_y, &hk, p, len);
+
+  {
+    uint8_t computed_mac[16];
+    fio___aes_bs_gcm_finalize(computed_mac,
+                              ghash_y,
+                              &hk,
+                              j0_enc,
+                              (uint64_t)adlen,
+                              (uint64_t)len);
+    if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+      result = -1;
+      goto cleanup;
+    }
+  }
+
+  /* Generate remaining keystream if needed */
+  if (len > 32) {
+    uint32_t w4[16];
+    uint64_t q[8];
+    fio___aes_bs_ctr_prepare4(w4, nonce_w, 4);
+    for (unsigned b = 0; b < 4; ++b)
+      fio___aes_bs_interleave_in(&q[b], &q[b + 4], w4 + b * 4);
+    fio___aes_bs_ortho(q);
+    fio___aes_bs_encrypt4_comp(num_rounds, comp_skey, q);
+    fio___aes_bs_ortho(q);
+    for (unsigned b = 0; b < 4; ++b) {
+      uint32_t out_w[4];
+      fio___aes_bs_interleave_out(out_w, q[b], q[b + 4]);
+      fio_u2buf32_le(ks + 32 + b * 16, out_w[0]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 4, out_w[1]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 8, out_w[2]);
+      fio_u2buf32_le(ks + 32 + b * 16 + 12, out_w[3]);
+    }
+  }
+
+  /* XOR keystream with ciphertext to get plaintext */
+  {
+    size_t full_blocks = len & ~(size_t)15;
+    for (size_t i = 0; i < full_blocks; i += 8) {
+      uint64_t d, k;
+      FIO_MEMCPY(&d, p + i, 8);
+      FIO_MEMCPY(&k, ks + i, 8);
+      d ^= k;
+      FIO_MEMCPY(p + i, &d, 8);
+    }
+    size_t tail = len - full_blocks;
+    if (tail > 0) {
+      for (size_t i = 0; i < tail; ++i)
+        p[full_blocks + i] ^= ks[full_blocks + i];
+    }
+  }
+
+cleanup:
+  fio_secure_zero(&hk, sizeof(hk));
+  fio_secure_zero(j0_enc, sizeof(j0_enc));
+  fio_secure_zero(ks, sizeof(ks));
+  return result;
 }
 
 SFUNC void fio_aes128_gcm_enc(void *restrict mac,
@@ -2335,67 +3835,58 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
                               size_t adlen,
                               const void *key,
                               const void *nonce) {
-  uint32_t rk[44];
-  uint8_t h[16] = {0};
-  fio___gcm_htable_s htbl;
-  uint8_t j0[16];
-  uint8_t counter[16];
-  uint8_t keystream[16];
-  uint64_t tag[2] = {0, 0};
-  uint8_t len_block[16];
-  uint8_t *p = (uint8_t *)data;
-  size_t orig_len = len;
+  uint64_t comp_skey[22];
+  fio___aes_bs_key_expand128(comp_skey, (const uint8_t *)key);
 
-  fio___aes128_key_expand(rk, (const uint8_t *)key);
-  fio___aes128_encrypt_block(h, h, rk);
-  fio___gcm_precompute_htable(&htbl, h);
-
-  FIO_MEMCPY(j0, nonce, 12);
-  j0[12] = 0;
-  j0[13] = 0;
-  j0[14] = 0;
-  j0[15] = 1;
-
-  fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
-
-  fio_memcpy16(counter, j0);
-  while (len >= 16) {
-    fio___gcm_inc_counter(counter);
-    fio___aes128_encrypt_block(keystream, counter, rk);
-    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
-    for (size_t i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
-    fio___gcm_ghash_block(tag, p, &htbl);
-    p += 16;
-    len -= 16;
-  }
-  if (len > 0) {
-    fio___gcm_inc_counter(counter);
-    fio___aes128_encrypt_block(keystream, counter, rk);
-    for (size_t i = 0; i < len; ++i)
-      p[i] ^= keystream[i];
-    uint8_t block[16] = {0};
-    FIO_MEMCPY(block, p, len);
-    fio___gcm_ghash_block(tag, block, &htbl);
+  if (len <= 64 && adlen <= 16) {
+    fio___aes_bs_gcm_enc_small(mac,
+                               (uint8_t *)data,
+                               len,
+                               ad,
+                               adlen,
+                               10,
+                               comp_skey,
+                               nonce);
+    fio_secure_zero(comp_skey, sizeof(comp_skey));
+    return;
   }
 
-  FIO_MEMSET(len_block, 0, 16);
-  fio_u2buf64_be(len_block, (uint64_t)adlen * 8);
-  fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  fio___gcm_ghash_block(tag, len_block, &htbl);
+  {
+    uint64_t sk_exp4[11 * 8]; /* (10+1) rounds × 8 */
+    fio___ghash_ctmul_key_s hk;
+    uint64_t ghash_y[2] = {0, 0};
+    uint32_t nonce_w[3];
+    uint8_t j0_enc[16];
+    uint32_t ctr;
 
-  fio___aes128_encrypt_block(keystream, j0, rk);
-  fio_u2buf64_be((uint8_t *)mac, tag[0]);
-  fio_u2buf64_be((uint8_t *)mac + 8, tag[1]);
-  for (int i = 0; i < 16; ++i)
-    ((uint8_t *)mac)[i] ^= keystream[i];
-  /* Clear sensitive data */
-  fio_secure_zero(rk, sizeof(rk));
-  fio_secure_zero(&htbl, sizeof(htbl));
-  fio_secure_zero(j0, sizeof(j0));
-  fio_secure_zero(counter, sizeof(counter));
-  fio_secure_zero(keystream, sizeof(keystream));
-  fio_secure_zero(tag, sizeof(tag));
+    fio___aes_bs_gcm_init(sk_exp4, &hk, j0_enc, nonce_w, 10, comp_skey, nonce);
+
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+
+    ctr = 2;
+    fio___aes_bs_gcm_ctr_process((uint8_t *)data,
+                                 len,
+                                 nonce_w,
+                                 &ctr,
+                                 10,
+                                 sk_exp4,
+                                 ghash_y,
+                                 &hk,
+                                 1);
+
+    fio___aes_bs_gcm_finalize((uint8_t *)mac,
+                              ghash_y,
+                              &hk,
+                              j0_enc,
+                              (uint64_t)adlen,
+                              (uint64_t)len);
+
+    fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+    fio_secure_zero(&hk, sizeof(hk));
+    fio_secure_zero(j0_enc, sizeof(j0_enc));
+  }
+
+  fio_secure_zero(comp_skey, sizeof(comp_skey));
 }
 
 SFUNC void fio_aes256_gcm_enc(void *restrict mac,
@@ -2405,67 +3896,58 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
                               size_t adlen,
                               const void *key,
                               const void *nonce) {
-  uint32_t rk[60];
-  uint8_t h[16] = {0};
-  fio___gcm_htable_s htbl;
-  uint8_t j0[16];
-  uint8_t counter[16];
-  uint8_t keystream[16];
-  uint64_t tag[2] = {0, 0};
-  uint8_t len_block[16];
-  uint8_t *p = (uint8_t *)data;
-  size_t orig_len = len;
+  uint64_t comp_skey[30];
+  fio___aes_bs_key_expand256(comp_skey, (const uint8_t *)key);
 
-  fio___aes256_key_expand(rk, (const uint8_t *)key);
-  fio___aes256_encrypt_block(h, h, rk);
-  fio___gcm_precompute_htable(&htbl, h);
-
-  FIO_MEMCPY(j0, nonce, 12);
-  j0[12] = 0;
-  j0[13] = 0;
-  j0[14] = 0;
-  j0[15] = 1;
-
-  fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
-
-  fio_memcpy16(counter, j0);
-  while (len >= 16) {
-    fio___gcm_inc_counter(counter);
-    fio___aes256_encrypt_block(keystream, counter, rk);
-    /* XOR 16 bytes - use byte-by-byte to avoid alignment issues */
-    for (size_t i = 0; i < 16; ++i)
-      p[i] ^= keystream[i];
-    fio___gcm_ghash_block(tag, p, &htbl);
-    p += 16;
-    len -= 16;
-  }
-  if (len > 0) {
-    fio___gcm_inc_counter(counter);
-    fio___aes256_encrypt_block(keystream, counter, rk);
-    for (size_t i = 0; i < len; ++i)
-      p[i] ^= keystream[i];
-    uint8_t block[16] = {0};
-    FIO_MEMCPY(block, p, len);
-    fio___gcm_ghash_block(tag, block, &htbl);
+  if (len <= 64 && adlen <= 16) {
+    fio___aes_bs_gcm_enc_small(mac,
+                               (uint8_t *)data,
+                               len,
+                               ad,
+                               adlen,
+                               14,
+                               comp_skey,
+                               nonce);
+    fio_secure_zero(comp_skey, sizeof(comp_skey));
+    return;
   }
 
-  FIO_MEMSET(len_block, 0, 16);
-  fio_u2buf64_be(len_block, (uint64_t)adlen * 8);
-  fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  fio___gcm_ghash_block(tag, len_block, &htbl);
+  {
+    uint64_t sk_exp4[15 * 8]; /* (14+1) rounds × 8 */
+    fio___ghash_ctmul_key_s hk;
+    uint64_t ghash_y[2] = {0, 0};
+    uint32_t nonce_w[3];
+    uint8_t j0_enc[16];
+    uint32_t ctr;
 
-  fio___aes256_encrypt_block(keystream, j0, rk);
-  fio_u2buf64_be((uint8_t *)mac, tag[0]);
-  fio_u2buf64_be((uint8_t *)mac + 8, tag[1]);
-  for (int i = 0; i < 16; ++i)
-    ((uint8_t *)mac)[i] ^= keystream[i];
-  /* Clear sensitive data */
-  fio_secure_zero(rk, sizeof(rk));
-  fio_secure_zero(&htbl, sizeof(htbl));
-  fio_secure_zero(j0, sizeof(j0));
-  fio_secure_zero(counter, sizeof(counter));
-  fio_secure_zero(keystream, sizeof(keystream));
-  fio_secure_zero(tag, sizeof(tag));
+    fio___aes_bs_gcm_init(sk_exp4, &hk, j0_enc, nonce_w, 14, comp_skey, nonce);
+
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+
+    ctr = 2;
+    fio___aes_bs_gcm_ctr_process((uint8_t *)data,
+                                 len,
+                                 nonce_w,
+                                 &ctr,
+                                 14,
+                                 sk_exp4,
+                                 ghash_y,
+                                 &hk,
+                                 1);
+
+    fio___aes_bs_gcm_finalize((uint8_t *)mac,
+                              ghash_y,
+                              &hk,
+                              j0_enc,
+                              (uint64_t)adlen,
+                              (uint64_t)len);
+
+    fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+    fio_secure_zero(&hk, sizeof(hk));
+    fio_secure_zero(j0_enc, sizeof(j0_enc));
+  }
+
+  fio_secure_zero(comp_skey, sizeof(comp_skey));
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -2475,79 +3957,70 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
-  uint32_t rk[44];
-  uint8_t h[16] = {0};
-  fio___gcm_htable_s htbl;
-  uint8_t j0[16];
-  uint8_t counter[16];
-  uint8_t keystream[16];
-  uint64_t tag[2] = {0, 0};
-  uint8_t len_block[16];
-  uint8_t computed_mac[16];
-  uint8_t *p = (uint8_t *)data;
-  size_t orig_len = len;
+  uint64_t comp_skey[22];
+  fio___aes_bs_key_expand128(comp_skey, (const uint8_t *)key);
 
-  fio___aes128_key_expand(rk, (const uint8_t *)key);
-  fio___aes128_encrypt_block(h, h, rk);
-  fio___gcm_precompute_htable(&htbl, h);
-
-  FIO_MEMCPY(j0, nonce, 12);
-  j0[12] = 0;
-  j0[13] = 0;
-  j0[14] = 0;
-  j0[15] = 1;
-
-  fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
-  fio___gcm_ghash(tag, &htbl, p, orig_len);
-
-  FIO_MEMSET(len_block, 0, 16);
-  fio_u2buf64_be(len_block, (uint64_t)adlen * 8);
-  fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  fio___gcm_ghash_block(tag, len_block, &htbl);
-
-  fio___aes128_encrypt_block(keystream, j0, rk);
-  fio_u2buf64_be(computed_mac, tag[0]);
-  fio_u2buf64_be(computed_mac + 8, tag[1]);
-  for (int i = 0; i < 16; ++i)
-    computed_mac[i] ^= keystream[i];
-
-  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
-    fio_secure_zero(computed_mac, sizeof(computed_mac));
-    fio_secure_zero(rk, sizeof(rk));
-    fio_secure_zero(&htbl, sizeof(htbl));
-    fio_secure_zero(j0, sizeof(j0));
-    fio_secure_zero(counter, sizeof(counter));
-    fio_secure_zero(keystream, sizeof(keystream));
-    fio_secure_zero(tag, sizeof(tag));
-    return -1;
+  if (len <= 64 && adlen <= 16) {
+    int ret = fio___aes_bs_gcm_dec_small(mac,
+                                         (uint8_t *)data,
+                                         len,
+                                         ad,
+                                         adlen,
+                                         10,
+                                         comp_skey,
+                                         nonce);
+    fio_secure_zero(comp_skey, sizeof(comp_skey));
+    return ret;
   }
-  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  fio_memcpy16(counter, j0);
-  while (len >= 16) {
-    fio___gcm_inc_counter(counter);
-    fio___aes128_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
-    p += 16;
-    len -= 16;
+  {
+    uint64_t sk_exp4[11 * 8];
+    fio___ghash_ctmul_key_s hk;
+    uint64_t ghash_y[2] = {0, 0};
+    uint32_t nonce_w[3];
+    uint8_t j0_enc[16];
+    uint32_t ctr;
+
+    fio___aes_bs_gcm_init(sk_exp4, &hk, j0_enc, nonce_w, 10, comp_skey, nonce);
+
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)data, len);
+
+    {
+      uint8_t computed_mac[16];
+      fio___aes_bs_gcm_finalize(computed_mac,
+                                ghash_y,
+                                &hk,
+                                j0_enc,
+                                (uint64_t)adlen,
+                                (uint64_t)len);
+      if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+        fio_secure_zero(computed_mac, sizeof(computed_mac));
+        fio_secure_zero(comp_skey, sizeof(comp_skey));
+        fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+        fio_secure_zero(&hk, sizeof(hk));
+        fio_secure_zero(j0_enc, sizeof(j0_enc));
+        return -1;
+      }
+    }
+
+    ctr = 2;
+    fio___aes_bs_gcm_ctr_process((uint8_t *)data,
+                                 len,
+                                 nonce_w,
+                                 &ctr,
+                                 10,
+                                 sk_exp4,
+                                 ghash_y,
+                                 &hk,
+                                 0);
+
+    fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+    fio_secure_zero(&hk, sizeof(hk));
+    fio_secure_zero(j0_enc, sizeof(j0_enc));
   }
-  if (len > 0) {
-    fio___gcm_inc_counter(counter);
-    fio___aes128_encrypt_block(keystream, counter, rk);
-    for (size_t i = 0; i < len; ++i)
-      p[i] ^= keystream[i];
-  }
-  /* Clear sensitive data */
-  fio_secure_zero(rk, sizeof(rk));
-  fio_secure_zero(&htbl, sizeof(htbl));
-  fio_secure_zero(j0, sizeof(j0));
-  fio_secure_zero(counter, sizeof(counter));
-  fio_secure_zero(keystream, sizeof(keystream));
-  fio_secure_zero(tag, sizeof(tag));
+
+  fio_secure_zero(comp_skey, sizeof(comp_skey));
   return 0;
 }
 
@@ -2558,79 +4031,70 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
-  uint32_t rk[60];
-  uint8_t h[16] = {0};
-  fio___gcm_htable_s htbl;
-  uint8_t j0[16];
-  uint8_t counter[16];
-  uint8_t keystream[16];
-  uint64_t tag[2] = {0, 0};
-  uint8_t len_block[16];
-  uint8_t computed_mac[16];
-  uint8_t *p = (uint8_t *)data;
-  size_t orig_len = len;
+  uint64_t comp_skey[30];
+  fio___aes_bs_key_expand256(comp_skey, (const uint8_t *)key);
 
-  fio___aes256_key_expand(rk, (const uint8_t *)key);
-  fio___aes256_encrypt_block(h, h, rk);
-  fio___gcm_precompute_htable(&htbl, h);
-
-  FIO_MEMCPY(j0, nonce, 12);
-  j0[12] = 0;
-  j0[13] = 0;
-  j0[14] = 0;
-  j0[15] = 1;
-
-  fio___gcm_ghash(tag, &htbl, (const uint8_t *)ad, adlen);
-  fio___gcm_ghash(tag, &htbl, p, orig_len);
-
-  FIO_MEMSET(len_block, 0, 16);
-  fio_u2buf64_be(len_block, (uint64_t)adlen * 8);
-  fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  fio___gcm_ghash_block(tag, len_block, &htbl);
-
-  fio___aes256_encrypt_block(keystream, j0, rk);
-  fio_u2buf64_be(computed_mac, tag[0]);
-  fio_u2buf64_be(computed_mac + 8, tag[1]);
-  for (int i = 0; i < 16; ++i)
-    computed_mac[i] ^= keystream[i];
-
-  if (!fio_ct_is_eq(computed_mac, mac, 16)) {
-    fio_secure_zero(computed_mac, sizeof(computed_mac));
-    fio_secure_zero(rk, sizeof(rk));
-    fio_secure_zero(&htbl, sizeof(htbl));
-    fio_secure_zero(j0, sizeof(j0));
-    fio_secure_zero(counter, sizeof(counter));
-    fio_secure_zero(keystream, sizeof(keystream));
-    fio_secure_zero(tag, sizeof(tag));
-    return -1;
+  if (len <= 64 && adlen <= 16) {
+    int ret = fio___aes_bs_gcm_dec_small(mac,
+                                         (uint8_t *)data,
+                                         len,
+                                         ad,
+                                         adlen,
+                                         14,
+                                         comp_skey,
+                                         nonce);
+    fio_secure_zero(comp_skey, sizeof(comp_skey));
+    return ret;
   }
-  fio_secure_zero(computed_mac, sizeof(computed_mac));
 
-  fio_memcpy16(counter, j0);
-  while (len >= 16) {
-    fio___gcm_inc_counter(counter);
-    fio___aes256_encrypt_block(keystream, counter, rk);
-    /* Use 64-bit XOR for better performance */
-    uint64_t *p64 = (uint64_t *)p;
-    uint64_t *ks64 = (uint64_t *)keystream;
-    p64[0] ^= ks64[0];
-    p64[1] ^= ks64[1];
-    p += 16;
-    len -= 16;
+  {
+    uint64_t sk_exp4[15 * 8];
+    fio___ghash_ctmul_key_s hk;
+    uint64_t ghash_y[2] = {0, 0};
+    uint32_t nonce_w[3];
+    uint8_t j0_enc[16];
+    uint32_t ctr;
+
+    fio___aes_bs_gcm_init(sk_exp4, &hk, j0_enc, nonce_w, 14, comp_skey, nonce);
+
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)ad, adlen);
+    fio___aes_bs_ghash(ghash_y, &hk, (const uint8_t *)data, len);
+
+    {
+      uint8_t computed_mac[16];
+      fio___aes_bs_gcm_finalize(computed_mac,
+                                ghash_y,
+                                &hk,
+                                j0_enc,
+                                (uint64_t)adlen,
+                                (uint64_t)len);
+      if (!fio_ct_is_eq(computed_mac, mac, 16)) {
+        fio_secure_zero(computed_mac, sizeof(computed_mac));
+        fio_secure_zero(comp_skey, sizeof(comp_skey));
+        fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+        fio_secure_zero(&hk, sizeof(hk));
+        fio_secure_zero(j0_enc, sizeof(j0_enc));
+        return -1;
+      }
+    }
+
+    ctr = 2;
+    fio___aes_bs_gcm_ctr_process((uint8_t *)data,
+                                 len,
+                                 nonce_w,
+                                 &ctr,
+                                 14,
+                                 sk_exp4,
+                                 ghash_y,
+                                 &hk,
+                                 0);
+
+    fio_secure_zero(sk_exp4, sizeof(sk_exp4));
+    fio_secure_zero(&hk, sizeof(hk));
+    fio_secure_zero(j0_enc, sizeof(j0_enc));
   }
-  if (len > 0) {
-    fio___gcm_inc_counter(counter);
-    fio___aes256_encrypt_block(keystream, counter, rk);
-    for (size_t i = 0; i < len; ++i)
-      p[i] ^= keystream[i];
-  }
-  /* Clear sensitive data */
-  fio_secure_zero(rk, sizeof(rk));
-  fio_secure_zero(&htbl, sizeof(htbl));
-  fio_secure_zero(j0, sizeof(j0));
-  fio_secure_zero(counter, sizeof(counter));
-  fio_secure_zero(keystream, sizeof(keystream));
-  fio_secure_zero(tag, sizeof(tag));
+
+  fio_secure_zero(comp_skey, sizeof(comp_skey));
   return 0;
 }
 

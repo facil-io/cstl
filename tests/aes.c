@@ -56,22 +56,15 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing AES-GCM implementation");
 #if FIO___HAS_X86_AES_INTRIN
-  FIO_LOG_DDEBUG("(using x86 AES-NI)");
 #elif FIO___HAS_ARM_AES_INTRIN
-  FIO_LOG_DDEBUG("(using ARM Crypto Extensions)");
-
 #else
-  FIO_LOG_DDEBUG("(using software fallback)");
 #endif
 
   /* **************************************************************************
    * Test AES-128-GCM (NIST SP 800-38D test vectors)
    * *************************************************************************/
   {
-    FIO_LOG_DDEBUG("Testing AES-128-GCM (NIST test vectors)");
-
     /* Test Case 1: Empty plaintext, no AAD */
     {
       uint8_t key[16] = {0};
@@ -318,8 +311,6 @@ int main(void) {
    * Test AES-256-GCM (NIST SP 800-38D test vectors)
    * *************************************************************************/
   {
-    FIO_LOG_DDEBUG("Testing AES-256-GCM (NIST test vectors)");
-
     /* Test Case 13: Empty plaintext, no AAD (AES-256) */
     {
       uint8_t key[32] = {0};
@@ -542,7 +533,6 @@ int main(void) {
    * Test authentication failure detection
    * *************************************************************************/
   {
-    FIO_LOG_DDEBUG("Testing AES-GCM authentication failure detection");
     uint8_t key[16] = {0};
     uint8_t nonce[12] = {0};
     uint8_t plaintext[16] = {0};
@@ -566,7 +556,6 @@ int main(void) {
    * Test roundtrip with random data
    * *************************************************************************/
   {
-    FIO_LOG_DDEBUG("Testing AES-GCM roundtrip with random data");
     uint8_t key[32];
     uint8_t nonce[12];
     uint8_t aad[64];
@@ -607,7 +596,6 @@ int main(void) {
    * Test various message lengths
    * *************************************************************************/
   {
-    FIO_LOG_DDEBUG("Testing AES-GCM with various message lengths");
     uint8_t key[16] = {0x00,
                        0x01,
                        0x02,
@@ -675,17 +663,11 @@ int main(void) {
                  len);
     }
   }
-
-  FIO_LOG_DDEBUG("AES-GCM tests passed!");
-
   /* **************************************************************************
    * Edge Case Tests for AES-GCM
    * *************************************************************************/
-  FIO_LOG_DDEBUG("Testing AES-GCM edge cases...");
-
   /* Test: Single byte plaintext */
   {
-    FIO_LOG_DDEBUG("  Testing single byte plaintext...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[1] = {0x42};
@@ -704,7 +686,6 @@ int main(void) {
 
   /* Test: Plaintext one byte before block boundary (15 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing 15-byte plaintext...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[15];
@@ -724,7 +705,6 @@ int main(void) {
 
   /* Test: Plaintext one byte after block boundary (17 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing 17-byte plaintext...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[17];
@@ -744,7 +724,6 @@ int main(void) {
 
   /* Test: Both plaintext and AAD empty */
   {
-    FIO_LOG_DDEBUG("  Testing both plaintext and AAD empty...");
     uint8_t key[16] = {0};
     uint8_t nonce[12] = {0};
     uint8_t mac1[16], mac2[16];
@@ -773,7 +752,6 @@ int main(void) {
 
   /* Test: AAD at various sizes */
   {
-    FIO_LOG_DDEBUG("  Testing various AAD sizes...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -801,7 +779,6 @@ int main(void) {
 
   /* Test: Tag verification failure (corrupted ciphertext) */
   {
-    FIO_LOG_DDEBUG("  Testing corrupted ciphertext detection...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -824,7 +801,6 @@ int main(void) {
 
   /* Test: Tag verification failure (corrupted AAD) */
   {
-    FIO_LOG_DDEBUG("  Testing corrupted AAD detection...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -849,7 +825,6 @@ int main(void) {
 
   /* Test: Wrong key decryption */
   {
-    FIO_LOG_DDEBUG("  Testing wrong key detection...");
     uint8_t key1[16], key2[16];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -870,7 +845,6 @@ int main(void) {
 
   /* Test: Large plaintext (16KB - TLS max) */
   {
-    FIO_LOG_DDEBUG("  Testing large plaintext (16KB)...");
     uint8_t key[32];
     uint8_t nonce[12];
     size_t len = 16384;
@@ -897,7 +871,6 @@ int main(void) {
 
   /* Test: Deterministic encryption */
   {
-    FIO_LOG_DDEBUG("  Testing deterministic encryption...");
     uint8_t key[16] = {0x01,
                        0x02,
                        0x03,
@@ -943,7 +916,6 @@ int main(void) {
 
   /* Test: All-zero key and nonce */
   {
-    FIO_LOG_DDEBUG("  Testing all-zero key and nonce...");
     uint8_t key[16] = {0};
     uint8_t nonce[12] = {0};
     uint8_t plaintext[32];
@@ -962,7 +934,6 @@ int main(void) {
 
   /* Test: All-ones key and nonce */
   {
-    FIO_LOG_DDEBUG("  Testing all-ones key and nonce...");
     uint8_t key[32];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -983,7 +954,6 @@ int main(void) {
 
   /* Test: Flip each byte of tag to ensure detection */
   {
-    FIO_LOG_DDEBUG("  Testing tag bit-flip detection...");
     uint8_t key[16];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -1011,7 +981,6 @@ int main(void) {
 
   /* Test: AES-128 vs AES-256 produce different results */
   {
-    FIO_LOG_DDEBUG("  Testing AES-128 vs AES-256 produce different results...");
     uint8_t key[32];
     uint8_t nonce[12];
     uint8_t plaintext[32];
@@ -1034,9 +1003,6 @@ int main(void) {
     FIO_ASSERT(memcmp(mac128, mac256, 16) != 0,
                "AES-128 and AES-256 should produce different MACs");
   }
-
-  FIO_LOG_DDEBUG("AES-GCM edge case tests passed!");
-
   /* Performance tests moved to tests/performance-crypto.c */
 
   return 0;

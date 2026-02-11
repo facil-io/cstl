@@ -58,14 +58,11 @@ FIO_SFUNC void test_mul_against_long(const uint64_t *a,
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing Karatsuba multiplication...");
-
   /* Test 1: Simple 8-word (512-bit) multiplication */
   {
     uint64_t a[8] = {1, 0, 0, 0, 0, 0, 0, 0};
     uint64_t b[8] = {2, 0, 0, 0, 0, 0, 0, 0};
     test_mul_against_long(a, b, 8, "1 * 2 (512-bit)");
-    FIO_LOG_DDEBUG("  [PASS] 1 * 2 (512-bit)");
   }
 
   /* Test 2: Max value in low word */
@@ -73,7 +70,6 @@ int main(void) {
     uint64_t a[8] = {~0ULL, 0, 0, 0, 0, 0, 0, 0};
     uint64_t b[8] = {~0ULL, 0, 0, 0, 0, 0, 0, 0};
     test_mul_against_long(a, b, 8, "max_u64 * max_u64 (512-bit)");
-    FIO_LOG_DDEBUG("  [PASS] max_u64 * max_u64 (512-bit)");
   }
 
   /* Test 3: Full 512-bit numbers */
@@ -95,7 +91,6 @@ int main(void) {
                      0x0000000000000001ULL,
                      0x0000000000000002ULL};
     test_mul_against_long(a, b, 8, "full 512-bit numbers");
-    FIO_LOG_DDEBUG("  [PASS] full 512-bit numbers");
   }
 
   /* Test 4: 16-word (1024-bit) multiplication */
@@ -106,7 +101,6 @@ int main(void) {
       b[i] = 0xFEDCBA9876543210ULL ^ (i * 0x2222222222222222ULL);
     }
     test_mul_against_long(a, b, 16, "1024-bit multiplication");
-    FIO_LOG_DDEBUG("  [PASS] 1024-bit multiplication");
   }
 
   /* Test 5: Random values */
@@ -117,7 +111,6 @@ int main(void) {
       fio_rand_bytes(b, sizeof(b));
       test_mul_against_long(a, b, 8, "random 512-bit");
     }
-    FIO_LOG_DDEBUG("  [PASS] 100 random 512-bit multiplications");
   }
 
   /* Test 6: Random 1024-bit values */
@@ -128,7 +121,6 @@ int main(void) {
       fio_rand_bytes(b, sizeof(b));
       test_mul_against_long(a, b, 16, "random 1024-bit");
     }
-    FIO_LOG_DDEBUG("  [PASS] 50 random 1024-bit multiplications");
   }
 
   /* Test 7: Edge case - all ones */
@@ -139,7 +131,6 @@ int main(void) {
       b[i] = ~0ULL;
     }
     test_mul_against_long(a, b, 8, "all-ones 512-bit");
-    FIO_LOG_DDEBUG("  [PASS] all-ones 512-bit");
   }
 
   /* Test 8: Edge case - alternating bits */
@@ -150,7 +141,6 @@ int main(void) {
       b[i] = 0x5555555555555555ULL;
     }
     test_mul_against_long(a, b, 8, "alternating bits 512-bit");
-    FIO_LOG_DDEBUG("  [PASS] alternating bits 512-bit");
   }
 
   /* Test 9: Verify that smaller sizes still work (use long mul) */
@@ -164,7 +154,6 @@ int main(void) {
                      0xCCCCCCCCCCCCCCCCULL,
                      0xDDDDDDDDDDDDDDDDULL};
     test_mul_against_long(a, b, 4, "256-bit (should use long mul)");
-    FIO_LOG_DDEBUG("  [PASS] 256-bit multiplication (long mul path)");
   }
 
   /* Test 10: 2048-bit multiplication */
@@ -173,9 +162,6 @@ int main(void) {
     fio_rand_bytes(a, sizeof(a));
     fio_rand_bytes(b, sizeof(b));
     test_mul_against_long(a, b, 32, "2048-bit multiplication");
-    FIO_LOG_DDEBUG("  [PASS] 2048-bit multiplication");
   }
-
-  FIO_LOG_DDEBUG("All Karatsuba tests passed!");
   return 0;
 }

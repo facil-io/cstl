@@ -43,8 +43,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_build(void) {
   /* Test with invalid request_update value */
   len = fio_tls13_build_key_update(msg, sizeof(msg), 2);
   FIO_ASSERT(len == -1, "Should fail with invalid request_update value");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate build: PASSED");
 }
 
 /* *****************************************************************************
@@ -79,8 +77,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_parse(void) {
   uint8_t data3[] = {2};
   ret = fio_tls13_parse_key_update(data3, 1, &request_update);
   FIO_ASSERT(ret == -1, "Should fail with invalid value");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate parse: PASSED");
 }
 
 /* *****************************************************************************
@@ -112,8 +108,6 @@ FIO_SFUNC void fio___test_tls13_traffic_secret_update(void) {
   fio_tls13_update_traffic_secret(new_secret2, client_app_secret, 0);
   FIO_ASSERT(FIO_MEMCMP(new_secret, new_secret2, 32) == 0,
              "Traffic secret update should be deterministic");
-
-  FIO_LOG_DDEBUG("TLS 1.3 traffic secret update: PASSED");
 }
 
 /* *****************************************************************************
@@ -138,8 +132,6 @@ FIO_SFUNC void fio___test_tls13_traffic_secret_update_sha384(void) {
   /* Verify it's different from original */
   FIO_ASSERT(FIO_MEMCMP(new_secret, secret, 48) != 0,
              "SHA-384 new traffic secret should differ from original");
-
-  FIO_LOG_DDEBUG("TLS 1.3 traffic secret update (SHA-384): PASSED");
 }
 
 /* *****************************************************************************
@@ -196,8 +188,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_process(void) {
   /* Verify pending flag was set (because update_requested) */
   FIO_ASSERT(key_update_pending == 1,
              "key_update_pending should be set for update_requested");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate process: PASSED");
 }
 
 /* *****************************************************************************
@@ -231,8 +221,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_no_response(void) {
   /* Verify pending flag was NOT set */
   FIO_ASSERT(key_update_pending == 0,
              "key_update_pending should NOT be set for update_not_requested");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate no response: PASSED");
 }
 
 /* *****************************************************************************
@@ -290,8 +278,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_response(void) {
   /* Verify pending flag was cleared */
   FIO_ASSERT(key_update_pending == 0,
              "key_update_pending should be cleared after response");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate response: PASSED");
 }
 
 /* *****************************************************************************
@@ -356,8 +342,6 @@ FIO_SFUNC void fio___test_tls13_keyupdate_roundtrip(void) {
              "Should be KeyUpdate message");
   FIO_ASSERT(decrypted[4] == FIO_TLS13_KEY_UPDATE_NOT_REQUESTED,
              "Should be update_not_requested");
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate roundtrip: PASSED");
 }
 
 /* *****************************************************************************
@@ -401,35 +385,20 @@ FIO_SFUNC void fio___test_tls13_keyupdate_multiple(void) {
                  j);
     }
   }
-
-  FIO_LOG_DDEBUG("TLS 1.3 KeyUpdate multiple: PASSED");
 }
 
 /* *****************************************************************************
 Main test runner
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 KeyUpdate (RFC 8446 Section 4.6.3)...\n");
-
-  FIO_LOG_DDEBUG("=== KeyUpdate Message Tests ===");
   fio___test_tls13_keyupdate_build();
   fio___test_tls13_keyupdate_parse();
-
-  FIO_LOG_DDEBUG("=== Traffic Secret Update Tests ===");
   fio___test_tls13_traffic_secret_update();
   fio___test_tls13_traffic_secret_update_sha384();
-
-  FIO_LOG_DDEBUG("=== KeyUpdate Processing Tests ===");
   fio___test_tls13_keyupdate_process();
   fio___test_tls13_keyupdate_no_response();
-
-  FIO_LOG_DDEBUG("=== KeyUpdate Response Tests ===");
   fio___test_tls13_keyupdate_response();
   fio___test_tls13_keyupdate_roundtrip();
-
-  FIO_LOG_DDEBUG("=== Multiple KeyUpdate Tests ===");
   fio___test_tls13_keyupdate_multiple();
-
-  FIO_LOG_DDEBUG("\nAll TLS 1.3 KeyUpdate tests passed!");
   return 0;
 }

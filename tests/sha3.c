@@ -18,7 +18,6 @@ static void fio___test_sha3_256_empty(void) {
   fio_sha3_256(out, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32),
              "SHA3-256 empty string test failed");
-  FIO_LOG_DDEBUG("SHA3-256 empty string: PASSED");
 }
 
 static void fio___test_sha3_256_abc(void) {
@@ -30,7 +29,6 @@ static void fio___test_sha3_256_abc(void) {
   uint8_t out[32];
   fio_sha3_256(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "SHA3-256 'abc' test failed");
-  FIO_LOG_DDEBUG("SHA3-256 'abc': PASSED");
 }
 
 /* SHA3-512 test vectors */
@@ -47,7 +45,6 @@ static void fio___test_sha3_512_empty(void) {
   fio_sha3_512(out, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64),
              "SHA3-512 empty string test failed");
-  FIO_LOG_DDEBUG("SHA3-512 empty string: PASSED");
 }
 
 static void fio___test_sha3_512_abc(void) {
@@ -62,7 +59,6 @@ static void fio___test_sha3_512_abc(void) {
   uint8_t out[64];
   fio_sha3_512(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "SHA3-512 'abc' test failed");
-  FIO_LOG_DDEBUG("SHA3-512 'abc': PASSED");
 }
 
 /* SHA3-224 test */
@@ -75,7 +71,6 @@ static void fio___test_sha3_224_abc(void) {
   uint8_t out[28];
   fio_sha3_224(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 28), "SHA3-224 'abc' test failed");
-  FIO_LOG_DDEBUG("SHA3-224 'abc': PASSED");
 }
 
 /* SHA3-384 test */
@@ -89,7 +84,6 @@ static void fio___test_sha3_384_abc(void) {
   uint8_t out[48];
   fio_sha3_384(out, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 48), "SHA3-384 'abc' test failed");
-  FIO_LOG_DDEBUG("SHA3-384 'abc': PASSED");
 }
 
 /* SHAKE128 test */
@@ -102,7 +96,6 @@ static void fio___test_shake128(void) {
   uint8_t out[32];
   fio_shake128(out, 32, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "SHAKE128 'abc' test failed");
-  FIO_LOG_DDEBUG("SHAKE128 'abc' (32 bytes): PASSED");
 }
 
 /* SHAKE256 test */
@@ -118,7 +111,6 @@ static void fio___test_shake256(void) {
   uint8_t out[64];
   fio_shake256(out, 64, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "SHAKE256 'abc' test failed");
-  FIO_LOG_DDEBUG("SHAKE256 'abc' (64 bytes): PASSED");
 }
 
 /* Streaming test */
@@ -138,16 +130,12 @@ static void fio___test_sha3_streaming(void) {
   fio_sha3_finalize(&h, out2);
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "SHA3-256 streaming test failed");
-  FIO_LOG_DDEBUG("SHA3-256 streaming: PASSED");
 }
 
 /* Edge case tests */
 static void fio___test_sha3_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing SHA-3 edge cases...");
-
   /* Test: Single byte input */
   {
-    FIO_LOG_DDEBUG("  Testing single byte input...");
     uint8_t data[1] = {0x00};
     uint8_t out256[32], out512[64];
 
@@ -169,7 +157,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: Block boundary inputs (SHA3-256 rate = 136 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
     size_t test_sizes[] = {135, 136, 137, 271, 272, 273};
 
     for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); ++i) {
@@ -193,7 +180,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: Incremental vs one-shot with various chunk sizes */
   {
-    FIO_LOG_DDEBUG("  Testing incremental vs one-shot...");
     uint8_t data[1000];
     for (size_t i = 0; i < 1000; ++i)
       data[i] = (uint8_t)(i & 0xFF);
@@ -215,7 +201,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: Large input (1MB) */
   {
-    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
     size_t len = 1024 * 1024;
     uint8_t *data = (uint8_t *)malloc(len);
     uint8_t out[32];
@@ -242,7 +227,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: SHAKE variable output lengths */
   {
-    FIO_LOG_DDEBUG("  Testing SHAKE variable output lengths...");
     uint8_t data[] = "test input";
     size_t data_len = sizeof(data) - 1;
 
@@ -288,7 +272,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: SHAKE with 1 byte output */
   {
-    FIO_LOG_DDEBUG("  Testing SHAKE with 1 byte output...");
     uint8_t data[] = "test";
     uint8_t out128[1], out256[1];
 
@@ -296,13 +279,10 @@ static void fio___test_sha3_edge_cases(void) {
     fio_shake256(out256, 1, data, 4);
 
     /* Just verify it doesn't crash and produces output */
-    FIO_LOG_DDEBUG("    SHAKE128(1 byte) = 0x%02x", out128[0]);
-    FIO_LOG_DDEBUG("    SHAKE256(1 byte) = 0x%02x", out256[0]);
   }
 
   /* Test: All zeros input */
   {
-    FIO_LOG_DDEBUG("  Testing all-zeros input...");
     uint8_t data[64] = {0};
     uint8_t out[32];
 
@@ -317,7 +297,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: All ones input */
   {
-    FIO_LOG_DDEBUG("  Testing all-ones input...");
     uint8_t data[64];
     uint8_t out[32];
     FIO_MEMSET(data, 0xFF, 64);
@@ -333,7 +312,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: Different inputs produce different hashes */
   {
-    FIO_LOG_DDEBUG("  Testing different inputs produce different hashes...");
     uint8_t data1[32] = {0};
     uint8_t data2[32] = {0};
     data2[0] = 1;
@@ -348,7 +326,6 @@ static void fio___test_sha3_edge_cases(void) {
 
   /* Test: All SHA3 variants produce different outputs for same input */
   {
-    FIO_LOG_DDEBUG("  Testing all SHA3 variants produce different outputs...");
     uint8_t data[] = "test input for all variants";
     size_t data_len = sizeof(data) - 1;
 
@@ -366,41 +343,25 @@ static void fio___test_sha3_edge_cases(void) {
     FIO_ASSERT(FIO_MEMCMP(out384, out512, 28) != 0,
                "SHA3-384 and SHA3-512 should differ");
   }
-
-  FIO_LOG_DDEBUG("SHA-3 edge case tests passed!");
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing SHA-3 implementation...");
-
   /* SHA3 tests */
-  FIO_LOG_DDEBUG("=== SHA3-224 Tests ===");
   fio___test_sha3_224_abc();
-
-  FIO_LOG_DDEBUG("=== SHA3-256 Tests ===");
   fio___test_sha3_256_empty();
   fio___test_sha3_256_abc();
-
-  FIO_LOG_DDEBUG("=== SHA3-384 Tests ===");
   fio___test_sha3_384_abc();
-
-  FIO_LOG_DDEBUG("=== SHA3-512 Tests ===");
   fio___test_sha3_512_empty();
   fio___test_sha3_512_abc();
 
   /* SHAKE tests */
-  FIO_LOG_DDEBUG("=== SHAKE Tests ===");
   fio___test_shake128();
   fio___test_shake256();
 
   /* Streaming test */
-  FIO_LOG_DDEBUG("=== Streaming Tests ===");
   fio___test_sha3_streaming();
 
   /* Edge case tests */
-  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
   fio___test_sha3_edge_cases();
-
-  FIO_LOG_DDEBUG("All SHA-3 tests passed!");
   return 0;
 }

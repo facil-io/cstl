@@ -23,7 +23,6 @@ FIO_IFUNC struct tm *gmtime_r(const time_t *timep, struct tm *result) {
 #endif
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing facil.io fio_time2gm vs gmtime_r");
   struct tm tm1 = {0}, tm2 = {0};
   const time_t now = fio_time_real().tv_sec;
 #if FIO_OS_WIN
@@ -97,16 +96,12 @@ int main(void) {
     buf[47] = 0;
     FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc7231(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc7231:   %s", buf);
     FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2109(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc2109:   %s", buf);
     FIO_MEMSET(buf, 'X', 47);
     fio_time2rfc2822(buf, now);
-    FIO_LOG_DEBUG2("fio_time2rfc2822:   %s", buf);
     FIO_MEMSET(buf, 'X', 47);
     fio_time2log(buf, now);
-    FIO_LOG_DEBUG2("fio_time2log:       %s", buf);
   }
   {
     uint64_t start, stop;

@@ -12,8 +12,6 @@ Tests for handshake message building and parsing functions.
 Test: Handshake Header
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_handshake_header(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 handshake header...");
-
   /* Test write and parse round-trip */
   uint8_t header[4];
   fio_tls13_write_handshake_header(header, FIO_TLS13_HS_CLIENT_HELLO, 0x123456);
@@ -55,16 +53,12 @@ FIO_SFUNC void fio___test_tls13_handshake_header(void) {
   /* Test incomplete body */
   body = fio_tls13_parse_handshake_header(header, 4, &msg_type, &body_len);
   FIO_ASSERT(body == NULL, "Parse should fail with incomplete body");
-
-  FIO_LOG_DDEBUG("  PASS: Handshake header tests");
 }
 
 /* *****************************************************************************
 Test: ClientHello Building
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_client_hello(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ClientHello building...");
-
   uint8_t buffer[512];
   uint8_t random[32];
   uint8_t x25519_pubkey[32];
@@ -135,16 +129,12 @@ FIO_SFUNC void fio___test_tls13_client_hello(void) {
                                      suites,
                                      1);
   FIO_ASSERT(len > 0, "ClientHello with custom suites should succeed");
-
-  FIO_LOG_DDEBUG("  PASS: ClientHello building tests");
 }
 
 /* *****************************************************************************
 Test: ServerHello Parsing
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_server_hello(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ServerHello parsing...");
-
   /* Construct a minimal ServerHello */
   uint8_t sh_data[128];
   uint8_t *p = sh_data;
@@ -222,16 +212,12 @@ FIO_SFUNC void fio___test_tls13_server_hello(void) {
   ret = fio_tls13_parse_server_hello(&sh, sh_data, sh_len);
   FIO_ASSERT(ret == 0, "HRR parse should succeed");
   FIO_ASSERT(sh.is_hello_retry_request == 1, "Should detect HRR");
-
-  FIO_LOG_DDEBUG("  PASS: ServerHello parsing tests");
 }
 
 /* *****************************************************************************
 Test: EncryptedExtensions Parsing
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_encrypted_extensions(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 EncryptedExtensions parsing...");
-
   /* Empty extensions */
   uint8_t ee_empty[] = {0x00, 0x00}; /* extensions length = 0 */
   fio_tls13_encrypted_extensions_s ee;
@@ -254,16 +240,12 @@ FIO_SFUNC void fio___test_tls13_encrypted_extensions(void) {
   ret = fio_tls13_parse_encrypted_extensions(&ee, ee_sni, sizeof(ee_sni));
   FIO_ASSERT(ret == 0, "EE with SNI parse should succeed");
   FIO_ASSERT(ee.has_server_name == 1, "Should have SNI acknowledgment");
-
-  FIO_LOG_DDEBUG("  PASS: EncryptedExtensions parsing tests");
 }
 
 /* *****************************************************************************
 Test: Certificate Parsing
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_certificate(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Certificate parsing...");
-
   /* Construct minimal Certificate message */
   uint8_t cert_msg[64];
   uint8_t *p = cert_msg;
@@ -300,16 +282,12 @@ FIO_SFUNC void fio___test_tls13_certificate(void) {
   FIO_ASSERT(cert.cert_data != NULL, "Should have cert data pointer");
   FIO_ASSERT(cert.cert_len == 8, "Cert length should be 8");
   FIO_ASSERT(cert.cert_data[0] == 0x30, "Cert data should match");
-
-  FIO_LOG_DDEBUG("  PASS: Certificate parsing tests");
 }
 
 /* *****************************************************************************
 Test: CertificateVerify Parsing
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_certificate_verify(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 CertificateVerify parsing...");
-
   /* Construct CertificateVerify message */
   uint8_t cv_msg[128];
   uint8_t *p = cv_msg;
@@ -337,16 +315,12 @@ FIO_SFUNC void fio___test_tls13_certificate_verify(void) {
   FIO_ASSERT(cv.signature_len == 64, "Signature length should be 64");
   FIO_ASSERT(cv.signature != NULL, "Should have signature pointer");
   FIO_ASSERT(cv.signature[0] == 0x00, "Signature data should match");
-
-  FIO_LOG_DDEBUG("  PASS: CertificateVerify parsing tests");
 }
 
 /* *****************************************************************************
 Test: Finished Message
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_finished(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Finished message...");
-
   uint8_t verify_data[32];
   for (int i = 0; i < 32; ++i)
     verify_data[i] = (uint8_t)(0x55 + i);
@@ -378,16 +352,12 @@ FIO_SFUNC void fio___test_tls13_finished(void) {
   /* Test with wrong length */
   ret = fio_tls13_parse_finished(fin_msg + 4, 31, verify_data, 32);
   FIO_ASSERT(ret != 0, "Finished verification should fail with wrong length");
-
-  FIO_LOG_DDEBUG("  PASS: Finished message tests");
 }
 
 /* *****************************************************************************
 Test: Full ClientHello/ServerHello Round-Trip
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_hello_roundtrip(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Hello round-trip...");
-
   /* Generate X25519 keypair */
   uint8_t client_sk[32], client_pk[32];
   fio_rand_bytes(client_sk, 32);
@@ -420,17 +390,12 @@ FIO_SFUNC void fio___test_tls13_hello_roundtrip(void) {
   FIO_ASSERT(body != NULL, "Should parse ClientHello");
   FIO_ASSERT(msg_type == FIO_TLS13_HS_CLIENT_HELLO, "Should be ClientHello");
   FIO_ASSERT(body_len + 4 == (size_t)ch_len, "Lengths should match");
-
-  FIO_LOG_DDEBUG("  ClientHello size: %d bytes", ch_len);
-  FIO_LOG_DDEBUG("  PASS: Hello round-trip tests");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("=== TLS 1.3 Handshake Message Tests ===\n");
-
   fio___test_tls13_handshake_header();
   fio___test_tls13_client_hello();
   fio___test_tls13_server_hello();
@@ -439,7 +404,5 @@ int main(void) {
   fio___test_tls13_certificate_verify();
   fio___test_tls13_finished();
   fio___test_tls13_hello_roundtrip();
-
-  FIO_LOG_DDEBUG("\n=== All TLS 1.3 Handshake Tests PASSED ===");
   return 0;
 }

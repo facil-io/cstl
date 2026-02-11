@@ -18,14 +18,6 @@ static void *on_pair_print(void *udata,
   test_ctx_s *ctx = (test_ctx_s *)udata;
   (void)name;  /* Used only in debug logging */
   (void)value; /* Used only in debug logging */
-  FIO_LOG_DDEBUG("  Pair %d: name='%.*s' (%zu) value='%.*s' (%zu)",
-                 ctx->count,
-                 (int)name.len,
-                 name.buf,
-                 name.len,
-                 (int)value.len,
-                 value.buf,
-                 value.len);
   ctx->count++;
   if (ctx->stop_at >= 0 && ctx->count >= ctx->stop_at)
     return NULL; /* Stop parsing */
@@ -108,9 +100,6 @@ int main(void) {
   static const fio_url_encoded_parser_callbacks_s callbacks = {
       .on_pair = on_pair_print,
   };
-
-  FIO_LOG_DDEBUG("=== URL-Encoded Parser Tests ===");
-
   /* Basic parsing */
   TEST_PARSE("Basic name=value pairs",
              "name=value&foo=bar&baz=qux",
@@ -176,14 +165,8 @@ int main(void) {
   {
     test_ctx_s ctx = {.count = 0, .stop_at = 2};
     const char *data = "a=1&b=2&c=3&d=4";
-    FIO_LOG_DDEBUG("Test: Callback stop after 2 pairs");
-    FIO_LOG_DDEBUG("  Input: '%s'", data);
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&callbacks, &ctx, data, strlen(data));
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d",
-                   r.consumed,
-                   r.count,
-                   r.err);
     if (r.count != 2) {
       fprintf(stderr, "  FAIL: expected count=2, got %zu\n", r.count);
       return 1;
@@ -192,25 +175,17 @@ int main(void) {
       fprintf(stderr, "  FAIL: expected err=1, got %d\n", r.err);
       return 1;
     }
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Test with NULL callbacks (should use no-op) */
   {
     const char *data = "a=1&b=2";
-    FIO_LOG_DDEBUG("Test: NULL callbacks (no-op)");
-    FIO_LOG_DDEBUG("  Input: '%s'", data);
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(NULL, NULL, data, strlen(data));
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d",
-                   r.consumed,
-                   r.count,
-                   r.err);
     if (r.count != 2) {
       fprintf(stderr, "  FAIL: expected count=2, got %zu\n", r.count);
       return 1;
     }
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Plus sign as space (parser doesn't decode, just finds boundaries) */
@@ -234,21 +209,14 @@ int main(void) {
     long_data[1008] = '\0';
 
     test_ctx_s ctx = {.count = 0, .stop_at = -1};
-    FIO_LOG_DDEBUG("Test: Very long value (1000 chars)");
-    FIO_LOG_DDEBUG("  Input: longkey=<1000 'a' chars>");
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&callbacks, &ctx, long_data, 1008);
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d",
-                   r.consumed,
-                   r.count,
-                   r.err);
     FIO_ASSERT(r.count == 1,
                "Very long value: expected count=1, got %zu",
                r.count);
     FIO_ASSERT(r.consumed == 1008,
                "Very long value: expected consumed=1008, got %zu",
                r.consumed);
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Unicode characters (percent-encoded UTF-8) */
@@ -317,21 +285,14 @@ int main(void) {
     long_key_data[506] = '\0';
 
     test_ctx_s ctx = {.count = 0, .stop_at = -1};
-    FIO_LOG_DDEBUG("Test: Very long key (500 chars)");
-    FIO_LOG_DDEBUG("  Input: <500 'k' chars>=value");
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&callbacks, &ctx, long_key_data, 506);
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d",
-                   r.consumed,
-                   r.count,
-                   r.err);
     FIO_ASSERT(r.count == 1,
                "Very long key: expected count=1, got %zu",
                r.count);
     FIO_ASSERT(r.consumed == 506,
                "Very long key: expected consumed=506, got %zu",
                r.consumed);
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Many pairs */
@@ -353,14 +314,8 @@ int main(void) {
     size_t many_len = (size_t)(p - many_pairs);
 
     test_ctx_s ctx = {.count = 0, .stop_at = -1};
-    FIO_LOG_DDEBUG("Test: Many pairs (26 pairs a=1 through z=26)");
-    FIO_LOG_DDEBUG("  Input: '%s'", many_pairs);
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&callbacks, &ctx, many_pairs, many_len);
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d",
-                   r.consumed,
-                   r.count,
-                   r.err);
     FIO_ASSERT(r.count == 26,
                "Many pairs: expected count=26, got %zu",
                r.count);
@@ -368,7 +323,6 @@ int main(void) {
                "Many pairs: expected consumed=%zu, got %zu",
                many_len,
                r.consumed);
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Numeric keys and values */
@@ -406,21 +360,13 @@ int main(void) {
     };
 
     const char *data = "test=value123&other=data";
-    FIO_LOG_DDEBUG("Test: Verify callback receives correct name/value");
-    FIO_LOG_DDEBUG("  Input: '%s'", data);
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&verify_callbacks, &vctx, data, strlen(data));
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d, verified=%d",
-                   r.consumed,
-                   r.count,
-                   r.err,
-                   vctx.verified);
     FIO_ASSERT(vctx.verified == 1, "Callback value verification failed");
     FIO_ASSERT(r.count == 1, "Verify test: expected count=1, got %zu", r.count);
     FIO_ASSERT(r.err == 1,
                "Verify test: expected err=1 (stopped), got %d",
                r.err);
-    FIO_LOG_DDEBUG("  PASS");
   }
 
   /* Test that value without = has correct empty value pointer */
@@ -431,20 +377,10 @@ int main(void) {
 
     name_only_ctx_s nctx = {.name_only_correct = 0};
     const char *data = "nameonly";
-    FIO_LOG_DDEBUG("Test: Name without = has empty value");
-    FIO_LOG_DDEBUG("  Input: '%s'", data);
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&name_only_callbacks, &nctx, data, strlen(data));
     (void)r; /* Used only in debug logging */
-    FIO_LOG_DDEBUG("  Result: consumed=%zu, count=%zu, err=%d, correct=%d",
-                   r.consumed,
-                   r.count,
-                   r.err,
-                   nctx.name_only_correct);
     FIO_ASSERT(nctx.name_only_correct == 1, "Name-only value check failed");
-    FIO_LOG_DDEBUG("  PASS");
   }
-
-  FIO_LOG_DDEBUG("=== All URL-Encoded Parser Tests Passed! ===");
   return 0;
 }

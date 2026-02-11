@@ -23,8 +23,6 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 Test: Client Initialization
 ***************************************************************************** */
 FIO_SFUNC void test_client_init(void) {
-  FIO_LOG_DDEBUG("Testing client initialization");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
@@ -55,16 +53,12 @@ FIO_SFUNC void test_client_init(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_client_destroy(&client2);
-
-  FIO_LOG_DDEBUG("  - Client initialization tests passed");
 }
 
 /* *****************************************************************************
 Test: Client Destroy (Zeroes Secrets)
 ***************************************************************************** */
 FIO_SFUNC void test_client_destroy(void) {
-  FIO_LOG_DDEBUG("Testing client destroy");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
@@ -86,16 +80,12 @@ FIO_SFUNC void test_client_destroy(void) {
              "Master secret should be zeroed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_START,
              "State should be reset to START");
-
-  FIO_LOG_DDEBUG("  - Client destroy tests passed");
 }
 
 /* *****************************************************************************
 Test: ClientHello Generation
 ***************************************************************************** */
 FIO_SFUNC void test_client_hello_generation(void) {
-  FIO_LOG_DDEBUG("Testing ClientHello generation");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
 
@@ -135,16 +125,12 @@ FIO_SFUNC void test_client_hello_generation(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_client_destroy(&client2);
-
-  FIO_LOG_DDEBUG("  - ClientHello generation tests passed");
 }
 
 /* *****************************************************************************
 Test: State Name Helper
 ***************************************************************************** */
 FIO_SFUNC void test_state_names(void) {
-  FIO_LOG_DDEBUG("Testing state name helper");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -188,16 +174,12 @@ FIO_SFUNC void test_state_names(void) {
              "NULL client state name");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - State name tests passed");
 }
 
 /* *****************************************************************************
 Test: Status Query Functions
 ***************************************************************************** */
 FIO_SFUNC void test_status_queries(void) {
-  FIO_LOG_DDEBUG("Testing status query functions");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -228,16 +210,12 @@ FIO_SFUNC void test_status_queries(void) {
              "NULL client should not be in error");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Status query tests passed");
 }
 
 /* *****************************************************************************
 Test: Transcript Hash Computation
 ***************************************************************************** */
 FIO_SFUNC void test_transcript_hash(void) {
-  FIO_LOG_DDEBUG("Testing transcript hash computation");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -279,16 +257,12 @@ FIO_SFUNC void test_transcript_hash(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_client_destroy(&client2);
-
-  FIO_LOG_DDEBUG("  - Transcript hash tests passed");
 }
 
 /* *****************************************************************************
 Test: Key Derivation with Mock Data
 ***************************************************************************** */
 FIO_SFUNC void test_key_derivation(void) {
-  FIO_LOG_DDEBUG("Testing key derivation");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -340,16 +314,12 @@ FIO_SFUNC void test_key_derivation(void) {
              "Server app traffic secret should not be zero");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Key derivation tests passed");
 }
 
 /* *****************************************************************************
 Test: Finished Message Building and Verification
 ***************************************************************************** */
 FIO_SFUNC void test_finished_message(void) {
-  FIO_LOG_DDEBUG("Testing Finished message");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -384,16 +354,12 @@ FIO_SFUNC void test_finished_message(void) {
   FIO_ASSERT(len2 == -1, "Should fail with insufficient buffer");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Finished message tests passed");
 }
 
 /* *****************************************************************************
 Test: Server Finished Verification
 ***************************************************************************** */
 FIO_SFUNC void test_server_finished_verification(void) {
-  FIO_LOG_DDEBUG("Testing server Finished verification");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -439,16 +405,12 @@ FIO_SFUNC void test_server_finished_verification(void) {
   FIO_ASSERT(ret != 0, "Verification should fail with wrong length");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Server Finished verification tests passed");
 }
 
 /* *****************************************************************************
 Test: Application Data Encryption/Decryption
 ***************************************************************************** */
 FIO_SFUNC void test_app_data_encryption(void) {
-  FIO_LOG_DDEBUG("Testing application data encryption/decryption");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -491,16 +453,12 @@ FIO_SFUNC void test_app_data_encryption(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_client_destroy(&client2);
-
-  FIO_LOG_DDEBUG("  - Application data encryption tests passed");
 }
 
 /* *****************************************************************************
 Test: Cipher Suite Selection
 ***************************************************************************** */
 FIO_SFUNC void test_cipher_suite_helpers(void) {
-  FIO_LOG_DDEBUG("Testing cipher suite helpers");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -535,16 +493,12 @@ FIO_SFUNC void test_cipher_suite_helpers(void) {
              "ChaCha20 cipher type");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Cipher suite helper tests passed");
 }
 
 /* *****************************************************************************
 Test: Error State Handling
 ***************************************************************************** */
 FIO_SFUNC void test_error_handling(void) {
-  FIO_LOG_DDEBUG("Testing error state handling");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -573,16 +527,12 @@ FIO_SFUNC void test_error_handling(void) {
   FIO_ASSERT(ret == -1, "Process should fail in error state");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Error handling tests passed");
 }
 
 /* *****************************************************************************
 Test: Mock Handshake Flow (State Transitions)
 ***************************************************************************** */
 FIO_SFUNC void test_mock_handshake_flow(void) {
-  FIO_LOG_DDEBUG("Testing mock handshake flow");
-
   /* This test verifies state transitions with mock server responses */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "example.com");
@@ -623,16 +573,12 @@ FIO_SFUNC void test_mock_handshake_flow(void) {
   FIO_ASSERT(client.state == FIO_TLS13_STATE_ERROR, "Should be in error state");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Mock handshake flow tests passed");
 }
 
 /* *****************************************************************************
 Test: Record Header Writing
 ***************************************************************************** */
 FIO_SFUNC void test_record_header_writing(void) {
-  FIO_LOG_DDEBUG("Testing record header writing");
-
   uint8_t header[5];
 
   /* Test handshake record */
@@ -650,16 +596,12 @@ FIO_SFUNC void test_record_header_writing(void) {
   FIO_ASSERT(header[0] == 23, "Content type should be application_data (23)");
   FIO_ASSERT(header[3] == 0x01, "Length high byte");
   FIO_ASSERT(header[4] == 0x00, "Length low byte");
-
-  FIO_LOG_DDEBUG("  - Record header writing tests passed");
 }
 
 /* *****************************************************************************
 Test: Change Cipher Spec Handling
 ***************************************************************************** */
 FIO_SFUNC void test_ccs_handling(void) {
-  FIO_LOG_DDEBUG("Testing Change Cipher Spec handling");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, NULL);
 
@@ -693,16 +635,12 @@ FIO_SFUNC void test_ccs_handling(void) {
   FIO_ASSERT(out_len == 0, "No output should be generated");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Change Cipher Spec handling tests passed");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Client Handshake State Machine");
-
   /* Basic initialization tests */
   test_client_init();
   test_client_destroy();
@@ -733,7 +671,5 @@ int main(void) {
   /* Handshake flow tests */
   test_mock_handshake_flow();
   test_ccs_handling();
-
-  FIO_LOG_DDEBUG("All TLS 1.3 Client tests passed!");
   return 0;
 }

@@ -289,11 +289,12 @@ FIO_SFUNC void fio___perf_multiprecision_add(void) {
     fio_u128 a = fio_u128_init64(0xFFFFFFFFFFFFFFFFULL, 0x0000000000000001ULL);
     fio_u128 b = fio_u128_init64(0x0000000000000001ULL, 0x0000000000000001ULL);
     fio_u128 r;
+    bool carry;
     FIO_PERF_BENCHMARK("fio_u128_add",
                        iterations,
                        (void)0,
-                       ((void)fio_u128_add(&r, &a, &b), a = r),
-                       (void)r);
+                       (carry = fio_u128_add(&r, &a, &b), a = r),
+                       (void)carry);
   }
 
   /* fio_u256_add */
@@ -307,11 +308,12 @@ FIO_SFUNC void fio___perf_multiprecision_add(void) {
                                  0x0000000000000001ULL,
                                  0x0000000000000001ULL);
     fio_u256 r;
+    bool carry;
     FIO_PERF_BENCHMARK("fio_u256_add",
                        iterations,
                        (void)0,
-                       ((void)fio_u256_add(&r, &a, &b), a = r),
-                       (void)r);
+                       (carry = fio_u256_add(&r, &a, &b), a = r),
+                       (void)carry);
   }
 
   /* fio_u512_add */
@@ -333,11 +335,12 @@ FIO_SFUNC void fio___perf_multiprecision_add(void) {
                                  0x0000000000000001ULL,
                                  0x0000000000000001ULL);
     fio_u512 r;
+    bool carry;
     FIO_PERF_BENCHMARK("fio_u512_add",
                        iterations,
                        (void)0,
-                       ((void)fio_u512_add(&r, &a, &b), a = r),
-                       (void)r);
+                       (carry = fio_u512_add(&r, &a, &b), a = r),
+                       (void)carry);
   }
 }
 
@@ -351,11 +354,12 @@ FIO_SFUNC void fio___perf_multiprecision_sub(void) {
     fio_u128 a = fio_u128_init64(0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL);
     fio_u128 b = fio_u128_init64(0x0000000000000001ULL, 0x0000000000000001ULL);
     fio_u128 r;
+    bool borrow;
     FIO_PERF_BENCHMARK("fio_u128_sub",
                        iterations,
                        (void)0,
-                       ((void)fio_u128_sub(&r, &a, &b), a = r),
-                       (void)r);
+                       (borrow = fio_u128_sub(&r, &a, &b), a = r),
+                       (void)borrow);
   }
 
   /* fio_u256_sub */
@@ -369,11 +373,12 @@ FIO_SFUNC void fio___perf_multiprecision_sub(void) {
                                  0x0000000000000001ULL,
                                  0x0000000000000001ULL);
     fio_u256 r;
+    bool borrow;
     FIO_PERF_BENCHMARK("fio_u256_sub",
                        iterations,
                        (void)0,
-                       ((void)fio_u256_sub(&r, &a, &b), a = r),
-                       (void)r);
+                       (borrow = fio_u256_sub(&r, &a, &b), a = r),
+                       (void)borrow);
   }
 
   /* fio_u512_sub */
@@ -395,11 +400,12 @@ FIO_SFUNC void fio___perf_multiprecision_sub(void) {
                                  0x0000000000000001ULL,
                                  0x0000000000000001ULL);
     fio_u512 r;
+    bool borrow;
     FIO_PERF_BENCHMARK("fio_u512_sub",
                        iterations,
                        (void)0,
-                       ((void)fio_u512_sub(&r, &a, &b), a = r),
-                       (void)r);
+                       (borrow = fio_u512_sub(&r, &a, &b), a = r),
+                       (void)borrow);
   }
 }
 

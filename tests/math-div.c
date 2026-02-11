@@ -116,7 +116,6 @@ static int verify_division(const uint64_t *dividend,
 
 /* Test 1: Simple division 100 / 7 = 14 remainder 2 */
 static void test_simple_division(void) {
-  FIO_LOG_DDEBUG("  Testing simple division (100 / 7)...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -131,7 +130,6 @@ static void test_simple_division(void) {
 
 /* Test 2: Division by 1 */
 static void test_division_by_one(void) {
-  FIO_LOG_DDEBUG("  Testing division by 1...");
   uint64_t a[4] = {0x123456789ABCDEF0ULL, 0xFEDCBA9876543210ULL, 0, 0};
   uint64_t b[4] = {1, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -147,7 +145,6 @@ static void test_division_by_one(void) {
 
 /* Test 3: Division by self */
 static void test_division_by_self(void) {
-  FIO_LOG_DDEBUG("  Testing division by self...");
   uint64_t a[4] = {0xDEADBEEFCAFEBABEULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t b[4] = {0xDEADBEEFCAFEBABEULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t q[4] = {0};
@@ -162,7 +159,6 @@ static void test_division_by_self(void) {
 
 /* Test 4: Dividend < Divisor */
 static void test_dividend_less_than_divisor(void) {
-  FIO_LOG_DDEBUG("  Testing dividend < divisor...");
   uint64_t a[4] = {42, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -178,7 +174,6 @@ static void test_dividend_less_than_divisor(void) {
 
 /* Test 5: Large numbers - 2^192 / 2^64 */
 static void test_large_power_of_two(void) {
-  FIO_LOG_DDEBUG("  Testing large power of two division...");
   uint64_t a[4] = {0, 0, 0, 1}; /* 2^192 */
   uint64_t b[4] = {0, 1, 0, 0}; /* 2^64 */
   uint64_t q[4] = {0};
@@ -195,7 +190,6 @@ static void test_large_power_of_two(void) {
 
 /* Test 6: Division by power of 2 */
 static void test_division_by_power_of_two(void) {
-  FIO_LOG_DDEBUG("  Testing division by power of 2...");
   uint64_t a[4] = {0x8000000000000000ULL, 0x1234567890ABCDEFULL, 0, 0};
   uint64_t b[4] = {0x100, 0, 0, 0}; /* 256 = 2^8 */
   uint64_t q[4] = {0};
@@ -209,7 +203,6 @@ static void test_division_by_power_of_two(void) {
 
 /* Test 7: Edge case - divisor with high bit set */
 static void test_high_bit_divisor(void) {
-  FIO_LOG_DDEBUG("  Testing high bit divisor...");
   uint64_t a[4] = {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL, 0, 0};
   uint64_t b[4] = {0x8000000000000000ULL, 0, 0, 0}; /* 2^63 */
   uint64_t q[4] = {0};
@@ -222,7 +215,6 @@ static void test_high_bit_divisor(void) {
 
 /* Test 8: Single word operands */
 static void test_single_word(void) {
-  FIO_LOG_DDEBUG("  Testing single word operands...");
   uint64_t a[1] = {1000000007ULL};
   uint64_t b[1] = {12345ULL};
   uint64_t q[1] = {0};
@@ -240,7 +232,6 @@ static void test_single_word(void) {
 
 /* Test 9: Two word operands */
 static void test_two_word(void) {
-  FIO_LOG_DDEBUG("  Testing two word operands...");
   uint64_t a[2] = {0xFFFFFFFFFFFFFFFFULL, 0x00000000FFFFFFFFULL};
   uint64_t b[2] = {0x100000000ULL, 0}; /* 2^32 */
   uint64_t q[2] = {0};
@@ -253,7 +244,6 @@ static void test_two_word(void) {
 
 /* Test 10: Random test vectors */
 static void test_random_vectors(void) {
-  FIO_LOG_DDEBUG("  Testing random vectors (100 iterations)...");
   /* Use a simple PRNG for reproducibility */
   uint64_t seed = 0x123456789ABCDEF0ULL;
 #define NEXT_RAND()                                                            \
@@ -282,7 +272,6 @@ static void test_random_vectors(void) {
     }
   }
   if (all_passed) {
-    FIO_LOG_DDEBUG("    PASS: all 100 random tests");
     tests_passed++;
   }
 #undef NEXT_RAND
@@ -290,7 +279,6 @@ static void test_random_vectors(void) {
 
 /* Test 11: 256-bit numbers (crypto relevant) */
 static void test_256bit(void) {
-  FIO_LOG_DDEBUG("  Testing 256-bit numbers...");
   /* P-256 prime: 2^256 - 2^224 + 2^192 + 2^96 - 1 */
   uint64_t p256[4] = {0xFFFFFFFFFFFFFFFFULL,
                       0x00000000FFFFFFFFULL,
@@ -313,7 +301,6 @@ static void test_256bit(void) {
 
 /* Test 12: 512-bit numbers */
 static void test_512bit(void) {
-  FIO_LOG_DDEBUG("  Testing 512-bit numbers...");
   uint64_t a[8] = {0xFFFFFFFFFFFFFFFFULL,
                    0xFFFFFFFFFFFFFFFFULL,
                    0xFFFFFFFFFFFFFFFFULL,
@@ -348,7 +335,6 @@ static void test_512bit(void) {
 
 /* Test 13: Edge case - dividend equals divisor minus 1 */
 static void test_dividend_one_less(void) {
-  FIO_LOG_DDEBUG("  Testing dividend = divisor - 1...");
   uint64_t a[4] = {99, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -363,7 +349,6 @@ static void test_dividend_one_less(void) {
 
 /* Test 14: Edge case - dividend equals divisor plus 1 */
 static void test_dividend_one_more(void) {
-  FIO_LOG_DDEBUG("  Testing dividend = divisor + 1...");
   uint64_t a[4] = {101, 0, 0, 0};
   uint64_t b[4] = {100, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -378,7 +363,6 @@ static void test_dividend_one_more(void) {
 
 /* Test 15: NULL dest pointer (only compute remainder) */
 static void test_null_dest(void) {
-  FIO_LOG_DDEBUG("  Testing NULL dest pointer...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t r[4] = {0};
@@ -390,7 +374,6 @@ static void test_null_dest(void) {
 
 /* Test 16: NULL remainder pointer (only compute quotient) */
 static void test_null_remainder(void) {
-  FIO_LOG_DDEBUG("  Testing NULL remainder pointer...");
   uint64_t a[4] = {100, 0, 0, 0};
   uint64_t b[4] = {7, 0, 0, 0};
   uint64_t q[4] = {0};
@@ -402,7 +385,6 @@ static void test_null_remainder(void) {
 
 /* Test 17: Multi-word divisor with leading zeros in high words */
 static void test_leading_zeros(void) {
-  FIO_LOG_DDEBUG("  Testing leading zeros...");
   uint64_t a[4] = {0, 0, 0x100, 0};
   uint64_t b[4] = {0, 0x10, 0, 0};
   uint64_t q[4] = {0};
@@ -415,7 +397,6 @@ static void test_leading_zeros(void) {
 
 /* Test 18: Maximum values */
 static void test_max_values(void) {
-  FIO_LOG_DDEBUG("  Testing maximum values...");
   uint64_t a[4] = {~0ULL, ~0ULL, ~0ULL, ~0ULL};
   uint64_t b[4] = {~0ULL, ~0ULL, 0, 0};
   uint64_t q[4] = {0};
@@ -428,7 +409,6 @@ static void test_max_values(void) {
 
 /* Test 19: Edge case - same MSB position but different values */
 static void test_same_msb_different_values(void) {
-  FIO_LOG_DDEBUG("  Testing same MSB position but different values...");
   /* Both have MSB at position 127 (bit 63 of word 1) */
   uint64_t a[4] = {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL, 0, 0};
   uint64_t b[4] = {0x0000000000000001ULL, 0x8000000000000000ULL, 0, 0};
@@ -442,7 +422,6 @@ static void test_same_msb_different_values(void) {
 
 /* Test 20: Regression test - potential off-by-one in quotient estimation */
 static void test_quotient_estimation(void) {
-  FIO_LOG_DDEBUG("  Testing quotient estimation edge cases...");
   /* This tests the case where initial quotient estimate might be off */
   uint64_t a[4] = {0, 0x8000000000000000ULL, 0, 0};
   uint64_t b[4] = {1, 0x4000000000000000ULL, 0, 0};
@@ -500,8 +479,6 @@ static void benchmark_division(const char *name,
 }
 
 static void run_benchmarks(void) {
-  FIO_LOG_DDEBUG("=== Division Benchmarks ===");
-
   benchmark_division("256-bit / 128-bit (4 words)", 4, 100000);
   benchmark_division("512-bit / 256-bit (8 words)", 8, 50000);
   benchmark_division("1024-bit / 512-bit (16 words)", 16, 10000);
@@ -515,9 +492,6 @@ static void run_benchmarks(void) {
 int main(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
-
-  FIO_LOG_DDEBUG("=== fio_math_div Test Suite ===");
-
   /* Run all tests */
   test_simple_division();
   test_division_by_one();
@@ -539,11 +513,6 @@ int main(int argc, char *argv[]) {
   test_max_values();
   test_same_msb_different_values();
   test_quotient_estimation();
-
-  FIO_LOG_DDEBUG("=== Test Results ===");
-  FIO_LOG_DDEBUG("Passed: %zu", tests_passed);
-  FIO_LOG_DDEBUG("Failed: %zu", tests_failed);
-
   /* Run benchmarks if all tests pass */
   if (tests_failed == 0) {
     run_benchmarks();

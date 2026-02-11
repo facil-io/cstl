@@ -21,7 +21,7 @@ jobs:
       run: |
         echo "CI=false" >> "$GITHUB_ENV"
     - name: Test No-Op (debug)
-      run: cl /Od /RTCsu /TC tests\noop.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./noop.exe && echo "Compiled test, now running..." && ./noop.exe
+      run: cl /Od /RTCsu /TC tests\compile-check.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./noop.exe && echo "Compiled test, now running..." && ./noop.exe
     - name: Test STL (debug) - no allocators
       run: cl /Od /RTCsu /TC tests\core.c /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG /Fe./cored.exe && echo "Compiled test, now running..." && ./cored.exe
     - name: Test Mustache Compliance (debug) - no allocators

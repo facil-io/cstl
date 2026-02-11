@@ -13,21 +13,15 @@ https://www.rfc-editor.org/rfc/rfc8032#section-7.1
 
 /* Test field arithmetic */
 FIO_SFUNC void FIO_NAME_TEST(stl, fe25519_basic)(void) {
-  FIO_LOG_DDEBUG("Testing field arithmetic basics");
-
   /* Test: load and store identity */
   // {
   //   uint8_t one[32] = {1};
   //   uint8_t out[32];
   //   /* This would require exposing internal functions, skip for now */
   // }
-
-  FIO_LOG_DDEBUG("Field arithmetic tests skipped (internal functions)");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_rfc8032)(void) {
-  FIO_LOG_DDEBUG("Testing Ed25519 (RFC 8032 test vectors)");
-
   /* Test Vector 1: Empty message */
   {
     /* clang-format off */
@@ -215,8 +209,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_rfc8032)(void) {
         fio_ed25519_verify(sig, wrong_message, strlen(wrong_message), pk) != 0,
         "Ed25519 verification should fail for wrong message");
   }
-
-  FIO_LOG_DDEBUG("Ed25519 tests passed.");
 }
 
 /* *****************************************************************************
@@ -225,8 +217,6 @@ https://www.rfc-editor.org/rfc/rfc7748#section-5.2
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x25519_rfc7748)(void) {
-  FIO_LOG_DDEBUG("Testing X25519 (RFC 7748 test vectors)");
-
   /* Test Vector 1 */
   {
     /* clang-format off */
@@ -329,8 +319,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_rfc7748)(void) {
     FIO_ASSERT(!memcmp(alice_shared, bob_shared, 32),
                "X25519 ECDH key exchange failed - shared secrets don't match");
   }
-
-  FIO_LOG_DDEBUG("X25519 tests passed.");
 }
 
 /* *****************************************************************************
@@ -338,8 +326,6 @@ Ed25519 Signature Edge Cases
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_signature_edge_cases)(void) {
-  FIO_LOG_DDEBUG("Testing Ed25519 signature edge cases");
-
   uint8_t sk[32], pk[32], sig[64];
   fio_ed25519_keypair(sk, pk);
 
@@ -360,8 +346,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_signature_edge_cases)(void) {
                "Corrupted signature (byte %zu flipped) should fail",
                i);
   }
-  FIO_LOG_DDEBUG("  All 64 byte-flip corruptions detected");
-
   /* Test: All-zero signature should fail */
   {
     uint8_t zero_sig[64] = {0};
@@ -461,8 +445,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_signature_edge_cases)(void) {
     FIO_ASSERT(fio_ed25519_verify(sig, message, message_len, pk2) != 0,
                "Signature should not verify with wrong public key");
   }
-
-  FIO_LOG_DDEBUG("Ed25519 signature edge cases passed.");
 }
 
 /* *****************************************************************************
@@ -470,8 +452,6 @@ Key Conversion Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_x25519_conversion)(void) {
-  FIO_LOG_DDEBUG("Testing Ed25519 <-> X25519 key conversion");
-
   /* Test that converted keys work for ECDH */
   {
     uint8_t ed_sk[32], ed_pk[32];
@@ -500,8 +480,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_x25519_conversion)(void) {
         !memcmp(shared1, shared2, 32),
         "ECDH with converted Ed25519 keys failed - shared secrets don't match");
   }
-
-  FIO_LOG_DDEBUG("Key conversion tests passed.");
 }
 
 /* *****************************************************************************
@@ -509,8 +487,6 @@ ECIES Public Key Encryption Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
-  FIO_LOG_DDEBUG("Testing X25519 ECIES (public key encryption)");
-
   /* Test basic encryption/decryption */
   {
     uint8_t sk[32], pk[32];
@@ -762,8 +738,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies)(void) {
     free(ciphertext);
     free(plaintext);
   }
-
-  FIO_LOG_DDEBUG("ECIES tests passed.");
 }
 
 /* *****************************************************************************
@@ -1326,7 +1300,6 @@ Main Test Function
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
-  FIO_LOG_DDEBUG("Testing Ed25519 / X25519 implementation");
   FIO_NAME_TEST(stl, ed25519_rfc8032)();
   FIO_NAME_TEST(stl, ed25519_signature_edge_cases)();
   FIO_NAME_TEST(stl, x25519_rfc7748)();
@@ -1335,7 +1308,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519)(void) {
 #if !DEBUG
   FIO_NAME_TEST(stl, ed25519_performance)();
 #endif
-  FIO_LOG_DDEBUG("Ed25519 / X25519 tests complete.");
 }
 
 /* *****************************************************************************

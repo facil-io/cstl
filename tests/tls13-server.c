@@ -180,8 +180,6 @@ FIO_SFUNC void build_test_certificate(void) {
 Test: Server Initialization and Cleanup
 ***************************************************************************** */
 FIO_SFUNC void test_server_init_destroy(void) {
-  FIO_LOG_DDEBUG("Testing server init/destroy\n");
-
   fio_tls13_server_s server;
 
   /* Test initialization */
@@ -203,16 +201,12 @@ FIO_SFUNC void test_server_init_destroy(void) {
   uint8_t zeros[32] = {0};
   FIO_ASSERT(FIO_MEMCMP(server.shared_secret, zeros, 32) == 0,
              "Shared secret should be zeroed after destroy");
-
-  FIO_LOG_DDEBUG("  - Server init/destroy tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server Certificate Configuration
 ***************************************************************************** */
 FIO_SFUNC void test_server_cert_config(void) {
-  FIO_LOG_DDEBUG("Testing server certificate configuration\n");
-
   build_test_certificate();
 
   fio_tls13_server_s server;
@@ -242,16 +236,12 @@ FIO_SFUNC void test_server_cert_config(void) {
              "Private key type should be Ed25519");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Server certificate configuration tests passed\n");
 }
 
 /* *****************************************************************************
 Test: ClientHello Parsing
 ***************************************************************************** */
 FIO_SFUNC void test_client_hello_parsing(void) {
-  FIO_LOG_DDEBUG("Testing ClientHello parsing\n");
-
   /* Build a ClientHello using the client API */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
@@ -296,8 +286,6 @@ FIO_SFUNC void test_client_hello_parsing(void) {
   FIO_ASSERT(found_x25519, "Should have X25519 key share");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - ClientHello parsing tests passed\n");
 }
 
 /* *****************************************************************************
@@ -308,8 +296,6 @@ This tests that the server correctly parses and selects from multiple key
 shares.
 ***************************************************************************** */
 FIO_SFUNC void test_browser_client_hello_parsing(void) {
-  FIO_LOG_DDEBUG("Testing browser-style ClientHello with 2 key shares\n");
-
   /* Build a synthetic ClientHello with 2 key shares like a browser would send.
    * Key share extension format:
    *   2 bytes: total length of key shares
@@ -482,16 +468,12 @@ FIO_SFUNC void test_browser_client_hello_parsing(void) {
              "Selected key data should match X25519 key");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Browser ClientHello parsing tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Server Message Building
 ***************************************************************************** */
 FIO_SFUNC void test_server_message_building(void) {
-  FIO_LOG_DDEBUG("Testing server message building\n");
-
   build_test_certificate();
 
   fio_tls13_server_s server;
@@ -540,16 +522,12 @@ FIO_SFUNC void test_server_message_building(void) {
              "Should be Certificate message");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Server message building tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Full Client-Server Handshake (Loopback)
 ***************************************************************************** */
 FIO_SFUNC void test_client_server_handshake(void) {
-  FIO_LOG_DDEBUG("Testing full client-server handshake\n");
-
   build_test_certificate();
 
   /* Initialize client */
@@ -579,8 +557,6 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
   FIO_ASSERT(client.state == FIO_TLS13_STATE_WAIT_SH,
              "Client should be in WAIT_SH state");
-  FIO_LOG_DDEBUG("  - ClientHello generated (%d bytes)\n", ch_len);
-
   /* Step 2: Server processes ClientHello and generates response */
   out_len = 0;
   int consumed = fio_tls13_server_process(&server,
@@ -644,8 +620,6 @@ FIO_SFUNC void test_client_server_handshake(void) {
              "Server should consume client Finished");
   FIO_ASSERT(fio_tls13_server_is_connected(&server),
              "Server should be connected");
-  FIO_LOG_DDEBUG("  - Server processed client Finished\n");
-
   /* Step 5: Test application data exchange */
   const char *test_message = "Hello from client!";
   size_t test_message_len = strlen(test_message);
@@ -657,8 +631,6 @@ FIO_SFUNC void test_client_server_handshake(void) {
                                          (const uint8_t *)test_message,
                                          test_message_len);
   FIO_ASSERT(enc_len > 0, "Client encryption should succeed");
-  FIO_LOG_DDEBUG("  - Client encrypted message (%d bytes)\n", enc_len);
-
   /* Server decrypts message */
   uint8_t decrypted[256];
   int dec_len = fio_tls13_server_decrypt(&server,
@@ -669,8 +641,6 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(dec_len == (int)test_message_len, "Decrypted length should match");
   FIO_ASSERT(FIO_MEMCMP(decrypted, test_message, test_message_len) == 0,
              "Decrypted message should match");
-  FIO_LOG_DDEBUG("  - Server decrypted message successfully\n");
-
   /* Server sends response */
   const char *response = "Hello from server!";
   size_t response_len = strlen(response);
@@ -691,21 +661,15 @@ FIO_SFUNC void test_client_server_handshake(void) {
   FIO_ASSERT(dec_len == (int)response_len, "Decrypted length should match");
   FIO_ASSERT(FIO_MEMCMP(decrypted, response, response_len) == 0,
              "Decrypted response should match");
-  FIO_LOG_DDEBUG("  - Client decrypted server response successfully\n");
-
   /* Cleanup */
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Full client-server handshake tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Multiple Cipher Suites
 ***************************************************************************** */
 FIO_SFUNC void test_cipher_suite_negotiation(void) {
-  FIO_LOG_DDEBUG("Testing cipher suite negotiation\n");
-
   build_test_certificate();
 
   /* Test each supported cipher suite */
@@ -723,8 +687,6 @@ FIO_SFUNC void test_cipher_suite_negotiation(void) {
 
   for (size_t i = 0; i < sizeof(cipher_suites) / sizeof(cipher_suites[0]);
        ++i) {
-    FIO_LOG_DDEBUG("  - Testing %s\n", cipher_names[i]);
-
     /* Initialize client and server */
     fio_tls13_client_s client;
     fio_tls13_client_init(&client, "test");
@@ -798,16 +760,12 @@ FIO_SFUNC void test_cipher_suite_negotiation(void) {
     fio_tls13_client_destroy(&client);
     fio_tls13_server_destroy(&server);
   }
-
-  FIO_LOG_DDEBUG("  - Cipher suite negotiation tests passed\n");
 }
 
 /* *****************************************************************************
 Test: Error Handling
 ***************************************************************************** */
 FIO_SFUNC void test_error_handling(void) {
-  FIO_LOG_DDEBUG("Testing error handling\n");
-
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
@@ -844,16 +802,12 @@ FIO_SFUNC void test_error_handling(void) {
   FIO_ASSERT(ret == -1, "Decryption should fail when not connected");
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Error handling tests passed\n");
 }
 
 /* *****************************************************************************
 Test: State Machine Transitions
 ***************************************************************************** */
 FIO_SFUNC void test_state_machine(void) {
-  FIO_LOG_DDEBUG("Testing state machine transitions\n");
-
   build_test_certificate();
 
   fio_tls13_server_s server;
@@ -927,8 +881,6 @@ FIO_SFUNC void test_state_machine(void) {
 
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - State machine transition tests passed\n");
 }
 
 /* *****************************************************************************
@@ -942,9 +894,6 @@ Modern browsers send key shares in this order:
 This tests that all 3 key shares are correctly parsed and stored.
 ***************************************************************************** */
 FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
-  FIO_LOG_DDEBUG(
-      "Testing browser ClientHello with GREASE + X25519MLKEM768 + X25519\n");
-
   /* Generate known X25519 key for verification */
   uint8_t x25519_key[32];
   for (int i = 0; i < 32; ++i)
@@ -1149,19 +1098,13 @@ FIO_SFUNC void test_browser_grease_kyber_x25519(void) {
 #endif
 
   fio_tls13_server_destroy(&server);
-
-  FIO_LOG_DDEBUG("  - Browser GREASE + X25519MLKEM768 + X25519 ClientHello "
-                 "tests passed\n");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("=== TLS 1.3 Server Tests ===\n\n");
-
   /* Unit tests */
-  FIO_LOG_DDEBUG("Unit Tests:");
   test_server_init_destroy();
   test_server_cert_config();
   test_client_hello_parsing();
@@ -1172,10 +1115,7 @@ int main(void) {
   test_error_handling();
 
   /* Integration tests */
-  FIO_LOG_DDEBUG("Integration Tests:");
   test_client_server_handshake();
   test_cipher_suite_negotiation();
-
-  FIO_LOG_DDEBUG("=== All TLS 1.3 Server Tests PASSED ===\n\n");
   return 0;
 }

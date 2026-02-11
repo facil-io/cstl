@@ -23,8 +23,6 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 Test: Nonce Construction (RFC 8446 Section 5.3)
 ***************************************************************************** */
 FIO_SFUNC void test_nonce_construction(void) {
-  FIO_LOG_DDEBUG("Testing nonce construction");
-
   /* Test case: IV and sequence number from RFC 8446 examples */
   uint8_t iv[12] =
       {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b};
@@ -61,16 +59,12 @@ FIO_SFUNC void test_nonce_construction(void) {
                           0x0b ^ 0x08};
   FIO_ASSERT(!memcmp(nonce, expected, 12),
              "Nonce construction with 64-bit sequence number failed");
-
-  FIO_LOG_DDEBUG("  Nonce construction tests passed");
 }
 
 /* *****************************************************************************
 Test: Record Header Parsing
 ***************************************************************************** */
 FIO_SFUNC void test_header_parsing(void) {
-  FIO_LOG_DDEBUG("Testing record header parsing");
-
   /* Valid application data header */
   uint8_t valid_header[] = {0x17, 0x03, 0x03, 0x00, 0x20}; /* type=23, len=32 */
   uint8_t payload[32] = {0};
@@ -111,8 +105,6 @@ FIO_SFUNC void test_header_parsing(void) {
     FIO_ASSERT(ct == (fio_tls13_content_type_e)types[i],
                "Content type should match");
   }
-
-  FIO_LOG_DDEBUG("  Header parsing tests passed");
 }
 
 /* *****************************************************************************
@@ -122,8 +114,6 @@ FIO_SFUNC void test_roundtrip(fio_tls13_cipher_type_e cipher,
                               const char *cipher_name,
                               uint8_t key_len) {
   (void)cipher_name; /* Used only in debug logging */
-  FIO_LOG_DDEBUG("Testing %s round-trip", cipher_name);
-
   /* Generate random key and IV */
   uint8_t key[32];
   uint8_t iv[12];
@@ -226,16 +216,12 @@ FIO_SFUNC void test_roundtrip(fio_tls13_cipher_type_e cipher,
   /* Clear keys */
   fio_tls13_record_keys_clear(&enc_keys);
   fio_tls13_record_keys_clear(&dec_keys);
-
-  FIO_LOG_DDEBUG("  %s round-trip tests passed", cipher_name);
 }
 
 /* *****************************************************************************
 Test: Sequence Number Increment
 ***************************************************************************** */
 FIO_SFUNC void test_sequence_number(void) {
-  FIO_LOG_DDEBUG("Testing sequence number increment");
-
   uint8_t key[16] = {0};
   uint8_t iv[12] = {0};
   fio_tls13_record_keys_s keys;
@@ -297,16 +283,12 @@ FIO_SFUNC void test_sequence_number(void) {
 
   fio_tls13_record_keys_clear(&keys);
   fio_tls13_record_keys_clear(&dec_keys);
-
-  FIO_LOG_DDEBUG("  Sequence number tests passed");
 }
 
 /* *****************************************************************************
 Test: Authentication Failure Detection
 ***************************************************************************** */
 FIO_SFUNC void test_auth_failure(void) {
-  FIO_LOG_DDEBUG("Testing authentication failure detection");
-
   uint8_t key[16];
   uint8_t iv[12];
   fio_rand_bytes(key, 16);
@@ -380,16 +362,12 @@ FIO_SFUNC void test_auth_failure(void) {
 
   fio_tls13_record_keys_clear(&enc_keys);
   fio_tls13_record_keys_clear(&dec_keys);
-
-  FIO_LOG_DDEBUG("  Authentication failure tests passed");
 }
 
 /* *****************************************************************************
 Test: Padding Removal
 ***************************************************************************** */
 FIO_SFUNC void test_padding_removal(void) {
-  FIO_LOG_DDEBUG("Testing padding removal");
-
   /* This test verifies that zero padding is correctly stripped during
    * decryption. Since we can't easily inject padding into the encrypted
    * record, we test the basic case where no padding is present. */
@@ -453,16 +431,12 @@ FIO_SFUNC void test_padding_removal(void) {
 
   fio_tls13_record_keys_clear(&enc_keys);
   fio_tls13_record_keys_clear(&dec_keys);
-
-  FIO_LOG_DDEBUG("  Padding removal tests passed");
 }
 
 /* *****************************************************************************
 Test: Maximum Record Size
 ***************************************************************************** */
 FIO_SFUNC void test_max_record_size(void) {
-  FIO_LOG_DDEBUG("Testing maximum record size handling");
-
   uint8_t key[16];
   uint8_t iv[12];
   fio_rand_bytes(key, 16);
@@ -521,16 +495,12 @@ FIO_SFUNC void test_max_record_size(void) {
   free(ciphertext);
   free(decrypted);
   fio_tls13_record_keys_clear(&keys);
-
-  FIO_LOG_DDEBUG("  Maximum record size tests passed");
 }
 
 /* *****************************************************************************
 Test: Content Type Handling
 ***************************************************************************** */
 FIO_SFUNC void test_content_types(void) {
-  FIO_LOG_DDEBUG("Testing content type handling");
-
   uint8_t key[16];
   uint8_t iv[12];
   fio_rand_bytes(key, 16);
@@ -588,16 +558,12 @@ FIO_SFUNC void test_content_types(void) {
     fio_tls13_record_keys_clear(&enc_keys);
     fio_tls13_record_keys_clear(&dec_keys);
   }
-
-  FIO_LOG_DDEBUG("  Content type tests passed");
 }
 
 /* *****************************************************************************
 Test: Record Size Limits (RFC 8446 Section 5.1) - T087
 ***************************************************************************** */
 FIO_SFUNC void test_record_size_limits(void) {
-  FIO_LOG_DDEBUG("Testing record size limits (RFC 8446 §5.1)");
-
   uint8_t key[16];
   uint8_t iv[12];
   fio_rand_bytes(key, 16);
@@ -713,15 +679,12 @@ FIO_SFUNC void test_record_size_limits(void) {
   }
 
   fio_tls13_record_keys_clear(&keys);
-  FIO_LOG_DDEBUG("  Record size limit tests passed");
 }
 
 /* *****************************************************************************
 Test: Padding Validation (RFC 8446 Section 5.4) - T088
 ***************************************************************************** */
 FIO_SFUNC void test_padding_validation(void) {
-  FIO_LOG_DDEBUG("Testing padding validation (RFC 8446 §5.4)");
-
   uint8_t key[16];
   uint8_t iv[12];
   fio_rand_bytes(key, 16);
@@ -921,15 +884,12 @@ FIO_SFUNC void test_padding_validation(void) {
 
   fio_tls13_record_keys_clear(&enc_keys);
   fio_tls13_record_keys_clear(&dec_keys);
-  FIO_LOG_DDEBUG("  Padding validation tests passed");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 Record Layer (RFC 8446 Section 5)");
-
   /* Test nonce construction */
   test_nonce_construction();
 
@@ -961,7 +921,5 @@ int main(void) {
 
   /* Test padding validation (RFC 8446 §5.4) - T088 */
   test_padding_validation();
-
-  FIO_LOG_DDEBUG("All TLS 1.3 Record Layer tests passed!");
   return 0;
 }

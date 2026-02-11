@@ -297,40 +297,6 @@ int main(void) {
     tests[i].len = strlen(tests[i].url);
     fio_url_s result = fio_url_parse(tests[i].url, tests[i].len);
     fio_url_tls_info_s tls = fio_url_is_tls(result);
-    FIO_LOG_DEBUG2("Result for: %s"
-                   "\n\t     scheme   (%zu bytes):  %.*s"
-                   "\n\t     user     (%zu bytes):  %.*s"
-                   "\n\t     password (%zu bytes):  %.*s"
-                   "\n\t     host     (%zu bytes):  %.*s"
-                   "\n\t     port     (%zu bytes):  %.*s"
-                   "\n\t     path     (%zu bytes):  %.*s"
-                   "\n\t     query    (%zu bytes):  %.*s"
-                   "\n\t     target   (%zu bytes):  %.*s\n",
-                   tests[i].url,
-                   result.scheme.len,
-                   (int)result.scheme.len,
-                   result.scheme.buf,
-                   result.user.len,
-                   (int)result.user.len,
-                   result.user.buf,
-                   result.password.len,
-                   (int)result.password.len,
-                   result.password.buf,
-                   result.host.len,
-                   (int)result.host.len,
-                   result.host.buf,
-                   result.port.len,
-                   (int)result.port.len,
-                   result.port.buf,
-                   result.path.len,
-                   (int)result.path.len,
-                   result.path.buf,
-                   result.query.len,
-                   (int)result.query.len,
-                   result.query.buf,
-                   result.target.len,
-                   (int)result.target.len,
-                   result.target.buf);
     FIO_ASSERT(
         result.scheme.len == tests[i].expected.scheme.len &&
             (!result.scheme.len || !memcmp(result.scheme.buf,

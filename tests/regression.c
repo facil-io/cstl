@@ -21,8 +21,6 @@ Test: Verify fio_memchr works correctly for lengths 0, 1, 7, 8, 64, 127, 128,
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_regression_memchr_small_lengths(void) {
-  FIO_LOG_DDEBUG("Testing fio_memchr regression: small lengths (< 128)");
-
   /* Test buffer - fill with known pattern, place token at specific positions */
   char buf[256];
   FIO_MEMSET(buf, 'X', sizeof(buf));
@@ -112,8 +110,6 @@ FIO_SFUNC void fio___test_regression_memchr_small_lengths(void) {
       }
     }
   }
-
-  FIO_LOG_DDEBUG("fio_memchr small lengths regression tests passed.");
 }
 
 /* *****************************************************************************
@@ -182,8 +178,6 @@ static fio_json_parser_callbacks_s test_json_reg_callbacks = {
 };
 
 FIO_SFUNC void fio___test_regression_json_comments(void) {
-  FIO_LOG_DDEBUG("Testing JSON comment parsing regression");
-
   /* Test 1: Minimal block comment followed by value */
   {
     const char *json = "/**/42";
@@ -290,8 +284,6 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
         fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
     FIO_ASSERT(r.err, "JSON single slash should fail (not a valid comment)");
   }
-
-  FIO_LOG_DDEBUG("JSON comment parsing regression tests passed.");
 }
 
 /* *****************************************************************************
@@ -304,8 +296,6 @@ Test: Verify Ed25519 operations work correctly, especially with edge case keys.
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_regression_ed25519_negative_carry(void) {
-  FIO_LOG_DDEBUG("Testing Ed25519 negative carry regression");
-
   /* Test with RFC 8032 test vectors - these exercise the field arithmetic */
 
   /* Test Vector 1: Empty message */
@@ -359,8 +349,6 @@ FIO_SFUNC void fio___test_regression_ed25519_negative_carry(void) {
     fio_ed25519_public_key(pk, sk);
     /* We don't check the result, just that it doesn't crash */
   }
-
-  FIO_LOG_DDEBUG("Ed25519 negative carry regression tests passed.");
 }
 
 /* *****************************************************************************
@@ -372,8 +360,6 @@ Test: Verify AES-GCM works correctly with unaligned buffers.
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_regression_aes_gcm_unaligned(void) {
-  FIO_LOG_DDEBUG("Testing AES-GCM unaligned access regression");
-
   /* Create a buffer with extra space for alignment testing */
   uint8_t buffer_storage[512 + 64] FIO_ALIGN(64);
   uint8_t key[32] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
@@ -491,8 +477,6 @@ FIO_SFUNC void fio___test_regression_aes_gcm_unaligned(void) {
       }
     }
   }
-
-  FIO_LOG_DDEBUG("AES-GCM unaligned access regression tests passed.");
 }
 
 /* *****************************************************************************
@@ -500,8 +484,6 @@ Main Test Entry Point
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_DDEBUG("Running Regression Tests");
-
   /* Part 1: fio_memchr small lengths */
   fio___test_regression_memchr_small_lengths();
 
@@ -513,7 +495,5 @@ int main(void) {
 
   /* Part 4: AES-GCM unaligned access */
   fio___test_regression_aes_gcm_unaligned();
-
-  FIO_LOG_DDEBUG("All regression tests passed.");
   return 0;
 }

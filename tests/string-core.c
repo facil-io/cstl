@@ -23,9 +23,7 @@ FIO_SFUNC size_t FIO_NAME_TEST(stl, string_core_ltoa)(char *buf,
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing Core String API.");
   { /* test basic fio_string_write functions. */
-    FIO_LOG_DDEBUG("Testing Core String writing functions.");
     char mem[16];
     fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
     FIO_ASSERT(!fio_string_write(&buf, NULL, "World", 5),
@@ -152,7 +150,6 @@ int main(void) {
                "fio_string_write_bin didn't print 16!");
   }
   { /* Testing UTF-8 */
-    FIO_LOG_DDEBUG("Testing UTF-8 support.");
     /* 4B heart, 3B heart, 3B heart resizer, 4B heart, 2B f, 1B Z */
     const char *utf8_sample =
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95\xc6\x92Z\0";
@@ -208,7 +205,6 @@ int main(void) {
     /* TODO! test fio_string_utf8_valid speed. */
   }
   { /* testing C / JSON style escaping */
-    FIO_LOG_DDEBUG("Testing C / JSON style character (un)escaping.");
     char mem[2048];
     fio_str_info_s unescaped = FIO_STR_INFO3(mem, 0, 512);
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
@@ -254,7 +250,6 @@ int main(void) {
                decoded.buf);
   }
   { /* testing Base64 Support */
-    FIO_LOG_DDEBUG("Testing Base64 encoding / decoding.");
     char mem[2048];
     fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
@@ -294,7 +289,6 @@ int main(void) {
                decoded.buf);
   }
   { /* testing Base32 Support */
-    FIO_LOG_DDEBUG("Testing Base32 encoding / decoding.");
     char mem[2048];
     fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
@@ -337,7 +331,6 @@ int main(void) {
                decoded.buf);
   }
   { /* testing URL encoding Support */
-    FIO_LOG_DDEBUG("Testing URL (percent) encoding / decoding.");
     char mem[2048];
     for (size_t i = 0; i < 256; ++i) {
       mem[i] = i;
@@ -356,7 +349,6 @@ int main(void) {
                "fio_string_write_url_enc/dec roundtrip failed!");
   }
   { /* testing HTML escaping / un-escaping Support */
-    FIO_LOG_DDEBUG("Testing HTML escaping / un-escaping (basic support)");
     char mem[3072];
     fio_str_info_s original = FIO_STR_INFO3(mem, 127, 256);
     fio_str_info_s escaped = FIO_STR_INFO3(mem + 256, 0, 2048);
@@ -414,7 +406,6 @@ int main(void) {
                "fio_string_write_html_escape should error on capacity");
   }
   { /* Comparison testing */
-    FIO_LOG_DDEBUG("Testing comparison");
     FIO_ASSERT(fio_string_is_greater(FIO_STR_INFO1((char *)"A"),
                                      FIO_STR_INFO1((char *)"")),
                "fio_string_is_greater failed for A vs __");
@@ -438,7 +429,6 @@ int main(void) {
                "fio_string_is_greater failed for Hello world");
   }
   { /* testing fio_bstr helpers */
-    FIO_LOG_DDEBUG("Testing fio_bstr helpers (micro test).");
     char *str = fio_bstr_write(NULL, "Hello", 5);
     FIO_ASSERT(fio_bstr_info(str).len == 5 &&
                    !memcmp(str, "Hello", fio_bstr_info(str).len + 1),
@@ -469,9 +459,6 @@ int main(void) {
   { /* testing readfile */
     char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
     FIO_ASSERT(s && fio_bstr_len(s), "fio_bstr_readfile failed");
-    FIO_LOG_DEBUG("readfile returned %zu bytes, starting with:\n%s",
-                  fio_bstr_len(s),
-                  s);
     char *find_z = (char *)FIO_MEMCHR(s, 'Z', fio_bstr_len(s));
     if (find_z) {
       int fd = open(__FILE__, 0, "r"); // fio_filename_open(__FILE__, 0);

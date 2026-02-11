@@ -122,7 +122,6 @@ FIO_SFUNC uintptr_t FIO_NAME_TEST(stl, xmask_wrapper)(char *buf, size_t len) {
 
 /* tests Risky Hash and Stable Hash... takes a while (speed tests as well) */
 FIO_SFUNC void FIO_NAME_TEST(stl, risky)(void) {
-  FIO_LOG_DDEBUG("Testing Risky Hash and Risky Mask (sanity).");
   {
     char *str = (char *)"testing that risky hash is always the same hash";
     const size_t len = FIO_STRLEN(str);
@@ -323,8 +322,6 @@ Random Number Generation Edge Cases
 ***************************************************************************** */
 
 static void fio___test_random_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing random number generation edge cases");
-
   /* Test: fio_rand64 produces non-zero values */
   {
     uint64_t r = fio_rand64();
@@ -358,7 +355,6 @@ static void fio___test_random_edge_cases(void) {
     uint8_t buf[1] = {0};
     fio_rand_bytes(buf, 1);
     /* Can't really assert much here, just that it doesn't crash */
-    FIO_LOG_DDEBUG("  fio_rand_bytes(1) = 0x%02x", buf[0]);
   }
 
   /* Test: fio_rand_bytes with small buffer (7 bytes - not aligned) */
@@ -425,8 +421,6 @@ static void fio___test_random_edge_cases(void) {
     fio_rand_bytes(NULL, 0);
     /* If we get here, it didn't crash */
   }
-
-  FIO_LOG_DDEBUG("Random edge cases: PASSED");
 }
 
 int main(void) {
@@ -434,9 +428,6 @@ int main(void) {
   const size_t test_len = (1UL << 21);
   uint64_t *rs =
       (uint64_t *)FIO_MEM_REALLOC(NULL, 0, sizeof(*rs) * test_len, 0);
-  FIO_LOG_DDEBUG("Testing randomness - bit frequency / hemming distance / "
-                 "chi-square (%zu random bytes).",
-                 (size_t)(sizeof(*rs) * test_len));
   clock_t start, end;
   FIO_ASSERT_ALLOC(rs);
 
@@ -550,7 +541,6 @@ int main(void) {
     for (size_t i = 0; i < data.len; ++i)
       data.buf[i] = (char)(i & 255);
     uint64_t h = fio_stable_hash(data.buf, 1024, 0);
-    FIO_LOG_DDEBUG2("Stable Hash Value: %p", (void *)h);
     FIO_ASSERT(h == (uint64_t)0x5DC4DAD435547F67ULL,
                "Stable Hash Value Error!");
   }

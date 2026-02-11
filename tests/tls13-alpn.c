@@ -12,8 +12,6 @@ Tests for Application-Layer Protocol Negotiation (RFC 7301) support.
 Test: ALPN Extension Building (ClientHello)
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alpn_build(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ALPN extension building...");
-
   uint8_t buffer[256];
   size_t len;
 
@@ -37,16 +35,12 @@ FIO_SFUNC void fio___test_tls13_alpn_build(void) {
 
   len = fio___tls13_write_ext_alpn(buffer, NULL);
   FIO_ASSERT(len == 0, "NULL protocols should return 0");
-
-  FIO_LOG_DDEBUG("  PASS: ALPN extension building");
 }
 
 /* *****************************************************************************
 Test: ALPN Extension Parsing (ClientHello)
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alpn_parse(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ALPN extension parsing...");
-
   /* Build a valid ALPN extension with "h2" and "http/1.1" */
   uint8_t ext_data[] = {
       /* ALPN extension list length (2 bytes) */
@@ -93,16 +87,12 @@ FIO_SFUNC void fio___test_tls13_alpn_parse(void) {
                                            protocol_lens,
                                            8);
   FIO_ASSERT(count == 0, "Empty extension should return 0 protocols");
-
-  FIO_LOG_DDEBUG("  PASS: ALPN extension parsing");
 }
 
 /* *****************************************************************************
 Test: ALPN Protocol Selection
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alpn_select(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ALPN protocol selection...");
-
   /* Use static strings to ensure they're properly null-terminated */
   static const char proto_h2[] = "h2";
   static const char proto_http11[] = "http/1.1";
@@ -184,16 +174,12 @@ FIO_SFUNC void fio___test_tls13_alpn_select(void) {
                                    &selected_len,
                                    sizeof(selected));
   FIO_ASSERT(result == -1, "Selection should fail with empty server list");
-
-  FIO_LOG_DDEBUG("  PASS: ALPN protocol selection");
 }
 
 /* *****************************************************************************
 Test: ALPN Response Building (EncryptedExtensions)
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alpn_response(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ALPN response building...");
-
   uint8_t buffer[64];
   size_t len;
 
@@ -230,16 +216,12 @@ FIO_SFUNC void fio___test_tls13_alpn_response(void) {
   FIO_ASSERT(selected_len == 8, "Selected length should be 8");
   FIO_ASSERT(FIO_MEMCMP(selected, "http/1.1", 8) == 0,
              "Selected should be 'http/1.1'");
-
-  FIO_LOG_DDEBUG("  PASS: ALPN response building");
 }
 
 /* *****************************************************************************
 Test: Client ALPN API
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_client_alpn_api(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 client ALPN API...");
-
   fio_tls13_client_s client;
   FIO_MEMSET(&client, 0, sizeof(client));
 
@@ -271,16 +253,12 @@ FIO_SFUNC void fio___test_tls13_client_alpn_api(void) {
   fio_tls13_client_alpn_set(&client, "");
   FIO_ASSERT(client.alpn_protocols_len == 0,
              "Empty string should clear ALPN protocols");
-
-  FIO_LOG_DDEBUG("  PASS: Client ALPN API");
 }
 
 /* *****************************************************************************
 Test: Server ALPN API
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_server_alpn_api(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 server ALPN API...");
-
   fio_tls13_server_s server;
   FIO_MEMSET(&server, 0, sizeof(server));
 
@@ -312,16 +290,12 @@ FIO_SFUNC void fio___test_tls13_server_alpn_api(void) {
   fio_tls13_server_alpn_set(&server, "");
   FIO_ASSERT(server.alpn_supported_len == 0,
              "Empty string should clear ALPN supported");
-
-  FIO_LOG_DDEBUG("  PASS: Server ALPN API");
 }
 
 /* *****************************************************************************
 Test: ALPN in ClientHello Round-Trip
 ***************************************************************************** */
 FIO_SFUNC void fio___test_tls13_alpn_client_hello_roundtrip(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 ALPN in ClientHello round-trip...");
-
   fio_tls13_client_s client;
   FIO_MEMSET(&client, 0, sizeof(client));
 
@@ -356,8 +330,6 @@ FIO_SFUNC void fio___test_tls13_alpn_client_hello_roundtrip(void) {
              "Second protocol length should be 8");
   FIO_ASSERT(FIO_MEMCMP(ch.alpn_protocols[1], "http/1.1", 8) == 0,
              "Second protocol should be 'http/1.1'");
-
-  FIO_LOG_DDEBUG("  PASS: ALPN in ClientHello round-trip");
 }
 
 /* *****************************************************************************

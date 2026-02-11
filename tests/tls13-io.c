@@ -34,8 +34,6 @@ Test: Context Creation and Destruction
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_context(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 IO context creation/destruction\n");
-
   /* Get TLS 1.3 IO functions */
   fio_io_functions_s funcs = fio_tls13_io_functions();
   FIO_ASSERT(funcs.build_context, "build_context should not be NULL");
@@ -65,8 +63,6 @@ FIO_SFUNC void fio___test_tls13_io_context(void) {
 
   /* Free TLS configuration */
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  - Context creation/destruction: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -74,8 +70,6 @@ Test: Self-Signed Certificate Generation
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_self_signed(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 self-signed certificate generation\n");
-
   /* Get TLS 1.3 IO functions */
   fio_io_functions_s funcs = fio_tls13_io_functions();
 
@@ -90,8 +84,6 @@ FIO_SFUNC void fio___test_tls13_io_self_signed(void) {
   /* Free context */
   funcs.free_context(server_ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  - Self-signed certificate generation: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -99,8 +91,6 @@ Test: IO Functions Structure
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_functions_struct(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 IO functions structure\n");
-
   fio_io_functions_s funcs = fio_tls13_io_functions();
 
   /* Verify all function pointers are set */
@@ -112,8 +102,6 @@ FIO_SFUNC void fio___test_tls13_io_functions_struct(void) {
   FIO_ASSERT(funcs.flush != NULL, "flush must be set");
   FIO_ASSERT(funcs.cleanup != NULL, "cleanup must be set");
   FIO_ASSERT(funcs.finish != NULL, "finish must be set");
-
-  FIO_LOG_DDEBUG("  - IO functions structure: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -121,8 +109,6 @@ Test: Default TLS Functions Registration
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_default_registration(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 default registration\n");
-
   /* Get current default functions */
   fio_io_functions_s defaults = fio_io_tls_default_functions(NULL);
 
@@ -131,8 +117,6 @@ FIO_SFUNC void fio___test_tls13_io_default_registration(void) {
              "default build_context should be set");
   FIO_ASSERT(defaults.read != NULL, "default read should be set");
   FIO_ASSERT(defaults.write != NULL, "default write should be set");
-
-  FIO_LOG_DDEBUG("  - Default TLS functions registration: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -140,8 +124,6 @@ Test: TLS Configuration with Certificates
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_tls_config(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 with fio_io_tls_s configuration\n");
-
   /* Create TLS configuration */
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls, "fio_io_tls_new should return non-NULL");
@@ -161,8 +143,6 @@ FIO_SFUNC void fio___test_tls13_io_tls_config(void) {
   /* Cleanup */
   funcs.free_context(ctx);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  - TLS configuration: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -170,8 +150,6 @@ Test: Multiple Context Creation
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_multiple_contexts(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 multiple context creation\n");
-
   fio_io_functions_s funcs = fio_tls13_io_functions();
   fio_io_tls_s *tls = fio_io_tls_new();
 
@@ -196,8 +174,6 @@ FIO_SFUNC void fio___test_tls13_io_multiple_contexts(void) {
   funcs.free_context(client1);
   funcs.free_context(client2);
   fio_io_tls_free(tls);
-
-  FIO_LOG_DDEBUG("  - Multiple context creation: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -205,8 +181,6 @@ Test: Underlying TLS 1.3 Client/Server Handshake (Unit Test)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 client/server handshake (unit test)\n");
-
   /* Generate self-signed certificate for server */
   fio_x509_keypair_s keypair;
   FIO_ASSERT(fio_x509_keypair_ed25519(&keypair) == 0,
@@ -253,8 +227,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
   /* Client sends ClientHello */
   int ch_len = fio_tls13_client_start(&client, client_out, sizeof(client_out));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
-  FIO_LOG_DDEBUG("  - ClientHello: %d bytes\n", ch_len);
-
   /* Server processes ClientHello and sends response */
   int consumed = fio_tls13_server_process(&server,
                                           client_out,
@@ -264,8 +236,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
                                           &out_len);
   FIO_ASSERT(consumed > 0, "Server should process ClientHello");
   FIO_ASSERT(out_len > 0, "Server should generate response");
-  FIO_LOG_DDEBUG("  - Server response: %zu bytes\n", out_len);
-
   /* Client processes server response */
   size_t client_response_len = 0;
   size_t offset = 0;
@@ -285,8 +255,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
 
   FIO_ASSERT(fio_tls13_client_is_connected(&client),
              "Client should be connected after handshake");
-  FIO_LOG_DDEBUG("  - Client connected: YES\n");
-
   /* Server processes client Finished */
   if (client_response_len > 0) {
     consumed = fio_tls13_server_process(&server,
@@ -300,8 +268,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
 
   FIO_ASSERT(fio_tls13_server_is_connected(&server),
              "Server should be connected after handshake");
-  FIO_LOG_DDEBUG("  - Server connected: YES\n");
-
   /* Test application data exchange */
   const char *test_msg = "Hello, TLS 1.3!";
   size_t test_msg_len = FIO_STRLEN(test_msg);
@@ -313,8 +279,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
                                          (const uint8_t *)test_msg,
                                          test_msg_len);
   FIO_ASSERT(enc_len > 0, "Client encryption should succeed");
-  FIO_LOG_DDEBUG("  - Encrypted message: %d bytes\n", enc_len);
-
   /* Server decrypts message */
   uint8_t decrypted[256];
   int dec_len = fio_tls13_server_decrypt(&server,
@@ -325,15 +289,11 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
   FIO_ASSERT(dec_len == (int)test_msg_len, "Decrypted length should match");
   FIO_ASSERT(FIO_MEMCMP(decrypted, test_msg, test_msg_len) == 0,
              "Decrypted message should match original");
-  FIO_LOG_DDEBUG("  - Decrypted message: '%.*s'\n", dec_len, decrypted);
-
   /* Cleanup */
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
   fio_x509_keypair_clear(&keypair);
   FIO_MEM_FREE(cert, cert_size);
-
-  FIO_LOG_DDEBUG("  - Client/server handshake unit test: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -341,8 +301,6 @@ Test: P-256 Client/Server Handshake (Unit Test)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 P-256 client/server handshake (unit test)\n");
-
   /* Generate P-256 self-signed certificate for server */
   fio_x509_keypair_s keypair;
   FIO_ASSERT(fio_x509_keypair_p256(&keypair) == 0,
@@ -391,8 +349,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
   /* Client sends ClientHello */
   int ch_len = fio_tls13_client_start(&client, client_out, sizeof(client_out));
   FIO_ASSERT(ch_len > 0, "ClientHello generation should succeed");
-  FIO_LOG_DDEBUG("  - ClientHello: %d bytes\n", ch_len);
-
   /* Server processes ClientHello and sends response */
   int consumed = fio_tls13_server_process(&server,
                                           client_out,
@@ -402,8 +358,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
                                           &out_len);
   FIO_ASSERT(consumed > 0, "Server should process ClientHello (P-256)");
   FIO_ASSERT(out_len > 0, "Server should generate response (P-256)");
-  FIO_LOG_DDEBUG("  - Server response: %zu bytes\n", out_len);
-
   /* Client processes server response */
   size_t client_response_len = 0;
   size_t offset = 0;
@@ -423,8 +377,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
 
   FIO_ASSERT(fio_tls13_client_is_connected(&client),
              "Client should be connected after P-256 handshake");
-  FIO_LOG_DDEBUG("  - Client connected: YES\n");
-
   /* Server processes client Finished */
   if (client_response_len > 0) {
     consumed = fio_tls13_server_process(&server,
@@ -438,8 +390,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
 
   FIO_ASSERT(fio_tls13_server_is_connected(&server),
              "Server should be connected after P-256 handshake");
-  FIO_LOG_DDEBUG("  - Server connected: YES\n");
-
   /* Test application data exchange */
   const char *test_msg = "Hello, TLS 1.3 with P-256!";
   size_t test_msg_len = FIO_STRLEN(test_msg);
@@ -451,8 +401,6 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
                                          (const uint8_t *)test_msg,
                                          test_msg_len);
   FIO_ASSERT(enc_len > 0, "Client encryption should succeed (P-256)");
-  FIO_LOG_DDEBUG("  - Encrypted message: %d bytes\n", enc_len);
-
   /* Server decrypts message */
   uint8_t decrypted[256];
   int dec_len = fio_tls13_server_decrypt(&server,
@@ -464,15 +412,11 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
              "Decrypted length should match (P-256)");
   FIO_ASSERT(FIO_MEMCMP(decrypted, test_msg, test_msg_len) == 0,
              "Decrypted message should match original (P-256)");
-  FIO_LOG_DDEBUG("  - Decrypted message: '%.*s'\n", dec_len, decrypted);
-
   /* Cleanup */
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
   fio_x509_keypair_clear(&keypair);
   FIO_MEM_FREE(cert, cert_size);
-
-  FIO_LOG_DDEBUG("  - P-256 client/server handshake unit test: PASSED\n");
 }
 
 /* *****************************************************************************
@@ -480,8 +424,6 @@ Main Test Function
 ***************************************************************************** */
 
 void fio___test_tls13_io(void) {
-  FIO_LOG_DDEBUG("=== Testing TLS 1.3 IO Functions Interface ===\n\n");
-
   fio___test_tls13_io_functions_struct();
   fio___test_tls13_io_context();
   fio___test_tls13_io_self_signed();
@@ -493,8 +435,6 @@ void fio___test_tls13_io(void) {
 
   /* Run deferred tasks to clean up contexts */
   fio_queue_perform_all(fio_io_queue());
-
-  FIO_LOG_DDEBUG("=== TLS 1.3 IO Functions Tests Complete ===\n\n");
 }
 
 /* *****************************************************************************

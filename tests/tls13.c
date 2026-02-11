@@ -88,8 +88,6 @@ Test: Real Server Connection
 ***************************************************************************** */
 FIO_SFUNC int test_real_server_connection(const char *hostname,
                                           const char *port) {
-  FIO_LOG_DDEBUG("Testing TLS 1.3 connection to %s:%s", hostname, port);
-
   int result = -1;
   int fd = -1;
   fio_tls13_client_s client = {0};
@@ -113,8 +111,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
     result = 0; /* Skip, not fail */
     goto cleanup;
   }
-  FIO_LOG_DEBUG2("  TCP connection established (fd=%d)", fd);
-
   /* Wait for connection to complete */
   short events = fio_sock_wait_io(fd, POLLOUT, TLS13_TEST_TIMEOUT_MS);
   if (!(events & POLLOUT)) {
@@ -125,9 +121,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
 
   /* 2. Initialize TLS client */
   fio_tls13_client_init(&client, hostname);
-  FIO_LOG_DEBUG2("  TLS client initialized (state=%s)",
-                 fio_tls13_client_state_name(&client));
-
   /* 3. Generate and send ClientHello */
   int len = fio_tls13_client_start(&client, buf, TLS13_BUF_SIZE);
   if (len <= 0) {
@@ -140,11 +133,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
 
   /* Debug: verify record header */
   if (len >= 5) {
-    FIO_LOG_DEBUG2("  Record: type=%02x version=%02x%02x length=%d",
-                   buf[0],
-                   buf[1],
-                   buf[2],
-                   (buf[3] << 8) | buf[4]);
     /* Verify it's a handshake record */
     if (buf[0] != 0x16) {
       FIO_LOG_ERROR("  Invalid record type (expected 0x16 handshake)");
@@ -162,8 +150,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
     FIO_LOG_ERROR("  Failed to send ClientHello (sent=%zd)", sent);
     goto cleanup;
   }
-  FIO_LOG_DDEBUG("  Sent ClientHello (%d bytes)", len);
-
   /* 4. Receive and process server response (may be multiple records) */
   int handshake_attempts = 0;
   const int max_handshake_attempts = 50;
@@ -186,24 +172,11 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
       goto cleanup;
     }
     buf_len += (size_t)received;
-
-    FIO_LOG_DEBUG2("  Received %zd bytes (total buffered=%zu, state=%s)",
-                   received,
-                   buf_len,
-                   fio_tls13_client_state_name(&client));
-
     /* Process all complete records in buffer */
     size_t offset = 0;
     while (offset < buf_len) {
       /* Debug: show record header at current offset */
       if (offset + 5 <= buf_len) {
-        FIO_LOG_DEBUG2(
-            "    Record at offset %zu: type=%02x version=%02x%02x length=%d",
-            offset,
-            buf[offset],
-            buf[offset + 1],
-            buf[offset + 2],
-            (buf[offset + 3] << 8) | buf[offset + 4]);
       }
 
       size_t out_len = 0;
@@ -213,13 +186,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
                                               out_buf,
                                               TLS13_BUF_SIZE,
                                               &out_len);
-
-      FIO_LOG_DEBUG2(
-          "    Process result: consumed=%d, out_len=%zu, new_state=%s",
-          consumed,
-          out_len,
-          fio_tls13_client_state_name(&client));
-
       if (consumed < 0) {
         FIO_LOG_ERROR("  Handshake processing error (state=%s, alert=%d)",
                       fio_tls13_client_state_name(&client),
@@ -228,8 +194,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
       }
 
       if (consumed == 0) {
-        FIO_LOG_DEBUG2("    Need more data (buffered=%zu bytes)",
-                       buf_len - offset);
         break; /* Need more data */
       }
 
@@ -242,7 +206,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
           FIO_LOG_ERROR("  Failed to send handshake response");
           goto cleanup;
         }
-        FIO_LOG_DDEBUG("  Sent handshake response (%zu bytes)", out_len);
       }
     }
 
@@ -250,7 +213,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
     if (offset > 0 && offset < buf_len) {
       FIO_MEMMOVE(buf, buf + offset, buf_len - offset);
       buf_len -= offset;
-      FIO_LOG_DEBUG2("    Compacted buffer: %zu bytes remaining", buf_len);
     } else if (offset >= buf_len) {
       buf_len = 0;
     }
@@ -275,34 +237,9 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
                   fio_tls13_client_state_name(&client));
     goto cleanup;
   }
-
-  FIO_LOG_DDEBUG("  TLS 1.3 handshake complete!");
-  FIO_LOG_DDEBUG(
-      "    Cipher suite: 0x%04X (%s)",
-      client.cipher_suite,
-      client.cipher_suite == FIO_TLS13_CIPHER_SUITE_AES_128_GCM_SHA256
-          ? "AES-128-GCM-SHA256"
-      : client.cipher_suite == FIO_TLS13_CIPHER_SUITE_CHACHA20_POLY1305_SHA256
-          ? "ChaCha20-Poly1305-SHA256"
-      : client.cipher_suite == FIO_TLS13_CIPHER_SUITE_AES_256_GCM_SHA384
-          ? "AES-256-GCM-SHA384"
-          : "Unknown");
-
   /* Report certificate verification status (Phase 2) */
-  FIO_LOG_DDEBUG("    Certificate verification:");
-  FIO_LOG_DDEBUG("      Signature scheme: 0x%04X (%s)",
-                 client.server_signature_scheme,
-                 tls13_signature_scheme_name(client.server_signature_scheme));
-  FIO_LOG_DDEBUG("      CertificateVerify: %s",
-                 client.cert_verified ? "PASS" : "FAIL");
-  FIO_LOG_DDEBUG("      Chain validation:  %s",
-                 client.chain_verified ? "PASS" : "FAIL");
-  FIO_LOG_DDEBUG("      Certificates in chain: %u", client.cert_chain_count);
   if (fio_tls13_client_is_cert_verified(&client)) {
-    FIO_LOG_DDEBUG("      Overall: VERIFIED");
   } else {
-    FIO_LOG_DDEBUG("      Overall: NOT VERIFIED (error=%d)",
-                   fio_tls13_client_get_cert_error(&client));
   }
 
   /* 5. Send HTTP request */
@@ -331,10 +268,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
     FIO_LOG_ERROR("  Failed to send encrypted request");
     goto cleanup;
   }
-  FIO_LOG_DDEBUG("  Sent encrypted HTTP request (%d plaintext -> %d encrypted)",
-                 request_len,
-                 len);
-
   /* 6. Receive HTTP response (may include post-handshake messages) */
   uint8_t plaintext[TLS13_BUF_SIZE];
   int plain_len = -1;
@@ -370,9 +303,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
         break; /* No more data */
       }
       response_buf_len += (size_t)received;
-      FIO_LOG_DEBUG2("  Received %zd bytes (total buffered: %zu)",
-                     received,
-                     response_buf_len);
     }
 
     /* Process records in the buffer */
@@ -390,12 +320,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
       /* Check if we have the complete record */
       if (response_buf_len - offset < record_total_len)
         break;
-
-      FIO_LOG_DEBUG2("    Processing record at offset %zu (type=%02x, len=%u)",
-                     offset,
-                     buf[offset],
-                     record_payload_len);
-
       /* Try to decrypt this record */
       plain_len = fio_tls13_client_decrypt(&client,
                                            plaintext,
@@ -410,7 +334,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
         break;
       } else if (plain_len == 0) {
         /* Post-handshake message (e.g., NewSessionTicket), continue */
-        FIO_LOG_DEBUG2("    Skipped post-handshake message");
         continue;
       } else {
         /* Decryption error */
@@ -439,8 +362,6 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
 
   if (plain_len > 0) {
     plaintext[plain_len] = '\0';
-    FIO_LOG_DDEBUG("  Received HTTP response (%d bytes decrypted)", plain_len);
-
     /* Print first line of response */
     char *end_of_line = strchr((char *)plaintext, '\r');
     if (!end_of_line)
@@ -454,10 +375,8 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
 
     /* Verify we got an HTTP response */
     if (plain_len >= 4 && FIO_MEMCMP(plaintext, "HTTP", 4) == 0) {
-      FIO_LOG_DDEBUG("  PASS: Valid HTTP response received!");
       result = 1;
     } else {
-      FIO_LOG_DDEBUG("  Decrypted data doesn't look like HTTP response");
       tls13_print_hex("Decrypted data",
                       plaintext,
                       (size_t)plain_len > 64 ? 64 : (size_t)plain_len);
@@ -491,8 +410,6 @@ This test uses the RFC 8448 test vectors for a complete handshake,
 allowing testing without network access.
 ***************************************************************************** */
 FIO_SFUNC void test_rfc8448_vectors(void) {
-  FIO_LOG_DDEBUG("Testing with RFC 8448 handshake structure");
-
   /* This is a simplified test that verifies the handshake message building
    * works correctly without needing actual server messages.
    *
@@ -528,16 +445,12 @@ FIO_SFUNC void test_rfc8448_vectors(void) {
   FIO_ASSERT(record_len == 4 + hs_len, "Handshake length should match");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - RFC 8448 structure tests passed");
 }
 
 /* *****************************************************************************
 Test: Handshake State Machine Transitions
 ***************************************************************************** */
 FIO_SFUNC void test_state_machine(void) {
-  FIO_LOG_DDEBUG("Testing handshake state machine");
-
   fio_tls13_client_s client;
 
   /* Test initial state */
@@ -569,16 +482,12 @@ FIO_SFUNC void test_state_machine(void) {
   FIO_ASSERT(enc_len == -1, "Encrypt should fail when not connected");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - State machine tests passed");
 }
 
 /* *****************************************************************************
 Test: Error Recovery and Cleanup
 ***************************************************************************** */
 FIO_SFUNC void test_error_cleanup(void) {
-  FIO_LOG_DDEBUG("Testing error recovery and cleanup");
-
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
 
@@ -605,16 +514,12 @@ FIO_SFUNC void test_error_cleanup(void) {
   uint8_t zeros[32] = {0};
   FIO_ASSERT(FIO_MEMCMP(client.shared_secret, zeros, 32) == 0,
              "Secrets should be zeroed after destroy");
-
-  FIO_LOG_DDEBUG("  - Error cleanup tests passed");
 }
 
 /* *****************************************************************************
 Test: Multiple Cipher Suites
 ***************************************************************************** */
 FIO_SFUNC void test_cipher_suite_support(void) {
-  FIO_LOG_DDEBUG("Testing cipher suite support");
-
   /* Test that we advertise supported cipher suites */
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
@@ -655,8 +560,6 @@ FIO_SFUNC void test_cipher_suite_support(void) {
   FIO_ASSERT(found_aes256, "AES-256-GCM should be offered");
 
   fio_tls13_client_destroy(&client);
-
-  FIO_LOG_DDEBUG("  - Cipher suite support tests passed");
 }
 
 /* *****************************************************************************

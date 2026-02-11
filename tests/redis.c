@@ -114,7 +114,6 @@ FIO_SFUNC void redis_on_ping_reply(fio_pubsub_engine_s *e,
   if (FIOBJ_TYPE(reply) == FIOBJ_T_STRING) {
     fio_str_info_s s = fiobj2cstr(reply);
     if (s.len == 4 && !memcmp(s.buf, "PONG", 4)) {
-      FIO_LOG_DDEBUG("  PASS: PING returned PONG");
       test_state.phase = TEST_PHASE_SET;
       redis_run_next_test();
       return;
@@ -178,7 +177,6 @@ FIO_SFUNC void redis_on_del_reply(fio_pubsub_engine_s *e,
 
   /* DEL returns integer - we don't care about the value */
   if (FIOBJ_TYPE(reply) == FIOBJ_T_NUMBER) {
-    FIO_LOG_DDEBUG("  PASS: SET/GET working correctly");
     test_state.phase = TEST_PHASE_INCR_DEL;
     redis_run_next_test();
     return;
@@ -223,8 +221,6 @@ FIO_SFUNC void redis_on_incr_cleanup_reply(fio_pubsub_engine_s *e,
   (void)e;
   (void)reply;
   (void)udata;
-
-  FIO_LOG_DDEBUG("  PASS: INCR working correctly");
   test_state.phase = TEST_PHASE_PUBSUB_ROUNDTRIP;
   redis_run_next_test();
 }
@@ -250,7 +246,6 @@ FIO_SFUNC void redis_pubsub_roundtrip_on_message(fio_pubsub_msg_s *msg) {
   if (msg->message.len == strlen(PUBSUB_TEST_MESSAGE) &&
       !memcmp(msg->message.buf, PUBSUB_TEST_MESSAGE, msg->message.len)) {
     test_state.pubsub_msg_received = 1;
-    FIO_LOG_DDEBUG("  PASS: Pub/Sub roundtrip message received");
     /* Add a small delay before starting dedup test */
     fio_io_run_every(.fn = redis_start_dedup_test,
                      .every = 100,
@@ -322,8 +317,6 @@ FIO_SFUNC int redis_pubsub_dedup_verify(void *udata1, void *udata2) {
 
     /* We expect 2 messages - one per subscription (channel + pattern) */
     if (test_state.pubsub_dedup_msg_count == 2) {
-      FIO_LOG_DDEBUG("  PASS: Deduplication working (2 messages, one per "
-                     "subscription)");
       test_state.phase = TEST_PHASE_DONE;
       redis_run_next_test();
     } else if (test_state.pubsub_dedup_msg_count > 2) {
@@ -378,7 +371,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_PING:
-    FIO_LOG_DDEBUG("Testing Redis PING command");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("PING", 4));
     r = fio_redis_send(redis, cmd, redis_on_ping_reply, NULL);
@@ -391,7 +383,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_SET:
-    FIO_LOG_DDEBUG("Testing Redis SET/GET commands");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("SET", 3));
     fiobj_array_push(cmd, fiobj_str_new_cstr(TEST_KEY, strlen(TEST_KEY)));
@@ -432,7 +423,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_INCR_DEL:
-    FIO_LOG_DDEBUG("Testing Redis INCR command");
     cmd = fiobj_array_new();
     fiobj_array_push(cmd, fiobj_str_new_cstr("DEL", 3));
     fiobj_array_push(
@@ -478,7 +468,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_PUBSUB_ROUNDTRIP:
-    FIO_LOG_DDEBUG("Testing Redis Pub/Sub roundtrip");
     /* Reset state */
     test_state.pubsub_msg_received = 0;
 
@@ -504,8 +493,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_PUBSUB_PATTERN_DEDUP:
-    FIO_LOG_DDEBUG("Testing Redis Pub/Sub pattern deduplication");
-
     /* Reset state */
     test_state.pubsub_dedup_msg_count = 0;
 
@@ -537,8 +524,6 @@ FIO_SFUNC void redis_run_next_test(void) {
     break;
 
   case TEST_PHASE_DONE:
-    FIO_LOG_DDEBUG("Redis tests complete!");
-
     /* Cleanup pub/sub subscriptions */
     if (test_state.pubsub_sub_handle) {
       fio_pubsub_unsubscribe(.subscription_handle_ptr =
@@ -589,16 +574,10 @@ Main
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_DDEBUG("==================================");
-  FIO_LOG_DDEBUG("Testing Redis Module");
-
   if (!redis_is_available()) {
     fprintf(stderr, "SKIPPED! no local redis database to test against\n");
     return 0;
   }
-
-  FIO_LOG_DDEBUG("(Redis detected on localhost:6379)");
-
   /* Create Redis engine */
   fio_pubsub_engine_s *redis = fio_redis_new(.url = "redis://localhost:6379");
   FIO_ASSERT_ALLOC(redis);

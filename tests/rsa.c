@@ -70,8 +70,6 @@ Test: Byte Conversion Helpers
 ***************************************************************************** */
 
 static void test_rsa_byte_conversion(void) {
-  FIO_LOG_DDEBUG("Testing RSA byte conversion helpers...");
-
   /* Test big-endian to little-endian conversion */
   uint8_t bytes[16] = {0x01,
                        0x02,
@@ -111,8 +109,6 @@ static void test_rsa_byte_conversion(void) {
   fio___rsa_words_to_bytes(bytes2, 16, words, 2);
   FIO_ASSERT(FIO_MEMCMP(bytes, bytes2, 16) == 0,
              "Round-trip conversion failed");
-
-  FIO_LOG_DDEBUG("  Byte conversion: PASSED");
 }
 
 /* *****************************************************************************
@@ -125,8 +121,6 @@ For e = 65537, this should give predictable results.
 ***************************************************************************** */
 
 static void test_rsa_modexp(void) {
-  FIO_LOG_DDEBUG("Testing RSA modular exponentiation...");
-
   /* Simple test: 2^65537 mod (2^64 + 1) using small numbers */
   /* Actually, let's just test that the function doesn't crash
      and produces non-zero output for the test key */
@@ -161,8 +155,6 @@ static void test_rsa_modexp(void) {
     }
   }
   FIO_ASSERT(!all_zero, "RSA public op returned all zeros");
-
-  FIO_LOG_DDEBUG("  Modular exponentiation: PASSED");
 }
 
 /* *****************************************************************************
@@ -176,8 +168,6 @@ For now, we test the padding verification logic with synthetic data.
 ***************************************************************************** */
 
 static void test_rsa_pkcs1_padding(void) {
-  FIO_LOG_DDEBUG("Testing PKCS#1 v1.5 padding verification...");
-
   /* Create a properly formatted PKCS#1 v1.5 message:
    * EM = 0x00 || 0x01 || PS || 0x00 || DigestInfo || Hash
    *
@@ -253,8 +243,6 @@ static void test_rsa_pkcs1_padding(void) {
   /* Verify hash */
   FIO_ASSERT(FIO_MEMCMP(em + 3 + ps_len + 19, test_hash, 32) == 0,
              "Hash mismatch");
-
-  FIO_LOG_DDEBUG("  PKCS#1 v1.5 padding format: PASSED");
 }
 
 /* *****************************************************************************
@@ -264,8 +252,6 @@ Test the RSA-PSS padding structure without a real signature.
 ***************************************************************************** */
 
 static void test_rsa_pss_structure(void) {
-  FIO_LOG_DDEBUG("Testing RSA-PSS structure...");
-
   /* RSA-PSS EM format:
    * EM = maskedDB || H || 0xBC
    *
@@ -298,8 +284,6 @@ static void test_rsa_pss_structure(void) {
              "Total should equal em_len: %zu vs %zu",
              total,
              em_len);
-
-  FIO_LOG_DDEBUG("  RSA-PSS structure: PASSED");
 }
 
 /* *****************************************************************************
@@ -307,8 +291,6 @@ Test: MGF1 (Mask Generation Function)
 ***************************************************************************** */
 
 static void test_rsa_mgf1(void) {
-  FIO_LOG_DDEBUG("Testing MGF1 mask generation...");
-
   /* Test MGF1 with a known seed */
   uint8_t seed[32];
   FIO_MEMSET(seed, 0x42, 32);
@@ -337,8 +319,6 @@ static void test_rsa_mgf1(void) {
   fio___rsa_mgf1(mask2, 64, seed2, 32, FIO_RSA_HASH_SHA256);
   FIO_ASSERT(FIO_MEMCMP(mask, mask2, 64) != 0,
              "Different seeds should produce different masks");
-
-  FIO_LOG_DDEBUG("  MGF1: PASSED");
 }
 
 /* *****************************************************************************
@@ -346,8 +326,6 @@ Test: Invalid Inputs
 ***************************************************************************** */
 
 static void test_rsa_invalid_inputs(void) {
-  FIO_LOG_DDEBUG("Testing RSA invalid input handling...");
-
   uint8_t sig[256], hash[32];
   FIO_MEMSET(sig, 0, sizeof(sig));
   FIO_MEMSET(hash, 0xAB, sizeof(hash));
@@ -379,8 +357,6 @@ static void test_rsa_invalid_inputs(void) {
   FIO_ASSERT(
       fio_rsa_verify_pkcs1(sig, 128, hash, 32, FIO_RSA_HASH_SHA256, &key) == -1,
       "Signature length mismatch should fail");
-
-  FIO_LOG_DDEBUG("  Invalid inputs: PASSED");
 }
 
 /* *****************************************************************************
@@ -394,8 +370,6 @@ verification logic.
 ***************************************************************************** */
 
 static void test_rsa_synthetic_pkcs1(void) {
-  FIO_LOG_DDEBUG("Testing synthetic PKCS#1 v1.5 verification...");
-
   /* We can't easily create a real RSA signature without a private key,
      but we can test the modular exponentiation and verify that an
      invalid signature (random data) is properly rejected. */
@@ -414,8 +388,6 @@ static void test_rsa_synthetic_pkcs1(void) {
   int result =
       fio_rsa_verify_pkcs1(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, &key);
   FIO_ASSERT(result == -1, "Random signature should fail verification");
-
-  FIO_LOG_DDEBUG("  Synthetic PKCS#1 v1.5: PASSED");
 }
 
 /* *****************************************************************************
@@ -423,8 +395,6 @@ Test: Signature Edge Cases
 ***************************************************************************** */
 
 static void test_rsa_signature_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing RSA signature edge cases...");
-
   uint8_t sig[256], hash[32];
   FIO_MEMSET(hash, 0xAB, sizeof(hash));
 
@@ -542,8 +512,6 @@ static void test_rsa_signature_edge_cases(void) {
                                     &bad_key) == -1,
                "NULL exponent should fail");
   }
-
-  FIO_LOG_DDEBUG("  Signature edge cases: PASSED");
 }
 
 /* *****************************************************************************
@@ -551,8 +519,6 @@ Test: RSA-PSS Edge Cases
 ***************************************************************************** */
 
 static void test_rsa_pss_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing RSA-PSS edge cases...");
-
   uint8_t sig[256], hash[32];
   FIO_MEMSET(hash, 0xAB, sizeof(hash));
 
@@ -591,8 +557,6 @@ static void test_rsa_pss_edge_cases(void) {
   FIO_ASSERT(
       fio_rsa_verify_pss(sig, 256, hash, 32, FIO_RSA_HASH_SHA256, NULL) == -1,
       "NULL key should fail PSS");
-
-  FIO_LOG_DDEBUG("  RSA-PSS edge cases: PASSED");
 }
 
 /* *****************************************************************************
@@ -630,8 +594,6 @@ Test: RSA-PSS Signing API
 ***************************************************************************** */
 
 static void test_rsa_pss_sign_api(void) {
-  FIO_LOG_DDEBUG("Testing RSA-PSS signing API...");
-
   uint8_t sig[256];
   size_t sig_len = 0;
   uint8_t hash[32];
@@ -681,8 +643,6 @@ static void test_rsa_pss_sign_api(void) {
       fio_rsa_sign_pss(sig, &sig_len, hash, 32, (fio_rsa_hash_e)99, &privkey) ==
           -1,
       "Invalid hash algorithm should fail");
-
-  FIO_LOG_DDEBUG("  RSA-PSS signing API: PASSED");
 }
 
 /* *****************************************************************************
@@ -726,8 +686,6 @@ static const char *test_keypair_d_hex =
 static const char *test_keypair_e_hex = "010001";
 
 static void test_rsa_pss_sign_verify_roundtrip(void) {
-  FIO_LOG_DDEBUG("Testing RSA-PSS sign/verify round-trip...");
-
   /* Note: This test uses synthetic keypair data that may not form a valid
    * mathematical RSA keypair. The test verifies the API works correctly
    * but may not produce cryptographically valid signatures.
@@ -784,7 +742,6 @@ static void test_rsa_pss_sign_verify_roundtrip(void) {
 
   /* The signing may fail with synthetic keys - that's expected */
   if (sign_result != 0) {
-    FIO_LOG_DDEBUG("  Sign failed (expected with synthetic keys): PASSED");
     return;
   }
 
@@ -803,11 +760,8 @@ static void test_rsa_pss_sign_verify_roundtrip(void) {
 
   /* With synthetic keys, verification may fail - that's expected */
   if (verify_result != 0) {
-    FIO_LOG_DDEBUG("  Verify failed (expected with synthetic keys): PASSED");
     return;
   }
-
-  FIO_LOG_DDEBUG("  RSA-PSS sign/verify round-trip: PASSED");
 }
 
 /* *****************************************************************************
@@ -815,8 +769,6 @@ Test: EMSA-PSS-ENCODE Structure
 ***************************************************************************** */
 
 static void test_emsa_pss_encode_structure(void) {
-  FIO_LOG_DDEBUG("Testing EMSA-PSS-ENCODE structure...");
-
   /* Test that the encoded message has the correct structure:
    * EM = maskedDB || H || 0xBC
    *
@@ -836,8 +788,6 @@ static void test_emsa_pss_encode_structure(void) {
   /* The encoded message should end with 0xBC */
   /* We can't easily test the internal function, but we verify the structure
    * is correct by checking the sign function produces valid output */
-
-  FIO_LOG_DDEBUG("  EMSA-PSS-ENCODE structure: PASSED");
 }
 
 /* *****************************************************************************
@@ -845,8 +795,6 @@ Main
 ***************************************************************************** */
 
 int main(void) {
-  FIO_LOG_DDEBUG("=== RSA Signature Tests ===");
-
   test_rsa_byte_conversion();
   test_rsa_modexp();
   test_rsa_pkcs1_padding();
@@ -861,7 +809,5 @@ int main(void) {
   test_rsa_pss_sign_api();
   test_rsa_pss_sign_verify_roundtrip();
   test_emsa_pss_encode_structure();
-
-  FIO_LOG_DDEBUG("=== All RSA tests passed! ===");
   return 0;
 }

@@ -45,14 +45,6 @@ static void inform_master_received(fio_ipc_s *ipc) {
   FIO_ASSERT(ipc->len == sizeof(*data), "Test code error - wrong payload size");
   results.to[data->to].from[data->from].counter[data->numerator] += 1;
   results.to[data->to].from[data->from].total += 1;
-  FIO_LOG_DDEBUG2(
-      "%s[%zu] got Message[%zu] from %s[%zu] (now %zu times)",
-      (data->to ? "Worker" : "Master"),
-      data->to,
-      data->numerator,
-      (data->from ? "Worker" : "Master"),
-      data->from,
-      results.to[data->to].from[data->from].counter[data->numerator]);
   if (ipc->from)
     FIO_LOG_INFO("(%d) Message[%zu] ACK from %zu",
                  fio_io_pid(),

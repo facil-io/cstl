@@ -22,7 +22,6 @@ static void fio___test_blake2b_empty(void) {
   fio_blake2b_hash(out, 64, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64),
              "BLAKE2b-512 empty string test failed");
-  FIO_LOG_DDEBUG("BLAKE2b-512 empty string: PASSED");
 }
 
 static void fio___test_blake2b_abc(void) {
@@ -37,7 +36,6 @@ static void fio___test_blake2b_abc(void) {
   uint8_t out[64];
   fio_blake2b_hash(out, 64, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 'abc' test failed");
-  FIO_LOG_DDEBUG("BLAKE2b-512 'abc': PASSED");
 }
 
 static void fio___test_blake2b_keyed(void) {
@@ -61,7 +59,6 @@ static void fio___test_blake2b_keyed(void) {
   uint8_t out[64];
   fio_blake2b_hash(out, 64, msg, 255, key, 64);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 64), "BLAKE2b-512 keyed test failed");
-  FIO_LOG_DDEBUG("BLAKE2b-512 keyed (64-byte key, 255-byte msg): PASSED");
 }
 
 static void fio___test_blake2b_streaming(void) {
@@ -84,7 +81,6 @@ static void fio___test_blake2b_streaming(void) {
   }
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64), "BLAKE2b streaming test failed");
-  FIO_LOG_DDEBUG("BLAKE2b-512 streaming: PASSED");
 }
 
 /* BLAKE2s test vectors */
@@ -98,7 +94,6 @@ static void fio___test_blake2s_empty(void) {
   fio_blake2s_hash(out, 32, NULL, 0, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32),
              "BLAKE2s-256 empty string test failed");
-  FIO_LOG_DDEBUG("BLAKE2s-256 empty string: PASSED");
 }
 
 static void fio___test_blake2s_abc(void) {
@@ -110,7 +105,6 @@ static void fio___test_blake2s_abc(void) {
   uint8_t out[32];
   fio_blake2s_hash(out, 32, "abc", 3, NULL, 0);
   FIO_ASSERT(!FIO_MEMCMP(out, expected, 32), "BLAKE2s-256 'abc' test failed");
-  FIO_LOG_DDEBUG("BLAKE2s-256 'abc': PASSED");
 }
 
 static void fio___test_blake2s_streaming(void) {
@@ -133,16 +127,12 @@ static void fio___test_blake2s_streaming(void) {
   }
 
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32), "BLAKE2s streaming test failed");
-  FIO_LOG_DDEBUG("BLAKE2s-256 streaming: PASSED");
 }
 
 /* Edge case tests */
 static void fio___test_blake2_edge_cases(void) {
-  FIO_LOG_DDEBUG("Testing BLAKE2 edge cases...");
-
   /* Test: Single byte input */
   {
-    FIO_LOG_DDEBUG("  Testing single byte input...");
     uint8_t data[1] = {0x00};
     uint8_t out_b[64], out_s[32];
 
@@ -164,7 +154,6 @@ static void fio___test_blake2_edge_cases(void) {
   /* Test: Block boundary inputs (BLAKE2b block = 128 bytes, BLAKE2s = 64 bytes)
    */
   {
-    FIO_LOG_DDEBUG("  Testing block boundary inputs...");
     size_t test_sizes[] = {63, 64, 65, 127, 128, 129};
 
     for (size_t i = 0; i < sizeof(test_sizes) / sizeof(test_sizes[0]); ++i) {
@@ -194,7 +183,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Variable output lengths */
   {
-    FIO_LOG_DDEBUG("  Testing variable output lengths...");
     uint8_t data[] = "test input";
     size_t data_len = sizeof(data) - 1;
 
@@ -237,7 +225,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Keyed hashing with various key lengths */
   {
-    FIO_LOG_DDEBUG("  Testing keyed hashing with various key lengths...");
     uint8_t data[] = "test message";
     size_t data_len = sizeof(data) - 1;
 
@@ -282,7 +269,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Empty key (should work like unkeyed) */
   {
-    FIO_LOG_DDEBUG("  Testing empty key...");
     uint8_t data[] = "test";
     uint8_t out1[64], out2[64];
 
@@ -294,7 +280,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Large input (1MB) */
   {
-    FIO_LOG_DDEBUG("  Testing large input (1MB)...");
     size_t len = 1024 * 1024;
     uint8_t *data = (uint8_t *)malloc(len);
     uint8_t out[64];
@@ -321,7 +306,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Incremental with various chunk sizes */
   {
-    FIO_LOG_DDEBUG("  Testing incremental with various chunk sizes...");
     uint8_t data[1000];
     for (size_t i = 0; i < 1000; ++i)
       data[i] = (uint8_t)(i & 0xFF);
@@ -347,7 +331,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: All zeros input */
   {
-    FIO_LOG_DDEBUG("  Testing all-zeros input...");
     uint8_t data[64] = {0};
     uint8_t out[64];
 
@@ -362,7 +345,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: All ones input */
   {
-    FIO_LOG_DDEBUG("  Testing all-ones input...");
     uint8_t data[64];
     uint8_t out[64];
     FIO_MEMSET(data, 0xFF, 64);
@@ -378,7 +360,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Different keys produce different outputs */
   {
-    FIO_LOG_DDEBUG("  Testing different keys produce different outputs...");
     uint8_t data[] = "test";
     uint8_t key1[32] = {0};
     uint8_t key2[32] = {0};
@@ -394,7 +375,6 @@ static void fio___test_blake2_edge_cases(void) {
 
   /* Test: Different output lengths produce different prefixes */
   {
-    FIO_LOG_DDEBUG("  Testing different output lengths...");
     uint8_t data[] = "test";
     uint8_t out32[32], out64[64];
 
@@ -406,30 +386,21 @@ static void fio___test_blake2_edge_cases(void) {
     FIO_ASSERT(FIO_MEMCMP(out32, out64, 32) != 0,
                "Different output lengths should produce different hashes");
   }
-
-  FIO_LOG_DDEBUG("BLAKE2 edge case tests passed!");
 }
 
 int main(void) {
-  FIO_LOG_DDEBUG("Testing BLAKE2 implementation...");
-
   /* BLAKE2b tests */
-  FIO_LOG_DDEBUG("=== BLAKE2b Tests ===");
   fio___test_blake2b_empty();
   fio___test_blake2b_abc();
   fio___test_blake2b_keyed();
   fio___test_blake2b_streaming();
 
   /* BLAKE2s tests */
-  FIO_LOG_DDEBUG("=== BLAKE2s Tests ===");
   fio___test_blake2s_empty();
   fio___test_blake2s_abc();
   fio___test_blake2s_streaming();
 
   /* Edge case tests */
-  FIO_LOG_DDEBUG("=== Edge Case Tests ===");
   fio___test_blake2_edge_cases();
-
-  FIO_LOG_DDEBUG("All BLAKE2 tests passed!");
   return 0;
 }

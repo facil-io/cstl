@@ -65,7 +65,6 @@ FIO_SFUNC uintptr_t fio__chacha20poly1305dec_speed_wrapper(char *msg,
 
 int main(void) {
   { /* test ChaCha20 independently */
-    FIO_LOG_DDEBUG("Testing ChaCha20 separately");
     struct {
       char key[33];
       char nounce[13];
@@ -128,7 +127,6 @@ int main(void) {
     }
   }
   { /* test Poly1305 independently */
-    FIO_LOG_DDEBUG("Testing Poly1305 separately");
     struct {
       char key[33];
       char *msg;
@@ -168,7 +166,6 @@ int main(void) {
     }
   }
   { /* test ChaCha20Poly1305 */
-    FIO_LOG_DDEBUG("Testing ChaCha20Poly1305 together");
     struct {
       char key[33];
       char nounce[13];
@@ -310,7 +307,6 @@ int main(void) {
     }
   }
   { /* test roundtrip */
-    FIO_LOG_DDEBUG("Testing ChaCha20Poly1305 round-trip.");
     fio_u256 key =
         fio_u256_init64(fio_rand64(), fio_rand64(), fio_rand64(), fio_rand64());
     FIO_STR_INFO_TMP_VAR(ad, 128);
@@ -362,11 +358,8 @@ int main(void) {
   /* **************************************************************************
    * Edge Case Tests for ChaCha20-Poly1305 AEAD
    * *************************************************************************/
-  FIO_LOG_DDEBUG("Testing ChaCha20-Poly1305 edge cases...");
-
   /* Test: Empty plaintext (0 bytes) - should still produce valid tag */
   {
-    FIO_LOG_DDEBUG("  Testing empty plaintext...");
     char key[32] = {0};
     char nonce[12] = {0};
     char mac[16] = {0};
@@ -398,7 +391,6 @@ int main(void) {
 
   /* Test: Empty AAD (0 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing empty AAD...");
     char key[32] = {0};
     char nonce[12] = {0};
     char plaintext[] = "Hello, World!";
@@ -428,7 +420,6 @@ int main(void) {
 
   /* Test: Both plaintext and AAD empty */
   {
-    FIO_LOG_DDEBUG("  Testing both plaintext and AAD empty...");
     char key[32] = {0};
     char nonce[12] = {0};
     char mac[16] = {0};
@@ -441,7 +432,6 @@ int main(void) {
 
   /* Test: Plaintext at block boundary (64 bytes for ChaCha) */
   {
-    FIO_LOG_DDEBUG("  Testing plaintext at block boundary (64 bytes)...");
     char key[32];
     char nonce[12];
     char plaintext[64];
@@ -461,7 +451,6 @@ int main(void) {
 
   /* Test: Plaintext one byte before block boundary (63 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing plaintext at 63 bytes...");
     char key[32];
     char nonce[12];
     char plaintext[63];
@@ -481,7 +470,6 @@ int main(void) {
 
   /* Test: Plaintext one byte after block boundary (65 bytes) */
   {
-    FIO_LOG_DDEBUG("  Testing plaintext at 65 bytes...");
     char key[32];
     char nonce[12];
     char plaintext[65];
@@ -501,7 +489,6 @@ int main(void) {
 
   /* Test: AAD at various sizes (1, 16, 17, 256) */
   {
-    FIO_LOG_DDEBUG("  Testing various AAD sizes...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -534,7 +521,6 @@ int main(void) {
 
   /* Test: Tag verification failure (corrupted ciphertext) */
   {
-    FIO_LOG_DDEBUG("  Testing corrupted ciphertext detection...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -557,7 +543,6 @@ int main(void) {
 
   /* Test: Tag verification failure (corrupted tag) */
   {
-    FIO_LOG_DDEBUG("  Testing corrupted tag detection...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -580,7 +565,6 @@ int main(void) {
 
   /* Test: Tag verification failure (corrupted AAD) */
   {
-    FIO_LOG_DDEBUG("  Testing corrupted AAD detection...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -607,7 +591,6 @@ int main(void) {
 
   /* Test: Wrong key decryption */
   {
-    FIO_LOG_DDEBUG("  Testing wrong key detection...");
     char key1[32];
     char key2[32];
     char nonce[12];
@@ -630,7 +613,6 @@ int main(void) {
 
   /* Test: Single byte plaintext */
   {
-    FIO_LOG_DDEBUG("  Testing single byte plaintext...");
     char key[32];
     char nonce[12];
     char plaintext[1] = {0x42};
@@ -649,7 +631,6 @@ int main(void) {
 
   /* Test: Large plaintext (16KB - TLS max) */
   {
-    FIO_LOG_DDEBUG("  Testing large plaintext (16KB)...");
     char key[32];
     char nonce[12];
     size_t len = 16384;
@@ -675,7 +656,6 @@ int main(void) {
 
   /* Test: Deterministic encryption (same inputs = same outputs) */
   {
-    FIO_LOG_DDEBUG("  Testing deterministic encryption...");
     char key[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
                     0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
                     0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
@@ -709,7 +689,6 @@ int main(void) {
 
   /* Test: All-zero key and nonce */
   {
-    FIO_LOG_DDEBUG("  Testing all-zero key and nonce...");
     char key[32] = {0};
     char nonce[12] = {0};
     char plaintext[32];
@@ -728,7 +707,6 @@ int main(void) {
 
   /* Test: All-ones key and nonce */
   {
-    FIO_LOG_DDEBUG("  Testing all-ones key and nonce...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -749,7 +727,6 @@ int main(void) {
 
   /* Test: Flip each byte of signature to ensure detection */
   {
-    FIO_LOG_DDEBUG("  Testing tag bit-flip detection...");
     char key[32];
     char nonce[12];
     char plaintext[32];
@@ -780,17 +757,11 @@ int main(void) {
       FIO_ASSERT(ret != 0, "Flipped MAC byte %d should fail verification", i);
     }
   }
-
-  FIO_LOG_DDEBUG("ChaCha20-Poly1305 edge case tests passed!");
-
   /* **************************************************************************
    * XChaCha20-Poly1305 Tests (Extended Nonce Variant)
    * *************************************************************************/
-  FIO_LOG_DDEBUG("Testing XChaCha20-Poly1305 (extended nonce)...");
-
   /* Test: HChaCha20 test vector from draft-irtf-cfrg-xchacha */
   {
-    FIO_LOG_DDEBUG("  Testing HChaCha20 key derivation...");
     /* Test vector from XChaCha20 draft RFC */
     const uint8_t key[32] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
                              0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
@@ -831,7 +802,6 @@ int main(void) {
 
   /* Test: XChaCha20 test vector from draft-irtf-cfrg-xchacha */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20 stream cipher...");
     const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
                              0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
                              0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
@@ -875,7 +845,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 test vector (from RFC draft) */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 AEAD...");
     const uint8_t key[32] = {0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
                              0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
                              0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
@@ -956,7 +925,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 roundtrip with random data */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 roundtrip...");
     char key[32];
     char nonce[24];
     char plaintext[256];
@@ -982,7 +950,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 empty plaintext */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 empty plaintext...");
     char key[32];
     char nonce[24];
     char mac[16] = {0};
@@ -1017,7 +984,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 empty AAD */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 empty AAD...");
     char key[32];
     char nonce[24];
     char plaintext[] = "Hello, XChaCha20!";
@@ -1051,8 +1017,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 corrupted ciphertext detection */
   {
-    FIO_LOG_DDEBUG(
-        "  Testing XChaCha20-Poly1305 corrupted ciphertext detection...");
     char key[32];
     char nonce[24];
     char plaintext[32];
@@ -1075,7 +1039,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 corrupted tag detection */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 corrupted tag detection...");
     char key[32];
     char nonce[24];
     char plaintext[32];
@@ -1098,7 +1061,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 corrupted AAD detection */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 corrupted AAD detection...");
     char key[32];
     char nonce[24];
     char plaintext[32];
@@ -1124,7 +1086,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 wrong key detection */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 wrong key detection...");
     char key1[32];
     char key2[32];
     char nonce[24];
@@ -1146,7 +1107,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 wrong nonce detection */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 wrong nonce detection...");
     char key[32];
     char nonce1[24];
     char nonce2[24];
@@ -1168,7 +1128,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 at various plaintext sizes */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 various sizes...");
     char key[32];
     char nonce[24];
     char mac[16];
@@ -1204,7 +1163,6 @@ int main(void) {
 
   /* Test: XChaCha20-Poly1305 determinism */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20-Poly1305 determinism...");
     char key[32] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
                     0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
                     0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
@@ -1230,7 +1188,6 @@ int main(void) {
 
   /* Test: XChaCha20 standalone roundtrip */
   {
-    FIO_LOG_DDEBUG("  Testing XChaCha20 standalone roundtrip...");
     char key[32];
     char nonce[24];
     char plaintext[128];
@@ -1248,6 +1205,4 @@ int main(void) {
     fio_xchacha20(buffer, 128, key, nonce, 0);
     FIO_ASSERT(!memcmp(buffer, plaintext, 128), "XChaCha20 roundtrip failed");
   }
-
-  FIO_LOG_DDEBUG("XChaCha20-Poly1305 tests passed!");
 }

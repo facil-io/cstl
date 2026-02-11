@@ -32,8 +32,6 @@ FIO_SFUNC void print_scalar384(const char *name, const uint64_t s[6]) {
 Test P-384 curve constants
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_constants)(void) {
-  FIO_LOG_DDEBUG("Testing P-384 curve constants");
-
   /* Verify prime p = 2^384 - 2^128 - 2^96 + 2^32 - 1 */
   /* p = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE
    *     FFFFFFFF0000000000000000FFFFFFFF */
@@ -53,16 +51,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_constants)(void) {
   FIO_ASSERT(FIO___P384_N[3] == 0xFFFFFFFFFFFFFFFFULL, "N[3] incorrect");
   FIO_ASSERT(FIO___P384_N[4] == 0xFFFFFFFFFFFFFFFFULL, "N[4] incorrect");
   FIO_ASSERT(FIO___P384_N[5] == 0xFFFFFFFFFFFFFFFFULL, "N[5] incorrect");
-
-  FIO_LOG_DDEBUG("  Curve constants verified.");
 }
 
 /* *****************************************************************************
 Test field arithmetic
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_field_ops)(void) {
-  FIO_LOG_DDEBUG("Testing P-384 field arithmetic");
-
   fio___p384_fe_s a, b, c;
 
   /* Test addition: 1 + 2 = 3 */
@@ -103,8 +97,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_field_ops)(void) {
              "Field squaring 4^2 failed");
 
   /* Test inversion: a * a^(-1) = 1 */
-  FIO_LOG_DDEBUG("  Testing field inversion...");
-
   a[0] = 7;
   a[1] = a[2] = a[3] = a[4] = a[5] = 0;
   fio___p384_fe_inv(b, a);
@@ -124,16 +116,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_field_ops)(void) {
   FIO_ASSERT(c[0] == 1 && c[1] == 0 && c[2] == 0 && c[3] == 0 && c[4] == 0 &&
                  c[5] == 0,
              "Field inversion Gx * Gx^(-1) != 1");
-
-  FIO_LOG_DDEBUG("  Field arithmetic tests passed.");
 }
 
 /* *****************************************************************************
 Test that base point G is on the curve
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_base_point)(void) {
-  FIO_LOG_DDEBUG("Testing P-384 base point is on curve");
-
   fio___p384_fe_s y2, x3, t, x2;
 
   /* Compute y^2 */
@@ -161,16 +149,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_base_point)(void) {
   /* Verify y^2 == x^3 - 3x + b */
   FIO_ASSERT(fio___p384_fe_eq(y2, t) == 0,
              "Base point G is not on the P-384 curve!");
-
-  FIO_LOG_DDEBUG("  Base point verified on curve.");
 }
 
 /* *****************************************************************************
 Test scalar multiplication with base point
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_scalar_mul)(void) {
-  FIO_LOG_DDEBUG("Testing P-384 scalar multiplication");
-
   /* Test: 1 * G = G */
   fio___p384_scalar_s one = {1, 0, 0, 0, 0, 0};
   fio___p384_point_affine_s g;
@@ -194,7 +178,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_scalar_mul)(void) {
              "1*G y-coordinate mismatch");
 
   /* Test: 2 * G using point_double directly */
-  FIO_LOG_DDEBUG("  Testing point doubling directly...");
   fio___p384_point_jacobian_s g_jac, doubled;
   fio___p384_point_to_jacobian(&g_jac, &g);
   fio___p384_point_double(&doubled, &g_jac);
@@ -220,7 +203,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_scalar_mul)(void) {
              "2*G (doubled) is not on the curve!");
 
   /* Test: 2 * G via scalar multiplication */
-  FIO_LOG_DDEBUG("  Testing 2*G via scalar multiplication...");
   fio___p384_scalar_s two = {2, 0, 0, 0, 0, 0};
   fio___p384_point_mul(&result, two, &g);
   fio___p384_point_to_affine(&result_affine, &result);
@@ -237,8 +219,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_scalar_mul)(void) {
   fio___p384_fe_sub(t, t, result_affine.x);
   fio___p384_fe_add(t, t, FIO___P384_B);
   FIO_ASSERT(fio___p384_fe_eq(y2, t) == 0, "2*G is not on the curve!");
-
-  FIO_LOG_DDEBUG("  Scalar multiplication tests passed.");
 }
 
 /* *****************************************************************************
@@ -246,8 +226,6 @@ NIST ECDSA P-384 Test Vectors
 From: https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_ecdsa_nist)(void) {
-  FIO_LOG_DDEBUG("Testing ECDSA P-384 with NIST test vectors");
-
   /* NIST CAVP ECDSA P-384 SHA-384 test vector (PKV.rsp) */
   /* clang-format off */
 
@@ -311,8 +289,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_ecdsa_nist)(void) {
   /* clang-format on */
 
   /* Debug: trace the verification */
-  FIO_LOG_DDEBUG("  Debug: tracing ECDSA P-384 verification...");
-
   fio___p384_scalar_s r_scalar, s_scalar, e;
   fio___p384_point_affine_s q;
 
@@ -404,16 +380,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_ecdsa_nist)(void) {
   int result =
       fio_ecdsa_p384_verify_raw(r, s, msg_hash, pubkey + 1, pubkey + 49);
   FIO_ASSERT(result == 0, "NIST ECDSA P-384 test vector failed");
-
-  FIO_LOG_DDEBUG("  NIST test vectors passed.");
 }
 
 /* *****************************************************************************
 Test DER signature parsing
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_der_parsing)(void) {
-  FIO_LOG_DDEBUG("Testing DER signature parsing for P-384");
-
   /* Create a DER-encoded signature from RFC 6979 test vector */
   /* clang-format off */
 
@@ -469,16 +441,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_der_parsing)(void) {
   int result =
       fio_ecdsa_p384_verify(der_sig, sizeof(der_sig), msg_hash, pubkey, 97);
   FIO_ASSERT(result == 0, "DER signature verification failed");
-
-  FIO_LOG_DDEBUG("  DER parsing tests passed.");
 }
 
 /* *****************************************************************************
 Test invalid signatures
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_invalid_sigs)(void) {
-  FIO_LOG_DDEBUG("Testing ECDSA P-384 rejects invalid signatures");
-
   /* clang-format off */
   static const uint8_t msg_hash[48] = {
     0x9a, 0x90, 0x83, 0x50, 0x5b, 0xc9, 0x22, 0x76,
@@ -562,8 +530,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384_invalid_sigs)(void) {
   result =
       fio_ecdsa_p384_verify_raw(r, zero, msg_hash, pubkey + 1, pubkey + 49);
   FIO_ASSERT(result != 0, "Should reject s = 0");
-
-  FIO_LOG_DDEBUG("  Invalid signature tests passed.");
 }
 
 /* *****************************************************************************
@@ -571,12 +537,8 @@ Performance test
 ***************************************************************************** */
 FIO_SFUNC void FIO_NAME_TEST(stl, p384_performance)(void) {
 #ifdef DEBUG
-  FIO_LOG_DDEBUG("Skipping performance test in DEBUG mode");
   return;
 #endif
-
-  FIO_LOG_DDEBUG("Testing ECDSA P-384 performance");
-
   /* clang-format off */
   static const uint8_t msg_hash[48] = {
     0x9a, 0x90, 0x83, 0x50, 0x5b, 0xc9, 0x22, 0x76,
@@ -649,7 +611,6 @@ Main Test Function
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, p384)(void) {
-  FIO_LOG_DDEBUG("Testing ECDSA P-384 (secp384r1) implementation");
   FIO_NAME_TEST(stl, p384_constants)();
   FIO_NAME_TEST(stl, p384_field_ops)();
   FIO_NAME_TEST(stl, p384_base_point)();
@@ -658,8 +619,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p384)(void) {
   FIO_NAME_TEST(stl, p384_der_parsing)();
   FIO_NAME_TEST(stl, p384_invalid_sigs)();
   FIO_NAME_TEST(stl, p384_performance)();
-
-  FIO_LOG_DDEBUG("P-384 tests complete.");
 }
 
 /* *****************************************************************************

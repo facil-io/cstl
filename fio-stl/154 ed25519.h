@@ -390,6 +390,113 @@ FIO_IFUNC void fio___gf_sub(fio___gf_s h,
   h[4] = f[4] + FIO___GF_TWO54M8 - g[4];
 }
 
+/* Field element multiplication and squaring.
+ *
+ * When __uint128_t is available (GCC/Clang on 64-bit), use native 128-bit
+ * accumulators for ~20% faster multiply-accumulate. Falls back to portable
+ * fio_math_mulc64 + manual lo/hi tracking on other compilers. */
+
+#if defined(__SIZEOF_INT128__)
+
+/* Field element multiplication: o = a * b
+ * Uses native __uint128_t accumulators (donna-64bit style) */
+FIO_IFUNC void fio___gf_mul(fio___gf_s o,
+                            const fio___gf_s a,
+                            const fio___gf_s b) {
+  const uint64_t s0 = a[0], s1 = a[1], s2 = a[2], s3 = a[3], s4 = a[4];
+  const uint64_t r0 = b[0], r1 = b[1], r2 = b[2], r3 = b[3], r4 = b[4];
+  const uint64_t r1_19 = r1 * 19, r2_19 = r2 * 19;
+  const uint64_t r3_19 = r3 * 19, r4_19 = r4 * 19;
+
+  __uint128_t t0 = (__uint128_t)r0 * s0 + (__uint128_t)r4_19 * s1 +
+                   (__uint128_t)r3_19 * s2 + (__uint128_t)r2_19 * s3 +
+                   (__uint128_t)r1_19 * s4;
+
+  __uint128_t t1 = (__uint128_t)r0 * s1 + (__uint128_t)r1 * s0 +
+                   (__uint128_t)r4_19 * s2 + (__uint128_t)r3_19 * s3 +
+                   (__uint128_t)r2_19 * s4;
+
+  __uint128_t t2 = (__uint128_t)r0 * s2 + (__uint128_t)r2 * s0 +
+                   (__uint128_t)r1 * s1 + (__uint128_t)r4_19 * s3 +
+                   (__uint128_t)r3_19 * s4;
+
+  __uint128_t t3 = (__uint128_t)r0 * s3 + (__uint128_t)r3 * s0 +
+                   (__uint128_t)r1 * s2 + (__uint128_t)r2 * s1 +
+                   (__uint128_t)r4_19 * s4;
+
+  __uint128_t t4 = (__uint128_t)r0 * s4 + (__uint128_t)r4 * s0 +
+                   (__uint128_t)r3 * s1 + (__uint128_t)r1 * s3 +
+                   (__uint128_t)r2 * s2;
+
+  /* Carry propagation */
+  uint64_t c;
+  o[0] = (uint64_t)t0 & FIO___GF_MASK51;
+  c = (uint64_t)(t0 >> 51);
+  t1 += c;
+  o[1] = (uint64_t)t1 & FIO___GF_MASK51;
+  c = (uint64_t)(t1 >> 51);
+  t2 += c;
+  o[2] = (uint64_t)t2 & FIO___GF_MASK51;
+  c = (uint64_t)(t2 >> 51);
+  t3 += c;
+  o[3] = (uint64_t)t3 & FIO___GF_MASK51;
+  c = (uint64_t)(t3 >> 51);
+  t4 += c;
+  o[4] = (uint64_t)t4 & FIO___GF_MASK51;
+  c = (uint64_t)(t4 >> 51);
+  o[0] += c * 19;
+  c = o[0] >> 51;
+  o[0] &= FIO___GF_MASK51;
+  o[1] += c;
+}
+
+/* Field element squaring: o = f^2
+ * Uses native __uint128_t accumulators with symmetry optimization */
+FIO_IFUNC void fio___gf_sqr(fio___gf_s o, const fio___gf_s f) {
+  const uint64_t r0 = f[0], r1 = f[1], r2 = f[2], r3 = f[3], r4 = f[4];
+  const uint64_t d0 = r0 * 2, d1 = r1 * 2;
+  const uint64_t d2_19 = r2 * 2 * 19;
+  const uint64_t d419 = r4 * 19, d4 = d419 * 2;
+
+  __uint128_t t0 =
+      (__uint128_t)r0 * r0 + (__uint128_t)d4 * r1 + (__uint128_t)d2_19 * r3;
+
+  __uint128_t t1 =
+      (__uint128_t)d0 * r1 + (__uint128_t)d4 * r2 + (__uint128_t)(r3 * 19) * r3;
+
+  __uint128_t t2 =
+      (__uint128_t)d0 * r2 + (__uint128_t)r1 * r1 + (__uint128_t)d4 * r3;
+
+  __uint128_t t3 =
+      (__uint128_t)d0 * r3 + (__uint128_t)d1 * r2 + (__uint128_t)r4 * d419;
+
+  __uint128_t t4 =
+      (__uint128_t)d0 * r4 + (__uint128_t)d1 * r3 + (__uint128_t)r2 * r2;
+
+  /* Carry propagation */
+  uint64_t c;
+  o[0] = (uint64_t)t0 & FIO___GF_MASK51;
+  c = (uint64_t)(t0 >> 51);
+  t1 += c;
+  o[1] = (uint64_t)t1 & FIO___GF_MASK51;
+  c = (uint64_t)(t1 >> 51);
+  t2 += c;
+  o[2] = (uint64_t)t2 & FIO___GF_MASK51;
+  c = (uint64_t)(t2 >> 51);
+  t3 += c;
+  o[3] = (uint64_t)t3 & FIO___GF_MASK51;
+  c = (uint64_t)(t3 >> 51);
+  t4 += c;
+  o[4] = (uint64_t)t4 & FIO___GF_MASK51;
+  c = (uint64_t)(t4 >> 51);
+  o[0] += c * 19;
+  c = o[0] >> 51;
+  o[0] &= FIO___GF_MASK51;
+  o[1] += c;
+}
+
+#else /* !__SIZEOF_INT128__ - portable fallback */
+
 /* Helper: add 64-bit value to 128-bit accumulator (lo, hi) */
 #define FIO___GF_ADD128_64(lo, hi, v)                                          \
   do {                                                                         \
@@ -402,7 +509,7 @@ FIO_IFUNC void fio___gf_sub(fio___gf_s h,
 #define FIO___GF_SHR128_51(lo, hi) (((lo) >> 51) | ((hi) << 13))
 
 /* Field element multiplication: o = a * b
- * Uses fio_math_mulc64 for 64x64->128 multiplication */
+ * Portable fallback using fio_math_mulc64 for 64x64->128 multiplication */
 FIO_IFUNC void fio___gf_mul(fio___gf_s o,
                             const fio___gf_s a,
                             const fio___gf_s b) {
@@ -531,7 +638,7 @@ FIO_IFUNC void fio___gf_mul(fio___gf_s o,
 }
 
 /* Field element squaring: o = f^2
- * Optimized: uses symmetry to reduce multiplications */
+ * Portable fallback using fio_math_mulc64 with symmetry optimization */
 FIO_IFUNC void fio___gf_sqr(fio___gf_s o, const fio___gf_s f) {
   uint64_t t0_lo, t0_hi, t1_lo, t1_hi, t2_lo, t2_hi, t3_lo, t3_hi, t4_lo, t4_hi;
   uint64_t tmp_lo, tmp_hi;
@@ -622,47 +729,140 @@ FIO_IFUNC void fio___gf_sqr(fio___gf_s o, const fio___gf_s f) {
   o[4] = r4;
 }
 
-/* Field element inversion: o = 1/i using Fermat's little theorem
- * f^(-1) = f^(p-2) where p = 2^255 - 19 */
-FIO_IFUNC void fio___gf_inv(fio___gf_s o, const fio___gf_s i) {
-  fio___gf_s c;
-  int a;
-  c[0] = i[0];
-  c[1] = i[1];
-  c[2] = i[2];
-  c[3] = i[3];
-  c[4] = i[4];
-  for (a = 253; a >= 0; --a) {
-    fio___gf_sqr(c, c);
-    if (a != 2 && a != 4)
-      fio___gf_mul(c, c, i);
-  }
-  o[0] = c[0];
-  o[1] = c[1];
-  o[2] = c[2];
-  o[3] = c[3];
-  o[4] = c[4];
+#endif /* __SIZEOF_INT128__ */
+
+/* Helper: compute z^(2^n) by repeated squaring (constant-time, fixed count) */
+FIO_IFUNC void fio___gf_sqr_n(fio___gf_s o, const fio___gf_s z, int n) {
+  o[0] = z[0];
+  o[1] = z[1];
+  o[2] = z[2];
+  o[3] = z[3];
+  o[4] = z[4];
+  for (int j = 0; j < n; ++j)
+    fio___gf_sqr(o, o);
 }
 
-/* Compute f^((p-5)/8) for square root computation */
-FIO_IFUNC void fio___gf_pow_pm5d8(fio___gf_s o, const fio___gf_s i) {
-  fio___gf_s c;
-  int a;
-  c[0] = i[0];
-  c[1] = i[1];
-  c[2] = i[2];
-  c[3] = i[3];
-  c[4] = i[4];
-  for (a = 250; a >= 0; --a) {
-    fio___gf_sqr(c, c);
-    if (a != 1)
-      fio___gf_mul(c, c, i);
-  }
-  o[0] = c[0];
-  o[1] = c[1];
-  o[2] = c[2];
-  o[3] = c[3];
-  o[4] = c[4];
+/* Field element inversion: o = z^(p-2) where p = 2^255 - 19
+ *
+ * Uses an optimized addition chain (254 squarings + 11 multiplications)
+ * instead of the naive approach (254 squarings + 252 multiplications).
+ * Based on the standard ref10/donna addition chain.
+ *
+ * Constant-time: fixed operation sequence, no data-dependent branches. */
+FIO_IFUNC void fio___gf_inv(fio___gf_s o, const fio___gf_s z) {
+  fio___gf_s z2, z9, z11, z_5_0, z_10_0, z_50_0, z_100_0, t;
+
+  /* z^2 */
+  fio___gf_sqr(z2, z);
+
+  /* z^(2^2 - 1) = z^3 */
+  fio___gf_mul(z2, z2, z);
+
+  /* z^(2^4 - 1) = z^15  (called z9 per donna convention) */
+  fio___gf_sqr_n(z9, z2, 2);
+  fio___gf_mul(z9, z9, z2);
+
+  /* z^(2^5 - 1) = z^31  (called z11 per donna convention) */
+  fio___gf_sqr(z11, z9);
+  fio___gf_mul(z11, z11, z);
+
+  /* z^(2^10 - 1) */
+  fio___gf_sqr_n(z_5_0, z11, 5);
+  fio___gf_mul(z_5_0, z_5_0, z11);
+
+  /* z^(2^20 - 1) */
+  fio___gf_sqr_n(z_10_0, z_5_0, 10);
+  fio___gf_mul(z_10_0, z_10_0, z_5_0);
+
+  /* z^(2^40 - 1) */
+  fio___gf_sqr_n(t, z_10_0, 20);
+  fio___gf_mul(t, t, z_10_0);
+
+  /* z^(2^50 - 1) */
+  fio___gf_sqr_n(t, t, 10);
+  fio___gf_mul(z_50_0, t, z_5_0);
+
+  /* z^(2^100 - 1) */
+  fio___gf_sqr_n(z_100_0, z_50_0, 50);
+  fio___gf_mul(z_100_0, z_100_0, z_50_0);
+
+  /* z^(2^200 - 1) */
+  fio___gf_sqr_n(t, z_100_0, 100);
+  fio___gf_mul(t, t, z_100_0);
+
+  /* z^(2^250 - 1) */
+  fio___gf_sqr_n(t, t, 50);
+  fio___gf_mul(t, t, z_50_0);
+
+  /* z^(2^255 - 32) */
+  fio___gf_sqr_n(t, t, 5);
+
+  /* z^(2^255 - 21) = z^(p-2)
+   * p-2 = 2^255 - 21, and -21 = -32 + 11, so we need z^11.
+   * z^11 = z^(8+2+1) but it's simpler: z11 holds z^31, z9 holds z^15.
+   * We need 11 = 0b01011. Use z9 (=z^15)? No, 15 != 11.
+   * 11 = 8 + 3 = 8 + 2 + 1. z2 = z^3, z^8 = sqr(sqr(sqr(z))).
+   * But z2 was overwritten to z^3. Actually we need z^11:
+   *   z^11 = z^(3+8) = z2 * z^8, but z2 = z^3.
+   * Compute z^11 directly: */
+  fio___gf_sqr_n(o, z, 3); /* z^8 */
+  fio___gf_mul(o, o, z2);  /* z^8 * z^3 = z^11 */
+  fio___gf_mul(o, t, o);   /* z^(2^255 - 32 + 11) = z^(2^255 - 21) */
+}
+
+/* Compute f^((p-5)/8) for square root computation
+ * (p-5)/8 = (2^255 - 24) / 8 = 2^252 - 3
+ *
+ * Optimized addition chain (251 squarings + 11 multiplications).
+ * Same chain structure as inversion, final exponent differs. */
+FIO_IFUNC void fio___gf_pow_pm5d8(fio___gf_s o, const fio___gf_s z) {
+  fio___gf_s t0, t1, t2, t3;
+
+  /* z^3 */
+  fio___gf_sqr(t0, z);
+  fio___gf_mul(t0, t0, z);
+
+  /* z^15 = z^(2^4 - 1) */
+  fio___gf_sqr_n(t1, t0, 2);
+  fio___gf_mul(t1, t1, t0);
+
+  /* z^31 = z^(2^5 - 1) */
+  fio___gf_sqr(t2, t1);
+  fio___gf_mul(t2, t2, z);
+
+  /* z^(2^10 - 1) */
+  fio___gf_sqr_n(t3, t2, 5);
+  fio___gf_mul(t2, t3, t2);
+
+  /* z^(2^20 - 1) */
+  fio___gf_sqr_n(t3, t2, 10);
+  fio___gf_mul(t3, t3, t2);
+
+  /* z^(2^40 - 1) */
+  fio___gf_sqr_n(t0, t3, 20);
+  fio___gf_mul(t0, t0, t3);
+
+  /* z^(2^50 - 1) */
+  fio___gf_sqr_n(t0, t0, 10);
+  fio___gf_mul(t2, t0, t2);
+
+  /* z^(2^100 - 1) */
+  fio___gf_sqr_n(t3, t2, 50);
+  fio___gf_mul(t3, t3, t2);
+
+  /* z^(2^200 - 1) */
+  fio___gf_sqr_n(t0, t3, 100);
+  fio___gf_mul(t3, t0, t3);
+
+  /* z^(2^250 - 1) */
+  fio___gf_sqr_n(t3, t3, 50);
+  fio___gf_mul(t3, t3, t2);
+
+  /* z^(2^252 - 4) */
+  fio___gf_sqr_n(t3, t3, 2);
+
+  /* z^(2^252 - 3) = z^((p-5)/8) */
+  fio___gf_mul(o, t3, z);
 }
 
 /* Check if field element is zero */
@@ -1177,7 +1377,7 @@ FIO_IFUNC void fio___ge_p3_add(fio___ge_p3_s p, const fio___ge_p3_s q) {
 /* point doubling: p = 2*p (in-place)
  * Uses unified addition formula (same as addition but with p=q)
  * This matches the original tweetnacl-style formula.
- * Cost: 4S + 4M where S = squaring, M = multiplication */
+ * Cost: 4S + 5M where S = squaring, M = multiplication */
 FIO_IFUNC void fio___ge_p3_dbl(fio___ge_p3_s p) {
   fio___gf_s a, b, c, d, e, f, g, h;
 
@@ -1223,37 +1423,74 @@ Cost: 256 doublings + 64 mixed additions (vs 256 doublings + 128 full additions)
 Speedup: ~2.3x for fixed-base scalar multiplication
 ***************************************************************************** */
 
-/* Convert projective point to precomputed affine form */
-FIO_SFUNC void fio___ge_p3_to_precomp(fio___ge_precomp_s *r,
-                                      const fio___ge_p3_s p) {
-  fio___gf_s z_inv, x, y;
-  fio___gf_inv(z_inv, p[2]);
-  fio___gf_mul(x, p[0], z_inv);
-  fio___gf_mul(y, p[1], z_inv);
-
-  fio___gf_add(r->ypx, y, x);
-  fio___gf_sub(r->ymx, y, x);
-  fio___gf_mul(r->xy2d, x, y);
-  fio___gf_mul(r->xy2d, r->xy2d, FIO___ED25519_D2);
-}
-
-/* Initialize precomputed base point table (lazy, called once) */
+/* Initialize precomputed base point table (lazy, called once).
+ *
+ * Uses Montgomery's batch inversion trick to compute 16 affine points
+ * with a single field inversion + 30 multiplications instead of 16
+ * separate inversions (~15x faster initialization). */
 FIO_SFUNC void fio___ge_init_base_table(void) {
   if (fio___ge_table_initialized)
     return;
 
-  fio___ge_p3_s B, acc;
+  /* Compute all 16 points in projective form: points[i] = (i+1)*B */
+  fio___ge_p3_s points[16];
+  fio___ge_p3_s B;
   fio___ge_p3_base(B);
-  fio___gf_copy(acc[0], B[0]);
-  fio___gf_copy(acc[1], B[1]);
-  fio___gf_copy(acc[2], B[2]);
-  fio___gf_copy(acc[3], B[3]);
+  FIO_MEMCPY(points[0], B, sizeof(fio___ge_p3_s));
+  for (int i = 1; i < 16; i++) {
+    FIO_MEMCPY(points[i], points[i - 1], sizeof(fio___ge_p3_s));
+    fio___ge_p3_add(points[i], (const fio___gf_s *)B);
+  }
 
-  for (int i = 0; i < 16; i++) {
-    fio___ge_p3_to_precomp(&fio___ge_base_table[i], acc);
-    if (i < 15) {
-      fio___ge_p3_add(acc, (const fio___gf_s *)B);
-    }
+  /* Montgomery batch inversion: invert all Z coordinates with one inversion.
+   *
+   * Algorithm:
+   * 1. Compute cumulative products: prod[i] = Z[0] * Z[1] * ... * Z[i]
+   * 2. Invert the final product: inv = 1 / prod[15]
+   * 3. Walk backwards: Z_inv[i] = inv * prod[i-1], inv = inv * Z[i]
+   *
+   * Cost: 1 inversion + 15 + 15 = 30 multiplications (vs 16 inversions) */
+  fio___gf_s prod[16], inv;
+
+  /* Step 1: cumulative products of Z coordinates */
+  fio___gf_copy(prod[0], points[0][2]);
+  for (int i = 1; i < 16; i++)
+    fio___gf_mul(prod[i], prod[i - 1], points[i][2]);
+
+  /* Step 2: single inversion */
+  fio___gf_inv(inv, prod[15]);
+
+  /* Step 3: extract individual inverses and build affine table entries */
+  for (int i = 15; i >= 1; --i) {
+    /* z_inv[i] = inv * prod[i-1] */
+    fio___gf_s z_inv, x, y;
+    fio___gf_mul(z_inv, inv, prod[i - 1]);
+
+    /* update inv for next iteration: inv = inv * Z[i] */
+    fio___gf_mul(inv, inv, points[i][2]);
+
+    /* convert to affine and build precomp entry */
+    fio___gf_mul(x, points[i][0], z_inv);
+    fio___gf_mul(y, points[i][1], z_inv);
+    fio___gf_add(fio___ge_base_table[i].ypx, y, x);
+    fio___gf_sub(fio___ge_base_table[i].ymx, y, x);
+    fio___gf_mul(fio___ge_base_table[i].xy2d, x, y);
+    fio___gf_mul(fio___ge_base_table[i].xy2d,
+                 fio___ge_base_table[i].xy2d,
+                 FIO___ED25519_D2);
+  }
+
+  /* Handle i=0: inv is now 1/Z[0] */
+  {
+    fio___gf_s x, y;
+    fio___gf_mul(x, points[0][0], inv);
+    fio___gf_mul(y, points[0][1], inv);
+    fio___gf_add(fio___ge_base_table[0].ypx, y, x);
+    fio___gf_sub(fio___ge_base_table[0].ymx, y, x);
+    fio___gf_mul(fio___ge_base_table[0].xy2d, x, y);
+    fio___gf_mul(fio___ge_base_table[0].xy2d,
+                 fio___ge_base_table[0].xy2d,
+                 FIO___ED25519_D2);
   }
 
   fio___ge_table_initialized = 1;
@@ -1385,10 +1622,7 @@ FIO_SFUNC void fio___ge_scalarmult(fio___ge_p3_s r,
   fio___gf_zero(p[3]);
 
   /* q = input point */
-  fio___gf_copy(q[0], point[0]);
-  fio___gf_copy(q[1], point[1]);
-  fio___gf_copy(q[2], point[2]);
-  fio___gf_copy(q[3], point[3]);
+  FIO_MEMCPY(q, point, sizeof(fio___ge_p3_s));
 
   for (int i = 255; i >= 0; --i) {
     uint8_t b = (scalar[i >> 3] >> (i & 7)) & 1;
@@ -1398,28 +1632,27 @@ FIO_SFUNC void fio___ge_scalarmult(fio___ge_p3_s r,
     fio___ge_p3_cswap(p, q, b);
   }
 
-  fio___gf_copy(r[0], p[0]);
-  fio___gf_copy(r[1], p[1]);
-  fio___gf_copy(r[2], p[2]);
-  fio___gf_copy(r[3], p[3]);
+  FIO_MEMCPY(r, p, sizeof(fio___ge_p3_s));
 }
 
 /* *****************************************************************************
-Straus/Shamir Double-Scalar Multiplication for Verification
+Straus/Shamir Constant-Time Double-Scalar Multiplication for Verification
 
 Computes: r = [s]B + [h]A  (or [s]B - [h]A by negating A first)
 
 This is the core of Ed25519 verification. Instead of computing two separate
 scalar multiplications (512 doublings + ~256 additions), we process both
-scalars bit-by-bit together (256 doublings + ~192 additions on average).
+scalars in 4-bit windows simultaneously (256 doublings + up to 128 additions).
 
 The algorithm uses:
-- Precomputed table for B (base point): 16 points for 4-bit windows
-- On-the-fly precomputed table for A: 8 points for 3-bit windows
+- Precomputed table for B (base point): 16 affine points for 4-bit windows
+- On-the-fly precomputed table for A: 16 pniels points for 4-bit windows
 - Straus interleaving: process both scalars simultaneously
+- Constant-time table lookups: always read ALL entries, select via masking
+- No data-dependent branches: always execute the same operations
 
-This provides ~1.5-2x speedup over separate scalar multiplications.
-Variable-time is acceptable for verification since all inputs are public.
+This provides ~1.5-2x speedup over separate scalar multiplications while
+maintaining constant-time security properties.
 ***************************************************************************** */
 
 /* Precomputed projective point for variable-base (stores y+x, y-x, 2*d*x*y) */
@@ -1431,7 +1664,7 @@ typedef struct {
 } fio___ge_pniels_s;
 
 /* Convert extended point to pniels form (projective niels) */
-FIO_SFUNC void fio___ge_p3_to_pniels(fio___ge_pniels_s *r,
+FIO_IFUNC void fio___ge_p3_to_pniels(fio___ge_pniels_s *r,
                                      const fio___ge_p3_s p) {
   fio___gf_add(r->ypx, p[1], p[0]);
   fio___gf_sub(r->ymx, p[1], p[0]);
@@ -1439,33 +1672,39 @@ FIO_SFUNC void fio___ge_p3_to_pniels(fio___ge_pniels_s *r,
   fio___gf_mul(r->xy2d, p[3], FIO___ED25519_D2);
 }
 
-/* Mixed addition with projective niels point: p = p + q
- * Cost: 8 mul (same as full addition, but q has precomputed values) */
-FIO_SFUNC void fio___ge_pnielsadd(fio___ge_p3_s p,
+/* Addition with projective niels point: p = p + q (sign=0) or p = p - q
+ * (sign=1). Cost: 8 mul (same as full addition, but q has precomputed values).
+ * Constant-time: sign selects between ypx/ymx via masking, no branches. */
+FIO_IFUNC void fio___ge_pnielsadd(fio___ge_p3_s p,
                                   const fio___ge_pniels_s *q,
                                   int sign) {
   fio___gf_s a, b, c, d, e, f, g, h;
+  fio___gf_s q_first, q_second; /* CT-selected operands */
+  uint64_t smask = (uint64_t)0 - (uint64_t)sign;
 
-  /* a = (Y1 - X1) * (Y2 - X2) or (Y2 + X2) depending on sign */
+  /* CT select: if sign=0, q_first=ymx, q_second=ypx
+   *            if sign=1, q_first=ypx, q_second=ymx */
+  for (int j = 0; j < 5; j++) {
+    q_first[j] = (q->ymx[j] & ~smask) | (q->ypx[j] & smask);
+    q_second[j] = (q->ypx[j] & ~smask) | (q->ymx[j] & smask);
+  }
+
+  /* a = (Y1 - X1) * q_first */
   fio___gf_sub(a, p[1], p[0]);
-  if (sign) {
-    fio___gf_mul(a, a, q->ypx); /* negated: use y+x instead of y-x */
-  } else {
-    fio___gf_mul(a, a, q->ymx);
-  }
+  fio___gf_mul(a, a, q_first);
 
-  /* b = (Y1 + X1) * (Y2 + X2) or (Y2 - X2) depending on sign */
+  /* b = (Y1 + X1) * q_second */
   fio___gf_add(b, p[1], p[0]);
-  if (sign) {
-    fio___gf_mul(b, b, q->ymx); /* negated: use y-x instead of y+x */
-  } else {
-    fio___gf_mul(b, b, q->ypx);
-  }
+  fio___gf_mul(b, b, q_second);
 
   /* c = T1 * 2*d*T2 (negated if sign) */
   fio___gf_mul(c, p[3], q->xy2d);
-  if (sign) {
-    fio___gf_neg(c, c);
+  /* CT negate: if sign, c = -c */
+  {
+    fio___gf_s neg_c;
+    fio___gf_neg(neg_c, c);
+    for (int j = 0; j < 5; j++)
+      c[j] = (c[j] & ~smask) | (neg_c[j] & smask);
   }
 
   /* d = 2 * Z1 * Z2 */
@@ -1485,112 +1724,143 @@ FIO_SFUNC void fio___ge_pnielsadd(fio___ge_p3_s p,
   fio___gf_mul(p[3], e, h);
 }
 
-/* Double-scalar multiplication: r = [s]B + [h]A (variable-time)
- * Uses Straus/Shamir trick with sliding windows.
- * B = base point (uses precomputed table)
- * A = public key point (table computed on-the-fly)
- * s, h = scalars (from signature)
- *
- * Window sizes:
- * - Base point B: 4-bit window (16 precomputed points, already available)
- * - Variable point A: 3-bit window (8 points, computed here)
- */
-FIO_SFUNC void fio___ge_double_scalarmult_vartime(fio___ge_p3_s r,
-                                                  const uint8_t s[32],
-                                                  const uint8_t h[32],
-                                                  fio___ge_p3_s A) {
-  fio___ge_init_base_table();
+/* Constant-time pniels table lookup - reads ALL 16 entries.
+ * Returns table[index] where index is 0..15. */
+FIO_IFUNC void fio___ge_pniels_lookup_ct(fio___ge_pniels_s *r,
+                                         const fio___ge_pniels_s *table,
+                                         int index) {
+  /* Initialize to identity: ypx=1, ymx=1, xy2d=0, z=1 */
+  fio___gf_one(r->ypx);
+  fio___gf_one(r->ymx);
+  fio___gf_zero(r->xy2d);
+  fio___gf_one(r->z);
 
-  /* Build table for A: table_a[i] = (2i+1) * A for i = 0..7
-   * This gives us odd multiples: 1A, 3A, 5A, 7A, 9A, 11A, 13A, 15A
-   * We use 3-bit signed windows, so we need multiples 1-7 (and negatives) */
-  fio___ge_pniels_s table_a[8];
-  fio___ge_p3_s A2, acc;
-
-  /* A2 = 2*A */
-  fio___gf_copy(A2[0], A[0]);
-  fio___gf_copy(A2[1], A[1]);
-  fio___gf_copy(A2[2], A[2]);
-  fio___gf_copy(A2[3], A[3]);
-  fio___ge_p3_dbl(A2);
-
-  /* acc = A, then compute odd multiples */
-  fio___gf_copy(acc[0], A[0]);
-  fio___gf_copy(acc[1], A[1]);
-  fio___gf_copy(acc[2], A[2]);
-  fio___gf_copy(acc[3], A[3]);
-
-  for (int i = 0; i < 8; i++) {
-    fio___ge_p3_to_pniels(&table_a[i], acc);
-    if (i < 7) {
-      fio___ge_p3_add(acc, (const fio___gf_s *)A2);
+  /* Constant-time selection: read ALL entries, select matching one */
+  for (int i = 0; i < 16; i++) {
+    uint64_t mask = (uint64_t)0 - (uint64_t)(i == index);
+    for (int j = 0; j < 5; j++) {
+      r->ypx[j] = (r->ypx[j] & ~mask) | (table[i].ypx[j] & mask);
+      r->ymx[j] = (r->ymx[j] & ~mask) | (table[i].ymx[j] & mask);
+      r->xy2d[j] = (r->xy2d[j] & ~mask) | (table[i].xy2d[j] & mask);
+      r->z[j] = (r->z[j] & ~mask) | (table[i].z[j] & mask);
     }
   }
+}
 
-  /* r = identity */
+/* Constant-time double-scalar multiplication: r = [s]B + [h]A
+ * Uses Straus/Shamir trick with 4-bit windows for both scalars.
+ * B = base point (uses precomputed affine table, 16 entries)
+ * A = variable point (pniels table computed on-the-fly, 16 entries)
+ * s, h = scalars (from signature)
+ *
+ * All table lookups are constant-time (read all entries, select via masking).
+ * No data-dependent branches. Always executes the same operations regardless
+ * of scalar values. */
+FIO_SFUNC void fio___ge_double_scalarmult(fio___ge_p3_s r,
+                                          const uint8_t s[32],
+                                          const uint8_t h[32],
+                                          fio___ge_p3_s A) {
+  fio___ge_init_base_table();
+
+  /* Build table for A: table_a[i] = (i+1) * A for i = 0..15 */
+  fio___ge_pniels_s table_a[16];
+  {
+    fio___ge_p3_s points_a[16];
+    FIO_MEMCPY(points_a[0], A, sizeof(fio___ge_p3_s));
+    for (int i = 1; i < 16; i++) {
+      FIO_MEMCPY(points_a[i], points_a[i - 1], sizeof(fio___ge_p3_s));
+      fio___ge_p3_add(points_a[i], (const fio___gf_s *)A);
+    }
+    for (int i = 0; i < 16; i++)
+      fio___ge_p3_to_pniels(&table_a[i], points_a[i]);
+  }
+
+  /* r = identity point (0, 1, 1, 0) */
   fio___gf_zero(r[0]);
   fio___gf_one(r[1]);
   fio___gf_one(r[2]);
   fio___gf_zero(r[3]);
 
-  /* Process bits from MSB to LSB using simple double-and-add with both scalars
-   * For each bit position i:
-   *   r = 2*r
-   *   if s[i] == 1: r = r + B
-   *   if h[i] == 1: r = r + A
-   *
-   * This is the basic Straus method - we can enhance with windows later.
-   */
-  int started = 0;
-  for (int i = 255; i >= 0; --i) {
-    int s_bit = (s[i >> 3] >> (i & 7)) & 1;
-    int h_bit = (h[i >> 3] >> (i & 7)) & 1;
+  /* Process 4 bits at a time, MSB to LSB (64 windows).
+   * For each window position:
+   *   1. Double the accumulator 4 times
+   *   2. Extract 4-bit window from s, CT lookup in B table, CT add
+   *   3. Extract 4-bit window from h, CT lookup in A table, CT add */
+  for (int i = 63; i >= 0; i--) {
+    /* Double 4 times */
+    fio___ge_p3_dbl(r);
+    fio___ge_p3_dbl(r);
+    fio___ge_p3_dbl(r);
+    fio___ge_p3_dbl(r);
 
-    if (started) {
-      fio___ge_p3_dbl(r);
+    /* Extract 4-bit window from scalar s (for base point B) */
+    {
+      int bit_pos = i * 4;
+      int byte_idx = bit_pos >> 3;
+      int bit_offset = bit_pos & 7;
+      int s_window;
+      if (bit_offset <= 4) {
+        s_window = (s[byte_idx] >> bit_offset) & 0xF;
+      } else {
+        s_window = ((s[byte_idx] >> bit_offset) |
+                    (s[byte_idx + 1] << (8 - bit_offset))) &
+                   0xF;
+      }
+
+      /* CT lookup: use index max(window-1, 0), then CT replace with identity
+       * if window==0 */
+      int s_lookup = s_window - (s_window > 0);
+      fio___ge_precomp_s tmp_b;
+      fio___ge_precomp_lookup_ct(&tmp_b, s_lookup);
+
+      /* CT identity replacement when window == 0 */
+      uint64_t s_zero_mask = (uint64_t)0 - (uint64_t)(s_window == 0);
+      for (int j = 0; j < 5; j++) {
+        tmp_b.ypx[j] = (tmp_b.ypx[j] & ~s_zero_mask) |
+                       ((j == 0 ? 1ULL : 0ULL) & s_zero_mask);
+        tmp_b.ymx[j] = (tmp_b.ymx[j] & ~s_zero_mask) |
+                       ((j == 0 ? 1ULL : 0ULL) & s_zero_mask);
+        tmp_b.xy2d[j] &= ~s_zero_mask;
+      }
+
+      fio___ge_madd(r, &tmp_b);
     }
 
-    if (s_bit && h_bit) {
-      /* Add both B and A */
-      if (!started) {
-        /* r = B + A */
-        fio___ge_p3_base(r);
-        fio___ge_p3_add(r, (const fio___gf_s *)A);
-        started = 1;
+    /* Extract 4-bit window from scalar h (for variable point A) */
+    {
+      int bit_pos = i * 4;
+      int byte_idx = bit_pos >> 3;
+      int bit_offset = bit_pos & 7;
+      int h_window;
+      if (bit_offset <= 4) {
+        h_window = (h[byte_idx] >> bit_offset) & 0xF;
       } else {
-        /* r = r + B */
-        fio___ge_precomp_s tmp;
-        fio___ge_precomp_lookup_ct(&tmp, 0); /* B = table[0] = 1*B */
-        fio___ge_madd(r, &tmp);
-        /* r = r + A */
-        fio___ge_pnielsadd(r, &table_a[0], 0); /* 1*A */
+        h_window = ((h[byte_idx] >> bit_offset) |
+                    (h[byte_idx + 1] << (8 - bit_offset))) &
+                   0xF;
       }
-    } else if (s_bit) {
-      /* Add only B */
-      if (!started) {
-        fio___ge_p3_base(r);
-        started = 1;
-      } else {
-        fio___ge_precomp_s tmp;
-        fio___ge_precomp_lookup_ct(&tmp, 0);
-        fio___ge_madd(r, &tmp);
+
+      /* CT lookup: use index max(window-1, 0), then CT replace with identity
+       * if window==0 */
+      int h_lookup = h_window - (h_window > 0);
+      fio___ge_pniels_s tmp_a;
+      fio___ge_pniels_lookup_ct(&tmp_a, table_a, h_lookup);
+
+      /* CT identity replacement when window == 0 */
+      uint64_t h_zero_mask = (uint64_t)0 - (uint64_t)(h_window == 0);
+      for (int j = 0; j < 5; j++) {
+        tmp_a.ypx[j] = (tmp_a.ypx[j] & ~h_zero_mask) |
+                       ((j == 0 ? 1ULL : 0ULL) & h_zero_mask);
+        tmp_a.ymx[j] = (tmp_a.ymx[j] & ~h_zero_mask) |
+                       ((j == 0 ? 1ULL : 0ULL) & h_zero_mask);
+        tmp_a.xy2d[j] &= ~h_zero_mask;
+        tmp_a.z[j] = (tmp_a.z[j] & ~h_zero_mask) |
+                     ((j == 0 ? 1ULL : 0ULL) & h_zero_mask);
       }
-    } else if (h_bit) {
-      /* Add only A */
-      if (!started) {
-        fio___gf_copy(r[0], A[0]);
-        fio___gf_copy(r[1], A[1]);
-        fio___gf_copy(r[2], A[2]);
-        fio___gf_copy(r[3], A[3]);
-        started = 1;
-      } else {
-        fio___ge_pnielsadd(r, &table_a[0], 0);
-      }
+
+      fio___ge_pnielsadd(r, &tmp_a, 0);
     }
-    /* If both bits are 0, just double (already done above) */
   }
-
-  /* If we never started (both scalars are 0), r is already identity */
 }
 
 /* encode point to 32 bytes */
@@ -1837,11 +2107,12 @@ SFUNC int fio_ed25519_verify(const uint8_t signature[64],
   fio___gf_neg(pk[0], pk[0]);
   fio___gf_neg(pk[3], pk[3]);
 
-  /* Use Straus/Shamir double-scalar multiplication:
+  /* Use constant-time Straus/Shamir double-scalar multiplication:
    * result = [s]B + [k](-A) = [s]B - [k]A
-   * This is ~1.5x faster than two separate scalar multiplications */
+   * This is ~1.5x faster than two separate scalar multiplications.
+   * All table lookups and operations are constant-time. */
   fio___ge_p3_s result;
-  fio___ge_double_scalarmult_vartime(result, signature + 32, k, pk);
+  fio___ge_double_scalarmult(result, signature + 32, k, pk);
 
   /* encode result and compare with r */
   uint8_t check[32];

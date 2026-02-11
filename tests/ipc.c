@@ -103,8 +103,6 @@ Test: Message Lifecycle - Reference Counting
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_lifecycle)(void) {
-  FIO_LOG_DEBUG2("Testing IPC message lifecycle (reference counting)...");
-
   /* Test: Create message with zero data */
   {
     fio_ipc_s *msg = fio___ipc_new(16); /* +16 for MAC */
@@ -202,8 +200,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_lifecycle)(void) {
     /* fio_ipc_free(NULL) should be safe (no-op) */
     fio_ipc_free(NULL);
   }
-
-  FIO_LOG_DEBUG2("IPC message lifecycle tests passed.");
 }
 
 /* *****************************************************************************
@@ -211,8 +207,6 @@ Test: URL Management
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
-  FIO_LOG_DEBUG2("Testing IPC URL management...");
-
   /* Test: Get default URL (auto-generated at init) */
   {
     const char *url = fio_ipc_url();
@@ -220,7 +214,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
     FIO_ASSERT(FIO_STRLEN(url) > 0, "IPC URL should not be empty");
     FIO_ASSERT(FIO_STRLEN(url) < FIO_IPC_URL_MAX_LENGTH,
                "IPC URL should be within max length");
-    FIO_LOG_DEBUG2("  Default IPC URL: %s", url);
   }
 
   /* Test: URL starts with expected prefix */
@@ -235,10 +228,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
   /* Test: Set custom URL */
   {
     const char *custom_url = "unix://test_ipc_url.sock";
-    FIO_LOG_DEBUG2("Testing custom URL: %s", custom_url);
     int result = fio_ipc_url_set(custom_url);
     FIO_ASSERT(result == 0, "fio_ipc_url_set should succeed on master");
-    FIO_LOG_DEBUG2("Reading URL");
     const char *url = fio_ipc_url();
     FIO_ASSERT(url != NULL, "fio_ipc_url should return non-NULL after set");
     FIO_ASSERT(FIO_MEMCMP(url, custom_url, FIO_STRLEN(custom_url)) == 0,
@@ -247,7 +238,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
 
   /* Test: Set NULL URL (auto-generate) */
   {
-    FIO_LOG_DEBUG2("Testing NULL URL");
     int result = fio_ipc_url_set(NULL);
     FIO_ASSERT(result == 0, "fio_ipc_url_set(NULL) should succeed");
 
@@ -270,8 +260,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
 
   /* Reset to default */
   fio_ipc_url_set(NULL);
-
-  FIO_LOG_DEBUG2("IPC URL management tests passed.");
 }
 
 /* *****************************************************************************
@@ -279,8 +267,6 @@ Test: Message Structure Fields
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_fields)(void) {
-  FIO_LOG_DEBUG2("Testing IPC message structure fields...");
-
   /* Test: All fields are properly initialized and accessible */
   {
     fio_ipc_s *msg = fio___ipc_new(64);
@@ -334,15 +320,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_fields)(void) {
 
   /* Test: sizeof(fio_ipc_s) is reasonable */
   {
-    FIO_LOG_DEBUG2("  sizeof(fio_ipc_s) = %zu bytes", sizeof(fio_ipc_s));
     /* Structure should be reasonably sized (header only, no data) */
     FIO_ASSERT(sizeof(fio_ipc_s) >= 64,
                "fio_ipc_s should be at least 64 bytes");
     FIO_ASSERT(sizeof(fio_ipc_s) <= 256,
                "fio_ipc_s should not be excessively large");
   }
-
-  FIO_LOG_DEBUG2("IPC message structure field tests passed.");
 }
 
 /* *****************************************************************************
@@ -350,8 +333,6 @@ Test: Error Handling - NULL and Invalid Inputs
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_error_handling)(void) {
-  FIO_LOG_DEBUG2("Testing IPC error handling...");
-
   fio___test_ipc_reset_state();
 
   /* Test: fio_ipc_call with NULL call function (should be no-op) */
@@ -393,8 +374,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_error_handling)(void) {
     fio_ipc_free(NULL);
     /* Should not crash */
   }
-
-  FIO_LOG_DEBUG2("IPC error handling tests passed.");
 }
 
 /* *****************************************************************************
@@ -402,8 +381,6 @@ Test: Data Integrity Through Call/Reply Cycle
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_data_integrity)(void) {
-  FIO_LOG_DEBUG2("Testing IPC data integrity...");
-
   fio___test_ipc_reset_state();
 
   /* Test: Data is correctly copied in fio_ipc_call */
@@ -475,8 +452,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_data_integrity)(void) {
         FIO_MEMCMP(fio___test_ipc_received_data, binary_data, binary_len) == 0,
         "received binary data should match");
   }
-
-  FIO_LOG_DEBUG2("IPC data integrity tests passed.");
 }
 
 /* *****************************************************************************
@@ -484,8 +459,6 @@ Test: Master Process Direct Execution
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_master_execution)(void) {
-  FIO_LOG_DEBUG2("Testing IPC master process execution...");
-
   /* Verify we're running as master */
   FIO_ASSERT(fio_io_is_master(), "Test should run as master process");
 
@@ -527,8 +500,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_master_execution)(void) {
     FIO_ASSERT(fio___test_ipc_call_count == 5,
                "all 5 call callbacks should be invoked");
   }
-
-  FIO_LOG_DEBUG2("IPC master process execution tests passed.");
 }
 
 /* *****************************************************************************
@@ -536,8 +507,6 @@ Test: Reply Mechanism
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_reply_mechanism)(void) {
-  FIO_LOG_DEBUG2("Testing IPC reply mechanism...");
-
   fio___test_ipc_reset_state();
 
   /* Test: Reply with done=1 triggers on_done (not on_reply)
@@ -587,8 +556,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_reply_mechanism)(void) {
     FIO_ASSERT(fio___test_ipc_done_count == 1,
                "on_done should be called once at the end");
   }
-
-  FIO_LOG_DEBUG2("IPC reply mechanism tests passed.");
 }
 
 /* *****************************************************************************
@@ -596,8 +563,6 @@ Test: Flags Preservation
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_flags_preservation)(void) {
-  FIO_LOG_DEBUG2("Testing IPC flags preservation...");
-
   fio___test_ipc_reset_state();
 
   /* Test: User flags are preserved through message lifecycle */
@@ -623,8 +588,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_flags_preservation)(void) {
 
     fio___ipc_free(msg);
   }
-
-  FIO_LOG_DEBUG2("IPC flags preservation tests passed.");
 }
 
 /* *****************************************************************************
@@ -632,8 +595,6 @@ Test: Broadcast Mechanism (Single Process)
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_broadcast)(void) {
-  FIO_LOG_DEBUG2("Testing IPC broadcast mechanism...");
-
   fio___test_ipc_reset_state();
 
   /* Test: Local broadcast with NULL call is a no-op */
@@ -671,11 +632,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_broadcast)(void) {
 
     /* With no workers, the callback is NOT executed locally.
      * Local broadcast is specifically for worker distribution. */
-    FIO_LOG_DEBUG2("  Local broadcast with no workers: call_count = %d",
-                   fio___test_ipc_call_count);
   }
-
-  FIO_LOG_DEBUG2("IPC local broadcast mechanism tests passed.");
 }
 
 /* *****************************************************************************
@@ -683,8 +640,6 @@ Test: Message Size Limits
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_sizes)(void) {
-  FIO_LOG_DEBUG2("Testing IPC message size handling...");
-
   /* Test: Very small message (1 byte) */
   {
     fio_ipc_s *msg = fio___ipc_new(1 + 16);
@@ -735,8 +690,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_message_sizes)(void) {
     }
     fio___ipc_free(msg);
   }
-
-  FIO_LOG_DEBUG2("IPC message size handling tests passed.");
 }
 
 /* *****************************************************************************
@@ -744,8 +697,6 @@ Test: Timestamp and ID Generation
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_timestamp_id)(void) {
-  FIO_LOG_DEBUG2("Testing IPC timestamp and ID generation...");
-
   /* Test: Timestamps are monotonically increasing */
   {
     uint64_t prev_ts = 0;
@@ -780,8 +731,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_timestamp_id)(void) {
       }
     }
   }
-
-  FIO_LOG_DEBUG2("IPC timestamp and ID generation tests passed.");
 }
 
 /* *****************************************************************************
@@ -789,8 +738,6 @@ Test: Callback Function Pointers
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_callbacks)(void) {
-  FIO_LOG_DEBUG2("Testing IPC callback function pointers...");
-
   fio___test_ipc_reset_state();
 
   /* Test: All three callbacks are invoked correctly with udata preserved */
@@ -849,8 +796,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_callbacks)(void) {
     FIO_ASSERT(fio___test_ipc_call_count == 1,
                "call should be invoked even with NULL reply/done");
   }
-
-  FIO_LOG_DEBUG2("IPC callback function pointer tests passed.");
 }
 
 /* *****************************************************************************
@@ -858,8 +803,6 @@ Test: Multi-Buffer Data Combining (Unit Test)
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multi_buffer_data)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-buffer data combining...");
-
   fio___test_ipc_reset_state();
 
   /* Test: Combine 4 buffers into a single message */
@@ -1010,8 +953,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multi_buffer_data)(void) {
         FIO_MEMCMP(fio___test_ipc_received_data, part1, FIO_STRLEN(part1)) == 0,
         "part1 should be received");
   }
-
-  FIO_LOG_DEBUG2("IPC multi-buffer data combining tests passed.");
 }
 
 /* *****************************************************************************
@@ -1019,8 +960,6 @@ Test: Memory Safety
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_memory_safety)(void) {
-  FIO_LOG_DEBUG2("Testing IPC memory safety...");
-
   /* Test: Allocate and free many messages (stress test) */
   {
     const int num_messages = 1000;
@@ -1069,8 +1008,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_memory_safety)(void) {
     /* Final free */
     fio___ipc_free(msg);
   }
-
-  FIO_LOG_DEBUG2("IPC memory safety tests passed.");
 }
 
 /* *****************************************************************************
@@ -1112,10 +1049,6 @@ Test: Worker → Master Call (Multi-Process)
 /* Master handler - receives call from worker, sends reply */
 FIO_SFUNC void fio___test_mp_call_master_handler(fio_ipc_s *msg) {
   fio___test_mp_master_call_count++;
-  FIO_LOG_DEBUG2("(%d) [Master] Received IPC call, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Verify request data */
   const char *expected = "worker_request";
   if (msg->len == FIO_STRLEN(expected) &&
@@ -1136,16 +1069,11 @@ FIO_SFUNC void fio___test_mp_call_worker_on_reply(fio_ipc_s *msg) {
     FIO_MEMCPY((void *)fio___test_mp_reply_data[idx], msg->data, msg->len);
     fio___test_mp_reply_data[idx][msg->len] = '\0';
   }
-  FIO_LOG_DEBUG2("(%d) [Worker] Received reply: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
 }
 
 /* Worker done callback */
 FIO_SFUNC void fio___test_mp_call_worker_on_done(fio_ipc_s *msg) {
   fio___test_mp_worker_done_count++;
-  FIO_LOG_DEBUG2("(%d) [Worker] IPC call done", fio_io_pid());
   (void)msg;
 }
 
@@ -1154,9 +1082,6 @@ FIO_SFUNC void fio___test_mp_call_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Making IPC call to master", fio_io_pid());
-
   const char *request = "worker_request";
   fio_ipc_call(.call = fio___test_mp_call_master_handler,
                .on_reply = fio___test_mp_call_worker_on_reply,
@@ -1170,7 +1095,6 @@ FIO_SFUNC int fio___test_mp_call_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Timeout] Stopping reactor", fio_io_pid());
   fio_io_stop();
   return -1;
 }
@@ -1185,14 +1109,9 @@ FIO_SFUNC void fio___test_mp_call_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_master_call_count >= 1,
              "[Master] Should receive at least 1 call from worker (got %d)",
              fio___test_mp_master_call_count);
-  FIO_LOG_DEBUG2("(%d) [Master] Received %d calls from workers",
-                 fio_io_pid(),
-                 fio___test_mp_master_call_count);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_call)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process worker→master call...");
-
   fio___test_mp_reset_state();
 
   /* Register callbacks */
@@ -1216,8 +1135,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_call)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_call_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process call test passed.");
 }
 
 /* *****************************************************************************
@@ -1237,17 +1154,9 @@ static volatile int fio___test_mp_udata_failed = 0;
 /* Master handler - receives call from worker, verifies udata and sends reply */
 FIO_SFUNC void fio___test_mp_udata_master_handler(fio_ipc_s *msg) {
   fio___test_mp_udata_master_received++;
-  FIO_LOG_DEBUG2("(%d) [Master] Received IPC call with udata=%p",
-                 fio_io_pid(),
-                 msg->udata);
-
   /* Verify udata is the expected non-NULL marker value */
   if (msg->udata == FIO___TEST_MP_UDATA_MARKER) {
     fio___test_mp_udata_verified++;
-    FIO_LOG_DEBUG2("(%d) [Master] udata verified: %p == %p",
-                   fio_io_pid(),
-                   msg->udata,
-                   FIO___TEST_MP_UDATA_MARKER);
   } else {
     fio___test_mp_udata_failed++;
     FIO_LOG_ERROR("(%d) [Master] udata mismatch: got %p, expected %p",
@@ -1267,28 +1176,17 @@ FIO_SFUNC void fio___test_mp_udata_master_handler(fio_ipc_s *msg) {
 
 /* Worker reply callback for udata test */
 FIO_SFUNC void fio___test_mp_udata_worker_on_reply(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Received udata verification reply: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
+  (void)msg;
 }
 
 /* Worker done callback for udata test */
-FIO_SFUNC void fio___test_mp_udata_worker_on_done(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] udata test IPC call done", fio_io_pid());
-  (void)msg;
-}
+FIO_SFUNC void fio___test_mp_udata_worker_on_done(fio_ipc_s *msg) { (void)msg; }
 
 /* Worker startup - makes IPC call with specific udata */
 FIO_SFUNC void fio___test_mp_udata_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Making IPC call with udata=%p",
-                 fio_io_pid(),
-                 FIO___TEST_MP_UDATA_MARKER);
-
   const char *request = "udata_test_request";
   fio_ipc_call(.call = fio___test_mp_udata_master_handler,
                .on_reply = fio___test_mp_udata_worker_on_reply,
@@ -1303,7 +1201,6 @@ FIO_SFUNC int fio___test_mp_udata_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Timeout] Stopping reactor", fio_io_pid());
   fio_io_stop();
   return -1;
 }
@@ -1323,16 +1220,9 @@ FIO_SFUNC void fio___test_mp_udata_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_udata_failed == 0,
              "[Master] udata verification should not fail (got %d failures)",
              fio___test_mp_udata_failed);
-  FIO_LOG_DEBUG2("(%d) [Master] udata: received=%d, verified=%d, failed=%d",
-                 fio_io_pid(),
-                 fio___test_mp_udata_master_received,
-                 fio___test_mp_udata_verified,
-                 fio___test_mp_udata_failed);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_udata)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process udata preservation...");
-
   /* Reset state */
   fio___test_mp_udata_master_received = 0;
   fio___test_mp_udata_verified = 0;
@@ -1359,8 +1249,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_udata)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_udata_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process udata test passed.");
 }
 
 /* *****************************************************************************
@@ -1377,9 +1265,6 @@ static volatile int fio___test_mp_stream_worker_success = 0;
 
 /* Master handler - sends 1 reply for debugging */
 FIO_SFUNC void fio___test_mp_stream_master_handler(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Master] Received stream request, sending 1 reply",
-                 fio_io_pid());
-
   const char *reply = "stream_reply_1";
   fio_ipc_reply(
       msg,
@@ -1394,16 +1279,11 @@ FIO_SFUNC void fio___test_mp_stream_report_handler(fio_ipc_s *msg) {
   if (msg->len >= 7 && FIO_MEMCMP(msg->data, "success", 7) == 0) {
     fio___test_mp_stream_worker_success++;
   }
-  FIO_LOG_DEBUG2("(%d) [Master] Worker reported streaming result: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
 }
 
 /* Worker reply callback for streaming - minimal version for debugging */
 FIO_SFUNC void fio___test_mp_stream_worker_on_reply(fio_ipc_s *msg) {
   fio___test_mp_stream_reply_count++;
-  FIO_LOG_DEBUG2("(%d) [Worker] Stream reply callback entered", fio_io_pid());
   (void)msg;
 }
 
@@ -1413,9 +1293,6 @@ FIO_SFUNC void fio___test_mp_stream_worker_on_reply(fio_ipc_s *msg) {
  * itself (debug mode). The master timeout will stop the reactor cleanly. */
 FIO_SFUNC void fio___test_mp_stream_worker_on_done(fio_ipc_s *msg) {
   fio___test_mp_stream_done_count++;
-  FIO_LOG_DEBUG2("(%d) [%s] Stream done callback entered",
-                 fio_io_pid(),
-                 fio_io_is_master() ? "Master" : "Worker");
   (void)msg;
 }
 
@@ -1424,15 +1301,10 @@ FIO_SFUNC void fio___test_mp_stream_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Requesting streaming replies", fio_io_pid());
-
   fio_ipc_call(.call = fio___test_mp_stream_master_handler,
                .on_reply = fio___test_mp_stream_worker_on_reply,
                .on_done = fio___test_mp_stream_worker_on_done,
                .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"stream_request")));
-
-  FIO_LOG_DEBUG2("(%d) [Worker] IPC call sent", fio_io_pid());
 }
 
 /* Timeout for streaming test */
@@ -1453,12 +1325,9 @@ FIO_SFUNC void fio___test_mp_stream_on_finish(void *ignr_) {
   /* We can only verify master-side behavior. Worker verification happens
    * locally in the worker process and is logged via FIO_LOG_DEBUG2.
    * The test passes if the worker exits normally (not abnormally). */
-  FIO_LOG_DEBUG2("(%d) [Master] Streaming test finished", fio_io_pid());
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_streaming)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process streaming replies...");
-
   /* Reset state */
   fio___test_mp_stream_reply_count = 0;
   fio___test_mp_stream_done_count = 0;
@@ -1491,8 +1360,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_streaming)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_stream_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process streaming test passed.");
 }
 
 /* *****************************************************************************
@@ -1514,10 +1381,6 @@ FIO_SFUNC void fio___test_mp_bcast_confirm_handler(fio_ipc_s *msg) {
   if (msg->len >= 7 && FIO_MEMCMP(msg->data, "success", 7) == 0) {
     fio___test_mp_bcast_confirm_success++;
   }
-  FIO_LOG_DEBUG2("(%d) [Master] Worker confirmed broadcast receipt: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
 }
 
 /* Handler executed on each worker when broadcast received - NO ASSERTIONS */
@@ -1525,11 +1388,6 @@ FIO_SFUNC void fio___test_mp_bcast_worker_handler(fio_ipc_s *msg) {
   int idx = fio___test_mp_bcast_received++;
   if (idx < 4)
     fio___test_mp_bcast_worker_pids[idx] = fio_io_pid();
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Received broadcast, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Verify broadcast data - record result, don't assert */
   const char *expected = "broadcast_data";
   int success = 0;
@@ -1554,9 +1412,6 @@ FIO_SFUNC int fio___test_mp_bcast_trigger(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcasting to all workers", fio_io_pid());
-
   const char *data = "broadcast_data";
   fio_ipc_local(.call = fio___test_mp_bcast_worker_handler,
                 .data = FIO_IPC_DATA(
@@ -1586,15 +1441,9 @@ FIO_SFUNC void fio___test_mp_bcast_on_finish(void *ignr_) {
              "[Master] All 2 workers should confirm successful broadcast "
              "receipt (got %d successes)",
              fio___test_mp_bcast_confirm_success);
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcast: confirmations=%d, successes=%d",
-                 fio_io_pid(),
-                 fio___test_mp_bcast_confirmations,
-                 fio___test_mp_bcast_confirm_success);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process broadcast...");
-
   /* Reset state */
   fio___test_mp_bcast_received = 0;
   fio___test_mp_bcast_confirmations = 0;
@@ -1621,8 +1470,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_bcast_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process broadcast test passed.");
 }
 
 /* *****************************************************************************
@@ -1639,8 +1486,6 @@ static volatile int fio___test_mp_data_master_verified = 0;
 
 /* Master handler - verifies data and echoes back */
 FIO_SFUNC void fio___test_mp_data_master_handler(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Master] Received data, len=%u", fio_io_pid(), msg->len);
-
   /* Verify pattern */
   int valid = 1;
   for (size_t i = 0; i < msg->len && valid; ++i) {
@@ -1666,17 +1511,10 @@ FIO_SFUNC void fio___test_mp_data_worker_on_reply(fio_ipc_s *msg) {
   if (msg->len == 8 && FIO_MEMCMP(msg->data, "verified", 8) == 0) {
     fio___test_mp_data_verified = 1;
   }
-  FIO_LOG_DEBUG2("(%d) [Worker] Data verification: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
 }
 
 /* Worker done callback for data test */
-FIO_SFUNC void fio___test_mp_data_worker_on_done(fio_ipc_s *msg) {
-  (void)msg;
-  FIO_LOG_DEBUG2("(%d) [Worker] Data test done", fio_io_pid());
-}
+FIO_SFUNC void fio___test_mp_data_worker_on_done(fio_ipc_s *msg) { (void)msg; }
 
 /* Worker startup for data test */
 FIO_SFUNC void fio___test_mp_data_worker_start(void *ignr_) {
@@ -1685,8 +1523,6 @@ FIO_SFUNC void fio___test_mp_data_worker_start(void *ignr_) {
     return;
 
   size_t size = fio___test_mp_data_test_size;
-  FIO_LOG_DEBUG2("(%d) [Worker] Sending %zu bytes of data", fio_io_pid(), size);
-
   /* Allocate and fill pattern */
   char *data = (char *)FIO_MEM_REALLOC(NULL, 0, size, 0);
   if (!data)
@@ -1722,9 +1558,6 @@ FIO_SFUNC void fio___test_mp_data_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_data_master_verified >= 1,
              "[Master] Should verify at least 1 data message (got %d)",
              fio___test_mp_data_master_verified);
-  FIO_LOG_DEBUG2("(%d) [Master] Data integrity: verified=%d",
-                 fio_io_pid(),
-                 fio___test_mp_data_master_verified);
 }
 
 /* Helper to run data integrity test with specific size */
@@ -1755,21 +1588,14 @@ FIO_SFUNC void fio___test_mp_data_run_size(size_t size) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_data_integrity)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process data integrity...");
-
   /* Test small data (64 bytes) */
-  FIO_LOG_DEBUG2("  Testing 64 bytes...");
   fio___test_mp_data_run_size(64);
 
   /* Test medium data (4KB) */
-  FIO_LOG_DEBUG2("  Testing 4KB...");
   fio___test_mp_data_run_size(4096);
 
   /* Test large data (64KB) */
-  FIO_LOG_DEBUG2("  Testing 64KB...");
   fio___test_mp_data_run_size(65536);
-
-  FIO_LOG_DEBUG2("IPC multi-process data integrity test passed.");
 }
 
 /* *****************************************************************************
@@ -1785,10 +1611,6 @@ static volatile int fio___test_mp_binary_master_verified = 0;
 
 /* Master handler - verifies binary data with nulls */
 FIO_SFUNC void fio___test_mp_binary_master_handler(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Master] Received binary data, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Expected pattern: 0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03 */
   uint8_t expected[] = {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
   int valid = (msg->len == sizeof(expected) &&
@@ -1823,9 +1645,6 @@ FIO_SFUNC void fio___test_mp_binary_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Sending binary data with nulls", fio_io_pid());
-
   unsigned char binary_data[] =
       {0x00, 0x01, 0x02, 0x00, 0xFF, 0xFE, 0x00, 0x03};
   fio_ipc_call(.call = fio___test_mp_binary_master_handler,
@@ -1853,14 +1672,9 @@ FIO_SFUNC void fio___test_mp_binary_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_binary_master_verified >= 1,
              "[Master] Should verify at least 1 binary message (got %d)",
              fio___test_mp_binary_master_verified);
-  FIO_LOG_DEBUG2("(%d) [Master] Binary data: verified=%d",
-                 fio_io_pid(),
-                 fio___test_mp_binary_master_verified);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_binary)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process binary data with nulls...");
-
   fio___test_mp_binary_verified = 0;
   fio___test_mp_binary_worker_success = 0;
   fio___test_mp_binary_worker_failure = 0;
@@ -1885,8 +1699,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_binary)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_binary_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process binary data test passed.");
 }
 
 /* *****************************************************************************
@@ -1899,10 +1711,6 @@ static volatile int fio___test_mp_concurrent_worker_replies = 0;
 /* Master handler for concurrent test */
 FIO_SFUNC void fio___test_mp_concurrent_master_handler(fio_ipc_s *msg) {
   fio___test_mp_concurrent_master_calls++;
-  FIO_LOG_DEBUG2("(%d) [Master] Concurrent call #%d",
-                 fio_io_pid(),
-                 fio___test_mp_concurrent_master_calls);
-
   /* Echo back with worker ID */
   char reply[64];
   int len = snprintf(reply, sizeof(reply), "ack_%u", msg->len);
@@ -1914,10 +1722,7 @@ FIO_SFUNC void fio___test_mp_concurrent_master_handler(fio_ipc_s *msg) {
 /* Worker reply callback for concurrent test */
 FIO_SFUNC void fio___test_mp_concurrent_worker_on_reply(fio_ipc_s *msg) {
   fio___test_mp_concurrent_worker_replies++;
-  FIO_LOG_DEBUG2("(%d) [Worker] Concurrent reply: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
+  (void)msg;
 }
 
 /* Worker done callback for concurrent test */
@@ -1930,9 +1735,6 @@ FIO_SFUNC void fio___test_mp_concurrent_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Making concurrent IPC call", fio_io_pid());
-
   /* Use PID as unique identifier */
   char request[32];
   int len = snprintf(request, sizeof(request), "worker_%d", fio_io_pid());
@@ -1958,16 +1760,10 @@ FIO_SFUNC void fio___test_mp_concurrent_on_finish(void *ignr_) {
     FIO_ASSERT(fio___test_mp_concurrent_master_calls >= 2,
                "[Master] Should receive calls from 2 workers (got %d)",
                fio___test_mp_concurrent_master_calls);
-    FIO_LOG_DEBUG2("(%d) [Master] Received %d concurrent calls",
-                   fio_io_pid(),
-                   fio___test_mp_concurrent_master_calls);
   }
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_concurrent)(void) {
-  FIO_LOG_DEBUG2(
-      "Testing IPC multi-process concurrent calls from 2 workers...");
-
   fio___test_mp_concurrent_master_calls = 0;
   fio___test_mp_concurrent_worker_replies = 0;
 
@@ -1991,8 +1787,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_concurrent)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_concurrent_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process concurrent test passed.");
 }
 
 /* *****************************************************************************
@@ -2000,8 +1794,6 @@ Test: Encryption Verification
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_encryption_verification)(void) {
-  FIO_LOG_DEBUG2("Testing IPC encryption verification...");
-
   /* Create test message */
   const char *test_data = "encryption_test_data";
   size_t data_len = FIO_STRLEN(test_data);
@@ -2081,8 +1873,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_encryption_verification)(void) {
 
   fio___ipc_free(msg);
   fio___ipc_free(tampered);
-
-  FIO_LOG_DEBUG2("IPC encryption verification test passed.");
 }
 
 /* *****************************************************************************
@@ -2103,10 +1893,6 @@ static volatile int fio___test_mp_bcast_exclude_data_fail = 0;
 FIO_SFUNC void fio___test_mp_bcast_exclude_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_bcast_exclude_master_received++;
-    FIO_LOG_DEBUG2("(%d) [Master] Executed broadcast handler, count=%d",
-                   fio_io_pid(),
-                   fio___test_mp_bcast_exclude_master_received);
-
     /* Verify broadcast data on master - record result, don't assert in handler
      */
     const char *expected = "exclude_test_data";
@@ -2119,7 +1905,6 @@ FIO_SFUNC void fio___test_mp_bcast_exclude_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Received broadcast", fio_io_pid());
   }
 }
 
@@ -2128,10 +1913,6 @@ FIO_SFUNC int fio___test_mp_bcast_exclude_trigger(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcasting with NULL exclude to 3 workers",
-                 fio_io_pid());
-
   const char *data = "exclude_test_data";
   fio_ipc_local(
           /* no .exclude workers receive + master executes */
@@ -2163,16 +1944,9 @@ FIO_SFUNC void fio___test_mp_bcast_exclude_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_bcast_exclude_data_fail == 0,
              "[Master] Broadcast exclude data failures: %d",
              fio___test_mp_bcast_exclude_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcast exclude: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_bcast_exclude_master_received,
-                 fio___test_mp_bcast_exclude_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast_exclude)(void) {
-  FIO_LOG_DEBUG2("Testing IPC broadcast with exclude parameter...");
-
   /* Reset state */
   fio___test_mp_bcast_exclude_master_received = 0;
   fio___test_mp_bcast_exclude_data_ok = 0;
@@ -2199,8 +1973,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast_exclude)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_bcast_exclude_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC broadcast exclude test passed.");
 }
 
 /* *****************************************************************************
@@ -2221,10 +1993,6 @@ static volatile int fio___test_mp_bcast_verify_data_fail = 0;
 FIO_SFUNC void fio___test_mp_bcast_verify_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_bcast_verify_master_received++;
-    FIO_LOG_DEBUG2("(%d) [Master] Executed verify-broadcast handler, count=%d",
-                   fio_io_pid(),
-                   fio___test_mp_bcast_verify_master_received);
-
     /* Verify data on master - record result, don't assert in handler */
     const char *expected = "verify_data";
     if (msg->len == FIO_STRLEN(expected) &&
@@ -2236,7 +2004,6 @@ FIO_SFUNC void fio___test_mp_bcast_verify_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Received verify-broadcast", fio_io_pid());
   }
 }
 
@@ -2245,9 +2012,6 @@ FIO_SFUNC int fio___test_mp_bcast_verify_trigger(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-
-  FIO_LOG_DEBUG2("(%d) [Master] Broadcasting for verification", fio_io_pid());
-
   const char *data = "verify_data";
   fio_ipc_local(.call = fio___test_mp_bcast_verify_handler,
                 .data = FIO_IPC_DATA(
@@ -2275,16 +2039,9 @@ FIO_SFUNC void fio___test_mp_bcast_verify_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_bcast_verify_data_fail == 0,
              "[Master] Verify broadcast data failures: %d",
              fio___test_mp_bcast_verify_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Verify broadcast: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_bcast_verify_master_received,
-                 fio___test_mp_bcast_verify_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast_verify)(void) {
-  FIO_LOG_DEBUG2("Testing IPC broadcast with verification assertion...");
-
   fio___test_mp_bcast_verify_master_received = 0;
   fio___test_mp_bcast_verify_data_ok = 0;
   fio___test_mp_bcast_verify_data_fail = 0;
@@ -2307,8 +2064,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_broadcast_verify)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_bcast_verify_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC broadcast verification test passed.");
 }
 
 /* *****************************************************************************
@@ -2332,10 +2087,6 @@ static volatile int fio___test_mp_child_bcast_data_fail = 0;
 FIO_SFUNC void fio___test_mp_child_bcast_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_child_bcast_master_received++;
-    FIO_LOG_DEBUG2("(%d) [Master] Received child broadcast, count=%d",
-                   fio_io_pid(),
-                   fio___test_mp_child_bcast_master_received);
-
     /* Verify data on master - record result, don't assert in handler */
     const char *expected = "child_broadcast_data";
     if (msg->len == FIO_STRLEN(expected) &&
@@ -2347,7 +2098,6 @@ FIO_SFUNC void fio___test_mp_child_bcast_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Received broadcast", fio_io_pid());
   }
 }
 
@@ -2360,9 +2110,6 @@ FIO_SFUNC void fio___test_mp_child_bcast_worker_start(void *ignr_) {
   /* Only first worker broadcasts (use atomic-like check) */
   if (fio___test_mp_child_bcast_started == 0) {
     fio___test_mp_child_bcast_started = 1;
-    FIO_LOG_DEBUG2("(%d) [Worker] Broadcasting to all (including self)",
-                   fio_io_pid());
-
     const char *data = "child_broadcast_data";
     /* no .exclude - should run on master AND all workers including caller */
     fio_ipc_local(.call = fio___test_mp_child_bcast_handler,
@@ -2395,16 +2142,9 @@ FIO_SFUNC void fio___test_mp_child_bcast_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_child_bcast_data_fail == 0,
              "[Master] Child broadcast data failures: %d",
              fio___test_mp_child_bcast_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Child broadcast: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_child_bcast_master_received,
-                 fio___test_mp_child_bcast_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_child_broadcast)(void) {
-  FIO_LOG_DEBUG2("Testing IPC broadcast from child process...");
-
   /* Reset state */
   fio___test_mp_child_bcast_master_received = 0;
   fio___test_mp_child_bcast_started = 0;
@@ -2431,8 +2171,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_child_broadcast)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_child_bcast_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC child broadcast test passed.");
 }
 
 /* *****************************************************************************
@@ -2456,10 +2194,6 @@ static volatile int fio___test_mp_child_excl_data_fail = 0;
 FIO_SFUNC void fio___test_mp_child_excl_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_child_excl_master_received++;
-    FIO_LOG_DEBUG2("(%d) [Master] Received child excl broadcast, count=%d",
-                   fio_io_pid(),
-                   fio___test_mp_child_excl_master_received);
-
     /* Verify data on master - record result, don't assert in handler */
     const char *expected = "child_excl_data";
     if (msg->len == FIO_STRLEN(expected) &&
@@ -2471,7 +2205,6 @@ FIO_SFUNC void fio___test_mp_child_excl_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Received broadcast", fio_io_pid());
   }
 }
 
@@ -2484,9 +2217,6 @@ FIO_SFUNC void fio___test_mp_child_excl_worker_start(void *ignr_) {
   /* Only first worker broadcasts (use atomic-like check) */
   if (fio___test_mp_child_excl_started == 0) {
     fio___test_mp_child_excl_started = 1;
-    FIO_LOG_DEBUG2("(%d) [Worker] Broadcasting with self-exclusion",
-                   fio_io_pid());
-
     const char *data = "child_excl_data";
     /* .exclude = true - should NOT run on caller */
     fio_ipc_local(.call = fio___test_mp_child_excl_handler,
@@ -2519,17 +2249,10 @@ FIO_SFUNC void fio___test_mp_child_excl_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_child_excl_data_fail == 0,
              "[Master] Child excl broadcast data failures: %d",
              fio___test_mp_child_excl_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Child excl: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_child_excl_master_received,
-                 fio___test_mp_child_excl_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl,
                              ipc_multiprocess_child_broadcast_exclude)(void) {
-  FIO_LOG_DEBUG2("Testing IPC broadcast from child with self-exclusion...");
-
   /* Reset state */
   fio___test_mp_child_excl_master_received = 0;
   fio___test_mp_child_excl_started = 0;
@@ -2556,8 +2279,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl,
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_child_excl_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC child broadcast with self-exclusion test passed.");
 }
 
 /* *****************************************************************************
@@ -2581,10 +2302,6 @@ static volatile int fio___test_mp_multibuf_data_fail = 0;
  */
 FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
   fio___test_mp_multibuf_master_received++;
-  FIO_LOG_DEBUG2("(%d) [Master] Received multi-buffer IPC call, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Calculate expected length */
   size_t expected_len =
       FIO_STRLEN(FIO___TEST_MP_MULTIBUF_HEADER) + sizeof(uint32_t) +
@@ -2596,11 +2313,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
   /* Verify length */
   if (msg->len != expected_len) {
     valid = 0;
-    FIO_LOG_DEBUG2(
-        "(%d) [Master] Multi-buffer length mismatch: expected %zu, got %u",
-        fio_io_pid(),
-        expected_len,
-        msg->len);
   }
 
   if (valid) {
@@ -2611,7 +2323,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
                    FIO___TEST_MP_MULTIBUF_HEADER,
                    FIO_STRLEN(FIO___TEST_MP_MULTIBUF_HEADER)) != 0) {
       valid = 0;
-      FIO_LOG_DEBUG2("(%d) [Master] Header mismatch", fio_io_pid());
     }
     offset += FIO_STRLEN(FIO___TEST_MP_MULTIBUF_HEADER);
 
@@ -2621,10 +2332,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
       FIO_MEMCPY(&num1, msg->data + offset, sizeof(uint32_t));
       if (num1 != FIO___TEST_MP_MULTIBUF_NUM1) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] num1 mismatch: 0x%X vs 0x%X",
-                       fio_io_pid(),
-                       num1,
-                       FIO___TEST_MP_MULTIBUF_NUM1);
       }
       offset += sizeof(uint32_t);
     }
@@ -2635,7 +2342,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
                      FIO___TEST_MP_MULTIBUF_SEP,
                      FIO_STRLEN(FIO___TEST_MP_MULTIBUF_SEP)) != 0) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] Separator mismatch", fio_io_pid());
       }
       offset += FIO_STRLEN(FIO___TEST_MP_MULTIBUF_SEP);
     }
@@ -2646,10 +2352,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
       FIO_MEMCPY(&num2, msg->data + offset, sizeof(uint64_t));
       if (num2 != FIO___TEST_MP_MULTIBUF_NUM2) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] num2 mismatch: 0x%llX vs 0x%llX",
-                       fio_io_pid(),
-                       (unsigned long long)num2,
-                       (unsigned long long)FIO___TEST_MP_MULTIBUF_NUM2);
       }
       offset += sizeof(uint64_t);
     }
@@ -2660,15 +2362,12 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
                      FIO___TEST_MP_MULTIBUF_FOOTER,
                      FIO_STRLEN(FIO___TEST_MP_MULTIBUF_FOOTER)) != 0) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] Footer mismatch", fio_io_pid());
       }
     }
   }
 
   if (valid) {
     fio___test_mp_multibuf_master_verified++;
-    FIO_LOG_DEBUG2("(%d) [Master] Multi-buffer data verified successfully",
-                   fio_io_pid());
   } else {
     fio___test_mp_multibuf_data_fail++;
     FIO_LOG_ERROR("(%d) [Master] Multi-buffer data verification FAILED",
@@ -2690,10 +2389,6 @@ FIO_SFUNC void fio___test_mp_multibuf_master_handler(fio_ipc_s *msg) {
 
 /* Worker reply callback for multi-buffer test */
 FIO_SFUNC void fio___test_mp_multibuf_worker_on_reply(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Worker] Received multi-buffer reply, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Verify reply: "REPLY:" + uint16_t(0xABCD) + ":OK" */
   size_t expected_len =
       FIO_STRLEN("REPLY:") + sizeof(uint16_t) + FIO_STRLEN(":OK");
@@ -2727,7 +2422,6 @@ FIO_SFUNC void fio___test_mp_multibuf_worker_on_reply(fio_ipc_s *msg) {
 
     if (valid) {
       fio___test_mp_multibuf_reply_verified = 1;
-      FIO_LOG_DEBUG2("(%d) [Worker] Multi-buffer reply verified", fio_io_pid());
     }
   }
 }
@@ -2735,7 +2429,6 @@ FIO_SFUNC void fio___test_mp_multibuf_worker_on_reply(fio_ipc_s *msg) {
 /* Worker done callback for multi-buffer test */
 FIO_SFUNC void fio___test_mp_multibuf_worker_on_done(fio_ipc_s *msg) {
   (void)msg;
-  FIO_LOG_DEBUG2("(%d) [Worker] Multi-buffer IPC call done", fio_io_pid());
 }
 
 /* Worker startup - sends multi-buffer IPC call to master */
@@ -2743,10 +2436,6 @@ FIO_SFUNC void fio___test_mp_multibuf_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Sending multi-buffer IPC call to master",
-                 fio_io_pid());
-
   /* Prepare data: "HDR:" + uint32_t + ":SEP:" + uint64_t + ":FTR" */
   const char *header = FIO___TEST_MP_MULTIBUF_HEADER;
   uint32_t num1 = FIO___TEST_MP_MULTIBUF_NUM1;
@@ -2769,7 +2458,6 @@ FIO_SFUNC int fio___test_mp_multibuf_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Timeout] Stopping reactor", fio_io_pid());
   fio_io_stop();
   return -1;
 }
@@ -2789,18 +2477,9 @@ FIO_SFUNC void fio___test_mp_multibuf_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_multibuf_data_fail == 0,
              "[Master] Multi-buffer data failures: %d",
              fio___test_mp_multibuf_data_fail);
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Multi-buffer: received=%d, verified=%d, failed=%d",
-      fio_io_pid(),
-      fio___test_mp_multibuf_master_received,
-      fio___test_mp_multibuf_master_verified,
-      fio___test_mp_multibuf_data_fail);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_multi_buffer)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process multi-buffer data...");
-
   /* Reset state */
   fio___test_mp_multibuf_master_received = 0;
   fio___test_mp_multibuf_master_verified = 0;
@@ -2830,8 +2509,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_multi_buffer)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_multibuf_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process multi-buffer test passed.");
 }
 
 /* *****************************************************************************
@@ -2847,29 +2524,15 @@ static volatile int fio___test_mp_large_master_verified = 0;
 
 /* Master handler - verifies 1MB data */
 FIO_SFUNC void fio___test_mp_large_master_handler(fio_ipc_s *msg) {
-  FIO_LOG_DEBUG2("(%d) [Master] Received large data, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Verify pattern */
   int valid = 1;
   size_t expected_size = 1024 * 1024; /* 1MB */
   if (msg->len != expected_size) {
     valid = 0;
-    FIO_LOG_DEBUG2("(%d) [Master] Size mismatch: expected %zu, got %u",
-                   fio_io_pid(),
-                   expected_size,
-                   msg->len);
   } else {
     for (size_t i = 0; i < msg->len && valid; ++i) {
       if ((uint8_t)msg->data[i] != (uint8_t)(i & 0xFF)) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] Pattern mismatch at byte %zu: expected "
-                       "%u, got %u",
-                       fio_io_pid(),
-                       i,
-                       (uint8_t)(i & 0xFF),
-                       (uint8_t)msg->data[i]);
       }
     }
   }
@@ -2892,17 +2555,10 @@ FIO_SFUNC void fio___test_mp_large_worker_on_reply(fio_ipc_s *msg) {
   if (msg->len == 14 && FIO_MEMCMP(msg->data, "large_verified", 14) == 0) {
     fio___test_mp_large_verified = 1;
   }
-  FIO_LOG_DEBUG2("(%d) [Worker] Large data verification: %.*s",
-                 fio_io_pid(),
-                 (int)msg->len,
-                 msg->data);
 }
 
 /* Worker done callback for large test */
-FIO_SFUNC void fio___test_mp_large_worker_on_done(fio_ipc_s *msg) {
-  (void)msg;
-  FIO_LOG_DEBUG2("(%d) [Worker] Large data test done", fio_io_pid());
-}
+FIO_SFUNC void fio___test_mp_large_worker_on_done(fio_ipc_s *msg) { (void)msg; }
 
 /* Worker startup for large test */
 FIO_SFUNC void fio___test_mp_large_worker_start(void *ignr_) {
@@ -2911,10 +2567,6 @@ FIO_SFUNC void fio___test_mp_large_worker_start(void *ignr_) {
     return;
 
   size_t size = 1024 * 1024; /* 1MB */
-  FIO_LOG_DEBUG2("(%d) [Worker] Sending %zu bytes (1MB) of data",
-                 fio_io_pid(),
-                 size);
-
   /* Allocate and fill pattern */
   char *data = (char *)FIO_MEM_REALLOC(NULL, 0, size, 0);
   if (!data) {
@@ -2952,14 +2604,9 @@ FIO_SFUNC void fio___test_mp_large_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_large_master_verified >= 1,
              "[Master] Should verify at least 1 large (1MB) message (got %d)",
              fio___test_mp_large_master_verified);
-  FIO_LOG_DEBUG2("(%d) [Master] Large message: verified=%d",
-                 fio_io_pid(),
-                 fio___test_mp_large_master_verified);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_large_message)(void) {
-  FIO_LOG_DEBUG2("Testing IPC multi-process 1MB large message...");
-
   fio___test_mp_large_verified = 0;
   fio___test_mp_large_worker_success = 0;
   fio___test_mp_large_worker_failure = 0;
@@ -2983,8 +2630,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_large_message)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_large_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC multi-process 1MB large message test passed.");
 }
 
 /* *****************************************************************************
@@ -3007,10 +2652,6 @@ static volatile int fio___test_mp_redist_started = 0;
 FIO_SFUNC void fio___test_mp_redist_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_redist_master_received++;
-    FIO_LOG_DEBUG2("(%d) [Master] Received redistribution message, count=%d",
-                   fio_io_pid(),
-                   fio___test_mp_redist_master_received);
-
     /* Verify data on master - record result, don't assert in handler */
     const char *expected = "redistribution_test";
     if (msg->len == FIO_STRLEN(expected) &&
@@ -3022,8 +2663,6 @@ FIO_SFUNC void fio___test_mp_redist_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Received redistributed message",
-                   fio_io_pid());
   }
 }
 
@@ -3036,9 +2675,6 @@ FIO_SFUNC void fio___test_mp_redist_worker_start(void *ignr_) {
   /* Only first worker publishes (use atomic-like check) */
   if (fio___test_mp_redist_started == 0) {
     fio___test_mp_redist_started = 1;
-    FIO_LOG_DEBUG2("(%d) [Worker] Publishing message for redistribution",
-                   fio_io_pid());
-
     const char *data = "redistribution_test";
     /* Worker publishes with self-exclusion - master should receive */
     fio_ipc_local(.call = fio___test_mp_redist_handler,
@@ -3073,17 +2709,9 @@ FIO_SFUNC void fio___test_mp_redist_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_redist_data_fail == 0,
              "[Master] Redistribution data failures: %d",
              fio___test_mp_redist_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Redistribution: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_redist_master_received,
-                 fio___test_mp_redist_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_redistribution)(void) {
-  FIO_LOG_DEBUG2(
-      "Testing IPC Worker → Master → Other Workers redistribution...");
-
   /* Reset state */
   fio___test_mp_redist_master_received = 0;
   fio___test_mp_redist_data_ok = 0;
@@ -3110,8 +2738,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_redistribution)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_redist_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC redistribution test passed.");
 }
 
 /* *****************************************************************************
@@ -3143,11 +2769,6 @@ static volatile int fio___test_mp_worker_bcast_data_fail = 0;
 FIO_SFUNC void fio___test_mp_worker_bcast_handler(fio_ipc_s *msg) {
   if (fio_io_is_master()) {
     fio___test_mp_worker_bcast_master_received++;
-    FIO_LOG_DEBUG2(
-        "(%d) [Master] Received worker's mistaken broadcast, count=%d",
-        fio_io_pid(),
-        fio___test_mp_worker_bcast_master_received);
-
     /* Verify data on master - record result, don't assert in handler */
     const char *expected = "worker_mistaken_broadcast";
     if (msg->len == FIO_STRLEN(expected) &&
@@ -3159,8 +2780,6 @@ FIO_SFUNC void fio___test_mp_worker_bcast_handler(fio_ipc_s *msg) {
                     fio_io_pid());
     }
   } else {
-    FIO_LOG_DEBUG2("(%d) [Worker] Executed broadcast handler locally",
-                   fio_io_pid());
   }
 }
 
@@ -3173,9 +2792,6 @@ FIO_SFUNC void fio___test_mp_worker_bcast_worker_start(void *ignr_) {
   /* Only first worker broadcasts (use atomic-like check) */
   if (fio___test_mp_worker_bcast_started == 0) {
     fio___test_mp_worker_bcast_started = 1;
-    FIO_LOG_DEBUG2("(%d) [Worker] Mistakenly calling fio_ipc_local",
-                   fio_io_pid());
-
     const char *data = "worker_mistaken_broadcast";
     /* Worker calls local broadcast without .exclude - this is the "mistake"
      * scenario According to docs: behaves like fio_ipc_call + executes locally
@@ -3218,16 +2834,9 @@ FIO_SFUNC void fio___test_mp_worker_bcast_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_mp_worker_bcast_data_fail == 0,
              "[Master] Worker broadcast data failures: %d",
              fio___test_mp_worker_bcast_data_fail);
-
-  FIO_LOG_DEBUG2("(%d) [Master] Worker broadcast: received=%d, data_ok=%d",
-                 fio_io_pid(),
-                 fio___test_mp_worker_bcast_master_received,
-                 fio___test_mp_worker_bcast_data_ok);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_worker_broadcast)(void) {
-  FIO_LOG_DEBUG2("Testing IPC worker mistakenly calls broadcast...");
-
   /* Reset state */
   fio___test_mp_worker_bcast_master_received = 0;
   fio___test_mp_worker_bcast_started = 0;
@@ -3254,8 +2863,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multiprocess_worker_broadcast)(void) {
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___test_mp_worker_bcast_on_finish,
                             NULL);
-
-  FIO_LOG_DEBUG2("IPC worker mistakenly calls broadcast test passed.");
 }
 
 /* *****************************************************************************
@@ -3271,8 +2878,6 @@ Test: RPC Message Creation (fio_ipc_cluster_new)
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_message_creation)(void) {
-  FIO_LOG_DEBUG2("Testing RPC message creation (fio_ipc_cluster_new)...");
-
   /* Test: Create RPC message with opcode and data */
   {
     const char *test_data = "rpc_test_data";
@@ -3296,9 +2901,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_message_creation)(void) {
     /* Note: flags field is NOT currently copied in fio___ipc_new_author.
      * This appears to be a bug in the library - args->flags is accepted but
      * not copied to m->flags. For now, we just verify the field exists. */
-    FIO_LOG_DEBUG2("  flags field value: 0x%X (expected 0xABCD - not copied)",
-                   msg->flags);
-
     /* Verify data is copied correctly */
     FIO_ASSERT(msg->len == FIO_STRLEN(test_data),
                "data length should match (got %u, expected %zu)",
@@ -3388,8 +2990,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_message_creation)(void) {
 
     fio___ipc_free(msg);
   }
-
-  FIO_LOG_DEBUG2("RPC message creation tests passed.");
 }
 
 /* *****************************************************************************
@@ -3405,14 +3005,9 @@ FIO_SFUNC void fio___test_rpc_opcode_handler(fio_ipc_s *msg) {
   fio___test_rpc_opcode_called++;
   /* Note: by the time handler is called, msg->call has been replaced with fn */
   fio___test_rpc_opcode_udata = msg->udata;
-  FIO_LOG_DEBUG2("(%d) RPC op-code handler called, udata=%p",
-                 fio_io_pid(),
-                 fio___test_rpc_opcode_udata);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_opcode_registration)(void) {
-  FIO_LOG_DEBUG2("Testing RPC op-code registration and dispatch...");
-
   /* Reset test state */
   fio___test_rpc_opcode_called = 0;
   fio___test_rpc_opcode_received = 0;
@@ -3514,8 +3109,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_opcode_registration)(void) {
 
   /* Clean up remaining registered op-codes */
   fio_ipc_opcode_register(.opcode = 0x00005678, .call = NULL);
-
-  FIO_LOG_DEBUG2("RPC op-code registration and dispatch tests passed.");
 }
 
 /* *****************************************************************************
@@ -3523,14 +3116,11 @@ Test: RPC Listen/Connect Validation
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_listen_connect_validation)(void) {
-  FIO_LOG_DEBUG2("Testing RPC listen/connect input validation...");
-
   /* Test: fio_ipc_cluster_connect with NULL URL
    * Should log a warning and return without crashing */
   {
     fprintf(stderr, "      (expect WARNING about NULL or empty URL)\n");
     fio_ipc_cluster_connect(NULL);
-    FIO_LOG_DEBUG2("  fio_ipc_cluster_connect(NULL) handled gracefully");
   }
 
   /* Test: fio_ipc_cluster_connect with empty URL
@@ -3538,7 +3128,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_listen_connect_validation)(void) {
   {
     fprintf(stderr, "      (expect WARNING about NULL or empty URL)\n");
     fio_ipc_cluster_connect("");
-    FIO_LOG_DEBUG2("  fio_ipc_cluster_connect(\"\") handled gracefully");
   }
 
   /* Test: fio_ipc_cluster_listen returns NULL when using random secret
@@ -3550,11 +3139,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_listen_connect_validation)(void) {
       FIO_ASSERT(
           listener == NULL,
           "fio_ipc_cluster_listen should return NULL with random secret");
-      FIO_LOG_DEBUG2("  fio_ipc_cluster_listen returns NULL with random secret "
-                     "(expected)");
     } else {
-      FIO_LOG_DEBUG2(
-          "  Skipping random secret test - shared secret is configured");
     }
   }
 
@@ -3565,8 +3150,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_listen_connect_validation)(void) {
    * 3. They require network access
    *
    * Full integration tests would need two separate processes. */
-
-  FIO_LOG_DEBUG2("RPC listen/connect validation tests passed.");
 }
 
 /* *****************************************************************************
@@ -3574,8 +3157,6 @@ Test: RPC Message Encryption/Decryption
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_encryption)(void) {
-  FIO_LOG_DEBUG2("Testing RPC message encryption/decryption...");
-
   /* Test: RPC message can be encrypted and decrypted */
   {
     const char *test_data = "rpc_encryption_test";
@@ -3644,8 +3225,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_encryption)(void) {
 
     fio___ipc_free(msg);
   }
-
-  FIO_LOG_DEBUG2("RPC message encryption/decryption tests passed.");
 }
 
 /* *****************************************************************************
@@ -3653,8 +3232,6 @@ Test: RPC Filter (Duplicate Message Detection)
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_filter)(void) {
-  FIO_LOG_DEBUG2("Testing RPC duplicate message filter...");
-
   /* Test: Filter rejects duplicate messages */
   {
     fio___ipc_cluster_filter_s filter = {0};
@@ -3719,8 +3296,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_rpc_filter)(void) {
     int result4 = fio___ipc_cluster_filter_window(current_tick + 31000);
     FIO_ASSERT(result4 == -1, "31s future timestamp should fail window check");
   }
-
-  FIO_LOG_DEBUG2("RPC duplicate message filter tests passed.");
 }
 
 /* *****************************************************************************
@@ -3728,8 +3303,6 @@ Test: UDP Discovery Message Composition and Validation
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_udp_discovery_message)(void) {
-  FIO_LOG_DEBUG2("Testing IPC UDP discovery message composition/validation...");
-
   /* Test: Compose and validate a discovery message */
   {
     fio___ipc_udp_discovery_s msg;
@@ -3781,8 +3354,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_udp_discovery_message)(void) {
     FIO_ASSERT(result == -1,
                "Old discovery message should fail time window validation");
   }
-
-  FIO_LOG_DEBUG2("IPC UDP discovery message tests passed.");
 }
 
 /* *****************************************************************************
@@ -3801,10 +3372,6 @@ static volatile int fio___test_udp_discovery_rpc_verified = 0;
 /* RPC handler for UDP discovery test */
 FIO_SFUNC void fio___test_udp_discovery_rpc_handler(fio_ipc_s *msg) {
   fio___test_udp_discovery_rpc_received++;
-  FIO_LOG_DEBUG2("(%d) [Master] Received RPC via UDP discovery, len=%u",
-                 fio_io_pid(),
-                 msg->len);
-
   /* Verify message content */
   const char *expected = "udp_discovery_test";
   if (msg->len == FIO_STRLEN(expected) &&
@@ -3835,20 +3402,11 @@ FIO_SFUNC void fio___test_udp_discovery_on_finish(void *ignr_) {
    * If using random secret, discovery is disabled and this test will pass
    * with 0 messages received (expected behavior). */
   if (fio_secret_is_random()) {
-    FIO_LOG_DEBUG2("(%d) [Master] UDP discovery test skipped - random secret",
-                   fio_io_pid());
     return;
   }
-
-  FIO_LOG_DEBUG2("(%d) [Master] UDP discovery: received=%d, verified=%d",
-                 fio_io_pid(),
-                 fio___test_udp_discovery_rpc_received,
-                 fio___test_udp_discovery_rpc_verified);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_udp_discovery)(void) {
-  FIO_LOG_DEBUG2("Testing IPC UDP discovery (unit test only)...");
-
   /* Run unit tests for message composition/validation */
   FIO_NAME_TEST(stl, ipc_udp_discovery_message)();
 
@@ -3859,8 +3417,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_udp_discovery)(void) {
    *
    * This is better tested manually or in a dedicated integration test.
    * The unit tests above verify the core message format and validation. */
-
-  FIO_LOG_DEBUG2("IPC UDP discovery tests passed.");
 }
 
 /* *****************************************************************************
@@ -3904,22 +3460,12 @@ FIO_SFUNC void fio___test_worker_rpc_handler(fio_ipc_s *msg) {
     fio___test_worker_rpc_master_received++;
     fio___test_worker_rpc_udata_received = msg->udata;
   }
-
-  FIO_LOG_DEBUG2("(%d) [%s] Received worker-initiated RPC, len=%u, udata=%p",
-                 fio_io_pid(),
-                 fio_io_is_master() ? "Master" : "Worker",
-                 msg->len,
-                 msg->udata);
-
   /* Verify message data */
   const char *expected = FIO___TEST_WORKER_RPC_DATA;
   if (msg->len == FIO_STRLEN(expected) &&
       FIO_MEMCMP(msg->data, expected, msg->len) == 0) {
     if (fio_io_is_master())
       fio___test_worker_rpc_master_verified++;
-    FIO_LOG_DEBUG2("(%d) [%s] Worker RPC data verified successfully",
-                   fio_io_pid(),
-                   fio_io_is_master() ? "Master" : "Worker");
   } else {
     if (fio_io_is_master())
       fio___test_worker_rpc_data_fail++;
@@ -3936,11 +3482,6 @@ FIO_SFUNC void fio___test_worker_rpc_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Worker] Initiating global broadcast via fio_ipc_broadcast()",
-      fio_io_pid());
-
   const char *data = FIO___TEST_WORKER_RPC_DATA;
 
   /* Worker calls fio_ipc_broadcast() - handler runs on all local processes
@@ -3955,7 +3496,6 @@ FIO_SFUNC int fio___test_worker_rpc_timeout(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_master())
     return -1;
-  FIO_LOG_DEBUG2("(%d) [Timeout] Stopping reactor", fio_io_pid());
   fio_io_stop();
   return -1;
 }
@@ -3990,19 +3530,9 @@ FIO_SFUNC void fio___test_worker_rpc_on_finish(void *ignr_) {
       "(got %p, expected %p)",
       fio___test_worker_rpc_udata_received,
       FIO___TEST_WORKER_RPC_UDATA);
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Worker RPC: received=%d, verified=%d, failed=%d",
-      fio_io_pid(),
-      fio___test_worker_rpc_master_received,
-      fio___test_worker_rpc_master_verified,
-      fio___test_worker_rpc_data_fail);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_worker_initiated_rpc)(void) {
-  FIO_LOG_DEBUG2(
-      "Testing IPC worker-initiated RPC (fio_ipc_remote from worker)...");
-
   /* Reset state */
   fio___test_worker_rpc_master_received = 0;
   fio___test_worker_rpc_master_verified = 0;
@@ -4041,8 +3571,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_worker_initiated_rpc)(void) {
 
   /* Cleanup op-code registration */
   fio_ipc_opcode_register(.opcode = FIO___TEST_WORKER_RPC_OPCODE, .call = NULL);
-
-  FIO_LOG_DEBUG2("IPC worker-initiated RPC test passed.");
 }
 
 /* *****************************************************************************
@@ -4075,12 +3603,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
   /* Only count/verify on master since worker state isn't visible to master */
   if (fio_io_is_master())
     fio___test_worker_rpc_mb_master_received++;
-
-  FIO_LOG_DEBUG2("(%d) [%s] Received multi-buffer worker RPC, len=%u",
-                 fio_io_pid(),
-                 fio_io_is_master() ? "Master" : "Worker",
-                 msg->len);
-
   /* Calculate expected length */
   size_t expected_len =
       FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_PREFIX) + sizeof(uint32_t) +
@@ -4092,11 +3614,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
   /* Verify length */
   if (msg->len != expected_len) {
     valid = 0;
-    FIO_LOG_DEBUG2(
-        "(%d) [Master] Multi-buffer length mismatch: expected %zu, got %u",
-        fio_io_pid(),
-        expected_len,
-        msg->len);
   }
 
   if (valid) {
@@ -4107,7 +3624,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
                    FIO___TEST_WORKER_RPC_MB_PREFIX,
                    FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_PREFIX)) != 0) {
       valid = 0;
-      FIO_LOG_DEBUG2("(%d) [Master] Prefix mismatch", fio_io_pid());
     }
     offset += FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_PREFIX);
 
@@ -4117,10 +3633,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
       FIO_MEMCPY(&num1, msg->data + offset, sizeof(uint32_t));
       if (num1 != FIO___TEST_WORKER_RPC_MB_NUM1) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] num1 mismatch: 0x%X vs 0x%X",
-                       fio_io_pid(),
-                       num1,
-                       FIO___TEST_WORKER_RPC_MB_NUM1);
       }
       offset += sizeof(uint32_t);
     }
@@ -4131,7 +3643,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
                      FIO___TEST_WORKER_RPC_MB_SEP,
                      FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_SEP)) != 0) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] Separator mismatch", fio_io_pid());
       }
       offset += FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_SEP);
     }
@@ -4142,10 +3653,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
       FIO_MEMCPY(&num2, msg->data + offset, sizeof(uint64_t));
       if (num2 != FIO___TEST_WORKER_RPC_MB_NUM2) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] num2 mismatch: 0x%llX vs 0x%llX",
-                       fio_io_pid(),
-                       (unsigned long long)num2,
-                       (unsigned long long)FIO___TEST_WORKER_RPC_MB_NUM2);
       }
       offset += sizeof(uint64_t);
     }
@@ -4156,7 +3663,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
                      FIO___TEST_WORKER_RPC_MB_SUFFIX,
                      FIO_STRLEN(FIO___TEST_WORKER_RPC_MB_SUFFIX)) != 0) {
         valid = 0;
-        FIO_LOG_DEBUG2("(%d) [Master] Suffix mismatch", fio_io_pid());
       }
     }
   }
@@ -4164,9 +3670,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_handler(fio_ipc_s *msg) {
   if (valid) {
     if (fio_io_is_master())
       fio___test_worker_rpc_mb_master_verified++;
-    FIO_LOG_DEBUG2("(%d) [%s] Multi-buffer worker RPC verified successfully",
-                   fio_io_pid(),
-                   fio_io_is_master() ? "Master" : "Worker");
   } else {
     if (fio_io_is_master())
       fio___test_worker_rpc_mb_data_fail++;
@@ -4181,10 +3684,6 @@ FIO_SFUNC void fio___test_worker_rpc_mb_worker_start(void *ignr_) {
   (void)ignr_;
   if (!fio_io_is_worker())
     return;
-
-  FIO_LOG_DEBUG2("(%d) [Worker] Initiating multi-buffer global broadcast",
-                 fio_io_pid());
-
   /* Prepare multi-buffer data */
   const char *prefix = FIO___TEST_WORKER_RPC_MB_PREFIX;
   uint32_t num1 = FIO___TEST_WORKER_RPC_MB_NUM1;
@@ -4229,17 +3728,9 @@ FIO_SFUNC void fio___test_worker_rpc_mb_on_finish(void *ignr_) {
   FIO_ASSERT(fio___test_worker_rpc_mb_data_fail == 0,
              "[Master] Multi-buffer worker RPC data failures: %d",
              fio___test_worker_rpc_mb_data_fail);
-
-  FIO_LOG_DEBUG2(
-      "(%d) [Master] Multi-buffer worker RPC: received=%d, verified=%d",
-      fio_io_pid(),
-      fio___test_worker_rpc_mb_master_received,
-      fio___test_worker_rpc_mb_master_verified);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc_worker_initiated_rpc_multibuf)(void) {
-  FIO_LOG_DEBUG2("Testing IPC worker-initiated RPC with multi-buffer data...");
-
   /* Reset state */
   fio___test_worker_rpc_mb_master_received = 0;
   fio___test_worker_rpc_mb_master_verified = 0;
@@ -4277,8 +3768,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_worker_initiated_rpc_multibuf)(void) {
   /* Cleanup op-code registration */
   fio_ipc_opcode_register(.opcode = FIO___TEST_WORKER_RPC_MULTIBUF_OPCODE,
                           .call = NULL);
-
-  FIO_LOG_DEBUG2("IPC worker-initiated RPC multi-buffer test passed.");
 }
 
 /* *****************************************************************************
@@ -4288,8 +3777,6 @@ Main Test Runner
 FIO_SFUNC void FIO_NAME_TEST(stl, ipc)(void) {
   if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_INFO)
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_WARNING;
-  FIO_LOG_DEBUG("Testing IPC (Inter-Process Communication) module");
-
   fprintf(stderr, "\t* IPC structure size:   \t%zu bytes\n", sizeof(fio_ipc_s));
   fprintf(stderr,
           "\t* IPC Wire Header + MAC:\t%zu bytes\n",
@@ -4366,8 +3853,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc)(void) {
   fprintf(stderr, "\n\t--- Worker-Initiated RPC Tests ---\n");
   FIO_NAME_TEST(stl, ipc_worker_initiated_rpc)();
   FIO_NAME_TEST(stl, ipc_worker_initiated_rpc_multibuf)();
-
-  FIO_LOG_DEBUG("IPC module tests complete.");
 }
 
 /* *****************************************************************************

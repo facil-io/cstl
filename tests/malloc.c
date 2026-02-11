@@ -89,10 +89,6 @@ static size_t test_mem_functions(void *(*malloc_func)(size_t),
     fio_optimized /= repetitions;
     fio_optimized2 /= repetitions;
     if (!calloc_func) {
-      FIO_LOG_DEBUG2("* size_units: %zu, ppu: %zu, total pointers: %zu \n",
-                     size_units,
-                     pointers_per_unit,
-                     total_pointers);
       fprintf(stderr, "* Micro-seconds performing malloc: %zu\n", clock_alloc);
       fprintf(stderr, "* Micro-seconds performing calloc: %zu\n", clock_calloc);
       fprintf(stderr,

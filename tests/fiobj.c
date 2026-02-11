@@ -39,7 +39,6 @@ int main(void) {
   }
   /* primitives - (in)sanity */
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ primitives.");
     FIO_ASSERT(FIOBJ_TYPE(o) == FIOBJ_T_NULL,
                "invalid FIOBJ type should be FIOBJ_T_NULL.");
     FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(o, FIO_NAME(fiobj, FIOBJ___NAME_NULL)()),
@@ -67,7 +66,6 @@ int main(void) {
                "fiobj_false() should be equal to self.");
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ integers.");
     uint8_t allocation_flags = 0;
     for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8) - 4; ++bit) {
       uintptr_t i = ((uintptr_t)1 << bit) + 1;
@@ -104,7 +102,6 @@ int main(void) {
                (int)allocation_flags);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ floats.");
     uint8_t allocation_flags = 0;
     for (uint8_t bit = 0; bit < (sizeof(double) * 8); ++bit) {
       union {
@@ -133,7 +130,6 @@ int main(void) {
                (int)allocation_flags);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ each2.");
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), push)(o, a);
@@ -157,7 +153,6 @@ int main(void) {
     FIO_NAME_TEST(stl, fiobj_task)(NULL);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ JSON handling.");
     char json[] =
         "                    "
         "\n# comment 1"
@@ -193,7 +188,6 @@ int main(void) {
     o = FIOBJ_INVALID;
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ array equality test (fiobj_is_eq).");
     FIOBJ a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     FIOBJ a2 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     FIOBJ n1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
@@ -221,7 +215,6 @@ int main(void) {
     fiobj_free(a2);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ array ownership.");
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     for (size_t i = 1; i <= FIOBJ_TEST_REPETITIONS; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
@@ -282,7 +275,6 @@ int main(void) {
     fiobj_free(removed);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ array ownership after concat.");
     FIOBJ a1, a2;
     a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     a2 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
@@ -313,7 +305,6 @@ int main(void) {
     fiobj_free(a2);
   }
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ hash ownership.");
     o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), new)();
     for (size_t i = 1; i <= FIOBJ_TEST_REPETITIONS; ++i) {
       FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
@@ -363,7 +354,6 @@ int main(void) {
 
 #if FIOBJ_MARK_MEMORY
   {
-    FIO_LOG_DDEBUG("Testing FIOBJ for memory leaks.");
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), reserve)(a, 64);
     for (uint8_t bit = 0; bit < (sizeof(intptr_t) * 8); ++bit) {
