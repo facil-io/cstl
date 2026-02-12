@@ -90734,7 +90734,10 @@ HTTP Listen
 
 static void fio___http_listen_on_start(fio_io_protocol_s *protocol, void *u) {
   (void)u;
-  fio___http_protocol_s *p = (fio___http_protocol_s *)protocol;
+  fio___http_protocol_s *p =
+      FIO_PTR_FROM_FIELD(fio___http_protocol_s,
+                         state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
+                         protocol);
   p->queue = ((p->settings.queue && p->settings.queue->q) ? p->settings.queue->q
                                                           : fio_io_queue());
 }
