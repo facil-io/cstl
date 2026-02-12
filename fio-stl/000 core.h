@@ -89,6 +89,11 @@ Settings - Behavioral defaults
 #error FIO_NO_LOG and FIO_LEAK_COUNTER are exclusive, as memory leaks print to log.
 #endif
 
+#ifndef FIO_MAP_WARNING_BITSIZE
+/** imap and map allocation */
+#define FIO_MAP_WARNING_BITSIZE 24
+#endif
+
 /* *****************************************************************************
 C++ extern start
 ***************************************************************************** */

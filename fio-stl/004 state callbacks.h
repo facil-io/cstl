@@ -324,11 +324,9 @@ FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
 
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
-  /* Pre-allocate commonly used event arrays to reduce reallocation races */
-  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_ON_STOP, 32);
-  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_ON_START, 32);
-  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_IN_CHILD, 32);
-  fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + FIO_CALL_AFTER_FORK, 32);
+  /* reserve memory for future use */
+  for (size_t i = 0; i < FIO_CALL_NEVER; ++i)
+    fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + i, 32);
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
   fio_state_callback_add(FIO_CALL_AFTER_EXIT,
                          fio___state_cleanup_task_at_exit,

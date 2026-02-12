@@ -16,6 +16,10 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 
+#if defined(FIO_MEMORY_DISABLE)
+#undef FIO_MALLOC_TMP_USE_SYSTEM
+#define FIO_MALLOC_TMP_USE_SYSTEM 1
+#endif
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */

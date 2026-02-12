@@ -744,6 +744,11 @@ FIO_IFUNC int FIO_NAME(FIO_MAP_NAME,
   if (bits > FIO_MAP_CAPA_BITS_LIMIT)
     return -1;
   size_t s = (sizeof(o->map[0]) + 1) << bits;
+  if (bits > (FIO_MAP_WARNING_BITSIZE))
+    FIO_LOG_WARNING(
+        "The " FIO_MACRO2STR(
+            FIO_MAP_NAME) "_s map is now using a LOT of memory - %zu Mb!",
+        (s >> 20));
   FIO_NAME(FIO_MAP_NAME, node_s) *n =
       (FIO_NAME(FIO_MAP_NAME, node_s) *)FIO_MEM_REALLOC_(NULL, 0, s, 0);
   if (!n)

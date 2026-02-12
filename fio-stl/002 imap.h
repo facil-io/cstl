@@ -122,6 +122,10 @@ iMap Creation Macro
     if (!bits || bits > ((sizeof(imap_type) << 3) - 2))                        \
       return -1;                                                               \
     size_t capa = 1ULL << bits;                                                \
+    if (bits > (size_t)(FIO_MAP_WARNING_BITSIZE - 1))                          \
+      FIO_LOG_WARNING(                                                         \
+          "The " #array_name "_s map is now using a LOT of memory - %zu Mb!",  \
+          (capa >> 20) * (sizeof(array_type) + sizeof(imap_type)));            \
     size_t old_capa = FIO_NAME(array_name, capa)(a);                           \
     array_type *tmp = (array_type *)FIO_TYPEDEF_IMAP_REALLOC(                  \
         a->ary,                                                                \
