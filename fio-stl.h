@@ -81823,12 +81823,13 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy_task(void *tsk,
 
 FIO_SFUNC void fio___pubsub_subscription_on_destroy(
     fio_pubsub_subscription_s *s) {
+  fio_pubsub_channel_s *c = s->channel;
 
   FIO_LOG_DDEBUG2("(%d) subscription destroyed for %p -> %.*s",
                   fio_io_pid(),
                   (void *)s,
-                  (int)s->channel->name_len,
-                  s->channel->name);
+                  (c ? (int)c->name_len : 6),
+                  (c ? c->name : "(null)"));
 
   if (s->node.next != &s->node)
     FIO_LIST_REMOVE(&(s->node));
@@ -81842,7 +81843,7 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy(
                  u.tsk,
                  s->udata);
 
-  fio_pubsub_channel_s *c = s->channel;
+  FIO_ASSERT_ALLOC(c);
   /* no more subscribers - remove channel from channel collection */
   if (!FIO_LIST_IS_EMPTY(&c->subscriptions))
     fio___pubsub_channel_map_remove(

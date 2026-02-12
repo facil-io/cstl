@@ -637,6 +637,10 @@ FIO_SFUNC void f_bcast_on_message(fio_pubsub_msg_s *msg) {
   (void)msg;
   char buf[64];
   int len = snprintf(buf, sizeof(buf), "bcast_worker_%d", fio_io_pid());
+  if (len < 0)
+    len = 0;
+  else if ((size_t)len >= sizeof(buf))
+    len = sizeof(buf) - 1;
   fio_ipc_call(.call = f_bcast_confirm_handler,
                .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
 }
@@ -661,6 +665,10 @@ FIO_SFUNC void f_cluster_bcast_on_message(fio_pubsub_msg_s *msg) {
   (void)msg;
   char buf[64];
   int len = snprintf(buf, sizeof(buf), "cluster_bcast_worker_%d", fio_io_pid());
+  if (len < 0)
+    len = 0;
+  else if ((size_t)len >= sizeof(buf))
+    len = sizeof(buf) - 1;
   fio_ipc_call(.call = f_cluster_bcast_confirm_handler,
                .data = FIO_IPC_DATA(FIO_BUF_INFO2(buf, (size_t)len)));
 }
