@@ -544,10 +544,14 @@ SFUNC int fio_tls13_record_encrypt(uint8_t *out,
  * - Scans backwards to find real content type (removes padding)
  * - Sequence number is incremented after successful decryption
  *
+ * Note: decryption is performed in-place in the ciphertext buffer, so the
+ * ciphertext buffer will be modified. The output buffer only needs to hold
+ * the plaintext (not the internal content type byte).
+ *
  * @param out          Output buffer for decrypted plaintext
- * @param out_capacity Capacity of output buffer
+ * @param out_capacity Capacity of output buffer (>= plaintext length)
  * @param content_type Output: actual content type from inner plaintext
- * @param ciphertext   Input ciphertext (includes 5-byte header)
+ * @param ciphertext   Input ciphertext (includes 5-byte header, modified)
  * @param ciphertext_len Total length including header
  * @param keys         Decryption keys (sequence number will be incremented)
  * @return Plaintext length (excluding padding and content type), or -1 on error
@@ -1678,8 +1682,11 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
   /* Calculate inner ciphertext length (excluding tag) */
   size_t inner_ct_len = payload_len - FIO_TLS13_TAG_LEN;
 
-  /* Check output capacity */
-  if (out_capacity < inner_ct_len)
+  /* Check output capacity - only need room for plaintext (inner_ct_len - 1),
+   * since the content type byte is extracted separately.
+   * AEAD decryption is performed in-place in the ciphertext buffer.
+   * We use +16 instead of +1 for better memcpy alignment. */
+  if (inner_ct_len == 0 || out_capacity + 16 < inner_ct_len)
     return -1;
 
   /* Extract tag (last 16 bytes of payload) */
@@ -1692,9 +1699,12 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
   /* AAD is the 5-byte record header */
   const uint8_t *aad = ciphertext;
 
-  /* Decrypt */
+  /* Decrypt in-place in the ciphertext buffer to avoid requiring the caller
+   * to allocate space for the internal content type byte. The ciphertext
+   * buffer is a receive buffer that gets consumed after decryption. */
+  uint8_t *dec_buf = (uint8_t *)(uintptr_t)payload;
   int ret =
-      fio___tls13_aead_decrypt(out,
+      fio___tls13_aead_decrypt(dec_buf,
                                tag,
                                payload,
                                inner_ct_len,
@@ -1715,7 +1725,7 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
    * Per RFC 8446: zeros are optional padding, real content type is
    * the last non-zero byte */
   size_t pt_len = inner_ct_len;
-  while (pt_len > 0 && out[pt_len - 1] == 0)
+  while (pt_len > 0 && dec_buf[pt_len - 1] == 0)
     --pt_len;
 
   /* Must have at least the content type byte (RFC 8446 §5.4) */
@@ -1726,17 +1736,21 @@ SFUNC int fio_tls13_record_decrypt(uint8_t *out,
   }
 
   /* Last non-zero byte is the content type */
-  uint8_t inner_type = out[pt_len - 1];
+  uint8_t inner_type = dec_buf[pt_len - 1];
   --pt_len; /* Exclude content type from plaintext length */
 
   /* Validate content type */
   if (inner_type != FIO_TLS13_CONTENT_ALERT &&
       inner_type != FIO_TLS13_CONTENT_HANDSHAKE &&
       inner_type != FIO_TLS13_CONTENT_APPLICATION_DATA) {
-    /* Zero out decrypted data on invalid content type */
-    fio_secure_zero(out, inner_ct_len);
+    /* Zero out decrypted data */
+    fio_secure_zero(dec_buf, inner_ct_len);
     return -1;
   }
+
+  /* Copy plaintext to output buffer */
+  if (pt_len > 0)
+    FIO_MEMCPY(out, dec_buf, pt_len);
 
   *content_type = (fio_tls13_content_type_e)inner_type;
 

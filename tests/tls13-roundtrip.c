@@ -171,10 +171,10 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
   /* Step 1: Client generates ClientHello */
   int ch_len = fio_tls13_client_start(client, client_out, sizeof(client_out));
   if (ch_len <= 0) {
-    fprintf(stderr, "  [%s] FAIL: ClientHello generation failed\n", test_name);
+    FIO_LOG_DEBUG("  [%s] FAIL: ClientHello generation failed\n", test_name);
     return -1;
   }
-  fprintf(stderr, "  [%s] ClientHello: %d bytes\n", test_name, ch_len);
+  FIO_LOG_DEBUG("  [%s] ClientHello: %d bytes\n", test_name, ch_len);
 
   /* Step 2: Server processes ClientHello */
   out_len = 0;
@@ -185,18 +185,16 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                           sizeof(server_out),
                                           &out_len);
   if (consumed != ch_len || out_len == 0) {
-    fprintf(stderr,
-            "  [%s] FAIL: Server process failed (consumed=%d, out=%zu)\n",
-            test_name,
-            consumed,
-            out_len);
+    FIO_LOG_DEBUG("  [%s] FAIL: Server process failed (consumed=%d, out=%zu)\n",
+                  test_name,
+                  consumed,
+                  out_len);
     return -1;
   }
-  fprintf(stderr,
-          "  [%s] Server response: %zu bytes (group=0x%04x)\n",
-          test_name,
-          out_len,
-          server->key_share_group);
+  FIO_LOG_DEBUG("  [%s] Server response: %zu bytes (group=0x%04x)\n",
+                test_name,
+                out_len,
+                server->key_share_group);
 
   /* Step 3: Client processes server response */
   size_t client_response_len = 0;
@@ -218,17 +216,15 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
   }
 
   if (fio_tls13_client_is_error(client)) {
-    fprintf(stderr,
-            "  [%s] FAIL: Client error (alert=%d)\n",
-            test_name,
-            client->alert_description);
+    FIO_LOG_DEBUG("  [%s] FAIL: Client error (alert=%d)\n",
+                  test_name,
+                  client->alert_description);
     return -1;
   }
   if (!fio_tls13_client_is_connected(client)) {
-    fprintf(stderr,
-            "  [%s] FAIL: Client not connected (state=%s)\n",
-            test_name,
-            fio_tls13_client_state_name(client));
+    FIO_LOG_DEBUG("  [%s] FAIL: Client not connected (state=%s)\n",
+                  test_name,
+                  fio_tls13_client_state_name(client));
     return -1;
   }
 
@@ -241,14 +237,13 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                       sizeof(server_out),
                                       &out_len);
   if (!fio_tls13_server_is_connected(server)) {
-    fprintf(stderr,
-            "  [%s] FAIL: Server not connected (state=%s)\n",
-            test_name,
-            fio_tls13_server_state_name(server));
+    FIO_LOG_DEBUG("  [%s] FAIL: Server not connected (state=%s)\n",
+                  test_name,
+                  fio_tls13_server_state_name(server));
     return -1;
   }
 
-  fprintf(stderr, "  [%s] Handshake complete!\n", test_name);
+  FIO_LOG_DEBUG("  [%s] Handshake complete!\n", test_name);
 
   /* Step 5: Data exchange - client to server */
   const char *msg1 = "Hello from client!";
@@ -260,7 +255,7 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                          (const uint8_t *)msg1,
                                          msg1_len);
   if (enc_len <= 0) {
-    fprintf(stderr, "  [%s] FAIL: Client encrypt failed\n", test_name);
+    FIO_LOG_DEBUG("  [%s] FAIL: Client encrypt failed\n", test_name);
     return -1;
   }
 
@@ -271,7 +266,7 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                          client_out,
                                          (size_t)enc_len);
   if (dec_len != (int)msg1_len || FIO_MEMCMP(decrypted, msg1, msg1_len) != 0) {
-    fprintf(stderr, "  [%s] FAIL: Server decrypt mismatch\n", test_name);
+    FIO_LOG_DEBUG("  [%s] FAIL: Server decrypt mismatch\n", test_name);
     return -1;
   }
 
@@ -285,7 +280,7 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                      (const uint8_t *)msg2,
                                      msg2_len);
   if (enc_len <= 0) {
-    fprintf(stderr, "  [%s] FAIL: Server encrypt failed\n", test_name);
+    FIO_LOG_DEBUG("  [%s] FAIL: Server encrypt failed\n", test_name);
     return -1;
   }
 
@@ -295,11 +290,11 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
                                      server_out,
                                      (size_t)enc_len);
   if (dec_len != (int)msg2_len || FIO_MEMCMP(decrypted, msg2, msg2_len) != 0) {
-    fprintf(stderr, "  [%s] FAIL: Client decrypt mismatch\n", test_name);
+    FIO_LOG_DEBUG("  [%s] FAIL: Client decrypt mismatch\n", test_name);
     return -1;
   }
 
-  fprintf(stderr, "  [%s] Data exchange OK!\n", test_name);
+  FIO_LOG_DEBUG("  [%s] Data exchange OK!\n", test_name);
   return 0;
 }
 
@@ -307,7 +302,7 @@ FIO_SFUNC int do_handshake_and_exchange(fio_tls13_client_s *client,
 Test: X25519 Roundtrip (Classical)
 ***************************************************************************** */
 FIO_SFUNC void test_x25519_roundtrip(void) {
-  fprintf(stderr, "\nX25519 Roundtrip Test:\n");
+  FIO_LOG_DEBUG("\nX25519 Roundtrip Test:\n");
 
   build_test_certificate();
 
@@ -340,14 +335,14 @@ FIO_SFUNC void test_x25519_roundtrip(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "  X25519 roundtrip: OK\n");
+  FIO_LOG_DEBUG("  X25519 roundtrip: OK\n");
 }
 
 /* *****************************************************************************
 Test: X25519MLKEM768 Client Key Generation
 ***************************************************************************** */
 FIO_SFUNC void test_hybrid_key_generation(void) {
-  fprintf(stderr, "\nX25519MLKEM768 Key Generation Test:\n");
+  FIO_LOG_DEBUG("\nX25519MLKEM768 Key Generation Test:\n");
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "test.example.com");
@@ -376,14 +371,14 @@ FIO_SFUNC void test_hybrid_key_generation(void) {
   }
   FIO_ASSERT(mlkem_nonzero, "ML-KEM public key component should be non-zero");
 
-  fprintf(stderr, "  Hybrid key generation: OK\n");
-  fprintf(stderr, "  - use_hybrid: %d\n", client.use_hybrid);
-  fprintf(stderr, "  - hybrid_public_key size: 1216 bytes\n");
-  fprintf(stderr, "  - hybrid_private_key size: 2432 bytes\n");
+  FIO_LOG_DEBUG("  Hybrid key generation: OK\n");
+  FIO_LOG_DEBUG("  - use_hybrid: %d\n", client.use_hybrid);
+  FIO_LOG_DEBUG("  - hybrid_public_key size: 1216 bytes\n");
+  FIO_LOG_DEBUG("  - hybrid_private_key size: 2432 bytes\n");
 #else
   FIO_ASSERT(client.use_hybrid == 0,
              "Hybrid should be disabled when ML-KEM not available");
-  fprintf(stderr, "  Hybrid key generation: SKIPPED (ML-KEM not compiled)\n");
+  FIO_LOG_DEBUG("  Hybrid key generation: SKIPPED (ML-KEM not compiled)\n");
 #endif
 
   fio_tls13_client_destroy(&client);
@@ -393,7 +388,7 @@ FIO_SFUNC void test_hybrid_key_generation(void) {
 Test: X25519MLKEM768 ClientHello Structure
 ***************************************************************************** */
 FIO_SFUNC void test_hybrid_client_hello_structure(void) {
-  fprintf(stderr, "\nX25519MLKEM768 ClientHello Structure Test:\n");
+  FIO_LOG_DEBUG("\nX25519MLKEM768 ClientHello Structure Test:\n");
 
 #if defined(H___FIO_MLKEM___H)
   fio_tls13_client_s client;
@@ -408,7 +403,7 @@ FIO_SFUNC void test_hybrid_client_hello_structure(void) {
   /* With hybrid, ClientHello should be much larger:
    * Base ~150 bytes + X25519MLKEM768 key share (1216 bytes) + X25519 (32 bytes)
    * Total ~1400+ bytes */
-  fprintf(stderr, "  ClientHello size: %d bytes\n", ch_len);
+  FIO_LOG_DEBUG("  ClientHello size: %d bytes\n", ch_len);
   FIO_ASSERT(ch_len > 1300,
              "Hybrid ClientHello should be >1300 bytes (got %d)",
              ch_len);
@@ -424,17 +419,16 @@ FIO_SFUNC void test_hybrid_client_hello_structure(void) {
   FIO_ASSERT(ret == 0, "ClientHello parsing should succeed");
 
   /* Should have 2 key shares: X25519MLKEM768 and X25519 */
-  fprintf(stderr, "  Key share count: %zu\n", ch.key_share_count);
+  FIO_LOG_DEBUG("  Key share count: %zu\n", ch.key_share_count);
   FIO_ASSERT(ch.key_share_count >= 2, "Should have at least 2 key shares");
 
   /* Find hybrid and X25519 key shares */
   int found_hybrid = 0, found_x25519 = 0;
   for (size_t i = 0; i < ch.key_share_count; ++i) {
-    fprintf(stderr,
-            "    Key share %zu: group=0x%04x, len=%u\n",
-            i,
-            ch.key_share_groups[i],
-            (unsigned)ch.key_share_lens[i]);
+    FIO_LOG_DEBUG("    Key share %zu: group=0x%04x, len=%u\n",
+                  i,
+                  ch.key_share_groups[i],
+                  (unsigned)ch.key_share_lens[i]);
     if (ch.key_share_groups[i] == FIO_TLS13_GROUP_X25519MLKEM768) {
       found_hybrid = 1;
       FIO_ASSERT(ch.key_share_lens[i] == 1216,
@@ -451,10 +445,10 @@ FIO_SFUNC void test_hybrid_client_hello_structure(void) {
   FIO_ASSERT(found_x25519, "Should include X25519 key share (fallback)");
 
   fio_tls13_client_destroy(&client);
-  fprintf(stderr, "  Hybrid ClientHello structure: OK\n");
+  FIO_LOG_DEBUG("  Hybrid ClientHello structure: OK\n");
 #else
-  fprintf(stderr,
-          "  Hybrid ClientHello structure: SKIPPED (ML-KEM not compiled)\n");
+  FIO_LOG_DEBUG(
+      "  Hybrid ClientHello structure: SKIPPED (ML-KEM not compiled)\n");
 #endif
 }
 
@@ -462,7 +456,7 @@ FIO_SFUNC void test_hybrid_client_hello_structure(void) {
 Test: X25519MLKEM768 Full Hybrid Roundtrip (server supports PQC)
 ***************************************************************************** */
 FIO_SFUNC void test_hybrid_full_roundtrip(void) {
-  fprintf(stderr, "\nX25519MLKEM768 Full Hybrid Roundtrip Test:\n");
+  FIO_LOG_DEBUG("\nX25519MLKEM768 Full Hybrid Roundtrip Test:\n");
 
 #if defined(H___FIO_MLKEM___H)
   build_test_certificate();
@@ -503,9 +497,9 @@ FIO_SFUNC void test_hybrid_full_roundtrip(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "  Full hybrid roundtrip: OK\n");
+  FIO_LOG_DEBUG("  Full hybrid roundtrip: OK\n");
 #else
-  fprintf(stderr, "  Full hybrid roundtrip: SKIPPED (ML-KEM not compiled)\n");
+  FIO_LOG_DEBUG("  Full hybrid roundtrip: SKIPPED (ML-KEM not compiled)\n");
 #endif
 }
 
@@ -513,7 +507,7 @@ FIO_SFUNC void test_hybrid_full_roundtrip(void) {
 Test: X25519 Fallback (client without hybrid)
 ***************************************************************************** */
 FIO_SFUNC void test_x25519_only_client(void) {
-  fprintf(stderr, "\nX25519-Only Client Test:\n");
+  FIO_LOG_DEBUG("\nX25519-Only Client Test:\n");
 
 #if defined(H___FIO_MLKEM___H)
   build_test_certificate();
@@ -552,9 +546,9 @@ FIO_SFUNC void test_x25519_only_client(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
 
-  fprintf(stderr, "  X25519-only client: OK\n");
+  FIO_LOG_DEBUG("  X25519-only client: OK\n");
 #else
-  fprintf(stderr, "  X25519-only client: SKIPPED (ML-KEM not compiled)\n");
+  FIO_LOG_DEBUG("  X25519-only client: SKIPPED (ML-KEM not compiled)\n");
 #endif
 }
 
@@ -562,7 +556,7 @@ FIO_SFUNC void test_x25519_only_client(void) {
 Test: Multiple Roundtrips
 ***************************************************************************** */
 FIO_SFUNC void test_multiple_roundtrips(void) {
-  fprintf(stderr, "\nMultiple Roundtrips Test:\n");
+  FIO_LOG_DEBUG("\nMultiple Roundtrips Test:\n");
 
   build_test_certificate();
 
@@ -595,14 +589,14 @@ FIO_SFUNC void test_multiple_roundtrips(void) {
     fio_tls13_server_destroy(&server);
   }
 
-  fprintf(stderr, "  10 roundtrips: OK\n");
+  FIO_LOG_DEBUG("  10 roundtrips: OK\n");
 }
 
 /* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
-  fprintf(stderr, "=== TLS 1.3 Roundtrip Tests ===\n");
+  FIO_LOG_DEBUG("=== TLS 1.3 Roundtrip Tests ===\n");
 
   /* Basic roundtrip (X25519) */
   test_x25519_roundtrip();
@@ -622,6 +616,6 @@ int main(void) {
   /* Multiple roundtrips */
   test_multiple_roundtrips();
 
-  fprintf(stderr, "\n=== All TLS 1.3 Roundtrip Tests PASSED ===\n");
+  FIO_LOG_DEBUG("\n=== All TLS 1.3 Roundtrip Tests PASSED ===\n");
   return 0;
 }

@@ -66,30 +66,59 @@ typedef struct {
   } state;
   uint8_t is_client;
   uint8_t handshake_complete;
-  /* Buffered incoming data (partial records) */
-  uint8_t *recv_buf;
+  /* Buffered incoming data (partial records) - stored in buf[0..cap) */
   size_t recv_buf_len; /* Total data length in recv_buf */
   size_t recv_buf_pos; /* Current read position (lazy compaction) */
-  size_t recv_buf_cap;
-  /* Buffered decrypted data (ready to read) */
-  uint8_t *app_buf;
+  /* Buffered decrypted data (ready to read) - stored in buf[cap..2*cap) */
   size_t app_buf_len;
-  size_t app_buf_cap;
   size_t app_buf_pos; /* Read position in app_buf */
-  /* Buffered outgoing handshake data */
-  uint8_t *send_buf;
+  /* Buffered outgoing handshake data - stored in buf[2*cap..3*cap) */
   size_t send_buf_len;
-  size_t send_buf_cap;
   size_t send_buf_pos; /* Write position in send_buf */
-  /* Pre-allocated encryption buffer (avoids stack allocation in write path) */
-  uint8_t enc_buf[FIO_TLS13_MAX_CIPHERTEXT_LEN + FIO_TLS13_RECORD_HEADER_LEN +
-                  FIO_TLS13_TAG_LEN + 16];
+  /* Pre-allocated encryption buffer for multi-record batching.
+   * Sized for 4 max TLS records to match FIO_IO_BUFFER_PER_WRITE (64KB).
+   * The IO layer offers up to 64KB per write; each TLS record holds up to
+   * 16384 bytes of plaintext with 22 bytes overhead, so 4 records cover it. */
+#define FIO___TLS13_ENC_RECORD_SIZE                                            \
+  (FIO_TLS13_MAX_CIPHERTEXT_LEN + FIO_TLS13_RECORD_HEADER_LEN +                \
+   FIO_TLS13_TAG_LEN + 16)
+  uint8_t enc_buf[4 * FIO___TLS13_ENC_RECORD_SIZE];
+  /* Partial write tracking: encrypted data that couldn't be fully sent.
+   * TLS records are atomic - we must buffer partial writes because:
+   * 1. Re-encrypting would use a new sequence number, corrupting the stream
+   * 2. The browser would receive a partial record followed by a new record */
+  size_t enc_buf_len;  /* Total encrypted data length in enc_buf */
+  size_t enc_buf_sent; /* Bytes already sent from enc_buf */
   /* Parent context (for certificate chain) */
   fio___tls13_context_s *ctx;
   /* Certificate chain storage (for server - pointers must outlive handshake) */
   const uint8_t *cert_ptr;
   size_t cert_len;
+  /* Flexible array member: all buffers in single allocation
+   * Layout: [recv_buf | app_buf | send_buf], each FIO_IO_BUFFER_PER_WRITE */
+  uint8_t buf[];
 } fio___tls13_connection_s;
+
+/** Buffer capacity per buffer region (recv, app, send) */
+#define FIO___TLS13_BUF_CAP FIO_IO_BUFFER_PER_WRITE
+
+/** Total buffer size for flexible array member */
+#define FIO___TLS13_BUF_TOTAL (FIO___TLS13_BUF_CAP * 3)
+
+/** Get pointer to recv_buf region */
+FIO_IFUNC uint8_t *fio___tls13_recv_buf(fio___tls13_connection_s *c) {
+  return c->buf + (FIO___TLS13_BUF_CAP * 0);
+}
+
+/** Get pointer to app_buf region */
+FIO_IFUNC uint8_t *fio___tls13_app_buf(fio___tls13_connection_s *c) {
+  return c->buf + (FIO___TLS13_BUF_CAP * 1);
+}
+
+/** Get pointer to send_buf region */
+FIO_IFUNC uint8_t *fio___tls13_send_buf(fio___tls13_connection_s *c) {
+  return c->buf + (FIO___TLS13_BUF_CAP * 2);
+}
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_connection_s)
 
@@ -534,46 +563,21 @@ FIO_SFUNC void fio___tls13_free_context(void *tls_ctx) {
 TLS 1.3 Per-Connection Management
 ***************************************************************************** */
 
-/** Allocate connection state */
+/** Allocate connection state with flexible array buffer */
 FIO_SFUNC fio___tls13_connection_s *fio___tls13_connection_new(
     fio___tls13_context_s *ctx) {
+  /* Single allocation for struct + all buffers (flex array member) */
+  size_t alloc_size = sizeof(fio___tls13_connection_s) + FIO___TLS13_BUF_TOTAL;
   fio___tls13_connection_s *conn =
-      (fio___tls13_connection_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*conn), 0);
+      (fio___tls13_connection_s *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
   if (!conn)
     return NULL;
   FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_connection_s);
-  FIO_MEMSET(conn, 0, sizeof(*conn));
+  FIO_MEMSET(conn, 0, alloc_size);
   conn->is_client = ctx->is_client;
   conn->ctx = ctx;
 
-  /* Allocate buffers */
-  conn->recv_buf_cap = FIO_TLS13_MAX_CIPHERTEXT_LEN + 256;
-  conn->recv_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, conn->recv_buf_cap, 0);
-  if (!conn->recv_buf)
-    goto error;
-
-  conn->app_buf_cap = FIO_TLS13_MAX_PLAINTEXT_LEN;
-  conn->app_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, conn->app_buf_cap, 0);
-  if (!conn->app_buf)
-    goto error;
-
-  conn->send_buf_cap = 8192;
-  conn->send_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, conn->send_buf_cap, 0);
-  if (!conn->send_buf)
-    goto error;
-
   return conn;
-
-error:
-  if (conn->recv_buf)
-    FIO_MEM_FREE(conn->recv_buf, conn->recv_buf_cap);
-  if (conn->app_buf)
-    FIO_MEM_FREE(conn->app_buf, conn->app_buf_cap);
-  if (conn->send_buf)
-    FIO_MEM_FREE(conn->send_buf, conn->send_buf_cap);
-  FIO_LEAK_COUNTER_ON_FREE(fio___tls13_connection_s);
-  FIO_MEM_FREE(conn, sizeof(*conn));
-  return NULL;
 }
 
 /** Free connection state */
@@ -587,16 +591,9 @@ FIO_SFUNC void fio___tls13_connection_free(fio___tls13_connection_s *conn) {
   else
     fio_tls13_server_destroy(&conn->state.server);
 
-  /* Free buffers */
-  if (conn->recv_buf)
-    FIO_MEM_FREE(conn->recv_buf, conn->recv_buf_cap);
-  if (conn->app_buf)
-    FIO_MEM_FREE(conn->app_buf, conn->app_buf_cap);
-  if (conn->send_buf)
-    FIO_MEM_FREE(conn->send_buf, conn->send_buf_cap);
-
+  /* Single free for struct + all buffers (flex array member) */
   FIO_LEAK_COUNTER_ON_FREE(fio___tls13_connection_s);
-  FIO_MEM_FREE(conn, sizeof(*conn));
+  FIO_MEM_FREE(conn, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
 }
 
 /* *****************************************************************************
@@ -635,8 +632,8 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
 
     /* Generate ClientHello */
     int ch_len = fio_tls13_client_start(&conn->state.client,
-                                        conn->send_buf,
-                                        conn->send_buf_cap);
+                                        fio___tls13_send_buf(conn),
+                                        FIO___TLS13_BUF_CAP);
     if (ch_len < 0) {
       FIO_LOG_ERROR("TLS 1.3: failed to generate ClientHello");
       return;
@@ -694,7 +691,7 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
   if (conn->app_buf_len > conn->app_buf_pos) {
     size_t available = conn->app_buf_len - conn->app_buf_pos;
     size_t to_copy = (len < available) ? len : available;
-    FIO_MEMCPY(buf, conn->app_buf + conn->app_buf_pos, to_copy);
+    FIO_MEMCPY(buf, fio___tls13_app_buf(conn) + conn->app_buf_pos, to_copy);
     conn->app_buf_pos += to_copy;
 
     /* Reset buffer if fully consumed */
@@ -707,27 +704,28 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
 
   /* Calculate available space in recv_buf and compact if needed */
   size_t recv_data_len = conn->recv_buf_len - conn->recv_buf_pos;
-  size_t recv_space = conn->recv_buf_cap - conn->recv_buf_len;
+  size_t recv_space = FIO___TLS13_BUF_CAP - conn->recv_buf_len;
 
   /* Lazy compaction: only compact when buffer is >50% consumed AND
    * we don't have enough space for a new record */
-  if (conn->recv_buf_pos > (conn->recv_buf_cap >> 1) &&
+  if (conn->recv_buf_pos > (FIO___TLS13_BUF_CAP >> 1) &&
       recv_space < FIO_TLS13_MAX_CIPHERTEXT_LEN) {
     if (recv_data_len > 0) {
-      FIO_MEMMOVE(conn->recv_buf,
-                  conn->recv_buf + conn->recv_buf_pos,
+      FIO_MEMMOVE(fio___tls13_recv_buf(conn),
+                  fio___tls13_recv_buf(conn) + conn->recv_buf_pos,
                   recv_data_len);
     }
     conn->recv_buf_len = recv_data_len;
     conn->recv_buf_pos = 0;
-    recv_space = conn->recv_buf_cap - conn->recv_buf_len;
+    recv_space = FIO___TLS13_BUF_CAP - conn->recv_buf_len;
   }
 
   /* Read raw data from socket */
   errno = 0;
-  ssize_t raw_read = fio_sock_read(fd,
-                                   (char *)conn->recv_buf + conn->recv_buf_len,
-                                   recv_space);
+  ssize_t raw_read =
+      fio_sock_read(fd,
+                    (char *)fio___tls13_recv_buf(conn) + conn->recv_buf_len,
+                    recv_space);
   if (raw_read <= 0) {
     if (raw_read == 0)
       return 0; /* EOF */
@@ -739,7 +737,7 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
   recv_data_len = conn->recv_buf_len - conn->recv_buf_pos;
 
   /* Process received data */
-  uint8_t *recv_ptr = conn->recv_buf + conn->recv_buf_pos;
+  uint8_t *recv_ptr = fio___tls13_recv_buf(conn) + conn->recv_buf_pos;
   while (recv_data_len >= FIO_TLS13_RECORD_HEADER_LEN) {
     /* Check if we have a complete record */
     uint16_t record_len = ((uint16_t)recv_ptr[3] << 8) | recv_ptr[4];
@@ -778,17 +776,19 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
 
       /* Buffer any handshake response */
       if (out_len > 0) {
-        if (conn->send_buf_len + out_len <= conn->send_buf_cap) {
-          FIO_MEMCPY(conn->send_buf + conn->send_buf_len, out_buf, out_len);
+        if (conn->send_buf_len + out_len <= FIO___TLS13_BUF_CAP) {
+          FIO_MEMCPY(fio___tls13_send_buf(conn) + conn->send_buf_len,
+                     out_buf,
+                     out_len);
           conn->send_buf_len += out_len;
         }
         /* Immediately try to send handshake response */
         while (conn->send_buf_pos < conn->send_buf_len) {
           errno = 0;
-          ssize_t hs_written =
-              fio_sock_write(fd,
-                             (char *)conn->send_buf + conn->send_buf_pos,
-                             conn->send_buf_len - conn->send_buf_pos);
+          ssize_t hs_written = fio_sock_write(
+              fd,
+              (char *)fio___tls13_send_buf(conn) + conn->send_buf_pos,
+              conn->send_buf_len - conn->send_buf_pos);
           if (hs_written <= 0) {
             if (errno == EWOULDBLOCK || errno == EAGAIN)
               break; /* Will retry later */
@@ -848,8 +848,8 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
         decrypt_capacity = len;
       } else {
         /* Use app_buf as intermediate buffer */
-        decrypt_target = conn->app_buf + conn->app_buf_len;
-        decrypt_capacity = conn->app_buf_cap - conn->app_buf_len;
+        decrypt_target = fio___tls13_app_buf(conn) + conn->app_buf_len;
+        decrypt_capacity = FIO___TLS13_BUF_CAP - conn->app_buf_len;
       }
 
       if (conn->is_client) {
@@ -891,7 +891,7 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
   if (conn->app_buf_len > conn->app_buf_pos) {
     size_t available = conn->app_buf_len - conn->app_buf_pos;
     size_t to_copy = (len < available) ? len : available;
-    FIO_MEMCPY(buf, conn->app_buf + conn->app_buf_pos, to_copy);
+    FIO_MEMCPY(buf, fio___tls13_app_buf(conn) + conn->app_buf_pos, to_copy);
     conn->app_buf_pos += to_copy;
 
     if (conn->app_buf_pos >= conn->app_buf_len) {
@@ -910,14 +910,33 @@ FIO_SFUNC ssize_t fio___tls13_read(int fd,
 TLS 1.3 IO Functions - Write
 ***************************************************************************** */
 
-/** Called to perform a non-blocking `write`, same as the system call. */
+/** Called to perform a non-blocking `write`, same as POSIX write(2).
+ *
+ * Returns:
+ *   N > 0  - number of plaintext bytes accepted/encrypted
+ *   0      - nothing to write (EOF condition, len was 0)
+ *   -1     - error or EWOULDBLOCK (socket full, can't accept data now)
+ *
+ * Multi-record batching: encrypts up to 4 TLS records (64KB plaintext) into
+ * enc_buf in a single call, then writes everything with one fio_sock_write().
+ * Handshake data (send_buf) and KeyUpdate responses are prepended to enc_buf
+ * so all outgoing data goes in a single syscall.
+ *
+ * IMPORTANT: Once data is encrypted, the TLS sequence number is incremented.
+ * The function MUST return success (N > 0) after encryption, even if the
+ * socket write fails. The encrypted data is buffered and flush() sends later.
+ */
 FIO_SFUNC ssize_t fio___tls13_write(int fd,
                                     const void *buf,
                                     size_t len,
                                     void *tls_ctx) {
   fio___tls13_connection_s *conn = (fio___tls13_connection_s *)tls_ctx;
-  if (!conn || !buf || len == 0)
+  if (!conn || !buf) {
+    errno = EINVAL;
     return -1;
+  }
+  if (len == 0)
+    return 0;
 
   /* If handshake not complete, can't send application data */
   if (!conn->handshake_complete) {
@@ -925,40 +944,65 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
     return -1;
   }
 
-  /* Flush any pending handshake data (e.g., client Finished) before sending
-   * application data. The server must receive the client Finished before it
-   * can process application data encrypted with application keys. */
-  while (conn->send_buf_pos < conn->send_buf_len) {
+  /* CRITICAL: Flush any pending encrypted data from a previous partial write.
+   * TLS records are atomic - we cannot re-encrypt because the sequence number
+   * has already been incremented. We must send the buffered encrypted data
+   * before we can accept new plaintext.
+   *
+   * IMPORTANT: We must NOT return the old plaintext_len here! The IO layer
+   * passed us NEW data in buf/len. If we return the old length, the IO layer
+   * will advance the stream by that amount, losing the new data.
+   * Instead, we flush the pending data and then continue to process the new
+   * data. If we can't fully flush, return EWOULDBLOCK. */
+  while (conn->enc_buf_sent < conn->enc_buf_len) {
+    size_t remaining = conn->enc_buf_len - conn->enc_buf_sent;
     errno = 0;
-    ssize_t hs_written =
-        fio_sock_write(fd,
-                       (char *)conn->send_buf + conn->send_buf_pos,
-                       conn->send_buf_len - conn->send_buf_pos);
-    if (hs_written <= 0) {
-      /* Can't send handshake data yet, so can't send app data either */
-      errno = EWOULDBLOCK;
-      return -1;
+    ssize_t written = fio_sock_write(fd,
+                                     (char *)conn->enc_buf + conn->enc_buf_sent,
+                                     remaining);
+    if (written <= 0) {
+      if (errno == EWOULDBLOCK || errno == EAGAIN) {
+        errno = EWOULDBLOCK;
+        return -1;
+      }
+      return -1; /* Real socket error */
     }
-    conn->send_buf_pos += (size_t)hs_written;
+    conn->enc_buf_sent += (size_t)written;
   }
-  /* Reset send buffer after handshake data is fully sent */
-  if (conn->send_buf_pos >= conn->send_buf_len) {
+
+  /* Pending data fully sent - reset buffer */
+  conn->enc_buf_len = 0;
+  conn->enc_buf_sent = 0;
+
+  /* Position in enc_buf where we'll write next */
+  size_t enc_pos = 0;
+
+  /* Copy any pending handshake data (e.g., client Finished) into enc_buf
+   * so it goes out in the same syscall as application data. */
+  if (conn->send_buf_pos < conn->send_buf_len) {
+    size_t hs_remaining = conn->send_buf_len - conn->send_buf_pos;
+    if (hs_remaining <= sizeof(conn->enc_buf)) {
+      FIO_MEMCPY(conn->enc_buf,
+                 fio___tls13_send_buf(conn) + conn->send_buf_pos,
+                 hs_remaining);
+      enc_pos = hs_remaining;
+    }
     conn->send_buf_len = 0;
     conn->send_buf_pos = 0;
   }
 
   /* RFC 8446 Section 4.6.3: Send KeyUpdate response before Application Data
-   * if one is pending. The response MUST be encrypted with OLD sending keys,
-   * then we update our sending keys. */
+   * if one is pending. Encrypt into enc_buf with OLD sending keys,
+   * then update our sending keys. */
   if (conn->is_client && conn->state.client.key_update_pending) {
-    uint8_t ku_response[64];
+    size_t ku_space = sizeof(conn->enc_buf) - enc_pos;
     size_t key_len = fio___tls13_key_len(&conn->state.client);
     fio_tls13_cipher_type_e cipher_type =
         fio___tls13_cipher_type(&conn->state.client);
 
     int ku_len = fio_tls13_send_key_update_response(
-        ku_response,
-        sizeof(ku_response),
+        conn->enc_buf + enc_pos,
+        ku_space,
         conn->state.client.client_app_traffic_secret,
         &conn->state.client.client_app_keys,
         &conn->state.client.key_update_pending,
@@ -967,26 +1011,18 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
         cipher_type);
 
     if (ku_len > 0) {
-      /* Send KeyUpdate response */
-      errno = 0;
-      ssize_t ku_written =
-          fio_sock_write(fd, (char *)ku_response, (size_t)ku_len);
-      if (ku_written <= 0) {
-        /* Can't send KeyUpdate, can't send app data either */
-        errno = EWOULDBLOCK;
-        return -1;
-      }
-      FIO_LOG_DEBUG2("TLS 1.3 Client: Sent KeyUpdate response");
+      enc_pos += (size_t)ku_len;
+      FIO_LOG_DEBUG2("TLS 1.3 Client: KeyUpdate response queued in enc_buf");
     }
   } else if (!conn->is_client && conn->state.server.key_update_pending) {
-    uint8_t ku_response[64];
+    size_t ku_space = sizeof(conn->enc_buf) - enc_pos;
     size_t key_len = fio___tls13_server_key_len(&conn->state.server);
     fio_tls13_cipher_type_e cipher_type =
         fio___tls13_server_cipher_type(&conn->state.server);
 
     int ku_len = fio_tls13_send_key_update_response(
-        ku_response,
-        sizeof(ku_response),
+        conn->enc_buf + enc_pos,
+        ku_space,
         conn->state.server.server_app_traffic_secret,
         &conn->state.server.server_app_keys,
         &conn->state.server.key_update_pending,
@@ -995,60 +1031,98 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
         cipher_type);
 
     if (ku_len > 0) {
-      /* Send KeyUpdate response */
-      errno = 0;
-      ssize_t ku_written =
-          fio_sock_write(fd, (char *)ku_response, (size_t)ku_len);
-      if (ku_written <= 0) {
-        /* Can't send KeyUpdate, can't send app data either */
-        errno = EWOULDBLOCK;
-        return -1;
-      }
-      FIO_LOG_DEBUG2("TLS 1.3 Server: Sent KeyUpdate response");
+      enc_pos += (size_t)ku_len;
+      FIO_LOG_DEBUG2("TLS 1.3 Server: KeyUpdate response queued in enc_buf");
     }
   }
 
-  /* Limit to max plaintext size */
-  if (len > FIO_TLS13_MAX_PLAINTEXT_LEN)
-    len = FIO_TLS13_MAX_PLAINTEXT_LEN;
+  /* Multi-record encryption: loop encrypting up to 4 TLS records into enc_buf.
+   * Each record holds up to FIO_TLS13_MAX_PLAINTEXT_LEN (16384) bytes. */
+  size_t total_plaintext = 0;
+  const uint8_t *src = (const uint8_t *)buf;
+  size_t remaining_plaintext = len;
 
-  /* Encrypt data using pre-allocated buffer (avoids stack allocation) */
-  int enc_len;
-  if (conn->is_client) {
-    enc_len = fio_tls13_client_encrypt(&conn->state.client,
-                                       conn->enc_buf,
-                                       sizeof(conn->enc_buf),
-                                       (const uint8_t *)buf,
-                                       len);
-  } else {
-    enc_len = fio_tls13_server_encrypt(&conn->state.server,
-                                       conn->enc_buf,
-                                       sizeof(conn->enc_buf),
-                                       (const uint8_t *)buf,
-                                       len);
-  }
+  while (remaining_plaintext > 0) {
+    /* Check if enc_buf has space for at least one more max record */
+    size_t enc_space = sizeof(conn->enc_buf) - enc_pos;
+    if (enc_space < FIO_TLS13_RECORD_HEADER_LEN + 1 + 1 + FIO_TLS13_TAG_LEN)
+      break; /* Not enough space for even a minimal record */
 
-  if (enc_len < 0) {
-    FIO_LOG_DEBUG2("TLS 1.3: encryption error");
-    errno = ECONNRESET;
-    return -1;
-  }
+    /* Clamp this chunk to max plaintext per record */
+    size_t chunk = remaining_plaintext;
+    if (chunk > FIO_TLS13_MAX_PLAINTEXT_LEN)
+      chunk = FIO_TLS13_MAX_PLAINTEXT_LEN;
 
-  /* Write encrypted data to socket */
-  errno = 0;
-  ssize_t written = fio_sock_write(fd, (char *)conn->enc_buf, (size_t)enc_len);
-  if (written <= 0) {
-    if (errno == EWOULDBLOCK || errno == EAGAIN)
+    /* Also clamp to what fits in remaining enc_buf space:
+     * encrypted size = header(5) + plaintext + content_type(1) + tag(16) */
+    size_t max_pt_for_space =
+        enc_space - FIO_TLS13_RECORD_HEADER_LEN - 1 - FIO_TLS13_TAG_LEN;
+    if (chunk > max_pt_for_space)
+      chunk = max_pt_for_space;
+
+    /* Encrypt one record into enc_buf at enc_pos */
+    int enc_len;
+    if (conn->is_client) {
+      enc_len = fio_tls13_client_encrypt(&conn->state.client,
+                                         conn->enc_buf + enc_pos,
+                                         enc_space,
+                                         src,
+                                         chunk);
+    } else {
+      enc_len = fio_tls13_server_encrypt(&conn->state.server,
+                                         conn->enc_buf + enc_pos,
+                                         enc_space,
+                                         src,
+                                         chunk);
+    }
+
+    if (enc_len < 0) {
+      /* Encryption error. If we already encrypted some records, return what
+       * we have. Otherwise report error. */
+      if (total_plaintext > 0)
+        break;
+      FIO_LOG_DEBUG2("TLS 1.3: encryption error");
+      errno = ECONNRESET;
       return -1;
-    return written;
+    }
+
+    enc_pos += (size_t)enc_len;
+    src += chunk;
+    remaining_plaintext -= chunk;
+    total_plaintext += chunk;
   }
 
-  /* If we wrote all encrypted data, report original plaintext length */
-  if (written == enc_len)
-    return (ssize_t)len;
+  /* If we have data to send (handshake, KeyUpdate, and/or encrypted records),
+   * write it all in a single syscall. */
+  if (enc_pos > 0) {
+    errno = 0;
+    ssize_t written = fio_sock_write(fd, (char *)conn->enc_buf, enc_pos);
+    if (written <= 0) {
+      if (errno == EWOULDBLOCK || errno == EAGAIN) {
+        /* Socket buffer full. Buffer everything for later.
+         * CRITICAL: Return SUCCESS for any encrypted plaintext because
+         * sequence numbers are incremented. flush() will send later. */
+        conn->enc_buf_len = enc_pos;
+        conn->enc_buf_sent = 0;
+        errno = 0;
+        return total_plaintext > 0 ? (ssize_t)total_plaintext : -1;
+      }
+      return -1; /* Real socket error */
+    }
 
-  /* Partial write - this is tricky with TLS, report error */
-  /* TODO: Buffer partial writes properly */
+    /* Partial write - buffer the remainder.
+     * CRITICAL: Cannot re-encrypt; sequence numbers already incremented. */
+    if ((size_t)written < enc_pos) {
+      conn->enc_buf_len = enc_pos;
+      conn->enc_buf_sent = (size_t)written;
+    }
+  }
+
+  /* Report total plaintext bytes accepted.
+   * N > 0: plaintext was encrypted and sent/buffered.
+   * -1: no plaintext could be encrypted (enc_buf full of control data). */
+  if (total_plaintext > 0)
+    return (ssize_t)total_plaintext;
   errno = EWOULDBLOCK;
   return -1;
 }
@@ -1057,25 +1131,39 @@ FIO_SFUNC ssize_t fio___tls13_write(int fd,
 TLS 1.3 IO Functions - Flush
 ***************************************************************************** */
 
-/** Sends any unsent internal data. Returns 0 only if all data was sent. */
+/** Sends any unsent internal data, returning POSIX write(2) semantics.
+ *
+ * Returns:
+ *   N > 0  - number of bytes written to the socket
+ *   0      - nothing to flush, all internal buffers are empty (EOF)
+ *   -1     - error or EWOULDBLOCK (pending data couldn't be flushed)
+ *
+ * After the write() rewrite, all outgoing data (handshake, KeyUpdate,
+ * encrypted records) is unified into enc_buf. Flush only needs to drain it.
+ * The send_buf is still flushed here for handshake data generated during
+ * read() (before write() has a chance to copy it into enc_buf). */
 FIO_SFUNC int fio___tls13_flush(int fd, void *tls_ctx) {
   fio___tls13_connection_s *conn = (fio___tls13_connection_s *)tls_ctx;
   if (!conn)
     return 0;
 
-  /* Send any buffered handshake data */
+  size_t total_flushed = 0;
+
+  /* Send any buffered handshake data that was generated during read()
+   * and hasn't been copied into enc_buf by write() yet. */
   while (conn->send_buf_pos < conn->send_buf_len) {
     errno = 0;
     ssize_t written =
         fio_sock_write(fd,
-                       (char *)conn->send_buf + conn->send_buf_pos,
+                       (char *)fio___tls13_send_buf(conn) + conn->send_buf_pos,
                        conn->send_buf_len - conn->send_buf_pos);
     if (written <= 0) {
-      if (errno == EWOULDBLOCK || errno == EAGAIN)
-        return -1; /* Would block, try again later */
-      return -1;   /* Error */
+      if (total_flushed > 0)
+        goto done;
+      return -1;
     }
     conn->send_buf_pos += (size_t)written;
+    total_flushed += (size_t)written;
   }
 
   /* Reset send buffer if fully sent */
@@ -1084,7 +1172,42 @@ FIO_SFUNC int fio___tls13_flush(int fd, void *tls_ctx) {
     conn->send_buf_pos = 0;
   }
 
-  return (conn->send_buf_len > conn->send_buf_pos) ? -1 : 0;
+  /* Flush pending encrypted data (handshake + KeyUpdate + app records) */
+  while (conn->enc_buf_sent < conn->enc_buf_len) {
+    size_t remaining = conn->enc_buf_len - conn->enc_buf_sent;
+    errno = 0;
+    ssize_t written = fio_sock_write(fd,
+                                     (char *)conn->enc_buf + conn->enc_buf_sent,
+                                     remaining);
+    if (written <= 0) {
+      if (total_flushed > 0)
+        goto done;
+      return -1;
+    }
+    conn->enc_buf_sent += (size_t)written;
+    total_flushed += (size_t)written;
+  }
+
+  /* Reset encrypted buffer if fully sent */
+  if (conn->enc_buf_sent >= conn->enc_buf_len) {
+    conn->enc_buf_len = 0;
+    conn->enc_buf_sent = 0;
+  }
+
+done:
+  /* N > 0: bytes were flushed (may still have pending data).
+   * 0: all internal buffers are empty.
+   * The IO layer uses truthiness to decide whether to monitor for POLLOUT,
+   * so both N > 0 and -1 correctly trigger continued monitoring. */
+  if (total_flushed > 0)
+    return (int)total_flushed;
+  /* Check if there's still pending data we couldn't flush */
+  if ((conn->send_buf_len > conn->send_buf_pos) ||
+      (conn->enc_buf_len > conn->enc_buf_sent)) {
+    errno = EWOULDBLOCK;
+    return -1;
+  }
+  return 0;
 }
 
 /* *****************************************************************************

@@ -399,6 +399,7 @@ IO Type
 #define FIO___IO_FLAG_WRITE_SCHD  ((uint32_t)128U)
 #define FIO___IO_FLAG_POLLIN_SET  ((uint32_t)256U)
 #define FIO___IO_FLAG_POLLOUT_SET ((uint32_t)512U)
+#define FIO___IO_FLAG_WRITE_DIRTY ((uint32_t)1024U)
 
 #define FIO___IO_FLAG_PREVENT_ON_DATA                                          \
   (FIO___IO_FLAG_SUSPENDED | FIO___IO_FLAG_THROTTLED)
@@ -409,6 +410,7 @@ IO Type
 static void fio___io_poll_on_data_schd(void *io);
 static void fio___io_poll_on_ready_schd(void *io);
 static void fio___io_poll_on_close_schd(void *io);
+FIO_IFUNC void fio___io_free_with_flush(fio_io_s *io);
 
 /** The main IO object type. Should be treated as an opaque pointer. */
 struct fio_io_s {
@@ -528,7 +530,7 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
     fio___io_monitor_out(io);
   }
   fio___io_monitor_in(io);
-  fio___io_free2(io);
+  fio___io_free_with_flush(io);
 }
 
 /** Performs a task for each IO in the stated protocol. */
@@ -721,7 +723,10 @@ SFUNC void fio_io_write2 FIO_NOOP(fio_io_s *io, fio_io_write_args_s args) {
     goto error;
   if ((io->flags & FIO___IO_FLAG_CLOSE))
     goto write_called_after_close;
-  fio_io_defer(fio___io_write2, (void *)fio___io_dup2(io), (void *)packet);
+  FIO___IO_FLAG_SET(io, FIO___IO_FLAG_WRITE_DIRTY);
+  fio___io_defer_no_wakeup(fio___io_write2,
+                           (void *)fio___io_dup2(io),
+                           (void *)packet);
   return;
 
 error: /* note: `dealloc` already called by the `fio_stream` error handler. */
@@ -797,9 +802,23 @@ SFUNC void fio___io_free_task(void *io_, void *ignr_) {
   fio___io_free2((fio_io_s *)io_);
   (void)ignr_;
 }
-/** Free IO (reference) - thread-safe */
+/** Free IO (reference) - thread-safe, flushes pending writes. */
 SFUNC void fio_io_free(fio_io_s *io) {
+  if (FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_WRITE_DIRTY) &
+      FIO___IO_FLAG_WRITE_DIRTY) {
+    fio___io_poll_on_ready_schd((void *)io);
+    fio___io_wakeup();
+  }
   fio___io_defer_no_wakeup(fio___io_free_task, (void *)io, NULL);
+}
+
+/** IO-thread free that flushes dirty writes (schedules on_ready if needed). */
+FIO_IFUNC void fio___io_free_with_flush(fio_io_s *io) {
+  if (FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_WRITE_DIRTY) &
+      FIO___IO_FLAG_WRITE_DIRTY) {
+    fio___io_poll_on_ready_schd((void *)io);
+  }
+  fio___io_free2(io);
 }
 
 /** Suspends future "on_data" events for the IO. */
@@ -894,7 +913,7 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
   } else if ((io->flags & FIO___IO_FLAG_OPEN)) {
     fio___io_monitor_out(io);
   }
-  fio___io_free2(io);
+  fio___io_free_with_flush(io);
   return;
 }
 
@@ -914,36 +933,41 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   if (!(io->flags & FIO___IO_FLAG_OPEN))
     goto finish;
   for (;;) {
+    ssize_t r = io->pr->io_functions.flush(io->fd, io->tls);
     size_t len = FIO_IO_BUFFER_PER_WRITE;
     char *buf = buf_mem;
-    fio_stream_read(&io->out, &buf, &len);
-    if (!len)
-      break;
-    ssize_t r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-    if (r > 0) {
-      // FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
-      //                 FIO___IO.pid,
-      //                 (size_t)r,
-      //                 io->fd);
+    if ((!r)) {
+      fio_stream_read(&io->out, &buf, &len);
+      if (!len)
+        goto finish_loop;
+      r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    }
+    switch ((size_t)(r + 1)) {
+    case 0:
+      if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
+        goto finish_loop;
+      if (errno == EINTR)
+        continue;
+      /* fallthrough */
+    case 1: goto connection_error;
+    default:
+      FIO_LOG_DDEBUG2("(%d) written %zu bytes to fd %d",
+                      FIO___IO.pid,
+                      (size_t)r,
+                      io->fd);
       total += r;
       fio_stream_advance(&io->out, r);
       continue;
     }
-    if (r == -1) {
-      if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
-        break;
-      if (errno == EINTR)
-        continue;
-    }
-    goto connection_error;
   }
+finish_loop:
   if (total) {
     fio___io_touch((void *)fio___io_dup2(io), NULL);
 #if FIO_IO_COUNT_STORAGE
     io->total_sent += total;
 #endif
   }
-  if (fio_stream_any(&io->out) || io->pr->io_functions.flush(io->fd, io->tls)) {
+  if (fio_stream_any(&io->out)) {
     if (fio_stream_length(&io->out) >= FIO_IO_THROTTLE_LIMIT) {
       if (!(io->flags & FIO___IO_FLAG_THROTTLED))
         FIO_LOG_DDEBUG2("(%d), throttled IO %p (fd %d)",
@@ -970,7 +994,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   }
 
 finish:
-  fio___io_free2(io);
+  fio___io_free_with_flush(io);
   return;
 
 connection_error:
@@ -985,7 +1009,7 @@ connection_error:
         strerror(errno));
 #endif
   fio_io_close_now(io);
-  fio___io_free2(io);
+  fio___io_free_with_flush(io);
 }
 
 // static void fio___io_poll_on_close_task(void *io_, void *ignr_) {
@@ -1011,7 +1035,7 @@ static void fio___io_poll_on_timeout(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
   io->pr->on_timeout(io);
-  fio___io_free2(io);
+  fio___io_free_with_flush(io);
 }
 
 /* *****************************************************************************

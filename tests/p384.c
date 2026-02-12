@@ -13,6 +13,8 @@ ECDSA P-384 (secp384r1) Tests
 Helper to print field elements for debugging
 ***************************************************************************** */
 FIO_SFUNC void print_fe384(const char *name, const uint64_t fe[6]) {
+  if (FIO_LOG_LEVEL < FIO_LOG_LEVEL_DEBUG)
+    return;
   fprintf(stderr, "%s: ", name);
   for (int i = 5; i >= 0; --i) {
     fprintf(stderr, "%016llx", (unsigned long long)fe[i]);
@@ -21,6 +23,8 @@ FIO_SFUNC void print_fe384(const char *name, const uint64_t fe[6]) {
 }
 
 FIO_SFUNC void print_scalar384(const char *name, const uint64_t s[6]) {
+  if (FIO_LOG_LEVEL < FIO_LOG_LEVEL_DEBUG)
+    return;
   fprintf(stderr, "%s: ", name);
   for (int i = 5; i >= 0; --i) {
     fprintf(stderr, "%016llx", (unsigned long long)s[i]);

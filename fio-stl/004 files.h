@@ -69,6 +69,9 @@ FIO_IFUNC size_t fio_fd_size(int fd);
  */
 FIO_IFUNC size_t fio_filename_type(const char *filename);
 
+/** Populates `stat_buf` with the file's metadata. Returns 0 on success. */
+FIO_IFUNC int fio_filename_stat(const char *filename, struct stat *stat_buf);
+
 /**
  * Returns the file type (or 0 on both error).
  *
@@ -297,6 +300,12 @@ FIO_IFUNC size_t fio_filename_type(const char *filename) {
   if (stat(filename, &stt))
     return r;
   return (r = (size_t)((stt.st_mode & S_IFMT)));
+}
+
+FIO_IFUNC int fio_filename_stat(const char *filename, struct stat *stat_buf) {
+  if (!filename || !stat_buf)
+    return -1;
+  return stat(filename, stat_buf);
 }
 
 FIO_IFUNC size_t fio_fd_type(int fd) {

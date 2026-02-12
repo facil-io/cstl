@@ -13,6 +13,8 @@ Helper Functions
 
 /* Print hex for debugging */
 FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
+  if (FIO_LOG_LEVEL < FIO_LOG_LEVEL_DEBUG)
+    return;
   fprintf(stderr, "%s: ", label);
   for (size_t i = 0; i < len; ++i)
     fprintf(stderr, "%02x", data[i]);

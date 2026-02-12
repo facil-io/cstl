@@ -13,6 +13,8 @@ ECDSA P-256 (secp256r1) Tests
 Helper to print field elements for debugging
 ***************************************************************************** */
 FIO_SFUNC void print_fe(const char *name, const uint64_t fe[4]) {
+  if (FIO_LOG_LEVEL < FIO_LOG_LEVEL_DEBUG)
+    return;
   fprintf(stderr, "%s: ", name);
   for (int i = 3; i >= 0; --i) {
     fprintf(stderr, "%016llx", (unsigned long long)fe[i]);
