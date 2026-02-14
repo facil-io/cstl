@@ -484,6 +484,13 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_RAND
 #endif
 
+#if defined(FIO_HTTP_HANDLE)
+#undef FIO_DEFLATE
+#undef FIO_BROTLI
+#define FIO_DEFLATE
+#define FIO_BROTLI
+#endif
+
 #if defined(FIO_IO)
 #undef FIO_SIGNAL
 #define FIO_SIGNAL

@@ -279,7 +279,7 @@ endif # LIB_CONCAT_FOLDER
 TEST4SOCKET:=     # --- tests for socket library linker flags
 TEST4POLL:=       # HAVE_KQUEUE / HAVE_EPOLL / HAVE_POLL
 TEST4CRYPTO:=1    # HAVE_OPENSSL / HAVE_SODIUM
-TEST4ZLIB:=       # HAVE_ZLIB
+TEST4ZLIB:=1      # HAVE_ZLIB
 TEST4PG:=         # HAVE_POSTGRESQL
 TEST4SQLITE3:=    # HAVE_SQLITE3
 
@@ -456,7 +456,7 @@ endif # TEST4CRYPTO
 # ZLib Library Detection
 # (no need to edit)
 #############################################################################
-ifneq ($(strip $($(strip $(TEST4ZLIB)))),)
+ifneq ($(strip $(TEST4ZLIB)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, zlib.h, 0, -lz) , 0)
   $(info * Detected the zlib library, setting HAVE_ZLIB)
@@ -469,7 +469,7 @@ endif #TEST4ZLIB
 # PostgreSQL Library Detection
 # (no need to edit)
 #############################################################################
-ifneq ($(strip $($(strip $(TEST4PG)))),)
+ifneq ($(strip $(TEST4PG)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, libpq-fe.h, 0, -lpg) , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
@@ -486,7 +486,7 @@ endif # TEST4PG
 # SQLite3 Library Detection
 # (no need to edit)
 #############################################################################
-ifneq ($(strip $($(strip $(TEST4SQLITE3)))),)
+ifneq ($(strip $(TEST4SQLITE3)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, sqlite3.h, sqlite3_open, -lsqlite3) , 0)
   $(info * Detected the SQLite3 library, setting HAVE_SQLITE3)

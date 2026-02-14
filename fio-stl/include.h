@@ -154,17 +154,25 @@
 #include "156 mlkem.h"
 #endif
 
+#ifdef FIO_LYRA2
+#include "159 lyra2.h"
+#endif
+#ifdef FIO_ARGON2
+#include "159 argon2.h"
+#endif
+
 #ifdef FIO_OTP
 #include "160 otp.h"
 #endif
 #ifdef FIO_SECRET
 #include "160 secret.h"
 #endif
-#ifdef FIO_LYRA2
-#include "160 lyra2.h"
+#ifdef FIO_DEFLATE
+#include "162 deflate.h"
 #endif
-#ifdef FIO_ARGON2
-#include "161 argon2.h"
+#ifdef FIO_BROTLI
+#include "161 brotli-tables.h"
+#include "162 brotli.h"
 #endif
 
 #ifdef FIO_TLS13
@@ -200,9 +208,9 @@
 #include "401 io types.h"
 #include "402 io reactor.h"
 #if defined(HAVE_OPENSSL)
-#include "411 openssl.h"
+#include "405 openssl.h"
 #endif
-#include "412 tls13.h"
+#include "405 tls13.h"
 #endif /* FIO_IO */
 
 #if defined(FIO_IPC) && !defined(FIO___RECURSIVE_INCLUDE)

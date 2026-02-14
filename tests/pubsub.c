@@ -20,10 +20,12 @@ Constants and Configuration
 
 /* Worker startup can take up to 250ms */
 #define WORKER_STARTUP_DELAY_MS 300
-/* Additional time for message delivery */
-#define MESSAGE_DELIVERY_MS 100
+/* Additional time for message delivery + IPC subscription propagation */
+#define MESSAGE_DELIVERY_MS 200
+/* Extra delay for subscription propagation before worker publish */
+#define SUBSCRIPTION_PROPAGATION_MS 300
 /* Timeout for entire test group */
-#define TEST_TIMEOUT_MS 3000
+#define TEST_TIMEOUT_MS 5000
 /* Number of workers for forking tests (use max needed) */
 #define FORKING_TEST_WORKERS 3
 
@@ -792,8 +794,7 @@ FIO_SFUNC int f_master_publish(void *ignr_1, void *ignr_2) {
   return -1;
 }
 
-/* --- Timer: Worker publishes (WORKER_STARTUP_DELAY_MS + 2*MESSAGE_DELIVERY_MS)
- * --- */
+/* --- Timer: Worker publishes (after master subscription propagates) --- */
 FIO_SFUNC int f_worker_publish(void *ignr_1, void *ignr_2) {
   (void)ignr_1, (void)ignr_2;
   if (!fio_io_is_worker())
@@ -846,14 +847,18 @@ FIO_SFUNC void fio___pubsub_test_forking_group(void) {
   fio_state_callback_add(FIO_CALL_ON_START, f_worker_start, NULL);
 
   /* Schedule timers:
-   * Timeline accounts for 250ms+ worker startup delay
+   * Timeline accounts for 250ms+ worker startup delay and IPC propagation.
+   * The key race condition: master subscribes, then workers publish — but
+   * the subscription must propagate through IPC before workers publish,
+   * otherwise master receives 0 messages. SUBSCRIPTION_PROPAGATION_MS
+   * provides the gap.
    *
-   * 100ms: Master publishes history messages (before workers subscribe)
-   * 300ms (WORKER_STARTUP_DELAY_MS): Master subscribes, workers ready
-   * 400ms: Master publishes to workers
-   * 500ms: Workers subscribe to history (with replay_since)
-   * 600ms: Workers publish
-   * 3000ms: Timeout
+   *  100ms: Master publishes history messages (before workers subscribe)
+   *  300ms: Master subscribes (workers ready by now)
+   *  500ms: Master publishes to workers
+   *  700ms: Workers subscribe to history (with replay_since)
+   *  900ms: Workers publish (master subscription fully propagated)
+   * 5000ms: Timeout
    */
   fio_io_run_every(.fn = f_hist_publish, .every = 100, .repetitions = 1);
 
@@ -866,11 +871,12 @@ FIO_SFUNC void fio___pubsub_test_forking_group(void) {
                    .repetitions = 1);
 
   fio_io_run_every(.fn = f_hist_worker_subscribe,
-                   .every = WORKER_STARTUP_DELAY_MS + MESSAGE_DELIVERY_MS + 100,
+                   .every = WORKER_STARTUP_DELAY_MS + 2 * MESSAGE_DELIVERY_MS,
                    .repetitions = 1);
 
   fio_io_run_every(.fn = f_worker_publish,
-                   .every = WORKER_STARTUP_DELAY_MS + 2 * MESSAGE_DELIVERY_MS,
+                   .every = WORKER_STARTUP_DELAY_MS +
+                            SUBSCRIPTION_PROPAGATION_MS + MESSAGE_DELIVERY_MS,
                    .repetitions = 1);
 
   fio_io_run_every(.fn = f_timeout, .every = TEST_TIMEOUT_MS, .repetitions = 1);
