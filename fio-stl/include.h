@@ -22,6 +22,9 @@
 #ifdef FIO_ATOL
 #include "002 atol.h"
 #endif
+#ifdef FIO_CRC32
+#include "002 crc32.h"
+#endif
 #ifdef FIO_GLOB_MATCH
 #include "002 glob matching.h"
 #endif

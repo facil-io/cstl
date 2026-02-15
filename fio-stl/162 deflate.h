@@ -35,8 +35,13 @@ DEFLATE / INFLATE API
 /**
  * Decompresses raw DEFLATE data (no zlib/gzip headers).
  *
- * Returns decompressed length on success, 0 on error.
- * Caller provides output buffer sized via fio_deflate_decompress_bound().
+ * Returns:
+ *  - On success: decompressed byte count (<= out_len).
+ *  - On buffer too small: the REQUIRED buffer size (> out_len).
+ *  - On corrupt/invalid data: 0.
+ *  - When out==NULL or out_len==0: performs a full decode pass counting
+ *    output bytes and returns the required size (0 if data is corrupt).
+ *    This allows callers to query the decompressed size without allocating.
  */
 SFUNC size_t fio_deflate_decompress(void *out,
                                     size_t out_len,
@@ -75,7 +80,11 @@ SFUNC size_t fio_gzip_compress(void *out,
 /**
  * Decompresses gzip data.
  *
- * Returns decompressed length on success, 0 on error.
+ * Returns:
+ *  - On success: decompressed byte count (<= out_len).
+ *  - On buffer too small: the REQUIRED buffer size (> out_len).
+ *  - On corrupt/invalid data: 0.
+ *  - When out==NULL or out_len==0: returns required size (0 if corrupt).
  */
 SFUNC size_t fio_gzip_decompress(void *out,
                                  size_t out_len,
@@ -102,13 +111,21 @@ SFUNC fio_deflate_s *fio_deflate_new(int level, int is_compress);
 /** Frees a streaming deflate/inflate state. */
 SFUNC void fio_deflate_free(fio_deflate_s *s);
 
+/** Resets a deflate streaming context (keeps allocated memory, clears state).
+ */
+SFUNC void fio_deflate_destroy(fio_deflate_s *s);
+
 /**
  * Streaming compress/decompress.
  *
  * Processes `in_len` bytes from `in`, writing output to `out` (max `out_len`).
  * `flush`: 0=normal, 1=sync_flush (for WebSocket frame boundaries).
  *
- * Returns bytes written to `out`, or 0 on error.
+ * Decompression returns:
+ * - Decompressed byte count on success (<= out_len).
+ * - Required buffer size when buffer too small (> out_len). Internal buffer is
+ *   preserved for retry with a larger output buffer.
+ * - 0 on corrupt/invalid data or allocation failure.
  */
 SFUNC size_t fio_deflate_push(fio_deflate_s *s,
                               void *out,
@@ -211,66 +228,28 @@ static const uint8_t fio___deflate_dist_extra[30] = {
     0, 0, 0, 0, 1, 1, 2, 2,  3,  3,  4,  4,  5,  5,  6,
     6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
 
+/* Length-to-symbol-index lookup: 256 entries for lengths 3-258.
+   Index by (length - 3). Value is the symbol index (0-28).
+   Symbol = value + 257. Use value to index len_base[] and len_extra[]. */
+static const uint8_t fio___deflate_len_to_idx[256] = {
+    0,  1,  2,  3,  4,  5,  6,  7,  8,  8,  9,  9,  10, 10, 11, 11, 12, 12, 12,
+    12, 13, 13, 13, 13, 14, 14, 14, 14, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16,
+    16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 19,
+    19, 19, 19, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+    20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+    21, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 23, 23,
+    23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 24, 24, 24, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24,
+    24, 24, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+    25, 25, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26,
+    26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27, 27,
+    27, 27, 27, 27, 27, 27, 27, 27, 28};
+
 /* Code length alphabet order (RFC 1951) */
 static const uint8_t fio___deflate_codelen_order[19] =
     {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
-
-/* *****************************************************************************
-CRC32 (for gzip)
-***************************************************************************** */
-
-static const uint32_t fio___deflate_crc32_table[256] = {
-    0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA, 0x076DC419, 0x706AF48F,
-    0xE963A535, 0x9E6495A3, 0x0EDB8832, 0x79DCB8A4, 0xE0D5E91E, 0x97D2D988,
-    0x09B64C2B, 0x7EB17CBD, 0xE7B82D07, 0x90BF1D91, 0x1DB71064, 0x6AB020F2,
-    0xF3B97148, 0x84BE41DE, 0x1ADAD47D, 0x6DDDE4EB, 0xF4D4B551, 0x83D385C7,
-    0x136C9856, 0x646BA8C0, 0xFD62F97A, 0x8A65C9EC, 0x14015C4F, 0x63066CD9,
-    0xFA0F3D63, 0x8D080DF5, 0x3B6E20C8, 0x4C69105E, 0xD56041E4, 0xA2677172,
-    0x3C03E4D1, 0x4B04D447, 0xD20D85FD, 0xA50AB56B, 0x35B5A8FA, 0x42B2986C,
-    0xDBBBC9D6, 0xACBCF940, 0x32D86CE3, 0x45DF5C75, 0xDCD60DCF, 0xABD13D59,
-    0x26D930AC, 0x51DE003A, 0xC8D75180, 0xBFD06116, 0x21B4F4B5, 0x56B3C423,
-    0xCFBA9599, 0xB8BDA50F, 0x2802B89E, 0x5F058808, 0xC60CD9B2, 0xB10BE924,
-    0x2F6F7C87, 0x58684C11, 0xC1611DAB, 0xB6662D3D, 0x76DC4190, 0x01DB7106,
-    0x98D220BC, 0xEFD5102A, 0x71B18589, 0x06B6B51F, 0x9FBFE4A5, 0xE8B8D433,
-    0x7807C9A2, 0x0F00F934, 0x9609A88E, 0xE10E9818, 0x7F6A0DBB, 0x086D3D2D,
-    0x91646C97, 0xE6635C01, 0x6B6B51F4, 0x1C6C6162, 0x856530D8, 0xF262004E,
-    0x6C0695ED, 0x1B01A57B, 0x8208F4C1, 0xF50FC457, 0x65B0D9C6, 0x12B7E950,
-    0x8BBEB8EA, 0xFCB9887C, 0x62DD1DDF, 0x15DA2D49, 0x8CD37CF3, 0xFBD44C65,
-    0x4DB26158, 0x3AB551CE, 0xA3BC0074, 0xD4BB30E2, 0x4ADFA541, 0x3DD895D7,
-    0xA4D1C46D, 0xD3D6F4FB, 0x4369E96A, 0x346ED9FC, 0xAD678846, 0xDA60B8D0,
-    0x44042D73, 0x33031DE5, 0xAA0A4C5F, 0xDD0D7CC9, 0x5005713C, 0x270241AA,
-    0xBE0B1010, 0xC90C2086, 0x5768B525, 0x206F85B3, 0xB966D409, 0xCE61E49F,
-    0x5EDEF90E, 0x29D9C998, 0xB0D09822, 0xC7D7A8B4, 0x59B33D17, 0x2EB40D81,
-    0xB7BD5C3B, 0xC0BA6CAD, 0xEDB88320, 0x9ABFB3B6, 0x03B6E20C, 0x74B1D29A,
-    0xEAD54739, 0x9DD277AF, 0x04DB2615, 0x73DC1683, 0xE3630B12, 0x94643B84,
-    0x0D6D6A3E, 0x7A6A5AA8, 0xE40ECF0B, 0x9309FF9D, 0x0A00AE27, 0x7D079EB1,
-    0xF00F9344, 0x8708A3D2, 0x1E01F268, 0x6906C2FE, 0xF762575D, 0x806567CB,
-    0x196C3671, 0x6E6B06E7, 0xFED41B76, 0x89D32BE0, 0x10DA7A5A, 0x67DD4ACC,
-    0xF9B9DF6F, 0x8EBEEFF9, 0x17B7BE43, 0x60B08ED5, 0xD6D6A3E8, 0xA1D1937E,
-    0x38D8C2C4, 0x4FDFF252, 0xD1BB67F1, 0xA6BC5767, 0x3FB506DD, 0x48B2364B,
-    0xD80D2BDA, 0xAF0A1B4C, 0x36034AF6, 0x41047A60, 0xDF60EFC3, 0xA867DF55,
-    0x316E8EEF, 0x4669BE79, 0xCB61B38C, 0xBC66831A, 0x256FD2A0, 0x5268E236,
-    0xCC0C7795, 0xBB0B4703, 0x220216B9, 0x5505262F, 0xC5BA3BBE, 0xB2BD0B28,
-    0x2BB45A92, 0x5CB36A04, 0xC2D7FFA7, 0xB5D0CF31, 0x2CD99E8B, 0x5BDEAE1D,
-    0x9B64C2B0, 0xEC63F226, 0x756AA39C, 0x026D930A, 0x9C0906A9, 0xEB0E363F,
-    0x72076785, 0x05005713, 0x95BF4A82, 0xE2B87A14, 0x7BB12BAE, 0x0CB61B38,
-    0x92D28E9B, 0xE5D5BE0D, 0x7CDCEFB7, 0x0BDBDF21, 0x86D3D2D4, 0xF1D4E242,
-    0x68DDB3F8, 0x1FDA836E, 0x81BE16CD, 0xF6B9265B, 0x6FB077E1, 0x18B74777,
-    0x88085AE6, 0xFF0F6A70, 0x66063BCA, 0x11010B5C, 0x8F659EFF, 0xF862AE69,
-    0x616BFFD3, 0x166CCF45, 0xA00AE278, 0xD70DD2EE, 0x4E048354, 0x3903B3C2,
-    0xA7672661, 0xD06016F7, 0x4969474D, 0x3E6E77DB, 0xAED16A4A, 0xD9D65ADC,
-    0x40DF0B66, 0x37D83BF0, 0xA9BCAE53, 0xDEBB9EC5, 0x47B2CF7F, 0x30B5FFE9,
-    0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605, 0xCDD70693,
-    0x54DE5729, 0x23D967BF, 0xB3667A2E, 0xC4614AB8, 0x5D681B02, 0x2A6F2B94,
-    0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D};
-
-FIO_SFUNC uint32_t fio___deflate_crc32(const void *data, size_t len) {
-  const uint8_t *p = (const uint8_t *)data;
-  uint32_t crc = 0xFFFFFFFFU;
-  for (size_t i = 0; i < len; ++i)
-    crc = fio___deflate_crc32_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
-  return crc ^ 0xFFFFFFFFU;
-}
 
 /* *****************************************************************************
 Bit buffer operations (64-bit branchless)
@@ -350,15 +329,11 @@ FIO_IFUNC void fio___deflate_bitwriter_put(fio___deflate_bitwriter_s *w,
   fio___deflate_bitwriter_flush_bits(w);
 }
 
-/** Write Huffman code (bit-reversed canonical code). */
+/** Write pre-reversed Huffman code (codes are reversed at build time). */
 FIO_IFUNC void fio___deflate_bitwriter_put_huff(fio___deflate_bitwriter_s *w,
                                                 uint32_t code,
                                                 uint32_t nbits) {
-  /* Huffman codes are MSB-first but bitstream is LSB-first, so reverse */
-  uint32_t rev = 0;
-  for (uint32_t i = 0; i < nbits; ++i)
-    rev |= ((code >> (nbits - 1 - i)) & 1) << i;
-  fio___deflate_bitwriter_put(w, rev, nbits);
+  fio___deflate_bitwriter_put(w, code, nbits);
 }
 
 FIO_IFUNC void fio___deflate_bitwriter_align(fio___deflate_bitwriter_s *w) {
@@ -733,8 +708,12 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
       break;
 
     if (FIO___DEFLATE_ENTRY_IS_LIT(entry)) {
-      if (out >= out_end)
-        break;
+      if (out >= out_end) {
+        /* Output buffer full — return -2 (overflow, not corrupt) */
+        *in_p = in;
+        *out_p = out;
+        return -2;
+      }
       *out++ = (uint8_t)FIO___DEFLATE_ENTRY_LIT_SYM(entry);
       fio___deflate_bitbuf_consume(bb, codelen);
       continue;
@@ -809,8 +788,12 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
 
     if (distance == 0 || distance > (size_t)(out - out_start))
       return -1;
-    if (out + length > out_end)
-      return -1;
+    if (out + length > out_end) {
+      /* Output buffer overflow — return -2 (not corrupt) */
+      *in_p = in;
+      *out_p = out;
+      return -2;
+    }
 
     /* Byte-by-byte copy for slow path */
     const uint8_t *src = out - distance;
@@ -821,6 +804,149 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
 
   *in_p = in;
   *out_p = out;
+  return 0;
+}
+
+/* *****************************************************************************
+Inflate - counting-only path (no output writes, just counts bytes)
+
+Used when out==NULL (size query) or after buffer overflow (to determine
+the total required size). Decodes the bitstream identically to the slow
+path but only increments a virtual output position.
+
+Returns:
+  1  = end of block (out_pos updated with bytes decoded)
+  -1 = corrupt data
+  0  = need more input bits
+***************************************************************************** */
+
+FIO_SFUNC int fio___inflate_count(const uint8_t *restrict *in_p,
+                                  const uint8_t *in_end,
+                                  size_t *out_pos,
+                                  size_t out_start_pos,
+                                  fio___deflate_bitbuf_s *bb,
+                                  const uint32_t *litlen_table,
+                                  const uint32_t *dist_table) {
+  const uint8_t *in = *in_p;
+  size_t pos = *out_pos;
+
+  for (;;) {
+    /* Careful refill - byte at a time */
+    while (bb->count < 15 && in < in_end) {
+      bb->bits |= (uint64_t)(*in++) << bb->count;
+      bb->count += 8;
+    }
+    if (bb->count < 1)
+      break;
+
+    /* Decode literal/length */
+    uint32_t bits = fio___deflate_bitbuf_peek(
+        bb,
+        FIO___DEFLATE_LITLEN_BITS < bb->count ? FIO___DEFLATE_LITLEN_BITS
+                                              : bb->count);
+    uint32_t entry = litlen_table[bits & (FIO___DEFLATE_LITLEN_SIZE - 1)];
+
+    if (FIO___DEFLATE_ENTRY_IS_SUB(entry)) {
+      uint32_t root_len = FIO___DEFLATE_ENTRY_CODELEN(entry);
+      if (bb->count < root_len)
+        break;
+      fio___deflate_bitbuf_consume(bb, root_len);
+      uint32_t sub_off = FIO___DEFLATE_ENTRY_SUB_OFF(entry);
+      uint32_t sub_bits = FIO___DEFLATE_ENTRY_SUB_BITS(entry);
+      while (bb->count < sub_bits && in < in_end) {
+        bb->bits |= (uint64_t)(*in++) << bb->count;
+        bb->count += 8;
+      }
+      bits = fio___deflate_bitbuf_peek(bb, sub_bits);
+      entry = litlen_table[sub_off + bits];
+    }
+
+    uint32_t codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
+    if (bb->count < codelen)
+      break;
+
+    if (FIO___DEFLATE_ENTRY_IS_LIT(entry)) {
+      pos++; /* count literal byte without writing */
+      fio___deflate_bitbuf_consume(bb, codelen);
+      continue;
+    }
+
+    fio___deflate_bitbuf_consume(bb, codelen);
+
+    uint32_t length = FIO___DEFLATE_ENTRY_LEN_BASE(entry);
+    uint32_t len_extra = FIO___DEFLATE_ENTRY_LEN_EXTRA(entry);
+
+    /* End of block */
+    if (length == 0 && len_extra == 0) {
+      *in_p = in;
+      *out_pos = pos;
+      return 1;
+    }
+
+    /* Read length extra bits */
+    while (bb->count < len_extra && in < in_end) {
+      bb->bits |= (uint64_t)(*in++) << bb->count;
+      bb->count += 8;
+    }
+    if (bb->count < len_extra)
+      break;
+    if (len_extra)
+      length += fio___deflate_bitbuf_read(bb, len_extra);
+
+    /* Refill for distance */
+    while (bb->count < 15 && in < in_end) {
+      bb->bits |= (uint64_t)(*in++) << bb->count;
+      bb->count += 8;
+    }
+
+    /* Decode distance */
+    bits = fio___deflate_bitbuf_peek(bb,
+                                     FIO___DEFLATE_DIST_BITS < bb->count
+                                         ? FIO___DEFLATE_DIST_BITS
+                                         : bb->count);
+    entry = dist_table[bits & (FIO___DEFLATE_DIST_SIZE - 1)];
+
+    if (FIO___DEFLATE_ENTRY_IS_SUB(entry)) {
+      uint32_t root_len = FIO___DEFLATE_ENTRY_CODELEN(entry);
+      if (bb->count < root_len)
+        break;
+      fio___deflate_bitbuf_consume(bb, root_len);
+      uint32_t sub_off = FIO___DEFLATE_ENTRY_SUB_OFF(entry);
+      uint32_t sub_bits = FIO___DEFLATE_ENTRY_SUB_BITS(entry);
+      while (bb->count < sub_bits && in < in_end) {
+        bb->bits |= (uint64_t)(*in++) << bb->count;
+        bb->count += 8;
+      }
+      bits = fio___deflate_bitbuf_peek(bb, sub_bits);
+      entry = dist_table[sub_off + bits];
+    }
+
+    uint32_t dist_codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
+    if (bb->count < dist_codelen)
+      break;
+    fio___deflate_bitbuf_consume(bb, dist_codelen);
+
+    uint32_t distance = FIO___DEFLATE_ENTRY_DIST_BASE(entry);
+    uint32_t dist_extra = FIO___DEFLATE_ENTRY_DIST_EXTRA(entry);
+
+    while (bb->count < dist_extra && in < in_end) {
+      bb->bits |= (uint64_t)(*in++) << bb->count;
+      bb->count += 8;
+    }
+    if (bb->count < dist_extra)
+      break;
+    if (dist_extra)
+      distance += fio___deflate_bitbuf_read(bb, dist_extra);
+
+    if (distance == 0 || distance > (pos - out_start_pos))
+      return -1;
+
+    /* Count match bytes without writing */
+    pos += length;
+  }
+
+  *in_p = in;
+  *out_pos = pos;
   return 0;
 }
 
@@ -845,14 +971,19 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
                                              size_t out_len,
                                              const void *in,
                                              size_t in_len) {
-  if (!out || !out_len || !in || !in_len)
+  if (!in || !in_len)
     return 0;
+
+  /* Counting mode: out==NULL or out_len==0 — decode without writing.
+   * Normal mode: decode into buffer; on overflow switch to counting. */
+  int counting = (!out || !out_len);
 
   const uint8_t *inp = (const uint8_t *)in;
   const uint8_t *in_end = inp + in_len;
-  uint8_t *outp = (uint8_t *)out;
-  uint8_t *out_end = outp + out_len;
+  uint8_t *outp = counting ? NULL : (uint8_t *)out;
+  uint8_t *out_end = counting ? NULL : (outp + out_len);
   uint8_t *out_start = outp;
+  size_t out_pos = 0; /* virtual position for counting mode */
 
   fio___deflate_bitbuf_s bb = {0, 0};
 
@@ -900,12 +1031,23 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
       bb.bits = 0;
       bb.count = 0;
 
-      if (inp + len > in_end || outp + len > out_end)
-        return 0;
+      if (inp + len > in_end)
+        return 0; /* truncated input — corrupt */
 
-      FIO_MEMCPY(outp, inp, len);
-      inp += len;
-      outp += len;
+      if (counting) {
+        /* Just count bytes, skip input */
+        out_pos += len;
+        inp += len;
+      } else if (outp + len > out_end) {
+        /* Buffer overflow — switch to counting mode */
+        out_pos = (size_t)(outp - out_start) + len;
+        counting = 1;
+        inp += len;
+      } else {
+        FIO_MEMCPY(outp, inp, len);
+        inp += len;
+        outp += len;
+      }
       continue;
     }
 
@@ -1047,59 +1189,110 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
         return 0;
     }
 
-    /* Decode symbols using fast path when possible, slow path at boundaries */
-    for (;;) {
-      /* Fast path: need 8 bytes input margin and 258+8 bytes output margin */
-      const uint8_t *in_safe = in_end - 8;
-      uint8_t *out_safe = out_end - (FIO___DEFLATE_MAX_MATCH + 8);
-
-      int rc;
-      if (inp < in_safe && outp < out_safe) {
-        rc = fio___inflate_fast(&inp,
-                                in_safe,
-                                &outp,
-                                out_safe,
-                                out_start,
-                                &bb,
-                                litlen_table,
-                                dist_table);
-      } else {
-        rc = fio___inflate_slow(&inp,
-                                in_end,
-                                &outp,
-                                out_end,
-                                out_start,
-                                &bb,
-                                litlen_table,
-                                dist_table);
-      }
-
-      if (rc == 1)
-        break; /* end of block */
-      if (rc < 0)
-        return 0; /* error */
-
-      /* If fast path ran out of margin, try slow path for remaining */
-      if (inp >= in_safe || outp >= out_safe) {
-        rc = fio___inflate_slow(&inp,
-                                in_end,
-                                &outp,
-                                out_end,
-                                out_start,
-                                &bb,
-                                litlen_table,
-                                dist_table);
+    /* Decode symbols */
+    if (counting) {
+      /* Counting mode: use counting-only path (no output writes) */
+      for (;;) {
+        int rc = fio___inflate_count(&inp,
+                                     in_end,
+                                     &out_pos,
+                                     0,
+                                     &bb,
+                                     litlen_table,
+                                     dist_table);
         if (rc == 1)
-          break;
+          break; /* end of block */
         if (rc < 0)
+          return 0; /* corrupt */
+        return 0;   /* need more data — error for one-shot */
+      }
+    } else {
+      /* Normal mode: fast path when possible, slow path at boundaries */
+      int overflow = 0;
+      for (;;) {
+        const uint8_t *in_safe = in_end - 8;
+        uint8_t *out_safe = out_end - (FIO___DEFLATE_MAX_MATCH + 8);
+
+        int rc;
+        if (inp < in_safe && outp < out_safe) {
+          rc = fio___inflate_fast(&inp,
+                                  in_safe,
+                                  &outp,
+                                  out_safe,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+        } else {
+          rc = fio___inflate_slow(&inp,
+                                  in_end,
+                                  &outp,
+                                  out_end,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+        }
+
+        if (rc == 1)
+          break; /* end of block */
+        if (rc == -1)
+          return 0; /* corrupt data */
+        if (rc == -2) {
+          /* Buffer overflow — switch to counting mode for remainder */
+          out_pos = (size_t)(outp - out_start);
+          counting = 1;
+          overflow = 1;
+          break;
+        }
+
+        /* If fast path ran out of margin, try slow path for remaining */
+        if (inp >= in_safe || outp >= out_safe) {
+          rc = fio___inflate_slow(&inp,
+                                  in_end,
+                                  &outp,
+                                  out_end,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+          if (rc == 1)
+            break;
+          if (rc == -1)
+            return 0; /* corrupt */
+          if (rc == -2) {
+            out_pos = (size_t)(outp - out_start);
+            counting = 1;
+            overflow = 1;
+            break;
+          }
+          /* slow path returned 0 — need more data, error for one-shot */
           return 0;
-        /* If slow path also returned 0, we need more data - error for
-         * one-shot */
-        return 0;
+        }
+      }
+      /* If we switched to counting mid-block, finish this block in count mode
+       */
+      if (overflow) {
+        for (;;) {
+          int rc = fio___inflate_count(&inp,
+                                       in_end,
+                                       &out_pos,
+                                       0,
+                                       &bb,
+                                       litlen_table,
+                                       dist_table);
+          if (rc == 1)
+            break;
+          if (rc < 0)
+            return 0;
+          return 0;
+        }
       }
     }
   }
 
+  if (counting)
+    return out_pos;
   return (size_t)(outp - out_start);
 }
 
@@ -1284,17 +1477,17 @@ FIO_SFUNC int fio___deflate_build_code_lengths(uint8_t *lens,
       if (kraft <= (1 << max_bits))
         break;
 
-      /* Over-subscribed: increase longest codes */
-      /* Find a code at max_bits and try to shorten it */
+      /* Over-subscribed: lengthen shortest codes to reduce Kraft sum.
+       * Moving a code from length i to i+1 reduces kraft by 2^(max-i-1). */
       int fixed = 0;
-      for (uint32_t i = max_bits; i > 1 && !fixed; --i) {
+      for (uint32_t i = 1; i < max_bits && !fixed; ++i) {
         if (count[i] > 0) {
           count[i]--;
-          count[i - 1]++;
-          /* Find a symbol with this length and shorten it */
+          count[i + 1]++;
+          /* Find a symbol with this length and lengthen it */
           for (uint32_t s = 0; s < num_syms; ++s) {
             if (lens[s] == i) {
-              lens[s]--;
+              lens[s]++;
               fixed = 1;
               break;
             }
@@ -1318,7 +1511,7 @@ FIO_SFUNC int fio___deflate_build_code_lengths(uint8_t *lens,
 }
 
 /** Build canonical Huffman codes from code lengths.
- *  Returns codes in `codes` array (bit-reversed for LSB-first bitstream). */
+ *  Codes are pre-reversed (LSB-first) for direct bitstream emission. */
 FIO_SFUNC void fio___deflate_build_codes(uint16_t *codes,
                                          const uint8_t *lens,
                                          uint32_t num_syms) {
@@ -1335,10 +1528,15 @@ FIO_SFUNC void fio___deflate_build_codes(uint16_t *codes,
     next_code[bits] = code;
   }
 
-  /* Assign codes */
+  /* Assign codes and bit-reverse for LSB-first bitstream */
   for (uint32_t i = 0; i < num_syms; ++i) {
     if (lens[i]) {
-      codes[i] = (uint16_t)next_code[lens[i]]++;
+      uint32_t c = next_code[lens[i]]++;
+      uint32_t nbits = lens[i];
+      uint32_t rev = 0;
+      for (uint32_t b = 0; b < nbits; ++b)
+        rev |= ((c >> b) & 1) << (nbits - 1 - b);
+      codes[i] = (uint16_t)rev;
     } else {
       codes[i] = 0;
     }
@@ -1371,20 +1569,44 @@ static const fio___deflate_level_params_s fio___deflate_levels[10] = {
     {32, 258, 258, 4096, 1}, /* level 9: max lazy */
 };
 
-/** Hash function for 3-byte sequences */
-FIO_IFUNC uint32_t fio___deflate_hash3(const uint8_t *p) {
-  uint32_t h = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
-  h = (h * 0x1E35A7BDU) >> (32 - FIO___DEFLATE_HASH_BITS);
-  return h;
+/** Hash function for 4-byte sequences (single unaligned load). */
+FIO_IFUNC uint32_t fio___deflate_hash4(const uint8_t *p) {
+  return (fio_buf2u32_le(p) * 0x1E35A7BDU) >> (32 - FIO___DEFLATE_HASH_BITS);
+}
+
+/** Extend a match using 8-byte word-at-a-time comparison.
+ *  `len` is the number of already-verified matching bytes.
+ *  Returns the total match length (up to max_len). */
+FIO_IFUNC uint32_t fio___deflate_extend_match(const uint8_t *src,
+                                              uint32_t pos,
+                                              uint32_t candidate,
+                                              uint32_t len,
+                                              uint32_t max_len) {
+  while (len + 8 <= max_len) {
+    uint64_t a = fio_buf2u64_le(src + pos + len);
+    uint64_t b = fio_buf2u64_le(src + candidate + len);
+    uint64_t diff = a ^ b;
+    if (diff) {
+      len += (uint32_t)(fio_lsb_index_unsafe(diff) >> 3);
+      return len < max_len ? len : max_len;
+    }
+    len += 8;
+  }
+  while (len < max_len && src[pos + len] == src[candidate + len])
+    ++len;
+  return len;
 }
 
 /** Find best match at current position.
- *  Returns match length (0 if no match found >= 3). */
+ *  Returns match length (0 if no match found >= 3).
+ *  Uses generation counter: head_gen[h] must equal gen for a valid entry. */
 FIO_SFUNC uint32_t fio___deflate_find_match(const uint8_t *src,
                                             uint32_t pos,
                                             uint32_t src_len,
-                                            const uint16_t *head,
-                                            const uint16_t *prev,
+                                            const uint32_t *head,
+                                            const uint32_t *prev,
+                                            const uint32_t *head_gen,
+                                            uint32_t gen,
                                             uint32_t max_chain,
                                             uint32_t nice_length,
                                             uint32_t *match_dist) {
@@ -1393,10 +1615,14 @@ FIO_SFUNC uint32_t fio___deflate_find_match(const uint8_t *src,
   uint32_t max_len = src_len - pos;
   if (max_len > FIO___DEFLATE_MAX_MATCH)
     max_len = FIO___DEFLATE_MAX_MATCH;
-  if (max_len < 3)
+  if (max_len < 4)
     return 0;
 
-  uint32_t hash = fio___deflate_hash3(src + pos);
+  uint32_t prefix = fio_buf2u32_le(src + pos);
+  uint32_t hash = fio___deflate_hash4(src + pos);
+  /* Generation check: stale head entry means no chain to walk */
+  if (head_gen[hash] != gen)
+    return 0;
   uint32_t chain_pos = head[hash];
   uint32_t chain_count = 0;
 
@@ -1405,13 +1631,12 @@ FIO_SFUNC uint32_t fio___deflate_find_match(const uint8_t *src,
     if (dist == 0 || dist > FIO___DEFLATE_WINDOW_SIZE)
       break;
 
-    /* Quick check: compare last byte of current best + first bytes */
-    if (src[chain_pos + best_len] == src[pos + best_len] &&
-        src[chain_pos] == src[pos] && src[chain_pos + 1] == src[pos + 1]) {
-      /* Full comparison */
-      uint32_t len = 2;
-      while (len < max_len && src[chain_pos + len] == src[pos + len])
-        ++len;
+    /* Quick check: 4-byte prefix + last byte of current best */
+    if (fio_buf2u32_le(src + chain_pos) == prefix &&
+        src[chain_pos + best_len] == src[pos + best_len]) {
+      /* Full comparison (first 4 bytes already verified) */
+      uint32_t len =
+          fio___deflate_extend_match(src, pos, chain_pos, 4, max_len);
 
       if (len > best_len) {
         best_len = len;
@@ -1552,38 +1777,27 @@ FIO_SFUNC void fio___deflate_write_dynamic_header(fio___deflate_bitwriter_s *w,
   (void)d_codes;
 }
 
-/** Find the length code index for a given length value. */
+/** Find the length symbol for a given length value (O(1) table lookup). */
 FIO_IFUNC uint32_t fio___deflate_len_to_sym(uint32_t length) {
-  /* Binary search in length base table */
-  uint32_t lo = 0, hi = 28;
-  while (lo < hi) {
-    uint32_t mid = (lo + hi + 1) >> 1;
-    if (fio___deflate_len_base[mid] <= length)
-      lo = mid;
-    else
-      hi = mid - 1;
-  }
-  return lo + 257;
+  return (uint32_t)fio___deflate_len_to_idx[length - 3] + 257;
 }
 
-/** Find the distance code index for a given distance value. */
+/** Find the distance symbol for a given distance value (branchless log2). */
 FIO_IFUNC uint32_t fio___deflate_dist_to_sym(uint32_t distance) {
-  uint32_t lo = 0, hi = 29;
-  while (lo < hi) {
-    uint32_t mid = (lo + hi + 1) >> 1;
-    if (fio___deflate_dist_base[mid] <= distance)
-      lo = mid;
-    else
-      hi = mid - 1;
-  }
-  return lo;
+  if (distance <= 2)
+    return distance - 1;
+  uint32_t d = distance - 1;
+  uint32_t msb = (uint32_t)fio_bits_msb_index(d);
+  return (msb << 1) + ((d >> (msb - 1)) & 1);
 }
 
 /** Upper bound on compressed output size. */
 FIO_IFUNC size_t fio_deflate_compress_bound(size_t in_len) {
-  /* Stored blocks: 5 bytes header per 65535 bytes + data */
+  /* Worst case: stored blocks (5 bytes header per 65535 bytes + data).
+   * Add extra margin for dynamic Huffman header overhead (~320 bytes max)
+   * and bitwriter flush margin (8 bytes). */
   size_t num_blocks = (in_len + 65534) / 65535;
-  return in_len + num_blocks * 5 + 16;
+  return in_len + num_blocks * 5 + 336;
 }
 
 void fio_deflate_compress___(void); /* IDE Marker */
@@ -1647,17 +1861,24 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
   /* Levels 1-9: LZ77 + Huffman */
   const fio___deflate_level_params_s *params = &fio___deflate_levels[level];
 
-  /* Allocate hash tables on heap for large sizes */
-  size_t alloc_size = sizeof(uint16_t) * FIO___DEFLATE_HASH_SIZE +
-                      sizeof(uint16_t) * FIO___DEFLATE_WINDOW_SIZE;
-  uint16_t *hash_mem = (uint16_t *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
+  /* Allocate hash tables on heap.
+   * Uses generation counter to avoid zeroing head[] (128KB) and prev[] (128KB)
+   * on each call. head_gen[h] tracks which generation wrote head[h]; stale
+   * entries are treated as empty. prev[] chain links are cut at insertion time
+   * when the head entry is stale, so prev[] never needs zeroing either. */
+  size_t alloc_size = sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE * 2 +
+                      sizeof(uint32_t) * FIO___DEFLATE_WINDOW_SIZE;
+  uint32_t *hash_mem = (uint32_t *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
   if (!hash_mem)
     return 0;
 
-  uint16_t *head = hash_mem;
-  uint16_t *prev = hash_mem + FIO___DEFLATE_HASH_SIZE;
-  FIO_MEMSET(head, 0, sizeof(uint16_t) * FIO___DEFLATE_HASH_SIZE);
-  FIO_MEMSET(prev, 0, sizeof(uint16_t) * FIO___DEFLATE_WINDOW_SIZE);
+  uint32_t *head = hash_mem;
+  uint32_t *head_gen = hash_mem + FIO___DEFLATE_HASH_SIZE;
+  uint32_t *prev = hash_mem + FIO___DEFLATE_HASH_SIZE * 2;
+  /* No memset needed — generation counter makes stale entries harmless.
+   * Initialize head_gen to 0; gen starts at 1 so all entries are stale. */
+  FIO_MEMSET(head_gen, 0, sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE);
+  uint32_t gen = 1;
 
   /* Symbol frequency counts */
   uint32_t ll_freqs[286];
@@ -1692,12 +1913,14 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
     uint32_t match_len = 0;
     uint32_t match_dist = 0;
 
-    if (pos + 2 < src_len) {
+    if (pos + 3 < src_len) {
       match_len = fio___deflate_find_match(src,
                                            pos,
                                            src_len,
                                            head,
                                            prev,
+                                           head_gen,
+                                           gen,
                                            params->max_chain,
                                            params->nice_length,
                                            &match_dist);
@@ -1722,25 +1945,42 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
       uint32_t dsym = fio___deflate_dist_to_sym(prev_match_dist);
       d_freqs[dsym]++;
 
-      /* Update hash for skipped positions */
+      /* Update hash for skipped positions (level-dependent density) */
       uint32_t skip_end = pos - 1 + prev_match_len;
       if (skip_end > src_len)
         skip_end = src_len;
-      for (uint32_t j = pos; j < skip_end && j + 2 < src_len; ++j) {
-        uint32_t h = fio___deflate_hash3(src + j);
-        prev[j & FIO___DEFLATE_WINDOW_MASK] = head[h];
-        head[h] = (uint16_t)j;
+      if (level >= 4) {
+        /* Level 4+: full insertion (needed for good lazy matching) */
+        for (uint32_t j = pos; j < skip_end && j + 3 < src_len; ++j) {
+          uint32_t h = fio___deflate_hash4(src + j);
+          prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? head[h] : 0;
+          head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      } else if (level >= 2) {
+        /* Level 2-3: sparse insertion every 4th position */
+        for (uint32_t j = pos + 3; j < skip_end && j + 3 < src_len; j += 4) {
+          uint32_t h = fio___deflate_hash4(src + j);
+          prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? head[h] : 0;
+          head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
       }
+      /* Level 1: skip all mid-match insertions (zlib-style) */
       pos = skip_end;
       prev_was_match = 0;
       continue;
     }
 
     /* Update hash chain */
-    if (pos + 2 < src_len) {
-      uint32_t h = fio___deflate_hash3(src + pos);
-      prev[pos & FIO___DEFLATE_WINDOW_MASK] = head[h];
-      head[h] = (uint16_t)pos;
+    if (pos + 3 < src_len) {
+      uint32_t h = fio___deflate_hash4(src + pos);
+      prev[pos & FIO___DEFLATE_WINDOW_MASK] =
+          (head_gen[h] == gen) ? head[h] : 0;
+      head[h] = (uint32_t)pos;
+      head_gen[h] = gen;
     }
 
     if (match_len >= 3) {
@@ -1763,12 +2003,29 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
       uint32_t dsym = fio___deflate_dist_to_sym(match_dist);
       d_freqs[dsym]++;
 
-      /* Update hash for match positions */
-      for (uint32_t j = pos + 1; j < pos + match_len && j + 2 < src_len; ++j) {
-        uint32_t h = fio___deflate_hash3(src + j);
-        prev[j & FIO___DEFLATE_WINDOW_MASK] = head[h];
-        head[h] = (uint16_t)j;
+      /* Update hash for match positions (level-dependent density) */
+      if (level >= 4) {
+        /* Level 4+: full insertion (needed for good lazy matching) */
+        for (uint32_t j = pos + 1; j < pos + match_len && j + 3 < src_len;
+             ++j) {
+          uint32_t h = fio___deflate_hash4(src + j);
+          prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? head[h] : 0;
+          head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      } else if (level >= 2) {
+        /* Level 2-3: sparse insertion every 4th position */
+        for (uint32_t j = pos + 4; j < pos + match_len && j + 3 < src_len;
+             j += 4) {
+          uint32_t h = fio___deflate_hash4(src + j);
+          prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? head[h] : 0;
+          head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
       }
+      /* Level 1: skip all mid-match insertions (zlib-style) */
       pos += match_len;
     } else {
       /* Emit literal */
@@ -1817,11 +2074,6 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
   if (ll_lens[256] == 0)
     ll_lens[256] = 1;
 
-  uint16_t ll_codes[286];
-  uint16_t d_codes[30];
-  fio___deflate_build_codes(ll_codes, ll_lens, 286);
-  fio___deflate_build_codes(d_codes, d_lens, 30);
-
   /* Determine actual number of litlen and distance codes to emit */
   uint32_t num_ll = 286;
   while (num_ll > 257 && ll_lens[num_ll - 1] == 0)
@@ -1830,29 +2082,166 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
   while (num_d > 1 && d_lens[num_d - 1] == 0)
     --num_d;
 
+  uint16_t ll_codes[286];
+  uint16_t d_codes[30];
+  fio___deflate_build_codes(ll_codes, ll_lens, 286);
+  fio___deflate_build_codes(d_codes, d_lens, 30);
+
+  /* ---- Cost comparison: fixed vs dynamic Huffman ---- */
+
+  /* Fixed Huffman code lengths per RFC 1951 §3.2.6.
+   * Must use 288 entries for correct canonical code generation. */
+  uint8_t fixed_ll_lens[288];
+  uint8_t fixed_d_lens[30];
+  fio___deflate_fixed_litlen_lens(fixed_ll_lens);
+  for (uint32_t i = 0; i < 30; ++i)
+    fixed_d_lens[i] = 5;
+
+  /* Cost comparison: only Huffman code bits differ between fixed and dynamic.
+   * Extra bits for length/distance are identical and cancel out. */
+  uint64_t fixed_cost = 3; /* BFINAL(1) + BTYPE(2), no code-length header */
+  uint64_t dyn_cost = 3;   /* BFINAL(1) + BTYPE(2) */
+
+  /* Litlen symbol costs (code bits only) */
+  for (uint32_t i = 0; i < 286; ++i) {
+    if (ll_freqs[i]) {
+      fixed_cost += (uint64_t)ll_freqs[i] * fixed_ll_lens[i];
+      dyn_cost += (uint64_t)ll_freqs[i] * ll_lens[i];
+    }
+  }
+
+  /* Distance symbol costs (code bits only, extra bits cancel out) */
+  for (uint32_t i = 0; i < 30; ++i) {
+    if (d_freqs[i]) {
+      fixed_cost += (uint64_t)d_freqs[i] * fixed_d_lens[i];
+      dyn_cost += (uint64_t)d_freqs[i] * d_lens[i];
+    }
+  }
+
+  /* Dynamic header overhead: compute the RLE-encoded header cost.
+   * Replicates the header encoding logic to count bits without writing. */
+  {
+    uint8_t all_lens_tmp[286 + 30];
+    uint32_t total = num_ll + num_d;
+    FIO_MEMCPY(all_lens_tmp, ll_lens, num_ll);
+    FIO_MEMCPY(all_lens_tmp + num_ll, d_lens, num_d);
+
+    /* RLE encode to count code-length symbols */
+    uint32_t cl_freqs_tmp[19];
+    FIO_MEMSET(cl_freqs_tmp, 0, sizeof(cl_freqs_tmp));
+
+    for (uint32_t i = 0; i < total;) {
+      if (all_lens_tmp[i] == 0) {
+        uint32_t run = 1;
+        while (i + run < total && all_lens_tmp[i + run] == 0)
+          ++run;
+        while (run >= 11) {
+          uint32_t r = run > 138 ? 138 : run;
+          cl_freqs_tmp[18]++;
+          run -= r;
+          i += r;
+        }
+        while (run >= 3) {
+          uint32_t r = run > 10 ? 10 : run;
+          cl_freqs_tmp[17]++;
+          run -= r;
+          i += r;
+        }
+        while (run > 0) {
+          cl_freqs_tmp[0]++;
+          run--;
+          i++;
+        }
+      } else {
+        uint8_t val = all_lens_tmp[i];
+        cl_freqs_tmp[val]++;
+        i++;
+        uint32_t run = 0;
+        while (i + run < total && all_lens_tmp[i + run] == val)
+          ++run;
+        while (run >= 3) {
+          uint32_t r = run > 6 ? 6 : run;
+          cl_freqs_tmp[16]++;
+          run -= r;
+          i += r;
+        }
+        while (run > 0) {
+          cl_freqs_tmp[val]++;
+          run--;
+          i++;
+        }
+      }
+    }
+
+    /* Build code-length Huffman to get their code lengths */
+    uint8_t cl_lens_tmp[19];
+    fio___deflate_build_code_lengths(cl_lens_tmp, cl_freqs_tmp, 19, 7);
+
+    /* HCLEN: how many code-length code lengths to transmit */
+    uint32_t hclen_tmp = 19;
+    while (hclen_tmp > 4 &&
+           cl_lens_tmp[fio___deflate_codelen_order[hclen_tmp - 1]] == 0)
+      --hclen_tmp;
+
+    /* Header bits: HLIT(5) + HDIST(5) + HCLEN(4) + code-length code lengths */
+    dyn_cost += 5 + 5 + 4;
+    dyn_cost +=
+        (uint64_t)hclen_tmp * 3; /* 3 bits per code-length code length */
+
+    /* RLE-encoded code lengths: each symbol's Huffman code + extra bits */
+    for (uint32_t i = 0; i < 19; ++i) {
+      if (cl_freqs_tmp[i])
+        dyn_cost += (uint64_t)cl_freqs_tmp[i] * cl_lens_tmp[i];
+    }
+    /* Extra bits for repeat codes: 16→2 bits, 17→3 bits, 18→7 bits */
+    dyn_cost += (uint64_t)cl_freqs_tmp[16] * 2;
+    dyn_cost += (uint64_t)cl_freqs_tmp[17] * 3;
+    dyn_cost += (uint64_t)cl_freqs_tmp[18] * 7;
+  }
+
+  /* Choose fixed Huffman if cheaper or equal (avoids header overhead) */
+  int use_fixed = (fixed_cost <= dyn_cost);
+
+  /* Build fixed codes if needed (must use all 288 for correct canonicals) */
+  uint16_t fixed_ll_codes[288];
+  uint16_t fixed_d_codes[30];
+  if (use_fixed) {
+    fio___deflate_build_codes(fixed_ll_codes, fixed_ll_lens, 288);
+    fio___deflate_build_codes(fixed_d_codes, fixed_d_lens, 30);
+  }
+
+  /* Select which code tables to use for encoding */
+  const uint8_t *enc_ll_lens = use_fixed ? fixed_ll_lens : ll_lens;
+  const uint16_t *enc_ll_codes = use_fixed ? fixed_ll_codes : ll_codes;
+  const uint8_t *enc_d_lens = use_fixed ? fixed_d_lens : d_lens;
+  const uint16_t *enc_d_codes = use_fixed ? fixed_d_codes : d_codes;
+
   /* Write compressed output */
   fio___deflate_bitwriter_s w;
   fio___deflate_bitwriter_init(&w, out, out_len);
 
-  /* Block header: BFINAL=1, BTYPE=10 (dynamic) */
+  /* Block header */
   fio___deflate_bitwriter_put(&w, 1, 1); /* BFINAL */
-  fio___deflate_bitwriter_put(&w, 2, 2); /* BTYPE = dynamic */
-
-  /* Write dynamic Huffman header */
-  fio___deflate_write_dynamic_header(&w,
-                                     ll_lens,
-                                     num_ll,
-                                     ll_codes,
-                                     d_lens,
-                                     num_d,
-                                     d_codes);
+  if (use_fixed) {
+    fio___deflate_bitwriter_put(&w, 1, 2); /* BTYPE = 01 (fixed) */
+  } else {
+    fio___deflate_bitwriter_put(&w, 2, 2); /* BTYPE = 10 (dynamic) */
+    /* Write dynamic Huffman header */
+    fio___deflate_write_dynamic_header(&w,
+                                       ll_lens,
+                                       num_ll,
+                                       ll_codes,
+                                       d_lens,
+                                       num_d,
+                                       d_codes);
+  }
 
   /* Write tokens */
   for (uint32_t i = 0; i < token_count; ++i) {
     if (tokens[i].dist == 0) {
       /* Literal */
       uint32_t sym = tokens[i].litlen;
-      fio___deflate_bitwriter_put_huff(&w, ll_codes[sym], ll_lens[sym]);
+      fio___deflate_bitwriter_put_huff(&w, enc_ll_codes[sym], enc_ll_lens[sym]);
     } else {
       /* Length/distance pair */
       uint32_t length = tokens[i].litlen;
@@ -1860,7 +2249,9 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
 
       /* Emit length code */
       uint32_t lsym = fio___deflate_len_to_sym(length);
-      fio___deflate_bitwriter_put_huff(&w, ll_codes[lsym], ll_lens[lsym]);
+      fio___deflate_bitwriter_put_huff(&w,
+                                       enc_ll_codes[lsym],
+                                       enc_ll_lens[lsym]);
 
       /* Emit length extra bits */
       uint32_t lidx = lsym - 257;
@@ -1871,7 +2262,7 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
 
       /* Emit distance code */
       uint32_t dsym = fio___deflate_dist_to_sym(distance);
-      fio___deflate_bitwriter_put_huff(&w, d_codes[dsym], d_lens[dsym]);
+      fio___deflate_bitwriter_put_huff(&w, enc_d_codes[dsym], enc_d_lens[dsym]);
 
       /* Emit distance extra bits */
       if (fio___deflate_dist_extra[dsym])
@@ -1882,7 +2273,7 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
   }
 
   /* End of block */
-  fio___deflate_bitwriter_put_huff(&w, ll_codes[256], ll_lens[256]);
+  fio___deflate_bitwriter_put_huff(&w, enc_ll_codes[256], enc_ll_lens[256]);
 
   size_t result = fio___deflate_bitwriter_finish(&w, out);
 
@@ -1923,7 +2314,7 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
     return 0;
 
   /* CRC32 + ISIZE trailer (8 bytes) */
-  uint32_t crc = fio___deflate_crc32(in, in_len);
+  uint32_t crc = fio_crc32(in, in_len, 0);
   uint32_t isize = (uint32_t)(in_len & 0xFFFFFFFFU);
 
   uint8_t *trailer = o + 10 + compressed_len;
@@ -1938,7 +2329,7 @@ SFUNC size_t fio_gzip_decompress FIO_NOOP(void *out,
                                           size_t out_len,
                                           const void *in,
                                           size_t in_len) {
-  if (!out || !out_len || !in || in_len < 18)
+  if (!in || in_len < 18)
     return 0;
 
   const uint8_t *p = (const uint8_t *)in;
@@ -1984,15 +2375,26 @@ SFUNC size_t fio_gzip_decompress FIO_NOOP(void *out,
   size_t compressed_len = in_len - hdr_len - 8;
   const uint8_t *trailer = p + in_len - 8;
 
-  /* Decompress */
+  /* Decompress (supports counting mode when out==NULL) */
   size_t decompressed_len =
       fio_deflate_decompress(out, out_len, p + hdr_len, compressed_len);
   if (!decompressed_len && compressed_len > 5) /* allow empty */
     return 0;
 
+  /* If result > out_len, this is a size query or buffer-too-small.
+   * We can still verify ISIZE from the trailer but not CRC32
+   * (since we don't have the actual decompressed data). */
+  if (!out || !out_len || decompressed_len > out_len) {
+    /* Verify ISIZE only (CRC32 requires actual data) */
+    uint32_t expected_isize = fio_buf2u32_le(trailer + 4);
+    if ((uint32_t)(decompressed_len & 0xFFFFFFFFU) != expected_isize)
+      return 0;
+    return decompressed_len;
+  }
+
   /* Verify CRC32 */
   uint32_t expected_crc = fio_buf2u32_le(trailer);
-  uint32_t actual_crc = fio___deflate_crc32(out, decompressed_len);
+  uint32_t actual_crc = fio_crc32(out, decompressed_len, 0);
   if (actual_crc != expected_crc)
     return 0;
 
@@ -2006,19 +2408,899 @@ SFUNC size_t fio_gzip_decompress FIO_NOOP(void *out,
 
 /* *****************************************************************************
 Streaming API (for WebSocket permessage-deflate)
+
+True incremental streaming with context takeover:
+- Compressor: maintains sliding window + hash chain across push calls.
+  On flush, emits non-final DEFLATE block(s) + sync flush marker.
+  LZ77 matches can reference data from previous push calls.
+- Decompressor: buffers compressed input. On flush, prepends the sliding
+  window to the output buffer so back-references from later messages
+  resolve correctly against earlier message data.
 ***************************************************************************** */
 
+/** Maximum buffered input before auto-flush (compressor). */
+#define FIO___DEFLATE_STREAM_BUF_MAX FIO___DEFLATE_WINDOW_SIZE
+
 struct fio_deflate_s {
-  int is_compress;
-  int level;
-  /* Sliding window for decompression context takeover */
-  uint32_t window_pos;
-  uint8_t window[FIO___DEFLATE_WINDOW_SIZE];
-  /* Compression state */
-  uint16_t *hash_head;
-  uint16_t *hash_prev;
+  /* Compression hash chain (persistent across calls) */
+  uint32_t *hash_head;
+  uint32_t *hash_prev;
+  uint32_t *hash_head_gen; /* generation stamp per head[] entry */
   size_t hash_alloc;
+  uint32_t hash_gen; /* current generation (incremented each compress call) */
+  /* Input buffer (accumulates data between flush calls) */
+  uint8_t *buf;
+  size_t buf_len;
+  size_t buf_cap;
+  /* Sliding window for context takeover (both compress and decompress) */
+  uint32_t window_pos;
+  /* level and state */
+  uint8_t is_compress;
+  uint8_t level;
+  uint8_t window[FIO___DEFLATE_WINDOW_SIZE];
 };
+
+/** Ensure the input buffer has room for `need` more bytes. */
+FIO_SFUNC int fio___deflate_stream_buf_grow(fio_deflate_s *s, size_t need) {
+  size_t required = s->buf_len + need;
+  if (required <= s->buf_cap)
+    return 0;
+  size_t new_cap = s->buf_cap ? s->buf_cap : 4096;
+  while (new_cap < required)
+    new_cap <<= 1;
+  uint8_t *nb =
+      (uint8_t *)FIO_MEM_REALLOC(s->buf, s->buf_cap, new_cap, s->buf_len);
+  if (!nb)
+    return -1;
+  s->buf = nb;
+  s->buf_cap = new_cap;
+  return 0;
+}
+
+/* *****************************************************************************
+Streaming compression internals
+
+Builds a combined buffer [window | new_data] and runs LZ77 on it.
+The window prefix provides match context from previous messages.
+Only new_data bytes produce output tokens; window bytes are skipped
+(but their hash entries are inserted so matches can reference them).
+***************************************************************************** */
+
+FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
+                                               void *out,
+                                               size_t out_len,
+                                               const uint8_t *new_data,
+                                               size_t new_len) {
+  if (!new_len && !out_len)
+    return 0;
+
+  const fio___deflate_level_params_s *params = &fio___deflate_levels[s->level];
+
+  /* Build combined buffer: [window_prefix | new_data] */
+  uint32_t prefix_len = s->window_pos;
+  uint32_t total_len = prefix_len + (uint32_t)new_len;
+
+  uint8_t *combined = NULL;
+  size_t combined_alloc = 0;
+  if (total_len) {
+    combined_alloc = total_len;
+    combined = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, combined_alloc, 0);
+    if (!combined)
+      return 0;
+    if (prefix_len)
+      FIO_MEMCPY(combined, s->window, prefix_len);
+    if (new_len)
+      FIO_MEMCPY(combined + prefix_len, new_data, new_len);
+  }
+
+  /* Advance generation counter instead of zeroing 256KB of hash tables.
+   * Stale entries (gen mismatch) are treated as empty. */
+  s->hash_gen++;
+  uint32_t gen = s->hash_gen;
+  uint32_t *head_gen = s->hash_head_gen;
+
+  /* Insert hash entries for the window prefix (no tokens emitted).
+   * This allows new_data matches to reference window content. */
+  for (uint32_t i = 0; i + 3 < prefix_len; ++i) {
+    uint32_t h = fio___deflate_hash4(combined + i);
+    s->hash_prev[i & FIO___DEFLATE_WINDOW_MASK] =
+        (head_gen[h] == gen) ? s->hash_head[h] : 0;
+    s->hash_head[h] = (uint32_t)i;
+    head_gen[h] = gen;
+  }
+
+  /* LZ77 pass: find matches starting from prefix_len */
+  typedef struct {
+    uint16_t litlen;
+    uint16_t dist;
+  } fio___deflate_token_s;
+
+  size_t max_tokens = new_len + 1;
+  size_t token_alloc =
+      sizeof(fio___deflate_token_s) * (max_tokens ? max_tokens : 1);
+  fio___deflate_token_s *tokens =
+      (fio___deflate_token_s *)FIO_MEM_REALLOC(NULL, 0, token_alloc, 0);
+  if (!tokens) {
+    if (combined)
+      FIO_MEM_FREE(combined, combined_alloc);
+    return 0;
+  }
+  uint32_t token_count = 0;
+
+  uint32_t ll_freqs[286];
+  uint32_t d_freqs[30];
+  FIO_MEMSET(ll_freqs, 0, sizeof(ll_freqs));
+  FIO_MEMSET(d_freqs, 0, sizeof(d_freqs));
+
+  uint32_t pos = prefix_len;
+  uint32_t prev_match_len = 0;
+  uint32_t prev_match_dist = 0;
+  int prev_was_match = 0;
+
+  while (pos < total_len) {
+    uint32_t match_len = 0;
+    uint32_t match_dist = 0;
+
+    if (pos + 3 < total_len) {
+      match_len = fio___deflate_find_match(combined,
+                                           pos,
+                                           total_len,
+                                           s->hash_head,
+                                           s->hash_prev,
+                                           head_gen,
+                                           gen,
+                                           params->max_chain,
+                                           params->nice_length,
+                                           &match_dist);
+    }
+
+    /* Lazy matching */
+    if (params->lazy && prev_was_match && match_len > prev_match_len) {
+      tokens[token_count].litlen = combined[pos - 1];
+      tokens[token_count].dist = 0;
+      token_count++;
+      ll_freqs[combined[pos - 1]]++;
+      prev_was_match = 0;
+    } else if (prev_was_match) {
+      tokens[token_count].litlen = (uint16_t)prev_match_len;
+      tokens[token_count].dist = (uint16_t)prev_match_dist;
+      token_count++;
+      uint32_t sym = fio___deflate_len_to_sym(prev_match_len);
+      ll_freqs[sym]++;
+      uint32_t dsym = fio___deflate_dist_to_sym(prev_match_dist);
+      d_freqs[dsym]++;
+
+      uint32_t skip_end = pos - 1 + prev_match_len;
+      if (skip_end > total_len)
+        skip_end = total_len;
+      if (s->level >= 4) {
+        /* Level 4+: full insertion (needed for good lazy matching) */
+        for (uint32_t j = pos; j < skip_end && j + 3 < total_len; ++j) {
+          uint32_t h = fio___deflate_hash4(combined + j);
+          s->hash_prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? s->hash_head[h] : 0;
+          s->hash_head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      } else if (s->level >= 2) {
+        /* Level 2-3: sparse insertion every 4th position */
+        for (uint32_t j = pos + 3; j < skip_end && j + 3 < total_len; j += 4) {
+          uint32_t h = fio___deflate_hash4(combined + j);
+          s->hash_prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? s->hash_head[h] : 0;
+          s->hash_head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      }
+      /* Level 1: skip all mid-match insertions (zlib-style) */
+      pos = skip_end;
+      prev_was_match = 0;
+      continue;
+    }
+
+    /* Update hash chain */
+    if (pos + 3 < total_len) {
+      uint32_t h = fio___deflate_hash4(combined + pos);
+      s->hash_prev[pos & FIO___DEFLATE_WINDOW_MASK] =
+          (head_gen[h] == gen) ? s->hash_head[h] : 0;
+      s->hash_head[h] = (uint32_t)pos;
+      head_gen[h] = gen;
+    }
+
+    if (match_len >= 3) {
+      if (params->lazy && match_len < params->max_lazy) {
+        prev_match_len = match_len;
+        prev_match_dist = match_dist;
+        prev_was_match = 1;
+        pos++;
+        continue;
+      }
+
+      tokens[token_count].litlen = (uint16_t)match_len;
+      tokens[token_count].dist = (uint16_t)match_dist;
+      token_count++;
+      uint32_t sym = fio___deflate_len_to_sym(match_len);
+      ll_freqs[sym]++;
+      uint32_t dsym = fio___deflate_dist_to_sym(match_dist);
+      d_freqs[dsym]++;
+
+      if (s->level >= 4) {
+        /* Level 4+: full insertion (needed for good lazy matching) */
+        for (uint32_t j = pos + 1; j < pos + match_len && j + 3 < total_len;
+             ++j) {
+          uint32_t h = fio___deflate_hash4(combined + j);
+          s->hash_prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? s->hash_head[h] : 0;
+          s->hash_head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      } else if (s->level >= 2) {
+        /* Level 2-3: sparse insertion every 4th position */
+        for (uint32_t j = pos + 4; j < pos + match_len && j + 3 < total_len;
+             j += 4) {
+          uint32_t h = fio___deflate_hash4(combined + j);
+          s->hash_prev[j & FIO___DEFLATE_WINDOW_MASK] =
+              (head_gen[h] == gen) ? s->hash_head[h] : 0;
+          s->hash_head[h] = (uint32_t)j;
+          head_gen[h] = gen;
+        }
+      }
+      /* Level 1: skip all mid-match insertions (zlib-style) */
+      pos += match_len;
+    } else {
+      tokens[token_count].litlen = combined[pos];
+      tokens[token_count].dist = 0;
+      token_count++;
+      ll_freqs[combined[pos]]++;
+      pos++;
+    }
+  }
+
+  /* Flush pending lazy match */
+  if (prev_was_match) {
+    tokens[token_count].litlen = (uint16_t)prev_match_len;
+    tokens[token_count].dist = (uint16_t)prev_match_dist;
+    token_count++;
+    uint32_t sym = fio___deflate_len_to_sym(prev_match_len);
+    ll_freqs[sym]++;
+    uint32_t dsym = fio___deflate_dist_to_sym(prev_match_dist);
+    d_freqs[dsym]++;
+  }
+
+  /* Add end-of-block symbol */
+  ll_freqs[256]++;
+
+  /* Build Huffman trees */
+  uint8_t ll_lens[286];
+  uint8_t d_lens[30];
+  fio___deflate_build_code_lengths(ll_lens, ll_freqs, 286, 15);
+  fio___deflate_build_code_lengths(d_lens, d_freqs, 30, 15);
+
+  /* Ensure at least one distance code */
+  {
+    int has_dist = 0;
+    for (uint32_t i = 0; i < 30; ++i) {
+      if (d_lens[i]) {
+        has_dist = 1;
+        break;
+      }
+    }
+    if (!has_dist)
+      d_lens[0] = 1;
+  }
+  if (ll_lens[256] == 0)
+    ll_lens[256] = 1;
+
+  uint32_t num_ll = 286;
+  while (num_ll > 257 && ll_lens[num_ll - 1] == 0)
+    --num_ll;
+  uint32_t num_d = 30;
+  while (num_d > 1 && d_lens[num_d - 1] == 0)
+    --num_d;
+
+  uint16_t ll_codes[286];
+  uint16_t d_codes[30];
+  fio___deflate_build_codes(ll_codes, ll_lens, 286);
+  fio___deflate_build_codes(d_codes, d_lens, 30);
+
+  /* ---- Cost comparison: fixed vs dynamic Huffman ---- */
+  uint8_t fixed_ll_lens[288];
+  uint8_t fixed_d_lens[30];
+  fio___deflate_fixed_litlen_lens(fixed_ll_lens);
+  for (uint32_t i = 0; i < 30; ++i)
+    fixed_d_lens[i] = 5;
+
+  uint64_t fixed_cost = 3;
+  uint64_t dyn_cost = 3;
+
+  for (uint32_t i = 0; i < 286; ++i) {
+    if (ll_freqs[i]) {
+      fixed_cost += (uint64_t)ll_freqs[i] * fixed_ll_lens[i];
+      dyn_cost += (uint64_t)ll_freqs[i] * ll_lens[i];
+    }
+  }
+  for (uint32_t i = 0; i < 30; ++i) {
+    if (d_freqs[i]) {
+      fixed_cost += (uint64_t)d_freqs[i] * fixed_d_lens[i];
+      dyn_cost += (uint64_t)d_freqs[i] * d_lens[i];
+    }
+  }
+
+  /* Dynamic header overhead */
+  {
+    uint8_t all_lens_tmp[286 + 30];
+    uint32_t total = num_ll + num_d;
+    FIO_MEMCPY(all_lens_tmp, ll_lens, num_ll);
+    FIO_MEMCPY(all_lens_tmp + num_ll, d_lens, num_d);
+
+    uint32_t cl_freqs_tmp[19];
+    FIO_MEMSET(cl_freqs_tmp, 0, sizeof(cl_freqs_tmp));
+
+    for (uint32_t i = 0; i < total;) {
+      if (all_lens_tmp[i] == 0) {
+        uint32_t run = 1;
+        while (i + run < total && all_lens_tmp[i + run] == 0)
+          ++run;
+        while (run >= 11) {
+          uint32_t r = run > 138 ? 138 : run;
+          cl_freqs_tmp[18]++;
+          run -= r;
+          i += r;
+        }
+        while (run >= 3) {
+          uint32_t r = run > 10 ? 10 : run;
+          cl_freqs_tmp[17]++;
+          run -= r;
+          i += r;
+        }
+        while (run > 0) {
+          cl_freqs_tmp[0]++;
+          run--;
+          i++;
+        }
+      } else {
+        uint8_t val = all_lens_tmp[i];
+        cl_freqs_tmp[val]++;
+        i++;
+        uint32_t run = 0;
+        while (i + run < total && all_lens_tmp[i + run] == val)
+          ++run;
+        while (run >= 3) {
+          uint32_t r = run > 6 ? 6 : run;
+          cl_freqs_tmp[16]++;
+          run -= r;
+          i += r;
+        }
+        while (run > 0) {
+          cl_freqs_tmp[val]++;
+          run--;
+          i++;
+        }
+      }
+    }
+
+    uint8_t cl_lens_tmp[19];
+    fio___deflate_build_code_lengths(cl_lens_tmp, cl_freqs_tmp, 19, 7);
+
+    uint32_t hclen_tmp = 19;
+    while (hclen_tmp > 4 &&
+           cl_lens_tmp[fio___deflate_codelen_order[hclen_tmp - 1]] == 0)
+      --hclen_tmp;
+
+    dyn_cost += 5 + 5 + 4;
+    dyn_cost += (uint64_t)hclen_tmp * 3;
+
+    for (uint32_t i = 0; i < 19; ++i) {
+      if (cl_freqs_tmp[i])
+        dyn_cost += (uint64_t)cl_freqs_tmp[i] * cl_lens_tmp[i];
+    }
+    dyn_cost += (uint64_t)cl_freqs_tmp[16] * 2;
+    dyn_cost += (uint64_t)cl_freqs_tmp[17] * 3;
+    dyn_cost += (uint64_t)cl_freqs_tmp[18] * 7;
+  }
+
+  int use_fixed = (fixed_cost <= dyn_cost);
+
+  uint16_t fixed_ll_codes[288];
+  uint16_t fixed_d_codes[30];
+  if (use_fixed) {
+    fio___deflate_build_codes(fixed_ll_codes, fixed_ll_lens, 288);
+    fio___deflate_build_codes(fixed_d_codes, fixed_d_lens, 30);
+  }
+
+  const uint8_t *enc_ll_lens = use_fixed ? fixed_ll_lens : ll_lens;
+  const uint16_t *enc_ll_codes = use_fixed ? fixed_ll_codes : ll_codes;
+  const uint8_t *enc_d_lens = use_fixed ? fixed_d_lens : d_lens;
+  const uint16_t *enc_d_codes = use_fixed ? fixed_d_codes : d_codes;
+
+  /* Write compressed output */
+  fio___deflate_bitwriter_s w;
+  fio___deflate_bitwriter_init(&w, out, out_len);
+
+  /* BFINAL=0 (non-final block — streaming continues) */
+  fio___deflate_bitwriter_put(&w, 0, 1);
+  if (use_fixed) {
+    fio___deflate_bitwriter_put(&w, 1, 2); /* BTYPE=01 */
+  } else {
+    fio___deflate_bitwriter_put(&w, 2, 2); /* BTYPE=10 */
+    fio___deflate_write_dynamic_header(&w,
+                                       ll_lens,
+                                       num_ll,
+                                       ll_codes,
+                                       d_lens,
+                                       num_d,
+                                       d_codes);
+  }
+
+  /* Write tokens */
+  for (uint32_t i = 0; i < token_count; ++i) {
+    if (tokens[i].dist == 0) {
+      uint32_t sym = tokens[i].litlen;
+      fio___deflate_bitwriter_put_huff(&w, enc_ll_codes[sym], enc_ll_lens[sym]);
+    } else {
+      uint32_t length = tokens[i].litlen;
+      uint32_t distance = tokens[i].dist;
+      uint32_t lsym = fio___deflate_len_to_sym(length);
+      fio___deflate_bitwriter_put_huff(&w,
+                                       enc_ll_codes[lsym],
+                                       enc_ll_lens[lsym]);
+      uint32_t lidx = lsym - 257;
+      if (fio___deflate_len_extra[lidx])
+        fio___deflate_bitwriter_put(&w,
+                                    length - fio___deflate_len_base[lidx],
+                                    fio___deflate_len_extra[lidx]);
+      uint32_t dsym = fio___deflate_dist_to_sym(distance);
+      fio___deflate_bitwriter_put_huff(&w, enc_d_codes[dsym], enc_d_lens[dsym]);
+      if (fio___deflate_dist_extra[dsym])
+        fio___deflate_bitwriter_put(&w,
+                                    distance - fio___deflate_dist_base[dsym],
+                                    fio___deflate_dist_extra[dsym]);
+    }
+  }
+
+  /* End of block */
+  fio___deflate_bitwriter_put_huff(&w, enc_ll_codes[256], enc_ll_lens[256]);
+
+  /* Sync flush: byte-align then emit empty stored block (0x00 0x00 0xFF 0xFF)
+   * Format: BFINAL=0, BTYPE=00 (stored), pad to byte, LEN=0, NLEN=0xFFFF */
+  fio___deflate_bitwriter_align(&w);
+  /* Empty stored block: BFINAL=0, BTYPE=00 = 0x00 byte, LEN=0, NLEN=0xFFFF */
+  if (w.out + 5 <= w.out_end) {
+    w.out[0] = 0x00; /* BFINAL=0, BTYPE=00, padding=000000 */
+    w.out[1] = 0x00; /* LEN low */
+    w.out[2] = 0x00; /* LEN high */
+    w.out[3] = 0xFF; /* NLEN low */
+    w.out[4] = 0xFF; /* NLEN high */
+    w.out += 5;
+  }
+
+  size_t result = (size_t)(w.out - (uint8_t *)out);
+
+  /* Update sliding window with the new data */
+  if (new_len >= FIO___DEFLATE_WINDOW_SIZE) {
+    FIO_MEMCPY(s->window,
+               new_data + new_len - FIO___DEFLATE_WINDOW_SIZE,
+               FIO___DEFLATE_WINDOW_SIZE);
+    s->window_pos = FIO___DEFLATE_WINDOW_SIZE;
+  } else if (new_len > 0) {
+    if (s->window_pos + (uint32_t)new_len > FIO___DEFLATE_WINDOW_SIZE) {
+      /* Shift: keep last (WINDOW_SIZE - new_len) bytes of window */
+      uint32_t keep = FIO___DEFLATE_WINDOW_SIZE - (uint32_t)new_len;
+      FIO_MEMMOVE(s->window, s->window + s->window_pos - keep, keep);
+      s->window_pos = keep;
+    }
+    FIO_MEMCPY(s->window + s->window_pos, new_data, new_len);
+    s->window_pos += (uint32_t)new_len;
+  }
+
+  FIO_MEM_FREE(tokens, token_alloc);
+  if (combined)
+    FIO_MEM_FREE(combined, combined_alloc);
+
+  return result;
+}
+
+/* *****************************************************************************
+Streaming decompression internals
+
+Prepends the sliding window to the output buffer so that back-references
+from the compressed stream resolve against data from previous messages.
+Only the NEW decompressed bytes are returned to the caller.
+
+Strategy: each flush produces exactly one compressed block (BFINAL=0) followed
+by a sync flush marker. We copy the compressed data, set BFINAL=1 on the first
+block, and use a modified inflate that starts writing after a pre-populated
+window prefix (so back-references into previous messages resolve correctly).
+***************************************************************************** */
+
+/**
+ * Inflate with pre-populated output prefix.
+ *
+ * `out[0..prefix_len-1]` must be pre-filled with window context.
+ * Decompressed output is written starting at `out[prefix_len]`.
+ * Back-references can reach into the prefix (prior message data).
+ *
+ * Returns:
+ *  - On success: total bytes in `out` (prefix + new), <= out_len.
+ *  - On buffer too small: the REQUIRED total size (> out_len).
+ *  - On corrupt/invalid data: 0.
+ */
+FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
+                                                   size_t out_len,
+                                                   size_t prefix_len,
+                                                   const void *in,
+                                                   size_t in_len) {
+  if (!out || !out_len || !in || !in_len)
+    return 0;
+  if (prefix_len >= out_len)
+    return 0;
+
+  const uint8_t *inp = (const uint8_t *)in;
+  const uint8_t *in_end = inp + in_len;
+  uint8_t *out_start = (uint8_t *)out;    /* includes window prefix */
+  uint8_t *outp = out_start + prefix_len; /* write after prefix */
+  uint8_t *out_end = out_start + out_len;
+
+  int counting = 0;
+  size_t out_pos = 0; /* virtual position for counting mode */
+
+  fio___deflate_bitbuf_s bb = {0, 0};
+
+  uint32_t litlen_table[FIO___DEFLATE_LITLEN_MAX];
+  uint32_t dist_table[FIO___DEFLATE_DIST_MAX];
+
+  uint32_t bfinal = 0;
+
+  while (!bfinal) {
+    while (bb.count < 3 && inp < in_end) {
+      bb.bits |= (uint64_t)(*inp++) << bb.count;
+      bb.count += 8;
+    }
+    if (bb.count < 3)
+      return 0;
+
+    bfinal = fio___deflate_bitbuf_read(&bb, 1);
+    uint32_t btype = fio___deflate_bitbuf_read(&bb, 2);
+
+    if (btype == 0) {
+      bb.bits >>= (bb.count & 7);
+      bb.count &= ~7U;
+
+      while (bb.count < 32 && inp < in_end) {
+        bb.bits |= (uint64_t)(*inp++) << bb.count;
+        bb.count += 8;
+      }
+      if (bb.count < 32)
+        return 0;
+
+      uint32_t len = fio___deflate_bitbuf_read(&bb, 16);
+      uint32_t nlen = fio___deflate_bitbuf_read(&bb, 16);
+
+      if ((len ^ nlen) != 0xFFFF)
+        return 0;
+
+      uint32_t rewind_bytes = bb.count >> 3;
+      inp -= rewind_bytes;
+      bb.bits = 0;
+      bb.count = 0;
+
+      if (inp + len > in_end)
+        return 0; /* truncated input */
+
+      if (counting) {
+        out_pos += len;
+        inp += len;
+      } else if (outp + len > out_end) {
+        out_pos = (size_t)(outp - out_start) + len;
+        counting = 1;
+        inp += len;
+      } else {
+        FIO_MEMCPY(outp, inp, len);
+        inp += len;
+        outp += len;
+      }
+      continue;
+    }
+
+    if (btype == 3)
+      return 0;
+
+    if (btype == 1) {
+      uint8_t ll_lens[288];
+      uint8_t d_lens[32];
+      fio___deflate_fixed_litlen_lens(ll_lens);
+      fio___deflate_fixed_dist_lens(d_lens);
+
+      if (!fio___deflate_build_decode_table(litlen_table,
+                                            ll_lens,
+                                            288,
+                                            FIO___DEFLATE_LITLEN_BITS,
+                                            1))
+        return 0;
+      if (!fio___deflate_build_decode_table(dist_table,
+                                            d_lens,
+                                            32,
+                                            FIO___DEFLATE_DIST_BITS,
+                                            2))
+        return 0;
+    } else {
+      while (bb.count < 14 && inp < in_end) {
+        bb.bits |= (uint64_t)(*inp++) << bb.count;
+        bb.count += 8;
+      }
+      if (bb.count < 14)
+        return 0;
+
+      uint32_t hlit = fio___deflate_bitbuf_read(&bb, 5) + 257;
+      uint32_t hdist = fio___deflate_bitbuf_read(&bb, 5) + 1;
+      uint32_t hclen = fio___deflate_bitbuf_read(&bb, 4) + 4;
+
+      if (hlit > 286 || hdist > 30)
+        return 0;
+
+      uint8_t cl_lens[19];
+      FIO_MEMSET(cl_lens, 0, sizeof(cl_lens));
+
+      for (uint32_t i = 0; i < hclen; ++i) {
+        while (bb.count < 3 && inp < in_end) {
+          bb.bits |= (uint64_t)(*inp++) << bb.count;
+          bb.count += 8;
+        }
+        if (bb.count < 3)
+          return 0;
+        cl_lens[fio___deflate_codelen_order[i]] =
+            (uint8_t)fio___deflate_bitbuf_read(&bb, 3);
+      }
+
+      uint32_t precode_table[FIO___DEFLATE_PRECODE_SIZE];
+      if (!fio___deflate_build_decode_table(precode_table,
+                                            cl_lens,
+                                            19,
+                                            FIO___DEFLATE_PRECODE_BITS,
+                                            0))
+        return 0;
+
+      uint8_t all_lens[286 + 30];
+      FIO_MEMSET(all_lens, 0, sizeof(all_lens));
+      uint32_t total_codes = hlit + hdist;
+      uint32_t idx = 0;
+
+      while (idx < total_codes) {
+        while (bb.count < 7 + 7 && inp < in_end) {
+          bb.bits |= (uint64_t)(*inp++) << bb.count;
+          bb.count += 8;
+        }
+
+        uint32_t pbits = fio___deflate_bitbuf_peek(
+            &bb,
+            FIO___DEFLATE_PRECODE_BITS < bb.count ? FIO___DEFLATE_PRECODE_BITS
+                                                  : bb.count);
+        uint32_t pentry =
+            precode_table[pbits & (FIO___DEFLATE_PRECODE_SIZE - 1)];
+        uint32_t plen = FIO___DEFLATE_ENTRY_CODELEN(pentry);
+        uint32_t psym = FIO___DEFLATE_ENTRY_LIT_SYM(pentry);
+
+        if (bb.count < plen)
+          return 0;
+        fio___deflate_bitbuf_consume(&bb, plen);
+
+        if (psym < 16) {
+          all_lens[idx++] = (uint8_t)psym;
+        } else if (psym == 16) {
+          if (bb.count < 2)
+            return 0;
+          uint32_t rep = fio___deflate_bitbuf_read(&bb, 2) + 3;
+          if (idx == 0 || idx + rep > total_codes)
+            return 0;
+          uint8_t prev_val = all_lens[idx - 1];
+          for (uint32_t r = 0; r < rep; ++r)
+            all_lens[idx++] = prev_val;
+        } else if (psym == 17) {
+          if (bb.count < 3)
+            return 0;
+          uint32_t rep = fio___deflate_bitbuf_read(&bb, 3) + 3;
+          if (idx + rep > total_codes)
+            return 0;
+          for (uint32_t r = 0; r < rep; ++r)
+            all_lens[idx++] = 0;
+        } else if (psym == 18) {
+          if (bb.count < 7)
+            return 0;
+          uint32_t rep = fio___deflate_bitbuf_read(&bb, 7) + 11;
+          if (idx + rep > total_codes)
+            return 0;
+          for (uint32_t r = 0; r < rep; ++r)
+            all_lens[idx++] = 0;
+        } else {
+          return 0;
+        }
+      }
+
+      if (!fio___deflate_build_decode_table(litlen_table,
+                                            all_lens,
+                                            hlit,
+                                            FIO___DEFLATE_LITLEN_BITS,
+                                            1))
+        return 0;
+      if (!fio___deflate_build_decode_table(dist_table,
+                                            all_lens + hlit,
+                                            hdist,
+                                            FIO___DEFLATE_DIST_BITS,
+                                            2))
+        return 0;
+    }
+
+    /* Decode symbols — out_start includes the prefix for distance validation */
+    if (counting) {
+      /* Counting mode */
+      for (;;) {
+        int rc = fio___inflate_count(&inp,
+                                     in_end,
+                                     &out_pos,
+                                     0,
+                                     &bb,
+                                     litlen_table,
+                                     dist_table);
+        if (rc == 1)
+          break;
+        if (rc < 0)
+          return 0;
+        return 0;
+      }
+    } else {
+      int overflow = 0;
+      for (;;) {
+        const uint8_t *in_safe = in_end - 8;
+        uint8_t *out_safe = out_end - (FIO___DEFLATE_MAX_MATCH + 8);
+
+        int rc;
+        if (inp < in_safe && outp < out_safe) {
+          rc = fio___inflate_fast(&inp,
+                                  in_safe,
+                                  &outp,
+                                  out_safe,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+        } else {
+          rc = fio___inflate_slow(&inp,
+                                  in_end,
+                                  &outp,
+                                  out_end,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+        }
+
+        if (rc == 1)
+          break;
+        if (rc == -1)
+          return 0;
+        if (rc == -2) {
+          out_pos = (size_t)(outp - out_start);
+          counting = 1;
+          overflow = 1;
+          break;
+        }
+
+        if (inp >= in_safe || outp >= out_safe) {
+          rc = fio___inflate_slow(&inp,
+                                  in_end,
+                                  &outp,
+                                  out_end,
+                                  out_start,
+                                  &bb,
+                                  litlen_table,
+                                  dist_table);
+          if (rc == 1)
+            break;
+          if (rc == -1)
+            return 0;
+          if (rc == -2) {
+            out_pos = (size_t)(outp - out_start);
+            counting = 1;
+            overflow = 1;
+            break;
+          }
+          return 0;
+        }
+      }
+      if (overflow) {
+        for (;;) {
+          int rc = fio___inflate_count(&inp,
+                                       in_end,
+                                       &out_pos,
+                                       0,
+                                       &bb,
+                                       litlen_table,
+                                       dist_table);
+          if (rc == 1)
+            break;
+          if (rc < 0)
+            return 0;
+          return 0;
+        }
+      }
+    }
+  }
+
+  if (counting)
+    return out_pos;
+  return (size_t)(outp - out_start);
+}
+
+FIO_SFUNC size_t fio___deflate_stream_decompress(fio_deflate_s *s,
+                                                 void *out,
+                                                 size_t out_len,
+                                                 const uint8_t *comp_data,
+                                                 size_t comp_len) {
+  if (!comp_len)
+    return 0;
+
+  /* Allocate temp buffer: [window_prefix | space_for_new_output] */
+  uint32_t prefix_len = s->window_pos;
+  size_t temp_len = prefix_len + out_len;
+  /* Allocate temp output + modified input copy in one allocation */
+  size_t alloc_len = temp_len + comp_len;
+  uint8_t *alloc = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, alloc_len, 0);
+  if (!alloc)
+    return 0;
+
+  uint8_t *temp = alloc;
+  uint8_t *mod_in = alloc + temp_len;
+
+  /* Copy window prefix into temp output buffer */
+  if (prefix_len)
+    FIO_MEMCPY(temp, s->window, prefix_len);
+
+  /* Copy compressed data and set BFINAL=1 on the first block so the
+   * one-shot decompressor stops after processing it. */
+  FIO_MEMCPY(mod_in, comp_data, comp_len);
+  mod_in[0] |= 0x01; /* set BFINAL bit (bit 0 of first byte) */
+
+  /* Decompress with prefix: output starts after the window, but
+   * back-references can reach into the window prefix. */
+  size_t total_out = fio___deflate_decompress_prefixed(temp,
+                                                       temp_len,
+                                                       prefix_len,
+                                                       mod_in,
+                                                       comp_len);
+
+  size_t new_bytes = 0;
+  if (total_out > prefix_len)
+    new_bytes = total_out - prefix_len;
+
+  if (new_bytes > out_len) {
+    /* Buffer too small — return required size, don't update window */
+    FIO_MEM_FREE(alloc, alloc_len);
+    return new_bytes;
+  }
+
+  if (new_bytes)
+    FIO_MEMCPY(out, temp + prefix_len, new_bytes);
+
+  /* Update sliding window with the last 32KB of ALL decompressed output */
+  if (total_out > 0) {
+    if (total_out >= FIO___DEFLATE_WINDOW_SIZE) {
+      FIO_MEMCPY(s->window,
+                 temp + total_out - FIO___DEFLATE_WINDOW_SIZE,
+                 FIO___DEFLATE_WINDOW_SIZE);
+      s->window_pos = FIO___DEFLATE_WINDOW_SIZE;
+    } else {
+      FIO_MEMCPY(s->window, temp, total_out);
+      s->window_pos = (uint32_t)total_out;
+    }
+  }
+
+  FIO_MEM_FREE(alloc, alloc_len);
+  return new_bytes;
+}
+
+/* *****************************************************************************
+Streaming API - public functions
+***************************************************************************** */
 
 void fio_deflate_new___(void); /* IDE Marker */
 SFUNC fio_deflate_s *fio_deflate_new FIO_NOOP(int level, int is_compress) {
@@ -2033,20 +3315,25 @@ SFUNC fio_deflate_s *fio_deflate_new FIO_NOOP(int level, int is_compress) {
     return NULL;
 
   FIO_MEMSET(s, 0, alloc_size);
-  s->is_compress = is_compress;
-  s->level = level;
+  s->is_compress = (uint8_t)(!!is_compress);
+  s->level = (uint8_t)level;
 
   if (is_compress) {
-    s->hash_alloc = sizeof(uint16_t) * FIO___DEFLATE_HASH_SIZE +
-                    sizeof(uint16_t) * FIO___DEFLATE_WINDOW_SIZE;
-    uint16_t *hash_mem = (uint16_t *)FIO_MEM_REALLOC(NULL, 0, s->hash_alloc, 0);
+    /* Allocate head[] + head_gen[] + prev[] in one block.
+     * head_gen[] is zeroed; head[] and prev[] are left uninitialized
+     * (generation counter makes stale entries harmless). */
+    s->hash_alloc = sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE * 2 +
+                    sizeof(uint32_t) * FIO___DEFLATE_WINDOW_SIZE;
+    uint32_t *hash_mem = (uint32_t *)FIO_MEM_REALLOC(NULL, 0, s->hash_alloc, 0);
     if (!hash_mem) {
       FIO_MEM_FREE(s, alloc_size);
       return NULL;
     }
-    FIO_MEMSET(hash_mem, 0, s->hash_alloc);
     s->hash_head = hash_mem;
-    s->hash_prev = hash_mem + FIO___DEFLATE_HASH_SIZE;
+    s->hash_head_gen = hash_mem + FIO___DEFLATE_HASH_SIZE;
+    s->hash_prev = hash_mem + FIO___DEFLATE_HASH_SIZE * 2;
+    FIO_MEMSET(s->hash_head_gen, 0, sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE);
+    s->hash_gen = 0; /* first compress call will increment to 1 */
   }
 
   return s;
@@ -2058,7 +3345,27 @@ SFUNC void fio_deflate_free FIO_NOOP(fio_deflate_s *s) {
     return;
   if (s->hash_head)
     FIO_MEM_FREE(s->hash_head, s->hash_alloc);
+  if (s->buf)
+    FIO_MEM_FREE(s->buf, s->buf_cap);
   FIO_MEM_FREE(s, sizeof(fio_deflate_s));
+}
+
+void fio_deflate_destroy___(void); /* IDE Marker */
+SFUNC void fio_deflate_destroy FIO_NOOP(fio_deflate_s *s) {
+  if (!s)
+    return;
+  /* Reset sliding window */
+  s->window_pos = 0;
+  FIO_MEMSET(s->window, 0, FIO___DEFLATE_WINDOW_SIZE);
+  /* Reset hash chain state via generation counter (compressor only).
+   * Zeroing head_gen[] (128KB) invalidates all entries without touching
+   * head[] (128KB) or prev[] (128KB). */
+  if (s->hash_head_gen) {
+    FIO_MEMSET(s->hash_head_gen, 0, sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE);
+    s->hash_gen = 0;
+  }
+  /* Reset input buffer (keep allocation) */
+  s->buf_len = 0;
 }
 
 void fio_deflate_push___(void); /* IDE Marker */
@@ -2072,69 +3379,54 @@ SFUNC size_t fio_deflate_push FIO_NOOP(fio_deflate_s *s,
     return 0;
 
   if (s->is_compress) {
-    /* Streaming compression: compress data, optionally add sync flush */
-    size_t result = fio_deflate_compress(out, out_len, in, in_len, s->level);
-    if (!result && in_len > 0)
-      return 0;
+    /* Accumulate input */
+    if (in && in_len) {
+      if (fio___deflate_stream_buf_grow(s, in_len))
+        return 0;
+      FIO_MEMCPY(s->buf + s->buf_len, in, in_len);
+      s->buf_len += in_len;
+    }
 
-    /* For WebSocket: if flush requested, the output already ends with
-     * a complete block. The caller should strip the 0x00 0x00 0xFF 0xFF
-     * sync marker if present. */
-    (void)flush;
+    /* Compress on flush or when buffer is full */
+    if (!flush && s->buf_len < FIO___DEFLATE_STREAM_BUF_MAX)
+      return 0; /* buffered, no output yet */
+
+    size_t result =
+        fio___deflate_stream_compress(s, out, out_len, s->buf, s->buf_len);
+    s->buf_len = 0; /* buffer consumed */
     return result;
   }
 
-  /* Streaming decompression */
-  if (!in || !in_len)
-    return 0;
-
-  /* For WebSocket permessage-deflate: append sync flush marker */
-  size_t total_in = in_len;
-  uint8_t *temp_in = NULL;
-  const void *actual_in = in;
-
-  if (flush) {
-    /* Append 0x00 0x00 0xFF 0xFF */
-    total_in = in_len + 4;
-    temp_in = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, total_in, 0);
-    if (!temp_in)
+  /* Streaming decompression: accumulate compressed input */
+  if (in && in_len) {
+    if (fio___deflate_stream_buf_grow(s, in_len))
       return 0;
-    FIO_MEMCPY(temp_in, in, in_len);
-    temp_in[in_len] = 0x00;
-    temp_in[in_len + 1] = 0x00;
-    temp_in[in_len + 2] = 0xFF;
-    temp_in[in_len + 3] = 0xFF;
-    actual_in = temp_in;
+    FIO_MEMCPY(s->buf + s->buf_len, in, in_len);
+    s->buf_len += in_len;
   }
 
-  size_t result = fio_deflate_decompress(out, out_len, actual_in, total_in);
+  if (!flush)
+    return 0; /* buffered, no output yet */
 
-  /* Update sliding window for context takeover */
-  if (result > 0) {
-    const uint8_t *outp = (const uint8_t *)out;
-    if (result >= FIO___DEFLATE_WINDOW_SIZE) {
-      FIO_MEMCPY(s->window,
-                 outp + result - FIO___DEFLATE_WINDOW_SIZE,
-                 FIO___DEFLATE_WINDOW_SIZE);
-      s->window_pos = FIO___DEFLATE_WINDOW_SIZE;
-    } else {
-      size_t copy_len = result;
-      if (s->window_pos + copy_len > FIO___DEFLATE_WINDOW_SIZE) {
-        /* Shift window */
-        size_t keep = FIO___DEFLATE_WINDOW_SIZE - copy_len;
-        FIO_MEMMOVE(s->window, s->window + s->window_pos - keep, keep);
-        s->window_pos = (uint32_t)keep;
-      }
-      FIO_MEMCPY(s->window + s->window_pos, outp, copy_len);
-      s->window_pos += (uint32_t)copy_len;
-    }
-  }
+  /* On flush: append sync flush marker and decompress */
+  if (fio___deflate_stream_buf_grow(s, 4))
+    return 0;
+  s->buf[s->buf_len] = 0x00;
+  s->buf[s->buf_len + 1] = 0x00;
+  s->buf[s->buf_len + 2] = 0xFF;
+  s->buf[s->buf_len + 3] = 0xFF;
+  size_t comp_len = s->buf_len + 4;
 
-  if (temp_in)
-    FIO_MEM_FREE(temp_in, total_in);
+  size_t result =
+      fio___deflate_stream_decompress(s, out, out_len, s->buf, comp_len);
 
+  if (result <= out_len)
+    s->buf_len = 0; /* buffer consumed on success or corrupt (0) */
+  /* On overflow (result > out_len): keep buffer for retry with larger out */
   return result;
 }
+
+#undef FIO___DEFLATE_STREAM_BUF_MAX
 
 /* *****************************************************************************
 Cleanup

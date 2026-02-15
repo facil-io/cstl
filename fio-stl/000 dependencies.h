@@ -491,6 +491,11 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_BROTLI
 #endif
 
+#if defined(FIO_DEFLATE)
+#undef FIO_CRC32
+#define FIO_CRC32
+#endif
+
 #if defined(FIO_IO)
 #undef FIO_SIGNAL
 #define FIO_SIGNAL

@@ -73,10 +73,10 @@ static const uint16_t fio___brotli_copy_base[24] = {
 static const uint8_t fio___brotli_copy_extra[24] = {
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 24};
 
-/* Block count prefix code: 26 symbols with extra bits */
+/* Block count prefix code: 26 symbols with extra bits (RFC 7932 Section 6) */
 static const uint32_t fio___brotli_block_count_base[26] = {
-    1,  2,  3,  4,  5,  6,  7,   8,   9,   10,  11,   12,   13,
-    16, 20, 28, 40, 56, 84, 120, 184, 312, 568, 1080, 2104, 4120};
+    1,   5,   9,   13,  17,  25,  33,  41,  49,   65,   81,   97,   113,
+    145, 177, 209, 241, 305, 369, 497, 753, 1265, 2289, 4337, 8433, 16625};
 static const uint8_t fio___brotli_block_count_extra[26] = {
     2, 2, 2, 2, 3, 3, 3, 3, 4,  4,  4,  4,  5,
     5, 5, 5, 6, 6, 7, 8, 9, 10, 11, 12, 13, 24};

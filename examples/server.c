@@ -135,12 +135,18 @@ int main(int argc, char const *argv[]) {
       FIO_CLI_INT("--keep-alive -k (" FIO_MACRO2STR(
           FIO_HTTP_DEFAULT_TIMEOUT) ") HTTP keep-alive timeout in seconds "
                                     "(0..255)"),
+      FIO_CLI_BOOL(
+          "--compress-static -cs auto-compress static files before serving."),
+      FIO_CLI_BOOL("--compress-dynamic -cd auto-compress dynamic responses "
+                   "before serving."),
       FIO_CLI_BOOL("--log -v log HTTP messages."),
 
       FIO_CLI_PRINT_HEADER("WebSocket / SSE"),
       FIO_CLI_INT("--ws-max-msg -maxms (" FIO_MACRO2STR(
           FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE) ") incoming WebSocket message "
                                             "limit, in bytes."),
+      FIO_CLI_BOOL(
+          "--ws-no-deflate -wsnd do NOT use WebSoclet permessage-deflate"),
       FIO_CLI_INT("--timeout -ping (" FIO_MACRO2STR(
           FIO_HTTP_DEFAULT_TIMEOUT_LONG) ") WebSocket / SSE timeout, in "
                                          "seconds."),
@@ -302,6 +308,9 @@ int main(int argc, char const *argv[]) {
       .ws_max_msg_size = fio_cli_get_i("-maxms"),
       .ws_timeout = fio_cli_get_i("-ping"),
       .sse_timeout = fio_cli_get_i("-ping"),
+      .compress_ws = !fio_cli_get_i("-wsnd"),
+      .compress_static = fio_cli_get_i("-cs"),
+      .compress_dynamic = fio_cli_get_i("-cd"),
       .timeout = fio_cli_get_i("-k"),
       .queue = &http_queue,
       .tls = tls,
@@ -456,14 +465,16 @@ static void http_respond_echo(fio_http_s *h) {
   }
   /* ETag header example - setting an ETag automatically enables caching */
   if (1) {
-    uint64_t hash =
-        fio_risky_hash(fio_http_path(h).buf, fio_http_path(h).len, 0);
+    uint64_t hash = fio_risky_hash(out, fio_bstr_len(out), 0);
     char hash_buf[18];
     fio_str_info_s etag = FIO_STR_INFO3(hash_buf, 0, 18);
     fio_string_write_hex(&etag, NULL, hash);
     fio_http_response_header_set(h, FIO_STR_INFO2("etag", 4), etag);
   }
   FIO_LOG_DDEBUG2("echoing back:\n%s", out);
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO1("content-type"),
+                               FIO_STR_INFO1("text/plain"));
   fio_http_write(h,
                  .buf = out,
                  .len = fio_bstr_len(out),

@@ -86,6 +86,11 @@ HTTP Handle Settings
 #define FIO_HTTP_STATIC_FILE_COMPLETION 1
 #endif
 
+#ifndef FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT
+/** Maximum file size (in bytes) for on-disk static file compression. */
+#define FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT (1UL << 21) /* 2 MiB */
+#endif
+
 #ifndef FIO_HTTP_LOG_X_REQUEST_START
 #define FIO_HTTP_LOG_X_REQUEST_START 1
 #endif
@@ -1621,8 +1626,15 @@ HTTP Handle Type
 #define FIO_HTTP_STATE_COOKIES_PARSED 32
 #define FIO_HTTP_STATE_FREEING        64
 
+/** Controller flags (cflags) for opt-in compression features. */
+#define FIO_HTTP_CFLAG_COMPRESS_DYNAMIC 1
+#define FIO_HTTP_CFLAG_COMPRESS_WS      2
+#define FIO_HTTP_CFLAG_COMPRESS_STATIC  4
+
 FIO_SFUNC int fio____http_write_start(fio_http_s *, fio_http_write_args_s *);
 FIO_SFUNC int fio____http_write_cont(fio_http_s *, fio_http_write_args_s *);
+FIO_SFUNC int fio___http_mime_is_compressible(fio_str_info_s);
+FIO_SFUNC int fio___http_header_has_token(fio_str_info_s, const char *, size_t);
 
 struct fio_http_s {
   void *udata;
@@ -1632,8 +1644,10 @@ struct fio_http_s {
   int (*writer)(fio_http_s *, fio_http_write_args_s *);
   int64_t received_at;
   size_t sent;
-  uint32_t state;
-  uint32_t status;
+  uint16_t state;
+  uint16_t status;
+  uint16_t cflags;
+  uint16_t uflags;
   fio_keystr_s method;
   fio_keystr_s opath;
   fio_keystr_s path;
@@ -1786,8 +1800,43 @@ SFUNC size_t fio_http_status_set(fio_http_s *h, size_t status) {
     status = 500;
   if (!status)
     status = 200;
-  return (h->status = (uint32_t)status);
+  return (h->status = (uint16_t)status);
 }
+
+/* *****************************************************************************
+Controller / User Flags Set / Test / Flip
+***************************************************************************** */
+
+#define FIO___HTTP_MAKE_GET_SET(flags)                                         \
+  /** Returns all set flags */                                                 \
+  FIO_IFUNC uint16_t fio_http_##flags(fio_http_s *h) {                         \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    return h->flags;                                                           \
+  }                                                                            \
+  FIO_IFUNC uint16_t fio_http_##flags##_flip(fio_http_s *h, uint16_t flg) {    \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    h->flags ^= flg;                                                           \
+    return h->flags & flg;                                                     \
+  }                                                                            \
+  FIO_IFUNC uint16_t fio_http_##flags##_set(fio_http_s *h, uint16_t flg) {     \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    h->flags |= flg;                                                           \
+    return h->flags & flg;                                                     \
+  }                                                                            \
+  FIO_IFUNC uint16_t fio_http_##flags##_unset(fio_http_s *h, uint16_t flg) {   \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    h->flags &= ~flg;                                                          \
+    return h->flags & flg;                                                     \
+  }                                                                            \
+  FIO_IFUNC uint16_t fio_http_##flags##_is_set(fio_http_s *h, uint16_t flg) {  \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    return h->flags & flg;                                                     \
+  }
+
+FIO___HTTP_MAKE_GET_SET(cflags)
+FIO___HTTP_MAKE_GET_SET(uflags)
+
+#undef FIO___HTTP_MAKE_GET_SET
 /* *****************************************************************************
 Handler State
 ***************************************************************************** */
@@ -2599,6 +2648,91 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
         fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
         0);
   }
+#if 1
+  if (args->finish &&
+      FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC)) &&
+      args->len > 1024 && args->buf) {
+    fio_str_info_s ac =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                0);
+    if (!ac.len)
+      goto no_compress;
+    /* only compress text-like content types */
+    if (!fio___http_mime_is_compressible(
+            fio_http_response_header(h,
+                                     FIO_STR_INFO2((char *)"content-type", 12),
+                                     0)))
+      goto no_compress;
+    /* try encodings in preference order (brotli > gzip) */
+    struct {
+      fio_str_info_s token;
+      fio_str_info_s encoding;
+      size_t (*compress)(void *, size_t, const void *, size_t, int);
+      size_t (*bound)(size_t);
+      size_t extra; /* added to bound (e.g. gzip header+trailer) */
+    } encodings[] = {{FIO_STR_INFO2((char *)"br", 2),
+                      FIO_STR_INFO2((char *)"br", 2),
+                      fio_brotli_compress,
+                      fio_brotli_compress_bound,
+                      0},
+                     {FIO_STR_INFO2((char *)"gzip", 4),
+                      FIO_STR_INFO2((char *)"gzip", 4),
+                      fio_gzip_compress,
+                      fio_deflate_compress_bound,
+                      18},
+                     {{0}}};
+    fio_str_info_s comp = {0};
+    fio_str_info_s enc_name = {0};
+    for (size_t i = 0; encodings[i].token.buf; ++i) {
+      if (!fio___http_header_has_token(ac,
+                                       encodings[i].token.buf,
+                                       encodings[i].token.len))
+        continue;
+      size_t bound = encodings[i].bound(args->len) + encodings[i].extra;
+      comp = (fio_str_info_s){0};
+      if (FIO_STRING_REALLOC(&comp, bound))
+        continue;
+      comp.len =
+          encodings[i].compress(comp.buf, comp.capa, args->buf, args->len, 1);
+      if (comp.len && comp.len < args->len) {
+        enc_name = encodings[i].encoding;
+        break;
+      }
+      FIO_STRING_FREE2(comp);
+      comp = (fio_str_info_s){0};
+    }
+    if (comp.buf) {
+      /* free original buffer if owned */
+      if (args->dealloc && args->buf)
+        args->dealloc((void *)args->buf);
+      args->buf = comp.buf;
+      args->len = comp.len;
+      args->offset = 0;
+      args->copy = 0;
+      args->dealloc = FIO_STRING_FREE;
+      /* update Content-Length */
+      {
+        char ibuf[32];
+        fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+        v.len = fio_digits10u(comp.len);
+        fio_ltoa10u(v.buf, comp.len, v.len);
+        fio___http_hmap_set2(hdrs,
+                             FIO_STR_INFO2((char *)"content-length", 14),
+                             v,
+                             -1);
+      }
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"content-encoding", 16),
+          enc_name);
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"vary", 4),
+          FIO_STR_INFO2((char *)"accept-encoding", 15));
+    }
+  }
+#endif
   /* test if streaming / single body response */
   if (!fio___http_hmap_get_ptr(hdrs,
                                FIO_STR_INFO2((char *)"content-length", 14))) {
@@ -2614,7 +2748,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
-
+no_compress:
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
@@ -3085,7 +3219,7 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
     return -1;
   if (!status || status > 1000)
     status = 404;
-  h->status = (uint32_t)status;
+  h->status = (uint16_t)status;
   FIO_STR_INFO_TMP_VAR(filename, 127);
   /* read static error code file */
   fio_string_write2(&filename,
@@ -4210,6 +4344,123 @@ Static file helper
 ***************************************************************************** */
 
 /**
+ * Returns non-zero if `header` (a comma-separated header value) contains
+ * `token` as a complete, standalone value.
+ *
+ * Handles formats like: "gzip, deflate, br" or "br;q=1.0, gzip;q=0.8"
+ * Matching is case-insensitive and ignores quality parameters (;q=...).
+ */
+FIO_SFUNC int fio___http_header_has_token(fio_str_info_s header,
+                                          const char *token,
+                                          size_t token_len) {
+  if (!header.len || !header.buf || !token_len)
+    return 0;
+  const char *pos = header.buf;
+  const char *end = header.buf + header.len;
+  while (pos < end) {
+    /* skip leading whitespace */
+    while (pos < end && (*pos == ' ' || *pos == '\t'))
+      ++pos;
+    /* find end of this token (before comma or semicolon) */
+    const char *tok_start = pos;
+    while (pos < end && *pos != ',' && *pos != ';')
+      ++pos;
+    /* trim trailing whitespace from token */
+    const char *tok_end = pos;
+    while (tok_end > tok_start && (tok_end[-1] == ' ' || tok_end[-1] == '\t'))
+      --tok_end;
+    /* compare (case-insensitive) */
+    if ((size_t)(tok_end - tok_start) == token_len) {
+      size_t j = 0;
+      for (; j < token_len; ++j) {
+        if ((tok_start[j] | 32) != (token[j] | 32))
+          break;
+      }
+      if (j == token_len)
+        return 1;
+    }
+    /* skip past comma (and any ;q=... parameters) */
+    while (pos < end && *pos != ',')
+      ++pos;
+    if (pos < end)
+      ++pos; /* skip the comma */
+  }
+  return 0;
+}
+
+/** Returns non-zero if the mime type is compressible (text-like).
+ *
+ * Handles: text types, application json/javascript/xml/wasm,
+ *          +json and +xml suffixes, image svg+xml.
+ *          Parameters (;charset=...) are ignored. Case-insensitive.
+ */
+FIO_SFUNC int fio___http_mime_is_compressible(fio_str_info_s mime) {
+  if (!mime.len)
+    return 0;
+  /* text/ — all text types are compressible */
+  if (mime.len >= 5 &&
+      (fio_buf2u32u(mime.buf) | 0x20202020UL) ==
+          (fio_buf2u32u("text") | 0x20202020UL) &&
+      mime.buf[4] == '/')
+    return 1;
+  /* image/svg+xml (case-insensitive: 8 bytes "image/sv" + 5 bytes "g+xml") */
+  if (mime.len >= 13 &&
+      (fio_buf2u64u(mime.buf) | (uint64_t)0x2020202020202020ULL) ==
+          fio_buf2u64u("image/sv") &&
+      (fio_buf2u32u(mime.buf + 8) | 0x20202020UL) ==
+          (fio_buf2u32u("g+xm") | 0x20202020UL) &&
+      (mime.buf[12] | 32) == 'l' && (mime.len == 13 || mime.buf[13] == ';'))
+    return 1;
+  /* application/ — check exact subtype or +suffix */
+  if (mime.len <= 12 || mime.buf[11] != '/')
+    return 0;
+  if ((fio_buf2u64u(mime.buf) | (uint64_t)0x2020202020202020ULL) !=
+      fio_buf2u64u("applicat"))
+    return 0;
+  /* also verify "ion/" at bytes 8..11 */
+  if ((fio_buf2u32u(mime.buf + 8) | 0x20202020UL) !=
+      (fio_buf2u32u("ion/") | 0x20202020UL))
+    return 0;
+  /* extract subtype: from after '/' to ';' or end */
+  const char *sub = mime.buf + 12;
+  const char *end = mime.buf + mime.len;
+  const char *sep = sub;
+  while (sep < end && *sep != ';')
+    ++sep;
+  size_t sub_len = (size_t)(sep - sub);
+  /* exact subtype matches (case-insensitive) */
+  /* "json" / "wasm" — 4 bytes */
+  if (sub_len == 4 && ((fio_buf2u32u(sub) | 0x20202020UL) ==
+                           (fio_buf2u32u("json") | 0x20202020UL) ||
+                       (fio_buf2u32u(sub) | 0x20202020UL) ==
+                           (fio_buf2u32u("wasm") | 0x20202020UL)))
+    return 1;
+  /* "xml" — 3 bytes: u16 "xm" + byte 'l' */
+  if (sub_len == 3 &&
+      (fio_buf2u16u(sub) | 0x2020) == (fio_buf2u16u("xm") | 0x2020) &&
+      (sub[2] | 32) == 'l')
+    return 1;
+  /* "javascript" — 10 bytes: u64 "javascri" + u16 "pt" */
+  if (sub_len == 10 &&
+      (fio_buf2u64u(sub) | (uint64_t)0x2020202020202020ULL) ==
+          fio_buf2u64u("javascri") &&
+      (fio_buf2u16u(sub + 8) | 0x2020) == (fio_buf2u16u("pt") | 0x2020))
+    return 1;
+  /* +json suffix (e.g. ld+json, vnd.api+json) */
+  if (sub_len >= 5 && sub[sub_len - 5] == '+' &&
+      (fio_buf2u32u(sub + sub_len - 4) | 0x20202020UL) ==
+          (fio_buf2u32u("json") | 0x20202020UL))
+    return 1;
+  /* +xml suffix (e.g. xhtml+xml, atom+xml) */
+  if (sub_len >= 4 && sub[sub_len - 4] == '+' &&
+      (fio_buf2u16u(sub + sub_len - 3) | 0x2020) ==
+          (fio_buf2u16u("xm") | 0x2020) &&
+      (sub[sub_len - 1] | 32) == 'l')
+    return 1;
+  return 0;
+}
+
+/**
  * Attempts to send a static file from the `root` folder. On success the
  * response is complete and 0 is returned. Otherwise returns -1.
  */
@@ -4309,23 +4560,107 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                                 0);
     if (!ac.len)
       goto accept_encoding_header_test_done;
+    /* stat the original file for staleness comparison and creation */
+    struct stat orig_st;
+    int have_orig_st = !fio_filename_stat(filename.buf, &orig_st);
+    size_t orig_len = filename.len; /* remember unextended length */
+    int can_create =
+        have_orig_st &&
+        fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC) &&
+        fio___http_mime_is_compressible(mime_type) &&
+        (size_t)orig_st.st_size >= 1024 &&
+        (size_t)orig_st.st_size <= FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT;
     struct {
-      char *value;
+      fio_buf_info_s value;
       fio_buf_info_s ext;
-    } options[] = {{(char *)"br", FIO_BUF_INFO2((char *)".br", 3)},
-                   {(char *)"zstd", FIO_BUF_INFO2((char *)".zstd", 4)},
-                   {(char *)"gzip", FIO_BUF_INFO2((char *)".gz", 3)},
-                   {(char *)"deflate", FIO_BUF_INFO2((char *)".zip", 4)},
-                   {NULL}};
-    for (size_t i = 0; options[i].value; ++i) {
-      if (!strstr(ac.buf, options[i].value))
+      size_t (*compress)(void *, size_t, const void *, size_t, int);
+      size_t (*bound)(size_t);
+      size_t extra; /* added to bound (e.g. gzip header+trailer) */
+      int level;    /* compression level */
+    } options[] = {{FIO_BUF_INFO2((char *)"br", 2),
+                    FIO_BUF_INFO2((char *)".br", 3),
+                    fio_brotli_compress,
+                    fio_brotli_compress_bound,
+                    0,
+                    4},
+                   {FIO_BUF_INFO2((char *)"zstd", 4),
+                    FIO_BUF_INFO2((char *)".zstd", 5),
+                    NULL,
+                    NULL,
+                    0,
+                    0},
+                   {FIO_BUF_INFO2((char *)"gzip", 4),
+                    FIO_BUF_INFO2((char *)".gz", 3),
+                    fio_gzip_compress,
+                    fio_deflate_compress_bound,
+                    18,
+                    6},
+                   {FIO_BUF_INFO2((char *)"deflate", 7),
+                    FIO_BUF_INFO2((char *)".zip", 4),
+                    NULL,
+                    NULL,
+                    0,
+                    0},
+                   {0}};
+    for (size_t i = 0; options[i].value.buf; ++i) {
+      if (!fio___http_header_has_token(ac,
+                                       options[i].value.buf,
+                                       options[i].value.len))
         continue;
       fio_string_write(&filename, NULL, options[i].ext.buf, options[i].ext.len);
-      if (!fio_filename_type(filename.buf)) {
-        filename.len -= options[i].ext.len;
+      /* check if compressed variant exists on disk and is fresh */
+      struct stat comp_st;
+      int variant_exists = !fio_filename_stat(filename.buf, &comp_st);
+      if (variant_exists && have_orig_st && comp_st.st_mtime < orig_st.st_mtime)
+        variant_exists = 0; /* stale — original was modified */
+      if (!variant_exists) {
+        /* no usable variant on disk — try to create one */
+        filename.len = orig_len;
         filename.buf[filename.len] = 0;
-        continue;
+        if (!can_create || !options[i].compress)
+          continue;
+        /* read original file */
+        int orig_fd = fio_filename_open(filename.buf, O_RDONLY);
+        if (orig_fd == -1)
+          continue;
+        void *src = FIO_MEM_REALLOC(NULL, 0, (size_t)orig_st.st_size, 0);
+        if (!src) {
+          close(orig_fd);
+          continue;
+        }
+        size_t rd = fio_fd_read(orig_fd, src, (size_t)orig_st.st_size, 0);
+        close(orig_fd);
+        if (rd != (size_t)orig_st.st_size) {
+          FIO_MEM_FREE(src, (size_t)orig_st.st_size);
+          continue;
+        }
+        /* compress */
+        size_t bound = options[i].bound(rd) + options[i].extra;
+        void *dst = FIO_MEM_REALLOC(NULL, 0, bound, 0);
+        if (!dst) {
+          FIO_MEM_FREE(src, (size_t)orig_st.st_size);
+          continue;
+        }
+        size_t comp_len = options[i].compress(dst, bound, src, rd, 6);
+        FIO_MEM_FREE(src, (size_t)orig_st.st_size);
+        if (!comp_len || comp_len >= rd) {
+          FIO_MEM_FREE(dst, bound);
+          continue;
+        }
+        /* write compressed variant to disk */
+        fio_string_write(&filename,
+                         NULL,
+                         options[i].ext.buf,
+                         options[i].ext.len);
+        if (fio_filename_overwrite(filename.buf, dst, comp_len)) {
+          FIO_MEM_FREE(dst, bound);
+          filename.len = orig_len;
+          filename.buf[filename.len] = 0;
+          continue;
+        }
+        FIO_MEM_FREE(dst, bound);
       }
+      /* compressed variant is ready — set response headers */
       fio_http_response_header_set(
           h,
           FIO_STR_INFO2((char *)"vary", 4),
@@ -4333,7 +4668,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       fio_http_response_header_set(
           h,
           FIO_STR_INFO2((char *)"content-encoding", 16),
-          FIO_STR_INFO1(options[i].value));
+          FIO_BUF2STR_INFO(options[i].value));
       break;
     }
   }

@@ -57,6 +57,12 @@ HTTP Setting Defaults
 #define FIO_WEBSOCKET_STATS 0
 #endif
 
+#ifndef FIO_HTTP_WEBSOCKET_DEFLATE_MIN
+/** Messages smaller than this are not compressed (fits in a single TCP/IP
+ * packet, compression saves no network overhead). */
+#define FIO_HTTP_WEBSOCKET_DEFLATE_MIN 1024
+#endif
+
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
@@ -179,6 +185,12 @@ typedef struct fio_http_settings_s {
   uint8_t connect_timeout;
   /** Logging flag - set to TRUE to log HTTP requests. */
   uint8_t log;
+  /** Opt-in: auto-compress static files (save .br/.gz to disk). */
+  uint8_t compress_static;
+  /** Opt-in: auto-compress dynamic HTTP responses on-the-fly. */
+  uint8_t compress_dynamic;
+  /** Opt-in: enable permessage-deflate for WebSocket connections. */
+  uint8_t compress_ws;
 } fio_http_settings_s;
 
 /* a pointer safety type */
@@ -609,11 +621,16 @@ typedef struct {
     struct fio___http_connection_ws_s ws;
     struct fio___http_connection_sse_s sse;
   } state;
+  fio_deflate_s
+      *deflate_rd; /* WS decompressor (NULL = no permessage-deflate) */
+  fio_deflate_s *deflate_wr; /* WS compressor (NULL = no permessage-deflate) */
   uint32_t len;
   uint32_t capa;
   uint8_t log;
   uint8_t suspend;
   uint8_t is_client;
+  uint8_t deflate_rd_reset; /* 1 = client_no_context_takeover */
+  uint8_t deflate_wr_reset; /* 1 = server_no_context_takeover */
   char buf[];
 } fio___http_connection_s;
 
@@ -622,6 +639,10 @@ typedef struct {
 #define FIO_REF_FLEX_TYPE        char
 #define FIO_REF_DESTROY(o)                                                     \
   do {                                                                         \
+    if (o.deflate_rd)                                                          \
+      fio_deflate_free(o.deflate_rd);                                          \
+    if (o.deflate_wr)                                                          \
+      fio_deflate_free(o.deflate_wr);                                          \
     fio___http_protocol_free(                                                  \
         FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, o.settings));      \
   } while (0)
@@ -881,50 +902,73 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
     goto refuse_upgrade;
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
-#if HAVE_ZLIB && 0           /* TODO: logs and fix extension handling logic */
-  FIO_HTTP_HEADER_EACH_VALUE(/* TODO: setup WebSocket extension */
-                             h,
-                             1,
-                             FIO_STR_INFO2((char *)"sec-websocket-extensions",
-                                           24),
-                             val) {
-    FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
-                    (int)val.len,
-                    val.buf);
-    if (!FIO_STR_INFO_IS_EQ(val,
-                            FIO_STR_INFO2((char *)"permessage-deflate", 18)))
-      continue;
-    size_t client_bits = 0, server_bits = 0;
-    FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(val, p) {
-      FIO_LOG_DDEBUG2("\t %.*s: %.*s",
-                      (int)p.name.len,
-                      p.name.buf,
-                      (int)p.value.len,
-                      p.value.buf);
-      if (FIO_STR_INFO_IS_EQ(p.name,
-                             FIO_STR_INFO2((char *)"client_max_window_bits",
-                                           22))) { /* used by chrome */
-        char *iptr = p.value.buf;
-        client_bits = iptr ? fio_atol10u(&iptr) : 0;
-        if (client_bits < 8 || client_bits > 15)
-          client_bits = (size_t)-1;
+  /* RFC 7692: permessage-deflate extension negotiation */
+  if (FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_WS))) {
+    FIO_HTTP_HEADER_EACH_VALUE(
+        h,
+        1,
+        FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
+        val) {
+      FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
+                      (int)val.len,
+                      val.buf);
+      if (!FIO_STR_INFO_IS_EQ(val,
+                              FIO_STR_INFO2((char *)"permessage-deflate", 18)))
+        continue;
+      /* Parse extension parameters */
+      int server_no_ctx = 0, client_no_ctx = 0;
+      int client_bits_present = 0;
+      FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(val, p) {
+        FIO_LOG_DDEBUG2("\t %.*s: %.*s",
+                        (int)p.name.len,
+                        p.name.buf,
+                        (int)p.value.len,
+                        p.value.buf);
+        if (FIO_STR_INFO_IS_EQ(
+                p.name,
+                FIO_STR_INFO2((char *)"server_no_context_takeover", 26)))
+          server_no_ctx = 1;
+        else if (FIO_STR_INFO_IS_EQ(
+                     p.name,
+                     FIO_STR_INFO2((char *)"client_no_context_takeover", 26)))
+          client_no_ctx = 1;
+        else if (FIO_STR_INFO_IS_EQ(
+                     p.name,
+                     FIO_STR_INFO2((char *)"client_max_window_bits", 22)))
+          client_bits_present = 1;
+        /* server_max_window_bits: we always use 15, accept any valid value */
       }
-      if (FIO_STR_INFO_IS_EQ(
-              p.name,
-              FIO_STR_INFO2((char *)"server_max_window_bits", 22))) {
-        char *iptr = p.value.buf;
-        server_bits = iptr ? fio_atol10u(&iptr) : 0;
-        if (server_bits < 8 || server_bits > 15)
-          server_bits = (size_t)-1;
+      /* Build response extension header */
+      {
+        FIO_STR_INFO_TMP_VAR(ext_resp, 128);
+        fio_string_write(&ext_resp, NULL, "permessage-deflate", 18);
+        if (server_no_ctx)
+          fio_string_write(&ext_resp, NULL, "; server_no_context_takeover", 28);
+        if (client_no_ctx)
+          fio_string_write(&ext_resp, NULL, "; client_no_context_takeover", 28);
+        if (client_bits_present)
+          fio_string_write(&ext_resp, NULL, "; client_max_window_bits=15", 26);
+        fio_http_response_header_set(
+            h,
+            FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
+            ext_resp);
       }
+      /* Create deflate streaming contexts (stored at connection level,
+       * outside the state union, so they survive the HTTP→WS transition).
+       * Compressor = our writes (server side), Decompressor = client's data.
+       * For no_context_takeover: we still create contexts but will free and
+       * recreate them per-message in the compress/decompress callbacks. */
+      c->deflate_wr = fio_deflate_new(1, 1);
+      c->deflate_rd = fio_deflate_new(1, 0);
+      c->deflate_wr_reset = (uint8_t)server_no_ctx;
+      c->deflate_rd_reset = (uint8_t)client_no_ctx;
+      FIO_LOG_DDEBUG2("WebSocket permessage-deflate negotiated "
+                      "(server_no_ctx=%d, client_no_ctx=%d)",
+                      server_no_ctx,
+                      client_no_ctx);
+      break;
     }
-    if (client_bits)
-      ; /* TODO */
-    if (server_bits)
-      ; /* TODO */
-    break;
-  } /* HAVE_ZLIB */
-#endif
+  }
   fio_http_upgrade_websocket(h);
   return;
 
@@ -1320,6 +1364,12 @@ FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
            .controller);
   fio_http_udata_set(c->h, c->udata);
   fio_http_cdata_set(c->h, fio___http_connection_dup(c));
+  if (c->settings->compress_dynamic)
+    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+  if (c->settings->compress_ws)
+    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_WS);
+  if (c->settings->compress_static)
+    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
 }
 
 /** called when a request method is parsed. */
@@ -2157,9 +2207,43 @@ FIO_SFUNC fio_buf_info_s fio_websocket_write_partial(void *udata,
 FIO_SFUNC fio_buf_info_s fio_websocket_decompress(void *udata,
                                                   fio_buf_info_s msg) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  FIO_LOG_ERROR("WebSocket permessage-deflate not yet implemented!");
-  (void)c;
-  return msg;
+  if (!c->deflate_rd || !msg.len)
+    return msg;
+  /* RFC 7692 §7.2.2: decompress the message.
+   * fio_deflate_push with flush=1 appends the sync marker (00 00 FF FF)
+   * before decompressing, which is exactly what we need since the sender
+   * stripped it. */
+  size_t out_cap = msg.len * 4;
+  if (out_cap < 256)
+    out_cap = 256;
+  char *out = fio_bstr_reserve(NULL, out_cap);
+  size_t r = fio_deflate_push(c->deflate_rd, out, out_cap, msg.buf, msg.len, 1);
+  if (!r) {
+    /* Corrupt data — log error, return original message */
+    FIO_LOG_ERROR("WebSocket permessage-deflate: corrupt compressed data");
+    fio_bstr_free(out);
+    return msg;
+  }
+  if (r > out_cap) {
+    /* Buffer too small — allocate exact required size and retry once */
+    fio_bstr_free(out);
+    out_cap = r;
+    out = fio_bstr_reserve(NULL, out_cap);
+    r = fio_deflate_push(c->deflate_rd, out, out_cap, NULL, 0, 1);
+    if (!r || r > out_cap) {
+      FIO_LOG_ERROR("WebSocket permessage-deflate: decompression retry failed");
+      fio_bstr_free(out);
+      return msg;
+    }
+  }
+  /* Success: replace the message buffer */
+  fio_bstr_free(c->state.ws.msg);
+  out = fio_bstr_len_set(out, r);
+  c->state.ws.msg = out;
+  /* Reset context if client_no_context_takeover */
+  if (c->deflate_rd_reset)
+    fio_deflate_destroy(c->deflate_rd);
+  return fio_bstr_buf(c->state.ws.msg);
 }
 
 /** Called when a `ping` message was received. */
@@ -2316,6 +2400,15 @@ FIO_SFUNC void fio___websocket_on_close(void *buf, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   c->io = NULL;
   fio_bstr_free(c->state.ws.msg);
+  /* Free permessage-deflate contexts */
+  if (c->deflate_rd) {
+    fio_deflate_free(c->deflate_rd);
+    c->deflate_rd = NULL;
+  }
+  if (c->deflate_wr) {
+    fio_deflate_free(c->deflate_wr);
+    c->deflate_wr = NULL;
+  }
   if (c->h) {
     fio_http_status_set(c->h, (size_t)(c->state.ws.code));
     c->settings->on_close(c->h);
@@ -2462,26 +2555,73 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
   is_text = (!!is_text);
   is_text |= (!is_text) << 1;
   uint8_t rsv = 0;
-  if (len < 512) { /* fast-path: no allocation, no compression */
+
+  /* RFC 7692: compress with permessage-deflate if negotiated */
+  const void *send_buf = buf;
+  size_t send_len = len;
+  char *comp_buf = NULL;
+  size_t comp_alloc = 0;
+  if (c->deflate_wr && len >= FIO_HTTP_WEBSOCKET_DEFLATE_MIN) {
+    /* Compress: output bound is input + overhead */
+    comp_alloc = len + (len >> 3) + 32;
+    comp_buf = (char *)FIO_MEM_REALLOC(NULL, 0, comp_alloc, 0);
+    if (comp_buf) {
+      size_t comp_len =
+          fio_deflate_push(c->deflate_wr, comp_buf, comp_alloc, buf, len, 1);
+      if (comp_len >= 4) {
+        /* RFC 7692 §7.2.1: strip trailing 00 00 FF FF sync marker */
+        const uint8_t *tail = (const uint8_t *)comp_buf + comp_len - 4;
+        if (tail[0] == 0x00 && tail[1] == 0x00 && tail[2] == 0xFF &&
+            tail[3] == 0xFF) {
+          comp_len -= 4;
+        }
+        send_buf = comp_buf;
+        send_len = comp_len;
+        rsv = 1; /* RSV1 = compressed */
+      } else {
+        /* Compression failed or produced no output — send uncompressed */
+        FIO_MEM_FREE(comp_buf, comp_alloc);
+        comp_buf = NULL;
+        comp_alloc = 0;
+      }
+      /* Reset context if server_no_context_takeover */
+      if (c->deflate_wr_reset)
+        fio_deflate_destroy(c->deflate_wr);
+    }
+  }
+
+  if (send_len < 512) {
+    /* fast-path: small message (compressed or not), use stack buffer */
     char tmp[520];
-    size_t wlen =
-        (c->is_client
-             ? fio_websocket_client_wrap
-             : fio_websocket_server_wrap)(tmp, buf, len, is_text, 1, 1, rsv);
+    size_t wlen = (c->is_client ? fio_websocket_client_wrap
+                                : fio_websocket_server_wrap)(tmp,
+                                                             send_buf,
+                                                             send_len,
+                                                             is_text,
+                                                             1,
+                                                             1,
+                                                             rsv);
+    if (comp_buf)
+      FIO_MEM_FREE(comp_buf, comp_alloc);
     fio_io_write2(c->io, .buf = tmp, .len = wlen, .copy = 1);
     return 0;
   }
-#if HAVE_ZLIB /* TODO: compress? */
-  // if(c->state.ws.deflate) ;
-#endif
-  char *payload =
-      fio_bstr_reserve(NULL,
-                       fio_websocket_wrapped_len(len) + (c->is_client << 2));
-  payload = fio_bstr_len_set(
-      payload,
-      (c->is_client
-           ? fio_websocket_client_wrap
-           : fio_websocket_server_wrap)(payload, buf, len, is_text, 1, 1, rsv));
+
+  char *payload = fio_bstr_reserve(NULL,
+                                   fio_websocket_wrapped_len(send_len) +
+                                       (c->is_client << 2));
+  payload =
+      fio_bstr_len_set(payload,
+                       (c->is_client ? fio_websocket_client_wrap
+                                     : fio_websocket_server_wrap)(payload,
+                                                                  send_buf,
+                                                                  send_len,
+                                                                  is_text,
+                                                                  1,
+                                                                  1,
+                                                                  rsv));
+  if (comp_buf)
+    FIO_MEM_FREE(comp_buf, comp_alloc);
   fio_io_write2(c->io,
                 .buf = payload,
                 .len = fio_bstr_len(payload),
