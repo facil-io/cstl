@@ -9,7 +9,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define TEST_CHANNEL           FIO_BUF_INFO1("test")
 #define MESSAGES_PER_PUBLISHER 50
 #define WORKERS                4
-#define START_OFFSET_MILLI     250
+#define START_OFFSET_MILLI     150
 #define SUBSCRIBE_OFFSET_MILLI 10
 #define CLEANUP_MILLI          2500
 #define LISTENERS              (WORKERS + 1)
@@ -89,6 +89,8 @@ static void on_message_callback(fio_pubsub_msg_s *msg) {
 static int stop_io_timeout(void *ignr_, void *ignr__) {
   (void)ignr_;
   (void)ignr__;
+  if (!fio_io_is_master())
+    return -1;
   FIO_LOG_INFO("(%d) Timeout Detected, calling fio_io_stop", fio_io_pid());
   fio_io_stop();
   return -1;
