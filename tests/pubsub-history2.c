@@ -175,9 +175,8 @@ int main(void) {
   size_t received_count = 0;
   /* setup timeout */
   fio_io_run_every(.fn = stop_io_timeout,
-                   .every = (CLEANUP_MILLI + 2000),
-                   .repetitions = 0,
-                   .start_at = fio_time_milli());
+                   .every = (CLEANUP_MILLI + 5000),
+                   .repetitions = 0);
   /* attach history manager for replay_since to work */
   fio_pubsub_history_attach(fio_pubsub_history_cache(0), 100);
   /* setup callbacks for unique worker ID */
@@ -190,7 +189,7 @@ int main(void) {
   fio_io_run_every(.fn = publish_message,
                    .every = (SUBSCRIBE_OFFSET_MILLI / 2),
                    .repetitions = MESSAGES_PER_PUBLISHER,
-                   .start_at = fio_io_last_tick() + START_OFFSET_MILLI +
+                   .start_at = fio_time_milli() + START_OFFSET_MILLI +
                                (LISTENERS / SUBSCRIBE_OFFSET_MILLI));
   /* run IO and wait for timeout */
   fio_io_start(WORKERS);
