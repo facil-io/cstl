@@ -74,6 +74,12 @@ typedef struct fio_http_settings_s {
   uint8_t connect_timeout;
   /** Logging flag - set to TRUE to log HTTP requests. */
   uint8_t log;
+  /** Opt-in: auto-compress static files (save .br/.gz to disk). */
+  uint8_t compress_static;
+  /** Opt-in: auto-compress dynamic HTTP responses on-the-fly. */
+  uint8_t compress_dynamic;
+  /** Opt-in: enable permessage-deflate for WebSocket connections. */
+  uint8_t compress_ws;
 } fio_http_settings_s;
 ```
 
@@ -119,8 +125,13 @@ fio_http_listener_s *listener = fio_http_listen("0.0.0.0:3000",
 | `sse_timeout` | `uint8_t` | SSE timeout in seconds; defaults to `FIO_HTTP_DEFAULT_TIMEOUT_LONG` |
 | `connect_timeout` | `uint8_t` | Client connection timeout (client mode only) |
 | `log` | `uint8_t` | Set to TRUE to log HTTP requests |
+| `compress_static` | `uint8_t` | Opt-in: auto-compress static files (save `.br`/`.gz` variants to disk) |
+| `compress_dynamic` | `uint8_t` | Opt-in: auto-compress dynamic HTTP responses on-the-fly |
+| `compress_ws` | `uint8_t` | Opt-in: enable permessage-deflate (RFC 7692) for WebSocket connections |
 
 **Returns:** a listener handle (`fio_http_listener_s *`) on success, or NULL on error. The listener can be used with `fio_http_route` to add route-specific handlers.
+
+**Note**: the `compress_static`, `compress_dynamic`, and `compress_ws` options require `FIO_DEFLATE` and/or `FIO_BROTLI` to be defined before including the library. When both are available, Brotli is preferred for clients that support it, with deflate/gzip as fallback.
 
 #### `fio_http_route`
 

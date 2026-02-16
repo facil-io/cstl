@@ -595,8 +595,8 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
 FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
-  if ((uintptr_t)(cpy->from) + 1 > 1) /* tests exclude + NULL*/
-    cpy->from = fio_io_dup(cpy->from);
+  if ((uintptr_t)(cpy->from) + 1 > 1)  /* tests exclude + NULL */
+    cpy->from = fio_io_dup(cpy->from); /* copy owns its own ref */
   return cpy;
 }
 
@@ -874,7 +874,7 @@ SFUNC void fio_ipc_send(fio_ipc_s *ipc) {
   }
   /* Worker */
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE)) {
-    ipc->udata = ipc->from;
+    ipc->udata = ipc->from; /* preserve exclude identity through the wire */
   }
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS) &&
       ipc->from != FIO_IPC_EXCLUDE_SELF) {
@@ -955,7 +955,7 @@ IPC Core - executing IPC calls
 
 /** Wrapper that manages request vs response states */
 FIO_SFUNC void fio___ipc_on_ipc_master(void *ipc_, void *io_) {
-  fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
+  fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS) ||
@@ -981,7 +981,7 @@ decrypt_error:
 
 /** Wrapper that manages request vs response states */
 FIO_SFUNC void fio___ipc_on_ipc_worker(void *ipc_, void *io_) {
-  fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
+  fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
   fio___ipc_execute_task(ipc, io_);
@@ -1097,6 +1097,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
                                      p->expected_len - p->msg_received);
       if (p->expected_len != p->msg_received)
         return;
+      /* dup ref owned by msg->from */
       fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
       fio___ipc_parser_init(p);
       return; /* don't read more messages for now */
@@ -1137,7 +1138,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         //                p->expected_len,
         //                p->buf_len);
         msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
-        msg->from = io;
+        msg->from = io; /* ref ownership from fio_io_dup below */
         FIO_MEMCPY(&msg->len, p->buffer + consumed, p->expected_len);
         consumed += p->expected_len;
         fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
@@ -1146,7 +1147,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
       }
       p->msg = msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
       p->msg_received = p->buf_len - consumed;
-      msg->from = io;
+      msg->from = io; /* dup'd when queued / NULLs if incomplete (on destroy) */
       FIO_MEMCPY(&msg->len, p->buffer + consumed, p->msg_received);
       consumed = p->buf_len = 0;
       break;

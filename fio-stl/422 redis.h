@@ -35,6 +35,20 @@ Features:
 - Ping/pong keepalive
 - Optional pub/sub integration with SUBSCRIBE/PSUBSCRIBE/PUBLISH
 
+Multi-Process Architecture:
+===========================
+Only the MASTER process connects to the Redis server. Worker processes
+communicate with the master via IPC (Inter-Process Communication).
+
+  Master:   [Redis pub_conn] + [Redis sub_conn] → Redis Server
+  Worker 1: [IPC connection] → Master → Redis
+  Worker 2: [IPC connection] → Master → Redis
+
+This ensures:
+- No duplicate Redis connections from workers
+- Correct pub/sub semantics (subscribe/unsubscribe only on master)
+- Workers transparently forward commands and publishes via IPC
+
 Thread Safety Model:
 ====================
 The Redis engine is thread-safe. All internal state modifications are delegated
@@ -237,7 +251,6 @@ typedef struct fio_redis_cmd_s {
 typedef struct fio_redis_connection_s {
   fio_io_s *io;
   fio_resp3_parser_s parser;
-  FIOBJ building;   /* Object being built during parsing */
   uint16_t buf_pos; /* Position in read buffer */
   uint8_t is_sub;   /* Is this the subscription connection? */
 } fio_redis_connection_s;
@@ -280,8 +293,9 @@ typedef struct fio_redis_engine_s {
       buf[FIO_REDIS_READ_BUFFER * 2]; /* Read buffers for both connections */
 } fio_redis_engine_s;
 
-/* Forward declaration for FIO_REF destroy callback */
+/* Forward declarations */
 FIO_SFUNC void fio___redis_destroy(fio_redis_engine_s *r);
+FIO_SFUNC void fio___redis_on_fork(void *engine_);
 
 /* Reference counting using FIO_REF (with FIO_REF_CONSTRUCTOR_ONLY) - generates:
  * - fio___redis_new(flex_size) - allocate with ref=1
@@ -468,13 +482,36 @@ static const fio_resp3_callbacks_s FIO___REDIS_RESP3_CALLBACKS = {
 RESP Formatting Helpers
 ***************************************************************************** */
 
-/** Writes a FIOBJ to RESP format into a string */
+/** Writes a FIOBJ to RESP format into a string.
+ * Uses RESP3 type prefixes to preserve types through serialization roundtrips:
+ * - NULL  → $-1\r\n (RESP2 null bulk string)
+ * - TRUE  → #t\r\n (RESP3 boolean)
+ * - FALSE → #f\r\n (RESP3 boolean)
+ * - NUMBER → :<number>\r\n (RESP integer)
+ * - FLOAT  → ,<float>\r\n (RESP3 double)
+ * - HASH   → %<count>\r\n (RESP3 map)
+ * - ARRAY  → *<count>\r\n (RESP2 array)
+ * - STRING → $<len>\r\n<data>\r\n (RESP2 bulk string)
+ */
 FIO_SFUNC void fio___redis_fiobj2resp(FIOBJ dest, FIOBJ obj) {
   fio_str_info_s s;
   switch (FIOBJ_TYPE(obj)) {
   case FIOBJ_T_NULL: fiobj_str_write(dest, "$-1\r\n", 5); break;
-  case FIOBJ_T_TRUE: fiobj_str_write(dest, "$4\r\ntrue\r\n", 10); break;
-  case FIOBJ_T_FALSE: fiobj_str_write(dest, "$5\r\nfalse\r\n", 11); break;
+  case FIOBJ_T_TRUE: fiobj_str_write(dest, "#t\r\n", 4); break;
+  case FIOBJ_T_FALSE: fiobj_str_write(dest, "#f\r\n", 4); break;
+  case FIOBJ_T_NUMBER:
+    fiobj_str_write(dest, ":", 1);
+    fiobj_str_write_i(dest, fiobj2i(obj));
+    fiobj_str_write(dest, "\r\n", 2);
+    break;
+  case FIOBJ_T_FLOAT: {
+    char tmp[64];
+    size_t tmp_len = fio_ftoa(tmp, fiobj2f(obj), 10);
+    fiobj_str_write(dest, ",", 1);
+    fiobj_str_write(dest, tmp, tmp_len);
+    fiobj_str_write(dest, "\r\n", 2);
+    break;
+  }
   case FIOBJ_T_ARRAY:
     fiobj_str_write(dest, "*", 1);
     fiobj_str_write_i(dest, (int64_t)fiobj_array_count(obj));
@@ -484,16 +521,14 @@ FIO_SFUNC void fio___redis_fiobj2resp(FIOBJ dest, FIOBJ obj) {
     }
     break;
   case FIOBJ_T_HASH:
-    fiobj_str_write(dest, "*", 1);
-    fiobj_str_write_i(dest, (int64_t)(fiobj_hash_count(obj) * 2));
+    fiobj_str_write(dest, "%", 1);
+    fiobj_str_write_i(dest, (int64_t)fiobj_hash_count(obj));
     fiobj_str_write(dest, "\r\n", 2);
     FIO_MAP_EACH(fiobj_hash, obj, pos) {
       fio___redis_fiobj2resp(dest, pos.key);
       fio___redis_fiobj2resp(dest, pos.value);
     }
     break;
-  case FIOBJ_T_NUMBER:
-  case FIOBJ_T_FLOAT:
   case FIOBJ_T_STRING:
   default:
     s = fiobj2cstr(obj);
@@ -542,8 +577,6 @@ FIO_SFUNC void fio___redis_connection_reset(fio_redis_connection_s *conn) {
     --conn->parser.depth;
   }
   conn->parser = (fio_resp3_parser_s){0};
-  fiobj_free(conn->building);
-  conn->building = FIOBJ_INVALID;
   conn->io = NULL;
 }
 
@@ -554,11 +587,16 @@ FIO_SFUNC void fio___redis_connection_reset(fio_redis_connection_s *conn) {
 FIO_SFUNC void fio___redis_destroy(fio_redis_engine_s *r) {
   FIO_LOG_DEBUG("(redis) destroying engine for %s:%s", r->address, r->port);
 
-  /* Free remaining resources */
+  /* Remove fork callback to prevent use-after-free */
+  fio_state_callback_remove(FIO_CALL_IN_CHILD, fio___redis_on_fork, r);
+
+  /* Free remaining resources - invoke callbacks to release IPC references */
   fiobj_free(r->last_channel);
   while (!FIO_LIST_IS_EMPTY(&r->cmd_queue)) {
     fio_redis_cmd_s *cmd;
     FIO_LIST_POP(fio_redis_cmd_s, node, cmd, &r->cmd_queue);
+    if (cmd->callback)
+      cmd->callback((fio_pubsub_engine_s *)r, FIOBJ_INVALID, cmd->udata);
     FIO_MEM_FREE(cmd, sizeof(*cmd) + cmd->cmd_len);
     FIO_LEAK_COUNTER_ON_FREE(fio___redis_cmd);
   }
@@ -795,8 +833,22 @@ FIO_SFUNC void fio___redis_on_attach(fio_io_s *io) {
   conn->io = io;
   conn->is_sub = (uint8_t)is_sub;
 
-  /* Send AUTH if configured */
-  if (r->auth_cmd_len) {
+  /* Send AUTH if configured.
+   * For pub connection: queue as a proper command so its reply is consumed
+   * and doesn't desynchronize the command queue.
+   * For sub connection: direct write is fine since non-array replies are
+   * ignored in fio___redis_on_sub_message. */
+  if (!is_sub && r->auth_cmd_len) {
+    fio_redis_cmd_s *auth_cmd = (fio_redis_cmd_s *)
+        FIO_MEM_REALLOC(NULL, 0, sizeof(*auth_cmd) + r->auth_cmd_len + 1, 0);
+    if (auth_cmd) {
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+      *auth_cmd = (fio_redis_cmd_s){.cmd_len = r->auth_cmd_len};
+      FIO_MEMCPY(auth_cmd->cmd, r->auth_cmd, r->auth_cmd_len);
+      FIO_LIST_PUSH(&r->cmd_queue, &auth_cmd->node);
+    }
+  }
+  if (is_sub && r->auth_cmd_len) {
     fio_io_write(io, r->auth_cmd, r->auth_cmd_len);
   }
 
@@ -968,6 +1020,15 @@ FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
   fio_redis_connection_s *conn = (fio_redis_connection_s *)conn_;
 
+  /* Workers must NOT connect to Redis - they use IPC to master.
+   * Check !fio_io_is_master() rather than fio_io_is_worker() because in
+   * single-process mode (fio_io_start(0)) both is_master and is_worker are
+   * true, and we DO want to connect in that case. */
+  if (!fio_io_is_master()) {
+    fio___redis_free(r);
+    return;
+  }
+
   if (!r->running || conn->io) {
     fio___redis_free(r);
     return;
@@ -1018,10 +1079,248 @@ FIO_SFUNC int fio___redis_connect_timer(void *engine_, void *conn_) {
 }
 
 /* *****************************************************************************
+IPC Handlers for Multi-Process Communication
+
+Workers forward publish and send operations to the master via IPC.
+The master executes them on the real Redis connection and replies back.
+
+IPC data layouts:
+- PUBLISH from worker:
+    [fio___redis_ipc_publish_header_s][channel_bytes][message_bytes]
+
+- fio_redis_send from worker:
+    [callback_ptr (8)][engine_ptr (8)][RESP command bytes]
+    User's udata stored in ipc->udata directly (no heap allocation).
+
+- Reply from master to worker (fio_redis_send):
+    [callback_ptr (8)][engine_ptr (8)][RESP reply bytes]
+    The 16-byte header is echoed from the original request so the worker
+    can recover the callback and engine pointers.
+***************************************************************************** */
+
+/** IPC data header for PUBLISH forwarding from worker to master */
+typedef struct {
+  fio_redis_engine_s *engine;
+  uint32_t channel_len;
+  uint32_t message_len;
+} fio___redis_ipc_publish_header_s;
+
+/**
+ * Internal: Build a RESP PUBLISH command for the given channel and message.
+ * Returns a newly allocated fio_redis_cmd_s or NULL on failure.
+ */
+FIO_SFUNC fio_redis_cmd_s *fio___redis_publish_cmd_new(fio_buf_info_s channel,
+                                                       fio_buf_info_s message) {
+  size_t cmd_size = sizeof(fio_redis_cmd_s) + 64 + channel.len + message.len;
+  fio_redis_cmd_s *cmd =
+      (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, cmd_size, 0);
+  if (!cmd)
+    return NULL;
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+
+  *cmd = (fio_redis_cmd_s){0};
+
+  char *buf = (char *)cmd->cmd;
+  size_t pos = 0;
+
+  /* *3\r\n$7\r\nPUBLISH\r\n$<ch_len>\r\n<ch>\r\n$<msg_len>\r\n<msg>\r\n */
+  FIO_MEMCPY(buf + pos, "*3\r\n$7\r\nPUBLISH\r\n$", 18);
+  pos += 18;
+  pos += (size_t)fio_ltoa(buf + pos, (int64_t)channel.len, 10);
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  FIO_MEMCPY(buf + pos, channel.buf, channel.len);
+  pos += channel.len;
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  buf[pos++] = '$';
+  pos += (size_t)fio_ltoa(buf + pos, (int64_t)message.len, 10);
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  FIO_MEMCPY(buf + pos, message.buf, message.len);
+  pos += message.len;
+  buf[pos++] = '\r';
+  buf[pos++] = '\n';
+  buf[pos] = 0;
+
+  cmd->cmd_len = pos;
+  return cmd;
+}
+
+/**
+ * Master-side IPC handler: receives PUBLISH from a worker.
+ * Extracts channel + message and queues a PUBLISH command on the Redis
+ * pub connection.
+ */
+FIO_SFUNC void fio___redis_ipc_publish_on_master(fio_ipc_s *ipc) {
+  if (ipc->len < sizeof(fio___redis_ipc_publish_header_s))
+    return;
+
+  fio___redis_ipc_publish_header_s header;
+  FIO_MEMCPY(&header, ipc->data, sizeof(header));
+
+  /* Validate lengths */
+  size_t expected = sizeof(header) + header.channel_len + header.message_len;
+  if (ipc->len < expected)
+    return;
+
+  char *payload = ipc->data + sizeof(header);
+  fio_buf_info_s channel = FIO_BUF_INFO2(payload, header.channel_len);
+  fio_buf_info_s message =
+      FIO_BUF_INFO2(payload + header.channel_len, header.message_len);
+
+  fio_redis_engine_s *r = header.engine;
+  if (!r || !r->running)
+    return;
+
+  fio_redis_cmd_s *cmd = fio___redis_publish_cmd_new(channel, message);
+  if (!cmd)
+    return;
+  fio___redis_attach_cmd(r, cmd);
+}
+
+/** Size of the IPC data header for fio_redis_send: callback + engine ptrs */
+#define FIO___REDIS_IPC_SEND_HEADER 16
+
+/**
+ * Master-side callback: Redis replied to a command forwarded from a worker.
+ * Serializes the FIOBJ reply to RESP and sends it back via IPC reply.
+ * Echoes the 16-byte header (callback + engine) so the worker can recover them.
+ */
+FIO_SFUNC void fio___redis_ipc_send_redis_reply(fio_pubsub_engine_s *e,
+                                                FIOBJ reply,
+                                                void *udata) {
+  fio_ipc_s *ipc = (fio_ipc_s *)udata;
+  (void)e;
+
+  /* Serialize reply to RESP format */
+  FIOBJ resp = fiobj_str_new_buf(256);
+  if (reply == FIOBJ_INVALID) {
+    /* No reply / error - send null */
+    fiobj_str_write(resp, "$-1\r\n", 5);
+  } else {
+    fio___redis_fiobj2resp(resp, reply);
+  }
+  fio_str_info_s s = fiobj2cstr(resp);
+
+  /* Send reply back to worker via IPC.
+   * Echo the 16-byte header from the original request so the worker
+   * can recover callback + engine pointers from the reply data. */
+  fio_ipc_reply(ipc,
+                .data = FIO_IPC_DATA(
+                    FIO_BUF_INFO2(ipc->data, FIO___REDIS_IPC_SEND_HEADER),
+                    FIO_BUF_INFO2(s.buf, s.len)),
+                .done = 1);
+  fiobj_free(resp);
+  fio_ipc_free(ipc);
+}
+
+/**
+ * Master-side IPC handler: receives fio_redis_send() from a worker.
+ * IPC data layout: [callback (8) | engine (8) | RESP command bytes]
+ * Extracts the engine pointer, queues the RESP command on the Redis
+ * pub connection, and arranges to reply via IPC when Redis responds.
+ */
+FIO_SFUNC void fio___redis_ipc_send_on_master(fio_ipc_s *ipc) {
+  if (ipc->len < FIO___REDIS_IPC_SEND_HEADER)
+    return;
+
+  /* Extract engine pointer (skip callback, that's for the worker) */
+  fio_redis_engine_s *r;
+  FIO_MEMCPY(&r, ipc->data + 8, sizeof(r));
+
+  if (!r || !r->running) {
+    /* Engine gone - reply with null so worker callback fires.
+     * Echo the 16-byte header so the worker can recover callback + engine. */
+    fio_ipc_reply(ipc,
+                  .data = FIO_IPC_DATA(
+                      FIO_BUF_INFO2(ipc->data, FIO___REDIS_IPC_SEND_HEADER),
+                      FIO_BUF_INFO2("$-1\r\n", 5)),
+                  .done = 1);
+    return;
+  }
+
+  /* Extract RESP command bytes (after the 16-byte header) */
+  char *resp_data = ipc->data + FIO___REDIS_IPC_SEND_HEADER;
+  size_t resp_len = ipc->len - FIO___REDIS_IPC_SEND_HEADER;
+
+  /* Allocate command node for the master's queue */
+  fio_redis_cmd_s *cmd = (fio_redis_cmd_s *)
+      FIO_MEM_REALLOC(NULL, 0, sizeof(*cmd) + resp_len + 1, 0);
+  if (!cmd) {
+    fio_ipc_reply(ipc,
+                  .data = FIO_IPC_DATA(
+                      FIO_BUF_INFO2(ipc->data, FIO___REDIS_IPC_SEND_HEADER),
+                      FIO_BUF_INFO2("$-1\r\n", 5)),
+                  .done = 1);
+    return;
+  }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
+
+  /* Dup the IPC message so we can reply later when Redis responds.
+   * The dup preserves ipc->data which still has the 16-byte header. */
+  fio_ipc_s *ipc_ref = fio_ipc_dup(ipc);
+
+  *cmd = (fio_redis_cmd_s){
+      .callback = fio___redis_ipc_send_redis_reply,
+      .udata = ipc_ref,
+      .cmd_len = resp_len,
+  };
+  FIO_MEMCPY(cmd->cmd, resp_data, resp_len);
+  cmd->cmd[resp_len] = 0;
+
+  /* Queue command on master's Redis connection */
+  fio___redis_attach_cmd(r, cmd);
+}
+
+/**
+ * Worker-side IPC done handler: receives Redis reply from master.
+ * IPC data layout: [callback (8) | engine (8) | RESP reply bytes]
+ * Extracts callback + engine from the data prefix, parses the RESP reply,
+ * and invokes the original user callback.
+ *
+ * This is the on_done handler (not on_reply) because the master sends
+ * a single reply with .done = 1, which dispatches directly to on_done.
+ */
+FIO_SFUNC void fio___redis_ipc_send_on_done(fio_ipc_s *ipc) {
+  if (ipc->len < FIO___REDIS_IPC_SEND_HEADER)
+    return;
+
+  /* Extract callback and engine from the reply data prefix */
+  void (*callback)(fio_pubsub_engine_s *, FIOBJ, void *);
+  fio_pubsub_engine_s *engine;
+  FIO_MEMCPY(&callback, ipc->data, sizeof(callback));
+  FIO_MEMCPY(&engine, ipc->data + 8, sizeof(engine));
+
+  /* Parse RESP reply from data after the 16-byte header */
+  FIOBJ reply = FIOBJ_INVALID;
+  size_t resp_off = FIO___REDIS_IPC_SEND_HEADER;
+  if (ipc->len > resp_off) {
+    fio_resp3_parser_s parser = {0};
+    fio_resp3_result_s result = fio_resp3_parse(&parser,
+                                                &FIO___REDIS_RESP3_CALLBACKS,
+                                                ipc->data + resp_off,
+                                                ipc->len - resp_off);
+    if (result.obj)
+      reply = (FIOBJ)result.obj;
+  }
+
+  /* Invoke the original callback. ipc->udata is the user's udata. */
+  if (callback)
+    callback(engine, reply, ipc->udata);
+  fiobj_free(reply);
+}
+
+/* *****************************************************************************
 Pub/Sub Engine Callbacks
 
 NOTE: All pub/sub engine callbacks are called from the IO thread by the pub/sub
 system, so they don't need locks for accessing engine state.
+
+EXECUTION CONTEXT:
+- subscribe, psubscribe, unsubscribe, punsubscribe: MASTER ONLY
+- publish: ANY process (worker or master)
+- detached: MASTER ONLY
 ***************************************************************************** */
 
 /**
@@ -1034,23 +1333,20 @@ system, so they don't need locks for accessing engine state.
 FIO_SFUNC void fio___redis_detached(const fio_pubsub_engine_s *eng) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
   FIO_LOG_DEBUG("(redis) engine detached from pub/sub");
-  /* Only release the attached reference if we were actually attached.
-   * This prevents double-free if detached is called multiple times. */
-  uint8_t was_attached = r->attached;
   r->attached = 0;
   r->detaching = 0; /* Detach complete */
   /* Close subscription connection since we're no longer attached */
   if (r->sub_conn.io) {
     fio_io_close_now(r->sub_conn.io);
   }
-  /* free attached reference only if we were attached */
-  if (was_attached)
-    fio___redis_free(r);
+  /* NOTE: Do NOT call fio___redis_free() here. The "attached" state is not a
+   * reference-counted ownership. The caller's fio_redis_free() handles all
+   * reference counting via fio___redis_dup/fio___redis_free pairs. */
 }
 
 /**
  * Subscribe to a channel.
- * Runs on IO thread - no lock needed.
+ * Runs on MASTER ONLY - no lock needed.
  */
 FIO_SFUNC void fio___redis_subscribe(const fio_pubsub_engine_s *eng,
                                      fio_buf_info_s channel,
@@ -1085,7 +1381,7 @@ FIO_SFUNC void fio___redis_subscribe(const fio_pubsub_engine_s *eng,
 
 /**
  * Subscribe to a pattern.
- * Runs on IO thread - no lock needed.
+ * Runs on MASTER ONLY - no lock needed.
  */
 FIO_SFUNC void fio___redis_psubscribe(const fio_pubsub_engine_s *eng,
                                       fio_buf_info_s channel,
@@ -1120,7 +1416,7 @@ FIO_SFUNC void fio___redis_psubscribe(const fio_pubsub_engine_s *eng,
 
 /**
  * Unsubscribe from a channel.
- * Runs on IO thread - no lock needed.
+ * Runs on MASTER ONLY - no lock needed.
  */
 FIO_SFUNC void fio___redis_unsubscribe(const fio_pubsub_engine_s *eng,
                                        fio_buf_info_s channel,
@@ -1147,7 +1443,7 @@ FIO_SFUNC void fio___redis_unsubscribe(const fio_pubsub_engine_s *eng,
 
 /**
  * Unsubscribe from a pattern.
- * Runs on IO thread - no lock needed.
+ * Runs on MASTER ONLY - no lock needed.
  */
 FIO_SFUNC void fio___redis_punsubscribe(const fio_pubsub_engine_s *eng,
                                         fio_buf_info_s channel,
@@ -1173,51 +1469,50 @@ FIO_SFUNC void fio___redis_punsubscribe(const fio_pubsub_engine_s *eng,
 }
 
 /**
- * Publish a message to Redis.
- * Runs on IO thread - command queuing is thread-safe via
- * fio___redis_attach_cmd.
+ * Worker-side publish: forwards channel + message to master via IPC.
+ * Installed as the engine's publish callback in forked worker processes.
+ */
+FIO_SFUNC void fio___redis_publish_worker(const fio_pubsub_engine_s *eng,
+                                          const fio_pubsub_msg_s *msg) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
+  fio___redis_ipc_publish_header_s header = {
+      .engine = r,
+      .channel_len = (uint32_t)msg->channel.len,
+      .message_len = (uint32_t)msg->message.len,
+  };
+  fio_ipc_call(.call = fio___redis_ipc_publish_on_master,
+               .data =
+                   FIO_IPC_DATA(FIO_BUF_INFO2((char *)&header, sizeof(header)),
+                                msg->channel,
+                                msg->message));
+}
+
+/**
+ * Master-side publish: builds PUBLISH command and queues it on the Redis
+ * pub connection.
+ *
+ * In single-process mode (fio_io_start(0)) this is also the active callback
+ * since FIO_CALL_IN_CHILD never fires and the vtable is not swapped.
  */
 FIO_SFUNC void fio___redis_publish(const fio_pubsub_engine_s *eng,
                                    const fio_pubsub_msg_s *msg) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
-
-  /* Build PUBLISH command */
-  size_t cmd_size =
-      sizeof(fio_redis_cmd_s) + 64 + msg->channel.len + msg->message.len;
   fio_redis_cmd_s *cmd =
-      (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, cmd_size, 0);
+      fio___redis_publish_cmd_new(msg->channel, msg->message);
   if (!cmd)
     return;
-  FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_cmd);
-
-  *cmd = (fio_redis_cmd_s){0};
-
-  char *buf = (char *)cmd->cmd;
-  size_t pos = 0;
-
-  /* *3\r\n$7\r\nPUBLISH\r\n$<channel_len>\r\n<channel>\r\n$<msg_len>\r\n<msg>\r\n
-   */
-  FIO_MEMCPY(buf + pos, "*3\r\n$7\r\nPUBLISH\r\n$", 18);
-  pos += 18;
-  pos += (size_t)fio_ltoa(buf + pos, (int64_t)msg->channel.len, 10);
-  buf[pos++] = '\r';
-  buf[pos++] = '\n';
-  FIO_MEMCPY(buf + pos, msg->channel.buf, msg->channel.len);
-  pos += msg->channel.len;
-  buf[pos++] = '\r';
-  buf[pos++] = '\n';
-  buf[pos++] = '$';
-  pos += (size_t)fio_ltoa(buf + pos, (int64_t)msg->message.len, 10);
-  buf[pos++] = '\r';
-  buf[pos++] = '\n';
-  FIO_MEMCPY(buf + pos, msg->message.buf, msg->message.len);
-  pos += msg->message.len;
-  buf[pos++] = '\r';
-  buf[pos++] = '\n';
-  buf[pos] = 0;
-
-  cmd->cmd_len = pos;
   fio___redis_attach_cmd(r, cmd);
+}
+
+/**
+ * FIO_CALL_IN_CHILD callback: swap the publish vtable pointer to the
+ * worker-specific IPC-forwarding implementation.
+ *
+ * This fires only in forked worker processes (never in single-process mode).
+ */
+FIO_SFUNC void fio___redis_on_fork(void *engine_) {
+  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
+  r->engine.publish = fio___redis_publish_worker;
 }
 
 /* *****************************************************************************
@@ -1268,9 +1563,10 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
     auth_cmd_len = 18 + 20 + auth_len; /* generous estimate */
   }
 
-  /* Allocate engine using FIO_REF (includes ref count, starts at 1) */
-  size_t flex_size =
-      host_len + 1 + port_len + 1 + auth_cmd_len + (FIO_REDIS_READ_BUFFER * 2);
+  /* Allocate engine using FIO_REF (includes ref count, starts at 1).
+   * Note: buf[FIO_REDIS_READ_BUFFER * 2] is already inside the struct,
+   * so we only need flex space for the strings. */
+  size_t flex_size = host_len + 1 + port_len + 1 + auth_cmd_len;
   fio_redis_engine_s *r = fio___redis_new(flex_size);
   if (!r) {
     FIO_LOG_ERROR("(redis) failed to allocate engine");
@@ -1294,8 +1590,8 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
       .running = 1,
   };
 
-  /* Set up string pointers after the struct */
-  char *str_ptr = (char *)(r + 1) + (FIO_REDIS_READ_BUFFER * 2);
+  /* Set up string pointers in the flex area after the struct */
+  char *str_ptr = (char *)(r + 1);
   r->address = str_ptr;
   FIO_MEMCPY(r->address, host, host_len);
   r->address[host_len] = '\0';
@@ -1330,9 +1626,15 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
   FIO___REDIS_PUB_PROTOCOL.timeout = timeout_ms;
   FIO___REDIS_SUB_PROTOCOL.timeout = timeout_ms;
 
-  /* Start connection - increment ref for deferred task */
+  /* Start connection - increment ref for deferred task.
+   * The deferred connect will check fio_io_is_worker() and skip on workers. */
   fio___redis_dup(r);
   fio_io_defer(fio___redis_connect, r, &r->pub_conn);
+
+  /* Register fork callback to swap publish vtable in worker processes.
+   * FIO_CALL_IN_CHILD fires only in forked workers, not in single-process
+   * mode, so the master publish path remains active when appropriate. */
+  fio_state_callback_add(FIO_CALL_IN_CHILD, fio___redis_on_fork, r);
 
   FIO_LOG_DEBUG("(redis) engine created for %s:%s (ref=1)",
                 r->address,
@@ -1390,6 +1692,9 @@ SFUNC void fio_redis_free(fio_pubsub_engine_s *engine) {
 /**
  * Sends a Redis command.
  * Thread-safe - command queuing is deferred to the IO thread.
+ *
+ * On MASTER: queues command directly on the Redis pub connection.
+ * On WORKER: forwards command to master via IPC, receives reply back.
  */
 SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
                          FIOBJ command,
@@ -1407,7 +1712,26 @@ SFUNC int fio_redis_send(fio_pubsub_engine_s *engine,
   fio___redis_fiobj2resp(resp, command);
   fio_str_info_s s = fiobj2cstr(resp);
 
-  /* Allocate command node */
+  /* Worker path: forward via IPC to master.
+   * Use !fio_io_is_master() so single-process mode takes the master path.
+   *
+   * IPC data layout: [callback(8) | engine(8) | RESP command bytes]
+   * ipc->udata carries the user's udata directly (no heap allocation).
+   * Master echoes the 16-byte header in its reply so the worker's on_done
+   * handler can recover callback + engine pointers from the reply data. */
+  if (!fio_io_is_master()) {
+    fio_ipc_call(.call = fio___redis_ipc_send_on_master,
+                 .on_done = fio___redis_ipc_send_on_done,
+                 .udata = udata,
+                 .data = FIO_IPC_DATA(
+                     FIO_BUF_INFO2((char *)&callback, sizeof(callback)),
+                     FIO_BUF_INFO2((char *)&r, sizeof(r)),
+                     FIO_BUF_INFO2(s.buf, s.len)));
+    fiobj_free(resp);
+    return 0;
+  }
+
+  /* Master path: queue command directly */
   fio_redis_cmd_s *cmd =
       (fio_redis_cmd_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*cmd) + s.len + 1, 0);
   if (!cmd) {
