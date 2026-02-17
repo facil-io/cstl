@@ -637,7 +637,6 @@ typedef struct {
   size_t size;
   fio___pubsub_history_map_s map;
 } fio___pubsub_history_cache_s;
-/* TODO: remove older messages as necessary */
 
 FIO_SFUNC void fio___pubsub_history_cache_destroy(
     fio___pubsub_history_cache_s *h) {
@@ -1765,7 +1764,6 @@ FIO_SFUNC int fio___pubsub_history_cache_push(
       fio___pubsub_history_cache_ipc_size(ipc);
   for (; FIO___PUBSUB_POSTOFFICE.cache.size >
          FIO___PUBSUB_POSTOFFICE.cache.limit;) {
-    /* TODO pop and size update until size is under limit */
     FIO_MAP_EACH(fio___pubsub_history_map,
                  &FIO___PUBSUB_POSTOFFICE.cache.map,
                  pos) {
