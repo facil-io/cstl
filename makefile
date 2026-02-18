@@ -263,6 +263,7 @@ endif
 else
 # Windows implementation
 $(warning *** Single-file library concatination skipped: requires a POSIX system.)
+LDFLAGS += -lcrypt32
 endif #Windows_NT
 
 endif # LIB_CONCAT_TARGET

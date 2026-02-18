@@ -289,6 +289,8 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
   /* Count code lengths */
   for (unsigned i = 0; i < num_syms; i++) {
     if (lengths[i]) {
+      if (lengths[i] > FIO___BROTLI_MAX_CODE_LEN)
+        return 0; /* invalid: code length exceeds RFC 7932 maximum */
       count[lengths[i]]++;
       if (lengths[i] > max_len)
         max_len = lengths[i];

@@ -547,6 +547,9 @@ FIO_SFUNC int fio___tls13_load_system_trust(fio___tls13_context_s *ctx) {
 #if defined(_WIN32)
   /* Windows: enumerate the "ROOT" system certificate store via CryptoAPI */
 #include <wincrypt.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "Crypt32.lib")
+#endif
   HCERTSTORE hStore = CertOpenSystemStoreA(0, "ROOT");
   if (!hStore) {
     FIO_LOG_ERROR("TLS 1.3: failed to open Windows ROOT certificate store");
