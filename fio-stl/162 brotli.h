@@ -197,7 +197,7 @@ FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
   b->avail = 0;
   b->src = (const uint8_t *)data;
   b->end = b->src + len;
-  b->safe_end = (len >= 8) ? (b->end - 8) : b->src - 1;
+  b->safe_end = (len >= 8) ? (b->end - 8) : (const uint8_t *)NULL;
 }
 
 FIO_IFUNC void fio___brotli_bits_fill(fio___brotli_bits_s *b) {
@@ -278,13 +278,19 @@ FIO_IFUNC uint32_t fio___brotli_bit_reverse(uint32_t code, unsigned n) {
 FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
                                             unsigned root_bits,
                                             const uint8_t *lengths,
-                                            unsigned num_syms) {
+                                            unsigned num_syms,
+                                            uint32_t max_size) {
   uint16_t count[FIO___BROTLI_MAX_CODE_LEN + 1] = {0};
   uint16_t offsets[FIO___BROTLI_MAX_CODE_LEN + 1];
   uint16_t sorted[FIO___BROTLI_MAX_IACLEN]; /* max alphabet */
   unsigned max_len = 0;
   unsigned root_size = 1U << root_bits;
   uint32_t total = root_size;
+
+  /* Safety guard: sorted[] is sized for FIO___BROTLI_MAX_IACLEN (704).
+   * Reject any alphabet larger than this to prevent stack overflow. */
+  if (num_syms > FIO___BROTLI_MAX_IACLEN)
+    return 0;
 
   /* Count code lengths */
   for (unsigned i = 0; i < num_syms; i++) {
@@ -388,8 +394,10 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
                 FIO___BROTLI_ENTRY_SUB(sub_offset, root_bits, sub_bits);
             prev_root_slot = (int32_t)root_slot;
 
-            /* Clear subtable */
+            /* Clear subtable — guard against buffer overflow */
             uint32_t sub_size = 1U << sub_bits;
+            if (max_size && sub_offset + sub_size > max_size)
+              return 0; /* subtable overflow: table buffer too small */
             FIO_MEMSET(table + sub_offset, 0, sub_size * sizeof(uint32_t));
             total = sub_offset + sub_size;
             sub_offset = total;
@@ -451,7 +459,8 @@ Prefix code reading (RFC 7932 Section 3.4-3.5)
 FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
                                                  uint32_t *table,
                                                  unsigned root_bits,
-                                                 unsigned alphabet_size) {
+                                                 unsigned alphabet_size,
+                                                 uint32_t max_size) {
   uint8_t lengths[FIO___BROTLI_MAX_IACLEN];
   FIO_MEMSET(lengths, 0, alphabet_size);
 
@@ -488,12 +497,20 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
     case 2:
       lengths[symbols[0]] = 1;
       lengths[symbols[1]] = 1;
-      return fio___brotli_build_table(table, root_bits, lengths, alphabet_size);
+      return fio___brotli_build_table(table,
+                                      root_bits,
+                                      lengths,
+                                      alphabet_size,
+                                      max_size);
     case 3:
       lengths[symbols[0]] = 1;
       lengths[symbols[1]] = 2;
       lengths[symbols[2]] = 2;
-      return fio___brotli_build_table(table, root_bits, lengths, alphabet_size);
+      return fio___brotli_build_table(table,
+                                      root_bits,
+                                      lengths,
+                                      alphabet_size,
+                                      max_size);
     case 4: {
       uint32_t tree_select = fio___brotli_bits_get(b, 1);
       if (tree_select) {
@@ -507,7 +524,11 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
         lengths[symbols[2]] = 2;
         lengths[symbols[3]] = 2;
       }
-      return fio___brotli_build_table(table, root_bits, lengths, alphabet_size);
+      return fio___brotli_build_table(table,
+                                      root_bits,
+                                      lengths,
+                                      alphabet_size,
+                                      max_size);
     }
     }
     return 0;
@@ -545,7 +566,8 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
   if (!fio___brotli_build_table(cl_table,
                                 FIO___BROTLI_MAX_CL_LEN,
                                 cl_lengths,
-                                18))
+                                18,
+                                (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN)))
     return 0;
 
   /* Read symbol code lengths using the code-length Huffman table.
@@ -607,7 +629,11 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
   while (sym_count < alphabet_size)
     lengths[sym_count++] = 0;
 
-  return fio___brotli_build_table(table, root_bits, lengths, alphabet_size);
+  return fio___brotli_build_table(table,
+                                  root_bits,
+                                  lengths,
+                                  alphabet_size,
+                                  max_size);
 }
 
 /* *****************************************************************************
@@ -644,14 +670,16 @@ FIO_SFUNC int fio___brotli_read_block_switch(fio___brotli_bits_s *b,
   if (!fio___brotli_read_prefix_code(b,
                                      type_table_buf,
                                      FIO___BROTLI_HUFF_BITS,
-                                     type_alpha))
+                                     type_alpha,
+                                     FIO___BROTLI_HUFF_SIZE + 512))
     return -1;
 
   /* Read block count Huffman code (alphabet = 26) */
   if (!fio___brotli_read_prefix_code(b,
                                      count_table_buf,
                                      FIO___BROTLI_HUFF_BITS,
-                                     26))
+                                     26,
+                                     FIO___BROTLI_HUFF_SIZE + 512))
     return -1;
 
   /* Read initial block count */
@@ -730,7 +758,8 @@ FIO_SFUNC int fio___brotli_read_context_map(fio___brotli_bits_s *b,
   if (!fio___brotli_read_prefix_code(b,
                                      cm_table,
                                      FIO___BROTLI_HUFF_BITS,
-                                     alpha))
+                                     alpha,
+                                     FIO___BROTLI_HUFF_SIZE + 512))
     return -1;
 
   /* Decode context map entries */
@@ -782,17 +811,19 @@ FIO_SFUNC int fio___brotli_read_context_map(fio___brotli_bits_s *b,
 Dictionary word transform (RFC 7932 Appendix B)
 ***************************************************************************** */
 
-FIO_SFUNC int fio___brotli_uppercase(uint8_t *p) {
+FIO_SFUNC int fio___brotli_uppercase(uint8_t *p, int remaining) {
   if (p[0] < 0xC0) {
     if (p[0] >= 'a' && p[0] <= 'z')
       p[0] ^= 32;
     return 1;
   }
   if (p[0] < 0xE0) {
-    p[1] ^= 32;
+    if (remaining >= 2)
+      p[1] ^= 32;
     return 2;
   }
-  p[2] ^= 5;
+  if (remaining >= 3)
+    p[2] ^= 5;
   return 3;
 }
 
@@ -845,11 +876,11 @@ FIO_SFUNC int fio___brotli_transform_word(uint8_t *dst,
 
   /* Apply uppercase transforms */
   if (type == FIO___BROTLI_TRANSFORM_UPPERCASE_FIRST) {
-    fio___brotli_uppercase(dst + written);
+    fio___brotli_uppercase(dst + written, copy_len);
   } else if (type == FIO___BROTLI_TRANSFORM_UPPERCASE_ALL) {
     int pos = 0;
     while (pos < copy_len) {
-      pos += fio___brotli_uppercase(dst + written + pos);
+      pos += fio___brotli_uppercase(dst + written + pos, copy_len - pos);
     }
   }
 
@@ -1228,7 +1259,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
       if (!fio___brotli_read_prefix_code(&bits,
                                          lit_tables + lit_offsets[t],
                                          FIO___BROTLI_HUFF_BITS,
-                                         256))
+                                         256,
+                                         per_lit))
         goto err_free_all;
     }
 
@@ -1238,7 +1270,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
       if (!fio___brotli_read_prefix_code(&bits,
                                          iac_tables + iac_offsets[t],
                                          FIO___BROTLI_HUFF_BITS,
-                                         704))
+                                         704,
+                                         per_iac))
         goto err_free_all;
     }
 
@@ -1248,7 +1281,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
       if (!fio___brotli_read_prefix_code(&bits,
                                          dist_tables + dist_offsets[t],
                                          FIO___BROTLI_HUFF_BITS,
-                                         dist_alpha))
+                                         dist_alpha,
+                                         per_dist))
         goto err_free_all;
     }
 
@@ -2592,8 +2626,10 @@ FIO_SFUNC uint32_t fio___brotli_hc_find(const fio___brotli_hc_s *hc,
     /* Quick 4-byte prefix rejection */
     if (fio_buf2u32_le(src + candidate) != prefix)
       continue;
-    /* Extend match */
-    uint32_t len = fio___brotli_extend_match(src, pos, candidate, 4, max_len);
+    /* Extend match — clamp max_len to candidate's remaining bytes too */
+    uint32_t cand_max = src_len - candidate;
+    uint32_t eff_max = max_len < cand_max ? max_len : cand_max;
+    uint32_t len = fio___brotli_extend_match(src, pos, candidate, 4, eff_max);
     if (len >= 4) {
       int32_t sc = fio___brotli_match_score(len, dist, -1);
       if (sc > best_score) {
@@ -3125,9 +3161,14 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     hash_chain = (fio___brotli_hc_s *)FIO_MEM_REALLOC(NULL, 0, hc_alloc, 0);
     if (!hash_chain)
       return 0;
-    /* Only zero bucket_gen[] + gen (not the 2MB+ buckets array).
-     * fio___brotli_hc_insert checks bucket_gen[h] != gen before trusting. */
+    /* Zero bucket_gen[] and num[] (not the 2MB+ buckets array).
+     * fio___brotli_hc_insert checks bucket_gen[h] != gen before trusting.
+     * num[] must also be zeroed: if malloc returns memory containing the
+     * initial generation value (1) in a bucket_gen[] slot, the generation
+     * check passes and num[h] (garbage) would be used as loop count in
+     * fio___brotli_hc_find, causing out-of-bounds reads from buckets[]. */
     FIO_MEMSET(hash_chain->bucket_gen, 0, sizeof(hash_chain->bucket_gen));
+    FIO_MEMSET(hash_chain->num, 0, sizeof(hash_chain->num));
     hash_chain->gen = 1;
   } else {
     hash_alloc = sizeof(uint32_t) * FIO___BROTLI_HASH_SIZE + /* hash_table */
@@ -3136,8 +3177,12 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     if (!hash_table)
       return 0;
     hash_gen = hash_table + FIO___BROTLI_HASH_SIZE;
-    /* Only zero hash_gen[] (not hash_table[] — stale entries detected by
-     * generation mismatch). */
+    /* Zero both hash_table[] and hash_gen[].
+     * hash_table[] must be zeroed: if malloc returns memory containing the
+     * initial generation value (1) in a hash_gen[] slot, the generation check
+     * passes with a garbage candidate from hash_table[], potentially causing
+     * an out-of-bounds read. */
+    FIO_MEMSET(hash_table, 0, sizeof(uint32_t) * FIO___BROTLI_HASH_SIZE);
     FIO_MEMSET(hash_gen, 0, sizeof(uint32_t) * FIO___BROTLI_HASH_SIZE);
   }
   if (quality >= 5) {
@@ -3232,10 +3277,13 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
             int32_t d = dist_rb[(dist_rb_idx - 1 - ci) & 3];
             if (d <= 0 || pos < (uint32_t)d)
               continue;
-            /* Extend match from cache candidate */
+            /* Extend match from cache candidate — clamp to candidate's
+             * remaining bytes */
             uint32_t cand = pos - (uint32_t)d;
+            uint32_t cand_max_c = src_len - cand;
+            uint32_t eff_max_c = max_len < cand_max_c ? max_len : cand_max_c;
             uint32_t clen =
-                fio___brotli_extend_match(src, pos, cand, 0, max_len);
+                fio___brotli_extend_match(src, pos, cand, 0, eff_max_c);
             if (clen >= 4) {
               int32_t sc = fio___brotli_match_score(clen, (uint32_t)d, ci);
               if (sc > match_score) {
@@ -3453,6 +3501,10 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
             uint32_t max_len = src_len - pos;
             if (max_len > (1U << 24) - 1)
               max_len = (1U << 24) - 1;
+            /* Clamp to candidate's remaining bytes to prevent OOB read */
+            uint32_t cand_rem = src_len - candidate;
+            if (cand_rem < max_len)
+              max_len = cand_rem;
             match_len =
                 fio___brotli_extend_match(src, pos, candidate, 4, max_len);
             match_dist = pos - candidate;
