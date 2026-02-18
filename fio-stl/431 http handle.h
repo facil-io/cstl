@@ -1057,9 +1057,18 @@ FIO_IFUNC int64_t fio_http_get_timestump(void) {
   return fio_time2micro(fio_time_real());
 }
 #else
-#define FIO___HTTP_TIME_DIV      1000
-#define FIO___HTTP_TIME_UNIT     "ms"
-#define fio_http_get_timestump() fio_io_last_tick()
+#define FIO___HTTP_TIME_DIV  1000
+#define FIO___HTTP_TIME_UNIT "ms"
+/* When the IO module is available, use its cached wall-clock ms to avoid a
+ * clock_gettime syscall on every HTTP request. Falls back to a direct call
+ * when the HTTP handle is used without the IO reactor (e.g., unit tests). */
+FIO_IFUNC int64_t fio_http_get_timestump(void) {
+#ifdef H___FIO_IO___H
+  return fio_io_last_tick_time();
+#else
+  return fio_time2milli(fio_time_real());
+#endif
+}
 #endif
 
 /* date/time string caching for HTTP date header */
@@ -3557,7 +3566,7 @@ fio___http_body_detect_content_type(fio_http_s *h) {
     if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
         w1 == (fio_buf2u64u("ion/x-ww") | 0x2020202020202020ULL) &&
         w2 == (fio_buf2u64u("w-form-u") | 0x2020202020202020ULL) &&
-        w3 == (fio_buf2u64u("rlencod") | 0x2020202020202020ULL))
+        w3 == (fio_buf2u64u("rlencoded") | 0x2020202020202020ULL))
       return FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED;
   }
 

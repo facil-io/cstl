@@ -52,7 +52,7 @@ FIO_SFUNC size_t fio_websocket_parse(fio_websocket_parser_s *p,
  * Setting this helps prevent DoS attacks via memory exhaustion.
  */
 #ifndef FIO_WEBSOCKET_MAX_PAYLOAD
-#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(1ULL << 30))
+#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(256ULL << 20))
 #endif
 
 /* *****************************************************************************

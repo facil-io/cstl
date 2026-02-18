@@ -304,6 +304,9 @@ These are mostly for internal use, but made available for advance usage with
 #define FIO_IPC_FLAG_CLUSTER ((uint16_t)1UL << 4)
 /** If set, calls `on_reply` rather than `call` */
 #define FIO_IPC_FLAG_REPLY ((uint16_t)1UL << 5)
+/** If set, this is an internal ping/keepalive message (not dispatched to user)
+ */
+#define FIO_IPC_FLAG_PING ((uint16_t)1UL << 6)
 /** If flag is set == 1, otherwise zero */
 #define FIO_IPC_FLAG_TEST(msg, flag) (((msg)->routing_flags & flag) == flag)
 /** If flag is set == flag, otherwise zero */
@@ -950,6 +953,137 @@ SFUNC void fio_ipc_reply FIO_NOOP(fio_ipc_reply_args_s args) {
 }
 
 /* *****************************************************************************
+IPC Core - IPC Socket Parser State
+***************************************************************************** */
+
+/** Parser state for reading IPC messages from socket */
+typedef struct {
+  fio_ipc_s *msg;        /* Current message being parsed */
+  uint32_t expected_len; /* Expected total length */
+  uint32_t msg_received; /* Bytes received for current message */
+  size_t buf_len;        /* Valid bytes in buffer */
+  uint8_t ping_pending;  /* Non-zero if a ping was sent and awaiting pong */
+  char buffer[];         /* FIO_IPC_BUFFER_LEN for small messages */
+} fio___ipc_parser_s;
+
+FIO_IFUNC fio_u128 *fio___ipc_cluster_uuid(fio_io_s *io) {
+  return (fio_u128 *)fio_io_buffer(io);
+}
+FIO_IFUNC fio___ipc_parser_s *fio___ipc_cluster_parser(fio_io_s *io) {
+  return (fio___ipc_parser_s *)(fio___ipc_cluster_uuid(io) + 1);
+}
+
+/** Get parser from IO buffer */
+FIO_IFUNC fio___ipc_parser_s *fio___ipc_parser(fio_io_s *io) {
+  return (fio___ipc_parser_s *)fio_io_buffer(io);
+}
+
+/** Initialize parser */
+FIO_IFUNC void fio___ipc_parser_init(fio___ipc_parser_s *p) {
+  *p = (fio___ipc_parser_s){0};
+}
+
+/** Destroy parser */
+FIO_IFUNC void fio___ipc_parser_destroy(fio___ipc_parser_s *p) {
+  if (p->msg) {
+    p->msg->from = NULL; /* avoid double free, fio_io_dup wasn't called yet */
+    fio___ipc_free(p->msg);
+  }
+  *p = (fio___ipc_parser_s){0};
+}
+
+FIO_SFUNC void fio___ipc_on_attach(fio_io_s *io) {
+  fio___ipc_parser_s *p = fio___ipc_parser(io);
+  fio___ipc_parser_init(p);
+}
+
+/* *****************************************************************************
+IPC Core - Ping / Keepalive
+***************************************************************************** */
+
+/* Shared builder — random junk fills the encrypted pointer fields.
+ * No data payload: len=0, eliminating redundant random bytes. */
+FIO_SFUNC void fio___ipc_send_ping_frame(fio_io_s *io, uint16_t routing_flags) {
+  fio_ipc_s *msg = fio___ipc_new(16); /* no data payload, just header + MAC */
+  if (!msg)
+    return;
+  /* Fill encrypted pointer fields with random junk to defeat known-plaintext */
+  fio_rand_bytes(&msg->call,
+                 sizeof(msg->call) + sizeof(msg->on_reply) +
+                     sizeof(msg->on_done) + sizeof(msg->udata));
+  msg->from = NULL;
+  msg->len = 0;
+  msg->flags = 0;
+  msg->routing_flags = routing_flags;
+  msg->timestamp = (uint64_t)fio_io_last_tick();
+  msg->id = fio_rand64();
+  fio_ipc_send_to(io, msg);
+}
+
+/** Send a ping message to the peer on the given IO connection.
+ *
+ * Sets ping_pending on the parser so the next timeout can detect no-response.
+ */
+FIO_SFUNC void fio___ipc_send_ping(fio_io_s *io, fio___ipc_parser_s *p) {
+  p->ping_pending = 1;
+  fio___ipc_send_ping_frame(io, FIO_IPC_FLAG_PING);
+}
+
+/** Send a pong reply to a received ping. */
+FIO_SFUNC void fio___ipc_send_pong(fio_io_s *io) {
+  fio___ipc_send_ping_frame(io, FIO_IPC_FLAG_PING | FIO_IPC_FLAG_REPLY);
+}
+
+/** Handle an incoming ping/pong message.
+ *
+ * Frees the message and returns 1 if it was a ping/pong (caller should NOT
+ * dispatch to user). Returns 0 if the message is a normal user message.
+ */
+FIO_IFUNC int fio___ipc_handle_ping(fio_ipc_s *ipc, fio___ipc_parser_s *p) {
+  if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_PING))
+    return 0;
+  if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY)) {
+    /* This is a pong — peer is alive, reset timeout */
+    p->ping_pending = 0;
+    fio_io_touch(ipc->from);
+  } else {
+    /* This is a ping — send pong back */
+    fio___ipc_send_pong(ipc->from);
+  }
+  fio___ipc_free(ipc); /* consumed here — callers must not free */
+  return 1;
+}
+
+/** on_timeout for IPC connections (master side, worker side).
+ *
+ * First timeout: send a ping and mark ping_pending.
+ * Second timeout (ping_pending already set): close the connection — peer dead.
+ */
+FIO_SFUNC void fio___ipc_on_timeout_ipc(fio_io_s *io) {
+  fio___ipc_parser_s *p = fio___ipc_parser(io);
+  if (p->ping_pending) {
+    /* No pong received since last ping — peer is dead */
+    FIO_LOG_DEBUG2("(%d) IPC peer unresponsive, closing connection",
+                   fio_io_pid());
+    fio_io_close(io);
+    return;
+  }
+  fio___ipc_send_ping(io, p);
+}
+
+/** on_timeout for RPC (cluster) connections. */
+FIO_SFUNC void fio___ipc_on_timeout_rpc(fio_io_s *io) {
+  fio___ipc_parser_s *p = fio___ipc_cluster_parser(io);
+  if (p->ping_pending) {
+    FIO_LOG_DEBUG2("(%d) RPC peer unresponsive, closing connection",
+                   fio_io_pid());
+    fio_io_close(io);
+    return;
+  }
+  fio___ipc_send_ping(io, p);
+}
+
+/* *****************************************************************************
 IPC Core - executing IPC calls
 ***************************************************************************** */
 
@@ -958,6 +1092,9 @@ FIO_SFUNC void fio___ipc_on_ipc_master(void *ipc_, void *io_) {
   fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
+  /* Handle internal ping/pong — never dispatch to user */
+  if (fio___ipc_handle_ping(ipc, fio___ipc_parser(ipc->from)))
+    return;
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS) ||
       FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER)) {
     /* this message expects to be forwarded */
@@ -984,6 +1121,9 @@ FIO_SFUNC void fio___ipc_on_ipc_worker(void *ipc_, void *io_) {
   fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
+  /* Handle internal ping/pong — never dispatch to user */
+  if (fio___ipc_handle_ping(ipc, fio___ipc_parser(ipc->from)))
+    return;
   fio___ipc_execute_task(ipc, io_);
   return;
 decrypt_error:
@@ -998,7 +1138,12 @@ FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   fio_u128 *uuid = fio_io_buffer(io_);
   fio_u128 peer_uuid;
 
-  if (fio_ipc_decrypt(ipc) || !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER) ||
+  if (fio_ipc_decrypt(ipc))
+    goto peer_error;
+  /* Handle internal ping/pong for cluster connections */
+  if (fio___ipc_handle_ping(ipc, fio___ipc_cluster_parser(io_)))
+    return;
+  if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER) ||
       !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE))
     goto peer_error;
 
@@ -1041,46 +1186,6 @@ filtered:
 /* *****************************************************************************
 IPC Core - IPC Socket Management
 ***************************************************************************** */
-
-/** Parser state for reading IPC messages from socket */
-typedef struct {
-  fio_ipc_s *msg;        /* Current message being parsed */
-  uint32_t expected_len; /* Expected total length */
-  uint32_t msg_received; /* Bytes received for current message */
-  size_t buf_len;        /* Valid bytes in buffer */
-  char buffer[];         /* FIO_IPC_BUFFER_LEN for small messages */
-} fio___ipc_parser_s;
-
-FIO_IFUNC fio_u128 *fio___ipc_cluster_uuid(fio_io_s *io) {
-  return (fio_u128 *)fio_io_buffer(io);
-}
-FIO_IFUNC fio___ipc_parser_s *fio___ipc_cluster_parser(fio_io_s *io) {
-  return (fio___ipc_parser_s *)(fio___ipc_cluster_uuid(io) + 1);
-}
-
-/** Get parser from IO buffer */
-FIO_IFUNC fio___ipc_parser_s *fio___ipc_parser(fio_io_s *io) {
-  return (fio___ipc_parser_s *)fio_io_buffer(io);
-}
-
-/** Initialize parser */
-FIO_IFUNC void fio___ipc_parser_init(fio___ipc_parser_s *p) {
-  *p = (fio___ipc_parser_s){0};
-}
-
-/** Destroy parser */
-FIO_IFUNC void fio___ipc_parser_destroy(fio___ipc_parser_s *p) {
-  if (p->msg) {
-    p->msg->from = NULL; /* avoid double free, fio_io_dup wasn't called yet */
-    fio___ipc_free(p->msg);
-  }
-  *p = (fio___ipc_parser_s){0};
-}
-
-FIO_SFUNC void fio___ipc_on_attach(fio_io_s *io) {
-  fio___ipc_parser_s *p = fio___ipc_parser(io);
-  fio___ipc_parser_init(p);
-}
 
 /** Called when data is received on IPC socket */
 FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
@@ -1665,16 +1770,18 @@ FIO_CONSTRUCTOR(fio___ipc_init) {
       .on_data = fio___ipc_on_data_master,
       .on_shutdown = fio___ipc_on_shutdown_master,
       .on_close = fio___ipc_on_close,
-      .on_timeout = fio_io_touch, /* TODO Fix: add pings? */
+      .on_timeout = fio___ipc_on_timeout_ipc,
       .buffer_size = sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
+      .timeout = (360 * 1024), /* IPC (local) timeout: ~6 minutes */
   };
   FIO___IPC.protocol_rpc = (fio_io_protocol_s){
       .on_attach = fio___ipc_on_attach_cluster,
       .on_data = fio___ipc_on_data_cluster,
       .on_close = fio___ipc_on_close_cluster,
-      .on_timeout = fio_io_touch, /* TODO Fix: add pings? */
+      .on_timeout = fio___ipc_on_timeout_rpc,
       .buffer_size =
           sizeof(fio_u128) + sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
+      .timeout = (55 * 1024), /* RPC (remote) timeout: ~55 sec */
   };
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_ipc); /* initialize - safety */
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_rpc); /* initialize - safety */

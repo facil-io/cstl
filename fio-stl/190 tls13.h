@@ -4748,8 +4748,19 @@ FIO_SFUNC int fio___tls13_process_certificate_verify(fio_tls13_client_s *client,
 
   client->cert_verified = 1;
 #else
-  /* X509/RSA modules not available - skip signature verification */
-  FIO_LOG_DEBUG2("TLS 1.3: X509/RSA modules unavailable, skipping CV verify");
+  /* X509/RSA modules not available - cannot verify signature.
+   * Require explicit opt-in via skip_cert_verify to proceed. */
+  if (!client->skip_cert_verify) {
+    FIO_LOG_ERROR("TLS 1.3: X509/RSA modules unavailable - cannot verify "
+                  "CertificateVerify signature. Set skip_cert_verify=1 to "
+                  "disable verification (insecure).");
+    fio___tls13_set_error(client,
+                          FIO_TLS13_ALERT_LEVEL_FATAL,
+                          FIO_TLS13_ALERT_HANDSHAKE_FAILURE);
+    return -1;
+  }
+  FIO_LOG_DEBUG2("TLS 1.3: X509/RSA modules unavailable, skipping CV verify "
+                 "(insecure mode)");
   client->cert_verified = 1;
 #endif /* H___FIO_X509___H && H___FIO_RSA___H */
   return 0;
@@ -4796,46 +4807,30 @@ FIO_SFUNC int fio___tls13_verify_certificate_chain(fio_tls13_client_s *client) {
     return 0;
   }
 
-  /* No trust store: perform minimal validation (hostname + validity only) */
-  fio_x509_cert_s cert;
-  if (fio_x509_parse(&cert,
-                     client->cert_chain[0],
-                     client->cert_chain_lens[0]) != 0) {
-    FIO_LOG_DEBUG2("TLS 1.3: Failed to parse end-entity certificate");
-    client->cert_error = FIO_X509_ERR_PARSE;
-    return -1;
-  }
-
-  /* Check validity period */
-  if (fio_x509_check_validity(&cert, current_time) != 0) {
-    FIO_LOG_DEBUG2("TLS 1.3: Certificate expired or not yet valid");
-    client->cert_error = (current_time < cert.not_before)
-                             ? FIO_X509_ERR_NOT_YET_VALID
-                             : FIO_X509_ERR_EXPIRED;
-    return -1;
-  }
-
-  /* Check hostname if SNI was provided */
-  if (client->server_name != NULL) {
-    size_t name_len = strlen(client->server_name);
-    if (fio_x509_match_hostname(&cert, client->server_name, name_len) != 0) {
-      FIO_LOG_DEBUG2("TLS 1.3: Hostname mismatch (expected: %s)",
-                     client->server_name);
-      client->cert_error = FIO_X509_ERR_HOSTNAME_MISMATCH;
-      return -1;
-    }
-  }
-
-  /* Without trust store, we can't verify the chain, but we did basic checks */
-  FIO_LOG_DEBUG2("TLS 1.3: Basic certificate checks passed (no trust store)");
-  client->chain_verified = 1;
-  return 0;
+  /* No trust store and skip_cert_verify not set: fail securely.
+   * Without a trust store we cannot authenticate the server — accepting the
+   * certificate would allow a MITM attacker to present any cert that passes
+   * hostname/validity checks.  Require explicit opt-in via skip_cert_verify. */
+  FIO_LOG_ERROR("TLS 1.3: No trust store configured — cannot verify "
+                "certificate chain. Add CA certificates via "
+                "fio_io_tls_trust_add() or set skip_cert_verify=1 to "
+                "disable verification (insecure).");
+  client->cert_error = FIO_X509_ERR_NO_TRUST_ANCHOR;
+  return -1;
 }
 #else
 /* X509 module not available - stub function */
 FIO_SFUNC int fio___tls13_verify_certificate_chain(fio_tls13_client_s *client) {
-  /* No X509 module - skip chain verification */
-  FIO_LOG_DEBUG2("TLS 1.3: X509 module unavailable, skipping chain verify");
+  /* No X509 module - cannot verify chain.
+   * Require explicit opt-in via skip_cert_verify to proceed. */
+  if (!client->skip_cert_verify) {
+    FIO_LOG_ERROR("TLS 1.3: X509 module unavailable — cannot verify "
+                  "certificate chain. Set skip_cert_verify=1 to disable "
+                  "verification (insecure).");
+    return -1;
+  }
+  FIO_LOG_DEBUG2("TLS 1.3: X509 module unavailable, skipping chain verify "
+                 "(insecure mode)");
   client->chain_verified = 1;
   (void)client;
   return 0;

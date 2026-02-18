@@ -1474,9 +1474,9 @@ static int fio_http1_on_expect(void *udata) {
   if (!h)
     return 1;
   c->h = NULL;
-  /* TODO: test for body size violation and deny request if payload too big. */
+  /* test for body size violation and deny request if payload too big. */
   if (FIO_HTTP1_EXPECTED_CHUNKED != fio_http1_expected(&c->state.http.parser) &&
-      c->settings->max_body_size > fio_http1_expected(&c->state.http.parser))
+      c->settings->max_body_size < fio_http1_expected(&c->state.http.parser))
     goto payload_too_big;
   c->settings->pre_http_body(h);
   if (fio_http_status(h))
@@ -2675,7 +2675,6 @@ EventSource / SSE Protocol (TODO!)
 ***************************************************************************** */
 
 FIO_SFUNC void fio___sse_consume_data(fio___http_connection_s *c) {
-  /* TODO: Fix Me! parse and process SSE data */
   FIO_LOG_DEBUG2("SSE data processing:\n%.*s", (int)c->len, c->buf);
   struct fio___http_connection_sse_s *sse = &c->state.sse;
   const char *next_line = c->buf;
@@ -2716,12 +2715,12 @@ FIO_SFUNC void fio___sse_consume_data(fio___http_connection_s *c) {
           goto breach;
         sse->data = fio_bstr_write2(
             sse->data,
-            FIO_STRING_WRITE_STR2("\r\n", ((size_t) !!sse->data << 1)),
+            FIO_STRING_WRITE_STR2("\n", ((size_t) !!sse->data)),
             FIO_STRING_WRITE_STR2(start, (size_t)(eol - start)));
       }
 
     } else if (line_len > 5 && line[5] == ':') { /* event */
-      const char *start = line + 3;
+      const char *start = line + 6;
       start += (start[0] == ' ' || start[0] == '\t');
       if ((line[0] |= 32) == 'e' &&
           (fio_buf2u32u(line + 1) | 0x20202020U) == fio_buf2u32u("vent"))

@@ -448,23 +448,36 @@ FIO_SFUNC void fio___p256_fe_reduce(fio___p256_fe_s r, const uint64_t t[8]) {
    * acc[2]-=0xFFFFFFFF, acc[6]-=1, acc[7]-=0xFFFFFFFF
    */
 
-  /* Reduce: while acc[7] is out of [0, 2^32), add or subtract p */
-  while (acc[7] < 0 || acc[7] > (int64_t)0xFFFFFFFFLL) {
-    if (acc[7] < 0) {
-      /* Add p */
-      acc[0] += 0xFFFFFFFFLL;
-      acc[1] += 0xFFFFFFFFLL;
-      acc[2] += 0xFFFFFFFFLL;
-      acc[6] += 1;
-      acc[7] += 0xFFFFFFFFLL;
-    } else {
-      /* Subtract p */
-      acc[0] -= 0xFFFFFFFFLL;
-      acc[1] -= 0xFFFFFFFFLL;
-      acc[2] -= 0xFFFFFFFFLL;
-      acc[6] -= 1;
-      acc[7] -= 0xFFFFFFFFLL;
-    }
+  /* Reduce: perform exactly 4 conditional add/subtract passes of p.
+   * After the initial carry propagation the NIST formula guarantees acc[7]
+   * is in the range [-4, 4] * 0xFFFFFFFF, so 4 passes are always sufficient.
+   * Each pass is branchless: we derive a signed direction from acc[7] and
+   * apply the corresponding multiple of p without branching.
+   *
+   * p in 32-bit words (little-endian):
+   *   acc[0..2] += 0xFFFFFFFF, acc[3..5] += 0, acc[6] += 1, acc[7] +=
+   * 0xFFFFFFFF Subtracting p negates all of the above.
+   */
+  for (int pass = 0; pass < 4; ++pass) {
+    /* neg_mask: all-ones (-1) if acc[7] < 0, else 0 */
+    int64_t neg_mask = acc[7] >> 63;
+    /* ovf_mask: all-ones (-1) if acc[7] >= 2^32, else 0.
+     * (acc[7] - 2^32) is negative iff acc[7] < 2^32.
+     * ~neg_mask ensures ovf_mask=0 when acc[7] < 0 (neg_mask handles that). */
+    int64_t ovf_mask = ~neg_mask & ~((acc[7] - (int64_t)0x100000000LL) >> 63);
+
+    /* adj: +0xFFFFFFFF if adding p, -0xFFFFFFFF if subtracting p, 0 otherwise
+     */
+    int64_t adj = (neg_mask & (int64_t)0xFFFFFFFFLL) |
+                  (ovf_mask & -(int64_t)0xFFFFFFFFLL);
+    /* adj6: +1 if adding p, -1 if subtracting p, 0 otherwise */
+    int64_t adj6 = (neg_mask & 1LL) | (ovf_mask & -1LL);
+
+    acc[0] += adj;
+    acc[1] += adj;
+    acc[2] += adj;
+    acc[6] += adj6;
+    acc[7] += adj;
 
     /* Re-propagate carries */
     for (int i = 0; i < 7; ++i) {
@@ -481,9 +494,10 @@ FIO_SFUNC void fio___p256_fe_reduce(fio___p256_fe_s r, const uint64_t t[8]) {
   res[2] = ((uint64_t)(uint32_t)acc[5] << 32) | (uint32_t)acc[4];
   res[3] = ((uint64_t)(uint32_t)acc[7] << 32) | (uint32_t)acc[6];
 
-  /* Final reduction: if result >= p, subtract p */
-  /* May need multiple subtractions */
-  for (int iter = 0; iter < 3; ++iter) {
+  /* Final reduction: subtract p at most twice (branchless).
+   * After the pass above, res < 2p, so at most one subtraction is needed.
+   * We do two passes for safety, each branchless. */
+  for (int iter = 0; iter < 2; ++iter) {
     uint64_t borrow = 0;
     uint64_t sub[4];
     sub[0] = fio_math_subc64(res[0], FIO___P256_P[0], 0, &borrow);
@@ -491,15 +505,12 @@ FIO_SFUNC void fio___p256_fe_reduce(fio___p256_fe_s r, const uint64_t t[8]) {
     sub[2] = fio_math_subc64(res[2], FIO___P256_P[2], borrow, &borrow);
     sub[3] = fio_math_subc64(res[3], FIO___P256_P[3], borrow, &borrow);
 
-    /* If no borrow (result >= p), use subtracted value */
-    if (!borrow) {
-      res[0] = sub[0];
-      res[1] = sub[1];
-      res[2] = sub[2];
-      res[3] = sub[3];
-    } else {
-      break;
-    }
+    /* If no borrow (result >= p), use subtracted value — branchless select */
+    uint64_t keep = (uint64_t)0 - borrow; /* 0 if res>=p, ~0 if res<p */
+    res[0] = (res[0] & keep) | (sub[0] & ~keep);
+    res[1] = (res[1] & keep) | (sub[1] & ~keep);
+    res[2] = (res[2] & keep) | (sub[2] & ~keep);
+    res[3] = (res[3] & keep) | (sub[3] & ~keep);
   }
 
   r[0] = res[0];
@@ -928,39 +939,143 @@ FIO_SFUNC void fio___p256_point_add_mixed(fio___p256_point_jacobian_s *r,
   fio___p256_fe_sub(r->y, r->y, t2);
 }
 
+/* (fio___p256_point_add_jacobian removed — ladder uses mixed add directly) */
+
 /**
- * Scalar multiplication: r = k * P
- * Uses double-and-add algorithm (not constant-time for simplicity).
- * For production use, implement constant-time scalar multiplication.
+ * Constant-time conditional swap of two Jacobian points.
+ * swap must be exactly 0 or 1.
+ */
+FIO_IFUNC void fio___p256_point_cswap(fio___p256_point_jacobian_s *a,
+                                      fio___p256_point_jacobian_s *b,
+                                      uint64_t swap) {
+  uint64_t mask = (uint64_t)0 - swap; /* 0x000...0 or 0xFFF...F */
+  uint64_t tmp;
+#define FIO___P256_CSWAP_LIMB(field, i)                                        \
+  tmp = mask & (a->field[i] ^ b->field[i]);                                    \
+  a->field[i] ^= tmp;                                                          \
+  b->field[i] ^= tmp
+  FIO___P256_CSWAP_LIMB(x, 0);
+  FIO___P256_CSWAP_LIMB(x, 1);
+  FIO___P256_CSWAP_LIMB(x, 2);
+  FIO___P256_CSWAP_LIMB(x, 3);
+  FIO___P256_CSWAP_LIMB(y, 0);
+  FIO___P256_CSWAP_LIMB(y, 1);
+  FIO___P256_CSWAP_LIMB(y, 2);
+  FIO___P256_CSWAP_LIMB(y, 3);
+  FIO___P256_CSWAP_LIMB(z, 0);
+  FIO___P256_CSWAP_LIMB(z, 1);
+  FIO___P256_CSWAP_LIMB(z, 2);
+  FIO___P256_CSWAP_LIMB(z, 3);
+#undef FIO___P256_CSWAP_LIMB
+}
+
+/**
+ * Scalar multiplication: r = k * P  (constant-time Montgomery ladder)
+ *
+ * Uses the Montgomery ladder (double-and-add-always) for constant-time
+ * execution. Every bit position performs exactly the same sequence of field
+ * operations regardless of the scalar value, preventing timing side-channels.
+ *
+ * To avoid the "point at infinity" special case at the start of the ladder
+ * (which would require a branch), we compute k' = k + 2n (twice the curve
+ * order). Since 1 <= k < n and n > 2^255, we have k' = k + 2n > 2^256, so
+ * bit 256 of k' is always 1. We initialize the ladder with that known leading
+ * 1 and process the remaining 256 bits — giving the same result as k*P
+ * because 2n*P = 2*(n*P) = 2*infinity = infinity, and infinity + k*P = k*P.
+ *
+ * Algorithm (257 bits, bit 256 always 1):
+ *   k' = k + 2n  (257-bit value, bit 256 = 1 always)
+ *   R[0] = P,  R[1] = 2P   (ladder state after consuming the leading 1)
+ *   for bit i from 255 down to 0:
+ *     b = bit i of k'
+ *     cswap(R[0], R[1], b)
+ *     R[1] = R[0] + R[1]
+ *     R[0] = 2 * R[0]
+ *     cswap(R[0], R[1], b)
+ *   result = R[0]
+ *
+ * The add step uses the mixed Jacobian+affine addition with the input point P
+ * (kept in affine form). After the first cswap, the invariant R[1] = R[0] ± P
+ * allows computing R[0]+R[1] = 2*R[0] ± P using one double and one mixed add.
+ * The sign is determined by the current bit b (branchless y-coordinate select).
+ * This avoids field inversion entirely: 1 double + 1 mixed add per bit.
  */
 FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
                                     const fio___p256_scalar_s k,
                                     const fio___p256_point_affine_s *p) {
-  fio___p256_point_set_infinity(r);
+  /* Compute k' = k + 2n.
+   * 2n in 64-bit limbs (little-endian): shift n left by 1.
+   * Since n > 2^255, 2n > 2^256, so bit 256 of k' is always 1. */
+  uint64_t carry = 0;
+  uint64_t kp[5];
+  kp[0] = fio_math_addc64(k[0], FIO___P256_N[0] << 1, 0, &carry);
+  kp[1] = fio_math_addc64(k[1],
+                          (FIO___P256_N[1] << 1) | (FIO___P256_N[0] >> 63),
+                          carry,
+                          &carry);
+  kp[2] = fio_math_addc64(k[2],
+                          (FIO___P256_N[2] << 1) | (FIO___P256_N[1] >> 63),
+                          carry,
+                          &carry);
+  kp[3] = fio_math_addc64(k[3],
+                          (FIO___P256_N[3] << 1) | (FIO___P256_N[2] >> 63),
+                          carry,
+                          &carry);
+  kp[4] = (FIO___P256_N[3] >> 63) + carry; /* bit 256: always 1 */
 
-  /* Find the highest set bit */
-  int start_bit = 255;
-  while (start_bit >= 0) {
-    int limb = start_bit / 64;
-    int bit = start_bit % 64;
-    if (k[limb] & (1ULL << bit))
-      break;
-    --start_bit;
+  /* Precompute -P (same x, negated y) for the b=1 case */
+  fio___p256_point_affine_s P_neg;
+  fio___p256_fe_copy(P_neg.x, p->x);
+  fio___p256_fe_neg(P_neg.y, p->y);
+
+  fio___p256_point_jacobian_s R0, R1, D;
+
+  /* Initialize ladder: R[0] = P, R[1] = 2P
+   * Corresponds to consuming the leading 1 (bit 256 of k'). */
+  fio___p256_point_to_jacobian(&R0, p);
+  fio___p256_point_double(&R1, &R0);
+
+  /* Process bits 255 down to 0 of k'.
+   *
+   * Ladder invariant (after first cswap, before second cswap):
+   *   b=0: R[0] = a*P, R[1] = (a+1)*P  → R[1] = R[0] + P
+   *   b=1: R[0] = (a+1)*P, R[1] = a*P  → R[1] = R[0] - P
+   *
+   * Therefore R[0] + R[1] = 2*R[0] + (b==0 ? P : -P).
+   * We compute: D = 2*R[0], sum = D + P_sel (mixed add).
+   * P_sel is chosen branchlessly from {P, -P} based on b.
+   */
+  for (int i = 255; i >= 0; --i) {
+    uint64_t b = (kp[i / 64] >> (i % 64)) & 1ULL;
+
+    /* First cswap: if b=1, swap so R[0] is the "larger" register */
+    fio___p256_point_cswap(&R0, &R1, b);
+
+    /* D = 2*R[0] */
+    fio___p256_point_double(&D, &R0);
+
+    /* Constant-time select P or -P based on b:
+     * mask = 0 if b=0 (use P), ~0 if b=1 (use -P).
+     * x-coordinate is the same for P and -P. */
+    fio___p256_point_affine_s P_sel;
+    uint64_t bmask = (uint64_t)0 - b;
+    fio___p256_fe_copy(P_sel.x, p->x);
+    P_sel.y[0] = (p->y[0] & ~bmask) | (P_neg.y[0] & bmask);
+    P_sel.y[1] = (p->y[1] & ~bmask) | (P_neg.y[1] & bmask);
+    P_sel.y[2] = (p->y[2] & ~bmask) | (P_neg.y[2] & bmask);
+    P_sel.y[3] = (p->y[3] & ~bmask) | (P_neg.y[3] & bmask);
+
+    /* R[1] = D + P_sel = 2*R[0] + (b==0 ? P : -P) = R[0] + R[1] */
+    fio___p256_point_add_mixed(&R1, &D, &P_sel);
+
+    /* R[0] = D = 2*R[0] */
+    R0 = D;
+
+    /* Second cswap: restore order */
+    fio___p256_point_cswap(&R0, &R1, b);
   }
 
-  if (start_bit < 0)
-    return; /* k = 0 */
-
-  /* Double-and-add from MSB to LSB */
-  for (int i = start_bit; i >= 0; --i) {
-    fio___p256_point_double(r, r);
-
-    int limb = i / 64;
-    int bit = i % 64;
-    if (k[limb] & (1ULL << bit)) {
-      fio___p256_point_add_mixed(r, r, p);
-    }
-  }
+  *r = R0;
 }
 
 /**
@@ -1579,7 +1694,7 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
   fio___p256_fe_to_bytes(public_key + 33, pub_aff.y);
 
   /* Clear sensitive data */
-  FIO_MEMSET(k, 0, sizeof(k));
+  fio_secure_zero(k, sizeof(k));
 
   return 0;
 }
@@ -1618,7 +1733,7 @@ SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
 
   /* Validate scalar: 0 < k < n */
   if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k)) {
-    FIO_MEMSET(k, 0, sizeof(k));
+    fio_secure_zero(k, sizeof(k));
     return -1;
   }
 
@@ -1628,7 +1743,7 @@ SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
 
   /* Check for point at infinity (shouldn't happen with valid inputs) */
   if (fio___p256_point_is_infinity(&result_jac)) {
-    FIO_MEMSET(k, 0, sizeof(k));
+    fio_secure_zero(k, sizeof(k));
     return -1;
   }
 
@@ -1638,9 +1753,9 @@ SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
   fio___p256_fe_to_bytes(shared_secret, result_aff.x);
 
   /* Clear sensitive data */
-  FIO_MEMSET(k, 0, sizeof(k));
-  FIO_MEMSET(&result_jac, 0, sizeof(result_jac));
-  FIO_MEMSET(&result_aff, 0, sizeof(result_aff));
+  fio_secure_zero(k, sizeof(k));
+  fio_secure_zero(&result_jac, sizeof(result_jac));
+  fio_secure_zero(&result_aff, sizeof(result_aff));
 
   /* Check for all-zero output (low-order point attack) */
   uint8_t zero_check = 0;

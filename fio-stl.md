@@ -23453,7 +23453,21 @@ Returns the root / master process id.
 int64_t fio_io_last_tick(void);
 ```
 
-Returns the last millisecond when the IO reactor polled for events.
+Returns a cached **monotonic** timestamp (in milliseconds) recording the last time the IO reactor polled for events.
+
+Because this value comes from a monotonic clock it is immune to NTP adjustments and system clock changes, making it suitable for measuring durations, timeouts, and timer intervals. It is **not** suitable for producing epoch-based wall-clock timestamps — use `fio_io_last_tick_time` for that.
+
+#### `fio_io_last_tick_time`
+
+```c
+int64_t fio_io_last_tick_time(void);
+```
+
+Returns a cached **wall-clock** (real-time) timestamp in milliseconds since the Unix epoch, updated each IO tick at the same time as `fio_io_last_tick`.
+
+Use this when you need an approximate epoch-based timestamp without the cost of a `clock_gettime` syscall — for example, when generating HTTP `Date:` headers or writing access-log entries. Because the value is updated once per IO tick it may lag by up to one tick interval.
+
+**Note**: Not suitable for measuring durations or timeouts — use `fio_io_last_tick` for that.
 
 #### `fio_io_restart`
 
@@ -25305,6 +25319,20 @@ The encryption ensures:
 3. **Authentication**: Only processes with the shared secret can communicate
 
 **Note**: If decryption fails (e.g., due to tampering), a security log message is emitted and the message is discarded.
+
+### Connection Keepalive
+
+IPC and cluster connections are automatically monitored for liveness via an internal ping/keepalive protocol. This mechanism is fully transparent — ping and pong frames are never dispatched to user callbacks.
+
+**How it works:**
+
+1. On the first timeout event the IO module sends a ping frame to the peer and marks the connection as awaiting a pong.
+2. If a pong is received before the next timeout, the connection is considered alive and the pending flag is cleared.
+3. If no pong is received before the next timeout, the connection is closed and the peer is considered dead.
+
+The keepalive applies to both local IPC connections (master ↔ worker) and cluster RPC connections (machine ↔ machine).
+
+**Note**: Ping frames carry random junk in all encrypted fields (`call`, `on_reply`, `on_done`, `udata`) with no data payload. This ensures there is no deterministic plaintext for an attacker to exploit, preserving the forward security properties of the ChaCha20-Poly1305 AEAD cipher.
 
 ### Thread Safety
 
@@ -28022,7 +28050,7 @@ The parser is designed as a set of static functions suitable for embedding direc
 
 ```c
 #ifndef FIO_WEBSOCKET_MAX_PAYLOAD
-#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(1ULL << 30))
+#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(256ULL << 20))
 #endif
 ```
 

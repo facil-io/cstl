@@ -84,6 +84,119 @@ FIO_SFUNC const char *tls13_signature_scheme_name(uint16_t scheme) {
 }
 
 /* *****************************************************************************
+Helper: Load system CA trust store into a client
+***************************************************************************** */
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+
+/** Platform CA bundle paths (tried in order) */
+static const char *const tls13_test_ca_paths[] = {
+    "/etc/ssl/cert.pem",                                 /* macOS, FreeBSD */
+    "/etc/ssl/certs/ca-certificates.crt",                /* Debian/Ubuntu */
+    "/etc/pki/tls/certs/ca-bundle.crt",                  /* RHEL/CentOS */
+    "/etc/ssl/ca-bundle.pem",                            /* openSUSE */
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", /* RHEL newer */
+    "/usr/local/etc/ssl/cert.pem",                       /* FreeBSD ports */
+    NULL,
+};
+
+/** Load all CERTIFICATE blocks from a PEM bundle into a trust store.
+ * Returns number of certs loaded, or 0 on failure. */
+FIO_SFUNC int tls13_test_load_trust_store(fio_x509_trust_store_s *store,
+                                          uint8_t ***der_bufs_out,
+                                          size_t **der_lens_out,
+                                          size_t *der_count_out) {
+  uint8_t **der_bufs = NULL;
+  size_t *der_lens = NULL;
+  size_t der_count = 0;
+  int total_loaded = 0;
+
+  for (int pi = 0; tls13_test_ca_paths[pi] != NULL; ++pi) {
+    char *pem = fio_bstr_readfile(NULL, tls13_test_ca_paths[pi], 0, 0);
+    if (!pem)
+      continue;
+
+    size_t pem_len = fio_bstr_len(pem);
+    const char *pos = pem;
+    size_t remaining = pem_len;
+
+    while (remaining > 0) {
+      size_t der_buf_cap = remaining;
+      uint8_t *der_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_buf_cap, 0);
+      if (!der_buf)
+        break;
+
+      fio_pem_s pem_block;
+      size_t consumed =
+          fio_pem_parse(&pem_block, der_buf, der_buf_cap, pos, remaining);
+      if (consumed == 0) {
+        FIO_MEM_FREE(der_buf, der_buf_cap);
+        break;
+      }
+
+      if (pem_block.label_len == 11 &&
+          FIO_MEMCMP(pem_block.label, "CERTIFICATE", 11) == 0 &&
+          pem_block.der_len > 0) {
+        /* Grow arrays */
+        size_t new_count = der_count + 1;
+        uint8_t **nb = (uint8_t **)FIO_MEM_REALLOC(der_bufs,
+                                                   der_count * sizeof(*nb),
+                                                   new_count * sizeof(*nb),
+                                                   der_count * sizeof(*nb));
+        size_t *nl = (size_t *)FIO_MEM_REALLOC(der_lens,
+                                               der_count * sizeof(*nl),
+                                               new_count * sizeof(*nl),
+                                               der_count * sizeof(*nl));
+        if (!nb || !nl) {
+          FIO_MEM_FREE(der_buf, der_buf_cap);
+          if (nb)
+            der_bufs = nb;
+          if (nl)
+            der_lens = nl;
+          break;
+        }
+        der_bufs = nb;
+        der_lens = nl;
+        der_bufs[der_count] = der_buf;
+        der_lens[der_count] = pem_block.der_len;
+        ++der_count;
+        ++total_loaded;
+      } else {
+        FIO_MEM_FREE(der_buf, der_buf_cap);
+      }
+
+      pos += consumed;
+      remaining -= consumed;
+    }
+
+    fio_bstr_free(pem);
+    if (total_loaded > 0)
+      break; /* Use first successful path */
+  }
+
+  if (total_loaded > 0) {
+    store->roots = (const uint8_t **)der_bufs;
+    store->root_lens = der_lens;
+    store->root_count = der_count;
+    *der_bufs_out = der_bufs;
+    *der_lens_out = der_lens;
+    *der_count_out = der_count;
+  }
+  return total_loaded;
+}
+
+FIO_SFUNC void tls13_test_free_trust_store(uint8_t **der_bufs,
+                                           size_t *der_lens,
+                                           size_t der_count) {
+  for (size_t i = 0; i < der_count; ++i)
+    FIO_MEM_FREE(der_bufs[i], der_lens[i]);
+  if (der_bufs)
+    FIO_MEM_FREE(der_bufs, der_count * sizeof(*der_bufs));
+  if (der_lens)
+    FIO_MEM_FREE(der_lens, der_count * sizeof(*der_lens));
+}
+#endif /* H___FIO_X509___H && H___FIO_PEM___H */
+
+/* *****************************************************************************
 Test: Real Server Connection
 ***************************************************************************** */
 FIO_SFUNC int test_real_server_connection(const char *hostname,
@@ -93,6 +206,12 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
   fio_tls13_client_s client = {0};
   uint8_t *buf = NULL;
   uint8_t *out_buf = NULL;
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+  uint8_t **trust_der_bufs = NULL;
+  size_t *trust_der_lens = NULL;
+  size_t trust_der_count = 0;
+  fio_x509_trust_store_s trust_store = {0};
+#endif
 
   /* Allocate buffers */
   buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, TLS13_BUF_SIZE, 0);
@@ -121,6 +240,27 @@ FIO_SFUNC int test_real_server_connection(const char *hostname,
 
   /* 2. Initialize TLS client */
   fio_tls13_client_init(&client, hostname);
+
+  /* Load system CA trust store for certificate verification */
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+  {
+    int loaded = tls13_test_load_trust_store(&trust_store,
+                                             &trust_der_bufs,
+                                             &trust_der_lens,
+                                             &trust_der_count);
+    if (loaded > 0) {
+      fio_tls13_client_set_trust_store(&client, &trust_store);
+      FIO_LOG_DEBUG2("  Loaded %d CA certs from system trust store", loaded);
+    } else {
+      FIO_LOG_WARNING("  System CA trust store not found — skipping test");
+      result = 0; /* Skip, not fail */
+      goto cleanup;
+    }
+  }
+#else
+  /* X509/PEM modules unavailable: skip verification for integration test */
+  fio_tls13_client_skip_verification(&client, 1);
+#endif
   /* 3. Generate and send ClientHello */
   int len = fio_tls13_client_start(&client, buf, TLS13_BUF_SIZE);
   if (len <= 0) {
@@ -399,6 +539,9 @@ cleanup:
     FIO_MEM_FREE(buf, TLS13_BUF_SIZE);
   if (out_buf)
     FIO_MEM_FREE(out_buf, TLS13_BUF_SIZE);
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+  tls13_test_free_trust_store(trust_der_bufs, trust_der_lens, trust_der_count);
+#endif
 
   return result;
 }

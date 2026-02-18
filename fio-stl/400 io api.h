@@ -124,6 +124,12 @@ SFUNC int fio_io_root_pid(void);
 /** Returns the last millisecond when the IO reactor polled for events. */
 SFUNC int64_t fio_io_last_tick(void);
 
+/** Returns a cached real-time (wall-clock) timestamp in milliseconds,
+ * updated each IO tick alongside `fio_io_last_tick`. Use this to avoid
+ * repeated `clock_gettime` syscalls when an approximate wall-clock ms is
+ * sufficient (e.g., HTTP Date headers, access-log timestamps). */
+SFUNC int64_t fio_io_last_tick_time(void);
+
 /* *****************************************************************************
 Listening to Incoming Connections
 ***************************************************************************** */

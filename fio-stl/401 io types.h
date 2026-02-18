@@ -15,8 +15,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 #define H___FIO_IO_TYPES___H
 
-/** I would love to use fio_time_mono, but using time_real enables logging. */
-#define FIO___IO_GET_TIME_MILLI() fio_time2milli(fio_time_real())
+/** Use monotonic clock for the IO tick - avoids syscall overhead and NTP skew.
+ */
+#define FIO___IO_GET_TIME_MILLI() fio_time2milli(fio_time_mono())
 
 /** Sets a flag in io->flag */
 #define FIO___IO_FLAG_SET(io, flag_to_set)                                     \
@@ -286,6 +287,7 @@ typedef struct {
 static struct FIO___IO_S {
   fio_poll_s poll;
   int64_t tick;
+  int64_t time_ms;
   fio_queue_s queue;
   uint32_t flags;
   uint16_t workers;
@@ -359,6 +361,7 @@ SFUNC int fio_io_is_worker(void) { return FIO___IO.is_worker; }
 FIO_SFUNC void fio___io_last_tick_update(void *ignr_1, void *ignr_2) {
   FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_TICK_SET);
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  FIO___IO.time_ms = fio_time2milli(fio_time_real());
   (void)ignr_1, (void)ignr_2;
 }
 
@@ -369,6 +372,8 @@ SFUNC int64_t fio_io_last_tick(void) {
     fio___io_defer_no_wakeup(fio___io_last_tick_update, NULL, NULL);
   return FIO___IO.tick;
 }
+
+SFUNC int64_t fio_io_last_tick_time(void) { return FIO___IO.time_ms; }
 
 /** Sets a signal to listen to for a hot restart (see `fio_io_restart`). */
 SFUNC void fio_io_restart_on_signal(int signal) {

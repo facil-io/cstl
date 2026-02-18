@@ -22,7 +22,7 @@ The parser is designed as a set of static functions suitable for embedding direc
 
 ```c
 #ifndef FIO_WEBSOCKET_MAX_PAYLOAD
-#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(1ULL << 30))
+#define FIO_WEBSOCKET_MAX_PAYLOAD ((uint64_t)(256ULL << 20))
 #endif
 ```
 
