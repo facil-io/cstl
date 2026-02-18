@@ -91,7 +91,7 @@ Settings - Behavioral defaults
 
 #ifndef FIO_MAP_WARNING_BITSIZE
 /** imap and map allocation */
-#define FIO_MAP_WARNING_BITSIZE 24
+#define FIO_MAP_WARNING_BITSIZE ((size_t)24)
 #endif
 
 /* *****************************************************************************
@@ -437,8 +437,14 @@ Function Attributes
 #endif
 
 #ifndef FIO_WEAK
+#if (defined(_MSC_VER) && _MSC_VER) ||                                         \
+    (FIO_OS_WIN && __has_attribute(selectany))
+/** Marks a function as weak */
+#define FIO_WEAK __declspec(selectany)
+#else
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
+#endif
 #endif
 
 #ifndef FIO_DEF_GET_SET
