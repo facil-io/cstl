@@ -1,14 +1,13 @@
 /* ************************************************************************* */
-#if !defined(FIO_INCLUDE_FILE)               /* Dev test - ignore line */
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL /* Dev */
-#define FIO___DEV___    /* Development inclusion - ignore line */
-#define FIO_POLL        /* Development inclusion - ignore line */
-#include "./include.h"  /* Development inclusion - ignore line */
-#endif                  /* Development inclusion - ignore line */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO_POLL_ENGINE_POLL   /* Dev */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_POLL               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
 /* ************************************************************************* */
-#if defined(FIO_POLL) &&                                                       \
+#if defined(FIO_POLL) && defined(FIO_POLL_ENGINE_POLL) &&                      \
     (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
-    FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL &&                                 \
     !defined(H___FIO_POLL_EGN___H) && !defined(H___FIO_POLL___H) &&            \
     !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_POLL_EGN___H
@@ -274,7 +273,7 @@ Cleanup
 ***************************************************************************** */
 #undef FIO_POLL_EX_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL */
+#endif /* FIO_POLL_ENGINE_POLL */
 
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) &&                         \
     !defined(FIO___RECURSIVE_INCLUDE)

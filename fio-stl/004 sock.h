@@ -54,7 +54,6 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
   return c;
 }
 #define accept fio_sock_accept
-#define poll   WSAPoll
 /** Acts as POSIX dup. Use this for portability with WinSock2. */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   WSAPROTOCOL_INFO info;

@@ -37,53 +37,37 @@ Copyright and License: see header file (000 copyright.h) or top of file
 Possible polling engine (system call) selection
 ***************************************************************************** */
 
-#ifndef FIO_POLL_ENGINE_POLL
-/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_POLL` to use `poll` */
-#define FIO_POLL_ENGINE_POLL 1
-#endif
-#ifndef FIO_POLL_ENGINE_EPOLL
-/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_EPOLL` to use `epoll` */
-#define FIO_POLL_ENGINE_EPOLL 2
-#endif
-#ifndef FIO_POLL_ENGINE_KQUEUE
-/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_KQUEUE` to use `kqueue` */
-#define FIO_POLL_ENGINE_KQUEUE 3
-#endif
-#ifndef FIO_POLL_ENGINE_WEPOLL
-/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_WEPOLL` to use wepoll (Windows
- * only). Requires extras/wepoll.c to be compiled alongside the project. */
-#define FIO_POLL_ENGINE_WEPOLL 4
-#endif
+/* Define one of the following before including to select the polling engine.
+ * If none is defined, the best engine for the current OS is selected below.
+ *   #define FIO_POLL_ENGINE_POLL    - use POSIX poll() / WSAPoll
+ *   #define FIO_POLL_ENGINE_EPOLL   - use Linux epoll
+ *   #define FIO_POLL_ENGINE_KQUEUE  - use BSD/macOS kqueue
+ *   #define FIO_POLL_ENGINE_WEPOLL  - use wepoll (Windows, requires
+ * extras/wepoll.c)
+ */
 
-/* if `FIO_POLL_ENGINE` wasn't define, detect automatically. */
-#if !defined(FIO_POLL_ENGINE)
+/* Auto-select only if the user made no explicit choice. */
+#if !defined(FIO_POLL_ENGINE_POLL) && !defined(FIO_POLL_ENGINE_EPOLL) &&       \
+    !defined(FIO_POLL_ENGINE_KQUEUE) && !defined(FIO_POLL_ENGINE_WEPOLL)
 #if FIO_OS_WIN
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_WEPOLL
+#define FIO_POLL_ENGINE_WEPOLL
 #elif defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL
-#elif (defined(HAVE_KQUEUE) || __has_include("sys/event.h"))
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE
+#define FIO_POLL_ENGINE_EPOLL
+#elif defined(HAVE_KQUEUE) || __has_include("sys/event.h")
+#define FIO_POLL_ENGINE_KQUEUE
 #else
-#define FIO_POLL_ENGINE FIO_POLL_ENGINE_POLL
+#define FIO_POLL_ENGINE_POLL
 #endif
-#endif /* FIO_POLL_ENGINE */
+#endif /* auto-select */
 
-#if FIO_POLL_ENGINE == FIO_POLL_ENGINE_POLL
-#ifndef FIO_POLL_ENGINE_STR
+#ifdef FIO_POLL_ENGINE_POLL
 #define FIO_POLL_ENGINE_STR "poll"
-#endif
-#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_EPOLL
-#ifndef FIO_POLL_ENGINE_STR
+#elif defined(FIO_POLL_ENGINE_EPOLL)
 #define FIO_POLL_ENGINE_STR "epoll"
-#endif
-#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
-#ifndef FIO_POLL_ENGINE_STR
+#elif defined(FIO_POLL_ENGINE_KQUEUE)
 #define FIO_POLL_ENGINE_STR "kqueue"
-#endif
-#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_WEPOLL
-#ifndef FIO_POLL_ENGINE_STR
+#elif defined(FIO_POLL_ENGINE_WEPOLL)
 #define FIO_POLL_ENGINE_STR "wepoll (Windows epoll)"
-#endif
 #endif
 /* *****************************************************************************
 Polling API
