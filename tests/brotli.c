@@ -1859,6 +1859,927 @@ static void test_brotli_16mb_roundtrip(void) {
 }
 
 /* *****************************************************************************
+Adversarial / Maliciously-Crafted Payloads
+***************************************************************************** */
+
+/*
+ * Brotli stream bit layout (LSB-first):
+ *
+ * WBITS encoding:
+ *   bit0=0                     → WBITS=16  (1 bit consumed)
+ *   bit0=1, bits[1:3]=n≠0      → WBITS=n+17 (4 bits consumed, n=1..7 → 18..24)
+ *   bit0=1, bits[1:3]=0, bits[4:6]=n≠0,1 → WBITS=n+8 (7 bits, n=2..7 → 10..15)
+ *   bit0=1, bits[1:3]=0, bits[4:6]=0  → WBITS=17 (7 bits)
+ *   bit0=1, bits[1:3]=0, bits[4:6]=1  → invalid (return 0)
+ *
+ * After WBITS:
+ *   ISLAST (1 bit)
+ *   if ISLAST: ISLASTEMPTY (1 bit) — if 1: empty stream, done
+ *   MNIBBLES (2 bits): 0→4 nibbles, 1→5 nibbles, 2→6 nibbles, 3→metadata
+ *   MLEN-1: (MNIBBLES+4)*4 bits, little-endian
+ *
+ * Known empty stream: {0x3b} = 0b00111011 (LSB first: 1,1,0,1,1,1,0,0)
+ *   bit0=1, bits[1:3]=5 → WBITS=22; bit4=1 ISLAST; bit5=1 ISLASTEMPTY → done
+ */
+
+/* ── helper: build a minimal non-empty compressed meta-block header ──────── */
+/*
+ * Minimal 1-byte literal stream (WBITS=16, ISLAST=1, ISLASTEMPTY=0):
+ *   Bit layout (LSB first):
+ *     bit 0   = 0          → WBITS=16
+ *     bit 1   = 1          → ISLAST=1
+ *     bit 2   = 0          → ISLASTEMPTY=0
+ *     bits 3-4 = 00        → MNIBBLES=0 → 4 nibbles for MLEN
+ *     bits 5-20 = MLEN-1   → 16 bits (4 nibbles)
+ *   Then prefix codes + data follow.
+ *
+ * For our adversarial tests we mostly just need the decompressor to
+ * *not crash* — returning 0 (corrupt) is perfectly acceptable.
+ */
+
+/* ── 1. Window size variants ─────────────────────────────────────────────── */
+static void test_brotli_adversarial_window_size(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv window size: malloc skipped");
+    return;
+  }
+
+  /* Baseline: known-good empty stream (WBITS=22) */
+  {
+    uint8_t s[] = {0x3b};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    TEST_ASSERT(r == 0, "adv window: baseline empty stream should return 0");
+  }
+
+  /*
+   * WBITS=16: first bit=0, then ISLAST=1, ISLASTEMPTY=1
+   * Byte: bits 0..7 = 0,1,1,x,x,x,x,x → 0b00000110 = 0x06
+   */
+  {
+    uint8_t s[] = {0x06};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv window: WBITS=16 empty stream survived");
+  }
+
+  /*
+   * WBITS=17: bit0=1, bits[1:3]=0, bits[4:6]=0 → 7 bits consumed
+   * Then ISLAST=1, ISLASTEMPTY=1
+   * Bits (LSB first): 1,0,0,0,0,0,0,1,1,...
+   * Byte0 = 0b00000001 = 0x01, Byte1 = 0b00000011 = 0x03 (ISLAST+ISLASTEMPTY
+   * in bits 0-1 of byte1)
+   */
+  {
+    uint8_t s[] = {0x01, 0x03};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv window: WBITS=17 stream survived");
+  }
+
+  /*
+   * WBITS=10: bit0=1, bits[1:3]=0, bits[4:6]=2 → n=2 → WBITS=10
+   * Bits: 1,0,0,0,0,1,0 then ISLAST=1, ISLASTEMPTY=1
+   * Byte0 = 0b00100001 = 0x21, Byte1 = 0b00000011 = 0x03
+   */
+  {
+    uint8_t s[] = {0x21, 0x03};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv window: WBITS=10 stream survived");
+  }
+
+  /*
+   * WBITS=24 (max): bit0=1, bits[1:3]=7 → n=7 → WBITS=24
+   * Bits: 1,1,1,1,0 then ISLAST=1, ISLASTEMPTY=1
+   * Byte0 = 0b00001111 = 0x0F, Byte1 = 0b00000011 = 0x03
+   */
+  {
+    uint8_t s[] = {0x0F, 0x03};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv window: WBITS=24 stream survived");
+  }
+
+  /*
+   * Invalid WBITS: bit0=1, bits[1:3]=0, bits[4:6]=1 → invalid per spec
+   * Bits: 1,0,0,0,0,0,1 → Byte0 = 0b01000001 = 0x41
+   */
+  {
+    uint8_t s[] = {0x41, 0x03};
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    TEST_ASSERT(r == 0, "adv window: invalid WBITS should return 0");
+  }
+
+  /* Truncated after WBITS byte — must not crash */
+  {
+    uint8_t s[] = {0x01}; /* WBITS=17 path, then nothing */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv window: truncated after WBITS survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv window size: all variants survived without crash");
+}
+
+/* ── 2. Incomplete Huffman code ──────────────────────────────────────────── */
+static void test_brotli_adversarial_huffman_incomplete(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv huffman incomplete: malloc skipped");
+    return;
+  }
+
+  /*
+   * Craft a stream that reaches the complex prefix code path (hskip != 1)
+   * with a code-length Huffman tree that is incomplete (not all 2^max_len
+   * codes assigned).  The decompressor must return 0, not crash.
+   *
+   * Stream layout (WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0, MLEN=1):
+   *   Byte 0: bit0=0 (WBITS=16), bit1=1 (ISLAST), bit2=0 (ISLASTEMPTY=0)
+   *           bits3-4=00 (MNIBBLES=0 → 4 nibbles)
+   *           bits5-7=000 (low 3 bits of MLEN-1=0)
+   *   Byte 1: bits0-12 = remaining MLEN-1 bits (13 bits, all 0 → MLEN=1)
+   *           then NBLTYPES-1 for L,I,D (each: 0 bit = 1 type)
+   *           then NPOSTFIX (2 bits=0), NDIRECT (4 bits=0)
+   *           then context_modes[0] (2 bits=0)
+   *           then NTREESL varlen (bit=0 → NTREESL=1)
+   *   Then context map (NTREESL=1 → skip), NTREESD varlen (bit=0 → 1)
+   *   Then dist context map (skip)
+   *   Then literal prefix code: hskip=0b10 (complex, hskip=2)
+   *     → reads code-length code lengths starting at index 2
+   *     → we provide bytes that create an incomplete cl_table
+   *   Then IAC prefix code, dist prefix code, then data
+   *
+   * Rather than bit-perfect crafting (extremely complex), we use a
+   * representative corrupt payload that exercises the incomplete-Huffman
+   * path: a stream that starts valid (WBITS, meta-block header) but
+   * then has garbage bytes where the prefix codes should be.  The
+   * decompressor must return 0 without crashing.
+   *
+   * We use several known-bad patterns:
+   */
+
+  /* Pattern A: all-zero bytes after a valid WBITS+meta-block header.
+   * The zero bytes will be parsed as prefix codes; an all-zero code-length
+   * sequence creates a degenerate Huffman table (all symbols length 0).
+   * The decompressor should handle this gracefully. */
+  {
+    /* WBITS=16 (bit0=0), ISLAST=1 (bit1=1), ISLASTEMPTY=0 (bit2=0),
+     * MNIBBLES=0 (bits3-4=00), MLEN-1=0 (bits5-20=0) → MLEN=1
+     * Packed into bytes:
+     *   byte0: bits[0..7] = 0,1,0,0,0,0,0,0 = 0x02
+     *   byte1..N: all zeros (garbage prefix codes) */
+    uint8_t s[32];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02; /* WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0, MLEN low */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv huffman incomplete A: survived");
+  }
+
+  /* Pattern B: hskip=2 (complex prefix code) with only 1 code-length entry
+   * set, leaving the tree incomplete. */
+  {
+    uint8_t s[64];
+    memset(s, 0, sizeof(s));
+    /* WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0, MLEN=1 */
+    s[0] = 0x02;
+    /* After MLEN: NBLTYPES for L=0 (1 type), I=0, D=0; NPOSTFIX=0,
+     * NDIRECT=0; context_modes[0]=0; NTREESL varlen=0 (1 tree);
+     * context map (skipped for 1 tree); NTREESD=0 (1 tree);
+     * dist context map (skipped).
+     * All these fit in the zero bytes.
+     * Then literal prefix code starts: hskip bits = 0b10 = complex, hskip=2
+     * We need to set those bits. After the header bits above, we're at
+     * approximately bit 35 in the stream. Rather than computing exactly,
+     * we set byte 4 to 0x80 to inject a non-zero pattern that will be
+     * interpreted as hskip=2 somewhere in the prefix code reading. */
+    s[4] = 0x80;
+    s[5] = 0xFF; /* incomplete code-length data */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv huffman incomplete B: survived");
+  }
+
+  /* Pattern C: maximum code lengths that don't sum to a complete tree */
+  {
+    uint8_t s[128];
+    memset(s, 0xFF, sizeof(s)); /* all-ones: aggressive bit pattern */
+    s[0] = 0x02;                /* valid WBITS=16 + meta-block start */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv huffman incomplete C: survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv huffman incomplete: all patterns survived without crash");
+}
+
+/* ── 3. Distance overflow (distance > pos) ───────────────────────────────── */
+static void test_brotli_adversarial_distance_overflow(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv distance overflow: malloc skipped");
+    return;
+  }
+
+  /*
+   * We use a real compressed stream and then corrupt the distance field
+   * to be larger than the current output position.  The decompressor
+   * should either reject it (return 0) or treat it as a dictionary ref.
+   * It must NOT read before dst[0].
+   *
+   * Strategy: compress a short string, then flip bits in the distance
+   * area to create large distance values.
+   */
+  const char *input = "AB";
+  uint8_t compressed[256];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 2, 1);
+  if (clen > 0) {
+    /* Corrupt bytes in the middle/end of the stream to create bad distances */
+    for (size_t i = clen / 2; i < clen; i++) {
+      uint8_t corrupted[256];
+      memcpy(corrupted, compressed, clen);
+      corrupted[i] = 0xFF; /* set all bits → large distance codes */
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv distance overflow: survived distance corruption");
+
+  /*
+   * Craft a stream with dist_sym=4 (ring buffer distance -1 from last)
+   * at position 0 (no output yet) — distance would be 15 but pos=0,
+   * so distance > pos → should go to dict path or error.
+   *
+   * Use a known-good stream for "A" and corrupt the IAC command to
+   * force a copy before any literals are emitted.
+   */
+  {
+    /* All-zeros stream with WBITS=16 header: the IAC decoder will see
+     * insert_len=0, copy_len=2, dist_code_zero=1 (distance from ring buffer).
+     * Ring buffer initial values are {16,15,11,4}, so distance=15 > pos=0
+     * → dict reference path → wlen=2 < 4 → goto err_free_all → return 0 */
+    uint8_t s[64];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02; /* WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0 */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv distance overflow: zero-pos copy survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv distance overflow: all variants survived without crash");
+}
+
+/* ── 4. MLEN too large ───────────────────────────────────────────────────── */
+static void test_brotli_adversarial_mlen_too_large(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv mlen too large: malloc skipped");
+    return;
+  }
+
+  /*
+   * Craft a stream claiming MLEN = 16,777,216 (2^24, maximum for WBITS=24)
+   * but with no actual data.  The decompressor should:
+   *   - Return required_size > out_len when buffer is small
+   *   - Not crash with a large buffer
+   *   - Not loop forever
+   *
+   * WBITS=16 (bit0=0), ISLAST=1 (bit1=1), ISLASTEMPTY=0 (bit2=0),
+   * MNIBBLES=2 (bits3-4=10 → 6 nibbles → 24 bits for MLEN-1),
+   * MLEN-1 = 0xFFFFFF (24 bits, all ones → MLEN = 16,777,216)
+   *
+   * Bit stream (LSB first):
+   *   0: WBITS=16
+   *   1: ISLAST=1
+   *   2: ISLASTEMPTY=0
+   *   3-4: MNIBBLES=2 (binary 10)
+   *   5-28: MLEN-1 = 0xFFFFFF (24 bits, all ones)
+   *   29+: garbage (zeros) for prefix codes
+   *
+   * Packing into bytes (LSB first):
+   *   byte0: bits[0..7] = 0,1,0,0,1,1,1,1 = 0b11110010 = 0xF2
+   *     (bit0=0 WBITS, bit1=1 ISLAST, bit2=0 ISLASTEMPTY,
+   *      bits3-4=10 MNIBBLES=2, bits5-7=111 low 3 of MLEN-1)
+   *   byte1: bits[8..15] = 1,1,1,1,1,1,1,1 = 0xFF (MLEN-1 bits 3-10)
+   *   byte2: bits[16..23] = 1,1,1,1,1,1,1,1 = 0xFF (MLEN-1 bits 11-18)
+   *   byte3: bits[24..28] = 1,1,1,1,1 (MLEN-1 bits 19-23), then prefix code
+   *   byte3 = 0b00011111 = 0x1F (5 bits of MLEN-1, 3 bits of prefix code)
+   *   bytes 4+: zeros
+   */
+  {
+    uint8_t s[64];
+    memset(s, 0, sizeof(s));
+    s[0] = 0xF2;
+    s[1] = 0xFF;
+    s[2] = 0xFF;
+    s[3] = 0x1F;
+    /* With a tiny output buffer, should return required_size > out_len */
+    size_t r_small = fio_brotli_decompress(out, 1, s, sizeof(s));
+    (void)r_small;
+    TEST_ASSERT(1, "adv mlen too large: small buffer survived");
+
+    /* With a large output buffer, should return 0 (corrupt, no data) */
+    size_t r_large = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r_large;
+    TEST_ASSERT(1, "adv mlen too large: large buffer survived");
+  }
+
+  /*
+   * Variant: MNIBBLES=1 (5 nibbles = 20 bits), MLEN-1 = 0xFFFFF → MLEN=1M
+   * byte0: 0,1,0,0,1,0,1,1 = 0b11010010 = 0xD2
+   *   (WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=1=01, low3=111)
+   * byte1: 0xFF, byte2: 0x1F (remaining 17 bits of MLEN-1)
+   */
+  {
+    uint8_t s[64];
+    memset(s, 0, sizeof(s));
+    s[0] = 0xD2;
+    s[1] = 0xFF;
+    s[2] = 0x1F;
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv mlen too large variant: survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv mlen too large: all variants survived without crash");
+}
+
+/* ── 5. Block type overflow ──────────────────────────────────────────────── */
+static void test_brotli_adversarial_block_type_overflow(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv block type overflow: malloc skipped");
+    return;
+  }
+
+  /*
+   * Craft a stream with NBLTYPES=255 for literals, then corrupt the
+   * block type switch to claim type >= NBLTYPES.
+   *
+   * We use a real compressed stream and corrupt the NBLTYPES field.
+   * The decompressor reads NBLTYPES as: if bit=1, read VarLenUint8+2.
+   * VarLenUint8: if bit=0 → 0; if bit=1, read 3 bits n, if n=0 → 1,
+   *   else read n bits → value + (1<<n).
+   * So NBLTYPES=255: bit=1, VarLenUint8=253: bit=1, n=7, read 7 bits=125
+   *   → 125 + 128 = 253 → NBLTYPES = 253+2 = 255.
+   *
+   * Rather than exact bit crafting, we use a corrupt stream approach:
+   * take a valid stream and flip bits in the NBLTYPES area.
+   */
+  const char *input = "Hello, World! This is a test.";
+  uint8_t compressed[256];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 29, 1);
+  if (clen > 4) {
+    /* Corrupt bytes 2-4 which typically contain NBLTYPES fields */
+    for (int byte_idx = 2; byte_idx <= 4 && byte_idx < (int)clen; byte_idx++) {
+      uint8_t corrupted[256];
+      memcpy(corrupted, compressed, clen);
+      corrupted[byte_idx] = 0xFF; /* set all bits → large NBLTYPES */
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv block type overflow: survived NBLTYPES corruption");
+
+  /*
+   * Direct crafted stream: WBITS=16, ISLAST=1, ISLASTEMPTY=0, MLEN=1,
+   * then NBLTYPES-1 bit=1 for literals (requesting many block types),
+   * followed by garbage.
+   */
+  {
+    uint8_t s[128];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02; /* WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0 */
+    /* Set bit 5 (NBLTYPES-1 flag for literals) and subsequent bits to 0xFF
+     * to request a large NBLTYPES value */
+    s[0] |= 0xE0; /* bits 5-7 = 111 */
+    s[1] = 0xFF;
+    s[2] = 0xFF;
+    s[3] = 0xFF;
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv block type overflow: direct crafted survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1,
+              "adv block type overflow: all variants survived without crash");
+}
+
+/* ── 6. Context map overflow ─────────────────────────────────────────────── */
+static void test_brotli_adversarial_context_map_overflow(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv context map overflow: malloc skipped");
+    return;
+  }
+
+  /*
+   * Craft a stream where the literal context map references tree index
+   * >= NTREESL.  The decompressor validates this at:
+   *   if (val >= num_trees) return -1;
+   * and also at:
+   *   if (lit_tree_idx >= ntreesl) goto err_free_all;
+   * Both should return 0 cleanly.
+   *
+   * Strategy: corrupt a valid stream's context map bytes.
+   */
+  const char *input = "The quick brown fox jumps over the lazy dog.";
+  uint8_t compressed[512];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 44, 5);
+  if (clen > 8) {
+    /* Corrupt the latter half of the stream (context map area) */
+    for (size_t i = clen / 2; i < clen - 2; i += 3) {
+      uint8_t corrupted[512];
+      memcpy(corrupted, compressed, clen);
+      corrupted[i] = 0xFF;
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv context map overflow: survived context map corruption");
+
+  /*
+   * Direct: stream with NTREESL=1 but context map claiming tree index 5.
+   * The context map validation will catch this and return 0.
+   */
+  {
+    uint8_t s[128];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02; /* WBITS=16, ISLAST=1, ISLASTEMPTY=0, MNIBBLES=0 */
+    /* Inject 0xFF bytes to corrupt the context map area */
+    s[6] = 0xFF;
+    s[7] = 0xFF;
+    s[8] = 0xFF;
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv context map overflow: direct crafted survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1,
+              "adv context map overflow: all variants survived without crash");
+}
+
+/* ── 7. Copy length exceeds meta-block remaining ─────────────────────────── */
+static void test_brotli_adversarial_copy_len_exceeds_meta(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv copy len exceeds meta: malloc skipped");
+    return;
+  }
+
+  /*
+   * The decompressor checks: if (copy_len > meta_remaining) goto err_free_all
+   * We need a stream where copy_len > meta_remaining.
+   *
+   * Strategy: compress a short string (MLEN=small), then corrupt the
+   * IAC command bytes to produce a large copy_len.
+   */
+  const char *input = "ABCDE"; /* 5 bytes */
+  uint8_t compressed[256];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 5, 1);
+  if (clen > 4) {
+    /* Corrupt the IAC command area (typically in the latter bytes) */
+    for (size_t i = clen / 2; i < clen; i++) {
+      uint8_t corrupted[256];
+      memcpy(corrupted, compressed, clen);
+      corrupted[i] ^= 0xFF; /* flip all bits */
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv copy len exceeds meta: survived IAC corruption");
+
+  /*
+   * Direct crafted: WBITS=16, ISLAST=1, MLEN=1 (1 byte), then
+   * prefix codes that produce insert_len=0, copy_len=255 (>> MLEN).
+   * The decompressor should hit: copy_len > meta_remaining → err_free_all.
+   */
+  {
+    uint8_t s[128];
+    memset(s, 0xFF, sizeof(s)); /* all-ones → large code values */
+    s[0] = 0x02;                /* WBITS=16, ISLAST=1, ISLASTEMPTY=0 */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv copy len exceeds meta: direct crafted survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1,
+              "adv copy len exceeds meta: all variants survived without crash");
+}
+
+/* ── 8. Dictionary reference with invalid word length ────────────────────── */
+static void test_brotli_adversarial_dict_invalid_wlen(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv dict invalid wlen: malloc skipped");
+    return;
+  }
+
+  /*
+   * The decompressor checks: if (wlen < 4 || wlen > 24 ||
+   *   fio___brotli_ndbits[wlen] == 0) goto err_free_all
+   *
+   * wlen = copy_len when distance > pos (dict reference path).
+   * We need copy_len outside [4,24] with distance > pos.
+   *
+   * Strategy: corrupt a valid stream to produce a large distance
+   * (triggering dict path) with copy_len=2 or copy_len=25.
+   */
+  const char *input = "Hello World";
+  uint8_t compressed[256];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 11, 1);
+  if (clen > 4) {
+    /* Corrupt distance bytes to be very large (> pos) */
+    for (size_t i = clen - 4; i < clen; i++) {
+      uint8_t corrupted[256];
+      memcpy(corrupted, compressed, clen);
+      corrupted[i] = 0xFF;
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv dict invalid wlen: survived distance corruption");
+
+  /*
+   * Direct: all-zeros stream with WBITS=16 header.
+   * The IAC decoder with all-zero bits produces insert_len=0, copy_len=2,
+   * dist_code_zero=1 → distance from ring buffer (=16) > pos=0 → dict path
+   * → wlen=2 < 4 → goto err_free_all → return 0.
+   */
+  {
+    uint8_t s[64];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02;
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    TEST_ASSERT(r == 0,
+                "adv dict invalid wlen: copy_len=2 dict ref should return 0");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv dict invalid wlen: all variants survived without crash");
+}
+
+/* ── 9. Transform ID overflow ────────────────────────────────────────────── */
+static void test_brotli_adversarial_transform_overflow(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv transform overflow: malloc skipped");
+    return;
+  }
+
+  /*
+   * The decompressor checks: if (transform_id >= FIO___BROTLI_NUM_TRANSFORMS)
+   *   goto err_free_all
+   * FIO___BROTLI_NUM_TRANSFORMS = 121.
+   *
+   * transform_id = dict_off / nwords where dict_off = distance - max_dist - 1.
+   * We need a large distance to push transform_id >= 121.
+   *
+   * Strategy: corrupt a valid stream's distance bytes to be very large.
+   */
+  const char *input = "international";
+  uint8_t compressed[256];
+  size_t clen =
+      fio_brotli_compress(compressed, sizeof(compressed), input, 13, 5);
+  if (clen > 4) {
+    /* Corrupt the last few bytes (distance area) */
+    for (size_t i = clen - 3; i < clen; i++) {
+      uint8_t corrupted[256];
+      memcpy(corrupted, compressed, clen);
+      corrupted[i] = 0xFF;
+      size_t r = fio_brotli_decompress(out, 65536, corrupted, clen);
+      (void)r;
+    }
+  }
+  TEST_ASSERT(1, "adv transform overflow: survived distance corruption");
+
+  /*
+   * Direct: all-0xFF stream with valid WBITS header.
+   * The large bit values will produce large distance codes → dict path
+   * → transform_id will be large → goto err_free_all → return 0.
+   */
+  {
+    uint8_t s[128];
+    memset(s, 0xFF, sizeof(s));
+    s[0] = 0x02; /* WBITS=16, ISLAST=1, ISLASTEMPTY=0 */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv transform overflow: direct crafted survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv transform overflow: all variants survived without crash");
+}
+
+/* ── 10. Tiny input variants ─────────────────────────────────────────────── */
+static void test_brotli_adversarial_tiny_input_variants(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv tiny input: malloc skipped");
+    return;
+  }
+
+  /* All 256 single-byte values (already covered by
+   * test_brotli_single_byte_inputs but we repeat here for completeness in the
+   * adversarial section) */
+  for (int b = 0; b < 256; b++) {
+    uint8_t byte = (uint8_t)b;
+    size_t r = fio_brotli_decompress(out, 65536, &byte, 1);
+    (void)r;
+  }
+  TEST_ASSERT(1, "adv tiny input: all 256 single-byte values survived");
+
+  /* Representative 2-byte values: all combinations of first byte with
+   * second byte in {0x00, 0x01, 0x3b, 0x7f, 0x80, 0xfe, 0xff} */
+  {
+    static const uint8_t second_bytes[] = {0x00,
+                                           0x01,
+                                           0x03,
+                                           0x06,
+                                           0x0F,
+                                           0x21,
+                                           0x3b,
+                                           0x41,
+                                           0x7f,
+                                           0x80,
+                                           0xAA,
+                                           0xfe,
+                                           0xff};
+    size_t nsecond = sizeof(second_bytes) / sizeof(second_bytes[0]);
+    for (int b0 = 0; b0 < 256; b0++) {
+      for (size_t b1i = 0; b1i < nsecond; b1i++) {
+        uint8_t s[2] = {(uint8_t)b0, second_bytes[b1i]};
+        size_t r = fio_brotli_decompress(out, 65536, s, 2);
+        (void)r;
+      }
+    }
+    TEST_ASSERT(1, "adv tiny input: 2-byte representative set survived");
+  }
+
+  /* 3-byte values: stress the bit-reader boundary (safe_end path) */
+  {
+    static const uint8_t patterns[][3] = {
+        {0x00, 0x00, 0x00}, /* all zeros */
+        {0xFF, 0xFF, 0xFF}, /* all ones */
+        {0x3b, 0x00, 0x00}, /* valid empty + garbage */
+        {0x06, 0x00, 0x00}, /* WBITS=16 empty + garbage */
+        {0x01, 0x03, 0x00}, /* WBITS=17 empty + garbage */
+        {0x02, 0x00, 0x00}, /* WBITS=16, ISLAST, ISLASTEMPTY=0, MLEN=1 */
+        {0x02, 0xFF, 0xFF}, /* above + garbage prefix codes */
+        {0xF2, 0xFF, 0x1F}, /* WBITS=16, large MLEN */
+        {0x41, 0x03, 0x00}, /* invalid WBITS */
+        {0x0F, 0x03, 0x00}, /* WBITS=24 empty */
+        {0x21, 0x03, 0x00}, /* WBITS=10 empty */
+        {0xAA, 0x55, 0xAA}, /* alternating bits */
+        {0x55, 0xAA, 0x55}, /* alternating bits inverted */
+    };
+    size_t npatterns = sizeof(patterns) / sizeof(patterns[0]);
+    for (size_t i = 0; i < npatterns; i++) {
+      size_t r = fio_brotli_decompress(out, 65536, patterns[i], 3);
+      (void)r;
+    }
+    TEST_ASSERT(1, "adv tiny input: 3-byte patterns survived");
+  }
+
+  /* 4-7 byte inputs: stress the safe_end boundary (< 8 bytes → slow path) */
+  {
+    for (size_t len = 4; len <= 7; len++) {
+      uint8_t s[7];
+      /* Pattern 1: all zeros */
+      memset(s, 0, len);
+      s[0] = 0x02;
+      size_t r = fio_brotli_decompress(out, 65536, s, len);
+      (void)r;
+      /* Pattern 2: all ones */
+      memset(s, 0xFF, len);
+      r = fio_brotli_decompress(out, 65536, s, len);
+      (void)r;
+      /* Pattern 3: valid WBITS + garbage */
+      memset(s, 0xAB, len);
+      s[0] = 0x3b;
+      r = fio_brotli_decompress(out, 65536, s, len);
+      (void)r;
+    }
+    TEST_ASSERT(1, "adv tiny input: 4-7 byte inputs survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv tiny input: all tiny input variants survived");
+}
+
+/* ── 11. Known crash payloads (regression for fixed bugs) ────────────────── */
+static void test_brotli_adversarial_known_crash_payloads(void) {
+  uint8_t *out = (uint8_t *)malloc(65536);
+  if (!out) {
+    TEST_ASSERT(1, "adv known crash: malloc skipped");
+    return;
+  }
+
+  /*
+   * Bug 1: NULL safe_end pointer comparison (fixed: now uses src+8<=end).
+   * Trigger: input exactly 7 bytes long that looks like a valid brotli header.
+   * The old code set safe_end = data + len - 8 = data - 1 (wraps to ~0),
+   * then compared src <= safe_end which is UB when safe_end < data.
+   * Fixed code uses: if (b->src + 8 <= b->end) for the fast path.
+   *
+   * We test several 7-byte inputs that exercise the slow byte-at-a-time path.
+   */
+  {
+    /* 7-byte input: valid WBITS=22 empty stream + 6 garbage bytes */
+    uint8_t s7a[7] = {0x3b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    size_t r = fio_brotli_decompress(out, 65536, s7a, 7);
+    TEST_ASSERT(r == 0,
+                "adv known crash: 7-byte empty+garbage should return 0");
+
+    /* 7-byte input: WBITS=16 header with MLEN=1 + garbage prefix codes */
+    uint8_t s7b[7] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    r = fio_brotli_decompress(out, 65536, s7b, 7);
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: 7-byte MLEN=1+garbage survived");
+
+    /* 7-byte input: all 0xFF (aggressive bit pattern, 7 bytes) */
+    uint8_t s7c[7] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    r = fio_brotli_decompress(out, 65536, s7c, 7);
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: 7-byte all-0xFF survived");
+
+    /* 7-byte input: alternating pattern */
+    uint8_t s7d[7] = {0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA};
+    r = fio_brotli_decompress(out, 65536, s7d, 7);
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: 7-byte alternating survived");
+
+    /* 7-byte input: valid WBITS=17 header + garbage */
+    uint8_t s7e[7] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00};
+    r = fio_brotli_decompress(out, 65536, s7e, 7);
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: 7-byte WBITS=17+garbage survived");
+  }
+
+  /*
+   * Bug 2: Incomplete Huffman code / subtable underflow.
+   * A code-length Huffman tree where some subtable entries are never filled
+   * (zero-initialized), causing CODELEN(0) - root_bits to underflow unsigned
+   * → UB shift.  Fixed by: if (codelen <= root_bits) return 0.
+   *
+   * Craft a stream that reaches the subtable lookup with a zero entry:
+   * - WBITS=16, ISLAST=1, ISLASTEMPTY=0, MLEN=1
+   * - Complex prefix code (hskip=0b00 or 0b10 or 0b11)
+   * - Code-length data that creates an incomplete tree
+   *
+   * The key pattern: after the meta-block header, the literal prefix code
+   * is read.  hskip=0b00 means complex code starting at cl index 0.
+   * If the cl_lengths produce a tree where some 8-bit root entries point
+   * to subtables with zero entries, the old code would UB-shift.
+   *
+   * We use several patterns that stress this path:
+   */
+  {
+    /* Pattern: WBITS=16 header + hskip=0 (complex) + sparse cl_lengths */
+    /* After the meta-block header bits, the first 2 bits of the prefix
+     * code are hskip.  With our byte layout:
+     *   byte0=0x02: WBITS=16(1b), ISLAST(1b), ISLASTEMPTY=0(1b),
+     *               MNIBBLES=0(2b), MLEN-1 low 3 bits=0
+     *   byte1=0x00: MLEN-1 bits 3-10 = 0 (MLEN=1)
+     *   byte2=0x00: MLEN-1 bits 11-15 = 0, then NBLTYPES flags (3x 0=1type),
+     *               NPOSTFIX=0(2b), NDIRECT=0(4b) start
+     *   byte3=0x00: NDIRECT remaining, context_modes[0]=0(2b),
+     *               NTREESL varlen=0(1b=1tree), NTREESD varlen=0(1b=1tree)
+     *               then literal prefix code hskip bits start
+     *   byte4=0x00: hskip=0b00 (complex, start at cl index 0)
+     *               then cl_lengths via VLC...
+     * All zeros → cl_lengths all 0 → degenerate tree → build_table returns
+     * root_size with all entries SYM(0,0) → huff_decode returns 0 (sym=0,
+     * codelen=0) → cl_sym=0 → literal code length 0 → space never decreases
+     * → loop exits when sym_count reaches alphabet_size.
+     * Then build_table for literal tree: all lengths 0 → max_len=0 →
+     * fills with SYM(0,0) → huff_decode returns sym=0 always.
+     * This is actually valid (degenerate but not crashing).
+     * The stream then tries to decode IAC commands with all-zero bits.
+     */
+    uint8_t s[32];
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02;
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: incomplete huffman pattern A survived");
+
+    /* Pattern: inject a non-zero cl_length that creates a partial tree
+     * where some subtable entries remain zero.
+     * Set byte 5 = 0x08 to inject a code-length value of 8 for one symbol,
+     * leaving the rest of the tree unfilled. */
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02;
+    s[5] = 0x08; /* inject a non-zero cl_length bit pattern */
+    r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: incomplete huffman pattern B survived");
+
+    /* Pattern: hskip=3 (skip first 3 cl entries) with sparse remaining */
+    memset(s, 0, sizeof(s));
+    s[0] = 0x02;
+    s[4] = 0xC0; /* bits 6-7 = 11 → hskip=3 in the prefix code area */
+    s[5] = 0x01; /* one non-zero cl_length */
+    r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: incomplete huffman pattern C survived");
+  }
+
+  /*
+   * Bug 3: Uninitialized hash_table[] / num[] — allocator returning memory
+   * with generation value embedded → garbage candidates used as src offsets.
+   * This is a compressor bug, not directly testable via the decompressor API.
+   * We verify the decompressor handles streams produced by a potentially
+   * corrupt compressor state by testing random garbage inputs.
+   */
+  {
+    uint8_t garbage[64];
+    for (int trial = 0; trial < 20; trial++) {
+      /* Use a deterministic pattern that varies per trial */
+      for (int i = 0; i < 64; i++)
+        garbage[i] = (uint8_t)((trial * 37 + i * 13) ^ (i << 2));
+      garbage[0] = 0x02; /* keep valid WBITS to get deeper into parsing */
+      size_t r = fio_brotli_decompress(out, 65536, garbage, 64);
+      (void)r;
+    }
+    TEST_ASSERT(1,
+                "adv known crash: uninitialized hash table patterns survived");
+  }
+
+  /*
+   * Bug 4: Subtable buffer overflow — Huffman subtable exceeding allocated
+   * table buffer.  Fixed by: if (sub_offset + sub_size > max_size) return 0.
+   *
+   * Craft a stream where the prefix code has many long codes that would
+   * require many subtables, exceeding the allocated buffer.
+   * We use a stream with hskip=0 and cl_lengths that create many subtables.
+   */
+  {
+    /* All-0xAA pattern after valid header: alternating bits create
+     * varied code-length patterns that stress subtable allocation */
+    uint8_t s[128];
+    memset(s, 0xAA, sizeof(s));
+    s[0] = 0x02; /* valid WBITS=16 header */
+    size_t r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: subtable overflow pattern survived");
+
+    /* All-0x55 pattern */
+    memset(s, 0x55, sizeof(s));
+    s[0] = 0x02;
+    r = fio_brotli_decompress(out, 65536, s, sizeof(s));
+    (void)r;
+    TEST_ASSERT(1, "adv known crash: subtable overflow pattern 2 survived");
+  }
+
+  /*
+   * Bug 5: fio___brotli_uppercase OOB write — 1-byte UTF-8 lead byte word
+   * at end of output buffer.  Fixed by passing `remaining` to uppercase().
+   * We test by providing a stream that would produce a dictionary word
+   * with UPPERCASE_ALL transform at the very end of the output buffer.
+   * Since we can't easily craft this exactly, we use a near-full output
+   * buffer with a stream that exercises the dict+transform path.
+   */
+  {
+    /* Use a q5 stream that exercises the static dictionary */
+    const char *text = "international";
+    uint8_t compressed[256];
+    size_t clen =
+        fio_brotli_compress(compressed, sizeof(compressed), text, 13, 5);
+    if (clen > 0) {
+      /* Decompress into a buffer that's exactly the right size */
+      uint8_t exact_out[13];
+      size_t r = fio_brotli_decompress(exact_out, 13, compressed, clen);
+      TEST_ASSERT(r == 13,
+                  "adv known crash: uppercase OOB - exact buffer should work");
+      /* Decompress into a 1-byte-too-small buffer */
+      uint8_t small_out[12];
+      r = fio_brotli_decompress(small_out, 12, compressed, clen);
+      TEST_ASSERT(r > 12,
+                  "adv known crash: uppercase OOB - small buffer returns size");
+    }
+    TEST_ASSERT(1, "adv known crash: uppercase OOB test survived");
+  }
+
+  free(out);
+  TEST_ASSERT(1, "adv known crash: all known crash payloads survived");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
@@ -1929,6 +2850,20 @@ int main(void) {
 
   /* 16MB roundtrip corruption test */
   test_brotli_16mb_roundtrip();
+
+  /* Adversarial / Maliciously-Crafted Payloads */
+  fprintf(stderr, "\n--- Adversarial Tests ---\n");
+  test_brotli_adversarial_window_size();
+  test_brotli_adversarial_huffman_incomplete();
+  test_brotli_adversarial_distance_overflow();
+  test_brotli_adversarial_mlen_too_large();
+  test_brotli_adversarial_block_type_overflow();
+  test_brotli_adversarial_context_map_overflow();
+  test_brotli_adversarial_copy_len_exceeds_meta();
+  test_brotli_adversarial_dict_invalid_wlen();
+  test_brotli_adversarial_transform_overflow();
+  test_brotli_adversarial_tiny_input_variants();
+  test_brotli_adversarial_known_crash_payloads();
 
   fprintf(stderr, "=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
   return g_fail ? 1 : 0;

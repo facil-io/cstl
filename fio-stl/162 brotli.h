@@ -183,11 +183,10 @@ Bit reader - 64-bit buffer, LSB-first
 ***************************************************************************** */
 
 typedef struct {
-  uint64_t bits;           /* bit buffer */
-  unsigned avail;          /* bits available in buffer */
-  const uint8_t *src;      /* current read position */
-  const uint8_t *end;      /* end of input */
-  const uint8_t *safe_end; /* end - 8: safe for 8-byte unaligned load */
+  uint64_t bits;      /* bit buffer */
+  unsigned avail;     /* bits available in buffer */
+  const uint8_t *src; /* current read position */
+  const uint8_t *end; /* one past last byte of input */
 } fio___brotli_bits_s;
 
 FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
@@ -197,12 +196,14 @@ FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
   b->avail = 0;
   b->src = (const uint8_t *)data;
   b->end = b->src + len;
-  b->safe_end = (len >= 8) ? (b->end - 8) : (const uint8_t *)NULL;
 }
 
 FIO_IFUNC void fio___brotli_bits_fill(fio___brotli_bits_s *b) {
-  if (b->src <= b->safe_end) {
-    /* Branchless bulk refill: single 8-byte unaligned load */
+  if (b->src + 8 <= b->end) {
+    /* Branchless bulk refill: single 8-byte unaligned load.
+     * Condition b->src + 8 <= b->end guarantees the load is in-bounds.
+     * (Replaces the former b->src <= safe_end which used a NULL sentinel
+     *  when len < 8 — undefined behaviour per C99 6.5.8p5.) */
     b->bits |= fio_buf2u64_le(b->src) << b->avail;
     unsigned consumed = (63 - b->avail) >> 3;
     b->src += consumed;
@@ -311,6 +312,15 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
     return root_size;
   }
 
+  /* Pre-initialize root table to a safe direct-symbol sentinel.
+   * For incomplete Huffman codes (Kraft sum < 1), some root slots are never
+   * assigned. Without initialization they retain malloc garbage, causing
+   * fio___brotli_huff_decode to follow a bogus subtable pointer and crash.
+   * codelen=0 means "consume 0 bits, return symbol 0" — the caller's range
+   * check (sym >= alphabet_size) will reject it as corrupt input. */
+  for (unsigned i = 0; i < root_size; i++)
+    table[i] = FIO___BROTLI_ENTRY_SYM(0, 0);
+
   /* Build offsets for sorting */
   offsets[1] = 0;
   for (unsigned i = 2; i <= max_len; i++)
@@ -346,7 +356,21 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
       code <<= 1;
     }
 
-    /* Build second-level subtables for codes longer than root_bits */
+    /* Build second-level subtables for codes longer than root_bits.
+     *
+     * Key invariant: a given root slot may be visited at MULTIPLE code
+     * lengths (e.g. length 9 and length 10 can both map to root slot 5).
+     * We must create the subtable only ONCE (on first visit) and reuse it
+     * on subsequent visits.  The old approach used prev_root_slot to detect
+     * "new" slots, but that fails when the same slot reappears after other
+     * slots have been processed in between — it would create a second
+     * subtable, overwriting the root entry and orphaning the first subtable's
+     * entries.
+     *
+     * Fix: check FIO___BROTLI_ENTRY_IS_SUB(table[root_slot]) instead.
+     * Because we pre-initialized the root table to direct-symbol entries
+     * above, an unvisited slot has IS_SUB=0 and a visited slot has IS_SUB=1.
+     */
     if (max_len > root_bits) {
       /* Reset code to where we left off */
       code = 0;
@@ -356,9 +380,7 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
         sym_idx += count[len];
       }
 
-      int32_t prev_root_slot = -1;
       uint32_t sub_offset = root_size;
-      unsigned sub_bits = 0;
 
       for (unsigned len = root_bits + 1; len <= max_len; len++) {
         for (unsigned c = 0; c < count[len]; c++) {
@@ -367,10 +389,11 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
           uint32_t rev_code = fio___brotli_bit_reverse(code, len);
           uint32_t root_slot = rev_code & (root_size - 1);
 
-          if ((int32_t)root_slot != prev_root_slot) {
-            /* New subtable needed */
-            /* Determine subtable size: find max code length sharing this root
-             */
+          if (!FIO___BROTLI_ENTRY_IS_SUB(table[root_slot])) {
+            /* First visit to this root slot: create subtable.
+             * Scan ALL remaining codes to find the maximum code length that
+             * shares this root slot, so the subtable is sized correctly for
+             * all lengths (not just the current one). */
             unsigned max_sub_len = 0;
             uint32_t test_code = code;
             for (unsigned tl = len; tl <= max_len; tl++) {
@@ -385,27 +408,27 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
               }
               test_code <<= 1;
             }
-            sub_bits = max_sub_len - root_bits;
+            unsigned sub_bits = max_sub_len - root_bits;
             if (sub_bits > 15)
               sub_bits = 15; /* safety clamp */
 
-            /* Write root entry pointing to subtable */
-            table[root_slot] =
-                FIO___BROTLI_ENTRY_SUB(sub_offset, root_bits, sub_bits);
-            prev_root_slot = (int32_t)root_slot;
-
-            /* Clear subtable — guard against buffer overflow */
+            /* Guard against buffer overflow */
             uint32_t sub_size = 1U << sub_bits;
             if (max_size && sub_offset + sub_size > max_size)
               return 0; /* subtable overflow: table buffer too small */
             FIO_MEMSET(table + sub_offset, 0, sub_size * sizeof(uint32_t));
             total = sub_offset + sub_size;
+
+            /* Write root entry pointing to subtable */
+            table[root_slot] =
+                FIO___BROTLI_ENTRY_SUB(sub_offset, root_bits, sub_bits);
             sub_offset = total;
           }
 
-          /* Fill subtable entry */
+          /* Fill subtable entry (works for both first and subsequent visits) */
+          unsigned sub_bits_cur = FIO___BROTLI_ENTRY_SUB_BITS(table[root_slot]);
           uint32_t sub_code = rev_code >> root_bits;
-          uint32_t sub_size = 1U << sub_bits;
+          uint32_t sub_size = 1U << sub_bits_cur;
           uint32_t entry = FIO___BROTLI_ENTRY_SYM(sym, len);
           uint32_t sub_stride = 1U << (len - root_bits);
           uint32_t base_off = FIO___BROTLI_ENTRY_SUB_OFF(table[root_slot]);
@@ -425,15 +448,32 @@ FIO_SFUNC uint32_t fio___brotli_build_table(uint32_t *table,
 /**
  * Decode one symbol from a Huffman table.
  */
+/* Sentinel returned by fio___brotli_huff_decode on truncated/corrupt input.
+ * Callers that check symbol ranges (e.g. < alphabet_size) will naturally
+ * reject this value and propagate the error via goto err_free_all / return 0.
+ * 0xFFFFFFFF is safely out of range for any brotli alphabet (max 704). */
+#define FIO___BROTLI_HUFF_ERR (0xFFFFFFFFU)
+
 FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
                                             const uint32_t *table,
                                             unsigned root_bits) {
   fio___brotli_bits_fill(b);
+  /* Peek root_bits from the buffer.  When avail < root_bits the upper bits
+   * are zero (bits_fill only ORs bytes up to avail), so the index is
+   * zero-padded.  For a canonical Huffman table this is safe: every entry
+   * whose codelen <= avail is correctly identified by its lower codelen bits,
+   * and the zero-padding lands in the same table slot.  The per-entry
+   * codelen > b->avail check below rejects any entry that would require more
+   * bits than are actually available. */
   uint32_t idx = fio___brotli_bits_peek(b, root_bits);
   uint32_t entry = table[idx];
 
   if (FIO___BROTLI_ENTRY_IS_SYM(entry)) {
-    fio___brotli_bits_drop(b, FIO___BROTLI_ENTRY_CODELEN(entry));
+    unsigned codelen = FIO___BROTLI_ENTRY_CODELEN(entry);
+    /* nsym=1 simple codes store codelen=0 (no bits consumed). Valid. */
+    if (codelen > b->avail)
+      return FIO___BROTLI_HUFF_ERR;
+    fio___brotli_bits_drop(b, codelen);
     return FIO___BROTLI_ENTRY_SYMBOL(entry);
   }
 
@@ -441,10 +481,20 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
   fio___brotli_bits_drop(b, root_bits);
   fio___brotli_bits_fill(b);
   unsigned sub_bits = FIO___BROTLI_ENTRY_SUB_BITS(entry);
+  if (b->avail < sub_bits)
+    return FIO___BROTLI_HUFF_ERR;
   uint32_t sub_off = FIO___BROTLI_ENTRY_SUB_OFF(entry);
   uint32_t sub_idx = fio___brotli_bits_peek(b, sub_bits);
   entry = table[sub_off + sub_idx];
-  fio___brotli_bits_drop(b, FIO___BROTLI_ENTRY_CODELEN(entry) - root_bits);
+  /* Subtable entries must have codelen > root_bits. A zero entry means an
+   * incomplete Huffman code (corrupt stream). */
+  unsigned codelen = FIO___BROTLI_ENTRY_CODELEN(entry);
+  if (codelen <= root_bits)
+    return FIO___BROTLI_HUFF_ERR;
+  unsigned drop = codelen - root_bits;
+  if (drop > b->avail)
+    return FIO___BROTLI_HUFF_ERR;
+  fio___brotli_bits_drop(b, drop);
   return FIO___BROTLI_ENTRY_SYMBOL(entry);
 }
 
@@ -1408,6 +1458,13 @@ SFUNC size_t fio_brotli_decompress(void *out,
                                      dist_tables + dist_offsets[dist_tree_idx],
                                      FIO___BROTLI_HUFF_BITS);
 
+        /* Validate dist_sym before use: FIO___BROTLI_HUFF_ERR (0xFFFFFFFF)
+         * or any value >= dist_alpha is corrupt input.  Without this guard,
+         * the complex-distance path computes nbits = 1 + (0xFFFFFFFF-16)>>1
+         * = 2147483640, causing UB shift (C99 6.5.7p3). */
+        if (dist_sym >= dist_alpha)
+          goto err_free_all;
+
         if (dist_sym < 16) {
           /* Ring buffer distance (RFC 7932 Section 4, Table 2) */
           static const int8_t doff[16] =
@@ -1422,13 +1479,23 @@ SFUNC size_t fio_brotli_decompress(void *out,
         } else if (dist_sym < 16 + ndirect) {
           distance = dist_sym - 15;
         } else {
-          /* Complex distance code with extra bits */
+          /* Complex distance code with extra bits.
+           * nbits = 1 + hcode.  The maximum valid dist_sym is dist_alpha-1.
+           * With dist_alpha <= 16 + 120 + (48<<3) = 520, the maximum
+           * d = dist_alpha - 1 - 16 - ndirect <= 503, hcode <= 251,
+           * nbits <= 252 — well within uint32_t shift range (< 32 only when
+           * npostfix=0,ndirect=0 and dist_alpha=64: max d=47, hcode=23,
+           * nbits=24).  The dist_sym >= dist_alpha guard above ensures we
+           * never reach here with an out-of-range symbol. */
           uint32_t d = dist_sym - 16 - ndirect;
           uint32_t postfix = d & ((1U << npostfix) - 1);
           d >>= npostfix;
           uint32_t hcode = d >> 1;
           uint32_t lcode = d & 1;
           uint32_t nbits = 1 + hcode;
+          /* Guard: nbits must be < 32 for the shift to be defined. */
+          if (nbits >= 32)
+            goto err_free_all;
           uint32_t offset = ((2 + lcode) << nbits) - 4;
           uint32_t extra = fio___brotli_bits_get(&bits, nbits);
           distance = ((offset + extra) << npostfix) + postfix + ndirect + 1;
@@ -3335,8 +3402,12 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
         }
       }
 
-      /* Insert current position into hash chain */
-      fio___brotli_hc_insert(hash_chain, fio___brotli_hc_hash4(src + pos), pos);
+      /* Insert current position into hash chain (only when 4 bytes available)
+       */
+      if (pos + 3 < src_len)
+        fio___brotli_hc_insert(hash_chain,
+                               fio___brotli_hc_hash4(src + pos),
+                               pos);
 
       /* --- Incompressibility probe: track match rate in first 1024 pos --- */
       if (!q5_fast_mode) {
@@ -4264,6 +4335,12 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
       lit_pos += copy_len;
   }
 #undef FIO___BROTLI_MAX_LIT_TREES
+
+  /* Write 8 trailing zero bits so the decompressor's bit reader always has
+   * at least root_bits (8) bits available when decoding the last symbol.
+   * The decompressor stops at meta_remaining=0 and never reads past the
+   * data, so these bits are harmless padding. */
+  fio___brotli_bw_put(&w, 0, 8);
 
   size_t result = fio___brotli_bw_finish(&w, out);
 

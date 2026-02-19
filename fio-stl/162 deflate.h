@@ -1631,9 +1631,13 @@ FIO_SFUNC uint32_t fio___deflate_find_match(const uint8_t *src,
     if (dist == 0 || dist > FIO___DEFLATE_WINDOW_SIZE)
       break;
 
-    /* Quick check: 4-byte prefix + last byte of current best */
+    /* Quick check: 4-byte prefix + last byte of current best.
+     * Guard: both pos+best_len and chain_pos+best_len must be in bounds.
+     * When best_len == max_len we can't improve, skip the last-byte check. */
     if (fio_buf2u32_le(src + chain_pos) == prefix &&
-        src[chain_pos + best_len] == src[pos + best_len]) {
+        (best_len >= max_len ||
+         (chain_pos + best_len < src_len &&
+          src[chain_pos + best_len] == src[pos + best_len]))) {
       /* Full comparison (first 4 bytes already verified) */
       uint32_t len =
           fio___deflate_extend_match(src, pos, chain_pos, 4, max_len);

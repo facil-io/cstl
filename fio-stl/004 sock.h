@@ -64,8 +64,12 @@ FIO_IFUNC int fio_sock_dup(int original) {
   SOCKET tmpfd = INVALID_SOCKET;
   WSAPROTOCOL_INFO info;
   if (!WSADuplicateSocket(original, GetCurrentProcessId(), &info) &&
-      (tmpfd = WSASocket(AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, &info, 0, 0)) !=
-          INVALID_SOCKET) {
+      (tmpfd = WSASocket(FROM_PROTOCOL_INFO,
+                         FROM_PROTOCOL_INFO,
+                         FROM_PROTOCOL_INFO,
+                         &info,
+                         0,
+                         0)) != INVALID_SOCKET) {
     if (FIO_SOCK_FD_ISVALID(tmpfd))
       fd = (int)tmpfd;
     else

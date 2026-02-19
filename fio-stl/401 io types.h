@@ -1153,11 +1153,64 @@ FIO_SFUNC void fio___io_wakeup_init(void) {
   if (FIO___IO.wakeup)
     return;
   int fds[2];
+#if FIO_OS_WIN
+  /* On Windows, pipe() returns CRT file descriptors, not Winsock SOCKETs.
+   * All fio_sock_* APIs (send/recv/ioctlsocket/WSAPoll) require real SOCKET
+   * handles, so we emulate socketpair() with a loopback TCP connection. */
+  {
+    SOCKET listener = INVALID_SOCKET;
+    SOCKET writer = INVALID_SOCKET;
+    SOCKET reader = INVALID_SOCKET;
+    struct sockaddr_in addr;
+    int addrlen = (int)sizeof(addr);
+    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listener == INVALID_SOCKET)
+      goto win_pipe_fail;
+    FIO_MEMSET(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0; /* OS assigns an ephemeral port */
+    if (bind(listener, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
+      goto win_pipe_fail;
+    if (getsockname(listener, (struct sockaddr *)&addr, &addrlen) ==
+        SOCKET_ERROR)
+      goto win_pipe_fail;
+    if (listen(listener, 1) == SOCKET_ERROR)
+      goto win_pipe_fail;
+    writer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (writer == INVALID_SOCKET)
+      goto win_pipe_fail;
+    if (connect(writer, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
+      goto win_pipe_fail;
+    reader = accept(listener, NULL, NULL);
+    if (reader == INVALID_SOCKET)
+      goto win_pipe_fail;
+    closesocket(listener);
+    if (!FIO_SOCK_FD_ISVALID(reader) || !FIO_SOCK_FD_ISVALID(writer))
+      goto win_pipe_fail2;
+    fds[0] = (int)reader; /* read end */
+    fds[1] = (int)writer; /* write end */
+    goto win_pipe_ok;
+  win_pipe_fail:
+    if (listener != INVALID_SOCKET)
+      closesocket(listener);
+  win_pipe_fail2:
+    if (reader != INVALID_SOCKET)
+      closesocket(reader);
+    if (writer != INVALID_SOCKET)
+      closesocket(writer);
+    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___io_wakeup disabled.",
+                  FIO___IO.pid);
+    return;
+  win_pipe_ok:;
+  }
+#else
   if (pipe(fds)) {
     FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___io_wakeup disabled.",
                   FIO___IO.pid);
     return;
   }
+#endif /* FIO_OS_WIN */
   fio_sock_set_non_block(fds[0]);
   fio_sock_set_non_block(fds[1]);
   FIO___IO.wakeup_fd = fds[1];
