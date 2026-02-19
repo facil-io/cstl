@@ -22,6 +22,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
 OS specific patches.
 ***************************************************************************** */
 #if FIO_OS_WIN
+/** Native socket handle type: SOCKET (UINT_PTR) on Windows. */
+typedef SOCKET fio_socket_i;
+/** Sentinel value for an invalid socket handle. */
+#define FIO_SOCKET_INVALID INVALID_SOCKET
 #if _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
 #endif
@@ -32,7 +36,7 @@ OS specific patches.
 #include <afunix.h>
 #endif
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((size_t)(fd) <= (size_t)0x7FFFFFFF)
+#define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len) send((fd), (data), (len), 0)
@@ -40,45 +44,78 @@ OS specific patches.
 #define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd) closesocket(fd)
-/** Protects against type size overflow on Windows, where FD > MAX_INT. */
-FIO_IFUNC int fio_sock_accept(int s, struct sockaddr *addr, int *addrlen) {
-  int r = -1;
-  SOCKET c = accept(s, addr, addrlen);
+/** Accepts a new connection, returning a native socket handle. */
+FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
+                                       struct sockaddr *addr,
+                                       int *addrlen) {
+  fio_socket_i c = accept(s, addr, addrlen);
   if (c == INVALID_SOCKET)
-    return r;
-  if (FIO_SOCK_FD_ISVALID(c)) {
-    r = (int)c;
-    return r;
-  }
-  closesocket(c);
-  errno = ERANGE;
-  FIO_LOG_ERROR("Windows SOCKET value overflowed int limits (was: %zu)",
-                (size_t)c);
-  return r;
+    return FIO_SOCKET_INVALID;
+  return c;
 }
 #define accept fio_sock_accept
 #define poll   WSAPoll
 /** Acts as POSIX dup. Use this for portability with WinSock2. */
-FIO_IFUNC int fio_sock_dup(int original) {
-  int fd = -1;
-  SOCKET tmpfd = INVALID_SOCKET;
+FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   WSAPROTOCOL_INFO info;
-  if (!WSADuplicateSocket(original, GetCurrentProcessId(), &info) &&
-      (tmpfd = WSASocket(FROM_PROTOCOL_INFO,
-                         FROM_PROTOCOL_INFO,
-                         FROM_PROTOCOL_INFO,
-                         &info,
-                         0,
-                         0)) != INVALID_SOCKET) {
-    if (FIO_SOCK_FD_ISVALID(tmpfd))
-      fd = (int)tmpfd;
-    else
-      fio_sock_close(tmpfd);
-  }
+  if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info))
+    return FIO_SOCKET_INVALID;
+  fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            &info,
+                                            0,
+                                            0);
   return fd;
+}
+/** Creates a connected socket pair via loopback TCP (Windows socketpair). */
+FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
+  fio_socket_i listener = INVALID_SOCKET;
+  fio_socket_i writer = INVALID_SOCKET;
+  fio_socket_i reader = INVALID_SOCKET;
+  struct sockaddr_in addr;
+  int addrlen = (int)sizeof(addr);
+  fds[0] = fds[1] = INVALID_SOCKET;
+  listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (listener == INVALID_SOCKET)
+    goto fail;
+  FIO_MEMSET(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0; /* OS assigns an ephemeral port */
+  if (bind(listener, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
+    goto fail;
+  if (getsockname(listener, (struct sockaddr *)&addr, &addrlen) == SOCKET_ERROR)
+    goto fail;
+  if (listen(listener, 1) == SOCKET_ERROR)
+    goto fail;
+  writer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (writer == INVALID_SOCKET)
+    goto fail;
+  if (connect(writer, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
+    goto fail;
+  reader = accept(listener, NULL, NULL);
+  if (reader == INVALID_SOCKET)
+    goto fail;
+  closesocket(listener);
+  fds[0] = reader; /* read end */
+  fds[1] = writer; /* write end */
+  return 0;
+fail:
+  if (listener != INVALID_SOCKET)
+    closesocket(listener);
+  if (reader != INVALID_SOCKET)
+    closesocket(reader);
+  if (writer != INVALID_SOCKET)
+    closesocket(writer);
+  return -1;
 }
 
 #elif FIO_HAVE_UNIX_TOOLS
+/** Native socket handle type: int on POSIX. */
+typedef int fio_socket_i;
+/** Sentinel value for an invalid socket handle. */
+#define FIO_SOCKET_INVALID (-1)
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -91,7 +128,7 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #include <sys/un.h>
 #include <unistd.h>
 #ifndef FIO_SOCK_FD_ISVALID
-#define FIO_SOCK_FD_ISVALID(fd) ((int)(fd) != (int)-1)
+#define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
 #define fio_sock_write(fd, data, len)      write((fd), (data), (len))
@@ -103,6 +140,10 @@ FIO_IFUNC int fio_sock_dup(int original) {
 #define fio_sock_close(fd)                 close(fd)
 /** Acts as POSIX accept. Use this macro for portability with WinSock2. */
 #define fio_sock_accept(fd, addr, addrlen) accept(fd, addr, addrlen)
+/** Creates a connected socket pair using POSIX socketpair(). */
+FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
+  return socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+}
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
@@ -148,12 +189,12 @@ typedef enum {
  *
  * The `port` string will be ignored when `FIO_SOCK_UNIX` is set.
  */
-FIO_IFUNC int fio_sock_open(const char *restrict address,
-                            const char *restrict port,
-                            uint16_t flags);
+FIO_IFUNC fio_socket_i fio_sock_open(const char *restrict address,
+                                     const char *restrict port,
+                                     uint16_t flags);
 
 /** Creates a new socket, according to the provided flags. */
-SFUNC int fio_sock_open2(const char *url, uint16_t flags);
+SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags);
 
 /**
  * Attempts to resolve an address to a valid IP6 / IP4 address pointer.
@@ -179,19 +220,19 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a);
  *
  * This function is limited in its thread safety to 128 threads / calls.
  */
-SFUNC fio_buf_info_s fio_sock_peer_addr(int s);
+SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s);
 
 /** Creates a new network socket and binds it to a local address. */
-SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock);
+SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock);
 
 /** Creates a new network socket and connects it to a remote address. */
-SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock);
+SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock);
 
 /** Creates a new Unix socket and binds it to a local address. */
-SFUNC int fio_sock_open_unix(const char *address, uint16_t flags);
+SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags);
 
 /** Sets a file descriptor / socket to non blocking state. */
-SFUNC int fio_sock_set_non_block(int fd);
+SFUNC int fio_sock_set_non_block(fio_socket_i fd);
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
 SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
@@ -205,7 +246,7 @@ SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
  *
  * Possible return values include POLLIN | POLLOUT | POLLHUP | POLLNVAL
  */
-SFUNC short fio_sock_wait_io(int fd, short events, int timeout);
+SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout);
 
 /** A helper macro that waits on a single IO with no callbacks (0 = no event) */
 #define FIO_SOCK_WAIT_RW(fd, timeout_)                                         \
@@ -236,11 +277,11 @@ IO Poll - Implementation (always static / inlined)
  *
  * The `port` string will be ignored when `FIO_SOCK_UNIX` is set.
  */
-FIO_IFUNC int fio_sock_open(const char *restrict address,
-                            const char *restrict port,
-                            uint16_t flags) {
+FIO_IFUNC fio_socket_i fio_sock_open(const char *restrict address,
+                                     const char *restrict port,
+                                     uint16_t flags) {
   struct addrinfo *addr = NULL;
-  int fd;
+  fio_socket_i fd;
 #ifdef AF_UNIX
   if ((flags & FIO_SOCK_UNIX))
     return fio_sock_open_unix(address, flags);
@@ -252,17 +293,17 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     addr = fio_sock_address_new(address, port, SOCK_STREAM);
     if (!addr) {
       FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
     if ((flags & FIO_SOCK_CLIENT)) {
       fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
     } else {
       fd = fio_sock_open_local(addr, (flags & FIO_SOCK_NONBLOCK));
-      if (fd != -1 && listen(fd, SOMAXCONN) == -1) {
+      if (FIO_SOCK_FD_ISVALID(fd) && listen(fd, SOMAXCONN) == -1) {
         FIO_LOG_ERROR("(fio_sock_open) failed on call to listen: %s",
                       strerror(errno));
         fio_sock_close(fd);
-        fd = -1;
+        fd = FIO_SOCKET_INVALID;
       }
     }
     fio_sock_address_free(addr);
@@ -271,7 +312,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
     addr = fio_sock_address_new(address, port, SOCK_DGRAM);
     if (!addr) {
       FIO_LOG_ERROR("(fio_sock_open) address error: %s", strerror(errno));
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
     if ((flags & FIO_SOCK_CLIENT)) {
       fd = fio_sock_open_remote(addr, (flags & FIO_SOCK_NONBLOCK));
@@ -284,7 +325,7 @@ FIO_IFUNC int fio_sock_open(const char *restrict address,
 
   FIO_LOG_ERROR(
       "(fio_sock_open) the FIO_SOCK_TCP and FIO_SOCK_UDP flags are exclusive");
-  return -1;
+  return FIO_SOCKET_INVALID;
 }
 
 FIO_IFUNC struct addrinfo *fio_sock_address_new(
@@ -357,7 +398,7 @@ FIO_SOCK - Implementation
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /** Creates a new socket, according to the provided flags. */
-SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
+SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
   char buf[2048];
   char port[64];
   char *addr = buf;
@@ -379,7 +420,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
           "Couldn't open unix socket to %s - host name too long (%zu).",
           url,
           u.path.len);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(buf, u.path.buf, u.path.len);
     buf[u.path.len] = 0;
@@ -396,7 +437,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
       errno = EINVAL;
       FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
                     url);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(port, u.port.buf, u.port.len);
     port[u.port.len] = 0;
@@ -419,7 +460,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
     if (u.host.len > 2047) {
       errno = EINVAL;
       FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(buf, u.host.buf, u.host.len);
     buf[u.host.len] = 0;
@@ -430,7 +471,7 @@ SFUNC int fio_sock_open2(const char *url, uint16_t flags) {
 }
 
 /** Sets a file descriptor / socket to non blocking state. */
-SFUNC int fio_sock_set_non_block(int fd) {
+SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 /* If they have O_NONBLOCK, use the Posix way to do it */
 #if defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
   /* Fixme: O_NONBLOCK is defined but broken on SunOS 4.1.x and AIX 3.2.5. */
@@ -477,85 +518,57 @@ SFUNC int fio_sock_set_non_block(int fd) {
 }
 
 /** Creates a new network socket and binds it to a local address. */
-SFUNC int fio_sock_open_local(struct addrinfo *addr, int nonblock) {
-  int fd = -1;
+SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
+  fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
-#if FIO_OS_WIN
-    SOCKET fd_tmp;
-    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
-        INVALID_SOCKET) {
+    fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
-    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
-      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
-      errno = ERANGE;
-    }
-    fd = (int)fd_tmp;
-#else
-    if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
-      continue;
-    }
-#endif
     { // avoid the "address taken"
       int optval = 1;
       setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      FIO_LOG_DEBUG("Couldn't set socket (%d) to non-blocking mode %s",
-                    fd,
+      FIO_LOG_DEBUG("Couldn't set socket to non-blocking mode %s",
                     strerror(errno));
       fio_sock_close(fd);
-      fd = -1;
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
     if (bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
-      FIO_LOG_DEBUG("Failed attempt to bind socket (%d) to address %s",
-                    fd,
+      FIO_LOG_DEBUG("Failed attempt to bind socket to address %s",
                     strerror(errno));
       fio_sock_close(fd);
-      fd = -1;
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
     break;
   }
-  if (fd == -1) {
+  if (!FIO_SOCK_FD_ISVALID(fd)) {
     FIO_LOG_DEBUG("socket binding/creation error %s", strerror(errno));
   }
   return fd;
 }
 
 /** Creates a new network socket and connects it to a remote address. */
-SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
-  int fd = -1;
+SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
+  fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
-#if FIO_OS_WIN
-    SOCKET fd_tmp;
-    if ((fd_tmp = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) ==
-        INVALID_SOCKET) {
+    fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+    if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
-    if (!FIO_SOCK_FD_ISVALID(fd_tmp)) {
-      FIO_LOG_DEBUG("windows socket value out of valid portable range.");
-      errno = ERANGE;
-    }
-    fd = (int)fd_tmp;
-#else
-    if ((fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
-      continue;
-    }
-#endif
 
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      FIO_LOG_DEBUG(
-          "Failed attempt to set client socket (%d) to non-blocking %s",
-          fd,
-          strerror(errno));
+      FIO_LOG_DEBUG("Failed attempt to set client socket to non-blocking %s",
+                    strerror(errno));
       fio_sock_close(fd);
-      fd = -1;
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
     if (connect(fd, p->ai_addr, p->ai_addrlen) == -1 &&
@@ -566,33 +579,30 @@ SFUNC int fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 #endif
     ) {
 #if FIO_OS_WIN
-      FIO_LOG_DEBUG(
-          "Couldn't connect client socket (%d) to remote address %s (%d)",
-          fd,
-          strerror(errno),
-          WSAGetLastError());
+      FIO_LOG_DEBUG("Couldn't connect client socket to remote address %s (%d)",
+                    strerror(errno),
+                    WSAGetLastError());
 #else
-      FIO_LOG_DEBUG("Couldn't connect client socket (%d) to remote address %s",
-                    fd,
+      FIO_LOG_DEBUG("Couldn't connect client socket to remote address %s",
                     strerror(errno));
 #endif
       fio_sock_close(fd);
-      fd = -1;
+      fd = FIO_SOCKET_INVALID;
       continue;
     }
     break;
   }
-  if (fd == -1) {
+  if (!FIO_SOCK_FD_ISVALID(fd)) {
     FIO_LOG_DEBUG("socket connection/creation error %s", strerror(errno));
   }
   return fd;
 }
 
 /** Returns 0 on timeout, -1 on error or the events that are valid. */
-SFUNC short fio_sock_wait_io(int fd, short events, int timeout) {
+SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout) {
   short r = 0;
 #if FIO_OS_WIN
-  if (fd == -1) {
+  if (fd == FIO_SOCKET_INVALID) {
     FIO_THREAD_WAIT((timeout * 1000000));
     return r;
   }
@@ -657,7 +667,7 @@ SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
 
 #ifdef AF_UNIX
 /** Creates a new Unix socket and binds it to a local address. */
-SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
+SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
   /* Unix socket */
   struct sockaddr_un addr = {0};
   size_t addr_len = strlen(address);
@@ -667,27 +677,29 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
         addr_len,
         sizeof(addr.sun_path) - 1);
     errno = ENAMETOOLONG;
-    return -1;
+    return FIO_SOCKET_INVALID;
   }
   addr.sun_family = AF_UNIX;
   FIO_MEMCPY(addr.sun_path, address, addr_len + 1); /* copy the NUL byte. */
 #if defined(__APPLE__)
   addr.sun_len = addr_len;
 #endif
-  int fd =
-      socket(AF_UNIX, (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM, 0);
-  if (fd == -1) {
+  fio_socket_i fd =
+      (fio_socket_i)socket(AF_UNIX,
+                           (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM,
+                           0);
+  if (!FIO_SOCK_FD_ISVALID(fd)) {
     FIO_LOG_ERROR("couldn't open unix socket (flags == %d) %s\n\t%s",
                   (int)flags,
                   strerror(errno),
                   address);
-    return -1;
+    return FIO_SOCKET_INVALID;
   }
   if ((flags & FIO_SOCK_NONBLOCK) && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_ERROR("couldn't set socket to non-blocking mode");
     fio_sock_close(fd);
     unlink(addr.sun_path);
-    return -1;
+    return FIO_SOCKET_INVALID;
   }
   if ((flags & FIO_SOCK_CLIENT)) {
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
@@ -696,7 +708,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
                     addr.sun_path,
                     strerror(errno));
       fio_sock_close(fd);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
   } else {
     unlink(addr.sun_path);
@@ -720,7 +732,7 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
                     strerror(errno));
       fio_sock_close(fd);
       // unlink(addr.sun_path);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
 #ifndef FIO_OS_WIN
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
@@ -732,15 +744,16 @@ SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
       FIO_LOG_ERROR("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
       unlink(addr.sun_path);
-      return -1;
+      return FIO_SOCKET_INVALID;
     }
   }
   return fd;
 }
 #else
-SFUNC int fio_sock_open_unix(const char *address, uint16_t flags) {
+SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
   (void)address, (void)flags;
   FIO_ASSERT(0, "this system does not support Unix sockets.");
+  return FIO_SOCKET_INVALID;
 }
 #endif /* AF_UNIX */
 
@@ -757,7 +770,7 @@ Peer Address
  *
  * This function is limited in its thread safety to 128 threads / calls.
  */
-SFUNC fio_buf_info_s fio_sock_peer_addr(int s) {
+SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s) {
   static char buffer[8129]; /* 64 byte per buffer x 128 threads */
   static unsigned pos = 0;
   fio_buf_info_s r =

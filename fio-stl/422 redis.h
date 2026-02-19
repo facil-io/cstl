@@ -58,32 +58,61 @@ state changes. This prevents race conditions without requiring locks.
 Public API thread safety:
 - fio_redis_new():   Thread-safe (defers connection to IO thread)
 - fio_redis_dup():   Thread-safe (uses atomic reference counting)
-- fio_redis_free():  Thread-safe (defers cleanup to IO thread)
+- fio_redis_free():  Thread-safe (releases caller's ref; simply decrements ref)
 - fio_redis_send():  Thread-safe (defers command queuing to IO thread)
 
 Internal operations that run on the IO thread:
 - Command queue management (add, remove, send)
 - Connection state changes (connect, disconnect, reconnect)
 - Protocol callbacks (on_attach, on_data, on_close, on_timeout)
-- Pub/sub engine callbacks (subscribe, publish, etc.)
+- Pub/Sub engine callbacks (subscribe, publish, etc.)
 
 Reference Counting Ownership Model:
 ====================================
-The Redis engine uses reference counting for memory management:
+The Redis engine uses reference counting (via FIO_REF) for memory management.
+There are THREE completely independent concerns:
 
-- fio_redis_new():   Creates engine with ref=1 (caller's reference)
-- fio_redis_dup():   Increments ref, returns engine
-- fio_redis_free():  Decrements ref, destroys when ref reaches 0
+1. Reference counting — pure memory lifetime:
+   - fio_redis_new():   Creates engine with ref=1 (caller owns this reference)
+   - fio_redis_dup():   Increments ref, returns engine
+   - fio_redis_free():  One line only: fio___redis_free(r). Nothing else.
+   When ref hits 0: FIO_REF_DESTROY → fio___redis_destroy fires.
 
-Important: fio_pubsub_engine_attach/detach do NOT affect reference counts.
-The caller is responsible for calling fio_redis_free() when done.
+2. Pub/sub membership — system owns a ref TRANSFERRED at attach:
+   - fio_pubsub_engine_attach(engine): the CALLER moves their reference into
+     the system. The caller either relinquished their only ref (won't use it
+     after), or called fio_redis_dup first to keep a copy. Either way: NO
+     extra dup inside the redis module for attach. The ref is transferred.
+   - fio___redis_detached callback (fired by fio_pubsub_engine_detach):
+     the system releases its ref: fio___redis_free(r). That's it.
+   - subscribe/psubscribe: only send SUBSCRIBE/PSUBSCRIBE commands to Redis.
+     They do NOT touch ref counts. The ref was already transferred at attach.
+
+3. IO ↔ Engine link — peers, no ownership:
+   - fio_io_connect(..., .udata = r): raw pointer, no ownership, no dup.
+   - fio___redis_destroy (called when ref hits 0): breaks the link both ways:
+     nulls IO's udata, closes IO, nulls conn->io.
+   - on_close callback: checks udata. If NULL (engine destroyed): do nothing.
+     If non-NULL: null conn->io, schedule reconnect. No fio___redis_free.
 
 Internal reference management:
-- Deferred tasks (connect, callbacks) increment ref before scheduling
-  and decrement after the task completes
-- Connection on_close callbacks decrement ref (balancing connect's ref)
-- The on_detached callback does NOT free memory; it only marks the
-  engine as detached
+- Deferred tasks (connect, callbacks) dup before scheduling, free at end.
+- Connection on_close callbacks do NOT free (connection holds no ref).
+- The on_detached callback releases the pub/sub system's ref.
+
+Typical usage patterns:
+  // Pattern A: with pub/sub (caller keeps a dup, transfers original to system)
+  fio_pubsub_engine_s *redis = fio_redis_new(...);  // ref=1
+  fio_redis_dup(redis);                              // ref=2, caller keeps this
+  fio_pubsub_engine_attach(redis);                   // system takes original
+ref
+  // ... use pub/sub ...
+  fio_pubsub_engine_detach(redis);  // system releases its ref → ref=1
+  fio_redis_free(redis);            // caller releases dup → ref=0 → destroy
+
+  // Pattern B: never attached (no system ref)
+  fio_pubsub_engine_s *redis = fio_redis_new(...);  // ref=1
+  fio_redis_free(redis);                             // ref=0 → destroy
 
 Usage 1 - Database Only:
     // Create engine - only the publishing connection is established
@@ -100,21 +129,17 @@ Usage 1 - Database Only:
     fio_redis_send(redis, cmd, my_callback, my_udata);
     fiobj_free(cmd);
 
-    // Cleanup
+    // Cleanup - releases caller's ref
     fio_redis_free(redis);
 
 Usage 2 - With Pub/Sub:
-    fio_pubsub_engine_s *redis = fio_redis_new(
-        .url = "localhost:6379"
-    );
-
-    // Explicitly attach to pub/sub system - this starts the subscription
-    // connection and enables SUBSCRIBE/PSUBSCRIBE/PUBLISH functionality
-    fio_pubsub_engine_attach(redis);
+    fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost:6379");
+    fio_redis_dup(redis);              // keep a local ref
+    fio_pubsub_engine_attach(redis);   // system takes the original ref
 
     // ... use pub/sub ...
 
-    // Explicitly detach before destroying if attached
+    // detach releases the system's ref; free releases the caller's dup.
     fio_pubsub_engine_detach(redis);
     fio_redis_free(redis);
 
@@ -181,18 +206,19 @@ SFUNC fio_pubsub_engine_s *fio_redis_new(fio_redis_args_s args);
 SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine);
 
 /**
- * Decrements the reference count. When count reaches 0, destroys the engine.
+ * Releases the caller's reference to the engine.
  *
- * This function:
- * - Decrements the reference count
- * - If ref reaches 0:
- *   - Closes all connections
- *   - Frees all queued commands
- *   - Frees the engine memory
+ * This function simply decrements the reference count. If the ref reaches 0
+ * (no other refs held), fio___redis_destroy() fires immediately:
+ * sets running=0, closes connections, drains the command queue, frees memory.
  *
- * IMPORTANT: If the engine was attached to pub/sub via
- * fio_pubsub_engine_attach(), you MUST call fio_pubsub_engine_detach() before
- * calling fio_redis_free().
+ * The engine stays alive as long as any other ref is held (e.g. the pub/sub
+ * system's ref taken via subscribe/psubscribe). The pub/sub system releases
+ * its ref via the on_detached callback when fio_pubsub_engine_detach() fires.
+ *
+ * The caller does NOT need to call fio_pubsub_engine_detach() before freeing.
+ * Calling fio_pubsub_engine_detach() before fio_redis_free() is also safe
+ * (detach releases the system ref; free releases the caller ref).
  *
  * Safe to call with NULL (no-op).
  */
@@ -261,18 +287,20 @@ typedef struct fio_redis_connection_s {
  * Reference counting ownership model (via FIO_REF):
  * - fio_redis_new():  ref = 1 (caller owns this reference)
  * - fio_redis_dup():  ref += 1 (returns engine)
- * - fio_redis_free(): ref -= 1, if ref==0 calls fio___redis_destroy()
+ * - fio_redis_free(): ref -= 1. If ref==0, fio___redis_destroy() fires.
  *
  * Internal reference management:
  * - fio_io_defer(fio___redis_connect, ...): ref += 1 before, ref -= 1 after
  * - fio_io_defer(fio___redis_perform_callback, ...): ref += 1 before, ref -= 1
- * after
- * - on_close callbacks: ref -= 1 (balances the connect ref)
+ *   after
+ * - on_close callbacks: NO ref change (connection holds no ownership ref)
  *
- * Pub/Sub integration (NO ref changes):
- * - fio_pubsub_engine_attach(): does NOT increment ref
- * - fio_pubsub_engine_detach(): does NOT decrement ref
- * - on_detached callback: only marks engine as detached, does NOT free
+ * Pub/Sub integration:
+ * - fio_pubsub_engine_attach(): CALLER transfers their ref to the system
+ * - subscribe/psubscribe: only send wire commands, do NOT touch ref counts
+ * - on_detached callback: releases the system's ref (fio___redis_free)
+ *
+ * IO ↔ Engine: peers, no ownership in either direction.
  */
 typedef struct fio_redis_engine_s {
   fio_pubsub_engine_s engine;      /* Must be first for casting */
@@ -285,10 +313,9 @@ typedef struct fio_redis_engine_s {
   FIOBJ last_channel;      /* Last received channel (dedup) */
   FIO_LIST_HEAD cmd_queue; /* Command queue - accessed only from IO thread */
   uint8_t ping_interval;
-  volatile uint8_t pub_sent;  /* Flag: command sent, awaiting reply */
-  volatile uint8_t running;   /* Flag: engine is active (for reconnection) */
-  volatile uint8_t attached;  /* Flag: attached to pub/sub system */
-  volatile uint8_t detaching; /* Flag: detach in progress, don't re-attach */
+  volatile uint8_t pub_sent; /* Flag: command sent, awaiting reply */
+  volatile uint8_t running;  /* Flag: engine is active (for reconnection) */
+  volatile uint8_t attached; /* Flag: attached to pub/sub system */
   uint8_t
       buf[FIO_REDIS_READ_BUFFER * 2]; /* Read buffers for both connections */
 } fio_redis_engine_s;
@@ -547,18 +574,30 @@ Reference Counting and Cleanup
 Reference counting ownership model (via FIO_REF macros):
 - fio_redis_new():  ref = 1 (caller's reference)
 - fio_redis_dup():  ref += 1
-- fio_redis_free(): ref -= 1, if ref==0 calls fio___redis_destroy()
+- fio_redis_free(): ref -= 1. If ref==0, fio___redis_destroy() fires.
 
 Internal reference management:
 - fio_io_defer(fio___redis_connect, ...): ref += 1 before, ref -= 1 after
 - fio_io_defer(fio___redis_perform_callback, ...): ref += 1 before, ref -= 1
-after
-- on_close callbacks: ref -= 1 (balances the connect ref)
+  after
+- on_close callbacks: NO ref change (connection holds no ownership ref)
 
-Pub/Sub integration (NO ref changes):
-- fio_pubsub_engine_attach(): does NOT increment ref
-- fio_pubsub_engine_detach(): does NOT decrement ref
-- on_detached callback: only marks engine as detached, does NOT free
+Pub/Sub integration:
+- fio_pubsub_engine_attach(): CALLER transfers their ref to the system
+- subscribe/psubscribe: only send wire commands, do NOT touch ref counts
+- on_detached callback: releases the system's ref (fio___redis_free)
+
+IO ↔ Engine: peers, no ownership in either direction.
+- fio_io_connect(.udata = r): raw pointer, no dup
+- fio___redis_destroy: nulls IO udata, closes IO, nulls conn->io
+- on_close: if udata NULL → engine destroyed, do nothing; else reconnect
+
+fio___redis_destroy (called when last ref drops):
+- Sets running=0 (stops command queue from accepting new commands)
+- Closes pub_conn and sub_conn (NULL udata first to prevent on_close dup)
+- Removes fork callback
+- Drains command queue (invokes callbacks with FIOBJ_INVALID)
+- Frees last_channel
 ***************************************************************************** */
 
 FIO_SFUNC void fio___redis_connection_reset(fio_redis_connection_s *conn) {
@@ -583,9 +622,40 @@ FIO_SFUNC void fio___redis_connection_reset(fio_redis_connection_s *conn) {
 /**
  * Internal: Destroy callback for FIO_REF.
  * Called when reference count reaches 0.
+ *
+ * This is the ONLY place that sets running=0, closes connections, removes
+ * the fork callback, and drains the command queue.
+ *
+ * Guard: NULL the io pointer BEFORE calling fio_io_close_now to prevent
+ * double-close re-entrancy (on_close calls fio___redis_free which would
+ * re-enter destroy if io is still set).
  */
 FIO_SFUNC void fio___redis_destroy(fio_redis_engine_s *r) {
   FIO_LOG_DEBUG("(redis) destroying engine for %s:%s", r->address, r->port);
+
+  /* Stop reconnection attempts - must be set before closing connections
+   * so that on_close callbacks do not schedule a reconnect. */
+  r->running = 0;
+
+  /* Close connections safely.
+   * 1. NULL the io field first so on_close_internal sees conn->io == NULL
+   *    and skips the reconnect path.
+   * 2. Set udata to NULL on the io handle so on_close_pub/sub returns early
+   *    without calling fio___redis_free (which would underflow the ref count
+   *    since we are already in destroy with ref == 0).
+   * 3. Then close. */
+  fio_io_s *pub_io = r->pub_conn.io;
+  fio_io_s *sub_io = r->sub_conn.io;
+  r->pub_conn.io = NULL;
+  r->sub_conn.io = NULL;
+  if (pub_io) {
+    fio_io_udata_set(pub_io, NULL);
+    fio_io_close_now(pub_io);
+  }
+  if (sub_io) {
+    fio_io_udata_set(sub_io, NULL);
+    fio_io_close_now(sub_io);
+  }
 
   /* Remove fork callback to prevent use-after-free */
   fio_state_callback_remove(FIO_CALL_IN_CHILD, fio___redis_on_fork, r);
@@ -602,33 +672,6 @@ FIO_SFUNC void fio___redis_destroy(fio_redis_engine_s *r) {
   }
   FIO_LEAK_COUNTER_ON_FREE(fio___redis_engine);
   /* Note: FIO_REF handles the actual memory deallocation */
-}
-
-/**
- * Internal: Deferred task to close connections and release reference.
- * Runs on IO thread to ensure thread-safety.
- *
- * IMPORTANT: fio_io_close_now() triggers on_close callbacks synchronously,
- * which call fio___redis_free(). We must capture IO handles before closing
- * to avoid use-after-free if the engine is freed during the first close.
- */
-FIO_SFUNC void fio___redis_free_task(void *engine_, void *ignr_) {
-  fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
-  (void)ignr_;
-
-  /* Capture IO handles before closing - on_close may free the engine */
-  fio_io_s *pub_io = r->pub_conn.io;
-  fio_io_s *sub_io = r->sub_conn.io;
-
-  /* Close connections - this will trigger on_close callbacks which will
-   * release the connection references and eventually free the engine */
-  if (pub_io)
-    fio_io_close_now(pub_io);
-  if (sub_io)
-    fio_io_close_now(sub_io);
-
-  /* Release the reference held for this deferred task */
-  fio___redis_free(r);
 }
 
 /* *****************************************************************************
@@ -796,6 +839,12 @@ FIO_SFUNC void fio___redis_on_close_pub(void *buffer, void *udata);
 FIO_SFUNC void fio___redis_on_close_sub(void *buffer, void *udata);
 FIO_SFUNC void fio___redis_on_timeout(fio_io_s *io);
 FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_);
+FIO_SFUNC void fio___redis_subscribe(const fio_pubsub_engine_s *eng,
+                                     fio_buf_info_s channel,
+                                     int16_t filter);
+FIO_SFUNC void fio___redis_psubscribe(const fio_pubsub_engine_s *eng,
+                                      fio_buf_info_s channel,
+                                      int16_t filter);
 
 /** Protocol for publishing connection */
 static fio_io_protocol_s FIO___REDIS_PUB_PROTOCOL = {
@@ -856,11 +905,33 @@ FIO_SFUNC void fio___redis_on_attach(fio_io_s *io) {
     FIO_LOG_DEBUG("(redis) subscription connection established to %s:%s",
                   r->address,
                   r->port);
-    /* If attached to pub/sub and not detaching, re-attach to trigger
-     * resubscription. Don't re-attach if detaching to avoid adding the
-     * engine back to the pubsub engines list after detach. */
-    if (r->attached && r->running && !r->detaching)
-      fio_pubsub_engine_attach(&r->engine);
+    /* Resubscription on reconnect: directly send SUBSCRIBE/PSUBSCRIBE for
+     * all channels the pub/sub system knows about.
+     *
+     * We do NOT call fio_pubsub_engine_attach here because that defers
+     * fio___pubsub_attach_task, which could run after fio___pubsub_detach_task
+     * (if detach is in progress), causing a use-after-free when attach_task
+     * re-adds the freed engine to the pub/sub engines list.
+     *
+     * Instead, we directly iterate the pub/sub channel maps and send wire
+     * commands. This is safe because we're on the IO thread and the channel
+     * maps are only modified on the IO thread. */
+    if (r->attached && r->running) {
+      FIO_MAP_EACH(fio___pubsub_channel_map,
+                   &FIO___PUBSUB_POSTOFFICE.channels,
+                   i) {
+        fio_pubsub_channel_s *ch = i.node->key;
+        fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
+        fio___redis_subscribe(&r->engine, name, ch->filter);
+      }
+      FIO_MAP_EACH(fio___pubsub_channel_map,
+                   &FIO___PUBSUB_POSTOFFICE.patterns,
+                   i) {
+        fio_pubsub_channel_s *ch = i.node->key;
+        fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
+        fio___redis_psubscribe(&r->engine, name, ch->filter);
+      }
+    }
   } else {
     FIO_LOG_DEBUG("(redis) publishing connection established to %s:%s",
                   r->address,
@@ -945,37 +1016,43 @@ FIO_SFUNC void fio___redis_on_data(fio_io_s *io) {
   }
 }
 
-/** Internal helper for connection close handling */
+/** Internal helper for connection close handling.
+ *
+ * Called from on_close_pub / on_close_sub with the udata from the IO handle.
+ * If r is NULL, the engine was already destroyed (fio___redis_destroy nulled
+ * the udata before closing) — do nothing.
+ *
+ * The connection holds NO ownership ref. Reconnect tasks hold their own ref
+ * (dup before defer, free at end of fio___redis_connect).
+ */
 FIO_SFUNC void fio___redis_on_close_internal(fio_redis_engine_s *r,
-                                             fio_redis_connection_s *conn,
-                                             int is_sub) {
+                                             fio_redis_connection_s *conn) {
+  if (!r)
+    return; /* engine already destroyed — udata was NULL */
   fio___redis_connection_reset(conn);
 
-  if (r->running && fio_io_is_running()) {
+  /* Reconnect if IO reactor is still running */
+  if (fio_io_is_running()) {
     FIO_LOG_WARNING("(redis) %s connection lost, reconnecting...",
-                    is_sub ? "subscription" : "publishing");
-    /* Increment ref for deferred reconnect task */
-    fio___redis_dup(r);
+                    (conn == &r->sub_conn) ? "subscription" : "publishing");
+    fio___redis_dup(r); /* ref for deferred reconnect task */
     fio_io_defer(fio___redis_connect, r, conn);
   }
-  /* Release the reference held by this connection */
-  fio___redis_free(r);
+  /* No fio___redis_free here — connection holds no ownership ref */
 }
 
 FIO_SFUNC void fio___redis_on_close_pub(void *buffer, void *udata) {
-  fio_redis_engine_s *r = (fio_redis_engine_s *)udata;
   (void)buffer;
-  if (!r)
-    return;
-  fio___redis_on_close_internal(r, &r->pub_conn, 0);
+  fio___redis_on_close_internal((fio_redis_engine_s *)udata,
+                                udata ? &((fio_redis_engine_s *)udata)->pub_conn
+                                      : NULL);
 }
 
 FIO_SFUNC void fio___redis_on_close_sub(void *buffer, void *udata) {
-  fio_redis_engine_s *r = (fio_redis_engine_s *)udata;
   (void)buffer;
-  if (!r)
-    return;
-  fio___redis_on_close_internal(r, &r->sub_conn, 1);
+  fio___redis_on_close_internal((fio_redis_engine_s *)udata,
+                                udata ? &((fio_redis_engine_s *)udata)->sub_conn
+                                      : NULL);
 }
 
 /**
@@ -1060,16 +1137,17 @@ FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_) {
     FIO_LOG_ERROR("(redis) failed to initiate connection to %s:%s",
                   r->address,
                   r->port);
-    /* Retry after delay using proper timer callback signature */
+    /* Retry after delay — pass our ref to the timer (timer holds it) */
     fio_io_run_every(.fn = fio___redis_connect_timer,
                      .udata1 = r,
                      .udata2 = conn,
                      .every = 1000,
                      .repetitions = 1);
-    return;
+    return; /* ref ownership transferred to timer */
   }
-  /* Connection initiated - the ref added before connect is now held by the
-   * connection. It will be released in on_close when the connection closes. */
+  /* Connection initiated successfully.
+   * The connection holds NO ownership ref — release the deferred task's ref. */
+  fio___redis_free(r);
 }
 
 /** Timer callback wrapper - calls fio___redis_connect and returns 0 to stop */
@@ -1327,21 +1405,38 @@ EXECUTION CONTEXT:
  * Called when engine is detached from pub/sub.
  * Runs on IO thread - no lock needed.
  *
- * IMPORTANT: This callback does NOT free memory. It only marks the engine
- * as detached. Memory is freed by fio_redis_free() when ref reaches 0.
+ * Releases the system's reference that was taken in fio___redis_subscribe /
+ * fio___redis_psubscribe when r->attached was first set to 1.
+ *
+ * Guard: if r->attached is 0, no system ref was taken — return immediately
+ * to avoid underflowing the reference count.
+ *
+ * NOTE: We do NOT close sub_conn here. The sub_conn will close naturally
+ * (via IO shutdown or normal close path). When on_close_sub fires, it checks
+ * r->attached (now 0) and skips reconnection. This avoids the re-entrancy
+ * hazard of closing sub_conn here and having on_close_sub call fio___redis_free
+ * on an engine that may already be in fio___redis_destroy.
  */
 FIO_SFUNC void fio___redis_detached(const fio_pubsub_engine_s *eng) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
   FIO_LOG_DEBUG("(redis) engine detached from pub/sub");
+  /* Guard: only release if the attach-ref was actually taken. */
+  if (!r->attached)
+    return;
   r->attached = 0;
-  r->detaching = 0; /* Detach complete */
-  /* Close subscription connection since we're no longer attached */
-  if (r->sub_conn.io) {
-    fio_io_close_now(r->sub_conn.io);
+
+  /* Close sub connection — no longer needed without pub/sub.
+   * Null the udata first so on_close sees NULL and does not reconnect. */
+  fio_io_s *sub_io = r->sub_conn.io;
+  r->sub_conn.io = NULL;
+  if (sub_io) {
+    fio_io_udata_set(sub_io, NULL);
+    fio_io_close_now(sub_io);
   }
-  /* NOTE: Do NOT call fio___redis_free() here. The "attached" state is not a
-   * reference-counted ownership. The caller's fio_redis_free() handles all
-   * reference counting via fio___redis_dup/fio___redis_free pairs. */
+
+  /* Release the system's reference (transferred at fio_pubsub_engine_attach).
+   * The caller moved their ref to the system; this releases it. */
+  fio___redis_free(r);
 }
 
 /**
@@ -1354,11 +1449,13 @@ FIO_SFUNC void fio___redis_subscribe(const fio_pubsub_engine_s *eng,
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
   (void)filter;
 
-  /* Mark as attached and start subscription connection if needed */
+  /* Mark as attached and start subscription connection if needed.
+   * The system's ref was transferred at fio_pubsub_engine_attach time —
+   * the caller moved their ref to the system. No dup here. */
   if (!r->attached) {
     r->attached = 1;
     if (r->running && !r->sub_conn.io) {
-      fio___redis_dup(r);
+      fio___redis_dup(r); /* ref for deferred connect task */
       fio_io_defer(fio___redis_connect, r, &r->sub_conn);
     }
   }
@@ -1389,11 +1486,13 @@ FIO_SFUNC void fio___redis_psubscribe(const fio_pubsub_engine_s *eng,
   fio_redis_engine_s *r = (fio_redis_engine_s *)eng;
   (void)filter;
 
-  /* Mark as attached and start subscription connection if needed */
+  /* Mark as attached and start subscription connection if needed.
+   * The system's ref was transferred at fio_pubsub_engine_attach time —
+   * the caller moved their ref to the system. No dup here. */
   if (!r->attached) {
     r->attached = 1;
     if (r->running && !r->sub_conn.io) {
-      fio___redis_dup(r);
+      fio___redis_dup(r); /* ref for deferred connect task */
       fio_io_defer(fio___redis_connect, r, &r->sub_conn);
     }
   }
@@ -1509,10 +1608,19 @@ FIO_SFUNC void fio___redis_publish(const fio_pubsub_engine_s *eng,
  * worker-specific IPC-forwarding implementation.
  *
  * This fires only in forked worker processes (never in single-process mode).
+ *
+ * We also reset the inherited leak counters here. The worker inherits the
+ * master's allocation counters via fork, but the engine is owned and freed
+ * by the master — the worker should not count it as a leak.
  */
 FIO_SFUNC void fio___redis_on_fork(void *engine_) {
   fio_redis_engine_s *r = (fio_redis_engine_s *)engine_;
   r->engine.publish = fio___redis_publish_worker;
+  /* Reset inherited leak counters: the engine was allocated in the master
+   * and will be freed there. The worker's counters would otherwise report
+   * a false positive "1 leak" for each inherited engine. */
+  FIO_LEAK_COUNTER_ON_FREE(fio___redis_engine);
+  FIO_LEAK_COUNTER_ON_FREE(fio___redis);
 }
 
 /* *****************************************************************************
@@ -1654,39 +1762,22 @@ SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine) {
 }
 
 /**
- * Decrements the reference count. When count reaches 0, destroys the engine.
- * Thread-safe - defers connection closure to the IO thread.
+ * Releases the caller's reference to the engine.
+ * Thread-safe - simply decrements the reference count.
+ *
+ * If this was the last reference, fio___redis_destroy() fires immediately:
+ * sets running=0, closes connections, drains the command queue, frees memory.
+ *
+ * The caller does NOT need to call fio_pubsub_engine_detach() before freeing.
+ * If the engine is attached, the pub/sub system holds its own ref which is
+ * released when fio___redis_detached() fires (via detach or shutdown).
+ *
+ * Safe to call with NULL (no-op).
  */
 SFUNC void fio_redis_free(fio_pubsub_engine_s *engine) {
   if (!engine)
     return;
-  fio_redis_engine_s *r = (fio_redis_engine_s *)engine;
-
-  /* Mark as not running to prevent reconnection attempts and re-attach.
-   * This is safe to do from any thread as it's a simple flag. */
-  r->running = 0;
-
-  /* Mark as detaching to prevent re-attach in on_attach callback */
-  r->detaching = 1;
-
-  /* Always try to detach from pubsub to ensure engine is removed from the
-   * engines list. This prevents use-after-free during exit cleanup where
-   * pubsub cleanup may try to call detached() on an already-freed engine.
-   * Note: fio_pubsub_engine_detach is safe to call even if not attached -
-   * it will simply not find the engine in the list and not call detached().
-   *
-   * We hold an extra reference during detach because detach may call
-   * fio___redis_detached which calls fio___redis_free. Without the extra
-   * reference, the engine could be freed during detach. */
-  fio___redis_dup(r);
-  fio_pubsub_engine_detach(engine);
-
-  /* Defer connection closure to IO thread for thread-safety.
-   * We already have one extra reference from above, use it for the task. */
-  fio_io_defer(fio___redis_free_task, r, NULL);
-
-  /* Release caller's reference */
-  fio___redis_free(r);
+  fio___redis_free((fio_redis_engine_s *)engine);
 }
 
 /**

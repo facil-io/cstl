@@ -282,7 +282,10 @@ SFUNC fio_io_listener_s *fio_ipc_cluster_listen(uint16_t port);
 /** Manually connects to cluster peers. Usually unnecessary. */
 SFUNC void fio_ipc_cluster_connect(const char *url);
 
-/** Returns the last port number passed to fio_ipc_cluster_listen (or zero) */
+/**
+ * Returns the last port number passed to either fio_ipc_cluster_listen or
+ * fio_ipc_cluster_connect - zero if none.
+ * */
 SFUNC uint16_t fio_ipc_cluster_port(void);
 
 /* *****************************************************************************
@@ -1723,6 +1726,12 @@ SFUNC void fio_ipc_cluster_connect(const char *url) {
                   fio_io_pid(),
                   url);
     return;
+  }
+  fio_url_s info = fio_url_parse(url, FIO_STRLEN(url));
+  if (info.port.len) {
+    uint64_t tmp = fio_atol10u(&info.port.buf);
+    if (tmp && tmp < 0xFFFFU)
+      FIO___IPC.cluster_port = tmp;
   }
 
   FIO_LOG_INFO("(%d) Connecting to cluster IPC peer: %s", fio_io_pid(), url);

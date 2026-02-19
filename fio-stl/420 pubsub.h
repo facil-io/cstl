@@ -231,10 +231,10 @@ typedef struct fio_pubsub_engine_s {
                   const fio_pubsub_msg_s *msg);
 } fio_pubsub_engine_s;
 
-/** Attach an engine to the pub/sub system */
+/** Attach an engine to the pub/sub system - moves ownership to the system. */
 SFUNC void fio_pubsub_engine_attach(fio_pubsub_engine_s *engine);
 
-/** Detach an engine from the pub/sub system */
+/** Detach an engine from the pub/sub system - frees system's reference.*/
 SFUNC void fio_pubsub_engine_detach(fio_pubsub_engine_s *engine);
 
 /** Returns the builtin engine for publishing to the process group (IPC). */
@@ -425,14 +425,19 @@ FIO_SFUNC void fio___pubsub_on_message_stub(fio_pubsub_msg_s *msg) {
 Engine Collection
 ***************************************************************************** */
 
+/* Engine array hash: hash the engine pointer VALUE (not the address of the
+ * local variable holding it). fio_risky_ptr takes void* and hashes the
+ * pointer value, so we must dereference pobj to get the engine pointer. */
+#define FIO___PUBSUB_ENGINE_HASH(pe) fio_risky_ptr(*(pe))
+
 /* Engine array */
 FIO_TYPEDEF_IMAP_ARRAY(fio___pubsub_engines,
                        fio_pubsub_engine_s *,
                        uint32_t,
-                       fio_risky_ptr,
+                       FIO___PUBSUB_ENGINE_HASH,
                        FIO_IMAP_SIMPLE_CMP,
                        FIO_IMAP_VALID_NON_ZERO)
-
+#undef FIO___PUBSUB_ENGINE_HASH
 /* *****************************************************************************
 History Collection
 ***************************************************************************** */
@@ -712,7 +717,8 @@ FIO_SFUNC void fio___pubsub_pre_start(void *ignr_);
 SFUNC fio_pubsub_engine_s const *fio_pubsub_engine_default_set(
     fio_pubsub_engine_s const *engine) {
   if (!engine)
-    engine = fio_pubsub_engine_ipc();
+    engine = fio_ipc_cluster_port() ? fio_pubsub_engine_cluster()
+                                    : fio_pubsub_engine_ipc();
   FIO___PUBSUB_POSTOFFICE.default_engine = (fio_pubsub_engine_s *)engine;
   if (!fio_io_is_running())
     fio_state_callback_remove(FIO_CALL_PRE_START, fio___pubsub_pre_start, NULL);
@@ -1169,7 +1175,9 @@ FIO_SFUNC void fio___pubsub_attach_task(void *e, void *_ignr) {
 FIO_SFUNC void fio___pubsub_detach_task(void *e, void *_ignr) {
   (void)_ignr;
   fio_pubsub_engine_s *engine = (fio_pubsub_engine_s *)e;
-  if (fio___pubsub_engines_remove(&FIO___PUBSUB_POSTOFFICE.engines, engine) &&
+  /* fio___pubsub_engines_remove returns 0 on success (found+removed),
+   * -1 on failure (not found). Call detached only when successfully removed. */
+  if (!fio___pubsub_engines_remove(&FIO___PUBSUB_POSTOFFICE.engines, engine) &&
       engine->detached)
     engine->detached(engine);
 }
@@ -1198,6 +1206,8 @@ SFUNC void fio_pubsub_engine_detach(fio_pubsub_engine_s *engine) {
     fio_io_defer(fio___pubsub_detach_task, engine, NULL);
   else
     fio___pubsub_detach_task(engine, NULL);
+  if (engine == FIO___PUBSUB_POSTOFFICE.default_engine)
+    fio_pubsub_engine_default_set(NULL);
 }
 /* *****************************************************************************
 Publish Implementation

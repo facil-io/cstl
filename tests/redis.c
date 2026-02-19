@@ -471,9 +471,11 @@ FIO_SFUNC void redis_run_next_test(void) {
     /* Reset state */
     test_state.pubsub_msg_received = 0;
 
-    /* Attach Redis engine to pub/sub system.
-     * Attach/detach do NOT affect reference counts - the caller owns the ref.
-     */
+    /* fio_pubsub_engine_attach transfers ownership of one ref to the pub/sub
+     * system. We called fio_redis_dup() above to retain our own ref.
+     * fio_pubsub_engine_detach will release the system's ref (via
+     * fio___redis_detached). fio_redis_free() in TEST_PHASE_DONE releases our
+     * dup'd ref. */
     fio_pubsub_engine_attach(redis);
 
     /* Subscribe to test channel with our callback */
@@ -544,8 +546,12 @@ FIO_SFUNC void redis_run_next_test(void) {
       test_state.pubsub_pattern_handle = 0;
     }
 
-    /* Detach Redis from pub/sub before cleanup */
+    /* Detach Redis from pub/sub (releases the system's ref that was
+     * transferred at fio_pubsub_engine_attach time), then free our own
+     * dup'd ref. Both calls together bring the ref to 0 → destroy. */
     fio_pubsub_engine_detach(redis);
+    fio_redis_free(redis); /* releases our dup'd ref from fio_redis_dup above */
+    test_state.redis = NULL;
 
     fio_io_stop();
     break;
@@ -575,9 +581,13 @@ Round 1 Runner - Single-process mode
 FIO_SFUNC int redis_run_round1(void) {
   fprintf(stderr, "\t* Round 1: single-process mode (master-direct paths)\n");
 
-  /* Create Redis engine */
+  /* Create Redis engine (ref=1, caller owns this ref).
+   * Dup immediately so we keep a local ref alongside the one we will
+   * transfer to the pub/sub system via fio_pubsub_engine_attach. */
   fio_pubsub_engine_s *redis = fio_redis_new(.url = "redis://localhost:6379");
   FIO_ASSERT_ALLOC(redis);
+  fio_redis_dup(
+      redis); /* keep caller's ref; attach will consume the original */
 
   FIO_MEMSET(&test_state, 0, sizeof(test_state));
   test_state.redis = redis;
@@ -592,9 +602,10 @@ FIO_SFUNC int redis_run_round1(void) {
                    .every = 500,
                    .repetitions = 1);
 
-  /* Start the IO reactor (this blocks until fio_io_stop is called) */
+  /* Start the IO reactor (this blocks until fio_io_stop is called).
+   * fio_redis_free is called inside TEST_PHASE_DONE (before fio_io_stop)
+   * so the deferred cleanup runs while the IO loop is still active. */
   fio_io_start(0);
-  fio_redis_free(redis);
 
   /* Check if tests completed successfully */
   if (test_state.test_failed || test_state.phase != TEST_PHASE_DONE) {
@@ -934,12 +945,15 @@ FIO_SFUNC int redis_run_round2(void) {
   mp_master_ping = 0;
   mp_pubsub_sub = 0;
 
-  /* Create a fresh Redis engine for Round 2.
-   * fio_redis_new defers the pub_conn connect to the IO queue.
+  /* Create a fresh Redis engine for Round 2 (ref=1, caller owns this ref).
+   * Dup immediately so we keep a local ref alongside the one we will
+   * transfer to the pub/sub system via fio_pubsub_engine_attach.
    * Do NOT call fio_pubsub_engine_attach here — the subscription connection
    * requires the IO reactor to be running. Attach from a master-side timer. */
   mp_redis = fio_redis_new(.url = "redis://localhost:6379");
   FIO_ASSERT_ALLOC(mp_redis);
+  fio_redis_dup(
+      mp_redis); /* keep caller's ref; attach will consume the original */
 
   /* Register worker startup callback */
   fio_state_callback_add(FIO_CALL_ON_START, mp_worker_start, NULL);
@@ -963,8 +977,11 @@ FIO_SFUNC int redis_run_round2(void) {
     fio_pubsub_unsubscribe(.subscription_handle_ptr = &mp_pubsub_sub);
     mp_pubsub_sub = 0;
   }
+  /* detach releases the system's ref (transferred at attach time);
+   * free releases our dup'd ref — together they bring ref to 0 → destroy. */
   fio_pubsub_engine_detach(mp_redis);
-  fio_redis_free(mp_redis);
+  fio_redis_free(
+      mp_redis); /* releases our dup'd ref from fio_redis_dup above */
   mp_redis = NULL;
 
   /* === Verify results === */

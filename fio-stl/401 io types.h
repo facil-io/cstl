@@ -295,7 +295,7 @@ static struct FIO___IO_S {
   volatile uint8_t stop;
   fio_timer_queue_s timer;
   int restart_signal;
-  int wakeup_fd;
+  fio_socket_i wakeup_fd;
   fio_thread_pid_t root_pid;
   fio_thread_pid_t pid;
   fio___io_env_safe_s env;
@@ -308,7 +308,7 @@ static struct FIO___IO_S {
   size_t shutdown_timeout;
 } FIO___IO = {
     .tick = 0,
-    .wakeup_fd = -1,
+    .wakeup_fd = FIO_SOCKET_INVALID,
     .stop = 1,
     .lock = FIO___LOCK_INIT,
     .shutdown_timeout = FIO_IO_SHUTDOWN_TIMEOUT,
@@ -419,7 +419,7 @@ FIO_IFUNC void fio___io_free_with_flush(fio_io_s *io);
 
 /** The main IO object type. Should be treated as an opaque pointer. */
 struct fio_io_s {
-  int fd;
+  fio_socket_i fd;
   uint32_t flags;
   FIO_LIST_NODE node;
   void *udata;
@@ -553,13 +553,13 @@ SFUNC size_t fio_io_protocol_each(fio_io_protocol_s *protocol,
 }
 
 /* Attaches the socket in `fd` to the facio.io engine (reactor). */
-SFUNC fio_io_s *fio_io_attach_fd(int fd,
+SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
                                  fio_io_protocol_s *pr,
                                  void *udata,
                                  void *tls) {
   fio_io_s *io = NULL;
   fio_io_protocol_s cpy;
-  if (fd == -1)
+  if (!FIO_SOCK_FD_ISVALID(fd))
     goto error;
   io = fio___io_new2(pr->buffer_size);
   *io = (fio_io_s){
@@ -636,7 +636,7 @@ IFUNC void *fio_io_tls_set(fio_io_s *io, void *tls) {
 IFUNC void *fio_io_tls(fio_io_s *io) { return io->tls; }
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-IFUNC int fio_io_fd(fio_io_s *io) { return io->fd; }
+IFUNC fio_socket_i fio_io_fd(fio_io_s *io) { return io->fd; }
 
 FIO_SFUNC void fio___io_touch(void *io_, void *ignr_) {
   fio_io_s *io = (fio_io_s *)io_;
@@ -1129,7 +1129,7 @@ FIO_SFUNC void fio___io_wakeup_cb(fio_io_s *io) {
 FIO_SFUNC void fio___io_wakeup_on_close(void *ignr1_, void *ignr2_) {
   fio_sock_close(FIO___IO.wakeup_fd);
   FIO___IO.wakeup = NULL;
-  FIO___IO.wakeup_fd = -1;
+  FIO___IO.wakeup_fd = FIO_SOCKET_INVALID;
   FIO_LOG_DDEBUG2("(%d) fio___io_wakeup destroyed", FIO___IO.pid);
   (void)ignr1_, (void)ignr2_;
 }
@@ -1152,65 +1152,12 @@ static fio_io_protocol_s FIO___IO_WAKEUP_PROTOCOL = {
 FIO_SFUNC void fio___io_wakeup_init(void) {
   if (FIO___IO.wakeup)
     return;
-  int fds[2];
-#if FIO_OS_WIN
-  /* On Windows, pipe() returns CRT file descriptors, not Winsock SOCKETs.
-   * All fio_sock_* APIs (send/recv/ioctlsocket/WSAPoll) require real SOCKET
-   * handles, so we emulate socketpair() with a loopback TCP connection. */
-  {
-    SOCKET listener = INVALID_SOCKET;
-    SOCKET writer = INVALID_SOCKET;
-    SOCKET reader = INVALID_SOCKET;
-    struct sockaddr_in addr;
-    int addrlen = (int)sizeof(addr);
-    listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listener == INVALID_SOCKET)
-      goto win_pipe_fail;
-    FIO_MEMSET(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = 0; /* OS assigns an ephemeral port */
-    if (bind(listener, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
-      goto win_pipe_fail;
-    if (getsockname(listener, (struct sockaddr *)&addr, &addrlen) ==
-        SOCKET_ERROR)
-      goto win_pipe_fail;
-    if (listen(listener, 1) == SOCKET_ERROR)
-      goto win_pipe_fail;
-    writer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (writer == INVALID_SOCKET)
-      goto win_pipe_fail;
-    if (connect(writer, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
-      goto win_pipe_fail;
-    reader = accept(listener, NULL, NULL);
-    if (reader == INVALID_SOCKET)
-      goto win_pipe_fail;
-    closesocket(listener);
-    if (!FIO_SOCK_FD_ISVALID(reader) || !FIO_SOCK_FD_ISVALID(writer))
-      goto win_pipe_fail2;
-    fds[0] = (int)reader; /* read end */
-    fds[1] = (int)writer; /* write end */
-    goto win_pipe_ok;
-  win_pipe_fail:
-    if (listener != INVALID_SOCKET)
-      closesocket(listener);
-  win_pipe_fail2:
-    if (reader != INVALID_SOCKET)
-      closesocket(reader);
-    if (writer != INVALID_SOCKET)
-      closesocket(writer);
-    FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___io_wakeup disabled.",
-                  FIO___IO.pid);
-    return;
-  win_pipe_ok:;
-  }
-#else
-  if (pipe(fds)) {
+  fio_socket_i fds[2];
+  if (fio_sock_socketpair(fds)) {
     FIO_LOG_ERROR("(%d) couldn't open wakeup pipes, fio___io_wakeup disabled.",
                   FIO___IO.pid);
     return;
   }
-#endif /* FIO_OS_WIN */
   fio_sock_set_non_block(fds[0]);
   fio_sock_set_non_block(fds[1]);
   FIO___IO.wakeup_fd = fds[1];

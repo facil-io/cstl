@@ -262,7 +262,7 @@ IO Operations
  * Returns NULL on error. the `fio_io_s` pointer must NOT be used except
  * within proper callbacks.
  */
-SFUNC fio_io_s *fio_io_attach_fd(int fd,
+SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
                                  fio_io_protocol_s *protocol,
                                  void *udata,
                                  void *tls);
@@ -299,7 +299,7 @@ IFUNC void *fio_io_tls_set(fio_io_s *io, void *tls);
 IFUNC void *fio_io_tls(fio_io_s *io);
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
-IFUNC int fio_io_fd(fio_io_s *io);
+IFUNC fio_socket_i fio_io_fd(fio_io_s *io);
 
 /** Resets a socket's timeout counter. */
 SFUNC void fio_io_touch(fio_io_s *io);

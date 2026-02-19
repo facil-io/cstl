@@ -492,7 +492,7 @@ typedef struct {
   void (*on_start)(fio_io_protocol_s *protocol, void *udata);
   void (*on_stop)(fio_io_protocol_s *protocol, void *udata);
   int owner;
-  int fd;
+  fio_socket_i fd;
   size_t ref_count;
   size_t url_len;
   uint8_t hide_from_log;
@@ -595,7 +595,7 @@ SFUNC void *fio_io_listener_udata_set(fio_io_listener_s *listener,
 static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
-  int fd;
+  fio_socket_i fd;
   fio___io_listen_s *l = (fio___io_listen_s *)fio_io_udata(io);
   fio_io_unsuspend(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
@@ -659,12 +659,10 @@ static fio_io_protocol_s FIO___IO_LISTEN_PROTOCOL = {
 FIO_SFUNC void fio___io_listen_attach_task_deferred(void *l_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)l_;
   l = fio___io_listen_dup(l);
-  int fd = fio_sock_dup(l->fd);
-  FIO_ASSERT(fd != -1, "listening socket failed to `dup`");
-  FIO_LOG_DEBUG2("(%d) Called dup(%d) to attach %d as a listening socket.",
-                 (int)fio_io_pid(),
-                 l->fd,
-                 fd);
+  fio_socket_i fd = fio_sock_dup(l->fd);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd), "listening socket failed to `dup`");
+  FIO_LOG_DEBUG2("(%d) Called dup to attach new fd as a listening socket.",
+                 (int)fio_io_pid());
   l->io = fio_io_attach_fd(fd, &FIO___IO_LISTEN_PROTOCOL, l, NULL);
   (void)ignr_;
 }
@@ -765,7 +763,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
     fio_io_tls_free(args.tls);
 
   l->fd = fio_sock_open2(l->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
-  if (l->fd == -1) {
+  if (!FIO_SOCK_FD_ISVALID(l->fd)) {
     fio___io_listen_free(l);
     return (fio_io_listener_s *)(l = NULL);
   }
