@@ -436,14 +436,25 @@ Function Attributes
 #endif
 #endif
 
-#ifndef FIO_WEAK
-#if (defined(_MSC_VER) && _MSC_VER) ||                                         \
-    (FIO_OS_WIN && __has_attribute(selectany))
 /** Marks a function as weak */
-#define FIO_WEAK __declspec(selectany)
-#else
+#ifndef FIO_WEAK
+#if (__has_attribute(weak) || defined(__GNUC__)) && !defined(__MINGW32__)
 /** Marks a function as weak */
 #define FIO_WEAK __attribute__((weak))
+#else
+/** Marks a function as weak */
+#define FIO_WEAK
+#endif
+#endif
+
+#ifndef FIO_WEAK_VAR
+#if (defined(_MSC_VER) && _MSC_VER) ||                                         \
+    (FIO_OS_WIN && __has_attribute(selectany))
+/** Marks a global variable as weak */
+#define FIO_WEAK_VAR __declspec(selectany)
+#else
+/** Marks a global variable as weak */
+#define FIO_WEAK_VAR __attribute__((weak))
 #endif
 #endif
 

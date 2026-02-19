@@ -78,7 +78,7 @@ FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_INFO
 #endif
 #endif
-int FIO_WEAK FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
+int FIO_WEAK_VAR FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEFAULT;
 FIO_IFUNC int fio___log_level_set(int i) { return (FIO_LOG_LEVEL = i); }
 FIO_IFUNC int fio___log_level(void) { return FIO_LOG_LEVEL; }
 

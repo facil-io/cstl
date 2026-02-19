@@ -114,8 +114,8 @@ General Requirements / Macros
 Debugging / Leak Detection
 ***************************************************************************** */
 #if defined(TEST) || defined(DEBUG) || defined(FIO_LEAK_COUNTER)
-size_t FIO_WEAK FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
-size_t FIO_WEAK FIOBJ_MARK_MEMORY_FREE_COUNTER;
+size_t FIO_WEAK_VAR FIOBJ_MARK_MEMORY_ALLOC_COUNTER;
+size_t FIO_WEAK_VAR FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_ALLOC()                                              \
   fio_atomic_add(&FIOBJ_MARK_MEMORY_ALLOC_COUNTER, 1)
 #define FIOBJ_MARK_MEMORY_FREE()                                               \

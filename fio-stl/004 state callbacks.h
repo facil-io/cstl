@@ -173,8 +173,8 @@ static const char *FIO___STATE_TASKS_NAMES[FIO_CALL_NEVER + 1] = {
 State Callback Global State and Locks
 ***************************************************************************** */
 /* use `weak` instead of `static` to make sure state callbacks are global. */
-FIO_WEAK fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
-FIO_WEAK fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
+FIO_WEAK_VAR fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
+FIO_WEAK_VAR fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
 
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {

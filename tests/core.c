@@ -621,8 +621,13 @@ FIO_SFUNC void fio___test_core_vector_operations(void) {
       fio_u256_mul(&result, &ua, &ub);
       FIO_ASSERT(!memcmp(result.u64, expected, sizeof(result.u64)),
                  "Multi-Precision MUL error");
-      FIO_ASSERT(fio_u512_is_eq(&result, (fio_u512 *)&expected),
-                 "Multi-Precision MUL error (is_eq)");
+      {
+        /* Copy expected into a properly aligned fio_u512 before comparing */
+        fio_u512 expected_aligned;
+        FIO_MEMCPY(&expected_aligned, expected, sizeof(expected_aligned));
+        FIO_ASSERT(fio_u512_is_eq(&result, &expected_aligned),
+                   "Multi-Precision MUL error (is_eq)");
+      }
       {
         fio_u512 cpy = result;
         fio_u512 tmp = result;
