@@ -29,7 +29,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 typedef struct {
   void *udata;
-  int fd;
+  fio_socket_i fd;
   unsigned short flags;
 } fio___poll_i_s;
 
@@ -108,7 +108,7 @@ FIO_IFUNC unsigned short fio___poll_handle_events(fio_poll_s *p,
  * Returns -1 on error.
  */
 SFUNC int fio_poll_monitor(fio_poll_s *p,
-                           int fd,
+                           fio_socket_i fd,
                            void *udata,
                            unsigned short flags) {
   int r = -1;
@@ -166,8 +166,13 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
     if (!(cpy.map.ary[pos].flags & flag_mask))
       continue;
-    pfd[r] = (struct pollfd){.fd = cpy.map.ary[pos].fd,
-                             .events = (short)cpy.map.ary[pos].flags};
+    pfd[r].fd = cpy.map.ary[pos].fd;
+#if FIO_OS_WIN
+    /* POLLPRI is not supported by WSAPoll and causes WSAEINVAL */
+    pfd[r].events = (short)(cpy.map.ary[pos].flags & (POLLIN | POLLOUT));
+#else
+    pfd[r].events = (short)(cpy.map.ary[pos].flags & FIO_POLL_POSSIBLE_FLAGS);
+#endif
     uary[r] = cpy.map.ary[pos].udata;
     ++r;
   }
@@ -237,7 +242,7 @@ finish:
 }
 
 /** Stops monitoring the specified file descriptor, returning -1 on error. */
-SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
   int r = 0;
   fio___poll_i_s i = {.fd = fd};
   FIO___LOCK_LOCK(p->lock);

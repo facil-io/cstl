@@ -49,10 +49,17 @@ Possible polling engine (system call) selection
 /** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_KQUEUE` to use `kqueue` */
 #define FIO_POLL_ENGINE_KQUEUE 3
 #endif
+#ifndef FIO_POLL_ENGINE_WEPOLL
+/** define `FIO_POLL_ENGINE` as `FIO_POLL_ENGINE_WEPOLL` to use wepoll (Windows
+ * only). Requires extras/wepoll.c to be compiled alongside the project. */
+#define FIO_POLL_ENGINE_WEPOLL 4
+#endif
 
 /* if `FIO_POLL_ENGINE` wasn't define, detect automatically. */
 #if !defined(FIO_POLL_ENGINE)
-#if defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
+#if FIO_OS_WIN
+#define FIO_POLL_ENGINE FIO_POLL_ENGINE_WEPOLL
+#elif defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_EPOLL
 #elif (defined(HAVE_KQUEUE) || __has_include("sys/event.h"))
 #define FIO_POLL_ENGINE FIO_POLL_ENGINE_KQUEUE
@@ -72,6 +79,10 @@ Possible polling engine (system call) selection
 #elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_KQUEUE
 #ifndef FIO_POLL_ENGINE_STR
 #define FIO_POLL_ENGINE_STR "kqueue"
+#endif
+#elif FIO_POLL_ENGINE == FIO_POLL_ENGINE_WEPOLL
+#ifndef FIO_POLL_ENGINE_STR
+#define FIO_POLL_ENGINE_STR "wepoll (Windows epoll)"
 #endif
 #endif
 /* *****************************************************************************
@@ -115,7 +126,7 @@ FIO_IFUNC const char *fio_poll_engine(void);
  * Returns -1 on error.
  */
 SFUNC int fio_poll_monitor(fio_poll_s *p,
-                           int fd,
+                           fio_socket_i fd,
                            void *udata,
                            unsigned short flags);
 
@@ -134,7 +145,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout);
 
 /** Stops monitoring the specified file descriptor (if monitoring). */
-SFUNC int fio_poll_forget(fio_poll_s *p, int fd);
+SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd);
 
 /* *****************************************************************************
 Implementation Helpers

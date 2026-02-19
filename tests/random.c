@@ -534,6 +534,115 @@ int main(void) {
   (rs, test_len, "PNGR128_bytes (deterministic)", end - start);
 
   FIO_MEM_FREE(rs, sizeof(*rs) * test_len);
+
+  /* --- fio_risky_num / fio_risky_ptr small-integer quality tests --- */
+
+  /* fio_risky_num bit distribution (fd-like values 0..65535, seed=3) */
+  {
+    uint64_t bit_counts[64] = {0};
+    const uint64_t N = 65536;
+    for (uint64_t i = 0; i < N; i++) {
+      uint64_t h =
+          fio_risky_num(i, 3); /* seed=3, same as FIO___POLL_IMAP_HASH */
+      for (int b = 0; b < 64; b++)
+        bit_counts[b] += (h >> b) & 1;
+    }
+    double min_pct = 1.0, max_pct = 0.0, sum_pct = 0.0;
+    int bias_fail = 0;
+    for (int b = 0; b < 64; b++) {
+      double pct = (double)bit_counts[b] / (double)N;
+      sum_pct += pct;
+      if (pct < min_pct)
+        min_pct = pct;
+      if (pct > max_pct)
+        max_pct = pct;
+      if (pct < 0.40 || pct > 0.60)
+        bias_fail++;
+    }
+    FIO_ASSERT(!bias_fail,
+               "fio_risky_num small-integer bit distribution: "
+               "%d/64 bits outside 40%%–60%% range",
+               bias_fail);
+    fprintf(stderr,
+            "* fio_risky_num bit distribution (inputs 0..%llu, seed=3):\n"
+            "    avg %.2f%%  min %.2f%%  max %.2f%%  "
+            "biased bits: %d/64\n",
+            (unsigned long long)(N - 1),
+            100.0 * sum_pct / 64.0,
+            100.0 * min_pct,
+            100.0 * max_pct,
+            bias_fail);
+  }
+
+  /* fio_risky_num single-bit-flip avalanche (inputs 0..1023, seed=3) */
+  {
+    uint64_t total_flipped = 0;
+    uint64_t min_flipped = 64, max_flipped = 0;
+    const int TRIALS = 1024;
+    for (int t = 0; t < TRIALS; t++) {
+      uint64_t n = (uint64_t)t;
+      uint64_t h0 = fio_risky_num(n, 3);
+      for (int b = 0; b < 64; b++) {
+        uint64_t flipped = (uint64_t)fio_popcount(
+            h0 ^ fio_risky_num(n ^ (UINT64_C(1) << b), 3));
+        total_flipped += flipped;
+        if (flipped < min_flipped)
+          min_flipped = flipped;
+        if (flipped > max_flipped)
+          max_flipped = flipped;
+      }
+    }
+    double avg = (double)total_flipped / (double)(TRIALS * 64);
+    FIO_ASSERT(avg >= 28.0 && avg <= 36.0,
+               "fio_risky_num avalanche avg=%.2f/64 bits flipped "
+               "(expected 28–36, ideal 32)",
+               avg);
+    fprintf(stderr,
+            "* fio_risky_num avalanche (%d inputs x 64 bit-flips, seed=3):\n"
+            "    avg %.2f/64 bits flipped  min %llu  max %llu  "
+            "(ideal 32.00)\n",
+            TRIALS,
+            avg,
+            (unsigned long long)min_flipped,
+            (unsigned long long)max_flipped);
+  }
+
+  /* fio_risky_ptr bit distribution (values 0..65535 cast to void*) */
+  {
+    uint64_t bit_counts[64] = {0};
+    const uint64_t N = 65536;
+    for (uint64_t i = 0; i < N; i++) {
+      uint64_t h = fio_risky_ptr((void *)(uintptr_t)i);
+      for (int b = 0; b < 64; b++)
+        bit_counts[b] += (h >> b) & 1;
+    }
+    double min_pct = 1.0, max_pct = 0.0, sum_pct = 0.0;
+    int bias_fail = 0;
+    for (int b = 0; b < 64; b++) {
+      double pct = (double)bit_counts[b] / (double)N;
+      sum_pct += pct;
+      if (pct < min_pct)
+        min_pct = pct;
+      if (pct > max_pct)
+        max_pct = pct;
+      if (pct < 0.40 || pct > 0.60)
+        bias_fail++;
+    }
+    FIO_ASSERT(!bias_fail,
+               "fio_risky_ptr small-integer bit distribution: "
+               "%d/64 bits outside 40%%–60%% range",
+               bias_fail);
+    fprintf(stderr,
+            "* fio_risky_ptr bit distribution (inputs 0..%llu cast to void*):\n"
+            "    avg %.2f%%  min %.2f%%  max %.2f%%  "
+            "biased bits: %d/64\n",
+            (unsigned long long)(N - 1),
+            100.0 * sum_pct / 64.0,
+            100.0 * min_pct,
+            100.0 * max_pct,
+            bias_fail);
+  }
+
   fprintf(stderr, "\n");
   {
     FIO_STR_INFO_TMP_VAR(data, 1124);

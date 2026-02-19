@@ -88,6 +88,7 @@
 #include "102 poll epoll.h"
 #include "102 poll kqueue.h"
 #include "102 poll poll.h"
+#include "102 poll wepoll.h"
 #endif
 #ifdef FIO_STR
 #include "102 string core.h"

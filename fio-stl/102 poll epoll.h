@@ -71,7 +71,7 @@ Poll Monitoring Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-FIO_IFUNC int fio___epoll_add2(int fd,
+FIO_IFUNC int fio___epoll_add2(fio_socket_i fd,
                                void *udata,
                                uint32_t events,
                                int ep_fd) {
@@ -110,7 +110,7 @@ FIO_IFUNC int fio___epoll_add2(int fd,
  * Returns -1 on error.
  */
 SFUNC int fio_poll_monitor(fio_poll_s *p,
-                           int fd,
+                           fio_socket_i fd,
                            void *udata,
                            unsigned short flags) {
   int r = 0;
@@ -130,7 +130,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 /**
  * Stops monitoring the specified file descriptor, returning its udata (if any).
  */
-SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
   int r = 0;
   struct epoll_event chevent = {.events = (EPOLLOUT | EPOLLIN)};
   r |= epoll_ctl(p->fds[0].fd, EPOLL_CTL_DEL, fd, &chevent);
@@ -159,10 +159,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     return total;
   int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
-    /* TODO! fix error handling*/
+    /* errors are dispatched via the EPOLLIN queue (see below) */
     for (unsigned i = 0; i < (unsigned)active_count; i++) {
-      // errors are handled as disconnections (on_close) in the EPOLLIN queue
-      // if no error, try an active event(s)
       if (events[i].events & EPOLLOUT)
         p->settings.on_ready(events[i].data.ptr);
     } // end for loop

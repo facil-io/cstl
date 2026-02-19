@@ -80,7 +80,7 @@ Poll Monitoring Implementation - possibly externed functions.
  * Returns -1 on error.
  */
 SFUNC int fio_poll_monitor(fio_poll_s *p,
-                           int fd,
+                           fio_socket_i fd,
                            void *udata,
                            unsigned short flags) {
   int r = -1;
@@ -156,7 +156,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout_) {
 }
 
 /** Stops monitoring the specified file descriptor (if monitoring). */
-SFUNC int fio_poll_forget(fio_poll_s *p, int fd) {
+SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
   int r = 0;
   if (p->fd == -1)
     return (r = -1);
