@@ -46,8 +46,13 @@ FIO_SFUNC ssize_t tls13_read_with_timeout(int fd,
   short events = fio_sock_wait_io(fd, POLLIN, timeout_ms);
   if (events <= 0)
     return -1; /* Timeout or error */
-  if (events & (POLLHUP | POLLERR | POLLNVAL))
-    return -1; /* Connection closed or error */
+  /* If POLLIN is set, read even if POLLHUP is also set —
+   * POLLHUP + POLLIN means data is available AND peer closed;
+   * we must drain the data before treating it as EOF. */
+  if (!(events & POLLIN)) {
+    if (events & (POLLHUP | POLLERR | POLLNVAL))
+      return -1; /* No data, connection error/closed */
+  }
   return fio_sock_read(fd, buf, buf_size);
 }
 

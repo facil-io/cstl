@@ -199,7 +199,7 @@ FIO_SFUNC void on_input(fio_io_s *io) {
     size_t len;
     char buf[4080];
   } info;
-  for (; FIO_SOCK_WAIT_R(fileno(stdin), 50) == POLLIN;) { /* read until done */
+  for (; FIO_SOCK_WAIT_R(fileno(stdin), 50) & POLLIN;) { /* read until done */
     FIO_LOG_DEBUG2("reading from STDIN...");
     info.len = fread(info.buf, 1, 4080, stdin);
     if (!info.len)

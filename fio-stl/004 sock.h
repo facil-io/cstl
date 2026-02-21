@@ -607,7 +607,11 @@ SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout) {
   }
 #endif
   struct pollfd pfd = {.fd = fd, .events = events};
+#if FIO_OS_WIN
+  r = (short)WSAPoll(&pfd, 1, timeout);
+#else
   r = (short)poll(&pfd, 1, timeout);
+#endif
   if (r == 1)
     r = pfd.revents;
   return r;
