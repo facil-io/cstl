@@ -120,9 +120,7 @@ typedef struct {
 } fio___state_task_s;
 
 FIO_IFUNC uint64_t fio___state_callback_hash_fn(fio___state_task_s *t) {
-  uint64_t hash = fio_risky_ptr((void *)(uintptr_t)(t->func));
-  hash ^= hash + fio_risky_ptr(t->arg);
-  return hash;
+  return fio_risky_num((uintptr_t)(t->func), (uintptr_t)(t->arg));
 }
 
 #define FIO_STATE_CALLBACK_IS_VALID(pobj) ((pobj)->func)

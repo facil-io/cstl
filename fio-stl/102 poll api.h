@@ -42,16 +42,12 @@ Possible polling engine (system call) selection
  *   #define FIO_POLL_ENGINE_POLL    - use POSIX poll() / WSAPoll
  *   #define FIO_POLL_ENGINE_EPOLL   - use Linux epoll
  *   #define FIO_POLL_ENGINE_KQUEUE  - use BSD/macOS kqueue
- *   #define FIO_POLL_ENGINE_WEPOLL  - use wepoll (Windows, requires
- * extras/wepoll.c)
  */
 
 /* Auto-select only if the user made no explicit choice. */
 #if !defined(FIO_POLL_ENGINE_POLL) && !defined(FIO_POLL_ENGINE_EPOLL) &&       \
-    !defined(FIO_POLL_ENGINE_KQUEUE) && !defined(FIO_POLL_ENGINE_WEPOLL)
-#if FIO_OS_WIN
-#define FIO_POLL_ENGINE_WEPOLL
-#elif defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
+    !defined(FIO_POLL_ENGINE_KQUEUE)
+#if defined(HAVE_EPOLL) || __has_include("sys/epoll.h")
 #define FIO_POLL_ENGINE_EPOLL
 #elif defined(HAVE_KQUEUE) || __has_include("sys/event.h")
 #define FIO_POLL_ENGINE_KQUEUE
@@ -60,14 +56,12 @@ Possible polling engine (system call) selection
 #endif
 #endif /* auto-select */
 
-#ifdef FIO_POLL_ENGINE_POLL
-#define FIO_POLL_ENGINE_STR "poll"
-#elif defined(FIO_POLL_ENGINE_EPOLL)
+#if defined(FIO_POLL_ENGINE_EPOLL)
 #define FIO_POLL_ENGINE_STR "epoll"
 #elif defined(FIO_POLL_ENGINE_KQUEUE)
 #define FIO_POLL_ENGINE_STR "kqueue"
-#elif defined(FIO_POLL_ENGINE_WEPOLL)
-#define FIO_POLL_ENGINE_STR "wepoll (Windows epoll)"
+#else /* defined(FIO_POLL_ENGINE_POLL) */
+#define FIO_POLL_ENGINE_STR "poll"
 #endif
 /* *****************************************************************************
 Polling API

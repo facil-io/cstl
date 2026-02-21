@@ -100,7 +100,12 @@ static const char *const tls13_test_ca_paths[] = {
 };
 
 /** Load all CERTIFICATE blocks from a PEM bundle into a trust store.
- * Returns number of certs loaded, or 0 on failure. */
+ * Returns number of certs loaded, or 0 on failure.
+ *
+ * Problem 1 fix: parse into a fixed stack buffer (DER certs typically <4KB),
+ * then allocate exactly der_len bytes per cert so that alloc_size == DER
+ * content size and FIO_MEM_FREE(buf, lens[i]) is always correct.
+ * No realloc trim step needed. */
 FIO_SFUNC int tls13_test_load_trust_store(fio_x509_trust_store_s *store,
                                           uint8_t ***der_bufs_out,
                                           size_t **der_lens_out,
@@ -120,22 +125,26 @@ FIO_SFUNC int tls13_test_load_trust_store(fio_x509_trust_store_s *store,
     size_t remaining = pem_len;
 
     while (remaining > 0) {
-      size_t der_buf_cap = remaining;
-      uint8_t *der_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_buf_cap, 0);
-      if (!der_buf)
-        break;
-
+      /* Parse into a fixed stack buffer — DER certs are typically <4 KB,
+       * max ~16 KB.  Avoids any heap pressure before knowing the cert size. */
+      uint8_t tmp_der[16384];
       fio_pem_s pem_block;
       size_t consumed =
-          fio_pem_parse(&pem_block, der_buf, der_buf_cap, pos, remaining);
-      if (consumed == 0) {
-        FIO_MEM_FREE(der_buf, der_buf_cap);
+          fio_pem_parse(&pem_block, tmp_der, sizeof(tmp_der), pos, remaining);
+      if (consumed == 0)
         break;
-      }
 
       if (pem_block.label_len == 11 &&
           FIO_MEMCMP(pem_block.label, "CERTIFICATE", 11) == 0 &&
           pem_block.der_len > 0) {
+        /* Allocate exactly der_len bytes — alloc size == DER content size,
+         * so FIO_MEM_FREE(buf, lens[i]) is always correct. */
+        uint8_t *der_buf =
+            (uint8_t *)FIO_MEM_REALLOC(NULL, 0, pem_block.der_len, 0);
+        if (!der_buf)
+          break;
+        FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
+
         /* Grow arrays */
         size_t new_count = der_count + 1;
         uint8_t **nb = (uint8_t **)FIO_MEM_REALLOC(der_bufs,
@@ -147,7 +156,7 @@ FIO_SFUNC int tls13_test_load_trust_store(fio_x509_trust_store_s *store,
                                                new_count * sizeof(*nl),
                                                der_count * sizeof(*nl));
         if (!nb || !nl) {
-          FIO_MEM_FREE(der_buf, der_buf_cap);
+          FIO_MEM_FREE(der_buf, pem_block.der_len);
           if (nb)
             der_bufs = nb;
           if (nl)
@@ -157,11 +166,10 @@ FIO_SFUNC int tls13_test_load_trust_store(fio_x509_trust_store_s *store,
         der_bufs = nb;
         der_lens = nl;
         der_bufs[der_count] = der_buf;
-        der_lens[der_count] = pem_block.der_len;
+        der_lens[der_count] =
+            pem_block.der_len; /* alloc size == content size */
         ++der_count;
         ++total_loaded;
-      } else {
-        FIO_MEM_FREE(der_buf, der_buf_cap);
       }
 
       pos += consumed;

@@ -57,14 +57,65 @@ typedef struct {
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
   /* Trust store for client certificate verification (NULL = skip verify) */
   fio_x509_trust_store_s trust_store;
-  /* Owned DER buffers backing trust_store.roots (freed with context) */
+  /* Owned DER buffers backing trust_store.roots.
+   * trust_der_bufs/lens/count are NULL/0 when trust_store points to the
+   * global system trust singleton (trust_der_owned == 0). In that case the
+   * free path must NOT free the backing buffers — they are owned by the
+   * global singleton. */
   uint8_t **trust_der_bufs;
   size_t *trust_der_lens;
   size_t trust_der_count;
-#endif /* H___FIO_X509___H && H___FIO_PEM___H */
+  uint8_t trust_der_owned; /* 1 = context owns bufs, 0 = global singleton */
+#endif                     /* H___FIO_X509___H && H___FIO_PEM___H */
 } fio___tls13_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
+
+/* *****************************************************************************
+TLS 1.3 Global System Trust Store Singleton
+*
+* The system CA bundle is large (128+ certs on macOS) and immutable.
+* Loading it per-context (per fio_io_connect call) wastes memory linearly with
+* N concurrent client connections.  Instead, load it once into this global
+* singleton and share it (read-only) across all contexts.
+*
+* Lifetime: allocated at first use, freed at process exit via
+* FIO_CALL_AT_EXIT callback.  Protected by fio___tls13_sys_trust_lock.
+***************************************************************************** */
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+typedef struct {
+  fio_x509_trust_store_s store; /* roots/root_lens/root_count */
+  uint8_t **bufs;               /* owned DER buffers (freed at exit) */
+  size_t *lens;                 /* DER lengths (alloc size == content size) */
+  size_t count;
+  uint8_t loaded; /* 1 once successfully populated */
+} fio___tls13_sys_trust_s;
+
+static fio___tls13_sys_trust_s fio___tls13_sys_trust;
+static fio_lock_i fio___tls13_sys_trust_lock = FIO_LOCK_INIT;
+
+/** AT_EXIT callback: free the global system trust store.
+ * Registered once at startup via FIO_CONSTRUCTOR below. */
+FIO_SFUNC void fio___tls13_sys_trust_free(void *ignr_) {
+  fio_lock(&fio___tls13_sys_trust_lock);
+  for (size_t i = 0; i < fio___tls13_sys_trust.count; ++i)
+    FIO_MEM_FREE(fio___tls13_sys_trust.bufs[i], fio___tls13_sys_trust.lens[i]);
+  if (fio___tls13_sys_trust.bufs)
+    FIO_MEM_FREE(fio___tls13_sys_trust.bufs,
+                 fio___tls13_sys_trust.count * sizeof(uint8_t *));
+  if (fio___tls13_sys_trust.lens)
+    FIO_MEM_FREE(fio___tls13_sys_trust.lens,
+                 fio___tls13_sys_trust.count * sizeof(size_t));
+  fio___tls13_sys_trust = (fio___tls13_sys_trust_s){0};
+  fio_unlock(&fio___tls13_sys_trust_lock);
+  (void)ignr_;
+}
+
+/** Register the system trust cleanup exactly once at process start. */
+FIO_CONSTRUCTOR(fio___tls13_sys_trust_register_cleanup) {
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___tls13_sys_trust_free, NULL);
+}
+#endif /* H___FIO_X509___H && H___FIO_PEM___H */
 
 /** Per-connection TLS state */
 typedef struct {
@@ -132,48 +183,26 @@ FIO_LEAK_COUNTER_DEF(fio___tls13_connection_s)
 
 /* *****************************************************************************
 TLS 1.3 Context Builder - Self-Signed Certificate Generation
+*
+* The self-signed certificate is generated once (lazily, under a lock) and
+* stored directly in the context.  Its lifetime is tied to the context — freed
+* in fio___tls13_free_context_task.  No global state, no state callbacks.
 ***************************************************************************** */
 
 #if defined(H___FIO_X509___H)
-/** Global P-256 keypair for self-signed certificates */
-static fio_x509_keypair_s fio___tls13_self_signed_keypair;
-static uint8_t *fio___tls13_self_signed_cert = NULL;
-static size_t fio___tls13_self_signed_cert_len = 0;
-
-/** Cleanup callback to free the self-signed certificate at exit */
-FIO_SFUNC void fio___tls13_clear_self_signed(void *ignr_) {
-  if (fio___tls13_self_signed_cert) {
-    FIO_MEM_FREE(fio___tls13_self_signed_cert,
-                 fio___tls13_self_signed_cert_len);
-    fio___tls13_self_signed_cert = NULL;
-    fio___tls13_self_signed_cert_len = 0;
-  }
-  fio_x509_keypair_clear(&fio___tls13_self_signed_keypair);
-  (void)ignr_;
-}
-
-/** Generate self-signed certificate for TLS 1.3 server */
-FIO_SFUNC int fio___tls13_make_self_signed(const char *server_name) {
-  static fio_lock_i lock = FIO_LOCK_INIT;
-  fio_lock(&lock);
-
-  if (fio___tls13_self_signed_cert) {
-    fio_unlock(&lock);
-    return 0; /* Already generated */
-  }
-
-  FIO_LOG_DEBUG2("generating P-256 self-signed certificate for TLS 1.3...");
-
-  /* Generate P-256 keypair (universally supported by browsers/curl) */
-  if (fio_x509_keypair_p256(&fio___tls13_self_signed_keypair) != 0) {
-    FIO_LOG_ERROR("TLS 1.3: failed to generate P-256 keypair");
-    fio_unlock(&lock);
-    return -1;
-  }
-
-  /* Set up certificate options */
+/** Generate a self-signed P-256 certificate directly into ctx. */
+FIO_SFUNC int fio___tls13_make_self_signed(fio___tls13_context_s *ctx,
+                                           const char *server_name) {
   if (!server_name || !server_name[0])
     server_name = "localhost";
+
+  FIO_LOG_DEBUG2("TLS 1.3: generating P-256 self-signed certificate...");
+
+  fio_x509_keypair_s keypair;
+  if (fio_x509_keypair_p256(&keypair) != 0) {
+    FIO_LOG_ERROR("TLS 1.3: failed to generate P-256 keypair");
+    return -1;
+  }
 
   const char *san_dns[] = {server_name};
   fio_x509_cert_options_s opts = {
@@ -186,50 +215,39 @@ FIO_SFUNC int fio___tls13_make_self_signed(const char *server_name) {
       .is_ca = 0,
   };
 
-  /* Calculate certificate size */
-  size_t cert_size = fio_x509_self_signed_cert(NULL,
-                                               0,
-                                               &fio___tls13_self_signed_keypair,
-                                               &opts);
+  size_t cert_size = fio_x509_self_signed_cert(NULL, 0, &keypair, &opts);
   if (cert_size == 0) {
-    FIO_LOG_ERROR("TLS 1.3: failed to calculate certificate size");
-    fio_x509_keypair_clear(&fio___tls13_self_signed_keypair);
-    fio_unlock(&lock);
+    FIO_LOG_ERROR("TLS 1.3: failed to calculate self-signed certificate size");
+    fio_x509_keypair_clear(&keypair);
     return -1;
   }
 
-  /* Allocate and generate certificate */
-  fio___tls13_self_signed_cert =
-      (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
-  if (!fio___tls13_self_signed_cert) {
+  ctx->cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
+  if (!ctx->cert_der) {
     FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
-    fio_x509_keypair_clear(&fio___tls13_self_signed_keypair);
-    fio_unlock(&lock);
+    fio_x509_keypair_clear(&keypair);
     return -1;
   }
 
-  fio___tls13_self_signed_cert_len =
-      fio_x509_self_signed_cert(fio___tls13_self_signed_cert,
-                                cert_size,
-                                &fio___tls13_self_signed_keypair,
-                                &opts);
-
-  if (fio___tls13_self_signed_cert_len == 0) {
+  ctx->cert_der_len =
+      fio_x509_self_signed_cert(ctx->cert_der, cert_size, &keypair, &opts);
+  if (ctx->cert_der_len == 0) {
     FIO_LOG_ERROR("TLS 1.3: failed to generate self-signed certificate");
-    FIO_MEM_FREE(fio___tls13_self_signed_cert, cert_size);
-    fio___tls13_self_signed_cert = NULL;
-    fio_x509_keypair_clear(&fio___tls13_self_signed_keypair);
-    fio_unlock(&lock);
+    FIO_MEM_FREE(ctx->cert_der, cert_size);
+    ctx->cert_der = NULL;
+    fio_x509_keypair_clear(&keypair);
     return -1;
   }
 
-  /* Register cleanup callback */
-  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___tls13_clear_self_signed, NULL);
+  /* Store key material in context */
+  fio_memcpy32(ctx->private_key, keypair.secret_key);
+  FIO_MEMCPY(ctx->public_key, keypair.public_key, 65);
+  ctx->private_key_len = 32;
+  ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
 
-  FIO_LOG_DEBUG2("P-256 self-signed certificate generated successfully "
-                 "(%zu bytes)",
-                 fio___tls13_self_signed_cert_len);
-  fio_unlock(&lock);
+  fio_x509_keypair_clear(&keypair);
+  FIO_LOG_DEBUG2("TLS 1.3: self-signed certificate generated (%zu bytes)",
+                 ctx->cert_der_len);
   return 0;
 }
 #endif /* H___FIO_X509___H */
@@ -413,30 +431,9 @@ use_self_signed:
         "TLS 1.3: PEM loading failed, using self-signed certificate");
   }
 
-  if (fio___tls13_make_self_signed(server_name) != 0) {
+  if (fio___tls13_make_self_signed(ctx, server_name) != 0) {
     FIO_LOG_ERROR("TLS 1.3: failed to create self-signed certificate");
     return -1;
-  }
-
-  /* Copy certificate to context */
-  if (fio___tls13_self_signed_cert && fio___tls13_self_signed_cert_len > 0) {
-    ctx->cert_der = (uint8_t *)
-        FIO_MEM_REALLOC(NULL, 0, fio___tls13_self_signed_cert_len, 0);
-    if (!ctx->cert_der) {
-      FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
-      return -1;
-    }
-    FIO_MEMCPY(ctx->cert_der,
-               fio___tls13_self_signed_cert,
-               fio___tls13_self_signed_cert_len);
-    ctx->cert_der_len = fio___tls13_self_signed_cert_len;
-
-    /* Copy private key (P-256 scalar) */
-    fio_memcpy32(ctx->private_key, fio___tls13_self_signed_keypair.secret_key);
-    /* Copy public key (P-256 uncompressed point for signing) */
-    FIO_MEMCPY(ctx->public_key, fio___tls13_self_signed_keypair.public_key, 65);
-    ctx->private_key_len = 32;
-    ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
   }
 #else
   FIO_LOG_ERROR(
@@ -450,88 +447,118 @@ use_self_signed:
 
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
 
-/** Internal: append one owned DER buffer to the context's trust store arrays.
- * Takes ownership of der_buf (allocated with FIO_MEM_REALLOC, size
- * der_buf_cap). Returns 0 on success, -1 on allocation failure (der_buf is
- * freed on error). */
-FIO_SFUNC int fio___tls13_add_der_to_trust(fio___tls13_context_s *ctx,
+/** Internal: append one owned DER buffer to a trust store array pair.
+ *
+ * Takes ownership of der_buf (allocated with FIO_MEM_REALLOC, exactly
+ * der_len bytes).  alloc_len MUST equal the exact allocation size passed to
+ * FIO_MEM_REALLOC — the free path uses it to call FIO_MEM_FREE correctly.
+ * When der_buf was allocated exactly der_len bytes, alloc_len == der_len.
+ *
+ * Returns 0 on success, -1 on allocation failure (der_buf is freed on error).
+ */
+FIO_SFUNC int fio___tls13_trust_array_push(uint8_t ***bufs_p,
+                                           size_t **lens_p,
+                                           size_t *count_p,
                                            uint8_t *der_buf,
-                                           size_t der_buf_cap,
                                            size_t der_len) {
-  size_t new_count = ctx->trust_der_count + 1;
+  size_t old_count = *count_p;
+  size_t new_count = old_count + 1;
   uint8_t **new_bufs =
-      (uint8_t **)FIO_MEM_REALLOC(ctx->trust_der_bufs,
-                                  ctx->trust_der_count * sizeof(uint8_t *),
+      (uint8_t **)FIO_MEM_REALLOC(*bufs_p,
+                                  old_count * sizeof(uint8_t *),
                                   new_count * sizeof(uint8_t *),
-                                  ctx->trust_der_count * sizeof(uint8_t *));
-  size_t *new_lens =
-      (size_t *)FIO_MEM_REALLOC(ctx->trust_der_lens,
-                                ctx->trust_der_count * sizeof(size_t),
-                                new_count * sizeof(size_t),
-                                ctx->trust_der_count * sizeof(size_t));
+                                  old_count * sizeof(uint8_t *));
+  size_t *new_lens = (size_t *)FIO_MEM_REALLOC(*lens_p,
+                                               old_count * sizeof(size_t),
+                                               new_count * sizeof(size_t),
+                                               old_count * sizeof(size_t));
   if (!new_bufs || !new_lens) {
     FIO_LOG_ERROR("TLS 1.3: failed to allocate trust store arrays");
-    FIO_MEM_FREE(der_buf, der_buf_cap);
+    FIO_MEM_FREE(der_buf, der_len);
     if (new_bufs)
-      ctx->trust_der_bufs = new_bufs;
+      *bufs_p = new_bufs;
     if (new_lens)
-      ctx->trust_der_lens = new_lens;
+      *lens_p = new_lens;
     return -1;
   }
-  ctx->trust_der_bufs = new_bufs;
-  ctx->trust_der_lens = new_lens;
-  ctx->trust_der_bufs[ctx->trust_der_count] = der_buf;
-  ctx->trust_der_lens[ctx->trust_der_count] = der_len;
-  ctx->trust_der_count = new_count;
+  *bufs_p = new_bufs;
+  *lens_p = new_lens;
+  (*bufs_p)[old_count] = der_buf;
+  (*lens_p)[old_count] = der_len; /* alloc size == DER content size */
+  *count_p = new_count;
+  return 0;
+}
+
+/** Internal: append one owned DER buffer to the context's trust store arrays.
+ * Wrapper around fio___tls13_trust_array_push that also updates
+ * trust_store.roots/root_lens/root_count to point at the (possibly
+ * reallocated) arrays. */
+FIO_SFUNC int fio___tls13_add_der_to_trust(fio___tls13_context_s *ctx,
+                                           uint8_t *der_buf,
+                                           size_t der_len) {
+  if (fio___tls13_trust_array_push(&ctx->trust_der_bufs,
+                                   &ctx->trust_der_lens,
+                                   &ctx->trust_der_count,
+                                   der_buf,
+                                   der_len) != 0)
+    return -1;
   /* Update trust_store to point to the (possibly reallocated) arrays */
   ctx->trust_store.roots = (const uint8_t **)ctx->trust_der_bufs;
   ctx->trust_store.root_lens = ctx->trust_der_lens;
   ctx->trust_store.root_count = ctx->trust_der_count;
-  (void)der_buf_cap;
   return 0;
 }
 
-/** Internal: load all CERTIFICATE blocks from a PEM bundle into the trust
- * store. Iterates through all certs in the bundle (CA bundles contain
- * hundreds). Returns the number of certificates loaded (>= 0), or -1 on fatal
- * error. */
-FIO_SFUNC int fio___tls13_load_pem_bundle(fio___tls13_context_s *ctx,
-                                          const char *pem_data,
-                                          size_t pem_len) {
+/** Internal: load all CERTIFICATE blocks from a PEM bundle into a trust
+ * store array.  Iterates through all certs in the bundle (CA bundles contain
+ * hundreds).  Returns the number of certificates loaded (>= 0), or -1 on
+ * fatal error.
+ *
+ * Problem 1 fix: parse into a fixed stack buffer first (DER certs are
+ * typically < 4KB, max ~16KB).  Then allocate exactly der_len bytes — so the
+ * allocation size equals the DER content size and FIO_MEM_FREE is always
+ * called with the correct size.  No heap allocation is needed before knowing
+ * the cert size; no realloc trim is needed after. */
+FIO_SFUNC int fio___tls13_load_pem_bundle_into(uint8_t ***bufs_p,
+                                               size_t **lens_p,
+                                               size_t *count_p,
+                                               const char *pem_data,
+                                               size_t pem_len) {
   int loaded = 0;
   const char *pos = pem_data;
   size_t remaining = pem_len;
 
   while (remaining > 0) {
-    /* Allocate a per-cert DER buffer (conservative: PEM is base64, DER ~75%) */
-    size_t der_buf_cap = remaining;
-    uint8_t *der_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_buf_cap, 0);
-    if (!der_buf) {
-      FIO_LOG_ERROR("TLS 1.3: failed to allocate DER buffer for PEM bundle");
-      return (loaded > 0) ? loaded : -1;
-    }
-
+    /* Parse into a fixed stack buffer — X.509 DER certs are typically <4 KB,
+     * worst case (large RSA chain) ~16 KB.  Stack allocation avoids any
+     * heap pressure before we know the actual DER size. */
+    uint8_t tmp_der[16384];
     fio_pem_s pem_block;
     size_t consumed =
-        fio_pem_parse(&pem_block, der_buf, der_buf_cap, pos, remaining);
-    if (consumed == 0) {
-      /* No more PEM blocks found */
-      FIO_MEM_FREE(der_buf, der_buf_cap);
-      break;
-    }
+        fio_pem_parse(&pem_block, tmp_der, sizeof(tmp_der), pos, remaining);
+    if (consumed == 0)
+      break; /* No more PEM blocks */
 
     /* Only accept CERTIFICATE blocks (skip PRIVATE KEY etc.) */
     if (pem_block.label_len == 11 &&
         FIO_MEMCMP(pem_block.label, "CERTIFICATE", 11) == 0 &&
         pem_block.der_len > 0) {
-      if (fio___tls13_add_der_to_trust(ctx,
+      /* Allocate exactly der_len bytes — alloc size == DER content size,
+       * so FIO_MEM_FREE(buf, lens[i]) is always correct. */
+      uint8_t *der_buf =
+          (uint8_t *)FIO_MEM_REALLOC(NULL, 0, pem_block.der_len, 0);
+      if (!der_buf) {
+        FIO_LOG_ERROR("TLS 1.3: failed to allocate DER buffer for PEM bundle");
+        return (loaded > 0) ? loaded : -1;
+      }
+      FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
+      if (fio___tls13_trust_array_push(bufs_p,
+                                       lens_p,
+                                       count_p,
                                        der_buf,
-                                       der_buf_cap,
                                        pem_block.der_len) != 0)
         return (loaded > 0) ? loaded : -1; /* der_buf freed by helper */
       ++loaded;
-    } else {
-      FIO_MEM_FREE(der_buf, der_buf_cap);
     }
 
     pos += consumed;
@@ -540,10 +567,46 @@ FIO_SFUNC int fio___tls13_load_pem_bundle(fio___tls13_context_s *ctx,
   return loaded;
 }
 
-/** Internal: attempt to load the system CA trust store.
- * Tries platform-specific paths in order; loads the first one found.
+/** Internal: load all CERTIFICATE blocks from a PEM bundle into a context's
+ * trust store.  Wrapper that updates trust_store pointers after loading. */
+FIO_SFUNC int fio___tls13_load_pem_bundle(fio___tls13_context_s *ctx,
+                                          const char *pem_data,
+                                          size_t pem_len) {
+  size_t old_count = ctx->trust_der_count;
+  int loaded = fio___tls13_load_pem_bundle_into(&ctx->trust_der_bufs,
+                                                &ctx->trust_der_lens,
+                                                &ctx->trust_der_count,
+                                                pem_data,
+                                                pem_len);
+  if (loaded > 0 && ctx->trust_der_count > old_count) {
+    /* Update trust_store to reflect the newly added entries */
+    ctx->trust_store.roots = (const uint8_t **)ctx->trust_der_bufs;
+    ctx->trust_store.root_lens = ctx->trust_der_lens;
+    ctx->trust_store.root_count = ctx->trust_der_count;
+  }
+  return loaded;
+}
+
+/** Internal: get (or lazily load) the global system CA trust store singleton.
+ *
+ * Problem 2 fix: the system CA bundle is loaded ONCE into a process-wide
+ * singleton and shared (read-only) across all TLS contexts.  This prevents
+ * loading ~128 certs from disk and allocating ~192 KB of DER per client
+ * connection.  After this function returns successfully,
+ * fio___tls13_sys_trust.store is valid for the lifetime of the process.
+ *
+ * Thread safety: protected by fio___tls13_sys_trust_lock.
  * Returns the number of CA certs loaded (>= 1) on success, 0 if not found. */
-FIO_SFUNC int fio___tls13_load_system_trust(fio___tls13_context_s *ctx) {
+FIO_SFUNC int fio___tls13_get_system_trust(void) {
+  fio_lock(&fio___tls13_sys_trust_lock);
+  if (fio___tls13_sys_trust.loaded) {
+    int n = (int)fio___tls13_sys_trust.count;
+    fio_unlock(&fio___tls13_sys_trust_lock);
+    return n;
+  }
+
+  int loaded = 0;
+
 #if defined(_WIN32)
   /* Windows: enumerate the "ROOT" system certificate store via CryptoAPI */
 #include <wincrypt.h>
@@ -553,9 +616,9 @@ FIO_SFUNC int fio___tls13_load_system_trust(fio___tls13_context_s *ctx) {
   HCERTSTORE hStore = CertOpenSystemStoreA(0, "ROOT");
   if (!hStore) {
     FIO_LOG_ERROR("TLS 1.3: failed to open Windows ROOT certificate store");
+    fio_unlock(&fio___tls13_sys_trust_lock);
     return 0;
   }
-  int loaded = 0;
   PCCERT_CONTEXT pCert = NULL;
   while ((pCert = CertEnumCertificatesInStore(hStore, pCert)) != NULL) {
     if (pCert->dwCertEncodingType != X509_ASN_ENCODING ||
@@ -566,14 +629,17 @@ FIO_SFUNC int fio___tls13_load_system_trust(fio___tls13_context_s *ctx) {
     if (!der_buf)
       continue;
     FIO_MEMCPY(der_buf, pCert->pbCertEncoded, der_len);
-    if (fio___tls13_add_der_to_trust(ctx, der_buf, der_len, der_len) == 0)
+    if (fio___tls13_trust_array_push(&fio___tls13_sys_trust.bufs,
+                                     &fio___tls13_sys_trust.lens,
+                                     &fio___tls13_sys_trust.count,
+                                     der_buf,
+                                     der_len) == 0)
       ++loaded;
   }
   CertCloseStore(hStore, 0);
   if (loaded > 0)
     FIO_LOG_DEBUG2("TLS 1.3: loaded %d CA certs from Windows ROOT store",
                    loaded);
-  return loaded;
 
 #else  /* POSIX */
   /* Try platform-specific CA bundle paths in order */
@@ -593,42 +659,62 @@ FIO_SFUNC int fio___tls13_load_system_trust(fio___tls13_context_s *ctx) {
       continue;
 
     size_t pem_len = fio_bstr_len(pem);
-    int loaded = fio___tls13_load_pem_bundle(ctx, pem, pem_len);
+    loaded = fio___tls13_load_pem_bundle_into(&fio___tls13_sys_trust.bufs,
+                                              &fio___tls13_sys_trust.lens,
+                                              &fio___tls13_sys_trust.count,
+                                              pem,
+                                              pem_len);
     fio_bstr_free(pem);
 
     if (loaded > 0) {
-      FIO_LOG_DEBUG2("TLS 1.3: loaded %d CA certs from system store: %s",
+      FIO_LOG_DEBUG2("TLS 1.3: loaded %d CA certs into global system store "
+                     "from %s",
                      loaded,
                      ca_paths[i]);
-      return loaded;
+      break;
     }
   }
-  return 0; /* No system store found */
 #endif /* _WIN32 */
+
+  if (loaded > 0) {
+    /* Populate the trust_store view into the global arrays */
+    fio___tls13_sys_trust.store.roots =
+        (const uint8_t **)fio___tls13_sys_trust.bufs;
+    fio___tls13_sys_trust.store.root_lens = fio___tls13_sys_trust.lens;
+    fio___tls13_sys_trust.store.root_count = fio___tls13_sys_trust.count;
+    fio___tls13_sys_trust.loaded = 1;
+    /* Cleanup is registered once at startup via FIO_CONSTRUCTOR — not here. */
+  }
+
+  fio_unlock(&fio___tls13_sys_trust_lock);
+  return loaded;
 }
 
 /** Callback for iterating trust certificates in fio_io_tls_s.
  *
  * Loads each PEM trust certificate into the context's trust store.
- * Called with public_cert_file == NULL when trust_sys is set — loads the
- * system CA trust store automatically. */
+ * Called with public_cert_file == NULL when trust_sys is set — uses the
+ * global system CA trust store singleton (Problem 2 fix). */
 FIO_SFUNC int fio___tls13_each_trust(struct fio_io_tls_each_s *e,
                                      const char *public_cert_file) {
   fio___tls13_context_s *ctx = (fio___tls13_context_s *)e->udata;
 
   if (!public_cert_file) {
-    /* System trust store requested: load platform CA bundle */
-    int loaded = fio___tls13_load_system_trust(ctx);
+    /* System trust store requested: use global singleton (loaded once). */
+    int loaded = fio___tls13_get_system_trust();
     if (loaded <= 0) {
       FIO_LOG_ERROR("TLS 1.3: system trust store not found or empty — "
                     "cannot verify server certificates. Add CA certificates "
                     "explicitly via fio_io_tls_trust_add().");
       return -1;
     }
+    /* Point context trust_store at the global singleton (non-owning ref).
+     * trust_der_owned stays 0 — context must NOT free these buffers. */
+    ctx->trust_store = fio___tls13_sys_trust.store;
     return 0;
   }
 
-  /* Read PEM file */
+  /* Read PEM file (user-configured trust cert — owned by this context) */
   char *pem = fio_bstr_readfile(NULL, public_cert_file, 0, 0);
   if (!pem) {
     FIO_LOG_ERROR("TLS 1.3: failed to read trust certificate: %s",
@@ -646,6 +732,7 @@ FIO_SFUNC int fio___tls13_each_trust(struct fio_io_tls_each_s *e,
     return -1;
   }
 
+  ctx->trust_der_owned = 1;
   FIO_LOG_DEBUG2("TLS 1.3: loaded %d trust certificate(s) from %s",
                  loaded,
                  public_cert_file);
@@ -680,12 +767,19 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
     }
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
     /* Build trust store from configured trust certificates.
-     * When no explicit trust config exists, load the system CA store as the
+     * When no explicit trust config exists, use the system CA store as the
      * secure default — this prevents silent MITM when the caller forgets to
-     * configure trust anchors. */
+     * configure trust anchors.
+     *
+     * Problem 2 fix: the system CA store is loaded ONCE into a global
+     * singleton (fio___tls13_sys_trust) and shared across all contexts.
+     * Per-context trust_der_bufs/lens are only allocated for user-configured
+     * certs (trust_der_owned=1).  System trust is a non-owning reference
+     * (trust_der_owned=0). */
     if (fio_io_tls_trust_count(tls) || tls->trust_sys) {
-      /* Explicit trust config: load via iterator (handles both file certs and
-       * trust_sys → system store via fio___tls13_each_trust NULL path) */
+      /* Explicit trust config: load via iterator.
+       * fio___tls13_each_trust handles both file certs (owned, per-context)
+       * and trust_sys → global singleton (non-owned). */
       if (fio_io_tls_each(tls,
                           .udata = ctx,
                           .each_trust = fio___tls13_each_trust)) {
@@ -693,8 +787,8 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
         goto error;
       }
     } else {
-      /* No explicit trust config: load system CA store as secure default */
-      int loaded = fio___tls13_load_system_trust(ctx);
+      /* No explicit trust config: use global system CA store as default */
+      int loaded = fio___tls13_get_system_trust();
       if (loaded <= 0) {
         FIO_LOG_ERROR("TLS 1.3: no trust store configured and system CA store "
                       "not found — TLS client connections will fail. Add CA "
@@ -702,39 +796,23 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
                       "fio_io_tls_trust_add(tls, NULL) for system store.");
         goto error;
       }
-      FIO_LOG_DEBUG2("TLS 1.3: using system CA store (%d certs) as default "
-                     "trust anchor",
+      /* Point context at the global singleton — no per-context ownership */
+      ctx->trust_store = fio___tls13_sys_trust.store;
+      /* trust_der_owned stays 0 — free path must NOT free these buffers */
+      FIO_LOG_DEBUG2("TLS 1.3: using global system CA store (%d certs) as "
+                     "default trust anchor",
                      loaded);
     }
 #endif     /* H___FIO_X509___H && H___FIO_PEM___H */
   } else { /* For server, load certificates */
     /* Check if certificates are configured */
     if (!fio_io_tls_cert_count(tls)) {
-      /* No certificates configured - use self-signed */
+      /* No certificates configured - generate self-signed into context */
 #if defined(H___FIO_X509___H)
-      if (fio___tls13_make_self_signed("localhost") != 0) {
+      if (fio___tls13_make_self_signed(ctx, "localhost") != 0) {
         FIO_LOG_ERROR("TLS 1.3: failed to create self-signed certificate");
         goto error;
       }
-      ctx->cert_der = (uint8_t *)
-          FIO_MEM_REALLOC(NULL, 0, fio___tls13_self_signed_cert_len, 0);
-      if (!ctx->cert_der) {
-        FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
-        goto error;
-      }
-      FIO_MEMCPY(ctx->cert_der,
-                 fio___tls13_self_signed_cert,
-                 fio___tls13_self_signed_cert_len);
-      ctx->cert_der_len = fio___tls13_self_signed_cert_len;
-      /* Copy private key (P-256 scalar) */
-      fio_memcpy32(ctx->private_key,
-                   fio___tls13_self_signed_keypair.secret_key);
-      /* Copy public key (P-256 uncompressed point for signing) */
-      FIO_MEMCPY(ctx->public_key,
-                 fio___tls13_self_signed_keypair.public_key,
-                 65);
-      ctx->private_key_len = 32;
-      ctx->private_key_type = FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256;
 #else
       FIO_LOG_ERROR("TLS 1.3: X509 module required for server certificates");
       goto error;
@@ -771,13 +849,19 @@ error:
     if (ctx->cert_der)
       FIO_MEM_FREE(ctx->cert_der, ctx->cert_der_len);
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
-    for (size_t i = 0; i < ctx->trust_der_count; ++i)
-      FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
-    if (ctx->trust_der_bufs)
-      FIO_MEM_FREE(ctx->trust_der_bufs,
-                   ctx->trust_der_count * sizeof(uint8_t *));
-    if (ctx->trust_der_lens)
-      FIO_MEM_FREE(ctx->trust_der_lens, ctx->trust_der_count * sizeof(size_t));
+    /* Only free DER buffers when this context owns them (trust_der_owned=1).
+     * When trust_der_owned=0 the arrays are the global system trust singleton
+     * and must NOT be freed here. */
+    if (ctx->trust_der_owned) {
+      for (size_t i = 0; i < ctx->trust_der_count; ++i)
+        FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
+      if (ctx->trust_der_bufs)
+        FIO_MEM_FREE(ctx->trust_der_bufs,
+                     ctx->trust_der_count * sizeof(uint8_t *));
+      if (ctx->trust_der_lens)
+        FIO_MEM_FREE(ctx->trust_der_lens,
+                     ctx->trust_der_count * sizeof(size_t));
+    }
 #endif /* H___FIO_X509___H && H___FIO_PEM___H */
     if (ctx->tls)
       fio_io_tls_free(ctx->tls);
@@ -800,12 +884,18 @@ FIO_SFUNC void fio___tls13_free_context_task(void *tls_ctx, void *ignr_) {
     FIO_MEM_FREE(ctx->cert_der, ctx->cert_der_len);
   fio_secure_zero(ctx->private_key, sizeof(ctx->private_key));
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
-  for (size_t i = 0; i < ctx->trust_der_count; ++i)
-    FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
-  if (ctx->trust_der_bufs)
-    FIO_MEM_FREE(ctx->trust_der_bufs, ctx->trust_der_count * sizeof(uint8_t *));
-  if (ctx->trust_der_lens)
-    FIO_MEM_FREE(ctx->trust_der_lens, ctx->trust_der_count * sizeof(size_t));
+  /* Only free DER buffers when this context owns them (trust_der_owned=1).
+   * When trust_der_owned=0 the arrays are the global system trust singleton
+   * and must NOT be freed here — they are freed at process exit. */
+  if (ctx->trust_der_owned) {
+    for (size_t i = 0; i < ctx->trust_der_count; ++i)
+      FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
+    if (ctx->trust_der_bufs)
+      FIO_MEM_FREE(ctx->trust_der_bufs,
+                   ctx->trust_der_count * sizeof(uint8_t *));
+    if (ctx->trust_der_lens)
+      FIO_MEM_FREE(ctx->trust_der_lens, ctx->trust_der_count * sizeof(size_t));
+  }
 #endif /* H___FIO_X509___H && H___FIO_PEM___H */
   if (ctx->tls)
     fio_io_tls_free(ctx->tls);
