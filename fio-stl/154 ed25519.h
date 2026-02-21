@@ -495,6 +495,11 @@ FIO_IFUNC void fio___gf_sqr(fio___gf_s o, const fio___gf_s f) {
   o[1] += c;
 }
 
+/* MAINTENANCE NOTE: This portable 32-bit path uses paired uint64_t
+ * accumulators. Every product accumulation MUST use fio_math_addc64 for the
+ * high-word addition (not +=) to propagate carry correctly.  Silent uint64_t
+ * overflow here corrupts GF(2^255-19) field elements and produces wrong X25519
+ * shared secrets. */
 #else /* !__SIZEOF_INT128__ - portable fallback */
 
 /* Helper: add 64-bit value to 128-bit accumulator (lo, hi) */
@@ -514,7 +519,8 @@ FIO_IFUNC void fio___gf_mul(fio___gf_s o,
                             const fio___gf_s a,
                             const fio___gf_s b) {
   uint64_t t0_lo, t0_hi, t1_lo, t1_hi, t2_lo, t2_hi, t3_lo, t3_hi, t4_lo, t4_hi;
-  uint64_t tmp_lo, tmp_hi;
+  uint64_t t0_ovf = 0, t1_ovf = 0, t2_ovf = 0, t3_ovf = 0, t4_ovf = 0;
+  uint64_t tmp_lo, tmp_hi, _carry;
   uint64_t r0, r1, r2, r3, r4, s0, s1, s2, s3, s4, c;
 
   r0 = b[0];
@@ -534,40 +540,50 @@ FIO_IFUNC void fio___gf_mul(fio___gf_s o,
   t1_lo = fio_math_mulc64(r0, s1, &t1_hi);
   tmp_lo = fio_math_mulc64(r1, s0, &tmp_hi);
   FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
-  t1_hi += tmp_hi;
+  t1_hi = fio_math_addc64(t1_hi, tmp_hi, 0, &_carry);
+  t1_ovf += _carry;
 
   t2_lo = fio_math_mulc64(r0, s2, &t2_hi);
   tmp_lo = fio_math_mulc64(r2, s0, &tmp_hi);
   FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
-  t2_hi += tmp_hi;
+  t2_hi = fio_math_addc64(t2_hi, tmp_hi, 0, &_carry);
+  t2_ovf += _carry;
   tmp_lo = fio_math_mulc64(r1, s1, &tmp_hi);
   FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
-  t2_hi += tmp_hi;
+  t2_hi = fio_math_addc64(t2_hi, tmp_hi, 0, &_carry);
+  t2_ovf += _carry;
 
   t3_lo = fio_math_mulc64(r0, s3, &t3_hi);
   tmp_lo = fio_math_mulc64(r3, s0, &tmp_hi);
   FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
-  t3_hi += tmp_hi;
+  t3_hi = fio_math_addc64(t3_hi, tmp_hi, 0, &_carry);
+  t3_ovf += _carry;
   tmp_lo = fio_math_mulc64(r1, s2, &tmp_hi);
   FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
-  t3_hi += tmp_hi;
+  t3_hi = fio_math_addc64(t3_hi, tmp_hi, 0, &_carry);
+  t3_ovf += _carry;
   tmp_lo = fio_math_mulc64(r2, s1, &tmp_hi);
   FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
-  t3_hi += tmp_hi;
+  t3_hi = fio_math_addc64(t3_hi, tmp_hi, 0, &_carry);
+  t3_ovf += _carry;
 
   t4_lo = fio_math_mulc64(r0, s4, &t4_hi);
   tmp_lo = fio_math_mulc64(r4, s0, &tmp_hi);
   FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
-  t4_hi += tmp_hi;
+  t4_hi = fio_math_addc64(t4_hi, tmp_hi, 0, &_carry);
+  t4_ovf += _carry;
   tmp_lo = fio_math_mulc64(r3, s1, &tmp_hi);
   FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
-  t4_hi += tmp_hi;
+  t4_hi = fio_math_addc64(t4_hi, tmp_hi, 0, &_carry);
+  t4_ovf += _carry;
   tmp_lo = fio_math_mulc64(r1, s3, &tmp_hi);
   FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
-  t4_hi += tmp_hi;
+  t4_hi = fio_math_addc64(t4_hi, tmp_hi, 0, &_carry);
+  t4_ovf += _carry;
   tmp_lo = fio_math_mulc64(r2, s2, &tmp_hi);
   FIO___GF_ADD128_64(t4_lo, t4_hi, tmp_lo);
-  t4_hi += tmp_hi;
+  t4_hi = fio_math_addc64(t4_hi, tmp_hi, 0, &_carry);
+  t4_ovf += _carry;
 
   /* Multiply r1-r4 by 19 for wrapped terms */
   r1 *= 19;
@@ -578,37 +594,56 @@ FIO_IFUNC void fio___gf_mul(fio___gf_s o,
   /* Add wrapped products */
   tmp_lo = fio_math_mulc64(r4, s1, &tmp_hi);
   FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
-  t0_hi += tmp_hi;
+  t0_hi = fio_math_addc64(t0_hi, tmp_hi, 0, &_carry);
+  t0_ovf += _carry;
   tmp_lo = fio_math_mulc64(r1, s4, &tmp_hi);
   FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
-  t0_hi += tmp_hi;
+  t0_hi = fio_math_addc64(t0_hi, tmp_hi, 0, &_carry);
+  t0_ovf += _carry;
   tmp_lo = fio_math_mulc64(r2, s3, &tmp_hi);
   FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
-  t0_hi += tmp_hi;
+  t0_hi = fio_math_addc64(t0_hi, tmp_hi, 0, &_carry);
+  t0_ovf += _carry;
   tmp_lo = fio_math_mulc64(r3, s2, &tmp_hi);
   FIO___GF_ADD128_64(t0_lo, t0_hi, tmp_lo);
-  t0_hi += tmp_hi;
+  t0_hi = fio_math_addc64(t0_hi, tmp_hi, 0, &_carry);
+  t0_ovf += _carry;
 
   tmp_lo = fio_math_mulc64(r4, s2, &tmp_hi);
   FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
-  t1_hi += tmp_hi;
+  t1_hi = fio_math_addc64(t1_hi, tmp_hi, 0, &_carry);
+  t1_ovf += _carry;
   tmp_lo = fio_math_mulc64(r2, s4, &tmp_hi);
   FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
-  t1_hi += tmp_hi;
+  t1_hi = fio_math_addc64(t1_hi, tmp_hi, 0, &_carry);
+  t1_ovf += _carry;
   tmp_lo = fio_math_mulc64(r3, s3, &tmp_hi);
   FIO___GF_ADD128_64(t1_lo, t1_hi, tmp_lo);
-  t1_hi += tmp_hi;
+  t1_hi = fio_math_addc64(t1_hi, tmp_hi, 0, &_carry);
+  t1_ovf += _carry;
 
   tmp_lo = fio_math_mulc64(r4, s3, &tmp_hi);
   FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
-  t2_hi += tmp_hi;
+  t2_hi = fio_math_addc64(t2_hi, tmp_hi, 0, &_carry);
+  t2_ovf += _carry;
   tmp_lo = fio_math_mulc64(r3, s4, &tmp_hi);
   FIO___GF_ADD128_64(t2_lo, t2_hi, tmp_lo);
-  t2_hi += tmp_hi;
+  t2_hi = fio_math_addc64(t2_hi, tmp_hi, 0, &_carry);
+  t2_ovf += _carry;
 
   tmp_lo = fio_math_mulc64(r4, s4, &tmp_hi);
   FIO___GF_ADD128_64(t3_lo, t3_hi, tmp_lo);
-  t3_hi += tmp_hi;
+  t3_hi = fio_math_addc64(t3_hi, tmp_hi, 0, &_carry);
+  t3_ovf += _carry;
+
+  /* Fold overflow words (bits 128-191) into hi words before carry propagation.
+   * tN_ovf is at most 5 (one per product), so tN_hi + tN_ovf cannot overflow.
+   */
+  t0_hi += t0_ovf;
+  t1_hi += t1_ovf;
+  t2_hi += t2_ovf;
+  t3_hi += t3_ovf;
+  t4_hi += t4_ovf;
 
   /* Carry propagation */
   r0 = t0_lo & FIO___GF_MASK51;
