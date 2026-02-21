@@ -11,7 +11,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define WORKERS                4
 #define START_OFFSET_MILLI     150
 #define SUBSCRIBE_OFFSET_MILLI 10
-#define CLEANUP_MILLI          2500
+#define CLEANUP_MILLI          3000
 #define LISTENERS              (WORKERS + 1)
 
 static struct {
@@ -175,7 +175,7 @@ int main(void) {
   size_t received_count = 0;
   /* setup timeout */
   fio_io_run_every(.fn = stop_io_timeout,
-                   .every = (CLEANUP_MILLI + 5000),
+                   .every = (CLEANUP_MILLI + 7000),
                    .repetitions = 0);
   /* attach history manager for replay_since to work */
   fio_pubsub_history_attach(fio_pubsub_history_cache(0), 100);

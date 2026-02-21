@@ -164,7 +164,10 @@ FIO_SFUNC void fio___io_work(int is_worker) {
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_start(q);
   }
-
+  /* run pre-start callbacks only once, on master */
+  if (fio_io_is_master())
+    fio_state_callback_force(FIO_CALL_PRE_START);
+  /* Performing the queued tasks will spawn any workers waiting to be spawned */
   fio_queue_perform_all(&FIO___IO.queue);
   if (is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
@@ -372,12 +375,6 @@ SFUNC void fio_io_start(int workers) {
   FIO___IO.is_worker = !workers;
   fio_sock_maximize_limits(0);
 
-  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
-    fio___io_async_start(q);
-  }
-
-  fio_state_callback_force(FIO_CALL_PRE_START);
-  fio_queue_perform_all(&FIO___IO.queue);
   fio_signal_monitor(.sig = SIGINT,
                      .callback = fio___io_signal_stop,
                      .immediate = 1);
