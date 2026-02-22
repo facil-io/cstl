@@ -1335,17 +1335,6 @@ Constant-Time Utilities
  * Constant-time comparison of two buffers.
  * Returns 0 if equal, 1 if different.
  */
-FIO_SFUNC uint8_t fio___mlkem_verify(const uint8_t *a,
-                                     const uint8_t *b,
-                                     size_t len) {
-  size_t i;
-  uint8_t r = 0;
-  for (i = 0; i < len; i++)
-    r |= a[i] ^ b[i];
-  /* Collapse to 0 or 1 */
-  r = (uint8_t)((uint64_t)(-((int64_t)r)) >> 63);
-  return r;
-}
 
 /**
  * Constant-time conditional move.
@@ -1358,9 +1347,11 @@ FIO_SFUNC void fio___mlkem_cmov(uint8_t *restrict dst,
                                 uint8_t b) {
   size_t i;
   b = (uint8_t)(-b); /* 0x00 or 0xFF */
-#if defined(__GNUC__) || defined(__clang__)
-  __asm__ __volatile__("" : "+r"(b) : : "memory");
-#endif
+  /* Compiler barrier: prevent the optimizer from branching on b or folding the
+   * XOR loop into memcpy/no-op — this is a constant-time select, not a branch.
+   * Security-relevant: without the barrier, timing leaks the decryption result.
+   */
+  FIO_COMPILER_GUARD;
   for (i = 0; i < len; i++)
     dst[i] ^= b & (dst[i] ^ src[i]);
 }
@@ -1675,8 +1666,11 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
   /* c' = Enc(pk, m'; r') */
   fio___mlkem_indcpa_enc(cmp, buf, pk, kr + FIO___MLKEM_SYMBYTES);
 
-  /* Constant-time comparison: ct == c' ? */
-  fail = fio___mlkem_verify(ct, cmp, FIO___MLKEM_INDCPA_BYTES);
+  /* Constant-time comparison: fail = (ct != c')
+   * fio_ct_is_eq returns 1 (equal/success), 0 (not equal/failure).
+   * Subtract 1 to invert: 0 (equal=no fail), 0xFF (not equal=fail). */
+  fail =
+      (uint8_t)((uint8_t)fio_ct_is_eq(ct, cmp, FIO___MLKEM_INDCPA_BYTES) - 1);
 
   /* Implicit rejection: if fail, use K_bar = J(z || ct) instead */
   /* Overwrite K with K_bar = SHAKE256(z || ct) if fail */

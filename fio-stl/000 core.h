@@ -2343,7 +2343,9 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
     a += 64;
     b += 64;
   }
-  return !flag;
+  flag |= (uint64_t)((~flag) + 1);
+  flag = ~flag;
+  return (uint64_t)((flag >> 63));
 }
 
 /** A timing attack resistant memory zeroing function. */
