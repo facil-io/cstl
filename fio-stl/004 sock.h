@@ -54,24 +54,33 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
   return c;
 }
 #define accept fio_sock_accept
-/** Acts as POSIX dup. Use this for portability with WinSock2. */
+/** Acts as POSIX dup. Use this for portability with WinSock2.
+ *
+ * Uses DuplicateHandle for same-process socket duplication.
+ *
+ * MSDN (WSADuplicateSocket): "The special WSAPROTOCOL_INFO structure can only
+ * be used once by the target process." and the WSASocket dwFlags must exactly
+ * match the original socket's overlapped flag — mismatches cause WSAEINVAL.
+ * DuplicateHandle avoids all of this: it duplicates any kernel object handle
+ * (including Winsock SOCKETs) within the same process without restrictions.
+ * This is the same approach used by libuv for same-process socket duplication.
+ * See:
+ * https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
+ */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
-  WSAPROTOCOL_INFO info;
-  if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info)) {
-    FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
-                  WSAGetLastError());
+  HANDLE dup_handle;
+  if (!DuplicateHandle(GetCurrentProcess(),
+                       (HANDLE)(UINT_PTR)original,
+                       GetCurrentProcess(),
+                       &dup_handle,
+                       0,
+                       FALSE,
+                       DUPLICATE_SAME_ACCESS)) {
+    FIO_LOG_ERROR("(fio_sock_dup) DuplicateHandle failed (error %lu)",
+                  (unsigned long)GetLastError());
     return FIO_SOCKET_INVALID;
   }
-  fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
-                                            FROM_PROTOCOL_INFO,
-                                            FROM_PROTOCOL_INFO,
-                                            &info,
-                                            0,
-                                            WSA_FLAG_OVERLAPPED);
-  if (!FIO_SOCK_FD_ISVALID(fd))
-    FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
-                  WSAGetLastError());
-  return fd;
+  return (fio_socket_i)(UINT_PTR)dup_handle;
 }
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
