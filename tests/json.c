@@ -105,31 +105,39 @@ FIO_SFUNC void test_json_value_free(test_json_value_s *v) {
 JSON Parser Callbacks
 ***************************************************************************** */
 
-FIO_SFUNC void *test_json_on_null(void) {
+FIO_SFUNC void *test_json_on_null(void *udata) {
+  (void)udata;
   return test_json_value_new(TEST_JSON_NULL);
 }
 
-FIO_SFUNC void *test_json_on_true(void) {
+FIO_SFUNC void *test_json_on_true(void *udata) {
+  (void)udata;
   return test_json_value_new(TEST_JSON_TRUE);
 }
 
-FIO_SFUNC void *test_json_on_false(void) {
+FIO_SFUNC void *test_json_on_false(void *udata) {
+  (void)udata;
   return test_json_value_new(TEST_JSON_FALSE);
 }
 
-FIO_SFUNC void *test_json_on_number(int64_t i) {
+FIO_SFUNC void *test_json_on_number(void *udata, int64_t i) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_NUMBER);
   v->data.i = i;
   return v;
 }
 
-FIO_SFUNC void *test_json_on_float(double f) {
+FIO_SFUNC void *test_json_on_float(void *udata, double f) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_FLOAT);
   v->data.f = f;
   return v;
 }
 
-FIO_SFUNC void *test_json_on_string(const void *start, size_t len) {
+FIO_SFUNC void *test_json_on_string(void *udata,
+                                    const void *start,
+                                    size_t len) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_STRING);
   /* Unescape the string */
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, len + 1, 0);
@@ -141,7 +149,10 @@ FIO_SFUNC void *test_json_on_string(const void *start, size_t len) {
   return v;
 }
 
-FIO_SFUNC void *test_json_on_string_simple(const void *start, size_t len) {
+FIO_SFUNC void *test_json_on_string_simple(void *udata,
+                                           const void *start,
+                                           size_t len) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_STRING);
   v->data.str.buf = (char *)FIO_MEM_REALLOC(NULL, 0, len + 1, 0);
   FIO_ASSERT_ALLOC(v->data.str.buf);
@@ -151,7 +162,8 @@ FIO_SFUNC void *test_json_on_string_simple(const void *start, size_t len) {
   return v;
 }
 
-FIO_SFUNC void *test_json_on_map(void *ctx, void *at) {
+FIO_SFUNC void *test_json_on_map(void *udata, void *ctx, void *at) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_MAP);
   v->data.map.capa = 8;
   v->data.map.keys = (test_json_value_s **)FIO_MEM_REALLOC(
@@ -171,7 +183,8 @@ FIO_SFUNC void *test_json_on_map(void *ctx, void *at) {
   return v;
 }
 
-FIO_SFUNC void *test_json_on_array(void *ctx, void *at) {
+FIO_SFUNC void *test_json_on_array(void *udata, void *ctx, void *at) {
+  (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_ARRAY);
   v->data.arr.capa = 8;
   v->data.arr.items = (test_json_value_s **)FIO_MEM_REALLOC(
@@ -185,7 +198,11 @@ FIO_SFUNC void *test_json_on_array(void *ctx, void *at) {
   return v;
 }
 
-FIO_SFUNC int test_json_map_push(void *ctx, void *key, void *value) {
+FIO_SFUNC int test_json_map_push(void *udata,
+                                 void *ctx,
+                                 void *key,
+                                 void *value) {
+  (void)udata;
   test_json_value_s *map = (test_json_value_s *)ctx;
   if (map->data.map.count >= map->data.map.capa) {
     size_t new_capa = map->data.map.capa * 2;
@@ -207,7 +224,8 @@ FIO_SFUNC int test_json_map_push(void *ctx, void *key, void *value) {
   return 0;
 }
 
-FIO_SFUNC int test_json_array_push(void *ctx, void *value) {
+FIO_SFUNC int test_json_array_push(void *udata, void *ctx, void *value) {
+  (void)udata;
   test_json_value_s *arr = (test_json_value_s *)ctx;
   if (arr->data.arr.count >= arr->data.arr.capa) {
     size_t new_capa = arr->data.arr.capa * 2;
@@ -222,11 +240,13 @@ FIO_SFUNC int test_json_array_push(void *ctx, void *value) {
   return 0;
 }
 
-FIO_SFUNC void test_json_free_unused(void *obj) {
+FIO_SFUNC void test_json_free_unused(void *udata, void *obj) {
+  (void)udata;
   test_json_value_free((test_json_value_s *)obj);
 }
 
-FIO_SFUNC void *test_json_on_error(void *ctx) {
+FIO_SFUNC void *test_json_on_error(void *udata, void *ctx) {
+  (void)udata;
   test_json_value_free((test_json_value_s *)ctx);
   return NULL;
 }
@@ -252,7 +272,7 @@ Helper: Parse JSON string
 ***************************************************************************** */
 
 FIO_SFUNC test_json_value_s *test_json_parse(const char *json, size_t len) {
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, json, len);
+  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, json, len);
   if (r.err)
     return NULL;
   return (test_json_value_s *)r.ctx;
@@ -932,7 +952,7 @@ FIO_SFUNC void fio___test_json_bom(void) {
 
   /* BOM only (should succeed with no value) */
   const char bom_only[] = "\xEF\xBB\xBF";
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, bom_only, 3);
+  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, bom_only, 3);
   FIO_ASSERT(!r.err, "JSON BOM-only should not error");
   if (r.ctx)
     test_json_value_free((test_json_value_s *)r.ctx);
@@ -945,7 +965,7 @@ Test: Stop Position
 FIO_SFUNC void fio___test_json_stop_position(void) {
   /* Parse stops after first complete value */
   const char *json = "42 extra";
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, json, 8);
+  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, json, 8);
   FIO_ASSERT(!r.err, "JSON parsing should succeed");
   FIO_ASSERT(r.stop_pos == 2,
              "JSON stop position mismatch: expected 2, got %zu",
@@ -955,7 +975,7 @@ FIO_SFUNC void fio___test_json_stop_position(void) {
 
   /* Array parsing */
   json = "[1,2,3]more";
-  r = fio_json_parse(&test_json_callbacks, json, 11);
+  r = fio_json_parse(&test_json_callbacks, NULL, json, 11);
   FIO_ASSERT(!r.err, "JSON array parsing should succeed");
   FIO_ASSERT(r.stop_pos == 7,
              "JSON array stop position mismatch: expected 7, got %zu",

@@ -44,39 +44,39 @@ FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536, "FIO_JSON_MAX_DEPTH too big");
  */
 typedef struct {
   /** NULL object was detected. Returns new object as `void *`. */
-  void *(*on_null)(void);
+  void *(*on_null)(void *udata);
   /** TRUE object was detected. Returns new object as `void *`. */
-  void *(*on_true)(void);
+  void *(*on_true)(void *udata);
   /** FALSE object was detected. Returns new object as `void *`. */
-  void *(*on_false)(void);
+  void *(*on_false)(void *udata);
   /** Number was detected (long long). Returns new object as `void *`. */
-  void *(*on_number)(int64_t i);
+  void *(*on_number)(void *udata, int64_t i);
   /** Float was detected (double).Returns new object as `void *`.  */
-  void *(*on_float)(double f);
+  void *(*on_float)(void *udata, double f);
   /** (escaped) String was detected. Returns a new String as `void *`. */
-  void *(*on_string)(const void *start, size_t len);
+  void *(*on_string)(void *udata, const void *start, size_t len);
   /** (unescaped) String was detected. Returns a new String as `void *`. */
-  void *(*on_string_simple)(const void *start, size_t len);
+  void *(*on_string_simple)(void *udata, const void *start, size_t len);
   /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-  void *(*on_map)(void *ctx, void *at);
+  void *(*on_map)(void *udata, void *ctx, void *at);
   /** Array was detected. Returns ctx to array or NULL on error. */
-  void *(*on_array)(void *ctx, void *at);
+  void *(*on_array)(void *udata, void *ctx, void *at);
   /** Map entry detected. Returns non-zero on error. Owns key and value. */
-  int (*map_push)(void *ctx, void *key, void *value);
+  int (*map_push)(void *udata, void *ctx, void *key, void *value);
   /** Array entry detected. Returns non-zero on error. Owns value. */
-  int (*array_push)(void *ctx, void *value);
+  int (*array_push)(void *udata, void *ctx, void *value);
   /** Called when an array object (`ctx`) appears done. */
-  int (*array_finished)(void *ctx);
+  int (*array_finished)(void *udata, void *ctx);
   /** Called when a map object (`ctx`) appears done. */
-  int (*map_finished)(void *ctx);
+  int (*map_finished)(void *udata, void *ctx);
   /** Called when context is expected to be an array (i.e., fio_json_update). */
-  int (*is_array)(void *ctx);
+  int (*is_array)(void *udata, void *ctx);
   /** Called when context is expected to be a map (i.e., fio_json_update). */
-  int (*is_map)(void *ctx);
+  int (*is_map)(void *udata, void *ctx);
   /** Called for unused objects (e.g., key on error). Must free the object. */
-  void (*free_unused_object)(void *ctx);
+  void (*free_unused_object)(void *udata, void *ctx);
   /** The JSON parsing encountered an error. Owns ctx, should free or return. */
-  void *(*on_error)(void *ctx);
+  void *(*on_error)(void *udata, void *ctx);
 } fio_json_parser_callbacks_s;
 
 /** The JSON return type. */
@@ -100,6 +100,7 @@ typedef struct {
  * once an object parsing was completed.
  */
 SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *settings,
+                                       void *udata,
                                        const char *json_string,
                                        const size_t len);
 
@@ -125,6 +126,7 @@ typedef struct {
   fio_json_parser_callbacks_s cb;
   void *ctx;
   void *key;
+  void *udata;
   const char *pos;
   const char *end;
   uint32_t depth;
@@ -185,7 +187,7 @@ FIO_SFUNC void *fio___json_consume_infinit(fio___json_state_s *s,
       s->pos += (tst64 == inf64) * 5;
     }
     s->pos += 3;
-    return s->cb.on_float(negative ? (INFINITY * -1) : INFINITY);
+    return s->cb.on_float(s->udata, negative ? (INFINITY * -1) : INFINITY);
   }
 buffer_error:
   s->error = 1;
@@ -196,7 +198,8 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "number");
 #if FIO_JSON_USE_FIO_ATON
   fio_aton_s aton = fio_aton((char **)&s->pos);
-  return aton.is_float ? s->cb.on_float(aton.f) : s->cb.on_number(aton.i);
+  return aton.is_float ? s->cb.on_float(s->udata, aton.f)
+                       : s->cb.on_number(s->udata, aton.i);
 #else
   const char *tst = s->pos;
   uint64_t i;
@@ -239,7 +242,7 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   if (errno == E2BIG || (((uint64_t)(1 ^ hex ^ binary) << 63) & i))
     goto is_float_from_error;
   // s->error = (errno == E2BIG);
-  return s->cb.on_number(fio_u2i_limit(i, negative));
+  return s->cb.on_number(s->udata, fio_u2i_limit(i, negative));
 is_float_from_error:
   s->pos = tst;
   errno = 0;
@@ -247,7 +250,7 @@ is_float_from_error:
 is_float:
   f = fio_atof((char **)&s->pos);
   s->error = (errno == E2BIG);
-  return s->cb.on_float(f);
+  return s->cb.on_float(s->udata, f);
 
 buffer_overflow:
   s->error = 1;
@@ -260,11 +263,12 @@ is_inifinity:
 
 FIO_SFUNC void *fio___json_consume_string(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "string");
-  void *(*cb)(const void *start, size_t len) = s->cb.on_string_simple;
+  void *(*cb)(void *udata, const void *start, size_t len) =
+      s->cb.on_string_simple;
   const char *start = ++s->pos;
   for (; s->pos < s->end; ++s->pos) {
     if (*s->pos == '"')
-      return cb(start, (s->pos++) - start);
+      return cb(s->udata, start, (s->pos++) - start);
     if (*s->pos == '\\')
       cb = s->cb.on_string;
     s->pos += (*s->pos == '\\');
@@ -277,7 +281,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "map");
   void *old = s->ctx;
   void *old_key = s->key;
-  void *map = s->cb.on_map(s, s->key);
+  void *map = s->cb.on_map(s->udata, s, s->key);
   s->ctx = map;
   s->key = NULL;
   if (++s->depth == FIO_JSON_MAX_DEPTH)
@@ -293,7 +297,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
     if (fio___json_consume_whitespace(s))
       break;
     void *value = fio___json_consume(s);
-    s->error |= s->cb.map_push(s->ctx, s->key, value);
+    s->error |= s->cb.map_push(s->udata, s->ctx, s->key, value);
     s->key = NULL;
     if (s->error || fio___json_consume_whitespace(s))
       break;
@@ -302,7 +306,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
   }
   if (s->key) {
     s->error = 1;
-    s->cb.free_unused_object(s->key);
+    s->cb.free_unused_object(s->udata, s->key);
   } else if (*s->pos != '}' || s->error) {
     s->error = 1;
   } else {
@@ -311,7 +315,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
   --s->depth;
   s->ctx = old;
   s->key = old_key;
-  s->error |= s->cb.map_finished(map);
+  s->error |= s->cb.map_finished(s->udata, map);
   return map;
 too_deep:
   s->ctx = old;
@@ -323,7 +327,7 @@ too_deep:
 FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "array");
   void *old = s->ctx;
-  void *array = s->ctx = s->cb.on_array(s, s->key);
+  void *array = s->ctx = s->cb.on_array(s->udata, s, s->key);
   if (++s->depth == FIO_JSON_MAX_DEPTH)
     goto too_deep;
   for (;;) {
@@ -334,7 +338,7 @@ FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
       break;
     void *value = fio___json_consume(s);
     if (value)
-      s->error |= s->cb.array_push(s->ctx, value);
+      s->error |= s->cb.array_push(s->udata, s->ctx, value);
     if (s->error || fio___json_consume_comma(s))
       break;
     if (*s->pos != ',')
@@ -347,7 +351,7 @@ FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
   }
   s->ctx = old;
   --s->depth;
-  s->error |= s->cb.array_finished(array);
+  s->error |= s->cb.array_finished(s->udata, array);
   return array;
 too_deep:
   s->ctx = old;
@@ -365,7 +369,7 @@ FIO_SFUNC void *fio___json_consume_null(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 4;
-  return s->cb.on_null();
+  return s->cb.on_null(s->udata);
 on_error:
   s->error = 1;
   return NULL;
@@ -380,7 +384,7 @@ FIO_SFUNC void *fio___json_consume_true(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 4;
-  return s->cb.on_true();
+  return s->cb.on_true(s->udata);
 on_error:
   s->error = 1;
   return NULL;
@@ -395,7 +399,7 @@ FIO_SFUNC void *fio___json_consume_false(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 5;
-  return s->cb.on_false();
+  return s->cb.on_false(s->udata);
 on_error:
   s->error = 1;
   return NULL;
@@ -410,7 +414,7 @@ FIO_SFUNC void *fio___json_consume_nan(fio___json_state_s *s) {
   if (data != wrd)
     goto on_error;
   s->pos += 3;
-  return s->cb.on_float(NAN);
+  return s->cb.on_float(s->udata, NAN);
 on_error:
   s->error = 1;
   return NULL;
@@ -498,11 +502,15 @@ void *fio___json_consume(fio___json_state_s *s) {
   }
 }
 
-static int fio___json_callback_noop(void *ctx) {
-  return 0;
+static int fio___json_callback_noop(void *udata, void *ctx) {
+  (void)udata;
   (void)ctx;
+  return 0;
 }
-static void *fio___json_callback_noop2(void *ctx) { return ctx; }
+static void *fio___json_callback_noop2(void *udata, void *ctx) {
+  (void)udata;
+  return ctx;
+}
 
 FIO_SFUNC int fio___json_callbacks_validate(fio_json_parser_callbacks_s *cb) {
   if (!cb)
@@ -554,6 +562,7 @@ is_invalid:
  * of the buffer or once an object parsing was completed.
  */
 SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
+                                       void *udata,
                                        const char *start,
                                        const size_t len) {
   fio_json_result_s r = {.stop_pos = 0, .err = 0};
@@ -563,6 +572,7 @@ SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *callbacks,
 
   state = (fio___json_state_s){
       .cb = callbacks[0],
+      .udata = udata,
       .pos = start,
       .end = start + len,
   };
@@ -586,7 +596,7 @@ failed:
       "JSON parsing failed after:\n%.*s",
       ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
       state.pos);
-  r.ctx = callbacks->on_error(r.ctx);
+  r.ctx = callbacks->on_error(udata, r.ctx);
   return r;
 
 missing_callback:
@@ -596,31 +606,35 @@ missing_callback:
 }
 
 /** Dictionary was detected. Returns ctx to hash map or NULL on error. */
-FIO_SFUNC void *fio___json_parse_update_on_map(void *ctx, void *at) {
+FIO_SFUNC void *fio___json_parse_update_on_map(void *udata,
+                                               void *ctx,
+                                               void *at) {
   void **ex_data = (void **)ctx;
   fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
   ctx = ex_data[1];
   fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
   s->cb.on_map = cb->on_map;
   s->cb.on_array = cb->on_array;
-  if (ctx && !s->cb.is_map(ctx))
+  if (ctx && !s->cb.is_map(udata, ctx))
     return NULL;
   else if (!ctx)
-    ctx = cb->on_map(ctx, at);
+    ctx = cb->on_map(udata, ctx, at);
   return ctx;
 }
 /** Array was detected. Returns ctx to array or NULL on error. */
-FIO_SFUNC void *fio___json_parse_update_on_array(void *ctx, void *at) {
+FIO_SFUNC void *fio___json_parse_update_on_array(void *udata,
+                                                 void *ctx,
+                                                 void *at) {
   void **ex_data = (void **)ctx;
   fio_json_parser_callbacks_s *cb = (fio_json_parser_callbacks_s *)ex_data[0];
   ctx = ex_data[1];
   fio___json_state_s *s = (fio___json_state_s *)ex_data[2];
   s->cb.on_map = cb->on_map;
   s->cb.on_array = cb->on_array;
-  if (ctx && !s->cb.is_array(ctx))
+  if (ctx && !s->cb.is_array(udata, ctx))
     return NULL;
   else if (!ctx)
-    ctx = cb->on_array(ctx, at);
+    ctx = cb->on_array(udata, ctx, at);
 
   return ctx;
 }
@@ -632,13 +646,12 @@ FIO_SFUNC void *fio___json_parse_update_on_array(void *ctx, void *at) {
  * i.e., update an array or hash map.
  */
 SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
+                                              void *udata,
                                               void *ctx,
                                               const char *start,
                                               const size_t len) {
   fio_json_result_s r = {.stop_pos = 0, .err = 0};
   fio_json_parser_callbacks_s callbacks;
-  callbacks.on_map = fio___json_parse_update_on_map;
-  callbacks.on_array = fio___json_parse_update_on_array;
   fio___json_state_s state;
   void *ex_data[3] = {s, ctx, &state};
 
@@ -650,8 +663,11 @@ SFUNC fio_json_result_s fio_json_parse_update(fio_json_parser_callbacks_s *s,
     goto missing_callback;
 
   callbacks = *s;
+  callbacks.on_map = fio___json_parse_update_on_map;
+  callbacks.on_array = fio___json_parse_update_on_array;
   state = (fio___json_state_s){
       .cb = callbacks,
+      .udata = udata,
       .pos = start,
       .end = start + len,
   };
@@ -675,7 +691,7 @@ failed:
       "JSON parsing failed after:\n%.*s",
       ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
       state.pos);
-  r.ctx = s->on_error(r.ctx);
+  r.ctx = s->on_error(udata, r.ctx);
   return r;
 missing_callback:
   FIO_LOG_ERROR("JSON parser missing a critical callback!");

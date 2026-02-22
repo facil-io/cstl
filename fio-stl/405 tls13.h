@@ -20,6 +20,16 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(H___FIO_IO___H) && defined(H___FIO_TLS13___H) &&                   \
     !defined(H___FIO_TLS13_IO___H) && !defined(FIO___RECURSIVE_INCLUDE)
 #define H___FIO_TLS13_IO___H 1
+
+#if defined(_WIN32)
+/* wincrypt.h must be included at file scope - MSVC rejects #include inside a
+ * function body (error C2071: illegal storage class). */
+#include <wincrypt.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "Crypt32.lib")
+#endif
+#endif /* _WIN32 */
+
 /* *****************************************************************************
 TLS 1.3 IO Function Getter
 ***************************************************************************** */
@@ -609,10 +619,6 @@ FIO_SFUNC int fio___tls13_get_system_trust(void) {
 
 #if defined(_WIN32)
   /* Windows: enumerate the "ROOT" system certificate store via CryptoAPI */
-#include <wincrypt.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "Crypt32.lib")
-#endif
   HCERTSTORE hStore = CertOpenSystemStoreA(0, "ROOT");
   if (!hStore) {
     FIO_LOG_ERROR("TLS 1.3: failed to open Windows ROOT certificate store");

@@ -122,44 +122,71 @@ Test: Verify JSON parser handles various comment edge cases correctly.
 ***************************************************************************** */
 
 /* Simple JSON callbacks for testing */
-static void *test_json_reg_on_null(void) { return (void *)1; }
-static void *test_json_reg_on_true(void) { return (void *)2; }
-static void *test_json_reg_on_false(void) { return (void *)3; }
-static void *test_json_reg_on_number(int64_t i) {
+static void *test_json_reg_on_null(void *udata) {
+  (void)udata;
+  return (void *)1;
+}
+static void *test_json_reg_on_true(void *udata) {
+  (void)udata;
+  return (void *)2;
+}
+static void *test_json_reg_on_false(void *udata) {
+  (void)udata;
+  return (void *)3;
+}
+static void *test_json_reg_on_number(void *udata, int64_t i) {
+  (void)udata;
   return (void *)(uintptr_t)(i + 1000);
 }
-static void *test_json_reg_on_float(double f) {
+static void *test_json_reg_on_float(void *udata, double f) {
+  (void)udata;
   (void)f;
   return (void *)4;
 }
-static void *test_json_reg_on_string(const void *start, size_t len) {
+static void *test_json_reg_on_string(void *udata,
+                                     const void *start,
+                                     size_t len) {
+  (void)udata;
   (void)start;
   (void)len;
   return (void *)5;
 }
-static void *test_json_reg_on_map(void *ctx, void *at) {
+static void *test_json_reg_on_map(void *udata, void *ctx, void *at) {
+  (void)udata;
   (void)ctx;
   (void)at;
   return (void *)6;
 }
-static void *test_json_reg_on_array(void *ctx, void *at) {
+static void *test_json_reg_on_array(void *udata, void *ctx, void *at) {
+  (void)udata;
   (void)ctx;
   (void)at;
   return (void *)7;
 }
-static int test_json_reg_map_push(void *ctx, void *key, void *value) {
+static int test_json_reg_map_push(void *udata,
+                                  void *ctx,
+                                  void *key,
+                                  void *value) {
+  (void)udata;
   (void)ctx;
   (void)key;
   (void)value;
   return 0;
 }
-static int test_json_reg_array_push(void *ctx, void *value) {
+static int test_json_reg_array_push(void *udata, void *ctx, void *value) {
+  (void)udata;
   (void)ctx;
   (void)value;
   return 0;
 }
-static void test_json_reg_free_unused(void *obj) { (void)obj; }
-static void *test_json_reg_on_error(void *ctx) { return ctx; }
+static void test_json_reg_free_unused(void *udata, void *obj) {
+  (void)udata;
+  (void)obj;
+}
+static void *test_json_reg_on_error(void *udata, void *ctx) {
+  (void)udata;
+  return ctx;
+}
 
 static fio_json_parser_callbacks_s test_json_reg_callbacks = {
     .on_null = test_json_reg_on_null,
@@ -182,7 +209,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/**/42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON minimal block comment /**/ should parse");
     FIO_ASSERT(r.ctx == (void *)(uintptr_t)(42 + 1000),
                "JSON value after /**/ should be 42");
@@ -192,7 +219,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/* */42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON block comment /* */ should parse");
     FIO_ASSERT(r.ctx == (void *)(uintptr_t)(42 + 1000),
                "JSON value after /* */ should be 42");
@@ -202,7 +229,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/****/42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON block comment /****/ should parse");
   }
 
@@ -210,7 +237,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/* this is a comment */42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON block comment with content should parse");
   }
 
@@ -218,7 +245,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/* unclosed";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(r.err, "JSON unclosed block comment should fail");
   }
 
@@ -226,7 +253,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/**/";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     /* This should either parse successfully with no value, or fail gracefully
      */
     /* The key is it shouldn't crash or read past buffer */
@@ -237,7 +264,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "// comment\n42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON line comment should parse");
     FIO_ASSERT(r.ctx == (void *)(uintptr_t)(42 + 1000),
                "JSON value after // comment should be 42");
@@ -247,7 +274,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "# comment\n42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON hash comment should parse");
     FIO_ASSERT(r.ctx == (void *)(uintptr_t)(42 + 1000),
                "JSON value after # comment should be 42");
@@ -257,7 +284,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/* a *//* b */42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON multiple block comments should parse");
   }
 
@@ -265,7 +292,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/* a/b */42";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(!r.err, "JSON block comment with slash inside should parse");
   }
 
@@ -273,7 +300,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/*";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(r.err, "JSON incomplete block comment /* should fail");
   }
 
@@ -281,7 +308,7 @@ FIO_SFUNC void fio___test_regression_json_comments(void) {
   {
     const char *json = "/";
     fio_json_result_s r =
-        fio_json_parse(&test_json_reg_callbacks, json, FIO_STRLEN(json));
+        fio_json_parse(&test_json_reg_callbacks, NULL, json, FIO_STRLEN(json));
     FIO_ASSERT(r.err, "JSON single slash should fail (not a valid comment)");
   }
 }

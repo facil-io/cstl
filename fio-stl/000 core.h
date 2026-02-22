@@ -136,7 +136,8 @@ Compiler detection, GCC / CLang features and OS dependent included files
 #define __has_attribute(...) 0
 #endif
 #define GNUC_BYPASS 1
-#elif !defined(__clang__) && !defined(__has_builtin)
+
+#elif !defined(__has_builtin) || (defined(_MSC_VER) && !defined(__clang__))
 /* E.g: GCC < 6.0 doesn't support __has_builtin */
 #define __has_builtin(...) 0
 #define GNUC_BYPASS        1
@@ -2612,6 +2613,9 @@ Popcount (set bit counting) and Hemming Distance
 #if __has_builtin(__builtin_popcountll)
 /** performs a `popcount` operation to count the set bits. */
 #define fio_popcount(n) __builtin_popcountll(n)
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#define fio_popcount(n) ((int)__popcnt64((unsigned __int64)(n)))
 #else
 FIO_IFUNC FIO_CONST int fio_popcount(uint64_t n) {
   /* for logic, see Wikipedia: https://en.wikipedia.org/wiki/Hamming_weight */

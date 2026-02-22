@@ -3595,56 +3595,55 @@ JSON Body Parsing - Adapter Implementation
 
 /**
  * Wrapper struct to hold HTTP body parse context for JSON adapter callbacks.
- * We use a thread-local to pass context since JSON callbacks don't have udata.
+ * Passed as `udata` directly to `fio_json_parse()`.
  */
 typedef struct {
   const fio_http_body_parse_callbacks_s *callbacks;
   void *udata;
 } fio___http_json_adapter_s;
 
-/** Thread-local adapter context - the JSON parser callbacks don't have udata */
-static __thread fio___http_json_adapter_s *fio___http_json_adapter_ctx;
-
 /* --- JSON to HTTP body adapter callbacks --- */
 
-FIO_SFUNC void *fio___http_json_on_null(void) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_null(void *udata) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_null)
     return NULL;
   return a->callbacks->on_null(a->udata);
 }
 
-FIO_SFUNC void *fio___http_json_on_true(void) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_true(void *udata) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_true)
     return NULL;
   return a->callbacks->on_true(a->udata);
 }
 
-FIO_SFUNC void *fio___http_json_on_false(void) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_false(void *udata) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_false)
     return NULL;
   return a->callbacks->on_false(a->udata);
 }
 
-FIO_SFUNC void *fio___http_json_on_number(int64_t i) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_number(void *udata, int64_t i) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_number)
     return NULL;
   return a->callbacks->on_number(a->udata, i);
 }
 
-FIO_SFUNC void *fio___http_json_on_float(double f) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_float(void *udata, double f) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_float)
     return NULL;
   return a->callbacks->on_float(a->udata, f);
 }
 
 /** Escaped string - needs unescaping before passing to callback */
-FIO_SFUNC void *fio___http_json_on_string(const void *start, size_t len) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_string(void *udata,
+                                          const void *start,
+                                          size_t len) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_string)
     return NULL;
   /* Unescape JSON string */
@@ -3657,9 +3656,10 @@ FIO_SFUNC void *fio___http_json_on_string(const void *start, size_t len) {
 }
 
 /** Simple (unescaped) string - pass through directly */
-FIO_SFUNC void *fio___http_json_on_string_simple(const void *start,
+FIO_SFUNC void *fio___http_json_on_string_simple(void *udata,
+                                                 const void *start,
                                                  size_t len) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_string)
     return NULL;
   return a->callbacks->on_string(a->udata, start, len);
@@ -3671,8 +3671,8 @@ FIO_SFUNC void *fio___http_json_on_string_simple(const void *start,
  * JSON parser handles nesting internally and will call map_set/array_push
  * with the correct container.
  */
-FIO_SFUNC void *fio___http_json_on_map(void *ctx, void *at) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_map(void *udata, void *ctx, void *at) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_map)
     return NULL;
   return a->callbacks->on_map(a->udata, NULL);
@@ -3680,8 +3680,8 @@ FIO_SFUNC void *fio___http_json_on_map(void *ctx, void *at) {
   (void)at;
 }
 
-FIO_SFUNC void *fio___http_json_on_array(void *ctx, void *at) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_array(void *udata, void *ctx, void *at) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->on_array)
     return NULL;
   return a->callbacks->on_array(a->udata, NULL);
@@ -3689,49 +3689,53 @@ FIO_SFUNC void *fio___http_json_on_array(void *ctx, void *at) {
   (void)at;
 }
 
-FIO_SFUNC int fio___http_json_map_push(void *ctx, void *key, void *value) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC int fio___http_json_map_push(void *udata,
+                                       void *ctx,
+                                       void *key,
+                                       void *value) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->map_set)
     return -1;
   return a->callbacks->map_set(a->udata, ctx, key, value);
 }
 
-FIO_SFUNC int fio___http_json_array_push(void *ctx, void *value) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC int fio___http_json_array_push(void *udata, void *ctx, void *value) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (!a || !a->callbacks->array_push)
     return -1;
   return a->callbacks->array_push(a->udata, ctx, value);
 }
 
-FIO_SFUNC int fio___http_json_array_finished(void *ctx) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC int fio___http_json_array_finished(void *udata, void *ctx) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (a && a->callbacks->array_done)
     a->callbacks->array_done(a->udata, ctx);
   return 0;
 }
 
-FIO_SFUNC int fio___http_json_map_finished(void *ctx) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC int fio___http_json_map_finished(void *udata, void *ctx) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (a && a->callbacks->map_done)
     a->callbacks->map_done(a->udata, ctx);
   return 0;
 }
 
-FIO_SFUNC void fio___http_json_free_unused(void *ctx) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void fio___http_json_free_unused(void *udata, void *ctx) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (a && a->callbacks->free_unused)
     a->callbacks->free_unused(a->udata, ctx);
 }
 
-FIO_SFUNC void *fio___http_json_on_error(void *ctx) {
-  fio___http_json_adapter_s *a = fio___http_json_adapter_ctx;
+FIO_SFUNC void *fio___http_json_on_error(void *udata, void *ctx) {
+  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
   if (a && a->callbacks->on_error)
     return a->callbacks->on_error(a->udata, ctx);
   return NULL;
 }
 
-/** Static callback adapter mapping JSON parser to HTTP body parse callbacks */
-static fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
+/** Static callback adapter mapping JSON parser to HTTP body parse callbacks.
+ * Function pointers are constant — safe to share across all callers. */
+static const fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
     .on_null = fio___http_json_on_null,
     .on_true = fio___http_json_on_true,
     .on_false = fio___http_json_on_false,
@@ -3767,20 +3771,18 @@ fio___http_body_parse_json(fio_http_s *h,
     return result;
   }
 
-  /* Set up thread-local adapter context */
+  /* Build per-call adapter on the stack — holds callbacks + caller's udata */
   fio___http_json_adapter_s adapter = {
       .callbacks = callbacks,
       .udata = udata,
   };
-  fio___http_json_adapter_s *old_ctx = fio___http_json_adapter_ctx;
-  fio___http_json_adapter_ctx = &adapter;
 
-  /* Parse JSON */
-  fio_json_result_s json_result =
-      fio_json_parse(&fio___http_json_adapter_callbacks, body.buf, body.len);
-
-  /* Restore old context */
-  fio___http_json_adapter_ctx = old_ctx;
+  /* Parse JSON, passing &adapter as udata so every callback receives it */
+  fio_json_result_s json_result = fio_json_parse(
+      (fio_json_parser_callbacks_s *)&fio___http_json_adapter_callbacks,
+      &adapter,
+      body.buf,
+      body.len);
 
   /* Map results */
   result.result = json_result.ctx;

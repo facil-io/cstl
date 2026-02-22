@@ -52,7 +52,13 @@ typedef pthread_cond_t fio_thread_cond_t;
 #include <synchapi.h>
 
 #ifndef FIO_THREADS_BYO
-typedef HANDLE fio_thread_t;
+/* On Windows, fio_thread_t carries both the kernel HANDLE (needed for join /
+ * detach) and the numeric thread ID (needed for equality comparison after the
+ * handle has been closed, mirroring the POSIX pthread_t opaque-value model). */
+typedef struct {
+  HANDLE handle;
+  DWORD tid;
+} fio_thread_t;
 #endif
 
 #ifndef FIO_THREADS_FORK_BYO
@@ -64,7 +70,8 @@ typedef DWORD fio_thread_pid_t;
  * compatible with CONDITION_VARIABLE via SleepConditionVariableSRW. */
 typedef SRWLOCK fio_thread_mutex_t;
 /** Used this macro for static initialization. */
-#define FIO_THREAD_MUTEX_INIT SRWLOCK_INIT
+#define FIO_THREAD_MUTEX_INIT                                                  \
+  { 0 } /* SRWLOCK is zero-initialized */
 #endif
 
 #ifndef FIO_THREADS_COND_BYO
@@ -614,44 +621,44 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                                 void *(*fn)(void *),
                                 void *arg) {
-  *t = (HANDLE)_beginthreadex(NULL,
-                              0,
-                              (_beginthreadex_proc_type)(uintptr_t)fn,
-                              arg,
-                              0,
-                              NULL);
-  return (!!*t) - 1;
+  /* _beginthreadex returns the handle and fills the tid out-parameter. */
+  t->handle = (HANDLE)_beginthreadex(NULL,
+                                     0,
+                                     (_beginthreadex_proc_type)(uintptr_t)fn,
+                                     arg,
+                                     0,
+                                     (unsigned *)&t->tid);
+  return (!t->handle) - 1; /* 0 on success, -1 on failure */
 }
 
 FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
   int r = 0;
-  if (WaitForSingleObject(*t, INFINITE) == WAIT_FAILED) {
+  if (WaitForSingleObject(t->handle, INFINITE) == WAIT_FAILED) {
     errno = GetLastError();
     r = -1;
   } else
-    CloseHandle(*t);
+    CloseHandle(t->handle); /* release kernel object, mirrors pthread_join */
   return r;
 }
 
 // clang-format off
 /** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return CloseHandle(*t) - 1; }
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return CloseHandle(t->handle) - 1; }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
-/* Returns non-zero if both threads refer to the same thread. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return GetThreadId(*a) == GetThreadId(*b); }
+/* Returns non-zero if both threads refer to the same thread.
+ * Compares numeric TIDs, which remain valid even after the handle is closed,
+ * mirroring how POSIX pthread_equal compares opaque pthread_t values. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return a->tid == b->tid; }
 
-/** Returns the current thread.
- *
- * NOTE: On Windows, GetCurrentThread() returns a pseudo-handle that is only
- * valid in the calling thread's context. To get a real, transferable handle
- * (required for fio_thread_equal to work across threads), we use OpenThread()
- * to duplicate the pseudo-handle into a real kernel handle. The caller is
- * responsible for closing this handle (fio_thread_join / fio_thread_detach). */
+/** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) {
-  return OpenThread(THREAD_ALL_ACCESS, FALSE, GetCurrentThreadId());
+  fio_thread_t t;
+  t.handle = GetCurrentThread(); /* pseudo-handle, sufficient for join/detach */
+  t.tid    = GetCurrentThreadId();
+  return t;
 }
 
 /** Yields thread execution. */
