@@ -60,9 +60,11 @@ typedef DWORD fio_thread_pid_t;
 #endif
 
 #ifndef FIO_THREADS_MUTEX_BYO
-typedef CRITICAL_SECTION fio_thread_mutex_t;
+/* SRWLOCK is non-recursive (unlike CRITICAL_SECTION), zero-initialized, and
+ * compatible with CONDITION_VARIABLE via SleepConditionVariableSRW. */
+typedef SRWLOCK fio_thread_mutex_t;
 /** Used this macro for static initialization. */
-#define FIO_THREAD_MUTEX_INIT ((fio_thread_mutex_t){0})
+#define FIO_THREAD_MUTEX_INIT SRWLOCK_INIT
 #endif
 
 #ifndef FIO_THREADS_COND_BYO
@@ -618,7 +620,7 @@ FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                               arg,
                               0,
                               NULL);
-  return (!!t) - 1;
+  return (!!*t) - 1;
 }
 
 FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
@@ -641,8 +643,16 @@ FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 /* Returns non-zero if both threads refer to the same thread. */
 FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return GetThreadId(*a) == GetThreadId(*b); }
 
-/** Returns the current thread. */
-FIO_IFUNC fio_thread_t fio_thread_current(void) { return GetCurrentThread(); }
+/** Returns the current thread.
+ *
+ * NOTE: On Windows, GetCurrentThread() returns a pseudo-handle that is only
+ * valid in the calling thread's context. To get a real, transferable handle
+ * (required for fio_thread_equal to work across threads), we use OpenThread()
+ * to duplicate the pseudo-handle into a real kernel handle. The caller is
+ * responsible for closing this handle (fio_thread_join / fio_thread_detach). */
+FIO_IFUNC fio_thread_t fio_thread_current(void) {
+  return OpenThread(THREAD_ALL_ACCESS, FALSE, GetCurrentThreadId());
+}
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
@@ -677,36 +687,39 @@ FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
 
 #ifndef FIO_THREADS_MUTEX_BYO
 
-SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m);
+// clang-format off
+/** Initializes a simple Mutex. SRWLOCK is zero-initialized; this is a no-op. */
+FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { InitializeSRWLock(m); return 0; }
 
-FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { InitializeCriticalSection(m); return 0; }
-
-/** Destroys the simple Mutex (cleanup). */
-FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { DeleteCriticalSection(m); memset(m,0,sizeof(*m)); }
+/** Destroys the simple Mutex (cleanup). SRWLOCK has no destroy function. */
+FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { FIO_MEMSET(m, 0, sizeof(*m)); }
 // clang-format on
+
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
 FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) {
   if (!m)
     return -1;
-  LeaveCriticalSection(m);
+  ReleaseSRWLockExclusive(m);
   return 0;
 }
 
 /** Locks a simple Mutex, returning -1 on error. */
 FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
-  const fio_thread_mutex_t zero = {0};
-  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!m)
     return -1;
-  EnterCriticalSection(m);
+  AcquireSRWLockExclusive(m);
   return 0;
 }
 
-/** Attempts to lock a simple Mutex, returning zero on success. */
+/** Attempts to lock a simple Mutex, returning zero on success.
+ *
+ * NOTE: SRWLOCK is non-recursive — TryAcquireSRWLockExclusive returns FALSE
+ * when the lock is already held by the calling thread, matching POSIX behavior
+ * for non-recursive mutexes. */
 FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) {
-  const fio_thread_mutex_t zero = {0};
-  if (!FIO_MEMCMP(m, &zero, sizeof(zero)) && fio___thread_mutex_lazy_init(m))
+  if (!m)
     return -1;
-  return TryEnterCriticalSection(m) - 1;
+  return TryAcquireSRWLockExclusive(m) ? 0 : -1;
 }
 #endif /* FIO_THREADS_MUTEX_BYO */
 
@@ -720,14 +733,14 @@ FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c) {
 /** Waits on a conditional variable (MUST be previously locked). */
 FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
                                    fio_thread_mutex_t *m) {
-  return 0 - !SleepConditionVariableCS(c, m, INFINITE);
+  return 0 - !SleepConditionVariableSRW(c, m, INFINITE, 0);
 }
 
 /** Waits on a conditional variable (MUST be previously locked). */
 FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
                                         fio_thread_mutex_t *m,
                                         size_t milliseconds) {
-  return 0 - !SleepConditionVariableCS(c, m, milliseconds);
+  return 0 - !SleepConditionVariableSRW(c, m, (DWORD)milliseconds, 0);
 }
 
 /** Signals a simple conditional variable. */
@@ -804,23 +817,7 @@ Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 #if FIO_OS_WIN
-#ifndef FIO_THREADS_MUTEX_BYO
-/** Initializes a simple Mutex */
-SFUNC int fio___thread_mutex_lazy_init(fio_thread_mutex_t *m) {
-  int r = 0;
-  static fio_lock_i lock = FIO_LOCK_INIT;
-  /* lazy initialization */
-  fio_thread_mutex_t zero = {0};
-  fio_lock(&lock);
-  if (!FIO_MEMCMP(m,
-                  &zero,
-                  sizeof(zero))) { /* retest, as this may have changed... */
-    r = fio_thread_mutex_init(m);
-  }
-  fio_unlock(&lock);
-  return r;
-}
-#endif /* FIO_THREADS_MUTEX_BYO */
+/* SRWLOCK is always zero-initialized and ready to use — no lazy init needed. */
 #endif /* FIO_OS_WIN */
 /* *****************************************************************************
 Module Cleanup

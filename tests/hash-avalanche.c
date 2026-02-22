@@ -31,7 +31,7 @@ FIO_SFUNC int fio___avalanche_hamming(const uint8_t *a,
                                       size_t len) {
   int diff = 0;
   for (size_t i = 0; i < len; ++i)
-    diff += __builtin_popcount(a[i] ^ b[i]);
+    diff += fio_popcount(a[i] ^ b[i]);
   return diff;
 }
 
