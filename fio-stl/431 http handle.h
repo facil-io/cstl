@@ -3734,7 +3734,9 @@ FIO_SFUNC void *fio___http_json_on_error(void *udata, void *ctx) {
 }
 
 /** Static callback adapter mapping JSON parser to HTTP body parse callbacks.
- * Function pointers are constant — safe to share across all callers. */
+ * All optional fields (is_array, is_map) are explicitly set to the noop so
+ * fio___json_callbacks_validate never needs to write to this struct, making
+ * it safe to declare const (placed in read-only memory / .rodata). */
 static const fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
     .on_null = fio___http_json_on_null,
     .on_true = fio___http_json_on_true,
@@ -3749,6 +3751,8 @@ static const fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
     .array_push = fio___http_json_array_push,
     .array_finished = fio___http_json_array_finished,
     .map_finished = fio___http_json_map_finished,
+    .is_array = fio___json_callback_noop,
+    .is_map = fio___json_callback_noop,
     .free_unused_object = fio___http_json_free_unused,
     .on_error = fio___http_json_on_error,
 };

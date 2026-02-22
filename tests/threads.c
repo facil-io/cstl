@@ -75,6 +75,13 @@ FIO_SFUNC void fio___test_thread_identity(void) {
                                  &child_self);
   FIO_ASSERT(result == 0, "fio_thread_create should succeed");
 
+  /* Test thread equality before joining: child_thread is valid until join.
+   * child_self is written by the child before it returns; because the child
+   * writes child_self and then returns (causing join to unblock), there is a
+   * happens-before edge from the child's write to our read here only AFTER
+   * join.  We therefore join first to synchronize child_self, then verify
+   * child_self is a valid (non-zero) handle — we cannot compare child_thread
+   * to child_self after join because child_thread is invalid post-join. */
   result = fio_thread_join(&child_thread);
   FIO_ASSERT(result == 0, "fio_thread_join should succeed");
 
@@ -82,10 +89,12 @@ FIO_SFUNC void fio___test_thread_identity(void) {
   FIO_ASSERT(fio_thread_equal(&main_thread, &main_thread),
              "Same thread should be equal to itself");
 
-  /* Note: child_self was captured inside the thread, child_thread is the
-   * handle from create. They should refer to the same thread. */
-  FIO_ASSERT(fio_thread_equal(&child_thread, &child_self),
-             "Thread handle from create should equal thread's self handle");
+  /* child_self was set by fio_thread_current() inside the child thread.
+   * join() above provides the happens-before guarantee that child_self is
+   * fully written.  We verify it is a different thread than main_thread.
+   * We do NOT use child_thread here: it is invalid after fio_thread_join. */
+  FIO_ASSERT(!fio_thread_equal(&main_thread, &child_self),
+             "Child thread's self handle should differ from main thread");
 }
 
 /* *****************************************************************************
