@@ -328,9 +328,12 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   state0 = _mm_blend_epi16(tmp, state1, 0xF0); /* DCBA */
   state1 = _mm_alignr_epi8(state1, tmp, 8);    /* ABEF */
 
-  /* Save state */
-  _mm_storeu_si128((__m128i *)&h->u32[0], state0);
-  _mm_storeu_si128((__m128i *)&h->u32[4], state1);
+  /* Save state — byte-swap each 32-bit word to native (LE) order so that
+   * fio_sha256_finalize's fio_ntol32 loop converts correctly to big-endian
+   * digest output. The SHA-NI intrinsics produce state words in big-endian
+   * byte order; shuf_mask is the 32-bit bswap mask defined above. */
+  _mm_storeu_si128((__m128i *)&h->u32[0], _mm_shuffle_epi8(state0, shuf_mask));
+  _mm_storeu_si128((__m128i *)&h->u32[4], _mm_shuffle_epi8(state1, shuf_mask));
 
 #elif FIO___HAS_ARM_INTRIN
   /* Code adjusted from:

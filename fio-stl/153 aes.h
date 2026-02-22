@@ -579,8 +579,11 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
 
 /* Increment counter (last 32 bits, big-endian) */
 FIO_IFUNC __m128i fio___gcm_inc_ctr(__m128i ctr) {
-  /* Counter is in bytes 12-15 (big-endian) */
-  __m128i one = _mm_set_epi32(1, 0, 0, 0);
+  /* Counter occupies bytes 12-15 in big-endian order in memory.
+   * fio___bswap128 reverses all 16 bytes, so bytes 12-15 land at bytes 0-3
+   * (the LOW 32-bit lane of the SSE register on little-endian x86).
+   * We must add 1 to the LOW dword, not the high dword. */
+  __m128i one = _mm_set_epi32(0, 0, 0, 1);
   ctr = fio___bswap128(ctr);
   ctr = _mm_add_epi32(ctr, one);
   return fio___bswap128(ctr);

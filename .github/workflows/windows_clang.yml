@@ -45,7 +45,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [DEBUG-NOALLOC] $name ==="
 
-            & clang -O0 -Wno-deprecated-declarations -Wno-pragma-messages -fstack-protector-all $src -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ".\${name}_d.exe" -lcrypt32
+            & clang -O0 -Wno-deprecated-declarations "-Wno-#pragma-messages" -fstack-protector-all $src -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ".\${name}_d.exe" -lcrypt32
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
@@ -88,7 +88,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [RELEASE] $name ==="
 
-            & clang -O3 -Wno-deprecated-declarations -Wno-pragma-messages -march=native $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
+            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=native $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
