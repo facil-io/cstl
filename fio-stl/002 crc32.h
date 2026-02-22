@@ -1015,7 +1015,7 @@ fio___crc32_arm_scalar(const uint8_t *p, size_t len, uint32_t crc) {
   /* 8-byte chunks */
   while (len >= 8) {
     uint64_t v;
-    __builtin_memcpy(&v, p, 8);
+    FIO_MEMCPY(&v, p, 8);
     crc = __crc32d(crc, v);
     p += 8;
     len -= 8;
@@ -1023,7 +1023,7 @@ fio___crc32_arm_scalar(const uint8_t *p, size_t len, uint32_t crc) {
   /* 4-byte chunk */
   if (len >= 4) {
     uint32_t v;
-    __builtin_memcpy(&v, p, 4);
+    FIO_MEMCPY(&v, p, 4);
     crc = __crc32w(crc, v);
     p += 4;
     len -= 4;

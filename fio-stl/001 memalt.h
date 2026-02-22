@@ -354,15 +354,15 @@ FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
       /* Found a match - determine which 16-byte chunk */
       int m0 = _mm_movemask_epi8(cmp0);
       if (m0)
-        return (void *)(r + __builtin_ctz(m0));
+        return (void *)(r + fio_lsb_index_unsafe((uint64_t)m0));
       int m1 = _mm_movemask_epi8(cmp1);
       if (m1)
-        return (void *)(r + 16 + __builtin_ctz(m1));
+        return (void *)(r + 16 + fio_lsb_index_unsafe((uint64_t)m1));
       int m2 = _mm_movemask_epi8(cmp2);
       if (m2)
-        return (void *)(r + 32 + __builtin_ctz(m2));
+        return (void *)(r + 32 + fio_lsb_index_unsafe((uint64_t)m2));
       int m3 = _mm_movemask_epi8(cmp3);
-      return (void *)(r + 48 + __builtin_ctz(m3));
+      return (void *)(r + 48 + fio_lsb_index_unsafe((uint64_t)m3));
     }
     r += 64;
   }
@@ -374,7 +374,7 @@ FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
     __m128i cmp = _mm_cmpeq_epi8(v, needle);
     int mask = _mm_movemask_epi8(cmp);
     if (mask)
-      return (void *)(r + __builtin_ctz(mask));
+      return (void *)(r + fio_lsb_index_unsafe((uint64_t)mask));
     r += 16;
   }
 
@@ -427,15 +427,15 @@ FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
       /* Found a match - determine which 32-byte chunk */
       int m0 = _mm256_movemask_epi8(cmp0);
       if (m0)
-        return (void *)(r + __builtin_ctz(m0));
+        return (void *)(r + fio_lsb_index_unsafe((uint64_t)m0));
       int m1 = _mm256_movemask_epi8(cmp1);
       if (m1)
-        return (void *)(r + 32 + __builtin_ctz(m1));
+        return (void *)(r + 32 + fio_lsb_index_unsafe((uint64_t)m1));
       int m2 = _mm256_movemask_epi8(cmp2);
       if (m2)
-        return (void *)(r + 64 + __builtin_ctz(m2));
+        return (void *)(r + 64 + fio_lsb_index_unsafe((uint64_t)m2));
       int m3 = _mm256_movemask_epi8(cmp3);
-      return (void *)(r + 96 + __builtin_ctz(m3));
+      return (void *)(r + 96 + fio_lsb_index_unsafe((uint64_t)m3));
     }
     r += 128;
   }
@@ -447,7 +447,7 @@ FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
     __m256i cmp = _mm256_cmpeq_epi8(v, needle);
     int mask = _mm256_movemask_epi8(cmp);
     if (mask)
-      return (void *)(r + __builtin_ctz(mask));
+      return (void *)(r + fio_lsb_index_unsafe((uint64_t)mask));
     r += 32;
   }
 
