@@ -308,9 +308,8 @@ FIO_IFUNC void fio___keccak_f1600(uint64_t *state) {
  * so we can XOR directly as uint64_t without byte-swapping. */
 FIO_IFUNC void fio___sha3_absorb_buf(fio_sha3_s *restrict h) {
   const size_t rate_words = h->rate >> 3;
-  const uint64_t *w = (const uint64_t *)h->buf;
   for (size_t i = 0; i < rate_words; ++i)
-    h->state[i] ^= fio_ltole64(w[i]);
+    h->state[i] ^= fio_buf2u64_le(h->buf + (i << 3));
   fio___keccak_f1600(h->state);
 }
 

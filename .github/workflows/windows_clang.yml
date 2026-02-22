@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
 
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
     - uses: actions/checkout@v3
@@ -22,11 +22,89 @@ jobs:
     - name: Setup ENV
       run: |
         echo "CI=false" >> "$GITHUB_ENV"
-    - name: Test No-Op (debug)
-      run: clang -O0 -Wno-deprecated-declarations -Wno-#pragma-messages -fstack-protector-all tests\compile-check.c -I. -DFIO_LEAK_COUNTER=1 -DDEBUG -D_CRT_NONSTDC_NO_WARNINGS -o ./noop.exe && echo "Compiled test, now running..." && ./noop.exe
-    - name: Test STL (debug) - no allocators
-      run: clang -O0 -Wno-deprecated-declarations -Wno-#pragma-messages -fstack-protector-all tests\core.c -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ./core_d.exe && echo "Compiled test, now running..." && ./core_d.exe
-    - name: Test fio_malloc speed
-      run: clang -O3 -Wno-deprecated-declarations -Wno-#pragma-messages -march=native tests\malloc.c -I. -o ./malloc_spd_tst.exe && echo "Compiled test, now running..." && ./malloc_spd_tst.exe
-    - name: Test STL
-      run: clang -O3 -Wno-deprecated-declarations -Wno-#pragma-messages -march=native tests\core.c -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -I. -o ./core_o.exe && echo "Compiled test, now running..." && ./core_o.exe
+
+    - name: Test All (debug - no allocators)
+      shell: pwsh
+      run: |
+        $excludedExact  = @("io", "io-units", "ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
+        $excludedPrefix = @("tls13", "pubsub")
+
+        $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
+            $name = $_.BaseName
+            $skip = $false
+            foreach ($ex in $excludedExact)  { if ($name -eq $ex)            { $skip = $true; break } }
+            foreach ($ex in $excludedPrefix) { if ($name.StartsWith($ex))    { $skip = $true; break } }
+            -not $skip
+        }
+
+        $passed = 0; $failed = 0
+
+        foreach ($test in $tests) {
+            $name = $test.BaseName
+            $src  = "tests\$($test.Name)"
+            Write-Host ""
+            Write-Host "=== [DEBUG-NOALLOC] $name ==="
+
+            & clang -O0 -Wno-deprecated-declarations -Wno-pragma-messages -fstack-protector-all $src -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ".\${name}_d.exe" -lcrypt32
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "COMPILE FAILED: $name"
+                $failed++
+                continue
+            }
+
+            & ".\${name}_d.exe"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "RUN FAILED: $name"
+                $failed++
+            } else {
+                Write-Host "PASS: $name"
+                $passed++
+            }
+        }
+
+        Write-Host ""
+        Write-Host "Results: $passed passed, $failed failed out of $($passed + $failed) total"
+        if ($failed -gt 0) { exit 1 }
+
+    - name: Test All (release)
+      shell: pwsh
+      run: |
+        $excludedExact  = @("io", "io-units", "ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
+        $excludedPrefix = @("tls13", "pubsub")
+
+        $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
+            $name = $_.BaseName
+            $skip = $false
+            foreach ($ex in $excludedExact)  { if ($name -eq $ex)            { $skip = $true; break } }
+            foreach ($ex in $excludedPrefix) { if ($name.StartsWith($ex))    { $skip = $true; break } }
+            -not $skip
+        }
+
+        $passed = 0; $failed = 0
+
+        foreach ($test in $tests) {
+            $name = $test.BaseName
+            $src  = "tests\$($test.Name)"
+            Write-Host ""
+            Write-Host "=== [RELEASE] $name ==="
+
+            & clang -O3 -Wno-deprecated-declarations -Wno-pragma-messages -march=native $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "COMPILE FAILED: $name"
+                $failed++
+                continue
+            }
+
+            & ".\${name}.exe"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "RUN FAILED: $name"
+                $failed++
+            } else {
+                Write-Host "PASS: $name"
+                $passed++
+            }
+        }
+
+        Write-Host ""
+        Write-Host "Results: $passed passed, $failed failed out of $($passed + $failed) total"
+        if ($failed -gt 0) { exit 1 }
