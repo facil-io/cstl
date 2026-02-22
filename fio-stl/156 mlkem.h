@@ -243,11 +243,12 @@ FIO_IFUNC int16_t fio___mlkem_montgomery_reduce(int32_t a) {
  * Barrett reduction: reduce a mod q to range [0, q).
  */
 FIO_IFUNC int16_t fio___mlkem_barrett_reduce(int16_t a) {
-  int16_t t;
-  const int16_t v = ((1 << 26) + FIO___MLKEM_Q / 2) / FIO___MLKEM_Q;
-  t = (int16_t)(((int32_t)v * a + (1 << 25)) >> 26);
-  t = (int16_t)(t * FIO___MLKEM_Q);
-  return (int16_t)(a - t);
+  /* Keep all arithmetic in int32_t — t*Q can reach ~5.5M, outside int16_t.
+   * Casting int16_t*int to int16_t is implementation-defined on MSVC. */
+  const int32_t v = ((1 << 26) + FIO___MLKEM_Q / 2) / FIO___MLKEM_Q;
+  int32_t t = (int32_t)(((int32_t)v * (int32_t)a + (1 << 25)) >> 26);
+  t = (int32_t)a - t * (int32_t)FIO___MLKEM_Q;
+  return (int16_t)t;
 }
 
 /** Field multiplication via Montgomery: a*b*R^{-1} mod q */
