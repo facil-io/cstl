@@ -229,10 +229,14 @@ Reduction Functions
  * a * R^{-1} mod q where R = 2^16.
  */
 FIO_IFUNC int16_t fio___mlkem_montgomery_reduce(int32_t a) {
-  int16_t t;
-  t = (int16_t)a * FIO___MLKEM_QINV;
-  t = (int16_t)((a - (int32_t)t * FIO___MLKEM_Q) >> 16);
-  return t;
+  /* Portable: keep all arithmetic in int32_t. The truncation of `a` to
+   * int16_t is done explicitly before the multiply so the narrowing is
+   * well-defined on all compilers (MSVC, GCC, Clang) — the multiply itself
+   * stays in int32_t and cannot overflow. */
+  int32_t t =
+      (int32_t)(int16_t)((int32_t)(int16_t)a * (int32_t)FIO___MLKEM_QINV);
+  t = (a - t * (int32_t)FIO___MLKEM_Q) >> 16;
+  return (int16_t)t;
 }
 
 /**
