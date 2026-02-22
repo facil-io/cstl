@@ -1331,7 +1331,7 @@ FIO_SFUNC void fio___ipc_connect_on_failed(fio_io_protocol_s *protocol,
 }
 
 static void fio___ipc_listen_on_data(fio_io_s *io) {
-  int fd;
+  fio_socket_i fd;
   fio_io_protocol_s *protocol = (fio_io_protocol_s *)fio_io_udata(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
     FIO_LOG_DDEBUG2("(%d) accepted new IPC connection with fd %d",
@@ -1358,10 +1358,11 @@ FIO_SFUNC void fio___ipc_listen(void *ignr_) {
         FIO___IPC.ipc_url);
   }
 
-  int fd = fio_sock_open2(FIO___IPC.ipc_url,
-                          FIO_SOCK_SERVER | FIO_SOCK_TCP | FIO_SOCK_NONBLOCK);
+  fio_socket_i fd =
+      fio_sock_open2(FIO___IPC.ipc_url,
+                     FIO_SOCK_SERVER | FIO_SOCK_TCP | FIO_SOCK_NONBLOCK);
 
-  FIO_ASSERT(fd != -1,
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd),
              "(%d) failed to start IPC listening @ %s",
              fio_io_pid(),
              FIO___IPC.ipc_url);
@@ -1585,11 +1586,11 @@ FIO_SFUNC void fio___ipc_cluster_udp_start(uint16_t port) {
   /* Open UDP socket */
   FIO_STR_INFO_TMP_VAR(port_str, 16);
   fio_string_write_u(&port_str, NULL, (uint64_t)port);
-  int fd_udp =
+  fio_socket_i fd_udp =
       fio_sock_open(NULL,
                     port_str.buf,
                     FIO_SOCK_UDP | FIO_SOCK_NONBLOCK | FIO_SOCK_SERVER);
-  if (fd_udp == -1) {
+  if (!FIO_SOCK_FD_ISVALID(fd_udp)) {
     FIO_LOG_ERROR("(%d) IPC/RPC couldn't open UDP discovery socket on port %u",
                   fio_io_pid(),
                   (unsigned)port);

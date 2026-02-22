@@ -57,14 +57,20 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
 /** Acts as POSIX dup. Use this for portability with WinSock2. */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   WSAPROTOCOL_INFO info;
-  if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info))
+  if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info)) {
+    FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
+                  WSAGetLastError());
     return FIO_SOCKET_INVALID;
+  }
   fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
                                             FROM_PROTOCOL_INFO,
                                             FROM_PROTOCOL_INFO,
                                             &info,
                                             0,
-                                            0);
+                                            WSA_FLAG_OVERLAPPED);
+  if (!FIO_SOCK_FD_ISVALID(fd))
+    FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
+                  WSAGetLastError());
   return fd;
 }
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
@@ -133,8 +139,19 @@ typedef int fio_socket_i;
 #define fio_sock_write(fd, data, len)      write((fd), (data), (len))
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
 #define fio_sock_read(fd, buf, len)        read((fd), (buf), (len))
-/** Acts as POSIX dup. Use this macro for portability with WinSock2. */
-#define fio_sock_dup(fd)                   dup(fd)
+/** Acts as POSIX dup. Sets O_CLOEXEC on the new fd. */
+FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i fd) {
+  fio_socket_i r = dup(fd);
+  if (r == -1) {
+    FIO_LOG_ERROR("(fio_sock_dup) dup(%d) failed: %s", fd, strerror(errno));
+    return FIO_SOCKET_INVALID;
+  }
+  if (fcntl(r, F_SETFD, FD_CLOEXEC) == -1)
+    FIO_LOG_ERROR("(fio_sock_dup) fcntl(FD_CLOEXEC) failed on fd %d: %s",
+                  r,
+                  strerror(errno));
+  return r;
+}
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd)                 close(fd)
 /** Acts as POSIX accept. Use this macro for portability with WinSock2. */
@@ -528,7 +545,11 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     }
     { // avoid the "address taken"
       int optval = 1;
-      setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
+      setsockopt(fd,
+                 SOL_SOCKET,
+                 SO_REUSEADDR,
+                 (const char *)&optval,
+                 sizeof(optval));
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
       FIO_LOG_DEBUG("Couldn't set socket to non-blocking mode %s",
