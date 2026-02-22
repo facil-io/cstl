@@ -2359,12 +2359,12 @@ Bit rotation
 /** Left rotation for an unknown size element, inlined. */
 #define FIO_LROT(i, bits)                                                      \
   (((i) << ((bits) & ((sizeof((i)) << 3) - 1))) |                              \
-   ((i) >> ((-(bits)) & ((sizeof((i)) << 3) - 1))))
+   ((i) >> (((uint8_t)(-(bits))) & ((sizeof((i)) << 3) - 1))))
 
 /** Right rotation for an unknown size element, inlined. */
 #define FIO_RROT(i, bits)                                                      \
   (((i) >> ((bits) & ((sizeof((i)) << 3) - 1))) |                              \
-   ((i) << ((-(bits)) & ((sizeof((i)) << 3) - 1))))
+   ((i) << (((uint8_t)(-(bits))) & ((sizeof((i)) << 3) - 1))))
 
 #if __has_builtin(__builtin_rotateleft8)
 /** 8Bit left rotation, inlined. */
@@ -2372,7 +2372,7 @@ Bit rotation
 #else
 /** 8Bit left rotation, inlined. */
 FIO_IFUNC FIO_CONST uint8_t fio_lrot8(uint8_t i, uint8_t bits) {
-  return ((i << (bits & 7UL)) | (i >> ((-(bits)) & 7UL)));
+  return ((i << (bits & 7UL)) | (i >> (((uint8_t)(-(bits))) & 7UL)));
 }
 #endif
 
@@ -2382,7 +2382,7 @@ FIO_IFUNC FIO_CONST uint8_t fio_lrot8(uint8_t i, uint8_t bits) {
 #else
 /** 16Bit left rotation, inlined. */
 FIO_IFUNC FIO_CONST uint16_t fio_lrot16(uint16_t i, uint8_t bits) {
-  return ((i << (bits & 15UL)) | (i >> ((-(bits)) & 15UL)));
+  return ((i << (bits & 15UL)) | (i >> (((uint8_t)(-(bits))) & 15UL)));
 }
 #endif
 
@@ -2392,7 +2392,7 @@ FIO_IFUNC FIO_CONST uint16_t fio_lrot16(uint16_t i, uint8_t bits) {
 #else
 /** 32Bit left rotation, inlined. */
 FIO_IFUNC FIO_CONST uint32_t fio_lrot32(uint32_t i, uint8_t bits) {
-  return ((i << (bits & 31UL)) | (i >> ((-(bits)) & 31UL)));
+  return ((i << (bits & 31UL)) | (i >> (((uint8_t)(-(bits))) & 31UL)));
 }
 #endif
 
@@ -2402,7 +2402,7 @@ FIO_IFUNC FIO_CONST uint32_t fio_lrot32(uint32_t i, uint8_t bits) {
 #else
 /** 64Bit left rotation, inlined. */
 FIO_IFUNC FIO_CONST uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
-  return ((i << ((bits)&63UL)) | (i >> ((-(bits)) & 63UL)));
+  return ((i << ((bits)&63UL)) | (i >> (((uint8_t)(-(bits))) & 63UL)));
 }
 #endif
 
@@ -2412,7 +2412,7 @@ FIO_IFUNC FIO_CONST uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
 #else
 /** 8Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
-  return (uint8_t)((i >> (bits & 7U)) | (i << ((-(bits)) & 7U)));
+  return (uint8_t)((i >> (bits & 7U)) | (i << (((uint8_t)(-(bits))) & 7U)));
 }
 #endif
 
@@ -2422,7 +2422,7 @@ FIO_IFUNC FIO_CONST uint8_t fio_rrot8(uint8_t i, uint8_t bits) {
 #else
 /** 16Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
-  return ((i >> (bits & 15UL)) | (i << ((-(bits)) & 15UL)));
+  return ((i >> (bits & 15UL)) | (i << (((uint8_t)(-(bits))) & 15UL)));
 }
 #endif
 
@@ -2432,7 +2432,7 @@ FIO_IFUNC FIO_CONST uint16_t fio_rrot16(uint16_t i, uint8_t bits) {
 #else
 /** 32Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
-  return ((i >> (bits & 31UL)) | (i << ((-(bits)) & 31UL)));
+  return ((i >> (bits & 31UL)) | (i << (((uint8_t)(-(bits))) & 31UL)));
 }
 #endif
 
@@ -2442,7 +2442,7 @@ FIO_IFUNC FIO_CONST uint32_t fio_rrot32(uint32_t i, uint8_t bits) {
 #else
 /** 64Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
-  return ((i >> ((bits)&63UL)) | (i << ((-(bits)) & 63UL)));
+  return ((i >> ((bits)&63UL)) | (i << (((uint8_t)(-(bits))) & 63UL)));
 }
 #endif
 
@@ -2456,11 +2456,11 @@ FIO_IFUNC FIO_CONST uint64_t fio_rrot64(uint64_t i, uint8_t bits) {
 #else
 /** 128Bit left rotation, inlined. */
 FIO_IFUNC FIO_CONST __uint128_t fio_lrot128(__uint128_t i, uint8_t bits) {
-  return ((i << ((bits)&127UL)) | (i >> ((-(bits)) & 127UL)));
+  return ((i << ((bits)&127UL)) | (i >> (((uint8_t)(-(bits))) & 127UL)));
 }
 /** 128Bit right rotation, inlined. */
 FIO_IFUNC FIO_CONST __uint128_t fio_rrot128(__uint128_t i, uint8_t bits) {
-  return ((i >> ((bits)&127UL)) | (i << ((-(bits)) & 127UL)));
+  return ((i >> ((bits)&127UL)) | (i << (((uint8_t)(-(bits))) & 127UL)));
 }
 #endif
 #endif /* __SIZEOF_INT128__ */

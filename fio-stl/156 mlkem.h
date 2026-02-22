@@ -1343,7 +1343,7 @@ FIO_SFUNC uint8_t fio___mlkem_verify(const uint8_t *a,
   for (i = 0; i < len; i++)
     r |= a[i] ^ b[i];
   /* Collapse to 0 or 1 */
-  r = (uint8_t)((-((int64_t)r)) >> 63);
+  r = (uint8_t)((uint64_t)(-((int64_t)r)) >> 63);
   return r;
 }
 

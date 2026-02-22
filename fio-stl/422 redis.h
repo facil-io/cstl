@@ -1313,7 +1313,7 @@ FIO_SFUNC void fio___redis_ipc_send_on_master(fio_ipc_s *ipc) {
     fio_ipc_reply(ipc,
                   .data = FIO_IPC_DATA(
                       FIO_BUF_INFO2(ipc->data, FIO___REDIS_IPC_SEND_HEADER),
-                      FIO_BUF_INFO2("$-1\r\n", 5)),
+                      FIO_BUF_INFO2((char *)"$-1\r\n", 5)),
                   .done = 1);
     return;
   }
@@ -1329,7 +1329,7 @@ FIO_SFUNC void fio___redis_ipc_send_on_master(fio_ipc_s *ipc) {
     fio_ipc_reply(ipc,
                   .data = FIO_IPC_DATA(
                       FIO_BUF_INFO2(ipc->data, FIO___REDIS_IPC_SEND_HEADER),
-                      FIO_BUF_INFO2("$-1\r\n", 5)),
+                      FIO_BUF_INFO2((char *)"$-1\r\n", 5)),
                   .done = 1);
     return;
   }
