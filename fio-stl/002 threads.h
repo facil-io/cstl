@@ -52,13 +52,17 @@ typedef pthread_cond_t fio_thread_cond_t;
 #include <synchapi.h>
 
 #ifndef FIO_THREADS_BYO
-/* On Windows, fio_thread_t carries both the kernel HANDLE (needed for join /
- * detach) and the numeric thread ID (needed for equality comparison after the
- * handle has been closed, mirroring the POSIX pthread_t opaque-value model). */
-typedef struct {
-  HANDLE handle;
-  DWORD tid;
-} fio_thread_t;
+/* On Windows, fio_thread_t is the numeric thread ID (DWORD / uintptr_t).
+ *
+ * Using the TID rather than a HANDLE means:
+ *  - fio_thread_t is a scalar, castable through void* (matches pthread_t
+ *    on Linux/glibc which is also a scalar unsigned long).
+ *  - fio_thread_equal compares TIDs directly — no live handle required,
+ *    so comparison is valid even after join/detach (mirrors pthread_equal).
+ *  - join/detach open a temporary kernel handle via OpenThread, use it,
+ *    then close it — no long-lived handle stored in the identifier.
+ */
+typedef uintptr_t fio_thread_t;
 #endif
 
 #ifndef FIO_THREADS_FORK_BYO
@@ -621,45 +625,46 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                                 void *(*fn)(void *),
                                 void *arg) {
-  /* _beginthreadex returns the handle and fills the tid out-parameter. */
-  t->handle = (HANDLE)_beginthreadex(NULL,
-                                     0,
-                                     (_beginthreadex_proc_type)(uintptr_t)fn,
-                                     arg,
-                                     0,
-                                     (unsigned *)&t->tid);
-  return (!t->handle) - 1; /* 0 on success, -1 on failure */
+  unsigned tid = 0;
+  HANDLE h = (HANDLE)_beginthreadex(NULL,
+                                    0,
+                                    (_beginthreadex_proc_type)(uintptr_t)fn,
+                                    arg,
+                                    0,
+                                    &tid);
+  if (!h)
+    return -1;
+  CloseHandle(h); /* we track by TID, not by handle */
+  *t = (fio_thread_t)tid;
+  return 0;
 }
 
 FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
-  int r = 0;
-  if (WaitForSingleObject(t->handle, INFINITE) == WAIT_FAILED) {
+  /* Open a temporary handle solely for waiting, then release it. */
+  HANDLE h = OpenThread(SYNCHRONIZE, FALSE, (DWORD)*t);
+  if (!h) {
     errno = GetLastError();
-    r = -1;
-  } else
-    CloseHandle(t->handle); /* release kernel object, mirrors pthread_join */
+    return -1;
+  }
+  int r = (WaitForSingleObject(h, INFINITE) == WAIT_FAILED) ? -1 : 0;
+  if (r)
+    errno = GetLastError();
+  CloseHandle(h);
   return r;
 }
 
 // clang-format off
-/** Detaches the thread, so thread resources are freed automatically. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { return CloseHandle(t->handle) - 1; }
+/** Detaches the thread — on Windows, TID-based tracking needs no handle. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { (void)t; return 0; }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
-/* Returns non-zero if both threads refer to the same thread.
- * Compares numeric TIDs, which remain valid even after the handle is closed,
- * mirroring how POSIX pthread_equal compares opaque pthread_t values. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return a->tid == b->tid; }
+/* Returns non-zero if both threads refer to the same thread. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return *a == *b; }
 
-/** Returns the current thread. */
-FIO_IFUNC fio_thread_t fio_thread_current(void) {
-  fio_thread_t t;
-  t.handle = GetCurrentThread(); /* pseudo-handle, sufficient for join/detach */
-  t.tid    = GetCurrentThreadId();
-  return t;
-}
+/** Returns the current thread identifier (numeric TID). */
+FIO_IFUNC fio_thread_t fio_thread_current(void) { return (fio_thread_t)GetCurrentThreadId(); }
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
