@@ -763,9 +763,7 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     }
     if (fio_sock_bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
 #if FIO_OS_WIN
-      FIO_LOG_ERROR("(fio_sock_open_local) bind failed for %s:%s (WSA %d)",
-                    host,
-                    port,
+      FIO_LOG_DEBUG("(fio_sock_open_local) bind failed (WSA %d)",
                     WSAGetLastError());
 #else
       FIO_LOG_DEBUG("Failed attempt to bind socket to address %s",
