@@ -80,21 +80,6 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
   return c;
 }
 #define accept fio_sock_accept
-/**
- * Lazily initializes WinSock2. Idempotent — safe to call multiple times.
- * Must be called before any Winsock API (socket, WSADuplicateSocket, etc.).
- */
-FIO_IFUNC void fio___wsa_start(void) {
-  static uint8_t fio___wsa_initialized = 0;
-  if (fio___wsa_initialized)
-    return;
-  fio___wsa_initialized = 1;
-  static WSADATA fio___wsa_data;
-  int e = WSAStartup(MAKEWORD(2, 2), &fio___wsa_data);
-  if (e)
-    FIO_LOG_ERROR("(fio___wsa_start) WSAStartup failed (error %d)", e);
-}
-
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
  * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
@@ -106,7 +91,6 @@ FIO_IFUNC void fio___wsa_start(void) {
  * implementations (notably MinGW) when the flags conflict.
  */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
-  fio___wsa_start();
   WSAPROTOCOL_INFO info;
   if (WSADuplicateSocket(original, GetCurrentProcessId(), &info)) {
     FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
@@ -167,7 +151,6 @@ FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
 
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
-  fio___wsa_start();
   fio_socket_i listener = INVALID_SOCKET;
   fio_socket_i writer = INVALID_SOCKET;
   fio_socket_i reader = INVALID_SOCKET;
@@ -690,9 +673,6 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 
 /** Creates a new network socket and binds it to a local address. */
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
-#if FIO_OS_WIN
-  fio___wsa_start();
-#endif
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
 #if FIO_OS_WIN
@@ -760,9 +740,6 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
-#if FIO_OS_WIN
-  fio___wsa_start();
-#endif
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
 #if FIO_OS_WIN
@@ -912,7 +889,6 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
 #endif
 #if FIO_OS_WIN
   /* WSASocket always returns a true Winsock SOCKET — no CRT fd shim. */
-  fio___wsa_start();
   fio_socket_i fd =
       (fio_socket_i)WSASocket(AF_UNIX,
                               (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM,
