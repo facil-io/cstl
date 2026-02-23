@@ -763,8 +763,21 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     }
     if (fio_sock_bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
 #if FIO_OS_WIN
-      FIO_LOG_DEBUG("(fio_sock_open_local) bind failed (WSA %d)",
-                    WSAGetLastError());
+      { /* capture error before any other call clears it */
+        DWORD wsa_err = WSAGetLastError();
+        char wsa_msg[256];
+        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
+                           FORMAT_MESSAGE_IGNORE_INSERTS,
+                       NULL,
+                       wsa_err,
+                       0,
+                       wsa_msg,
+                       sizeof(wsa_msg),
+                       NULL);
+        FIO_LOG_ERROR("(fio_sock_open_local) bind failed (WSA %lu: %s)",
+                      (unsigned long)wsa_err,
+                      wsa_msg);
+      }
 #else
       FIO_LOG_DEBUG("Failed attempt to bind socket to address %s",
                     strerror(errno));
@@ -776,13 +789,7 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     break;
   }
   if (!FIO_SOCK_FD_ISVALID(fd)) {
-#if FIO_OS_WIN
-    FIO_LOG_ERROR(
-        "(fio_sock_open_local) failed to open listening socket (WSA %d)",
-        WSAGetLastError());
-#else
     FIO_LOG_DEBUG("socket binding/creation error %s", strerror(errno));
-#endif
   }
   return fd;
 }
