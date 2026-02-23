@@ -38,6 +38,57 @@ typedef SOCKET fio_socket_i;
 #ifndef FIO_SOCK_FD_ISVALID
 #define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
+/* Ruby's win32.h redefines Winsock functions to rb_w32_* wrappers (fake Ruby
+ * fds). We use real Winsock SOCKETs (via WSASocket), so we must bypass them.
+ * These #undefs restore the real Winsock function names. */
+#ifdef bind
+#undef bind
+#endif
+#ifdef connect
+#undef connect
+#endif
+#ifdef listen
+#undef listen
+#endif
+#ifdef accept
+#undef accept
+#endif
+#ifdef socket
+#undef socket
+#endif
+#ifdef send
+#undef send
+#endif
+#ifdef recv
+#undef recv
+#endif
+#ifdef sendto
+#undef sendto
+#endif
+#ifdef recvfrom
+#undef recvfrom
+#endif
+#ifdef setsockopt
+#undef setsockopt
+#endif
+#ifdef getsockopt
+#undef getsockopt
+#endif
+#ifdef ioctlsocket
+#undef ioctlsocket
+#endif
+#ifdef closesocket
+#undef closesocket
+#endif
+#ifdef select
+#undef select
+#endif
+#ifdef getsockname
+#undef getsockname
+#endif
+#ifdef getpeername
+#undef getpeername
+#endif
 /** Acts as POSIX write. Use this function for portability with WinSock2.
  * send/recv are the correct Winsock2 functions for WSAPoll-based I/O;
  * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
