@@ -544,18 +544,16 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
-#if FIO_OS_WIN
-    /* Use WSASocket to guarantee a true Winsock SOCKET (not a CRT fd).
-     * MinGW's socket() may return a CRT-wrapped fd that WSADuplicateSocket
-     * and WSAPoll reject with WSAENOTSOCK. */
-    fd = (fio_socket_i)WSASocket(p->ai_family,
-                                 p->ai_socktype,
-                                 p->ai_protocol,
-                                 NULL,
-                                 0,
-                                 WSA_FLAG_OVERLAPPED);
-#else
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+#if FIO_OS_WIN
+    /* On MinGW, socket() may return a CRT fd (small int) rather than a true
+     * Winsock SOCKET. Convert it immediately so WSADuplicateSocket and
+     * WSAPoll always receive a real SOCKET handle. */
+    if (FIO_SOCK_FD_ISVALID(fd)) {
+      HANDLE h = (HANDLE)_get_osfhandle((int)fd);
+      if (h != INVALID_HANDLE_VALUE)
+        fd = (fio_socket_i)(SOCKET)h;
+    }
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
@@ -596,15 +594,13 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
-#if FIO_OS_WIN
-    fd = (fio_socket_i)WSASocket(p->ai_family,
-                                 p->ai_socktype,
-                                 p->ai_protocol,
-                                 NULL,
-                                 0,
-                                 WSA_FLAG_OVERLAPPED);
-#else
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+#if FIO_OS_WIN
+    if (FIO_SOCK_FD_ISVALID(fd)) {
+      HANDLE h = (HANDLE)_get_osfhandle((int)fd);
+      if (h != INVALID_HANDLE_VALUE)
+        fd = (fio_socket_i)(SOCKET)h;
+    }
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
