@@ -657,7 +657,18 @@ FIO_SFUNC void fio___io_listen_attach_task_deferred(void *l_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)l_;
   l = fio___io_listen_dup(l);
   fio_socket_i fd = fio_sock_dup(l->fd);
-  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd), "listening socket failed to `dup`");
+#if FIO_OS_WIN
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd),
+             "listening socket failed to `dup` (original fd: %zu, "
+             "GetLastError: %lu)",
+             (size_t)l->fd,
+             (unsigned long)GetLastError());
+#else
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd),
+             "listening socket failed to `dup` (original fd: %d, errno: %s)",
+             (int)l->fd,
+             strerror(errno));
+#endif
   FIO_LOG_DEBUG2("(%d) Called dup to attach new fd as a listening socket.",
                  (int)fio_io_pid());
   l->io = fio_io_attach_fd(fd, &FIO___IO_LISTEN_PROTOCOL, l, NULL);
