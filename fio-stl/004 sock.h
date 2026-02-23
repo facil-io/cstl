@@ -497,22 +497,11 @@ SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
-/* If they have O_NONBLOCK, use the Posix way to do it */
-#if defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
-  /* Fixme: O_NONBLOCK is defined but broken on SunOS 4.1.x and AIX 3.2.5. */
-  int flags;
-  if (-1 == (flags = fcntl(fd, F_GETFL, 0)))
-    flags = 0;
-#if defined(O_CLOEXEC)
-  return fcntl(fd, F_SETFL, flags | O_NONBLOCK | O_CLOEXEC);
-#else
-  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#endif
-#elif defined(FIONBIO)
-  /* Otherwise, use the old way of doing it */
+/* On Windows, always use ioctlsocket — MinGW defines O_NONBLOCK/F_GETFL/F_SETFL
+ * but fcntl does not work on Winsock SOCKETs (only on CRT fds). */
 #if FIO_OS_WIN
-  unsigned long flags = 1;
-  if (ioctlsocket(fd, FIONBIO, &flags) == SOCKET_ERROR) {
+  unsigned long f = 1;
+  if (ioctlsocket(fd, FIONBIO, &f) == SOCKET_ERROR) {
     switch (WSAGetLastError()) {
     case WSANOTINITIALISED:
       FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
@@ -533,12 +522,21 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
     return -1;
   }
   return 0;
+#elif defined(O_NONBLOCK) && defined(F_GETFL) && defined(F_SETFL)
+  /* Fixme: O_NONBLOCK is defined but broken on SunOS 4.1.x and AIX 3.2.5. */
+  int flags;
+  if (-1 == (flags = fcntl(fd, F_GETFL, 0)))
+    flags = 0;
+#if defined(O_CLOEXEC)
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK | O_CLOEXEC);
 #else
+  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+#elif defined(FIONBIO)
   int flags = 1;
   return ioctl(fd, FIONBIO, &flags);
-#endif /* FIO_OS_WIN */
 #else
-#error No functions / argumnet macros for non-blocking sockets.
+#error No functions / argument macros for non-blocking sockets.
 #endif
 }
 
@@ -546,7 +544,19 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    /* Use WSASocket to guarantee a true Winsock SOCKET (not a CRT fd).
+     * MinGW's socket() may return a CRT-wrapped fd that WSADuplicateSocket
+     * and WSAPoll reject with WSAENOTSOCK. */
+    fd = (fio_socket_i)WSASocket(p->ai_family,
+                                 p->ai_socktype,
+                                 p->ai_protocol,
+                                 NULL,
+                                 0,
+                                 WSA_FLAG_OVERLAPPED);
+#else
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+#endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       fd = FIO_SOCKET_INVALID;
@@ -586,7 +596,16 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+#if FIO_OS_WIN
+    fd = (fio_socket_i)WSASocket(p->ai_family,
+                                 p->ai_socktype,
+                                 p->ai_protocol,
+                                 NULL,
+                                 0,
+                                 WSA_FLAG_OVERLAPPED);
+#else
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+#endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
       fd = FIO_SOCKET_INVALID;
