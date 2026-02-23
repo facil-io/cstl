@@ -95,7 +95,6 @@ IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
 IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
                                    struct sockaddr *addr,
                                    int *addrlen);
-#define accept fio_sock_accept
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
  * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
@@ -1152,12 +1151,21 @@ FIO_CONSTRUCTOR(fio___sock_win_init) {
   FIO_ASSERT(ws2, "failed to load Ws2_32.dll");
   if (!flag) {
     flag |= 1;
-    if (GetProcAddress(ws2, "WSAStartup")(MAKEWORD(2, 2),
-                                          &fio___sock_useless_windows_data)) {
-      FIO_LOG_FATAL("WinSock2 unavailable.");
-      exit(-1);
+    {
+      int(WSAAPI * fn_WSAStartup)(WORD, LPWSADATA) =
+          (void *)GetProcAddress(ws2, "WSAStartup");
+      FIO_ASSERT(fn_WSAStartup, "Ws2_32.dll missing: WSAStartup");
+      if (fn_WSAStartup(MAKEWORD(2, 2), &fio___sock_useless_windows_data)) {
+        FIO_LOG_FATAL("WinSock2 unavailable.");
+        exit(-1);
+      }
     }
-    atexit((void (*)(void))(WSACleanup));
+    {
+      void(WSAAPI * fn_WSACleanup)(void) =
+          (void *)GetProcAddress(ws2, "WSACleanup");
+      if (fn_WSACleanup)
+        atexit(fn_WSACleanup);
+    }
 #define FIO___LOAD_WS2(name)                                                   \
   fio___winsock_fn.name = (void *)GetProcAddress(ws2, #name);                  \
   FIO_ASSERT(fio___winsock_fn.name, "Ws2_32.dll missing: " #name)
