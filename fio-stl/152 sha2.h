@@ -110,7 +110,11 @@ Implementation - SHA-256
 ***************************************************************************** */
 
 FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
-#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN
+/* Note: SHA-NI SHA-256 is disabled on Windows because the x86 SHA-NI
+ * intrinsic path produces incorrect results with Windows Clang/MSVC.
+ * The portable path below is correct and used as fallback. */
+#if defined(FIO___HAS_X86_SHA_INTRIN) && FIO___HAS_X86_SHA_INTRIN &&           \
+    !defined(_WIN32)
   /* Code adjusted from:
    * https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-x86.c
    * Credit to Jeffrey Walton.
@@ -328,12 +332,9 @@ FIO_IFUNC void fio___sha256_round(fio_u256 *h, const uint8_t *block) {
   state0 = _mm_blend_epi16(tmp, state1, 0xF0); /* DCBA */
   state1 = _mm_alignr_epi8(state1, tmp, 8);    /* ABEF */
 
-  /* Save state — byte-swap each 32-bit word to native (LE) order so that
-   * fio_sha256_finalize's fio_ntol32 loop converts correctly to big-endian
-   * digest output. The SHA-NI intrinsics produce state words in big-endian
-   * byte order; shuf_mask is the 32-bit bswap mask defined above. */
-  _mm_storeu_si128((__m128i *)&h->u32[0], _mm_shuffle_epi8(state0, shuf_mask));
-  _mm_storeu_si128((__m128i *)&h->u32[4], _mm_shuffle_epi8(state1, shuf_mask));
+  /* Save state */
+  _mm_storeu_si128((__m128i *)&h->u32[0], state0);
+  _mm_storeu_si128((__m128i *)&h->u32[4], state1);
 
 #elif FIO___HAS_ARM_INTRIN
   /* Code adjusted from:
