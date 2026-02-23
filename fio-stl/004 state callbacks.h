@@ -183,6 +183,11 @@ FIO_IFUNC void fio_state_callback_clear_all(void) {
                  fio_getpid());
 }
 
+FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
+  fio_state_callback_clear_all();
+  (void)ignr_;
+}
+
 /** Adds a callback to the list of callbacks to be called for the event. */
 SFUNC void fio_state_callback_add(fio_state_event_type_e e,
                                   void (*func)(void *),
@@ -325,11 +330,6 @@ FIO_IFUNC void fio_state_callback_print_state(void) {
 /* *****************************************************************************
 State constructor / destructor
 ***************************************************************************** */
-
-FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
-  fio_state_callback_clear_all();
-  (void)ignr_;
-}
 
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");

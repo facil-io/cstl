@@ -107,6 +107,12 @@ FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   int addrlen = (int)sizeof(addr);
   fds[0] = fds[1] = INVALID_SOCKET;
   listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  /* On MinGW, socket() may return a CRT fd — recover the real SOCKET. */
+  if (listener != INVALID_SOCKET) {
+    HANDLE h = (HANDLE)_get_osfhandle((int)listener);
+    if (h != INVALID_HANDLE_VALUE)
+      listener = (fio_socket_i)(SOCKET)h;
+  }
   if (listener == INVALID_SOCKET)
     goto fail;
   FIO_MEMSET(&addr, 0, sizeof(addr));
@@ -120,6 +126,12 @@ FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   if (listen(listener, 1) == SOCKET_ERROR)
     goto fail;
   writer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  /* On MinGW, socket() may return a CRT fd — recover the real SOCKET. */
+  if (writer != INVALID_SOCKET) {
+    HANDLE h = (HANDLE)_get_osfhandle((int)writer);
+    if (h != INVALID_HANDLE_VALUE)
+      writer = (fio_socket_i)(SOCKET)h;
+  }
   if (writer == INVALID_SOCKET)
     goto fail;
   if (connect(writer, (struct sockaddr *)&addr, addrlen) == SOCKET_ERROR)
@@ -564,11 +576,11 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-#if FIO_OS_WIN && 0
-    /* TODO: investigate if MinGW socket() returns a CRT fd or a real SOCKET.
-     * The small integer value (e.g. 3) may simply be how Windows represents
-     * low-numbered SOCKETs internally (limited to 24 bits historically).
-     * Disabled until confirmed necessary. */
+#if FIO_OS_WIN
+    /* On MinGW, socket() may return a CRT fd (small int like 3) instead of a
+     * real Winsock SOCKET. The real SOCKET is recoverable via _get_osfhandle.
+     * If socket() already returned a real SOCKET, _get_osfhandle returns
+     * INVALID_HANDLE_VALUE and the original value is preserved. */
     if (FIO_SOCK_FD_ISVALID(fd)) {
       HANDLE h = (HANDLE)_get_osfhandle((int)fd);
       if (h != INVALID_HANDLE_VALUE)
@@ -619,8 +631,8 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-#if FIO_OS_WIN && 0
-    /* TODO: same investigation note as fio_sock_open_local. Disabled. */
+#if FIO_OS_WIN
+    /* On MinGW, socket() may return a CRT fd — recover the real SOCKET. */
     if (FIO_SOCK_FD_ISVALID(fd)) {
       HANDLE h = (HANDLE)_get_osfhandle((int)fd);
       if (h != INVALID_HANDLE_VALUE)
@@ -761,6 +773,14 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
       (fio_socket_i)socket(AF_UNIX,
                            (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM,
                            0);
+#if FIO_OS_WIN
+  /* On MinGW, socket() may return a CRT fd — recover the real SOCKET. */
+  if (FIO_SOCK_FD_ISVALID(fd)) {
+    HANDLE h = (HANDLE)_get_osfhandle((int)fd);
+    if (h != INVALID_HANDLE_VALUE)
+      fd = (fio_socket_i)(SOCKET)h;
+  }
+#endif
   if (!FIO_SOCK_FD_ISVALID(fd)) {
     FIO_LOG_ERROR("couldn't open unix socket (flags == %d) %s\n\t%s",
                   (int)flags,
