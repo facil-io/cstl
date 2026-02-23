@@ -52,21 +52,26 @@ typedef pthread_cond_t fio_thread_cond_t;
 #include <synchapi.h>
 
 #ifndef FIO_THREADS_BYO
-/* On Windows, fio_thread_t stores the HANDLE returned by _beginthreadex.
+/* On Windows, fio_thread_t stores the numeric Thread ID (TID, a DWORD).
  *
  * Design:
- *  - fio_thread_create() stores the HANDLE in *t. The HANDLE stays open until
- *    fio_thread_join() or fio_thread_detach() closes it.
- *  - fio_thread_join() casts *t directly to HANDLE, waits, then CloseHandle.
- *    No OpenThread() needed — the HANDLE is already stored.
- *  - fio_thread_detach() calls CloseHandle((HANDLE)*t) and zeroes *t.
+ *  - fio_thread_create() calls _beginthreadex, captures the TID via the tid
+ *    out-param, stores (fio_thread_t)tid in *t, then immediately CloseHandle
+ *    the returned HANDLE — it is not needed.
+ *  - fio_thread_join() opens a transient HANDLE via
+ *    OpenThread(SYNCHRONIZE, FALSE, (DWORD)*t), waits, then CloseHandle.
+ *    If OpenThread returns NULL the thread already exited — return 0.
+ *  - fio_thread_detach() is a no-op: TID is not a kernel resource.
+ *    Just zeroes *t and returns 0.
  *  - fio_thread_current() returns GetCurrentThreadId() cast to uintptr_t —
- *    a TID, not a HANDLE. No kernel object, no CloseHandle, no leak.
- *  - fio_thread_equal() handles both HANDLEs (from fio_thread_create) and
- *    TIDs (from fio_thread_current) via GetThreadId() with a fallback:
- *    if GetThreadId returns 0, the value was a TID — use it directly.
+ *    a TID, no kernel object, no CloseHandle, no leak.
+ *  - fio_thread_equal() is a direct integer compare — both sides are TIDs.
  *  - fio_thread_t is a scalar (uintptr_t), castable through void* — matches
  *    pthread_t on Linux/glibc and satisfies IO module abstraction patterns.
+ *
+ * Accepted tradeoff: fio_thread_join is only called by code that knows the
+ * thread is alive (or just finished), so the narrow window where OpenThread
+ * could open a recycled TID is acceptable for this library.
  */
 typedef uintptr_t fio_thread_t;
 #endif
@@ -631,17 +636,17 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                                 void *(*fn)(void *),
                                 void *arg) {
-  /* Store the HANDLE in *t. It stays open until fio_thread_join or
-   * fio_thread_detach closes it — no race condition on TID reuse. */
+  unsigned tid = 0;
   HANDLE h = (HANDLE)_beginthreadex(NULL,
                                     0,
                                     (_beginthreadex_proc_type)(uintptr_t)fn,
                                     arg,
                                     0,
-                                    NULL);
+                                    &tid);
   if (!h)
     return -1;
-  *t = (fio_thread_t)h; /* store HANDLE, caller must join or detach */
+  CloseHandle(h); /* TID is stored; HANDLE not needed */
+  *t = (fio_thread_t)tid;
   return 0;
 }
 
@@ -650,43 +655,35 @@ FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
     errno = EINVAL;
     return -1;
   }
-  /* Cast stored HANDLE directly — no OpenThread needed. */
-  HANDLE h = (HANDLE)*t;
+  /* Open a transient HANDLE for the duration of the wait only. */
+  HANDLE h = OpenThread(SYNCHRONIZE, FALSE, (DWORD)*t);
+  if (!h) {
+    /* Thread already exited and TID was recycled — nothing to wait for. */
+    *t = 0;
+    return 0;
+  }
   int r = (WaitForSingleObject(h, INFINITE) == WAIT_FAILED) ? -1 : 0;
   if (r)
     errno = GetLastError();
-  CloseHandle(h); /* release the kernel object */
+  CloseHandle(h);
   *t = 0;
   return r;
 }
 
 // clang-format off
-/** Detaches the thread — closes the stored HANDLE and zeroes *t. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t *t) {
-  if (*t) { CloseHandle((HANDLE)*t); *t = 0; }
-  return 0;
-}
+/** Detaches the thread — TID is not a kernel resource; just zero *t. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { *t = 0; return 0; }
 
 /** Ends the current running thread. */
 FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
 
 /* Returns non-zero if both threads refer to the same thread.
- * *a may be a HANDLE (from fio_thread_create) or a TID (from
- * fio_thread_current). GetThreadId() resolves HANDLEs to TIDs; if it
- * returns 0 the value was already a TID — use it directly. */
-FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) {
-  if (*a == *b) return 1; /* fast path: identical values */
-  DWORD id_a = GetThreadId((HANDLE)*a);
-  DWORD id_b = GetThreadId((HANDLE)*b);
-  if (!id_a) id_a = (DWORD)*a; /* *a was a TID, not a HANDLE */
-  if (!id_b) id_b = (DWORD)*b; /* *b was a TID, not a HANDLE */
-  return id_a && id_b && (id_a == id_b);
-}
+ * Both values are TIDs — direct integer compare is correct and sufficient. */
+FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return *a == *b; }
 
-/** Returns the calling thread's numeric Thread ID (not a HANDLE).
+/** Returns the calling thread's numeric Thread ID (TID, not a HANDLE).
  *
- * Returns a TID — no CloseHandle required, no kernel object created.
- * Use fio_thread_equal() to compare with values from fio_thread_create(). */
+ * No kernel object created, no CloseHandle required, no leak. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) {
   return (fio_thread_t)GetCurrentThreadId();
 }
