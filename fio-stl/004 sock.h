@@ -56,61 +56,31 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
 #define accept fio_sock_accept
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
- * On MinGW, socket() from <sys/socket.h> may return a CRT fd (small integer)
- * rather than a raw Winsock SOCKET kernel handle. DuplicateHandle requires a
- * real kernel handle, so we resolve the underlying HANDLE via _get_osfhandle
- * when the value looks like a CRT fd, then wrap the duplicate back into a CRT
- * fd with _open_osfhandle so the rest of the code stays consistent.
+ * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
+ * that can be used with WSAPoll, send, recv, etc.
  *
- * When the value is already a raw SOCKET/HANDLE (large pointer-sized value),
- * we use DuplicateHandle directly — this is the same approach as libuv.
+ * dwFlags MUST be 0 when FROM_PROTOCOL_INFO is used — the WSAPROTOCOL_INFO
+ * struct already encodes WSA_FLAG_OVERLAPPED from the original socket.
+ * Passing WSA_FLAG_OVERLAPPED explicitly causes WSAEINVAL on some Winsock
+ * implementations (notably MinGW) when the flags conflict.
  */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
-  HANDLE src_handle;
-  HANDLE dup_handle;
-#if FIO_HAVE_UNIX_TOOLS /* MinGW/Cygwin: socket() may return a CRT fd */
-  HANDLE h = (HANDLE)_get_osfhandle((int)original);
-  if (h != INVALID_HANDLE_VALUE) {
-    /* original is a CRT fd — duplicate the underlying handle */
-    src_handle = h;
-    if (!DuplicateHandle(GetCurrentProcess(),
-                         src_handle,
-                         GetCurrentProcess(),
-                         &dup_handle,
-                         0,
-                         FALSE,
-                         DUPLICATE_SAME_ACCESS)) {
-      FIO_LOG_ERROR("(fio_sock_dup) DuplicateHandle(CRT) failed (error %lu)",
-                    (unsigned long)GetLastError());
-      return FIO_SOCKET_INVALID;
-    }
-    /* wrap duplicate back into a CRT fd */
-    fio_socket_i r = (fio_socket_i)_open_osfhandle((intptr_t)dup_handle, 0);
-    if (r == -1) {
-      FIO_LOG_ERROR("(fio_sock_dup) _open_osfhandle failed (error %lu)",
-                    (unsigned long)GetLastError());
-      CloseHandle(dup_handle);
-      return FIO_SOCKET_INVALID;
-    }
-    return r;
-  }
-  /* fall through: original is already a raw SOCKET/HANDLE */
-  src_handle = (HANDLE)(UINT_PTR)original;
-#else
-  src_handle = (HANDLE)(UINT_PTR)original;
-#endif
-  if (!DuplicateHandle(GetCurrentProcess(),
-                       src_handle,
-                       GetCurrentProcess(),
-                       &dup_handle,
-                       0,
-                       FALSE,
-                       DUPLICATE_SAME_ACCESS)) {
-    FIO_LOG_ERROR("(fio_sock_dup) DuplicateHandle failed (error %lu)",
-                  (unsigned long)GetLastError());
+  WSAPROTOCOL_INFO info;
+  if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info)) {
+    FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
+                  WSAGetLastError());
     return FIO_SOCKET_INVALID;
   }
-  return (fio_socket_i)(UINT_PTR)dup_handle;
+  fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            &info,
+                                            0,
+                                            0);
+  if (!FIO_SOCK_FD_ISVALID(fd))
+    FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
+                  WSAGetLastError());
+  return fd;
 }
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
