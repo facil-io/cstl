@@ -67,7 +67,7 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * See:
  * https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
  */
-SFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
+FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   HANDLE dup_handle;
   if (!DuplicateHandle(GetCurrentProcess(),
                        (HANDLE)(UINT_PTR)original,
@@ -149,7 +149,7 @@ typedef int fio_socket_i;
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
 #define fio_sock_read(fd, buf, len)        read((fd), (buf), (len))
 /** Acts as POSIX dup. Sets O_CLOEXEC on the new fd. */
-SFUNC fio_socket_i fio_sock_dup(fio_socket_i fd) {
+FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i fd) {
   fio_socket_i r = dup(fd);
   if (r == -1) {
     FIO_LOG_ERROR("(fio_sock_dup) dup(%d) failed: %s", fd, strerror(errno));
