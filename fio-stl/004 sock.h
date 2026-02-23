@@ -38,104 +38,63 @@ typedef SOCKET fio_socket_i;
 #ifndef FIO_SOCK_FD_ISVALID
 #define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
-/* Ruby's win32.h redefines standard socket function names to rb_w32_* wrappers
- * (e.g. #define bind(s,a,l) rb_w32_bind(s,a,l)). We use real Winsock SOCKETs
- * (via WSASocket), so we must restore the real Winsock function names.
- * Include this STL header BEFORE ruby.h to ensure these undefs take effect. */
-#ifdef bind
-#undef bind
-#endif
-#ifdef connect
-#undef connect
-#endif
-#ifdef listen
-#undef listen
-#endif
-#ifdef accept
-#undef accept
-#endif
-#ifdef socket
-#undef socket
-#endif
-#ifdef send
-#undef send
-#endif
-#ifdef recv
-#undef recv
-#endif
-#ifdef sendto
-#undef sendto
-#endif
-#ifdef recvfrom
-#undef recvfrom
-#endif
-#ifdef setsockopt
-#undef setsockopt
-#endif
-#ifdef getsockopt
-#undef getsockopt
-#endif
-#ifdef ioctlsocket
-#undef ioctlsocket
-#endif
-#ifdef closesocket
-#undef closesocket
-#endif
-#ifdef select
-#undef select
-#endif
-#ifdef getsockname
-#undef getsockname
-#endif
-#ifdef getpeername
-#undef getpeername
-#endif
+/* Winsock function pointer table — populated at startup via GetProcAddress so
+ * that Ruby's win32.h symbol replacements (rb_w32_bind, rb_w32_send, etc.)
+ * never intercept our calls. Not static: IFUNC wrappers must share one copy. */
+extern struct fio___winsock_fn_s {
+  int(WSAAPI *bind)(SOCKET, const struct sockaddr *, int);
+  int(WSAAPI *connect)(SOCKET, const struct sockaddr *, int);
+  int(WSAAPI *listen)(SOCKET, int);
+  SOCKET(WSAAPI *accept)(SOCKET, struct sockaddr *, int *);
+  SOCKET(WSAAPI *socket)(int, int, int);
+  int(WSAAPI *send)(SOCKET, const char *, int, int);
+  int(WSAAPI *recv)(SOCKET, char *, int, int);
+  int(WSAAPI *sendto)(SOCKET,
+                      const char *,
+                      int,
+                      int,
+                      const struct sockaddr *,
+                      int);
+  int(WSAAPI *recvfrom)(SOCKET, char *, int, int, struct sockaddr *, int *);
+  int(WSAAPI *setsockopt)(SOCKET, int, int, const char *, int);
+  int(WSAAPI *getsockopt)(SOCKET, int, int, char *, int *);
+  int(WSAAPI *ioctlsocket)(SOCKET, long, u_long *);
+  int(WSAAPI *closesocket)(SOCKET);
+  int(WSAAPI *select)(int,
+                      fd_set *,
+                      fd_set *,
+                      fd_set *,
+                      const struct timeval *);
+  int(WSAAPI *getsockname)(SOCKET, struct sockaddr *, int *);
+  int(WSAAPI *getpeername)(SOCKET, struct sockaddr *, int *);
+} fio___winsock_fn;
 /** Acts as POSIX write. Use this function for portability with WinSock2.
  * send/recv are the correct Winsock2 functions for WSAPoll-based I/O;
  * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
  */
-FIO_IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
-  return (ssize_t)(send)(fd, (const char *)buf, (int)len, 0);
-}
+IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len);
 /** Acts as POSIX read. Use this function for portability with WinSock2. */
-FIO_IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len) {
-  return (ssize_t)(recv)(fd, (char *)buf, (int)len, 0);
-}
+IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len);
 /** Acts as POSIX close. Use this function for portability with WinSock2. */
-FIO_IFUNC int fio_sock_close(fio_socket_i fd) { return (closesocket)(fd); }
+IFUNC int fio_sock_close(fio_socket_i fd);
 /** Acts as POSIX sendto. Use this function for portability with WinSock2. */
-FIO_IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
-                                  const void *buf,
-                                  size_t len,
-                                  int flags,
-                                  const struct sockaddr *addr,
-                                  socklen_t addrlen) {
-  return (
-      ssize_t)(sendto)(fd, (const char *)buf, (int)len, flags, addr, addrlen);
-}
+IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
+                              const void *buf,
+                              size_t len,
+                              int flags,
+                              const struct sockaddr *addr,
+                              socklen_t addrlen);
 /** Acts as POSIX recvfrom. Use this function for portability with WinSock2. */
-FIO_IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
-                                    void *buf,
-                                    size_t len,
-                                    int flags,
-                                    struct sockaddr *addr,
-                                    socklen_t *addrlen) {
-  return (ssize_t)(recvfrom)(fd,
-                             (char *)buf,
-                             (int)len,
-                             flags,
-                             addr,
-                             (int *)addrlen);
-}
+IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
+                                void *buf,
+                                size_t len,
+                                int flags,
+                                struct sockaddr *addr,
+                                socklen_t *addrlen);
 /** Accepts a new connection, returning a native socket handle. */
-FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
-                                       struct sockaddr *addr,
-                                       int *addrlen) {
-  fio_socket_i c = (accept)(s, addr, addrlen);
-  if (c == INVALID_SOCKET)
-    return FIO_SOCKET_INVALID;
-  return c;
-}
+IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
+                                   struct sockaddr *addr,
+                                   int *addrlen);
 #define accept fio_sock_accept
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
@@ -147,24 +106,7 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * Passing WSA_FLAG_OVERLAPPED explicitly causes WSAEINVAL on some Winsock
  * implementations (notably MinGW) when the flags conflict.
  */
-FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
-  WSAPROTOCOL_INFO info;
-  if (WSADuplicateSocket(original, GetCurrentProcessId(), &info)) {
-    FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
-                  WSAGetLastError());
-    return FIO_SOCKET_INVALID;
-  }
-  fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
-                                            FROM_PROTOCOL_INFO,
-                                            FROM_PROTOCOL_INFO,
-                                            &info,
-                                            0,
-                                            0);
-  if (!FIO_SOCK_FD_ISVALID(fd))
-    FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
-                  WSAGetLastError());
-  return fd;
-}
+IFUNC fio_socket_i fio_sock_dup(fio_socket_i original);
 /* *****************************************************************************
 Portable wrappers for bind / connect / listen / setsockopt.
 
@@ -175,95 +117,33 @@ that differ from POSIX. fio_socket_i is typedef'd to the correct OS type
 ***************************************************************************** */
 
 /** Portable bind. Calls Winsock2 bind on Windows, POSIX bind on POSIX. */
-FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
-                            const struct sockaddr *addr,
-                            socklen_t addrlen) {
-  return (bind)(fd, addr, (int)addrlen);
-}
+IFUNC int fio_sock_bind(fio_socket_i fd,
+                        const struct sockaddr *addr,
+                        socklen_t addrlen);
 
 /** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
  */
-FIO_IFUNC int fio_sock_connect(fio_socket_i fd,
-                               const struct sockaddr *addr,
-                               socklen_t addrlen) {
-  return (connect)(fd, addr, (int)addrlen);
-}
+IFUNC int fio_sock_connect(fio_socket_i fd,
+                           const struct sockaddr *addr,
+                           socklen_t addrlen);
 
 /** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
-FIO_IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
-  return (listen)(fd, backlog);
-}
+IFUNC int fio_sock_listen(fio_socket_i fd, int backlog);
 
 /** Portable setsockopt.
  * optval is (const char *) on Windows and (const void *) on POSIX;
  * optlen is int on Windows and socklen_t on POSIX.
  * Both coercions are applied internally; callers pass any pointer type. */
-FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
-                                  int level,
-                                  int optname,
-                                  const void *optval,
-                                  socklen_t optlen) {
-  return (setsockopt)(fd, level, optname, (const char *)optval, (int)optlen);
-}
+IFUNC int fio_sock_setsockopt(fio_socket_i fd,
+                              int level,
+                              int optname,
+                              const void *optval,
+                              socklen_t optlen);
 
 /** Creates a connected socket pair via loopback TCP (Windows socketpair).
  * On Windows, fio_sock_pipe() delegates here since _pipe() returns CRT fds
  * (not Winsock SOCKETs) and is incompatible with WSAPoll-based I/O. */
-FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
-  fio_socket_i listener = INVALID_SOCKET;
-  fio_socket_i writer = INVALID_SOCKET;
-  fio_socket_i reader = INVALID_SOCKET;
-  struct sockaddr_in addr;
-  int addrlen = (int)sizeof(addr);
-  fds[0] = fds[1] = INVALID_SOCKET;
-  /* WSASocket always returns a true Winsock SOCKET — no CRT fd shim. */
-  listener = (fio_socket_i)WSASocket(AF_INET,
-                                     SOCK_STREAM,
-                                     IPPROTO_TCP,
-                                     NULL,
-                                     0,
-                                     WSA_FLAG_OVERLAPPED);
-  if (listener == INVALID_SOCKET)
-    goto fail;
-  FIO_MEMSET(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0; /* OS assigns an ephemeral port */
-  if (fio_sock_bind(listener, (struct sockaddr *)&addr, addrlen) ==
-      SOCKET_ERROR)
-    goto fail;
-  if ((getsockname)(listener, (struct sockaddr *)&addr, &addrlen) ==
-      SOCKET_ERROR)
-    goto fail;
-  if (fio_sock_listen(listener, 1) == SOCKET_ERROR)
-    goto fail;
-  writer = (fio_socket_i)WSASocket(AF_INET,
-                                   SOCK_STREAM,
-                                   IPPROTO_TCP,
-                                   NULL,
-                                   0,
-                                   WSA_FLAG_OVERLAPPED);
-  if (writer == INVALID_SOCKET)
-    goto fail;
-  if (fio_sock_connect(writer, (struct sockaddr *)&addr, addrlen) ==
-      SOCKET_ERROR)
-    goto fail;
-  reader = (accept)(listener, NULL, NULL);
-  if (reader == INVALID_SOCKET)
-    goto fail;
-  (closesocket)(listener);
-  fds[0] = reader; /* read end */
-  fds[1] = writer; /* write end */
-  return 0;
-fail:
-  if (listener != INVALID_SOCKET)
-    (closesocket)(listener);
-  if (reader != INVALID_SOCKET)
-    (closesocket)(reader);
-  if (writer != INVALID_SOCKET)
-    (closesocket)(writer);
-  return -1;
-}
+IFUNC int fio_sock_socketpair(fio_socket_i fds[2]);
 
 /** Creates a pipe-like connected pair. On Windows, delegates to
  * fio_sock_socketpair() (loopback TCP) since _pipe() returns CRT fds that are
@@ -704,7 +584,7 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
  * but fcntl does not work on Winsock SOCKETs (only on CRT fds). */
 #if FIO_OS_WIN
   unsigned long f = 1;
-  if (ioctlsocket(fd, FIONBIO, &f) == SOCKET_ERROR) {
+  if (fio___winsock_fn.ioctlsocket(fd, FIONBIO, &f) == SOCKET_ERROR) {
     switch (WSAGetLastError()) {
     case WSANOTINITIALISED:
       FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
@@ -1071,8 +951,13 @@ SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s) {
   socklen_t len = sizeof(addr);
   if (!FIO_SOCK_FD_ISVALID(s))
     goto finish;
+#if FIO_OS_WIN
+  if (fio___winsock_fn.getpeername(s, addr, (int *)&len))
+    goto finish;
+#else
   if (getpeername(s, addr, &len))
     goto finish;
+#endif
   if (getnameinfo(addr, len, r.buf, 64, NULL, 0, NI_NUMERICHOST))
     goto finish;
   r.len = FIO_STRLEN(r.buf);
@@ -1086,16 +971,213 @@ finish:
 WinSock initialization
 ***************************************************************************** */
 #if FIO_OS_WIN
+/* Definition of the Winsock function pointer table (one copy per binary). */
+struct fio___winsock_fn_s fio___winsock_fn;
+
+/** Acts as POSIX write. Use this function for portability with WinSock2.
+ * send/recv are the correct Winsock2 functions for WSAPoll-based I/O;
+ * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
+ */
+IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
+  return (ssize_t)fio___winsock_fn.send(fd, (const char *)buf, (int)len, 0);
+}
+/** Acts as POSIX read. Use this function for portability with WinSock2. */
+IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len) {
+  return (ssize_t)fio___winsock_fn.recv(fd, (char *)buf, (int)len, 0);
+}
+/** Acts as POSIX close. Use this function for portability with WinSock2. */
+IFUNC int fio_sock_close(fio_socket_i fd) {
+  return fio___winsock_fn.closesocket(fd);
+}
+/** Acts as POSIX sendto. Use this function for portability with WinSock2. */
+IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
+                              const void *buf,
+                              size_t len,
+                              int flags,
+                              const struct sockaddr *addr,
+                              socklen_t addrlen) {
+  return (ssize_t)fio___winsock_fn
+      .sendto(fd, (const char *)buf, (int)len, flags, addr, (int)addrlen);
+}
+/** Acts as POSIX recvfrom. Use this function for portability with WinSock2. */
+IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
+                                void *buf,
+                                size_t len,
+                                int flags,
+                                struct sockaddr *addr,
+                                socklen_t *addrlen) {
+  return (ssize_t)fio___winsock_fn
+      .recvfrom(fd, (char *)buf, (int)len, flags, addr, (int *)addrlen);
+}
+/** Accepts a new connection, returning a native socket handle. */
+IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
+                                   struct sockaddr *addr,
+                                   int *addrlen) {
+  fio_socket_i c = fio___winsock_fn.accept(s, addr, addrlen);
+  if (c == INVALID_SOCKET)
+    return FIO_SOCKET_INVALID;
+  return c;
+}
+/** Acts as POSIX dup. Use this for portability with WinSock2.
+ *
+ * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
+ * that can be used with WSAPoll, send, recv, etc.
+ *
+ * dwFlags MUST be 0 when FROM_PROTOCOL_INFO is used — the WSAPROTOCOL_INFO
+ * struct already encodes WSA_FLAG_OVERLAPPED from the original socket.
+ * Passing WSA_FLAG_OVERLAPPED explicitly causes WSAEINVAL on some Winsock
+ * implementations (notably MinGW) when the flags conflict.
+ */
+IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
+  WSAPROTOCOL_INFO info;
+  if (WSADuplicateSocket(original, GetCurrentProcessId(), &info)) {
+    FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
+                  WSAGetLastError());
+    return FIO_SOCKET_INVALID;
+  }
+  fio_socket_i fd = (fio_socket_i)WSASocket(FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            FROM_PROTOCOL_INFO,
+                                            &info,
+                                            0,
+                                            0);
+  if (!FIO_SOCK_FD_ISVALID(fd))
+    FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
+                  WSAGetLastError());
+  return fd;
+}
+/** Portable bind. Calls Winsock2 bind on Windows, POSIX bind on POSIX. */
+IFUNC int fio_sock_bind(fio_socket_i fd,
+                        const struct sockaddr *addr,
+                        socklen_t addrlen) {
+  return fio___winsock_fn.bind(fd, addr, (int)addrlen);
+}
+/** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
+ */
+IFUNC int fio_sock_connect(fio_socket_i fd,
+                           const struct sockaddr *addr,
+                           socklen_t addrlen) {
+  return fio___winsock_fn.connect(fd, addr, (int)addrlen);
+}
+/** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
+IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
+  return fio___winsock_fn.listen(fd, backlog);
+}
+/** Portable setsockopt.
+ * optval is (const char *) on Windows and (const void *) on POSIX;
+ * optlen is int on Windows and socklen_t on POSIX.
+ * Both coercions are applied internally; callers pass any pointer type. */
+IFUNC int fio_sock_setsockopt(fio_socket_i fd,
+                              int level,
+                              int optname,
+                              const void *optval,
+                              socklen_t optlen) {
+  return fio___winsock_fn.setsockopt(fd,
+                                     level,
+                                     optname,
+                                     (const char *)optval,
+                                     (int)optlen);
+}
+/** Creates a connected socket pair via loopback TCP (Windows socketpair).
+ * On Windows, fio_sock_pipe() delegates here since _pipe() returns CRT fds
+ * (not Winsock SOCKETs) and is incompatible with WSAPoll-based I/O. */
+IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
+  fio_socket_i listener = INVALID_SOCKET;
+  fio_socket_i writer = INVALID_SOCKET;
+  fio_socket_i reader = INVALID_SOCKET;
+  struct sockaddr_in addr;
+  int addrlen = (int)sizeof(addr);
+  fds[0] = fds[1] = INVALID_SOCKET;
+  /* WSASocket always returns a true Winsock SOCKET — no CRT fd shim. */
+  listener = (fio_socket_i)WSASocket(AF_INET,
+                                     SOCK_STREAM,
+                                     IPPROTO_TCP,
+                                     NULL,
+                                     0,
+                                     WSA_FLAG_OVERLAPPED);
+  if (listener == INVALID_SOCKET)
+    goto fail;
+  FIO_MEMSET(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0; /* OS assigns an ephemeral port */
+  if (fio_sock_bind(listener, (struct sockaddr *)&addr, addrlen) ==
+      SOCKET_ERROR)
+    goto fail;
+  if (fio___winsock_fn.getsockname(listener,
+                                   (struct sockaddr *)&addr,
+                                   &addrlen) == SOCKET_ERROR)
+    goto fail;
+  if (fio_sock_listen(listener, 1) == SOCKET_ERROR)
+    goto fail;
+  writer = (fio_socket_i)WSASocket(AF_INET,
+                                   SOCK_STREAM,
+                                   IPPROTO_TCP,
+                                   NULL,
+                                   0,
+                                   WSA_FLAG_OVERLAPPED);
+  if (writer == INVALID_SOCKET)
+    goto fail;
+  if (fio_sock_connect(writer, (struct sockaddr *)&addr, addrlen) ==
+      SOCKET_ERROR)
+    goto fail;
+  reader = fio___winsock_fn.accept(listener, NULL, NULL);
+  if (reader == INVALID_SOCKET)
+    goto fail;
+  fio___winsock_fn.closesocket(listener);
+  fds[0] = reader; /* read end */
+  fds[1] = writer; /* write end */
+  return 0;
+fail:
+  if (listener != INVALID_SOCKET)
+    fio___winsock_fn.closesocket(listener);
+  if (reader != INVALID_SOCKET)
+    fio___winsock_fn.closesocket(reader);
+  if (writer != INVALID_SOCKET)
+    fio___winsock_fn.closesocket(writer);
+  return -1;
+}
+
 static WSADATA fio___sock_useless_windows_data;
 FIO_CONSTRUCTOR(fio___sock_win_init) {
   static uint8_t flag = 0;
+  /* Load real Winsock function pointers via GetProcAddress so that Ruby's
+   * win32.h macro redefinitions (rb_w32_bind, rb_w32_send, etc.) can never
+   * intercept our calls — symbol resolution happens at link time for static
+   * inline functions, making #undef blocks ineffective. By calling through
+   * these pointers we bypass the linker symbol table entirely.
+   * NOTE: do NOT FreeLibrary(ws2) — pointers must remain valid for the
+   * process lifetime. */
+  HMODULE ws2 = LoadLibraryA("Ws2_32.dll");
+  FIO_ASSERT(ws2, "failed to load Ws2_32.dll");
   if (!flag) {
     flag |= 1;
-    if (WSAStartup(MAKEWORD(2, 2), &fio___sock_useless_windows_data)) {
+    if (GetProcAddress(ws2, "WSAStartup")(MAKEWORD(2, 2),
+                                          &fio___sock_useless_windows_data)) {
       FIO_LOG_FATAL("WinSock2 unavailable.");
       exit(-1);
     }
     atexit((void (*)(void))(WSACleanup));
+#define FIO___LOAD_WS2(name)                                                   \
+  fio___winsock_fn.name = (void *)GetProcAddress(ws2, #name);                  \
+  FIO_ASSERT(fio___winsock_fn.name, "Ws2_32.dll missing: " #name)
+    FIO___LOAD_WS2(bind);
+    FIO___LOAD_WS2(connect);
+    FIO___LOAD_WS2(listen);
+    FIO___LOAD_WS2(accept);
+    FIO___LOAD_WS2(socket);
+    FIO___LOAD_WS2(send);
+    FIO___LOAD_WS2(recv);
+    FIO___LOAD_WS2(sendto);
+    FIO___LOAD_WS2(recvfrom);
+    FIO___LOAD_WS2(setsockopt);
+    FIO___LOAD_WS2(getsockopt);
+    FIO___LOAD_WS2(ioctlsocket);
+    FIO___LOAD_WS2(closesocket);
+    FIO___LOAD_WS2(select);
+    FIO___LOAD_WS2(getsockname);
+    FIO___LOAD_WS2(getpeername);
+#undef FIO___LOAD_WS2
   }
 }
 #endif /* FIO_OS_WIN / FIO_OS_POSIX */
