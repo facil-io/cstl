@@ -280,30 +280,23 @@ FIO_IFUNC __m128i fio___ghash_mult_pclmul(__m128i a, __m128i b) {
   tmp2 = _mm_xor_si128(tmp2, tmp4);
   tmp5 = _mm_xor_si128(tmp5, tmp3);
 
-  /* Reduction modulo x^128 + x^7 + x^2 + x + 1 */
-  __m128i tmp6 = _mm_srli_epi32(tmp2, 31);
-  __m128i tmp7 = _mm_srli_epi32(tmp2, 30);
-  __m128i tmp8 = _mm_srli_epi32(tmp2, 25);
-  tmp6 = _mm_xor_si128(tmp6, tmp7);
-  tmp6 = _mm_xor_si128(tmp6, tmp8);
-  tmp7 = _mm_shuffle_epi32(tmp6, 0x93);
-  tmp6 = _mm_and_si128(tmp7, _mm_set_epi32(0, ~0, ~0, ~0));
-  tmp7 = _mm_and_si128(tmp7, _mm_set_epi32(~0, 0, 0, 0));
-  tmp2 = _mm_xor_si128(tmp2, tmp6);
-  tmp5 = _mm_xor_si128(tmp5, tmp7);
+  /* Reduction modulo x^128 + x^7 + x^2 + x + 1
+   * Linux kernel algorithm (__clmul_gf128mul_ble) for byte-reversed data. */
+  __m128i T3 = tmp2;
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 1), tmp2);
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 5), tmp2);
+  T3 = _mm_slli_epi64(T3, 57);
+  __m128i T2 = _mm_slli_si128(T3, 8);
+  T3 = _mm_srli_si128(T3, 8);
+  tmp2 = _mm_xor_si128(tmp2, T2);
+  tmp5 = _mm_xor_si128(tmp5, T3);
+  T2 = tmp2;
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 5), tmp2);
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 1), tmp2);
+  T2 = _mm_srli_epi64(T2, 1);
+  tmp5 = _mm_xor_si128(tmp5, T2);
 
-  __m128i tmp9 = _mm_slli_epi32(tmp2, 1);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp9 = _mm_slli_epi32(tmp2, 2);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp9 = _mm_slli_epi32(tmp2, 7);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp7 = _mm_srli_si128(tmp2, 12);
-  tmp2 = _mm_slli_si128(tmp2, 4);
-  tmp5 = _mm_xor_si128(tmp5, tmp2);
-  tmp5 = _mm_xor_si128(tmp5, tmp7);
-
-  return tmp5;
+  return _mm_xor_si128(tmp5, tmp2);
 }
 
 /* Byte-swap for GCM (big-endian) */
@@ -311,6 +304,30 @@ FIO_IFUNC __m128i fio___bswap128(__m128i x) {
   return _mm_shuffle_epi8(
       x,
       _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+}
+
+/**
+ * Multiply H by x in byte-reversed (bswap'd) GCM form.
+ *
+ * In bswap'd form, bit 0 of the low 64-bit lane holds the x^127 coefficient.
+ * Multiplying by x = right-shift the 128-bit value by 1, then XOR the
+ * reduction polynomial (0xE1 << 120) if the original x^127 coefficient was 1.
+ *
+ * Required so that fio___ghash_mult_pclmul (Linux kernel reduction) produces
+ * the correct GF(2^128) product for byte-reversed operands.
+ */
+FIO_IFUNC __m128i fio___ghash_h_times_x(__m128i h) {
+  /* Extract x^127 coefficient: bit 0 of the low 64-bit lane */
+  __m128i carry = _mm_and_si128(h, _mm_set_epi32(0, 0, 0, 1));
+  /* Build all-ones mask in all 32-bit lanes if carry != 0 */
+  __m128i mask =
+      _mm_shuffle_epi32(_mm_sub_epi32(_mm_setzero_si128(), carry), 0x00);
+  /* Right-shift h by 1 bit across the full 128-bit value */
+  __m128i shifted = _mm_or_si128(_mm_srli_epi64(h, 1),
+                                 _mm_slli_epi64(_mm_srli_si128(h, 8), 63));
+  /* XOR reduction polynomial (0xE1 << 120) if carry was set */
+  __m128i poly = _mm_and_si128(_mm_set_epi32(0xE1000000, 0, 0, 0), mask);
+  return _mm_xor_si128(shifted, poly);
 }
 
 /**
@@ -373,30 +390,23 @@ FIO_IFUNC __m128i fio___x86_ghash_mult4(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 */
-  __m128i tmp6 = _mm_srli_epi32(lo, 31);
-  __m128i tmp7 = _mm_srli_epi32(lo, 30);
-  __m128i tmp8 = _mm_srli_epi32(lo, 25);
-  tmp6 = _mm_xor_si128(tmp6, tmp7);
-  tmp6 = _mm_xor_si128(tmp6, tmp8);
-  tmp7 = _mm_shuffle_epi32(tmp6, 0x93);
-  tmp6 = _mm_and_si128(tmp7, _mm_set_epi32(0, ~0, ~0, ~0));
-  tmp7 = _mm_and_si128(tmp7, _mm_set_epi32(~0, 0, 0, 0));
-  lo = _mm_xor_si128(lo, tmp6);
-  hi = _mm_xor_si128(hi, tmp7);
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1
+   * Linux kernel algorithm (__clmul_gf128mul_ble) for byte-reversed data. */
+  __m128i T3 = lo;
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 1), lo);
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 5), lo);
+  T3 = _mm_slli_epi64(T3, 57);
+  __m128i T2 = _mm_slli_si128(T3, 8);
+  T3 = _mm_srli_si128(T3, 8);
+  lo = _mm_xor_si128(lo, T2);
+  hi = _mm_xor_si128(hi, T3);
+  T2 = lo;
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 5), lo);
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 1), lo);
+  T2 = _mm_srli_epi64(T2, 1);
+  hi = _mm_xor_si128(hi, T2);
 
-  __m128i tmp9 = _mm_slli_epi32(lo, 1);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp9 = _mm_slli_epi32(lo, 2);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp9 = _mm_slli_epi32(lo, 7);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp7 = _mm_srli_si128(lo, 12);
-  lo = _mm_slli_si128(lo, 4);
-  hi = _mm_xor_si128(hi, lo);
-  hi = _mm_xor_si128(hi, tmp7);
-
-  return hi;
+  return _mm_xor_si128(hi, lo);
 }
 
 /**
@@ -469,30 +479,23 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 */
-  __m128i tmp6 = _mm_srli_epi32(lo, 31);
-  __m128i tmp7 = _mm_srli_epi32(lo, 30);
-  __m128i tmp8 = _mm_srli_epi32(lo, 25);
-  tmp6 = _mm_xor_si128(tmp6, tmp7);
-  tmp6 = _mm_xor_si128(tmp6, tmp8);
-  tmp7 = _mm_shuffle_epi32(tmp6, 0x93);
-  tmp6 = _mm_and_si128(tmp7, _mm_set_epi32(0, ~0, ~0, ~0));
-  tmp7 = _mm_and_si128(tmp7, _mm_set_epi32(~0, 0, 0, 0));
-  lo = _mm_xor_si128(lo, tmp6);
-  hi = _mm_xor_si128(hi, tmp7);
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1
+   * Linux kernel algorithm (__clmul_gf128mul_ble) for byte-reversed data. */
+  __m128i T3 = lo;
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 1), lo);
+  T3 = _mm_xor_si128(_mm_slli_epi64(T3, 5), lo);
+  T3 = _mm_slli_epi64(T3, 57);
+  __m128i T2 = _mm_slli_si128(T3, 8);
+  T3 = _mm_srli_si128(T3, 8);
+  lo = _mm_xor_si128(lo, T2);
+  hi = _mm_xor_si128(hi, T3);
+  T2 = lo;
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 5), lo);
+  T2 = _mm_xor_si128(_mm_srli_epi64(T2, 1), lo);
+  T2 = _mm_srli_epi64(T2, 1);
+  hi = _mm_xor_si128(hi, T2);
 
-  __m128i tmp9 = _mm_slli_epi32(lo, 1);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp9 = _mm_slli_epi32(lo, 2);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp9 = _mm_slli_epi32(lo, 7);
-  lo = _mm_xor_si128(lo, tmp9);
-  tmp7 = _mm_srli_si128(lo, 12);
-  lo = _mm_slli_si128(lo, 4);
-  hi = _mm_xor_si128(hi, lo);
-  hi = _mm_xor_si128(hi, tmp7);
-
-  return hi;
+  return _mm_xor_si128(hi, lo);
 }
 
 /* === Interleaved AES+GHASH macros for 8-block pipeline ===
@@ -605,6 +608,8 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
 
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
+  h = fio___ghash_h_times_x(
+      h); /* pre-multiply H by x for Linux kernel reduction */
 
   /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
   if (len >= 128 || adlen >= 128)
@@ -1011,6 +1016,8 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
 
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
+  h = fio___ghash_h_times_x(
+      h); /* pre-multiply H by x for Linux kernel reduction */
 
   /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
   if (len >= 128 || adlen >= 128)
@@ -1439,6 +1446,8 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
 
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
+  h = fio___ghash_h_times_x(
+      h); /* pre-multiply H by x for Linux kernel reduction */
 
   /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
   if (len >= 128 || adlen >= 128)
@@ -1682,6 +1691,8 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
 
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
   h = fio___bswap128(h);
+  h = fio___ghash_h_times_x(
+      h); /* pre-multiply H by x for Linux kernel reduction */
 
   /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
   if (len >= 128 || adlen >= 128)
