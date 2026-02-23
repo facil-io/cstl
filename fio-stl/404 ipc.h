@@ -1598,17 +1598,25 @@ FIO_SFUNC void fio___ipc_cluster_udp_start(uint16_t port) {
   }
   /* Enable broadcast */
   {
-#if FIO_OS_WIN
-    char enabled = 1;
-#else
     int enabled = 1;
-#endif
-    setsockopt(fd_udp, SOL_SOCKET, SO_BROADCAST, &enabled, sizeof(enabled));
+    fio_sock_setsockopt(fd_udp,
+                        SOL_SOCKET,
+                        SO_BROADCAST,
+                        &enabled,
+                        sizeof(enabled));
     enabled = 1;
-    setsockopt(fd_udp, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
+    fio_sock_setsockopt(fd_udp,
+                        SOL_SOCKET,
+                        SO_REUSEADDR,
+                        &enabled,
+                        sizeof(enabled));
 #ifdef SO_REUSEPORT
     enabled = 1;
-    setsockopt(fd_udp, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(enabled));
+    fio_sock_setsockopt(fd_udp,
+                        SOL_SOCKET,
+                        SO_REUSEPORT,
+                        &enabled,
+                        sizeof(enabled));
 #endif
   }
   /* Attach to IO reactor with port as udata */
