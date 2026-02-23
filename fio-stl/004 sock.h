@@ -124,6 +124,47 @@ FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
                   WSAGetLastError());
   return fd;
 }
+/* *****************************************************************************
+Portable wrappers for bind / connect / listen / setsockopt.
+
+These mirror fio_sock_write / fio_sock_read / fio_sock_close etc. and
+encapsulate the Winsock2 type coercions (addrlen int, optval char*, optlen int)
+that differ from POSIX. fio_socket_i is typedef'd to the correct OS type
+(SOCKET on Windows, int on POSIX), so no fd cast is needed at the call site.
+***************************************************************************** */
+
+/** Portable bind. Calls Winsock2 bind on Windows, POSIX bind on POSIX. */
+FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
+                            const struct sockaddr *addr,
+                            socklen_t addrlen) {
+  return bind(fd, addr, (int)addrlen);
+}
+
+/** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
+ */
+FIO_IFUNC int fio_sock_connect(fio_socket_i fd,
+                               const struct sockaddr *addr,
+                               socklen_t addrlen) {
+  return connect(fd, addr, (int)addrlen);
+}
+
+/** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
+FIO_IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
+  return listen(fd, backlog);
+}
+
+/** Portable setsockopt.
+ * optval is (const char *) on Windows and (const void *) on POSIX;
+ * optlen is int on Windows and socklen_t on POSIX.
+ * Both coercions are applied internally; callers pass any pointer type. */
+FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
+                                  int level,
+                                  int optname,
+                                  const void *optval,
+                                  socklen_t optlen) {
+  return setsockopt(fd, level, optname, (const char *)optval, (int)optlen);
+}
+
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   fio___wsa_start();
@@ -243,6 +284,35 @@ FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i fd) {
 FIO_IFUNC int fio_sock_close(fio_socket_i fd) { return close(fd); }
 /** Acts as POSIX accept. Use this macro for portability with WinSock2. */
 #define fio_sock_accept(fd, addr, addrlen) accept(fd, addr, addrlen)
+
+/** Portable bind. POSIX version. */
+FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
+                            const struct sockaddr *addr,
+                            socklen_t addrlen) {
+  return bind(fd, addr, addrlen);
+}
+
+/** Portable connect. POSIX version. */
+FIO_IFUNC int fio_sock_connect(fio_socket_i fd,
+                               const struct sockaddr *addr,
+                               socklen_t addrlen) {
+  return connect(fd, addr, addrlen);
+}
+
+/** Portable listen. POSIX version. */
+FIO_IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
+  return listen(fd, backlog);
+}
+
+/** Portable setsockopt. POSIX version. */
+FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
+                                  int level,
+                                  int optname,
+                                  const void *optval,
+                                  socklen_t optlen) {
+  return setsockopt(fd, level, optname, optval, optlen);
+}
+
 /** Creates a connected socket pair using POSIX socketpair(). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   return socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
@@ -250,59 +320,6 @@ FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif
-
-/* *****************************************************************************
-Portable wrappers for bind / connect / listen / setsockopt.
-
-These mirror fio_sock_write / fio_sock_read / fio_sock_close etc. and
-encapsulate the Winsock2 type coercions (addrlen int, optval char*, optlen int)
-that differ from POSIX. fio_socket_i is typedef'd to the correct OS type
-(SOCKET on Windows, int on POSIX), so no fd cast is needed at the call site.
-***************************************************************************** */
-
-/** Portable bind. Calls Winsock2 bind on Windows, POSIX bind on POSIX. */
-FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
-                            const struct sockaddr *addr,
-                            socklen_t addrlen) {
-#if FIO_OS_WIN
-  return bind(fd, addr, (int)addrlen);
-#else
-  return bind(fd, addr, addrlen);
-#endif
-}
-
-/** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
- */
-FIO_IFUNC int fio_sock_connect(fio_socket_i fd,
-                               const struct sockaddr *addr,
-                               socklen_t addrlen) {
-#if FIO_OS_WIN
-  return connect(fd, addr, (int)addrlen);
-#else
-  return connect(fd, addr, addrlen);
-#endif
-}
-
-/** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
-FIO_IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
-  return listen(fd, backlog);
-}
-
-/** Portable setsockopt.
- * optval is (const char *) on Windows and (const void *) on POSIX;
- * optlen is int on Windows and socklen_t on POSIX.
- * Both coercions are applied internally; callers pass any pointer type. */
-FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
-                                  int level,
-                                  int optname,
-                                  const void *optval,
-                                  socklen_t optlen) {
-#if FIO_OS_WIN
-  return setsockopt(fd, level, optname, (const char *)optval, (int)optlen);
-#else
-  return setsockopt(fd, level, optname, optval, optlen);
-#endif
-}
 
 /* Set to 1 if in need to debug unexpected IO closures. */
 #if defined(DEBUG) && 0
