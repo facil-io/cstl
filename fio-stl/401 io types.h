@@ -765,7 +765,9 @@ do_nothing:
     } u = {.fn = args.dealloc};
     fio___io_defer_no_wakeup(fio___io_write2_dealloc_task, u.ptr, args.buf);
     if ((unsigned)(args.fd + 1) > 1)
-      close((int)args.fd);
+      close(
+          (int)args.fd); /* CRT file fd (from open/fio_filename_tmp) — never
+                            a socket; CRT close() is correct on all platforms */
   }
 }
 

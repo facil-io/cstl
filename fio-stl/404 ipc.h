@@ -1464,12 +1464,12 @@ FIO_SFUNC void fio___ipc_udp_broadcast_hello(fio_io_s *io) {
   FIO_LOG_DDEBUG2("(%d) IPC/RPC sending UDP discovery broadcast on port %u",
                   fio_io_pid(),
                   (unsigned)port);
-  sendto(fio_io_fd(io),
-         (const char *)&msg,
-         sizeof(msg),
-         0,
-         (struct sockaddr *)&addr,
-         sizeof(addr));
+  fio_sock_sendto(fio_io_fd(io),
+                  &msg,
+                  sizeof(msg),
+                  0,
+                  (struct sockaddr *)&addr,
+                  sizeof(addr));
 }
 
 /** Periodic task to send UDP discovery broadcasts */
@@ -1513,12 +1513,12 @@ FIO_SFUNC void fio___ipc_udp_on_data(fio_io_s *io) {
   ssize_t len;
   uint16_t port = (uint16_t)(uintptr_t)fio_io_udata(io);
 
-  while ((len = recvfrom(fio_io_fd(io),
-                         (char *)&buf,
-                         sizeof(buf),
-                         0,
-                         from,
-                         &from_len)) > 0) {
+  while ((len = fio_sock_recvfrom(fio_io_fd(io),
+                                  &buf,
+                                  sizeof(buf),
+                                  0,
+                                  from,
+                                  &from_len)) > 0) {
     /* Validate message size */
     if (len != sizeof(fio___ipc_udp_discovery_s)) {
       FIO_LOG_SECURITY("(%d) IPC/RPC UDP received invalid packet (%zd bytes)",

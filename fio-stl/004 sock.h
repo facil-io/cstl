@@ -44,6 +44,14 @@ typedef SOCKET fio_socket_i;
 #define fio_sock_read(fd, buf, len) recv((fd), (buf), (len), 0)
 /** Acts as POSIX close. Use this macro for portability with WinSock2. */
 #define fio_sock_close(fd) closesocket(fd)
+/** Acts as POSIX sendto. Use this macro for portability with WinSock2.
+ * Casts buf to (const char *) — required by Winsock2; harmless on POSIX. */
+#define fio_sock_sendto(fd, buf, len, flags, addr, addrlen)                    \
+  sendto((fd), (const char *)(buf), (len), (flags), (addr), (addrlen))
+/** Acts as POSIX recvfrom. Use this macro for portability with WinSock2.
+ * Casts buf to (char *) — required by Winsock2; harmless on POSIX. */
+#define fio_sock_recvfrom(fd, buf, len, flags, addr, addrlen_ptr)              \
+  recvfrom((fd), (char *)(buf), (len), (flags), (addr), (addrlen_ptr))
 /** Accepts a new connection, returning a native socket handle. */
 FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
                                        struct sockaddr *addr,
@@ -173,9 +181,17 @@ typedef int fio_socket_i;
 #define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
 /** Acts as POSIX write. Use this macro for portability with WinSock2. */
-#define fio_sock_write(fd, data, len)      write((fd), (data), (len))
+#define fio_sock_write(fd, data, len) write((fd), (data), (len))
 /** Acts as POSIX read. Use this macro for portability with WinSock2. */
-#define fio_sock_read(fd, buf, len)        read((fd), (buf), (len))
+#define fio_sock_read(fd, buf, len)   read((fd), (buf), (len))
+/** Acts as POSIX sendto. Use this macro for portability with WinSock2.
+ * Casts buf to (const char *) — required by Winsock2; harmless on POSIX. */
+#define fio_sock_sendto(fd, buf, len, flags, addr, addrlen)                    \
+  sendto((fd), (const char *)(buf), (len), (flags), (addr), (addrlen))
+/** Acts as POSIX recvfrom. Use this macro for portability with WinSock2.
+ * Casts buf to (char *) — required by Winsock2; harmless on POSIX. */
+#define fio_sock_recvfrom(fd, buf, len, flags, addr, addrlen_ptr)              \
+  recvfrom((fd), (char *)(buf), (len), (flags), (addr), (addrlen_ptr))
 /** Acts as POSIX dup. Sets O_CLOEXEC on the new fd. */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i fd) {
   fio_socket_i r = dup(fd);
