@@ -731,8 +731,15 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
       continue;
     }
     if (fio_sock_bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
+#if FIO_OS_WIN
+      FIO_LOG_ERROR("(fio_sock_open_local) bind failed for %s:%s (WSA %d)",
+                    host,
+                    port,
+                    WSAGetLastError());
+#else
       FIO_LOG_DEBUG("Failed attempt to bind socket to address %s",
                     strerror(errno));
+#endif
       fio_sock_close(fd);
       fd = FIO_SOCKET_INVALID;
       continue;
@@ -740,7 +747,13 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     break;
   }
   if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+    FIO_LOG_ERROR(
+        "(fio_sock_open_local) failed to open listening socket (WSA %d)",
+        WSAGetLastError());
+#else
     FIO_LOG_DEBUG("socket binding/creation error %s", strerror(errno));
+#endif
   }
   return fd;
 }
@@ -784,8 +797,7 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 #endif
     ) {
 #if FIO_OS_WIN
-      FIO_LOG_DEBUG("Couldn't connect client socket to remote address %s (%d)",
-                    strerror(errno),
+      FIO_LOG_ERROR("(fio_sock_open_remote) connect failed (WSA %d)",
                     WSAGetLastError());
 #else
       FIO_LOG_DEBUG("Couldn't connect client socket to remote address %s",
@@ -798,7 +810,12 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
     break;
   }
   if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+    FIO_LOG_ERROR("(fio_sock_open_remote) failed to connect socket (WSA %d)",
+                  WSAGetLastError());
+#else
     FIO_LOG_DEBUG("socket connection/creation error %s", strerror(errno));
+#endif
   }
   return fd;
 }
