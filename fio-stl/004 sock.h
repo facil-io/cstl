@@ -54,6 +54,21 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
   return c;
 }
 #define accept fio_sock_accept
+/**
+ * Lazily initializes WinSock2. Idempotent — safe to call multiple times.
+ * Must be called before any Winsock API (socket, WSADuplicateSocket, etc.).
+ */
+FIO_IFUNC void fio___wsa_start(void) {
+  static uint8_t fio___wsa_initialized = 0;
+  if (fio___wsa_initialized)
+    return;
+  fio___wsa_initialized = 1;
+  static WSADATA fio___wsa_data;
+  int e = WSAStartup(MAKEWORD(2, 2), &fio___wsa_data);
+  if (e)
+    FIO_LOG_ERROR("(fio___wsa_start) WSAStartup failed (error %d)", e);
+}
+
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
  * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
@@ -65,6 +80,7 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * implementations (notably MinGW) when the flags conflict.
  */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
+  fio___wsa_start();
   WSAPROTOCOL_INFO info;
   if (WSADuplicateSocket((SOCKET)original, GetCurrentProcessId(), &info)) {
     FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
@@ -542,13 +558,17 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 
 /** Creates a new network socket and binds it to a local address. */
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
+#if FIO_OS_WIN
+  fio___wsa_start();
+#endif
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-#if FIO_OS_WIN
-    /* On MinGW, socket() may return a CRT fd (small int) rather than a true
-     * Winsock SOCKET. Convert it immediately so WSADuplicateSocket and
-     * WSAPoll always receive a real SOCKET handle. */
+#if FIO_OS_WIN && 0
+    /* TODO: investigate if MinGW socket() returns a CRT fd or a real SOCKET.
+     * The small integer value (e.g. 3) may simply be how Windows represents
+     * low-numbered SOCKETs internally (limited to 24 bits historically).
+     * Disabled until confirmed necessary. */
     if (FIO_SOCK_FD_ISVALID(fd)) {
       HANDLE h = (HANDLE)_get_osfhandle((int)fd);
       if (h != INVALID_HANDLE_VALUE)
@@ -557,6 +577,10 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+#if FIO_OS_WIN
+      FIO_LOG_DEBUG("(fio_sock_open_local) socket() failed (WSA error %d)",
+                    WSAGetLastError());
+#endif
       fd = FIO_SOCKET_INVALID;
       continue;
     }
@@ -595,7 +619,8 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-#if FIO_OS_WIN
+#if FIO_OS_WIN && 0
+    /* TODO: same investigation note as fio_sock_open_local. Disabled. */
     if (FIO_SOCK_FD_ISVALID(fd)) {
       HANDLE h = (HANDLE)_get_osfhandle((int)fd);
       if (h != INVALID_HANDLE_VALUE)

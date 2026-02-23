@@ -223,6 +223,8 @@ SFUNC void fio_state_callback_clear(fio_state_event_type_e e) {
   fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
 }
 
+FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_); /* fwd decl */
+
 FIO_SFUNC void fio_state_callback_force___task(void *fn_p, void *arg) {
   union {
     void *p;
@@ -257,7 +259,16 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   size_t ary_capa = 0;
   size_t len = 0;
   if (e == FIO_CALL_ON_INITIALIZE) {
-    fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER);
+    /* FIO_CALL_ON_INITIALIZE should run only once */
+    if (fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER))
+      return;
+    /* State initialization that should run only once */
+    for (size_t i = 0; i < FIO_CALL_NEVER; ++i)
+      if (i != FIO_CALL_ON_INITIALIZE)
+        fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + i, 32);
+    fio_state_callback_add(FIO_CALL_AFTER_EXIT,
+                           fio___state_cleanup_task_at_exit,
+                           NULL);
   }
 
   /* copy task queue while holding the lock */
@@ -323,12 +334,7 @@ FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
 FIO_CONSTRUCTOR(fio___state_constructor) {
   FIO_LOG_DEBUG2("fio_state_callback maps are now active.");
   /* reserve memory for future use */
-  for (size_t i = 0; i < FIO_CALL_NEVER; ++i)
-    fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + i, 32);
   fio_state_callback_force(FIO_CALL_ON_INITIALIZE);
-  fio_state_callback_add(FIO_CALL_AFTER_EXIT,
-                         fio___state_cleanup_task_at_exit,
-                         NULL);
 }
 
 FIO_DESTRUCTOR(fio___state_at_exit_hook) {
