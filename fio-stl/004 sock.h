@@ -56,21 +56,51 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
 #define accept fio_sock_accept
 /** Acts as POSIX dup. Use this for portability with WinSock2.
  *
- * Uses DuplicateHandle for same-process socket duplication.
+ * On MinGW, socket() from <sys/socket.h> may return a CRT fd (small integer)
+ * rather than a raw Winsock SOCKET kernel handle. DuplicateHandle requires a
+ * real kernel handle, so we resolve the underlying HANDLE via _get_osfhandle
+ * when the value looks like a CRT fd, then wrap the duplicate back into a CRT
+ * fd with _open_osfhandle so the rest of the code stays consistent.
  *
- * MSDN (WSADuplicateSocket): "The special WSAPROTOCOL_INFO structure can only
- * be used once by the target process." and the WSASocket dwFlags must exactly
- * match the original socket's overlapped flag — mismatches cause WSAEINVAL.
- * DuplicateHandle avoids all of this: it duplicates any kernel object handle
- * (including Winsock SOCKETs) within the same process without restrictions.
- * This is the same approach used by libuv for same-process socket duplication.
- * See:
- * https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle
+ * When the value is already a raw SOCKET/HANDLE (large pointer-sized value),
+ * we use DuplicateHandle directly — this is the same approach as libuv.
  */
 FIO_IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
+  HANDLE src_handle;
   HANDLE dup_handle;
+#if FIO_HAVE_UNIX_TOOLS /* MinGW/Cygwin: socket() may return a CRT fd */
+  HANDLE h = (HANDLE)_get_osfhandle((int)original);
+  if (h != INVALID_HANDLE_VALUE) {
+    /* original is a CRT fd — duplicate the underlying handle */
+    src_handle = h;
+    if (!DuplicateHandle(GetCurrentProcess(),
+                         src_handle,
+                         GetCurrentProcess(),
+                         &dup_handle,
+                         0,
+                         FALSE,
+                         DUPLICATE_SAME_ACCESS)) {
+      FIO_LOG_ERROR("(fio_sock_dup) DuplicateHandle(CRT) failed (error %lu)",
+                    (unsigned long)GetLastError());
+      return FIO_SOCKET_INVALID;
+    }
+    /* wrap duplicate back into a CRT fd */
+    fio_socket_i r = (fio_socket_i)_open_osfhandle((intptr_t)dup_handle, 0);
+    if (r == -1) {
+      FIO_LOG_ERROR("(fio_sock_dup) _open_osfhandle failed (error %lu)",
+                    (unsigned long)GetLastError());
+      CloseHandle(dup_handle);
+      return FIO_SOCKET_INVALID;
+    }
+    return r;
+  }
+  /* fall through: original is already a raw SOCKET/HANDLE */
+  src_handle = (HANDLE)(UINT_PTR)original;
+#else
+  src_handle = (HANDLE)(UINT_PTR)original;
+#endif
   if (!DuplicateHandle(GetCurrentProcess(),
-                       (HANDLE)(UINT_PTR)original,
+                       src_handle,
                        GetCurrentProcess(),
                        &dup_handle,
                        0,
