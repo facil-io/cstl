@@ -84,15 +84,19 @@ FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * Lazily initializes WinSock2. Idempotent — safe to call multiple times.
  * Must be called before any Winsock API (socket, WSADuplicateSocket, etc.).
  */
-FIO_IFUNC void fio___wsa_start(void) {
+FIO_IFUNC int fio___wsa_start(void) {
   static uint8_t fio___wsa_initialized = 0;
   if (fio___wsa_initialized)
-    return;
-  fio___wsa_initialized = 1;
+    return 0;
   static WSADATA fio___wsa_data;
   int e = WSAStartup(MAKEWORD(2, 2), &fio___wsa_data);
-  if (e)
+  if (e) {
     FIO_LOG_ERROR("(fio___wsa_start) WSAStartup failed (error %d)", e);
+    return -1;
+  }
+  fio___wsa_initialized = 1;
+  atexit((void (*)(void))WSACleanup);
+  return 0;
 }
 
 /** Acts as POSIX dup. Use this for portability with WinSock2.
@@ -167,7 +171,8 @@ FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
 
 /** Creates a connected socket pair via loopback TCP (Windows socketpair). */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
-  fio___wsa_start();
+  if (fio___wsa_start())
+    return -1;
   fio_socket_i listener = INVALID_SOCKET;
   fio_socket_i writer = INVALID_SOCKET;
   fio_socket_i reader = INVALID_SOCKET;
@@ -691,10 +696,22 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 /** Creates a new network socket and binds it to a local address. */
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 #if FIO_OS_WIN
-  fio___wsa_start();
+  if (fio___wsa_start())
+    return FIO_SOCKET_INVALID;
 #endif
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
+    /* Resolve a printable "host:port" string for this candidate (best-effort).
+     */
+    char host[64] = "<unknown>";
+    char port[16] = "";
+    getnameinfo(p->ai_addr,
+                (socklen_t)p->ai_addrlen,
+                host,
+                sizeof(host),
+                port,
+                sizeof(port),
+                NI_NUMERICHOST | NI_NUMERICSERV);
 #if FIO_OS_WIN
     /* WSASocket always returns a true Winsock SOCKET — no CRT fd shim. */
     fd = (fio_socket_i)WSASocket(p->ai_family,
@@ -707,10 +724,17 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
-      FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+      FIO_LOG_ERROR(
+          "(fio_sock_open_local) socket creation failed for %s:%s - %s",
+          host,
+          port,
+          strerror(errno));
 #if FIO_OS_WIN
-      FIO_LOG_DEBUG("(fio_sock_open_local) WSASocket failed (WSA error %d)",
-                    WSAGetLastError());
+      FIO_LOG_ERROR(
+          "(fio_sock_open_local) WSASocket failed for %s:%s (WSA error %d)",
+          host,
+          port,
+          WSAGetLastError());
 #endif
       fd = FIO_SOCKET_INVALID;
       continue;
@@ -724,15 +748,28 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
                           sizeof(optval));
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
-      FIO_LOG_DEBUG("Couldn't set socket to non-blocking mode %s",
+      FIO_LOG_ERROR("(fio_sock_open_local) failed to set non-blocking mode for "
+                    "%s:%s - %s",
+                    host,
+                    port,
                     strerror(errno));
       fio_sock_close(fd);
       fd = FIO_SOCKET_INVALID;
       continue;
     }
     if (fio_sock_bind(fd, p->ai_addr, p->ai_addrlen) == -1) {
-      FIO_LOG_DEBUG("Failed attempt to bind socket to address %s",
+#if FIO_OS_WIN
+      FIO_LOG_ERROR(
+          "(fio_sock_open_local) bind failed for %s:%s (WSA error %d)",
+          host,
+          port,
+          WSAGetLastError());
+#else
+      FIO_LOG_ERROR("(fio_sock_open_local) bind failed for %s:%s - %s",
+                    host,
+                    port,
                     strerror(errno));
+#endif
       fio_sock_close(fd);
       fd = FIO_SOCKET_INVALID;
       continue;
@@ -740,7 +777,14 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     break;
   }
   if (!FIO_SOCK_FD_ISVALID(fd)) {
-    FIO_LOG_DEBUG("socket binding/creation error %s", strerror(errno));
+#if FIO_OS_WIN
+    FIO_LOG_ERROR(
+        "(fio_sock_open_local) failed to open listening socket (WSA error %d)",
+        WSAGetLastError());
+#else
+    FIO_LOG_ERROR("(fio_sock_open_local) failed to open listening socket - %s",
+                  strerror(errno));
+#endif
   }
   return fd;
 }
@@ -748,7 +792,8 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 /** Creates a new network socket and connects it to a remote address. */
 SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
 #if FIO_OS_WIN
-  fio___wsa_start();
+  if (fio___wsa_start())
+    return FIO_SOCKET_INVALID;
 #endif
   fio_socket_i fd = FIO_SOCKET_INVALID;
   for (struct addrinfo *p = addr; p != NULL; p = p->ai_next) {
@@ -798,7 +843,13 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
     break;
   }
   if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+    FIO_LOG_DEBUG("socket connection/creation error %s (WSA error %d)",
+                  strerror(errno),
+                  WSAGetLastError());
+#else
     FIO_LOG_DEBUG("socket connection/creation error %s", strerror(errno));
+#endif
   }
   return fd;
 }
@@ -895,7 +946,8 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
 #endif
 #if FIO_OS_WIN
   /* WSASocket always returns a true Winsock SOCKET — no CRT fd shim. */
-  fio___wsa_start();
+  if (fio___wsa_start())
+    return FIO_SOCKET_INVALID;
   fio_socket_i fd =
       (fio_socket_i)WSASocket(AF_UNIX,
                               (flags & FIO_SOCK_UDP) ? SOCK_DGRAM : SOCK_STREAM,
@@ -1011,24 +1063,6 @@ finish:
     r.buf = NULL;
   return r;
 }
-
-/* *****************************************************************************
-WinSock initialization
-***************************************************************************** */
-#if FIO_OS_WIN
-static WSADATA fio___sock_useless_windows_data;
-FIO_CONSTRUCTOR(fio___sock_win_init) {
-  static uint8_t flag = 0;
-  if (!flag) {
-    flag |= 1;
-    if (WSAStartup(MAKEWORD(2, 2), &fio___sock_useless_windows_data)) {
-      FIO_LOG_FATAL("WinSock2 unavailable.");
-      exit(-1);
-    }
-    atexit((void (*)(void))(WSACleanup));
-  }
-}
-#endif /* FIO_OS_WIN / FIO_OS_POSIX */
 
 /* *****************************************************************************
 FIO_SOCK - cleanup
