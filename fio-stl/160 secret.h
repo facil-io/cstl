@@ -126,8 +126,8 @@ SFUNC fio_u512 fio_secret_at(fio_u512 *secret) {
 FIO_CONSTRUCTOR(fio___secret_constructor) {
   char *str = NULL;
   size_t len = 0;
-  if ((str = getenv("SECRET"))) {
-    const char *secret_length = getenv("SECRET_LENGTH");
+  if ((str = fio_sys_env("SECRET"))) {
+    const char *secret_length = fio_sys_env("SECRET_LENGTH");
     len = secret_length ? fio_atol((char **)&secret_length) : 0;
     if (!len)
       len = strlen(str);

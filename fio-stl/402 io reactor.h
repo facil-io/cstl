@@ -703,7 +703,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
     return (fio_io_listener_s *)l;
   }
   if (!args.url) {
-    args.url = getenv("ADDRESS");
+    args.url = fio_sys_env("ADDRESS");
     if (!args.url)
       args.url = "0.0.0.0";
   }
@@ -722,8 +722,8 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
   if (!url.port.buf && !url.scheme.buf) {
     static size_t port_counter = 3000;
     size_t port = fio_atomic_add(&port_counter, 1);
-    if (port == 3000 && getenv("PORT")) {
-      char *port_env = getenv("PORT");
+    if (port == 3000 && fio_sys_env("PORT")) {
+      char *port_env = fio_sys_env("PORT");
       port = fio_atol(&port_env);
       if (!port | (port > 65535ULL))
         port = 3000;

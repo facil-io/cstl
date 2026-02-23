@@ -566,7 +566,7 @@ FIO_SFUNC int fio___openssl_each_trust(struct fio_io_tls_each_s *e,
       return -1;
     }
   } else { /* trust system's default trust store */
-    const char *path = getenv(X509_get_default_cert_dir_env());
+    const char *path = fio_sys_env(X509_get_default_cert_dir_env());
     if (!path)
       path = X509_get_default_cert_dir();
     if (path) {

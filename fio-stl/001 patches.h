@@ -180,10 +180,6 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #define unlink _unlink
 #endif /* unlink */
 
-#if !FIO_HAVE_UNIX_TOOLS || defined(__MINGW32__)
-#define pipe(fds) _pipe(fds, 65536, _O_BINARY)
-#endif
-
 /* *****************************************************************************
 Patched function Implementation
 ***************************************************************************** */
@@ -271,6 +267,65 @@ Patches for POSIX
 ***************************************************************************** */
 #elif FIO_OS_POSIX /* POSIX patches */
 #endif
+
+/* *****************************************************************************
+Portable environment variable access
+
+Use fio_sys_env / fio_sys_env_set instead of getenv / setenv everywhere,
+to avoid Ruby win32.h macro conflicts (Ruby redefines getenv → rb_w32_ugetenv)
+and Windows wchar_t environment issues.
+
+On Windows: uses GetEnvironmentVariableA / SetEnvironmentVariableA (Win32 API),
+which cannot be redefined by Ruby or any other macro system.
+
+On POSIX: thin inline wrappers around getenv / setenv with identical signatures.
+***************************************************************************** */
+
+#if FIO_OS_WIN
+
+/** Portable getenv: returns the value of environment variable `name`, or NULL.
+ * Uses GetEnvironmentVariableA on Windows to bypass Ruby win32.h macro
+ * redefinition of getenv. The returned pointer is valid until the next call. */
+FIO_IFUNC char *fio_sys_env(const char *name) {
+  static char fio___sys_env_buf[4096];
+  DWORD r = (GetEnvironmentVariableA)(name,
+                                      fio___sys_env_buf,
+                                      (DWORD)sizeof(fio___sys_env_buf));
+  if (!r)
+    return NULL;
+  return fio___sys_env_buf;
+}
+
+/** Portable setenv: sets environment variable `name` to `value`.
+ * If `overwrite` is zero and the variable already exists, does nothing.
+ * Returns 0 on success, -1 on failure. */
+FIO_IFUNC int fio_sys_env_set(const char *name,
+                              const char *value,
+                              int overwrite) {
+  if (!overwrite) {
+    DWORD r = (GetEnvironmentVariableA)(name, NULL, 0);
+    if (r || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+      return 0; /* already set — leave it alone */
+  }
+  return (SetEnvironmentVariableA)(name, value) ? 0 : -1;
+}
+
+#else /* POSIX */
+
+/** Portable getenv: returns the value of environment variable `name`, or NULL.
+ * Thin wrapper around getenv for API uniformity across platforms. */
+FIO_IFUNC char *fio_sys_env(const char *name) { return getenv(name); }
+
+/** Portable setenv: sets environment variable `name` to `value`.
+ * If `overwrite` is zero and the variable already exists, does nothing.
+ * Returns 0 on success, -1 on failure. */
+FIO_IFUNC int fio_sys_env_set(const char *name,
+                              const char *value,
+                              int overwrite) {
+  return setenv(name, value, overwrite);
+}
+
+#endif /* FIO_OS_WIN / POSIX */
 
 /* *****************************************************************************
 Done with Patches

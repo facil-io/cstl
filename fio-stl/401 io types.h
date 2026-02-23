@@ -1314,7 +1314,7 @@ SFUNC fio_io_tls_s *fio_io_tls_from_url(fio_io_tls_s *tls, fio_url_s url) {
 
       if (tls_info.key.buf ==
           tls_info.cert.buf) { /* assume value is prefix / folder */
-        if ((tmp = getenv(cert_tmp.buf))) {
+        if ((tmp = fio_sys_env(cert_tmp.buf))) {
           fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
           if (buf_tmp.len < 124) {
             key_tmp.len = cert_tmp.len = buf_tmp.len;
@@ -1325,7 +1325,7 @@ SFUNC fio_io_tls_s *fio_io_tls_from_url(fio_io_tls_s *tls, fio_url_s url) {
         fio_string_write(&key_tmp, NULL, "key.pem", 7);
         fio_string_write(&cert_tmp, NULL, "cert.pem", 8);
       } else {
-        if ((tmp = getenv(key_tmp.buf))) {
+        if ((tmp = fio_sys_env(key_tmp.buf))) {
           fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
           if (buf_tmp.len < 124) {
             key_tmp.len = buf_tmp.len;
@@ -1333,7 +1333,7 @@ SFUNC fio_io_tls_s *fio_io_tls_from_url(fio_io_tls_s *tls, fio_url_s url) {
           }
         }
 
-        if ((tmp = getenv(cert_tmp.buf))) {
+        if ((tmp = fio_sys_env(cert_tmp.buf))) {
           fio_buf_info_s buf_tmp = FIO_BUF_INFO1((char *)tmp);
           if (buf_tmp.len < 124) {
             cert_tmp.len = buf_tmp.len;

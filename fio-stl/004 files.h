@@ -339,7 +339,7 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
 
   if (filename[0] == '~' &&
       (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/')) {
-    char *home = getenv("HOME");
+    char *home = fio_sys_env("HOME");
     if (home) {
       size_t filename_len = FIO_STRLEN(filename);
       size_t home_len = FIO_STRLEN(home);
@@ -418,7 +418,7 @@ SFUNC int fio_filename_tmp(void) {
   const char *tmp = NULL;
   const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
   for (size_t i = 0; !tmp && options[i]; ++i) {
-    tmp = getenv(options[i]);
+    tmp = fio_sys_env(options[i]);
   }
 #if defined(P_tmpdir)
   if (!tmp && sizeof(P_tmpdir) < 464 && sizeof(P_tmpdir) > 0) {

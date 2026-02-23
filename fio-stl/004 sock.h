@@ -38,9 +38,10 @@ typedef SOCKET fio_socket_i;
 #ifndef FIO_SOCK_FD_ISVALID
 #define FIO_SOCK_FD_ISVALID(fd) ((fio_socket_i)(fd) != FIO_SOCKET_INVALID)
 #endif
-/* Ruby's win32.h redefines Winsock functions to rb_w32_* wrappers (fake Ruby
- * fds). We use real Winsock SOCKETs (via WSASocket), so we must bypass them.
- * These #undefs restore the real Winsock function names. */
+/* Ruby's win32.h redefines standard socket function names to rb_w32_* wrappers
+ * (e.g. #define bind(s,a,l) rb_w32_bind(s,a,l)). We use real Winsock SOCKETs
+ * (via WSASocket), so we must restore the real Winsock function names.
+ * Include this STL header BEFORE ruby.h to ensure these undefs take effect. */
 #ifdef bind
 #undef bind
 #endif
@@ -94,14 +95,14 @@ typedef SOCKET fio_socket_i;
  * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
  */
 FIO_IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
-  return (ssize_t)send(fd, (const char *)buf, (int)len, 0);
+  return (ssize_t)(send)(fd, (const char *)buf, (int)len, 0);
 }
 /** Acts as POSIX read. Use this function for portability with WinSock2. */
 FIO_IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len) {
-  return (ssize_t)recv(fd, (char *)buf, (int)len, 0);
+  return (ssize_t)(recv)(fd, (char *)buf, (int)len, 0);
 }
 /** Acts as POSIX close. Use this function for portability with WinSock2. */
-FIO_IFUNC int fio_sock_close(fio_socket_i fd) { return closesocket(fd); }
+FIO_IFUNC int fio_sock_close(fio_socket_i fd) { return (closesocket)(fd); }
 /** Acts as POSIX sendto. Use this function for portability with WinSock2. */
 FIO_IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
                                   const void *buf,
@@ -109,7 +110,8 @@ FIO_IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
                                   int flags,
                                   const struct sockaddr *addr,
                                   socklen_t addrlen) {
-  return (ssize_t)sendto(fd, (const char *)buf, (int)len, flags, addr, addrlen);
+  return (
+      ssize_t)(sendto)(fd, (const char *)buf, (int)len, flags, addr, addrlen);
 }
 /** Acts as POSIX recvfrom. Use this function for portability with WinSock2. */
 FIO_IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
@@ -118,14 +120,18 @@ FIO_IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
                                     int flags,
                                     struct sockaddr *addr,
                                     socklen_t *addrlen) {
-  return (
-      ssize_t)recvfrom(fd, (char *)buf, (int)len, flags, addr, (int *)addrlen);
+  return (ssize_t)(recvfrom)(fd,
+                             (char *)buf,
+                             (int)len,
+                             flags,
+                             addr,
+                             (int *)addrlen);
 }
 /** Accepts a new connection, returning a native socket handle. */
 FIO_IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
                                        struct sockaddr *addr,
                                        int *addrlen) {
-  fio_socket_i c = accept(s, addr, addrlen);
+  fio_socket_i c = (accept)(s, addr, addrlen);
   if (c == INVALID_SOCKET)
     return FIO_SOCKET_INVALID;
   return c;
@@ -172,7 +178,7 @@ that differ from POSIX. fio_socket_i is typedef'd to the correct OS type
 FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
                             const struct sockaddr *addr,
                             socklen_t addrlen) {
-  return bind(fd, addr, (int)addrlen);
+  return (bind)(fd, addr, (int)addrlen);
 }
 
 /** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
@@ -180,12 +186,12 @@ FIO_IFUNC int fio_sock_bind(fio_socket_i fd,
 FIO_IFUNC int fio_sock_connect(fio_socket_i fd,
                                const struct sockaddr *addr,
                                socklen_t addrlen) {
-  return connect(fd, addr, (int)addrlen);
+  return (connect)(fd, addr, (int)addrlen);
 }
 
 /** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
 FIO_IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
-  return listen(fd, backlog);
+  return (listen)(fd, backlog);
 }
 
 /** Portable setsockopt.
@@ -197,10 +203,12 @@ FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
                                   int optname,
                                   const void *optval,
                                   socklen_t optlen) {
-  return setsockopt(fd, level, optname, (const char *)optval, (int)optlen);
+  return (setsockopt)(fd, level, optname, (const char *)optval, (int)optlen);
 }
 
-/** Creates a connected socket pair via loopback TCP (Windows socketpair). */
+/** Creates a connected socket pair via loopback TCP (Windows socketpair).
+ * On Windows, fio_sock_pipe() delegates here since _pipe() returns CRT fds
+ * (not Winsock SOCKETs) and is incompatible with WSAPoll-based I/O. */
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   fio_socket_i listener = INVALID_SOCKET;
   fio_socket_i writer = INVALID_SOCKET;
@@ -224,7 +232,8 @@ FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   if (fio_sock_bind(listener, (struct sockaddr *)&addr, addrlen) ==
       SOCKET_ERROR)
     goto fail;
-  if (getsockname(listener, (struct sockaddr *)&addr, &addrlen) == SOCKET_ERROR)
+  if ((getsockname)(listener, (struct sockaddr *)&addr, &addrlen) ==
+      SOCKET_ERROR)
     goto fail;
   if (fio_sock_listen(listener, 1) == SOCKET_ERROR)
     goto fail;
@@ -239,21 +248,28 @@ FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   if (fio_sock_connect(writer, (struct sockaddr *)&addr, addrlen) ==
       SOCKET_ERROR)
     goto fail;
-  reader = accept(listener, NULL, NULL);
+  reader = (accept)(listener, NULL, NULL);
   if (reader == INVALID_SOCKET)
     goto fail;
-  closesocket(listener);
+  (closesocket)(listener);
   fds[0] = reader; /* read end */
   fds[1] = writer; /* write end */
   return 0;
 fail:
   if (listener != INVALID_SOCKET)
-    closesocket(listener);
+    (closesocket)(listener);
   if (reader != INVALID_SOCKET)
-    closesocket(reader);
+    (closesocket)(reader);
   if (writer != INVALID_SOCKET)
-    closesocket(writer);
+    (closesocket)(writer);
   return -1;
+}
+
+/** Creates a pipe-like connected pair. On Windows, delegates to
+ * fio_sock_socketpair() (loopback TCP) since _pipe() returns CRT fds that are
+ * incompatible with Winsock / WSAPoll-based I/O. */
+FIO_IFUNC int fio_sock_pipe(fio_socket_i fds[2]) {
+  return fio_sock_socketpair(fds);
 }
 
 #elif FIO_HAVE_UNIX_TOOLS
@@ -351,6 +367,11 @@ FIO_IFUNC int fio_sock_setsockopt(fio_socket_i fd,
 FIO_IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   return socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
 }
+
+/** Creates a POSIX pipe. fds[0] = read end, fds[1] = write end.
+ * On Windows, fio_sock_pipe() is defined in the FIO_OS_WIN block above and
+ * delegates to fio_sock_socketpair() (loopback TCP). */
+FIO_IFUNC int fio_sock_pipe(fio_socket_i fds[2]) { return pipe(fds); }
 #else
 #error FIO_SOCK requires a supported OS (Windows / POSIX).
 #endif

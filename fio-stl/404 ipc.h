@@ -494,7 +494,7 @@ SFUNC int fio_ipc_url_set(const char *url) {
     const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
     const char *tmpdir = NULL;
     for (size_t i = 0; !tmpdir && options[i]; ++i) {
-      tmpdir = getenv(options[i]);
+      tmpdir = fio_sys_env(options[i]);
     }
     size_t tmplen = tmpdir ? FIO_STRLEN(tmpdir) : 0;
     if (!tmpdir || tmplen > 128) {

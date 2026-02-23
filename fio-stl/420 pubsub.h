@@ -1875,14 +1875,14 @@ SFUNC const fio_pubsub_history_s *fio_pubsub_history_cache(size_t size_limit) {
   if (!size_limit && !FIO___PUBSUB_POSTOFFICE.cache.limit) {
     size_t mul = 1024 * 1024;
     int64_t tmp;
-    char *env = getenv("WEBSITE_MEMORY_LIMIT_MB");
+    char *env = fio_sys_env("WEBSITE_MEMORY_LIMIT_MB");
     if (!env) {
       mul = 1024;
-      env = getenv("WEBSITE_MEMORY_LIMIT_KB");
+      env = fio_sys_env("WEBSITE_MEMORY_LIMIT_KB");
     }
     if (!env) {
       mul = 1;
-      env = getenv("WEBSITE_MEMORY_LIMIT");
+      env = fio_sys_env("WEBSITE_MEMORY_LIMIT");
     }
     if (env && (tmp = fio_atol(&env)) > 0)
       size_limit = mul * tmp;
