@@ -281,7 +281,6 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
 
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
-  // pthread_get_qos_class_np(pthread_t  _Nonnull __pthread, qos_class_t * _Nullable __qos_class, int * _Nullable __relative_priority)
   qos_class_t qos = QOS_CLASS_DEFAULT;
   int rel = 0;
   switch(pr) {
@@ -427,7 +426,8 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
 #else /* defined(fork) && defined(WEXITSTATUS) */
 
 FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
-  FIO_LOG_ERROR("`fork` not implemented, cannot spawn child processes.");
+  FIO_LOG_FATAL(
+      "`fork` unsupported on this platform - cannot spawn worker processes.");
   return (fio_thread_pid_t)-1;
 }
 
@@ -564,9 +564,9 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
     return -1;
   }
 
-  if (pid > 0 || pid == -1) {
+  if (pid < -1 || pid == 0) {
     FIO_LOG_ERROR(
-        "fio_thread_waitpid not implemented for pid < -1 || pid ==0.");
+        "fio_thread_waitpid not implemented for pid < -1 || pid == 0.");
     return -1;
   }
 

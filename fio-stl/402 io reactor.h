@@ -173,6 +173,9 @@ FIO_SFUNC void fio___io_work(int is_worker) {
     fio_state_callback_force(FIO_CALL_ON_START);
   }
   fio___io_wakeup_init();
+  FIO_LOG_DEBUG2("(%d) IO reactor work loop starting (is_worker: %d).",
+                 fio_io_pid(),
+                 is_worker);
 
   fio_queue_push(&FIO___IO.queue, fio___io_work_task);
   FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING);
