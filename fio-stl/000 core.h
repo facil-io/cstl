@@ -309,7 +309,9 @@ OS Specific includes and Macros
 
 #define fio_getpid _getpid
 
-#define FIO___KILL_SELF() TerminateProcess(GetCurrentProcess(), 1)
+#ifndef FIO_KILL_SELF
+#define FIO_KILL_SELF() GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
+#endif
 
 #if defined(__MINGW32__)
 /* Mingw supports */
@@ -341,8 +343,10 @@ typedef SSIZE_T ssize_t;
 #undef FIO_OS_POSIX
 #define FIO_HAVE_UNIX_TOOLS 1
 #define FIO_OS_POSIX        1
-#define FIO___KILL_SELF()   kill(0, SIGINT)
 #define fio_getpid          getpid
+#ifndef FIO_KILL_SELF
+#define FIO_KILL_SELF() kill(0, SIGINT)
+#endif
 
 #else
 #define FIO_HAVE_UNIX_TOOLS 0
@@ -1145,7 +1149,7 @@ Logging Primitives (no-op)
 #define FIO_LOG_DSECURITY(...)        FIO_LOG_SECURITY(__VA_ARGS__)
 #define FIO_LOG_DWARNING(...)         FIO_LOG_WARNING(__VA_ARGS__)
 #define FIO_LOG_DINFO(...)            FIO_LOG_INFO(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() FIO___KILL_SELF();
+#define FIO_ASSERT___PERFORM_SIGNAL() FIO_KILL_SELF();
 #else
 #define FIO_LOG_DDEBUG(...)    ((void)(0))
 #define FIO_LOG_DDEBUG2(...)   ((void)(0))
@@ -1161,13 +1165,16 @@ Logging Primitives (no-op)
 #define FIO_LOG_LENGTH_LIMIT 1024
 #endif
 
+#ifndef FIO_LOG2STDERR
 /** Prints to STDERR, attempting to use only stack allocated memory. */
 #define FIO_LOG2STDERR(...)
+#endif
 
 /* *****************************************************************************
 Assertions
 ***************************************************************************** */
 
+#ifndef FIO_ASSERT
 /* Asserts a condition is true, or kills the application using SIGINT. */
 #define FIO_ASSERT(cond, ...)                                                  \
   do {                                                                         \
@@ -1175,16 +1182,17 @@ Assertions
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
       FIO_ASSERT___PERFORM_SIGNAL();                                           \
-      abort();                                                                 \
+      exit(-1);                                                                \
     }                                                                          \
   } while (0)
+#endif
 
 #ifndef FIO_ASSERT_ALLOC
 /** Tests for an allocation failure. The behavior can be overridden. */
 #define FIO_ASSERT_ALLOC(ptr) FIO_ASSERT((ptr), "memory allocation failed.")
 #endif
 
-#ifdef DEBUG
+#if defined(DEBUG) && !defined(FIO_ASSERT_DEBUG)
 /** If `DEBUG` is defined, raises SIGINT if assertion fails, otherwise NOOP. */
 #define FIO_ASSERT_DEBUG(cond, ...)                                            \
   do {                                                                         \

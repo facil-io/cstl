@@ -35,6 +35,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
     (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOG___H
 
+#ifndef FIO_STDERR_FILE
+#define FIO_STDERR_FILE stderr
+#endif
 #undef FIO_LOG2STDERR
 
 FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
@@ -59,13 +62,13 @@ FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
     }
     tmp___log[len___log++] = '\n';
     tmp___log[len___log] = '0';
-    fwrite(tmp___log, 1, len___log, stderr);
+    fwrite(tmp___log, 1, len___log, FIO_STDERR_FILE);
     return;
   }
   fwrite("\x1B[1mERROR:\x1B[0m log output error (can't write).\n",
          1,
          47,
-         stderr);
+         FIO_STDERR_FILE);
 #undef FIO_LOG____LENGTH_ON_STACK
 #undef FIO_LOG____LENGTH_BORDER
 }
