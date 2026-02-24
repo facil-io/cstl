@@ -962,9 +962,8 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   tag = _mm_xor_si128(tag, len_blk);
   tag = fio___ghash_mult_pclmul(tag, h);
 
-  /* Final tag: convert bit-reflected GHASH result back to big-endian */
+  /* Final tag: GHASH result is already in GCM (big-endian) format — no bswap */
   __m128i s = fio___aesni_encrypt128(j0, rk);
-  tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
   /* Clear sensitive data */
@@ -1380,9 +1379,8 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   tag = _mm_xor_si128(tag, len_blk);
   tag = fio___ghash_mult_pclmul(tag, h);
 
-  /* Final tag: convert bit-reflected GHASH result back to big-endian */
+  /* Final tag: GHASH result is already in GCM (big-endian) format — no bswap */
   __m128i s = fio___aesni_encrypt256(j0, rk);
-  tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
   /* Clear sensitive data */
@@ -1513,9 +1511,8 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   tag = _mm_xor_si128(tag, len_blk);
   tag = fio___ghash_mult_pclmul(tag, h);
 
-  /* Compute and verify tag: convert bit-reflected GHASH result to big-endian */
+  /* Compute and verify tag: GHASH result is already in GCM format — no bswap */
   __m128i s = fio___aesni_encrypt128(j0, rk);
-  tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];
   _mm_storeu_si128((__m128i *)computed_mac, tag);
@@ -1749,9 +1746,8 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   tag = _mm_xor_si128(tag, len_blk);
   tag = fio___ghash_mult_pclmul(tag, h);
 
-  /* Compute and verify tag: convert bit-reflected GHASH result to big-endian */
+  /* Compute and verify tag: GHASH result is already in GCM format — no bswap */
   __m128i s = fio___aesni_encrypt256(j0, rk);
-  tag = fio___bswap128(tag);
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];
   _mm_storeu_si128((__m128i *)computed_mac, tag);
