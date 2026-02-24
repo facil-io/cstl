@@ -300,6 +300,7 @@ OS Specific includes and Macros
 #include <io.h>
 #include <process.h>
 #include <processthreadsapi.h>
+#include <stdio.h>
 #include <sys/types.h>
 
 #include <sys/stat.h>
