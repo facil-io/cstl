@@ -309,24 +309,29 @@ FIO_IFUNC __m128i fio___bswap128(__m128i x) {
 /**
  * Multiply H by x in byte-reversed (bswap'd) GCM form.
  *
- * In bswap'd form, bit 0 of the low 64-bit lane holds the x^127 coefficient.
- * Multiplying by x = right-shift the 128-bit value by 1, then XOR the
- * reduction polynomial (0xE1 << 120) if the original x^127 coefficient was 1.
+ * In bswap'd (non-reflected) form, bit 127 of the high 64-bit lane holds the
+ * x^127 coefficient (the highest-degree coefficient).
+ * Multiplying by x = left-shift the full 128-bit value by 1, then XOR the
+ * reduction polynomial (x^7+x^2+x+1 = 0x87 at byte 0) if the original
+ * x^127 coefficient was 1.
  *
- * Required so that fio___ghash_mult_pclmul (Linux kernel reduction) produces
- * the correct GF(2^128) product for byte-reversed operands.
+ * Required so that fio___ghash_mult_pclmul (Linux kernel BLE reduction)
+ * produces the correct GF(2^128) product for byte-reversed operands.
  */
 FIO_IFUNC __m128i fio___ghash_h_times_x(__m128i h) {
-  /* Extract x^127 coefficient: bit 0 of the low 64-bit lane */
-  __m128i carry = _mm_and_si128(h, _mm_set_epi32(0, 0, 0, 1));
+  /* Extract x^127 coefficient: bit 63 of the high 64-bit lane */
+  __m128i carry = _mm_and_si128(_mm_srli_epi64(_mm_srli_si128(h, 8), 63),
+                                _mm_set_epi32(0, 0, 0, 1));
   /* Build all-ones mask in all 32-bit lanes if carry != 0 */
   __m128i mask =
       _mm_shuffle_epi32(_mm_sub_epi32(_mm_setzero_si128(), carry), 0x00);
-  /* Right-shift h by 1 bit across the full 128-bit value */
-  __m128i shifted = _mm_or_si128(_mm_srli_epi64(h, 1),
-                                 _mm_slli_epi64(_mm_srli_si128(h, 8), 63));
-  /* XOR reduction polynomial (0xE1 << 120) if carry was set */
-  __m128i poly = _mm_and_si128(_mm_set_epi32(0xE1000000, 0, 0, 0), mask);
+  /* Left-shift h by 1 bit across the full 128-bit value:
+   * new_lo = h.lo << 1
+   * new_hi = (h.hi << 1) | (h.lo >> 63) */
+  __m128i shifted = _mm_or_si128(_mm_slli_epi64(h, 1),
+                                 _mm_srli_epi64(_mm_slli_si128(h, 8), 63));
+  /* XOR reduction polynomial (x^7+x^2+x+1 = 0x87 at byte 0) if carry set */
+  __m128i poly = _mm_and_si128(_mm_set_epi32(0, 0, 0, 0x87), mask);
   return _mm_xor_si128(shifted, poly);
 }
 
@@ -551,33 +556,29 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
   } while (0)
 
 /* Finalize GHASH: Karatsuba combination + reduction.
- * Produces the final 128-bit GHASH result from accumulated partial products. */
+ * Produces the final 128-bit GHASH result from accumulated partial products.
+ * Uses the Linux kernel BLE reduction for byte-reversed (bswap'd) data,
+ * matching fio___ghash_mult_pclmul. */
 #define FIO___X86_GHASH_FINAL(result, gh_lo, gh_hi, gh_m1, gh_m2)              \
   do {                                                                         \
     __m128i gf_mid_ = _mm_xor_si128(gh_m1, gh_m2);                             \
     gh_lo = _mm_xor_si128(gh_lo, _mm_slli_si128(gf_mid_, 8));                  \
     gh_hi = _mm_xor_si128(gh_hi, _mm_srli_si128(gf_mid_, 8));                  \
-    /* Reduction modulo x^128 + x^7 + x^2 + x + 1 */                           \
-    __m128i gf6_ = _mm_srli_epi32(gh_lo, 31);                                  \
-    __m128i gf7_ = _mm_srli_epi32(gh_lo, 30);                                  \
-    __m128i gf8_ = _mm_srli_epi32(gh_lo, 25);                                  \
-    gf6_ = _mm_xor_si128(gf6_, gf7_);                                          \
-    gf6_ = _mm_xor_si128(gf6_, gf8_);                                          \
-    gf7_ = _mm_shuffle_epi32(gf6_, 0x93);                                      \
-    gf6_ = _mm_and_si128(gf7_, _mm_set_epi32(0, ~0, ~0, ~0));                  \
-    gf7_ = _mm_and_si128(gf7_, _mm_set_epi32(~0, 0, 0, 0));                    \
-    gh_lo = _mm_xor_si128(gh_lo, gf6_);                                        \
+    /* BLE reduction modulo x^128 + x^7 + x^2 + x + 1 (Linux kernel algo) */   \
+    __m128i gf6_ = gh_lo;                                                      \
+    gf6_ = _mm_xor_si128(_mm_slli_epi64(gf6_, 1), gh_lo);                      \
+    gf6_ = _mm_xor_si128(_mm_slli_epi64(gf6_, 5), gh_lo);                      \
+    gf6_ = _mm_slli_epi64(gf6_, 57);                                           \
+    __m128i gf7_ = _mm_slli_si128(gf6_, 8);                                    \
+    gf6_ = _mm_srli_si128(gf6_, 8);                                            \
+    gh_lo = _mm_xor_si128(gh_lo, gf7_);                                        \
+    gh_hi = _mm_xor_si128(gh_hi, gf6_);                                        \
+    gf7_ = gh_lo;                                                              \
+    gf7_ = _mm_xor_si128(_mm_srli_epi64(gf7_, 5), gh_lo);                      \
+    gf7_ = _mm_xor_si128(_mm_srli_epi64(gf7_, 1), gh_lo);                      \
+    gf7_ = _mm_srli_epi64(gf7_, 1);                                            \
     gh_hi = _mm_xor_si128(gh_hi, gf7_);                                        \
-    __m128i gf9_ = _mm_slli_epi32(gh_lo, 1);                                   \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf9_ = _mm_slli_epi32(gh_lo, 2);                                           \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf9_ = _mm_slli_epi32(gh_lo, 7);                                           \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf7_ = _mm_srli_si128(gh_lo, 12);                                          \
-    gh_lo = _mm_slli_si128(gh_lo, 4);                                          \
-    gh_hi = _mm_xor_si128(gh_hi, gh_lo);                                       \
-    result = _mm_xor_si128(gh_hi, gf7_);                                       \
+    result = _mm_xor_si128(gh_hi, gh_lo);                                      \
   } while (0)
 
 /* Increment counter (last 32 bits, big-endian) */
