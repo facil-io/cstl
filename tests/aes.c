@@ -56,954 +56,866 @@ FIO_SFUNC void print_hex(const char *label, const uint8_t *data, size_t len) {
 }
 
 int main(void) {
-#if FIO___HAS_X86_AES_INTRIN
-#elif FIO___HAS_ARM_AES_INTRIN
-#else
-#endif
+  fprintf(stderr, "AES GHASH impl: %s\n", FIO___AES_GHASH_IMPL);
 
   /* **************************************************************************
    * Test AES-128-GCM (NIST SP 800-38D test vectors)
    * *************************************************************************/
-  {
-    /* Test Case 1: Empty plaintext, no AAD */
-    {
-      uint8_t key[16] = {0};
-      uint8_t nonce[12] = {0};
-      uint8_t expected_tag[16] = {0x58,
-                                  0xe2,
-                                  0xfc,
-                                  0xce,
-                                  0xfa,
-                                  0x7e,
-                                  0x30,
-                                  0x61,
-                                  0x36,
-                                  0x7f,
-                                  0x1d,
-                                  0x57,
-                                  0xa4,
-                                  0xe7,
-                                  0x45,
-                                  0x5a};
-      uint8_t mac[16];
-
-      fio_aes128_gcm_enc(mac, NULL, 0, NULL, 0, key, nonce);
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-128-GCM Test Case 1 failed (empty plaintext)");
-    }
-
-    /* Test Case 2: 16-byte plaintext, no AAD */
-    {
-      uint8_t key[16] = {0};
-      uint8_t nonce[12] = {0};
-      uint8_t plaintext[16] = {0};
-      uint8_t expected_ct[16] = {0x03,
-                                 0x88,
-                                 0xda,
-                                 0xce,
-                                 0x60,
-                                 0xb6,
-                                 0xa3,
-                                 0x92,
-                                 0xf3,
-                                 0x28,
-                                 0xc2,
-                                 0xb9,
-                                 0x71,
-                                 0xb2,
-                                 0xfe,
-                                 0x78};
-      uint8_t expected_tag[16] = {0xab,
-                                  0x6e,
-                                  0x47,
-                                  0xd4,
-                                  0x2c,
-                                  0xec,
-                                  0x13,
-                                  0xbd,
-                                  0xf5,
-                                  0x3a,
-                                  0x67,
-                                  0xb2,
-                                  0x12,
-                                  0x57,
-                                  0xbd,
-                                  0xdf};
-      uint8_t buffer[16];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 16);
-      fio_aes128_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 16),
-                 "AES-128-GCM Test Case 2 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-128-GCM Test Case 2 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes128_gcm_dec(mac, buffer, 16, NULL, 0, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 2 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 16),
-                 "AES-128-GCM Test Case 2 decryption failed");
-    }
-
-    /* Test Case 3: 64-byte plaintext, no AAD */
-    {
-      uint8_t key[16] = {0xfe,
-                         0xff,
-                         0xe9,
-                         0x92,
-                         0x86,
-                         0x65,
-                         0x73,
-                         0x1c,
-                         0x6d,
-                         0x6a,
-                         0x8f,
-                         0x94,
-                         0x67,
-                         0x30,
-                         0x83,
-                         0x08};
-      uint8_t nonce[12] = {0xca,
-                           0xfe,
-                           0xba,
-                           0xbe,
-                           0xfa,
-                           0xce,
-                           0xdb,
-                           0xad,
-                           0xde,
-                           0xca,
-                           0xf8,
-                           0x88};
-      uint8_t plaintext[64] = {
-          0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09,
-          0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34,
-          0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c,
-          0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24,
-          0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6,
-          0x57, 0xba, 0x63, 0x7b, 0x39, 0x1a, 0xaf, 0xd2, 0x55};
-      uint8_t expected_ct[64] = {
-          0x42, 0x83, 0x1e, 0xc2, 0x21, 0x77, 0x74, 0x24, 0x4b, 0x72, 0x21,
-          0xb7, 0x84, 0xd0, 0xd4, 0x9c, 0xe3, 0xaa, 0x21, 0x2f, 0x2c, 0x02,
-          0xa4, 0xe0, 0x35, 0xc1, 0x7e, 0x23, 0x29, 0xac, 0xa1, 0x2e, 0x21,
-          0xd5, 0x14, 0xb2, 0x54, 0x66, 0x93, 0x1c, 0x7d, 0x8f, 0x6a, 0x5a,
-          0xac, 0x84, 0xaa, 0x05, 0x1b, 0xa3, 0x0b, 0x39, 0x6a, 0x0a, 0xac,
-          0x97, 0x3d, 0x58, 0xe0, 0x91, 0x47, 0x3f, 0x59, 0x85};
-      uint8_t expected_tag[16] = {0x4d,
-                                  0x5c,
-                                  0x2a,
-                                  0xf3,
-                                  0x27,
-                                  0xcd,
-                                  0x64,
-                                  0xa6,
-                                  0x2c,
-                                  0xf3,
-                                  0x5a,
-                                  0xbd,
-                                  0x2b,
-                                  0xa6,
-                                  0xfa,
-                                  0xb4};
-      uint8_t buffer[64];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 64);
-      fio_aes128_gcm_enc(mac, buffer, 64, NULL, 0, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 64),
-                 "AES-128-GCM Test Case 3 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-128-GCM Test Case 3 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes128_gcm_dec(mac, buffer, 64, NULL, 0, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 3 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 64),
-                 "AES-128-GCM Test Case 3 decryption failed");
-    }
-
-    /* Test Case 4: 60-byte plaintext with 20-byte AAD */
-    {
-      uint8_t key[16] = {0xfe,
-                         0xff,
-                         0xe9,
-                         0x92,
-                         0x86,
-                         0x65,
-                         0x73,
-                         0x1c,
-                         0x6d,
-                         0x6a,
-                         0x8f,
-                         0x94,
-                         0x67,
-                         0x30,
-                         0x83,
-                         0x08};
-      uint8_t nonce[12] = {0xca,
-                           0xfe,
-                           0xba,
-                           0xbe,
-                           0xfa,
-                           0xce,
-                           0xdb,
-                           0xad,
-                           0xde,
-                           0xca,
-                           0xf8,
-                           0x88};
-      uint8_t aad[20] = {0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe,
-                         0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad,
-                         0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2};
-      uint8_t plaintext[60] = {
-          0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59,
-          0x09, 0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53,
-          0x15, 0x34, 0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31,
-          0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53,
-          0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a,
-          0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39};
-      uint8_t expected_ct[60] = {
-          0x42, 0x83, 0x1e, 0xc2, 0x21, 0x77, 0x74, 0x24, 0x4b, 0x72,
-          0x21, 0xb7, 0x84, 0xd0, 0xd4, 0x9c, 0xe3, 0xaa, 0x21, 0x2f,
-          0x2c, 0x02, 0xa4, 0xe0, 0x35, 0xc1, 0x7e, 0x23, 0x29, 0xac,
-          0xa1, 0x2e, 0x21, 0xd5, 0x14, 0xb2, 0x54, 0x66, 0x93, 0x1c,
-          0x7d, 0x8f, 0x6a, 0x5a, 0xac, 0x84, 0xaa, 0x05, 0x1b, 0xa3,
-          0x0b, 0x39, 0x6a, 0x0a, 0xac, 0x97, 0x3d, 0x58, 0xe0, 0x91};
-      uint8_t expected_tag[16] = {0x5b,
-                                  0xc9,
-                                  0x4f,
-                                  0xbc,
-                                  0x32,
-                                  0x21,
-                                  0xa5,
-                                  0xdb,
-                                  0x94,
-                                  0xfa,
-                                  0xe9,
-                                  0x5a,
-                                  0xe7,
-                                  0x12,
-                                  0x1a,
-                                  0x47};
-      uint8_t buffer[60];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 60);
-      fio_aes128_gcm_enc(mac, buffer, 60, aad, 20, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 60),
-                 "AES-128-GCM Test Case 4 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-128-GCM Test Case 4 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes128_gcm_dec(mac, buffer, 60, aad, 20, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 4 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 60),
-                 "AES-128-GCM Test Case 4 decryption failed");
-    }
-  }
-
-  /* **************************************************************************
-   * Test AES-256-GCM (NIST SP 800-38D test vectors)
-   * *************************************************************************/
-  {
-    /* Test Case 13: Empty plaintext, no AAD (AES-256) */
-    {
-      uint8_t key[32] = {0};
-      uint8_t nonce[12] = {0};
-      uint8_t expected_tag[16] = {0x53,
-                                  0x0f,
-                                  0x8a,
-                                  0xfb,
-                                  0xc7,
-                                  0x45,
-                                  0x36,
-                                  0xb9,
-                                  0xa9,
-                                  0x63,
-                                  0xb4,
-                                  0xf1,
-                                  0xc4,
-                                  0xcb,
-                                  0x73,
-                                  0x8b};
-      uint8_t mac[16];
-
-      fio_aes256_gcm_enc(mac, NULL, 0, NULL, 0, key, nonce);
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-256-GCM Test Case 13 failed (empty plaintext)");
-    }
-
-    /* Test Case 14: 16-byte plaintext, no AAD (AES-256) */
-    {
-      uint8_t key[32] = {0};
-      uint8_t nonce[12] = {0};
-      uint8_t plaintext[16] = {0};
-      uint8_t expected_ct[16] = {0xce,
-                                 0xa7,
-                                 0x40,
-                                 0x3d,
-                                 0x4d,
-                                 0x60,
-                                 0x6b,
-                                 0x6e,
-                                 0x07,
-                                 0x4e,
-                                 0xc5,
-                                 0xd3,
-                                 0xba,
-                                 0xf3,
-                                 0x9d,
-                                 0x18};
-      uint8_t expected_tag[16] = {0xd0,
-                                  0xd1,
-                                  0xc8,
-                                  0xa7,
-                                  0x99,
-                                  0x99,
-                                  0x6b,
-                                  0xf0,
-                                  0x26,
-                                  0x5b,
-                                  0x98,
-                                  0xb5,
-                                  0xd4,
-                                  0x8a,
-                                  0xb9,
-                                  0x19};
-      uint8_t buffer[16];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 16);
-      fio_aes256_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 16),
-                 "AES-256-GCM Test Case 14 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-256-GCM Test Case 14 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes256_gcm_dec(mac, buffer, 16, NULL, 0, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 14 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 16),
-                 "AES-256-GCM Test Case 14 decryption failed");
-    }
-
-    /* Test Case 15: 64-byte plaintext, no AAD (AES-256) */
-    {
-      uint8_t key[32] = {0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
-                         0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08,
-                         0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
-                         0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08};
-      uint8_t nonce[12] = {0xca,
-                           0xfe,
-                           0xba,
-                           0xbe,
-                           0xfa,
-                           0xce,
-                           0xdb,
-                           0xad,
-                           0xde,
-                           0xca,
-                           0xf8,
-                           0x88};
-      uint8_t plaintext[64] = {
-          0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09,
-          0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34,
-          0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c,
-          0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24,
-          0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6,
-          0x57, 0xba, 0x63, 0x7b, 0x39, 0x1a, 0xaf, 0xd2, 0x55};
-      uint8_t expected_ct[64] = {
-          0x52, 0x2d, 0xc1, 0xf0, 0x99, 0x56, 0x7d, 0x07, 0xf4, 0x7f, 0x37,
-          0xa3, 0x2a, 0x84, 0x42, 0x7d, 0x64, 0x3a, 0x8c, 0xdc, 0xbf, 0xe5,
-          0xc0, 0xc9, 0x75, 0x98, 0xa2, 0xbd, 0x25, 0x55, 0xd1, 0xaa, 0x8c,
-          0xb0, 0x8e, 0x48, 0x59, 0x0d, 0xbb, 0x3d, 0xa7, 0xb0, 0x8b, 0x10,
-          0x56, 0x82, 0x88, 0x38, 0xc5, 0xf6, 0x1e, 0x63, 0x93, 0xba, 0x7a,
-          0x0a, 0xbc, 0xc9, 0xf6, 0x62, 0x89, 0x80, 0x15, 0xad};
-      uint8_t expected_tag[16] = {0xb0,
-                                  0x94,
-                                  0xda,
-                                  0xc5,
-                                  0xd9,
-                                  0x34,
-                                  0x71,
-                                  0xbd,
-                                  0xec,
-                                  0x1a,
-                                  0x50,
-                                  0x22,
-                                  0x70,
-                                  0xe3,
-                                  0xcc,
-                                  0x6c};
-      uint8_t buffer[64];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 64);
-      fio_aes256_gcm_enc(mac, buffer, 64, NULL, 0, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 64),
-                 "AES-256-GCM Test Case 15 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-256-GCM Test Case 15 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes256_gcm_dec(mac, buffer, 64, NULL, 0, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 15 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 64),
-                 "AES-256-GCM Test Case 15 decryption failed");
-    }
-
-    /* Test Case 16: 60-byte plaintext with 20-byte AAD (AES-256) */
-    {
-      uint8_t key[32] = {0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
-                         0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08,
-                         0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
-                         0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08};
-      uint8_t nonce[12] = {0xca,
-                           0xfe,
-                           0xba,
-                           0xbe,
-                           0xfa,
-                           0xce,
-                           0xdb,
-                           0xad,
-                           0xde,
-                           0xca,
-                           0xf8,
-                           0x88};
-      uint8_t aad[20] = {0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe,
-                         0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad,
-                         0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2};
-      uint8_t plaintext[60] = {
-          0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59,
-          0x09, 0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53,
-          0x15, 0x34, 0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31,
-          0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53,
-          0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a,
-          0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39};
-      uint8_t expected_ct[60] = {
-          0x52, 0x2d, 0xc1, 0xf0, 0x99, 0x56, 0x7d, 0x07, 0xf4, 0x7f,
-          0x37, 0xa3, 0x2a, 0x84, 0x42, 0x7d, 0x64, 0x3a, 0x8c, 0xdc,
-          0xbf, 0xe5, 0xc0, 0xc9, 0x75, 0x98, 0xa2, 0xbd, 0x25, 0x55,
-          0xd1, 0xaa, 0x8c, 0xb0, 0x8e, 0x48, 0x59, 0x0d, 0xbb, 0x3d,
-          0xa7, 0xb0, 0x8b, 0x10, 0x56, 0x82, 0x88, 0x38, 0xc5, 0xf6,
-          0x1e, 0x63, 0x93, 0xba, 0x7a, 0x0a, 0xbc, 0xc9, 0xf6, 0x62};
-      uint8_t expected_tag[16] = {0x76,
-                                  0xfc,
-                                  0x6e,
-                                  0xce,
-                                  0x0f,
-                                  0x4e,
-                                  0x17,
-                                  0x68,
-                                  0xcd,
-                                  0xdf,
-                                  0x88,
-                                  0x53,
-                                  0xbb,
-                                  0x2d,
-                                  0x55,
-                                  0x1b};
-      uint8_t buffer[60];
-      uint8_t mac[16];
-
-      FIO_MEMCPY(buffer, plaintext, 60);
-      fio_aes256_gcm_enc(mac, buffer, 60, aad, 20, key, nonce);
-
-      FIO_ASSERT(!memcmp(buffer, expected_ct, 60),
-                 "AES-256-GCM Test Case 16 ciphertext failed");
-      FIO_ASSERT(!memcmp(mac, expected_tag, 16),
-                 "AES-256-GCM Test Case 16 tag failed");
-
-      /* Test decryption */
-      int ret = fio_aes256_gcm_dec(mac, buffer, 60, aad, 20, key, nonce);
-      FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 16 decryption auth failed");
-      FIO_ASSERT(!memcmp(buffer, plaintext, 60),
-                 "AES-256-GCM Test Case 16 decryption failed");
-    }
-  }
-
-  /* **************************************************************************
-   * Test authentication failure detection
-   * *************************************************************************/
-  {
-    uint8_t key[16] = {0};
-    uint8_t nonce[12] = {0};
-    uint8_t plaintext[16] = {0};
-    uint8_t buffer[16];
-    uint8_t mac[16];
-    uint8_t bad_mac[16];
-
-    FIO_MEMCPY(buffer, plaintext, 16);
-    fio_aes128_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
-
-    /* Corrupt the MAC */
-    FIO_MEMCPY(bad_mac, mac, 16);
-    bad_mac[0] ^= 0x01;
-
-    int ret = fio_aes128_gcm_dec(bad_mac, buffer, 16, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == -1,
-               "AES-GCM should detect authentication failure with bad MAC");
-  }
-
-  /* **************************************************************************
-   * Test roundtrip with random data
-   * *************************************************************************/
-  {
-    uint8_t key[32];
-    uint8_t nonce[12];
-    uint8_t aad[64];
-    uint8_t plaintext[256];
-    uint8_t buffer[256];
-    uint8_t mac[16];
-
-    /* Generate random test data */
-    fio_rand_bytes(key, 32);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(aad, 64);
-    fio_rand_bytes(plaintext, 256);
-
-    /* Test AES-128-GCM roundtrip */
-    FIO_MEMCPY(buffer, plaintext, 256);
-    fio_aes128_gcm_enc(mac, buffer, 256, aad, 64, key, nonce);
-    FIO_ASSERT(memcmp(buffer, plaintext, 256) != 0,
-               "AES-128-GCM ciphertext should differ from plaintext");
-
-    int ret = fio_aes128_gcm_dec(mac, buffer, 256, aad, 64, key, nonce);
-    FIO_ASSERT(ret == 0, "AES-128-GCM roundtrip decryption auth failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, 256),
-               "AES-128-GCM roundtrip decryption failed");
-
-    /* Test AES-256-GCM roundtrip */
-    FIO_MEMCPY(buffer, plaintext, 256);
-    fio_aes256_gcm_enc(mac, buffer, 256, aad, 64, key, nonce);
-    FIO_ASSERT(memcmp(buffer, plaintext, 256) != 0,
-               "AES-256-GCM ciphertext should differ from plaintext");
-
-    ret = fio_aes256_gcm_dec(mac, buffer, 256, aad, 64, key, nonce);
-    FIO_ASSERT(ret == 0, "AES-256-GCM roundtrip decryption auth failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, 256),
-               "AES-256-GCM roundtrip decryption failed");
-  }
-
-  /* **************************************************************************
-   * Test various message lengths
-   * *************************************************************************/
-  {
-    uint8_t key[16] = {0x00,
-                       0x01,
-                       0x02,
-                       0x03,
-                       0x04,
-                       0x05,
-                       0x06,
-                       0x07,
-                       0x08,
-                       0x09,
-                       0x0a,
-                       0x0b,
-                       0x0c,
-                       0x0d,
-                       0x0e,
-                       0x0f};
-    uint8_t nonce[12] = {0xca,
-                         0xfe,
-                         0xba,
-                         0xbe,
-                         0xfa,
-                         0xce,
-                         0xdb,
-                         0xad,
-                         0xde,
-                         0xca,
-                         0xf8,
-                         0x88};
-    uint8_t plaintext[300];
-    uint8_t buffer[300];
-    uint8_t mac[16];
-
-    fio_rand_bytes(plaintext, 300);
-
-    /* Test lengths: 0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129 */
-    size_t test_lengths[] = {0,
-                             1,
-                             15,
-                             16,
-                             17,
-                             31,
-                             32,
-                             33,
-                             63,
-                             64,
-                             65,
-                             127,
-                             128,
-                             129,
-                             255,
-                             256,
-                             300};
-    for (size_t i = 0; i < sizeof(test_lengths) / sizeof(test_lengths[0]);
-         ++i) {
-      size_t len = test_lengths[i];
-      FIO_MEMCPY(buffer, plaintext, len);
-      fio_aes128_gcm_enc(mac, buffer, len, NULL, 0, key, nonce);
-
-      int ret = fio_aes128_gcm_dec(mac, buffer, len, NULL, 0, key, nonce);
-      FIO_ASSERT(ret == 0,
-                 "AES-128-GCM roundtrip failed for length %zu (auth)",
-                 len);
-      FIO_ASSERT(!memcmp(buffer, plaintext, len),
-                 "AES-128-GCM roundtrip failed for length %zu (data)",
-                 len);
-    }
-  }
-  /* **************************************************************************
-   * Edge Case Tests for AES-GCM
-   * *************************************************************************/
-  /* Test: Single byte plaintext */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[1] = {0x42};
-    uint8_t buffer[1];
-    uint8_t mac[16];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    FIO_MEMCPY(buffer, plaintext, 1);
-
-    fio_aes128_gcm_enc(mac, buffer, 1, NULL, 0, key, nonce);
-    int ret = fio_aes128_gcm_dec(mac, buffer, 1, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "Single byte AES-128-GCM decryption failed");
-    FIO_ASSERT(buffer[0] == plaintext[0], "Single byte roundtrip failed");
-  }
-
-  /* Test: Plaintext one byte before block boundary (15 bytes) */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[15];
-    uint8_t buffer[15];
-    uint8_t mac[16];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 15);
-    FIO_MEMCPY(buffer, plaintext, 15);
-
-    fio_aes128_gcm_enc(mac, buffer, 15, NULL, 0, key, nonce);
-    int ret = fio_aes128_gcm_dec(mac, buffer, 15, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "15-byte decryption failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, 15), "15-byte roundtrip failed");
-  }
-
-  /* Test: Plaintext one byte after block boundary (17 bytes) */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[17];
-    uint8_t buffer[17];
-    uint8_t mac[16];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 17);
-    FIO_MEMCPY(buffer, plaintext, 17);
-
-    fio_aes128_gcm_enc(mac, buffer, 17, NULL, 0, key, nonce);
-    int ret = fio_aes128_gcm_dec(mac, buffer, 17, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "17-byte decryption failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, 17), "17-byte roundtrip failed");
-  }
-
-  /* Test: Both plaintext and AAD empty */
-  {
-    uint8_t key[16] = {0};
-    uint8_t nonce[12] = {0};
-    uint8_t mac1[16], mac2[16];
-
-    fio_aes128_gcm_enc(mac1, NULL, 0, NULL, 0, key, nonce);
-    fio_aes256_gcm_enc(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
-
-    /* MACs should not be all zeros */
-    int all_zero1 = 1, all_zero2 = 1;
-    for (int i = 0; i < 16; ++i) {
-      if (mac1[i] != 0)
-        all_zero1 = 0;
-      if (mac2[i] != 0)
-        all_zero2 = 0;
-    }
-    FIO_ASSERT(!all_zero1, "AES-128-GCM empty should produce non-zero MAC");
-    FIO_ASSERT(!all_zero2, "AES-256-GCM empty should produce non-zero MAC");
-
-    /* Decryption should succeed */
-    int ret1 = fio_aes128_gcm_dec(mac1, NULL, 0, NULL, 0, key, nonce);
-    int ret2 =
-        fio_aes256_gcm_dec(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
-    FIO_ASSERT(ret1 == 0, "AES-128-GCM empty decryption failed");
-    FIO_ASSERT(ret2 == 0, "AES-256-GCM empty decryption failed");
-  }
-
-  /* Test: AAD at various sizes */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
-    uint8_t aad[256];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    fio_rand_bytes(aad, 256);
-
-    size_t aad_sizes[] = {1, 15, 16, 17, 31, 32, 33, 256};
-    for (size_t i = 0; i < sizeof(aad_sizes) / sizeof(aad_sizes[0]); ++i) {
-      FIO_MEMCPY(buffer, plaintext, 32);
-      fio_aes128_gcm_enc(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
-      int ret =
-          fio_aes128_gcm_dec(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
-      FIO_ASSERT(ret == 0, "AAD size %zu decryption failed", aad_sizes[i]);
-      FIO_ASSERT(!memcmp(buffer, plaintext, 32),
-                 "AAD size %zu roundtrip failed",
-                 aad_sizes[i]);
-    }
-  }
-
-  /* Test: Tag verification failure (corrupted ciphertext) */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    FIO_MEMCPY(buffer, plaintext, 32);
-
-    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
-
-    /* Corrupt ciphertext */
-    buffer[0] ^= 0x01;
-
-    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
-    FIO_ASSERT(ret != 0, "Corrupted ciphertext should fail verification");
-  }
-
-  /* Test: Tag verification failure (corrupted AAD) */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
-    uint8_t aad[16];
-    uint8_t bad_aad[16];
-
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    fio_rand_bytes(aad, 16);
-    FIO_MEMCPY(bad_aad, aad, 16);
-    bad_aad[0] ^= 0x01;
-    FIO_MEMCPY(buffer, plaintext, 32);
-
-    fio_aes128_gcm_enc(mac, buffer, 32, aad, 16, key, nonce);
-
-    int ret = fio_aes128_gcm_dec(mac, buffer, 32, bad_aad, 16, key, nonce);
-    FIO_ASSERT(ret != 0, "Corrupted AAD should fail verification");
-  }
-
-  /* Test: Wrong key decryption */
-  {
-    uint8_t key1[16], key2[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
-
-    fio_rand_bytes(key1, 16);
-    fio_rand_bytes(key2, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    FIO_MEMCPY(buffer, plaintext, 32);
-
-    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key1, nonce);
-
-    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key2, nonce);
-    FIO_ASSERT(ret != 0, "Wrong key should fail verification");
-  }
-
-  /* Test: Large plaintext (16KB - TLS max) */
-  {
-    uint8_t key[32];
-    uint8_t nonce[12];
-    size_t len = 16384;
-    uint8_t *plaintext = (uint8_t *)malloc(len);
-    uint8_t *buffer = (uint8_t *)malloc(len);
-    uint8_t mac[16];
-
-    FIO_ASSERT(plaintext && buffer, "Memory allocation failed");
-
-    fio_rand_bytes(key, 32);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, len);
+  {/* Test Case 1: Empty plaintext, no AAD */
+   {uint8_t key[16] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t expected_tag[16] = {0x58,
+                              0xe2,
+                              0xfc,
+                              0xce,
+                              0xfa,
+                              0x7e,
+                              0x30,
+                              0x61,
+                              0x36,
+                              0x7f,
+                              0x1d,
+                              0x57,
+                              0xa4,
+                              0xe7,
+                              0x45,
+                              0x5a};
+  uint8_t mac[16];
+
+  fio_aes128_gcm_enc(mac, NULL, 0, NULL, 0, key, nonce);
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-128-GCM Test Case 1 failed (empty plaintext)");
+}
+
+/* Test Case 2: 16-byte plaintext, no AAD */
+{
+  uint8_t key[16] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t plaintext[16] = {0};
+  uint8_t expected_ct[16] = {0x03,
+                             0x88,
+                             0xda,
+                             0xce,
+                             0x60,
+                             0xb6,
+                             0xa3,
+                             0x92,
+                             0xf3,
+                             0x28,
+                             0xc2,
+                             0xb9,
+                             0x71,
+                             0xb2,
+                             0xfe,
+                             0x78};
+  uint8_t expected_tag[16] = {0xab,
+                              0x6e,
+                              0x47,
+                              0xd4,
+                              0x2c,
+                              0xec,
+                              0x13,
+                              0xbd,
+                              0xf5,
+                              0x3a,
+                              0x67,
+                              0xb2,
+                              0x12,
+                              0x57,
+                              0xbd,
+                              0xdf};
+  uint8_t buffer[16];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 16);
+  fio_aes128_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 16),
+             "AES-128-GCM Test Case 2 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-128-GCM Test Case 2 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes128_gcm_dec(mac, buffer, 16, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 2 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 16),
+             "AES-128-GCM Test Case 2 decryption failed");
+}
+
+/* Test Case 3: 64-byte plaintext, no AAD */
+{
+  uint8_t key[16] = {0xfe,
+                     0xff,
+                     0xe9,
+                     0x92,
+                     0x86,
+                     0x65,
+                     0x73,
+                     0x1c,
+                     0x6d,
+                     0x6a,
+                     0x8f,
+                     0x94,
+                     0x67,
+                     0x30,
+                     0x83,
+                     0x08};
+  uint8_t nonce[12] =
+      {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};
+  uint8_t plaintext[64] = {
+      0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09,
+      0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34,
+      0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c,
+      0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24,
+      0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6,
+      0x57, 0xba, 0x63, 0x7b, 0x39, 0x1a, 0xaf, 0xd2, 0x55};
+  uint8_t expected_ct[64] = {
+      0x42, 0x83, 0x1e, 0xc2, 0x21, 0x77, 0x74, 0x24, 0x4b, 0x72, 0x21,
+      0xb7, 0x84, 0xd0, 0xd4, 0x9c, 0xe3, 0xaa, 0x21, 0x2f, 0x2c, 0x02,
+      0xa4, 0xe0, 0x35, 0xc1, 0x7e, 0x23, 0x29, 0xac, 0xa1, 0x2e, 0x21,
+      0xd5, 0x14, 0xb2, 0x54, 0x66, 0x93, 0x1c, 0x7d, 0x8f, 0x6a, 0x5a,
+      0xac, 0x84, 0xaa, 0x05, 0x1b, 0xa3, 0x0b, 0x39, 0x6a, 0x0a, 0xac,
+      0x97, 0x3d, 0x58, 0xe0, 0x91, 0x47, 0x3f, 0x59, 0x85};
+  uint8_t expected_tag[16] = {0x4d,
+                              0x5c,
+                              0x2a,
+                              0xf3,
+                              0x27,
+                              0xcd,
+                              0x64,
+                              0xa6,
+                              0x2c,
+                              0xf3,
+                              0x5a,
+                              0xbd,
+                              0x2b,
+                              0xa6,
+                              0xfa,
+                              0xb4};
+  uint8_t buffer[64];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 64);
+  fio_aes128_gcm_enc(mac, buffer, 64, NULL, 0, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 64),
+             "AES-128-GCM Test Case 3 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-128-GCM Test Case 3 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes128_gcm_dec(mac, buffer, 64, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 3 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 64),
+             "AES-128-GCM Test Case 3 decryption failed");
+}
+
+/* Test Case 4: 60-byte plaintext with 20-byte AAD */
+{
+  uint8_t key[16] = {0xfe,
+                     0xff,
+                     0xe9,
+                     0x92,
+                     0x86,
+                     0x65,
+                     0x73,
+                     0x1c,
+                     0x6d,
+                     0x6a,
+                     0x8f,
+                     0x94,
+                     0x67,
+                     0x30,
+                     0x83,
+                     0x08};
+  uint8_t nonce[12] =
+      {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};
+  uint8_t aad[20] = {0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe,
+                     0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad,
+                     0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2};
+  uint8_t plaintext[60] = {
+      0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09, 0xc5,
+      0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34, 0xf7, 0xda,
+      0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95,
+      0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25,
+      0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39};
+  uint8_t expected_ct[60] = {
+      0x42, 0x83, 0x1e, 0xc2, 0x21, 0x77, 0x74, 0x24, 0x4b, 0x72, 0x21, 0xb7,
+      0x84, 0xd0, 0xd4, 0x9c, 0xe3, 0xaa, 0x21, 0x2f, 0x2c, 0x02, 0xa4, 0xe0,
+      0x35, 0xc1, 0x7e, 0x23, 0x29, 0xac, 0xa1, 0x2e, 0x21, 0xd5, 0x14, 0xb2,
+      0x54, 0x66, 0x93, 0x1c, 0x7d, 0x8f, 0x6a, 0x5a, 0xac, 0x84, 0xaa, 0x05,
+      0x1b, 0xa3, 0x0b, 0x39, 0x6a, 0x0a, 0xac, 0x97, 0x3d, 0x58, 0xe0, 0x91};
+  uint8_t expected_tag[16] = {0x5b,
+                              0xc9,
+                              0x4f,
+                              0xbc,
+                              0x32,
+                              0x21,
+                              0xa5,
+                              0xdb,
+                              0x94,
+                              0xfa,
+                              0xe9,
+                              0x5a,
+                              0xe7,
+                              0x12,
+                              0x1a,
+                              0x47};
+  uint8_t buffer[60];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 60);
+  fio_aes128_gcm_enc(mac, buffer, 60, aad, 20, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 60),
+             "AES-128-GCM Test Case 4 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-128-GCM Test Case 4 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes128_gcm_dec(mac, buffer, 60, aad, 20, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-128-GCM Test Case 4 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 60),
+             "AES-128-GCM Test Case 4 decryption failed");
+}
+}
+
+/* **************************************************************************
+ * Test AES-256-GCM (NIST SP 800-38D test vectors)
+ * *************************************************************************/
+{/* Test Case 13: Empty plaintext, no AAD (AES-256) */
+ {uint8_t key[32] = {0};
+uint8_t nonce[12] = {0};
+uint8_t expected_tag[16] = {0x53,
+                            0x0f,
+                            0x8a,
+                            0xfb,
+                            0xc7,
+                            0x45,
+                            0x36,
+                            0xb9,
+                            0xa9,
+                            0x63,
+                            0xb4,
+                            0xf1,
+                            0xc4,
+                            0xcb,
+                            0x73,
+                            0x8b};
+uint8_t mac[16];
+
+fio_aes256_gcm_enc(mac, NULL, 0, NULL, 0, key, nonce);
+FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+           "AES-256-GCM Test Case 13 failed (empty plaintext)");
+}
+
+/* Test Case 14: 16-byte plaintext, no AAD (AES-256) */
+{
+  uint8_t key[32] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t plaintext[16] = {0};
+  uint8_t expected_ct[16] = {0xce,
+                             0xa7,
+                             0x40,
+                             0x3d,
+                             0x4d,
+                             0x60,
+                             0x6b,
+                             0x6e,
+                             0x07,
+                             0x4e,
+                             0xc5,
+                             0xd3,
+                             0xba,
+                             0xf3,
+                             0x9d,
+                             0x18};
+  uint8_t expected_tag[16] = {0xd0,
+                              0xd1,
+                              0xc8,
+                              0xa7,
+                              0x99,
+                              0x99,
+                              0x6b,
+                              0xf0,
+                              0x26,
+                              0x5b,
+                              0x98,
+                              0xb5,
+                              0xd4,
+                              0x8a,
+                              0xb9,
+                              0x19};
+  uint8_t buffer[16];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 16);
+  fio_aes256_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 16),
+             "AES-256-GCM Test Case 14 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-256-GCM Test Case 14 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes256_gcm_dec(mac, buffer, 16, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 14 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 16),
+             "AES-256-GCM Test Case 14 decryption failed");
+}
+
+/* Test Case 15: 64-byte plaintext, no AAD (AES-256) */
+{
+  uint8_t key[32] = {0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
+                     0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08,
+                     0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
+                     0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08};
+  uint8_t nonce[12] =
+      {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};
+  uint8_t plaintext[64] = {
+      0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09,
+      0xc5, 0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34,
+      0xf7, 0xda, 0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c,
+      0x3c, 0x0c, 0x95, 0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24,
+      0x49, 0xa6, 0xb5, 0x25, 0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6,
+      0x57, 0xba, 0x63, 0x7b, 0x39, 0x1a, 0xaf, 0xd2, 0x55};
+  uint8_t expected_ct[64] = {
+      0x52, 0x2d, 0xc1, 0xf0, 0x99, 0x56, 0x7d, 0x07, 0xf4, 0x7f, 0x37,
+      0xa3, 0x2a, 0x84, 0x42, 0x7d, 0x64, 0x3a, 0x8c, 0xdc, 0xbf, 0xe5,
+      0xc0, 0xc9, 0x75, 0x98, 0xa2, 0xbd, 0x25, 0x55, 0xd1, 0xaa, 0x8c,
+      0xb0, 0x8e, 0x48, 0x59, 0x0d, 0xbb, 0x3d, 0xa7, 0xb0, 0x8b, 0x10,
+      0x56, 0x82, 0x88, 0x38, 0xc5, 0xf6, 0x1e, 0x63, 0x93, 0xba, 0x7a,
+      0x0a, 0xbc, 0xc9, 0xf6, 0x62, 0x89, 0x80, 0x15, 0xad};
+  uint8_t expected_tag[16] = {0xb0,
+                              0x94,
+                              0xda,
+                              0xc5,
+                              0xd9,
+                              0x34,
+                              0x71,
+                              0xbd,
+                              0xec,
+                              0x1a,
+                              0x50,
+                              0x22,
+                              0x70,
+                              0xe3,
+                              0xcc,
+                              0x6c};
+  uint8_t buffer[64];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 64);
+  fio_aes256_gcm_enc(mac, buffer, 64, NULL, 0, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 64),
+             "AES-256-GCM Test Case 15 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-256-GCM Test Case 15 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes256_gcm_dec(mac, buffer, 64, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 15 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 64),
+             "AES-256-GCM Test Case 15 decryption failed");
+}
+
+/* Test Case 16: 60-byte plaintext with 20-byte AAD (AES-256) */
+{
+  uint8_t key[32] = {0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
+                     0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08,
+                     0xfe, 0xff, 0xe9, 0x92, 0x86, 0x65, 0x73, 0x1c,
+                     0x6d, 0x6a, 0x8f, 0x94, 0x67, 0x30, 0x83, 0x08};
+  uint8_t nonce[12] =
+      {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};
+  uint8_t aad[20] = {0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe,
+                     0xef, 0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad,
+                     0xbe, 0xef, 0xab, 0xad, 0xda, 0xd2};
+  uint8_t plaintext[60] = {
+      0xd9, 0x31, 0x32, 0x25, 0xf8, 0x84, 0x06, 0xe5, 0xa5, 0x59, 0x09, 0xc5,
+      0xaf, 0xf5, 0x26, 0x9a, 0x86, 0xa7, 0xa9, 0x53, 0x15, 0x34, 0xf7, 0xda,
+      0x2e, 0x4c, 0x30, 0x3d, 0x8a, 0x31, 0x8a, 0x72, 0x1c, 0x3c, 0x0c, 0x95,
+      0x95, 0x68, 0x09, 0x53, 0x2f, 0xcf, 0x0e, 0x24, 0x49, 0xa6, 0xb5, 0x25,
+      0xb1, 0x6a, 0xed, 0xf5, 0xaa, 0x0d, 0xe6, 0x57, 0xba, 0x63, 0x7b, 0x39};
+  uint8_t expected_ct[60] = {
+      0x52, 0x2d, 0xc1, 0xf0, 0x99, 0x56, 0x7d, 0x07, 0xf4, 0x7f, 0x37, 0xa3,
+      0x2a, 0x84, 0x42, 0x7d, 0x64, 0x3a, 0x8c, 0xdc, 0xbf, 0xe5, 0xc0, 0xc9,
+      0x75, 0x98, 0xa2, 0xbd, 0x25, 0x55, 0xd1, 0xaa, 0x8c, 0xb0, 0x8e, 0x48,
+      0x59, 0x0d, 0xbb, 0x3d, 0xa7, 0xb0, 0x8b, 0x10, 0x56, 0x82, 0x88, 0x38,
+      0xc5, 0xf6, 0x1e, 0x63, 0x93, 0xba, 0x7a, 0x0a, 0xbc, 0xc9, 0xf6, 0x62};
+  uint8_t expected_tag[16] = {0x76,
+                              0xfc,
+                              0x6e,
+                              0xce,
+                              0x0f,
+                              0x4e,
+                              0x17,
+                              0x68,
+                              0xcd,
+                              0xdf,
+                              0x88,
+                              0x53,
+                              0xbb,
+                              0x2d,
+                              0x55,
+                              0x1b};
+  uint8_t buffer[60];
+  uint8_t mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 60);
+  fio_aes256_gcm_enc(mac, buffer, 60, aad, 20, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer, expected_ct, 60),
+             "AES-256-GCM Test Case 16 ciphertext failed");
+  FIO_ASSERT(!memcmp(mac, expected_tag, 16),
+             "AES-256-GCM Test Case 16 tag failed");
+
+  /* Test decryption */
+  int ret = fio_aes256_gcm_dec(mac, buffer, 60, aad, 20, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-256-GCM Test Case 16 decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 60),
+             "AES-256-GCM Test Case 16 decryption failed");
+}
+}
+
+/* **************************************************************************
+ * Test authentication failure detection
+ * *************************************************************************/
+{
+  uint8_t key[16] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t plaintext[16] = {0};
+  uint8_t buffer[16];
+  uint8_t mac[16];
+  uint8_t bad_mac[16];
+
+  FIO_MEMCPY(buffer, plaintext, 16);
+  fio_aes128_gcm_enc(mac, buffer, 16, NULL, 0, key, nonce);
+
+  /* Corrupt the MAC */
+  FIO_MEMCPY(bad_mac, mac, 16);
+  bad_mac[0] ^= 0x01;
+
+  int ret = fio_aes128_gcm_dec(bad_mac, buffer, 16, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == -1,
+             "AES-GCM should detect authentication failure with bad MAC");
+}
+
+/* **************************************************************************
+ * Test roundtrip with random data
+ * *************************************************************************/
+{
+  uint8_t key[32];
+  uint8_t nonce[12];
+  uint8_t aad[64];
+  uint8_t plaintext[256];
+  uint8_t buffer[256];
+  uint8_t mac[16];
+
+  /* Generate random test data */
+  fio_rand_bytes(key, 32);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(aad, 64);
+  fio_rand_bytes(plaintext, 256);
+
+  /* Test AES-128-GCM roundtrip */
+  FIO_MEMCPY(buffer, plaintext, 256);
+  fio_aes128_gcm_enc(mac, buffer, 256, aad, 64, key, nonce);
+  FIO_ASSERT(memcmp(buffer, plaintext, 256) != 0,
+             "AES-128-GCM ciphertext should differ from plaintext");
+
+  int ret = fio_aes128_gcm_dec(mac, buffer, 256, aad, 64, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-128-GCM roundtrip decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 256),
+             "AES-128-GCM roundtrip decryption failed");
+
+  /* Test AES-256-GCM roundtrip */
+  FIO_MEMCPY(buffer, plaintext, 256);
+  fio_aes256_gcm_enc(mac, buffer, 256, aad, 64, key, nonce);
+  FIO_ASSERT(memcmp(buffer, plaintext, 256) != 0,
+             "AES-256-GCM ciphertext should differ from plaintext");
+
+  ret = fio_aes256_gcm_dec(mac, buffer, 256, aad, 64, key, nonce);
+  FIO_ASSERT(ret == 0, "AES-256-GCM roundtrip decryption auth failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 256),
+             "AES-256-GCM roundtrip decryption failed");
+}
+
+/* **************************************************************************
+ * Test various message lengths
+ * *************************************************************************/
+{
+  uint8_t key[16] = {0x00,
+                     0x01,
+                     0x02,
+                     0x03,
+                     0x04,
+                     0x05,
+                     0x06,
+                     0x07,
+                     0x08,
+                     0x09,
+                     0x0a,
+                     0x0b,
+                     0x0c,
+                     0x0d,
+                     0x0e,
+                     0x0f};
+  uint8_t nonce[12] =
+      {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};
+  uint8_t plaintext[300];
+  uint8_t buffer[300];
+  uint8_t mac[16];
+
+  fio_rand_bytes(plaintext, 300);
+
+  /* Test lengths: 0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129 */
+  size_t test_lengths[] =
+      {0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 300};
+  for (size_t i = 0; i < sizeof(test_lengths) / sizeof(test_lengths[0]); ++i) {
+    size_t len = test_lengths[i];
     FIO_MEMCPY(buffer, plaintext, len);
+    fio_aes128_gcm_enc(mac, buffer, len, NULL, 0, key, nonce);
 
-    /* Test AES-256-GCM with large data */
-    fio_aes256_gcm_enc(mac, buffer, len, NULL, 0, key, nonce);
-    int ret = fio_aes256_gcm_dec(mac, buffer, len, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "16KB AES-256-GCM decryption failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, len), "16KB roundtrip failed");
-
-    free(plaintext);
-    free(buffer);
+    int ret = fio_aes128_gcm_dec(mac, buffer, len, NULL, 0, key, nonce);
+    FIO_ASSERT(ret == 0,
+               "AES-128-GCM roundtrip failed for length %zu (auth)",
+               len);
+    FIO_ASSERT(!memcmp(buffer, plaintext, len),
+               "AES-128-GCM roundtrip failed for length %zu (data)",
+               len);
   }
+}
+/* **************************************************************************
+ * Edge Case Tests for AES-GCM
+ * *************************************************************************/
+/* Test: Single byte plaintext */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[1] = {0x42};
+  uint8_t buffer[1];
+  uint8_t mac[16];
 
-  /* Test: Deterministic encryption */
-  {
-    uint8_t key[16] = {0x01,
-                       0x02,
-                       0x03,
-                       0x04,
-                       0x05,
-                       0x06,
-                       0x07,
-                       0x08,
-                       0x09,
-                       0x0a,
-                       0x0b,
-                       0x0c,
-                       0x0d,
-                       0x0e,
-                       0x0f,
-                       0x10};
-    uint8_t nonce[12] = {0x00,
-                         0x01,
-                         0x02,
-                         0x03,
-                         0x04,
-                         0x05,
-                         0x06,
-                         0x07,
-                         0x08,
-                         0x09,
-                         0x0a,
-                         0x0b};
-    uint8_t plaintext[32] = "deterministic test message!!!!!";
-    uint8_t buffer1[32], buffer2[32];
-    uint8_t mac1[16], mac2[16];
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  FIO_MEMCPY(buffer, plaintext, 1);
 
-    FIO_MEMCPY(buffer1, plaintext, 32);
-    FIO_MEMCPY(buffer2, plaintext, 32);
+  fio_aes128_gcm_enc(mac, buffer, 1, NULL, 0, key, nonce);
+  int ret = fio_aes128_gcm_dec(mac, buffer, 1, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "Single byte AES-128-GCM decryption failed");
+  FIO_ASSERT(buffer[0] == plaintext[0], "Single byte roundtrip failed");
+}
 
-    fio_aes128_gcm_enc(mac1, buffer1, 32, NULL, 0, key, nonce);
-    fio_aes128_gcm_enc(mac2, buffer2, 32, NULL, 0, key, nonce);
+/* Test: Plaintext one byte before block boundary (15 bytes) */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[15];
+  uint8_t buffer[15];
+  uint8_t mac[16];
 
-    FIO_ASSERT(!memcmp(buffer1, buffer2, 32),
-               "Encryption should be deterministic");
-    FIO_ASSERT(!memcmp(mac1, mac2, 16), "MAC should be deterministic");
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 15);
+  FIO_MEMCPY(buffer, plaintext, 15);
+
+  fio_aes128_gcm_enc(mac, buffer, 15, NULL, 0, key, nonce);
+  int ret = fio_aes128_gcm_dec(mac, buffer, 15, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "15-byte decryption failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 15), "15-byte roundtrip failed");
+}
+
+/* Test: Plaintext one byte after block boundary (17 bytes) */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[17];
+  uint8_t buffer[17];
+  uint8_t mac[16];
+
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 17);
+  FIO_MEMCPY(buffer, plaintext, 17);
+
+  fio_aes128_gcm_enc(mac, buffer, 17, NULL, 0, key, nonce);
+  int ret = fio_aes128_gcm_dec(mac, buffer, 17, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "17-byte decryption failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 17), "17-byte roundtrip failed");
+}
+
+/* Test: Both plaintext and AAD empty */
+{
+  uint8_t key[16] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t mac1[16], mac2[16];
+
+  fio_aes128_gcm_enc(mac1, NULL, 0, NULL, 0, key, nonce);
+  fio_aes256_gcm_enc(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
+
+  /* MACs should not be all zeros */
+  int all_zero1 = 1, all_zero2 = 1;
+  for (int i = 0; i < 16; ++i) {
+    if (mac1[i] != 0)
+      all_zero1 = 0;
+    if (mac2[i] != 0)
+      all_zero2 = 0;
   }
+  FIO_ASSERT(!all_zero1, "AES-128-GCM empty should produce non-zero MAC");
+  FIO_ASSERT(!all_zero2, "AES-256-GCM empty should produce non-zero MAC");
 
-  /* Test: All-zero key and nonce */
-  {
-    uint8_t key[16] = {0};
-    uint8_t nonce[12] = {0};
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
+  /* Decryption should succeed */
+  int ret1 = fio_aes128_gcm_dec(mac1, NULL, 0, NULL, 0, key, nonce);
+  int ret2 =
+      fio_aes256_gcm_dec(mac2, NULL, 0, NULL, 0, (uint8_t[32]){0}, nonce);
+  FIO_ASSERT(ret1 == 0, "AES-128-GCM empty decryption failed");
+  FIO_ASSERT(ret2 == 0, "AES-256-GCM empty decryption failed");
+}
 
-    fio_rand_bytes(plaintext, 32);
+/* Test: AAD at various sizes */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+  uint8_t aad[256];
+
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  fio_rand_bytes(aad, 256);
+
+  size_t aad_sizes[] = {1, 15, 16, 17, 31, 32, 33, 256};
+  for (size_t i = 0; i < sizeof(aad_sizes) / sizeof(aad_sizes[0]); ++i) {
     FIO_MEMCPY(buffer, plaintext, 32);
-
-    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
-    int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "All-zero key/nonce decryption failed");
+    fio_aes128_gcm_enc(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
+    int ret =
+        fio_aes128_gcm_dec(mac, buffer, 32, aad, aad_sizes[i], key, nonce);
+    FIO_ASSERT(ret == 0, "AAD size %zu decryption failed", aad_sizes[i]);
     FIO_ASSERT(!memcmp(buffer, plaintext, 32),
-               "All-zero key/nonce roundtrip failed");
+               "AAD size %zu roundtrip failed",
+               aad_sizes[i]);
   }
+}
 
-  /* Test: All-ones key and nonce */
-  {
-    uint8_t key[32];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
+/* Test: Tag verification failure (corrupted ciphertext) */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
 
-    FIO_MEMSET(key, 0xFF, 32);
-    FIO_MEMSET(nonce, 0xFF, 12);
-    fio_rand_bytes(plaintext, 32);
-    FIO_MEMCPY(buffer, plaintext, 32);
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer, plaintext, 32);
 
-    fio_aes256_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
-    int ret = fio_aes256_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
-    FIO_ASSERT(ret == 0, "All-ones key/nonce decryption failed");
-    FIO_ASSERT(!memcmp(buffer, plaintext, 32),
-               "All-ones key/nonce roundtrip failed");
+  fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+  /* Corrupt ciphertext */
+  buffer[0] ^= 0x01;
+
+  int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+  FIO_ASSERT(ret != 0, "Corrupted ciphertext should fail verification");
+}
+
+/* Test: Tag verification failure (corrupted AAD) */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+  uint8_t aad[16];
+  uint8_t bad_aad[16];
+
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  fio_rand_bytes(aad, 16);
+  FIO_MEMCPY(bad_aad, aad, 16);
+  bad_aad[0] ^= 0x01;
+  FIO_MEMCPY(buffer, plaintext, 32);
+
+  fio_aes128_gcm_enc(mac, buffer, 32, aad, 16, key, nonce);
+
+  int ret = fio_aes128_gcm_dec(mac, buffer, 32, bad_aad, 16, key, nonce);
+  FIO_ASSERT(ret != 0, "Corrupted AAD should fail verification");
+}
+
+/* Test: Wrong key decryption */
+{
+  uint8_t key1[16], key2[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+
+  fio_rand_bytes(key1, 16);
+  fio_rand_bytes(key2, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer, plaintext, 32);
+
+  fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key1, nonce);
+
+  int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key2, nonce);
+  FIO_ASSERT(ret != 0, "Wrong key should fail verification");
+}
+
+/* Test: Large plaintext (16KB - TLS max) */
+{
+  uint8_t key[32];
+  uint8_t nonce[12];
+  size_t len = 16384;
+  uint8_t *plaintext = (uint8_t *)malloc(len);
+  uint8_t *buffer = (uint8_t *)malloc(len);
+  uint8_t mac[16];
+
+  FIO_ASSERT(plaintext && buffer, "Memory allocation failed");
+
+  fio_rand_bytes(key, 32);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, len);
+  FIO_MEMCPY(buffer, plaintext, len);
+
+  /* Test AES-256-GCM with large data */
+  fio_aes256_gcm_enc(mac, buffer, len, NULL, 0, key, nonce);
+  int ret = fio_aes256_gcm_dec(mac, buffer, len, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "16KB AES-256-GCM decryption failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, len), "16KB roundtrip failed");
+
+  free(plaintext);
+  free(buffer);
+}
+
+/* Test: Deterministic encryption */
+{
+  uint8_t key[16] = {0x01,
+                     0x02,
+                     0x03,
+                     0x04,
+                     0x05,
+                     0x06,
+                     0x07,
+                     0x08,
+                     0x09,
+                     0x0a,
+                     0x0b,
+                     0x0c,
+                     0x0d,
+                     0x0e,
+                     0x0f,
+                     0x10};
+  uint8_t nonce[12] =
+      {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b};
+  uint8_t plaintext[32] = "deterministic test message!!!!!";
+  uint8_t buffer1[32], buffer2[32];
+  uint8_t mac1[16], mac2[16];
+
+  FIO_MEMCPY(buffer1, plaintext, 32);
+  FIO_MEMCPY(buffer2, plaintext, 32);
+
+  fio_aes128_gcm_enc(mac1, buffer1, 32, NULL, 0, key, nonce);
+  fio_aes128_gcm_enc(mac2, buffer2, 32, NULL, 0, key, nonce);
+
+  FIO_ASSERT(!memcmp(buffer1, buffer2, 32),
+             "Encryption should be deterministic");
+  FIO_ASSERT(!memcmp(mac1, mac2, 16), "MAC should be deterministic");
+}
+
+/* Test: All-zero key and nonce */
+{
+  uint8_t key[16] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer, plaintext, 32);
+
+  fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+  int ret = fio_aes128_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "All-zero key/nonce decryption failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+             "All-zero key/nonce roundtrip failed");
+}
+
+/* Test: All-ones key and nonce */
+{
+  uint8_t key[32];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+
+  FIO_MEMSET(key, 0xFF, 32);
+  FIO_MEMSET(nonce, 0xFF, 12);
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer, plaintext, 32);
+
+  fio_aes256_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+  int ret = fio_aes256_gcm_dec(mac, buffer, 32, NULL, 0, key, nonce);
+  FIO_ASSERT(ret == 0, "All-ones key/nonce decryption failed");
+  FIO_ASSERT(!memcmp(buffer, plaintext, 32),
+             "All-ones key/nonce roundtrip failed");
+}
+
+/* Test: Flip each byte of tag to ensure detection */
+{
+  uint8_t key[16];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer[32];
+  uint8_t mac[16];
+  uint8_t bad_mac[16];
+
+  fio_rand_bytes(key, 16);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer, plaintext, 32);
+
+  fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+
+  for (int i = 0; i < 16; ++i) {
+    FIO_MEMCPY(bad_mac, mac, 16);
+    bad_mac[i] ^= 0x01;
+    uint8_t test_buffer[32];
+    FIO_MEMCPY(test_buffer, buffer, 32);
+    int ret = fio_aes128_gcm_dec(bad_mac, test_buffer, 32, NULL, 0, key, nonce);
+    FIO_ASSERT(ret != 0, "Flipped MAC byte %d should fail verification", i);
   }
+}
 
-  /* Test: Flip each byte of tag to ensure detection */
-  {
-    uint8_t key[16];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer[32];
-    uint8_t mac[16];
-    uint8_t bad_mac[16];
+/* Test: AES-128 vs AES-256 produce different results */
+{
+  uint8_t key[32];
+  uint8_t nonce[12];
+  uint8_t plaintext[32];
+  uint8_t buffer128[32], buffer256[32];
+  uint8_t mac128[16], mac256[16];
 
-    fio_rand_bytes(key, 16);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    FIO_MEMCPY(buffer, plaintext, 32);
+  fio_rand_bytes(key, 32);
+  fio_rand_bytes(nonce, 12);
+  fio_rand_bytes(plaintext, 32);
+  FIO_MEMCPY(buffer128, plaintext, 32);
+  FIO_MEMCPY(buffer256, plaintext, 32);
 
-    fio_aes128_gcm_enc(mac, buffer, 32, NULL, 0, key, nonce);
+  fio_aes128_gcm_enc(mac128, buffer128, 32, NULL, 0, key, nonce);
+  fio_aes256_gcm_enc(mac256, buffer256, 32, NULL, 0, key, nonce);
 
-    for (int i = 0; i < 16; ++i) {
-      FIO_MEMCPY(bad_mac, mac, 16);
-      bad_mac[i] ^= 0x01;
-      uint8_t test_buffer[32];
-      FIO_MEMCPY(test_buffer, buffer, 32);
-      int ret =
-          fio_aes128_gcm_dec(bad_mac, test_buffer, 32, NULL, 0, key, nonce);
-      FIO_ASSERT(ret != 0, "Flipped MAC byte %d should fail verification", i);
-    }
-  }
+  /* Ciphertexts should be different */
+  FIO_ASSERT(memcmp(buffer128, buffer256, 32) != 0,
+             "AES-128 and AES-256 should produce different ciphertexts");
+  /* MACs should be different */
+  FIO_ASSERT(memcmp(mac128, mac256, 16) != 0,
+             "AES-128 and AES-256 should produce different MACs");
+}
+/* Performance tests moved to tests/performance-crypto.c */
 
-  /* Test: AES-128 vs AES-256 produce different results */
-  {
-    uint8_t key[32];
-    uint8_t nonce[12];
-    uint8_t plaintext[32];
-    uint8_t buffer128[32], buffer256[32];
-    uint8_t mac128[16], mac256[16];
-
-    fio_rand_bytes(key, 32);
-    fio_rand_bytes(nonce, 12);
-    fio_rand_bytes(plaintext, 32);
-    FIO_MEMCPY(buffer128, plaintext, 32);
-    FIO_MEMCPY(buffer256, plaintext, 32);
-
-    fio_aes128_gcm_enc(mac128, buffer128, 32, NULL, 0, key, nonce);
-    fio_aes256_gcm_enc(mac256, buffer256, 32, NULL, 0, key, nonce);
-
-    /* Ciphertexts should be different */
-    FIO_ASSERT(memcmp(buffer128, buffer256, 32) != 0,
-               "AES-128 and AES-256 should produce different ciphertexts");
-    /* MACs should be different */
-    FIO_ASSERT(memcmp(mac128, mac256, 16) != 0,
-               "AES-128 and AES-256 should produce different MACs");
-  }
-  /* Performance tests moved to tests/performance-crypto.c */
-
-  return 0;
+return 0;
 }

@@ -126,6 +126,15 @@ Hardware Intrinsics Detection
 #define FIO___HAS_ARM_AES_INTRIN 1
 #endif
 
+/* Diagnostic: identifies the active GHASH implementation at compile time */
+#if defined(FIO___HAS_X86_AES_INTRIN) && FIO___HAS_X86_AES_INTRIN
+#define FIO___AES_GHASH_IMPL "x86-pclmulqdq"
+#elif defined(FIO___HAS_ARM_AES_INTRIN) && FIO___HAS_ARM_AES_INTRIN
+#define FIO___AES_GHASH_IMPL "arm-pmull"
+#else
+#define FIO___AES_GHASH_IMPL "portable"
+#endif
+
 /* *****************************************************************************
 x86 AES-NI Implementation
 ***************************************************************************** */
@@ -272,41 +281,33 @@ FIO_IFUNC __m128i fio___aesni_encrypt256(__m128i block, const __m128i *rk) {
  * Algorithm from Intel CLMUL Application Note v2.02. */
 FIO_IFUNC __m128i fio___ghash_mult_pclmul(__m128i a, __m128i b) {
   /* Karatsuba carryless multiplication */
-  __m128i tmp2 = _mm_clmulepi64_si128(a, b, 0x00); /* a_lo * b_lo */
-  __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x01); /* a_hi * b_lo */
-  __m128i tmp4 = _mm_clmulepi64_si128(a, b, 0x10); /* a_lo * b_hi */
-  __m128i tmp5 = _mm_clmulepi64_si128(a, b, 0x11); /* a_hi * b_hi */
+  __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x00); /* a_lo * b_lo */
+  __m128i tmp6 = _mm_clmulepi64_si128(a, b, 0x11); /* a_hi * b_hi */
+  __m128i tmp4 = _mm_clmulepi64_si128(a, b, 0x10); /* a_hi * b_lo */
+  __m128i tmp5 = _mm_clmulepi64_si128(a, b, 0x01); /* a_lo * b_hi */
+  tmp4 = _mm_xor_si128(tmp4, tmp5);                /* cross term */
+  tmp5 = _mm_slli_si128(tmp4, 8);
+  tmp4 = _mm_srli_si128(tmp4, 8);
+  tmp3 = _mm_xor_si128(tmp3, tmp5); /* low 128 bits */
+  tmp6 = _mm_xor_si128(tmp6, tmp4); /* high 128 bits */
 
-  tmp3 = _mm_xor_si128(tmp3, tmp4);
-  tmp4 = _mm_slli_si128(tmp3, 8);
-  tmp3 = _mm_srli_si128(tmp3, 8);
-  tmp2 = _mm_xor_si128(tmp2, tmp4); /* low 128 bits */
-  tmp5 = _mm_xor_si128(tmp5, tmp3); /* high 128 bits */
-
-  /* Reduction modulo x^128 + x^127 + x^126 + x^121 + 1 (bit-reflected form).
+  /* Reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected form).
    * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i tmp6 = _mm_srli_epi32(tmp2, 31);
-  __m128i tmp7 = _mm_srli_epi32(tmp2, 30);
-  __m128i tmp8 = _mm_srli_epi32(tmp2, 25);
-  tmp6 = _mm_xor_si128(tmp6, tmp7);
-  tmp6 = _mm_xor_si128(tmp6, tmp8);
-  tmp7 = _mm_shuffle_epi32(tmp6, 0x93); /* {w3,w2,w1,w0} -> {w2,w1,w0,w3} */
-  tmp6 = _mm_and_si128(tmp7, _mm_set_epi32(0, ~0, ~0, ~0));
-  tmp7 = _mm_and_si128(tmp7, _mm_set_epi32(~0, 0, 0, 0));
-  tmp2 = _mm_xor_si128(tmp2, tmp6);
-  tmp5 = _mm_xor_si128(tmp5, tmp7);
-  __m128i tmp9 = _mm_slli_epi32(tmp2, 1);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp9 = _mm_slli_epi32(tmp2, 2);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp9 = _mm_slli_epi32(tmp2, 7);
-  tmp2 = _mm_xor_si128(tmp2, tmp9);
-  tmp7 = _mm_srli_si128(tmp2, 12);
-  tmp2 = _mm_slli_si128(tmp2, 4);
-  tmp5 = _mm_xor_si128(tmp5, tmp2);
-  tmp5 = _mm_xor_si128(tmp5, tmp7);
-
-  return tmp5;
+  __m128i tmp7 = _mm_srli_epi32(tmp3, 31);
+  __m128i tmp8 = _mm_srli_epi32(tmp3, 30);
+  tmp8 = _mm_xor_si128(tmp8, _mm_srli_epi32(tmp3, 25));
+  tmp7 = _mm_xor_si128(tmp7, tmp8);
+  tmp8 = _mm_slli_si128(tmp7, 12);
+  tmp7 = _mm_srli_si128(tmp7, 4);
+  tmp3 = _mm_xor_si128(tmp3, tmp8);
+  __m128i tmp0 = _mm_slli_epi32(tmp3, 1);
+  __m128i tmp1 = _mm_slli_epi32(tmp3, 2);
+  __m128i tmp2 = _mm_slli_epi32(tmp3, 7);
+  tmp0 = _mm_xor_si128(tmp0, tmp1);
+  tmp0 = _mm_xor_si128(tmp0, tmp2);
+  tmp0 = _mm_xor_si128(tmp0, tmp7);
+  tmp0 = _mm_xor_si128(tmp0, tmp3);
+  return _mm_xor_si128(tmp0, tmp6);
 }
 
 /* Byte-swap for GCM (big-endian) */
@@ -376,30 +377,23 @@ FIO_IFUNC __m128i fio___x86_ghash_mult4(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^127 + x^126 + x^121 + 1 (bit-reflected).
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected).
    * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i r6 = _mm_srli_epi32(lo, 31);
-  __m128i r7 = _mm_srli_epi32(lo, 30);
-  __m128i r8 = _mm_srli_epi32(lo, 25);
-  r6 = _mm_xor_si128(r6, r7);
-  r6 = _mm_xor_si128(r6, r8);
-  r7 = _mm_shuffle_epi32(r6, 0x93);
-  r6 = _mm_and_si128(r7, _mm_set_epi32(0, ~0, ~0, ~0));
-  r7 = _mm_and_si128(r7, _mm_set_epi32(~0, 0, 0, 0));
-  lo = _mm_xor_si128(lo, r6);
-  hi = _mm_xor_si128(hi, r7);
-  __m128i r9 = _mm_slli_epi32(lo, 1);
-  lo = _mm_xor_si128(lo, r9);
-  r9 = _mm_slli_epi32(lo, 2);
-  lo = _mm_xor_si128(lo, r9);
-  r9 = _mm_slli_epi32(lo, 7);
-  lo = _mm_xor_si128(lo, r9);
-  r7 = _mm_srli_si128(lo, 12);
-  lo = _mm_slli_si128(lo, 4);
-  hi = _mm_xor_si128(hi, lo);
-  hi = _mm_xor_si128(hi, r7);
-
-  return hi;
+  __m128i r7 = _mm_srli_epi32(lo, 31);
+  __m128i r8 = _mm_srli_epi32(lo, 30);
+  r8 = _mm_xor_si128(r8, _mm_srli_epi32(lo, 25));
+  r7 = _mm_xor_si128(r7, r8);
+  r8 = _mm_slli_si128(r7, 12);
+  r7 = _mm_srli_si128(r7, 4);
+  lo = _mm_xor_si128(lo, r8);
+  __m128i r0 = _mm_slli_epi32(lo, 1);
+  __m128i r1 = _mm_slli_epi32(lo, 2);
+  __m128i r2 = _mm_slli_epi32(lo, 7);
+  r0 = _mm_xor_si128(r0, r1);
+  r0 = _mm_xor_si128(r0, r2);
+  r0 = _mm_xor_si128(r0, r7);
+  r0 = _mm_xor_si128(r0, lo);
+  return _mm_xor_si128(r0, hi);
 }
 
 /**
@@ -472,30 +466,23 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^127 + x^126 + x^121 + 1 (bit-reflected).
+  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected).
    * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i r6 = _mm_srli_epi32(lo, 31);
-  __m128i r7 = _mm_srli_epi32(lo, 30);
-  __m128i r8 = _mm_srli_epi32(lo, 25);
-  r6 = _mm_xor_si128(r6, r7);
-  r6 = _mm_xor_si128(r6, r8);
-  r7 = _mm_shuffle_epi32(r6, 0x93);
-  r6 = _mm_and_si128(r7, _mm_set_epi32(0, ~0, ~0, ~0));
-  r7 = _mm_and_si128(r7, _mm_set_epi32(~0, 0, 0, 0));
-  lo = _mm_xor_si128(lo, r6);
-  hi = _mm_xor_si128(hi, r7);
-  __m128i r9 = _mm_slli_epi32(lo, 1);
-  lo = _mm_xor_si128(lo, r9);
-  r9 = _mm_slli_epi32(lo, 2);
-  lo = _mm_xor_si128(lo, r9);
-  r9 = _mm_slli_epi32(lo, 7);
-  lo = _mm_xor_si128(lo, r9);
-  r7 = _mm_srli_si128(lo, 12);
-  lo = _mm_slli_si128(lo, 4);
-  hi = _mm_xor_si128(hi, lo);
-  hi = _mm_xor_si128(hi, r7);
-
-  return hi;
+  __m128i r7 = _mm_srli_epi32(lo, 31);
+  __m128i r8 = _mm_srli_epi32(lo, 30);
+  r8 = _mm_xor_si128(r8, _mm_srli_epi32(lo, 25));
+  r7 = _mm_xor_si128(r7, r8);
+  r8 = _mm_slli_si128(r7, 12);
+  r7 = _mm_srli_si128(r7, 4);
+  lo = _mm_xor_si128(lo, r8);
+  __m128i r0 = _mm_slli_epi32(lo, 1);
+  __m128i r1 = _mm_slli_epi32(lo, 2);
+  __m128i r2 = _mm_slli_epi32(lo, 7);
+  r0 = _mm_xor_si128(r0, r1);
+  r0 = _mm_xor_si128(r0, r2);
+  r0 = _mm_xor_si128(r0, r7);
+  r0 = _mm_xor_si128(r0, lo);
+  return _mm_xor_si128(r0, hi);
 }
 
 /* === Interleaved AES+GHASH macros for 8-block pipeline ===
@@ -559,27 +546,22 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
     __m128i gf_mid_ = _mm_xor_si128(gh_m1, gh_m2);                             \
     gh_lo = _mm_xor_si128(gh_lo, _mm_slli_si128(gf_mid_, 8));                  \
     gh_hi = _mm_xor_si128(gh_hi, _mm_srli_si128(gf_mid_, 8));                  \
-    /* Reflected reduction: x^128 + x^127 + x^126 + x^121 + 1 */               \
-    __m128i gf6_ = _mm_srli_epi32(gh_lo, 31);                                  \
-    __m128i gf7_ = _mm_srli_epi32(gh_lo, 30);                                  \
-    __m128i gf8_ = _mm_srli_epi32(gh_lo, 25);                                  \
-    gf6_ = _mm_xor_si128(gf6_, gf7_);                                          \
-    gf6_ = _mm_xor_si128(gf6_, gf8_);                                          \
-    gf7_ = _mm_shuffle_epi32(gf6_, 0x93);                                      \
-    gf6_ = _mm_and_si128(gf7_, _mm_set_epi32(0, ~0, ~0, ~0));                  \
-    gf7_ = _mm_and_si128(gf7_, _mm_set_epi32(~0, 0, 0, 0));                    \
-    gh_lo = _mm_xor_si128(gh_lo, gf6_);                                        \
-    gh_hi = _mm_xor_si128(gh_hi, gf7_);                                        \
-    __m128i gf9_ = _mm_slli_epi32(gh_lo, 1);                                   \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf9_ = _mm_slli_epi32(gh_lo, 2);                                           \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf9_ = _mm_slli_epi32(gh_lo, 7);                                           \
-    gh_lo = _mm_xor_si128(gh_lo, gf9_);                                        \
-    gf7_ = _mm_srli_si128(gh_lo, 12);                                          \
-    gh_lo = _mm_slli_si128(gh_lo, 4);                                          \
-    gh_hi = _mm_xor_si128(gh_hi, gh_lo);                                       \
-    result = _mm_xor_si128(gh_hi, gf7_);                                       \
+    /* Reflected reduction: x^128 + x^7 + x^2 + x + 1 */                       \
+    __m128i gf7_ = _mm_srli_epi32(gh_lo, 31);                                  \
+    __m128i gf8_ = _mm_srli_epi32(gh_lo, 30);                                  \
+    gf8_ = _mm_xor_si128(gf8_, _mm_srli_epi32(gh_lo, 25));                     \
+    gf7_ = _mm_xor_si128(gf7_, gf8_);                                          \
+    gf8_ = _mm_slli_si128(gf7_, 12);                                           \
+    gf7_ = _mm_srli_si128(gf7_, 4);                                            \
+    gh_lo = _mm_xor_si128(gh_lo, gf8_);                                        \
+    __m128i gf0_ = _mm_slli_epi32(gh_lo, 1);                                   \
+    __m128i gf1_ = _mm_slli_epi32(gh_lo, 2);                                   \
+    __m128i gf2_ = _mm_slli_epi32(gh_lo, 7);                                   \
+    gf0_ = _mm_xor_si128(gf0_, gf1_);                                          \
+    gf0_ = _mm_xor_si128(gf0_, gf2_);                                          \
+    gf0_ = _mm_xor_si128(gf0_, gf7_);                                          \
+    gf0_ = _mm_xor_si128(gf0_, gh_lo);                                         \
+    result = _mm_xor_si128(gf0_, gh_hi);                                       \
   } while (0)
 
 /* Increment counter (last 32 bits, big-endian) */
