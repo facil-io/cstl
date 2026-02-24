@@ -1017,16 +1017,7 @@ IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
     return FIO_SOCKET_INVALID;
   return c;
 }
-/** Acts as POSIX dup. Use this for portability with WinSock2.
- *
- * Uses WSADuplicateSocket + WSASocket to produce a valid Winsock SOCKET
- * that can be used with WSAPoll, send, recv, etc.
- *
- * dwFlags MUST be 0 when FROM_PROTOCOL_INFO is used — the WSAPROTOCOL_INFO
- * struct already encodes WSA_FLAG_OVERLAPPED from the original socket.
- * Passing WSA_FLAG_OVERLAPPED explicitly causes WSAEINVAL on some Winsock
- * implementations (notably MinGW) when the flags conflict.
- */
+/** Duplicates a Winsock2 socket, acting as POSIX dup for portability. */
 IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   WSAPROTOCOL_INFO info;
   if (WSADuplicateSocket(original, GetCurrentProcessId(), &info)) {
@@ -1039,7 +1030,7 @@ IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
                                             FROM_PROTOCOL_INFO,
                                             &info,
                                             0,
-                                            0);
+                                            WSA_FLAG_OVERLAPPED);
   if (!FIO_SOCK_FD_ISVALID(fd))
     FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
                   WSAGetLastError());
