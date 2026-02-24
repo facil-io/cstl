@@ -26,7 +26,7 @@ jobs:
     - name: Test All (debug - no allocators)
       shell: pwsh
       run: |
-        $excludedExact  = @("io", "io-units", "ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
+        $excludedExact  = @("ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
         $excludedPrefix = @("tls13", "pubsub")
 
         $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
@@ -69,7 +69,7 @@ jobs:
     - name: Test All (release)
       shell: pwsh
       run: |
-        $excludedExact  = @("io", "io-units", "ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
+        $excludedExact  = @("ipc", "signals", "poll", "redis", "openssl", "tmp_compress_compare")
         $excludedPrefix = @("tls13", "pubsub")
 
         $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
