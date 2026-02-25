@@ -119,10 +119,8 @@ Hardware Intrinsics Detection
 /* x86/x64 AES-NI + PCLMULQDQ detection */
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AES__) && defined(__PCLMUL__)
 #define FIO___HAS_X86_AES_INTRIN 1
-#endif
-
+#elif defined(FIO___HAS_ARM_INTRIN)
 /* ARM Crypto Extensions detection */
-#if defined(FIO___HAS_ARM_INTRIN)
 #define FIO___HAS_ARM_AES_INTRIN 1
 #endif
 
@@ -275,10 +273,72 @@ FIO_IFUNC __m128i fio___aesni_encrypt256(__m128i block, const __m128i *rk) {
   return _mm_aesenclast_si128(block, rk[14]);
 }
 
+/* Bit-reverse each byte in a 128-bit register (X86 equivalent of ARM
+ * vrbitq_u8). Uses SSSE3 _mm_shuffle_epi8 with a nibble-reversal LUT. */
+FIO_IFUNC __m128i fio___x86_bitreflect_bytes(__m128i x) {
+  __m128i lut = _mm_set_epi8((char)0x0F,
+                             (char)0x07,
+                             (char)0x0B,
+                             (char)0x03,
+                             (char)0x0D,
+                             (char)0x05,
+                             (char)0x09,
+                             (char)0x01,
+                             (char)0x0E,
+                             (char)0x06,
+                             (char)0x0A,
+                             (char)0x02,
+                             (char)0x0C,
+                             (char)0x04,
+                             (char)0x08,
+                             (char)0x00);
+  __m128i mask = _mm_set1_epi8(0x0F);
+  __m128i lo_nib = _mm_and_si128(x, mask);
+  __m128i hi_nib = _mm_and_si128(_mm_srli_epi32(x, 4), mask);
+  __m128i rev_lo = _mm_shuffle_epi8(lut, lo_nib);
+  __m128i rev_hi = _mm_shuffle_epi8(lut, hi_nib);
+  return _mm_or_si128(
+      _mm_and_si128(_mm_slli_epi32(rev_lo, 4), _mm_set1_epi8((char)0xF0)),
+      rev_hi);
+}
+
+/* GF(2^128) reduction of a 256-bit product using 64-bit lane shifts.
+ * Polynomial: x^128 + x^7 + x^2 + x + 1 (i.e. x^128 ≡ x^7 + x^2 + x + 1).
+ * Input: lo (bits 0-127), hi (bits 128-255).
+ * Output: 128-bit reduced result.
+ * Mirrors the ARM fio___arm_ghash_reduce algorithm using SSE2 intrinsics. */
+FIO_IFUNC __m128i fio___x86_ghash_reduce(__m128i lo, __m128i hi) {
+  /* Step 1: Fold r3 (hi lane 1, bits 192-255) into r2:r1 */
+  __m128i r3 = _mm_shuffle_epi32(hi, 0xEE); /* {r3, r3} */
+  __m128i fold_lo = _mm_xor_si128(
+      _mm_xor_si128(r3, _mm_slli_epi64(r3, 1)),
+      _mm_xor_si128(_mm_slli_epi64(r3, 2), _mm_slli_epi64(r3, 7)));
+  __m128i fold_hi = _mm_xor_si128(
+      _mm_srli_epi64(r3, 63),
+      _mm_xor_si128(_mm_srli_epi64(r3, 62), _mm_srli_epi64(r3, 57)));
+  lo = _mm_xor_si128(lo, _mm_slli_si128(fold_lo, 8));
+  hi = _mm_xor_si128(hi, fold_hi);
+
+  /* Step 2: Fold r2 (hi lane 0, bits 128-191) into r1:r0 */
+  __m128i r2 = _mm_shuffle_epi32(hi, 0x44); /* {r2, r2} */
+  __m128i fold2_lo = _mm_xor_si128(
+      _mm_xor_si128(r2, _mm_slli_epi64(r2, 1)),
+      _mm_xor_si128(_mm_slli_epi64(r2, 2), _mm_slli_epi64(r2, 7)));
+  __m128i fold2_hi = _mm_xor_si128(
+      _mm_srli_epi64(r2, 63),
+      _mm_xor_si128(_mm_srli_epi64(r2, 62), _mm_srli_epi64(r2, 57)));
+  /* Combine {fold2_lo[0], fold2_hi[0]} and XOR into lo */
+  lo = _mm_xor_si128(
+      lo,
+      _mm_xor_si128(_mm_srli_si128(_mm_slli_si128(fold2_lo, 8), 8),
+                    _mm_slli_si128(fold2_hi, 8)));
+  return lo;
+}
+
 /* GHASH multiplication using PCLMULQDQ (carryless multiply).
- * Operates on bit-reflected data (standard PCLMULQDQ representation).
- * Reduction polynomial: x^128 + x^127 + x^126 + x^121 + 1 (reflected form).
- * Algorithm from Intel CLMUL Application Note v2.02. */
+ * Both inputs must be in bit-reflected form (PCLMULQDQ domain).
+ * Result is in bit-reflected form.
+ * Reduction polynomial: x^128 + x^7 + x^2 + x + 1. */
 FIO_IFUNC __m128i fio___ghash_mult_pclmul(__m128i a, __m128i b) {
   /* Karatsuba carryless multiplication */
   __m128i tmp3 = _mm_clmulepi64_si128(a, b, 0x00); /* a_lo * b_lo */
@@ -288,26 +348,9 @@ FIO_IFUNC __m128i fio___ghash_mult_pclmul(__m128i a, __m128i b) {
   tmp4 = _mm_xor_si128(tmp4, tmp5);                /* cross term */
   tmp5 = _mm_slli_si128(tmp4, 8);
   tmp4 = _mm_srli_si128(tmp4, 8);
-  tmp3 = _mm_xor_si128(tmp3, tmp5); /* low 128 bits */
-  tmp6 = _mm_xor_si128(tmp6, tmp4); /* high 128 bits */
-
-  /* Reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected form).
-   * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i tmp7 = _mm_srli_epi32(tmp3, 31);
-  __m128i tmp8 = _mm_srli_epi32(tmp3, 30);
-  tmp8 = _mm_xor_si128(tmp8, _mm_srli_epi32(tmp3, 25));
-  tmp7 = _mm_xor_si128(tmp7, tmp8);
-  tmp8 = _mm_slli_si128(tmp7, 12);
-  tmp7 = _mm_srli_si128(tmp7, 4);
-  tmp3 = _mm_xor_si128(tmp3, tmp8);
-  __m128i tmp0 = _mm_slli_epi32(tmp3, 1);
-  __m128i tmp1 = _mm_slli_epi32(tmp3, 2);
-  __m128i tmp2 = _mm_slli_epi32(tmp3, 7);
-  tmp0 = _mm_xor_si128(tmp0, tmp1);
-  tmp0 = _mm_xor_si128(tmp0, tmp2);
-  tmp0 = _mm_xor_si128(tmp0, tmp7);
-  tmp0 = _mm_xor_si128(tmp0, tmp3);
-  return _mm_xor_si128(tmp0, tmp6);
+  __m128i lo = _mm_xor_si128(tmp3, tmp5); /* low 128 bits */
+  __m128i hi = _mm_xor_si128(tmp6, tmp4); /* high 128 bits */
+  return fio___x86_ghash_reduce(lo, hi);
 }
 
 /* Byte-swap for GCM (big-endian) */
@@ -319,8 +362,9 @@ FIO_IFUNC __m128i fio___bswap128(__m128i x) {
 
 /**
  * Precompute H powers for parallel GHASH.
- * htbl[0] = H¹, htbl[1] = H², ..., htbl[n-1] = Hⁿ.
- * All stored in byte-swapped (GCM) form.
+ * Input h is in GCM format (big-endian, MSB-first).
+ * All powers are stored in bit-reflected form for use with PCLMULQDQ.
+ * htbl[0] = H¹_br, htbl[1] = H²_br, ..., htbl[n-1] = Hⁿ_br.
  *
  * When compute8 is true, computes H¹ through H⁸ (for 8-block GHASH).
  * When false, computes H¹ through H⁴ (for 4-block GHASH).
@@ -328,19 +372,21 @@ FIO_IFUNC __m128i fio___bswap128(__m128i x) {
 FIO_IFUNC void fio___x86_ghash_precompute(__m128i h,
                                           __m128i *htbl,
                                           int compute8) {
-  htbl[0] = h;                                         /* H¹ */
-  htbl[1] = fio___ghash_mult_pclmul(h, h);             /* H² */
-  htbl[2] = fio___ghash_mult_pclmul(htbl[1], h);       /* H³ */
-  htbl[3] = fio___ghash_mult_pclmul(htbl[1], htbl[1]); /* H⁴ */
+  __m128i h_br = fio___x86_bitreflect_bytes(h);
+  htbl[0] = h_br;                                      /* H¹_br */
+  htbl[1] = fio___ghash_mult_pclmul(h_br, h_br);       /* H²_br */
+  htbl[2] = fio___ghash_mult_pclmul(htbl[1], h_br);    /* H³_br */
+  htbl[3] = fio___ghash_mult_pclmul(htbl[1], htbl[1]); /* H⁴_br */
   if (compute8) {
-    htbl[4] = fio___ghash_mult_pclmul(htbl[3], h);       /* H⁵ */
-    htbl[5] = fio___ghash_mult_pclmul(htbl[3], htbl[1]); /* H⁶ */
-    htbl[6] = fio___ghash_mult_pclmul(htbl[3], htbl[2]); /* H⁷ */
-    htbl[7] = fio___ghash_mult_pclmul(htbl[3], htbl[3]); /* H⁸ */
+    htbl[4] = fio___ghash_mult_pclmul(htbl[3], h_br);    /* H⁵_br */
+    htbl[5] = fio___ghash_mult_pclmul(htbl[3], htbl[1]); /* H⁶_br */
+    htbl[6] = fio___ghash_mult_pclmul(htbl[3], htbl[2]); /* H⁷_br */
+    htbl[7] = fio___ghash_mult_pclmul(htbl[3], htbl[3]); /* H⁸_br */
   }
 }
 
 /* 4-way parallel GHASH with deferred reduction.
+ * All inputs must be in bit-reflected form. Result is bit-reflected.
  * Accumulates Karatsuba partial products across all 4 multiplies,
  * then performs a single reduction. Saves 3 reductions per 4-block batch. */
 FIO_IFUNC __m128i fio___x86_ghash_mult4(__m128i x0,
@@ -377,32 +423,17 @@ FIO_IFUNC __m128i fio___x86_ghash_mult4(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected).
-   * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i r7 = _mm_srli_epi32(lo, 31);
-  __m128i r8 = _mm_srli_epi32(lo, 30);
-  r8 = _mm_xor_si128(r8, _mm_srli_epi32(lo, 25));
-  r7 = _mm_xor_si128(r7, r8);
-  r8 = _mm_slli_si128(r7, 12);
-  r7 = _mm_srli_si128(r7, 4);
-  lo = _mm_xor_si128(lo, r8);
-  __m128i r0 = _mm_slli_epi32(lo, 1);
-  __m128i r1 = _mm_slli_epi32(lo, 2);
-  __m128i r2 = _mm_slli_epi32(lo, 7);
-  r0 = _mm_xor_si128(r0, r1);
-  r0 = _mm_xor_si128(r0, r2);
-  r0 = _mm_xor_si128(r0, r7);
-  r0 = _mm_xor_si128(r0, lo);
-  return _mm_xor_si128(r0, hi);
+  return fio___x86_ghash_reduce(lo, hi);
 }
 
 /**
  * 8-way parallel GHASH with deferred reduction.
+ * All inputs must be in bit-reflected form. Result is bit-reflected.
  * Accumulates schoolbook partial products across all 8 multiplies,
  * then performs a single Karatsuba combination + single reduction.
  * Saves 7 reductions per 8-block batch vs calling fio___ghash_mult_pclmul 8x.
  *
- * htbl[7] = H⁸ (for x0), htbl[6] = H⁷, ..., htbl[0] = H¹ (for x7).
+ * htbl[7] = H⁸_br (for x0), htbl[6] = H⁷_br, ..., htbl[0] = H¹_br (for x7).
  */
 FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
                                         __m128i x1,
@@ -466,23 +497,7 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
   lo = _mm_xor_si128(lo, _mm_slli_si128(mid, 8));
   hi = _mm_xor_si128(hi, _mm_srli_si128(mid, 8));
 
-  /* Single reduction modulo x^128 + x^7 + x^2 + x + 1 (bit-reflected).
-   * Intel CLMUL App Note v2.02, Algorithm 1 (reflected). */
-  __m128i r7 = _mm_srli_epi32(lo, 31);
-  __m128i r8 = _mm_srli_epi32(lo, 30);
-  r8 = _mm_xor_si128(r8, _mm_srli_epi32(lo, 25));
-  r7 = _mm_xor_si128(r7, r8);
-  r8 = _mm_slli_si128(r7, 12);
-  r7 = _mm_srli_si128(r7, 4);
-  lo = _mm_xor_si128(lo, r8);
-  __m128i r0 = _mm_slli_epi32(lo, 1);
-  __m128i r1 = _mm_slli_epi32(lo, 2);
-  __m128i r2 = _mm_slli_epi32(lo, 7);
-  r0 = _mm_xor_si128(r0, r1);
-  r0 = _mm_xor_si128(r0, r2);
-  r0 = _mm_xor_si128(r0, r7);
-  r0 = _mm_xor_si128(r0, lo);
-  return _mm_xor_si128(r0, hi);
+  return fio___x86_ghash_reduce(lo, hi);
 }
 
 /* === Interleaved AES+GHASH macros for 8-block pipeline ===
@@ -539,29 +554,14 @@ FIO_IFUNC __m128i fio___x86_ghash_mult8(__m128i x0,
 
 /* Finalize GHASH: Karatsuba combination + reduction.
  * Produces the final 128-bit GHASH result from accumulated partial products.
- * Uses Intel CLMUL App Note v2.02 reflected reduction for bit-reflected data.
+ * Uses 64-bit-shift reduction matching fio___x86_ghash_reduce.
  */
 #define FIO___X86_GHASH_FINAL(result, gh_lo, gh_hi, gh_m1, gh_m2)              \
   do {                                                                         \
     __m128i gf_mid_ = _mm_xor_si128(gh_m1, gh_m2);                             \
     gh_lo = _mm_xor_si128(gh_lo, _mm_slli_si128(gf_mid_, 8));                  \
     gh_hi = _mm_xor_si128(gh_hi, _mm_srli_si128(gf_mid_, 8));                  \
-    /* Reflected reduction: x^128 + x^7 + x^2 + x + 1 */                       \
-    __m128i gf7_ = _mm_srli_epi32(gh_lo, 31);                                  \
-    __m128i gf8_ = _mm_srli_epi32(gh_lo, 30);                                  \
-    gf8_ = _mm_xor_si128(gf8_, _mm_srli_epi32(gh_lo, 25));                     \
-    gf7_ = _mm_xor_si128(gf7_, gf8_);                                          \
-    gf8_ = _mm_slli_si128(gf7_, 12);                                           \
-    gf7_ = _mm_srli_si128(gf7_, 4);                                            \
-    gh_lo = _mm_xor_si128(gh_lo, gf8_);                                        \
-    __m128i gf0_ = _mm_slli_epi32(gh_lo, 1);                                   \
-    __m128i gf1_ = _mm_slli_epi32(gh_lo, 2);                                   \
-    __m128i gf2_ = _mm_slli_epi32(gh_lo, 7);                                   \
-    gf0_ = _mm_xor_si128(gf0_, gf1_);                                          \
-    gf0_ = _mm_xor_si128(gf0_, gf2_);                                          \
-    gf0_ = _mm_xor_si128(gf0_, gf7_);                                          \
-    gf0_ = _mm_xor_si128(gf0_, gh_lo);                                         \
-    result = _mm_xor_si128(gf0_, gh_hi);                                       \
+    result = fio___x86_ghash_reduce(gh_lo, gh_hi);                             \
   } while (0)
 
 /* Increment counter (last 32 bits, big-endian) */
@@ -590,62 +590,75 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   size_t orig_len = len;
   size_t orig_adlen = adlen;
 
-  /* H is loaded directly (bit-reflected form) — no bswap needed */
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
 
-  /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
+  /* Precompute H powers in bit-reflected form for PCLMULQDQ */
   if (len >= 128 || adlen >= 128)
     fio___x86_ghash_precompute(h, htbl, 1);
   else if (len >= 64 || adlen >= 64)
     fio___x86_ghash_precompute(h, htbl, 0);
   else
-    htbl[0] = h; /* Only H^1 needed for single-block path */
+    htbl[0] = fio___x86_bitreflect_bytes(h); /* Only H^1_br needed */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = _mm_loadu_si128((const __m128i *)j0_bytes);
   ctr = j0;
-  tag = _mm_setzero_si128();
+  tag = _mm_setzero_si128(); /* tag in bit-reflected domain (zero = self) */
 
-  /* GHASH over AAD - process 8 blocks, then 4 blocks, then single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over AAD — all data bit-reflected before entering GHASH */
   while (adlen >= 128) {
-    __m128i a0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)aad));
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
-    __m128i a4 = _mm_loadu_si128((const __m128i *)(aad + 64));
-    __m128i a5 = _mm_loadu_si128((const __m128i *)(aad + 80));
-    __m128i a6 = _mm_loadu_si128((const __m128i *)(aad + 96));
-    __m128i a7 = _mm_loadu_si128((const __m128i *)(aad + 112));
+    __m128i a0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
+    __m128i a4 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 64)));
+    __m128i a5 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 80)));
+    __m128i a6 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 96)));
+    __m128i a7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 112)));
     tag = fio___x86_ghash_mult8(a0, a1, a2, a3, a4, a5, a6, a7, htbl);
     aad += 128;
     adlen -= 128;
   }
   while (adlen >= 64) {
-    __m128i a0 = _mm_loadu_si128((const __m128i *)aad);
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
+    __m128i a0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
     a0 = _mm_xor_si128(tag, a0);
     tag = fio___x86_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)aad);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
   /* === 8-block interleaved AES-CTR encryption + GHASH === */
@@ -687,15 +700,15 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)(p + 96), ct6);
     _mm_storeu_si128((__m128i *)(p + 112), ct7);
 
-    /* Save previous ciphertext (bit-reflected, direct load) for GHASH */
-    __m128i prev0 = _mm_xor_si128(tag, ct0);
-    __m128i prev1 = ct1;
-    __m128i prev2 = ct2;
-    __m128i prev3 = ct3;
-    __m128i prev4 = ct4;
-    __m128i prev5 = ct5;
-    __m128i prev6 = ct6;
-    __m128i prev7 = ct7;
+    /* Save previous ciphertext (bit-reflected) for GHASH */
+    __m128i prev0 = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+    __m128i prev1 = fio___x86_bitreflect_bytes(ct1);
+    __m128i prev2 = fio___x86_bitreflect_bytes(ct2);
+    __m128i prev3 = fio___x86_bitreflect_bytes(ct3);
+    __m128i prev4 = fio___x86_bitreflect_bytes(ct4);
+    __m128i prev5 = fio___x86_bitreflect_bytes(ct5);
+    __m128i prev6 = fio___x86_bitreflect_bytes(ct6);
+    __m128i prev7 = fio___x86_bitreflect_bytes(ct7);
 
     p += 128;
     len -= 128;
@@ -868,14 +881,14 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
       _mm_storeu_si128((__m128i *)(p + 112), ct7);
 
       /* Save current ciphertext (bit-reflected) for GHASH in next iteration */
-      prev0 = _mm_xor_si128(tag, ct0);
-      prev1 = ct1;
-      prev2 = ct2;
-      prev3 = ct3;
-      prev4 = ct4;
-      prev5 = ct5;
-      prev6 = ct6;
-      prev7 = ct7;
+      prev0 = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+      prev1 = fio___x86_bitreflect_bytes(ct1);
+      prev2 = fio___x86_bitreflect_bytes(ct2);
+      prev3 = fio___x86_bitreflect_bytes(ct3);
+      prev4 = fio___x86_bitreflect_bytes(ct4);
+      prev5 = fio___x86_bitreflect_bytes(ct5);
+      prev6 = fio___x86_bitreflect_bytes(ct6);
+      prev7 = fio___x86_bitreflect_bytes(ct7);
 
       p += 128;
       len -= 128;
@@ -919,8 +932,12 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)(p + 32), ct2);
     _mm_storeu_si128((__m128i *)(p + 48), ct3);
 
-    ct0 = _mm_xor_si128(tag, ct0);
-    tag = fio___x86_ghash_mult4(ct0, ct1, ct2, ct3, htbl);
+    __m128i ct0_br = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+    tag = fio___x86_ghash_mult4(ct0_br,
+                                fio___x86_bitreflect_bytes(ct1),
+                                fio___x86_bitreflect_bytes(ct2),
+                                fio___x86_bitreflect_bytes(ct3),
+                                htbl);
     p += 64;
     len -= 64;
   }
@@ -932,8 +949,8 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
     __m128i plaintext = _mm_loadu_si128((const __m128i *)p);
     __m128i ciphertext = _mm_xor_si128(plaintext, keystream);
     _mm_storeu_si128((__m128i *)p, ciphertext);
-    tag = _mm_xor_si128(tag, ciphertext);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ciphertext));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     p += 16;
     len -= 16;
   }
@@ -948,21 +965,23 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
       p[i] ^= ks_bytes[i];
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH length block — fio_u2buf64_be writes big-endian, direct load is
-   * bit-reflected form (same as loading big-endian GCM data directly) */
+  /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  __m128i len_blk = _mm_loadu_si128((const __m128i *)len_block);
-  tag = _mm_xor_si128(tag, len_blk);
-  tag = fio___ghash_mult_pclmul(tag, h);
+  tag = _mm_xor_si128(
+      tag,
+      fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)len_block)));
+  tag = fio___ghash_mult_pclmul(tag, htbl[0]);
 
-  /* Final tag: GHASH result is already in GCM (big-endian) format — no bswap */
+  /* Final tag: convert from bit-reflected domain back to GCM format */
+  tag = fio___x86_bitreflect_bytes(tag);
   __m128i s = fio___aesni_encrypt128(j0, rk);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
@@ -986,62 +1005,75 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   size_t orig_len = len;
   size_t orig_adlen = adlen;
 
-  /* H is loaded directly (bit-reflected form) — no bswap needed */
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
 
-  /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
+  /* Precompute H powers in bit-reflected form for PCLMULQDQ */
   if (len >= 128 || adlen >= 128)
     fio___x86_ghash_precompute(h, htbl, 1);
   else if (len >= 64 || adlen >= 64)
     fio___x86_ghash_precompute(h, htbl, 0);
   else
-    htbl[0] = h; /* Only H^1 needed for single-block path */
+    htbl[0] = fio___x86_bitreflect_bytes(h); /* Only H^1_br needed */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = _mm_loadu_si128((const __m128i *)j0_bytes);
   ctr = j0;
-  tag = _mm_setzero_si128();
+  tag = _mm_setzero_si128(); /* tag in bit-reflected domain */
 
-  /* GHASH over AAD - 8-block, 4-block, single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over AAD — all data bit-reflected before entering GHASH */
   while (adlen >= 128) {
-    __m128i a0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)aad));
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
-    __m128i a4 = _mm_loadu_si128((const __m128i *)(aad + 64));
-    __m128i a5 = _mm_loadu_si128((const __m128i *)(aad + 80));
-    __m128i a6 = _mm_loadu_si128((const __m128i *)(aad + 96));
-    __m128i a7 = _mm_loadu_si128((const __m128i *)(aad + 112));
+    __m128i a0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
+    __m128i a4 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 64)));
+    __m128i a5 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 80)));
+    __m128i a6 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 96)));
+    __m128i a7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 112)));
     tag = fio___x86_ghash_mult8(a0, a1, a2, a3, a4, a5, a6, a7, htbl);
     aad += 128;
     adlen -= 128;
   }
   while (adlen >= 64) {
-    __m128i a0 = _mm_loadu_si128((const __m128i *)aad);
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
+    __m128i a0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
     a0 = _mm_xor_si128(tag, a0);
     tag = fio___x86_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)aad);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
   /* === 8-block interleaved AES-CTR encryption + GHASH === */
@@ -1083,14 +1115,14 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)(p + 96), ct6);
     _mm_storeu_si128((__m128i *)(p + 112), ct7);
 
-    __m128i prev0 = _mm_xor_si128(tag, ct0);
-    __m128i prev1 = ct1;
-    __m128i prev2 = ct2;
-    __m128i prev3 = ct3;
-    __m128i prev4 = ct4;
-    __m128i prev5 = ct5;
-    __m128i prev6 = ct6;
-    __m128i prev7 = ct7;
+    __m128i prev0 = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+    __m128i prev1 = fio___x86_bitreflect_bytes(ct1);
+    __m128i prev2 = fio___x86_bitreflect_bytes(ct2);
+    __m128i prev3 = fio___x86_bitreflect_bytes(ct3);
+    __m128i prev4 = fio___x86_bitreflect_bytes(ct4);
+    __m128i prev5 = fio___x86_bitreflect_bytes(ct5);
+    __m128i prev6 = fio___x86_bitreflect_bytes(ct6);
+    __m128i prev7 = fio___x86_bitreflect_bytes(ct7);
 
     p += 128;
     len -= 128;
@@ -1288,14 +1320,14 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
       _mm_storeu_si128((__m128i *)(p + 96), ct6);
       _mm_storeu_si128((__m128i *)(p + 112), ct7);
 
-      prev0 = _mm_xor_si128(tag, ct0);
-      prev1 = ct1;
-      prev2 = ct2;
-      prev3 = ct3;
-      prev4 = ct4;
-      prev5 = ct5;
-      prev6 = ct6;
-      prev7 = ct7;
+      prev0 = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+      prev1 = fio___x86_bitreflect_bytes(ct1);
+      prev2 = fio___x86_bitreflect_bytes(ct2);
+      prev3 = fio___x86_bitreflect_bytes(ct3);
+      prev4 = fio___x86_bitreflect_bytes(ct4);
+      prev5 = fio___x86_bitreflect_bytes(ct5);
+      prev6 = fio___x86_bitreflect_bytes(ct6);
+      prev7 = fio___x86_bitreflect_bytes(ct7);
 
       p += 128;
       len -= 128;
@@ -1339,8 +1371,12 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)(p + 32), ct2);
     _mm_storeu_si128((__m128i *)(p + 48), ct3);
 
-    ct0 = _mm_xor_si128(tag, ct0);
-    tag = fio___x86_ghash_mult4(ct0, ct1, ct2, ct3, htbl);
+    __m128i ct0_br = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ct0));
+    tag = fio___x86_ghash_mult4(ct0_br,
+                                fio___x86_bitreflect_bytes(ct1),
+                                fio___x86_bitreflect_bytes(ct2),
+                                fio___x86_bitreflect_bytes(ct3),
+                                htbl);
     p += 64;
     len -= 64;
   }
@@ -1352,8 +1388,8 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
     __m128i plaintext = _mm_loadu_si128((const __m128i *)p);
     __m128i ciphertext = _mm_xor_si128(plaintext, keystream);
     _mm_storeu_si128((__m128i *)p, ciphertext);
-    tag = _mm_xor_si128(tag, ciphertext);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(tag, fio___x86_bitreflect_bytes(ciphertext));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     p += 16;
     len -= 16;
   }
@@ -1366,20 +1402,23 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
       p[i] ^= ks_bytes[i];
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH length block — direct load (bit-reflected form) */
+  /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  __m128i len_blk = _mm_loadu_si128((const __m128i *)len_block);
-  tag = _mm_xor_si128(tag, len_blk);
-  tag = fio___ghash_mult_pclmul(tag, h);
+  tag = _mm_xor_si128(
+      tag,
+      fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)len_block)));
+  tag = fio___ghash_mult_pclmul(tag, htbl[0]);
 
-  /* Final tag: GHASH result is already in GCM (big-endian) format — no bswap */
+  /* Final tag: convert from bit-reflected domain back to GCM format */
+  tag = fio___x86_bitreflect_bytes(tag);
   __m128i s = fio___aesni_encrypt256(j0, rk);
   tag = _mm_xor_si128(tag, s);
   _mm_storeu_si128((__m128i *)mac, tag);
@@ -1403,115 +1442,144 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
   size_t orig_len = len;
   size_t orig_adlen = adlen;
 
-  /* H is loaded directly (bit-reflected form) — no bswap needed */
   fio___aesni_gcm128_init(rk, &h, (const uint8_t *)key);
 
-  /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
+  /* Precompute H powers in bit-reflected form for PCLMULQDQ */
   if (len >= 128 || adlen >= 128)
     fio___x86_ghash_precompute(h, htbl, 1);
   else if (len >= 64 || adlen >= 64)
     fio___x86_ghash_precompute(h, htbl, 0);
   else
-    htbl[0] = h; /* Only H^1 needed for single-block path */
+    htbl[0] = fio___x86_bitreflect_bytes(h); /* Only H^1_br needed */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
   j0_bytes[15] = 1;
   j0 = _mm_loadu_si128((const __m128i *)j0_bytes);
   ctr = j0;
-  tag = _mm_setzero_si128();
+  tag = _mm_setzero_si128(); /* tag in bit-reflected domain */
 
-  /* GHASH over AAD - 8-block, 4-block, single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over AAD — all data bit-reflected before entering GHASH */
   while (adlen >= 128) {
-    __m128i a0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)aad));
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
-    __m128i a4 = _mm_loadu_si128((const __m128i *)(aad + 64));
-    __m128i a5 = _mm_loadu_si128((const __m128i *)(aad + 80));
-    __m128i a6 = _mm_loadu_si128((const __m128i *)(aad + 96));
-    __m128i a7 = _mm_loadu_si128((const __m128i *)(aad + 112));
+    __m128i a0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
+    __m128i a4 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 64)));
+    __m128i a5 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 80)));
+    __m128i a6 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 96)));
+    __m128i a7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 112)));
     tag = fio___x86_ghash_mult8(a0, a1, a2, a3, a4, a5, a6, a7, htbl);
     aad += 128;
     adlen -= 128;
   }
   while (adlen >= 64) {
-    __m128i a0 = _mm_loadu_si128((const __m128i *)aad);
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
+    __m128i a0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
     a0 = _mm_xor_si128(tag, a0);
     tag = fio___x86_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)aad);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH over ciphertext — 8-block, 4-block, single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over ciphertext — all data bit-reflected before entering GHASH */
   const uint8_t *ct = p;
   size_t ct_len = orig_len;
   while (ct_len >= 128) {
-    __m128i c0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)ct));
-    __m128i c1 = _mm_loadu_si128((const __m128i *)(ct + 16));
-    __m128i c2 = _mm_loadu_si128((const __m128i *)(ct + 32));
-    __m128i c3 = _mm_loadu_si128((const __m128i *)(ct + 48));
-    __m128i c4 = _mm_loadu_si128((const __m128i *)(ct + 64));
-    __m128i c5 = _mm_loadu_si128((const __m128i *)(ct + 80));
-    __m128i c6 = _mm_loadu_si128((const __m128i *)(ct + 96));
-    __m128i c7 = _mm_loadu_si128((const __m128i *)(ct + 112));
+    __m128i c0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct)));
+    __m128i c1 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 16)));
+    __m128i c2 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 32)));
+    __m128i c3 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 48)));
+    __m128i c4 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 64)));
+    __m128i c5 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 80)));
+    __m128i c6 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 96)));
+    __m128i c7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(ct + 112)));
     tag = fio___x86_ghash_mult8(c0, c1, c2, c3, c4, c5, c6, c7, htbl);
     ct += 128;
     ct_len -= 128;
   }
   while (ct_len >= 64) {
-    __m128i c0 = _mm_loadu_si128((const __m128i *)ct);
-    __m128i c1 = _mm_loadu_si128((const __m128i *)(ct + 16));
-    __m128i c2 = _mm_loadu_si128((const __m128i *)(ct + 32));
-    __m128i c3 = _mm_loadu_si128((const __m128i *)(ct + 48));
+    __m128i c0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct));
+    __m128i c1 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 16)));
+    __m128i c2 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 32)));
+    __m128i c3 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 48)));
     c0 = _mm_xor_si128(tag, c0);
     tag = fio___x86_ghash_mult4(c0, c1, c2, c3, htbl);
     ct += 64;
     ct_len -= 64;
   }
   while (ct_len >= 16) {
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)ct);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     ct += 16;
     ct_len -= 16;
   }
   if (ct_len > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, ct, ct_len);
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH length block — direct load (bit-reflected form) */
+  /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  __m128i len_blk = _mm_loadu_si128((const __m128i *)len_block);
-  tag = _mm_xor_si128(tag, len_blk);
-  tag = fio___ghash_mult_pclmul(tag, h);
+  tag = _mm_xor_si128(
+      tag,
+      fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)len_block)));
+  tag = fio___ghash_mult_pclmul(tag, htbl[0]);
 
-  /* Compute and verify tag: GHASH result is already in GCM format — no bswap */
+  /* Final tag: convert from bit-reflected domain back to GCM format */
+  tag = fio___x86_bitreflect_bytes(tag);
   __m128i s = fio___aesni_encrypt128(j0, rk);
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];
@@ -1638,16 +1706,15 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   size_t orig_len = len;
   size_t orig_adlen = adlen;
 
-  /* H is loaded directly (bit-reflected form) — no bswap needed */
   fio___aesni_gcm256_init(rk, &h, (const uint8_t *)key);
 
-  /* Precompute H powers: H⁸ for 8-block, H⁴ for 4-block, H¹ for small */
+  /* Precompute H powers in bit-reflected form for PCLMULQDQ */
   if (len >= 128 || adlen >= 128)
     fio___x86_ghash_precompute(h, htbl, 1);
   else if (len >= 64 || adlen >= 64)
     fio___x86_ghash_precompute(h, htbl, 0);
   else
-    htbl[0] = h; /* Only H^1 needed for single-block path */
+    htbl[0] = fio___x86_bitreflect_bytes(h); /* Only H^1_br needed */
 
   uint8_t j0_bytes[16] = {0};
   FIO_MEMCPY(j0_bytes, nonce, 12);
@@ -1656,97 +1723,127 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
   ctr = j0;
   tag = _mm_setzero_si128();
 
-  /* GHASH over AAD - 8-block, 4-block, single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over AAD — all data bit-reflected before entering GHASH */
   while (adlen >= 128) {
-    __m128i a0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)aad));
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
-    __m128i a4 = _mm_loadu_si128((const __m128i *)(aad + 64));
-    __m128i a5 = _mm_loadu_si128((const __m128i *)(aad + 80));
-    __m128i a6 = _mm_loadu_si128((const __m128i *)(aad + 96));
-    __m128i a7 = _mm_loadu_si128((const __m128i *)(aad + 112));
+    __m128i a0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
+    __m128i a4 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 64)));
+    __m128i a5 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 80)));
+    __m128i a6 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 96)));
+    __m128i a7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 112)));
     tag = fio___x86_ghash_mult8(a0, a1, a2, a3, a4, a5, a6, a7, htbl);
     aad += 128;
     adlen -= 128;
   }
   while (adlen >= 64) {
-    __m128i a0 = _mm_loadu_si128((const __m128i *)aad);
-    __m128i a1 = _mm_loadu_si128((const __m128i *)(aad + 16));
-    __m128i a2 = _mm_loadu_si128((const __m128i *)(aad + 32));
-    __m128i a3 = _mm_loadu_si128((const __m128i *)(aad + 48));
+    __m128i a0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad));
+    __m128i a1 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 16)));
+    __m128i a2 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 32)));
+    __m128i a3 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(aad + 48)));
     a0 = _mm_xor_si128(tag, a0);
     tag = fio___x86_ghash_mult4(a0, a1, a2, a3, htbl);
     aad += 64;
     adlen -= 64;
   }
   while (adlen >= 16) {
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)aad);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)aad)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     aad += 16;
     adlen -= 16;
   }
   if (adlen > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, aad, adlen);
-    __m128i aad_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, aad_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH over ciphertext — 8-block, 4-block, single.
-   * Data loaded directly (bit-reflected) — no bswap on inputs. */
+  /* GHASH over ciphertext — all data bit-reflected before entering GHASH */
   const uint8_t *ct = p;
   size_t ct_len = orig_len;
   while (ct_len >= 128) {
-    __m128i c0 = _mm_xor_si128(tag, _mm_loadu_si128((const __m128i *)ct));
-    __m128i c1 = _mm_loadu_si128((const __m128i *)(ct + 16));
-    __m128i c2 = _mm_loadu_si128((const __m128i *)(ct + 32));
-    __m128i c3 = _mm_loadu_si128((const __m128i *)(ct + 48));
-    __m128i c4 = _mm_loadu_si128((const __m128i *)(ct + 64));
-    __m128i c5 = _mm_loadu_si128((const __m128i *)(ct + 80));
-    __m128i c6 = _mm_loadu_si128((const __m128i *)(ct + 96));
-    __m128i c7 = _mm_loadu_si128((const __m128i *)(ct + 112));
+    __m128i c0 = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct)));
+    __m128i c1 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 16)));
+    __m128i c2 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 32)));
+    __m128i c3 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 48)));
+    __m128i c4 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 64)));
+    __m128i c5 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 80)));
+    __m128i c6 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 96)));
+    __m128i c7 = fio___x86_bitreflect_bytes(
+        _mm_loadu_si128((const __m128i *)(ct + 112)));
     tag = fio___x86_ghash_mult8(c0, c1, c2, c3, c4, c5, c6, c7, htbl);
     ct += 128;
     ct_len -= 128;
   }
   while (ct_len >= 64) {
-    __m128i c0 = _mm_loadu_si128((const __m128i *)ct);
-    __m128i c1 = _mm_loadu_si128((const __m128i *)(ct + 16));
-    __m128i c2 = _mm_loadu_si128((const __m128i *)(ct + 32));
-    __m128i c3 = _mm_loadu_si128((const __m128i *)(ct + 48));
+    __m128i c0 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct));
+    __m128i c1 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 16)));
+    __m128i c2 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 32)));
+    __m128i c3 =
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)(ct + 48)));
     c0 = _mm_xor_si128(tag, c0);
     tag = fio___x86_ghash_mult4(c0, c1, c2, c3, htbl);
     ct += 64;
     ct_len -= 64;
   }
   while (ct_len >= 16) {
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)ct);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)ct)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
     ct += 16;
     ct_len -= 16;
   }
   if (ct_len > 0) {
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, ct, ct_len);
-    __m128i ct_block = _mm_loadu_si128((const __m128i *)tmp);
-    tag = _mm_xor_si128(tag, ct_block);
-    tag = fio___ghash_mult_pclmul(tag, h);
+    tag = _mm_xor_si128(
+        tag,
+        fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)tmp)));
+    tag = fio___ghash_mult_pclmul(tag, htbl[0]);
   }
 
-  /* GHASH length block — direct load (bit-reflected form) */
+  /* GHASH length block */
   uint8_t len_block[16] = {0};
   fio_u2buf64_be(len_block, (uint64_t)orig_adlen * 8);
   fio_u2buf64_be(len_block + 8, (uint64_t)orig_len * 8);
-  __m128i len_blk = _mm_loadu_si128((const __m128i *)len_block);
-  tag = _mm_xor_si128(tag, len_blk);
-  tag = fio___ghash_mult_pclmul(tag, h);
+  tag = _mm_xor_si128(
+      tag,
+      fio___x86_bitreflect_bytes(_mm_loadu_si128((const __m128i *)len_block)));
+  tag = fio___ghash_mult_pclmul(tag, htbl[0]);
 
-  /* Compute and verify tag: GHASH result is already in GCM format — no bswap */
+  /* Final tag: convert from bit-reflected domain back to GCM format */
+  tag = fio___x86_bitreflect_bytes(tag);
   __m128i s = fio___aesni_encrypt256(j0, rk);
   tag = _mm_xor_si128(tag, s);
   uint8_t computed_mac[16];

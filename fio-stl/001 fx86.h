@@ -46,7 +46,6 @@ for fio_u128 / fio_u256. On real X86, these types already exist from
 ***************************************************************************** */
 
 #if !defined(FIO___HAS_X86_INTRIN)
-// #warning Using face
 typedef fio_u128 __m128i;
 typedef fio_u256 __m256i;
 /* _MM_HINT constants for _mm_prefetch (no-op in fake mode) */
@@ -65,7 +64,7 @@ Section A: SSE2 Intrinsics (20 functions)
 /* --- Load / Store --- */
 
 /** _mm_loadu_si128: load 128 bits from unaligned memory. */
-FIO_IFUNC __m128i fio_fx86_mm_loadu_si128(const void *p) {
+FIO_IFUNC __m128i fio_fx86_loadu_si128(const void *p) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_loadu_si128((const __m128i *)p);
 #else
@@ -76,7 +75,7 @@ FIO_IFUNC __m128i fio_fx86_mm_loadu_si128(const void *p) {
 }
 
 /** _mm_load_si128: load 128 bits from 16-byte aligned memory. */
-FIO_IFUNC __m128i fio_fx86_mm_load_si128(const void *p) {
+FIO_IFUNC __m128i fio_fx86_load_si128(const void *p) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_load_si128((const __m128i *)p);
 #else
@@ -87,7 +86,7 @@ FIO_IFUNC __m128i fio_fx86_mm_load_si128(const void *p) {
 }
 
 /** _mm_storeu_si128: store 128 bits to unaligned memory. */
-FIO_IFUNC void fio_fx86_mm_storeu_si128(void *p, __m128i a) {
+FIO_IFUNC void fio_fx86_storeu_si128(void *p, __m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   _mm_storeu_si128((__m128i *)p, a);
 #else
@@ -98,7 +97,7 @@ FIO_IFUNC void fio_fx86_mm_storeu_si128(void *p, __m128i a) {
 /* --- Arithmetic --- */
 
 /** _mm_add_epi32: add packed 32-bit integers. */
-FIO_IFUNC __m128i fio_fx86_mm_add_epi32(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_add_epi32(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_add_epi32(a, b);
 #else
@@ -112,7 +111,7 @@ FIO_IFUNC __m128i fio_fx86_mm_add_epi32(__m128i a, __m128i b) {
 /* --- Bitwise --- */
 
 /** _mm_xor_si128: bitwise XOR of 128-bit values. */
-FIO_IFUNC __m128i fio_fx86_mm_xor_si128(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_xor_si128(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_xor_si128(a, b);
 #else
@@ -124,7 +123,7 @@ FIO_IFUNC __m128i fio_fx86_mm_xor_si128(__m128i a, __m128i b) {
 }
 
 /** _mm_or_si128: bitwise OR of 128-bit values. */
-FIO_IFUNC __m128i fio_fx86_mm_or_si128(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_or_si128(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_or_si128(a, b);
 #else
@@ -136,7 +135,7 @@ FIO_IFUNC __m128i fio_fx86_mm_or_si128(__m128i a, __m128i b) {
 }
 
 /** _mm_and_si128: bitwise AND of 128-bit values. */
-FIO_IFUNC __m128i fio_fx86_mm_and_si128(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_and_si128(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_and_si128(a, b);
 #else
@@ -150,7 +149,7 @@ FIO_IFUNC __m128i fio_fx86_mm_and_si128(__m128i a, __m128i b) {
 /* --- Shift (whole register) --- */
 
 /** _mm_slli_si128: shift left by imm8 BYTES (not bits), zero-fill right. */
-FIO_IFUNC __m128i fio_fx86_mm_slli_si128(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_slli_si128(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   /* Must use a switch because the intrinsic requires a compile-time constant */
   switch (imm8) {
@@ -188,7 +187,7 @@ FIO_IFUNC __m128i fio_fx86_mm_slli_si128(__m128i a, int imm8) {
 }
 
 /** _mm_srli_si128: shift right by imm8 BYTES (not bits), zero-fill left. */
-FIO_IFUNC __m128i fio_fx86_mm_srli_si128(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_srli_si128(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   switch (imm8) {
   case 0: return a;
@@ -227,7 +226,7 @@ FIO_IFUNC __m128i fio_fx86_mm_srli_si128(__m128i a, int imm8) {
 /* --- Shift (per-element) --- */
 
 /** _mm_slli_epi32: shift each 32-bit lane left by imm8 bits. */
-FIO_IFUNC __m128i fio_fx86_mm_slli_epi32(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_slli_epi32(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   switch (imm8) {
   case 0: return a;
@@ -260,7 +259,7 @@ FIO_IFUNC __m128i fio_fx86_mm_slli_epi32(__m128i a, int imm8) {
 }
 
 /** _mm_srli_epi32: shift each 32-bit lane right (logical) by imm8 bits. */
-FIO_IFUNC __m128i fio_fx86_mm_srli_epi32(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_srli_epi32(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   switch (imm8) {
   case 0: return a;
@@ -291,10 +290,72 @@ FIO_IFUNC __m128i fio_fx86_mm_srli_epi32(__m128i a, int imm8) {
 #endif
 }
 
+/** _mm_slli_epi64: shift each 64-bit lane left by imm8 bits. */
+FIO_IFUNC __m128i fio_fx86_slli_epi64(__m128i a, int imm8) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+  switch (imm8) {
+  case 0: return a;
+  case 1: return _mm_slli_epi64(a, 1);
+  case 2: return _mm_slli_epi64(a, 2);
+  case 7: return _mm_slli_epi64(a, 7);
+  case 57: return _mm_slli_epi64(a, 57);
+  case 62: return _mm_slli_epi64(a, 62);
+  case 63: return _mm_slli_epi64(a, 63);
+  default: {
+    __m128i r;
+    for (int i = 0; i < 2; ++i)
+      ((uint64_t *)&r)[i] =
+          (imm8 >= 64) ? 0 : (((const uint64_t *)&a)[i] << imm8);
+    return r;
+  }
+  }
+#else
+  __m128i r;
+  if (imm8 >= 64) {
+    FIO_MEMSET(&r, 0, 16);
+    return r;
+  }
+  for (int i = 0; i < 2; ++i)
+    r.u64[i] = a.u64[i] << imm8;
+  return r;
+#endif
+}
+
+/** _mm_srli_epi64: shift each 64-bit lane right (logical) by imm8 bits. */
+FIO_IFUNC __m128i fio_fx86_srli_epi64(__m128i a, int imm8) {
+#if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
+  switch (imm8) {
+  case 0: return a;
+  case 1: return _mm_srli_epi64(a, 1);
+  case 2: return _mm_srli_epi64(a, 2);
+  case 7: return _mm_srli_epi64(a, 7);
+  case 57: return _mm_srli_epi64(a, 57);
+  case 62: return _mm_srli_epi64(a, 62);
+  case 63: return _mm_srli_epi64(a, 63);
+  default: {
+    __m128i r;
+    for (int i = 0; i < 2; ++i)
+      ((uint64_t *)&r)[i] =
+          (imm8 >= 64) ? 0 : (((const uint64_t *)&a)[i] >> imm8);
+    return r;
+  }
+  }
+#else
+  __m128i r;
+  if (imm8 >= 64) {
+    FIO_MEMSET(&r, 0, 16);
+    return r;
+  }
+  for (int i = 0; i < 2; ++i)
+    r.u64[i] = a.u64[i] >> imm8;
+  return r;
+#endif
+}
+
 /* --- Shuffle / Permute --- */
 
 /** _mm_shuffle_epi32: shuffle 32-bit lanes according to imm8 control. */
-FIO_IFUNC __m128i fio_fx86_mm_shuffle_epi32(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_shuffle_epi32(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   switch (imm8) {
   case 0x0E: return _mm_shuffle_epi32(a, 0x0E);
@@ -324,7 +385,7 @@ FIO_IFUNC __m128i fio_fx86_mm_shuffle_epi32(__m128i a, int imm8) {
 /* --- Compare --- */
 
 /** _mm_cmpeq_epi8: compare packed 8-bit integers for equality. */
-FIO_IFUNC __m128i fio_fx86_mm_cmpeq_epi8(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_cmpeq_epi8(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_cmpeq_epi8(a, b);
 #else
@@ -338,7 +399,7 @@ FIO_IFUNC __m128i fio_fx86_mm_cmpeq_epi8(__m128i a, __m128i b) {
 /* --- Movemask --- */
 
 /** _mm_movemask_epi8: create 16-bit mask from MSBs of each byte. */
-FIO_IFUNC int fio_fx86_mm_movemask_epi8(__m128i a) {
+FIO_IFUNC int fio_fx86_movemask_epi8(__m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_movemask_epi8(a);
 #else
@@ -352,7 +413,7 @@ FIO_IFUNC int fio_fx86_mm_movemask_epi8(__m128i a) {
 /* --- Set --- */
 
 /** _mm_set_epi32: set packed 32-bit integers (high to low order). */
-FIO_IFUNC __m128i fio_fx86_mm_set_epi32(int e3, int e2, int e1, int e0) {
+FIO_IFUNC __m128i fio_fx86_set_epi32(int e3, int e2, int e1, int e0) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_set_epi32(e3, e2, e1, e0);
 #else
@@ -366,7 +427,7 @@ FIO_IFUNC __m128i fio_fx86_mm_set_epi32(int e3, int e2, int e1, int e0) {
 }
 
 /** _mm_set_epi64x: set packed 64-bit integers (high, low). */
-FIO_IFUNC __m128i fio_fx86_mm_set_epi64x(int64_t e1, int64_t e0) {
+FIO_IFUNC __m128i fio_fx86_set_epi64x(int64_t e1, int64_t e0) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_set_epi64x(e1, e0);
 #else
@@ -378,22 +439,22 @@ FIO_IFUNC __m128i fio_fx86_mm_set_epi64x(int64_t e1, int64_t e0) {
 }
 
 /** _mm_set_epi8: set packed 8-bit integers (high to low: e15..e0). */
-FIO_IFUNC __m128i fio_fx86_mm_set_epi8(char e15,
-                                       char e14,
-                                       char e13,
-                                       char e12,
-                                       char e11,
-                                       char e10,
-                                       char e9,
-                                       char e8,
-                                       char e7,
-                                       char e6,
-                                       char e5,
-                                       char e4,
-                                       char e3,
-                                       char e2,
-                                       char e1,
-                                       char e0) {
+FIO_IFUNC __m128i fio_fx86_set_epi8(char e15,
+                                    char e14,
+                                    char e13,
+                                    char e12,
+                                    char e11,
+                                    char e10,
+                                    char e9,
+                                    char e8,
+                                    char e7,
+                                    char e6,
+                                    char e5,
+                                    char e4,
+                                    char e3,
+                                    char e2,
+                                    char e1,
+                                    char e0) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_set_epi8(e15,
                       e14,
@@ -434,7 +495,7 @@ FIO_IFUNC __m128i fio_fx86_mm_set_epi8(char e15,
 }
 
 /** _mm_set1_epi8: broadcast 8-bit integer to all 16 bytes. */
-FIO_IFUNC __m128i fio_fx86_mm_set1_epi8(char a) {
+FIO_IFUNC __m128i fio_fx86_set1_epi8(char a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_set1_epi8(a);
 #else
@@ -445,7 +506,7 @@ FIO_IFUNC __m128i fio_fx86_mm_set1_epi8(char a) {
 }
 
 /** _mm_setzero_si128: return zero vector. */
-FIO_IFUNC __m128i fio_fx86_mm_setzero_si128(void) {
+FIO_IFUNC __m128i fio_fx86_setzero_si128(void) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_setzero_si128();
 #else
@@ -456,7 +517,7 @@ FIO_IFUNC __m128i fio_fx86_mm_setzero_si128(void) {
 }
 
 /** _mm_cvtsi32_si128: set low 32 bits from int, zero upper bits. */
-FIO_IFUNC __m128i fio_fx86_mm_cvtsi32_si128(int a) {
+FIO_IFUNC __m128i fio_fx86_cvtsi32_si128(int a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_cvtsi32_si128(a);
 #else
@@ -472,7 +533,7 @@ Section B: SSSE3 Intrinsics (2 functions)
 ***************************************************************************** */
 
 /** _mm_shuffle_epi8: byte-level shuffle using control mask. */
-FIO_IFUNC __m128i fio_fx86_mm_shuffle_epi8(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_shuffle_epi8(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSSE3__)
   return _mm_shuffle_epi8(a, b);
 #else
@@ -488,7 +549,7 @@ FIO_IFUNC __m128i fio_fx86_mm_shuffle_epi8(__m128i a, __m128i b) {
 }
 
 /** _mm_alignr_epi8: concatenate a:b, shift right by imm8 bytes. */
-FIO_IFUNC __m128i fio_fx86_mm_alignr_epi8(__m128i a, __m128i b, int imm8) {
+FIO_IFUNC __m128i fio_fx86_alignr_epi8(__m128i a, __m128i b, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSSE3__)
   switch (imm8) {
   case 4: return _mm_alignr_epi8(a, b, 4);
@@ -528,7 +589,7 @@ Section C: SSE4.1 Intrinsics (2 functions)
 ***************************************************************************** */
 
 /** _mm_blend_epi16: blend 16-bit lanes from a and b using imm8 mask. */
-FIO_IFUNC __m128i fio_fx86_mm_blend_epi16(__m128i a, __m128i b, int imm8) {
+FIO_IFUNC __m128i fio_fx86_blend_epi16(__m128i a, __m128i b, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_1__)
   switch (imm8) {
   case 0xF0: return _mm_blend_epi16(a, b, 0xF0);
@@ -549,7 +610,7 @@ FIO_IFUNC __m128i fio_fx86_mm_blend_epi16(__m128i a, __m128i b, int imm8) {
 }
 
 /** _mm_extract_epi32: extract 32-bit integer from lane imm8. */
-FIO_IFUNC int fio_fx86_mm_extract_epi32(__m128i a, int imm8) {
+FIO_IFUNC int fio_fx86_extract_epi32(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_1__)
   switch (imm8 & 3) {
   case 0: return _mm_extract_epi32(a, 0);
@@ -567,7 +628,7 @@ Section D: Prefetch (1 function)
 ***************************************************************************** */
 
 /** _mm_prefetch: prefetch data into cache. No-op in fake mode. */
-FIO_IFUNC void fio_fx86_mm_prefetch(const void *p, int hint) {
+FIO_IFUNC void fio_fx86_prefetch(const void *p, int hint) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   switch (hint) {
   case _MM_HINT_T0: _mm_prefetch((const char *)p, _MM_HINT_T0); break;
@@ -674,7 +735,7 @@ FIO_IFUNC void fio___fx86_mix_columns(uint8_t s[16]) {
  * _mm_aesenc_si128: one AES encryption round.
  * Performs SubBytes -> ShiftRows -> MixColumns -> AddRoundKey.
  */
-FIO_IFUNC __m128i fio_fx86_mm_aesenc_si128(__m128i a, __m128i roundkey) {
+FIO_IFUNC __m128i fio_fx86_aesenc_si128(__m128i a, __m128i roundkey) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AES__)
   return _mm_aesenc_si128(a, roundkey);
 #else
@@ -696,7 +757,7 @@ FIO_IFUNC __m128i fio_fx86_mm_aesenc_si128(__m128i a, __m128i roundkey) {
  * _mm_aesenclast_si128: last AES encryption round.
  * Performs SubBytes -> ShiftRows -> AddRoundKey (no MixColumns).
  */
-FIO_IFUNC __m128i fio_fx86_mm_aesenclast_si128(__m128i a, __m128i roundkey) {
+FIO_IFUNC __m128i fio_fx86_aesenclast_si128(__m128i a, __m128i roundkey) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AES__)
   return _mm_aesenclast_si128(a, roundkey);
 #else
@@ -723,7 +784,7 @@ FIO_IFUNC __m128i fio_fx86_mm_aesenclast_si128(__m128i a, __m128i roundkey) {
  * dst[95:64]  = SubWord(src[127:96])
  * dst[127:96] = RotWord(SubWord(src[127:96])) XOR rcon
  */
-FIO_IFUNC __m128i fio_fx86_mm_aeskeygenassist_si128(__m128i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_aeskeygenassist_si128(__m128i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AES__)
   switch (imm8) {
   case 0x00: return _mm_aeskeygenassist_si128(a, 0x00);
@@ -823,7 +884,7 @@ Carry-less (GF(2)) multiplication of selected 64-bit halves.
  *   0x11: a.hi * b.hi
  * Result is a 128-bit product in GF(2).
  */
-FIO_IFUNC __m128i fio_fx86_mm_clmulepi64_si128(__m128i a, __m128i b, int imm8) {
+FIO_IFUNC __m128i fio_fx86_clmulepi64_si128(__m128i a, __m128i b, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__PCLMUL__)
   switch (imm8) {
   case 0x00: return _mm_clmulepi64_si128(a, b, 0x00);
@@ -869,9 +930,9 @@ These implement the actual SHA round function logic.
  * msg contains the round message+constant in the low 2 dwords.
  * Performs rounds using msg[0] then msg[1].
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha256rnds2_epu32(__m128i cdgh,
-                                                __m128i abef,
-                                                __m128i msg) {
+FIO_IFUNC __m128i fio_fx86_sha256rnds2_epu32(__m128i cdgh,
+                                             __m128i abef,
+                                             __m128i msg) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha256rnds2_epu32(cdgh, abef, msg);
 #else
@@ -924,7 +985,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha256rnds2_epu32(__m128i cdgh,
  * Computes sigma0 on msg1 elements and adds to msg0.
  * sigma0(x) = ROTR(7,x) ^ ROTR(18,x) ^ SHR(3,x)
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha256msg1_epu32(__m128i msg0, __m128i msg1) {
+FIO_IFUNC __m128i fio_fx86_sha256msg1_epu32(__m128i msg0, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha256msg1_epu32(msg0, msg1);
 #else
@@ -945,7 +1006,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha256msg1_epu32(__m128i msg0, __m128i msg1) {
  * Computes sigma1 on the last two elements and propagates.
  * sigma1(x) = ROTR(17,x) ^ ROTR(19,x) ^ SHR(10,x)
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha256msg2_epu32(__m128i msg4, __m128i msg1) {
+FIO_IFUNC __m128i fio_fx86_sha256msg2_epu32(__m128i msg4, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha256msg2_epu32(msg4, msg1);
 #else
@@ -986,9 +1047,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha256msg2_epu32(__m128i msg4, __m128i msg1) {
  * func selects the round function: 0=Ch, 1=Parity, 2=Maj, 3=Parity.
  * abcd = {a, b, c, d}, e0 has e in the high dword [3].
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha1rnds4_epu32(__m128i abcd,
-                                              __m128i e0,
-                                              int func) {
+FIO_IFUNC __m128i fio_fx86_sha1rnds4_epu32(__m128i abcd, __m128i e0, int func) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   switch (func) {
   case 0: return _mm_sha1rnds4_epu32(abcd, e0, 0);
@@ -1044,7 +1103,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha1rnds4_epu32(__m128i abcd,
  * Rotates e (from a[3]) left by 30 and adds to b[3].
  * Returns {ROL30(a[3])+b[3], b[2], b[1], b[0]}.
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha1nexte_epu32(__m128i a, __m128i b) {
+FIO_IFUNC __m128i fio_fx86_sha1nexte_epu32(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1nexte_epu32(a, b);
 #else
@@ -1067,7 +1126,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha1nexte_epu32(__m128i a, __m128i b) {
  *   dst[1] = msg0[1] XOR msg1[3]
  *   dst[0] = msg0[0] XOR msg1[2]
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha1msg1_epu32(__m128i msg0, __m128i msg1) {
+FIO_IFUNC __m128i fio_fx86_sha1msg1_epu32(__m128i msg0, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1msg1_epu32(msg0, msg1);
 #else
@@ -1092,7 +1151,7 @@ FIO_IFUNC __m128i fio_fx86_mm_sha1msg1_epu32(__m128i msg0, __m128i msg1) {
  *   t0 = msg5[0] XOR dst[3]
  *   dst[0] = ROL1(t0)
  */
-FIO_IFUNC __m128i fio_fx86_mm_sha1msg2_epu32(__m128i msg5, __m128i msg1) {
+FIO_IFUNC __m128i fio_fx86_sha1msg2_epu32(__m128i msg5, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1msg2_epu32(msg5, msg1);
 #else
@@ -1116,7 +1175,7 @@ Section H: AVX2 Intrinsics (32 functions)
 /* --- Load / Store --- */
 
 /** _mm256_loadu_si256: load 256 bits from unaligned memory. */
-FIO_IFUNC __m256i fio_fx86_mm256_loadu_si256(const void *p) {
+FIO_IFUNC __m256i fio_fx86_256_loadu_si256(const void *p) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_loadu_si256((const __m256i *)p);
 #else
@@ -1127,7 +1186,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_loadu_si256(const void *p) {
 }
 
 /** _mm256_load_si256: load 256 bits from 32-byte aligned memory. */
-FIO_IFUNC __m256i fio_fx86_mm256_load_si256(const void *p) {
+FIO_IFUNC __m256i fio_fx86_256_load_si256(const void *p) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_load_si256((const __m256i *)p);
 #else
@@ -1138,7 +1197,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_load_si256(const void *p) {
 }
 
 /** _mm256_storeu_si256: store 256 bits to unaligned memory. */
-FIO_IFUNC void fio_fx86_mm256_storeu_si256(void *p, __m256i a) {
+FIO_IFUNC void fio_fx86_256_storeu_si256(void *p, __m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   _mm256_storeu_si256((__m256i *)p, a);
 #else
@@ -1149,7 +1208,7 @@ FIO_IFUNC void fio_fx86_mm256_storeu_si256(void *p, __m256i a) {
 /* --- Arithmetic (16-bit) --- */
 
 /** _mm256_add_epi16: add packed 16-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_add_epi16(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_add_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi16(a, b);
 #else
@@ -1161,7 +1220,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_add_epi16(__m256i a, __m256i b) {
 }
 
 /** _mm256_sub_epi16: subtract packed 16-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_sub_epi16(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_sub_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi16(a, b);
 #else
@@ -1173,7 +1232,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_sub_epi16(__m256i a, __m256i b) {
 }
 
 /** _mm256_mullo_epi16: multiply packed 16-bit integers, keep low 16 bits. */
-FIO_IFUNC __m256i fio_fx86_mm256_mullo_epi16(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_mullo_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_mullo_epi16(a, b);
 #else
@@ -1187,7 +1246,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_mullo_epi16(__m256i a, __m256i b) {
 /* --- Arithmetic (32-bit) --- */
 
 /** _mm256_add_epi32: add packed 32-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_add_epi32(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_add_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi32(a, b);
 #else
@@ -1199,7 +1258,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_add_epi32(__m256i a, __m256i b) {
 }
 
 /** _mm256_sub_epi32: subtract packed 32-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_sub_epi32(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_sub_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi32(a, b);
 #else
@@ -1211,7 +1270,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_sub_epi32(__m256i a, __m256i b) {
 }
 
 /** _mm256_mullo_epi32: multiply packed 32-bit integers, keep low 32 bits. */
-FIO_IFUNC __m256i fio_fx86_mm256_mullo_epi32(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_mullo_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_mullo_epi32(a, b);
 #else
@@ -1225,7 +1284,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_mullo_epi32(__m256i a, __m256i b) {
 /* --- Arithmetic (64-bit) --- */
 
 /** _mm256_add_epi64: add packed 64-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_add_epi64(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_add_epi64(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi64(a, b);
 #else
@@ -1237,7 +1296,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_add_epi64(__m256i a, __m256i b) {
 }
 
 /** _mm256_sub_epi64: subtract packed 64-bit integers. */
-FIO_IFUNC __m256i fio_fx86_mm256_sub_epi64(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_sub_epi64(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi64(a, b);
 #else
@@ -1251,7 +1310,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_sub_epi64(__m256i a, __m256i b) {
 /* --- Shift (per-element 32-bit) --- */
 
 /** _mm256_slli_epi32: shift each 32-bit lane left by imm8 bits. */
-FIO_IFUNC __m256i fio_fx86_mm256_slli_epi32(__m256i a, int imm8) {
+FIO_IFUNC __m256i fio_fx86_256_slli_epi32(__m256i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   switch (imm8) {
   case 16: return _mm256_slli_epi32(a, 16);
@@ -1276,7 +1335,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_slli_epi32(__m256i a, int imm8) {
 }
 
 /** _mm256_srai_epi32: arithmetic shift right each 32-bit lane by imm8. */
-FIO_IFUNC __m256i fio_fx86_mm256_srai_epi32(__m256i a, int imm8) {
+FIO_IFUNC __m256i fio_fx86_256_srai_epi32(__m256i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   switch (imm8) {
   case 16: return _mm256_srai_epi32(a, 16);
@@ -1300,7 +1359,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_srai_epi32(__m256i a, int imm8) {
 /* --- Bitwise --- */
 
 /** _mm256_xor_si256: bitwise XOR of 256-bit values. */
-FIO_IFUNC __m256i fio_fx86_mm256_xor_si256(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_xor_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_xor_si256(a, b);
 #else
@@ -1312,7 +1371,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_xor_si256(__m256i a, __m256i b) {
 }
 
 /** _mm256_and_si256: bitwise AND of 256-bit values. */
-FIO_IFUNC __m256i fio_fx86_mm256_and_si256(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_and_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_and_si256(a, b);
 #else
@@ -1324,7 +1383,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_and_si256(__m256i a, __m256i b) {
 }
 
 /** _mm256_or_si256: bitwise OR of 256-bit values. */
-FIO_IFUNC __m256i fio_fx86_mm256_or_si256(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_or_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_or_si256(a, b);
 #else
@@ -1338,7 +1397,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_or_si256(__m256i a, __m256i b) {
 /* --- Compare --- */
 
 /** _mm256_cmpeq_epi8: compare packed 8-bit integers for equality. */
-FIO_IFUNC __m256i fio_fx86_mm256_cmpeq_epi8(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_cmpeq_epi8(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_cmpeq_epi8(a, b);
 #else
@@ -1352,7 +1411,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_cmpeq_epi8(__m256i a, __m256i b) {
 /* --- Movemask --- */
 
 /** _mm256_movemask_epi8: create 32-bit mask from MSBs of each byte. */
-FIO_IFUNC int fio_fx86_mm256_movemask_epi8(__m256i a) {
+FIO_IFUNC int fio_fx86_256_movemask_epi8(__m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_movemask_epi8(a);
 #else
@@ -1366,7 +1425,7 @@ FIO_IFUNC int fio_fx86_mm256_movemask_epi8(__m256i a) {
 /* --- Set --- */
 
 /** _mm256_set1_epi8: broadcast 8-bit integer to all 32 bytes. */
-FIO_IFUNC __m256i fio_fx86_mm256_set1_epi8(char a) {
+FIO_IFUNC __m256i fio_fx86_256_set1_epi8(char a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi8(a);
 #else
@@ -1377,7 +1436,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_set1_epi8(char a) {
 }
 
 /** _mm256_set1_epi16: broadcast 16-bit integer to all 16 lanes. */
-FIO_IFUNC __m256i fio_fx86_mm256_set1_epi16(short a) {
+FIO_IFUNC __m256i fio_fx86_256_set1_epi16(short a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi16(a);
 #else
@@ -1389,7 +1448,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_set1_epi16(short a) {
 }
 
 /** _mm256_set1_epi32: broadcast 32-bit integer to all 8 lanes. */
-FIO_IFUNC __m256i fio_fx86_mm256_set1_epi32(int a) {
+FIO_IFUNC __m256i fio_fx86_256_set1_epi32(int a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi32(a);
 #else
@@ -1401,7 +1460,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_set1_epi32(int a) {
 }
 
 /** _mm256_set1_epi64x: broadcast 64-bit integer to all 4 lanes. */
-FIO_IFUNC __m256i fio_fx86_mm256_set1_epi64x(long long a) {
+FIO_IFUNC __m256i fio_fx86_256_set1_epi64x(long long a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi64x(a);
 #else
@@ -1413,10 +1472,10 @@ FIO_IFUNC __m256i fio_fx86_mm256_set1_epi64x(long long a) {
 }
 
 /** _mm256_set_epi64x: set packed 64-bit integers (high to low: e3..e0). */
-FIO_IFUNC __m256i fio_fx86_mm256_set_epi64x(long long e3,
-                                            long long e2,
-                                            long long e1,
-                                            long long e0) {
+FIO_IFUNC __m256i fio_fx86_256_set_epi64x(long long e3,
+                                          long long e2,
+                                          long long e1,
+                                          long long e0) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set_epi64x(e3, e2, e1, e0);
 #else
@@ -1430,38 +1489,38 @@ FIO_IFUNC __m256i fio_fx86_mm256_set_epi64x(long long e3,
 }
 
 /** _mm256_set_epi8: set packed 8-bit integers (high to low: e31..e0). */
-FIO_IFUNC __m256i fio_fx86_mm256_set_epi8(char e31,
-                                          char e30,
-                                          char e29,
-                                          char e28,
-                                          char e27,
-                                          char e26,
-                                          char e25,
-                                          char e24,
-                                          char e23,
-                                          char e22,
-                                          char e21,
-                                          char e20,
-                                          char e19,
-                                          char e18,
-                                          char e17,
-                                          char e16,
-                                          char e15,
-                                          char e14,
-                                          char e13,
-                                          char e12,
-                                          char e11,
-                                          char e10,
-                                          char e9,
-                                          char e8,
-                                          char e7,
-                                          char e6,
-                                          char e5,
-                                          char e4,
-                                          char e3,
-                                          char e2,
-                                          char e1,
-                                          char e0) {
+FIO_IFUNC __m256i fio_fx86_256_set_epi8(char e31,
+                                        char e30,
+                                        char e29,
+                                        char e28,
+                                        char e27,
+                                        char e26,
+                                        char e25,
+                                        char e24,
+                                        char e23,
+                                        char e22,
+                                        char e21,
+                                        char e20,
+                                        char e19,
+                                        char e18,
+                                        char e17,
+                                        char e16,
+                                        char e15,
+                                        char e14,
+                                        char e13,
+                                        char e12,
+                                        char e11,
+                                        char e10,
+                                        char e9,
+                                        char e8,
+                                        char e7,
+                                        char e6,
+                                        char e5,
+                                        char e4,
+                                        char e3,
+                                        char e2,
+                                        char e1,
+                                        char e0) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set_epi8(e31,
                          e30,
@@ -1534,7 +1593,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_set_epi8(char e31,
 }
 
 /** _mm256_setzero_si256: return zero vector. */
-FIO_IFUNC __m256i fio_fx86_mm256_setzero_si256(void) {
+FIO_IFUNC __m256i fio_fx86_256_setzero_si256(void) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_setzero_si256();
 #else
@@ -1547,7 +1606,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_setzero_si256(void) {
 /* --- Shuffle / Permute --- */
 
 /** _mm256_shuffle_epi8: byte-level shuffle within each 128-bit lane. */
-FIO_IFUNC __m256i fio_fx86_mm256_shuffle_epi8(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_shuffle_epi8(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_shuffle_epi8(a, b);
 #else
@@ -1571,7 +1630,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_shuffle_epi8(__m256i a, __m256i b) {
 }
 
 /** _mm256_alignr_epi8: concatenate and shift within each 128-bit lane. */
-FIO_IFUNC __m256i fio_fx86_mm256_alignr_epi8(__m256i a, __m256i b, int imm8) {
+FIO_IFUNC __m256i fio_fx86_256_alignr_epi8(__m256i a, __m256i b, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   switch (imm8) {
   case 8: return _mm256_alignr_epi8(a, b, 8);
@@ -1615,7 +1674,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_alignr_epi8(__m256i a, __m256i b, int imm8) {
 }
 
 /** _mm256_permute4x64_epi64: permute 64-bit lanes across full 256 bits. */
-FIO_IFUNC __m256i fio_fx86_mm256_permute4x64_epi64(__m256i a, int imm8) {
+FIO_IFUNC __m256i fio_fx86_256_permute4x64_epi64(__m256i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   switch (imm8) {
   case 0x4E: return _mm256_permute4x64_epi64(a, 0x4E);
@@ -1642,7 +1701,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_permute4x64_epi64(__m256i a, int imm8) {
 /* --- Pack / Convert --- */
 
 /** _mm256_packs_epi32: pack 32-bit to 16-bit with signed saturation. */
-FIO_IFUNC __m256i fio_fx86_mm256_packs_epi32(__m256i a, __m256i b) {
+FIO_IFUNC __m256i fio_fx86_256_packs_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_packs_epi32(a, b);
 #else
@@ -1675,7 +1734,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_packs_epi32(__m256i a, __m256i b) {
 
 /** _mm256_cvtepi16_epi32: sign-extend 8 packed 16-bit to 32-bit.
  * Takes the low 128 bits of a (8 x int16) and extends to 8 x int32. */
-FIO_IFUNC __m256i fio_fx86_mm256_cvtepi16_epi32(__m128i a) {
+FIO_IFUNC __m256i fio_fx86_256_cvtepi16_epi32(__m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_cvtepi16_epi32(a);
 #else
@@ -1689,7 +1748,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_cvtepi16_epi32(__m128i a) {
 /* --- Extract / Cast --- */
 
 /** _mm256_castsi256_si128: extract low 128 bits (no instruction, just cast). */
-FIO_IFUNC __m128i fio_fx86_mm256_castsi256_si128(__m256i a) {
+FIO_IFUNC __m128i fio_fx86_256_castsi256_si128(__m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_castsi256_si128(a);
 #else
@@ -1700,7 +1759,7 @@ FIO_IFUNC __m128i fio_fx86_mm256_castsi256_si128(__m256i a) {
 }
 
 /** _mm256_extracti128_si256: extract 128-bit lane (0=low, 1=high). */
-FIO_IFUNC __m128i fio_fx86_mm256_extracti128_si256(__m256i a, int imm8) {
+FIO_IFUNC __m128i fio_fx86_256_extracti128_si256(__m256i a, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   switch (imm8 & 1) {
   case 0: return _mm256_extracti128_si256(a, 0);
@@ -1726,9 +1785,9 @@ These operate on __m256i (4 x 64-bit lanes).
  * State layout: state0 = {a, b, c, d}, state1 = {e, f, g, h}
  * wk contains W[i]+K[i] in the low 128 bits (2 x 64-bit).
  */
-FIO_IFUNC __m256i fio_fx86_mm256_sha512rnds2_epi64(__m256i state1,
-                                                   __m256i state0,
-                                                   __m256i wk) {
+FIO_IFUNC __m256i fio_fx86_256_sha512rnds2_epi64(__m256i state1,
+                                                 __m256i state0,
+                                                 __m256i wk) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512rnds2_epi64(state1, state0, wk);
 #else
@@ -1783,7 +1842,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_sha512rnds2_epi64(__m256i state1,
  * Per Intel: dst[i] = w0[i] + sigma0(w1_shifted[i])
  * where the sigma0 inputs come from {w0[1], w0[2], w0[3], w1[0]}.
  */
-FIO_IFUNC __m256i fio_fx86_mm256_sha512msg1_epi64(__m256i w0, __m256i w1) {
+FIO_IFUNC __m256i fio_fx86_256_sha512msg1_epi64(__m256i w0, __m256i w1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512msg1_epi64(w0, w1);
 #else
@@ -1806,7 +1865,7 @@ FIO_IFUNC __m256i fio_fx86_mm256_sha512msg1_epi64(__m256i w0, __m256i w1) {
  *
  * Per Intel: uses w1[2], w1[3] for first two, then cascades.
  */
-FIO_IFUNC __m256i fio_fx86_mm256_sha512msg2_epi64(__m256i w0, __m256i w1) {
+FIO_IFUNC __m256i fio_fx86_256_sha512msg2_epi64(__m256i w0, __m256i w1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512msg2_epi64(w0, w1);
 #else
@@ -1893,23 +1952,24 @@ and run (slowly) on non-X86 systems.
 #endif
 
 /* --- SSE2 --- */
-#define _mm_loadu_si128(p)         fio_fx86_mm_loadu_si128(p)
-#define _mm_load_si128(p)          fio_fx86_mm_load_si128(p)
-#define _mm_storeu_si128(p, a)     fio_fx86_mm_storeu_si128((p), (a))
-#define _mm_add_epi32(a, b)        fio_fx86_mm_add_epi32((a), (b))
-#define _mm_xor_si128(a, b)        fio_fx86_mm_xor_si128((a), (b))
-#define _mm_or_si128(a, b)         fio_fx86_mm_or_si128((a), (b))
-#define _mm_and_si128(a, b)        fio_fx86_mm_and_si128((a), (b))
-#define _mm_slli_si128(a, imm8)    fio_fx86_mm_slli_si128((a), (imm8))
-#define _mm_srli_si128(a, imm8)    fio_fx86_mm_srli_si128((a), (imm8))
-#define _mm_slli_epi32(a, imm8)    fio_fx86_mm_slli_epi32((a), (imm8))
-#define _mm_srli_epi32(a, imm8)    fio_fx86_mm_srli_epi32((a), (imm8))
-#define _mm_shuffle_epi32(a, imm8) fio_fx86_mm_shuffle_epi32((a), (imm8))
-#define _mm_cmpeq_epi8(a, b)       fio_fx86_mm_cmpeq_epi8((a), (b))
-#define _mm_movemask_epi8(a)       fio_fx86_mm_movemask_epi8(a)
-#define _mm_set_epi32(e3, e2, e1, e0)                                          \
-  fio_fx86_mm_set_epi32((e3), (e2), (e1), (e0))
-#define _mm_set_epi64x(e1, e0) fio_fx86_mm_set_epi64x((e1), (e0))
+#define _mm_loadu_si128(p)            fio_fx86_loadu_si128(p)
+#define _mm_load_si128(p)             fio_fx86_load_si128(p)
+#define _mm_storeu_si128(p, a)        fio_fx86_storeu_si128((p), (a))
+#define _mm_add_epi32(a, b)           fio_fx86_add_epi32((a), (b))
+#define _mm_xor_si128(a, b)           fio_fx86_xor_si128((a), (b))
+#define _mm_or_si128(a, b)            fio_fx86_or_si128((a), (b))
+#define _mm_and_si128(a, b)           fio_fx86_and_si128((a), (b))
+#define _mm_slli_si128(a, imm8)       fio_fx86_slli_si128((a), (imm8))
+#define _mm_srli_si128(a, imm8)       fio_fx86_srli_si128((a), (imm8))
+#define _mm_slli_epi32(a, imm8)       fio_fx86_slli_epi32((a), (imm8))
+#define _mm_srli_epi32(a, imm8)       fio_fx86_srli_epi32((a), (imm8))
+#define _mm_slli_epi64(a, imm8)       fio_fx86_slli_epi64((a), (imm8))
+#define _mm_srli_epi64(a, imm8)       fio_fx86_srli_epi64((a), (imm8))
+#define _mm_shuffle_epi32(a, imm8)    fio_fx86_shuffle_epi32((a), (imm8))
+#define _mm_cmpeq_epi8(a, b)          fio_fx86_cmpeq_epi8((a), (b))
+#define _mm_movemask_epi8(a)          fio_fx86_movemask_epi8(a)
+#define _mm_set_epi32(e3, e2, e1, e0) fio_fx86_set_epi32((e3), (e2), (e1), (e0))
+#define _mm_set_epi64x(e1, e0)        fio_fx86_set_epi64x((e1), (e0))
 #define _mm_set_epi8(e15,                                                      \
                      e14,                                                      \
                      e13,                                                      \
@@ -1926,85 +1986,85 @@ and run (slowly) on non-X86 systems.
                      e2,                                                       \
                      e1,                                                       \
                      e0)                                                       \
-  fio_fx86_mm_set_epi8((e15),                                                  \
-                       (e14),                                                  \
-                       (e13),                                                  \
-                       (e12),                                                  \
-                       (e11),                                                  \
-                       (e10),                                                  \
-                       (e9),                                                   \
-                       (e8),                                                   \
-                       (e7),                                                   \
-                       (e6),                                                   \
-                       (e5),                                                   \
-                       (e4),                                                   \
-                       (e3),                                                   \
-                       (e2),                                                   \
-                       (e1),                                                   \
-                       (e0))
-#define _mm_set1_epi8(a)     fio_fx86_mm_set1_epi8(a)
-#define _mm_setzero_si128()  fio_fx86_mm_setzero_si128()
-#define _mm_cvtsi32_si128(a) fio_fx86_mm_cvtsi32_si128(a)
+  fio_fx86_set_epi8((e15),                                                     \
+                    (e14),                                                     \
+                    (e13),                                                     \
+                    (e12),                                                     \
+                    (e11),                                                     \
+                    (e10),                                                     \
+                    (e9),                                                      \
+                    (e8),                                                      \
+                    (e7),                                                      \
+                    (e6),                                                      \
+                    (e5),                                                      \
+                    (e4),                                                      \
+                    (e3),                                                      \
+                    (e2),                                                      \
+                    (e1),                                                      \
+                    (e0))
+#define _mm_set1_epi8(a)     fio_fx86_set1_epi8(a)
+#define _mm_setzero_si128()  fio_fx86_setzero_si128()
+#define _mm_cvtsi32_si128(a) fio_fx86_cvtsi32_si128(a)
 
 /* --- SSSE3 --- */
-#define _mm_shuffle_epi8(a, b)      fio_fx86_mm_shuffle_epi8((a), (b))
-#define _mm_alignr_epi8(a, b, imm8) fio_fx86_mm_alignr_epi8((a), (b), (imm8))
+#define _mm_shuffle_epi8(a, b)      fio_fx86_shuffle_epi8((a), (b))
+#define _mm_alignr_epi8(a, b, imm8) fio_fx86_alignr_epi8((a), (b), (imm8))
 
 /* --- SSE4.1 --- */
-#define _mm_blend_epi16(a, b, imm8) fio_fx86_mm_blend_epi16((a), (b), (imm8))
-#define _mm_extract_epi32(a, imm8)  fio_fx86_mm_extract_epi32((a), (imm8))
+#define _mm_blend_epi16(a, b, imm8) fio_fx86_blend_epi16((a), (b), (imm8))
+#define _mm_extract_epi32(a, imm8)  fio_fx86_extract_epi32((a), (imm8))
 
 /* --- Prefetch --- */
-#define _mm_prefetch(p, hint) fio_fx86_mm_prefetch((p), (hint))
+#define _mm_prefetch(p, hint) fio_fx86_prefetch((p), (hint))
 
 /* --- AES-NI --- */
-#define _mm_aesenc_si128(a, rk)     fio_fx86_mm_aesenc_si128((a), (rk))
-#define _mm_aesenclast_si128(a, rk) fio_fx86_mm_aesenclast_si128((a), (rk))
+#define _mm_aesenc_si128(a, rk)     fio_fx86_aesenc_si128((a), (rk))
+#define _mm_aesenclast_si128(a, rk) fio_fx86_aesenclast_si128((a), (rk))
 #define _mm_aeskeygenassist_si128(a, imm8)                                     \
-  fio_fx86_mm_aeskeygenassist_si128((a), (imm8))
+  fio_fx86_aeskeygenassist_si128((a), (imm8))
 
 /* --- PCLMULQDQ --- */
 #define _mm_clmulepi64_si128(a, b, imm8)                                       \
-  fio_fx86_mm_clmulepi64_si128((a), (b), (imm8))
+  fio_fx86_clmulepi64_si128((a), (b), (imm8))
 
 /* --- SHA-NI (SHA-256) --- */
 #define _mm_sha256rnds2_epu32(cdgh, abef, msg)                                 \
-  fio_fx86_mm_sha256rnds2_epu32((cdgh), (abef), (msg))
-#define _mm_sha256msg1_epu32(a, b) fio_fx86_mm_sha256msg1_epu32((a), (b))
-#define _mm_sha256msg2_epu32(a, b) fio_fx86_mm_sha256msg2_epu32((a), (b))
+  fio_fx86_sha256rnds2_epu32((cdgh), (abef), (msg))
+#define _mm_sha256msg1_epu32(a, b) fio_fx86_sha256msg1_epu32((a), (b))
+#define _mm_sha256msg2_epu32(a, b) fio_fx86_sha256msg2_epu32((a), (b))
 
 /* --- SHA-NI (SHA-1) --- */
 #define _mm_sha1rnds4_epu32(abcd, e0, func)                                    \
-  fio_fx86_mm_sha1rnds4_epu32((abcd), (e0), (func))
-#define _mm_sha1nexte_epu32(a, b) fio_fx86_mm_sha1nexte_epu32((a), (b))
-#define _mm_sha1msg1_epu32(a, b)  fio_fx86_mm_sha1msg1_epu32((a), (b))
-#define _mm_sha1msg2_epu32(a, b)  fio_fx86_mm_sha1msg2_epu32((a), (b))
+  fio_fx86_sha1rnds4_epu32((abcd), (e0), (func))
+#define _mm_sha1nexte_epu32(a, b) fio_fx86_sha1nexte_epu32((a), (b))
+#define _mm_sha1msg1_epu32(a, b)  fio_fx86_sha1msg1_epu32((a), (b))
+#define _mm_sha1msg2_epu32(a, b)  fio_fx86_sha1msg2_epu32((a), (b))
 
 /* --- AVX2 --- */
-#define _mm256_loadu_si256(p)      fio_fx86_mm256_loadu_si256(p)
-#define _mm256_load_si256(p)       fio_fx86_mm256_load_si256(p)
-#define _mm256_storeu_si256(p, a)  fio_fx86_mm256_storeu_si256((p), (a))
-#define _mm256_add_epi16(a, b)     fio_fx86_mm256_add_epi16((a), (b))
-#define _mm256_sub_epi16(a, b)     fio_fx86_mm256_sub_epi16((a), (b))
-#define _mm256_mullo_epi16(a, b)   fio_fx86_mm256_mullo_epi16((a), (b))
-#define _mm256_add_epi32(a, b)     fio_fx86_mm256_add_epi32((a), (b))
-#define _mm256_sub_epi32(a, b)     fio_fx86_mm256_sub_epi32((a), (b))
-#define _mm256_mullo_epi32(a, b)   fio_fx86_mm256_mullo_epi32((a), (b))
-#define _mm256_add_epi64(a, b)     fio_fx86_mm256_add_epi64((a), (b))
-#define _mm256_sub_epi64(a, b)     fio_fx86_mm256_sub_epi64((a), (b))
-#define _mm256_slli_epi32(a, imm8) fio_fx86_mm256_slli_epi32((a), (imm8))
-#define _mm256_srai_epi32(a, imm8) fio_fx86_mm256_srai_epi32((a), (imm8))
-#define _mm256_xor_si256(a, b)     fio_fx86_mm256_xor_si256((a), (b))
-#define _mm256_and_si256(a, b)     fio_fx86_mm256_and_si256((a), (b))
-#define _mm256_or_si256(a, b)      fio_fx86_mm256_or_si256((a), (b))
-#define _mm256_cmpeq_epi8(a, b)    fio_fx86_mm256_cmpeq_epi8((a), (b))
-#define _mm256_movemask_epi8(a)    fio_fx86_mm256_movemask_epi8(a)
-#define _mm256_set1_epi8(a)        fio_fx86_mm256_set1_epi8(a)
-#define _mm256_set1_epi16(a)       fio_fx86_mm256_set1_epi16(a)
-#define _mm256_set1_epi32(a)       fio_fx86_mm256_set1_epi32(a)
-#define _mm256_set1_epi64x(a)      fio_fx86_mm256_set1_epi64x(a)
+#define _mm256_loadu_si256(p)      fio_fx86_256_loadu_si256(p)
+#define _mm256_load_si256(p)       fio_fx86_256_load_si256(p)
+#define _mm256_storeu_si256(p, a)  fio_fx86_256_storeu_si256((p), (a))
+#define _mm256_add_epi16(a, b)     fio_fx86_256_add_epi16((a), (b))
+#define _mm256_sub_epi16(a, b)     fio_fx86_256_sub_epi16((a), (b))
+#define _mm256_mullo_epi16(a, b)   fio_fx86_256_mullo_epi16((a), (b))
+#define _mm256_add_epi32(a, b)     fio_fx86_256_add_epi32((a), (b))
+#define _mm256_sub_epi32(a, b)     fio_fx86_256_sub_epi32((a), (b))
+#define _mm256_mullo_epi32(a, b)   fio_fx86_256_mullo_epi32((a), (b))
+#define _mm256_add_epi64(a, b)     fio_fx86_256_add_epi64((a), (b))
+#define _mm256_sub_epi64(a, b)     fio_fx86_256_sub_epi64((a), (b))
+#define _mm256_slli_epi32(a, imm8) fio_fx86_256_slli_epi32((a), (imm8))
+#define _mm256_srai_epi32(a, imm8) fio_fx86_256_srai_epi32((a), (imm8))
+#define _mm256_xor_si256(a, b)     fio_fx86_256_xor_si256((a), (b))
+#define _mm256_and_si256(a, b)     fio_fx86_256_and_si256((a), (b))
+#define _mm256_or_si256(a, b)      fio_fx86_256_or_si256((a), (b))
+#define _mm256_cmpeq_epi8(a, b)    fio_fx86_256_cmpeq_epi8((a), (b))
+#define _mm256_movemask_epi8(a)    fio_fx86_256_movemask_epi8(a)
+#define _mm256_set1_epi8(a)        fio_fx86_256_set1_epi8(a)
+#define _mm256_set1_epi16(a)       fio_fx86_256_set1_epi16(a)
+#define _mm256_set1_epi32(a)       fio_fx86_256_set1_epi32(a)
+#define _mm256_set1_epi64x(a)      fio_fx86_256_set1_epi64x(a)
 #define _mm256_set_epi64x(e3, e2, e1, e0)                                      \
-  fio_fx86_mm256_set_epi64x((e3), (e2), (e1), (e0))
+  fio_fx86_256_set_epi64x((e3), (e2), (e1), (e0))
 #define _mm256_set_epi8(e31,                                                   \
                         e30,                                                   \
                         e29,                                                   \
@@ -2037,57 +2097,57 @@ and run (slowly) on non-X86 systems.
                         e2,                                                    \
                         e1,                                                    \
                         e0)                                                    \
-  fio_fx86_mm256_set_epi8((e31),                                               \
-                          (e30),                                               \
-                          (e29),                                               \
-                          (e28),                                               \
-                          (e27),                                               \
-                          (e26),                                               \
-                          (e25),                                               \
-                          (e24),                                               \
-                          (e23),                                               \
-                          (e22),                                               \
-                          (e21),                                               \
-                          (e20),                                               \
-                          (e19),                                               \
-                          (e18),                                               \
-                          (e17),                                               \
-                          (e16),                                               \
-                          (e15),                                               \
-                          (e14),                                               \
-                          (e13),                                               \
-                          (e12),                                               \
-                          (e11),                                               \
-                          (e10),                                               \
-                          (e9),                                                \
-                          (e8),                                                \
-                          (e7),                                                \
-                          (e6),                                                \
-                          (e5),                                                \
-                          (e4),                                                \
-                          (e3),                                                \
-                          (e2),                                                \
-                          (e1),                                                \
-                          (e0))
-#define _mm256_setzero_si256()    fio_fx86_mm256_setzero_si256()
-#define _mm256_shuffle_epi8(a, b) fio_fx86_mm256_shuffle_epi8((a), (b))
+  fio_fx86_256_set_epi8((e31),                                                 \
+                        (e30),                                                 \
+                        (e29),                                                 \
+                        (e28),                                                 \
+                        (e27),                                                 \
+                        (e26),                                                 \
+                        (e25),                                                 \
+                        (e24),                                                 \
+                        (e23),                                                 \
+                        (e22),                                                 \
+                        (e21),                                                 \
+                        (e20),                                                 \
+                        (e19),                                                 \
+                        (e18),                                                 \
+                        (e17),                                                 \
+                        (e16),                                                 \
+                        (e15),                                                 \
+                        (e14),                                                 \
+                        (e13),                                                 \
+                        (e12),                                                 \
+                        (e11),                                                 \
+                        (e10),                                                 \
+                        (e9),                                                  \
+                        (e8),                                                  \
+                        (e7),                                                  \
+                        (e6),                                                  \
+                        (e5),                                                  \
+                        (e4),                                                  \
+                        (e3),                                                  \
+                        (e2),                                                  \
+                        (e1),                                                  \
+                        (e0))
+#define _mm256_setzero_si256()    fio_fx86_256_setzero_si256()
+#define _mm256_shuffle_epi8(a, b) fio_fx86_256_shuffle_epi8((a), (b))
 #define _mm256_alignr_epi8(a, b, imm8)                                         \
-  fio_fx86_mm256_alignr_epi8((a), (b), (imm8))
+  fio_fx86_256_alignr_epi8((a), (b), (imm8))
 #define _mm256_permute4x64_epi64(a, imm8)                                      \
-  fio_fx86_mm256_permute4x64_epi64((a), (imm8))
-#define _mm256_packs_epi32(a, b)  fio_fx86_mm256_packs_epi32((a), (b))
-#define _mm256_cvtepi16_epi32(a)  fio_fx86_mm256_cvtepi16_epi32(a)
-#define _mm256_castsi256_si128(a) fio_fx86_mm256_castsi256_si128(a)
+  fio_fx86_256_permute4x64_epi64((a), (imm8))
+#define _mm256_packs_epi32(a, b)  fio_fx86_256_packs_epi32((a), (b))
+#define _mm256_cvtepi16_epi32(a)  fio_fx86_256_cvtepi16_epi32(a)
+#define _mm256_castsi256_si128(a) fio_fx86_256_castsi256_si128(a)
 #define _mm256_extracti128_si256(a, imm8)                                      \
-  fio_fx86_mm256_extracti128_si256((a), (imm8))
+  fio_fx86_256_extracti128_si256((a), (imm8))
 
 /* --- SHA-512 NI --- */
 #define _mm256_sha512rnds2_epi64(s1, s0, wk)                                   \
-  fio_fx86_mm256_sha512rnds2_epi64((s1), (s0), (wk))
+  fio_fx86_256_sha512rnds2_epi64((s1), (s0), (wk))
 #define _mm256_sha512msg1_epi64(w0, w1)                                        \
-  fio_fx86_mm256_sha512msg1_epi64((w0), (w1))
+  fio_fx86_256_sha512msg1_epi64((w0), (w1))
 #define _mm256_sha512msg2_epi64(w0, w1)                                        \
-  fio_fx86_mm256_sha512msg2_epi64((w0), (w1))
+  fio_fx86_256_sha512msg2_epi64((w0), (w1))
 
 /* When shadowing, also define the feature-detection macros so that
  * guarded code paths are compiled. */

@@ -459,9 +459,7 @@ FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
   }
   return NULL;
 }
-#endif /* AVX2 */
-
-#if defined(FIO___HAS_ARM_INTRIN)
+#elif defined(FIO___HAS_ARM_INTRIN)
 /* ARM NEON implementation - 16 bytes at a time */
 FIO_SFUNC void *fio___memchr_neon(const void *buffer,
                                   const char token,

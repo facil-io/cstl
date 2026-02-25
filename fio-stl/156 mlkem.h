@@ -548,9 +548,7 @@ FIO_SFUNC void fio___mlkem_invntt_neon(int16_t r[256]) {
   }
 }
 
-#endif /* FIO___HAS_ARM_INTRIN */
-
-#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+#elif defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
 /* *****************************************************************************
 x86 AVX2 Vectorized NTT
 ***************************************************************************** */

@@ -1101,9 +1101,7 @@ FIO_IFUNC void fio___gf_one_neon(fio___gf_s r) {
 #define fio___gf_zero  fio___gf_zero_neon
 #define fio___gf_one   fio___gf_one_neon
 
-#endif /* FIO___HAS_ARM_INTRIN */
-
-#if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
+#elif defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
 /* *****************************************************************************
 x86 AVX2 Optimized Field Operations
 
