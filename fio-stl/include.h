@@ -11,6 +11,10 @@
 
 #include "000 dependencies.h"
 
+#if defined(FIO_FAKE_X86) || defined(FIO_FAKE_X86_SHADOW)
+#include "001 fx86.h"
+#endif
+
 #include "001 header.h"
 #ifdef FIO_LOG
 #include "001 logging.h"
