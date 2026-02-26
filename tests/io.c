@@ -495,8 +495,8 @@ FIO_SFUNC void fio___test_client_on_attach(fio_io_s *io) {
   fio___test_io_client = io;
 
   /* Test IO object functions */
-  int fd = fio_io_fd(io);
-  FIO_ASSERT(fd >= 0, "fio_io_fd should return valid fd");
+  fio_socket_i fd = fio_io_fd(io);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd), "fio_io_fd should return valid fd");
 
   FIO_ASSERT(fio_io_is_open(io) == 1, "fio_io_is_open should return 1");
 

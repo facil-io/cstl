@@ -230,6 +230,60 @@ int main(void) {
     }
   }
 
+  { /* clmul imm8 semantics: non-canonical values map to imm8 & 0x11 */
+    uint64_t a_words[2] = {0x0123456789ABCDEFULL, 0x0F1E2D3C4B5A6978ULL};
+    uint64_t b_words[2] = {0xFEDCBA9876543210ULL, 0x8877665544332211ULL};
+    uint8_t got[16], expect[16];
+    int tests[] = {0x00, 0x01, 0x10, 0x11, 0x12, 0x21, 0xFF, -1};
+    __m128i va = fio_fx86_loadu_si128(a_words);
+    __m128i vb = fio_fx86_loadu_si128(b_words);
+    for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
+      int imm = tests[t];
+      int canon = ((uint8_t)imm) & 0x11;
+      fio_fx86_storeu_si128(got, fio_fx86_clmulepi64_si128(va, vb, imm));
+      fio_fx86_storeu_si128(expect, fio_fx86_clmulepi64_si128(va, vb, canon));
+      FIO_ASSERT(!FIO_MEMCMP(got, expect, 16),
+                 "fio_fx86_clmulepi64_si128 imm semantics mismatch for imm8=%d",
+                 imm);
+    }
+  }
+
+  { /* sha1rnds4 func semantics: behaves as func & 3 */
+#if defined(__SHA__) && (defined(__x86_64__) || defined(__i386__)) &&          \
+    (defined(__GNUC__) || defined(__clang__))
+    if (!__builtin_cpu_supports("sha")) {
+      fprintf(
+          stderr,
+          "* fx86: skipping sha1rnds4 imm test (runtime SHA unsupported)\n");
+    } else
+#endif
+    {
+      uint32_t abcd_words[4] = {0x01234567U,
+                                0x89ABCDEFU,
+                                0x0BADF00DU,
+                                0xC001D00DU};
+      uint32_t e0_words[4] = {0x11111111U,
+                              0x22222222U,
+                              0x33333333U,
+                              0x44444444U};
+      uint8_t got[16], expect[16];
+      int tests[] = {0, 1, 2, 3, 4, 5, 6, 7, 255, -1};
+      __m128i abcd = fio_fx86_loadu_si128(abcd_words);
+      __m128i e0 = fio_fx86_loadu_si128(e0_words);
+      for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
+        int func = tests[t];
+        int canon = ((uint8_t)func) & 3;
+        fio_fx86_storeu_si128(got, fio_fx86_sha1rnds4_epu32(abcd, e0, func));
+        fio_fx86_storeu_si128(expect,
+                              fio_fx86_sha1rnds4_epu32(abcd, e0, canon));
+        FIO_ASSERT(
+            !FIO_MEMCMP(got, expect, 16),
+            "fio_fx86_sha1rnds4_epu32 func semantics mismatch for func=%d",
+            func);
+      }
+    }
+  }
+
   fprintf(stderr, "* fx86 tests passed\n");
   return 0;
 }

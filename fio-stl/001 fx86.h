@@ -58,6 +58,39 @@ typedef fio_u256 __m256i;
 #endif /* !FIO___HAS_X86_INTRIN */
 
 /* *****************************************************************************
+ * Portable access helpers
+ *
+ * When FIO___HAS_X86_INTRIN is defined, __m128i / __m256i are compiler vector
+ * types and don't have fio_uXXX union members. Use memcpy-based conversions to
+ * access lanes in all fallback implementations (avoids strict-aliasing UB).
+ *****************************************************************************
+ */
+
+FIO_IFUNC fio_u128 fio___fx86_to_u128(__m128i v) {
+  fio_u128 u;
+  fio_memcpy16(&u, &v);
+  return u;
+}
+
+FIO_IFUNC __m128i fio___fx86_from_u128(fio_u128 u) {
+  __m128i v;
+  fio_memcpy16(&v, &u);
+  return v;
+}
+
+FIO_IFUNC fio_u256 fio___fx86_to_u256(__m256i v) {
+  fio_u256 u;
+  fio_memcpy32(&u, &v);
+  return u;
+}
+
+FIO_IFUNC __m256i fio___fx86_from_u256(fio_u256 u) {
+  __m256i v;
+  fio_memcpy32(&v, &u);
+  return v;
+}
+
+/* *****************************************************************************
 Section A: SSE2 Intrinsics (20 functions)
 ***************************************************************************** */
 
@@ -554,14 +587,16 @@ FIO_IFUNC __m128i fio_fx86_shuffle_epi8(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSSE3__)
   return _mm_shuffle_epi8(a, b);
 #else
-  __m128i r;
+  fio_u128 ua = fio___fx86_to_u128(a);
+  fio_u128 ub = fio___fx86_to_u128(b);
+  fio_u128 r;
   for (int i = 0; i < 16; ++i) {
-    if (b.u8[i] & 0x80)
+    if (ub.u8[i] & 0x80)
       r.u8[i] = 0;
     else
-      r.u8[i] = a.u8[b.u8[i] & 0x0F];
+      r.u8[i] = ua.u8[ub.u8[i] & 0x0F];
   }
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -624,10 +659,12 @@ FIO_IFUNC __m128i fio_fx86_blend_epi16(__m128i a, __m128i b, int imm8) {
   }
   }
 #else
-  __m128i r;
+  fio_u128 ua = fio___fx86_to_u128(a);
+  fio_u128 ub = fio___fx86_to_u128(b);
+  fio_u128 r;
   for (int i = 0; i < 8; ++i)
-    r.u16[i] = ((n >> i) & 1U) ? b.u16[i] : a.u16[i];
-  return r;
+    r.u16[i] = ((n >> i) & 1U) ? ub.u16[i] : ua.u16[i];
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -641,7 +678,8 @@ FIO_IFUNC int fio_fx86_extract_epi32(__m128i a, int imm8) {
   default: return _mm_extract_epi32(a, 3);
   }
 #else
-  return (int)a.u32[imm8 & 3];
+  fio_u128 ua = fio___fx86_to_u128(a);
+  return (int)ua.u32[imm8 & 3];
 #endif
 }
 
@@ -698,7 +736,7 @@ static const uint8_t fio___fx86_aes_sbox[256] = {
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f,
     0xb0, 0x54, 0xbb, 0x16};
 
-#if !defined(FIO___HAS_X86_INTRIN)
+#if !(defined(FIO___HAS_X86_INTRIN) && defined(__AES__))
 
 /* GF(2^8) multiply by 2 (xtime) for MixColumns. */
 FIO_IFUNC uint8_t fio___fx86_xtime(uint8_t x) {
@@ -751,7 +789,7 @@ FIO_IFUNC void fio___fx86_mix_columns(uint8_t s[16]) {
   }
 }
 
-#endif /* !FIO___HAS_X86_INTRIN */
+#endif /* !(FIO___HAS_X86_INTRIN && __AES__) */
 
 /**
  * _mm_aesenc_si128: one AES encryption round.
@@ -908,7 +946,7 @@ Carry-less (GF(2)) multiplication of selected 64-bit halves.
  */
 FIO_IFUNC __m128i fio_fx86_clmulepi64_si128(__m128i a, __m128i b, int imm8) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__PCLMUL__)
-  switch (imm8) {
+  switch (imm8 & 0x11) {
   case 0x00: return _mm_clmulepi64_si128(a, b, 0x00);
   case 0x01: return _mm_clmulepi64_si128(a, b, 0x01);
   case 0x10: return _mm_clmulepi64_si128(a, b, 0x10);
@@ -916,9 +954,11 @@ FIO_IFUNC __m128i fio_fx86_clmulepi64_si128(__m128i a, __m128i b, int imm8) {
   default: return _mm_clmulepi64_si128(a, b, 0x00);
   }
 #else
+  fio_u128 ua = fio___fx86_to_u128(a);
+  fio_u128 ub = fio___fx86_to_u128(b);
   /* Select 64-bit lanes: bit 0 of imm8 selects a, bit 4 selects b */
-  uint64_t va = a.u64[imm8 & 1];
-  uint64_t vb = b.u64[(imm8 >> 4) & 1];
+  uint64_t va = ua.u64[imm8 & 1];
+  uint64_t vb = ub.u64[(imm8 >> 4) & 1];
   /* Carry-less (GF(2)) multiplication: schoolbook algorithm.
    * NOT the same as fio_math_mulc64 which is regular arithmetic multiply. */
   uint64_t lo = 0, hi = 0;
@@ -929,10 +969,10 @@ FIO_IFUNC __m128i fio_fx86_clmulepi64_si128(__m128i a, __m128i b, int imm8) {
         hi ^= va >> (64 - i);
     }
   }
-  __m128i r;
+  fio_u128 r;
   r.u64[0] = lo;
   r.u64[1] = hi;
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -958,15 +998,18 @@ FIO_IFUNC __m128i fio_fx86_sha256rnds2_epu32(__m128i cdgh,
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha256rnds2_epu32(cdgh, abef, msg);
 #else
+  fio_u128 ucdgh = fio___fx86_to_u128(cdgh);
+  fio_u128 uabef = fio___fx86_to_u128(abef);
+  fio_u128 umsg = fio___fx86_to_u128(msg);
   /* Extract state: abef = {a, b, e, f}, cdgh = {c, d, g, h} */
-  uint32_t a = abef.u32[3], b = abef.u32[2];
-  uint32_t c = cdgh.u32[3], d = cdgh.u32[2];
-  uint32_t e = abef.u32[1], f = abef.u32[0];
-  uint32_t g = cdgh.u32[1], h = cdgh.u32[0];
+  uint32_t a = uabef.u32[3], b = uabef.u32[2];
+  uint32_t c = ucdgh.u32[3], d = ucdgh.u32[2];
+  uint32_t e = uabef.u32[1], f = uabef.u32[0];
+  uint32_t g = ucdgh.u32[1], h = ucdgh.u32[0];
 
   /* Two rounds */
   for (int i = 0; i < 2; ++i) {
-    uint32_t wk = msg.u32[i]; /* Wi + Ki already combined */
+    uint32_t wk = umsg.u32[i]; /* Wi + Ki already combined */
     /* Sigma1(e) */
     uint32_t s1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^
                   ((e >> 25) | (e << 7));
@@ -993,12 +1036,12 @@ FIO_IFUNC __m128i fio_fx86_sha256rnds2_epu32(__m128i cdgh,
   }
 
   /* Pack result as new abef: {a, b, e, f} */
-  __m128i r;
+  fio_u128 r;
   r.u32[3] = a;
   r.u32[2] = b;
   r.u32[1] = e;
   r.u32[0] = f;
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1011,15 +1054,17 @@ FIO_IFUNC __m128i fio_fx86_sha256msg1_epu32(__m128i msg0, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha256msg1_epu32(msg0, msg1);
 #else
-  __m128i r;
+  fio_u128 umsg0 = fio___fx86_to_u128(msg0);
+  fio_u128 umsg1 = fio___fx86_to_u128(msg1);
+  fio_u128 r;
   /* sigma0 inputs: {msg0[1], msg0[2], msg0[3], msg1[0]}
    * i.e. W[i+1]..W[i+3] from msg0, W[i+4] from msg1. */
   for (int i = 0; i < 4; ++i) {
-    uint32_t x = (i < 3) ? msg0.u32[i + 1] : msg1.u32[0];
+    uint32_t x = (i < 3) ? umsg0.u32[i + 1] : umsg1.u32[0];
     uint32_t s0 = ((x >> 7) | (x << 25)) ^ ((x >> 18) | (x << 14)) ^ (x >> 3);
-    r.u32[i] = msg0.u32[i] + s0;
+    r.u32[i] = umsg0.u32[i] + s0;
   }
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1036,29 +1081,31 @@ FIO_IFUNC __m128i fio_fx86_sha256msg2_epu32(__m128i msg4, __m128i msg1) {
    * msg4 is the partially computed result from sha256msg1.
    * We add sigma1(W[i-2]) to msg4[0], sigma1(W[i-1]) to msg4[1],
    * then use the new values for msg4[2] and msg4[3]. */
-  __m128i r;
-  uint32_t w14 = msg1.u32[2]; /* W[i-2] */
-  uint32_t w15 = msg1.u32[3]; /* W[i-1] */
+  fio_u128 umsg4 = fio___fx86_to_u128(msg4);
+  fio_u128 umsg1 = fio___fx86_to_u128(msg1);
+  fio_u128 r;
+  uint32_t w14 = umsg1.u32[2]; /* W[i-2] */
+  uint32_t w15 = umsg1.u32[3]; /* W[i-1] */
 
   uint32_t s1_14 =
       ((w14 >> 17) | (w14 << 15)) ^ ((w14 >> 19) | (w14 << 13)) ^ (w14 >> 10);
-  r.u32[0] = msg4.u32[0] + s1_14;
+  r.u32[0] = umsg4.u32[0] + s1_14;
 
   uint32_t s1_15 =
       ((w15 >> 17) | (w15 << 15)) ^ ((w15 >> 19) | (w15 << 13)) ^ (w15 >> 10);
-  r.u32[1] = msg4.u32[1] + s1_15;
+  r.u32[1] = umsg4.u32[1] + s1_15;
 
   /* Now use the newly computed values for the next two */
   uint32_t w16 = r.u32[0]; /* W[i] just computed */
   uint32_t s1_16 =
       ((w16 >> 17) | (w16 << 15)) ^ ((w16 >> 19) | (w16 << 13)) ^ (w16 >> 10);
-  r.u32[2] = msg4.u32[2] + s1_16;
+  r.u32[2] = umsg4.u32[2] + s1_16;
 
   uint32_t w17 = r.u32[1]; /* W[i+1] just computed */
   uint32_t s1_17 =
       ((w17 >> 17) | (w17 << 15)) ^ ((w17 >> 19) | (w17 << 13)) ^ (w17 >> 10);
-  r.u32[3] = msg4.u32[3] + s1_17;
-  return r;
+  r.u32[3] = umsg4.u32[3] + s1_17;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1071,19 +1118,22 @@ FIO_IFUNC __m128i fio_fx86_sha256msg2_epu32(__m128i msg4, __m128i msg1) {
  */
 FIO_IFUNC __m128i fio_fx86_sha1rnds4_epu32(__m128i abcd, __m128i e0, int func) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
-  switch (func) {
+  switch (func & 3) {
   case 0: return _mm_sha1rnds4_epu32(abcd, e0, 0);
   case 1: return _mm_sha1rnds4_epu32(abcd, e0, 1);
   case 2: return _mm_sha1rnds4_epu32(abcd, e0, 2);
   default: return _mm_sha1rnds4_epu32(abcd, e0, 3);
   }
 #else
+  fio_u128 uabcd = fio___fx86_to_u128(abcd);
+  fio_u128 ue0 = fio___fx86_to_u128(e0);
   /* State: a=abcd[3], b=abcd[2], c=abcd[1], d=abcd[0] */
-  uint32_t a = abcd.u32[3], b = abcd.u32[2], c = abcd.u32[1], d = abcd.u32[0];
+  uint32_t a = uabcd.u32[3], b = uabcd.u32[2], c = uabcd.u32[1],
+           d = uabcd.u32[0];
   uint32_t e =
       0; /* initialized for rounds 1-3; round 0 skips e (W0+E pre-combined) */
   /* e0 contains {W[0]+E, W[1], W[2], W[3]} where W[0]+E is pre-combined */
-  uint32_t w[4] = {e0.u32[3], e0.u32[2], e0.u32[1], e0.u32[0]};
+  uint32_t w[4] = {ue0.u32[3], ue0.u32[2], ue0.u32[1], ue0.u32[0]};
 
   /* SHA-1 round constants */
   static const uint32_t K[4] = {0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6};
@@ -1111,12 +1161,12 @@ FIO_IFUNC __m128i fio_fx86_sha1rnds4_epu32(__m128i abcd, __m128i e0, int func) {
     a = t;
   }
 
-  __m128i r;
+  fio_u128 r;
   r.u32[3] = a;
   r.u32[2] = b;
   r.u32[1] = c;
   r.u32[0] = d;
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1129,14 +1179,16 @@ FIO_IFUNC __m128i fio_fx86_sha1nexte_epu32(__m128i a, __m128i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1nexte_epu32(a, b);
 #else
-  __m128i r;
-  uint32_t e = a.u32[3];
+  fio_u128 ua = fio___fx86_to_u128(a);
+  fio_u128 ub = fio___fx86_to_u128(b);
+  fio_u128 r;
+  uint32_t e = ua.u32[3];
   uint32_t rotated = (e << 30) | (e >> 2);
-  r.u32[3] = rotated + b.u32[3];
-  r.u32[2] = b.u32[2];
-  r.u32[1] = b.u32[1];
-  r.u32[0] = b.u32[0];
-  return r;
+  r.u32[3] = rotated + ub.u32[3];
+  r.u32[2] = ub.u32[2];
+  r.u32[1] = ub.u32[1];
+  r.u32[0] = ub.u32[0];
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1152,12 +1204,14 @@ FIO_IFUNC __m128i fio_fx86_sha1msg1_epu32(__m128i msg0, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1msg1_epu32(msg0, msg1);
 #else
-  __m128i r;
-  r.u32[3] = msg0.u32[3] ^ msg0.u32[1];
-  r.u32[2] = msg0.u32[2] ^ msg0.u32[0];
-  r.u32[1] = msg0.u32[1] ^ msg1.u32[3];
-  r.u32[0] = msg0.u32[0] ^ msg1.u32[2];
-  return r;
+  fio_u128 umsg0 = fio___fx86_to_u128(msg0);
+  fio_u128 umsg1 = fio___fx86_to_u128(msg1);
+  fio_u128 r;
+  r.u32[3] = umsg0.u32[3] ^ umsg0.u32[1];
+  r.u32[2] = umsg0.u32[2] ^ umsg0.u32[0];
+  r.u32[1] = umsg0.u32[1] ^ umsg1.u32[3];
+  r.u32[0] = umsg0.u32[0] ^ umsg1.u32[2];
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1177,16 +1231,18 @@ FIO_IFUNC __m128i fio_fx86_sha1msg2_epu32(__m128i msg5, __m128i msg1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA__)
   return _mm_sha1msg2_epu32(msg5, msg1);
 #else
-  __m128i r;
-  uint32_t t3 = msg5.u32[3] ^ msg1.u32[2];
-  uint32_t t2 = msg5.u32[2] ^ msg1.u32[1];
-  uint32_t t1 = msg5.u32[1] ^ msg1.u32[0];
+  fio_u128 umsg5 = fio___fx86_to_u128(msg5);
+  fio_u128 umsg1 = fio___fx86_to_u128(msg1);
+  fio_u128 r;
+  uint32_t t3 = umsg5.u32[3] ^ umsg1.u32[2];
+  uint32_t t2 = umsg5.u32[2] ^ umsg1.u32[1];
+  uint32_t t1 = umsg5.u32[1] ^ umsg1.u32[0];
   r.u32[3] = (t3 << 1) | (t3 >> 31);
   r.u32[2] = (t2 << 1) | (t2 >> 31);
   r.u32[1] = (t1 << 1) | (t1 >> 31);
-  uint32_t t0 = msg5.u32[0] ^ r.u32[3];
+  uint32_t t0 = umsg5.u32[0] ^ r.u32[3];
   r.u32[0] = (t0 << 1) | (t0 >> 31);
-  return r;
+  return fio___fx86_from_u128(r);
 #endif
 }
 
@@ -1234,10 +1290,12 @@ FIO_IFUNC __m256i fio_fx86_256_add_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi16(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 16; ++i)
-    r.u16[i] = a.u16[i] + b.u16[i];
-  return r;
+    r.u16[i] = ua.u16[i] + ub.u16[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1246,10 +1304,12 @@ FIO_IFUNC __m256i fio_fx86_256_sub_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi16(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 16; ++i)
-    r.u16[i] = a.u16[i] - b.u16[i];
-  return r;
+    r.u16[i] = ua.u16[i] - ub.u16[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1258,10 +1318,12 @@ FIO_IFUNC __m256i fio_fx86_256_mullo_epi16(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_mullo_epi16(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 16; ++i)
-    r.u16[i] = (uint16_t)((uint32_t)a.u16[i] * (uint32_t)b.u16[i]);
-  return r;
+    r.u16[i] = (uint16_t)((uint32_t)ua.u16[i] * (uint32_t)ub.u16[i]);
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1272,10 +1334,12 @@ FIO_IFUNC __m256i fio_fx86_256_add_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi32(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
-    r.u32[i] = a.u32[i] + b.u32[i];
-  return r;
+    r.u32[i] = ua.u32[i] + ub.u32[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1284,10 +1348,12 @@ FIO_IFUNC __m256i fio_fx86_256_sub_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi32(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
-    r.u32[i] = a.u32[i] - b.u32[i];
-  return r;
+    r.u32[i] = ua.u32[i] - ub.u32[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1296,10 +1362,12 @@ FIO_IFUNC __m256i fio_fx86_256_mullo_epi32(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_mullo_epi32(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
-    r.u32[i] = a.u32[i] * b.u32[i];
-  return r;
+    r.u32[i] = ua.u32[i] * ub.u32[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1310,10 +1378,12 @@ FIO_IFUNC __m256i fio_fx86_256_add_epi64(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_add_epi64(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
-    r.u64[i] = a.u64[i] + b.u64[i];
-  return r;
+    r.u64[i] = ua.u64[i] + ub.u64[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1322,10 +1392,12 @@ FIO_IFUNC __m256i fio_fx86_256_sub_epi64(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_sub_epi64(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
-    r.u64[i] = a.u64[i] - b.u64[i];
-  return r;
+    r.u64[i] = ua.u64[i] - ub.u64[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1348,14 +1420,15 @@ FIO_IFUNC __m256i fio_fx86_256_slli_epi32(__m256i a, int imm8) {
   }
   }
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 r;
   if (n >= 32) {
     FIO_MEMSET(&r, 0, 32);
-    return r;
+    return fio___fx86_from_u256(r);
   }
   for (int i = 0; i < 8; ++i)
-    r.u32[i] = a.u32[i] << n;
-  return r;
+    r.u32[i] = ua.u32[i] << n;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1377,10 +1450,11 @@ FIO_IFUNC __m256i fio_fx86_256_srai_epi32(__m256i a, int imm8) {
   }
   }
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
-    r.i32[i] = (n >= 32) ? (a.i32[i] >> 31) : (a.i32[i] >> n);
-  return r;
+    r.i32[i] = (n >= 32) ? (ua.i32[i] >> 31) : (ua.i32[i] >> n);
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1391,10 +1465,12 @@ FIO_IFUNC __m256i fio_fx86_256_xor_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_xor_si256(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
-    r.u64[i] = a.u64[i] ^ b.u64[i];
-  return r;
+    r.u64[i] = ua.u64[i] ^ ub.u64[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1403,10 +1479,12 @@ FIO_IFUNC __m256i fio_fx86_256_and_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_and_si256(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
-    r.u64[i] = a.u64[i] & b.u64[i];
-  return r;
+    r.u64[i] = ua.u64[i] & ub.u64[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1415,10 +1493,12 @@ FIO_IFUNC __m256i fio_fx86_256_or_si256(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_or_si256(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
-    r.u64[i] = a.u64[i] | b.u64[i];
-  return r;
+    r.u64[i] = ua.u64[i] | ub.u64[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1429,10 +1509,12 @@ FIO_IFUNC __m256i fio_fx86_256_cmpeq_epi8(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_cmpeq_epi8(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int i = 0; i < 32; ++i)
-    r.u8[i] = (a.u8[i] == b.u8[i]) ? 0xFF : 0x00;
-  return r;
+    r.u8[i] = (ua.u8[i] == ub.u8[i]) ? 0xFF : 0x00;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1443,9 +1525,10 @@ FIO_IFUNC int fio_fx86_256_movemask_epi8(__m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_movemask_epi8(a);
 #else
+  fio_u256 ua = fio___fx86_to_u256(a);
   uint32_t r = 0;
   for (int i = 0; i < 32; ++i)
-    r |= ((uint32_t)((a.u8[i] >> 7) & 1U) << i);
+    r |= ((uint32_t)((ua.u8[i] >> 7) & 1U) << i);
   return (int)r;
 #endif
 }
@@ -1468,10 +1551,10 @@ FIO_IFUNC __m256i fio_fx86_256_set1_epi16(short a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi16(a);
 #else
-  __m256i r;
+  fio_u256 r;
   for (int i = 0; i < 16; ++i)
     r.u16[i] = (uint16_t)a;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1480,10 +1563,10 @@ FIO_IFUNC __m256i fio_fx86_256_set1_epi32(int a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi32(a);
 #else
-  __m256i r;
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
     r.u32[i] = (uint32_t)a;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1492,10 +1575,10 @@ FIO_IFUNC __m256i fio_fx86_256_set1_epi64x(long long a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi64x(a);
 #else
-  __m256i r;
+  fio_u256 r;
   for (int i = 0; i < 4; ++i)
     r.u64[i] = (uint64_t)a;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1507,12 +1590,12 @@ FIO_IFUNC __m256i fio_fx86_256_set_epi64x(long long e3,
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set_epi64x(e3, e2, e1, e0);
 #else
-  __m256i r;
+  fio_u256 r;
   r.u64[0] = (uint64_t)e0;
   r.u64[1] = (uint64_t)e1;
   r.u64[2] = (uint64_t)e2;
   r.u64[3] = (uint64_t)e3;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1583,7 +1666,7 @@ FIO_IFUNC __m256i fio_fx86_256_set_epi8(char e31,
                          e1,
                          e0);
 #else
-  __m256i r;
+  fio_u256 r;
   r.u8[0] = (uint8_t)e0;
   r.u8[1] = (uint8_t)e1;
   r.u8[2] = (uint8_t)e2;
@@ -1616,7 +1699,7 @@ FIO_IFUNC __m256i fio_fx86_256_set_epi8(char e31,
   r.u8[29] = (uint8_t)e29;
   r.u8[30] = (uint8_t)e30;
   r.u8[31] = (uint8_t)e31;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1638,22 +1721,24 @@ FIO_IFUNC __m256i fio_fx86_256_shuffle_epi8(__m256i a, __m256i b) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_shuffle_epi8(a, b);
 #else
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   /* Low 128-bit lane */
   for (int i = 0; i < 16; ++i) {
-    if (b.u8[i] & 0x80)
+    if (ub.u8[i] & 0x80)
       r.u8[i] = 0;
     else
-      r.u8[i] = a.u8[b.u8[i] & 0x0F];
+      r.u8[i] = ua.u8[ub.u8[i] & 0x0F];
   }
   /* High 128-bit lane */
   for (int i = 16; i < 32; ++i) {
-    if (b.u8[i] & 0x80)
+    if (ub.u8[i] & 0x80)
       r.u8[i] = 0;
     else
-      r.u8[i] = a.u8[16 + (b.u8[i] & 0x0F)];
+      r.u8[i] = ua.u8[16 + (ub.u8[i] & 0x0F)];
   }
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1722,12 +1807,13 @@ FIO_IFUNC __m256i fio_fx86_256_permute4x64_epi64(__m256i a, int imm8) {
   }
   }
 #else
-  __m256i r;
-  r.u64[0] = a.u64[(n >> 0) & 3];
-  r.u64[1] = a.u64[(n >> 2) & 3];
-  r.u64[2] = a.u64[(n >> 4) & 3];
-  r.u64[3] = a.u64[(n >> 6) & 3];
-  return r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 r;
+  r.u64[0] = ua.u64[(n >> 0) & 3];
+  r.u64[1] = ua.u64[(n >> 2) & 3];
+  r.u64[2] = ua.u64[(n >> 4) & 3];
+  r.u64[3] = ua.u64[(n >> 6) & 3];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1741,14 +1827,16 @@ FIO_IFUNC __m256i fio_fx86_256_packs_epi32(__m256i a, __m256i b) {
   /* Per 128-bit lane: interleave a_lane and b_lane with saturation.
    * Lane 0: a[0..3] saturated to i16, then b[0..3] saturated to i16.
    * Lane 1: a[4..7] saturated to i16, then b[4..7] saturated to i16. */
-  __m256i r;
+  fio_u256 ua = fio___fx86_to_u256(a);
+  fio_u256 ub = fio___fx86_to_u256(b);
+  fio_u256 r;
   for (int lane = 0; lane < 2; ++lane) {
     int base_a = lane * 4;
     int base_b = lane * 4;
     int base_r = lane * 8;
     for (int i = 0; i < 4; ++i) {
-      int32_t va = a.i32[base_a + i];
-      int32_t vb = b.i32[base_b + i];
+      int32_t va = ua.i32[base_a + i];
+      int32_t vb = ub.i32[base_b + i];
       if (va > 32767)
         va = 32767;
       if (va < -32768)
@@ -1761,7 +1849,7 @@ FIO_IFUNC __m256i fio_fx86_256_packs_epi32(__m256i a, __m256i b) {
       r.i16[base_r + 4 + i] = (int16_t)vb;
     }
   }
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1771,10 +1859,11 @@ FIO_IFUNC __m256i fio_fx86_256_cvtepi16_epi32(__m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_cvtepi16_epi32(a);
 #else
-  __m256i r;
+  fio_u128 ua = fio___fx86_to_u128(a);
+  fio_u256 r;
   for (int i = 0; i < 8; ++i)
-    r.i32[i] = (int32_t)a.i16[i];
-  return r;
+    r.i32[i] = (int32_t)ua.i16[i];
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1824,14 +1913,17 @@ FIO_IFUNC __m256i fio_fx86_256_sha512rnds2_epi64(__m256i state1,
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512rnds2_epi64(state1, state0, wk);
 #else
+  fio_u256 us0 = fio___fx86_to_u256(state0);
+  fio_u256 us1 = fio___fx86_to_u256(state1);
+  fio_u256 uwk = fio___fx86_to_u256(wk);
   /* Extract state: state0 = {a, b, c, d}, state1 = {e, f, g, h} */
-  uint64_t a = state0.u64[3], b = state0.u64[2];
-  uint64_t c = state0.u64[1], d = state0.u64[0];
-  uint64_t e = state1.u64[3], f = state1.u64[2];
-  uint64_t g = state1.u64[1], h = state1.u64[0];
+  uint64_t a = us0.u64[3], b = us0.u64[2];
+  uint64_t c = us0.u64[1], d = us0.u64[0];
+  uint64_t e = us1.u64[3], f = us1.u64[2];
+  uint64_t g = us1.u64[1], h = us1.u64[0];
 
   for (int i = 0; i < 2; ++i) {
-    uint64_t wi = wk.u64[i]; /* W[i] + K[i] already combined */
+    uint64_t wi = uwk.u64[i]; /* W[i] + K[i] already combined */
     /* Sigma1(e) */
     uint64_t s1 = ((e >> 14) | (e << 50)) ^ ((e >> 18) | (e << 46)) ^
                   ((e >> 41) | (e << 23));
@@ -1858,12 +1950,12 @@ FIO_IFUNC __m256i fio_fx86_256_sha512rnds2_epi64(__m256i state1,
   }
 
   /* Return updated state1 = {e, f, g, h} */
-  __m256i r;
+  fio_u256 r;
   r.u64[3] = e;
   r.u64[2] = f;
   r.u64[1] = g;
   r.u64[0] = h;
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1879,15 +1971,17 @@ FIO_IFUNC __m256i fio_fx86_256_sha512msg1_epi64(__m256i w0, __m256i w1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512msg1_epi64(w0, w1);
 #else
-  __m256i r;
+  fio_u256 uw0 = fio___fx86_to_u256(w0);
+  fio_u256 uw1 = fio___fx86_to_u256(w1);
+  fio_u256 r;
   /* sigma0 inputs: {w0[1], w0[2], w0[3], w1[0]} */
-  uint64_t src[4] = {w0.u64[1], w0.u64[2], w0.u64[3], w1.u64[0]};
+  uint64_t src[4] = {uw0.u64[1], uw0.u64[2], uw0.u64[3], uw1.u64[0]};
   for (int i = 0; i < 4; ++i) {
     uint64_t x = src[i];
     uint64_t s0 = ((x >> 1) | (x << 63)) ^ ((x >> 8) | (x << 56)) ^ (x >> 7);
-    r.u64[i] = w0.u64[i] + s0;
+    r.u64[i] = uw0.u64[i] + s0;
   }
-  return r;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1902,29 +1996,31 @@ FIO_IFUNC __m256i fio_fx86_256_sha512msg2_epi64(__m256i w0, __m256i w1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512msg2_epi64(w0, w1);
 #else
-  __m256i r;
-  uint64_t w14 = w1.u64[2]; /* W[t-2] */
-  uint64_t w15 = w1.u64[3]; /* W[t-1] */
+  fio_u256 uw0 = fio___fx86_to_u256(w0);
+  fio_u256 uw1 = fio___fx86_to_u256(w1);
+  fio_u256 r;
+  uint64_t w14 = uw1.u64[2]; /* W[t-2] */
+  uint64_t w15 = uw1.u64[3]; /* W[t-1] */
 
   uint64_t s1_14 =
       ((w14 >> 19) | (w14 << 45)) ^ ((w14 >> 61) | (w14 << 3)) ^ (w14 >> 6);
-  r.u64[0] = w0.u64[0] + s1_14;
+  r.u64[0] = uw0.u64[0] + s1_14;
 
   uint64_t s1_15 =
       ((w15 >> 19) | (w15 << 45)) ^ ((w15 >> 61) | (w15 << 3)) ^ (w15 >> 6);
-  r.u64[1] = w0.u64[1] + s1_15;
+  r.u64[1] = uw0.u64[1] + s1_15;
 
   /* Cascade: use newly computed values */
   uint64_t w16 = r.u64[0];
   uint64_t s1_16 =
       ((w16 >> 19) | (w16 << 45)) ^ ((w16 >> 61) | (w16 << 3)) ^ (w16 >> 6);
-  r.u64[2] = w0.u64[2] + s1_16;
+  r.u64[2] = uw0.u64[2] + s1_16;
 
   uint64_t w17 = r.u64[1];
   uint64_t s1_17 =
       ((w17 >> 19) | (w17 << 45)) ^ ((w17 >> 61) | (w17 << 3)) ^ (w17 >> 6);
-  r.u64[3] = w0.u64[3] + s1_17;
-  return r;
+  r.u64[3] = uw0.u64[3] + s1_17;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
