@@ -36,6 +36,19 @@ static fio_io_s *fio___test_io_client = NULL;
 static volatile int fio___test_io_server_ready = 0;
 static volatile int fio___test_io_client_connected = 0;
 static volatile int fio___test_io_exchange_complete = 0;
+static volatile int fio___test_io_connect_attempts = 0;
+static volatile int fio___test_io_connect_failures = 0;
+static volatile int fio___test_io_connect_initiated = 0;
+static volatile int fio___test_io_timeout_fired = 0;
+static volatile intptr_t fio___test_io_last_net_error = 0;
+
+FIO_SFUNC intptr_t fio___test_io_last_error(void) {
+#if FIO_OS_WIN
+  return (intptr_t)WSAGetLastError();
+#else
+  return (intptr_t)errno;
+#endif
+}
 
 /* *****************************************************************************
 Test: Reactor State API (without starting reactor)
@@ -568,13 +581,33 @@ FIO_SFUNC void fio___test_listener_on_start(fio_io_protocol_s *pr, void *ud) {
   (void)pr, (void)ud;
 }
 
+FIO_SFUNC void fio___test_client_on_failed(fio_io_protocol_s *pr, void *ud) {
+  ++fio___test_io_connect_failures;
+  fio___test_io_last_net_error = fio___test_io_last_error();
+  (void)pr, (void)ud;
+}
+
 /* Timer callbacks */
 FIO_SFUNC int fio___test_connect_client(void *u1, void *u2) {
   (void)u1, (void)u2;
-  fio_io_connect("tcp://127.0.0.1:19876",
-                 .protocol = &fio___test_client_protocol,
-                 .udata = (void *)0xABCD,
-                 .timeout = 5000);
+  if (!fio___test_io_server_ready)
+    return 0;
+  ++fio___test_io_connect_attempts;
+  fio_io_s *io = fio_io_connect("tcp://127.0.0.1:19876",
+                                .protocol = &fio___test_client_protocol,
+                                .on_failed = fio___test_client_on_failed,
+                                .udata = (void *)0xABCD,
+                                .timeout = 5000);
+  if (!io) {
+    ++fio___test_io_connect_failures;
+    fio___test_io_last_net_error = fio___test_io_last_error();
+    if (fio___test_io_connect_attempts >= 50) {
+      fio_io_stop();
+      return -1;
+    }
+    return 0;
+  }
+  fio___test_io_connect_initiated = 1;
   return -1;
 }
 
@@ -589,7 +622,18 @@ FIO_SFUNC int fio___test_check_done(void *u1, void *u2) {
 
 FIO_SFUNC int fio___test_timeout(void *u1, void *u2) {
   (void)u1, (void)u2;
-  FIO_LOG_WARNING("  test timeout!");
+  fio___test_io_timeout_fired = 1;
+  FIO_LOG_ERROR(
+      "  io roundtrip timeout (server_ready=%d, connect_attempts=%d, "
+      "connect_failures=%d, connect_initiated=%d, "
+      "client_connected=%d, exchange_complete=%d, last_net_error=%lld)",
+      fio___test_io_server_ready,
+      fio___test_io_connect_attempts,
+      fio___test_io_connect_failures,
+      fio___test_io_connect_initiated,
+      fio___test_io_client_connected,
+      fio___test_io_exchange_complete,
+      (long long)fio___test_io_last_net_error);
   fio_io_stop();
   return -1;
 }
@@ -614,6 +658,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   fio___test_io_server_ready = 0;
   fio___test_io_client_connected = 0;
   fio___test_io_exchange_complete = 0;
+  fio___test_io_connect_attempts = 0;
+  fio___test_io_connect_failures = 0;
+  fio___test_io_connect_initiated = 0;
+  fio___test_io_timeout_fired = 0;
+  fio___test_io_last_net_error = 0;
   fio___test_listener = NULL;
 
   /* Set up listener BEFORE reactor starts (like pubsub tests) */
@@ -646,8 +695,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
 
   /* Schedule timers BEFORE reactor starts (like pubsub tests) */
   fio_io_run_every(.fn = fio___test_connect_client,
-                   .every = 100,
-                   .repetitions = 1);
+                   .every = 50,
+                   .repetitions = -1);
   fio_io_run_every(.fn = fio___test_check_done,
                    .every = 50,
                    .repetitions = -1); /* -1 = repeat forever */
@@ -660,8 +709,32 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   fio_state_callback_remove(FIO_CALL_ON_START, fio___test_on_start, NULL);
 
   /* Verify results */
+  FIO_ASSERT(!fio___test_io_timeout_fired,
+             "roundtrip hit timeout (server_ready=%d, connect_attempts=%d, "
+             "connect_failures=%d, connect_initiated=%d, client_connected=%d, "
+             "on_attach=%d, on_data=%d, last_net_error=%lld)",
+             fio___test_io_server_ready,
+             fio___test_io_connect_attempts,
+             fio___test_io_connect_failures,
+             fio___test_io_connect_initiated,
+             fio___test_io_client_connected,
+             fio___test_io_on_attach_count,
+             fio___test_io_on_data_count,
+             (long long)fio___test_io_last_net_error);
+  FIO_ASSERT(fio___test_io_connect_initiated,
+             "client connect was never initiated after listener startup");
+  FIO_ASSERT(fio___test_io_client_connected,
+             "client on_attach was never called (attempts=%d, failures=%d, "
+             "last_net_error=%lld)",
+             fio___test_io_connect_attempts,
+             fio___test_io_connect_failures,
+             (long long)fio___test_io_last_net_error);
   FIO_ASSERT(fio___test_io_exchange_complete,
-             "roundtrip should complete before timeout");
+             "roundtrip should complete before timeout (attempts=%d, "
+             "failures=%d, last_net_error=%lld)",
+             fio___test_io_connect_attempts,
+             fio___test_io_connect_failures,
+             (long long)fio___test_io_last_net_error);
   FIO_ASSERT(fio___test_io_received_len > 0, "should have received data");
 
   const char *expected = "ECHO:Hello, IO!";

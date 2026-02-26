@@ -45,8 +45,66 @@ static void test_raw_socket_api_no_poll(void) {
   fprintf(stderr, "* raw socket API (no poll): OK\n");
 }
 
+static void test_sock_dup_api(void) {
+  static const char *const address = "127.0.0.1";
+  static const char *const port = "9448";
+  static const char payload[] = "dup-path";
+  static const char reply[] = "dup-reply";
+  char buf[32] = {0};
+
+  fio_socket_i srv =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "sock dup test: server socket failed to open (%lld)",
+             (long long)srv);
+
+  fio_socket_i cl =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_CLIENT);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+             "sock dup test: client socket failed to open (%lld)",
+             (long long)cl);
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "sock dup test: accept failed (%lld)",
+             (long long)accepted);
+
+  fio_socket_i accepted_dup = fio_sock_dup(accepted);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted_dup),
+             "sock dup test: fio_sock_dup failed for accepted socket (%lld)",
+             (long long)accepted);
+
+  fio_sock_close(accepted);
+
+  FIO_ASSERT(fio_sock_write(cl, payload, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "sock dup test: write to client failed");
+  FIO_ASSERT(fio_sock_read(accepted_dup, buf, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "sock dup test: read from dup socket failed");
+  FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
+             "sock dup test: payload mismatch after dup read");
+
+  FIO_ASSERT(fio_sock_write(accepted_dup, reply, sizeof(reply) - 1) ==
+                 (ssize_t)(sizeof(reply) - 1),
+             "sock dup test: write from dup socket failed");
+  FIO_MEMSET(buf, 0, sizeof(buf));
+  FIO_ASSERT(fio_sock_read(cl, buf, sizeof(reply) - 1) ==
+                 (ssize_t)(sizeof(reply) - 1),
+             "sock dup test: read from client failed");
+  FIO_ASSERT(!memcmp(buf, reply, sizeof(reply) - 1),
+             "sock dup test: reply mismatch after dup write");
+
+  fio_sock_close(accepted_dup);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+
+  fprintf(stderr, "* sock dup API: OK\n");
+}
+
 int main(void) {
   test_raw_socket_api_no_poll();
+  test_sock_dup_api();
   struct {
     const char *address;
     const char *port;
