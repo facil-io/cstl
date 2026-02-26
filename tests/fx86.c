@@ -1,7 +1,8 @@
+#include "test-helpers.h"
 #ifndef FIO_FAKE_X86
 #define FIO_FAKE_X86 1
 #endif
-#include "test-helpers.h"
+#include FIO_INCLUDE_FILE
 
 static void fio___fx86_ref_slli_si128(uint8_t out[16],
                                       const uint8_t in[16],
