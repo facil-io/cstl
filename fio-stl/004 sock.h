@@ -722,17 +722,16 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
       fd = FIO_SOCKET_INVALID;
       continue;
     }
-    if (fio_sock_connect(fd, p->ai_addr, p->ai_addrlen) == -1 &&
+    if (fio_sock_connect(fd, p->ai_addr, p->ai_addrlen) == -1) {
 #if FIO_OS_WIN
-        (WSAGetLastError() != WSAEWOULDBLOCK || errno != EINPROGRESS)
+      const int wsa_err = WSAGetLastError();
+      if (wsa_err == WSAEWOULDBLOCK || wsa_err == WSAEINPROGRESS ||
+          wsa_err == WSAEALREADY)
+        break;
+      FIO_LOG_ERROR("(fio_sock_open_remote) connect failed (WSA %d)", wsa_err);
 #else
-        errno != EINPROGRESS
-#endif
-    ) {
-#if FIO_OS_WIN
-      FIO_LOG_ERROR("(fio_sock_open_remote) connect failed (WSA %d)",
-                    WSAGetLastError());
-#else
+      if (errno == EINPROGRESS)
+        break;
       FIO_LOG_DEBUG("Couldn't connect client socket to remote address %s",
                     strerror(errno));
 #endif
@@ -1030,7 +1029,7 @@ IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
                                             FROM_PROTOCOL_INFO,
                                             &info,
                                             0,
-                                            WSA_FLAG_OVERLAPPED);
+                                            0);
   if (!FIO_SOCK_FD_ISVALID(fd))
     FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
                   WSAGetLastError());

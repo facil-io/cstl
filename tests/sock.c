@@ -6,7 +6,47 @@ Test
 #define FIO_SOCK
 #include FIO_INCLUDE_FILE
 
+static void test_raw_socket_api_no_poll(void) {
+  static const char *const address = "127.0.0.1";
+  static const char *const port = "9447";
+  static const char payload[] = "raw";
+  char buf[sizeof(payload)] = {0};
+
+  fio_socket_i srv =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "raw socket test: server socket failed to open (%lld)",
+             (long long)srv);
+
+  fio_socket_i cl =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_CLIENT);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+             "raw socket test: client socket failed to open (%lld)",
+             (long long)cl);
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "raw socket test: accept failed (%lld)",
+             (long long)accepted);
+
+  FIO_ASSERT(fio_sock_write(cl, payload, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "raw socket test: write failed");
+
+  FIO_ASSERT(fio_sock_read(accepted, buf, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "raw socket test: read failed");
+  FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
+             "raw socket test: payload mismatch");
+
+  fio_sock_close(accepted);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+  fprintf(stderr, "* raw socket API (no poll): OK\n");
+}
+
 int main(void) {
+  test_raw_socket_api_no_poll();
   struct {
     const char *address;
     const char *port;
@@ -31,30 +71,32 @@ int main(void) {
   for (size_t i = 0; server_tests[i].address; ++i) {
     short ev = (short)-1;
     errno = 0;
-    int srv = fio_sock_open(server_tests[i].address,
-                            server_tests[i].port,
-                            server_tests[i].flag | FIO_SOCK_SERVER);
-    FIO_ASSERT(srv != -1, "server socket failed to open: %s", strerror(errno));
+    fio_socket_i srv = fio_sock_open(server_tests[i].address,
+                                     server_tests[i].port,
+                                     server_tests[i].flag | FIO_SOCK_SERVER);
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+               "server socket failed to open: %s",
+               strerror(errno));
     ev = fio_sock_wait_io(-1, POLLIN | POLLOUT, 0);
     FIO_ASSERT(!ev, "no error should have been returned for IO -1 (%d)", ev);
     ev = fio_sock_wait_io(srv, POLLIN, 0);
     FIO_ASSERT(!ev, "no events should have been returned (%d)", ev);
-    int cl = fio_sock_open(server_tests[i].address,
-                           server_tests[i].port,
-                           server_tests[i].flag | FIO_SOCK_CLIENT);
+    fio_socket_i cl = fio_sock_open(server_tests[i].address,
+                                    server_tests[i].port,
+                                    server_tests[i].flag | FIO_SOCK_CLIENT);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
-               "client socket failed to open (%d)",
-               cl);
+               "client socket failed to open (%lld)",
+               (long long)cl);
     ev = fio_sock_wait_io(cl, POLLIN /* | POLLOUT <= OS dependent */, 0);
     FIO_ASSERT(!ev,
                "no events should have been returned for connecting client(%d)",
                ev);
     ev = fio_sock_wait_io(srv, POLLIN, 200);
     FIO_ASSERT((ev & POLLIN),
-               "incoming connection should have been detected (%d : %u)",
-               srv,
+               "incoming connection should have been detected (%lld : %u)",
+               (long long)srv,
                (unsigned)ev);
-    int accepted = fio_sock_accept(srv, NULL, NULL);
+    fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
     FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
                "accepted socket failed to open (%zd)",
                (ssize_t)accepted);
@@ -85,8 +127,8 @@ int main(void) {
                  ev);
     } else {
       FIO_ASSERT(0,
-                 "send(fd:%ld) failed! error: %s",
-                 accepted,
+                 "send(fd:%lld) failed! error: %s",
+                 (long long)accepted,
                  strerror(errno));
     }
     fio_sock_close(accepted);
@@ -105,7 +147,7 @@ int main(void) {
   }
   {
     /* UDP semi test */
-    int srv =
+    fio_socket_i srv =
         fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_SERVER);
     int n = 0;
     socklen_t sn = sizeof(n);
@@ -129,11 +171,12 @@ int main(void) {
     if (-1 != getsockopt(srv, SOL_SOCKET, SO_RCVBUF, (void *)&n, &sn) &&
         sizeof(n) == sn)
       fprintf(stderr, "\t\t- UDP receive buffer could be set to %d bytes\n", n);
-    FIO_ASSERT(srv != -1,
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
                "Couldn't open UDP server socket: %s",
                strerror(errno));
-    int cl = fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
-    FIO_ASSERT(cl != -1,
+    fio_socket_i cl =
+        fio_sock_open("127.0.0.1", "9437", FIO_SOCK_UDP | FIO_SOCK_CLIENT);
+    FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
                "Couldn't open UDP client socket: %s",
                strerror(errno));
     FIO_ASSERT(fio_sock_write(cl, "hello", 5) != -1,

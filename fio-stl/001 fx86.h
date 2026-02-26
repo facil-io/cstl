@@ -69,7 +69,7 @@ FIO_IFUNC __m128i fio_fx86_loadu_si128(const void *p) {
   return _mm_loadu_si128((const __m128i *)p);
 #else
   __m128i r;
-  FIO_MEMCPY(&r, p, 16);
+  fio_memcpy16(&r, p);
   return r;
 #endif
 }
@@ -80,7 +80,7 @@ FIO_IFUNC __m128i fio_fx86_load_si128(const void *p) {
   return _mm_load_si128((const __m128i *)p);
 #else
   __m128i r;
-  FIO_MEMCPY(&r, p, 16);
+  fio_memcpy16(&r, p);
   return r;
 #endif
 }
@@ -90,7 +90,7 @@ FIO_IFUNC void fio_fx86_storeu_si128(void *p, __m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   _mm_storeu_si128((__m128i *)p, a);
 #else
-  FIO_MEMCPY(p, &a, 16);
+  fio_memcpy16(p, &a);
 #endif
 }
 
@@ -150,9 +150,10 @@ FIO_IFUNC __m128i fio_fx86_and_si128(__m128i a, __m128i b) {
 
 /** _mm_slli_si128: shift left by imm8 BYTES (not bits), zero-fill right. */
 FIO_IFUNC __m128i fio_fx86_slli_si128(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   /* Must use a switch because the intrinsic requires a compile-time constant */
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_slli_si128(a, 1);
   case 2: return _mm_slli_si128(a, 2);
@@ -172,24 +173,25 @@ FIO_IFUNC __m128i fio_fx86_slli_si128(__m128i a, int imm8) {
   default: return _mm_setzero_si128();
   }
 #else
-  if (imm8 <= 0)
+  if (!n)
     return a;
-  if (imm8 >= 16) {
+  if (n >= 16) {
     __m128i r;
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   __m128i r;
   FIO_MEMSET(&r, 0, 16);
-  FIO_MEMCPY(r.u8 + imm8, a.u8, (size_t)(16 - imm8));
+  FIO_MEMCPY(r.u8 + n, a.u8, (size_t)(16 - n));
   return r;
 #endif
 }
 
 /** _mm_srli_si128: shift right by imm8 BYTES (not bits), zero-fill left. */
 FIO_IFUNC __m128i fio_fx86_srli_si128(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_srli_si128(a, 1);
   case 2: return _mm_srli_si128(a, 2);
@@ -209,16 +211,16 @@ FIO_IFUNC __m128i fio_fx86_srli_si128(__m128i a, int imm8) {
   default: return _mm_setzero_si128();
   }
 #else
-  if (imm8 <= 0)
+  if (!n)
     return a;
-  if (imm8 >= 16) {
+  if (n >= 16) {
     __m128i r;
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   __m128i r;
   FIO_MEMSET(&r, 0, 16);
-  FIO_MEMCPY(r.u8, a.u8 + imm8, (size_t)(16 - imm8));
+  FIO_MEMCPY(r.u8, a.u8 + n, (size_t)(16 - n));
   return r;
 #endif
 }
@@ -227,8 +229,9 @@ FIO_IFUNC __m128i fio_fx86_srli_si128(__m128i a, int imm8) {
 
 /** _mm_slli_epi32: shift each 32-bit lane left by imm8 bits. */
 FIO_IFUNC __m128i fio_fx86_slli_epi32(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_slli_epi32(a, 1);
   case 2: return _mm_slli_epi32(a, 2);
@@ -238,30 +241,32 @@ FIO_IFUNC __m128i fio_fx86_slli_epi32(__m128i a, int imm8) {
   case 30: return _mm_slli_epi32(a, 30);
   case 31: return _mm_slli_epi32(a, 31);
   default: {
-    /* General case: use a temporary to call with variable */
+    uint32_t in[4], out[4];
     __m128i r;
+    fio_memcpy16(in, &a);
     for (int i = 0; i < 4; ++i)
-      ((uint32_t *)&r)[i] =
-          (imm8 >= 32) ? 0 : (((const uint32_t *)&a)[i] << imm8);
+      out[i] = (n >= 32) ? 0 : (in[i] << n);
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
-  if (imm8 >= 32) {
+  if (n >= 32) {
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   for (int i = 0; i < 4; ++i)
-    r.u32[i] = a.u32[i] << imm8;
+    r.u32[i] = a.u32[i] << n;
   return r;
 #endif
 }
 
 /** _mm_srli_epi32: shift each 32-bit lane right (logical) by imm8 bits. */
 FIO_IFUNC __m128i fio_fx86_srli_epi32(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_srli_epi32(a, 1);
   case 2: return _mm_srli_epi32(a, 2);
@@ -271,29 +276,32 @@ FIO_IFUNC __m128i fio_fx86_srli_epi32(__m128i a, int imm8) {
   case 30: return _mm_srli_epi32(a, 30);
   case 31: return _mm_srli_epi32(a, 31);
   default: {
+    uint32_t in[4], out[4];
     __m128i r;
+    fio_memcpy16(in, &a);
     for (int i = 0; i < 4; ++i)
-      ((uint32_t *)&r)[i] =
-          (imm8 >= 32) ? 0 : (((const uint32_t *)&a)[i] >> imm8);
+      out[i] = (n >= 32) ? 0 : (in[i] >> n);
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
-  if (imm8 >= 32) {
+  if (n >= 32) {
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   for (int i = 0; i < 4; ++i)
-    r.u32[i] = a.u32[i] >> imm8;
+    r.u32[i] = a.u32[i] >> n;
   return r;
 #endif
 }
 
 /** _mm_slli_epi64: shift each 64-bit lane left by imm8 bits. */
 FIO_IFUNC __m128i fio_fx86_slli_epi64(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_slli_epi64(a, 1);
   case 2: return _mm_slli_epi64(a, 2);
@@ -302,29 +310,32 @@ FIO_IFUNC __m128i fio_fx86_slli_epi64(__m128i a, int imm8) {
   case 62: return _mm_slli_epi64(a, 62);
   case 63: return _mm_slli_epi64(a, 63);
   default: {
+    uint64_t in[2], out[2];
     __m128i r;
+    fio_memcpy16(in, &a);
     for (int i = 0; i < 2; ++i)
-      ((uint64_t *)&r)[i] =
-          (imm8 >= 64) ? 0 : (((const uint64_t *)&a)[i] << imm8);
+      out[i] = (n >= 64) ? 0 : (in[i] << n);
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
-  if (imm8 >= 64) {
+  if (n >= 64) {
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   for (int i = 0; i < 2; ++i)
-    r.u64[i] = a.u64[i] << imm8;
+    r.u64[i] = a.u64[i] << n;
   return r;
 #endif
 }
 
 /** _mm_srli_epi64: shift each 64-bit lane right (logical) by imm8 bits. */
 FIO_IFUNC __m128i fio_fx86_srli_epi64(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0: return a;
   case 1: return _mm_srli_epi64(a, 1);
   case 2: return _mm_srli_epi64(a, 2);
@@ -333,21 +344,23 @@ FIO_IFUNC __m128i fio_fx86_srli_epi64(__m128i a, int imm8) {
   case 62: return _mm_srli_epi64(a, 62);
   case 63: return _mm_srli_epi64(a, 63);
   default: {
+    uint64_t in[2], out[2];
     __m128i r;
+    fio_memcpy16(in, &a);
     for (int i = 0; i < 2; ++i)
-      ((uint64_t *)&r)[i] =
-          (imm8 >= 64) ? 0 : (((const uint64_t *)&a)[i] >> imm8);
+      out[i] = (n >= 64) ? 0 : (in[i] >> n);
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
-  if (imm8 >= 64) {
+  if (n >= 64) {
     FIO_MEMSET(&r, 0, 16);
     return r;
   }
   for (int i = 0; i < 2; ++i)
-    r.u64[i] = a.u64[i] >> imm8;
+    r.u64[i] = a.u64[i] >> n;
   return r;
 #endif
 }
@@ -356,28 +369,32 @@ FIO_IFUNC __m128i fio_fx86_srli_epi64(__m128i a, int imm8) {
 
 /** _mm_shuffle_epi32: shuffle 32-bit lanes according to imm8 control. */
 FIO_IFUNC __m128i fio_fx86_shuffle_epi32(__m128i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (imm8) {
+  switch (n) {
   case 0x0E: return _mm_shuffle_epi32(a, 0x0E);
   case 0x1B: return _mm_shuffle_epi32(a, 0x1B);
   case 0xAA: return _mm_shuffle_epi32(a, 0xAA);
   case 0xB1: return _mm_shuffle_epi32(a, 0xB1);
   case 0xFF: return _mm_shuffle_epi32(a, 0xFF);
   default: {
+    uint32_t in[4], out[4];
     __m128i r;
-    ((uint32_t *)&r)[0] = ((const uint32_t *)&a)[(imm8 >> 0) & 3];
-    ((uint32_t *)&r)[1] = ((const uint32_t *)&a)[(imm8 >> 2) & 3];
-    ((uint32_t *)&r)[2] = ((const uint32_t *)&a)[(imm8 >> 4) & 3];
-    ((uint32_t *)&r)[3] = ((const uint32_t *)&a)[(imm8 >> 6) & 3];
+    fio_memcpy16(in, &a);
+    out[0] = in[(n >> 0) & 3];
+    out[1] = in[(n >> 2) & 3];
+    out[2] = in[(n >> 4) & 3];
+    out[3] = in[(n >> 6) & 3];
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
-  r.u32[0] = a.u32[(imm8 >> 0) & 3];
-  r.u32[1] = a.u32[(imm8 >> 2) & 3];
-  r.u32[2] = a.u32[(imm8 >> 4) & 3];
-  r.u32[3] = a.u32[(imm8 >> 6) & 3];
+  r.u32[0] = a.u32[(n >> 0) & 3];
+  r.u32[1] = a.u32[(n >> 2) & 3];
+  r.u32[2] = a.u32[(n >> 4) & 3];
+  r.u32[3] = a.u32[(n >> 6) & 3];
   return r;
 #endif
 }
@@ -403,10 +420,10 @@ FIO_IFUNC int fio_fx86_movemask_epi8(__m128i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_movemask_epi8(a);
 #else
-  int r = 0;
+  uint32_t r = 0;
   for (int i = 0; i < 16; ++i)
-    r |= ((a.u8[i] >> 7) & 1) << i;
-  return r;
+    r |= ((uint32_t)((a.u8[i] >> 7) & 1U) << i);
+  return (int)r;
 #endif
 }
 
@@ -550,35 +567,36 @@ FIO_IFUNC __m128i fio_fx86_shuffle_epi8(__m128i a, __m128i b) {
 
 /** _mm_alignr_epi8: concatenate a:b, shift right by imm8 bytes. */
 FIO_IFUNC __m128i fio_fx86_alignr_epi8(__m128i a, __m128i b, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSSE3__)
-  switch (imm8) {
+  switch (n) {
   case 4: return _mm_alignr_epi8(a, b, 4);
   case 8: return _mm_alignr_epi8(a, b, 8);
   default: {
     /* Fallback for other values — pad to 48 bytes for imm8 17..31 safety */
     uint8_t tmp[48];
-    FIO_MEMCPY(tmp, &b, 16);
-    FIO_MEMCPY(tmp + 16, &a, 16);
+    fio_memcpy16(tmp, &b);
+    fio_memcpy16(tmp + 16, &a);
     FIO_MEMSET(tmp + 32, 0, 16);
     __m128i r;
-    if (imm8 >= 32)
+    if (n >= 32)
       FIO_MEMSET(&r, 0, 16);
     else
-      FIO_MEMCPY(&r, tmp + imm8, 16);
+      fio_memcpy16(&r, tmp + n);
     return r;
   }
   }
 #else
   /* Pad to 48 bytes so imm8 values 17..31 don't read out of bounds */
   uint8_t tmp[48];
-  FIO_MEMCPY(tmp, &b, 16);
-  FIO_MEMCPY(tmp + 16, &a, 16);
+  fio_memcpy16(tmp, &b);
+  fio_memcpy16(tmp + 16, &a);
   FIO_MEMSET(tmp + 32, 0, 16);
   __m128i r;
-  if (imm8 >= 32) {
+  if (n >= 32) {
     FIO_MEMSET(&r, 0, 16);
   } else {
-    FIO_MEMCPY(&r, tmp + imm8, 16);
+    fio_memcpy16(&r, tmp + n);
   }
   return r;
 #endif
@@ -590,21 +608,25 @@ Section C: SSE4.1 Intrinsics (2 functions)
 
 /** _mm_blend_epi16: blend 16-bit lanes from a and b using imm8 mask. */
 FIO_IFUNC __m128i fio_fx86_blend_epi16(__m128i a, __m128i b, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_1__)
-  switch (imm8) {
+  switch (n) {
   case 0xF0: return _mm_blend_epi16(a, b, 0xF0);
   default: {
+    uint16_t va[8], vb[8], out[8];
     __m128i r;
+    fio_memcpy16(va, &a);
+    fio_memcpy16(vb, &b);
     for (int i = 0; i < 8; ++i)
-      ((uint16_t *)&r)[i] = ((imm8 >> i) & 1) ? ((const uint16_t *)&b)[i]
-                                              : ((const uint16_t *)&a)[i];
+      out[i] = ((n >> i) & 1U) ? vb[i] : va[i];
+    fio_memcpy16(&r, out);
     return r;
   }
   }
 #else
   __m128i r;
   for (int i = 0; i < 8; ++i)
-    r.u16[i] = ((imm8 >> i) & 1) ? b.u16[i] : a.u16[i];
+    r.u16[i] = ((n >> i) & 1U) ? b.u16[i] : a.u16[i];
   return r;
 #endif
 }
@@ -740,7 +762,7 @@ FIO_IFUNC __m128i fio_fx86_aesenc_si128(__m128i a, __m128i roundkey) {
   return _mm_aesenc_si128(a, roundkey);
 #else
   uint8_t state[16];
-  FIO_MEMCPY(state, &a, 16);
+  fio_memcpy16(state, &a);
   fio___fx86_sub_bytes(state);
   fio___fx86_shift_rows(state);
   fio___fx86_mix_columns(state);
@@ -748,7 +770,7 @@ FIO_IFUNC __m128i fio_fx86_aesenc_si128(__m128i a, __m128i roundkey) {
   for (int i = 0; i < 16; ++i)
     state[i] ^= ((const uint8_t *)&roundkey)[i];
   __m128i r;
-  FIO_MEMCPY(&r, state, 16);
+  fio_memcpy16(&r, state);
   return r;
 #endif
 }
@@ -762,14 +784,14 @@ FIO_IFUNC __m128i fio_fx86_aesenclast_si128(__m128i a, __m128i roundkey) {
   return _mm_aesenclast_si128(a, roundkey);
 #else
   uint8_t state[16];
-  FIO_MEMCPY(state, &a, 16);
+  fio_memcpy16(state, &a);
   fio___fx86_sub_bytes(state);
   fio___fx86_shift_rows(state);
   /* AddRoundKey (no MixColumns) */
   for (int i = 0; i < 16; ++i)
     state[i] ^= ((const uint8_t *)&roundkey)[i];
   __m128i r;
-  FIO_MEMCPY(&r, state, 16);
+  fio_memcpy16(&r, state);
   return r;
 #endif
 }
@@ -1180,7 +1202,7 @@ FIO_IFUNC __m256i fio_fx86_256_loadu_si256(const void *p) {
   return _mm256_loadu_si256((const __m256i *)p);
 #else
   __m256i r;
-  FIO_MEMCPY(&r, p, 32);
+  fio_memcpy32(&r, p);
   return r;
 #endif
 }
@@ -1191,7 +1213,7 @@ FIO_IFUNC __m256i fio_fx86_256_load_si256(const void *p) {
   return _mm256_load_si256((const __m256i *)p);
 #else
   __m256i r;
-  FIO_MEMCPY(&r, p, 32);
+  fio_memcpy32(&r, p);
   return r;
 #endif
 }
@@ -1201,7 +1223,7 @@ FIO_IFUNC void fio_fx86_256_storeu_si256(void *p, __m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   _mm256_storeu_si256((__m256i *)p, a);
 #else
-  FIO_MEMCPY(p, &a, 32);
+  fio_memcpy32(p, &a);
 #endif
 }
 
@@ -1311,47 +1333,53 @@ FIO_IFUNC __m256i fio_fx86_256_sub_epi64(__m256i a, __m256i b) {
 
 /** _mm256_slli_epi32: shift each 32-bit lane left by imm8 bits. */
 FIO_IFUNC __m256i fio_fx86_256_slli_epi32(__m256i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  switch (imm8) {
+  switch (n) {
   case 16: return _mm256_slli_epi32(a, 16);
   default: {
+    uint32_t in[8], out[8];
     __m256i r;
+    fio_memcpy32(in, &a);
     for (int i = 0; i < 8; ++i)
-      ((uint32_t *)&r)[i] =
-          (imm8 >= 32) ? 0 : (((const uint32_t *)&a)[i] << imm8);
+      out[i] = (n >= 32) ? 0 : (in[i] << n);
+    fio_memcpy32(&r, out);
     return r;
   }
   }
 #else
   __m256i r;
-  if (imm8 >= 32) {
+  if (n >= 32) {
     FIO_MEMSET(&r, 0, 32);
     return r;
   }
   for (int i = 0; i < 8; ++i)
-    r.u32[i] = a.u32[i] << imm8;
+    r.u32[i] = a.u32[i] << n;
   return r;
 #endif
 }
 
 /** _mm256_srai_epi32: arithmetic shift right each 32-bit lane by imm8. */
 FIO_IFUNC __m256i fio_fx86_256_srai_epi32(__m256i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  switch (imm8) {
+  switch (n) {
   case 16: return _mm256_srai_epi32(a, 16);
   case 26: return _mm256_srai_epi32(a, 26);
   default: {
+    int32_t in[8], out[8];
     __m256i r;
+    fio_memcpy32(in, &a);
     for (int i = 0; i < 8; ++i)
-      ((int32_t *)&r)[i] = (imm8 >= 32) ? (((const int32_t *)&a)[i] >> 31)
-                                        : (((const int32_t *)&a)[i] >> imm8);
+      out[i] = (n >= 32) ? (in[i] >> 31) : (in[i] >> n);
+    fio_memcpy32(&r, out);
     return r;
   }
   }
 #else
   __m256i r;
   for (int i = 0; i < 8; ++i)
-    r.i32[i] = (imm8 >= 32) ? (a.i32[i] >> 31) : (a.i32[i] >> imm8);
+    r.i32[i] = (n >= 32) ? (a.i32[i] >> 31) : (a.i32[i] >> n);
   return r;
 #endif
 }
@@ -1415,10 +1443,10 @@ FIO_IFUNC int fio_fx86_256_movemask_epi8(__m256i a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_movemask_epi8(a);
 #else
-  int r = 0;
+  uint32_t r = 0;
   for (int i = 0; i < 32; ++i)
-    r |= ((a.u8[i] >> 7) & 1) << i;
-  return r;
+    r |= ((uint32_t)((a.u8[i] >> 7) & 1U) << i);
+  return (int)r;
 #endif
 }
 
@@ -1631,24 +1659,25 @@ FIO_IFUNC __m256i fio_fx86_256_shuffle_epi8(__m256i a, __m256i b) {
 
 /** _mm256_alignr_epi8: concatenate and shift within each 128-bit lane. */
 FIO_IFUNC __m256i fio_fx86_256_alignr_epi8(__m256i a, __m256i b, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  switch (imm8) {
+  switch (n) {
   case 8: return _mm256_alignr_epi8(a, b, 8);
   default: {
     /* Per-lane concatenate and shift — pad to 48 for imm8 17..31 safety */
     uint8_t lo[48], hi[48];
-    FIO_MEMCPY(lo, &b, 16);
-    FIO_MEMCPY(lo + 16, &a, 16);
+    fio_memcpy16(lo, &b);
+    fio_memcpy16(lo + 16, &a);
     FIO_MEMSET(lo + 32, 0, 16);
-    FIO_MEMCPY(hi, (const uint8_t *)&b + 16, 16);
-    FIO_MEMCPY(hi + 16, (const uint8_t *)&a + 16, 16);
+    fio_memcpy16(hi, (const uint8_t *)&b + 16);
+    fio_memcpy16(hi + 16, (const uint8_t *)&a + 16);
     FIO_MEMSET(hi + 32, 0, 16);
     __m256i r;
-    if (imm8 >= 32) {
+    if (n >= 32) {
       FIO_MEMSET(&r, 0, 32);
     } else {
-      FIO_MEMCPY(&r, lo + imm8, 16);
-      FIO_MEMCPY((uint8_t *)&r + 16, hi + imm8, 16);
+      fio_memcpy16(&r, lo + n);
+      fio_memcpy16((uint8_t *)&r + 16, hi + n);
     }
     return r;
   }
@@ -1656,18 +1685,18 @@ FIO_IFUNC __m256i fio_fx86_256_alignr_epi8(__m256i a, __m256i b, int imm8) {
 #else
   /* Per-lane: concatenate b_lane:a_lane — pad to 48 for imm8 17..31 safety */
   uint8_t lo[48], hi[48];
-  FIO_MEMCPY(lo, &b, 16);
-  FIO_MEMCPY(lo + 16, &a, 16);
+  fio_memcpy16(lo, &b);
+  fio_memcpy16(lo + 16, &a);
   FIO_MEMSET(lo + 32, 0, 16);
-  FIO_MEMCPY(hi, (const uint8_t *)&b + 16, 16);
-  FIO_MEMCPY(hi + 16, (const uint8_t *)&a + 16, 16);
+  fio_memcpy16(hi, (const uint8_t *)&b + 16);
+  fio_memcpy16(hi + 16, (const uint8_t *)&a + 16);
   FIO_MEMSET(hi + 32, 0, 16);
   __m256i r;
-  if (imm8 >= 32) {
+  if (n >= 32) {
     FIO_MEMSET(&r, 0, 32);
   } else {
-    FIO_MEMCPY(&r, lo + imm8, 16);
-    FIO_MEMCPY((uint8_t *)&r + 16, hi + imm8, 16);
+    fio_memcpy16(&r, lo + n);
+    fio_memcpy16((uint8_t *)&r + 16, hi + n);
   }
   return r;
 #endif
@@ -1675,25 +1704,29 @@ FIO_IFUNC __m256i fio_fx86_256_alignr_epi8(__m256i a, __m256i b, int imm8) {
 
 /** _mm256_permute4x64_epi64: permute 64-bit lanes across full 256 bits. */
 FIO_IFUNC __m256i fio_fx86_256_permute4x64_epi64(__m256i a, int imm8) {
+  uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  switch (imm8) {
+  switch (n) {
   case 0x4E: return _mm256_permute4x64_epi64(a, 0x4E);
   case 0xD8: return _mm256_permute4x64_epi64(a, 0xD8);
   default: {
+    uint64_t in[4], out[4];
     __m256i r;
-    ((uint64_t *)&r)[0] = ((const uint64_t *)&a)[(imm8 >> 0) & 3];
-    ((uint64_t *)&r)[1] = ((const uint64_t *)&a)[(imm8 >> 2) & 3];
-    ((uint64_t *)&r)[2] = ((const uint64_t *)&a)[(imm8 >> 4) & 3];
-    ((uint64_t *)&r)[3] = ((const uint64_t *)&a)[(imm8 >> 6) & 3];
+    fio_memcpy32(in, &a);
+    out[0] = in[(n >> 0) & 3];
+    out[1] = in[(n >> 2) & 3];
+    out[2] = in[(n >> 4) & 3];
+    out[3] = in[(n >> 6) & 3];
+    fio_memcpy32(&r, out);
     return r;
   }
   }
 #else
   __m256i r;
-  r.u64[0] = a.u64[(imm8 >> 0) & 3];
-  r.u64[1] = a.u64[(imm8 >> 2) & 3];
-  r.u64[2] = a.u64[(imm8 >> 4) & 3];
-  r.u64[3] = a.u64[(imm8 >> 6) & 3];
+  r.u64[0] = a.u64[(n >> 0) & 3];
+  r.u64[1] = a.u64[(n >> 2) & 3];
+  r.u64[2] = a.u64[(n >> 4) & 3];
+  r.u64[3] = a.u64[(n >> 6) & 3];
   return r;
 #endif
 }
@@ -1753,7 +1786,7 @@ FIO_IFUNC __m128i fio_fx86_256_castsi256_si128(__m256i a) {
   return _mm256_castsi256_si128(a);
 #else
   __m128i r;
-  FIO_MEMCPY(&r, &a, 16);
+  fio_memcpy16(&r, &a);
   return r;
 #endif
 }
@@ -1767,7 +1800,7 @@ FIO_IFUNC __m128i fio_fx86_256_extracti128_si256(__m256i a, int imm8) {
   }
 #else
   __m128i r;
-  FIO_MEMCPY(&r, (const uint8_t *)&a + ((imm8 & 1) * 16), 16);
+  fio_memcpy16(&r, (const uint8_t *)&a + ((imm8 & 1) * 16));
   return r;
 #endif
 }

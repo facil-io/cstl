@@ -143,7 +143,7 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
  */
 SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
-  int handled = -1;
+  int handled = 0;
   if (!p || !(p->map.count)) {
     if (timeout) {
       FIO_THREAD_WAIT((timeout * 1000000));
