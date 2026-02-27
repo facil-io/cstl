@@ -498,20 +498,26 @@ SFUNC int fio_ipc_url_set(const char *url) {
     }
     size_t tmplen = tmpdir ? FIO_STRLEN(tmpdir) : 0;
     if (!tmpdir || tmplen > 128) {
+#if FIO_OS_WIN
+      tmpdir = NULL;
+      tmplen = 0;
+#else
       tmpdir = "/tmp/";
       tmplen = FIO_STRLEN(tmpdir);
+#endif
     }
 
-    fio_string_write2(&str,
-                      NULL,
-                      FIO_STRING_WRITE_STR1("unix://"),
-                      FIO_STRING_WRITE_STR1(tmpdir),
-                      FIO_STRING_WRITE_STR2("/",
-                                            (tmpdir[tmplen - 1] != '/' &&
-                                             tmpdir[tmplen - 1] != '\\')),
-                      FIO_STRING_WRITE_STR1("fio_tmp_"),
-                      FIO_STRING_WRITE_HEX((fio_rand64() >> 24)),
-                      FIO_STRING_WRITE_STR1(".sock"));
+    fio_string_write2(
+        &str,
+        NULL,
+        FIO_STRING_WRITE_STR1("unix://"),
+        FIO_STRING_WRITE_STR2(tmpdir, tmplen),
+        FIO_STRING_WRITE_STR2("/",
+                              (tmplen && tmpdir[tmplen - 1] != '/' &&
+                               tmpdir[tmplen - 1] != '\\')),
+        FIO_STRING_WRITE_STR1("fio_tmp_"),
+        FIO_STRING_WRITE_HEX((fio_rand64() >> 24)),
+        FIO_STRING_WRITE_STR1(".sock"));
   }
 
   if (FIO___IPC.listener) {

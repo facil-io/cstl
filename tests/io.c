@@ -703,6 +703,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
   fio_io_run_every(.fn = fio___test_timeout, .every = 5000, .repetitions = 1);
 
   /* Start reactor in single-process mode */
+  fprintf(stderr,
+          "  [io-roundtrip] starting reactor with workers=0; IPC fork/connect "
+          "path is not used in this test\n");
   fio_io_start(0);
 
   /* Clean up state callback */

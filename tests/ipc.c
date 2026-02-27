@@ -232,6 +232,43 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_url_management)(void) {
                "IPC URL should start with 'unix://'");
   }
 
+#if defined(_WIN32)
+  /* Diagnostic only: report Windows default URL compatibility with sock tests.
+   */
+  {
+    const char *url = fio_ipc_url();
+    const char *path = (url && FIO_STRLEN(url) >= 7) ? (url + 7) : "";
+    int has_backslash = 0;
+    int has_drive_letter = 0;
+    int has_drive_backslash = 0;
+
+    for (size_t i = 0; path[i]; ++i) {
+      if (path[i] == '\\') {
+        has_backslash = 1;
+        break;
+      }
+    }
+    if (((path[0] >= 'A' && path[0] <= 'Z') ||
+         (path[0] >= 'a' && path[0] <= 'z')) &&
+        path[1] == ':') {
+      has_drive_letter = 1;
+      if (path[2] == '\\')
+        has_drive_backslash = 1;
+    }
+
+    fprintf(stderr,
+            "* windows IPC default URL diagnostic: url=%s, path=%s, "
+            "drive_letter=%s, backslash=%s, compatibility=%s\n",
+            url,
+            path,
+            (has_drive_letter ? "yes" : "no"),
+            (has_backslash ? "yes" : "no"),
+            ((has_backslash || has_drive_backslash)
+                 ? "problematic (matches unix:// backslash edge-case probes)"
+                 : "compatible (slash-normalized)"));
+  }
+#endif
+
   /* Test: Set custom URL */
   {
     const char *custom_url = "unix://test_ipc_url.sock";
