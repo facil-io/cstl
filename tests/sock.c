@@ -13,6 +13,16 @@ Test
 #endif
 
 #if defined(_WIN32) && defined(AF_UNIX)
+static char *fio___test_sock_getcwd(char *buf, size_t len) {
+#if FIO_OS_WIN
+  return _getcwd(buf, (int)len);
+#else
+  return getcwd(buf, len);
+#endif
+}
+#endif
+
+#if defined(_WIN32) && defined(AF_UNIX)
 static int test_unix_url_open2_roundtrip(const char *url,
                                          const char *path_for_unlink,
                                          const char *label,
@@ -367,7 +377,7 @@ static void test_windows_unix_url_path_formats(void) {
   const char *const rel_backslash_url =
       "unix://.\\tmp\\tests\\tmp_unix_win_url_backslash.sock";
 
-  FIO_ASSERT(getcwd(cwd, sizeof(cwd)),
+  FIO_ASSERT(fio___test_sock_getcwd(cwd, sizeof(cwd)),
              "windows unix:// URL formatting test: getcwd failed.");
 
   FIO_MEMCPY(cwd_slash, cwd, sizeof(cwd_slash));
