@@ -6,6 +6,79 @@ Test
 #define FIO_SOCK
 #include FIO_INCLUDE_FILE
 
+#if defined(_WIN32)
+#define FIO___TEST_SOCK_ERRNO() WSAGetLastError()
+#else
+#define FIO___TEST_SOCK_ERRNO() errno
+#endif
+
+#if defined(_WIN32) && defined(AF_UNIX)
+static void test_unix_url_open2_roundtrip(const char *url,
+                                          const char *path_for_unlink,
+                                          const char *label) {
+  static const char payload[] = "u2";
+  char buf[sizeof(payload)] = {0};
+
+  unlink(path_for_unlink);
+  errno = 0;
+  fio_socket_i srv = fio_sock_open2(url, FIO_SOCK_SERVER);
+  const int srv_errno = errno;
+  const int srv_sock_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "%s: server open failed (url=%s, path=%s, errno=%d, "
+             "socket_error=%d)",
+             label,
+             url,
+             path_for_unlink,
+             srv_errno,
+             srv_sock_err);
+
+  errno = 0;
+  fio_socket_i cl = fio_sock_open2(url, FIO_SOCK_CLIENT);
+  const int cl_errno = errno;
+  const int cl_sock_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+             "%s: client open failed (url=%s, path=%s, errno=%d, "
+             "socket_error=%d)",
+             label,
+             url,
+             path_for_unlink,
+             cl_errno,
+             cl_sock_err);
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  const int accept_errno = errno;
+  const int accept_sock_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "%s: accept failed (url=%s, path=%s, errno=%d, socket_error=%d)",
+             label,
+             url,
+             path_for_unlink,
+             accept_errno,
+             accept_sock_err);
+
+  FIO_ASSERT(fio_sock_write(cl, payload, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "%s: client write failed (url=%s)",
+             label,
+             url);
+  FIO_ASSERT(fio_sock_read(accepted, buf, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "%s: server read failed (url=%s)",
+             label,
+             url);
+  FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
+             "%s: payload mismatch (url=%s)",
+             label,
+             url);
+
+  fio_sock_close(accepted);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+  unlink(path_for_unlink);
+}
+#endif
+
 static void test_raw_socket_api_no_poll(void) {
   static const char *const address = "127.0.0.1";
   static const char *const port = "9447";
@@ -113,12 +186,6 @@ static void test_unix_domain_socket_support(void) {
   static const char payload[] = "unix";
   char buf[sizeof(payload)] = {0};
 
-#if defined(_WIN32)
-#define FIO___TEST_SOCK_ERRNO() WSAGetLastError()
-#else
-#define FIO___TEST_SOCK_ERRNO() errno
-#endif
-
   unlink(path);
 
   errno = 0;
@@ -159,8 +226,6 @@ static void test_unix_domain_socket_support(void) {
   fio_sock_close(srv);
   unlink(path);
 
-#undef FIO___TEST_SOCK_ERRNO
-
   fprintf(stderr, "* AF_UNIX socket API: OK\n");
 #elif defined(_WIN32)
   FIO_ASSERT(0,
@@ -173,10 +238,82 @@ static void test_unix_domain_socket_support(void) {
 #endif
 }
 
+static void test_windows_unix_url_path_formats(void) {
+#if defined(_WIN32) && defined(AF_UNIX)
+  char cwd[1024] = {0};
+  char cwd_slash[1024] = {0};
+  char drive_path_backslash[1280] = {0};
+  char drive_path_slash[1280] = {0};
+  char url_drive_backslash[1536] = {0};
+  char url_drive_slash[1536] = {0};
+  const char *const rel_backslash_path =
+      ".\\tmp\\tests\\tmp_unix_win_url_backslash.sock";
+  const char *const rel_backslash_url =
+      "unix://.\\tmp\\tests\\tmp_unix_win_url_backslash.sock";
+
+  FIO_ASSERT(getcwd(cwd, sizeof(cwd)),
+             "windows unix:// URL formatting test: getcwd failed.");
+
+  FIO_MEMCPY(cwd_slash, cwd, sizeof(cwd_slash));
+  for (size_t i = 0; cwd_slash[i]; ++i) {
+    if (cwd_slash[i] == '\\')
+      cwd_slash[i] = '/';
+  }
+
+  FIO_ASSERT((size_t)snprintf(drive_path_backslash,
+                              sizeof(drive_path_backslash),
+                              "%s\\tmp\\tests\\tmp_unix_win_url_drive.sock",
+                              cwd) < sizeof(drive_path_backslash),
+             "windows unix:// URL formatting test: drive path is too long "
+             "(backslash variant). cwd=%s",
+             cwd);
+  FIO_ASSERT((size_t)snprintf(drive_path_slash,
+                              sizeof(drive_path_slash),
+                              "%s/tmp/tests/tmp_unix_win_url_drive.sock",
+                              cwd_slash) < sizeof(drive_path_slash),
+             "windows unix:// URL formatting test: drive path is too long "
+             "(slash variant). cwd=%s",
+             cwd_slash);
+
+  FIO_ASSERT((size_t)snprintf(url_drive_backslash,
+                              sizeof(url_drive_backslash),
+                              "unix://%s",
+                              drive_path_backslash) <
+                 sizeof(url_drive_backslash),
+             "windows unix:// URL formatting test: URL is too long "
+             "(drive+backslash). path=%s",
+             drive_path_backslash);
+  FIO_ASSERT((size_t)snprintf(url_drive_slash,
+                              sizeof(url_drive_slash),
+                              "unix://%s",
+                              drive_path_slash) < sizeof(url_drive_slash),
+             "windows unix:// URL formatting test: URL is too long "
+             "(drive+slash). path=%s",
+             drive_path_slash);
+
+  test_unix_url_open2_roundtrip(url_drive_backslash,
+                                drive_path_backslash,
+                                "windows unix:// drive-letter backslash path");
+  test_unix_url_open2_roundtrip(rel_backslash_url,
+                                rel_backslash_path,
+                                "windows unix:// relative backslash path");
+  test_unix_url_open2_roundtrip(url_drive_slash,
+                                drive_path_slash,
+                                "windows unix:// normalized slash path");
+
+  fprintf(stderr, "* windows unix:// URL path formatting: OK\n");
+#else
+  fprintf(stderr,
+          "* windows unix:// URL path formatting: skipped "
+          "(non-Windows or AF_UNIX unavailable)\n");
+#endif
+}
+
 int main(void) {
   test_raw_socket_api_no_poll();
   test_sock_dup_api();
   test_unix_domain_socket_support();
+  test_windows_unix_url_path_formats();
   struct {
     const char *address;
     const char *port;

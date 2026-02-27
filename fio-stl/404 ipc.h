@@ -506,7 +506,9 @@ SFUNC int fio_ipc_url_set(const char *url) {
                       NULL,
                       FIO_STRING_WRITE_STR1("unix://"),
                       FIO_STRING_WRITE_STR1(tmpdir),
-                      FIO_STRING_WRITE_STR2("/", (tmpdir[tmplen - 1] != '/')),
+                      FIO_STRING_WRITE_STR2("/",
+                                            (tmpdir[tmplen - 1] != '/' &&
+                                             tmpdir[tmplen - 1] != '\\')),
                       FIO_STRING_WRITE_STR1("fio_tmp_"),
                       FIO_STRING_WRITE_HEX((fio_rand64() >> 24)),
                       FIO_STRING_WRITE_STR1(".sock"));

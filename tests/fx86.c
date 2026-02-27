@@ -1,8 +1,20 @@
 #include "test-helpers.h"
+#if defined(_MSC_VER) && defined(__is_identifier)
+#define FIO___FX86_TEST_PRELOADED_M128I (!__is_identifier(__m128i))
+#define FIO___FX86_TEST_PRELOADED_M256I (!__is_identifier(__m256i))
+#else
+#define FIO___FX86_TEST_PRELOADED_M128I 0
+#define FIO___FX86_TEST_PRELOADED_M256I 0
+#endif
 #ifndef FIO_FAKE_X86
 #define FIO_FAKE_X86 1
 #endif
 #include FIO_INCLUDE_FILE
+
+#if defined(__is_identifier)
+#define FIO___FX86_TEST_RAW_M128I_IDENTIFIER __is_identifier(__m128i)
+#define FIO___FX86_TEST_RAW_M256I_IDENTIFIER __is_identifier(__m256i)
+#endif
 
 static void fio___fx86_ref_slli_si128(uint8_t out[16],
                                       const uint8_t in[16],
@@ -65,6 +77,38 @@ static void fio___fx86_ref_alignr_epi8_256(uint8_t out[32],
 int main(void) {
   fprintf(stderr, "* fx86 tests\n");
 
+  {
+    int const preloaded_m128 = FIO___FX86_TEST_PRELOADED_M128I;
+    int const preloaded_m256 = FIO___FX86_TEST_PRELOADED_M256I;
+    int const detected_m128 = FIO___FX86_HAS_NATIVE_M128I;
+    int const detected_m256 = FIO___FX86_HAS_NATIVE_M256I;
+    int const detected = FIO___FX86_HAS_NATIVE_TYPES;
+    if (preloaded_m128)
+      FIO_ASSERT(detected_m128,
+                 "fx86 native __m128i preloaded but not detected");
+    if (preloaded_m256)
+      FIO_ASSERT(detected_m256,
+                 "fx86 native __m256i preloaded but not detected");
+    FIO_ASSERT(detected == (detected_m128 && detected_m256),
+               "fx86 native aggregate detection mismatch");
+#if defined(__is_identifier) && !defined(FIO_FAKE_X86_SHADOW)
+    if (!preloaded_m128)
+      FIO_ASSERT(FIO___FX86_TEST_RAW_M128I_IDENTIFIER,
+                 "fx86 must not provide raw __m128i typedef");
+    if (!preloaded_m256)
+      FIO_ASSERT(FIO___FX86_TEST_RAW_M256I_IDENTIFIER,
+                 "fx86 must not provide raw __m256i typedef");
+#endif
+    fprintf(stderr,
+            "* fx86 native SIMD types: %s (m128: preloaded=%s detected=%s, "
+            "m256: preloaded=%s detected=%s)\n",
+            detected ? "yes" : "no",
+            preloaded_m128 ? "yes" : "no",
+            detected_m128 ? "yes" : "no",
+            preloaded_m256 ? "yes" : "no",
+            detected_m256 ? "yes" : "no");
+  }
+
   { /* imm8 normalization: byte shifts */
     uint8_t in[16], got[16], expect[16];
     int tests[] = {-1, 0, 1, 7, 15, 16, 17, 255, 256};
@@ -72,7 +116,7 @@ int main(void) {
       in[i] = (uint8_t)(i + 1);
     for (size_t i = 0; i < (sizeof(tests) / sizeof(*tests)); ++i) {
       int imm8 = tests[i];
-      __m128i v = fio_fx86_loadu_si128(in);
+      fio_fx86_m128i v = fio_fx86_loadu_si128(in);
       fio_fx86_storeu_si128(got, fio_fx86_slli_si128(v, imm8));
       fio___fx86_ref_slli_si128(expect, in, imm8);
       FIO_ASSERT(!FIO_MEMCMP(got, expect, 16),
@@ -91,7 +135,7 @@ int main(void) {
     uint32_t in[4] = {0x80000001U, 0x7FFFFFFFU, 0x00000001U, 0xFFFFFFFFU};
     uint32_t got[4], expect[4];
     int tests[] = {-1, 0, 1, 16, 31, 32, 255};
-    __m128i v = fio_fx86_loadu_si128(in);
+    fio_fx86_m128i v = fio_fx86_loadu_si128(in);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       uint8_t const n = (uint8_t)tests[t];
       fio_fx86_storeu_si128(got, fio_fx86_slli_epi32(v, tests[t]));
@@ -114,7 +158,7 @@ int main(void) {
     uint64_t in[2] = {0x8000000000000001ULL, 0x7FFFFFFFFFFFFFFFULL};
     uint64_t got[2], expect[2];
     int tests[] = {-1, 0, 1, 32, 63, 64, 255};
-    __m128i v = fio_fx86_loadu_si128(in);
+    fio_fx86_m128i v = fio_fx86_loadu_si128(in);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       uint8_t const n = (uint8_t)tests[t];
       fio_fx86_storeu_si128(got, fio_fx86_slli_epi64(v, tests[t]));
@@ -140,8 +184,8 @@ int main(void) {
       a[i] = (uint8_t)(0xA0U + i);
       b[i] = (uint8_t)(0x10U + i);
     }
-    __m128i va = fio_fx86_loadu_si128(a);
-    __m128i vb = fio_fx86_loadu_si128(b);
+    fio_fx86_m128i va = fio_fx86_loadu_si128(a);
+    fio_fx86_m128i vb = fio_fx86_loadu_si128(b);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       fio_fx86_storeu_si128(got, fio_fx86_alignr_epi8(va, vb, tests[t]));
       fio___fx86_ref_alignr_epi8(expect, a, b, tests[t]);
@@ -158,8 +202,8 @@ int main(void) {
       a[i] = (uint8_t)(0x80U + i);
       b[i] = (uint8_t)(0x20U + i);
     }
-    __m256i va = fio_fx86_256_loadu_si256(a);
-    __m256i vb = fio_fx86_256_loadu_si256(b);
+    fio_fx86_m256i va = fio_fx86_256_loadu_si256(a);
+    fio_fx86_m256i vb = fio_fx86_256_loadu_si256(b);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       fio_fx86_256_storeu_si256(got,
                                 fio_fx86_256_alignr_epi8(va, vb, tests[t]));
@@ -182,7 +226,7 @@ int main(void) {
     for (size_t i = 0; i < 32; ++i)
       expect |= ((uint32_t)((b32[i] >> 7) & 1U) << i);
     {
-      __m256i v = fio_fx86_256_loadu_si256(b32);
+      fio_fx86_m256i v = fio_fx86_256_loadu_si256(b32);
       uint32_t got = (uint32_t)fio_fx86_256_movemask_epi8(v);
       FIO_ASSERT(
           got == expect,
@@ -194,7 +238,7 @@ int main(void) {
     FIO_MEMSET(b32, 0, 32);
     b32[31] = 0x80;
     {
-      __m256i v = fio_fx86_256_loadu_si256(b32);
+      fio_fx86_m256i v = fio_fx86_256_loadu_si256(b32);
       uint32_t got = (uint32_t)fio_fx86_256_movemask_epi8(v);
       FIO_ASSERT(got == 0x80000000U,
                  "fio_fx86_256_movemask_epi8 high-bit mismatch (got=0x%08x)",
@@ -210,8 +254,8 @@ int main(void) {
     int32_t got_i[8], expect_i[8];
     int tests[] = {-1, 0, 1, 16, 31, 32, 255};
 
-    __m256i vu = fio_fx86_256_loadu_si256(in_u);
-    __m256i vi = fio_fx86_256_loadu_si256(in_i);
+    fio_fx86_m256i vu = fio_fx86_256_loadu_si256(in_u);
+    fio_fx86_m256i vi = fio_fx86_256_loadu_si256(in_i);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       uint8_t const n = (uint8_t)tests[t];
 
@@ -236,8 +280,8 @@ int main(void) {
     uint64_t b_words[2] = {0xFEDCBA9876543210ULL, 0x8877665544332211ULL};
     uint8_t got[16], expect[16];
     int tests[] = {0x00, 0x01, 0x10, 0x11, 0x12, 0x21, 0xFF, -1};
-    __m128i va = fio_fx86_loadu_si128(a_words);
-    __m128i vb = fio_fx86_loadu_si128(b_words);
+    fio_fx86_m128i va = fio_fx86_loadu_si128(a_words);
+    fio_fx86_m128i vb = fio_fx86_loadu_si128(b_words);
     for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
       int imm = tests[t];
       int canon = ((uint8_t)imm) & 0x11;
@@ -269,8 +313,8 @@ int main(void) {
                               0x44444444U};
       uint8_t got[16], expect[16];
       int tests[] = {0, 1, 2, 3, 4, 5, 6, 7, 255, -1};
-      __m128i abcd = fio_fx86_loadu_si128(abcd_words);
-      __m128i e0 = fio_fx86_loadu_si128(e0_words);
+      fio_fx86_m128i abcd = fio_fx86_loadu_si128(abcd_words);
+      fio_fx86_m128i e0 = fio_fx86_loadu_si128(e0_words);
       for (size_t t = 0; t < (sizeof(tests) / sizeof(*tests)); ++t) {
         int func = tests[t];
         int canon = ((uint8_t)func) & 3;
