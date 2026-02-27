@@ -1034,7 +1034,12 @@ FIO_IFUNC int fio___sock_wsa2errno(int wsa_err) {
   case WSAETIMEDOUT: return ETIMEDOUT;
   case WSAECONNREFUSED: return ECONNREFUSED;
   case WSAEHOSTUNREACH: return EHOSTUNREACH;
-  case WSAEHOSTDOWN: return EHOSTDOWN;
+  case WSAEHOSTDOWN:
+#ifdef EHOSTDOWN
+    return EHOSTDOWN;
+#else
+    return EHOSTUNREACH;
+#endif
   case WSAEINVAL: return EINVAL;
   default: return EIO;
   }
