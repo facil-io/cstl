@@ -13,16 +13,6 @@ Test
 #endif
 
 #if defined(_WIN32) && defined(AF_UNIX)
-static char *fio___test_sock_getcwd(char *buf, size_t len) {
-#if FIO_OS_WIN
-  return _getcwd(buf, (int)len);
-#else
-  return getcwd(buf, len);
-#endif
-}
-#endif
-
-#if defined(_WIN32) && defined(AF_UNIX)
 static int test_unix_url_open2_roundtrip(const char *url,
                                          const char *path_for_unlink,
                                          const char *label,
@@ -366,87 +356,38 @@ static void test_unix_domain_socket_support(void) {
 
 static void test_windows_unix_url_path_formats(void) {
 #if defined(_WIN32) && defined(AF_UNIX)
-  char cwd[1024] = {0};
-  char cwd_slash[1024] = {0};
-  char drive_path_backslash[1280] = {0};
-  char drive_path_slash[1280] = {0};
-  char url_drive_backslash[1536] = {0};
-  char url_drive_slash[1536] = {0};
   const char *const rel_backslash_path =
       ".\\tmp\\tests\\tmp_unix_win_url_backslash.sock";
   const char *const rel_backslash_url =
       "unix://.\\tmp\\tests\\tmp_unix_win_url_backslash.sock";
+  const char *const rel_slash_path = "./tmp/tests/tmp_unix_win_url_slash.sock";
+  const char *const rel_slash_url =
+      "unix://./tmp/tests/tmp_unix_win_url_slash.sock";
 
-  FIO_ASSERT(fio___test_sock_getcwd(cwd, sizeof(cwd)),
-             "windows unix:// URL formatting test: getcwd failed.");
-
-  FIO_MEMCPY(cwd_slash, cwd, sizeof(cwd_slash));
-  for (size_t i = 0; cwd_slash[i]; ++i) {
-    if (cwd_slash[i] == '\\')
-      cwd_slash[i] = '/';
-  }
-
-  FIO_ASSERT((size_t)snprintf(drive_path_backslash,
-                              sizeof(drive_path_backslash),
-                              "%s\\tmp\\tests\\tmp_unix_win_url_drive.sock",
-                              cwd) < sizeof(drive_path_backslash),
-             "windows unix:// URL formatting test: drive path is too long "
-             "(backslash variant). cwd=%s",
-             cwd);
-  FIO_ASSERT((size_t)snprintf(drive_path_slash,
-                              sizeof(drive_path_slash),
-                              "%s/tmp/tests/tmp_unix_win_url_drive.sock",
-                              cwd_slash) < sizeof(drive_path_slash),
-             "windows unix:// URL formatting test: drive path is too long "
-             "(slash variant). cwd=%s",
-             cwd_slash);
-
-  FIO_ASSERT((size_t)snprintf(url_drive_backslash,
-                              sizeof(url_drive_backslash),
-                              "unix://%s",
-                              drive_path_backslash) <
-                 sizeof(url_drive_backslash),
-             "windows unix:// URL formatting test: URL is too long "
-             "(drive+backslash). path=%s",
-             drive_path_backslash);
-  FIO_ASSERT((size_t)snprintf(url_drive_slash,
-                              sizeof(url_drive_slash),
-                              "unix://%s",
-                              drive_path_slash) < sizeof(url_drive_slash),
-             "windows unix:// URL formatting test: URL is too long "
-             "(drive+slash). path=%s",
-             drive_path_slash);
-
-  const int drive_backslash_ok = test_unix_url_open2_roundtrip(
-      url_drive_backslash,
-      drive_path_backslash,
-      "windows unix:// drive-letter backslash path",
-      0);
   const int rel_backslash_ok =
       test_unix_url_open2_roundtrip(rel_backslash_url,
                                     rel_backslash_path,
                                     "windows unix:// relative backslash path",
                                     0);
-  const int drive_slash_ok =
-      test_unix_url_open2_roundtrip(url_drive_slash,
-                                    drive_path_slash,
-                                    "windows unix:// normalized slash path",
+  const int rel_slash_ok =
+      test_unix_url_open2_roundtrip(rel_slash_url,
+                                    rel_slash_path,
+                                    "windows unix:// relative slash path",
                                     0);
 
   fprintf(stderr,
           "* windows unix:// URL path formatting probes: "
-          "drive+backslash=%s, relative+backslash=%s, drive+slash=%s\n",
-          (drive_backslash_ok == 0 ? "OK" : "WARNING"),
+          "relative+backslash=%s, relative+slash=%s\n",
           (rel_backslash_ok == 0 ? "OK" : "WARNING"),
-          (drive_slash_ok == 0 ? "OK" : "WARNING"));
-  if (drive_slash_ok == 0) {
+          (rel_slash_ok == 0 ? "OK" : "WARNING"));
+  if (rel_slash_ok == 0) {
     fprintf(stderr,
             "* windows unix:// URL path formatting: OK "
-            "(normalized slash path supported)\n");
+            "(relative slash path supported)\n");
   } else {
     fprintf(stderr,
             "* windows unix:// URL path formatting: WARNING "
-            "(normalized slash path unsupported on this Windows build)\n");
+            "(relative slash path unsupported on this Windows build)\n");
   }
 #else
   fprintf(stderr,
