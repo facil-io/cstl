@@ -264,4 +264,3 @@ Math - cleanup
 ***************************************************************************** */
 #endif /* FIO_MATH */
 #undef FIO_MATH
-#undef FIO_MIFN
