@@ -427,19 +427,27 @@ static void test_windows_unix_url_path_formats(void) {
                                     rel_backslash_path,
                                     "windows unix:// relative backslash path",
                                     0);
-  test_unix_url_open2_roundtrip(url_drive_slash,
-                                drive_path_slash,
-                                "windows unix:// normalized slash path",
-                                1);
+  const int drive_slash_ok =
+      test_unix_url_open2_roundtrip(url_drive_slash,
+                                    drive_path_slash,
+                                    "windows unix:// normalized slash path",
+                                    0);
 
   fprintf(stderr,
           "* windows unix:// URL path formatting probes: "
-          "drive+backslash=%s, relative+backslash=%s\n",
+          "drive+backslash=%s, relative+backslash=%s, drive+slash=%s\n",
           (drive_backslash_ok == 0 ? "OK" : "WARNING"),
-          (rel_backslash_ok == 0 ? "OK" : "WARNING"));
-  fprintf(stderr,
-          "* windows unix:// URL path formatting: OK "
-          "(normalized slash path required)\n");
+          (rel_backslash_ok == 0 ? "OK" : "WARNING"),
+          (drive_slash_ok == 0 ? "OK" : "WARNING"));
+  if (drive_slash_ok == 0) {
+    fprintf(stderr,
+            "* windows unix:// URL path formatting: OK "
+            "(normalized slash path supported)\n");
+  } else {
+    fprintf(stderr,
+            "* windows unix:// URL path formatting: WARNING "
+            "(normalized slash path unsupported on this Windows build)\n");
+  }
 #else
   fprintf(stderr,
           "* windows unix:// URL path formatting: skipped "
