@@ -102,9 +102,81 @@ static void test_sock_dup_api(void) {
   fprintf(stderr, "* sock dup API: OK\n");
 }
 
+static void test_unix_domain_socket_support(void) {
+#if defined(AF_UNIX)
+#if defined(P_tmpdir) && !defined(__MINGW32__)
+  static const char *const path =
+      P_tmpdir "/tmp_unix_testing_socket_facil_io_ci.sock";
+#else
+  static const char *const path = "./tmp_unix_testing_socket_facil_io_ci.sock";
+#endif
+  static const char payload[] = "unix";
+  char buf[sizeof(payload)] = {0};
+
+#if defined(_WIN32)
+#define FIO___TEST_SOCK_ERRNO() WSAGetLastError()
+#else
+#define FIO___TEST_SOCK_ERRNO() errno
+#endif
+
+  unlink(path);
+
+  errno = 0;
+  fio_socket_i srv = fio_sock_open(path, NULL, FIO_SOCK_UNIX | FIO_SOCK_SERVER);
+  const int srv_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "AF_UNIX test failure: server open failed (socket_error=%d). "
+             "Unix-domain sockets are unsupported or broken on this platform.",
+             srv_err);
+
+  errno = 0;
+  fio_socket_i cl = fio_sock_open(path, NULL, FIO_SOCK_UNIX | FIO_SOCK_CLIENT);
+  const int cl_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+             "AF_UNIX test failure: client open failed (socket_error=%d). "
+             "Unix-domain sockets are unsupported or broken on this platform.",
+             cl_err);
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  const int accept_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "AF_UNIX test failure: accept failed (%lld, socket_error=%d). "
+             "Unix-domain sockets are unsupported or broken on this platform.",
+             (long long)accepted,
+             accept_err);
+
+  FIO_ASSERT(fio_sock_write(cl, payload, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "AF_UNIX test failure: client write failed.");
+  FIO_ASSERT(fio_sock_read(accepted, buf, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "AF_UNIX test failure: server read failed.");
+  FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
+             "AF_UNIX test failure: payload mismatch.");
+
+  fio_sock_close(accepted);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+  unlink(path);
+
+#undef FIO___TEST_SOCK_ERRNO
+
+  fprintf(stderr, "* AF_UNIX socket API: OK\n");
+#elif defined(_WIN32)
+  FIO_ASSERT(0,
+             "AF_UNIX test failure: AF_UNIX is unavailable in this Windows "
+             "build, so Unix-domain socket support is not present.");
+#else
+  fprintf(
+      stderr,
+      "* AF_UNIX socket API: skipped (AF_UNIX unavailable at compile time)\n");
+#endif
+}
+
 int main(void) {
   test_raw_socket_api_no_poll();
   test_sock_dup_api();
+  test_unix_domain_socket_support();
   struct {
     const char *address;
     const char *port;

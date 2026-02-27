@@ -106,6 +106,10 @@ IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * implementations (notably MinGW) when the flags conflict.
  */
 IFUNC fio_socket_i fio_sock_dup(fio_socket_i original);
+/* Winsock -> POSIX errno normalization helpers (Windows only). */
+IFUNC int fio___sock_wsa2errno(int wsa_err);
+IFUNC int fio___sock_wsa_set_errno_from(int wsa_err);
+IFUNC int fio___sock_wsa_set_errno_last(void);
 /* *****************************************************************************
 Portable wrappers for bind / connect / listen / setsockopt.
 
@@ -584,7 +588,9 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 #if FIO_OS_WIN
   unsigned long f = 1;
   if (fio___winsock_fn.ioctlsocket(fd, FIONBIO, &f) == SOCKET_ERROR) {
-    switch (WSAGetLastError()) {
+    const int wsa_err = WSAGetLastError();
+    fio___sock_wsa_set_errno_from(wsa_err);
+    switch (wsa_err) {
     case WSANOTINITIALISED:
       FIO_LOG_DEBUG("Windows non-blocking ioctl failed with WSANOTINITIALISED");
       break;
@@ -638,10 +644,14 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+      const int wsa_err = WSAGetLastError();
+      fio___sock_wsa_set_errno_from(wsa_err);
+#endif
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
 #if FIO_OS_WIN
       FIO_LOG_DEBUG("(fio_sock_open_local) WSASocket failed (WSA error %d)",
-                    WSAGetLastError());
+                    wsa_err);
 #endif
       fd = FIO_SOCKET_INVALID;
       continue;
@@ -710,7 +720,15 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
     fd = (fio_socket_i)socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 #endif
     if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+      const int wsa_err = WSAGetLastError();
+      fio___sock_wsa_set_errno_from(wsa_err);
+#endif
       FIO_LOG_DEBUG("socket creation error %s", strerror(errno));
+#if FIO_OS_WIN
+      FIO_LOG_DEBUG("(fio_sock_open_remote) WSASocket failed (WSA error %d)",
+                    wsa_err);
+#endif
       fd = FIO_SOCKET_INVALID;
       continue;
     }
@@ -724,11 +742,11 @@ SFUNC fio_socket_i fio_sock_open_remote(struct addrinfo *addr, int nonblock) {
     }
     if (fio_sock_connect(fd, p->ai_addr, p->ai_addrlen) == -1) {
 #if FIO_OS_WIN
-      const int wsa_err = WSAGetLastError();
-      if (wsa_err == WSAEWOULDBLOCK || wsa_err == WSAEINPROGRESS ||
-          wsa_err == WSAEALREADY)
+      if (errno == EWOULDBLOCK || errno == EINPROGRESS || errno == EALREADY)
         break;
-      FIO_LOG_ERROR("(fio_sock_open_remote) connect failed (WSA %d)", wsa_err);
+      FIO_LOG_ERROR("(fio_sock_open_remote) connect failed (errno %d: %s)",
+                    errno,
+                    strerror(errno));
 #else
       if (errno == EINPROGRESS)
         break;
@@ -767,6 +785,13 @@ SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout) {
 #else
   r = (short)poll(&pfd, 1, timeout);
 #endif
+  if (r == -1) {
+#if FIO_OS_WIN
+    if (fio___sock_wsa_set_errno_last() == ENOTSOCK)
+      return POLLNVAL;
+#endif
+    return -1;
+  }
   if (r == 1)
     r = pfd.revents;
   return r;
@@ -858,6 +883,9 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
                            0);
 #endif
   if (!FIO_SOCK_FD_ISVALID(fd)) {
+#if FIO_OS_WIN
+    fio___sock_wsa_set_errno_last();
+#endif
     FIO_LOG_ERROR("couldn't open unix socket (flags == %d) %s\n\t%s",
                   (int)flags,
                   strerror(errno),
@@ -871,8 +899,14 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
     return FIO_SOCKET_INVALID;
   }
   if ((flags & FIO_SOCK_CLIENT)) {
-    if (fio_sock_connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1 &&
-        errno != EINPROGRESS) {
+    if (fio_sock_connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+#if FIO_OS_WIN
+      if (errno == EWOULDBLOCK || errno == EINPROGRESS || errno == EALREADY)
+        return fd;
+#else
+      if (errno == EINPROGRESS)
+        return fd;
+#endif
       FIO_LOG_ERROR("couldn't connect unix client @ %s : %s",
                     addr.sun_path,
                     strerror(errno));
@@ -972,20 +1006,79 @@ WinSock initialization
 /* Definition of the Winsock function pointer table (one copy per binary). */
 struct fio___winsock_fn_s fio___winsock_fn;
 
+/* Maps Winsock errors to POSIX-style errno values for I/O wrappers. */
+FIO_IFUNC int fio___sock_wsa2errno(int wsa_err) {
+  switch (wsa_err) {
+  case WSAEWOULDBLOCK: return EWOULDBLOCK;
+  case WSAEINPROGRESS: return EINPROGRESS;
+  case WSAEINTR: return EINTR;
+  case WSAEALREADY: return EALREADY;
+  case WSAENOTSOCK: return ENOTSOCK;
+  case WSAEMSGSIZE: return EMSGSIZE;
+  case WSAEDESTADDRREQ: return EDESTADDRREQ;
+  case WSAEPROTOTYPE: return EPROTOTYPE;
+  case WSAENOPROTOOPT: return ENOPROTOOPT;
+  case WSAEPROTONOSUPPORT: return EPROTONOSUPPORT;
+  case WSAEOPNOTSUPP: return EOPNOTSUPP;
+  case WSAEAFNOSUPPORT: return EAFNOSUPPORT;
+  case WSAEADDRINUSE: return EADDRINUSE;
+  case WSAEADDRNOTAVAIL: return EADDRNOTAVAIL;
+  case WSAENETDOWN: return ENETDOWN;
+  case WSAENETUNREACH: return ENETUNREACH;
+  case WSAENETRESET: return ENETRESET;
+  case WSAECONNABORTED: return ECONNABORTED;
+  case WSAECONNRESET: return ECONNRESET;
+  case WSAENOBUFS: return ENOBUFS;
+  case WSAEISCONN: return EISCONN;
+  case WSAENOTCONN: return ENOTCONN;
+  case WSAETIMEDOUT: return ETIMEDOUT;
+  case WSAECONNREFUSED: return ECONNREFUSED;
+  case WSAEHOSTUNREACH: return EHOSTUNREACH;
+  case WSAEHOSTDOWN: return EHOSTDOWN;
+  case WSAEINVAL: return EINVAL;
+  default: return EIO;
+  }
+}
+FIO_IFUNC int fio___sock_wsa_set_errno_from(int wsa_err) {
+  errno = fio___sock_wsa2errno(wsa_err);
+  return errno;
+}
+FIO_IFUNC int fio___sock_wsa_set_errno_last(void) {
+  return fio___sock_wsa_set_errno_from(WSAGetLastError());
+}
+FIO_IFUNC void fio___sock_wsa_set_errno(void) {
+  (void)fio___sock_wsa_set_errno_last();
+}
+
 /** Acts as POSIX write. Use this function for portability with WinSock2.
  * send/recv are the correct Winsock2 functions for WSAPoll-based I/O;
  * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
  */
 IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
-  return (ssize_t)fio___winsock_fn.send(fd, (const char *)buf, (int)len, 0);
+  const int r = fio___winsock_fn.send(fd, (const char *)buf, (int)len, 0);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno();
+    return -1;
+  }
+  return (ssize_t)r;
 }
 /** Acts as POSIX read. Use this function for portability with WinSock2. */
 IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len) {
-  return (ssize_t)fio___winsock_fn.recv(fd, (char *)buf, (int)len, 0);
+  const int r = fio___winsock_fn.recv(fd, (char *)buf, (int)len, 0);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno();
+    return -1;
+  }
+  return (ssize_t)r;
 }
 /** Acts as POSIX close. Use this function for portability with WinSock2. */
 IFUNC int fio_sock_close(fio_socket_i fd) {
-  return fio___winsock_fn.closesocket(fd);
+  const int r = fio___winsock_fn.closesocket(fd);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
+    return -1;
+  }
+  return r;
 }
 /** Acts as POSIX sendto. Use this function for portability with WinSock2. */
 IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
@@ -994,8 +1087,17 @@ IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
                               int flags,
                               const struct sockaddr *addr,
                               socklen_t addrlen) {
-  return (ssize_t)fio___winsock_fn
-      .sendto(fd, (const char *)buf, (int)len, flags, addr, (int)addrlen);
+  const int r = fio___winsock_fn.sendto(fd,
+                                        (const char *)buf,
+                                        (int)len,
+                                        flags,
+                                        addr,
+                                        (int)addrlen);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno();
+    return -1;
+  }
+  return (ssize_t)r;
 }
 /** Acts as POSIX recvfrom. Use this function for portability with WinSock2. */
 IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
@@ -1004,22 +1106,34 @@ IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
                                 int flags,
                                 struct sockaddr *addr,
                                 socklen_t *addrlen) {
-  return (ssize_t)fio___winsock_fn
-      .recvfrom(fd, (char *)buf, (int)len, flags, addr, (int *)addrlen);
+  const int r = fio___winsock_fn.recvfrom(fd,
+                                          (char *)buf,
+                                          (int)len,
+                                          flags,
+                                          addr,
+                                          (int *)addrlen);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno();
+    return -1;
+  }
+  return (ssize_t)r;
 }
 /** Accepts a new connection, returning a native socket handle. */
 IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
                                    struct sockaddr *addr,
                                    int *addrlen) {
   fio_socket_i c = fio___winsock_fn.accept(s, addr, addrlen);
-  if (c == INVALID_SOCKET)
+  if (c == INVALID_SOCKET) {
+    fio___sock_wsa_set_errno_last();
     return FIO_SOCKET_INVALID;
+  }
   return c;
 }
 /** Duplicates a Winsock2 socket, acting as POSIX dup for portability. */
 IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
   WSAPROTOCOL_INFO info;
   if (WSADuplicateSocket(original, GetCurrentProcessId(), &info)) {
+    fio___sock_wsa_set_errno_last();
     FIO_LOG_ERROR("(fio_sock_dup) WSADuplicateSocket failed (WSA error %d)",
                   WSAGetLastError());
     return FIO_SOCKET_INVALID;
@@ -1030,27 +1144,44 @@ IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
                                             &info,
                                             0,
                                             0);
-  if (!FIO_SOCK_FD_ISVALID(fd))
+  if (!FIO_SOCK_FD_ISVALID(fd)) {
+    fio___sock_wsa_set_errno_last();
     FIO_LOG_ERROR("(fio_sock_dup) WSASocket failed (WSA error %d)",
                   WSAGetLastError());
+  }
   return fd;
 }
 /** Portable bind. Calls Winsock2 bind on Windows, POSIX bind on POSIX. */
 IFUNC int fio_sock_bind(fio_socket_i fd,
                         const struct sockaddr *addr,
                         socklen_t addrlen) {
-  return fio___winsock_fn.bind(fd, addr, (int)addrlen);
+  const int r = fio___winsock_fn.bind(fd, addr, (int)addrlen);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
+    return -1;
+  }
+  return r;
 }
 /** Portable connect. Calls Winsock2 connect on Windows, POSIX connect on POSIX.
  */
 IFUNC int fio_sock_connect(fio_socket_i fd,
                            const struct sockaddr *addr,
                            socklen_t addrlen) {
-  return fio___winsock_fn.connect(fd, addr, (int)addrlen);
+  const int r = fio___winsock_fn.connect(fd, addr, (int)addrlen);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
+    return -1;
+  }
+  return r;
 }
 /** Portable listen. Calls Winsock2 listen on Windows, POSIX listen on POSIX. */
 IFUNC int fio_sock_listen(fio_socket_i fd, int backlog) {
-  return fio___winsock_fn.listen(fd, backlog);
+  const int r = fio___winsock_fn.listen(fd, backlog);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
+    return -1;
+  }
+  return r;
 }
 /** Portable setsockopt.
  * optval is (const char *) on Windows and (const void *) on POSIX;
@@ -1061,11 +1192,16 @@ IFUNC int fio_sock_setsockopt(fio_socket_i fd,
                               int optname,
                               const void *optval,
                               socklen_t optlen) {
-  return fio___winsock_fn.setsockopt(fd,
-                                     level,
-                                     optname,
-                                     (const char *)optval,
-                                     (int)optlen);
+  const int r = fio___winsock_fn.setsockopt(fd,
+                                            level,
+                                            optname,
+                                            (const char *)optval,
+                                            (int)optlen);
+  if (r == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
+    return -1;
+  }
+  return r;
 }
 /** Creates a connected socket pair via loopback TCP (Windows socketpair).
  * On Windows, fio_sock_pipe() delegates here since _pipe() returns CRT fds
@@ -1084,8 +1220,10 @@ IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
                                      NULL,
                                      0,
                                      WSA_FLAG_OVERLAPPED);
-  if (listener == INVALID_SOCKET)
+  if (listener == INVALID_SOCKET) {
+    fio___sock_wsa_set_errno_last();
     goto fail;
+  }
   FIO_MEMSET(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1095,8 +1233,10 @@ IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
     goto fail;
   if (fio___winsock_fn.getsockname(listener,
                                    (struct sockaddr *)&addr,
-                                   &addrlen) == SOCKET_ERROR)
+                                   &addrlen) == SOCKET_ERROR) {
+    fio___sock_wsa_set_errno_last();
     goto fail;
+  }
   if (fio_sock_listen(listener, 1) == SOCKET_ERROR)
     goto fail;
   writer = (fio_socket_i)WSASocket(AF_INET,
@@ -1105,14 +1245,18 @@ IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
                                    NULL,
                                    0,
                                    WSA_FLAG_OVERLAPPED);
-  if (writer == INVALID_SOCKET)
+  if (writer == INVALID_SOCKET) {
+    fio___sock_wsa_set_errno_last();
     goto fail;
+  }
   if (fio_sock_connect(writer, (struct sockaddr *)&addr, addrlen) ==
       SOCKET_ERROR)
     goto fail;
   reader = fio___winsock_fn.accept(listener, NULL, NULL);
-  if (reader == INVALID_SOCKET)
+  if (reader == INVALID_SOCKET) {
+    fio___sock_wsa_set_errno_last();
     goto fail;
+  }
   fio___winsock_fn.closesocket(listener);
   fds[0] = reader; /* read end */
   fds[1] = writer; /* write end */
