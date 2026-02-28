@@ -542,5 +542,5 @@ int main(void) {
     fio_sock_close(srv);
     fio_sock_close(cl);
   }
-  fio_sock_maximize_limits();
+  fio_sock_maximize_limits(100000);
 }
