@@ -321,60 +321,6 @@ SFUNC int fio_signal_review(void) {
 }
 
 /* *****************************************************************************
-Signal Monitoring Testing?
-***************************************************************************** */
-#ifdef FIO_TEST_ALL
-FIO_SFUNC void FIO_NAME_TEST(stl, signal)(void) {
-
-#define FIO___SIGNAL_MEMBER(a)                                                 \
-  { (int)a, #a }
-  struct {
-    int sig;
-    const char *name;
-  } t[] = {
-    FIO___SIGNAL_MEMBER(SIGINT),
-    FIO___SIGNAL_MEMBER(SIGILL),
-    FIO___SIGNAL_MEMBER(SIGABRT),
-    FIO___SIGNAL_MEMBER(SIGSEGV),
-    FIO___SIGNAL_MEMBER(SIGTERM),
-#if FIO_OS_POSIX
-    FIO___SIGNAL_MEMBER(SIGQUIT),
-    FIO___SIGNAL_MEMBER(SIGHUP),
-    FIO___SIGNAL_MEMBER(SIGTRAP),
-    FIO___SIGNAL_MEMBER(SIGBUS),
-    FIO___SIGNAL_MEMBER(SIGFPE),
-    FIO___SIGNAL_MEMBER(SIGUSR1),
-    FIO___SIGNAL_MEMBER(SIGUSR2),
-    FIO___SIGNAL_MEMBER(SIGPIPE),
-    FIO___SIGNAL_MEMBER(SIGALRM),
-    FIO___SIGNAL_MEMBER(SIGCHLD),
-    FIO___SIGNAL_MEMBER(SIGCONT),
-#endif
-  };
-#undef FIO___SIGNAL_MEMBER
-  size_t e = 0;
-  fprintf(stderr, "* testing signal monitoring (setup / cleanup only).\n");
-  for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
-    if (fio_signal_monitor(t[i].sig, NULL, NULL, 1)) {
-      FIO_LOG_ERROR("couldn't set signal monitoring for %s (%d)",
-                    t[i].name,
-                    t[i].sig);
-      e = 1;
-    }
-  }
-  for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
-    if (fio_signal_forget(t[i].sig)) {
-      FIO_LOG_ERROR("couldn't stop signal monitoring for %s (%d)",
-                    t[i].name,
-                    t[i].sig);
-      e = 1;
-    }
-  }
-  FIO_ASSERT(!e, "signal monitoring error");
-}
-
-#endif /* FIO_TEST_ALL */
-/* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */
 

@@ -616,9 +616,11 @@ FIO_SFUNC int fio___test_connect_client(void *u1, void *u2) {
 FIO_SFUNC int fio___test_check_done(void *u1, void *u2) {
   (void)u1, (void)u2;
   if (fio___test_io_exchange_complete) {
+    FIO_LOG_DDEBUG2("fio___test_check_done complete");
     fio_io_stop();
     return -1;
   }
+  FIO_LOG_DDEBUG2("fio___test_check_done incomplete");
   return 0;
 }
 
@@ -644,6 +646,12 @@ FIO_SFUNC void fio___test_on_start(void *ignr_) {
   (void)ignr_;
   /* The listener was set up before fio_io_start, so it should be ready now */
   fio___test_io_server_ready = 1;
+  FIO_LOG_DDEBUG2("Test on_start called");
+}
+
+FIO_SFUNC void fio___test_on_start_before_listener(void *ignr_) {
+  (void)ignr_;
+  FIO_LOG_DDEBUG2("fio___test_on_start_before_listener called");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
@@ -678,6 +686,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
     FIO_LOG_ERROR("  failed to set up listener!");
     return;
   }
+
+  /* Register first startup callback */
+  fio_state_callback_add(FIO_CALL_ON_START,
+                         fio___test_on_start_before_listener,
+                         NULL);
 
   /* Test listener API (before reactor starts) */
   fio_io_protocol_s *pr = fio_io_listener_protocol(fio___test_listener);
