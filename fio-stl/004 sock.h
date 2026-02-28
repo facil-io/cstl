@@ -837,11 +837,11 @@ SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
   getrlimit(RLIMIT_NOFILE, &rlim);
   capa = rlim.rlim_cur;
 #elif FIO_OS_WIN
-  capa = 1ULL << 10;
-  while (_setmaxstdio(capa) > 0)
-    capa <<= 1;
-  capa >>= 1;
-  FIO_LOG_DEBUG("new open file limit: %zd", (ssize_t)capa);
+  capa = (ssize_t)max_limit;
+  FIO_LOG_DEBUG2(
+      "Windows has no RLIMIT_NOFILE-equivalent for sockets; using advisory "
+      "per-process cap %zu",
+      max_limit);
 #else
   FIO_LOG_ERROR("No OS detected, couldn't maximize open file limit.");
 #endif
