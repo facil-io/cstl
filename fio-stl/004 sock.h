@@ -800,12 +800,16 @@ SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout) {
 /** Attempts to maximize the allowed open file limits. returns known limit */
 SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
   ssize_t capa = 0;
+#if FIO_OS_POSIX
   if (!max_limit)
     max_limit = FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT;
-#if FIO_OS_POSIX
 
 #ifdef _SC_OPEN_MAX
-  capa = sysconf(_SC_OPEN_MAX);
+  {
+    const long sys_max = sysconf(_SC_OPEN_MAX);
+    if (sys_max >= 0)
+      capa = (ssize_t)sys_max;
+  }
 #elif defined(FOPEN_MAX)
   capa = FOPEN_MAX;
 #endif
@@ -837,6 +841,8 @@ SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
   getrlimit(RLIMIT_NOFILE, &rlim);
   capa = rlim.rlim_cur;
 #elif FIO_OS_WIN
+  if (!max_limit)
+    max_limit = FIO_SOCK_DEFAULT_MAXIMIZE_LIMIT;
   capa = (ssize_t)max_limit;
   FIO_LOG_DEBUG2(
       "Windows has no RLIMIT_NOFILE-equivalent for sockets; using advisory "
