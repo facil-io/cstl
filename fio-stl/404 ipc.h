@@ -1366,6 +1366,8 @@ FIO_SFUNC void fio___ipc_listen(void *ignr_) {
         FIO___IPC.ipc_url);
   }
 
+  FIO_LOG_DDEBUG2("(%d) Opening IPC listening socket @ %s", FIO___IPC.ipc_url);
+
   fio_socket_i fd =
       fio_sock_open2(FIO___IPC.ipc_url,
                      FIO_SOCK_SERVER | FIO_SOCK_TCP | FIO_SOCK_NONBLOCK);

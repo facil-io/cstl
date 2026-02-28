@@ -578,11 +578,13 @@ static fio_io_listener_s *fio___test_listener = NULL;
 
 FIO_SFUNC void fio___test_listener_on_start(fio_io_protocol_s *pr, void *ud) {
   fio___test_io_server_ready = 1;
+  FIO_LOG_DDEBUG2("Listener on_start called");
   (void)pr, (void)ud;
 }
 
 FIO_SFUNC void fio___test_client_on_failed(fio_io_protocol_s *pr, void *ud) {
   ++fio___test_io_connect_failures;
+  FIO_LOG_DDEBUG2("fio___test_client_on_failed called");
   fio___test_io_last_net_error = fio___test_io_last_error();
   (void)pr, (void)ud;
 }
@@ -695,10 +697,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, io_roundtrip)(void) {
 
   /* Schedule timers BEFORE reactor starts (like pubsub tests) */
   fio_io_run_every(.fn = fio___test_connect_client,
-                   .every = 50,
+                   .every = 100,
                    .repetitions = -1);
   fio_io_run_every(.fn = fio___test_check_done,
-                   .every = 50,
+                   .every = 100,
                    .repetitions = -1); /* -1 = repeat forever */
   fio_io_run_every(.fn = fio___test_timeout, .every = 5000, .repetitions = 1);
 
