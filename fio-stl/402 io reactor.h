@@ -395,6 +395,8 @@ SFUNC void fio_io_start(int workers) {
   if (workers) {
     FIO___IO.to_spawn = workers;
     fio___io_spawn_workers_task(NULL, NULL);
+    FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
+                   fio_io_root_pid());
   } else {
     FIO_LOG_DEBUG2("(%d) starting facil.io IO reactor in single process mode.",
                    fio_io_root_pid());
