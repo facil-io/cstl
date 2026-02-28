@@ -296,11 +296,13 @@ int main(void) {
   { /* sha1rnds4 func semantics: behaves as func & 3 */
 #if defined(__SHA__) && (defined(__x86_64__) || defined(__i386__)) &&          \
     (defined(__GNUC__) || defined(__clang__))
+#if !defined(_WIN32)
     if (!__builtin_cpu_supports("sha")) {
       fprintf(
           stderr,
           "* fx86: skipping sha1rnds4 imm test (runtime SHA unsupported)\n");
     } else
+#endif
 #endif
     {
       uint32_t abcd_words[4] = {0x01234567U,
