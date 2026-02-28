@@ -354,6 +354,11 @@ typedef SSIZE_T ssize_t;
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
 #endif /* OS / Compiler detection */
 
+#if FIO_OS_WIN
+#undef FIO_OS_POSIX
+#define FIO_OS_POSIX 0
+#endif
+
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
