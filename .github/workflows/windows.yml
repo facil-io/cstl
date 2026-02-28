@@ -67,7 +67,7 @@ jobs:
     - name: Test All (release)
       shell: pwsh
       run: |
-        $excludedExact  = @("ipc", "signals", "redis", "openssl", "tmp_compress_compare")
+        $excludedExact  = @("ipc", "redis", "openssl", "tmp_compress_compare")
         $excludedPrefix = @("tls13", "pubsub")
 
         $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
