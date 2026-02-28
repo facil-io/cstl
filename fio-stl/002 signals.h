@@ -28,6 +28,24 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 #include <signal.h>
+/* ****************************************************************************
+Portable signal aliases (abstract OS differences)
+***************************************************************************** */
+
+#if FIO_OS_POSIX
+#define FIO_SIGNAL_USER1             SIGUSR1
+#define FIO_SIGNAL_USER2             SIGUSR2
+#define FIO_SIGNAL_USER_UNREGISTERED SIGUSR2
+#elif FIO_OS_WIN
+/* Windows has no SIGUSR1/SIGUSR2; map to safe, distinct signals. */
+#define FIO_SIGNAL_USER1             SIGBREAK
+#define FIO_SIGNAL_USER2             SIGABRT
+/*
+ * Use SIGBREAK for unregistered-signal tests to avoid clobbering SIGINT/SIGTERM
+ * handlers that a test harness might rely on.
+ */
+#define FIO_SIGNAL_USER_UNREGISTERED SIGBREAK
+#endif
 /* *****************************************************************************
 Signal Monitoring API
 ***************************************************************************** */
@@ -169,7 +187,6 @@ SFUNC int fio_signal_forget(int sig) {
     }
     return 0;
   }
-  sigaction(sig, &act, NULL);
   return -1;
 }
 
@@ -271,7 +288,6 @@ SFUNC int fio_signal_forget(int sig) {
     fio___signal_watchers[i].old = SIG_DFL;
     return 0;
   }
-  signal(sig, SIG_DFL);
   return -1;
 sig_error:
   fio___signal_watchers[i].old = SIG_DFL;

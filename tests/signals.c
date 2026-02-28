@@ -37,16 +37,17 @@ Test: Basic signal monitor registration and cleanup
 FIO_SFUNC void FIO_NAME_TEST(stl, signal_basic)(void) {
   /* Test registering a signal monitor */
   int result =
-      fio_signal_monitor(.sig = SIGUSR1,
+      fio_signal_monitor(.sig = FIO_SIGNAL_USER1,
                          .callback = FIO_NAME_TEST(stl, signal_callback),
                          .udata = NULL,
                          .propagate = false,
                          .immediate = false);
-  FIO_ASSERT(result == 0, "fio_signal_monitor should succeed for SIGUSR1");
+  FIO_ASSERT(result == 0,
+             "fio_signal_monitor should succeed for FIO_SIGNAL_USER1");
 
   /* Test updating an existing monitor (same signal) */
   size_t counter = 0;
-  result = fio_signal_monitor(.sig = SIGUSR1,
+  result = fio_signal_monitor(.sig = FIO_SIGNAL_USER1,
                               .callback = FIO_NAME_TEST(stl, signal_callback),
                               .udata = &counter,
                               .propagate = true,
@@ -56,8 +57,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_basic)(void) {
       "fio_signal_monitor should succeed when updating existing monitor");
 
   /* Test cleanup */
-  result = fio_signal_forget(SIGUSR1);
-  FIO_ASSERT(result == 0, "fio_signal_forget should succeed for SIGUSR1");
+  result = fio_signal_forget(FIO_SIGNAL_USER1);
+  FIO_ASSERT(result == 0,
+             "fio_signal_forget should succeed for FIO_SIGNAL_USER1");
 }
 
 /* *****************************************************************************
@@ -76,15 +78,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_edge_cases)(void) {
   FIO_ASSERT(result == -1, "fio_signal_forget should fail for sig=0");
 
   /* Test: forget unregistered signal should fail */
-  result = fio_signal_forget(SIGUSR2);
+  result = fio_signal_forget(FIO_SIGNAL_USER_UNREGISTERED);
   FIO_ASSERT(result == -1,
              "fio_signal_forget should fail for unregistered signal");
 
   /* Test: NULL callback (ignore signal) should work */
-  result = fio_signal_monitor(.sig = SIGUSR1, .callback = NULL, .udata = NULL);
+  result = fio_signal_monitor(.sig = FIO_SIGNAL_USER1,
+                              .callback = NULL,
+                              .udata = NULL);
   FIO_ASSERT(result == 0,
              "fio_signal_monitor should succeed with NULL callback (ignore)");
-  fio_signal_forget(SIGUSR1);
+  fio_signal_forget(FIO_SIGNAL_USER1);
 }
 
 /* *****************************************************************************
@@ -94,7 +98,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_review)(void) {
   /* Register a monitor */
   size_t counter = 0;
   int result =
-      fio_signal_monitor(.sig = SIGUSR1,
+      fio_signal_monitor(.sig = FIO_SIGNAL_USER1,
                          .callback = FIO_NAME_TEST(stl, signal_callback),
                          .udata = &counter,
                          .propagate = false,
@@ -109,7 +113,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_review)(void) {
              "callback should not be called when no signals pending");
 
   /* Cleanup */
-  fio_signal_forget(SIGUSR1);
+  fio_signal_forget(FIO_SIGNAL_USER1);
 }
 
 /* *****************************************************************************
@@ -178,6 +182,58 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal_posix)(void) {
 #endif /* FIO_OS_POSIX */
 
 /* *****************************************************************************
+Old testing code
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, signal)(void) {
+
+#define FIO___SIGNAL_MEMBER(a)                                                 \
+  { (int)a, #a }
+  struct {
+    int sig;
+    const char *name;
+  } t[] = {
+    FIO___SIGNAL_MEMBER(SIGINT),
+    FIO___SIGNAL_MEMBER(SIGILL),
+    FIO___SIGNAL_MEMBER(SIGABRT),
+    FIO___SIGNAL_MEMBER(SIGSEGV),
+    FIO___SIGNAL_MEMBER(SIGTERM),
+#if FIO_OS_POSIX
+    FIO___SIGNAL_MEMBER(SIGQUIT),
+    FIO___SIGNAL_MEMBER(SIGHUP),
+    FIO___SIGNAL_MEMBER(SIGTRAP),
+    FIO___SIGNAL_MEMBER(SIGBUS),
+    FIO___SIGNAL_MEMBER(SIGFPE),
+    FIO___SIGNAL_MEMBER(SIGUSR1),
+    FIO___SIGNAL_MEMBER(SIGUSR2),
+    FIO___SIGNAL_MEMBER(SIGPIPE),
+    FIO___SIGNAL_MEMBER(SIGALRM),
+    FIO___SIGNAL_MEMBER(SIGCHLD),
+    FIO___SIGNAL_MEMBER(SIGCONT),
+#endif
+  };
+#undef FIO___SIGNAL_MEMBER
+  size_t e = 0;
+  fprintf(stderr, "* testing signal monitoring (setup / cleanup only).\n");
+  for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
+    if (fio_signal_monitor(t[i].sig, NULL, NULL, 1)) {
+      FIO_LOG_ERROR("couldn't set signal monitoring for %s (%d)",
+                    t[i].name,
+                    t[i].sig);
+      e = 1;
+    }
+  }
+  for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
+    if (fio_signal_forget(t[i].sig)) {
+      FIO_LOG_ERROR("couldn't stop signal monitoring for %s (%d)",
+                    t[i].name,
+                    t[i].sig);
+      e = 1;
+    }
+  }
+  FIO_ASSERT(!e, "signal monitoring error");
+}
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
@@ -188,5 +244,6 @@ int main(void) {
 #if FIO_OS_POSIX
   FIO_NAME_TEST(stl, signal_posix)();
 #endif
+  FIO_NAME_TEST(stl, signal)();
   return 0;
 }
