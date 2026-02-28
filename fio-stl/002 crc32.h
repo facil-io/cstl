@@ -1166,11 +1166,13 @@ __attribute__((target("sse4.2,pclmul"))) static uint32_t fio___crc32_x86_pclmul(
 
 /* *****************************************************************************
 Section C — Software slicing-by-16 fallback
-Compiled only when needed: x86 PCLMULQDQ uses it for the tail, and the pure
-software path uses it for everything. ARM uses scalar CRC32 for the tail.
+Compiled when not using ARM CRC32 instructions. x86 PCLMULQDQ uses it for the
+tail, and the pure software path uses it for everything.
 ***************************************************************************** */
 
-#elif !(defined(__aarch64__) && defined(__ARM_FEATURE_CRC32))
+#endif /* ARM CRC32 / x86 PCLMULQDQ selection */
+
+#if !(defined(__aarch64__) && defined(__ARM_FEATURE_CRC32))
 /* Slicing-by-16 core: processes p[0..len) into crc (pre-inverted).
  * Returns updated crc (still pre-inverted). */
 static uint32_t fio___crc32_sw(const uint8_t *p, size_t len, uint32_t crc) {
