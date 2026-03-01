@@ -43,6 +43,12 @@ static void add_one(void *ignr_) {
 static void inform_master_received(fio_ipc_s *ipc) {
   payload_s *data = (payload_s *)ipc->data;
   FIO_ASSERT(ipc->len == sizeof(*data), "Test code error - wrong payload size");
+  FIO_ASSERT(data->to < LISTENERS && data->from < LISTENERS &&
+                 data->numerator < MESSAGES_PER_PUBLISHER,
+             "Corrupt message - invalid indices: to=%u from=%u num=%zu",
+             (unsigned)data->to,
+             (unsigned)data->from,
+             data->numerator);
   results.to[data->to].from[data->from].counter[data->numerator] += 1;
   results.to[data->to].from[data->from].total += 1;
   if (ipc->from)
@@ -55,6 +61,10 @@ static void inform_master_received(fio_ipc_s *ipc) {
 static void inform_master_sent(fio_ipc_s *ipc) {
   payload_s *data = (payload_s *)ipc->data;
   FIO_ASSERT(ipc->len == sizeof(*data), "Test code error - wrong payload size");
+  FIO_ASSERT(data->from < LISTENERS && data->numerator < MESSAGES_PER_PUBLISHER,
+             "Corrupt message - invalid indices: from=%u num=%zu",
+             (unsigned)data->from,
+             data->numerator);
   for (size_t i = 0; i < LISTENERS; ++i) {
     sent.to[i].from[data->from].counter[data->numerator] += 1;
     sent.to[i].from[data->from].total += 1;
@@ -64,7 +74,7 @@ static void inform_master_sent(fio_ipc_s *ipc) {
 /* --- Pub/Sub Callbacks --- */
 
 static void on_message_callback(fio_pubsub_msg_s *msg) {
-  payload_s data;
+  payload_s data = {0};
   FIO_ASSERT(msg->message.len == sizeof(data),
              "Test code error - wrong payload size");
   FIO_MEMCPY(&data, msg->message.buf, sizeof(data));
@@ -154,10 +164,14 @@ static int subscribe_timer_setup(void *ignr_, void *ignr__) {
 /* --- History Validation Callbacks --- */
 
 static void history_replay_on_message(fio_pubsub_msg_s *msg, void *udata) {
-  payload_s data;
+  payload_s data = {0};
   FIO_ASSERT(msg->message.len == sizeof(data),
              "Test code error - wrong payload size");
   FIO_MEMCPY(&data, msg->message.buf, sizeof(data));
+  FIO_ASSERT(data.from < LISTENERS && data.numerator < MESSAGES_PER_PUBLISHER,
+             "Corrupt message - invalid indices: from=%u num=%zu",
+             (unsigned)data.from,
+             data.numerator);
   for (size_t i = 0; i < LISTENERS; ++i) {
     history.to[i].from[data.from].counter[data.numerator] += 1;
     history.to[i].from[data.from].total += 1;

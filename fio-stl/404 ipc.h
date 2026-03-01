@@ -612,6 +612,7 @@ FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
   if (!ipc)
     return NULL;
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
+  FIO_ASSERT_ALLOC(cpy);
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
   if ((uintptr_t)(cpy->from) + 1 > 1)  /* tests exclude + NULL */
     cpy->from = fio_io_dup(cpy->from); /* copy owns its own ref */
@@ -1372,7 +1373,7 @@ FIO_SFUNC void fio___ipc_listen(void *ignr_) {
         FIO___IPC.ipc_url);
   }
 
-  FIO_LOG_DDEBUG2("(%d) Opening IPC listening socket @ %s", FIO___IPC.ipc_url);
+  FIO_LOG_DEBUG2("(%d) Opening IPC listening socket @ %s", FIO___IPC.ipc_url);
 
   fio_socket_i fd =
       fio_sock_open2(FIO___IPC.ipc_url,
@@ -1382,9 +1383,9 @@ FIO_SFUNC void fio___ipc_listen(void *ignr_) {
              "(%d) failed to start IPC listening @ %s",
              fio_io_pid(),
              FIO___IPC.ipc_url);
-  FIO_LOG_DDEBUG2("(%d) starting IPC listening socket at: %s",
-                  fio_io_pid(),
-                  FIO___IPC.ipc_url);
+  FIO_LOG_DEBUG2("(%d) starting IPC listening socket at: %s",
+                 fio_io_pid(),
+                 FIO___IPC.ipc_url);
   fio_io_attach_fd(fd, &listening_protocol, &FIO___IPC.protocol_ipc, NULL);
   (void)ignr_;
 }

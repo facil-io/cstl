@@ -164,11 +164,11 @@ test: clean | all $(TEST_BINS)
 			test_name=$$(basename $$test_bin); \
 			echo "  [$$test_count] Running $$test_name..."; \
 			if $$test_bin; then \
-				echo "      ✓ PASS"; \
-				pass_count=$$((pass_count + 1)); \
-			else \
-				echo "      ✗ FAIL"; \
-				fail_count=$$((fail_count + 1)); \
+				echo "      ✓ TEST PASSED: $$test_bin"; \
+				pass_count=$$((pass_count + 1));        \
+			else                                      \
+				echo "      ✗ TEST FAILED: $$test_bin"; \
+				fail_count=$$((fail_count + 1));        \
 			fi; \
 			echo ""; \
 		done; \
@@ -185,9 +185,9 @@ $(TEST_DIR)/%: | clean $(BUILD_DIR)/$(TEST_DIR)/%
 	@echo "Running test $(BUILD_DIR)/$@"
 	@echo "=================================="
 	@if $(BUILD_DIR)/$@; then \
-		echo " ✓ PASS";         \
+		echo "      ✓ TEST PASS"; \
 	 else                     \
-		echo " ✗ FAIL";         \
+		echo "      ✓ TEST FAILED"; \
 	 fi;
 	@echo $(AFTER_TEST_MESSAGE) 
 
