@@ -834,7 +834,7 @@ IPC to fio_pubsub_msg_s Format Helper
 
 /** Extract pub/sub message from IPC message */
 FIO_IFUNC fio_pubsub_msg_s fio___pubsub_ipc2msg(fio_ipc_s *ipc) {
-  return (fio_pubsub_msg_s){
+  fio_pubsub_msg_s m = {
       .timestamp = ipc->timestamp,
       .id = ipc->id,
       .channel = FIO_BUF_INFO2(ipc->data + 8, fio_buf2u32u(ipc->data)),
@@ -842,6 +842,9 @@ FIO_IFUNC fio_pubsub_msg_s fio___pubsub_ipc2msg(fio_ipc_s *ipc) {
                                fio_buf2u32u(ipc->data + 4)),
       .filter = (int16_t)ipc->flags,
   };
+  if (m.channel.len + m.message.len + 2 > ipc->len)
+    m.channel = m.message = FIO_BUF_INFO0;
+  return m;
 }
 
 /** Extract pub/sub message from IPC message */
@@ -919,18 +922,17 @@ FIO_SFUNC void fio___pubsub_history_ipc_push(fio_ipc_s *ipc) {
 }
 
 SFUNC void fio_pubsub_history_push_all(fio_pubsub_msg_s *msg) {
+  uint32_t header[2] = {(uint32_t)msg->channel.len, (uint32_t)msg->message.len};
   fio_ipc_call(.call = fio___pubsub_history_ipc_push,
                .timestamp = msg->timestamp,
                .id = msg->id,
                .flags = (uint16_t)msg->filter,
-               .data = FIO_IPC_DATA(FIO_BUF_INFO2((char *)&msg->channel.len,
-                                                  sizeof(msg->channel.len)),
-                                    FIO_BUF_INFO2((char *)&msg->message.len,
-                                                  sizeof(msg->message.len)),
-                                    msg->channel,
-                                    FIO_BUF_INFO2((char *)"\0", 1),
-                                    msg->message,
-                                    FIO_BUF_INFO2((char *)"\0", 1)));
+               .data =
+                   FIO_IPC_DATA(FIO_BUF_INFO2((char *)header, sizeof(header)),
+                                msg->channel,
+                                FIO_BUF_INFO2((char *)"\0", 1),
+                                msg->message,
+                                FIO_BUF_INFO2((char *)"\0", 1)));
 }
 
 /* *****************************************************************************
@@ -938,7 +940,11 @@ Channel Callbacks
 ***************************************************************************** */
 
 FIO_SFUNC void fio___pubsub_notify_master_of_subscription(fio_ipc_s *ipc) {
+  if (ipc->len < 5)
+    return;
   fio_buf_info_s chname = FIO_BUF_INFO2(ipc->data + 5, fio_buf2u32u(ipc->data));
+  if (chname.len + 5 > ipc->len)
+    return;
   uint8_t is_pattern = ipc->data[4];
   int16_t filter = (int16_t)ipc->flags;
   fio_pubsub_subscribe(.io = ipc->from,
@@ -949,7 +955,11 @@ FIO_SFUNC void fio___pubsub_notify_master_of_subscription(fio_ipc_s *ipc) {
 }
 
 FIO_SFUNC void fio___pubsub_notify_master_of_unsubscription(fio_ipc_s *ipc) {
+  if (ipc->len < 5)
+    return;
   fio_buf_info_s chname = FIO_BUF_INFO2(ipc->data + 5, fio_buf2u32u(ipc->data));
+  if (chname.len + 5 > ipc->len)
+    return;
   uint8_t is_pattern = ipc->data[4];
   int16_t filter = (int16_t)ipc->flags;
   fio_pubsub_unsubscribe(.io = ipc->from,

@@ -590,23 +590,27 @@ FIO_IFUNC size_t fio___ipc_data_len(const fio_buf_info_s *data) {
   size_t all = 0;
   if (!data)
     return all;
-  for (; data->len || data->buf; ++data)
+  for (; data->len || data->buf; ++data) {
     all += data->len;
+    if (all < data->len)
+      return (size_t)(-1ULL);
+  }
   return all;
 }
 FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
   size_t pos = 0;
   if (!data)
     return;
-  for (; data->len || data->buf; ++data) {
-    if (!data->len)
+  for (; data->len || data->buf; pos += (data++)->len) {
+    if (!data->len || !data->buf)
       continue;
     FIO_MEMCPY(m->data + pos, data->buf, data->len);
-    pos += data->len;
   }
 }
 
 FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
+  if (!ipc)
+    return NULL;
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
   if ((uintptr_t)(cpy->from) + 1 > 1)  /* tests exclude + NULL */
@@ -1254,6 +1258,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         //                p->expected_len,
         //                p->buf_len);
         msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
+        FIO_ASSERT_ALLOC(msg);
         msg->from = io; /* ref ownership from fio_io_dup below */
         FIO_MEMCPY(&msg->len, p->buffer + consumed, p->expected_len);
         consumed += p->expected_len;
@@ -1262,6 +1267,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         continue;
       }
       p->msg = msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
+      FIO_ASSERT_ALLOC(msg);
       p->msg_received = p->buf_len - consumed;
       msg->from = io; /* dup'd when queued / NULLs if incomplete (on destroy) */
       FIO_MEMCPY(&msg->len, p->buffer + consumed, p->msg_received);
