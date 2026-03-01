@@ -396,9 +396,169 @@ static void test_windows_unix_url_path_formats(void) {
 #endif
 }
 
+static void test_sock_set_non_block(void) {
+  static const char *const address = "127.0.0.1";
+  static const char *const port = "9449";
+
+  /* Test 1: Valid socket - should succeed */
+  fio_socket_i srv =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "test_sock_set_non_block: server socket failed to open (%lld)",
+             (long long)srv);
+
+  errno = 0;
+  int result = fio_sock_set_non_block(srv);
+  const int err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_set_non_block: valid socket should return 0, got %d "
+             "(errno=%d, socket_error=%d)",
+             result,
+             errno,
+             err);
+  FIO_ASSERT(errno == 0,
+             "test_sock_set_non_block: errno should be 0 after success, got %d",
+             errno);
+
+  /* Test 2: Idempotent - calling again should succeed */
+  errno = 0;
+  result = fio_sock_set_non_block(srv);
+  const int err2 = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_set_non_block: idempotent call should return 0, got %d "
+             "(errno=%d, socket_error=%d)",
+             result,
+             errno,
+             err2);
+
+  fio_sock_close(srv);
+
+  /* Test 3: Invalid socket - should fail */
+  errno = 0;
+  result = fio_sock_set_non_block(FIO_SOCKET_INVALID);
+  const int err3 = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == -1,
+             "test_sock_set_non_block: invalid socket should return -1, got %d "
+             "(errno=%d, socket_error=%d)",
+             result,
+             errno,
+             err3);
+
+  fprintf(stderr, "* test_sock_set_non_block: OK\n");
+}
+
+static void test_sock_dup_with_non_block(void) {
+  static const char *const address = "127.0.0.1";
+  static const char *const port = "9450";
+  static const char payload[] = "dup-nonblock";
+  char buf[sizeof(payload)] = {0};
+
+  /* Setup: Create server and client connection */
+  fio_socket_i srv =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_SERVER);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(srv),
+      "test_sock_dup_with_non_block: server socket failed to open (%lld)",
+      (long long)srv);
+
+  fio_socket_i cl =
+      fio_sock_open(address, port, FIO_SOCK_TCP | FIO_SOCK_CLIENT);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(cl),
+      "test_sock_dup_with_non_block: client socket failed to open (%lld)",
+      (long long)cl);
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "test_sock_dup_with_non_block: accept failed (%lld)",
+             (long long)accepted);
+
+  /* Test 1: Dup listening socket, then set non-blocking */
+  errno = 0;
+  fio_socket_i srv_dup = fio_sock_dup(srv);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv_dup),
+             "test_sock_dup_with_non_block: dup listening socket failed (%lld, "
+             "errno=%d, socket_error=%d)",
+             (long long)srv_dup,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  errno = 0;
+  int result = fio_sock_set_non_block(srv_dup);
+  const int err1 = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_dup_with_non_block: set_non_block on dup listening "
+             "socket should return 0, got %d (errno=%d, socket_error=%d)",
+             result,
+             errno,
+             err1);
+
+  fio_sock_close(srv_dup);
+
+  /* Test 2: Dup accepted socket, then set non-blocking */
+  errno = 0;
+  fio_socket_i accepted_dup = fio_sock_dup(accepted);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted_dup),
+             "test_sock_dup_with_non_block: dup accepted socket failed (%lld, "
+             "errno=%d, socket_error=%d)",
+             (long long)accepted_dup,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  errno = 0;
+  result = fio_sock_set_non_block(accepted_dup);
+  const int err2 = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_dup_with_non_block: set_non_block on dup accepted "
+             "socket should return 0, got %d (errno=%d, socket_error=%d)",
+             result,
+             errno,
+             err2);
+
+  /* Test 3: Verify dup socket still works for I/O (with non-blocking handling)
+   */
+  FIO_ASSERT(fio_sock_write(cl, payload, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "test_sock_dup_with_non_block: write to client failed");
+
+  /* Wait for data to be available since socket is non-blocking */
+  short ev = fio_sock_wait_io(accepted_dup, POLLIN, 100);
+  FIO_ASSERT((ev & POLLIN),
+             "test_sock_dup_with_non_block: POLLIN not received on dup socket");
+
+  FIO_ASSERT(fio_sock_read(accepted_dup, buf, sizeof(payload) - 1) ==
+                 (ssize_t)(sizeof(payload) - 1),
+             "test_sock_dup_with_non_block: read from dup socket failed");
+  FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
+             "test_sock_dup_with_non_block: payload mismatch");
+
+  /* Test 4: Dup the original accepted socket again after first dup was set
+   * non-blocking This verifies that setting non-blocking on a dup doesn't
+   * affect the ability to dup the original again */
+  errno = 0;
+  fio_socket_i accepted_dup2 = fio_sock_dup(accepted);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(accepted_dup2),
+      "test_sock_dup_with_non_block: dup original socket again after first dup "
+      "was set non-blocking failed (%lld, errno=%d, socket_error=%d)",
+      (long long)accepted_dup2,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  fio_sock_close(accepted_dup2);
+  fio_sock_close(accepted_dup);
+  fio_sock_close(accepted);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+
+  fprintf(stderr, "* test_sock_dup_with_non_block: OK\n");
+}
+
 int main(void) {
   test_raw_socket_api_no_poll();
   test_sock_dup_api();
+  test_sock_set_non_block();
+  test_sock_dup_with_non_block();
   test_unix_domain_socket_support();
   test_windows_unix_url_path_formats();
   struct {
