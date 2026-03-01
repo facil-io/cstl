@@ -545,6 +545,18 @@ static void test_sock_dup_with_non_block(void) {
       errno,
       FIO___TEST_SOCK_ERRNO());
 
+  /* Test 5: Dup the non-blocking socket itself */
+  errno = 0;
+  fio_socket_i accepted_dup3 = fio_sock_dup(accepted_dup);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(accepted_dup3),
+      "test_sock_dup_with_non_block: dup of non-blocking socket failed (%lld, "
+      "errno=%d, socket_error=%d)",
+      (long long)accepted_dup3,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  fio_sock_close(accepted_dup3);
   fio_sock_close(accepted_dup2);
   fio_sock_close(accepted_dup);
   fio_sock_close(accepted);
@@ -554,11 +566,209 @@ static void test_sock_dup_with_non_block(void) {
   fprintf(stderr, "* test_sock_dup_with_non_block: OK\n");
 }
 
+static void test_sock_dup_unix(void) {
+#if defined(AF_UNIX)
+#if defined(P_tmpdir) && !defined(__MINGW32__)
+  static const char *const path =
+      P_tmpdir "/tmp_unix_dup_testing_socket_facil_io.sock";
+#else
+  static const char *const path = "./tmp_unix_dup_testing_socket_facil_io.sock";
+#endif
+
+  unlink(path);
+
+  errno = 0;
+  fio_socket_i srv = fio_sock_open(path, NULL, FIO_SOCK_UNIX | FIO_SOCK_SERVER);
+  const int srv_err = FIO___TEST_SOCK_ERRNO();
+  if (!FIO_SOCK_FD_ISVALID(srv)) {
+    fprintf(
+        stderr,
+        "* test_sock_dup_unix: skipped (AF_UNIX server open failed, errno=%d, "
+        "socket_error=%d)\n",
+        errno,
+        srv_err);
+    unlink(path);
+    return;
+  }
+
+  errno = 0;
+  fio_socket_i cl = fio_sock_open(path, NULL, FIO_SOCK_UNIX | FIO_SOCK_CLIENT);
+  const int cl_err = FIO___TEST_SOCK_ERRNO();
+  if (!FIO_SOCK_FD_ISVALID(cl)) {
+    fprintf(
+        stderr,
+        "* test_sock_dup_unix: skipped (AF_UNIX client open failed, errno=%d, "
+        "socket_error=%d)\n",
+        errno,
+        cl_err);
+    fio_sock_close(srv);
+    unlink(path);
+    return;
+  }
+
+  fio_socket_i accepted = fio_sock_accept(srv, NULL, NULL);
+  const int accept_err = FIO___TEST_SOCK_ERRNO();
+  if (!FIO_SOCK_FD_ISVALID(accepted)) {
+    fprintf(stderr,
+            "* test_sock_dup_unix: skipped (AF_UNIX accept failed, errno=%d, "
+            "socket_error=%d)\n",
+            errno,
+            accept_err);
+    fio_sock_close(cl);
+    fio_sock_close(srv);
+    unlink(path);
+    return;
+  }
+
+  /* Test 1: Dup Unix server socket */
+  errno = 0;
+  fio_socket_i srv_dup = fio_sock_dup(srv);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(srv_dup),
+      "test_sock_dup_unix: dup Unix server socket failed (%lld, errno=%d, "
+      "socket_error=%d)",
+      (long long)srv_dup,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  /* Test 2: Dup Unix accepted socket */
+  errno = 0;
+  fio_socket_i accepted_dup = fio_sock_dup(accepted);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(accepted_dup),
+      "test_sock_dup_unix: dup Unix accepted socket failed (%lld, errno=%d, "
+      "socket_error=%d)",
+      (long long)accepted_dup,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  /* Test 3: Dup Unix client socket */
+  errno = 0;
+  fio_socket_i cl_dup = fio_sock_dup(cl);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(cl_dup),
+      "test_sock_dup_unix: dup Unix client socket failed (%lld, errno=%d, "
+      "socket_error=%d)",
+      (long long)cl_dup,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  /* Test 4: Set non-blocking on Unix dup socket and dup it again */
+  errno = 0;
+  int result = fio_sock_set_non_block(accepted_dup);
+  const int nb_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_dup_unix: set_non_block on Unix dup socket failed "
+             "(result=%d, errno=%d, socket_error=%d)",
+             result,
+             errno,
+             nb_err);
+
+  errno = 0;
+  fio_socket_i accepted_dup2 = fio_sock_dup(accepted_dup);
+  FIO_ASSERT(
+      FIO_SOCK_FD_ISVALID(accepted_dup2),
+      "test_sock_dup_unix: dup of non-blocking Unix socket failed (%lld, "
+      "errno=%d, socket_error=%d)",
+      (long long)accepted_dup2,
+      errno,
+      FIO___TEST_SOCK_ERRNO());
+
+  fio_sock_close(accepted_dup2);
+  fio_sock_close(cl_dup);
+  fio_sock_close(accepted_dup);
+  fio_sock_close(srv_dup);
+  fio_sock_close(accepted);
+  fio_sock_close(cl);
+  fio_sock_close(srv);
+  unlink(path);
+
+  fprintf(stderr, "* test_sock_dup_unix: OK\n");
+#else
+  fprintf(stderr, "* test_sock_dup_unix: skipped (AF_UNIX unavailable)\n");
+#endif
+}
+
+static void test_sock_dup_udp(void) {
+  static const char *const address = "127.0.0.1";
+  static const char *const port = "9451";
+
+  /* Test 1: Dup UDP server socket */
+  errno = 0;
+  fio_socket_i srv =
+      fio_sock_open(address, port, FIO_SOCK_UDP | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv),
+             "test_sock_dup_udp: UDP server socket failed to open (%lld, "
+             "errno=%d, socket_error=%d)",
+             (long long)srv,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  errno = 0;
+  fio_socket_i srv_dup = fio_sock_dup(srv);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv_dup),
+             "test_sock_dup_udp: dup UDP server socket failed (%lld, errno=%d, "
+             "socket_error=%d)",
+             (long long)srv_dup,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  /* Test 2: Dup UDP client socket */
+  errno = 0;
+  fio_socket_i cl =
+      fio_sock_open(address, port, FIO_SOCK_UDP | FIO_SOCK_CLIENT);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl),
+             "test_sock_dup_udp: UDP client socket failed to open (%lld, "
+             "errno=%d, socket_error=%d)",
+             (long long)cl,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  errno = 0;
+  fio_socket_i cl_dup = fio_sock_dup(cl);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl_dup),
+             "test_sock_dup_udp: dup UDP client socket failed (%lld, errno=%d, "
+             "socket_error=%d)",
+             (long long)cl_dup,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  /* Test 3: Set non-blocking on UDP dup socket and dup it again */
+  errno = 0;
+  int result = fio_sock_set_non_block(cl_dup);
+  const int nb_err = FIO___TEST_SOCK_ERRNO();
+  FIO_ASSERT(result == 0,
+             "test_sock_dup_udp: set_non_block on UDP dup socket failed "
+             "(result=%d, errno=%d, socket_error=%d)",
+             result,
+             errno,
+             nb_err);
+
+  errno = 0;
+  fio_socket_i cl_dup2 = fio_sock_dup(cl_dup);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(cl_dup2),
+             "test_sock_dup_udp: dup of non-blocking UDP socket failed (%lld, "
+             "errno=%d, socket_error=%d)",
+             (long long)cl_dup2,
+             errno,
+             FIO___TEST_SOCK_ERRNO());
+
+  fio_sock_close(cl_dup2);
+  fio_sock_close(cl_dup);
+  fio_sock_close(cl);
+  fio_sock_close(srv_dup);
+  fio_sock_close(srv);
+
+  fprintf(stderr, "* test_sock_dup_udp: OK\n");
+}
+
 int main(void) {
   test_raw_socket_api_no_poll();
   test_sock_dup_api();
   test_sock_set_non_block();
   test_sock_dup_with_non_block();
+  test_sock_dup_unix();
+  test_sock_dup_udp();
   test_unix_domain_socket_support();
   test_windows_unix_url_path_formats();
   struct {
