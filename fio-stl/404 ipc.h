@@ -1269,7 +1269,7 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
       }
       p->msg = msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
       FIO_ASSERT_ALLOC(msg);
-      p->msg_received = p->buf_len - consumed;
+      p->msg_received = (uint32_t)(p->buf_len - consumed);
       msg->from = io; /* dup'd when queued / NULLs if incomplete (on destroy) */
       FIO_MEMCPY(&msg->len, p->buffer + consumed, p->msg_received);
       consumed = p->buf_len = 0;
