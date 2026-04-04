@@ -525,9 +525,9 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
     FIO_LIST_PUSH(&FIO___IO.protocols, &pr->reserved.protocols);
   FIO_LIST_PUSH(&pr->reserved.ios, &io->node);
   io->pr = pr;
-  FIO_LOG_DDEBUG2("(%d) protocol set for IO with fd %d",
-                  fio_io_pid(),
-                  fio_io_fd(io));
+  FIO_LOG_DEBUG2("(%d) protocol set for IO with fd %d",
+                 fio_io_pid(),
+                 fio_io_fd(io));
   pr->on_attach(io);
   /* avoid calling `start` and setting `on_ready` more than once */
   if (old == &FIO___IO_MOCK_PROTOCOL) {
@@ -536,6 +536,7 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
   }
   fio___io_monitor_in(io);
   fio___io_free_with_flush(io);
+  FIO_LOG_DEBUG2("(%d) attached IO with fd %d", fio_io_pid(), fio_io_fd(io));
 }
 
 /** Performs a task for each IO in the stated protocol. */
@@ -572,11 +573,11 @@ SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
       .active = FIO___IO.tick,
   };
   fio_sock_set_non_block(fd);
-  FIO_LOG_DDEBUG2("(%d) attaching fd %d to IO object %p (%zu bytes buffer)",
-                  fio_io_pid(),
-                  fd,
-                  (void *)io,
-                  fio_io_buffer_len(io));
+  FIO_LOG_DEBUG2("(%d) attaching fd %d to IO object %p (%zu bytes buffer)",
+                 fio_io_pid(),
+                 fd,
+                 (void *)io,
+                 fio_io_buffer_len(io));
   fio_io_defer(fio___io_protocol_set, (void *)fio___io_dup2(io), (void *)pr);
   return io;
 

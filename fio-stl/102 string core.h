@@ -1768,20 +1768,25 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
                                   const void *restrict src,
                                   size_t len) {
   /* Escaping map, test if bit 64 is set or not. Created using Ruby Script:
-  map = []; 256.times { |i| map << ((i > 126 || i < 35) ? 48.chr : 64.chr)  };
-  map[' '.ord] = 64.chr; map['!'.ord] = 64.chr;
-  ["\b","\f","\n","\r","\t",'\\','"'].each {|c| map[c.ord] = 49.chr };
-  str = map.join(''); puts "static const uint8_t escape_map[256]= " +
-          "\"#{str.slice(0,64)}\"" +
-          "\"#{str.slice(64,64)}\"" +
-          "\"#{str.slice(128,64)}\"" +
-          "\"#{str.slice(192,64)}\";"
+  map = []; 256.times { |i| map << ((i > 126 || i < 35) ? 5 : 0)  };
+  256.times { |i| map[i] = ((i > 126) ? 3 : map[i])  };
+  map[' '.ord] = 0; map['!'.ord] = 0;
+  ["\b","\f","\n","\r","\t",'\\','"'].each {|c| map[c.ord] = 1 };
+  str = map.map {|e| e.to_s } .join(', ');
+  puts "static const uint8_t escape_map[256]= { #{str} };"
    */
-  static const uint8_t escape_map[256] =
-      "00000000111011000000000000000000@@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
-      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@1@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@0"
-      "0000000000000000000000000000000000000000000000000000000000000000"
-      "0000000000000000000000000000000000000000000000000000000000000000";
+  static const uint8_t escape_map[256] = {
+      5, 5, 5, 5, 5, 5, 5, 5, 1, 1, 1, 5, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+      5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
   int r = 0;
   if ((!len | !src | !dest))
     return r;
@@ -1794,19 +1799,17 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
 
   /* test memory length requirements – unlikely to be avoided (len * 5) */
   for (; (p < e); ++p) {
-    if ((escape_map[*p] & 64)) /* hope for compiler magic */
+    if (!escape_map[*p]) /* skip valid ASCII, hope for compiler magic */
       continue;
     size_t valid_utf8_len = fio_utf8_char_len(p);
-    if (valid_utf8_len > 1) {
+    if (valid_utf8_len > 1) { /* skip valid UTF-8 */
       p += valid_utf8_len - 1;
       continue;
     }
     first_stop |= (0ULL - updater) & (p - s);
     updater = 0;
     /* count extra bytes */
-    ++extra_space; /* the '\' character followed by escape sequence */
-    /* constant-time "if" (bit mask) – known escape or \xFF / \uFFFF escaping */
-    extra_space += (escape_map[*p] - 1) & (3 + ((*p < 127) << 1));
+    extra_space += escape_map[*p];
   }
 
   /* reserve space and copy any valid first_stop */
@@ -1822,7 +1825,7 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   }
 
   /* copy unescaped head of string (if it's worth our time) */
-  if (((!first_stop) & updater & (escape_map[*s] == 64)) || first_stop > 16) {
+  if (((!first_stop) & updater & (!escape_map[*s])) || first_stop > 16) {
     if (!first_stop)
       first_stop = len;
     FIO_MEMMOVE(dest->buf + dest->len, s, first_stop);
@@ -1833,8 +1836,8 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
 
   /* start copying and escaping as needed */
   for (;;) {
-    if ((escape_map[*p] & 64)) {
-      for (s = p; (s < e) && (escape_map[*s] & 64); ++s)
+    if (!(escape_map[*p])) {
+      for (s = p; (s < e) && !(escape_map[*s]); ++s)
         ; /* hope for compiler magic */
       updater = s - p;
       FIO_MEMMOVE(dest->buf + dest->len, p, updater);
@@ -1868,19 +1871,17 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
     case '\\': dest->buf[dest->len++] = '\\'; continue;
     case ' ': dest->buf[dest->len++] = ' '; continue;
     case '"': dest->buf[dest->len++] = '"'; continue;
-    default:
-      /* pass through character */
-      first_stop = (ec > 34);
-      dest->buf[dest->len - first_stop] = ec;
-      /* escaping all control characters and non-UTF-8 characters */
-      first_stop = (ec < 127);
+    default: { /* escaping all control characters and non-UTF-8 characters */
       const char in_hex[2] = {(char)fio_i2c(ec >> 4), (char)fio_i2c(ec & 15)};
-      dest->buf[dest->len] = 'u'; /* UTF-8 encoding (remains valid) */
-      dest->buf[dest->len += first_stop] = '0';
-      dest->buf[dest->len += first_stop] = '0';
-      dest->buf[dest->len += first_stop] = in_hex[0];
-      dest->buf[dest->len += first_stop] = in_hex[1];
-      dest->len += first_stop;
+      const uint8_t invalid = ((uint8_t)ec & 128) >> 6;    /* 0 or 2 */
+      const uint8_t u2x = (invalid | (invalid >> 1));      /* 0 or 3 */
+      dest->buf[dest->len++] = (char)((uint8_t)'u' + u2x); /* u + 3 = x */
+      dest->buf[dest->len++] = '0';
+      dest->buf[dest->len++] = '0';
+      dest->len -= invalid; /* erase the 00 and walk back if invalid */
+      dest->buf[dest->len++] = in_hex[0];
+      dest->buf[dest->len++] = in_hex[1];
+    }
     }
   }
   dest->buf[dest->len] = 0;
