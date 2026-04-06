@@ -1769,7 +1769,7 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
                                   size_t len) {
   /* Escaping map, test if bit 64 is set or not. Created using Ruby Script:
   map = []; 256.times { |i| map << ((i > 126 || i < 35) ? 5 : 0)  };
-  256.times { |i| map[i] = ((i > 126) ? 3 : map[i])  };
+  256.times { |i| map[i] = ((i > 127) ? 3 : map[i])  };
   map[' '.ord] = 0; map['!'.ord] = 0;
   ["\b","\f","\n","\r","\t",'\\','"'].each {|c| map[c.ord] = 1 };
   str = map.map {|e| e.to_s } .join(', ');
@@ -1781,7 +1781,7 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+      0, 0, 0, 0, 0, 0, 0, 5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
       3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
       3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
       3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -1869,7 +1869,6 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
     case '\r': dest->buf[dest->len++] = 'r'; continue;
     case '\t': dest->buf[dest->len++] = 't'; continue;
     case '\\': dest->buf[dest->len++] = '\\'; continue;
-    case ' ': dest->buf[dest->len++] = ' '; continue;
     case '"': dest->buf[dest->len++] = '"'; continue;
     default: { /* escaping all control characters and non-UTF-8 characters */
       const char in_hex[2] = {(char)fio_i2c(ec >> 4), (char)fio_i2c(ec & 15)};
