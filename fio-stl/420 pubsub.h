@@ -1510,6 +1510,7 @@ FIO_SFUNC void fio___pubsub_worker_on_history_reply(fio_ipc_s *ipc) {
 
 /** IPC handler: Worker receives history reply from master */
 FIO_SFUNC void fio___pubsub_worker_on_history_reply_done(fio_ipc_s *ipc) {
+  fio___pubsub_worker_on_history_reply(ipc); /* MAY contain last message */
   fio_pubsub_subscription_free2(ipc->udata);
 }
 
