@@ -151,6 +151,7 @@ typedef struct fio___mustache_bldr_s {
   void *ctx;
   fio_buf_info_s padding;
   fio_mustache_bargs_s *args;
+  uint32_t depth;
 #if FIO_MUSTACHE_ISOLATE_PARTIALS
   uint32_t stop;
 #endif
@@ -196,8 +197,9 @@ FIO_SFUNC void *fio___mustache_build_section(char *p, fio___mustache_bldr_s a) {
 #endif
 
   };
-  while (p)
-    p = map[(uint8_t)(p[0])](p, &a);
+  if (a.depth < FIO_MUSTACHE_MAX_DEPTH)
+    while (p)
+      p = map[(uint8_t)(p[0])](p, &a);
   return a.args->udata;
 }
 
@@ -327,11 +329,10 @@ FIO_SFUNC char *fio___mustache_i_stack_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
-#if FIO_MUSTACHE_ISOLATE_PARTIALS
     .ctx = b->ctx,
-#endif
     .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
+    .depth = b->depth + 1,
 #if FIO_MUSTACHE_ISOLATE_PARTIALS
     .stop = 1,
 #endif
@@ -344,11 +345,10 @@ FIO_SFUNC char *fio___mustache_i_goto_push(char *p, fio___mustache_bldr_s *b) {
   fio___mustache_bldr_s builder = {
     .root = b->root,
     .prev = b,
-#if FIO_MUSTACHE_ISOLATE_PARTIALS
     .ctx = b->ctx,
-#endif
     .padding = FIO_BUF_INFO2(NULL, b->padding.len),
     .args = b->args,
+    .depth = b->depth + 1,
 #if FIO_MUSTACHE_ISOLATE_PARTIALS
     .stop = 1,
 #endif
@@ -420,6 +420,7 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
         .ctx = nctx,
         .padding = FIO_BUF_INFO2(NULL, b->padding.len),
         .args = b->args,
+        .depth = b->depth + 1,
     };
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
@@ -449,6 +450,7 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
       .prev = b,
       .padding = FIO_BUF_INFO2(NULL, b->padding.len),
       .args = b->args,
+      .depth = b->depth + 1,
   };
   fio___mustache_build_section(var.buf + var.len, builder);
   return p;
@@ -495,11 +497,11 @@ FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
   if (!v)
     return p;
   var = b->args->var2str(v);
-  if (!var.len)
-    goto done;
-  fio___mustache_bldr_s b2 = *b;
-  b2.padding = padding;
-  fio___mustache_writer_route(&b2, var, b->args->write_text);
+  if (var.len) {
+    fio___mustache_bldr_s b2 = *b;
+    b2.padding = padding;
+    fio___mustache_writer_route(&b2, var, b->args->write_text);
+  }
   b->args->release_var(v);
   return p;
 }
@@ -572,8 +574,9 @@ typedef struct fio___mustache_parser_s {
 /* *****************************************************************************
 Template file loading
 ***************************************************************************** */
-FIO_SFUNC fio_buf_info_s
-fio___mustache_load_template(fio___mustache_parser_s *p, fio_buf_info_s fname) {
+/* clang-format off */
+FIO_SFUNC fio_buf_info_s fio___mustache_load_template(fio___mustache_parser_s *p, fio_buf_info_s fname) {
+  /* clang-format on */
   /* Attempt to load templates in the following order:
    * 1. Calling template folder
    * 2. Parent calling folder (recursively)?
@@ -661,11 +664,11 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p);
 FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p);
 
 FIO_IFUNC void fio___mustache_stand_alone_skip_eol(fio___mustache_parser_s *p) {
-  size_t offset =
-      !p->dirty && p->forwards.buf[0] == '\r' && p->forwards.buf[1] == '\n';
+  size_t offset = !p->dirty && p->forwards.len > 1 &&
+                  p->forwards.buf[0] == '\r' && p->forwards.buf[1] == '\n';
   p->forwards.buf += offset;
   p->forwards.len -= offset;
-  offset = !p->dirty && p->forwards.buf[0] == '\n';
+  offset = !p->dirty && p->forwards.len && p->forwards.buf[0] == '\n';
   p->forwards.buf += offset;
   p->forwards.len -= offset;
 }
@@ -706,7 +709,7 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
     goto section_not_open;
   prev = p->root + p->starts_at;
   if (*prev != FIO___MUSTACHE_I_ARY && *prev != FIO___MUSTACHE_I_MISSING)
-    goto section_not_open;
+    goto section_not_open; /* TODO: review this line - I_TXT ? */
   old_var_name = FIO_BUF_INFO2(prev + 7, (size_t)fio_buf2u16u(prev + 1));
   if (!FIO_BUF_INFO_IS_EQ(old_var_name, var))
     goto value_name_mismatch;
@@ -891,7 +894,7 @@ delim_tag_error:
 
 FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
                                             fio_buf_info_s var,
-                                            size_t raw) {
+                                            _Bool raw) {
   union {
     uint64_t u64[1];
     char u8[8];
@@ -905,7 +908,7 @@ FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
 #else
   fio___mustache_parse_add_text(p, p->backwards);
 #endif
-  buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR + raw);
+  buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR + (char)raw);
   fio_u2buf16u(buf.u8 + 1, var.len);
   p->root = fio_bstr_write2(p->root,
                             FIO_STRING_WRITE_STR2(buf.u8, 3),
@@ -1096,6 +1099,10 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
     char *pos = (char *)FIO_MEMCHR(p->forwards.buf, '\n', p->forwards.len);
     if (!pos)
       return 0; /* done with file... though nothing happened. */
+    ++pos;
+    pos += (pos[0] == '\r' || pos[0] == '\n');
+    p->forwards.len -= (size_t)(pos - p->forwards.buf);
+    p->forwards.buf = (char *)pos;
   }
   /* consume (possible) YAML front matter */
   if (p->forwards.buf[0] == '-' && p->forwards.buf[1] == '-' &&
@@ -1103,6 +1110,10 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
       (p->forwards.buf[3] == '\n' || p->forwards.buf[3] == '\r')) {
     const char *end = p->forwards.buf + p->forwards.len;
     const char *pos = p->forwards.buf;
+    pos += 4;
+    pos += (pos[0] == '\r' || pos[0] == '\n');
+    const char *yml_start = pos;
+    size_t yaml_len;
     for (;;) {
       pos = (const char *)FIO_MEMCHR(pos, '\n', end - pos);
       if (!pos)
@@ -1110,15 +1121,15 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
       ++pos;
       if (pos[0] == '-' && pos[1] == '-' && pos[2] == '-' &&
           (pos[3] == '\n' || pos[3] == '\r' || !pos[3])) {
+        yaml_len = (size_t)(pos - yml_start);
         pos += 4;
-        pos += pos[0] == '\n';
+        pos += (pos[0] == '\r' || pos[0] == '\n');
         break;
       }
     }
-    p->args->on_yaml_front_matter(
-        FIO_BUF_INFO2(p->forwards.buf, (size_t)(pos - p->forwards.buf)),
-        p->args->udata);
-    p->forwards.len = (size_t)(pos - p->forwards.buf);
+    p->args->on_yaml_front_matter(FIO_BUF_INFO2(yml_start, yaml_len),
+                                  p->args->udata);
+    p->forwards.len = (size_t)(end - pos);
     p->forwards.buf = (char *)pos;
   }
   return fio___mustache_parse_block(p);

@@ -9,6 +9,8 @@ If the `FIO_ATOL` macro is defined, the following functions will be defined for 
 
 **Note**: all functions that write to a buffer also write a `NUL` terminator byte.
 
+**CRITICAL**: all `fio_atol` functions are guard-less(!), they assume: (1) that the buffer has an invalid character that ends the conversion (such as a `NUL` terminator byte); and that (2) system allocations are 8 byte aligned (the terminating character is within an 8 byte group all read together).
+
 ### Configuration Macros
 
 #### `FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER`

@@ -168,9 +168,9 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
                               size_t digits,
                               size_t base);
 
-/** Reads a signed base 8 formatted number. */
+/** Reads a signed base 8 formatted number - may overflow buffer. */
 SFUNC uint64_t fio_atol8u(char **pstr);
-/** Reads a signed base 10 formatted number. */
+/** Reads a signed base 10 formatted number - may overflow buffer. */
 SFUNC uint64_t fio_atol10u(char **pstr);
 /** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
 SFUNC uint64_t fio_atol16u(char **pstr);

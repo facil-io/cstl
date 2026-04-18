@@ -4866,6 +4866,8 @@ If the `FIO_ATOL` macro is defined, the following functions will be defined for 
 
 **Note**: all functions that write to a buffer also write a `NUL` terminator byte.
 
+**CRITICAL**: all `fio_atol` functions are guard-less(!), they assume: (1) that the buffer has an invalid character that ends the conversion (such as a `NUL` terminator byte); and that (2) system allocations are 8 byte aligned (the terminating character is within an 8 byte group all read together).
+
 ### Configuration Macros
 
 #### `FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER`
@@ -24618,7 +24620,7 @@ Replies are sent back to the caller via the `on_reply` callback. When all replie
 /* Worker calls master to process data */
 fio_ipc_call(.call = process_on_master,
              .on_reply = handle_reply,
-             .on_done = cleanup,
+             .on_done = last_reply_and_cleanup,
              .udata = my_context,
              .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"request_data")));
 ```
@@ -25098,6 +25100,8 @@ void on_reply(fio_ipc_s *msg) {
 
 /* Called on worker when all replies done */
 void on_done(fio_ipc_s *msg) {
+  if(msg->len)
+    on_reply(msg);
   printf("Request complete\n");
   (void)msg;
 }
@@ -25281,6 +25285,8 @@ void on_chunk(fio_ipc_s *msg) {
 
 /* Worker notified when streaming complete */
 void on_stream_done(fio_ipc_s *msg) {
+  if(msg->len)
+    on_chunk(msg);
   printf("Stream complete\n");
   (void)msg;
 }

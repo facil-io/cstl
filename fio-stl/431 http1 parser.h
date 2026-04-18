@@ -381,7 +381,8 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
 
 /* returns either a lower case (ASCI) or the original char. */
 static inline uint8_t fio_http1_tolower(uint8_t c) {
-  c |= (((uint8_t)(c - (uint8_t)'A') < (uint8_t)((uint8_t)'Z' - ((uint8_t)'A')))
+  c |= (((uint8_t)(c - (uint8_t)'A') <
+         (uint8_t)(((uint8_t)'Z' + 1) - ((uint8_t)'A')))
         << 5);
   return c;
 }

@@ -156,18 +156,14 @@ FIO_IFUNC int fio___json_consume_whitespace(fio___json_state_s *s) {
 }
 FIO_IFUNC int fio___json_consume_comma(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "comma");
-  fio___json_consume_whitespace(s);
-  if (*s->pos != ',')
+  if (fio___json_consume_whitespace(s) || *s->pos != ',')
     return -1;
-  fio___json_consume_whitespace(s);
   return 0;
 }
 FIO_IFUNC int fio___json_consume_colon(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "colon");
-  fio___json_consume_whitespace(s);
-  if (*s->pos != ':')
+  if (fio___json_consume_whitespace(s) || *s->pos != ':')
     return -1;
-  fio___json_consume_whitespace(s);
   return 0;
 }
 
@@ -204,36 +200,44 @@ FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   const char *tst = s->pos;
   uint64_t i;
   double f;
-  _Bool negative = (tst[0] == '-') | (tst[0] == '+');
+  _Bool negative = 0;
   _Bool hex = 0;
   _Bool binary = 0;
-  long ilimit = 19 + negative;
-  tst += negative;
+  long ilimit = 19;
+  while (tst < s->end && ((unsigned)(tst[0] == '-') | (tst[0] == '+')))
+    negative ^= ((tst++)[0] == '-');
   if (tst + 1 > s->end)
     goto buffer_overflow;
+  const char *start = tst;
   if ((tst[0] | 0x20) == 'i')
     goto is_inifinity;
   tst += (tst[0] == '0' && tst + 2 < s->end);
   if ((tst[0] | 32) == 'x') {
     hex = 1;
-    while ((tst < s->end) & (((tst[0] >= '0') & (tst[0] <= '9')) |
-                             (((tst[0] | 32) >= 'a') & ((tst[0] | 32) <= 'f'))))
+    do
       ++tst;
+    while ((tst < s->end) &
+           (((tst[0] >= '0') & (tst[0] <= '9')) |
+            (((tst[0] | 32) >= 'a') & ((tst[0] | 32) <= 'f'))));
+    if (tst - start > 9 || tst == start + 1)
+      goto buffer_overflow;
   } else if ((tst[0] | 32) == 'b') {
     binary = 1;
-    ilimit = 66 + negative;
-    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '1')))
+    ilimit = 66;
+    do
       ++tst;
+    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '1')));
   } else {
     while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '9')))
       ++tst;
   }
-  if (tst > (s->pos + ilimit) ||
+  if (tst > (start + ilimit) ||
       ((tst < s->end) &&
        (tst[0] == '.' || (tst[0] | 32) == 'e' || (tst[0] | 32) == 'p')))
     goto is_float;
+
   tst = s->pos;
-  s->pos += negative;
+  s->pos = start;
   errno = 0;
   i = (hex              ? fio_atol16u((char **)&s->pos)
        : binary         ? fio_atol_bin((char **)&s->pos)
@@ -291,7 +295,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
     s->key = fio___json_consume(s);
     if (s->error || !s->key)
       break;
-    if (*s->pos != ':')
+    if (fio___json_consume_colon(s))
       break;
     ++s->pos;
     if (fio___json_consume_whitespace(s))
@@ -307,7 +311,7 @@ FIO_SFUNC void *fio___json_consume_map(fio___json_state_s *s) {
   if (s->key) {
     s->error = 1;
     s->cb.free_unused_object(s->udata, s->key);
-  } else if (*s->pos != '}' || s->error) {
+  } else if (s->pos >= s->end || *s->pos != '}' || s->error) {
     s->error = 1;
   } else {
     ++s->pos;
@@ -344,7 +348,7 @@ FIO_SFUNC void *fio___json_consume_array(fio___json_state_s *s) {
     if (*s->pos != ',')
       break;
   }
-  if (*s->pos != ']' || s->error) {
+  if (s->pos >= s->end || *s->pos != ']' || s->error) {
     s->error = 1;
   } else {
     ++s->pos;
@@ -450,52 +454,54 @@ FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
 void *fio___json_consume(fio___json_state_s *s) {
   for (;;) {
     FIO_JSON___PRINT_STEP(s, "consumption type test");
-    switch (*s->pos) {
-    case 0x09: /* fall through */
-    case 0x0A: /* fall through */
-    case 0x0D: /* fall through */
-    case 0x20:
-      ++s->pos;
-      if (fio___json_consume_whitespace(s))
-        goto set_error;
-      continue;
-    case '+': /* fall through */
-    case '-': /* fall through */
-    case '0': /* fall through */
-    case '1': /* fall through */
-    case '2': /* fall through */
-    case '3': /* fall through */
-    case '4': /* fall through */
-    case '5': /* fall through */
-    case '6': /* fall through */
-    case '7': /* fall through */
-    case '8': /* fall through */
-    case '9': /* fall through */
-    case 'x': /* fall through */
-    case '.': /* fall through */
-    case 'e': /* fall through */
-    case 'E': return fio___json_consume_number(s);
-    case 'i': /* fall through */
-    case 'I': return fio___json_consume_infinit(s, 0);
-    case '"': return fio___json_consume_string(s);
-    case '{': return fio___json_consume_map(s);
-    case '}': return NULL; /* don't progress, just stop. */
-    case '[': return fio___json_consume_array(s);
-    case ']': return NULL; /* don't progress, just stop. */
-    case 'T':              /* fall through */
-    case 't': return fio___json_consume_true(s);
-    case 'F': /* fall through */
-    case 'f': return fio___json_consume_false(s);
-    case 'N': /* fall through */
-    case 'n':
-      return (((s->pos[1] | 32) == 'u') ? fio___json_consume_null
-                                        : fio___json_consume_nan)(s);
-    case '#':
-    case '/':
-      if (fio___json_consume_comment(s))
-        goto set_error;
-      continue;
-    }
+    if (s->pos < s->end)
+      switch (*s->pos) {
+      case 0x09: /* fall through */
+      case 0x0A: /* fall through */
+      case 0x0D: /* fall through */
+      case 0x20:
+        ++s->pos;
+        if (fio___json_consume_whitespace(s))
+          goto set_error;
+        continue;
+      case '+': /* fall through */
+      case '-': /* fall through */
+      case '0': /* fall through */
+      case '1': /* fall through */
+      case '2': /* fall through */
+      case '3': /* fall through */
+      case '4': /* fall through */
+      case '5': /* fall through */
+      case '6': /* fall through */
+      case '7': /* fall through */
+      case '8': /* fall through */
+      case '9': /* fall through */
+      case 'x': /* fall through */
+      case '.': /* fall through */
+      case 'e': /* fall through */
+      case 'E': return fio___json_consume_number(s);
+      case 'i': /* fall through */
+      case 'I': return fio___json_consume_infinit(s, 0);
+      case '"': return fio___json_consume_string(s);
+      case '{': return fio___json_consume_map(s);
+      case '}': return NULL; /* don't progress, just stop. */
+      case '[': return fio___json_consume_array(s);
+      case ']': return NULL; /* don't progress, just stop. */
+      case 'T':              /* fall through */
+      case 't': return fio___json_consume_true(s);
+      case 'F': /* fall through */
+      case 'f': return fio___json_consume_false(s);
+      case 'N': /* fall through */
+      case 'n':
+        return ((s->end - s->pos > 3) && ((s->pos[1] | 32) == 'u')
+                    ? fio___json_consume_null
+                    : fio___json_consume_nan)(s);
+      case '#':
+      case '/':
+        if (fio___json_consume_comment(s))
+          goto set_error;
+        continue;
+      }
   set_error:
     s->error = 1;
     return NULL;

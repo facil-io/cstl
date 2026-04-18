@@ -379,16 +379,16 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
   uint8_t len_indicator = ((((uint8_t *)buf->buf)[1]) & 127U);
   switch (len_indicator) {
   case 126:
-    if (buf->len < 8UL)
+    if (buf->len < (4UL + mask_l))
       return 1;
     p->expect = fio_buf2u16_be(buf->buf + 2);
-    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 4);
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + ((0ULL - mask_f) & 4));
     buf->buf += 4 + mask_l;
     buf->len -= 4 + mask_l;
     break;
 
   case 127:
-    if (buf->len < 14UL)
+    if (buf->len < (10UL + mask_l))
       return 1;
     p->expect = fio_buf2u64_be(buf->buf + 2);
     /* RFC 6455: most significant bit MUST be 0, and enforce max payload limit
@@ -396,7 +396,7 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
     if ((p->expect & 0x8000000000000000ULL) ||
         (p->expect > FIO_WEBSOCKET_MAX_PAYLOAD))
       return -1;
-    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + 10);
+    p->mask = (0ULL - mask_f) & fio_buf2u32u(buf->buf + ((0ULL - mask_f) & 10));
     buf->buf += 10 + mask_l;
     buf->len -= 10 + mask_l;
     break;
@@ -410,19 +410,22 @@ FIO_SFUNC int fio___websocket_consume_header(fio_websocket_parser_s *p,
     buf->len -= 2 + mask_l;
     break;
   }
-  if (p->first) {
-    p->current = info;
-    if ((info & 15)) /* continuation frame == 0 ; is it missing? */
-      return -1;
-  } else {
-    p->first = p->current = info;
+  if (p->first && (info & 15) > 2)
+    goto maybe_control_frame;
+  if (!p->first && !(info & 15))
+    return -1; /* continuation frame == 0 ; where's the first? */
+  /* review header info */
+  p->current = info;
+  if (!p->first) {
+    p->first = info;
     p->start_at = 0;
-    if (!(info & 15)) /* continuation frame == 0 ; where's the first? */
-      return -1;
   }
   if (p->must_mask && !p->mask)
     return -1;
   return (p->fn = fio___websocket_consume_frame)(p, buf, udata);
+maybe_control_frame:
+  /* TODO: what should we do with incomplete control frames? */
+  return -1;
 }
 /* *****************************************************************************
 Main Parsing Loop

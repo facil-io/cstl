@@ -2252,6 +2252,13 @@ FIO_IFUNC FIO_CONST uintmax_t fio_ct_abs(intmax_t i_) {
   return (intmax_t)fio_ct_if_bool((i >> ((sizeof(i) << 3) - 1)), 0 - i, i);
 }
 
+/* returns either a lower case (ASCI) or the original char. */
+FIO_IFUNC char fio_ct_tolower(char c) {
+  return (c | (((uint8_t)((uint8_t)c - (uint8_t)'A') <
+                (uint8_t)(((uint8_t)'Z' + 1) - ((uint8_t)'A')))
+               << 5));
+}
+
 /* *****************************************************************************
 Constant-Time Bitwise Selection Functions
 
