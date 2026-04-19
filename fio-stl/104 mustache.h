@@ -899,6 +899,8 @@ FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
     uint64_t u64[1];
     char u8[8];
   } buf;
+  if (var.len >= 0xFFFFU)
+    return -1;
   if (p->backwards.len > ((1 << 16) - 1))
     p->backwards.len = 0;
 
@@ -1127,7 +1129,7 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
         break;
       }
     }
-    p->args->on_yaml_front_matter(FIO_BUF_INFO2(yml_start, yaml_len),
+    p->args->on_yaml_front_matter(FIO_BUF_INFO2((char *)yml_start, yaml_len),
                                   p->args->udata);
     p->forwards.len = (size_t)(end - pos);
     p->forwards.buf = (char *)pos;
