@@ -19,7 +19,7 @@ The facil.io random generator functions appear both faster and more random than 
 
 I designed it in the hopes of achieving a cryptographically safe PRNG, but it wasn't cryptographically analyzed, lacks a good source of entropy and should be considered as a good enough non-cryptographic PRNG for general use.
 
-**Note**: bitwise operations (`FIO_BITWISE`), Risky Hash and Stable Hash are automatically defined along with `FIO_RAND`, since they are required by the algorithm.
+**Note**: Risky Hash and Stable Hash are automatically defined along with `FIO_RAND`.
 
 ### Pseudo-Random Generator Functions
 

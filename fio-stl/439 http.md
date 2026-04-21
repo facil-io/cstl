@@ -23,7 +23,15 @@ typedef struct fio_http_settings_s {
   int (*on_authenticate_websocket)(fio_http_s *h);
   /** Called once a WebSocket / SSE connection upgrade is complete. */
   void (*on_open)(fio_http_s *h);
-  /** Called when a WebSocket message is received. */
+  /** Called when a WebSocket message is received.
+   *
+   * The `msg` payload is always backed by a `fio_bstr` (a reference-counted
+   * string buffer). This means:
+   * - You may call `fio_bstr_dup(msg.buf)` to retain the payload beyond the
+   *   callback without copying data.
+   * - `fio_bstr_free(msg.buf)` is safe (and a no-op for NULL).
+   * - The buffer is valid only for the duration of the callback unless dup'd.
+   */
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
   /** Called when an EventSource event is received. */
   void (*on_eventsource)(fio_http_s *h,

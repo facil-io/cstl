@@ -99,7 +99,7 @@ typedef struct fio_ipc_opcode_s {
  * */
 #define FIO_IPC_DATA(...)                                                      \
   (fio_buf_info_s[]) {                                                         \
-    __VA_ARGS__, { 0 }                                                         \
+    __VA_ARGS__, { .len = ((size_t)-1) }                                       \
   }
 
 /* *****************************************************************************
@@ -590,7 +590,7 @@ FIO_IFUNC size_t fio___ipc_data_len(const fio_buf_info_s *data) {
   size_t all = 0;
   if (!data)
     return all;
-  for (; data->len || data->buf; ++data) {
+  for (; data->len != ((size_t)-1); ++data) {
     all += data->len;
     if (all < data->len)
       return (size_t)(-1ULL);
@@ -601,7 +601,7 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
   size_t pos = 0;
   if (!data)
     return;
-  for (; data->len || data->buf; pos += (data++)->len) {
+  for (; data->len != ((size_t)-1); pos += (data++)->len) {
     if (!data->len || !data->buf)
       continue;
     FIO_MEMCPY(m->data + pos, data->buf, data->len);

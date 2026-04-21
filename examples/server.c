@@ -52,6 +52,10 @@ static void websocket_on_open(fio_http_s *h) { /* also for SSE connections */
 static void websocket_on_message(fio_http_s *h,
                                  fio_buf_info_s msg,
                                  uint8_t is_text) {
+  // if (is_text)
+  //   FIO_LOG_DEBUG2("Message input: %s (%zu bytes)", msg.buf, msg.len);
+  // else
+  //   FIO_LOG_DEBUG2("Message input: binary (%zu bytes)", msg.len);
   fio_pubsub_publish(.filter = 1, .message = msg);
   (void)h, (void)is_text;
 }

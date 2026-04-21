@@ -1041,6 +1041,13 @@ FIO_SFUNC void fio___pubsub_engine_ipc_deliver2channel(fio_pubsub_channel_s *ch,
   //     (void *)ch->subscriptions.next,
   //     (void *)ch->subscriptions.prev);
   const fio_io_s *skip = ipc->from;
+
+  // FIO_LOG_DEBUG2("(%d) Pubsub delivering: %s (%zu bytes message, %zu ipc)",
+  //                fio_io_pid(),
+  //                fio___pubsub_ipc2msg(ipc).message.buf,
+  //                fio___pubsub_ipc2msg(ipc).message.len,
+  //                ipc->len);
+
   FIO_LIST_EACH(fio_pubsub_subscription_s, node, &ch->subscriptions, s) {
     /* Skip if publisher is sending to itself (IO is set)*/
     if (skip && s->io == skip)

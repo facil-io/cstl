@@ -479,7 +479,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_CLI) || defined(FIO_FILES) || defined(FIO_HTTP_HANDLE) ||      \
     defined(FIO_MEMORY_NAME) || defined(FIO_POLL) || defined(FIO_STATE) ||     \
-    defined(FIO_STR)
+    defined(FIO_STR) || defined(FIO_WEBSOCKET_PARSER)
 #undef FIO_RAND
 #define FIO_RAND
 #endif
