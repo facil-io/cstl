@@ -8,6 +8,10 @@ DEFLATE / INFLATE Tests
 #include <stdio.h>
 #include <string.h>
 
+#ifdef HAVE_ZLIB
+#include <zlib.h>
+#endif
+
 static int g_pass = 0;
 static int g_fail = 0;
 
@@ -1072,6 +1076,123 @@ static void test_streaming_websocket_style(void) {
   fio_deflate_free(decomp);
 }
 
+#ifdef HAVE_ZLIB
+static size_t test_zlib_inflate_websocket_payload(uint8_t *out,
+                                                  size_t out_len,
+                                                  const uint8_t *wire,
+                                                  size_t wire_len,
+                                                  int *zrc,
+                                                  const char **zmsg) {
+  static const uint8_t trailer[4] = {0x00, 0x00, 0xFF, 0xFF};
+  size_t total_in = wire_len + sizeof(trailer);
+  uint8_t *input = (uint8_t *)malloc(total_in);
+  if (!input)
+    return 0;
+
+  memcpy(input, wire, wire_len);
+  memcpy(input + wire_len, trailer, sizeof(trailer));
+
+  z_stream zs;
+  memset(&zs, 0, sizeof(zs));
+  if (inflateInit2(&zs, -15) != Z_OK) {
+    free(input);
+    if (zrc)
+      *zrc = Z_MEM_ERROR;
+    if (zmsg)
+      *zmsg = "inflateInit2 failed";
+    return 0;
+  }
+
+  zs.next_in = input;
+  zs.avail_in = (uInt)total_in;
+  zs.next_out = out;
+  zs.avail_out = (uInt)out_len;
+
+  int rc = inflate(&zs, Z_SYNC_FLUSH);
+  size_t produced = zs.total_out;
+  const char *msg = zs.msg;
+  inflateEnd(&zs);
+  free(input);
+
+  if (zrc)
+    *zrc = rc;
+  if (zmsg)
+    *zmsg = msg;
+  if (rc != Z_OK && rc != Z_STREAM_END)
+    return 0;
+  return produced;
+}
+
+static void test_streaming_websocket_zlib_interop(void) {
+  fprintf(
+      stderr,
+      "Testing streaming: WebSocket permessage-deflate interop with zlib...\n");
+
+  const size_t data_len = 4096;
+  uint8_t *data = (uint8_t *)malloc(data_len);
+  uint8_t *compressed = NULL;
+  uint8_t *inflated = NULL;
+  fio_deflate_s *comp = NULL;
+
+  TEST_ASSERT(data != NULL, "ws_zlib: malloc input failed");
+  if (!data)
+    return;
+
+  for (size_t i = 0; i < data_len; ++i)
+    data[i] = (uint8_t)((i * 251U + 17U) & 0xFFU);
+
+  size_t comp_bound = fio_deflate_compress_bound(data_len) + 64;
+  compressed = (uint8_t *)malloc(comp_bound);
+  inflated = (uint8_t *)malloc(data_len + 256);
+  TEST_ASSERT(compressed != NULL, "ws_zlib: malloc compressed failed");
+  TEST_ASSERT(inflated != NULL, "ws_zlib: malloc inflated failed");
+  if (!compressed || !inflated) {
+    free(data);
+    free(compressed);
+    free(inflated);
+    return;
+  }
+
+  comp = fio_deflate_new(1, 1);
+  TEST_ASSERT(comp != NULL, "ws_zlib: fio_deflate_new(compress) failed");
+  if (!comp) {
+    free(data);
+    free(compressed);
+    free(inflated);
+    return;
+  }
+
+  size_t comp_len =
+      fio_deflate_push(comp, compressed, comp_bound, data, data_len, 1);
+  TEST_ASSERT(comp_len > 4 && comp_len <= comp_bound,
+              "ws_zlib: compress returned %zu (bound %zu)",
+              comp_len,
+              comp_bound);
+  if (comp_len > 4 && comp_len <= comp_bound) {
+    int zrc = Z_OK;
+    const char *zmsg = NULL;
+    size_t inflated_len = test_zlib_inflate_websocket_payload(inflated,
+                                                              data_len + 256,
+                                                              compressed,
+                                                              comp_len - 4,
+                                                              &zrc,
+                                                              &zmsg);
+    TEST_ASSERT(inflated_len == data_len,
+                "ws_zlib: zlib inflate returned %zu (rc=%d, msg=%s)",
+                inflated_len,
+                zrc,
+                zmsg ? zmsg : "none");
+    TEST_ASSERT(inflated_len == data_len && !memcmp(inflated, data, data_len),
+                "ws_zlib: output mismatch after zlib inflate");
+  }
+
+  fio_deflate_free(comp);
+  free(data);
+  free(compressed);
+  free(inflated);
+}
+#endif
+
 /* *****************************************************************************
 Test: large streaming (256KB in 4KB chunks)
 ***************************************************************************** */
@@ -1345,6 +1466,9 @@ int main(void) {
   test_streaming_multi_push();
   test_streaming_context_takeover();
   test_streaming_websocket_style();
+#ifdef HAVE_ZLIB
+  test_streaming_websocket_zlib_interop();
+#endif
   test_streaming_large();
   test_deflate_16mb_roundtrip();
 

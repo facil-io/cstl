@@ -187,7 +187,8 @@ $(TEST_DIR)/%: | clean $(BUILD_DIR)/$(TEST_DIR)/%
 	@if $(BUILD_DIR)/$@; then \
 		echo "      ✓ TEST PASS"; \
 	 else                     \
-		echo "      ✓ TEST FAILED"; \
+		echo "      ✗ TEST FAILED"; \
+		exit 1; \
 	 fi;
 	@echo $(AFTER_TEST_MESSAGE) 
 
@@ -517,5 +518,4 @@ clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR) $(PROJECT)
 	@echo "Clean complete!"
-
 

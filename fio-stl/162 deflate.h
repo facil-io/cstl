@@ -2865,20 +2865,26 @@ FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
   /* End of block */
   fio___deflate_bitwriter_put_huff(&w, enc_ll_codes[256], enc_ll_lens[256]);
 
-  /* Sync flush: byte-align then emit empty stored block (0x00 0x00 0xFF 0xFF)
-   * Format: BFINAL=0, BTYPE=00 (stored), pad to byte, LEN=0, NLEN=0xFFFF */
-  fio___deflate_bitwriter_align(&w);
-  /* Empty stored block: BFINAL=0, BTYPE=00 = 0x00 byte, LEN=0, NLEN=0xFFFF */
-  if (w.out + 5 <= w.out_end) {
-    w.out[0] = 0x00; /* BFINAL=0, BTYPE=00, padding=000000 */
-    w.out[1] = 0x00; /* LEN low */
-    w.out[2] = 0x00; /* LEN high */
-    w.out[3] = 0xFF; /* NLEN low */
-    w.out[4] = 0xFF; /* NLEN high */
-    w.out += 5;
+  /* Sync flush (RFC 7692 / zlib interoperability): write the empty stored
+   * block HEADER first, then align, then append the 4-byte LEN/NLEN trailer.
+   * Aligning before the header lets the inflater consume padding bits as the
+   * next block header and mis-read LEN/NLEN (`invalid stored block lengths`).
+   * WebSocket peers strip and later re-append only the trailer bytes because
+   * the header bits remain in the retained bitstream. */
+  fio___deflate_bitwriter_put(&w, 0, 3); /* BFINAL=0, BTYPE=00 */
+  size_t result = fio___deflate_bitwriter_finish(&w, out);
+  w.out = (uint8_t *)out + result;
+  w.bits = 0;
+  w.count = 0;
+  if (w.out + 4 <= w.out_end) {
+    w.out[0] = 0x00; /* LEN low */
+    w.out[1] = 0x00; /* LEN high */
+    w.out[2] = 0xFF; /* NLEN low */
+    w.out[3] = 0xFF; /* NLEN high */
+    w.out += 4;
   }
 
-  size_t result = (size_t)(w.out - (uint8_t *)out);
+  result = (size_t)(w.out - (uint8_t *)out);
 
   /* Update sliding window with the new data */
   if (new_len >= FIO___DEFLATE_WINDOW_SIZE) {
