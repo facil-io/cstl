@@ -379,14 +379,6 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
   return fio_http1_on_header(name, value, udata);
 }
 
-/* returns either a lower case (ASCI) or the original char. */
-static inline uint8_t fio_http1_tolower(uint8_t c) {
-  c |= (((uint8_t)(c - (uint8_t)'A') <
-         (uint8_t)(((uint8_t)'Z' + 1) - ((uint8_t)'A')))
-        << 5);
-  return c;
-}
-
 /* seeks to the ':' divisor while testing and converting to downcase. */
 static char *fio_http1___seek_header_div(char *p) {
   /* this is the subset of the forbidden chars that allows UTF-8 headers */
@@ -407,7 +399,7 @@ static char *fio_http1___seek_header_div(char *p) {
   for (;;) {
     if (FIO_UNLIKELY(forbidden_name_chars[((uint8_t)(*p))]))
       return p;
-    *p = (char)fio_http1_tolower((uint8_t)(*p));
+    *p = fio_ct_tolower(*p);
     ++p;
   }
 }
