@@ -934,7 +934,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multi_buffer_data)(void) {
 
   fio___test_ipc_reset_state();
 
-  /* Test: Empty buffer in the middle (should stop combining) */
+  /* Test: Empty buffer in the middle (should NOT stop combining) */
   {
     const char *part1 = "part1";
     const char *part2 = "part2";
@@ -952,8 +952,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ipc_multi_buffer_data)(void) {
 
     FIO_ASSERT(fio___test_ipc_call_count == 1,
                "call callback should be invoked");
-    FIO_ASSERT(fio___test_ipc_received_len == FIO_STRLEN(part1),
-               "only part1 should be included (empty buffer terminates)");
+    FIO_ASSERT(fio___test_ipc_received_len ==
+                   FIO_STRLEN(part1) + FIO_STRLEN(part2),
+               "empty buffer should NOT terminate data");
     FIO_ASSERT(
         FIO_MEMCMP(fio___test_ipc_received_data, part1, FIO_STRLEN(part1)) == 0,
         "part1 should be received");
