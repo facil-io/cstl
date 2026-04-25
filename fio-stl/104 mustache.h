@@ -1024,6 +1024,7 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
       break;
     }
     if (FIO_UNLIKELY(*p->forwards.buf == p->delim.in.buf[0] &&
+                     p->forwards.buf + p->delim.in.len < end &&
                      p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
       p->forwards.buf += p->delim.in.len;
@@ -1032,13 +1033,14 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
         if (p->forwards.buf + p->delim.out.len > end)
           goto incomplete_tag_error;
         if (p->forwards.buf[0] == p->delim.out.buf[0] &&
+            p->forwards.buf + p->delim.out.len < end &&
             p->delim.out.cmp(p->forwards.buf, p->delim.out.buf))
           break;
         ++(p->forwards.buf);
       }
       /* advance tag ending when triple mustache is detected. */
       p->forwards.buf +=
-          ((p->forwards.buf + p->delim.out.len) < end &&
+          ((p->forwards.buf + p->delim.out.len + 1) < end &&
            p->forwards.buf[0] == '}' &&
            p->delim.out.cmp(p->forwards.buf + 1, p->delim.out.buf));
       /* finalize tag */
@@ -1107,8 +1109,8 @@ FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
     p->forwards.buf = (char *)pos;
   }
   /* consume (possible) YAML front matter */
-  if (p->forwards.buf[0] == '-' && p->forwards.buf[1] == '-' &&
-      p->forwards.buf[2] == '-' &&
+  if (p->forwards.len > 3 && p->forwards.buf[0] == '-' &&
+      p->forwards.buf[1] == '-' && p->forwards.buf[2] == '-' &&
       (p->forwards.buf[3] == '\n' || p->forwards.buf[3] == '\r')) {
     const char *end = p->forwards.buf + p->forwards.len;
     const char *pos = p->forwards.buf;

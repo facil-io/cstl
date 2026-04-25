@@ -4,7 +4,7 @@ Test - Threads Module
 #include "test-helpers.h"
 
 #define FIO_THREADS
-#include "../fio-stl/include.h"
+#include FIO_INCLUDE_FILE
 
 /* Priority is controlled by the OS and changes aren't always accepted */
 #define FIO___TEST_PRIORITY 1

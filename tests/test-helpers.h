@@ -14,8 +14,9 @@ FIO_SFUNC uintptr_t fio___dynamic_types_test_untag(uintptr_t i) {
 
 #define FIO_TEST_REPEAT (1ULL << 12U)
 
-FIO_CONSTRUCTOR(fio____test_stack_poisener) {
-#define FIO___STACK_POISON_LENGTH (1ULL << 15)
+static void poison_stack(void *ignr_) {
+  (void)ignr_;
+#define FIO___STACK_POISON_LENGTH (1ULL << 16)
   uint8_t buf[FIO___STACK_POISON_LENGTH];
   FIO_COMPILER_GUARD;
   FIO_MEMSET(buf, (int)(0xA0U), FIO___STACK_POISON_LENGTH);
@@ -23,7 +24,16 @@ FIO_CONSTRUCTOR(fio____test_stack_poisener) {
   fio_rand_bytes(buf, FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
   fio_trylock(buf);
+  FIO_LOG_DDEBUG2("(%d) Stack Poisoned: %zu Kb",
+                  getpid(),
+                  (size_t)(FIO___STACK_POISON_LENGTH >> 10));
 #undef FIO___STACK_POISON_LENGTH
+}
+
+FIO_CONSTRUCTOR(fio____test_stack_poisener) {
+  poison_stack(NULL);
+  fio_state_callback_add(FIO_CALL_ON_WORKER_THREAD_START, poison_stack, NULL);
+  fio_state_callback_add(FIO_CALL_IN_CHILD, poison_stack, NULL);
 }
 
 #ifndef FIO_PRINT_SIZE_OF

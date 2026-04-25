@@ -11,7 +11,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define WORKERS                4
 #define START_OFFSET_MILLI     150
 #define SUBSCRIBE_OFFSET_MILLI 10
-#define CLEANUP_MILLI          3000
+#define CLEANUP_MILLI          (3000 + ((DEBUG - 1 + 1) * 2000))
 #define LISTENERS              (WORKERS + 1)
 
 static struct {
@@ -99,7 +99,7 @@ static void on_message_callback(fio_pubsub_msg_s *msg) {
 static int stop_io_timeout(void *ignr_, void *ignr__) {
   (void)ignr_;
   (void)ignr__;
-  if (!fio_io_is_master())
+  if (!fio_io_is_master() || !fio_io_is_running())
     return -1;
   FIO_LOG_INFO("(%d) Timeout Detected, calling fio_io_stop", fio_io_pid());
   fio_io_stop();
@@ -185,6 +185,9 @@ int main(void) {
   int r = 0;
   if (FIO_LOG_LEVEL == FIO_LOG_LEVEL_INFO)
     FIO_LOG_LEVEL = FIO_LOG_LEVEL_WARNING;
+  FIO_MEMSET(&results, 0, sizeof(results));
+  FIO_MEMSET(&sent, 0, sizeof(sent));
+  FIO_MEMSET(&history, 0, sizeof(history));
   size_t sent_count = 0;
   size_t received_count = 0;
   /* setup timeout */
@@ -203,7 +206,7 @@ int main(void) {
   fio_io_run_every(.fn = publish_message,
                    .every = (SUBSCRIBE_OFFSET_MILLI / 2),
                    .repetitions = MESSAGES_PER_PUBLISHER,
-                   .start_at = fio_time_milli() + START_OFFSET_MILLI +
+                   .start_at = fio_io_last_tick() + START_OFFSET_MILLI +
                                (LISTENERS / SUBSCRIBE_OFFSET_MILLI));
   /* run IO and wait for timeout */
   fio_io_start(WORKERS);

@@ -3,7 +3,7 @@
 #define FIO_SHA3
 #define FIO_SHA2
 #define FIO_ED25519
-#include "../fio-stl/include.h"
+#include "test-helpers.h"
 
 #include <stdio.h>
 #include <string.h>

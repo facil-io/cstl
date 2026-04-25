@@ -1,6 +1,6 @@
 #define FIO_EVERYTHING
 #define FIO_LOG
-#include "fio-stl/include.h"
+#include "test-helpers.h"
 
 #ifndef PRINT_SPECS_FILE_DATA
 #define PRINT_SPECS_FILE_DATA 0

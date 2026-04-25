@@ -11,7 +11,7 @@
 #define FIO_RSA     /* Required for RSA signature verification */
 #define FIO_ED25519 /* Required for Ed25519 signature verification */
 #define FIO_X509    /* The module under test */
-#include "fio-stl/include.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test Data - Real Certificate DER Data

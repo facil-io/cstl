@@ -6,7 +6,7 @@ Tests for Application-Layer Protocol Negotiation (RFC 7301) support.
 #define FIO_LOG
 #define FIO_CRYPT
 #define FIO_TLS13
-#include "fio-stl.h"
+#include "test-helpers.h"
 
 /* *****************************************************************************
 Test: ALPN Extension Building (ClientHello)

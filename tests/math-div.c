@@ -6,7 +6,7 @@
  * ***************************************************************************/
 #define FIO_CORE
 #define FIO_MATH
-#include "../fio-stl/include.h"
+#include "test-helpers.h"
 
 #include <time.h>
 

@@ -3,7 +3,7 @@
 #include <string.h>
 
 #define FIO_MUSTACHE
-#include "../fio-stl.h"
+#include "test-helpers.h"
 
 static void run_load_only(char *buf, size_t len) {
   fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO2(buf, len));

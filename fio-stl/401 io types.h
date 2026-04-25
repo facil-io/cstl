@@ -944,12 +944,17 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
     ssize_t r = io->pr->io_functions.flush(io->fd, io->tls);
     size_t len = FIO_IO_BUFFER_PER_WRITE;
     char *buf = buf_mem;
-    if ((!r)) {
-      fio_stream_read(&io->out, &buf, &len);
-      if (!len)
-        goto finish_loop;
-      r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
+    if (r) {
+      if ((r + 1))
+        total += r;
+      else if ((errno != EWOULDBLOCK) && (errno != EAGAIN))
+        goto connection_error;
+      goto finish_loop;
     }
+    fio_stream_read(&io->out, &buf, &len);
+    if (!len)
+      goto finish_loop;
+    r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
     switch ((size_t)(r + 1)) {
     case 0:
       if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
