@@ -209,7 +209,7 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
 /*
  * Returns the millisecond at which the next event should occur.
  *
- * If no timer is due (list is empty), returns `(uint64_t)-1`.
+ * If no timer is due (list is empty), returns the maximum possible value.
  *
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
@@ -266,13 +266,13 @@ struct fio___timer_event_s {
 /*
  * Returns the millisecond at which the next event should occur.
  *
- * If no timer is due (list is empty), returns `-1`.
+ * If no timer is due (list is empty), returns the maximum possible value.
  *
  * NOTE: unless manually specified, millisecond timers are relative to
  * `fio_time_milli()`.
  */
 FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *tq) {
-  int64_t v = -1;
+  int64_t v = (int64_t)((~(uint64_t)0) >> 1);
   if (!tq)
     goto missing_tq;
   if (!tq || !tq->next)

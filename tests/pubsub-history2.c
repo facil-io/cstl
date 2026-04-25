@@ -11,8 +11,13 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define WORKERS                4
 #define START_OFFSET_MILLI     150
 #define SUBSCRIBE_OFFSET_MILLI 10
-#define CLEANUP_MILLI          (3000 + ((DEBUG - 1 + 1) * 2000))
 #define LISTENERS              (WORKERS + 1)
+
+#ifdef DEBUG
+#define CLEANUP_MILLI 5000
+#else
+#define CLEANUP_MILLI 3000
+#endif
 
 static struct {
   struct {
@@ -207,7 +212,7 @@ int main(void) {
                    .every = (SUBSCRIBE_OFFSET_MILLI / 2),
                    .repetitions = MESSAGES_PER_PUBLISHER,
                    .start_at = fio_io_last_tick() + START_OFFSET_MILLI +
-                               (LISTENERS / SUBSCRIBE_OFFSET_MILLI));
+                               (SUBSCRIBE_OFFSET_MILLI / LISTENERS));
   /* run IO and wait for timeout */
   fio_io_start(WORKERS);
 

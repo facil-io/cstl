@@ -58,23 +58,40 @@ static void fio___io_signal_restart(int sig, void *flg) {
   (void)sig, (void)flg;
 }
 
-FIO_SFUNC void fio___io_tick(int timeout) {
+FIO_IFUNC int fio___io_queue_timers(void) {
+  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  fio_timer_push2queue(&FIO___IO.queue, &FIO___IO.timer, FIO___IO.tick);
+  int64_t first = fio_timer_next_at(&FIO___IO.timer);
+  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, a) {
+    fio_timer_push2queue(a->q, &a->timers, FIO___IO.tick);
+    if (first > fio_timer_next_at(&a->timers))
+      first = fio_timer_next_at(&a->timers);
+  }
+  /* convert first event timestamp to delta */
+  first -= FIO___IO.tick;
+  if (first < 0) /* shouldn't be possible, but just n case */
+    first = 0;
+  if (first > 0xFFFFFF) /* cap */
+    first = 0xFFFFFF;
+  return first;
+}
+
+FIO_SFUNC void fio___io_tick(int max_timeout) {
   static size_t performed_idle = 0;
+  int timeout = fio___io_queue_timers();
+  if (fio_queue_count(&FIO___IO.queue))
+    timeout = 0;
+  if (timeout > max_timeout)
+    timeout = max_timeout;
   size_t idle_round = (fio_poll_review(&FIO___IO.poll, timeout) == 0);
-  performed_idle &= idle_round;
   idle_round &= (timeout > 0);
+  performed_idle &= idle_round;
   idle_round ^= performed_idle;
   if ((idle_round & !FIO___IO.stop)) {
     fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
-  fio_timer_push2queue(&FIO___IO.queue, &FIO___IO.timer, FIO___IO.tick);
-  FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, a) {
-    fio_timer_push2queue(a->q, &a->timers, FIO___IO.tick);
-  }
-  for (size_t i = 0; i < 2048 && !fio_queue_perform(&FIO___IO.queue); ++i)
-    ;
+  fio___io_queue_timers();
   fio___io_review_timeouts();
   fio_signal_review();
 }
@@ -98,7 +115,7 @@ FIO_SFUNC void fio___io_shutdown_task(void *shutdown_start_, void *a2) {
       (intptr_t)shutdown_start_ + FIO___IO.shutdown_timeout;
   if (shutdown_start < FIO___IO.tick || FIO_LIST_IS_EMPTY(&FIO___IO.protocols))
     return;
-  fio___io_tick(fio_queue_count(&FIO___IO.queue) ? 0 : 100);
+  fio___io_tick(100);
   fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync);
   fio_queue_push(&FIO___IO.queue, fio___io_shutdown_task, shutdown_start_, a2);
 }
@@ -152,7 +169,7 @@ FIO_SFUNC void fio___io_shutdown(void) {
 FIO_SFUNC void fio___io_work_task(void *ignr_1, void *ignr_2) {
   if (FIO___IO.stop)
     goto no_run;
-  fio___io_tick(fio_queue_count(&FIO___IO.queue) ? 0 : 500);
+  fio___io_tick(500);
   fio_queue_push(&FIO___IO.queue, fio___io_work_task, ignr_1, ignr_2);
   return;
 no_run:
