@@ -114,6 +114,42 @@ int main(int argc, char **argv) {
     run_load_and_build((char *)buf, sizeof(buf) - 1);
     r = 0;
   }
+
+  if (argc < 2 || !strcmp(argv[1], "path_traversal_leading")) {
+    fprintf(stderr, "\t- path_traversal_leading\n");
+    static const char buf[] = "{{>../etc/passwd}}";
+    run_load_and_build((char *)buf, sizeof(buf) - 1);
+    r = 0;
+  }
+
+  if (argc < 2 || !strcmp(argv[1], "path_traversal_middle")) {
+    fprintf(stderr, "\t- path_traversal_middle\n");
+    static const char buf[] = "{{>foo/../../etc/passwd}}";
+    run_load_and_build((char *)buf, sizeof(buf) - 1);
+    r = 0;
+  }
+
+  if (argc < 2 || !strcmp(argv[1], "path_traversal_double_dot")) {
+    fprintf(stderr, "\t- path_traversal_double_dot\n");
+    static const char buf[] = "{{>..}}";
+    run_load_and_build((char *)buf, sizeof(buf) - 1);
+    r = 0;
+  }
+
+  if (argc < 2 || !strcmp(argv[1], "path_traversal_dot_dot_slash")) {
+    fprintf(stderr, "\t- path_traversal_dot_dot_slash\n");
+    static const char buf[] = "{{>../secret}}";
+    run_load_and_build((char *)buf, sizeof(buf) - 1);
+    r = 0;
+  }
+
+  if (argc < 2 || !strcmp(argv[1], "path_traversal_nested")) {
+    fprintf(stderr, "\t- path_traversal_nested\n");
+    static const char buf[] = "{{>a/b/../c/d}}";
+    run_load_and_build((char *)buf, sizeof(buf) - 1);
+    r = 0;
+  }
+
   if (r)
     fprintf(stderr, "unknown case: %s\n", argv[1]);
   return r;

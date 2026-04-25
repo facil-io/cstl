@@ -1415,7 +1415,10 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
 
   for (int attempts = 0; attempts < 100; ++attempts) {
     /* Generate random k */
-    fio_rand_bytes(k_bytes, 32);
+    do {
+      fio_rand_bytes(k_bytes, 32);
+    } while (!fio_buf2u64u(k_bytes) || !fio_buf2u64u(k_bytes + 8) ||
+             !fio_buf2u64u(k_bytes + 16) || !fio_buf2u64u(k_bytes + 24));
     fio___p256_scalar_from_bytes(k, k_bytes);
 
     /* Ensure 0 < k < n */
@@ -1665,7 +1668,10 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
 
   /* Generate random scalar and ensure 0 < k < n */
   for (int attempts = 0; attempts < 100; ++attempts) {
-    fio_rand_bytes(secret_key, 32);
+    do {
+      fio_rand_bytes(secret_key, 32);
+    } while (!fio_buf2u64u(secret_key) || !fio_buf2u64u(secret_key + 8) ||
+             !fio_buf2u64u(secret_key + 16) || !fio_buf2u64u(secret_key + 24));
     fio___p256_scalar_from_bytes(k, secret_key);
 
     /* Check k is not zero and k < n */

@@ -1592,13 +1592,18 @@ SFUNC int fio_x509_keypair_p256(fio_x509_keypair_s *keypair);
  * Generate a self-signed X.509v3 certificate.
  *
  * The certificate is DER-encoded and written to the output buffer.
- * Call with buf=NULL to calculate required buffer size.
+ * Call with buf=NULL to get the maximum possible certificate size.
+ * This returns a worst-case size that accounts for variable-length DER
+ * encoding (e.g., serial numbers with varying leading zeros), ensuring
+ * that a buffer of this size will always be sufficient for the actual
+ * generation call.
  *
- * @param buf Output buffer (can be NULL to calculate size)
+ * @param buf Output buffer (can be NULL to calculate max size)
  * @param buf_len Buffer size (ignored if buf is NULL)
  * @param keypair Key pair to use for signing
  * @param options Certificate options
- * @return Number of bytes written/needed, or 0 on error
+ * @return Number of bytes written (if buf!=NULL) or max needed (if buf==NULL),
+ * or 0 on error
  */
 SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
                                        size_t buf_len,
@@ -2158,11 +2163,6 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   if (not_after == 0)
     not_after = not_before + (365 * 24 * 60 * 60); /* +1 year */
 
-  /* Generate random serial number (20 bytes max per RFC 5280) */
-  uint8_t serial[16];
-  fio_rand_bytes(serial, sizeof(serial));
-  serial[0] &= 0x7F; /* Ensure positive */
-
   /* Calculate TBSCertificate content length */
   size_t tbs_content = 0;
 
@@ -2172,8 +2172,12 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
       fio_asn1_encode_context_header(NULL, 0, version_int, 1) + version_int;
   tbs_content += version_len;
 
-  /* Serial number */
-  size_t serial_len = fio_asn1_encode_integer(NULL, serial, sizeof(serial));
+  /* Serial number: 16 bytes, DER-encoded INTEGER.
+   * Max size = 1 (tag) + 1 (length) + 16 (content) = 18 bytes.
+   * High bit is always cleared (serial[0] &= 0x7F), so no leading zero needed.
+   * When buf==NULL, we use this maximum to ensure callers allocate enough space
+   * regardless of how many leading zeros the actual random serial may have. */
+  size_t serial_len = 18;
   tbs_content += serial_len;
 
   /* Signature algorithm */
@@ -2240,6 +2244,13 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
 
   if (buf_len < total)
     return 0;
+
+  /* Generate random serial number (20 bytes max per RFC 5280) */
+  uint8_t serial[16];
+  do {
+    fio_rand_bytes(serial, sizeof(serial));
+  } while (!fio_buf2u64u(serial) || !fio_buf2u64u(serial + 8));
+  serial[0] &= 0x7F; /* Ensure positive */
 
   /* Now encode everything */
   size_t offset = 0;

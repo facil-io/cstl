@@ -10,7 +10,7 @@ static volatile size_t WORKER_ID = 1; /* start from 1 and increase every fork */
 #define MESSAGES_PER_PUBLISHER 50
 #define WORKERS                4
 #define START_OFFSET_MILLI     150
-#define SUBSCRIBE_OFFSET_MILLI 10
+#define SUBSCRIBE_OFFSET_MILLI 20
 #define LISTENERS              (WORKERS + 1)
 
 #ifdef DEBUG

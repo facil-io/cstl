@@ -214,6 +214,9 @@ static int fio_http1___start(fio_http1_parser_s *p,
     return 1;
   if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */
     return -1;
+  /* test for `NUL` in data */
+  if (FIO_MEMCHR(start, 0, (size_t)(eol - start)))
+    return -1;
 
   /* prep next stage */
   buf->len -= (eol - buf->buf) + 1;
@@ -297,6 +300,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
   case 14: /* test for "content-length" */
     if (fio_buf2u64u(name.buf) == fio_buf2u64u("content-") &&
         fio_buf2u64u(name.buf + 6) == fio_buf2u64u("t-length")) {
+      if (!value.len)
+        return -1;
       char *tmp = value.buf;
       errno = 0; /* reset errno before parsing */
       uint64_t clen = fio_atol10u(&tmp);
@@ -439,6 +444,9 @@ static inline int fio_http1___read_header_line(
       while (eol[-1] == ' ' || eol[-1] == '\t')
         --eol;
     value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
+
+    if (FIO_MEMCHR(value.buf, 0, value.len))
+      return -1;
     int r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
       return r;

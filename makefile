@@ -159,6 +159,7 @@ test: clean | all $(TEST_BINS)
 		test_count=0; \
 		pass_count=0; \
 		fail_count=0; \
+		failed_tests=""; \
 		for test_bin in $(TEST_BINS); do \
 			test_count=$$((test_count + 1)); \
 			test_name=$$(basename $$test_bin); \
@@ -169,12 +170,20 @@ test: clean | all $(TEST_BINS)
 			else                                      \
 				echo "      ✗ TEST FAILED: $$test_bin"; \
 				fail_count=$$((fail_count + 1));        \
+				failed_tests="$$failed_tests$$test_name "; \
 			fi; \
 			echo ""; \
 		done; \
 		echo ""; \
 		echo "Test Results: $$pass_count passed, $$fail_count failed, $$test_count total"; \
-		if [ $$fail_count -gt 0 ]; then exit 1; fi; \
+		if [ $$fail_count -gt 0 ]; then \
+			echo ""; \
+			echo "Failed tests:"; \
+			for failed_test in $$failed_tests; do \
+				echo "  ✗ $$failed_test"; \
+			done; \
+			exit 1; \
+		fi; \
 	else \
 		echo "No test files found in $(TEST_DIR)/"; \
 	fi

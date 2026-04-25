@@ -196,10 +196,11 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
   FIO_ASSERT(cert_size > 0, "cert size calculation should succeed");
 
   /* Generate certificate */
-  uint8_t *cert = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
+  uint8_t *cert = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size + 100, 0);
   FIO_ASSERT(cert, "cert allocation should succeed");
 
-  size_t cert_len = fio_x509_self_signed_cert(cert, cert_size, &keypair, &opts);
+  size_t cert_len =
+      fio_x509_self_signed_cert(cert, cert_size + 100, &keypair, &opts);
   FIO_ASSERT(cert_len > 0, "cert generation should succeed");
 
   /* Initialize server */
@@ -293,7 +294,7 @@ FIO_SFUNC void fio___test_tls13_io_handshake_unit(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
   fio_x509_keypair_clear(&keypair);
-  FIO_MEM_FREE(cert, cert_size);
+  FIO_MEM_FREE(cert, cert_size + 100);
 }
 
 /* *****************************************************************************
@@ -316,10 +317,11 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
   FIO_ASSERT(cert_size > 0, "P-256 cert size calculation should succeed");
 
   /* Generate certificate */
-  uint8_t *cert = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
+  uint8_t *cert = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size + 100, 0);
   FIO_ASSERT(cert, "cert allocation should succeed");
 
-  size_t cert_len = fio_x509_self_signed_cert(cert, cert_size, &keypair, &opts);
+  size_t cert_len =
+      fio_x509_self_signed_cert(cert, cert_size + 100, &keypair, &opts);
   FIO_ASSERT(cert_len > 0, "P-256 cert generation should succeed");
 
   /* Initialize server */
@@ -416,7 +418,7 @@ FIO_SFUNC void fio___test_tls13_io_handshake_p256(void) {
   fio_tls13_client_destroy(&client);
   fio_tls13_server_destroy(&server);
   fio_x509_keypair_clear(&keypair);
-  FIO_MEM_FREE(cert, cert_size);
+  FIO_MEM_FREE(cert, cert_size + 100);
 }
 
 /* *****************************************************************************

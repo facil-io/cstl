@@ -42,6 +42,9 @@ Settings
 #define FIO_MUSTACHE_ISOLATE_PARTIALS 1
 #endif
 
+#ifndef FIO_MUSTACHE_SECURE_PATH
+#define FIO_MUSTACHE_SECURE_PATH 1
+#endif
 /* *****************************************************************************
 Mustache Parser / Builder API
 ***************************************************************************** */
@@ -802,6 +805,30 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
     return -1;
 
   fio___mustache_stand_alone_skip_eol(p);
+
+#if FIO_MUSTACHE_SECURE_PATH
+  /* protect against `../` */
+  for (fio_buf_info_s path = filename; path.len > 1;) {
+    /* Check for leading "../" which escapes the base directory */
+    if (path.buf[0] == '.' && path.buf[1] == '.' &&
+        (path.len < 3 || path.buf[2] == '/')) {
+      FIO_LOG_SECURITY(
+          "Path traversal attack detected in Mustache partial: %.*s (skipped)",
+          (int)filename.len,
+          filename.buf);
+      filename.len = 0;
+      break;
+    }
+    while (path.len && path.buf[0] != '/') {
+      --path.len;
+      ++path.buf;
+    }
+    if (path.len) {
+      --path.len;
+      ++path.buf;
+    }
+  }
+#endif
 
   if (!filename.len)
     return 0;
