@@ -803,6 +803,9 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
 
   fio___mustache_stand_alone_skip_eol(p);
 
+  if (!filename.len)
+    return 0;
+
   fio_buf_info_s file_content = fio___mustache_load_template(p, filename);
   if (!file_content.len)
     return 0;
@@ -950,12 +953,6 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   if (!buf.len)
     return fio___mustache_parse_comment(p, buf);
   char id = buf.buf[0];
-  /* allow {{!}} empty comment - check for comment marker before content check
-   */
-  if (id == '!')
-    return fio___mustache_parse_comment(
-        p,
-        FIO_BUF_INFO2(buf.buf + 1, buf.len - 1));
   /* detect malformed triple mustache: {{{name}} (missing closing brace) */
   if (id == '{' && buf.buf[buf.len - 1] != '}') {
     FIO_LOG_ERROR(
@@ -974,11 +971,14 @@ FIO_SFUNC int fio___mustache_parse_consume_tag(fio___mustache_parser_s *p,
   do {
     ++buf.buf;
     --buf.len;
-    if (buf.len)
-      continue;
+  } while (buf.len && (buf.buf[0] == ' ' || buf.buf[0] == '\t'));
+  if (!buf.len) {
+    if (id == '>' || id == '!')
+      return 0;
     FIO_LOG_ERROR("(mustache) template tags must contain a value!");
     return -1;
-  } while (buf.buf[0] == ' ' || buf.buf[0] == '\t');
+  }
+
   /* test for tag type and route to handler */
   switch (id) {
   case '/': return fio___mustache_parse_section_end(p, buf);
@@ -1024,7 +1024,7 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
       break;
     }
     if (FIO_UNLIKELY(*p->forwards.buf == p->delim.in.buf[0] &&
-                     p->forwards.buf + p->delim.in.len < end &&
+                     p->forwards.buf + p->delim.in.len <= end &&
                      p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
       p->forwards.buf += p->delim.in.len;
@@ -1033,14 +1033,14 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
         if (p->forwards.buf + p->delim.out.len > end)
           goto incomplete_tag_error;
         if (p->forwards.buf[0] == p->delim.out.buf[0] &&
-            p->forwards.buf + p->delim.out.len < end &&
+            p->forwards.buf + p->delim.out.len <= end &&
             p->delim.out.cmp(p->forwards.buf, p->delim.out.buf))
           break;
         ++(p->forwards.buf);
       }
       /* advance tag ending when triple mustache is detected. */
       p->forwards.buf +=
-          ((p->forwards.buf + p->delim.out.len + 1) < end &&
+          ((p->forwards.buf + p->delim.out.len) < end &&
            p->forwards.buf[0] == '}' &&
            p->delim.out.cmp(p->forwards.buf + 1, p->delim.out.buf));
       /* finalize tag */
