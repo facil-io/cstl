@@ -299,6 +299,8 @@ From:
 https://csrc.nist.gov/groups/STM/cavp/documents/dss/186-3ecdsatestvectors.zip
 ***************************************************************************** */
 FIO_SFUNC void print_scalar(const char *name, const uint64_t s[4]) {
+  if (FIO_LOG_LEVEL < FIO_LOG_LEVEL_DEBUG)
+    return;
   fprintf(stderr, "%s: ", name);
   for (int i = 3; i >= 0; --i) {
     fprintf(stderr, "%016llx", (unsigned long long)s[i]);
@@ -363,10 +365,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     uint64_t q[4] = {0};
     uint64_t r[4] = {0};
     fio_math_div(q, r, a, b, 4);
-    fprintf(stderr,
-            "    100 / 7 = %llu, remainder = %llu\n",
-            (unsigned long long)q[0],
-            (unsigned long long)r[0]);
+    FIO_LOG_DEBUG2("    100 / 7 = %llu, remainder = %llu\n",
+                   (unsigned long long)q[0],
+                   (unsigned long long)r[0]);
     FIO_ASSERT(q[0] == 14 && r[0] == 2, "100 / 7 should be 14 remainder 2");
 
     /* Test the specific 512-bit product that's failing */
@@ -388,16 +389,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
                           0};
     uint64_t rem2[8] = {0};
     fio_math_div(NULL, rem2, product, n_ext2, 8);
-    fprintf(stderr,
-            "    product mod n = %016llx%016llx%016llx%016llx\n",
-            (unsigned long long)rem2[3],
-            (unsigned long long)rem2[2],
-            (unsigned long long)rem2[1],
-            (unsigned long long)rem2[0]);
+    FIO_LOG_DEBUG2("    product mod n = %016llx%016llx%016llx%016llx\n",
+                   (unsigned long long)rem2[3],
+                   (unsigned long long)rem2[2],
+                   (unsigned long long)rem2[1],
+                   (unsigned long long)rem2[0]);
+#if DEBUG
     fprintf(
         stderr,
         "    expected      = "
         "309f1aeeff274eaffb58ea09e2aad1f4e1d782283e63f349901e2513870a0f0e\n");
+#endif
 
     /* Test: large number mod n */
     uint64_t large[8] = {0xFFFFFFFFFFFFFFFFULL,
@@ -485,7 +487,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     /* Test scalar inversion manually step by step */
     /* Expected:
      * 0x49249248db6db6dbb6db6db6db6db6db5a8b230d0b2b51dcd7ebf0c9fef7c185 */
-    fprintf(stderr, "\t  Manual scalar inversion trace:\n");
+#if DEBUG
+    FIO_LOG_DEBUG2("\t  Manual scalar inversion trace:\n");
     {
       fio___p256_scalar_s t = {1, 0, 0, 0};
       fio___p256_scalar_s base2 = {7, 0, 0, 0};
@@ -523,6 +526,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       }
       print_scalar("After 8 bits, t", t);
     }
+#endif
 
     fio___p256_scalar_s inv;
     fio___p256_scalar_inv(inv, a);
@@ -591,6 +595,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     fio___p256_point_to_affine(&threeG_aff, &threeG);
     print_fe("3G.x (computed)", threeG_aff.x);
     print_fe("3G.y (computed)", threeG_aff.y);
+#if DEBUG
     fprintf(
         stderr,
         "3G.x (expected): "
@@ -599,6 +604,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
         stderr,
         "3G.y (expected): "
         "8734640c4998ff7e374b06ce1a64a2ecd82ab036384fb83d9a79b127a27d5032\n");
+#endif
   }
 
   /* Test: verify 4*G, 5*G, 6*G, 7*G */
@@ -617,25 +623,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       fio___p256_point_mul(&kG, scalar, &g_test);
       fio___p256_point_affine_s kG_aff;
       fio___p256_point_to_affine(&kG_aff, &kG);
-      fprintf(stderr, "%lluG.x: ", (unsigned long long)k);
-      for (int i = 3; i >= 0; --i)
-        fprintf(stderr, "%016llx", (unsigned long long)kG_aff.x[i]);
-      fprintf(stderr, "\n");
+      if (FIO_LOG_LEVEL >= FIO_LOG_LEVEL_DEBUG) {
+        fprintf(stderr, "%lluG.x: ", (unsigned long long)k);
+        for (int i = 3; i >= 0; --i)
+          fprintf(stderr, "%016llx", (unsigned long long)kG_aff.x[i]);
+        fprintf(stderr, "\n");
+      }
     }
-    fprintf(
-        stderr,
+    FIO_LOG_DEBUG2(
         "4G.x (expected): "
         "e2534a3532d08fbba02dde659ee62bd0031fe2db785596ef509302446b030852\n");
-    fprintf(
-        stderr,
+    FIO_LOG_DEBUG2(
         "5G.x (expected): "
         "51590b7a515140d2d784c85608668fdfef8c82fd1f5be52421554a0dc3d033ed\n");
-    fprintf(
-        stderr,
+    FIO_LOG_DEBUG2(
         "6G.x (expected): "
         "b01a172a76a4602c92d3242cb897dde3024c740debb215b4c6b0aae93c2291a9\n");
-    fprintf(
-        stderr,
+    FIO_LOG_DEBUG2(
         "7G.x (expected): "
         "8e533b6fa0bf7b4625bb30667c01fb607ef9f8b8a80fef5b300628703187b2a3\n");
   }
@@ -653,7 +657,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     fio___p256_point_set_infinity(&kG);
 
     int start_bit = 64; /* Only bit 64 is set */
-    fprintf(stderr, "Manual 2^64*G trace:\n");
+    FIO_LOG_DEBUG2("Manual 2^64*G trace:\n");
     for (int i = start_bit; i >= 0; --i) {
       fio___p256_point_double(&kG, &kG);
 
@@ -664,13 +668,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       if (i >= 60 || i <= 5) {
         fio___p256_point_affine_s tmp_aff;
         fio___p256_point_to_affine(&tmp_aff, &kG);
-        fprintf(stderr,
-                "  i=%d, limb=%d, bit=%d, val=%d, after double: x=%016llx...\n",
-                i,
-                limb,
-                bit,
-                bit_val,
-                (unsigned long long)tmp_aff.x[3]);
+        FIO_LOG_DEBUG2(
+            "  i=%d, limb=%d, bit=%d, val=%d, after double: x=%016llx...\n",
+            i,
+            limb,
+            bit,
+            bit_val,
+            (unsigned long long)tmp_aff.x[3]);
       }
 
       if (bit_val) {
@@ -678,9 +682,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
         if (i >= 60 || i <= 5) {
           fio___p256_point_affine_s tmp_aff;
           fio___p256_point_to_affine(&tmp_aff, &kG);
-          fprintf(stderr,
-                  "           after add:    x=%016llx...\n",
-                  (unsigned long long)tmp_aff.x[3]);
+          FIO_LOG_DEBUG2("           after add:    x=%016llx...\n",
+                         (unsigned long long)tmp_aff.x[3]);
         }
       }
     }
@@ -705,9 +708,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     fio___p256_fe_sub(t, t, kG_aff.x);
     fio___p256_fe_sub(t, t, kG_aff.x);
     fio___p256_fe_add(t, t, FIO___P256_B);
-    fprintf(stderr,
-            "2^64*G on curve: %s\n",
-            fio___p256_fe_eq(y2, t) == 0 ? "YES" : "NO");
+    FIO_LOG_DEBUG2("2^64*G on curve: %s\n",
+                   fio___p256_fe_eq(y2, t) == 0 ? "YES" : "NO");
 
     /* Compute 2^64*G by doubling G 64 times */
     fio___p256_point_jacobian_s doubled;
@@ -720,11 +722,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     print_fe("2^64*G.x (64 doubles)", doubled_aff.x);
 
     /* Check if they match */
-    if (fio___p256_fe_eq(kG_aff.x, doubled_aff.x) == 0) {
-      fprintf(stderr, "2^64*G: scalar mul matches 64 doubles\n");
-    } else {
-      fprintf(stderr, "2^64*G: MISMATCH between scalar mul and 64 doubles!\n");
-    }
+    FIO_ASSERT(fio___p256_fe_eq(kG_aff.x, doubled_aff.x) == 0,
+               "2^64*G: MISMATCH between scalar mul and 64 doubles");
   }
 
   /* Test point addition: G + G should equal 2G */
@@ -750,11 +749,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     print_fe("2G (double).x", twoG_double_aff.x);
     print_fe("2G (add G+G).x", twoG_add_aff.x);
 
-    if (fio___p256_fe_eq(twoG_double_aff.x, twoG_add_aff.x) == 0) {
-      fprintf(stderr, "G + G = 2G: PASS\n");
-    } else {
-      fprintf(stderr, "G + G = 2G: FAIL\n");
-    }
+    FIO_ASSERT(fio___p256_fe_eq(twoG_double_aff.x, twoG_add_aff.x) == 0,
+               "G + G = 2G mismatch");
   }
 
   /* Test point addition: G + 2G should equal 3G */
@@ -787,11 +783,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     print_fe("3G (scalar mul).x", threeG_mul_aff.x);
     print_fe("3G (G + 2G).x", threeG_add_aff.x);
 
-    if (fio___p256_fe_eq(threeG_mul_aff.x, threeG_add_aff.x) == 0) {
-      fprintf(stderr, "G + 2G = 3G: PASS\n");
-    } else {
-      fprintf(stderr, "G + 2G = 3G: FAIL\n");
-    }
+    FIO_ASSERT(fio___p256_fe_eq(threeG_mul_aff.x, threeG_add_aff.x) == 0,
+               "G + 2G = 3G mismatch");
   }
 
   /* Test: verify d*G = Q using RFC 6979 A.2.5 test vector */
@@ -818,6 +811,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     print_scalar("d (private key)", d);
 
     /* Verify scalar loading */
+#if DEBUG
     fprintf(stderr, "d_bytes: ");
     for (int i = 0; i < 32; i++)
       fprintf(stderr, "%02x", d_bytes[i]);
@@ -828,6 +822,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
             (unsigned long long)d[1],
             (unsigned long long)d[2],
             (unsigned long long)d[3]);
+#endif
 
     fio___p256_point_affine_s g_test;
     fio___p256_fe_copy(g_test.x, FIO___P256_GX);
@@ -846,7 +841,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
         break;
       --start_bit;
     }
+#if DEBUG
     fprintf(stderr, "start_bit = %d\n", start_bit);
+#endif
 
     /* Trace first 10 iterations */
     for (int i = start_bit; i >= 0; --i) {
@@ -859,11 +856,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       if (i >= start_bit - 10) {
         fio___p256_point_affine_s tmp_aff;
         fio___p256_point_to_affine(&tmp_aff, &dG);
+#if DEBUG
         fprintf(stderr,
                 "i=%d, bit=%d, after double: x=%016llx...\n",
                 i,
                 bit_val,
                 (unsigned long long)tmp_aff.x[3]);
+#endif
       }
 
       if (bit_val) {
@@ -871,9 +870,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
         if (i >= start_bit - 10) {
           fio___p256_point_affine_s tmp_aff;
           fio___p256_point_to_affine(&tmp_aff, &dG);
+#if DEBUG
           fprintf(stderr,
                   "         after add:    x=%016llx...\n",
                   (unsigned long long)tmp_aff.x[3]);
+#endif
         }
       }
     }
@@ -900,17 +901,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
       fio___p256_fe_sub(t, t, dG_aff.x);
       fio___p256_fe_sub(t, t, dG_aff.x);
       fio___p256_fe_add(t, t, FIO___P256_B);
-      fprintf(stderr,
-              "d*G on curve: %s\n",
-              fio___p256_fe_eq(y2, t) == 0 ? "YES" : "NO");
+      FIO_ASSERT(fio___p256_fe_eq(y2, t) == 0, "d*G is not on curve");
     }
 
-    if (fio___p256_fe_eq(dG_aff.x, exp_qx) != 0 ||
-        fio___p256_fe_eq(dG_aff.y, exp_qy) != 0) {
-      fprintf(stderr, "ERROR: d*G != Q (RFC 6979)\n");
-    } else {
-      fprintf(stderr, "OK: d*G == Q (RFC 6979)\n");
-    }
+    FIO_ASSERT(fio___p256_fe_eq(dG_aff.x, exp_qx) == 0 &&
+               fio___p256_fe_eq(dG_aff.y, exp_qy) == 0,
+               "d*G != Q (RFC 6979)");
   }
 
   /* Debug: compute u1*G and u2*Q separately */
@@ -935,9 +931,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     fio___p256_fe_sub(t, t, u1G_aff.x);
     fio___p256_fe_sub(t, t, u1G_aff.x);
     fio___p256_fe_add(t, t, FIO___P256_B);
-    fprintf(stderr,
-            "u1*G on curve: %s\n",
-            fio___p256_fe_eq(y2, t) == 0 ? "YES" : "NO");
+    FIO_ASSERT(fio___p256_fe_eq(y2, t) == 0, "u1*G is not on curve");
   }
 
   fio___p256_point_jacobian_s u2Q_jac;
@@ -957,9 +951,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdsa_nist)(void) {
     fio___p256_fe_sub(t, t, u2Q_aff.x);
     fio___p256_fe_sub(t, t, u2Q_aff.x);
     fio___p256_fe_add(t, t, FIO___P256_B);
-    fprintf(stderr,
-            "u2*Q on curve: %s\n",
-            fio___p256_fe_eq(y2, t) == 0 ? "YES" : "NO");
+    FIO_ASSERT(fio___p256_fe_eq(y2, t) == 0, "u2*Q is not on curve");
   }
 
   /* Compute u1*G + u2*Q manually */
@@ -1313,14 +1305,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_performance)(void) {
   }
   clock_gettime(CLOCK_MONOTONIC, &end);
 
+#if DEBUG
   double elapsed_us = (double)(end.tv_sec - start.tv_sec) * 1000000.0 +
                       (double)(end.tv_nsec - start.tv_nsec) / 1000.0;
   double ops_per_sec = (iterations * 1000000.0) / elapsed_us;
-
   fprintf(stderr,
           "\t  ECDSA P-256 verify: %.2f ops/sec (%.2f us/op)\n",
           ops_per_sec,
           elapsed_us / iterations);
+#endif
 }
 
 /* *****************************************************************************
@@ -1459,14 +1452,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_performance)(void) {
   }
   clock_gettime(CLOCK_MONOTONIC, &end);
 
+#if DEBUG
   double elapsed_us = (double)(end.tv_sec - start.tv_sec) * 1000000.0 +
                       (double)(end.tv_nsec - start.tv_nsec) / 1000.0;
   double ops_per_sec = (iterations * 1000000.0) / elapsed_us;
-
   fprintf(stderr,
           "\t  P-256 keypair: %.2f ops/sec (%.2f us/op)\n",
           ops_per_sec,
           elapsed_us / iterations);
+#endif
 
   /* Generate another keypair for shared secret test */
   uint8_t sk2[32], pk2[65];
@@ -1481,14 +1475,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_performance)(void) {
   }
   clock_gettime(CLOCK_MONOTONIC, &end);
 
+#if DEBUG
   elapsed_us = (double)(end.tv_sec - start.tv_sec) * 1000000.0 +
                (double)(end.tv_nsec - start.tv_nsec) / 1000.0;
   ops_per_sec = (iterations * 1000000.0) / elapsed_us;
-
   fprintf(stderr,
           "\t  P-256 shared secret: %.2f ops/sec (%.2f us/op)\n",
           ops_per_sec,
           elapsed_us / iterations);
+#endif
 }
 
 /* *****************************************************************************

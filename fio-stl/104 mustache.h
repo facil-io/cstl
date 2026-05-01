@@ -1050,14 +1050,14 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
       }
       break;
     }
-    if (FIO_UNLIKELY(*p->forwards.buf == p->delim.in.buf[0] &&
+    if (FIO_UNLIKELY(p->forwards.buf[0] == p->delim.in.buf[0] &&
                      p->forwards.buf + p->delim.in.len <= end &&
                      p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
       p->forwards.buf += p->delim.in.len;
       tag = FIO_BUF_INFO2(p->forwards.buf, 0);
       for (;;) {
-        if (p->forwards.buf + p->delim.out.len > end)
+        if (p->forwards.buf + p->delim.out.len >= end)
           goto incomplete_tag_error;
         if (p->forwards.buf[0] == p->delim.out.buf[0] &&
             p->forwards.buf + p->delim.out.len <= end &&
