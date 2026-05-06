@@ -516,7 +516,10 @@ FIO_SFUNC int fio_bstr_is_eq2info(const char *a_, fio_str_info_s b);
 /** Compares to see if fio_bstr a is equal to another String. */
 FIO_SFUNC int fio_bstr_is_eq2buf(const char *a_, fio_buf_info_s b);
 
-/** Writes data to a fio_bstr, returning the address of the new fio_bstr. */
+/**
+ * Writes data to a fio_bstr, returning the address of the new fio_bstr.
+ * Returns existing string on reallocation error (true for all fio_bstr_write).
+ */
 FIO_IFUNC char *fio_bstr_write(char *bstr,
                                const void *restrict src,
                                size_t len);
@@ -2034,7 +2037,7 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
                                      fio_string_realloc_fn reallocate,
                                      const void *raw,
                                      size_t raw_len) {
-  static const uint8_t base32ecncode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  static const uint8_t base32encode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   int r = 0;
   size_t expected = ((raw_len * 8) / 5) + 1;
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
@@ -2048,19 +2051,19 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
     if (bits < 25)
       continue;
     while (bits > 4) {
-      uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+      uint8_t val = base32encode[(31U & (store >> (bits - 5)))];
       dest->buf[dest->len++] = val;
       bits -= 5;
     }
   }
   while (bits > 4) {
-    uint8_t val = base32ecncode[(31U & (store >> (bits - 5)))];
+    uint8_t val = base32encode[(31U & (store >> (bits - 5)))];
     dest->buf[dest->len++] = val;
     bits -= 5;
   }
   if (bits) {
-    // dest->buf[dest->len++] = base32ecncode[store & ((1U << bits) - 1)];
-    dest->buf[dest->len++] = base32ecncode[31U & (store << (5 - bits))];
+    // dest->buf[dest->len++] = base32encode[store & ((1U << bits) - 1)];
+    dest->buf[dest->len++] = base32encode[31U & (store << (5 - bits))];
     dest->buf[dest->len] = '=';
     dest->len += !!((dest->len - expected) % 5);
   }
