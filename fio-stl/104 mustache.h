@@ -1057,7 +1057,7 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
       p->forwards.buf += p->delim.in.len;
       tag = FIO_BUF_INFO2(p->forwards.buf, 0);
       for (;;) {
-        if (p->forwards.buf + p->delim.out.len >= end)
+        if (p->forwards.buf + p->delim.out.len > end)
           goto incomplete_tag_error;
         if (p->forwards.buf[0] == p->delim.out.buf[0] &&
             p->forwards.buf + p->delim.out.len <= end &&
@@ -1076,8 +1076,9 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
         goto empty_tag_error;
       p->forwards.buf += p->delim.out.len;
       p->forwards.len = (size_t)(end - p->forwards.buf);
-      p->dirty |= (unsigned)(p->forwards.buf[0] && p->forwards.buf[0] != '\r' &&
-                             p->forwards.buf[0] != '\n');
+      p->dirty |=
+          (unsigned)(p->forwards.len && p->forwards.buf[0] &&
+                     p->forwards.buf[0] != '\r' && p->forwards.buf[0] != '\n');
       if (p->dirty && p->backwards.len) { /* not stand-alone, add txt */
         fio___mustache_parse_add_text(p, p->backwards);
         p->backwards = FIO_BUF_INFO2((p->backwards.buf + p->backwards.len), 0);
