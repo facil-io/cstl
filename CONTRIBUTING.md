@@ -68,10 +68,6 @@ The `fio-stl.h` header is **Auto-Generated** - do **not** edit it.
 
 Any new features or changes should be made in the individual headers placed in the `./fio-stl` **folder**. This avoids manual edits and ensures consistency during the generation process.
 
-#### Boilerplate for New Modules
-
-There's a template or boilerplate for new modules provided the [`./fio-stl/699 empty module.h`](https://github.com/facil-io/cstl/blob/master/fio-stl/699%20empty%20module.h), which should be used as the starting point for adding any new functionality. This includes the necessary structure and naming conventions for creating new modules within the CSTL.
-
 #### Numbering Scheme for Header Files
 
 The numbering at the beginning of the header filenames serves a dual purpose:
@@ -81,11 +77,13 @@ The numbering at the beginning of the header filenames serves a dual purpose:
 * Feature classification (e.g., core types that require memory allocation are in the 100-199 range while new type templates are placed in the 200-299 range). This numbering ensures that modules are added in the correct sequence and can manage their dependencies efficiently.
 
 
-These are the current numbering ranges:
+These are the current prefix numbering ranges. Modules are ordered by priority and dependency, multiple modules may occupy the same numeral prefix:
 
-* 000-099: core features, ordered by priority and dependency. This may also include non-core helpers and parsers that require no memory allocation.
+* 000-009: core features that require no memory allocation. These may also include non-core helpers and parsers.
 
-* 100-148: non-template / core types and building blocks. This may also include parsers that require memory allocations.
+* 011-099: core features that require memory allocation.
+
+* 100-148: complex / non-template / building blocks. These may also include parsers that require memory allocations.
 
 * 150-198: cryptography and cryptographic tools - these should be considered as fallback elements when a cryptography library is missing.
 

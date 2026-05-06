@@ -87,15 +87,17 @@
 #include "010 mem.h"
 #endif
 
+#ifdef FIO_STR
+#include "011 string core.h"
+#endif
+
 #if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "102 poll api.h"
 #include "102 poll epoll.h"
 #include "102 poll kqueue.h"
 #include "102 poll poll.h"
 #endif
-#ifdef FIO_STR
-#include "102 string core.h"
-#endif
+
 #ifdef FIO_STREAM
 #include "102 stream.h"
 #endif

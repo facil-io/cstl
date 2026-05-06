@@ -11036,840 +11036,6 @@ The following are reserved macro names:
 
 
 -------------------------------------------------------------------------------
-## Basic IO Polling
-
-```c
-#define FIO_POLL
-#include "fio-stl.h"
-```
-
-IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
-
-The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
-
-"One-Shot" means that once a specific event has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file descriptor is waiting on multiple events, only those events that occurred will be removed from the monitored collection.
-
-There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
-
-It is recommended to use the system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
-
-By defining `FIO_POLL`, the following functions will be defined.
-
-**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
-
-### `FIO_POLL` API
-
-
-#### `fio_poll_s`
-
-```c
-typedef struct fio_poll_s fio_poll_s;
-```
-
-The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
-
-#### `fio_poll_init`
-
-```c
-void fio_poll_init(fio_poll_s *p, fio_poll_settings_s settings);
-/* Named arguments using macro. */
-#define fio_poll_init(p, ...) fio_poll_init((p), (fio_poll_settings_s){__VA_ARGS__})
-
-typedef struct {
-  /** callback for when data is available in the incoming buffer. */
-  void (*on_data)(void *udata);
-  /** callback for when the outgoing buffer allows a call to `write`. */
-  void (*on_ready)(void *udata);
-  /** callback for closed connections and / or connections with errors. */
-  void (*on_close)(void *udata);
-} fio_poll_settings_s;
-```
-
-Initializes a polling object, allocating its resources.
-
-The function is shadowed by a macro, allowing it to accept named arguments:
-
-```c
-fio_poll_s poller;
-fio_poll_init(&poller,
-              .on_data = my_on_data_callback,
-              .on_ready = my_on_ready_callback,
-              .on_close = my_on_close_callback);
-```
-
-**Named Arguments:**
-
-| Argument | Type | Description |
-|----------|------|-------------|
-| `on_data` | `void (*)(void *)` | Callback for when data is available in the incoming buffer |
-| `on_ready` | `void (*)(void *)` | Callback for when the outgoing buffer allows a call to `write` |
-| `on_close` | `void (*)(void *)` | Callback for closed connections and/or connections with errors |
-
-**Note**: callbacks that are not provided will default to a no-op function.
-
-#### `fio_poll_destroy`
-
-```c
-void fio_poll_destroy(fio_poll_s *p);
-```
-
-Destroys the polling object, freeing its resources.
-
-**Note**: the monitored file descriptors will remain untouched (possibly open).
-
-#### `fio_poll_monitor`
-
-```c
-int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
-```
-
-Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
-
-Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
-
-On systems where `POLLRDHUP` is supported, it is always monitored for.
-
-Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
-
-Returns -1 on error.
-
-#### `fio_poll_review`
-
-```c
-int fio_poll_review(fio_poll_s *p, size_t timeout);
-```
-
-Reviews if any of the monitored file descriptors has any events.
-
-**Parameters:**
-- `p` - pointer to the polling object
-- `timeout` - timeout in milliseconds
-
-**Returns:** the number of events called.
-
-**Note**: polling is thread safe, but has different effects on different threads. Adding a new file descriptor from one thread while polling in a different thread will not poll that IO until `fio_poll_review` is called again.
-
-#### `fio_poll_forget`
-
-```c
-int fio_poll_forget(fio_poll_s *p, int fd);
-```
-
-Stops monitoring the specified file descriptor even if some of its events hadn't occurred yet.
-
-**Parameters:**
-- `p` - pointer to the polling object
-- `fd` - the file descriptor to stop monitoring
-
-**Returns:** `0` on success, `-1` on error (e.g., if the file descriptor was not being monitored).
-
-#### `fio_poll_close_all`
-
-```c
-void fio_poll_close_all(fio_poll_s *p);
-```
-
-Closes all monitored sockets, calling the `on_close` callback for each.
-
-**Parameters:**
-- `p` - pointer to the polling object
-
-**Note**: this function is only available when using the `poll` engine (`FIO_POLL_ENGINE_POLL`).
-
-#### `fio_poll_engine`
-
-```c
-const char *fio_poll_engine(void);
-```
-
-Returns the system call used for polling as a constant string.
-
-**Returns:** `"poll"`, `"epoll"`, or `"kqueue"` depending on the selected engine (always `"poll"` on Windows).
-
-### `FIO_POLL` Compile Time Macros
-
-#### Engine Selection Macros
-
-Define one of the following before including the library to select the polling engine. If none is defined, the best available engine for the current platform is selected automatically.
-
-```c
-#define FIO_POLL_ENGINE_POLL    /* POSIX poll() / WSAPoll - any platform */
-#define FIO_POLL_ENGINE_EPOLL   /* Linux epoll */
-#define FIO_POLL_ENGINE_KQUEUE  /* BSD/macOS kqueue */
-```
-
-When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses fewer system calls.
-
-Auto-detection order (when no engine is explicitly selected): `epoll` on Linux, `kqueue` on BSD/macOS, `poll` as universal fallback (including Windows).
-
-#### `FIO_POLL_ENGINE_STR`
-
-```c
-#define FIO_POLL_ENGINE_STR "poll"    /* set by FIO_POLL_ENGINE_POLL */
-#define FIO_POLL_ENGINE_STR "epoll"   /* set by FIO_POLL_ENGINE_EPOLL */
-#define FIO_POLL_ENGINE_STR "kqueue"  /* set by FIO_POLL_ENGINE_KQUEUE */
-```
-
-A string macro representing the selected IO multiplexing engine.
-
-#### `FIO_POLL_POSSIBLE_FLAGS`
-
-```c
-#define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
-```
-
-Defines the user flags that IO events recognize. This can be overridden before including the header.
-
-#### `FIO_POLL_MAX_EVENTS`
-
-```c
-#define FIO_POLL_MAX_EVENTS 128 /* or 256 on 32-bit systems */
-```
-
-Defines the maximum number of events per review call. This is relevant only for `epoll` and `kqueue` engines.
-
-The default value is `128` on 64-bit systems and `256` on 32-bit systems.
-
--------------------------------------------------------------------------------
-## Task Queue
-
-```c
-#define FIO_QUEUE
-#include "fio-stl.h"
-```
-
-The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
-
-Since delayed processing is a common task, this queue provides an easy way to schedule and perform delayed tasks.
-
-In addition, a Timer type allows timed events to be scheduled and moved (according to their "due date") to an existing Task Queue.
-
-By defining `FIO_QUEUE`, the following task and timer related helpers are defined:
-
-### Configuration Macros
-
-#### `FIO_QUEUE_TASKS_PER_ALLOC`
-
-```c
-#define FIO_QUEUE_TASKS_PER_ALLOC 168 /* or 338 on 32-bit systems */
-```
-
-Controls the number of tasks per allocation block in the queue's ring buffer. The default value is chosen to fit `fio_queue_s` in one memory page on most systems (168 for 64-bit, 338 for 32-bit).
-
-**Note**: This value cannot exceed 65535.
-
-### Queue Related Types
-
-#### `fio_queue_task_s`
-
-```c
-/** Task information */
-typedef struct {
-  /** The function to call */
-  void (*fn)(void *, void *);
-  /** User opaque data */
-  void *udata1;
-  /** User opaque data */
-  void *udata2;
-} fio_queue_task_s;
-```
-
-The `fio_queue_task_s` type contains information about a delayed task. The information is important for the `fio_queue_push` MACRO, where it is used as named arguments for the task information.
-
-#### `fio_queue_s`
-
-```c
-/** The queue object - should be considered opaque (or, at least, read only). */
-typedef struct {
-  /** task read pointer. */
-  fio___task_ring_s *r;
-  /** task write pointer. */
-  fio___task_ring_s *w;
-  /** the number of tasks waiting to be performed. */
-  uint32_t count;
-  /** global queue lock. */
-  FIO___LOCK_TYPE lock;
-  /** linked lists of consumer threads. */
-  FIO_LIST_NODE consumers;
-  /** main ring buffer associated with the queue. */
-  fio___task_ring_s mem;
-} fio_queue_s;
-```
-
-The `fio_queue_s` object is the queue object.
-
-This object could be placed on the stack or allocated on the heap (using [`fio_queue_new`](#fio_queue_new)).
-
-Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destroy) (if placed on the stack) or [`fio_queue_free`](#fio_queue_free) (if allocated using [`fio_queue_new`](#fio_queue_new)).
-
-### Queue API
-
-#### `fio_queue_init`
-
-```c
-/** Used to initialize a fio_queue_s object. */
-void fio_queue_init(fio_queue_s *q);
-```
-
-#### `fio_queue_destroy`
-
-```c
-void fio_queue_destroy(fio_queue_s *q);
-```
-
-Destroys a queue and re-initializes it, after freeing any used resources.
-
-**Note**:
-When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be re-initialized explicitly before re-used after being destroyed (call `fio_queue_init`).
-
-#### `FIO_QUEUE_STATIC_INIT(queue)`
-
-```c
-#define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  {                                                                            \
-    .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT,               \
-    .consumers = FIO_LIST_INIT((queue).consumers),                             \
-  }
-```
-
-May be used to initialize global, static memory, queues.
-
-**Note**: while the use of `FIO_QUEUE_STATIC_INIT` is possible, this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
-
-**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
-
-#### `fio_queue_new`
-
-```c
-fio_queue_s *fio_queue_new(void);
-```
-
-Creates a new queue object (allocated on the heap).
-
-#### `fio_queue_free`
-
-```c
-void fio_queue_free(fio_queue_s *q);
-```
-
-Frees a queue object after calling fio_queue_destroy.
-
-#### `fio_queue_push`
-
-```c
-int fio_queue_push(fio_queue_s *q, fio_queue_task_s task);
-#define fio_queue_push(q, ...)                                                 \
-  fio_queue_push((q), (fio_queue_task_s){__VA_ARGS__})
-
-```
-
-Pushes a **valid** (non-NULL) task to the queue.
-
-This function is shadowed by the `fio_queue_push` MACRO, allowing named arguments to be used.
-
-For example:
-
-```c
-void tsk(void *, void *);
-fio_queue_s q = FIO_QUEUE_STATIC_INIT(q);
-fio_queue_push(&q, .fn = tsk);
-// ...
-fio_queue_destroy(&q);
-```
-
-Returns 0 if `task.fn == NULL` or if the task was successfully added to the queue.
-
-Returns -1 on error (no memory).
-
-
-#### `fio_queue_push_urgent`
-
-```c
-int fio_queue_push_urgent(fio_queue_s *q, fio_queue_task_s task);
-#define fio_queue_push_urgent(q, ...)                                          \
-  fio_queue_push_urgent((q), (fio_queue_task_s){__VA_ARGS__})
-```
-
-Pushes a task to the head of the queue (LIFO).
-
-Returns -1 on error (no memory).
-
-See [`fio_queue_push`](#fio_queue_push) for details.
-
-#### `fio_queue_pop`
-
-```c
-fio_queue_task_s fio_queue_pop(fio_queue_s *q);
-```
-
-Pops a task from the queue (FIFO).
-
-Returns a NULL task on error (`task.fn == NULL`).
-
-**Note**: The task isn't performed automatically, it's just returned. This is useful for queues that don't necessarily contain callable functions.
-
-#### `fio_queue_perform`
-
-```c
-int fio_queue_perform(fio_queue_s *q);
-```
-
-Pops and performs a task from the queue (FIFO).
-
-Returns -1 on error (queue empty).
-
-#### `fio_queue_perform_all`
-
-```c
-void fio_queue_perform_all(fio_queue_s *q);
-```
-
-Performs all tasks in the queue.
-
-#### `fio_queue_count`
-
-```c
-uint32_t fio_queue_count(fio_queue_s *q);
-```
-
-Returns the number of tasks in the queue.
-
-### Worker Thread API
-
-The queue supports consumer/worker threads that automatically perform tasks as they are added to the queue.
-
-#### `fio_queue_workers_add`
-
-```c
-int fio_queue_workers_add(fio_queue_s *q, size_t count);
-```
-
-Adds worker/consumer threads to perform the jobs in the queue.
-
-**Parameters:**
-- `q` - the queue to add workers to
-- `count` - the number of worker threads to add
-
-**Returns:** `0` on success, `-1` on error (thread creation failed).
-
-**Note**: Worker threads will automatically wake up when new tasks are added to the queue and sleep when the queue is empty.
-
-#### `fio_queue_workers_stop`
-
-```c
-void fio_queue_workers_stop(fio_queue_s *q);
-```
-
-Signals all worker threads to stop performing tasks and terminate.
-
-This function returns immediately without waiting for threads to finish. Use [`fio_queue_workers_join`](#fio_queue_workers_join) to wait for threads to complete.
-
-#### `fio_queue_workers_join`
-
-```c
-void fio_queue_workers_join(fio_queue_s *q);
-```
-
-Signals all worker threads to stop and waits for them to complete.
-
-This function blocks until all worker threads have terminated.
-
-#### `fio_queue_workers_wake`
-
-```c
-void fio_queue_workers_wake(fio_queue_s *q);
-```
-
-Signals all worker threads to wake up and check for new tasks.
-
-**Note**: This is typically called automatically when tasks are pushed to the queue, but can be called manually if needed.
-
-### Timer Related Types
-
-#### `fio_timer_queue_s`
-
-```c
-typedef struct {
-  fio___timer_event_s *next;
-  FIO___LOCK_TYPE lock;
-} fio_timer_queue_s;
-```
-
-The `fio_timer_queue_s` struct should be considered an opaque data type and accessed only using the functions or the initialization MACRO.
-
-To create a `fio_timer_queue_s` on the stack (or statically):
-
-```c
-fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
-```
-
-A timer could be allocated dynamically:
-
-```c
-fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
-FIO_ASSERT_ALLOC(foo_timer);
-*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
-```
-
-#### `FIO_TIMER_QUEUE_INIT`
-
-```c
-#define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO_LOCK_INIT }
-```
-
-This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
-
-**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
-
-### Timer API
-
-#### `fio_timer_schedule`
-
-```c
-void fio_timer_schedule(fio_timer_queue_s *timer_queue,
-                        fio_timer_schedule_args_s args);
-/* Named arguments using macro. */
-#define fio_timer_schedule(timer_queue, ...)                                   \
-  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
-
-typedef struct {
-  /** The timer function. If it returns a non-zero value, the timer stops. */
-  int (*fn)(void *, void *);
-  /** Opaque user data. */
-  void *udata1;
-  /** Opaque user data. */
-  void *udata2;
-  /** Called when the timer is done (finished). */
-  void (*on_finish)(void *, void *);
-  /** Timer interval, in milliseconds. */
-  uint32_t every;
-  /** The number of times the timer should be performed. -1 == infinity. */
-  int32_t repetitions;
-  /** Millisecond at which to start. If missing, filled automatically. */
-  int64_t start_at;
-} fio_timer_schedule_args_s;
-```
-
-Adds a time-bound event to the timer queue.
-
-The function is shadowed by a macro, allowing it to accept named arguments:
-
-```c
-fio_timer_schedule(timer_queue,
-                   .fn = my_timer_callback,
-                   .udata1 = my_data,
-                   .every = 1000,        /* every 1000ms (1 second) */
-                   .repetitions = -1);   /* repeat forever */
-```
-
-**Named Arguments:**
-
-| Argument | Type | Description |
-|----------|------|-------------|
-| `fn` | `int (*)(void *, void *)` | Timer callback. Return non-zero to stop the timer. |
-| `udata1` | `void *` | Opaque user data passed to callbacks |
-| `udata2` | `void *` | Opaque user data passed to callbacks |
-| `on_finish` | `void (*)(void *, void *)` | Called when timer is done/stopped |
-| `every` | `uint32_t` | Timer interval in milliseconds |
-| `repetitions` | `int32_t` | Number of times to repeat; `-1` for infinite |
-| `start_at` | `int64_t` | Start time in milliseconds; `0` uses `fio_time_milli()` |
-
-**Note**: the event will repeat every `every` milliseconds (or the same units as `start_at` and `now`).
-
-**Note**: if the scheduler is busy or the event is otherwise delayed, its next scheduling may compensate for the delay by being scheduled sooner.
-
-#### `fio_timer_push2queue`
-
-```c
-size_t fio_timer_push2queue(fio_queue_s *queue,
-                            fio_timer_queue_s *timer_queue,
-                            int64_t now_in_milliseconds);
-```
-
-Pushes due events from the timer queue to an event queue.
-
-**Parameters:**
-- `queue` - the task queue to push due events to
-- `timer_queue` - the timer queue to check for due events
-- `now_in_milliseconds` - current time in milliseconds; if `0`, `fio_time_milli()` is called automatically
-
-**Returns:** the number of tasks pushed to the queue. A value of `0` indicates no new tasks were scheduled.
-
-**Note**: all the `start_at` values for all the events in the timer queue will be treated as if they use the same units as (and are relative to) `now_in_milliseconds`. By default, this unit should be milliseconds, to allow `now_in_milliseconds` to be zero.
-
-#### `fio_timer_next_at`
-
-```c
-int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
-```
-
-Returns the millisecond at which the next event should occur.
-
-If no timer is due (list is empty), returns the maximum possible value.
-
-**Note**: Unless manually specified, millisecond timers are relative to  `fio_time_milli()`.
-
-
-#### `fio_timer_destroy`
-
-```c
-void fio_timer_destroy(fio_timer_queue_s *timer_queue);
-```
-
-Clears any waiting timer bound tasks.
-
-**Note**:
-
-The timer queue must NEVER be freed when there's a chance that timer tasks are waiting to be performed in a `fio_queue_s`.
-
-This is due to the fact that the tasks may try to reschedule themselves (if they repeat).
-
-**Note 2**:
-When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
-
--------------------------------------------------------------------------------
-## Data Stream Container
-
-```c
-#define FIO_STREAM
-#include "fio-stl.h"
-```
-
-Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
-
-Data Streams offer a way to store / concat different data sources (static strings, dynamic strings, files) as a single data stream. This allows the data to be easily written to an IO target (socket / pipe / file) using the `write` operation.
-
-By defining the macro `FIO_STREAM`, the following macros and functions will be defined.
-
-### Configuration Macros
-
-#### `FIO_STREAM_COPY_PER_PACKET`
-
-```c
-#define FIO_STREAM_COPY_PER_PACKET 98304
-```
-
-When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
-
-This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (98304 bytes).
-
-#### `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`
-
-```c
-#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
-```
-
-If the data added is less than this number of bytes, copying is preferred over referencing for better memory locality. By default, it is set to 116 bytes (or 8 bytes in DEBUG mode).
-
-### Types
-
-#### `fio_stream_s`
-
-```c
-typedef struct {
-  /* do not directly access! */
-  fio_stream_packet_s *next;
-  fio_stream_packet_s **pos;
-  size_t consumed;
-  size_t length;
-} fio_stream_s;
-```
-
-The `fio_stream_s` type should be considered opaque and only accessed through the following API.
-
-#### `fio_stream_packet_s`
-
-The `fio_stream_packet_s` type should be considered opaque and only accessed through the following API.
-
-This type is used to separate data packing from any updates made to the stream object, allowing data packing to be performed concurrently with stream reading / updating (which requires a lock in multi-threaded applications).
-
-### Initialization and Destruction
-
-#### `FIO_STREAM_INIT`
-
-```c
-#define FIO_STREAM_INIT(s)                                                     \
-  { .next = NULL, .pos = &(s).next }
-```
-
-Object initialization macro.
-
-#### `fio_stream_new`
-
-```c
-fio_stream_s *fio_stream_new(void);
-```
-
-Allocates a new object on the heap and initializes its memory.
-
-**Returns:** a pointer to the newly allocated stream, or NULL on allocation failure.
-
-#### `fio_stream_free`
-
-```c
-int fio_stream_free(fio_stream_s *stream);
-```
-
-Frees any internal data AND the object's container!
-
-**Parameters:**
-- `stream` - the stream object to free
-
-**Returns:** 0.
-
-#### `fio_stream_destroy`
-
-```c
-void fio_stream_destroy(fio_stream_s *stream);
-```
-
-Destroys the object, reinitializing its container.
-
-**Parameters:**
-- `stream` - the stream object to destroy
-
-### Stream Information
-
-#### `fio_stream_any`
-
-```c
-uint8_t fio_stream_any(fio_stream_s *stream);
-```
-
-Returns true if there's any data in the stream.
-
-**Parameters:**
-- `stream` - the stream object to check
-
-**Returns:** non-zero if there's data in the stream, 0 otherwise.
-
-**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
-
-#### `fio_stream_length`
-
-```c
-size_t fio_stream_length(fio_stream_s *stream);
-```
-
-Returns the number of bytes waiting in the stream.
-
-**Parameters:**
-- `stream` - the stream object to query
-
-**Returns:** the number of bytes in the stream.
-
-**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
-
-### Packing Data into the Stream
-
-#### `fio_stream_pack_data`
-
-```c
-fio_stream_packet_s *fio_stream_pack_data(void *buf,
-                                          size_t len,
-                                          size_t offset,
-                                          uint8_t copy_buffer,
-                                          void (*dealloc_func)(void *));
-```
-
-Packs data into a `fio_stream_packet_s` container.
-
-**Parameters:**
-- `buf` - pointer to the data buffer
-- `len` - length of the data in bytes
-- `offset` - offset within the buffer to start from
-- `copy_buffer` - if non-zero, the data will be copied; otherwise, the buffer is referenced
-- `dealloc_func` - function to call to free the buffer when done (can be NULL)
-
-**Returns:** a pointer to the packet, or NULL on error.
-
-**Note**: can be performed concurrently with other stream operations. If `copy_buffer` is set or if `len` is less than `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`, the data will be copied. Large data blocks may be split into multiple packets based on `FIO_STREAM_COPY_PER_PACKET`. If `dealloc_func` is provided, it will be called even on error.
-
-#### `fio_stream_pack_fd`
-
-```c
-fio_stream_packet_s *fio_stream_pack_fd(int fd,
-                                        size_t len,
-                                        size_t offset,
-                                        uint8_t keep_open);
-```
-
-Packs a file descriptor into a `fio_stream_packet_s` container.
-
-**Parameters:**
-- `fd` - the file descriptor to pack
-- `len` - number of bytes to read from the file (0 to auto-detect from file size)
-- `offset` - offset within the file to start reading from
-- `keep_open` - if non-zero, the file descriptor will NOT be closed when the packet is freed
-
-**Returns:** a pointer to the packet, or NULL on error.
-
-**Note**: if `len` is 0, the file size will be queried and `len` will be set to `file_size - offset`. If `keep_open` is 0 and an error occurs, the file descriptor will be closed.
-
-#### `fio_stream_add`
-
-```c
-void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
-```
-
-Adds a packet to the stream.
-
-**Parameters:**
-- `stream` - the stream to add the packet to
-- `packet` - the packet to add
-
-**Note**: this isn't thread safe. If `stream` or `packet` is NULL, the packet will be freed.
-
-#### `fio_stream_pack_free`
-
-```c
-void fio_stream_pack_free(fio_stream_packet_s *packet);
-```
-
-Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never added to the stream using `fio_stream_add`.
-
-**Parameters:**
-- `packet` - the packet to free
-
-### Reading / Consuming Data from the Stream
-
-#### `fio_stream_read`
-
-```c
-void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
-```
-
-Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance)).
-
-`buf` MUST point to a buffer with - at least - `len` bytes. This is required in case the packed data is fragmented or references a file and needs to be copied to an available buffer.
-
-On error, or if the stream is empty, `buf` will be set to NULL and `len` will be set to zero.
-
-Otherwise, `buf` may retain the same value or it may point directly to a memory address within the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
-
-**Parameters:**
-- `stream` - the stream to read from
-- `buf` - pointer to a buffer pointer (will be updated)
-- `len` - pointer to the buffer length (will be updated)
-
-**Note**: this isn't thread safe.
-
-#### `fio_stream_advance`
-
-```c
-void fio_stream_advance(fio_stream_s *stream, size_t len);
-```
-
-Advances the Stream, so the first `len` bytes are marked as consumed.
-
-**Parameters:**
-- `stream` - the stream to advance
-- `len` - number of bytes to mark as consumed
-
-**Note**: this isn't thread safe.
-
--------------------------------------------------------------------------------
 ## Binary Safe Core String Helpers
 
 ```c
@@ -12848,6 +12014,840 @@ void map_keystr_example(void) {
   umap_destroy(&map);
 }
 ```
+-------------------------------------------------------------------------------
+## Basic IO Polling
+
+```c
+#define FIO_POLL
+#include "fio-stl.h"
+```
+
+IO polling using `kqueue`, `epoll` or the portable `poll` POSIX function is another area that's of common need and where many solutions are required.
+
+The facil.io standard library provides a persistent polling container for evented management of (small) IO (file descriptor) collections using the "one-shot" model.
+
+"One-Shot" means that once a specific event has "fired" (occurred), it will no longer be monitored (unless re-submitted). If the same file descriptor is waiting on multiple events, only those events that occurred will be removed from the monitored collection.
+
+There's no real limit on the number of file descriptors that can be monitored, except possible system limits that the system may impose on the `kqueue`/`epoll`/`poll` system calls. However, performance will degrade significantly as the ratio between inactive vs. active IO objects being monitored increases when using the `poll` system call.
+
+It is recommended to use the system specific polling "engine" (`epoll` / `kqueue`) if polling thousands of persistent file descriptors.
+
+By defining `FIO_POLL`, the following functions will be defined.
+
+**Note**: the same type and range limitations that apply to the Sockets implementation on Windows apply to the `poll` implementation.
+
+### `FIO_POLL` API
+
+
+#### `fio_poll_s`
+
+```c
+typedef struct fio_poll_s fio_poll_s;
+```
+
+The `fio_poll_s` type should be considered opaque and should **not** be accessed directly.
+
+#### `fio_poll_init`
+
+```c
+void fio_poll_init(fio_poll_s *p, fio_poll_settings_s settings);
+/* Named arguments using macro. */
+#define fio_poll_init(p, ...) fio_poll_init((p), (fio_poll_settings_s){__VA_ARGS__})
+
+typedef struct {
+  /** callback for when data is available in the incoming buffer. */
+  void (*on_data)(void *udata);
+  /** callback for when the outgoing buffer allows a call to `write`. */
+  void (*on_ready)(void *udata);
+  /** callback for closed connections and / or connections with errors. */
+  void (*on_close)(void *udata);
+} fio_poll_settings_s;
+```
+
+Initializes a polling object, allocating its resources.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_poll_s poller;
+fio_poll_init(&poller,
+              .on_data = my_on_data_callback,
+              .on_ready = my_on_ready_callback,
+              .on_close = my_on_close_callback);
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `on_data` | `void (*)(void *)` | Callback for when data is available in the incoming buffer |
+| `on_ready` | `void (*)(void *)` | Callback for when the outgoing buffer allows a call to `write` |
+| `on_close` | `void (*)(void *)` | Callback for closed connections and/or connections with errors |
+
+**Note**: callbacks that are not provided will default to a no-op function.
+
+#### `fio_poll_destroy`
+
+```c
+void fio_poll_destroy(fio_poll_s *p);
+```
+
+Destroys the polling object, freeing its resources.
+
+**Note**: the monitored file descriptors will remain untouched (possibly open).
+
+#### `fio_poll_monitor`
+
+```c
+int fio_poll_monitor(fio_poll_s *p, int fd, void *udata, unsigned short flags);
+```
+
+Adds a file descriptor to be monitored, adds events to be monitored or updates the monitored file's `udata`.
+
+Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might be ignored.
+
+On systems where `POLLRDHUP` is supported, it is always monitored for.
+
+Monitoring mode is always one-shot. If an event if fired, it is removed from the monitoring state.
+
+Returns -1 on error.
+
+#### `fio_poll_review`
+
+```c
+int fio_poll_review(fio_poll_s *p, size_t timeout);
+```
+
+Reviews if any of the monitored file descriptors has any events.
+
+**Parameters:**
+- `p` - pointer to the polling object
+- `timeout` - timeout in milliseconds
+
+**Returns:** the number of events called.
+
+**Note**: polling is thread safe, but has different effects on different threads. Adding a new file descriptor from one thread while polling in a different thread will not poll that IO until `fio_poll_review` is called again.
+
+#### `fio_poll_forget`
+
+```c
+int fio_poll_forget(fio_poll_s *p, int fd);
+```
+
+Stops monitoring the specified file descriptor even if some of its events hadn't occurred yet.
+
+**Parameters:**
+- `p` - pointer to the polling object
+- `fd` - the file descriptor to stop monitoring
+
+**Returns:** `0` on success, `-1` on error (e.g., if the file descriptor was not being monitored).
+
+#### `fio_poll_close_all`
+
+```c
+void fio_poll_close_all(fio_poll_s *p);
+```
+
+Closes all monitored sockets, calling the `on_close` callback for each.
+
+**Parameters:**
+- `p` - pointer to the polling object
+
+**Note**: this function is only available when using the `poll` engine (`FIO_POLL_ENGINE_POLL`).
+
+#### `fio_poll_engine`
+
+```c
+const char *fio_poll_engine(void);
+```
+
+Returns the system call used for polling as a constant string.
+
+**Returns:** `"poll"`, `"epoll"`, or `"kqueue"` depending on the selected engine (always `"poll"` on Windows).
+
+### `FIO_POLL` Compile Time Macros
+
+#### Engine Selection Macros
+
+Define one of the following before including the library to select the polling engine. If none is defined, the best available engine for the current platform is selected automatically.
+
+```c
+#define FIO_POLL_ENGINE_POLL    /* POSIX poll() / WSAPoll - any platform */
+#define FIO_POLL_ENGINE_EPOLL   /* Linux epoll */
+#define FIO_POLL_ENGINE_KQUEUE  /* BSD/macOS kqueue */
+```
+
+When multiplexing a small number of IO sockets, using the `poll` engine might be faster, as it uses fewer system calls.
+
+Auto-detection order (when no engine is explicitly selected): `epoll` on Linux, `kqueue` on BSD/macOS, `poll` as universal fallback (including Windows).
+
+#### `FIO_POLL_ENGINE_STR`
+
+```c
+#define FIO_POLL_ENGINE_STR "poll"    /* set by FIO_POLL_ENGINE_POLL */
+#define FIO_POLL_ENGINE_STR "epoll"   /* set by FIO_POLL_ENGINE_EPOLL */
+#define FIO_POLL_ENGINE_STR "kqueue"  /* set by FIO_POLL_ENGINE_KQUEUE */
+```
+
+A string macro representing the selected IO multiplexing engine.
+
+#### `FIO_POLL_POSSIBLE_FLAGS`
+
+```c
+#define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
+```
+
+Defines the user flags that IO events recognize. This can be overridden before including the header.
+
+#### `FIO_POLL_MAX_EVENTS`
+
+```c
+#define FIO_POLL_MAX_EVENTS 128 /* or 256 on 32-bit systems */
+```
+
+Defines the maximum number of events per review call. This is relevant only for `epoll` and `kqueue` engines.
+
+The default value is `128` on 64-bit systems and `256` on 32-bit systems.
+
+-------------------------------------------------------------------------------
+## Task Queue
+
+```c
+#define FIO_QUEUE
+#include "fio-stl.h"
+```
+
+The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
+
+Since delayed processing is a common task, this queue provides an easy way to schedule and perform delayed tasks.
+
+In addition, a Timer type allows timed events to be scheduled and moved (according to their "due date") to an existing Task Queue.
+
+By defining `FIO_QUEUE`, the following task and timer related helpers are defined:
+
+### Configuration Macros
+
+#### `FIO_QUEUE_TASKS_PER_ALLOC`
+
+```c
+#define FIO_QUEUE_TASKS_PER_ALLOC 168 /* or 338 on 32-bit systems */
+```
+
+Controls the number of tasks per allocation block in the queue's ring buffer. The default value is chosen to fit `fio_queue_s` in one memory page on most systems (168 for 64-bit, 338 for 32-bit).
+
+**Note**: This value cannot exceed 65535.
+
+### Queue Related Types
+
+#### `fio_queue_task_s`
+
+```c
+/** Task information */
+typedef struct {
+  /** The function to call */
+  void (*fn)(void *, void *);
+  /** User opaque data */
+  void *udata1;
+  /** User opaque data */
+  void *udata2;
+} fio_queue_task_s;
+```
+
+The `fio_queue_task_s` type contains information about a delayed task. The information is important for the `fio_queue_push` MACRO, where it is used as named arguments for the task information.
+
+#### `fio_queue_s`
+
+```c
+/** The queue object - should be considered opaque (or, at least, read only). */
+typedef struct {
+  /** task read pointer. */
+  fio___task_ring_s *r;
+  /** task write pointer. */
+  fio___task_ring_s *w;
+  /** the number of tasks waiting to be performed. */
+  uint32_t count;
+  /** global queue lock. */
+  FIO___LOCK_TYPE lock;
+  /** linked lists of consumer threads. */
+  FIO_LIST_NODE consumers;
+  /** main ring buffer associated with the queue. */
+  fio___task_ring_s mem;
+} fio_queue_s;
+```
+
+The `fio_queue_s` object is the queue object.
+
+This object could be placed on the stack or allocated on the heap (using [`fio_queue_new`](#fio_queue_new)).
+
+Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destroy) (if placed on the stack) or [`fio_queue_free`](#fio_queue_free) (if allocated using [`fio_queue_new`](#fio_queue_new)).
+
+### Queue API
+
+#### `fio_queue_init`
+
+```c
+/** Used to initialize a fio_queue_s object. */
+void fio_queue_init(fio_queue_s *q);
+```
+
+#### `fio_queue_destroy`
+
+```c
+void fio_queue_destroy(fio_queue_s *q);
+```
+
+Destroys a queue and re-initializes it, after freeing any used resources.
+
+**Note**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be re-initialized explicitly before re-used after being destroyed (call `fio_queue_init`).
+
+#### `FIO_QUEUE_STATIC_INIT(queue)`
+
+```c
+#define FIO_QUEUE_STATIC_INIT(queue)                                           \
+  {                                                                            \
+    .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT,               \
+    .consumers = FIO_LIST_INIT((queue).consumers),                             \
+  }
+```
+
+May be used to initialize global, static memory, queues.
+
+**Note**: while the use of `FIO_QUEUE_STATIC_INIT` is possible, this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
+
+**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
+
+#### `fio_queue_new`
+
+```c
+fio_queue_s *fio_queue_new(void);
+```
+
+Creates a new queue object (allocated on the heap).
+
+#### `fio_queue_free`
+
+```c
+void fio_queue_free(fio_queue_s *q);
+```
+
+Frees a queue object after calling fio_queue_destroy.
+
+#### `fio_queue_push`
+
+```c
+int fio_queue_push(fio_queue_s *q, fio_queue_task_s task);
+#define fio_queue_push(q, ...)                                                 \
+  fio_queue_push((q), (fio_queue_task_s){__VA_ARGS__})
+
+```
+
+Pushes a **valid** (non-NULL) task to the queue.
+
+This function is shadowed by the `fio_queue_push` MACRO, allowing named arguments to be used.
+
+For example:
+
+```c
+void tsk(void *, void *);
+fio_queue_s q = FIO_QUEUE_STATIC_INIT(q);
+fio_queue_push(&q, .fn = tsk);
+// ...
+fio_queue_destroy(&q);
+```
+
+Returns 0 if `task.fn == NULL` or if the task was successfully added to the queue.
+
+Returns -1 on error (no memory).
+
+
+#### `fio_queue_push_urgent`
+
+```c
+int fio_queue_push_urgent(fio_queue_s *q, fio_queue_task_s task);
+#define fio_queue_push_urgent(q, ...)                                          \
+  fio_queue_push_urgent((q), (fio_queue_task_s){__VA_ARGS__})
+```
+
+Pushes a task to the head of the queue (LIFO).
+
+Returns -1 on error (no memory).
+
+See [`fio_queue_push`](#fio_queue_push) for details.
+
+#### `fio_queue_pop`
+
+```c
+fio_queue_task_s fio_queue_pop(fio_queue_s *q);
+```
+
+Pops a task from the queue (FIFO).
+
+Returns a NULL task on error (`task.fn == NULL`).
+
+**Note**: The task isn't performed automatically, it's just returned. This is useful for queues that don't necessarily contain callable functions.
+
+#### `fio_queue_perform`
+
+```c
+int fio_queue_perform(fio_queue_s *q);
+```
+
+Pops and performs a task from the queue (FIFO).
+
+Returns -1 on error (queue empty).
+
+#### `fio_queue_perform_all`
+
+```c
+void fio_queue_perform_all(fio_queue_s *q);
+```
+
+Performs all tasks in the queue.
+
+#### `fio_queue_count`
+
+```c
+uint32_t fio_queue_count(fio_queue_s *q);
+```
+
+Returns the number of tasks in the queue.
+
+### Worker Thread API
+
+The queue supports consumer/worker threads that automatically perform tasks as they are added to the queue.
+
+#### `fio_queue_workers_add`
+
+```c
+int fio_queue_workers_add(fio_queue_s *q, size_t count);
+```
+
+Adds worker/consumer threads to perform the jobs in the queue.
+
+**Parameters:**
+- `q` - the queue to add workers to
+- `count` - the number of worker threads to add
+
+**Returns:** `0` on success, `-1` on error (thread creation failed).
+
+**Note**: Worker threads will automatically wake up when new tasks are added to the queue and sleep when the queue is empty.
+
+#### `fio_queue_workers_stop`
+
+```c
+void fio_queue_workers_stop(fio_queue_s *q);
+```
+
+Signals all worker threads to stop performing tasks and terminate.
+
+This function returns immediately without waiting for threads to finish. Use [`fio_queue_workers_join`](#fio_queue_workers_join) to wait for threads to complete.
+
+#### `fio_queue_workers_join`
+
+```c
+void fio_queue_workers_join(fio_queue_s *q);
+```
+
+Signals all worker threads to stop and waits for them to complete.
+
+This function blocks until all worker threads have terminated.
+
+#### `fio_queue_workers_wake`
+
+```c
+void fio_queue_workers_wake(fio_queue_s *q);
+```
+
+Signals all worker threads to wake up and check for new tasks.
+
+**Note**: This is typically called automatically when tasks are pushed to the queue, but can be called manually if needed.
+
+### Timer Related Types
+
+#### `fio_timer_queue_s`
+
+```c
+typedef struct {
+  fio___timer_event_s *next;
+  FIO___LOCK_TYPE lock;
+} fio_timer_queue_s;
+```
+
+The `fio_timer_queue_s` struct should be considered an opaque data type and accessed only using the functions or the initialization MACRO.
+
+To create a `fio_timer_queue_s` on the stack (or statically):
+
+```c
+fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
+```
+
+A timer could be allocated dynamically:
+
+```c
+fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
+FIO_ASSERT_ALLOC(foo_timer);
+*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
+```
+
+#### `FIO_TIMER_QUEUE_INIT`
+
+```c
+#define FIO_TIMER_QUEUE_INIT                                                   \
+  { .lock = FIO_LOCK_INIT }
+```
+
+This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
+
+**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
+
+### Timer API
+
+#### `fio_timer_schedule`
+
+```c
+void fio_timer_schedule(fio_timer_queue_s *timer_queue,
+                        fio_timer_schedule_args_s args);
+/* Named arguments using macro. */
+#define fio_timer_schedule(timer_queue, ...)                                   \
+  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
+
+typedef struct {
+  /** The timer function. If it returns a non-zero value, the timer stops. */
+  int (*fn)(void *, void *);
+  /** Opaque user data. */
+  void *udata1;
+  /** Opaque user data. */
+  void *udata2;
+  /** Called when the timer is done (finished). */
+  void (*on_finish)(void *, void *);
+  /** Timer interval, in milliseconds. */
+  uint32_t every;
+  /** The number of times the timer should be performed. -1 == infinity. */
+  int32_t repetitions;
+  /** Millisecond at which to start. If missing, filled automatically. */
+  int64_t start_at;
+} fio_timer_schedule_args_s;
+```
+
+Adds a time-bound event to the timer queue.
+
+The function is shadowed by a macro, allowing it to accept named arguments:
+
+```c
+fio_timer_schedule(timer_queue,
+                   .fn = my_timer_callback,
+                   .udata1 = my_data,
+                   .every = 1000,        /* every 1000ms (1 second) */
+                   .repetitions = -1);   /* repeat forever */
+```
+
+**Named Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `fn` | `int (*)(void *, void *)` | Timer callback. Return non-zero to stop the timer. |
+| `udata1` | `void *` | Opaque user data passed to callbacks |
+| `udata2` | `void *` | Opaque user data passed to callbacks |
+| `on_finish` | `void (*)(void *, void *)` | Called when timer is done/stopped |
+| `every` | `uint32_t` | Timer interval in milliseconds |
+| `repetitions` | `int32_t` | Number of times to repeat; `-1` for infinite |
+| `start_at` | `int64_t` | Start time in milliseconds; `0` uses `fio_time_milli()` |
+
+**Note**: the event will repeat every `every` milliseconds (or the same units as `start_at` and `now`).
+
+**Note**: if the scheduler is busy or the event is otherwise delayed, its next scheduling may compensate for the delay by being scheduled sooner.
+
+#### `fio_timer_push2queue`
+
+```c
+size_t fio_timer_push2queue(fio_queue_s *queue,
+                            fio_timer_queue_s *timer_queue,
+                            int64_t now_in_milliseconds);
+```
+
+Pushes due events from the timer queue to an event queue.
+
+**Parameters:**
+- `queue` - the task queue to push due events to
+- `timer_queue` - the timer queue to check for due events
+- `now_in_milliseconds` - current time in milliseconds; if `0`, `fio_time_milli()` is called automatically
+
+**Returns:** the number of tasks pushed to the queue. A value of `0` indicates no new tasks were scheduled.
+
+**Note**: all the `start_at` values for all the events in the timer queue will be treated as if they use the same units as (and are relative to) `now_in_milliseconds`. By default, this unit should be milliseconds, to allow `now_in_milliseconds` to be zero.
+
+#### `fio_timer_next_at`
+
+```c
+int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
+```
+
+Returns the millisecond at which the next event should occur.
+
+If no timer is due (list is empty), returns the maximum possible value.
+
+**Note**: Unless manually specified, millisecond timers are relative to  `fio_time_milli()`.
+
+
+#### `fio_timer_destroy`
+
+```c
+void fio_timer_destroy(fio_timer_queue_s *timer_queue);
+```
+
+Clears any waiting timer bound tasks.
+
+**Note**:
+
+The timer queue must NEVER be freed when there's a chance that timer tasks are waiting to be performed in a `fio_queue_s`.
+
+This is due to the fact that the tasks may try to reschedule themselves (if they repeat).
+
+**Note 2**:
+When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
+
+-------------------------------------------------------------------------------
+## Data Stream Container
+
+```c
+#define FIO_STREAM
+#include "fio-stl.h"
+```
+
+Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
+
+Data Streams offer a way to store / concat different data sources (static strings, dynamic strings, files) as a single data stream. This allows the data to be easily written to an IO target (socket / pipe / file) using the `write` operation.
+
+By defining the macro `FIO_STREAM`, the following macros and functions will be defined.
+
+### Configuration Macros
+
+#### `FIO_STREAM_COPY_PER_PACKET`
+
+```c
+#define FIO_STREAM_COPY_PER_PACKET 98304
+```
+
+When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
+
+This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (98304 bytes).
+
+#### `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`
+
+```c
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
+```
+
+If the data added is less than this number of bytes, copying is preferred over referencing for better memory locality. By default, it is set to 116 bytes (or 8 bytes in DEBUG mode).
+
+### Types
+
+#### `fio_stream_s`
+
+```c
+typedef struct {
+  /* do not directly access! */
+  fio_stream_packet_s *next;
+  fio_stream_packet_s **pos;
+  size_t consumed;
+  size_t length;
+} fio_stream_s;
+```
+
+The `fio_stream_s` type should be considered opaque and only accessed through the following API.
+
+#### `fio_stream_packet_s`
+
+The `fio_stream_packet_s` type should be considered opaque and only accessed through the following API.
+
+This type is used to separate data packing from any updates made to the stream object, allowing data packing to be performed concurrently with stream reading / updating (which requires a lock in multi-threaded applications).
+
+### Initialization and Destruction
+
+#### `FIO_STREAM_INIT`
+
+```c
+#define FIO_STREAM_INIT(s)                                                     \
+  { .next = NULL, .pos = &(s).next }
+```
+
+Object initialization macro.
+
+#### `fio_stream_new`
+
+```c
+fio_stream_s *fio_stream_new(void);
+```
+
+Allocates a new object on the heap and initializes its memory.
+
+**Returns:** a pointer to the newly allocated stream, or NULL on allocation failure.
+
+#### `fio_stream_free`
+
+```c
+int fio_stream_free(fio_stream_s *stream);
+```
+
+Frees any internal data AND the object's container!
+
+**Parameters:**
+- `stream` - the stream object to free
+
+**Returns:** 0.
+
+#### `fio_stream_destroy`
+
+```c
+void fio_stream_destroy(fio_stream_s *stream);
+```
+
+Destroys the object, reinitializing its container.
+
+**Parameters:**
+- `stream` - the stream object to destroy
+
+### Stream Information
+
+#### `fio_stream_any`
+
+```c
+uint8_t fio_stream_any(fio_stream_s *stream);
+```
+
+Returns true if there's any data in the stream.
+
+**Parameters:**
+- `stream` - the stream object to check
+
+**Returns:** non-zero if there's data in the stream, 0 otherwise.
+
+**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
+
+#### `fio_stream_length`
+
+```c
+size_t fio_stream_length(fio_stream_s *stream);
+```
+
+Returns the number of bytes waiting in the stream.
+
+**Parameters:**
+- `stream` - the stream object to query
+
+**Returns:** the number of bytes in the stream.
+
+**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
+
+### Packing Data into the Stream
+
+#### `fio_stream_pack_data`
+
+```c
+fio_stream_packet_s *fio_stream_pack_data(void *buf,
+                                          size_t len,
+                                          size_t offset,
+                                          uint8_t copy_buffer,
+                                          void (*dealloc_func)(void *));
+```
+
+Packs data into a `fio_stream_packet_s` container.
+
+**Parameters:**
+- `buf` - pointer to the data buffer
+- `len` - length of the data in bytes
+- `offset` - offset within the buffer to start from
+- `copy_buffer` - if non-zero, the data will be copied; otherwise, the buffer is referenced
+- `dealloc_func` - function to call to free the buffer when done (can be NULL)
+
+**Returns:** a pointer to the packet, or NULL on error.
+
+**Note**: can be performed concurrently with other stream operations. If `copy_buffer` is set or if `len` is less than `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`, the data will be copied. Large data blocks may be split into multiple packets based on `FIO_STREAM_COPY_PER_PACKET`. If `dealloc_func` is provided, it will be called even on error.
+
+#### `fio_stream_pack_fd`
+
+```c
+fio_stream_packet_s *fio_stream_pack_fd(int fd,
+                                        size_t len,
+                                        size_t offset,
+                                        uint8_t keep_open);
+```
+
+Packs a file descriptor into a `fio_stream_packet_s` container.
+
+**Parameters:**
+- `fd` - the file descriptor to pack
+- `len` - number of bytes to read from the file (0 to auto-detect from file size)
+- `offset` - offset within the file to start reading from
+- `keep_open` - if non-zero, the file descriptor will NOT be closed when the packet is freed
+
+**Returns:** a pointer to the packet, or NULL on error.
+
+**Note**: if `len` is 0, the file size will be queried and `len` will be set to `file_size - offset`. If `keep_open` is 0 and an error occurs, the file descriptor will be closed.
+
+#### `fio_stream_add`
+
+```c
+void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
+```
+
+Adds a packet to the stream.
+
+**Parameters:**
+- `stream` - the stream to add the packet to
+- `packet` - the packet to add
+
+**Note**: this isn't thread safe. If `stream` or `packet` is NULL, the packet will be freed.
+
+#### `fio_stream_pack_free`
+
+```c
+void fio_stream_pack_free(fio_stream_packet_s *packet);
+```
+
+Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never added to the stream using `fio_stream_add`.
+
+**Parameters:**
+- `packet` - the packet to free
+
+### Reading / Consuming Data from the Stream
+
+#### `fio_stream_read`
+
+```c
+void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
+```
+
+Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance)).
+
+`buf` MUST point to a buffer with - at least - `len` bytes. This is required in case the packed data is fragmented or references a file and needs to be copied to an available buffer.
+
+On error, or if the stream is empty, `buf` will be set to NULL and `len` will be set to zero.
+
+Otherwise, `buf` may retain the same value or it may point directly to a memory address within the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
+
+**Parameters:**
+- `stream` - the stream to read from
+- `buf` - pointer to a buffer pointer (will be updated)
+- `len` - pointer to the buffer length (will be updated)
+
+**Note**: this isn't thread safe.
+
+#### `fio_stream_advance`
+
+```c
+void fio_stream_advance(fio_stream_s *stream, size_t len);
+```
+
+Advances the Stream, so the first `len` bytes are marked as consumed.
+
+**Parameters:**
+- `stream` - the stream to advance
+- `len` - number of bytes to mark as consumed
+
+**Note**: this isn't thread safe.
+
 -------------------------------------------------------------------------------
 ## Mustache Template Engine
 
