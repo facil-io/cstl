@@ -66,11 +66,11 @@ SFUNC void fio_ed25519_public_key(uint8_t public_key[32],
  * The signature is 64 bytes and is deterministic (same message + key = same
  * signature).
  */
-SFUNC void fio_ed25519_sign(uint8_t signature[64],
-                            const void *message,
-                            size_t len,
-                            const uint8_t secret_key[32],
-                            const uint8_t public_key[32]);
+SFUNC int fio_ed25519_sign(uint8_t signature[64],
+                           const void *message,
+                           size_t len,
+                           const uint8_t secret_key[32],
+                           const uint8_t public_key[32]);
 
 /**
  * Verifies an Ed25519 signature.
@@ -2049,11 +2049,14 @@ SFUNC void fio_ed25519_public_key(uint8_t public_key[32],
   fio___ge_p3_tobytes(public_key, pk);
 }
 
-SFUNC void fio_ed25519_sign(uint8_t signature[64],
-                            const void *message,
-                            size_t len,
-                            const uint8_t secret_key[32],
-                            const uint8_t public_key[32]) {
+SFUNC int fio_ed25519_sign(uint8_t signature[64],
+                           const void *message,
+                           size_t len,
+                           const uint8_t secret_key[32],
+                           const uint8_t public_key[32]) {
+  if (!signature || !secret_key || !public_key || (!message && len))
+    return -1;
+
   /* hash secret key */
   fio_u512 h = fio_sha512(secret_key, 32);
 
@@ -2088,6 +2091,7 @@ SFUNC void fio_ed25519_sign(uint8_t signature[64],
 
   /* s = (r + k * h) mod l */
   fio___sc_muladd(signature + 32, r, k, h.u8);
+  return 0;
 }
 
 SFUNC int fio_ed25519_verify(const uint8_t signature[64],

@@ -11706,6 +11706,8 @@ To create a new String simply write to `NULL` and a new `char *` pointer will be
 
 All `fio_bstr` functions that mutate the string return a pointer to the new string (**make sure to update the pointer!**).
 
+Returns the same pointer if out of memory or reallocation wasn't possible.
+
 The pointer should be freed using `fio_bstr_free`. i.e.:
 
 ```c
@@ -11799,7 +11801,7 @@ char *fio_bstr_reserve(char *bstr, size_t len);
 
 Reserves `len` bytes for future `write` operations (used to minimize realloc).
 
-Returns the (possibly updated) `fio_bstr` pointer.
+Returns the (possibly updated) `fio_bstr` pointer. Returns the same point if out of memory or reallocation wasn't possible.
 
 #### `fio_bstr_info`
 

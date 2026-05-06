@@ -1415,14 +1415,14 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
 
   for (int attempts = 0; attempts < 100; ++attempts) {
     /* Generate random k */
-    do {
-      fio_rand_bytes(k_bytes, 32);
-    } while (!fio_buf2u64u(k_bytes) || !fio_buf2u64u(k_bytes + 8) ||
-             !fio_buf2u64u(k_bytes + 16) || !fio_buf2u64u(k_bytes + 24));
+    fio_rand_bytes(k_bytes, 32);
     fio___p256_scalar_from_bytes(k, k_bytes);
+    k[3] >>= (k[3] > FIO___P256_N[3]);
+    k[2] >>= (k[2] >= FIO___P256_N[2]);
+    k[3] += !k[3];
 
-    /* Ensure 0 < k < n */
-    if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k))
+    /* Ensure 0 < k < n - should be impossible... but just in case I'm wrong */
+    if (fio___p256_scalar_gte_n(k))
       continue;
 
     /* Compute R = k * G */
