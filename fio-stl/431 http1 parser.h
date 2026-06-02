@@ -558,7 +558,7 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
 
   char *eol = buf->buf;
   size_t expected = fio_atol16u(&eol); /* never overflows, EOL validated */
-  if (eol == buf->buf)
+  if (eol == buf->buf || expected > 0x0FFFFFFF) /* cap expected */
     return -1;
   eol += (eol[0] == '\r');
   if (eol >= buf->buf + buf->len)

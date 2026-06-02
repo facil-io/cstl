@@ -8208,6 +8208,158 @@ The facil.io JSON parser supports several extensions beyond strict JSON:
 - Trailing commas: `[1, 2, 3,]` and `{"a": 1,}`
 
 -------------------------------------------------------------------------------
+## Markdown / GFM Callback Parser
+
+```c
+#define FIO_MARKDOWN
+#include "fio-stl.h"
+```
+
+`FIO_MARKDOWN` provides a non-streaming, zero-copy, callback-based Markdown / GFM parser. It builds no AST, performs no rendering, does not accumulate output for the caller, and performs no heap allocation.
+
+The parser accepts a complete `fio_buf_info_s` source buffer and emits block / inline events whose slices point into the original buffer wherever practical. Reference definitions are scanned lazily only when a reference-style link is encountered; the most recent lookup is cached.
+
+### Configuration Macros
+
+- `FIO_MARKDOWN_MAX_DEPTH` — maximum inline recursion / nested container depth. Default: `64`.
+- `FIO_MARKDOWN_MAX_TABLE_COLUMNS` — maximum GFM table column alignments cached on the stack. Default: `64`.
+
+### Error Codes
+
+Negative `err` values reported to `on_error` are reserved for parser-generated errors:
+
+- `FIO_MD_ERR_GENERIC` (`-1`) — generic parser error.
+- `FIO_MD_ERR_DEPTH` (`-2`) — nesting exceeded `FIO_MARKDOWN_MAX_DEPTH`.
+- `FIO_MD_ERR_INPUT` (`-3`) — invalid parser input.
+
+Positive `err` values are reserved for caller callbacks. If an event callback returns non-zero, that exact value is forwarded to `on_error`.
+
+### Block Events
+
+```c
+typedef struct {
+  fio_buf_info_s source;
+  fio_buf_info_s content;
+  fio_buf_info_s marker;
+  fio_buf_info_s info;
+  uint32_t list_start;
+  uint16_t columns;
+  uint16_t column;
+  uint8_t type;
+  uint8_t heading_level;
+  uint8_t flags;
+  uint8_t align;
+} fio_md_block_s;
+```
+
+`type` uses `FIO_MD_BLOCK_*` values. `align` uses `FIO_MD_ALIGN_*` values.
+
+Supported block types:
+
+- `FIO_MD_BLOCK_DOCUMENT`
+- `FIO_MD_BLOCK_PARAGRAPH`
+- `FIO_MD_BLOCK_HEADING` for ATX and setext headings (`heading_level` 1..6)
+- `FIO_MD_BLOCK_THEMATIC_BREAK`
+- `FIO_MD_BLOCK_BLOCK_QUOTE`
+- `FIO_MD_BLOCK_LIST_UNORDERED`
+- `FIO_MD_BLOCK_LIST_ORDERED`
+- `FIO_MD_BLOCK_LIST_ITEM`
+- `FIO_MD_BLOCK_CODE_INDENTED`
+- `FIO_MD_BLOCK_CODE_FENCED`
+- `FIO_MD_BLOCK_HTML`
+- `FIO_MD_BLOCK_TABLE`
+- `FIO_MD_BLOCK_TABLE_ROW`
+- `FIO_MD_BLOCK_TABLE_CELL`
+
+`source` is the full source span for the block. `content` is provided when a useful contiguous body exists, such as fenced code body, HTML block body, heading text, or table cell text. Indented code uses the original contiguous source including indentation rather than constructing normalized text.
+
+`marker` contains the source marker where one exists: heading markers, list markers, setext underline, table delimiter, or the opening code fence. Fence character and length are intentionally not separate fields; callers can use `marker.buf[0]` and `marker.len`.
+
+Block flags:
+
+- `FIO_MD_BLOCK_F_TIGHT` — list is tight. Valid on list leave events.
+- `FIO_MD_BLOCK_F_TASK` — list item has a GFM task marker.
+- `FIO_MD_BLOCK_F_TASK_CHECKED` — task marker is checked.
+
+### Inline Events
+
+```c
+typedef struct {
+  fio_buf_info_s source;
+  fio_buf_info_s text;
+  fio_buf_info_s destination;
+  fio_buf_info_s title;
+  fio_buf_info_s reference;
+  uint8_t type;
+  uint8_t event;
+} fio_md_inline_s;
+```
+
+`type` uses `FIO_MD_INLINE_*` values. `event` uses `FIO_MD_EVENT_*` values.
+
+Supported inline types:
+
+- text, soft break, hard break, code span
+- emphasis, strong emphasis, GFM strikethrough
+- links, images, autolinks
+- GFM footnote references (`FIO_MD_INLINE_FOOTNOTE_REF`)
+- raw inline HTML, backslash escapes, entities
+
+Inline containers such as emphasis, strong emphasis, strikethrough, and links emit `FIO_MD_EVENT_ENTER`, child inline events, then `FIO_MD_EVENT_LEAVE`. Leaf events use `FIO_MD_EVENT_LEAF`.
+
+Entities are emitted as source slices. The parser does not normalize entity values.
+
+GFM footnote definition blocks are recognized and skipped in the main block stream. Inline footnote references emit `FIO_MD_INLINE_FOOTNOTE_REF` with `reference` set to the label without the leading `^`.
+
+### Callbacks
+
+```c
+typedef struct {
+  int (*on_document_start)(void *udata, fio_buf_info_s source);
+  int (*on_document_end)(void *udata, fio_buf_info_s source);
+  int (*on_block_enter)(void *udata, const fio_md_block_s *block);
+  int (*on_block_leave)(void *udata, const fio_md_block_s *block);
+  int (*on_inline)(void *udata, const fio_md_inline_s *inline_event);
+  void (*on_error)(void *udata, int err, size_t consumed);
+} fio_md_callbacks_s;
+```
+
+All callbacks are optional. Every callback receives the caller-provided `udata` pointer.
+
+A non-zero return value from any event callback aborts parsing. `on_error`, if set, receives that exact positive callback error code and the consumed byte count. Parser-generated errors are negative. Callers that need richer error data can store it from `on_error` using `udata`.
+
+### API
+
+```c
+size_t fio_md_parse(const fio_md_callbacks_s *callbacks,
+                    void *udata,
+                    fio_buf_info_s source);
+```
+
+Parses a complete Markdown source buffer and returns the number of source bytes consumed. On success, the return value equals `source.len`.
+
+### Event Trace Example
+
+```c
+static int on_inline(void *udata, const fio_md_inline_s *i) {
+  (void)udata;
+  fprintf(stderr, "inline type=%d len=%zu\n", (int)i->type, i->source.len);
+  return 0;
+}
+
+static const fio_md_callbacks_s cb = {.on_inline = on_inline};
+
+size_t consumed = fio_md_parse(&cb, NULL, FIO_BUF_INFO1(markdown));
+```
+
+### Examples
+
+- `examples/markdown_trace.c` — event tracing.
+- `examples/markdown_html_minimal.c` — a minimal caller-owned HTML renderer.
+
+### Zero-Copy Policy
+
+All public slices are borrowed views into the input buffer. They are valid only while the source buffer remains valid. The parser does not concatenate paragraph text or normalize content for the caller. If a construct is non-contiguous after Markdown marker removal, the parser either emits smaller inline slices or exposes the original source slice.
 ## MIME Multipart Parser
 
 ```c
@@ -12851,6 +13003,54 @@ Advances the Stream, so the first `len` bytes are marked as consumed.
 **Note**: this isn't thread safe.
 
 -------------------------------------------------------------------------------
+## Markdown to HTML bstr Renderer
+
+```c
+#define FIO_MD2HTML
+#include "fio-stl.h"
+```
+
+`FIO_MD2HTML` provides a small Markdown / GFM to HTML renderer built on the
+`FIO_MARKDOWN` callback parser. The renderer accumulates output in `fio_bstr`.
+
+Defining `FIO_MD2HTML` automatically enables its dependencies:
+
+- `FIO_MARKDOWN`
+- `FIO_STR` for `fio_bstr`
+
+### API
+
+```c
+char *fio_md2html(char *bstr_target, fio_buf_info_s source);
+```
+
+Parses a complete Markdown buffer and appends rendered HTML to `bstr_target`, returning the resulting owned `fio_bstr`. Pass `NULL` to create a new buffer. Release the returned value with `fio_bstr_free`.
+
+Returns `NULL` if parsing aborts or output allocation fails. Empty input renders
+to a non-NULL empty `fio_bstr` when allocation succeeds.
+
+### Rendering Notes
+
+- Normal text, code, and attribute values are HTML-escaped.
+- Markdown raw HTML blocks and inline HTML are preserved as raw HTML.
+- Fenced code info strings render as `class="language-..."` using the first info
+  word.
+- GFM tables render with `<thead>` for the first row and `<tbody>` for remaining
+  rows.
+- GFM task-list items render disabled checkbox inputs.
+- GFM footnotes render with GitHub-compatible `footnote-ref`, `footnote-backref`, `fn-...`, and `fnref-...` markup.
+- Reference-link URLs are percent-encoded when the destination has no existing `%` escape.
+
+### Example
+
+```c
+char md[] = "# Demo\n\nHello **world**.\n";
+char *html = fio_md2html(NULL, FIO_BUF_INFO1(md));
+if (html) {
+  fwrite(html, 1, fio_bstr_len(html), stdout);
+  fio_bstr_free(html);
+}
+```
 ## Mustache Template Engine
 
 ```c

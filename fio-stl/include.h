@@ -78,6 +78,9 @@
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
 #endif
+#ifdef FIO_MARKDOWN
+#include "004 markdown.h"
+#endif
 
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
@@ -103,6 +106,10 @@
 #endif
 #ifdef FIO_QUEUE
 #include "102 queue.h"
+#endif
+
+#ifdef FIO_MD2HTML
+#include "103 md2html.h"
 #endif
 
 #ifdef FIO_MUSTACHE

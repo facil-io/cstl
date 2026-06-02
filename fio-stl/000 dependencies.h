@@ -355,6 +355,13 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_JSON
 #endif
 
+#if defined(FIO_MD2HTML)
+#undef FIO_MARKDOWN
+#define FIO_MARKDOWN
+#undef FIO_STR
+#define FIO_STR
+#endif
+
 #if defined(FIO_HTTP)
 #undef FIO_HTTP1_PARSER
 #define FIO_HTTP1_PARSER
