@@ -182,6 +182,8 @@ typedef struct {
 
   /* --- reference cache --- */
   fio___md_ref_s refs[FIO_MARKDOWN_REF_CACHE_SIZE];
+  fio___md_ref_s ref_overflow_slot;
+  char *ref_scanned_to;
   uint16_t ref_count;
   uint8_t ref_overflow;
 
@@ -679,6 +681,190 @@ FIO_SFUNC char *fio___md_footnote_end(char *p, char *end) {
   return scan;
 }
 
+FIO_IFUNC void fio___md_ref_cache_add(fio___md_parser_s *st,
+                                       fio_buf_info_s label,
+                                       fio_buf_info_s dst,
+                                       fio_buf_info_s title) {
+  uint16_t i = 0;
+  label.buf = fio___md_ltrim(label.buf, label.buf + label.len);
+  label.len =
+      (size_t)(fio___md_rtrim(label.buf, label.buf + label.len) - label.buf);
+  while (i < st->ref_count &&
+         !fio___md_slice_eq_lc(label, st->refs[i].label))
+    ++i;
+  if (i == st->ref_count) {
+    if (st->ref_count < FIO_MARKDOWN_REF_CACHE_SIZE) {
+      st->refs[st->ref_count].label = label;
+      st->refs[st->ref_count].destination = dst;
+      st->refs[st->ref_count].title = title;
+      ++st->ref_count;
+    } else {
+      st->ref_overflow = 1;
+    }
+  }
+}
+
+/* Forward declarations for block helpers used in ref_index */
+FIO_SFUNC int fio___md_atx(char *ls,
+                           char *le,
+                           uint8_t *level,
+                           char **content_start,
+                           char **content_end,
+                           fio_buf_info_s *marker);
+FIO_SFUNC int fio___md_setext(char *ls, char *le, uint8_t *level);
+FIO_SFUNC int fio___md_thematic(char *ls, char *le);
+FIO_SFUNC int fio___md_fence(char *ls,
+                             char *le,
+                             fio_buf_info_s *marker,
+                             fio_buf_info_s *info);
+FIO_SFUNC int fio___md_fence_close(char *ls, char *le, fio_buf_info_s marker);
+FIO_SFUNC int fio___md_html_block_start(char *ls, char *le);
+FIO_SFUNC int fio___md_html_long_block(char *ls, char *le);
+FIO_SFUNC int fio___md_html_long_close(char *ls, char *le);
+FIO_SFUNC int fio___md_list_marker(char *ls,
+                                   char *le,
+                                   int *ordered,
+                                   uint64_t *start,
+                                   char **content,
+                                   fio_buf_info_s *marker);
+
+FIO_SFUNC int fio___md_line_starts_block(char *ls, char *le) {
+  uint8_t level = 0;
+  char *cs = NULL, *ce = NULL;
+  fio_buf_info_s m = FIO_BUF_INFO0, info = FIO_BUF_INFO0;
+  int ordered = 0;
+  uint64_t sn = 0;
+  char *content = NULL;
+  char *trim = fio___md_ltrim(ls, le);
+  return fio___md_atx(ls, le, &level, &cs, &ce, &m) ||
+         fio___md_setext(ls, le, &level) ||
+         fio___md_thematic(ls, le) ||
+         fio___md_fence(ls, le, &m, &info) ||
+         fio___md_html_block_start(ls, le) ||
+         fio___md_list_marker(ls, le, &ordered, &sn, &content, &m) ||
+         (trim < le && *trim == '>' &&
+          (uint32_t)(trim - ls) <= FIO___MD_MAX_MARKER_INDENT);
+}
+
+/* Strip blockquote markers from a line, returning the content after them.
+   Also returns the blockquote depth. */
+FIO_IFUNC char *fio___md_strip_bq(char *p, char *le, int *bq_depth) {
+  char *content = p;
+  *bq_depth = 0;
+  while (1) {
+    char *trim = fio___md_ltrim(content, le);
+    if (trim < le && *trim == '>') {
+      content = trim + 1;
+      if (content < le && *content == ' ')
+        ++content;
+      else if (content < le && *content == '\t')
+        ++content;
+      ++*bq_depth;
+    } else {
+      break;
+    }
+  }
+  return content;
+}
+
+/* Lazy reference scanner: scans a range for ref definitions and caches them.
+   Returns pointer to where scanning stopped (end or overflow point). */
+FIO_SFUNC char *fio___md_ref_scan(fio___md_parser_s *st,
+                                  char *p,
+                                  char *scan_end) {
+  int may_start_ref_def = 1;
+
+  while (p < scan_end) {
+    char *le = fio___md_line_end(p, scan_end);
+    char *next = fio___md_line_next(le, scan_end);
+    char *after = NULL;
+    fio_buf_info_s label = FIO_BUF_INFO0;
+    fio_buf_info_s dst = FIO_BUF_INFO0;
+    fio_buf_info_s title = FIO_BUF_INFO0;
+    fio_buf_info_s fence_marker = FIO_BUF_INFO0;
+    fio_buf_info_s fence_info = FIO_BUF_INFO0;
+    int bq_depth = 0;
+    char *content = fio___md_strip_bq(p, le, &bq_depth);
+
+    if (fio___md_is_blank(p, le)) {
+      may_start_ref_def = 1;
+      p = next;
+      continue;
+    }
+
+    /* Skip fenced code blocks */
+    if (fio___md_fence(p, le, &fence_marker, &fence_info)) {
+      char *q = next;
+      while (q < scan_end) {
+        char *qe = fio___md_line_end(q, scan_end);
+        if (fio___md_fence_close(q, qe, fence_marker)) {
+          p = fio___md_line_next(qe, scan_end);
+          break;
+        }
+        q = fio___md_line_next(qe, scan_end);
+      }
+      if (q >= scan_end)
+        break;
+      may_start_ref_def = 1;
+      continue;
+    }
+    /* Skip indented code blocks */
+    if (fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH) {
+      while (next < scan_end) {
+        char *ne = fio___md_line_end(next, scan_end);
+        if (!fio___md_is_blank(next, ne) &&
+            fio___md_indent(next, ne) < FIO___MD_TAB_WIDTH)
+          break;
+        next = fio___md_line_next(ne, scan_end);
+      }
+      p = next;
+      may_start_ref_def = 1;
+      continue;
+    }
+    /* Skip HTML blocks */
+    if (fio___md_html_block_start(p, le)) {
+      if (fio___md_html_long_block(p, le)) {
+        if (!fio___md_html_long_close(p, le)) {
+          while (next < scan_end) {
+            char *line = next;
+            char *ne = fio___md_line_end(line, scan_end);
+            next = fio___md_line_next(ne, scan_end);
+            if (fio___md_html_long_close(line, ne))
+              break;
+          }
+        }
+      } else {
+        while (next < scan_end) {
+          char *ne = fio___md_line_end(next, scan_end);
+          if (fio___md_is_blank(next, ne))
+            break;
+          next = fio___md_line_next(ne, scan_end);
+        }
+      }
+      p = next;
+      may_start_ref_def = 1;
+      continue;
+    }
+
+    /* Check for ref def on stripped content */
+    if (may_start_ref_def &&
+        fio___md_ref_def(content, scan_end, &label, &dst, &title, &after)) {
+      fio___md_ref_cache_add(st, label, dst, title);
+      if (st->ref_overflow) {
+        return after ? after : next;
+      }
+      may_start_ref_def = 1;
+      p = after ? after : next;
+      continue;
+    }
+
+    /* Update paragraph state for next line */
+    may_start_ref_def = fio___md_line_starts_block(content, le);
+    p = next;
+  }
+  return scan_end;
+}
+
 FIO_SFUNC fio___md_ref_s *fio___md_ref_find(fio___md_parser_s *st,
                                             fio_buf_info_s label) {
   uint16_t i;
@@ -689,53 +875,86 @@ FIO_SFUNC fio___md_ref_s *fio___md_ref_find(fio___md_parser_s *st,
     if (fio___md_slice_eq_lc(label, st->refs[i].label))
       return &st->refs[i];
   }
-  if (st->ref_overflow) {
-    char *p = st->start;
+
+  /* First miss: perform lazy full-document scan */
+  if (!st->ref_scanned_to) {
+    st->ref_scanned_to = fio___md_ref_scan(st, st->start, st->end);
+    for (i = 0; i < st->ref_count; ++i) {
+      if (fio___md_slice_eq_lc(label, st->refs[i].label))
+        return &st->refs[i];
+    }
+  }
+
+  /* Overflow: scan from last position, looking for this specific label */
+  if (st->ref_overflow && st->ref_scanned_to < st->end) {
+    char *p = st->ref_scanned_to;
     while (p < st->end) {
+      char *le = fio___md_line_end(p, st->end);
+      char *next = fio___md_line_next(le, st->end);
       char *after = NULL;
+      char *content = p;
       fio_buf_info_s ref_label = FIO_BUF_INFO0;
       fio_buf_info_s dst = FIO_BUF_INFO0;
       fio_buf_info_s title = FIO_BUF_INFO0;
-      if (fio___md_ref_def(p, st->end, &ref_label, &dst, &title, &after) &&
-          fio___md_slice_eq_lc(label, ref_label)) {
-        /* Cache the found ref if there's room */
-        if (st->ref_count < FIO_MARKDOWN_REF_CACHE_SIZE) {
-          st->refs[st->ref_count].label = ref_label;
-          st->refs[st->ref_count].destination = dst;
-          st->refs[st->ref_count].title = title;
-          ++st->ref_count;
-        }
-        return &st->refs[st->ref_count - 1];
+      int bq_depth = 0;
+
+      if (fio___md_is_blank(p, le)) {
+        p = next;
+        continue;
       }
-      p = after ? after
-                : fio___md_line_next(fio___md_line_end(p, st->end), st->end);
+
+      content = fio___md_strip_bq(p, le, &bq_depth);
+
+      if (fio___md_ref_def(content, st->end, &ref_label, &dst, &title,
+                           &after)) {
+        if (fio___md_slice_eq_lc(label, ref_label)) {
+          st->ref_overflow_slot.label = ref_label;
+          st->ref_overflow_slot.destination = dst;
+          st->ref_overflow_slot.title = title;
+          return &st->ref_overflow_slot;
+        }
+        p = after ? after : next;
+        continue;
+      }
+      p = next;
     }
+    st->ref_scanned_to = st->end;
   }
   return NULL;
 }
 
-/* Forward declarations for block helpers used in ref_index */
-FIO_SFUNC int fio___md_fence(char *ls,
-                             char *le,
-                             fio_buf_info_s *marker,
-                             fio_buf_info_s *info);
-FIO_SFUNC int fio___md_fence_close(char *ls, char *le, fio_buf_info_s marker);
-FIO_SFUNC int fio___md_html_block_start(char *ls, char *le);
-FIO_SFUNC int fio___md_html_long_block(char *ls, char *le);
-FIO_SFUNC int fio___md_html_long_close(char *ls, char *le);
-
 FIO_SFUNC void fio___md_ref_index(fio___md_parser_s *st) {
   char *p = st->start;
+  int may_start_ref_def = 1;   /* top level: can a ref def start here? */
+  int bq_may_start_ref_def = 0; /* inside blockquote: can a ref def start? */
+  int prev_bq_depth = 0;
+
   while (p < st->end) {
     char *le = fio___md_line_end(p, st->end);
     char *next = fio___md_line_next(le, st->end);
-    // char *trim = fio___md_ltrim(p, le);
     char *after = NULL;
     fio_buf_info_s label = FIO_BUF_INFO0;
     fio_buf_info_s dst = FIO_BUF_INFO0;
     fio_buf_info_s title = FIO_BUF_INFO0;
     fio_buf_info_s fence_marker = FIO_BUF_INFO0;
     fio_buf_info_s fence_info = FIO_BUF_INFO0;
+    int bq_depth = 0;
+    char *content = fio___md_strip_bq(p, le, &bq_depth);
+
+    if (fio___md_is_blank(p, le)) {
+      may_start_ref_def = 1;
+      bq_may_start_ref_def = 1;
+      prev_bq_depth = 0;
+      p = next;
+      continue;
+    }
+
+    /* Reset bq paragraph state when bq depth changes */
+    if (bq_depth != prev_bq_depth) {
+      bq_may_start_ref_def = 1;
+      prev_bq_depth = bq_depth;
+    }
+
     /* Skip fenced code blocks during pre-scan */
     if (fio___md_fence(p, le, &fence_marker, &fence_info)) {
       char *q = next;
@@ -749,6 +968,8 @@ FIO_SFUNC void fio___md_ref_index(fio___md_parser_s *st) {
       }
       if (q >= st->end)
         break;
+      may_start_ref_def = 1;
+      bq_may_start_ref_def = 1;
       continue;
     }
     /* Skip indented code blocks during pre-scan */
@@ -761,6 +982,8 @@ FIO_SFUNC void fio___md_ref_index(fio___md_parser_s *st) {
         next = fio___md_line_next(ne, st->end);
       }
       p = next;
+      may_start_ref_def = 1;
+      bq_may_start_ref_def = 1;
       continue;
     }
     /* Skip HTML blocks during pre-scan */
@@ -784,25 +1007,56 @@ FIO_SFUNC void fio___md_ref_index(fio___md_parser_s *st) {
         }
       }
       p = next;
+      may_start_ref_def = 1;
+      bq_may_start_ref_def = 1;
       continue;
     }
-    if (fio___md_ref_def(p, st->end, &label, &dst, &title, &after)) {
-      uint16_t i = 0;
-      while (i < st->ref_count &&
-             !fio___md_slice_eq_lc(label, st->refs[i].label))
-        ++i;
-      if (i == st->ref_count) {
-        if (st->ref_count < FIO_MARKDOWN_REF_CACHE_SIZE) {
-          st->refs[st->ref_count].label = label;
-          st->refs[st->ref_count].destination = dst;
-          st->refs[st->ref_count].title = title;
-          ++st->ref_count;
-        } else {
-          st->ref_overflow = 1;
+
+    /* Check for list marker at top level (not inside blockquote) */
+    if (bq_depth == 0) {
+      int ordered = 0;
+      uint64_t start_num = 0;
+      char *list_content = NULL;
+      fio_buf_info_s list_marker = FIO_BUF_INFO0;
+      if (fio___md_list_marker(p, le, &ordered, &start_num, &list_content,
+                               &list_marker)) {
+        if (list_content < le) {
+          if (fio___md_ref_def(list_content, st->end, &label, &dst, &title,
+                               &after)) {
+            fio___md_ref_cache_add(st, label, dst, title);
+            may_start_ref_def = 1;
+            p = after ? after : next;
+            continue;
+          }
         }
       }
     }
-    p = after ? after : next;
+
+    /* Check for ref def on stripped content */
+    {
+      int can_start =
+          (bq_depth > 0) ? bq_may_start_ref_def : may_start_ref_def;
+      if (can_start &&
+          fio___md_ref_def(content, st->end, &label, &dst, &title, &after)) {
+        fio___md_ref_cache_add(st, label, dst, title);
+        if (bq_depth > 0)
+          bq_may_start_ref_def = 1;
+        else
+          may_start_ref_def = 1;
+        p = after ? after : next;
+        continue;
+      }
+    }
+
+    /* Update paragraph state for next line */
+    {
+      int is_block = fio___md_line_starts_block(content, le);
+      if (bq_depth > 0)
+        bq_may_start_ref_def = is_block;
+      else
+        may_start_ref_def = is_block;
+    }
+    p = next;
   }
 }
 
@@ -905,17 +1159,20 @@ FIO_SFUNC int fio___md_fence(char *ls,
 }
 
 FIO_SFUNC int fio___md_fence_close(char *ls, char *le, fio_buf_info_s marker) {
-  char *p = fio___md_ltrim(ls, le);
+  char *p = ls;
   size_t n = 0;
-  if (!marker.len)
+  if (fio___md_indent(ls, le) > FIO___MD_MAX_MARKER_INDENT || !marker.len)
     return 0;
+  while (p < le && (*p == ' ' || *p == '\t'))
+    ++p;
   while (p < le && *p == marker.buf[0]) {
     ++n;
     ++p;
   }
   if (n < marker.len)
     return 0;
-  p = fio___md_ltrim(p, le);
+  while (p < le && (*p == ' ' || *p == '\t'))
+    ++p;
   return p == le;
 }
 
@@ -950,7 +1207,7 @@ FIO_SFUNC int fio___md_list_marker(char *ls,
   ++p;
   if (p < le && *p != ' ' && *p != '\t')
     return 0;
-  if (num < 1 || num > 999999999)
+  if (num > 999999999)
     return 0;
   *ordered = 1;
   *start = num;
@@ -2385,6 +2642,20 @@ FIO_SFUNC int fio___md_parse_blockquote(fio___md_parser_s *st,
       continue;
     }
 
+    /* Reference definition inside blockquote */
+    if (!para_open) {
+      char *ref_after = NULL;
+      fio_buf_info_s ref_label = FIO_BUF_INFO0;
+      fio_buf_info_s ref_dst = FIO_BUF_INFO0;
+      fio_buf_info_s ref_title = FIO_BUF_INFO0;
+      if (fio___md_ref_def(qcontent, end, &ref_label, &ref_dst, &ref_title,
+                           &ref_after)) {
+        fio___md_ref_cache_add(st, ref_label, ref_dst, ref_title);
+        p = ref_after;
+        continue;
+      }
+    }
+
     /* Paragraph continuation */
     ts = fio___md_ltrim(qcontent, qe);
     te = fio___md_rtrim(ts, qe);
@@ -2483,6 +2754,7 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_parser_s *st,
                            &ref_dst,
                            &ref_title,
                            &ref_after)) {
+        fio___md_ref_cache_add(st, ref_label, ref_dst, ref_title);
         p = ref_after;
         continue;
       }
@@ -2699,6 +2971,9 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_parser_s *st,
       char *para_end = le;
       char *q = next;
       uint8_t setext_level = 0;
+      int ordered_dummy = 0;
+      uint64_t start_dummy = 0;
+      char *content_dummy = NULL;
       while (q < end) {
         char *qe = fio___md_line_end(q, end);
         char *qt = fio___md_ltrim(q, qe);
@@ -2734,7 +3009,10 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_parser_s *st,
              (qt[1] == '!' || qt[1] == '?' ||
               fio___md_html_block_tag(qt + 1, qe))) ||
             (qt < qe && *qt == '>' &&
-             (uint32_t)(qt - q) <= FIO___MD_MAX_MARKER_INDENT))
+             (uint32_t)(qt - q) <= FIO___MD_MAX_MARKER_INDENT) ||
+            (fio___md_list_marker(q, qe, &ordered_dummy, &start_dummy,
+                                  &content_dummy, &marker) &&
+             (!ordered_dummy || start_dummy == 1)))
           break;
         para_end = qe;
         q = fio___md_line_next(qe, end);
@@ -2830,9 +3108,6 @@ SFUNC size_t fio_md_parse(const fio_md_callbacks_s *callbacks,
     fio___md_error(&st, &e);
     return 0;
   }
-
-  if (source.buf)
-    fio___md_ref_index(&st);
 
   if (source.buf &&
       fio___md_parse_blocks(&st, source.buf, source.buf + source.len))

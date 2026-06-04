@@ -471,8 +471,13 @@ static void test_md2html_fixture_line(const char *path, size_t line) {
 static size_t test_md2html_fixture_audit(const char *path) {
   test_md2html_fixture_s fixture = test_md2html_fixture_load(path);
   size_t mismatches = 0;
-  fprintf(stderr, "GFM fixture audit: scanning %s\n", path);
+  fprintf(stderr,
+          "GFM fixture audit: scanning %s (%zu examples)\n",
+          path,
+          fixture.count);
   for (size_t i = 0; i < fixture.count; ++i) {
+    // fprintf(stderr, "  example %zu/%zu (line %zu)...\n", i + 1,
+    // fixture.count, fixture.items[i].line_start); fflush(stderr);
     if (!test_md2html_case_compare(path, &fixture.items[i], 1))
       ++mismatches;
   }
@@ -688,11 +693,23 @@ static void test_md2html_empty(void) {
 }
 
 int main(void) {
+  fprintf(stderr, "START fixture_normalization\n");
+  fflush(stderr);
   test_md2html_fixture_normalization();
+  fprintf(stderr, "START inline_and_blocks\n");
+  fflush(stderr);
   test_md2html_inline_and_blocks();
+  fprintf(stderr, "START table_and_raw_html\n");
+  fflush(stderr);
   test_md2html_table_and_raw_html();
+  fprintf(stderr, "START gfm_regressions\n");
+  fflush(stderr);
   test_md2html_gfm_regressions();
+  fprintf(stderr, "START gfm_fixture_examples\n");
+  fflush(stderr);
   test_md2html_gfm_fixture_examples();
+  fprintf(stderr, "START existing_target\n");
+  fflush(stderr);
   test_md2html_existing_target();
 #ifdef DEBUG
   {

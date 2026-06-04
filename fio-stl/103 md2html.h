@@ -719,7 +719,7 @@ FIO_SFUNC int fio___md2html_push(fio_md_event_s *e) {
       return renderer->err;
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<ol"))
       return renderer->err;
-    if (e->list_start && e->list_start != 1) {
+    if (e->list_start != 1) {
       if (FIO___MD2HTML_APPEND_LITERAL(renderer, " start=\"") ||
           fio___md2html_append_u(renderer, e->list_start) ||
           FIO___MD2HTML_APPEND_LITERAL(renderer, "\""))
