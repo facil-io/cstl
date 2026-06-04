@@ -2464,8 +2464,29 @@ FIO_SFUNC int fio___md_parse_blockquote(fio___md_parser_s *st,
       if (!para_open || fio___md_is_blank(p, qe)) {
         break;
       }
-      if (fio___md_block_start_line(p, qe)) {
+      /* Lazy continuation with open paragraph: indented lines continue
+         the paragraph rather than starting an indented code block. */
+      if (!para_open && fio___md_block_start_line(p, qe)) {
         break;
+      }
+      if (para_open) {
+        uint8_t level = 0;
+        int ordered = 0;
+        uint64_t start_num = 0;
+        char *content = NULL;
+        fio_buf_info_s marker = FIO_BUF_INFO0;
+        fio_buf_info_s info = FIO_BUF_INFO0;
+        char *cs = NULL, *ce = NULL;
+        char *trim = fio___md_ltrim(p, qe);
+        if (fio___md_atx(p, qe, &level, &cs, &ce, &marker) ||
+            fio___md_thematic(p, qe) ||
+            fio___md_fence(p, qe, &marker, &info) ||
+            fio___md_html_block_start(p, qe) ||
+            fio___md_list_marker(p, qe, &ordered, &start_num, &content,
+                                 &marker) ||
+            (trim < qe && *trim == '>' &&
+             (uint32_t)(trim - p) <= FIO___MD_MAX_MARKER_INDENT))
+          break;
       }
       qcontent = p;
       qpadding = 0;
