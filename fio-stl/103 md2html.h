@@ -48,6 +48,10 @@ typedef struct {
   uint16_t ref_count;
 } fio___md2html_footnote_s;
 
+#ifndef FIO_MD2HTML_MAX_FOOTNOTES
+#define FIO_MD2HTML_MAX_FOOTNOTES FIO_MARKDOWN_REF_CACHE_SIZE
+#endif
+
 typedef struct {
   fio___md2html_footnote_s *note;
   uint16_t ordinal;
@@ -56,8 +60,8 @@ typedef struct {
 typedef struct {
   char *html;
   size_t consumed;
-  fio___md2html_footnote_s footnotes[FIO_MARKDOWN_MAX_REFERENCES];
-  fio___md2html_footnote_use_s footnote_uses[FIO_MARKDOWN_MAX_REFERENCES];
+  fio___md2html_footnote_s footnotes[FIO_MD2HTML_MAX_FOOTNOTES];
+  fio___md2html_footnote_use_s footnote_uses[FIO_MD2HTML_MAX_FOOTNOTES];
   uint32_t table_row;
   uint32_t tight_list_item_depth;
   uint32_t paragraph_suppressed_depth;
@@ -516,7 +520,7 @@ FIO_SFUNC void fio___md2html_scan_footnotes(fio___md2html_s *renderer,
     char *content = NULL;
     fio_buf_info_s label = FIO_BUF_INFO0;
     if (fio___md_footnote_line(p, le, &label, &content) &&
-        renderer->footnote_count < FIO_MARKDOWN_MAX_REFERENCES &&
+        renderer->footnote_count < FIO_MD2HTML_MAX_FOOTNOTES &&
         !fio___md2html_footnote_find(renderer, label)) {
       char *next = fio___md_line_next(le, end);
       char *def_end = fio___md_footnote_end(p, end);
@@ -544,7 +548,7 @@ FIO_SFUNC fio___md2html_footnote_s *fio___md2html_use_footnote(
     fio_buf_info_s label,
     uint16_t *ordinal) {
   fio___md2html_footnote_s *note = fio___md2html_footnote_find(renderer, label);
-  if (!note || renderer->footnote_use_count >= FIO_MARKDOWN_MAX_REFERENCES)
+  if (!note || renderer->footnote_use_count >= FIO_MD2HTML_MAX_FOOTNOTES)
     return NULL;
   if (!note->index)
     note->index = (uint16_t)(renderer->footnote_use_count + 1);
@@ -681,72 +685,70 @@ FIO_SFUNC int fio___md2html_append_backrefs(fio___md2html_s *renderer,
   return 0;
 }
 
-FIO_SFUNC int fio___md2html_block_enter(void *udata,
-                                        const fio_md_block_s *block) {
-  fio___md2html_s *renderer = (fio___md2html_s *)udata;
+FIO_SFUNC int fio___md2html_push(fio_md_event_s *e) {
+  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
   fio_buf_info_s language;
   if (renderer->err)
     return renderer->err;
-  switch (block->type) {
-  case FIO_MD_BLOCK_DOCUMENT: return 0;
-  case FIO_MD_BLOCK_PARAGRAPH:
+  switch (e->type) {
+  case FIO_MD_PARAGRAPH:
     if (renderer->tight_list_item_depth) {
       ++renderer->paragraph_suppressed_depth;
       return 0;
     }
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<p>");
-  case FIO_MD_BLOCK_HEADING:
+  case FIO_MD_HEADING:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<h") ||
-           fio___md2html_append_u(renderer, block->heading_level) ||
+           fio___md2html_append_u(renderer, e->heading_level) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, ">");
-  case FIO_MD_BLOCK_THEMATIC_BREAK:
+  case FIO_MD_THEMATIC_BREAK:
     if (renderer->tight_list_item_depth &&
         FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
       return renderer->err;
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<hr />\n");
-  case FIO_MD_BLOCK_BLOCK_QUOTE:
+  case FIO_MD_BLOCKQUOTE:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<blockquote>\n");
-  case FIO_MD_BLOCK_LIST_UNORDERED:
+  case FIO_MD_LIST_UNORDERED:
     if (renderer->tight_list_item_depth &&
         FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
       return renderer->err;
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<ul>\n");
-  case FIO_MD_BLOCK_LIST_ORDERED:
+  case FIO_MD_LIST_ORDERED:
     if (renderer->tight_list_item_depth &&
         FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
       return renderer->err;
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<ol"))
       return renderer->err;
-    if (block->list_start && block->list_start != 1) {
+    if (e->list_start && e->list_start != 1) {
       if (FIO___MD2HTML_APPEND_LITERAL(renderer, " start=\"") ||
-          fio___md2html_append_u(renderer, block->list_start) ||
+          fio___md2html_append_u(renderer, e->list_start) ||
           FIO___MD2HTML_APPEND_LITERAL(renderer, "\""))
         return renderer->err;
     }
     return FIO___MD2HTML_APPEND_LITERAL(renderer, ">\n");
-  case FIO_MD_BLOCK_LIST_ITEM:
-    if (block->flags & FIO_MD_BLOCK_F_TIGHT)
+  case FIO_MD_LIST_ITEM:
+    if (e->flags & FIO_MD_F_TIGHT)
       ++renderer->tight_list_item_depth;
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<li>"))
       return renderer->err;
-    if (!(block->flags & FIO_MD_BLOCK_F_TIGHT) &&
+    if (!(e->flags & FIO_MD_F_TIGHT) &&
         FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
       return renderer->err;
-    if (block->flags & FIO_MD_BLOCK_F_TASK) {
+    if (e->flags & FIO_MD_F_TASK) {
       if (FIO___MD2HTML_APPEND_LITERAL(renderer,
                                        "<input type=\"checkbox\" disabled") ||
-          ((block->flags & FIO_MD_BLOCK_F_TASK_CHECKED)
+          ((e->flags & FIO_MD_F_TASK_CHECKED)
                ? FIO___MD2HTML_APPEND_LITERAL(renderer, " checked")
                : 0) ||
           FIO___MD2HTML_APPEND_LITERAL(renderer, "> "))
         return renderer->err;
     }
     return 0;
-  case FIO_MD_BLOCK_CODE_INDENTED:
-  case FIO_MD_BLOCK_CODE_FENCED:
+  case FIO_MD_CODE_INDENTED:
+  case FIO_MD_CODE_FENCED:
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<pre><code"))
       return renderer->err;
-    language = fio___md2html_info_language(block->info);
+    language = fio___md2html_info_language(e->info);
     if (language.len &&
         (FIO___MD2HTML_APPEND_LITERAL(renderer, " class=\"language-") ||
          fio___md2html_escape_attr(renderer, language) ||
@@ -754,171 +756,164 @@ FIO_SFUNC int fio___md2html_block_enter(void *udata,
       return renderer->err;
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, ">"))
       return renderer->err;
-    if (block->type == FIO_MD_BLOCK_CODE_INDENTED) {
+    if (e->type == FIO_MD_CODE_INDENTED) {
       if (fio___md2html_escape_indented_code(renderer,
-                                             block->content,
-                                             block->padding))
+                                             e->text,
+                                             e->padding))
         return renderer->err;
-    } else if (block->padding) {
-      if (fio___md2html_escape_bq_fenced_code(renderer, block->content))
+    } else if (e->padding) {
+      if (fio___md2html_escape_bq_fenced_code(renderer, e->text))
         return renderer->err;
     } else if (fio___md2html_escape_fenced_code(
                    renderer,
-                   block->content,
-                   (size_t)(block->marker.buf - block->source.buf))) {
+                   e->text,
+                   (size_t)(e->marker.buf - e->source.buf))) {
       return renderer->err;
     }
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</code></pre>\n");
-  case FIO_MD_BLOCK_HTML:
+  case FIO_MD_HTML_BLOCK:
     return fio___md2html_append(renderer,
-                                block->content.buf,
-                                block->content.len);
-  case FIO_MD_BLOCK_TABLE:
+                                e->text.buf,
+                                e->text.len);
+  case FIO_MD_TABLE:
     renderer->table_row = 0;
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<table>\n<thead>\n");
-  case FIO_MD_BLOCK_TABLE_ROW:
+  case FIO_MD_TABLE_ROW:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<tr>");
-  case FIO_MD_BLOCK_TABLE_CELL:
+  case FIO_MD_TABLE_CELL:
     if (renderer->table_row == 0) {
       if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<th"))
         return renderer->err;
     } else if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<td")) {
       return renderer->err;
     }
-    return fio___md2html_align_attr(renderer, block->align) ||
+    return fio___md2html_align_attr(renderer, e->align) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, ">");
+  case FIO_MD_EMPHASIS_STAR:
+  case FIO_MD_EMPHASIS_UNDERSCORE:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<em>");
+  case FIO_MD_STRONG_STAR:
+  case FIO_MD_STRONG_UNDERSCORE:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<strong>");
+  case FIO_MD_STRIKETHROUGH:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<del>");
+  case FIO_MD_LINK:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"") ||
+           fio___md2html_escape_reference_url(renderer,
+                                              e->destination,
+                                              e->reference) ||
+           fio___md2html_append_title(renderer, e->title) ||
+           FIO___MD2HTML_APPEND_LITERAL(renderer, "\">");
   }
   return 0;
 }
 
-FIO_SFUNC int fio___md2html_block_leave(void *udata,
-                                        const fio_md_block_s *block) {
-  fio___md2html_s *renderer = (fio___md2html_s *)udata;
+FIO_SFUNC int fio___md2html_pop(fio_md_event_s *e) {
+  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
   if (renderer->err)
     return renderer->err;
-  switch (block->type) {
-  case FIO_MD_BLOCK_DOCUMENT: return 0;
-  case FIO_MD_BLOCK_PARAGRAPH:
+  switch (e->type) {
+  case FIO_MD_PARAGRAPH:
     if (renderer->paragraph_suppressed_depth) {
       --renderer->paragraph_suppressed_depth;
       return 0;
     }
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</p>\n");
-  case FIO_MD_BLOCK_HEADING:
+  case FIO_MD_HEADING:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</h") ||
-           fio___md2html_append_u(renderer, block->heading_level) ||
+           fio___md2html_append_u(renderer, e->heading_level) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, ">\n");
-  case FIO_MD_BLOCK_BLOCK_QUOTE:
+  case FIO_MD_BLOCKQUOTE:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</blockquote>\n");
-  case FIO_MD_BLOCK_LIST_UNORDERED:
+  case FIO_MD_LIST_UNORDERED:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</ul>\n");
-  case FIO_MD_BLOCK_LIST_ORDERED:
+  case FIO_MD_LIST_ORDERED:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</ol>\n");
-  case FIO_MD_BLOCK_LIST_ITEM:
+  case FIO_MD_LIST_ITEM:
     if (FIO___MD2HTML_APPEND_LITERAL(renderer, "</li>\n"))
       return renderer->err;
-    if ((block->flags & FIO_MD_BLOCK_F_TIGHT) &&
+    if ((e->flags & FIO_MD_F_TIGHT) &&
         renderer->tight_list_item_depth)
       --renderer->tight_list_item_depth;
     return 0;
-  case FIO_MD_BLOCK_TABLE:
+  case FIO_MD_TABLE:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</tbody>\n</table>\n");
-  case FIO_MD_BLOCK_TABLE_ROW:
+  case FIO_MD_TABLE_ROW:
     if (renderer->table_row++ == 0)
       return FIO___MD2HTML_APPEND_LITERAL(renderer,
                                           "</tr>\n</thead>\n<tbody>\n");
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "</tr>\n");
-  case FIO_MD_BLOCK_TABLE_CELL:
+  case FIO_MD_TABLE_CELL:
     return (renderer->table_row == 0)
                ? FIO___MD2HTML_APPEND_LITERAL(renderer, "</th>")
                : FIO___MD2HTML_APPEND_LITERAL(renderer, "</td>");
-  case FIO_MD_BLOCK_THEMATIC_BREAK:
-  case FIO_MD_BLOCK_CODE_INDENTED:
-  case FIO_MD_BLOCK_CODE_FENCED:
-  case FIO_MD_BLOCK_HTML: return 0;
+  case FIO_MD_EMPHASIS_STAR:
+  case FIO_MD_EMPHASIS_UNDERSCORE:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</em>");
+  case FIO_MD_STRONG_STAR:
+  case FIO_MD_STRONG_UNDERSCORE:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</strong>");
+  case FIO_MD_STRIKETHROUGH:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</del>");
+  case FIO_MD_LINK:
+    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>");
+  case FIO_MD_THEMATIC_BREAK:
+  case FIO_MD_CODE_INDENTED:
+  case FIO_MD_CODE_FENCED:
+  case FIO_MD_HTML_BLOCK: return 0;
   }
   return 0;
 }
 
-FIO_SFUNC int fio___md2html_inline(void *udata,
-                                   const fio_md_inline_s *inline_event) {
-  fio___md2html_s *renderer = (fio___md2html_s *)udata;
+FIO_SFUNC int fio___md2html_text(fio_md_event_s *e) {
+  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
   if (renderer->err)
     return renderer->err;
-  switch (inline_event->type) {
-  case FIO_MD_INLINE_TEXT:
-    return fio___md2html_escape_text(renderer, inline_event->text);
-  case FIO_MD_INLINE_SOFT_BREAK:
+  switch (e->type) {
+  case FIO_MD_TEXT:
+    return fio___md2html_escape_text(renderer, e->text);
+  case FIO_MD_SOFT_BREAK:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "\n");
-  case FIO_MD_INLINE_HARD_BREAK:
+  case FIO_MD_HARD_BREAK:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<br />\n");
-  case FIO_MD_INLINE_CODE_SPAN:
+  case FIO_MD_CODE_SPAN:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<code>") ||
-           fio___md2html_escape_code_span(renderer, inline_event->text) ||
+           fio___md2html_escape_code_span(renderer, e->text) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, "</code>");
-  case FIO_MD_INLINE_EMPHASIS:
-    if (inline_event->event == FIO_MD_EVENT_ENTER)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "<em>");
-    if (inline_event->event == FIO_MD_EVENT_LEAVE)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "</em>");
-    return 0;
-  case FIO_MD_INLINE_STRONG:
-    if (inline_event->event == FIO_MD_EVENT_ENTER)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "<strong>");
-    if (inline_event->event == FIO_MD_EVENT_LEAVE)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "</strong>");
-    return 0;
-  case FIO_MD_INLINE_STRIKETHROUGH:
-    if (inline_event->event == FIO_MD_EVENT_ENTER)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "<del>");
-    if (inline_event->event == FIO_MD_EVENT_LEAVE)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "</del>");
-    return 0;
-  case FIO_MD_INLINE_LINK:
-    if (inline_event->event == FIO_MD_EVENT_ENTER)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"") ||
-             fio___md2html_escape_reference_url(renderer,
-                                                inline_event->destination,
-                                                inline_event->reference) ||
-             fio___md2html_append_title(renderer, inline_event->title) ||
-             FIO___MD2HTML_APPEND_LITERAL(renderer, "\">");
-    if (inline_event->event == FIO_MD_EVENT_LEAVE)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>");
-    return 0;
-  case FIO_MD_INLINE_IMAGE:
+  case FIO_MD_IMAGE:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<img src=\"") ||
-           fio___md2html_escape_attr(renderer, inline_event->destination) ||
+           fio___md2html_escape_attr(renderer, e->destination) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, "\" alt=\"") ||
-           fio___md2html_escape_attr(renderer, inline_event->text) ||
-           fio___md2html_append_title(renderer, inline_event->title) ||
+           fio___md2html_escape_attr(renderer, e->text) ||
+           fio___md2html_append_title(renderer, e->title) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, "\">");
-  case FIO_MD_INLINE_AUTOLINK:
+  case FIO_MD_AUTOLINK:
     return FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"") ||
-           fio___md2html_escape_attr(renderer, inline_event->destination) ||
+           fio___md2html_escape_attr(renderer, e->destination) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, "\">") ||
-           fio___md2html_escape_text(renderer, inline_event->destination) ||
+           fio___md2html_escape_text(renderer, e->destination) ||
            FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>");
   case FIO_MD_INLINE_HTML:
     return fio___md2html_append(renderer,
-                                inline_event->source.buf,
-                                inline_event->source.len);
-  case FIO_MD_INLINE_ESCAPE:
-    return fio___md2html_escape_text(renderer, inline_event->text);
-  case FIO_MD_INLINE_ENTITY:
+                                e->source.buf,
+                                e->source.len);
+  case FIO_MD_ESCAPE:
+    return fio___md2html_escape_text(renderer, e->text);
+  case FIO_MD_ENTITY:
     return fio___md2html_append(renderer,
-                                inline_event->source.buf,
-                                inline_event->source.len);
-  case FIO_MD_INLINE_FOOTNOTE_REF:
-    return fio___md2html_append_footnote_ref(renderer, inline_event->reference);
+                                e->source.buf,
+                                e->source.len);
+  case FIO_MD_FOOTNOTE_REF:
+    return fio___md2html_append_footnote_ref(renderer, e->reference);
   }
   return 0;
 }
 
-FIO_SFUNC void fio___md2html_error(void *udata, int err, size_t consumed) {
-  fio___md2html_s *renderer = (fio___md2html_s *)udata;
+FIO_SFUNC void fio___md2html_error(fio_md_event_s *e) {
+  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
   if (!renderer->err)
-    renderer->err = err;
-  renderer->consumed = consumed;
+    renderer->err = e->err;
+  renderer->consumed = e->consumed;
 }
 
 FIO_IFUNC int fio___md2html_ends_with(char *s,
@@ -993,10 +988,10 @@ FIO_SFUNC int fio___md2html_render_footnotes(fio___md2html_s *renderer) {
 SFUNC char *fio_md2html(char *bstr_target, fio_buf_info_s source) {
   fio___md2html_s renderer = {0};
   fio_md_callbacks_s callbacks = {
-      .on_block_enter = fio___md2html_block_enter,
-      .on_block_leave = fio___md2html_block_leave,
-      .on_inline = fio___md2html_inline,
-      .on_error = fio___md2html_error,
+      .push = fio___md2html_push,
+      .text = fio___md2html_text,
+      .pop = fio___md2html_pop,
+      .error = fio___md2html_error,
   };
   size_t consumed;
   renderer.html = fio_bstr_reserve(bstr_target, source.len ? source.len : 1);

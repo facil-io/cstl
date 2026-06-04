@@ -18,27 +18,23 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define H___FIO_MARKDOWN___H
 
 #ifndef FIO_MARKDOWN_MAX_DEPTH
-/** Maximum inline recursion / nested container depth. */
-#define FIO_MARKDOWN_MAX_DEPTH 64
+/** Maximum nesting depth (container + inline). */
+#define FIO_MARKDOWN_MAX_DEPTH 255
 #endif
 
 #ifndef FIO_MARKDOWN_MAX_TABLE_COLUMNS
-/** Maximum GFM table column alignments cached on the stack. */
+/** Bytes for table alignment cache (2 bits/column = 4 columns/byte). */
 #define FIO_MARKDOWN_MAX_TABLE_COLUMNS 64
 #endif
 FIO_ASSERT_STATIC(FIO_MARKDOWN_MAX_TABLE_COLUMNS > 0,
                   "FIO_MARKDOWN_MAX_TABLE_COLUMNS too small");
-FIO_ASSERT_STATIC(FIO_MARKDOWN_MAX_TABLE_COLUMNS < 65536,
-                  "FIO_MARKDOWN_MAX_TABLE_COLUMNS too large");
 
-#ifndef FIO_MARKDOWN_MAX_REFERENCES
-/** Maximum reference definitions indexed during the initial zero-heap scan. */
-#define FIO_MARKDOWN_MAX_REFERENCES 128
+#ifndef FIO_MARKDOWN_REF_CACHE_SIZE
+/** Maximum reference definitions cached during pre-scan. */
+#define FIO_MARKDOWN_REF_CACHE_SIZE 128
 #endif
-FIO_ASSERT_STATIC(FIO_MARKDOWN_MAX_REFERENCES > 0,
-                  "FIO_MARKDOWN_MAX_REFERENCES too small");
-FIO_ASSERT_STATIC(FIO_MARKDOWN_MAX_REFERENCES < 65536,
-                  "FIO_MARKDOWN_MAX_REFERENCES too large");
+FIO_ASSERT_STATIC(FIO_MARKDOWN_REF_CACHE_SIZE > 0,
+                  "FIO_MARKDOWN_REF_CACHE_SIZE too small");
 
 #define FIO___MD_TAB_WIDTH         4U
 #define FIO___MD_MAX_MARKER_INDENT 3U
@@ -54,55 +50,49 @@ FIO_ASSERT_STATIC(FIO_MARKDOWN_MAX_REFERENCES < 65536,
 #define FIO_MD_ERR_INPUT -3
 
 /** Block flag: list is tight. Valid on list leave events. */
-#define FIO_MD_BLOCK_F_TIGHT ((uint32_t)1U << 0)
+#define FIO_MD_F_TIGHT ((uint32_t)1U << 0)
 /** Block flag: list item has a GFM task-list marker. */
-#define FIO_MD_BLOCK_F_TASK ((uint32_t)1U << 1)
-/** Block flag: GFM task-list marker is checked. Requires FIO_MD_BLOCK_F_TASK.
- */
-#define FIO_MD_BLOCK_F_TASK_CHECKED ((uint32_t)1U << 2)
+#define FIO_MD_F_TASK ((uint32_t)1U << 1)
+/** Block flag: GFM task-list marker is checked. Requires FIO_MD_F_TASK. */
+#define FIO_MD_F_TASK_CHECKED ((uint32_t)1U << 2)
 
-/** Markdown block event types. */
+/** Markdown node type (block, inline section, or text). */
 typedef enum {
-  FIO_MD_BLOCK_DOCUMENT = 0,
-  FIO_MD_BLOCK_PARAGRAPH,
-  FIO_MD_BLOCK_HEADING,
-  FIO_MD_BLOCK_THEMATIC_BREAK,
-  FIO_MD_BLOCK_BLOCK_QUOTE,
-  FIO_MD_BLOCK_LIST_UNORDERED,
-  FIO_MD_BLOCK_LIST_ORDERED,
-  FIO_MD_BLOCK_LIST_ITEM,
-  FIO_MD_BLOCK_CODE_INDENTED,
-  FIO_MD_BLOCK_CODE_FENCED,
-  FIO_MD_BLOCK_HTML,
-  FIO_MD_BLOCK_TABLE,
-  FIO_MD_BLOCK_TABLE_ROW,
-  FIO_MD_BLOCK_TABLE_CELL,
-} fio_md_block_type_e;
+  /* === Block sections === */
+  FIO_MD_PARAGRAPH = 0,
+  FIO_MD_HEADING,
+  FIO_MD_THEMATIC_BREAK,
+  FIO_MD_BLOCKQUOTE,
+  FIO_MD_LIST_UNORDERED,
+  FIO_MD_LIST_ORDERED,
+  FIO_MD_LIST_ITEM,
+  FIO_MD_CODE_INDENTED,
+  FIO_MD_CODE_FENCED,
+  FIO_MD_HTML_BLOCK,
+  FIO_MD_TABLE,
+  FIO_MD_TABLE_ROW,
+  FIO_MD_TABLE_CELL,
 
-/** Markdown inline event types. */
-typedef enum {
-  FIO_MD_INLINE_TEXT = 0,
-  FIO_MD_INLINE_SOFT_BREAK,
-  FIO_MD_INLINE_HARD_BREAK,
-  FIO_MD_INLINE_CODE_SPAN,
-  FIO_MD_INLINE_EMPHASIS,
-  FIO_MD_INLINE_STRONG,
-  FIO_MD_INLINE_STRIKETHROUGH,
-  FIO_MD_INLINE_LINK,
-  FIO_MD_INLINE_IMAGE,
-  FIO_MD_INLINE_AUTOLINK,
+  /* === Inline sections === */
+  FIO_MD_EMPHASIS_STAR,
+  FIO_MD_EMPHASIS_UNDERSCORE,
+  FIO_MD_STRONG_STAR,
+  FIO_MD_STRONG_UNDERSCORE,
+  FIO_MD_STRIKETHROUGH,
+  FIO_MD_LINK,
+
+  /* === Text / leaf content === */
+  FIO_MD_TEXT,
+  FIO_MD_SOFT_BREAK,
+  FIO_MD_HARD_BREAK,
+  FIO_MD_CODE_SPAN,
+  FIO_MD_IMAGE,
+  FIO_MD_AUTOLINK,
   FIO_MD_INLINE_HTML,
-  FIO_MD_INLINE_ESCAPE,
-  FIO_MD_INLINE_ENTITY,
-  FIO_MD_INLINE_FOOTNOTE_REF,
-} fio_md_inline_type_e;
-
-/** Container event phase for inline events that wrap child inline events. */
-typedef enum {
-  FIO_MD_EVENT_LEAF = 0,
-  FIO_MD_EVENT_ENTER = 1,
-  FIO_MD_EVENT_LEAVE = 2,
-} fio_md_event_e;
+  FIO_MD_ESCAPE,
+  FIO_MD_ENTITY,
+  FIO_MD_FOOTNOTE_REF,
+} fio_md_type_e;
 
 /** GFM table cell alignment. */
 typedef enum {
@@ -112,71 +102,38 @@ typedef enum {
   FIO_MD_ALIGN_CENTER,
 } fio_md_align_e;
 
-/** A zero-copy Markdown block event. */
+/** Markdown event. Passed by pointer to all callbacks. */
 typedef struct {
-  /** Full source slice for the block, including Markdown markers. */
-  fio_buf_info_s source;
-  /** Block content slice when contiguous and useful (code/html/fenced body). */
-  fio_buf_info_s content;
-  /** Marker slice (`#`, fence, list marker, table delimiter, etc.). */
-  fio_buf_info_s marker;
-  /** Fenced-code info string, when any. */
-  fio_buf_info_s info;
-  /** Ordered-list start number, if any. */
-  uint32_t list_start;
-  /** GFM table column count. */
-  uint16_t columns;
-  /** GFM table cell column index. */
-  uint16_t column;
-  /** Block type (`FIO_MD_BLOCK_*`). */
-  uint8_t type;
-  /** Heading level (1..6), valid only for headings. */
-  uint8_t heading_level;
-  /** `FIO_MD_BLOCK_F_*` bit flags. */
-  uint8_t flags;
-  /** GFM table cell alignment (`FIO_MD_ALIGN_*`). */
-  uint8_t align;
-  /** Virtual leading spaces produced by tab expansion while stripping
-   * containers. */
-  uint8_t padding;
-} fio_md_block_s;
-
-/** A zero-copy Markdown inline event. */
-typedef struct {
-  /** Full source slice for this inline construct. */
-  fio_buf_info_s source;
-  /** Text / label / code content slice. */
-  fio_buf_info_s text;
-  /** Link/image/autolink destination slice. */
-  fio_buf_info_s destination;
-  /** Link/image optional title slice. */
-  fio_buf_info_s title;
-  /** Reference label slice for reference-style links. */
-  fio_buf_info_s reference;
-  /** Inline type (`FIO_MD_INLINE_*`). */
-  uint8_t type;
-  /** Leaf / enter / leave event phase (`FIO_MD_EVENT_*`). */
-  uint8_t event;
-} fio_md_inline_s;
+  void *udata;                /* live: parser copies back after callback */
+  fio_buf_info_s source;      /* full source slice for this event */
+  fio_buf_info_s text;        /* text / label / code content */
+  fio_buf_info_s marker;      /* marker slice (`#`, fence, list marker) */
+  fio_buf_info_s info;        /* fenced code info string */
+  fio_buf_info_s destination; /* link/image/autolink URL */
+  fio_buf_info_s title;       /* link/image title */
+  fio_buf_info_s reference;   /* reference label for ref-style links/images */
+  uint32_t list_start;        /* ordered list start number */
+  uint16_t columns;           /* table column count */
+  uint16_t column;            /* table cell column index */
+  uint8_t type;               /* fio_md_type_e */
+  uint8_t heading_level;      /* 1..6 for headings */
+  uint8_t flags;              /* FIO_MD_F_* */
+  uint8_t align;              /* FIO_MD_ALIGN_* for table cells */
+  uint8_t padding;            /* virtual leading spaces from tab expansion */
+  int err;                    /* error code (error callback only) */
+  size_t consumed;            /* bytes consumed (error callback only) */
+} fio_md_event_s;
 
 /** Markdown parser callbacks. All callbacks are optional. */
 typedef struct {
-  /** Called before parsing starts. Non-zero return aborts parsing. */
-  int (*on_document_start)(void *udata, fio_buf_info_s source);
-  /** Called after parsing completes, unless parsing aborted. */
-  int (*on_document_end)(void *udata, fio_buf_info_s source);
-  /** Called when a block opens. Non-zero return aborts parsing. */
-  int (*on_block_enter)(void *udata, const fio_md_block_s *block);
-  /** Called when a block closes. Non-zero return aborts parsing. */
-  int (*on_block_leave)(void *udata, const fio_md_block_s *block);
-  /** Called for inline events. Non-zero return aborts parsing. */
-  int (*on_inline)(void *udata, const fio_md_inline_s *inline_event);
-  /** Called when parsing aborts. Negative `err` values are parser errors. */
-  void (*on_error)(void *udata, int err, size_t consumed);
+  int (*push)(fio_md_event_s *e);   /* section start */
+  int (*text)(fio_md_event_s *e);   /* text / leaf content */
+  int (*pop)(fio_md_event_s *e);    /* section end */
+  void (*error)(fio_md_event_s *e); /* parse error */
 } fio_md_callbacks_s;
 
 /**
- * Parses a full Markdown / GFM source buffer and emits callback events.
+ * Parses a complete Markdown / GFM document and emits callback events.
  *
  * The parser is non-streaming: `source` must contain the complete document.
  * Events are zero-copy slices into `source` wherever Markdown structure
@@ -184,7 +141,7 @@ typedef struct {
  * heap allocation.
  *
  * A non-zero callback return aborts parsing and is forwarded as `err` to the
- * optional `on_error` callback. Parser-generated errors are negative; `-1` is
+ * optional `error` callback. Parser-generated errors are negative; `-1` is
  * the generic parser error code. The return value is the number of source bytes
  * consumed before stopping.
  */
@@ -204,20 +161,128 @@ typedef struct {
 } fio___md_ref_s;
 
 typedef struct {
+  /* --- hot flags --- */
+  uint8_t in_footnote;
+  uint8_t tight_list_item_depth;
+  uint8_t paragraph_suppressed_depth;
+  uint8_t rendering_footnotes;
+  uint8_t _pad[4];
+
+  /* --- iteration state --- */
   const fio_md_callbacks_s *cb;
   void *udata;
   char *start;
   char *end;
+  char *p;
   size_t consumed;
-  uint32_t depth;
   int err;
-  fio___md_ref_s ref_cache;
-  fio___md_ref_s refs[FIO_MARKDOWN_MAX_REFERENCES];
-  uint32_t ref_cache_valid;
+
+  /* --- 256-byte nesting array --- */
+  uint8_t nest[FIO_MARKDOWN_MAX_DEPTH + 1];
+
+  /* --- reference cache --- */
+  fio___md_ref_s refs[FIO_MARKDOWN_REF_CACHE_SIZE];
   uint16_t ref_count;
   uint8_t ref_overflow;
-} fio___md_s;
 
+  /* --- table alignment bit-packed cache --- */
+  uint8_t table_align[(FIO_MARKDOWN_MAX_TABLE_COLUMNS + 3) >> 2];
+} fio___md_parser_s;
+
+/* --- Nesting array macros --- */
+#define FIO___MD_NEST_DEPTH(st)   ((st)->nest[0])
+#define FIO___MD_NEST_TYPE(st, d) ((st)->nest[(d)])
+#define FIO___MD_NEST_PUSH(st, t)                                              \
+  do {                                                                         \
+    if ((st)->nest[0] >= FIO_MARKDOWN_MAX_DEPTH) {                             \
+      (st)->err = FIO_MD_ERR_DEPTH;                                            \
+      break;                                                                   \
+    }                                                                          \
+    (st)->nest[++((st)->nest[0])] = (t);                                       \
+  } while (0)
+#define FIO___MD_NEST_POP(st) (--(st)->nest[0])
+#define FIO___MD_NEST_TOP(st) ((st)->nest[(st)->nest[0]])
+
+/* --- Table alignment bit-packed macros --- */
+#define FIO___MD_TABLE_ALIGN_GET(st, col)                                      \
+  (((st)->table_align[(col) >> 2] >> (((col)&3) << 1)) & 3)
+#define FIO___MD_TABLE_ALIGN_SET(st, col, val)                                 \
+  do {                                                                         \
+    uint8_t _shift = ((col)&3) << 1;                                           \
+    (st)->table_align[(col) >> 2] &= ~(3 << _shift);                           \
+    (st)->table_align[(col) >> 2] |= ((val)&3) << _shift;                      \
+  } while (0)
+
+/* --- Event helpers --- */
+FIO_IFUNC void fio___md_event_init(fio___md_parser_s *st, fio_md_event_s *e) {
+  FIO_MEMSET(e, 0, sizeof(*e));
+  e->udata = st->udata;
+}
+
+FIO_IFUNC int fio___md_push(fio___md_parser_s *st, fio_md_event_s *e) {
+  int r;
+  if (!st->cb || !st->cb->push)
+    return 0;
+  e->udata = st->udata;
+  r = st->cb->push(e);
+  st->udata = e->udata;
+  return r;
+}
+
+FIO_IFUNC int fio___md_text(fio___md_parser_s *st, fio_md_event_s *e) {
+  int r;
+  if (!st->cb || !st->cb->text)
+    return 0;
+  e->udata = st->udata;
+  r = st->cb->text(e);
+  st->udata = e->udata;
+  return r;
+}
+
+FIO_IFUNC int fio___md_pop(fio___md_parser_s *st, fio_md_event_s *e) {
+  int r;
+  if (!st->cb || !st->cb->pop)
+    return 0;
+  e->udata = st->udata;
+  r = st->cb->pop(e);
+  st->udata = e->udata;
+  return r;
+}
+
+FIO_IFUNC void fio___md_error(fio___md_parser_s *st, fio_md_event_s *e) {
+  if (!st->cb || !st->cb->error)
+    return;
+  e->udata = st->udata;
+  st->cb->error(e);
+  st->udata = e->udata;
+}
+
+FIO_SFUNC int fio___md_abort(fio___md_parser_s *st,
+                             int err,
+                             char *pos,
+                             fio_md_event_s *e) {
+  if (!err)
+    err = FIO_MD_ERR_GENERIC;
+  st->err = err;
+  if (!st->start) {
+    st->consumed = 0;
+  } else {
+    if (pos < st->start)
+      pos = st->start;
+    if (pos > st->end)
+      pos = st->end;
+    st->consumed = (size_t)(pos - st->start);
+  }
+  if (st->cb && st->cb->error) {
+    fio___md_event_init(st, e);
+    e->err = err;
+    e->consumed = st->consumed;
+    fio___md_error(st, e);
+  }
+  return -1;
+}
+
+/* --- Buffer helpers --- */
 FIO_IFUNC fio_buf_info_s fio___md_buf(char *start, char *end) {
   fio_buf_info_s r = FIO_BUF_INFO0;
   if (end > start) {
@@ -366,64 +431,7 @@ FIO_IFUNC int fio___md_punct(char c) {
   }
 }
 
-FIO_SFUNC int fio___md_abort(fio___md_s *s, int err, char *pos) {
-  if (!err)
-    err = FIO_MD_ERR_GENERIC;
-  s->err = err;
-  if (!s->start) {
-    s->consumed = 0;
-  } else {
-    if (pos < s->start)
-      pos = s->start;
-    if (pos > s->end)
-      pos = s->end;
-    s->consumed = (size_t)(pos - s->start);
-  }
-  if (s->cb && s->cb->on_error)
-    s->cb->on_error(s->udata, err, s->consumed);
-  return -1;
-}
-
-FIO_IFUNC int fio___md_doc_start(fio___md_s *s, fio_buf_info_s source) {
-  int r;
-  if (!s->cb || !s->cb->on_document_start)
-    return 0;
-  r = s->cb->on_document_start(s->udata, source);
-  return r ? fio___md_abort(s, r, source.buf) : 0;
-}
-
-FIO_IFUNC int fio___md_doc_end(fio___md_s *s, fio_buf_info_s source) {
-  int r;
-  if (!s->cb || !s->cb->on_document_end)
-    return 0;
-  r = s->cb->on_document_end(s->udata, source);
-  return r ? fio___md_abort(s, r, s->end) : 0;
-}
-
-FIO_IFUNC int fio___md_block_enter(fio___md_s *s, const fio_md_block_s *b) {
-  int r;
-  if (!s->cb || !s->cb->on_block_enter)
-    return 0;
-  r = s->cb->on_block_enter(s->udata, b);
-  return r ? fio___md_abort(s, r, b->source.buf) : 0;
-}
-
-FIO_IFUNC int fio___md_block_leave(fio___md_s *s, const fio_md_block_s *b) {
-  int r;
-  if (!s->cb || !s->cb->on_block_leave)
-    return 0;
-  r = s->cb->on_block_leave(s->udata, b);
-  return r ? fio___md_abort(s, r, b->source.buf) : 0;
-}
-
-FIO_IFUNC int fio___md_inline(fio___md_s *s, const fio_md_inline_s *i) {
-  int r;
-  if (!s->cb || !s->cb->on_inline)
-    return 0;
-  r = s->cb->on_inline(s->udata, i);
-  return r ? fio___md_abort(s, r, i->source.buf) : 0;
-}
-
+/* --- Label / reference helpers --- */
 FIO_IFUNC char *fio___md_label_end(char *p, char *end) {
   while (p < end) {
     if (*p == '\\' && p + 1 < end) {
@@ -453,8 +461,7 @@ FIO_IFUNC int fio___md_label_next_char(fio_buf_info_s *s, char *c) {
 }
 
 FIO_IFUNC int fio___md_slice_eq_lc(fio_buf_info_s a, fio_buf_info_s b) {
-  char ca;
-  char cb;
+  char ca, cb;
   while (fio___md_label_next_char(&a, &ca)) {
     if (!fio___md_label_next_char(&b, &cb) ||
         fio___md_ascii_lower(ca) != fio___md_ascii_lower(cb))
@@ -478,9 +485,7 @@ FIO_SFUNC int fio___md_ref_title(char *p,
                                  char *end,
                                  fio_buf_info_s *title,
                                  char **after) {
-  char q;
-  char close;
-  char *title_start;
+  char q, close, *title_start;
   p = fio___md_ltrim(p, le);
   if (p == le)
     return 0;
@@ -519,6 +524,36 @@ FIO_SFUNC int fio___md_ref_title(char *p,
   }
 }
 
+/* Find the end of a reference definition label (may span multiple lines).
+   Returns pointer to the closing ']' or NULL if not found before end.
+   Sets *label_end to the position after ']' and *label_line_end to the
+   line end where ']' was found. */
+FIO_IFUNC char *fio___md_ref_label_end(char *p,
+                                       char *end,
+                                       char **label_line_end) {
+  while (p < end) {
+    if (*p == '\\' && p + 1 < end) {
+      p += 2;
+      continue;
+    }
+    if (*p == ']') {
+      if (label_line_end)
+        *label_line_end = fio___md_line_end(p, end);
+      return p;
+    }
+    if (*p == '\n' || *p == '\r') {
+      /* label may span lines, skip line ending */
+      if (*p == '\r')
+        ++p;
+      if (p < end && *p == '\n')
+        ++p;
+      continue;
+    }
+    ++p;
+  }
+  return NULL;
+}
+
 FIO_SFUNC int fio___md_ref_def(char *ls,
                                char *end,
                                fio_buf_info_s *label,
@@ -527,24 +562,22 @@ FIO_SFUNC int fio___md_ref_def(char *ls,
                                char **after) {
   char *le = fio___md_line_end(ls, end);
   char *p = fio___md_ltrim(ls, le);
-  char *label_start;
-  char *label_end;
-  char *dst_start;
-  char *dst_end;
-  char *dst_line_end;
+  char *label_start, *label_end, *label_le;
+  char *dst_start, *dst_end, *dst_line_end;
   char *ref_after;
-  uint8_t angled_dst = 0;
-  uint8_t has_space_after_dst = 0;
+  uint8_t angled_dst = 0, has_space_after_dst = 0;
   if ((uint32_t)(p - ls) > FIO___MD_MAX_MARKER_INDENT || p == le || *p != '[')
     return 0;
   label_start = ++p;
-  p = fio___md_label_end(p, le);
-  if (p == le || p == label_start || p + 1 == le || p[1] != ':')
+  label_end = fio___md_ref_label_end(p, end, &label_le);
+  if (!label_end || label_end == label_start || label_end + 1 >= end ||
+      label_end[1] != ':')
     return 0;
-  label_end = p;
   if (*label_start == '^')
     return 0;
-  p = fio___md_ltrim(p + 2, le);
+  /* After ]: must have destination on same line or next */
+  p = fio___md_ltrim(label_end + 2, label_le);
+  le = label_le;
   if (p == le) {
     p = fio___md_line_next(le, end);
     if (p >= end)
@@ -589,12 +622,18 @@ FIO_SFUNC int fio___md_ref_def(char *ls,
       char *tle = fio___md_line_end(title_line, end);
       char *tt = fio___md_ltrim(title_line, tle);
       if (tt < tle && (*tt == '"' || *tt == '\'' || *tt == '(')) {
-        if (!fio___md_ref_title(title_line,
-                                fio___md_rtrim(title_line, tle),
-                                end,
-                                title,
-                                &ref_after))
-          return 0;
+        fio_buf_info_s try_title = FIO_BUF_INFO0;
+        char *try_after = ref_after;
+        if (fio___md_ref_title(title_line,
+                               fio___md_rtrim(title_line, tle),
+                               end,
+                               &try_title,
+                               &try_after)) {
+          *title = try_title;
+          ref_after = try_after;
+        }
+        /* If title parsing fails, the ref def is still valid with no title.
+           The next line is not consumed. */
       }
     }
   }
@@ -608,8 +647,7 @@ FIO_SFUNC int fio___md_footnote_line(char *ls,
                                      fio_buf_info_s *label,
                                      char **content) {
   char *p = fio___md_ltrim(ls, le);
-  char *label_start;
-  char *label_end;
+  char *label_start, *label_end;
   if ((uint32_t)(p - ls) > FIO___MD_MAX_MARKER_INDENT || p + 3 >= le ||
       p[0] != '[' || p[1] != '^')
     return 0;
@@ -641,500 +679,134 @@ FIO_SFUNC char *fio___md_footnote_end(char *p, char *end) {
   return scan;
 }
 
-FIO_SFUNC fio___md_ref_s *fio___md_ref_find(fio___md_s *s,
+FIO_SFUNC fio___md_ref_s *fio___md_ref_find(fio___md_parser_s *st,
                                             fio_buf_info_s label) {
+  uint16_t i;
   label.buf = fio___md_ltrim(label.buf, label.buf + label.len);
   label.len =
       (size_t)(fio___md_rtrim(label.buf, label.buf + label.len) - label.buf);
-  if (s->ref_cache_valid && fio___md_slice_eq_lc(label, s->ref_cache.label))
-    return &s->ref_cache;
-  for (uint16_t i = 0; i < s->ref_count; ++i) {
-    if (fio___md_slice_eq_lc(label, s->refs[i].label)) {
-      s->ref_cache = s->refs[i];
-      s->ref_cache_valid = 1;
-      return &s->ref_cache;
-    }
+  for (i = 0; i < st->ref_count; ++i) {
+    if (fio___md_slice_eq_lc(label, st->refs[i].label))
+      return &st->refs[i];
   }
-  if (s->ref_overflow) {
-    char *p = s->start;
-    while (p < s->end) {
+  if (st->ref_overflow) {
+    char *p = st->start;
+    while (p < st->end) {
       char *after = NULL;
       fio_buf_info_s ref_label = FIO_BUF_INFO0;
       fio_buf_info_s dst = FIO_BUF_INFO0;
       fio_buf_info_s title = FIO_BUF_INFO0;
-      if (fio___md_ref_def(p, s->end, &ref_label, &dst, &title, &after) &&
+      if (fio___md_ref_def(p, st->end, &ref_label, &dst, &title, &after) &&
           fio___md_slice_eq_lc(label, ref_label)) {
-        s->ref_cache.label = ref_label;
-        s->ref_cache.destination = dst;
-        s->ref_cache.title = title;
-        s->ref_cache_valid = 1;
-        return &s->ref_cache;
+        /* Cache the found ref if there's room */
+        if (st->ref_count < FIO_MARKDOWN_REF_CACHE_SIZE) {
+          st->refs[st->ref_count].label = ref_label;
+          st->refs[st->ref_count].destination = dst;
+          st->refs[st->ref_count].title = title;
+          ++st->ref_count;
+        }
+        return &st->refs[st->ref_count - 1];
       }
       p = after ? after
-                : fio___md_line_next(fio___md_line_end(p, s->end), s->end);
+                : fio___md_line_next(fio___md_line_end(p, st->end), st->end);
     }
   }
   return NULL;
 }
 
-FIO_SFUNC void fio___md_ref_index(fio___md_s *s) {
-  char *p = s->start;
-  while (p < s->end) {
+/* Forward declarations for block helpers used in ref_index */
+FIO_SFUNC int fio___md_fence(char *ls,
+                             char *le,
+                             fio_buf_info_s *marker,
+                             fio_buf_info_s *info);
+FIO_SFUNC int fio___md_fence_close(char *ls, char *le, fio_buf_info_s marker);
+FIO_SFUNC int fio___md_html_block_start(char *ls, char *le);
+FIO_SFUNC int fio___md_html_long_block(char *ls, char *le);
+FIO_SFUNC int fio___md_html_long_close(char *ls, char *le);
+
+FIO_SFUNC void fio___md_ref_index(fio___md_parser_s *st) {
+  char *p = st->start;
+  while (p < st->end) {
+    char *le = fio___md_line_end(p, st->end);
+    char *next = fio___md_line_next(le, st->end);
+    // char *trim = fio___md_ltrim(p, le);
     char *after = NULL;
     fio_buf_info_s label = FIO_BUF_INFO0;
     fio_buf_info_s dst = FIO_BUF_INFO0;
     fio_buf_info_s title = FIO_BUF_INFO0;
-    if (fio___md_ref_def(p, s->end, &label, &dst, &title, &after)) {
+    fio_buf_info_s fence_marker = FIO_BUF_INFO0;
+    fio_buf_info_s fence_info = FIO_BUF_INFO0;
+    /* Skip fenced code blocks during pre-scan */
+    if (fio___md_fence(p, le, &fence_marker, &fence_info)) {
+      char *q = next;
+      while (q < st->end) {
+        char *qe = fio___md_line_end(q, st->end);
+        if (fio___md_fence_close(q, qe, fence_marker)) {
+          p = fio___md_line_next(qe, st->end);
+          break;
+        }
+        q = fio___md_line_next(qe, st->end);
+      }
+      if (q >= st->end)
+        break;
+      continue;
+    }
+    /* Skip indented code blocks during pre-scan */
+    if (fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH) {
+      while (next < st->end) {
+        char *ne = fio___md_line_end(next, st->end);
+        if (!fio___md_is_blank(next, ne) &&
+            fio___md_indent(next, ne) < FIO___MD_TAB_WIDTH)
+          break;
+        next = fio___md_line_next(ne, st->end);
+      }
+      p = next;
+      continue;
+    }
+    /* Skip HTML blocks during pre-scan */
+    if (fio___md_html_block_start(p, le)) {
+      if (fio___md_html_long_block(p, le)) {
+        if (!fio___md_html_long_close(p, le)) {
+          while (next < st->end) {
+            char *line = next;
+            char *ne = fio___md_line_end(line, st->end);
+            next = fio___md_line_next(ne, st->end);
+            if (fio___md_html_long_close(line, ne))
+              break;
+          }
+        }
+      } else {
+        while (next < st->end) {
+          char *ne = fio___md_line_end(next, st->end);
+          if (fio___md_is_blank(next, ne))
+            break;
+          next = fio___md_line_next(ne, st->end);
+        }
+      }
+      p = next;
+      continue;
+    }
+    if (fio___md_ref_def(p, st->end, &label, &dst, &title, &after)) {
       uint16_t i = 0;
-      while (i < s->ref_count && !fio___md_slice_eq_lc(label, s->refs[i].label))
+      while (i < st->ref_count &&
+             !fio___md_slice_eq_lc(label, st->refs[i].label))
         ++i;
-      if (i == s->ref_count) {
-        if (s->ref_count < FIO_MARKDOWN_MAX_REFERENCES) {
-          s->refs[s->ref_count].label = label;
-          s->refs[s->ref_count].destination = dst;
-          s->refs[s->ref_count].title = title;
-          ++s->ref_count;
+      if (i == st->ref_count) {
+        if (st->ref_count < FIO_MARKDOWN_REF_CACHE_SIZE) {
+          st->refs[st->ref_count].label = label;
+          st->refs[st->ref_count].destination = dst;
+          st->refs[st->ref_count].title = title;
+          ++st->ref_count;
         } else {
-          s->ref_overflow = 1;
+          st->ref_overflow = 1;
         }
       }
     }
-    p = after ? after
-              : fio___md_line_next(fio___md_line_end(p, s->end), s->end);
+    p = after ? after : next;
   }
 }
 
-FIO_SFUNC int fio___md_parse_inline_span(fio___md_s *s, char *p, char *end);
-FIO_SFUNC int fio___md_inline_break(fio___md_s *s,
-                                    int hard,
-                                    char *break_start,
-                                    char *break_end);
-
-FIO_SFUNC char *fio___md_find_closing(char *p,
-                                      char *end,
-                                      char marker,
-                                      size_t count) {
-  while (p < end) {
-    size_t n = 0;
-    if (*p == '\\') {
-      p += (p + 1 < end) ? 2 : 1;
-      continue;
-    }
-    while (p + n < end && p[n] == marker)
-      ++n;
-    if (n >= count)
-      return p;
-    ++p;
-  }
-  return NULL;
-}
-
-FIO_SFUNC int fio___md_inline_text(fio___md_s *s, char *p, char *end) {
-  fio_md_inline_s i = {0};
-  if (p == end)
-    return 0;
-  i.type = FIO_MD_INLINE_TEXT;
-  i.event = FIO_MD_EVENT_LEAF;
-  i.source = fio___md_buf(p, end);
-  i.text = i.source;
-  return fio___md_inline(s, &i);
-}
-
-FIO_SFUNC int fio___md_inline_container(fio___md_s *s,
-                                        fio_md_inline_type_e type,
-                                        char *open,
-                                        char *inner,
-                                        char *inner_end,
-                                        char *close_end) {
-  fio_md_inline_s i = {0};
-  if (s->depth >= FIO_MARKDOWN_MAX_DEPTH)
-    return fio___md_abort(s, FIO_MD_ERR_DEPTH, open);
-  i.type = type;
-  i.event = FIO_MD_EVENT_ENTER;
-  i.source = fio___md_buf(open, close_end);
-  i.text = fio___md_buf(inner, inner_end);
-  if (fio___md_inline(s, &i))
-    return -1;
-  ++s->depth;
-  if (fio___md_parse_inline_span(s, inner, inner_end))
-    return -1;
-  --s->depth;
-  i.event = FIO_MD_EVENT_LEAVE;
-  return fio___md_inline(s, &i);
-}
-
-FIO_SFUNC int fio___md_try_link(fio___md_s *s,
-                                char *p,
-                                char *end,
-                                char **after) {
-  char *label_start = p + (*p == '!' ? 2 : 1);
-  char *label_end = label_start;
-  int is_image = (*p == '!');
-  fio_md_inline_s i = {0};
-  if ((is_image && p + 1 == end) || (is_image && p[1] != '['))
-    return 0;
-  label_end = fio___md_label_end(label_end, end);
-  if (label_end == end)
-    return 0;
-  if (label_end + 1 < end && label_end[1] == '(') {
-    char *dst_start = fio___md_ltrim(label_end + 2, end);
-    char *dst_end = dst_start;
-    char *title_start = NULL;
-    char *title_end = NULL;
-    char *q;
-    while (dst_end < end && *dst_end != ')' && *dst_end != ' ' &&
-           *dst_end != '\t')
-      ++dst_end;
-    q = fio___md_ltrim(dst_end, end);
-    if (q < end && (*q == '"' || *q == '\'')) {
-      char quote = *q++;
-      title_start = q;
-      while (q < end && *q != quote)
-        ++q;
-      if (q < end) {
-        title_end = q++;
-        q = fio___md_ltrim(q, end);
-      }
-    }
-    while (q < end && *q != ')')
-      ++q;
-    if (q == end)
-      return 0;
-    i.type = is_image ? FIO_MD_INLINE_IMAGE : FIO_MD_INLINE_LINK;
-    i.event = is_image ? FIO_MD_EVENT_LEAF : FIO_MD_EVENT_ENTER;
-    i.source = fio___md_buf(p, q + 1);
-    i.text = fio___md_buf(label_start, label_end);
-    i.destination = fio___md_buf(dst_start, dst_end);
-    if (title_start && title_end)
-      i.title = fio___md_buf(title_start, title_end);
-    if (fio___md_inline(s, &i))
-      return -1;
-    if (!is_image) {
-      if (s->depth >= FIO_MARKDOWN_MAX_DEPTH)
-        return fio___md_abort(s, FIO_MD_ERR_DEPTH, p);
-      ++s->depth;
-      if (fio___md_parse_inline_span(s, label_start, label_end))
-        return -1;
-      --s->depth;
-      i.event = FIO_MD_EVENT_LEAVE;
-      if (fio___md_inline(s, &i))
-        return -1;
-    }
-    *after = q + 1;
-    return 1;
-  }
-  if (!is_image && label_end + 1 < end && label_end[1] == '[') {
-    char *ref_start = label_end + 2;
-    char *ref_end = ref_start;
-    fio_buf_info_s ref_label;
-    fio___md_ref_s *ref;
-    ref_end = fio___md_label_end(ref_end, end);
-    if (ref_end == end)
-      return 0;
-    ref_label = (ref_start == ref_end) ? fio___md_buf(label_start, label_end)
-                                       : fio___md_buf(ref_start, ref_end);
-    ref = fio___md_ref_find(s, ref_label);
-    if (!ref)
-      return 0;
-    i.type = FIO_MD_INLINE_LINK;
-    i.event = FIO_MD_EVENT_ENTER;
-    i.source = fio___md_buf(p, ref_end + 1);
-    i.text = fio___md_buf(label_start, label_end);
-    i.destination = ref->destination;
-    i.title = ref->title;
-    i.reference = ref_label;
-    if (fio___md_inline(s, &i))
-      return -1;
-    ++s->depth;
-    if (fio___md_parse_inline_span(s, label_start, label_end))
-      return -1;
-    --s->depth;
-    i.event = FIO_MD_EVENT_LEAVE;
-    if (fio___md_inline(s, &i))
-      return -1;
-    *after = ref_end + 1;
-    return 1;
-  }
-  if (!is_image) {
-    fio___md_ref_s *ref =
-        fio___md_ref_find(s, fio___md_buf(label_start, label_end));
-    if (!ref)
-      return 0;
-    i.type = FIO_MD_INLINE_LINK;
-    i.event = FIO_MD_EVENT_ENTER;
-    i.source = fio___md_buf(p, label_end + 1);
-    i.text = fio___md_buf(label_start, label_end);
-    i.destination = ref->destination;
-    i.title = ref->title;
-    i.reference = i.text;
-    if (fio___md_inline(s, &i))
-      return -1;
-    ++s->depth;
-    if (fio___md_parse_inline_span(s, label_start, label_end))
-      return -1;
-    --s->depth;
-    i.event = FIO_MD_EVENT_LEAVE;
-    if (fio___md_inline(s, &i))
-      return -1;
-    *after = label_end + 1;
-    return 1;
-  }
-  return 0;
-}
-
-FIO_SFUNC int fio___md_try_autolink_or_html(fio___md_s *s,
-                                            char *p,
-                                            char *end,
-                                            char **after) {
-  char *q = p + 1;
-  fio_md_inline_s i = {0};
-  if (p == end || *p != '<')
-    return 0;
-  while (q < end && *q != '>' && *q != ' ' && *q != '\t')
-    ++q;
-  if (q < end && *q == '>' &&
-      (fio___md_prefix_lc(p + 1, q, "http://") ||
-       fio___md_prefix_lc(p + 1, q, "https://") ||
-       (FIO_MEMCHR(p + 1, '@', (size_t)(q - p - 1)) != NULL))) {
-    i.type = FIO_MD_INLINE_AUTOLINK;
-    i.event = FIO_MD_EVENT_LEAF;
-    i.source = fio___md_buf(p, q + 1);
-    i.destination = fio___md_buf(p + 1, q);
-    *after = q + 1;
-    return fio___md_inline(s, &i) ? -1 : 1;
-  }
-  q = p + 1;
-  while (q < end && *q != '>')
-    ++q;
-  if (q < end && *q == '>') {
-    i.type = FIO_MD_INLINE_HTML;
-    i.event = FIO_MD_EVENT_LEAF;
-    i.source = fio___md_buf(p, q + 1);
-    i.text = i.source;
-    *after = q + 1;
-    return fio___md_inline(s, &i) ? -1 : 1;
-  }
-  return 0;
-}
-
-FIO_SFUNC int fio___md_parse_inline_span(fio___md_s *s, char *p, char *end) {
-  char *text = p;
-  while (p < end) {
-    char *after = p;
-    if (*p == '\n' || *p == '\r') {
-      int hard = 0;
-      char *text_end = p;
-      char *next = p;
-      if (text_end > text && text_end[-1] == '\\') {
-        hard = 1;
-        --text_end;
-      } else if (text_end > text + 1 && text_end[-1] == ' ' &&
-                 text_end[-2] == ' ') {
-        hard = 1;
-        text_end -= 2;
-      } else {
-        text_end = fio___md_rtrim(text, text_end);
-      }
-      if (fio___md_inline_text(s, text, text_end))
-        return -1;
-      if (*next == '\r')
-        ++next;
-      if (next < end && *next == '\n')
-        ++next;
-      if (fio___md_inline_break(s, hard, text_end, next))
-        return -1;
-      p = fio___md_ltrim(next, end);
-      text = p;
-      continue;
-    }
-    if (*p == '`') {
-      size_t n = 1;
-      char *q;
-      fio_md_inline_s i = {0};
-      while (p + n < end && p[n] == '`')
-        ++n;
-      q = fio___md_find_closing(p + n, end, '`', n);
-      if (q) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        i.type = FIO_MD_INLINE_CODE_SPAN;
-        i.event = FIO_MD_EVENT_LEAF;
-        i.source = fio___md_buf(p, q + n);
-        i.text = fio___md_buf(p + n, q);
-        if (fio___md_inline(s, &i))
-          return -1;
-        p = q + n;
-        text = p;
-        continue;
-      }
-    }
-    if ((*p == '*' || *p == '_') && p + 1 < end && p[1] == *p) {
-      char *q = fio___md_find_closing(p + 2, end, *p, 2);
-      if (q && q > p + 2 && fio___md_span_has_nonspace(p + 2, q)) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        if (fio___md_inline_container(s,
-                                      FIO_MD_INLINE_STRONG,
-                                      p,
-                                      p + 2,
-                                      q,
-                                      q + 2))
-          return -1;
-        p = q + 2;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '*' || *p == '_') {
-      char *q = fio___md_find_closing(p + 1, end, *p, 1);
-      if (q && q > p + 1 && fio___md_span_has_nonspace(p + 1, q)) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        if (fio___md_inline_container(s,
-                                      FIO_MD_INLINE_EMPHASIS,
-                                      p,
-                                      p + 1,
-                                      q,
-                                      q + 1))
-          return -1;
-        p = q + 1;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '~' && p + 1 < end && p[1] == '~') {
-      char *q = fio___md_find_closing(p + 2, end, '~', 2);
-      if (q && fio___md_span_has_nonspace(p + 2, q)) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        if (fio___md_inline_container(s,
-                                      FIO_MD_INLINE_STRIKETHROUGH,
-                                      p,
-                                      p + 2,
-                                      q,
-                                      q + 2))
-          return -1;
-        p = q + 2;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '!' || *p == '[') {
-      int r;
-      if (*p == '!' && (p + 1 == end || p[1] != '[')) {
-        ++p;
-        continue;
-      }
-      if (text < p) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        text = p;
-        continue;
-      }
-      r = fio___md_try_link(s, p, end, &after);
-      if (r < 0)
-        return -1;
-      if (r) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        p = after;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '<') {
-      int r;
-      if (text < p) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        text = p;
-        continue;
-      }
-      r = fio___md_try_autolink_or_html(s, p, end, &after);
-      if (r < 0)
-        return -1;
-      if (r) {
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        p = after;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '\\' && p + 1 < end && fio___md_punct(p[1])) {
-      fio_md_inline_s i = {0};
-      if (fio___md_inline_text(s, text, p))
-        return -1;
-      i.type = FIO_MD_INLINE_ESCAPE;
-      i.event = FIO_MD_EVENT_LEAF;
-      i.source = fio___md_buf(p, p + 2);
-      i.text = fio___md_buf(p + 1, p + 2);
-      if (fio___md_inline(s, &i))
-        return -1;
-      p += 2;
-      text = p;
-      continue;
-    }
-    if (*p == '[' && p + 2 < end && p[1] == '^') {
-      char *q = fio___md_label_end(p + 2, end);
-      if (q < end && q > p + 2) {
-        fio_md_inline_s i = {0};
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        i.type = FIO_MD_INLINE_FOOTNOTE_REF;
-        i.event = FIO_MD_EVENT_LEAF;
-        i.source = fio___md_buf(p, q + 1);
-        i.reference = fio___md_buf(p + 2, q);
-        if (fio___md_inline(s, &i))
-          return -1;
-        p = q + 1;
-        text = p;
-        continue;
-      }
-    }
-    if (*p == '&') {
-      char *q = p + 1;
-      while (q < end && q - p < FIO___MD_MAX_ENTITY_LEN &&
-             ((*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') ||
-              (*q >= '0' && *q <= '9') || *q == '#'))
-        ++q;
-      if (q < end && *q == ';') {
-        fio_md_inline_s i = {0};
-        if (fio___md_inline_text(s, text, p))
-          return -1;
-        i.type = FIO_MD_INLINE_ENTITY;
-        i.event = FIO_MD_EVENT_LEAF;
-        i.source = fio___md_buf(p, q + 1);
-        i.text = i.source;
-        if (fio___md_inline(s, &i))
-          return -1;
-        p = q + 1;
-        text = p;
-        continue;
-      }
-    }
-    ++p;
-  }
-  return fio___md_inline_text(s, text, end);
-}
-
-FIO_SFUNC int fio___md_inline_break(fio___md_s *s,
-                                    int hard,
-                                    char *break_start,
-                                    char *break_end) {
-  fio_md_inline_s br = {0};
-  br.type = hard ? FIO_MD_INLINE_HARD_BREAK : FIO_MD_INLINE_SOFT_BREAK;
-  br.event = FIO_MD_EVENT_LEAF;
-  br.source = fio___md_buf(break_start, break_end);
-  return fio___md_inline(s, &br);
-}
-
-FIO_SFUNC int fio___md_inline_lines(fio___md_s *s, char *p, char *end) {
-  p = fio___md_ltrim(p, end);
-  end = fio___md_rtrim(p, end);
-  return fio___md_parse_inline_span(s, p, end);
-}
-
+/* --- Block detection helpers --- */
 FIO_SFUNC int fio___md_atx(char *ls,
                            char *le,
                            uint8_t *level,
@@ -1235,7 +907,7 @@ FIO_SFUNC int fio___md_fence(char *ls,
 FIO_SFUNC int fio___md_fence_close(char *ls, char *le, fio_buf_info_s marker) {
   char *p = fio___md_ltrim(ls, le);
   size_t n = 0;
-  if ((uint32_t)(p - ls) > FIO___MD_MAX_MARKER_INDENT || !marker.len)
+  if (!marker.len)
     return 0;
   while (p < le && *p == marker.buf[0]) {
     ++n;
@@ -1278,6 +950,8 @@ FIO_SFUNC int fio___md_list_marker(char *ls,
   ++p;
   if (p < le && *p != ' ' && *p != '\t')
     return 0;
+  if (num < 1 || num > 999999999)
+    return 0;
   *ordered = 1;
   *start = num;
   *marker = fio___md_buf(m, p);
@@ -1291,8 +965,7 @@ FIO_SFUNC uint32_t fio___md_task_flags(char **content, char *end) {
       (p[1] == ' ' || p[1] == 'x' || p[1] == 'X') &&
       (p + 3 == end || p[3] == ' ' || p[3] == '\t')) {
     *content = fio___md_ltrim(p + 3, end);
-    return FIO_MD_BLOCK_F_TASK |
-           ((p[1] != ' ') ? FIO_MD_BLOCK_F_TASK_CHECKED : 0);
+    return FIO_MD_F_TASK | ((p[1] != ' ') ? FIO_MD_F_TASK_CHECKED : 0);
   }
   return 0;
 }
@@ -1324,7 +997,7 @@ FIO_SFUNC char *fio___md_table_next_pipe(char *p, char *end) {
 
 FIO_SFUNC int fio___md_table_delim(char *ls,
                                    char *le,
-                                   uint8_t *aligns,
+                                   fio___md_parser_s *st,
                                    uint16_t *columns) {
   char *p = fio___md_ltrim(ls, le);
   uint16_t col = 0;
@@ -1335,18 +1008,18 @@ FIO_SFUNC int fio___md_table_delim(char *ls,
     ++p;
   if (p < le && le[-1] == '|')
     --le;
-  while (p < le && col < FIO_MARKDOWN_MAX_TABLE_COLUMNS) {
+  while (p < le && col < ((FIO_MARKDOWN_MAX_TABLE_COLUMNS + 3) >> 2) * 4) {
     char *cell = p;
     char *ce;
     char *t;
+    uint8_t align = FIO_MD_ALIGN_NONE;
     p = fio___md_table_next_pipe(p, le);
     ce = fio___md_rtrim(cell, p);
     t = fio___md_ltrim(cell, ce);
     if (t == ce)
       return 0;
-    aligns[col] = FIO_MD_ALIGN_NONE;
     if (*t == ':') {
-      aligns[col] = FIO_MD_ALIGN_LEFT;
+      align = FIO_MD_ALIGN_LEFT;
       ++t;
     }
     if (t == ce || *t != '-')
@@ -1354,13 +1027,14 @@ FIO_SFUNC int fio___md_table_delim(char *ls,
     while (t < ce && *t == '-')
       ++t;
     if (t < ce && *t == ':') {
-      aligns[col] = (aligns[col] == FIO_MD_ALIGN_LEFT) ? FIO_MD_ALIGN_CENTER
-                                                       : FIO_MD_ALIGN_RIGHT;
+      align = (align == FIO_MD_ALIGN_LEFT) ? FIO_MD_ALIGN_CENTER
+                                           : FIO_MD_ALIGN_RIGHT;
       ++t;
     }
     t = fio___md_ltrim(t, ce);
     if (t != ce)
       return 0;
+    FIO___MD_TABLE_ALIGN_SET(st, col, align);
     ++col;
     if (p < le && *p == '|')
       ++p;
@@ -1475,78 +1149,25 @@ FIO_SFUNC int fio___md_html_block_start(char *ls, char *le) {
   return q == le;
 }
 
-FIO_SFUNC int fio___md_parse_paragraph(fio___md_s *s, char *p, char *end) {
-  fio_md_block_s b = {0};
-  b.type = FIO_MD_BLOCK_PARAGRAPH;
-  b.source = fio___md_buf(p, end);
-  if (fio___md_block_enter(s, &b))
-    return -1;
-  if (fio___md_inline_lines(s, p, end))
-    return -1;
-  return fio___md_block_leave(s, &b);
+FIO_SFUNC int fio___md_block_start_line(char *p, char *le) {
+  uint8_t level = 0;
+  int ordered = 0;
+  uint64_t start_num = 0;
+  char *content = NULL;
+  fio_buf_info_s marker = FIO_BUF_INFO0;
+  fio_buf_info_s info = FIO_BUF_INFO0;
+  char *content_start = NULL;
+  char *content_end = NULL;
+  char *trim = fio___md_ltrim(p, le);
+  return fio___md_atx(p, le, &level, &content_start, &content_end, &marker) ||
+         fio___md_thematic(p, le) ||
+         fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH ||
+         fio___md_fence(p, le, &marker, &info) ||
+         fio___md_html_block_start(p, le) ||
+         fio___md_list_marker(p, le, &ordered, &start_num, &content, &marker) ||
+         (trim < le && *trim == '>' &&
+          (uint32_t)(trim - p) <= FIO___MD_MAX_MARKER_INDENT);
 }
-
-FIO_SFUNC int fio___md_emit_html_block(fio___md_s *s, char *p, char *end) {
-  fio_md_block_s b = {0};
-  b.type = FIO_MD_BLOCK_HTML;
-  b.source = fio___md_buf(p, end);
-  b.content = b.source;
-  return (fio___md_block_enter(s, &b) || fio___md_block_leave(s, &b)) ? -1 : 0;
-}
-
-FIO_SFUNC int fio___md_parse_table_row(fio___md_s *s,
-                                       char *ls,
-                                       char *le,
-                                       uint8_t *aligns,
-                                       uint16_t columns) {
-  char *p = ls;
-  uint16_t col = 0;
-  fio_md_block_s row = {0};
-  row.type = FIO_MD_BLOCK_TABLE_ROW;
-  row.source = fio___md_buf(ls, le);
-  row.columns = columns;
-  if (fio___md_block_enter(s, &row))
-    return -1;
-  le = fio___md_rtrim(p, le);
-  if (p < le && *p == '|')
-    ++p;
-  if (p < le && le[-1] == '|')
-    --le;
-  while (p <= le && col < columns) {
-    char *cell_start = p;
-    char *cell_end;
-    fio_md_block_s cell = {0};
-    p = fio___md_table_next_pipe(p, le);
-    cell_end = p;
-    cell.type = FIO_MD_BLOCK_TABLE_CELL;
-    cell.source = fio___md_buf(cell_start, cell_end);
-    cell.content = fio___md_buf(fio___md_ltrim(cell_start, cell_end),
-                                fio___md_rtrim(cell_start, cell_end));
-    cell.column = col;
-    cell.columns = columns;
-    cell.align = aligns[col];
-    if (fio___md_block_enter(s, &cell))
-      return -1;
-    if (fio___md_parse_inline_span(s,
-                                   cell.content.buf,
-                                   cell.content.buf + cell.content.len))
-      return -1;
-    if (fio___md_block_leave(s, &cell))
-      return -1;
-    ++col;
-    if (p < le && *p == '|')
-      ++p;
-    else
-      break;
-  }
-  return fio___md_block_leave(s, &row);
-}
-
-FIO_SFUNC int fio___md_parse_blocks(fio___md_s *s, char *p, char *end);
-FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
-                                       char *p,
-                                       char *end,
-                                       uint8_t initial_padding);
 
 FIO_SFUNC int fio___md_blockquote_line(char *p,
                                        char *end,
@@ -1571,27 +1192,747 @@ FIO_SFUNC int fio___md_blockquote_line(char *p,
   return 1;
 }
 
-FIO_SFUNC int fio___md_block_start_line(char *p, char *le) {
-  uint8_t level = 0;
-  int ordered = 0;
-  uint64_t start_num = 0;
-  char *content = NULL;
-  fio_buf_info_s marker = FIO_BUF_INFO0;
-  fio_buf_info_s info = FIO_BUF_INFO0;
-  char *content_start = NULL;
-  char *content_end = NULL;
-  char *trim = fio___md_ltrim(p, le);
-  return fio___md_atx(p, le, &level, &content_start, &content_end, &marker) ||
-         fio___md_thematic(p, le) ||
-         fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH ||
-         fio___md_fence(p, le, &marker, &info) ||
-         fio___md_html_block_start(p, le) ||
-         fio___md_list_marker(p, le, &ordered, &start_num, &content, &marker) ||
-         (trim < le && *trim == '>' &&
-          (uint32_t)(trim - p) <= FIO___MD_MAX_MARKER_INDENT);
+/* *****************************************************************************
+Inline Parser
+***************************************************************************** */
+
+/* Forward declarations */
+FIO_SFUNC int fio___md_parse_inline_span(fio___md_parser_s *st,
+                                         char *p,
+                                         char *end);
+
+/* Check if a * or _ run at run_end is left-flanking (run_end points to char
+ * after run) */
+FIO_IFUNC int fio___md_left_flanking(char *run_start,
+                                     char *run_end,
+                                     char *buf_start,
+                                     char *buf_end) {
+  char after = (run_end < buf_end) ? *run_end : ' ';
+  char before = (run_start > buf_start) ? run_start[-1] : ' ';
+  if (after == ' ' || after == '\t' || after == '\n' || after == '\r')
+    return 0;
+  if (!fio___md_punct(after))
+    return 1;
+  return fio___md_punct(before) || before == ' ' || before == '\t' ||
+         before == '\n' || before == '\r';
 }
 
-FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
+/* Check if a * or _ run at run_start is right-flanking */
+FIO_IFUNC int fio___md_right_flanking(char *run_start,
+                                      char *run_end,
+                                      char *buf_start,
+                                      char *buf_end) {
+  char before = (run_start > buf_start) ? run_start[-1] : ' ';
+  char after = (run_end < buf_end) ? *run_end : ' ';
+  if (before == ' ' || before == '\t' || before == '\n' || before == '\r')
+    return 0;
+  if (!fio___md_punct(before))
+    return 1;
+  return fio___md_punct(after) || after == ' ' || after == '\t' ||
+         after == '\n' || after == '\r';
+}
+
+/* Check if an outer container of the given type is open in the nesting stack */
+FIO_IFUNC int fio___md_has_open_container(fio___md_parser_s *st, uint8_t type) {
+  uint8_t d = st->nest[0];
+  while (d > 0) {
+    if (st->nest[d] == type)
+      return 1;
+    --d;
+  }
+  return 0;
+}
+
+/* Emit a text event */
+FIO_SFUNC int fio___md_inline_text(fio___md_parser_s *st,
+                                   char *start,
+                                   char *end) {
+  fio_md_event_s e;
+  if (start == end)
+    return 0;
+  fio___md_event_init(st, &e);
+  e.type = FIO_MD_TEXT;
+  e.source = fio___md_buf(start, end);
+  e.text = e.source;
+  return fio___md_text(st, &e);
+}
+
+/* Try to find an emphasis closer. If an outer container's closer is found
+   first, return NULL (abort). */
+FIO_SFUNC char *fio___md_find_emphasis_closer(fio___md_parser_s *st,
+                                              char *p,
+                                              char *end,
+                                              char marker,
+                                              size_t run_len) {
+  char *q = p;
+  while (q < end) {
+    if (*q == '\\' && q + 1 < end) {
+      q += 2;
+      continue;
+    }
+    if (*q == marker) {
+      char *run_start = q;
+      size_t n = 1;
+      while (q + n < end && q[n] == marker)
+        ++n;
+      /* If this run could close an outer container, abort */
+      if (marker == '*' && n >= 2 &&
+          fio___md_has_open_container(st, FIO_MD_STRONG_STAR))
+        return NULL;
+      if (marker == '_' && n >= 2 &&
+          fio___md_has_open_container(st, FIO_MD_STRONG_UNDERSCORE))
+        return NULL;
+      if (n == run_len && fio___md_right_flanking(run_start,
+                                                  run_start + n,
+                                                  st->start,
+                                                  st->end)) {
+        /* For _, also check intraword restriction */
+        if (marker == '_') {
+          int lf = fio___md_left_flanking(run_start,
+                                          run_start + n,
+                                          st->start,
+                                          st->end);
+          if (lf)
+            return NULL; /* intraword _ cannot close */
+        }
+        return run_start;
+      }
+      q += n;
+      continue;
+    }
+    ++q;
+  }
+  return NULL;
+}
+
+/* Try to resolve a link or image */
+FIO_SFUNC int fio___md_try_link(fio___md_parser_s *st,
+                                char *p,
+                                char *end,
+                                char **after) {
+  char *label_start = p + (*p == '!' ? 2 : 1);
+  char *label_end = label_start;
+  int is_image = (*p == '!');
+  fio_md_event_s e;
+
+  if ((is_image && p + 1 == end) || (is_image && p[1] != '['))
+    return 0;
+  label_end = fio___md_label_end(label_end, end);
+  if (label_end == end)
+    return 0;
+
+  /* Inline link: ](url "title") */
+  if (label_end + 1 < end && label_end[1] == '(') {
+    char *dst_start = fio___md_ltrim(label_end + 2, end);
+    char *dst_end = dst_start;
+    char *title_start = NULL;
+    char *title_end = NULL;
+    char *q;
+    while (dst_end < end && *dst_end != ')' && *dst_end != ' ' &&
+           *dst_end != '\t')
+      ++dst_end;
+    q = fio___md_ltrim(dst_end, end);
+    if (q < end && (*q == '"' || *q == '\'')) {
+      char quote = *q++;
+      title_start = q;
+      while (q < end && *q != quote)
+        ++q;
+      if (q < end) {
+        title_end = q++;
+        q = fio___md_ltrim(q, end);
+      }
+    }
+    while (q < end && *q != ')')
+      ++q;
+    if (q == end)
+      return 0;
+
+    fio___md_event_init(st, &e);
+    e.source = fio___md_buf(p, q + 1);
+    e.text = fio___md_buf(label_start, label_end);
+    e.destination = fio___md_buf(dst_start, dst_end);
+    if (title_start && title_end)
+      e.title = fio___md_buf(title_start, title_end);
+
+    if (is_image) {
+      e.type = FIO_MD_IMAGE;
+      if (fio___md_text(st, &e))
+        return -1;
+    } else {
+      e.type = FIO_MD_LINK;
+      if (fio___md_push(st, &e))
+        return -1;
+      FIO___MD_NEST_PUSH(st, FIO_MD_LINK);
+      if (fio___md_parse_inline_span(st, label_start, label_end))
+        return -1;
+      FIO___MD_NEST_POP(st);
+      if (fio___md_pop(st, &e))
+        return -1;
+    }
+    *after = q + 1;
+    return 1;
+  }
+
+  /* Reference-style links */
+  if (!is_image) {
+    fio___md_ref_s *ref = NULL;
+    fio_buf_info_s ref_label = FIO_BUF_INFO0;
+
+    if (label_end + 1 < end && label_end[1] == '[') {
+      char *ref_start = label_end + 2;
+      char *ref_end = fio___md_label_end(ref_start, end);
+      if (ref_end == end)
+        return 0;
+      ref_label = (ref_start == ref_end) ? fio___md_buf(label_start, label_end)
+                                         : fio___md_buf(ref_start, ref_end);
+      ref = fio___md_ref_find(st, ref_label);
+      if (ref) {
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_LINK;
+        e.source = fio___md_buf(p, ref_end + 1);
+        e.text = fio___md_buf(label_start, label_end);
+        e.destination = ref->destination;
+        e.title = ref->title;
+        e.reference = ref_label;
+        if (fio___md_push(st, &e))
+          return -1;
+        FIO___MD_NEST_PUSH(st, FIO_MD_LINK);
+        if (fio___md_parse_inline_span(st, label_start, label_end))
+          return -1;
+        FIO___MD_NEST_POP(st);
+        if (fio___md_pop(st, &e))
+          return -1;
+        *after = ref_end + 1;
+        return 1;
+      }
+    } else {
+      ref = fio___md_ref_find(st, fio___md_buf(label_start, label_end));
+      if (ref) {
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_LINK;
+        e.source = fio___md_buf(p, label_end + 1);
+        e.text = fio___md_buf(label_start, label_end);
+        e.destination = ref->destination;
+        e.title = ref->title;
+        e.reference = e.text;
+        if (fio___md_push(st, &e))
+          return -1;
+        FIO___MD_NEST_PUSH(st, FIO_MD_LINK);
+        if (fio___md_parse_inline_span(st, label_start, label_end))
+          return -1;
+        FIO___MD_NEST_POP(st);
+        if (fio___md_pop(st, &e))
+          return -1;
+        *after = label_end + 1;
+        return 1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+/* Try autolink or raw HTML */
+FIO_SFUNC int fio___md_try_autolink_or_html(fio___md_parser_s *st,
+                                            char *p,
+                                            char *end,
+                                            char **after) {
+  char *q = p + 1;
+  fio_md_event_s e;
+  if (p == end || *p != '<')
+    return 0;
+
+  /* Autolink: <http://...>, <https://...>, <email@domain> */
+  while (q < end && *q != '>' && *q != ' ' && *q != '\t')
+    ++q;
+  if (q < end && *q == '>' &&
+      (fio___md_prefix_lc(p + 1, q, "http://") ||
+       fio___md_prefix_lc(p + 1, q, "https://") ||
+       (FIO_MEMCHR(p + 1, '@', (size_t)(q - p - 1)) != NULL))) {
+    fio___md_event_init(st, &e);
+    e.type = FIO_MD_AUTOLINK;
+    e.source = fio___md_buf(p, q + 1);
+    e.destination = fio___md_buf(p + 1, q);
+    *after = q + 1;
+    return fio___md_text(st, &e) ? -1 : 1;
+  }
+
+  /* Raw HTML */
+  q = p + 1;
+  while (q < end && *q != '>')
+    ++q;
+  if (q < end && *q == '>') {
+    fio___md_event_init(st, &e);
+    e.type = FIO_MD_INLINE_HTML;
+    e.source = fio___md_buf(p, q + 1);
+    e.text = e.source;
+    *after = q + 1;
+    return fio___md_text(st, &e) ? -1 : 1;
+  }
+  return 0;
+}
+
+/* Main inline parser */
+FIO_SFUNC int fio___md_parse_inline_span(fio___md_parser_s *st,
+                                         char *p,
+                                         char *end) {
+  char *text = p;
+  while (p < end) {
+    char *after = p;
+
+    /* Newline handling */
+    if (*p == '\n' || *p == '\r') {
+      int hard = 0;
+      char *text_end = p;
+      char *next = p;
+      if (text_end > text && text_end[-1] == '\\') {
+        hard = 1;
+        --text_end;
+      } else {
+        char *trimmed = fio___md_rtrim(text, text_end);
+        if (text_end - trimmed >= 2) {
+          hard = 1;
+          text_end = trimmed;
+        } else {
+          text_end = trimmed;
+        }
+      }
+      if (fio___md_inline_text(st, text, text_end))
+        return -1;
+      if (*next == '\r')
+        ++next;
+      if (next < end && *next == '\n')
+        ++next;
+      {
+        fio_md_event_s e;
+        fio___md_event_init(st, &e);
+        e.type = hard ? FIO_MD_HARD_BREAK : FIO_MD_SOFT_BREAK;
+        e.source = fio___md_buf(text_end, next);
+        if (fio___md_text(st, &e))
+          return -1;
+      }
+      p = fio___md_ltrim(next, end);
+      text = p;
+      continue;
+    }
+
+    /* Code span */
+    if (*p == '`') {
+      size_t n = 1;
+      char *q;
+      fio_md_event_s e;
+      while (p + n < end && p[n] == '`')
+        ++n;
+      q = p + n;
+      while (q < end) {
+        if (*q == '`') {
+          char *r = q + 1;
+          size_t m = 1;
+          while (r < end && *r == '`')
+            ++m, ++r;
+          if (m == n) {
+            if (fio___md_inline_text(st, text, p))
+              return -1;
+            fio___md_event_init(st, &e);
+            e.type = FIO_MD_CODE_SPAN;
+            e.source = fio___md_buf(p, r);
+            e.text = fio___md_buf(p + n, q);
+            if (fio___md_text(st, &e))
+              return -1;
+            p = r;
+            text = p;
+            break;
+          }
+          q = r;
+          continue;
+        }
+        ++q;
+      }
+      if (q >= end) {
+        p += n;
+        continue;
+      }
+      continue;
+    }
+
+    /* Emphasis / Strong */
+    if ((*p == '*' || *p == '_') && p + 1 < end && p[1] == *p) {
+      char marker = *p;
+      char *q = p + 2;
+      int can_open = fio___md_left_flanking(p, p + 2, st->start, st->end);
+      int can_close = fio___md_right_flanking(p, p + 2, st->start, st->end);
+      if (marker == '_' && can_open && can_close)
+        can_open = can_close = 0; /* intraword _ */
+      if (!can_open) {
+        p += 2;
+        continue;
+      }
+      q = fio___md_find_emphasis_closer(st, q, end, marker, 2);
+      if (q && q > p + 2 && fio___md_span_has_nonspace(p + 2, q)) {
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        {
+          fio_md_event_s e;
+          uint8_t strong_type =
+              (marker == '*') ? FIO_MD_STRONG_STAR : FIO_MD_STRONG_UNDERSCORE;
+          fio___md_event_init(st, &e);
+          e.type = strong_type;
+          e.source = fio___md_buf(p, q + 2);
+          if (fio___md_push(st, &e))
+            return -1;
+          FIO___MD_NEST_PUSH(st, strong_type);
+          if (fio___md_parse_inline_span(st, p + 2, q))
+            return -1;
+          FIO___MD_NEST_POP(st);
+          if (fio___md_pop(st, &e))
+            return -1;
+        }
+        p = q + 2;
+        text = p;
+        continue;
+      }
+      p += 2;
+      continue;
+    }
+
+    if (*p == '*' || *p == '_') {
+      char marker = *p;
+      char *q = p + 1;
+      int can_open = fio___md_left_flanking(p, p + 1, st->start, st->end);
+      int can_close = fio___md_right_flanking(p, p + 1, st->start, st->end);
+      if (marker == '_' && can_open && can_close)
+        can_open = can_close = 0;
+      if (!can_open) {
+        ++p;
+        continue;
+      }
+      q = fio___md_find_emphasis_closer(st, q, end, marker, 1);
+      if (q && q > p + 1 && fio___md_span_has_nonspace(p + 1, q)) {
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        {
+          fio_md_event_s e;
+          uint8_t em_type = (marker == '*') ? FIO_MD_EMPHASIS_STAR
+                                            : FIO_MD_EMPHASIS_UNDERSCORE;
+          fio___md_event_init(st, &e);
+          e.type = em_type;
+          e.source = fio___md_buf(p, q + 1);
+          if (fio___md_push(st, &e))
+            return -1;
+          FIO___MD_NEST_PUSH(st, em_type);
+          if (fio___md_parse_inline_span(st, p + 1, q))
+            return -1;
+          FIO___MD_NEST_POP(st);
+          if (fio___md_pop(st, &e))
+            return -1;
+        }
+        p = q + 1;
+        text = p;
+        continue;
+      }
+      ++p;
+      continue;
+    }
+
+    /* Strikethrough */
+    if (*p == '~' && p + 1 < end && p[1] == '~') {
+      char *q = p + 2;
+      while (q < end) {
+        if (*q == '\\' && q + 1 < end) {
+          q += 2;
+          continue;
+        }
+        if (q + 1 < end && q[0] == '~' && q[1] == '~')
+          break;
+        ++q;
+      }
+      if (q + 1 < end && fio___md_span_has_nonspace(p + 2, q)) {
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        {
+          fio_md_event_s e;
+          fio___md_event_init(st, &e);
+          e.type = FIO_MD_STRIKETHROUGH;
+          e.source = fio___md_buf(p, q + 2);
+          if (fio___md_push(st, &e))
+            return -1;
+          FIO___MD_NEST_PUSH(st, FIO_MD_STRIKETHROUGH);
+          if (fio___md_parse_inline_span(st, p + 2, q))
+            return -1;
+          FIO___MD_NEST_POP(st);
+          if (fio___md_pop(st, &e))
+            return -1;
+        }
+        p = q + 2;
+        text = p;
+        continue;
+      }
+      p += 2;
+      continue;
+    }
+
+    /* Link or image */
+    if (*p == '!' || *p == '[') {
+      int r;
+      if (*p == '!' && (p + 1 == end || p[1] != '[')) {
+        ++p;
+        continue;
+      }
+      if (text < p) {
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        text = p;
+      }
+      r = fio___md_try_link(st, p, end, &after);
+      if (r < 0)
+        return -1;
+      if (r) {
+        p = after;
+        text = p;
+        continue;
+      }
+    }
+
+    /* Autolink or raw HTML */
+    if (*p == '<') {
+      int r;
+      if (text < p) {
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        text = p;
+      }
+      r = fio___md_try_autolink_or_html(st, p, end, &after);
+      if (r < 0)
+        return -1;
+      if (r) {
+        p = after;
+        text = p;
+        continue;
+      }
+    }
+
+    /* Escape */
+    if (*p == '\\' && p + 1 < end && fio___md_punct(p[1])) {
+      fio_md_event_s e;
+      if (fio___md_inline_text(st, text, p))
+        return -1;
+      fio___md_event_init(st, &e);
+      e.type = FIO_MD_ESCAPE;
+      e.source = fio___md_buf(p, p + 2);
+      e.text = fio___md_buf(p + 1, p + 2);
+      if (fio___md_text(st, &e))
+        return -1;
+      p += 2;
+      text = p;
+      continue;
+    }
+
+    /* Footnote reference */
+    if (*p == '[' && p + 2 < end && p[1] == '^') {
+      char *q = fio___md_label_end(p + 2, end);
+      if (q < end && q > p + 2) {
+        fio_md_event_s e;
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_FOOTNOTE_REF;
+        e.source = fio___md_buf(p, q + 1);
+        e.reference = fio___md_buf(p + 2, q);
+        if (fio___md_text(st, &e))
+          return -1;
+        p = q + 1;
+        text = p;
+        continue;
+      }
+    }
+
+    /* Entity */
+    if (*p == '&') {
+      char *q = p + 1;
+      while (q < end && q - p < FIO___MD_MAX_ENTITY_LEN &&
+             ((*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') ||
+              (*q >= '0' && *q <= '9') || *q == '#'))
+        ++q;
+      if (q < end && *q == ';') {
+        fio_md_event_s e;
+        if (fio___md_inline_text(st, text, p))
+          return -1;
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_ENTITY;
+        e.source = fio___md_buf(p, q + 1);
+        e.text = e.source;
+        if (fio___md_text(st, &e))
+          return -1;
+        p = q + 1;
+        text = p;
+        continue;
+      }
+    }
+
+    ++p;
+  }
+  return fio___md_inline_text(st, text, end);
+}
+
+/* Parse inline content from a buffer, trimming edges */
+FIO_SFUNC int fio___md_inline_lines(fio___md_parser_s *st, char *p, char *end) {
+  p = fio___md_ltrim(p, end);
+  end = fio___md_rtrim(p, end);
+  return fio___md_parse_inline_span(st, p, end);
+}
+
+/* *****************************************************************************
+Block Parser
+***************************************************************************** */
+
+FIO_SFUNC int fio___md_parse_table_row(fio___md_parser_s *st,
+                                       char *ls,
+                                       char *le,
+                                       uint16_t columns);
+FIO_SFUNC int fio___md_parse_blocks(fio___md_parser_s *st, char *p, char *end);
+FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_parser_s *st,
+                                       char *p,
+                                       char *end,
+                                       uint8_t initial_padding);
+
+FIO_SFUNC int fio___md_emit_html_block(fio___md_parser_s *st,
+                                       char *p,
+                                       char *end) {
+  fio_md_event_s e;
+  fio___md_event_init(st, &e);
+  e.type = FIO_MD_HTML_BLOCK;
+  e.source = fio___md_buf(p, end);
+  e.text = e.source;
+  return (fio___md_push(st, &e) || fio___md_pop(st, &e)) ? -1 : 0;
+}
+
+FIO_SFUNC int fio___md_parse_paragraph(fio___md_parser_s *st,
+                                       char *p,
+                                       char *end) {
+  fio_md_event_s e;
+  fio___md_event_init(st, &e);
+  e.type = FIO_MD_PARAGRAPH;
+  e.source = fio___md_buf(p, end);
+  if (fio___md_push(st, &e))
+    return -1;
+  if (fio___md_inline_lines(st, p, end))
+    return -1;
+  return fio___md_pop(st, &e);
+}
+
+/* Find the end of a block starting at line `p`. Returns pointer to first char
+   after the block. Used for list item continuations to pass full blocks to
+   fio___md_parse_blocks_ex. */
+FIO_SFUNC char *fio___md_find_block_end(char *p,
+                                        char *end,
+                                        uint32_t content_indent) {
+  char *le = fio___md_line_end(p, end);
+  char *next = fio___md_line_next(le, end);
+  fio_buf_info_s fence_marker = FIO_BUF_INFO0;
+  fio_buf_info_s fence_info = FIO_BUF_INFO0;
+  char *trim = fio___md_ltrim(p, le);
+  uint8_t level = 0;
+  char *cs = NULL, *ce = NULL;
+  fio_buf_info_s dummy_m = FIO_BUF_INFO0, dummy_i = FIO_BUF_INFO0;
+
+  /* Fenced code block */
+  if (fio___md_fence(trim, le, &fence_marker, &fence_info)) {
+    char *q = next;
+    while (q < end) {
+      char *qe = fio___md_line_end(q, end);
+      if (fio___md_fence_close(q, qe, fence_marker))
+        return fio___md_line_next(qe, end);
+      q = fio___md_line_next(qe, end);
+    }
+    return end;
+  }
+
+  /* Indented code block */
+  if ((uint32_t)(trim - p) + fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH) {
+    char *q = next;
+    while (q < end) {
+      char *qe = fio___md_line_end(q, end);
+      if (!fio___md_is_blank(q, qe) &&
+          fio___md_indent(q, qe) < FIO___MD_TAB_WIDTH)
+        break;
+      q = fio___md_line_next(qe, end);
+    }
+    return q;
+  }
+
+  /* HTML block */
+  if (fio___md_html_block_start(trim, le)) {
+    if (fio___md_html_long_block(trim, le)) {
+      if (!fio___md_html_long_close(trim, le)) {
+        while (next < end) {
+          char *line = next;
+          char *ne = fio___md_line_end(line, end);
+          next = fio___md_line_next(ne, end);
+          if (fio___md_html_long_close(line, ne))
+            break;
+        }
+      }
+    } else {
+      while (next < end) {
+        char *ne = fio___md_line_end(next, end);
+        if (fio___md_is_blank(next, ne))
+          break;
+        next = fio___md_line_next(ne, end);
+      }
+    }
+    return next;
+  }
+
+  /* ATX heading - single line */
+  if (fio___md_atx(trim, le, &level, &cs, &ce, &dummy_m))
+    return next;
+
+  /* Thematic break - single line */
+  if (fio___md_thematic(trim, le))
+    return next;
+
+  /* Blockquote */
+  if (trim < le && *trim == '>' &&
+      (uint32_t)(trim - p) <= FIO___MD_MAX_MARKER_INDENT)
+    return next;
+
+  /* List marker at same or lower indent - not our block */
+  {
+    int ordered = 0;
+    uint64_t start_num = 0;
+    char *unused = NULL;
+    if (fio___md_list_marker(trim,
+                             le,
+                             &ordered,
+                             &start_num,
+                             &unused,
+                             &dummy_m) &&
+        fio___md_indent(p, le) <= content_indent)
+      return p;
+  }
+
+  /* Paragraph: scan until blank line or block start */
+  {
+    char *q = next;
+    while (q < end) {
+      char *qe = fio___md_line_end(q, end);
+      char *qn = fio___md_line_next(qe, end);
+      char *qt = fio___md_ltrim(q, qe);
+      if (fio___md_is_blank(q, qe))
+        break;
+      if (fio___md_atx(qt, qe, &level, &cs, &ce, &dummy_m) ||
+          fio___md_thematic(qt, qe) ||
+          fio___md_fence(qt, qe, &dummy_m, &dummy_i) ||
+          fio___md_html_block_start(qt, qe) ||
+          fio___md_indent(q, qe) < content_indent)
+        break;
+      q = qn;
+    }
+    return q;
+  }
+}
+
+FIO_SFUNC int fio___md_parse_list(fio___md_parser_s *st, char *p, char *end) {
   char *list_start = p;
   char *cur = p;
   int ordered = 0;
@@ -1599,8 +1940,9 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
   uint64_t start_num = 0;
   char *content;
   fio_buf_info_s marker = FIO_BUF_INFO0;
-  fio_md_block_s list = {0};
+  fio_md_event_s list_e;
   uint32_t base_indent;
+
   if (!fio___md_list_marker(p,
                             fio___md_line_end(p, end),
                             &ordered,
@@ -1610,67 +1952,84 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
     return 0;
   list_ordered = ordered;
   base_indent = fio___md_indent(p, marker.buf);
-  list.type =
-      list_ordered ? FIO_MD_BLOCK_LIST_ORDERED : FIO_MD_BLOCK_LIST_UNORDERED;
-  list.list_start = start_num;
-  list.marker = marker;
-  list.flags = FIO_MD_BLOCK_F_TIGHT;
-  for (char *scan = cur; scan < end;) {
-    char *se = fio___md_line_end(scan, end);
-    char *sn = fio___md_line_next(se, end);
-    char *scan_content = NULL;
-    fio_buf_info_s scan_marker = FIO_BUF_INFO0;
-    if (fio___md_is_blank(scan, se)) {
-      char *look = sn;
-      int look_ordered = 0;
-      uint64_t look_start = 0;
-      char *look_content = NULL;
-      fio_buf_info_s look_marker = FIO_BUF_INFO0;
-      while (look < end) {
-        char *look_end = fio___md_line_end(look, end);
-        if (!fio___md_is_blank(look, look_end))
+
+  fio___md_event_init(st, &list_e);
+  list_e.type = list_ordered ? FIO_MD_LIST_ORDERED : FIO_MD_LIST_UNORDERED;
+  list_e.list_start = start_num;
+  list_e.marker = marker;
+  list_e.flags = FIO_MD_F_TIGHT;
+
+  /* Determine tight/loose */
+  {
+    uint32_t last_content_indent = 0;
+    for (char *scan = cur; scan < end;) {
+      char *se = fio___md_line_end(scan, end);
+      char *sn = fio___md_line_next(se, end);
+      char *scan_content = NULL;
+      fio_buf_info_s scan_marker = FIO_BUF_INFO0;
+      if (fio___md_is_blank(scan, se)) {
+        char *look = sn;
+        int look_ordered = 0;
+        uint64_t look_start = 0;
+        char *look_content = NULL;
+        fio_buf_info_s look_marker = FIO_BUF_INFO0;
+        while (look < end) {
+          char *look_end = fio___md_line_end(look, end);
+          if (!fio___md_is_blank(look, look_end))
+            break;
+          look = fio___md_line_next(look_end, end);
+        }
+        if (look >= end)
           break;
-        look = fio___md_line_next(look_end, end);
-      }
-      if (look >= end)
+        if (fio___md_list_marker(look,
+                                 fio___md_line_end(look, end),
+                                 &look_ordered,
+                                 &look_start,
+                                 &look_content,
+                                 &look_marker) &&
+            fio___md_indent(look, look_marker.buf) >= base_indent) {
+          list_e.flags &= ~FIO_MD_F_TIGHT;
+          scan = sn;
+          continue;
+        }
+        if (fio___md_indent(look, fio___md_line_end(look, end)) >=
+            last_content_indent) {
+          list_e.flags &= ~FIO_MD_F_TIGHT;
+          scan = sn;
+          continue;
+        }
         break;
-      if (fio___md_list_marker(look,
-                               fio___md_line_end(look, end),
-                               &look_ordered,
-                               &look_start,
-                               &look_content,
-                               &look_marker) &&
-          fio___md_indent(look, look_marker.buf) >= base_indent) {
-        list.flags &= ~FIO_MD_BLOCK_F_TIGHT;
-        scan = sn;
-        continue;
       }
-      if (fio___md_indent(look, fio___md_line_end(look, end)) >=
-          base_indent + 2) {
-        list.flags &= ~FIO_MD_BLOCK_F_TIGHT;
-        scan = sn;
-        continue;
+      if (!fio___md_list_marker(scan,
+                                se,
+                                &ordered,
+                                &start_num,
+                                &scan_content,
+                                &scan_marker) ||
+          fio___md_indent(scan, scan_marker.buf) < base_indent)
+        break;
+      {
+        uint32_t marker_indent = fio___md_indent(scan, scan_marker.buf);
+        if (marker_indent == base_indent) {
+          last_content_indent = fio___md_column_to(scan, scan_content);
+        }
       }
-      break;
+      scan = sn;
     }
-    if (!fio___md_list_marker(scan,
-                              se,
-                              &ordered,
-                              &start_num,
-                              &scan_content,
-                              &scan_marker) ||
-        fio___md_indent(scan, scan_marker.buf) < base_indent)
-      break;
-    scan = sn;
   }
-  if (fio___md_block_enter(s, &list))
+
+  if (fio___md_push(st, &list_e))
     return -1;
+  FIO___MD_NEST_PUSH(st, list_e.type);
+
   while (cur < end) {
     char *le = fio___md_line_end(cur, end);
     char *next = fio___md_line_next(le, end);
     char *item_content;
-    fio_md_block_s item = {0};
+    fio_md_event_s item_e;
     uint32_t indent;
+    uint32_t content_indent;
+
     if (fio___md_is_blank(cur, le)) {
       cur = next;
       continue;
@@ -1690,14 +2049,16 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
       break;
     if (indent > base_indent)
       break;
-    item.type = FIO_MD_BLOCK_LIST_ITEM;
-    item.source = fio___md_buf(cur, le);
-    item.marker = marker;
-    item.list_start = start_num;
-    uint8_t item_padding = 0;
-    uint32_t content_indent = fio___md_column_to(cur, item_content);
+
+    fio___md_event_init(st, &item_e);
+    item_e.type = FIO_MD_LIST_ITEM;
+    item_e.source = fio___md_buf(cur, le);
+    item_e.marker = marker;
+    item_e.list_start = start_num;
     {
       char *after_marker = marker.buf + marker.len;
+      uint8_t item_padding = 0;
+      content_indent = fio___md_column_to(cur, item_content);
       if (after_marker < le && *after_marker == '\t') {
         uint32_t marker_end_col = fio___md_column_to(cur, after_marker);
         uint32_t content_col = marker_end_col + 1;
@@ -1708,44 +2069,51 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
         item_padding = (uint8_t)(tab_end_col - content_col);
         content_indent = content_col;
       }
+      item_e.flags = fio___md_task_flags(&item_content, le) |
+                     (list_e.flags & FIO_MD_F_TIGHT);
+      if (item_content < le &&
+          ((uint32_t)item_padding + fio___md_indent(item_content, le) >=
+               FIO___MD_TAB_WIDTH ||
+           fio___md_block_start_line(item_content, le)))
+        item_e.flags &= (uint8_t)~FIO_MD_F_TIGHT;
+      item_e.padding = item_padding;
     }
-    item.flags = fio___md_task_flags(&item_content, le) |
-                 (list.flags & FIO_MD_BLOCK_F_TIGHT);
-    if (item_content < le &&
-        ((uint32_t)item_padding + fio___md_indent(item_content, le) >=
-             FIO___MD_TAB_WIDTH ||
-         fio___md_block_start_line(item_content, le)))
-      item.flags &= (uint8_t)~FIO_MD_BLOCK_F_TIGHT;
-    if (fio___md_block_enter(s, &item))
+
+    if (fio___md_push(st, &item_e))
       return -1;
+    FIO___MD_NEST_PUSH(st, FIO_MD_LIST_ITEM);
+
     if (item_content < le) {
       if (fio___md_thematic(item_content, le)) {
-        fio_md_block_s hr = {0};
-        hr.type = FIO_MD_BLOCK_THEMATIC_BREAK;
+        fio_md_event_s hr;
+        fio___md_event_init(st, &hr);
+        hr.type = FIO_MD_THEMATIC_BREAK;
         hr.source = fio___md_buf(item_content, le);
         hr.marker = fio___md_buf(fio___md_ltrim(item_content, le),
                                  fio___md_rtrim(item_content, le));
-        if (fio___md_block_enter(s, &hr) || fio___md_block_leave(s, &hr))
+        if (fio___md_push(st, &hr) || fio___md_pop(st, &hr))
           return -1;
-      } else if ((uint32_t)item_padding + fio___md_indent(item_content, le) >=
+      } else if ((uint32_t)item_e.padding + fio___md_indent(item_content, le) >=
                      FIO___MD_TAB_WIDTH ||
                  fio___md_block_start_line(item_content, le)) {
-        if (fio___md_parse_blocks_ex(s, item_content, next, item_padding))
+        if (fio___md_parse_blocks_ex(st, item_content, next, item_e.padding))
           return -1;
       } else {
-        fio_md_block_s para = {0};
-        para.type = FIO_MD_BLOCK_PARAGRAPH;
+        fio_md_event_s para;
+        fio___md_event_init(st, &para);
+        para.type = FIO_MD_PARAGRAPH;
         para.source = fio___md_buf(item_content, le);
-        if (fio___md_block_enter(s, &para))
+        if (fio___md_push(st, &para))
           return -1;
-        if (fio___md_parse_inline_span(s,
+        if (fio___md_parse_inline_span(st,
                                        item_content,
                                        fio___md_rtrim(item_content, le)))
           return -1;
-        if (fio___md_block_leave(s, &para))
+        if (fio___md_pop(st, &para))
           return -1;
       }
     }
+
     cur = next;
     while (cur < end) {
       char *ne = fio___md_line_end(cur, end);
@@ -1767,9 +2135,9 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
         nested_indent = fio___md_indent(cur, nested_marker.buf);
         if (nested_indent <= base_indent)
           break;
-        if (fio___md_parse_list(s, cur, end) < 0)
+        if (fio___md_parse_list(st, cur, end) < 0)
           return -1;
-        cur = s->start + s->consumed;
+        cur = st->start + st->consumed;
         continue;
       }
       if (fio___md_indent(cur, ne) >= content_indent) {
@@ -1778,125 +2146,53 @@ FIO_SFUNC int fio___md_parse_list(fio___md_s *s, char *p, char *end) {
             fio___md_skip_indent2(cur, ne, content_indent, &child_padding);
         if (!child)
           break;
-        char *child_end = fio___md_line_next(ne, end);
-        if (fio___md_parse_blocks_ex(s, child, child_end, child_padding))
+        char *child_end = fio___md_find_block_end(cur, end, content_indent);
+        /* child_end is relative to cur; we need to strip indent for blocks_ex
+         */
+        /* For blocks that span multiple lines, child_end might be past the
+           current line. fio___md_parse_blocks_ex needs to see the stripped
+           content. We pass the raw lines and let blocks_ex handle padding. */
+        if (fio___md_parse_blocks_ex(st, child, child_end, child_padding))
           return -1;
         cur = child_end;
         continue;
       }
       break;
     }
-    if (fio___md_block_leave(s, &item))
+
+    FIO___MD_NEST_POP(st);
+    if (fio___md_pop(st, &item_e))
       return -1;
   }
-  list.source = fio___md_buf(list_start, cur);
-  if (fio___md_block_leave(s, &list))
+
+  FIO___MD_NEST_POP(st);
+  list_e.source = fio___md_buf(list_start, cur);
+  if (fio___md_pop(st, &list_e))
     return -1;
-  s->consumed = (size_t)(cur - s->start);
+  st->consumed = (size_t)(cur - st->start);
   return 1;
 }
 
-FIO_SFUNC int fio___md_blockquote_para_close(fio___md_s *s,
-                                             fio_md_block_s *para,
-                                             char *para_start,
-                                             char *para_end) {
-  para->source = fio___md_buf(para_start, para_end);
-  return fio___md_block_leave(s, para);
-}
-
-FIO_SFUNC int fio___md_parse_blockquote_list(fio___md_s *s,
-                                             char *p,
-                                             char *end,
-                                             char **after) {
-  char *list_start = p;
-  char *qcontent;
-  char *qe;
-  char *next;
-  uint8_t qpadding = 0;
-  int ordered = 0;
-  int list_ordered = 0;
-  uint64_t start_num = 0;
-  char *item_content = NULL;
-  fio_buf_info_s marker = FIO_BUF_INFO0;
-  fio_md_block_s list = {0};
-  if (!fio___md_blockquote_line(p, end, &qcontent, &qpadding, &qe, &next) ||
-      !fio___md_list_marker(qcontent,
-                            qe,
-                            &ordered,
-                            &start_num,
-                            &item_content,
-                            &marker))
-    return 0;
-  (void)qpadding;
-  list_ordered = ordered;
-  list.type =
-      list_ordered ? FIO_MD_BLOCK_LIST_ORDERED : FIO_MD_BLOCK_LIST_UNORDERED;
-  list.list_start = start_num;
-  list.marker = marker;
-  list.flags = FIO_MD_BLOCK_F_TIGHT;
-  if (fio___md_block_enter(s, &list))
-    return -1;
-  while (p < end) {
-    fio_md_block_s item = {0};
-    fio_md_block_s para = {0};
-    uint32_t task_flags;
-    if (!fio___md_blockquote_line(p, end, &qcontent, &qpadding, &qe, &next))
-      break;
-    if (fio___md_is_blank(qcontent, qe))
-      break;
-    if (!fio___md_list_marker(qcontent,
-                              qe,
-                              &ordered,
-                              &start_num,
-                              &item_content,
-                              &marker) ||
-        ordered != list_ordered)
-      break;
-    task_flags = fio___md_task_flags(&item_content, qe);
-    item.type = FIO_MD_BLOCK_LIST_ITEM;
-    item.source = fio___md_buf(qcontent, qe);
-    item.marker = marker;
-    item.list_start = start_num;
-    item.flags = task_flags | FIO_MD_BLOCK_F_TIGHT;
-    if (fio___md_block_enter(s, &item))
-      return -1;
-    if (item_content < qe) {
-      para.type = FIO_MD_BLOCK_PARAGRAPH;
-      para.source = fio___md_buf(item_content, qe);
-      if (fio___md_block_enter(s, &para) ||
-          fio___md_parse_inline_span(s,
-                                     item_content,
-                                     fio___md_rtrim(item_content, qe)) ||
-          fio___md_block_leave(s, &para))
-        return -1;
-    }
-    if (fio___md_block_leave(s, &item))
-      return -1;
-    p = next;
-  }
-  list.source = fio___md_buf(list_start, p);
-  if (fio___md_block_leave(s, &list))
-    return -1;
-  *after = p;
-  return 1;
-}
-
-FIO_SFUNC int fio___md_parse_blockquote(fio___md_s *s,
+FIO_SFUNC int fio___md_parse_blockquote(fio___md_parser_s *st,
                                         char *p,
                                         char *end,
                                         char **after) {
   char *bq_start = p;
-  fio_md_block_s b = {0};
-  fio_md_block_s para = {0};
+  fio_md_event_s bq_e;
+  fio_md_event_s para_e;
   char *para_start = NULL;
   char *para_end = NULL;
   char *break_start = NULL;
   char *break_end = NULL;
   int para_open = 0;
   int hard = 0;
-  b.type = FIO_MD_BLOCK_BLOCK_QUOTE;
-  if (fio___md_block_enter(s, &b))
+
+  fio___md_event_init(st, &bq_e);
+  bq_e.type = FIO_MD_BLOCKQUOTE;
+  if (fio___md_push(st, &bq_e))
     return -1;
+  FIO___MD_NEST_PUSH(st, FIO_MD_BLOCKQUOTE);
+
   while (p < end) {
     char *qcontent;
     char *qe;
@@ -1904,40 +2200,130 @@ FIO_SFUNC int fio___md_parse_blockquote(fio___md_s *s,
     char *ts;
     char *te;
     uint8_t qpadding = 0;
+
     if (!fio___md_blockquote_line(p, end, &qcontent, &qpadding, &qe, &next)) {
       qe = fio___md_line_end(p, end);
       next = fio___md_line_next(qe, end);
-      if (!para_open || fio___md_is_blank(p, qe) ||
-          fio___md_block_start_line(p, qe))
+      if (!para_open || fio___md_is_blank(p, qe)) {
         break;
+      }
+      if (fio___md_block_start_line(p, qe)) {
+        break;
+      }
       qcontent = p;
       qpadding = 0;
     }
+
     if (fio___md_is_blank(qcontent, qe)) {
-      if (para_open &&
-          fio___md_blockquote_para_close(s, &para, para_start, para_end))
-        return -1;
-      para_open = 0;
+      if (para_open) {
+        para_e.source = fio___md_buf(para_start, para_end);
+        if (fio___md_pop(st, &para_e))
+          return -1;
+        para_open = 0;
+      }
       p = next;
       continue;
     }
+
+    /* Try list inside blockquote */
     if (!para_open) {
-      int list_result = fio___md_parse_blockquote_list(s, p, end, &p);
-      if (list_result < 0)
-        return -1;
-      if (list_result)
+      char *qcontent2;
+      char *qe2;
+      char *next2;
+      uint8_t qpadding2 = 0;
+      int ordered = 0;
+      uint64_t start_num = 0;
+      char *item_content = NULL;
+      fio_buf_info_s marker = FIO_BUF_INFO0;
+      if (fio___md_blockquote_line(p,
+                                   end,
+                                   &qcontent2,
+                                   &qpadding2,
+                                   &qe2,
+                                   &next2) &&
+          fio___md_list_marker(qcontent2,
+                               qe2,
+                               &ordered,
+                               &start_num,
+                               &item_content,
+                               &marker)) {
+        char *list_start = p;
+        fio_md_event_s list_e;
+        int list_ordered = ordered;
+        fio___md_event_init(st, &list_e);
+        list_e.type =
+            list_ordered ? FIO_MD_LIST_ORDERED : FIO_MD_LIST_UNORDERED;
+        list_e.list_start = start_num;
+        list_e.marker = marker;
+        list_e.flags = FIO_MD_F_TIGHT;
+        if (fio___md_push(st, &list_e))
+          return -1;
+        FIO___MD_NEST_PUSH(st, list_e.type);
+        while (p < end) {
+          fio_md_event_s item_e;
+          fio_md_event_s para;
+          uint32_t task_flags;
+          if (!fio___md_blockquote_line(p,
+                                        end,
+                                        &qcontent2,
+                                        &qpadding2,
+                                        &qe2,
+                                        &next2))
+            break;
+          if (fio___md_is_blank(qcontent2, qe2))
+            break;
+          if (!fio___md_list_marker(qcontent2,
+                                    qe2,
+                                    &ordered,
+                                    &start_num,
+                                    &item_content,
+                                    &marker) ||
+              ordered != list_ordered)
+            break;
+          task_flags = fio___md_task_flags(&item_content, qe2);
+          fio___md_event_init(st, &item_e);
+          item_e.type = FIO_MD_LIST_ITEM;
+          item_e.source = fio___md_buf(qcontent2, qe2);
+          item_e.marker = marker;
+          item_e.list_start = start_num;
+          item_e.flags = task_flags | FIO_MD_F_TIGHT;
+          if (fio___md_push(st, &item_e))
+            return -1;
+          FIO___MD_NEST_PUSH(st, FIO_MD_LIST_ITEM);
+          if (item_content < qe2) {
+            fio___md_event_init(st, &para);
+            para.type = FIO_MD_PARAGRAPH;
+            para.source = fio___md_buf(item_content, qe2);
+            if (fio___md_push(st, &para) ||
+                fio___md_parse_inline_span(st,
+                                           item_content,
+                                           fio___md_rtrim(item_content, qe2)) ||
+                fio___md_pop(st, &para))
+              return -1;
+          }
+          FIO___MD_NEST_POP(st);
+          if (fio___md_pop(st, &item_e))
+            return -1;
+          p = next2;
+        }
+        FIO___MD_NEST_POP(st);
+        list_e.source = fio___md_buf(list_start, p);
+        if (fio___md_pop(st, &list_e))
+          return -1;
         continue;
+      }
     }
-    {
+
+    /* Fenced code inside blockquote */
+    if (!para_open) {
       fio_buf_info_s fence_marker = FIO_BUF_INFO0;
       fio_buf_info_s fence_info = FIO_BUF_INFO0;
-      if (!para_open &&
-          fio___md_fence(qcontent, qe, &fence_marker, &fence_info)) {
+      if (fio___md_fence(qcontent, qe, &fence_marker, &fence_info)) {
         char *code_start = p;
         char *body_start = next;
         char *close_line = next;
         char *after_code = next;
-        fio_md_block_s code = {0};
+        fio_md_event_s code_e;
         while (after_code < end) {
           char *line_content;
           char *line_end;
@@ -1958,24 +2344,27 @@ FIO_SFUNC int fio___md_parse_blockquote(fio___md_s *s,
           close_line = line_next;
           after_code = line_next;
         }
-        code.type = FIO_MD_BLOCK_CODE_FENCED;
-        code.source = fio___md_buf(code_start, after_code);
-        code.content = fio___md_buf(body_start, close_line);
-        code.marker = fence_marker;
-        code.info = fence_info;
-        code.padding = 1;
-        if (fio___md_block_enter(s, &code) || fio___md_block_leave(s, &code))
+        fio___md_event_init(st, &code_e);
+        code_e.type = FIO_MD_CODE_FENCED;
+        code_e.source = fio___md_buf(code_start, after_code);
+        code_e.text = fio___md_buf(body_start, close_line);
+        code_e.marker = fence_marker;
+        code_e.info = fence_info;
+        code_e.padding = 1;
+        if (fio___md_push(st, &code_e) || fio___md_pop(st, &code_e))
           return -1;
         p = after_code;
         continue;
       }
     }
+
+    /* HTML block inside blockquote */
     if (!para_open && fio___md_html_block_start(qcontent, qe)) {
       const int html_long = fio___md_html_long_block(qcontent, qe);
       for (;;) {
         const int html_done =
             html_long ? fio___md_html_long_close(qcontent, qe) : (next >= end);
-        if (fio___md_emit_html_block(s, qcontent, next))
+        if (fio___md_emit_html_block(st, qcontent, next))
           return -1;
         p = next;
         if (html_done || p >= end)
@@ -1987,52 +2376,81 @@ FIO_SFUNC int fio___md_parse_blockquote(fio___md_s *s,
       }
       continue;
     }
+
+    /* Nested block inside blockquote */
     if (!para_open && fio___md_block_start_line(qcontent, qe)) {
-      if (fio___md_parse_blocks_ex(s, qcontent, next, qpadding))
+      if (fio___md_parse_blocks_ex(st, qcontent, next, qpadding))
         return -1;
       p = next;
       continue;
     }
+
+    /* Paragraph continuation */
     ts = fio___md_ltrim(qcontent, qe);
     te = fio___md_rtrim(ts, qe);
     if (!para_open) {
-      FIO_MEMSET(&para, 0, sizeof(para));
-      para.type = FIO_MD_BLOCK_PARAGRAPH;
-      para.source = fio___md_buf(qcontent, qe);
-      if (fio___md_block_enter(s, &para))
+      fio___md_event_init(st, &para_e);
+      para_e.type = FIO_MD_PARAGRAPH;
+      para_e.source = fio___md_buf(qcontent, qe);
+      if (fio___md_push(st, &para_e))
         return -1;
       para_open = 1;
       para_start = qcontent;
-    } else if (fio___md_inline_break(s, hard, break_start, break_end)) {
-      return -1;
+    } else if (hard) {
+      fio_md_event_s br;
+      fio___md_event_init(st, &br);
+      br.type = FIO_MD_HARD_BREAK;
+      br.source = fio___md_buf(break_start, break_end);
+      if (fio___md_text(st, &br))
+        return -1;
+    } else {
+      fio_md_event_s sb;
+      fio___md_event_init(st, &sb);
+      sb.type = FIO_MD_SOFT_BREAK;
+      sb.source = fio___md_buf(break_start, break_end);
+      if (fio___md_text(st, &sb))
+        return -1;
     }
-    if (fio___md_parse_inline_span(s, ts, te))
+    if (fio___md_parse_inline_span(st, ts, te))
       return -1;
     hard = 0;
     if (qe > qcontent && qe[-1] == '\\')
       hard = 1;
-    if (qe > qcontent + 1 && qe[-1] == ' ' && qe[-2] == ' ')
-      hard = 1;
-    para_end = qe;
-    break_start = qe;
+    {
+      char *trimmed = fio___md_rtrim(qcontent, qe);
+      if (qe - trimmed >= 2)
+        hard = 1;
+      if (hard) {
+        para_end = trimmed;
+        break_start = trimmed;
+      } else {
+        para_end = qe;
+        break_start = qe;
+      }
+    }
     break_end = next;
     p = next;
   }
-  if (para_open &&
-      fio___md_blockquote_para_close(s, &para, para_start, para_end))
-    return -1;
-  b.source = fio___md_buf(bq_start, p);
-  if (fio___md_block_leave(s, &b))
+
+  if (para_open) {
+    para_e.source = fio___md_buf(para_start, para_end);
+    if (fio___md_pop(st, &para_e))
+      return -1;
+  }
+
+  FIO___MD_NEST_POP(st);
+  bq_e.source = fio___md_buf(bq_start, p);
+  if (fio___md_pop(st, &bq_e))
     return -1;
   *after = p;
   return 1;
 }
 
-FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
+FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_parser_s *st,
                                        char *p,
                                        char *end,
                                        uint8_t initial_padding) {
-  while (p < end && !s->err) {
+  while (p < end && !st->err) {
     uint8_t line_padding = initial_padding;
     initial_padding = 0;
     char *le = fio___md_line_end(p, end);
@@ -2043,10 +2461,13 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
     char *content_end = NULL;
     fio_buf_info_s marker = FIO_BUF_INFO0;
     fio_buf_info_s info = FIO_BUF_INFO0;
+
     if (fio___md_is_blank(p, le)) {
       p = next;
       continue;
     }
+
+    /* Skip reference definitions and footnotes */
     {
       fio_buf_info_s ref_label = FIO_BUF_INFO0;
       fio_buf_info_s ref_dst = FIO_BUF_INFO0;
@@ -2066,42 +2487,52 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         continue;
       }
     }
+
+    /* Blockquote */
     if (trim < le && *trim == '>' &&
         (uint32_t)(trim - p) <= FIO___MD_MAX_MARKER_INDENT) {
-      int rr = fio___md_parse_blockquote(s, p, end, &p);
+      int rr = fio___md_parse_blockquote(st, p, end, &p);
       if (rr < 0)
         return -1;
       continue;
     }
+
+    /* ATX heading */
     if (fio___md_atx(p, le, &level, &content_start, &content_end, &marker)) {
-      fio_md_block_s b = {0};
-      b.type = FIO_MD_BLOCK_HEADING;
-      b.source = fio___md_buf(p, le);
-      b.content = fio___md_buf(content_start, content_end);
-      b.marker = marker;
-      b.heading_level = level;
-      if (fio___md_block_enter(s, &b) ||
-          fio___md_parse_inline_span(s, content_start, content_end) ||
-          fio___md_block_leave(s, &b))
+      fio_md_event_s e;
+      fio___md_event_init(st, &e);
+      e.type = FIO_MD_HEADING;
+      e.source = fio___md_buf(p, le);
+      e.text = fio___md_buf(content_start, content_end);
+      e.marker = marker;
+      e.heading_level = level;
+      if (fio___md_push(st, &e) ||
+          fio___md_parse_inline_span(st, content_start, content_end) ||
+          fio___md_pop(st, &e))
         return -1;
       p = next;
       continue;
     }
+
+    /* Thematic break */
     if (fio___md_thematic(p, le)) {
-      fio_md_block_s b = {0};
-      b.type = FIO_MD_BLOCK_THEMATIC_BREAK;
-      b.source = fio___md_buf(p, le);
-      b.marker = fio___md_buf(trim, fio___md_rtrim(trim, le));
-      if (fio___md_block_enter(s, &b) || fio___md_block_leave(s, &b))
+      fio_md_event_s e;
+      fio___md_event_init(st, &e);
+      e.type = FIO_MD_THEMATIC_BREAK;
+      e.source = fio___md_buf(p, le);
+      e.marker = fio___md_buf(trim, fio___md_rtrim(trim, le));
+      if (fio___md_push(st, &e) || fio___md_pop(st, &e))
         return -1;
       p = next;
       continue;
     }
+
+    /* Fenced code block */
     if (fio___md_fence(p, le, &marker, &info)) {
       char *body_start = next;
       char *close_line = end;
       char *q = next;
-      fio_md_block_s b = {0};
+      fio_md_event_s e;
       while (q < end) {
         char *qe = fio___md_line_end(q, end);
         if (fio___md_fence_close(q, qe, marker)) {
@@ -2111,16 +2542,19 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         }
         q = fio___md_line_next(qe, end);
       }
-      b.type = FIO_MD_BLOCK_CODE_FENCED;
-      b.source = fio___md_buf(p, q);
-      b.content = fio___md_buf(body_start, close_line);
-      b.marker = marker;
-      b.info = info;
-      if (fio___md_block_enter(s, &b) || fio___md_block_leave(s, &b))
+      fio___md_event_init(st, &e);
+      e.type = FIO_MD_CODE_FENCED;
+      e.source = fio___md_buf(p, q);
+      e.text = fio___md_buf(body_start, close_line);
+      e.marker = marker;
+      e.info = info;
+      if (fio___md_push(st, &e) || fio___md_pop(st, &e))
         return -1;
       p = q;
       continue;
     }
+
+    /* Indented code block */
     if ((uint32_t)line_padding + fio___md_indent(p, le) >= FIO___MD_TAB_WIDTH) {
       char *code_start = p;
       char *code_content_end = next;
@@ -2153,17 +2587,20 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         scan = sn;
       }
       {
-        fio_md_block_s b = {0};
-        b.type = FIO_MD_BLOCK_CODE_INDENTED;
-        b.source = fio___md_buf(code_start, next);
-        b.content = fio___md_buf(code_start, code_content_end);
-        b.padding = line_padding;
-        if (fio___md_block_enter(s, &b) || fio___md_block_leave(s, &b))
+        fio_md_event_s e;
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_CODE_INDENTED;
+        e.source = fio___md_buf(code_start, next);
+        e.text = fio___md_buf(code_start, code_content_end);
+        e.padding = line_padding;
+        if (fio___md_push(st, &e) || fio___md_pop(st, &e))
           return -1;
       }
       p = next;
       continue;
     }
+
+    /* HTML block */
     if (fio___md_html_block_start(p, le)) {
       char *html_start = p;
       if (fio___md_html_long_block(p, le)) {
@@ -2185,16 +2622,19 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         }
       }
       {
-        fio_md_block_s b = {0};
-        b.type = FIO_MD_BLOCK_HTML;
-        b.source = fio___md_buf(html_start, next);
-        b.content = b.source;
-        if (fio___md_block_enter(s, &b) || fio___md_block_leave(s, &b))
+        fio_md_event_s e;
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_HTML_BLOCK;
+        e.source = fio___md_buf(html_start, next);
+        e.text = e.source;
+        if (fio___md_push(st, &e) || fio___md_pop(st, &e))
           return -1;
       }
       p = next;
       continue;
     }
+
+    /* List */
     {
       int ordered = 0;
       uint64_t start_num = 0;
@@ -2206,24 +2646,26 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
                                     &unused_content,
                                     &marker);
       if (lr) {
-        int rr = fio___md_parse_list(s, p, end);
+        int rr = fio___md_parse_list(st, p, end);
         if (rr < 0)
           return -1;
-        p = s->start + s->consumed;
+        p = st->start + st->consumed;
         continue;
       }
     }
+
+    /* Table */
     {
       char *nle = (next < end) ? fio___md_line_end(next, end) : next;
-      uint8_t aligns[FIO_MARKDOWN_MAX_TABLE_COLUMNS];
       uint16_t columns = 0;
       if (next < end && fio___md_count_table_cells(p, le) > 1 &&
-          fio___md_table_delim(next, nle, aligns, &columns)) {
+          fio___md_table_delim(next, nle, st, &columns)) {
         char *table_start = p;
         char *row = fio___md_line_next(nle, end);
-        fio_md_block_s b = {0};
-        b.type = FIO_MD_BLOCK_TABLE;
-        b.columns = columns;
+        fio_md_event_s e;
+        fio___md_event_init(st, &e);
+        e.type = FIO_MD_TABLE;
+        e.columns = columns;
         while (row < end) {
           char *re = fio___md_line_end(row, end);
           if (fio___md_is_blank(row, re) ||
@@ -2231,23 +2673,27 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
             break;
           row = fio___md_line_next(re, end);
         }
-        b.source = fio___md_buf(table_start, row);
-        if (fio___md_block_enter(s, &b))
+        e.source = fio___md_buf(table_start, row);
+        if (fio___md_push(st, &e))
           return -1;
-        if (fio___md_parse_table_row(s, p, le, aligns, columns))
+        FIO___MD_NEST_PUSH(st, FIO_MD_TABLE);
+        if (fio___md_parse_table_row(st, p, le, columns))
           return -1;
         p = fio___md_line_next(nle, end);
         while (p < row) {
           char *re = fio___md_line_end(p, end);
-          if (fio___md_parse_table_row(s, p, re, aligns, columns))
+          if (fio___md_parse_table_row(st, p, re, columns))
             return -1;
           p = fio___md_line_next(re, end);
         }
-        if (fio___md_block_leave(s, &b))
+        FIO___MD_NEST_POP(st);
+        if (fio___md_pop(st, &e))
           return -1;
         continue;
       }
     }
+
+    /* Paragraph / Setext heading */
     {
       char *para_start = p;
       char *para_end = le;
@@ -2259,18 +2705,17 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         fio_buf_info_s dummy_a = FIO_BUF_INFO0;
         fio_buf_info_s dummy_b = FIO_BUF_INFO0;
         if (fio___md_setext(q, qe, &setext_level)) {
-          fio_md_block_s b = {0};
-          b.type = FIO_MD_BLOCK_HEADING;
-          b.source = fio___md_buf(para_start, qe);
-          b.content = fio___md_buf(fio___md_ltrim(para_start, le),
-                                   fio___md_rtrim(para_start, para_end));
-          b.marker = fio___md_buf(fio___md_ltrim(q, qe), fio___md_rtrim(q, qe));
-          b.heading_level = setext_level;
-          if (fio___md_block_enter(s, &b) ||
-              fio___md_inline_lines(s,
-                                    b.content.buf,
-                                    b.content.buf + b.content.len) ||
-              fio___md_block_leave(s, &b))
+          fio_md_event_s e;
+          fio___md_event_init(st, &e);
+          e.type = FIO_MD_HEADING;
+          e.source = fio___md_buf(para_start, qe);
+          e.text = fio___md_buf(fio___md_ltrim(para_start, le),
+                                fio___md_rtrim(para_start, para_end));
+          e.marker = fio___md_buf(fio___md_ltrim(q, qe), fio___md_rtrim(q, qe));
+          e.heading_level = setext_level;
+          if (fio___md_push(st, &e) ||
+              fio___md_inline_lines(st, e.text.buf, e.text.buf + e.text.len) ||
+              fio___md_pop(st, &e))
             return -1;
           p = fio___md_line_next(qe, end);
           goto fio___md_blocks_next;
@@ -2294,50 +2739,106 @@ FIO_SFUNC int fio___md_parse_blocks_ex(fio___md_s *s,
         para_end = qe;
         q = fio___md_line_next(qe, end);
       }
-      if (fio___md_parse_paragraph(s, para_start, para_end))
+      if (fio___md_parse_paragraph(st, para_start, para_end))
         return -1;
       p = fio___md_line_next(para_end, end);
     }
   fio___md_blocks_next:;
   }
-  s->consumed = (size_t)(p - s->start);
+  st->consumed = (size_t)(p - st->start);
   return 0;
 }
 
-FIO_SFUNC int fio___md_parse_blocks(fio___md_s *s, char *p, char *end) {
-  return fio___md_parse_blocks_ex(s, p, end, 0);
+FIO_SFUNC int fio___md_parse_blocks(fio___md_parser_s *st, char *p, char *end) {
+  return fio___md_parse_blocks_ex(st, p, end, 0);
 }
+
+FIO_SFUNC int fio___md_parse_table_row(fio___md_parser_s *st,
+                                       char *ls,
+                                       char *le,
+                                       uint16_t columns) {
+  char *p = ls;
+  uint16_t col = 0;
+  fio_md_event_s row_e;
+  fio___md_event_init(st, &row_e);
+  row_e.type = FIO_MD_TABLE_ROW;
+  row_e.source = fio___md_buf(ls, le);
+  row_e.columns = columns;
+  if (fio___md_push(st, &row_e))
+    return -1;
+  FIO___MD_NEST_PUSH(st, FIO_MD_TABLE_ROW);
+
+  le = fio___md_rtrim(p, le);
+  if (p < le && *p == '|')
+    ++p;
+  if (p < le && le[-1] == '|')
+    --le;
+
+  while (p <= le && col < columns) {
+    char *cell_start = p;
+    char *cell_end;
+    fio_md_event_s cell_e;
+    p = fio___md_table_next_pipe(p, le);
+    cell_end = p;
+
+    fio___md_event_init(st, &cell_e);
+    cell_e.type = FIO_MD_TABLE_CELL;
+    cell_e.source = fio___md_buf(cell_start, cell_end);
+    cell_e.text = fio___md_buf(fio___md_ltrim(cell_start, cell_end),
+                               fio___md_rtrim(cell_start, cell_end));
+    cell_e.column = col;
+    cell_e.columns = columns;
+    cell_e.align = FIO___MD_TABLE_ALIGN_GET(st, col);
+    if (fio___md_push(st, &cell_e))
+      return -1;
+    if (fio___md_parse_inline_span(st,
+                                   cell_e.text.buf,
+                                   cell_e.text.buf + cell_e.text.len))
+      return -1;
+    if (fio___md_pop(st, &cell_e))
+      return -1;
+    ++col;
+    if (p < le && *p == '|')
+      ++p;
+    else
+      break;
+  }
+
+  FIO___MD_NEST_POP(st);
+  return fio___md_pop(st, &row_e);
+}
+
+/* *****************************************************************************
+Public API
+***************************************************************************** */
 
 SFUNC size_t fio_md_parse(const fio_md_callbacks_s *callbacks,
                           void *udata,
                           fio_buf_info_s source) {
-  fio___md_s s;
-  fio_md_block_s doc = {0};
-  FIO_MEMSET(&s, 0, sizeof(s));
-  s.cb = callbacks;
-  s.udata = udata;
-  s.start = source.buf;
-  s.end = source.buf ? source.buf + source.len : NULL;
-  doc.type = FIO_MD_BLOCK_DOCUMENT;
-  doc.source = source;
+  fio___md_parser_s st;
+  FIO_MEMSET(&st, 0, sizeof(st));
+  st.cb = callbacks;
+  st.udata = udata;
+  st.start = source.buf;
+  st.end = source.buf ? source.buf + source.len : NULL;
+
   if (!source.buf && source.len) {
-    fio___md_abort(&s, FIO_MD_ERR_INPUT, source.buf);
-    return s.consumed;
+    fio_md_event_s e;
+    fio___md_event_init(&st, &e);
+    e.err = FIO_MD_ERR_INPUT;
+    e.consumed = 0;
+    fio___md_error(&st, &e);
+    return 0;
   }
+
   if (source.buf)
-    fio___md_ref_index(&s);
-  if (fio___md_doc_start(&s, source))
-    return s.consumed;
-  if (fio___md_block_enter(&s, &doc))
-    return s.consumed;
+    fio___md_ref_index(&st);
+
   if (source.buf &&
-      fio___md_parse_blocks(&s, source.buf, source.buf + source.len))
-    return s.consumed;
-  s.consumed = source.len;
-  if (fio___md_block_leave(&s, &doc))
-    return s.consumed;
-  if (fio___md_doc_end(&s, source))
-    return s.consumed;
+      fio___md_parse_blocks(&st, source.buf, source.buf + source.len))
+    return st.consumed;
+
+  st.consumed = source.len;
   return source.len;
 }
 
