@@ -383,13 +383,15 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_STATE
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_STR_NAME) ||                       \
+#if defined(FIO_STR) || defined(FIO_HTTP_HANDLE) || defined(FIO_STR_NAME) ||   \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
     defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP) ||     \
     defined(FIO_PUBSUB)
 #undef FIO_STR
+#undef FIO_ENTITY
+#define FIO_ENTITY
 #define FIO_STR
 #endif
 

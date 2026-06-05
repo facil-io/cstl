@@ -54,6 +54,10 @@
 #include "002 url.h"
 #endif
 
+#ifdef FIO_ENTITY
+#include "003 entities.h"
+#endif
+
 #ifdef FIO_FILES
 #include "004 files.h"
 #endif
@@ -81,7 +85,6 @@
 #ifdef FIO_MARKDOWN
 #include "004 markdown.h"
 #endif
-
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
 #endif
@@ -92,6 +95,10 @@
 
 #ifdef FIO_STR
 #include "011 string core.h"
+#endif
+
+#ifdef FIO_GFM
+#include "012 gfm.h"
 #endif
 
 #if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
