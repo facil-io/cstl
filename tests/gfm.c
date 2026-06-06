@@ -499,6 +499,64 @@ static void test_list_interrupts_paragraph(void) {
   }
 }
 
+static void test_blank_list_marker_does_not_interrupt_paragraph(void) {
+  fprintf(stderr, "test_blank_list_marker_does_not_interrupt_paragraph\n");
+  reset_events();
+  const char *src = "Hello\n-\nWorld\n1.\n";
+  fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
+  for (int i = 0; i < g_event_count; ++i) {
+    TEST_ASSERT(g_events[i].type != FIO_GFM_LIST_UNORDERED &&
+                    g_events[i].type != FIO_GFM_LIST_ORDERED &&
+                    g_events[i].type != FIO_GFM_LIST_ITEM,
+                "blank list marker interrupted paragraph at event %d", i);
+  }
+}
+
+static void test_blank_list_marker_continues_existing_list(void) {
+  fprintf(stderr, "test_blank_list_marker_continues_existing_list\n");
+  reset_events();
+  const char *src = "- foo\n-\n- bar\n";
+  fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
+  int li_pushes = 0;
+  for (int i = 0; i < g_event_count; ++i)
+    li_pushes += (g_events[i].kind == 0 && g_events[i].type == FIO_GFM_LIST_ITEM);
+  TEST_ASSERT(li_pushes == 3, "existing list has 3 items, got %d", li_pushes);
+}
+
+static void test_blockquote_list_loose_lookahead(void) {
+  fprintf(stderr, "test_blockquote_list_loose_lookahead\n");
+  reset_events();
+  const char *src = "   > > 1.  one\n>>\n>>     two\n";
+  fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
+  int found_ol = 0;
+  for (int i = 0; i < g_event_count; ++i) {
+    if (g_events[i].kind == 0 && g_events[i].type == FIO_GFM_LIST_ORDERED) {
+      found_ol = 1;
+      TEST_ASSERT(!(g_events[i].flags & FIO_GFM_F_TIGHT),
+                  "blockquote list with blank continuation is loose");
+      break;
+    }
+  }
+  TEST_ASSERT(found_ol, "ordered list found inside blockquote");
+}
+
+static void test_empty_list_item_blank_then_paragraph_outside(void) {
+  fprintf(stderr, "test_empty_list_item_blank_then_paragraph_outside\n");
+  reset_events();
+  const char *src = "-\n\n  foo\n";
+  fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
+  int ul_pop = -1;
+  int para_after_ul = 0;
+  for (int i = 0; i < g_event_count; ++i) {
+    if (g_events[i].kind == 2 && g_events[i].type == FIO_GFM_LIST_UNORDERED)
+      ul_pop = i;
+    if (ul_pop >= 0 && i > ul_pop && g_events[i].kind == 0 &&
+        g_events[i].type == FIO_GFM_PARAGRAPH)
+      para_after_ul = 1;
+  }
+  TEST_ASSERT(para_after_ul, "paragraph after blank line is outside empty list");
+}
+
 /* ── slice 6: code blocks ── */
 
 static void test_fenced_code_backtick(void) {
@@ -826,6 +884,19 @@ static void test_ref_def_case_insensitive(void) {
   TEST_ASSERT(found_link, "case-insensitive ref match");
 }
 
+static void test_ref_def_unicode_case_insensitive(void) {
+  fprintf(stderr, "test_ref_def_unicode_case_insensitive\n");
+  reset_events();
+  const char *src = "[ΑΓΩ]: /url\n\n[αγω]\n";
+  fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
+  int found_link = 0;
+  for (int i = 0; i < g_event_count; ++i) {
+    if (g_events[i].type == FIO_GFM_LINK && g_events[i].kind == 0)
+      found_link = 1;
+  }
+  TEST_ASSERT(found_link, "unicode case-insensitive ref match");
+}
+
 /* ── slice 10: inline parser ── */
 
 static void test_inline_emphasis(void) {
@@ -1030,6 +1101,10 @@ int main(void) {
   test_list_loose();
   test_different_markers_separate_lists();
   test_list_interrupts_paragraph();
+  test_blank_list_marker_does_not_interrupt_paragraph();
+  test_blank_list_marker_continues_existing_list();
+  test_blockquote_list_loose_lookahead();
+  test_empty_list_item_blank_then_paragraph_outside();
   test_fenced_code_backtick();
   test_fenced_code_tilde();
   test_fenced_code_info_string();
@@ -1052,6 +1127,7 @@ int main(void) {
   test_table_header_only();
   test_ref_def_basic();
   test_ref_def_case_insensitive();
+  test_ref_def_unicode_case_insensitive();
   test_inline_emphasis();
   test_inline_strong();
   test_inline_code_span();

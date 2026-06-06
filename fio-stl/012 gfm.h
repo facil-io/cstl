@@ -93,6 +93,11 @@ FIO_ASSERT_STATIC(FIO_GFM_REF_CACHE_SIZE > 0,
 /** GFM task-list marker is checked. */
 #define FIO_GFM_F_TASK_CHECKED ((uint8_t)1U << 3)
 
+/** Internal: list item has already started block content. */
+#define FIO___GFM_F_LI_HAS_BLOCK ((uint8_t)1U << 4)
+/** Internal: empty list item saw an extra leading blank line. */
+#define FIO___GFM_F_LI_LEADING_BLANK ((uint8_t)1U << 5)
+
 /* ---------------------------------------------------------------------------
  * Public API — self-contained, does NOT depend on 004 markdown.h.
  *
@@ -848,15 +853,6 @@ FIO_SFUNC int fio___gfm_is_list_marker(char *p,
       info->task = FIO_GFM_F_TASK |
                    ((t[1] == 'x' || t[1] == 'X') ? FIO_GFM_F_TASK_CHECKED : 0);
       info->content_start = t + 4;
-      /* Recalculate content_indent */
-      uint32_t cs_col = info->content_indent;
-      for (char *c = t; c < t + 4; ++c) {
-        cs_col += (*c == '\t')
-                      ? FIO___GFM_TAB_WIDTH -
-                            (cs_col & (FIO___GFM_TAB_WIDTH - 1U))
-                      : 1;
-      }
-      info->content_indent = (uint16_t)cs_col;
     }
   }
 
@@ -1234,10 +1230,20 @@ FIO_SFUNC uint16_t fio___gfm_is_table_delimiter(fio___gfm_parser_s *st,
  * ones, and closing all containers deeper than `matched_depth`.
  * ========================================================================= */
 
+FIO_IFUNC void fio___gfm_mark_li_content(fio___gfm_parser_s *st) {
+  for (uint16_t d = FIO___GFM_DEPTH(st); d > 0; --d) {
+    if (st->nest[d - 1].type == FIO___GFM_CONT_LI) {
+      st->nest[d - 1].flags |= FIO___GFM_F_LI_HAS_BLOCK;
+      break;
+    }
+  }
+}
+
 /** Push a blockquote container onto the nesting stack and emit PUSH event.
  *  `content_after` points to the position after '>' + optional space. */
 FIO_SFUNC int fio___gfm_push_blockquote(fio___gfm_parser_s *st,
                                         uint16_t content_col) {
+  fio___gfm_mark_li_content(st);
   FIO___GFM_PUSH(st, FIO___GFM_CONT_BQ, 0);
   if (st->err)
     return st->err;
@@ -1278,21 +1284,42 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
   int saw_blank = 0;
   int content_after_blank = 0;
   int in_fence = 0;
+  char *marker_line_end = fio___gfm_line_end(info->content_start, end);
+  uint16_t bq_depth = 0;
+  for (uint16_t d = 0; d < st->depth; ++d)
+    bq_depth += (st->nest[d].type == FIO___GFM_CONT_BQ);
 
   while (p < end) {
     char *le = fio___gfm_line_end(p, end);
     char *next = fio___gfm_line_next(le, end);
+    char *line = p;
+    uint8_t line_padding = 0;
+
+    if (p > marker_line_end) {
+      for (uint16_t bq = 0; bq < bq_depth; ++bq) {
+        uint32_t bq_col = line_padding + fio___gfm_indent(line, le);
+        char *bq_trimmed = fio___gfm_ltrim(line, le);
+        if (bq_col > FIO___GFM_MAX_MARKER_INDENT || bq_trimmed >= le ||
+            *bq_trimmed != '>' ||
+            !fio___gfm_is_blockquote(bq_trimmed,
+                                     le,
+                                     bq_col,
+                                     &line,
+                                     &line_padding))
+          return content_after_blank ? 0 : FIO_GFM_F_TIGHT;
+      }
+    }
 
     if (in_fence) {
       /* Inside fenced code — check for closing fence */
-      char *ft = fio___gfm_ltrim(p, le);
+      char *ft = fio___gfm_ltrim(line, le);
       if (ft < le && (*ft == '`' || *ft == '~'))
         in_fence = 0; /* simplified: any fence-like line ends code */
       p = next;
       continue;
     }
 
-    if (fio___gfm_is_blank(p, le)) {
+    if (fio___gfm_is_blank(line, le)) {
       saw_blank = 1;
       p = next;
       continue;
@@ -1301,15 +1328,21 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
     /* Check if this line starts a new item of the same type.
      * Do this BEFORE the blank-line indent check so that a new
      * item is always recognized even after a blank line. */
-    uint32_t vcol = fio___gfm_indent(p, le);
+    uint32_t vcol = line_padding + fio___gfm_indent(line, le);
     if (vcol <= FIO___GFM_MAX_MARKER_INDENT) {
       fio___gfm_list_marker_s m2;
-      if (fio___gfm_is_list_marker(fio___gfm_ltrim(p, le), le, vcol, &m2)) {
+      if (fio___gfm_is_list_marker(fio___gfm_ltrim(line, le), le, vcol, &m2)) {
         if (m2.type != info->type)
           return saw_blank ? 0 : FIO_GFM_F_TIGHT;
         if (saw_blank)
           return 0;
         content_after_blank = 0;
+        {
+          char fc2;
+          char *mt = fio___gfm_ltrim(m2.content_start, le);
+          if (mt < le && fio___gfm_is_fenced_code_open(mt, le, &fc2))
+            in_fence = 1;
+        }
         p = next;
         continue;
       }
@@ -1320,7 +1353,7 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
      * content_indent) or starts a new list item. Content with
      * indent < content_indent is outside the item. */
     if (saw_blank) {
-      uint32_t line_indent = fio___gfm_indent(p, le);
+      uint32_t line_indent = line_padding + fio___gfm_indent(line, le);
       if (line_indent >= info->content_indent) {
         content_after_blank = 1;
       } else {
@@ -1330,7 +1363,7 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
     }
 
     /* Check for fence open */
-    char *ft = fio___gfm_ltrim(p, le);
+    char *ft = fio___gfm_ltrim(line, le);
     if (ft < le && (*ft == '`' || *ft == '~')) {
       char fc;
       if (fio___gfm_is_fenced_code_open(ft, le, &fc))
@@ -1346,6 +1379,7 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
 FIO_SFUNC int fio___gfm_push_list_and_item(fio___gfm_parser_s *st,
                                            fio___gfm_list_marker_s *info) {
   int r;
+  fio___gfm_mark_li_content(st);
   if (st->depth + 2 > FIO_GFM_MAX_DEPTH) {
     st->err = FIO_GFM_ERR_DEPTH;
     return st->err;
@@ -1558,6 +1592,7 @@ FIO_SFUNC int fio___gfm_close_all(fio___gfm_parser_s *st) {
 FIO_SFUNC void fio___gfm_open_paragraph(fio___gfm_parser_s *st,
                                         char *content,
                                         char *le) {
+  fio___gfm_mark_li_content(st);
   /* NOTE: No PUSH event is emitted here. The PUSH is deferred until
    * paragraph close, because:
    *   1. The paragraph might be retroactively converted to a setext heading.
@@ -1760,6 +1795,7 @@ FIO_SFUNC int fio___gfm_convert_to_table(fio___gfm_parser_s *st,
 
 /** Handle a blank line. Context-dependent behavior. */
 FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
+  int had_leaf = !!st->leaf_type;
   switch (st->leaf_type) {
   case FIO_GFM_PARAGRAPH: {
     int r = fio___gfm_close_paragraph(st);
@@ -1783,6 +1819,10 @@ FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
     return fio___gfm_close_leaf(st);
   default: break;
   }
+  if (!had_leaf && FIO___GFM_DEPTH(st) > 0 &&
+      FIO___GFM_TOP_TYPE(st) == FIO___GFM_CONT_LI &&
+      !(st->nest[st->depth - 1].flags & FIO___GFM_F_LI_HAS_BLOCK))
+    st->nest[st->depth - 1].flags |= FIO___GFM_F_LI_LEADING_BLANK;
   /* Mark enclosing list as loose if inside a list item. */
   for (uint16_t d = st->depth; d > 0; --d) {
     uint8_t t = st->nest[d - 1].type;
@@ -1808,8 +1848,60 @@ FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
  * Reference Cache
  * ========================================================================= */
 
+FIO_IFUNC uint32_t fio___gfm_utf8_read(char **p, char *end) {
+  unsigned char c = (unsigned char)**p;
+  if (c < 0x80) {
+    ++(*p);
+    return (uint32_t)c;
+  }
+  if (c >= 0xC2 && c <= 0xDF && *p + 1 < end) {
+    unsigned char c1 = (unsigned char)(*p)[1];
+    if ((c1 & 0xC0) == 0x80) {
+      *p += 2;
+      return (((uint32_t)c & 0x1F) << 6) | ((uint32_t)c1 & 0x3F);
+    }
+  }
+  if (c >= 0xE0 && c <= 0xEF && *p + 2 < end) {
+    unsigned char c1 = (unsigned char)(*p)[1];
+    unsigned char c2 = (unsigned char)(*p)[2];
+    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 &&
+        (c != 0xE0 || c1 >= 0xA0) && (c != 0xED || c1 < 0xA0)) {
+      *p += 3;
+      return (((uint32_t)c & 0x0F) << 12) |
+             (((uint32_t)c1 & 0x3F) << 6) | ((uint32_t)c2 & 0x3F);
+    }
+  }
+  if (c >= 0xF0 && c <= 0xF4 && *p + 3 < end) {
+    unsigned char c1 = (unsigned char)(*p)[1];
+    unsigned char c2 = (unsigned char)(*p)[2];
+    unsigned char c3 = (unsigned char)(*p)[3];
+    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 &&
+        (c3 & 0xC0) == 0x80 && (c != 0xF0 || c1 >= 0x90) &&
+        (c != 0xF4 || c1 < 0x90)) {
+      *p += 4;
+      return (((uint32_t)c & 0x07) << 18) |
+             (((uint32_t)c1 & 0x3F) << 12) |
+             (((uint32_t)c2 & 0x3F) << 6) | ((uint32_t)c3 & 0x3F);
+    }
+  }
+  ++(*p);
+  return (uint32_t)c;
+}
+
+FIO_IFUNC uint32_t fio___gfm_label_fold(uint32_t c) {
+  if (c >= 'A' && c <= 'Z')
+    return c + 32;
+  if ((c >= 0x00C0 && c <= 0x00D6) || (c >= 0x00D8 && c <= 0x00DE))
+    return c + 32;
+  if ((c >= 0x0391 && c <= 0x03A1) || (c >= 0x03A3 && c <= 0x03AB))
+    return c + 32;
+  if (c == 0x03C2)
+    return 0x03C3;
+  return c;
+}
+
 /** Compare two reference labels with GFM normalization:
- *  ASCII case-fold, collapse internal whitespace to single space,
+ *  Unicode-aware case-fold, collapse internal whitespace to single space,
  *  strip leading/trailing whitespace. Returns 1 if equal, 0 otherwise. */
 FIO_SFUNC int fio___gfm_label_eq(fio_buf_info_s a, fio_buf_info_s b) {
   char *ap = a.buf, *ae = a.buf + a.len;
@@ -1842,10 +1934,9 @@ FIO_SFUNC int fio___gfm_label_eq(fio_buf_info_s a, fio_buf_info_s b) {
     }
     if (a_ws != b_ws)
       return 0;
-    if (fio___gfm_tolower(*ap) != fio___gfm_tolower(*bp))
+    if (fio___gfm_label_fold(fio___gfm_utf8_read(&ap, ae)) !=
+        fio___gfm_label_fold(fio___gfm_utf8_read(&bp, be)))
       return 0;
-    ++ap;
-    ++bp;
   }
   return (ap == ae) & (bp == be);
 }
@@ -3198,6 +3289,7 @@ FIO_SFUNC int fio___gfm_emit_atx_heading(fio___gfm_parser_s *st,
                                          char *le,
                                          int level) {
   int r = 0;
+  fio___gfm_mark_li_content(st);
   /* Skip '#' markers */
   char *content = trimmed + level;
   /* Skip required space/tab after markers */
@@ -3242,6 +3334,7 @@ FIO_SFUNC int fio___gfm_emit_thematic_break(fio___gfm_parser_s *st,
                                             char *trimmed,
                                             char *le) {
   int r;
+  fio___gfm_mark_li_content(st);
   fio_gfm_event_s e;
   fio___gfm_event_init(st, &e);
   e.type = FIO_GFM_THEMATIC_BREAK;
@@ -3263,6 +3356,7 @@ FIO_SFUNC int fio___gfm_open_fenced_code(fio___gfm_parser_s *st,
                                          uint32_t vcol,
                                          char fc,
                                          uint16_t fl) {
+  fio___gfm_mark_li_content(st);
   st->leaf_type = FIO_GFM_CODE_BLOCK;
   st->fence_char = (uint8_t)fc;
   st->fence_len = fl;
@@ -3524,6 +3618,8 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
         if (fio___gfm_is_blank(content, le)) {
           st.matched_depth = d + 1;
         } else {
+          if (st.nest[d].flags & FIO___GFM_F_LI_LEADING_BLANK)
+            break;
           uint32_t line_col = content_padding + fio___gfm_indent(content, le);
           if (line_col >= st.nest[d].indent) {
             char *after = fio___gfm_skip_indent_with_padding(
@@ -3815,6 +3911,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
           fio___gfm_close_unmatched(&st);
           fio___gfm_close_orphan_lists(&st);
           fio___gfm_close_paragraph(&st);
+          fio___gfm_mark_li_content(&st);
           st.leaf_type = FIO_GFM_HTML_BLOCK;
           st.leaf_html_type = (uint8_t)html_type;
           st.leaf_start = content;
@@ -3869,12 +3966,28 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
            * New list: bullet or ordered start=1 only.
            * Different delimiter (e.g., '.' vs ')') always starts new. */
           if (list_depth || has_diff_list ||
-              marker_info.start_num == 0 || marker_info.start_num == 1) {
+              (!fio___gfm_is_blank(marker_info.content_start, le) &&
+               (marker_info.start_num == 0 || marker_info.start_num == 1))) {
             fio___gfm_close_paragraph(&st);
             fio___gfm_close_unmatched(&st);
-            /* After close_unmatched, the found list may no longer exist
-             * (e.g., "> - foo\n- bar" — BQ and its list were closed).
-             * In that case, treat as a new list. */
+            /* After close_unmatched, the first found list may no longer exist
+             * (e.g., "> - foo\n- bar" — BQ and its list were closed). If a
+             * nested list was popped, retry against the surviving stack so a
+             * following marker can become an item in the outer list. */
+            if (list_depth && list_depth > FIO___GFM_DEPTH(&st)) {
+              list_depth = 0;
+              for (uint16_t d = FIO___GFM_DEPTH(&st); d >= 1; --d) {
+                uint8_t t = st.nest[d - 1].type;
+                if (t >= FIO___GFM_CONT_UL_DASH &&
+                    t <= FIO___GFM_CONT_OL_PAREN) {
+                  if (t == marker_info.type)
+                    list_depth = d;
+                  break;
+                }
+                if (t == FIO___GFM_CONT_BQ)
+                  break;
+              }
+            }
             if (list_depth && list_depth <= FIO___GFM_DEPTH(&st)) {
               fio___gfm_push_new_item(&st, list_depth, &marker_info);
             } else {
@@ -3964,6 +4077,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
     /* B1: Indented code? (only when no paragraph is open)
      *     A line with indent >= 4 that doesn't start another block. */
     if (vcol >= 4) {
+      fio___gfm_mark_li_content(&st);
       st.leaf_type = FIO_GFM_CODE_BLOCK;
       st.fence_char = 0; /* indented = no fence char */
       st.fence_len = 0;
@@ -4026,6 +4140,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
     {
       int html_type = fio___gfm_is_html_block_start(trimmed, le, 1);
       if (html_type) {
+        fio___gfm_mark_li_content(&st);
         st.leaf_type = FIO_GFM_HTML_BLOCK;
         st.leaf_html_type = (uint8_t)html_type;
         st.leaf_start = content;

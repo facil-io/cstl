@@ -230,6 +230,7 @@ typedef struct {
   uint8_t code_has_line;  /* 1 iff at least one code line was emitted */
   uint8_t tight_child_pending; /* 1 iff a prior tight-LI child was emitted */
   uint8_t li_tight[128];  /* original tight state for LIST_ITEM pops */
+  uint32_t li_block_base[128]; /* block_container_depth at LIST_ITEM push */
   int err;
 } html_renderer_s;
 
@@ -393,11 +394,15 @@ static int spec_push(fio_gfm_event_s *e) {
 
   switch (e->type) {
   case FIO_GFM_PARAGRAPH:
-    if (r->tight_depth && r->block_container_depth == 0) {
-      /* In tight list and directly inside the LI (not nested container):
-       * suppress <p> tags but track depth */
-      ++r->para_suppress;
-      return 0;
+    if (r->li_depth) {
+      uint32_t li = r->li_depth - 1;
+      if (li < sizeof(r->li_tight) && r->li_tight[li] &&
+          r->block_container_depth == r->li_block_base[li]) {
+        /* In a tight list and directly inside the current LI (not nested
+         * in a block container): suppress <p> tags but track depth. */
+        ++r->para_suppress;
+        return 0;
+      }
     }
     HTML_LIT(r, "<p>");
     return 0;
@@ -446,8 +451,10 @@ static int spec_push(fio_gfm_event_s *e) {
 
   case FIO_GFM_LIST_ITEM: {
     uint8_t was_tight = !!(e->flags & FIO_GFM_F_TIGHT);
-    if (r->li_depth < sizeof(r->li_tight))
+    if (r->li_depth < sizeof(r->li_tight)) {
       r->li_tight[r->li_depth] = was_tight;
+      r->li_block_base[r->li_depth] = r->block_container_depth;
+    }
     ++r->li_depth;
     if (was_tight)
       ++r->tight_depth;
