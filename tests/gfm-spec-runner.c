@@ -221,10 +221,14 @@ typedef struct {
   size_t cap;             /* capacity */
   uint32_t table_row;     /* 0 = header row, 1+ = body rows */
   uint32_t tight_depth;   /* >0 iff we're inside tight list items */
+  uint32_t li_depth;      /* renderer LIST_ITEM stack depth */
   uint32_t para_suppress; /* >0 iff paragraphs are suppressed (tight) */
+  uint32_t block_container_depth; /* nesting depth of block containers within tight LI */
   uint8_t in_code_block;  /* 1 iff inside <pre><code> */
   uint8_t in_html_block;  /* 1 iff inside HTML block */
   uint8_t code_has_line;  /* 1 iff at least one code line was emitted */
+  uint8_t tight_child_pending; /* 1 iff a prior tight-LI child was emitted */
+  uint8_t li_tight[128];  /* original tight state for LIST_ITEM pops */
   int err;
 } html_renderer_s;
 
@@ -358,12 +362,9 @@ static int spec_push(fio_gfm_event_s *e) {
 
   switch (e->type) {
   case FIO_GFM_PARAGRAPH:
-    if (r->tight_depth && r->para_suppress == 0) {
-      /* In tight list: suppress <p> tags but track depth */
-      ++r->para_suppress;
-      return 0;
-    }
-    if (r->para_suppress) {
+    if (r->tight_depth && r->block_container_depth == 0) {
+      /* In tight list and directly inside the LI (not nested container):
+       * suppress <p> tags but track depth */
       ++r->para_suppress;
       return 0;
     }
@@ -371,9 +372,13 @@ static int spec_push(fio_gfm_event_s *e) {
     return 0;
 
   case FIO_GFM_HEADING:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      HTML_LIT(r, "\n");
     HTML_LIT(r, "<h");
     html_append_u(r, e->heading_level);
     HTML_LIT(r, ">");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_THEMATIC_BREAK:
@@ -381,14 +386,23 @@ static int spec_push(fio_gfm_event_s *e) {
     return 0;
 
   case FIO_GFM_BLOCKQUOTE:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      HTML_LIT(r, "\n");
     HTML_LIT(r, "<blockquote>");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_LIST_UNORDERED:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      HTML_LIT(r, "\n");
     HTML_LIT(r, "<ul>");
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_LIST_ORDERED:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      HTML_LIT(r, "\n");
     HTML_LIT(r, "<ol");
     if (e->list_start != 1) {
       HTML_LIT(r, " start=\"");
@@ -396,20 +410,34 @@ static int spec_push(fio_gfm_event_s *e) {
       HTML_LIT(r, "\"");
     }
     HTML_LIT(r, ">");
+    r->tight_child_pending = 0;
     return 0;
 
-  case FIO_GFM_LIST_ITEM:
-    if (e->flags & FIO_GFM_F_TIGHT)
+  case FIO_GFM_LIST_ITEM: {
+    uint8_t was_tight = !!(e->flags & FIO_GFM_F_TIGHT);
+    if (r->li_depth < sizeof(r->li_tight))
+      r->li_tight[r->li_depth] = was_tight;
+    ++r->li_depth;
+    if (was_tight)
       ++r->tight_depth;
+    r->tight_child_pending = 0;
     HTML_LIT(r, "<li>");
+    if (e->flags & FIO_GFM_F_TASK) {
+      HTML_LIT(r, "<input");
+      if (e->flags & FIO_GFM_F_TASK_CHECKED)
+        HTML_LIT(r, " checked=\"\"");
+      HTML_LIT(r, " disabled=\"\" type=\"checkbox\"> ");
+    }
     return 0;
+  }
 
   case FIO_GFM_CODE_BLOCK:
     r->in_code_block = 1;
     r->code_has_line = 0;
     HTML_LIT(r, "<pre><code");
     if (e->info.len) {
-      /* Extract first word of info string as language */
+      /* Extract first word of info string as language.
+       * Process backslash escapes (\X → X) per GFM spec. */
       const char *lang = e->info.buf;
       size_t lang_len = e->info.len;
       for (size_t i = 0; i < e->info.len; ++i) {
@@ -420,7 +448,20 @@ static int spec_push(fio_gfm_event_s *e) {
       }
       if (lang_len) {
         HTML_LIT(r, " class=\"language-");
-        html_escape(r, lang, lang_len);
+        /* Unescape backslash-escaped punctuation in info string */
+        const char *end = lang + lang_len;
+        const char *mark = lang;
+        while (lang < end) {
+          if (*lang == '\\' && lang + 1 < end) {
+            html_escape(r, mark, (size_t)(lang - mark));
+            html_escape(r, lang + 1, 1);
+            lang += 2;
+            mark = lang;
+          } else {
+            ++lang;
+          }
+        }
+        html_escape(r, mark, (size_t)(end - mark));
         HTML_LIT(r, "\"");
       }
     }
@@ -433,8 +474,12 @@ static int spec_push(fio_gfm_event_s *e) {
     return 0;
 
   case FIO_GFM_TABLE:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      HTML_LIT(r, "\n");
     r->table_row = 0;
     HTML_LIT(r, "<table><thead>");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_TABLE_ROW:
@@ -506,6 +551,9 @@ static int spec_pop(fio_gfm_event_s *e) {
     HTML_LIT(r, "</h");
     html_append_u(r, e->heading_level);
     HTML_LIT(r, ">");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
     return 0;
 
   case FIO_GFM_THEMATIC_BREAK:
@@ -513,21 +561,34 @@ static int spec_pop(fio_gfm_event_s *e) {
 
   case FIO_GFM_BLOCKQUOTE:
     HTML_LIT(r, "</blockquote>");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
     return 0;
 
   case FIO_GFM_LIST_UNORDERED:
     HTML_LIT(r, "</ul>");
+    r->tight_child_pending = 1;
     return 0;
 
   case FIO_GFM_LIST_ORDERED:
     HTML_LIT(r, "</ol>");
+    r->tight_child_pending = 1;
     return 0;
 
-  case FIO_GFM_LIST_ITEM:
+  case FIO_GFM_LIST_ITEM: {
+    uint8_t was_tight = 0;
     HTML_LIT(r, "</li>");
-    if ((e->flags & FIO_GFM_F_TIGHT) && r->tight_depth)
+    if (r->li_depth) {
+      --r->li_depth;
+      if (r->li_depth < sizeof(r->li_tight))
+        was_tight = r->li_tight[r->li_depth];
+    }
+    if (was_tight && r->tight_depth)
       --r->tight_depth;
+    r->tight_child_pending = 0;
     return 0;
+  }
 
   case FIO_GFM_CODE_BLOCK:
     /* Spec expects trailing \n before </code></pre> */
@@ -546,6 +607,9 @@ static int spec_pop(fio_gfm_event_s *e) {
     if (r->table_row > 1)
       HTML_LIT(r, "</tbody>");
     HTML_LIT(r, "</table>");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
     return 0;
 
   case FIO_GFM_TABLE_ROW:
@@ -596,6 +660,13 @@ static int spec_write(fio_gfm_event_s *e) {
       if (r->code_has_line)
         HTML_LIT(r, "\n");
       r->code_has_line = 1;
+      /* Emit padding spaces from partial tab stops */
+      if (e->padding) {
+        char spaces[8] = {0};
+        size_t n = e->padding < 8 ? e->padding : 8;
+        memset(spaces, ' ', n);
+        html_append(r, spaces, n);
+      }
       html_escape(r, e->text.buf, e->text.len);
       return 0;
     }
@@ -606,15 +677,22 @@ static int spec_write(fio_gfm_event_s *e) {
       HTML_LIT(r, "\n");
       return 0;
     }
+    if (r->tight_depth && r->block_container_depth == 0) {
+      if (r->tight_child_pending)
+        HTML_LIT(r, "\n");
+      r->tight_child_pending = 1;
+    }
     html_escape(r, e->text.buf, e->text.len);
     return 0;
 
   case FIO_GFM_SOFT_BREAK:
     HTML_LIT(r, "\n");
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_HARD_BREAK:
     HTML_LIT(r, "<br />\n");
+    r->tight_child_pending = 0;
     return 0;
 
   case FIO_GFM_CODE_SPAN: {

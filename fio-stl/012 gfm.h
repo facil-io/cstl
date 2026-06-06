@@ -721,6 +721,7 @@ typedef struct {
   uint8_t type;            /* FIO___GFM_CONT_* internal type */
   uint8_t marker_char;     /* '-', '+', '*', '.', or ')' */
   uint16_t content_indent; /* virtual column of content start */
+  uint8_t  task;           /* FIO_GFM_F_TASK | FIO_GFM_F_TASK_CHECKED */
 } fio___gfm_list_marker_s;
 
 /** Test for list marker at current position.
@@ -798,6 +799,30 @@ FIO_SFUNC int fio___gfm_is_list_marker(char *p,
 
   info->start_num = start_num;
   info->type = type;
+  info->task = 0;
+
+  /* Task list item detection: [ ] or [x] immediately after marker whitespace */
+  {
+    char *t = info->content_start;
+    if (t + 3 <= le && t[0] == '[' &&
+        (t[1] == ' ' || t[1] == 'x' || t[1] == 'X') &&
+        t[2] == ']' &&
+        t + 3 < le && (t[3] == ' ' || t[3] == '\t')) {
+      info->task = FIO_GFM_F_TASK |
+                   ((t[1] == 'x' || t[1] == 'X') ? FIO_GFM_F_TASK_CHECKED : 0);
+      info->content_start = t + 4;
+      /* Recalculate content_indent */
+      uint32_t cs_col = info->content_indent;
+      for (char *c = t; c < t + 4; ++c) {
+        cs_col += (*c == '\t')
+                      ? FIO___GFM_TAB_WIDTH -
+                            (cs_col & (FIO___GFM_TAB_WIDTH - 1U))
+                      : 1;
+      }
+      info->content_indent = (uint16_t)cs_col;
+    }
+  }
+
   return 1;
 }
 
@@ -1206,6 +1231,13 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
    * blank line between them"). */
   char *p = info->content_start;
   char *end = st->end;
+  /* If content_start is on the marker line and the rest is blank,
+   * skip to the next line. */
+  {
+    char *marker_le = fio___gfm_line_end(p, end);
+    if (fio___gfm_is_blank(p, marker_le))
+      p = fio___gfm_line_next(marker_le, end);
+  }
   int saw_blank = 0;
   int content_after_blank = 0;
   int in_fence = 0;
@@ -1229,8 +1261,36 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
       continue;
     }
 
-    /* Non-blank content after a blank → potential loose trigger */
-    content_after_blank |= saw_blank;
+    /* Check if this line starts a new item of the same type.
+     * Do this BEFORE the blank-line indent check so that a new
+     * item is always recognized even after a blank line. */
+    uint32_t vcol = fio___gfm_indent(p, le);
+    if (vcol <= FIO___GFM_MAX_MARKER_INDENT) {
+      fio___gfm_list_marker_s m2;
+      if (fio___gfm_is_list_marker(fio___gfm_ltrim(p, le), le, vcol, &m2)) {
+        if (m2.type != info->type)
+          return saw_blank ? 0 : FIO_GFM_F_TIGHT;
+        if (saw_blank)
+          return 0;
+        content_after_blank = 0;
+        p = next;
+        continue;
+      }
+    }
+
+    /* Non-blank content after a blank → potential loose trigger.
+     * But only if the content is inside the list item (indent >=
+     * content_indent) or starts a new list item. Content with
+     * indent < content_indent is outside the item. */
+    if (saw_blank) {
+      uint32_t line_indent = fio___gfm_indent(p, le);
+      if (line_indent >= info->content_indent) {
+        content_after_blank = 1;
+      } else {
+        /* Content is outside the list item — stop scanning */
+        return FIO_GFM_F_TIGHT;
+      }
+    }
 
     /* Check for fence open */
     char *ft = fio___gfm_ltrim(p, le);
@@ -1238,14 +1298,6 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
       char fc;
       if (fio___gfm_is_fenced_code_open(ft, le, &fc))
         in_fence = 1;
-    }
-
-    /* Check if this line starts a new item of the same type */
-    uint32_t vcol = fio___gfm_indent(p, le);
-    if (vcol <= FIO___GFM_MAX_MARKER_INDENT) {
-      fio___gfm_list_marker_s m2;
-      if (fio___gfm_is_list_marker(ft, le, vcol, &m2) && m2.type == info->type)
-        return saw_blank ? 0 : FIO_GFM_F_TIGHT;
     }
 
     p = next;
@@ -1289,7 +1341,7 @@ FIO_SFUNC int fio___gfm_push_list_and_item(fio___gfm_parser_s *st,
 
   fio___gfm_event_init(st, &e);
   e.type = FIO_GFM_LIST_ITEM;
-  e.flags = tight;
+  e.flags = tight | info->task;
   return fio___gfm_emit_push(st, &e);
 }
 
@@ -1340,7 +1392,7 @@ FIO_SFUNC int fio___gfm_push_new_item(fio___gfm_parser_s *st,
   fio_gfm_event_s e;
   fio___gfm_event_init(st, &e);
   e.type = FIO_GFM_LIST_ITEM;
-  e.flags = tight;
+  e.flags = tight | info->task;
   return fio___gfm_emit_push(st, &e);
 }
 
@@ -1508,8 +1560,9 @@ FIO_SFUNC int fio___gfm_close_paragraph(fio___gfm_parser_s *st) {
     text = after;
   }
 
-  /* Left-trim leading whitespace from first line */
-  while (text < text_end && (*text == ' ' || *text == '\t'))
+  /* Left-trim leading whitespace and newlines from paragraph text */
+  while (text < text_end &&
+         (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r'))
     ++text;
   /* Right-trim trailing whitespace/newlines from paragraph text */
   while (text_end > text &&
@@ -1551,10 +1604,19 @@ FIO_SFUNC int fio___gfm_convert_to_setext(fio___gfm_parser_s *st,
   (void)underline;
   (void)le;
 
-  /* TODO: extract leading ref defs (enable when ref cache is implemented) */
+  /* Extract leading ref defs */
+  for (;;) {
+    fio_buf_info_s lbl, dst, ttl;
+    char *after = fio___gfm_try_parse_ref_def(text, text_end, &lbl, &dst, &ttl);
+    if (!after)
+      break;
+    fio___gfm_ref_cache_add(st, lbl, dst, ttl);
+    text = after;
+  }
 
-  /* Left-trim leading whitespace */
-  while (text < text_end && (*text == ' ' || *text == '\t'))
+  /* Left-trim leading whitespace and newlines */
+  while (text < text_end &&
+         (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r'))
     ++text;
   /* Right-trim paragraph text */
   while (text_end > text &&
@@ -1589,8 +1651,15 @@ FIO_SFUNC int fio___gfm_convert_to_setext(fio___gfm_parser_s *st,
       e.type = FIO_GFM_THEMATIC_BREAK;
       r = fio___gfm_emit_pop(st, &e);
     }
+  } else {
+    /* All text was ref defs and underline is '===' → not a setext heading.
+     * Keep the paragraph open with the underline text. */
+    st->leaf_type = FIO_GFM_PARAGRAPH;
+    st->para_open = 1;
+    st->para_start = underline;
+    st->para_end = le;
+    return r;
   }
-  /* If '=' and all ref defs → underline is ignored (per spec) */
 
   st->leaf_type = 0;
   st->para_open = 0;
@@ -1655,8 +1724,14 @@ FIO_SFUNC int fio___gfm_convert_to_table(fio___gfm_parser_s *st,
 /** Handle a blank line. Context-dependent behavior. */
 FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
   switch (st->leaf_type) {
-  case FIO_GFM_PARAGRAPH:
-    return fio___gfm_close_paragraph(st);
+  case FIO_GFM_PARAGRAPH: {
+    int r = fio___gfm_close_paragraph(st);
+    if (r)
+      return r;
+    /* A blank line that closes a paragraph also makes the enclosing
+     * list loose (if inside a list item). Fall through. */
+    break;
+  }
   case FIO_GFM_CODE_BLOCK:
     /* Blank line inside code block — part of content.
      * Fenced: always continues. Indented: trailing blanks stripped on close.
@@ -1671,13 +1746,20 @@ FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
     return fio___gfm_close_leaf(st);
   default: break;
   }
-  /* No open leaf — mark enclosing list as loose if inside a list item. */
+  /* Mark enclosing list as loose if inside a list item. */
   for (uint16_t d = st->depth; d > 0; --d) {
     uint8_t t = st->nest[d - 1].type;
     if (t == FIO___GFM_CONT_LI)
       continue;
     if (t >= FIO___GFM_CONT_UL_DASH && t <= FIO___GFM_CONT_OL_PAREN) {
       st->nest[d - 1].flags |= FIO_GFM_F_LOOSE_SEEN;
+      /* Clear TIGHT on the list so future items and the current open
+       * LI know the list is loose. */
+      st->nest[d - 1].flags &= ~FIO_GFM_F_TIGHT;
+      for (uint16_t cd = d; cd < st->depth; ++cd) {
+        if (st->nest[cd].type == FIO___GFM_CONT_LI)
+          st->nest[cd].flags &= ~FIO_GFM_F_TIGHT;
+      }
       break;
     }
     break;
@@ -1867,8 +1949,14 @@ FIO_SFUNC char *fio___gfm_try_parse_ref_def(char *p,
     while (s < end && (*s == ' ' || *s == '\t'))
       ++s;
   }
-  /* 7. Optional title in "...", '...', or (...) */
+  /* 7. Optional title in "...", '...', or (...)
+   *    Title must be separated from destination by whitespace
+   *    (spaces, tabs, or a line ending). */
   if (s < end && (*s == '"' || *s == '\'' || *s == '(')) {
+    if (before_title_ws == after_dest_line && !had_line_ending) {
+      /* No whitespace between destination and title → invalid ref def */
+      return NULL;
+    }
     char open_ch = *s;
     char close_ch = (open_ch == '(') ? ')' : open_ch;
     ++s;
@@ -1906,14 +1994,17 @@ FIO_SFUNC char *fio___gfm_try_parse_ref_def(char *p,
         s = before_title_ws;
     }
   }
-  /* 8. No further non-whitespace on the final line */
+  /* 8. No further non-whitespace on the final line.
+   *    If trailing non-whitespace after a title, fall back to no title. */
   if (ttl_start) {
-    /* we have a title — rest of line must be whitespace */
     while (s < end && (*s == ' ' || *s == '\t'))
       ++s;
-    if (s < end && *s != '\n' && *s != '\r')
-      return NULL;
-  } else {
+    if (s < end && *s != '\n' && *s != '\r') {
+      /* Trailing non-whitespace after title → invalid title, fall back */
+      ttl_start = NULL;
+    }
+  }
+  if (!ttl_start) {
     /* no title — rest of dest line must be whitespace */
     s = after_dest_line;
     if (had_line_ending) {
@@ -1967,25 +2058,17 @@ FIO_SFUNC void fio___gfm_ref_scan_document(fio___gfm_parser_s *st) {
   int in_fence = 0;
   char fence_ch = 0;
   uint16_t fence_len = 0;
+  int prev_was_blank_or_block = 1; /* first line can start a ref def */
 
   while (p < doc_end) {
     char *le = fio___gfm_line_end(p, doc_end);
     char *next = fio___gfm_line_next(le, doc_end);
 
-    /* Strip blockquote markers for scanning (simplified: one level) */
-    char *line = p;
-    while (line < le && (*line == ' ' || *line == '\t'))
-      ++line;
-    if (line < le && *line == '>') {
-      ++line;
-      line += (line < le && (*line == ' ' || *line == '\t'));
-    }
-
-    uint32_t ind = fio___gfm_indent(line, le);
+    uint32_t ind = fio___gfm_indent(p, le);
 
     if (in_fence) {
       /* Check for closing fence */
-      char *ft = fio___gfm_ltrim(line, le);
+      char *ft = fio___gfm_ltrim(p, le);
       if (ind <= FIO___GFM_MAX_MARKER_INDENT && ft < le && *ft == fence_ch) {
         uint16_t cnt = 0;
         char *fc = ft;
@@ -1997,14 +2080,25 @@ FIO_SFUNC void fio___gfm_ref_scan_document(fio___gfm_parser_s *st) {
         if (cnt >= fence_len && fio___gfm_is_blank(fc, le))
           in_fence = 0;
       }
+      prev_was_blank_or_block = 0;
       p = next;
       continue;
     }
 
     /* Skip indented code (indent >= 4) */
     if (ind >= 4) {
+      prev_was_blank_or_block = 0;
       p = next;
       continue;
+    }
+
+    /* Strip blockquote markers for scanning (simplified: one level) */
+    char *line = p;
+    while (line < le && (*line == ' ' || *line == '\t'))
+      ++line;
+    if (line < le && *line == '>') {
+      ++line;
+      line += (line < le && (*line == ' ' || *line == '\t'));
     }
 
     /* Check for fence open */
@@ -2017,27 +2111,51 @@ FIO_SFUNC void fio___gfm_ref_scan_document(fio___gfm_parser_s *st) {
           in_fence = 1;
           fence_ch = fc;
           fence_len = fl;
+          prev_was_blank_or_block = 1;
           p = next;
           continue;
         }
       }
     }
 
-    /* Try ref def if line starts with '[' at indent <= 3 */
+    if (fio___gfm_is_blank(line, le)) {
+      prev_was_blank_or_block = 1;
+      p = next;
+      continue;
+    }
+
+    /* Detect block-level constructs so ref defs can follow them */
     {
       char *ft = fio___gfm_ltrim(line, le);
-      if (ft < le && *ft == '[') {
+      if (fio___gfm_is_atx_heading(ft, le) ||
+          fio___gfm_is_thematic_break(ft, le) ||
+          (ft < le && *ft == '>') ||
+          (ft < le && (*ft == '-' || *ft == '+' || *ft == '*')) ||
+          (ft < le && *ft >= '0' && *ft <= '9')) {
+        prev_was_blank_or_block = 1;
+        p = next;
+        continue;
+      }
+    }
+
+    /* Try ref def if line starts with '[' at indent <= 3 and
+     * the previous line was a blank line or block start. */
+    {
+      char *ft = fio___gfm_ltrim(line, le);
+      if (prev_was_blank_or_block && ft < le && *ft == '[') {
         fio_buf_info_s lbl, dst, ttl;
         char *after = fio___gfm_try_parse_ref_def(line, doc_end, &lbl, &dst, &ttl);
         if (after) {
           fio___gfm_ref_cache_add(st, lbl, dst, ttl);
           /* A ref def might span multiple lines; advance past it */
+          prev_was_blank_or_block = 1;
           p = after;
           continue;
         }
       }
     }
 
+    prev_was_blank_or_block = 0;
     p = next;
   }
   st->ref_scanned_to = st->end;
@@ -3402,7 +3520,10 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
           fio___gfm_close_leaf(&st);
         } else {
           /* Content line. Strip up to fence_indent columns of indent. */
-          fio___gfm_emit_code_line(&st, content, le, st.fence_indent);
+          uint32_t code_indent = fio___gfm_indent(content, le);
+          uint32_t strip_cols = st.fence_indent;
+          strip_cols = (strip_cols < code_indent) ? strip_cols : code_indent;
+          fio___gfm_emit_code_line(&st, content, le, strip_cols);
         }
         p = next;
         continue;
@@ -3546,9 +3667,14 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
         if (setext_level) {
           /* Convert paragraph to heading FIRST (consumes para state),
            * THEN close unmatched containers. close_unmatched would
-           * otherwise close the paragraph as a regular paragraph. */
+           * otherwise close the paragraph as a regular paragraph.
+           *
+           * If convert_to_setext opened a new paragraph (because the
+           * preceding text was all ref defs), don't close_unmatched —
+           * the paragraph stays open for continuation. */
           fio___gfm_convert_to_setext(&st, content, le, setext_level);
-          fio___gfm_close_unmatched(&st);
+          if (!st.para_open)
+            fio___gfm_close_unmatched(&st);
           p = next;
           continue;
         }
@@ -3752,6 +3878,23 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
     /* Close unmatched containers now.
      * (With no paragraph, there's no lazy continuation to preserve.) */
     fio___gfm_close_unmatched(&st);
+
+    /* If closing an unmatched LI left its parent LIST at the stack top, keep
+     * it only when the current line starts the next list item. Otherwise the
+     * next block is outside the list. */
+    if (FIO___GFM_DEPTH(&st) > 0) {
+      uint8_t ot = FIO___GFM_TOP_TYPE(&st);
+      if (ot >= FIO___GFM_CONT_UL_DASH && ot <= FIO___GFM_CONT_OL_PAREN) {
+        fio___gfm_list_marker_s orphan_marker;
+        uint32_t orphan_vcol = fio___gfm_indent(content, le);
+        char *orphan_trimmed = fio___gfm_ltrim(content, le);
+        if (!fio___gfm_is_list_marker(orphan_trimmed,
+                                      le,
+                                      orphan_vcol,
+                                      &orphan_marker))
+          fio___gfm_close_orphan_lists(&st);
+      }
+    }
 
     /* Try to open new blocks. This loop handles nested container starts:
      * e.g., "> - foo" opens a blockquote, then inside it opens a list.
