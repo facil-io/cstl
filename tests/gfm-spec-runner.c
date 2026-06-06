@@ -220,6 +220,7 @@ typedef struct {
   size_t len;             /* current length */
   size_t cap;             /* capacity */
   uint32_t table_row;     /* 0 = header row, 1+ = body rows */
+  uint32_t table_cell_depth; /* >0 iff rendering a table cell */
   uint32_t tight_depth;   /* >0 iff we're inside tight list items */
   uint32_t li_depth;      /* renderer LIST_ITEM stack depth */
   uint32_t para_suppress; /* >0 iff paragraphs are suppressed (tight) */
@@ -312,6 +313,20 @@ static void html_escape_url(html_renderer_s *r, const char *s, size_t n) {
 static void html_escape_md_url(html_renderer_s *r, const char *s, size_t n) {
   const char *end = s + n;
   while (s < end) {
+    if (*s == '&') {
+      const char *semi = s + 1;
+      while (semi < end && *semi != ';' && (semi - s) < 32)
+        ++semi;
+      if (semi < end && *semi == ';') {
+        char decoded[8];
+        size_t dlen = fio_entity(decoded, s, (size_t)(semi - s + 1));
+        if (dlen) {
+          html_escape_url(r, decoded, dlen);
+          s = semi + 1;
+          continue;
+        }
+      }
+    }
     if (*s == '\\' && s + 1 < end) {
       char next = s[1];
       /* Check if next is ASCII punctuation */
@@ -335,6 +350,22 @@ static void html_escape_md_text(html_renderer_s *r, const char *s, size_t n) {
   const char *mark = s;
   const char *end = s + n;
   while (s < end) {
+    if (*s == '&') {
+      const char *semi = s + 1;
+      while (semi < end && *semi != ';' && (semi - s) < 32)
+        ++semi;
+      if (semi < end && *semi == ';') {
+        char decoded[8];
+        size_t dlen = fio_entity(decoded, s, (size_t)(semi - s + 1));
+        if (dlen) {
+          html_escape(r, mark, (size_t)(s - mark));
+          html_escape(r, decoded, dlen);
+          s = semi + 1;
+          mark = s;
+          continue;
+        }
+      }
+    }
     if (*s == '\\' && s + 1 < end) {
       char next = s[1];
       int is_punct =
@@ -448,20 +479,7 @@ static int spec_push(fio_gfm_event_s *e) {
       }
       if (lang_len) {
         HTML_LIT(r, " class=\"language-");
-        /* Unescape backslash-escaped punctuation in info string */
-        const char *end = lang + lang_len;
-        const char *mark = lang;
-        while (lang < end) {
-          if (*lang == '\\' && lang + 1 < end) {
-            html_escape(r, mark, (size_t)(lang - mark));
-            html_escape(r, lang + 1, 1);
-            lang += 2;
-            mark = lang;
-          } else {
-            ++lang;
-          }
-        }
-        html_escape(r, mark, (size_t)(end - mark));
+        html_escape_md_text(r, lang, lang_len);
         HTML_LIT(r, "\"");
       }
     }
@@ -489,6 +507,7 @@ static int spec_push(fio_gfm_event_s *e) {
     return 0;
 
   case FIO_GFM_TABLE_CELL:
+    ++r->table_cell_depth;
     if (r->table_row == 0)
       HTML_LIT(r, "<th");
     else
@@ -623,6 +642,8 @@ static int spec_pop(fio_gfm_event_s *e) {
       HTML_LIT(r, "</th>");
     else
       HTML_LIT(r, "</td>");
+    if (r->table_cell_depth)
+      --r->table_cell_depth;
     return 0;
 
   case FIO_GFM_EMPHASIS:
@@ -696,12 +717,19 @@ static int spec_write(fio_gfm_event_s *e) {
     return 0;
 
   case FIO_GFM_CODE_SPAN: {
-    /* Code spans: newlines are collapsed to spaces per CommonMark */
+    /* Code spans: newlines are collapsed to spaces per CommonMark. */
     HTML_LIT(r, "<code>");
     const char *cs = e->text.buf;
     const char *ce = cs + e->text.len;
     const char *mark = cs;
     while (cs < ce) {
+      if (r->table_cell_depth && *cs == '\\' && cs + 1 < ce && cs[1] == '|') {
+        html_escape(r, mark, (size_t)(cs - mark));
+        html_append(r, "|", 1);
+        cs += 2;
+        mark = cs;
+        continue;
+      }
       if (*cs == '\n' || *cs == '\r') {
         html_escape(r, mark, (size_t)(cs - mark));
         html_append(r, " ", 1);

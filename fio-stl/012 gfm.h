@@ -560,6 +560,25 @@ FIO_IFUNC char *fio___gfm_skip_indent(char *p,
   return col >= columns ? p : NULL;
 }
 
+/** Skip virtual indentation when earlier marker stripping left virtual spaces
+ *  before `p` (from a partially consumed tab). Updates *padding to leftover
+ *  virtual spaces that should be emitted before `p`. */
+FIO_IFUNC char *fio___gfm_skip_indent_with_padding(char *p,
+                                                   char *le,
+                                                   uint32_t columns,
+                                                   uint8_t *padding) {
+  uint8_t pad = padding ? *padding : 0;
+  if (pad >= columns) {
+    if (padding)
+      *padding = (uint8_t)(pad - columns);
+    return p;
+  }
+  columns -= pad;
+  if (padding)
+    *padding = 0;
+  return fio___gfm_skip_indent(p, le, columns, padding);
+}
+
 /** Left-trim whitespace. Only use before emitting TEXT events (G5). */
 FIO_IFUNC char *fio___gfm_ltrim(char *p, char *le) {
   while (p < le && (*p == ' ' || *p == '\t'))
@@ -640,13 +659,24 @@ FIO_SFUNC int fio___gfm_is_thematic_break(char *p, char *le) {
 /** Test for blockquote marker: '>' at indent <= 3.
  *  Returns 1 if blockquote marker found, 0 otherwise.
  *  Sets *after to the position after '>' + optional space. */
-FIO_SFUNC int fio___gfm_is_blockquote(char *p, char *le, char **after) {
-  /* GFM spec section 5.1: '>' optionally followed by single space. */
+FIO_SFUNC int fio___gfm_is_blockquote(char *p,
+                                      char *le,
+                                      uint32_t base_col,
+                                      char **after,
+                                      uint8_t *padding) {
+  /* GFM spec section 5.1: '>' optionally followed by one virtual space. */
   if (p >= le || *p != '>')
     return 0;
   ++p;
-  /* Consume optional single space or tab after '>' */
-  p += (p < le && (*p == ' ' || *p == '\t'));
+  if (p < le && *p == ' ') {
+    ++p;
+  } else if (p < le && *p == '\t') {
+    uint32_t tab_cols = FIO___GFM_TAB_WIDTH -
+                        ((base_col + 1) & (FIO___GFM_TAB_WIDTH - 1U));
+    if (padding)
+      *padding = (uint8_t)(*padding + tab_cols - 1);
+    ++p;
+  }
   *after = p;
   return 1;
 }
@@ -722,6 +752,7 @@ typedef struct {
   uint8_t marker_char;     /* '-', '+', '*', '.', or ')' */
   uint16_t content_indent; /* virtual column of content start */
   uint8_t  task;           /* FIO_GFM_F_TASK | FIO_GFM_F_TASK_CHECKED */
+  uint8_t  padding;        /* virtual spaces before content_start */
 } fio___gfm_list_marker_s;
 
 /** Test for list marker at current position.
@@ -788,9 +819,15 @@ FIO_SFUNC int fio___gfm_is_list_marker(char *p,
 
   int blank_after = (scan >= le);
 
+  info->padding = 0;
   if (blank_after || spaces > 4) {
     info->content_indent = (uint16_t)(base_col + marker_width + 1);
-    /* Consume just one space past marker (or stay at EOL) */
+    /* Consume just one virtual space past marker (or stay at EOL). */
+    if (p < le && *p == '\t') {
+      uint32_t tab_cols = FIO___GFM_TAB_WIDTH -
+                          (after_col & (FIO___GFM_TAB_WIDTH - 1U));
+      info->padding = (uint8_t)(tab_cols - 1);
+    }
     info->content_start = (p < le) ? p + 1 : p;
   } else {
     info->content_indent = (uint16_t)(base_col + marker_width + spaces);
@@ -3254,13 +3291,18 @@ FIO_SFUNC int fio___gfm_open_fenced_code(fio___gfm_parser_s *st,
 FIO_SFUNC int fio___gfm_emit_code_line(fio___gfm_parser_s *st,
                                        char *p,
                                        char *le,
-                                       uint32_t strip_cols) {
-  /* Strip leading indentation */
-  uint8_t padding = 0;
+                                       uint32_t strip_cols,
+                                       uint8_t padding) {
+  /* Strip leading indentation, preserving virtual spaces left by tabs. */
   if (strip_cols > 0) {
-    char *after = fio___gfm_skip_indent(p, le, strip_cols, &padding);
-    if (after)
+    char *after = fio___gfm_skip_indent_with_padding(
+        p, le, strip_cols, &padding);
+    if (after) {
       p = after;
+    } else if (fio___gfm_is_blank(p, le)) {
+      p = le;
+      padding = 0;
+    }
   }
   fio_gfm_event_s e;
   fio___gfm_event_init(st, &e);
@@ -3449,6 +3491,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
      * NOT yet closed (they may survive via lazy continuation).
      * ================================================================= */
     char *content = p;
+    uint8_t content_padding = 0;
     st.matched_depth = 0;
     int from_push = 0; /* set to 1 when entering try_new_block via push */
 
@@ -3457,14 +3500,18 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
 
       if (ctype == FIO___GFM_CONT_BQ) {
         /* Blockquote continuation: expect '>' within first 3 columns. */
-        uint32_t ind = fio___gfm_indent(content, le);
+        uint32_t ind = content_padding + fio___gfm_indent(content, le);
         if (ind > FIO___GFM_MAX_MARKER_INDENT)
           break;
         char *trimmed = fio___gfm_ltrim(content, le);
         if (trimmed >= le || *trimmed != '>')
           break;
-        content = trimmed + 1;
-        content += (content < le && (*content == ' ' || *content == '\t'));
+        if (!fio___gfm_is_blockquote(trimmed,
+                                     le,
+                                     ind,
+                                     &content,
+                                     &content_padding))
+          break;
         st.matched_depth = d + 1;
 
       } else if (ctype >= FIO___GFM_CONT_UL_DASH &&
@@ -3477,11 +3524,10 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
         if (fio___gfm_is_blank(content, le)) {
           st.matched_depth = d + 1;
         } else {
-          uint32_t line_col = fio___gfm_indent(content, le);
+          uint32_t line_col = content_padding + fio___gfm_indent(content, le);
           if (line_col >= st.nest[d].indent) {
-            uint8_t padding = 0;
-            char *after = fio___gfm_skip_indent(
-                content, le, st.nest[d].indent, &padding);
+            char *after = fio___gfm_skip_indent_with_padding(
+                content, le, st.nest[d].indent, &content_padding);
             if (after)
               content = after;
             st.matched_depth = d + 1;
@@ -3520,17 +3566,18 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
           fio___gfm_close_leaf(&st);
         } else {
           /* Content line. Strip up to fence_indent columns of indent. */
-          uint32_t code_indent = fio___gfm_indent(content, le);
+          uint32_t code_indent = content_padding + fio___gfm_indent(content, le);
           uint32_t strip_cols = st.fence_indent;
           strip_cols = (strip_cols < code_indent) ? strip_cols : code_indent;
-          fio___gfm_emit_code_line(&st, content, le, strip_cols);
+          fio___gfm_emit_code_line(
+              &st, content, le, strip_cols, content_padding);
         }
         p = next;
         continue;
       }
       /* --- Indented code: continues while indent >= 4 or blank --- */
       {
-        uint32_t vcol_ic = fio___gfm_indent(content, le);
+        uint32_t vcol_ic = content_padding + fio___gfm_indent(content, le);
         int is_blank_ic = fio___gfm_is_blank(content, le);
         if (vcol_ic >= 4 || is_blank_ic) {
           if (is_blank_ic) {
@@ -3546,10 +3593,10 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
               uint16_t idx = (bi < FIO___GFM_MAX_IC_BLANKS) ? bi : 0;
               fio___gfm_emit_code_line(&st,
                                        st.ic_blank_content[idx],
-                                       st.ic_blank_le[idx], 4);
+                                       st.ic_blank_le[idx], 4, 0);
             }
             st.ic_pending_blanks = 0;
-            fio___gfm_emit_code_line(&st, content, le, 4);
+            fio___gfm_emit_code_line(&st, content, le, 4, content_padding);
           }
           p = next;
           continue;
@@ -3606,7 +3653,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
               fio___gfm_list_marker_s lm_dummy;
               if (fio___gfm_is_atx_heading(tt, le) ||
                   fio___gfm_is_thematic_break(tt, le) ||
-                  fio___gfm_is_blockquote(tt, le, &bq_dummy) ||
+                  fio___gfm_is_blockquote(tt, le, tvcol, &bq_dummy, NULL) ||
                   fio___gfm_is_fenced_code_open(tt, le, &fc_dummy) ||
                   fio___gfm_is_html_block_start(tt, le, 1) ||
                   fio___gfm_is_list_marker(tt, le, tvcol, &lm_dummy)) {
@@ -3748,7 +3795,8 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
 
         /* Blockquote? */
         char *bq_after;
-        if (fio___gfm_is_blockquote(trimmed, le, &bq_after)) {
+        if (fio___gfm_is_blockquote(
+                trimmed, le, vcol, &bq_after, &content_padding)) {
           fio___gfm_close_unmatched(&st);
           fio___gfm_close_orphan_lists(&st);
           fio___gfm_close_paragraph(&st);
@@ -3844,6 +3892,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
             if (st.err)
               break;
             content = marker_info.content_start;
+            content_padding = marker_info.padding;
             from_push = 1;
             goto try_new_block;
           }
@@ -3909,7 +3958,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
      * parse_blockquote() calls parse_blocks() which calls parse_list()
      * which calls parse_blocks() again. */
   try_new_block:;
-    uint32_t vcol = fio___gfm_indent(content, le);
+    uint32_t vcol = content_padding + fio___gfm_indent(content, le);
     char *trimmed = fio___gfm_ltrim(content, le);
 
     /* B1: Indented code? (only when no paragraph is open)
@@ -3925,7 +3974,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
       e.type = FIO_GFM_CODE_BLOCK;
       e.source = FIO_BUF_INFO2(content, (size_t)(le - content));
       fio___gfm_emit_push(&st, &e);
-      fio___gfm_emit_code_line(&st, content, le, 4);
+      fio___gfm_emit_code_line(&st, content, le, 4, content_padding);
       p = next;
       continue;
     }
@@ -3961,7 +4010,8 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
     /* B5: Blockquote? → push container, loop back for nested blocks */
     {
       char *bq_after;
-      if (fio___gfm_is_blockquote(trimmed, le, &bq_after)) {
+      if (fio___gfm_is_blockquote(
+              trimmed, le, vcol, &bq_after, &content_padding)) {
         uint16_t bq_content_col = fio___gfm_vcol(p, bq_after);
         fio___gfm_push_blockquote(&st, bq_content_col);
         if (st.err)
@@ -4056,6 +4106,7 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
 
         /* Advance content past the list marker */
         content = marker_info.content_start;
+        content_padding = marker_info.padding;
         from_push = 1;
         goto try_new_block; /* check for nested blocks inside list item */
       }

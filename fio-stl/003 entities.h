@@ -54,12 +54,12 @@ ML Entity Decoding — Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-/** Named entity entry. `name` is lowercase, max 7 chars. `r` is UTF-8. */
+/** Named entity entry. `name` is lowercase. `r` is UTF-8. */
 typedef struct {
-  char name[8];
+  char name[32];
   uint8_t nlen;
   uint8_t rlen;
-  uint8_t r[4];
+  uint8_t r[8];
 } fio___entity_s;
 
 static const fio___entity_s fio___entity_table[] = {
@@ -77,6 +77,15 @@ static const fio___entity_s fio___entity_table[] = {
     FIO___ENTITY("le", "\xE2\x89\xA4"),
     FIO___ENTITY("ne", "\xE2\x89\xA0"),
     FIO___ENTITY("copy", "\xC2\xA9"),
+    FIO___ENTITY("aelig", "\xC3\x86"),
+    FIO___ENTITY("aacute", "\xC3\x81"),
+    FIO___ENTITY("dcaron", "\xC4\x8E"),
+    FIO___ENTITY("ouml", "\xC3\xB6"),
+    FIO___ENTITY("fjlig", "fj"),
+    FIO___ENTITY("hilbertspace", "\xE2\x84\x8B"),
+    FIO___ENTITY("differentiald", "\xE2\x85\x86"),
+    FIO___ENTITY("clockwisecontourintegral", "\xE2\x88\xB2"),
+    FIO___ENTITY("nge", "\xE2\x89\xA7\xCC\xB8"),
     FIO___ENTITY("raquo", "\xC2\xBB"),
     FIO___ENTITY("laquo", "\xC2\xAB"),
     FIO___ENTITY("rdquo", "\xE2\x80\x9D"),
@@ -146,7 +155,8 @@ SFUNC size_t fio_entity(char *dest, const char *src, size_t len) {
   /* ── Named: &name; ── */
   {
     const char *name_start = p;
-    while (p < end && *p != ';' && (size_t)(p - name_start) < 8)
+    while (p < end && *p != ';' &&
+           (size_t)(p - name_start) < sizeof(fio___entity_table[0].name))
       ++p;
     if (p >= end || *p != ';')
       return 0;
