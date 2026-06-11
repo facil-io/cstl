@@ -297,7 +297,7 @@ static void html_escape_url(html_renderer_s *r, const char *s, size_t n) {
     } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
         (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
         c == '~' || c == ':' || c == '/' || c == '?' || c == '#' ||
-        c == '[' || c == ']' || c == '@' || c == '!' || c == '$' ||
+        c == '@' || c == '!' || c == '$' ||
         c == '\'' || c == '(' || c == ')' || c == '*' ||
         c == '+' || c == ',' || c == ';' || c == '=' || c == '%') {
       html_append(r, s, 1);
@@ -705,10 +705,14 @@ static int spec_write(fio_gfm_event_s *e) {
       HTML_LIT(r, "\n");
       return 0;
     }
-    if (r->tight_depth && r->block_container_depth == 0) {
-      if (r->tight_child_pending)
-        HTML_LIT(r, "\n");
-      r->tight_child_pending = 1;
+    if (r->li_depth) {
+      uint32_t li = r->li_depth - 1;
+      if (li < sizeof(r->li_tight) && r->li_tight[li] &&
+          r->block_container_depth == r->li_block_base[li]) {
+        if (r->tight_child_pending)
+          HTML_LIT(r, "\n");
+        r->tight_child_pending = 1;
+      }
     }
     html_escape(r, e->text.buf, e->text.len);
     return 0;
@@ -765,8 +769,21 @@ static int spec_write(fio_gfm_event_s *e) {
     HTML_LIT(r, " />");
     return 0;
 
-  case FIO_GFM_AUTOLINK:
+  case FIO_GFM_AUTOLINK: {
+    int is_email = 0, has_colon = 0;
+    for (size_t i = 0; i < e->destination.len; ++i) {
+      is_email |= (e->destination.buf[i] == '@');
+      has_colon |= (e->destination.buf[i] == ':');
+    }
     HTML_LIT(r, "<a href=\"");
+    if (is_email && !has_colon)
+      HTML_LIT(r, "mailto:");
+    else if (e->destination.len >= 4 &&
+             (e->destination.buf[0] == 'w' || e->destination.buf[0] == 'W') &&
+             (e->destination.buf[1] == 'w' || e->destination.buf[1] == 'W') &&
+             (e->destination.buf[2] == 'w' || e->destination.buf[2] == 'W') &&
+             e->destination.buf[3] == '.')
+      HTML_LIT(r, "http://");
     if (e->destination.len)
       html_escape_url(r, e->destination.buf, e->destination.len);
     HTML_LIT(r, "\">");
@@ -774,6 +791,7 @@ static int spec_write(fio_gfm_event_s *e) {
       html_escape(r, e->text.buf, e->text.len);
     HTML_LIT(r, "</a>");
     return 0;
+  }
 
   case FIO_GFM_INLINE_HTML:
     /* Raw passthrough */

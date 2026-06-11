@@ -1284,6 +1284,8 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
   int saw_blank = 0;
   int content_after_blank = 0;
   int in_fence = 0;
+  int in_nested_list = 0;
+  int nested_blank = 0;
   char *marker_line_end = fio___gfm_line_end(info->content_start, end);
   uint16_t bq_depth = 0;
   for (uint16_t d = 0; d < st->depth; ++d)
@@ -1320,33 +1322,59 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
     }
 
     if (fio___gfm_is_blank(line, le)) {
-      saw_blank = 1;
+      if (in_nested_list)
+        nested_blank = 1;
+      else
+        saw_blank = 1;
       p = next;
       continue;
     }
 
-    /* Check if this line starts a new item of the same type.
-     * Do this BEFORE the blank-line indent check so that a new
-     * item is always recognized even after a blank line. */
+    /* Check list markers before blank-line accounting. Markers indented to
+     * this item's content column belong to a child list; their blanks should
+     * not make this parent list loose unless a later parent block follows. */
     uint32_t vcol = line_padding + fio___gfm_indent(line, le);
-    if (vcol <= FIO___GFM_MAX_MARKER_INDENT) {
-      fio___gfm_list_marker_s m2;
-      if (fio___gfm_is_list_marker(fio___gfm_ltrim(line, le), le, vcol, &m2)) {
-        if (m2.type != info->type)
-          return saw_blank ? 0 : FIO_GFM_F_TIGHT;
-        if (saw_blank)
-          return 0;
-        content_after_blank = 0;
-        {
-          char fc2;
-          char *mt = fio___gfm_ltrim(m2.content_start, le);
-          if (mt < le && fio___gfm_is_fenced_code_open(mt, le, &fc2))
-            in_fence = 1;
-        }
-        p = next;
-        continue;
-      }
+    fio___gfm_list_marker_s m2;
+    int has_marker = fio___gfm_is_list_marker(fio___gfm_ltrim(line, le),
+                                             le,
+                                             vcol,
+                                             &m2);
+    if (has_marker && vcol >= info->content_indent) {
+      if (saw_blank)
+        return 0;
+      in_nested_list = 1;
+      nested_blank = 0;
+      p = next;
+      continue;
     }
+
+    if (in_nested_list && vcol >= info->content_indent) {
+      nested_blank = 0;
+      p = next;
+      continue;
+    }
+
+    if (has_marker && vcol <= FIO___GFM_MAX_MARKER_INDENT) {
+      if (m2.type != info->type)
+        return saw_blank ? 0 : FIO_GFM_F_TIGHT;
+      if (saw_blank)
+        return 0;
+      content_after_blank = 0;
+      in_nested_list = 0;
+      nested_blank = 0;
+      {
+        char fc2;
+        char *mt = fio___gfm_ltrim(m2.content_start, le);
+        if (mt < le && fio___gfm_is_fenced_code_open(mt, le, &fc2))
+          in_fence = 1;
+      }
+      p = next;
+      continue;
+    }
+
+    if (in_nested_list && nested_blank)
+      return 0;
+    in_nested_list = 0;
 
     /* Non-blank content after a blank → potential loose trigger.
      * But only if the content is inside the list item (indent >=
@@ -1823,24 +1851,9 @@ FIO_SFUNC int fio___gfm_handle_blank_line(fio___gfm_parser_s *st) {
       FIO___GFM_TOP_TYPE(st) == FIO___GFM_CONT_LI &&
       !(st->nest[st->depth - 1].flags & FIO___GFM_F_LI_HAS_BLOCK))
     st->nest[st->depth - 1].flags |= FIO___GFM_F_LI_LEADING_BLANK;
-  /* Mark enclosing list as loose if inside a list item. */
-  for (uint16_t d = st->depth; d > 0; --d) {
-    uint8_t t = st->nest[d - 1].type;
-    if (t == FIO___GFM_CONT_LI)
-      continue;
-    if (t >= FIO___GFM_CONT_UL_DASH && t <= FIO___GFM_CONT_OL_PAREN) {
-      st->nest[d - 1].flags |= FIO_GFM_F_LOOSE_SEEN;
-      /* Clear TIGHT on the list so future items and the current open
-       * LI know the list is loose. */
-      st->nest[d - 1].flags &= ~FIO_GFM_F_TIGHT;
-      for (uint16_t cd = d; cd < st->depth; ++cd) {
-        if (st->nest[cd].type == FIO___GFM_CONT_LI)
-          st->nest[cd].flags &= ~FIO_GFM_F_TIGHT;
-      }
-      break;
-    }
-    break;
-  }
+  /* Tight/loose is determined by list lookahead at list open time.
+   * Do not clear FIO_GFM_F_TIGHT here: a blank line may belong to a child
+   * list that will close before the next non-blank parent block. */
   return 0;
 }
 
@@ -2368,6 +2381,146 @@ FIO_SFUNC void fio___gfm_ref_scan_document(fio___gfm_parser_s *st) {
  *
  *  The forward scan skips over code spans (backtick pairs) to avoid
  *  false matches inside code. */
+FIO_IFUNC int fio___gfm_is_ascii_alnum(uint8_t c) {
+  return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9'));
+}
+
+FIO_IFUNC int fio___gfm_is_autolink_body(char *p, char *end) {
+  for (; p < end; ++p) {
+    unsigned char c = (unsigned char)*p;
+    if (c <= 32 || c == '<' || c == '>')
+      return 0;
+  }
+  return 1;
+}
+
+FIO_IFUNC int fio___gfm_is_autolink_scheme(char *p, char *end) {
+  size_t len = 0;
+  if (p >= end || !((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z')))
+    return 0;
+  for (; p < end && *p != ':'; ++p) {
+    char c = *p;
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '+' || c == '.' || c == '-'))
+      return 0;
+    ++len;
+  }
+  return (p < end && *p == ':' && len >= 2 && len <= 32 && p + 1 < end &&
+          fio___gfm_is_autolink_body(p + 1, end));
+}
+
+FIO_IFUNC int fio___gfm_is_autolink_email(char *p, char *end) {
+  char *at = NULL;
+  char *domain;
+  int label_len = 0, label_has_dot = 0;
+  for (char *s = p; s < end; ++s) {
+    char c = *s;
+    int ok = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '!' || c == '#' ||
+              c == '$' || c == '%' || c == '&' || c == '\'' || c == '*' ||
+              c == '+' || c == '/' || c == '=' || c == '?' || c == '^' ||
+              c == '_' || c == '`' || c == '{' || c == '|' || c == '}' ||
+              c == '~' || c == '-');
+    if (c == '@') {
+      if (at || s == p)
+        return 0;
+      at = s;
+      continue;
+    }
+    if (!ok)
+      return 0;
+  }
+  if (!at || at + 1 >= end)
+    return 0;
+  domain = at + 1;
+  if (*domain == '.' || *domain == '-')
+    return 0;
+  for (char *s = domain; s < end; ++s) {
+    char c = *s;
+    if (c == '.') {
+      if (!label_len || s[-1] == '-')
+        return 0;
+      label_has_dot = 1;
+      label_len = 0;
+      continue;
+    }
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-'))
+      return 0;
+    ++label_len;
+  }
+  return label_has_dot && label_len > 0 && end[-1] != '-';
+}
+
+FIO_IFUNC char *fio___gfm_extended_url_end(char *p, char *end) {
+  char *s = p;
+  int is_url = 0;
+  if (end - p >= 7 && fio___gfm_ci_match(p, end, "http://") == p + 7)
+    is_url = 1;
+  else if (end - p >= 8 && fio___gfm_ci_match(p, end, "https://") == p + 8)
+    is_url = 1;
+  else if (end - p >= 6 && fio___gfm_ci_match(p, end, "ftp://") == p + 6)
+    is_url = 1;
+  else if (end - p >= 4 && fio___gfm_ci_match(p, end, "www.") == p + 4)
+    is_url = 1;
+  if (!is_url)
+    return NULL;
+  while (s < end && *s > ' ' && *s != '<')
+    ++s;
+  while (s > p && (s[-1] == '.' || s[-1] == ',' || s[-1] == ':' ||
+                   s[-1] == '*' || s[-1] == '_' || s[-1] == '~' ||
+                   s[-1] == '?' || s[-1] == '!'))
+    --s;
+  for (;;) {
+    char *amp = s;
+    while (amp > p && amp[-1] != '&')
+      --amp;
+    if (amp <= p || s[-1] != ';')
+      break;
+    int entityish = 1;
+    for (char *e = amp; e < s - 1; ++e) {
+      char c = *e;
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '#')) {
+        entityish = 0;
+        break;
+      }
+    }
+    if (!entityish)
+      break;
+    s = amp - 1;
+  }
+  int open_paren = 0, close_paren = 0;
+  for (char *q = p; q < s; ++q) {
+    open_paren += (*q == '(');
+    close_paren += (*q == ')');
+  }
+  while (s > p && s[-1] == ')' && close_paren > open_paren) {
+    --s;
+    --close_paren;
+  }
+  return (s > p) ? s : NULL;
+}
+
+FIO_IFUNC char *fio___gfm_extended_email_end(char *p, char *end) {
+  char *s = p;
+  while (s < end) {
+    char c = *s;
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '.' || c == '!' || c == '#' ||
+          c == '$' || c == '%' || c == '&' || c == '\'' || c == '*' ||
+          c == '+' || c == '/' || c == '=' || c == '?' || c == '^' ||
+          c == '_' || c == '`' || c == '{' || c == '|' || c == '}' ||
+          c == '~' || c == '-' || c == '@'))
+      break;
+    ++s;
+  }
+  while (s > p && (s[-1] == '.' || s[-1] == ','))
+    --s;
+  return fio___gfm_is_autolink_email(p, s) ? s : NULL;
+}
+
 FIO_SFUNC char *fio___gfm_find_closer(char *search_start,
                                       char *boundary,
                                       char marker,
@@ -2788,6 +2941,13 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
       break;
 
     char c = *p;
+    int angle_suppressed = 0;
+    {
+      char *prev = p;
+      while (prev > start && (prev[-1] == ' ' || prev[-1] == '\t'))
+        --prev;
+      angle_suppressed = (prev > start && prev[-1] == '<');
+    }
 
     /* (b) Backslash escape */
     if (c == '\\' && p + 1 < end) {
@@ -2953,21 +3113,55 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
       continue;
     }
 
-    /* (e) Less-than — autolink or inline HTML */
+    /* (e) GFM extended autolinks (bare URLs and emails) */
+    if (!angle_suppressed &&
+        (p == start || !(fio___gfm_is_ascii_alnum((uint8_t)p[-1]))) &&
+        ((c == 'h' || c == 'H' || c == 'f' || c == 'F' || c == 'w' ||
+          c == 'W'))) {
+      char *ue = fio___gfm_extended_url_end(p, end);
+      if (ue) {
+        FIO___GFM_FLUSH_TEXT(p);
+        fio_gfm_event_s ev;
+        fio___gfm_event_init(st, &ev);
+        ev.type = FIO_GFM_AUTOLINK;
+        ev.text = FIO_BUF_INFO2(p, (size_t)(ue - p));
+        ev.destination = ev.text;
+        r = fio___gfm_emit_write(st, &ev);
+        if (r) goto done;
+        p = ue;
+        text_start = p;
+        continue;
+      }
+    }
+    if (!angle_suppressed &&
+        (p == start || !(fio___gfm_is_ascii_alnum((uint8_t)p[-1]))) &&
+        ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9'))) {
+      char *ee = fio___gfm_extended_email_end(p, end);
+      if (ee) {
+        FIO___GFM_FLUSH_TEXT(p);
+        fio_gfm_event_s ev;
+        fio___gfm_event_init(st, &ev);
+        ev.type = FIO_GFM_AUTOLINK;
+        ev.text = FIO_BUF_INFO2(p, (size_t)(ee - p));
+        ev.destination = ev.text;
+        r = fio___gfm_emit_write(st, &ev);
+        if (r) goto done;
+        p = ee;
+        text_start = p;
+        continue;
+      }
+    }
+
+    /* (f) Less-than — autolink or inline HTML */
     if (c == '<') {
       char *gt = p + 1;
       while (gt < end && *gt != '>')
         ++gt;
       if (gt < end) {
-        /* check for autolink: has ':' or '@' inside, no spaces/newlines */
-        int has_colon = 0, has_at = 0, has_space = 0;
-        for (char *sc = p + 1; sc < gt; ++sc) {
-          has_colon |= (*sc == ':');
-          has_at |= (*sc == '@');
-          has_space |= (*sc == ' ' || *sc == '\t' || *sc == '\n' ||
-                        *sc == '\r' || *sc == '<');
-        }
-        if ((has_colon || has_at) && !has_space) {
+        /* check for CommonMark autolink: absolute URI or email */
+        if (fio___gfm_is_autolink_scheme(p + 1, gt) ||
+            fio___gfm_is_autolink_email(p + 1, gt)) {
           FIO___GFM_FLUSH_TEXT(p);
           fio_gfm_event_s ev;
           fio___gfm_event_init(st, &ev);
@@ -2982,8 +3176,30 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
         }
         /* check for inline HTML */
         char fc = (p + 1 < gt) ? p[1] : 0;
-        int is_html = ((fc >= 'a' && fc <= 'z') || (fc >= 'A' && fc <= 'Z') ||
-                       fc == '/' || fc == '!' || fc == '?');
+        int is_html = (fc == '!' || fc == '?');
+        if (!is_html && fc == '/') {
+          char *hn = p + 2;
+          while (hn < gt && ((*hn >= 'a' && *hn <= 'z') ||
+                             (*hn >= 'A' && *hn <= 'Z') ||
+                             (*hn >= '0' && *hn <= '9') || *hn == '-'))
+            ++hn;
+          if (hn > p + 2) {
+            while (hn < gt && (*hn == ' ' || *hn == '\t' || *hn == '\n' ||
+                               *hn == '\r'))
+              ++hn;
+          }
+          is_html = (hn > p + 2 && hn == gt);
+        } else if (!is_html &&
+                   ((fc >= 'a' && fc <= 'z') || (fc >= 'A' && fc <= 'Z'))) {
+          char *hn = p + 1;
+          while (hn < gt && ((*hn >= 'a' && *hn <= 'z') ||
+                             (*hn >= 'A' && *hn <= 'Z') ||
+                             (*hn >= '0' && *hn <= '9') || *hn == '-'))
+            ++hn;
+          is_html = (hn > p + 1 &&
+                     (hn == gt || *hn == '/' || *hn == ' ' || *hn == '\t' ||
+                      *hn == '\n' || *hn == '\r'));
+        }
         if (is_html) {
           FIO___GFM_FLUSH_TEXT(p);
           fio_gfm_event_s ev;
@@ -4050,7 +4266,8 @@ SFUNC size_t fio_gfm_parse(const fio_gfm_callbacks_s *callbacks,
         fio___gfm_list_marker_s orphan_marker;
         uint32_t orphan_vcol = fio___gfm_indent(content, le);
         char *orphan_trimmed = fio___gfm_ltrim(content, le);
-        if (!fio___gfm_is_list_marker(orphan_trimmed,
+        if (orphan_vcol > FIO___GFM_MAX_MARKER_INDENT ||
+            !fio___gfm_is_list_marker(orphan_trimmed,
                                       le,
                                       orphan_vcol,
                                       &orphan_marker))
