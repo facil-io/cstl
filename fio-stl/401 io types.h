@@ -258,6 +258,9 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
     pr->timeout = FIO_IO_TIMEOUT_MAX;
   /* round up to nearest 16 byte size */
   pr->buffer_size = ((pr->buffer_size + 15ULL) & (~15ULL));
+  if (pr->buffer_size > 0x3FFFFF)
+    FIO_LOG_WARNING("A very large protocol buffer was requested... %zu per IO",
+                    (size_t)pr->buffer_size);
 }
 
 /* the FIO___MOCK_PROTOCOL is used to manage hijacked / zombie connections. */
@@ -419,14 +422,16 @@ FIO_IFUNC void fio___io_free_with_flush(fio_io_s *io);
 
 /** The main IO object type. Should be treated as an opaque pointer. */
 struct fio_io_s {
+  fio_io_protocol_s *pr;
+  void *udata;
+  void *tls;
+  fio___io_env_safe_s env;
+  uint8_t pad___[64 - (63 & (sizeof(fio___io_env_safe_s) + sizeof(void *) +
+                             sizeof(void *) + sizeof(fio_io_protocol_s *)))];
   fio_socket_i fd;
   uint32_t flags;
   FIO_LIST_NODE node;
-  void *udata;
-  void *tls;
-  fio_io_protocol_s *pr;
   fio_stream_s out;
-  fio___io_env_safe_s env;
 #if FIO_IO_COUNT_STORAGE
   size_t total_sent;
   size_t total_recieved;
@@ -562,6 +567,8 @@ SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
   fio_io_protocol_s cpy;
   if (!FIO_SOCK_FD_ISVALID(fd))
     goto error;
+  if (!pr)
+    pr = &FIO___IO_MOCK_PROTOCOL;
   io = fio___io_new2(pr->buffer_size);
   *io = (fio_io_s){
       .fd = fd,
@@ -620,21 +627,10 @@ IFUNC size_t fio_io_buffer_len(fio_io_s *io) {
   return fio___io_metadata_flex_len(io);
 }
 
-/** Associates a new `udata` pointer with the IO, returning the old `udata` */
-FIO_DEF_SET_FUNC(IFUNC, fio_io, fio_io_s, void *, udata, FIO_NOOP_FN)
-
-/** Returns the `udata` pointer associated with the IO. */
-IFUNC void *fio_io_udata(fio_io_s *io) { return io->udata; }
-
-/** Associates a new `tls` pointer with the IO, returning the old `tls` */
-IFUNC void *fio_io_tls_set(fio_io_s *io, void *tls) {
-  void *old = io->tls;
-  io->tls = tls;
-  return old;
-}
-
-/** Returns the `tls` pointer associated with the IO. */
-IFUNC void *fio_io_tls(fio_io_s *io) { return io->tls; }
+/* Get/Set the IO's `udata` pointer */
+FIO_DEF_GETSET_FUNC(IFUNC, fio_io, fio_io_s, void *, udata, FIO_NOOP_FN)
+/* Get/Set the IO's `tls` context pointer */
+FIO_DEF_GETSET_FUNC(IFUNC, fio_io, fio_io_s, void *, tls, FIO_NOOP_FN)
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
 IFUNC fio_socket_i fio_io_fd(fio_io_s *io) { return io->fd; }
@@ -721,7 +717,7 @@ SFUNC void fio_io_write2 FIO_NOOP(fio_io_s *io, fio_io_write_args_s args) {
                                   args.offset,
                                   args.copy,
                                   args.dealloc);
-  } else if ((unsigned)(args.fd + 1) > 1) {
+  } else if (((unsigned)args.fd + 1) > 1 /* int file descriptor, not sock */) {
     packet = fio_stream_pack_fd((int)args.fd, args.len, args.offset, args.copy);
   } else /* fio_io_write2 called without data */
     goto do_nothing;
@@ -812,6 +808,8 @@ SFUNC void fio___io_free_task(void *io_, void *ignr_) {
 }
 /** Free IO (reference) - thread-safe, flushes pending writes. */
 SFUNC void fio_io_free(fio_io_s *io) {
+  if (!io)
+    return;
   if (FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_WRITE_DIRTY) &
       FIO___IO_FLAG_WRITE_DIRTY) {
     fio___io_poll_on_ready_schd((void *)io);
@@ -925,13 +923,14 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
   return;
 }
 
+FIO_STATIC_ALLOC_DEF(fio___on_ready_buf_new, char, FIO_IO_BUFFER_PER_WRITE, 1)
 static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
 #if defined(DEBUG) && DEBUG
   errno = 0;
 #endif
   fio_io_s *io = (fio_io_s *)io_;
-  char buf_mem[FIO_IO_BUFFER_PER_WRITE];
+  char *buf_mem = fio___on_ready_buf_new(1);
   size_t total = 0;
   FIO___IO_FLAG_UNSET(io,
                       (FIO___IO_FLAG_POLLOUT_SET | FIO___IO_FLAG_WRITE_SCHD));
@@ -945,7 +944,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
     size_t len = FIO_IO_BUFFER_PER_WRITE;
     char *buf = buf_mem;
     if (r) {
-      if ((r + 1))
+      if (((size_t)r + 1))
         total += r;
       else if ((errno != EWOULDBLOCK) && (errno != EAGAIN))
         goto connection_error;
@@ -955,7 +954,7 @@ static void fio___io_poll_on_ready(void *io_, void *ignr_) {
     if (!len)
       goto finish_loop;
     r = io->pr->io_functions.write(io->fd, buf, len, io->tls);
-    switch ((size_t)(r + 1)) {
+    switch (((size_t)r + 1)) {
     case 0:
       if ((errno == EWOULDBLOCK) || (errno == EAGAIN))
         goto finish_loop;
@@ -1447,7 +1446,7 @@ SFUNC int fio_io_tls_alpn_select(fio_io_tls_s *t,
                                  const char *protocol_name,
                                  size_t name_length,
                                  fio_io_s *io) {
-  if (!t || !protocol_name)
+  if (!t || !protocol_name || name_length > 0xFF)
     return -1;
   fio___io_tls_alpn_s seeking = {
       .nm = fio_keystr_tmp(protocol_name, (uint32_t)name_length)};

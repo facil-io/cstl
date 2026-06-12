@@ -26,6 +26,8 @@ String Authorship Helpers (`fio_string_write` functions)
  *
  * The callback MUST allocate at least `len + 1` bytes, setting the new capacity
  * in `dest->capa`.
+ *
+ * Returns 0 on success, -1 on error.
  * */
 typedef int (*fio_string_realloc_fn)(fio_str_info_s *dest, size_t len);
 /**
@@ -54,7 +56,7 @@ typedef int (*fio_string_realloc_fn)(fio_str_info_s *dest, size_t len);
  * An example for a `reallocate` callback using the system's `realloc` function:
  *
  *      int fio_string_realloc_system(fio_str_info_s *dest, size_t len_no_nul) {
- *       const size_t new_capa = fio_string_capa4len(len_pre_nul);
+ *       const size_t new_capa = fio_string_capa4len(len_no_nul);
  *       void *tmp = realloc(dest.buf, new_capa);
  *       if (!tmp)
  *         return -1;
@@ -669,7 +671,7 @@ FIO_IFUNC int fio_string___write_validate_len(fio_str_info_s *restrict dest,
                                               fio_string_realloc_fn reallocate,
                                               size_t *restrict len) {
   size_t l = len[0];
-  if ((dest->capa > dest->len + l))
+  if ((dest->capa > dest->len + l) && (dest->capa > l))
     return 0;
   if (reallocate && l < (dest->capa >> 2) &&
       ((dest->capa >> 2) + (dest->capa) < 0x7FFFFFFFULL))
@@ -1083,6 +1085,8 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
     r.buf = str.buf;
     return r;
   }
+  if (!alloc_func)
+    return r;
   char *buf;
   r.len = (uint32_t)str.len;
   r.buf = buf = (char *)alloc_func(str.len + 1);
@@ -1127,7 +1131,7 @@ FIO_IFUNC int fio_keystr_is_eq3(fio_keystr_s a_, fio_buf_info_s b) {
 /** Returns a good-enough `fio_keystr_s` risky hash. */
 FIO_IFUNC uint64_t fio_keystr_hash(fio_keystr_s a_) {
   fio_buf_info_s a = fio_keystr_buf(&a_);
-  return fio_risky_hash(a.buf, a.len, (uint64_t)(uintptr_t)fio_string_write2);
+  return fio_risky_hash(a.buf, a.len, (uint64_t)(uintptr_t)fio_risky_hash);
 }
 
 /* *****************************************************************************
@@ -1142,8 +1146,10 @@ Allocation Helpers
 ***************************************************************************** */
 
 SFUNC int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len) {
+  if (len > (SIZE_MAX >> 2))
+    return -1;
   len = fio_string_capa4len(len);
-  void *tmp = realloc(dest->buf, dest->capa);
+  void *tmp = realloc(dest->buf, len);
   if (!tmp)
     return -1;
   dest->capa = len;
@@ -1152,6 +1158,8 @@ SFUNC int fio_string_sys_reallocate(fio_str_info_s *dest, size_t len) {
 }
 
 SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
+  if (len > (SIZE_MAX >> 2))
+    return -1;
   len = fio_string_capa4len(len);
   void *tmp = FIO_MEM_REALLOC_(dest->buf, dest->capa, len, dest->len);
   if (!tmp)
@@ -1164,15 +1172,17 @@ SFUNC int fio_string_default_reallocate(fio_str_info_s *dest, size_t len) {
 }
 
 SFUNC int fio_string_default_allocate_copy(fio_str_info_s *dest, size_t len) {
+  if (len > (SIZE_MAX >> 2))
+    return -1;
   len = fio_string_capa4len(len);
   void *tmp = FIO_MEM_REALLOC_(NULL, 0, len, 0);
   if (!tmp)
     return -1;
   FIO_LEAK_COUNTER_ON_ALLOC(fio_string_default_allocations);
-  dest->capa = len;
-  dest->buf = (char *)tmp;
   if (dest->len)
     FIO_MEMCPY(tmp, dest->buf, dest->len);
+  dest->capa = len;
+  dest->buf = (char *)tmp;
   return 0;
 }
 
@@ -1515,6 +1525,8 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
                              const void *src,
                              size_t len) {
   int r = 0;
+  if (!dest)
+    return (r = -1);
   if (start_pos < 0) {
     start_pos = dest->len + start_pos + 1;
     if (start_pos < 0)
@@ -1546,7 +1558,7 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
   }
   if (move_len)
     FIO_MEMMOVE(dest->buf + start_pos + len, dest->buf + move_start, move_len);
-  if (len)
+  if (len && src)
     FIO_MEMCPY(dest->buf + start_pos, src, len);
   dest->len = start_pos + len + move_len;
   dest->buf[dest->len] = 0;
@@ -1564,13 +1576,18 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
   size_t len = 0;
 
   while (pos->klass) {
+    if (len > (SIZE_MAX >> 1))
+      return -1;
     switch (pos->klass) { /* use more memory rather then calculate twice. */
     case 2: /* number */ len += fio_digits10(pos->info.i); break;
     case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
     case 4: /* hex */ len += fio_digits16u(pos->info.u); break;
     case 5: /* binary */ len += fio_digits_bin(pos->info.u); break;
     case 6: /* float */ len += 18; break;
-    default: len += pos->info.str.len;
+    default:
+      if (pos->info.str.len > (SIZE_MAX >> 2))
+        return -1;
+      len += pos->info.str.len;
     }
     ++pos;
   }
@@ -1670,8 +1687,6 @@ typedef struct {
                   const uint8_t *restrict e);
   /* If `len` of `src` is less then `skip_diff_len`, skips the test. */
   uint32_t skip_diff_len;
-  /* If set, will not allow a partial write when memory allocation fails. */
-  uint32_t refuse_partial;
 } fio___string_altering_args_s;
 
 /**
@@ -1714,9 +1729,7 @@ FIO_IFUNC int fio___string_altering_cycle(
     if (d.len + written_length >= d.capa &&
         fio_string___write_validate_len(&d, args.reallocate, &written_length)) {
       r = -1;
-      if (args.refuse_partial)
-        goto finish;
-      e = (const uint8_t *)d.capa - (d.len + 1);
+      goto finish;
     }
   }
 
@@ -2024,7 +2037,6 @@ SFUNC int fio_string_write_unescape(fio_str_info_s *restrict dest,
       .diff = fio___string_write_unescape_diff,
       .write = fio___string_write_unescape_write,
       .skip_diff_len = 127,
-      .refuse_partial = 1,
   });
 }
 
@@ -2892,9 +2904,9 @@ Binary String Type - Embedded Strings
 /** default reallocation callback implementation */
 SFUNC int fio_bstr_reallocate(fio_str_info_s *dest, size_t len) {
   fio___bstr_meta_s *bstr_m = NULL;
+  if (len > UINT32_MAX || len > (SIZE_MAX - sizeof(bstr_m[0])))
+    return -1;
   size_t new_capa = fio_string_capa4len(len + sizeof(bstr_m[0]));
-  if (FIO_UNLIKELY(new_capa > (size_t)0xFFFFFFFFULL))
-    new_capa = (size_t)0x0FFFFFFFFULL + sizeof(bstr_m[0]);
   if (dest->capa < fio_string_capa4len(sizeof(bstr_m[0])))
     goto copy_the_string;
   bstr_m = (fio___bstr_meta_s *)FIO_MEM_REALLOC_(

@@ -324,6 +324,8 @@ typedef struct {
   /**
    * If this is a buffer, the de-allocation function used to free it.
    *
+   * If `copy == 0`, and `dealloc` is set, `write` will take ownership.
+   *
    * If NULL, the buffer will NOT be de-allocated.
    */
   void (*dealloc)(void *);
@@ -451,6 +453,9 @@ system's IO functions.
 This defines Transport Layer callbacks that facil.io will treat as non-blocking
 system calls and allows any protocol to easily add a secure (SSL/TLS) flavor if
 desired.
+
+The functions receive the file descriptor (`fd`) but MUST NOT keep a copy or
+defer any `fd` related actions to later.
 */
 struct fio_io_functions_s {
   /** Helper that converts a `fio_io_tls_s` into the implementation's context.
@@ -461,7 +466,7 @@ struct fio_io_functions_s {
   /** called when a new IO is first attached to a valid protocol. */
   void (*start)(fio_io_s *io);
   /** Called to perform a non-blocking `read`, same as the system call. */
-  ssize_t (*read)(int fd, void *buf, size_t len, void *context);
+  ssize_t (*read)(fio_socket_i fd, void *buf, size_t len, void *context);
   /**
    * Called to perform a non-blocking `write`, same as POSIX `write(2)`.
    *
@@ -476,7 +481,7 @@ struct fio_io_functions_s {
    * (e.g., TLS sequence numbers have already been incremented). Buffered
    * transformed data will be sent later by `flush`.
    */
-  ssize_t (*write)(int fd, const void *buf, size_t len, void *context);
+  ssize_t (*write)(fio_socket_i fd, const void *buf, size_t len, void *context);
   /**
    * Sends any unsent internal data. Returns `0` only if all data was sent.
    *
@@ -489,9 +494,9 @@ struct fio_io_functions_s {
    * still pending and the socket should be monitored for writability; `0`
    * means all done.
    */
-  int (*flush)(int fd, void *context);
+  int (*flush)(fio_socket_i fd, void *context);
   /** Called when the IO object finished sending all data before closure. */
-  void (*finish)(int fd, void *context);
+  void (*finish)(fio_socket_i fd, void *context);
   /** Called after the IO object is closed, used to cleanup its `tls` object. */
   void (*cleanup)(void *context);
 };
@@ -569,14 +574,18 @@ struct fio_io_protocol_s {
   /**
    * The timeout value in milliseconds for all connections using this protocol.
    *
-   * Limited to FIO_IO_TIMEOUT_MAX seconds. Zero (0) == FIO_IO_TIMEOUT_MAX
+   * Limited to FIO_IO_TIMEOUT_MAX ms. Zero (0) == FIO_IO_TIMEOUT_MAX
    */
   uint32_t timeout;
   /** The number of bytes to allocate for the fio_io_buf buffer. */
   uint32_t buffer_size;
 };
 
-/** Performs a task for each IO in the stated protocol. */
+/**
+ * Performs a task for each IO in the stated protocol.
+ *
+ * Call ONLY from the main IO thread (consider using `fio_io_defer`).
+ * */
 SFUNC size_t fio_io_protocol_each(fio_io_protocol_s *protocol,
                                   void (*task)(fio_io_s *, void *udata2),
                                   void *udata2);
@@ -795,7 +804,7 @@ SFUNC int fio_io_tls_each(fio_io_tls_each_s);
 #define fio_io_tls_each(tls_, ...)                                             \
   fio_io_tls_each(((fio_io_tls_each_s){.tls = tls_, __VA_ARGS__}))
 
-/** If `NULL` returns current default, otherwise sets it. */
+/** If `NULL` returns current default, otherwise sets it. Set before start. */
 SFUNC fio_io_functions_s fio_io_tls_default_functions(fio_io_functions_s *);
 
 /* *****************************************************************************

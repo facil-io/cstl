@@ -732,6 +732,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
     FIO_LOG_ERROR("fio_io_listen called with `on_root` by a non-root worker.");
     return (fio_io_listener_s *)l;
   }
+test_url:
   if (!args.url) {
     args.url = fio_sys_env("ADDRESS");
     if (!args.url)
@@ -741,6 +742,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
   if (url_alt.len > 2024) {
     FIO_LOG_ERROR("binding address / url too long.");
     args.url = NULL;
+    goto test_url;
   }
   fio_url_s url = fio_url_parse(args.url, url_alt.len);
   if (url.scheme.buf &&
@@ -861,9 +863,7 @@ FIO_SFUNC void fio___connecting_on_ready(fio_io_s *io) {
 void fio_io_connect___(void); /* IDE Marker */
 SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   int should_free_tls = !args.tls;
-  if (!args.protocol)
-    return NULL;
-  if (!args.url) {
+  if (!args.protocol || !args.url) {
     if (args.on_failed)
       args.on_failed(args.protocol, args.udata);
     return NULL;

@@ -115,6 +115,9 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size);
 /**
  * When forking is called manually, call this function to reset the facil.io
  * memory allocator's locks.
+ *
+ * This is provided in case of forking in a multi-threaded environment, which
+ * some people do even though it's bad.
  */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_after_fork)(void);
 
@@ -425,8 +428,10 @@ Helpers and System Memory Allocation
 #define H___FIO_MEM_INCLUDE_ONCE___H
 
 #define FIO_MEM_BYTES2PAGES(size)                                              \
-  (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &                   \
-   ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG))
+  ((size > (SIZE_MAX - ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)))                  \
+       ? size                                                                  \
+       : (((size_t)(size) + ((1UL << FIO_MEM_PAGE_SIZE_LOG) - 1)) &            \
+          ((~(size_t)0) << FIO_MEM_PAGE_SIZE_LOG)))
 
 /* *****************************************************************************
 
@@ -472,18 +477,18 @@ FIO_SFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
   const size_t alignment_mask = (1ULL << alignment_log) - 1;
   const size_t alignment_size = (1ULL << alignment_log);
   bytes = FIO_MEM_BYTES2PAGES(bytes);
-  next_alloc =
-      (void *)(((uintptr_t)next_alloc + alignment_mask) & alignment_mask);
+  void *next_hint = next_alloc =
+      (void *)(((uintptr_t)next_alloc + alignment_mask) & (~alignment_mask));
 /* hope for the best? */
 #ifdef MAP_ALIGNED
-  result = mmap(next_alloc,
+  result = mmap(next_hint,
                 bytes,
                 PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_ALIGNED(alignment_log),
                 -1,
                 0);
 #else
-  result = mmap(next_alloc,
+  result = mmap(next_hint,
                 bytes,
                 PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS,
@@ -510,8 +515,8 @@ FIO_SFUNC void *FIO_MEM_SYS_ALLOC_def_func(size_t bytes,
       result = (void *)((uintptr_t)result + offset);
     }
     munmap((void *)((uintptr_t)result + bytes), alignment_size - offset);
+    next_alloc = (void *)((uintptr_t)result + (bytes << 2));
   }
-  next_alloc = (void *)((uintptr_t)result + (bytes << 2));
   return result;
 }
 
@@ -952,7 +957,7 @@ Allocator State
 typedef struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s)
     FIO_NAME(FIO_MEMORY_NAME, __mem_state_s);
 
-static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
+struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
 #if FIO_MEMORY_CACHE_SLOTS
   /** cache array container for available memory chunks */
   struct {
@@ -961,6 +966,10 @@ static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
     size_t pos;
   } cache;
 #endif /* FIO_MEMORY_CACHE_SLOTS */
+  /* cache line padding */
+  uint8_t pad_for_cache0___[128 -
+                            (127 & ((sizeof(void *) * FIO_MEMORY_CACHE_SLOTS) +
+                                    sizeof(size_t)))];
 
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
   /** a block for big allocations, shared (no arena) */
@@ -968,17 +977,30 @@ static struct FIO_NAME(FIO_MEMORY_NAME, __mem_state_s) {
   int32_t big_last_pos;
   /** big allocation lock */
   FIO_MEMORY_LOCK_TYPE big_lock;
-  uint8_t pad_for_cache___[115]; /* cache line padding */
+  /* cache line padding */
+  uint8_t
+      pad_for_cache1___[128 -
+                        (127 & (sizeof(void *) + sizeof(FIO_MEMORY_LOCK_TYPE) +
+                                (sizeof(int32_t) > sizeof(FIO_MEMORY_LOCK_TYPE)
+                                     ? sizeof(int32_t)
+                                     : sizeof(FIO_MEMORY_LOCK_TYPE))))];
+
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
   /** main memory state lock */
   FIO_MEMORY_LOCK_TYPE lock;
   /** free list for available blocks */
   FIO_LIST_HEAD blocks;
+  /* cache line padding */
+  uint8_t pad_for_cache2___
+      [128 - (127 & (sizeof(FIO_MEMORY_LOCK_TYPE) +
+                     (sizeof(FIO_LIST_HEAD) > sizeof(FIO_MEMORY_LOCK_TYPE)
+                          ? sizeof(FIO_LIST_HEAD)
+                          : sizeof(FIO_MEMORY_LOCK_TYPE))))];
+
   /** the arena count for the allocator */
-  uint8_t pad_for_cache2___[111]; /* cache line padding */
   size_t arena_count;
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) arena[];
-} * FIO_NAME(FIO_MEMORY_NAME, __mem_state);
+} * FIO_NAME(FIO_MEMORY_NAME, __mem_state) FIO_WEAK;
 
 /* *****************************************************************************
 Arena assignment
@@ -2302,7 +2324,7 @@ void fio_mmap__(void);
  * However, since this allocation will invoke the system call (`mmap`), it will
  * be inherently slower.
  *
- * `mempoll_free` can be used for deallocating the memory.
+ * The allocator's `free` function can be used for deallocating the memory.
  */
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (!size)
