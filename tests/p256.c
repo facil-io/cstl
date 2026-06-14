@@ -1529,6 +1529,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_sign_openssl_verify)(void) {
                                    sizeof(public_key)) == 0,
              "self verification should accept generated signature");
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
   EC_KEY *key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
   FIO_ASSERT(key, "OpenSSL EC_KEY_new_by_curve_name failed");
   const EC_GROUP *group = EC_KEY_get0_group(key);
@@ -1547,6 +1554,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_sign_openssl_verify)(void) {
   BN_free(x);
   BN_free(y);
   EC_KEY_free(key);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #else
   fprintf(stderr, "\t  OpenSSL unavailable; skipping P-256 sign oracle\n");
 #endif
