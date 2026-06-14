@@ -64,16 +64,22 @@ typedef struct {
   fio_pem_key_type_e type;
   union {
     struct {
-      const uint8_t *n; /**< RSA modulus (big-endian) */
+      uint8_t n[FIO_RSA_MAX_BYTES]; /**< RSA modulus (big-endian) */
       size_t n_len;
-      const uint8_t *e; /**< RSA public exponent (big-endian) */
+      uint8_t e[FIO_RSA_MAX_BYTES]; /**< RSA public exponent (big-endian) */
       size_t e_len;
-      const uint8_t *d; /**< RSA private exponent (big-endian) */
+      uint8_t d[FIO_RSA_MAX_BYTES]; /**< RSA private exponent (big-endian) */
       size_t d_len;
-      const uint8_t *p; /**< RSA prime p (optional) */
+      uint8_t p[FIO_RSA_MAX_BYTES]; /**< RSA prime p (optional) */
       size_t p_len;
-      const uint8_t *q; /**< RSA prime q (optional) */
+      uint8_t q[FIO_RSA_MAX_BYTES]; /**< RSA prime q (optional) */
       size_t q_len;
+      uint8_t dP[FIO_RSA_MAX_BYTES]; /**< d mod (p-1) (optional) */
+      size_t dP_len;
+      uint8_t dQ[FIO_RSA_MAX_BYTES]; /**< d mod (q-1) (optional) */
+      size_t dQ_len;
+      uint8_t qInv[FIO_RSA_MAX_BYTES]; /**< q^-1 mod p (optional) */
+      size_t qInv_len;
     } rsa;
     struct {
       uint8_t private_key[32]; /**< P-256 scalar (32 bytes) */
@@ -455,12 +461,17 @@ FIO_SFUNC int fio___pem_parse_pkcs8(fio_pem_private_key_s *key,
       return -1;
     if (!fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER))
       return -1;
-    key->rsa.n = rsa_elem.data;
-    key->rsa.n_len = rsa_elem.len;
-    /* Skip leading zero if present */
-    if (key->rsa.n_len > 1 && key->rsa.n[0] == 0x00) {
-      key->rsa.n++;
-      key->rsa.n_len--;
+    {
+      const uint8_t *src = rsa_elem.data;
+      size_t src_len = rsa_elem.len;
+      if (src_len > 1 && src[0] == 0x00) {
+        ++src;
+        --src_len;
+      }
+      if (src_len > FIO_RSA_MAX_BYTES)
+        return -1;
+      FIO_MEMCPY(key->rsa.n, src, src_len);
+      key->rsa.n_len = src_len;
     }
 
     /* publicExponent (e) */
@@ -468,11 +479,17 @@ FIO_SFUNC int fio___pem_parse_pkcs8(fio_pem_private_key_s *key,
       return -1;
     if (!fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER))
       return -1;
-    key->rsa.e = rsa_elem.data;
-    key->rsa.e_len = rsa_elem.len;
-    if (key->rsa.e_len > 1 && key->rsa.e[0] == 0x00) {
-      key->rsa.e++;
-      key->rsa.e_len--;
+    {
+      const uint8_t *src = rsa_elem.data;
+      size_t src_len = rsa_elem.len;
+      if (src_len > 1 && src[0] == 0x00) {
+        ++src;
+        --src_len;
+      }
+      if (src_len > FIO_RSA_MAX_BYTES)
+        return -1;
+      FIO_MEMCPY(key->rsa.e, src, src_len);
+      key->rsa.e_len = src_len;
     }
 
     /* privateExponent (d) */
@@ -480,31 +497,100 @@ FIO_SFUNC int fio___pem_parse_pkcs8(fio_pem_private_key_s *key,
       return -1;
     if (!fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER))
       return -1;
-    key->rsa.d = rsa_elem.data;
-    key->rsa.d_len = rsa_elem.len;
-    if (key->rsa.d_len > 1 && key->rsa.d[0] == 0x00) {
-      key->rsa.d++;
-      key->rsa.d_len--;
+    {
+      const uint8_t *src = rsa_elem.data;
+      size_t src_len = rsa_elem.len;
+      if (src_len > 1 && src[0] == 0x00) {
+        ++src;
+        --src_len;
+      }
+      if (src_len > FIO_RSA_MAX_BYTES)
+        return -1;
+      FIO_MEMCPY(key->rsa.d, src, src_len);
+      key->rsa.d_len = src_len;
     }
 
     /* prime1 (p) */
     if (fio_asn1_iterator_next(&rsa_it, &rsa_elem) == 0 &&
         fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER)) {
-      key->rsa.p = rsa_elem.data;
-      key->rsa.p_len = rsa_elem.len;
-      if (key->rsa.p_len > 1 && key->rsa.p[0] == 0x00) {
-        key->rsa.p++;
-        key->rsa.p_len--;
+      {
+        const uint8_t *src = rsa_elem.data;
+        size_t src_len = rsa_elem.len;
+        if (src_len > 1 && src[0] == 0x00) {
+          ++src;
+          --src_len;
+        }
+        if (src_len <= FIO_RSA_MAX_BYTES) {
+          FIO_MEMCPY(key->rsa.p, src, src_len);
+          key->rsa.p_len = src_len;
+        }
       }
 
       /* prime2 (q) */
       if (fio_asn1_iterator_next(&rsa_it, &rsa_elem) == 0 &&
           fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER)) {
-        key->rsa.q = rsa_elem.data;
-        key->rsa.q_len = rsa_elem.len;
-        if (key->rsa.q_len > 1 && key->rsa.q[0] == 0x00) {
-          key->rsa.q++;
-          key->rsa.q_len--;
+        {
+          const uint8_t *src = rsa_elem.data;
+          size_t src_len = rsa_elem.len;
+          if (src_len > 1 && src[0] == 0x00) {
+            ++src;
+            --src_len;
+          }
+          if (src_len <= FIO_RSA_MAX_BYTES) {
+            FIO_MEMCPY(key->rsa.q, src, src_len);
+            key->rsa.q_len = src_len;
+          }
+        }
+
+        /* exponent1 (dP = d mod (p-1)) */
+        if (fio_asn1_iterator_next(&rsa_it, &rsa_elem) == 0 &&
+            fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER)) {
+          {
+            const uint8_t *src = rsa_elem.data;
+            size_t src_len = rsa_elem.len;
+            if (src_len > 1 && src[0] == 0x00) {
+              ++src;
+              --src_len;
+            }
+            if (src_len <= FIO_RSA_MAX_BYTES) {
+              FIO_MEMCPY(key->rsa.dP, src, src_len);
+              key->rsa.dP_len = src_len;
+            }
+          }
+
+          /* exponent2 (dQ = d mod (q-1)) */
+          if (fio_asn1_iterator_next(&rsa_it, &rsa_elem) == 0 &&
+              fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER)) {
+            {
+              const uint8_t *src = rsa_elem.data;
+              size_t src_len = rsa_elem.len;
+              if (src_len > 1 && src[0] == 0x00) {
+                ++src;
+                --src_len;
+              }
+              if (src_len <= FIO_RSA_MAX_BYTES) {
+                FIO_MEMCPY(key->rsa.dQ, src, src_len);
+                key->rsa.dQ_len = src_len;
+              }
+            }
+
+            /* coefficient (qInv = q^-1 mod p) */
+            if (fio_asn1_iterator_next(&rsa_it, &rsa_elem) == 0 &&
+                fio_asn1_is_tag(&rsa_elem, FIO_ASN1_INTEGER)) {
+              {
+                const uint8_t *src = rsa_elem.data;
+                size_t src_len = rsa_elem.len;
+                if (src_len > 1 && src[0] == 0x00) {
+                  ++src;
+                  --src_len;
+                }
+                if (src_len <= FIO_RSA_MAX_BYTES) {
+                  FIO_MEMCPY(key->rsa.qInv, src, src_len);
+                  key->rsa.qInv_len = src_len;
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -653,11 +739,17 @@ FIO_SFUNC int fio___pem_parse_rsa_private_key(fio_pem_private_key_s *key,
     return -1;
   if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
     return -1;
-  key->rsa.n = elem.data;
-  key->rsa.n_len = elem.len;
-  if (key->rsa.n_len > 1 && key->rsa.n[0] == 0x00) {
-    key->rsa.n++;
-    key->rsa.n_len--;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len > FIO_RSA_MAX_BYTES)
+      return -1;
+    FIO_MEMCPY(key->rsa.n, src, src_len);
+    key->rsa.n_len = src_len;
   }
 
   /* publicExponent (e) */
@@ -665,11 +757,17 @@ FIO_SFUNC int fio___pem_parse_rsa_private_key(fio_pem_private_key_s *key,
     return -1;
   if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
     return -1;
-  key->rsa.e = elem.data;
-  key->rsa.e_len = elem.len;
-  if (key->rsa.e_len > 1 && key->rsa.e[0] == 0x00) {
-    key->rsa.e++;
-    key->rsa.e_len--;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len > FIO_RSA_MAX_BYTES)
+      return -1;
+    FIO_MEMCPY(key->rsa.e, src, src_len);
+    key->rsa.e_len = src_len;
   }
 
   /* privateExponent (d) */
@@ -677,11 +775,17 @@ FIO_SFUNC int fio___pem_parse_rsa_private_key(fio_pem_private_key_s *key,
     return -1;
   if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
     return -1;
-  key->rsa.d = elem.data;
-  key->rsa.d_len = elem.len;
-  if (key->rsa.d_len > 1 && key->rsa.d[0] == 0x00) {
-    key->rsa.d++;
-    key->rsa.d_len--;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len > FIO_RSA_MAX_BYTES)
+      return -1;
+    FIO_MEMCPY(key->rsa.d, src, src_len);
+    key->rsa.d_len = src_len;
   }
 
   /* prime1 (p) */
@@ -689,11 +793,17 @@ FIO_SFUNC int fio___pem_parse_rsa_private_key(fio_pem_private_key_s *key,
     return -1;
   if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
     return -1;
-  key->rsa.p = elem.data;
-  key->rsa.p_len = elem.len;
-  if (key->rsa.p_len > 1 && key->rsa.p[0] == 0x00) {
-    key->rsa.p++;
-    key->rsa.p_len--;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len <= FIO_RSA_MAX_BYTES) {
+      FIO_MEMCPY(key->rsa.p, src, src_len);
+      key->rsa.p_len = src_len;
+    }
   }
 
   /* prime2 (q) */
@@ -701,11 +811,71 @@ FIO_SFUNC int fio___pem_parse_rsa_private_key(fio_pem_private_key_s *key,
     return -1;
   if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
     return -1;
-  key->rsa.q = elem.data;
-  key->rsa.q_len = elem.len;
-  if (key->rsa.q_len > 1 && key->rsa.q[0] == 0x00) {
-    key->rsa.q++;
-    key->rsa.q_len--;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len <= FIO_RSA_MAX_BYTES) {
+      FIO_MEMCPY(key->rsa.q, src, src_len);
+      key->rsa.q_len = src_len;
+    }
+  }
+
+  /* exponent1 (dP = d mod (p-1)) */
+  if (fio_asn1_iterator_next(&it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
+    return -1;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len <= FIO_RSA_MAX_BYTES) {
+      FIO_MEMCPY(key->rsa.dP, src, src_len);
+      key->rsa.dP_len = src_len;
+    }
+  }
+
+  /* exponent2 (dQ = d mod (q-1)) */
+  if (fio_asn1_iterator_next(&it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
+    return -1;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len <= FIO_RSA_MAX_BYTES) {
+      FIO_MEMCPY(key->rsa.dQ, src, src_len);
+      key->rsa.dQ_len = src_len;
+    }
+  }
+
+  /* coefficient (qInv = q^-1 mod p) */
+  if (fio_asn1_iterator_next(&it, &elem) != 0)
+    return -1;
+  if (!fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER))
+    return -1;
+  {
+    const uint8_t *src = elem.data;
+    size_t src_len = elem.len;
+    if (src_len > 1 && src[0] == 0x00) {
+      ++src;
+      --src_len;
+    }
+    if (src_len <= FIO_RSA_MAX_BYTES) {
+      FIO_MEMCPY(key->rsa.qInv, src, src_len);
+      key->rsa.qInv_len = src_len;
+    }
   }
 
   return 0;

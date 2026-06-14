@@ -320,6 +320,14 @@ FIO_SFUNC void fio___rsa_words_to_bytes(uint8_t *bytes,
   }
 }
 
+/** Strip DER INTEGER sign-extension zero bytes from big-endian input. */
+FIO_IFUNC void fio___rsa_trim_be(const uint8_t **bytes, size_t *byte_len) {
+  while (*byte_len > 1 && **bytes == 0) {
+    ++(*bytes);
+    --(*byte_len);
+  }
+}
+
 /** Compare two big integers. Returns: <0 if a<b, 0 if a==b, >0 if a>b */
 FIO_SFUNC int fio___rsa_cmp(const uint64_t *a,
                             const uint64_t *b,
@@ -423,6 +431,16 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
                high_words * sizeof(uint64_t));
   }
 
+  /* Montgomery multiplication below expects operands in normal form (< mod).
+   * Since mod has its top bit set for RSA primes, m_high < R < 2*mod, so one
+   * branchless conditional subtraction is sufficient. */
+  uint64_t m_high_sub[FIO_RSA_MAX_WORDS];
+  uint64_t m_high_borrow = fio_math_sub(m_high_sub, m_high, mod, mod_word_count);
+  uint64_t use_m_high_sub = (uint64_t)0 - (m_high_borrow ^ 1);
+  uint64_t use_m_high = (uint64_t)0 - m_high_borrow;
+  for (size_t i = 0; i < mod_word_count; ++i)
+    m_high[i] = (m_high_sub[i] & use_m_high_sub) | (m_high[i] & use_m_high);
+
   /* Compute R mod mod = 2^(64*mod_word_count) mod mod.  mod is public, so
    * the variable-time division is acceptable. */
   uint64_t R_ext[FIO_RSA_MAX_WORDS * 2];
@@ -436,12 +454,18 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
   fio_math_div(NULL, R_mod_mod, R_ext, mod_ext, mod_word_count * 2);
 
   /* out = m_high * (R mod mod) + m_low  (mod mod).
-   * This is correct because m = m_low + m_high * R. */
+   * This is correct because m = m_low + m_high * R.  If the low-word add
+   * carries, account for the extra R by adding R mod mod branchlessly. */
   fio___rsa_mul_mod(out, m_high, R_mod_mod, mod, mod_word_count);
-  (void)fio_math_add(out, out, m_full, mod_word_count);
+  uint64_t low_carry = fio_math_add(out, out, m_full, mod_word_count);
+  uint64_t carry_mask = (uint64_t)0 - low_carry;
+  uint64_t carry_add[FIO_RSA_MAX_WORDS];
+  for (size_t i = 0; i < mod_word_count; ++i)
+    carry_add[i] = R_mod_mod[i] & carry_mask;
+  (void)fio_math_add(out, out, carry_add, mod_word_count);
 
-  /* For RSA primes R < 2*mod, so the sum is < 3*mod.  Two conditional
-   * subtractions are sufficient. */
+  /* For RSA primes R < 2*mod, so the value is < 2*mod after carry handling.
+   * Two conditional subtractions are kept for conservative normalization. */
   for (int pass = 0; pass < 2; ++pass) {
     uint64_t sub[FIO_RSA_MAX_WORDS];
     uint64_t borrow = fio_math_sub(sub, out, mod, mod_word_count);
@@ -456,6 +480,8 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
   fio_secure_zero(mod_ext, sizeof(mod_ext));
   fio_secure_zero(R_mod_mod, sizeof(R_mod_mod));
   fio_secure_zero(m_high, sizeof(m_high));
+  fio_secure_zero(m_high_sub, sizeof(m_high_sub));
+  fio_secure_zero(carry_add, sizeof(carry_add));
 }
 
 /**
@@ -761,14 +787,21 @@ FIO_SFUNC int fio___rsa_public_op(uint8_t *result,
   if (!result || !sig || !key || !key->n || !key->e)
     return -1;
 
+  const uint8_t *n = key->n;
+  const uint8_t *e = key->e;
+  size_t n_len = key->n_len;
+  size_t e_len = key->e_len;
+  fio___rsa_trim_be(&n, &n_len);
+  fio___rsa_trim_be(&e, &e_len);
+
   /* Validate key size */
-  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+  if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
     return -1; /* Only support 2048-4096 bit keys */
 
-  if (sig_len != key->n_len)
+  if (sig_len != n_len)
     return -1; /* Signature must be same length as modulus */
 
-  size_t word_count = (key->n_len + 7) / 8;
+  size_t word_count = (n_len + 7) / 8;
 
 #if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t n_words[word_count];
@@ -781,7 +814,7 @@ FIO_SFUNC int fio___rsa_public_op(uint8_t *result,
 #endif
 
   /* Convert to internal representation */
-  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(n_words, word_count, n, n_len);
   fio___rsa_bytes_to_words(sig_words, word_count, sig, sig_len);
 
   /* Verify signature < modulus */
@@ -790,9 +823,9 @@ FIO_SFUNC int fio___rsa_public_op(uint8_t *result,
 
   /* Check if exponent is 65537 (common case) */
   uint64_t e_val = 0;
-  if (key->e_len <= 8) {
-    for (size_t i = 0; i < key->e_len; ++i)
-      e_val = (e_val << 8) | key->e[i];
+  if (e_len <= 8) {
+    for (size_t i = 0; i < e_len; ++i)
+      e_val = (e_val << 8) | e[i];
   }
 
   if (e_val == 65537) {
@@ -808,12 +841,12 @@ FIO_SFUNC int fio___rsa_public_op(uint8_t *result,
     uint64_t e_words[FIO_RSA_MAX_WORDS];
 #endif
     FIO_MEMSET(e_words, 0, word_count * sizeof(uint64_t));
-    fio___rsa_bytes_to_words(e_words, word_count, key->e, key->e_len);
+    fio___rsa_bytes_to_words(e_words, word_count, e, e_len);
     fio___rsa_modexp(result_words, sig_words, e_words, n_words, word_count);
   }
 
   /* Convert back to bytes */
-  fio___rsa_words_to_bytes(result, key->n_len, result_words, word_count);
+  fio___rsa_words_to_bytes(result, n_len, result_words, word_count);
 
   return 0;
 }
@@ -1004,6 +1037,10 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
   /* For TLS 1.3, salt length = hash length */
   size_t salt_len = hash_len;
 
+  const uint8_t *n = key->n;
+  size_t n_len = key->n_len;
+  fio___rsa_trim_be(&n, &n_len);
+
   /* Compute sig^e mod n */
   uint8_t em[FIO_RSA_MAX_BYTES];
   if (fio___rsa_public_op(em, sig, sig_len, key) != 0)
@@ -1022,13 +1059,13 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
    *   - PS = zero bytes
    */
 
-  size_t em_len = key->n_len;
+  size_t em_len = n_len;
   size_t db_len = em_len - hash_len - 1;
 
   /* Compute top-mask from the actual modulus bit length (RFC 8017 9.1.2). */
-  size_t word_count = (key->n_len + 7) / 8;
+  size_t word_count = (n_len + 7) / 8;
   uint64_t n_words[FIO_RSA_MAX_WORDS];
-  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(n_words, word_count, n, n_len);
   size_t em_bits = fio_math_msb_index(n_words, word_count);
   if (em_bits == (size_t)-1)
     em_bits = 0;
@@ -1140,15 +1177,37 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
                                        const uint64_t *m_words,
                                        const fio_rsa_privkey_s *key,
                                        size_t word_count) {
-  size_t p_word_count = (key->p_len + 7) / 8;
-  size_t q_word_count = (key->q_len + 7) / 8;
+  const uint8_t *n_be = key->n;
+  const uint8_t *p_be = key->p;
+  const uint8_t *q_be = key->q;
+  const uint8_t *dP_be = key->dP;
+  const uint8_t *dQ_be = key->dQ;
+  const uint8_t *qInv_be = key->qInv;
+  const uint8_t *e_be = key->e;
+  size_t n_len = key->n_len;
+  size_t p_len = key->p_len;
+  size_t q_len = key->q_len;
+  size_t dP_len = key->dP_len;
+  size_t dQ_len = key->dQ_len;
+  size_t qInv_len = key->qInv_len;
+  size_t e_len = key->e_len;
+  fio___rsa_trim_be(&n_be, &n_len);
+  fio___rsa_trim_be(&p_be, &p_len);
+  fio___rsa_trim_be(&q_be, &q_len);
+  fio___rsa_trim_be(&dP_be, &dP_len);
+  fio___rsa_trim_be(&dQ_be, &dQ_len);
+  fio___rsa_trim_be(&qInv_be, &qInv_len);
+  fio___rsa_trim_be(&e_be, &e_len);
+
+  size_t p_word_count = (p_len + 7) / 8;
+  size_t q_word_count = (q_len + 7) / 8;
 
   if (!p_word_count || p_word_count > FIO_RSA_MAX_WORDS / 2 ||
       !q_word_count || q_word_count > FIO_RSA_MAX_WORDS / 2)
     return -1;
 
   uint64_t n_words[FIO_RSA_MAX_WORDS];
-  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(n_words, word_count, n_be, n_len);
 
   uint64_t p[FIO_RSA_MAX_WORDS];
   uint64_t q[FIO_RSA_MAX_WORDS];
@@ -1166,13 +1225,13 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
   FIO_MEMSET(e_p, 0, sizeof(e_p));
   FIO_MEMSET(e_q, 0, sizeof(e_q));
 
-  fio___rsa_bytes_to_words(p, p_word_count, key->p, key->p_len);
-  fio___rsa_bytes_to_words(q, q_word_count, key->q, key->q_len);
-  fio___rsa_bytes_to_words(dP, p_word_count, key->dP, key->dP_len);
-  fio___rsa_bytes_to_words(dQ, q_word_count, key->dQ, key->dQ_len);
-  fio___rsa_bytes_to_words(qInv, p_word_count, key->qInv, key->qInv_len);
-  fio___rsa_bytes_to_words(e_p, p_word_count, key->e, key->e_len);
-  fio___rsa_bytes_to_words(e_q, q_word_count, key->e, key->e_len);
+  fio___rsa_bytes_to_words(p, p_word_count, p_be, p_len);
+  fio___rsa_bytes_to_words(q, q_word_count, q_be, q_len);
+  fio___rsa_bytes_to_words(dP, p_word_count, dP_be, dP_len);
+  fio___rsa_bytes_to_words(dQ, q_word_count, dQ_be, dQ_len);
+  fio___rsa_bytes_to_words(qInv, p_word_count, qInv_be, qInv_len);
+  fio___rsa_bytes_to_words(e_p, p_word_count, e_be, e_len);
+  fio___rsa_bytes_to_words(e_q, q_word_count, e_be, e_len);
 
   /* m_p = m mod p, m_q = m mod q */
   uint64_t m_p[FIO_RSA_MAX_WORDS];
@@ -1308,14 +1367,21 @@ FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
   if (!result || !message || !key || !key->n || !key->d)
     return -1;
 
+  const uint8_t *n = key->n;
+  const uint8_t *d = key->d;
+  size_t n_len = key->n_len;
+  size_t d_len = key->d_len;
+  fio___rsa_trim_be(&n, &n_len);
+  fio___rsa_trim_be(&d, &d_len);
+
   /* Validate key size */
-  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+  if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
     return -1; /* Only support 2048-4096 bit keys */
 
-  if (msg_len != key->n_len)
+  if (msg_len != n_len)
     return -1; /* Message must be same length as modulus */
 
-  size_t word_count = (key->n_len + 7) / 8;
+  size_t word_count = (n_len + 7) / 8;
 
   uint64_t n_words[FIO_RSA_MAX_WORDS];
   uint64_t d_words[FIO_RSA_MAX_WORDS];
@@ -1328,8 +1394,8 @@ FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
   FIO_MEMSET(result_words, 0, sizeof(result_words));
 
   /* Convert to internal representation */
-  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
-  fio___rsa_bytes_to_words(d_words, word_count, key->d, key->d_len);
+  fio___rsa_bytes_to_words(n_words, word_count, n, n_len);
+  fio___rsa_bytes_to_words(d_words, word_count, d, d_len);
   fio___rsa_bytes_to_words(msg_words, word_count, message, msg_len);
 
   int have_crt = (key->p && key->p_len && key->q && key->q_len &&
@@ -1352,7 +1418,7 @@ FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
   }
 
   if (rc == 0)
-    fio___rsa_words_to_bytes(result, key->n_len, result_words, word_count);
+    fio___rsa_words_to_bytes(result, n_len, result_words, word_count);
 
 cleanup:
   /* Clear sensitive data */
@@ -1492,33 +1558,37 @@ SFUNC int fio_rsa_sign_pss(uint8_t *signature,
   if (hash_len != expected_hash_len)
     return -1;
 
+  const uint8_t *n = key->n;
+  size_t n_len = key->n_len;
+  fio___rsa_trim_be(&n, &n_len);
+
   /* Validate key size */
-  if (key->n_len > FIO_RSA_MAX_BYTES || key->n_len < 256)
+  if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
     return -1;
 
   /* Compute top-mask from the actual modulus bit length. */
-  size_t word_count = (key->n_len + 7) / 8;
+  size_t word_count = (n_len + 7) / 8;
   uint64_t n_words[FIO_RSA_MAX_WORDS];
-  fio___rsa_bytes_to_words(n_words, word_count, key->n, key->n_len);
+  fio___rsa_bytes_to_words(n_words, word_count, n, n_len);
   size_t em_bits = fio_math_msb_index(n_words, word_count);
   if (em_bits == (size_t)-1)
     em_bits = 0;
-  size_t top_mask = 0xFF >> (8 * key->n_len - em_bits);
+  size_t top_mask = 0xFF >> (8 * n_len - em_bits);
 
   /* Step 1: EMSA-PSS-ENCODE */
   uint8_t em[FIO_RSA_MAX_BYTES];
   if (fio___rsa_emsa_pss_encode(
-          em, key->n_len, msg_hash, hash_len, hash_alg, top_mask) != 0) {
+          em, n_len, msg_hash, hash_len, hash_alg, top_mask) != 0) {
     return -1;
   }
 
   /* Step 2-4: RSASP1 - compute s = m^d mod n */
-  if (fio___rsa_private_op(signature, em, key->n_len, key) != 0) {
+  if (fio___rsa_private_op(signature, em, n_len, key) != 0) {
     fio_secure_zero(em, sizeof(em));
     return -1;
   }
 
-  *sig_len = key->n_len;
+  *sig_len = n_len;
 
   /* Clear sensitive data */
   fio_secure_zero(em, sizeof(em));
