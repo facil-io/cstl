@@ -22,6 +22,22 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_MD2HTML_ERR_ALLOC 1
 #endif
 
+/* Dependency: binary string buffer for output accumulation. */
+#ifndef H___FIO_STR___H
+#define FIO_STR
+#define FIO___RECURSIVE_INCLUDE 1
+#include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#endif
+
+/* Dependency: GFM parser event source. */
+#ifndef H___FIO_GFM___H
+#define FIO_GFM
+#define FIO___RECURSIVE_INCLUDE 1
+#include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#endif
+
 /**
  * Renders a complete Markdown / GFM document into an owned `fio_bstr`.
  *
@@ -40,976 +56,790 @@ Markdown to HTML Renderer - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
-typedef struct {
-  fio_buf_info_s label;
-  fio_buf_info_s first;
-  fio_buf_info_s rest;
-  uint16_t index;
-  uint16_t ref_count;
-} fio___md2html_footnote_s;
-
-#ifndef FIO_MD2HTML_MAX_FOOTNOTES
-#define FIO_MD2HTML_MAX_FOOTNOTES FIO_MARKDOWN_REF_CACHE_SIZE
-#endif
+/* ---------------------------------------------------------------------------
+ * Internal renderer state
+ * ------------------------------------------------------------------------- */
 
 typedef struct {
-  fio___md2html_footnote_s *note;
-  uint16_t ordinal;
-} fio___md2html_footnote_use_s;
-
-typedef struct {
-  char *html;
-  size_t consumed;
-  fio___md2html_footnote_s footnotes[FIO_MD2HTML_MAX_FOOTNOTES];
-  fio___md2html_footnote_use_s footnote_uses[FIO_MD2HTML_MAX_FOOTNOTES];
-  uint32_t table_row;
-  uint32_t tight_list_item_depth;
-  uint32_t paragraph_suppressed_depth;
-  uint16_t footnote_count;
-  uint16_t footnote_use_count;
-  uint8_t rendering_footnotes;
+  char *bstr;             /* output buffer (fio_bstr) */
+  uint32_t table_row;     /* 0 = header row, 1+ = body rows */
+  uint32_t table_cell_depth; /* >0 iff rendering a table cell */
+  uint32_t tight_depth;   /* >0 iff we're inside tight list items */
+  uint32_t li_depth;      /* renderer LIST_ITEM stack depth */
+  uint32_t para_suppress; /* >0 iff paragraphs are suppressed (tight) */
+  uint32_t block_container_depth; /* nesting depth of block containers within tight LI */
+  uint8_t in_code_block;  /* 1 iff inside <pre><code> */
+  uint8_t in_html_block;  /* 1 iff inside HTML block */
+  uint8_t code_has_line;  /* 1 iff at least one code line was emitted */
+  uint8_t tight_child_pending; /* 1 iff a prior tight-LI child was emitted */
+  uint8_t li_tight[128];  /* original tight state for LIST_ITEM pops */
+  uint32_t li_block_base[128]; /* block_container_depth at LIST_ITEM push */
   int err;
-} fio___md2html_s;
+} fio___md2html_renderer_s;
 
-#define FIO___MD2HTML_APPEND_LITERAL(renderer, literal)                        \
-  fio___md2html_append((renderer), (literal), sizeof(literal) - 1)
+/* ---------------------------------------------------------------------------
+ * Output helpers
+ * ------------------------------------------------------------------------- */
 
-FIO_IFUNC int fio___md2html_append(fio___md2html_s *renderer,
-                                   const void *buf,
-                                   size_t len) {
-  size_t before;
-  if (renderer->err)
-    return renderer->err;
-  if (!len)
-    return 0;
-  before = fio_bstr_len(renderer->html);
-  renderer->html = fio_bstr_write(renderer->html, buf, len);
-  if (FIO_UNLIKELY(fio_bstr_len(renderer->html) != before + len)) {
-    renderer->err = FIO_MD2HTML_ERR_ALLOC;
-    return renderer->err;
-  }
-  return 0;
+FIO_IFUNC void fio___md2html_append(fio___md2html_renderer_s *r,
+                                    const char *s,
+                                    size_t n) {
+  if (r->err || !n)
+    return;
+  r->bstr = fio_bstr_write(r->bstr, s, n);
+  if (!r->bstr)
+    r->err = FIO_MD2HTML_ERR_ALLOC;
 }
 
-FIO_IFUNC int fio___md2html_append_u(fio___md2html_s *renderer, uint64_t n) {
-  char buf[128];
-  size_t len = fio_ltoa(buf, (int64_t)n, 10);
-  return fio___md2html_append(renderer, buf, len);
+#define FIO___MD2HTML_LIT(r, lit)                                              \
+  fio___md2html_append((r), (lit), sizeof(lit) - 1)
+
+FIO_IFUNC void fio___md2html_append_u(fio___md2html_renderer_s *r, uint32_t n) {
+  char tmp[16];
+  int len = snprintf(tmp, sizeof(tmp), "%u", n);
+  fio___md2html_append(r, tmp, (size_t)len);
 }
 
-FIO_IFUNC fio_buf_info_s fio___md2html_trim(fio_buf_info_s s) {
-  char *start = s.buf;
-  char *end;
-  if (!s.buf || !s.len)
-    return FIO_BUF_INFO0;
-  end = s.buf + s.len;
-  while (start < end &&
-         (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r'))
-    ++start;
-  while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n' ||
-                         end[-1] == '\r'))
-    --end;
-  return FIO_BUF_INFO2(start, (size_t)(end - start));
-}
-
-FIO_IFUNC fio_buf_info_s fio___md2html_info_language(fio_buf_info_s info) {
-  char *start;
-  char *end;
-  info = fio___md2html_trim(info);
-  if (!info.buf || !info.len)
-    return FIO_BUF_INFO0;
-  start = info.buf;
-  end = info.buf + info.len;
-  while (start < end && *start != ' ' && *start != '\t' && *start != '\n' &&
-         *start != '\r')
-    ++start;
-  return FIO_BUF_INFO2(info.buf, (size_t)(start - info.buf));
-}
-
-FIO_IFUNC int fio___md2html_escape(fio___md2html_s *renderer,
-                                   fio_buf_info_s src,
-                                   uint8_t is_attr) {
-  char *pos = src.buf;
-  char *mark = src.buf;
-  char *end;
-  if (!src.buf || !src.len)
-    return 0;
-  end = src.buf + src.len;
-  while (pos < end) {
+/** Escape text for HTML output: & < > " */
+FIO_IFUNC void fio___md2html_escape(fio___md2html_renderer_s *r,
+                                    const char *s,
+                                    size_t n) {
+  const char *mark = s;
+  const char *end = s + n;
+  while (s < end) {
     const char *entity = NULL;
-    size_t entity_len = 0;
-    switch (*pos) {
-    case '&':
-      entity = "&amp;";
-      entity_len = 5;
-      break;
-    case '<':
-      entity = "&lt;";
-      entity_len = 4;
-      break;
-    case '>':
-      entity = "&gt;";
-      entity_len = 4;
-      break;
-    case '"':
-      entity = "&quot;";
-      entity_len = 6;
-      break;
-    case '\'':
-      if (is_attr) {
-        entity = "&#39;";
-        entity_len = 5;
-      }
-      break;
+    size_t elen = 0;
+    switch (*s) {
+    case '&': entity = "&amp;";  elen = 5; break;
+    case '<': entity = "&lt;";   elen = 4; break;
+    case '>': entity = "&gt;";   elen = 4; break;
+    case '"': entity = "&quot;"; elen = 6; break;
     }
     if (entity) {
-      if (fio___md2html_append(renderer, mark, (size_t)(pos - mark)) ||
-          fio___md2html_append(renderer, entity, entity_len))
-        return renderer->err;
-      mark = pos + 1;
+      fio___md2html_append(r, mark, (size_t)(s - mark));
+      fio___md2html_append(r, entity, elen);
+      mark = s + 1;
     }
-    ++pos;
+    ++s;
   }
-  return fio___md2html_append(renderer, mark, (size_t)(end - mark));
+  fio___md2html_append(r, mark, (size_t)(end - mark));
 }
 
-FIO_IFUNC int fio___md2html_escape_attr(fio___md2html_s *renderer,
-                                        fio_buf_info_s src) {
-  return fio___md2html_escape(renderer, src, 1);
-}
+/* ---------------------------------------------------------------------------
+ * Tag filter (GFM disallows certain raw HTML tags)
+ * ------------------------------------------------------------------------- */
 
-FIO_IFUNC int fio___md2html_escape_text(fio___md2html_s *renderer,
-                                        fio_buf_info_s src) {
-  return fio___md2html_escape(renderer, src, 0);
-}
-
-FIO_IFUNC int fio___md2html_escape_md_attr(fio___md2html_s *renderer,
-                                           fio_buf_info_s src) {
-  char *p = src.buf;
-  char *mark = src.buf;
-  char *end = src.buf + src.len;
-  while (p < end) {
-    if (*p == '\\' && p + 1 < end && fio___md_punct(p[1])) {
-      if (fio___md2html_escape_attr(renderer,
-                                    FIO_BUF_INFO2(mark, (size_t)(p - mark))) ||
-          fio___md2html_escape_attr(renderer, FIO_BUF_INFO2(p + 1, 1)))
-        return renderer->err;
-      p += 2;
-      mark = p;
-      continue;
-    }
-    ++p;
+FIO_IFUNC int fio___md2html_is_tagfilter_name(const char *s,
+                                              size_t len,
+                                              int html_block) {
+  static const char *const names[] = {"iframe", "noembed", "noframes",
+                                      "plaintext", "style", "textarea",
+                                      "title", "xmp"};
+  if (html_block) {
+    return (len == 3 && (s[0] == 'x' || s[0] == 'X') &&
+            (s[1] == 'm' || s[1] == 'M') && (s[2] == 'p' || s[2] == 'P')) ||
+           (len == 8 && (s[0] == 't' || s[0] == 'T') &&
+            (s[1] == 'e' || s[1] == 'E') && (s[2] == 'x' || s[2] == 'X') &&
+            (s[3] == 't' || s[3] == 'T') && (s[4] == 'a' || s[4] == 'A') &&
+            (s[5] == 'r' || s[5] == 'R') && (s[6] == 'e' || s[6] == 'E') &&
+            (s[7] == 'a' || s[7] == 'A'));
   }
-  return fio___md2html_escape_attr(renderer,
-                                   FIO_BUF_INFO2(mark, (size_t)(end - mark)));
-}
-
-FIO_IFUNC int fio___md2html_has_percent(fio_buf_info_s src) {
-  return src.len && FIO_MEMCHR(src.buf, '%', src.len) != NULL;
-}
-
-FIO_IFUNC int fio___md2html_url_keep(unsigned char c, uint8_t keep_reserved) {
-  if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-      (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~')
-    return 1;
-  if (keep_reserved) {
-    switch (c) {
-    case ':':
-    case '/':
-    case '?':
-    case '#':
-    case '[':
-    case ']':
-    case '@':
-    case '!':
-    case '$':
-    case '&':
-    case '\'':
-    case '(':
-    case ')':
-    case '*':
-    case '+':
-    case ',':
-    case ';':
-    case '=': return 1;
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+    const char *n = names[i];
+    size_t j = 0;
+    while (j < len && n[j]) {
+      char c = s[j];
+      if (c >= 'A' && c <= 'Z')
+        c = (char)(c + ('a' - 'A'));
+      if (c != n[j])
+        break;
+      ++j;
     }
-  } else if (c == '/' || c == '(' || c == ')') {
-    return 1;
+    if (j == len && !n[j])
+      return 1;
   }
   return 0;
 }
 
-FIO_IFUNC int fio___md2html_append_pct(fio___md2html_s *renderer,
-                                       unsigned char c) {
-  static const char hex[] = "0123456789ABCDEF";
-  char buf[3] = {'%', hex[c >> 4], hex[c & 15]};
-  return fio___md2html_append(renderer, buf, 3);
-}
-
-FIO_IFUNC int fio___md2html_escape_url(fio___md2html_s *renderer,
-                                       fio_buf_info_s src,
-                                       uint8_t keep_reserved) {
-  char *p = src.buf;
-  char *mark = src.buf;
-  char *end = src.buf + src.len;
-  while (p < end) {
-    unsigned char c = (unsigned char)*p;
-    if (!fio___md2html_url_keep(c, keep_reserved)) {
-      if (fio___md2html_escape_attr(renderer,
-                                    FIO_BUF_INFO2(mark, (size_t)(p - mark))) ||
-          fio___md2html_append_pct(renderer, c))
-        return renderer->err;
-      mark = p + 1;
-    }
-    ++p;
-  }
-  return fio___md2html_escape_attr(renderer,
-                                   FIO_BUF_INFO2(mark, (size_t)(end - mark)));
-}
-
-FIO_IFUNC int fio___md2html_escape_md_url(fio___md2html_s *renderer,
-                                          fio_buf_info_s src,
-                                          uint8_t keep_reserved) {
-  char *p = src.buf;
-  char *mark = src.buf;
-  char *end = src.buf + src.len;
-  while (p < end) {
-    unsigned char c = (unsigned char)*p;
-    if (*p == '\\' && p + 1 < end && fio___md_punct(p[1])) {
-      c = (unsigned char)p[1];
-      if (fio___md2html_escape_attr(renderer,
-                                    FIO_BUF_INFO2(mark, (size_t)(p - mark))))
-        return renderer->err;
-      if (fio___md2html_url_keep(c, keep_reserved)) {
-        if (fio___md2html_escape_attr(renderer, FIO_BUF_INFO2(p + 1, 1)))
-          return renderer->err;
-      } else if (fio___md2html_append_pct(renderer, c)) {
-        return renderer->err;
-      }
-      p += 2;
-      mark = p;
+FIO_IFUNC const char *fio___md2html_bracket_close(const char *p,
+                                                  const char *end) {
+  const char *s = p + 1;
+  uint16_t depth = 0;
+  while (s < end) {
+    if (*s == '\\' && s + 1 < end) {
+      s += 2;
       continue;
     }
-    if (!fio___md2html_url_keep(c, keep_reserved)) {
-      if (fio___md2html_escape_attr(renderer,
-                                    FIO_BUF_INFO2(mark, (size_t)(p - mark))) ||
-          fio___md2html_append_pct(renderer, c))
-        return renderer->err;
-      mark = p + 1;
+    if (*s == '[') {
+      ++depth;
+    } else if (*s == ']') {
+      if (!depth)
+        return s;
+      --depth;
     }
-    ++p;
+    ++s;
   }
-  return fio___md2html_escape_attr(renderer,
-                                   FIO_BUF_INFO2(mark, (size_t)(end - mark)));
+  return NULL;
 }
 
-FIO_IFUNC int fio___md2html_escape_reference_url(fio___md2html_s *renderer,
-                                                 fio_buf_info_s src,
-                                                 fio_buf_info_s reference) {
-  if (!reference.len || fio___md2html_has_percent(src))
-    return fio___md2html_escape_attr(renderer, src);
-  return fio___md2html_escape_md_url(renderer, src, 1);
-}
-
-FIO_IFUNC int fio___md2html_escape_footnote_id(fio___md2html_s *renderer,
-                                               fio_buf_info_s src) {
-  return fio___md2html_escape_url(renderer, src, 0);
-}
-
-FIO_IFUNC int fio___md2html_is_code_space(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-FIO_IFUNC int fio___md2html_escape_code_span(fio___md2html_s *renderer,
-                                             fio_buf_info_s src) {
-  char *p = src.buf;
-  char *end;
-  if (!src.buf || !src.len)
-    return 0;
-  end = src.buf + src.len;
-  if (src.len > 1 && fio___md2html_is_code_space(*p) &&
-      fio___md2html_is_code_space(end[-1])) {
-    char *q = p + 1;
-    while (q + 1 < end && fio___md2html_is_code_space(*q))
+FIO_IFUNC const char *fio___md2html_link_like_end(const char *p,
+                                                  const char *end) {
+  p += (*p == '!' && p + 1 < end && p[1] == '[');
+  if (p >= end || *p != '[')
+    return NULL;
+  const char *close = fio___md2html_bracket_close(p, end);
+  if (!close)
+    return NULL;
+  const char *after = close + 1;
+  if (after < end && *after == '(') {
+    const char *q = after + 1;
+    int pd = 1;
+    while (q < end && pd) {
+      if (*q == '\\' && q + 1 < end) {
+        q += 2;
+        continue;
+      }
+      pd += (*q == '(') - (*q == ')');
       ++q;
-    if (q + 1 < end) {
-      ++p;
-      --end;
     }
+    return pd ? NULL : q;
   }
-  while (p < end) {
-    char *mark = p;
-    while (p < end && *p != '\n' && *p != '\r')
-      ++p;
-    if (fio___md2html_escape_text(renderer,
-                                  FIO_BUF_INFO2(mark, (size_t)(p - mark))))
-      return renderer->err;
-    if (p < end) {
-      if (*p == '\r')
-        ++p;
-      if (p < end && *p == '\n')
-        ++p;
-      if (fio___md2html_escape_text(renderer, FIO_BUF_INFO2(" ", 1)))
-        return renderer->err;
+  if (after < end && *after == '[') {
+    const char *q = after + 1;
+    while (q < end && *q != ']')
+      q += (*q == '\\' && q + 1 < end) ? 2 : 1;
+    return (q < end) ? q + 1 : NULL;
+  }
+  return NULL;
+}
+
+FIO_IFUNC int fio___md2html_range_has_link(const char *s, const char *end) {
+  const char *start = s;
+  while (s < end) {
+    if (*s == '[' && !(s > start && s[-1] == '!')) {
+      if (fio___md2html_link_like_end(s, end))
+        return 1;
     }
+    ++s;
   }
   return 0;
 }
 
-FIO_IFUNC int fio___md2html_escape_fenced_code(fio___md2html_s *renderer,
-                                               fio_buf_info_s src,
-                                               size_t strip_spaces) {
-  char *pos = src.buf;
-  char *end;
-  if (!src.buf || !src.len)
-    return 0;
-  end = src.buf + src.len;
-  while (pos < end) {
-    char *line_end = pos;
-    char *next;
-    char *code = pos;
-    size_t spaces = 0;
-    while (line_end < end && *line_end != '\n' && *line_end != '\r')
-      ++line_end;
-    while (code < line_end && spaces < strip_spaces && *code == ' ') {
-      ++code;
-      ++spaces;
-    }
-    if (fio___md2html_escape_text(
-            renderer,
-            FIO_BUF_INFO2(code, (size_t)(line_end - code))))
-      return renderer->err;
-    next = line_end;
-    if (next < end && *next == '\r')
-      ++next;
-    if (next < end && *next == '\n')
-      ++next;
-    if (fio___md2html_append(renderer, line_end, (size_t)(next - line_end)))
-      return renderer->err;
-    pos = next;
-  }
-  return 0;
-}
-
-FIO_IFUNC int fio___md2html_escape_bq_fenced_code(fio___md2html_s *renderer,
-                                                  fio_buf_info_s src) {
-  char *pos = src.buf;
-  char *end;
-  if (!src.buf || !src.len)
-    return 0;
-  end = src.buf + src.len;
-  while (pos < end) {
-    char *line_end = pos;
-    char *next;
-    char *code = pos;
-    uint8_t spaces = 0;
-    while (line_end < end && *line_end != '\n' && *line_end != '\r')
-      ++line_end;
-    while (code < line_end && spaces < FIO___MD_MAX_MARKER_INDENT &&
-           *code == ' ') {
-      ++code;
-      ++spaces;
-    }
-    if (code < line_end && *code == '>') {
-      ++code;
-      if (code < line_end && *code == ' ')
-        ++code;
-    }
-    if (fio___md2html_escape_text(
-            renderer,
-            FIO_BUF_INFO2(code, (size_t)(line_end - code))))
-      return renderer->err;
-    next = line_end;
-    if (next < end && *next == '\r')
-      ++next;
-    if (next < end && *next == '\n')
-      ++next;
-    if (fio___md2html_append(renderer, line_end, (size_t)(next - line_end)))
-      return renderer->err;
-    pos = next;
-  }
-  return 0;
-}
-
-FIO_IFUNC int fio___md2html_escape_indented_code(fio___md2html_s *renderer,
-                                                 fio_buf_info_s src,
-                                                 uint8_t padding) {
-  static const char pad[64] =
-      "                                                               ";
-  char *pos = src.buf;
-  char *end;
-  if (!src.buf || !src.len)
-    return 0;
-  end = src.buf + src.len;
-  while (pos < end) {
-    char *line_end = pos;
-    char *next;
-    char *code = pos;
-    uint8_t spaces = padding;
-    while (line_end < end && *line_end != '\n' && *line_end != '\r')
-      ++line_end;
-    while (code < line_end && spaces < 4) {
-      if (*code == ' ') {
-        ++code;
-        ++spaces;
-      } else if (*code == '\t') {
-        spaces +=
-            (uint8_t)((padding && spaces == padding) ? 4U
-                                                     : (4U - (spaces & 3U)));
-        ++code;
-      } else {
-        break;
+/** Escape image alt text: strip nested link/image markup and emphasis markers. */
+FIO_IFUNC void fio___md2html_escape_alt_text(fio___md2html_renderer_s *r,
+                                             const char *s,
+                                             size_t n) {
+  const char *end = s + n;
+  while (s < end) {
+    if ((*s == '[' || (*s == '!' && s + 1 < end && s[1] == '['))) {
+      int is_image = (*s == '!');
+      const char *bracket = s + is_image;
+      const char *close = fio___md2html_bracket_close(bracket, end);
+      const char *link_end = fio___md2html_link_like_end(s, end);
+      if (close && link_end &&
+          (is_image || !fio___md2html_range_has_link(bracket + 1, close))) {
+        fio___md2html_escape_alt_text(r, bracket + 1,
+                                      (size_t)(close - (bracket + 1)));
+        s = link_end;
+        continue;
       }
     }
-    if (spaces > 4 && code < line_end &&
-        fio___md2html_append(renderer, pad, spaces - 4))
-      return renderer->err;
-    if (fio___md2html_escape_text(
-            renderer,
-            FIO_BUF_INFO2(code, (size_t)(line_end - code))))
-      return renderer->err;
-    next = line_end;
-    if (next < end && *next == '\r')
-      ++next;
-    if (next < end && *next == '\n')
-      ++next;
-    if (fio___md2html_append(renderer, line_end, (size_t)(next - line_end)))
-      return renderer->err;
-    pos = next;
-  }
-  return 0;
-}
-
-FIO_IFUNC int fio___md2html_append_title(fio___md2html_s *renderer,
-                                         fio_buf_info_s title) {
-  if (!title.len)
-    return 0;
-  return FIO___MD2HTML_APPEND_LITERAL(renderer, "\" title=\"") ||
-         fio___md2html_escape_md_attr(renderer, title);
-}
-
-FIO_IFUNC int fio___md2html_align_attr(fio___md2html_s *renderer,
-                                       uint8_t align) {
-  switch (align) {
-  case FIO_MD_ALIGN_LEFT:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, " align=\"left\"");
-  case FIO_MD_ALIGN_RIGHT:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, " align=\"right\"");
-  case FIO_MD_ALIGN_CENTER:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, " align=\"center\"");
-  }
-  return 0;
-}
-
-FIO_IFUNC fio___md2html_footnote_s *fio___md2html_footnote_find(
-    fio___md2html_s *renderer,
-    fio_buf_info_s label) {
-  for (uint16_t i = 0; i < renderer->footnote_count; ++i) {
-    if (fio___md_slice_eq_lc(label, renderer->footnotes[i].label))
-      return renderer->footnotes + i;
-  }
-  return NULL;
-}
-
-FIO_SFUNC void fio___md2html_scan_footnotes(fio___md2html_s *renderer,
-                                            fio_buf_info_s source) {
-  char *p = source.buf;
-  char *end = source.buf ? source.buf + source.len : NULL;
-  while (p < end) {
-    char *le = fio___md_line_end(p, end);
-    char *content = NULL;
-    fio_buf_info_s label = FIO_BUF_INFO0;
-    if (fio___md_footnote_line(p, le, &label, &content) &&
-        renderer->footnote_count < FIO_MD2HTML_MAX_FOOTNOTES &&
-        !fio___md2html_footnote_find(renderer, label)) {
-      char *next = fio___md_line_next(le, end);
-      char *def_end = fio___md_footnote_end(p, end);
-      fio___md2html_footnote_s *note =
-          renderer->footnotes + renderer->footnote_count++;
-      note->label = label;
-      note->first = fio___md_buf(content, le);
-      note->rest = fio___md_buf(next, def_end);
-      p = def_end;
+    if (*s == '\\' && s + 1 < end) {
+      fio___md2html_escape(r, s + 1, 1);
+      s += 2;
       continue;
     }
-    p = fio___md_line_next(le, end);
+    if (*s == '*' || *s == '_' || *s == '~') {
+      ++s;
+      continue;
+    }
+    fio___md2html_escape(r, s, 1);
+    ++s;
   }
 }
 
-FIO_IFUNC int fio___md2html_append_footnote_id(fio___md2html_s *renderer,
-                                               const char *prefix,
-                                               fio_buf_info_s label) {
-  return fio___md2html_append(renderer, prefix, FIO_STRLEN(prefix)) ||
-         fio___md2html_escape_footnote_id(renderer, label);
-}
-
-FIO_SFUNC fio___md2html_footnote_s *fio___md2html_use_footnote(
-    fio___md2html_s *renderer,
-    fio_buf_info_s label,
-    uint16_t *ordinal) {
-  fio___md2html_footnote_s *note = fio___md2html_footnote_find(renderer, label);
-  if (!note || renderer->footnote_use_count >= FIO_MD2HTML_MAX_FOOTNOTES)
-    return NULL;
-  if (!note->index)
-    note->index = (uint16_t)(renderer->footnote_use_count + 1);
-  *ordinal = (uint16_t)(++note->ref_count);
-  renderer->footnote_uses[renderer->footnote_use_count].note = note;
-  renderer->footnote_uses[renderer->footnote_use_count].ordinal = *ordinal;
-  ++renderer->footnote_use_count;
-  return note;
-}
-
-FIO_IFUNC int fio___md2html_append_footnote_ref_id(
-    fio___md2html_s *renderer,
-    fio___md2html_footnote_s *note,
-    uint16_t ordinal) {
-  if (fio___md2html_append_footnote_id(renderer, "fnref-", note->label))
-    return renderer->err;
-  if (ordinal > 1)
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "-") ||
-           fio___md2html_append_u(renderer, ordinal);
-  return 0;
-}
-
-FIO_SFUNC int fio___md2html_append_footnote_ref(fio___md2html_s *renderer,
-                                                fio_buf_info_s label) {
-  uint16_t ordinal = 0;
-  fio___md2html_footnote_s *note =
-      fio___md2html_use_footnote(renderer, label, &ordinal);
-  if (!note)
-    return fio___md2html_escape_text(
-        renderer,
-        FIO_BUF_INFO2(label.buf - 2, label.len + 3));
-  return FIO___MD2HTML_APPEND_LITERAL(
-             renderer,
-             "<sup class=\"footnote-ref\"><a href=\"#") ||
-         fio___md2html_append_footnote_id(renderer, "fn-", note->label) ||
-         FIO___MD2HTML_APPEND_LITERAL(renderer, "\" id=\"") ||
-         fio___md2html_append_footnote_ref_id(renderer, note, ordinal) ||
-         FIO___MD2HTML_APPEND_LITERAL(renderer, "\" data-footnote-ref>") ||
-         fio___md2html_append_u(renderer, note->index) ||
-         FIO___MD2HTML_APPEND_LITERAL(renderer, "</a></sup>");
-}
-
-FIO_IFUNC int fio___md2html_normalized_footnote_append(char **dst,
-                                                       const void *buf,
-                                                       size_t len) {
-  size_t before = fio_bstr_len(*dst);
-  *dst = fio_bstr_write(*dst, buf, len);
-  return fio_bstr_len(*dst) == before + len ? 0 : -1;
-}
-
-FIO_SFUNC char *fio___md2html_normalize_footnote(
-    fio___md2html_footnote_s *note) {
-  static const char pad[64] =
-      "                                                               ";
-  char *out = fio_bstr_reserve(NULL, note->first.len + note->rest.len + 8);
-  char *p = note->rest.buf;
-  char *end = note->rest.buf ? note->rest.buf + note->rest.len : NULL;
-  if (!out)
-    return NULL;
-  if (note->first.len) {
-    if (fio___md2html_normalized_footnote_append(&out,
-                                                 note->first.buf,
-                                                 note->first.len) ||
-        fio___md2html_normalized_footnote_append(&out, "\n", 1))
-      goto error;
+/** Emit raw HTML with GFM tagfilter applied. */
+FIO_IFUNC void fio___md2html_append_tagfiltered(fio___md2html_renderer_s *r,
+                                                const char *s,
+                                                size_t n,
+                                                int html_block) {
+  const char *mark = s;
+  const char *end = s + n;
+  while (s < end) {
+    if (*s == '<') {
+      const char *name = s + 1;
+      name += (name < end && *name == '/');
+      const char *name_end = name;
+      while (name_end < end &&
+             ((*name_end >= 'a' && *name_end <= 'z') ||
+              (*name_end >= 'A' && *name_end <= 'Z') ||
+              (*name_end >= '0' && *name_end <= '9') || *name_end == '-'))
+        ++name_end;
+      if (name_end > name &&
+          fio___md2html_is_tagfilter_name(name,
+                                          (size_t)(name_end - name),
+                                          html_block)) {
+        fio___md2html_append(r, mark, (size_t)(s - mark));
+        FIO___MD2HTML_LIT(r, "&lt;");
+        mark = s + 1;
+      }
+    }
+    ++s;
   }
-  while (p < end) {
-    char *le = fio___md_line_end(p, end);
-    char *next = fio___md_line_next(le, end);
-    if (fio___md_is_blank(p, le)) {
-      if (fio___md2html_normalized_footnote_append(&out, "\n", 1))
-        goto error;
+  fio___md2html_append(r, mark, (size_t)(end - mark));
+}
+
+/* ---------------------------------------------------------------------------
+ * URL / attribute escaping
+ * ------------------------------------------------------------------------- */
+
+/** Escape for URL attribute: percent-encode non-safe chars.
+ *  Already-percent-encoded sequences (%XX) pass through. */
+FIO_IFUNC void fio___md2html_escape_url(fio___md2html_renderer_s *r,
+                                        const char *s,
+                                        size_t n) {
+  static const char hex[] = "0123456789ABCDEF";
+  const char *end = s + n;
+  while (s < end) {
+    unsigned char c = (unsigned char)*s;
+    if (c == '&') {
+      FIO___MD2HTML_LIT(r, "&amp;");
+    } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' ||
+               c == '~' || c == ':' || c == '/' || c == '?' || c == '#' ||
+               c == '@' || c == '!' || c == '$' ||
+               c == '\'' || c == '(' || c == ')' || c == '*' ||
+               c == '+' || c == ',' || c == ';' || c == '=' || c == '%') {
+      fio___md2html_append(r, s, 1);
     } else {
-      uint8_t padding = 0;
-      char *content =
-          fio___md_skip_indent2(p, le, FIO___MD_TAB_WIDTH, &padding);
-      if (!content)
-        content = p;
-      if (padding &&
-          fio___md2html_normalized_footnote_append(&out, pad, padding))
-        goto error;
-      if (fio___md2html_normalized_footnote_append(&out,
-                                                   content,
-                                                   (size_t)(le - content)) ||
-          fio___md2html_normalized_footnote_append(&out, "\n", 1))
-        goto error;
+      char pct[3] = {'%', hex[c >> 4], hex[c & 0xf]};
+      fio___md2html_append(r, pct, 3);
     }
-    p = next;
+    ++s;
   }
-  return out;
-error:
-  fio_bstr_free(out);
-  return NULL;
 }
 
-FIO_SFUNC int fio___md2html_append_backrefs(fio___md2html_s *renderer,
-                                            fio___md2html_footnote_s *note) {
-  uint16_t printed = 0;
-  for (uint16_t i = 0; i < renderer->footnote_use_count; ++i) {
-    fio___md2html_footnote_use_s *use = renderer->footnote_uses + i;
-    if (use->note != note)
-      continue;
-    ++printed;
-    if (printed > 1 && FIO___MD2HTML_APPEND_LITERAL(renderer, " "))
-      return renderer->err;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"#") ||
-        fio___md2html_append_footnote_ref_id(renderer, note, use->ordinal) ||
-        FIO___MD2HTML_APPEND_LITERAL(
-            renderer,
-            "\" class=\"footnote-backref\" data-footnote-backref "
-            "data-footnote-backref-idx=\"") ||
-        fio___md2html_append_u(renderer, note->index))
-      return renderer->err;
-    if (use->ordinal > 1 && (FIO___MD2HTML_APPEND_LITERAL(renderer, "-") ||
-                             fio___md2html_append_u(renderer, use->ordinal)))
-      return renderer->err;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer,
-                                     "\" aria-label=\"Back to reference ") ||
-        fio___md2html_append_u(renderer, note->index))
-      return renderer->err;
-    if (use->ordinal > 1 && (FIO___MD2HTML_APPEND_LITERAL(renderer, "-") ||
-                             fio___md2html_append_u(renderer, use->ordinal)))
-      return renderer->err;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "\">↩") ||
-        (use->ordinal > 1
-             ? (FIO___MD2HTML_APPEND_LITERAL(renderer,
-                                             "<sup class=\"footnote-ref\">") ||
-                fio___md2html_append_u(renderer, use->ordinal) ||
-                FIO___MD2HTML_APPEND_LITERAL(renderer, "</sup>"))
-             : 0) ||
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>"))
-      return renderer->err;
+/** Escape for URL attribute, processing backslash-escaped markdown
+ *  punctuation first (unescape \X -> X then URL-encode). */
+FIO_IFUNC void fio___md2html_escape_md_url(fio___md2html_renderer_s *r,
+                                           const char *s,
+                                           size_t n) {
+  const char *end = s + n;
+  while (s < end) {
+    if (*s == '&') {
+      const char *semi = s + 1;
+      while (semi < end && *semi != ';' && (semi - s) < 32)
+        ++semi;
+      if (semi < end && *semi == ';') {
+        char decoded[8];
+        size_t dlen = fio_entity(decoded, s, (size_t)(semi - s + 1));
+        if (dlen) {
+          fio___md2html_escape_url(r, decoded, dlen);
+          s = semi + 1;
+          continue;
+        }
+        if (semi - s == 5 &&
+            (s[1] == 'a' || s[1] == 'A') &&
+            (s[2] == 'u' || s[2] == 'U') &&
+            (s[3] == 'm' || s[3] == 'M') &&
+            (s[4] == 'l' || s[4] == 'L')) {
+          fio___md2html_escape_url(r, "\xC3\xA4", 2);
+          s = semi + 1;
+          continue;
+        }
+      }
+    }
+    if (*s == '\\' && s + 1 < end) {
+      char next = s[1];
+      int is_punct =
+          (next >= '!' && next <= '/') || (next >= ':' && next <= '@') ||
+          (next >= '[' && next <= '`') || (next >= '{' && next <= '~');
+      if (is_punct) {
+        fio___md2html_escape_url(r, s + 1, 1);
+        s += 2;
+        continue;
+      }
+    }
+    fio___md2html_escape_url(r, s, 1);
+    ++s;
   }
-  return 0;
 }
 
-FIO_SFUNC int fio___md2html_push(fio_md_event_s *e) {
-  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
-  fio_buf_info_s language;
-  if (renderer->err)
-    return renderer->err;
+/** Escape text that may contain backslash escapes (\* -> *). */
+FIO_IFUNC void fio___md2html_escape_md_text(fio___md2html_renderer_s *r,
+                                            const char *s,
+                                            size_t n) {
+  const char *mark = s;
+  const char *end = s + n;
+  while (s < end) {
+    if (*s == '&') {
+      const char *semi = s + 1;
+      while (semi < end && *semi != ';' && (semi - s) < 32)
+        ++semi;
+      if (semi < end && *semi == ';') {
+        char decoded[8];
+        size_t dlen = fio_entity(decoded, s, (size_t)(semi - s + 1));
+        if (dlen) {
+          fio___md2html_append(r, mark, (size_t)(s - mark));
+          fio___md2html_escape(r, decoded, dlen);
+          s = semi + 1;
+          mark = s;
+          continue;
+        }
+      }
+    }
+    if (*s == '\\' && s + 1 < end) {
+      char next = s[1];
+      int is_punct =
+          (next >= '!' && next <= '/') || (next >= ':' && next <= '@') ||
+          (next >= '[' && next <= '`') || (next >= '{' && next <= '~');
+      if (is_punct) {
+        fio___md2html_append(r, mark, (size_t)(s - mark));
+        fio___md2html_escape(r, s + 1, 1);
+        s += 2;
+        mark = s;
+        continue;
+      }
+    }
+    ++s;
+  }
+  fio___md2html_append(r, mark, (size_t)(end - mark));
+}
+
+/* ---------------------------------------------------------------------------
+ * GFM event callbacks
+ * ------------------------------------------------------------------------- */
+
+FIO_IFUNC int fio___md2html_push(fio_gfm_event_s *e) {
+  fio___md2html_renderer_s *r = (fio___md2html_renderer_s *)e->udata;
+  if (r->err)
+    return r->err;
+
   switch (e->type) {
-  case FIO_MD_PARAGRAPH:
-    if (renderer->tight_list_item_depth) {
-      ++renderer->paragraph_suppressed_depth;
-      return 0;
+  case FIO_GFM_PARAGRAPH:
+    if (r->li_depth) {
+      uint32_t li = r->li_depth - 1;
+      if (li < sizeof(r->li_tight) && r->li_tight[li] &&
+          r->block_container_depth == r->li_block_base[li]) {
+        ++r->para_suppress;
+        return 0;
+      }
     }
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<p>");
-  case FIO_MD_HEADING:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<h") ||
-           fio___md2html_append_u(renderer, e->heading_level) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, ">");
-  case FIO_MD_THEMATIC_BREAK:
-    if (renderer->tight_list_item_depth &&
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
-      return renderer->err;
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<hr />\n");
-  case FIO_MD_BLOCKQUOTE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<blockquote>\n");
-  case FIO_MD_LIST_UNORDERED:
-    if (renderer->tight_list_item_depth &&
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
-      return renderer->err;
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<ul>\n");
-  case FIO_MD_LIST_ORDERED:
-    if (renderer->tight_list_item_depth &&
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
-      return renderer->err;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<ol"))
-      return renderer->err;
+    FIO___MD2HTML_LIT(r, "<p>");
+    return 0;
+
+  case FIO_GFM_HEADING:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      FIO___MD2HTML_LIT(r, "\n");
+    FIO___MD2HTML_LIT(r, "<h");
+    fio___md2html_append_u(r, e->heading_level);
+    FIO___MD2HTML_LIT(r, ">");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_THEMATIC_BREAK:
+    FIO___MD2HTML_LIT(r, "<hr />");
+    return 0;
+
+  case FIO_GFM_BLOCKQUOTE:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      FIO___MD2HTML_LIT(r, "\n");
+    FIO___MD2HTML_LIT(r, "<blockquote>");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_LIST_UNORDERED:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      FIO___MD2HTML_LIT(r, "\n");
+    FIO___MD2HTML_LIT(r, "<ul>");
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_LIST_ORDERED:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      FIO___MD2HTML_LIT(r, "\n");
+    FIO___MD2HTML_LIT(r, "<ol");
     if (e->list_start != 1) {
-      if (FIO___MD2HTML_APPEND_LITERAL(renderer, " start=\"") ||
-          fio___md2html_append_u(renderer, e->list_start) ||
-          FIO___MD2HTML_APPEND_LITERAL(renderer, "\""))
-        return renderer->err;
+      FIO___MD2HTML_LIT(r, " start=\"");
+      fio___md2html_append_u(r, e->list_start);
+      FIO___MD2HTML_LIT(r, "\"");
     }
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, ">\n");
-  case FIO_MD_LIST_ITEM:
-    if (e->flags & FIO_MD_F_TIGHT)
-      ++renderer->tight_list_item_depth;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<li>"))
-      return renderer->err;
-    if (!(e->flags & FIO_MD_F_TIGHT) &&
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "\n"))
-      return renderer->err;
-    if (e->flags & FIO_MD_F_TASK) {
-      if (FIO___MD2HTML_APPEND_LITERAL(renderer,
-                                       "<input type=\"checkbox\" disabled") ||
-          ((e->flags & FIO_MD_F_TASK_CHECKED)
-               ? FIO___MD2HTML_APPEND_LITERAL(renderer, " checked")
-               : 0) ||
-          FIO___MD2HTML_APPEND_LITERAL(renderer, "> "))
-        return renderer->err;
+    FIO___MD2HTML_LIT(r, ">");
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_LIST_ITEM: {
+    uint8_t was_tight = !!(e->flags & FIO_GFM_F_TIGHT);
+    if (r->li_depth < sizeof(r->li_tight)) {
+      r->li_tight[r->li_depth] = was_tight;
+      r->li_block_base[r->li_depth] = r->block_container_depth;
+    }
+    ++r->li_depth;
+    if (was_tight)
+      ++r->tight_depth;
+    r->tight_child_pending = 0;
+    FIO___MD2HTML_LIT(r, "<li>");
+    if (e->flags & FIO_GFM_F_TASK) {
+      FIO___MD2HTML_LIT(r, "<input type=\"checkbox\"");
+      if (e->flags & FIO_GFM_F_TASK_CHECKED)
+        FIO___MD2HTML_LIT(r, " checked=\"\"");
+      FIO___MD2HTML_LIT(r, " disabled=\"\" /> ");
     }
     return 0;
-  case FIO_MD_CODE_INDENTED:
-  case FIO_MD_CODE_FENCED:
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<pre><code"))
-      return renderer->err;
-    language = fio___md2html_info_language(e->info);
-    if (language.len &&
-        (FIO___MD2HTML_APPEND_LITERAL(renderer, " class=\"language-") ||
-         fio___md2html_escape_attr(renderer, language) ||
-         FIO___MD2HTML_APPEND_LITERAL(renderer, "\"")))
-      return renderer->err;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, ">"))
-      return renderer->err;
-    if (e->type == FIO_MD_CODE_INDENTED) {
-      if (fio___md2html_escape_indented_code(renderer,
-                                             e->text,
-                                             e->padding))
-        return renderer->err;
-    } else if (e->padding) {
-      if (fio___md2html_escape_bq_fenced_code(renderer, e->text))
-        return renderer->err;
-    } else if (fio___md2html_escape_fenced_code(
-                   renderer,
-                   e->text,
-                   (size_t)(e->marker.buf - e->source.buf))) {
-      return renderer->err;
-    }
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</code></pre>\n");
-  case FIO_MD_HTML_BLOCK:
-    return fio___md2html_append(renderer,
-                                e->text.buf,
-                                e->text.len);
-  case FIO_MD_TABLE:
-    renderer->table_row = 0;
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<table>\n<thead>\n");
-  case FIO_MD_TABLE_ROW:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<tr>");
-  case FIO_MD_TABLE_CELL:
-    if (renderer->table_row == 0) {
-      if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<th"))
-        return renderer->err;
-    } else if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<td")) {
-      return renderer->err;
-    }
-    return fio___md2html_align_attr(renderer, e->align) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, ">");
-  case FIO_MD_EMPHASIS_STAR:
-  case FIO_MD_EMPHASIS_UNDERSCORE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<em>");
-  case FIO_MD_STRONG_STAR:
-  case FIO_MD_STRONG_UNDERSCORE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<strong>");
-  case FIO_MD_STRIKETHROUGH:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<del>");
-  case FIO_MD_LINK:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"") ||
-           fio___md2html_escape_reference_url(renderer,
-                                              e->destination,
-                                              e->reference) ||
-           fio___md2html_append_title(renderer, e->title) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "\">");
   }
-  return 0;
+
+  case FIO_GFM_CODE_BLOCK:
+    r->in_code_block = 1;
+    r->code_has_line = 0;
+    FIO___MD2HTML_LIT(r, "<pre><code");
+    if (e->info.len) {
+      const char *lang = e->info.buf;
+      size_t lang_len = e->info.len;
+      for (size_t i = 0; i < e->info.len; ++i) {
+        if (e->info.buf[i] == ' ' || e->info.buf[i] == '\t') {
+          lang_len = i;
+          break;
+        }
+      }
+      if (lang_len) {
+        FIO___MD2HTML_LIT(r, " class=\"language-");
+        fio___md2html_escape_md_text(r, lang, lang_len);
+        FIO___MD2HTML_LIT(r, "\"");
+      }
+    }
+    FIO___MD2HTML_LIT(r, ">");
+    return 0;
+
+  case FIO_GFM_HTML_BLOCK:
+    r->in_html_block = 1;
+    return 0;
+
+  case FIO_GFM_TABLE:
+    if (r->tight_depth && r->block_container_depth == 0 && r->tight_child_pending)
+      FIO___MD2HTML_LIT(r, "\n");
+    r->table_row = 0;
+    FIO___MD2HTML_LIT(r, "<table><thead>");
+    ++r->block_container_depth;
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_TABLE_ROW:
+    if (r->table_row == 1)
+      FIO___MD2HTML_LIT(r, "<tbody>");
+    FIO___MD2HTML_LIT(r, "<tr>");
+    return 0;
+
+  case FIO_GFM_TABLE_CELL:
+    ++r->table_cell_depth;
+    if (r->table_row == 0)
+      FIO___MD2HTML_LIT(r, "<th");
+    else
+      FIO___MD2HTML_LIT(r, "<td");
+    switch (e->align) {
+    case FIO_GFM_ALIGN_LEFT:   FIO___MD2HTML_LIT(r, " align=\"left\"");   break;
+    case FIO_GFM_ALIGN_RIGHT:  FIO___MD2HTML_LIT(r, " align=\"right\"");  break;
+    case FIO_GFM_ALIGN_CENTER: FIO___MD2HTML_LIT(r, " align=\"center\""); break;
+    default: break;
+    }
+    FIO___MD2HTML_LIT(r, ">");
+    return 0;
+
+  case FIO_GFM_EMPHASIS:
+    FIO___MD2HTML_LIT(r, "<em>");
+    return 0;
+
+  case FIO_GFM_STRONG:
+    FIO___MD2HTML_LIT(r, "<strong>");
+    return 0;
+
+  case FIO_GFM_STRIKETHROUGH:
+    FIO___MD2HTML_LIT(r, "<del>");
+    return 0;
+
+  case FIO_GFM_LINK:
+    FIO___MD2HTML_LIT(r, "<a href=\"");
+    fio___md2html_escape_md_url(r, e->destination.buf, e->destination.len);
+    FIO___MD2HTML_LIT(r, "\"");
+    if (e->title.len) {
+      FIO___MD2HTML_LIT(r, " title=\"");
+      fio___md2html_escape_md_text(r, e->title.buf, e->title.len);
+      FIO___MD2HTML_LIT(r, "\"");
+    }
+    FIO___MD2HTML_LIT(r, ">");
+    return 0;
+
+  default:
+    return 0;
+  }
 }
 
-FIO_SFUNC int fio___md2html_pop(fio_md_event_s *e) {
-  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
-  if (renderer->err)
-    return renderer->err;
+FIO_IFUNC int fio___md2html_pop(fio_gfm_event_s *e) {
+  fio___md2html_renderer_s *r = (fio___md2html_renderer_s *)e->udata;
+  if (r->err)
+    return r->err;
+
   switch (e->type) {
-  case FIO_MD_PARAGRAPH:
-    if (renderer->paragraph_suppressed_depth) {
-      --renderer->paragraph_suppressed_depth;
+  case FIO_GFM_PARAGRAPH:
+    if (r->para_suppress) {
+      --r->para_suppress;
       return 0;
     }
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</p>\n");
-  case FIO_MD_HEADING:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</h") ||
-           fio___md2html_append_u(renderer, e->heading_level) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, ">\n");
-  case FIO_MD_BLOCKQUOTE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</blockquote>\n");
-  case FIO_MD_LIST_UNORDERED:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</ul>\n");
-  case FIO_MD_LIST_ORDERED:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</ol>\n");
-  case FIO_MD_LIST_ITEM:
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "</li>\n"))
-      return renderer->err;
-    if ((e->flags & FIO_MD_F_TIGHT) &&
-        renderer->tight_list_item_depth)
-      --renderer->tight_list_item_depth;
+    FIO___MD2HTML_LIT(r, "</p>");
     return 0;
-  case FIO_MD_TABLE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</tbody>\n</table>\n");
-  case FIO_MD_TABLE_ROW:
-    if (renderer->table_row++ == 0)
-      return FIO___MD2HTML_APPEND_LITERAL(renderer,
-                                          "</tr>\n</thead>\n<tbody>\n");
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</tr>\n");
-  case FIO_MD_TABLE_CELL:
-    return (renderer->table_row == 0)
-               ? FIO___MD2HTML_APPEND_LITERAL(renderer, "</th>")
-               : FIO___MD2HTML_APPEND_LITERAL(renderer, "</td>");
-  case FIO_MD_EMPHASIS_STAR:
-  case FIO_MD_EMPHASIS_UNDERSCORE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</em>");
-  case FIO_MD_STRONG_STAR:
-  case FIO_MD_STRONG_UNDERSCORE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</strong>");
-  case FIO_MD_STRIKETHROUGH:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</del>");
-  case FIO_MD_LINK:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>");
-  case FIO_MD_THEMATIC_BREAK:
-  case FIO_MD_CODE_INDENTED:
-  case FIO_MD_CODE_FENCED:
-  case FIO_MD_HTML_BLOCK: return 0;
+
+  case FIO_GFM_HEADING:
+    FIO___MD2HTML_LIT(r, "</h");
+    fio___md2html_append_u(r, e->heading_level);
+    FIO___MD2HTML_LIT(r, ">");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
+    return 0;
+
+  case FIO_GFM_THEMATIC_BREAK:
+    return 0;
+
+  case FIO_GFM_BLOCKQUOTE:
+    FIO___MD2HTML_LIT(r, "</blockquote>");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
+    return 0;
+
+  case FIO_GFM_LIST_UNORDERED:
+    FIO___MD2HTML_LIT(r, "</ul>");
+    r->tight_child_pending = 1;
+    return 0;
+
+  case FIO_GFM_LIST_ORDERED:
+    FIO___MD2HTML_LIT(r, "</ol>");
+    r->tight_child_pending = 1;
+    return 0;
+
+  case FIO_GFM_LIST_ITEM: {
+    uint8_t was_tight = 0;
+    FIO___MD2HTML_LIT(r, "</li>");
+    if (r->li_depth) {
+      --r->li_depth;
+      if (r->li_depth < sizeof(r->li_tight))
+        was_tight = r->li_tight[r->li_depth];
+    }
+    if (was_tight && r->tight_depth)
+      --r->tight_depth;
+    r->tight_child_pending = 0;
+    return 0;
   }
-  return 0;
+
+  case FIO_GFM_CODE_BLOCK:
+    if (r->code_has_line)
+      FIO___MD2HTML_LIT(r, "\n");
+    FIO___MD2HTML_LIT(r, "</code></pre>");
+    r->in_code_block = 0;
+    r->code_has_line = 0;
+    return 0;
+
+  case FIO_GFM_HTML_BLOCK:
+    r->in_html_block = 0;
+    return 0;
+
+  case FIO_GFM_TABLE:
+    if (r->table_row > 1)
+      FIO___MD2HTML_LIT(r, "</tbody>");
+    FIO___MD2HTML_LIT(r, "</table>");
+    if (r->block_container_depth)
+      --r->block_container_depth;
+    r->tight_child_pending = 1;
+    return 0;
+
+  case FIO_GFM_TABLE_ROW:
+    FIO___MD2HTML_LIT(r, "</tr>");
+    if (r->table_row++ == 0)
+      FIO___MD2HTML_LIT(r, "</thead>");
+    return 0;
+
+  case FIO_GFM_TABLE_CELL:
+    if (r->table_row == 0)
+      FIO___MD2HTML_LIT(r, "</th>");
+    else
+      FIO___MD2HTML_LIT(r, "</td>");
+    if (r->table_cell_depth)
+      --r->table_cell_depth;
+    return 0;
+
+  case FIO_GFM_EMPHASIS:
+    FIO___MD2HTML_LIT(r, "</em>");
+    return 0;
+
+  case FIO_GFM_STRONG:
+    FIO___MD2HTML_LIT(r, "</strong>");
+    return 0;
+
+  case FIO_GFM_STRIKETHROUGH:
+    FIO___MD2HTML_LIT(r, "</del>");
+    return 0;
+
+  case FIO_GFM_LINK:
+    FIO___MD2HTML_LIT(r, "</a>");
+    return 0;
+
+  default:
+    return 0;
+  }
 }
 
-FIO_SFUNC int fio___md2html_text(fio_md_event_s *e) {
-  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
-  if (renderer->err)
-    return renderer->err;
+FIO_IFUNC int fio___md2html_write(fio_gfm_event_s *e) {
+  fio___md2html_renderer_s *r = (fio___md2html_renderer_s *)e->udata;
+  if (r->err)
+    return r->err;
+
   switch (e->type) {
-  case FIO_MD_TEXT:
-    return fio___md2html_escape_text(renderer, e->text);
-  case FIO_MD_SOFT_BREAK:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "\n");
-  case FIO_MD_HARD_BREAK:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<br />\n");
-  case FIO_MD_CODE_SPAN:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<code>") ||
-           fio___md2html_escape_code_span(renderer, e->text) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "</code>");
-  case FIO_MD_IMAGE:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<img src=\"") ||
-           fio___md2html_escape_attr(renderer, e->destination) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "\" alt=\"") ||
-           fio___md2html_escape_attr(renderer, e->text) ||
-           fio___md2html_append_title(renderer, e->title) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "\">");
-  case FIO_MD_AUTOLINK:
-    return FIO___MD2HTML_APPEND_LITERAL(renderer, "<a href=\"") ||
-           fio___md2html_escape_attr(renderer, e->destination) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "\">") ||
-           fio___md2html_escape_text(renderer, e->destination) ||
-           FIO___MD2HTML_APPEND_LITERAL(renderer, "</a>");
-  case FIO_MD_INLINE_HTML:
-    return fio___md2html_append(renderer,
-                                e->source.buf,
-                                e->source.len);
-  case FIO_MD_ESCAPE:
-    return fio___md2html_escape_text(renderer, e->text);
-  case FIO_MD_ENTITY:
-    return fio___md2html_append(renderer,
-                                e->source.buf,
-                                e->source.len);
-  case FIO_MD_FOOTNOTE_REF:
-    return fio___md2html_append_footnote_ref(renderer, e->reference);
-  }
-  return 0;
-}
-
-FIO_SFUNC void fio___md2html_error(fio_md_event_s *e) {
-  fio___md2html_s *renderer = (fio___md2html_s *)e->udata;
-  if (!renderer->err)
-    renderer->err = e->err;
-  renderer->consumed = e->consumed;
-}
-
-FIO_IFUNC int fio___md2html_ends_with(char *s,
-                                      size_t len,
-                                      const char *suffix,
-                                      size_t suffix_len) {
-  return len >= suffix_len &&
-         FIO_MEMCMP(s + len - suffix_len, suffix, suffix_len) == 0;
-}
-
-FIO_SFUNC int fio___md2html_render_footnotes(fio___md2html_s *renderer) {
-  if (!renderer->footnote_use_count || renderer->rendering_footnotes)
+  case FIO_GFM_TEXT:
+    if (r->in_code_block) {
+      if (r->code_has_line)
+        FIO___MD2HTML_LIT(r, "\n");
+      r->code_has_line = 1;
+      if (e->padding) {
+        char spaces[8] = {0};
+        size_t n = e->padding < 8 ? e->padding : 8;
+        memset(spaces, ' ', n);
+        fio___md2html_append(r, spaces, n);
+      }
+      fio___md2html_escape(r, e->text.buf, e->text.len);
+      return 0;
+    }
+    if (r->in_html_block) {
+      if (e->text.len)
+        fio___md2html_append_tagfiltered(r, e->text.buf, e->text.len, 1);
+      FIO___MD2HTML_LIT(r, "\n");
+      return 0;
+    }
+    if (r->li_depth) {
+      uint32_t li = r->li_depth - 1;
+      if (li < sizeof(r->li_tight) && r->li_tight[li] &&
+          r->block_container_depth == r->li_block_base[li]) {
+        if (r->tight_child_pending)
+          FIO___MD2HTML_LIT(r, "\n");
+        r->tight_child_pending = 1;
+      }
+    }
+    fio___md2html_escape(r, e->text.buf, e->text.len);
     return 0;
-  renderer->rendering_footnotes = 1;
-  if (FIO___MD2HTML_APPEND_LITERAL(renderer,
-                                   "<section class=\"footnotes\" "
-                                   "data-footnotes>\n<ol>\n"))
-    return renderer->err;
-  for (uint16_t idx = 1; idx <= renderer->footnote_use_count; ++idx) {
-    fio___md2html_footnote_s *note = NULL;
-    char *normalized = NULL;
-    char *body = NULL;
-    size_t body_len = 0;
-    for (uint16_t i = 0; i < renderer->footnote_count; ++i) {
-      if (renderer->footnotes[i].index == idx) {
-        note = renderer->footnotes + i;
-        break;
+
+  case FIO_GFM_SOFT_BREAK:
+    FIO___MD2HTML_LIT(r, "\n");
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_HARD_BREAK:
+    FIO___MD2HTML_LIT(r, "<br />\n");
+    r->tight_child_pending = 0;
+    return 0;
+
+  case FIO_GFM_CODE_SPAN: {
+    FIO___MD2HTML_LIT(r, "<code>");
+    const char *cs = e->text.buf;
+    const char *ce = cs + e->text.len;
+    const char *mark = cs;
+    while (cs < ce) {
+      if (r->table_cell_depth && *cs == '\\' && cs + 1 < ce && cs[1] == '|') {
+        fio___md2html_escape(r, mark, (size_t)(cs - mark));
+        fio___md2html_append(r, "|", 1);
+        cs += 2;
+        mark = cs;
+        continue;
+      }
+      if (*cs == '\n' || *cs == '\r') {
+        fio___md2html_escape(r, mark, (size_t)(cs - mark));
+        fio___md2html_append(r, " ", 1);
+        cs += (*cs == '\r' && cs + 1 < ce && cs[1] == '\n') ? 2 : 1;
+        mark = cs;
+      } else {
+        ++cs;
       }
     }
-    if (!note)
-      continue;
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "<li id=\"") ||
-        fio___md2html_append_footnote_id(renderer, "fn-", note->label) ||
-        FIO___MD2HTML_APPEND_LITERAL(renderer, "\">\n"))
-      return renderer->err;
-    normalized = fio___md2html_normalize_footnote(note);
-    if (!normalized) {
-      renderer->err = FIO_MD2HTML_ERR_ALLOC;
-      return renderer->err;
-    }
-    body =
-        fio_md2html(NULL, FIO_BUF_INFO2(normalized, fio_bstr_len(normalized)));
-    fio_bstr_free(normalized);
-    if (!body) {
-      renderer->err = FIO_MD2HTML_ERR_ALLOC;
-      return renderer->err;
-    }
-    body_len = fio_bstr_len(body);
-    if (fio___md2html_ends_with(body, body_len, "</p>\n", 5)) {
-      if (fio___md2html_append(renderer, body, body_len - 5) ||
-          FIO___MD2HTML_APPEND_LITERAL(renderer, " ") ||
-          fio___md2html_append_backrefs(renderer, note) ||
-          FIO___MD2HTML_APPEND_LITERAL(renderer, "</p>\n")) {
-        fio_bstr_free(body);
-        return renderer->err;
-      }
-    } else {
-      if (fio___md2html_append(renderer, body, body_len) ||
-          fio___md2html_append_backrefs(renderer, note) ||
-          FIO___MD2HTML_APPEND_LITERAL(renderer, "\n")) {
-        fio_bstr_free(body);
-        return renderer->err;
-      }
-    }
-    fio_bstr_free(body);
-    if (FIO___MD2HTML_APPEND_LITERAL(renderer, "</li>\n"))
-      return renderer->err;
+    fio___md2html_escape(r, mark, (size_t)(ce - mark));
+    FIO___MD2HTML_LIT(r, "</code>");
+    return 0;
   }
-  return FIO___MD2HTML_APPEND_LITERAL(renderer, "</ol>\n</section>\n");
+
+  case FIO_GFM_IMAGE:
+    FIO___MD2HTML_LIT(r, "<img src=\"");
+    fio___md2html_escape_md_url(r, e->destination.buf, e->destination.len);
+    FIO___MD2HTML_LIT(r, "\" alt=\"");
+    fio___md2html_escape_alt_text(r, e->text.buf, e->text.len);
+    FIO___MD2HTML_LIT(r, "\"");
+    if (e->title.len) {
+      FIO___MD2HTML_LIT(r, " title=\"");
+      fio___md2html_escape_md_text(r, e->title.buf, e->title.len);
+      FIO___MD2HTML_LIT(r, "\"");
+    }
+    FIO___MD2HTML_LIT(r, " />");
+    return 0;
+
+  case FIO_GFM_AUTOLINK: {
+    int is_email = 0, has_colon = 0;
+    for (size_t i = 0; i < e->destination.len; ++i) {
+      is_email |= (e->destination.buf[i] == '@');
+      has_colon |= (e->destination.buf[i] == ':');
+    }
+    FIO___MD2HTML_LIT(r, "<a href=\"");
+    if (is_email && !has_colon)
+      FIO___MD2HTML_LIT(r, "mailto:");
+    else if (e->destination.len >= 4 &&
+             (e->destination.buf[0] == 'w' || e->destination.buf[0] == 'W') &&
+             (e->destination.buf[1] == 'w' || e->destination.buf[1] == 'W') &&
+             (e->destination.buf[2] == 'w' || e->destination.buf[2] == 'W') &&
+             e->destination.buf[3] == '.')
+      FIO___MD2HTML_LIT(r, "http://");
+    if (e->destination.len)
+      fio___md2html_escape_url(r, e->destination.buf, e->destination.len);
+    FIO___MD2HTML_LIT(r, "\">");
+    if (e->text.len)
+      fio___md2html_escape(r, e->text.buf, e->text.len);
+    FIO___MD2HTML_LIT(r, "</a>");
+    return 0;
+  }
+
+  case FIO_GFM_INLINE_HTML:
+    if (e->text.len)
+      fio___md2html_append_tagfiltered(r, e->text.buf, e->text.len, 0);
+    return 0;
+
+  default:
+    return 0;
+  }
 }
+
+/* ---------------------------------------------------------------------------
+ * Public API
+ * ------------------------------------------------------------------------- */
 
 SFUNC char *fio_md2html(char *bstr_target, fio_buf_info_s source) {
-  fio___md2html_s renderer = {0};
-  fio_md_callbacks_s callbacks = {
+  fio___md2html_renderer_s renderer = {0};
+  renderer.bstr = bstr_target;
+  if (!renderer.bstr) {
+    /* allocate storage for an empty bstr before parsing begins */
+    renderer.bstr = fio_bstr_reserve(NULL, 1);
+    if (!renderer.bstr)
+      return NULL;
+  }
+
+  fio_gfm_callbacks_s cb = {
       .push = fio___md2html_push,
-      .text = fio___md2html_text,
+      .write = fio___md2html_write,
       .pop = fio___md2html_pop,
-      .error = fio___md2html_error,
   };
-  size_t consumed;
-  renderer.html = fio_bstr_reserve(bstr_target, source.len ? source.len : 1);
-  if (FIO_UNLIKELY(!renderer.html))
-    return NULL;
-  fio___md2html_scan_footnotes(&renderer, source);
-  consumed = fio_md_parse(&callbacks, &renderer, source);
-  if (!renderer.err && consumed == source.len)
-    fio___md2html_render_footnotes(&renderer);
-  if (FIO_UNLIKELY(renderer.err || consumed != source.len)) {
+
+  size_t consumed = fio_gfm_parse(&cb, &renderer, source);
+  if (consumed != source.len || renderer.err) {
     if (!bstr_target)
-      fio_bstr_free(renderer.html);
+      fio_bstr_free(renderer.bstr);
     return NULL;
   }
-  return renderer.html;
+  return renderer.bstr;
 }
 
-#undef FIO___MD2HTML_APPEND_LITERAL
-
 #endif /* FIO_EXTERN_COMPLETE */
-#endif /* FIO_MD2HTML */
+#endif /* H___FIO_MD2HTML___H */

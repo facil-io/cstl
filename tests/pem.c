@@ -236,12 +236,9 @@ FIO_SFUNC void fio___pem_test_rsa_pkcs8_key(void) {
    * TLS 1.3 */
   if (result == 0) {
     FIO_ASSERT(key.type == FIO_PEM_KEY_RSA, "Key type should be RSA");
-    FIO_ASSERT(key.rsa.n != NULL && key.rsa.n_len > 0,
-               "RSA modulus (n) should be set");
-    FIO_ASSERT(key.rsa.e != NULL && key.rsa.e_len > 0,
-               "RSA exponent (e) should be set");
-    FIO_ASSERT(key.rsa.d != NULL && key.rsa.d_len > 0,
-               "RSA private exponent (d) should be set");
+    FIO_ASSERT(key.rsa.n_len > 0, "RSA modulus (n) should be set");
+    FIO_ASSERT(key.rsa.e_len > 0, "RSA exponent (e) should be set");
+    FIO_ASSERT(key.rsa.d_len > 0, "RSA private exponent (d) should be set");
     fprintf(
         stderr,
         "  - PKCS#8 RSA key parsing: OK (n_len=%zu, e_len=%zu, d_len=%zu)\n",
@@ -266,16 +263,11 @@ FIO_SFUNC void fio___pem_test_rsa_pkcs1_key(void) {
 
   if (result == 0) {
     FIO_ASSERT(key.type == FIO_PEM_KEY_RSA, "Key type should be RSA");
-    FIO_ASSERT(key.rsa.n != NULL && key.rsa.n_len > 0,
-               "RSA modulus (n) should be set");
-    FIO_ASSERT(key.rsa.e != NULL && key.rsa.e_len > 0,
-               "RSA exponent (e) should be set");
-    FIO_ASSERT(key.rsa.d != NULL && key.rsa.d_len > 0,
-               "RSA private exponent (d) should be set");
-    FIO_ASSERT(key.rsa.p != NULL && key.rsa.p_len > 0,
-               "RSA prime p should be set");
-    FIO_ASSERT(key.rsa.q != NULL && key.rsa.q_len > 0,
-               "RSA prime q should be set");
+    FIO_ASSERT(key.rsa.n_len > 0, "RSA modulus (n) should be set");
+    FIO_ASSERT(key.rsa.e_len > 0, "RSA exponent (e) should be set");
+    FIO_ASSERT(key.rsa.d_len > 0, "RSA private exponent (d) should be set");
+    FIO_ASSERT(key.rsa.p_len > 0, "RSA prime p should be set");
+    FIO_ASSERT(key.rsa.q_len > 0, "RSA prime q should be set");
     fprintf(
         stderr,
         "  - PKCS#1 RSA key parsing: OK (n_len=%zu, p_len=%zu, q_len=%zu)\n",

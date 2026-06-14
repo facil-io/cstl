@@ -344,8 +344,10 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
 
   /* do not allow master tasks to run in worker - pretend to stop. */
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+
   if (fio_atomic_or_fetch(&FIO___IO.stop, 2) != 2)
-    return;
+    goto faild_or_done;
+
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
@@ -371,6 +373,7 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
     }
   }
 
+faild_or_done:
   is_running = 0;
   (void)ignr_1, (void)ignr_2;
 }
@@ -446,6 +449,8 @@ SFUNC uint16_t fio_io_workers(int workers) {
     workers = (int)(cores / (0 - workers));
     workers += !workers;
   }
+  if (workers > 0x0FFF)
+    workers = 0x0FFF;
   return (uint16_t)workers;
 }
 
@@ -754,6 +759,8 @@ test_url:
   if (!url.port.buf && !url.scheme.buf) {
     static size_t port_counter = 3000;
     size_t port = fio_atomic_add(&port_counter, 1);
+    if (!port_counter | (port_counter > 65535ULL))
+      port = port_counter = 3000;
     if (port == 3000 && fio_sys_env("PORT")) {
       char *port_env = fio_sys_env("PORT");
       port = fio_atol(&port_env);

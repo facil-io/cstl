@@ -51,14 +51,21 @@ typedef struct {
   fio_io_tls_s *tls;
   uint8_t is_client;
   /* Certificate chain (DER-encoded) for server */
-  uint8_t *cert_der;
-  size_t cert_der_len;
-  /* Private key for server (P-256: 32-byte scalar, Ed25519: 32-byte seed) */
+  uint8_t *cert_der;  /* alias for first certificate (compat/debug) */
+  size_t cert_der_len; /* length of first certificate */
+  const uint8_t **cert_chain;
+  size_t *cert_chain_lens;
+  size_t cert_chain_count;
+  /* Private key for server (P-256: 32-byte scalar, Ed25519: 32-byte seed).
+   * RSA keys are too large for this buffer; use private_key_ext instead. */
   uint8_t private_key[32];
   /* Public key for P-256 signing (65 bytes: 0x04 || x || y) */
   uint8_t public_key[65];
   size_t private_key_len;
   uint16_t private_key_type;
+  /* Extended private key buffer for RSA (n + d encoded for the TLS layer). */
+  uint8_t *private_key_ext;
+  size_t private_key_ext_len;
   /* SNI hostname for client connections */
   char server_name[256];
   /* ALPN protocols (comma-separated) for server */
@@ -80,6 +87,78 @@ typedef struct {
 } fio___tls13_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
+
+/** Free DER certificate buffers owned by a context. */
+FIO_SFUNC void fio___tls13_context_cert_chain_free(
+    fio___tls13_context_s *ctx) {
+  if (!ctx)
+    return;
+  for (size_t i = 0; i < ctx->cert_chain_count; ++i)
+    FIO_MEM_FREE((void *)ctx->cert_chain[i], ctx->cert_chain_lens[i]);
+  if (ctx->cert_chain)
+    FIO_MEM_FREE((void *)ctx->cert_chain,
+                 ctx->cert_chain_count * sizeof(*ctx->cert_chain));
+  if (ctx->cert_chain_lens)
+    FIO_MEM_FREE(ctx->cert_chain_lens,
+                 ctx->cert_chain_count * sizeof(*ctx->cert_chain_lens));
+  ctx->cert_der = NULL;
+  ctx->cert_der_len = 0;
+  ctx->cert_chain = NULL;
+  ctx->cert_chain_lens = NULL;
+  ctx->cert_chain_count = 0;
+}
+
+/** Add an owned DER certificate buffer to a context chain. */
+FIO_SFUNC int fio___tls13_context_cert_chain_add(
+    fio___tls13_context_s *ctx,
+    uint8_t *der_buf,
+    size_t der_len) {
+  if (!ctx || !der_buf || !der_len)
+    return -1;
+  size_t old_count = ctx->cert_chain_count;
+  size_t new_count = old_count + 1;
+  const uint8_t **new_chain =
+      (const uint8_t **)FIO_MEM_REALLOC(NULL,
+                                        0,
+                                        new_count * sizeof(*ctx->cert_chain),
+                                        0);
+  size_t *new_lens =
+      (size_t *)FIO_MEM_REALLOC(NULL,
+                                0,
+                                new_count * sizeof(*ctx->cert_chain_lens),
+                                0);
+  if (!new_chain || !new_lens) {
+    if (new_chain)
+      FIO_MEM_FREE((void *)new_chain,
+                   new_count * sizeof(*ctx->cert_chain));
+    if (new_lens)
+      FIO_MEM_FREE(new_lens, new_count * sizeof(*ctx->cert_chain_lens));
+    FIO_MEM_FREE(der_buf, der_len);
+    return -1;
+  }
+  if (old_count) {
+    FIO_MEMCPY((void *)new_chain,
+               ctx->cert_chain,
+               old_count * sizeof(*ctx->cert_chain));
+    FIO_MEMCPY(new_lens,
+               ctx->cert_chain_lens,
+               old_count * sizeof(*ctx->cert_chain_lens));
+    FIO_MEM_FREE((void *)ctx->cert_chain,
+                 old_count * sizeof(*ctx->cert_chain));
+    FIO_MEM_FREE(ctx->cert_chain_lens,
+                 old_count * sizeof(*ctx->cert_chain_lens));
+  }
+  ctx->cert_chain = new_chain;
+  ctx->cert_chain_lens = new_lens;
+  ctx->cert_chain[old_count] = der_buf;
+  ctx->cert_chain_lens[old_count] = der_len;
+  ctx->cert_chain_count = new_count;
+  if (!old_count) {
+    ctx->cert_der = der_buf;
+    ctx->cert_der_len = der_len;
+  }
+  return 0;
+}
 
 /* *****************************************************************************
 TLS 1.3 Global System Trust Store Singleton
@@ -232,19 +311,34 @@ FIO_SFUNC int fio___tls13_make_self_signed(fio___tls13_context_s *ctx,
     return -1;
   }
 
-  ctx->cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
-  if (!ctx->cert_der) {
+  uint8_t *cert_tmp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_size, 0);
+  if (!cert_tmp) {
     FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
     fio_x509_keypair_clear(&keypair);
     return -1;
   }
 
-  ctx->cert_der_len =
-      fio_x509_self_signed_cert(ctx->cert_der, cert_size, &keypair, &opts);
-  if (ctx->cert_der_len == 0) {
+  size_t cert_der_len =
+      fio_x509_self_signed_cert(cert_tmp, cert_size, &keypair, &opts);
+  if (cert_der_len == 0) {
     FIO_LOG_ERROR("TLS 1.3: failed to generate self-signed certificate");
-    FIO_MEM_FREE(ctx->cert_der, cert_size);
-    ctx->cert_der = NULL;
+    FIO_MEM_FREE(cert_tmp, cert_size);
+    fio_x509_keypair_clear(&keypair);
+    return -1;
+  }
+
+  uint8_t *cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_der_len, 0);
+  if (!cert_der) {
+    FIO_LOG_ERROR("TLS 1.3: failed to allocate exact certificate buffer");
+    FIO_MEM_FREE(cert_tmp, cert_size);
+    fio_x509_keypair_clear(&keypair);
+    return -1;
+  }
+  FIO_MEMCPY(cert_der, cert_tmp, cert_der_len);
+  FIO_MEM_FREE(cert_tmp, cert_size);
+
+  if (fio___tls13_context_cert_chain_add(ctx, cert_der, cert_der_len) != 0) {
+    FIO_LOG_ERROR("TLS 1.3: failed to store self-signed certificate");
     fio_x509_keypair_clear(&keypair);
     return -1;
   }
@@ -299,6 +393,45 @@ FIO_SFUNC int fio___tls13_each_alpn(struct fio_io_tls_each_s *e,
   return 0;
 }
 
+#if defined(H___FIO_PEM___H) && defined(H___FIO_X509___H)
+/** Load all CERTIFICATE PEM blocks from a file buffer into ctx->cert_chain. */
+FIO_SFUNC int fio___tls13_load_cert_pem_chain(fio___tls13_context_s *ctx,
+                                              const char *pem_data,
+                                              size_t pem_len) {
+  int loaded = 0;
+  const char *pos = pem_data;
+  size_t remaining = pem_len;
+
+  while (remaining > 0) {
+    uint8_t tmp_der[16384];
+    fio_pem_s pem_block;
+    size_t consumed =
+        fio_pem_parse(&pem_block, tmp_der, sizeof(tmp_der), pos, remaining);
+    if (consumed == 0)
+      break;
+
+    if (pem_block.label_len == 11 &&
+        FIO_MEMCMP(pem_block.label, "CERTIFICATE", 11) == 0 &&
+        pem_block.der_len > 0) {
+      uint8_t *der_buf =
+          (uint8_t *)FIO_MEM_REALLOC(NULL, 0, pem_block.der_len, 0);
+      if (!der_buf)
+        return (loaded > 0) ? loaded : -1;
+      FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
+      if (fio___tls13_context_cert_chain_add(ctx,
+                                             der_buf,
+                                             pem_block.der_len) != 0)
+        return (loaded > 0) ? loaded : -1;
+      ++loaded;
+    }
+
+    pos += consumed;
+    remaining -= consumed;
+  }
+  return loaded;
+}
+#endif /* H___FIO_PEM___H && H___FIO_X509___H */
+
 /** Callback for iterating certificates in fio_io_tls_s */
 FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
                                     const char *server_name,
@@ -330,28 +463,14 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
       goto use_self_signed;
     }
 
-    /* Allocate buffer for DER-encoded certificate */
+    /* Load every CERTIFICATE block so servers send the full chain. */
     size_t cert_pem_len = fio_bstr_len(cert_pem);
-    size_t der_buf_len = cert_pem_len; /* Conservative estimate */
-    ctx->cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_buf_len, 0);
-    if (!ctx->cert_der) {
-      FIO_LOG_ERROR("TLS 1.3: failed to allocate certificate buffer");
-      fio_bstr_free(cert_pem);
-      fio_bstr_free(key_pem);
-      return -1;
-    }
-
-    /* Extract DER from PEM */
-    ctx->cert_der_len = fio_pem_get_certificate_der(ctx->cert_der,
-                                                    der_buf_len,
-                                                    cert_pem,
-                                                    cert_pem_len);
+    int certs_loaded =
+        fio___tls13_load_cert_pem_chain(ctx, cert_pem, cert_pem_len);
     fio_bstr_free(cert_pem);
 
-    if (ctx->cert_der_len == 0) {
+    if (certs_loaded <= 0) {
       FIO_LOG_ERROR("TLS 1.3: failed to parse certificate PEM");
-      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
-      ctx->cert_der = NULL;
       fio_bstr_free(key_pem);
       goto use_self_signed;
     }
@@ -361,9 +480,7 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
     size_t key_pem_len = fio_bstr_len(key_pem);
     if (fio_pem_parse_private_key(&pkey, key_pem, key_pem_len) != 0) {
       FIO_LOG_ERROR("TLS 1.3: failed to parse private key PEM");
-      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
-      ctx->cert_der = NULL;
-      ctx->cert_der_len = 0;
+      fio___tls13_context_cert_chain_free(ctx);
       fio_bstr_free(key_pem);
       goto use_self_signed;
     }
@@ -385,9 +502,7 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
 #else
         FIO_LOG_ERROR("TLS 1.3: P-256 module required for key derivation");
         fio_pem_private_key_clear(&pkey);
-        FIO_MEM_FREE(ctx->cert_der, der_buf_len);
-        ctx->cert_der = NULL;
-        ctx->cert_der_len = 0;
+        fio___tls13_context_cert_chain_free(ctx);
         goto use_self_signed;
 #endif
       }
@@ -403,28 +518,65 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
       FIO_LOG_DEBUG2("TLS 1.3: loaded Ed25519 private key from PEM");
       break;
 
-    case FIO_PEM_KEY_RSA:
-      /* RSA signing not yet supported in TLS 1.3 implementation */
-      FIO_LOG_WARNING(
-          "TLS 1.3: RSA private keys not yet supported for signing");
+    case FIO_PEM_KEY_RSA: {
+#if defined(H___FIO_RSA___H)
+      /* Encode the RSA private key in the format expected by the TLS 1.3
+       * server: [n_len:4][n:n_len][d_len:4][d:d_len]. */
+      if (!pkey.rsa.n_len || !pkey.rsa.d_len ||
+          pkey.rsa.n_len > FIO_RSA_MAX_BYTES ||
+          pkey.rsa.d_len > FIO_RSA_MAX_BYTES) {
+        FIO_LOG_ERROR("TLS 1.3: RSA private key has invalid lengths");
+        fio_pem_private_key_clear(&pkey);
+        fio___tls13_context_cert_chain_free(ctx);
+        goto use_self_signed;
+      }
+      size_t encoded_len = 8 + pkey.rsa.n_len + pkey.rsa.d_len;
+      uint8_t *encoded =
+          (uint8_t *)FIO_MEM_REALLOC(NULL, 0, encoded_len, 0);
+      if (!encoded) {
+        FIO_LOG_ERROR("TLS 1.3: failed to allocate RSA private key buffer");
+        fio_pem_private_key_clear(&pkey);
+        fio___tls13_context_cert_chain_free(ctx);
+        goto use_self_signed;
+      }
+      encoded[0] = (uint8_t)(pkey.rsa.n_len >> 24);
+      encoded[1] = (uint8_t)(pkey.rsa.n_len >> 16);
+      encoded[2] = (uint8_t)(pkey.rsa.n_len >> 8);
+      encoded[3] = (uint8_t)(pkey.rsa.n_len);
+      FIO_MEMCPY(encoded + 4, pkey.rsa.n, pkey.rsa.n_len);
+      size_t d_offset = 4 + pkey.rsa.n_len;
+      encoded[d_offset + 0] = (uint8_t)(pkey.rsa.d_len >> 24);
+      encoded[d_offset + 1] = (uint8_t)(pkey.rsa.d_len >> 16);
+      encoded[d_offset + 2] = (uint8_t)(pkey.rsa.d_len >> 8);
+      encoded[d_offset + 3] = (uint8_t)(pkey.rsa.d_len);
+      FIO_MEMCPY(encoded + d_offset + 4, pkey.rsa.d, pkey.rsa.d_len);
+
+      ctx->private_key_ext = encoded;
+      ctx->private_key_ext_len = encoded_len;
+      ctx->private_key_len = 0;
+      ctx->private_key_type = FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256;
+      FIO_LOG_DEBUG2("TLS 1.3: loaded RSA private key from PEM (n=%zu)",
+                     pkey.rsa.n_len);
+      break;
+#else
+      FIO_LOG_ERROR(
+          "TLS 1.3: RSA private key loaded but RSA module not available");
       fio_pem_private_key_clear(&pkey);
-      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
-      ctx->cert_der = NULL;
-      ctx->cert_der_len = 0;
+      fio___tls13_context_cert_chain_free(ctx);
       goto use_self_signed;
+#endif
+    }
 
     default:
       FIO_LOG_ERROR("TLS 1.3: unsupported private key type");
       fio_pem_private_key_clear(&pkey);
-      FIO_MEM_FREE(ctx->cert_der, der_buf_len);
-      ctx->cert_der = NULL;
-      ctx->cert_der_len = 0;
+      fio___tls13_context_cert_chain_free(ctx);
       goto use_self_signed;
     }
 
     fio_pem_private_key_clear(&pkey);
-    FIO_LOG_DEBUG2("TLS 1.3: certificate loaded successfully (%zu bytes)",
-                   ctx->cert_der_len);
+    FIO_LOG_DEBUG2("TLS 1.3: loaded %d certificate(s) from PEM chain",
+                   certs_loaded);
     (void)pk_password;
     (void)server_name;
     return 0;
@@ -852,8 +1004,13 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
 
 error:
   if (ctx) {
-    if (ctx->cert_der)
-      FIO_MEM_FREE(ctx->cert_der, ctx->cert_der_len);
+    fio___tls13_context_cert_chain_free(ctx);
+    if (ctx->private_key_ext) {
+      fio_secure_zero(ctx->private_key_ext, ctx->private_key_ext_len);
+      FIO_MEM_FREE(ctx->private_key_ext, ctx->private_key_ext_len);
+      ctx->private_key_ext = NULL;
+      ctx->private_key_ext_len = 0;
+    }
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
     /* Only free DER buffers when this context owns them (trust_der_owned=1).
      * When trust_der_owned=0 the arrays are the global system trust singleton
@@ -886,9 +1043,14 @@ FIO_SFUNC void fio___tls13_free_context_task(void *tls_ctx, void *ignr_) {
   if (!ctx)
     return;
   FIO_LEAK_COUNTER_ON_FREE(fio___tls13_context_s);
-  if (ctx->cert_der)
-    FIO_MEM_FREE(ctx->cert_der, ctx->cert_der_len);
+  fio___tls13_context_cert_chain_free(ctx);
   fio_secure_zero(ctx->private_key, sizeof(ctx->private_key));
+  if (ctx->private_key_ext) {
+    fio_secure_zero(ctx->private_key_ext, ctx->private_key_ext_len);
+    FIO_MEM_FREE(ctx->private_key_ext, ctx->private_key_ext_len);
+    ctx->private_key_ext = NULL;
+    ctx->private_key_ext_len = 0;
+  }
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
   /* Only free DER buffers when this context owns them (trust_der_owned=1).
    * When trust_der_owned=0 the arrays are the global system trust singleton
@@ -1010,19 +1172,22 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
     /* Initialize server */
     fio_tls13_server_init(&conn->state.server);
 
-    /* Set certificate chain - use pointers stored in connection struct */
-    if (ctx->cert_der && ctx->cert_der_len > 0) {
-      /* Store cert pointer and length in connection for lifetime management */
-      conn->cert_ptr = ctx->cert_der;
-      conn->cert_len = ctx->cert_der_len;
+    /* Set certificate chain loaded into the context. */
+    if (ctx->cert_chain && ctx->cert_chain_count > 0) {
       fio_tls13_server_set_cert_chain(&conn->state.server,
-                                      &conn->cert_ptr,
-                                      &conn->cert_len,
-                                      1);
+                                      ctx->cert_chain,
+                                      ctx->cert_chain_lens,
+                                      ctx->cert_chain_count);
     }
 
     /* Set private key */
-    if (ctx->private_key_len > 0) {
+    if (ctx->private_key_type == FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256 &&
+        ctx->private_key_ext) {
+      fio_tls13_server_set_private_key(&conn->state.server,
+                                       ctx->private_key_ext,
+                                       ctx->private_key_ext_len,
+                                       ctx->private_key_type);
+    } else if (ctx->private_key_len > 0) {
       fio_tls13_server_set_private_key(&conn->state.server,
                                        ctx->private_key,
                                        ctx->private_key_len,

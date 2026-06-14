@@ -356,8 +356,8 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_MD2HTML)
-#undef FIO_MARKDOWN
-#define FIO_MARKDOWN
+#undef FIO_GFM
+#define FIO_GFM
 #undef FIO_STR
 #define FIO_STR
 #endif

@@ -146,6 +146,51 @@ FIO_SFUNC void fio___test_tls13_io_tls_config(void) {
 }
 
 /* *****************************************************************************
+Test: Certificate PEM Path Loads Full Chain
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_tls13_io_cert_chain_path(void) {
+  const char *chain_path = "./tmp/tls13-chain-cert.pem";
+  char *cert_pem = fio_bstr_readfile(NULL, "./test-cert.pem", 0, 0);
+  char *key_pem = fio_bstr_readfile(NULL, "./test-key.pem", 0, 0);
+  FIO_ASSERT(cert_pem, "test certificate path should exist");
+  FIO_ASSERT(key_pem, "test private key path should exist");
+
+  FILE *f = fopen(chain_path, "wb");
+  FIO_ASSERT(f, "temporary chain certificate path should be writable");
+  size_t cert_len = fio_bstr_len(cert_pem);
+  FIO_ASSERT(fwrite(cert_pem, 1, cert_len, f) == cert_len,
+             "first certificate write should succeed");
+  if (cert_len && cert_pem[cert_len - 1] != '\n')
+    FIO_ASSERT(fputc('\n', f) != EOF, "certificate separator write failed");
+  FIO_ASSERT(fwrite(cert_pem, 1, cert_len, f) == cert_len,
+             "second certificate write should succeed");
+  FIO_ASSERT(fclose(f) == 0, "temporary chain certificate close failed");
+
+  fio_io_tls_s *tls = fio_io_tls_new();
+  FIO_ASSERT(tls, "fio_io_tls_new should return non-NULL");
+  fio_io_tls_cert_add(tls, "localhost", chain_path, "./test-key.pem", NULL);
+
+  fio_io_functions_s funcs = fio_tls13_io_functions();
+  fio___tls13_context_s *ctx =
+      (fio___tls13_context_s *)funcs.build_context(tls, 0);
+  FIO_ASSERT(ctx, "build_context should load certificate path");
+  FIO_ASSERT(ctx->cert_chain_count == 2,
+             "certificate path should load all PEM certificates, got %zu",
+             ctx->cert_chain_count);
+  FIO_ASSERT(ctx->cert_chain && ctx->cert_chain_lens,
+             "certificate chain arrays should be populated");
+  FIO_ASSERT(ctx->cert_chain[0] && ctx->cert_chain[1],
+             "certificate chain entries should be populated");
+
+  funcs.free_context(ctx);
+  fio_io_tls_free(tls);
+  fio_bstr_free(cert_pem);
+  fio_bstr_free(key_pem);
+  remove(chain_path);
+}
+
+/* *****************************************************************************
 Test: Multiple Context Creation
 ***************************************************************************** */
 
@@ -431,6 +476,7 @@ void fio___test_tls13_io(void) {
   fio___test_tls13_io_self_signed();
   fio___test_tls13_io_default_registration();
   fio___test_tls13_io_tls_config();
+  fio___test_tls13_io_cert_chain_path();
   fio___test_tls13_io_multiple_contexts();
   fio___test_tls13_io_handshake_unit();
   fio___test_tls13_io_handshake_p256();

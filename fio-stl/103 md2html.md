@@ -6,11 +6,11 @@
 ```
 
 `FIO_MD2HTML` provides a small Markdown / GFM to HTML renderer built on the
-`FIO_MARKDOWN` callback parser. The renderer accumulates output in `fio_bstr`.
+`FIO_GFM` callback parser. The renderer accumulates output in `fio_bstr`.
 
 Defining `FIO_MD2HTML` automatically enables its dependencies:
 
-- `FIO_MARKDOWN`
+- `FIO_GFM`
 - `FIO_STR` for `fio_bstr`
 
 ### API
@@ -33,8 +33,8 @@ to a non-NULL empty `fio_bstr` when allocation succeeds.
 - GFM tables render with `<thead>` for the first row and `<tbody>` for remaining
   rows.
 - GFM task-list items render disabled checkbox inputs.
-- GFM footnotes render with GitHub-compatible `footnote-ref`, `footnote-backref`, `fn-...`, and `fnref-...` markup.
 - Reference-link URLs are percent-encoded when the destination has no existing `%` escape.
+- Footnote references (`[^label]`) are currently passed through as plain text.
 
 ### Example
 

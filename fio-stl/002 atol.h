@@ -1073,8 +1073,9 @@ FIO_IFUNC long double fio___aton_pow10n(uint64_t e10) {
 #undef fio___aton_pow10_map_row
   if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
     return pow_map[e10];
-  return (long double)powl((long double)10,
-                           (long double)(0 - e10)); /* return zero? */
+  return (long double)powl(
+      (long double)10,
+      (long double)((long double)0 - e10)); /* return zero? */
 }
 
 FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
@@ -1159,17 +1160,17 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
       dbl_dot *= fio___aton_pow10n(dot_expo);
   } else if (base == 3) {
     dbl *= fio_u2d(1U, (int64_t)(head_expo << 2));
-    dbl_dot *= fio_u2d(1U, (int64_t)(0 - (dot_expo << 2)));
+    dbl_dot *= fio_u2d(1U, ((int64_t)0 - (dot_expo << 2)));
   } else { /* if (base == 1) */
     dbl *= fio_u2d(1U, (int64_t)(head_expo * 3));
-    dbl_dot *= fio_u2d(1U, (int64_t)(0 - (dot_expo * 3)));
+    dbl_dot *= fio_u2d(1U, ((int64_t)0 - (dot_expo * 3)));
   }
   dbl += dbl_dot;
   if (expo) {
     if (base < 2) { /* base 10 / Oct */
       dbl *= (expo_neg ? fio___aton_pow10n : fio___aton_pow10)(expo);
     } else {
-      dbl *= fio_u2d(1U, (int64_t)(expo_neg ? 0 - expo : expo));
+      dbl *= fio_u2d(1U, (expo_neg ? (int64_t)0 - expo : (int64_t)expo));
     }
   }
   r.is_float = 1;

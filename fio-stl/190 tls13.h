@@ -6665,6 +6665,74 @@ FIO_SFUNC int fio___tls13_build_certificate(fio_tls13_server_s *server,
 }
 
 /* Internal: Build CertificateVerify message */
+/**
+ * Parse the RSA private key structure stored in server->private_key.
+ *
+ * The minimum format is:
+ *   [n_len:4][n:n_len][d_len:4][d:d_len]
+ *
+ * An extended format may append, in order:
+ *   [e_len:4][e:e_len][p_len:4][p:p_len][q_len:4][q:q_len]
+ *   [dP_len:4][dP:dP_len][dQ_len:4][dQ:dQ_len][qInv_len:4][qInv:qInv_len]
+ *
+ * Missing optional fields are left as NULL / zero length.
+ */
+FIO_SFUNC int fio___tls13_parse_rsa_private_key(fio_rsa_privkey_s *key,
+                                                const uint8_t *pk,
+                                                size_t pk_len) {
+  const uint8_t *start = pk;
+
+  if (!key || !pk || pk_len < 8)
+    return -1;
+
+  FIO_MEMSET(key, 0, sizeof(*key));
+
+  uint32_t n_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
+                   ((uint32_t)pk[2] << 8) | pk[3];
+  pk += 4;
+  if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
+    return -1;
+  if ((size_t)(pk - start) + n_len + 4 > pk_len)
+    return -1;
+  key->n = pk;
+  key->n_len = n_len;
+  pk += n_len;
+
+  uint32_t d_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
+                   ((uint32_t)pk[2] << 8) | pk[3];
+  pk += 4;
+  if (d_len > FIO_RSA_MAX_BYTES)
+    return -1;
+  if ((size_t)(pk - start) + d_len > pk_len)
+    return -1;
+  key->d = pk;
+  key->d_len = d_len;
+  pk += d_len;
+
+  /* Optional fields.  Each is [len:4][data:len]; if the buffer ends here the
+   * field is absent and the remaining code leaves the pointer NULL. */
+  const uint8_t **fields[] = {&key->e,   &key->p,   &key->q,
+                              &key->dP,  &key->dQ,  &key->qInv};
+  size_t *lens[] = {&key->e_len,   &key->p_len,   &key->q_len,
+                    &key->dP_len,  &key->dQ_len,  &key->qInv_len};
+  for (size_t i = 0; i < 6; ++i) {
+    if ((size_t)(pk - start) + 4 > pk_len)
+      break;
+    uint32_t len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
+                   ((uint32_t)pk[2] << 8) | pk[3];
+    pk += 4;
+    if (len > FIO_RSA_MAX_BYTES)
+      return -1;
+    if ((size_t)(pk - start) + len > pk_len)
+      return -1;
+    *fields[i] = pk;
+    *lens[i] = len;
+    pk += len;
+  }
+
+  return 0;
+}
+
 FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
                                                    uint8_t *out,
                                                    size_t out_capacity) {
@@ -6734,28 +6802,12 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
       return -1;
 
     /* Parse the private key structure */
-    const uint8_t *pk = server->private_key;
-    uint32_t n_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
-                     ((uint32_t)pk[2] << 8) | pk[3];
-    pk += 4;
-    if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
+    fio_rsa_privkey_s rsa_key;
+    if (fio___tls13_parse_rsa_private_key(
+            &rsa_key, server->private_key, server->private_key_len) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: RSA private key parsing failed");
       return -1;
-    const uint8_t *n = pk;
-    pk += n_len;
-
-    if ((size_t)(pk - server->private_key) + 4 > server->private_key_len)
-      return -1;
-    uint32_t d_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
-                     ((uint32_t)pk[2] << 8) | pk[3];
-    pk += 4;
-    if (d_len > FIO_RSA_MAX_BYTES)
-      return -1;
-    const uint8_t *d = pk;
-
-    fio_rsa_privkey_s rsa_key = {.n = n,
-                                 .n_len = n_len,
-                                 .d = d,
-                                 .d_len = d_len};
+    }
 
     if (fio_rsa_sign_pss(signature,
                          &sig_len,
@@ -6778,31 +6830,12 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
     FIO_MEMCPY(msg_hash, h.u8, 48);
 
     /* Parse the private key structure (same format as SHA-256 case) */
-    if (server->private_key_len < 8)
+    fio_rsa_privkey_s rsa_key;
+    if (fio___tls13_parse_rsa_private_key(
+            &rsa_key, server->private_key, server->private_key_len) != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: RSA private key parsing failed");
       return -1;
-
-    const uint8_t *pk = server->private_key;
-    uint32_t n_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
-                     ((uint32_t)pk[2] << 8) | pk[3];
-    pk += 4;
-    if (n_len > FIO_RSA_MAX_BYTES || n_len < 256)
-      return -1;
-    const uint8_t *n = pk;
-    pk += n_len;
-
-    if ((size_t)(pk - server->private_key) + 4 > server->private_key_len)
-      return -1;
-    uint32_t d_len = ((uint32_t)pk[0] << 24) | ((uint32_t)pk[1] << 16) |
-                     ((uint32_t)pk[2] << 8) | pk[3];
-    pk += 4;
-    if (d_len > FIO_RSA_MAX_BYTES)
-      return -1;
-    const uint8_t *d = pk;
-
-    fio_rsa_privkey_s rsa_key = {.n = n,
-                                 .n_len = n_len,
-                                 .d = d,
-                                 .d_len = d_len};
+    }
 
     if (fio_rsa_sign_pss(signature,
                          &sig_len,

@@ -91,13 +91,15 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
         if (u2.u64 + 1 == u1.u64)
           continue;
       }
-      FIO_ASSERT(tmp2 == tmp && u1.u64 == u2.u64,
-                 "Sanity test failed for %s\n\t %.17g ?!= %.17g\n\t %s ?!= %s",
-                 (char *)floats[n_i],
-                 u1.f,
-                 u2.f,
-                 tmp,
-                 tmp2);
+      FIO_ASSERT(
+          tmp2 == tmp && u1.u64 == u2.u64,
+          "Sanity test failed for %s\n\t %.17g ?!= %.17g\n\t %s ?!= %s %s",
+          (char *)floats[n_i],
+          u1.f,
+          u2.f,
+          tmp,
+          tmp2,
+          (tmp == tmp2 ? "√" : "X"));
     }
   }
   /* Speed Test */

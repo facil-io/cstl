@@ -82,9 +82,6 @@
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
 #endif
-#ifdef FIO_MARKDOWN
-#include "004 markdown.h"
-#endif
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
 #endif
@@ -265,37 +262,6 @@
 
 #ifndef FIO___DEV___
 #include "700 cleanup.h"
-#endif
-
-#if 0 && defined(FIO_TEST_ALL) && !defined(H___FIO_TESTS_START___H)
-#include "900 tests start.h"
-#include "902 atol.h"
-#include "902 atomics.h"
-#include "902 cli.h"
-#include "902 core.h"
-#include "902 files.h"
-#include "902 fiobj.h"
-#include "902 glob matching.h"
-#include "902 http handle.h"
-#include "902 imap.h"
-#include "902 io.h"
-#include "902 math.h"
-#include "902 memalt.h"
-#include "902 mustache.h"
-#include "902 poll.h"
-#include "902 pubsub.h"
-#include "902 queue.h"
-#include "902 random.h"
-#include "902 sock.h"
-#include "902 sort.h"
-#include "902 state callbacks.h"
-#include "902 stream.h"
-#include "902 string core.h"
-#include "902 time.h"
-#include "902 url.h"
-#include "903 chacha.h"
-#include "903 sha.h"
-#include "998 tests finish.h"
 #endif
 
 #endif /* !H___FIO_CSTL_COMBINED___H */
