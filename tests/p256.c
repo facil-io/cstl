@@ -9,6 +9,14 @@ ECDSA P-256 (secp256r1) Tests
 #define FIO_LOG
 #include FIO_INCLUDE_FILE
 
+#if defined(HAVE_OPENSSL) || __has_include(<openssl/ec.h>)
+#define FIO___TEST_HAS_OPENSSL_P256 1
+#include <openssl/bn.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
+#include <openssl/obj_mac.h>
+#endif
+
 /* *****************************************************************************
 Helper to print field elements for debugging
 ***************************************************************************** */
@@ -1487,6 +1495,64 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_ecdhe_performance)(void) {
 }
 
 /* *****************************************************************************
+OpenSSL interoperability for generated ECDSA signatures
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_sign_openssl_verify)(void) {
+#ifdef FIO___TEST_HAS_OPENSSL_P256
+  uint8_t secret_key[32] = {0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16,
+                            0x6b, 0x5c, 0x21, 0x57, 0x67, 0xb1, 0xd6, 0x93,
+                            0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8, 0x9b, 0x12,
+                            0x7b, 0x8a, 0x62, 0x2b, 0x12, 0x0f, 0x67, 0x21};
+  uint8_t public_key[65] = {
+      0x04, 0x60, 0xfe, 0xd4, 0xba, 0x25, 0x5a, 0x9d, 0x31, 0xc9, 0x61,
+      0xeb, 0x74, 0xc6, 0x35, 0x6d, 0x68, 0xc0, 0x49, 0xb8, 0x92, 0x3b,
+      0x61, 0xfa, 0x6c, 0xe6, 0x69, 0x62, 0x2e, 0x60, 0xf2, 0x9f, 0xb6,
+      0x79, 0x03, 0xfe, 0x10, 0x08, 0xb8, 0xbc, 0x99, 0xa4, 0x1a, 0xe9,
+      0xe9, 0x56, 0x28, 0xbc, 0x64, 0xf2, 0xf1, 0xb2, 0x0c, 0x2d, 0x7e,
+      0x9f, 0x51, 0x77, 0xa3, 0xc2, 0x94, 0xd4, 0x46, 0x22, 0x99};
+
+  const uint8_t msg[] = "P-256 OpenSSL verification test";
+  fio_u256 msg_hash = fio_sha256(msg, sizeof(msg) - 1);
+  uint8_t sig[72];
+  size_t sig_len = 0;
+  FIO_ASSERT(fio_ecdsa_p256_sign(sig,
+                                 &sig_len,
+                                 sizeof(sig),
+                                 msg_hash.u8,
+                                 secret_key) == 0,
+             "P-256 signing should succeed");
+  FIO_ASSERT(fio_ecdsa_p256_verify(sig,
+                                   sig_len,
+                                   msg_hash.u8,
+                                   public_key,
+                                   sizeof(public_key)) == 0,
+             "self verification should accept generated signature");
+
+  EC_KEY *key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+  FIO_ASSERT(key, "OpenSSL EC_KEY_new_by_curve_name failed");
+  const EC_GROUP *group = EC_KEY_get0_group(key);
+  BIGNUM *x = BN_bin2bn(public_key + 1, 32, NULL);
+  BIGNUM *y = BN_bin2bn(public_key + 33, 32, NULL);
+  EC_POINT *point = EC_POINT_new(group);
+  FIO_ASSERT(x && y && point, "OpenSSL point allocation failed");
+  FIO_ASSERT(EC_POINT_set_affine_coordinates(group, point, x, y, NULL) == 1,
+             "OpenSSL public point setup failed");
+  FIO_ASSERT(EC_KEY_set_public_key(key, point) == 1,
+             "OpenSSL public key setup failed");
+  FIO_ASSERT(ECDSA_verify(0, msg_hash.u8, 32, sig, (int)sig_len, key) == 1,
+             "OpenSSL should verify generated P-256 ECDSA signature");
+
+  EC_POINT_free(point);
+  BN_free(x);
+  BN_free(y);
+  EC_KEY_free(key);
+#else
+  fprintf(stderr, "\t  OpenSSL unavailable; skipping P-256 sign oracle\n");
+#endif
+}
+
+/* *****************************************************************************
 Main Test Function
 ***************************************************************************** */
 
@@ -1505,6 +1571,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256)(void) {
   FIO_NAME_TEST(stl, p256_ecdhe_invalid_inputs)();
   FIO_NAME_TEST(stl, p256_ecdhe_compressed)();
   FIO_NAME_TEST(stl, p256_ecdhe_performance)();
+  FIO_NAME_TEST(stl, p256_sign_openssl_verify)();
 }
 
 /* *****************************************************************************

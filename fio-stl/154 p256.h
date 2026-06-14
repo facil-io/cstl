@@ -213,16 +213,29 @@ FIO_IFUNC void fio___p256_fe_one(fio___p256_fe_s r) {
   r[3] = 0;
 }
 
-/** Check if field element is zero */
+/** Public-value check: returns 1 if field element is zero. */
 FIO_IFUNC int fio___p256_fe_is_zero(const fio___p256_fe_s a) {
   return (a[0] | a[1] | a[2] | a[3]) == 0;
 }
 
-/** Compare two field elements: returns 0 if equal */
+/** Secret-safe check: returns 1 if field element is zero. */
+FIO_IFUNC int fio___p256_fe_ct_is_zero(const fio___p256_fe_s a) {
+  uint64_t diff = a[0] | a[1] | a[2] | a[3];
+  return (int)fio_ct_false(diff);
+}
+
+/** Public-value compare: returns 0 if equal. */
 FIO_IFUNC int fio___p256_fe_eq(const fio___p256_fe_s a,
                                const fio___p256_fe_s b) {
   uint64_t diff = (a[0] ^ b[0]) | (a[1] ^ b[1]) | (a[2] ^ b[2]) | (a[3] ^ b[3]);
   return diff == 0 ? 0 : 1;
+}
+
+/** Secret-safe compare: returns 1 if equal. */
+FIO_IFUNC int fio___p256_fe_ct_is_eq(const fio___p256_fe_s a,
+                                     const fio___p256_fe_s b) {
+  uint64_t diff = (a[0] ^ b[0]) | (a[1] ^ b[1]) | (a[2] ^ b[2]) | (a[3] ^ b[3]);
+  return (int)fio_ct_false(diff);
 }
 
 /** Load 32-byte big-endian number into field element */
@@ -610,12 +623,18 @@ FIO_IFUNC void fio___p256_scalar_from_bytes(fio___p256_scalar_s r,
   r[0] = fio_buf2u64_be(in + 24);
 }
 
-/** Check if scalar is zero */
+/** Public-value check: returns 1 if scalar is zero. */
 FIO_IFUNC int fio___p256_scalar_is_zero(const fio___p256_scalar_s a) {
   return (a[0] | a[1] | a[2] | a[3]) == 0;
 }
 
-/** Check if scalar >= n (curve order) */
+/** Secret-safe check: returns 1 if scalar is zero. */
+FIO_IFUNC int fio___p256_scalar_ct_is_zero(const fio___p256_scalar_s a) {
+  uint64_t diff = a[0] | a[1] | a[2] | a[3];
+  return (int)fio_ct_false(diff);
+}
+
+/** Public-value check: returns 1 if scalar >= n (curve order). */
 FIO_IFUNC int fio___p256_scalar_gte_n(const fio___p256_scalar_s a) {
   /* Compare from most significant limb */
   if (a[3] > FIO___P256_N[3])
@@ -633,6 +652,32 @@ FIO_IFUNC int fio___p256_scalar_gte_n(const fio___p256_scalar_s a) {
   if (a[0] >= FIO___P256_N[0])
     return 1;
   return 0;
+}
+
+/** Secret-safe check: returns 1 if scalar >= n (curve order). */
+FIO_IFUNC int fio___p256_scalar_ct_gte_n(const fio___p256_scalar_s a) {
+  uint64_t borrow = 0;
+  (void)fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
+  (void)fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
+  (void)fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
+  (void)fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
+  return (int)(borrow ^ 1);
+}
+
+/** Secret-safe conditional scalar subtraction: a = cond ? a - n : a. */
+FIO_IFUNC void fio___p256_scalar_sub_n_if(fio___p256_scalar_s a,
+                                          uint64_t cond) {
+  uint64_t borrow = 0;
+  uint64_t s[4];
+  uint64_t mask = (uint64_t)0 - (cond & 1);
+  s[0] = fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
+  s[1] = fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
+  s[2] = fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
+  s[3] = fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
+  a[0] = fio_ct_mux64(mask, s[0], a[0]);
+  a[1] = fio_ct_mux64(mask, s[1], a[1]);
+  a[2] = fio_ct_mux64(mask, s[2], a[2]);
+  a[3] = fio_ct_mux64(mask, s[3], a[3]);
 }
 
 /** Scalar reduction mod n using fio_math_div */
@@ -666,7 +711,23 @@ FIO_SFUNC void fio___p256_scalar_mul(fio___p256_scalar_s r,
                                      const fio___p256_scalar_s b) {
   uint64_t t[8] = {0};
 
-  /* Schoolbook multiplication */
+  /* Schoolbook multiplication with full carry propagation. */
+#if defined(__SIZEOF_INT128__)
+  for (int i = 0; i < 4; ++i) {
+    __uint128_t carry = 0;
+    for (int j = 0; j < 4; ++j) {
+      const int k = i + j;
+      __uint128_t sum = (__uint128_t)a[i] * b[j] + t[k] + carry;
+      t[k] = (uint64_t)sum;
+      carry = sum >> 64;
+    }
+    for (int k = i + 4; carry && k < 8; ++k) {
+      __uint128_t sum = (__uint128_t)t[k] + carry;
+      t[k] = (uint64_t)sum;
+      carry = sum >> 64;
+    }
+  }
+#else
   for (int i = 0; i < 4; ++i) {
     uint64_t carry = 0;
     for (int j = 0; j < 4; ++j) {
@@ -677,8 +738,13 @@ FIO_SFUNC void fio___p256_scalar_mul(fio___p256_scalar_s r,
       t[i + j] = fio_math_addc64(t[i + j], carry, 0, &c2);
       carry = hi + c1 + c2;
     }
-    t[i + 4] += carry;
+    for (int k = i + 4; carry && k < 8; ++k) {
+      uint64_t c = 0;
+      t[k] = fio_math_addc64(t[k], carry, 0, &c);
+      carry = c;
+    }
   }
+#endif
 
   fio___p256_scalar_reduce(r, t);
 }
@@ -768,24 +834,33 @@ FIO_IFUNC void fio___p256_point_to_jacobian(
   fio___p256_fe_one(j->z);
 }
 
+/** Return all-ones if field element is zero, zero otherwise. */
+FIO_IFUNC uint64_t fio___p256_fe_ct_is_zero_mask(const fio___p256_fe_s a) {
+  return (uint64_t)0 - (uint64_t)fio___p256_fe_ct_is_zero(a);
+}
+
+FIO_IFUNC void fio___p256_point_cswap(fio___p256_point_jacobian_s *a,
+                                      fio___p256_point_jacobian_s *b,
+                                      uint64_t swap);
+
 /** Convert Jacobian point to affine (x = X/Z², y = Y/Z³) */
 FIO_SFUNC void fio___p256_point_to_affine(
     fio___p256_point_affine_s *a,
     const fio___p256_point_jacobian_s *j) {
-  if (fio___p256_point_is_infinity(j)) {
-    fio___p256_fe_zero(a->x);
-    fio___p256_fe_zero(a->y);
-    return;
-  }
-
   fio___p256_fe_s z_inv, z_inv2, z_inv3;
 
+  /* Inverting Z=0 yields zero with this fixed-exponent inversion path, so
+   * infinity maps to the same affine (0, 0) result with no branch. */
   fio___p256_fe_inv(z_inv, j->z);
   fio___p256_fe_sqr(z_inv2, z_inv);
   fio___p256_fe_mul(z_inv3, z_inv2, z_inv);
 
   fio___p256_fe_mul(a->x, j->x, z_inv2);
   fio___p256_fe_mul(a->y, j->y, z_inv3);
+
+  fio_secure_zero(z_inv, sizeof(z_inv));
+  fio_secure_zero(z_inv2, sizeof(z_inv2));
+  fio_secure_zero(z_inv3, sizeof(z_inv3));
 }
 
 /**
@@ -801,12 +876,8 @@ FIO_SFUNC void fio___p256_point_to_affine(
  */
 FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
                                        const fio___p256_point_jacobian_s *p) {
-  if (fio___p256_point_is_infinity(p)) {
-    fio___p256_point_set_infinity(r);
-    return;
-  }
-
   fio___p256_fe_s t1, t2, t3, t4, t5, yz;
+  fio___p256_point_jacobian_s generic, infinity, candidate;
 
   /* Save Y*Z early to handle aliasing (r == p) */
   fio___p256_fe_mul(yz, p->y, p->z);
@@ -841,8 +912,8 @@ FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
   fio___p256_fe_sqr(t3, t2);
 
   /* X' = λ² - 2S */
-  fio___p256_fe_sub(r->x, t3, t5);
-  fio___p256_fe_sub(r->x, r->x, t5);
+  fio___p256_fe_sub(generic.x, t3, t5);
+  fio___p256_fe_sub(generic.x, generic.x, t5);
 
   /* t4 = Y⁴ */
   fio___p256_fe_sqr(t4, t4);
@@ -853,14 +924,30 @@ FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
   fio___p256_fe_add(t4, t4, t4);
 
   /* t5 = S - X' */
-  fio___p256_fe_sub(t5, t5, r->x);
+  fio___p256_fe_sub(t5, t5, generic.x);
 
   /* Y' = λ(S - X') - 8Y⁴ */
-  fio___p256_fe_mul(r->y, t2, t5);
-  fio___p256_fe_sub(r->y, r->y, t4);
+  fio___p256_fe_mul(generic.y, t2, t5);
+  fio___p256_fe_sub(generic.y, generic.y, t4);
 
   /* Z' = 2YZ (using pre-computed value to handle aliasing) */
-  fio___p256_fe_add(r->z, yz, yz);
+  fio___p256_fe_add(generic.z, yz, yz);
+
+  /* Select infinity for infinity input without branching on p->z. */
+  fio___p256_point_set_infinity(&infinity);
+  *r = generic;
+  candidate = infinity;
+  fio___p256_point_cswap(r, &candidate, fio___p256_fe_ct_is_zero_mask(p->z) & 1);
+
+  fio_secure_zero(t1, sizeof(t1));
+  fio_secure_zero(t2, sizeof(t2));
+  fio_secure_zero(t3, sizeof(t3));
+  fio_secure_zero(t4, sizeof(t4));
+  fio_secure_zero(t5, sizeof(t5));
+  fio_secure_zero(yz, sizeof(yz));
+  fio_secure_zero(&generic, sizeof(generic));
+  fio_secure_zero(&infinity, sizeof(infinity));
+  fio_secure_zero(&candidate, sizeof(candidate));
 }
 
 /**
@@ -872,12 +959,9 @@ FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
 FIO_SFUNC void fio___p256_point_add_mixed(fio___p256_point_jacobian_s *r,
                                           const fio___p256_point_jacobian_s *p,
                                           const fio___p256_point_affine_s *q) {
-  if (fio___p256_point_is_infinity(p)) {
-    fio___p256_point_to_jacobian(r, q);
-    return;
-  }
-
   fio___p256_fe_s t1, t2, t3, t4, t5, t6;
+  fio___p256_point_jacobian_s generic, doubled, infinity, q_jac, selected;
+  fio___p256_point_jacobian_s candidate;
 
   /* t1 = Z₁² */
   fio___p256_fe_sqr(t1, p->z);
@@ -897,19 +981,6 @@ FIO_SFUNC void fio___p256_point_add_mixed(fio___p256_point_jacobian_s *r,
   /* t4 = Y₂Z₁³ - Y₁ = R */
   fio___p256_fe_sub(t4, t4, p->y);
 
-  /* Check if points are equal or opposite */
-  if (fio___p256_fe_is_zero(t3)) {
-    if (fio___p256_fe_is_zero(t4)) {
-      /* Points are equal - double */
-      fio___p256_point_double(r, p);
-      return;
-    } else {
-      /* Points are opposite - result is infinity */
-      fio___p256_point_set_infinity(r);
-      return;
-    }
-  }
-
   /* t5 = H² */
   fio___p256_fe_sqr(t5, t3);
 
@@ -919,24 +990,63 @@ FIO_SFUNC void fio___p256_point_add_mixed(fio___p256_point_jacobian_s *r,
   /* t1 = X₁H² */
   fio___p256_fe_mul(t1, p->x, t5);
 
-  /* t2 = Y₁H³ (compute early to handle r == p aliasing) */
+  /* t2 = Y₁H³ */
   fio___p256_fe_mul(t2, p->y, t6);
 
-  /* Z₃ = Z₁H (compute early to handle r == p aliasing) */
-  fio___p256_fe_mul(r->z, p->z, t3);
+  /* Z₃ = Z₁H */
+  fio___p256_fe_mul(generic.z, p->z, t3);
 
   /* X₃ = R² - H³ - 2X₁H² */
-  fio___p256_fe_sqr(r->x, t4);
-  fio___p256_fe_sub(r->x, r->x, t6);
-  fio___p256_fe_sub(r->x, r->x, t1);
-  fio___p256_fe_sub(r->x, r->x, t1);
+  fio___p256_fe_sqr(generic.x, t4);
+  fio___p256_fe_sub(generic.x, generic.x, t6);
+  fio___p256_fe_sub(generic.x, generic.x, t1);
+  fio___p256_fe_sub(generic.x, generic.x, t1);
 
   /* t1 = X₁H² - X₃ */
-  fio___p256_fe_sub(t1, t1, r->x);
+  fio___p256_fe_sub(t1, t1, generic.x);
 
   /* Y₃ = R(X₁H² - X₃) - Y₁H³ */
-  fio___p256_fe_mul(r->y, t4, t1);
-  fio___p256_fe_sub(r->y, r->y, t2);
+  fio___p256_fe_mul(generic.y, t4, t1);
+  fio___p256_fe_sub(generic.y, generic.y, t2);
+
+  /* Compute all exceptional-case results unconditionally. */
+  fio___p256_point_double(&doubled, p);
+  fio___p256_point_set_infinity(&infinity);
+  fio___p256_point_to_jacobian(&q_jac, q);
+
+  /* Select the correct result without branching on point coordinates:
+   * - p infinity: q
+   * - H == 0 and R == 0: 2p
+   * - H == 0 and R != 0: infinity
+   * - otherwise: generic mixed-add result */
+  uint64_t p_inf_mask = fio___p256_fe_ct_is_zero_mask(p->z);
+  uint64_t h_zero_mask = fio___p256_fe_ct_is_zero_mask(t3);
+  uint64_t r_zero_mask = fio___p256_fe_ct_is_zero_mask(t4);
+  uint64_t not_p_inf_mask = ~p_inf_mask;
+  uint64_t equal_mask = not_p_inf_mask & h_zero_mask & r_zero_mask;
+  uint64_t opposite_mask = not_p_inf_mask & h_zero_mask & ~r_zero_mask;
+
+  selected = generic;
+  candidate = infinity;
+  fio___p256_point_cswap(&selected, &candidate, opposite_mask & 1);
+  candidate = doubled;
+  fio___p256_point_cswap(&selected, &candidate, equal_mask & 1);
+  candidate = q_jac;
+  fio___p256_point_cswap(&selected, &candidate, p_inf_mask & 1);
+  *r = selected;
+
+  fio_secure_zero(t1, sizeof(t1));
+  fio_secure_zero(t2, sizeof(t2));
+  fio_secure_zero(t3, sizeof(t3));
+  fio_secure_zero(t4, sizeof(t4));
+  fio_secure_zero(t5, sizeof(t5));
+  fio_secure_zero(t6, sizeof(t6));
+  fio_secure_zero(&generic, sizeof(generic));
+  fio_secure_zero(&doubled, sizeof(doubled));
+  fio_secure_zero(&infinity, sizeof(infinity));
+  fio_secure_zero(&q_jac, sizeof(q_jac));
+  fio_secure_zero(&selected, sizeof(selected));
+  fio_secure_zero(&candidate, sizeof(candidate));
 }
 
 /* (fio___p256_point_add_jacobian removed — ladder uses mixed add directly) */
@@ -976,52 +1086,50 @@ FIO_IFUNC void fio___p256_point_cswap(fio___p256_point_jacobian_s *a,
  * execution. Every bit position performs exactly the same sequence of field
  * operations regardless of the scalar value, preventing timing side-channels.
  *
- * To avoid the "point at infinity" special case at the start of the ladder
- * (which would require a branch), we compute k' = k + 2n (twice the curve
- * order). Since 1 <= k < n and n > 2^255, we have k' = k + 2n > 2^256, so
- * bit 256 of k' is always 1. We initialize the ladder with that known leading
- * 1 and process the remaining 256 bits — giving the same result as k*P
- * because 2n*P = 2*(n*P) = 2*infinity = infinity, and infinity + k*P = k*P.
+ * The ladder starts from R[0] = infinity and R[1] = P, then processes exactly
+ * the 256 scalar bits from most-significant to least-significant. Do not use
+ * the old k + 2n shortcut: for scalars near n it can overflow the assumed
+ * 257-bit range and drop a high carry.
  *
- * Algorithm (257 bits, bit 256 always 1):
- *   k' = k + 2n  (257-bit value, bit 256 = 1 always)
- *   R[0] = P,  R[1] = 2P   (ladder state after consuming the leading 1)
+ * Algorithm (256 bits):
+ *   R[0] = infinity, R[1] = P
  *   for bit i from 255 down to 0:
- *     b = bit i of k'
+ *     b = bit i of k
  *     cswap(R[0], R[1], b)
- *     R[1] = R[0] + R[1]
- *     R[0] = 2 * R[0]
+ *     D = 2 * R[0]
+ *     P_sel = (b == 0) ? P : -P   (selected with masks, no branch)
+ *     R[1] = D + P_sel            (equivalent to old R[0] + old R[1])
+ *     R[0] = D
  *     cswap(R[0], R[1], b)
  *   result = R[0]
  *
- * The add step uses the mixed Jacobian+affine addition with the input point P
- * (kept in affine form). After the first cswap, the invariant R[1] = R[0] ± P
- * allows computing R[0]+R[1] = 2*R[0] ± P using one double and one mixed add.
- * The sign is determined by the current bit b (branchless y-coordinate select).
+ * After the first cswap, the invariant R[1] = R[0] ± P allows computing
+ * R[0] + R[1] as 2*R[0] ± P using one double and one mixed add. The sign is
+ * determined by the current bit b through branchless y-coordinate selection.
  * This avoids field inversion entirely: 1 double + 1 mixed add per bit.
  */
 FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
                                     const fio___p256_scalar_s k,
                                     const fio___p256_point_affine_s *p) {
-  /* Compute k' = k + 2n.
-   * 2n in 64-bit limbs (little-endian): shift n left by 1.
-   * Since n > 2^255, 2n > 2^256, so bit 256 of k' is always 1. */
-  uint64_t carry = 0;
-  uint64_t kp[5];
-  kp[0] = fio_math_addc64(k[0], FIO___P256_N[0] << 1, 0, &carry);
-  kp[1] = fio_math_addc64(k[1],
-                          (FIO___P256_N[1] << 1) | (FIO___P256_N[0] >> 63),
-                          carry,
-                          &carry);
-  kp[2] = fio_math_addc64(k[2],
-                          (FIO___P256_N[2] << 1) | (FIO___P256_N[1] >> 63),
-                          carry,
-                          &carry);
-  kp[3] = fio_math_addc64(k[3],
-                          (FIO___P256_N[3] << 1) | (FIO___P256_N[2] >> 63),
-                          carry,
-                          &carry);
-  kp[4] = (FIO___P256_N[3] >> 63) + carry; /* bit 256: always 1 */
+  /* Constant-time Montgomery ladder over the 256 scalar bits of k.
+   *
+   * The previous k' = k + 2n shortcut assumed bit 256 of k' was always the
+   * leading 1, but k + 2n can exceed 2^257 for scalars near n.  That caused
+   * the ladder to drop a high carry and produced wrong results for many
+   * random scalars (small scalars like 1 and 2 happened to work).
+   *
+   * Instead we start from the true scalar k with the standard initialization:
+   *   R[0] = infinity, R[1] = P
+   * and process bits 255 down to 0.  point_add_mixed handles the infinity
+   * case, so the first iterations where k's top bits are zero are safe.
+   *
+   * Invariant after the first cswap (and before the second):
+   *   b=0: R[0] = a*P, R[1] = (a+1)*P  → R[1] = R[0] + P
+   *   b=1: R[0] = (a+1)*P, R[1] = a*P  → R[1] = R[0] - P
+   *
+   * We compute D = 2*R[0] and then R[1] = D + P_sel where P_sel is P for
+   * b=0 and -P for b=1, selected branchlessly.
+   */
 
   /* Precompute -P (same x, negated y) for the b=1 case */
   fio___p256_point_affine_s P_neg;
@@ -1029,24 +1137,14 @@ FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
   fio___p256_fe_neg(P_neg.y, p->y);
 
   fio___p256_point_jacobian_s R0, R1, D;
+  fio___p256_point_affine_s P_sel;
 
-  /* Initialize ladder: R[0] = P, R[1] = 2P
-   * Corresponds to consuming the leading 1 (bit 256 of k'). */
-  fio___p256_point_to_jacobian(&R0, p);
-  fio___p256_point_double(&R1, &R0);
+  /* Initialize ladder: R[0] = infinity, R[1] = P */
+  fio___p256_point_set_infinity(&R0);
+  fio___p256_point_to_jacobian(&R1, p);
 
-  /* Process bits 255 down to 0 of k'.
-   *
-   * Ladder invariant (after first cswap, before second cswap):
-   *   b=0: R[0] = a*P, R[1] = (a+1)*P  → R[1] = R[0] + P
-   *   b=1: R[0] = (a+1)*P, R[1] = a*P  → R[1] = R[0] - P
-   *
-   * Therefore R[0] + R[1] = 2*R[0] + (b==0 ? P : -P).
-   * We compute: D = 2*R[0], sum = D + P_sel (mixed add).
-   * P_sel is chosen branchlessly from {P, -P} based on b.
-   */
   for (int i = 255; i >= 0; --i) {
-    uint64_t b = (kp[i / 64] >> (i % 64)) & 1ULL;
+    uint64_t b = (k[i / 64] >> (i % 64)) & 1ULL;
 
     /* First cswap: if b=1, swap so R[0] is the "larger" register */
     fio___p256_point_cswap(&R0, &R1, b);
@@ -1057,7 +1155,6 @@ FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
     /* Constant-time select P or -P based on b:
      * mask = 0 if b=0 (use P), ~0 if b=1 (use -P).
      * x-coordinate is the same for P and -P. */
-    fio___p256_point_affine_s P_sel;
     uint64_t bmask = (uint64_t)0 - b;
     fio___p256_fe_copy(P_sel.x, p->x);
     P_sel.y[0] = (p->y[0] & ~bmask) | (P_neg.y[0] & bmask);
@@ -1076,6 +1173,12 @@ FIO_SFUNC void fio___p256_point_mul(fio___p256_point_jacobian_s *r,
   }
 
   *r = R0;
+
+  fio_secure_zero(&P_neg, sizeof(P_neg));
+  fio_secure_zero(&P_sel, sizeof(P_sel));
+  fio_secure_zero(&R0, sizeof(R0));
+  fio_secure_zero(&R1, sizeof(R1));
+  fio_secure_zero(&D, sizeof(D));
 }
 
 /**
@@ -1385,16 +1488,37 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
   if (!sig || !sig_len || !msg_hash || !secret_key || sig_capacity < 72)
     return -1;
 
-  fio___p256_scalar_s d, e, k, r_scalar, s_scalar, tmp;
+  int rc = -1;
+  fio___p256_scalar_s d = {0}, e = {0}, k = {0}, k_inv = {0};
+  fio___p256_scalar_s r_scalar = {0}, s_scalar = {0}, tmp = {0};
+  fio___p256_point_affine_s g = {0}, R_aff = {0};
+  fio___p256_point_jacobian_s R_jac = {0};
+  uint8_t k_bytes[32] = {0};
+  uint8_t r_bytes[32] = {0}, s_bytes[32] = {0};
+  uint8_t r_der[35] = {0}, s_der[35] = {0};
+
+#define FIO___P256_SIGN_CLEAR_ATTEMPT()                                        \
+  do {                                                                         \
+    fio_secure_zero(k, sizeof(k));                                             \
+    fio_secure_zero(k_inv, sizeof(k_inv));                                     \
+    fio_secure_zero(r_scalar, sizeof(r_scalar));                               \
+    fio_secure_zero(s_scalar, sizeof(s_scalar));                               \
+    fio_secure_zero(tmp, sizeof(tmp));                                         \
+    fio_secure_zero(k_bytes, sizeof(k_bytes));                                 \
+    fio_secure_zero(r_bytes, sizeof(r_bytes));                                 \
+    fio_secure_zero(s_bytes, sizeof(s_bytes));                                 \
+    fio_secure_zero(r_der, sizeof(r_der));                                     \
+    fio_secure_zero(s_der, sizeof(s_der));                                     \
+    fio_secure_zero(&R_jac, sizeof(R_jac));                                    \
+    fio_secure_zero(&R_aff, sizeof(R_aff));                                    \
+  } while (0)
 
   /* Load secret key as scalar d */
   fio___p256_scalar_from_bytes(d, secret_key);
 
   /* Validate d: 0 < d < n */
-  if (fio___p256_scalar_is_zero(d) || fio___p256_scalar_gte_n(d)) {
-    fio_secure_zero(d, sizeof(d));
-    return -1;
-  }
+  if (fio___p256_scalar_ct_is_zero(d) | fio___p256_scalar_ct_gte_n(d))
+    goto cleanup;
 
   /* Load message hash as scalar e */
   fio___p256_scalar_from_bytes(e, msg_hash);
@@ -1408,142 +1532,98 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
     e[3] = fio_math_subc64(e[3], FIO___P256_N[3], borrow, &borrow);
   }
 
-  /* Generate random k and compute signature */
-  /* Try up to 100 times to get valid k (should succeed on first try) */
-  uint8_t k_bytes[32];
-  uint8_t r_bytes[32], s_bytes[32];
+  fio___p256_fe_copy(g.x, FIO___P256_GX);
+  fio___p256_fe_copy(g.y, FIO___P256_GY);
 
+  /* Generate random k and compute signature. */
   for (int attempts = 0; attempts < 100; ++attempts) {
-    /* Generate random k */
-    fio_rand_bytes(k_bytes, 32);
-    fio___p256_scalar_from_bytes(k, k_bytes);
-    k[3] >>= (k[3] > FIO___P256_N[3]);
-    k[2] >>= (k[2] >= FIO___P256_N[2]);
-    k[3] += !k[3];
-
-    /* Ensure 0 < k < n - should be impossible... but just in case I'm wrong */
-    if (fio___p256_scalar_gte_n(k))
-      continue;
+    /* Generate random nonce k in the valid scalar range 0 < k < n. */
+    do {
+      fio_rand_bytes(k_bytes, 32);
+      fio___p256_scalar_from_bytes(k, k_bytes);
+    } while (fio___p256_scalar_ct_is_zero(k) |
+             fio___p256_scalar_ct_gte_n(k));
 
     /* Compute R = k * G */
-    fio___p256_point_affine_s g;
-    fio___p256_fe_copy(g.x, FIO___P256_GX);
-    fio___p256_fe_copy(g.y, FIO___P256_GY);
-
-    fio___p256_point_jacobian_s R_jac;
     fio___p256_point_mul(&R_jac, k, &g);
 
-    if (fio___p256_point_is_infinity(&R_jac))
+    if (fio___p256_point_is_infinity(&R_jac)) {
+      FIO___P256_SIGN_CLEAR_ATTEMPT();
       continue;
+    }
 
     /* Convert R to affine */
-    fio___p256_point_affine_s R_aff;
     fio___p256_point_to_affine(&R_aff, &R_jac);
 
     /* r = R.x mod n */
     fio___p256_fe_to_bytes(r_bytes, R_aff.x);
     fio___p256_scalar_from_bytes(r_scalar, r_bytes);
 
-    /* Reduce r mod n if needed */
-    while (fio___p256_scalar_gte_n(r_scalar)) {
-      uint64_t borrow = 0;
-      r_scalar[0] = fio_math_subc64(r_scalar[0], FIO___P256_N[0], 0, &borrow);
-      r_scalar[1] =
-          fio_math_subc64(r_scalar[1], FIO___P256_N[1], borrow, &borrow);
-      r_scalar[2] =
-          fio_math_subc64(r_scalar[2], FIO___P256_N[2], borrow, &borrow);
-      r_scalar[3] =
-          fio_math_subc64(r_scalar[3], FIO___P256_N[3], borrow, &borrow);
+    /* Reduce r mod n if needed. R.x < p < 2n, so one subtract is enough. */
+    fio___p256_scalar_sub_n_if(r_scalar,
+                               (uint64_t)fio___p256_scalar_ct_gte_n(r_scalar));
+
+    if (fio___p256_scalar_ct_is_zero(r_scalar)) {
+      FIO___P256_SIGN_CLEAR_ATTEMPT();
+      continue;
     }
 
-    /* If r == 0, try again */
-    if (fio___p256_scalar_is_zero(r_scalar))
-      continue;
-
     /* Compute s = k^(-1) * (e + r*d) mod n */
-    /* First: r*d mod n */
     fio___p256_scalar_mul(tmp, r_scalar, d);
 
-    /* Then: e + r*d mod n */
-    /* Add e to tmp */
     uint64_t carry = 0;
     tmp[0] = fio_math_addc64(tmp[0], e[0], 0, &carry);
     tmp[1] = fio_math_addc64(tmp[1], e[1], carry, &carry);
     tmp[2] = fio_math_addc64(tmp[2], e[2], carry, &carry);
     tmp[3] = fio_math_addc64(tmp[3], e[3], carry, &carry);
 
-    /* Reduce mod n if needed */
-    while (carry || fio___p256_scalar_gte_n(tmp)) {
-      uint64_t borrow = 0;
-      tmp[0] = fio_math_subc64(tmp[0], FIO___P256_N[0], 0, &borrow);
-      tmp[1] = fio_math_subc64(tmp[1], FIO___P256_N[1], borrow, &borrow);
-      tmp[2] = fio_math_subc64(tmp[2], FIO___P256_N[2], borrow, &borrow);
-      tmp[3] = fio_math_subc64(tmp[3], FIO___P256_N[3], borrow, &borrow);
-      carry = 0;
-    }
+    /* e and r*d are each < n, so one subtract is enough. */
+    fio___p256_scalar_sub_n_if(tmp,
+                               carry |
+                                   (uint64_t)fio___p256_scalar_ct_gte_n(tmp));
 
-    /* Compute k^(-1) mod n */
-    fio___p256_scalar_s k_inv;
     fio___p256_scalar_inv(k_inv, k);
-
-    /* s = k^(-1) * (e + r*d) mod n */
     fio___p256_scalar_mul(s_scalar, k_inv, tmp);
 
-    /* If s == 0, try again */
-    if (fio___p256_scalar_is_zero(s_scalar))
+    if (fio___p256_scalar_ct_is_zero(s_scalar)) {
+      FIO___P256_SIGN_CLEAR_ATTEMPT();
       continue;
+    }
 
-    /* Convert r and s to bytes (big-endian) */
-    /* r_scalar to r_bytes */
     fio_u2buf64_be(r_bytes, r_scalar[3]);
     fio_u2buf64_be(r_bytes + 8, r_scalar[2]);
     fio_u2buf64_be(r_bytes + 16, r_scalar[1]);
     fio_u2buf64_be(r_bytes + 24, r_scalar[0]);
 
-    /* s_scalar to s_bytes */
     fio_u2buf64_be(s_bytes, s_scalar[3]);
     fio_u2buf64_be(s_bytes + 8, s_scalar[2]);
     fio_u2buf64_be(s_bytes + 16, s_scalar[1]);
     fio_u2buf64_be(s_bytes + 24, s_scalar[0]);
 
-    /* Encode as DER: SEQUENCE { r INTEGER, s INTEGER } */
-    uint8_t r_der[35], s_der[35];
-    FIO_MEMSET(r_der, 0, sizeof(r_der));
-    FIO_MEMSET(s_der, 0, sizeof(s_der));
     size_t r_der_len = fio___p256_encode_der_integer(r_der, r_bytes);
     size_t s_der_len = fio___p256_encode_der_integer(s_der, s_bytes);
-
     size_t seq_content_len = r_der_len + s_der_len;
-    size_t total_len =
-        2 + seq_content_len; /* SEQUENCE tag + length + content */
+    size_t total_len = 2 + seq_content_len;
 
-    if (total_len > sig_capacity) {
-      fio_secure_zero(d, sizeof(d));
-      fio_secure_zero(k, sizeof(k));
-      fio_secure_zero(k_inv, sizeof(k_inv));
-      return -1;
-    }
+    if (total_len > sig_capacity)
+      goto cleanup;
 
-    /* Write SEQUENCE header */
-    sig[0] = 0x30; /* SEQUENCE tag */
+    sig[0] = 0x30;
     sig[1] = (uint8_t)seq_content_len;
     FIO_MEMCPY(sig + 2, r_der, r_der_len);
     FIO_MEMCPY(sig + 2 + r_der_len, s_der, s_der_len);
-
     *sig_len = total_len;
-
-    /* Clear sensitive data */
-    fio_secure_zero(d, sizeof(d));
-    fio_secure_zero(k, sizeof(k));
-    fio_secure_zero(k_inv, sizeof(k_inv));
-    fio_secure_zero(k_bytes, sizeof(k_bytes));
-
-    return 0;
+    rc = 0;
+    goto cleanup;
   }
 
-  /* Failed to generate valid signature after 100 attempts */
+cleanup:
   fio_secure_zero(d, sizeof(d));
-  return -1;
+  fio_secure_zero(e, sizeof(e));
+  fio_secure_zero(&g, sizeof(g));
+  FIO___P256_SIGN_CLEAR_ATTEMPT();
+#undef FIO___P256_SIGN_CLEAR_ATTEMPT
+  return rc;
 }
 
 /* *****************************************************************************
@@ -1664,7 +1744,10 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
   if (!secret_key || !public_key)
     return -1;
 
-  fio___p256_scalar_s k;
+  int rc = -1;
+  fio___p256_scalar_s k = {0};
+  fio___p256_point_affine_s g = {0}, pub_aff = {0};
+  fio___p256_point_jacobian_s pub_jac = {0};
 
   /* Generate random scalar and ensure 0 < k < n */
   for (int attempts = 0; attempts < 100; ++attempts) {
@@ -1675,23 +1758,21 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
     fio___p256_scalar_from_bytes(k, secret_key);
 
     /* Check k is not zero and k < n */
-    if (!fio___p256_scalar_is_zero(k) && !fio___p256_scalar_gte_n(k))
+    if (!fio___p256_scalar_ct_is_zero(k) && !fio___p256_scalar_ct_gte_n(k)) {
+      rc = 0;
       break;
-
-    if (attempts == 99)
-      return -1; /* Failed to generate valid scalar */
+    }
   }
 
+  if (rc != 0)
+    goto cleanup;
+
   /* Compute public key = k * G */
-  fio___p256_point_affine_s g;
   fio___p256_fe_copy(g.x, FIO___P256_GX);
   fio___p256_fe_copy(g.y, FIO___P256_GY);
-
-  fio___p256_point_jacobian_s pub_jac;
   fio___p256_point_mul(&pub_jac, k, &g);
 
   /* Convert to affine */
-  fio___p256_point_affine_s pub_aff;
   fio___p256_point_to_affine(&pub_aff, &pub_jac);
 
   /* Serialize: 0x04 || x || y */
@@ -1699,10 +1780,14 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
   fio___p256_fe_to_bytes(public_key + 1, pub_aff.x);
   fio___p256_fe_to_bytes(public_key + 33, pub_aff.y);
 
-  /* Clear sensitive data */
+cleanup:
+  if (rc != 0)
+    fio_secure_zero(secret_key, 32);
   fio_secure_zero(k, sizeof(k));
-
-  return 0;
+  fio_secure_zero(&g, sizeof(g));
+  fio_secure_zero(&pub_jac, sizeof(pub_jac));
+  fio_secure_zero(&pub_aff, sizeof(pub_aff));
+  return rc;
 }
 
 SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
@@ -1712,63 +1797,60 @@ SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
   if (!shared_secret || !secret_key || !their_public_key)
     return -1;
 
-  fio___p256_point_affine_s their_point;
+  int rc = -1;
+  fio___p256_point_affine_s their_point = {0}, result_aff = {0};
+  fio___p256_point_jacobian_s result_jac = {0};
+  fio___p256_scalar_s k = {0};
 
   /* Parse their public key */
   if (their_public_key_len == 65) {
     /* Uncompressed: 0x04 || x || y */
     if (their_public_key[0] != 0x04)
-      return -1;
+      goto cleanup;
     fio___p256_fe_from_bytes(their_point.x, their_public_key + 1);
     fio___p256_fe_from_bytes(their_point.y, their_public_key + 33);
   } else if (their_public_key_len == 33) {
     /* Compressed: 0x02/0x03 || x */
     if (fio___p256_point_decompress(&their_point, their_public_key) != 0)
-      return -1;
+      goto cleanup;
   } else {
-    return -1; /* Invalid length */
+    goto cleanup;
   }
 
   /* Validate point is on curve */
   if (fio___p256_point_validate(&their_point) != 0)
-    return -1;
+    goto cleanup;
 
-  /* Load our secret key as scalar */
-  fio___p256_scalar_s k;
+  /* Load and validate our secret scalar: 0 < k < n */
   fio___p256_scalar_from_bytes(k, secret_key);
-
-  /* Validate scalar: 0 < k < n */
-  if (fio___p256_scalar_is_zero(k) || fio___p256_scalar_gte_n(k)) {
-    fio_secure_zero(k, sizeof(k));
-    return -1;
-  }
+  if (fio___p256_scalar_ct_is_zero(k) | fio___p256_scalar_ct_gte_n(k))
+    goto cleanup;
 
   /* Compute shared = k * their_point */
-  fio___p256_point_jacobian_s result_jac;
   fio___p256_point_mul(&result_jac, k, &their_point);
 
   /* Check for point at infinity (shouldn't happen with valid inputs) */
-  if (fio___p256_point_is_infinity(&result_jac)) {
-    fio_secure_zero(k, sizeof(k));
-    return -1;
-  }
+  if (fio___p256_point_is_infinity(&result_jac))
+    goto cleanup;
 
   /* Convert to affine and extract x-coordinate */
-  fio___p256_point_affine_s result_aff;
   fio___p256_point_to_affine(&result_aff, &result_jac);
   fio___p256_fe_to_bytes(shared_secret, result_aff.x);
-
-  /* Clear sensitive data */
-  fio_secure_zero(k, sizeof(k));
-  fio_secure_zero(&result_jac, sizeof(result_jac));
-  fio_secure_zero(&result_aff, sizeof(result_aff));
 
   /* Check for all-zero output (low-order point attack) */
   uint8_t zero_check = 0;
   for (int i = 0; i < 32; ++i)
     zero_check |= shared_secret[i];
+  rc = zero_check ? 0 : -1;
 
-  return zero_check ? 0 : -1;
+cleanup:
+  if (rc != 0)
+    fio_secure_zero(shared_secret, 32);
+  fio_secure_zero(k, sizeof(k));
+  fio_secure_zero(&their_point, sizeof(their_point));
+  fio_secure_zero(&result_jac, sizeof(result_jac));
+  fio_secure_zero(&result_aff, sizeof(result_aff));
+  return rc;
 }
 
 /* *****************************************************************************
