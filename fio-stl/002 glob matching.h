@@ -117,7 +117,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
 
       if (match == inverted)
         goto backtrack;
-      pat.len -= cls - (uint8_t *)pat.buf;
+      pat.len -= (size_t)(cls - (uint8_t *)pat.buf);
       pat.buf = (char *)cls;
 
     } break;

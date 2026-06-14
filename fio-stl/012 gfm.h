@@ -401,6 +401,7 @@ FIO_SFUNC char *fio___gfm_try_parse_ref_def(char *p,
                                             fio_buf_info_s *dest,
                                             fio_buf_info_s *title);
 FIO_SFUNC void fio___gfm_ref_scan_document(fio___gfm_parser_s *st);
+FIO_SFUNC char *fio___gfm_html_tag_end(char *p, char *end);
 
 /* ===========================================================================
  * Nesting Stack Macros
@@ -974,46 +975,12 @@ FIO_SFUNC int fio___gfm_is_html_block_start(char *p,
    * whitespace, '>', '/>' or attributes. Autolinks (<scheme://...>) are NOT
    * valid HTML tags and must not match here. */
   if (can_interrupt_para) {
-    char *t = after;
-    int is_close = 0;
-    if (t < le && *t == '/') {
-      is_close = 1;
-      ++t;
-    }
-    if (t < le && ((*t >= 'a' && *t <= 'z') || (*t >= 'A' && *t <= 'Z'))) {
-      char *tag_name = t;
-      /* Tag name: letters, digits, hyphens */
-      while (t < le && ((*t >= 'a' && *t <= 'z') || (*t >= 'A' && *t <= 'Z') ||
-                        (*t >= '0' && *t <= '9') || *t == '-'))
-        ++t;
-      /* Tag name must be non-empty and followed by valid continuation */
-      if (t > tag_name && t < le) {
-        if (is_close) {
-          /* Closing tag: optional whitespace then > */
-          while (t < le && (*t == ' ' || *t == '\t'))
-            ++t;
-          if (t < le && *t == '>') {
-            ++t;
-            while (t < le && (*t == ' ' || *t == '\t'))
-              ++t;
-            if (t >= le)
-              return 7;
-          }
-        } else {
-          /* Open tag: after tag name, must see whitespace, '>', or '/' */
-          if (*t == ' ' || *t == '\t' || *t == '>' || *t == '/') {
-            while (t < le && *t != '>')
-              ++t;
-            if (t < le && *t == '>') {
-              ++t;
-              while (t < le && (*t == ' ' || *t == '\t'))
-                ++t;
-              if (t >= le)
-                return 7;
-            }
-          }
-        }
-      }
+    char *tag_end = fio___gfm_html_tag_end(p, le);
+    if (tag_end) {
+      while (tag_end < le && (*tag_end == ' ' || *tag_end == '\t'))
+        ++tag_end;
+      if (tag_end >= le)
+        return 7;
     }
   }
 
@@ -1286,10 +1253,24 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
   int in_fence = 0;
   int in_nested_list = 0;
   int nested_blank = 0;
+  uint32_t nested_marker_indent = 0;
+  uint32_t nested_content_indent = 0;
   char *marker_line_end = fio___gfm_line_end(info->content_start, end);
   uint16_t bq_depth = 0;
   for (uint16_t d = 0; d < st->depth; ++d)
     bq_depth += (st->nest[d].type == FIO___GFM_CONT_BQ);
+  char *marker_line_start = info->content_start;
+  while (marker_line_start > st->start && marker_line_start[-1] != '\n' &&
+         marker_line_start[-1] != '\r')
+    --marker_line_start;
+  uint32_t item_marker_indent = bq_depth
+                                    ? 0
+                                    : fio___gfm_indent(marker_line_start,
+                                                       marker_line_end);
+  uint32_t item_content_indent = bq_depth
+                                     ? info->content_indent
+                                     : fio___gfm_vcol(marker_line_start,
+                                                      info->content_start);
 
   while (p < end) {
     char *le = fio___gfm_line_end(p, end);
@@ -1339,20 +1320,37 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
                                              le,
                                              vcol,
                                              &m2);
-    if (has_marker && vcol >= info->content_indent) {
+    if (in_nested_list) {
+      if (has_marker && vcol >= nested_marker_indent) {
+        nested_blank = 0;
+        p = next;
+        continue;
+      }
+      if (vcol >= nested_content_indent) {
+        nested_blank = 0;
+        p = next;
+        continue;
+      }
+      if (nested_blank)
+        return 0;
+      in_nested_list = 0;
+      nested_marker_indent = 0;
+      nested_content_indent = 0;
+    }
+
+    if (has_marker && vcol >= item_content_indent) {
       if (saw_blank)
         return 0;
       in_nested_list = 1;
       nested_blank = 0;
+      nested_marker_indent = vcol;
+      nested_content_indent = m2.content_indent;
       p = next;
       continue;
     }
 
-    if (in_nested_list && vcol >= info->content_indent) {
-      nested_blank = 0;
-      p = next;
-      continue;
-    }
+    if (has_marker && vcol < item_marker_indent)
+      return content_after_blank ? 0 : FIO_GFM_F_TIGHT;
 
     if (has_marker && vcol <= FIO___GFM_MAX_MARKER_INDENT) {
       if (m2.type != info->type)
@@ -1362,6 +1360,8 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
       content_after_blank = 0;
       in_nested_list = 0;
       nested_blank = 0;
+      nested_marker_indent = 0;
+      nested_content_indent = 0;
       {
         char fc2;
         char *mt = fio___gfm_ltrim(m2.content_start, le);
@@ -1375,6 +1375,8 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
     if (in_nested_list && nested_blank)
       return 0;
     in_nested_list = 0;
+    nested_marker_indent = 0;
+    nested_content_indent = 0;
 
     /* Non-blank content after a blank → potential loose trigger.
      * But only if the content is inside the list item (indent >=
@@ -1382,7 +1384,7 @@ FIO_SFUNC uint8_t fio___gfm_list_lookahead_tight(fio___gfm_parser_s *st,
      * indent < content_indent is outside the item. */
     if (saw_blank) {
       uint32_t line_indent = line_padding + fio___gfm_indent(line, le);
-      if (line_indent >= info->content_indent) {
+      if (line_indent >= item_content_indent) {
         content_after_blank = 1;
       } else {
         /* Content is outside the list item — stop scanning */
@@ -1778,22 +1780,34 @@ FIO_SFUNC int fio___gfm_convert_to_table(fio___gfm_parser_s *st,
   (void)delim_line;
   (void)delim_le;
 
-  /* Paragraph must be a single line (no embedded newlines).
-   * Multi-line paragraphs cannot become table headers. */
+  /* The table header is the paragraph's final physical line. GFM tables may
+   * start after paragraph text; in that case only the final paragraph line is
+   * reinterpreted as the header and earlier lines remain a paragraph. */
+  while (text_end > text && (text_end[-1] == '\n' || text_end[-1] == '\r'))
+    --text_end;
+  char *header = text;
   for (char *s = text; s < text_end; ++s) {
     if (*s == '\n' || *s == '\r')
-      return 0;
+      header = s + 1;
   }
 
   /* Header column count must match delimiter column count
    * (is_table_delimiter already stored count in st->table_columns). */
-  uint16_t header_cols = fio___gfm_count_table_cells(text, text_end);
+  uint16_t header_cols = fio___gfm_count_table_cells(header, text_end);
   if (header_cols != st->table_columns || !header_cols)
     return 0;
 
   /* --- Conversion confirmed: emit TABLE + header row --- */
 
+  if (header > text) {
+    st->para_end = header;
+    r = fio___gfm_close_paragraph(st);
+    if (r)
+      return r;
+  }
+
   /* Clear paragraph state */
+  st->leaf_type = 0;
   st->para_open = 0;
   st->para_start = NULL;
   st->para_end = NULL;
@@ -1808,7 +1822,7 @@ FIO_SFUNC int fio___gfm_convert_to_table(fio___gfm_parser_s *st,
     return r;
 
   /* Emit header row (cells parsed via inline_parse) */
-  r = fio___gfm_emit_table_row(st, text, text_end);
+  r = fio___gfm_emit_table_row(st, header, text_end);
   if (r)
     return r;
 
@@ -1908,6 +1922,10 @@ FIO_IFUNC uint32_t fio___gfm_label_fold(uint32_t c) {
     return c + 32;
   if ((c >= 0x0391 && c <= 0x03A1) || (c >= 0x03A3 && c <= 0x03AB))
     return c + 32;
+  if (c >= 0x0410 && c <= 0x042F)
+    return c + 32;
+  if (c == 0x0401)
+    return 0x0451;
   if (c == 0x03C2)
     return 0x03C3;
   return c;
@@ -2521,7 +2539,219 @@ FIO_IFUNC char *fio___gfm_extended_email_end(char *p, char *end) {
   return fio___gfm_is_autolink_email(p, s) ? s : NULL;
 }
 
-FIO_SFUNC char *fio___gfm_find_closer(char *search_start,
+FIO_IFUNC int fio___gfm_is_html_attr_name_start(char c) {
+  return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
+          c == ':');
+}
+
+FIO_IFUNC int fio___gfm_is_html_attr_name_char(char c) {
+  return fio___gfm_is_html_attr_name_start(c) || (c >= '0' && c <= '9') ||
+         c == '.' || c == '-';
+}
+
+FIO_SFUNC char *fio___gfm_html_tag_end(char *p, char *end) {
+  if (p >= end || *p != '<' || p + 1 >= end)
+    return NULL;
+
+  if (end - p >= 4 && p[1] == '!' && p[2] == '-' && p[3] == '-') {
+    if (p + 4 < end && p[4] == '>')
+      return p + 5;
+    if (p + 5 < end && p[4] == '-' && p[5] == '>')
+      return p + 6;
+    for (char *s = p + 4; s + 2 < end; ++s) {
+      if (s[0] == '-' && s[1] == '-' && s[2] == '>')
+        return s + 3;
+    }
+    return NULL;
+  }
+  if (p[1] == '?') {
+    for (char *s = p + 2; s + 1 < end; ++s) {
+      if (s[0] == '?' && s[1] == '>')
+        return s + 2;
+    }
+    return NULL;
+  }
+  if (fio___gfm_ci_match(p + 1, end, "![cdata[")) {
+    for (char *s = p + 9; s + 2 < end; ++s) {
+      if (s[0] == ']' && s[1] == ']' && s[2] == '>')
+        return s + 3;
+    }
+    return NULL;
+  }
+  if (p[1] == '!') {
+    char *s = p + 2;
+    if (s >= end || !(*s >= 'A' && *s <= 'Z'))
+      return NULL;
+    while (s < end && *s >= 'A' && *s <= 'Z')
+      ++s;
+    if (s >= end || !(*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+      return NULL;
+    while (s < end && *s != '>')
+      ++s;
+    return (s < end) ? s + 1 : NULL;
+  }
+
+  char *s = p + 1;
+  int closing = 0;
+  if (*s == '/') {
+    closing = 1;
+    ++s;
+  }
+  if (s >= end || !((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z')))
+    return NULL;
+  while (s < end && ((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') ||
+                     (*s >= '0' && *s <= '9') || *s == '-'))
+    ++s;
+
+  if (closing) {
+    while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+      ++s;
+    return (s < end && *s == '>') ? s + 1 : NULL;
+  }
+
+  for (;;) {
+    int had_ws = 0;
+    while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')) {
+      had_ws = 1;
+      ++s;
+    }
+    if (s >= end)
+      return NULL;
+    if (*s == '>')
+      return s + 1;
+    if (*s == '/')
+      return (s + 1 < end && s[1] == '>') ? s + 2 : NULL;
+    if (!had_ws || !fio___gfm_is_html_attr_name_start(*s))
+      return NULL;
+    while (s < end && fio___gfm_is_html_attr_name_char(*s))
+      ++s;
+    char *after_name = s;
+    while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+      ++s;
+    if (s >= end || *s != '=') {
+      s = after_name;
+      continue;
+    }
+    ++s;
+    while (s < end && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+      ++s;
+    if (s >= end)
+      return NULL;
+    if (*s == '\'' || *s == '"') {
+      char quote = *s++;
+      while (s < end && *s != quote)
+        ++s;
+      if (s >= end)
+        return NULL;
+      ++s;
+      continue;
+    }
+    char *value = s;
+    while (s < end && !(*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r' ||
+                        *s == '"' || *s == '\'' || *s == '=' || *s == '<' ||
+                        *s == '>' || *s == '`'))
+      ++s;
+    if (s == value)
+      return NULL;
+  }
+}
+
+/** Return the end of a CommonMark angle autolink or inline raw HTML span.
+ *  Used by delimiter lookahead so marker characters inside raw HTML attrs
+ *  don't satisfy emphasis closers (e.g. `*<img title="*">`). */
+FIO_SFUNC char *fio___gfm_inline_angle_end(char *p, char *end) {
+  if (p >= end || *p != '<')
+    return NULL;
+  char *gt = p + 1;
+  while (gt < end && *gt != '>')
+    ++gt;
+  if (gt < end && (fio___gfm_is_autolink_scheme(p + 1, gt) ||
+                   fio___gfm_is_autolink_email(p + 1, gt)))
+    return gt + 1;
+  return fio___gfm_html_tag_end(p, end);
+}
+
+FIO_SFUNC char *fio___gfm_link_like_end(char *p, char *end) {
+  if (p >= end)
+    return NULL;
+  p += (*p == '!' && p + 1 < end && p[1] == '[');
+  if (p >= end || *p != '[')
+    return NULL;
+  char *s = p + 1;
+  uint16_t depth = 0;
+  while (s < end) {
+    if (*s == '\\' && s + 1 < end) {
+      s += 2;
+      continue;
+    }
+    if (*s == '`') {
+      char *bq = s;
+      while (s < end && *s == '`')
+        ++s;
+      uint16_t bq_len = (uint16_t)(s - bq);
+      while (s < end) {
+        if (*s == '`') {
+          char *cr = s;
+          while (s < end && *s == '`')
+            ++s;
+          if ((uint16_t)(s - cr) == bq_len)
+            break;
+        } else {
+          ++s;
+        }
+      }
+      continue;
+    }
+    if (*s == '<') {
+      char *ae = fio___gfm_inline_angle_end(s, end);
+      if (ae) {
+        s = ae;
+        continue;
+      }
+    }
+    if (*s == '[') {
+      ++depth;
+      ++s;
+      continue;
+    }
+    if (*s == ']') {
+      if (!depth)
+        break;
+      --depth;
+    }
+    ++s;
+  }
+  if (s >= end || depth)
+    return NULL;
+  char *after = s + 1;
+  if (after < end && *after == '(') {
+    char *q = after + 1;
+    int pd = 1;
+    while (q < end && pd) {
+      if (*q == '\\' && q + 1 < end) {
+        q += 2;
+        continue;
+      }
+      pd += (*q == '(') - (*q == ')');
+      ++q;
+    }
+    return pd ? NULL : q;
+  }
+  if (after < end && *after == '[') {
+    char *q = after + 1;
+    while (q < end && *q != ']') {
+      if (*q == '\\' && q + 1 < end)
+        q += 2;
+      else
+        ++q;
+    }
+    return (q < end) ? q + 1 : NULL;
+  }
+  return NULL;
+}
+
+FIO_SFUNC char *fio___gfm_find_closer(fio___gfm_parser_s *st,
+                                      char *search_start,
                                       char *boundary,
                                       char marker,
                                       uint16_t opener_len,
@@ -2558,6 +2788,42 @@ FIO_SFUNC char *fio___gfm_find_closer(char *search_start,
       s += 2;
       continue;
     }
+    /* Skip angle autolinks, raw HTML, and link/image constructs. Delimiters
+     * inside them are literal/link text, not closer candidates. */
+    if (*s == '<') {
+      char *angle_end = fio___gfm_inline_angle_end(s, boundary);
+      if (angle_end) {
+        s = angle_end;
+        continue;
+      }
+    }
+    if (*s == '[' || (*s == '!' && s + 1 < boundary && s[1] == '[')) {
+      char *link_end = fio___gfm_link_like_end(s, boundary);
+      if (link_end) {
+        s = link_end;
+        continue;
+      }
+      char *bracket = s + (*s == '!');
+      char *q = bracket + 1;
+      uint16_t bd = 0;
+      while (q < boundary) {
+        if (*q == '[')
+          ++bd;
+        else if (*q == ']') {
+          if (!bd)
+            break;
+          --bd;
+        }
+        ++q;
+      }
+      if (*s == '[' && q < boundary && *q == ']') {
+        fio_buf_info_s label = FIO_BUF_INFO2(s + 1, (size_t)(q - (s + 1)));
+        if (fio___gfm_ref_resolve(st, label)) {
+          s = q + 1;
+          continue;
+        }
+      }
+    }
     /* Check for run of marker */
     if (*s == marker) {
       char *run_start = s;
@@ -2584,8 +2850,8 @@ FIO_SFUNC char *fio___gfm_find_closer(char *search_start,
         can_close = right_flanking && (!left_flanking || after_punct);
       }
       if (marker == '~') {
-        can_close = can_close && (run_len == 2);
-        can_open = can_open && (run_len == 2);
+        can_close = can_close && (run_len == opener_len);
+        can_open = can_open && (run_len == opener_len);
       }
 
       /* Nesting: pure opener increments depth, closer decrements */
@@ -2645,53 +2911,16 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
   *title = (fio_buf_info_s){0};
   *ref_label = (fio_buf_info_s){0};
 
-  /* Scan for unescaped ']' — handle escapes, code spans, and images.
-   * Images (![...]) are allowed inside link text; bare '[' is not. */
-  while (s < end && *s != ']') {
+  /* Scan for the matching ']' for link text. Balanced nested brackets are
+   * part of the link text; brackets inside code spans, raw HTML, and angle
+   * autolinks do not close the link. */
+  uint16_t bracket_depth = 0;
+  while (s < end) {
     if (*s == '\\' && s + 1 < end) {
       s += 2;
       continue;
     }
-    if (*s == '!' && s + 1 < end && s[1] == '[') {
-      /* Skip over image construct: find matching ] then skip (url) or [ref] */
-      char *img_start = s + 1; /* points at '[' */
-      char *img_s = img_start + 1;
-      /* Find closing ']' for image text */
-      while (img_s < end && *img_s != ']') {
-        if (*img_s == '\\' && img_s + 1 < end) { img_s += 2; continue; }
-        ++img_s;
-      }
-      if (img_s < end) {
-        ++img_s; /* past ']' */
-        /* Skip (url) or [ref] or [] */
-        if (img_s < end && *img_s == '(') {
-          ++img_s;
-          int paren_depth = 1;
-          while (img_s < end && paren_depth > 0) {
-            paren_depth += (*img_s == '(') - (*img_s == ')');
-            ++img_s;
-          }
-          s = img_s;
-          continue;
-        }
-        if (img_s < end && *img_s == '[') {
-          ++img_s;
-          while (img_s < end && *img_s != ']')
-            ++img_s;
-          s = img_s + (img_s < end);
-          continue;
-        }
-        s = img_s; /* collapsed ref: ![text][] or shortcut ![text] */
-        continue;
-      }
-      /* Not a valid image — treat '!' as literal */
-      ++s;
-      continue;
-    }
-    if (*s == '[')
-      return NULL; /* no nested unescaped [ in link text */
     if (*s == '`') {
-      /* skip code span */
       char *bq = s;
       while (s < end && *s == '`')
         ++s;
@@ -2709,12 +2938,41 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
       }
       continue;
     }
+    if (*s == '<') {
+      char *angle_end = fio___gfm_inline_angle_end(s, end);
+      if (angle_end) {
+        s = angle_end;
+        continue;
+      }
+    }
+    if (*s == '[') {
+      ++bracket_depth;
+      ++s;
+      continue;
+    }
+    if (*s == ']') {
+      if (!bracket_depth)
+        break;
+      --bracket_depth;
+      ++s;
+      continue;
+    }
     ++s;
   }
-  if (s >= end)
+  if (s >= end || bracket_depth)
     return NULL;
   *bracket_close = s;
   ++s; /* past ']' */
+
+  if (!is_image) {
+    for (char *inner = *text_start; inner < *bracket_close; ++inner) {
+      if (*inner == '[' && !(inner > *text_start && inner[-1] == '!')) {
+        char *inner_end = fio___gfm_link_like_end(inner, *bracket_close);
+        if (inner_end)
+          return NULL;
+      }
+    }
+  }
 
   /* (a) Inline link: ( destination "title" ) */
   if (s < end && *s == '(') {
@@ -2743,7 +3001,7 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
       ds = lp;
       int pd = 0;
       while (lp < end && *lp != ' ' && *lp != '\t' && *lp != '\n' &&
-             *lp != '\r' && *lp != ')') {
+             *lp != '\r') {
         if (*lp == '\\' && lp + 1 < end) {
           lp += 2;
           continue;
@@ -2757,6 +3015,8 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
         }
         ++lp;
       }
+      if (pd != 0)
+        goto try_ref;
       de = lp;
     } else {
       ds = lp;
@@ -2835,8 +3095,10 @@ try_ref:
     }
   }
 
-  /* (d) Shortcut reference: label = link text */
-  {
+  /* (d) Shortcut reference: label = link text. A following '[' means this
+   * attempted a full/collapsed reference; if that failed, do not reinterpret
+   * the first bracketed text as a shortcut. */
+  if (!(s < end && *s == '[')) {
     fio_buf_info_s rl = FIO_BUF_INFO2(
         *text_start, (size_t)(*bracket_close - *text_start));
     fio___gfm_ref_s *ref = fio___gfm_ref_resolve(st, rl);
@@ -2958,6 +3220,24 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
         p += 1; /* skip backslash */
         p += (*p == '\r');
         p += (p < end && *p == '\n');
+        for (uint16_t bq = 0; bq < bq_depth && p < end; ++bq) {
+          char *t = p;
+          uint32_t sp = 0;
+          while (t < end && (*t == ' ' || *t == '\t') && sp < 3) {
+            sp += (*t == '\t')
+                      ? FIO___GFM_TAB_WIDTH - (sp & (FIO___GFM_TAB_WIDTH - 1U))
+                      : 1;
+            ++t;
+          }
+          if (t < end && *t == '>') {
+            p = t + 1;
+            p += (p < end && (*p == ' ' || *p == '\t'));
+          } else {
+            break;
+          }
+        }
+        while (p < end && (*p == ' ' || *p == '\t'))
+          ++p;
         text_start = p;
         if (p < end) {
           fio_gfm_event_s ev;
@@ -3070,11 +3350,7 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
         ++trailing_spaces;
       }
       int is_hard = (trailing_spaces >= 2);
-      if (is_hard) {
-        FIO___GFM_FLUSH_TEXT(line_text_end);
-      } else {
-        FIO___GFM_FLUSH_TEXT(p);
-      }
+      FIO___GFM_FLUSH_TEXT(line_text_end);
       /* skip line ending */
       p += (*p == '\r');
       p += (p < end && *p == '\n');
@@ -3175,40 +3451,16 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
           continue;
         }
         /* check for inline HTML */
-        char fc = (p + 1 < gt) ? p[1] : 0;
-        int is_html = (fc == '!' || fc == '?');
-        if (!is_html && fc == '/') {
-          char *hn = p + 2;
-          while (hn < gt && ((*hn >= 'a' && *hn <= 'z') ||
-                             (*hn >= 'A' && *hn <= 'Z') ||
-                             (*hn >= '0' && *hn <= '9') || *hn == '-'))
-            ++hn;
-          if (hn > p + 2) {
-            while (hn < gt && (*hn == ' ' || *hn == '\t' || *hn == '\n' ||
-                               *hn == '\r'))
-              ++hn;
-          }
-          is_html = (hn > p + 2 && hn == gt);
-        } else if (!is_html &&
-                   ((fc >= 'a' && fc <= 'z') || (fc >= 'A' && fc <= 'Z'))) {
-          char *hn = p + 1;
-          while (hn < gt && ((*hn >= 'a' && *hn <= 'z') ||
-                             (*hn >= 'A' && *hn <= 'Z') ||
-                             (*hn >= '0' && *hn <= '9') || *hn == '-'))
-            ++hn;
-          is_html = (hn > p + 1 &&
-                     (hn == gt || *hn == '/' || *hn == ' ' || *hn == '\t' ||
-                      *hn == '\n' || *hn == '\r'));
-        }
-        if (is_html) {
+        char *tag_end = fio___gfm_html_tag_end(p, end);
+        if (tag_end) {
           FIO___GFM_FLUSH_TEXT(p);
           fio_gfm_event_s ev;
           fio___gfm_event_init(st, &ev);
           ev.type = FIO_GFM_INLINE_HTML;
-          ev.text = FIO_BUF_INFO2(p, (size_t)(gt + 1 - p));
+          ev.text = FIO_BUF_INFO2(p, (size_t)(tag_end - p));
           r = fio___gfm_emit_write(st, &ev);
           if (r) goto done;
-          p = gt + 1;
+          p = tag_end;
           text_start = p;
           continue;
         }
@@ -3247,7 +3499,7 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
       if (can_open && open_top < FIO___GFM_MAX_OPEN_SECTIONS) {
         char *boundary = open_top > 0 ? open[open_top - 1].closer_pos : end;
         uint16_t cl = 0;
-        char *closer = fio___gfm_find_closer(p, boundary, marker, run_len, &cl);
+        char *closer = fio___gfm_find_closer(st, p, boundary, marker, run_len, &cl);
         if (closer) {
           /* determine consume: 2 for STRONG if both >= 2, else 1 for EMPHASIS */
           uint16_t consume = (run_len >= 2 && cl >= 2) ? 2 : 1;
@@ -3301,7 +3553,7 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
             /* Closer run has no extra chars — search for separate outer */
             uint16_t outer_cl = 0;
             char *outer_closer = fio___gfm_find_closer(
-                closer + cl, boundary, marker, outer_consume, &outer_cl);
+                st, closer + cl, boundary, marker, outer_consume, &outer_cl);
             if (outer_closer) {
               /* push outer, then inner (LIFO: inner on top) */
               fio_gfm_event_s ev;
@@ -3380,7 +3632,8 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
       while (p < end && *p == '~')
         ++p;
       uint16_t run_len = (uint16_t)(p - run_start);
-      if (run_len == 2 && open_top < FIO___GFM_MAX_OPEN_SECTIONS) {
+      if ((run_len == 1 || run_len == 2) &&
+          open_top < FIO___GFM_MAX_OPEN_SECTIONS) {
         char before = (run_start > start) ? run_start[-1] : ' ';
         int before_ws = (before == ' ' || before == '\t' || before == '\n' ||
                          before == '\r');
@@ -3393,7 +3646,7 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
         if (left_flanking) {
           char *boundary = open_top > 0 ? open[open_top - 1].closer_pos : end;
           uint16_t cl = 0;
-          char *closer = fio___gfm_find_closer(p, boundary, '~', 2, &cl);
+          char *closer = fio___gfm_find_closer(st, p, boundary, '~', run_len, &cl);
           if (closer) {
             FIO___GFM_FLUSH_TEXT(run_start);
             fio_gfm_event_s ev;
@@ -3403,7 +3656,7 @@ FIO_SFUNC int fio___gfm_inline_parse(fio___gfm_parser_s *st,
             if (r) goto done;
             open[open_top++] = (fio___gfm_open_section_s){
                 .closer_pos = closer,
-                .closer_len = 2,
+                .closer_len = run_len,
                 .type = FIO_GFM_STRIKETHROUGH,
                 .marker = '~',
             };

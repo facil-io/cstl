@@ -576,7 +576,7 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
     return 0;
   for (; *str;) /* compiler, please vectorize */
     ++str;
-  return (str - start);
+  return (size_t)(str - start);
   //   const char *r = (const char *)str;
   //   uint64_t u[16] FIO_ALIGN(16) = {0};
   //   uint64_t flag = 0;

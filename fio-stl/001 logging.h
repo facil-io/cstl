@@ -62,7 +62,7 @@ FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
     }
     tmp___log[len___log++] = '\n';
     tmp___log[len___log] = '0';
-    fwrite(tmp___log, 1, len___log, FIO_STDERR_FILE);
+    fwrite(tmp___log, 1, (size_t)len___log, FIO_STDERR_FILE);
     return;
   }
   fwrite("\x1B[1mERROR:\x1B[0m log output error (can't write).\n",

@@ -233,7 +233,7 @@ Implementation - inlined
 /** Returns the number of digits in base 10. */
 FIO_IFUNC size_t fio_digits10(int64_t i) {
   if (i >= 0)
-    return fio_digits10u(i);
+    return fio_digits10u((uint64_t)i);
   return fio_digits10u((0ULL - (uint64_t)i)) + 1;
 }
 
@@ -341,10 +341,10 @@ FIO_IFUNC void fio_ltoa8u(char *dest, uint64_t i, size_t digits) {
   dest += digits;
   *dest-- = 0;
   while (i > 7) {
-    *dest-- = '0' + (i & 7);
+    *dest-- = (char)('0' + (i & 7));
     i >>= 3;
   }
-  *dest = '0' + i;
+  *dest = (char)('0' + i);
 }
 
 FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
@@ -352,10 +352,10 @@ FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits) {
   *dest-- = 0;
   while (i > 9) {
     uint64_t nxt = i / 10;
-    *dest-- = '0' + (i - (nxt * 10ULL));
+    *dest-- = (char)('0' + (i - (nxt * 10ULL)));
     i = nxt;
   }
-  *dest = '0' + (unsigned char)i;
+  *dest = (char)('0' + (unsigned char)i);
 }
 
 FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
@@ -364,9 +364,9 @@ FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits) {
   *dest-- = 0;
   while (digits) {
     digits -= 2;
-    *dest-- = fio_i2c(i & 15);
+    *dest-- = (char)fio_i2c((uint8_t)(i & 15));
     i >>= 4;
-    *dest-- = fio_i2c(i & 15);
+    *dest-- = (char)fio_i2c((uint8_t)(i & 15));
     i >>= 4;
   }
 }
@@ -405,10 +405,10 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
   *dest-- = 0;
   while (i >= base) {
     uint64_t nxt = i / base;
-    *dest-- = fio_i2c(i - (nxt * base));
+    *dest-- = (char)fio_i2c((uint8_t)(i - (nxt * base)));
     i = nxt;
   }
-  *dest = fio_i2c(i);
+  *dest = (char)fio_i2c((uint8_t)i);
 }
 
 /** Converts an unsigned `val` to a signed `val`, with overflow protection. */
@@ -416,14 +416,14 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
   if (!to_negative) {
     /* overflow? */
     if (!(val & 0x8000000000000000ULL))
-      return val;
+      return (int64_t)val;
     errno = E2BIG;
     val = 0x7FFFFFFFFFFFFFFFULL;
-    return val;
+    return (int64_t)val;
   }
   if (!(val & 0x8000000000000000ULL)) {
-    val = (int64_t)0LL - (int64_t)val;
-    return val;
+    val = (uint64_t)((int64_t)0LL - (int64_t)val);
+    return (int64_t)val;
   }
   /* read overflow */
   errno = E2BIG;
@@ -484,8 +484,8 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
     goto is_inifinity_or_nan;
   if (FIO_UNLIKELY(exponent <= 0))
     goto is_subnormal;
-  exponent = (uint64_t)exponent << 52;
-  u.u64 |= exponent;
+  exponent = (int64_t)((uint64_t)exponent << 52);
+  u.u64 |= (uint64_t)exponent;
   /* reposition mant bits so we "hide" the fist set bit in bit[52] */
   if (msbi < 52)
     mant = mant << (52 - msbi);
@@ -593,7 +593,7 @@ SFUNC uint64_t fio_atol8u(char **pstr) {
     *pstr += (**pstr == '_'); /* allow '_' as a divider. */
 #endif
   }
-  if ((fio_c2i(**pstr)) < 8)
+  if ((fio_c2i((uint8_t)(**pstr))) < 8)
     errno = E2BIG;
   return r;
 }
@@ -852,7 +852,7 @@ SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base) {
     if (r > limit)
       break;
   }
-  if ((fio_c2i(**pstr)) < base)
+  if ((fio_c2i((uint8_t)(**pstr))) < base)
     errno = E2BIG;
   return r;
 }
@@ -881,14 +881,14 @@ SFUNC int64_t FIO___ASAN_AVOID fio_atol(char **pstr) {
   neg = (p[0] == '-');
   p += (neg | (p[0] == '+'));
 
-  base += (p[0] == '0');             /* starts with zero? - oct */
-  p += base;                         /* consume the possible '0' */
-  base += ((p[0] | 32) == 'b');      /* binary */
-  base += ((p[0] | 32) == 'x') << 1; /* hex */
-  p += (base > 1);                   /* consume 'b' or 'x' */
-  char *const s = p;                 /* mark starting point */
-  u.u64 = fn[base](&p);              /* convert string to unsigned long long */
-  if (p != s || base == 1)           /* false oct base, a single '0'? */
+  base += (p[0] == '0');                         /* starts with zero? - oct */
+  p += base;                                     /* consume the possible '0' */
+  base += ((p[0] | 32) == 'b');                  /* binary */
+  base += ((uint32_t)((p[0] | 32) == 'x') << 1); /* hex */
+  p += (base > 1);                               /* consume 'b' or 'x' */
+  char *const s = p;                             /* mark starting point */
+  u.u64 = fn[base](&p);    /* convert string to unsigned long long */
+  if (p != s || base == 1) /* false oct base, a single '0'? */
     *pstr = p;
   if ((neg | !base)) /* if base 10 or negative, treat signed bit as overflow */
     return fio_u2i_limit(u.u64, neg);
@@ -997,7 +997,11 @@ SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base) {
   if (isnan(num))
     goto is_nan;
 
-  written = snprintf(dest, 30, "%g", num);
+  written = (size_t)snprintf(dest, 30, "%g", num);
+  if ((written + 1) == 0)
+    written = 0;
+  if (written > 30)
+    written = 30;
   /* test if we need to add a ".0" to the end of the string */
   for (char *start = dest;;) {
     switch (*start) {
@@ -1049,7 +1053,8 @@ FIO_IFUNC long double fio___aton_pow10(uint64_t e10) {
 #undef fio___aton_pow10_map_row
   if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
     return pow_map[e10];
-  return powl(10, e10); /* return infinity? */
+  return (long double)powl((long double)10,
+                           (long double)e10); /* return infinity? */
 }
 
 /** Returns a power of 10. Supports values up to 1.0e-308. */
@@ -1068,7 +1073,8 @@ FIO_IFUNC long double fio___aton_pow10n(uint64_t e10) {
 #undef fio___aton_pow10_map_row
   if (e10 < sizeof(pow_map) / sizeof(pow_map[0]))
     return pow_map[e10];
-  return powl(10, (int64_t)(0 - e10)); /* return zero? */
+  return (long double)powl((long double)10,
+                           (long double)(0 - e10)); /* return zero? */
 }
 
 FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
@@ -1100,30 +1106,30 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
   if ((p[0] | 32) == 'n')
     goto is_nan;
 
-  base += (p[0] == '0');             /* oct */
-  p += base;                         /* consume '0' */
-  base += ((p[0] | 32) == 'b');      /* binary */
-  base += ((p[0] | 32) == 'x') << 1; /* hex */
-  base -= (base & (p[0] == '.'));    /* 0. isn't oct...  */
-  p += (base > 1);                   /* consume 'b' or 'x' */
-  start = p;                         /* mark starting point */
+  base += (uint16_t)(p[0] == '0');               /* oct */
+  p += base;                                     /* consume '0' */
+  base += (uint16_t)((p[0] | 32) == 'b');        /* binary */
+  base += (uint16_t)(((p[0] | 32) == 'x') << 1); /* hex */
+  base -= (uint16_t)(base & (p[0] == '.'));      /* 0. isn't oct...  */
+  p += (base > 1);                               /* consume 'b' or 'x' */
+  start = p;                                     /* mark starting point */
 
   // FIO_LOG_INFO("Start Unsigned: %s", p);
   before_dot = fn[base]((char **)&p);
   if (base == 2)
     goto is_binary;
   head = p;
-  while (fio_c2i(p[0]) < base_limit[base])
+  while (fio_c2i((uint8_t)(p[0])) < base_limit[base])
     ++p;
-  head_expo = p - head;
+  head_expo = (size_t)(p - head);
   force_float |= !!(head_expo);
   if (p[0] == '.') {
     ++p;
     force_float = 1;
     head = p;
     after_dot = fn[base]((char **)&p);
-    dot_expo = p - head;
-    while (fio_c2i(p[0]) < base_limit[base])
+    dot_expo = (size_t)(p - head);
+    while (fio_c2i((uint8_t)(p[0])) < base_limit[base])
       ++p;
   }
   if ((p[0] | 32) == exponent_char[base]) {
@@ -1142,7 +1148,7 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
                        (!neg && base))) { /* is integer */
     r.u = before_dot;
     if (neg)
-      r.i = 0 - r.u;
+      r.i = (int64_t)(0 - r.u);
     return r;
   }
   dbl = (long double)before_dot;
@@ -1152,18 +1158,18 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
     if (after_dot)
       dbl_dot *= fio___aton_pow10n(dot_expo);
   } else if (base == 3) {
-    dbl *= fio_u2d(1, (head_expo << 2));
-    dbl_dot *= fio_u2d(1, 0 - (dot_expo << 2));
+    dbl *= fio_u2d(1U, (int64_t)(head_expo << 2));
+    dbl_dot *= fio_u2d(1U, (int64_t)(0 - (dot_expo << 2)));
   } else { /* if (base == 1) */
-    dbl *= fio_u2d(1, (head_expo * 3));
-    dbl_dot *= fio_u2d(1, 0 - (dot_expo * 3));
+    dbl *= fio_u2d(1U, (int64_t)(head_expo * 3));
+    dbl_dot *= fio_u2d(1U, (int64_t)(0 - (dot_expo * 3)));
   }
   dbl += dbl_dot;
   if (expo) {
     if (base < 2) { /* base 10 / Oct */
       dbl *= (expo_neg ? fio___aton_pow10n : fio___aton_pow10)(expo);
     } else {
-      dbl *= fio_u2d(1, (int64_t)(expo_neg ? 0 - expo : expo));
+      dbl *= fio_u2d(1U, (int64_t)(expo_neg ? 0 - expo : expo));
     }
   }
   r.is_float = 1;
@@ -1187,7 +1193,7 @@ is_infinity:
 is_nan:
   if ((p[1] | 32) == 'a' && (p[2] | 32) == 'n') { /* nan */
     r.is_float = 1;
-    r.i = ((~(uint64_t)0) >> (!neg));
+    r.u = ((~(uint64_t)0) >> (!neg));
     p += 3;
     *pstr = (char *)p;
   } else

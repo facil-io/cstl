@@ -163,8 +163,8 @@ iMap Creation Macro
     const imap_type hash = (imap_type)hash_fn(pobj);                           \
     imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */ \
     imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */ \
-    tester += (!tester) << a->capa_bits;                                       \
-    tester -= (hash_mask == tester) << a->capa_bits;                           \
+    tester += (imap_type)((!tester) << a->capa_bits);                          \
+    tester -= (imap_type)((hash_mask == tester) << a->capa_bits);              \
     size_t attempts = 11;                                                      \
     for (;;) {                                                                 \
       /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */  \
@@ -359,14 +359,14 @@ iMap Creation Macro
                                      (uint##bits##_t)(~(uint##bits##_t)0)};    \
     if (!ary)                                                                  \
       return r;                                                                \
-    const uint##bits##_t capa = ((uint##bits##_t)1 << capa_bits);              \
+    const uint##bits##_t capa = (uint##bits##_t)((uint64_t)1 << capa_bits);    \
     const uint##bits##_t pos_mask = (uint##bits##_t)(capa - 1);                \
     const uint##bits##_t hash_mask = (uint##bits##_t) ~pos_mask;               \
     uint##bits##_t tester = (hash & hash_mask); /* hide `tester` lower bits */ \
     uint##bits##_t pos = hash;                  /* use more bits */            \
     /* make sure tester isn't a reserved value (0 || ~0) */                    \
-    tester += (!tester) << capa_bits;                                          \
-    tester -= (hash_mask == tester) << capa_bits;                              \
+    tester += (uint##bits##_t)((!tester) << capa_bits);                        \
+    tester -= (uint##bits##_t)((hash_mask == tester) << capa_bits);            \
     r.set_val = tester; /* store tester value */                               \
     size_t attempts = max_attempts;                                            \
     /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */    \
@@ -412,6 +412,9 @@ FIO___IMAP_SEEKER_TYPE(16)
 FIO___IMAP_SEEKER_TYPE(32)
 FIO___IMAP_SEEKER_TYPE(64)
 
+// #define FIO_IMAP_STATIC()
+
+// FIO_NAME(array_name, s)
 /* *****************************************************************************
 iMap Cleanup
 ***************************************************************************** */

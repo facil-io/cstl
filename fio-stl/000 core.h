@@ -947,7 +947,7 @@ FIO_IFUNC uint8_t fio_trylock_group(fio_lock_i *lock, uint8_t group) {
   if (!(state & group))
     return 0;
   /* store the acquired locks in `state`. */
-  state = ~((~state) & group);
+  state = (uint8_t)(~((~state) & group));
   /* release the locks we acquired */
   fio_atomic_and(lock, state);
   return 1;
@@ -972,17 +972,17 @@ FIO_IFUNC void fio_lock_group(fio_lock_i *lock, uint8_t group) {
 FIO_IFUNC void fio_unlock_group(fio_lock_i *lock, uint8_t group) {
   if (!group)
     group = 1;
-  fio_atomic_and(lock, (~group));
+  fio_atomic_and(lock, (uint8_t)(~group));
 }
 
 /** Tries to lock all sublocks. Returns 0 on success and 1 on failure. */
 FIO_IFUNC uint8_t fio_trylock_full(fio_lock_i *lock) {
-  return fio_trylock_group(lock, (uint8_t)~0);
+  return fio_trylock_group(lock, (uint8_t)(~0));
 }
 
 /** Busy waits for all sub lock to become available - not recommended. */
 FIO_IFUNC void fio_lock_full(fio_lock_i *lock) {
-  fio_lock_group(lock, (uint8_t)~0);
+  fio_lock_group(lock, (uint8_t)(~0));
 }
 
 /** Unlocks all sub locks, no matter which thread owns the lock. */
@@ -2232,7 +2232,7 @@ FIO_IFUNC FIO_CONST uintmax_t fio_ct_if(uintmax_t cond,
 /** Returns `a` if a >= `b`. */
 FIO_IFUNC FIO_CONST intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
-  const uintmax_t a = a_, b = b_;
+  const uintmax_t a = (uintmax_t)a_, b = (uintmax_t)b_;
   return (
       intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
 }
@@ -2240,7 +2240,7 @@ FIO_IFUNC FIO_CONST intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
 /** Returns `a` if a >= `b`. */
 FIO_IFUNC FIO_CONST intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
   // if b - a is negative, a > b, unless both / one are negative.
-  const uintmax_t a = a_, b = b_;
+  const uintmax_t a = (uintmax_t)a_, b = (uintmax_t)b_;
   return (
       intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, a, b);
 }
@@ -2248,15 +2248,17 @@ FIO_IFUNC FIO_CONST intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
 /** Returns absolute value. */
 FIO_IFUNC FIO_CONST uintmax_t fio_ct_abs(intmax_t i_) {
   // if b - a is negative, a > b, unless both / one are negative.
-  const uintmax_t i = i_;
-  return (intmax_t)fio_ct_if_bool((i >> ((sizeof(i) << 3) - 1)), 0 - i, i);
+  const uintmax_t i = (uintmax_t)i_;
+  return fio_ct_if_bool((uintmax_t)(i >> ((sizeof(i) << 3) - 1)),
+                        (uintmax_t)((uintmax_t)0 - i),
+                        i);
 }
 
 /* returns either a lower case (ASCI) or the original char. */
 FIO_IFUNC char fio_ct_tolower(char c) {
-  return (c | (((uint8_t)((uint8_t)c - (uint8_t)'A') <
-                (uint8_t)(((uint8_t)'Z' + 1) - ((uint8_t)'A')))
-               << 5));
+  return (char)((uint8_t)c | (((uint8_t)((uint8_t)c - (uint8_t)'A') <
+                               (uint8_t)(((uint8_t)'Z' + 1) - ((uint8_t)'A')))
+                              << 5));
 }
 
 /* *****************************************************************************
@@ -4401,7 +4403,7 @@ Vector Helpers - Multi-Precision Math
       is_bigger |= (is_eq & (a->u64[i] > b->u64[i]));                          \
       is_eq &= (unsigned)(a->u64[i] == b->u64[i]);                             \
     }                                                                          \
-    return (is_eq - 1) + (is_bigger << 1);                                     \
+    return (int)((is_eq - (unsigned)1) + (is_bigger << 1));                    \
   }
 
 #undef FIO___VMATH_DEF_LARGE_MUL

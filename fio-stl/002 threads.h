@@ -377,7 +377,7 @@ FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
                                         size_t milliseconds) {
   struct timespec t;
   clock_gettime(CLOCK_REALTIME, &t);
-  milliseconds += t.tv_nsec / 1000000;
+  milliseconds += (size_t)(t.tv_nsec / 1000000);
   t.tv_sec += (long)(milliseconds / 1000);
   t.tv_nsec = (long)((milliseconds % 1000) * 1000000);
   return pthread_cond_timedwait(c, m, &t);

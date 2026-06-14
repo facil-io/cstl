@@ -155,7 +155,7 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
     return i;
   char *amp = (char *)FIO_MEMCHR(i.name.buf, '&', i.name.len);
   if (amp) {
-    i.name.len = amp - i.name.buf;
+    i.name.len = (size_t)(amp - i.name.buf);
     i.private___.len -= i.name.len + 1;
     i.private___.buf += i.name.len + 1;
   } else {
@@ -164,8 +164,8 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s i) {
   char *equ = (char *)FIO_MEMCHR(i.name.buf, '=', i.name.len);
   if (equ) {
     i.value.buf = equ + 1;
-    i.value.len = (i.name.buf + i.name.len) - i.value.buf;
-    i.name.len = equ - i.name.buf;
+    i.value.len = (size_t)((i.name.buf + i.name.len) - i.value.buf);
+    i.name.len = (size_t)(equ - i.name.buf);
   } else {
     i.value = FIO_BUF_INFO0;
   }
@@ -252,7 +252,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   case ':':
     if (pos + 2 <= end && pos[1] == '/' && pos[2] == '/') {
       /* scheme:// */
-      r.scheme.len = pos - url;
+      r.scheme.len = (size_t)(pos - url);
       pos += 3;
     } else {
       /* username:[password] OR */
@@ -419,15 +419,15 @@ finish:
     s |= 0x20202020U; /* downcase */
     if (s == file_str || s == unix_str || s == priv_str) {
       r.path.buf = r.scheme.buf + 7;
-      r.path.len = end - (r.scheme.buf + 7);
+      r.path.len = (size_t)(end - (r.scheme.buf + 7));
       if (r.query.len)
-        r.path.len = r.query.buf - (r.path.buf + 1);
+        r.path.len = (size_t)(r.query.buf - (r.path.buf + 1));
       else if (r.target.len)
-        r.path.len = r.target.buf - (r.path.buf + 1);
+        r.path.len = (size_t)(r.target.buf - (r.path.buf + 1));
       r.user.len = r.password.len = r.port.len = r.host.len = 0;
     }
   } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
-    r.path.len = end - r.host.buf;
+    r.path.len = (size_t)(end - r.host.buf);
     r.path.buf = r.host.buf;
     r.query.len = r.target.len = r.host.len = 0;
   }
