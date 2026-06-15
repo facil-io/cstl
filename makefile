@@ -49,7 +49,7 @@ INSTALL_INCLUDE = $(INSTALL_PREFIX)/include/$(NAME)
 #############################################################################
 
 # Targets
-.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags $(TEST_DIR) $(TEST_DIR)/% $(EXAMPLES_DIR) $(EXAMPLES_DIR)/% extras extras/%
+.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags FORCE
 
 # Default target
 all: everything___
@@ -90,6 +90,9 @@ lint:
 set_debug_flags:
 	$(eval CFLAGS=$(DEBUG_CFLAGS))
 	@echo "(!) Debug mode detected."
+
+# Force-rebuild helper: any target that depends on this is always out of date
+FORCE:
 
 db/%: | clean set_debug_flags % ;
 %/db: | clean set_debug_flags % ;
@@ -134,116 +137,81 @@ install-docs: | $(BUILD_DIR)
 
 everything___: install-docs install-headers
 
-#############################################################################
-# Tests
-#############################################################################
+############################################################################-
+# Generic folder rules: build & run every standalone C program
+############################################################################-
 
-# Test files
-TEST_SOURCES = $(shell find $(TEST_DIR) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
-TEST_TARGETS = $(TEST_SOURCES:$(TEST_DIR)/%=$(BUILD_DIR)/$(TEST_DIR)/%)
-TEST_BINS = $(TEST_TARGETS:%.c=%)
-AFTER_TEST_MESSAGE="\\n$(DESCRIPTION) is brought to you by \\x1B[1m$(AUTHOR)\x1B[0m.\\n\\x1B[1mValue deserves to be valued.\\x1B[0m\\n(please consider code contributions / donations)\\n"
-
-# Build test binaries (each test file becomes a separate executable)
-$(BUILD_DIR)/$(TEST_DIR)/%: $(TEST_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	@echo "* Compiling Test: $*.c"
-	@$(CC) $(CFLAGS) -o $@ $< $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(LDFLAGS)
+AFTER_RUN_MESSAGE="\\n$(DESCRIPTION) is brought to you by \\x1B[1m$(AUTHOR)\x1B[0m.\\n\\x1B[1mValue deserves to be valued.\x1B[0m\\n(please consider code contributions / donations)\\n"
 
 
-# Build and run tests
-test: clean | all $(TEST_BINS)
+# $(call DEFINE_UNIT_RULE, path) - explicit rule to run one compiled unit
+define DEFINE_UNIT_RULE
+$(1): $(BUILD_DIR)/$(1)
+	@echo "Running $$@"
+	@echo "=================================="
+	@$(BUILD_DIR)/$$@
+endef
+
+# $(call DEFINE_FOLDER, folder) generates:
+#   <folder>              - build and run all .c units in <folder>
+#   <folder>/<path/name>  - build and run a specific unit
+#   tmp/<folder>/<path/name> - the actual binary target
+define DEFINE_FOLDER
+$(1)_SOURCES := $(shell find $(1) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
+$(1)_BINS    := $$($(1)_SOURCES:%.c=$(BUILD_DIR)/%)
+$(1)_RUNS    := $$($(1)_SOURCES:$(1)/%.c=$(1)/%)
+
+.PHONY: $(1) $$($(1)_RUNS)
+
+# Build: each .c becomes its own executable under $(BUILD_DIR).
+# FORCE is a normal prerequisite so the binary is always recompiled.
+$$(BUILD_DIR)/$(1)/%: $(1)/%.c $(OBJECTS) FORCE | $(BUILD_DIR)
+	@mkdir -p $$(dir $$@)
+	@echo "* Compiling $(1)/$$*.c"
+	@$$(CC) $$(CFLAGS) -o $$@ $$< $$(filter-out $$(BUILD_DIR)/main.o,$$(OBJECTS)) $$(LDFLAGS)
+
+# Run one unit (explicit rules so prerequisites are built even for phony targets)
+$$(foreach run,$$($(1)_RUNS),$$(eval $$(call DEFINE_UNIT_RULE,$$(run))))
+
+# Run every unit in the folder, with pass/fail counter
+$(1): $$($(1)_BINS)
 	@echo ""
-	@if [ -n "$(TEST_BINS)" ]; then \
-		echo "Running test suite..."; \
-		test_count=0; \
-		pass_count=0; \
-		fail_count=0; \
-		failed_tests=""; \
-		for test_bin in $(TEST_BINS); do \
-			test_count=$$((test_count + 1)); \
-			test_name=$$(basename $$test_bin); \
-			echo "  [$$test_count] Running $$test_name..."; \
-			if $$test_bin; then \
-				echo "      ✓ TEST PASSED: $$test_bin"; \
-				pass_count=$$((pass_count + 1));        \
-			else                                      \
-				echo "      ✗ TEST FAILED: $$test_bin"; \
-				fail_count=$$((fail_count + 1));        \
-				failed_tests="$$failed_tests$$test_name "; \
-			fi; \
-			echo ""; \
-		done; \
-		echo ""; \
-		echo "Test Results: $$pass_count passed, $$fail_count failed, $$test_count total"; \
-		if [ $$fail_count -gt 0 ]; then \
-			echo ""; \
-			echo "Failed tests:"; \
-			for failed_test in $$failed_tests; do \
-				echo "  ✗ $$failed_test"; \
-			done; \
-			exit 1; \
+	@echo "Running all units in $(1)/ ..."
+	@unit_count=0; pass_count=0; fail_count=0; failed_units=""; \
+	for unit_bin in $$($(1)_BINS); do \
+		unit_count=$$$$((unit_count + 1)); \
+		unit_name=$$$$(basename $$$$unit_bin); \
+		echo "  [$$$$unit_count] Running $$$$unit_name ..."; \
+		if $$$$unit_bin; then \
+			echo "      ✓ UNIT PASSED: $$$$unit_bin"; \
+			pass_count=$$$$((pass_count + 1)); \
+		else \
+			echo "      ✗ UNIT FAILED: $$$$unit_bin"; \
+			fail_count=$$$$((fail_count + 1)); \
+			failed_units="$$$$failed_units$$$$unit_name "; \
 		fi; \
-	else \
-		echo "No test files found in $(TEST_DIR)/"; \
-	fi
-	@echo "All tests complete!"
-	@echo $(AFTER_TEST_MESSAGE)
-
-$(TEST_DIR)/%: | clean $(BUILD_DIR)/$(TEST_DIR)/%
-	@echo "Running test $(BUILD_DIR)/$@"
-	@echo "=================================="
-	@if $(BUILD_DIR)/$@; then \
-		echo "      ✓ TEST PASS"; \
-	 else                     \
-		echo "      ✗ TEST FAILED"; \
+		echo ""; \
+	done; \
+	echo "Unit Results: $$$$pass_count passed, $$$$fail_count failed, $$$$unit_count total"; \
+	if [ $$$$fail_count -gt 0 ]; then \
+		echo ""; \
+		echo "Failed units:"; \
+		for failed_unit in $$$$failed_units; do \
+			echo "  ✗ $$$$failed_unit"; \
+		done; \
 		exit 1; \
-	 fi;
-	@echo $(AFTER_TEST_MESSAGE) 
+	fi
+	@echo "All units in $(1)/ complete!"
+	@echo $(AFTER_RUN_MESSAGE)
 
-$(TEST_DIR): test;
+endef
 
-#############################################################################
-# Examples
-#############################################################################
-EXAMPLES_SOURCES:=$(shell find $(EXAMPLES_DIR) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
-EXAMPLES_BINS:=$(EXAMPLES_SOURCES:%.c=$(BUILD_DIR)/%)
+$(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old,$(eval $(call DEFINE_FOLDER,$(folder))))
 
-.PHONY: $(EXAMPLES_DIR) $(EXAMPLES_DIR)/%
-
-# Build example binary (each C file becomes a separate executable)
-$(BUILD_DIR)/$(EXAMPLES_DIR)/%: $(EXAMPLES_DIR)/%.c $(OBJECTS) | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	@echo "* Compiling Example: $*.c"
-	@$(CC) $(CFLAGS) -o $@ $< $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(LDFLAGS)
-
-$(EXAMPLES_DIR)/%: $(BUILD_DIR)/$(EXAMPLES_DIR)/%
-	@echo "Running $(BUILD_DIR)/$@"
-	@echo "=================================="
-	@$(BUILD_DIR)/$@
-
-$(EXAMPLES_DIR): $(EXAMPLES_BINS);
-
-#############################################################################
-# Experiments & Extras - use for testing new ideas or temporary tests
-#############################################################################
-EXTRAS_SOURCES:=$(shell find extras -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
-EXTRAS_BINS:=$(EXTRAS_SOURCES:%.c=$(BUILD_DIR)/%)
-
-.PHONY: $(BUILD_DIR)/extras/% extras/%
-
-# Build extra binary (each C file becomes a separate executable)
-$(BUILD_DIR)/extras/%: extras/%.c $(OBJECTS) | $(BUILD_DIR)
-	@mkdir -p $(dir $@)
-	@echo "* Compiling Example: $*.c"
-	@$(CC) $(CFLAGS) -o $@ $< $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(LDFLAGS)
-
-extras/%: $(BUILD_DIR)/extras/%
-	@echo "Running $(BUILD_DIR)/$@"
-	@echo "=================================="
-	@$(BUILD_DIR)/$@
-
-extras: $(EXTRA_BINS) ;
+# `make test` is a convenience alias for `make tests`
+test: tests;
+benchmark: benchmarks;
+bench: benchmarks;
 
 #############################################################################
 # Combining single-file library
@@ -513,7 +481,9 @@ endif #TEST4SQLITE3
 help:
 	@echo "Available targets:"
 	@echo "  all             - Build the project and copy headers (default)"
-	@echo "  test            - Build and run tests"
+	@echo "  test / tests    - Build and run tests"
+	@echo "  examples        - Build and run examples"
+	@echo "  extras          - Build and run extras"
 	@echo "  format          - Format code with clang-format"
 	@echo "  lint            - Lint code with clang-tidy"
 	@echo "  install         - Install binary and headers to $(INSTALL_PREFIX)"
