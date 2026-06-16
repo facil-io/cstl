@@ -170,6 +170,10 @@
 #include "155 x509.h"
 #endif
 
+#ifdef FIO_PEM
+#include "156 pem.h"
+#endif
+
 #ifdef FIO_MLKEM
 #include "156 mlkem.h"
 #endif
@@ -182,10 +186,10 @@
 #endif
 
 #ifdef FIO_OTP
-#include "160 otp.h"
+#include "159 otp.h"
 #endif
 #ifdef FIO_SECRET
-#include "160 secret.h"
+#include "159 secret.h"
 #endif
 #ifdef FIO_DEFLATE
 #include "162 deflate.h"
@@ -197,10 +201,6 @@
 
 #ifdef FIO_TLS13
 #include "190 tls13.h"
-#endif
-
-#ifdef FIO_PEM
-#include "301 pem.h"
 #endif
 
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
