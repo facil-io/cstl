@@ -1,5 +1,5 @@
 /* *****************************************************************************
-CRC32 Compliance Tests and Performance Benchmarks
+CRC32 Compliance Tests
 Tests the standard CRC32 polynomial (0xEDB88320 / gzip / ITU-T V.42).
 ***************************************************************************** */
 #include "test-helpers.h"
@@ -155,90 +155,6 @@ static void test_crc32_all_short_lengths(void) {
 }
 
 /* *****************************************************************************
-Section 2 — Performance Benchmark
-Skipped entirely when DEBUG macro is defined.
-***************************************************************************** */
-
-#ifndef DEBUG
-
-static int64_t crc32_time_us(void) {
-  struct timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
-  return ((int64_t)t.tv_sec * 1000000) + (int64_t)t.tv_nsec / 1000;
-}
-
-static void bench_crc32(void) {
-  /* 64MB total data processed — use a 1MB buffer and iterate */
-  const size_t buf_len = 1024 * 1024;              /* 1 MB */
-  const size_t target_bytes = 64ULL * 1024 * 1024; /* 64 MB */
-
-  uint8_t *buf = (uint8_t *)malloc(buf_len);
-  if (!buf) {
-    fprintf(stderr, "  ERROR: malloc failed for benchmark buffer\n");
-    return;
-  }
-
-  /* Fill with a repeating pattern */
-  for (size_t i = 0; i < buf_len; ++i)
-    buf[i] = (uint8_t)(i & 0xFF);
-
-  /* Warmup */
-  volatile uint32_t sink = 0;
-  for (int w = 0; w < 4; ++w)
-    sink ^= fio_crc32(buf, buf_len, 0);
-
-  /* Benchmark fio_crc32 */
-  size_t iterations = target_bytes / buf_len;
-  if (iterations < 4)
-    iterations = 4;
-
-  int64_t t0 = crc32_time_us();
-  uint32_t crc = 0;
-  for (size_t i = 0; i < iterations; ++i) {
-    crc = fio_crc32(buf, buf_len, 0);
-    FIO_COMPILER_GUARD;
-  }
-  int64_t t1 = crc32_time_us();
-  (void)crc;
-
-  double elapsed_sec = (double)(t1 - t0) / 1e6;
-  double total_mb = (double)(iterations * buf_len) / (1024.0 * 1024.0);
-  double fio_mbps = (elapsed_sec > 0.0) ? total_mb / elapsed_sec : 0.0;
-
-  fprintf(stderr,
-          "\nPerformance (CRC32, %.0f MB):\n"
-          "  fio_crc32:  %.0f MB/s\n",
-          total_mb,
-          fio_mbps);
-
-#ifdef HAVE_ZLIB
-  /* Benchmark zlib crc32() on the same buffer */
-  int64_t z0 = crc32_time_us();
-  uLong zcrc = crc32(0L, Z_NULL, 0);
-  for (size_t i = 0; i < iterations; ++i) {
-    zcrc = crc32(0L, (const Bytef *)buf, (uInt)buf_len);
-    FIO_COMPILER_GUARD;
-  }
-  int64_t z1 = crc32_time_us();
-  (void)zcrc;
-
-  double z_elapsed = (double)(z1 - z0) / 1e6;
-  double zlib_mbps = (z_elapsed > 0.0) ? total_mb / z_elapsed : 0.0;
-  double ratio = (zlib_mbps > 0.0) ? fio_mbps / zlib_mbps : 0.0;
-
-  fprintf(stderr,
-          "  zlib crc32: %.0f MB/s  (ratio: %.2fx)\n",
-          zlib_mbps,
-          ratio);
-#endif /* HAVE_ZLIB */
-
-  fprintf(stderr, "\n");
-  free(buf);
-}
-
-#endif /* !DEBUG */
-
-/* *****************************************************************************
 Main
 ***************************************************************************** */
 
@@ -252,11 +168,6 @@ int main(void) {
   test_crc32_all_short_lengths();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
-
-#ifndef DEBUG
-  /* Section 2: Performance benchmark (release only) */
-  bench_crc32();
-#endif /* !DEBUG */
 
   return g_fail ? 1 : 0;
 }

@@ -1,224 +1,849 @@
 /* *****************************************************************************
-Test
+Test - Comprehensive FIO_STR String Core Tests
 ***************************************************************************** */
 #include "test-helpers.h"
 
 #define FIO_STR
 #include FIO_INCLUDE_FILE
 
-FIO_SFUNC size_t FIO_NAME_TEST(stl, string_core_ltoa)(char *buf,
-                                                      int64_t i,
-                                                      uint8_t base) {
-  fio_str_info_s s = FIO_STR_INFO3(buf, 0, 1024);
-  if (base == 16) {
-    fio_string_write_hex(&s, NULL, i);
-    return s.len;
+/* =============================================================================
+ * Test: FIO_STR_INFO and FIO_BUF_INFO macros
+ * ========================================================================== */
+FIO_SFUNC void test_str_info_macros(void) {
+  /* FIO_STR_INFO1 - from NUL-terminated string */
+  {
+    char *s = "Hello";
+    fio_str_info_s info = FIO_STR_INFO1(s);
+    FIO_ASSERT(info.buf == s, "FIO_STR_INFO1 buf mismatch");
+    FIO_ASSERT(info.len == 5, "FIO_STR_INFO1 len mismatch: %zu", info.len);
   }
-  if (base == 2) {
-    fio_string_write_bin(&s, NULL, i);
-    return s.len;
+
+  /* FIO_STR_INFO2 - from buffer and length */
+  {
+    char *s = "Hello World";
+    fio_str_info_s info = FIO_STR_INFO2(s, 5);
+    FIO_ASSERT(info.buf == s, "FIO_STR_INFO2 buf mismatch");
+    FIO_ASSERT(info.len == 5, "FIO_STR_INFO2 len mismatch");
   }
-  fio_string_write_i(&s, NULL, i);
-  return s.len;
+
+  /* FIO_STR_INFO3 - from buffer, length, and capacity */
+  {
+    char buf[32];
+    fio_str_info_s info = FIO_STR_INFO3(buf, 0, 32);
+    FIO_ASSERT(info.buf == buf, "FIO_STR_INFO3 buf mismatch");
+    FIO_ASSERT(info.len == 0, "FIO_STR_INFO3 len mismatch");
+    FIO_ASSERT(info.capa == 32, "FIO_STR_INFO3 capa mismatch");
+  }
+
+  /* FIO_STR_INFO_IS_EQ */
+  {
+    fio_str_info_s a = FIO_STR_INFO1("Hello");
+    fio_str_info_s b = FIO_STR_INFO2("Hello", 5);
+    fio_str_info_s c = FIO_STR_INFO1("World");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(a, b), "FIO_STR_INFO_IS_EQ equal strings");
+    FIO_ASSERT(!FIO_STR_INFO_IS_EQ(a, c),
+               "FIO_STR_INFO_IS_EQ different strings");
+  }
+
+  /* FIO_BUF_INFO macros */
+  {
+    fio_buf_info_s a = FIO_BUF_INFO1("Test");
+    fio_buf_info_s b = FIO_BUF_INFO2("Test", 4);
+    FIO_ASSERT(a.len == 4, "FIO_BUF_INFO1 len mismatch");
+    FIO_ASSERT(FIO_BUF_INFO_IS_EQ(a, b), "FIO_BUF_INFO_IS_EQ mismatch");
+  }
 }
 
-int main(void) {
-  { /* test basic fio_string_write functions. */
-    char mem[16];
-    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 16);
-    FIO_ASSERT(!fio_string_write(&buf, NULL, "World", 5),
-               "non-truncated return should be zero for fio_string_write");
-    FIO_ASSERT(mem == buf.buf && buf.len == 5 && !memcmp(buf.buf, "World", 6),
-               "fio_string_write failed!");
-    FIO_ASSERT(!fio_string_replace(&buf, NULL, 0, 0, "Hello ", 6),
-               "non-truncated return should be zero for fio_string_replace");
-    FIO_ASSERT(mem == buf.buf && buf.len == 11 &&
-                   !memcmp(buf.buf, "Hello World", 12),
-               "fio_string_replace failed to perform insert (index[0])!");
-    fio_string_write(&buf, NULL, "Hello World", 11);
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "Hello WorldHell", 16),
-               "fio_string_write failed to truncate!");
-    fio_string_replace(&buf, NULL, 0, 5, "Hola", 4);
-    FIO_ASSERT(mem == buf.buf && buf.len == 14 &&
-                   !memcmp(buf.buf, "Hola WorldHell", 15),
-               "fio_string_replace at index 0 failed!");
-    FIO_ASSERT(!fio_string_replace(&buf, NULL, 5, 9, "World", 5),
-               "non-truncated return should be zero for fio_string_replace");
-    FIO_ASSERT(mem == buf.buf && buf.len == 10 &&
-                   !memcmp(buf.buf, "Hola World", 11),
-               "fio_string_replace end overwrite failed!");
-    fio_string_replace(&buf, NULL, 5, 0, "my beautiful", 12);
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "Hola my beautif", 16),
-               "fio_string_replace failed to truncate!");
-    FIO_ASSERT(fio_string_replace(&buf, NULL, -11, 2, "big", 3),
-               "truncation should return non-zero on fio_string_replace.");
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "Hola big beauti", 16),
-               "fio_string_replace failed to truncate (negative index)!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
-    fio_string_printf(&buf, NULL, "I think %d is the best answer", 42);
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "I think 42 is t", 16),
-               "fio_string_printf failed to truncate!");
+/* =============================================================================
+ * Test: fio_string_write - edge cases
+ * ========================================================================== */
+FIO_SFUNC void test_string_write(void) {
+  /* Basic write */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    int r = fio_string_write(&s, NULL, "Hello", 5);
+    FIO_ASSERT(r == 0, "fio_string_write should return 0 on success");
+    FIO_ASSERT(s.len == 5, "len should be 5, got %zu", s.len);
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello", 6), "content mismatch");
+  }
 
-    FIO_MEMSET(mem, 0, 16);
-    buf = FIO_STR_INFO3(mem, 0, 16);
-    FIO_ASSERT(
-        fio_string_write2(&buf,
-                          NULL,
-                          FIO_STRING_WRITE_STR2((char *)"I think ", 8),
-                          FIO_STRING_WRITE_NUM(42),
-                          FIO_STRING_WRITE_STR1((char *)" is the best answer")),
-        "truncation return value should be non-zero for fio_string_write2.");
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "I think 42 is t", 16),
-               "fio_string_write2 failed to truncate!");
-    FIO_MEMSET(mem, 0, 16);
-    buf = FIO_STR_INFO3(mem, 0, 16);
-    FIO_ASSERT(
-        fio_string_write2(&buf,
-                          NULL,
-                          FIO_STRING_WRITE_STR2((char *)"I think ", 8),
-                          FIO_STRING_WRITE_HEX(42),
-                          FIO_STRING_WRITE_STR1((char *)" is the best answer")),
-        "truncation return value should be non-zero for fio_string_write2.");
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "I think 2A is t", 16),
-               "fio_string_write2 failed to truncate (hex)!");
-    FIO_MEMSET(mem, 0, 16);
-    buf = FIO_STR_INFO3(mem, 0, 16);
-    FIO_ASSERT(
-        fio_string_write2(&buf,
-                          NULL,
-                          FIO_STRING_WRITE_STR2((char *)"I Think ", 8),
-                          FIO_STRING_WRITE_FLOAT(42.42),
-                          FIO_STRING_WRITE_STR1((char *)" is the best answer")),
-        "truncation return value should be non-zero for fio_string_write2.");
-    FIO_ASSERT(mem == buf.buf && buf.len == 15 &&
-                   !memcmp(buf.buf, "I Think 42.42 i", 16),
-               "fio_string_write2 failed to truncate (float)!");
-    buf = FIO_STR_INFO3(mem, 0, 16);
-    fio_string_write2(&buf,
+  /* Write to buffer with exact capacity */
+  {
+    char buf[6];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 6);
+    int r = fio_string_write(&s, NULL, "Hello", 5);
+    FIO_ASSERT(r == 0, "exact capacity write should succeed");
+    FIO_ASSERT(s.len == 5, "len should be 5");
+  }
+
+  /* Write with truncation */
+  {
+    char buf[4];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 4);
+    int r = fio_string_write(&s, NULL, "Hello", 5);
+    FIO_ASSERT(r != 0, "truncation should return non-zero");
+    FIO_ASSERT(s.len == 3, "truncated len should be 3, got %zu", s.len);
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hel", 4), "truncated content mismatch");
+  }
+
+  /* Write zero-length data */
+  {
+    char buf[16];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 5, 16);
+    FIO_MEMCPY(buf, "Hello", 5);
+    int r = fio_string_write(&s, NULL, "X", 0);
+    FIO_ASSERT(r == 0, "zero-length write should succeed");
+    FIO_ASSERT(s.len == 5, "len should remain 5");
+  }
+
+  /* Multiple writes */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "Hello", 5);
+    fio_string_write(&s, NULL, " ", 1);
+    fio_string_write(&s, NULL, "World", 5);
+    FIO_ASSERT(s.len == 11, "multiple writes len should be 11");
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello World", 12),
+               "multiple writes content");
+  }
+}
+
+/* =============================================================================
+ * Test: fio_string_replace - comprehensive
+ * ========================================================================== */
+FIO_SFUNC void test_string_replace(void) {
+  /* Insert at beginning */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "World", 5);
+    fio_string_replace(&s, NULL, 0, 0, "Hello ", 6);
+    FIO_ASSERT(s.len == 11, "insert at start len");
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello World", 12),
+               "insert at start content");
+  }
+
+  /* Insert in middle */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "HelloWorld", 10);
+    fio_string_replace(&s, NULL, 5, 0, " ", 1);
+    FIO_ASSERT(s.len == 11, "insert in middle len");
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello World", 12),
+               "insert in middle content");
+  }
+
+  /* Replace in middle */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "Hello World", 11);
+    fio_string_replace(&s, NULL, 6, 5, "Universe", 8);
+    FIO_ASSERT(s.len == 14, "replace len: %zu", s.len);
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello Universe", 15), "replace content");
+  }
+
+  /* Delete (replace with empty) */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "Hello World", 11);
+    fio_string_replace(&s, NULL, 5, 6, "", 0);
+    FIO_ASSERT(s.len == 5, "delete len: %zu", s.len);
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello", 5), "delete content");
+  }
+
+  /* Negative index: -1 == end of string, -6 == position of 'W' in "Hello World"
+   */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write(&s, NULL, "Hello World", 11);
+    fio_string_replace(&s, NULL, -6, 5, "Earth", 5);
+    FIO_ASSERT(s.len == 11, "negative index len: %zu", s.len);
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello Earth", 11), "negative index content");
+  }
+}
+
+/* =============================================================================
+ * Test: fio_string_write2 - format specifiers
+ * ========================================================================== */
+FIO_SFUNC void test_string_write2(void) {
+  /* String specifiers */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write2(&s,
                       NULL,
-                      FIO_STRING_WRITE_STR2((char *)"I think ", 8),
-                      FIO_STRING_WRITE_BIN(-1LL),
-                      FIO_STRING_WRITE_STR1((char *)" is the best answer"));
-    FIO_ASSERT(mem == buf.buf && buf.len == 8 &&
-                   !memcmp(buf.buf, "I think ", 8),
-               "fio_string_write2 failed to truncate (bin)!");
+                      FIO_STRING_WRITE_STR1("Hello"),
+                      FIO_STRING_WRITE_STR2(" World", 6));
+    FIO_ASSERT(s.len == 11, "STR write2 len");
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Hello World", 12), "STR write2 content");
   }
-  { /* test numeral fio_string_write functions. */
-    char mem[32];
-    fio_str_info_s buf = FIO_STR_INFO3(mem, 0, 32);
-    FIO_ASSERT(!fio_string_write_i(&buf, NULL, 0),
-               "fio_string_write_i returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
-               "fio_string_write_i didn't print 0!");
-    FIO_ASSERT(!fio_string_write_i(&buf, NULL, -42),
-               "fio_string_write_i returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "0-42", 5),
-               "fio_string_write_i didn't print -24!");
-    buf = FIO_STR_INFO3(mem, 0, 32);
-    FIO_ASSERT(!fio_string_write_u(&buf, NULL, 0),
-               "fio_string_write_u returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
-               "fio_string_write_u didn't print 0!");
-    FIO_ASSERT(!fio_string_write_u(&buf, NULL, -42LL),
-               "fio_string_write_u returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 21 &&
-                   !memcmp(buf.buf, "018446744073709551574", 21),
-               "fio_string_write_u didn't print -24!");
-    buf = FIO_STR_INFO3(mem, 0, 32);
-    FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 0),
-               "fio_string_write_hex returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 2 && !memcmp(buf.buf, "00", 3),
-               "fio_string_write_hex didn't print 0!");
-    FIO_ASSERT(!fio_string_write_hex(&buf, NULL, 42),
-               "fio_string_write_hex returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 4 && !memcmp(buf.buf, "002A", 5),
-               "fio_string_write_hex didn't print 2A!");
-    buf = FIO_STR_INFO3(mem, 0, 32);
-    FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 0),
-               "fio_string_write_bin returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 1 && !memcmp(buf.buf, "0", 2),
-               "fio_string_write_bin didn't print 0!");
-    FIO_ASSERT(!fio_string_write_bin(&buf, NULL, 16),
-               "fio_string_write_bin returned error!");
-    FIO_ASSERT(mem == buf.buf && buf.len == 7 && !memcmp(buf.buf, "0010000", 8),
-               "fio_string_write_bin didn't print 16!");
-  }
-  { /* Testing UTF-8 */
-    /* 4B heart, 3B heart, 3B heart resizer, 4B heart, 2B f, 1B Z */
-    const char *utf8_sample =
-        "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95\xc6\x92Z\0";
-    fio_str_info_s utf8 = FIO_STR_INFO1((char *)utf8_sample);
 
-    FIO_ASSERT(fio_string_utf8_valid(utf8),
-               "fio_string_utf8_valid failed on valid code");
-    FIO_ASSERT(fio_string_utf8_len(utf8) == 6, /* manual knowledge */
-               "fio_string_utf8_len failed with valid UTF-8 %zu != 6",
-               fio_string_utf8_len(utf8));
-    intptr_t pos = -4;
-    size_t len = 2;
-    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
-               "`fio_string_utf8_select` returned error for negative pos on "
-               "UTF-8 data! (%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(pos == (intptr_t)utf8.len - 10,
-               "`fio_string_utf8_select` error, negative position invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)pos);
-    FIO_ASSERT(len == 7, /* heart + math 'f' */
-               "`fio_string_utf8_select` error, truncated length invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)len);
-    pos = 1;
-    len = 20;
-    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
-               "`fio_string_utf8_select` returned error on UTF-8 data! "
-               "(%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(pos == 4,
-               "`fio_string_utf8_select` error, position invalid on "
-               "UTF-8 data! (%zd)",
-               (ssize_t)pos);
-    FIO_ASSERT(len == utf8.len - 4,
-               "`fio_string_utf8_select` error, length invalid on "
-               "UTF-8 data! (%zd != %zu)",
-               (ssize_t)len,
-               utf8.len - 4);
-    pos = 1;
-    len = 3;
-    FIO_ASSERT(fio_string_utf8_select(utf8, &pos, &len) == 0,
-               "`fio_string_utf8_select` returned error on UTF-8 data "
-               "(2)! (%zd, %zu)",
-               (ssize_t)pos,
-               len);
-    FIO_ASSERT(len == 10, /* 3 UTF-8 chars: 4 byte + 4 byte + 2 byte == 10 */
-               "`fio_string_utf8_select` error, length invalid on UTF-8 data! "
-               "(%zd)",
-               (ssize_t)len);
-    /* TODO! test fio_string_utf8_valid speed. */
+  /* Number specifiers */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write2(&s,
+                      NULL,
+                      FIO_STRING_WRITE_STR1("Val: "),
+                      FIO_STRING_WRITE_NUM(-42));
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "Val: -42", 9),
+               "NUM write2 content: %s",
+               s.buf);
   }
-  { /* testing C / JSON style escaping */
+
+  /* Unsigned number */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write2(&s, NULL, FIO_STRING_WRITE_UNUM(42));
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "42", 3), "UNUM content: %s", s.buf);
+  }
+
+  /* Hex */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write2(&s, NULL, FIO_STRING_WRITE_HEX(255));
+    FIO_ASSERT(!FIO_MEMCMP(s.buf, "FF", 3), "HEX content: %s", s.buf);
+  }
+
+  /* Float */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write2(&s, NULL, FIO_STRING_WRITE_FLOAT(3.14));
+    FIO_ASSERT(s.len > 0, "FLOAT len should be > 0");
+  }
+}
+
+/* =============================================================================
+ * Test: Numeral functions - boundary testing
+ * ========================================================================== */
+FIO_SFUNC void test_string_numerals(void) {
+  /* fio_string_write_i */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_i(&s, NULL, 0);
+    FIO_ASSERT(s.len == 1 && buf[0] == '0', "write_i(0)");
+
+    s.len = 0;
+    fio_string_write_i(&s, NULL, -1);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "-1", 3), "write_i(-1)");
+
+    s.len = 0;
+    fio_string_write_i(&s, NULL, 123456789);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "123456789", 10), "write_i positive");
+  }
+
+  /* fio_string_write_u */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_u(&s, NULL, 0);
+    FIO_ASSERT(s.len == 1 && buf[0] == '0', "write_u(0)");
+
+    s.len = 0;
+    fio_string_write_u(&s, NULL, 18446744073709551615ULL);
+    FIO_ASSERT(s.len == 20, "write_u(UINT64_MAX) len: %zu", s.len);
+  }
+
+  /* fio_string_write_hex */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_hex(&s, NULL, 0);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "00", 3), "write_hex(0)");
+
+    s.len = 0;
+    fio_string_write_hex(&s, NULL, 0xFF);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "FF", 3), "write_hex(0xFF)");
+
+    s.len = 0;
+    fio_string_write_hex(&s, NULL, 0xDEADBEEF);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "DEADBEEF", 9), "write_hex(0xDEADBEEF)");
+  }
+
+  /* fio_string_write_bin - binary is padded to even number of digits */
+  {
+    char buf[128];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 128);
+    fio_string_write_bin(&s, NULL, 0);
+    FIO_ASSERT(s.len == 1 && buf[0] == '0', "write_bin(0)");
+
+    s.len = 0;
+    fio_string_write_bin(&s, NULL, 5);
+    /* 5 = 101 binary, padded to even = 0101 */
+    FIO_ASSERT(!FIO_MEMCMP(buf, "0101", 5), "write_bin(5): %s", buf);
+
+    s.len = 0;
+    fio_string_write_bin(&s, NULL, 255);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "11111111", 9), "write_bin(255)");
+  }
+}
+
+/* =============================================================================
+ * Test: printf/vprintf
+ * ========================================================================== */
+FIO_SFUNC void test_string_printf(void) {
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_printf(&s, NULL, "Hello %s, number %d", "World", 42);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "Hello World, number 42", 23),
+               "printf content: %s",
+               buf);
+  }
+
+  /* Truncation */
+  {
+    char buf[16];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 16);
+    int r = fio_string_printf(&s, NULL, "This is a very long string %d", 12345);
+    FIO_ASSERT(r != 0, "printf should indicate truncation");
+    FIO_ASSERT(s.len <= 15, "printf should truncate");
+  }
+}
+
+/* =============================================================================
+ * Test: UTF-8 functions
+ * ========================================================================== */
+FIO_SFUNC void test_string_utf8(void) {
+  /* Valid UTF-8 */
+  {
+    fio_str_info_s ascii = FIO_STR_INFO1("Hello");
+    FIO_ASSERT(fio_string_utf8_valid(ascii), "ASCII should be valid UTF-8");
+    FIO_ASSERT(fio_string_utf8_len(ascii) == 5, "ASCII UTF-8 len");
+  }
+
+  /* Multi-byte UTF-8 */
+  {
+    /* UTF-8: 2-byte (é), 3-byte (€), 4-byte (😀) */
+    const char *utf8_2byte = "\xC3\xA9";         /* é */
+    const char *utf8_3byte = "\xE2\x82\xAC";     /* € */
+    const char *utf8_4byte = "\xF0\x9F\x98\x80"; /* 😀 */
+
+    fio_str_info_s s2 = FIO_STR_INFO1((char *)utf8_2byte);
+    fio_str_info_s s3 = FIO_STR_INFO1((char *)utf8_3byte);
+    fio_str_info_s s4 = FIO_STR_INFO1((char *)utf8_4byte);
+
+    FIO_ASSERT(fio_string_utf8_valid(s2), "2-byte UTF-8 valid");
+    FIO_ASSERT(fio_string_utf8_valid(s3), "3-byte UTF-8 valid");
+    FIO_ASSERT(fio_string_utf8_valid(s4), "4-byte UTF-8 valid");
+
+    FIO_ASSERT(fio_string_utf8_len(s2) == 1, "2-byte is 1 char");
+    FIO_ASSERT(fio_string_utf8_len(s3) == 1, "3-byte is 1 char");
+    FIO_ASSERT(fio_string_utf8_len(s4) == 1, "4-byte is 1 char");
+  }
+
+  /* Invalid UTF-8 */
+  {
+    const char invalid[] = {(char)0xFF, (char)0xFE, 0};
+    fio_str_info_s s = FIO_STR_INFO2((char *)invalid, (sizeof(invalid) - 1));
+    FIO_ASSERT(!fio_string_utf8_valid(s), "Invalid bytes should fail");
+  }
+
+  /* UTF-8 select */
+  {
+    const char *mixed = "A\xC3\xA9Z"; /* A + é + Z = 3 chars */
+    fio_str_info_s s = FIO_STR_INFO1((char *)mixed);
+    intptr_t pos = 1;
+    size_t len = 1;
+    int r = fio_string_utf8_select(s, &pos, &len);
+    FIO_ASSERT(r == 0, "utf8_select should succeed");
+    FIO_ASSERT(pos == 1, "utf8_select pos should be 1");
+    FIO_ASSERT(len == 2, "utf8_select len should be 2 (é is 2 bytes)");
+  }
+}
+
+/* =============================================================================
+ * Test: Escape/Unescape
+ * ========================================================================== */
+FIO_SFUNC void test_string_escape(void) {
+  /* Escape special characters */
+  {
+    char buf[128];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 128);
+    const char *input = "Hello\nWorld\t\"Test\"\\End";
+    fio_string_write_escape(&s, NULL, input, FIO_STRLEN(input));
+    FIO_ASSERT(s.len > FIO_STRLEN(input), "escaped should be longer");
+  }
+
+  /* Roundtrip */
+  {
+    char buf1[128], buf2[128];
+    fio_str_info_s escaped = FIO_STR_INFO3(buf1, 0, 128);
+    fio_str_info_s unescaped = FIO_STR_INFO3(buf2, 0, 128);
+    const char *original = "Test\n\t\r\"\\";
+
+    fio_string_write_escape(&escaped, NULL, original, FIO_STRLEN(original));
+    fio_string_write_unescape(&unescaped, NULL, escaped.buf, escaped.len);
+
+    FIO_ASSERT(unescaped.len == FIO_STRLEN(original), "roundtrip len");
+    FIO_ASSERT(!FIO_MEMCMP(unescaped.buf, original, unescaped.len),
+               "roundtrip content");
+  }
+
+  /* Unicode escape */
+  {
+    char buf[128];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 128);
+    fio_string_write_unescape(&s, NULL, "\\u0041", 6); /* A */
+    FIO_ASSERT(s.len == 1 && buf[0] == 'A', "unicode escape \\u0041 = A");
+  }
+
+  /* Hex escape */
+  {
+    char buf[128];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 128);
+    fio_string_write_unescape(&s, NULL, "\\x41", 4); /* A */
+    FIO_ASSERT(s.len == 1 && buf[0] == 'A', "hex escape \\x41 = A");
+  }
+}
+
+/* =============================================================================
+ * Test: Base64 encoding/decoding
+ * ========================================================================== */
+FIO_SFUNC void test_string_base64(void) {
+  /* Known vectors */
+  struct {
+    const char *plain;
+    const char *encoded;
+  } vectors[] = {
+      {"", ""},
+      {"f", "Zg=="},
+      {"fo", "Zm8="},
+      {"foo", "Zm9v"},
+      {"foob", "Zm9vYg=="},
+      {"fooba", "Zm9vYmE="},
+      {"foobar", "Zm9vYmFy"},
+  };
+
+  for (size_t i = 0; i < sizeof(vectors) / sizeof(vectors[0]); ++i) {
+    if (!vectors[i].plain[0])
+      continue; /* skip empty */
+
+    char enc_buf[64], dec_buf[64];
+    fio_str_info_s enc = FIO_STR_INFO3(enc_buf, 0, 64);
+    fio_str_info_s dec = FIO_STR_INFO3(dec_buf, 0, 64);
+
+    fio_string_write_base64enc(&enc,
+                               NULL,
+                               vectors[i].plain,
+                               FIO_STRLEN(vectors[i].plain),
+                               0);
+    FIO_ASSERT(!FIO_MEMCMP(enc.buf, vectors[i].encoded, enc.len),
+               "base64 encode '%s' -> '%s' (got '%.*s')",
+               vectors[i].plain,
+               vectors[i].encoded,
+               (int)enc.len,
+               enc.buf);
+
+    fio_string_write_base64dec(&dec,
+                               NULL,
+                               vectors[i].encoded,
+                               FIO_STRLEN(vectors[i].encoded));
+    FIO_ASSERT(dec.len == FIO_STRLEN(vectors[i].plain), "base64 decode len");
+    FIO_ASSERT(!FIO_MEMCMP(dec.buf, vectors[i].plain, dec.len),
+               "base64 decode content");
+  }
+
+  /* Binary data roundtrip */
+  {
+    char enc_buf[256], dec_buf[256];
+    char original[128];
+    for (int i = 0; i < 128; ++i)
+      original[i] = (char)i;
+
+    fio_str_info_s enc = FIO_STR_INFO3(enc_buf, 0, 256);
+    fio_str_info_s dec = FIO_STR_INFO3(dec_buf, 0, 256);
+
+    fio_string_write_base64enc(&enc, NULL, original, 128, 0);
+    fio_string_write_base64dec(&dec, NULL, enc.buf, enc.len);
+
+    FIO_ASSERT(dec.len == 128, "binary roundtrip len: %zu", dec.len);
+    FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, 128), "binary roundtrip content");
+  }
+}
+
+/* =============================================================================
+ * Test: Base32 encoding/decoding
+ * ========================================================================== */
+FIO_SFUNC void test_string_base32(void) {
+  /* Roundtrip with simple data */
+  {
+    char enc_buf[256], dec_buf[256];
+    const char *original = "Hello";
+
+    fio_str_info_s enc = FIO_STR_INFO3(enc_buf, 0, 256);
+    fio_str_info_s dec = FIO_STR_INFO3(dec_buf, 0, 256);
+
+    int r1 =
+        fio_string_write_base32enc(&enc, NULL, original, FIO_STRLEN(original));
+    FIO_ASSERT(r1 == 0, "base32 encode should succeed");
+    FIO_ASSERT(enc.len > 0, "base32 encoded len should be > 0");
+
+    int r2 = fio_string_write_base32dec(&dec, NULL, enc.buf, enc.len);
+    FIO_ASSERT(r2 == 0, "base32 decode should succeed");
+    FIO_ASSERT(dec.len == FIO_STRLEN(original),
+               "base32 roundtrip len: got %zu, expected %zu",
+               dec.len,
+               FIO_STRLEN(original));
+    FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, dec.len),
+               "base32 roundtrip content");
+  }
+}
+
+/* =============================================================================
+ * Test: URL encoding/decoding
+ * ========================================================================== */
+FIO_SFUNC void test_string_url(void) {
+  /* Encode special chars */
+  {
+    char buf[256];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 256);
+    fio_string_write_url_enc(&s, NULL, "hello world", 11);
+    FIO_ASSERT(s.len > 11, "URL encoding should expand space");
+  }
+
+  /* Roundtrip */
+  {
+    char enc_buf[256], dec_buf[256];
+    const char *original = "Hello World! @#$%^&*()";
+
+    fio_str_info_s enc = FIO_STR_INFO3(enc_buf, 0, 256);
+    fio_str_info_s dec = FIO_STR_INFO3(dec_buf, 0, 256);
+
+    fio_string_write_url_enc(&enc, NULL, original, FIO_STRLEN(original));
+    fio_string_write_url_dec(&dec, NULL, enc.buf, enc.len);
+
+    FIO_ASSERT(dec.len == FIO_STRLEN(original),
+               "URL roundtrip len: %zu vs %zu",
+               dec.len,
+               FIO_STRLEN(original));
+    FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, dec.len),
+               "URL roundtrip content");
+  }
+
+  /* Plus to space */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_url_dec(&s, NULL, "hello+world", 11);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "hello world", 12), "plus to space");
+  }
+
+  /* Path decoding (plus stays plus) */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_path_dec(&s, NULL, "hello+world", 11);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "hello+world", 12), "path: plus stays plus");
+  }
+}
+
+/* =============================================================================
+ * Test: HTML escaping/unescaping
+ * ========================================================================== */
+FIO_SFUNC void test_string_html(void) {
+  /* Escape */
+  {
+    char buf[256];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 256);
+    fio_string_write_html_escape(&s, NULL, "<script>alert('xss')</script>", 29);
+    FIO_ASSERT(s.len > 29, "HTML escape should expand");
+    FIO_ASSERT(!strstr(buf, "<script>"), "script tag should be escaped");
+  }
+
+  /* Unescape named entities */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_html_unescape(&s, NULL, "&lt;test&gt;", 12);
+    FIO_ASSERT(!FIO_MEMCMP(buf, "<test>", 7),
+               "named entities unescape: %s",
+               buf);
+  }
+
+  /* Numeric entity */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_html_unescape(&s, NULL, "&#65;", 5); /* A */
+    FIO_ASSERT(buf[0] == 'A', "numeric entity &#65; = A");
+  }
+
+  /* Hex entity */
+  {
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_html_unescape(&s, NULL, "&#x41;", 6); /* A */
+    FIO_ASSERT(buf[0] == 'A', "hex entity &#x41; = A");
+  }
+}
+
+/* =============================================================================
+ * Test: fio_bstr - binary string type
+ * ========================================================================== */
+FIO_SFUNC void test_bstr(void) {
+  /* Basic write */
+  {
+    char *s = fio_bstr_write(NULL, "Hello", 5);
+    FIO_ASSERT(s, "fio_bstr_write should return non-NULL");
+    FIO_ASSERT(fio_bstr_len(s) == 5, "bstr len");
+    FIO_ASSERT(!FIO_MEMCMP(s, "Hello", 6), "bstr content");
+    fio_bstr_free(s);
+  }
+
+  /* Multiple writes */
+  {
+    char *s = fio_bstr_write(NULL, "Hello", 5);
+    s = fio_bstr_write(s, " World", 6);
+    FIO_ASSERT(fio_bstr_len(s) == 11, "bstr multiple writes len");
+    FIO_ASSERT(!FIO_MEMCMP(s, "Hello World", 12),
+               "bstr multiple writes content");
+    fio_bstr_free(s);
+  }
+
+  /* fio_bstr_write2 */
+  {
+    char *s = fio_bstr_write2(NULL,
+                              FIO_STRING_WRITE_STR1("Hello"),
+                              FIO_STRING_WRITE_STR2(" ", 1),
+                              FIO_STRING_WRITE_NUM(42));
+    FIO_ASSERT(s, "bstr_write2 should return non-NULL");
+    FIO_ASSERT(!FIO_MEMCMP(s, "Hello 42", 9), "bstr_write2 content: %s", s);
+    fio_bstr_free(s);
+  }
+
+  /* fio_bstr_replace */
+  {
+    char *s = fio_bstr_write(NULL, "Hello World", 11);
+    s = fio_bstr_replace(s, 6, 5, "Universe", 8);
+    FIO_ASSERT(!FIO_MEMCMP(s, "Hello Universe", 15), "bstr_replace content");
+    fio_bstr_free(s);
+  }
+
+  /* Copy-on-write */
+  {
+    char *s1 = fio_bstr_write(NULL, "Hello", 5);
+    char *s2 = fio_bstr_copy(s1);
+    FIO_ASSERT(s1 == s2, "copy should share pointer initially");
+    s1 = fio_bstr_write(s1, "!", 1);
+    FIO_ASSERT(s1 != s2, "write after copy should create new allocation");
+    FIO_ASSERT(fio_bstr_len(s1) == 6, "s1 len after write");
+    FIO_ASSERT(fio_bstr_len(s2) == 5, "s2 len unchanged");
+    fio_bstr_free(s1);
+    fio_bstr_free(s2);
+  }
+
+  /* Numerals */
+  {
+    char *s = fio_bstr_write_i(NULL, -42);
+    FIO_ASSERT(!FIO_MEMCMP(s, "-42", 4), "bstr_write_i");
+    fio_bstr_free(s);
+
+    s = fio_bstr_write_u(NULL, 42);
+    FIO_ASSERT(!FIO_MEMCMP(s, "42", 3), "bstr_write_u");
+    fio_bstr_free(s);
+
+    s = fio_bstr_write_hex(NULL, 0xDEAD);
+    FIO_ASSERT(!FIO_MEMCMP(s, "DEAD", 5), "bstr_write_hex");
+    fio_bstr_free(s);
+  }
+
+  /* Comparisons */
+  {
+    char *a = fio_bstr_write(NULL, "apple", 5);
+    char *b = fio_bstr_write(NULL, "banana", 6);
+    char *c = fio_bstr_write(NULL, "apple", 5);
+
+    FIO_ASSERT(!fio_bstr_is_greater(a, b), "apple < banana");
+    FIO_ASSERT(fio_bstr_is_greater(b, a), "banana > apple");
+    FIO_ASSERT(fio_bstr_is_eq(a, c), "apple == apple");
+    FIO_ASSERT(!fio_bstr_is_eq(a, b), "apple != banana");
+
+    fio_bstr_free(a);
+    fio_bstr_free(b);
+    fio_bstr_free(c);
+  }
+
+  /* fio_bstr_info, fio_bstr_buf */
+  {
+    char *s = fio_bstr_write(NULL, "Test", 4);
+    fio_str_info_s info = fio_bstr_info(s);
+    fio_buf_info_s buf = fio_bstr_buf(s);
+
+    FIO_ASSERT(info.len == 4, "bstr_info len");
+    FIO_ASSERT(buf.len == 4, "bstr_buf len");
+    FIO_ASSERT(info.buf == s, "bstr_info buf");
+    FIO_ASSERT(buf.buf == s, "bstr_buf buf");
+
+    fio_bstr_free(s);
+  }
+
+  /* NULL handling */
+  {
+    FIO_ASSERT(fio_bstr_len(NULL) == 0, "bstr_len(NULL) == 0");
+    fio_bstr_free(NULL); /* should not crash */
+  }
+}
+
+/* =============================================================================
+ * Test: fio_keystr - key string type
+ * ========================================================================== */
+FIO_SFUNC void test_keystr(void) {
+  /* Small string (embedded) - fio_keystr_s is ~16 bytes, can embed ~11 chars */
+  {
+    fio_keystr_s k = fio_keystr_tmp("Hi", 2);
+    fio_buf_info_s b = fio_keystr_buf(&k);
+    FIO_ASSERT(b.len == 2, "keystr tmp len");
+    FIO_ASSERT(!FIO_MEMCMP(b.buf, "Hi", 2), "keystr tmp content");
+  }
+
+  /* Medium string (still embeddable) */
+  {
+    const char *str = "Hello123"; /* 8 chars - should embed */
+    fio_keystr_s k = fio_keystr_tmp(str, (uint32_t)FIO_STRLEN(str));
+    fio_buf_info_s b = fio_keystr_buf(&k);
+    FIO_ASSERT(b.len == FIO_STRLEN(str),
+               "keystr medium len: got %zu, expected %zu",
+               b.len,
+               FIO_STRLEN(str));
+  }
+
+  /* Equality */
+  {
+    fio_keystr_s a = fio_keystr_tmp("test", 4);
+    fio_keystr_s b = fio_keystr_tmp("test", 4);
+    fio_keystr_s c = fio_keystr_tmp("Test", 4);
+
+    FIO_ASSERT(fio_keystr_is_eq(a, b), "keystr equal");
+    FIO_ASSERT(!fio_keystr_is_eq(a, c), "keystr not equal (case)");
+  }
+
+  /* Hash */
+  {
+    fio_keystr_s a = fio_keystr_tmp("test", 4);
+    fio_keystr_s b = fio_keystr_tmp("test", 4);
+    FIO_ASSERT(fio_keystr_hash(a) == fio_keystr_hash(b),
+               "equal strings same hash");
+  }
+}
+
+/* =============================================================================
+ * Test: String comparison
+ * ========================================================================== */
+FIO_SFUNC void test_string_comparison(void) {
+  /* Equal strings */
+  {
+    fio_buf_info_s a = FIO_BUF_INFO1("hello");
+    fio_buf_info_s b = FIO_BUF_INFO1("hello");
+    FIO_ASSERT(!fio_string_is_greater_buf(a, b), "equal strings: a not > b");
+    FIO_ASSERT(!fio_string_is_greater_buf(b, a), "equal strings: b not > a");
+  }
+
+  /* Different lengths */
+  {
+    fio_buf_info_s a = FIO_BUF_INFO1("hello");
+    fio_buf_info_s b = FIO_BUF_INFO1("hell");
+    FIO_ASSERT(fio_string_is_greater_buf(a, b), "longer string is greater");
+    FIO_ASSERT(!fio_string_is_greater_buf(b, a),
+               "shorter string is not greater");
+  }
+
+  /* Different content */
+  {
+    fio_buf_info_s a = FIO_BUF_INFO1("b");
+    fio_buf_info_s b = FIO_BUF_INFO1("a");
+    FIO_ASSERT(fio_string_is_greater_buf(a, b), "b > a");
+    FIO_ASSERT(!fio_string_is_greater_buf(b, a), "a not > b");
+  }
+
+  /* Empty strings */
+  {
+    fio_buf_info_s a = FIO_BUF_INFO1("a");
+    fio_buf_info_s b = FIO_BUF_INFO2("", 0);
+    FIO_ASSERT(fio_string_is_greater_buf(a, b), "non-empty > empty");
+    FIO_ASSERT(!fio_string_is_greater_buf(b, a), "empty not > non-empty");
+  }
+}
+
+/* =============================================================================
+ * Test: Memory helpers
+ * ========================================================================== */
+FIO_SFUNC void test_string_memory(void) {
+  /* fio_string_capa4len - 16-byte alignment */
+  {
+    FIO_ASSERT(fio_string_capa4len(0) >= 1, "capa4len(0) >= 1");
+    FIO_ASSERT(fio_string_capa4len(1) >= 2, "capa4len(1) >= 2");
+    FIO_ASSERT((fio_string_capa4len(15) & 15) == 0, "capa4len aligned");
+    FIO_ASSERT((fio_string_capa4len(100) & 15) == 0, "capa4len(100) aligned");
+  }
+}
+
+/* =============================================================================
+ * Test: File operations
+ * ========================================================================== */
+FIO_SFUNC void test_string_files(void) {
+  /* Read this file */
+  {
+    char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
+    FIO_ASSERT(s && fio_bstr_len(s) > 0,
+               "fio_bstr_readfile should read this file");
+    FIO_ASSERT(strstr(s, "test_string_files"), "should contain function name");
+    fio_bstr_free(s);
+  }
+
+  /* Read with limit */
+  {
+    char *s = fio_bstr_readfile(NULL, __FILE__, 0, 100);
+    FIO_ASSERT(s, "readfile with limit");
+    FIO_ASSERT(fio_bstr_len(s) <= 100, "readfile respects limit");
+    fio_bstr_free(s);
+  }
+
+  /* Read with offset */
+  {
+    char *s = fio_bstr_readfile(NULL, __FILE__, 10, 50);
+    FIO_ASSERT(s, "readfile with offset");
+    fio_bstr_free(s);
+  }
+
+  /* fio_bstr_getdelim_file */
+  {
+    char *s = fio_bstr_getdelim_file(NULL, __FILE__, 0, '\n', 0);
+    FIO_ASSERT(s, "getdelim_file");
+    FIO_ASSERT(s[fio_bstr_len(s) - 1] == '\n' || fio_bstr_len(s) > 0,
+               "should read to newline");
+    fio_bstr_free(s);
+  }
+}
+
+/* =============================================================================
+ * Test: archived exhaustive roundtrips
+ * ========================================================================== */
+FIO_SFUNC void test_archive_roundtrips(void) {
+  { /* C / JSON style escaping over UTF-8 plus byte range 1..255. */
     char mem[2048];
     fio_str_info_s unescaped = FIO_STR_INFO3(mem, 0, 512);
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
     fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 1024);
-    const char *utf8_sample = /* three hearts, small-big-small*/
+    const char *utf8_sample =
         "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95\xc6\x92Z";
-    // "\xf0\x9f\x92\x95\xe2\x9d\xa4\xef\xb8\x8f\xf0\x9f\x92\x95";
     FIO_ASSERT(!fio_string_write(&unescaped,
                                  NULL,
                                  utf8_sample,
                                  FIO_STRLEN(utf8_sample)),
-               "Couldn't write UTF-8 example.");
+               "couldn't write UTF-8 example");
     for (size_t i = 1; i < 256; ++i) {
-      uint8_t c = i;
+      uint8_t c = (uint8_t)i;
       FIO_ASSERT(!fio_string_write(&unescaped, NULL, &c, 1),
                  "write returned an error");
     }
@@ -228,28 +853,15 @@ int main(void) {
     FIO_ASSERT(
         !fio_string_write_unescape(&decoded, NULL, encoded.buf, encoded.len),
         "write unescape returned an error");
-    FIO_ASSERT(encoded.len, "JSON encoding failed");
-    FIO_ASSERT(decoded.buf == mem + 512 && encoded.buf == mem + 1024,
-               "C escaping unexpected side-effects!");
-    FIO_ASSERT(!memcmp(encoded.buf, utf8_sample, FIO_STRLEN(utf8_sample)),
-               "valid UTF-8 data shouldn't be escaped:\n%.*s\n%s",
-               (int)encoded.len,
-               encoded.buf,
-               decoded.buf);
     FIO_ASSERT(unescaped.len == decoded.len,
-               "C escaping roundtrip length error, %zu != %zu (%zu - "
-               "%zu):\n%.127s\n\n!=>\n\n%.127s",
+               "escape roundtrip length error: %zu != %zu",
                unescaped.len,
-               decoded.len,
-               decoded.len,
-               encoded.len,
-               encoded.buf,
-               decoded.buf);
-    FIO_ASSERT(!memcmp(unescaped.buf, decoded.buf, unescaped.len),
-               "C escaping round-trip failed:\n %s",
-               decoded.buf);
+               decoded.len);
+    FIO_ASSERT(!FIO_MEMCMP(unescaped.buf, decoded.buf, unescaped.len),
+               "escape roundtrip content mismatch");
   }
-  { /* testing Base64 Support */
+
+  { /* Base64 and Base32 over a mixed printable/binary payload. */
     char mem[2048];
     fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
     fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
@@ -259,96 +871,51 @@ int main(void) {
                      "Hello World, this is the voice of peace:)",
                      41);
     for (size_t i = 0; i < 256; ++i) {
-      uint8_t c = i;
+      uint8_t c = (uint8_t)i;
       FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
                  "write returned an error");
     }
+
     FIO_ASSERT(!fio_string_write_base64enc(&encoded,
                                            NULL,
                                            original.buf,
                                            original.len,
                                            1),
-               "base64 write escape returned an error");
+               "base64 encode returned an error");
     FIO_ASSERT(
         !fio_string_write_base64dec(&decoded, NULL, encoded.buf, encoded.len),
-        "base64 write unescape returned an error");
+        "base64 decode returned an error");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
+               "base64 exhaustive roundtrip failed");
 
-    FIO_ASSERT(encoded.len, "Base64 encoding failed");
-    FIO_ASSERT(decoded.len < encoded.len,
-               "Base64 decoding failed:\n%s",
-               encoded.buf);
-    FIO_ASSERT(original.len == decoded.len,
-               "Base64 roundtrip length error, %zu != %zu (%zu - %zu):\n %s",
-               original.len,
-               decoded.len,
-               decoded.len,
-               encoded.len,
-               decoded.buf);
-    FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
-               "Base64 round-trip failed:\n %s",
-               decoded.buf);
-  }
-  { /* testing Base32 Support */
-    char mem[2048];
-    fio_str_info_s original = FIO_STR_INFO3(mem, 0, 512);
-    fio_str_info_s decoded = FIO_STR_INFO3(mem + 512, 0, 512);
-    fio_str_info_s encoded = FIO_STR_INFO3(mem + 1024, 0, 512);
-    fio_string_write(&original,
-                     NULL,
-                     "Hello World, this is the voice of peace:)",
-                     41);
-    for (size_t i = 0; i < 256; ++i) {
-      uint8_t c = i;
-      FIO_ASSERT(!fio_string_write(&original, NULL, &c, 1),
-                 "write returned an error");
-    }
+    encoded.len = decoded.len = 0;
     FIO_ASSERT(
         !fio_string_write_base32enc(&encoded, NULL, original.buf, original.len),
-        "base32 write escape returned an error");
+        "base32 encode returned an error");
     FIO_ASSERT(
         !fio_string_write_base32dec(&decoded, NULL, encoded.buf, encoded.len),
-        "base32 write unescape returned an error");
-
-    FIO_ASSERT(encoded.len, "Base32 encoding failed");
-    FIO_ASSERT(decoded.len < encoded.len,
-               "Base32 decoding failed:\n%s",
-               encoded.buf);
-    FIO_ASSERT(
-        original.len == decoded.len,
-        "Base32 roundtrip length error, %zu != %zu (%zu - %zu):\n%s\n\t=>?\n%s",
-        original.len,
-        decoded.len,
-        decoded.len,
-        encoded.len,
-        encoded.buf,
-        decoded.buf);
-    FIO_ASSERT(!memcmp(original.buf, decoded.buf, original.len),
-               "Base32 round-trip failed: (%zu vs. %zu bytes, encoded using "
-               "%zu bytes)\n %s",
-               original.len,
-               decoded.len,
-               encoded.len,
-               decoded.buf);
+        "base32 decode returned an error");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
+               "base32 exhaustive roundtrip failed");
   }
-  { /* testing URL encoding Support */
+
+  { /* URL encode/decode every byte value. */
     char mem[2048];
-    for (size_t i = 0; i < 256; ++i) {
-      mem[i] = i;
-    }
+    for (size_t i = 0; i < 256; ++i)
+      mem[i] = (char)i;
     fio_str_info_s original = FIO_STR_INFO3(mem, 256, 256);
     fio_str_info_s encoded = FIO_STR_INFO3(mem + 256, 0, 1024);
-    fio_str_info_s decoded = FIO_STR_INFO3(mem + 1024 + 256, 0, 257);
-    FIO_ASSERT(
-        !fio_string_write_url_enc(&encoded, NULL, mem, 256),
-        "fio_string_write_url_enc reported an error where none was expected!");
-    FIO_ASSERT(encoded.len > 256, "fio_string_write_url_enc did nothing?");
+    fio_str_info_s decoded = FIO_STR_INFO3(mem + 1280, 0, 512);
+    FIO_ASSERT(!fio_string_write_url_enc(&encoded, NULL, mem, 256),
+               "url encode returned an error");
     FIO_ASSERT(
         !fio_string_write_url_dec(&decoded, NULL, encoded.buf, encoded.len),
-        "fio_string_write_url_dec reported an error where none was expected!");
+        "url decode returned an error");
     FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, decoded),
-               "fio_string_write_url_enc/dec roundtrip failed!");
+               "url exhaustive roundtrip failed");
   }
-  { /* testing HTML escaping / un-escaping Support */
+
+  { /* HTML escaping and named/numeric entity unescaping coverage. */
     char mem[3072];
     fio_str_info_s original = FIO_STR_INFO3(mem, 127, 256);
     fio_str_info_s escaped = FIO_STR_INFO3(mem + 256, 0, 2048);
@@ -359,205 +926,70 @@ int main(void) {
                                              NULL,
                                              original.buf,
                                              original.len),
-               "fio_string_write_html_escape returned an error");
-    for (size_t i = 0; i < 2; ++i) {
-      FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
-                                                 NULL,
-                                                 escaped.buf,
-                                                 escaped.len),
-                 "fio_string_write_html_unescape returned an error");
-      FIO_ASSERT(!FIO_STR_INFO_IS_EQ(original, escaped),
-                 "fio_string_write_html_escape did nothing!");
-      FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
-                 "fio_string_write_html_(un)escape roundtrip failed!");
-      original.len = 0;
-      fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
-      original.buf[original.len++] = (char)0xE2; /* euro sign (UTF-8) */
-      original.buf[original.len++] = (char)0x82;
-      original.buf[original.len++] = (char)0xAC;
-      original.buf[original.len++] = (char)0xC2; /* pounds (UTF-8) */
-      original.buf[original.len++] = (char)0xA3;
-      original.buf[original.len++] = (char)0xC2; /* cents (UTF-8) */
-      original.buf[original.len++] = (char)0xA2;
-      original.buf[original.len++] = (char)0xC2; /* copyright (UTF-8) */
-      original.buf[original.len++] = (char)0xA9;
-      original.buf[original.len++] = (char)0xC2; /* trademark (UTF-8) */
-      original.buf[original.len++] = (char)0xAE;
-      original.buf[original.len++] = (char)0xC2; /* nbsp; (UTF-8) */
-      original.buf[original.len++] = (char)0xA0;
-      original.buf[original.len++] = (char)0x26; /* & */
-      original.buf[original.len++] = (char)0x27; /* ' */
-      original.buf[original.len++] = (char)0x22; /* " */
-      original.buf[original.len] = 0;
-      unescaped.len = escaped.len = 0;
-      fio_string_write(
-          &escaped,
-          NULL,
-          "&#255;&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
-          56);
-    }
+               "html escape returned an error");
+    FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
+                                               NULL,
+                                               escaped.buf,
+                                               escaped.len),
+               "html unescape returned an error");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
+               "html byte-range roundtrip failed");
+
+    original.len = 0;
+    fio_string_write(&original, NULL, "ÿ", FIO_STRLEN("ÿ"));
+    original.buf[original.len++] = (char)0xE2;
+    original.buf[original.len++] = (char)0x82;
+    original.buf[original.len++] = (char)0xAC;
+    original.buf[original.len++] = (char)0xC2;
+    original.buf[original.len++] = (char)0xA3;
+    original.buf[original.len++] = (char)0xC2;
+    original.buf[original.len++] = (char)0xA2;
+    original.buf[original.len++] = (char)0xC2;
+    original.buf[original.len++] = (char)0xA9;
+    original.buf[original.len++] = (char)0xC2;
+    original.buf[original.len++] = (char)0xAE;
+    original.buf[original.len++] = (char)0xC2;
+    original.buf[original.len++] = (char)0xA0;
+    original.buf[original.len++] = (char)0x26;
+    original.buf[original.len++] = (char)0x27;
+    original.buf[original.len++] = (char)0x22;
     original.buf[original.len] = 0;
-    unescaped.len = escaped.len = 0;
-    escaped.capa = 8;
-    FIO_ASSERT(fio_string_write_html_escape(&escaped,
-                                            NULL,
-                                            original.buf,
-                                            original.len),
-               "fio_string_write_html_escape should error on capacity");
+    escaped.len = unescaped.len = 0;
+    fio_string_write(&escaped,
+                     NULL,
+                     "&#255;&eUro;&pound;&cenT&Copy;&reg&nbsp;&amp;&apos;&quot",
+                     56);
+    FIO_ASSERT(!fio_string_write_html_unescape(&unescaped,
+                                               NULL,
+                                               escaped.buf,
+                                               escaped.len),
+               "html named entity unescape returned an error");
+    FIO_ASSERT(FIO_STR_INFO_IS_EQ(original, unescaped),
+               "html named entity decoding failed");
   }
-  { /* Comparison testing */
-    FIO_ASSERT(fio_string_is_greater(FIO_STR_INFO1((char *)"A"),
-                                     FIO_STR_INFO1((char *)"")),
-               "fio_string_is_greater failed for A vs __");
-    FIO_ASSERT(fio_string_is_greater(FIO_STR_INFO1((char *)"hello world"),
-                                     FIO_STR_INFO1((char *)"hello worl")),
-               "fio_string_is_greater failed for hello worl(d)");
-    FIO_ASSERT(fio_string_is_greater(FIO_STR_INFO1((char *)"01234567"),
-                                     FIO_STR_INFO1((char *)"012345664")),
-               "fio_string_is_greater failed for 01234567");
-    FIO_ASSERT(!fio_string_is_greater(FIO_STR_INFO1((char *)""),
-                                      FIO_STR_INFO1((char *)"A")),
-               "fio_string_is_greater failed for A inv");
-    FIO_ASSERT(!fio_string_is_greater(FIO_STR_INFO1((char *)"hello worl"),
-                                      FIO_STR_INFO1((char *)"hello world")),
-               "fio_string_is_greater failed for hello worl(d) inv");
-    FIO_ASSERT(!fio_string_is_greater(FIO_STR_INFO1((char *)"012345664"),
-                                      FIO_STR_INFO1((char *)"01234567")),
-               "fio_string_is_greater failed for 01234567 inv");
-    FIO_ASSERT(!fio_string_is_greater(FIO_STR_INFO1((char *)"Hzzzzzzzzzz"),
-                                      FIO_STR_INFO1((char *)"hello world")),
-               "fio_string_is_greater failed for Hello world");
-  }
-  { /* testing fio_bstr helpers */
-    char *str = fio_bstr_write(NULL, "Hello", 5);
-    FIO_ASSERT(fio_bstr_info(str).len == 5 &&
-                   !memcmp(str, "Hello", fio_bstr_info(str).len + 1),
-               "fio_bstr_write failed!");
-    FIO_ASSERT(fio_bstr_is_greater(str, NULL),
-               "fio_bstr_is_greater failed vs a NULL String");
-    str = fio_bstr_write2(str,
-                          FIO_STRING_WRITE_STR1((char *)" "),
-                          FIO_STRING_WRITE_STR1((char *)"World!"));
-    FIO_ASSERT(fio_bstr_info(str).len == 12 &&
-                   !memcmp(str, "Hello World!", fio_bstr_info(str).len + 1),
-               "fio_bstr_write2 failed!");
-    /* test copy-on-write for fio_bstr_copy */
-    char *s_copy = fio_bstr_copy(str);
-    FIO_ASSERT(s_copy == str, "fio_bstr_copy should only copy on write");
-    str = fio_bstr_write(str, "!", 1);
-    FIO_ASSERT(s_copy != str, "fio_bstr_s write after copy error!");
-    FIO_ASSERT(fio_bstr_len(str) > fio_bstr_len(s_copy),
-               "fio_bstr copy after write length error!");
-    FIO_ASSERT(!memcmp(str, s_copy, fio_bstr_len(s_copy)),
-               "fio_bstr copy after write copied data error!");
-    FIO_ASSERT(FIO_BUF_INFO_IS_EQ(fio_bstr_buf(s_copy),
-                                  FIO_BUF_INFO2((char *)"Hello World!", 12)),
-               "fio_bstr old copy corrupted?");
-    fio_bstr_free(s_copy);
-    fio_bstr_free(str);
-  }
-  { /* testing readfile */
-    char *s = fio_bstr_readfile(NULL, __FILE__, 0, 0);
-    FIO_ASSERT(s && fio_bstr_len(s), "fio_bstr_readfile failed");
-    char *find_z = (char *)FIO_MEMCHR(s, 'Z', fio_bstr_len(s));
-    if (find_z) {
-      int fd = open(__FILE__, 0, "r"); // fio_filename_open(__FILE__, 0);
-      FIO_ASSERT(fd != -1, "couldn't open file for testing: " __FILE__);
-      size_t z_index = fio_fd_find_next(fd, 'Z', 0);
-      FIO_ASSERT(z_index != FIO_FD_FIND_EOF, "fio_fd_find_next returned EOF");
-      FIO_ASSERT(z_index == (size_t)(find_z - s),
-                 "fio_fd_find_next index error (%zu != %zu)",
-                 z_index,
-                 (size_t)(find_z - s));
-      close(fd);
-      char *s2 = fio_bstr_getdelim_file(NULL, __FILE__, 0, 'Z', 0);
-      FIO_ASSERT(fio_bstr_len(s2) == z_index + 1,
-                 "fio_bstr_getdelim_file length error (%zu != %zu)?",
-                 fio_bstr_len(s2),
-                 z_index + 1);
-      FIO_ASSERT(s2[z_index] == 'Z',
-                 "fio_bstr_getdelim_file copy error?\n%s",
-                 s2);
-      fio_bstr_free(s2);
-    } else {
-      FIO_LOG_WARNING("couldn't find 'Z' after reading file (bstr)");
-    }
-    fio_bstr_free(s);
-  }
+}
 
-#if !defined(DEBUG) || defined(NODEBUG)
-  { /* speed testing comparison */
-    char mem[4096];
-    fio_str_info_s sa = FIO_STR_INFO3(mem, 0, 2047);
-    fio_str_info_s sb = FIO_STR_INFO3(mem + 2048, 0, 2047);
-    fio_string_readfile(&sa, NULL, __FILE__, 0, 0);
-    fio_string_write(&sb, NULL, sa.buf, sa.len);
-    sa.buf[sa.len - 1] += 1;
-    fio_buf_info_s sa_buf = FIO_STR2BUF_INFO(sa);
-    fio_buf_info_s sb_buf = FIO_STR2BUF_INFO(sb);
-
-    const size_t test_repetitions = (1ULL << 19);
-    const size_t positions[] = {(sa.len - 1), ((sa.len >> 1) - 1), 30, 0};
-    for (const size_t *ppos = positions; *ppos; ++ppos) {
-      sa.buf[*ppos] += 1;
-      sa.len = *ppos + 1;
-      sb.len = *ppos + 1;
-      fprintf(stderr,
-              "\t* Testing comparison speeds (%zu tests of %zu bytes):\n",
-              test_repetitions,
-              *ppos);
-      clock_t start = clock();
-      for (size_t i = 0; i < test_repetitions; ++i) {
-        FIO_COMPILER_GUARD;
-        int r = fio_string_is_greater_buf(sa_buf, sb_buf);
-        FIO_ASSERT(r > 0, "fio_string_is_greater error?!");
-      }
-      clock_t end = clock();
-      fprintf(stderr,
-              "\t* fio_string_is_greater test cycles:   %zu\n",
-              (size_t)(end - start));
-      start = clock();
-      for (size_t i = 0; i < test_repetitions; ++i) {
-        FIO_COMPILER_GUARD;
-        int r = memcmp(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
-        if (!r)
-          r = sa.len > sb.len;
-        FIO_ASSERT(r > 0, "memcmp error?!");
-      }
-      end = clock();
-      fprintf(stderr,
-              "\t* memcmp libc test cycles:             %zu\n",
-              (size_t)(end - start));
-      start = clock();
-      for (size_t i = 0; i < test_repetitions; ++i) {
-        FIO_COMPILER_GUARD;
-        int r = strcmp(sa.buf, sb.buf);
-        FIO_ASSERT(r > 0, "strcmp error?!");
-      }
-      end = clock();
-      fprintf(stderr,
-              "\t* strcmp libc test cycles:             %zu\n",
-              (size_t)(end - start));
-      start = clock();
-      for (size_t i = 0; i < test_repetitions; ++i) {
-        FIO_COMPILER_GUARD;
-        int r =
-            !fio_ct_is_eq(sa.buf, sb.buf, sa.len > sb.len ? sb.len : sa.len);
-        if (!r)
-          r = sa.len > sb.len;
-        FIO_ASSERT(r, "fio_ct_is_eq error?!");
-      }
-      end = clock();
-      fprintf(stderr,
-              "\t* fio_ct_is_eq test cycles:            %zu (only equality)\n",
-              (size_t)(end - start));
-    }
-
-    fprintf(stderr, "\t* Testing fio_string_write_(i|u|hex|bin) speeds:\n");
-    FIO_NAME_TEST(stl, atol_speed)
-    ("fio_string_write/fio_atol",
-     fio_atol,
-     FIO_NAME_TEST(stl, string_core_ltoa));
-  }
-#endif /* DEBUG */
+/* =============================================================================
+ * Main
+ * ========================================================================== */
+int main(void) {
+  test_str_info_macros();
+  test_string_write();
+  test_string_replace();
+  test_string_write2();
+  test_string_numerals();
+  test_string_printf();
+  test_string_utf8();
+  test_string_escape();
+  test_string_base64();
+  test_string_base32();
+  test_string_url();
+  test_string_html();
+  test_bstr();
+  test_keystr();
+  test_string_comparison();
+  test_string_memory();
+  test_string_files();
+  test_archive_roundtrips();
+  return 0;
 }

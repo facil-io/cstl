@@ -390,9 +390,21 @@ int main(void) {
         result.target.buf);
 
     FIO_ASSERT(
-        1,
-        "TSL detection result failed for:\n\ttest[%zu]: %s\n\texpected: "
-        "%s key:%s, cert:%s, pass%s\n\tgot: %s key:%.*s, cert:%.*s, pass%.*s",
+        tls.tls == tests[i].tls.tls &&
+            tls.key.len == tests[i].tls.key.len &&
+            (!tls.key.len || !memcmp(tls.key.buf,
+                                     tests[i].tls.key.buf,
+                                     tests[i].tls.key.len)) &&
+            tls.cert.len == tests[i].tls.cert.len &&
+            (!tls.cert.len || !memcmp(tls.cert.buf,
+                                      tests[i].tls.cert.buf,
+                                      tests[i].tls.cert.len)) &&
+            tls.pass.len == tests[i].tls.pass.len &&
+            (!tls.pass.len || !memcmp(tls.pass.buf,
+                                      tests[i].tls.pass.buf,
+                                      tests[i].tls.pass.len)),
+        "TLS detection result failed for:\n\ttest[%zu]: %s\n\texpected: "
+        "%s key:%s, cert:%s, pass:%s\n\tgot: %s key:%.*s, cert:%.*s, pass:%.*s",
         i,
         tests[i].url,
         tests[i].tls.tls ? "TLS" : "none",
@@ -406,5 +418,32 @@ int main(void) {
         tls.cert.buf,
         (int)tls.pass.len,
         tls.pass.buf);
+  }
+
+  {
+    const char *query_url = "https://host/path?a=1&b=two&flag#frag";
+    fio_url_s url = fio_url_parse(query_url, FIO_STRLEN(query_url));
+    size_t count = 0;
+    FIO_URL_QUERY_EACH(url.query, q) {
+      switch (count++) {
+      case 0:
+        FIO_ASSERT(q.name.len == 1 && !memcmp(q.name.buf, "a", 1) &&
+                       q.value.len == 1 && !memcmp(q.value.buf, "1", 1),
+                   "query iterator first pair mismatch");
+        break;
+      case 1:
+        FIO_ASSERT(q.name.len == 1 && !memcmp(q.name.buf, "b", 1) &&
+                       q.value.len == 3 && !memcmp(q.value.buf, "two", 3),
+                   "query iterator second pair mismatch");
+        break;
+      case 2:
+        FIO_ASSERT(q.name.len == 4 && !memcmp(q.name.buf, "flag", 4) &&
+                       q.value.len == 0,
+                   "query iterator flag pair mismatch");
+        break;
+      default: FIO_ASSERT(0, "query iterator yielded too many pairs");
+      }
+    }
+    FIO_ASSERT(count == 3, "query iterator pair count mismatch: %zu", count);
   }
 }

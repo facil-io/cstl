@@ -23,8 +23,6 @@ WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wfor
 # Compiler and linker flags
 # Consider: -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
-# CFLAGS in debug mode. i.e.: -fsanitize=thread -fsanitize=undefined -fsanitize=address -coverage -DFIO_MEMORY_DISABLE
-DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
 # CFLAGS in production mode.
 CFLAGS+=$(OPTIMIZATION) $(WARNINGS) -I$(SRC_DIR) -I.
 LDFLAGS+= -lm
@@ -157,7 +155,7 @@ endef
 #   <folder>/<path/name>  - build and run a specific unit
 #   tmp/<folder>/<path/name> - the actual binary target
 define DEFINE_FOLDER
-$(1)_SOURCES := $(shell find $(1) -name "*.c" -type f 2>/dev/null | sed 's/ /\\ /g')
+$(1)_SOURCES := $(shell find $(1) -name "*.c" -type f 2>/dev/null | sort | sed 's/ /\\ /g')
 $(1)_BINS    := $$($(1)_SOURCES:%.c=$(BUILD_DIR)/%)
 $(1)_RUNS    := $$($(1)_SOURCES:$(1)/%.c=$(1)/%)
 
@@ -210,8 +208,11 @@ $(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old,
 
 # `make test` is a convenience alias for `make tests`
 test: tests;
+test/%: tests/% ;
 benchmark: benchmarks;
 bench: benchmarks;
+benchmark/%: benchmarks/% ;
+bench/%: benchmarks/% ;
 
 #############################################################################
 # Combining single-file library
@@ -474,6 +475,14 @@ ifeq ($(call TRY_HEADER_AND_FUNC, sqlite3.h, sqlite3_open, -lsqlite3) , 0)
 endif
 
 endif #TEST4SQLITE3
+
+#############################################################################
+# Debug build flags (defined after all detection so -DHAVE_OPENSSL and
+# similar flags are preserved when switching to debug mode)
+#############################################################################
+
+DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
+
 #############################################################################
 # Help
 #############################################################################

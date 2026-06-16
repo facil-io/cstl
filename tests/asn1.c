@@ -1,649 +1,491 @@
 /* *****************************************************************************
-ASN.1 DER Parser Tests
+Test for 155 asn1.h
+
+Coverage: ASN.1 DER parsing and encoding for universal types (INTEGER,
+BOOLEAN, NULL, BIT STRING, OCTET STRING, OID, UTF8String, PrintableString,
+UTC/Generalized Time), SEQUENCE/SET iteration, context-specific tags, long-form
+lengths, and error handling. Encoding round-trips are validated by parsing the
+encoded bytes back. Performance loops and external references are omitted.
 ***************************************************************************** */
+#define FIO_ASN1
 #include "test-helpers.h"
 
-#define FIO_ASN1
-#include FIO_INCLUDE_FILE
-
 /* *****************************************************************************
-Test Data - DER Encoded Test Vectors
+Test Vectors
 ***************************************************************************** */
 
-/* Simple SEQUENCE with INTEGER(42) and NULL */
+/* SEQUENCE { INTEGER(42), NULL } */
 static const uint8_t test_seq_int_null[] = {
-    0x30,
-    0x05, /* SEQUENCE, length 5 */
-    0x02,
-    0x01,
-    0x2A, /* INTEGER, length 1, value 42 */
-    0x05,
-    0x00 /* NULL, length 0 */
-};
+    0x30, 0x05, 0x02, 0x01, 0x2A, 0x05, 0x00};
 
-/* INTEGER test vectors */
-static const uint8_t test_int_42[] = {0x02, 0x01, 0x2A};  /* 42 */
-static const uint8_t test_int_127[] = {0x02, 0x01, 0x7F}; /* 127 */
-static const uint8_t test_int_128[] = {0x02,
-                                       0x02,
-                                       0x00,
-                                       0x80}; /* 128 (needs leading 0) */
-static const uint8_t test_int_256[] = {0x02, 0x02, 0x01, 0x00}; /* 256 */
-/* Note: We don't test negative integers since they're uncommon in X.509 */
+static const uint8_t test_int_42[] = {0x02, 0x01, 0x2A};
+static const uint8_t test_int_127[] = {0x02, 0x01, 0x7F};
+static const uint8_t test_int_128[] = {0x02, 0x02, 0x00, 0x80};
+static const uint8_t test_int_256[] = {0x02, 0x02, 0x01, 0x00};
 static const uint8_t test_int_large[] = {
-    0x02,
-    0x08, /* INTEGER, length 8 */
-    0x01,
-    0x23,
-    0x45,
-    0x67,
-    0x89,
-    0xAB,
-    0xCD,
-    0xEF /* 0x0123456789ABCDEF */
-};
+    0x02, 0x08, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
 
-/* BOOLEAN test vectors */
 static const uint8_t test_bool_true[] = {0x01, 0x01, 0xFF};
 static const uint8_t test_bool_false[] = {0x01, 0x01, 0x00};
-
-/* NULL test vector */
 static const uint8_t test_null[] = {0x05, 0x00};
 
-/* BIT STRING test vectors */
 static const uint8_t test_bitstring[] = {
-    0x03,
-    0x04, /* BIT STRING, length 4 */
-    0x06, /* 6 unused bits */
-    0x6E,
-    0x5D,
-    0xC0 /* data bytes (last byte has 6 bits unused) */
-};
-static const uint8_t test_bitstring_empty[] = {0x03,
-                                               0x01,
-                                               0x00}; /* empty bit string */
+    0x03, 0x04, 0x06, 0x6E, 0x5D, 0xC0};
+static const uint8_t test_bitstring_empty[] = {0x03, 0x01, 0x00};
 
-/* OCTET STRING is tested implicitly via BIT STRING and other types */
+static const uint8_t test_oid_sha256_rsa[] = {
+    0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B};
+static const uint8_t test_oid_secp256r1[] = {
+    0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07};
+static const uint8_t test_oid_cn[] = {0x06, 0x03, 0x55, 0x04, 0x03};
+static const uint8_t test_oid_ed25519[] = {0x06, 0x03, 0x2B, 0x65, 0x70};
 
-/* OID test vectors */
-/* SHA-256 with RSA: 1.2.840.113549.1.1.11 */
-static const uint8_t test_oid_sha256_rsa[] = {0x06,
-                                              0x09, /* OID, length 9 */
-                                              0x2A,
-                                              0x86,
-                                              0x48,
-                                              0x86,
-                                              0xF7,
-                                              0x0D,
-                                              0x01,
-                                              0x01,
-                                              0x0B};
-
-/* secp256r1 (P-256): 1.2.840.10045.3.1.7 */
-static const uint8_t test_oid_secp256r1[] = {0x06,
-                                             0x08, /* OID, length 8 */
-                                             0x2A,
-                                             0x86,
-                                             0x48,
-                                             0xCE,
-                                             0x3D,
-                                             0x03,
-                                             0x01,
-                                             0x07};
-
-/* Common Name: 2.5.4.3 */
-static const uint8_t test_oid_cn[] = {
-    0x06,
-    0x03, /* OID, length 3 */
-    0x55,
-    0x04,
-    0x03 /* 2.5.4.3 */
-};
-
-/* Ed25519: 1.3.101.112 */
-static const uint8_t test_oid_ed25519[] = {
-    0x06,
-    0x03, /* OID, length 3 */
-    0x2B,
-    0x65,
-    0x70 /* 1.3.101.112 */
-};
-
-/* UTF8String test vector */
-static const uint8_t test_utf8_string[] = {0x0C,
-                                           0x0B, /* UTF8String, length 11 */
-                                           'H',
-                                           'e',
-                                           'l',
-                                           'l',
-                                           'o',
-                                           ' ',
-                                           'W',
-                                           'o',
-                                           'r',
-                                           'l',
-                                           'd'};
-
-/* PrintableString test vector */
+static const uint8_t test_utf8_string[] = {
+    0x0C, 0x0B, 'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'};
 static const uint8_t test_printable_string[] = {
-    0x13,
-    0x07, /* PrintableString, length 7 */
-    'e',
-    'x',
-    'a',
-    'm',
-    'p',
-    'l',
-    'e'};
+    0x13, 0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e'};
 
-/* UTC Time test vectors */
-/* 2023-12-25 12:30:45Z */
-static const uint8_t test_utc_time[] = {0x17,
-                                        0x0D, /* UTCTime, length 13 */
-                                        '2',
-                                        '3',
-                                        '1',
-                                        '2',
-                                        '2',
-                                        '5',
-                                        '1',
-                                        '2',
-                                        '3',
-                                        '0',
-                                        '4',
-                                        '5',
-                                        'Z'};
+static const uint8_t test_utc_time[] = {
+    0x17, 0x0D, '2', '3', '1', '2', '2', '5', '1', '2', '3', '0', '4', '5', 'Z'};
+static const uint8_t test_gen_time[] = {
+    0x18, 0x0F,
+    '2', '0', '2', '3', '1', '2', '2', '5', '1', '2', '3', '0', '4', '5', 'Z'};
 
-/* Generalized Time test vector */
-/* 2023-12-25 12:30:45Z */
-static const uint8_t test_gen_time[] = {0x18,
-                                        0x0F, /* GeneralizedTime, length 15 */
-                                        '2',
-                                        '0',
-                                        '2',
-                                        '3',
-                                        '1',
-                                        '2',
-                                        '2',
-                                        '5',
-                                        '1',
-                                        '2',
-                                        '3',
-                                        '0',
-                                        '4',
-                                        '5',
-                                        'Z'};
+static const uint8_t test_context_0[] = {0xA0, 0x03, 0x02, 0x01, 0x03};
 
-/* Context-specific tags */
-static const uint8_t test_context_0[] = {
-    0xA0,
-    0x03, /* [0] CONSTRUCTED, length 3 */
-    0x02,
-    0x01,
-    0x03 /* INTEGER 3 (version) */
-};
-
-/* Nested SEQUENCE for X.509-like structure
- * Structure:
- *   SEQUENCE (outer)
- *     SEQUENCE (AlgorithmIdentifier) = OID(5) + NULL(2) = 7 bytes
- *     SEQUENCE (Name) = SET(14) = 14 bytes
- *       SET = RDN SEQUENCE(12) = 12 bytes
- *         SEQUENCE (RDN) = OID(5) + UTF8(5) = 10 bytes
- * Total outer content: (2+7) + (2+14) = 25 bytes
- */
 static const uint8_t test_nested_seq[] = {
-    0x30, 0x19,                   /* SEQUENCE, length 25 */
-    0x30, 0x07,                   /* SEQUENCE (AlgorithmIdentifier), length 7 */
-    0x06, 0x03, 0x55, 0x04, 0x03, /* OID 2.5.4.3 (5 bytes) */
-    0x05, 0x00,                   /* NULL params (2 bytes) */
-    0x30, 0x0E,                   /* SEQUENCE (Name), length 14 */
-    0x31, 0x0C,                   /* SET, length 12 */
-    0x30, 0x0A,                   /* SEQUENCE (RDN), length 10 */
-    0x06, 0x03, 0x55, 0x04, 0x03, /* OID 2.5.4.3 */
-    0x0C, 0x03, 'f',  'o',  'o'   /* UTF8String "foo" */
-};
-
-/* Note: Long-form length is tested in fio___test_asn1_long_length */
+    0x30, 0x19,
+    0x30, 0x07, 0x06, 0x03, 0x55, 0x04, 0x03, 0x05, 0x00,
+    0x30, 0x0E, 0x31, 0x0C, 0x30, 0x0A, 0x06, 0x03, 0x55, 0x04, 0x03,
+    0x0C, 0x03, 'f',  'o',  'o'};
 
 /* *****************************************************************************
-Basic Element Parsing Tests
+Core Parsing Tests
 ***************************************************************************** */
 
-FIO_SFUNC void fio___test_asn1_parse_element(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_element)(void) {
   fio_asn1_element_s elem;
   const uint8_t *next;
-  /* Test INTEGER parsing */
+
   next = fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42));
-  FIO_ASSERT(next != NULL, "Failed to parse INTEGER(42)");
-  FIO_ASSERT(elem.tag == 0x02, "Wrong tag for INTEGER: 0x%02X", elem.tag);
+  FIO_ASSERT(next, "INTEGER(42) parse failed");
+  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_INTEGER, "INTEGER tag mismatch");
   FIO_ASSERT(elem.tag_class == FIO_ASN1_CLASS_UNIVERSAL,
-             "Wrong tag class for INTEGER");
-  FIO_ASSERT(elem.is_constructed == 0, "INTEGER should not be constructed");
-  FIO_ASSERT(elem.len == 1, "Wrong length for INTEGER(42): %zu", elem.len);
-  FIO_ASSERT(elem.data[0] == 0x2A, "Wrong data for INTEGER(42)");
-  FIO_ASSERT(next == test_int_42 + sizeof(test_int_42),
-             "Wrong next pointer for INTEGER(42)");
+             "INTEGER class mismatch");
+  FIO_ASSERT(!elem.is_constructed, "INTEGER must be primitive");
+  FIO_ASSERT(elem.len == 1, "INTEGER length mismatch");
+  FIO_ASSERT(elem.data[0] == 0x2A, "INTEGER value mismatch");
+  FIO_ASSERT(next == test_int_42 + sizeof(test_int_42), "next pointer wrong");
 
-  /* Test NULL parsing */
   next = fio_asn1_parse(&elem, test_null, sizeof(test_null));
-  FIO_ASSERT(next != NULL, "Failed to parse NULL");
-  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_NULL, "Wrong tag for NULL");
-  FIO_ASSERT(elem.len == 0, "Wrong length for NULL");
+  FIO_ASSERT(next, "NULL parse failed");
+  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_NULL, "NULL tag mismatch");
+  FIO_ASSERT(elem.len == 0, "NULL length mismatch");
 
-  /* Test BOOLEAN parsing */
   next = fio_asn1_parse(&elem, test_bool_true, sizeof(test_bool_true));
-  FIO_ASSERT(next != NULL, "Failed to parse BOOLEAN TRUE");
-  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_BOOLEAN, "Wrong tag for BOOLEAN");
-  FIO_ASSERT(elem.len == 1, "Wrong length for BOOLEAN");
-  FIO_ASSERT(elem.data[0] == 0xFF, "Wrong value for BOOLEAN TRUE");
+  FIO_ASSERT(next, "BOOLEAN parse failed");
+  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_BOOLEAN, "BOOLEAN tag mismatch");
+  FIO_ASSERT(elem.len == 1 && elem.data[0] == 0xFF,
+             "BOOLEAN TRUE value mismatch");
 
-  /* Test SEQUENCE parsing */
   next = fio_asn1_parse(&elem, test_seq_int_null, sizeof(test_seq_int_null));
-  FIO_ASSERT(next != NULL, "Failed to parse SEQUENCE");
-  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_SEQUENCE, "Wrong tag for SEQUENCE");
-  FIO_ASSERT(elem.is_constructed == 1, "SEQUENCE should be constructed");
-  FIO_ASSERT(elem.len == 5, "Wrong length for SEQUENCE");
+  FIO_ASSERT(next, "SEQUENCE parse failed");
+  FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_SEQUENCE, "SEQUENCE tag mismatch");
+  FIO_ASSERT(elem.is_constructed, "SEQUENCE must be constructed");
+  FIO_ASSERT(elem.len == 5, "SEQUENCE length mismatch");
 
-  /* Test context-specific tag */
   next = fio_asn1_parse(&elem, test_context_0, sizeof(test_context_0));
-  FIO_ASSERT(next != NULL, "Failed to parse [0] context tag");
+  FIO_ASSERT(next, "context tag [0] parse failed");
   FIO_ASSERT(elem.tag_class == FIO_ASN1_CLASS_CONTEXT,
-             "Wrong tag class for context tag");
-  FIO_ASSERT((elem.tag & 0x1F) == 0, "Wrong tag number for [0]");
-  FIO_ASSERT(elem.is_constructed == 1, "[0] should be constructed");
+             "context tag class mismatch");
+  FIO_ASSERT((elem.tag & 0x1F) == 0, "context tag number mismatch");
+  FIO_ASSERT(elem.is_constructed, "context tag [0] must be constructed");
 }
 
-/* *****************************************************************************
-Integer Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_integer(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_integer)(void) {
   fio_asn1_element_s elem;
   uint64_t value;
-  /* Test small positive integer */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)),
-             "Failed to parse INTEGER(42)");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) == 0,
-             "Failed to extract INTEGER(42) value");
-  FIO_ASSERT(value == 42, "Wrong value for INTEGER(42): %" PRIu64, value);
 
-  /* Test 127 (max single byte positive) */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_127, sizeof(test_int_127)),
-             "Failed to parse INTEGER(127)");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) == 0,
-             "Failed to extract INTEGER(127) value");
-  FIO_ASSERT(value == 127, "Wrong value for INTEGER(127)");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 && value == 42,
+             "INTEGER(42) failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_127, sizeof(test_int_127)) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 && value == 127,
+             "INTEGER(127) failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_128, sizeof(test_int_128)) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 && value == 128,
+             "INTEGER(128) failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_256, sizeof(test_int_256)) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 && value == 256,
+             "INTEGER(256) failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_large, sizeof(test_int_large)) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 &&
+                 value == 0x0123456789ABCDEFULL,
+             "large INTEGER failed");
 
-  /* Test 128 (requires leading zero byte) */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_128, sizeof(test_int_128)),
-             "Failed to parse INTEGER(128)");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) == 0,
-             "Failed to extract INTEGER(128) value");
-  FIO_ASSERT(value == 128, "Wrong value for INTEGER(128): %" PRIu64, value);
-
-  /* Test 256 */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_256, sizeof(test_int_256)),
-             "Failed to parse INTEGER(256)");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) == 0,
-             "Failed to extract INTEGER(256) value");
-  FIO_ASSERT(value == 256, "Wrong value for INTEGER(256)");
-
-  /* Test large integer (8 bytes) */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_large, sizeof(test_int_large)),
-             "Failed to parse large INTEGER");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) == 0,
-             "Failed to extract large INTEGER value");
-  FIO_ASSERT(value == 0x0123456789ABCDEFULL,
-             "Wrong value for large INTEGER: 0x%" PRIX64,
-             value);
+  FIO_ASSERT(fio_asn1_parse(&elem, test_null, sizeof(test_null)) &&
+                 fio_asn1_parse_integer(&elem, &value) != 0,
+             "NULL as INTEGER should fail");
 }
 
-/* *****************************************************************************
-Boolean Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_boolean(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_boolean)(void) {
   fio_asn1_element_s elem;
   int value;
-  /* Test TRUE */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_bool_true, sizeof(test_bool_true)),
-             "Failed to parse BOOLEAN TRUE");
-  FIO_ASSERT(fio_asn1_parse_boolean(&elem, &value) == 0,
-             "Failed to extract BOOLEAN TRUE");
-  FIO_ASSERT(value != 0, "BOOLEAN TRUE should be non-zero");
 
-  /* Test FALSE */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_bool_false, sizeof(test_bool_false)),
-             "Failed to parse BOOLEAN FALSE");
-  FIO_ASSERT(fio_asn1_parse_boolean(&elem, &value) == 0,
-             "Failed to extract BOOLEAN FALSE");
-  FIO_ASSERT(value == 0, "BOOLEAN FALSE should be zero");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_bool_true, sizeof(test_bool_true)) &&
+                 fio_asn1_parse_boolean(&elem, &value) == 0 && value,
+             "BOOLEAN TRUE failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_bool_false, sizeof(test_bool_false)) &&
+                 fio_asn1_parse_boolean(&elem, &value) == 0 && !value,
+             "BOOLEAN FALSE failed");
 }
 
-/* *****************************************************************************
-Bit String Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_bit_string(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_bit_string)(void) {
   fio_asn1_element_s elem;
   const uint8_t *bits;
   size_t bit_len;
-  uint8_t unused_bits;
-  /* Test non-empty bit string */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_bitstring, sizeof(test_bitstring)),
-             "Failed to parse BIT STRING");
-  FIO_ASSERT(fio_asn1_parse_bit_string(&elem, &bits, &bit_len, &unused_bits) ==
-                 0,
-             "Failed to extract BIT STRING");
-  FIO_ASSERT(unused_bits == 6, "Wrong unused bits: %u", unused_bits);
-  FIO_ASSERT(bit_len == 3, "Wrong bit length: %zu", bit_len);
-  FIO_ASSERT(bits[0] == 0x6E && bits[1] == 0x5D && bits[2] == 0xC0,
-             "Wrong bit data");
+  uint8_t unused;
 
-  /* Test empty bit string */
+  FIO_ASSERT(fio_asn1_parse(&elem, test_bitstring, sizeof(test_bitstring)) &&
+                 fio_asn1_parse_bit_string(&elem, &bits, &bit_len, &unused) ==
+                     0,
+             "BIT STRING parse failed");
+  FIO_ASSERT(unused == 6 && bit_len == 3, "BIT STRING length/unused mismatch");
+  FIO_ASSERT(bits[0] == 0x6E && bits[1] == 0x5D && bits[2] == 0xC0,
+             "BIT STRING data mismatch");
+
   FIO_ASSERT(
-      fio_asn1_parse(&elem, test_bitstring_empty, sizeof(test_bitstring_empty)),
-      "Failed to parse empty BIT STRING");
-  FIO_ASSERT(fio_asn1_parse_bit_string(&elem, &bits, &bit_len, &unused_bits) ==
-                 0,
-             "Failed to extract empty BIT STRING");
-  FIO_ASSERT(bit_len == 0, "Empty BIT STRING should have zero length");
-  FIO_ASSERT(unused_bits == 0, "Empty BIT STRING should have zero unused bits");
+      fio_asn1_parse(&elem, test_bitstring_empty, sizeof(test_bitstring_empty))
+          && fio_asn1_parse_bit_string(&elem, &bits, &bit_len, &unused) == 0
+          && bit_len == 0 && unused == 0,
+      "empty BIT STRING failed");
 }
 
-/* *****************************************************************************
-OID Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_oid(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_oid)(void) {
   fio_asn1_element_s elem;
   char oid_buf[128];
   int len;
-  /* Test SHA-256 with RSA OID: 1.2.840.113549.1.1.11 */
-  FIO_ASSERT(
-      fio_asn1_parse(&elem, test_oid_sha256_rsa, sizeof(test_oid_sha256_rsa)),
-      "Failed to parse SHA256-RSA OID");
-  len = fio_asn1_parse_oid(&elem, oid_buf, sizeof(oid_buf));
-  FIO_ASSERT(len > 0, "Failed to convert OID to string");
-  FIO_ASSERT(FIO_MEMCMP(oid_buf, FIO_OID_SHA256_WITH_RSA, len) == 0,
-             "Wrong OID string: %s (expected %s)",
-             oid_buf,
-             FIO_OID_SHA256_WITH_RSA);
 
-  /* Test with fio_asn1_oid_eq */
+  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_sha256_rsa,
+                            sizeof(test_oid_sha256_rsa)),
+             "SHA256-RSA OID parse failed");
+  len = fio_asn1_parse_oid(&elem, oid_buf, sizeof(oid_buf));
+  FIO_ASSERT(len > 0, "OID stringify failed");
+  FIO_ASSERT(!FIO_MEMCMP(oid_buf, FIO_OID_SHA256_WITH_RSA, len),
+             "SHA256-RSA OID mismatch");
   FIO_ASSERT(fio_asn1_oid_eq(&elem, FIO_OID_SHA256_WITH_RSA),
-             "OID comparison failed for SHA256-RSA");
+             "SHA256-RSA oid_eq failed");
   FIO_ASSERT(!fio_asn1_oid_eq(&elem, FIO_OID_ED25519),
-             "OID comparison should fail for different OID");
+             "different OID should not match");
 
-  /* Test secp256r1 OID: 1.2.840.10045.3.1.7 */
-  FIO_ASSERT(
-      fio_asn1_parse(&elem, test_oid_secp256r1, sizeof(test_oid_secp256r1)),
-      "Failed to parse secp256r1 OID");
-  FIO_ASSERT(fio_asn1_oid_eq(&elem, FIO_OID_SECP256R1),
-             "OID comparison failed for secp256r1");
-
-  /* Test Common Name OID: 2.5.4.3 */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_cn, sizeof(test_oid_cn)),
-             "Failed to parse CN OID");
-  len = fio_asn1_parse_oid(&elem, oid_buf, sizeof(oid_buf));
-  FIO_ASSERT(len > 0, "Failed to convert CN OID to string");
-  FIO_ASSERT(FIO_MEMCMP(oid_buf, FIO_OID_COMMON_NAME, len) == 0,
-             "Wrong CN OID string: %s",
-             oid_buf);
-
-  /* Test Ed25519 OID: 1.3.101.112 */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_ed25519, sizeof(test_oid_ed25519)),
-             "Failed to parse Ed25519 OID");
-  FIO_ASSERT(fio_asn1_oid_eq(&elem, FIO_OID_ED25519),
-             "OID comparison failed for Ed25519");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_secp256r1,
+                            sizeof(test_oid_secp256r1)) &&
+                 fio_asn1_oid_eq(&elem, FIO_OID_SECP256R1),
+             "secp256r1 OID failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_cn, sizeof(test_oid_cn)) &&
+                 fio_asn1_oid_eq(&elem, FIO_OID_COMMON_NAME),
+             "CN OID failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_oid_ed25519, sizeof(test_oid_ed25519))
+                 && fio_asn1_oid_eq(&elem, FIO_OID_ED25519),
+             "Ed25519 OID failed");
 }
 
-/* *****************************************************************************
-String Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_string(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_string)(void) {
   fio_asn1_element_s elem;
   const char *str;
   size_t len;
-  /* Test UTF8String */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_utf8_string, sizeof(test_utf8_string)),
-             "Failed to parse UTF8String");
-  str = fio_asn1_parse_string(&elem, &len);
-  FIO_ASSERT(str != NULL, "Failed to extract UTF8String");
-  FIO_ASSERT(len == 11, "Wrong UTF8String length: %zu", len);
-  FIO_ASSERT(FIO_MEMCMP(str, "Hello World", 11) == 0,
-             "Wrong UTF8String content");
 
-  /* Test PrintableString */
-  FIO_ASSERT(fio_asn1_parse(&elem,
-                            test_printable_string,
-                            sizeof(test_printable_string)),
-             "Failed to parse PrintableString");
-  str = fio_asn1_parse_string(&elem, &len);
-  FIO_ASSERT(str != NULL, "Failed to extract PrintableString");
-  FIO_ASSERT(len == 7, "Wrong PrintableString length");
-  FIO_ASSERT(FIO_MEMCMP(str, "example", 7) == 0,
-             "Wrong PrintableString content");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_utf8_string, sizeof(test_utf8_string))
+                 && (str = fio_asn1_parse_string(&elem, &len)) && len == 11
+                 && !FIO_MEMCMP(str, "Hello World", 11),
+             "UTF8String failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_printable_string,
+                            sizeof(test_printable_string))
+                 && (str = fio_asn1_parse_string(&elem, &len)) && len == 7
+                 && !FIO_MEMCMP(str, "example", 7),
+             "PrintableString failed");
+
+  /* IA5String is also accepted as a string type */
+  static const uint8_t test_ia5[] = {0x16, 0x05, 'h', 'e', 'l', 'l', 'o'};
+  FIO_ASSERT(fio_asn1_parse(&elem, test_ia5, sizeof(test_ia5))
+                 && (str = fio_asn1_parse_string(&elem, &len)) && len == 5
+                 && !FIO_MEMCMP(str, "hello", 5),
+             "IA5String failed");
+
+  /* NumericString is accepted */
+  static const uint8_t test_numeric[] = {0x12, 0x05, '1', '2', '3', '4', '5'};
+  FIO_ASSERT(fio_asn1_parse(&elem, test_numeric, sizeof(test_numeric))
+                 && (str = fio_asn1_parse_string(&elem, &len)) && len == 5
+                 && !FIO_MEMCMP(str, "12345", 5),
+             "NumericString failed");
+
+  /* Non-string type should be rejected by parse_string */
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42))
+                 && fio_asn1_parse_string(&elem, &len) == NULL,
+             "INTEGER should not parse as string");
 }
 
-/* *****************************************************************************
-Time Parsing Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_parse_time(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_parse_time)(void) {
   fio_asn1_element_s elem;
-  int64_t unix_time;
-  /* Test UTC Time: 231225123045Z = 2023-12-25 12:30:45 UTC */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_utc_time, sizeof(test_utc_time)),
-             "Failed to parse UTCTime");
-  FIO_ASSERT(fio_asn1_parse_time(&elem, &unix_time) == 0,
-             "Failed to extract UTCTime");
-  /* 2023-12-25 12:30:45 UTC should be around 1703507445 */
-  FIO_ASSERT(unix_time > 1703500000 && unix_time < 1703510000,
-             "UTCTime out of expected range: %" PRId64,
-             unix_time);
+  int64_t utc_ts;
+  int64_t gen_ts;
 
-  /* Test Generalized Time: 20231225123045Z */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_gen_time, sizeof(test_gen_time)),
-             "Failed to parse GeneralizedTime");
-  int64_t gen_unix_time;
-  FIO_ASSERT(fio_asn1_parse_time(&elem, &gen_unix_time) == 0,
-             "Failed to extract GeneralizedTime");
-  /* Should be same as UTC time */
-  FIO_ASSERT(gen_unix_time == unix_time,
-             "GeneralizedTime != UTCTime: %" PRId64 " vs %" PRId64,
-             gen_unix_time,
-             unix_time);
+  FIO_ASSERT(fio_asn1_parse(&elem, test_utc_time, sizeof(test_utc_time)) &&
+                 fio_asn1_parse_time(&elem, &utc_ts) == 0,
+             "UTCTime parse failed");
+  FIO_ASSERT(utc_ts > 1703500000 && utc_ts < 1703510000,
+             "UTCTime value out of range");
+
+  FIO_ASSERT(fio_asn1_parse(&elem, test_gen_time, sizeof(test_gen_time)) &&
+                 fio_asn1_parse_time(&elem, &gen_ts) == 0 && gen_ts == utc_ts,
+             "GeneralizedTime != UTCTime");
 }
 
-/* *****************************************************************************
-Iterator Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_iterator(void) {
-  fio_asn1_element_s seq_elem, elem;
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_iterator)(void) {
+  fio_asn1_element_s seq, elem;
   fio_asn1_iterator_s it;
-  uint64_t int_value;
-  /* Parse SEQUENCE containing INTEGER(42) and NULL */
-  FIO_ASSERT(
-      fio_asn1_parse(&seq_elem, test_seq_int_null, sizeof(test_seq_int_null)),
-      "Failed to parse SEQUENCE");
+  uint64_t value;
 
-  /* Initialize iterator */
-  fio_asn1_iterator_init(&it, &seq_elem);
-  FIO_ASSERT(fio_asn1_iterator_has_next(&it), "Iterator should have elements");
-
-  /* Get first element (INTEGER) */
-  FIO_ASSERT(fio_asn1_iterator_next(&it, &elem) == 0,
-             "Failed to get first element");
-  FIO_ASSERT(fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER),
-             "First element should be INTEGER");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &int_value) == 0,
-             "Failed to parse INTEGER");
-  FIO_ASSERT(int_value == 42, "Wrong INTEGER value: %" PRIu64, int_value);
-
-  /* Get second element (NULL) */
+  FIO_ASSERT(fio_asn1_parse(&seq, test_seq_int_null, sizeof(test_seq_int_null)),
+             "iterator SEQUENCE parse failed");
+  fio_asn1_iterator_init(&it, &seq);
   FIO_ASSERT(fio_asn1_iterator_has_next(&it),
-             "Iterator should have more elements");
-  FIO_ASSERT(fio_asn1_iterator_next(&it, &elem) == 0,
-             "Failed to get second element");
-  FIO_ASSERT(fio_asn1_is_tag(&elem, FIO_ASN1_NULL),
-             "Second element should be NULL");
-
-  /* No more elements */
-  FIO_ASSERT(!fio_asn1_iterator_has_next(&it), "Iterator should be exhausted");
+             "iterator should have elements");
+  FIO_ASSERT(!fio_asn1_iterator_next(&it, &elem) &&
+                 fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 && value == 42,
+             "iterator first element failed");
+  FIO_ASSERT(!fio_asn1_iterator_next(&it, &elem) &&
+                 fio_asn1_is_tag(&elem, FIO_ASN1_NULL),
+             "iterator second element failed");
+  FIO_ASSERT(!fio_asn1_iterator_has_next(&it),
+             "iterator should be exhausted");
   FIO_ASSERT(fio_asn1_iterator_next(&it, &elem) != 0,
-             "Should fail to get element from exhausted iterator");
+             "exhausted iterator should fail");
 }
 
-/* *****************************************************************************
-Nested Structure Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_nested(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_nested)(void) {
   fio_asn1_element_s outer, inner, elem;
-  fio_asn1_iterator_s it_outer, it_inner;
-  /* Parse outer SEQUENCE */
-  FIO_ASSERT(fio_asn1_parse(&outer, test_nested_seq, sizeof(test_nested_seq)),
-             "Failed to parse outer SEQUENCE");
-  FIO_ASSERT(fio_asn1_is_tag(&outer, FIO_ASN1_SEQUENCE),
-             "Outer element should be SEQUENCE");
+  fio_asn1_iterator_s it;
 
-  fio_asn1_iterator_init(&it_outer, &outer);
+  FIO_ASSERT(fio_asn1_parse(&outer, test_nested_seq, sizeof(test_nested_seq)) &&
+                 fio_asn1_is_tag(&outer, FIO_ASN1_SEQUENCE),
+             "nested SEQUENCE parse failed");
+  fio_asn1_iterator_init(&it, &outer);
 
-  /* First inner element: AlgorithmIdentifier SEQUENCE */
-  FIO_ASSERT(fio_asn1_iterator_next(&it_outer, &inner) == 0,
-             "Failed to get AlgorithmIdentifier");
-  FIO_ASSERT(fio_asn1_is_tag(&inner, FIO_ASN1_SEQUENCE),
-             "AlgorithmIdentifier should be SEQUENCE");
-
-  fio_asn1_iterator_init(&it_inner, &inner);
-
-  /* Get OID from AlgorithmIdentifier */
-  FIO_ASSERT(fio_asn1_iterator_next(&it_inner, &elem) == 0,
-             "Failed to get OID from AlgorithmIdentifier");
-  FIO_ASSERT(fio_asn1_is_tag(&elem, FIO_ASN1_OID), "Should be OID");
-  FIO_ASSERT(fio_asn1_oid_eq(&elem, FIO_OID_COMMON_NAME),
-             "OID should be 2.5.4.3");
-
-  /* Get NULL params */
-  FIO_ASSERT(fio_asn1_iterator_next(&it_inner, &elem) == 0,
-             "Failed to get NULL params");
-  FIO_ASSERT(fio_asn1_is_tag(&elem, FIO_ASN1_NULL), "Should be NULL");
-
-  /* Second inner element: Name SEQUENCE */
-  FIO_ASSERT(fio_asn1_iterator_next(&it_outer, &inner) == 0,
-             "Failed to get Name SEQUENCE");
-  FIO_ASSERT(fio_asn1_is_tag(&inner, FIO_ASN1_SEQUENCE),
-             "Name should be SEQUENCE");
+  FIO_ASSERT(!fio_asn1_iterator_next(&it, &inner) &&
+                 fio_asn1_is_tag(&inner, FIO_ASN1_SEQUENCE),
+             "AlgorithmIdentifier SEQUENCE failed");
+  fio_asn1_iterator_init(&it, &inner);
+  FIO_ASSERT(!fio_asn1_iterator_next(&it, &elem) &&
+                 fio_asn1_is_tag(&elem, FIO_ASN1_OID) &&
+                 fio_asn1_oid_eq(&elem, FIO_OID_COMMON_NAME),
+             "nested OID failed");
+  FIO_ASSERT(!fio_asn1_iterator_next(&it, &elem) &&
+                 fio_asn1_is_tag(&elem, FIO_ASN1_NULL),
+             "nested NULL params failed");
 }
 
-/* *****************************************************************************
-Helper Function Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_helpers(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_helpers)(void) {
   fio_asn1_element_s elem;
-  /* Test fio_asn1_is_tag */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)),
-             "Failed to parse INTEGER");
-  FIO_ASSERT(fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER),
-             "fio_asn1_is_tag failed for INTEGER");
-  FIO_ASSERT(!fio_asn1_is_tag(&elem, FIO_ASN1_BOOLEAN),
-             "fio_asn1_is_tag should fail for wrong tag");
 
-  /* Test fio_asn1_is_context_tag */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_context_0, sizeof(test_context_0)),
-             "Failed to parse context tag");
-  FIO_ASSERT(fio_asn1_is_context_tag(&elem, 0),
-             "fio_asn1_is_context_tag failed for [0]");
-  FIO_ASSERT(!fio_asn1_is_context_tag(&elem, 1),
-             "fio_asn1_is_context_tag should fail for [1]");
-
-  /* Test fio_asn1_tag_number */
-  FIO_ASSERT(fio_asn1_tag_number(&elem) == 0,
-             "fio_asn1_tag_number wrong for [0]");
-
-  /* Test fio_asn1_element_total_len */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)),
-             "Failed to parse INTEGER");
-  size_t total = fio_asn1_element_total_len(&elem, test_int_42);
-  FIO_ASSERT(total == sizeof(test_int_42),
-             "Wrong total length: %zu vs %zu",
-             total,
-             sizeof(test_int_42));
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)) &&
+                 fio_asn1_is_tag(&elem, FIO_ASN1_INTEGER) &&
+                 !fio_asn1_is_tag(&elem, FIO_ASN1_BOOLEAN),
+             "fio_asn1_is_tag failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_context_0, sizeof(test_context_0)) &&
+                 fio_asn1_is_context_tag(&elem, 0) &&
+                 !fio_asn1_is_context_tag(&elem, 1) &&
+                 fio_asn1_tag_number(&elem) == 0,
+             "context tag helpers failed");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, sizeof(test_int_42)) &&
+                 fio_asn1_element_total_len(&elem, test_int_42) ==
+                     sizeof(test_int_42),
+             "element_total_len failed");
 }
 
-/* *****************************************************************************
-Error Handling Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_errors(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_errors)(void) {
   fio_asn1_element_s elem;
   uint64_t value;
   int bool_val;
-  /* Test NULL inputs */
-  FIO_ASSERT(fio_asn1_parse(NULL, test_int_42, sizeof(test_int_42)) == NULL,
-             "Should fail with NULL elem");
-  FIO_ASSERT(fio_asn1_parse(&elem, NULL, 10) == NULL,
-             "Should fail with NULL data");
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, 0) == NULL,
-             "Should fail with zero length");
 
-  /* Test type mismatches */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_null, sizeof(test_null)),
-             "Failed to parse NULL");
-  FIO_ASSERT(fio_asn1_parse_integer(&elem, &value) != 0,
-             "Should fail to parse NULL as INTEGER");
-  FIO_ASSERT(fio_asn1_parse_boolean(&elem, &bool_val) != 0,
-             "Should fail to parse NULL as BOOLEAN");
+  FIO_ASSERT(!fio_asn1_parse(NULL, test_int_42, sizeof(test_int_42)),
+             "NULL elem should fail");
+  FIO_ASSERT(!fio_asn1_parse(&elem, NULL, 10), "NULL data should fail");
+  FIO_ASSERT(!fio_asn1_parse(&elem, test_int_42, 0),
+             "zero length should fail");
+  FIO_ASSERT(!fio_asn1_parse(&elem, test_int_42, 1),
+             "truncated data should fail");
 
-  /* Test truncated data */
-  FIO_ASSERT(fio_asn1_parse(&elem, test_int_42, 1) == NULL,
-             "Should fail on truncated data");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_null, sizeof(test_null)) &&
+                 fio_asn1_parse_integer(&elem, &value) != 0,
+             "NULL as INTEGER should fail");
+  FIO_ASSERT(fio_asn1_parse(&elem, test_null, sizeof(test_null)) &&
+                 fio_asn1_parse_boolean(&elem, &bool_val) != 0,
+             "NULL as BOOLEAN should fail");
 }
 
-/* *****************************************************************************
-Long Form Length Tests
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_asn1_long_length(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_long_length)(void) {
   fio_asn1_element_s elem;
-  /* Create a buffer with long-form length and enough content */
   uint8_t buf[260];
-  buf[0] = 0x04;                  /* OCTET STRING */
-  buf[1] = 0x82;                  /* Long form: 2 bytes of length */
-  buf[2] = 0x01;                  /* Length high byte */
-  buf[3] = 0x00;                  /* Length low byte = 256 */
-  FIO_MEMSET(buf + 4, 0xAB, 256); /* 256 bytes of content */
+
+  buf[0] = 0x04;
+  buf[1] = 0x82;
+  buf[2] = 0x01;
+  buf[3] = 0x00;
+  FIO_MEMSET(buf + 4, 0xAB, 256);
 
   const uint8_t *next = fio_asn1_parse(&elem, buf, sizeof(buf));
-  FIO_ASSERT(next != NULL, "Failed to parse long-form length element");
+  FIO_ASSERT(next, "long-form length parse failed");
   FIO_ASSERT((elem.tag & 0x1F) == FIO_ASN1_OCTET_STRING,
-             "Wrong tag for OCTET STRING");
-  FIO_ASSERT(elem.len == 256, "Wrong length for long-form: %zu", elem.len);
-  FIO_ASSERT(elem.data[0] == 0xAB, "Wrong content byte");
+             "long-form tag mismatch");
+  FIO_ASSERT(elem.len == 256, "long-form length mismatch");
+  FIO_ASSERT(elem.data[0] == 0xAB, "long-form content mismatch");
 }
 
 /* *****************************************************************************
-Main Test Runner
+Encoding Round-Trip Tests
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_length)(void) {
+  uint8_t buf[8];
+
+  FIO_ASSERT(fio_asn1_encode_length(buf, 50) == 1 && buf[0] == 50,
+             "short-form length encode failed");
+  FIO_ASSERT(fio_asn1_encode_length(buf, 200) == 2 && buf[0] == 0x81 &&
+                 buf[1] == 200,
+             "long-form (1 byte) length encode failed");
+  FIO_ASSERT(fio_asn1_encode_length(buf, 300) == 3 && buf[0] == 0x82 &&
+                 buf[1] == 0x01 && buf[2] == 0x2C,
+             "long-form (2 byte) length encode failed");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_integer)(void) {
+  uint8_t buf[16];
+  fio_asn1_element_s elem;
+  uint64_t value;
+
+  FIO_ASSERT(fio_asn1_encode_integer_small(buf, 42) == 3 && buf[0] == 0x02 &&
+                 buf[1] == 0x01 && buf[2] == 42,
+             "INTEGER(42) encode failed");
+  FIO_ASSERT(fio_asn1_encode_integer_small(buf, 128) == 4 && buf[0] == 0x02 &&
+                 buf[1] == 0x02 && buf[2] == 0x00 && buf[3] == 128,
+             "INTEGER(128) encode failed");
+
+  uint8_t big[8] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
+  size_t len = fio_asn1_encode_integer(buf, big, sizeof(big));
+  FIO_ASSERT(len > 0 && fio_asn1_parse(&elem, buf, len) &&
+                 fio_asn1_parse_integer(&elem, &value) == 0 &&
+                 value == 0x0123456789ABCDEFULL,
+             "INTEGER round-trip failed");
+
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_oid)(void) {
+  uint8_t buf[32];
+  fio_asn1_element_s elem;
+
+  size_t len = fio_asn1_encode_oid(buf, FIO_OID_SHA256_WITH_RSA);
+  FIO_ASSERT(len > 0 && fio_asn1_parse(&elem, buf, len) &&
+                 fio_asn1_oid_eq(&elem, FIO_OID_SHA256_WITH_RSA),
+             "OID encode round-trip failed");
+
+  len = fio_asn1_encode_oid(buf, FIO_OID_ED25519);
+  FIO_ASSERT(len > 0 && fio_asn1_parse(&elem, buf, len) &&
+                 fio_asn1_oid_eq(&elem, FIO_OID_ED25519),
+             "Ed25519 OID encode round-trip failed");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_strings)(void) {
+  uint8_t buf[64];
+  fio_asn1_element_s elem;
+  const char *str;
+  size_t len;
+
+  size_t enclen = fio_asn1_encode_utf8_string(buf, "localhost", 9);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 (str = fio_asn1_parse_string(&elem, &len)) && len == 9 &&
+                 !FIO_MEMCMP(str, "localhost", 9),
+             "UTF8String encode round-trip failed");
+
+  enclen = fio_asn1_encode_printable_string(buf, "example", 7);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 (elem.tag & 0x1F) == FIO_ASN1_PRINTABLE_STRING &&
+                 (str = fio_asn1_parse_string(&elem, &len)) && len == 7 &&
+                 !FIO_MEMCMP(str, "example", 7),
+             "PrintableString encode round-trip failed");
+
+  uint8_t bits[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+  enclen = fio_asn1_encode_bit_string(buf, bits, 4, 0);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 (elem.tag & 0x1F) == FIO_ASN1_BIT_STRING,
+             "BIT STRING encode round-trip failed");
+
+  enclen = fio_asn1_encode_octet_string(buf, bits, 4);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 (elem.tag & 0x1F) == FIO_ASN1_OCTET_STRING &&
+                 elem.len == 4 && !FIO_MEMCMP(elem.data, bits, 4),
+             "OCTET STRING encode round-trip failed");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_time)(void) {
+  uint8_t buf[32];
+  fio_asn1_element_s elem;
+  int64_t ts;
+
+  int64_t test_ts = 1705321845; /* 2024-01-15 12:30:45 UTC */
+  size_t enclen = fio_asn1_encode_utc_time(buf, test_ts);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 fio_asn1_parse_time(&elem, &ts) == 0 && ts == test_ts,
+             "UTCTime encode round-trip failed");
+
+  enclen = fio_asn1_encode_generalized_time(buf, test_ts);
+  FIO_ASSERT(enclen > 0 && fio_asn1_parse(&elem, buf, enclen) &&
+                 fio_asn1_parse_time(&elem, &ts) == 0 && ts == test_ts,
+             "GeneralizedTime encode round-trip failed");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, asn1_encode_headers)(void) {
+  uint8_t buf[16];
+
+  FIO_ASSERT(fio_asn1_encode_sequence_header(buf, 100) == 2 &&
+                 buf[0] == 0x30 && buf[1] == 100,
+             "SEQUENCE header encode failed");
+  FIO_ASSERT(fio_asn1_encode_set_header(buf, 50) == 2 && buf[0] == 0x31 &&
+                 buf[1] == 50,
+             "SET header encode failed");
+  FIO_ASSERT(fio_asn1_encode_context_header(buf, 0, 10, 1) == 2 &&
+                 buf[0] == 0xA0 && buf[1] == 10,
+             "context header encode failed");
+  FIO_ASSERT(fio_asn1_encode_null(buf) == 2 && buf[0] == 0x05 && buf[1] == 0,
+             "NULL encode failed");
+  FIO_ASSERT(fio_asn1_encode_boolean(buf, 1) == 3 && buf[0] == 0x01 &&
+                 buf[1] == 0x01 && buf[2] == 0xFF,
+             "BOOLEAN encode failed");
+}
+
+/* *****************************************************************************
+Main
 ***************************************************************************** */
 
 int main(void) {
-  fio___test_asn1_parse_element();
-  fio___test_asn1_parse_integer();
-  fio___test_asn1_parse_boolean();
-  fio___test_asn1_parse_bit_string();
-  fio___test_asn1_parse_oid();
-  fio___test_asn1_parse_string();
-  fio___test_asn1_parse_time();
-  fio___test_asn1_iterator();
-  fio___test_asn1_nested();
-  fio___test_asn1_helpers();
-  fio___test_asn1_errors();
-  fio___test_asn1_long_length();
+  FIO_NAME_TEST(stl, asn1_parse_element)();
+  FIO_NAME_TEST(stl, asn1_parse_integer)();
+  FIO_NAME_TEST(stl, asn1_parse_boolean)();
+  FIO_NAME_TEST(stl, asn1_parse_bit_string)();
+  FIO_NAME_TEST(stl, asn1_parse_oid)();
+  FIO_NAME_TEST(stl, asn1_parse_string)();
+  FIO_NAME_TEST(stl, asn1_parse_time)();
+  FIO_NAME_TEST(stl, asn1_iterator)();
+  FIO_NAME_TEST(stl, asn1_nested)();
+  FIO_NAME_TEST(stl, asn1_helpers)();
+  FIO_NAME_TEST(stl, asn1_errors)();
+  FIO_NAME_TEST(stl, asn1_long_length)();
+  FIO_NAME_TEST(stl, asn1_encode_length)();
+  FIO_NAME_TEST(stl, asn1_encode_integer)();
+  FIO_NAME_TEST(stl, asn1_encode_oid)();
+  FIO_NAME_TEST(stl, asn1_encode_strings)();
+  FIO_NAME_TEST(stl, asn1_encode_time)();
+  FIO_NAME_TEST(stl, asn1_encode_headers)();
   return 0;
 }

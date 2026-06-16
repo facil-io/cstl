@@ -14,7 +14,7 @@ FIO_SFUNC double fio___strtod_wrapper(char **pstr) {
   return strtod(*pstr, pstr);
 }
 
-FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, aton_vectors)(void) {
   struct {
     const char *n;
     double (*fn)(char **);
@@ -63,7 +63,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
       "0x3a.0P-1074",
       "0x0.f9c7573d7fe52p-1022",
   };
-  fprintf(stderr, "\t* Testing fio_aton/strtod performance:\n");
+  fprintf(stderr, "\t* Testing fio_aton against strtod vectors:\n");
   /* Sanity Test */
   bool rounding_errors_detected = 0;
   for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
@@ -101,22 +101,6 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_speed)(void) {
           tmp2,
           (tmp == tmp2 ? "√" : "X"));
     }
-  }
-  /* Speed Test */
-  for (size_t fn_i = 0; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
-    double unused;
-    fprintf(stderr, "\t%s\t", to_test[fn_i].n);
-    int64_t start = FIO_NAME_TEST(stl, atol_time)();
-    for (size_t i = 0; i < (FIO_ATOL_TEST_MAX / 10); ++i) {
-      for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
-        char *tmp = (char *)floats[n_i];
-        unused = to_test[fn_i].fn(&tmp);
-        FIO_COMPILER_GUARD;
-      }
-    }
-    (void)unused;
-    int64_t end = FIO_NAME_TEST(stl, atol_time)();
-    fprintf(stderr, "%lld us\n", (long long int)(end - start));
   }
   if (rounding_errors_detected)
     FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
@@ -195,46 +179,6 @@ int main(void) {
                tst[0].p,
                tst[1].p);
   }
-#if 1 || !(DEBUG - 1 + 1)
-  {
-    uint64_t start, end, rep = (1ULL << 22);
-    int64_t u64[128] = {0};
-    double dbl[128] = {0.0};
-    double rtest;
-    fprintf(stderr, "\t* Testing fio_i2d conversion overhead.\n");
-    start = fio_time_micro();
-    for (size_t i = 0; i < rep; ++i) {
-      u64[i & 127] -= i;
-      FIO_COMPILER_GUARD;
-      dbl[i & 127] += 2.0 * u64[i & 127];
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr, "\t- C cast:  %zuus\n", (size_t)(end - start));
-    rtest = dbl[127];
-    FIO_MEMSET(u64, 0, sizeof(u64));
-    FIO_MEMSET(dbl, 0, sizeof(dbl));
-    start = fio_time_micro();
-    for (size_t i = 0; i < rep; ++i) {
-      u64[i & 127] -= i;
-      FIO_COMPILER_GUARD;
-      dbl[i & 127] += fio_i2d((int64_t)u64[i & 127], 1);
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr, "\t- fio_i2d: %zuus\n", (size_t)(end - start));
-    FIO_ASSERT(rtest == dbl[127], "fio_i2d results not the same as C cast?");
-    start = fio_time_micro();
-    for (size_t i = 0; i < rep; ++i) {
-      u64[i & 127] -= i;
-      FIO_COMPILER_GUARD;
-      dbl[i & 127] += fio_u2d((int64_t)u64[i & 127], 1);
-      FIO_COMPILER_GUARD;
-    }
-    end = fio_time_micro();
-    fprintf(stderr, "\t- fio_u2d: %zuus\n", (size_t)(end - start));
-  }
-#endif
 #define TEST_ATOL(s_, n)                                                       \
   do {                                                                         \
     char *s = (char *)s_;                                                      \
@@ -391,13 +335,7 @@ int main(void) {
   TEST_LTOA_DIGITS_BIN(0xFF00000000000000ULL, 64);
 #undef TEST_LTOA_DIGITS_BIN
 
-  FIO_NAME_TEST(stl, atol_speed)("fio_atol/fio_ltoa", fio_atol, fio_ltoa);
-  FIO_NAME_TEST(stl, atol_speed)
-  ("fio_aton/fio_ltoa", fio_aton_wrapper, fio_ltoa);
-
-  FIO_NAME_TEST(stl, atol_speed)
-  ("system strtoll/sprintf", strtoll_wrapper, sprintf_wrapper);
-  FIO_NAME_TEST(stl, aton_speed)();
+  FIO_NAME_TEST(stl, aton_vectors)();
 
 #define TEST_DOUBLE(s, d, stop)                                                \
   do {                                                                         \
@@ -614,37 +552,5 @@ int main(void) {
               5708990770823839524233143877797980545530986496.0,
               0);
 #undef TEST_DOUBLE
-#if !DEBUG
-  {
-    clock_t start, stop;
-    fio_memcpy15x(buffer, "1234567890.123", 14);
-    buffer[14] = 0;
-    volatile size_t r = 0;
-    start = clock();
-    for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
-      char *pos = buffer;
-      r += fio_atol(&pos);
-      FIO_COMPILER_GUARD;
-      // FIO_ASSERT(r == exp, "fio_atol failed during speed test");
-    }
-    stop = clock();
-    fprintf(stderr,
-            "\t* fio_atol speed test completed in %zu cycles\n",
-            (size_t)(stop - start));
-    r = 0;
-
-    start = clock();
-    for (int i = 0; i < (FIO_ATOL_TEST_MAX << 3); ++i) {
-      char *pos = buffer;
-      r += strtol(pos, NULL, 10);
-      FIO_COMPILER_GUARD;
-      // FIO_ASSERT(r == exp, "system strtol failed during speed test");
-    }
-    stop = clock();
-    fprintf(stderr,
-            "\t* system atol speed test completed in %zu cycles\n",
-            (size_t)(stop - start));
-  }
-#endif /* !DEBUG */
 }
 #undef FIO_ATOL_TEST_MAX

@@ -151,7 +151,8 @@ static void test_multiline_paragraph(void) {
               g_event_count);
   if (g_event_count >= 2) {
     TEST_ASSERT(g_events[1].type == FIO_GFM_TEXT,
-                "event 1 = TEXT, got type %d", g_events[1].type);
+                "event 1 = TEXT, got type %d",
+                g_events[1].type);
   }
 }
 
@@ -508,7 +509,8 @@ static void test_blank_list_marker_does_not_interrupt_paragraph(void) {
     TEST_ASSERT(g_events[i].type != FIO_GFM_LIST_UNORDERED &&
                     g_events[i].type != FIO_GFM_LIST_ORDERED &&
                     g_events[i].type != FIO_GFM_LIST_ITEM,
-                "blank list marker interrupted paragraph at event %d", i);
+                "blank list marker interrupted paragraph at event %d",
+                i);
   }
 }
 
@@ -519,7 +521,8 @@ static void test_blank_list_marker_continues_existing_list(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int li_pushes = 0;
   for (int i = 0; i < g_event_count; ++i)
-    li_pushes += (g_events[i].kind == 0 && g_events[i].type == FIO_GFM_LIST_ITEM);
+    li_pushes +=
+        (g_events[i].kind == 0 && g_events[i].type == FIO_GFM_LIST_ITEM);
   TEST_ASSERT(li_pushes == 3, "existing list has 3 items, got %d", li_pushes);
 }
 
@@ -554,7 +557,8 @@ static void test_empty_list_item_blank_then_paragraph_outside(void) {
         g_events[i].type == FIO_GFM_PARAGRAPH)
       para_after_ul = 1;
   }
-  TEST_ASSERT(para_after_ul, "paragraph after blank line is outside empty list");
+  TEST_ASSERT(para_after_ul,
+              "paragraph after blank line is outside empty list");
 }
 
 /* ── slice 6: code blocks ── */
@@ -735,13 +739,17 @@ static void test_table_alignment(void) {
     /* Check alignment of cells: left, right, center, none */
     /* Cell events are at indices 2, 5, 8, 11 (push(TABLE_CELL)) */
     TEST_ASSERT(g_events[2].align == FIO_GFM_ALIGN_LEFT,
-                "col 0 align = LEFT, got %d", g_events[2].align);
+                "col 0 align = LEFT, got %d",
+                g_events[2].align);
     TEST_ASSERT(g_events[5].align == FIO_GFM_ALIGN_RIGHT,
-                "col 1 align = RIGHT, got %d", g_events[5].align);
+                "col 1 align = RIGHT, got %d",
+                g_events[5].align);
     TEST_ASSERT(g_events[8].align == FIO_GFM_ALIGN_CENTER,
-                "col 2 align = CENTER, got %d", g_events[8].align);
+                "col 2 align = CENTER, got %d",
+                g_events[8].align);
     TEST_ASSERT(g_events[11].align == FIO_GFM_ALIGN_NONE,
-                "col 3 align = NONE, got %d", g_events[11].align);
+                "col 3 align = NONE, got %d",
+                g_events[11].align);
   }
 }
 
@@ -755,7 +763,8 @@ static void test_table_no_leading_trailing_pipe(void) {
               g_event_count);
   if (g_event_count >= 1) {
     TEST_ASSERT(g_events[0].type == FIO_GFM_TABLE,
-                "push(TABLE), got type %d", g_events[0].type);
+                "push(TABLE), got type %d",
+                g_events[0].type);
   }
 }
 
@@ -768,7 +777,8 @@ static void test_table_column_mismatch(void) {
   /* Should be a single paragraph containing all three lines */
   TEST_ASSERT(g_event_count >= 1, "at least 1 event");
   TEST_ASSERT(g_events[0].type == FIO_GFM_PARAGRAPH,
-              "column mismatch = PARAGRAPH, got %d", g_events[0].type);
+              "column mismatch = PARAGRAPH, got %d",
+              g_events[0].type);
 }
 
 static void test_table_multiline_para_not_table(void) {
@@ -935,7 +945,8 @@ static void test_inline_code_span(void) {
     if (g_events[i].type == FIO_GFM_CODE_SPAN && g_events[i].kind == 1) {
       found_code = 1;
       TEST_ASSERT(strcmp(g_events[i].text_buf, "code") == 0,
-                  "code span text = 'code', got '%s'", g_events[i].text_buf);
+                  "code span text = 'code', got '%s'",
+                  g_events[i].text_buf);
     }
   }
   TEST_ASSERT(found_code, "code span found");
@@ -966,7 +977,8 @@ static void test_inline_escape(void) {
   /* No emphasis should be found — the * are escaped */
   int found_em = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_EMPHASIS) found_em = 1;
+    if (g_events[i].type == FIO_GFM_EMPHASIS)
+      found_em = 1;
   }
   TEST_ASSERT(!found_em, "escaped stars = no emphasis");
 }
@@ -978,7 +990,8 @@ static void test_inline_hard_break_spaces(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int found_hard = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_HARD_BREAK) found_hard = 1;
+    if (g_events[i].type == FIO_GFM_HARD_BREAK)
+      found_hard = 1;
   }
   TEST_ASSERT(found_hard, "2+ trailing spaces = hard break");
 }
@@ -990,7 +1003,8 @@ static void test_inline_hard_break_backslash(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int found_hard = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_HARD_BREAK) found_hard = 1;
+    if (g_events[i].type == FIO_GFM_HARD_BREAK)
+      found_hard = 1;
   }
   TEST_ASSERT(found_hard, "backslash before newline = hard break");
 }
@@ -1002,7 +1016,8 @@ static void test_inline_soft_break(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int found_soft = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_SOFT_BREAK) found_soft = 1;
+    if (g_events[i].type == FIO_GFM_SOFT_BREAK)
+      found_soft = 1;
   }
   TEST_ASSERT(found_soft, "plain newline = soft break");
 }
@@ -1042,7 +1057,8 @@ static void test_inline_autolink(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int found = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_AUTOLINK) found = 1;
+    if (g_events[i].type == FIO_GFM_AUTOLINK)
+      found = 1;
   }
   TEST_ASSERT(found, "autolink found");
 }
@@ -1067,8 +1083,10 @@ static void test_inline_nested_emphasis(void) {
   fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2((char *)src, strlen(src)));
   int found_em = 0, found_strong = 0;
   for (int i = 0; i < g_event_count; ++i) {
-    if (g_events[i].type == FIO_GFM_EMPHASIS && g_events[i].kind == 0) found_em = 1;
-    if (g_events[i].type == FIO_GFM_STRONG && g_events[i].kind == 0) found_strong = 1;
+    if (g_events[i].type == FIO_GFM_EMPHASIS && g_events[i].kind == 0)
+      found_em = 1;
+    if (g_events[i].type == FIO_GFM_STRONG && g_events[i].kind == 0)
+      found_strong = 1;
   }
   TEST_ASSERT(found_em && found_strong, "*** = emphasis + strong");
 }

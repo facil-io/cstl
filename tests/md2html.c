@@ -76,8 +76,7 @@ static void test_blockquote(void) {
 static void test_list(void) {
   fprintf(stderr, "test_list\n");
   TEST_HTML_EQ("- a\n- b\n", "<ul><li>a</li><li>b</li></ul>");
-  TEST_HTML_EQ("1. a\n2. b\n",
-               "<ol><li>a</li><li>b</li></ol>");
+  TEST_HTML_EQ("1. a\n2. b\n", "<ol><li>a</li><li>b</li></ol>");
 }
 
 static void test_task_list(void) {
@@ -85,14 +84,14 @@ static void test_task_list(void) {
   TEST_HTML_EQ("- [x] done\n",
                "<ul><li><input type=\"checkbox\" checked=\"\" "
                "disabled=\"\" /> done</li></ul>");
-  TEST_HTML_EQ("- [ ] todo\n",
-               "<ul><li><input type=\"checkbox\" disabled=\"\" /> todo</li></ul>");
+  TEST_HTML_EQ(
+      "- [ ] todo\n",
+      "<ul><li><input type=\"checkbox\" disabled=\"\" /> todo</li></ul>");
 }
 
 static void test_code_block(void) {
   fprintf(stderr, "test_code_block\n");
-  TEST_HTML_EQ("```\ncode\n```\n",
-               "<pre><code>code\n</code></pre>");
+  TEST_HTML_EQ("```\ncode\n```\n", "<pre><code>code\n</code></pre>");
   TEST_HTML_EQ("```c\ncode\n```\n",
                "<pre><code class=\"language-c\">code\n</code></pre>");
 }
@@ -109,8 +108,9 @@ static void test_link(void) {
   fprintf(stderr, "test_link\n");
   TEST_HTML_EQ("[text](http://example.com)\n",
                "<p><a href=\"http://example.com\">text</a></p>");
-  TEST_HTML_EQ("[text](http://example.com \"title\")\n",
-               "<p><a href=\"http://example.com\" title=\"title\">text</a></p>");
+  TEST_HTML_EQ(
+      "[text](http://example.com \"title\")\n",
+      "<p><a href=\"http://example.com\" title=\"title\">text</a></p>");
 }
 
 static void test_image(void) {
@@ -121,8 +121,9 @@ static void test_image(void) {
 
 static void test_autolink(void) {
   fprintf(stderr, "test_autolink\n");
-  TEST_HTML_EQ("<user@example.com>\n",
-               "<p><a href=\"mailto:user@example.com\">user@example.com</a></p>");
+  TEST_HTML_EQ(
+      "<user@example.com>\n",
+      "<p><a href=\"mailto:user@example.com\">user@example.com</a></p>");
   TEST_HTML_EQ("<http://example.com>\n",
                "<p><a href=\"http://example.com\">http://example.com</a></p>");
 }

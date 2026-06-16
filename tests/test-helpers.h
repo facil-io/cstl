@@ -3,7 +3,7 @@
 
 #define FIO_LOG
 #define FIO_CORE
-#include "../fio-stl/include.h"
+#include "fio-stl/include.h"
 
 #include <math.h>
 

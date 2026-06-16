@@ -16,23 +16,25 @@
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Configuration
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
-#define SPEC_MAX_EXAMPLES   800
-#define SPEC_DETAIL_LIMIT   20        /* print first N failures in detail */
+#define SPEC_MAX_EXAMPLES 800
+#define SPEC_DETAIL_LIMIT 20 /* print first N failures in detail */
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Spec Example Storage
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 typedef struct {
-  const char *md;         /* markdown input (tab-expanded, owned) */
+  const char *md; /* markdown input (tab-expanded, owned) */
   size_t md_len;
-  const char *html;       /* expected HTML output (tab-expanded, owned) */
+  const char *html; /* expected HTML output (tab-expanded, owned) */
   size_t html_len;
-  int number;             /* example number (1-based) */
-  int line;               /* line number in spec file */
-  const char *file;       /* source file name */
+  int number;       /* example number (1-based) */
+  int line;         /* line number in spec file */
+  const char *file; /* source file name */
 } spec_example_s;
 
 static spec_example_s g_examples[SPEC_MAX_EXAMPLES];
@@ -45,7 +47,8 @@ static int g_example_count;
  * Inside, markdown and expected HTML are separated by a line containing
  * just ".". The spec uses UTF-8 → (U+2192, 3 bytes: e2 86 92) to
  * represent literal tab characters.
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 /* The 32-backtick fence that opens/closes examples. */
 static const char EXAMPLE_FENCE[] = "````````````````````````````````";
@@ -56,8 +59,7 @@ static char *spec_expand_tabs(const char *src, size_t len, size_t *out_len) {
   /* Count arrows to size output */
   size_t arrows = 0;
   for (size_t i = 0; i + 2 < len; ++i) {
-    if ((unsigned char)src[i] == 0xe2 &&
-        (unsigned char)src[i + 1] == 0x86 &&
+    if ((unsigned char)src[i] == 0xe2 && (unsigned char)src[i + 1] == 0x86 &&
         (unsigned char)src[i + 2] == 0x92)
       ++arrows;
   }
@@ -67,8 +69,7 @@ static char *spec_expand_tabs(const char *src, size_t len, size_t *out_len) {
     return NULL;
   size_t j = 0;
   for (size_t i = 0; i < len;) {
-    if (i + 2 < len &&
-        (unsigned char)src[i] == 0xe2 &&
+    if (i + 2 < len && (unsigned char)src[i] == 0xe2 &&
         (unsigned char)src[i + 1] == 0x86 &&
         (unsigned char)src[i + 2] == 0x92) {
       out[j++] = '\t';
@@ -176,7 +177,8 @@ static int spec_parse_file(const char *path) {
 
       /* Store example */
       if (g_example_count >= SPEC_MAX_EXAMPLES) {
-        fprintf(stderr, "WARNING: too many examples, increase SPEC_MAX_EXAMPLES\n");
+        fprintf(stderr,
+                "WARNING: too many examples, increase SPEC_MAX_EXAMPLES\n");
         break;
       }
 
@@ -214,11 +216,13 @@ static void spec_free_examples(void) {
  * The GFM-to-HTML conversion is performed by the fio_md2html() helper in
  * fio-stl/103 md2html.h. The spec runner only needs to invoke it and compare
  * the resulting fio_bstr against the expected HTML.
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Test Runner
- * ═══════════════════════════════════════════════════════════════════════════ */
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 /** Trim trailing whitespace from HTML output for comparison. */
 static size_t trim_trailing_ws(const char *s, size_t len) {
@@ -249,7 +253,9 @@ static char *normalize_html(const char *s, size_t len, size_t *out_len) {
         !memcmp(s + i,
                 "<input checked=\"\" disabled=\"\" type=\"checkbox\">",
                 46)) {
-      memcpy(out + j, "<input type=\"checkbox\" checked=\"\" disabled=\"\">", 46);
+      memcpy(out + j,
+             "<input type=\"checkbox\" checked=\"\" disabled=\"\">",
+             46);
       i += 46;
       j += 46;
       continue;
@@ -265,7 +271,9 @@ static char *normalize_html(const char *s, size_t len, size_t *out_len) {
         !memcmp(s + i,
                 "<input type=\"checkbox\" checked=\"\" disabled=\"\" />",
                 48)) {
-      memcpy(out + j, "<input type=\"checkbox\" checked=\"\" disabled=\"\">", 46);
+      memcpy(out + j,
+             "<input type=\"checkbox\" checked=\"\" disabled=\"\">",
+             46);
       i += 48;
       j += 46;
       continue;
@@ -274,8 +282,8 @@ static char *normalize_html(const char *s, size_t len, size_t *out_len) {
     if (s[i] == '>') {
       ++i;
       /* Skip whitespace between > and < */
-      while (i < len && (s[i] == '\n' || s[i] == '\r' ||
-                         s[i] == ' ' || s[i] == '\t')) {
+      while (i < len &&
+             (s[i] == '\n' || s[i] == '\r' || s[i] == ' ' || s[i] == '\t')) {
         if (i + 1 < len && s[i + 1] == '<') {
           /* whitespace immediately before < — skip it */
           ++i;
@@ -283,8 +291,8 @@ static char *normalize_html(const char *s, size_t len, size_t *out_len) {
         }
         /* whitespace but next non-ws is not < — keep it */
         size_t k = i;
-        while (k < len && (s[k] == '\n' || s[k] == '\r' ||
-                           s[k] == ' ' || s[k] == '\t'))
+        while (k < len &&
+               (s[k] == '\n' || s[k] == '\r' || s[k] == ' ' || s[k] == '\t'))
           ++k;
         if (k < len && s[k] == '<') {
           /* all whitespace between > and < — skip */
@@ -341,6 +349,31 @@ static void print_escaped(const char *s, size_t len) {
   }
 }
 
+static int spec_number_in(const int *list, size_t count, int number) {
+  for (size_t i = 0; i < count; ++i) {
+    if (list[i] == number)
+      return 1;
+  }
+  return 0;
+}
+
+static int spec_is_expected_failure(const spec_example_s *ex) {
+  static const int main_spec[] = {363, 398, 418, 423, 424, 426, 434,
+                                  435, 436, 440, 473, 474, 475, 477,
+                                  479, 517, 581, 584, 585, 619, 620};
+  static const int extensions[] = {19, 23, 24, 25};
+
+  if (!strcmp(ex->file, "gfm-spec.txt"))
+    return spec_number_in(main_spec,
+                          sizeof(main_spec) / sizeof(main_spec[0]),
+                          ex->number);
+  if (!strcmp(ex->file, "gfm-extensions.txt"))
+    return spec_number_in(extensions,
+                          sizeof(extensions) / sizeof(extensions[0]),
+                          ex->number);
+  return 0;
+}
+
 static void print_failure_detail(spec_example_s *ex) {
   char *got_bstr = fio_md2html(NULL, FIO_BUF_INFO2((char *)ex->md, ex->md_len));
   if (!got_bstr)
@@ -355,8 +388,12 @@ static void print_failure_detail(spec_example_s *ex) {
   char *got_norm = normalize_html(got, got_trimmed, &got_norm_len);
   char *exp_norm = normalize_html(ex->html, exp_trimmed, &exp_norm_len);
 
-  fprintf(stderr, "\n--- FAIL: %s example %d (line %d) ---\n",
-          ex->file, ex->number, ex->line);
+  fprintf(stderr,
+          "\n--- %s: %s example %d (line %d) ---\n",
+          spec_is_expected_failure(ex) ? "EXPECTED FAIL" : "FAIL",
+          ex->file,
+          ex->number,
+          ex->line);
   fprintf(stderr, "  markdown:\n    ");
   print_escaped(ex->md, ex->md_len);
   fprintf(stderr, "\n  expected (normalized):\n    ");
@@ -394,41 +431,63 @@ int main(int argc, char **argv) {
   fprintf(stderr, "Parsed %d examples from gfm-extensions.txt\n", ext_count);
   fprintf(stderr, "Total: %d examples\n\n", g_example_count);
 
-  /* Run all examples */
+  /* Run all examples. Known gaps are an explicit expected-failure list so
+   * fixture coverage gates unexpected regressions without claiming complete
+   * GFM conformance yet. */
   int pass = 0, fail = 0;
+  int expected_fail = 0, unexpected_fail = 0, expected_pass = 0;
   int failed_indices[SPEC_MAX_EXAMPLES];
   int failed_count = 0;
+  int expected_pass_indices[SPEC_MAX_EXAMPLES];
+  int expected_pass_count = 0;
 
   for (int i = 0; i < g_example_count; ++i) {
     int num = g_examples[i].number;
     if (num < filter_min || num > filter_max)
       continue;
+    int expected = spec_is_expected_failure(&g_examples[i]);
     int ok = run_one_example(&g_examples[i]);
     if (ok == 1) {
       ++pass;
+      if (expected) {
+        ++expected_pass;
+        if (expected_pass_count < SPEC_MAX_EXAMPLES)
+          expected_pass_indices[expected_pass_count++] = i;
+      }
     } else {
       ++fail;
+      if (expected)
+        ++expected_fail;
+      else
+        ++unexpected_fail;
       if (failed_count < SPEC_MAX_EXAMPLES)
         failed_indices[failed_count++] = i;
     }
   }
 
   /* Print first N detailed failures */
-  int detail_count = failed_count < SPEC_DETAIL_LIMIT
-                         ? failed_count
-                         : SPEC_DETAIL_LIMIT;
+  int detail_count =
+      failed_count < SPEC_DETAIL_LIMIT ? failed_count : SPEC_DETAIL_LIMIT;
   for (int i = 0; i < detail_count; ++i)
     print_failure_detail(&g_examples[failed_indices[i]]);
 
   /* Summary */
   fprintf(stderr, "\n=== Results ===\n");
-  fprintf(stderr, "  Passed: %d / %d (%.1f%%)\n", pass, g_example_count,
+  fprintf(stderr,
+          "  Passed: %d / %d (%.1f%%)\n",
+          pass,
+          g_example_count,
           100.0 * pass / g_example_count);
   fprintf(stderr, "  Failed: %d / %d\n", fail, g_example_count);
+  fprintf(stderr, "  Expected failures: %d\n", expected_fail);
+  fprintf(stderr, "  Unexpected failures: %d\n", unexpected_fail);
+  fprintf(stderr, "  Expected failures now passing: %d\n", expected_pass);
 
   if (failed_count > detail_count)
-    fprintf(stderr, "  (showing first %d failures of %d)\n",
-            detail_count, failed_count);
+    fprintf(stderr,
+            "  (showing first %d failures of %d)\n",
+            detail_count,
+            failed_count);
 
   /* Section breakdown: main spec vs extensions (use first-run results) */
   {
@@ -450,10 +509,15 @@ int main(int argc, char **argv) {
     }
     main_pass = main_count - main_fail;
     ext_pass = ext_count - ext_fail;
-    fprintf(stderr, "\n  Main spec:   %d / %d (%.1f%%)\n",
-            main_pass, main_count, 100.0 * main_pass / main_count);
-    fprintf(stderr, "  Extensions:  %d / %d (%.1f%%)\n",
-            ext_pass, ext_count,
+    fprintf(stderr,
+            "\n  Main spec:   %d / %d (%.1f%%)\n",
+            main_pass,
+            main_count,
+            100.0 * main_pass / main_count);
+    fprintf(stderr,
+            "  Extensions:  %d / %d (%.1f%%)\n",
+            ext_pass,
+            ext_count,
             ext_count ? 100.0 * ext_pass / ext_count : 0.0);
   }
 
@@ -466,8 +530,19 @@ int main(int argc, char **argv) {
   }
   fprintf(stderr, "\n");
 
+  if (expected_pass_count) {
+    fprintf(stderr,
+            "  Update expected-failure allowlist for now-passing examples: ");
+    for (int i = 0; i < expected_pass_count; ++i) {
+      spec_example_s *ex = &g_examples[expected_pass_indices[i]];
+      if (i > 0)
+        fprintf(stderr, ", ");
+      fprintf(stderr, "%s:%d", ex->file, ex->number);
+    }
+    fprintf(stderr, "\n");
+  }
+
   spec_free_examples();
 
-  /* Exit 0 — this is a conformance metric, not pass/fail gate (yet). */
-  return 0;
+  return (unexpected_fail || expected_pass) ? 1 : 0;
 }

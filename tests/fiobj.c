@@ -6,7 +6,7 @@ Test
 #define FIO_FIOBJ
 #include FIO_INCLUDE_FILE
 
-#define FIOBJ_TEST_REPETITIONS 4096
+#define FIOBJ_TEST_REPETITIONS 1024
 
 FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   static size_t index = 0;

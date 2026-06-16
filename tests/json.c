@@ -7,6 +7,8 @@ JSON Parser Tests
 #define FIO_STR
 #include FIO_INCLUDE_FILE
 
+#include "yyjson.c"
+
 /* *****************************************************************************
 Test Data Structures - Simple JSON Value Representation
 ***************************************************************************** */
@@ -276,6 +278,21 @@ FIO_SFUNC test_json_value_s *test_json_parse(const char *json, size_t len) {
   if (r.err)
     return NULL;
   return (test_json_value_s *)r.ctx;
+}
+
+FIO_SFUNC test_json_value_s *test_json_map_get(test_json_value_s *map,
+                                               const char *key,
+                                               size_t key_len) {
+  FIO_ASSERT(map && map->type == TEST_JSON_MAP,
+             "JSON map lookup requires a map");
+  for (size_t i = 0; i < map->data.map.count; ++i) {
+    test_json_value_s *candidate = map->data.map.keys[i];
+    if (candidate->type == TEST_JSON_STRING &&
+        candidate->data.str.len == key_len &&
+        !FIO_MEMCMP(candidate->data.str.buf, key, key_len))
+      return map->data.map.values[i];
+  }
+  return NULL;
 }
 
 /* *****************************************************************************
@@ -1087,6 +1104,74 @@ FIO_SFUNC void fio___test_json_realworld(void) {
 }
 
 /* *****************************************************************************
+Test: yyjson reference comparison for strict JSON
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_json_yyjson_reference(void) {
+  const char *json = "{"
+                     "\"name\":\"facil\","
+                     "\"count\":3,"
+                     "\"active\":true,"
+                     "\"items\":[1,2,3],"
+                     "\"nested\":{\"text\":\"line\\nnext\",\"unicode\":\"\\u20AC\"}"
+                     "}";
+  const size_t len = FIO_STRLEN(json);
+
+  yyjson_doc *doc = yyjson_read(json, len, YYJSON_READ_NOFLAG);
+  FIO_ASSERT(doc, "yyjson reference parser rejected strict JSON fixture");
+  yyjson_val *root = yyjson_doc_get_root(doc);
+  FIO_ASSERT(yyjson_is_obj(root), "yyjson root should be object");
+  FIO_ASSERT(!FIO_MEMCMP(yyjson_get_str(yyjson_obj_get(root, "name")),
+                         "facil",
+                         6),
+             "yyjson name mismatch");
+  FIO_ASSERT(yyjson_get_int(yyjson_obj_get(root, "count")) == 3,
+             "yyjson count mismatch");
+  FIO_ASSERT(yyjson_is_true(yyjson_obj_get(root, "active")),
+             "yyjson active mismatch");
+  yyjson_val *items = yyjson_obj_get(root, "items");
+  FIO_ASSERT(yyjson_is_arr(items) && yyjson_arr_size(items) == 3,
+             "yyjson items mismatch");
+  FIO_ASSERT(yyjson_get_int(yyjson_arr_get(items, 2)) == 3,
+             "yyjson third item mismatch");
+  yyjson_val *nested = yyjson_obj_get(root, "nested");
+  FIO_ASSERT(yyjson_is_obj(nested), "yyjson nested mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(yyjson_get_str(yyjson_obj_get(nested, "unicode")),
+                         "\xE2\x82\xAC",
+                         4),
+             "yyjson unicode mismatch");
+  yyjson_doc_free(doc);
+
+  test_json_value_s *v = test_json_parse(json, len);
+  FIO_ASSERT(v, "facil.io parser rejected yyjson-validated fixture");
+  FIO_ASSERT(v->type == TEST_JSON_MAP, "facil.io root should be map");
+  test_json_value_s *name = test_json_map_get(v, "name", 4);
+  FIO_ASSERT(name && name->type == TEST_JSON_STRING && name->data.str.len == 5 &&
+                 !FIO_MEMCMP(name->data.str.buf, "facil", 5),
+             "facil.io name mismatch");
+  test_json_value_s *count = test_json_map_get(v, "count", 5);
+  FIO_ASSERT(count && count->type == TEST_JSON_NUMBER && count->data.i == 3,
+             "facil.io count mismatch");
+  test_json_value_s *active = test_json_map_get(v, "active", 6);
+  FIO_ASSERT(active && active->type == TEST_JSON_TRUE,
+             "facil.io active mismatch");
+  test_json_value_s *fio_items = test_json_map_get(v, "items", 5);
+  FIO_ASSERT(fio_items && fio_items->type == TEST_JSON_ARRAY &&
+                 fio_items->data.arr.count == 3 &&
+                 fio_items->data.arr.items[2]->data.i == 3,
+             "facil.io items mismatch");
+  test_json_value_s *fio_nested = test_json_map_get(v, "nested", 6);
+  FIO_ASSERT(fio_nested && fio_nested->type == TEST_JSON_MAP,
+             "facil.io nested mismatch");
+  test_json_value_s *unicode = test_json_map_get(fio_nested, "unicode", 7);
+  FIO_ASSERT(unicode && unicode->type == TEST_JSON_STRING &&
+                 unicode->data.str.len == 3 &&
+                 !FIO_MEMCMP(unicode->data.str.buf, "\xE2\x82\xAC", 3),
+             "facil.io unicode mismatch");
+  test_json_value_free(v);
+}
+
+/* *****************************************************************************
 Main Test Entry Point
 ***************************************************************************** */
 
@@ -1139,6 +1224,9 @@ FIO_SFUNC void fio_test_json(void) {
 
   /* Real-world examples */
   fio___test_json_realworld();
+
+  /* External reference validation for strict JSON */
+  fio___test_json_yyjson_reference();
 }
 
 #ifndef FIO_TEST_ALL

@@ -1,14 +1,338 @@
 /* *****************************************************************************
-Comprehensive Security/Quality Tests for fio_risky256 / fio_risky512
-
-Tests the A3 (Zero-Copy ILP) hash variation.
-Categories: sanity, avalanche, collision, differential, HMAC,
-            length extension resistance, known answer tests, speed sanity,
-            absorption boundaries.
-
-Compile: make tests/risky256
+Test - Hash Module
+Covers hash avalanche and risky/stable hash helper behavior. Speed sections from
+./tests-old/risky256.c are intentionally omitted.
 ***************************************************************************** */
+#define FIO_LOG
+#define FIO_RAND
+#define FIO_BLAKE2
+#define FIO_SHA3
+#define FIO_CRYPT
+#define FIO_CRC32
 #include "test-helpers.h"
+
+/* --- ./tests-old/hash-avalanche.c --- */
+
+/* Enable all hash modules */
+#define FIO_LOG
+#define FIO_RAND
+#define FIO_BLAKE2
+#define FIO_SHA3
+#define FIO_CRYPT
+#define FIO_CRC32
+#include FIO_INCLUDE_FILE
+
+/* *****************************************************************************
+Helpers
+***************************************************************************** */
+
+/** Count differing bits between two byte arrays (Hamming distance). */
+FIO_SFUNC int fio___avalanche_hamming(const uint8_t *a,
+                                      const uint8_t *b,
+                                      size_t len) {
+  int diff = 0;
+  for (size_t i = 0; i < len; ++i)
+    diff += fio_popcount(a[i] ^ b[i]);
+  return diff;
+}
+
+/** Print avalanche result and assert >= 25% threshold. */
+FIO_SFUNC void fio___avalanche_report(const char *name,
+                                      int diff_bits,
+                                      int total_bits) {
+  int min_expected = total_bits / 4; /* 25% threshold */
+  double pct = (double)diff_bits * 100.0 / (double)total_bits;
+  FIO_LOG_INFO("%-16s avalanche: %3d/%3d bits differ (%5.1f%%) %s",
+               name,
+               diff_bits,
+               total_bits,
+               pct,
+               (diff_bits >= min_expected) ? "PASS" : "FAIL");
+  FIO_ASSERT(diff_bits >= min_expected,
+             "%s avalanche FAIL: only %d/%d bits differ (%.1f%% < 25%%)",
+             name,
+             diff_bits,
+             total_bits,
+             pct);
+}
+
+/* *****************************************************************************
+1MB Avalanche Test
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_hash_avalanche(void) {
+  const size_t DATA_LEN = 1048576; /* 1MB */
+  const size_t FLIP_BYTE = 768000; /* 750KB mark */
+
+  FIO_LOG_INFO("=== 1MB Avalanche Test (flip bit at 750KB mark) ===");
+
+  /* Allocate 1MB buffer using project macros */
+  uint8_t *data = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, DATA_LEN, 0);
+  FIO_ASSERT(data, "1MB allocation failed");
+
+  /* Fill with deterministic pseudo-random data */
+  for (size_t i = 0; i < DATA_LEN; i++)
+    data[i] = (uint8_t)(i * 2654435761UL ^ (i >> 7));
+
+  /* -------------------------------------------------------------------------
+   * SHA-1 (20 bytes = 160 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 20;
+    uint8_t out1[20], out2[20];
+
+    fio_sha1_s h1 = fio_sha1(data, DATA_LEN);
+    FIO_MEMCPY(out1, h1.digest, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_sha1_s h2 = fio_sha1(data, DATA_LEN);
+    FIO_MEMCPY(out2, h2.digest, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("SHA-1",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * SHA-256 (32 bytes = 256 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 32;
+    uint8_t out1[32], out2[32];
+
+    fio_u256 r1 = fio_sha256(data, DATA_LEN);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_u256 r2 = fio_sha256(data, DATA_LEN);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("SHA-256",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * SHA-512 (64 bytes = 512 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 64;
+    uint8_t out1[64], out2[64];
+
+    fio_u512 r1 = fio_sha512(data, DATA_LEN);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_u512 r2 = fio_sha512(data, DATA_LEN);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("SHA-512",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * SHA3-256 (32 bytes = 256 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 32;
+    uint8_t out1[32], out2[32];
+
+    fio_sha3_256(out1, data, DATA_LEN);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_sha3_256(out2, data, DATA_LEN);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("SHA3-256",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * SHA3-512 (64 bytes = 512 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 64;
+    uint8_t out1[64], out2[64];
+
+    fio_sha3_512(out1, data, DATA_LEN);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_sha3_512(out2, data, DATA_LEN);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("SHA3-512",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * BLAKE2b (64 bytes = 512 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 64;
+    uint8_t out1[64], out2[64];
+
+    fio_blake2b_s ctx1 = fio_blake2b_init(DIGEST, NULL, 0);
+    fio_blake2b_consume(&ctx1, data, DATA_LEN);
+    fio_u512 r1 = fio_blake2b_finalize(&ctx1);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_blake2b_s ctx2 = fio_blake2b_init(DIGEST, NULL, 0);
+    fio_blake2b_consume(&ctx2, data, DATA_LEN);
+    fio_u512 r2 = fio_blake2b_finalize(&ctx2);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("BLAKE2b",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * BLAKE2s (32 bytes = 256 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 32;
+    uint8_t out1[32], out2[32];
+
+    fio_blake2s_s ctx1 = fio_blake2s_init(DIGEST, NULL, 0);
+    fio_blake2s_consume(&ctx1, data, DATA_LEN);
+    fio_u256 r1 = fio_blake2s_finalize(&ctx1);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_blake2s_s ctx2 = fio_blake2s_init(DIGEST, NULL, 0);
+    fio_blake2s_consume(&ctx2, data, DATA_LEN);
+    fio_u256 r2 = fio_blake2s_finalize(&ctx2);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("BLAKE2s",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * RiskyHash-256 (32 bytes = 256 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 32;
+    uint8_t out1[32], out2[32];
+
+    fio_u256 r1 = fio_risky256(data, DATA_LEN);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_u256 r2 = fio_risky256(data, DATA_LEN);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("RiskyHash-256",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * RiskyHash-512 (64 bytes = 512 bits)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 64;
+    uint8_t out1[64], out2[64];
+
+    fio_u512 r1 = fio_risky512(data, DATA_LEN);
+    FIO_MEMCPY(out1, r1.u8, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    fio_u512 r2 = fio_risky512(data, DATA_LEN);
+    FIO_MEMCPY(out2, r2.u8, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("RiskyHash-512",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * fio_risky_hash (64-bit = 8 bytes)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 8;
+    uint8_t out1[8], out2[8];
+
+    uint64_t h1 = fio_risky_hash(data, DATA_LEN, 0);
+    FIO_MEMCPY(out1, &h1, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    uint64_t h2 = fio_risky_hash(data, DATA_LEN, 0);
+    FIO_MEMCPY(out2, &h2, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("fio_risky_hash",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * fio_stable_hash (64-bit = 8 bytes)
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 8;
+    uint8_t out1[8], out2[8];
+
+    uint64_t h1 = fio_stable_hash(data, DATA_LEN, 0);
+    FIO_MEMCPY(out1, &h1, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    uint64_t h2 = fio_stable_hash(data, DATA_LEN, 0);
+    FIO_MEMCPY(out2, &h2, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("fio_stable_hash",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  /* -------------------------------------------------------------------------
+   * CRC32 (4 bytes = 32 bits)
+   * Note: CRC32 is a checksum, not a cryptographic hash. Its avalanche
+   * properties are weaker — we still test it but the 25% bar is lenient.
+   * ---------------------------------------------------------------------- */
+  {
+    const int DIGEST = 4;
+    uint8_t out1[4], out2[4];
+
+    uint32_t c1 = fio_crc32(data, DATA_LEN, 0);
+    FIO_MEMCPY(out1, &c1, DIGEST);
+
+    data[FLIP_BYTE] ^= 1;
+    uint32_t c2 = fio_crc32(data, DATA_LEN, 0);
+    FIO_MEMCPY(out2, &c2, DIGEST);
+    data[FLIP_BYTE] ^= 1; /* restore */
+
+    fio___avalanche_report("CRC32",
+                           fio___avalanche_hamming(out1, out2, DIGEST),
+                           DIGEST * 8);
+  }
+
+  FIO_MEM_FREE(data, DATA_LEN);
+  FIO_LOG_INFO("=== All avalanche tests passed ===");
+}
+
+/* *****************************************************************************
+Main
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_hash_avalanche_main(void) {
+  fio___test_hash_avalanche();
+}
+
+/* --- ./tests-old/risky256.c --- */
 
 #define FIO_RAND
 #include FIO_INCLUDE_FILE
@@ -263,31 +587,47 @@ FIO_SFUNC int fio___test_risky256_avalanche(void) {
   uint64_t total_flips = 0;
   uint64_t total_trials = 0;
 
+  /* Precompute per-byte bit-increment table for fast per-bit counters. */
+  uint64_t bit_inc[256][8];
+  for (int v = 0; v < 256; ++v) {
+    for (int b = 0; b < 8; ++b)
+      bit_inc[v][b] = (uint64_t)((v >> b) & 1);
+  }
+
   for (int n = 0; n < N; ++n) {
     uint8_t input[64];
     fio_rand_bytes(input, 64);
     fio_u256 base = fio_risky256(input, 64);
 
     for (int bit = 0; bit < INPUT_BITS; ++bit) {
-      /* Flip one input bit */
-      uint8_t modified[64];
-      FIO_MEMCPY(modified, input, 64);
-      modified[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
+      /* Flip one input bit in-place and restore after hashing. */
+      uint8_t *bytep = input + (bit >> 3);
+      uint8_t mask = (uint8_t)(1U << (bit & 7));
+      *bytep ^= mask;
 
-      fio_u256 flipped = fio_risky256(modified, 64);
+      fio_u256 flipped = fio_risky256(input, 64);
 
-      /* Count which output bits changed */
-      uint8_t diff[32];
-      fio___xor_bytes(diff, base.u8, flipped.u8, OUTPUT_BYTES);
-      size_t changed = fio___popcount_bytes(diff, OUTPUT_BYTES);
-      total_flips += changed;
-      ++total_trials;
+      *bytep ^= mask; /* restore */
 
-      /* Track per-bit flips */
-      for (int ob = 0; ob < OUTPUT_BITS; ++ob) {
-        if (diff[ob >> 3] & (1U << (ob & 7)))
-          ++bit_flips[ob];
+      /* XOR with base in place; no separate diff buffer. */
+      for (size_t i = 0; i < OUTPUT_BYTES; ++i)
+        flipped.u8[i] ^= base.u8[i];
+
+      /* Update total and per-bit flip counters. */
+      for (size_t i = 0; i < OUTPUT_BYTES; ++i) {
+        uint8_t b = flipped.u8[i];
+        total_flips += fio_popcount(b);
+        int idx = (int)(i << 3);
+        bit_flips[idx + 0] += bit_inc[b][0];
+        bit_flips[idx + 1] += bit_inc[b][1];
+        bit_flips[idx + 2] += bit_inc[b][2];
+        bit_flips[idx + 3] += bit_inc[b][3];
+        bit_flips[idx + 4] += bit_inc[b][4];
+        bit_flips[idx + 5] += bit_inc[b][5];
+        bit_flips[idx + 6] += bit_inc[b][6];
+        bit_flips[idx + 7] += bit_inc[b][7];
       }
+      ++total_trials;
     }
   }
 
@@ -770,74 +1110,139 @@ FIO_SFUNC int fio___test_risky256_length_extension(void) {
 
 FIO_SFUNC int fio___test_risky256_kats(void) {
   int failures = 0;
+
+  bool should_print = 0;
+  if (FIO_LOG_LEVEL >= FIO_LOG_LEVEL_DEBUG)
+    should_print = 1;
+
   fprintf(stderr, "  * [7] Known Answer Tests (KATs)\n");
-  fprintf(stderr,
-          "    Computing reference values (freeze after integration):\n");
+  if (should_print)
+    fprintf(stderr,
+            "    Computing reference values (freeze after integration):\n");
 
-  /* 7a. hash("", 0) */
-  {
-    fio_u256 h256 = fio_risky256("", 0);
-    fio_u512 h512 = fio_risky512("", 0);
-    fio___print_u256("risky256(\"\", 0)", h256);
-    fio___print_u512("risky512(\"\", 0)", h512);
-  }
+  /* prep long tests in static buffers */
+  static char seq_0_255[1024];
+  static char seq_ab_64k[65536];
+  for (size_t i = 0; i < 1024; ++i)
+    seq_0_255[i] = (uint8_t)(i & 255);
+  FIO_MEMSET(seq_ab_64k, 0xAB, sizeof(seq_ab_64k));
 
-  /* 7b. hash("abc", 3) */
-  {
-    fio_u256 h256 = fio_risky256("abc", 3);
-    fio_u512 h512 = fio_risky512("abc", 3);
-    fio___print_u256("risky256(\"abc\", 3)", h256);
-    fio___print_u512("risky512(\"abc\", 3)", h512);
-  }
-
-  /* 7c. 1024 bytes of sequential 0..255 pattern */
-  {
-    uint8_t pattern[1024];
-    for (size_t i = 0; i < 1024; ++i)
-      pattern[i] = (uint8_t)(i & 255);
-    fio_u256 h256 = fio_risky256(pattern, 1024);
-    fio_u512 h512 = fio_risky512(pattern, 1024);
-    fio___print_u256("risky256(seq_0_255, 1024)", h256);
-    fio___print_u512("risky512(seq_0_255, 1024)", h512);
-  }
-
-  /* 7d. 64KB of 0xAB pattern */
-  {
-    size_t sz = 65536;
-    uint8_t *buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, sz, 0);
-    FIO_ASSERT_ALLOC(buf);
-    FIO_MEMSET(buf, 0xAB, sz);
-    fio_u256 h256 = fio_risky256(buf, sz);
-    fio_u512 h512 = fio_risky512(buf, sz);
-    fio___print_u256("risky256(0xAB*64K, 64K)", h256);
-    fio___print_u512("risky512(0xAB*64K, 64K)", h512);
-    FIO_MEM_FREE(buf, sz);
-  }
-
-  /* 7e. HMAC KATs */
-  {
-    const char *key = "HMAC test key";
-    const char *msg = "HMAC test message";
-    fio_u256 hmac256 = fio_risky256_hmac(key, 13, msg, 17);
-    fio_u512 hmac512 = fio_risky512_hmac(key, 13, msg, 17);
-    fio___print_u256("risky256_hmac(\"HMAC test key\", \"HMAC test message\")",
-                     hmac256);
-    fio___print_u512("risky512_hmac(\"HMAC test key\", \"HMAC test message\")",
-                     hmac512);
-  }
-
-  /* 7f. Verify 256-bit and 512-bit KATs are self-consistent (deterministic) */
-  {
-    fio_u256 a = fio_risky256("abc", 3);
-    fio_u256 b = fio_risky256("abc", 3);
-    fio_u512 c = fio_risky512("abc", 3);
-    fio_u512 d = fio_risky512("abc", 3);
-    if (fio___u256_cmp(a, b) || fio___u512_cmp(c, d)) {
-      fprintf(stderr, "    KAT determinism check: * FAIL *\n");
-      ++failures;
+  /* KAT list (reference vectors are printed in debug mode; deterministic
+     recomputation is verified below). */
+  struct {
+    const char *name;
+    const char *str;
+    size_t len;
+    const char *e256_str;
+    const char *e512_str;
+    fio_u256 e256;
+    fio_u512 e512;
+    fio_u256 r256;
+    fio_u512 r512;
+    bool is_hmac;
+  } KATS[] = {
+      {
+          "(\"\", 0)",
+          "",
+          0,
+          "41c89d5519ed1e2f81308c41080dcd3247a8a4a0c80ac29c86933e9ff8d7c3d0",
+          "41c89d5519ed1e2f81308c41080dcd3247a8a4a0c80ac29c86933e9ff8d7c3d016a5"
+          "1e71fd5c4df73f106e360b3b632dd9939a62fe09202f2284e4333d347315",
+      },
+      {"(\"abc\", 3)",
+       "abc",
+       3,
+       "854db944644cc0415a9c98fbacfd0b144882953e0f7360289af523efbbb743c8",
+       "854db944644cc0415a9c98fbacfd0b144882953e0f7360289af523efbbb743c895250d3"
+       "211746ee8221adeed195f02cd6b6918e326368fd8a9e5b6f723b0e2aa"},
+      {"(\"seq_0_255\", 1024)",
+       seq_0_255,
+       1024,
+       "e9e90d2219dfbb155c360ed4e5fc7aa0e517f56d032c7ebec1d2c75844f173fe",
+       "e9e90d2219dfbb155c360ed4e5fc7aa0e517f56d032c7ebec1d2c75844f173fe77e2357"
+       "3d4e8a65c1589fccd9c2381fb58346637ab020fe09fcb0a98555f94a4"},
+      {"0xAB*64K",
+       seq_ab_64k,
+       65536,
+       "7fa1eabeea186b7f1b2c17bc059b595c234b0038d090c4bacc6b2911ed0c163f",
+       "7fa1eabeea186b7f1b2c17bc059b595c234b0038d090c4bacc6b2911ed0c163f8618bdc"
+       "7cecd8a19bc6b1999880c062b08eec7f407a5b52aaaa44c51b5e32bf5"},
+      {"HMAC",
+       "HMAC test message",
+       17,
+       "b7e3e2e979361227c2deabf42e693767c7ae7d330dfc5b96d1f81a10391f9f5c",
+       "a6a194aa6dca490e448fabdfe0dee0319a700bd947defe65cc82126ae692ba2255cdcdb"
+       "5b7bbcb1610be209bb72d40c938b75af9d6bf4b63e09fab7a6305511e",
+       .is_hmac = 1},
+      {0},
+  };
+  /* compute reference hashes once */
+  for (size_t i = 0; KATS[i].name; ++i) {
+    if (KATS[i].is_hmac) {
+      KATS[i].r256 =
+          fio_risky256_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
+      KATS[i].r512 =
+          fio_risky512_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
     } else {
-      fprintf(stderr, "    KAT determinism check: PASS\n");
+      KATS[i].r256 = fio_risky256(KATS[i].str, KATS[i].len);
+      KATS[i].r512 = fio_risky512(KATS[i].str, KATS[i].len);
     }
+  }
+  /* parse and test expectations */
+  for (size_t i = 0; KATS[i].name; ++i) {
+    if (!KATS[i].e256_str || !KATS[i].e512_str) {
+      fprintf(stderr, "  - missing KAT values for %s, got:\n", KATS[i].name);
+      fio___print_u256("risky 256", KATS[i].r256);
+      fio___print_u512("risky 512", KATS[i].r512);
+      continue;
+    }
+    for (size_t p = 0; p < sizeof(KATS[i].e256) && KATS[i].e256_str[(p << 1)] &&
+                       KATS[i].e256_str[(p << 1) + 1];
+         ++p)
+      KATS[i].e256.u8[p] = (fio_c2i(KATS[i].e256_str[(p << 1)]) << 4) |
+                           fio_c2i(KATS[i].e256_str[(p << 1) + 1]);
+    for (size_t p = 0; p < sizeof(KATS[i].e512) && KATS[i].e512_str[(p << 1)] &&
+                       KATS[i].e512_str[(p << 1) + 1];
+         ++p)
+      KATS[i].e512.u8[p] = (fio_c2i(KATS[i].e512_str[(p << 1)]) << 4) |
+                           fio_c2i(KATS[i].e512_str[(p << 1) + 1]);
+    bool pass;
+    pass = !FIO_MEMCMP(KATS[i].r256.u8, KATS[i].e256.u8, sizeof(KATS[i].r256));
+    pass &= !FIO_MEMCMP(KATS[i].r512.u8, KATS[i].e512.u8, sizeof(KATS[i].r512));
+    failures += !pass;
+    if (!pass) {
+      fprintf(stderr, "  X Failed KAT test for %s, got:\n", KATS[i].name);
+      fio___print_u256("risky 256", KATS[i].r256);
+      fio___print_u512("risky 512", KATS[i].r512);
+      fprintf(stderr, "       Expected:\n");
+      fio___print_u256("risky 256", KATS[i].e256);
+      fio___print_u512("risky 512", KATS[i].e512);
+      fprintf(stderr, "\n");
+    }
+  }
+
+  /* verify deterministic recomputation */
+  bool pass_deterministic = 1;
+  for (size_t i = 0; KATS[i].name; ++i) {
+    bool pass;
+    fio_u256 r256;
+    fio_u512 r512;
+    if (KATS[i].is_hmac) {
+      r256 = fio_risky256_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
+      r512 = fio_risky512_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
+    } else {
+      r256 = fio_risky256(KATS[i].str, KATS[i].len);
+      r512 = fio_risky512(KATS[i].str, KATS[i].len);
+    }
+    pass = !FIO_MEMCMP(KATS[i].r256.u8, r256.u8, sizeof(KATS[i].r256));
+    pass &= !FIO_MEMCMP(KATS[i].r512.u8, r512.u8, sizeof(KATS[i].r512));
+    failures += !pass;
+    pass_deterministic &= pass;
+  }
+  if (pass_deterministic) {
+    fprintf(stderr, "    KAT determinism check: PASS\n");
+  } else {
+    fprintf(stderr, "    KAT determinism check: * FAIL * !!!\n");
   }
 
   return failures;
@@ -1006,12 +1411,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky256)(void) {
   fprintf(stderr, "\n");
   total_failures += fio___test_risky256_kats();
   fprintf(stderr, "\n");
-#if !DEBUG
-  total_failures += fio___test_risky256_speed();
-  fprintf(stderr, "\n");
-#else
-  fprintf(stderr, "  * [8] Speed Sanity: SKIPPED (DEBUG build)\n\n");
-#endif
+  fprintf(stderr,
+          "  * [8] Speed Sanity: SKIPPED (benchmarks are not part of "
+          "correctness tests)\n\n");
   total_failures += fio___test_risky256_boundaries();
   fprintf(stderr, "\n");
 
@@ -1030,8 +1432,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, risky256)(void) {
   FIO_ASSERT(!total_failures, "fio_risky256 quality tests failed!");
 }
 
-int main(void) {
+FIO_SFUNC void fio___test_risky256_main(void) {
   fio_rand_reseed();
   FIO_NAME_TEST(stl, risky256)();
+}
+
+int main(void) {
+  fio___test_hash_avalanche_main();
+  fio___test_risky256_main();
   return 0;
 }

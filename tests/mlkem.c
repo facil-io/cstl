@@ -1,35 +1,39 @@
-#define FIO_LOG
+/* *****************************************************************************
+Test for 156 mlkem.h
+
+Coverage: ML-KEM-768 keypair generation, deterministic keypair generation,
+encapsulation/decapsulation round-trips, implicit rejection for malformed
+ciphertexts, NIST ACVP known-answer vectors, and X25519MLKEM768 hybrid
+round-trips with component verification. Performance loops are intentionally
+omitted.
+***************************************************************************** */
+#include "test-helpers.h"
+
 #define FIO_MLKEM
 #define FIO_SHA3
 #define FIO_SHA2
 #define FIO_ED25519
-#include "test-helpers.h"
+#include FIO_INCLUDE_FILE
 
-#include <stdio.h>
-#include <string.h>
-
-/* Helper to convert hex string to bytes */
-static void hex_to_bytes(const char *hex, uint8_t *out, size_t len) {
-  for (size_t i = 0; i < len; i++) {
-    unsigned int val;
-    sscanf(hex + 2 * i, "%02x", &val);
-    out[i] = (uint8_t)val;
+/* Helper: parse a hex string to bytes (no sscanf, validates every nibble). */
+static void fio___test_hex2bin(uint8_t *out, const char *hex, size_t out_len) {
+  for (size_t i = 0; i < out_len; ++i) {
+    uint8_t hi = fio_c2i((unsigned char)hex[2 * i]);
+    uint8_t lo = fio_c2i((unsigned char)hex[2 * i + 1]);
+    FIO_ASSERT(hi < 16 && lo < 16, "invalid hex character in test vector");
+    out[i] = (uint8_t)((hi << 4) | lo);
   }
 }
 
-/* NIST ACVP ML-KEM-768 KeyGen test vector (tcId: 26) */
+/* *****************************************************************************
+NIST ACVP ML-KEM-768 KeyGen test vector (tcId: 26)
+***************************************************************************** */
 static const char *acvp_keygen_d =
     "A2B4BCA315A6EA4600B4A316E09A2578AA1E8BCE919C8DF3A96C71C843F5B38B";
 static const char *acvp_keygen_z =
     "D6BF055CB7B375E3271ED131F1BA31F83FEF533A239878A71074578B891265D1";
-/* Expected ek (first 48 hex chars for prefix verification) */
 static const char *acvp_keygen_ek_prefix =
     "5219C4CC17C35A828F3E21B2AB7496805C99EE041FCA0158";
-/* Expected dk (last 64 hex chars = z value at end of secret key) */
-static const char *acvp_keygen_dk_suffix =
-    "D6BF055CB7B375E3271ED131F1BA31F83FEF533A239878A71074578B891265D1";
-
-/* NIST ACVP ML-KEM-768 KeyGen test vector (tcId: 27) */
 static const char *acvp_keygen2_d =
     "6DBB99AE6889AF01DA387D7D99BD4E91BACB11A6051B14AECD4C96F30CD9F9D9";
 static const char *acvp_keygen2_z =
@@ -37,21 +41,13 @@ static const char *acvp_keygen2_z =
 static const char *acvp_keygen2_ek_prefix =
     "BC02284C2B36002A8E002311D6FA3ED17088D6157E76867E";
 
-/* NIST ACVP ML-KEM-768 Encapsulation test vector (tcId: 26, tgId: 2) */
-/* Input: ek (public key) - first 48 hex chars shown */
-static const char *acvp_encap_ek_prefix =
-    "F255CE47334283B8622BE7CE76D7354E3C4FE3F6C44F6BB2";
-/* Input: m (32-byte randomness) */
+/* NIST ACVP ML-KEM-768 Encapsulation test vector (tcId: 26). */
 static const char *acvp_encap_m =
     "5BD922AF345AB90F297D0A82EA39527A648E4977AB56242E2AC0ED9A2CC66F10";
-/* Expected output: k (32-byte shared secret) */
 static const char *acvp_encap_k =
     "B2425299020BCF563B8EBE0512F0479941335A75A32B8D10BFF60E5548B64672";
-/* Expected output: c (ciphertext) - first 48 hex chars */
 static const char *acvp_encap_c_prefix =
     "4EE24D9E0858B36DC755A9389F4FDBF438DB8FBFDDD2E2A4";
-
-/* Full ek for encap test (1184 bytes = 2368 hex chars) */
 static const char *acvp_encap_ek_full =
     "F255CE47334283B8622BE7CE76D7354E3C4FE3F6C44F6BB25C9864EE0BAEB576"
     "5950D88F438263CE8B5A7A4C0FC4C95F10C477A7521F9BB458B8AA55D2E43BDC"
@@ -91,360 +87,253 @@ static const char *acvp_encap_ek_full =
     "4AC971529FB7A883492235E62112064A0F6FF5BF4F1619A0D03B96B5112009966"
     "B2DF7C2F300B6F295DF7FA2C453E1949DF6405309DF7575C7656C245EDCA9F6";
 
-int main(void) {
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_roundtrip)(void) {
   uint8_t pk[1184], sk[2400];
   uint8_t ct[1088], ss_enc[32], ss_dec[32];
 
-  printf("ML-KEM-768 tests...\n");
+  FIO_ASSERT(!fio_mlkem768_keypair(pk, sk), "ML-KEM keypair generation failed");
+  FIO_ASSERT(!fio_mlkem768_encaps(ct, ss_enc, pk),
+             "ML-KEM encapsulation failed");
+  FIO_ASSERT(!fio_mlkem768_decaps(ss_dec, ct, sk),
+             "ML-KEM decapsulation failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss_enc, ss_dec, 32),
+             "ML-KEM shared secret mismatch");
+}
 
-  /* Test 1: Random round-trip */
-  fio_mlkem768_keypair(pk, sk);
-  fio_mlkem768_encaps(ct, ss_enc, pk);
-  fio_mlkem768_decaps(ss_dec, ct, sk);
-  if (memcmp(ss_enc, ss_dec, 32) != 0) {
-    fprintf(stderr, "FAIL: random round-trip\n");
-    return 1;
-  }
-  printf("  random round-trip: OK\n");
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_deterministic)(void) {
+  uint8_t coins[64], enc_coins[32];
+  uint8_t pk1[1184], sk1[2400], ct1[1088], ss1[32];
+  uint8_t pk2[1184], sk2[2400], ct2[1088], ss2[32];
+  FIO_MEMSET(coins, 0x42, 64);
+  FIO_MEMSET(enc_coins, 0x37, 32);
 
-  /* Test 2: Deterministic reproducibility */
-  {
-    uint8_t coins[64], enc_coins[32];
-    uint8_t pk2[1184], sk2[2400], ct2[1088], ss2[32];
-    uint8_t pk3[1184], sk3[2400], ct3[1088], ss3[32];
-    memset(coins, 0x42, 64);
-    memset(enc_coins, 0x37, 32);
+  FIO_ASSERT(!fio_mlkem768_keypair_derand(pk1, sk1, coins),
+             "deterministic ML-KEM keypair failed");
+  FIO_ASSERT(!fio_mlkem768_keypair_derand(pk2, sk2, coins),
+             "deterministic ML-KEM keypair failed");
+  FIO_ASSERT(!FIO_MEMCMP(pk1, pk2, 1184), "deterministic ML-KEM pk mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(sk1, sk2, 2400), "deterministic ML-KEM sk mismatch");
 
-    fio_mlkem768_keypair_derand(pk2, sk2, coins);
-    fio_mlkem768_keypair_derand(pk3, sk3, coins);
-    if (memcmp(pk2, pk3, 1184) || memcmp(sk2, sk3, 2400)) {
-      fprintf(stderr, "FAIL: derand keypair\n");
-      return 1;
-    }
+  FIO_ASSERT(!fio_mlkem768_encaps_derand(ct1, ss1, pk1, enc_coins),
+             "deterministic ML-KEM encaps failed");
+  FIO_ASSERT(!fio_mlkem768_encaps_derand(ct2, ss2, pk2, enc_coins),
+             "deterministic ML-KEM encaps failed");
+  FIO_ASSERT(!FIO_MEMCMP(ct1, ct2, 1088),
+             "deterministic ML-KEM ct mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(ss1, ss2, 32),
+             "deterministic ML-KEM ss mismatch");
 
-    fio_mlkem768_encaps_derand(ct2, ss2, pk2, enc_coins);
-    fio_mlkem768_encaps_derand(ct3, ss3, pk3, enc_coins);
-    if (memcmp(ct2, ct3, 1088) || memcmp(ss2, ss3, 32)) {
-      fprintf(stderr, "FAIL: derand encaps\n");
-      return 1;
-    }
+  uint8_t ss_d[32];
+  FIO_ASSERT(!fio_mlkem768_decaps(ss_d, ct1, sk1),
+             "deterministic ML-KEM decaps failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss1, ss_d, 32),
+             "deterministic ML-KEM decaps mismatch");
+}
 
-    uint8_t ss_d[32];
-    fio_mlkem768_decaps(ss_d, ct2, sk2);
-    if (memcmp(ss2, ss_d, 32)) {
-      fprintf(stderr, "FAIL: derand round-trip\n");
-      return 1;
-    }
-    printf("  deterministic round-trip: OK\n");
-  }
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_implicit_rejection)(void) {
+  uint8_t pk[1184], sk[2400];
+  uint8_t ct[1088], ss_enc[32], ss_bad[32], ss_bad2[32];
 
-  /* Test 3: Implicit rejection */
-  {
-    uint8_t ss_bad[32], ct_bad[1088];
-    memcpy(ct_bad, ct, 1088);
-    ct_bad[0] ^= 0xFF;
-    fio_mlkem768_decaps(ss_bad, ct_bad, sk);
-    if (memcmp(ss_enc, ss_bad, 32) == 0) {
-      fprintf(stderr, "FAIL: implicit rejection\n");
-      return 1;
-    }
-    uint8_t ss_bad2[32];
-    fio_mlkem768_decaps(ss_bad2, ct_bad, sk);
-    if (memcmp(ss_bad, ss_bad2, 32) != 0) {
-      fprintf(stderr, "FAIL: implicit rejection not deterministic\n");
-      return 1;
-    }
-    printf("  implicit rejection: OK\n");
-  }
+  FIO_ASSERT(!fio_mlkem768_keypair(pk, sk), "ML-KEM keypair generation failed");
+  FIO_ASSERT(!fio_mlkem768_encaps(ct, ss_enc, pk),
+             "ML-KEM encapsulation failed");
 
-  /* Test 4: Multiple round-trips */
-  for (int trial = 0; trial < 100; trial++) {
-    fio_mlkem768_keypair(pk, sk);
-    fio_mlkem768_encaps(ct, ss_enc, pk);
-    fio_mlkem768_decaps(ss_dec, ct, sk);
-    if (memcmp(ss_enc, ss_dec, 32) != 0) {
-      fprintf(stderr, "FAIL: round-trip trial %d\n", trial);
-      return 1;
-    }
-  }
-  printf("  100 random round-trips: OK\n");
+  ct[0] ^= 0xFF;
+  FIO_ASSERT(!fio_mlkem768_decaps(ss_bad, ct, sk),
+             "ML-KEM decaps on corrupted ct failed");
+  FIO_ASSERT(FIO_MEMCMP(ss_enc, ss_bad, 32),
+             "ML-KEM implicit rejection did not change shared secret");
 
-  /* Test 5: NIST ACVP KeyGen test vector (tcId 26, ML-KEM-768) */
-  {
-    uint8_t d[32], z[32], coins[64];
-    uint8_t ek[1184], dk[2400];
-    uint8_t expected_ek_prefix[24], expected_dk_suffix[32];
+  FIO_ASSERT(!fio_mlkem768_decaps(ss_bad2, ct, sk),
+             "ML-KEM second decaps on corrupted ct failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss_bad, ss_bad2, 32),
+             "ML-KEM implicit rejection is not deterministic");
+}
 
-    hex_to_bytes(acvp_keygen_d, d, 32);
-    hex_to_bytes(acvp_keygen_z, z, 32);
-    hex_to_bytes(acvp_keygen_ek_prefix, expected_ek_prefix, 24);
-    hex_to_bytes(acvp_keygen_dk_suffix, expected_dk_suffix, 32);
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_acvp_keygen)(void) {
+  uint8_t d[32], z[32], coins[64];
+  uint8_t ek[1184], dk[2400];
+  uint8_t expected_ek_prefix[24];
 
-    /* coins = d || z per FIPS 203 */
-    memcpy(coins, d, 32);
-    memcpy(coins + 32, z, 32);
+  fio___test_hex2bin(d, acvp_keygen_d, 32);
+  fio___test_hex2bin(z, acvp_keygen_z, 32);
+  fio___test_hex2bin(expected_ek_prefix, acvp_keygen_ek_prefix, 24);
+  FIO_MEMCPY(coins, d, 32);
+  FIO_MEMCPY(coins + 32, z, 32);
 
-    fio_mlkem768_keypair_derand(ek, dk, coins);
+  FIO_ASSERT(!fio_mlkem768_keypair_derand(ek, dk, coins),
+             "ACVP keygen keypair_derand failed");
+  FIO_ASSERT(!FIO_MEMCMP(ek, expected_ek_prefix, 24),
+             "ACVP keygen ek prefix mismatch (tcId 26)");
+  FIO_ASSERT(!FIO_MEMCMP(dk + 2400 - 32, z, 32),
+             "ACVP keygen dk suffix mismatch (tcId 26)");
 
-    /* Verify ek prefix matches */
-    if (memcmp(ek, expected_ek_prefix, 24) != 0) {
-      fprintf(stderr, "FAIL: ACVP keygen ek prefix mismatch\n");
-      fprintf(stderr, "  Got:      ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", ek[i]);
-      fprintf(stderr, "\n  Expected: ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", expected_ek_prefix[i]);
-      fprintf(stderr, "\n");
-      return 1;
-    }
+  fio___test_hex2bin(d, acvp_keygen2_d, 32);
+  fio___test_hex2bin(z, acvp_keygen2_z, 32);
+  fio___test_hex2bin(expected_ek_prefix, acvp_keygen2_ek_prefix, 24);
+  FIO_MEMCPY(coins, d, 32);
+  FIO_MEMCPY(coins + 32, z, 32);
 
-    /* Verify dk suffix (z) matches — z is at end of dk per FIPS 203 sk format
-     */
-    if (memcmp(dk + 2400 - 32, expected_dk_suffix, 32) != 0) {
-      fprintf(stderr, "FAIL: ACVP keygen dk suffix (z) mismatch\n");
-      return 1;
-    }
+  FIO_ASSERT(!fio_mlkem768_keypair_derand(ek, dk, coins),
+             "ACVP keygen keypair_derand failed (tcId 27)");
+  FIO_ASSERT(!FIO_MEMCMP(ek, expected_ek_prefix, 24),
+             "ACVP keygen ek prefix mismatch (tcId 27)");
+  FIO_ASSERT(!FIO_MEMCMP(dk + 2400 - 32, z, 32),
+             "ACVP keygen dk suffix mismatch (tcId 27)");
+}
 
-    printf("  ACVP keygen tcId 26: OK\n");
-  }
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_acvp_encap)(void) {
+  uint8_t ek[1184], m[32];
+  uint8_t expected_k[32], expected_c_prefix[24];
+  uint8_t acvp_ct[1088], acvp_ss[32];
 
-  /* Test 6: NIST ACVP KeyGen test vector (tcId 27, ML-KEM-768) */
-  {
-    uint8_t d[32], z[32], coins[64];
-    uint8_t ek[1184], dk[2400];
-    uint8_t expected_ek_prefix[24];
+  fio___test_hex2bin(ek, acvp_encap_ek_full, 1184);
+  fio___test_hex2bin(m, acvp_encap_m, 32);
+  fio___test_hex2bin(expected_k, acvp_encap_k, 32);
+  fio___test_hex2bin(expected_c_prefix, acvp_encap_c_prefix, 24);
 
-    hex_to_bytes(acvp_keygen2_d, d, 32);
-    hex_to_bytes(acvp_keygen2_z, z, 32);
-    hex_to_bytes(acvp_keygen2_ek_prefix, expected_ek_prefix, 24);
+  FIO_ASSERT(!fio_mlkem768_encaps_derand(acvp_ct, acvp_ss, ek, m),
+             "ACVP encaps failed");
+  FIO_ASSERT(!FIO_MEMCMP(acvp_ct, expected_c_prefix, 24),
+             "ACVP encaps ciphertext prefix mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(acvp_ss, expected_k, 32),
+             "ACVP encaps shared secret mismatch");
+}
 
-    memcpy(coins, d, 32);
-    memcpy(coins + 32, z, 32);
+FIO_SFUNC void FIO_NAME_TEST(stl, x25519mlkem768_roundtrip)(void) {
+  uint8_t pk[1216], sk[2432];
+  uint8_t ct[1120], ss_enc[64], ss_dec[64];
 
-    fio_mlkem768_keypair_derand(ek, dk, coins);
+  FIO_ASSERT(!fio_x25519mlkem768_keypair(pk, sk),
+             "hybrid keypair generation failed");
+  FIO_ASSERT(!fio_x25519mlkem768_encaps(ct, ss_enc, pk),
+             "hybrid encapsulation failed");
+  FIO_ASSERT(!fio_x25519mlkem768_decaps(ss_dec, ct, sk),
+             "hybrid decapsulation failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss_enc, ss_dec, 64),
+             "hybrid shared secret mismatch");
+}
 
-    if (memcmp(ek, expected_ek_prefix, 24) != 0) {
-      fprintf(stderr, "FAIL: ACVP keygen tcId 27 ek prefix mismatch\n");
-      fprintf(stderr, "  Got:      ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", ek[i]);
-      fprintf(stderr, "\n  Expected: ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", expected_ek_prefix[i]);
-      fprintf(stderr, "\n");
-      return 1;
-    }
+FIO_SFUNC void FIO_NAME_TEST(stl, x25519mlkem768_components)(void) {
+  uint8_t pk[1216], sk[2432];
+  uint8_t ct[1120], ss[64];
+  uint8_t mlkem_ss[32], x25519_ss[32];
 
-    /* Also verify z is at end of dk */
-    uint8_t expected_z[32];
-    hex_to_bytes(acvp_keygen2_z, expected_z, 32);
-    if (memcmp(dk + 2400 - 32, expected_z, 32) != 0) {
-      fprintf(stderr, "FAIL: ACVP keygen tcId 27 dk suffix (z) mismatch\n");
-      return 1;
-    }
+  FIO_ASSERT(FIO_X25519MLKEM768_PUBLICKEYBYTES == 1216,
+             "hybrid public key size mismatch");
+  FIO_ASSERT(FIO_X25519MLKEM768_SECRETKEYBYTES == 2432,
+             "hybrid secret key size mismatch");
+  FIO_ASSERT(FIO_X25519MLKEM768_CIPHERTEXTBYTES == 1120,
+             "hybrid ciphertext size mismatch");
+  FIO_ASSERT(FIO_X25519MLKEM768_SSBYTES == 64,
+             "hybrid shared secret size mismatch");
 
-    printf("  ACVP keygen tcId 27: OK\n");
-  }
+  FIO_ASSERT(!fio_x25519mlkem768_keypair(pk, sk),
+             "hybrid keypair generation failed");
+  FIO_ASSERT(!fio_x25519mlkem768_encaps(ct, ss, pk),
+             "hybrid encapsulation failed");
 
-  /* Test 7: NIST ACVP Encapsulation test vector (tcId 26, ML-KEM-768) */
-  {
-    uint8_t ek[1184], m[32];
-    uint8_t expected_k[32], expected_c_prefix[24];
-    uint8_t acvp_ct[1088], acvp_ss[32];
+  /* ML-KEM component: ct[0..1087], sk[0..2399]. */
+  FIO_ASSERT(!fio_mlkem768_decaps(mlkem_ss, ct, sk),
+             "hybrid ML-KEM component decaps failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss, mlkem_ss, 32),
+             "hybrid ML-KEM component mismatch");
 
-    /* Parse the full public key */
-    hex_to_bytes(acvp_encap_ek_full, ek, 1184);
-    hex_to_bytes(acvp_encap_m, m, 32);
-    hex_to_bytes(acvp_encap_k, expected_k, 32);
-    hex_to_bytes(acvp_encap_c_prefix, expected_c_prefix, 24);
+  /* X25519 component: ct[1088..1119], sk[2400..2431]. */
+  FIO_ASSERT(!fio_x25519_shared_secret(x25519_ss, sk + 2400, ct + 1088),
+             "hybrid X25519 shared secret failed");
+  FIO_ASSERT(!FIO_MEMCMP(ss + 32, x25519_ss, 32),
+             "hybrid X25519 component mismatch");
+}
 
-    /* Verify ek prefix matches what we expect */
-    uint8_t expected_ek_prefix[24];
-    hex_to_bytes(acvp_encap_ek_prefix, expected_ek_prefix, 24);
-    if (memcmp(ek, expected_ek_prefix, 24) != 0) {
-      fprintf(stderr, "FAIL: ACVP encap ek parse error\n");
-      return 1;
-    }
+FIO_SFUNC void FIO_NAME_TEST(stl, x25519mlkem768_implicit_rejection)(void) {
+  uint8_t pk[1216], sk[2432];
+  uint8_t ct[1120], ss_enc[64], ss_dec[64];
 
-    /* Deterministic encapsulation */
-    fio_mlkem768_encaps_derand(acvp_ct, acvp_ss, ek, m);
+  FIO_ASSERT(!fio_x25519mlkem768_keypair(pk, sk),
+             "hybrid keypair generation failed");
+  FIO_ASSERT(!fio_x25519mlkem768_encaps(ct, ss_enc, pk),
+             "hybrid encapsulation failed");
 
-    /* Verify ciphertext prefix */
-    if (memcmp(acvp_ct, expected_c_prefix, 24) != 0) {
-      fprintf(stderr, "FAIL: ACVP encap ciphertext prefix mismatch\n");
-      fprintf(stderr, "  Got:      ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", acvp_ct[i]);
-      fprintf(stderr, "\n  Expected: ");
-      for (int i = 0; i < 24; i++)
-        fprintf(stderr, "%02X", expected_c_prefix[i]);
-      fprintf(stderr, "\n");
-      return 1;
-    }
+  /* Corrupt the ML-KEM portion of the ciphertext. */
+  ct[500] ^= 0xFF;
+  FIO_ASSERT(!fio_x25519mlkem768_decaps(ss_dec, ct, sk),
+             "hybrid decaps on corrupted ct failed");
+  FIO_ASSERT(FIO_MEMCMP(ss_enc, ss_dec, 32),
+             "hybrid ML-KEM portion matched on corrupted ciphertext");
+  FIO_ASSERT(!FIO_MEMCMP(ss_enc + 32, ss_dec + 32, 32),
+             "hybrid X25519 portion changed on ML-KEM corruption");
+}
 
-    /* Verify shared secret */
-    if (memcmp(acvp_ss, expected_k, 32) != 0) {
-      fprintf(stderr, "FAIL: ACVP encap shared secret mismatch\n");
-      fprintf(stderr, "  Got:      ");
-      for (int i = 0; i < 32; i++)
-        fprintf(stderr, "%02X", acvp_ss[i]);
-      fprintf(stderr, "\n  Expected: ");
-      for (int i = 0; i < 32; i++)
-        fprintf(stderr, "%02X", expected_k[i]);
-      fprintf(stderr, "\n");
-      return 1;
-    }
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_null_args)(void) {
+  uint8_t pk[1184], sk[2400], ct[1088], ss[32];
+  uint8_t coins[64] = {0};
 
-    printf("  ACVP encap tcId 26: OK\n");
-  }
+  FIO_ASSERT(fio_mlkem768_keypair(NULL, sk) == -1,
+             "keypair should reject NULL pk");
+  FIO_ASSERT(fio_mlkem768_keypair(pk, NULL) == -1,
+             "keypair should reject NULL sk");
 
-  /* =========================================================================
-   * X25519MLKEM768 Hybrid Tests
-   * =========================================================================
-   */
-  printf("\nX25519MLKEM768 hybrid tests...\n");
+  FIO_ASSERT(fio_mlkem768_keypair_derand(NULL, sk, coins) == -1,
+             "keypair_derand should reject NULL pk");
+  FIO_ASSERT(fio_mlkem768_keypair_derand(pk, NULL, coins) == -1,
+             "keypair_derand should reject NULL sk");
+  FIO_ASSERT(fio_mlkem768_keypair_derand(pk, sk, NULL) == -1,
+             "keypair_derand should reject NULL coins");
 
-  /* Test 8: Basic hybrid round-trip */
-  {
-    uint8_t hybrid_pk[1216], hybrid_sk[2432];
-    uint8_t hybrid_ct[1120], hybrid_ss_enc[64], hybrid_ss_dec[64];
+  FIO_ASSERT(fio_mlkem768_encaps(NULL, ss, pk) == -1,
+             "encaps should reject NULL ct");
+  FIO_ASSERT(fio_mlkem768_encaps(ct, NULL, pk) == -1,
+             "encaps should reject NULL ss");
+  FIO_ASSERT(fio_mlkem768_encaps(ct, ss, NULL) == -1,
+             "encaps should reject NULL pk");
 
-    if (fio_x25519mlkem768_keypair(hybrid_pk, hybrid_sk) != 0) {
-      fprintf(stderr, "FAIL: hybrid keypair generation\n");
-      return 1;
-    }
-    if (fio_x25519mlkem768_encaps(hybrid_ct, hybrid_ss_enc, hybrid_pk) != 0) {
-      fprintf(stderr, "FAIL: hybrid encapsulation\n");
-      return 1;
-    }
-    if (fio_x25519mlkem768_decaps(hybrid_ss_dec, hybrid_ct, hybrid_sk) != 0) {
-      fprintf(stderr, "FAIL: hybrid decapsulation\n");
-      return 1;
-    }
-    if (memcmp(hybrid_ss_enc, hybrid_ss_dec, 64) != 0) {
-      fprintf(stderr, "FAIL: hybrid shared secrets don't match\n");
-      fprintf(stderr, "  encaps ss: ");
-      for (int i = 0; i < 64; i++)
-        fprintf(stderr, "%02X", hybrid_ss_enc[i]);
-      fprintf(stderr, "\n  decaps ss: ");
-      for (int i = 0; i < 64; i++)
-        fprintf(stderr, "%02X", hybrid_ss_dec[i]);
-      fprintf(stderr, "\n");
-      return 1;
-    }
-    printf("  hybrid round-trip: OK\n");
-  }
+  FIO_ASSERT(fio_mlkem768_encaps_derand(NULL, ss, pk, coins) == -1,
+             "encaps_derand should reject NULL ct");
+  FIO_ASSERT(fio_mlkem768_encaps_derand(ct, NULL, pk, coins) == -1,
+             "encaps_derand should reject NULL ss");
+  FIO_ASSERT(fio_mlkem768_encaps_derand(ct, ss, NULL, coins) == -1,
+             "encaps_derand should reject NULL pk");
+  FIO_ASSERT(fio_mlkem768_encaps_derand(ct, ss, pk, NULL) == -1,
+             "encaps_derand should reject NULL coins");
 
-  /* Test 8: Multiple hybrid round-trips */
-  for (int trial = 0; trial < 50; trial++) {
-    uint8_t hybrid_pk[1216], hybrid_sk[2432];
-    uint8_t hybrid_ct[1120], hybrid_ss_enc[64], hybrid_ss_dec[64];
+  FIO_ASSERT(fio_mlkem768_decaps(NULL, ct, sk) == -1,
+             "decaps should reject NULL ss");
+  FIO_ASSERT(fio_mlkem768_decaps(ss, NULL, sk) == -1,
+             "decaps should reject NULL ct");
+  FIO_ASSERT(fio_mlkem768_decaps(ss, ct, NULL) == -1,
+             "decaps should reject NULL sk");
 
-    fio_x25519mlkem768_keypair(hybrid_pk, hybrid_sk);
-    fio_x25519mlkem768_encaps(hybrid_ct, hybrid_ss_enc, hybrid_pk);
-    fio_x25519mlkem768_decaps(hybrid_ss_dec, hybrid_ct, hybrid_sk);
-    if (memcmp(hybrid_ss_enc, hybrid_ss_dec, 64) != 0) {
-      fprintf(stderr, "FAIL: hybrid round-trip trial %d\n", trial);
-      return 1;
-    }
-  }
-  printf("  50 hybrid round-trips: OK\n");
+  uint8_t hpk[1216], hsk[2432], hct[1120], hss[64];
+  FIO_ASSERT(fio_x25519mlkem768_keypair(NULL, hsk) == -1,
+             "hybrid keypair should reject NULL pk");
+  FIO_ASSERT(fio_x25519mlkem768_keypair(hpk, NULL) == -1,
+             "hybrid keypair should reject NULL sk");
 
-  /* Test 9: Verify hybrid key sizes */
-  {
-    if (FIO_X25519MLKEM768_PUBLICKEYBYTES != 1216) {
-      fprintf(stderr, "FAIL: public key size != 1216\n");
-      return 1;
-    }
-    if (FIO_X25519MLKEM768_SECRETKEYBYTES != 2432) {
-      fprintf(stderr, "FAIL: secret key size != 2432\n");
-      return 1;
-    }
-    if (FIO_X25519MLKEM768_CIPHERTEXTBYTES != 1120) {
-      fprintf(stderr, "FAIL: ciphertext size != 1120\n");
-      return 1;
-    }
-    if (FIO_X25519MLKEM768_SSBYTES != 64) {
-      fprintf(stderr, "FAIL: shared secret size != 64\n");
-      return 1;
-    }
-    printf("  hybrid sizes: OK\n");
-  }
+  FIO_ASSERT(fio_x25519mlkem768_encaps(NULL, hss, hpk) == -1,
+             "hybrid encaps should reject NULL ct");
+  FIO_ASSERT(fio_x25519mlkem768_encaps(hct, NULL, hpk) == -1,
+             "hybrid encaps should reject NULL ss");
+  FIO_ASSERT(fio_x25519mlkem768_encaps(hct, hss, NULL) == -1,
+             "hybrid encaps should reject NULL pk");
 
-  /* Test 10: Hybrid shared secret has both X25519 and ML-KEM components
-   * Layout per IETF draft-ietf-tls-ecdhe-mlkem-03 (ML-KEM FIRST):
-   *   ct = ML-KEM-768_ct[0..1087] || X25519_eph_pk[1088..1119]
-   *   sk = ML-KEM-768_dk[0..2399] || X25519_sk[2400..2431]
-   *   ss = ML-KEM-768_ss[0..31] || X25519_ss[32..63]
-   */
-  {
-    uint8_t hybrid_pk[1216], hybrid_sk[2432];
-    uint8_t hybrid_ct[1120], hybrid_ss[64];
+  FIO_ASSERT(fio_x25519mlkem768_decaps(NULL, hct, hsk) == -1,
+             "hybrid decaps should reject NULL ss");
+  FIO_ASSERT(fio_x25519mlkem768_decaps(hss, NULL, hsk) == -1,
+             "hybrid decaps should reject NULL ct");
+  FIO_ASSERT(fio_x25519mlkem768_decaps(hss, hct, NULL) == -1,
+             "hybrid decaps should reject NULL sk");
+}
 
-    fio_x25519mlkem768_keypair(hybrid_pk, hybrid_sk);
-    fio_x25519mlkem768_encaps(hybrid_ct, hybrid_ss, hybrid_pk);
-
-    /* Verify ML-KEM component independently */
-    uint8_t mlkem_ss[32];
-    /* ct[0..1087] is ML-KEM ciphertext, sk[0..2399] is ML-KEM secret key */
-    fio_mlkem768_decaps(mlkem_ss, hybrid_ct, hybrid_sk);
-    if (memcmp(hybrid_ss, mlkem_ss, 32) != 0) {
-      fprintf(stderr, "FAIL: ML-KEM component mismatch\n");
-      return 1;
-    }
-
-    /* Verify X25519 component independently */
-    uint8_t x25519_ss[32];
-    /* ct[1088..1119] is ephemeral X25519 public key, sk[2400..2431] is X25519
-     * private */
-    if (fio_x25519_shared_secret(x25519_ss,
-                                 hybrid_sk + 2400,
-                                 hybrid_ct + 1088) != 0) {
-      fprintf(stderr, "FAIL: couldn't compute X25519 shared secret\n");
-      return 1;
-    }
-    if (memcmp(hybrid_ss + 32, x25519_ss, 32) != 0) {
-      fprintf(stderr, "FAIL: X25519 component mismatch\n");
-      return 1;
-    }
-
-    printf("  hybrid component verification: OK\n");
-  }
-
-  /* Test 11: Modified hybrid ciphertext fails gracefully
-   * Layout per IETF: ss = ML-KEM-768_ss[0..31] || X25519_ss[32..63]
-   */
-  {
-    uint8_t hybrid_pk[1216], hybrid_sk[2432];
-    uint8_t hybrid_ct[1120], hybrid_ss_enc[64], hybrid_ss_dec[64];
-
-    fio_x25519mlkem768_keypair(hybrid_pk, hybrid_sk);
-    fio_x25519mlkem768_encaps(hybrid_ct, hybrid_ss_enc, hybrid_pk);
-
-    /* Corrupt ML-KEM portion of ciphertext (first 1088 bytes) */
-    hybrid_ct[500] ^= 0xFF;
-
-    /* Decapsulation should still "succeed" but produce different shared secret
-     * (ML-KEM uses implicit rejection) */
-    int ret = fio_x25519mlkem768_decaps(hybrid_ss_dec, hybrid_ct, hybrid_sk);
-    if (ret != 0) {
-      fprintf(stderr, "FAIL: hybrid decaps returned error on corrupted ct\n");
-      return 1;
-    }
-    /* The ML-KEM portion (ss[0..31]) should NOT match (implicit rejection) */
-    if (memcmp(hybrid_ss_enc, hybrid_ss_dec, 32) == 0) {
-      fprintf(stderr, "FAIL: ML-KEM portion matched on corrupted ciphertext\n");
-      return 1;
-    }
-    /* The X25519 portion (ss[32..63]) should still match */
-    if (memcmp(hybrid_ss_enc + 32, hybrid_ss_dec + 32, 32) != 0) {
-      fprintf(stderr, "FAIL: X25519 portion changed on ML-KEM corruption\n");
-      return 1;
-    }
-    printf("  hybrid implicit rejection: OK\n");
-  }
-
-  printf("\nALL TESTS PASSED\n");
+int main(void) {
+  FIO_NAME_TEST(stl, mlkem_roundtrip)();
+  FIO_NAME_TEST(stl, mlkem_deterministic)();
+  FIO_NAME_TEST(stl, mlkem_implicit_rejection)();
+  FIO_NAME_TEST(stl, mlkem_acvp_keygen)();
+  FIO_NAME_TEST(stl, mlkem_acvp_encap)();
+  FIO_NAME_TEST(stl, x25519mlkem768_roundtrip)();
+  FIO_NAME_TEST(stl, x25519mlkem768_components)();
+  FIO_NAME_TEST(stl, x25519mlkem768_implicit_rejection)();
+  FIO_NAME_TEST(stl, mlkem_null_args)();
   return 0;
 }

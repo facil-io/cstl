@@ -696,9 +696,6 @@ int main(void) {
   /* Multi-threaded memcpy */
   fio___test_thread_memcpy();
 
-  /* Fork tests (POSIX only) */
-#if FIO_OS_POSIX
-  fio___test_fork();
-#endif
+  /* Fork coverage is multi-process and belongs in ./stress/, not ./tests/. */
   return 0;
 }

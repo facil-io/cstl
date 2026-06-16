@@ -1,9 +1,9 @@
 /* *****************************************************************************
 Test - Core Module
+Covers 000 core.h, atomics, type-size sanity, state callbacks, and logging.
 ***************************************************************************** */
-#undef FIO_MEMALT
 #define FIO_LOG
-#define FIO_MEMALT /* Enable fio_memcpy, fio_memset, fio_memchr, etc. */
+#define FIO_THREADS /* Enable thread type declarations for size checks. */
 #include "test-helpers.h"
 
 /* *****************************************************************************
@@ -654,661 +654,6 @@ FIO_SFUNC void fio___test_core_vector_operations(void) {
 /* *****************************************************************************
 Memory Function Edge Case Tests (FIO_MEMALT)
 ***************************************************************************** */
-
-FIO_SFUNC void fio___test_memcpy_overlap(void) {
-  /* Forward overlap: dest < src < dest+len (should use buffered copy) */
-  {
-    char buf[256];
-    fio_rand_bytes(buf, 256);
-    char expected[256];
-    FIO_MEMCPY(expected, buf, 256);
-
-    /* Copy from buf+10 to buf+0 (100 bytes) - forward overlap */
-    fio_memcpy(buf, buf + 10, 100);
-    FIO_ASSERT(!memcmp(buf, expected + 10, 100),
-               "fio_memcpy forward overlap failed");
-  }
-
-  /* Backward overlap: src < dest < src+len (should use reversed copy) */
-  {
-    char buf[256];
-    fio_rand_bytes(buf, 256);
-    char expected[256];
-    FIO_MEMCPY(expected, buf, 256);
-
-    /* Copy from buf+0 to buf+10 (100 bytes) - backward overlap */
-    fio_memcpy(buf + 10, buf, 100);
-    FIO_ASSERT(!memcmp(buf + 10, expected, 100),
-               "fio_memcpy backward overlap failed");
-  }
-
-  /* No overlap: dest+len <= src */
-  {
-    char buf[512];
-    fio_rand_bytes(buf + 256, 256);
-    char expected[256];
-    FIO_MEMCPY(expected, buf + 256, 256);
-
-    fio_memcpy(buf, buf + 256, 256);
-    FIO_ASSERT(!memcmp(buf, expected, 256),
-               "fio_memcpy non-overlapping (dest before src) failed");
-  }
-
-  /* No overlap: src+len <= dest */
-  {
-    char buf[512];
-    fio_rand_bytes(buf, 256);
-    char expected[256];
-    FIO_MEMCPY(expected, buf, 256);
-
-    fio_memcpy(buf + 256, buf, 256);
-    FIO_ASSERT(!memcmp(buf + 256, expected, 256),
-               "fio_memcpy non-overlapping (src before dest) failed");
-  }
-
-  /* Adjacent memory: dest = src+len (no overlap) */
-  {
-    char buf[256];
-    fio_rand_bytes(buf, 128);
-    char expected[128];
-    FIO_MEMCPY(expected, buf, 128);
-
-    fio_memcpy(buf + 128, buf, 128);
-    FIO_ASSERT(!memcmp(buf + 128, expected, 128),
-               "fio_memcpy adjacent memory failed");
-  }
-
-  /* Same pointer: dest == src (should be no-op) */
-  {
-    char buf[64];
-    fio_rand_bytes(buf, 64);
-    char expected[64];
-    FIO_MEMCPY(expected, buf, 64);
-
-    fio_memcpy(buf, buf, 64);
-    FIO_ASSERT(!memcmp(buf, expected, 64), "fio_memcpy same pointer failed");
-  }
-
-  /* Overlap at various offsets */
-  for (size_t offset = 1; offset <= 64; offset *= 2) {
-    char buf[256];
-    fio_rand_bytes(buf, 256);
-    char expected[256];
-    FIO_MEMCPY(expected, buf, 256);
-
-    /* Forward overlap */
-    fio_memcpy(buf, buf + offset, 128);
-    FIO_ASSERT(!memcmp(buf, expected + offset, 128),
-               "fio_memcpy forward overlap at offset %zu failed",
-               offset);
-
-    /* Reset and test backward overlap */
-    FIO_MEMCPY(buf, expected, 256);
-    fio_memcpy(buf + offset, buf, 128);
-    FIO_ASSERT(!memcmp(buf + offset, expected, 128),
-               "fio_memcpy backward overlap at offset %zu failed",
-               offset);
-  }
-}
-
-FIO_SFUNC void fio___test_memcpy_null_handling(void) {
-  char buf[64];
-  fio_rand_bytes(buf, 64);
-  char expected[64];
-  FIO_MEMCPY(expected, buf, 64);
-
-  /* Both NULL with len = 0 - should be safe no-op */
-  void *result = fio_memcpy(NULL, NULL, 0);
-  FIO_ASSERT(result == NULL, "fio_memcpy(NULL, NULL, 0) should return NULL");
-
-  /* len = 0 with valid pointers - should be no-op */
-  result = fio_memcpy(buf, buf + 32, 0);
-  FIO_ASSERT(!memcmp(buf, expected, 64),
-             "fio_memcpy with len=0 should not modify buffer");
-}
-
-FIO_SFUNC void fio___test_memcpy_size_boundaries(void) {
-  /* Test sizes: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 31, 32, 33,
-   * 63, 64, 65, 127, 128, 129, 255, 256, 257 */
-  size_t test_sizes[] = {0,  1,   2,   3,   4,   5,   6,   7,   8,
-                         9,  15,  16,  17,  31,  32,  33,  63,  64,
-                         65, 127, 128, 129, 255, 256, 257, 511, 512};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  char src[1024];
-  char dest[1024];
-  char guard = (char)0xAA;
-
-  fio_rand_bytes(src, sizeof(src));
-
-  for (size_t i = 0; i < num_sizes; ++i) {
-    size_t len = test_sizes[i];
-    if (len > sizeof(src))
-      continue;
-
-    /* Clear dest and set guard byte */
-    FIO_MEMSET(dest, 0, sizeof(dest));
-    if (len < sizeof(dest))
-      dest[len] = guard;
-
-    fio_memcpy(dest, src, len);
-
-    FIO_ASSERT(!memcmp(dest, src, len), "fio_memcpy failed for size %zu", len);
-
-    /* Check guard byte wasn't modified (overflow detection) */
-    if (len < sizeof(dest)) {
-      FIO_ASSERT(dest[len] == guard,
-                 "fio_memcpy overflow detected at size %zu",
-                 len);
-    }
-  }
-}
-
-FIO_SFUNC void fio___test_memcpy_alignment(void) {
-  char buf[256 + 16] FIO_ALIGN(16);
-  char src[256 + 16] FIO_ALIGN(16);
-  fio_rand_bytes(src, sizeof(src));
-
-  /* Test all combinations of dest and src alignment offsets 0-7 */
-  for (size_t dest_off = 0; dest_off < 8; ++dest_off) {
-    for (size_t src_off = 0; src_off < 8; ++src_off) {
-      FIO_MEMSET(buf, 0, sizeof(buf));
-
-      fio_memcpy(buf + dest_off, src + src_off, 64);
-
-      FIO_ASSERT(!memcmp(buf + dest_off, src + src_off, 64),
-                 "fio_memcpy alignment test failed: dest_off=%zu, src_off=%zu",
-                 dest_off,
-                 src_off);
-    }
-  }
-}
-
-FIO_SFUNC void fio___test_memset_size_boundaries(void) {
-  size_t test_sizes[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 63, 64, 127, 128};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  char buf[256];
-  char guard = (char)0xCC;
-
-  for (size_t i = 0; i < num_sizes; ++i) {
-    size_t len = test_sizes[i];
-
-    /* Clear buffer and set guard */
-    FIO_MEMSET(buf, 0xFF, sizeof(buf));
-    if (len < sizeof(buf))
-      buf[len] = guard;
-
-    fio_memset(buf, 0x42, len);
-
-    /* Verify all bytes are set correctly */
-    for (size_t j = 0; j < len; ++j) {
-      FIO_ASSERT((uint8_t)buf[j] == 0x42,
-                 "fio_memset failed at byte %zu for size %zu",
-                 j,
-                 len);
-    }
-
-    /* Check guard byte */
-    if (len < sizeof(buf)) {
-      FIO_ASSERT(buf[len] == guard,
-                 "fio_memset overflow detected at size %zu",
-                 len);
-    }
-  }
-}
-
-FIO_SFUNC void fio___test_memset_data_patterns(void) {
-  char buf[128];
-
-  /* data = 0 (all zeros) */
-  {
-    FIO_MEMSET(buf, 0xFF, sizeof(buf));
-    fio_memset(buf, 0, 64);
-    for (size_t i = 0; i < 64; ++i) {
-      FIO_ASSERT(buf[i] == 0, "fio_memset with data=0 failed at byte %zu", i);
-    }
-  }
-
-  /* data = 0xFF (single byte, should expand to 0xFFFFFFFFFFFFFFFF) */
-  {
-    FIO_MEMSET(buf, 0, sizeof(buf));
-    fio_memset(buf, 0xFF, 64);
-    for (size_t i = 0; i < 64; ++i) {
-      FIO_ASSERT((uint8_t)buf[i] == 0xFF,
-                 "fio_memset with data=0xFF failed at byte %zu",
-                 i);
-    }
-  }
-
-  /* data = 1 (single byte, should expand to 0x0101010101010101) */
-  {
-    FIO_MEMSET(buf, 0, sizeof(buf));
-    fio_memset(buf, 1, 64);
-    for (size_t i = 0; i < 64; ++i) {
-      FIO_ASSERT((uint8_t)buf[i] == 0x01,
-                 "fio_memset with data=1 failed at byte %zu",
-                 i);
-    }
-  }
-
-  /* data = 0x0100 (two-byte pattern, NOT expanded - only low byte used) */
-  {
-    FIO_MEMSET(buf, 0xFF, sizeof(buf));
-    fio_memset(buf, 0x0100, 64);
-    /* When data >= 0x100, fio_memset uses the full 64-bit pattern */
-    /* Check that pattern is applied correctly */
-    uint64_t expected = 0x0100;
-    for (size_t i = 0; i + 8 <= 64; i += 8) {
-      uint64_t val;
-      fio_memcpy8(&val, buf + i);
-      FIO_ASSERT(val == expected,
-                 "fio_memset with data=0x0100 failed at offset %zu",
-                 i);
-    }
-  }
-
-  /* data = 0xDEADBEEFCAFEBABE (8-byte pattern) */
-  {
-    FIO_MEMSET(buf, 0, sizeof(buf));
-    fio_memset(buf, 0xDEADBEEFCAFEBABEULL, 64);
-    uint64_t expected = 0xDEADBEEFCAFEBABEULL;
-    for (size_t i = 0; i + 8 <= 64; i += 8) {
-      uint64_t val;
-      fio_memcpy8(&val, buf + i);
-      FIO_ASSERT(val == expected,
-                 "fio_memset with 8-byte pattern failed at offset %zu",
-                 i);
-    }
-  }
-}
-
-FIO_SFUNC void fio___test_memset_alignment(void) {
-  char buf[128 + 16] FIO_ALIGN(16);
-
-  /* Test dest unaligned by 1-7 bytes */
-  for (size_t offset = 0; offset < 8; ++offset) {
-    FIO_MEMSET(buf, 0, sizeof(buf));
-    fio_memset(buf + offset, 0xAB, 64);
-
-    for (size_t i = 0; i < 64; ++i) {
-      FIO_ASSERT((uint8_t)buf[offset + i] == 0xAB,
-                 "fio_memset alignment test failed: offset=%zu, byte=%zu",
-                 offset,
-                 i);
-    }
-
-    /* Verify bytes before offset weren't touched */
-    for (size_t i = 0; i < offset; ++i) {
-      FIO_ASSERT(buf[i] == 0,
-                 "fio_memset wrote before dest at offset=%zu",
-                 offset);
-    }
-  }
-}
-
-FIO_SFUNC void fio___test_memchr_token_position(void) {
-  char buf[256];
-  FIO_MEMSET(buf, 'X', sizeof(buf));
-
-  /* Token at position 0 (first byte) */
-  {
-    buf[0] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf, "fio_memchr failed to find token at position 0");
-    buf[0] = 'X';
-  }
-
-  /* Token at position 1 */
-  {
-    buf[1] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf + 1,
-               "fio_memchr failed to find token at position 1");
-    buf[1] = 'X';
-  }
-
-  /* Token at position len-1 (last byte) */
-  {
-    buf[sizeof(buf) - 1] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf + sizeof(buf) - 1,
-               "fio_memchr failed to find token at last position");
-    buf[sizeof(buf) - 1] = 'X';
-  }
-
-  /* Token not present (return NULL) */
-  {
-    void *result = fio_memchr(buf, 'Z', sizeof(buf));
-    FIO_ASSERT(result == NULL,
-               "fio_memchr should return NULL when token not found");
-  }
-
-  /* Multiple occurrences (find first) */
-  {
-    buf[10] = 'A';
-    buf[50] = 'A';
-    buf[100] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf + 10, "fio_memchr should find first occurrence");
-    buf[10] = buf[50] = buf[100] = 'X';
-  }
-}
-
-FIO_SFUNC void fio___test_memchr_token_values(void) {
-  char buf[128];
-  FIO_MEMSET(buf, 0x55, sizeof(buf));
-
-  /* token = 0 (NUL byte) - critical for fio_has_zero_byte64 */
-  {
-    buf[32] = '\0';
-    void *result = fio_memchr(buf, '\0', sizeof(buf));
-    FIO_ASSERT(result == buf + 32, "fio_memchr failed to find NUL byte");
-    buf[32] = 0x55;
-  }
-
-  /* token = 0xFF */
-  {
-    buf[48] = (char)0xFF;
-    void *result = fio_memchr(buf, (char)0xFF, sizeof(buf));
-    FIO_ASSERT(result == buf + 48, "fio_memchr failed to find 0xFF byte");
-    buf[48] = 0x55;
-  }
-
-  /* token = 0x80 (high bit set) */
-  {
-    buf[64] = (char)0x80;
-    void *result = fio_memchr(buf, (char)0x80, sizeof(buf));
-    FIO_ASSERT(result == buf + 64, "fio_memchr failed to find 0x80 byte");
-    buf[64] = 0x55;
-  }
-
-  /* token = 'A' (normal ASCII) */
-  {
-    buf[16] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf + 16, "fio_memchr failed to find 'A'");
-    buf[16] = 0x55;
-  }
-}
-
-FIO_SFUNC void fio___test_memchr_size_boundaries(void) {
-  char buf[256];
-  FIO_MEMSET(buf, 'X', sizeof(buf));
-
-  /* len = 0 (return NULL) */
-  {
-    buf[0] = 'A';
-    void *result = fio_memchr(buf, 'A', 0);
-    FIO_ASSERT(result == NULL, "fio_memchr with len=0 should return NULL");
-    buf[0] = 'X';
-  }
-
-  /* Test various sizes with token at end */
-  size_t test_sizes[] = {1, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  for (size_t i = 0; i < num_sizes; ++i) {
-    size_t len = test_sizes[i];
-    buf[len - 1] = 'A';
-    void *result = fio_memchr(buf, 'A', len);
-    FIO_ASSERT(result == buf + len - 1, "fio_memchr failed for size %zu", len);
-    buf[len - 1] = 'X';
-  }
-}
-
-FIO_SFUNC void fio___test_memchr_simd_boundaries(void) {
-  char buf[256] FIO_ALIGN(32);
-  FIO_MEMSET(buf, 'X', sizeof(buf));
-
-  /* Token at SIMD vector boundaries: 15, 16, 31, 32, 63, 64 */
-  size_t boundary_positions[] = {15, 16, 31, 32, 63, 64, 127, 128};
-  size_t num_positions =
-      sizeof(boundary_positions) / sizeof(boundary_positions[0]);
-
-  for (size_t i = 0; i < num_positions; ++i) {
-    size_t pos = boundary_positions[i];
-    if (pos >= sizeof(buf))
-      continue;
-
-    buf[pos] = 'A';
-    void *result = fio_memchr(buf, 'A', sizeof(buf));
-    FIO_ASSERT(result == buf + pos,
-               "fio_memchr failed at SIMD boundary position %zu",
-               pos);
-    buf[pos] = 'X';
-  }
-
-  /* Test with buffer unaligned by 1-15 bytes */
-  for (size_t offset = 1; offset < 16; ++offset) {
-    char *unaligned = buf + offset;
-    size_t len = sizeof(buf) - offset - 1;
-    FIO_MEMSET(unaligned, 'Y', len);
-    unaligned[32] = 'B';
-
-    void *result = fio_memchr(unaligned, 'B', len);
-    FIO_ASSERT(result == unaligned + 32,
-               "fio_memchr failed with unaligned buffer offset=%zu",
-               offset);
-  }
-}
-
-FIO_SFUNC void fio___test_memcmp_equal_buffers(void) {
-  char a[128], b[128];
-  fio_rand_bytes(a, sizeof(a));
-  FIO_MEMCPY(b, a, sizeof(b));
-
-  /* Test various sizes */
-  size_t test_sizes[] = {0, 1, 7, 8, 63, 64, 65, 127, 128};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  for (size_t i = 0; i < num_sizes; ++i) {
-    size_t len = test_sizes[i];
-    int result = fio_memcmp(a, b, len);
-    FIO_ASSERT(result == 0,
-               "fio_memcmp should return 0 for equal buffers, size=%zu",
-               len);
-  }
-}
-
-FIO_SFUNC void fio___test_memcmp_difference_position(void) {
-  char a[128], b[128];
-
-  /* First byte differs (a > b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x40, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: first byte a > b should return positive");
-  }
-
-  /* First byte differs (a < b) */
-  {
-    FIO_MEMSET(a, 0x40, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: first byte a < b should return negative");
-  }
-
-  /* Last byte differs (a > b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[sizeof(a) - 1] = 0x60;
-    b[sizeof(b) - 1] = 0x40;
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: last byte a > b should return positive");
-  }
-
-  /* Last byte differs (a < b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[sizeof(a) - 1] = 0x40;
-    b[sizeof(b) - 1] = 0x60;
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: last byte a < b should return negative");
-  }
-
-  /* Difference at boundary positions: 7, 8, 63, 64 */
-  size_t boundary_positions[] = {7, 8, 63, 64};
-  size_t num_positions =
-      sizeof(boundary_positions) / sizeof(boundary_positions[0]);
-
-  for (size_t i = 0; i < num_positions; ++i) {
-    size_t pos = boundary_positions[i];
-    if (pos >= sizeof(a))
-      continue;
-
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[pos] = 0x60;
-    b[pos] = 0x40;
-
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: difference at position %zu (a > b) failed",
-               pos);
-
-    a[pos] = 0x40;
-    b[pos] = 0x60;
-    result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: difference at position %zu (a < b) failed",
-               pos);
-  }
-}
-
-FIO_SFUNC void fio___test_memcmp_same_pointer(void) {
-  char buf[64];
-  fio_rand_bytes(buf, sizeof(buf));
-
-  int result = fio_memcmp(buf, buf, sizeof(buf));
-  FIO_ASSERT(result == 0, "fio_memcmp(a, a, len) should return 0");
-}
-
-FIO_SFUNC void fio___test_memcmp_byte_value_edge_cases(void) {
-  char a[8], b[8];
-
-  /* 0x7F vs 0x80 (sign bit boundary - must use unsigned comparison) */
-  {
-    FIO_MEMSET(a, 0x7F, sizeof(a));
-    FIO_MEMSET(b, 0x80, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: 0x7F < 0x80 (unsigned comparison required)");
-
-    result = fio_memcmp(b, a, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: 0x80 > 0x7F (unsigned comparison required)");
-  }
-
-  /* 0x00 vs 0x01 */
-  {
-    FIO_MEMSET(a, 0x00, sizeof(a));
-    FIO_MEMSET(b, 0x01, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0, "fio_memcmp: 0x00 < 0x01 failed");
-  }
-
-  /* 0xFE vs 0xFF */
-  {
-    FIO_MEMSET(a, 0xFE, sizeof(a));
-    FIO_MEMSET(b, 0xFF, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0, "fio_memcmp: 0xFE < 0xFF failed");
-  }
-}
-
-FIO_SFUNC void fio___test_strlen_lengths(void) {
-  /* Empty string "" (return 0) */
-  FIO_ASSERT(fio_strlen("") == 0, "fio_strlen(\"\") should return 0");
-
-  /* Single char "a" (return 1) */
-  FIO_ASSERT(fio_strlen("a") == 1, "fio_strlen(\"a\") should return 1");
-
-  /* Test with string literals of known lengths */
-  FIO_ASSERT(fio_strlen("1234567") == 7, "fio_strlen 7-char string failed");
-  FIO_ASSERT(fio_strlen("12345678") == 8, "fio_strlen 8-char string failed");
-  FIO_ASSERT(fio_strlen("123456789012345") == 15,
-             "fio_strlen 15-char string failed");
-  FIO_ASSERT(fio_strlen("1234567890123456") == 16,
-             "fio_strlen 16-char string failed");
-
-  /* Test longer strings with dynamically created buffers */
-  char buf[512] FIO_ALIGN(64);
-  size_t test_lengths[] = {31, 32, 63, 64, 127, 128, 255, 256};
-  size_t num_lengths = sizeof(test_lengths) / sizeof(test_lengths[0]);
-
-  for (size_t i = 0; i < num_lengths; ++i) {
-    size_t len = test_lengths[i];
-    if (len >= sizeof(buf) - 1)
-      continue;
-
-    /* Reset buffer and set NUL at desired position */
-    FIO_MEMSET(buf, 'A', sizeof(buf));
-    buf[len] = '\0';
-
-    size_t result = fio_strlen(buf);
-    FIO_ASSERT(result == len,
-               "fio_strlen failed for length %zu (got %zu)",
-               len,
-               result);
-  }
-}
-
-FIO_SFUNC void fio___test_strlen_null_pointer(void) {
-  size_t result = fio_strlen(NULL);
-  FIO_ASSERT(result == 0, "fio_strlen(NULL) should return 0");
-}
-
-FIO_SFUNC void fio___test_strlen_alignment(void) {
-  char buf[128 + 16] FIO_ALIGN(16);
-  FIO_MEMSET(buf, 'B', sizeof(buf) - 1);
-  buf[sizeof(buf) - 1] = '\0';
-
-  /* Test string starting at various alignment offsets */
-  for (size_t offset = 0; offset < 8; ++offset) {
-    char *str = buf + offset;
-    size_t expected_len = sizeof(buf) - 1 - offset;
-
-    size_t result = fio_strlen(str);
-    FIO_ASSERT(result == expected_len,
-               "fio_strlen alignment test failed: offset=%zu, expected=%zu, "
-               "got=%zu",
-               offset,
-               expected_len,
-               result);
-  }
-}
-
-FIO_SFUNC void fio___test_strlen_simd_boundaries(void) {
-  char buf[256] FIO_ALIGN(32);
-
-  /* NUL at SIMD vector boundaries: 15, 16, 31, 32, 63, 64 */
-  size_t boundary_positions[] = {15, 16, 31, 32, 63, 64, 127, 128};
-  size_t num_positions =
-      sizeof(boundary_positions) / sizeof(boundary_positions[0]);
-
-  for (size_t i = 0; i < num_positions; ++i) {
-    size_t pos = boundary_positions[i];
-    if (pos >= sizeof(buf))
-      continue;
-
-    FIO_MEMSET(buf, 'C', sizeof(buf));
-    buf[pos] = '\0';
-
-    size_t result = fio_strlen(buf);
-    FIO_ASSERT(result == pos,
-               "fio_strlen failed at SIMD boundary position %zu (got %zu)",
-               pos,
-               result);
-  }
-}
 
 FIO_SFUNC void fio___test_memcpyXx_masking(void) {
   char src[256];
@@ -2101,12 +1446,263 @@ FIO_SFUNC void fio___test_core_rotation_macros(void) {
 }
 
 /* *****************************************************************************
+Merged core-adjacent tests
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_core_atomics_and_locks(void) {
+  struct fio___atomic_test_s {
+    size_t w;
+    unsigned long l;
+    unsigned short s;
+    unsigned char c;
+  } s = {0}, r1 = {0}, r2 = {0};
+  fio_lock_i lock = FIO_LOCK_INIT;
+
+  r1.c = fio_atomic_add(&s.c, 1);
+  r1.s = fio_atomic_add(&s.s, 1);
+  r1.l = fio_atomic_add(&s.l, 1);
+  r1.w = fio_atomic_add(&s.w, 1);
+  FIO_ASSERT(r1.c == 0 && s.c == 1, "fio_atomic_add failed for c");
+  FIO_ASSERT(r1.s == 0 && s.s == 1, "fio_atomic_add failed for s");
+  FIO_ASSERT(r1.l == 0 && s.l == 1, "fio_atomic_add failed for l");
+  FIO_ASSERT(r1.w == 0 && s.w == 1, "fio_atomic_add failed for w");
+  r2.c = fio_atomic_add_fetch(&s.c, 1);
+  r2.s = fio_atomic_add_fetch(&s.s, 1);
+  r2.l = fio_atomic_add_fetch(&s.l, 1);
+  r2.w = fio_atomic_add_fetch(&s.w, 1);
+  FIO_ASSERT(r2.c == 2 && s.c == 2, "fio_atomic_add_fetch failed for c");
+  FIO_ASSERT(r2.s == 2 && s.s == 2, "fio_atomic_add_fetch failed for s");
+  FIO_ASSERT(r2.l == 2 && s.l == 2, "fio_atomic_add_fetch failed for l");
+  FIO_ASSERT(r2.w == 2 && s.w == 2, "fio_atomic_add_fetch failed for w");
+  r1.c = fio_atomic_sub(&s.c, 1);
+  r1.s = fio_atomic_sub(&s.s, 1);
+  r1.l = fio_atomic_sub(&s.l, 1);
+  r1.w = fio_atomic_sub(&s.w, 1);
+  FIO_ASSERT(r1.c == 2 && s.c == 1, "fio_atomic_sub failed for c");
+  FIO_ASSERT(r1.s == 2 && s.s == 1, "fio_atomic_sub failed for s");
+  FIO_ASSERT(r1.l == 2 && s.l == 1, "fio_atomic_sub failed for l");
+  FIO_ASSERT(r1.w == 2 && s.w == 1, "fio_atomic_sub failed for w");
+  r2.c = fio_atomic_sub_fetch(&s.c, 1);
+  r2.s = fio_atomic_sub_fetch(&s.s, 1);
+  r2.l = fio_atomic_sub_fetch(&s.l, 1);
+  r2.w = fio_atomic_sub_fetch(&s.w, 1);
+  FIO_ASSERT(r2.c == 0 && s.c == 0, "fio_atomic_sub_fetch failed for c");
+  FIO_ASSERT(r2.s == 0 && s.s == 0, "fio_atomic_sub_fetch failed for s");
+  FIO_ASSERT(r2.l == 0 && s.l == 0, "fio_atomic_sub_fetch failed for l");
+  FIO_ASSERT(r2.w == 0 && s.w == 0, "fio_atomic_sub_fetch failed for w");
+  fio_atomic_add(&s.c, 1);
+  fio_atomic_add(&s.s, 1);
+  fio_atomic_add(&s.l, 1);
+  fio_atomic_add(&s.w, 1);
+  r1.c = fio_atomic_exchange(&s.c, 99);
+  r1.s = fio_atomic_exchange(&s.s, 99);
+  r1.l = fio_atomic_exchange(&s.l, 99);
+  r1.w = fio_atomic_exchange(&s.w, 99);
+  FIO_ASSERT(r1.c == 1 && s.c == 99, "fio_atomic_exchange failed for c");
+  FIO_ASSERT(r1.s == 1 && s.s == 99, "fio_atomic_exchange failed for s");
+  FIO_ASSERT(r1.l == 1 && s.l == 99, "fio_atomic_exchange failed for l");
+  FIO_ASSERT(r1.w == 1 && s.w == 99, "fio_atomic_exchange failed for w");
+  // clang-format off
+  FIO_ASSERT(!fio_atomic_compare_exchange_p(&s.c, &r1.c, &r1.c), "fio_atomic_compare_exchange_p didn't fail for c");
+  FIO_ASSERT(!fio_atomic_compare_exchange_p(&s.s, &r1.s, &r1.s), "fio_atomic_compare_exchange_p didn't fail for s");
+  FIO_ASSERT(!fio_atomic_compare_exchange_p(&s.l, &r1.l, &r1.l), "fio_atomic_compare_exchange_p didn't fail for l");
+  FIO_ASSERT(!fio_atomic_compare_exchange_p(&s.w, &r1.w, &r1.w), "fio_atomic_compare_exchange_p didn't fail for w");
+  r1.c = 1;s.c = 99; r1.s = 1;s.s = 99; r1.l = 1;s.l = 99; r1.w = 1;s.w = 99; /* ignore system spefcific behavior. */
+  r1.c = fio_atomic_compare_exchange_p(&s.c,&s.c, &r1.c);
+  r1.s = fio_atomic_compare_exchange_p(&s.s,&s.s, &r1.s);
+  r1.l = fio_atomic_compare_exchange_p(&s.l,&s.l, &r1.l);
+  r1.w = fio_atomic_compare_exchange_p(&s.w,&s.w, &r1.w);
+  FIO_ASSERT(r1.c == 1 && s.c == 1, "fio_atomic_compare_exchange_p failed for c (%zu got %zu)", (size_t)s.c, (size_t)r1.c);
+  FIO_ASSERT(r1.s == 1 && s.s == 1, "fio_atomic_compare_exchange_p failed for s (%zu got %zu)", (size_t)s.s, (size_t)r1.s);
+  FIO_ASSERT(r1.l == 1 && s.l == 1, "fio_atomic_compare_exchange_p failed for l (%zu got %zu)", (size_t)s.l, (size_t)r1.l);
+  FIO_ASSERT(r1.w == 1 && s.w == 1, "fio_atomic_compare_exchange_p failed for w (%zu got %zu)", (size_t)s.w, (size_t)r1.w);
+  // clang-format on
+
+  uint64_t val = 1;
+  FIO_ASSERT(fio_atomic_and(&val, 2) == 1,
+             "fio_atomic_and should return old value");
+  FIO_ASSERT(val == 0, "fio_atomic_and should update value");
+  FIO_ASSERT(fio_atomic_xor(&val, 1) == 0,
+             "fio_atomic_xor should return old value");
+  FIO_ASSERT(val == 1, "fio_atomic_xor_fetch should update value");
+  FIO_ASSERT(fio_atomic_xor_fetch(&val, 1) == 0,
+             "fio_atomic_xor_fetch should return new value");
+  FIO_ASSERT(val == 0, "fio_atomic_xor should update value");
+  FIO_ASSERT(fio_atomic_or(&val, 2) == 0,
+             "fio_atomic_or should return old value");
+  FIO_ASSERT(val == 2, "fio_atomic_or should update value");
+  FIO_ASSERT(fio_atomic_or_fetch(&val, 1) == 3,
+             "fio_atomic_or_fetch should return new value");
+  FIO_ASSERT(val == 3, "fio_atomic_or_fetch should update value");
+#if !_MSC_VER /* don't test missing MSVC features */
+  FIO_ASSERT(fio_atomic_nand_fetch(&val, 4) == ~0ULL,
+             "fio_atomic_nand_fetch should return new value");
+  FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
+  val = 3ULL;
+  FIO_ASSERT(fio_atomic_nand(&val, 4) == 3ULL,
+             "fio_atomic_nand should return old value");
+  FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
+#endif /* !_MSC_VER */
+  FIO_ASSERT(!fio_is_locked(&lock),
+             "lock should be initialized in unlocked state");
+  FIO_ASSERT(!fio_trylock(&lock), "fio_trylock should succeed");
+  FIO_ASSERT(fio_trylock(&lock), "fio_trylock should fail");
+  FIO_ASSERT(fio_is_locked(&lock), "lock should be engaged");
+  fio_unlock(&lock);
+  FIO_ASSERT(!fio_is_locked(&lock), "lock should be released");
+  fio_lock(&lock);
+  FIO_ASSERT(fio_is_locked(&lock), "lock should be engaged (fio_lock)");
+  for (uint8_t i = 1; i < 8; ++i) {
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock flagged, but wasn't engaged (%u - %p)",
+               (unsigned int)i,
+               (void *)(uintptr_t)lock);
+  }
+  fio_unlock(&lock);
+  FIO_ASSERT(!fio_is_locked(&lock), "lock should be released");
+  lock = FIO_LOCK_INIT;
+  for (size_t i = 0; i < 8; ++i) {
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be initialized in unlocked state");
+    FIO_ASSERT(!fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock_group should succeed");
+    FIO_ASSERT(fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(i)),
+               "fio_trylock should fail");
+    FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "sub-lock %d should be engaged",
+               i);
+    {
+      uint8_t g =
+          fio_trylock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
+      FIO_ASSERT((i != 1 && i != 3 && !g) || ((i == 1 || i == 3) && g),
+                 "fio_trylock_group should succeed / fail");
+      if (!g)
+        fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(3));
+    }
+    for (uint8_t j = 1; j < 8; ++j) {
+      FIO_ASSERT(i == j || !fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(j)),
+                 "another group lock was flagged, though it wasn't engaged");
+    }
+    FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "lock should remain engaged");
+    fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(i));
+    FIO_ASSERT(!fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
+               "group lock should be released");
+    FIO_ASSERT(!fio_trylock_full(&lock), "fio_trylock_full should succeed");
+    fio_unlock_full(&lock);
+    FIO_ASSERT(!lock, "fio_unlock_full should unlock all");
+  }
+}
+
+FIO_SFUNC void fio___test_core_type_sizes(void) {
+  switch (sizeof(void *)) {
+  case 2:
+    fprintf(stderr, "\t 16bit words size (unexpected, unknown effects).\n");
+    break;
+  case 4:
+    fprintf(stderr, "\t 32bit words size (some features might be slower).\n");
+    break;
+  case 8: fprintf(stderr, "\t 64bit words size okay.\n"); break;
+  case 16: fprintf(stderr, "\t 128bit words size... wow!\n"); break;
+  default:
+    fprintf(stderr, "\t Unknown words size %zubit!\n", sizeof(void *) << 3);
+    break;
+  }
+  fprintf(stderr, "\t Using the following type sizes:\n");
+  FIO_PRINT_SIZE_OF(char);
+  FIO_PRINT_SIZE_OF(short);
+  FIO_PRINT_SIZE_OF(int);
+  FIO_PRINT_SIZE_OF(float);
+  FIO_PRINT_SIZE_OF(long);
+  FIO_PRINT_SIZE_OF(double);
+  FIO_PRINT_SIZE_OF(size_t);
+  FIO_PRINT_SIZE_OF(void *);
+  FIO_PRINT_SIZE_OF(uintmax_t);
+  FIO_PRINT_SIZE_OF(long double);
+#ifdef __SIZEOF_INT128__
+  FIO_PRINT_SIZE_OF(__uint128_t);
+#endif
+  FIO_PRINT_SIZE_OF(fio_thread_t);
+  FIO_PRINT_SIZE_OF(fio_thread_mutex_t);
+#if FIO_OS_POSIX || defined(_SC_PAGESIZE)
+  long page = sysconf(_SC_PAGESIZE);
+  if (page > 0) {
+    fprintf(stderr, "\t\t%-17s%ld bytes.\n", "Page", page);
+    if (page != (1UL << FIO_MEM_PAGE_SIZE_LOG))
+      FIO_LOG_INFO("unexpected page size != 4096\n          "
+                   "facil.io could be recompiled with:\n          "
+                   "`CFLAGS=\"-DFIO_MEM_PAGE_SIZE_LOG=%.0lf\"`",
+                   log2(page));
+  }
+#endif /* FIO_OS_POSIX */
+}
+
+static size_t FIO_NAME_TEST(stl, state_task_counter) = 0;
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task)(void *arg) {
+  size_t *i = (size_t *)arg;
+  ++i[0];
+}
+FIO_SFUNC void FIO_NAME_TEST(stl, state_task_global)(void *arg) {
+  (void)arg;
+  ++FIO_NAME_TEST(stl, state_task_counter);
+}
+
+FIO_SFUNC void fio___test_core_state_callbacks(void) {
+  size_t count = 0;
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task),
+                           &count);
+    fio_state_callback_add(FIO_CALL_RESERVED1,
+                           FIO_NAME_TEST(stl, state_task_global),
+                           (void *)i);
+  }
+  FIO_ASSERT(!count && !FIO_NAME_TEST(stl, state_task_counter),
+             "callbacks should NOT have been called yet");
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1, "count error for local counter callback (%zu)", count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu)",
+             FIO_NAME_TEST(stl, state_task_counter));
+  for (size_t i = 0; i < 1024; ++i) {
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task),
+                              &count);
+    fio_state_callback_remove(FIO_CALL_RESERVED1,
+                              FIO_NAME_TEST(stl, state_task_global),
+                              (void *)i);
+  }
+  fio_state_callback_force(FIO_CALL_RESERVED1);
+  FIO_ASSERT(count == 1,
+             "count error for local counter callback (%zu) - not removed?",
+             count);
+  FIO_ASSERT(FIO_NAME_TEST(stl, state_task_counter) == 1024,
+             "count error for global counter callback (%zu) - not removed?",
+             FIO_NAME_TEST(stl, state_task_counter));
+}
+
+FIO_SFUNC void fio___test_core_logging(void) {
+  FIO_LOG_FATAL("this is a fatal error message!");
+  FIO_LOG_ERROR("this is an error message!");
+  FIO_LOG_WARNING("this is a warning message!");
+  FIO_LOG_INFO("this is an informative message.");
+}
+
+/* *****************************************************************************
 Main Test Entry Point
 ***************************************************************************** */
 
 int main(void) {
+  /* Run merged core-adjacent tests first. */
+  fio___test_core_type_sizes();
+  fio___test_core_logging();
+  fio___test_core_state_callbacks();
+  fio___test_core_atomics_and_locks();
+
   /* Run all functional tests */
   fio___test_core_memcpy_primitives();
+  fio___test_memcpyXx_masking();
   fio___test_core_byte_swap();
   fio___test_core_bit_rotation();
   fio___test_core_bit_index();
@@ -2123,28 +1719,6 @@ int main(void) {
   fio___test_core_multiprecision_basic();
   fio___test_core_vector_operations();
   fio___test_core_simd_value_ops();
-
-  /* Memory function edge case tests (FIO_MEMALT) */
-  fio___test_memcpy_overlap();
-  fio___test_memcpy_null_handling();
-  fio___test_memcpy_size_boundaries();
-  fio___test_memcpy_alignment();
-  fio___test_memset_size_boundaries();
-  fio___test_memset_data_patterns();
-  fio___test_memset_alignment();
-  fio___test_memchr_token_position();
-  fio___test_memchr_token_values();
-  fio___test_memchr_size_boundaries();
-  fio___test_memchr_simd_boundaries();
-  fio___test_memcmp_equal_buffers();
-  fio___test_memcmp_difference_position();
-  fio___test_memcmp_same_pointer();
-  fio___test_memcmp_byte_value_edge_cases();
-  fio___test_strlen_lengths();
-  fio___test_strlen_null_pointer();
-  fio___test_strlen_alignment();
-  fio___test_strlen_simd_boundaries();
-  fio___test_memcpyXx_masking();
 
   /* Rotation function tests (RROT/LROT) */
   fio___test_core_rotation_basic_correctness();

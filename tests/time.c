@@ -103,59 +103,6 @@ int main(void) {
     FIO_MEMSET(buf, 'X', 47);
     fio_time2log(buf, now);
   }
-  {
-    uint64_t start, stop;
-#if DEBUG
-    fprintf(stderr, "\tPERFOMEANCE TESTS IN DEBUG MODE ARE BIASED\n");
-#endif
-    fprintf(stderr, "\tPerformance testing fio_time2gm vs gmtime_r\n");
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm = fio_time2gm(now);
-      FIO_COMPILER_GUARD;
-      (void)tm;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t\t- fio_time2gm speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      volatile struct tm tm;
-      time_t tmp = now;
-      gmtime_r(&tmp, (struct tm *)&tm);
-      FIO_COMPILER_GUARD;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t\t- gmtime_r speed test took:  \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-    struct tm tm_now = fio_time2gm(now);
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      time_t t_tmp = fio_gm2time(tm_now);
-      FIO_COMPILER_GUARD;
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t\t- fio_gm2time speed test took:\t%zuus\n",
-            (size_t)(stop - start));
-    start = fio_time_micro();
-    for (size_t i = 0; i < (1 << 17); ++i) {
-      tm_now = fio_time2gm(now + i);
-      volatile time_t t_tmp = mktime((struct tm *)&tm_now);
-      FIO_COMPILER_GUARD;
-      (void)t_tmp;
-    }
-    stop = fio_time_micro();
-    fprintf(stderr,
-            "\t\t- mktime speed test took:    \t%zuus\n",
-            (size_t)(stop - start));
-    fprintf(stderr, "\n");
-  }
   /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
 }
 #undef FIO___GMTIME_TEST_INTERVAL
