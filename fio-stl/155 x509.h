@@ -877,15 +877,25 @@ SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
   {
     fio_asn1_iterator_s val_it;
     fio_asn1_element_s not_before, not_after;
+    int has_not_after = 0;
 
     fio_asn1_iterator_init(&val_it, &elem);
 
     if (fio_asn1_iterator_next(&val_it, &not_before) == 0) {
-      fio_asn1_parse_time(&not_before, &cert->not_before);
+      if (fio_asn1_parse_time(&not_before, &cert->not_before) != 0)
+        return -1; /* malformed notBefore */
     }
+    /* missing notBefore is treated as "in the past" (cert->not_before stays
+     * 0 from the memset above), which is safe: it only matters if the
+     * certificate is "not yet valid", and epoch is never in the future. */
+
     if (fio_asn1_iterator_next(&val_it, &not_after) == 0) {
-      fio_asn1_parse_time(&not_after, &cert->not_after);
+      if (fio_asn1_parse_time(&not_after, &cert->not_after) != 0)
+        return -1; /* malformed notAfter */
+      has_not_after = 1;
     }
+    if (!has_not_after)
+      return -1; /* missing notAfter is unrecoverable */
   }
 
   /* Parse subject (Name = SEQUENCE) */
@@ -2158,10 +2168,11 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   /* Set default validity if not specified */
   int64_t not_before = options->not_before;
   int64_t not_after = options->not_after;
+  const int64_t now = (int64_t)fio_time_real().tv_sec;
   if (not_before == 0)
-    not_before = (int64_t)fio_time_real().tv_sec;
+    not_before = now - 86400; /* start validity 1 day ago */
   if (not_after == 0)
-    not_after = not_before + (365 * 24 * 60 * 60); /* +1 year */
+    not_after = now + (365 * 24 * 60 * 60); /* +1 year */
 
   /* Calculate TBSCertificate content length */
   size_t tbs_content = 0;
