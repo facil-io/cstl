@@ -20,6 +20,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #undef FIO_MALLOC_TMP_USE_SYSTEM
 #define FIO_MALLOC_TMP_USE_SYSTEM 1
 #endif
+
 /* *****************************************************************************
 Memory Allocation - Setup Alignment Info
 ***************************************************************************** */
@@ -131,6 +132,24 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
 #if defined(FIO_MALLOC_TMP_USE_SYSTEM) && FIO_MALLOC_TMP_USE_SYSTEM
 #undef FIO_MEMORY_INITIALIZE_ALLOCATIONS
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS 0
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#include <stddef.h>
+#define FIO___MEM_SYSTEM_ALIGNMENT _Alignof(max_align_t)
+#else
+#define FIO___MEM_SYSTEM_ALIGNMENT sizeof(double)
+#endif
+#undef FIO_MEMORY_ALIGN_LOG
+#define FIO_MEMORY_ALIGN_LOG                                                   \
+  ((FIO___MEM_SYSTEM_ALIGNMENT >= 256)   ? 8                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 128) ? 7                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 64)  ? 6                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 32)  ? 5                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 16)  ? 4                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 8)   ? 3                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 4)   ? 2                                   \
+   : (FIO___MEM_SYSTEM_ALIGNMENT >= 2)   ? 1                                   \
+                                         : 0)
+
 #endif
 
 #ifndef FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG
@@ -139,8 +158,8 @@ NOTE: most configuration values should be a power of 2 or a logarithmic value.
  *
  * Limited to >=17 and <=24.
  *
- * By default 22, which is a ~2Mb allocation per system call, resulting in a
- * maximum allocation size of 131Kb.
+ * By default 21, which is a ~2Mb allocation per system call, resulting in a
+ * maximum allocation size of 64Kb.
  */
 #define FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG 21
 #endif
@@ -313,6 +332,18 @@ Memory Allocation - configuration access - UNSTABLE API!!!
 /** Arena count for the allocator. */
 SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arenas)(void);
 
+/* Returns the calculated block size. */
+SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
+
+/** Prints the allocator's data structure. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void);
+
+/** Prints the allocator's free block list. May be used for debugging. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void);
+
+/** Prints the settings used to define the allocator. */
+SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
+
 /** System allocation sizes (bytes per system allocation). */
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_sys_alloc_size)(void) {
   return FIO_MEMORY_SYS_ALLOCATION_SIZE;
@@ -346,18 +377,6 @@ FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_arena_alloc_limit)(void) {
 FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)(void) {
   return FIO_MEMORY_INITIALIZE_ALLOCATIONS;
 }
-
-/* Returns the calculated block size. */
-SFUNC size_t FIO_NAME(FIO_MEMORY_NAME, malloc_block_size)(void);
-
-/** Prints the allocator's data structure. May be used for debugging. */
-SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_state)(void);
-
-/** Prints the allocator's free block list. May be used for debugging. */
-SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_free_block_list)(void);
-
-/** Prints the settings used to define the allocator. */
-SFUNC void FIO_NAME(FIO_MEMORY_NAME, malloc_print_settings)(void);
 
 /* *****************************************************************************
 Set global macros to use this allocator if FIO_MALLOC
