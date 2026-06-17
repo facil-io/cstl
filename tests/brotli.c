@@ -342,7 +342,7 @@ static void test_quality_roundtrips(void) {
   fio___brotli_fill_pattern(binary, sizeof(binary), 0xC0FFEEU);
 
   {
-    uint8_t compressed[fio_brotli_compress_bound(TEXT_LEN)];
+    uint8_t compressed[(TEXT_LEN * 3) + 1024];
     for (int quality = 1; quality <= 6; ++quality) {
       size_t clen = fio_brotli_compress(compressed,
                                         sizeof(compressed),

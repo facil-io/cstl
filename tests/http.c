@@ -233,12 +233,47 @@ static void test_settings_and_io_queries(void) {
 static void test_static_file_response(void) {
   fprintf(stderr, "  * static file response\n");
 
-  char dir[] = "./tmp/http_static_test_XXXXXX";
-  char *d = mkdtemp(dir);
-  FIO_ASSERT(d, "mkdtemp failed");
+  /* Build a temp directory path using the same pattern as fio_ipc_url_set. */
+  char dir[512];
+  const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
+  const char *tmpdir = NULL;
+  for (size_t i = 0; !tmpdir && options[i]; ++i) {
+    tmpdir = fio_sys_env(options[i]);
+  }
+  size_t tmplen = tmpdir ? FIO_STRLEN(tmpdir) : 0;
+  if (!tmpdir || tmplen > 128) {
+#if FIO_OS_WIN
+    tmpdir = ".";
+    tmplen = 1;
+#else
+    tmpdir = "/tmp/";
+    tmplen = FIO_STRLEN(tmpdir);
+#endif
+  }
+  FIO_ASSERT(tmplen + 48 < sizeof(dir), "temp directory path too long");
+  FIO_MEMCPY(dir, tmpdir, tmplen);
+  size_t len = tmplen;
+  if (len && dir[len - 1] != '/' && dir[len - 1] != '\\' &&
+      dir[len - 1] != FIO_FOLDER_SEPARATOR) {
+    dir[len++] = FIO_FOLDER_SEPARATOR;
+  }
+  FIO_MEMCPY(dir + len, "http_static_test_", 17);
+  len += 17;
+  len += fio_ltoa(dir + len, (int64_t)fio_rand64(), 16);
+  dir[len] = '\0';
+
+#if FIO_OS_WIN
+  FIO_ASSERT(CreateDirectoryA(dir, NULL), "failed to create static test directory");
+#else
+  FIO_ASSERT(mkdir(dir, 0755) == 0, "failed to create static test directory");
+#endif
 
   char path[512];
-  snprintf(path, sizeof(path), "%s/test.txt", d);
+  snprintf(path,
+           sizeof(path),
+           "%s%ctest.txt",
+           dir,
+           FIO_FOLDER_SEPARATOR);
   const char *content = "hello static file";
   FILE *f = fopen(path, "w");
   FIO_ASSERT(f, "failed to create static test file");
@@ -249,7 +284,7 @@ static void test_static_file_response(void) {
   fio_http_s *h = fio_http_new();
   fio_http_status_set(h, 200);
   int r = fio_http_static_file_response(h,
-                                        FIO_STR_INFO1(d),
+                                        FIO_STR_INFO2(dir, len),
                                         FIO_STR_INFO1((char *)"/test.txt"),
                                         0);
   FIO_ASSERT(r == 0, "static_file_response should succeed for existing file");
@@ -264,8 +299,13 @@ static void test_static_file_response(void) {
              "static .txt file should have text/plain content-type");
 
   fio_http_free(h);
+#if FIO_OS_WIN
+  DeleteFileA(path);
+  RemoveDirectoryA(dir);
+#else
   unlink(path);
-  rmdir(d);
+  rmdir(dir);
+#endif
 }
 
 static void test_error_response(void) {
