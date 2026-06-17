@@ -14,15 +14,13 @@ Loopback sockets are used only for listener creation (no reactor is run).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* ===========================================================================
    Helpers
    ===========================================================================
  */
 
-static fio_http_s *test_http_make_handle(const char *method,
-                                         const char *path) {
+static fio_http_s *test_http_make_handle(const char *method, const char *path) {
   fio_http_s *h = fio_http_new();
   FIO_ASSERT(h, "fio_http_new returned NULL");
   fio_http_method_set(h, FIO_STR_INFO1((char *)method));
@@ -157,10 +155,9 @@ static void test_resource_action(void) {
 static void test_listen_and_route(void) {
   fprintf(stderr, "  * listener and routing\n");
 
-  fio_http_listener_s *l =
-      fio_http_listen("tcp://127.0.0.1:0",
-                      .udata = (void *)(uintptr_t)0xABCD,
-                      .on_http = test_http_noop_on_http);
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .udata = (void *)(uintptr_t)0xABCD,
+                                           .on_http = test_http_noop_on_http);
   FIO_ASSERT(l, "fio_http_listen should succeed on loopback port 0");
 
   fio_http_settings_s *defs = fio_http_listener_settings(l);
@@ -261,8 +258,8 @@ static void test_static_file_response(void) {
   FIO_ASSERT(fio_http_is_finished(h),
              "static file response should finish the response");
 
-  fio_str_info_s ct = fio_http_response_header(
-      h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+  fio_str_info_s ct =
+      fio_http_response_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
   FIO_ASSERT(ct.len >= 10 && !FIO_MEMCMP(ct.buf, "text/plain", 10),
              "static .txt file should have text/plain content-type");
 
@@ -281,8 +278,8 @@ static void test_error_response(void) {
              "send_error_response should set status");
   FIO_ASSERT(fio_http_is_finished(h),
              "send_error_response should finish the response");
-  fio_str_info_s ct = fio_http_response_header(
-      h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+  fio_str_info_s ct =
+      fio_http_response_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
   FIO_ASSERT(ct.len >= 9 && !FIO_MEMCMP(ct.buf, "text/plain", 9),
              "error response fallback should be text/plain");
 
@@ -298,14 +295,12 @@ static void test_websocket_upgrade_helpers(void) {
   fprintf(stderr, "  * WebSocket upgrade helpers\n");
 
   fio_http_s *h = fio_http_new();
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"connection", 10),
-      FIO_STR_INFO1((char *)"Upgrade"));
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"upgrade", 7),
-      FIO_STR_INFO1((char *)"websocket"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"connection", 10),
+                              FIO_STR_INFO1((char *)"Upgrade"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"upgrade", 7),
+                              FIO_STR_INFO1((char *)"websocket"));
   fio_http_request_header_set(
       h,
       FIO_STR_INFO2((char *)"sec-websocket-key", 17),
@@ -327,7 +322,9 @@ static void test_websocket_upgrade_helpers(void) {
              "WebSocket upgrade should finish the response");
 
   fio_str_info_s accept = fio_http_response_header(
-      h, FIO_STR_INFO2((char *)"sec-websocket-accept", 20), 0);
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
+      0);
   FIO_ASSERT(accept.len == 28,
              "WebSocket accept header should be present (len=%zu)",
              accept.len);
@@ -345,10 +342,9 @@ static void test_sse_upgrade_helpers(void) {
   fprintf(stderr, "  * SSE upgrade helpers\n");
 
   fio_http_s *h = fio_http_new();
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"accept", 6),
-      FIO_STR_INFO1((char *)"text/event-stream"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept", 6),
+                              FIO_STR_INFO1((char *)"text/event-stream"));
 
   FIO_ASSERT(fio_http_sse_requested(h),
              "SSE request headers should be detected");
@@ -356,12 +352,10 @@ static void test_sse_upgrade_helpers(void) {
   fio_http_status_set(h, 200);
   fio_http_upgrade_sse(h);
   FIO_ASSERT(fio_http_is_sse(h), "handle should report SSE after upgrade");
-  FIO_ASSERT(fio_http_status(h) == 200,
-             "SSE upgrade should keep status 200");
-  FIO_ASSERT(fio_http_is_finished(h),
-             "SSE upgrade should finish the response");
-  fio_str_info_s ct = fio_http_response_header(
-      h, FIO_STR_INFO2((char *)"content-type", 12), 0);
+  FIO_ASSERT(fio_http_status(h) == 200, "SSE upgrade should keep status 200");
+  FIO_ASSERT(fio_http_is_finished(h), "SSE upgrade should finish the response");
+  fio_str_info_s ct =
+      fio_http_response_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
   FIO_ASSERT(ct.len == 17 && !FIO_MEMCMP(ct.buf, "text/event-stream", 17),
              "SSE upgrade should set text/event-stream content-type");
 
