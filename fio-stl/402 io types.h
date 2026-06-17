@@ -133,7 +133,7 @@ static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
 static void fio___io_on_close_mock(void *p1, void *p2) { (void)p1, (void)p2; }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
-static ssize_t fio___io_func_default_read(int fd,
+static ssize_t fio___io_func_default_read(fio_socket_i fd,
                                           void *buf,
                                           size_t len,
                                           void *tls) {
@@ -141,7 +141,7 @@ static ssize_t fio___io_func_default_read(int fd,
   (void)tls;
 }
 /** Called to perform a non-blocking `write`, same as the system call. */
-static ssize_t fio___io_func_default_write(int fd,
+static ssize_t fio___io_func_default_write(fio_socket_i fd,
                                            const void *buf,
                                            size_t len,
                                            void *tls) {
@@ -149,12 +149,12 @@ static ssize_t fio___io_func_default_write(int fd,
   (void)tls;
 }
 /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-static int fio___io_func_default_flush(int fd, void *tls) {
+static int fio___io_func_default_flush(fio_socket_i fd, void *tls) {
   return 0;
   (void)fd, (void)tls;
 }
 /** Sends any unsent internal data. Returns 0 only if all data was sent. */
-static void fio___io_func_default_finish(int fd, void *tls) {
+static void fio___io_func_default_finish(fio_socket_i fd, void *tls) {
   (void)fd, (void)tls;
 }
 static void fio___io_func_default_cleanup(void *p1) { (void)p1; }

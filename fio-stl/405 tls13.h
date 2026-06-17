@@ -51,7 +51,7 @@ typedef struct {
   fio_io_tls_s *tls;
   uint8_t is_client;
   /* Certificate chain (DER-encoded) for server */
-  uint8_t *cert_der;  /* alias for first certificate (compat/debug) */
+  uint8_t *cert_der;   /* alias for first certificate (compat/debug) */
   size_t cert_der_len; /* length of first certificate */
   const uint8_t **cert_chain;
   size_t *cert_chain_lens;
@@ -89,8 +89,7 @@ typedef struct {
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
 
 /** Free DER certificate buffers owned by a context. */
-FIO_SFUNC void fio___tls13_context_cert_chain_free(
-    fio___tls13_context_s *ctx) {
+FIO_SFUNC void fio___tls13_context_cert_chain_free(fio___tls13_context_s *ctx) {
   if (!ctx)
     return;
   for (size_t i = 0; i < ctx->cert_chain_count; ++i)
@@ -109,28 +108,20 @@ FIO_SFUNC void fio___tls13_context_cert_chain_free(
 }
 
 /** Add an owned DER certificate buffer to a context chain. */
-FIO_SFUNC int fio___tls13_context_cert_chain_add(
-    fio___tls13_context_s *ctx,
-    uint8_t *der_buf,
-    size_t der_len) {
+FIO_SFUNC int fio___tls13_context_cert_chain_add(fio___tls13_context_s *ctx,
+                                                 uint8_t *der_buf,
+                                                 size_t der_len) {
   if (!ctx || !der_buf || !der_len)
     return -1;
   size_t old_count = ctx->cert_chain_count;
   size_t new_count = old_count + 1;
-  const uint8_t **new_chain =
-      (const uint8_t **)FIO_MEM_REALLOC(NULL,
-                                        0,
-                                        new_count * sizeof(*ctx->cert_chain),
-                                        0);
-  size_t *new_lens =
-      (size_t *)FIO_MEM_REALLOC(NULL,
-                                0,
-                                new_count * sizeof(*ctx->cert_chain_lens),
-                                0);
+  const uint8_t **new_chain = (const uint8_t **)
+      FIO_MEM_REALLOC(NULL, 0, new_count * sizeof(*ctx->cert_chain), 0);
+  size_t *new_lens = (size_t *)
+      FIO_MEM_REALLOC(NULL, 0, new_count * sizeof(*ctx->cert_chain_lens), 0);
   if (!new_chain || !new_lens) {
     if (new_chain)
-      FIO_MEM_FREE((void *)new_chain,
-                   new_count * sizeof(*ctx->cert_chain));
+      FIO_MEM_FREE((void *)new_chain, new_count * sizeof(*ctx->cert_chain));
     if (new_lens)
       FIO_MEM_FREE(new_lens, new_count * sizeof(*ctx->cert_chain_lens));
     FIO_MEM_FREE(der_buf, der_len);
@@ -143,8 +134,7 @@ FIO_SFUNC int fio___tls13_context_cert_chain_add(
     FIO_MEMCPY(new_lens,
                ctx->cert_chain_lens,
                old_count * sizeof(*ctx->cert_chain_lens));
-    FIO_MEM_FREE((void *)ctx->cert_chain,
-                 old_count * sizeof(*ctx->cert_chain));
+    FIO_MEM_FREE((void *)ctx->cert_chain, old_count * sizeof(*ctx->cert_chain));
     FIO_MEM_FREE(ctx->cert_chain_lens,
                  old_count * sizeof(*ctx->cert_chain_lens));
   }
@@ -418,9 +408,8 @@ FIO_SFUNC int fio___tls13_load_cert_pem_chain(fio___tls13_context_s *ctx,
       if (!der_buf)
         return (loaded > 0) ? loaded : -1;
       FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
-      if (fio___tls13_context_cert_chain_add(ctx,
-                                             der_buf,
-                                             pem_block.der_len) != 0)
+      if (fio___tls13_context_cert_chain_add(ctx, der_buf, pem_block.der_len) !=
+          0)
         return (loaded > 0) ? loaded : -1;
       ++loaded;
     }
@@ -531,8 +520,7 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
         goto use_self_signed;
       }
       size_t encoded_len = 8 + pkey.rsa.n_len + pkey.rsa.d_len;
-      uint8_t *encoded =
-          (uint8_t *)FIO_MEM_REALLOC(NULL, 0, encoded_len, 0);
+      uint8_t *encoded = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, encoded_len, 0);
       if (!encoded) {
         FIO_LOG_ERROR("TLS 1.3: failed to allocate RSA private key buffer");
         fio_pem_private_key_clear(&pkey);
@@ -1210,7 +1198,7 @@ TLS 1.3 IO Functions - Read
 ***************************************************************************** */
 
 /** Called to perform a non-blocking `read`, same as the system call. */
-FIO_SFUNC ssize_t fio___tls13_read(int fd,
+FIO_SFUNC ssize_t fio___tls13_read(fio_socket_i fd,
                                    void *buf,
                                    size_t len,
                                    void *tls_ctx) {
@@ -1457,7 +1445,7 @@ TLS 1.3 IO Functions - Write
  * The function MUST return success (N > 0) after encryption, even if the
  * socket write fails. The encrypted data is buffered and flush() sends later.
  */
-FIO_SFUNC ssize_t fio___tls13_write(int fd,
+FIO_SFUNC ssize_t fio___tls13_write(fio_socket_i fd,
                                     const void *buf,
                                     size_t len,
                                     void *tls_ctx) {
@@ -1673,7 +1661,7 @@ TLS 1.3 IO Functions - Flush
  * encrypted records) is unified into enc_buf. Flush only needs to drain it.
  * The send_buf is still flushed here for handshake data generated during
  * read() (before write() has a chance to copy it into enc_buf). */
-FIO_SFUNC int fio___tls13_flush(int fd, void *tls_ctx) {
+FIO_SFUNC int fio___tls13_flush(fio_socket_i fd, void *tls_ctx) {
   fio___tls13_connection_s *conn = (fio___tls13_connection_s *)tls_ctx;
   if (!conn)
     return 0;
@@ -1746,7 +1734,7 @@ TLS 1.3 IO Functions - Finish
 ***************************************************************************** */
 
 /** Called when the IO object finished sending all data before closure. */
-FIO_SFUNC void fio___tls13_finish(int fd, void *tls_ctx) {
+FIO_SFUNC void fio___tls13_finish(fio_socket_i fd, void *tls_ctx) {
   fio___tls13_connection_s *conn = (fio___tls13_connection_s *)tls_ctx;
   if (!conn)
     return;
