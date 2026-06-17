@@ -105,12 +105,13 @@ static size_t run_parse_persist(parser_state_s *st,
 static void test_basic_request(void) {
   fprintf(stderr, "  * basic request parsing\n");
   char req[] = "GET /index.html HTTP/1.1\r\n"
-                            "Host: example.com\r\n"
-                            "Accept: text/html\r\n"
-                            "\r\n";
+               "Host: example.com\r\n"
+               "Accept: text/html\r\n"
+               "\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
-  FIO_ASSERT(result == sizeof(req) - 1, "basic request: bytes consumed mismatch");
+  FIO_ASSERT(result == sizeof(req) - 1,
+             "basic request: bytes consumed mismatch");
   FIO_ASSERT(st.complete, "basic request: should be complete");
   FIO_ASSERT(FIO_BUF_INFO_IS_EQ(st.method, FIO_BUF_INFO1((char *)"GET")),
              "basic request: method mismatch");
@@ -128,7 +129,8 @@ static void test_lf_only(void) {
   char req[] = "GET / HTTP/1.1\nHost: x\n\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
-  FIO_ASSERT(result != FIO_HTTP1_PARSER_ERROR, "lf_only: parser returned error");
+  FIO_ASSERT(result != FIO_HTTP1_PARSER_ERROR,
+             "lf_only: parser returned error");
   FIO_ASSERT(st.complete, "lf_only: should be complete");
 }
 
@@ -169,9 +171,9 @@ static void test_response_line(void) {
 static void test_content_length_body(void) {
   fprintf(stderr, "  * Content-Length body\n");
   char req[] = "POST / HTTP/1.1\r\n"
-                            "Content-Length: 5\r\n"
-                            "\r\n"
-                            "Hello";
+               "Content-Length: 5\r\n"
+               "\r\n"
+               "Hello";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == sizeof(req) - 1, "cl body: bytes consumed mismatch");
@@ -191,10 +193,8 @@ static void test_content_length_fragmented(void) {
   char part2[] = "lo World!";
   size_t r1 = run_parse_persist(&st, &parser, (char *)part1, sizeof(part1) - 1);
   size_t r2 = run_parse_persist(&st, &parser, (char *)part2, sizeof(part2) - 1);
-  FIO_ASSERT(r1 != FIO_HTTP1_PARSER_ERROR,
-             "cl fragmented: part1 parser error");
-  FIO_ASSERT(r2 != FIO_HTTP1_PARSER_ERROR,
-             "cl fragmented: part2 parser error");
+  FIO_ASSERT(r1 != FIO_HTTP1_PARSER_ERROR, "cl fragmented: part1 parser error");
+  FIO_ASSERT(r2 != FIO_HTTP1_PARSER_ERROR, "cl fragmented: part2 parser error");
   FIO_ASSERT(st.complete, "cl fragmented: should be complete");
   FIO_ASSERT(st.body_len == 11,
              "cl fragmented: body length mismatch (%zu)",
@@ -212,8 +212,7 @@ static void test_empty_content_length_rejected(void) {
 
 static void test_huge_content_length_rejected(void) {
   fprintf(stderr, "  * huge Content-Length rejected\n");
-  char req[] =
-      "GET / HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n";
+  char req[] = "GET / HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -223,10 +222,10 @@ static void test_huge_content_length_rejected(void) {
 static void test_cl_te_conflict_rejected(void) {
   fprintf(stderr, "  * Content-Length + Transfer-Encoding conflict rejected\n");
   char req[] = "POST / HTTP/1.1\r\n"
-                            "Content-Length: 5\r\n"
-                            "Transfer-Encoding: chunked\r\n"
-                            "\r\n"
-                            "5\r\nHello\r\n0\r\n\r\n";
+               "Content-Length: 5\r\n"
+               "Transfer-Encoding: chunked\r\n"
+               "\r\n"
+               "5\r\nHello\r\n0\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -241,11 +240,11 @@ static void test_cl_te_conflict_rejected(void) {
 static void test_chunked_body(void) {
   fprintf(stderr, "  * chunked body\n");
   char req[] = "POST / HTTP/1.1\r\n"
-                            "Transfer-Encoding: chunked\r\n"
-                            "\r\n"
-                            "5\r\nHello\r\n"
-                            "1\r\n!\r\n"
-                            "0\r\n\r\n";
+               "Transfer-Encoding: chunked\r\n"
+               "\r\n"
+               "5\r\nHello\r\n"
+               "1\r\n!\r\n"
+               "0\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == sizeof(req) - 1, "chunked: bytes consumed mismatch");
@@ -259,8 +258,7 @@ static void test_chunked_fragmented(void) {
   fprintf(stderr, "  * chunked fragmented input\n");
   fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
   parser_state_s st = {0};
-  char part1[] =
-      "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+  char part1[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
   char part2[] = "5\r\nHel";
   char part3[] = "lo\r\n0\r\n\r\n";
   size_t r1 = run_parse_persist(&st, &parser, (char *)part1, sizeof(part1) - 1);
@@ -281,8 +279,7 @@ static void test_chunked_fragmented(void) {
 
 static void test_bad_chunk_size_rejected(void) {
   fprintf(stderr, "  * bad chunk size rejected\n");
-  char req[] =
-      "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n";
+  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -291,8 +288,7 @@ static void test_bad_chunk_size_rejected(void) {
 
 static void test_negative_chunk_rejected(void) {
   fprintf(stderr, "  * negative chunk size rejected\n");
-  char req[] =
-      "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\n";
+  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -378,12 +374,41 @@ static void test_parser_state_queries(void) {
              "fresh parser should be empty");
   char req[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
   parser_state_s st = {0};
-  size_t r = fio_http1_parse(
-      &parser, FIO_BUF_INFO2((char *)req, sizeof(req) - 1), &st);
+  size_t r = fio_http1_parse(&parser,
+                             FIO_BUF_INFO2((char *)req, sizeof(req) - 1),
+                             &st);
   FIO_ASSERT(r == sizeof(req) - 1, "state query: bytes consumed mismatch");
   FIO_ASSERT(st.complete, "state query: should be complete");
   FIO_ASSERT(fio_http1_parser_is_empty(&parser),
              "parser should be empty after complete request");
+}
+
+/* ===========================================================================
+ * Regression test: V4 — fio_http1_parse first-line OOB read (CWE-125)
+ *
+ * After skipping leading whitespace, the old code searched for '\n' using the
+ * full original buffer length, reading up to `start - buf->buf` bytes past the
+ * end of the buffer when no newline was present. The request is heap-allocated
+ * at the exact size so AddressSanitizer detects the over-read on unpatched
+ * code. After the fix the parser correctly reports that more data is needed.
+ * ===========================================================================
+ */
+static void test_leading_whitespace_no_newline(void) {
+  fprintf(stderr, "  * leading whitespace without newline\n");
+  const char *r = "   GET / HTTP/1.1";
+  size_t n = strlen(r);
+  char *p = (char *)FIO_MEM_REALLOC(NULL, 0, n, 0);
+  FIO_ASSERT_ALLOC(p);
+  FIO_MEMCPY(p, r, n);
+
+  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+  parser_state_s st = {0};
+  size_t result = fio_http1_parse(&parser, FIO_BUF_INFO2(p, n), &st);
+  FIO_ASSERT(result != FIO_HTTP1_PARSER_ERROR,
+             "leading_ws_no_newline: parser returned error");
+  FIO_ASSERT(!st.complete, "leading_ws_no_newline: should not be complete");
+
+  FIO_MEM_FREE(p, n);
 }
 
 /* ===========================================================================
@@ -411,6 +436,7 @@ int main(void) {
   test_missing_colon_rejected();
   test_many_headers();
   test_parser_state_queries();
+  test_leading_whitespace_no_newline();
   fprintf(stderr, "All HTTP/1 parser tests passed!\n");
   return 0;
 }

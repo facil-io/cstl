@@ -263,17 +263,14 @@ static void test_static_file_response(void) {
   dir[len] = '\0';
 
 #if FIO_OS_WIN
-  FIO_ASSERT(CreateDirectoryA(dir, NULL), "failed to create static test directory");
+  FIO_ASSERT(CreateDirectoryA(dir, NULL),
+             "failed to create static test directory");
 #else
   FIO_ASSERT(mkdir(dir, 0755) == 0, "failed to create static test directory");
 #endif
 
   char path[512];
-  snprintf(path,
-           sizeof(path),
-           "%s%ctest.txt",
-           dir,
-           FIO_FOLDER_SEPARATOR);
+  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
   const char *content = "hello static file";
   FILE *f = fopen(path, "w");
   FIO_ASSERT(f, "failed to create static test file");
@@ -407,6 +404,37 @@ static void test_sse_upgrade_helpers(void) {
 }
 
 /* ===========================================================================
+ * Regression test: V5 — fio_http_sse_write OOB read on newline-first data
+ * (CWE-125 / CWE-787)
+ *
+ * When splitting SSE data into lines, the old code did
+ *   pos -= (pos[-1] == '\r');
+ * If args.data begins with '\n', pos equals args.data.buf and pos[-1] reads one
+ * byte before the buffer. A full runtime PoC needs a live upgraded SSE
+ * connection; this test at least exercises the no-connection path with the
+ * triggering input pattern and verifies it returns -1 without crashing. The
+ * source-level fix guards the look-behind with `pos > args.data.buf`.
+ * ===========================================================================
+ */
+static void test_sse_newline_first_edge_case(void) {
+  fprintf(stderr, "  * SSE newline-first data edge case\n");
+
+  fio_http_s *h = fio_http_new();
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept", 6),
+                              FIO_STR_INFO1((char *)"text/event-stream"));
+  fio_http_status_set(h, 200);
+  fio_http_upgrade_sse(h);
+
+  /* Data starting with '\n' is the trigger for the V5 look-behind bug. */
+  FIO_ASSERT(
+      fio_http_sse_write(h, .data = FIO_BUF_INFO2((char *)"\nhi", 3)) == -1,
+      "sse_write with newline-first data should fail without a connection");
+
+  fio_http_free(h);
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -425,6 +453,7 @@ int main(void) {
   test_error_response();
   test_websocket_upgrade_helpers();
   test_sse_upgrade_helpers();
+  test_sse_newline_first_edge_case();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

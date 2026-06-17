@@ -209,7 +209,8 @@ static int fio_http1___start(fio_http1_parser_s *p,
     buf->buf = start;
     return 1;
   }
-  char *eol = (char *)FIO_MEMCHR(start, '\n', buf->len);
+  char *eol =
+      (char *)FIO_MEMCHR(start, '\n', (size_t)((buf->buf + buf->len) - start));
   if (!eol)
     return 1;
   if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */

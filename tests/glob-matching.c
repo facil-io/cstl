@@ -3,6 +3,55 @@ Test
 ***************************************************************************** */
 #include "test-helpers.h"
 
+/* ===========================================================================
+ * Regression test: V3 — fio_glob_match OOB read on unterminated class (CWE-125)
+ *
+ * Patterns with an unterminated '[' class used to scan past the end of the
+ * pattern buffer looking for ']'. The input is heap-allocated at the exact
+ * size so AddressSanitizer detects the over-read on unpatched code. After the
+ * fix an unterminated class is treated as a non-match.
+ * ========================================================================== */
+FIO_SFUNC void test_unterminated_class(void) {
+  struct {
+    char *pat;
+    size_t pat_len;
+    char *str;
+    size_t str_len;
+    uint8_t expect;
+  } cases[] = {
+      {.pat = (char *)"[",
+       .pat_len = 1,
+       .str = (char *)"a",
+       .str_len = 1,
+       .expect = 0},
+      {.pat = (char *)"[a",
+       .pat_len = 2,
+       .str = (char *)"a",
+       .str_len = 1,
+       .expect = 0},
+      {.pat = (char *)"[^a",
+       .pat_len = 3,
+       .str = (char *)"a",
+       .str_len = 1,
+       .expect = 0},
+      {.pat = (char *)"[a-",
+       .pat_len = 3,
+       .str = (char *)"a",
+       .str_len = 1,
+       .expect = 0},
+  };
+
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fio_str_info_s p = FIO_STR_INFO2(cases[i].pat, cases[i].pat_len);
+    fio_str_info_s s = FIO_STR_INFO2(cases[i].str, cases[i].str_len);
+    FIO_ASSERT(fio_glob_match(p, s) == cases[i].expect,
+               "unterminated class case %zu: expected %u, got %u",
+               i,
+               (unsigned)cases[i].expect,
+               (unsigned)fio_glob_match(p, s));
+  }
+}
+
 int main(void) {
   struct {
     char *pat;
@@ -70,4 +119,5 @@ int main(void) {
                s.buf,
                p.buf);
   }
+  test_unterminated_class();
 }

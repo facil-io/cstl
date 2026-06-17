@@ -88,9 +88,15 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
       break;
 
     case '[': { /* Character class */
-      uint8_t match = 0, inverted = (*(uint8_t *)pat.buf == '^' ||
-                                     *(uint8_t *)pat.buf == '!');
-      uint8_t *cls = (uint8_t *)pat.buf + inverted;
+      uint8_t *cls = (uint8_t *)pat.buf;
+      uint8_t *const pend = (uint8_t *)pat.buf + pat.len; /* class bounds */
+      uint8_t match = 0, inverted = 0;
+      if (cls < pend && (*cls == '^' || *cls == '!')) {
+        inverted = 1;
+        ++cls;
+      }
+      if (cls >= pend) /* unterminated class, no ']' within bounds */
+        goto backtrack;
       uint8_t a = *cls++;
 
       /*
@@ -101,8 +107,10 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
       do {
         uint8_t b = a;
         if (a == '\\') { /* when escaped, next character is regular */
+          if (cls >= pend)
+            goto backtrack;
           b = a = *(cls++);
-        } else if (cls[0] == '-' && cls[1] != ']') {
+        } else if (cls + 1 < pend && cls[0] == '-' && cls[1] != ']') {
           b = cls[1];
 
           cls += 2;
@@ -113,6 +121,8 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
           }
         }
         match |= (a <= c && c <= b);
+        if (cls >= pend) /* no closing ']' within bounds */
+          goto backtrack;
       } while ((a = *cls++) != ']');
 
       if (match == inverted)

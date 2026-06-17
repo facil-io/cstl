@@ -1571,6 +1571,7 @@ void fio_string_write2____(void);
 SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
                                      fio_string_realloc_fn reallocate,
                                      const fio_string_write_s srcs[]) {
+#define FIO___STRING_WRITE2_FLOAT_LEN 24
   int r = 0;
   const fio_string_write_s *pos = srcs;
   size_t len = 0;
@@ -1583,7 +1584,7 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     case 3: /* unsigned */ len += fio_digits10u(pos->info.u); break;
     case 4: /* hex */ len += fio_digits16u(pos->info.u); break;
     case 5: /* binary */ len += fio_digits_bin(pos->info.u); break;
-    case 6: /* float */ len += 18; break;
+    case 6: /* float */ len += FIO___STRING_WRITE2_FLOAT_LEN; break;
     default:
       if (pos->info.str.len > (SIZE_MAX >> 2))
         return -1;
@@ -1602,9 +1603,17 @@ SFUNC int fio_string_write2 FIO_NOOP(fio_str_info_s *restrict dest,
     case 3: fio_string_write_u(dest, NULL, pos->info.u); break;   /* unsigned */
     case 4: fio_string_write_hex(dest, NULL, pos->info.u); break; /* hex */
     case 5: fio_string_write_bin(dest, NULL, pos->info.u); break; /* binary */
-    case 6:                                                       /* float */
-      dest->len += snprintf(dest->buf + dest->len, 19, "%.15g", pos->info.f);
+    case 6: {                                                     /* float */
+      /* snprintf returns the length it *would* have written; the buffer is
+       * capped at 19 (<=18 chars + NUL) and only 18 bytes were reserved, so
+       * cap the advance to the bytes actually written to avoid overrunning. */
+      int fl = snprintf(dest->buf + dest->len, 19, "%.15g", pos->info.f);
+      dest->len += (fl < 0) ? 0
+                            : ((fl > FIO___STRING_WRITE2_FLOAT_LEN)
+                                   ? (size_t)FIO___STRING_WRITE2_FLOAT_LEN
+                                   : (size_t)fl);
       break;
+    }
     default:
       FIO_MEMCPY(&dest->buf[dest->len], pos->info.str.buf, pos->info.str.len);
       dest->len += pos->info.str.len;
@@ -1635,7 +1644,13 @@ truncate:
         goto finish;
       break; /* binary */
     case 6:  /* float */
-      len = snprintf(dest->buf + dest->len, 19, "%.15g", pos->info.f);
+      len = snprintf(dest->buf + dest->len,
+                     FIO___STRING_WRITE2_FLOAT_LEN,
+                     "%.15g",
+                     pos->info.f);
+      /* snprintf return is "would-be" length; cap to written */
+      if (len > FIO___STRING_WRITE2_FLOAT_LEN)
+        len = FIO___STRING_WRITE2_FLOAT_LEN;
       if (dest->capa < dest->len + len + 2)
         goto finish;
       dest->len += len;
@@ -2312,7 +2327,9 @@ p valid; p decoder; nil
     writer[2] = (b64wrd[2] << 6) | b64wrd[3];
     writer += 3;
   }
-  writer -= (encoded[-1] == '=') + (encoded[-2] == '=');
+  /* Avoid reading before the start of the input for very short data. */
+  writer -= (encoded - (const uint8_t *)encoded_ >= 1 && encoded[-1] == '=');
+  writer -= (encoded - (const uint8_t *)encoded_ >= 2 && encoded[-2] == '=');
   if (writer < ((uint8_t *)dest->buf + dest->len))
     writer = ((uint8_t *)dest->buf + dest->len);
   dest->len = (size_t)(writer - (uint8_t *)dest->buf);

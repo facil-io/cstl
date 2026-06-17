@@ -2609,7 +2609,7 @@ SFUNC int fio_http_sse_write FIO_NOOP(fio_http_s *h,
     while (args.data.len &&
            (pos = (char *)FIO_MEMCHR(args.data.buf, '\n', args.data.len))) {
       const size_t len = (pos + 1) - args.data.buf;
-      pos -= (pos[-1] == '\r');
+      pos -= (pos > args.data.buf && pos[-1] == '\r');
       payload = fio_bstr_write2(
           payload,
           FIO_STRING_WRITE_STR2("data:", 5),

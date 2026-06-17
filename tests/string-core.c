@@ -223,6 +223,40 @@ FIO_SFUNC void test_string_write2(void) {
 }
 
 /* =============================================================================
+ * Regression test: V1 — fio_string_write2 float overflow (CWE-787 / CWE-131)
+ *
+ * The length-estimation pass reserves only 18 bytes per float, but a `double`
+ * such as DBL_MAX can require ~21 characters with "%.15g". The old code
+ * advanced dest->len by snprintf's "would-be" return value, writing past the
+ * allocated buffer when the prefix length landed close to a 16-byte boundary.
+ *
+ * This test uses a 12-byte prefix with the stock reallocator so that the total
+ * length (12 + 18 = 30) ends up just past a 16-byte-aligned capacity. On the
+ * unpatched code AddressSanitizer reports a heap-buffer-overflow WRITE.
+ * ========================================================================== */
+FIO_SFUNC void test_string_write2_float_overflow(void) {
+  char prefix[12];
+  FIO_MEMSET(prefix, 'A', sizeof(prefix));
+  double v = 1.7976931348623157e+308; /* %.15g => 21 chars */
+
+  fio_str_info_s s = FIO_STR_INFO0;
+  int r = fio_string_write2(&s,
+                            fio_string_sys_reallocate,
+                            FIO_STRING_WRITE_STR2(prefix, sizeof(prefix)),
+                            FIO_STRING_WRITE_FLOAT(v));
+  FIO_ASSERT(r == 0, "float overflow test: write2 should succeed");
+  FIO_ASSERT(s.len == sizeof(prefix) + 18,
+             "float overflow test: len should be %zu, got %zu",
+             (size_t)(sizeof(prefix) + 18),
+             s.len);
+  FIO_ASSERT(!FIO_MEMCMP(s.buf, prefix, sizeof(prefix)),
+             "float overflow test: prefix overwritten");
+  FIO_ASSERT(s.buf[s.len] == 0, "float overflow test: missing NUL terminator");
+  FIO_ASSERT(s.capa > s.len, "float overflow test: capa should exceed len");
+  FIO_MEM_FREE(s.buf, s.capa);
+}
+
+/* =============================================================================
  * Test: Numeral functions - boundary testing
  * ========================================================================== */
 FIO_SFUNC void test_string_numerals(void) {
@@ -470,6 +504,29 @@ FIO_SFUNC void test_string_base64(void) {
     FIO_ASSERT(dec.len == 128, "binary roundtrip len: %zu", dec.len);
     FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, 128), "binary roundtrip content");
   }
+}
+
+/* =============================================================================
+ * Regression test: V2 — fio_string_write_base64dec OOB read (CWE-125)
+ *
+ * After decoding, the old padding-detection code read encoded[-1] and
+ * encoded[-2] unconditionally. For a single-character input this read one byte
+ * before the start of the provided buffer. The input is heap-allocated at the
+ * exact size so AddressSanitizer can detect the under-read on unpatched code.
+ * ========================================================================== */
+FIO_SFUNC void test_string_base64_short_input(void) {
+  char *in = (char *)FIO_MEM_REALLOC(NULL, 0, 1, 0);
+  FIO_ASSERT_ALLOC(in);
+  in[0] = 'A';
+
+  char out[64];
+  fio_str_info_s s = FIO_STR_INFO3(out, 0, sizeof(out));
+  int r = fio_string_write_base64dec(&s, NULL, in, 1);
+  FIO_ASSERT(r == 0, "base64 short input: should not report error");
+  FIO_ASSERT(s.len <= sizeof(out), "base64 short input: len overflow");
+  FIO_ASSERT(s.buf[s.len] == 0, "base64 short input: missing NUL terminator");
+
+  FIO_MEM_FREE(in, 1);
 }
 
 /* =============================================================================
@@ -977,11 +1034,13 @@ int main(void) {
   test_string_write();
   test_string_replace();
   test_string_write2();
+  test_string_write2_float_overflow();
   test_string_numerals();
   test_string_printf();
   test_string_utf8();
   test_string_escape();
   test_string_base64();
+  test_string_base64_short_input();
   test_string_base32();
   test_string_url();
   test_string_html();
