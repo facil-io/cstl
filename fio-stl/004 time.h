@@ -308,13 +308,9 @@ SFUNC time_t fio_gm2time(struct tm tm) {
   time = time * 60LL + tm.tm_min;
   time = time * 60LL + tm.tm_sec;
 
-  if (tm.tm_isdst > 0) {
-    time -= 60 * 60;
-  }
+  time -= (int64_t)((60 * 60) & (0ULL - (tm.tm_isdst > 0)));
 #if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
-  if (tm.tm_gmtoff) {
-    time += tm.tm_gmtoff;
-  }
+  time += tm.tm_gmtoff;
 #endif
   return (time_t)time;
 }

@@ -207,8 +207,10 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   case CLOCK_REALTIME:
   realtime_clock:
     GetSystemTimePreciseAsFileTime(&tu.ft);
-    tv->tv_sec = tu.u / 10000000;
-    tv->tv_nsec = tu.u - (tv->tv_sec * 10000000);
+    /* FILETIME counts 100-ns intervals since 1601-01-01. Convert to Unix
+     * time (seconds since 1970-01-01) and nanoseconds. */
+    tv->tv_sec = (time_t)(tu.u / 10000000ULL - 11644473600ULL);
+    tv->tv_nsec = (long)((tu.u % 10000000ULL) * 100ULL);
     return 0;
 
 #ifdef CLOCK_PROCESS_CPUTIME_ID

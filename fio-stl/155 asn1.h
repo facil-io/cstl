@@ -743,159 +743,87 @@ SFUNC int fio_asn1_oid_eq(const fio_asn1_element_s *elem,
 Implementation - Time Parser
 ***************************************************************************** */
 
-/** Parse 2-digit number from string */
-FIO_SFUNC int fio___asn1_parse_2digits(const char *p, int *value) {
-  if (p[0] < '0' || p[0] > '9' || p[1] < '0' || p[1] > '9')
-    return -1;
-  *value = (p[0] - '0') * 10 + (p[1] - '0');
-  return 0;
-}
-
-/** Days in each month (non-leap year) */
-static const int fio___days_in_month[] =
-    {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-
-/** Check if year is leap year */
-FIO_SFUNC int fio___is_leap_year(int year) {
-  return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-}
-
-/** Convert broken-down time to Unix timestamp */
-FIO_SFUNC int64_t
-fio___asn1_mktime(int year, int month, int day, int hour, int min, int sec) {
-  /* Validate ranges */
-  if (month < 1 || month > 12)
-    return -1;
-  if (day < 1 || day > 31)
-    return -1;
-  if (hour < 0 || hour > 23)
-    return -1;
-  if (min < 0 || min > 59)
-    return -1;
-  if (sec < 0 || sec > 60) /* Allow leap second */
-    return -1;
-
-  /* Calculate days since Unix epoch (1970-01-01) */
-  int64_t days = 0;
-
-  /* Years from 1970 to year-1 */
-  for (int y = 1970; y < year; ++y)
-    days += fio___is_leap_year(y) ? 366 : 365;
-  for (int y = year; y < 1970; ++y)
-    days -= fio___is_leap_year(y) ? 366 : 365;
-
-  /* Months in current year */
-  for (int m = 1; m < month; ++m) {
-    days += fio___days_in_month[m - 1];
-    if (m == 2 && fio___is_leap_year(year))
-      days += 1;
-  }
-
-  /* Days in current month */
-  days += day - 1;
-
-  /* Convert to seconds */
-  int64_t ts = days * 86400LL + hour * 3600LL + min * 60LL + sec;
-  return ts;
-}
-
 SFUNC int fio_asn1_parse_time(const fio_asn1_element_s *elem,
                               int64_t *unix_time) {
   if (!elem || !unix_time)
     return -1;
 
+  char *p = (char *)elem->data;
+  uint64_t digits;
+  uint64_t divisor = 100000000ULL;
+  size_t consumed = 0;
+  int year, month, day, hour, min, sec = 0;
   uint8_t tag = elem->tag & 0x1F;
-  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL)
+
+  if (elem->tag_class != FIO_ASN1_CLASS_UNIVERSAL ||
+      (tag != FIO_ASN1_UTC_TIME && tag != FIO_ASN1_GENERALIZED_TIME) ||
+      elem->len < 10 || fio_buf2u32u(p) == (0x01010101UL * '0'))
     return -1;
 
-  const char *p = (const char *)elem->data;
-  size_t len = elem->len;
+  digits = fio_atol10u(&p);
+  consumed = (size_t)(p - (const char *)elem->data);
 
-  int year, month, day, hour, min, sec = 0;
+  /* Skip optional fractional seconds */
+  if (*p == '.') {
+    p++;
+    while (*p >= '0' && *p <= '9')
+      p++;
+  }
+  if (*p != 'Z')
+    return -1;
 
   if (tag == FIO_ASN1_UTC_TIME) {
-    /* UTCTime: YYMMDDhhmmZ or YYMMDDhhmmssZ */
-    if (len != 11 && len != 13)
+    if (consumed == 12)
+      divisor = 10000000000ULL; /*   YYMMDDhhmmss */
+    else if (consumed != 10)
       return -1;
-
-    int yy;
-    if (fio___asn1_parse_2digits(p, &yy) < 0)
+  } else { /* GENERALIZED_TIME */
+    if (consumed == 14)
+      divisor = 10000000000ULL; /* YYYYMMDDhhmmss */
+    else if (consumed != 12)
       return -1;
-    /* RFC 5280: years 00-49 = 2000-2049, 50-99 = 1950-1999 */
-    year = (yy < 50) ? 2000 + yy : 1900 + yy;
-    p += 2;
-
-    if (fio___asn1_parse_2digits(p, &month) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &day) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &hour) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &min) < 0)
-      return -1;
-    p += 2;
-
-    if (len == 13) {
-      if (fio___asn1_parse_2digits(p, &sec) < 0)
-        return -1;
-      p += 2;
-    }
-
-    if (*p != 'Z')
-      return -1;
-  } else if (tag == FIO_ASN1_GENERALIZED_TIME) {
-    /* GeneralizedTime: YYYYMMDDhhmmssZ */
-    if (len < 15)
-      return -1;
-
-    int yy1, yy2;
-    if (fio___asn1_parse_2digits(p, &yy1) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &yy2) < 0)
-      return -1;
-    p += 2;
-    year = yy1 * 100 + yy2;
-
-    if (fio___asn1_parse_2digits(p, &month) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &day) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &hour) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &min) < 0)
-      return -1;
-    p += 2;
-    if (fio___asn1_parse_2digits(p, &sec) < 0)
-      return -1;
-    p += 2;
-
-    /* Skip optional fractional seconds */
-    if (*p == '.') {
-      p++;
-      while (*p >= '0' && *p <= '9')
-        p++;
-    }
-
-    if (*p != 'Z')
-      return -1;
-  } else {
-    return -1;
   }
 
-  *unix_time = fio___asn1_mktime(year, month, day, hour, min, sec);
-  return (*unix_time == -1) ? -1 : 0;
+  year = digits / divisor;
+  digits -= year * divisor;
+  divisor /= 100;
+  month = digits / divisor;
+  digits -= month * divisor;
+  divisor /= 100;
+  day = digits / divisor;
+  digits -= day * divisor;
+  divisor /= 100;
+  hour = digits / divisor;
+  digits -= hour * divisor;
+  divisor /= 100;
+  min = digits / divisor;
+  digits -= min * divisor;
+  divisor /= 100;
+  sec = digits;
+
+  if (tag == FIO_ASN1_UTC_TIME) {
+    year += (year < 50 ? 2000 : 1900);
+  }
+
+  {
+    struct tm tm = {
+        .tm_year = year - 1900,
+        .tm_mon = month - 1,
+        .tm_mday = day,
+        .tm_hour = hour,
+        .tm_min = min,
+        .tm_sec = sec,
+        .tm_isdst = 0,
+    };
+    *unix_time = (int64_t)fio_gm2time(tm);
+  }
+  return 0;
 }
 
 /* *****************************************************************************
 Implementation - Iterator
-***************************************************************************** */
+*****************************************************************************
+*/
 
 SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
                                  fio_asn1_element_s *elem) {
@@ -913,7 +841,8 @@ SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
 
 /* *****************************************************************************
 ASN.1 DER Encoding API
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /**
  * Encode DER length field.
@@ -1030,7 +959,8 @@ SFUNC size_t fio_asn1_encode_set_header(uint8_t *buf, size_t content_len);
  * @param buf Output buffer (can be NULL to calculate length only)
  * @param tag_num Context tag number (0-30)
  * @param content_len Length of content that will follow
- * @param constructed 1 if constructed (contains other elements), 0 if primitive
+ * @param constructed 1 if constructed (contains other elements), 0 if
+ * primitive
  * @return Number of bytes written/needed for tag+length only
  */
 SFUNC size_t fio_asn1_encode_context_header(uint8_t *buf,
@@ -1075,7 +1005,8 @@ SFUNC size_t fio_asn1_encode_generalized_time(uint8_t *buf, int64_t unix_time);
 
 /* *****************************************************************************
 Implementation - ASN.1 Encoding Functions
-***************************************************************************** */
+*****************************************************************************
+*/
 
 /** Encode DER length field */
 SFUNC size_t fio_asn1_encode_length(uint8_t *buf, size_t len) {
@@ -1383,41 +1314,15 @@ FIO_SFUNC void fio___asn1_gmtime(int64_t unix_time,
                                  int *hour,
                                  int *min,
                                  int *sec) {
-  /* Days since epoch */
-  int64_t days = unix_time / 86400;
-  int64_t rem = unix_time % 86400;
-  if (rem < 0) {
-    --days;
-    rem += 86400;
-  }
+  const time_t t = (time_t)unix_time;
+  const struct tm tm = fio_time2gm(t);
 
-  *hour = (int)(rem / 3600);
-  rem %= 3600;
-  *min = (int)(rem / 60);
-  *sec = (int)(rem % 60);
-
-  /* Calculate year and day of year */
-  int y = 1970;
-  while (days >= (fio___is_leap_year(y) ? 366 : 365)) {
-    days -= fio___is_leap_year(y) ? 366 : 365;
-    ++y;
-  }
-  while (days < 0) {
-    --y;
-    days += fio___is_leap_year(y) ? 366 : 365;
-  }
-  *year = y;
-
-  /* Calculate month and day */
-  int m = 1;
-  while (days >= fio___days_in_month[m - 1] +
-                     (m == 2 && fio___is_leap_year(y) ? 1 : 0)) {
-    days -=
-        fio___days_in_month[m - 1] + (m == 2 && fio___is_leap_year(y) ? 1 : 0);
-    ++m;
-  }
-  *month = m;
-  *day = (int)days + 1;
+  *year = tm.tm_year + 1900;
+  *month = tm.tm_mon + 1;
+  *day = tm.tm_mday;
+  *hour = tm.tm_hour;
+  *min = tm.tm_min;
+  *sec = tm.tm_sec;
 }
 
 /** Encode ASN.1 UTCTime */
