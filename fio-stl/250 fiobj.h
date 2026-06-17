@@ -918,7 +918,11 @@ FIOBJ Integers
 #define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
 #define FIO_PTR_TAG_TYPE        FIOBJ
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 99
 
 /* Places a 61 or 29 bit signed integer in the leftmost bits of a word. */
 #define FIO_NUMBER_ENCODE(i) (((uintptr_t)(i) << 3) | FIOBJ_T_NUMBER)
@@ -993,7 +997,11 @@ FIOBJ Floats
 #define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
 #define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
 #define FIO_PTR_TAG_TYPE        FIOBJ
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 99
 
 /** Creates a new Float object. */
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(double i) {
@@ -2009,9 +2017,11 @@ SFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
 
 #else
 #define FIO_JSON
+#undef FIO___RECURSIVE_INCLUDE
 #define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 99
 
 /* FIOBJ JSON parser */
 typedef struct {

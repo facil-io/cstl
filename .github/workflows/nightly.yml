@@ -1,0 +1,30 @@
+name: Nightly Full Test Suite
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  full-suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev zlib1g-dev
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install openssl zlib || true
+    - name: Run full test suite
+      run: make clean && make test-all

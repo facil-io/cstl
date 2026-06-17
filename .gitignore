@@ -2,5 +2,7 @@
 tmp/*
 .DS_Store
 *.pem
-tests-old/*
-ai-task/
+tests-o*
+ai*
+.cl*
+*.js

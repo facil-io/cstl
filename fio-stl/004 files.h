@@ -372,7 +372,7 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
 }
 
 /** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//"). */
-SFUNC int fio___filename_is_unsafe_sep(const char *path, const char sep) {
+static int fio___filename_is_unsafe_sep(const char *path, const char sep) {
   if (!path) /* no file is a safe file, nothing to do */
     return 0;
   /* Check for leading "../" which escapes the base directory */

@@ -28,24 +28,29 @@ Include the file as many times as required and enjoy.
 To test the STL locally you need to first fork the project or download the whole project source code. Then, from the project's root folder run:
 
 ```bash
-make tests/stl
+make tests       # run all fast correctness tests
 ```
 
-The GNU `make` command will compile and run any file in the `tests` folder if it is explicitly listed. i.e.,
+The test suite is split into three categories:
+
+- `make tests` — fast, deterministic correctness tests. These must pass on every PR.
+- `make benchmarks` — performance benchmarks and library-level comparisons. Run on request.
+- `make stress` — long-running, multi-process, network, or audit tests. Run on request.
+- `make test-all` — run correctness tests, benchmarks, and stress tests in one go.
+
+Individual units can be run with the folder prefix:
 
 ```bash
-make tests/malloc      # speed test facil.io's memory allocator
-make tests/json        # test JSON parser
-make tests/redis       # requires local redis/valkey - tests pub/sub & database access
+make tests/malloc      # memory allocator correctness test
+make tests/json        # JSON parser correctness test
+make tests/redis       # RESP/Redis helper correctness test
+make benchmarks/crypto # crypto performance benchmark
+make stress/ipc        # IPC multi-process stress test
 ```
+
+Debug builds are available with the `db/` prefix, e.g. `make tests/json/db`.
 
 It is possible to use the same `makefile` to compile source code and static library code. See the makefile for details.
-
-On Windows you might want to skip the makefile (if you do not have `make` and `gcc` installed) and run:
-
-```dos
-cls && cl /Ox tests\stl.c /I. && stl.exe 
-```
 
 ## Quick Examples
 

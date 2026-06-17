@@ -42,12 +42,28 @@ OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 INSTALL_BIN = $(INSTALL_PREFIX)/bin
 INSTALL_INCLUDE = $(INSTALL_PREFIX)/include/$(NAME)
 
+# Library output paths
+UNAME_S    := $(shell uname -s)
+ifeq ($(OS),Windows_NT)
+  SHARED_EXT   := dll
+  SHARED_FLAGS := -shared -Wl,--out-implib,$(LIB_DIR)/libfio.dll.a
+else ifeq ($(UNAME_S),Darwin)
+  SHARED_EXT   := dylib
+  SHARED_FLAGS := -dynamiclib
+else
+  SHARED_EXT   := so
+  SHARED_FLAGS := -shared -fPIC
+endif
+LIB_DIR    := $(BUILD_DIR)/lib
+LIB_STATIC := $(LIB_DIR)/libfio.a
+LIB_SHARED := $(LIB_DIR)/libfio.$(SHARED_EXT)
+
 #############################################################################
 # Basics
 #############################################################################
 
 # Targets
-.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags FORCE
+.PHONY: all clean test format lint install install-headers everything___ help set_debug_flags FORCE lib
 
 # Default target
 all: everything___
@@ -136,6 +152,31 @@ install-docs: | $(BUILD_DIR)
 everything___: install-docs install-headers
 
 ############################################################################-
+# Library Build (static + shared from lib/fio.c)
+############################################################################-
+
+lib: $(LIB_STATIC) $(LIB_SHARED)
+	@echo "Libraries ready in $(LIB_DIR)/"
+	@echo "  Static:  $(LIB_STATIC)"
+	@echo "  Shared:  $(LIB_SHARED)"
+
+$(LIB_DIR):
+	@mkdir -p $@
+
+# Single PIC object — valid for both static archive and shared library
+$(LIB_DIR)/fio.pic.o: lib/fio.c lib/fio.h FORCE | $(LIB_DIR)
+	@echo "* Compiling lib/fio.c"
+	@$(CC) $(CFLAGS) -fPIC -c -o $@ lib/fio.c
+
+$(LIB_STATIC): $(LIB_DIR)/fio.pic.o | $(LIB_DIR)
+	@echo "* Archiving $(LIB_STATIC)"
+	@ar rcs $@ $<
+
+$(LIB_SHARED): $(LIB_DIR)/fio.pic.o | $(LIB_DIR)
+	@echo "* Linking $(LIB_SHARED)"
+	@$(CC) $(SHARED_FLAGS) -o $@ $< $(LDFLAGS)
+
+############################################################################-
 # Generic folder rules: build & run every standalone C program
 ############################################################################-
 
@@ -213,6 +254,9 @@ benchmark: benchmarks;
 bench: benchmarks;
 benchmark/%: benchmarks/% ;
 bench/%: benchmarks/% ;
+test-all: tests benchmarks stress;
+tests-all: test-all;
+all-tests: test-all;
 
 #############################################################################
 # Combining single-file library
@@ -495,6 +539,7 @@ help:
 	@echo "  extras          - Build and run extras"
 	@echo "  format          - Format code with clang-format"
 	@echo "  lint            - Lint code with clang-tidy"
+	@echo "  lib             - Build static (libfio.a) and shared (libfio.dylib/.so) libraries"
 	@echo "  install         - Install binary and headers to $(INSTALL_PREFIX)"
 	@echo "  clean           - Remove build artifacts"
 	@echo "  help            - Show this help message"

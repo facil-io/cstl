@@ -204,10 +204,10 @@
 #endif
 
 #if defined(FIO_STR_SMALL) || defined(FIO_STR_NAME)
-#include "200 string.h"
+#include "201 string.h"
 #endif
 #ifdef FIO_ARRAY_NAME
-#include "201 array.h"
+#include "202 array.h"
 #endif
 #if defined(FIO_UMAP_NAME) || defined(FIO_OMAP_NAME) || defined(FIO_MAP_NAME)
 #include "210 map.h"
@@ -224,18 +224,17 @@
 #endif
 
 #if defined(FIO_IO) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "400 io api.h"
-#include "401 io types.h"
-#include "402 io reactor.h"
+#include "401 io api.h"
+#include "402 io types.h"
+#include "403 io reactor.h"
+#if defined(FIO_IPC)
+#include "404 ipc.h"
+#endif
 #if defined(HAVE_OPENSSL)
 #include "405 openssl.h"
 #endif
 #include "405 tls13.h"
 #endif /* FIO_IO */
-
-#if defined(FIO_IPC) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "404 ipc.h"
-#endif
 
 #if defined(FIO_PUBSUB) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "420 pubsub.h"
