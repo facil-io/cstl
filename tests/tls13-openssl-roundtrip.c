@@ -164,8 +164,7 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
   const unsigned char *negotiated = NULL;
   unsigned int negotiated_len = 0;
   SSL_get0_alpn_selected(ssl, &negotiated, &negotiated_len);
-  if (negotiated_len != 8 ||
-      FIO_MEMCMP(negotiated, "http/1.1", 8) != 0) {
+  if (negotiated_len != 8 || FIO_MEMCMP(negotiated, "http/1.1", 8) != 0) {
     fprintf(stderr, "ALPN mismatch: expected http/1.1\n");
     SSL_free(ssl);
     close(fd);
@@ -173,11 +172,10 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
     return -1;
   }
 
-  static const char request[] =
-      "GET / HTTP/1.1\r\n"
-      "Host: localhost\r\n"
-      "Connection: close\r\n"
-      "\r\n";
+  static const char request[] = "GET / HTTP/1.1\r\n"
+                                "Host: localhost\r\n"
+                                "Connection: close\r\n"
+                                "\r\n";
   if (SSL_write(ssl, request, sizeof(request) - 1) <= 0) {
     SSL_free(ssl);
     close(fd);
@@ -219,14 +217,14 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
 static void *fio___tls13_openssl_rt_thread(void *ignr_) {
   (void)ignr_;
   /* Give the listener a moment to start accepting. */
-  usleep(10000);
+  usleep(100000);
 
-  fio___tls13_openssl_rt_state.port =
-      fio___tls13_openssl_rt_listener_port(fio___tls13_openssl_rt_state.listener);
+  fio___tls13_openssl_rt_state.port = fio___tls13_openssl_rt_listener_port(
+      fio___tls13_openssl_rt_state.listener);
   if (fio___tls13_openssl_rt_state.port > 0) {
     fio___tls13_openssl_rt_state.result =
         fio___tls13_openssl_rt_client_run("127.0.0.1",
-                                           fio___tls13_openssl_rt_state.port);
+                                          fio___tls13_openssl_rt_state.port);
   } else {
     fio___tls13_openssl_rt_state.result = -1;
   }
@@ -274,12 +272,12 @@ int main(void) {
   fio_io_tls_cert_add(tls, "localhost", NULL, NULL, NULL);
   fio_io_tls_alpn_add(tls, "http/1.1", NULL);
 
-  fio___tls13_openssl_rt_state.listener = fio_http_listen(
-      "https://127.0.0.1:0",
-      .tls = tls,
-      .tls_io_func = &tls13_funcs,
-      .on_http = fio___tls13_openssl_rt_on_http,
-      .timeout = 5);
+  fio___tls13_openssl_rt_state.listener =
+      fio_http_listen("https://127.0.0.1:0",
+                      .tls = tls,
+                      .tls_io_func = &tls13_funcs,
+                      .on_http = fio___tls13_openssl_rt_on_http,
+                      .timeout = 5);
   fio_io_tls_free(tls);
   FIO_ASSERT(fio___tls13_openssl_rt_state.listener,
              "fio_http_listen failed on 127.0.0.1:0");
@@ -299,7 +297,8 @@ int main(void) {
   if (fio___tls13_openssl_rt_state.thread)
     pthread_join(fio___tls13_openssl_rt_state.thread, NULL);
 
-  fio_io_listen_stop((fio_io_listener_s *)fio___tls13_openssl_rt_state.listener);
+  fio_io_listen_stop(
+      (fio_io_listener_s *)fio___tls13_openssl_rt_state.listener);
 
   FIO_ASSERT(!fio___tls13_openssl_rt_watchdog_fired,
              "TLS 1.3 roundtrip timed out");
