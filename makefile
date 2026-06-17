@@ -525,6 +525,8 @@ endif #TEST4SQLITE3
 # similar flags are preserved when switching to debug mode)
 #############################################################################
 
+# Consider CFLAGS in debug mode:
+#    -fsanitize=thread -fsanitize=undefined -fsanitize=address -coverage -DFIO_MEMORY_DISABLE
 DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
 
 #############################################################################
