@@ -24,7 +24,7 @@ Without OpenSSL the test compiles to a no-op that exits 0.
 #if HAVE_OPENSSL
 #define FIO_OPENSSL
 #endif
-#include "test-helpers.h"
+#include "../tests/test-helpers.h"
 
 #if HAVE_OPENSSL && FIO_OS_POSIX
 
