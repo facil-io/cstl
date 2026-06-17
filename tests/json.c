@@ -7,7 +7,12 @@ JSON Parser Tests
 #define FIO_STR
 #include FIO_INCLUDE_FILE
 
+#if defined(__has_include)
+#if __has_include("yyjson.h")
 #include "yyjson.c"
+#define FIO_TEST_JSON_YYJSON 1
+#endif
+#endif
 
 /* *****************************************************************************
 Test Data Structures - Simple JSON Value Representation
@@ -1107,6 +1112,7 @@ FIO_SFUNC void fio___test_json_realworld(void) {
 Test: yyjson reference comparison for strict JSON
 ***************************************************************************** */
 
+#if defined(FIO_TEST_JSON_YYJSON)
 FIO_SFUNC void fio___test_json_yyjson_reference(void) {
   const char *json = "{"
                      "\"name\":\"facil\","
@@ -1170,6 +1176,7 @@ FIO_SFUNC void fio___test_json_yyjson_reference(void) {
              "facil.io unicode mismatch");
   test_json_value_free(v);
 }
+#endif /* FIO_TEST_JSON_YYJSON */
 
 /* *****************************************************************************
 Main Test Entry Point
@@ -1226,7 +1233,9 @@ FIO_SFUNC void fio_test_json(void) {
   fio___test_json_realworld();
 
   /* External reference validation for strict JSON */
+#if defined(FIO_TEST_JSON_YYJSON)
   fio___test_json_yyjson_reference();
+#endif
 }
 
 #ifndef FIO_TEST_ALL
