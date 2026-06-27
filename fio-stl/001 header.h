@@ -249,7 +249,7 @@ Pointer Tagging
   do {                                                                         \
     if (!(FIO_PTR_TAG_VALIDATE((tagged_ptr)))) {                               \
       /* Log error since GOTO indicates cleanup or other side-effects. */      \
-      FIO_LOG_ERROR("(" FIO__FILE__ ":" FIO_MACRO2STR(                         \
+      FIO_LOG_ERROR("(" FIO___FILE__ ":" FIO_MACRO2STR(                        \
           __LINE__) ") pointer tag (type) mismatch in function call.");        \
       goto lable;                                                              \
     }                                                                          \

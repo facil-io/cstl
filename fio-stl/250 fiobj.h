@@ -1419,7 +1419,7 @@ typedef struct {
     (dest).pos = (src).pos;                                                    \
   } while (0)
 #define FIO_ARRAY_TYPE_CMP(a, b)  (a).obj == (b).obj
-#define FIO_ARRAY_TYPE_DESTROY(o) fiobj_free(o)
+#define FIO_ARRAY_TYPE_DESTROY(o) fiobj_free(o.obj)
 #define FIO___RECURSIVE_INCLUDE   1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE

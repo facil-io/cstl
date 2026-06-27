@@ -263,7 +263,7 @@ all-tests: test-all;
 #############################################################################
 
 ifneq ($(wildcard ./ai-tools/api2md.js),)
-  API2MD_STATUS := $(shell ./ai-tools/api2md.js > "./fio-stl.unified API.md"; echo $$?)
+  API2MD_STATUS := $(shell ./ai-tools/api2md.js > "./fio-stl.unified-API.md"; echo $$?)
   $(info * Detected API auto-generation script, running now)
   ifneq ($(API2MD_STATUS),0)
     $(error ./ai-tools/api2md.js failed)

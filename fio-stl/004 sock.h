@@ -263,7 +263,7 @@ FIO_IFUNC int fio_sock_pipe(fio_socket_i fds[2]) { return pipe(fds); }
 #if defined(DEBUG) && 0
 #define close(fd)                                                              \
   do {                                                                         \
-    FIO_LOG_DWARNING("(%d) (" FIO__FILE__ ":" FIO_MACRO2STR(                   \
+    FIO_LOG_DWARNING("(%d) (" FIO___FILE__ ":" FIO_MACRO2STR(                  \
                          __LINE__) ") fio_sock_close called for fd %d",        \
                      fio_getpid(),                                             \
                      (int)fd);                                                 \
