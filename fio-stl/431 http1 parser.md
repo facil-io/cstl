@@ -1,379 +1,411 @@
-## HTTP/1.1 Parser
+# HTTP/1.x Parser
 
 ```c
 #define FIO_HTTP1_PARSER
 #include FIO_INCLUDE_FILE
 ```
 
-By defining `FIO_HTTP1_PARSER`, a lightweight, zero-allocation HTTP/1.1 parser is defined and made available. The parser is implemented entirely as static functions and uses a callback-driven (SAX-style) design.
+Small parser, sharp teeth. Define `FIO_HTTP1_PARSER` to add the static
+HTTP/1.x request / response parser used by the HTTP layer. It performs no heap
+allocations, stores only parser state, and reports parsed data through callbacks
+implemented by the including translation unit.
 
-The parser handles both **requests** and **responses**, automatically detecting which is being parsed from the first line. It supports:
+Nearby context: [IO and HTTP overview](./400 io-overview.md), the higher-level
+[HTTP module header](./439 http.h), and the neighboring
+[WebSocket parser header](./431 websocket parser.h).
 
-- **Request parsing** - method, URL, version, headers, and body
-- **Response parsing** - version, status code, status text, headers, and body
-- **Chunked transfer encoding** - automatic chunk size parsing and reassembly
-- **Content-Length bodies** - known-length body reading
-- **Trailer headers** - chunked encoding trailers with forbidden-header filtering
-- **Expect: 100-continue** - callback notification for flow control
-- **Incremental parsing** - feed data in arbitrary chunks; the parser resumes where it left off
+---
 
-**Standalone use**: this parser can be used independently in a separate translation unit from the rest of the HTTP module. To use it standalone, define `FIO_HTTP1_PARSER` and implement the required callback functions (declared as `static` prototypes in the header). The callbacks are **not** provided by the parser - they must be implemented by the user.
+## What Gets Added
 
-### HTTP/1.1 Parser Type
+`FIO_HTTP1_PARSER` exposes:
 
-#### `fio_http1_parser_s`
+- `fio_http1_parser_s` — parser state.
+- `FIO_HTTP1_PARSER_INIT` — zero-initializer / reset value.
+- `fio_http1_parse` — incremental parser entry point.
+- parser state helpers:
+  - `fio_http1_parser_is_empty`
+  - `fio_http1_parser_is_on_header`
+  - `fio_http1_parser_is_on_body`
+  - `fio_http1_expected`
+- parse result / expected-body constants:
+  - `FIO_HTTP1_PARSER_ERROR`
+  - `FIO_HTTP1_EXPECTED_CHUNKED`
+- required user callbacks named `fio_http1_on_*`.
+
+The implementation also declares internal parsing stages named with
+`fio_http1___...`; these are private implementation details.
+
+---
+
+## Parser State
+
+### `fio_http1_parser_s`
 
 ```c
+typedef struct fio_http1_parser_s fio_http1_parser_s;
+
 struct fio_http1_parser_s {
   int (*fn)(fio_http1_parser_s *, fio_buf_info_s *, void *);
   size_t expected;
 };
 ```
 
-The HTTP/1.1 parser state type.
+The parser state is intentionally tiny: one function pointer for the current
+state-machine stage and one `expected` byte counter / sentinel.
 
-The parser is a small state machine containing a function pointer to the current parsing stage and a counter for expected remaining body bytes.
+Treat both fields as opaque. Allocate the struct wherever it fits your lifetime
+(stack, connection object, arena, etc.), initialize it with
+`FIO_HTTP1_PARSER_INIT`, and use the helper functions to inspect state.
 
-**Members:**
-- `fn` - internal function pointer to the current parsing stage (treat as opaque)
-- `expected` - number of body bytes still expected, or a sentinel value for chunked/no-body states (treat as opaque)
-
-**Note**: this type should be treated as opaque. Initialize it with `FIO_HTTP1_PARSER_INIT` and interact with it only through the provided API functions.
-
-#### `FIO_HTTP1_PARSER_INIT`
+### `FIO_HTTP1_PARSER_INIT`
 
 ```c
 #define FIO_HTTP1_PARSER_INIT ((fio_http1_parser_s){0})
 ```
 
-Zero-initialization value for the parser.
-
-Use this macro to initialize or reset a parser instance:
+Zero-initializes a parser:
 
 ```c
 fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
 ```
 
-### HTTP/1.1 Parser API
+The parser also resets itself to this empty state after a complete message is
+reported with `fio_http1_on_complete`.
 
-#### `fio_http1_parse`
+---
 
-```c
-size_t fio_http1_parse(fio_http1_parser_s *p,
-                       fio_buf_info_s buf,
-                       void *udata);
-```
+## Parsing API
 
-Parses HTTP/1.x data, calling the appropriate callbacks as elements are parsed.
-
-Data can be fed incrementally - the parser maintains its state between calls and resumes parsing where it left off. Each call processes as much data as possible from the provided buffer.
-
-**Parameters:**
-- `p` - pointer to an initialized `fio_http1_parser_s` parser state
-- `buf` - a `fio_buf_info_s` containing the data to parse (pointer and length)
-- `udata` - opaque user data pointer passed through to all callbacks
-
-**Returns:** the number of bytes consumed from `buf`, or `FIO_HTTP1_PARSER_ERROR` (`(size_t)-1`) on error.
-
-**Note**: after `fio_http1_on_complete` fires, the parser resets itself. Unconsumed bytes (i.e., `buf.len - returned_value`) may belong to a subsequent HTTP message and should be fed to the parser again.
-
-**Note**: a return value of `0` when `buf.len > 0` means the parser needs more data to make progress (e.g., an incomplete header line).
-
-#### `fio_http1_parser_is_empty`
+### `fio_http1_parse`
 
 ```c
-size_t fio_http1_parser_is_empty(fio_http1_parser_s *p);
+FIO_SFUNC size_t fio_http1_parse(fio_http1_parser_s *p,
+                                 fio_buf_info_s buf,
+                                 void *udata);
 ```
 
-Returns true (non-zero) if the parser is idle - waiting to parse a new request or response.
+Parses as much HTTP/1.x data as currently possible and invokes callbacks as
+fields are discovered.
 
-This is the case immediately after initialization or after a complete request/response has been parsed and the `fio_http1_on_complete` callback has fired.
+- `p` is the parser state.
+- `buf` is the current readable bytes.
+- `udata` is passed unchanged to every callback.
 
-**Parameters:**
-- `p` - pointer to the parser state
+Returns the number of bytes consumed from `buf`, or
+`FIO_HTTP1_PARSER_ERROR` (`(size_t)-1`) on parse / callback error.
 
-**Returns:** non-zero if the parser is empty/idle, zero otherwise.
+A successful return may consume fewer bytes than supplied. Any unconsumed bytes
+belong to a later parse step or to the next HTTP message on a keep-alive
+connection.
 
-#### `fio_http1_parser_is_on_header`
+If the parser needs more bytes before it can make progress, it returns
+successfully with the bytes consumed so far, which can be `0`.
+
+### State Helpers
 
 ```c
-size_t fio_http1_parser_is_on_header(fio_http1_parser_s *p);
+FIO_IFUNC size_t fio_http1_parser_is_empty(fio_http1_parser_s *p);
+FIO_IFUNC size_t fio_http1_parser_is_on_header(fio_http1_parser_s *p);
+FIO_IFUNC size_t fio_http1_parser_is_on_body(fio_http1_parser_s *p);
+FIO_IFUNC size_t fio_http1_expected(fio_http1_parser_s *p);
 ```
 
-Returns true (non-zero) if the parser is currently reading header data.
+- `fio_http1_parser_is_empty` returns non-zero when the parser is waiting for a
+  new request / response line.
+- `fio_http1_parser_is_on_header` returns non-zero while reading regular
+  headers or chunked trailer headers.
+- `fio_http1_parser_is_on_body` returns non-zero while reading a known-length
+  body or while the chunked parser is ready to read the next chunk frame. During
+  a split chunk payload, the internal chunk-read stage may report false even
+  though body bytes are still being drained.
+- `fio_http1_expected` returns the parser's current expected byte count, returns
+  `FIO_HTTP1_EXPECTED_CHUNKED` after a chunked body is detected and before the
+  next chunk-size line is parsed, and returns `0` when the parser's internal
+  state marks the message as having no body. During chunked payload delivery,
+  it may expose the current chunk size / remaining chunk bytes.
 
-This includes both regular headers and chunked encoding trailer headers.
-
-**Parameters:**
-- `p` - pointer to the parser state
-
-**Returns:** non-zero if the parser is in the header-reading stage, zero otherwise.
-
-#### `fio_http1_parser_is_on_body`
-
-```c
-size_t fio_http1_parser_is_on_body(fio_http1_parser_s *p);
-```
-
-Returns true (non-zero) if the parser is currently reading body data.
-
-This includes both known-length bodies (Content-Length) and chunked transfer encoding bodies.
-
-**Parameters:**
-- `p` - pointer to the parser state
-
-**Returns:** non-zero if the parser is in the body-reading stage, zero otherwise.
-
-#### `fio_http1_expected`
-
-```c
-size_t fio_http1_expected(fio_http1_parser_s *p);
-```
-
-Returns the number of bytes of body payload still expected to be received.
-
-For chunked transfer encoding, returns `FIO_HTTP1_EXPECTED_CHUNKED`. For methods that don't allow a body (GET, HEAD, OPTIONS) or when no body is expected, returns `0`.
-
-**Parameters:**
-- `p` - pointer to the parser state
-
-**Returns:** number of remaining body bytes, `FIO_HTTP1_EXPECTED_CHUNKED` for chunked bodies, or `0` if no body is expected.
-
-### HTTP/1.1 Parser Constants
-
-#### `FIO_HTTP1_PARSER_ERROR`
+### Constants
 
 ```c
 #define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
-```
-
-The error return value for `fio_http1_parse`.
-
-When `fio_http1_parse` returns this value, the HTTP data was malformed and the connection should be closed. The parser state is undefined after an error.
-
-#### `FIO_HTTP1_EXPECTED_CHUNKED`
-
-```c
 #define FIO_HTTP1_EXPECTED_CHUNKED ((size_t)(-2))
 ```
 
-A return value for `fio_http1_expected` indicating that the body uses chunked transfer encoding.
+`FIO_HTTP1_PARSER_ERROR` is the error return value from `fio_http1_parse`.
+After a parse error, close / discard the stream state rather than attempting to
+recover the same parser instance.
 
-When chunked encoding is active, the total body size is not known in advance.
+`FIO_HTTP1_EXPECTED_CHUNKED` is the parser's sentinel after
+`transfer-encoding: chunked` is accepted and before a chunk-size line is parsed.
+Once chunk parsing starts, `fio_http1_expected` may instead report the current
+chunk size or remaining chunk bytes.
 
-### Callbacks (User-Implemented)
+The header also defines `FIO___HTTP1_BODY_NOT_ALLOWED` as an internal sentinel
+for methods / states where a body should not be read. User code should rely on
+`fio_http1_expected(p) == 0` instead of using that internal macro.
 
-The HTTP/1.1 parser requires the user to implement the following `static` callback functions. These are declared as prototypes in the parser header and **must be defined** in the same translation unit where the parser is included.
+---
 
-All callbacks that return `int` should return `0` on success or `-1` (non-zero) to signal an error and abort parsing.
+## Callback Contract
 
-#### `fio_http1_on_complete`
+The parser declares these callbacks as `static` prototypes. The including
+translation unit must define them.
+
+For portable user code, every `int` callback should return only `0` to continue
+or `-1` to reject the parse.
+
+The parser's internal checks are not identical for every callback:
+
+- `fio_http1_on_method`, `fio_http1_on_url`, `fio_http1_on_version`,
+  `fio_http1_on_status`, and `fio_http1_on_body_chunk` treat any non-zero return
+  as a parse error.
+- `fio_http1_on_header` during normal headers and
+  `fio_http1_on_header_content_length` reject only an exact `-1` return.
+- `fio_http1_on_header` during chunked trailers is passed through; negative
+  values become parse errors and positive values stop the current parse as
+  incomplete.
+- `fio_http1_on_expect` is special: any non-zero return rejects the expectation,
+  resets the parser, and stops the current parse without calling
+  `fio_http1_on_complete`.
+
+All `fio_buf_info_s` values point into the `buf` memory passed to
+`fio_http1_parse`. They are not NUL-terminated unless the input happened to be.
+Copy or retain the data before the callback returns if it must outlive the input
+buffer.
+
+> Important: the parser lowercases header names in-place. Feed it writable
+> memory, not a string literal or read-only mapping.
+
+### Completion
 
 ```c
 static void fio_http1_on_complete(void *udata);
 ```
 
-Called when a complete HTTP request or response has been parsed (all headers and body received).
+Called after the request / response line, headers, and any body have been fully
+parsed. The parser is reset before this callback is invoked, so it is ready for
+the next message on the same connection.
 
-After this callback fires, the parser automatically resets itself and is ready to parse the next message on the same connection (HTTP keep-alive).
-
-**Parameters:**
-- `udata` - the opaque user data pointer passed to `fio_http1_parse`
-
-#### `fio_http1_on_method`
+### Request Line Callbacks
 
 ```c
 static int fio_http1_on_method(fio_buf_info_s method, void *udata);
+static int fio_http1_on_url(fio_buf_info_s path, void *udata);
+static int fio_http1_on_version(fio_buf_info_s version, void *udata);
 ```
 
-Called when a request method is parsed (e.g., `GET`, `POST`, `PUT`).
+For request lines, the parser calls the callbacks in this order:
 
-This callback is only called for HTTP requests, not responses.
+1. `fio_http1_on_method`
+2. `fio_http1_on_url`
+3. `fio_http1_on_version`
 
-**Parameters:**
-- `method` - a `fio_buf_info_s` containing the method string (not NUL-terminated)
-- `udata` - the opaque user data pointer
+The version slice is clamped to at most 14 bytes. `GET`, `HEAD`, and `OPTIONS`
+are recognized case-insensitively and mark the parser as not expecting a body;
+body-bearing headers for these methods conflict with that marker and are
+rejected.
 
-**Returns:** `0` on success, `-1` to abort parsing.
-
-**Note**: the parser automatically detects GET, HEAD, and OPTIONS methods and marks them as not allowing a body (unless overridden by Content-Length or Transfer-Encoding headers).
-
-#### `fio_http1_on_status`
+### Response Line Callbacks
 
 ```c
+static int fio_http1_on_version(fio_buf_info_s version, void *udata);
 static int fio_http1_on_status(size_t istatus,
                                fio_buf_info_s status,
                                void *udata);
 ```
 
-Called when a response status line is parsed.
+For response lines, the parser calls `fio_http1_on_version` first and then
+`fio_http1_on_status`.
 
-This callback is only called for HTTP responses, not requests.
+`istatus` is parsed from the numeric status token. `status` is the remaining
+status text slice after the numeric token. The version slice is clamped to at
+most 14 bytes.
 
-**Parameters:**
-- `istatus` - the numeric HTTP status code (e.g., `200`, `404`)
-- `status` - a `fio_buf_info_s` containing the status text without the numeric prefix (e.g., `"OK"`, `"Not Found"`)
-- `udata` - the opaque user data pointer
+The parser decides whether the first line is a response by checking whether the
+second token starts with a decimal digit.
 
-**Returns:** `0` on success, `-1` to abort parsing.
-
-#### `fio_http1_on_url`
-
-```c
-static int fio_http1_on_url(fio_buf_info_s path, void *udata);
-```
-
-Called when a request URL/path is parsed.
-
-This callback is only called for HTTP requests, not responses.
-
-**Parameters:**
-- `path` - a `fio_buf_info_s` containing the URL/path string (not NUL-terminated)
-- `udata` - the opaque user data pointer
-
-**Returns:** `0` on success, `-1` to abort parsing.
-
-#### `fio_http1_on_version`
-
-```c
-static int fio_http1_on_version(fio_buf_info_s version, void *udata);
-```
-
-Called when the HTTP version string is parsed (e.g., `HTTP/1.1`).
-
-Called for both requests and responses. For requests, the version appears as the third token on the first line. For responses, it appears as the first token.
-
-**Parameters:**
-- `version` - a `fio_buf_info_s` containing the version string (not NUL-terminated, clamped to 14 bytes max)
-- `udata` - the opaque user data pointer
-
-**Returns:** `0` on success, `-1` to abort parsing.
-
-#### `fio_http1_on_header`
+### Headers
 
 ```c
 static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata);
-```
 
-Called for each parsed header.
-
-Header names are automatically converted to lowercase by the parser. This callback is also used for chunked encoding trailer headers (with forbidden headers filtered out by the parser).
-
-**Parameters:**
-- `name` - a `fio_buf_info_s` containing the lowercase header name (not NUL-terminated)
-- `value` - a `fio_buf_info_s` containing the header value with leading/trailing whitespace trimmed (not NUL-terminated; `buf` is NULL if value is empty)
-- `udata` - the opaque user data pointer
-
-**Returns:** `0` on success, `-1` to abort parsing.
-
-**Note**: the `content-length` and `transfer-encoding: chunked` headers are processed internally by the parser. The `content-length` header is reported through `fio_http1_on_header_content_length` instead of this callback. The `transfer-encoding` header is reported through this callback only if it contains values other than `chunked` (the `chunked` token is stripped).
-
-#### `fio_http1_on_header_content_length`
-
-```c
 static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               fio_buf_info_s value,
                                               size_t content_length,
                                               void *udata);
 ```
 
-Called when the special `content-length` header is parsed.
+For ordinary headers, `fio_http1_on_header` receives:
 
-This callback allows the user to validate or reject the content length (e.g., enforce maximum body size limits).
+- `name` lowercased in-place.
+- `value` trimmed of leading and trailing spaces / tabs.
+- an empty value as `{ .buf = NULL, .len = 0 }`.
 
-**Parameters:**
-- `name` - a `fio_buf_info_s` containing the header name (`"content-length"`)
-- `value` - a `fio_buf_info_s` containing the raw header value string
-- `content_length` - the parsed numeric value of the Content-Length header
-- `udata` - the opaque user data pointer
+Header names must contain a valid `:` separator and may not contain the
+forbidden characters encoded by the parser. NUL bytes in header values are
+rejected.
 
-**Returns:** `0` to accept the content length, `-1` to reject (aborts parsing).
+`content-length` is special:
 
-**Note**: the parser enforces that duplicate `content-length` headers must have the same value (CL.CL attack prevention). It also rejects `content-length` values that collide with internal sentinel values or that overflow.
+- empty values are rejected;
+- non-decimal / overflowing values are rejected;
+- values colliding with internal sentinels are rejected;
+- duplicate `content-length` headers must agree;
+- conflicting `content-length` and final `transfer-encoding: chunked` are
+  rejected;
+- the first non-zero accepted value calls `fio_http1_on_header_content_length`
+  instead of the generic header callback; a repeated matching value is accepted
+  without calling the content-length callback again.
 
-#### `fio_http1_on_expect`
+A `content-length: 0` value marks the message as having no body and does not
+call `fio_http1_on_header_content_length`.
+
+`transfer-encoding` is also special when its final token is `chunked`
+(case-insensitive):
+
+- the parser switches to chunked body decoding;
+- if the value is exactly `chunked`, no generic header callback is made;
+- if other transfer-coding text appears before the final `chunked` token, the
+  final `chunked` token and adjacent separators are stripped before the
+  remaining value is passed to `fio_http1_on_header`;
+- malformed separators before the final `chunked` token are rejected.
+
+`expect` is special when its value is exactly `100-continue`. Any other
+`Expect` value is rejected.
+
+### Expect: 100-continue
 
 ```c
 static int fio_http1_on_expect(void *udata);
 ```
 
-Called when an `Expect: 100-continue` header is received and all headers have been parsed.
+Called after headers when an accepted `Expect: 100-continue` header requires a
+post-header decision and the parser has a non-zero body expectation marker.
+Return `0` to continue into the body / completion flow. Return non-zero to reset
+the parser and stop the current parse without calling `fio_http1_on_complete`.
 
-This allows the server to send a `100 Continue` interim response before the client sends the body, or to reject the request with a `417 Expectation Failed` response.
-
-**Parameters:**
-- `udata` - the opaque user data pointer
-
-**Returns:** `0` to continue parsing (accept the body), non-zero to stop (the parser resets, no `fio_http1_on_complete` is called).
-
-**Note**: the parser only recognizes the exact value `100-continue` for the `Expect` header. Any other value causes a parse error.
-
-#### `fio_http1_on_body_chunk`
+### Body Chunks
 
 ```c
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
 ```
 
-Called for each chunk of body data received.
+Called with decoded body bytes.
 
-For Content-Length bodies, this may be called multiple times if data arrives incrementally, with chunks summing to the total content length. For chunked transfer encoding, this is called once per decoded chunk (without the chunk framing).
+For `Content-Length` bodies, callback chunks follow the supplied input chunks
+and sum to the accepted content length.
 
-**Parameters:**
-- `chunk` - a `fio_buf_info_s` containing the body data chunk
-- `udata` - the opaque user data pointer
+For chunked bodies, framing bytes are removed before callback delivery. Large or
+split HTTP chunks may be delivered through more than one callback if the input
+arrives in smaller pieces.
 
-**Returns:** `0` on success, `-1` to abort parsing.
+---
 
-### Security Features
+## Parser Flow
 
-The parser includes several built-in protections:
+```text
+start line
+  ├─ request  -> method -> url -> version
+  └─ response -> version -> status
+headers
+  ├─ no body / body not allowed -> complete
+  ├─ content-length body        -> body chunks -> complete
+  └─ chunked body               -> chunk chunks -> trailers -> complete
+```
 
-- **CL.CL prevention** - duplicate `content-length` headers with different values cause a parse error
-- **CL.TE prevention** - conflicting `content-length` and `transfer-encoding: chunked` headers cause a parse error
-- **Forbidden trailer headers** - the following headers are rejected in chunked encoding trailers: `authorization`, `cache-control`, `content-encoding`, `content-length`, `content-range`, `content-type`, `expect`, `host`, `max-forwards`, `set-cookie`, `te`, `trailer`, `transfer-encoding`
-- **Header name validation** - forbidden characters in header names cause a parse error
-- **Content-Length overflow protection** - values that would overflow or collide with sentinel values are rejected
+Details worth keeping in mind:
 
-### Standalone Usage Example
+- Leading spaces, `\r`, and `\n` before the first line are skipped.
+- First lines shorter than the parser's minimum accepted shape are rejected.
+- NUL bytes in the first line are rejected.
+- Header and first-line parsing waits for a newline before making progress.
+- The parser accepts `\n` line endings and handles an optional preceding `\r`.
+- Chunk size lines are hexadecimal, capped by the implementation, and do not
+  support chunk extensions.
+- A zero-size chunk either completes immediately when followed by an empty line
+  or enters trailer parsing.
 
-To use the HTTP/1.1 parser independently from the full HTTP module, define the required callbacks in your translation unit:
+---
+
+## Chunked Trailers
+
+Allowed trailer headers are reported through `fio_http1_on_header` after the
+body's terminating zero-size chunk.
+
+The parser rejects the following trailer names:
+
+- `authorization`
+- `cache-control`
+- `content-encoding`
+- `content-length`
+- `content-range`
+- `content-type`
+- `expect`
+- `host`
+- `max-forwards`
+- `set-cookie`
+- `te`
+- `trailer`
+- `transfer-encoding`
+
+---
+
+## Ownership and Lifetime
+
+- The parser allocates no memory.
+- The parser does not copy callback data.
+- The parser mutates header names in the input buffer to lowercase.
+- Callback slices are valid only while the input buffer remains valid and
+  unchanged.
+- `udata` is never owned by the parser; it is simply forwarded.
+- The parser state may live inside a connection object and be reused for
+  keep-alive messages. It resets automatically on complete messages.
+- After `FIO_HTTP1_PARSER_ERROR`, discard the parser / connection state.
+
+---
+
+## Minimal Skeleton
 
 ```c
 #define FIO_HTTP1_PARSER
 #include FIO_INCLUDE_FILE
 
-/* --- Implement all required callbacks --- */
-
 static int fio_http1_on_method(fio_buf_info_s method, void *udata) {
-  printf("Method: %.*s\n", (int)method.len, method.buf);
+  (void)method;
+  (void)udata;
   return 0;
 }
 
 static int fio_http1_on_url(fio_buf_info_s path, void *udata) {
-  printf("URL: %.*s\n", (int)path.len, path.buf);
+  (void)path;
+  (void)udata;
   return 0;
 }
 
 static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
-  printf("Version: %.*s\n", (int)version.len, version.buf);
+  (void)version;
+  (void)udata;
   return 0;
 }
 
-static int fio_http1_on_status(size_t istatus,
+static int fio_http1_on_status(size_t status_code,
                                fio_buf_info_s status,
                                void *udata) {
-  printf("Status: %zu %.*s\n", istatus, (int)status.len, status.buf);
+  (void)status_code;
+  (void)status;
+  (void)udata;
   return 0;
 }
 
 static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
-  printf("Header: %.*s: %.*s\n",
-         (int)name.len, name.buf,
-         (int)value.len, value.buf);
+  (void)name;
+  (void)value;
+  (void)udata;
   return 0;
 }
 
@@ -381,71 +413,33 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               fio_buf_info_s value,
                                               size_t content_length,
                                               void *udata) {
-  printf("Content-Length: %zu\n", content_length);
-  /* Reject bodies larger than 1MB */
-  return (content_length > (1UL << 20)) ? -1 : 0;
+  (void)name;
+  (void)value;
+  (void)udata;
+  return content_length > (1UL << 20) ? -1 : 0;
 }
 
 static int fio_http1_on_expect(void *udata) {
-  /* Accept 100-continue */
+  (void)udata;
   return 0;
 }
 
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
-  printf("Body chunk: %zu bytes\n", chunk.len);
+  (void)chunk;
+  (void)udata;
   return 0;
 }
 
 static void fio_http1_on_complete(void *udata) {
-  printf("Request/Response complete!\n");
+  (void)udata;
 }
 
-/* --- Use the parser --- */
-
-void parse_http_data(char *data, size_t len) {
+size_t parse_some_http(char *data, size_t len, void *udata) {
   fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
-  fio_buf_info_s buf = FIO_BUF_INFO2(data, len);
-  size_t consumed = fio_http1_parse(&parser, buf, NULL);
-  if (consumed == FIO_HTTP1_PARSER_ERROR) {
-    printf("Parse error!\n");
-    return;
-  }
-  printf("Consumed %zu of %zu bytes\n", consumed, len);
+  return fio_http1_parse(&parser, FIO_BUF_INFO2(data, len), udata);
 }
 ```
 
-### Incremental Parsing Example
-
-The parser supports feeding data in arbitrary-sized chunks:
-
-```c
-void example_incremental_parsing(int fd) {
-  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
-  char buffer[4096];
-  size_t pending = 0;
-
-  for (;;) {
-    /* Read more data into buffer after any unconsumed bytes */
-    ssize_t nread = read(fd, buffer + pending, sizeof(buffer) - pending);
-    if (nread <= 0)
-      break;
-    pending += nread;
-
-    /* Parse available data */
-    fio_buf_info_s buf = FIO_BUF_INFO2(buffer, pending);
-    size_t consumed = fio_http1_parse(&parser, buf, NULL);
-    if (consumed == FIO_HTTP1_PARSER_ERROR) {
-      /* Malformed HTTP - close connection */
-      break;
-    }
-
-    /* Move unconsumed data to front of buffer */
-    if (consumed && consumed < pending) {
-      memmove(buffer, buffer + consumed, pending - consumed);
-    }
-    pending -= consumed;
-  }
-}
-```
-
-------------------------------------------------------------
+For real incremental parsing, keep `fio_http1_parser_s` with the connection and
+preserve / retry unconsumed bytes when `fio_http1_parse` returns less than the
+available buffer length.

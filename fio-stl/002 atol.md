@@ -1,15 +1,13 @@
-## String / Number Conversion
+# String / Number Conversion
 
 ```c
 #define FIO_ATOL
 #include "fio-stl.h"
 ```
 
-If the `FIO_ATOL` macro is defined, the following functions will be defined for converting between strings and numbers.
+String-to-number and number-to-string helpers. These are the grunts that parse integers, floats, hex, binary, and arbitrary bases, then turn them back into text. Fast, greedy, and mostly guard-less — give them a valid buffer and a terminating character.
 
-**Note**: all functions that write to a buffer also write a `NUL` terminator byte.
-
-**CRITICAL**: all `fio_atol` functions are guard-less(!), they assume: (1) that the buffer has an invalid character that ends the conversion (such as a `NUL` terminator byte); and that (2) system allocations are 8 byte aligned (the terminating character is within an 8 byte group all read together).
+**Note:** functions that write to a buffer also write a NUL terminator. `fio_atol*` functions assume the buffer ends with an invalid character (such as NUL) and that allocations are aligned enough for multi-byte reads.
 
 ### Configuration Macros
 
@@ -19,11 +17,9 @@ If the `FIO_ATOL` macro is defined, the following functions will be defined for 
 #define FIO_ATOL_ALLOW_UNDERSCORE_DIVIDER 1
 ```
 
-When set to `1` (default), allows underscores (`_`) to be used as digit separators when parsing numbers. For example, `1_000_000` would be parsed as `1000000`.
+When `1` (default), underscores act as digit separators: `1_000_000` parses as `1000000`. Set to `0` to disable.
 
-Set to `0` to disable this feature.
-
-### Universal Number Parsing
+### Types
 
 #### `fio_aton_s`
 
@@ -39,422 +35,313 @@ typedef struct {
 } fio_aton_s;
 ```
 
-Result type for `fio_aton`. Contains the parsed number value and metadata about the parsing result.
+Result container for `fio_aton`. Read the union member that matches `is_float`, and check `err` for overflow or parse failures.
 
-**Members:**
-- `i` - The parsed value as a signed 64-bit integer
-- `f` - The parsed value as a double-precision float
-- `u` - The parsed value as an unsigned 64-bit integer
-- `is_float` - Non-zero if the parsed value is a floating-point number
-- `err` - Non-zero if a parsing or overflow error occurred
+### Universal Parsing
 
 #### `fio_aton`
 
 ```c
-fio_aton_s fio_aton(char **pstr);
+FIO_SFUNC fio_aton_s fio_aton(char **pstr);
 ```
 
-Converts a string to a number - either an integer or a float (double).
+Auto-detects integers and floats. Skips leading whitespace, recognizes `0x` / `0b` / octal prefixes, and accepts `inf`, `infinity`, and `nan`. Updates `*pstr` to the first unconverted character. Sets `.err` on overflow or bad format.
 
-- Skips white space at the beginning of the string
-- Auto detects binary and hex formats when prefix is provided (`0x` / `0b`)
-- Auto detects octal when number starts with zero
-- Auto detects the strings `"inf"`, `"infinity"` and `"nan"` as float values
-- The number's format and type are returned in the return type
-- If a numerical overflow or format error occurred, the `.err` flag is set
+**Note:** not an exact `strtod` replacement; rounding differences are possible.
 
-**Note**: rounding errors may occur, as this is not an exact `strtod` match.
-
-### Signed Number / String Conversion
-
-The most common use of number to string conversion (and string to number) relates to converting signed numbers.
-
-However, consider using unsigned conversion where possible.
-
-#### `fio_atol10`
-
-```c
-int64_t fio_atol10(char **pstr);
-```
-
-Reads a signed base 10 formatted number.
+### Signed Conversion
 
 #### `fio_atol`
 
 ```c
-int64_t fio_atol(char **pstr);
+SFUNC int64_t fio_atol(char **pstr);
 ```
 
-A helper function that converts between String data to a signed int64_t.
-
-Numbers are assumed to be in base 10. Octal (`0###`), Hex (`0x##`/`x##`) and binary (`0b##`/ `b##`) are recognized as well. For binary Most Significant Bit must come first.
-
-The most significant difference between this function and `strtol` (aside of API design), is the added support for binary representations.
-
-#### `fio_ltoa`
-
-```c
-size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
-```
-
-A helper function that writes a signed int64_t to a `NUL` terminated string.
-
-If `dest` is `NULL`, returns the number of bytes that would have been written.
-
-No overflow guard is provided, make sure there's at least 68 bytes available (for base 2).
-
-Offers special support for base 2 (binary), base 8 (octal), base 10 and base 16 (hex) where prefixes are automatically added if required (i.e., `"0x"` for hex, `"0b"` for base 2, and `"0"` for octal).
-
-Supports any base up to base 36 (using 0-9,A-Z).
-
-An unsupported base will log an error and print zero.
-
-Returns the number of bytes actually written (excluding the NUL terminator).
+Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x...`), and binary (`0b...` or `b...`). Updates `*pstr` past the number.
 
 #### `fio_atof`
 
 ```c
-double fio_atof(char **pstr);
+SFUNC double fio_atof(char **pstr);
 ```
 
-A helper function that converts between String data to a signed double.
-
-Currently wraps `strtod` with some special case handling.
+Parses a double. Wraps `strtod` for most inputs. The source also attempts to accept a raw `0b...` binary bit-pattern, but the detection condition looks fragile.
 
 #### `fio_ftoa`
 
 ```c
-size_t fio_ftoa(char *dest, double num, uint8_t base);
+SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
 ```
 
-A helper function that converts between a double to a string.
+Writes `num` to `dest` in `base` (2, 10, or 16; unsupported bases silently fall back to 10). No prefixes are added. Returns bytes written excluding NUL.
 
-Currently wraps `snprintf` with some special case handling.
+**Note:** provide at least 130 bytes for base 2. Special values `inf` and `nan` produce `"Infinity"` / `"NaN"`.
 
-No overflow guard is provided, make sure there's at least 130 bytes available (for base 2).
+#### `fio_ltoa`
 
-Supports base 2, base 10 and base 16. An unsupported base will silently default to base 10. Prefixes aren't added (i.e., no `"0x"` or `"0b"` at the beginning of the string).
+```c
+SFUNC size_t fio_ltoa(char *dest, int64_t num, uint8_t base);
+```
 
-Returns the number of bytes actually written (excluding the NUL terminator).
+Writes `num` to `dest` in `base` (2, 8, 10, 16, or any base up to 36). Adds `0x`, `0b`, or `0` prefixes for the built-in bases. Returns bytes written excluding NUL. If `dest` is `NULL`, writes to an internal scratch buffer and still returns the length. Logs an error and returns `0` for unsupported bases.
+
+**Note:** provide at least 68 bytes for base 2.
 
 #### `fio_ltoa10`
 
 ```c
-void fio_ltoa10(char *dest, int64_t i, size_t digits);
+FIO_IFUNC void fio_ltoa10(char *dest, int64_t i, size_t digits);
 ```
 
-Writes a signed number to `dest` using `digits` bytes (+ `NUL`). See also [`fio_digits10`](#fio_digits10).
+Writes a signed base-10 number using exactly `digits` bytes plus NUL. Use `fio_digits10()` to compute `digits`.
 
-### Unsigned Number / String Conversion
-
-#### `fio_ltoa10u`
+#### `fio_atol10`
 
 ```c
-void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+SFUNC int64_t fio_atol10(char **pstr);
 ```
 
-Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`).
+Reads a signed base-10 number.
 
-#### `fio_ltoa8u`
-
-```c
-void fio_ltoa8u(char *dest, uint64_t i, size_t digits);
-```
-
-Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in octal format (base 8).
-
-#### `fio_ltoa16u`
-
-```c
-void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
-```
-
-Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in hex format (base 16).
-
-**Note**: for hex based numerals facil.io assumes that `digits` are always even (2, 4, 6, 8, 10, 12, 14, 16).
-
-#### `fio_ltoa_bin`
-
-```c
-void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
-```
-
-Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in binary format (base 2).
-
-#### `fio_ltoa_xbase`
-
-```c
-void fio_ltoa_xbase(char *dest, uint64_t i, size_t digits, size_t base);
-```
-
-Writes an unsigned number to `dest` using `digits` bytes (+ `NUL`) in `base` format (up to base 36 inclusive).
+### Unsigned Conversion
 
 #### `fio_atol8u`
 
 ```c
-uint64_t fio_atol8u(char **pstr);
+SFUNC uint64_t fio_atol8u(char **pstr);
 ```
 
-Reads an unsigned base 8 formatted number.
+Reads an unsigned octal number. May overflow the buffer if no terminator is present.
 
 #### `fio_atol10u`
 
 ```c
-uint64_t fio_atol10u(char **pstr);
+SFUNC uint64_t fio_atol10u(char **pstr);
 ```
 
-Reads an unsigned base 10 formatted number.
+Reads an unsigned base-10 number.
 
 #### `fio_atol16u`
 
 ```c
-uint64_t fio_atol16u(char **pstr);
+SFUNC uint64_t fio_atol16u(char **pstr);
 ```
 
-Reads an unsigned hex formatted number (possibly prefixed with `"0x"`).
+Reads an unsigned hex number, with optional `0x` prefix.
 
 #### `fio_atol_bin`
 
 ```c
-uint64_t fio_atol_bin(char **pstr);
+SFUNC uint64_t fio_atol_bin(char **pstr);
 ```
 
-Reads an unsigned binary formatted number (possibly prefixed with `"0b"`).
+Reads an unsigned binary number, with optional `0b` prefix.
 
 #### `fio_atol_xbase`
 
 ```c
-uint64_t fio_atol_xbase(char **pstr, size_t base);
+SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
 ```
 
-Read an unsigned number in any base up to base 36.
+Reads an unsigned number in any base up to 36.
 
-### Number / String Conversion Helpers
+#### `fio_ltoa8u`
+
+```c
+FIO_IFUNC void fio_ltoa8u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned octal number using `digits` bytes plus NUL.
+
+#### `fio_ltoa10u`
+
+```c
+FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned base-10 number using `digits` bytes plus NUL.
+
+#### `fio_ltoa16u`
+
+```c
+FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned hex number using `digits` bytes plus NUL. `digits` is rounded up to an even number.
+
+#### `fio_ltoa_bin`
+
+```c
+FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
+```
+
+Writes an unsigned binary number using `digits` bytes plus NUL.
+
+#### `fio_ltoa_xbase`
+
+```c
+FIO_IFUNC void fio_ltoa_xbase(char *dest,
+                              uint64_t i,
+                              size_t digits,
+                              size_t base);
+```
+
+Writes an unsigned number in `base` (up to 36) using `digits` bytes plus NUL.
+
+### Helpers
 
 #### `fio_c2i`
 
 ```c
-uint8_t fio_c2i(unsigned char c);
+IFUNC uint8_t fio_c2i(unsigned char c);
 ```
 
-Maps characters to alphanumerical value, where numbers have their natural values (`0-9`) and `A-Z` (or `a-z`) map to the values `10-35`.
-
-Out of bound values return 255.
-
-This allows calculations for up to base 36.
+Maps a character to its numeric value (`0-9` → 0-9, `A-Z`/`a-z` → 10-35). Returns `255` for out-of-range characters.
 
 #### `fio_i2c`
 
 ```c
-uint8_t fio_i2c(unsigned char i);
+IFUNC uint8_t fio_i2c(unsigned char i);
 ```
 
-Maps numeral values to alphanumerical characters, where numbers have their natural values (`0-9`) and `A-Z` are the values `10-35`.
-
-Accepts values up to 63. Returns zero for values over 35. Out of bound values produce undefined behavior.
-
-This allows printing of numerals for up to base 36.
-
-#### `fio_u2i_limit`
-
-```c
-int64_t fio_u2i_limit(uint64_t val, size_t to_negative);
-```
-
-Converts an unsigned `val` to a signed `val`, limiting the value to provide overflow protection and limiting it to either a negative or a positive value.
+Maps a numeric value `0-35` to a character (`0-9`, `A-Z`). Out-of-range values above 35 produce undefined behavior; accepts values up to 63 by masking.
 
 #### `fio_digits10`
 
 ```c
-size_t fio_digits10(int64_t i);
+FIO_IFUNC size_t fio_digits10(int64_t i);
 ```
 
-Returns the number of digits of the **signed** number when using base 10. The result includes the possible sign (`-`) digit.
-
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+Returns the number of base-10 digits needed for `i`, including the sign.
 
 #### `fio_digits10u`
 
 ```c
-size_t fio_digits10u(uint64_t i);
+FIO_SFUNC size_t fio_digits10u(uint64_t i);
 ```
 
-Returns the number of digits of the **unsigned** number when using base 10.
-
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+Returns the number of base-10 digits needed for an unsigned number.
 
 #### `fio_digits8u`
 
 ```c
-size_t fio_digits8u(uint64_t i);
+FIO_SFUNC size_t fio_digits8u(uint64_t i);
 ```
 
-Returns the number of digits of the **unsigned** number when using base 8.
-
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+Returns the number of base-8 digits needed for an unsigned number.
 
 #### `fio_digits16u`
 
 ```c
-size_t fio_digits16u(uint64_t i);
+FIO_SFUNC size_t fio_digits16u(uint64_t i);
 ```
 
-Returns the number of digits in base 16 for an **unsigned** number.
-
-Base 16 digits are always computed in pairs (byte sized chunks). Possible values are 2, 4, 6, 8, 10, 12, 14 and 16.
-
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
-
-**Note**: facil.io always assumes all base 16 numeral representations are printed as they are represented in memory.
+Returns the number of base-16 digits needed for an unsigned number, always an even count (2, 4, 6, ... 16).
 
 #### `fio_digits_bin`
 
 ```c
-size_t fio_digits_bin(uint64_t i);
+FIO_SFUNC size_t fio_digits_bin(uint64_t i);
 ```
 
-Returns the number of digits of the **unsigned** number when using base 2.
-
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+Returns the number of base-2 digits needed for an unsigned number, rounded up to an even count.
 
 #### `fio_digits_xbase`
 
 ```c
-size_t fio_digits_xbase(uint64_t i, size_t base);
+FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base);
 ```
 
-Returns the number of digits of the **unsigned** number when using base `base`.
+Returns the number of digits needed for an unsigned number in `base` (must be < 65).
 
-This function can be used before allocating memory in order to predict the amount of memory required by a String representation of the number.
+#### `fio_u2i_limit`
 
-### IEEE 754 Floating Point Helpers
+```c
+FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
+```
+
+Converts unsigned `val` to signed with overflow protection. If `invert` is zero, clamps to `INT64_MAX` and sets `errno = E2BIG` on overflow. If `invert` is non-zero, produces the negative value and clamps to `INT64_MIN`.
+
+### IEEE 754 Helpers
 
 #### `fio_i2d`
 
 ```c
-double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
+FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent_in_base_2);
 ```
 
-Converts a 64 bit signed integer mantissa and a base-2 exponent to an IEEE 754 formatted double.
+Converts a signed 64-bit mantissa and base-2 exponent to a `double`.
 
 #### `fio_u2d`
 
 ```c
-double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
+FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent_in_base_2);
 ```
 
-Converts a 64 bit unsigned integer mantissa and a base-2 exponent to an IEEE 754 formatted double.
+Converts an unsigned 64-bit mantissa and base-2 exponent to a `double`.
 
-### Big Number Conversion
+### Big Number Hex Conversion
 
-These functions provide hex string conversion for large unsigned integer types.
-
-#### `fio_u128_hex_read`
+#### `fio_u128_hex_read` / `fio_u256_hex_read` / `fio_u512_hex_read`
 
 ```c
-fio_u128 fio_u128_hex_read(char **pstr);
+SFUNC fio_u128 fio_u128_hex_read(char **pstr);
+SFUNC fio_u256 fio_u256_hex_read(char **pstr);
+SFUNC fio_u512 fio_u512_hex_read(char **pstr);
 ```
 
-Reads a hex numeral string and initializes a 128-bit unsigned integer.
+Reads a hex string and initializes the corresponding wide integer. Updates `*pstr` past the consumed input.
 
-#### `fio_u256_hex_read`
+#### `fio_u1024_hex_read` / `fio_u2048_hex_read` / `fio_u4096_hex_read`
 
 ```c
-fio_u256 fio_u256_hex_read(char **pstr);
+SFUNC fio_u1024 fio_u1024_hex_read(char **pstr);
+SFUNC fio_u2048 fio_u2048_hex_read(char **pstr);
+SFUNC fio_u4096 fio_u4096_hex_read(char **pstr);
 ```
 
-Reads a hex numeral string and initializes a 256-bit unsigned integer.
+Same as above for 1024-, 2048-, and 4096-bit integers.
 
-#### `fio_u512_hex_read`
+#### `fio_u128_hex_write` / `fio_u256_hex_write` / `fio_u512_hex_write`
 
 ```c
-fio_u512 fio_u512_hex_read(char **pstr);
+SFUNC size_t fio_u128_hex_write(char *dest, const fio_u128 *u);
+SFUNC size_t fio_u256_hex_write(char *dest, const fio_u256 *u);
+SFUNC size_t fio_u512_hex_write(char *dest, const fio_u512 *u);
 ```
 
-Reads a hex numeral string and initializes a 512-bit unsigned integer.
+Writes a wide integer as a hex string to `dest`. Returns bytes written excluding NUL.
 
-#### `fio_u1024_hex_read`
+#### `fio_u1024_hex_write` / `fio_u2048_hex_write` / `fio_u4096_hex_write`
 
 ```c
-fio_u1024 fio_u1024_hex_read(char **pstr);
+SFUNC size_t fio_u1024_hex_write(char *dest, const fio_u1024 *u);
+SFUNC size_t fio_u2048_hex_write(char *dest, const fio_u2048 *u);
+SFUNC size_t fio_u4096_hex_write(char *dest, const fio_u4096 *u);
 ```
 
-Reads a hex numeral string and initializes a 1024-bit unsigned integer.
+Same as above for 1024-, 2048-, and 4096-bit integers.
 
-#### `fio_u2048_hex_read`
+### Example
 
 ```c
-fio_u2048 fio_u2048_hex_read(char **pstr);
+#define FIO_ATOL
+#include "fio-stl.h"
+
+int main(void) {
+  char *p = "0x1F 0b1010 42";
+  char buf[80];
+
+  printf("hex: %lld\n", (long long)fio_atol(&p));
+  ++p; /* skip space */
+  printf("bin: %lld\n", (long long)fio_atol(&p));
+  ++p;
+  printf("dec: %lld\n", (long long)fio_atol(&p));
+
+  fio_ltoa(buf, -255, 16);
+  printf("back to hex: %s\n", buf);
+  return 0;
+}
 ```
 
-Reads a hex numeral string and initializes a 2048-bit unsigned integer.
-
-#### `fio_u4096_hex_read`
-
-```c
-fio_u4096 fio_u4096_hex_read(char **pstr);
-```
-
-Reads a hex numeral string and initializes a 4096-bit unsigned integer.
-
-#### `fio_u128_hex_write`
-
-```c
-size_t fio_u128_hex_write(char *dest, const fio_u128 *u);
-```
-
-Writes a 128-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
-#### `fio_u256_hex_write`
-
-```c
-size_t fio_u256_hex_write(char *dest, const fio_u256 *u);
-```
-
-Writes a 256-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
-#### `fio_u512_hex_write`
-
-```c
-size_t fio_u512_hex_write(char *dest, const fio_u512 *u);
-```
-
-Writes a 512-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
-#### `fio_u1024_hex_write`
-
-```c
-size_t fio_u1024_hex_write(char *dest, const fio_u1024 *u);
-```
-
-Writes a 1024-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
-#### `fio_u2048_hex_write`
-
-```c
-size_t fio_u2048_hex_write(char *dest, const fio_u2048 *u);
-```
-
-Writes a 2048-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
-#### `fio_u4096_hex_write`
-
-```c
-size_t fio_u4096_hex_write(char *dest, const fio_u4096 *u);
-```
-
-Writes a 4096-bit unsigned integer to `dest` as a hex string.
-
-Returns the number of bytes written (excluding the NUL terminator).
-
--------------------------------------------------------------------------------
+------------------------------------------------------------

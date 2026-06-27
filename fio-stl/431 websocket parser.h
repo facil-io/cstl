@@ -64,7 +64,7 @@ enum {
   FIO_WEBSOCKET_EV_ERROR = 4,
 };
 
-/** WebSocket frame opcodes (RFC 6455). */
+/* WebSocket frame opcodes (RFC 6455). */
 #define FIO_WEBSOCKET_OP_CONT   0x0
 #define FIO_WEBSOCKET_OP_TEXT   0x1
 #define FIO_WEBSOCKET_OP_BINARY 0x2
@@ -72,20 +72,20 @@ enum {
 #define FIO_WEBSOCKET_OP_PING   0x9
 #define FIO_WEBSOCKET_OP_PONG   0xA
 
-/** Parser FSM states. */
+/* Parser FSM states. */
 #define FIO_WEBSOCKET_STATE_HEADER  0
 #define FIO_WEBSOCKET_STATE_PAYLOAD 1
 #define FIO_WEBSOCKET_STATE_CLOSED  0xFE
 #define FIO_WEBSOCKET_STATE_ERROR   0xFF
 
-/** Flag bit positions in fio_websocket_s.flags. */
+/* Flag bit positions in fio_websocket_s.flags. */
 #define FIO_WEBSOCKET_FLAG_FIN             0x80
 #define FIO_WEBSOCKET_FLAG_MASKED          0x40
 #define FIO_WEBSOCKET_FLAG_OPCODE_MASK     0x3C
 #define FIO_WEBSOCKET_FLAG_OPCODE_SHIFT    2
 #define FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK 0x03
 
-/** Flag bit positions in fio_websocket_s.flags2. */
+/* Flag bit positions in fio_websocket_s.flags2. */
 #define FIO_WEBSOCKET_FLAG2_PAUSED        0x80
 #define FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK  0x70
 #define FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT 4

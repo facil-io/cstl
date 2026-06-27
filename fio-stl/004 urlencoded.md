@@ -1,20 +1,13 @@
-## URL-Encoded Parser
+# URL-Encoded Parser
 
 ```c
 #define FIO_URL_ENCODED
-#include FIO_INCLUDE_FILE
+#include "fio-stl.h"
 ```
 
-By defining `FIO_URL_ENCODED`, a non-allocating, callback-based URL-encoded (`application/x-www-form-urlencoded`) parser is defined and made available.
+A non-allocating parser for `application/x-www-form-urlencoded` data. It splits `name=value&...` pairs and leaves decoding to you. No copies, no drama. Implemented in [`./004 urlencoded.h`](./004%20urlencoded.h).
 
-The parser finds boundaries between `name=value` pairs without decoding the data. Decoding is the caller's responsibility (use `fio_string_write_url_dec`).
-
-URL-encoded format:
-- Pairs separated by `&`
-- Name and value separated by `=`
-- Special characters are percent-encoded (`%XX`)
-
-### URL-Encoded Parser Types
+### Types
 
 #### `fio_url_encoded_parser_callbacks_s`
 
@@ -25,161 +18,87 @@ typedef struct {
 } fio_url_encoded_parser_callbacks_s;
 ```
 
-The URL-encoded parser callbacks. Callbacks receive `udata` as their first argument.
+Parser callbacks. `udata` is passed to callbacks and updated from `on_pair`'s return value.
 
 **Members:**
-- `on_pair` - called for each `name=value` pair found. `name` and `value` point directly into the original input data (NOT decoded). Returns the (possibly updated) `udata`, or NULL to stop parsing.
-- `on_error` - called on parsing error (optional). Currently reserved for future use since URL-encoded parsing is very permissive.
+- `on_pair` - called for each pair. `name` and `value` point into the original input and are **not decoded**. Return non-NULL to continue, or `NULL` to stop.
+- `on_error` - optional and currently unused; reserved because parsers enjoy having a rainy-day pocket.
 
-**Note**: this struct should typically be declared as `static const`.
+If `callbacks` or a member is `NULL`, an internal no-op callback is used.
 
 #### `fio_url_encoded_result_s`
 
 ```c
 typedef struct {
-  size_t consumed; /* Number of bytes consumed from the buffer. */
-  size_t count;    /* Number of name=value pairs found. */
-  int err;         /* Non-zero if an error occurred (callback returned NULL). */
+  size_t consumed;
+  size_t count;
+  int err;
 } fio_url_encoded_result_s;
 ```
 
-The URL-encoded parse result type.
+Parse result.
 
 **Members:**
-- `consumed` - number of bytes consumed from the input buffer
-- `count` - number of `name=value` pairs found
-- `err` - non-zero if parsing was stopped early (the `on_pair` callback returned NULL)
+- `consumed` - number of input bytes consumed
+- `count` - number of non-empty pairs reported
+- `err` - non-zero when parsing stopped because `on_pair` returned `NULL`
 
-### URL-Encoded Parser API
+### Parsing
 
 #### `fio_url_encoded_parse`
 
 ```c
-fio_url_encoded_result_s
+SFUNC fio_url_encoded_result_s
 fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
                       void *udata,
                       const char *data,
                       size_t len);
 ```
 
-Parses URL-encoded data from a buffer.
+Parses `data[0..len)` as URL-encoded form data.
 
-Iterates over the input, splitting it into `name=value` pairs delimited by `&`, and invokes the `on_pair` callback for each pair found. The parser does NOT decode percent-encoded characters.
+Rules from the implementation:
+- pairs are separated by `&`
+- the first `=` in a pair separates name and value
+- `name=` is valid and has an empty value
+- `name` is valid and has an empty value
+- `=value` is valid and has an empty name
+- empty pairs such as leading `&` or `&&` are skipped
+- percent escapes are not decoded
 
-**Parameters:**
-- `callbacks` - pointer to the callback struct (should be `static const`)
-- `udata` - user data passed to callbacks; also receives the return value of `on_pair`
-- `data` - pointer to the URL-encoded data to parse
-- `len` - length of the data in bytes
+Use a string helper such as `fio_string_write_url_dec` when you need decoded values.
 
-**Returns:** a `fio_url_encoded_result_s` containing:
-- `consumed` - number of bytes consumed from the buffer
-- `count` - number of `name=value` pairs found
-- `err` - non-zero if parsing was stopped (callback returned NULL)
+**Ownership:** callback buffers borrow the original `data`; keep `data` alive while parsing and copy anything you need later.
 
-Parsing rules:
-- Pairs are separated by `&`
-- Name and value are separated by `=`
-- Empty value is valid: `name=` produces `value.len = 0`
-- Missing `=` means value is empty: `name` produces `name="name"`, `value.len = 0`
-- Empty name with value: `=value` produces `name.len = 0`, `value="value"`
-- Empty pairs (`&&`) are skipped
+**Thread-safety:** parsing uses only caller-provided state and stack locals.
 
-**Note**: the parser does NOT decode percent-encoded characters. Use `fio_string_write_url_dec` to decode name and value buffers if needed.
-
-### URL-Encoded Parser Examples
-
-#### Basic Parsing
+### Example
 
 ```c
 #define FIO_URL_ENCODED
-#include FIO_INCLUDE_FILE
+#include "fio-stl.h"
+#include <stdio.h>
+#include <string.h>
 
-static void *my_on_pair(void *udata,
-                        fio_buf_info_s name,
-                        fio_buf_info_s value) {
-  printf("  %.*s = %.*s\n",
+static void *on_pair(void *udata, fio_buf_info_s name, fio_buf_info_s value) {
+  printf("%.*s = %.*s\n",
          (int)name.len, name.buf,
          (int)value.len, value.buf);
   return udata;
 }
 
-void example_basic(void) {
-  static const fio_url_encoded_parser_callbacks_s callbacks = {
-    .on_pair = my_on_pair,
+int main(void) {
+  const char form[] = "name=Bo&empty=&encoded=a%20b&&solo";
+  static const fio_url_encoded_parser_callbacks_s cb = {
+      .on_pair = on_pair,
   };
 
-  const char *data = "foo=bar&baz=42&key=hello%20world";
-  size_t len = strlen(data);
+  fio_url_encoded_result_s r =
+      fio_url_encoded_parse(&cb, (void *)1, form, strlen(form));
 
-  fio_url_encoded_result_s result =
-      fio_url_encoded_parse(&callbacks, (void *)1, data, len);
-
-  printf("Consumed: %zu bytes, Pairs: %zu, Error: %d\n",
-         result.consumed, result.count, result.err);
-  /* Output:
-   *   foo = bar
-   *   baz = 42
-   *   key = hello%20world
-   * Consumed: 31 bytes, Pairs: 3, Error: 0
-   */
+  printf("pairs=%zu consumed=%zu err=%d\n", r.count, r.consumed, r.err);
+  return r.err;
 }
 ```
 
-#### Early Termination
-
-```c
-static void *stop_after_two(void *udata,
-                            fio_buf_info_s name,
-                            fio_buf_info_s value) {
-  size_t *count = (size_t *)udata;
-  ++(*count);
-  if (*count >= 2)
-    return NULL; /* Stop parsing */
-  return udata;
-  (void)name;
-  (void)value;
-}
-
-void example_early_stop(void) {
-  static const fio_url_encoded_parser_callbacks_s callbacks = {
-    .on_pair = stop_after_two,
-  };
-
-  const char *data = "a=1&b=2&c=3&d=4";
-  size_t count = 0;
-
-  fio_url_encoded_result_s result =
-      fio_url_encoded_parse(&callbacks, &count, data, strlen(data));
-
-  /* result.count == 2, result.err == 1 */
-}
-```
-
-#### Edge Cases
-
-```c
-void example_edges(void) {
-  static const fio_url_encoded_parser_callbacks_s callbacks = {
-    .on_pair = my_on_pair,
-  };
-
-  /* Missing '=' - entire segment is the name */
-  fio_url_encoded_parse(&callbacks, (void *)1, "justname", 8);
-  /* on_pair: name="justname", value="" */
-
-  /* Empty value */
-  fio_url_encoded_parse(&callbacks, (void *)1, "key=", 4);
-  /* on_pair: name="key", value="" */
-
-  /* Empty name with value */
-  fio_url_encoded_parse(&callbacks, (void *)1, "=value", 6);
-  /* on_pair: name="", value="value" */
-
-  /* Empty pairs are skipped */
-  fio_url_encoded_parse(&callbacks, (void *)1, "a=1&&b=2", 8);
-  /* on_pair called twice: "a"="1" and "b"="2" */
-}
-```
-
--------------------------------------------------------------------------------
+---

@@ -1,405 +1,364 @@
-## Dynamic Arrays
+# Dynamic Arrays — Module 202
+
+Type-safe dynamic arrays, generated from a name macro.
+
+See also: [← 200 types-overview.md](./200 types-overview.md)
+
+---
+
+## Setup
 
 ```c
-#define FIO_ARRAY_NAME str_ary
-#define FIO_ARRAY_TYPE char *
-#define FIO_ARRAY_TYPE_CMP(a,b) (!strcmp((a),(b)))
+#define FIO_ARRAY_NAME ary         /* required — sets the type and function prefix */
+#define FIO_ARRAY_TYPE int         /* optional — element type; default void * */
 #include "fio-stl.h"
 ```
 
-Dynamic arrays are extremely common and useful data structures.
+This generates `ary_s` and a full API prefixed `ary_*`.
 
-In essence, Arrays are blocks of memory that contain all their elements "in a row". They grow (or shrink) as more items are added (or removed).
+Throughout this document `ARY` stands for whatever name you chose. `ARY_PTR` is shorthand for `FIO_ARRAY_PTR` (usually `ARY_s *`). All examples use `fio_ary` as the name.
 
-Items are accessed using a numerical `index` indicating the element's position within the array.
+---
 
-Indexes are zero based (first element == 0).
+## Configuration Macros
 
-**Note:** The dynamic array implementation provided limits the array's capacity to 31bits ((1<<31) - 1).
+Set these **before** `#include`, after `FIO_ARRAY_NAME`.
 
-### Dynamic Array Performance
+### Element type
 
-Seeking time is an extremely fast O(1). Arrays are also very fast to iterate since they enjoy high memory locality.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_ARRAY_TYPE` | `void *` | The element type stored in the array. |
+| `FIO_ARRAY_TYPE_INVALID` | `NULL` / `{0}` | Sentinel value returned for out-of-bounds access. |
+| `FIO_ARRAY_TYPE_INVALID_SIMPLE` | `1` if `{0}` | Set to `1` if the invalid element is all-zero bytes. |
+| `FIO_ARRAY_TYPE_STR` | — | Shortcut: configures the array for `fio_keystr_s` string elements (sets type, copy, destroy, and compare automatically). |
 
-Adding and editing items is also a very fast O(1), especially if enough memory was previously reserved. Otherwise, memory allocation and copying will slow performance.
+### Element hooks
 
-However, arrays suffer from slow find operations. Find has a worst case scenario O(n) cost.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_ARRAY_TYPE_COPY(dest, src)` | `dest = src` | Called when copying an element into the array. |
+| `FIO_ARRAY_TYPE_DESTROY(obj)` | _(nothing)_ | Called when an element is removed or the array is destroyed. |
+| `FIO_ARRAY_TYPE_CMP(a, b)` | `a == b` | Called by `find`, `remove2`, etc. |
+| `FIO_ARRAY_TYPE_CONCAT_COPY(dest, src)` | same as `COPY` | Used during `concat`; override if concat needs different copy semantics. |
+| `FIO_ARRAY_DESTROY_AFTER_COPY` | `1` if both hooks are non-trivial | When set, `DESTROY` is called on an element after it has been copied to an `old` pointer. |
 
-They also suffer from slow item removal (except, in our case, for `pop` / `unshift` operations), since middle-element removal requires memory copying when fixing the "hole" made in the array.
+### Memory / growth
 
-A common solution is to reserve a value for "empty" elements and `set` the element's value instead of `remove` the element.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_ARRAY_PADDING` | `4` | Extra empty slots allocated beyond the requested capacity. |
+| `FIO_ARRAY_EXPONENTIAL` | `0` | Set to `1` for exponential (doubling) growth. Linear growth with padding is the default. |
+| `FIO_ARRAY_ENABLE_EMBEDDED` | `1` | Store small arrays directly inside the struct (no heap allocation). Values > 1 add extra struct fields to increase the embedded capacity. |
 
-**Note**: unlike some dynamic array implementations, this STL implementation doesn't grow exponentially. Using the `ARY_reserve` function is highly encouraged for performance.
+---
 
-
-### Dynamic Array Overview
-
-To create a dynamic array type, define the type name using the `FIO_ARRAY_NAME` macro. i.e.:
+## Initialization
 
 ```c
-#define FIO_ARRAY_NAME int_ary
+ARY_s a = FIO_ARRAY_INIT;      /* stack — zero-initialize */
+
+ARY_s *p = ARY_new();          /* heap — allocate + zero-initialize */
 ```
 
-Next (usually), define the `FIO_ARRAY_TYPE` macro with the element type. The default element type is `void *`. For example:
+`FIO_ARRAY_INIT` expands to `{0}`, so a zero-initializing `memset` also works.
+
+---
+
+## Lifecycle
 
 ```c
+ARY_s *ARY_new(void);          /* allocate + initialize on the heap */
+void   ARY_free(ARY_PTR ary);  /* destroy elements + free the container */
+void   ARY_destroy(ARY_PTR ary); /* destroy elements, reset to empty (stack-safe) */
+```
+
+Use `ARY_destroy` for stack-allocated arrays. Use `ARY_new` / `ARY_free` for heap.
+
+```c
+#define FIO_ARRAY_NAME fio_ary
 #define FIO_ARRAY_TYPE int
-```
-
-For complex types, define any (or all) of the following macros:
-
-```c
-// set to adjust element copying 
-#define FIO_ARRAY_TYPE_COPY(dest, src)  
-// set for element cleanup 
-#define FIO_ARRAY_TYPE_DESTROY(obj)     
-// set to adjust element comparison 
-#define FIO_ARRAY_TYPE_CMP(a, b)        
-// set to adjust element copying during concat operations
-#define FIO_ARRAY_TYPE_CONCAT_COPY(dest, src)
-// to be returned when `index` is out of bounds / holes 
-#define FIO_ARRAY_TYPE_INVALID 0 
-// set ONLY if the invalid element is all zero bytes 
-#define FIO_ARRAY_TYPE_INVALID_SIMPLE 1     
-// should the object be destroyed when copied to an `old` pointer?
-#define FIO_ARRAY_DESTROY_AFTER_COPY 1 
-// when array memory grows, how many extra "spaces" should be allocated?
-#define FIO_ARRAY_PADDING 4 
-// should the array growth be exponential? (ignores FIO_ARRAY_PADDING)
-#define FIO_ARRAY_EXPONENTIAL 0 
-// optimizes small arrays (mostly tuplets and single item arrays).
-// note: values larger than 1 add a memory allocation cost to the array container
-#define FIO_ARRAY_ENABLE_EMBEDDED 1
-```
-
-For string arrays, the `FIO_ARRAY_TYPE_STR` macro can be used as a shortcut:
-
-```c
-// Automatically sets up FIO_ARRAY_TYPE, FIO_ARRAY_TYPE_COPY, 
-// FIO_ARRAY_TYPE_DESTROY, FIO_ARRAY_TYPE_CMP, and FIO_ARRAY_DESTROY_AFTER_COPY
-// for fio_keystr_s string types
-#define FIO_ARRAY_TYPE_STR
-```
-
-To create the type and helper functions, include The facil.io library header.
-
-For example:
-
-```c
-typedef struct {
-  int i;
-  float f;
-} foo_s;
-
-#define FIO_ARRAY_NAME ary
-#define FIO_ARRAY_TYPE foo_s
-#define FIO_ARRAY_TYPE_CMP(a,b) (a.i == b.i && a.f == b.f)
-#include "fio-stl/include.h"
+#include "fio-stl.h"
 
 void example(void) {
-  ary_s a = FIO_ARRAY_INIT;
-  foo_s *p = ary_push(&a, (foo_s){.i = 42});
-  FIO_ARRAY_EACH(ary, &a, pos) { // pos will be a pointer to the element
-    fprintf(stderr, "* [%zu]: %p : %d\n", (size_t)(pos - ary2ptr(&a)), (void *)pos, pos->i);
-  }
-  ary_destroy(&a);
+    fio_ary_s a = FIO_ARRAY_INIT;
+    fio_ary_push(&a, 1);
+    fio_ary_push(&a, 2);
+    fio_ary_push(&a, 3);
+    /* ... use ... */
+    fio_ary_destroy(&a);
 }
 ```
 
-### Dynamic Arrays - API
+---
 
-#### The Array Type (`ARY_s`)
+## State Inspection
 
 ```c
-typedef struct {
-  uint32_t start;  /* the offset to the first item */
-  uint32_t end;    /* the offset to the first empty location */
-  uint32_t capa;   /* the array's capacity */
-  FIO_ARRAY_TYPE *ary;  /* pointer to the array's memory (if not embedded) */
-} FIO_NAME(FIO_ARRAY_NAME, s); /* ARY_s in these docs */
+uint32_t       ARY_count(ARY_PTR ary);   /* number of elements */
+uint32_t       ARY_capa (ARY_PTR ary);   /* current capacity   */
+int            ARY_is_embedded(ARY_PTR ary); /* 1 = embedded, 0 = heap alloc, -1 = error */
+FIO_ARRAY_TYPE *ARY2ptr(ARY_PTR ary);        /* raw C pointer to the first element */
 ```
 
-The array type should be considered opaque. Use the helper functions to update the array's state when possible, even though the array's data is easily understood and could be manually adjusted as needed.
+`ARY_is_embedded` reports whether the array currently uses in-struct storage. `ARY2ptr` returns a pointer directly into the backing array. It is valid until the next mutating call. Useful for bulk reads or passing to functions that expect a C array.
 
-#### `FIO_ARRAY_INIT`
+---
 
-````c
-#define FIO_ARRAY_INIT  {0}
-````
-
-This macro initializes an uninitialized array object.
-
-#### `ARY_destroy`
-
-````c
-void ARY_destroy(ARY_s * ary);
-````
-
-Destroys any objects stored in the array and frees the internal state.
-
-#### `ARY_new`
-
-````c
-ARY_s * ARY_new(void);
-````
-
-Allocates a new array object on the heap and initializes it's memory.
-
-#### `ARY_free`
-
-````c
-void ARY_free(ARY_s * ary);
-````
-
-Frees an array's internal data AND it's container!
-
-#### `ARY_count`
-
-````c
-uint32_t ARY_count(ARY_s * ary);
-````
-
-Returns the number of elements in the Array.
-
-#### `ARY_capa`
-
-````c
-uint32_t ARY_capa(ARY_s * ary);
-````
-
-Returns the current, temporary, array capacity (it's dynamic).
-
-#### `ARY_embedded`
-
-````c
-int ARY_embedded(ARY_s * ary);
-````
-
-Returns 1 if the array is embedded, 0 if it has memory allocated and -1 on an error.
-
-#### `ARY_ptr`
-
-````c
-FIO_ARRAY_TYPE * ARY_ptr(ARY_s * ary);
-````
-
-Returns a pointer to the C array containing the objects.
-
-#### `ARY_reserve`
+## Memory Management
 
 ```c
-uint32_t ARY_reserve(ARY_s * ary, int64_t capa);
+/* Reserve capacity for at least `capa` additional elements.
+   Negative capa reserves space at the beginning of the array.
+   Returns the new capacity. */
+uint32_t ARY_reserve(ARY_PTR ary, int64_t capa);
+
+/* Attempt to shrink memory to fit the current element count. */
+void ARY_compact(ARY_PTR ary);
 ```
 
-Reserves capacity for new members to be added to the array.
+Growth is linear by default (current count + padding). Exponential growth can be enabled with `FIO_ARRAY_EXPONENTIAL 1`. Always call `ARY_reserve` before large batch inserts to avoid repeated reallocation.
 
-If `capa` is negative, new memory will be allocated at the beginning of the array rather then it's end.
+---
 
-Returns the array's new capacity.
-
-#### `ARY_concat`
+## Push / Pop (end of array)
 
 ```c
-ARY_s * ARY_concat(ARY_s * dest, ARY_s * src);
+/* Append an element. Returns a pointer to the new element, or NULL on error. */
+FIO_ARRAY_TYPE *ARY_push(ARY_PTR ary, FIO_ARRAY_TYPE data);
+
+/* Remove the last element.
+   If `old` is not NULL, the removed value is copied there.
+   Returns 0 on success, -1 if the array is empty. */
+int ARY_pop(ARY_PTR ary, FIO_ARRAY_TYPE *old);
 ```
 
-Adds all the items in the `src` Array to the end of the `dest` Array.
-
-The `src` Array remain untouched.
-
-Always returns the destination array (`dest`).
-
-#### `ARY_set`
-
 ```c
-FIO_ARRAY_TYPE * ARY_set(ARY_s * ary,
-                       int64_t index,
-                       FIO_ARRAY_TYPE data,
-                       FIO_ARRAY_TYPE *old);
+fio_ary_push(&a, 42);
+
+int out;
+if (!fio_ary_pop(&a, &out))
+    printf("popped: %d\n", out);
 ```
 
-Sets `index` to the value in `data`.
+---
 
-If `index` is negative, it will be counted from the end of the Array (-1 == last element).
-
-If `old` isn't NULL, the existing data will be copied to the location pointed to by `old` before the copy in the Array is destroyed.
-
-Returns a pointer to the new object, or NULL on error.
-
-#### `ARY_get`
+## Unshift / Shift (beginning of array)
 
 ```c
-FIO_ARRAY_TYPE ARY_get(ARY_s * ary, int64_t index);
+/* Prepend an element. Returns a pointer to the new element, or NULL on error.
+   May trigger memmove. */
+FIO_ARRAY_TYPE *ARY_unshift(ARY_PTR ary, FIO_ARRAY_TYPE data);
+
+/* Remove the first element.
+   If `old` is not NULL, the removed value is copied there.
+   Returns 0 on success, -1 if the array is empty. */
+int ARY_shift(ARY_PTR ary, FIO_ARRAY_TYPE *old);
 ```
 
-Returns the value located at `index` (no copying is performed).
+Both `push`/`pop` and heap-backed `unshift`/`shift` are O(1) amortized. The implementation maintains headroom at both ends of the heap buffer to keep prepend operations cheap; the tiny embedded path may move elements.
 
-If `index` is negative, it will be counted from the end of the Array (-1 == last element).
+---
 
-**Reminder**: indexes are zero based (first element == 0).
-
-#### `ARY_find`
+## Random Access
 
 ```c
-uint32_t ARY_find(ARY_s * ary, FIO_ARRAY_TYPE data, int64_t start_at);
-/* When an object can't be founds, this is the returned value. */
+/* Set the element at `index`. Grows the array if needed, filling gaps with
+   FIO_ARRAY_TYPE_INVALID.
+   Negative index counts from the end (-1 == last element).
+   If `old` is not NULL, the previous value is copied there before being
+   destroyed.
+   Returns a pointer to the set element, or NULL on error. */
+FIO_ARRAY_TYPE *ARY_set(ARY_PTR ary, int64_t index, FIO_ARRAY_TYPE data,
+                        FIO_ARRAY_TYPE *old);
+
+/* Return the element at `index` (no copy performed).
+   Negative index counts from the end.
+   Returns FIO_ARRAY_TYPE_INVALID if out of bounds. */
+FIO_ARRAY_TYPE ARY_get(ARY_PTR ary, int64_t index);
+```
+
+```c
+fio_ary_set(&a, 5, 99, NULL);    /* extend + set index 5 */
+int v = fio_ary_get(&a, -1);     /* last element */
+int prev;
+fio_ary_set(&a, 0, 7, &prev);   /* replace index 0, capture old value */
+```
+
+---
+
+## Concat
+
+```c
+/* Append all elements from `src` to `dest`.
+   `src` is not modified.
+   Returns `dest`, or NULL on allocation failure. */
+ARY_PTR ARY_concat(ARY_PTR dest, ARY_PTR src);
+```
+
+Uses `FIO_ARRAY_TYPE_CONCAT_COPY` (defaults to `FIO_ARRAY_TYPE_COPY`) for each element, so managed types are properly duplicated.
+
+---
+
+## Search and Removal
+
+```c
+/* Find the first occurrence of `data` starting at `start_at`.
+   Negative `start_at` seeks backwards (-1 == last element).
+   Returns the index, or FIO_ARRAY_NOT_FOUND ((uint32_t)-1). */
+uint32_t ARY_find(ARY_PTR ary, FIO_ARRAY_TYPE data, int64_t start_at);
+
+/* Remove element at `index`. All subsequent elements shift left (memmove).
+   If `old` is not NULL, the removed value is copied there.
+   Returns 0 on success, -1 on error. O(n). */
+int ARY_remove(ARY_PTR ary, int64_t index, FIO_ARRAY_TYPE *old);
+
+/* Remove all occurrences of `data`. Elements are compacted in-place.
+   Returns the count of removed items. O(n). */
+uint32_t ARY_remove2(ARY_PTR ary, FIO_ARRAY_TYPE data);
+```
+
+```c
 #define FIO_ARRAY_NOT_FOUND ((uint32_t)-1)
+
+uint32_t idx = fio_ary_find(&a, 42, 0);
+if (idx != FIO_ARRAY_NOT_FOUND)
+    fio_ary_remove(&a, idx, NULL);
 ```
 
-Returns the index of the object or `FIO_ARRAY_NOT_FOUND` (`(uint32_t)-1`) if the object wasn't found.
+---
 
-If `start_at` is negative (i.e., -1), than seeking will be performed in reverse, where -1 == last index (-2 == second to last, etc').
+## Iteration
 
-#### `ARY_remove`
-```c
-int ARY_remove(ARY_s * ary, int64_t index, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the array, MOVING all the other objects to prevent "holes" in the data.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns 0 on success and -1 on error.
-
-This action is O(n) where n in the length of the array. It could get expensive.
-
-#### `ARY_remove2`
+### Callback-based
 
 ```c
-uint32_t ARY_remove2(ARY_S * ary, FIO_ARRAY_TYPE data);
-```
+/** Iteration info passed to the callback. */
+typedef struct ARY_each_s {
+    ARY_PTR const parent;   /* the array being iterated */
+    uint64_t      index;    /* current element index */
+    int (*task)(struct ARY_each_s *info); /* the callback; may be updated mid-cycle */
+    void         *udata;    /* opaque user data */
+    FIO_ARRAY_TYPE value;   /* the current element's value */
+    uint64_t      padding;  /* reserved */
+} ARY_each_s;
 
-Removes all occurrences of an object from the array (if any), MOVING all the existing objects to prevent "holes" in the data.
-
-Returns the number of items removed.
-
-This action is O(n) where n in the length of the array. It could get expensive.
-
-#### `ARY_compact`
-```c
-void ARY_compact(ARY_s * ary);
-```
-
-Attempts to lower the array's memory consumption.
-
-#### `ARY_push`
-
-```c
-FIO_ARRAY_TYPE * ARY_push(ARY_s * ary, FIO_ARRAY_TYPE data);
-```
-
- Pushes an object to the end of the Array. Returns a pointer to the new object or NULL on error.
-
-#### `ARY_pop`
-
-```c
-int ARY_pop(ARY_s * ary, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the end of the Array.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns -1 on error (Array is empty) and 0 on success.
-
-#### `ARY_unshift`
-
-```c
-FIO_ARRAY_TYPE *ARY_unshift(ARY_s * ary, FIO_ARRAY_TYPE data);
-```
-
-Unshifts an object to the beginning of the Array. Returns a pointer to the new object or NULL on error.
-
-This could be expensive, causing `memmove`.
-
-#### `ARY_shift`
-
-```c
-int ARY_shift(ARY_s * ary, FIO_ARRAY_TYPE *old);
-```
-
-Removes an object from the beginning of the Array.
-
-If `old` is set, the data is copied to the location pointed to by `old` before the data in the array is destroyed.
-
-Returns -1 on error (Array is empty) and 0 on success.
-
-#### `ARY_each`
-
-```c
-uint32_t ARY_each(ARY_s * ary,
-                  int (*task)(ARY_each_s * info),
+/* Call `task` for each element starting at `start_at`.
+   Returning -1 from `task` stops the loop.
+   Returns the stop position (elements processed + start). */
+uint32_t ARY_each(ARY_PTR ary,
+                  int (*task)(ARY_each_s *info),
                   void *udata,
                   int64_t start_at);
 ```
 
-Iteration using a callback for each entry in the array.
-
-The callback task function must accept an `ARY_each_s` pointer (name matches Array name).
-
-If the callback returns -1, the loop is broken. Any other value is ignored.
-
-Returns the relative "stop" position (number of items processed + starting point).
-
-The `ARY_each_s` data structure looks like this:
+### Pointer iteration
 
 ```c
-/** Iteration information structure passed to the callback. */
-typedef struct ARY_each_s {
-  /** The array iterated. Once set, cannot be safely changed. */
-  FIO_ARRAY_PTR const parent;
-  /** The current object's index */
-  uint64_t index;
-  /** The callback / task called for each index, may be updated mid-cycle. */
-  int (*task)(struct ARY_each_s * info);
-  /** Opaque user data. */
-  void *udata;
-  /** The object / value at the current index. */
-  FIO_ARRAY_TYPE value;
-  /* memory padding used for FIOBJ */
-  uint64_t padding;
-} ARY_each_s;
-```
-
-#### `ARY_each_next`
-
-```c
-FIO_ARRAY_TYPE * ARY_each_next(ARY_s* ary,
+/* Returns a pointer to the next element.
+   Pass NULL for `pos` to get the first element.
+   `first` tracks the base pointer across reallocations.
+   Returns NULL when the end is reached. */
+FIO_ARRAY_TYPE *ARY_each_next(ARY_PTR ary,
                                FIO_ARRAY_TYPE **first,
                                FIO_ARRAY_TYPE *pos);
 ```
 
-Returns a pointer to the (next) object in the array.
-
-Returns a pointer to the first object if `pos == NULL` and there are objects in the array.
-
-The first pointer is automatically set and it allows object insertions and memory effecting functions to be called from within the loop.
-
-If the object in `pos` (or an object before it) were removed, consider passing `pos-1` to the function, to avoid skipping any elements while looping.
-
-Returns the next object if both `first` and `pos` are valid.
-
-Returns `NULL` if `pos` was the last object or no object exist.
-
-Returns the first object if either `first` or `pos` are invalid.
-
-#### `FIO_ARRAY_EACH`
+### Loop macro
 
 ```c
-#define FIO_ARRAY_EACH(array_name, array, pos)                                 \
-  for (FIO_NAME(array_name, ____type_t)                                        \
-           *first___ai = NULL,                                                 \
-           *pos = FIO_NAME(array_name, each_next)((array), &first___ai, NULL); \
-       pos;                                                                    \
-       pos = FIO_NAME(array_name, each_next)((array), &first___ai, pos))
+/* Iterates with a typed `pos` pointer.
+   `array_name` must be the literal macro name used when generating the type.
+   Avoid structural mutations inside the loop (push/pop/remove may invalidate pos). */
+FIO_ARRAY_EACH(array_name, array_ptr, pos) { /* pos is a FIO_ARRAY_TYPE * */ }
 ```
 
-Iterates through the array using a `for` loop.
+```c
+#define FIO_ARRAY_NAME fio_ary
+#define FIO_ARRAY_TYPE int
+#include "fio-stl.h"
 
-Access the object with the pointer `pos`. The `pos` variable can be named however you please.
+void print_all(fio_ary_s *a) {
+    FIO_ARRAY_EACH(fio_ary, a, pos) {
+        printf("%d\n", *pos);
+    }
+}
+```
 
-Avoid editing the array during a FOR loop, although I hope it's possible, I wouldn't count on it.
+---
 
-**Note**: this macro supports automatic pointer tagging / untagging.
+## Embedded Arrays
 
--------------------------------------------------------------------------------
+When `FIO_ARRAY_ENABLE_EMBEDDED` is set (the default), small arrays are stored directly inside the `ARY_s` struct, skipping heap allocation. For `void *` arrays on a 64-bit system, the struct has room for 2 pointers embedded.
+
+Setting `FIO_ARRAY_ENABLE_EMBEDDED` to a value greater than 1 adds extra fields to the struct, increasing embedded capacity at the cost of a larger struct.
+
+`ARY_is_embedded(ary)` returns `1` when the array is currently in embedded mode. `ARY_compact` will re-embed an array if its count fits within the embedded capacity.
+
+---
+
+## Practical Example — String Pointer Array
+
+```c
+#define FIO_ARRAY_NAME str_list
+#define FIO_ARRAY_TYPE const char *
+#include "fio-stl.h"
+
+void example(void) {
+    str_list_s list = FIO_ARRAY_INIT;
+
+    str_list_push(&list, "apple");
+    str_list_push(&list, "banana");
+    str_list_push(&list, "cherry");
+
+    FIO_ARRAY_EACH(str_list, &list, pos) {
+        printf("%s\n", *pos);
+    }
+
+    str_list_destroy(&list);
+}
+```
+
+---
+
+## Practical Example — Struct Array with Custom Hooks
+
+```c
+typedef struct { int id; float val; } point_s;
+
+#define FIO_ARRAY_NAME          pt_ary
+#define FIO_ARRAY_TYPE          point_s
+#define FIO_ARRAY_TYPE_CMP(a,b) ((a).id == (b).id)
+#include "fio-stl.h"
+
+void example(void) {
+    pt_ary_s a = FIO_ARRAY_INIT;
+
+    pt_ary_push(&a, (point_s){.id = 1, .val = 1.5f});
+    pt_ary_push(&a, (point_s){.id = 2, .val = 2.5f});
+
+    point_s key = {.id = 1};
+    uint32_t idx = pt_ary_find(&a, key, 0);
+    if (idx != FIO_ARRAY_NOT_FOUND)
+        printf("found at %u\n", idx);
+
+    pt_ary_destroy(&a);
+}
+```
+
+---
+
+## Performance Notes
+
+- **Access / set**: O(1).
+- **Iteration**: excellent cache locality.
+- **push / pop**: O(1) amortized.
+- **unshift / shift**: O(1) amortized for heap-backed arrays; the tiny embedded path may move elements.
+- **find**: O(n) worst case.
+- **remove / remove2**: O(n) — involve `memmove`.
+- Growth is **linear** by default (count + `FIO_ARRAY_PADDING`). Use `FIO_ARRAY_EXPONENTIAL 1` or call `ARY_reserve` up-front to avoid repeated reallocations on large batch inserts.
+- Capacity is limited to **32 bits** (max ~4 billion elements).
+
+---
+
+See [→ 200 types-overview.md](./200 types-overview.md) for the shared define-include-use pattern and how to combine arrays with strings, maps, and reference counters.

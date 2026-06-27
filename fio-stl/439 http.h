@@ -24,21 +24,27 @@ HTTP Setting Defaults
 ***************************************************************************** */
 
 #ifndef FIO_HTTP_DEFAULT_MAX_HEADER_SIZE
+/** The default HTTP total header size limit in bytes. */
 #define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE 32768 /* (1UL << 15) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_MAX_LINE_LEN
+/** The default HTTP header line limit in bytes. */
 #define FIO_HTTP_DEFAULT_MAX_LINE_LEN 8192 /* (1UL << 13) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_MAX_BODY_SIZE
+/** The default HTTP payload size limit in bytes. */
 #define FIO_HTTP_DEFAULT_MAX_BODY_SIZE 33554432 /* (1UL << 25) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE
+/** The default WebSocket message size limit in bytes. */
 #define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE 262144 /* (1UL << 18) */
 #endif
 #ifndef FIO_HTTP_DEFAULT_TIMEOUT
+/** The default timeout for HTTP connections. */
 #define FIO_HTTP_DEFAULT_TIMEOUT 50
 #endif
 #ifndef FIO_HTTP_DEFAULT_TIMEOUT_LONG
+/** The default timeout for long held HTTP connections (WebSockets / SSE). */
 #define FIO_HTTP_DEFAULT_TIMEOUT_LONG 50
 #endif
 
@@ -53,7 +59,7 @@ HTTP Setting Defaults
 #endif
 
 #ifndef FIO_WEBSOCKET_STATS
-/* If true, logs longest WebSocket round-trips (using FIO_LOG_INFO). */
+/** If true, logs longest WebSocket round-trips (using FIO_LOG_INFO). */
 #define FIO_WEBSOCKET_STATS 0
 #endif
 
@@ -258,6 +264,28 @@ HTTP Routing – prefix matching
 SFUNC int fio_http_route(fio_http_listener_s *listener,
                          const char *url,
                          fio_http_settings_s settings);
+/**
+ * Adds a route prefix to the HTTP handler.
+ *
+ * Order of route settings is irrelevant (unless overwriting an existing route).
+ *
+ * Matching is performed as a best-prefix match. i.e.:
+ *
+ * - All paths match the route `"/"` (the default prefix).
+ *
+ * - The route `"/user"` will match `"/user"` and all `"/user/..."` paths but
+ *   not `"/user..."`
+ *
+ * - Setting `"/user/new"` as well as `"/user"` (in whatever order) will route
+ *   `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
+ *   `"/user"` route will continue to behave the same.
+ *
+ * Note: the `udata`, `on_finish`, `public_folder` and `log` properties are all
+ * inherited (if missing) from the default HTTP settings used to create the
+ * listener.
+ *
+ * Note: TLS options are ignored.
+ * */
 #define fio_http_route(listener, url, ...)                                     \
   fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
 

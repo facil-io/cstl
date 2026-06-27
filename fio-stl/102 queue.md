@@ -1,257 +1,200 @@
-## Task Queue
+# Task and Timer Queues
 
 ```c
 #define FIO_QUEUE
 #include "fio-stl.h"
 ```
 
-The facil.io library includes a simple, thread-safe, task queue based on a linked list of ring buffers.
+A thread-safe task queue built from linked ring buffers, plus a timer queue that moves due events into a task queue. Worker threads can be attached to drain the queue in the background.
 
-Since delayed processing is a common task, this queue provides an easy way to schedule and perform delayed tasks.
+---
 
-In addition, a Timer type allows timed events to be scheduled and moved (according to their "due date") to an existing Task Queue.
-
-By defining `FIO_QUEUE`, the following task and timer related helpers are defined:
-
-### Configuration Macros
+## Configuration
 
 #### `FIO_QUEUE_TASKS_PER_ALLOC`
 
 ```c
-#define FIO_QUEUE_TASKS_PER_ALLOC 168 /* or 338 on 32-bit systems */
+#define FIO_QUEUE_TASKS_PER_ALLOC 168 /* 338 on 32-bit */
 ```
 
-Controls the number of tasks per allocation block in the queue's ring buffer. The default value is chosen to fit `fio_queue_s` in one memory page on most systems (168 for 64-bit, 338 for 32-bit).
+Tasks per ring-buffer chunk. Default is chosen so `fio_queue_s` fits in one page. Must not exceed 65535.
 
-**Note**: This value cannot exceed 65535.
+---
 
-### Queue Related Types
+## Task Queue Types
 
 #### `fio_queue_task_s`
 
 ```c
-/** Task information */
 typedef struct {
-  /** The function to call */
   void (*fn)(void *, void *);
-  /** User opaque data */
   void *udata1;
-  /** User opaque data */
   void *udata2;
 } fio_queue_task_s;
 ```
 
-The `fio_queue_task_s` type contains information about a delayed task. The information is important for the `fio_queue_push` MACRO, where it is used as named arguments for the task information.
+A single task. `fn` receives both `udata` pointers. Tasks with `fn == NULL` are ignored.
 
 #### `fio_queue_s`
 
 ```c
-/** The queue object - should be considered opaque (or, at least, read only). */
 typedef struct {
-  /** task read pointer. */
   fio___task_ring_s *r;
-  /** task write pointer. */
   fio___task_ring_s *w;
-  /** the number of tasks waiting to be performed. */
   uint32_t count;
-  /** global queue lock. */
   FIO___LOCK_TYPE lock;
-  /** linked lists of consumer threads. */
   FIO_LIST_NODE consumers;
-  /** main ring buffer associated with the queue. */
   fio___task_ring_s mem;
 } fio_queue_s;
 ```
 
-The `fio_queue_s` object is the queue object.
+Queue object. Treat as opaque. Allocate on the stack or with `fio_queue_new`.
 
-This object could be placed on the stack or allocated on the heap (using [`fio_queue_new`](#fio_queue_new)).
+---
 
-Once the object is no longer in use call [`fio_queue_destroy`](#fio_queue_destroy) (if placed on the stack) or [`fio_queue_free`](#fio_queue_free) (if allocated using [`fio_queue_new`](#fio_queue_new)).
+## Task Queue API
 
-### Queue API
+#### `FIO_QUEUE_STATIC_INIT`
+
+```c
+#define FIO_QUEUE_STATIC_INIT(queue) /* ... */
+```
+
+Static initializer for a global queue. Prefer `fio_queue_init` at runtime when possible — it initializes only the bytes that matter.
 
 #### `fio_queue_init`
 
 ```c
-/** Used to initialize a fio_queue_s object. */
-void fio_queue_init(fio_queue_s *q);
+FIO_IFUNC void fio_queue_init(fio_queue_s *q);
 ```
+
+Initializes `q` in place.
 
 #### `fio_queue_destroy`
 
 ```c
-void fio_queue_destroy(fio_queue_s *q);
+SFUNC void fio_queue_destroy(fio_queue_s *q);
 ```
 
-Destroys a queue and re-initializes it, after freeing any used resources.
-
-**Note**:
-When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be re-initialized explicitly before re-used after being destroyed (call `fio_queue_init`).
-
-#### `FIO_QUEUE_STATIC_INIT(queue)`
-
-```c
-#define FIO_QUEUE_STATIC_INIT(queue)                                           \
-  {                                                                            \
-    .r = &(queue).mem, .w = &(queue).mem, .lock = FIO_LOCK_INIT,               \
-    .consumers = FIO_LIST_INIT((queue).consumers),                             \
-  }
-```
-
-May be used to initialize global, static memory, queues.
-
-**Note**: while the use of `FIO_QUEUE_STATIC_INIT` is possible, this macro resets a whole page of memory to zero whereas `fio_queue_init` only initializes a few bytes of memory which are the only relevant bytes during initialization.
-
-**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
+Frees ring buffers, stops and joins workers, and re-initializes `q`. After destruction the queue may be reused, but on some platforms the lock may need explicit re-initialization.
 
 #### `fio_queue_new`
 
 ```c
-fio_queue_s *fio_queue_new(void);
+SFUNC fio_queue_s *fio_queue_new(void);
 ```
 
-Creates a new queue object (allocated on the heap).
+Allocates and initializes a queue on the heap.
 
 #### `fio_queue_free`
 
 ```c
-void fio_queue_free(fio_queue_s *q);
+SFUNC void fio_queue_free(fio_queue_s *q);
 ```
 
-Frees a queue object after calling fio_queue_destroy.
+Destroys `q` and frees the queue object itself.
 
 #### `fio_queue_push`
 
 ```c
-int fio_queue_push(fio_queue_s *q, fio_queue_task_s task);
-#define fio_queue_push(q, ...)                                                 \
+SFUNC int fio_queue_push(fio_queue_s *q, fio_queue_task_s task);
+#define fio_queue_push(q, ...) \
   fio_queue_push((q), (fio_queue_task_s){__VA_ARGS__})
-
 ```
 
-Pushes a **valid** (non-NULL) task to the queue.
+Pushes a task to the tail of the queue. The macro accepts named arguments.
 
-This function is shadowed by the `fio_queue_push` MACRO, allowing named arguments to be used.
-
-For example:
+**Returns:** `0` on success, `-1` on memory error.
 
 ```c
-void tsk(void *, void *);
-fio_queue_s q = FIO_QUEUE_STATIC_INIT(q);
-fio_queue_push(&q, .fn = tsk);
-// ...
-fio_queue_destroy(&q);
+fio_queue_push(&q, .fn = my_task, .udata1 = arg);
 ```
-
-Returns 0 if `task.fn == NULL` or if the task was successfully added to the queue.
-
-Returns -1 on error (no memory).
-
 
 #### `fio_queue_push_urgent`
 
 ```c
-int fio_queue_push_urgent(fio_queue_s *q, fio_queue_task_s task);
-#define fio_queue_push_urgent(q, ...)                                          \
+SFUNC int fio_queue_push_urgent(fio_queue_s *q, fio_queue_task_s task);
+#define fio_queue_push_urgent(q, ...) \
   fio_queue_push_urgent((q), (fio_queue_task_s){__VA_ARGS__})
 ```
 
 Pushes a task to the head of the queue (LIFO).
 
-Returns -1 on error (no memory).
-
-See [`fio_queue_push`](#fio_queue_push) for details.
+**Returns:** `0` on success, `-1` on memory error.
 
 #### `fio_queue_pop`
 
 ```c
-fio_queue_task_s fio_queue_pop(fio_queue_s *q);
+SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q);
 ```
 
-Pops a task from the queue (FIFO).
-
-Returns a NULL task on error (`task.fn == NULL`).
-
-**Note**: The task isn't performed automatically, it's just returned. This is useful for queues that don't necessarily contain callable functions.
+Removes and returns the next task (FIFO). The returned task has `fn == NULL` if the queue was empty.
 
 #### `fio_queue_perform`
 
 ```c
-int fio_queue_perform(fio_queue_s *q);
+SFUNC int fio_queue_perform(fio_queue_s *q);
 ```
 
-Pops and performs a task from the queue (FIFO).
-
-Returns -1 on error (queue empty).
+Pops and performs one task. Returns `-1` if the queue was empty.
 
 #### `fio_queue_perform_all`
 
 ```c
-void fio_queue_perform_all(fio_queue_s *q);
+SFUNC void fio_queue_perform_all(fio_queue_s *q);
 ```
 
-Performs all tasks in the queue.
+Performs every task currently in the queue.
 
 #### `fio_queue_count`
 
 ```c
-uint32_t fio_queue_count(fio_queue_s *q);
+FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q);
 ```
 
-Returns the number of tasks in the queue.
+Returns the number of pending tasks.
 
-### Worker Thread API
+---
 
-The queue supports consumer/worker threads that automatically perform tasks as they are added to the queue.
+## Worker Threads
 
 #### `fio_queue_workers_add`
 
 ```c
-int fio_queue_workers_add(fio_queue_s *q, size_t count);
+SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t count);
 ```
 
-Adds worker/consumer threads to perform the jobs in the queue.
+Spawns `count` consumer threads that automatically perform tasks as they arrive. Threads sleep on a condition variable when idle.
 
-**Parameters:**
-- `q` - the queue to add workers to
-- `count` - the number of worker threads to add
-
-**Returns:** `0` on success, `-1` on error (thread creation failed).
-
-**Note**: Worker threads will automatically wake up when new tasks are added to the queue and sleep when the queue is empty.
+**Returns:** `0` on success, `-1` on thread creation failure.
 
 #### `fio_queue_workers_stop`
 
 ```c
-void fio_queue_workers_stop(fio_queue_s *q);
+SFUNC void fio_queue_workers_stop(fio_queue_s *q);
 ```
 
-Signals all worker threads to stop performing tasks and terminate.
-
-This function returns immediately without waiting for threads to finish. Use [`fio_queue_workers_join`](#fio_queue_workers_join) to wait for threads to complete.
+Signals all workers to stop. Returns immediately without waiting.
 
 #### `fio_queue_workers_join`
 
 ```c
-void fio_queue_workers_join(fio_queue_s *q);
+SFUNC void fio_queue_workers_join(fio_queue_s *q);
 ```
 
-Signals all worker threads to stop and waits for them to complete.
-
-This function blocks until all worker threads have terminated.
+Signals workers to stop and blocks until they terminate.
 
 #### `fio_queue_workers_wake`
 
 ```c
-void fio_queue_workers_wake(fio_queue_s *q);
+SFUNC void fio_queue_workers_wake(fio_queue_s *q);
 ```
 
-Signals all worker threads to wake up and check for new tasks.
+Wakes all workers to check for new tasks. Called automatically on push.
 
-**Note**: This is typically called automatically when tasks are pushed to the queue, but can be called manually if needed.
+---
 
-### Timer Related Types
+## Timer Queue Types
 
 #### `fio_timer_queue_s`
 
@@ -262,137 +205,126 @@ typedef struct {
 } fio_timer_queue_s;
 ```
 
-The `fio_timer_queue_s` struct should be considered an opaque data type and accessed only using the functions or the initialization MACRO.
-
-To create a `fio_timer_queue_s` on the stack (or statically):
-
-```c
-fio_timer_queue_s foo_timer = FIO_TIMER_QUEUE_INIT;
-```
-
-A timer could be allocated dynamically:
-
-```c
-fio_timer_queue_s *foo_timer = malloc(sizeof(*foo_timer));
-FIO_ASSERT_ALLOC(foo_timer);
-*foo_timer = (fio_timer_queue_s)FIO_TIMER_QUEUE_INIT;
-```
+Opaque timer queue.
 
 #### `FIO_TIMER_QUEUE_INIT`
 
 ```c
-#define FIO_TIMER_QUEUE_INIT                                                   \
-  { .lock = FIO_LOCK_INIT }
+#define FIO_TIMER_QUEUE_INIT /* ... */
 ```
 
-This is a MACRO used to statically initialize a `fio_timer_queue_s` object.
+Static initializer for a timer queue.
 
-**Note**: when using `FIO_USE_THREAD_MUTEX_TMP`, the lock initialization uses `FIO_THREAD_MUTEX_INIT` instead of `FIO_LOCK_INIT`.
-
-### Timer API
-
-#### `fio_timer_schedule`
+#### `fio_timer_schedule_args_s`
 
 ```c
-void fio_timer_schedule(fio_timer_queue_s *timer_queue,
-                        fio_timer_schedule_args_s args);
-/* Named arguments using macro. */
-#define fio_timer_schedule(timer_queue, ...)                                   \
-  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
-
 typedef struct {
-  /** The timer function. If it returns a non-zero value, the timer stops. */
   int (*fn)(void *, void *);
-  /** Opaque user data. */
   void *udata1;
-  /** Opaque user data. */
   void *udata2;
-  /** Called when the timer is done (finished). */
   void (*on_finish)(void *, void *);
-  /** Timer interval, in milliseconds. */
   uint32_t every;
-  /** The number of times the timer should be performed. -1 == infinity. */
   int32_t repetitions;
-  /** Millisecond at which to start. If missing, filled automatically. */
   int64_t start_at;
 } fio_timer_schedule_args_s;
 ```
 
-Adds a time-bound event to the timer queue.
+Timer schedule arguments.
 
-The function is shadowed by a macro, allowing it to accept named arguments:
+**Members:**
+- `fn` — callback. Return non-zero to stop the timer.
+- `udata1`, `udata2` — opaque data passed to `fn` and `on_finish`.
+- `on_finish` — called when the timer stops.
+- `every` — interval in milliseconds.
+- `repetitions` — repeat count; `-1` means forever.
+- `start_at` — base time in milliseconds; `0` uses `fio_time_milli()`.
+
+---
+
+## Timer Queue API
+
+#### `fio_timer_schedule`
 
 ```c
-fio_timer_schedule(timer_queue,
-                   .fn = my_timer_callback,
-                   .udata1 = my_data,
-                   .every = 1000,        /* every 1000ms (1 second) */
-                   .repetitions = -1);   /* repeat forever */
+SFUNC void fio_timer_schedule(fio_timer_queue_s *timer_queue,
+                              fio_timer_schedule_args_s args);
+#define fio_timer_schedule(timer_queue, ...) \
+  fio_timer_schedule((timer_queue), (fio_timer_schedule_args_s){__VA_ARGS__})
 ```
 
-**Named Arguments:**
+Adds a timed event to the timer queue. The macro accepts named arguments.
 
-| Argument | Type | Description |
-|----------|------|-------------|
-| `fn` | `int (*)(void *, void *)` | Timer callback. Return non-zero to stop the timer. |
-| `udata1` | `void *` | Opaque user data passed to callbacks |
-| `udata2` | `void *` | Opaque user data passed to callbacks |
-| `on_finish` | `void (*)(void *, void *)` | Called when timer is done/stopped |
-| `every` | `uint32_t` | Timer interval in milliseconds |
-| `repetitions` | `int32_t` | Number of times to repeat; `-1` for infinite |
-| `start_at` | `int64_t` | Start time in milliseconds; `0` uses `fio_time_milli()` |
-
-**Note**: the event will repeat every `every` milliseconds (or the same units as `start_at` and `now`).
-
-**Note**: if the scheduler is busy or the event is otherwise delayed, its next scheduling may compensate for the delay by being scheduled sooner.
+```c
+fio_timer_schedule(&timers,
+                   .fn = tick,
+                   .udata1 = ctx,
+                   .every = 1000,
+                   .repetitions = -1);
+```
 
 #### `fio_timer_push2queue`
 
 ```c
-size_t fio_timer_push2queue(fio_queue_s *queue,
-                            fio_timer_queue_s *timer_queue,
-                            int64_t now_in_milliseconds);
+SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
+                                  fio_timer_queue_s *timer_queue,
+                                  int64_t now_in_milliseconds);
 ```
 
-Pushes due events from the timer queue to an event queue.
+Moves all due timer events into `queue`. Pass `0` for `now_in_milliseconds` to use `fio_time_milli()`.
 
-**Parameters:**
-- `queue` - the task queue to push due events to
-- `timer_queue` - the timer queue to check for due events
-- `now_in_milliseconds` - current time in milliseconds; if `0`, `fio_time_milli()` is called automatically
-
-**Returns:** the number of tasks pushed to the queue. A value of `0` indicates no new tasks were scheduled.
-
-**Note**: all the `start_at` values for all the events in the timer queue will be treated as if they use the same units as (and are relative to) `now_in_milliseconds`. By default, this unit should be milliseconds, to allow `now_in_milliseconds` to be zero.
+**Returns:** number of timers pushed.
 
 #### `fio_timer_next_at`
 
 ```c
-int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
+FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *timer_queue);
 ```
 
-Returns the millisecond at which the next event should occur.
-
-If no timer is due (list is empty), returns the maximum possible value.
-
-**Note**: Unless manually specified, millisecond timers are relative to  `fio_time_milli()`.
-
+Returns the due time of the next event, or `INT64_MAX` if the queue is empty.
 
 #### `fio_timer_destroy`
 
 ```c
-void fio_timer_destroy(fio_timer_queue_s *timer_queue);
+SFUNC void fio_timer_destroy(fio_timer_queue_s *timer_queue);
 ```
 
-Clears any waiting timer bound tasks.
+Cancels all pending timers. Do not free the timer queue while timer tasks may still be queued in a `fio_queue_s`, because repeating timers reschedule themselves.
 
-**Note**:
+---
 
-The timer queue must NEVER be freed when there's a chance that timer tasks are waiting to be performed in a `fio_queue_s`.
+## Example
 
-This is due to the fact that the tasks may try to reschedule themselves (if they repeat).
+```c
+#define FIO_QUEUE
+#include "fio-stl.h"
 
-**Note 2**:
-When using the optional `pthread_mutex_t` implementation or using timers on Windows, the timer object needs to be reinitialized before re-used after being destroyed.
+void work(void *a, void *b) {
+  (void)a; (void)b;
+  fprintf(stderr, "working\n");
+}
 
--------------------------------------------------------------------------------
+int tick(void *a, void *b) {
+  (void)a; (void)b;
+  fprintf(stderr, "tick\n");
+  return 0;
+}
+
+int main(void) {
+  fio_queue_s q = {0};
+  fio_queue_init(&q);
+
+  fio_queue_push(&q, .fn = work);
+  fio_queue_perform(&q);
+
+  fio_timer_queue_s t = FIO_TIMER_QUEUE_INIT;
+  fio_timer_schedule(&t, .fn = tick, .every = 100, .repetitions = 3);
+  fio_timer_push2queue(&q, &t, 0);
+  fio_queue_perform_all(&q);
+
+  fio_timer_destroy(&t);
+  fio_queue_destroy(&q);
+  return 0;
+}
+```
+
+------------------------------------------------------------

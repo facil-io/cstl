@@ -1,62 +1,60 @@
-## Time Helpers
+# Time Helpers
 
 ```c
 #define FIO_TIME
 #include "fio-stl.h"
 ```
 
-By defining `FIO_TIME` or `FIO_QUEUE`, the following time-related helper functions are defined.
+Wall-clock and monotonic time helpers, UTC calendar conversion, and a handful of date formatters. Tiny clock toolbox, no sundial required. Implemented in [`./004 time.h`](./004%20time.h).
 
-**Note**: this module depends on the `FIO_ATOL` module which will be automatically included.
-
-### Collecting Monotonic / Real Time
+### Collecting Time
 
 #### `fio_time_real`
 
 ```c
-struct timespec fio_time_real(void);
+FIO_IFUNC struct timespec fio_time_real(void);
 ```
 
-Returns human (wall clock) time. This value isn't as safe for measurements since it can be affected by system time adjustments.
+Returns human / watch time using `CLOCK_REALTIME`. Good for timestamps, less good for measuring elapsed time because the system clock may jump.
 
 #### `fio_time_mono`
 
 ```c
-struct timespec fio_time_mono(void);
+FIO_IFUNC struct timespec fio_time_mono(void);
 ```
 
-Returns monotonic time. This is the preferred time source for measuring elapsed time, as it is not affected by system time changes.
+Returns monotonic time using `CLOCK_MONOTONIC`. Prefer this for intervals and deadlines.
 
 #### `fio_time_nano`
 
 ```c
-int64_t fio_time_nano(void);
+FIO_IFUNC int64_t fio_time_nano(void);
 ```
 
-Returns monotonic time in nanoseconds (1 billionth of a second).
+Returns monotonic time in nanoseconds.
 
 #### `fio_time_micro`
 
 ```c
-int64_t fio_time_micro(void);
+FIO_IFUNC int64_t fio_time_micro(void);
 ```
 
-Returns monotonic time in microseconds (1 millionth of a second).
+Returns monotonic time in microseconds.
 
 #### `fio_time_milli`
 
 ```c
-int64_t fio_time_milli(void);
+FIO_IFUNC int64_t fio_time_milli(void);
 ```
 
 Returns monotonic time in milliseconds.
 
-### Time Conversion Functions
+### Conversion
 
 #### `fio_time2milli`
 
 ```c
-int64_t fio_time2milli(struct timespec t);
+FIO_IFUNC int64_t fio_time2milli(struct timespec);
 ```
 
 Converts a `struct timespec` to milliseconds.
@@ -64,7 +62,7 @@ Converts a `struct timespec` to milliseconds.
 #### `fio_time2micro`
 
 ```c
-int64_t fio_time2micro(struct timespec t);
+FIO_IFUNC int64_t fio_time2micro(struct timespec);
 ```
 
 Converts a `struct timespec` to microseconds.
@@ -72,190 +70,136 @@ Converts a `struct timespec` to microseconds.
 #### `fio_time2gm`
 
 ```c
-struct tm fio_time2gm(time_t time);
+SFUNC struct tm fio_time2gm(time_t time);
 ```
 
-A faster (yet less localized) alternative to `gmtime_r`.
-
-See the libc `gmtime_r` documentation for details.
-
-Returns a `struct tm` object filled with the date information.
-
-Falls back to `gmtime_r` for dates before epoch.
-
-This function is used internally for the formatting functions: `fio_time2rfc7231`, `fio_time2rfc2109`, `fio_time2rfc2822`, `fio_time2log`, and `fio_time2iso`.
+Converts `time` to a UTC `struct tm`. This is a faster, less localized alternative to `gmtime_r`.
 
 #### `fio_gm2time`
 
 ```c
-time_t fio_gm2time(struct tm tm);
+SFUNC time_t fio_gm2time(struct tm tm);
 ```
 
-Converts a `struct tm` to time in seconds (assuming UTC).
+Converts a UTC `struct tm` to seconds. If `tm.tm_isdst > 0`, one hour is subtracted. On platforms with `tm_gmtoff`, that offset is added.
 
-This function is less localized than the `mktime` / `timegm` library functions.
+### Date Formatting
 
-### Time Arithmetic Functions
-
-#### `fio_time_add`
-
-```c
-struct timespec fio_time_add(struct timespec t, struct timespec t2);
-```
-
-Adds two `struct timespec` objects together.
-
-Returns a normalized `struct timespec` with the sum of both time values.
-
-#### `fio_time_add_milli`
-
-```c
-struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
-```
-
-Adds milliseconds to a `struct timespec` object.
-
-Returns a normalized `struct timespec` with the adjusted time value.
-
-#### `fio_time_cmp`
-
-```c
-int fio_time_cmp(struct timespec t1, struct timespec t2);
-```
-
-Compares two `struct timespec` objects.
-
-**Returns:**
-- `-1` if `t1 < t2`
-- `0` if `t1 == t2`
-- `1` if `t1 > t2`
-
-### Time Formatting Functions
+All formatting functions write to `target`, NUL-terminate the output, and return the number of bytes written before the NUL. Provide a buffer with enough space; `64` bytes is comfortably boring.
 
 #### `fio_time2rfc7231`
 
 ```c
-size_t fio_time2rfc7231(char *target, time_t time);
+SFUNC size_t fio_time2rfc7231(char *target, time_t time);
 ```
 
-Writes an RFC 7231 date representation (HTTP date format) to `target`.
+Writes an RFC 7231 / HTTP date, usually 29 characters:
 
-Usually requires 29 characters, although this may vary.
-
-The format is: `DDD, dd MON YYYY HH:MM:SS GMT`
-
-i.e.: `Sun, 06 Nov 1994 08:49:37 GMT`
-
-**Returns:** the number of characters written (excluding NUL terminator).
+```text
+Sun, 06 Nov 1994 08:49:37 GMT
+```
 
 #### `fio_time2rfc2109`
 
 ```c
-size_t fio_time2rfc2109(char *target, time_t time);
+SFUNC size_t fio_time2rfc2109(char *target, time_t time);
 ```
 
-Writes an RFC 2109 date representation to `target` (HTTP Cookie format).
+Writes an RFC 2109 cookie date, usually 31 characters:
 
-Usually requires 31 characters, although this may vary.
-
-**Returns:** the number of characters written (excluding NUL terminator).
+```text
+Sun, 06 Nov 1994 08:49:37 -0000
+```
 
 #### `fio_time2rfc2822`
 
 ```c
-size_t fio_time2rfc2822(char *target, time_t time);
+SFUNC size_t fio_time2rfc2822(char *target, time_t time);
 ```
 
-Writes an RFC 2822 date representation to `target` (Internet Message Format).
+Writes an RFC 2822 date, usually 28-29 characters:
 
-Usually requires 28 to 29 characters, although this may vary.
-
-**Returns:** the number of characters written (excluding NUL terminator).
+```text
+Sun, 6-Nov-1994 08:49:37 GMT
+```
 
 #### `fio_time2log`
 
 ```c
-size_t fio_time2log(char *target, time_t time);
+SFUNC size_t fio_time2log(char *target, time_t time);
 ```
 
-Writes a date representation to `target` in common log format.
+Writes common log format:
 
-Format: `[DD/MMM/yyyy:hh:mm:ss +0000]`
+```text
+[DD/MMM/yyyy:hh:mm:ss +0000]
+```
 
-Usually requires 29 characters (including square brackets and NUL).
-
-**Returns:** the number of characters written (excluding NUL terminator).
+Usually needs 29 bytes including the NUL terminator.
 
 #### `fio_time2iso`
 
 ```c
-size_t fio_time2iso(char *target, time_t time);
+SFUNC size_t fio_time2iso(char *target, time_t time);
 ```
 
-Writes a date representation to `target` in ISO 8601 format.
+Writes an ISO-ish representation. The header comment says `YYYY-MM-DD HH:MM:SS`; the implementation writes a 3-letter month name:
 
-Format: `YYYY-MMM-DD HH:MM:SS`
+```text
+YYYY-MMM-DD HH:MM:SS
+```
 
-Usually requires 20 characters (including NUL).
+Usually needs 20 bytes including the NUL terminator.
 
-**Note**: the month is written as a 3-letter abbreviation (e.g., `Jan`, `Feb`), not as a numeric value.
+### Arithmetic
 
-**Returns:** the number of characters written (excluding NUL terminator).
+#### `fio_time_add`
+
+```c
+FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2);
+```
+
+Adds two `struct timespec` values and normalizes the nanoseconds field.
+
+#### `fio_time_add_milli`
+
+```c
+FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli);
+```
+
+Adds milliseconds to `t` and normalizes the result. The implementation splits milliseconds with a `1024`-millisecond approximation before normalization; cute, but be aware.
+
+#### `fio_time_cmp`
+
+```c
+FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2);
+```
+
+Compares two `struct timespec` values.
+
+**Returns:** `-1` if `t1 < t2`, `0` if equal, `1` if `t1 > t2`.
 
 ### Example
 
 ```c
 #define FIO_TIME
 #include "fio-stl.h"
+#include <stdio.h>
+#include <time.h>
 
 int main(void) {
-  /* Get current time */
-  struct timespec mono = fio_time_mono();
-  struct timespec real = fio_time_real();
-  
-  /* Convert to different units */
-  int64_t ms = fio_time_milli();
-  int64_t us = fio_time_micro();
-  int64_t ns = fio_time_nano();
-  
-  printf("Monotonic time: %lld ms, %lld us, %lld ns\n",
-         (long long)ms, (long long)us, (long long)ns);
-  
-  /* Time arithmetic */
-  struct timespec future = fio_time_add_milli(mono, 5000); /* 5 seconds later */
-  if (fio_time_cmp(future, mono) > 0) {
-    printf("Future time is greater than current time\n");
-  }
-  
-  /* Format current time */
-  time_t now = real.tv_sec;
-  char buf[64];
-  
-  fio_time2rfc7231(buf, now);
-  printf("RFC 7231: %s\n", buf);
-  
-  fio_time2rfc2109(buf, now);
-  printf("RFC 2109: %s\n", buf);
-  
-  fio_time2rfc2822(buf, now);
-  printf("RFC 2822: %s\n", buf);
-  
-  fio_time2log(buf, now);
-  printf("Log format: %s\n", buf);
-  
-  fio_time2iso(buf, now);
-  printf("ISO 8601: %s\n", buf);
-  
-  /* Convert between struct tm and time_t */
-  struct tm tm = fio_time2gm(now);
-  printf("Year: %d, Month: %d, Day: %d\n",
-         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-  
-  time_t converted = fio_gm2time(tm);
-  printf("Converted back: %s", ctime(&converted));
-  
+  struct timespec start = fio_time_mono();
+  struct timespec later = fio_time_add_milli(start, 500);
+
+  printf("now: %lld ms\n", (long long)fio_time_milli());
+  printf("later is after start: %d\n", fio_time_cmp(later, start) > 0);
+
+  char date[64];
+  fio_time2rfc7231(date, fio_time_real().tv_sec);
+  printf("http date: %s\n", date);
+
   return 0;
 }
 ```
 
--------------------------------------------------------------------------------
+---

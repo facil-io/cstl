@@ -1,188 +1,233 @@
-## Reference Counting and Type Wrapping
+# Reference Counting Wrapper — Module 249
+
+Heap-allocate any type with an atomic reference count attached, generated from a name macro.
+
+See also: [← 200 types-overview.md](./200 types-overview.md)
+
+---
+
+## Setup
 
 ```c
-#define FIO_REF_NAME my_type
-#define FIO_REF_TYPE my_type_s
-#define FIO_REF_CONSTRUCTOR_ONLY
+#define FIO_REF_NAME  my_obj           /* required */
+#define FIO_REF_TYPE  my_obj_s         /* optional — defaults to FIO_REF_NAME_s */
+#define FIO_REF_CONSTRUCTOR_ONLY       /* optional — see below */
 #include "fio-stl.h"
 ```
 
-If the `FIO_REF_NAME` macro is defined, then reference counting helpers can be defined for any named type.
+This generates a thin wrapper struct that sits **before** the `FIO_REF_TYPE` object in memory. The caller only ever sees a `FIO_REF_TYPE *` (or the tagged pointer type if `FIO_PTR_TAG_TYPE` is set). The reference count, optional metadata, and optional flex-array length are all hidden in the prefix.
 
-**Note**: requires the atomic operations to be defined (`FIO_ATOMIC`).
+Throughout this document `REF` stands for whatever name you chose (e.g. `my_obj`).
 
-**Note**: if `FIO_PTR_TAG_TYPE` is defined, the reference counting functions will use the tagged pointer type for parameters and return values instead of `FIO_REF_TYPE *`.
+> **Requires:** the `FIO_ATOMIC` helpers must be available (included automatically when using `fio-stl.h` as a single header).
 
-### Reference Counting Type Macros
+---
 
-The following setup Macros are supported when setting up the reference counting type helpers:
+## Configuration Macros
 
-#### `FIO_REF_TYPE`
+Set these **before** `#include`, after `FIO_REF_NAME`.
 
-```c
-#define FIO_REF_TYPE FIO_NAME(FIO_REF_NAME, s)
-```
+### Wrapped type
 
-The type to be wrapped and reference counted by the `FIO_REF_NAME` wrapper API.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_REF_TYPE` | `FIO_REF_NAME_s` | The C type to wrap and reference-count. |
 
-By default, `FIO_REF_TYPE` will equal `FIO_REF_NAME_s`, using the naming convention in this library.
+### Constructor / destructor naming
 
-#### `FIO_REF_INIT`
+| Macro | Effect |
+|---|---|
+| _(not defined)_ | Generates `REF_new2`, `REF_dup2`, `REF_free2` — the `2` suffix leaves room for a separately-defined `REF_new` / `REF_free`. |
+| `FIO_REF_CONSTRUCTOR_ONLY` | Generates `REF_new`, `REF_dup`, `REF_free` — use this when the ref-counted constructor **is** the primary constructor. |
 
-```c
-#define FIO_REF_INIT(obj)                                                      \
-  do {                                                                         \
-    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
-      (obj) = (FIO_REF_TYPE){0};                                               \
-  } while (0)
-```
+### Object lifecycle hooks
 
-Sets up the default object initializer.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_REF_INIT(obj)` | zero-fill if allocator doesn't guarantee it | Called on the newly allocated `FIO_REF_TYPE` object after allocation. `obj` is the dereferenced object (not a pointer). |
+| `FIO_REF_DESTROY(obj)` | _(nothing)_ | Called on the `FIO_REF_TYPE` object just before memory is freed (when the last reference drops). |
 
-By default initializes the object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
+### Metadata
 
-If `FIO_REF_FLEX_TYPE` is defined, the variable `members` may be used during initialization. It's value is the same as the value passed on to the `REF_new` function.
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_REF_METADATA` | _(not defined)_ | A type to embed as hidden metadata alongside the ref-counted object. Access it via `REF_metadata()`. |
+| `FIO_REF_METADATA_INIT(meta)` | zero-fill if needed | Called on the metadata field after allocation. |
+| `FIO_REF_METADATA_DESTROY(meta)` | _(nothing)_ | Called on the metadata field just before memory is freed. |
 
-**Note**:  `FIO_REF_FLEX_TYPE` should **not** be used when `FIO_MEM_FREE` macro only frees the number of bytes specified (rather than freeing the whole pointer, as `free` might do). The reference counter type does not store the data passed to the flex-`REF_new` function and frees the same number of bytes as a flex length of `0`.
+### Flexible array
 
-#### `FIO_REF_DESTROY`
+| Macro | Default | Effect |
+|---|---|---|
+| `FIO_REF_FLEX_TYPE` | _(not defined)_ | When defined, the constructor allocates extra memory for a `FIO_REF_FLEX_TYPE[]` array immediately after the main struct. The constructor accepts a `size_t members` argument and stores the count internally. The `members` value is also available inside `FIO_REF_INIT`. |
 
-```c
-#define FIO_REF_DESTROY(obj)
-```
+> **Note:** `FIO_REF_FLEX_TYPE` shrinks the reference counter to 32 bits (instead of the native word size). Do not combine this with a custom `FIO_MEM_FREE` that depends on the byte-count argument, because the flex free call reports a size that omits `sizeof(FIO_REF_TYPE)`.
 
-Sets up the default object cleanup. By default does nothing.
+### Pointer tagging
 
-#### `FIO_REF_CONSTRUCTOR_ONLY`
+If `FIO_PTR_TAG_TYPE` is defined (globally, before including), all generated functions accept and return `FIO_PTR_TAG_TYPE` instead of `FIO_REF_TYPE *`. Tags are applied on allocation (`FIO_PTR_TAG`) and stripped internally (`FIO_PTR_UNTAG`).
 
-By default, the reference counter generator will generate the `new2`, `free2` and `dup2` functions.
+---
 
-However, f the `FIO_REF_CONSTRUCTOR_ONLY` macro is defined, the reference counter will name these functions as `new`, `free` and `dup` instead, making them the type's only and primary constructor / destructor.
+## Generated API
 
-#### `FIO_REF_FLEX_TYPE`
-
-If the `FIO_REF_FLEX_TYPE` macro is defined, the constructor will allocate a enough memory for both the type and a `FIO_REF_FLEX_TYPE` array consisting of the specified amount of members (as passed to the constructor's `member` argument).
-
-This allows reference objects structures to include a flexible array of type `FIO_REF_FLEX_TYPE` at the end of the `struct`.
-
-The `members` variable passed to the constructor will also be available to the `FIO_REF_INIT` macro.
-
-**Note**: using `FIO_REF_FLEX_TYPE` limits the reference counter to 32 bits (rather then the native word size which **may** be 64 bits).
-
-#### `FIO_REF_METADATA`
-
-If defined, should be type that will be available as "meta data".
-
-A pointer to this type sill be available using the `REF_metadata` function and will allow "hidden" data to be accessible even though it isn't part of the observable object.
-
-#### `FIO_REF_METADATA_INIT`
+### Constructor
 
 ```c
-#define FIO_REF_METADATA_INIT(meta)                                            \
-  do {                                                                         \
-    if (!FIO_MEM_REALLOC_IS_SAFE_)                                             \
-      (meta) = (FIO_REF_METADATA){0};                                          \
-  } while (0)
+/* standard */
+FIO_REF_TYPE *REF_new(void);                  /* FIO_REF_CONSTRUCTOR_ONLY */
+FIO_REF_TYPE *REF_new2(void);                 /* default */
+
+/* with FIO_REF_FLEX_TYPE */
+FIO_REF_TYPE *REF_new(size_t members);
+FIO_REF_TYPE *REF_new2(size_t members);
 ```
 
-Sets up object's meta-data initialization (if any). By default initializes the meta-data object's memory to zero, but only if the memory allocator doesn't guarantee zeroed memory (`FIO_MEM_REALLOC_IS_SAFE_`).
+Allocates and zero-initializes the wrapper header, calls `FIO_REF_METADATA_INIT` (if any), then calls `FIO_REF_INIT` on the wrapped object. Returns `NULL` on allocation failure. Initial reference count is **1**.
 
-#### `FIO_REF_METADATA_DESTROY`
+### Increment reference count
 
 ```c
-#define FIO_REF_METADATA_DESTROY(meta)
+FIO_REF_TYPE *REF_dup(const FIO_REF_TYPE *obj);    /* FIO_REF_CONSTRUCTOR_ONLY */
+FIO_REF_TYPE *REF_dup2(const FIO_REF_TYPE *obj);   /* default */
 ```
 
-### Reference Counting Generated Functions
+Atomically increments the reference count. Returns the same pointer, or `NULL` if the input is `NULL`. Thread-safe.
 
-Reference counting adds the following functions:
-
-#### `REF_new` / `REF_new2`
+### Decrement reference count / free
 
 ```c
-FIO_REF_TYPE * REF_new2(void)
-// or, if FIO_REF_FLEX_TYPE is defined:
-FIO_REF_TYPE * REF_new2(size_t members)
-
-
-// or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-FIO_REF_TYPE * REF_new(void) 
-FIO_REF_TYPE * REF_new(size_t members) // for FIO_REF_FLEX_TYPE
-
+void REF_free(FIO_REF_TYPE *obj);             /* FIO_REF_CONSTRUCTOR_ONLY */
+void REF_free2(FIO_REF_TYPE *obj);            /* default */
 ```
 
-Allocates a new reference counted object, initializing it using the `FIO_REF_INIT(object)` macro.
+Atomically decrements the reference count. When the count reaches zero, calls `FIO_REF_DESTROY(object)`, then `FIO_REF_METADATA_DESTROY(metadata)` (if any), then frees the backing memory. Thread-safe. No-op on `NULL`.
 
-If `FIO_REF_METADATA` is defined, than the metadata is initialized using the `FIO_REF_METADATA_INIT(metadata)` macro.
-
-#### `REF_dup` / `REF_dup2`
+### Metadata access
 
 ```c
-FIO_REF_TYPE * REF_dup2(FIO_REF_TYPE * wrapped)
-// or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-FIO_REF_TYPE * REF_dup(FIO_REF_TYPE * wrapped)
+FIO_REF_METADATA *REF_metadata(FIO_REF_TYPE *obj);
 ```
 
-Increases an object's reference count (an atomic operation, thread-safe).
+Returns a pointer to the hidden metadata field. Only generated when `FIO_REF_METADATA` is defined.
 
-**Parameters:**
-- `wrapped` - pointer to the reference counted object
-
-**Returns:** the same pointer passed in, or `NULL` if the input was `NULL`.
-
-#### `REF_free` / `REF_free2`
+### Flex array length
 
 ```c
-void REF_free2(FIO_REF_TYPE * object)
-// or, if FIO_REF_CONSTRUCTOR_ONLY is defined
-void REF_free(FIO_REF_TYPE * object)
+uint32_t REF_metadata_flex_len(FIO_REF_TYPE *obj);
 ```
 
-Frees an object or decreases it's reference count (an atomic operation, thread-safe).
+Returns the number of `FIO_REF_FLEX_TYPE` members allocated alongside the object. Only generated when `FIO_REF_FLEX_TYPE` is defined. Returns `0` for `NULL`.
 
-Before the object is freed, the `FIO_REF_DESTROY(object)` macro will be called.
-
-If `FIO_REF_METADATA` is defined, than the metadata is also destroyed using the `FIO_REF_METADATA_DESTROY(metadata)` macro.
-
-#### `REF_metadata`
+### Debugging helper
 
 ```c
-FIO_REF_METADATA * REF_metadata(FIO_REF_TYPE * wrapped)
+size_t REF_references(FIO_REF_TYPE *obj);
 ```
 
-If `FIO_REF_METADATA` is defined, then the metadata is accessible using this inlined function.
+Returns the current reference count. **Do not use for program logic** — the value is inherently unstable in a concurrent context. Useful for assertions and leak-hunting.
 
-**Parameters:**
-- `wrapped` - pointer to the reference counted object
+---
 
-**Returns:** a pointer to the object's metadata.
+## Examples
 
-#### `REF_metadata_flex_len`
+### Basic reference-counted object
 
 ```c
-uint32_t REF_metadata_flex_len(FIO_REF_TYPE * wrapped)
+typedef struct { int x; int y; } point_s;
+
+#define FIO_REF_NAME             point
+#define FIO_REF_TYPE             point_s
+#define FIO_REF_CONSTRUCTOR_ONLY          /* point_new / point_dup / point_free */
+#define FIO_REF_INIT(obj)        (obj).x = 0; (obj).y = 0
+#include "fio-stl.h"
+
+void example(void) {
+    point_s *p = point_new();     /* ref count = 1 */
+    p->x = 10; p->y = 20;
+
+    point_s *alias = point_dup(p); /* ref count = 2 */
+
+    point_free(alias);            /* ref count = 1 — not freed yet */
+    point_free(p);                /* ref count = 0 — freed */
+}
 ```
 
-If `FIO_REF_FLEX_TYPE` is defined, this function returns the number of flex array members that were allocated with the object.
-
-**Parameters:**
-- `wrapped` - pointer to the reference counted object
-
-**Returns:** the number of flex array members allocated, or `0` if `wrapped` is `NULL`.
-
-#### `REF_references`
+### Using the `2`-suffix when a primary constructor already exists
 
 ```c
-size_t REF_references(FIO_REF_TYPE * wrapped)
+/* Suppose FIO_STR_NAME already generated str_new / str_free. */
+#define FIO_REF_NAME  str
+#define FIO_REF_TYPE  str_s
+/* No FIO_REF_CONSTRUCTOR_ONLY — generates str_new2 / str_dup2 / str_free2 */
+#define FIO_REF_DESTROY(obj) str_destroy(&(obj))
+#include "fio-stl.h"
+
+str_s *s = str_new2();           /* ref-counted allocation */
+str_write(s, "hello", 5);        /* use the string API directly */
+str_s *s2 = str_dup2(s);
+str_free2(s2);
+str_free2(s);                    /* calls str_destroy, then frees memory */
 ```
 
-A debugging helper that returns the current reference count for an object.
+### Hidden metadata
 
-**Parameters:**
-- `wrapped` - pointer to the reference counted object
+```c
+typedef struct { char name[64]; } widget_s;
+typedef struct { uint64_t created_at; } widget_meta_s;
 
-**Returns:** the current reference count, or `0` if `wrapped` is `NULL`.
+#define FIO_REF_NAME              widget
+#define FIO_REF_TYPE              widget_s
+#define FIO_REF_CONSTRUCTOR_ONLY
+#define FIO_REF_METADATA          widget_meta_s
+#define FIO_REF_METADATA_INIT(m)  (m).created_at = fio_time_real().tv_sec
+#include "fio-stl.h"
 
-**Note**: the returned value is unstable and should not be used for program logic. It is intended for debugging purposes only.
+void example(void) {
+    widget_s *w = widget_new();
+    widget_meta_s *m = widget_metadata(w);
+    printf("created at: %llu\n", (unsigned long long)m->created_at);
+    widget_free(w);
+}
+```
 
--------------------------------------------------------------------------------
+### Flexible array suffix
+
+```c
+typedef struct { size_t len; double data[]; } vec_s;
+
+#define FIO_REF_NAME              vec
+#define FIO_REF_TYPE              vec_s
+#define FIO_REF_CONSTRUCTOR_ONLY
+#define FIO_REF_FLEX_TYPE         double
+#define FIO_REF_INIT(obj)         (obj).len = members  /* 'members' is in scope */
+#include "fio-stl.h"
+
+void example(void) {
+    vec_s *v = vec_new(8);       /* allocates vec_s + 8 doubles */
+    uint32_t n = vec_metadata_flex_len(v); /* returns 8 */
+    for (uint32_t i = 0; i < n; i++) v->data[i] = (double)i;
+    vec_free(v);
+}
+```
+
+---
+
+## Memory Layout
+
+```
+ [ _wrapper_s header ] [ FIO_REF_TYPE object ] [ FIO_REF_FLEX_TYPE[] ] (optional)
+       ^                        ^
+   hidden prefix         pointer returned to caller
+```
+
+The `_wrapper_s` header holds the reference count (and optional `flx_size` / `metadata` fields). Callers never see it — they only receive a pointer to the `FIO_REF_TYPE` that immediately follows.
+
+---
+
+## Notes
+
+- All reference-count operations use **atomic** instructions and are thread-safe.
+- The module must be placed after any other type modules it wraps (e.g., after `FIO_STR_NAME` or `FIO_ARRAY_NAME` inclusions) when used together in one translation unit.
+- Each `FIO_REF_NAME` definition is independent: you can wrap multiple types in the same file.
+- `REF_references()` is a debugging aid; its return value is transient and must not drive control flow.

@@ -131,6 +131,7 @@ size_t FIO_WEAK_VAR FIOBJ_MARK_MEMORY_FREE_COUNTER;
       FIOBJ_MARK_MEMORY_ALLOC_COUNTER - FIOBJ_MARK_MEMORY_FREE_COUNTER,        \
       FIOBJ_MARK_MEMORY_ALLOC_COUNTER,                                         \
       FIOBJ_MARK_MEMORY_FREE_COUNTER)
+/** If true, FIOBJ memory allocation counting is enabled. */
 #define FIOBJ_MARK_MEMORY_ENABLED 1
 
 #else
@@ -140,6 +141,7 @@ size_t FIO_WEAK_VAR FIOBJ_MARK_MEMORY_FREE_COUNTER;
 #define FIOBJ_MARK_MEMORY_ALLOC()
 #define FIOBJ_MARK_MEMORY_FREE()
 #define FIOBJ_MARK_MEMORY_PRINT()
+/** If true, FIOBJ memory allocation counting is enabled. */
 #define FIOBJ_MARK_MEMORY_ENABLED 0
 #endif
 
@@ -1411,14 +1413,14 @@ typedef struct {
 
 #define FIO_ARRAY_NAME fiobj___active_stack
 #define FIO_ARRAY_TYPE fiobj___stack_element_s
-#define FIO_ARRAY_COPY(dest, src)                                              \
+#define FIO_ARRAY_TYPE_COPY(dest, src)                                         \
   do {                                                                         \
     (dest).obj = fiobj_dup((src).obj);                                         \
     (dest).pos = (src).pos;                                                    \
   } while (0)
-#define FIO_ARRAY_TYPE_CMP(a, b) (a).obj == (b).obj
-#define FIO_ARRAY_DESTROY(o)     fiobj_free(o)
-#define FIO___RECURSIVE_INCLUDE  1
+#define FIO_ARRAY_TYPE_CMP(a, b)  (a).obj == (b).obj
+#define FIO_ARRAY_TYPE_DESTROY(o) fiobj_free(o)
+#define FIO___RECURSIVE_INCLUDE   1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 

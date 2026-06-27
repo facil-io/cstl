@@ -1,169 +1,127 @@
-## Doubly Linked Lists
+# Linked Lists
 
 ```c
 #include "fio-stl.h"
 ```
 
-Doubly Linked Lists are an incredibly common and useful data structure. The facil.io C STL provides macros and types for managing both pointer-based linked lists and indexed linked lists.
+Small, sharp linked-list macros from [`./000 core.h`](./000%20core.h). There are two families:
 
-These macros are always defined by the CSTL core and can be used without defining any additional macros.
+- pointer-based circular doubly linked lists, using `next` / `prev` pointers;
+- indexed circular doubly linked lists, using integer offsets into an array.
 
-### Linked Lists Performance
+The macros do not allocate memory, do not own stored objects, and do not check that nodes are initialized. Fast tools, pointy edges.
 
-Memory overhead (on 64bit machines) is 16 bytes per node (or 8 bytes on 32 bit machines) for the `next` and `prev` pointers.
+### Types
 
-Linked Lists use pointers in order to provide fast add/remove operations with O(1) speeds. This O(1) operation ignores the object allocation time and suffers from poor memory locality, but it's still very fast.
-
-However, Linked Lists suffer from slow seek/find and iteration operations.
-
-Seek/find has a worst case scenario O(n) cost and iteration suffers from a high likelihood of CPU cache misses, resulting in degraded performance.
-
--------------------------------------------------------------------------------
-
-### Linked List Types
-
-#### `FIO_LIST_NODE` / `FIO_LIST_HEAD`
+#### `fio_list_node_s`
 
 ```c
-/** A linked list node type */
-#define FIO_LIST_NODE fio_list_node_s
-/** A linked list head type */
-#define FIO_LIST_HEAD fio_list_node_s
-
-/** A linked list arch-type */
 typedef struct fio_list_node_s {
   struct fio_list_node_s *next;
   struct fio_list_node_s *prev;
 } fio_list_node_s;
 ```
 
-These are the basic core types for a linked list node used by the Linked List macros.
+The pointer-based list link. Embed it inside the struct you want to place in a list.
 
-`FIO_LIST_NODE` and `FIO_LIST_HEAD` are both aliases for `fio_list_node_s`. The distinction is semantic - use `FIO_LIST_HEAD` for the list's head/root and `FIO_LIST_NODE` for nodes embedded in your data structures.
-
-Example:
+#### `FIO_LIST_NODE`
 
 ```c
-typedef struct {
-  FIO_LIST_NODE node;
-  char *data;
-} my_list_s;
-
-FIO_LIST_HEAD my_list = FIO_LIST_INIT(my_list);
+#define FIO_LIST_NODE fio_list_node_s
 ```
 
--------------------------------------------------------------------------------
+Semantic alias for an embedded node field.
 
-### Linked List Macros
+#### `FIO_LIST_HEAD`
+
+```c
+#define FIO_LIST_HEAD fio_list_node_s
+```
+
+Semantic alias for a list head/root. A list head is also a node, and an empty list points back to itself.
+
+#### `fio_index32_node_s`
+
+```c
+typedef struct fio_index32_node_s {
+  uint32_t next;
+  uint32_t prev;
+} fio_index32_node_s;
+```
+
+A 32-bit indexed-list link. It stores indexes into a caller-owned array.
+
+#### `fio_index16_node_s`
+
+```c
+typedef struct fio_index16_node_s {
+  uint16_t next;
+  uint16_t prev;
+} fio_index16_node_s;
+```
+
+A 16-bit indexed-list link.
+
+#### `fio_index8_node_s`
+
+```c
+typedef struct fio_index8_node_s {
+  uint8_t next;
+  uint8_t prev;
+} fio_index8_node_s;
+```
+
+An 8-bit indexed-list link.
+
+#### `FIO_INDEXED_LIST32_NODE`, `FIO_INDEXED_LIST32_HEAD`
+
+```c
+#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
+#define FIO_INDEXED_LIST32_HEAD uint32_t
+```
+
+32-bit indexed-list node and head index types.
+
+#### `FIO_INDEXED_LIST16_NODE`, `FIO_INDEXED_LIST16_HEAD`
+
+```c
+#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
+#define FIO_INDEXED_LIST16_HEAD uint16_t
+```
+
+16-bit indexed-list node and head index types.
+
+#### `FIO_INDEXED_LIST8_NODE`, `FIO_INDEXED_LIST8_HEAD`
+
+```c
+#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
+#define FIO_INDEXED_LIST8_HEAD uint8_t
+```
+
+8-bit indexed-list node and head index types.
+
+### API Functions
 
 #### `FIO_LIST_INIT`
 
 ```c
-#define FIO_LIST_INIT(obj) (fio_list_node_s){ .next = &(obj), .prev = &(obj) }
+#define FIO_LIST_INIT(obj)                                                     \
+  (fio_list_node_s) { .next = &(obj), .prev = &(obj) }
 ```
 
-Initializes a linked list head so it points to itself (indicating an empty list).
+Initializer for a pointer-list node or head. The node points to itself.
 
-Example:
-
-```c
-FIO_LIST_HEAD my_list = FIO_LIST_INIT(my_list);
-```
-
-#### `FIO_LIST_PUSH`
+Use it for heads:
 
 ```c
-#define FIO_LIST_PUSH(head, n)                                                 \
-  do {                                                                         \
-    (n)->prev = (head)->prev;                                                  \
-    (n)->next = (head);                                                        \
-    (head)->prev->next = (n);                                                  \
-    (head)->prev = (n);                                                        \
-  } while (0)
-```
-
-UNSAFE macro for pushing a node to the end of a list (before the head).
-
-**Parameters:**
-- `head` - pointer to the list head (`FIO_LIST_HEAD *`)
-- `n` - pointer to the node to push (`FIO_LIST_NODE *`)
-
-**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-#### `FIO_LIST_POP`
-
-```c
-#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
-  do {                                                                         \
-    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
-    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
-  } while (0)
-```
-
-UNSAFE macro for popping a node from the beginning of a list.
-
-**Parameters:**
-- `type` - the underlying `struct` type of the list member
-- `node_name` - the field name in `type` that is the `FIO_LIST_NODE` linking type
-- `dest_ptr` - the pointer that will receive the popped list member
-- `head` - pointer to the list head
-
-**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-**Note**: using this macro with an empty list will produce **undefined behavior**.
-
-Example:
-
-```c
-typedef struct {
-  FIO_LIST_NODE node;
-  int value;
-} item_s;
-
 FIO_LIST_HEAD list = FIO_LIST_INIT(list);
-// ... add items to list ...
-
-item_s *popped;
-FIO_LIST_POP(item_s, node, popped, &list);
-// popped now points to the first item, which has been removed from the list
 ```
 
-#### `FIO_LIST_REMOVE`
+and for standalone nodes before insertion:
 
 ```c
-#define FIO_LIST_REMOVE(n)                                                     \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-  } while (0)
+item_s item = {.node = FIO_LIST_INIT(item.node)};
 ```
-
-UNSAFE macro for removing a node from a list.
-
-**Parameters:**
-- `n` - pointer to the node to remove (`FIO_LIST_NODE *`)
-
-**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
-
-**Note**: after removal, the node's `next` and `prev` pointers still point to their old neighbors. Use `FIO_LIST_REMOVE_RESET` if you need the node to be self-referential after removal.
-
-#### `FIO_LIST_REMOVE_RESET`
-
-```c
-#define FIO_LIST_REMOVE_RESET(n)                                               \
-  do {                                                                         \
-    (n)->prev->next = (n)->next;                                               \
-    (n)->next->prev = (n)->prev;                                               \
-    (n)->next = (n)->prev = (n);                                               \
-  } while (0)
-```
-
-UNSAFE macro for removing a node from a list and resetting its pointers to point to itself.
-
-**Parameters:**
-- `n` - pointer to the node to remove (`FIO_LIST_NODE *`)
-
-**Note**: this macro does not test that the list / data was initialized before reading / writing to the memory pointed to by the list / node.
 
 #### `FIO_LIST_EACH`
 
@@ -180,34 +138,9 @@ UNSAFE macro for removing a node from a list and resetting its pointers to point
                                     next____p_ls_##pos->node_name.next)))
 ```
 
-Loops through every node in the linked list except the head.
+Iterates forward over every object after `head`. `pos` is declared by the macro as `type *`.
 
-This macro allows `pos` to point to the type that the linked list contains (rather than a pointer to the node type).
-
-**Parameters:**
-- `type` - the underlying `struct` type of the list members
-- `node_name` - the field name in `type` that is the `FIO_LIST_NODE`
-- `head` - pointer to the list head
-- `pos` - the variable name to use for the current position in the loop
-
-**Note**: it is safe to remove the current node (`pos`) during iteration.
-
-Example:
-
-```c
-typedef struct {
-  FIO_LIST_NODE node;
-  void *data;
-} ptr_list_s;
-
-FIO_LIST_HEAD my_ptr_list = FIO_LIST_INIT(my_ptr_list);
-
-// ... add items to list ...
-
-FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
-  do_something_with(pos->data);
-}
-```
+The next pointer is cached before the loop body, so removing the current `pos` is supported.
 
 #### `FIO_LIST_EACH_REVERSED`
 
@@ -224,15 +157,64 @@ FIO_LIST_EACH(ptr_list_s, node, &my_ptr_list, pos) {
                                     next____p_ls_##pos->node_name.prev)))
 ```
 
-Loops through every node in the linked list in reverse order (from tail to head).
+Attempts to iterate backward over every object before `head`. `pos` is declared by the macro as `type *`.
 
-**Parameters:**
-- `type` - the underlying `struct` type of the list members
-- `node_name` - the field name in `type` that is the `FIO_LIST_NODE`
-- `head` - pointer to the list head
-- `pos` - the variable name to use for the current position in the loop
+**Note:** the current implementation caches the next pointer from `(head)->next->prev`, which equals `head` for a normal list, so the loop stops after visiting the first reversed node. Treat full reverse iteration as limited/buggy until the source macro is fixed.
 
-**Note**: it is safe to remove the current node (`pos`) during iteration.
+#### `FIO_LIST_PUSH`
+
+```c
+#define FIO_LIST_PUSH(head, n)                                                 \
+  do {                                                                         \
+    (n)->prev = (head)->prev;                                                  \
+    (n)->next = (head);                                                        \
+    (head)->prev->next = (n);                                                  \
+    (head)->prev = (n);                                                        \
+  } while (0)
+```
+
+Pushes node `n` to the end of the circular list, just before `head`.
+
+Both `head` and `n` must point to initialized `FIO_LIST_NODE` / `FIO_LIST_HEAD` objects. The macro does not check whether `n` already belongs to another list.
+
+#### `FIO_LIST_REMOVE`
+
+```c
+#define FIO_LIST_REMOVE(n)                                                     \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+  } while (0)
+```
+
+Removes `n` from its current list. The node's own `next` and `prev` fields are left pointing at the old neighbors.
+
+#### `FIO_LIST_REMOVE_RESET`
+
+```c
+#define FIO_LIST_REMOVE_RESET(n)                                               \
+  do {                                                                         \
+    (n)->prev->next = (n)->next;                                               \
+    (n)->next->prev = (n)->prev;                                               \
+    (n)->next = (n)->prev = (n);                                               \
+  } while (0)
+```
+
+Removes `n`, then resets it to a self-linked node.
+
+#### `FIO_LIST_POP`
+
+```c
+#define FIO_LIST_POP(type, node_name, dest_ptr, head)                          \
+  do {                                                                         \
+    (dest_ptr) = FIO_PTR_FROM_FIELD(type, node_name, ((head)->next));          \
+    FIO_LIST_REMOVE(&(dest_ptr)->node_name);                                   \
+  } while (0)
+```
+
+Removes the first object after `head` and stores the containing object pointer in `dest_ptr`.
+
+Do not call this on an empty list. It will treat the head as a stored object and wander into undefined behavior.
 
 #### `FIO_LIST_IS_EMPTY`
 
@@ -241,75 +223,7 @@ Loops through every node in the linked list in reverse order (from tail to head)
   ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
 ```
 
-Macro for testing if a list is empty.
-
-**Parameters:**
-- `head` - pointer to the list head
-
-**Returns:** non-zero (true) if the list is empty or `head` is NULL, zero (false) otherwise.
-
--------------------------------------------------------------------------------
-
-### Indexed Linked Lists
-
-Indexed linked lists are often used to either save memory or make it easier to reallocate the memory used for the whole list. This is performed by storing index offsets instead of full pointers, allowing the offsets to use smaller type sizes.
-
-For example, an Indexed Linked List might be added to objects in a cache array in order to implement a "least recently used" eviction policy. If the cache holds less than 65,536 members, then a 16 bit index is all that's required, reducing the list's overhead from 2 pointers (16 bytes on 64 bit systems) to a 4 byte overhead per cache member.
-
-The "head" index is usually validated by reserving the value of `-1` (or the maximum value for the type) to indicate an empty list.
-
--------------------------------------------------------------------------------
-
-### Indexed Linked List Types
-
-#### `FIO_INDEXED_LIST32_NODE` / `FIO_INDEXED_LIST32_HEAD`
-
-```c
-/** A 32 bit indexed linked list node type */
-typedef struct fio_index32_node_s {
-  uint32_t next;
-  uint32_t prev;
-} fio_index32_node_s;
-
-#define FIO_INDEXED_LIST32_NODE fio_index32_node_s
-#define FIO_INDEXED_LIST32_HEAD uint32_t
-```
-
-A 32 bit indexed linked list node type, supporting up to 4,294,967,295 elements.
-
-#### `FIO_INDEXED_LIST16_NODE` / `FIO_INDEXED_LIST16_HEAD`
-
-```c
-/** A 16 bit indexed linked list node type */
-typedef struct fio_index16_node_s {
-  uint16_t next;
-  uint16_t prev;
-} fio_index16_node_s;
-
-#define FIO_INDEXED_LIST16_NODE fio_index16_node_s
-#define FIO_INDEXED_LIST16_HEAD uint16_t
-```
-
-A 16 bit indexed linked list node type, supporting up to 65,535 elements.
-
-#### `FIO_INDEXED_LIST8_NODE` / `FIO_INDEXED_LIST8_HEAD`
-
-```c
-/** An 8 bit indexed linked list node type */
-typedef struct fio_index8_node_s {
-  uint8_t next;
-  uint8_t prev;
-} fio_index8_node_s;
-
-#define FIO_INDEXED_LIST8_NODE fio_index8_node_s
-#define FIO_INDEXED_LIST8_HEAD uint8_t
-```
-
-An 8 bit indexed linked list node type, supporting up to 255 elements.
-
--------------------------------------------------------------------------------
-
-### Indexed Linked List Macros
+Returns non-zero if `head` is `NULL`, `head->next` is `NULL`, or the head points to itself.
 
 #### `FIO_INDEXED_LIST_PUSH`
 
@@ -324,13 +238,9 @@ An 8 bit indexed linked list node type, supporting up to 255 elements.
   } while (0)
 ```
 
-UNSAFE macro for pushing a node to the end of an indexed list (before the head).
+Adds index `i` to the end of the indexed circular list, just before `head`. `head` is not changed.
 
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `head` - the index of the list head
-- `i` - the index of the element to push
+`root` is the array containing all elements, and `node_name` is the embedded indexed-list node field.
 
 #### `FIO_INDEXED_LIST_UNSHIFT`
 
@@ -346,13 +256,7 @@ UNSAFE macro for pushing a node to the end of an indexed list (before the head).
   } while (0)
 ```
 
-UNSAFE macro for adding a node to the beginning of an indexed list (making it the new head).
-
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `head` - the index of the list head (will be updated to the new head)
-- `i` - the index of the element to add
+Adds index `i` to the beginning of the list and assigns `head = i`. The `head` argument must be an assignable lvalue.
 
 #### `FIO_INDEXED_LIST_REMOVE`
 
@@ -367,12 +271,7 @@ UNSAFE macro for adding a node to the beginning of an indexed list (making it th
   } while (0)
 ```
 
-UNSAFE macro for removing a node from an indexed list.
-
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `i` - the index of the element to remove
+Removes index `i` from its current indexed list. The removed node keeps its previous links.
 
 #### `FIO_INDEXED_LIST_REMOVE_RESET`
 
@@ -388,12 +287,7 @@ UNSAFE macro for removing a node from an indexed list.
   } while (0)
 ```
 
-UNSAFE macro for removing a node from an indexed list and resetting its links to point to itself.
-
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `i` - the index of the element to remove
+Removes index `i`, then resets its indexed node so `next == prev == i`.
 
 #### `FIO_INDEXED_LIST_EACH`
 
@@ -408,36 +302,9 @@ UNSAFE macro for removing a node from an indexed list and resetting its links to
               pos##___nxt = (root)[pos].node_name.next)
 ```
 
-Loops through every index in the indexed list, **assuming `head` is valid**.
+Iterates forward over an indexed circular list, including `head`. `pos` is declared by the macro as `size_t`.
 
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `head` - the index of the list head
-- `pos` - the variable name to use for the current index in the loop
-
-**Note**: it is safe to remove the current element during iteration.
-
-Example:
-
-```c
-typedef struct {
-  FIO_INDEXED_LIST32_NODE node;
-  int value;
-} indexed_item_s;
-
-indexed_item_s items[100];
-uint32_t head = 0;
-
-// Initialize head to point to itself
-items[0].node.next = items[0].node.prev = 0;
-
-// ... add items to list ...
-
-FIO_INDEXED_LIST_EACH(items, node, head, pos) {
-  printf("Item at index %zu has value %d\n", pos, items[pos].value);
-}
-```
+`head` must be a valid index. Empty-list sentinels are a caller convention, not something this macro handles.
 
 #### `FIO_INDEXED_LIST_EACH_REVERSED`
 
@@ -454,14 +321,136 @@ FIO_INDEXED_LIST_EACH(items, node, head, pos) {
         (pos##___nxt = (root)[pos##___nxt].node_name.prev)))
 ```
 
-Loops through every index in the indexed list in reverse order, **assuming `head` is valid**.
+Iterates backward over an indexed circular list, including the tail and eventually the head.
 
-**Parameters:**
-- `root` - pointer to the array containing the list elements
-- `node_name` - the field name in the element type that is the indexed list node
-- `head` - the index of the list head
-- `pos` - the variable name to use for the current index in the loop
+### Examples
 
-**Note**: it is safe to remove the current element during iteration.
+#### Pointer list
 
--------------------------------------------------------------------------------
+```c
+#include "fio-stl.h"
+
+typedef struct item_s {
+  FIO_LIST_NODE node;
+  int value;
+} item_s;
+
+int main(void) {
+  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  item_s a = {.node = FIO_LIST_INIT(a.node), .value = 1};
+  item_s b = {.node = FIO_LIST_INIT(b.node), .value = 2};
+
+  FIO_LIST_PUSH(&list, &a.node);
+  FIO_LIST_PUSH(&list, &b.node);
+
+  int sum = 0;
+  FIO_LIST_EACH(item_s, node, &list, pos) {
+    sum += pos->value;
+  }
+
+  item_s *first = 0;
+  FIO_LIST_POP(item_s, node, first, &list);
+
+  return (sum == 3 && first == &a) ? 0 : 1;
+}
+```
+
+#### Safe removal while iterating
+
+```c
+#include "fio-stl.h"
+
+typedef struct item_s {
+  FIO_LIST_NODE node;
+  int value;
+} item_s;
+
+int main(void) {
+  FIO_LIST_HEAD list = FIO_LIST_INIT(list);
+  item_s a = {.node = FIO_LIST_INIT(a.node), .value = 1};
+  item_s b = {.node = FIO_LIST_INIT(b.node), .value = 2};
+
+  FIO_LIST_PUSH(&list, &a.node);
+  FIO_LIST_PUSH(&list, &b.node);
+
+  FIO_LIST_EACH(item_s, node, &list, pos) {
+    if (pos->value == 1)
+      FIO_LIST_REMOVE_RESET(&pos->node);
+  }
+
+  return FIO_LIST_IS_EMPTY(&list) ? 1 : 0;
+}
+```
+
+#### Indexed list
+
+```c
+#include "fio-stl.h"
+
+typedef struct slot_s {
+  FIO_INDEXED_LIST16_NODE node;
+  int value;
+} slot_s;
+
+int main(void) {
+  slot_s slots[3] = {{{0}}};
+  FIO_INDEXED_LIST16_HEAD head = 0;
+
+  slots[0].node.next = slots[0].node.prev = 0;
+  slots[0].value = 10;
+
+  slots[1].node.next = slots[1].node.prev = 1;
+  slots[1].value = 20;
+
+  slots[2].node.next = slots[2].node.prev = 2;
+  slots[2].value = 30;
+
+  FIO_INDEXED_LIST_PUSH(slots, node, head, 1);
+  FIO_INDEXED_LIST_PUSH(slots, node, head, 2);
+
+  int sum = 0;
+  FIO_INDEXED_LIST_EACH(slots, node, head, pos) {
+    sum += slots[pos].value;
+  }
+
+  FIO_INDEXED_LIST_REMOVE_RESET(slots, node, 1);
+
+  return (sum == 60 && slots[1].node.next == 1) ? 0 : 1;
+}
+```
+
+### Safety Notes
+
+#### Initialization
+
+Every head or node must be initialized before use. Pointer lists have `FIO_LIST_INIT`; indexed lists do not have a dedicated init macro, so initialize an indexed node with:
+
+```c
+root[i].node.next = root[i].node.prev = i;
+```
+
+#### Empty lists
+
+Pointer lists have a natural empty state: `head->next == head`. `FIO_LIST_IS_EMPTY` checks it.
+
+Indexed lists usually reserve an out-of-range value, often `(type)-1`, to mean empty. The indexed macros do not check for this sentinel; call them only when `head` is a valid index.
+
+#### Index width
+
+The indexed macros use `size_t` temporaries, then store into `uint32_t`, `uint16_t`, or `uint8_t` node fields. Keep every index representable by the chosen node type.
+
+#### Removal and iteration
+
+The iteration macros cache the next node/index before running the loop body, so removing the current non-head item is supported. If you remove or reset the current head in an indexed list, update your `head` value deliberately.
+
+#### Memory ownership
+
+Lists own no memory. Removing or popping unlinks nodes only; it does not destroy containing objects.
+
+#### Thread safety
+
+Mutating a list is not atomic. Multiple threads may read immutable lists, but concurrent mutation needs external synchronization.
+
+#### Macro expansion
+
+All APIs here are macros. Arguments may be evaluated more than once, and helper variable names are introduced inside loops. Pass simple lvalues/pointers, not expressions with side effects.

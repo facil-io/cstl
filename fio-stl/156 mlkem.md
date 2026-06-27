@@ -1,321 +1,155 @@
-## ML-KEM-768
+# ML-KEM-768
 
 ```c
 #define FIO_MLKEM
-#include FIO_INCLUDE_FILE
+#include "fio-stl.h"
 ```
 
-By defining `FIO_MLKEM`, the ML-KEM-768 post-quantum key encapsulation mechanism and the X25519MLKEM768 hybrid key exchange are defined and made available.
+ML-KEM-768 is the FIPS 203 module-lattice key encapsulation mechanism: a post-quantum way to agree on a shared secret. This header also exposes the TLS hybrid `X25519MLKEM768` shape, which combines ML-KEM-768 with X25519.
 
-ML-KEM (Module-Lattice-Based Key-Encapsulation Mechanism) is standardized in [FIPS 203](https://csrc.nist.gov/publications/detail/fips/203/final). ML-KEM-768 provides 192-bit security against both classical and quantum adversaries.
+**Security note:** this implementation has not been independently audited. Use it carefully, and prefer audited crypto stacks for high-value deployments.
 
-This module also provides X25519MLKEM768, the hybrid key exchange combining classical X25519 with post-quantum ML-KEM-768, as specified in [draft-ietf-tls-ecdhe-mlkem](https://datatracker.ietf.org/doc/draft-ietf-tls-ecdhe-mlkem/) for TLS 1.3 (NamedGroup 0x11ec).
-
-**Warning**: this implementation has not been audited. Use at your own risk.
-
-**Note**: X25519MLKEM768 requires `FIO_ED25519` for X25519 support.
-
-### ML-KEM-768 Constants
-
-#### `FIO_MLKEM768_PUBLICKEYBYTES`
+## ML-KEM-768 Sizes
 
 ```c
 #define FIO_MLKEM768_PUBLICKEYBYTES  1184
-```
-
-Size of an ML-KEM-768 public (encapsulation) key in bytes.
-
-#### `FIO_MLKEM768_SECRETKEYBYTES`
-
-```c
 #define FIO_MLKEM768_SECRETKEYBYTES  2400
-```
-
-Size of an ML-KEM-768 secret (decapsulation) key in bytes.
-
-#### `FIO_MLKEM768_CIPHERTEXTBYTES`
-
-```c
 #define FIO_MLKEM768_CIPHERTEXTBYTES 1088
-```
-
-Size of an ML-KEM-768 ciphertext in bytes.
-
-#### `FIO_MLKEM768_SSBYTES`
-
-```c
 #define FIO_MLKEM768_SSBYTES         32
+#define FIO_MLKEM768_SYMBYTES        32
 ```
 
-Size of the ML-KEM-768 shared secret in bytes.
+Parameters: `n = 256`, `k = 3`, `q = 3329`, `eta1 = 2`, `eta2 = 2`, `d_u = 10`, `d_v = 4`.
 
-### ML-KEM-768 Functions
+## ML-KEM-768 API
 
-#### `fio_mlkem768_keypair`
+### `fio_mlkem768_keypair`
 
 ```c
-int fio_mlkem768_keypair(uint8_t pk[1184], uint8_t sk[2400]);
+SFUNC int fio_mlkem768_keypair(uint8_t pk[1184], uint8_t sk[2400]);
 ```
 
-Generates an ML-KEM-768 keypair using the system CSPRNG.
+Generates a random ML-KEM-768 key pair using the system CSPRNG. Returns `0` on success, `-1` on failure.
 
-**Parameters:**
-- `pk` - output buffer for the public key (1184 bytes)
-- `sk` - output buffer for the secret key (2400 bytes)
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_mlkem768_keypair_derand`
+### `fio_mlkem768_keypair_derand`
 
 ```c
-int fio_mlkem768_keypair_derand(uint8_t pk[1184],
-                                uint8_t sk[2400],
-                                const uint8_t coins[64]);
+SFUNC int fio_mlkem768_keypair_derand(uint8_t pk[1184],
+                                      uint8_t sk[2400],
+                                      const uint8_t coins[64]);
 ```
 
-Generates an ML-KEM-768 keypair from a deterministic 64-byte seed.
+Generates a deterministic key pair. `coins` is exactly 64 bytes: `d || z`. This is mostly for test vectors and reproducible checks; production code should normally use `fio_mlkem768_keypair`.
 
-This function is primarily useful for testing with known test vectors (e.g., NIST ACVP vectors). For production use, prefer `fio_mlkem768_keypair`.
-
-**Parameters:**
-- `pk` - output buffer for the public key (1184 bytes)
-- `sk` - output buffer for the secret key (2400 bytes)
-- `coins` - deterministic seed: 32 bytes of `d` followed by 32 bytes of `z`
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_mlkem768_encaps`
+### `fio_mlkem768_encaps`
 
 ```c
-int fio_mlkem768_encaps(uint8_t ct[1088],
-                        uint8_t ss[32],
-                        const uint8_t pk[1184]);
+SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
+                              uint8_t ss[32],
+                              const uint8_t pk[1184]);
 ```
 
-Encapsulates a shared secret using the recipient's public key.
+Creates a ciphertext and shared secret for the holder of `pk`. Randomness comes from the system CSPRNG. Send `ct`; keep `ss` as the shared secret input to your KDF or protocol.
 
-Generates a random shared secret and encrypts it into a ciphertext that only the holder of the corresponding secret key can decapsulate.
-
-**Parameters:**
-- `ct` - output buffer for the ciphertext (1088 bytes)
-- `ss` - output buffer for the shared secret (32 bytes)
-- `pk` - the recipient's public key (1184 bytes)
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_mlkem768_encaps_derand`
+### `fio_mlkem768_encaps_derand`
 
 ```c
-int fio_mlkem768_encaps_derand(uint8_t ct[1088],
-                               uint8_t ss[32],
-                               const uint8_t pk[1184],
-                               const uint8_t coins[32]);
+SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
+                                     uint8_t ss[32],
+                                     const uint8_t pk[1184],
+                                     const uint8_t coins[32]);
 ```
 
-Encapsulates with deterministic randomness. Primarily for testing with known test vectors.
+Deterministic encapsulation using 32 bytes of caller-provided randomness. Useful for known-answer tests. Boring in production, which is exactly the point.
 
-**Parameters:**
-- `ct` - output buffer for the ciphertext (1088 bytes)
-- `ss` - output buffer for the shared secret (32 bytes)
-- `pk` - the recipient's public key (1184 bytes)
-- `coins` - deterministic 32-byte randomness
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_mlkem768_decaps`
+### `fio_mlkem768_decaps`
 
 ```c
-int fio_mlkem768_decaps(uint8_t ss[32],
-                        const uint8_t ct[1088],
-                        const uint8_t sk[2400]);
+SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
+                              const uint8_t ct[1088],
+                              const uint8_t sk[2400]);
 ```
 
-Decapsulates a ciphertext to recover the shared secret.
+Recovers the shared secret from a ciphertext and secret key.
 
-Uses **implicit rejection**: if the ciphertext is invalid, a pseudorandom shared secret is returned (derived from the secret key and ciphertext) rather than an error. This prevents chosen-ciphertext attacks — the caller cannot distinguish valid from invalid ciphertexts.
+ML-KEM uses implicit rejection: invalid ciphertexts produce a pseudorandom shared secret derived from the secret key and ciphertext instead of a loud failure. That prevents chosen-ciphertext games from turning your error path into an oracle.
 
-**Parameters:**
-- `ss` - output buffer for the shared secret (32 bytes)
-- `ct` - the ciphertext to decapsulate (1088 bytes)
-- `sk` - the secret key (2400 bytes)
+Returns `0` for well-formed inputs.
 
-**Returns:** 0 (always succeeds for well-formed inputs).
+## X25519MLKEM768 Hybrid
 
-### ML-KEM-768 Example
+`X25519MLKEM768` is the TLS 1.3 hybrid key exchange shape from the ECDHE/ML-KEM draft. It needs `FIO_ED25519` too, because this STL implements X25519 in the Ed25519/Curve25519 header.
+
+The name starts with X25519, but the bytes start with ML-KEM. Yes, naming is hard.
+
+```c
+#define FIO_X25519MLKEM768_PUBLICKEYBYTES  (32 + 1184) /* 1216 */
+#define FIO_X25519MLKEM768_SECRETKEYBYTES  (32 + 2400) /* 2432 */
+#define FIO_X25519MLKEM768_CIPHERTEXTBYTES (32 + 1088) /* 1120 */
+#define FIO_X25519MLKEM768_SSBYTES         64
+```
+
+| Value | Layout |
+| --- | --- |
+| Public key | `ML-KEM-768_ek` (1184) `||` `X25519_pk` (32) |
+| Secret key | `ML-KEM-768_dk` (2400) `||` `X25519_sk` (32) |
+| Ciphertext | `ML-KEM-768_ct` (1088) `||` `X25519_ephemeral_pk` (32) |
+| Shared secret | `ML-KEM-768_ss` (32) `||` `X25519_ss` (32) |
+
+### `fio_x25519mlkem768_keypair`
+
+```c
+SFUNC int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]);
+```
+
+Generates both the ML-KEM-768 and X25519 key pairs with system randomness. Returns `0` on success.
+
+### `fio_x25519mlkem768_encaps`
+
+```c
+SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
+                                    uint8_t ss[64],
+                                    const uint8_t pk[1216]);
+```
+
+Performs ML-KEM encapsulation and X25519 ephemeral key exchange. The returned shared secret is the concatenation `ML-KEM-768_ss || X25519_ss`.
+
+### `fio_x25519mlkem768_decaps`
+
+```c
+SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
+                                    const uint8_t ct[1120],
+                                    const uint8_t sk[2432]);
+```
+
+Decapsulates the ML-KEM part and computes the X25519 shared secret. Returns `0` on success, or `-1` if X25519 rejects the peer point. ML-KEM invalid ciphertexts still use implicit rejection.
+
+## Example
 
 ```c
 #define FIO_MLKEM
-#include FIO_INCLUDE_FILE
+#include "fio-stl.h"
 
-void example_mlkem768(void) {
-  uint8_t pk[1184], sk[2400];
-  uint8_t ct[1088];
-  uint8_t ss_enc[32], ss_dec[32];
+int roundtrip(void) {
+  uint8_t pk[FIO_MLKEM768_PUBLICKEYBYTES];
+  uint8_t sk[FIO_MLKEM768_SECRETKEYBYTES];
+  uint8_t ct[FIO_MLKEM768_CIPHERTEXTBYTES];
+  uint8_t sender_ss[FIO_MLKEM768_SSBYTES];
+  uint8_t receiver_ss[FIO_MLKEM768_SSBYTES];
 
-  /* Generate keypair */
-  fio_mlkem768_keypair(pk, sk);
+  if (fio_mlkem768_keypair(pk, sk))
+    return -1;
+  if (fio_mlkem768_encaps(ct, sender_ss, pk))
+    return -1;
+  if (fio_mlkem768_decaps(receiver_ss, ct, sk))
+    return -1;
 
-  /* Encapsulate (sender side) */
-  fio_mlkem768_encaps(ct, ss_enc, pk);
-  /* ss_enc is the shared secret; ct is sent to the recipient */
-
-  /* Decapsulate (recipient side) */
-  fio_mlkem768_decaps(ss_dec, ct, sk);
-  /* ss_dec == ss_enc (both parties now share the same secret) */
+  return fio_memcmp(sender_ss, receiver_ss, sizeof(sender_ss));
 }
 ```
 
-### X25519MLKEM768 Hybrid Key Exchange
+## Implementation Notes
 
-X25519MLKEM768 combines classical X25519 (Curve25519 Diffie-Hellman) with post-quantum ML-KEM-768 to provide security against both classical and quantum adversaries. If either component remains secure, the combined key exchange is secure.
+The implementation uses ML-KEM-768 parameters, NTT arithmetic, Montgomery and Barrett reduction, and optional NEON / AVX2 paths for vectorized polynomial work. Those SIMD paths are speed knobs, not different APIs.
 
-This is the hybrid key exchange specified for TLS 1.3 in [draft-ietf-tls-ecdhe-mlkem](https://datatracker.ietf.org/doc/draft-ietf-tls-ecdhe-mlkem/) (NamedGroup 0x11ec).
-
-**Note**: the group name "X25519MLKEM768" does NOT reflect the concatenation order. The ML-KEM component comes FIRST in all concatenations (per Section 4 of the draft).
-
-### X25519MLKEM768 Constants
-
-#### `FIO_X25519MLKEM768_PUBLICKEYBYTES`
-
-```c
-#define FIO_X25519MLKEM768_PUBLICKEYBYTES  1216 /* ML-KEM-768_ek (1184) + X25519_pk (32) */
-```
-
-Size of an X25519MLKEM768 hybrid public key in bytes.
-
-#### `FIO_X25519MLKEM768_SECRETKEYBYTES`
-
-```c
-#define FIO_X25519MLKEM768_SECRETKEYBYTES  2432 /* ML-KEM-768_dk (2400) + X25519_sk (32) */
-```
-
-Size of an X25519MLKEM768 hybrid secret key in bytes.
-
-#### `FIO_X25519MLKEM768_CIPHERTEXTBYTES`
-
-```c
-#define FIO_X25519MLKEM768_CIPHERTEXTBYTES 1120 /* ML-KEM-768_ct (1088) + X25519_ephemeral_pk (32) */
-```
-
-Size of an X25519MLKEM768 hybrid ciphertext in bytes.
-
-#### `FIO_X25519MLKEM768_SSBYTES`
-
-```c
-#define FIO_X25519MLKEM768_SSBYTES         64   /* ML-KEM-768_ss (32) + X25519_ss (32) */
-```
-
-Size of the X25519MLKEM768 hybrid shared secret in bytes.
-
-### X25519MLKEM768 Key Format
-
-| Component | Public Key | Secret Key | Ciphertext | Shared Secret |
-|-----------|-----------|-----------|-----------|--------------|
-| ML-KEM-768 | 1184 bytes (first) | 2400 bytes (first) | 1088 bytes (first) | 32 bytes (first) |
-| X25519 | 32 bytes (last) | 32 bytes (last) | 32 bytes (last) | 32 bytes (last) |
-| **Total** | **1216 bytes** | **2432 bytes** | **1120 bytes** | **64 bytes** |
-
-### X25519MLKEM768 Functions
-
-#### `fio_x25519mlkem768_keypair`
-
-```c
-int fio_x25519mlkem768_keypair(uint8_t pk[1216], uint8_t sk[2432]);
-```
-
-Generates an X25519MLKEM768 hybrid keypair using the system CSPRNG.
-
-Generates both an X25519 keypair and an ML-KEM-768 keypair. The public key is `ML-KEM-768_ek (1184) || X25519_pk (32)`. The secret key is `ML-KEM-768_dk (2400) || X25519_sk (32)`.
-
-**Parameters:**
-- `pk` - output buffer for the hybrid public key (1216 bytes)
-- `sk` - output buffer for the hybrid secret key (2432 bytes)
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_x25519mlkem768_encaps`
-
-```c
-int fio_x25519mlkem768_encaps(uint8_t ct[1120],
-                              uint8_t ss[64],
-                              const uint8_t pk[1216]);
-```
-
-Performs X25519MLKEM768 hybrid encapsulation.
-
-Performs both X25519 key exchange and ML-KEM-768 encapsulation against the recipient's hybrid public key. The ciphertext is `ML-KEM-768_ct (1088) || X25519_ephemeral_pk (32)`. The shared secret is `ML-KEM-768_ss (32) || X25519_ss (32)`.
-
-**Parameters:**
-- `ct` - output buffer for the hybrid ciphertext (1120 bytes)
-- `ss` - output buffer for the hybrid shared secret (64 bytes)
-- `pk` - the recipient's hybrid public key (1216 bytes)
-
-**Returns:** 0 on success, -1 on failure.
-
-#### `fio_x25519mlkem768_decaps`
-
-```c
-int fio_x25519mlkem768_decaps(uint8_t ss[64],
-                              const uint8_t ct[1120],
-                              const uint8_t sk[2432]);
-```
-
-Performs X25519MLKEM768 hybrid decapsulation.
-
-Performs both X25519 shared secret derivation and ML-KEM-768 decapsulation. The shared secret is `ML-KEM-768_ss (32) || X25519_ss (32)`.
-
-**Parameters:**
-- `ss` - output buffer for the hybrid shared secret (64 bytes)
-- `ct` - the hybrid ciphertext (1120 bytes)
-- `sk` - the hybrid secret key (2432 bytes)
-
-**Returns:** 0 on success, -1 if X25519 shared secret computation fails (low-order point). ML-KEM-768 uses implicit rejection for invalid ciphertexts.
-
-### X25519MLKEM768 Example
-
-```c
-#define FIO_ED25519 /* Required for X25519 */
-#define FIO_MLKEM
-#include FIO_INCLUDE_FILE
-
-void example_hybrid(void) {
-  uint8_t pk[1216], sk[2432];
-  uint8_t ct[1120];
-  uint8_t ss_enc[64], ss_dec[64];
-
-  /* Generate hybrid keypair (server side) */
-  fio_x25519mlkem768_keypair(pk, sk);
-
-  /* Encapsulate (client side) */
-  fio_x25519mlkem768_encaps(ct, ss_enc, pk);
-  /* ss_enc[0..63] is the 64-byte hybrid shared secret */
-  /* ct[0..1119] is sent to the server */
-
-  /* Decapsulate (server side) */
-  fio_x25519mlkem768_decaps(ss_dec, ct, sk);
-  /* ss_dec == ss_enc (both parties share the same 64-byte secret) */
-  /* Typically fed into a KDF (e.g., HKDF) for key derivation */
-}
-```
-
-### ML-KEM-768 Parameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| n | 256 | Polynomial degree |
-| k | 3 | Module rank (number of polynomials) |
-| q | 3329 | Modulus |
-| eta1 | 2 | Noise parameter for key generation |
-| eta2 | 2 | Noise parameter for encryption |
-| d_u | 10 | Compression bits for ciphertext vector |
-| d_v | 4 | Compression bits for ciphertext scalar |
-
-### Browser and Server Support
-
-X25519MLKEM768 (TLS NamedGroup 0x11ec) is supported by:
-- Chrome 131+
-- Firefox 132+
-- Safari / iOS 26+
-- ~8.6% of top 1M websites (as of early 2026)
-
--------------------------------------------------------------------------------
+------------------------------------------------------------

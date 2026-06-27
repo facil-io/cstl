@@ -33,5 +33,6 @@ Feel free to copy, use and enjoy according to the license provided.
 #define H___FIO_CSTL_COMBINED___H
 #endif /* H___FIO_CSTL_COMBINED___H */
 #ifndef FIO_INCLUDE_FILE
+/** Persists the include file name (single file vs. folder) */
 #define FIO_INCLUDE_FILE "fio-stl.h"
 #endif

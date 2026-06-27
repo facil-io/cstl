@@ -17,7 +17,7 @@ Please refer to the core documentation in the Markdown File.
 /** An empty macro, adding white space. Used to avoid function like macros. */
 #define FIO_NOOP
 
-/** An empty macro, adding white space. Used to avoid function like macros. */
+/** A no-op macro that takes arguments. i.e., for use in `FIO_DEF_SET_FUNC` */
 #define FIO_NOOP_FN(...)
 
 /** Macro for a No-Op function name (void). */
@@ -72,16 +72,17 @@ Settings - Behavioral defaults
 #endif
 
 #ifndef FIO_LIMIT_INTRINSIC_BUFFER
-/* limits register consumption on some pseudo-intrinsics, using more loops */
+/** Limits register consumption on some pseudo-intrinsics, using more loops */
 #define FIO_LIMIT_INTRINSIC_BUFFER 1
 #endif
 
 #ifndef FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT
-/* Memory allocations should be secure by default (facil.io allocators only) */
+/** Memory allocations should be secure by default (facil.io allocators only) */
 #define FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT 1
 #endif
 
 #ifndef FIO_MEM_PAGE_SIZE_LOG
+/** Compile-time memory page size log (12 == 4096 bytes). */
 #define FIO_MEM_PAGE_SIZE_LOG 12 /* assumes 4096 bytes per page */
 #endif
 
@@ -90,7 +91,7 @@ Settings - Behavioral defaults
 #endif
 
 #ifndef FIO_MAP_WARNING_BITSIZE
-/** imap and map allocation */
+/** iMap and Map allocation size warning (log2), 24 == 16Mb. */
 #define FIO_MAP_WARNING_BITSIZE ((size_t)24)
 #endif
 
@@ -162,11 +163,14 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
+/** Sets alignment is supported by compiler. */
 #define FIO_ALIGN(bytes) __attribute__((aligned(bytes)))
 #elif defined(__INTEL_COMPILER) || defined(_MSC_VER)
+/** Sets alignment is supported by compiler. */
 #define FIO_ALIGN(bytes)
 // #define FIO_ALIGN(bytes) __declspec(align(bytes))
 #else
+/** Sets alignment is supported by compiler. */
 #define FIO_ALIGN(bytes)
 #endif
 
@@ -176,19 +180,21 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 /** We define this because Microsoft's naming scheme isn't portable */
 #define _CRT_SECURE_NO_WARNINGS 1
 
-#define inline   __inline
+#define inline __inline
+/** Thread local variable property. */
 #define __thread __declspec(thread)
 #elif !defined(__clang__) && !defined(__GNUC__)
+/** Thread local variable property. */
 #define __thread _Thread_local
 #endif
 
 #if defined(__clang__) || defined(__GNUC__)
 /** Clobber CPU registers and prevent compiler reordering optimizations. */
-#define FIO_COMPILER_GUARD             __asm__ volatile("" ::: "memory")
+#define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
+/** Prevent compiler reordering optimizations. */
 #define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
 #elif defined(_MSC_VER)
 #include <intrin.h>
-/** Clobber CPU registers and prevent compiler reordering optimizations. */
 #define FIO_COMPILER_GUARD             _ReadWriteBarrier()
 #define FIO_COMPILER_GUARD_INSTRUCTION _WriteBarrier()
 #pragma message("Warning: Windows deprecated it's low-level C memory barrier.")
@@ -273,8 +279,10 @@ Aligned Memory Access Selectors
 /* *****************************************************************************
 OS Specific includes and Macros
 ***************************************************************************** */
+/** Always defined, true on POSIX systems. */
 #define FIO_OS_POSIX 0
-#define FIO_OS_WIN   0
+/** Always defined, true on Windows systems. */
+#define FIO_OS_WIN 0
 
 /* Windows check MUST come first: MinGW/MSYS2 define both __unix__ and _WIN32.
  * If the POSIX branch wins, fio_sock_dup calls dup() on a Winsock SOCKET
@@ -308,26 +316,28 @@ OS Specific includes and Macros
 #include <time.h>
 #include <winsock2.h> /* struct timeval is here... why? Microsoft. */
 
+/** Calls the `getpid` provided by the system. */
 #define fio_getpid _getpid
 
 #ifndef FIO_KILL_SELF
+/** Sends a signal to kill the current process (emulates CTRL + C). */
 #define FIO_KILL_SELF() GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
 #endif
 
-#if defined(__MINGW32__)
-/* Mingw supports */
+#if defined(__MINGW32__) /* Mingw supports */
+                         /** True if POSIX headers are available. */
 #define FIO_HAVE_UNIX_TOOLS    2
 #define __USE_MINGW_ANSI_STDIO 1
 #define FIO___PRINTF_STYLE(string_index, check_index)                          \
   __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
-#elif defined(__CYGWIN__)
-/* TODO: cygwin support */
+#elif defined(__CYGWIN__) /* TODO: cygwin support */
+/** True if POSIX headers are available. */
 #define FIO_HAVE_UNIX_TOOLS    3
 #define __USE_MINGW_ANSI_STDIO 1
 #define FIO___PRINTF_STYLE(string_index, check_index)                          \
   __attribute__((format(__MINGW_PRINTF_FORMAT, string_index, check_index)))
-#else
-/* Pure MSVC (not MinGW/Cygwin) */
+#else /* Pure MSVC (not MinGW/Cygwin) */
+/** True if POSIX headers are available. */
 #define FIO_HAVE_UNIX_TOOLS 0
 typedef SSIZE_T ssize_t;
 /* MSVC doesn't support __attribute__, use empty macro */
@@ -342,10 +352,14 @@ typedef SSIZE_T ssize_t;
 
 #elif defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 #undef FIO_OS_POSIX
+/** True if POSIX headers are available. */
 #define FIO_HAVE_UNIX_TOOLS 1
+/** True if POSIX OS is detected. */
 #define FIO_OS_POSIX        1
+/** Calls the `getpid` provided by the system. */
 #define fio_getpid          getpid
 #ifndef FIO_KILL_SELF
+/** Sends a signal to kill the current process (emulates CTRL + C). */
 #define FIO_KILL_SELF() kill(0, SIGINT)
 #endif
 
@@ -393,22 +407,32 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #ifndef SSIZE_MAX
+/** the value of `SSIZE_MAX` (ssize_t range). */
 #define SSIZE_MAX ((ssize_t)((~(size_t)0) >> 1))
 #endif
 #ifndef SSIZE_MIN
+/** the value of `SSIZE_MIN` (ssize_t range). */
 #define SSIZE_MIN ((ssize_t)(~((~(size_t)0) >> 1)))
+#endif
+
+#ifndef FIO_SIZE_T_ERROR
+/** The `-1` value for a `size_t` type, often used as an error value. */
+#define FIO_SIZE_T_ERROR (~(size_t)0)
 #endif
 /* *****************************************************************************
 Function Attributes
 ***************************************************************************** */
 
 #if __has_attribute(unused) || defined(__GNUC__) || defined(__clang__)
+/** Marks a variable / function as possibly unused (if compiler supported). */
 #define FIO_MAYBE_UNUSED __attribute__((unused))
 #else
+/** Marks a variable / function as possibly unused (if compiler supported). */
 #define FIO_MAYBE_UNUSED
 #endif
 
 #ifndef FIO_SFUNC
+/** static, possibly unused, function. */
 #define FIO_SFUNC static FIO_MAYBE_UNUSED
 #endif
 
@@ -418,11 +442,12 @@ Function Attributes
 #endif
 
 #ifndef FIO_WARN_UNUSED
-/** Attribute for functions whose return value should not be ignored. */
 #if __has_attribute(warn_unused_result) || defined(__GNUC__) ||                \
     defined(__clang__)
+/** Attribute for functions whose return value should not be ignored. */
 #define FIO_WARN_UNUSED __attribute__((warn_unused_result))
 #else
+/** Attribute for functions whose return value should not be ignored. */
 #define FIO_WARN_UNUSED
 #endif
 #endif
@@ -432,20 +457,21 @@ Function Attributes
 #define FIO_MIFN FIO_IFUNC FIO_WARN_UNUSED
 #endif
 
-/** Marks a function as const (no side effects, result depends only on args) */
 #ifndef FIO_CONST
 #if __has_attribute(const) || defined(__GNUC__)
+/** Marks a function as const (no side effects, result depends only on args) */
 #define FIO_CONST __attribute__((const))
 #else
 #define FIO_CONST
 #endif
 #endif
 
-/** Marks a function as pure (no side effects, may read global memory) */
 #ifndef FIO_PURE
 #if __has_attribute(pure) || defined(__GNUC__)
+/** Marks a function as pure (no side effects, may read global memory) */
 #define FIO_PURE __attribute__((pure))
 #else
+/** Marks a function as pure (on supported compilers) */
 #define FIO_PURE
 #endif
 #endif
@@ -473,12 +499,12 @@ Function Attributes
 #endif
 
 #ifndef FIO_DEF_GET_SET
-/** Defines a "get" function for a field within a struct / union. */
-#define FIO_DEF_GET_FUNC_DEF(static, namespace, T_type, F_type, field_name)    \
+/** Declares (names) a `get` function for a field within a struct / union. */
+#define FIO_DEF_GET_FUNC_DEC(static, namespace, T_type, F_type, field_name)    \
   /** Returns current value of property within the struct / union. */          \
   static F_type FIO_NAME(namespace, field_name)(T_type * o);
 
-/** Defines a "get" function for a field within a struct / union. */
+/** Defines a `get` function for a field within a struct / union. */
 #define FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, field_name)        \
   /** Returns current value of property within the struct / union. */          \
   static F_type FIO_NAME(namespace, field_name)(T_type * o) {                  \
@@ -486,13 +512,13 @@ Function Attributes
     return o->field_name;                                                      \
   }
 
-/** Defines a "set" function for a field within a struct / union. */
-#define FIO_DEF_SET_FUNC_DEF(static, namespace, T_type, F_type, F_name)        \
+/** Declares (names) a `set` function for a field within a struct / union. */
+#define FIO_DEF_SET_FUNC_DEC(static, namespace, T_type, F_type, F_name)        \
   /** Sets a new value, returning the old one */                               \
   static F_type FIO_NAME(FIO_NAME(namespace, F_name), set)(T_type * o,         \
                                                            F_type new_value);
 
-/** Defines a "set" function for a field within a struct / union. */
+/** Defines a `set` function for a field within a struct / union. */
 #define FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)    \
   /** Sets a new value, returning the old one */                               \
   static F_type FIO_NAME(FIO_NAME(namespace, F_name), set)(T_type * o,         \
@@ -503,28 +529,28 @@ Function Attributes
     on_set(o);                                                                 \
     return old_value;                                                          \
   }
-/** Defines get/set functions for a field within a struct / union. */
+/** Defines `get/set` functions for a field within a struct / union. */
 #define FIO_DEF_GETSET_FUNC(static, namespace, T_type, F_type, F_name, on_set) \
   FIO_DEF_GET_FUNC(static, namespace, T_type, F_type, F_name)                  \
   FIO_DEF_SET_FUNC(static, namespace, T_type, F_type, F_name, on_set)
 
-/** Defines get/set functions for a field within a struct / union. */
-#define FIO_DEF_GETSET_FUNC_DEF(static, namespace, T_type, F_type, F_name)     \
-  FIO_DEF_GET_FUNC_DEF(static, namespace, T_type, F_type, F_name)              \
-  FIO_DEF_SET_FUNC_DEF(static, namespace, T_type, F_type, F_name)
+/** Declares (names) `get/set` functions for a field within a struct / union. */
+#define FIO_DEF_GETSET_FUNC_DEC(static, namespace, T_type, F_type, F_name)     \
+  FIO_DEF_GET_FUNC_DEC(static, namespace, T_type, F_type, F_name)              \
+  FIO_DEF_SET_FUNC_DEC(static, namespace, T_type, F_type, F_name)
 
 #endif
 
 #ifndef FIO_IFUNC_DEF_GETSET
-/** Defines a "get" function for a field within a struct / union. */
+/** Defines a `get` function for a field within a struct / union. */
 #define FIO_IFUNC_DEF_GET(namespace, T_type, F_type, field_name)               \
   FIO_DEF_GET_FUNC(FIO_IFUNC, namespace, T_type, F_type, field_name)
 
-/** Defines a "set" function for a field within a struct / union. */
+/** Defines a `set` function for a field within a struct / union. */
 #define FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)           \
   FIO_DEF_SET_FUNC(FIO_IFUNC, namespace, T_type, F_type, F_name, on_set)
 
-/** Defines get/set functions for a field within a struct / union. */
+/** Defines `get/set` functions for a field within a struct / union. */
 #define FIO_IFUNC_DEF_GETSET(namespace, T_type, F_type, F_name, on_set)        \
   FIO_IFUNC_DEF_GET(namespace, T_type, F_type, F_name)                         \
   FIO_IFUNC_DEF_SET(namespace, T_type, F_type, F_name, on_set)
@@ -582,10 +608,14 @@ FIO_SFUNC int fio___msv_run_counter_macro_to_3_digits(void) {
 Conditional Likelihood
 ***************************************************************************** */
 #if defined(__clang__) || defined(__GNUC__)
-#define FIO_LIKELY(cond)   __builtin_expect((cond), 1)
+/** Provides a compiler hint for value likelihood, if possible. */
+#define FIO_LIKELY(cond) __builtin_expect((cond), 1)
+/** Provides a compiler hint for value likelihood, if possible. */
 #define FIO_UNLIKELY(cond) __builtin_expect((cond), 0)
 #else
+/** Provides a compiler hint for value likelihood, if possible. */
 #define FIO_LIKELY(cond)   (cond)
+/** Provides a compiler hint for value likelihood, if possible. */
 #define FIO_UNLIKELY(cond) (cond)
 #endif
 
@@ -625,28 +655,30 @@ Cache Prefetch Hints
 Macro Stringifier
 ***************************************************************************** */
 #ifndef FIO_MACRO2STR
-#define FIO_MACRO2STR_STEP2(macro) #macro
+#define FIO___MACRO2STR_STEP2(macro) #macro
 /** Converts a macro's content to a string literal. */
-#define FIO_MACRO2STR(macro) FIO_MACRO2STR_STEP2(macro)
+#define FIO_MACRO2STR(macro) FIO___MACRO2STR_STEP2(macro)
 #endif
 
 /* *****************************************************************************
 Naming Macros
 ***************************************************************************** */
 /* Used for naming functions and types */
-#define FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
-#define FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, div)                        \
-  FIO_NAME_FROM_MACRO_STEP2(prefix, postfix, div)
+#define FIO___NAME_FROM_MACRO_STEP2(prefix, postfix, div) prefix##div##postfix
+#define FIO___NAME_FROM_MACRO_STEP1(prefix, postfix, div)                      \
+  FIO___NAME_FROM_MACRO_STEP2(prefix, postfix, div)
 
 /** Used for naming functions and variables resulting in: prefix_postfix */
-#define FIO_NAME(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _)
+#define FIO_NAME(prefix, postfix)                                              \
+  FIO___NAME_FROM_MACRO_STEP1(prefix, postfix, _)
 
 /** Sets naming convention for conversion functions, i.e.: foo2bar */
-#define FIO_NAME2(prefix, postfix) FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
+#define FIO_NAME2(prefix, postfix)                                             \
+  FIO___NAME_FROM_MACRO_STEP1(prefix, postfix, 2)
 
 /** Sets naming convention for boolean testing functions, i.e.: foo_is_true */
 #define FIO_NAME_BL(prefix, postfix)                                           \
-  FIO_NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
+  FIO___NAME_FROM_MACRO_STEP1(prefix, postfix, _is_)
 
 /** Used internally to name test functions. */
 #define FIO_NAME_TEST(prefix, postfix)                                         \
@@ -919,8 +951,11 @@ Copyright and License: see header file (000 copyright.h) or top of file
 Spin-Locks
 ***************************************************************************** */
 
-#define FIO_LOCK_INIT         0
+/** Initialization value for a spin lock. */
+#define FIO_LOCK_INIT 0
+/** A numbered sub-lock index, must be less than 8. Zero == the master lock. */
 #define FIO_LOCK_SUBLOCK(sub) ((uint8_t)(1U) << ((sub)&7))
+/** A spin lock type, must be initialized to `FIO_LOCK_INIT` before use. */
 typedef volatile unsigned char fio_lock_i;
 
 #ifndef FIO___LOCK_RESCHDULE_EVERY_LOG
@@ -932,10 +967,13 @@ typedef volatile unsigned char fio_lock_i;
  * Combine a number of sublocks using OR (`|`) and the FIO_LOCK_SUBLOCK(i)
  * macro. i.e.:
  *
- *      if(!fio_trylock_group(&lock,
- *                            FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
- *         // act in lock
- *      }
+ *```c
+ * if(!fio_trylock_group(&lock,
+ *                       FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2))) {
+ *    // act in lock
+ * }
+ * fio_unlock_group(&lock, FIO_LOCK_SUBLOCK(1) | FIO_LOCK_SUBLOCK(2)));
+ * ```
  *
  * Returns 0 on success and non-zero on failure.
  */
@@ -1053,7 +1091,7 @@ memory address to be returned if needed (valid until concurrency max calls).
 ***************************************************************************** */
 
 #ifndef FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX
-/* The multiplier is used to set the maximum number of safe concurrent calls. */
+/** The multiplier used to set the maximum number of safe concurrent calls. */
 #define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
 #endif
 
@@ -1064,7 +1102,9 @@ memory address to be returned if needed (valid until concurrency max calls).
  * single input `count` and returns a `type_T` pointer (`type_T *`) containing
  * `sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
  *
- *          static type_T *name(size_t allocation_count);
+ * ```c
+ * static type_T *name(size_t allocation_count);
+ * ```
  *
  * That memory is statically allocated, allowing it be returned and never
  * needing to be freed.
@@ -1072,8 +1112,10 @@ memory address to be returned if needed (valid until concurrency max calls).
  * The functions can safely allocate the following number of bytes before
  * the function returns the same memory block to another caller:
  *
- *     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
+ * ```c
+ * FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
  *         sizeof(type_T) * size_per_allocation
+ * ```
  *
  * Example use:
  *
@@ -1113,9 +1155,9 @@ Logging Primitives (no-op)
 
 /* avoid printing a full / nested path when __FILE_NAME__ is available */
 #ifdef __FILE_NAME__
-#define FIO__FILE__ __FILE_NAME__
+#define FIO___FILE__ __FILE_NAME__
 #else
-#define FIO__FILE__ __FILE__
+#define FIO___FILE__ __FILE__
 #endif
 
 /** Logging level of zero (no logging). */
@@ -1138,24 +1180,38 @@ Logging Primitives (no-op)
 
 // clang-format off
 #define FIO___LOG_PRINT_LEVEL(level, ...) do { if ((level) <= FIO_LOG_LEVEL_GET()) {FIO_LOG2STDERR(__VA_ARGS__);} } while (0)
-#define FIO_LOG_WRITE(...)    FIO_LOG2STDERR("(" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
+/** Writes a message to the log, including the file name and line number. */
+#define FIO_LOG_WRITE(...)    FIO_LOG2STDERR("(" FIO___FILE__ ":" FIO_MACRO2STR(__LINE__) "): " __VA_ARGS__)
+/** Writes a Fatal message to the log. */
 #define FIO_LOG_FATAL(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_FATAL, "\x1B[1m\x1B[7mFATAL:\x1B[0m    " __VA_ARGS__)
+/** Writes a Error message to the log. */
 #define FIO_LOG_ERROR(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_ERROR, "\x1B[1mERROR:\x1B[0m    " __VA_ARGS__)
+/** Writes a Security message to the log. */
 #define FIO_LOG_SECURITY(...) FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_ERROR, "\x1B[1mSECURITY:\x1B[0m " __VA_ARGS__)
+/** Writes a Warning message to the log. */
 #define FIO_LOG_WARNING(...)  FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_WARNING, "\x1B[2mWARNING:\x1B[0m  " __VA_ARGS__)
+/** Writes a Info message to the log. */
 #define FIO_LOG_INFO(...)     FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_INFO, "INFO:     " __VA_ARGS__)
-#define FIO_LOG_DEBUG(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_DEBUG,"DEBUG:    (" FIO__FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__)
+/** Writes a Debug message to the log, including the file name and line number. */
+#define FIO_LOG_DEBUG(...)    FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_DEBUG,"DEBUG:    (" FIO___FILE__ ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__)
+/** Writes a Debug message to the log. */
 #define FIO_LOG_DEBUG2(...)   FIO___LOG_PRINT_LEVEL(FIO_LOG_LEVEL_DEBUG, "DEBUG:    " __VA_ARGS__)
 // clang-format on
 
 #ifdef DEBUG
-#define FIO_LOG_DDEBUG(...)           FIO_LOG_DEBUG(__VA_ARGS__)
-#define FIO_LOG_DDEBUG2(...)          FIO_LOG_DEBUG2(__VA_ARGS__)
-#define FIO_LOG_DERROR(...)           FIO_LOG_ERROR(__VA_ARGS__)
-#define FIO_LOG_DSECURITY(...)        FIO_LOG_SECURITY(__VA_ARGS__)
-#define FIO_LOG_DWARNING(...)         FIO_LOG_WARNING(__VA_ARGS__)
+/** Writes a Debug message to the log only if `DEBUG` was defined. */
+#define FIO_LOG_DDEBUG(...) FIO_LOG_DEBUG(__VA_ARGS__)
+/** Writes a Debug2 message to the log only if `DEBUG` was defined. */
+#define FIO_LOG_DDEBUG2(...) FIO_LOG_DEBUG2(__VA_ARGS__)
+/** Writes a Error message to the log only if `DEBUG` was defined. */
+#define FIO_LOG_DERROR(...) FIO_LOG_ERROR(__VA_ARGS__)
+/** Writes a Security message to the log only if `DEBUG` was defined. */
+#define FIO_LOG_DSECURITY(...) FIO_LOG_SECURITY(__VA_ARGS__)
+/** Writes a Warning message to the log only if `DEBUG` was defined. */
+#define FIO_LOG_DWARNING(...) FIO_LOG_WARNING(__VA_ARGS__)
+/** Writes a Info message to the log only if `DEBUG` was defined. */
 #define FIO_LOG_DINFO(...)            FIO_LOG_INFO(__VA_ARGS__)
-#define FIO_ASSERT___PERFORM_SIGNAL() FIO_KILL_SELF();
+#define FIO___ASSERT_PERFORM_SIGNAL() FIO_KILL_SELF();
 #else
 #define FIO_LOG_DDEBUG(...)    ((void)(0))
 #define FIO_LOG_DDEBUG2(...)   ((void)(0))
@@ -1163,7 +1219,7 @@ Logging Primitives (no-op)
 #define FIO_LOG_DSECURITY(...) ((void)(0))
 #define FIO_LOG_DWARNING(...)  ((void)(0))
 #define FIO_LOG_DINFO(...)     ((void)(0))
-#define FIO_ASSERT___PERFORM_SIGNAL()
+#define FIO___ASSERT_PERFORM_SIGNAL()
 #endif /* DEBUG */
 
 #ifndef FIO_LOG_LENGTH_LIMIT
@@ -1181,13 +1237,13 @@ Assertions
 ***************************************************************************** */
 
 #ifndef FIO_ASSERT
-/* Asserts a condition is true, or kills the application using SIGINT. */
+/** Asserts a condition is true, or kills the application using SIGINT. */
 #define FIO_ASSERT(cond, ...)                                                  \
   do {                                                                         \
     if (FIO_UNLIKELY(!(cond))) {                                               \
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
-      FIO_ASSERT___PERFORM_SIGNAL();                                           \
+      FIO___ASSERT_PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
   } while (0)
@@ -1203,10 +1259,10 @@ Assertions
 #define FIO_ASSERT_DEBUG(cond, ...)                                            \
   do {                                                                         \
     if (!(cond)) {                                                             \
-      FIO_LOG_FATAL("(" FIO__FILE__                                            \
+      FIO_LOG_FATAL("(" FIO___FILE__                                           \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
-      FIO_ASSERT___PERFORM_SIGNAL();                                           \
+      FIO___ASSERT_PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
   } while (0)
@@ -1218,8 +1274,10 @@ Assertions
 Static Assertions
 ***************************************************************************** */
 #if __STDC_VERSION__ >= 201112L
+/** Perform a static (build time) assertion. */
 #define FIO_ASSERT_STATIC(cond, msg) _Static_assert((cond), msg)
 #else
+/** Perform a static (build time) assertion. */
 #define FIO_ASSERT_STATIC(cond, msg)                                           \
   static const char *FIO_NAME(fio_static_assertion_failed,                     \
                               __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
@@ -1266,13 +1324,13 @@ Static Endian Test
 #endif
 #elif !defined(__BIG_ENDIAN__) && !defined(__BYTE_ORDER__) &&                  \
     !defined(__LITTLE_ENDIAN__)
-#define FIO_LITTLE_ENDIAN_TEST 0x31323334UL
-#define FIO_BIG_ENDIAN_TEST    0x34333231UL
-#define FIO_ENDIAN_ORDER_TEST  ('1234')
-#if ENDIAN_ORDER_TEST == LITTLE_ENDIAN_TEST
+#define FIO___LITTLE_ENDIAN_TEST 0x31323334UL
+#define FIO___BIG_ENDIAN_TEST    0x34333231UL
+#define FIO___ENDIAN_ORDER_TEST  ('1234')
+#if FIO___ENDIAN_ORDER_TEST == FIO___LITTLE_ENDIAN_TEST
 #define __BIG_ENDIAN__    0
 #define __LITTLE_ENDIAN__ 1
-#elif ENDIAN_ORDER_TEST == BIG_ENDIAN_TEST
+#elif FIO___BIG_ENDIAN_TEST == FIO___BIG_ENDIAN_TEST
 #define __BIG_ENDIAN__    1
 #define __LITTLE_ENDIAN__ 0
 #else
@@ -1285,6 +1343,7 @@ Static Endian Test
 Dynamic Endian Testing
 ***************************************************************************** */
 
+/** Dynamically test if we are on a little endian machine. */
 FIO_IFUNC unsigned int fio_is_little_endian(void) {
   union {
     unsigned long ul;
@@ -1293,6 +1352,7 @@ FIO_IFUNC unsigned int fio_is_little_endian(void) {
   return (unsigned int)u.u8[0];
 }
 
+/** Dynamically test if we are on a big endian machine. */
 FIO_IFUNC unsigned int fio_is_big_endian(void) {
   return !fio_is_little_endian();
 }
@@ -1300,6 +1360,7 @@ FIO_IFUNC unsigned int fio_is_big_endian(void) {
 /* *****************************************************************************
 Security Related macros
 ***************************************************************************** */
+/** Places `pages` x 4096 bytes of zero (`0`) on the stack. */
 #define FIO_MEM_STACK_WIPE(pages)                                              \
   do {                                                                         \
     volatile char stack_mem[(pages) << 12] = {0};                              \
@@ -1311,21 +1372,27 @@ Settings - Memory Function Selectors
 ***************************************************************************** */
 #ifdef FIO_MEMALT
 #ifndef FIO_MEMCPY
+/** Use this macro instead of `memcpy`, for easy implementation overriding. */
 #define FIO_MEMCPY fio_memcpy
 #endif
 #ifndef FIO_MEMMOVE
+/** Use this macro instead of `memmove`, for easy implementation overriding. */
 #define FIO_MEMMOVE fio_memcpy
 #endif
 #ifndef FIO_MEMCMP
+/** Use this macro instead of `memcmp`, for easy implementation overriding. */
 #define FIO_MEMCMP fio_memcmp
 #endif
 #ifndef FIO_MEMCHR
+/** Use this macro instead of `memchr`, for easy implementation overriding. */
 #define FIO_MEMCHR fio_memchr
 #endif
 #ifndef FIO_MEMSET
+/** Use this macro instead of `memset`, for easy implementation overriding. */
 #define FIO_MEMSET fio_memset
 #endif
 #ifndef FIO_STRLEN
+/** Use this macro instead of `strlen`, for easy implementation overriding. */
 #define FIO_STRLEN fio_strlen
 #endif
 #endif /* FIO_MEMALT */
@@ -1422,15 +1489,18 @@ SIMD Vector Looping Helper
     const size_t fio___unroll_remainder__ =                                    \
         ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));            \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
-    if (fio___unroll_remainder__)                                              \
-      for (; i < fio___unroll_remainder__; ++i)                                \
+    if (fio___unroll_remainder__ && ((iterations) + 1))                        \
+      for (; i < fio___unroll_remainder__; ++i) {                              \
         action;                                                                \
+      }                                                                        \
     if (iterations)                                                            \
       for (; !((iterations) + 1) || (i < (iterations));)                       \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
+        {                                                                      \
           action;                                                              \
+        }                                                                      \
   } while (0)
 
 /* *****************************************************************************
@@ -1565,10 +1635,11 @@ FIO_SFUNC void *fio___memcpy_unsafe_x(void *restrict d_,
 }
 
 #define FIO___MEMCPYX_MAKER(lim, fn)                                           \
+  /** Copies up to `len & lim` bytes from `src` (`s`) to `dest` (`d`). */      \
   FIO_IFUNC void *fio_memcpy##lim##x(void *restrict d,                         \
                                      const void *restrict s,                   \
-                                     size_t l) {                               \
-    return fn(d, s, (l & lim));                                                \
+                                     size_t len) {                             \
+    return fn(d, s, (len & lim));                                              \
   }
 
 /** No-op (completes the name space). */
@@ -1576,25 +1647,16 @@ FIO_SFUNC void *fio_memcpy0x(void *d, const void *s, size_t l) {
   ((void)s), ((void)l);
   return d;
 }
-/** Copies up to (len & 7) bytes from `src` (`s`) to `dest` (`d`). */
+
 FIO___MEMCPYX_MAKER(7, fio___memcpy_unsafe_63x)
-/** Copies up to (len & 15) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(15, fio___memcpy_unsafe_63x)
-/** Copies up to (len & 31) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(31, fio___memcpy_unsafe_63x)
-/** Copies up to (len & 63) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(63, fio___memcpy_unsafe_63x)
-/** Copies up to (len & 127) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(127, fio___memcpy_unsafe_x)
-/** Copies up to (len & 255) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(255, fio___memcpy_unsafe_x)
-/** Copies up to (len & 511) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(511, fio___memcpy_unsafe_x)
-/** Copies up to (len & 1023) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(1023, fio___memcpy_unsafe_x)
-/** Copies up to (len & 2047) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(2047, fio___memcpy_unsafe_x)
-/** Copies up to (len & 4095) bytes from `src` (`s`) to `dest` (`d`). */
 FIO___MEMCPYX_MAKER(4095, fio___memcpy_unsafe_x)
 #undef FIO___MEMCPYX_MAKER
 
@@ -1603,6 +1665,7 @@ Memory Leak Detection
 ***************************************************************************** */
 
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
+/** If set, no `FIO_CALL_AFTER_EXIT` leak reporting event is registered. */
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
@@ -1648,29 +1711,32 @@ Swapping byte's order (`bswap` variations)
 /* avoid special cases by defining for all sizes */
 #define fio_bswap8(i) (i)
 
-/** Byte swap a 16 bit integer, inlined. */
 #if __has_builtin(__builtin_bswap16)
+/** Byte swap a 16 bit integer, inlined. */
 #define fio_bswap16(i) __builtin_bswap16((uint16_t)(i))
 #else
+/** Byte swap a 16 bit integer, inlined. */
 FIO_IFUNC FIO_CONST uint16_t fio_bswap16(uint16_t i) {
   return ((((i)&0xFFU) << 8) | (((i)&0xFF00U) >> 8));
 }
 #endif
 
-/** Byte swap a 32 bit integer, inlined. */
 #if __has_builtin(__builtin_bswap32)
+/** Byte swap a 32 bit integer, inlined. */
 #define fio_bswap32(i) __builtin_bswap32((uint32_t)(i))
 #else
+/** Byte swap a 32 bit integer, inlined. */
 FIO_IFUNC FIO_CONST uint32_t fio_bswap32(uint32_t i) {
   return ((((i)&0xFFUL) << 24) | (((i)&0xFF00UL) << 8) |
           (((i)&0xFF0000UL) >> 8) | (((i)&0xFF000000UL) >> 24));
 }
 #endif
 
-/** Byte swap a 64 bit integer, inlined. */
 #if __has_builtin(__builtin_bswap64)
+/** Byte swap a 64 bit integer, inlined. */
 #define fio_bswap64(i) __builtin_bswap64((uint64_t)(i))
 #else
+/** Byte swap a 64 bit integer, inlined. */
 FIO_IFUNC FIO_CONST uint64_t fio_bswap64(uint64_t i) {
   return ((((i)&0xFFULL) << 56) | (((i)&0xFF00ULL) << 40) |
           (((i)&0xFF0000ULL) << 24) | (((i)&0xFF000000ULL) << 8) |
@@ -1727,9 +1793,9 @@ Switching Endian Ordering
 /** Local byte order to Little Endian byte order, 128 bit integer */
 #define fio_ltole128(i) fio_bswap128((i))
 
-/** An endianess dependent shift operation, moves bytes forwards. */
+/** An endianess dependent shift operation, moves bits forwards. */
 #define FIO_SHIFT_FORWARDS(i, bits) ((i) >> (bits))
-/** An endianess dependent shift operation, moves bytes backwards. */
+/** An endianess dependent shift operation, moves bits backwards. */
 #define FIO_SHIFT_BACKWARDS(i, bits) ((i) << (bits))
 
 #endif /* __SIZEOF_INT128__ */
@@ -1875,6 +1941,7 @@ FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf32u(buf, i); }
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
 ***************************************************************************** */
 #define FIO____SHFL_FN(T, prefx, len)                                          \
+  /** Reorders (shuffles) the vectors using the indexes in `indx`. */          \
   FIO_IFUNC void fio_##prefx##x##len##_reshuffle(T *v, uint8_t indx[len]) {    \
     T tmp[len];                                                                \
     for (size_t i = 0; i < len; ++i) {                                         \
@@ -1885,6 +1952,7 @@ Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
     }                                                                          \
   }
 #define FIO____REDUCE_FN(T, prefx, len, opnm, op)                              \
+  /** Performs `opnm` in order along the vector, returning the result. */      \
   FIO_MIFN T fio_##prefx##x##len##_reduce_##opnm(T *v) {                       \
     T r = v[0];                                                                \
     for (size_t i = 1; i < len; ++i) {                                         \
@@ -1892,11 +1960,13 @@ Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
+  /** Performs operation `a opnm b`, storing the result in `dest`. */          \
   FIO_IFUNC void fio_##prefx##x##len##_##opnm(T *dest, T *a, T *b) {           \
     for (size_t i = 0; i < len; ++i)                                           \
       dest[i] = a[i] op b[i];                                                  \
   }
 #define FIO____REDUCE_MINMAX(T, prefx, len)                                    \
+  /** Returns the maximum value in a vector. */                                \
   FIO_MIFN T fio_##prefx##x##len##_reduce_max(T *v) {                          \
     T r = v[0];                                                                \
     for (size_t i = 1; i < len; ++i) {                                         \
@@ -1904,6 +1974,7 @@ Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
+  /** Returns the minimum value in a vector. */                                \
   FIO_MIFN T fio_##prefx##x##len##_reduce_min(T *v) {                          \
     T r = v[0];                                                                \
     for (size_t i = 1; i < len; ++i) {                                         \
@@ -3616,17 +3687,19 @@ FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
 #endif
 }
 
+// clang-format off
 /**
  * Karatsuba multiplication threshold (in 64-bit words).
  *
  * Below this threshold, schoolbook multiplication is faster.
  * Empirical testing (tests/performance-core.c) shows:
  *
- *   Size          Schoolbook      Karatsuba       Winner
- *   256-bit  (4w)  227 M ops/sec  22 M ops/sec   Schoolbook 10x faster
- *   512-bit  (8w)  41 M ops/sec   13 M ops/sec   Schoolbook 3x faster
- *   1024-bit (16w) 9 M ops/sec    5 M ops/sec    Schoolbook 2x faster
- *   2048-bit (32w) 1.18 M ops/sec 1.34 M ops/sec Karatsuba 1.13x faster
+ * | Size           |Schoolbook      | Karatsuba      | Winner  |
+ * | -------------- | -------------- | -------------- | ------- |
+ * | 256-bit  (4w)  | 227 M ops/sec  | 22 M ops/sec   | Schoolbook 10x faster |
+ * | 512-bit  (8w)  | 41 M ops/sec   | 13 M ops/sec   | Schoolbook 3x faster |
+ * | 1024-bit (16w) | 9 M ops/sec    | 5 M ops/sec    | Schoolbook 2x faster |
+ * | 2048-bit (32w) | 1.18 M ops/sec | 1.34 M ops/sec | Karatsuba 1.13x faster |
  *
  * Crossover point: ~32 words (2048 bits) on modern CPUs.
  * Conservative threshold accounts for platform variations (28-36 words).
@@ -3636,15 +3709,17 @@ FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
 #ifndef FIO___MATH_KARATSUBA_THRESHOLD
 #define FIO___MATH_KARATSUBA_THRESHOLD 32
 #endif
-
+// clang-format on
 /**
  * Karatsuba multiplication for large multi-precision numbers.
  *
+ * ```
  * For a = a_hi * B + a_lo and b = b_hi * B + b_lo (where B = 2^(half*64)):
- *   z0 = a_lo * b_lo
- *   z2 = a_hi * b_hi
- *   z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2
- *   result = z2 * B² + z1 * B + z0
+ * z0 = a_lo * b_lo
+ * z2 = a_hi * b_hi
+ * z1 = (a_lo + a_hi) * (b_lo + b_hi) - z0 - z2
+ * result = z2 * B² + z1 * B + z0
+ * ```
  *
  * Uses 3 multiplications instead of 4, giving O(n^1.585) complexity.
  *
@@ -4035,6 +4110,7 @@ Vector Helpers - memory load operations (implementation starts here)
     }                                                                          \
     return r;                                                                  \
   }                                                                            \
+  /** Loads vector from memory, swapping byte order by bit group.  */          \
   FIO_MIFN fio_u##total_bits fio_u##total_bits##_bswap##bits(                  \
       fio_u##total_bits a) {                                                   \
     fio_u##total_bits r = {0};                                                 \

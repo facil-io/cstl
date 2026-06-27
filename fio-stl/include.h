@@ -4,6 +4,7 @@
             Including facil.io modules for multi-file header option
 ***************************************************************************** */
 #ifndef FIO_INCLUDE_FILE
+/** Persists the include file name (single file vs. folder) */
 #define FIO_INCLUDE_FILE "fio-stl/include.h"
 #include "000 core.h"
 #include "001 patches.h"

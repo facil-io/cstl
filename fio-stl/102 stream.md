@@ -1,17 +1,17 @@
-## Data Stream Container
+# Packet Data Stream
 
 ```c
 #define FIO_STREAM
 #include "fio-stl.h"
 ```
 
-Data Stream objects solve the issues that could arise when `write` operations don't write all the data (due to OS buffering). 
+A packet-based byte stream for buffering data from memory buffers and file descriptors. It is useful when writes are partial: add packets to the stream, read the next contiguous chunk into or from a scratch buffer, write what you can, then advance by the number of bytes written.
 
-Data Streams offer a way to store / concat different data sources (static strings, dynamic strings, files) as a single data stream. This allows the data to be easily written to an IO target (socket / pipe / file) using the `write` operation.
+For the low-level helpers commonly used with streams, see [`004 files.md`](./004%20files.md), [`004 sock.md`](./004%20sock.md), and [`102 poll api.md`](./102%20poll%20api.md).
 
-By defining the macro `FIO_STREAM`, the following macros and functions will be defined.
+---
 
-### Configuration Macros
+## Configuration Macros
 
 #### `FIO_STREAM_COPY_PER_PACKET`
 
@@ -19,25 +19,24 @@ By defining the macro `FIO_STREAM`, the following macros and functions will be d
 #define FIO_STREAM_COPY_PER_PACKET 98304
 ```
 
-When copying data to the stream, large memory sections will be divided into smaller allocations in order to free memory faster and minimize the direct use of `mmap`.
-
-This macro should be set according to the specific allocator limits. By default, it is set to 96Kb (98304 bytes).
+Maximum copied payload per packet. Larger copied buffers are split into multiple packets so memory can be released progressively. Override before including the implementation.
 
 #### `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`
 
 ```c
-#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116
+#define FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN 116 /* 8 in DEBUG */
 ```
 
-If the data added is less than this number of bytes, copying is preferred over referencing for better memory locality. By default, it is set to 116 bytes (or 8 bytes in DEBUG mode).
+Small buffers are copied even when `copy_buffer == 0`, improving locality and avoiding tiny external references.
 
-### Types
+---
+
+## Types
 
 #### `fio_stream_s`
 
 ```c
 typedef struct {
-  /* do not directly access! */
   fio_stream_packet_s *next;
   fio_stream_packet_s **pos;
   size_t consumed;
@@ -45,24 +44,31 @@ typedef struct {
 } fio_stream_s;
 ```
 
-The `fio_stream_s` type should be considered opaque and only accessed through the following API.
+Stream object. Treat the fields as private. Allocate on the stack with `FIO_STREAM_INIT` or on the heap with `fio_stream_new`.
 
 #### `fio_stream_packet_s`
 
-The `fio_stream_packet_s` type should be considered opaque and only accessed through the following API.
+```c
+typedef struct fio_stream_packet_s fio_stream_packet_s;
+```
 
-This type is used to separate data packing from any updates made to the stream object, allowing data packing to be performed concurrently with stream reading / updating (which requires a lock in multi-threaded applications).
+Opaque packed data node. Packets are prepared separately, then transferred to a stream with `fio_stream_add`.
 
-### Initialization and Destruction
+---
+
+## Lifecycle
 
 #### `FIO_STREAM_INIT`
 
 ```c
-#define FIO_STREAM_INIT(s)                                                     \
-  { .next = NULL, .pos = &(s).next }
+#define FIO_STREAM_INIT(s) { .next = NULL, .pos = &(s).next }
 ```
 
-Object initialization macro.
+Initializer for an in-place stream.
+
+```c
+fio_stream_s stream = FIO_STREAM_INIT(stream);
+```
 
 #### `fio_stream_new`
 
@@ -70,9 +76,11 @@ Object initialization macro.
 fio_stream_s *fio_stream_new(void);
 ```
 
-Allocates a new object on the heap and initializes its memory.
+Allocates and initializes a heap stream.
 
-**Returns:** a pointer to the newly allocated stream, or NULL on allocation failure.
+**Returns:** stream pointer, or `NULL` on allocation failure.
+
+Not declared when `FIO_REF_CONSTRUCTOR_ONLY` is defined.
 
 #### `fio_stream_free`
 
@@ -80,12 +88,9 @@ Allocates a new object on the heap and initializes its memory.
 int fio_stream_free(fio_stream_s *stream);
 ```
 
-Frees any internal data AND the object's container!
+Destroys `stream`, frees the stream object itself, and returns `0`.
 
-**Parameters:**
-- `stream` - the stream object to free
-
-**Returns:** 0.
+Not declared when `FIO_REF_CONSTRUCTOR_ONLY` is defined.
 
 #### `fio_stream_destroy`
 
@@ -93,44 +98,11 @@ Frees any internal data AND the object's container!
 void fio_stream_destroy(fio_stream_s *stream);
 ```
 
-Destroys the object, reinitializing its container.
+Frees all queued packets and re-initializes the stream object. Safe to call with `NULL`.
 
-**Parameters:**
-- `stream` - the stream object to destroy
+---
 
-### Stream Information
-
-#### `fio_stream_any`
-
-```c
-uint8_t fio_stream_any(fio_stream_s *stream);
-```
-
-Returns true if there's any data in the stream.
-
-**Parameters:**
-- `stream` - the stream object to check
-
-**Returns:** non-zero if there's data in the stream, 0 otherwise.
-
-**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
-
-#### `fio_stream_length`
-
-```c
-size_t fio_stream_length(fio_stream_s *stream);
-```
-
-Returns the number of bytes waiting in the stream.
-
-**Parameters:**
-- `stream` - the stream object to query
-
-**Returns:** the number of bytes in the stream.
-
-**Note**: this isn't truly thread safe, but it often doesn't matter if it is.
-
-### Packing Data into the Stream
+## Packing Data
 
 #### `fio_stream_pack_data`
 
@@ -142,18 +114,13 @@ fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                           void (*dealloc_func)(void *));
 ```
 
-Packs data into a `fio_stream_packet_s` container.
+Packs `len` bytes starting at `((char *)buf + offset)`.
 
-**Parameters:**
-- `buf` - pointer to the data buffer
-- `len` - length of the data in bytes
-- `offset` - offset within the buffer to start from
-- `copy_buffer` - if non-zero, the data will be copied; otherwise, the buffer is referenced
-- `dealloc_func` - function to call to free the buffer when done (can be NULL)
+- If `copy_buffer` is non-zero, or `len < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`, bytes are copied into stream-owned packets.
+- Otherwise the packet references `buf` and calls `dealloc_func(buf)` when the packet is freed, if `dealloc_func` is not `NULL`.
+- Copied data larger than `FIO_STREAM_COPY_PER_PACKET` is split into multiple packets.
 
-**Returns:** a pointer to the packet, or NULL on error.
-
-**Note**: can be performed concurrently with other stream operations. If `copy_buffer` is set or if `len` is less than `FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN`, the data will be copied. Large data blocks may be split into multiple packets based on `FIO_STREAM_COPY_PER_PACKET`. If `dealloc_func` is provided, it will be called even on error.
+**Returns:** packet pointer, or `NULL` if `buf == NULL`, `len == 0`, the length is too large for the packet format, or allocation fails. If `dealloc_func` is provided, it is called on both success-after-copy and failure.
 
 #### `fio_stream_pack_fd`
 
@@ -164,17 +131,14 @@ fio_stream_packet_s *fio_stream_pack_fd(int fd,
                                         uint8_t keep_open);
 ```
 
-Packs a file descriptor into a `fio_stream_packet_s` container.
+Packs bytes from an open file descriptor. Reads are performed later by `fio_stream_read` using `fio_fd_read`.
 
-**Parameters:**
-- `fd` - the file descriptor to pack
-- `len` - number of bytes to read from the file (0 to auto-detect from file size)
-- `offset` - offset within the file to start reading from
-- `keep_open` - if non-zero, the file descriptor will NOT be closed when the packet is freed
+- `len == 0` auto-detects the remaining file size with `fio_fd_size(fd)`.
+- `offset` is the starting file offset.
+- If `keep_open == 0`, the descriptor is closed when the packet is freed, or on pack failure after ownership was accepted.
+- If `keep_open != 0`, the caller remains responsible for closing `fd`.
 
-**Returns:** a pointer to the packet, or NULL on error.
-
-**Note**: if `len` is 0, the file size will be queried and `len` will be set to `file_size - offset`. If `keep_open` is 0 and an error occurs, the file descriptor will be closed.
+**Returns:** packet pointer, or `NULL` on invalid input, size detection failure / oversized auto-detected size when `len == 0`, or allocation failure.
 
 #### `fio_stream_add`
 
@@ -182,13 +146,9 @@ Packs a file descriptor into a `fio_stream_packet_s` container.
 void fio_stream_add(fio_stream_s *stream, fio_stream_packet_s *packet);
 ```
 
-Adds a packet to the stream.
+Appends `packet` to `stream` and transfers packet ownership to the stream. If `stream` or `packet` is `NULL`, the packet is freed.
 
-**Parameters:**
-- `stream` - the stream to add the packet to
-- `packet` - the packet to add
-
-**Note**: this isn't thread safe. If `stream` or `packet` is NULL, the packet will be freed.
+This is not thread-safe.
 
 #### `fio_stream_pack_free`
 
@@ -196,12 +156,11 @@ Adds a packet to the stream.
 void fio_stream_pack_free(fio_stream_packet_s *packet);
 ```
 
-Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never added to the stream using `fio_stream_add`.
+Frees a packet that was not added to a stream. Do not call this after `fio_stream_add` succeeds.
 
-**Parameters:**
-- `packet` - the packet to free
+---
 
-### Reading / Consuming Data from the Stream
+## Reading and Consuming
 
 #### `fio_stream_read`
 
@@ -209,20 +168,17 @@ Destroys the `fio_stream_packet_s` - call this ONLY if the packed data was never
 void fio_stream_read(fio_stream_s *stream, char **buf, size_t *len);
 ```
 
-Reads data from the stream (if any), leaving the data in the stream **without advancing the reading position** (see [`fio_stream_advance`](#fio_stream_advance)).
+Reads the next available bytes without consuming them.
 
-`buf` MUST point to a buffer with - at least - `len` bytes. This is required in case the packed data is fragmented or references a file and needs to be copied to an available buffer.
+Before the call, `*buf` must point to a scratch buffer with at least `*len` bytes. This buffer is required when data spans multiple packets or comes from a file descriptor.
 
-On error, or if the stream is empty, `buf` will be set to NULL and `len` will be set to zero.
+After the call:
 
-Otherwise, `buf` may retain the same value or it may point directly to a memory address within the stream's buffer (the original value may be lost) and `len` will be updated to the largest possible value for valid data that can be read from `buf`.
+- On empty stream or error, `*buf == NULL` and `*len == 0`.
+- Otherwise `*buf` either still points to the supplied scratch buffer or points directly into stream-owned memory.
+- `*len` is updated to the number of readable bytes available at `*buf`.
 
-**Parameters:**
-- `stream` - the stream to read from
-- `buf` - pointer to a buffer pointer (will be updated)
-- `len` - pointer to the buffer length (will be updated)
-
-**Note**: this isn't thread safe.
+Reset both `*buf` and `*len` before each read if reusing the same scratch buffer. This is not thread-safe.
 
 #### `fio_stream_advance`
 
@@ -230,12 +186,88 @@ Otherwise, `buf` may retain the same value or it may point directly to a memory 
 void fio_stream_advance(fio_stream_s *stream, size_t len);
 ```
 
-Advances the Stream, so the first `len` bytes are marked as consumed.
+Consumes `len` bytes from the stream, freeing fully consumed packets. Usually pass the number of bytes actually written to the destination.
 
-**Parameters:**
-- `stream` - the stream to advance
-- `len` - number of bytes to mark as consumed
+This is not thread-safe.
 
-**Note**: this isn't thread safe.
+#### `fio_stream_any`
 
--------------------------------------------------------------------------------
+```c
+uint8_t fio_stream_any(fio_stream_s *stream);
+```
+
+Returns non-zero when `stream` has pending packets. Returns `0` for `NULL` or empty streams. This is not truly thread-safe.
+
+#### `fio_stream_length`
+
+```c
+size_t fio_stream_length(fio_stream_s *stream);
+```
+
+Returns the number of bytes waiting in the stream. Call with a valid stream object. This is not truly thread-safe.
+
+---
+
+## Ownership and Thread-Safety
+
+Packing creates a packet owned by the caller. `fio_stream_add` transfers that ownership to the stream. `fio_stream_destroy`, `fio_stream_free`, and `fio_stream_advance` free packets as needed.
+
+For referenced memory packets, the referenced buffer must remain valid until the packet is freed. Pass `copy_buffer != 0` when that lifetime is not guaranteed. For file descriptor packets, keep the descriptor readable until the packet is consumed or destroyed; `keep_open` controls who closes it.
+
+Packing packets can be done before taking the stream lock, but mutating or consuming a single `fio_stream_s` (`add`, `read`, `advance`, and length checks) should be externally synchronized when shared across threads.
+
+---
+
+## Example
+
+```c
+#define FIO_STREAM
+#include "fio-stl.h"
+#include <stdio.h>
+#include <string.h>
+
+int main(void) {
+  fio_stream_s stream = FIO_STREAM_INIT(stream);
+  char scratch[4096];
+
+  char msg[] = "hello, stream\n";
+  fio_stream_packet_s *p = fio_stream_pack_data(msg, strlen(msg), 0, 1, NULL);
+  fio_stream_add(&stream, p);
+
+  while (fio_stream_any(&stream)) {
+    char *buf = scratch;
+    size_t len = sizeof(scratch);
+
+    fio_stream_read(&stream, &buf, &len);
+    if (!len)
+      break;
+
+    size_t written = fwrite(buf, 1, len, stdout);
+    fio_stream_advance(&stream, written);
+
+    if (written != len)
+      break;
+  }
+
+  fio_stream_destroy(&stream);
+  return 0;
+}
+```
+
+### File Descriptor Packet
+
+```c
+#define FIO_STREAM
+#define FIO_FILES
+#include "fio-stl.h"
+
+fio_stream_s stream = FIO_STREAM_INIT(stream);
+int fd = fio_filename_open("./asset.bin", O_RDONLY);
+fio_stream_packet_s *p = fio_stream_pack_fd(fd, 0, 0, 0); /* stream closes fd */
+fio_stream_add(&stream, p);
+
+/* ... read / write packets ... */
+fio_stream_destroy(&stream);
+```
+
+------------------------------------------------------------

@@ -1,198 +1,178 @@
-## ChaCha20 & Poly1305
+# ChaCha20 & Poly1305
 
 ```c
 #define FIO_CHACHA
 #include "fio-stl.h"
 ```
 
-Non-streaming ChaCha20 and Poly1305 implementations are provided for cases when a cryptography library isn't available (or too heavy) but a good enough symmetric cryptographic solution is required. Please note that this implementation was not tested from a cryptographic viewpoint and although constant time was desired it might not have been achieved on all systems / CPUs.
+ChaCha20 stream cipher, Poly1305 authenticator, and the ChaCha20-Poly1305 AEAD combination. Also includes XChaCha20-Poly1305 with a 192-bit nonce, which is safer for random nonces than the 96-bit variant.
 
-**Note:** some CPUs do not offer constant time MUL and might leak information through side-chain attacks.
+**Security note:** this implementation has not been independently audited. Use at your own risk, and prefer a tested cryptographic library when one is available.
 
-**Note:** this module depends on the `FIO_MATH` module which will be automatically included.
-
-### ChaCha20Poly1305 API
+### ChaCha20-Poly1305 API
 
 #### `fio_chacha20_poly1305_enc`
 
 ```c
-void fio_chacha20_poly1305_enc(void *restrict mac,
-                               void *restrict data,
-                               size_t len,
-                               const void *ad, /* additional data */
-                               size_t adlen,
-                               const void *key,
-                               const void *nonce);
+SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad,
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce);
 ```
 
-Performs an in-place encryption of `data` using ChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
+In-place encryption with a 16-byte Poly1305 tag.
 
-* `mac`    MUST point to a buffer with (at least) 16 available bytes.
-* `data`   MAY be omitted, WILL be encrypted.
-* `len`    length of `data` in bytes.
-* `ad`     MAY be omitted, will NOT be encrypted.
-* `adlen`  length of `ad` in bytes.
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
+**Parameters:**
+- `mac` — output buffer; must have at least 16 writable bytes.
+- `data` — plaintext buffer; encrypted in place.
+- `len` — data length.
+- `ad` — additional authenticated data (not encrypted); may be `NULL`.
+- `adlen` — length of `ad`.
+- `key` — 32-byte key.
+- `nonce` — 12-byte nonce.
 
 #### `fio_chacha20_poly1305_dec`
 
 ```c
-int fio_chacha20_poly1305_dec(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad, /* additional data */
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce);
+SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
+                                    void *restrict data,
+                                    size_t len,
+                                    const void *ad,
+                                    size_t adlen,
+                                    const void *key,
+                                    const void *nonce);
 ```
 
-Performs an in-place decryption of `data` using ChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
+In-place decryption with tag verification.
 
-* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
-* `data`   MAY be omitted, WILL be decrypted.
-* `len`    length of `data` in bytes.
-* `ad`     MAY be omitted ONLY IF originally omitted.
-* `adlen`  length of `ad` in bytes.
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
-
-**Returns:** `0` on success, `-1` on error (authentication failed).
+**Returns:** `0` on success, `-1` if authentication fails. On failure `data` is zeroed.
 
 #### `fio_chacha20_poly1305_auth`
 
 ```c
-void fio_chacha20_poly1305_auth(void *restrict mac,
-                                void *restrict data,
-                                size_t len,
-                                const void *ad, /* additional data */
-                                size_t adlen,
-                                const void *key,
-                                const void *nonce);
+SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
+                                      void *restrict data,
+                                      size_t len,
+                                      const void *ad,
+                                      size_t adlen,
+                                      const void *key,
+                                      const void *nonce);
 ```
 
-Computes the Poly1305 authentication tag for already-encrypted data without performing decryption.
+Computes the Poly1305 tag for already-encrypted data without decrypting it.
 
-This function is useful when you need to verify or compute the MAC for ciphertext that was encrypted using ChaCha20Poly1305, without decrypting the data.
-
-* `mac`    MUST point to a buffer with (at least) 16 available bytes for the computed MAC.
-* `data`   the encrypted data (ciphertext).
-* `len`    length of `data` in bytes.
-* `ad`     additional authenticated data (MAY be omitted).
-* `adlen`  length of `ad` in bytes.
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`  MUST point to a  96 bit long memory address (12 Bytes).
-
-### Using ChaCha20 and Poly1305 Separately
+### Standalone ChaCha20 / Poly1305
 
 #### `fio_chacha20`
 
 ```c
-void fio_chacha20(void *restrict data,
-                  size_t len,
-                  const void *key,
-                  const void *nonce,
-                  uint32_t counter);
+SFUNC void fio_chacha20(void *restrict data,
+                        size_t len,
+                        const void *key,
+                        const void *nonce,
+                        uint32_t counter);
 ```
 
-Performs an in-place encryption/decryption of `data` using ChaCha20.
+In-place ChaCha20 encryption or decryption.
 
-* `data`    the data to encrypt/decrypt in-place.
-* `len`     length of `data` in bytes.
-* `key`     MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`   MUST point to a  96 bit long memory address (12 Bytes).
-* `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
+**Parameters:**
+- `data` — buffer to transform in place.
+- `len` — buffer length.
+- `key` — 32-byte key.
+- `nonce` — 12-byte nonce.
+- `counter` — block counter; usually `1` unless resuming mid-ciphertext.
 
 #### `fio_poly1305_auth`
 
 ```c
-void fio_poly1305_auth(void *restrict mac,
-                       const void *key,
-                       void *restrict msg,
-                       size_t len,
-                       const void *ad,
-                       size_t ad_len);
+SFUNC void fio_poly1305_auth(void *restrict mac_dest,
+                             void *restrict message,
+                             size_t len,
+                             const void *ad,
+                             size_t ad_len,
+                             const void *key256bits);
 ```
 
-Given a Poly1305 256bit (32 byte) key, writes the Poly1305 authentication code for the message and additional data into `mac`.
+Computes a Poly1305 MAC for `message` and `ad` using a 32-byte key.
 
-* `mac`    MUST point to a 128 bit long memory address (16 Bytes).
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `msg`    the message to authenticate.
-* `len`    length of `msg` in bytes.
-* `ad`     additional data to authenticate (MAY be omitted).
-* `ad_len` length of `ad` in bytes.
+**Parameters:**
+- `mac_dest` — output buffer; must have at least 16 writable bytes.
+- `message` — message to authenticate; may be `NULL` if `len` is 0.
+- `len` — message length.
+- `ad` — additional data; may be `NULL`.
+- `ad_len` — additional data length.
+- `key256bits` — 32-byte Poly1305 key.
 
-### XChaCha20-Poly1305 API (Extended Nonce)
+### XChaCha20-Poly1305 API
 
-XChaCha20-Poly1305 is the extended-nonce variant that uses a 192-bit (24-byte) nonce instead of the standard 96-bit (12-byte) nonce. This makes it safe to use randomly-generated nonces without collision risk due to the birthday paradox.
-
-**How it works:**
-1. HChaCha20 derives a 256-bit subkey from the original key and first 16 bytes of the nonce
-2. Standard ChaCha20-Poly1305 is applied using the subkey and remaining 8 bytes of the nonce
+XChaCha20 uses a 24-byte nonce, making random nonces safe from birthday-bound collisions.
 
 #### `fio_xchacha20_poly1305_enc`
 
 ```c
-void fio_xchacha20_poly1305_enc(void *restrict mac,
-                                void *restrict data,
-                                size_t len,
-                                const void *ad,
-                                size_t adlen,
-                                const void *key,
-                                const void *nonce);
+SFUNC void fio_xchacha20_poly1305_enc(void *restrict mac,
+                                      void *restrict data,
+                                      size_t len,
+                                      const void *ad,
+                                      size_t adlen,
+                                      const void *key,
+                                      const void *nonce);
 ```
 
-Performs an in-place encryption of `data` using XChaCha20 with additional data, producing a 16 byte message authentication code (MAC) using Poly1305.
-
-* `mac`    MUST point to a buffer with (at least) 16 available bytes.
-* `data`   MAY be omitted, WILL be encrypted.
-* `len`    length of `data` in bytes.
-* `ad`     MAY be omitted, will NOT be encrypted.
-* `adlen`  length of `ad` in bytes.
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`  MUST point to a 192 bit long memory address (24 Bytes).
+Same shape as `fio_chacha20_poly1305_enc`, but `nonce` must be 24 bytes.
 
 #### `fio_xchacha20_poly1305_dec`
 
 ```c
-int fio_xchacha20_poly1305_dec(void *restrict mac,
-                               void *restrict data,
-                               size_t len,
-                               const void *ad,
-                               size_t adlen,
-                               const void *key,
-                               const void *nonce);
+SFUNC int fio_xchacha20_poly1305_dec(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad,
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce);
 ```
 
-Performs an in-place decryption of `data` using XChaCha20 after authenticating the message authentication code (MAC) using Poly1305.
-
-* `mac`    MUST point to a buffer where the 16 byte MAC is placed.
-* `data`   MAY be omitted, WILL be decrypted.
-* `len`    length of `data` in bytes.
-* `ad`     MAY be omitted ONLY IF originally omitted.
-* `adlen`  length of `ad` in bytes.
-* `key`    MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`  MUST point to a 192 bit long memory address (24 Bytes).
-
-**Returns:** `0` on success, `-1` on error (authentication failed).
+Same shape as `fio_chacha20_poly1305_dec`, but `nonce` must be 24 bytes.
 
 #### `fio_xchacha20`
 
 ```c
-void fio_xchacha20(void *restrict data,
-                   size_t len,
-                   const void *key,
-                   const void *nonce,
-                   uint32_t counter);
+SFUNC void fio_xchacha20(void *restrict data,
+                         size_t len,
+                         const void *key,
+                         const void *nonce,
+                         uint32_t counter);
 ```
 
-Performs an in-place encryption/decryption of `data` using XChaCha20.
+In-place XChaCha20 encryption or decryption.
 
-* `data`    the data to encrypt/decrypt in-place.
-* `len`     length of `data` in bytes.
-* `key`     MUST point to a 256 bit long memory address (32 Bytes).
-* `nonce`   MUST point to a 192 bit long memory address (24 Bytes).
-* `counter` is the block counter, usually 0 unless `data` is mid-cyphertext.
+### Example
 
--------------------------------------------------------------------------------
+```c
+#define FIO_CHACHA
+#include "fio-stl.h"
+
+int main(void) {
+  uint8_t key[32] = {0};
+  uint8_t nonce[12] = {0};
+  uint8_t msg[32] = "hello, chacha world!";
+  uint8_t tag[16];
+
+  fio_rand_bytes_secure(key, sizeof(key));
+  fio_rand_bytes_secure(nonce, sizeof(nonce));
+
+  fio_chacha20_poly1305_enc(tag, msg, sizeof(msg), NULL, 0, key, nonce);
+
+  if (fio_chacha20_poly1305_dec(tag, msg, sizeof(msg), NULL, 0, key, nonce)) {
+    printf("authentication failed\n");
+    return 1;
+  }
+  return 0;
+}
+```
+
+------------------------------------------------------------

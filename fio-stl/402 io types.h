@@ -45,7 +45,6 @@ typedef struct {
     if ((o).on_close)                                                          \
       (o).on_close((o).udata);                                                 \
   } while (0)
-#define FIO_MAP_DESTROY_AFTER_COPY 0
 
 #define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE

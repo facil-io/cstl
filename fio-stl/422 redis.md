@@ -1,304 +1,201 @@
-## Redis Pub/Sub Engine
+# Redis — Pub/Sub Engine and Command Client (422 redis.h)
 
 ```c
 #define FIO_REDIS
 #include FIO_INCLUDE_FILE
 ```
 
-The Redis module provides a pub/sub engine that integrates with facil.io's pub/sub system, enabling distributed messaging across multiple server instances through Redis. It also serves as a standalone Redis client for arbitrary commands (GET, SET, INCR, etc.).
+> **Requires:** `FIO_IO`, `FIO_PUBSUB`, `FIO_FIOBJ`, `FIO_RESP3`. When using `include.h` all dependencies are resolved automatically.
 
-This module is designed for horizontal scaling scenarios where multiple application instances need to share pub/sub messages. When attached to the facil.io pub/sub system, all subscriptions and publications are automatically synchronized through Redis.
+The Redis module does two things: it acts as a **Pub/Sub engine** that connects facil.io's Pub/Sub system to a Redis server, enabling cross-machine message distribution; and it acts as a **Redis command client** for arbitrary commands (`GET`, `SET`, `INCR`, etc.).
 
-**Note**: This module requires the IO reactor (`FIO_IO`), FIOBJ types (`FIO_FIOBJ`), and RESP3 parser (`FIO_RESP3`) modules, which are automatically included.
+See [./400 io-overview.md](./400 io-overview.md) for where Redis fits in the full IO stack, [./420 pubsub.md](./420 pubsub.md) for the Pub/Sub engine interface, [./404 ipc.md](./404 ipc.md) for the IPC transport workers use to reach the master, and [./250 fiobj.md](./250 fiobj.md) for how FIOBJ types map to RESP replies.
 
-**Note**: `fio_redis_new()` **MUST** be called before `fio_io_start()` (before fork). Creating Redis engines from worker processes is not supported.
+---
 
-### Features
+## Architecture
 
-- **Master-Only Redis Connections**: Only the master process connects to Redis; workers proxy through IPC
-- **Dual Connection Model**: Master maintains separate connections for publishing and subscribing to avoid protocol conflicts
-- **Transparent Multi-Process Support**: `fio_redis_send()` and `fio_pubsub_publish()` work from any process — routing is automatic
-- **Automatic Subscription Management**: SUBSCRIBE/PSUBSCRIBE commands are handled internally by the pub/sub engine
-- **Command Queue**: Send arbitrary Redis commands with asynchronous callbacks
-- **Authentication Support**: Optional AUTH command on connection
-- **Automatic Reconnection**: Reconnects automatically on connection loss
-- **Ping/Pong Keepalive**: Configurable keepalive interval to detect dead connections
-- **Reference Counting**: Safe sharing of engine across multiple owners
+Only the **master** process opens TCP connections to Redis. Workers never connect directly. Instead:
 
-### Quick Start
+- Workers forward `fio_redis_send()` calls to the master via IPC; the master executes the command and replies back.
+- Workers forward `fio_pubsub_publish()` calls to the master via IPC; the master sends `PUBLISH` to Redis.
+- Incoming subscription messages arrive on the master's subscription connection and are fanned out to all workers via the normal Pub/Sub IPC infrastructure.
+
+The master maintains two separate TCP connections:
+
+| Connection | Purpose |
+|---|---|
+| **pub_conn** | Commands (`fio_redis_send`), `PUBLISH`, `PING`, `AUTH` |
+| **sub_conn** | `SUBSCRIBE` / `PSUBSCRIBE` push messages only |
+
+Redis protocol requires this split: a connection in subscription mode cannot execute regular commands.
+
+```
+              Master Process
+ ┌──────────────────────────────────────────┐
+ │  pub_conn ──────────────────────────┐    │
+ │  (commands / PUBLISH / PING / AUTH) │    │
+ │                                     ▼    │
+ │  sub_conn ──────── Redis Server          │
+ │  (SUBSCRIBE / PSUBSCRIBE push)      ▲    │
+ └──────────────────────────────────────────┘
+         ▲                   │
+         │ IPC               │ pub/sub IPC fan-out
+         │                   ▼
+ ┌────────────┐   ┌────────────┐   ┌────────────┐
+ │  Worker 1  │   │  Worker 2  │   │  Worker N  │
+ └────────────┘   └────────────┘   └────────────┘
+```
+
+In single-process mode (`fio_io_start(0)`) the process is both master and worker; all operations go directly to Redis with no IPC overhead.
+
+---
+
+## Setup
 
 ```c
 #define FIO_LOG
 #define FIO_REDIS
 #include FIO_INCLUDE_FILE
 
-/* Message handler */
-void on_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_INFO("Received on channel '%.*s': %.*s",
-               (int)msg->channel.len, msg->channel.buf,
-               (int)msg->message.len, msg->message.buf);
-}
-
 int main(void) {
-  /* Create Redis engine BEFORE fio_io_start() */
+  /* Create the engine BEFORE fio_io_start() (before fork). */
   fio_pubsub_engine_s *redis = fio_redis_new(
-      .url = "redis://localhost:6379"
+      .url  = "redis://localhost:6379",
+      .auth = "my_password"          /* optional */
   );
 
-  /* Attach to pub/sub system (does NOT take ownership) */
-  fio_pubsub_engine_attach(redis);
+  /* Dup before attach — attach transfers your reference to the system. */
+  fio_redis_dup(redis);              /* ref: 1 → 2 */
+  fio_pubsub_engine_attach(redis);   /* system takes the original ref */
 
-  /* Subscribe to a channel */
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("my-channel"),
-                .on_message = on_message);
+  fio_io_start(4);                   /* master connects; workers use IPC */
 
-  /* Start the IO reactor (forks workers if count > 0) */
-  fio_io_start(0);
-
-  /* Cleanup - detach before freeing if attached */
-  fio_pubsub_engine_detach(redis);
-  fio_redis_free(redis);
-  return 0;
+  fio_pubsub_engine_detach(redis);   /* system releases its ref: 2 → 1 */
+  fio_redis_free(redis);             /* caller releases dup:  1 → 0 → destroy */
 }
 ```
 
-------------------------------------------------------------
+`fio_redis_new()` **must** be called before `fio_io_start()`. Creating an engine from a worker process is not supported.
 
-### Architecture
+---
 
-#### Master-Only Redis Connections
+## Configuration
 
-Only the **master** process connects to the Redis server. Worker processes never open direct TCP connections to Redis. Instead, workers communicate with the master via IPC (Inter-Process Communication), and the master forwards operations to Redis on their behalf.
-
-This design ensures:
-- **No duplicate connections**: N workers do not create N×2 Redis connections
-- **Correct pub/sub semantics**: SUBSCRIBE/UNSUBSCRIBE only happen on the master's subscription connection
-- **Transparent operation**: The public API (`fio_redis_send`, `fio_pubsub_publish`) works identically from any process
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Master Process                            │
-│  ┌──────────────────────┐    ┌──────────────────────────────┐    │
-│  │ Publishing Connection │    │ Subscription Connection      │    │
-│  │ - fio_redis_send()   │    │ - SUBSCRIBE/PSUBSCRIBE       │    │
-│  │ - PUBLISH commands   │    │ - Receives pub/sub messages  │    │
-│  │ - Regular commands   │    │ - Pattern matching           │    │
-│  └──────────┬───────────┘    └──────────────┬───────────────┘    │
-│             └────────────────┬──────────────┘                    │
-│                              │                                   │
-│                              ▼                                   │
-│                    ┌─────────────────┐                            │
-│                    │   Redis Server  │                            │
-│                    └─────────────────┘                            │
-│                                                                  │
-│  ┌───────────────────────────────────────────────────────────┐   │
-│  │                    IPC Bus                                │   │
-│  └──────┬──────────────────┬──────────────────┬─────────────┘   │
-└─────────┼──────────────────┼──────────────────┼─────────────────┘
-          │                  │                  │
-          ▼                  ▼                  ▼
-   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-   │  Worker 1   │   │  Worker 2   │   │  Worker N   │
-   │ IPC → Master│   │ IPC → Master│   │ IPC → Master│
-   └─────────────┘   └─────────────┘   └─────────────┘
-```
-
-#### How Operations Route by Process
-
-| Operation | On Master | On Worker |
-|-----------|-----------|-----------|
-| `fio_redis_send()` | Queued directly on pub_conn | Serialized to RESP, sent to master via IPC; master executes against Redis and replies back via IPC |
-| `fio_pubsub_publish()` | Sent as Redis PUBLISH on pub_conn | Forwarded to master via IPC; master sends PUBLISH to Redis |
-| Subscription messages | Received on sub_conn, distributed to all processes via pub/sub IPC | Received from master via pub/sub IPC infrastructure |
-
-#### Dual Connection Model
-
-The master maintains two separate TCP connections to the Redis server:
-
-1. **Publishing Connection** (`pub_conn`): Used for sending commands (`fio_redis_send`) and PUBLISH operations. This connection operates in request-response mode.
-
-2. **Subscription Connection** (`sub_conn`): Used exclusively for SUBSCRIBE/PSUBSCRIBE operations. Once a connection enters subscription mode, it can only receive pub/sub messages and cannot execute regular commands.
-
-This separation is required by the Redis protocol — a connection in subscription mode cannot execute regular commands, and mixing the two would cause protocol errors.
-
-#### Ownership and Attach/Detach
-
-The `fio_pubsub_engine_attach()` and `fio_pubsub_engine_detach()` functions do **NOT** transfer ownership of the engine. They simply register or unregister the engine with the pub/sub system.
-
-The caller who created the engine with `fio_redis_new()` is responsible for calling `fio_redis_free()` when the engine is no longer needed. **Important**: If the engine was attached via `fio_pubsub_engine_attach()`, you **MUST** call `fio_pubsub_engine_detach()` before calling `fio_redis_free()`.
-
-#### Command Queue
-
-Commands sent via `fio_redis_send()` on the master are queued internally and sent one at a time, waiting for each reply before sending the next command. This ensures proper correlation between commands and their responses.
-
-The queue is processed in FIFO order. If the connection is lost, queued commands remain in the queue and are sent after reconnection.
-
-------------------------------------------------------------
-
-### Configuration Macros
-
-#### `FIO_REDIS_READ_BUFFER`
+### `FIO_REDIS_READ_BUFFER`
 
 ```c
-#define FIO_REDIS_READ_BUFFER 32768
+#define FIO_REDIS_READ_BUFFER 32768   /* default: 32 KiB */
 ```
 
-Size of the read buffer for Redis connections in bytes. Default is 32768 (32KB).
+Read buffer size per connection. The master allocates `FIO_REDIS_READ_BUFFER × 2` bytes of buffer space inside each engine (one slice per connection). Increase this for workloads with very large individual Redis replies.
 
-The master allocates two read buffers (one for each connection), so the total memory usage per engine is `FIO_REDIS_READ_BUFFER * 2` bytes plus overhead.
+---
 
-------------------------------------------------------------
+## Types
 
-### Types
-
-#### `fio_redis_args_s`
+### `fio_redis_args_s`
 
 ```c
 typedef struct {
-  /**
-   * Redis server URL.
-   *
-   * Supported formats:
-   * - "redis://host:port"
-   * - "redis://host" (default port 6379)
-   * - "host:port" (no scheme)
-   * - "host" (no scheme, default port 6379)
-   * - NULL or empty → defaults to "localhost:6379"
-   */
-  const char *url;
-  /** Redis server's password, if any (for AUTH command) */
-  const char *auth;
-  /** Length of auth string (0 = auto-detect with strlen) */
-  size_t auth_len;
-  /** Ping interval in seconds (0 = default 30 seconds) */
-  uint8_t ping_interval;
+  const char *url;          /* Redis server URL; NULL → "localhost:6379" */
+  const char *auth;         /* AUTH password; NULL = no auth */
+  size_t      auth_len;     /* Length of auth; 0 = strlen(auth) */
+  uint8_t     ping_interval;/* Keepalive interval in seconds; 0 → 30 s */
 } fio_redis_args_s;
 ```
 
-Arguments for creating a Redis pub/sub engine.
+**`url`** accepted formats:
 
-**Members:**
-- `url` - Redis server URL. Supports various formats including `redis://host:port`, `host:port`, or just `host`. Defaults to `"localhost:6379"` if NULL or empty.
-- `auth` - Optional password for Redis AUTH command. Set to NULL if no authentication is required.
-- `auth_len` - Length of the auth string. If 0, `strlen()` is used to determine the length.
-- `ping_interval` - Keepalive ping interval in seconds. Defaults to 30 seconds if 0.
+| Format | Example |
+|---|---|
+| Scheme with port | `"redis://host:6380"` |
+| Scheme, default port | `"redis://host"` |
+| Host and port | `"host:6380"` |
+| Host only | `"myredis"` |
+| NULL or `""` | → `localhost:6379` |
 
-------------------------------------------------------------
+**`ping_interval`** — the IO reactor sends a `PING` on each connection if it has been idle this many seconds. Default: **30 seconds**. The protocol error timeout (detecting a hung connection) is also governed by this value.
 
-### Reference Counting
+---
 
-The Redis engine uses reference counting for memory management:
+## Reference Counting and Ownership
 
-- `fio_redis_new` creates an engine with reference count = 1
-- `fio_redis_dup` increments the reference count and returns the engine
-- `fio_redis_free` decrements the reference count; frees the engine when count reaches 0
+The engine uses reference counting (`FIO_REF`). Three things independently hold or transfer refs:
 
-**Important**: `fio_pubsub_engine_attach()` and `fio_pubsub_engine_detach()` do **NOT** affect the reference count. The caller who created the engine is responsible for calling `fio_redis_free()` when done.
+1. **Caller**: `fio_redis_new()` returns `ref = 1`. The caller owns this ref and must release it with `fio_redis_free()`.
+
+2. **Pub/Sub system**: `fio_pubsub_engine_attach()` prepares the engine for Pub/Sub use. The Redis engine keeps its Pub/Sub reference on first `SUBSCRIBE` / `PSUBSCRIBE` and releases it from `on_detached`; call `fio_redis_dup()` before attach if you need to keep using the pointer after attaching.
+
+3. **Internal deferred tasks**: The engine dups before scheduling an IO-deferred task and frees at the end. These are invisible to the caller.
+
+**Usage patterns:**
 
 ```c
-/* Example: sharing engine across multiple owners */
-fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost");
+/* Pattern A — with Pub/Sub */
+fio_pubsub_engine_s *redis = fio_redis_new(...); /* ref = 1 */
+fio_redis_dup(redis);                            /* ref = 2 (keep a copy) */
+fio_pubsub_engine_attach(redis);                 /* system takes original ref */
+/* ...use pub/sub... */
+fio_pubsub_engine_detach(redis);                 /* system releases → ref = 1 */
+fio_redis_free(redis);                           /* caller releases → ref = 0 → destroy */
 
-/* Share with another component */
-fio_pubsub_engine_s *shared = fio_redis_dup(redis);  /* ref = 2 */
-
-/* Attach to pub/sub (does NOT increment ref) */
-fio_pubsub_engine_attach(redis);
-
-/* ... later, first owner is done ... */
-fio_redis_free(redis);   /* ref = 1, engine still alive */
-
-/* ... later, second owner is done - must detach before final free ... */
-fio_pubsub_engine_detach(shared);
-fio_redis_free(shared);  /* ref = 0, engine destroyed */
+/* Pattern B — command client only, no pub/sub */
+fio_pubsub_engine_s *redis = fio_redis_new(...); /* ref = 1 */
+/* ...send commands... */
+fio_redis_free(redis);                           /* ref = 0 → destroy */
 ```
 
-------------------------------------------------------------
+You do **not** have to detach before freeing. If you free while the pub/sub system still holds its ref, the engine remains alive until detach (or shutdown) fires the `on_detached` callback.
 
-### API Functions
+---
 
-#### `fio_redis_new`
+## API
+
+### `fio_redis_new`
 
 ```c
 fio_pubsub_engine_s *fio_redis_new(fio_redis_args_s args);
-/* Named arguments using macro. */
-#define fio_redis_new(...) fio_redis_new((fio_redis_args_s){__VA_ARGS__})
+#define fio_redis_new(...)  fio_redis_new((fio_redis_args_s){__VA_ARGS__})
 ```
 
-Creates a Redis pub/sub engine with reference count = 1.
+Creates a Redis engine with `ref = 1`. The macro overload enables named arguments.
 
-The function is shadowed by a macro, allowing it to accept named arguments:
+Returns a pointer to `fio_pubsub_engine_s` on success, `NULL` on allocation failure.
+
+The engine is typed as `fio_pubsub_engine_s *` so it can be passed directly to `fio_pubsub_engine_attach()`. Pass the same pointer to `fio_redis_dup()`, `fio_redis_free()`, and `fio_redis_send()`.
+
+The connection is deferred to the IO reactor; the engine does nothing until `fio_io_start()` is called.
 
 ```c
 fio_pubsub_engine_s *redis = fio_redis_new(
-    .url = "redis://redis.example.com:6379",
-    .auth = "secret_password",
-    .ping_interval = 30
+    .url           = "redis://10.0.0.5:6379",
+    .auth          = "s3cr3t",
+    .ping_interval = 60
 );
 ```
 
-**Named Arguments:**
-
-| Argument | Type | Description |
-|----------|------|-------------|
-| `url` | `const char *` | Redis server URL; defaults to `"localhost:6379"` |
-| `auth` | `const char *` | Optional authentication password |
-| `auth_len` | `size_t` | Length of auth string; 0 for auto-detect |
-| `ping_interval` | `uint8_t` | Keepalive interval in seconds; defaults to 30 |
-
-**Returns:** A pointer to the pub/sub engine on success, or NULL on error.
-
-**Note**: **MUST** be called before `fio_io_start()` (before fork). The engine is created in the master process and shared across all workers after fork. Creating engines from worker processes is not supported.
-
-**Note**: The engine is only active after the IO reactor starts running (`fio_io_start()`). Connection attempts are deferred until the reactor is running. Workers automatically detect the engine and route operations through IPC.
-
-**Note**: The caller owns the returned reference and must call `fio_redis_free()` when done. Attaching to pub/sub does NOT transfer ownership.
-
-#### `fio_redis_dup`
+### `fio_redis_dup`
 
 ```c
 fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine);
 ```
 
-Increments the reference count and returns the engine.
+Atomically increments the reference count and returns the engine. Returns `NULL` if `engine` is `NULL`.
 
-Use this when you need to share the engine across multiple owners. Each call to `fio_redis_dup()` must be balanced with a corresponding call to `fio_redis_free()`.
+Each `fio_redis_dup()` must be balanced with a `fio_redis_free()`.
 
-**Parameters:**
-- `engine` - The Redis engine to duplicate
-
-**Returns:** The same engine pointer with incremented reference count.
-
-```c
-/* Share engine with another component */
-fio_pubsub_engine_s *shared = fio_redis_dup(redis);
-pass_to_other_component(shared);
-
-/* Other component must call fio_redis_free(shared) when done */
-```
-
-#### `fio_redis_free`
+### `fio_redis_free`
 
 ```c
 void fio_redis_free(fio_pubsub_engine_s *engine);
 ```
 
-Decrements the reference count. When count reaches 0, destroys the engine.
+Releases the caller's reference. When the count reaches zero, destroys the engine immediately: sets `running = 0`, closes both connections, drains the command queue (invoking any pending callbacks with `FIOBJ_INVALID`), and frees memory.
 
-This function:
-1. Decrements the reference count
-2. If ref reaches 0:
-   - Closes all connections (Redis TCP connections on master)
-   - Frees any queued commands
-   - Releases all allocated memory
+Safe to call with `NULL` (no-op).
 
-**Important**: If the engine was attached to pub/sub via `fio_pubsub_engine_attach()`, you **MUST** call `fio_pubsub_engine_detach()` before calling `fio_redis_free()`.
-
-**Note**: Safe to call with NULL (no-op).
-
-**Note**: Any pending command callbacks will NOT be called after destruction.
-
-#### `fio_redis_send`
+### `fio_redis_send`
 
 ```c
 int fio_redis_send(fio_pubsub_engine_s *engine,
@@ -309,393 +206,211 @@ int fio_redis_send(fio_pubsub_engine_s *engine,
                    void *udata);
 ```
 
-Sends a Redis command through the engine's connection.
+Sends a Redis command. `command` must be a `FIOBJ_T_ARRAY` whose elements are the command verb and arguments as `FIOBJ_T_STRING` (or numbers). `callback` is optional (pass `NULL` to fire-and-forget).
 
-The command is sent asynchronously. When a reply is received from Redis, the callback is invoked with the parsed response.
+Returns `0` on success, `-1` if `engine` is `NULL` or `command` is not a FIOBJ array.
 
-**On master**: the command is queued directly on the publishing connection and sent to Redis. The callback runs on the IO thread.
+**On the master**: the command is serialized to RESP and queued on `pub_conn`. Commands are sent one at a time (pipelined within the queue); the next command is sent after the reply for the previous one arrives.
 
-**On worker**: the command is serialized to RESP format and forwarded to the master via IPC. The master executes the command against Redis and sends the reply back via IPC. The callback runs on the worker's IO thread.
+**On a worker**: the RESP bytes are forwarded to the master via IPC. The master executes the command, serializes the reply to RESP, and sends it back. The worker deserializes and calls the callback on its IO thread. This is transparent to the caller.
 
-**Parameters:**
-- `engine` - The Redis engine returned by `fio_redis_new()`
-- `command` - A FIOBJ array containing the command and its arguments
-- `callback` - Optional callback function invoked when the reply is received
-- `udata` - User data passed to the callback
+**Never** pass `SUBSCRIBE`, `PSUBSCRIBE`, `UNSUBSCRIBE`, or `PUNSUBSCRIBE` to `fio_redis_send()`. These are managed internally on the subscription connection; sending them via the publishing connection violates the Redis protocol.
 
-**Returns:** 0 on success, -1 on error (invalid engine or command).
+**Callback signature:**
 
-**Callback Signature:**
 ```c
-void callback(fio_pubsub_engine_s *e, FIOBJ reply, void *udata);
+void my_callback(fio_pubsub_engine_s *e, FIOBJ reply, void *udata);
 ```
 
-The `reply` parameter is a FIOBJ object representing the Redis response:
-- Simple strings and bulk strings become `FIOBJ_T_STRING`
-- Integers become `FIOBJ_T_NUMBER`
-- Arrays become `FIOBJ_T_ARRAY`
-- Maps (RESP3) become `FIOBJ_T_HASH`
-- Null becomes `fiobj_null()`
-- Booleans become `fiobj_true()` or `fiobj_false()`
-- Errors become `FIOBJ_T_STRING` (check logs for error messages)
+`reply` is `FIOBJ_INVALID` if the engine was destroyed or the connection was lost before the reply arrived. Otherwise it is a FIOBJ object:
 
-**Warning**: NEVER use `fio_redis_send` for subscription commands (`SUBSCRIBE`, `PSUBSCRIBE`, `UNSUBSCRIBE`, `PUNSUBSCRIBE`). These commands are handled internally by the pub/sub engine through the subscription connection. Using them with `fio_redis_send` will violate the Redis protocol and cause connection errors.
+| Redis response | FIOBJ type |
+|---|---|
+| Bulk string / simple string | `FIOBJ_T_STRING` |
+| Integer | `FIOBJ_T_NUMBER` |
+| Array | `FIOBJ_T_ARRAY` |
+| Map (RESP3) | `FIOBJ_T_HASH` |
+| Null | `fiobj_null()` |
+| Boolean (RESP3) | `fiobj_true()` / `fiobj_false()` |
+| Double (RESP3) | `FIOBJ_T_FLOAT` |
+| Bignum (RESP3) | `FIOBJ_T_STRING` |
+| Error | `FIOBJ_T_STRING` (warning logged) |
 
-------------------------------------------------------------
+The callback owns nothing — `reply` is freed by the engine after the callback returns. Copy any data you need to keep.
 
-### Multi-Process Behavior
+---
 
-The Redis engine is designed for facil.io's multi-process architecture where `fio_io_start()` forks worker processes.
+## Building Commands
 
-#### Setup Requirements
-
-1. Call `fio_redis_new()` **before** `fio_io_start()` — the engine must exist before fork
-2. Optionally call `fio_pubsub_engine_attach()` before or after start (pub/sub integration)
-3. Call `fio_io_start(workers)` — master connects to Redis; workers inherit the engine pointer
-
-```c
-int main(void) {
-  /* Create engine in master, before fork */
-  fio_pubsub_engine_s *redis = fio_redis_new(.url = "localhost:6379");
-  fio_pubsub_engine_attach(redis);
-
-  /* Fork workers — master connects to Redis, workers use IPC */
-  fio_io_start(4);  /* 4 worker processes */
-
-  fio_pubsub_engine_detach(redis);
-  fio_redis_free(redis);
-  return 0;
-}
-```
-
-#### Worker Command Flow
-
-When a worker calls `fio_redis_send()`:
-
-1. The command FIOBJ array is serialized to RESP wire format on the worker
-2. The RESP bytes are sent to the master process via `fio_ipc_call()`
-3. The master deserializes and queues the command on the publishing connection
-4. Redis processes the command and replies
-5. The master serializes the reply to RESP and sends it back to the worker via IPC
-6. The worker deserializes the reply and invokes the callback on its IO thread
-
-This is transparent to the caller — the same `fio_redis_send()` call works on both master and worker.
-
-#### Worker Publish Flow
-
-When a worker calls `fio_pubsub_publish()` with a Redis-attached engine:
-
-1. The channel and message are forwarded to the master via IPC
-2. The master sends a Redis `PUBLISH` command on the publishing connection
-3. Redis distributes the message to all subscribers (including other application instances)
-4. Incoming subscription messages on the master are distributed to all local processes via the existing pub/sub IPC infrastructure
-
-#### Single-Process Mode
-
-When using `fio_io_start(0)` (no fork), the process acts as both master and worker. All operations go directly to Redis without IPC indirection.
-
-------------------------------------------------------------
-
-### Usage Examples
-
-#### Basic Redis Commands
+Commands are FIOBJ arrays of strings (and optionally numbers). Build them, pass to `fio_redis_send()`, then free them — the engine serializes to RESP before returning.
 
 ```c
-#define FIO_LOG
-#define FIO_REDIS
-#include FIO_INCLUDE_FILE
+/* SET mykey "hello" */
+FIOBJ cmd = fiobj_array_new();
+fiobj_array_push(cmd, fiobj_str_new_cstr("SET", 3));
+fiobj_array_push(cmd, fiobj_str_new_cstr("mykey", 5));
+fiobj_array_push(cmd, fiobj_str_new_cstr("hello", 5));
+fio_redis_send(redis, cmd, NULL, NULL);   /* fire-and-forget */
+fiobj_free(cmd);
 
-/* Callback for GET command */
-void on_get_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
-  fio_str_info_s value = fiobj2cstr(reply);
-  FIO_LOG_INFO("GET result: %.*s", (int)value.len, value.buf);
+/* GET mykey */
+static void on_get(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
+  fio_str_info_s s = fiobj2cstr(reply);
+  printf("value: %.*s\n", (int)s.len, s.buf);
   (void)e; (void)udata;
 }
 
-/* Callback for SET command */
-void on_set_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
-  fio_str_info_s status = fiobj2cstr(reply);
-  FIO_LOG_INFO("SET result: %.*s", (int)status.len, status.buf);
+cmd = fiobj_array_new();
+fiobj_array_push(cmd, fiobj_str_new_cstr("GET", 3));
+fiobj_array_push(cmd, fiobj_str_new_cstr("mykey", 5));
+fio_redis_send(redis, cmd, on_get, NULL);
+fiobj_free(cmd);
+
+/* INCR counter */
+static void on_incr(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
+  printf("counter now: %ld\n", (long)fiobj2i(reply));
   (void)e; (void)udata;
 }
 
-/* Callback for INCR command */
-void on_incr_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
-  intptr_t new_value = fiobj2i(reply);
-  FIO_LOG_INFO("INCR result: %ld", (long)new_value);
-  (void)e; (void)udata;
-}
-
-void send_redis_commands(fio_pubsub_engine_s *redis) {
-  FIOBJ cmd;
-  
-  /* SET mykey "Hello, Redis!" */
-  cmd = fiobj_array_new();
-  fiobj_array_push(cmd, fiobj_str_new_cstr("SET", 3));
-  fiobj_array_push(cmd, fiobj_str_new_cstr("mykey", 5));
-  fiobj_array_push(cmd, fiobj_str_new_cstr("Hello, Redis!", 13));
-  fio_redis_send(redis, cmd, on_set_reply, NULL);
-  fiobj_free(cmd);
-  
-  /* GET mykey */
-  cmd = fiobj_array_new();
-  fiobj_array_push(cmd, fiobj_str_new_cstr("GET", 3));
-  fiobj_array_push(cmd, fiobj_str_new_cstr("mykey", 5));
-  fio_redis_send(redis, cmd, on_get_reply, NULL);
-  fiobj_free(cmd);
-  
-  /* INCR counter */
-  cmd = fiobj_array_new();
-  fiobj_array_push(cmd, fiobj_str_new_cstr("INCR", 4));
-  fiobj_array_push(cmd, fiobj_str_new_cstr("counter", 7));
-  fio_redis_send(redis, cmd, on_incr_reply, NULL);
-  fiobj_free(cmd);
-}
+cmd = fiobj_array_new();
+fiobj_array_push(cmd, fiobj_str_new_cstr("INCR", 4));
+fiobj_array_push(cmd, fiobj_str_new_cstr("counter", 7));
+fio_redis_send(redis, cmd, on_incr, NULL);
+fiobj_free(cmd);
 ```
 
-#### Pub/Sub Integration with facil.io
+Array replies (e.g., `LRANGE`, `HGETALL`):
 
 ```c
-#define FIO_LOG
-#define FIO_REDIS
-#include FIO_INCLUDE_FILE
-
-static fio_pubsub_engine_s *redis_engine = NULL;
-
-/* Handle incoming pub/sub messages */
-void on_pubsub_message(fio_pubsub_msg_s *msg) {
-  FIO_LOG_INFO("Channel: %.*s | Message: %.*s",
-               (int)msg->channel.len, msg->channel.buf,
-               (int)msg->message.len, msg->message.buf);
-}
-
-/* Called when server starts */
-void on_start(void *udata) {
-  (void)udata;
-  
-  /* Subscribe to channels - Redis engine handles SUBSCRIBE automatically */
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("notifications"),
-                .on_message = on_pubsub_message);
-  
-  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("events:*"),
-                .on_message = on_pubsub_message,
-                .is_pattern = 1);  /* Pattern subscription uses PSUBSCRIBE */
-  
-  FIO_LOG_INFO("Subscribed to channels via Redis");
-}
-
-/* Publish a message (works from any process - master or worker) */
-void broadcast_message(const char *channel, const char *message) {
-  fio_pubsub_publish(.channel = FIO_BUF_INFO1(channel),
-              .message = FIO_BUF_INFO1(message),
-              .engine = FIO_PUBSUB_CLUSTER);  /* Uses Redis if attached */
-}
-
-int main(void) {
-  /* Create Redis engine BEFORE fio_io_start() */
-  redis_engine = fio_redis_new(.url = "redis://localhost:6379");
-  if (!redis_engine) {
-    FIO_LOG_FATAL("Failed to create Redis engine");
-    return 1;
+static void on_hgetall(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
+  size_t n = fiobj_array_count(reply);
+  for (size_t i = 0; i + 1 < n; i += 2) {
+    fio_str_info_s k = fiobj2cstr(fiobj_array_get(reply, (int32_t)i));
+    fio_str_info_s v = fiobj2cstr(fiobj_array_get(reply, (int32_t)(i + 1)));
+    printf("  %.*s = %.*s\n", (int)k.len, k.buf, (int)v.len, v.buf);
   }
-  
-  /* Attach to pub/sub (does NOT take ownership) */
-  fio_pubsub_engine_attach(redis_engine);
-  
-  /* Register startup callback */
+  (void)e; (void)udata;
+}
+
+cmd = fiobj_array_new();
+fiobj_array_push(cmd, fiobj_str_new_cstr("HGETALL", 7));
+fiobj_array_push(cmd, fiobj_str_new_cstr("myhash", 6));
+fio_redis_send(redis, cmd, on_hgetall, NULL);
+fiobj_free(cmd);
+```
+
+See [./250 fiobj.md](./250 fiobj.md) for FIOBJ construction and inspection helpers.
+
+---
+
+## Pub/Sub Integration
+
+When attached via `fio_pubsub_engine_attach()`, the Redis engine implements the `fio_pubsub_engine_s` interface:
+
+| Pub/Sub event | Redis action |
+|---|---|
+| New channel subscription | `SUBSCRIBE channel` on `sub_conn` |
+| New pattern subscription | `PSUBSCRIBE pattern` on `sub_conn` |
+| Channel unsubscribe | `UNSUBSCRIBE channel` on `sub_conn` |
+| Pattern unsubscribe | `PUNSUBSCRIBE pattern` on `sub_conn` |
+| `fio_pubsub_publish(...)` | `PUBLISH channel message` on `pub_conn` (workers route via IPC) |
+| Incoming Redis push message | Re-published locally with `fio_pubsub_engine_ipc()` to fan out to all processes |
+
+The `filter` parameter from facil.io's Pub/Sub system is ignored by the Redis engine — Redis does not support numeric filter namespaces.
+
+Example: subscribing to Redis channels through facil.io's Pub/Sub API:
+
+```c
+static fio_pubsub_engine_s *redis_engine; /* global, set before fork */
+
+static void on_message(fio_pubsub_msg_s *msg) {
+  printf("channel: %.*s  message: %.*s\n",
+         (int)msg->channel.len, msg->channel.buf,
+         (int)msg->message.len, msg->message.buf);
+}
+
+/* Called after IO reactor starts (FIO_CALL_ON_START) */
+static void on_start(void *udata) {
+  /* Regular subscription — Redis engine sends SUBSCRIBE */
+  fio_pubsub_subscribe(.channel    = FIO_BUF_INFO1("alerts"),
+                       .on_message = on_message);
+
+  /* Pattern subscription — Redis engine sends PSUBSCRIBE */
+  fio_pubsub_subscribe(.channel    = FIO_BUF_INFO1("events:*"),
+                       .on_message = on_message,
+                       .is_pattern = 1);
+
+  /* Publish via Redis — specify the engine to route through Redis PUBLISH.
+   * Without .engine the default IPC engine is used (local cluster only). */
+  fio_pubsub_publish(.channel = FIO_BUF_INFO1("alerts"),
+                     .message = FIO_BUF_INFO1("server started"),
+                     .engine  = redis_engine);
+  (void)udata;
+}
+
+int main(void) {
+  redis_engine = fio_redis_new(.url = "localhost:6379");
+  fio_redis_dup(redis_engine);            /* keep a copy before attaching */
+  fio_pubsub_engine_attach(redis_engine); /* system takes the original ref */
   fio_state_callback_add(FIO_CALL_ON_START, on_start, NULL);
-  
-  /* Start the server with 4 workers */
   fio_io_start(4);
-  
-  /* Cleanup - detach before freeing if attached */
   fio_pubsub_engine_detach(redis_engine);
   fio_redis_free(redis_engine);
-  return 0;
 }
 ```
 
-#### Authentication
+See [./420 pubsub.md](./420 pubsub.md) for the full Pub/Sub API and engine interface.
 
-```c
-#define FIO_LOG
-#define FIO_REDIS
-#include FIO_INCLUDE_FILE
+---
 
-int main(void) {
-  /* Connect with password authentication */
-  fio_pubsub_engine_s *redis = fio_redis_new(
-      .url = "redis://redis.example.com:6379",
-      .auth = "my_redis_password"
-  );
-  
-  if (!redis) {
-    FIO_LOG_ERROR("Failed to create Redis engine");
-    return 1;
-  }
-  
-  /* For Redis 6+ ACL authentication (username:password), 
-   * you may need to send AUTH command manually after connection */
-  
-  fio_pubsub_engine_attach(redis);
-  fio_io_start(0);
-  fio_pubsub_engine_detach(redis);
-  fio_redis_free(redis);
-  return 0;
-}
-```
+## Multi-Process Behavior
 
-#### Handling Complex Replies
+The IPC routing is automatic and transparent:
 
-```c
-#define FIO_LOG
-#define FIO_REDIS
-#include FIO_INCLUDE_FILE
+| Call | On master | On worker |
+|---|---|---|
+| `fio_redis_send()` | Queued on `pub_conn` | Serialized → IPC → master → Redis → IPC reply → worker callback |
+| `fio_pubsub_publish()` | `PUBLISH` on `pub_conn` | Forwarded via IPC; master sends `PUBLISH` |
+| Subscription messages | Received on `sub_conn`, fanned out via Pub/Sub IPC | Delivered by Pub/Sub IPC from master |
 
-/* Handle HGETALL reply (returns array of field-value pairs) */
-void on_hgetall_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
-  if (FIOBJ_TYPE(reply) != FIOBJ_T_ARRAY) {
-    FIO_LOG_WARNING("Unexpected reply type");
-    return;
-  }
-  
-  size_t count = fiobj_array_count(reply);
-  FIO_LOG_INFO("Hash has %zu fields:", count / 2);
-  
-  for (size_t i = 0; i + 1 < count; i += 2) {
-    fio_str_info_s field = fiobj2cstr(fiobj_array_get(reply, (int32_t)i));
-    fio_str_info_s value = fiobj2cstr(fiobj_array_get(reply, (int32_t)(i + 1)));
-    FIO_LOG_INFO("  %.*s = %.*s",
-                 (int)field.len, field.buf,
-                 (int)value.len, value.buf);
-  }
-  (void)e; (void)udata;
-}
+Detection uses `fio_io_is_master()`. In single-process mode `fio_io_start(0)` everything uses the master path.
 
-/* Handle MGET reply (returns array of values) */
-void on_mget_reply(fio_pubsub_engine_s *e, FIOBJ reply, void *udata) {
-  if (FIOBJ_TYPE(reply) != FIOBJ_T_ARRAY) {
-    FIO_LOG_WARNING("Unexpected reply type");
-    return;
-  }
-  
-  size_t count = fiobj_array_count(reply);
-  for (size_t i = 0; i < count; ++i) {
-    FIOBJ item = fiobj_array_get(reply, (int32_t)i);
-    if (FIOBJ_TYPE(item) == FIOBJ_T_NULL) {
-      FIO_LOG_INFO("Key %zu: (nil)", i);
-    } else {
-      fio_str_info_s value = fiobj2cstr(item);
-      FIO_LOG_INFO("Key %zu: %.*s", i, (int)value.len, value.buf);
-    }
-  }
-  (void)e; (void)udata;
-}
-```
+Worker processes inherit the engine pointer after fork. A `FIO_CALL_IN_CHILD` hook swaps the engine's `publish` vtable pointer to the IPC-forwarding implementation, so workers never accidentally write directly to a Redis socket.
 
-------------------------------------------------------------
+See [./404 ipc.md](./404 ipc.md) for IPC internals.
 
-### Error Handling
+---
 
-#### Connection Loss
+## Reconnect and Failure Behavior
 
-When a Redis connection is lost (master process only):
+- **Connection loss**: The `on_close` callback logs a warning and schedules a reconnect via `fio_io_defer()`. Reconnection is attempted after a brief delay; on failure, it retries again.
+- **Queued commands**: Commands in the queue on the master stay queued and are flushed once the publishing connection is re-established.
+- **Resubscription**: When the subscription connection reconnects, the engine iterates the current Pub/Sub channel maps and re-sends all active `SUBSCRIBE` / `PSUBSCRIBE` commands directly. This restores subscription state without touching ref counts or re-attaching the engine.
+- **Keepalive**: A `PING` is sent on each idle connection after `ping_interval` seconds. If the publishing connection has unacknowledged commands when the timeout fires, the connection is forcibly closed and reconnected.
+- **Engine destroyed while commands are pending**: All queued commands have their callbacks invoked immediately with `reply = FIOBJ_INVALID`.
 
-1. The engine logs a warning message
-2. Automatic reconnection is attempted after a brief delay
-3. On the subscription connection, all active subscriptions are re-established via `fio_pubsub_engine_attach()`
-4. Queued commands on the publishing connection are sent after reconnection
+---
 
-Worker processes are unaffected by Redis connection loss — their IPC commands will queue on the master until the Redis connection is restored.
+## Thread Safety
 
-#### Authentication Failures
+All public API functions are thread-safe:
 
-If Redis authentication fails, the connection will be closed by Redis. The engine will attempt to reconnect, but authentication will fail again. Check your Redis logs and ensure the correct password is configured.
+| Function | Mechanism |
+|---|---|
+| `fio_redis_new()` | Defers connection to IO thread |
+| `fio_redis_dup()` | Atomic reference count increment |
+| `fio_redis_free()` | Atomic reference count decrement; destroy runs on caller thread |
+| `fio_redis_send()` | Defers queue insertion to IO thread (master); IPC on workers |
 
-#### Protocol Errors
+Internal state (command queue, connection pointers) is only accessed from the IO thread. No locks are needed internally.
 
-If a RESP protocol error is detected (malformed data from Redis), the connection is closed immediately and reconnection is attempted. This typically indicates a network issue or a bug.
+FIOBJ objects passed to callbacks are **not** thread-safe. Copy any data you need to keep or use outside the callback.
 
-#### Logging
+---
 
-The Redis module uses facil.io's logging system:
+## Limitations
 
-- `FIO_LOG_DEBUG` - Connection establishment, command sending
-- `FIO_LOG_WARNING` - Connection loss, unexpected responses, errors from Redis
-- `FIO_LOG_ERROR` - Protocol errors, allocation failures
-
-------------------------------------------------------------
-
-### Thread Safety
-
-The Redis engine is thread-safe. All internal state modifications are delegated to the IO queue using `fio_io_defer()`, ensuring single-threaded execution of state changes. This prevents race conditions without requiring locks.
-
-**Public API thread safety:**
-- `fio_redis_new()` - Thread-safe (defers connection to IO thread)
-- `fio_redis_dup()` - Thread-safe (uses atomic reference counting)
-- `fio_redis_free()` - Thread-safe (defers cleanup to IO thread)
-- `fio_redis_send()` - Thread-safe (defers command queuing to IO thread; on workers, routes via IPC)
-
-**Multi-process safety:**
-
-In multi-process mode, `fio_redis_send()` and `fio_pubsub_publish()` work transparently from any process. They automatically detect whether they are running on the master or a worker and route accordingly:
-
-- **Master**: operations go directly to the Redis connection
-- **Worker**: operations are serialized and forwarded to the master via IPC
-
-The detection uses `fio_io_is_master()` internally. In single-process mode (`fio_io_start(0)`), the process is both master and worker, so all operations take the direct master path.
-
-**Internal operations that run on the IO thread:**
-- Command queue management (add, remove, send)
-- Connection state changes (connect, disconnect, reconnect)
-- Protocol callbacks (on_attach, on_data, on_close, on_timeout)
-- Pub/sub engine callbacks (subscribe, publish, etc.)
-
-The FIOBJ objects passed to callbacks are **not** thread-safe. If you need to share reply data across threads, make a copy of the data within the callback.
-
-**Note**: The pub/sub callbacks (`on_message`) are called from the IO reactor thread. Long-running operations should be deferred to avoid blocking the reactor.
-
-------------------------------------------------------------
-
-### Integration with Pub/Sub Engines
-
-The Redis engine implements the `fio_pubsub_engine_s` interface:
-
-```c
-struct fio_pubsub_engine_s {
-  void (*detached)(const fio_pubsub_engine_s *eng);
-  void (*subscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
-  void (*psubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
-  void (*unsubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
-  void (*punsubscribe)(const fio_pubsub_engine_s *eng, fio_buf_info_s channel, int16_t filter);
-  void (*publish)(const fio_pubsub_engine_s *eng, fio_pubsub_msg_s *msg);
-};
-```
-
-When attached via `fio_pubsub_engine_attach()`:
-
-- `subscribe` sends Redis `SUBSCRIBE` command (on master's sub_conn)
-- `psubscribe` sends Redis `PSUBSCRIBE` command (on master's sub_conn)
-- `unsubscribe` sends Redis `UNSUBSCRIBE` command (on master's sub_conn)
-- `punsubscribe` sends Redis `PUNSUBSCRIBE` command (on master's sub_conn)
-- `publish` sends Redis `PUBLISH` command (on master's pub_conn; workers forward via IPC)
-
-Messages received from Redis subscriptions are forwarded to local subscribers via `fio_pubsub_publish()` with `fio_pubsub_engine_ipc()` engine, which distributes them to all processes.
-
-**Note**: The `filter` parameter is ignored by the Redis engine. Redis does not support facil.io's numeric filter namespaces.
-
-------------------------------------------------------------
-
-### Limitations
-
-- **Engine Creation Timing**: `fio_redis_new()` must be called before `fio_io_start()`. Creating engines from worker processes is not supported.
-
-- **Filter Namespaces**: Redis does not support facil.io's numeric filter feature. All Redis pub/sub operates with filter = 0.
-
-- **Message Size**: Limited by Redis's maximum bulk string size and `FIO_REDIS_READ_BUFFER`. Very large messages may require increasing the buffer size.
-
-- **Binary Data**: Channel names and messages can contain binary data, but some Redis tools may not display them correctly.
-
-- **Cluster Mode**: This module connects to a single Redis instance. For Redis Cluster, you would need to connect to the appropriate node or use a Redis proxy.
-
-------------------------------------------------------------
+- `fio_redis_new()` must be called before `fio_io_start()` (i.e., before fork). Creating engines from worker processes is not supported.
+- Redis's numeric filter namespaces (`filter` field in Pub/Sub) are not supported. All Redis pub/sub operates with `filter = 0`.
+- Single-node Redis only. Redis Cluster requires connecting to the correct shard or using a proxy.
+- Very large individual replies must fit within `FIO_REDIS_READ_BUFFER`. Increase the macro if needed.
