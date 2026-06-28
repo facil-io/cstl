@@ -1483,9 +1483,9 @@ SIMD Vector Looping Helper
  * @param i - the loop index variable name to use (accessible by `action`)
  * @param action - an action to be performed each iteration (can be a macro)
  *
- * Note that `action` is NOT guarded. In the following example, the `if`
- * statement will run only after each SIMD loop has ended, allowing the compiler
- * to unroll the loops:
+ * Note that `action` is NOT guarded. In the following `strlen` example, the
+ * `if` statement will run only after each SIMD loop has ended, allowing the
+ * compiler to unroll the loops:
  *
  * ```c
  *   size_t has_zero = 0;
@@ -1496,6 +1496,7 @@ SIMD Vector Looping Helper
  *     return i - has_zero;
  *   FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
  * #undef FIO___STRLEN_ACTION
+ *   return ~(size_t)0;
  * ```
  * */
 #define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
@@ -1508,11 +1509,12 @@ SIMD Vector Looping Helper
       for (; i < fio___unroll_remainder__; ++i)                                \
         action;                                                                \
     if (iterations)                                                            \
-      for (; !((iterations) + 1) || (i < (iterations));)                       \
+      for (; !((iterations) + 1) || (i < (iterations));) {                     \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
           action;                                                              \
+      }                                                                        \
   } while (0)
 
 /* *****************************************************************************

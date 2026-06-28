@@ -578,10 +578,10 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   //   ++str;
   // return (size_t)(str - start);
 
-  size_t has_zero = 0;
   const size_t iterations = ((~(uintptr_t)str) + 1) | (1ULL << 31);
+  size_t has_zero = 0;
 #define FIO___STRLEN_ACTION                                                    \
-  has_zero += (!str[i] | !!has_zero);                                          \
+  has_zero += ((!str[i]) | (!!has_zero));                                      \
   if (has_zero)                                                                \
     return i - has_zero;
   FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
