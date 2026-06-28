@@ -1482,6 +1482,21 @@ SIMD Vector Looping Helper
  * @param size_of_loop - the number of bytes consumed by each `action`
  * @param i - the loop index variable name to use (accessible by `action`)
  * @param action - an action to be performed each iteration (can be a macro)
+ *
+ * Note that `action` is NOT guarded. In the following example, the `if`
+ * statement will run only after each SIMD loop has ended, allowing the compiler
+ * to unroll the loops:
+ *
+ * ```c
+ *   size_t has_zero = 0;
+ *   const size_t iterations = ((~(uintptr_t)str) + 1) | (1ULL << 31);
+ * #define FIO___STRLEN_ACTION                                        \
+ *   has_zero += (!str[i] | !!has_zero);                              \
+ *   if (has_zero)                                                    \
+ *     return i - has_zero;
+ *   FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
+ * #undef FIO___STRLEN_ACTION
+ * ```
  * */
 #define FIO_FOR_UNROLL(iterations, size_of_loop, i, action)                    \
   do {                                                                         \
@@ -1490,17 +1505,14 @@ SIMD Vector Looping Helper
         ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));            \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
     if (fio___unroll_remainder__ && ((iterations) + 1))                        \
-      for (; i < fio___unroll_remainder__; ++i) {                              \
+      for (; i < fio___unroll_remainder__; ++i)                                \
         action;                                                                \
-      }                                                                        \
     if (iterations)                                                            \
       for (; !((iterations) + 1) || (i < (iterations));)                       \
         for (size_t j__loop__ = 0;                                             \
              j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
-        {                                                                      \
           action;                                                              \
-        }                                                                      \
   } while (0)
 
 /* *****************************************************************************

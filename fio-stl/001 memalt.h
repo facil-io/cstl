@@ -571,12 +571,23 @@ fio_strlen - (trust the compiler to optimize)
 
 /** An alternative to `strlen` - though really, strlen should be much better. */
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
-  const char *start = str;
   if (FIO_UNLIKELY(!str))
     return 0;
-  for (; *str;) /* compiler, please vectorize */
-    ++str;
-  return (size_t)(str - start);
+  // const char *start = str;
+  // for (; *str;) /* compiler, please vectorize */
+  //   ++str;
+  // return (size_t)(str - start);
+
+  size_t has_zero = 0;
+  const size_t iterations = ((~(uintptr_t)str) + 1) | (1ULL << 31);
+
+#define FIO___STRLEN_ACTION                                                    \
+  has_zero += (!str[i] | !!has_zero);                                          \
+  if (has_zero)                                                                \
+    return i - has_zero;
+  FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
+#undef FIO___STRLEN_ACTION
+
   //   const char *r = (const char *)str;
   //   uint64_t u[16] FIO_ALIGN(16) = {0};
   //   uint64_t flag = 0;
