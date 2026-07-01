@@ -573,42 +573,17 @@ fio_strlen - (trust the compiler to optimize)
 SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
   if (FIO_UNLIKELY(!str))
     return 0;
-  // const char *start = str;
-  // for (; *str;) /* compiler, please vectorize */
-  //   ++str;
-  // return (size_t)(str - start);
-
+  /* set iterations to pointer alignment + impossibly high number */
   const size_t iterations = ((~(uintptr_t)str) + 1) | (1ULL << 31);
-  size_t has_zero = 0;
+  /* marks the number of bytes since NUL */
+  size_t since_zero = 0;
 #define FIO___STRLEN_ACTION                                                    \
-  has_zero += ((!str[i]) | (!!has_zero));                                      \
-  if (has_zero)                                                                \
-    return i - has_zero;
+  since_zero += ((!str[i]) | (!!since_zero)); /* runs inside loop */           \
+  if (since_zero)                             /* runs outside loop */          \
+    return i - since_zero;
   FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
 #undef FIO___STRLEN_ACTION
   return ~(size_t)0;
-
-  //   const char *r = (const char *)str;
-  //   uint64_t u[16] FIO_ALIGN(16) = {0};
-  //   uint64_t flag = 0;
-  //   for (;;) {
-  //     fio_memcpy128(u, r);
-  //     for (size_t i = 0; i < 16; ++i) {
-  //       flag |= (u[i] = fio_has_zero_byte64(u[i]));
-  //     }
-  //     if (flag)
-  //       goto found_in_map;
-  //     r += 128;
-  //   }
-  // found_in_map:
-  //   flag = u[0];
-  //   for (size_t i = 0; i < 7; ++i) {
-  //     if (!flag) {
-  //       r += 8;
-  //       flag = u[i + 1];
-  //     }
-  //   }
-  //   return ((r - str) + fio_lsb_index_unsafe(flag));
 }
 
 /* *****************************************************************************
@@ -619,11 +594,26 @@ fio_memcmp
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   if (FIO_UNLIKELY(a_ == b_ || !len))
     return 0;
+  if (FIO_UNLIKELY(!a_))
+    return -1;
+  if (FIO_UNLIKELY(!b_))
+    return 1;
+  const uint8_t *a = (const uint8_t *)a_;
+  const uint8_t *b = (const uint8_t *)b_;
+
+#if 1
+  size_t since = 0;
+#define FIO___MEMCMP_ACTION                                                    \
+  since += ((a[i] != b[i]) | (!!since)); /* runs inside loop */                \
+  if (since)                             /* runs outside loop */               \
+    return (int)1 - (int)((unsigned)(a[i - since] < b[i - since]) << 1);
+  FIO_FOR_UNROLL(len, 1, i, FIO___MEMCMP_ACTION);
+#undef FIO___MEMCMP_ACTION
+  return 0;
+#else
   uint64_t ua[8] FIO_ALIGN(16);
   uint64_t ub[8] FIO_ALIGN(16);
   size_t flag = 0;
-  char *a = (char *)a_;
-  char *b = (char *)b_;
   char *e;
   if (*a != *b)
     return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
@@ -700,6 +690,7 @@ fio_memcmp_mini:
     case 1: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b;
     } /* clang-format on */
   return 0;
+#endif
 }
 
 /* *****************************************************************************

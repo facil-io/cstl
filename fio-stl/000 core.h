@@ -1522,7 +1522,7 @@ Memory Copying Primitives (the basis for unaligned memory access for numbers)
 ***************************************************************************** */
 
 /* memcpy selectors / overriding */
-#if __has_builtin(__builtin_memcpy) /* __builtin_memcpy isn't really better */
+#if __has_builtin(__builtin_memcpy) && 0 /* __builtin_memcpy can be better */
 #define FIO___MAKE_MEMCPY_FIXED(bytes)                                         \
   FIO_SFUNC void *fio_memcpy##bytes(void *restrict d,                          \
                                     const void *restrict s) {                  \
