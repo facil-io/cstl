@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3105.
+Total symbols: 3106.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1758
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1759
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1758 public symbols.
+1759 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -1330,6 +1330,20 @@ Helper for simple `for` loops, where `i` is the variable name to use.
 
 _Symbol type:_ `macro`
 
+#### `FIO_FOR_UNROLL_GROUP_SIZE`
+
+```c
+#define FIO_FOR_UNROLL_GROUP_SIZE ((size_t)256U)
+```
+
+The byte stride used by `FIO_FOR_UNROLL` for compiler-friendly batches.
+
+Most CPUs should be able to hold at least 512 bytes in their registers. The
+default value assumes half that is available for the optimized loop, as the
+action within each loop will likely require some available registers.
+
+_Symbol type:_ `macro`
+
 #### `FIO_FOR_UNROLL`
 
 ```c
@@ -1337,7 +1351,7 @@ _Symbol type:_ `macro`
   do {   \
     size_t i = 0;   \
     const size_t fio___unroll_remainder__ =   \
-        ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));   \
+        ((iterations) & ((FIO_FOR_UNROLL_GROUP_SIZE / (size_of_loop)) - 1));   \
     /* handle odd length vectors, not multiples of FIO___LOG2V */   \
     if (fio___unroll_remainder__ && ((iterations) + 1))   \
       for (; i < fio___unroll_remainder__; ++i)   \
@@ -1345,7 +1359,7 @@ _Symbol type:_ `macro`
     if (iterations)   \
       for (; !((iterations) + 1) || (i < (iterations));) {   \
         for (size_t j__loop__ = 0;   \
-             j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));   \
+             j__loop__ < (FIO_FOR_UNROLL_GROUP_SIZE / (size_of_loop));   \
              ++j__loop__, ++i) /* dear compiler, please vectorize */   \
           action;   \
       }   \

@@ -1472,8 +1472,14 @@ Settings - Memory Function Selectors
 SIMD Vector Looping Helper
 ***************************************************************************** */
 
-/* Internal - bytes per constant iterative loop for compiler optimization  */
-#define FIO___SIMD_BYTES ((size_t)256U)
+/**
+ * The byte stride used by `FIO_FOR_UNROLL` for compiler-friendly batches.
+ *
+ * Most CPUs should be able to hold at least 512 bytes in their registers. The
+ * default value assumes half that is available for the optimized loop, as the
+ * action within each loop will likely require some available registers.
+ */
+#define FIO_FOR_UNROLL_GROUP_SIZE ((size_t)256U)
 /**
  * Unrolled `for` loop - separates for loops to make it easier for the compiler
  * to optimize.
@@ -1503,7 +1509,7 @@ SIMD Vector Looping Helper
   do {                                                                         \
     size_t i = 0;                                                              \
     const size_t fio___unroll_remainder__ =                                    \
-        ((iterations) & ((FIO___SIMD_BYTES / (size_of_loop)) - 1));            \
+        ((iterations) & ((FIO_FOR_UNROLL_GROUP_SIZE / (size_of_loop)) - 1));   \
     /* handle odd length vectors, not multiples of FIO___LOG2V */              \
     if (fio___unroll_remainder__ && ((iterations) + 1))                        \
       for (; i < fio___unroll_remainder__; ++i)                                \
@@ -1511,7 +1517,7 @@ SIMD Vector Looping Helper
     if (iterations)                                                            \
       for (; !((iterations) + 1) || (i < (iterations));) {                     \
         for (size_t j__loop__ = 0;                                             \
-             j__loop__ < (FIO___SIMD_BYTES / (size_of_loop));                  \
+             j__loop__ < (FIO_FOR_UNROLL_GROUP_SIZE / (size_of_loop));         \
              ++j__loop__, ++i) /* dear compiler, please vectorize */           \
           action;                                                              \
       }                                                                        \
