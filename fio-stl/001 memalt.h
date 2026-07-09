@@ -216,6 +216,32 @@ SFUNC void *fio_memset(void *restrict dest_, uint64_t data, size_t bytes) {
     data |= (data << 16);
     data |= (data << 32);
   }
+#if 1
+  for (size_t i = 255; i < bytes; (i += 256), (d += 256))
+    for (size_t j = 0; j < 32; ++j)
+      fio_memcpy8(d + (j << 3), (char *)&data);
+  if (bytes & 128)
+    for (size_t j = 0; j < 16; ++j)
+      fio_memcpy8(d + (j << 3), (char *)&data);
+  d += (bytes & 128);
+  if (bytes & 64)
+    for (size_t j = 0; j < 8; ++j)
+      fio_memcpy8(d + (j << 3), (char *)&data);
+  d += (bytes & 64);
+  if (bytes & 32)
+    for (size_t j = 0; j < 4; ++j)
+      fio_memcpy8(d + (j << 3), (char *)&data);
+  d += (bytes & 32);
+  if (bytes & 16)
+    for (size_t j = 0; j < 2; ++j)
+      fio_memcpy8(d + (j << 3), (char *)&data);
+  d += (bytes & 16);
+  if (bytes & 8)
+    fio_memcpy8(d, (char *)&data);
+  d += (bytes & 8);
+  fio_memcpy7x(d, (char *)&data, bytes);
+  return dest_;
+#else
   if (FIO_UNLIKELY(bytes < 32))
     goto small_memset;
 
@@ -249,6 +275,7 @@ small_memset:
   }
   fio_memcpy7x(d, &data, bytes);
   return dest_;
+#endif
 }
 
 /* *****************************************************************************
@@ -600,8 +627,6 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
     return 1;
   const uint8_t *a = (const uint8_t *)a_;
   const uint8_t *b = (const uint8_t *)b_;
-
-#if 1
   size_t since = 0;
 #define FIO___MEMCMP_ACTION                                                    \
   since += ((a[i] != b[i]) | (!!since)); /* runs inside loop */                \
@@ -610,87 +635,6 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   FIO_FOR_UNROLL(len, 1, i, FIO___MEMCMP_ACTION);
 #undef FIO___MEMCMP_ACTION
   return 0;
-#else
-  uint64_t ua[8] FIO_ALIGN(16);
-  uint64_t ub[8] FIO_ALIGN(16);
-  size_t flag = 0;
-  char *e;
-  if (*a != *b)
-    return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1);
-  if (FIO_UNLIKELY(len < 8))
-    goto fio_memcmp_mini;
-  if (FIO_UNLIKELY(len < 64))
-    goto fio_memcmp_small;
-
-  e = a + len - 63;
-  do {
-    fio_memcpy64(ua, a);
-    fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 8; ++i)
-      flag |= (ua[i] ^ ub[i]);
-    if (flag)
-      goto fio_memcmp_found;
-    a += 64;
-    b += 64;
-  } while (a < e);
-  a += len & 63;
-  b += len & 63;
-  a -= 64;
-  b -= 64;
-  fio_memcpy64(ua, a);
-  fio_memcpy64(ub, b);
-  for (size_t i = 0; i < 8; ++i)
-    flag |= (ua[i] ^ ub[i]);
-  if (flag)
-    goto fio_memcmp_found;
-  return 0;
-
-fio_memcmp_found:
-  if (ua[0] == ub[0])
-    for (size_t i = 8; --i;)
-      if (ua[i] != ub[i]) {
-        ua[0] = ua[i];
-        ub[0] = ub[i];
-      }
-  goto fio_memcmp_small_found;
-
-fio_memcmp_small:
-  e = a + len - 7;
-  do {
-    fio_memcpy8(ua, a);
-    fio_memcpy8(ub, b);
-    if (ua[0] != ub[0])
-      goto fio_memcmp_small_found;
-    a += 8;
-    b += 8;
-  } while (a < e);
-  a += len & 7;
-  b += len & 7;
-  a -= 8;
-  b -= 8;
-  fio_memcpy8(ua, a);
-  fio_memcpy8(ub, b);
-  if (ua[0] != ub[0])
-    goto fio_memcmp_small_found;
-  return 0;
-
-fio_memcmp_small_found:
-  ua[0] = fio_lton64(ua[0]);
-  ub[0] = fio_lton64(ub[0]);
-  return (int)1 - (int)((ub[0] > ua[0]) << 1);
-
-fio_memcmp_mini:
-  switch ((len & 7)) { /* clang-format off */
-    case 7: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 6: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 5: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 4: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 3: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 2: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b; /* fall through */
-    case 1: if (*a != *b) return (int)1 - (int)(((unsigned)b[0] > (unsigned)a[0]) << 1); ++a; ++b;
-    } /* clang-format on */
-  return 0;
-#endif
 }
 
 /* *****************************************************************************
