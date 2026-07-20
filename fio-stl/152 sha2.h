@@ -56,6 +56,19 @@ SFUNC void fio_sha512_consume(fio_sha512_s *h, const void *data, uint64_t len);
 /** finalizes a fio_u512 with the SHA 512 hash. */
 SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h);
 
+/** initializes a fio_u512 so the hash can consume streaming data (SHA-384).
+ *
+ * SHA-384 is SHA-512 with different initial values, truncated to 48 bytes.
+ * NOTE: truncating a SHA-512 result is NOT the same as SHA-384. */
+FIO_IFUNC fio_sha512_s fio_sha384_init(void);
+/** Feed data into the hash */
+#define fio_sha384_consume fio_sha512_consume
+/** finalizes a fio_u512 with the SHA 384 hash (first 48 bytes are the hash). */
+#define fio_sha384_finalize fio_sha512_finalize
+/** A simple, non streaming, implementation of the SHA-384 hashing algorithm.
+ * Returns a fio_u512 of which the first 48 bytes hold the SHA-384 hash. */
+FIO_IFUNC fio_u512 fio_sha384(const void *data, uint64_t len);
+
 /* *****************************************************************************
 Implementation - static / inline functions.
 ***************************************************************************** */
@@ -96,6 +109,26 @@ FIO_IFUNC fio_sha512_s fio_sha512_init(void) {
 /** A simple, non streaming, implementation of the SHA-256 hashing algorithm. */
 FIO_IFUNC fio_u512 fio_sha512(const void *data, uint64_t len) {
   fio_sha512_s h = fio_sha512_init();
+  fio_sha512_consume(&h, data, len);
+  return fio_sha512_finalize(&h);
+}
+
+/** initializes a fio_u512 with the SHA-384 initial values. */
+FIO_IFUNC fio_sha512_s fio_sha384_init(void) {
+  fio_sha512_s h = {.hash.u64 = {0xCBBB9D5DC1059ED8ULL,
+                                 0x629A292A367CD507ULL,
+                                 0x9159015A3070DD17ULL,
+                                 0x152FECD8F70E5939ULL,
+                                 0x67332667FFC00B31ULL,
+                                 0x8EB44A8768581511ULL,
+                                 0xDB0C2E0D64F98FA7ULL,
+                                 0x47B5481DBEFA4FA4ULL}};
+  return h;
+}
+
+/** A simple, non streaming, implementation of the SHA-384 hashing algorithm. */
+FIO_IFUNC fio_u512 fio_sha384(const void *data, uint64_t len) {
+  fio_sha512_s h = fio_sha384_init();
   fio_sha512_consume(&h, data, len);
   return fio_sha512_finalize(&h);
 }
