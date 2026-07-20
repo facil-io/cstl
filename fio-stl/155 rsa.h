@@ -996,8 +996,7 @@ FIO_SFUNC void fio___rsa_mgf1(uint8_t *mask,
       break;
     }
     case FIO_RSA_HASH_SHA384: {
-      fio_u512 h = fio_sha512(hash_input, seed_len + 4);
-      /* SHA-384 is truncated SHA-512 */
+      fio_u512 h = fio_sha384(hash_input, seed_len + 4);
       FIO_MEMCPY(mask + offset, h.u8, to_copy);
       break;
     }
@@ -1127,7 +1126,7 @@ SFUNC int fio_rsa_verify_pss(const uint8_t *sig,
     break;
   }
   case FIO_RSA_HASH_SHA384: {
-    fio_u512 hp = fio_sha512(m_prime, 8 + hash_len + salt_len);
+    fio_u512 hp = fio_sha384(m_prime, 8 + hash_len + salt_len);
     FIO_MEMCPY(h_prime, hp.u8, 48);
     break;
   }
@@ -1486,7 +1485,7 @@ FIO_SFUNC int fio___rsa_emsa_pss_encode(uint8_t *em,
     break;
   }
   case FIO_RSA_HASH_SHA384: {
-    fio_sha512_s sha = fio_sha512_init();
+    fio_sha512_s sha = fio_sha384_init();
     fio_sha512_consume(&sha, m_prime, 8 + hash_len + salt_len);
     fio_u512 hp = fio_sha512_finalize(&sha);
     FIO_MEMCPY(h, hp.u8, 48);

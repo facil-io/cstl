@@ -4766,6 +4766,14 @@ typedef struct fio_buf_info_s {
   char *buf;
 } fio_buf_info_s;
 
+/** An information type for reporting/storing unsigned buffer data. */
+typedef struct fio_ubuf_info_s {
+  /** The buffer's length, if any. */
+  size_t len;
+  /** The buffer's address (may be NULL if no buffer). */
+  unsigned char *buf;
+} fio_ubuf_info_s;
+
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len &&                                                     \
@@ -4801,6 +4809,17 @@ typedef struct fio_buf_info_s {
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \
   ((fio_buf_info_s){.len = (length), .buf = (str)})
+
+/** A NULL fio_ubuf_info_s. */
+#define FIO_UBUF_INFO0 ((fio_ubuf_info_s){0})
+
+/** Converts a C String into a fio_ubuf_info_s. */
+#define FIO_UBUF_INFO1(str)                                                    \
+  ((fio_ubuf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+
+/** Converts a String with a known length into a fio_ubuf_info_s. */
+#define FIO_UBUF_INFO2(str, length)                                            \
+  ((fio_ubuf_info_s){.len = (length), .buf = (str)})
 
 /** Converts a fio_buf_info_s into a fio_str_info_s. */
 #define FIO_BUF2STR_INFO(buf_info)                                             \
