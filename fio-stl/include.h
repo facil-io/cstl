@@ -159,24 +159,24 @@
 #include "154 p384.h"
 #endif
 
-#ifdef FIO_ASN1
-#include "155 asn1.h"
+#ifdef FIO_DER
+#include "155 der.h"
 #endif
 
 #ifdef FIO_RSA
 #include "155 rsa.h"
 #endif
 
+#ifdef FIO_MLKEM
+#include "156 mlkem.h"
+#endif
+
 #ifdef FIO_X509
-#include "155 x509.h"
+#include "156 x509.h"
 #endif
 
 #ifdef FIO_PEM
-#include "156 pem.h"
-#endif
-
-#ifdef FIO_MLKEM
-#include "156 mlkem.h"
+#include "157 pem.h"
 #endif
 
 #ifdef FIO_LYRA2

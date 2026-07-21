@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Test for 301 pem.h
+Test for 157 pem.h
 
 Coverage: PEM block parsing, X.509 certificate loading from PEM, and private
 key loading (PKCS#8, PKCS#1, SEC1). Uses embedded RSA certificate and
@@ -12,7 +12,7 @@ and unsupported labels.
 #define FIO_TIME
 #define FIO_SHA2
 #define FIO_MATH
-#define FIO_ASN1
+#define FIO_DER
 #define FIO_RSA
 #define FIO_ED25519
 #define FIO_P256
@@ -159,11 +159,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pem_parse_certificate)(void) {
              "failed to parse embedded certificate PEM");
   FIO_ASSERT(cert.key_type == FIO_X509_KEY_RSA,
              "embedded certificate should contain an RSA key");
-  FIO_ASSERT(cert.pubkey.rsa.n_len >= 256,
+  FIO_ASSERT(cert.pubkey.rsa.n.len >= 256,
              "RSA modulus should be at least 256 bytes");
-  FIO_ASSERT(cert.pubkey.rsa.e_len == 3,
+  FIO_ASSERT(cert.pubkey.rsa.e.len == 3,
              "RSA exponent should be 3 bytes");
-  FIO_ASSERT(cert.subject_cn != NULL, "subject CN missing");
+  FIO_ASSERT(cert.cn.buf != NULL, "subject CN missing");
   FIO_ASSERT(fio_x509_verify_signature(&cert, &cert) == 0,
              "self-signed embedded certificate signature should verify");
 }
@@ -182,10 +182,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pem_get_certificate_der)(void) {
              "DER parse failed");
   FIO_ASSERT(fio_pem_parse_certificate(&cert2, pem, pem_len) == 0,
              "PEM parse failed");
-  FIO_ASSERT(cert1.pubkey.rsa.n_len == cert2.pubkey.rsa.n_len,
+  FIO_ASSERT(cert1.pubkey.rsa.n.len == cert2.pubkey.rsa.n.len,
              "DER/PEM parse mismatch");
-  FIO_ASSERT(!FIO_MEMCMP(cert1.pubkey.rsa.n, cert2.pubkey.rsa.n,
-                         cert1.pubkey.rsa.n_len),
+  FIO_ASSERT(!FIO_MEMCMP(cert1.pubkey.rsa.n.buf, cert2.pubkey.rsa.n.buf,
+                         cert1.pubkey.rsa.n.len),
              "modulus mismatch between DER and PEM parse");
 }
 
@@ -349,13 +349,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pem_openssl_cert_compare)(void) {
   BN_bn2bin(bn_n, n);
   BN_bn2bin(bn_e, e);
 
-  FIO_ASSERT(fc.pubkey.rsa.n_len == n_len,
+  FIO_ASSERT(fc.pubkey.rsa.n.len == n_len,
              "cert modulus length mismatch with OpenSSL");
-  FIO_ASSERT(fc.pubkey.rsa.e_len == e_len,
+  FIO_ASSERT(fc.pubkey.rsa.e.len == e_len,
              "cert exponent length mismatch with OpenSSL");
-  FIO_ASSERT(!FIO_MEMCMP(fc.pubkey.rsa.n, n, n_len),
+  FIO_ASSERT(!FIO_MEMCMP(fc.pubkey.rsa.n.buf, n, n_len),
              "cert modulus mismatch with OpenSSL");
-  FIO_ASSERT(!FIO_MEMCMP(fc.pubkey.rsa.e, e, e_len),
+  FIO_ASSERT(!FIO_MEMCMP(fc.pubkey.rsa.e.buf, e, e_len),
              "cert exponent mismatch with OpenSSL");
 
   RSA_free(rsa);

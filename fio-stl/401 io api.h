@@ -74,6 +74,9 @@ typedef struct fio_pubsub_msg_s fio_pubsub_msg_s;
 /** The IO Async Queue type. */
 typedef struct fio_io_async_s fio_io_async_s;
 
+/** Parsed X.509 certificate (defined in the X509 module, `156 x509.h`). */
+typedef struct fio_x509_cert_s fio_x509_cert_s;
+
 /* *****************************************************************************
 Starting / Stopping the IO Reactor
 ***************************************************************************** */
@@ -301,6 +304,40 @@ IFUNC void *fio_io_tls(fio_io_s *io);
 /** Returns the socket file descriptor (fd) associated with the IO. */
 IFUNC fio_socket_i fio_io_fd(fio_io_s *io);
 
+/**
+ * Returns the next peer information item for the connection.
+ *
+ * Iterate to inspect the peer's certificate chain (leaf certificate first),
+ * e.g., for client certificate authentication / authorization:
+ *
+ *     fio_x509_cert_s cert = {0}; // zeroed = new loop
+ *     while (fio_io_peer_info_next(io, &cert) == 0) {
+ *       // cert.verified != 0 if the TLS backend verified the chain
+ *       // cert.chain_index == position in the chain (0 == leaf)
+ *       // cert.cn, cert.fingerprint, etc.
+ *     }
+ *
+ * The iterator is stateless — the position is identified from `dest` alone:
+ * a zeroed `dest` (`der.buf == NULL`) starts a new loop; otherwise iteration
+ * continues at `dest->chain_index + 1`. Multiple loops may iterate the same
+ * connection concurrently without interfering with each other.
+ *
+ * Iteration is capped at 128 certificates (`chain_index` 0..127) as a
+ * deep-nesting / DoS guard — longer chains end the loop with -1.
+ *
+ * A `NULL` `dest` returns -1. To restart a loop, zero the struct (e.g.,
+ * `FIO_MEMSET(&cert, 0, sizeof(cert))`).
+ *
+ * Returns 0 while data is available, or -1 when done / unavailable (e.g.,
+ * handshake incomplete, the peer sent no certificate, or the X509 module is
+ * unavailable).
+ *
+ * NOTE: the parsed fields point into memory owned by the TLS backend and
+ * remain valid only until the next fio_io_peer_info_next call (on ANY
+ * connection) or until the connection is closed, whichever comes first.
+ */
+SFUNC int fio_io_peer_info_next(fio_io_s *io, fio_x509_cert_s *dest);
+
 /** Resets a socket's timeout counter. */
 SFUNC void fio_io_touch(fio_io_s *io);
 
@@ -457,6 +494,11 @@ desired.
 The functions receive the file descriptor (`fd`) but MUST NOT keep a copy or
 defer any `fd` related actions to later.
 */
+
+/* NOTE: peer certificate inspection requires the X509 module (`156 x509.h`),
+ * which defines fio_x509_cert_s.  Without it, peer_info_next implementations
+ * simply return -1. */
+
 struct fio_io_functions_s {
   /** Helper that converts a `fio_io_tls_s` into the implementation's context.
    */
@@ -499,6 +541,20 @@ struct fio_io_functions_s {
   void (*finish)(fio_socket_i fd, void *context);
   /** Called after the IO object is closed, used to cleanup its `tls` object. */
   void (*cleanup)(void *context);
+  /**
+   * Returns the next peer information item for the connection.
+   *
+   * The iterator is stateless — the position is identified from `dest`
+   * alone: a zeroed `dest` (`der.buf == NULL`) starts a new loop at the
+   * leaf certificate; otherwise iteration continues at
+   * `dest->chain_index + 1`.
+   * A `NULL` `dest` returns -1.
+   * Returns 0 while data is available, or -1 when done / unavailable.
+   * Implementations must not allocate memory in this callback.
+   */
+  int (*peer_info_next)(fio_socket_i fd,
+                        fio_x509_cert_s *dest,
+                        void *context);
 };
 
 /**************************************************************************/ /**

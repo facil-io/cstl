@@ -9891,7 +9891,7 @@ The crypto slice is a small, zero-dependency toolbox for code that needs to hash
 | Hash | [SHA-1](./152%20sha1.md), [SHA-2](./152%20sha2.md), [SHA-3 / SHAKE](./152%20sha3.md), [BLAKE2](./152%20blake2.md) | Digest functions, streaming hash contexts, SHA/BLAKE HMAC helpers where provided. SHA-1 is legacy-only glue. |
 | Symmetric | [ChaCha20-Poly1305](./152%20chacha20poly1305.md), [AES-GCM](./153%20aes.md) | AEAD encryption, stream cipher helpers, and the shared in-place authenticated encryption shape. |
 | Asymmetric | [Ed25519 & X25519](./154%20ed25519.md), [P-256](./154%20p256.md), [P-384](./154%20p384.md), [RSA](./155%20rsa.md) | Signatures, key exchange, ECIES-style X25519 encryption, and RSA signatures for TLS-style use cases. |
-| PKI | [ASN.1 DER](./155%20asn1.md), [X.509](./155%20x509.md), [PEM](./156%20pem.md) | DER/PEM parsing, certificate fields, hostname checks, signature checks, and certificate chain validation helpers. |
+| PKI | [ASN.1 DER](./155%20der.md), [X.509](./155%20x509.md), [PEM](./156%20pem.md) | DER/PEM parsing, certificate fields, hostname checks, signature checks, and certificate chain validation helpers. |
 | KDF | [HKDF](./152%20hkdf.md), [Argon2](./159%20argon2.md), [Lyra2](./159%20lyra2.md), [OTP](./159%20otp.md), [Secrets](./159%20secret.md) | Key derivation, password hashing, TOTP codes, and hashing a process secret into a stable internal value. |
 | Post-Quantum | [ML-KEM-768](./156%20mlkem.md) | ML-KEM-768 key encapsulation and the X25519MLKEM768 hybrid key exchange shape used by TLS drafts. |
 
@@ -10739,6 +10739,32 @@ Finalizes the hash and returns the 64-byte digest.
 **Returns:** a `fio_u512` containing the digest.
 
 **Note:** after finalization, `h` should not be reused without re-initialization.
+
+### SHA-384 Functions
+
+SHA-384 is SHA-512 with different initial values, truncated to 48 bytes
+(truncating a SHA-512 *result* is NOT the same as SHA-384).
+
+#### `fio_sha384`
+
+```c
+fio_u512 fio_sha384(const void *data, uint64_t len);
+```
+
+Computes SHA-384 in a single call.
+
+**Returns:** a `fio_u512` whose first 48 bytes hold the digest.
+
+#### `fio_sha384_init` / `fio_sha384_consume` / `fio_sha384_finalize`
+
+```c
+fio_sha512_s fio_sha384_init(void);
+void fio_sha384_consume(fio_sha512_s *h, const void *data, uint64_t len);
+fio_u512 fio_sha384_finalize(fio_sha512_s *h);
+```
+
+Streaming SHA-384: same state type as SHA-512; `fio_sha384_init` seeds the
+SHA-384 initial values, consume/finalize alias the SHA-512 operations.
 
 ### HMAC Functions
 
@@ -11647,7 +11673,7 @@ The scalar multiplication is for public verification data. Do not treat this hea
 # ASN.1 DER
 
 ```c
-#define FIO_ASN1
+#define FIO_DER
 #include "fio-stl.h"
 ```
 
@@ -11657,7 +11683,7 @@ The parser is non-allocating. Parsed elements point into the original DER buffer
 
 ## Core Types
 
-### `fio_asn1_element_s`
+### `fio_der_element_s`
 
 ```c
 typedef struct {
@@ -11667,47 +11693,54 @@ typedef struct {
   uint8_t is_constructed;
   uint8_t tag_class;
   uint8_t tag_number;
-} fio_asn1_element_s;
+} fio_der_element_s;
 ```
 
 A parsed DER element. `data` points to the content bytes, after the tag and length fields. `len` is the content length. The remaining fields describe the tag byte.
 
-### `fio_asn1_iterator_s`
+### `fio_der_iterator_s`
 
 ```c
 typedef struct {
   const uint8_t *pos;
   const uint8_t *end;
-} fio_asn1_iterator_s;
+} fio_der_iterator_s;
 ```
 
 Iterator state for walking a `SEQUENCE` or `SET` element.
 
 ### Tags and Classes
 
-`fio_asn1_tag_e` defines the common universal tags, including `FIO_ASN1_INTEGER`, `FIO_ASN1_BIT_STRING`, `FIO_ASN1_OID`, `FIO_ASN1_SEQUENCE`, `FIO_ASN1_SET`, string types, `FIO_ASN1_UTC_TIME`, `FIO_ASN1_GENERALIZED_TIME`, and context wrappers `FIO_ASN1_CONTEXT_0` through `FIO_ASN1_CONTEXT_3`.
+`fio_der_tag_e` defines the common universal tags, including `FIO_DER_INTEGER`, `FIO_DER_BIT_STRING`, `FIO_DER_OID`, `FIO_DER_SEQUENCE`, `FIO_DER_SET`, string types, `FIO_DER_UTC_TIME`, `FIO_DER_GENERALIZED_TIME`, and context wrappers `FIO_DER_CONTEXT_0` through `FIO_DER_CONTEXT_3`.
 
-`fio_asn1_class_e` names the tag classes: universal, application, context-specific, and private.
+`fio_der_class_e` names the tag classes: universal, application, context-specific, and private.
 
-## OID Constants
+## OID Values
 
-The header includes common OID strings for X.509 and TLS work:
+OID constants live in the X.509 module (`FIO_X509_OID_*`, see the X.509
+documentation). An OID value is a plain `fio_u128` where bytes 0-14 hold the
+DER content bytes (zero-padded) and byte 15 holds the content length. The
+length is folded in because `0x00` is a legal OID content byte (arc 0), so
+padding alone could not distinguish `{..0B}` from `{..0B 00}` - different
+OIDs. Oversized OIDs (content > 15 bytes) simply never match, which is safe:
+AlgorithmIdentifier OIDs are attacker-controlled and RFC 5280 requires exact
+match.
 
-- signature algorithms: RSA with SHA-256/384/512, RSA-PSS, ECDSA with SHA-256/384/512, Ed25519, Ed448;
-- public-key algorithms: RSA encryption and EC public key;
-- curves: P-256, P-384, P-521, X25519, X448;
-- X.509 extensions: subject key ID, key usage, subject alternative name, basic constraints, CRL distribution points, certificate policies, authority key ID, extended key usage;
-- EKU values: server auth and client auth;
-- distinguished-name attributes: common name, country, locality, state, organization, and organizational unit.
+Build a value once per parsed element with `fio___der_oid_value` (internal),
+then compare it against any number of constants with `fio___der_oid_eq`
+(internal) - two u64-lane `==` comparisons, no memcmp, no call:
 
-Use them with `fio_asn1_oid_eq` instead of hand-typing dotted strings everywhere.
+```c
+fio_u128 oid = fio___der_oid_value(&elem); /* build ONCE per element */
+if (fio___der_oid_eq(oid, FIO_X509_OID_COMMON_NAME)) { /* ... */ }
+```
 
 ## Parsing
 
-### `fio_asn1_parse`
+### `fio_der_parse`
 
 ```c
-SFUNC const uint8_t *fio_asn1_parse(fio_asn1_element_s *elem,
+SFUNC const uint8_t *fio_der_parse(fio_der_element_s *elem,
                                     const uint8_t *data,
                                     size_t data_len);
 ```
@@ -11716,10 +11749,10 @@ Parses one DER element. On success, fills `elem` and returns a pointer to the ne
 
 It rejects invalid DER lengths, truncated buffers, unsupported high-tag-number encodings, and indefinite lengths.
 
-### `fio_asn1_element_total_len`
+### `fio_der_element_total_len`
 
 ```c
-FIO_IFUNC size_t fio_asn1_element_total_len(const fio_asn1_element_s *elem,
+FIO_IFUNC size_t fio_der_element_total_len(const fio_der_element_s *elem,
                                             const uint8_t *data);
 ```
 
@@ -11727,10 +11760,10 @@ Returns the full encoded length of an element: tag + length + content. `data` mu
 
 ## Type Parsers
 
-### `fio_asn1_parse_integer`
+### `fio_der_parse_integer`
 
 ```c
-SFUNC int fio_asn1_parse_integer(const fio_asn1_element_s *elem,
+SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
                                  uint64_t *value);
 ```
 
@@ -11738,10 +11771,10 @@ Parses an ASN.1 `INTEGER`. For small integers, pass `value` and receive the 64-b
 
 Returns `0` on success, `-1` on error.
 
-### `fio_asn1_parse_bit_string`
+### `fio_der_parse_bit_string`
 
 ```c
-SFUNC int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem,
+SFUNC int fio_der_parse_bit_string(const fio_der_element_s *elem,
                                     const uint8_t **bits,
                                     size_t *bit_len,
                                     uint8_t *unused_bits);
@@ -11749,10 +11782,10 @@ SFUNC int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem,
 
 Parses an ASN.1 `BIT STRING`. `bits` points into the element data after the unused-bit count byte. `bit_len` is the byte length of the bit payload. `unused_bits` is the number of unused bits in the last byte.
 
-### `fio_asn1_parse_oid`
+### `fio_der_parse_oid`
 
 ```c
-SFUNC int fio_asn1_parse_oid(const fio_asn1_element_s *elem,
+SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
                              char *buf,
                              size_t buf_len);
 ```
@@ -11761,37 +11794,28 @@ Converts an ASN.1 `OBJECT IDENTIFIER` into dotted text such as `1.2.840.113549.1
 
 Returns the number of characters written, excluding the NUL byte, or `-1` on error.
 
-### `fio_asn1_oid_eq`
+### `fio_der_parse_time`
 
 ```c
-SFUNC int fio_asn1_oid_eq(const fio_asn1_element_s *elem,
-                          const char *oid_string);
-```
-
-Returns `1` if the OID element matches `oid_string`, otherwise `0`.
-
-### `fio_asn1_parse_time`
-
-```c
-SFUNC int fio_asn1_parse_time(const fio_asn1_element_s *elem,
+SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
                               int64_t *unix_time);
 ```
 
 Parses `UTCTime` or `GeneralizedTime` into a Unix timestamp. Times must be UTC (`Z`). Fractional seconds are skipped when present.
 
-### `fio_asn1_parse_string`
+### `fio_der_parse_string`
 
 ```c
-FIO_IFUNC const char *fio_asn1_parse_string(const fio_asn1_element_s *elem,
+FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
                                             size_t *len);
 ```
 
 Returns a pointer to the string bytes for supported ASN.1 string tags, with the byte length in `len`. This does not validate or transcode the text; it simply gives you the payload.
 
-### `fio_asn1_parse_boolean`
+### `fio_der_parse_boolean`
 
 ```c
-FIO_IFUNC int fio_asn1_parse_boolean(const fio_asn1_element_s *elem,
+FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem,
                                      int *value);
 ```
 
@@ -11799,28 +11823,28 @@ Parses a DER boolean and writes `0` or non-zero to `value`.
 
 ## Walking Sequences and Sets
 
-### `fio_asn1_iterator_init`
+### `fio_der_iterator_init`
 
 ```c
-FIO_IFUNC void fio_asn1_iterator_init(fio_asn1_iterator_s *it,
-                                      const fio_asn1_element_s *sequence);
+FIO_IFUNC void fio_der_iterator_init(fio_der_iterator_s *it,
+                                      const fio_der_element_s *sequence);
 ```
 
 Initializes an iterator over the content bytes of a parsed `SEQUENCE` or `SET`.
 
-### `fio_asn1_iterator_next`
+### `fio_der_iterator_next`
 
 ```c
-SFUNC int fio_asn1_iterator_next(fio_asn1_iterator_s *it,
-                                 fio_asn1_element_s *elem);
+SFUNC int fio_der_iterator_next(fio_der_iterator_s *it,
+                                 fio_der_element_s *elem);
 ```
 
 Parses the next child element and advances the iterator. Returns `0` when an element was read, `-1` at end or on parse error.
 
-### `fio_asn1_iterator_has_next`
+### `fio_der_iterator_has_next`
 
 ```c
-FIO_IFUNC int fio_asn1_iterator_has_next(const fio_asn1_iterator_s *it);
+FIO_IFUNC int fio_der_iterator_has_next(const fio_der_iterator_s *it);
 ```
 
 Returns `1` when the iterator still has bytes to parse, otherwise `0`.
@@ -11828,17 +11852,17 @@ Returns `1` when the iterator still has bytes to parse, otherwise `0`.
 ## Tag Helpers
 
 ```c
-FIO_IFUNC int fio_asn1_is_tag(const fio_asn1_element_s *elem, uint8_t tag);
-FIO_IFUNC int fio_asn1_is_context_tag(const fio_asn1_element_s *elem,
+FIO_IFUNC int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag);
+FIO_IFUNC int fio_der_is_context_tag(const fio_der_element_s *elem,
                                       uint8_t tag_num);
-FIO_IFUNC uint8_t fio_asn1_tag_number(const fio_asn1_element_s *elem);
+FIO_IFUNC uint8_t fio_der_tag_number(const fio_der_element_s *elem);
 ```
 
 Use these to keep parser code readable:
 
-- `fio_asn1_is_tag` checks a universal tag such as `FIO_ASN1_INTEGER`.
-- `fio_asn1_is_context_tag` checks `[0]`, `[1]`, and friends.
-- `fio_asn1_tag_number` returns the decoded tag number.
+- `fio_der_is_tag` checks a universal tag such as `FIO_DER_INTEGER`.
+- `fio_der_is_context_tag` checks `[0]`, `[1]`, and friends.
+- `fio_der_tag_number` returns the decoded tag number.
 
 ## Encoding
 
@@ -11847,32 +11871,35 @@ All encoder functions return the number of bytes written or needed. Pass `NULL` 
 ### Basic Encoders
 
 ```c
-SFUNC size_t fio_asn1_encode_length(uint8_t *buf, size_t len);
-SFUNC size_t fio_asn1_encode_integer(uint8_t *buf,
+SFUNC size_t fio_der_encode_length(uint8_t *buf, size_t len);
+SFUNC size_t fio_der_encode_integer(uint8_t *buf,
                                      const uint8_t *data,
                                      size_t data_len);
-SFUNC size_t fio_asn1_encode_integer_small(uint8_t *buf, uint64_t value);
-SFUNC size_t fio_asn1_encode_oid(uint8_t *buf, const char *oid_string);
-SFUNC size_t fio_asn1_encode_null(uint8_t *buf);
-SFUNC size_t fio_asn1_encode_boolean(uint8_t *buf, int value);
+SFUNC size_t fio_der_encode_integer_small(uint8_t *buf, uint64_t value);
+SFUNC size_t fio_der_encode_null(uint8_t *buf);
+SFUNC size_t fio_der_encode_boolean(uint8_t *buf, int value);
 ```
 
-These write DER length fields, positive integers, OIDs, `NULL`, and booleans. `fio_asn1_encode_integer` expects big-endian integer bytes and adds the leading zero byte when DER needs one to keep the integer positive.
+These write DER length fields, positive integers, `NULL`, and booleans. `fio_der_encode_integer` expects big-endian integer bytes and adds the leading zero byte when DER needs one to keep the integer positive.
+
+OIDs are encoded with the internal `fio___der_encode_oid(buf, fio_u128 oid)`,
+which TLV-wraps an OID value (see OID Values above) without any dot-string
+parsing.
 
 ### String and Byte Encoders
 
 ```c
-SFUNC size_t fio_asn1_encode_utf8_string(uint8_t *buf,
+SFUNC size_t fio_der_encode_utf8_string(uint8_t *buf,
                                          const char *str,
                                          size_t str_len);
-SFUNC size_t fio_asn1_encode_printable_string(uint8_t *buf,
+SFUNC size_t fio_der_encode_printable_string(uint8_t *buf,
                                               const char *str,
                                               size_t str_len);
-SFUNC size_t fio_asn1_encode_bit_string(uint8_t *buf,
+SFUNC size_t fio_der_encode_bit_string(uint8_t *buf,
                                         const uint8_t *bits,
                                         size_t bit_len,
                                         uint8_t unused_bits);
-SFUNC size_t fio_asn1_encode_octet_string(uint8_t *buf,
+SFUNC size_t fio_der_encode_octet_string(uint8_t *buf,
                                           const uint8_t *data,
                                           size_t data_len);
 ```
@@ -11882,9 +11909,9 @@ These write the tag, DER length, and payload for common primitive values.
 ### Header Encoders
 
 ```c
-SFUNC size_t fio_asn1_encode_sequence_header(uint8_t *buf, size_t content_len);
-SFUNC size_t fio_asn1_encode_set_header(uint8_t *buf, size_t content_len);
-SFUNC size_t fio_asn1_encode_context_header(uint8_t *buf,
+SFUNC size_t fio_der_encode_sequence_header(uint8_t *buf, size_t content_len);
+SFUNC size_t fio_der_encode_set_header(uint8_t *buf, size_t content_len);
+SFUNC size_t fio_der_encode_context_header(uint8_t *buf,
                                             uint8_t tag_num,
                                             size_t content_len,
                                             int constructed);
@@ -11895,8 +11922,8 @@ These write only the wrapper tag and length. Write the content bytes immediately
 ### Time Encoders
 
 ```c
-SFUNC size_t fio_asn1_encode_utc_time(uint8_t *buf, int64_t unix_time);
-SFUNC size_t fio_asn1_encode_generalized_time(uint8_t *buf, int64_t unix_time);
+SFUNC size_t fio_der_encode_utc_time(uint8_t *buf, int64_t unix_time);
+SFUNC size_t fio_der_encode_generalized_time(uint8_t *buf, int64_t unix_time);
 ```
 
 These encode Unix timestamps as DER `UTCTime` or `GeneralizedTime`.
@@ -11904,25 +11931,27 @@ These encode Unix timestamps as DER `UTCTime` or `GeneralizedTime`.
 ## Example
 
 ```c
-#define FIO_ASN1
+#define FIO_DER
 #include "fio-stl.h"
 
 void scan_sequence(const uint8_t *der, size_t der_len) {
-  fio_asn1_element_s seq;
-  if (!fio_asn1_parse(&seq, der, der_len))
+  fio_der_element_s seq;
+  if (!fio_der_parse(&seq, der, der_len))
     return;
-  if (!fio_asn1_is_tag(&seq, FIO_ASN1_SEQUENCE))
+  if (!fio_der_is_tag(&seq, FIO_DER_SEQUENCE))
     return;
 
-  fio_asn1_iterator_s it;
-  fio_asn1_iterator_init(&it, &seq);
+  fio_der_iterator_s it;
+  fio_der_iterator_init(&it, &seq);
 
-  fio_asn1_element_s elem;
-  while (fio_asn1_iterator_next(&it, &elem) == 0) {
-    if (fio_asn1_is_tag(&elem, FIO_ASN1_OID)) {
-      char oid[128];
-      if (fio_asn1_parse_oid(&elem, oid, sizeof(oid)) > 0) {
-        /* compare with FIO_OID_* constants here */
+  fio_der_element_s elem;
+  while (fio_der_iterator_next(&it, &elem) == 0) {
+    if (fio_der_is_tag(&elem, FIO_DER_OID)) {
+      fio_u128 oid = fio___der_oid_value(&elem);
+      /* compare with FIO_X509_OID_* constants via fio___der_oid_eq, or */
+      char dot[128];
+      if (fio_der_parse_oid(&elem, dot, sizeof(dot)) > 0) {
+        /* dotted string available for diagnostics */
       }
     }
   }
@@ -12108,298 +12137,6 @@ int verify_pss(const uint8_t *sig,
 - For X.509 parsing, this module is normally used through [X.509](./155%20x509.md), which extracts the RSA key and dispatches verification.
 
 ------------------------------------------------------------
-# X.509 Certificates
-
-```c
-#define FIO_X509
-#include "fio-stl.h"
-```
-
-This module parses DER-encoded X.509v3 certificates for TLS 1.3 style certificate checks. It is a compact parser, verifier, trust-store checker, TLS Certificate-message splitter, and small self-signed certificate generator.
-
-It is non-allocating while parsing: `fio_x509_cert_s` stores pointers into the original DER bytes. Keep those bytes alive. Certificates dislike disappearing floors.
-
-**Scope note:** this is a minimal TLS-oriented X.509 implementation, not a full PKI policy engine. Not all X.509 features are supported.
-
-## Supported Pieces
-
-- RSA, ECDSA P-256, ECDSA P-384, and Ed25519 public keys.
-- RSA PKCS#1 v1.5, RSA-PSS, ECDSA, and Ed25519 signature verification.
-- Validity period checks.
-- Hostname matching using SAN DNS names and CN fallback, with one-label wildcards.
-- Basic Constraints and Key Usage.
-- Certificate chain validation against an optional trust store.
-- TLS 1.3 Certificate message parsing.
-- Self-signed certificate generation for Ed25519 and P-256 keys.
-
-## Main Types
-
-### Key and Signature Enums
-
-```c
-typedef enum {
-  FIO_X509_KEY_UNKNOWN = 0,
-  FIO_X509_KEY_RSA = 1,
-  FIO_X509_KEY_ECDSA_P256 = 2,
-  FIO_X509_KEY_ECDSA_P384 = 3,
-  FIO_X509_KEY_ED25519 = 4,
-} fio_x509_key_type_e;
-```
-
-```c
-typedef enum {
-  FIO_X509_SIG_UNKNOWN = 0,
-  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1,
-  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2,
-  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3,
-  FIO_X509_SIG_RSA_PSS_SHA256 = 4,
-  FIO_X509_SIG_RSA_PSS_SHA384 = 5,
-  FIO_X509_SIG_RSA_PSS_SHA512 = 6,
-  FIO_X509_SIG_ECDSA_SHA256 = 7,
-  FIO_X509_SIG_ECDSA_SHA384 = 8,
-  FIO_X509_SIG_ED25519 = 9,
-} fio_x509_sig_alg_e;
-```
-
-### Key Usage and Errors
-
-`fio_x509_key_usage_e` defines RFC 5280 key-usage bits such as `FIO_X509_KU_DIGITAL_SIGNATURE`, `FIO_X509_KU_KEY_ENCIPHERMENT`, and `FIO_X509_KU_KEY_CERT_SIGN`. ASN.1 bit strings use MSB-first ordering, so the constants look a little backwards until they save you from off-by-one sadness.
-
-`fio_x509_error_e` gives chain validation results: `FIO_X509_OK`, parse failure, expired/not-yet-valid, signature failure, issuer mismatch, not-a-CA, no trust anchor, hostname mismatch, empty chain, and chain-too-long.
-
-### `fio_x509_trust_store_s`
-
-```c
-typedef struct {
-  const uint8_t **roots;
-  const size_t *root_lens;
-  size_t root_count;
-} fio_x509_trust_store_s;
-```
-
-A simple root store: arrays of DER certificate pointers and lengths.
-
-### `fio_tls_cert_entry_s`
-
-```c
-typedef struct {
-  const uint8_t *cert;
-  size_t cert_len;
-} fio_tls_cert_entry_s;
-```
-
-One certificate entry extracted from a TLS 1.3 `Certificate` handshake message.
-
-### `fio_x509_cert_s`
-
-```c
-typedef struct fio_x509_cert_s fio_x509_cert_s;
-```
-
-The parsed certificate structure includes:
-
-- version and validity timestamps;
-- raw subject and issuer DNs;
-- subject CN;
-- public key type and key data;
-- signature algorithm and signature bytes;
-- TBS certificate bytes used for verification;
-- Basic Constraints, Key Usage, and SAN DNS data.
-
-Most pointers reference the original DER buffer.
-
-## Parsing and Single-Certificate Checks
-
-### `fio_x509_parse`
-
-```c
-SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
-                         const uint8_t *der_data,
-                         size_t der_len);
-```
-
-Parses one DER certificate. `cert` is zeroed first. Returns `0` on success, `-1` on parse error.
-
-### `fio_x509_verify_signature`
-
-```c
-SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
-                                    const fio_x509_cert_s *issuer);
-```
-
-Verifies that `issuer` signed `cert`, using the issuer public key and the certificate signature algorithm. Returns `0` when the signature is valid, `-1` otherwise.
-
-### `fio_x509_check_validity`
-
-```c
-FIO_IFUNC int fio_x509_check_validity(const fio_x509_cert_s *cert,
-                                      int64_t current_time);
-```
-
-Checks `not_before <= current_time <= not_after`. Returns `0` when the certificate is in its validity window.
-
-### `fio_x509_match_hostname`
-
-```c
-SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
-                                  const char *hostname,
-                                  size_t hostname_len);
-```
-
-Checks whether a certificate matches a hostname. SAN DNS entries are supported, with CN fallback. Wildcards are one-label wildcards such as `*.example.com`; they do not swallow `a.b.example.com`.
-
-Returns `0` for a match, `-1` for no match.
-
-### `fio_x509_dn_equals`
-
-```c
-FIO_IFUNC int fio_x509_dn_equals(const uint8_t *dn1,
-                                 size_t dn1_len,
-                                 const uint8_t *dn2,
-                                 size_t dn2_len);
-```
-
-Compares two raw DER Distinguished Names. Returns `0` if equal, non-zero if different.
-
-## Chain Validation
-
-### `fio_x509_verify_chain`
-
-```c
-SFUNC int fio_x509_verify_chain(const uint8_t **certs,
-                                const size_t *cert_lens,
-                                size_t cert_count,
-                                const char *hostname,
-                                int64_t current_time,
-                                fio_x509_trust_store_s *trust_store);
-```
-
-Validates a certificate chain for TLS-style use.
-
-Expected order:
-
-1. `certs[0]`: end-entity / server certificate.
-2. `certs[1]`: intermediate that signed `certs[0]`.
-3. `certs[n-1]`: closest-to-root certificate.
-
-Validation parses all certificates, checks validity periods, optionally matches the hostname, verifies each signature with the next certificate, checks issuer/subject DN links, requires CA certificates where needed, and optionally checks the final certificate against `trust_store`.
-
-Returns `FIO_X509_OK` (`0`) on success, or a `FIO_X509_ERR_*` code.
-
-### `fio_x509_is_trusted`
-
-```c
-SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
-                              fio_x509_trust_store_s *trust_store);
-```
-
-Checks whether `cert` appears in the trust store by subject DN match. Returns `0` if trusted, `-1` if not found.
-
-### `fio_x509_error_str`
-
-```c
-FIO_IFUNC const char *fio_x509_error_str(int error);
-```
-
-Returns a static string for a chain validation error code.
-
-## TLS Certificate Messages
-
-```c
-#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
-```
-
-### `fio_tls_parse_certificate_message`
-
-```c
-SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
-                                               size_t max_entries,
-                                               const uint8_t *data,
-                                               size_t data_len);
-```
-
-Parses a TLS 1.3 `Certificate` message body, after the handshake header. It extracts certificate entries and skips per-certificate extensions.
-
-Returns the number of certificates parsed, or `FIO_TLS_CERT_PARSE_ERROR` on malformed input.
-
-## Self-Signed Certificate Generation
-
-Generation supports Ed25519 and P-256 key pairs.
-
-```c
-typedef enum {
-  FIO_X509_KEYPAIR_ED25519 = 1,
-  FIO_X509_KEYPAIR_P256 = 2,
-} fio_x509_keypair_type_e;
-```
-
-`fio_x509_keypair_s` stores the selected key type, secret key bytes, public key bytes, and their lengths. Use `fio_x509_keypair_clear` when done.
-
-`fio_x509_cert_options_s` controls the subject CN, organization, organizational unit, country, validity window, SAN DNS names, CA flag, and key-usage bits.
-
-### `fio_x509_keypair_ed25519`
-
-```c
-SFUNC int fio_x509_keypair_ed25519(fio_x509_keypair_s *keypair);
-```
-
-Generates an Ed25519 key pair for certificate signing. Requires the Ed25519 module to be included. Returns `0` on success.
-
-### `fio_x509_keypair_p256`
-
-```c
-SFUNC int fio_x509_keypair_p256(fio_x509_keypair_s *keypair);
-```
-
-Generates a P-256 key pair for certificate signing. Requires the P-256 module to be included. Returns `0` on success.
-
-### `fio_x509_self_signed_cert`
-
-```c
-SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
-                                       size_t buf_len,
-                                       const fio_x509_keypair_s *keypair,
-                                       const fio_x509_cert_options_s *options);
-```
-
-Writes a DER-encoded self-signed X.509v3 certificate. Call with `buf == NULL` to get a worst-case buffer size, then call again with a real buffer.
-
-Returns bytes written, or `0` on error.
-
-### `fio_x509_keypair_clear`
-
-```c
-FIO_IFUNC void fio_x509_keypair_clear(fio_x509_keypair_s *keypair);
-```
-
-Securely clears key material and zeros the structure.
-
-## Example: Parse and Check Hostname
-
-```c
-#define FIO_X509
-#include "fio-stl.h"
-
-int check_cert(const uint8_t *der, size_t der_len, int64_t now) {
-  fio_x509_cert_s cert;
-  if (fio_x509_parse(&cert, der, der_len))
-    return -1;
-  if (fio_x509_check_validity(&cert, now))
-    return -1;
-  if (fio_x509_match_hostname(&cert, "example.com", 11))
-    return -1;
-  return 0;
-}
-```
-
-## Practical Notes
-
-- Define the crypto modules you need before including the STL: RSA, P-256, P-384, Ed25519, SHA-2, and ASN.1 may all matter depending on certificate algorithms.
-- `trust_store == NULL` skips root trust checking in `fio_x509_verify_chain`; useful for structural tests, not for real trust decisions.
-- Hostname checks are DNS-name focused. IP address SAN handling is not a full replacement for platform certificate validation.
-- Parsed strings and DNs are raw certificate data. Normalize policy elsewhere if your application needs browser-grade PKI behavior.
-
-------------------------------------------------------------
 # ML-KEM-768
 
 ```c
@@ -12553,6 +12290,313 @@ int roundtrip(void) {
 ## Implementation Notes
 
 The implementation uses ML-KEM-768 parameters, NTT arithmetic, Montgomery and Barrett reduction, and optional NEON / AVX2 paths for vectorized polynomial work. Those SIMD paths are speed knobs, not different APIs.
+
+------------------------------------------------------------
+# X.509 Certificates
+
+```c
+#define FIO_X509
+#include "fio-stl.h"
+```
+
+This module parses DER-encoded X.509v3 certificates for TLS 1.3 style certificate checks. It is a compact parser, verifier, trust-store checker, TLS Certificate-message splitter, and small self-signed certificate generator.
+
+It is non-allocating while parsing: `fio_x509_cert_s` stores pointers into the original DER bytes. Keep those bytes alive. Certificates dislike disappearing floors.
+
+**Scope note:** this is a minimal TLS-oriented X.509 implementation, not a full PKI policy engine. Not all X.509 features are supported.
+
+## Supported Pieces
+
+- RSA, ECDSA P-256, ECDSA P-384, and Ed25519 public keys.
+- RSA PKCS#1 v1.5, RSA-PSS, ECDSA, and Ed25519 signature verification.
+- Validity period checks.
+- Hostname matching using SAN DNS names and CN fallback, with one-label wildcards.
+- Basic Constraints and Key Usage.
+- Certificate chain validation against an optional trust store.
+- TLS 1.3 Certificate message parsing.
+- Self-signed certificate generation for Ed25519 and P-256 keys.
+
+## Main Types
+
+### Key and Signature Enums
+
+```c
+typedef enum {
+  FIO_X509_KEY_UNKNOWN = 0,
+  FIO_X509_KEY_RSA = 1,
+  FIO_X509_KEY_ECDSA_P256 = 2,
+  FIO_X509_KEY_ECDSA_P384 = 3,
+  FIO_X509_KEY_ED25519 = 4,
+} fio_x509_key_type_e;
+```
+
+```c
+typedef enum {
+  FIO_X509_SIG_UNKNOWN = 0,
+  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1,
+  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2,
+  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3,
+  FIO_X509_SIG_RSA_PSS_SHA256 = 4,
+  FIO_X509_SIG_RSA_PSS_SHA384 = 5,
+  FIO_X509_SIG_RSA_PSS_SHA512 = 6,
+  FIO_X509_SIG_ECDSA_SHA256 = 7,
+  FIO_X509_SIG_ECDSA_SHA384 = 8,
+  FIO_X509_SIG_ED25519 = 9,
+} fio_x509_sig_alg_e;
+```
+
+### Key Usage and Errors
+
+`fio_x509_key_usage_e` defines RFC 5280 key-usage bits such as `FIO_X509_KU_DIGITAL_SIGNATURE`, `FIO_X509_KU_KEY_ENCIPHERMENT`, and `FIO_X509_KU_KEY_CERT_SIGN`. ASN.1 bit strings use MSB-first ordering, so the constants look a little backwards until they save you from off-by-one sadness.
+
+`fio_x509_error_e` gives chain validation results: `FIO_X509_OK`, parse failure, expired/not-yet-valid, signature failure, issuer mismatch, not-a-CA, no trust anchor, hostname mismatch, empty chain, and chain-too-long.
+
+### `fio_x509_trust_store_s`
+
+```c
+typedef struct {
+  const uint8_t **roots;
+  const size_t *root_lens;
+  size_t root_count;
+} fio_x509_trust_store_s;
+```
+
+A simple root store: arrays of DER certificate pointers and lengths.
+
+### `fio_tls_cert_entry_s`
+
+```c
+typedef struct {
+  const uint8_t *cert;
+  size_t cert_len;
+} fio_tls_cert_entry_s;
+```
+
+One certificate entry extracted from a TLS 1.3 `Certificate` handshake message.
+
+### `fio_x509_cert_s`
+
+```c
+typedef struct fio_x509_cert_s fio_x509_cert_s;
+```
+
+The parsed certificate structure uses non-owning buffer views
+(`fio_buf_info_s` / `fio_ubuf_info_s`) and packs to 256 bytes with no
+interior padding:
+
+- `verified`: non-zero when a TLS backend verified this certificate's chain
+  (peer inspection only; always zero after `fio_x509_parse`);
+- `der`: a reference to the original DER bytes (not a copy);
+- `fingerprint`: 32-byte SHA-256 of the DER bytes (see `fio_x509_fingerprint`);
+- `version`, `serial`, and validity timestamps;
+- raw subject and issuer DNs;
+- subject CN;
+- public key type and key data;
+- signature algorithm and signature bytes;
+- TBS certificate bytes used for verification;
+- Basic Constraints (`is_ca`), Key Usage (`has_key_usage`, `key_usage`), and
+  SAN data (first DNS name, first IP address, and the raw SAN extension for
+  iterating the rest).
+
+All view pointers reference the original DER buffer.
+
+## Parsing and Single-Certificate Checks
+
+### `fio_x509_parse`
+
+```c
+SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
+                         const uint8_t *der_data,
+                         size_t der_len);
+```
+
+Parses one DER certificate. `cert` is zeroed first. Returns `0` on success, `-1` on parse error.
+
+### `fio_x509_fingerprint`
+
+```c
+SFUNC void fio_x509_fingerprint(fio_x509_cert_s *cert);
+```
+
+Computes the SHA-256 of the certificate's DER bytes into
+`cert->fingerprint` (32 raw bytes). Call after `fio_x509_parse`; hashing is
+lazy so parsing never pays for it. Requires the SHA2 module.
+
+### `fio_x509_verify_signature`
+
+```c
+SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
+                                    const fio_x509_cert_s *issuer);
+```
+
+Verifies that `issuer` signed `cert`, using the issuer public key and the certificate signature algorithm. Returns `0` when the signature is valid, `-1` otherwise.
+
+### `fio_x509_check_validity`
+
+```c
+FIO_IFUNC int fio_x509_check_validity(const fio_x509_cert_s *cert,
+                                      int64_t current_time);
+```
+
+Checks `not_before <= current_time <= not_after`. Returns `0` when the certificate is in its validity window.
+
+### `fio_x509_match_hostname`
+
+```c
+SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
+                                  const char *hostname,
+                                  size_t hostname_len);
+```
+
+Checks whether a certificate matches a hostname. SAN DNS entries are supported, with CN fallback. Wildcards are one-label wildcards such as `*.example.com`; they do not swallow `a.b.example.com`.
+
+Returns `0` for a match, `-1` for no match.
+
+Distinguished Names are compared as raw DER with the core
+`FIO_BUF_INFO_IS_EQ` macro (e.g.,
+`FIO_BUF_INFO_IS_EQ(cert.issuer, root.subject)`).
+
+## Chain Validation
+
+### `fio_x509_verify_chain`
+
+```c
+SFUNC int fio_x509_verify_chain(const uint8_t **certs,
+                                const size_t *cert_lens,
+                                size_t cert_count,
+                                const char *hostname,
+                                int64_t current_time,
+                                fio_x509_trust_store_s *trust_store);
+```
+
+Validates a certificate chain for TLS-style use.
+
+Expected order:
+
+1. `certs[0]`: end-entity / server certificate.
+2. `certs[1]`: intermediate that signed `certs[0]`.
+3. `certs[n-1]`: closest-to-root certificate.
+
+Validation parses all certificates, checks validity periods, optionally matches the hostname, verifies each signature with the next certificate, checks issuer/subject DN links, requires CA certificates where needed, and optionally checks the final certificate against `trust_store`.
+
+Trust anchors are matched by (subject DN, public key): the anchor's key must
+verify the final certificate's signature. This also covers self-signed
+certificates — a same-named impostor with a different key is rejected.
+
+Returns `FIO_X509_OK` (`0`) on success, or a `FIO_X509_ERR_*` code.
+
+### `fio_x509_is_trusted`
+
+```c
+SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
+                              fio_x509_trust_store_s *trust_store);
+```
+
+Checks whether `cert` appears in the trust store by subject DN match. Returns `0` if trusted, `-1` if not found.
+
+### `fio_x509_error_str`
+
+```c
+FIO_IFUNC const char *fio_x509_error_str(int error);
+```
+
+Returns a static string for a chain validation error code.
+
+## TLS Certificate Messages
+
+```c
+#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
+```
+
+### `fio_tls_parse_certificate_message`
+
+```c
+SFUNC size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries,
+                                               size_t max_entries,
+                                               const uint8_t *data,
+                                               size_t data_len);
+```
+
+Parses a TLS 1.3 `Certificate` message body, after the handshake header. It extracts certificate entries and skips per-certificate extensions.
+
+Returns the number of certificates parsed, or `FIO_TLS_CERT_PARSE_ERROR` on malformed input.
+
+## Self-Signed Certificate Generation
+
+Generation supports Ed25519 and P-256 key pairs.
+
+```c
+typedef enum {
+  FIO_X509_KEYPAIR_ED25519 = 1,
+  FIO_X509_KEYPAIR_P256 = 2,
+} fio_x509_keypair_type_e;
+```
+
+`fio_x509_keypair_s` stores the selected key type, secret key bytes, public key bytes, and their lengths. Use `fio_x509_keypair_clear` when done.
+
+`fio_x509_cert_options_s` controls the subject CN, organization, organizational unit, country, validity window, SAN DNS names, CA flag, and key-usage bits.
+
+### `fio_x509_keypair_ed25519`
+
+```c
+SFUNC int fio_x509_keypair_ed25519(fio_x509_keypair_s *keypair);
+```
+
+Generates an Ed25519 key pair for certificate signing. Requires the Ed25519 module to be included. Returns `0` on success.
+
+### `fio_x509_keypair_p256`
+
+```c
+SFUNC int fio_x509_keypair_p256(fio_x509_keypair_s *keypair);
+```
+
+Generates a P-256 key pair for certificate signing. Requires the P-256 module to be included. Returns `0` on success.
+
+### `fio_x509_self_signed_cert`
+
+```c
+SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
+                                       size_t buf_len,
+                                       const fio_x509_keypair_s *keypair,
+                                       const fio_x509_cert_options_s *options);
+```
+
+Writes a DER-encoded self-signed X.509v3 certificate. Call with `buf == NULL` to get a worst-case buffer size, then call again with a real buffer.
+
+Returns bytes written, or `0` on error.
+
+### `fio_x509_keypair_clear`
+
+```c
+FIO_IFUNC void fio_x509_keypair_clear(fio_x509_keypair_s *keypair);
+```
+
+Securely clears key material and zeros the structure.
+
+## Example: Parse and Check Hostname
+
+```c
+#define FIO_X509
+#include "fio-stl.h"
+
+int check_cert(const uint8_t *der, size_t der_len, int64_t now) {
+  fio_x509_cert_s cert;
+  if (fio_x509_parse(&cert, der, der_len))
+    return -1;
+  if (fio_x509_check_validity(&cert, now))
+    return -1;
+  if (fio_x509_match_hostname(&cert, "example.com", 11))
+    return -1;
+  return 0;
+}
+```
+
+## Practical Notes
+
+- Define the crypto modules you need before including the STL: RSA, P-256, P-384, Ed25519, SHA-2, and ASN.1 may all matter depending on certificate algorithms.
+- `trust_store == NULL` skips root trust checking in `fio_x509_verify_chain`; useful for structural tests, not for real trust decisions.
+- Hostname checks are DNS-name focused. IP address SAN handling is not a full replacement for platform certificate validation.
+- Parsed strings and DNs are raw certificate data. Normalize policy elsewhere if your application needs browser-grade PKI behavior.
 
 ------------------------------------------------------------
 # PEM Parser
@@ -16390,6 +16434,55 @@ Transport backends use `fio_io_tls_each` to consume the stored instructions.
 Iterator callbacks return `int`; check the backend using them for any additional
 meaning assigned to non-zero return values.
 
+### Peer certificate inspection (mTLS)
+
+```c
+int fio_io_peer_info_next(fio_io_s *io, fio_x509_cert_s *dest);
+```
+
+Trust configured with `fio_io_tls_trust_add` always refers to **peer**
+verification: a server context verifies (and requires) client certificates,
+a client context verifies the server certificate. An empty trust list means
+no peer verification; passing `NULL` to `fio_io_tls_trust_add` selects the
+system trust store.
+
+Once the handshake completed, iterate the peer's certificate chain (leaf
+first) to implement application level client certificate authentication and
+authorization:
+
+```c
+fio_x509_cert_s cert = {0}; /* zeroed = new loop */
+while (fio_io_peer_info_next(io, &cert) == 0) {
+  if (!cert.verified)
+    continue; /* chain failed TLS-level verification (or was skipped) */
+  /* authorize by identity, e.g.: cert.cn,
+   * cert.subject, or pin cert.fingerprint (32-byte SHA-256) */
+}
+```
+
+The iterator is stateless — the position is identified from `dest` alone: a
+zeroed `dest` (`der.buf == NULL`) starts a new loop; otherwise iteration
+continues at `dest->chain_index + 1`. To restart a loop, zero the struct.
+Multiple loops may iterate the same connection concurrently.
+Iteration is capped at 128 certificates (`chain_index` 0..127) as a
+deep-nesting / DoS guard — longer chains end the loop with -1.
+
+Passing a `NULL` `dest` returns -1. The function returns
+-1 when the iteration is done or when peer information is unavailable (no
+TLS, handshake incomplete, peer sent no certificate, or the X509 module
+missing).
+
+Each call parses the next certificate into a `fio_x509_cert_s` (defined in
+the X509 module, `156 x509.h`). All certificate fields point directly into
+memory owned by the TLS backend — nothing is copied or allocated. The views
+stay valid until the next `fio_io_peer_info_next` call (on ANY connection)
+or connection close, whichever comes first; copy anything that must outlive
+the loop.
+
+The `verified` flag reflects the TLS backend's verification of the whole
+chain and is identical for every certificate in the chain. Connections that
+skipped verification (empty trust list) report `verified == 0`.
+
 ---
 
 ## Async Worker Queues
@@ -17154,12 +17247,26 @@ Protocol names must be 1–255 bytes. The internal wire-format list is capped at
 
 ## Trust and Peer Verification
 
+Trust configured with `fio_io_tls_trust_add` always refers to **peer**
+verification: a client context verifies the server certificate, a server
+context requests, requires, and verifies the client certificate (mutual TLS).
+An empty trust list means **no peer verification**.
+
 | Scenario | Behaviour |
 |----------|-----------|
 | `fio_io_tls_trust_add` called (any argument) | `SSL_VERIFY_PEER` enabled |
-| `NULL` passed to `fio_io_tls_trust_add` | system trust store is loaded |
+| `NULL` passed to `fio_io_tls_trust_add` | system trust store is loaded (`X509_STORE_set_default_paths`) |
+| Trust configured, server mode | `SSL_VERIFY_PEER \| SSL_VERIFY_FAIL_IF_NO_PEER_CERT` (client certificate required) |
 | No trust certs added, client mode | `SSL_VERIFY_NONE` + `FIO_LOG_SECURITY` warning |
-| No trust certs added, server mode | `SSL_VERIFY_NONE` (clients rarely present certs) |
+| No trust certs added, server mode | `SSL_VERIFY_NONE` (no client certificate requested) |
+
+After the handshake, inspect the peer's certificate chain with
+`fio_io_peer_info_next(io, &info)` (see the IO API docs). Each call
+re-encodes the next chain certificate into a fixed per-connection staging
+buffer (no allocation) and parses it into a `fio_x509_cert_s`, exposing the
+subject, issuer, SAN entries, public key, validity, and a SHA-256
+fingerprint. `info.verified` reflects OpenSSL's chain verification result
+(`SSL_get_verify_result`).
 
 ---
 
@@ -17462,15 +17569,31 @@ comma-separated list would exceed 255 characters — excess protocols are droppe
 
 ## Trust and Peer Verification
 
-The backend verifies server certificates on **client** connections. Server
-mode does not request client certificates by default.
+Trust configured with `fio_io_tls_trust_add` always refers to **peer**
+verification: on **client** connections the backend verifies the server
+certificate, on **server** connections it requests, requires, and verifies
+the client certificate (mutual TLS). An empty trust list means **no peer
+verification** — matching the OpenSSL backend.
 
 | Scenario | Behaviour |
 |----------|-----------|
-| `fio_io_tls_trust_add(tls, NULL)` | system CA bundle loaded (once, global) |
+| `fio_io_tls_trust_add(tls, NULL)` | system CA bundle used (loaded once, global) |
 | `fio_io_tls_trust_add(tls, "ca.pem")` | user-supplied CA bundle (per-context) |
-| No `fio_io_tls_trust_add` call, client mode | system CA bundle used automatically |
-| System CA bundle not found, client mode | context build fails with `FIO_LOG_ERROR` |
+| No `fio_io_tls_trust_add` call, client mode | no server verification + `FIO_LOG_SECURITY` warning |
+| No `fio_io_tls_trust_add` call, server mode | no client certificate requested |
+| Trust configured, server mode | client certificate required and verified |
+
+For mTLS, client certificate chains are verified against the trust store
+(`fio_x509_verify_chain`) and the client's `CertificateVerify` signature is
+validated against the leaf certificate's public key (Ed25519, ECDSA P-256 /
+P-384, and RSA-PSS / PKCS#1 SHA-256 / SHA-384 schemes). A client that fails
+verification is rejected with a TLS alert during the handshake.
+
+After the handshake, inspect the peer's chain with
+`fio_io_peer_info_next(io, &info)` (see the IO API docs) — each call parses
+the next certificate in place (zero-copy) into a `fio_x509_cert_s`, exposing
+the subject CN/DN, issuer, SAN entries, public key, validity, and a SHA-256
+fingerprint for pinning, plus a `verified` flag for authorization decisions.
 
 The system CA bundle is loaded **once** into a process-wide singleton
 (`fio___tls13_sys_trust`) and shared read-only across all connections —
@@ -19899,6 +20022,7 @@ typedef enum {
   FIO_HTTP_RESOURCE_CREATE,
   FIO_HTTP_RESOURCE_UPDATE,
   FIO_HTTP_RESOURCE_DELETE,
+  FIO_HTTP_RESOURCE_QUERY,
 } fio_http_resource_action_e;
 
 fio_http_resource_action_e fio_http_resource_action(fio_http_s *h);

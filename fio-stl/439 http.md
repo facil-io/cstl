@@ -208,6 +208,7 @@ typedef enum {
   FIO_HTTP_RESOURCE_CREATE,
   FIO_HTTP_RESOURCE_UPDATE,
   FIO_HTTP_RESOURCE_DELETE,
+  FIO_HTTP_RESOURCE_QUERY,
 } fio_http_resource_action_e;
 
 fio_http_resource_action_e fio_http_resource_action(fio_http_s *h);

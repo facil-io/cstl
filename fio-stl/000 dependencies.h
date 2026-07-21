@@ -132,7 +132,7 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
     defined(FIO_IO) || defined(FIO_MLKEM)
 #undef FIO_AES
 #undef FIO_ARGON2
-#undef FIO_ASN1
+#undef FIO_DER
 #undef FIO_BLAKE2
 #undef FIO_CHACHA
 #undef FIO_ED25519
@@ -153,7 +153,7 @@ FIO_CRYPTO            Poor-man's Cryptographic Elements
 #define FIO_CRYPTO_CORE
 #define FIO_AES
 #define FIO_ARGON2
-#define FIO_ASN1
+#define FIO_DER
 #define FIO_BLAKE2
 #define FIO_CHACHA
 #define FIO_ED25519
@@ -405,12 +405,6 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_QUEUE
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_OTP) ||      \
-    defined(FIO_X509)
-#undef FIO_TIME
-#define FIO_TIME
-#endif
-
 /* *****************************************************************************
 
 
@@ -421,6 +415,8 @@ FIO_MAP Ordering & Naming Shortcut
 
 ***************************************************************************** */
 #if defined(IPC)
+#undef FIO_CHACHA
+#undef FIO_SECRET
 #define FIO_CHACHA
 #define FIO_SECRET
 #endif
@@ -429,15 +425,40 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SHA1
 #endif
 
-#if defined(FIO_PUBSUB) || defined(FIO_SECRET) || defined(FIO_OTP)
+#if defined(FIO_PEM)
+#undef FIO_X509
+#undef FIO_STR
+#define FIO_X509
+#define FIO_STR
+#endif
+
+#if defined(FIO_X509)
+#undef FIO_DER
+#undef FIO_RSA
+#undef FIO_ED25519
+#undef FIO_P256
+#undef FIO_P384
+#define FIO_DER
+#define FIO_RSA
+#define FIO_ED25519
+#define FIO_P256
+#define FIO_P384
+#endif
+
+#if defined(FIO_PUBSUB) || defined(FIO_SECRET) || defined(FIO_OTP) ||          \
+    defined(FIO_X509)
+#undef FIO_SHA2
 #define FIO_SHA2
 #endif
 
 #if defined(FIO_LYRA2) || defined(FIO_ARGON2)
+#undef FIO_BLAKE2
 #define FIO_BLAKE2
 #endif
 
 #if defined(FIO_MLKEM)
+#undef FIO_SHA3
+#undef FIO_ED25519
 #define FIO_SHA3
 #define FIO_ED25519
 #endif
@@ -457,6 +478,12 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
+
+#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_OTP) ||      \
+    defined(FIO_X509)
+#undef FIO_TIME
+#define FIO_TIME
+#endif
 
 #if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STREAM)
 #undef FIO_FILES

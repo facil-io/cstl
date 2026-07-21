@@ -306,6 +306,7 @@ typedef enum {
   FIO_HTTP_RESOURCE_CREATE,
   FIO_HTTP_RESOURCE_UPDATE,
   FIO_HTTP_RESOURCE_DELETE,
+  FIO_HTTP_RESOURCE_QUERY,
 } fio_http_resource_action_e;
 
 /** returns expected action or `FIO_HTTP_RESOURCE_NONE` on error. */
@@ -379,6 +380,7 @@ FIO_IFUNC fio_http_resource_action_e fio_http_resource_action(fio_http_s *h) {
   const uint32_t patc = fio_buf2u32u("patc");
   const uint32_t dele = fio_buf2u32u("dele");
   const uint32_t lete = fio_buf2u32u("lete");
+  const uint32_t query = fio_buf2u32u("quer");
   fio_str_info_s method = fio_http_method(h);
   fio_str_info_s path = fio_http_path(h);
   bool path_ends_with_dash = (path.len && path.buf[path.len - 1] == '/');
@@ -419,6 +421,8 @@ FIO_IFUNC fio_http_resource_action_e fio_http_resource_action(fio_http_s *h) {
   } else if (path.len > 1 && !path_is_new && method.len == 6 && tmp == dele &&
              (fio_buf2u32u(method.buf + 2) | 0x20202020U) == lete) {
     r = FIO_HTTP_RESOURCE_DELETE;
+  } else if (tmp == query && method.len == 5 && (method.buf[4] | 32) == 'y') {
+    r = FIO_HTTP_RESOURCE_QUERY;
   }
   return r;
 }

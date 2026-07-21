@@ -1139,14 +1139,22 @@ memory address to be returned if needed (valid until concurrency max calls).
                              type_T,                                           \
                              size_per_allocation,                              \
                              allocations_per_thread)                           \
+  /** Allocates `count` blocks of memory from the `name` static arena. */      \
   FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {                       \
     static type_T name##buffer[sizeof(type_T) *                                \
                                FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *         \
                                size_per_allocation * allocations_per_thread];  \
     static size_t pos;                                                         \
+    if (!count)                                                                \
+      return name##buffer;                                                     \
     size_t at = fio_atomic_add(&pos, count);                                   \
     at %= FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread;      \
     return (at * size_per_allocation) + name##buffer;                          \
+  }                                                                            \
+  /** Returns the size of the static arena in `sizeof(type_T)` units. */       \
+  FIO_IFUNC size_t name##_size(void) {                                         \
+    return (size_t)(FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *                    \
+                    size_per_allocation * allocations_per_thread);             \
   }
 
 /* *****************************************************************************

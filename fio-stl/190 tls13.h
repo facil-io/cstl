@@ -4537,11 +4537,8 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
   case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384:
   case FIO_TLS13_SIG_RSA_PKCS1_SHA384:
   case FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384: {
-    /* SHA-384 uses SHA-512 internals, truncated to 48 bytes */
-    fio_sha512_s sha = fio_sha512_init();
-    fio_sha512_consume(&sha, signed_content, signed_content_len);
-    fio_u512 h = fio_sha512_finalize(&sha);
-    FIO_MEMCPY(content_hash, h.u8, 48); /* Use first 48 bytes (SHA-384) */
+    fio_u512 h = fio_sha384(signed_content, signed_content_len);
+    FIO_MEMCPY(content_hash, h.u8, 48);
     expected_hash_len = 48;
     rsa_hash_alg = FIO_RSA_HASH_SHA384;
     break;
@@ -4568,10 +4565,10 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
     /* Build RSA public key structure */
     fio_rsa_pubkey_s pubkey;
     FIO_MEMSET(&pubkey, 0, sizeof(pubkey));
-    pubkey.n = cert->pubkey.rsa.n;
-    pubkey.n_len = cert->pubkey.rsa.n_len;
-    pubkey.e = cert->pubkey.rsa.e;
-    pubkey.e_len = cert->pubkey.rsa.e_len;
+    pubkey.n = cert->pubkey.rsa.n.buf;
+    pubkey.n_len = cert->pubkey.rsa.n.len;
+    pubkey.e = cert->pubkey.rsa.e.buf;
+    pubkey.e_len = cert->pubkey.rsa.e.len;
 
     if (fio_rsa_verify_pss(signature,
                            sig_len,
@@ -4593,10 +4590,10 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
     }
     fio_rsa_pubkey_s pubkey;
     FIO_MEMSET(&pubkey, 0, sizeof(pubkey));
-    pubkey.n = cert->pubkey.rsa.n;
-    pubkey.n_len = cert->pubkey.rsa.n_len;
-    pubkey.e = cert->pubkey.rsa.e;
-    pubkey.e_len = cert->pubkey.rsa.e_len;
+    pubkey.n = cert->pubkey.rsa.n.buf;
+    pubkey.n_len = cert->pubkey.rsa.n.len;
+    pubkey.e = cert->pubkey.rsa.e.buf;
+    pubkey.e_len = cert->pubkey.rsa.e.len;
 
     if (fio_rsa_verify_pkcs1(signature,
                              sig_len,
@@ -4622,7 +4619,7 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
     if (fio_ed25519_verify(signature,
                            signed_content,
                            signed_content_len,
-                           cert->pubkey.ed25519.key) != 0) {
+                           cert->pubkey.ed25519.key.buf) != 0) {
       FIO_LOG_DEBUG2("TLS 1.3: Ed25519 signature verification failed");
       return -1;
     }
@@ -4635,15 +4632,15 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
       FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for ECDSA P-256");
       return -1;
     }
-    if (!cert->pubkey.ecdsa.point || cert->pubkey.ecdsa.point_len != 65) {
+    if (!cert->pubkey.ecdsa.point.buf || cert->pubkey.ecdsa.point.len != 65) {
       FIO_LOG_DEBUG2("TLS 1.3: Invalid ECDSA P-256 public key");
       return -1;
     }
     if (fio_ecdsa_p256_verify(signature,
                               sig_len,
                               content_hash,
-                              cert->pubkey.ecdsa.point,
-                              cert->pubkey.ecdsa.point_len) != 0) {
+                              cert->pubkey.ecdsa.point.buf,
+                              cert->pubkey.ecdsa.point.len) != 0) {
       FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-256 signature verification failed");
       return -1;
     }
@@ -4660,15 +4657,15 @@ FIO_SFUNC int fio___tls13_verify_cv_signature(fio_tls13_client_s *client,
       FIO_LOG_DEBUG2("TLS 1.3: Certificate key type mismatch for ECDSA P-384");
       return -1;
     }
-    if (!cert->pubkey.ecdsa.point || cert->pubkey.ecdsa.point_len != 97) {
+    if (!cert->pubkey.ecdsa.point.buf || cert->pubkey.ecdsa.point.len != 97) {
       FIO_LOG_DEBUG2("TLS 1.3: Invalid ECDSA P-384 public key");
       return -1;
     }
     if (fio_ecdsa_p384_verify(signature,
                               sig_len,
                               content_hash,
-                              cert->pubkey.ecdsa.point,
-                              cert->pubkey.ecdsa.point_len) != 0) {
+                              cert->pubkey.ecdsa.point.buf,
+                              cert->pubkey.ecdsa.point.len) != 0) {
       FIO_LOG_DEBUG2("TLS 1.3: ECDSA P-384 signature verification failed");
       return -1;
     }
@@ -5872,6 +5869,7 @@ typedef struct {
 
   /* Client Certificate Authentication (RFC 8446 Section 4.3.2, 4.4.2, 4.4.3) */
   uint8_t require_client_cert;          /* 0=none, 1=optional, 2=required */
+  void *trust_store;                   /* fio_x509_trust_store_s* or NULL */
   uint8_t cert_request_context[32];     /* Random context for CertRequest */
   size_t cert_request_context_len;      /* Context length */
   uint8_t client_cert_received;         /* 1 if client sent Certificate */
@@ -5933,6 +5931,19 @@ SFUNC void fio_tls13_server_set_private_key(fio_tls13_server_s *server,
                                             const uint8_t *private_key,
                                             size_t key_len,
                                             uint16_t key_type);
+
+/**
+ * Set a trust store for client certificate verification.
+ *
+ * The trust_store pointer should point to a valid fio_x509_trust_store_s
+ * structure. This is only used when client certificate authentication is
+ * required.
+ *
+ * @param server      Server context
+ * @param trust_store Trust store for client cert chain verification, or NULL
+ */
+FIO_IFUNC void fio_tls13_server_set_trust_store(fio_tls13_server_s *server,
+                                            void *trust_store);
 
 /**
  * Process incoming TLS record(s).
@@ -6080,6 +6091,16 @@ FIO_IFUNC void fio_tls13_server_require_client_cert(fio_tls13_server_s *server,
   if (!server)
     return;
   server->require_client_cert = (uint8_t)(mode & 0x03);
+}
+
+/**
+ * Set a trust store for client certificate verification.
+ */
+FIO_IFUNC void fio_tls13_server_set_trust_store(fio_tls13_server_s *server,
+                                                void *trust_store) {
+  if (!server)
+    return;
+  server->trust_store = trust_store;
 }
 
 /**
@@ -6823,9 +6844,7 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
   case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384: {
     /* RSA-PSS with SHA-384 */
     /* Hash the signed content with SHA-384 */
-    fio_sha512_s sha = fio_sha512_init();
-    fio_sha512_consume(&sha, signed_content, signed_content_len);
-    fio_u512 h = fio_sha512_finalize(&sha);
+    fio_u512 h = fio_sha384(signed_content, signed_content_len);
     uint8_t msg_hash[48];
     FIO_MEMCPY(msg_hash, h.u8, 48);
 
@@ -7698,44 +7717,145 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
   /* Verify signature based on scheme */
   int verified = 0;
 
+#if defined(H___FIO_X509___H)
+  /* Parse the leaf client certificate to obtain the public key. */
+  fio_x509_cert_s leaf;
+  if (fio_x509_parse(
+          &leaf, server->client_cert_chain[0], server->client_cert_chain_lens[0]) != 0) {
+    FIO_LOG_DEBUG2("TLS 1.3 Server: failed to parse client certificate");
+    fio___tls13_server_set_error(server,
+                                 FIO_TLS13_ALERT_LEVEL_FATAL,
+                                 FIO_TLS13_ALERT_BAD_CERTIFICATE);
+    return -1;
+  }
+
+  /* Verify the certificate chain against the trust store if configured. */
+  if (server->trust_store) {
+    fio_x509_trust_store_s *trust =
+        (fio_x509_trust_store_s *)server->trust_store;
+    int v = fio_x509_verify_chain(server->client_cert_chain,
+                                  server->client_cert_chain_lens,
+                                  server->client_cert_chain_count,
+                                  NULL,
+                                  (int64_t)fio_time_real().tv_sec,
+                                  trust);
+    if (v != 0) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: client cert chain verification failed (%d)",
+                     v);
+      fio___tls13_server_set_error(server,
+                                   FIO_TLS13_ALERT_LEVEL_FATAL,
+                                   FIO_TLS13_ALERT_BAD_CERTIFICATE);
+      return -1;
+    }
+  }
+
   switch (sig_scheme) {
   case FIO_TLS13_SIG_ED25519: {
-    /* Ed25519 signature verification */
-    if (sig_len != 64) {
-      FIO_LOG_DEBUG2("TLS 1.3 Server: Ed25519 signature wrong length: %u",
-                     sig_len);
+    if (sig_len != 64 || leaf.key_type != FIO_X509_KEY_ED25519) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: Ed25519 signature/key mismatch");
       break;
     }
-    /* Extract public key from client certificate */
-    /* For now, we need to parse the certificate to get the public key */
-    /* TODO: Implement proper X.509 public key extraction */
-    FIO_LOG_DEBUG2("TLS 1.3 Server: Ed25519 client cert verification not yet "
-                   "implemented");
-    /* For testing, mark as verified if we have a certificate */
-    verified = 1;
+    if (fio_ed25519_verify(signature,
+                           signed_content,
+                           signed_content_len,
+                           leaf.pubkey.ed25519.key.buf) == 0)
+      verified = 1;
     break;
   }
 
   case FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256: {
-    /* ECDSA P-256 signature verification */
-    /* TODO: Implement proper X.509 public key extraction and verification */
-    FIO_LOG_DEBUG2("TLS 1.3 Server: ECDSA P-256 client cert verification not "
-                   "yet fully implemented");
-    /* For testing, mark as verified if we have a certificate */
-    (void)signed_content;
-    (void)signed_content_len;
-    (void)signature;
-    verified = 1;
+    if (leaf.key_type != FIO_X509_KEY_ECDSA_P256) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: ECDSA P-256 key type mismatch");
+      break;
+    }
+    fio_u256 msg_hash = fio_sha256(signed_content, signed_content_len);
+    if (fio_ecdsa_p256_verify(signature,
+                              sig_len,
+                              msg_hash.u8,
+                              leaf.pubkey.ecdsa.point.buf,
+                              leaf.pubkey.ecdsa.point.len) == 0)
+      verified = 1;
+    break;
+  }
+
+  case FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384: {
+    if (leaf.key_type != FIO_X509_KEY_ECDSA_P384) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: ECDSA P-384 key type mismatch");
+      break;
+    }
+    fio_u512 msg_hash = fio_sha384(signed_content, signed_content_len);
+    if (fio_ecdsa_p384_verify(signature,
+                              sig_len,
+                              msg_hash.u8,
+                              leaf.pubkey.ecdsa.point.buf,
+                              leaf.pubkey.ecdsa.point.len) == 0)
+      verified = 1;
     break;
   }
 
   case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256:
   case FIO_TLS13_SIG_RSA_PKCS1_SHA256: {
-    /* RSA signature verification */
-    FIO_LOG_DEBUG2("TLS 1.3 Server: RSA client cert verification not yet "
-                   "implemented");
-    /* For testing, mark as verified if we have a certificate */
-    verified = 1;
+    if (leaf.key_type != FIO_X509_KEY_RSA) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: RSA key type mismatch");
+      break;
+    }
+    fio_rsa_pubkey_s key = {
+        .n = leaf.pubkey.rsa.n.buf,
+        .n_len = leaf.pubkey.rsa.n.len,
+        .e = leaf.pubkey.rsa.e.buf,
+        .e_len = leaf.pubkey.rsa.e.len,
+    };
+    fio_u256 msg_hash = fio_sha256(signed_content, signed_content_len);
+    if (sig_scheme == FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256) {
+      if (fio_rsa_verify_pss(signature,
+                             sig_len,
+                             msg_hash.u8,
+                             32,
+                             FIO_RSA_HASH_SHA256,
+                             &key) == 0)
+        verified = 1;
+    } else {
+      if (fio_rsa_verify_pkcs1(signature,
+                               sig_len,
+                               msg_hash.u8,
+                               32,
+                               FIO_RSA_HASH_SHA256,
+                               &key) == 0)
+        verified = 1;
+    }
+    break;
+  }
+
+  case FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384:
+  case FIO_TLS13_SIG_RSA_PKCS1_SHA384: {
+    if (leaf.key_type != FIO_X509_KEY_RSA) {
+      FIO_LOG_DEBUG2("TLS 1.3 Server: RSA key type mismatch");
+      break;
+    }
+    fio_rsa_pubkey_s key = {
+        .n = leaf.pubkey.rsa.n.buf,
+        .n_len = leaf.pubkey.rsa.n.len,
+        .e = leaf.pubkey.rsa.e.buf,
+        .e_len = leaf.pubkey.rsa.e.len,
+    };
+    fio_u512 msg_hash = fio_sha384(signed_content, signed_content_len);
+    if (sig_scheme == FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384) {
+      if (fio_rsa_verify_pss(signature,
+                             sig_len,
+                             msg_hash.u8,
+                             48,
+                             FIO_RSA_HASH_SHA384,
+                             &key) == 0)
+        verified = 1;
+    } else {
+      if (fio_rsa_verify_pkcs1(signature,
+                               sig_len,
+                               msg_hash.u8,
+                               48,
+                               FIO_RSA_HASH_SHA384,
+                               &key) == 0)
+        verified = 1;
+    }
     break;
   }
 
@@ -7747,6 +7867,19 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
                                  FIO_TLS13_ALERT_ILLEGAL_PARAMETER);
     return -1;
   }
+#else
+  (void)sig_scheme;
+  (void)sig_len;
+  (void)signature;
+  (void)signed_content;
+  (void)signed_content_len;
+  FIO_LOG_DEBUG2("TLS 1.3 Server: client certificate verification requires X509 "
+                 "module");
+  fio___tls13_server_set_error(server,
+                               FIO_TLS13_ALERT_LEVEL_FATAL,
+                               FIO_TLS13_ALERT_INTERNAL_ERROR);
+  return -1;
+#endif
 
   if (!verified) {
     FIO_LOG_DEBUG2("TLS 1.3 Server: client CertificateVerify failed");

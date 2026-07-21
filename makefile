@@ -245,7 +245,7 @@ $(1): $$($(1)_BINS)
 
 endef
 
-$(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old,$(eval $(call DEFINE_FOLDER,$(folder))))
+$(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old ai-tmp,$(eval $(call DEFINE_FOLDER,$(folder))))
 
 # `make test` is a convenience alias for `make tests`
 test: tests;

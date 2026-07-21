@@ -566,14 +566,8 @@ FIO_SFUNC int fio___openssl_each_trust(struct fio_io_tls_each_s *e,
       return -1;
     }
   } else { /* trust system's default trust store */
-    const char *path = fio_sys_env(X509_get_default_cert_dir_env());
-    if (!path)
-      path = X509_get_default_cert_dir();
-    if (path) {
-      if (!X509_STORE_load_path(store, path)) {
-        FIO_LOG_WARNING("OpenSSL: failed to load system trust store from: %s",
-                        path);
-      }
+    if (!X509_STORE_set_default_paths(store)) {
+      FIO_LOG_WARNING("OpenSSL: failed to load the system trust store");
     }
   }
   return 0;
@@ -618,16 +612,26 @@ FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
    * On reconnect, avoids full handshake — saves ~30-50% handshake CPU. */
   SSL_CTX_set_num_tickets(ctx->ctx, 2);
 
-  /* Configure certificate verification */
+  /* Configure certificate verification.
+   * Trust always refers to PEER verification: a client verifies the server,
+   * a server verifies (and requires) a client certificate.  An empty trust
+   * list means no verification.  fio_io_tls_trust_add(tls, NULL) selects
+   * the system trust store (loaded via fio___openssl_each_trust). */
   X509_STORE *store = NULL;
-  if (fio_io_tls_trust_count(tls)) {
-    SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_PEER, NULL);
+  if (fio_io_tls_trust_count(tls) || tls->trust_sys) {
     store = X509_STORE_new();
     if (!store) {
       FIO_LOG_ERROR("OpenSSL: X509_STORE_new failed");
       goto error;
     }
     SSL_CTX_set_cert_store(ctx->ctx, store); /* takes ownership of store */
+    if (is_client) {
+      SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_PEER, NULL);
+    } else {
+      SSL_CTX_set_verify(ctx->ctx,
+                         SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                         NULL);
+    }
   } else {
     SSL_CTX_set_verify(ctx->ctx, SSL_VERIFY_NONE, NULL);
     if (is_client)
@@ -725,6 +729,12 @@ while retaining full control over batching and partial write buffering.
 /** Max encrypted record overhead: header(5) + max_plaintext(16384) + tag(16)
  *  + 256 bytes margin for TLS 1.2/1.3 variations and alignment. */
 #define FIO___OPENSSL_ENC_RECORD_SIZE (16384 + 5 + 16 + 256)
+
+#ifndef FIO___OPENSSL_PEER_INFO_DER_MAX
+/** Max DER size of a peer certificate accepted by fio___openssl_peer_info_next.
+ * Real-world certificates are well under 8KB; larger ones are skipped. */
+#define FIO___OPENSSL_PEER_INFO_DER_MAX 8192
+#endif
 
 /** Per-connection wrapper around SSL, with receive and encrypted output
  *  buffers. Custom BIOs read/write directly from/to these buffers. */
@@ -1120,6 +1130,74 @@ FIO_SFUNC ssize_t fio___openssl_write(int fd,
 }
 
 /* *****************************************************************************
+Peer Information Iterator
+***************************************************************************** */
+
+/** Static round-robin DER slots for peer certificate iteration (one fresh
+ * slot per call, never freed — see FIO_STATIC_ALLOC_DEF).  OpenSSL does not
+ * expose the peer's DER zero-copy, so each certificate is re-encoded into a
+ * fresh slot (two-pass i2d_X509) and parsed in place. */
+FIO_STATIC_ALLOC_DEF(fio___openssl_peer_der,
+                     uint8_t,
+                     FIO___OPENSSL_PEER_INFO_DER_MAX,
+                     1)
+
+/** Returns the next peer certificate for the connection.
+ *
+ * The iterator is stateless — the position is identified from `dest` alone:
+ * a zeroed `dest` (`der.buf == NULL`) starts a new loop at the leaf
+ * certificate; otherwise iteration continues at `dest->chain_index + 1`.
+ * Returns 0 while data is available, -1 when done / on error. */
+FIO_SFUNC int fio___openssl_peer_info_next(fio_socket_i fd,
+                                           fio_x509_cert_s *dest,
+                                           void *tls_ctx) {
+  fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
+  if (!conn || !dest)
+    return -1;
+  if (!conn->handshake_complete)
+    return -1;
+  (void)fd;
+#if defined(H___FIO_X509___H) && defined(H___FIO_SHA2___H)
+  STACK_OF(X509) *chain = SSL_get_peer_cert_chain(conn->ssl);
+  if (!chain)
+    return -1;
+  /* Identify the position from `dest` — read `chain_index` BEFORE
+   * fio_x509_parse, which zeroes the whole struct.
+   * Iteration is capped at 128 certificates (deep-nesting / DoS guard). */
+  if ((uint8_t)dest->chain_index & (uint8_t)128U)
+    return -1;
+  const size_t pos =
+      dest->der.buf ? ((size_t)dest->chain_index + 1) : (size_t)0;
+  if ((uint8_t)pos & (uint8_t)128U)
+    return -1;
+  if (pos >= (size_t)sk_X509_num(chain))
+    return -1;
+  X509 *cert = sk_X509_value(chain, (int)pos);
+  if (!cert)
+    return -1;
+  /* Stage the DER encoding in a fresh static slot (two-pass i2d).
+   * DER is canonical, so the re-encoded bytes equal the received bytes and
+   * all parsed views reference the slot directly. */
+  int der_len = i2d_X509(cert, NULL);
+  if (der_len <= 0 || (size_t)der_len > FIO___OPENSSL_PEER_INFO_DER_MAX)
+    return -1;
+  uint8_t *slot = fio___openssl_peer_der(1);
+  uint8_t *w = slot;
+  if (i2d_X509(cert, &w) != der_len)
+    return -1;
+  if (fio_x509_parse(dest, slot, (size_t)der_len) != 0)
+    return -1;
+  fio_x509_fingerprint(dest);
+  /* OpenSSL verifies the chain as a whole; the result applies to each cert. */
+  dest->verified = (SSL_get_verify_result(conn->ssl) == X509_V_OK);
+  dest->chain_index = (uint8_t)pos;
+  return 0;
+#else  /* !H___FIO_X509___H || !H___FIO_SHA2___H */
+  return -1; /* peer certificate inspection requires the X509 module */
+#endif
+}
+
+/* *****************************************************************************
 Per-Connection Builder
 ***************************************************************************** */
 
@@ -1267,6 +1345,7 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
       .flush = fio___openssl_flush,
       .cleanup = fio___openssl_cleanup,
       .finish = fio___openssl_finish,
+      .peer_info_next = fio___openssl_peer_info_next,
   };
 }
 

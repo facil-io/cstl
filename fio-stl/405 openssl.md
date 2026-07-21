@@ -189,12 +189,26 @@ Protocol names must be 1–255 bytes. The internal wire-format list is capped at
 
 ## Trust and Peer Verification
 
+Trust configured with `fio_io_tls_trust_add` always refers to **peer**
+verification: a client context verifies the server certificate, a server
+context requests, requires, and verifies the client certificate (mutual TLS).
+An empty trust list means **no peer verification**.
+
 | Scenario | Behaviour |
 |----------|-----------|
 | `fio_io_tls_trust_add` called (any argument) | `SSL_VERIFY_PEER` enabled |
-| `NULL` passed to `fio_io_tls_trust_add` | system trust store is loaded |
+| `NULL` passed to `fio_io_tls_trust_add` | system trust store is loaded (`X509_STORE_set_default_paths`) |
+| Trust configured, server mode | `SSL_VERIFY_PEER \| SSL_VERIFY_FAIL_IF_NO_PEER_CERT` (client certificate required) |
 | No trust certs added, client mode | `SSL_VERIFY_NONE` + `FIO_LOG_SECURITY` warning |
-| No trust certs added, server mode | `SSL_VERIFY_NONE` (clients rarely present certs) |
+| No trust certs added, server mode | `SSL_VERIFY_NONE` (no client certificate requested) |
+
+After the handshake, inspect the peer's certificate chain with
+`fio_io_peer_info_next(io, &info)` (see the IO API docs). Each call
+re-encodes the next chain certificate into a fixed per-connection staging
+buffer (no allocation) and parses it into a `fio_x509_cert_s`, exposing the
+subject, issuer, SAN entries, public key, validity, and a SHA-256
+fingerprint. `info.verified` reflects OpenSSL's chain verification result
+(`SSL_get_verify_result`).
 
 ---
 

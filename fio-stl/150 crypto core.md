@@ -16,7 +16,7 @@ The crypto slice is a small, zero-dependency toolbox for code that needs to hash
 | Hash | [SHA-1](./152%20sha1.md), [SHA-2](./152%20sha2.md), [SHA-3 / SHAKE](./152%20sha3.md), [BLAKE2](./152%20blake2.md) | Digest functions, streaming hash contexts, SHA/BLAKE HMAC helpers where provided. SHA-1 is legacy-only glue. |
 | Symmetric | [ChaCha20-Poly1305](./152%20chacha20poly1305.md), [AES-GCM](./153%20aes.md) | AEAD encryption, stream cipher helpers, and the shared in-place authenticated encryption shape. |
 | Asymmetric | [Ed25519 & X25519](./154%20ed25519.md), [P-256](./154%20p256.md), [P-384](./154%20p384.md), [RSA](./155%20rsa.md) | Signatures, key exchange, ECIES-style X25519 encryption, and RSA signatures for TLS-style use cases. |
-| PKI | [ASN.1 DER](./155%20asn1.md), [X.509](./155%20x509.md), [PEM](./156%20pem.md) | DER/PEM parsing, certificate fields, hostname checks, signature checks, and certificate chain validation helpers. |
+| PKI | [ASN.1 DER](./155%20der.md), [X.509](./155%20x509.md), [PEM](./156%20pem.md) | DER/PEM parsing, certificate fields, hostname checks, signature checks, and certificate chain validation helpers. |
 | KDF | [HKDF](./152%20hkdf.md), [Argon2](./159%20argon2.md), [Lyra2](./159%20lyra2.md), [OTP](./159%20otp.md), [Secrets](./159%20secret.md) | Key derivation, password hashing, TOTP codes, and hashing a process secret into a stable internal value. |
 | Post-Quantum | [ML-KEM-768](./156%20mlkem.md) | ML-KEM-768 key encapsulation and the X25519MLKEM768 hybrid key exchange shape used by TLS drafts. |
 

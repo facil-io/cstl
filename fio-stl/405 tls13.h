@@ -283,12 +283,11 @@ FIO_SFUNC int fio___tls13_make_self_signed(fio___tls13_context_s *ctx,
     return -1;
   }
 
-  const char *san_dns[] = {server_name};
+  fio_buf_info_s san_dns[] = {
+      FIO_BUF_INFO2((char *)server_name, FIO_STRLEN(server_name))};
   fio_x509_cert_options_s opts = {
-      .subject_cn = server_name,
-      .subject_cn_len = FIO_STRLEN(server_name),
-      .subject_org = "facil.io",
-      .subject_org_len = 8,
+      .cn = FIO_BUF_INFO2((char *)server_name, FIO_STRLEN(server_name)),
+      .org = FIO_BUF_INFO2((char *)"facil.io", 8),
       .san_dns = san_dns,
       .san_dns_count = 1,
       .is_ca = 0,
@@ -913,14 +912,18 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
     }
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
     /* Build trust store from configured trust certificates.
-     * When no explicit trust config exists, use the system CA store as the
-     * secure default — this prevents silent MITM when the caller forgets to
-     * configure trust anchors.
      *
-     * Problem 2 fix: the system CA store is loaded ONCE into a global
-     * singleton (fio___tls13_sys_trust) and shared across all contexts.
-     * Per-context trust_der_bufs/lens are only allocated for user-configured
-     * certs (trust_der_owned=1).  System trust is a non-owning reference
+     * Trust semantics (fio_io_tls_trust_add always refers to PEER
+     * verification):
+     * - trust certificates listed: verify the peer (server) against them.
+     * - fio_io_tls_trust_add(tls, NULL): verify against the system store.
+     * - empty trust list: NO peer verification (a SECURITY warning is
+     *   logged and verification is skipped when the handshake starts).
+     *
+     * The system CA store is loaded ONCE into a global singleton
+     * (fio___tls13_sys_trust) and shared across all contexts.  Per-context
+     * trust_der_bufs/lens are only allocated for user-configured certs
+     * (trust_der_owned=1).  System trust is a non-owning reference
      * (trust_der_owned=0). */
     if (fio_io_tls_trust_count(tls) || tls->trust_sys) {
       /* Explicit trust config: load via iterator.
@@ -932,22 +935,6 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
         FIO_LOG_ERROR("TLS 1.3: failed to load trust certificates");
         goto error;
       }
-    } else {
-      /* No explicit trust config: use global system CA store as default */
-      int loaded = fio___tls13_get_system_trust();
-      if (loaded <= 0) {
-        FIO_LOG_ERROR("TLS 1.3: no trust store configured and system CA store "
-                      "not found — TLS client connections will fail. Add CA "
-                      "certificates via fio_io_tls_trust_add() or call "
-                      "fio_io_tls_trust_add(tls, NULL) for system store.");
-        goto error;
-      }
-      /* Point context at the global singleton — no per-context ownership */
-      ctx->trust_store = fio___tls13_sys_trust.store;
-      /* trust_der_owned stays 0 — free path must NOT free these buffers */
-      FIO_LOG_DEBUG2("TLS 1.3: using global system CA store (%d certs) as "
-                     "default trust anchor",
-                     loaded);
     }
 #endif     /* H___FIO_X509___H && H___FIO_PEM___H */
   } else { /* For server, load certificates */
@@ -986,6 +973,29 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
                        ctx->alpn_protocols);
       }
     }
+
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+    /* Load trust store for client certificate verification if configured.
+     * Trust always refers to peer verification: for a server context, the
+     * peer is the client.  An empty trust list means no client certificate
+     * is requested or verified. */
+    if (fio_io_tls_trust_count(tls) || tls->trust_sys) {
+      if (fio_io_tls_each(tls,
+                          .udata = ctx,
+                          .each_trust = fio___tls13_each_trust)) {
+        FIO_LOG_ERROR("TLS 1.3: failed to load client trust certificates");
+        goto error;
+      }
+    } else if (tls->trust_sys) {
+      int loaded = fio___tls13_get_system_trust();
+      if (loaded <= 0) {
+        FIO_LOG_ERROR("TLS 1.3: failed to load system trust store for client "
+                      "certificate verification");
+        goto error;
+      }
+      ctx->trust_store = fio___tls13_sys_trust.store;
+    }
+#endif /* H___FIO_X509___H && H___FIO_PEM___H */
   }
 
   return ctx;
@@ -1134,16 +1144,21 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
     fio_tls13_client_init(&conn->state.client, sni);
 
     /* Configure certificate verification.
-     * The trust store is populated by fio___tls13_build_context (either from
-     * explicit certs or the system CA store).  If X509/PEM modules are absent,
-     * verification will fail at handshake time unless skip_cert_verify is set
-     * explicitly by the caller. */
+     * The trust store is populated by fio___tls13_build_context only when
+     * trust certificates were configured.  An empty trust list means no
+     * peer (server) verification — skip verification and warn, matching
+     * the OpenSSL backend's SSL_VERIFY_NONE behavior. */
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
     if (ctx->trust_store.root_count > 0) {
       fio_tls13_client_set_trust_store(&conn->state.client, &ctx->trust_store);
+    } else {
+      FIO_LOG_SECURITY("no trusted TLS certificates listed for client, "
+                       "skipping server certificate verification!");
+      fio_tls13_client_skip_verification(&conn->state.client, 1);
     }
-    /* No else: if trust_store is empty here, fio___tls13_build_context already
-     * failed or the caller explicitly set skip_cert_verify elsewhere. */
+#else
+    /* X509 module unavailable — cannot verify, skip (insecure). */
+    fio_tls13_client_skip_verification(&conn->state.client, 1);
 #endif /* H___FIO_X509___H && H___FIO_PEM___H */
 
     /* Generate ClientHello */
@@ -1190,6 +1205,14 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
     if (ctx->alpn_protocols_len > 0) {
       fio_tls13_server_alpn_set(&conn->state.server, ctx->alpn_protocols);
     }
+
+#if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)
+    /* Require client certificates when a trust store is configured. */
+    if (ctx->trust_store.root_count > 0) {
+      fio_tls13_server_require_client_cert(&conn->state.server, 2);
+      fio_tls13_server_set_trust_store(&conn->state.server, &ctx->trust_store);
+    }
+#endif /* H___FIO_X509___H && H___FIO_PEM___H */
   }
 }
 
@@ -1783,6 +1806,69 @@ FIO_SFUNC void fio___tls13_cleanup(void *tls_ctx) {
 }
 
 /* *****************************************************************************
+Peer Information Iterator
+***************************************************************************** */
+
+/** Returns the next peer certificate for the connection (zero-copy).
+ *
+ * The iterator is stateless — the position is identified from `dest` alone:
+ * a zeroed `dest` (`der.buf == NULL`) starts a new loop at the leaf
+ * certificate; otherwise iteration continues at `dest->chain_index + 1`.
+ * Returns 0 while data is available, -1 when done / on error. */
+FIO_SFUNC int fio___tls13_peer_info_next(fio_socket_i fd,
+                                         fio_x509_cert_s *dest,
+                                         void *tls_ctx) {
+  fio___tls13_connection_s *conn = (fio___tls13_connection_s *)tls_ctx;
+  if (!conn || !dest)
+    return -1;
+  if (!conn->handshake_complete)
+    return -1;
+  (void)fd;
+#if defined(H___FIO_X509___H) && defined(H___FIO_SHA2___H)
+  const uint8_t **chain;
+  const size_t *chain_lens;
+  size_t chain_count;
+  uint8_t verified;
+  if (conn->is_client) {
+    chain = conn->state.client.cert_chain;
+    chain_lens = conn->state.client.cert_chain_lens;
+    chain_count = conn->state.client.cert_chain_count;
+    /* skipped verification must not be reported as verified */
+    verified = !conn->state.client.skip_cert_verify &&
+               conn->state.client.cert_verified &&
+               conn->state.client.chain_verified;
+  } else {
+    chain = conn->state.server.client_cert_chain;
+    chain_lens = conn->state.server.client_cert_chain_lens;
+    chain_count = conn->state.server.client_cert_chain_count;
+    verified = conn->state.server.client_cert_verified;
+  }
+  /* Identify the position from `dest` — read `chain_index` BEFORE
+   * fio_x509_parse, which zeroes the whole struct.
+   * Iteration is capped at 128 certificates (deep-nesting / DoS guard). */
+  if ((uint8_t)dest->chain_index & (uint8_t)128U)
+    return -1;
+  const size_t pos =
+      dest->der.buf ? ((size_t)dest->chain_index + 1) : (size_t)0;
+  if ((uint8_t)pos & (uint8_t)128U)
+    return -1;
+  if (pos >= chain_count)
+    return -1;
+  /* Parse in place: all fio_x509_cert_s views reference the certificate DER
+   * stored in the TLS state (cert_data_buf), valid for the connection's
+   * lifetime.  No allocation or copying takes place. */
+  if (fio_x509_parse(dest, chain[pos], chain_lens[pos]) != 0)
+    return -1;
+  fio_x509_fingerprint(dest);
+  dest->verified = verified;
+  dest->chain_index = (uint8_t)pos;
+  return 0;
+#else  /* !H___FIO_X509___H || !H___FIO_SHA2___H */
+  return -1; /* peer certificate inspection requires the X509 module */
+#endif
+}
+
+/* *****************************************************************************
 TLS 1.3 IO Functions Structure
 ***************************************************************************** */
 
@@ -1797,6 +1883,7 @@ SFUNC fio_io_functions_s fio_tls13_io_functions(void) {
       .flush = fio___tls13_flush,
       .cleanup = fio___tls13_cleanup,
       .finish = fio___tls13_finish,
+      .peer_info_next = fio___tls13_peer_info_next,
   };
 }
 

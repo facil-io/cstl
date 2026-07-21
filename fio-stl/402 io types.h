@@ -158,6 +158,14 @@ static void fio___io_func_default_finish(fio_socket_i fd, void *tls) {
 }
 static void fio___io_func_default_cleanup(void *p1) { (void)p1; }
 
+/** Default peer_info_next: no peer information available. */
+static int fio___io_func_default_peer_info_next(fio_socket_i fd,
+                                                fio_x509_cert_s *dest,
+                                                void *tls) {
+  return -1;
+  (void)fd, (void)dest, (void)tls;
+}
+
 /** Builds a local TLS context out of the fio_io_tls_s object. */
 static void *fio___io_func_default_build_context(fio_io_tls_s *tls,
                                                  uint8_t is_client) {
@@ -212,6 +220,7 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
       .flush = fio___io_func_default_flush,
       .finish = fio___io_func_default_finish,
       .cleanup = fio___io_func_default_cleanup,
+      .peer_info_next = fio___io_func_default_peer_info_next,
   };
   if (has_tls)
     io_fn = fio_io_tls_default_functions(NULL);
@@ -253,6 +262,8 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
     pr->io_functions.finish = io_fn.finish;
   if (!pr->io_functions.cleanup)
     pr->io_functions.cleanup = io_fn.cleanup;
+  if (!pr->io_functions.peer_info_next)
+    pr->io_functions.peer_info_next = io_fn.peer_info_next;
   if (!pr->timeout)
     pr->timeout = FIO_IO_TIMEOUT_MAX;
   /* round up to nearest 16 byte size */
@@ -633,6 +644,13 @@ FIO_DEF_GETSET_FUNC(IFUNC, fio_io, fio_io_s, void *, tls, FIO_NOOP_FN)
 
 /** Returns the socket file descriptor (fd) associated with the IO. */
 IFUNC fio_socket_i fio_io_fd(fio_io_s *io) { return io->fd; }
+
+/** Returns the next peer information item for the connection. */
+IFUNC int fio_io_peer_info_next(fio_io_s *io, fio_x509_cert_s *dest) {
+  if (!io || !io->pr || !io->pr->io_functions.peer_info_next)
+    return -1;
+  return io->pr->io_functions.peer_info_next(fio_io_fd(io), dest, io->tls);
+}
 
 FIO_SFUNC void fio___io_touch(void *io_, void *ignr_) {
   fio_io_s *io = (fio_io_s *)io_;
@@ -1574,6 +1592,7 @@ SFUNC fio_io_functions_s fio_io_tls_default_functions(fio_io_functions_s *f) {
       .flush = fio___io_func_default_flush,
       .finish = fio___io_func_default_finish,
       .cleanup = fio___io_func_default_cleanup,
+      .peer_info_next = fio___io_func_default_peer_info_next,
   };
   if (!f)
     return default_io_functions;
@@ -1591,6 +1610,8 @@ SFUNC fio_io_functions_s fio_io_tls_default_functions(fio_io_functions_s *f) {
     f->finish = fio___io_func_default_finish;
   if (!f->cleanup)
     f->cleanup = fio___io_func_default_cleanup;
+  if (!f->peer_info_next)
+    f->peer_info_next = fio___io_func_default_peer_info_next;
   default_io_functions = *f;
   return default_io_functions;
 }

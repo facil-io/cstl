@@ -1,5 +1,5 @@
 /* *****************************************************************************
-Test for 155 x509.h
+Test for 156 x509.h
 
 Coverage: X.509v3 certificate parsing, validity checking, hostname matching
 (CN and SAN with wildcards), DN comparison, signature verification, basic
@@ -12,7 +12,7 @@ references are omitted.
 #define FIO_TIME
 #define FIO_SHA2
 #define FIO_MATH
-#define FIO_ASN1
+#define FIO_DER
 #define FIO_RSA
 #define FIO_ED25519
 #define FIO_P256
@@ -64,9 +64,14 @@ FIO_SFUNC uint8_t *FIO_NAME_TEST(stl, x509_make_cert)(size_t *out_len,
                                                       const char **san_dns,
                                                       size_t san_count,
                                                       int is_ca) {
+  fio_buf_info_s san_buf[8];
+  FIO_ASSERT(san_count <= 8, "too many SAN entries for test helper");
+  for (size_t i = 0; i < san_count; ++i)
+    san_buf[i] =
+        FIO_BUF_INFO2((char *)san_dns[i], FIO_STRLEN(san_dns[i]));
   fio_x509_cert_options_s opts = {
-      .subject_cn = cn,
-      .san_dns = san_dns,
+      .cn = FIO_BUF_INFO2((char *)cn, FIO_STRLEN(cn)),
+      .san_dns = san_buf,
       .san_dns_count = san_count,
       .is_ca = is_ca,
   };
@@ -93,21 +98,37 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_parse_basic)(void) {
   FIO_ASSERT(cert.sig_alg == FIO_X509_SIG_RSA_PKCS1_SHA256,
              "signature algorithm mismatch");
   FIO_ASSERT(cert.key_type == FIO_X509_KEY_RSA, "key type should be RSA");
-  FIO_ASSERT(cert.pubkey.rsa.n != NULL && cert.pubkey.rsa.n_len > 0,
+  FIO_ASSERT(cert.pubkey.rsa.n.buf != NULL && cert.pubkey.rsa.n.len > 0,
              "RSA modulus not extracted");
-  FIO_ASSERT(cert.pubkey.rsa.e != NULL && cert.pubkey.rsa.e_len == 3,
+  FIO_ASSERT(cert.pubkey.rsa.e.buf != NULL && cert.pubkey.rsa.e.len == 3,
              "RSA exponent not extracted");
   FIO_ASSERT(cert.not_before > 0 && cert.not_after > cert.not_before,
              "validity period not parsed");
-  FIO_ASSERT(cert.subject_cn != NULL && cert.subject_cn_len == 4 &&
-                 !FIO_MEMCMP(cert.subject_cn, "test", 4),
+  FIO_ASSERT(cert.cn.buf != NULL && cert.cn.len == 4 &&
+                 !FIO_MEMCMP(cert.cn.buf, "test", 4),
              "subject CN mismatch");
-  FIO_ASSERT(cert.tbs_data != NULL && cert.tbs_len > 0,
+  FIO_ASSERT(cert.tbs.buf != NULL && cert.tbs.len > 0,
              "TBS data not captured");
-  FIO_ASSERT(cert.signature != NULL && cert.signature_len > 0,
+  FIO_ASSERT(cert.signature.buf != NULL && cert.signature.len > 0,
              "signature not extracted");
-  FIO_ASSERT(cert.issuer_der != NULL && cert.subject_der != NULL,
+  FIO_ASSERT(cert.issuer.buf != NULL && cert.subject.buf != NULL,
              "Distinguished Names not captured");
+  FIO_ASSERT(cert.serial.buf != NULL && cert.serial.len == 1 &&
+                 cert.serial.buf[0] == 0x01,
+             "serial number not captured");
+  FIO_ASSERT(cert.san_dns.buf != NULL && cert.san_dns.len == 3 &&
+                 !FIO_MEMCMP(cert.san_dns.buf, "www", 3),
+             "SAN DNS missing");
+  FIO_ASSERT(cert.san_ip.buf == NULL || cert.san_ip.len == 0,
+             "SAN IP should be absent");
+  FIO_ASSERT(cert.der.buf == test_minimal_cert &&
+                 cert.der.len == sizeof(test_minimal_cert),
+             "DER source should be referenced (not copied)");
+  fio_x509_fingerprint(&cert);
+  fio_u256 expected_fp =
+      fio_sha256(test_minimal_cert, sizeof(test_minimal_cert));
+  FIO_ASSERT(!FIO_MEMCMP(cert.fingerprint, expected_fp.u8, 32),
+             "fingerprint should equal SHA-256 of DER");
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
@@ -128,17 +149,17 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
              "key type should be Ed25519");
   FIO_ASSERT(parsed.sig_alg == FIO_X509_SIG_ED25519,
              "signature algorithm should be Ed25519");
-  FIO_ASSERT(parsed.pubkey.ed25519.key != NULL &&
-                 !FIO_MEMCMP(parsed.pubkey.ed25519.key, kp.public_key, 32),
+  FIO_ASSERT(parsed.pubkey.ed25519.key.buf != NULL &&
+                 !FIO_MEMCMP(parsed.pubkey.ed25519.key.buf, kp.public_key, 32),
              "Ed25519 public key mismatch");
-  FIO_ASSERT(parsed.subject_cn_len == 9 &&
-                 !FIO_MEMCMP(parsed.subject_cn, "localhost", 9),
+  FIO_ASSERT(parsed.cn.len == 9 &&
+                 !FIO_MEMCMP(parsed.cn.buf, "localhost", 9),
              "subject CN mismatch");
   FIO_ASSERT(parsed.is_ca == 0, "end-entity should not be CA");
   FIO_ASSERT(parsed.has_key_usage &&
                  (parsed.key_usage & FIO_X509_KU_DIGITAL_SIGNATURE),
              "digitalSignature key usage missing");
-  FIO_ASSERT(parsed.san_dns != NULL, "SAN DNS missing");
+  FIO_ASSERT(parsed.san_dns.buf != NULL, "SAN DNS missing");
 
   FIO_ASSERT(fio_x509_verify_signature(&parsed, &parsed) == 0,
              "Ed25519 self-signature verification failed");
@@ -163,9 +184,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_p256)(void) {
              "key type should be P-256");
   FIO_ASSERT(parsed.sig_alg == FIO_X509_SIG_ECDSA_SHA256,
              "signature algorithm should be ECDSA-SHA256");
-  FIO_ASSERT(parsed.pubkey.ecdsa.point != NULL &&
-                 parsed.pubkey.ecdsa.point_len == 65 &&
-                 !FIO_MEMCMP(parsed.pubkey.ecdsa.point, kp.public_key, 65),
+  FIO_ASSERT(parsed.pubkey.ecdsa.point.buf != NULL &&
+                 parsed.pubkey.ecdsa.point.len == 65 &&
+                 !FIO_MEMCMP(parsed.pubkey.ecdsa.point.buf, kp.public_key, 65),
              "P-256 public key mismatch");
   FIO_ASSERT(fio_x509_verify_signature(&parsed, &parsed) == 0,
              "P-256 self-signature verification failed");
@@ -262,7 +283,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_hostname_cn_fallback)(void) {
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
              "parse failed for CN fallback test");
-  FIO_ASSERT(parsed.san_ext_data == NULL, "SAN should be absent");
+  FIO_ASSERT(parsed.san_ext.buf == NULL, "SAN should be absent");
   FIO_ASSERT(fio_x509_match_hostname(&parsed, "cn-only.example.com", 19) == 0,
              "CN exact match failed");
   FIO_ASSERT(fio_x509_match_hostname(&parsed, "CN-ONLY.EXAMPLE.COM", 19) == 0,
@@ -286,11 +307,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_dn)(void) {
   uint8_t dn3[] = {0x30, 0x10, 0x31, 0x0E, 0x30, 0x0C, 0x06, 0x03, 0x55,
                    0x04, 0x03, 0x0C, 0x05, 'o',  't',  'h',  'e',  'r'};
 
-  FIO_ASSERT(fio_x509_dn_equals(dn1, sizeof(dn1), dn2, sizeof(dn2)) == 0,
+  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                FIO_UBUF_INFO2(dn2, sizeof(dn2))),
              "identical DNs should be equal");
-  FIO_ASSERT(fio_x509_dn_equals(dn1, sizeof(dn1), dn3, sizeof(dn3)) != 0,
+  FIO_ASSERT(!FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                 FIO_UBUF_INFO2(dn3, sizeof(dn3))),
              "different DNs should not be equal");
-  FIO_ASSERT(fio_x509_dn_equals(dn1, sizeof(dn1), dn1, sizeof(dn1) - 1) != 0,
+  FIO_ASSERT(!FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                 FIO_UBUF_INFO2(dn1, sizeof(dn1) - 1)),
              "different length DNs should not be equal");
 }
 
@@ -483,7 +507,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_invalid_inputs)(void) {
   FIO_ASSERT(fio_x509_self_signed_cert(NULL, 0, &kp, &opts) == 0,
              "missing subject CN should fail");
 
-  opts.subject_cn = "test";
+  opts.cn = FIO_BUF_INFO2((char *)"test", 4);
   size_t len = fio_x509_self_signed_cert(NULL, 0, &kp, &opts);
   FIO_ASSERT(len > 0, "valid options should succeed");
 

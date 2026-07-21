@@ -15,11 +15,42 @@ X.509 parsing, or PEM parsing — those live in rsa.c, x509.c, and pem.c.
 
 #if HAVE_OPENSSL
 
+#include <openssl/obj_mac.h> /* NID_X9_62_prime256v1 */
+
 /* *****************************************************************************
 Helpers
 ***************************************************************************** */
 
 FIO_SFUNC void fio___openssl_test_alpn_cb(fio_io_s *io) { (void)io; }
+
+/** Generates a self-signed ECDSA P-256 certificate with the given CN. */
+FIO_SFUNC X509 *fio___openssl_test_make_cert(EVP_PKEY **out_key,
+                                             const char *cn) {
+  EVP_PKEY *key = NULL;
+  EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+  FIO_ASSERT(kctx != NULL, "EVP_PKEY_CTX_new_id failed");
+  FIO_ASSERT(EVP_PKEY_keygen_init(kctx) > 0, "keygen_init failed");
+  FIO_ASSERT(
+      EVP_PKEY_CTX_set_ec_paramgen_curve_nid(kctx, NID_X9_62_prime256v1) > 0,
+      "curve selection failed");
+  FIO_ASSERT(EVP_PKEY_keygen(kctx, &key) > 0, "keygen failed");
+  EVP_PKEY_CTX_free(kctx);
+
+  X509 *x = X509_new();
+  FIO_ASSERT(x != NULL, "X509_new failed");
+  X509_set_version(x, 2);
+  ASN1_INTEGER_set(X509_get_serialNumber(x), 1);
+  X509_gmtime_adj(X509_getm_notBefore(x), -3600);
+  X509_gmtime_adj(X509_getm_notAfter(x), 3600);
+  X509_NAME *name = X509_get_subject_name(x);
+  X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                             (const unsigned char *)cn, -1, -1, 0);
+  X509_set_issuer_name(x, name);
+  X509_set_pubkey(x, key);
+  FIO_ASSERT(X509_sign(x, key, EVP_sha256()) > 0, "X509_sign failed");
+  *out_key = key;
+  return x;
+}
 
 /* *****************************************************************************
 Test: fio_openssl_io_functions returns a populated structure
@@ -43,6 +74,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_io_functions)(void) {
              "fio_openssl_io_functions: finish should not be NULL");
   FIO_ASSERT(funcs.cleanup != NULL,
              "fio_openssl_io_functions: cleanup should not be NULL");
+  FIO_ASSERT(funcs.peer_info_next != NULL,
+             "fio_openssl_io_functions: peer_info_next should not be NULL");
 }
 
 /* *****************************************************************************
@@ -358,6 +391,157 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_from_url)(void) {
 }
 
 /* *****************************************************************************
+Test: stateless peer certificate iteration (fio___openssl_peer_info_next)
+
+Uses a real in-memory TLS handshake (BIO pair) with a 2-certificate chain.
+***************************************************************************** */
+FIO_SFUNC void FIO_NAME_TEST(stl, openssl_peer_info_next)(void) {
+  EVP_PKEY *leaf_key = NULL, *ca_key = NULL;
+  X509 *leaf = fio___openssl_test_make_cert(&leaf_key, "leaf.local");
+  X509 *ca = fio___openssl_test_make_cert(&ca_key, "ca.local");
+
+  /* Server context: leaf + extra chain cert (2-certificate chain) */
+  SSL_CTX *sctx = SSL_CTX_new(TLS_server_method());
+  FIO_ASSERT(sctx != NULL, "server SSL_CTX_new failed");
+  FIO_ASSERT(SSL_CTX_use_certificate(sctx, leaf) == 1, "use_certificate");
+  FIO_ASSERT(SSL_CTX_use_PrivateKey(sctx, leaf_key) == 1, "use_PrivateKey");
+  FIO_ASSERT(SSL_CTX_add0_chain_cert(sctx, ca) == 1,
+             "add0_chain_cert failed"); /* ctx owns `ca` on success */
+
+  /* Client context: no verification (we test iteration, not validation) */
+  SSL_CTX *cctx = SSL_CTX_new(TLS_client_method());
+  FIO_ASSERT(cctx != NULL, "client SSL_CTX_new failed");
+  SSL_CTX_set_verify(cctx, SSL_VERIFY_NONE, NULL);
+
+  /* In-memory full handshake over a BIO pair */
+  BIO *sbio = NULL, *cbio = NULL;
+  FIO_ASSERT(BIO_new_bio_pair(&sbio, 0, &cbio, 0) == 1, "BIO pair failed");
+  SSL *sssl = SSL_new(sctx);
+  SSL *cssl = SSL_new(cctx);
+  FIO_ASSERT(sssl && cssl, "SSL_new failed");
+  SSL_set_bio(sssl, sbio, sbio);
+  SSL_set_bio(cssl, cbio, cbio);
+  SSL_set_accept_state(sssl);
+  SSL_set_connect_state(cssl);
+  for (int i = 0;
+       i < 4096 && (!SSL_is_init_finished(cssl) || !SSL_is_init_finished(sssl));
+       ++i) {
+    SSL_do_handshake(cssl);
+    SSL_do_handshake(sssl);
+  }
+  FIO_ASSERT(SSL_is_init_finished(cssl) && SSL_is_init_finished(sssl),
+             "in-memory handshake failed");
+
+  /* Fabricate the per-connection wrapper (client iterates server chain) */
+  fio___openssl_connection_s conn;
+  FIO_MEMSET(&conn, 0, sizeof(conn));
+  conn.ssl = cssl;
+  conn.handshake_complete = 1;
+
+  /* Expected leaf DER (canonical re-encoding == received bytes) */
+  int leaf_der_len_i = i2d_X509(leaf, NULL);
+  FIO_ASSERT(leaf_der_len_i > 0, "i2d_X509 sizing failed");
+  size_t leaf_der_len = (size_t)leaf_der_len_i;
+  uint8_t *leaf_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, leaf_der_len, 0);
+  FIO_ASSERT(leaf_der != NULL, "allocation failed");
+  uint8_t *p = leaf_der;
+  FIO_ASSERT(i2d_X509(leaf, &p) == leaf_der_len_i, "i2d_X509 failed");
+
+  fio_x509_cert_s info;
+
+  /* Handshake incomplete -> -1 */
+  conn.handshake_complete = 0;
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == -1,
+             "handshake incomplete should return -1");
+  conn.handshake_complete = 1;
+
+  /* NULL dest is an error — there is no hidden reset channel */
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, NULL, &conn) == -1,
+             "NULL dest should return -1");
+
+  /* A zeroed dest starts a new loop at the leaf certificate */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == 0,
+             "peer_info_next failed for leaf certificate");
+  FIO_ASSERT(info.chain_index == 0, "leaf should have chain_index 0");
+  FIO_ASSERT(info.der.buf != NULL && info.der.len == leaf_der_len &&
+                 !FIO_MEMCMP(info.der.buf, leaf_der, leaf_der_len),
+             "leaf DER mismatch (arena staging broken)");
+  FIO_ASSERT(info.cn.buf != NULL && info.cn.len == 10 &&
+                 !FIO_MEMCMP(info.cn.buf, "leaf.local", 10),
+             "leaf subject CN mismatch");
+  const uint8_t *leaf_slot = info.der.buf; /* arena slot of the leaf */
+
+  /* The next call steps forward using the data in `dest` alone */
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == 0,
+             "peer_info_next failed for second certificate");
+  FIO_ASSERT(info.chain_index == 1, "second cert should have chain_index 1");
+  FIO_ASSERT(info.der.buf != leaf_slot,
+             "each call must stage into a FRESH arena slot");
+  FIO_ASSERT(info.cn.buf != NULL && info.cn.len == 8 &&
+                 !FIO_MEMCMP(info.cn.buf, "ca.local", 8),
+             "second cert subject CN mismatch");
+
+  /* Arena freshness: the leaf's staged DER survives subsequent calls */
+  FIO_ASSERT(!FIO_MEMCMP(leaf_slot, leaf_der, leaf_der_len),
+             "leaf arena slot was overwritten by the next call");
+
+  /* Iteration ends with -1 */
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == -1,
+             "iteration should end after the last certificate");
+
+  /* Restarting a loop only requires zeroing the struct */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == 0 &&
+                 info.chain_index == 0 && info.der.len == leaf_der_len &&
+                 !FIO_MEMCMP(info.der.buf, leaf_der, leaf_der_len),
+             "zeroed dest should restart the loop at the leaf");
+
+  /* Interleaved loops on the same connection do not interfere */
+  fio_x509_cert_s a, b;
+  FIO_MEMSET(&a, 0, sizeof(a));
+  FIO_MEMSET(&b, 0, sizeof(b));
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &a, &conn) == 0 &&
+                 a.chain_index == 0,
+             "loop A failed at leaf");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &b, &conn) == 0 &&
+                 b.chain_index == 0,
+             "loop B failed at leaf");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &a, &conn) == 0 &&
+                 a.chain_index == 1,
+             "loop A should step to the second certificate");
+  FIO_ASSERT(b.chain_index == 0, "loop B state must be untouched by loop A");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &a, &conn) == -1,
+             "loop A should end");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &b, &conn) == 0 &&
+                 b.chain_index == 1,
+             "loop B should step to the second certificate");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &b, &conn) == -1,
+             "loop B should end");
+
+  /* Iteration is capped at 128 certificates (deep-nesting / DoS guard) */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  info.der.buf = (uint8_t *)leaf_slot; /* continue from a forged position */
+  info.chain_index = 127;
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == -1,
+             "iteration must stop at the 128-certificate cap");
+  info.chain_index = 200;
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == -1,
+             "chain_index >= 128 must return -1");
+
+  /* Cleanup */
+  FIO_MEM_FREE(leaf_der, leaf_der_len);
+  SSL_free(sssl);
+  SSL_free(cssl);
+  SSL_CTX_free(sctx); /* frees `ca` (ownership transferred) */
+  SSL_CTX_free(cctx);
+  X509_free(leaf);
+  EVP_PKEY_free(leaf_key);
+  EVP_PKEY_free(ca_key);
+}
+
+/* *****************************************************************************
 Main
 
 NOTE: The leak counter warning for fio___openssl_context_s is expected.
@@ -379,6 +563,7 @@ int main(void) {
   FIO_NAME_TEST(stl, openssl_tls_each)();
   FIO_NAME_TEST(stl, openssl_full_config)();
   FIO_NAME_TEST(stl, openssl_tls_from_url)();
+  FIO_NAME_TEST(stl, openssl_peer_info_next)();
   return 0;
 }
 

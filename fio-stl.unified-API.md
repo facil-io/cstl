@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3106.
+Total symbols: 3121.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1759
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -46,18 +46,18 @@ Total symbols: 3106.
 - [`./fio-stl/152 blake2.h`](#fio-stl-152-blake2-h) — 14
 - [`./fio-stl/152 chacha20poly1305.h`](#fio-stl-152-chacha20poly1305-h) — 7
 - [`./fio-stl/152 sha1.h`](#fio-stl-152-sha1-h) — 4
-- [`./fio-stl/152 sha2.h`](#fio-stl-152-sha2-h) — 10
+- [`./fio-stl/152 sha2.h`](#fio-stl-152-sha2-h) — 14
 - [`./fio-stl/152 sha2z hkdf.h`](#fio-stl-152-sha2z-hkdf-h) — 5
 - [`./fio-stl/152 sha3.h`](#fio-stl-152-sha3-h) — 17
 - [`./fio-stl/153 aes.h`](#fio-stl-153-aes-h) — 4
 - [`./fio-stl/154 ed25519.h`](#fio-stl-154-ed25519-h) — 13
 - [`./fio-stl/154 p256.h`](#fio-stl-154-p256-h) — 5
 - [`./fio-stl/154 p384.h`](#fio-stl-154-p384-h) — 2
-- [`./fio-stl/155 asn1.h`](#fio-stl-155-asn1-h) — 51
+- [`./fio-stl/155 der.h`](#fio-stl-155-der-h) — 18
 - [`./fio-stl/155 rsa.h`](#fio-stl-155-rsa-h) — 9
-- [`./fio-stl/155 x509.h`](#fio-stl-155-x509-h) — 18
 - [`./fio-stl/156 mlkem.h`](#fio-stl-156-mlkem-h) — 17
-- [`./fio-stl/156 pem.h`](#fio-stl-156-pem-h) — 8
+- [`./fio-stl/156 x509.h`](#fio-stl-156-x509-h) — 57
+- [`./fio-stl/157 pem.h`](#fio-stl-157-pem-h) — 8
 - [`./fio-stl/159 argon2.h`](#fio-stl-159-argon2-h) — 6
 - [`./fio-stl/159 lyra2.h`](#fio-stl-159-lyra2-h) — 5
 - [`./fio-stl/159 otp.h`](#fio-stl-159-otp-h) — 7
@@ -71,7 +71,7 @@ Total symbols: 3106.
 - [`./fio-stl/210 map2.h`](#fio-stl-210-map2-h) — 3
 - [`./fio-stl/249 reference counter.h`](#fio-stl-249-reference-counter-h) — 17
 - [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 66
-- [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 102
+- [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 103
 - [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 41
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1759 public symbols.
+1763 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -249,14 +249,22 @@ _Symbol type:_ `macro`
                              type_T,   \
                              size_per_allocation,   \
                              allocations_per_thread)   \
+  /** Allocates `count` blocks of memory from the `name` static arena. */   \
   FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {   \
     static type_T name##buffer[sizeof(type_T) *   \
                                FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *   \
                                size_per_allocation * allocations_per_thread];   \
     static size_t pos;   \
+    if (!count)   \
+      return name##buffer;   \
     size_t at = fio_atomic_add(&pos, count);   \
     at %= FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread;   \
     return (at * size_per_allocation) + name##buffer;   \
+  }   \
+  /** Returns the size of the static arena in `sizeof(type_T)` units. */   \
+  FIO_IFUNC size_t name##_size(void) {   \
+    return (size_t)(FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *   \
+                    size_per_allocation * allocations_per_thread);   \
   }
 ```
 
@@ -3604,6 +3612,38 @@ Converts a String with a known length into a fio_buf_info_s.
 
 _Symbol type:_ `macro`
 
+#### `FIO_UBUF_INFO0`
+
+```c
+#define FIO_UBUF_INFO0 ((fio_ubuf_info_s){0})
+```
+
+A NULL fio_ubuf_info_s.
+
+_Symbol type:_ `macro`
+
+#### `FIO_UBUF_INFO1`
+
+```c
+#define FIO_UBUF_INFO1(str)   \
+  ((fio_ubuf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+```
+
+Converts a C String into a fio_ubuf_info_s.
+
+_Symbol type:_ `macro`
+
+#### `FIO_UBUF_INFO2`
+
+```c
+#define FIO_UBUF_INFO2(str, length)   \
+  ((fio_ubuf_info_s){.len = (length), .buf = (str)})
+```
+
+Converts a String with a known length into a fio_ubuf_info_s.
+
+_Symbol type:_ `macro`
+
 #### `FIO_BUF2STR_INFO`
 
 ```c
@@ -3848,6 +3888,21 @@ char *buf;
 ```
 
 An information type for reporting/storing buffer data (no `capa`).
+
+_Symbol type:_ `type`
+
+#### `fio_ubuf_info_s`
+
+```c
+struct fio_ubuf_info_s {
+/** The buffer's length, if any. */
+size_t len;
+/** The buffer's address (may be NULL if no buffer). */
+unsigned char *buf;
+}
+```
+
+An information type for reporting/storing unsigned buffer data.
 
 _Symbol type:_ `type`
 
@@ -25870,7 +25925,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-152-sha2-h"></a> `./fio-stl/152 sha2.h`
 
-10 public symbols.
+14 public symbols.
 
 ### Types
 
@@ -25981,6 +26036,54 @@ fio_u512 fio_sha512_finalize(fio_sha512_s *h)
 ```
 
 finalizes a fio_u512 with the SHA 512 hash.
+
+_Symbol type:_ `function`
+
+#### `fio_sha384_init`
+
+```c
+inline fio_sha512_s fio_sha384_init(void)
+```
+
+initializes a fio_u512 so the hash can consume streaming data (SHA-384).
+
+SHA-384 is SHA-512 with different initial values, truncated to 48 bytes.
+NOTE: truncating a SHA-512 result is NOT the same as SHA-384.
+
+_Symbol type:_ `function`
+
+#### `fio_sha384_consume`
+
+```c
+#define fio_sha384_consume fio_sha512_consume
+```
+
+Feed data into the hash
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_sha384_finalize`
+
+```c
+#define fio_sha384_finalize fio_sha512_finalize
+```
+
+finalizes a fio_u512 with the SHA 384 hash (first 48 bytes are the hash).
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_sha384`
+
+```c
+inline fio_u512 fio_sha384(const void *data, uint64_t len)
+```
+
+A simple, non streaming, implementation of the SHA-384 hashing algorithm.
+Returns a fio_u512 of which the first 48 bytes hold the SHA-384 hash.
 
 _Symbol type:_ `function`
 
@@ -26697,394 +26800,72 @@ _Symbol type:_ `function`
 
 -----------------------------------------------------
 
-## <a id="fio-stl-155-asn1-h"></a> `./fio-stl/155 asn1.h`
+## <a id="fio-stl-155-der-h"></a> `./fio-stl/155 der.h`
 
-51 public symbols.
-
-### Macros
-
-#### `FIO_OID_SHA256_WITH_RSA`
-
-```c
-#define FIO_OID_SHA256_WITH_RSA   "1.2.840.113549.1.1.11"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SHA384_WITH_RSA`
-
-```c
-#define FIO_OID_SHA384_WITH_RSA   "1.2.840.113549.1.1.12"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SHA512_WITH_RSA`
-
-```c
-#define FIO_OID_SHA512_WITH_RSA   "1.2.840.113549.1.1.13"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_RSA_PSS`
-
-```c
-#define FIO_OID_RSA_PSS           "1.2.840.113549.1.1.10"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ECDSA_WITH_SHA256`
-
-```c
-#define FIO_OID_ECDSA_WITH_SHA256 "1.2.840.10045.4.3.2"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ECDSA_WITH_SHA384`
-
-```c
-#define FIO_OID_ECDSA_WITH_SHA384 "1.2.840.10045.4.3.3"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ECDSA_WITH_SHA512`
-
-```c
-#define FIO_OID_ECDSA_WITH_SHA512 "1.2.840.10045.4.3.4"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ED25519`
-
-```c
-#define FIO_OID_ED25519           "1.3.101.112"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ED448`
-
-```c
-#define FIO_OID_ED448             "1.3.101.113"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_RSA_ENCRYPTION`
-
-```c
-#define FIO_OID_RSA_ENCRYPTION "1.2.840.113549.1.1.1"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_EC_PUBLIC_KEY`
-
-```c
-#define FIO_OID_EC_PUBLIC_KEY  "1.2.840.10045.2.1"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SECP256R1`
-
-```c
-#define FIO_OID_SECP256R1 "1.2.840.10045.3.1.7"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SECP384R1`
-
-```c
-#define FIO_OID_SECP384R1 "1.3.132.0.34"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SECP521R1`
-
-```c
-#define FIO_OID_SECP521R1 "1.3.132.0.35"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_X25519`
-
-```c
-#define FIO_OID_X25519    "1.3.101.110"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_X448`
-
-```c
-#define FIO_OID_X448      "1.3.101.111"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SUBJECT_KEY_ID`
-
-```c
-#define FIO_OID_SUBJECT_KEY_ID    "2.5.29.14"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_KEY_USAGE`
-
-```c
-#define FIO_OID_KEY_USAGE         "2.5.29.15"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_SUBJECT_ALT_NAME`
-
-```c
-#define FIO_OID_SUBJECT_ALT_NAME  "2.5.29.17"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_BASIC_CONSTRAINTS`
-
-```c
-#define FIO_OID_BASIC_CONSTRAINTS "2.5.29.19"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_CRL_DIST_POINTS`
-
-```c
-#define FIO_OID_CRL_DIST_POINTS   "2.5.29.31"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_CERT_POLICIES`
-
-```c
-#define FIO_OID_CERT_POLICIES     "2.5.29.32"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_AUTH_KEY_ID`
-
-```c
-#define FIO_OID_AUTH_KEY_ID       "2.5.29.35"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_EXT_KEY_USAGE`
-
-```c
-#define FIO_OID_EXT_KEY_USAGE     "2.5.29.37"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_EKU_SERVER_AUTH`
-
-```c
-#define FIO_OID_EKU_SERVER_AUTH "1.3.6.1.5.5.7.3.1"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_EKU_CLIENT_AUTH`
-
-```c
-#define FIO_OID_EKU_CLIENT_AUTH "1.3.6.1.5.5.7.3.2"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_COMMON_NAME`
-
-```c
-#define FIO_OID_COMMON_NAME  "2.5.4.3"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_COUNTRY`
-
-```c
-#define FIO_OID_COUNTRY      "2.5.4.6"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_LOCALITY`
-
-```c
-#define FIO_OID_LOCALITY     "2.5.4.7"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_STATE`
-
-```c
-#define FIO_OID_STATE        "2.5.4.8"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ORGANIZATION`
-
-```c
-#define FIO_OID_ORGANIZATION "2.5.4.10"
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_OID_ORG_UNIT`
-
-```c
-#define FIO_OID_ORG_UNIT     "2.5.4.11"
-```
-
-
-
-_Symbol type:_ `macro`
+18 public symbols.
 
 ### Types
 
-#### `fio_asn1_tag_e`
+#### `fio_der_tag_e`
 
 ```c
 typedef enum {
-FIO_ASN1_EOC = 0x00, /**< End-of-contents */
-FIO_ASN1_BOOLEAN = 0x01, /**< Boolean */
-FIO_ASN1_INTEGER = 0x02, /**< Integer */
-FIO_ASN1_BIT_STRING = 0x03, /**< Bit String */
-FIO_ASN1_OCTET_STRING = 0x04, /**< Octet String */
-FIO_ASN1_NULL = 0x05, /**< Null */
-FIO_ASN1_OID = 0x06, /**< Object Identifier */
-FIO_ASN1_OBJECT_DESCRIPTOR = 0x07, /**< Object Descriptor */
-FIO_ASN1_EXTERNAL = 0x08, /**< External */
-FIO_ASN1_REAL = 0x09, /**< Real (float) */
-FIO_ASN1_ENUMERATED = 0x0A, /**< Enumerated */
-FIO_ASN1_EMBEDDED_PDV = 0x0B, /**< Embedded PDV */
-FIO_ASN1_UTF8_STRING = 0x0C, /**< UTF-8 String */
-FIO_ASN1_RELATIVE_OID = 0x0D, /**< Relative OID */
-FIO_ASN1_SEQUENCE = 0x10, /**< Sequence (0x30 with constructed bit) */
-FIO_ASN1_SET = 0x11, /**< Set (0x31 with constructed bit) */
-FIO_ASN1_NUMERIC_STRING = 0x12, /**< Numeric String */
-FIO_ASN1_PRINTABLE_STRING = 0x13, /**< Printable String */
-FIO_ASN1_T61_STRING = 0x14, /**< T61 String (Teletex) */
-FIO_ASN1_VIDEOTEX_STRING = 0x15, /**< Videotex String */
-FIO_ASN1_IA5_STRING = 0x16, /**< IA5 String (ASCII) */
-FIO_ASN1_UTC_TIME = 0x17, /**< UTC Time */
-FIO_ASN1_GENERALIZED_TIME = 0x18, /**< Generalized Time */
-FIO_ASN1_GRAPHIC_STRING = 0x19, /**< Graphic String */
-FIO_ASN1_VISIBLE_STRING = 0x1A, /**< Visible String */
-FIO_ASN1_GENERAL_STRING = 0x1B, /**< General String */
-FIO_ASN1_UNIVERSAL_STRING = 0x1C, /**< Universal String */
-FIO_ASN1_BMP_STRING = 0x1E, /**< BMP String (UCS-2) */
+FIO_DER_EOC = 0x00, /**< End-of-contents */
+FIO_DER_BOOLEAN = 0x01, /**< Boolean */
+FIO_DER_INTEGER = 0x02, /**< Integer */
+FIO_DER_BIT_STRING = 0x03, /**< Bit String */
+FIO_DER_OCTET_STRING = 0x04, /**< Octet String */
+FIO_DER_NULL = 0x05, /**< Null */
+FIO_DER_OID = 0x06, /**< Object Identifier */
+FIO_DER_OBJECT_DESCRIPTOR = 0x07, /**< Object Descriptor */
+FIO_DER_EXTERNAL = 0x08, /**< External */
+FIO_DER_REAL = 0x09, /**< Real (float) */
+FIO_DER_ENUMERATED = 0x0A, /**< Enumerated */
+FIO_DER_EMBEDDED_PDV = 0x0B, /**< Embedded PDV */
+FIO_DER_UTF8_STRING = 0x0C, /**< UTF-8 String */
+FIO_DER_RELATIVE_OID = 0x0D, /**< Relative OID */
+FIO_DER_SEQUENCE = 0x10, /**< Sequence (0x30 with constructed bit) */
+FIO_DER_SET = 0x11, /**< Set (0x31 with constructed bit) */
+FIO_DER_NUMERIC_STRING = 0x12, /**< Numeric String */
+FIO_DER_PRINTABLE_STRING = 0x13, /**< Printable String */
+FIO_DER_T61_STRING = 0x14, /**< T61 String (Teletex) */
+FIO_DER_VIDEOTEX_STRING = 0x15, /**< Videotex String */
+FIO_DER_IA5_STRING = 0x16, /**< IA5 String (ASCII) */
+FIO_DER_UTC_TIME = 0x17, /**< UTC Time */
+FIO_DER_GENERALIZED_TIME = 0x18, /**< Generalized Time */
+FIO_DER_GRAPHIC_STRING = 0x19, /**< Graphic String */
+FIO_DER_VISIBLE_STRING = 0x1A, /**< Visible String */
+FIO_DER_GENERAL_STRING = 0x1B, /**< General String */
+FIO_DER_UNIVERSAL_STRING = 0x1C, /**< Universal String */
+FIO_DER_BMP_STRING = 0x1E, /**< BMP String (UCS-2) */
 /* Context-specific tags (0x80 | tag_number) with constructed bit (0x20) */
-FIO_ASN1_CONTEXT_0 = 0xA0, /**< [0] EXPLICIT/IMPLICIT */
-FIO_ASN1_CONTEXT_1 = 0xA1, /**< [1] EXPLICIT/IMPLICIT */
-FIO_ASN1_CONTEXT_2 = 0xA2, /**< [2] EXPLICIT/IMPLICIT */
-FIO_ASN1_CONTEXT_3 = 0xA3, /**< [3] EXPLICIT/IMPLICIT */
-} fio_asn1_tag_e
+FIO_DER_CONTEXT_0 = 0xA0, /**< [0] EXPLICIT/IMPLICIT */
+FIO_DER_CONTEXT_1 = 0xA1, /**< [1] EXPLICIT/IMPLICIT */
+FIO_DER_CONTEXT_2 = 0xA2, /**< [2] EXPLICIT/IMPLICIT */
+FIO_DER_CONTEXT_3 = 0xA3, /**< [3] EXPLICIT/IMPLICIT */
+} fio_der_tag_e
 ```
 
 ASN.1 Universal Tag Types
 
 _Symbol type:_ `type`
 
-#### `fio_asn1_class_e`
+#### `fio_der_class_e`
 
 ```c
 typedef enum {
-FIO_ASN1_CLASS_UNIVERSAL = 0, /**< Universal (built-in types) */
-FIO_ASN1_CLASS_APPLICATION = 1, /**< Application-specific */
-FIO_ASN1_CLASS_CONTEXT = 2, /**< Context-specific */
-FIO_ASN1_CLASS_PRIVATE = 3, /**< Private */
-} fio_asn1_class_e
+FIO_DER_CLASS_UNIVERSAL = 0, /**< Universal (built-in types) */
+FIO_DER_CLASS_APPLICATION = 1, /**< Application-specific */
+FIO_DER_CLASS_CONTEXT = 2, /**< Context-specific */
+FIO_DER_CLASS_PRIVATE = 3, /**< Private */
+} fio_der_class_e
 ```
 
 ASN.1 Tag Class (bits 7-6 of tag byte)
 
 _Symbol type:_ `type`
 
-#### `fio_asn1_element_s`
+#### `fio_der_element_s`
 
 ```c
 typedef struct {
@@ -27094,20 +26875,20 @@ uint8_t tag; /**< Raw tag byte */
 uint8_t is_constructed; /**< 1 if constructed (contains other elements) */
 uint8_t tag_class; /**< 0=Universal, 1=Application, 2=Context, 3=Private */
 uint8_t tag_number; /**< Tag number (bits 4-0, or extended) */
-} fio_asn1_element_s
+} fio_der_element_s
 ```
 
 Parsed ASN.1 DER element
 
 _Symbol type:_ `type`
 
-#### `fio_asn1_iterator_s`
+#### `fio_der_iterator_s`
 
 ```c
 typedef struct {
 const uint8_t *pos; /**< Current position */
 const uint8_t *end; /**< End of sequence */
-} fio_asn1_iterator_s
+} fio_der_iterator_s
 ```
 
 Iterator for SEQUENCE or SET contents
@@ -27116,10 +26897,10 @@ _Symbol type:_ `type`
 
 ### Functions
 
-#### `fio_asn1_parse`
+#### `fio_der_parse`
 
 ```c
-const uint8_t *fio_asn1_parse(fio_asn1_element_s *elem, const uint8_t *data, size_t data_len)
+const uint8_t *fio_der_parse(fio_der_element_s *elem, const uint8_t *data, size_t data_len)
 ```
 
 Parse one ASN.1 element from DER-encoded data.
@@ -27134,10 +26915,10 @@ Parse one ASN.1 element from DER-encoded data.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_element_total_len`
+#### `fio_der_element_total_len`
 
 ```c
-inline size_t fio_asn1_element_total_len(const fio_asn1_element_s *elem, const uint8_t *data)
+inline size_t fio_der_element_total_len(const fio_der_element_s *elem, const uint8_t *data)
 ```
 
 Get the total encoded length of an ASN.1 element (tag + length + content).
@@ -27151,10 +26932,10 @@ Get the total encoded length of an ASN.1 element (tag + length + content).
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_parse_integer`
+#### `fio_der_parse_integer`
 
 ```c
-int fio_asn1_parse_integer(const fio_asn1_element_s *elem, uint64_t *value)
+int fio_der_parse_integer(const fio_der_element_s *elem, uint64_t *value)
 ```
 
 Parse an ASN.1 INTEGER element.
@@ -27172,10 +26953,10 @@ Leading zero bytes for positive numbers are handled correctly.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_parse_bit_string`
+#### `fio_der_parse_bit_string`
 
 ```c
-int fio_asn1_parse_bit_string(const fio_asn1_element_s *elem, const uint8_t **bits, size_t *bit_len, uint8_t *unused_bits)
+int fio_der_parse_bit_string(const fio_der_element_s *elem, const uint8_t **bits, size_t *bit_len, uint8_t *unused_bits)
 ```
 
 Parse an ASN.1 BIT STRING element.
@@ -27191,10 +26972,10 @@ Parse an ASN.1 BIT STRING element.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_parse_oid`
+#### `fio_der_parse_oid`
 
 ```c
-int fio_asn1_parse_oid(const fio_asn1_element_s *elem, char *buf, size_t buf_len)
+int fio_der_parse_oid(const fio_der_element_s *elem, char *buf, size_t buf_len)
 ```
 
 Parse an ASN.1 OID into a dot-separated string.
@@ -27211,27 +26992,10 @@ Example output: "1.2.840.113549.1.1.11"
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_oid_eq`
+#### `fio_der_parse_time`
 
 ```c
-int fio_asn1_oid_eq(const fio_asn1_element_s *elem, const char *oid_string)
-```
-
-Compare an ASN.1 OID element to a known OID string.
-
-**Parameters:**
-- `elem` - Parsed element (must be OID type)
-- `oid_string` - OID in dot notation (e.g., "1.2.840.113549.1.1.11")
-
-**Returns:**
-- 1 if match, 0 if no match
-
-_Symbol type:_ `function`
-
-#### `fio_asn1_parse_time`
-
-```c
-int fio_asn1_parse_time(const fio_asn1_element_s *elem, int64_t *unix_time)
+int fio_der_parse_time(const fio_der_element_s *elem, int64_t *unix_time)
 ```
 
 Parse an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
@@ -27246,10 +27010,10 @@ UTC)
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_parse_string`
+#### `fio_der_parse_string`
 
 ```c
-inline const char *fio_asn1_parse_string(const fio_asn1_element_s *elem, size_t *len)
+inline const char *fio_der_parse_string(const fio_der_element_s *elem, size_t *len)
 ```
 
 Parse an ASN.1 string element.
@@ -27266,10 +27030,10 @@ Returns pointer directly into the element data (no copy).
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_parse_boolean`
+#### `fio_der_parse_boolean`
 
 ```c
-inline int fio_asn1_parse_boolean(const fio_asn1_element_s *elem, int *value)
+inline int fio_der_parse_boolean(const fio_der_element_s *elem, int *value)
 ```
 
 Parse an ASN.1 BOOLEAN element.
@@ -27283,10 +27047,10 @@ Parse an ASN.1 BOOLEAN element.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_iterator_init`
+#### `fio_der_iterator_init`
 
 ```c
-inline void fio_asn1_iterator_init(fio_asn1_iterator_s *it, const fio_asn1_element_s *sequence)
+inline void fio_der_iterator_init(fio_der_iterator_s *it, const fio_der_element_s *sequence)
 ```
 
 Initialize an iterator for a SEQUENCE or SET element.
@@ -27297,10 +27061,10 @@ Initialize an iterator for a SEQUENCE or SET element.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_iterator_next`
+#### `fio_der_iterator_next`
 
 ```c
-int fio_asn1_iterator_next(fio_asn1_iterator_s *it, fio_asn1_element_s *elem)
+int fio_der_iterator_next(fio_der_iterator_s *it, fio_der_element_s *elem)
 ```
 
 Get the next element from an iterator.
@@ -27314,10 +27078,10 @@ Get the next element from an iterator.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_iterator_has_next`
+#### `fio_der_iterator_has_next`
 
 ```c
-inline int fio_asn1_iterator_has_next(const fio_asn1_iterator_s *it)
+inline int fio_der_iterator_has_next(const fio_der_iterator_s *it)
 ```
 
 Check if iterator has more elements.
@@ -27330,27 +27094,27 @@ Check if iterator has more elements.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_is_tag`
+#### `fio_der_is_tag`
 
 ```c
-inline int fio_asn1_is_tag(const fio_asn1_element_s *elem, uint8_t tag)
+inline int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag)
 ```
 
 Check if an element is a specific tag type.
 
 **Parameters:**
 - `elem` - Parsed element
-- `tag` - Expected tag (e.g., FIO_ASN1_INTEGER)
+- `tag` - Expected tag (e.g., FIO_DER_INTEGER)
 
 **Returns:**
 - 1 if match, 0 otherwise
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_is_context_tag`
+#### `fio_der_is_context_tag`
 
 ```c
-inline int fio_asn1_is_context_tag(const fio_asn1_element_s *elem, uint8_t tag_num)
+inline int fio_der_is_context_tag(const fio_der_element_s *elem, uint8_t tag_num)
 ```
 
 Check if an element is a context-specific tag.
@@ -27364,10 +27128,10 @@ Check if an element is a context-specific tag.
 
 _Symbol type:_ `function`
 
-#### `fio_asn1_tag_number`
+#### `fio_der_tag_number`
 
 ```c
-inline uint8_t fio_asn1_tag_number(const fio_asn1_element_s *elem)
+inline uint8_t fio_der_tag_number(const fio_der_element_s *elem)
 ```
 
 Get the tag number from an element.
@@ -27577,407 +27341,6 @@ This implementation uses:
 
 **Returns:**
 - 0 on success, -1 on error
-
-_Symbol type:_ `function`
-
------------------------------------------------------
-
-## <a id="fio-stl-155-x509-h"></a> `./fio-stl/155 x509.h`
-
-18 public symbols.
-
-### Macros
-
-#### `FIO_TLS_CERT_PARSE_ERROR`
-
-```c
-#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
-```
-
-Error value for fio_tls_parse_certificate_message
-
-_Symbol type:_ `macro`
-
-#### `FIO_X509_MAX_CHAIN_DEPTH`
-
-```c
-#define FIO_X509_MAX_CHAIN_DEPTH 10
-```
-
-
-
-_Symbol type:_ `macro`
-
-### Types
-
-#### `fio_x509_key_type_e`
-
-```c
-typedef enum {
-FIO_X509_KEY_UNKNOWN = 0,
-FIO_X509_KEY_RSA = 1, /**< RSA (any key size) */
-FIO_X509_KEY_ECDSA_P256 = 2, /**< ECDSA with P-256/secp256r1 */
-FIO_X509_KEY_ECDSA_P384 = 3, /**< ECDSA with P-384/secp384r1 */
-FIO_X509_KEY_ED25519 = 4, /**< Ed25519 (EdDSA) */
-} fio_x509_key_type_e
-```
-
-Public key algorithm types
-
-_Symbol type:_ `type`
-
-#### `fio_x509_sig_alg_e`
-
-```c
-typedef enum {
-FIO_X509_SIG_UNKNOWN = 0,
-FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
-FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
-FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
-FIO_X509_SIG_RSA_PSS_SHA256 = 4, /**< RSA-PSS with SHA-256 */
-FIO_X509_SIG_RSA_PSS_SHA384 = 5, /**< RSA-PSS with SHA-384 */
-FIO_X509_SIG_RSA_PSS_SHA512 = 6, /**< RSA-PSS with SHA-512 */
-FIO_X509_SIG_ECDSA_SHA256 = 7, /**< ecdsa-with-SHA256 */
-FIO_X509_SIG_ECDSA_SHA384 = 8, /**< ecdsa-with-SHA384 */
-FIO_X509_SIG_ED25519 = 9, /**< Ed25519 */
-} fio_x509_sig_alg_e
-```
-
-Signature algorithm types
-
-_Symbol type:_ `type`
-
-#### `fio_x509_key_usage_e`
-
-```c
-typedef enum {
-FIO_X509_KU_DIGITAL_SIGNATURE = 0x0080, /* bit 0 = MSB of byte 0 */
-FIO_X509_KU_NON_REPUDIATION = 0x0040, /* bit 1 */
-FIO_X509_KU_KEY_ENCIPHERMENT = 0x0020, /* bit 2 */
-FIO_X509_KU_DATA_ENCIPHERMENT = 0x0010, /* bit 3 */
-FIO_X509_KU_KEY_AGREEMENT = 0x0008, /* bit 4 */
-FIO_X509_KU_KEY_CERT_SIGN = 0x0004, /* bit 5 */
-FIO_X509_KU_CRL_SIGN = 0x0002, /* bit 6 */
-FIO_X509_KU_ENCIPHER_ONLY = 0x0001, /* bit 7 */
-FIO_X509_KU_DECIPHER_ONLY = 0x8000, /* bit 8 = MSB of byte 1 */
-} fio_x509_key_usage_e
-```
-
-Key Usage bit flags (RFC 5280 Section 4.2.1.3)
-
-ASN.1 BIT STRING uses MSB-first bit ordering:
-- Bit 0 = MSB of first byte (0x80)
-- Bit 1 = 0x40, Bit 2 = 0x20, etc.
-- Bits 8+ are in the second byte
-
-_Symbol type:_ `type`
-
-#### `fio_x509_error_e`
-
-```c
-typedef enum {
-FIO_X509_OK = 0, /**< Validation successful */
-FIO_X509_ERR_PARSE = -1, /**< Failed to parse certificate */
-FIO_X509_ERR_EXPIRED = -2, /**< Certificate expired */
-FIO_X509_ERR_NOT_YET_VALID = -3, /**< Certificate not yet valid */
-FIO_X509_ERR_SIGNATURE = -4, /**< Signature verification failed */
-FIO_X509_ERR_ISSUER_MISMATCH = -5, /**< Issuer DN doesn't match subject DN */
-FIO_X509_ERR_NOT_CA = -6, /**< Issuer is not a CA certificate */
-FIO_X509_ERR_NO_TRUST_ANCHOR = -7, /**< Certificate not in trust store */
-FIO_X509_ERR_HOSTNAME_MISMATCH = -8, /**< Hostname doesn't match cert */
-FIO_X509_ERR_EMPTY_CHAIN = -9, /**< Empty certificate chain */
-FIO_X509_ERR_CHAIN_TOO_LONG = -10, /**< Chain exceeds maximum depth */
-} fio_x509_error_e
-```
-
-X.509 chain validation error codes
-
-_Symbol type:_ `type`
-
-#### `fio_x509_trust_store_s`
-
-```c
-typedef struct {
-const uint8_t **roots; /**< Array of root CA certificate DER data */
-const size_t *root_lens; /**< Array of root CA certificate lengths */
-size_t root_count; /**< Number of root CAs */
-} fio_x509_trust_store_s
-```
-
-Trust store for root CA certificates
-
-_Symbol type:_ `type`
-
-#### `fio_tls_cert_entry_s`
-
-```c
-typedef struct {
-const uint8_t *cert; /**< DER-encoded certificate data */
-size_t cert_len; /**< Certificate length */
-} fio_tls_cert_entry_s
-```
-
-TLS certificate entry (parsed from Certificate message)
-
-_Symbol type:_ `type`
-
-#### `fio_x509_cert_s`
-
-```c
-typedef struct {
-/** Certificate version (0=v1, 1=v2, 2=v3) */
-int version;
-/** Validity period (Unix timestamps) */
-int64_t not_before;
-int64_t not_after;
-/** Subject Distinguished Name (raw DER for comparison) */
-const uint8_t *subject_der;
-size_t subject_der_len;
-/** Issuer Distinguished Name (raw DER for comparison) */
-const uint8_t *issuer_der;
-size_t issuer_der_len;
-/** Subject Common Name (if present, pointer into DER data) */
-const char *subject_cn;
-size_t subject_cn_len;
-/** Public Key Type */
-fio_x509_key_type_e key_type;
-/** Public Key Data (union based on key_type) */
-union {
-struct {
-const uint8_t *n; /**< RSA modulus (big-endian) */
-size_t n_len;
-const uint8_t *e; /**< RSA exponent (big-endian) */
-size_t e_len;
-} rsa;
-struct {
-const uint8_t *point; /**< Uncompressed EC point (04 || x || y) */
-size_t point_len;
-} ecdsa;
-struct {
-const uint8_t *key; /**< 32-byte Ed25519 public key */
-} ed25519;
-} pubkey;
-/** Signature Algorithm */
-fio_x509_sig_alg_e sig_alg;
-/** Signature value (pointer into DER data) */
-const uint8_t *signature;
-size_t signature_len;
-/** TBS Certificate (for signature verification) */
-const uint8_t *tbs_data;
-size_t tbs_len;
-/** Basic Constraints: is CA */
-int is_ca;
-/** Key Usage extension present */
-int has_key_usage;
-/** Key Usage bits */
-uint16_t key_usage;
-/** Subject Alternative Name: first DNS name (if present) */
-const char *san_dns;
-size_t san_dns_len;
-/** Subject Alternative Name extension raw data (for iterating all SANs) */
-const uint8_t *san_ext_data;
-size_t san_ext_len;
-} fio_x509_cert_s
-```
-
-Parsed X.509 certificate structure
-
-_Symbol type:_ `type`
-
-### Functions
-
-#### `fio_x509_parse`
-
-```c
-int fio_x509_parse(fio_x509_cert_s *cert, const uint8_t *der_data, size_t der_len)
-```
-
-Parse a DER-encoded X.509 certificate.
-
-The cert structure will contain pointers into the original DER data,
-so the DER data must remain valid while the cert is in use.
-
-**Parameters:**
-- `cert` - Output certificate structure (will be zeroed first)
-- `der_data` - Pointer to DER-encoded certificate
-- `der_len` - Length of DER data in bytes
-
-**Returns:**
-- 0 on success, -1 on error
-
-_Symbol type:_ `function`
-
-#### `fio_x509_verify_signature`
-
-```c
-int fio_x509_verify_signature(const fio_x509_cert_s *cert, const fio_x509_cert_s *issuer)
-```
-
-Verify certificate signature using issuer's public key.
-
-This verifies that the certificate was signed by the issuer.
-
-**Parameters:**
-- `cert` - Certificate to verify
-- `issuer` - Certificate of the issuer (contains the public key)
-
-**Returns:**
-- 0 if valid, -1 if invalid or error
-
-_Symbol type:_ `function`
-
-#### `fio_x509_check_validity`
-
-```c
-inline int fio_x509_check_validity(const fio_x509_cert_s *cert, int64_t current_time)
-```
-
-Check if certificate is currently valid (not expired, not yet valid).
-
-**Parameters:**
-- `cert` - Certificate to check
-- `current_time` - Current Unix timestamp (seconds since epoch)
-
-**Returns:**
-- 0 if valid, -1 if expired or not yet valid
-
-_Symbol type:_ `function`
-
-#### `fio_x509_match_hostname`
-
-```c
-int fio_x509_match_hostname(const fio_x509_cert_s *cert, const char *hostname, size_t hostname_len)
-```
-
-Check if hostname matches certificate (CN or SAN).
-
-Supports wildcard matching (*.example.com).
-Per RFC 6125, wildcards only match one label.
-
-**Parameters:**
-- `cert` - Certificate to check
-- `hostname` - Hostname to match
-- `hostname_len` - Length of hostname
-
-**Returns:**
-- 0 if match, -1 if no match
-
-_Symbol type:_ `function`
-
-#### `fio_x509_dn_equals`
-
-```c
-inline int fio_x509_dn_equals(const uint8_t *dn1, size_t dn1_len, const uint8_t *dn2, size_t dn2_len)
-```
-
-Compare two Distinguished Names for equality.
-
-Used for checking if issuer DN matches subject DN.
-
-**Parameters:**
-- `dn1` - First DN (DER-encoded)
-- `dn1_len` - Length of first DN
-- `dn2` - Second DN (DER-encoded)
-- `dn2_len` - Length of second DN
-
-**Returns:**
-- 0 if equal, non-zero if different
-
-_Symbol type:_ `function`
-
-#### `fio_x509_verify_chain`
-
-```c
-int fio_x509_verify_chain(const uint8_t **certs, const size_t *cert_lens, size_t cert_count, const char *hostname, int64_t current_time, fio_x509_trust_store_s *trust_store)
-```
-
-Validate a certificate chain for TLS 1.3.
-
-The chain should be ordered from end-entity to closest-to-root:
-  - certs[0] = server's certificate (end-entity)
-  - certs[1] = intermediate CA (signed certs[0])
-  - certs[n-1] = closest to root (may be root or intermediate)
-
-Validation performs:
-  1. Parse all certificates
-  2. Check validity period for all certificates
-  3. Verify hostname matches end-entity certificate (if hostname provided)
-  4. Verify each certificate's signature using the next certificate's key
-  5. Verify issuer DNs match subject DNs in the chain
-  6. Verify intermediate/root certificates have CA:TRUE
-  7. Verify the chain terminates at a trusted root (if trust store provided)
-
-**Parameters:**
-- `certs` - Array of DER-encoded certificates
-- `cert_lens` - Array of certificate lengths
-- `cert_count` - Number of certificates in chain
-- `hostname` - Expected hostname for end-entity (NULL to skip check)
-- `current_time` - Current Unix timestamp for validity checking
-- `trust_store` - Root CA certificates (NULL to skip trust check)
-
-**Returns:**
-- FIO_X509_OK (0) on success, or error code on failure
-
-_Symbol type:_ `function`
-
-#### `fio_x509_is_trusted`
-
-```c
-int fio_x509_is_trusted(const fio_x509_cert_s *cert, fio_x509_trust_store_s *trust_store)
-```
-
-Check if a certificate is in the trust store.
-
-Comparison is done by matching subject DN.
-
-**Parameters:**
-- `cert` - Certificate to check
-- `trust_store` - Trust store to search
-
-**Returns:**
-- 0 if trusted, -1 if not found
-
-_Symbol type:_ `function`
-
-#### `fio_tls_parse_certificate_message`
-
-```c
-size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries, size_t max_entries, const uint8_t *data, size_t data_len)
-```
-
-Parse TLS 1.3 Certificate message into individual certificates.
-
-TLS 1.3 Certificate message format (RFC 8446):
-  certificate_request_context<0..2^8-1>
-  certificate_list<0..2^24-1>:
-    CertificateEntry:
-      cert_data<1..2^24-1>
-      extensions<0..2^16-1>
-
-**Parameters:**
-- `entries` - Output array for certificate entries
-- `max_entries` - Maximum entries to parse
-- `data` - Raw Certificate message data (after handshake header)
-- `data_len` - Length of Certificate message data
-
-**Returns:**
-- Number of certificates parsed, or FIO_TLS_CERT_PARSE_ERROR on error
-
-_Symbol type:_ `function`
-
-#### `fio_x509_error_str`
-
-```c
-inline const char *fio_x509_error_str(int error)
-```
-
-Get human-readable error string for X.509 validation error code.
-
-**Parameters:**
-- `error` - Error code from fio_x509_verify_chain
-
-**Returns:**
-- Static string describing the error
 
 _Symbol type:_ `function`
 
@@ -28200,7 +27563,901 @@ _Symbol type:_ `function`
 
 -----------------------------------------------------
 
-## <a id="fio-stl-156-pem-h"></a> `./fio-stl/156 pem.h`
+## <a id="fio-stl-156-x509-h"></a> `./fio-stl/156 x509.h`
+
+57 public symbols.
+
+### Macros
+
+#### `FIO_X509_OID_SHA256_WITH_RSA`
+
+```c
+#define FIO_X509_OID_SHA256_WITH_RSA   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, [15] = 9}}) /* 1.2.840.113549.1.1.11 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SHA384_WITH_RSA`
+
+```c
+#define FIO_X509_OID_SHA384_WITH_RSA   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0C, [15] = 9}}) /* 1.2.840.113549.1.1.12 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SHA512_WITH_RSA`
+
+```c
+#define FIO_X509_OID_SHA512_WITH_RSA   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0D, [15] = 9}}) /* 1.2.840.113549.1.1.13 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_RSA_PSS`
+
+```c
+#define FIO_X509_OID_RSA_PSS   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0A, [15] = 9}}) /* 1.2.840.113549.1.1.10 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ECDSA_WITH_SHA256`
+
+```c
+#define FIO_X509_OID_ECDSA_WITH_SHA256   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02, [15] = 8}}) /* 1.2.840.10045.4.3.2 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ECDSA_WITH_SHA384`
+
+```c
+#define FIO_X509_OID_ECDSA_WITH_SHA384   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03, [15] = 8}}) /* 1.2.840.10045.4.3.3 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ECDSA_WITH_SHA512`
+
+```c
+#define FIO_X509_OID_ECDSA_WITH_SHA512   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x04, [15] = 8}}) /* 1.2.840.10045.4.3.4 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ED25519`
+
+```c
+#define FIO_X509_OID_ED25519   \
+  ((fio_u128){.u8 = {0x2B, 0x65, 0x70, [15] = 3}}) /* 1.3.101.112 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ED448`
+
+```c
+#define FIO_X509_OID_ED448   \
+  ((fio_u128){.u8 = {0x2B, 0x65, 0x71, [15] = 3}}) /* 1.3.101.113 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_RSA_ENCRYPTION`
+
+```c
+#define FIO_X509_OID_RSA_ENCRYPTION   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, [15] = 9}}) /* 1.2.840.113549.1.1.1 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_EC_PUBLIC_KEY`
+
+```c
+#define FIO_X509_OID_EC_PUBLIC_KEY   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01, [15] = 7}}) /* 1.2.840.10045.2.1 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SECP256R1`
+
+```c
+#define FIO_X509_OID_SECP256R1   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07, [15] = 8}}) /* 1.2.840.10045.3.1.7 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SECP384R1`
+
+```c
+#define FIO_X509_OID_SECP384R1   \
+  ((fio_u128){.u8 = {0x2B, 0x81, 0x04, 0x00, 0x22, [15] = 5}}) /* 1.3.132.0.34 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SECP521R1`
+
+```c
+#define FIO_X509_OID_SECP521R1   \
+  ((fio_u128){.u8 = {0x2B, 0x81, 0x04, 0x00, 0x23, [15] = 5}}) /* 1.3.132.0.35 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_X25519`
+
+```c
+#define FIO_X509_OID_X25519   \
+  ((fio_u128){.u8 = {0x2B, 0x65, 0x6E, [15] = 3}}) /* 1.3.101.110 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_X448`
+
+```c
+#define FIO_X509_OID_X448   \
+  ((fio_u128){.u8 = {0x2B, 0x65, 0x6F, [15] = 3}}) /* 1.3.101.111 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SUBJECT_KEY_ID`
+
+```c
+#define FIO_X509_OID_SUBJECT_KEY_ID   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x0E, [15] = 3}}) /* 2.5.29.14 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_KEY_USAGE`
+
+```c
+#define FIO_X509_OID_KEY_USAGE   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x0F, [15] = 3}}) /* 2.5.29.15 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SUBJECT_ALT_NAME`
+
+```c
+#define FIO_X509_OID_SUBJECT_ALT_NAME   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x11, [15] = 3}}) /* 2.5.29.17 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_BASIC_CONSTRAINTS`
+
+```c
+#define FIO_X509_OID_BASIC_CONSTRAINTS   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x13, [15] = 3}}) /* 2.5.29.19 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_CRL_DIST_POINTS`
+
+```c
+#define FIO_X509_OID_CRL_DIST_POINTS   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x1F, [15] = 3}}) /* 2.5.29.31 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_CERT_POLICIES`
+
+```c
+#define FIO_X509_OID_CERT_POLICIES   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x20, [15] = 3}}) /* 2.5.29.32 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_AUTH_KEY_ID`
+
+```c
+#define FIO_X509_OID_AUTH_KEY_ID   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x23, [15] = 3}}) /* 2.5.29.35 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_EXT_KEY_USAGE`
+
+```c
+#define FIO_X509_OID_EXT_KEY_USAGE   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x25, [15] = 3}}) /* 2.5.29.37 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_EKU_SERVER_AUTH`
+
+```c
+#define FIO_X509_OID_EKU_SERVER_AUTH   \
+  ((fio_u128){.u8 = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01, [15] = 8}}) /* 1.3.6.1.5.5.7.3.1 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_EKU_CLIENT_AUTH`
+
+```c
+#define FIO_X509_OID_EKU_CLIENT_AUTH   \
+  ((fio_u128){.u8 = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02, [15] = 8}}) /* 1.3.6.1.5.5.7.3.2 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_COMMON_NAME`
+
+```c
+#define FIO_X509_OID_COMMON_NAME   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x03, [15] = 3}}) /* 2.5.4.3 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_COUNTRY`
+
+```c
+#define FIO_X509_OID_COUNTRY   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x06, [15] = 3}}) /* 2.5.4.6 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_LOCALITY`
+
+```c
+#define FIO_X509_OID_LOCALITY   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x07, [15] = 3}}) /* 2.5.4.7 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_STATE`
+
+```c
+#define FIO_X509_OID_STATE   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x08, [15] = 3}}) /* 2.5.4.8 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ORGANIZATION`
+
+```c
+#define FIO_X509_OID_ORGANIZATION   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x0A, [15] = 3}}) /* 2.5.4.10 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_ORG_UNIT`
+
+```c
+#define FIO_X509_OID_ORG_UNIT   \
+  ((fio_u128){.u8 = {0x55, 0x04, 0x0B, [15] = 3}}) /* 2.5.4.11 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_TLS_CERT_PARSE_ERROR`
+
+```c
+#define FIO_TLS_CERT_PARSE_ERROR ((size_t)-1)
+```
+
+Error value for fio_tls_parse_certificate_message
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_MAX_CHAIN_DEPTH`
+
+```c
+#define FIO_X509_MAX_CHAIN_DEPTH 10
+```
+
+
+
+_Symbol type:_ `macro`
+
+### Types
+
+#### `fio_x509_key_type_e`
+
+```c
+typedef enum {
+FIO_X509_KEY_UNKNOWN = 0,
+FIO_X509_KEY_RSA = 1, /**< RSA (any key size) */
+FIO_X509_KEY_ECDSA_P256 = 2, /**< ECDSA with P-256/secp256r1 */
+FIO_X509_KEY_ECDSA_P384 = 3, /**< ECDSA with P-384/secp384r1 */
+FIO_X509_KEY_ED25519 = 4, /**< Ed25519 (EdDSA) */
+} fio_x509_key_type_e
+```
+
+Public key algorithm types
+
+_Symbol type:_ `type`
+
+#### `fio_x509_sig_alg_e`
+
+```c
+typedef enum {
+FIO_X509_SIG_UNKNOWN = 0,
+FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
+FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
+FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
+FIO_X509_SIG_RSA_PSS_SHA256 = 4, /**< RSA-PSS with SHA-256 */
+FIO_X509_SIG_RSA_PSS_SHA384 = 5, /**< RSA-PSS with SHA-384 */
+FIO_X509_SIG_RSA_PSS_SHA512 = 6, /**< RSA-PSS with SHA-512 */
+FIO_X509_SIG_ECDSA_SHA256 = 7, /**< ecdsa-with-SHA256 */
+FIO_X509_SIG_ECDSA_SHA384 = 8, /**< ecdsa-with-SHA384 */
+FIO_X509_SIG_ED25519 = 9, /**< Ed25519 */
+} fio_x509_sig_alg_e
+```
+
+Signature algorithm types
+
+_Symbol type:_ `type`
+
+#### `fio_x509_key_usage_e`
+
+```c
+typedef enum {
+FIO_X509_KU_DIGITAL_SIGNATURE = 0x0080, /* bit 0 = MSB of byte 0 */
+FIO_X509_KU_NON_REPUDIATION = 0x0040, /* bit 1 */
+FIO_X509_KU_KEY_ENCIPHERMENT = 0x0020, /* bit 2 */
+FIO_X509_KU_DATA_ENCIPHERMENT = 0x0010, /* bit 3 */
+FIO_X509_KU_KEY_AGREEMENT = 0x0008, /* bit 4 */
+FIO_X509_KU_KEY_CERT_SIGN = 0x0004, /* bit 5 */
+FIO_X509_KU_CRL_SIGN = 0x0002, /* bit 6 */
+FIO_X509_KU_ENCIPHER_ONLY = 0x0001, /* bit 7 */
+FIO_X509_KU_DECIPHER_ONLY = 0x8000, /* bit 8 = MSB of byte 1 */
+} fio_x509_key_usage_e
+```
+
+Key Usage bit flags (RFC 5280 Section 4.2.1.3)
+
+ASN.1 BIT STRING uses MSB-first bit ordering:
+- Bit 0 = MSB of first byte (0x80)
+- Bit 1 = 0x40, Bit 2 = 0x20, etc.
+- Bits 8+ are in the second byte
+
+_Symbol type:_ `type`
+
+#### `fio_x509_error_e`
+
+```c
+typedef enum {
+FIO_X509_OK = 0, /**< Validation successful */
+FIO_X509_ERR_PARSE = -1, /**< Failed to parse certificate */
+FIO_X509_ERR_EXPIRED = -2, /**< Certificate expired */
+FIO_X509_ERR_NOT_YET_VALID = -3, /**< Certificate not yet valid */
+FIO_X509_ERR_SIGNATURE = -4, /**< Signature verification failed */
+FIO_X509_ERR_ISSUER_MISMATCH = -5, /**< Issuer DN doesn't match subject DN */
+FIO_X509_ERR_NOT_CA = -6, /**< Issuer is not a CA certificate */
+FIO_X509_ERR_NO_TRUST_ANCHOR = -7, /**< Certificate not in trust store */
+FIO_X509_ERR_HOSTNAME_MISMATCH = -8, /**< Hostname doesn't match cert */
+FIO_X509_ERR_EMPTY_CHAIN = -9, /**< Empty certificate chain */
+FIO_X509_ERR_CHAIN_TOO_LONG = -10, /**< Chain exceeds maximum depth */
+} fio_x509_error_e
+```
+
+X.509 chain validation error codes
+
+_Symbol type:_ `type`
+
+#### `fio_x509_trust_store_s`
+
+```c
+typedef struct {
+const uint8_t **roots; /**< Array of root CA certificate DER data */
+const size_t *root_lens; /**< Array of root CA certificate lengths */
+size_t root_count; /**< Number of root CAs */
+} fio_x509_trust_store_s
+```
+
+Trust store for root CA certificates
+
+_Symbol type:_ `type`
+
+#### `fio_tls_cert_entry_s`
+
+```c
+typedef struct {
+const uint8_t *cert; /**< DER-encoded certificate data */
+size_t cert_len; /**< Certificate length */
+} fio_tls_cert_entry_s
+```
+
+TLS certificate entry (parsed from Certificate message)
+
+_Symbol type:_ `type`
+
+#### `fio_x509_cert_s`
+
+```c
+struct fio_x509_cert_s {
+/* Buffer views (16 bytes each, 8-byte aligned — no padding) */
+/** Raw DER data (points to the original input, NOT a copy) */
+fio_ubuf_info_s der;
+/** Certificate serial number (raw INTEGER contents, pointer into DER) */
+fio_ubuf_info_s serial;
+/** Subject Distinguished Name (raw DER for comparison) */
+fio_ubuf_info_s subject;
+/** Issuer Distinguished Name (raw DER for comparison) */
+fio_ubuf_info_s issuer;
+/** Subject Common Name (if present, pointer into DER data) */
+fio_buf_info_s cn;
+/** Public Key Data (union based on key_type) */
+union {
+struct {
+fio_ubuf_info_s n; /**< RSA modulus (big-endian) */
+fio_ubuf_info_s e; /**< RSA exponent (big-endian) */
+} rsa;
+struct {
+fio_ubuf_info_s point; /**< Uncompressed EC point (04 || x || y) */
+} ecdsa;
+struct {
+fio_ubuf_info_s key; /**< 32-byte Ed25519 public key */
+} ed25519;
+} pubkey;
+/** Signature value (pointer into DER data) */
+fio_ubuf_info_s signature;
+/** TBS Certificate (for signature verification) */
+fio_ubuf_info_s tbs;
+/** Subject Alternative Name: first DNS name (if present) */
+fio_buf_info_s san_dns;
+/** Subject Alternative Name extension raw data (for iterating all SANs) */
+fio_ubuf_info_s san_ext;
+/** Subject Alternative Name: first IP address (if present) */
+fio_ubuf_info_s san_ip;
+/** Validity period (Unix timestamps) */
+int64_t not_before;
+int64_t not_after;
+/** SHA-256 fingerprint of the DER data (see fio_x509_fingerprint) */
+uint8_t fingerprint[32];
+/* Small fields grouped at the end (no bitfields — byte access is faster) */
+/** Public Key Type */
+fio_x509_key_type_e key_type;
+/** Signature Algorithm */
+fio_x509_sig_alg_e sig_alg;
+/** Key Usage extension bits */
+uint16_t key_usage;
+/** Peer chain verification state: non-zero if a TLS backend verified this
+* certificate's chain (see fio_io_peer_info_next). Always zero after
+* fio_x509_parse — parsing does not verify anything. */
+uint8_t verified;
+/** Position in the peer certificate chain (0 = leaf certificate).
+* Iteration is capped at 128 certificates (max value 127) as a
+* deep-nesting / DoS guard. Set by fio_io_peer_info_next.
+* Always zero after fio_x509_parse. */
+uint8_t chain_index;
+/** Certificate version (0=v1, 1=v2, 2=v3) */
+uint8_t version;
+/** Basic Constraints: is CA */
+uint8_t is_ca;
+/** Key Usage extension present */
+uint8_t has_key_usage;
+}
+```
+
+Parsed X.509 certificate structure.
+
+All buffer fields are non-owning views (`fio_buf_info_s` /
+`fio_ubuf_info_s`) into the original DER data, which must remain valid
+while the certificate is in use.
+
+When a certificate is obtained through fio_io_peer_info_next (TLS peer
+certificate inspection), the views point into memory owned by the TLS
+backend and remain valid until the next fio_io_peer_info_next call (on ANY
+connection) or until the connection is closed, whichever comes first.
+
+_Symbol type:_ `type`
+
+#### `fio_x509_keypair_type_e`
+
+```c
+typedef enum {
+FIO_X509_KEYPAIR_ED25519 = 1, /**< Ed25519 (preferred) */
+FIO_X509_KEYPAIR_P256 = 2, /**< ECDSA P-256 */
+} fio_x509_keypair_type_e
+```
+
+Key pair types for certificate generation
+
+_Symbol type:_ `type`
+
+#### `fio_x509_keypair_s`
+
+```c
+typedef struct {
+fio_x509_keypair_type_e type; /**< Key type */
+uint8_t secret_key[64]; /**< Secret key (32 bytes for Ed25519, P-256) */
+uint8_t public_key[65]; /**< Public key (32 for Ed25519, 65 for P-256) */
+size_t secret_key_len; /**< Actual secret key length */
+size_t public_key_len; /**< Actual public key length */
+} fio_x509_keypair_s
+```
+
+Key pair structure for certificate generation
+
+_Symbol type:_ `type`
+
+#### `fio_x509_cert_options_s`
+
+```c
+typedef struct {
+fio_buf_info_s cn; /**< Subject Common Name (required) */
+fio_buf_info_s org; /**< Subject Organization (optional) */
+fio_buf_info_s ou; /**< Subject Organizational Unit (optional) */
+fio_buf_info_s country; /**< Subject Country (optional, 2 chars) */
+int64_t not_before; /**< Validity start (Unix timestamp, 0 = now) */
+int64_t not_after; /**< Validity end (Unix timestamp, 0 = +1 year) */
+const fio_buf_info_s *san_dns; /**< Subject Alternative Names (DNS) */
+size_t san_dns_count; /**< Number of SAN DNS entries */
+int is_ca; /**< Set CA:TRUE in BasicConstraints */
+uint16_t key_usage; /**< Key Usage bits (0 = default for type) */
+} fio_x509_cert_options_s
+```
+
+Certificate generation options.
+
+All string fields are `fio_buf_info_s` views (non-owning) — a zero `.len`
+marks the field as absent. There is NO implicit strlen fallback: callers
+wrapping C strings should use `FIO_BUF_INFO2((char *)s, FIO_STRLEN(s))`.
+
+_Symbol type:_ `type`
+
+### Functions
+
+#### `fio_x509_parse`
+
+```c
+int fio_x509_parse(fio_x509_cert_s *cert, const uint8_t *der_data, size_t der_len)
+```
+
+Parse a DER-encoded X.509 certificate.
+
+The cert structure will contain pointers into the original DER data,
+so the DER data must remain valid while the cert is in use.
+
+**Parameters:**
+- `cert` - Output certificate structure (will be zeroed first)
+- `der_data` - Pointer to DER-encoded certificate
+- `der_len` - Length of DER data in bytes
+
+**Returns:**
+- 0 on success, -1 on error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_fingerprint`
+
+```c
+void fio_x509_fingerprint(fio_x509_cert_s *cert)
+```
+
+Computes the SHA-256 fingerprint of the certificate's DER data, storing
+the raw 32-byte hash in `cert->fingerprint`.
+
+Call after fio_x509_parse. This is a lazy (on-demand) operation so that
+parsing alone never pays the hashing cost.
+
+**Parameters:**
+- `cert` - Parsed certificate (must have been filled by fio_x509_parse)
+
+_Symbol type:_ `function`
+
+#### `fio_x509_verify_signature`
+
+```c
+int fio_x509_verify_signature(const fio_x509_cert_s *cert, const fio_x509_cert_s *issuer)
+```
+
+Verify certificate signature using issuer's public key.
+
+This verifies that the certificate was signed by the issuer.
+
+**Parameters:**
+- `cert` - Certificate to verify
+- `issuer` - Certificate of the issuer (contains the public key)
+
+**Returns:**
+- 0 if valid, -1 if invalid or error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_check_validity`
+
+```c
+inline int fio_x509_check_validity(const fio_x509_cert_s *cert, int64_t current_time)
+```
+
+Check if certificate is currently valid (not expired, not yet valid).
+
+**Parameters:**
+- `cert` - Certificate to check
+- `current_time` - Current Unix timestamp (seconds since epoch)
+
+**Returns:**
+- 0 if valid, -1 if expired or not yet valid
+
+_Symbol type:_ `function`
+
+#### `fio_x509_match_hostname`
+
+```c
+int fio_x509_match_hostname(const fio_x509_cert_s *cert, const char *hostname, size_t hostname_len)
+```
+
+Check if hostname matches certificate (CN or SAN).
+
+Supports wildcard matching (*.example.com).
+Per RFC 6125, wildcards only match one label.
+
+**Parameters:**
+- `cert` - Certificate to check
+- `hostname` - Hostname to match
+- `hostname_len` - Length of hostname
+
+**Returns:**
+- 0 if match, -1 if no match
+
+_Symbol type:_ `function`
+
+#### `fio_x509_verify_chain`
+
+```c
+int fio_x509_verify_chain(const uint8_t **certs, const size_t *cert_lens, size_t cert_count, const char *hostname, int64_t current_time, fio_x509_trust_store_s *trust_store)
+```
+
+Validate a certificate chain for TLS 1.3.
+
+The chain should be ordered from end-entity to closest-to-root:
+  - certs[0] = server's certificate (end-entity)
+  - certs[1] = intermediate CA (signed certs[0])
+  - certs[n-1] = closest to root (may be root or intermediate)
+
+Validation performs:
+  1. Parse all certificates
+  2. Check validity period for all certificates
+  3. Verify hostname matches end-entity certificate (if hostname provided)
+  4. Verify each certificate's signature using the next certificate's key
+  5. Verify issuer DNs match subject DNs in the chain
+  6. Verify intermediate/root certificates have CA:TRUE
+  7. Verify the chain terminates at a trusted root (if trust store provided)
+
+**Parameters:**
+- `certs` - Array of DER-encoded certificates
+- `cert_lens` - Array of certificate lengths
+- `cert_count` - Number of certificates in chain
+- `hostname` - Expected hostname for end-entity (NULL to skip check)
+- `current_time` - Current Unix timestamp for validity checking
+- `trust_store` - Root CA certificates (NULL to skip trust check)
+
+**Returns:**
+- FIO_X509_OK (0) on success, or error code on failure
+
+_Symbol type:_ `function`
+
+#### `fio_x509_is_trusted`
+
+```c
+int fio_x509_is_trusted(const fio_x509_cert_s *cert, fio_x509_trust_store_s *trust_store)
+```
+
+Check if a certificate is in the trust store.
+
+Comparison is done by matching subject DN.
+
+**Parameters:**
+- `cert` - Certificate to check
+- `trust_store` - Trust store to search
+
+**Returns:**
+- 0 if trusted, -1 if not found
+
+_Symbol type:_ `function`
+
+#### `fio_tls_parse_certificate_message`
+
+```c
+size_t fio_tls_parse_certificate_message(fio_tls_cert_entry_s *entries, size_t max_entries, const uint8_t *data, size_t data_len)
+```
+
+Parse TLS 1.3 Certificate message into individual certificates.
+
+TLS 1.3 Certificate message format (RFC 8446):
+  certificate_request_context<0..2^8-1>
+  certificate_list<0..2^24-1>:
+    CertificateEntry:
+      cert_data<1..2^24-1>
+      extensions<0..2^16-1>
+
+**Parameters:**
+- `entries` - Output array for certificate entries
+- `max_entries` - Maximum entries to parse
+- `data` - Raw Certificate message data (after handshake header)
+- `data_len` - Length of Certificate message data
+
+**Returns:**
+- Number of certificates parsed, or FIO_TLS_CERT_PARSE_ERROR on error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_error_str`
+
+```c
+inline const char *fio_x509_error_str(int error)
+```
+
+Get human-readable error string for X.509 validation error code.
+
+**Parameters:**
+- `error` - Error code from fio_x509_verify_chain
+
+**Returns:**
+- Static string describing the error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_keypair_ed25519`
+
+```c
+int fio_x509_keypair_ed25519(fio_x509_keypair_s *keypair)
+```
+
+Generate an Ed25519 key pair for certificate signing.
+
+**Parameters:**
+- `keypair` - Output key pair structure
+
+**Returns:**
+- 0 on success, -1 on error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_keypair_p256`
+
+```c
+int fio_x509_keypair_p256(fio_x509_keypair_s *keypair)
+```
+
+Generate a P-256 key pair for certificate signing.
+
+**Parameters:**
+- `keypair` - Output key pair structure
+
+**Returns:**
+- 0 on success, -1 on error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_self_signed_cert`
+
+```c
+size_t fio_x509_self_signed_cert(uint8_t *buf, size_t buf_len, const fio_x509_keypair_s *keypair, const fio_x509_cert_options_s *options)
+```
+
+Generate a self-signed X.509v3 certificate.
+
+The certificate is DER-encoded and written to the output buffer.
+Call with buf=NULL to get the maximum possible certificate size.
+This returns a worst-case size that accounts for variable-length DER
+encoding (e.g., serial numbers with varying leading zeros), ensuring
+that a buffer of this size will always be sufficient for the actual
+generation call.
+
+**Parameters:**
+- `buf` - Output buffer (can be NULL to calculate max size)
+- `buf_len` - Buffer size (ignored if buf is NULL)
+- `keypair` - Key pair to use for signing
+- `options` - Certificate options
+
+**Returns:**
+- Number of bytes written (if buf!=NULL) or max needed (if buf==NULL),
+
+or 0 on error
+
+_Symbol type:_ `function`
+
+#### `fio_x509_keypair_clear`
+
+```c
+inline void fio_x509_keypair_clear(fio_x509_keypair_s *keypair)
+```
+
+Securely clear a key pair structure.
+
+**Parameters:**
+- `keypair` - Key pair to clear
+
+_Symbol type:_ `function`
+
+-----------------------------------------------------
+
+## <a id="fio-stl-157-pem-h"></a> `./fio-stl/157 pem.h`
 
 8 public symbols.
 
@@ -32384,7 +32641,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-401-io-api-h"></a> `./fio-stl/401 io api.h`
 
-102 public symbols.
+103 public symbols.
 
 ### Macros
 
@@ -33078,6 +33335,45 @@ fio_socket_i fio_io_fd(fio_io_s *io)
 ```
 
 Returns the socket file descriptor (fd) associated with the IO.
+
+_Symbol type:_ `function`
+
+#### `fio_io_peer_info_next`
+
+```c
+int fio_io_peer_info_next(fio_io_s *io, fio_x509_cert_s *dest)
+```
+
+Returns the next peer information item for the connection.
+
+Iterate to inspect the peer's certificate chain (leaf certificate first),
+e.g., for client certificate authentication / authorization:
+
+    fio_x509_cert_s cert = {0}; // zeroed = new loop
+    while (fio_io_peer_info_next(io, &cert) == 0) {
+      // cert.verified != 0 if the TLS backend verified the chain
+      // cert.chain_index == position in the chain (0 == leaf)
+      // cert.cn, cert.fingerprint, etc.
+    }
+
+The iterator is stateless — the position is identified from `dest` alone:
+a zeroed `dest` (`der.buf == NULL`) starts a new loop; otherwise iteration
+continues at `dest->chain_index + 1`. Multiple loops may iterate the same
+connection concurrently without interfering with each other.
+
+Iteration is capped at 128 certificates (`chain_index` 0..127) as a
+deep-nesting / DoS guard — longer chains end the loop with -1.
+
+A `NULL` `dest` returns -1. To restart a loop, zero the struct (e.g.,
+`FIO_MEMSET(&cert, 0, sizeof(cert))`).
+
+Returns 0 while data is available, or -1 when done / unavailable (e.g.,
+handshake incomplete, the peer sent no certificate, or the X509 module is
+unavailable).
+
+NOTE: the parsed fields point into memory owned by the TLS backend and
+remain valid only until the next fio_io_peer_info_next call (on ANY
+connection) or until the connection is closed, whichever comes first.
 
 _Symbol type:_ `function`
 
@@ -36967,6 +37263,7 @@ FIO_HTTP_RESOURCE_EDIT,
 FIO_HTTP_RESOURCE_CREATE,
 FIO_HTTP_RESOURCE_UPDATE,
 FIO_HTTP_RESOURCE_DELETE,
+FIO_HTTP_RESOURCE_QUERY,
 } fio_http_resource_action_e
 ```
 

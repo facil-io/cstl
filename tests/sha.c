@@ -155,6 +155,35 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha2_kat)(void) {
 }
 
 /* *****************************************************************************
+SHA-384 Known-Answer Tests
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha384_kat)(void) {
+  /* NIST test vector: SHA-384("abc") */
+  static const uint8_t abc_sha384[48] = {
+      0xcb, 0x00, 0x75, 0x3f, 0x45, 0xa3, 0x5e, 0x8b, 0xb5, 0xa0, 0x3d, 0x69,
+      0x9a, 0xc6, 0x50, 0x07, 0x27, 0x2c, 0x32, 0xab, 0x0e, 0xde, 0xd1, 0x63,
+      0x1a, 0x8b, 0x60, 0x5a, 0x43, 0xff, 0x5b, 0xed, 0x80, 0x86, 0x07, 0x2b,
+      0xa1, 0xe7, 0xcc, 0x23, 0x58, 0xba, 0xec, 0xa1, 0x34, 0xc8, 0x25, 0xa7};
+  fio_u512 h = fio_sha384("abc", 3);
+  FIO_ASSERT(!FIO_MEMCMP(h.u8, abc_sha384, 48),
+             "SHA-384 one-shot mismatch (must differ from truncated SHA-512)");
+
+  /* Streaming must match one-shot */
+  fio_sha512_s ctx = fio_sha384_init();
+  fio_sha384_consume(&ctx, "a", 1);
+  fio_sha384_consume(&ctx, "bc", 2);
+  fio_u512 hs = fio_sha384_finalize(&ctx);
+  FIO_ASSERT(!FIO_MEMCMP(hs.u8, abc_sha384, 48),
+             "SHA-384 streaming mismatch");
+
+  /* SHA-384 must NOT equal truncated SHA-512 (different initial values) */
+  fio_u512 h512 = fio_sha512("abc", 3);
+  FIO_ASSERT(FIO_MEMCMP(h.u8, h512.u8, 48) != 0,
+             "SHA-384 must not equal truncated SHA-512");
+}
+
+/* *****************************************************************************
 SHA-2 Streaming / Incremental Tests
 ***************************************************************************** */
 
@@ -537,6 +566,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
 int main(void) {
   FIO_NAME_TEST(stl, sha1_kat)();
   FIO_NAME_TEST(stl, sha2_kat)();
+  FIO_NAME_TEST(stl, sha384_kat)();
   FIO_NAME_TEST(stl, sha2_streaming)();
   FIO_NAME_TEST(stl, hmac_rfc4231)();
 #if HAVE_OPENSSL

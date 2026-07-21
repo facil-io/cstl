@@ -482,6 +482,55 @@ Transport backends use `fio_io_tls_each` to consume the stored instructions.
 Iterator callbacks return `int`; check the backend using them for any additional
 meaning assigned to non-zero return values.
 
+### Peer certificate inspection (mTLS)
+
+```c
+int fio_io_peer_info_next(fio_io_s *io, fio_x509_cert_s *dest);
+```
+
+Trust configured with `fio_io_tls_trust_add` always refers to **peer**
+verification: a server context verifies (and requires) client certificates,
+a client context verifies the server certificate. An empty trust list means
+no peer verification; passing `NULL` to `fio_io_tls_trust_add` selects the
+system trust store.
+
+Once the handshake completed, iterate the peer's certificate chain (leaf
+first) to implement application level client certificate authentication and
+authorization:
+
+```c
+fio_x509_cert_s cert = {0}; /* zeroed = new loop */
+while (fio_io_peer_info_next(io, &cert) == 0) {
+  if (!cert.verified)
+    continue; /* chain failed TLS-level verification (or was skipped) */
+  /* authorize by identity, e.g.: cert.cn,
+   * cert.subject, or pin cert.fingerprint (32-byte SHA-256) */
+}
+```
+
+The iterator is stateless — the position is identified from `dest` alone: a
+zeroed `dest` (`der.buf == NULL`) starts a new loop; otherwise iteration
+continues at `dest->chain_index + 1`. To restart a loop, zero the struct.
+Multiple loops may iterate the same connection concurrently.
+Iteration is capped at 128 certificates (`chain_index` 0..127) as a
+deep-nesting / DoS guard — longer chains end the loop with -1.
+
+Passing a `NULL` `dest` returns -1. The function returns
+-1 when the iteration is done or when peer information is unavailable (no
+TLS, handshake incomplete, peer sent no certificate, or the X509 module
+missing).
+
+Each call parses the next certificate into a `fio_x509_cert_s` (defined in
+the X509 module, `156 x509.h`). All certificate fields point directly into
+memory owned by the TLS backend — nothing is copied or allocated. The views
+stay valid until the next `fio_io_peer_info_next` call (on ANY connection)
+or connection close, whichever comes first; copy anything that must outlive
+the loop.
+
+The `verified` flag reflects the TLS backend's verification of the whole
+chain and is identical for every certificate in the chain. Connections that
+skipped verification (empty trust list) report `verified == 0`.
+
 ---
 
 ## Async Worker Queues

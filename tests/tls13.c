@@ -42,13 +42,11 @@ FIO_SFUNC int tls13_test_make_p256_cert(uint8_t **der,
   if (fio_x509_keypair_p256(&kp) != 0)
     return -1;
 
-  const char *san[] = {"localhost"};
+  fio_buf_info_s san_buf[] = {FIO_BUF_INFO2((char *)"localhost", 9)};
   fio_x509_cert_options_s opts = {
-      .subject_cn = "localhost",
-      .subject_cn_len = 9,
-      .subject_org = "facil.io",
-      .subject_org_len = 8,
-      .san_dns = san,
+      .cn = FIO_BUF_INFO2((char *)"localhost", 9),
+      .org = FIO_BUF_INFO2((char *)"facil.io", 8),
+      .san_dns = san_buf,
       .san_dns_count = 1,
       .is_ca = 0,
   };
@@ -697,6 +695,297 @@ FIO_SFUNC void test_tls13_io_functions(void) {
   FIO_ASSERT(fn.flush != NULL, "flush missing");
   FIO_ASSERT(fn.cleanup != NULL, "cleanup missing");
   FIO_ASSERT(fn.finish != NULL, "finish missing");
+  FIO_ASSERT(fn.peer_info_next != NULL, "peer_info_next missing");
+}
+
+/* *****************************************************************************
+Client certificate trust verification (mTLS)
+***************************************************************************** */
+
+/** Server requires a client certificate AND trusts it: handshake succeeds. */
+FIO_SFUNC void test_tls13_handshake_client_cert_trusted(void) {
+  uint8_t *server_cert = NULL;
+  size_t server_cert_len = 0;
+  fio_x509_keypair_s server_kp;
+  fio_tls13_server_s server;
+  const uint8_t *server_certs[1];
+  size_t server_cert_lens[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "localhost");
+  fio_tls13_client_skip_verification(&client, 1);
+
+  uint8_t *client_cert = NULL;
+  size_t client_cert_len = 0;
+  fio_x509_keypair_s client_kp;
+  FIO_ASSERT(tls13_test_make_p256_cert(&client_cert, &client_cert_len,
+                                        &client_kp) == 0,
+             "client cert generation failed");
+
+  /* Trust the client's (self-signed) certificate as its own anchor. */
+  const uint8_t *trust_roots[1] = {client_cert};
+  const size_t trust_lens[1] = {client_cert_len};
+  fio_x509_trust_store_s trust = {.roots = trust_roots,
+                                  .root_lens = trust_lens,
+                                  .root_count = 1};
+  fio_tls13_server_set_trust_store(&server, &trust);
+
+  FIO_ASSERT(tls13_test_run_handshake(
+                 &client, &server, 1, &client_kp, client_cert, client_cert_len),
+             "trusted client-cert handshake failed");
+  FIO_ASSERT(fio_tls13_server_client_cert_received(&server),
+             "server did not receive client certificate");
+  FIO_ASSERT(fio_tls13_server_client_cert_verified(&server),
+             "server did not verify trusted client certificate");
+
+  fio_tls13_client_destroy(&client);
+  fio_tls13_server_destroy(&server);
+  tls13_test_free(server_cert, server_cert_len);
+  tls13_test_free(client_cert, client_cert_len);
+  fio_x509_keypair_clear(&server_kp);
+  fio_x509_keypair_clear(&client_kp);
+}
+
+/** Server requires a client certificate but does NOT trust it: fails. */
+FIO_SFUNC void test_tls13_handshake_client_cert_untrusted(void) {
+  uint8_t *server_cert = NULL;
+  size_t server_cert_len = 0;
+  fio_x509_keypair_s server_kp;
+  fio_tls13_server_s server;
+  const uint8_t *server_certs[1];
+  size_t server_cert_lens[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "localhost");
+  fio_tls13_client_skip_verification(&client, 1);
+
+  uint8_t *client_cert = NULL;
+  size_t client_cert_len = 0;
+  fio_x509_keypair_s client_kp;
+  FIO_ASSERT(tls13_test_make_p256_cert(&client_cert, &client_cert_len,
+                                        &client_kp) == 0,
+             "client cert generation failed");
+
+  /* Trust store holds a DIFFERENT certificate — client must be rejected. */
+  uint8_t *other_cert = NULL;
+  size_t other_cert_len = 0;
+  fio_x509_keypair_s other_kp;
+  FIO_ASSERT(tls13_test_make_p256_cert(&other_cert, &other_cert_len,
+                                        &other_kp) == 0,
+             "other cert generation failed");
+  const uint8_t *trust_roots[1] = {other_cert};
+  const size_t trust_lens[1] = {other_cert_len};
+  fio_x509_trust_store_s trust = {.roots = trust_roots,
+                                  .root_lens = trust_lens,
+                                  .root_count = 1};
+  fio_tls13_server_set_trust_store(&server, &trust);
+
+  FIO_ASSERT(!tls13_test_run_handshake(
+                 &client, &server, 1, &client_kp, client_cert, client_cert_len),
+             "untrusted client certificate must not complete the handshake");
+  FIO_ASSERT(!fio_tls13_server_client_cert_verified(&server),
+             "untrusted client certificate must not be marked verified");
+
+  fio_tls13_client_destroy(&client);
+  fio_tls13_server_destroy(&server);
+  tls13_test_free(server_cert, server_cert_len);
+  tls13_test_free(client_cert, client_cert_len);
+  tls13_test_free(other_cert, other_cert_len);
+  fio_x509_keypair_clear(&server_kp);
+  fio_x509_keypair_clear(&client_kp);
+  fio_x509_keypair_clear(&other_kp);
+}
+
+/** Client verifies the server certificate against its trust store. */
+FIO_SFUNC void test_tls13_client_verifies_server(void) {
+  uint8_t *server_cert = NULL;
+  size_t server_cert_len = 0;
+  fio_x509_keypair_s server_kp;
+  fio_tls13_server_s server;
+  const uint8_t *server_certs[1];
+  size_t server_cert_lens[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+
+  /* Trusting the server's certificate: handshake verifies successfully. */
+  const uint8_t *trust_roots[1] = {server_cert};
+  const size_t trust_lens[1] = {server_cert_len};
+  fio_x509_trust_store_s trust = {.roots = trust_roots,
+                                  .root_lens = trust_lens,
+                                  .root_count = 1};
+
+  fio_tls13_client_s client;
+  fio_tls13_client_init(&client, "localhost");
+  fio_tls13_client_set_trust_store(&client, &trust);
+
+  FIO_ASSERT(tls13_test_run_handshake(&client, &server, 0, NULL, NULL, 0),
+             "handshake with trusted server cert failed");
+  FIO_ASSERT(fio_tls13_client_is_cert_verified(&client),
+             "client should report the server certificate verified");
+  fio_tls13_client_destroy(&client);
+  fio_tls13_server_destroy(&server);
+
+  /* NOT trusting the server's certificate: client must abort. */
+  uint8_t *other_cert = NULL;
+  size_t other_cert_len = 0;
+  fio_x509_keypair_s other_kp;
+  FIO_ASSERT(tls13_test_make_p256_cert(&other_cert, &other_cert_len,
+                                        &other_kp) == 0,
+             "other cert generation failed");
+  fio_tls13_server_s server2;
+  tls13_test_init_server(&server2, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+
+  const uint8_t *bad_roots[1] = {other_cert};
+  const size_t bad_lens[1] = {other_cert_len};
+  fio_x509_trust_store_s bad_trust = {.roots = bad_roots,
+                                      .root_lens = bad_lens,
+                                      .root_count = 1};
+
+  fio_tls13_client_s client2;
+  fio_tls13_client_init(&client2, "localhost");
+  fio_tls13_client_set_trust_store(&client2, &bad_trust);
+
+  FIO_ASSERT(!tls13_test_run_handshake(&client2, &server2, 0, NULL, NULL, 0),
+             "untrusted server certificate must not complete the handshake");
+  FIO_ASSERT(!fio_tls13_client_is_cert_verified(&client2),
+             "client must not report an untrusted certificate as verified");
+
+  fio_tls13_client_destroy(&client2);
+  fio_tls13_server_destroy(&server2);
+  tls13_test_free(server_cert, server_cert_len);
+  tls13_test_free(other_cert, other_cert_len);
+  fio_x509_keypair_clear(&server_kp);
+  fio_x509_keypair_clear(&other_kp);
+}
+
+/* *****************************************************************************
+Peer information iteration (fio___tls13_peer_info_next)
+***************************************************************************** */
+
+FIO_SFUNC void test_tls13_peer_info_next(void) {
+  uint8_t *cert = NULL, *cert2 = NULL;
+  size_t cert_len = 0, cert2_len = 0;
+  fio_x509_keypair_s kp, kp2;
+  FIO_ASSERT(tls13_test_make_p256_cert(&cert, &cert_len, &kp) == 0,
+             "cert generation failed");
+  FIO_ASSERT(tls13_test_make_p256_cert(&cert2, &cert2_len, &kp2) == 0,
+             "second cert generation failed");
+
+  /* Fabricate a minimal server-side connection holding a 2-certificate
+   * client certificate chain (leaf first) */
+  fio___tls13_connection_s *conn = (fio___tls13_connection_s *)FIO_MEM_REALLOC(
+      NULL, 0, sizeof(*conn) + FIO___TLS13_BUF_TOTAL, 0);
+  FIO_ASSERT(conn != NULL, "connection allocation failed");
+  FIO_MEMSET(conn, 0, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
+  conn->is_client = 0;
+  conn->handshake_complete = 1;
+  conn->state.server.client_cert_chain[0] = cert;
+  conn->state.server.client_cert_chain_lens[0] = cert_len;
+  conn->state.server.client_cert_chain[1] = cert2;
+  conn->state.server.client_cert_chain_lens[1] = cert2_len;
+  conn->state.server.client_cert_chain_count = 2;
+  conn->state.server.client_cert_verified = 1;
+
+  fio_x509_cert_s info;
+
+  /* NULL dest is an error — there is no hidden reset channel */
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, NULL, conn) == -1,
+             "NULL dest should return -1");
+
+  /* A zeroed dest starts a new loop at the leaf certificate */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == 0,
+             "peer_info_next failed for first certificate");
+  FIO_ASSERT(info.chain_index == 0, "leaf should have chain_index 0");
+  FIO_ASSERT(info.verified == 1, "verified flag lost");
+  FIO_ASSERT(info.der.buf == cert && info.der.len == cert_len,
+             "DER should reference the stored certificate (zero-copy)");
+  FIO_ASSERT(info.cn.buf != NULL && info.cn.len == 9 &&
+                 !FIO_MEMCMP(info.cn.buf, "localhost", 9),
+             "subject CN mismatch");
+  FIO_ASSERT(info.key_type == FIO_X509_KEY_ECDSA_P256,
+             "key type mismatch");
+  FIO_ASSERT(info.pubkey.ecdsa.point.buf != NULL &&
+                 info.pubkey.ecdsa.point.len == 65,
+             "public key missing");
+  fio_u256 expected_fp = fio_sha256(cert, cert_len);
+  FIO_ASSERT(!FIO_MEMCMP(info.fingerprint, expected_fp.u8, 32),
+             "fingerprint should equal SHA-256 of DER");
+
+  /* The next call steps forward using the data in `dest` alone */
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == 0,
+             "peer_info_next failed for second certificate");
+  FIO_ASSERT(info.chain_index == 1, "second cert should have chain_index 1");
+  FIO_ASSERT(info.der.buf == cert2 && info.der.len == cert2_len,
+             "second DER should reference the second stored certificate");
+
+  /* Iteration ends with -1 */
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == -1,
+             "iteration should end after the last certificate");
+
+  /* Restarting a loop only requires zeroing the struct */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == 0 &&
+                 info.chain_index == 0 && info.der.buf == cert,
+             "zeroed dest should restart the loop at the leaf");
+
+  /* Interleaved loops on the same connection do not interfere */
+  fio_x509_cert_s a, b;
+  FIO_MEMSET(&a, 0, sizeof(a));
+  FIO_MEMSET(&b, 0, sizeof(b));
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &a, conn) == 0 &&
+                 a.chain_index == 0,
+             "loop A failed at leaf");
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &b, conn) == 0 &&
+                 b.chain_index == 0,
+             "loop B failed at leaf");
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &a, conn) == 0 &&
+                 a.chain_index == 1 && a.der.buf == cert2,
+             "loop A should step to the second certificate");
+  FIO_ASSERT(b.chain_index == 0 && b.der.buf == cert,
+             "loop B state must be untouched by loop A");
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &b, conn) == 0 &&
+                 b.chain_index == 1 && b.der.buf == cert2,
+             "loop B should step to the second certificate");
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &a, conn) == -1,
+             "loop A should end after the last certificate");
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &b, conn) == -1,
+             "loop B should end after the last certificate");
+
+  /* Iteration is capped at 128 certificates (deep-nesting / DoS guard) */
+  FIO_MEMSET(&info, 0, sizeof(info));
+  info.der.buf = cert; /* non-NULL: continue from a (forged) position */
+  info.chain_index = 127;
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == -1,
+             "iteration must stop at the 128-certificate cap");
+  info.chain_index = 200;
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == -1,
+             "chain_index >= 128 must return -1");
+
+  /* Skipped (insecure) verification must never be reported as verified */
+  FIO_MEMSET(conn, 0, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
+  conn->is_client = 1;
+  conn->handshake_complete = 1;
+  conn->state.client.cert_chain[0] = cert;
+  conn->state.client.cert_chain_lens[0] = cert_len;
+  conn->state.client.cert_chain_count = 1;
+  conn->state.client.cert_verified = 1;   /* set by the skip path */
+  conn->state.client.chain_verified = 1;  /* set by the skip path */
+  conn->state.client.skip_cert_verify = 1;
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___tls13_peer_info_next(-1, &info, conn) == 0,
+             "peer_info_next failed for client-side certificate");
+  FIO_ASSERT(info.verified == 0,
+             "skipped verification must not be reported as verified");
+  FIO_ASSERT(info.chain_index == 0,
+             "client-side leaf should have chain_index 0");
+
+  FIO_MEM_FREE(conn, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
+  tls13_test_free(cert, cert_len);
+  tls13_test_free(cert2, cert2_len);
+  fio_x509_keypair_clear(&kp);
+  fio_x509_keypair_clear(&kp2);
 }
 
 /* *****************************************************************************
@@ -709,8 +998,12 @@ int main(void) {
   test_tls13_handshake_roundtrip();
   test_tls13_handshake_alpn();
   test_tls13_handshake_client_cert();
+  test_tls13_handshake_client_cert_trusted();
+  test_tls13_handshake_client_cert_untrusted();
+  test_tls13_client_verifies_server();
   test_tls13_app_data();
   test_tls13_large_transfer();
   test_tls13_io_functions();
+  test_tls13_peer_info_next();
   return 0;
 }
