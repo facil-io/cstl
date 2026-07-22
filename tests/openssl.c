@@ -23,6 +23,13 @@ Helpers
 
 FIO_SFUNC void fio___openssl_test_alpn_cb(fio_io_s *io) { (void)io; }
 
+FIO_SFUNC int fio___openssl_test_verify_accept(int preverify_ok,
+                                                X509_STORE_CTX *store) {
+  (void)preverify_ok;
+  (void)store;
+  return 1;
+}
+
 /** Generates a self-signed ECDSA P-256 certificate with the given CN. */
 FIO_SFUNC X509 *fio___openssl_test_make_cert(EVP_PKEY **out_key,
                                              const char *cn) {
@@ -414,11 +421,18 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_peer_info_next)(void) {
   FIO_ASSERT(SSL_CTX_use_PrivateKey(sctx, leaf_key) == 1, "use_PrivateKey");
   FIO_ASSERT(SSL_CTX_add0_chain_cert(sctx, ca) == 1,
              "add0_chain_cert failed"); /* ctx owns `ca` on success */
+  SSL_CTX_set_verify(sctx,
+                     SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+                     fio___openssl_test_verify_accept);
 
-  /* Client context: no verification (we test iteration, not validation) */
+  /* Client context: no server verification, but send a client certificate. */
   SSL_CTX *cctx = SSL_CTX_new(TLS_client_method());
   FIO_ASSERT(cctx != NULL, "client SSL_CTX_new failed");
   SSL_CTX_set_verify(cctx, SSL_VERIFY_NONE, NULL);
+  FIO_ASSERT(SSL_CTX_use_certificate(cctx, leaf) == 1,
+             "client use_certificate");
+  FIO_ASSERT(SSL_CTX_use_PrivateKey(cctx, leaf_key) == 1,
+             "client use_PrivateKey");
 
   /* In-memory full handshake over a BIO pair */
   BIO *sbio = NULL, *cbio = NULL;
@@ -438,6 +452,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_peer_info_next)(void) {
   }
   FIO_ASSERT(SSL_is_init_finished(cssl) && SSL_is_init_finished(sssl),
              "in-memory handshake failed");
+
+  /* OpenSSL documents an asymmetric raw-chain layout: client-side calls
+   * include the server leaf, while server-side calls exclude the client leaf. */
+  STACK_OF(X509) *client_chain = SSL_get_peer_cert_chain(cssl);
+  FIO_ASSERT(client_chain && sk_X509_num(client_chain) == 2,
+             "client raw peer chain should contain leaf + extra chain cert");
+  FIO_ASSERT(sk_X509_value(client_chain, 0) &&
+                 X509_cmp(sk_X509_value(client_chain, 0), leaf) == 0,
+             "client raw peer chain should include the leaf at index 0");
+  FIO_ASSERT(sk_X509_value(client_chain, 1) &&
+                 X509_cmp(sk_X509_value(client_chain, 1), ca) == 0,
+             "client raw peer chain should preserve the remaining chain");
+  STACK_OF(X509) *server_chain = SSL_get_peer_cert_chain(sssl);
+  FIO_ASSERT(!server_chain || sk_X509_num(server_chain) == 0,
+             "server raw peer chain should exclude the leaf-only client cert");
 
   /* Fabricate the per-connection wrapper (client iterates server chain) */
   fio___openssl_connection_s conn;
@@ -497,6 +526,20 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_peer_info_next)(void) {
   /* Iteration ends with -1 */
   FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &conn) == -1,
              "iteration should end after the last certificate");
+
+  /* The server-side chain API excludes the client leaf on OpenSSL. */
+  fio___openssl_connection_s server_conn;
+  FIO_MEMSET(&server_conn, 0, sizeof(server_conn));
+  server_conn.ssl = sssl;
+  server_conn.handshake_complete = 1;
+  FIO_MEMSET(&info, 0, sizeof(info));
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &server_conn) == 0,
+             "server peer_info_next failed for client leaf certificate");
+  FIO_ASSERT(info.chain_index == 0 && info.der.len == leaf_der_len &&
+                 !FIO_MEMCMP(info.der.buf, leaf_der, leaf_der_len),
+             "server-side client leaf DER mismatch");
+  FIO_ASSERT(fio___openssl_peer_info_next(-1, &info, &server_conn) == -1,
+             "server-side client chain should contain only the leaf");
 
   /* Restarting a loop only requires zeroing the struct */
   FIO_MEMSET(&info, 0, sizeof(info));

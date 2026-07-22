@@ -1142,6 +1142,42 @@ FIO_STATIC_ALLOC_DEF(fio___openssl_peer_der,
                      FIO___OPENSSL_PEER_INFO_DER_MAX,
                      1)
 
+/** Returns an owned reference to the peer certificate at `pos` (leaf first).
+ *
+ * SSL_get_peer_cert_chain includes the leaf for clients but excludes it for
+ * servers.  Normalize both layouts so the public iterator always starts at the
+ * leaf and advances through the remaining chain without duplication. */
+FIO_SFUNC X509 *fio___openssl_peer_cert_at(SSL *ssl, size_t pos) {
+  X509 *leaf = SSL_get1_peer_certificate(ssl);
+  if (!leaf)
+    return NULL;
+  if (!pos)
+    return leaf;
+
+  STACK_OF(X509) *chain = SSL_get_peer_cert_chain(ssl);
+  if (!chain) {
+    X509_free(leaf);
+    return NULL;
+  }
+  const int count = sk_X509_num(chain);
+  size_t chain_pos = pos - 1;
+  if (count > 0) {
+    X509 *first = sk_X509_value(chain, 0);
+    if (first && X509_cmp(first, leaf) == 0)
+      chain_pos = pos;
+  }
+  if (chain_pos >= (size_t)count) {
+    X509_free(leaf);
+    return NULL;
+  }
+
+  X509 *cert = sk_X509_value(chain, (int)chain_pos);
+  if (!cert || X509_up_ref(cert) != 1)
+    cert = NULL;
+  X509_free(leaf);
+  return cert;
+}
+
 /** Returns the next peer certificate for the connection.
  *
  * The iterator is stateless — the position is identified from `dest` alone:
@@ -1158,9 +1194,6 @@ FIO_SFUNC int fio___openssl_peer_info_next(fio_socket_i fd,
     return -1;
   (void)fd;
 #if defined(H___FIO_X509___H) && defined(H___FIO_SHA2___H)
-  STACK_OF(X509) *chain = SSL_get_peer_cert_chain(conn->ssl);
-  if (!chain)
-    return -1;
   /* Identify the position from `dest` — read `chain_index` BEFORE
    * fio_x509_parse, which zeroes the whole struct.
    * Iteration is capped at 128 certificates (deep-nesting / DoS guard). */
@@ -1170,28 +1203,31 @@ FIO_SFUNC int fio___openssl_peer_info_next(fio_socket_i fd,
       dest->der.buf ? ((size_t)dest->chain_index + 1) : (size_t)0;
   if ((uint8_t)pos & (uint8_t)128U)
     return -1;
-  if (pos >= (size_t)sk_X509_num(chain))
-    return -1;
-  X509 *cert = sk_X509_value(chain, (int)pos);
+  X509 *cert = fio___openssl_peer_cert_at(conn->ssl, pos);
   if (!cert)
     return -1;
+  int result = -1;
   /* Stage the DER encoding in a fresh static slot (two-pass i2d).
    * DER is canonical, so the re-encoded bytes equal the received bytes and
    * all parsed views reference the slot directly. */
   int der_len = i2d_X509(cert, NULL);
   if (der_len <= 0 || (size_t)der_len > FIO___OPENSSL_PEER_INFO_DER_MAX)
-    return -1;
+    goto cleanup;
   uint8_t *slot = fio___openssl_peer_der(1);
   uint8_t *w = slot;
   if (i2d_X509(cert, &w) != der_len)
-    return -1;
+    goto cleanup;
   if (fio_x509_parse(dest, slot, (size_t)der_len) != 0)
-    return -1;
+    goto cleanup;
   fio_x509_fingerprint(dest);
   /* OpenSSL verifies the chain as a whole; the result applies to each cert. */
   dest->verified = (SSL_get_verify_result(conn->ssl) == X509_V_OK);
   dest->chain_index = (uint8_t)pos;
-  return 0;
+  result = 0;
+
+cleanup:
+  X509_free(cert);
+  return result;
 #else  /* !H___FIO_X509___H || !H___FIO_SHA2___H */
   return -1; /* peer certificate inspection requires the X509 module */
 #endif

@@ -7,6 +7,7 @@ tests-old/tls13-openssl.c with deterministic, library-only roundtrips.  The
 facil.io side uses the native TLS 1.3 IO implementation
 (fio_tls13_io_functions); the client uses OpenSSL's libssl directly from the
 same process.  In addition to HTTP interoperability, this test verifies that
+an OpenSSL client certificate is exposed through fio_io_peer_info_next and that
 partially consumed plaintext schedules enough deferred on_data callbacks to
 drain the TLS buffer when the peer sends no more application data.
 
@@ -32,6 +33,8 @@ Without OpenSSL the test compiles to a no-op that exits 0.
 
 #include <arpa/inet.h>
 #include <openssl/err.h>
+#include <openssl/obj_mac.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <pthread.h>
 #include <string.h>
@@ -52,24 +55,33 @@ static const size_t fio___tls13_openssl_rt_payload_len[] = {
     4096,
     FIO_TLS13_MAX_PLAINTEXT_LEN + 257,
 };
+static const char fio___tls13_openssl_rt_client_cn[] = "openssl-client";
 
 typedef struct {
   fio_http_listener_s *http_listener;
   fio_io_listener_s *partial_listener;
+  fio_io_listener_s *openssl_peer_listener;
+  X509 *client_cert;
+  EVP_PKEY *client_key;
   int http_port;
   int partial_port;
+  int openssl_peer_port;
   int result;
   int done;
   size_t partial_phase;
   size_t partial_received[FIO___TLS13_OPENSSL_RT_PHASES];
   size_t partial_on_data[FIO___TLS13_OPENSSL_RT_PHASES];
+  int partial_peer_cert_seen;
+  int openssl_peer_cert_seen;
   int partial_failed;
+  int openssl_peer_failed;
   int thread_started;
   pthread_t thread;
 } fio___tls13_openssl_rt_state_s;
 
 static fio___tls13_openssl_rt_state_s fio___tls13_openssl_rt_state = {0};
 static fio_io_protocol_s fio___tls13_openssl_rt_partial_protocol = {0};
+static fio_io_protocol_s fio___tls13_openssl_rt_openssl_peer_protocol = {0};
 static int fio___tls13_openssl_rt_watchdog_fired = 0;
 
 /* *****************************************************************************
@@ -83,6 +95,36 @@ static void fio___tls13_openssl_rt_on_http(fio_http_s *h) {
 
 static uint8_t fio___tls13_openssl_rt_payload_byte(size_t phase, size_t pos) {
   return (uint8_t)((pos * 131U + phase * 17U + 29U) & 255U);
+}
+
+static int fio___tls13_openssl_rt_peer_cert_validate(fio_io_s *io,
+                                                      const char *backend) {
+  fio_x509_cert_s cert = {0};
+  int peer_info_result = fio_io_peer_info_next(io, &cert);
+  if (peer_info_result || !cert.der.buf || !cert.der.len || cert.chain_index ||
+      !cert.verified || !cert.cn.buf ||
+      cert.cn.len != sizeof(fio___tls13_openssl_rt_client_cn) - 1 ||
+      memcmp(cert.cn.buf, fio___tls13_openssl_rt_client_cn, cert.cn.len)) {
+    fprintf(stderr,
+            "%s fio_io_peer_info_next client certificate mismatch: "
+            "result=%d, DER=%zu, chain_index=%u, verified=%u, CN=%.*s\n",
+            backend,
+            peer_info_result,
+            cert.der.len,
+            (unsigned)cert.chain_index,
+            (unsigned)cert.verified,
+            (int)cert.cn.len,
+            cert.cn.buf ? cert.cn.buf : "");
+    return -1;
+  }
+  if (fio_io_peer_info_next(io, &cert) != -1) {
+    fprintf(stderr,
+            "%s fio_io_peer_info_next returned an unexpected client chain "
+            "certificate\n",
+            backend);
+    return -1;
+  }
+  return 0;
 }
 
 static void fio___tls13_openssl_rt_on_data_partial(fio_io_s *io) {
@@ -106,6 +148,15 @@ static void fio___tls13_openssl_rt_on_data_partial(fio_io_s *io) {
   size_t len = fio_io_read(io, buf, sizeof(buf));
   if (!len)
     return;
+
+  if (!state->partial_peer_cert_seen) {
+    if (fio___tls13_openssl_rt_peer_cert_validate(io, "embedded TLS")) {
+      state->partial_failed = 1;
+      fio_io_close(io);
+      return;
+    }
+    state->partial_peer_cert_seen = 1;
+  }
 
   ++state->partial_on_data[phase];
   const size_t offset = state->partial_received[phase];
@@ -143,6 +194,23 @@ static void fio___tls13_openssl_rt_on_data_partial(fio_io_s *io) {
     ++state->partial_phase;
     fio_io_write(io, &ack, 1);
   }
+}
+
+static void fio___tls13_openssl_rt_on_data_openssl_peer(fio_io_s *io) {
+  fio___tls13_openssl_rt_state_s *state =
+      (fio___tls13_openssl_rt_state_s *)fio_io_udata(io);
+  uint8_t buf[2];
+  size_t len = fio_io_read(io, buf, sizeof(buf));
+  if (!len)
+    return;
+  if (state->openssl_peer_cert_seen || len != 1 || buf[0] != 'P' ||
+      fio___tls13_openssl_rt_peer_cert_validate(io, "OpenSSL")) {
+    state->openssl_peer_failed = 1;
+    fio_io_close(io);
+    return;
+  }
+  state->openssl_peer_cert_seen = 1;
+  fio_io_write(io, buf, 1);
 }
 
 /* *****************************************************************************
@@ -199,10 +267,92 @@ static int fio___tls13_openssl_rt_socket_connect(const char *host, int port) {
   return fd;
 }
 
+static int fio___tls13_openssl_rt_client_identity_create(char *trust_path) {
+  fio___tls13_openssl_rt_state_s *state = &fio___tls13_openssl_rt_state;
+  EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+  EVP_PKEY *key = NULL;
+  X509 *cert = NULL;
+  FILE *file = NULL;
+  int fd = -1;
+  int trust_file_created = 0;
+  int result = -1;
+
+  if (!kctx || EVP_PKEY_keygen_init(kctx) <= 0 ||
+      EVP_PKEY_CTX_set_ec_paramgen_curve_nid(kctx,
+                                             NID_X9_62_prime256v1) <= 0 ||
+      EVP_PKEY_keygen(kctx, &key) <= 0 || !(cert = X509_new()) ||
+      !X509_set_version(cert, 2) ||
+      !ASN1_INTEGER_set(X509_get_serialNumber(cert), 1) ||
+      !X509_gmtime_adj(X509_getm_notBefore(cert), -3600) ||
+      !X509_gmtime_adj(X509_getm_notAfter(cert), 3600) ||
+      !X509_NAME_add_entry_by_txt(
+          X509_get_subject_name(cert),
+          "CN",
+          MBSTRING_ASC,
+          (const unsigned char *)fio___tls13_openssl_rt_client_cn,
+          -1,
+          -1,
+          0) ||
+      !X509_set_issuer_name(cert, X509_get_subject_name(cert)) ||
+      !X509_set_pubkey(cert, key) || X509_sign(cert, key, EVP_sha256()) <= 0)
+    goto cleanup;
+
+  fd = mkstemp(trust_path);
+  if (fd < 0)
+    goto cleanup;
+  trust_file_created = 1;
+  file = fdopen(fd, "w");
+  if (!file)
+    goto cleanup;
+
+  int write_ok = PEM_write_X509(file, cert) == 1;
+  if (fclose(file))
+    write_ok = 0;
+  file = NULL;
+  fd = -1;
+  if (!write_ok)
+    goto cleanup;
+  state->client_cert = cert;
+  state->client_key = key;
+  cert = NULL;
+  key = NULL;
+  result = 0;
+
+cleanup:
+  if (file)
+    fclose(file);
+  else if (fd >= 0)
+    close(fd);
+  EVP_PKEY_CTX_free(kctx);
+  X509_free(cert);
+  EVP_PKEY_free(key);
+  if (result) {
+    if (trust_file_created)
+      unlink(trust_path);
+    ERR_print_errors_fp(stderr);
+  }
+  return result;
+}
+
+static int fio___tls13_openssl_rt_client_cert_add(SSL_CTX *ctx) {
+  fio___tls13_openssl_rt_state_s *state = &fio___tls13_openssl_rt_state;
+  if (SSL_CTX_use_certificate(ctx, state->client_cert) != 1 ||
+      SSL_CTX_use_PrivateKey(ctx, state->client_key) != 1 ||
+      SSL_CTX_check_private_key(ctx) != 1) {
+    fprintf(stderr, "failed to load the OpenSSL client certificate\n");
+    return -1;
+  }
+  return 0;
+}
+
 static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
   if (!ctx)
     return -1;
+  if (fio___tls13_openssl_rt_client_cert_add(ctx)) {
+    SSL_CTX_free(ctx);
+    return -1;
+  }
 
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
   SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
@@ -303,6 +453,10 @@ static int fio___tls13_openssl_rt_partial_client_run(const char *host,
   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
   if (!ctx)
     return -1;
+  if (fio___tls13_openssl_rt_client_cert_add(ctx)) {
+    SSL_CTX_free(ctx);
+    return -1;
+  }
 
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
   SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
@@ -368,6 +522,54 @@ static int fio___tls13_openssl_rt_partial_client_run(const char *host,
   return ok ? 0 : -1;
 }
 
+static int fio___tls13_openssl_rt_peer_client_run(const char *host, int port) {
+  SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+  if (!ctx)
+    return -1;
+  if (fio___tls13_openssl_rt_client_cert_add(ctx)) {
+    SSL_CTX_free(ctx);
+    return -1;
+  }
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
+  SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+
+  int fd = fio___tls13_openssl_rt_socket_connect(host, port);
+  if (fd < 0) {
+    SSL_CTX_free(ctx);
+    return -1;
+  }
+  SSL *ssl = SSL_new(ctx);
+  if (!ssl) {
+    close(fd);
+    SSL_CTX_free(ctx);
+    return -1;
+  }
+  SSL_set_fd(ssl, fd);
+
+  uint8_t byte = 'P';
+  int ok = 1;
+  if (SSL_connect(ssl) <= 0) {
+    fprintf(stderr, "OpenSSL-backend SSL_connect failed\n");
+    ok = 0;
+  } else if (SSL_write(ssl, &byte, 1) != 1) {
+    fprintf(stderr, "OpenSSL-backend SSL_write failed\n");
+    ok = 0;
+  } else {
+    byte = 0;
+    if (SSL_read(ssl, &byte, 1) != 1 || byte != 'P') {
+      fprintf(stderr, "OpenSSL-backend acknowledgement failed\n");
+      ok = 0;
+    }
+  }
+
+  SSL_shutdown(ssl);
+  SSL_free(ssl);
+  close(fd);
+  SSL_CTX_free(ctx);
+  return ok ? 0 : -1;
+}
+
 static void *fio___tls13_openssl_rt_thread(void *ignr_) {
   (void)ignr_;
   /* Give both listeners a moment to start accepting. */
@@ -380,13 +582,20 @@ static void *fio___tls13_openssl_rt_thread(void *ignr_) {
   fio___tls13_openssl_rt_state.partial_port =
       fio___tls13_openssl_rt_listener_port(
           fio___tls13_openssl_rt_state.partial_listener);
+  fio___tls13_openssl_rt_state.openssl_peer_port =
+      fio___tls13_openssl_rt_listener_port(
+          fio___tls13_openssl_rt_state.openssl_peer_listener);
   if (fio___tls13_openssl_rt_state.http_port <= 0 ||
-      fio___tls13_openssl_rt_state.partial_port <= 0) {
+      fio___tls13_openssl_rt_state.partial_port <= 0 ||
+      fio___tls13_openssl_rt_state.openssl_peer_port <= 0) {
     fio___tls13_openssl_rt_state.result = -1;
   } else if (fio___tls13_openssl_rt_client_run(
                  "127.0.0.1", fio___tls13_openssl_rt_state.http_port) ||
              fio___tls13_openssl_rt_partial_client_run(
-                 "127.0.0.1", fio___tls13_openssl_rt_state.partial_port)) {
+                 "127.0.0.1", fio___tls13_openssl_rt_state.partial_port) ||
+             fio___tls13_openssl_rt_peer_client_run(
+                 "127.0.0.1",
+                 fio___tls13_openssl_rt_state.openssl_peer_port)) {
     fio___tls13_openssl_rt_state.result = -1;
   }
   fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
@@ -430,19 +639,32 @@ Main
 
 int main(void) {
   fprintf(stderr,
-          "Testing TLS 1.3 roundtrips (fio TLS 1.3 + OpenSSL):\n");
+          "Testing TLS 1.3 roundtrips (embedded TLS + OpenSSL backends):\n");
 
   fio_io_functions_s tls13_funcs = fio_tls13_io_functions();
+  fio_io_functions_s openssl_funcs = fio_openssl_io_functions();
   fio___tls13_openssl_rt_partial_protocol = (fio_io_protocol_s){
       .on_data = fio___tls13_openssl_rt_on_data_partial,
       .on_timeout = fio_io_touch,
       .io_functions = tls13_funcs,
       .timeout = 5000,
   };
+  fio___tls13_openssl_rt_openssl_peer_protocol = (fio_io_protocol_s){
+      .on_data = fio___tls13_openssl_rt_on_data_openssl_peer,
+      .on_timeout = fio_io_touch,
+      .io_functions = openssl_funcs,
+      .timeout = 5000,
+  };
+
+  char trust_path[] = ".tls13-openssl-client-cert-XXXXXX";
+  FIO_ASSERT(!fio___tls13_openssl_rt_client_identity_create(trust_path),
+             "failed to create the OpenSSL client identity");
 
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls, "fio_io_tls_new failed");
   fio_io_tls_cert_add(tls, "localhost", NULL, NULL, NULL);
+  FIO_ASSERT(fio_io_tls_trust_add(tls, trust_path),
+             "fio_io_tls_trust_add failed");
   fio_io_tls_alpn_add(tls, "http/1.1", NULL);
 
   fio___tls13_openssl_rt_state.http_listener =
@@ -451,18 +673,26 @@ int main(void) {
                       .tls_io_func = &tls13_funcs,
                       .on_http = fio___tls13_openssl_rt_on_http,
                       .timeout = 5);
-  FIO_ASSERT(fio___tls13_openssl_rt_state.http_listener,
-             "fio_http_listen failed on 127.0.0.1:0");
-
   fio___tls13_openssl_rt_state.partial_listener =
       fio_io_listen(.url = "tcp://127.0.0.1:0",
                     .protocol = &fio___tls13_openssl_rt_partial_protocol,
                     .udata = &fio___tls13_openssl_rt_state,
                     .tls = tls,
                     .hide_from_log = 1);
+  fio___tls13_openssl_rt_state.openssl_peer_listener =
+      fio_io_listen(.url = "tcp://127.0.0.1:0",
+                    .protocol = &fio___tls13_openssl_rt_openssl_peer_protocol,
+                    .udata = &fio___tls13_openssl_rt_state,
+                    .tls = tls,
+                    .hide_from_log = 1);
   fio_io_tls_free(tls);
+  FIO_ASSERT(!unlink(trust_path), "failed to remove temporary trust file");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.http_listener,
+             "fio_http_listen failed on 127.0.0.1:0");
   FIO_ASSERT(fio___tls13_openssl_rt_state.partial_listener,
-             "fio_io_listen failed on 127.0.0.1:0");
+             "embedded TLS fio_io_listen failed on 127.0.0.1:0");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.openssl_peer_listener,
+             "OpenSSL fio_io_listen failed on 127.0.0.1:0");
 
   fio_state_callback_add(FIO_CALL_ON_START,
                          fio___tls13_openssl_rt_start_client,
@@ -482,6 +712,9 @@ int main(void) {
   fio_io_listen_stop(
       (fio_io_listener_s *)fio___tls13_openssl_rt_state.http_listener);
   fio_io_listen_stop(fio___tls13_openssl_rt_state.partial_listener);
+  fio_io_listen_stop(fio___tls13_openssl_rt_state.openssl_peer_listener);
+  X509_free(fio___tls13_openssl_rt_state.client_cert);
+  EVP_PKEY_free(fio___tls13_openssl_rt_state.client_key);
 
   FIO_ASSERT(!fio___tls13_openssl_rt_watchdog_fired,
              "TLS 1.3 roundtrip timed out");
@@ -491,6 +724,14 @@ int main(void) {
              "TLS 1.3 OpenSSL client roundtrip failed");
   FIO_ASSERT(!fio___tls13_openssl_rt_state.partial_failed,
              "TLS 1.3 partial-read data validation failed");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.partial_peer_cert_seen,
+             "embedded TLS fio_io_peer_info_next did not expose the OpenSSL "
+             "client certificate");
+  FIO_ASSERT(!fio___tls13_openssl_rt_state.openssl_peer_failed,
+             "OpenSSL peer certificate validation failed");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.openssl_peer_cert_seen,
+             "OpenSSL fio_io_peer_info_next did not expose the client leaf "
+             "certificate");
   FIO_ASSERT(fio___tls13_openssl_rt_state.partial_phase ==
                  FIO___TLS13_OPENSSL_RT_PHASES,
              "TLS 1.3 partial-read phases did not complete");
@@ -522,7 +763,9 @@ int main(void) {
     }
   }
 
-  fprintf(stderr, "TLS 1.3 HTTP and partial-read roundtrips passed.\n");
+  fprintf(stderr,
+          "TLS 1.3 HTTP, partial-read, and peer-certificate roundtrips "
+          "passed.\n");
   return 0;
 }
 
