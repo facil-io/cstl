@@ -929,8 +929,7 @@ Event handling
 static void fio___io_poll_on_data(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
-  FIO___IO_FLAG_UNSET(io,
-                      (FIO___IO_FLAG_POLLIN_SET | FIO___IO_FLAG_DATA_SCHD));
+  FIO___IO_FLAG_UNSET(io, (FIO___IO_FLAG_POLLIN_SET | FIO___IO_FLAG_DATA_SCHD));
   if (!(io->flags & FIO___IO_FLAG_PREVENT_ON_DATA)) {
     /* this also tests for the suspended / throttled flags, allows closed */
     io->pr->on_data(io);
@@ -1395,6 +1394,33 @@ SFUNC fio_io_tls_s *fio_io_tls_from_url(fio_io_tls_s *tls, fio_url_s url) {
                           pass_tmp.buf);
     } else {
       FIO_LOG_ERROR("TLS files in `fio_io_listen` URL too long, "
+                    "construct TLS object separately");
+    }
+  }
+
+  if (tls_info.trust.len) {
+    if (((tls_info.trust.len == 6 &&
+          ((fio_buf2u32u(tls_info.trust.buf + 2) | 0x20202020UL) ==
+           fio_buf2u32u((char *)"stem"))) ||
+         (tls_info.trust.len == 3)) &&
+        ((tls_info.trust.buf[0] | 32) == 's') &&
+        ((tls_info.trust.buf[1] | 32) == 'y') &&
+        ((tls_info.trust.buf[2] | 32) == 's')) {
+      fio_io_tls_trust_add(tls, NULL);
+    } else if (tls_info.trust.len < 124) {
+      FIO_STR_INFO_TMP_VAR(trust_tmp, 128);
+      fio_string_write(&trust_tmp,
+                       NULL,
+                       tls_info.trust.buf,
+                       tls_info.trust.len);
+      if (tls_info.trust.len < 5 ||
+          (fio_buf2u32u(tls_info.trust.buf + (tls_info.trust.len - 4)) |
+           0x20202020UL) != fio_buf2u32u(".pem")) {
+        fio_string_write(&trust_tmp, NULL, ".pem", 4);
+      }
+      fio_io_tls_trust_add(tls, trust_tmp.buf);
+    } else {
+      FIO_LOG_ERROR("TLS trust file in `fio_io_listen` URL too long, "
                     "construct TLS object separately");
     }
   }

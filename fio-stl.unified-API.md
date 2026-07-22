@@ -20613,6 +20613,7 @@ _Symbol type:_ `type`
 typedef struct {
 fio_buf_info_s key;
 fio_buf_info_s cert;
+fio_buf_info_s trust;
 fio_buf_info_s pass;
 bool tls;
 } fio_url_tls_info_s

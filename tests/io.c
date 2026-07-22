@@ -234,6 +234,20 @@ static int fio___test_io_tls_each_trust(fio_io_tls_each_s *e, const char *nm) {
   return 0;
 }
 
+typedef struct {
+  size_t count;
+  const char *name;
+} fio___test_io_tls_trust_state_s;
+
+static int fio___test_io_tls_capture_trust(fio_io_tls_each_s *e,
+                                           const char *nm) {
+  fio___test_io_tls_trust_state_s *state =
+      (fio___test_io_tls_trust_state_s *)e->udata2;
+  ++state->count;
+  state->name = nm;
+  return 0;
+}
+
 static void fio___test_io_tls_alpn_cb(fio_io_s *io) { ++(*(volatile int *)io); }
 
 static void test_io_tls_helpers(void) {
@@ -309,6 +323,9 @@ static void test_io_tls_helpers(void) {
   const struct {
     const char *url;
     int expect_tls;
+    uintptr_t expect_trust_count;
+    size_t expect_trust_each;
+    const char *expect_trust_name;
   } url_tests[] = {
       {"http://example.com", 0},
       {"https://example.com", 1},
@@ -319,6 +336,9 @@ static void test_io_tls_helpers(void) {
       {"wss://example.com", 1},
       {"udp://example.com", 0},
       {"udps://example.com", 1},
+      {"http://example.com?trust=ca.pem", 1, 1, 1, "ca.pem"},
+      {"http://example.com?trust=sys", 1, 0, 1, NULL},
+      {"http://example.com?trust=system", 1, 0, 1, NULL},
       {NULL, 0},
   };
   for (size_t i = 0; url_tests[i].url; ++i) {
@@ -330,6 +350,30 @@ static void test_io_tls_helpers(void) {
                url_tests[i].url,
                url_tests[i].expect_tls,
                got);
+    FIO_ASSERT(fio_io_tls_trust_count(t) == url_tests[i].expect_trust_count,
+               "TLS trust count error for %s: expected %zu, got %zu",
+               url_tests[i].url,
+               (size_t)url_tests[i].expect_trust_count,
+               (size_t)fio_io_tls_trust_count(t));
+    fio___test_io_tls_trust_state_s trust_state = {0};
+    if (t)
+      fio_io_tls_each(t,
+                      .udata2 = &trust_state,
+                      .each_trust = fio___test_io_tls_capture_trust);
+    FIO_ASSERT(trust_state.count == url_tests[i].expect_trust_each,
+               "TLS trust iteration error for %s: expected %zu, got %zu",
+               url_tests[i].url,
+               url_tests[i].expect_trust_each,
+               trust_state.count);
+    FIO_ASSERT(
+        (!trust_state.name && !url_tests[i].expect_trust_name) ||
+            (trust_state.name && url_tests[i].expect_trust_name &&
+             !strcmp(trust_state.name, url_tests[i].expect_trust_name)),
+        "TLS trust source error for %s: expected %s, got %s",
+        url_tests[i].url,
+        url_tests[i].expect_trust_name ? url_tests[i].expect_trust_name
+                                       : "system",
+        trust_state.name ? trust_state.name : "system");
     fio_io_tls_free(t);
   }
 

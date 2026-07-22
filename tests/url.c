@@ -291,6 +291,51 @@ int main(void) {
                   .tls = 1,
               },
       },
+      {
+          .url = (char *)"http://example.com/path?trust=ca.pem",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"trust=ca.pem"),
+              },
+          .tls =
+              {
+                  .trust = FIO_BUF_INFO1((char *)"ca.pem"),
+                  .tls = 1,
+              },
+      },
+      {
+          .url = (char *)"http://example.com/path?trust=sys",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"trust=sys"),
+              },
+          .tls =
+              {
+                  .trust = FIO_BUF_INFO1((char *)"sys"),
+                  .tls = 1,
+              },
+      },
+      {
+          .url = (char *)"http://example.com/path?trust=system",
+          .expected =
+              {
+                  .scheme = FIO_BUF_INFO1((char *)"http"),
+                  .host = FIO_BUF_INFO1((char *)"example.com"),
+                  .path = FIO_BUF_INFO1((char *)"/path"),
+                  .query = FIO_BUF_INFO1((char *)"trust=system"),
+              },
+          .tls =
+              {
+                  .trust = FIO_BUF_INFO1((char *)"system"),
+                  .tls = 1,
+              },
+      },
       {.url = NULL},
   };
   for (size_t i = 0; tests[i].url; ++i) {
@@ -402,22 +447,30 @@ int main(void) {
             tls.pass.len == tests[i].tls.pass.len &&
             (!tls.pass.len || !memcmp(tls.pass.buf,
                                       tests[i].tls.pass.buf,
-                                      tests[i].tls.pass.len)),
+                                      tests[i].tls.pass.len)) &&
+            tls.trust.len == tests[i].tls.trust.len &&
+            (!tls.trust.len || !memcmp(tls.trust.buf,
+                                       tests[i].tls.trust.buf,
+                                       tests[i].tls.trust.len)),
         "TLS detection result failed for:\n\ttest[%zu]: %s\n\texpected: "
-        "%s key:%s, cert:%s, pass:%s\n\tgot: %s key:%.*s, cert:%.*s, pass:%.*s",
+        "%s key:%s, cert:%s, pass:%s, trust:%s\n\tgot: "
+        "%s key:%.*s, cert:%.*s, pass:%.*s, trust:%.*s",
         i,
         tests[i].url,
         tests[i].tls.tls ? "TLS" : "none",
         tests[i].tls.key.buf,
         tests[i].tls.cert.buf,
         tests[i].tls.pass.buf,
+        tests[i].tls.trust.buf,
         tls.tls ? "TLS" : "none",
         (int)tls.key.len,
         tls.key.buf,
         (int)tls.cert.len,
         tls.cert.buf,
         (int)tls.pass.len,
-        tls.pass.buf);
+        tls.pass.buf,
+        (int)tls.trust.len,
+        tls.trust.buf);
   }
 
   {

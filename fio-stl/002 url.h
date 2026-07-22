@@ -93,6 +93,7 @@ FIO_SFUNC fio_url_query_each_s fio_url_query_each_next(fio_url_query_each_s);
 typedef struct {
   fio_buf_info_s key;
   fio_buf_info_s cert;
+  fio_buf_info_s trust;
   fio_buf_info_s pass;
   bool tls;
 } fio_url_tls_info_s;
@@ -478,9 +479,10 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
              (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("http"));
     break;
   }
-  if (u.query.len) { /* key=, cert=, pass=, password=*/
+  if (u.query.len) { /* key=, cert=, pass=, password=, trust= */
     fio_buf_info_s key = {0};
     fio_buf_info_s cert = {0};
+    fio_buf_info_s trust = {0};
     fio_buf_info_s pass = {0};
     uint32_t name;
     const uint32_t wrd_key = fio_buf2u32u("key="); /* keyword's value */
@@ -488,6 +490,7 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
     const uint32_t wrd_ssl = fio_buf2u32u("ssl=");
     const uint32_t wrd_cert = fio_buf2u32u("cert");
     const uint32_t wrd_true = fio_buf2u32u("true");
+    const uint32_t wrd_trust = fio_buf2u32u("trus");
     const uint32_t wrd_pass = fio_buf2u32u("pass");
     const uint64_t wrd_password = fio_buf2u64u("password");
     FIO_URL_QUERY_EACH(u.query, i) { /* iterates each name=value pair */
@@ -518,6 +521,10 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
         else if (name == wrd_pass)
           pass = i.value;
         break;
+      case 5:
+        name = fio_buf2u32u(i.name.buf) | 0x20202020UL;
+        if (name == wrd_trust && (i.name.buf[4] | 0x20) == 't')
+          trust = i.value;
       }
     }
     if (key.len && cert.len) {
@@ -527,16 +534,22 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
         r.pass = pass;
       r.tls = 1;
     }
+    if (trust.len) {
+      r.trust = trust;
+      r.tls = 1;
+    }
   }
-  FIO_LOG_DDEBUG2(
-      "URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: %.*s\n\tpass: %.*s",
-      (r.tls ? "Secure" : "plaintext"),
-      (int)r.key.len,
-      r.key.buf,
-      (int)r.cert.len,
-      r.cert.buf,
-      (int)r.pass.len,
-      r.pass.buf);
+  FIO_LOG_DDEBUG2("URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: "
+                  "%.*s\n\ttrust: %.*s\n\tpass: %.*s",
+                  (r.tls ? "Secure" : "plaintext"),
+                  (int)r.key.len,
+                  r.key.buf,
+                  (int)r.cert.len,
+                  r.cert.buf,
+                  (int)r.trust.len,
+                  r.trust.buf,
+                  (int)r.pass.len,
+                  r.pass.buf);
   return r;
 }
 /* *****************************************************************************
