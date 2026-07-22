@@ -893,7 +893,7 @@ Per-Connection Helpers
 
 /** Try to send pending enc_buf data directly to socket.
  *  Returns total bytes sent, 0 if nothing pending or socket full. */
-FIO_SFUNC size_t fio___openssl_send_enc_buf(int fd,
+FIO_SFUNC size_t fio___openssl_send_enc_buf(fio_socket_i fd,
                                             fio___openssl_connection_s *conn) {
   if (conn->enc_buf_sent >= conn->enc_buf_len)
     return 0;
@@ -945,7 +945,7 @@ IO functions
  *    OpenSSL pulls from recv_buf via custom rbio.
  * 4. Send any post-read output from enc_buf (key updates, etc.)
  */
-FIO_SFUNC ssize_t fio___openssl_read(int fd,
+FIO_SFUNC ssize_t fio___openssl_read(fio_socket_i fd,
                                      void *buf,
                                      size_t len,
                                      void *tls_ctx) {
@@ -1042,7 +1042,7 @@ FIO_SFUNC ssize_t fio___openssl_read(int fd,
  * With custom BIOs, all encrypted output is already in enc_buf. Flush simply
  * sends any pending enc_buf data to the socket.
  */
-FIO_SFUNC int fio___openssl_flush(int fd, void *tls_ctx) {
+FIO_SFUNC int fio___openssl_flush(fio_socket_i fd, void *tls_ctx) {
   fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
   if (!conn)
     return 0;
@@ -1076,7 +1076,7 @@ FIO_SFUNC int fio___openssl_flush(int fd, void *tls_ctx) {
  * numbers, etc.) has advanced. We MUST return success even if the socket write
  * fails — the encrypted data is buffered in enc_buf and flush() sends later.
  */
-FIO_SFUNC ssize_t fio___openssl_write(int fd,
+FIO_SFUNC ssize_t fio___openssl_write(fio_socket_i fd,
                                       const void *buf,
                                       size_t len,
                                       void *tls_ctx) {
@@ -1228,7 +1228,7 @@ FIO_SFUNC int fio___openssl_peer_info_next(fio_socket_i fd,
 cleanup:
   X509_free(cert);
   return result;
-#else  /* !H___FIO_X509___H || !H___FIO_SHA2___H */
+#else /* !H___FIO_X509___H || !H___FIO_SHA2___H */
   return -1; /* peer certificate inspection requires the X509 module */
 #endif
 }
@@ -1314,7 +1314,7 @@ Closing Connections
 ***************************************************************************** */
 
 /** Called when the IO object finished sending all data before closure. */
-FIO_SFUNC void fio___openssl_finish(int fd, void *tls_ctx) {
+FIO_SFUNC void fio___openssl_finish(fio_socket_i fd, void *tls_ctx) {
   fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
   if (!conn || !conn->ssl)
     return;
