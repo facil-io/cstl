@@ -49,21 +49,21 @@ typedef enum {
   FIO_X509_KEY_ECDSA_P256 = 2, /**< ECDSA with P-256/secp256r1 */
   FIO_X509_KEY_ECDSA_P384 = 3, /**< ECDSA with P-384/secp384r1 */
   FIO_X509_KEY_ED25519 = 4,    /**< Ed25519 (EdDSA) */
-} fio_x509_key_type_e;
+} fio_x509_key_algo_e;
 
 /** Signature algorithm types */
 typedef enum {
-  FIO_X509_SIG_UNKNOWN = 0,
-  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
-  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
-  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
-  FIO_X509_SIG_RSA_PSS_SHA256 = 4,   /**< RSA-PSS with SHA-256 */
-  FIO_X509_SIG_RSA_PSS_SHA384 = 5,   /**< RSA-PSS with SHA-384 */
-  FIO_X509_SIG_RSA_PSS_SHA512 = 6,   /**< RSA-PSS with SHA-512 */
-  FIO_X509_SIG_ECDSA_SHA256 = 7,     /**< ecdsa-with-SHA256 */
-  FIO_X509_SIG_ECDSA_SHA384 = 8,     /**< ecdsa-with-SHA384 */
-  FIO_X509_SIG_ED25519 = 9,          /**< Ed25519 */
-} fio_x509_sig_alg_e;
+  FIO_X509_SIGNATURE_UNKNOWN = 0,
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
+  FIO_X509_SIGNATURE_RSA_PSS_SHA256 = 4,   /**< RSA-PSS with SHA-256 */
+  FIO_X509_SIGNATURE_RSA_PSS_SHA384 = 5,   /**< RSA-PSS with SHA-384 */
+  FIO_X509_SIGNATURE_RSA_PSS_SHA512 = 6,   /**< RSA-PSS with SHA-512 */
+  FIO_X509_SIGNATURE_ECDSA_SHA256 = 7,     /**< ecdsa-with-SHA256 */
+  FIO_X509_SIGNATURE_ECDSA_SHA384 = 8,     /**< ecdsa-with-SHA384 */
+  FIO_X509_SIGNATURE_ED25519 = 9,          /**< Ed25519 */
+} fio_x509_signature_algo_e;
 
 /** Key Usage bit flags (RFC 5280 Section 4.2.1.3)
  *
@@ -142,7 +142,7 @@ typedef struct fio_x509_cert_s {
   /** Subject Common Name (if present, pointer into DER data) */
   fio_buf_info_s cn;
 
-  /** Public Key Data (union based on key_type) */
+  /** Public Key Data (union based on key_algo) */
   union {
     struct {
       fio_ubuf_info_s n; /**< RSA modulus (big-endian) */
@@ -181,9 +181,9 @@ typedef struct fio_x509_cert_s {
   /* Small fields grouped at the end (no bitfields — byte access is faster) */
 
   /** Public Key Type */
-  fio_x509_key_type_e key_type;
+  fio_x509_key_algo_e key_algo;
   /** Signature Algorithm */
-  fio_x509_sig_alg_e sig_alg;
+  fio_x509_signature_algo_e signature_algo;
   /** Key Usage extension bits */
   uint16_t key_usage;
   /** Peer chain verification state: non-zero if a TLS backend verified this
@@ -379,16 +379,14 @@ X.509 Certificate Chain Validation API
  *   6. Verify intermediate/root certificates have CA:TRUE
  *   7. Verify the chain terminates at a trusted root (if trust store provided)
  *
- * @param certs Array of DER-encoded certificates
- * @param cert_lens Array of certificate lengths
+ * @param certs Array of DER-encoded certificate views
  * @param cert_count Number of certificates in chain
  * @param hostname Expected hostname for end-entity (NULL to skip check)
  * @param current_time Current Unix timestamp for validity checking
  * @param trust_store Root CA certificates (NULL to skip trust check)
  * @return FIO_X509_OK (0) on success, or error code on failure
  */
-SFUNC int fio_x509_verify_chain(const uint8_t **certs,
-                                const size_t *cert_lens,
+SFUNC int fio_x509_verify_chain(const fio_ubuf_info_s *certs,
                                 size_t cert_count,
                                 const char *hostname,
                                 int64_t current_time,
@@ -574,10 +572,10 @@ Implementation - Internal Helpers
 ***************************************************************************** */
 
 /** Parse signature algorithm OID to enum */
-FIO_SFUNC fio_x509_sig_alg_e
-fio___x509_parse_sig_alg(const fio_der_element_s *alg_id) {
+FIO_SFUNC fio_x509_signature_algo_e
+fio___x509_parse_signature_algo(const fio_der_element_s *alg_id) {
   if (!alg_id || !alg_id->data)
-    return FIO_X509_SIG_UNKNOWN;
+    return FIO_X509_SIGNATURE_UNKNOWN;
 
   /* AlgorithmIdentifier ::= SEQUENCE { algorithm OID, parameters ANY } */
   fio_der_iterator_s it;
@@ -585,33 +583,33 @@ fio___x509_parse_sig_alg(const fio_der_element_s *alg_id) {
 
   fio_der_iterator_init(&it, alg_id);
   if (fio_der_iterator_next(&it, &oid) != 0)
-    return FIO_X509_SIG_UNKNOWN;
+    return FIO_X509_SIGNATURE_UNKNOWN;
 
   if (!fio_der_is_tag(&oid, FIO_DER_OID))
-    return FIO_X509_SIG_UNKNOWN;
+    return FIO_X509_SIGNATURE_UNKNOWN;
 
   /* Check against known OIDs (build value once, then test constants) */
   fio_u128 oid_val = fio___der_oid_value(&oid);
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_SHA256_WITH_RSA))
-    return FIO_X509_SIG_RSA_PKCS1_SHA256;
+    return FIO_X509_SIGNATURE_RSA_PKCS1_SHA256;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_SHA384_WITH_RSA))
-    return FIO_X509_SIG_RSA_PKCS1_SHA384;
+    return FIO_X509_SIGNATURE_RSA_PKCS1_SHA384;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_SHA512_WITH_RSA))
-    return FIO_X509_SIG_RSA_PKCS1_SHA512;
+    return FIO_X509_SIGNATURE_RSA_PKCS1_SHA512;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_ECDSA_WITH_SHA256))
-    return FIO_X509_SIG_ECDSA_SHA256;
+    return FIO_X509_SIGNATURE_ECDSA_SHA256;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_ECDSA_WITH_SHA384))
-    return FIO_X509_SIG_ECDSA_SHA384;
+    return FIO_X509_SIGNATURE_ECDSA_SHA384;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_ED25519))
-    return FIO_X509_SIG_ED25519;
+    return FIO_X509_SIGNATURE_ED25519;
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_RSA_PSS)) {
     /* RSA-PSS - need to check parameters to determine hash */
     /* For simplicity, default to SHA-256 for now */
     /* TODO: Parse RSA-PSS parameters to determine actual hash */
-    return FIO_X509_SIG_RSA_PSS_SHA256;
+    return FIO_X509_SIGNATURE_RSA_PSS_SHA256;
   }
 
-  return FIO_X509_SIG_UNKNOWN;
+  return FIO_X509_SIGNATURE_UNKNOWN;
 }
 
 /** Parse SubjectPublicKeyInfo to extract public key */
@@ -662,7 +660,7 @@ FIO_SFUNC int fio___x509_parse_pubkey(fio_x509_cert_s *cert,
   fio_u128 oid_val = fio___der_oid_value(&oid);
   if (fio___der_oid_eq(oid_val, FIO_X509_OID_RSA_ENCRYPTION)) {
     /* RSA public key - bits contains SEQUENCE { n INTEGER, e INTEGER } */
-    cert->key_type = FIO_X509_KEY_RSA;
+    cert->key_algo = FIO_X509_KEY_RSA;
 
     fio_der_element_s rsa_seq;
     if (!fio_der_parse(&rsa_seq, bits, bit_len))
@@ -708,9 +706,9 @@ FIO_SFUNC int fio___x509_parse_pubkey(fio_x509_cert_s *cert,
 
     fio_u128 curve_val = fio___der_oid_value(&params);
     if (fio___der_oid_eq(curve_val, FIO_X509_OID_SECP256R1)) {
-      cert->key_type = FIO_X509_KEY_ECDSA_P256;
+      cert->key_algo = FIO_X509_KEY_ECDSA_P256;
     } else if (fio___der_oid_eq(curve_val, FIO_X509_OID_SECP384R1)) {
-      cert->key_type = FIO_X509_KEY_ECDSA_P384;
+      cert->key_algo = FIO_X509_KEY_ECDSA_P384;
     } else {
       return -1; /* Unsupported curve */
     }
@@ -720,7 +718,7 @@ FIO_SFUNC int fio___x509_parse_pubkey(fio_x509_cert_s *cert,
 
   } else if (fio___der_oid_eq(oid_val, FIO_X509_OID_ED25519)) {
     /* Ed25519 - public key is 32 bytes directly in BIT STRING */
-    cert->key_type = FIO_X509_KEY_ED25519;
+    cert->key_algo = FIO_X509_KEY_ED25519;
 
     if (bit_len != 32)
       return -1; /* Ed25519 public key must be 32 bytes */
@@ -728,7 +726,7 @@ FIO_SFUNC int fio___x509_parse_pubkey(fio_x509_cert_s *cert,
     cert->pubkey.ed25519.key = FIO_UBUF_INFO2((uint8_t *)bits, bit_len);
 
   } else {
-    cert->key_type = FIO_X509_KEY_UNKNOWN;
+    cert->key_algo = FIO_X509_KEY_UNKNOWN;
   }
 
   return 0;
@@ -942,7 +940,7 @@ SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
     return -1;
 
   fio_der_iterator_s cert_it;
-  fio_der_element_s tbs, sig_alg, sig_value;
+  fio_der_element_s tbs, signature_algo, sig_value;
 
   fio_der_iterator_init(&cert_it, &cert_seq);
 
@@ -958,12 +956,12 @@ SFUNC int fio_x509_parse(fio_x509_cert_s *cert,
                              (size_t)((tbs.data + tbs.len) - tbs_start));
 
   /* Parse signatureAlgorithm */
-  if (fio_der_iterator_next(&cert_it, &sig_alg) != 0)
+  if (fio_der_iterator_next(&cert_it, &signature_algo) != 0)
     return -1;
-  if (!fio_der_is_tag(&sig_alg, FIO_DER_SEQUENCE))
+  if (!fio_der_is_tag(&signature_algo, FIO_DER_SEQUENCE))
     return -1;
 
-  cert->sig_alg = fio___x509_parse_sig_alg(&sig_alg);
+  cert->signature_algo = fio___x509_parse_signature_algo(&signature_algo);
 
   /* Parse signatureValue (BIT STRING) */
   if (fio_der_iterator_next(&cert_it, &sig_value) != 0)
@@ -1289,31 +1287,31 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
   uint8_t hash[64]; /* Max hash size (SHA-512) */
   size_t hash_len = 0;
 
-  switch (cert->sig_alg) {
-  case FIO_X509_SIG_RSA_PKCS1_SHA256:
-  case FIO_X509_SIG_RSA_PSS_SHA256:
-  case FIO_X509_SIG_ECDSA_SHA256: {
+  switch (cert->signature_algo) {
+  case FIO_X509_SIGNATURE_RSA_PKCS1_SHA256:
+  case FIO_X509_SIGNATURE_RSA_PSS_SHA256:
+  case FIO_X509_SIGNATURE_ECDSA_SHA256: {
     fio_u256 h = fio_sha256(cert->tbs.buf, cert->tbs.len);
     fio_memcpy32(hash, h.u8);
     hash_len = 32;
     break;
   }
-  case FIO_X509_SIG_RSA_PKCS1_SHA384:
-  case FIO_X509_SIG_RSA_PSS_SHA384:
-  case FIO_X509_SIG_ECDSA_SHA384: {
+  case FIO_X509_SIGNATURE_RSA_PKCS1_SHA384:
+  case FIO_X509_SIGNATURE_RSA_PSS_SHA384:
+  case FIO_X509_SIGNATURE_ECDSA_SHA384: {
     fio_u512 h = fio_sha384(cert->tbs.buf, cert->tbs.len);
     FIO_MEMCPY(hash, h.u8, 48);
     hash_len = 48;
     break;
   }
-  case FIO_X509_SIG_RSA_PKCS1_SHA512:
-  case FIO_X509_SIG_RSA_PSS_SHA512: {
+  case FIO_X509_SIGNATURE_RSA_PKCS1_SHA512:
+  case FIO_X509_SIGNATURE_RSA_PSS_SHA512: {
     fio_u512 h = fio_sha512(cert->tbs.buf, cert->tbs.len);
     fio_memcpy64(hash, h.u8);
     hash_len = 64;
     break;
   }
-  case FIO_X509_SIG_ED25519: {
+  case FIO_X509_SIGNATURE_ED25519: {
     /* Ed25519 doesn't pre-hash - the data is hashed internally */
     /* Verification would be done directly with fio_ed25519_verify */
     break;
@@ -1322,7 +1320,7 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
   }
 
   /* Verify signature based on issuer's key type */
-  switch (issuer->key_type) {
+  switch (issuer->key_algo) {
   case FIO_X509_KEY_RSA: {
     if (!issuer->pubkey.rsa.n.buf || !issuer->pubkey.rsa.e.buf)
       return -1;
@@ -1342,19 +1340,19 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
     default: return -1;
     }
 
-    switch (cert->sig_alg) {
-    case FIO_X509_SIG_RSA_PKCS1_SHA256:
-    case FIO_X509_SIG_RSA_PKCS1_SHA384:
-    case FIO_X509_SIG_RSA_PKCS1_SHA512:
+    switch (cert->signature_algo) {
+    case FIO_X509_SIGNATURE_RSA_PKCS1_SHA256:
+    case FIO_X509_SIGNATURE_RSA_PKCS1_SHA384:
+    case FIO_X509_SIGNATURE_RSA_PKCS1_SHA512:
       return fio_rsa_verify_pkcs1(cert->signature.buf,
                                   cert->signature.len,
                                   hash,
                                   hash_len,
                                   rsa_hash,
                                   &rsa_key);
-    case FIO_X509_SIG_RSA_PSS_SHA256:
-    case FIO_X509_SIG_RSA_PSS_SHA384:
-    case FIO_X509_SIG_RSA_PSS_SHA512:
+    case FIO_X509_SIGNATURE_RSA_PSS_SHA256:
+    case FIO_X509_SIGNATURE_RSA_PSS_SHA384:
+    case FIO_X509_SIGNATURE_RSA_PSS_SHA512:
       return fio_rsa_verify_pss(cert->signature.buf,
                                 cert->signature.len,
                                 hash,
@@ -1369,7 +1367,7 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
   case FIO_X509_KEY_ECDSA_P384: {
 #if defined(H___FIO_P256___H)
     /* ECDSA P-256 verification */
-    if (issuer->key_type == FIO_X509_KEY_ECDSA_P256) {
+    if (issuer->key_algo == FIO_X509_KEY_ECDSA_P256) {
       if (!issuer->pubkey.ecdsa.point.buf ||
           issuer->pubkey.ecdsa.point.len != 65)
         return -1;
@@ -1387,7 +1385,7 @@ SFUNC int fio_x509_verify_signature(const fio_x509_cert_s *cert,
 #endif
 #if defined(H___FIO_P384___H)
     /* ECDSA P-384 verification */
-    if (issuer->key_type == FIO_X509_KEY_ECDSA_P384) {
+    if (issuer->key_algo == FIO_X509_KEY_ECDSA_P384) {
       if (!issuer->pubkey.ecdsa.point.buf ||
           issuer->pubkey.ecdsa.point.len != 97)
         return -1;
@@ -1503,14 +1501,13 @@ FIO_SFUNC int fio___x509_find_issuer_in_trust_store(
   return -1; /* Not found */
 }
 
-SFUNC int fio_x509_verify_chain(const uint8_t **certs,
-                                const size_t *cert_lens,
+SFUNC int fio_x509_verify_chain(const fio_ubuf_info_s *certs,
                                 size_t cert_count,
                                 const char *hostname,
                                 int64_t current_time,
                                 fio_x509_trust_store_s *trust_store) {
   /* Validate inputs */
-  if (!certs || !cert_lens)
+  if (!certs)
     return FIO_X509_ERR_PARSE;
   if (cert_count == 0)
     return FIO_X509_ERR_EMPTY_CHAIN;
@@ -1521,12 +1518,12 @@ SFUNC int fio_x509_verify_chain(const uint8_t **certs,
   fio_x509_cert_s chain[FIO_X509_MAX_CHAIN_DEPTH];
 
   for (size_t i = 0; i < cert_count; ++i) {
-    if (!certs[i] || cert_lens[i] == 0) {
+    if (!certs[i].buf || certs[i].len == 0) {
       FIO_LOG_DEBUG("X.509 chain: certificate %zu is empty", i);
       return FIO_X509_ERR_PARSE;
     }
 
-    if (fio_x509_parse(&chain[i], certs[i], cert_lens[i]) != 0) {
+    if (fio_x509_parse(&chain[i], certs[i].buf, certs[i].len) != 0) {
       FIO_LOG_DEBUG("X.509 chain: failed to parse certificate %zu", i);
       return FIO_X509_ERR_PARSE;
     }
@@ -2168,7 +2165,7 @@ fio___x509_encode_extensions(uint8_t *buf,
 }
 
 /** Helper: encode AlgorithmIdentifier for signature */
-FIO_SFUNC size_t fio___x509_encode_sig_alg(uint8_t *buf,
+FIO_SFUNC size_t fio___x509_encode_signature_algo(uint8_t *buf,
                                            fio_x509_keypair_type_e type) {
   fio_u128 oid;
   int has_params;
@@ -2240,8 +2237,8 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   tbs_content += serial_len;
 
   /* Signature algorithm */
-  size_t sig_alg_len = fio___x509_encode_sig_alg(NULL, keypair->type);
-  tbs_content += sig_alg_len;
+  size_t signature_algo_len = fio___x509_encode_signature_algo(NULL, keypair->type);
+  tbs_content += signature_algo_len;
 
   /* Issuer (same as subject for self-signed) */
   size_t issuer_len = fio___x509_encode_name(NULL, options);
@@ -2277,7 +2274,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
       fio_der_encode_sequence_header(NULL, tbs_content) + tbs_content;
 
   /* Signature algorithm (again, in outer Certificate) */
-  size_t outer_sig_alg_len = fio___x509_encode_sig_alg(NULL, keypair->type);
+  size_t outer_signature_algo_len = fio___x509_encode_signature_algo(NULL, keypair->type);
 
   /* Signature value (BIT STRING) */
   size_t sig_value_len;
@@ -2294,7 +2291,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   }
 
   /* Certificate SEQUENCE */
-  size_t cert_content = tbs_len + outer_sig_alg_len + sig_value_len;
+  size_t cert_content = tbs_len + outer_signature_algo_len + sig_value_len;
   size_t total =
       fio_der_encode_sequence_header(NULL, cert_content) + cert_content;
 
@@ -2335,7 +2332,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
 
   /* Signature algorithm */
   tbs_offset +=
-      fio___x509_encode_sig_alg(tbs_start + tbs_offset, keypair->type);
+      fio___x509_encode_signature_algo(tbs_start + tbs_offset, keypair->type);
 
   /* Issuer */
   tbs_offset += fio___x509_encode_name(tbs_start + tbs_offset, options);
@@ -2403,7 +2400,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
       fio_der_encode_bit_string(NULL, signature, actual_sig_len, 0);
 
   /* Recalculate certificate content length */
-  cert_content = tbs_len + outer_sig_alg_len + actual_sig_bits_len;
+  cert_content = tbs_len + outer_signature_algo_len + actual_sig_bits_len;
   total = fio_der_encode_sequence_header(NULL, cert_content) + cert_content;
 
   if (buf_len < total)
@@ -2418,7 +2415,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   offset += tbs_len;
 
   /* Signature algorithm */
-  offset += fio___x509_encode_sig_alg(buf + offset, keypair->type);
+  offset += fio___x509_encode_signature_algo(buf + offset, keypair->type);
 
   /* Signature value */
   offset +=

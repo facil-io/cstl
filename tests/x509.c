@@ -95,9 +95,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_parse_basic)(void) {
                             sizeof(test_minimal_cert)) == 0,
              "minimal RSA certificate parse failed");
   FIO_ASSERT(cert.version == 2, "version should be v3 (2)");
-  FIO_ASSERT(cert.sig_alg == FIO_X509_SIG_RSA_PKCS1_SHA256,
+  FIO_ASSERT(cert.signature_algo == FIO_X509_SIGNATURE_RSA_PKCS1_SHA256,
              "signature algorithm mismatch");
-  FIO_ASSERT(cert.key_type == FIO_X509_KEY_RSA, "key type should be RSA");
+  FIO_ASSERT(cert.key_algo == FIO_X509_KEY_RSA, "key type should be RSA");
   FIO_ASSERT(cert.pubkey.rsa.n.buf != NULL && cert.pubkey.rsa.n.len > 0,
              "RSA modulus not extracted");
   FIO_ASSERT(cert.pubkey.rsa.e.buf != NULL && cert.pubkey.rsa.e.len == 3,
@@ -145,9 +145,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
              "generated Ed25519 certificate parse failed");
   FIO_ASSERT(parsed.version == 2, "version mismatch");
-  FIO_ASSERT(parsed.key_type == FIO_X509_KEY_ED25519,
+  FIO_ASSERT(parsed.key_algo == FIO_X509_KEY_ED25519,
              "key type should be Ed25519");
-  FIO_ASSERT(parsed.sig_alg == FIO_X509_SIG_ED25519,
+  FIO_ASSERT(parsed.signature_algo == FIO_X509_SIGNATURE_ED25519,
              "signature algorithm should be Ed25519");
   FIO_ASSERT(parsed.pubkey.ed25519.key.buf != NULL &&
                  !FIO_MEMCMP(parsed.pubkey.ed25519.key.buf, kp.public_key, 32),
@@ -180,9 +180,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_p256)(void) {
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
              "generated P-256 certificate parse failed");
   FIO_ASSERT(parsed.version == 2, "version mismatch");
-  FIO_ASSERT(parsed.key_type == FIO_X509_KEY_ECDSA_P256,
+  FIO_ASSERT(parsed.key_algo == FIO_X509_KEY_ECDSA_P256,
              "key type should be P-256");
-  FIO_ASSERT(parsed.sig_alg == FIO_X509_SIG_ECDSA_SHA256,
+  FIO_ASSERT(parsed.signature_algo == FIO_X509_SIGNATURE_ECDSA_SHA256,
              "signature algorithm should be ECDSA-SHA256");
   FIO_ASSERT(parsed.pubkey.ecdsa.point.buf != NULL &&
                  parsed.pubkey.ecdsa.point.len == 65 &&
@@ -364,11 +364,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_chain_self_signed)(void) {
   uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
       &cert_len, &kp, "Test Root", NULL, 0, 1);
 
-  const uint8_t *certs[] = {cert};
-  const size_t cert_lens[] = {cert_len};
+  const fio_ubuf_info_s certs[] = {FIO_UBUF_INFO2(cert, cert_len)};
   int64_t now = (int64_t)fio_time_real().tv_sec;
 
-  int ret = fio_x509_verify_chain(certs, cert_lens, 1, NULL, now, NULL);
+  int ret = fio_x509_verify_chain(certs, 1, NULL, now, NULL);
   FIO_ASSERT(ret == FIO_X509_OK,
              "self-signed chain without hostname/trust should pass: %s",
              fio_x509_error_str(ret));
@@ -378,12 +377,12 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_chain_self_signed)(void) {
   fio_x509_trust_store_s trust = {.roots = roots,
                                   .root_lens = root_lens,
                                   .root_count = 1};
-  ret = fio_x509_verify_chain(certs, cert_lens, 1, "Test Root", now, &trust);
+  ret = fio_x509_verify_chain(certs, 1, "Test Root", now, &trust);
   FIO_ASSERT(ret == FIO_X509_OK,
              "self-signed chain with trust and hostname should pass: %s",
              fio_x509_error_str(ret));
 
-  ret = fio_x509_verify_chain(certs, cert_lens, 1, "wrong", now, &trust);
+  ret = fio_x509_verify_chain(certs, 1, "wrong", now, &trust);
   FIO_ASSERT(ret == FIO_X509_ERR_HOSTNAME_MISMATCH,
              "wrong hostname should fail");
 
@@ -392,17 +391,14 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_chain_self_signed)(void) {
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_chain_invalid_inputs)(void) {
-  const uint8_t *certs[] = {test_minimal_cert};
-  const size_t cert_lens[] = {sizeof(test_minimal_cert)};
+  const fio_ubuf_info_s certs[] = {
+      FIO_UBUF_INFO2((uint8_t *)test_minimal_cert, sizeof(test_minimal_cert))};
 
-  FIO_ASSERT(fio_x509_verify_chain(NULL, cert_lens, 1, NULL, 1750000000,
-                                    NULL) == FIO_X509_ERR_PARSE,
-             "NULL certs should return PARSE");
-  FIO_ASSERT(fio_x509_verify_chain(certs, NULL, 1, NULL, 1750000000, NULL) ==
+  FIO_ASSERT(fio_x509_verify_chain(NULL, 1, NULL, 1750000000, NULL) ==
                  FIO_X509_ERR_PARSE,
-             "NULL cert_lens should return PARSE");
-  FIO_ASSERT(fio_x509_verify_chain(certs, cert_lens, 0, NULL, 1750000000,
-                                    NULL) == FIO_X509_ERR_EMPTY_CHAIN,
+             "NULL certs should return PARSE");
+  FIO_ASSERT(fio_x509_verify_chain(certs, 0, NULL, 1750000000, NULL) ==
+                 FIO_X509_ERR_EMPTY_CHAIN,
              "empty chain should return EMPTY_CHAIN");
 }
 

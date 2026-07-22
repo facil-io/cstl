@@ -1,5 +1,27 @@
 # Change Log
 
+### Unreleased
+
+**API Changes** (`x509`): renamed the signature/public-key algorithm identifiers in `fio_x509_cert_s` for clarity and internal consistency (both fields are `AlgorithmIdentifier`s per RFC 5280):
+
+- Struct members: `sig_alg` -> `signature_algo`, `key_type` -> `key_algo`
+- Enum types: `fio_x509_sig_alg_e` -> `fio_x509_signature_algo_e`, `fio_x509_key_type_e` -> `fio_x509_key_algo_e`
+- Constants: `FIO_X509_SIG_*` -> `FIO_X509_SIGNATURE_*` (e.g., `FIO_X509_SIG_RSA_PKCS1_SHA256` -> `FIO_X509_SIGNATURE_RSA_PKCS1_SHA256`); `FIO_X509_KEY_*` unchanged
+- Internal helpers: `fio___x509_parse_sig_alg` / `fio___x509_encode_sig_alg` -> `fio___x509_parse_signature_algo` / `fio___x509_encode_signature_algo`
+
+**API Changes** (`tls13`, `x509`): unified signature-algorithm naming and buffer-view APIs across the TLS 1.3 and X.509 modules.
+
+- **Naming**: `fio_tls13_signature_scheme_e` -> `fio_tls13_signature_algo_e`, `FIO_TLS13_SIG_*` -> `FIO_TLS13_SIGNATURE_*`, and all `sig_algs` / `signature_algorithms` / `signature_scheme` / `key_type` identifiers -> `signature_algo(s)` (matches the x509 module).
+- **Struct grouping**: prefix-namespaced members of `fio_tls13_client_s` / `fio_tls13_server_s` were grouped into anonymous sub-structs (`auth`, `peer_auth`, `hrr`, `alpn`, `credentials`) plus the private `fio___tls13_cert_chain_s` type; `fio_tls13_client_hello_s` became private (`fio___tls13_client_hello_s`). Members are ordered by descending alignment (scalars before byte arrays) to avoid padding and keep scalar groups cache-line resident.
+- **Buffer views**: `fio_buf_info_s` / `fio_ubuf_info_s` replace pointer+length pairs and parallel pointer/length arrays:
+  - `fio_tls13_server_set_cert_chain(server, const fio_ubuf_info_s *chain, size_t count)`
+  - `fio_tls13_server_set_private_key(server, fio_ubuf_info_s key, fio_tls13_signature_algo_e algo)`
+  - `fio_tls13_client_set_cert(client, fio_ubuf_info_s cert, fio_ubuf_info_s private_key, fio_tls13_signature_algo_e algo)`
+  - `fio_tls13_build_certificate_request(..., fio_ubuf_info_s context, ...)`
+  - `fio_tls13_server_get_client_cert` now returns `fio_ubuf_info_s`
+  - `fio_x509_verify_chain(const fio_ubuf_info_s *certs, size_t count, ...)`
+  - Views are stored, not copied — pointed-to data must outlive the context.
+
 ### v.0.8.0.rc.01 (2026-01-19)
 
 **Breaking Change**: (`pubsub`) Complete rewrite of the Pub/Sub module with a new IPC-first architecture.

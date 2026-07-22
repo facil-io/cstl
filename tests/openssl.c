@@ -53,8 +53,15 @@ FIO_SFUNC X509 *fio___openssl_test_make_cert(EVP_PKEY **out_key,
 }
 
 /* *****************************************************************************
-Test: fio_openssl_io_functions returns a populated structure
+Test: TLS context overhead and fio_openssl_io_functions
 ***************************************************************************** */
+FIO_SFUNC void FIO_NAME_TEST(stl, openssl_context_overhead)(void) {
+  FIO_LOG_INFO("OpenSSL global TLS server context overhead: %zu Bytes",
+               sizeof(fio___openssl_context_s));
+  FIO_LOG_INFO("OpenSSL per-connection TLS context overhead: %zu Bytes",
+               sizeof(fio___openssl_connection_s));
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, openssl_io_functions)(void) {
   fio_io_functions_s funcs = fio_openssl_io_functions();
 
@@ -550,6 +557,7 @@ which requires the IO reactor to be running. These unit tests do not run the
 reactor, so deferred cleanup tasks may not execute before exit.
 ***************************************************************************** */
 int main(void) {
+  FIO_NAME_TEST(stl, openssl_context_overhead)();
   FIO_NAME_TEST(stl, openssl_io_functions)();
   FIO_NAME_TEST(stl, openssl_tls_context)();
   FIO_NAME_TEST(stl, openssl_default_registration)();

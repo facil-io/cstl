@@ -316,13 +316,12 @@ FIO_SFUNC void test_x25519_roundtrip(void) {
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
-  const uint8_t *certs[] = {test_certificate};
-  size_t cert_lens[] = {test_certificate_len};
-  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  const fio_ubuf_info_s certs[] = {
+      FIO_UBUF_INFO2(test_certificate, test_certificate_len)};
+  fio_tls13_server_set_cert_chain(&server, certs, 1);
   fio_tls13_server_set_private_key(&server,
-                                   test_ed25519_private_key,
-                                   32,
-                                   FIO_TLS13_SIG_ED25519);
+      FIO_UBUF_INFO2((uint8_t *)test_ed25519_private_key, 32),
+      FIO_TLS13_SIGNATURE_ED25519);
 
   int result = do_handshake_and_exchange(&client, &server, "X25519");
 
@@ -414,7 +413,7 @@ FIO_SFUNC void test_hybrid_client_hello_structure(void) {
   size_t ch_body_len = (size_t)ch_len - 5 - 4;
 
   /* Parse to get key shares */
-  fio_tls13_client_hello_s ch;
+  fio___tls13_client_hello_s ch;
   int ret = fio___tls13_parse_client_hello(&ch, ch_body, ch_body_len);
   FIO_ASSERT(ret == 0, "ClientHello parsing should succeed");
 
@@ -471,13 +470,12 @@ FIO_SFUNC void test_hybrid_full_roundtrip(void) {
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
-  const uint8_t *certs[] = {test_certificate};
-  size_t cert_lens[] = {test_certificate_len};
-  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  const fio_ubuf_info_s certs[] = {
+      FIO_UBUF_INFO2(test_certificate, test_certificate_len)};
+  fio_tls13_server_set_cert_chain(&server, certs, 1);
   fio_tls13_server_set_private_key(&server,
-                                   test_ed25519_private_key,
-                                   32,
-                                   FIO_TLS13_SIG_ED25519);
+      FIO_UBUF_INFO2((uint8_t *)test_ed25519_private_key, 32),
+      FIO_TLS13_SIGNATURE_ED25519);
 
   int result = do_handshake_and_exchange(&client, &server, "Hybrid");
 
@@ -522,13 +520,12 @@ FIO_SFUNC void test_x25519_only_client(void) {
   fio_tls13_server_s server;
   fio_tls13_server_init(&server);
 
-  const uint8_t *certs[] = {test_certificate};
-  size_t cert_lens[] = {test_certificate_len};
-  fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+  const fio_ubuf_info_s certs[] = {
+      FIO_UBUF_INFO2(test_certificate, test_certificate_len)};
+  fio_tls13_server_set_cert_chain(&server, certs, 1);
   fio_tls13_server_set_private_key(&server,
-                                   test_ed25519_private_key,
-                                   32,
-                                   FIO_TLS13_SIG_ED25519);
+      FIO_UBUF_INFO2((uint8_t *)test_ed25519_private_key, 32),
+      FIO_TLS13_SIGNATURE_ED25519);
 
   int result = do_handshake_and_exchange(&client, &server, "X25519-only");
 
@@ -571,13 +568,12 @@ FIO_SFUNC void test_multiple_roundtrips(void) {
     fio_tls13_server_s server;
     fio_tls13_server_init(&server);
 
-    const uint8_t *certs[] = {test_certificate};
-    size_t cert_lens[] = {test_certificate_len};
-    fio_tls13_server_set_cert_chain(&server, certs, cert_lens, 1);
+    const fio_ubuf_info_s certs[] = {
+        FIO_UBUF_INFO2(test_certificate, test_certificate_len)};
+    fio_tls13_server_set_cert_chain(&server, certs, 1);
     fio_tls13_server_set_private_key(&server,
-                                     test_ed25519_private_key,
-                                     32,
-                                     FIO_TLS13_SIG_ED25519);
+        FIO_UBUF_INFO2((uint8_t *)test_ed25519_private_key, 32),
+        FIO_TLS13_SIGNATURE_ED25519);
 
     char test_name[32];
     snprintf(test_name, sizeof(test_name), "Round %d", i + 1);

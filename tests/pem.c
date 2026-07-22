@@ -157,7 +157,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, pem_parse_certificate)(void) {
   fio_x509_cert_s cert;
   FIO_ASSERT(fio_pem_parse_certificate(&cert, pem, pem_len) == 0,
              "failed to parse embedded certificate PEM");
-  FIO_ASSERT(cert.key_type == FIO_X509_KEY_RSA,
+  FIO_ASSERT(cert.key_algo == FIO_X509_KEY_RSA,
              "embedded certificate should contain an RSA key");
   FIO_ASSERT(cert.pubkey.rsa.n.len >= 256,
              "RSA modulus should be at least 256 bytes");

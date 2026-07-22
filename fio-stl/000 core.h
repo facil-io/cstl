@@ -1113,6 +1113,68 @@ memory address to be returned if needed (valid until concurrency max calls).
  * the function returns the same memory block to another caller:
  *
  * ```c
+ * max_thread_safty * allocations_per_thread * sizeof(type_T) *
+ * size_per_allocation
+ * ```
+ *
+ * Example use:
+ *
+ * ```c
+ * // defined a static allocator for 32 byte long strings
+ * FIO_STATIC_ALLOC_DEF_UNSAFE(numer2hex_allocator, char, 19, 1, 256);
+ * // a function that returns an unsigned number as a 16 digit hex string
+ * char * ntos16(uint16_t n) {
+ *   char * n = numer2hex_allocator(1);
+ *   n[0] = '0'; n[1] = 'x';
+ *   fio_ltoa16u(n+2, n, 16);
+ *   n[18] = 0;
+ *   return n;
+ * }
+ * ```
+ *
+ * A similar approach is use by `fiobj_num2cstr` in order to provide temporary
+ * conversions of FIOBJ to a C String that doesn't require memory management.
+ */
+#define FIO_STATIC_ALLOC_DEF_UNSAFE(name,                                      \
+                                    type_T,                                    \
+                                    size_per_allocation,                       \
+                                    allocations_per_thread,                    \
+                                    max_thread_safty)                          \
+  /** Allocates `count` blocks of memory from the `name` static arena. */      \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {                       \
+    static type_T name##buffer[sizeof(type_T) * max_thread_safty *             \
+                               size_per_allocation * allocations_per_thread];  \
+    static size_t pos;                                                         \
+    if (!count)                                                                \
+      return name##buffer;                                                     \
+    size_t at = fio_atomic_add(&pos, count);                                   \
+    at %= max_thread_safty * allocations_per_thread;                           \
+    return (at * size_per_allocation) + name##buffer;                          \
+  }                                                                            \
+  /** Returns the size of the static arena in `sizeof(type_T)` units. */       \
+  FIO_IFUNC size_t name##_size(void) {                                         \
+    return (size_t)(max_thread_safty * size_per_allocation *                   \
+                    allocations_per_thread);                                   \
+  }
+
+/**
+ * Defines a simple (almost naive) static memory allocator named `name`.
+ *
+ * This defines a memory allocation function named `name` that accepts a
+ * single input `count` and returns a `type_T` pointer (`type_T *`) containing
+ * `sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
+ *
+ * ```c
+ * static type_T *name(size_t allocation_count);
+ * ```
+ *
+ * That memory is statically allocated, allowing it be returned and never
+ * needing to be freed.
+ *
+ * The functions can safely allocate the following number of bytes before
+ * the function returns the same memory block to another caller:
+ *
+ * ```c
  * FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
  *         sizeof(type_T) * size_per_allocation
  * ```
@@ -1139,23 +1201,11 @@ memory address to be returned if needed (valid until concurrency max calls).
                              type_T,                                           \
                              size_per_allocation,                              \
                              allocations_per_thread)                           \
-  /** Allocates `count` blocks of memory from the `name` static arena. */      \
-  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {                       \
-    static type_T name##buffer[sizeof(type_T) *                                \
-                               FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *         \
-                               size_per_allocation * allocations_per_thread];  \
-    static size_t pos;                                                         \
-    if (!count)                                                                \
-      return name##buffer;                                                     \
-    size_t at = fio_atomic_add(&pos, count);                                   \
-    at %= FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread;      \
-    return (at * size_per_allocation) + name##buffer;                          \
-  }                                                                            \
-  /** Returns the size of the static arena in `sizeof(type_T)` units. */       \
-  FIO_IFUNC size_t name##_size(void) {                                         \
-    return (size_t)(FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *                    \
-                    size_per_allocation * allocations_per_thread);             \
-  }
+  FIO_STATIC_ALLOC_DEF_UNSAFE(name,                                            \
+                              type_T,                                          \
+                              size_per_allocation,                             \
+                              allocations_per_thread,                          \
+                              FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX)
 
 /* *****************************************************************************
 Logging Primitives (no-op)

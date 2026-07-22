@@ -418,6 +418,7 @@ IO Type
 #define FIO___IO_FLAG_POLLIN_SET  ((uint32_t)256U)
 #define FIO___IO_FLAG_POLLOUT_SET ((uint32_t)512U)
 #define FIO___IO_FLAG_WRITE_DIRTY ((uint32_t)1024U)
+#define FIO___IO_FLAG_DATA_SCHD   ((uint32_t)2048U)
 
 #define FIO___IO_FLAG_PREVENT_ON_DATA                                          \
   (FIO___IO_FLAG_SUSPENDED | FIO___IO_FLAG_THROTTLED)
@@ -928,7 +929,8 @@ Event handling
 static void fio___io_poll_on_data(void *io_, void *ignr_) {
   (void)ignr_;
   fio_io_s *io = (fio_io_s *)io_;
-  FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLLIN_SET);
+  FIO___IO_FLAG_UNSET(io,
+                      (FIO___IO_FLAG_POLLIN_SET | FIO___IO_FLAG_DATA_SCHD));
   if (!(io->flags & FIO___IO_FLAG_PREVENT_ON_DATA)) {
     /* this also tests for the suspended / throttled flags, allows closed */
     io->pr->on_data(io);
@@ -1081,6 +1083,17 @@ static void fio___io_poll_on_data_schd(void *io) {
                            (void *)fio___io_dup2((fio_io_s *)io),
                            NULL);
 }
+SFUNC void fio_io_on_data_schedule(fio_io_s *io) {
+  if (!io || (io->flags & FIO___IO_FLAG_CLOSED_ALL))
+    return;
+  if (!(FIO___IO_FLAG_SET(io, FIO___IO_FLAG_DATA_SCHD) &
+        FIO___IO_FLAG_DATA_SCHD)) {
+    fio___io_defer_no_wakeup(fio___io_poll_on_data,
+                             (void *)fio___io_dup2(io),
+                             NULL);
+  }
+}
+
 static void fio___io_poll_on_ready_schd(void *io) {
   if (!(FIO___IO_FLAG_SET((fio_io_s *)io, FIO___IO_FLAG_WRITE_SCHD) &
         FIO___IO_FLAG_WRITE_SCHD)) {

@@ -250,15 +250,15 @@ FIO_SFUNC void test_tls13_handshake_messages(void) {
              "ALPN selected value mismatch");
 
   /* CertificateRequest build/parse. */
-  uint16_t sig_algs[] = {FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256};
+  uint16_t signature_algos[] = {FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256};
   uint8_t context[8];
   fio_rand_bytes(context, sizeof(context));
   uint8_t cr[64];
   int cr_len = fio_tls13_build_certificate_request(cr,
                                                     sizeof(cr),
-                                                    context,
-                                                    sizeof(context),
-                                                    sig_algs,
+                                                    FIO_UBUF_INFO2(context,
+                                                                   sizeof(context)),
+                                                    signature_algos,
                                                     1);
   FIO_ASSERT(cr_len > 0, "CertificateRequest build failed");
 
@@ -266,12 +266,12 @@ FIO_SFUNC void test_tls13_handshake_messages(void) {
   FIO_ASSERT(fio_tls13_parse_certificate_request(&cr_out, cr + 4,
                                                   cr_len - 4) == 0,
              "CertificateRequest parse failed");
-  FIO_ASSERT(cr_out.signature_algorithm_count == 1,
+  FIO_ASSERT(cr_out.algo_count == 1,
              "CertificateRequest sig alg count mismatch");
-  FIO_ASSERT(cr_out.signature_algorithms[0] ==
-                 FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256,
+  FIO_ASSERT(cr_out.algos[0] ==
+                 FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256,
              "CertificateRequest sig alg mismatch");
-  FIO_ASSERT(cr_out.certificate_request_context_len == sizeof(context),
+  FIO_ASSERT(cr_out.context_len == sizeof(context),
              "CertificateRequest context length mismatch");
 
   /* Finished build/parse. */
@@ -378,18 +378,17 @@ FIO_SFUNC void tls13_test_init_server(fio_tls13_server_s *server,
                                       uint8_t **cert_der,
                                       size_t *cert_len,
                                       fio_x509_keypair_s *kp,
-                                      const uint8_t **cert_ptrs,
-                                      size_t *cert_lens) {
+                                      fio_ubuf_info_s *chain) {
   FIO_ASSERT(tls13_test_make_p256_cert(cert_der, cert_len, kp) == 0,
              "server cert generation failed");
   fio_tls13_server_init(server);
-  cert_ptrs[0] = *cert_der;
-  cert_lens[0] = *cert_len;
-  fio_tls13_server_set_cert_chain(server, cert_ptrs, cert_lens, 1);
+  chain[0] = FIO_UBUF_INFO2(*cert_der, *cert_len);
+  fio_tls13_server_set_cert_chain(server, chain, 1);
   fio_tls13_server_set_private_key(
-      server, kp->secret_key, kp->secret_key_len,
-      FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256);
-  FIO_MEMCPY(server->public_key, kp->public_key, 65);
+      server,
+      FIO_UBUF_INFO2(kp->secret_key, kp->secret_key_len),
+      FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256);
+  FIO_MEMCPY(server->credentials.public_key, kp->public_key, 65);
 }
 
 FIO_SFUNC int tls13_test_run_handshake(fio_tls13_client_s *client,
@@ -401,11 +400,10 @@ FIO_SFUNC int tls13_test_run_handshake(fio_tls13_client_s *client,
   if (with_client_cert) {
     fio_tls13_server_require_client_cert(server, 2);
     fio_tls13_client_set_cert(client,
-                              client_cert_der,
-                              client_cert_len,
-                              client_kp->secret_key,
-                              client_kp->secret_key_len,
-                              FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256);
+                              FIO_UBUF_INFO2(client_cert_der, client_cert_len),
+                              FIO_UBUF_INFO2(client_kp->secret_key,
+                                             client_kp->secret_key_len),
+                              FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256);
     fio_tls13_client_set_public_key(client, client_kp->public_key);
   }
 
@@ -485,9 +483,8 @@ FIO_SFUNC void test_tls13_handshake_roundtrip(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -507,9 +504,8 @@ FIO_SFUNC void test_tls13_handshake_alpn(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
   fio_tls13_server_alpn_set(&server, "h2,http/1.1");
 
   fio_tls13_client_s client;
@@ -519,13 +515,13 @@ FIO_SFUNC void test_tls13_handshake_alpn(void) {
 
   FIO_ASSERT(tls13_test_run_handshake(&client, &server, 0, NULL, NULL, 0),
              "ALPN handshake failed");
-  FIO_ASSERT(client.alpn_selected_len == 2,
+  FIO_ASSERT(client.alpn.selected_len == 2,
              "client ALPN not selected");
-  FIO_ASSERT(!FIO_MEMCMP(client.alpn_selected, "h2", 2),
+  FIO_ASSERT(!FIO_MEMCMP(client.alpn.selected, "h2", 2),
              "client ALPN value wrong");
-  FIO_ASSERT(server.selected_alpn_len == 2,
+  FIO_ASSERT(server.alpn.selected_len == 2,
              "server ALPN not selected");
-  FIO_ASSERT(!FIO_MEMCMP(server.selected_alpn, "h2", 2),
+  FIO_ASSERT(!FIO_MEMCMP(server.alpn.selected, "h2", 2),
              "server ALPN value wrong");
 
   fio_tls13_client_destroy(&client);
@@ -539,9 +535,8 @@ FIO_SFUNC void test_tls13_handshake_client_cert(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -578,9 +573,8 @@ FIO_SFUNC void test_tls13_app_data(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -627,9 +621,8 @@ FIO_SFUNC void test_tls13_large_transfer(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -685,6 +678,13 @@ FIO_SFUNC void test_tls13_large_transfer(void) {
 /* *****************************************************************************
 TLS I/O function registration
 ***************************************************************************** */
+FIO_SFUNC void test_tls13_context_overhead(void) {
+  FIO_LOG_INFO("TLS 1.3 global TLS server context overhead: %zu Bytes",
+               sizeof(fio___tls13_context_s));
+  FIO_LOG_INFO("TLS 1.3 persistent per-connection context overhead: %zu Bytes",
+               sizeof(fio___tls13_connection_s) + FIO___TLS13_BUF_TOTAL);
+}
+
 FIO_SFUNC void test_tls13_io_functions(void) {
   fio_io_functions_s fn = fio_tls13_io_functions();
   FIO_ASSERT(fn.build_context != NULL, "build_context missing");
@@ -708,9 +708,8 @@ FIO_SFUNC void test_tls13_handshake_client_cert_trusted(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -753,9 +752,8 @@ FIO_SFUNC void test_tls13_handshake_client_cert_untrusted(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   fio_tls13_client_s client;
   fio_tls13_client_init(&client, "localhost");
@@ -804,9 +802,8 @@ FIO_SFUNC void test_tls13_client_verifies_server(void) {
   size_t server_cert_len = 0;
   fio_x509_keypair_s server_kp;
   fio_tls13_server_s server;
-  const uint8_t *server_certs[1];
-  size_t server_cert_lens[1];
-  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain[1];
+  tls13_test_init_server(&server, &server_cert, &server_cert_len, &server_kp, server_chain);
 
   /* Trusting the server's certificate: handshake verifies successfully. */
   const uint8_t *trust_roots[1] = {server_cert};
@@ -834,7 +831,12 @@ FIO_SFUNC void test_tls13_client_verifies_server(void) {
                                         &other_kp) == 0,
              "other cert generation failed");
   fio_tls13_server_s server2;
-  tls13_test_init_server(&server2, &server_cert, &server_cert_len, &server_kp, server_certs, server_cert_lens);
+  fio_ubuf_info_s server_chain2[1];
+  tls13_test_init_server(&server2,
+                         &server_cert,
+                         &server_cert_len,
+                         &server_kp,
+                         server_chain2);
 
   const uint8_t *bad_roots[1] = {other_cert};
   const size_t bad_lens[1] = {other_cert_len};
@@ -880,12 +882,12 @@ FIO_SFUNC void test_tls13_peer_info_next(void) {
   FIO_MEMSET(conn, 0, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
   conn->is_client = 0;
   conn->handshake_complete = 1;
-  conn->state.server.client_cert_chain[0] = cert;
-  conn->state.server.client_cert_chain_lens[0] = cert_len;
-  conn->state.server.client_cert_chain[1] = cert2;
-  conn->state.server.client_cert_chain_lens[1] = cert2_len;
-  conn->state.server.client_cert_chain_count = 2;
-  conn->state.server.client_cert_verified = 1;
+  conn->state.server.peer_auth.chain.certs[0].buf = cert;
+  conn->state.server.peer_auth.chain.certs[0].len = cert_len;
+  conn->state.server.peer_auth.chain.certs[1].buf = cert2;
+  conn->state.server.peer_auth.chain.certs[1].len = cert2_len;
+  conn->state.server.peer_auth.chain.count = 2;
+  conn->state.server.peer_auth.verified = 1;
 
   fio_x509_cert_s info;
 
@@ -904,7 +906,7 @@ FIO_SFUNC void test_tls13_peer_info_next(void) {
   FIO_ASSERT(info.cn.buf != NULL && info.cn.len == 9 &&
                  !FIO_MEMCMP(info.cn.buf, "localhost", 9),
              "subject CN mismatch");
-  FIO_ASSERT(info.key_type == FIO_X509_KEY_ECDSA_P256,
+  FIO_ASSERT(info.key_algo == FIO_X509_KEY_ECDSA_P256,
              "key type mismatch");
   FIO_ASSERT(info.pubkey.ecdsa.point.buf != NULL &&
                  info.pubkey.ecdsa.point.len == 65,
@@ -967,9 +969,9 @@ FIO_SFUNC void test_tls13_peer_info_next(void) {
   FIO_MEMSET(conn, 0, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
   conn->is_client = 1;
   conn->handshake_complete = 1;
-  conn->state.client.cert_chain[0] = cert;
-  conn->state.client.cert_chain_lens[0] = cert_len;
-  conn->state.client.cert_chain_count = 1;
+  conn->state.client.peer_chain.certs[0].buf = cert;
+  conn->state.client.peer_chain.certs[0].len = cert_len;
+  conn->state.client.peer_chain.count = 1;
   conn->state.client.cert_verified = 1;   /* set by the skip path */
   conn->state.client.chain_verified = 1;  /* set by the skip path */
   conn->state.client.skip_cert_verify = 1;
@@ -1003,6 +1005,7 @@ int main(void) {
   test_tls13_client_verifies_server();
   test_tls13_app_data();
   test_tls13_large_transfer();
+  test_tls13_context_overhead();
   test_tls13_io_functions();
   test_tls13_peer_info_next();
   return 0;

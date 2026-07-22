@@ -12327,22 +12327,22 @@ typedef enum {
   FIO_X509_KEY_ECDSA_P256 = 2,
   FIO_X509_KEY_ECDSA_P384 = 3,
   FIO_X509_KEY_ED25519 = 4,
-} fio_x509_key_type_e;
+} fio_x509_key_algo_e;
 ```
 
 ```c
 typedef enum {
-  FIO_X509_SIG_UNKNOWN = 0,
-  FIO_X509_SIG_RSA_PKCS1_SHA256 = 1,
-  FIO_X509_SIG_RSA_PKCS1_SHA384 = 2,
-  FIO_X509_SIG_RSA_PKCS1_SHA512 = 3,
-  FIO_X509_SIG_RSA_PSS_SHA256 = 4,
-  FIO_X509_SIG_RSA_PSS_SHA384 = 5,
-  FIO_X509_SIG_RSA_PSS_SHA512 = 6,
-  FIO_X509_SIG_ECDSA_SHA256 = 7,
-  FIO_X509_SIG_ECDSA_SHA384 = 8,
-  FIO_X509_SIG_ED25519 = 9,
-} fio_x509_sig_alg_e;
+  FIO_X509_SIGNATURE_UNKNOWN = 0,
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA256 = 1,
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA384 = 2,
+  FIO_X509_SIGNATURE_RSA_PKCS1_SHA512 = 3,
+  FIO_X509_SIGNATURE_RSA_PSS_SHA256 = 4,
+  FIO_X509_SIGNATURE_RSA_PSS_SHA384 = 5,
+  FIO_X509_SIGNATURE_RSA_PSS_SHA512 = 6,
+  FIO_X509_SIGNATURE_ECDSA_SHA256 = 7,
+  FIO_X509_SIGNATURE_ECDSA_SHA384 = 8,
+  FIO_X509_SIGNATURE_ED25519 = 9,
+} fio_x509_signature_algo_e;
 ```
 
 ### Key Usage and Errors
@@ -17523,9 +17523,9 @@ types are supported:
 
 | Key type | Constant | Notes |
 |----------|----------|-------|
-| ECDSA P-256 | `FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256` | Recommended; small and fast |
-| Ed25519 | `FIO_TLS13_SIG_ED25519` | Fastest signatures |
-| RSA (any size) | `FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256` | Requires `H___FIO_RSA___H` |
+| ECDSA P-256 | `FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256` | Recommended; small and fast |
+| Ed25519 | `FIO_TLS13_SIGNATURE_ED25519` | Fastest signatures |
+| RSA (any size) | `FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA256` | Requires `H___FIO_RSA___H` |
 
 If PEM parsing fails, the backend logs `FIO_LOG_WARNING` and falls back to a
 self-signed certificate. If the fallback also fails the context build fails

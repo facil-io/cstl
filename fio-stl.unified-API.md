@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3121.
+Total symbols: 3123.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -71,7 +71,7 @@ Total symbols: 3121.
 - [`./fio-stl/210 map2.h`](#fio-stl-210-map2-h) — 3
 - [`./fio-stl/249 reference counter.h`](#fio-stl-249-reference-counter-h) — 17
 - [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 66
-- [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 103
+- [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 104
 - [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 41
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1763 public symbols.
+1764 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -242,6 +242,75 @@ _Note:_  this MACRO defines or declares code.
 
 _Symbol type:_ `macro`
 
+#### `FIO_STATIC_ALLOC_DEF_UNSAFE`
+
+```c
+#define FIO_STATIC_ALLOC_DEF_UNSAFE(name,   \
+                                    type_T,   \
+                                    size_per_allocation,   \
+                                    allocations_per_thread,   \
+                                    max_thread_safty)   \
+  /** Allocates `count` blocks of memory from the `name` static arena. */   \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {   \
+    static type_T name##buffer[sizeof(type_T) * max_thread_safty *   \
+                               size_per_allocation * allocations_per_thread];   \
+    static size_t pos;   \
+    if (!count)   \
+      return name##buffer;   \
+    size_t at = fio_atomic_add(&pos, count);   \
+    at %= max_thread_safty * allocations_per_thread;   \
+    return (at * size_per_allocation) + name##buffer;   \
+  }   \
+  /** Returns the size of the static arena in `sizeof(type_T)` units. */   \
+  FIO_IFUNC size_t name##_size(void) {   \
+    return (size_t)(max_thread_safty * size_per_allocation *   \
+                    allocations_per_thread);   \
+  }
+```
+
+Defines a simple (almost naive) static memory allocator named `name`.
+
+This defines a memory allocation function named `name` that accepts a
+single input `count` and returns a `type_T` pointer (`type_T *`) containing
+`sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
+
+```c
+static type_T *name(size_t allocation_count);
+```
+
+That memory is statically allocated, allowing it be returned and never
+needing to be freed.
+
+The functions can safely allocate the following number of bytes before
+the function returns the same memory block to another caller:
+
+```c
+max_thread_safty * allocations_per_thread * sizeof(type_T) *
+size_per_allocation
+```
+
+Example use:
+
+```c
+// defined a static allocator for 32 byte long strings
+FIO_STATIC_ALLOC_DEF_UNSAFE(numer2hex_allocator, char, 19, 1, 256);
+// a function that returns an unsigned number as a 16 digit hex string
+char * ntos16(uint16_t n) {
+  char * n = numer2hex_allocator(1);
+  n[0] = '0'; n[1] = 'x';
+  fio_ltoa16u(n+2, n, 16);
+  n[18] = 0;
+  return n;
+}
+```
+
+A similar approach is use by `fiobj_num2cstr` in order to provide temporary
+conversions of FIOBJ to a C String that doesn't require memory management.
+
+_Note:_  this MACRO defines or declares code.
+
+_Symbol type:_ `macro`
+
 #### `FIO_STATIC_ALLOC_DEF`
 
 ```c
@@ -249,23 +318,11 @@ _Symbol type:_ `macro`
                              type_T,   \
                              size_per_allocation,   \
                              allocations_per_thread)   \
-  /** Allocates `count` blocks of memory from the `name` static arena. */   \
-  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {   \
-    static type_T name##buffer[sizeof(type_T) *   \
-                               FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *   \
-                               size_per_allocation * allocations_per_thread];   \
-    static size_t pos;   \
-    if (!count)   \
-      return name##buffer;   \
-    size_t at = fio_atomic_add(&pos, count);   \
-    at %= FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread;   \
-    return (at * size_per_allocation) + name##buffer;   \
-  }   \
-  /** Returns the size of the static arena in `sizeof(type_T)` units. */   \
-  FIO_IFUNC size_t name##_size(void) {   \
-    return (size_t)(FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX *   \
-                    size_per_allocation * allocations_per_thread);   \
-  }
+  FIO_STATIC_ALLOC_DEF_UNSAFE(name,   \
+                              type_T,   \
+                              size_per_allocation,   \
+                              allocations_per_thread,   \
+                              FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX)
 ```
 
 Defines a simple (almost naive) static memory allocator named `name`.
@@ -27943,7 +28000,7 @@ _Symbol type:_ `macro`
 
 ### Types
 
-#### `fio_x509_key_type_e`
+#### `fio_x509_key_algo_e`
 
 ```c
 typedef enum {
@@ -27952,28 +28009,28 @@ FIO_X509_KEY_RSA = 1, /**< RSA (any key size) */
 FIO_X509_KEY_ECDSA_P256 = 2, /**< ECDSA with P-256/secp256r1 */
 FIO_X509_KEY_ECDSA_P384 = 3, /**< ECDSA with P-384/secp384r1 */
 FIO_X509_KEY_ED25519 = 4, /**< Ed25519 (EdDSA) */
-} fio_x509_key_type_e
+} fio_x509_key_algo_e
 ```
 
 Public key algorithm types
 
 _Symbol type:_ `type`
 
-#### `fio_x509_sig_alg_e`
+#### `fio_x509_signature_algo_e`
 
 ```c
 typedef enum {
-FIO_X509_SIG_UNKNOWN = 0,
-FIO_X509_SIG_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
-FIO_X509_SIG_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
-FIO_X509_SIG_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
-FIO_X509_SIG_RSA_PSS_SHA256 = 4, /**< RSA-PSS with SHA-256 */
-FIO_X509_SIG_RSA_PSS_SHA384 = 5, /**< RSA-PSS with SHA-384 */
-FIO_X509_SIG_RSA_PSS_SHA512 = 6, /**< RSA-PSS with SHA-512 */
-FIO_X509_SIG_ECDSA_SHA256 = 7, /**< ecdsa-with-SHA256 */
-FIO_X509_SIG_ECDSA_SHA384 = 8, /**< ecdsa-with-SHA384 */
-FIO_X509_SIG_ED25519 = 9, /**< Ed25519 */
-} fio_x509_sig_alg_e
+FIO_X509_SIGNATURE_UNKNOWN = 0,
+FIO_X509_SIGNATURE_RSA_PKCS1_SHA256 = 1, /**< sha256WithRSAEncryption */
+FIO_X509_SIGNATURE_RSA_PKCS1_SHA384 = 2, /**< sha384WithRSAEncryption */
+FIO_X509_SIGNATURE_RSA_PKCS1_SHA512 = 3, /**< sha512WithRSAEncryption */
+FIO_X509_SIGNATURE_RSA_PSS_SHA256 = 4, /**< RSA-PSS with SHA-256 */
+FIO_X509_SIGNATURE_RSA_PSS_SHA384 = 5, /**< RSA-PSS with SHA-384 */
+FIO_X509_SIGNATURE_RSA_PSS_SHA512 = 6, /**< RSA-PSS with SHA-512 */
+FIO_X509_SIGNATURE_ECDSA_SHA256 = 7, /**< ecdsa-with-SHA256 */
+FIO_X509_SIGNATURE_ECDSA_SHA384 = 8, /**< ecdsa-with-SHA384 */
+FIO_X509_SIGNATURE_ED25519 = 9, /**< Ed25519 */
+} fio_x509_signature_algo_e
 ```
 
 Signature algorithm types
@@ -28069,7 +28126,7 @@ fio_ubuf_info_s subject;
 fio_ubuf_info_s issuer;
 /** Subject Common Name (if present, pointer into DER data) */
 fio_buf_info_s cn;
-/** Public Key Data (union based on key_type) */
+/** Public Key Data (union based on key_algo) */
 union {
 struct {
 fio_ubuf_info_s n; /**< RSA modulus (big-endian) */
@@ -28099,9 +28156,9 @@ int64_t not_after;
 uint8_t fingerprint[32];
 /* Small fields grouped at the end (no bitfields — byte access is faster) */
 /** Public Key Type */
-fio_x509_key_type_e key_type;
+fio_x509_key_algo_e key_algo;
 /** Signature Algorithm */
-fio_x509_sig_alg_e sig_alg;
+fio_x509_signature_algo_e signature_algo;
 /** Key Usage extension bits */
 uint16_t key_usage;
 /** Peer chain verification state: non-zero if a TLS backend verified this
@@ -28289,7 +28346,7 @@ _Symbol type:_ `function`
 #### `fio_x509_verify_chain`
 
 ```c
-int fio_x509_verify_chain(const uint8_t **certs, const size_t *cert_lens, size_t cert_count, const char *hostname, int64_t current_time, fio_x509_trust_store_s *trust_store)
+int fio_x509_verify_chain(const fio_ubuf_info_s *certs, size_t cert_count, const char *hostname, int64_t current_time, fio_x509_trust_store_s *trust_store)
 ```
 
 Validate a certificate chain for TLS 1.3.
@@ -28309,8 +28366,7 @@ Validation performs:
   7. Verify the chain terminates at a trusted root (if trust store provided)
 
 **Parameters:**
-- `certs` - Array of DER-encoded certificates
-- `cert_lens` - Array of certificate lengths
+- `certs` - Array of DER-encoded certificate views
 - `cert_count` - Number of certificates in chain
 - `hostname` - Expected hostname for end-entity (NULL to skip check)
 - `current_time` - Current Unix timestamp for validity checking
@@ -29475,19 +29531,19 @@ TLS 1.3 Named Groups (RFC 8446 Section 4.2.7, draft-ietf-tls-hybrid-design)
 
 _Symbol type:_ `type`
 
-#### `fio_tls13_signature_scheme_e`
+#### `fio_tls13_signature_algo_e`
 
 ```c
 typedef enum {
-FIO_TLS13_SIG_RSA_PKCS1_SHA256 = 0x0401,
-FIO_TLS13_SIG_RSA_PKCS1_SHA384 = 0x0501,
-FIO_TLS13_SIG_RSA_PKCS1_SHA512 = 0x0601,
-FIO_TLS13_SIG_ECDSA_SECP256R1_SHA256 = 0x0403,
-FIO_TLS13_SIG_ECDSA_SECP384R1_SHA384 = 0x0503,
-FIO_TLS13_SIG_RSA_PSS_RSAE_SHA256 = 0x0804,
-FIO_TLS13_SIG_RSA_PSS_RSAE_SHA384 = 0x0805,
-FIO_TLS13_SIG_ED25519 = 0x0807,
-} fio_tls13_signature_scheme_e
+FIO_TLS13_SIGNATURE_RSA_PKCS1_SHA256 = 0x0401,
+FIO_TLS13_SIGNATURE_RSA_PKCS1_SHA384 = 0x0501,
+FIO_TLS13_SIGNATURE_RSA_PKCS1_SHA512 = 0x0601,
+FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256 = 0x0403,
+FIO_TLS13_SIGNATURE_ECDSA_SECP384R1_SHA384 = 0x0503,
+FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA256 = 0x0804,
+FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA384 = 0x0805,
+FIO_TLS13_SIGNATURE_ED25519 = 0x0807,
+} fio_tls13_signature_algo_e
 ```
 
 TLS 1.3 Signature Algorithms (RFC 8446 Section 4.2.3)
@@ -29530,8 +29586,7 @@ _Symbol type:_ `type`
 
 ```c
 typedef struct {
-const uint8_t *cert_data; /* Pointer to first certificate */
-size_t cert_len; /* Length of first certificate */
+fio_ubuf_info_s cert; /* First certificate (view into message data) */
 } fio_tls13_certificate_s
 ```
 
@@ -29543,9 +29598,8 @@ _Symbol type:_ `type`
 
 ```c
 typedef struct {
-uint16_t signature_scheme;
-const uint8_t *signature;
-size_t signature_len;
+fio_ubuf_info_s signature; /* Signature (view into message data) */
+uint16_t signature_algo;
 } fio_tls13_certificate_verify_s
 ```
 
@@ -29557,15 +29611,13 @@ _Symbol type:_ `type`
 
 ```c
 typedef struct {
-uint8_t certificate_request_context[255]; /* Opaque context */
-size_t certificate_request_context_len; /* Context length (0-255) */
-uint16_t signature_algorithms[16]; /* Required signature algorithms */
-size_t signature_algorithm_count; /* Number of signature algorithms */
-uint16_t signature_algorithms_cert[16]; /* Cert chain sig algs (optional) */
-size_t signature_algorithms_cert_count; /* Number of cert sig algs */
-/* Certificate authorities (optional, pointers into original data) */
-const uint8_t *certificate_authorities; /* Raw CA DNs data */
-size_t certificate_authorities_len; /* Total CA DNs length */
+fio_ubuf_info_s authorities; /* Raw CA DNs data (view into message) */
+size_t context_len; /* Context length (0-255) */
+size_t algo_count; /* Number of signature algorithms */
+size_t cert_algos_count; /* Number of cert sig algos */
+uint16_t algos[16]; /* Required signature algorithms */
+uint16_t cert_algos[16]; /* Cert chain sig algos (optional) */
+uint8_t context[255]; /* Opaque context */
 } fio_tls13_certificate_request_s
 ```
 
@@ -32641,7 +32693,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-401-io-api-h"></a> `./fio-stl/401 io api.h`
 
-103 public symbols.
+104 public symbols.
 
 ### Macros
 
@@ -33540,6 +33592,19 @@ int fio_io_is_suspended(fio_io_s *io)
 ```
 
 Returns 1 if the IO handle was suspended.
+
+_Symbol type:_ `function`
+
+#### `fio_io_on_data_schedule`
+
+```c
+void fio_io_on_data_schedule(fio_io_s *io)
+```
+
+Schedules one deferred `on_data` callback for already-buffered input.
+
+Repeated calls before delivery are coalesced. This does not bypass normal
+suspension or throttling checks.
 
 _Symbol type:_ `function`
 

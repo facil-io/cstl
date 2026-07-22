@@ -436,6 +436,12 @@ SFUNC void fio_io_unsuspend(fio_io_s *io);
 /** Returns 1 if the IO handle was suspended. */
 SFUNC int fio_io_is_suspended(fio_io_s *io);
 
+/** Schedules one deferred `on_data` callback for already-buffered input.
+ *
+ * Repeated calls before delivery are coalesced. This does not bypass normal
+ * suspension or throttling checks. */
+SFUNC void fio_io_on_data_schedule(fio_io_s *io);
+
 /** Returns 1 if the IO handle is marked as open. */
 SFUNC int fio_io_is_open(fio_io_s *io);
 
