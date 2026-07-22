@@ -1353,7 +1353,7 @@ FIO_CONSTRUCTOR(FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)) {
   fio_state_callback_add(FIO_CALL_IN_CHILD,
                          FIO_NAME(FIO_MEMORY_NAME, __malloc_after_fork_task),
                          NULL);
-  fio_state_callback_add(FIO_CALL_AT_EXIT,
+  fio_state_callback_add(FIO_CALL_AFTER_EXIT,
                          FIO_NAME(FIO_MEMORY_NAME, __mem_state_cleanup),
                          NULL);
   /* allocate the state machine */
