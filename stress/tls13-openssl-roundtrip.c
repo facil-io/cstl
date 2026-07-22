@@ -1,12 +1,14 @@
 /*****************************************************************************
-Test: TLS 1.3 HTTP roundtrip with in-process fio TLS 1.3 server and OpenSSL
+Test: TLS 1.3 roundtrips with in-process fio TLS 1.3 servers and an OpenSSL
 libssl client.
 
 Replaces the external-process oracle tests tests-old/tls13-curl.c and
-tests-old/tls13-openssl.c with a single-process, deterministic, library-only
-roundtrip.  The facil.io side uses the native TLS 1.3 IO implementation
+tests-old/tls13-openssl.c with deterministic, library-only roundtrips.  The
+facil.io side uses the native TLS 1.3 IO implementation
 (fio_tls13_io_functions); the client uses OpenSSL's libssl directly from the
-same process.
+same process.  In addition to HTTP interoperability, this test verifies that
+partially consumed plaintext schedules enough deferred on_data callbacks to
+drain the TLS buffer when the peer sends no more application data.
 
 Without OpenSSL the test compiles to a no-op that exits 0.
 ***************************************************************************** */
@@ -41,15 +43,33 @@ Without OpenSSL the test compiles to a no-op that exits 0.
 Shared state
 ***************************************************************************** */
 
+enum {
+  FIO___TLS13_OPENSSL_RT_PARTIAL_READ = 17,
+  FIO___TLS13_OPENSSL_RT_PHASES = 2,
+};
+
+static const size_t fio___tls13_openssl_rt_payload_len[] = {
+    4096,
+    FIO_TLS13_MAX_PLAINTEXT_LEN + 257,
+};
+
 typedef struct {
-  fio_http_listener_s *listener;
-  int port;
+  fio_http_listener_s *http_listener;
+  fio_io_listener_s *partial_listener;
+  int http_port;
+  int partial_port;
   int result;
   int done;
+  size_t partial_phase;
+  size_t partial_received[FIO___TLS13_OPENSSL_RT_PHASES];
+  size_t partial_on_data[FIO___TLS13_OPENSSL_RT_PHASES];
+  int partial_failed;
+  int thread_started;
   pthread_t thread;
 } fio___tls13_openssl_rt_state_s;
 
 static fio___tls13_openssl_rt_state_s fio___tls13_openssl_rt_state = {0};
+static fio_io_protocol_s fio___tls13_openssl_rt_partial_protocol = {0};
 static int fio___tls13_openssl_rt_watchdog_fired = 0;
 
 /* *****************************************************************************
@@ -59,6 +79,70 @@ HTTP server handler
 static void fio___tls13_openssl_rt_on_http(fio_http_s *h) {
   fio_http_status_set(h, 200);
   fio_http_write(h, .buf = "OK", .len = 2, .finish = 1);
+}
+
+static uint8_t fio___tls13_openssl_rt_payload_byte(size_t phase, size_t pos) {
+  return (uint8_t)((pos * 131U + phase * 17U + 29U) & 255U);
+}
+
+static void fio___tls13_openssl_rt_on_data_partial(fio_io_s *io) {
+  fio___tls13_openssl_rt_state_s *state =
+      (fio___tls13_openssl_rt_state_s *)fio_io_udata(io);
+  const size_t phase = state->partial_phase;
+  uint8_t buf[FIO___TLS13_OPENSSL_RT_PARTIAL_READ];
+
+  if (phase >= FIO___TLS13_OPENSSL_RT_PHASES) {
+    if (fio_io_read(io, buf, sizeof(buf))) {
+      state->partial_failed = 1;
+      fio_io_close(io);
+    }
+    return;
+  }
+
+  /* Deliberately perform only one small read per callback.  Once OpenSSL has
+   * sent the phase payload it waits for our acknowledgement, so retained TLS
+   * plaintext must schedule the remaining callbacks without another peer
+   * write or socket readability edge. */
+  size_t len = fio_io_read(io, buf, sizeof(buf));
+  if (!len)
+    return;
+
+  ++state->partial_on_data[phase];
+  const size_t offset = state->partial_received[phase];
+  const size_t expected_len = fio___tls13_openssl_rt_payload_len[phase];
+  if (len > expected_len - offset) {
+    fprintf(stderr,
+            "partial-read phase %zu overflow: %zu + %zu > %zu\n",
+            phase,
+            offset,
+            len,
+            expected_len);
+    state->partial_failed = 1;
+    fio_io_close(io);
+    return;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    const uint8_t expected =
+        fio___tls13_openssl_rt_payload_byte(phase, offset + i);
+    if (buf[i] != expected) {
+      fprintf(stderr,
+              "partial-read phase %zu mismatch at %zu: %u != %u\n",
+              phase,
+              offset + i,
+              (unsigned)buf[i],
+              (unsigned)expected);
+      state->partial_failed = 1;
+      fio_io_close(io);
+      return;
+    }
+  }
+
+  state->partial_received[phase] += len;
+  if (state->partial_received[phase] == expected_len) {
+    uint8_t ack = (uint8_t)('A' + phase);
+    ++state->partial_phase;
+    fio_io_write(io, &ack, 1);
+  }
 }
 
 /* *****************************************************************************
@@ -82,7 +166,7 @@ typedef struct {
   char url[];
 } fio___tls13_openssl_rt_listen_s;
 
-static int fio___tls13_openssl_rt_listener_port(fio_http_listener_s *listener) {
+static int fio___tls13_openssl_rt_listener_port(fio_io_listener_s *listener) {
   fio___tls13_openssl_rt_listen_s *l =
       (fio___tls13_openssl_rt_listen_s *)listener;
   struct sockaddr_in addr = {0};
@@ -214,21 +298,98 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
   return ok ? 0 : -1;
 }
 
+static int fio___tls13_openssl_rt_partial_client_run(const char *host,
+                                                       int port) {
+  SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+  if (!ctx)
+    return -1;
+
+  SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
+  SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+
+  int fd = fio___tls13_openssl_rt_socket_connect(host, port);
+  if (fd < 0) {
+    SSL_CTX_free(ctx);
+    return -1;
+  }
+
+  SSL *ssl = SSL_new(ctx);
+  if (!ssl) {
+    close(fd);
+    SSL_CTX_free(ctx);
+    return -1;
+  }
+  SSL_set_fd(ssl, fd);
+
+  int ok = 1;
+  if (SSL_connect(ssl) <= 0) {
+    fprintf(stderr, "partial-read SSL_connect failed\n");
+    ok = 0;
+  }
+
+  uint8_t payload[FIO_TLS13_MAX_PLAINTEXT_LEN + 257];
+  for (size_t phase = 0; ok && phase < FIO___TLS13_OPENSSL_RT_PHASES;
+       ++phase) {
+    const size_t len = fio___tls13_openssl_rt_payload_len[phase];
+    for (size_t i = 0; i < len; ++i)
+      payload[i] = fio___tls13_openssl_rt_payload_byte(phase, i);
+
+    size_t sent = 0;
+    while (sent < len) {
+      int written = SSL_write(ssl, payload + sent, (int)(len - sent));
+      if (written <= 0) {
+        fprintf(stderr, "partial-read SSL_write failed in phase %zu\n", phase);
+        ok = 0;
+        break;
+      }
+      sent += (size_t)written;
+    }
+    if (!ok)
+      break;
+
+    /* Do not send more application data until the server drains this phase.
+     * A missing deferred on_data event therefore deadlocks here and is caught
+     * by the socket timeout / reactor watchdog. */
+    uint8_t ack = 0;
+    int ack_len = SSL_read(ssl, &ack, 1);
+    if (ack_len != 1 || ack != (uint8_t)('A' + phase)) {
+      fprintf(stderr,
+              "partial-read acknowledgement failed in phase %zu\n",
+              phase);
+      ok = 0;
+    }
+  }
+
+  SSL_shutdown(ssl);
+  SSL_free(ssl);
+  close(fd);
+  SSL_CTX_free(ctx);
+  return ok ? 0 : -1;
+}
+
 static void *fio___tls13_openssl_rt_thread(void *ignr_) {
   (void)ignr_;
-  /* Give the listener a moment to start accepting. */
+  /* Give both listeners a moment to start accepting. */
   usleep(100000);
 
-  fio___tls13_openssl_rt_state.port = fio___tls13_openssl_rt_listener_port(
-      fio___tls13_openssl_rt_state.listener);
-  if (fio___tls13_openssl_rt_state.port > 0) {
-    fio___tls13_openssl_rt_state.result =
-        fio___tls13_openssl_rt_client_run("127.0.0.1",
-                                          fio___tls13_openssl_rt_state.port);
-  } else {
+  fio___tls13_openssl_rt_state.http_port =
+      fio___tls13_openssl_rt_listener_port((fio_io_listener_s *)
+                                               fio___tls13_openssl_rt_state
+                                                   .http_listener);
+  fio___tls13_openssl_rt_state.partial_port =
+      fio___tls13_openssl_rt_listener_port(
+          fio___tls13_openssl_rt_state.partial_listener);
+  if (fio___tls13_openssl_rt_state.http_port <= 0 ||
+      fio___tls13_openssl_rt_state.partial_port <= 0) {
+    fio___tls13_openssl_rt_state.result = -1;
+  } else if (fio___tls13_openssl_rt_client_run(
+                 "127.0.0.1", fio___tls13_openssl_rt_state.http_port) ||
+             fio___tls13_openssl_rt_partial_client_run(
+                 "127.0.0.1", fio___tls13_openssl_rt_state.partial_port)) {
     fio___tls13_openssl_rt_state.result = -1;
   }
-  fio___tls13_openssl_rt_state.done = 1;
+  fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
   fio_io_stop();
   return NULL;
 }
@@ -244,15 +405,19 @@ static void fio___tls13_openssl_rt_start_client(void *ignr_) {
                      fio___tls13_openssl_rt_thread,
                      NULL) != 0) {
     fio___tls13_openssl_rt_state.result = -1;
-    fio___tls13_openssl_rt_state.done = 1;
+    fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
     fio_io_stop();
+  } else {
+    fio___tls13_openssl_rt_state.thread_started = 1;
   }
 }
 
 static int fio___tls13_openssl_rt_watchdog(void *u1, void *u2) {
   (void)u1;
   (void)u2;
-  if (!fio___tls13_openssl_rt_state.done) {
+  int done;
+  fio_atomic_load(done, &fio___tls13_openssl_rt_state.done);
+  if (!done) {
     fio___tls13_openssl_rt_watchdog_fired = 1;
     fio_io_stop();
   }
@@ -264,23 +429,40 @@ Main
 ***************************************************************************** */
 
 int main(void) {
-  fprintf(stderr, "Testing TLS 1.3 HTTP roundtrip (fio TLS 1.3 + OpenSSL):\n");
+  fprintf(stderr,
+          "Testing TLS 1.3 roundtrips (fio TLS 1.3 + OpenSSL):\n");
 
   fio_io_functions_s tls13_funcs = fio_tls13_io_functions();
+  fio___tls13_openssl_rt_partial_protocol = (fio_io_protocol_s){
+      .on_data = fio___tls13_openssl_rt_on_data_partial,
+      .on_timeout = fio_io_touch,
+      .io_functions = tls13_funcs,
+      .timeout = 5000,
+  };
+
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls, "fio_io_tls_new failed");
   fio_io_tls_cert_add(tls, "localhost", NULL, NULL, NULL);
   fio_io_tls_alpn_add(tls, "http/1.1", NULL);
 
-  fio___tls13_openssl_rt_state.listener =
+  fio___tls13_openssl_rt_state.http_listener =
       fio_http_listen("https://127.0.0.1:0",
                       .tls = tls,
                       .tls_io_func = &tls13_funcs,
                       .on_http = fio___tls13_openssl_rt_on_http,
                       .timeout = 5);
-  fio_io_tls_free(tls);
-  FIO_ASSERT(fio___tls13_openssl_rt_state.listener,
+  FIO_ASSERT(fio___tls13_openssl_rt_state.http_listener,
              "fio_http_listen failed on 127.0.0.1:0");
+
+  fio___tls13_openssl_rt_state.partial_listener =
+      fio_io_listen(.url = "tcp://127.0.0.1:0",
+                    .protocol = &fio___tls13_openssl_rt_partial_protocol,
+                    .udata = &fio___tls13_openssl_rt_state,
+                    .tls = tls,
+                    .hide_from_log = 1);
+  fio_io_tls_free(tls);
+  FIO_ASSERT(fio___tls13_openssl_rt_state.partial_listener,
+             "fio_io_listen failed on 127.0.0.1:0");
 
   fio_state_callback_add(FIO_CALL_ON_START,
                          fio___tls13_openssl_rt_start_client,
@@ -294,11 +476,12 @@ int main(void) {
   fio_state_callback_remove(FIO_CALL_ON_START,
                             fio___tls13_openssl_rt_start_client,
                             NULL);
-  if (fio___tls13_openssl_rt_state.thread)
+  if (fio___tls13_openssl_rt_state.thread_started)
     pthread_join(fio___tls13_openssl_rt_state.thread, NULL);
 
   fio_io_listen_stop(
-      (fio_io_listener_s *)fio___tls13_openssl_rt_state.listener);
+      (fio_io_listener_s *)fio___tls13_openssl_rt_state.http_listener);
+  fio_io_listen_stop(fio___tls13_openssl_rt_state.partial_listener);
 
   FIO_ASSERT(!fio___tls13_openssl_rt_watchdog_fired,
              "TLS 1.3 roundtrip timed out");
@@ -306,8 +489,40 @@ int main(void) {
              "client thread did not complete");
   FIO_ASSERT(fio___tls13_openssl_rt_state.result == 0,
              "TLS 1.3 OpenSSL client roundtrip failed");
+  FIO_ASSERT(!fio___tls13_openssl_rt_state.partial_failed,
+             "TLS 1.3 partial-read data validation failed");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.partial_phase ==
+                 FIO___TLS13_OPENSSL_RT_PHASES,
+             "TLS 1.3 partial-read phases did not complete");
+  for (size_t phase = 0; phase < FIO___TLS13_OPENSSL_RT_PHASES; ++phase) {
+    const size_t expected_len = fio___tls13_openssl_rt_payload_len[phase];
+    const size_t expected_events =
+        (expected_len + FIO___TLS13_OPENSSL_RT_PARTIAL_READ - 1) /
+        FIO___TLS13_OPENSSL_RT_PARTIAL_READ;
+    FIO_ASSERT(fio___tls13_openssl_rt_state.partial_received[phase] ==
+                   expected_len,
+               "partial-read phase %zu length mismatch: %zu != %zu",
+               phase,
+               fio___tls13_openssl_rt_state.partial_received[phase],
+               expected_len);
+    if (!phase) {
+      FIO_ASSERT(fio___tls13_openssl_rt_state.partial_on_data[phase] ==
+                     expected_events,
+                 "single-record phase on_data count mismatch: %zu != %zu",
+                 fio___tls13_openssl_rt_state.partial_on_data[phase],
+                 expected_events);
+    } else {
+      /* TLS record boundaries can add a short read, so only the lower bound is
+       * stable across OpenSSL versions and record-splitting policies. */
+      FIO_ASSERT(fio___tls13_openssl_rt_state.partial_on_data[phase] >=
+                     expected_events,
+                 "multi-record phase on_data count too small: %zu < %zu",
+                 fio___tls13_openssl_rt_state.partial_on_data[phase],
+                 expected_events);
+    }
+  }
 
-  fprintf(stderr, "TLS 1.3 HTTP roundtrip passed.\n");
+  fprintf(stderr, "TLS 1.3 HTTP and partial-read roundtrips passed.\n");
   return 0;
 }
 
