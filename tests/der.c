@@ -463,7 +463,7 @@ registry/define drift.
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, der_oid_registry_round_trip)(void) {
-  static const struct {
+  const struct {
     fio_u128 oid;
     const char *dot;
   } registry[] = {
