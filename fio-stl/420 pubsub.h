@@ -373,7 +373,7 @@ Subscription Type - Reference Counting via FIO_REF
 ***************************************************************************** */
 
 /* Subscription structure */
-typedef struct fio_pubsub_subscription_s {
+typedef struct fio___pubsub_subscription_s {
   FIO_LIST_NODE node;
   fio_io_s *io;
   void (*on_message)(fio_pubsub_msg_s *msg);
@@ -385,29 +385,29 @@ typedef struct fio_pubsub_subscription_s {
   int16_t filter;      /* Channel filter (temporary before channel is set) */
   uint8_t is_pattern;  /* Pattern flag (temporary before channel is set) */
   uint8_t master_only; /* If true, subscription exists only in master process */
-} fio_pubsub_subscription_s;
+} fio___pubsub_subscription_s;
 
 FIO_SFUNC void fio___pubsub_subscription_on_destroy(
-    fio_pubsub_subscription_s *s);
+    fio___pubsub_subscription_s *s);
 
 /* Subscription reference counting */
-#define FIO_REF_NAME         fio_pubsub_subscription
+#define FIO_REF_NAME         fio___pubsub_subscription
 #define FIO_REF_DESTROY(obj) fio___pubsub_subscription_on_destroy(&(obj))
 #include FIO_INCLUDE_FILE
 
 /* Subscription reference counting helpers - thread management */
 FIO_SFUNC void fio___pubsub_subscription_free_task(void *s, void *ignr_) {
-  fio_pubsub_subscription_free2(s);
+  fio___pubsub_subscription_free2(s);
   (void)ignr_;
 }
 
-FIO_SFUNC void fio_pubsub_subscription_free(fio_pubsub_subscription_s *s) {
+FIO_SFUNC void fio___pubsub_subscription_free(fio___pubsub_subscription_s *s) {
   fio_queue_push(fio_io_queue(), fio___pubsub_subscription_free_task, s, NULL);
 }
 
-FIO_IFUNC fio_pubsub_subscription_s *fio_pubsub_subscription_dup(
-    fio_pubsub_subscription_s *s) {
-  return fio_pubsub_subscription_dup2(s);
+FIO_IFUNC fio___pubsub_subscription_s *fio___pubsub_subscription_dup(
+    fio___pubsub_subscription_s *s) {
+  return fio___pubsub_subscription_dup2(s);
 }
 
 /** Compute environment type key for subscription storage. */
@@ -766,7 +766,7 @@ FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
 FIO_SFUNC void fio___pubsub_on_fork_test_unsubscribe_master(
     fio_pubsub_channel_s *ch) {
   /** Loops through every node in the linked list except the head. */
-  FIO_LIST_EACH(fio_pubsub_subscription_s, node, &ch->subscriptions, sub) {
+  FIO_LIST_EACH(fio___pubsub_subscription_s, node, &ch->subscriptions, sub) {
     if (sub->master_only) {
       fio_io_env_remove(
           sub->io,
@@ -858,7 +858,7 @@ Message Delivery to Subscriptions
 
 /** Container for deferred message delivery using IPC message directly */
 typedef struct {
-  fio_pubsub_subscription_s *sub;
+  fio___pubsub_subscription_s *sub;
   fio_ipc_s *ipc;
   fio_pubsub_msg_s msg;
   volatile uintptr_t defer_flag;
@@ -866,7 +866,7 @@ typedef struct {
 
 FIO_SFUNC void fio___pubsub_subscription_ipc_deliver(void *sub_, void *ipc_) {
   fio___pubsub_message_container_s data = {
-      .sub = (fio_pubsub_subscription_s *)sub_,
+      .sub = (fio___pubsub_subscription_s *)sub_,
       .ipc = (fio_ipc_s *)ipc_,
       .msg = fio___pubsub_ipc2msg((fio_ipc_s *)ipc_)};
 
@@ -881,7 +881,7 @@ FIO_SFUNC void fio___pubsub_subscription_ipc_deliver(void *sub_, void *ipc_) {
                    ipc_);
     return;
   }
-  fio_pubsub_subscription_free(data.sub);
+  fio___pubsub_subscription_free(data.sub);
   fio_ipc_free(data.ipc);
 }
 
@@ -1048,13 +1048,13 @@ FIO_SFUNC void fio___pubsub_engine_ipc_deliver2channel(fio_pubsub_channel_s *ch,
   //                fio___pubsub_ipc2msg(ipc).message.len,
   //                ipc->len);
 
-  FIO_LIST_EACH(fio_pubsub_subscription_s, node, &ch->subscriptions, s) {
+  FIO_LIST_EACH(fio___pubsub_subscription_s, node, &ch->subscriptions, s) {
     /* Skip if publisher is sending to itself (IO is set)*/
     if (skip && s->io == skip)
       continue;
     fio_queue_push(s->queue,
                    fio___pubsub_subscription_ipc_deliver,
-                   fio_pubsub_subscription_dup(s),
+                   fio___pubsub_subscription_dup(s),
                    fio_ipc_dup(ipc));
   }
 }
@@ -1253,7 +1253,7 @@ Unsubscribe Implementation
 
 /** Unsubscribes a node (deferred task). */
 FIO_SFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
-  fio_pubsub_subscription_s *sub = (fio_pubsub_subscription_s *)sub_;
+  fio___pubsub_subscription_s *sub = (fio___pubsub_subscription_s *)sub_;
 
   FIO_LIST_REMOVE(&sub->node);
   sub->node = FIO_LIST_INIT(sub->node);
@@ -1264,24 +1264,25 @@ FIO_SFUNC void fio___pubsub_unsubscribe_task(void *sub_, void *ignr_) {
   //                 (void *)sub,
   //                 (int)sub->channel->name_len,
   //                 sub->channel->name,
-  //                 fio_pubsub_subscription_references(sub));
+  //                 fio___pubsub_subscription_references(sub));
 
-  fio_pubsub_subscription_free2(sub);
+  fio___pubsub_subscription_free2(sub);
   /* fio_pubsub_channel_free(ch) - called by `destroy` when freed */
   (void)ignr_;
 }
 
 /** Unsubscribe callback for environment on_close */
 FIO_SFUNC void fio___pubsub_subscription_env_unsubscribe(void *sub_) {
-  fio_pubsub_subscription_s *sub = (fio_pubsub_subscription_s *)sub_;
+  fio___pubsub_subscription_s *sub = (fio___pubsub_subscription_s *)sub_;
+  if (!sub)
+    return;
   sub->on_message = fio___pubsub_on_message_stub;
   // FIO_LOG_DDEBUG2("(%d) unsubscribed called for %p -> %.*s (ref: %zu)",
   //                 fio_io_pid(),
   //                 (void *)sub,
   //                 (int)sub->channel->name_len,
   //                 sub->channel->name,
-  //                 fio_pubsub_subscription_references(sub));
-
+  //                 fio___pubsub_subscription_references(sub));
   fio_queue_push(fio_io_queue(),
                  fio___pubsub_unsubscribe_task,
                  (void *)sub,
@@ -1292,10 +1293,12 @@ int fio_pubsub_unsubscribe___(void); /* IDE Marker */
 SFUNC int fio_pubsub_unsubscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
   /* Handle subscriptions created with subscription_handle_ptr */
   if (args.subscription_handle_ptr && *args.subscription_handle_ptr) {
-    fio_pubsub_subscription_s *sub =
-        (fio_pubsub_subscription_s *)*args.subscription_handle_ptr;
-    *args.subscription_handle_ptr = 0;
-    fio___pubsub_subscription_env_unsubscribe(sub);
+    fio___pubsub_subscription_s *sub =
+        (fio___pubsub_subscription_s *)(fio_atomic_exchange(
+            args.subscription_handle_ptr,
+            0));
+    if (sub)
+      fio___pubsub_subscription_env_unsubscribe(sub);
     return 0;
   }
   return fio_io_env_remove(
@@ -1307,7 +1310,7 @@ SFUNC int fio_pubsub_unsubscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
 /* *****************************************************************************
 Subscribe Implementation
 ***************************************************************************** */
-FIO_SFUNC void fio___pubsub_request_history(fio_pubsub_subscription_s *sub);
+FIO_SFUNC void fio___pubsub_request_history(fio___pubsub_subscription_s *sub);
 
 /* A callback for IO subscriptions - sends raw message data. */
 SFUNC void FIO_ON_MESSAGE_SEND_MESSAGE(fio_pubsub_msg_s *msg) {
@@ -1332,7 +1335,7 @@ FIO_SFUNC void fio___subscription_call_protocol(fio_pubsub_msg_s *msg) {
 
 /** Completes the subscription request (deferred task). */
 FIO_SFUNC void fio___pubsub_subscribe_task(void *sub_, void *bstr_) {
-  fio_pubsub_subscription_s *sub = (fio_pubsub_subscription_s *)sub_;
+  fio___pubsub_subscription_s *sub = (fio___pubsub_subscription_s *)sub_;
   char *bstr = (char *)bstr_;
   fio_str_info_s ch_name = fio_bstr_info(bstr);
   ch_name.capa = FIO___PUBSUB_CHANNEL_ENCODE_CAPA(sub->filter, sub->is_pattern);
@@ -1365,17 +1368,17 @@ FIO_SFUNC void fio___pubsub_subscribe_task(void *sub_, void *bstr_) {
   //                 (void *)sub,
   //                 (int)sub->channel->name_len,
   //                 sub->channel->name,
-  //                 fio_pubsub_subscription_references(sub));
-  fio_pubsub_subscription_free2(sub);
+  //                 fio___pubsub_subscription_references(sub));
+  fio___pubsub_subscription_free2(sub);
   return;
 
 no_channel:
-  fio_pubsub_subscription_free2(sub);
+  fio___pubsub_subscription_free2(sub);
 }
 
 void fio_pubsub_subscribe___(void); /* IDE Marker */
 SFUNC void fio_pubsub_subscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
-  fio_pubsub_subscription_s *s = NULL;
+  fio___pubsub_subscription_s *s = NULL;
   char *bstr = NULL;
 
   if (args.channel.len > 0xFFFFUL)
@@ -1384,7 +1387,7 @@ SFUNC void fio_pubsub_subscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
   if (args.master_only && !fio_io_is_master())
     goto sub_error;
 
-  s = fio_pubsub_subscription_new2();
+  s = fio___pubsub_subscription_new2();
   if (!s)
     goto sub_error;
 
@@ -1397,7 +1400,7 @@ SFUNC void fio_pubsub_subscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
   if (!args.queue || !args.on_message)
     args.queue = fio_io_queue();
 
-  *s = (fio_pubsub_subscription_s){
+  *s = (fio___pubsub_subscription_s){
       .node = FIO_LIST_INIT(s->node),
       .io = args.io,
       .on_message =
@@ -1417,7 +1420,7 @@ SFUNC void fio_pubsub_subscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
   };
 
   fio_io_defer(fio___pubsub_subscribe_task,
-               fio_pubsub_subscription_dup(s),
+               fio___pubsub_subscription_dup(s),
                bstr);
 
   if (args.subscription_handle_ptr) {
@@ -1435,15 +1438,18 @@ SFUNC void fio_pubsub_subscribe FIO_NOOP(fio_pubsub_subscribe_args_s args) {
   return;
 
 sub_error:
-  FIO_LOG_ERROR("(%d) pub/sub subscription/channel cannot be created?",
-                fio_io_pid());
+  FIO_LOG_ERROR(
+      "(%d) pub/sub subscription/channel cannot be created? %.*s",
+      fio_io_pid(),
+      ((args.channel.len > 0xFFFFUL) ? (int)16 : (int)args.channel.len),
+      ((args.channel.len > 0xFFFFUL) ? "<name too long>" : args.channel.buf));
   if (args.on_unsubscribe)
     args.on_unsubscribe(args.udata);
   return;
 sub_error_free_sub:
   FIO_LOG_ERROR("(%d) pub/sub subscription/channel cannot be created?",
                 fio_io_pid());
-  fio_pubsub_subscription_free(s);
+  fio___pubsub_subscription_free(s);
 }
 
 /* *****************************************************************************
@@ -1460,7 +1466,7 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy_task(void *tsk,
 }
 
 FIO_SFUNC void fio___pubsub_subscription_on_destroy(
-    fio_pubsub_subscription_s *s) {
+    fio___pubsub_subscription_s *s) {
   fio_pubsub_channel_s *c = s->channel;
 
   FIO_LOG_DDEBUG2("(%d) subscription destroyed for %p -> %.*s",
@@ -1509,16 +1515,16 @@ FIO_SFUNC void fio___pubsub_worker_on_history_reply(fio_ipc_s *ipc) {
   //                (int)(fio_buf2u32u(ipc->data)),
   //                ipc->data + sizeof(uint32_t[2]));
 
-  fio_queue_push(((fio_pubsub_subscription_s *)ipc->udata)->queue,
+  fio_queue_push(((fio___pubsub_subscription_s *)ipc->udata)->queue,
                  fio___pubsub_subscription_ipc_deliver,
-                 fio_pubsub_subscription_dup(ipc->udata),
+                 fio___pubsub_subscription_dup(ipc->udata),
                  fio_ipc_dup(ipc));
 }
 
 /** IPC handler: Worker receives history reply from master */
 FIO_SFUNC void fio___pubsub_worker_on_history_reply_done(fio_ipc_s *ipc) {
   fio___pubsub_worker_on_history_reply(ipc); /* MAY contain last message */
-  fio_pubsub_subscription_free2(ipc->udata);
+  fio___pubsub_subscription_free2(ipc->udata);
 }
 
 /** Callback for master history replay - sends messages to requesting worker */
@@ -1604,7 +1610,7 @@ FIO_SFUNC void fio___pubsub_master_on_history_request(fio_ipc_s *ipc) {
 }
 
 /** Worker requests history from master via IPC */
-FIO_SFUNC void fio___pubsub_request_history(fio_pubsub_subscription_s *sub) {
+FIO_SFUNC void fio___pubsub_request_history(fio___pubsub_subscription_s *sub) {
   if (!sub || !sub->channel || !sub->replay_since)
     return;
 
@@ -1624,7 +1630,7 @@ FIO_SFUNC void fio___pubsub_request_history(fio_pubsub_subscription_s *sub) {
   fio_ipc_call(.call = fio___pubsub_master_on_history_request,
                .on_reply = fio___pubsub_worker_on_history_reply,
                .on_done = fio___pubsub_worker_on_history_reply_done,
-               .udata = fio_pubsub_subscription_dup(sub),
+               .udata = fio___pubsub_subscription_dup(sub),
                .flags = (uint16_t)sub->channel->filter,
                .data = FIO_IPC_DATA(
                    FIO_BUF_INFO2((char *)&header,

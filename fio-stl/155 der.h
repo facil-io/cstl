@@ -1,7 +1,7 @@
 /* ************************************************************************* */
 #if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
 #define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_DER               /* Development inclusion - ignore line */
+#define FIO_DER                /* Development inclusion - ignore line */
 #include "./include.h"         /* Development inclusion - ignore line */
 #endif                         /* Development inclusion - ignore line */
 /* *****************************************************************************
@@ -40,20 +40,20 @@ typedef enum {
   FIO_DER_EMBEDDED_PDV = 0x0B,      /**< Embedded PDV */
   FIO_DER_UTF8_STRING = 0x0C,       /**< UTF-8 String */
   FIO_DER_RELATIVE_OID = 0x0D,      /**< Relative OID */
-  FIO_DER_SEQUENCE = 0x10,         /**< Sequence (0x30 with constructed bit) */
-  FIO_DER_SET = 0x11,              /**< Set (0x31 with constructed bit) */
-  FIO_DER_NUMERIC_STRING = 0x12,   /**< Numeric String */
-  FIO_DER_PRINTABLE_STRING = 0x13, /**< Printable String */
-  FIO_DER_T61_STRING = 0x14,       /**< T61 String (Teletex) */
-  FIO_DER_VIDEOTEX_STRING = 0x15,  /**< Videotex String */
-  FIO_DER_IA5_STRING = 0x16,       /**< IA5 String (ASCII) */
-  FIO_DER_UTC_TIME = 0x17,         /**< UTC Time */
-  FIO_DER_GENERALIZED_TIME = 0x18, /**< Generalized Time */
-  FIO_DER_GRAPHIC_STRING = 0x19,   /**< Graphic String */
-  FIO_DER_VISIBLE_STRING = 0x1A,   /**< Visible String */
-  FIO_DER_GENERAL_STRING = 0x1B,   /**< General String */
-  FIO_DER_UNIVERSAL_STRING = 0x1C, /**< Universal String */
-  FIO_DER_BMP_STRING = 0x1E,       /**< BMP String (UCS-2) */
+  FIO_DER_SEQUENCE = 0x10,          /**< Sequence (0x30 with constructed bit) */
+  FIO_DER_SET = 0x11,               /**< Set (0x31 with constructed bit) */
+  FIO_DER_NUMERIC_STRING = 0x12,    /**< Numeric String */
+  FIO_DER_PRINTABLE_STRING = 0x13,  /**< Printable String */
+  FIO_DER_T61_STRING = 0x14,        /**< T61 String (Teletex) */
+  FIO_DER_VIDEOTEX_STRING = 0x15,   /**< Videotex String */
+  FIO_DER_IA5_STRING = 0x16,        /**< IA5 String (ASCII) */
+  FIO_DER_UTC_TIME = 0x17,          /**< UTC Time */
+  FIO_DER_GENERALIZED_TIME = 0x18,  /**< Generalized Time */
+  FIO_DER_GRAPHIC_STRING = 0x19,    /**< Graphic String */
+  FIO_DER_VISIBLE_STRING = 0x1A,    /**< Visible String */
+  FIO_DER_GENERAL_STRING = 0x1B,    /**< General String */
+  FIO_DER_UNIVERSAL_STRING = 0x1C,  /**< Universal String */
+  FIO_DER_BMP_STRING = 0x1E,        /**< BMP String (UCS-2) */
   /* Context-specific tags (0x80 | tag_number) with constructed bit (0x20) */
   FIO_DER_CONTEXT_0 = 0xA0, /**< [0] EXPLICIT/IMPLICIT */
   FIO_DER_CONTEXT_1 = 0xA1, /**< [1] EXPLICIT/IMPLICIT */
@@ -102,8 +102,8 @@ ASN.1 Parser API - Core Functions
  * @return Pointer to next element (after this one), or NULL on error
  */
 SFUNC const uint8_t *fio_der_parse(fio_der_element_s *elem,
-                                    const uint8_t *data,
-                                    size_t data_len);
+                                   const uint8_t *data,
+                                   size_t data_len);
 
 /**
  * Get the total encoded length of an ASN.1 element (tag + length + content).
@@ -113,7 +113,7 @@ SFUNC const uint8_t *fio_der_parse(fio_der_element_s *elem,
  * @return Total bytes used by the element encoding
  */
 FIO_IFUNC size_t fio_der_element_total_len(const fio_der_element_s *elem,
-                                            const uint8_t *data);
+                                           const uint8_t *data);
 
 /* *****************************************************************************
 ASN.1 Parser API - Type-Specific Parsers
@@ -130,8 +130,7 @@ ASN.1 Parser API - Type-Specific Parsers
  * @param value Output for integer value (can be NULL for large integers)
  * @return 0 on success, -1 on error
  */
-SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
-                                 uint64_t *value);
+SFUNC int fio_der_parse_integer(const fio_der_element_s *elem, uint64_t *value);
 
 /**
  * Parse an ASN.1 BIT STRING element.
@@ -143,9 +142,9 @@ SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
  * @return 0 on success, -1 on error
  */
 SFUNC int fio_der_parse_bit_string(const fio_der_element_s *elem,
-                                    const uint8_t **bits,
-                                    size_t *bit_len,
-                                    uint8_t *unused_bits);
+                                   const uint8_t **bits,
+                                   size_t *bit_len,
+                                   uint8_t *unused_bits);
 
 /**
  * Parse an ASN.1 OID into a dot-separated string.
@@ -158,8 +157,8 @@ SFUNC int fio_der_parse_bit_string(const fio_der_element_s *elem,
  * @return Number of chars written (excluding NUL), or -1 on error
  */
 SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
-                             char *buf,
-                             size_t buf_len);
+                            char *buf,
+                            size_t buf_len);
 
 /**
  * Parse an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
@@ -169,8 +168,7 @@ SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
  * UTC)
  * @return 0 on success, -1 on error
  */
-SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
-                              int64_t *unix_time);
+SFUNC int fio_der_parse_time(const fio_der_element_s *elem, int64_t *unix_time);
 
 /**
  * Parse an ASN.1 string element.
@@ -183,7 +181,7 @@ SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
  * @return Pointer to string data, or NULL on error
  */
 FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
-                                            size_t *len);
+                                           size_t *len);
 
 /**
  * Parse an ASN.1 BOOLEAN element.
@@ -192,8 +190,7 @@ FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
  * @param value Output boolean value (0 = false, non-zero = true)
  * @return 0 on success, -1 on error
  */
-FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem,
-                                     int *value);
+FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem, int *value);
 
 /* *****************************************************************************
 ASN.1 Parser API - Sequence/Set Iteration
@@ -206,7 +203,7 @@ ASN.1 Parser API - Sequence/Set Iteration
  * @param sequence Parsed element (must be SEQUENCE or SET)
  */
 FIO_IFUNC void fio_der_iterator_init(fio_der_iterator_s *it,
-                                      const fio_der_element_s *sequence);
+                                     const fio_der_element_s *sequence);
 
 /**
  * Get the next element from an iterator.
@@ -216,7 +213,7 @@ FIO_IFUNC void fio_der_iterator_init(fio_der_iterator_s *it,
  * @return 0 if element available, -1 if end or error
  */
 SFUNC int fio_der_iterator_next(fio_der_iterator_s *it,
-                                 fio_der_element_s *elem);
+                                fio_der_element_s *elem);
 
 /**
  * Check if iterator has more elements.
@@ -247,7 +244,7 @@ FIO_IFUNC int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag);
  * @return 1 if match, 0 otherwise
  */
 FIO_IFUNC int fio_der_is_context_tag(const fio_der_element_s *elem,
-                                      uint8_t tag_num);
+                                     uint8_t tag_num);
 
 /**
  * Get the tag number from an element.
@@ -266,7 +263,7 @@ Implementation - Inline Functions
 
 /** Get total encoded length of element */
 FIO_IFUNC size_t fio_der_element_total_len(const fio_der_element_s *elem,
-                                            const uint8_t *data) {
+                                           const uint8_t *data) {
   if (!elem || !data || !elem->data)
     return 0;
   return (size_t)(elem->data - data) + elem->len;
@@ -274,7 +271,7 @@ FIO_IFUNC size_t fio_der_element_total_len(const fio_der_element_s *elem,
 
 /** Parse string types - returns pointer to data */
 FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
-                                            size_t *len) {
+                                           size_t *len) {
   if (!elem || !len)
     return NULL;
   /* Accept various string types */
@@ -298,8 +295,7 @@ FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
 }
 
 /** Parse boolean value */
-FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem,
-                                     int *value) {
+FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem, int *value) {
   if (!elem || !value)
     return -1;
   if ((elem->tag & 0x1F) != FIO_DER_BOOLEAN ||
@@ -347,7 +343,7 @@ FIO_IFUNC int fio___der_oid_eq(fio_u128 a, fio_u128 b) {
 
 /** Initialize iterator for sequence/set */
 FIO_IFUNC void fio_der_iterator_init(fio_der_iterator_s *it,
-                                      const fio_der_element_s *sequence) {
+                                     const fio_der_element_s *sequence) {
   if (!it)
     return;
   if (!sequence || !sequence->data) {
@@ -377,7 +373,7 @@ FIO_IFUNC int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag) {
 
 /** Check if element is context-specific tag */
 FIO_IFUNC int fio_der_is_context_tag(const fio_der_element_s *elem,
-                                      uint8_t tag_num) {
+                                     uint8_t tag_num) {
   if (!elem)
     return 0;
   return (elem->tag_class == FIO_DER_CLASS_CONTEXT) &&
@@ -406,8 +402,8 @@ Implementation - Core Parser
  * Sets *out_len to the parsed length value.
  */
 FIO_SFUNC const uint8_t *fio___der_parse_length(const uint8_t *data,
-                                                 const uint8_t *end,
-                                                 size_t *out_len) {
+                                                const uint8_t *end,
+                                                size_t *out_len) {
   if (!data || !end || !out_len || data >= end)
     return NULL;
 
@@ -444,8 +440,8 @@ FIO_SFUNC const uint8_t *fio___der_parse_length(const uint8_t *data,
 
 /** Parse one ASN.1 element from DER data */
 SFUNC const uint8_t *fio_der_parse(fio_der_element_s *elem,
-                                    const uint8_t *data,
-                                    size_t data_len) {
+                                   const uint8_t *data,
+                                   size_t data_len) {
   if (!elem || !data || data_len == 0)
     return NULL;
 
@@ -499,7 +495,7 @@ Implementation - Integer Parser
 ***************************************************************************** */
 
 SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
-                                 uint64_t *value) {
+                                uint64_t *value) {
   if (!elem)
     return -1;
 
@@ -539,9 +535,9 @@ Implementation - Bit String Parser
 ***************************************************************************** */
 
 SFUNC int fio_der_parse_bit_string(const fio_der_element_s *elem,
-                                    const uint8_t **bits,
-                                    size_t *bit_len,
-                                    uint8_t *unused_bits) {
+                                   const uint8_t **bits,
+                                   size_t *bit_len,
+                                   uint8_t *unused_bits) {
   if (!elem || !bits || !bit_len || !unused_bits)
     return -1;
 
@@ -580,8 +576,8 @@ Implementation - OID Parser
 
 /** Parse OID component from base-128 encoding */
 FIO_SFUNC const uint8_t *fio___der_parse_oid_component(const uint8_t *p,
-                                                        const uint8_t *end,
-                                                        uint64_t *value) {
+                                                       const uint8_t *end,
+                                                       uint64_t *value) {
   uint64_t v = 0;
   size_t count = 0;
 
@@ -625,8 +621,8 @@ FIO_SFUNC int fio___der_write_uint(char *buf, size_t buf_len, uint64_t value) {
 }
 
 SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
-                             char *buf,
-                             size_t buf_len) {
+                            char *buf,
+                            size_t buf_len) {
   if (!elem || !buf || buf_len < 4)
     return -1;
 
@@ -701,7 +697,7 @@ Implementation - Time Parser
 ***************************************************************************** */
 
 SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
-                              int64_t *unix_time) {
+                             int64_t *unix_time) {
   if (!elem || !unix_time)
     return -1;
 
@@ -741,22 +737,22 @@ SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
       return -1;
   }
 
-  year = digits / divisor;
+  year = (int)(digits / divisor);
   digits -= year * divisor;
   divisor /= 100;
-  month = digits / divisor;
+  month = (int)(digits / divisor);
   digits -= month * divisor;
   divisor /= 100;
-  day = digits / divisor;
+  day = (int)(digits / divisor);
   digits -= day * divisor;
   divisor /= 100;
-  hour = digits / divisor;
+  hour = (int)(digits / divisor);
   digits -= hour * divisor;
   divisor /= 100;
-  min = digits / divisor;
+  min = (int)(digits / divisor);
   digits -= min * divisor;
   divisor /= 100;
-  sec = digits;
+  sec = (int)(digits);
 
   if (tag == FIO_DER_UTC_TIME) {
     year += (year < 50 ? 2000 : 1900);
@@ -783,7 +779,7 @@ Implementation - Iterator
 */
 
 SFUNC int fio_der_iterator_next(fio_der_iterator_s *it,
-                                 fio_der_element_s *elem) {
+                                fio_der_element_s *elem) {
   if (!it || !elem || !it->pos || !it->end || it->pos >= it->end)
     return -1;
 
@@ -821,8 +817,8 @@ SFUNC size_t fio_der_encode_length(uint8_t *buf, size_t len);
  * @return Number of bytes written/needed
  */
 SFUNC size_t fio_der_encode_integer(uint8_t *buf,
-                                     const uint8_t *data,
-                                     size_t data_len);
+                                    const uint8_t *data,
+                                    size_t data_len);
 
 /**
  * Encode an ASN.1 INTEGER from a small value.
@@ -854,8 +850,8 @@ SFUNC size_t fio___der_encode_oid(uint8_t *buf, fio_u128 oid);
  * @return Number of bytes written/needed
  */
 SFUNC size_t fio_der_encode_utf8_string(uint8_t *buf,
-                                         const char *str,
-                                         size_t str_len);
+                                        const char *str,
+                                        size_t str_len);
 
 /**
  * Encode an ASN.1 PrintableString.
@@ -866,8 +862,8 @@ SFUNC size_t fio_der_encode_utf8_string(uint8_t *buf,
  * @return Number of bytes written/needed
  */
 SFUNC size_t fio_der_encode_printable_string(uint8_t *buf,
-                                              const char *str,
-                                              size_t str_len);
+                                             const char *str,
+                                             size_t str_len);
 
 /**
  * Encode an ASN.1 BIT STRING.
@@ -879,9 +875,9 @@ SFUNC size_t fio_der_encode_printable_string(uint8_t *buf,
  * @return Number of bytes written/needed
  */
 SFUNC size_t fio_der_encode_bit_string(uint8_t *buf,
-                                        const uint8_t *bits,
-                                        size_t bit_len,
-                                        uint8_t unused_bits);
+                                       const uint8_t *bits,
+                                       size_t bit_len,
+                                       uint8_t unused_bits);
 
 /**
  * Encode an ASN.1 OCTET STRING.
@@ -892,8 +888,8 @@ SFUNC size_t fio_der_encode_bit_string(uint8_t *buf,
  * @return Number of bytes written/needed
  */
 SFUNC size_t fio_der_encode_octet_string(uint8_t *buf,
-                                          const uint8_t *data,
-                                          size_t data_len);
+                                         const uint8_t *data,
+                                         size_t data_len);
 
 /**
  * Encode an ASN.1 SEQUENCE wrapper around existing content.
@@ -924,9 +920,9 @@ SFUNC size_t fio_der_encode_set_header(uint8_t *buf, size_t content_len);
  * @return Number of bytes written/needed for tag+length only
  */
 SFUNC size_t fio_der_encode_context_header(uint8_t *buf,
-                                            uint8_t tag_num,
-                                            size_t content_len,
-                                            int constructed);
+                                           uint8_t tag_num,
+                                           size_t content_len,
+                                           int constructed);
 
 /**
  * Encode an ASN.1 NULL.
@@ -996,8 +992,8 @@ SFUNC size_t fio_der_encode_length(uint8_t *buf, size_t len) {
 
 /** Encode ASN.1 INTEGER */
 SFUNC size_t fio_der_encode_integer(uint8_t *buf,
-                                     const uint8_t *data,
-                                     size_t data_len) {
+                                    const uint8_t *data,
+                                    size_t data_len) {
   if (!data || data_len == 0)
     return 0;
 
@@ -1073,8 +1069,8 @@ SFUNC size_t fio___der_encode_oid(uint8_t *buf, fio_u128 oid) {
 
 /** Encode ASN.1 UTF8String */
 SFUNC size_t fio_der_encode_utf8_string(uint8_t *buf,
-                                         const char *str,
-                                         size_t str_len) {
+                                        const char *str,
+                                        size_t str_len) {
   size_t len_bytes = fio_der_encode_length(NULL, str_len);
   size_t total = 1 + len_bytes + str_len;
 
@@ -1090,8 +1086,8 @@ SFUNC size_t fio_der_encode_utf8_string(uint8_t *buf,
 
 /** Encode ASN.1 PrintableString */
 SFUNC size_t fio_der_encode_printable_string(uint8_t *buf,
-                                              const char *str,
-                                              size_t str_len) {
+                                             const char *str,
+                                             size_t str_len) {
   size_t len_bytes = fio_der_encode_length(NULL, str_len);
   size_t total = 1 + len_bytes + str_len;
 
@@ -1107,9 +1103,9 @@ SFUNC size_t fio_der_encode_printable_string(uint8_t *buf,
 
 /** Encode ASN.1 BIT STRING */
 SFUNC size_t fio_der_encode_bit_string(uint8_t *buf,
-                                        const uint8_t *bits,
-                                        size_t bit_len,
-                                        uint8_t unused_bits) {
+                                       const uint8_t *bits,
+                                       size_t bit_len,
+                                       uint8_t unused_bits) {
   size_t content_len = 1 + bit_len; /* unused bits byte + data */
   size_t len_bytes = fio_der_encode_length(NULL, content_len);
   size_t total = 1 + len_bytes + content_len;
@@ -1127,8 +1123,8 @@ SFUNC size_t fio_der_encode_bit_string(uint8_t *buf,
 
 /** Encode ASN.1 OCTET STRING */
 SFUNC size_t fio_der_encode_octet_string(uint8_t *buf,
-                                          const uint8_t *data,
-                                          size_t data_len) {
+                                         const uint8_t *data,
+                                         size_t data_len) {
   size_t len_bytes = fio_der_encode_length(NULL, data_len);
   size_t total = 1 + len_bytes + data_len;
 
@@ -1170,9 +1166,9 @@ SFUNC size_t fio_der_encode_set_header(uint8_t *buf, size_t content_len) {
 
 /** Encode ASN.1 context-specific tag header */
 SFUNC size_t fio_der_encode_context_header(uint8_t *buf,
-                                            uint8_t tag_num,
-                                            size_t content_len,
-                                            int constructed) {
+                                           uint8_t tag_num,
+                                           size_t content_len,
+                                           int constructed) {
   size_t len_bytes = fio_der_encode_length(NULL, content_len);
   size_t total = 1 + len_bytes;
 
@@ -1205,12 +1201,12 @@ SFUNC size_t fio_der_encode_boolean(uint8_t *buf, int value) {
 
 /** Helper: convert Unix timestamp to broken-down time */
 FIO_SFUNC void fio___der_gmtime(int64_t unix_time,
-                                 int *year,
-                                 int *month,
-                                 int *day,
-                                 int *hour,
-                                 int *min,
-                                 int *sec) {
+                                int *year,
+                                int *month,
+                                int *day,
+                                int *hour,
+                                int *min,
+                                int *sec) {
   const time_t t = (time_t)unix_time;
   const struct tm tm = fio_time2gm(t);
 

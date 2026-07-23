@@ -213,6 +213,8 @@ FIO_SFUNC void ps_handle_on_message(fio_pubsub_msg_s *msg) {
   fio_atomic_add(&ps_handle_received, 1);
 }
 
+FIO_SFUNC void ps_handle_on_message_noop(fio_pubsub_msg_s *msg) { (void)msg; }
+
 FIO_SFUNC void ps_handle_on_unsubscribe(void *udata) {
   (void)udata;
   fio_atomic_add(&ps_handle_unsub, 1);
@@ -360,6 +362,15 @@ static void test_pubsub_integration(void) {
   ps_handle_received = 0;
   ps_handle_unsub = 0;
   ps_handle = 0;
+
+  for (size_t i = 0; i < 4; ++i) {
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("should_auto_free1"),
+                         .on_message = ps_handle_on_message_noop);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("should_auto_free2"),
+                         .on_message = ps_handle_on_message_noop);
+    fio_pubsub_subscribe(.channel = FIO_BUF_INFO1("should_auto_free3"),
+                         .on_message = ps_handle_on_message_noop);
+  }
 
   fio_io_run_every(.fn = ps_subscribe_all, .every = 50, .repetitions = 1);
   fio_io_run_every(.fn = ps_unsubscribe, .every = 100, .repetitions = 1);
