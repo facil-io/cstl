@@ -2,9 +2,10 @@
 Test - POSIX portable polling (102 poll api.h + backends)
 
 Correctness coverage for fio_poll_init, fio_poll_destroy, fio_poll_engine,
-fio_poll_monitor, fio_poll_review, and fio_poll_forget.
+fio_poll_monitor, fio_poll_review, fio_poll_forget, and polling duplicated
+listener sockets.
 
-Uses fio_sock_socketpair for in-process deterministic roundtrips.
+Uses in-process loopback sockets for deterministic roundtrips.
 ***************************************************************************** */
 #include "test-helpers.h"
 
@@ -125,6 +126,60 @@ static void test_poll_on_data(void) {
   fprintf(stderr, "* on_data + one-shot: OK\n");
 }
 
+static void test_poll_duplicated_listener(void) {
+  fio_socket_i listener =
+      fio_sock_open("127.0.0.1", "0", FIO_SOCK_TCP | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(listener),
+             "duplicated-listener test: server socket failed to open");
+
+  struct sockaddr_storage addr = {0};
+  socklen_t addrlen = sizeof(addr);
+  FIO_ASSERT(!getsockname(listener, (struct sockaddr *)&addr, &addrlen),
+             "duplicated-listener test: getsockname failed");
+  char port_str[8];
+  snprintf(port_str,
+           sizeof(port_str),
+           "%u",
+           ntohs(((struct sockaddr_in *)&addr)->sin_port));
+
+  fio_socket_i duplicate = fio_sock_dup(listener);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(duplicate),
+             "duplicated-listener test: fio_sock_dup failed");
+  fio_sock_close(listener);
+
+  poll_counts_s counts = {0};
+  fio_poll_s p;
+  fio_poll_init(&p,
+                .on_data = cb_on_data,
+                .on_ready = cb_on_ready,
+                .on_close = cb_on_close);
+  FIO_ASSERT(!fio_poll_monitor(&p, duplicate, &counts, POLLIN),
+             "duplicated-listener test: fio_poll_monitor failed");
+
+  fio_socket_i client =
+      fio_sock_open("127.0.0.1", port_str, FIO_SOCK_TCP | FIO_SOCK_CLIENT);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(client),
+             "duplicated-listener test: client socket failed to open");
+
+  int events = fio_poll_review(&p, 1000);
+  FIO_ASSERT(events >= 1,
+             "duplicated listener should become readable (got %d events)",
+             events);
+  FIO_ASSERT(counts.on_data_count >= 1,
+             "duplicated listener should fire on_data (count=%d)",
+             counts.on_data_count);
+
+  fio_socket_i accepted = fio_sock_accept(duplicate, NULL, NULL);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(accepted),
+             "duplicated-listener test: accept failed after poll");
+
+  fio_poll_destroy(&p);
+  fio_sock_close(accepted);
+  fio_sock_close(client);
+  fio_sock_close(duplicate);
+  fprintf(stderr, "* duplicated listener + poll: OK\n");
+}
+
 static void test_poll_on_close(void) {
   fio_socket_i fds[2] = {FIO_SOCKET_INVALID, FIO_SOCKET_INVALID};
   poll_counts_s counts = {0};
@@ -222,6 +277,7 @@ int main(void) {
   test_poll_engine_and_init();
   test_poll_on_ready();
   test_poll_on_data();
+  test_poll_duplicated_listener();
   test_poll_on_close();
   test_poll_forget();
   test_poll_empty_review();
