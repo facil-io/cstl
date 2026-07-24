@@ -1780,6 +1780,324 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)(void) {
   test_obj_free((test_obj_s *)r.obj);
 }
 
+/* *****************************************************************************
+Fixed-Length Blob Incremental Streaming Tests (FIO_RESP3_STREAM_THRESHOLD)
+***************************************************************************** */
+
+/** Builds a `$<len>\r\n<pattern bytes>\r\n` wire image; returns total length. */
+static size_t test_make_blob_wire(uint8_t **out, size_t blob_len) {
+  char hdr[32];
+  int hpos = 0;
+  hdr[hpos++] = '$';
+  hpos += fio_ltoa(hdr + hpos, (int64_t)blob_len, 10);
+  hdr[hpos++] = '\r';
+  hdr[hpos++] = '\n';
+  size_t total = (size_t)hpos + blob_len + 2;
+  uint8_t *wire = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, total, 0);
+  FIO_ASSERT(wire, "wire allocation failed");
+  FIO_MEMCPY(wire, hdr, (size_t)hpos);
+  for (size_t i = 0; i < blob_len; ++i)
+    wire[(size_t)hpos + i] = (uint8_t)((i * 131) + 7);
+  wire[(size_t)hpos + blob_len] = '\r';
+  wire[(size_t)hpos + blob_len + 1] = '\n';
+  *out = wire;
+  return total;
+}
+
+/** Returns the byte offset of the blob data within a wire image. */
+static size_t test_blob_data_offset(const uint8_t *wire) {
+  size_t i = 1; /* skip '$' */
+  while (wire[i] != '\r')
+    ++i;
+  return i + 2;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_1mb_split)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  enum { BLOB_LEN = 1 << 20, CHUNK = 1 << 16 };
+  uint8_t *wire = NULL;
+  size_t wire_len = test_make_blob_wire(&wire, BLOB_LEN);
+  size_t data_off = test_blob_data_offset(wire);
+  (void)wire_len; /* used by FIO_MEM_FREE in debug builds only */
+
+  /* Feed the header alone: streaming starts immediately, nothing written */
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_streaming_callbacks, wire, data_off);
+  FIO_ASSERT(!r.err, "header parse error");
+  FIO_ASSERT(r.consumed == data_off,
+             "header consumed mismatch: %zu",
+             r.consumed);
+  FIO_ASSERT(r.obj == NULL, "header parse should not complete");
+  FIO_ASSERT(test_state.start_string_count == 1,
+             "streaming should start at header");
+  FIO_ASSERT(test_state.last_start_string_len == BLOB_LEN,
+             "declared len mismatch: %zu",
+             test_state.last_start_string_len);
+  FIO_ASSERT(test_state.string_write_count == 0, "no writes before data");
+  FIO_ASSERT(test_state.string_done_count == 0, "no done before data");
+
+  /* Feed the blob data in 16 x 64KB chunks: buffer drains per chunk */
+  size_t fed = 0;
+  while (fed < BLOB_LEN) {
+    r = fio_resp3_parse(&parser,
+                        &test_streaming_callbacks,
+                        wire + data_off + fed,
+                        CHUNK);
+    FIO_ASSERT(!r.err, "chunk parse error");
+    FIO_ASSERT(r.consumed == CHUNK,
+               "chunk should fully consume (buffer drains mid-blob): %zu",
+               r.consumed);
+    FIO_ASSERT(r.obj == NULL, "mid-blob parse should not complete");
+    FIO_ASSERT(test_state.string_done_count == 0, "done fired too early");
+    fed += CHUNK;
+  }
+  FIO_ASSERT(test_state.string_write_count == (BLOB_LEN / CHUNK),
+             "write call count mismatch: %d",
+             test_state.string_write_count);
+  FIO_ASSERT(test_state.total_string_write_len == BLOB_LEN,
+             "total written mismatch: %zu",
+             test_state.total_string_write_len);
+
+  /* Feed the trailing CRLF: string completes exactly once */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      wire + data_off + BLOB_LEN,
+                      2);
+  FIO_ASSERT(!r.err, "crlf parse error");
+  FIO_ASSERT(r.consumed == 2, "crlf consumed mismatch: %zu", r.consumed);
+  FIO_ASSERT(test_state.string_done_count == 1,
+             "string_done should fire exactly once");
+  FIO_ASSERT(test_state.string_count == 0,
+             "on_string must not fire for streamed blobs");
+  FIO_ASSERT(r.obj != NULL, "completed blob should be returned");
+
+  /* Verify chunk ordering: assembled bytes must equal the source pattern */
+  test_obj_s *obj = (test_obj_s *)r.obj;
+  FIO_ASSERT(obj->type == TEST_OBJ_STRING, "wrong object type");
+  FIO_ASSERT(obj->data.str.len == BLOB_LEN, "assembled length mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(obj->data.str.data, wire + data_off, BLOB_LEN),
+             "assembled content mismatch (chunks out of order?)");
+  test_obj_free(obj);
+  FIO_MEM_FREE(wire, wire_len);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_single_call)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  /* Blob above threshold, fully present in one call: one write, one done */
+  enum { BLOB_LEN = 5000 };
+  uint8_t *wire = NULL;
+  size_t wire_len = test_make_blob_wire(&wire, BLOB_LEN);
+
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_streaming_callbacks, wire, wire_len);
+  FIO_ASSERT(!r.err, "parse error");
+  FIO_ASSERT(r.consumed == wire_len, "consumed mismatch: %zu", r.consumed);
+  FIO_ASSERT(test_state.start_string_count == 1, "start count");
+  FIO_ASSERT(test_state.string_write_count == 1,
+             "single-call blob should be a single write: %d",
+             test_state.string_write_count);
+  FIO_ASSERT(test_state.total_string_write_len == BLOB_LEN, "write len");
+  FIO_ASSERT(test_state.string_done_count == 1, "done count");
+  FIO_ASSERT(r.obj != NULL, "obj expected");
+  test_obj_s *obj = (test_obj_s *)r.obj;
+  FIO_ASSERT(obj->data.str.len == BLOB_LEN &&
+                 !FIO_MEMCMP(obj->data.str.data,
+                             wire + test_blob_data_offset(wire),
+                             BLOB_LEN),
+             "content mismatch");
+  test_obj_free(obj);
+  FIO_MEM_FREE(wire, wire_len);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_small_split)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  /* Small blob (below threshold) split mid-blob: parser waits for
+   * contiguity, then delivers the whole blob in a single write. */
+  const char *part1 = "$11\r\nhello";
+  const char *full = "$11\r\nhello world\r\n";
+
+  fio_resp3_result_s r = fio_resp3_parse(&parser,
+                                         &test_streaming_callbacks,
+                                         part1,
+                                         FIO_STRLEN(part1));
+  FIO_ASSERT(!r.err, "part1 parse error");
+  FIO_ASSERT(r.consumed == 0,
+             "small blob split: nothing consumed while waiting: %zu",
+             r.consumed);
+  FIO_ASSERT(r.obj == NULL, "part1 should not complete");
+  FIO_ASSERT(test_state.start_string_count == 0,
+             "small blob must not start streaming early");
+
+  /* Parser consumed nothing: consumer re-feeds buffered data + new bytes */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      full,
+                      FIO_STRLEN(full));
+  FIO_ASSERT(!r.err, "part2 parse error");
+  FIO_ASSERT(r.consumed == FIO_STRLEN(full),
+             "part2 consumed mismatch: %zu",
+             r.consumed);
+  FIO_ASSERT(r.obj != NULL, "small blob should complete");
+  FIO_ASSERT(test_state.start_string_count == 1, "start count");
+  FIO_ASSERT(test_state.last_start_string_len == 11, "declared len");
+  FIO_ASSERT(test_state.string_write_count == 1,
+             "small blob delivered whole in one write: %d",
+             test_state.string_write_count);
+  FIO_ASSERT(test_state.total_string_write_len == 11, "write len");
+  FIO_ASSERT(test_state.string_done_count == 1, "done count");
+  test_obj_s *obj = (test_obj_s *)r.obj;
+  FIO_ASSERT(obj->data.str.len == 11 &&
+                 !FIO_MEMCMP(obj->data.str.data, "hello world", 11),
+             "content mismatch");
+  test_obj_free(obj);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_no_streaming_table)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  /* Tables without streaming callbacks: unchanged wait-for-contiguity
+   * behavior even for blobs above the threshold. */
+  enum { BLOB_LEN = 5000 };
+  uint8_t *wire = NULL;
+  size_t wire_len = test_make_blob_wire(&wire, BLOB_LEN);
+  size_t data_off = test_blob_data_offset(wire);
+  size_t half = data_off + (BLOB_LEN / 2);
+
+  fio_resp3_result_s r = fio_resp3_parse(&parser, &test_callbacks, wire, half);
+  FIO_ASSERT(!r.err, "part1 parse error");
+  FIO_ASSERT(r.consumed == 0,
+             "non-streaming table must wait for contiguity: %zu",
+             r.consumed);
+  FIO_ASSERT(r.obj == NULL, "part1 should not complete");
+
+  r = fio_resp3_parse(&parser, &test_callbacks, wire, wire_len);
+  FIO_ASSERT(!r.err, "part2 parse error");
+  FIO_ASSERT(r.consumed == wire_len, "consumed mismatch: %zu", r.consumed);
+  FIO_ASSERT(test_state.start_string_count == 0,
+             "streaming callbacks must not fire");
+  FIO_ASSERT(test_state.string_write_count == 0, "write must not fire");
+  FIO_ASSERT(test_state.string_done_count == 0, "done must not fire");
+  FIO_ASSERT(test_state.string_count == 1,
+             "on_string should deliver the whole blob");
+  FIO_ASSERT(r.obj != NULL, "obj expected");
+  test_obj_s *obj = (test_obj_s *)r.obj;
+  FIO_ASSERT(obj->data.str.len == BLOB_LEN &&
+                 !FIO_MEMCMP(obj->data.str.data, wire + data_off, BLOB_LEN),
+             "content mismatch");
+  test_obj_free(obj);
+  FIO_MEM_FREE(wire, wire_len);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_crlf_split)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  /* The trailing CRLF may arrive split from the data - and split itself. */
+  enum { BLOB_LEN = 5000 };
+  uint8_t *wire = NULL;
+  size_t wire_len = test_make_blob_wire(&wire, BLOB_LEN);
+  size_t data_off = test_blob_data_offset(wire);
+  (void)wire_len; /* used by FIO_MEM_FREE in debug builds only */
+
+  /* header + first half of data */
+  fio_resp3_result_s r = fio_resp3_parse(&parser,
+                                         &test_streaming_callbacks,
+                                         wire,
+                                         data_off + 2500);
+  FIO_ASSERT(!r.err && r.consumed == data_off + 2500, "feed 1");
+  FIO_ASSERT(test_state.total_string_write_len == 2500, "feed 1 write len");
+
+  /* second half of data, exactly to blob end (no CRLF yet) */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      wire + data_off + 2500,
+                      BLOB_LEN - 2500);
+  FIO_ASSERT(!r.err && r.consumed == BLOB_LEN - 2500, "feed 2");
+  FIO_ASSERT(r.obj == NULL, "no completion before CRLF");
+  FIO_ASSERT(test_state.string_done_count == 0,
+             "done must wait for the trailing CRLF");
+
+  /* CR alone */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      wire + data_off + BLOB_LEN,
+                      1);
+  FIO_ASSERT(!r.err && r.consumed == 1, "feed 3 (CR)");
+  FIO_ASSERT(r.obj == NULL, "no completion on CR alone");
+  FIO_ASSERT(test_state.string_done_count == 0, "done still pending");
+
+  /* LF completes */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      wire + data_off + BLOB_LEN + 1,
+                      1);
+  FIO_ASSERT(!r.err && r.consumed == 1, "feed 4 (LF)");
+  FIO_ASSERT(test_state.string_done_count == 1, "done fired");
+  FIO_ASSERT(r.obj != NULL, "obj expected after LF");
+  test_obj_free((test_obj_s *)r.obj);
+  FIO_MEM_FREE(wire, wire_len);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_in_array)(void) {
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+
+  /* Streamed blob nested in an array, split across reads. */
+  enum { BLOB_LEN = 5000 };
+  uint8_t *blob = NULL;
+  size_t blob_wire_len = test_make_blob_wire(&blob, BLOB_LEN);
+  size_t data_off = test_blob_data_offset(blob);
+  const char *prefix = "*2\r\n";
+  const char *suffix = ":42\r\n";
+  size_t total = FIO_STRLEN(prefix) + blob_wire_len + FIO_STRLEN(suffix);
+  uint8_t *wire = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, total, 0);
+  FIO_ASSERT(wire, "wire allocation failed");
+  FIO_MEMCPY(wire, prefix, FIO_STRLEN(prefix));
+  FIO_MEMCPY(wire + FIO_STRLEN(prefix), blob, blob_wire_len);
+  FIO_MEMCPY(wire + FIO_STRLEN(prefix) + blob_wire_len,
+             suffix,
+             FIO_STRLEN(suffix));
+  FIO_MEM_FREE(blob, blob_wire_len);
+
+  /* Feed 1: array header + blob header + 1000 data bytes */
+  size_t feed1 = FIO_STRLEN(prefix) + data_off + 1000;
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_streaming_callbacks, wire, feed1);
+  FIO_ASSERT(!r.err && r.consumed == feed1, "feed 1");
+  FIO_ASSERT(r.obj == NULL, "array incomplete");
+
+  /* Feed 2: remainder (rest of blob + CRLF + :42\r\n) */
+  r = fio_resp3_parse(&parser,
+                      &test_streaming_callbacks,
+                      wire + feed1,
+                      total - feed1);
+  FIO_ASSERT(!r.err && r.consumed == total - feed1, "feed 2");
+  FIO_ASSERT(r.obj != NULL, "array should complete");
+  FIO_ASSERT(test_state.string_done_count == 1, "blob done once");
+  test_obj_s *obj = (test_obj_s *)r.obj;
+  FIO_ASSERT(obj->type == TEST_OBJ_ARRAY && obj->data.array.count == 2,
+             "array shape mismatch");
+  FIO_ASSERT(obj->data.array.items[0]->type == TEST_OBJ_STRING &&
+                 obj->data.array.items[0]->data.str.len == BLOB_LEN,
+             "array blob element mismatch");
+  FIO_ASSERT(!FIO_MEMCMP(obj->data.array.items[0]->data.str.data,
+                         wire + FIO_STRLEN(prefix) + data_off,
+                         BLOB_LEN),
+             "array blob content mismatch");
+  FIO_ASSERT(obj->data.array.items[1]->type == TEST_OBJ_NUMBER &&
+                 obj->data.array.items[1]->data.num_val == 42,
+             "array number element mismatch");
+  test_obj_free(obj);
+  FIO_MEM_FREE(wire, total);
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, resp3_simple_string)();
   FIO_NAME_TEST(stl, resp3_simple_error)();
@@ -1813,5 +2131,11 @@ int main(void) {
   FIO_NAME_TEST(stl, resp3_streaming_string_in_array)();
   FIO_NAME_TEST(stl, resp3_streaming_string_fallback)();
   FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_1mb_split)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_single_call)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_small_split)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_no_streaming_table)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_crlf_split)();
+  FIO_NAME_TEST(stl, resp3_stream_blob_in_array)();
   return 0;
 }

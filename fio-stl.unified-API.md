@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3123.
+Total symbols: 3125.
 
 ## Contents
 
@@ -28,7 +28,7 @@ Total symbols: 3123.
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 21
 - [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 5
 - [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 3
-- [`./fio-stl/004 resp3.h`](#fio-stl-004-resp3-h) — 23
+- [`./fio-stl/004 resp3.h`](#fio-stl-004-resp3-h) — 24
 - [`./fio-stl/004 sock.h`](#fio-stl-004-sock-h) — 35
 - [`./fio-stl/004 state callbacks.h`](#fio-stl-004-state-callbacks-h) — 4
 - [`./fio-stl/004 time.h`](#fio-stl-004-time-h) — 17
@@ -75,7 +75,7 @@ Total symbols: 3123.
 - [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 41
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
-- [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 7
+- [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 8
 - [`./fio-stl/431 http handle.h`](#fio-stl-431-http-handle-h) — 118
 - [`./fio-stl/431 http1 parser.h`](#fio-stl-431-http1-parser-h) — 3
 - [`./fio-stl/431 websocket parser.h`](#fio-stl-431-websocket-parser-h) — 29
@@ -21273,7 +21273,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-resp3-h"></a> `./fio-stl/004 resp3.h`
 
-23 public symbols.
+24 public symbols.
 
 ### Macros
 
@@ -21281,6 +21281,16 @@ _Symbol type:_ `function`
 
 ```c
 #define FIO_RESP3_MAX_NESTING 32
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_RESP3_STREAM_THRESHOLD`
+
+```c
+#define FIO_RESP3_STREAM_THRESHOLD 4096
 ```
 
 
@@ -21498,10 +21508,15 @@ uint8_t error;
 uint8_t streaming_string;
 /** Streaming string type (FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, etc.) */
 uint8_t streaming_string_type;
-/** Reserved */
-uint8_t reserved[1];
+/** Streamed fixed-length blob: trailing CRLF bytes pending (0...2) */
+uint8_t streaming_blob_crlf;
 /** Context for streaming string (from on_start_string) */
 void *streaming_string_ctx;
+/**
+* Streamed fixed-length blob: data bytes remaining to stream.
+* Zero when inactive or in `$?` (chunked) streaming mode.
+*/
+int64_t streaming_remaining;
 /** Stack for nested structures */
 fio_resp3_frame_s stack[FIO_RESP3_MAX_NESTING];
 } fio_resp3_parser_s
@@ -35093,17 +35108,32 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-422-redis-h"></a> `./fio-stl/422 redis.h`
 
-7 public symbols.
+8 public symbols.
 
 ### Macros
 
 #### `FIO_REDIS_READ_BUFFER`
 
 ```c
-#define FIO_REDIS_READ_BUFFER 32768
+#define FIO_REDIS_READ_BUFFER 65536
 ```
 
-Size of the read buffer for Redis connections
+Size of the read buffer for the Redis connection.
+NOTE: must fit fio_redis_connection_s.buf_pos (uint32_t).
+
+_Symbol type:_ `macro`
+
+#### `FIO_REDIS_MAX_BATCH`
+
+```c
+#define FIO_REDIS_MAX_BATCH 128
+```
+
+Maximum number of complete messages processed per `on_data` event.
+
+When the cap is reached with more data buffered, processing continues in a
+deferred task. This keeps any single event-loop callback small - downstream
+work per message is limited to scheduling (defer / publish), never I/O.
 
 _Symbol type:_ `macro`
 
@@ -35124,12 +35154,23 @@ typedef struct {
 * - NULL or empty → defaults to "localhost:6379"
 */
 const char *url;
-/** Redis server's password, if any (for AUTH command) */
+/** Redis server's password, if any (folded into the HELLO 3 handshake) */
 const char *auth;
 /** Length of auth string (0 = auto-detect with strlen) */
 size_t auth_len;
 /** Ping interval in seconds (0 = default 300 seconds) */
 uint8_t ping_interval;
+/**
+* Cumulative payload budget per top-level Redis message, in bytes.
+*
+* Budget = Σ(all string payload bytes) + 32 × (count of ALL objects -
+* String, Array, Map, Bool, Number, etc.). Checked BEFORE allocating or
+* appending; a breach logs an error and disconnects.
+*
+* 0 = default (16MB). Protects against hostile / corrupt servers declaring
+* huge `$<len>` allocations or oversized replies.
+*/
+size_t payload_limit;
 } fio_redis_args_s
 ```
 

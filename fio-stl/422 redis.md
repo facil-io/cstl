@@ -15,29 +15,28 @@ See [./400 io-overview.md](./400 io-overview.md) for where Redis fits in the ful
 
 ## Architecture
 
-Only the **master** process opens TCP connections to Redis. Workers never connect directly. Instead:
+Only the **master** process opens a TCP connection to Redis. Workers never connect directly. Instead:
 
 - Workers forward `fio_redis_send()` calls to the master via IPC; the master executes the command and replies back.
 - Workers forward `fio_pubsub_publish()` calls to the master via IPC; the master sends `PUBLISH` to Redis.
-- Incoming subscription messages arrive on the master's subscription connection and are fanned out to all workers via the normal Pub/Sub IPC infrastructure.
+- Incoming subscription messages arrive as RESP3 push frames on the master's connection and are fanned out to all workers via the normal Pub/Sub IPC infrastructure.
 
-The master maintains two separate TCP connections:
+**RESP3 is required (Redis ≥ 6.0).** The engine negotiates the protocol with a `HELLO 3` handshake on every (re)connection — authentication folds into `HELLO`. There is **no RESP2 fallback**: if the handshake fails (old server, bad credentials), the engine logs a hard error and stops.
 
-| Connection | Purpose |
+After `HELLO 3`, `SUBSCRIBE` no longer commandeers the connection, so the master maintains a **single TCP connection** per engine:
+
+| Traffic | Handling |
 |---|---|
-| **pub_conn** | Commands (`fio_redis_send`), `PUBLISH`, `PING`, `AUTH` |
-| **sub_conn** | `SUBSCRIBE` / `PSUBSCRIBE` push messages only |
-
-Redis protocol requires this split: a connection in subscription mode cannot execute regular commands.
+| Commands (`fio_redis_send`), `PUBLISH`, `PING`, `HELLO` | Lock-step FIFO queue — one command in flight at a time |
+| `SUBSCRIBE` / `PSUBSCRIBE` / `UNSUBSCRIBE` / `PUNSUBSCRIBE` | Fire-and-forget writes; confirmations arrive as RESP3 **push frames**, never command replies, so they cannot desynchronize the queue |
+| Incoming pub/sub messages | RESP3 **push frames**, routed to the push handler and re-published locally via `fio_pubsub_engine_ipc()` (zero-copy from the read buffer) |
 
 ```
               Master Process
  ┌──────────────────────────────────────────┐
- │  pub_conn ──────────────────────────┐    │
- │  (commands / PUBLISH / PING / AUTH) │    │
- │                                     ▼    │
- │  sub_conn ──────── Redis Server          │
- │  (SUBSCRIBE / PSUBSCRIBE push)      ▲    │
+ │  connection ─────── Redis Server         │
+ │  (commands / PUBLISH / PING / HELLO      │
+ │   + SUBSCRIBE family / push frames)      │
  └──────────────────────────────────────────┘
          ▲                   │
          │ IPC               │ pub/sub IPC fan-out
@@ -85,10 +84,18 @@ int main(void) {
 ### `FIO_REDIS_READ_BUFFER`
 
 ```c
-#define FIO_REDIS_READ_BUFFER 32768   /* default: 32 KiB */
+#define FIO_REDIS_READ_BUFFER 65536   /* default: 64 KiB */
 ```
 
-Read buffer size per connection. The master allocates `FIO_REDIS_READ_BUFFER × 2` bytes of buffer space inside each engine (one slice per connection). Increase this for workloads with very large individual Redis replies.
+Read buffer size for the connection. The master allocates `FIO_REDIS_READ_BUFFER` bytes of buffer space inside each engine. Note that large replies do **not** need to fit the buffer: blob strings larger than `FIO_RESP3_STREAM_THRESHOLD` (see [./004 resp3.md](./004 resp3.md)) are streamed incrementally. The effective size cap is `payload_limit` (see below).
+
+### `FIO_REDIS_MAX_BATCH`
+
+```c
+#define FIO_REDIS_MAX_BATCH 128   /* default: 128 messages */
+```
+
+Maximum number of complete messages processed per `on_data` event. When the cap is reached with more data buffered, processing continues in a deferred task, keeping any single event-loop callback small.
 
 ---
 
@@ -99,9 +106,10 @@ Read buffer size per connection. The master allocates `FIO_REDIS_READ_BUFFER × 
 ```c
 typedef struct {
   const char *url;          /* Redis server URL; NULL → "localhost:6379" */
-  const char *auth;         /* AUTH password; NULL = no auth */
+  const char *auth;         /* Password for HELLO ... AUTH default <pwd>; NULL = no auth */
   size_t      auth_len;     /* Length of auth; 0 = strlen(auth) */
   uint8_t     ping_interval;/* Keepalive interval in seconds; 0 → 30 s */
+  size_t      payload_limit;/* Per-message budget in bytes; 0 → 16 MiB */
 } fio_redis_args_s;
 ```
 
@@ -115,7 +123,15 @@ typedef struct {
 | Host only | `"myredis"` |
 | NULL or `""` | → `localhost:6379` |
 
-**`ping_interval`** — the IO reactor sends a `PING` on each connection if it has been idle this many seconds. Default: **30 seconds**. The protocol error timeout (detecting a hung connection) is also governed by this value.
+**`ping_interval`** — the IO reactor sends a `PING` on the connection if it has been idle this many seconds. Default: **30 seconds**. The protocol error timeout (detecting a hung connection) is also governed by this value.
+
+**`payload_limit`** — cumulative payload budget **per top-level Redis message**, in bytes. Default: **16 MiB** (`16 << 20`). The budget is charged as:
+
+```
+total = Σ(all string payload bytes) + 32 × (count of ALL objects)
+```
+
+Every object in the reply (String, Array, Map, Number, Bool, etc.) costs 32 bytes of budget; string payload bytes are charged in full — for fixed-length blob strings, **before** the buffer is allocated. A breach logs an error and disconnects the engine. This protects against hostile or corrupt servers declaring huge `$<len>` allocations or sending oversized replies. Pub/sub push frames share the same per-message budget.
 
 ---
 
@@ -191,7 +207,7 @@ Each `fio_redis_dup()` must be balanced with a `fio_redis_free()`.
 void fio_redis_free(fio_pubsub_engine_s *engine);
 ```
 
-Releases the caller's reference. When the count reaches zero, destroys the engine immediately: sets `running = 0`, closes both connections, drains the command queue (invoking any pending callbacks with `FIOBJ_INVALID`), and frees memory.
+Releases the caller's reference. When the count reaches zero, destroys the engine immediately: sets `running = 0`, closes the connection, drains the command queue (invoking any pending callbacks with `FIOBJ_INVALID`), and frees memory.
 
 Safe to call with `NULL` (no-op).
 
@@ -210,11 +226,11 @@ Sends a Redis command. `command` must be a `FIOBJ_T_ARRAY` whose elements are th
 
 Returns `0` on success, `-1` if `engine` is `NULL` or `command` is not a FIOBJ array.
 
-**On the master**: the command is serialized to RESP and queued on `pub_conn`. Commands are sent one at a time (pipelined within the queue); the next command is sent after the reply for the previous one arrives.
+**On the master**: the command is serialized to RESP and queued on the connection. Commands are sent one at a time (lock-step); the next command is sent after the reply for the previous one arrives.
 
 **On a worker**: the RESP bytes are forwarded to the master via IPC. The master executes the command, serializes the reply to RESP, and sends it back. The worker deserializes and calls the callback on its IO thread. This is transparent to the caller.
 
-**Never** pass `SUBSCRIBE`, `PSUBSCRIBE`, `UNSUBSCRIBE`, or `PUNSUBSCRIBE` to `fio_redis_send()`. These are managed internally on the subscription connection; sending them via the publishing connection violates the Redis protocol.
+**Never** pass `SUBSCRIBE`, `PSUBSCRIBE`, `UNSUBSCRIBE`, or `PUNSUBSCRIBE` to `fio_redis_send()`. These are managed internally as fire-and-forget writes (their confirmations are RESP3 push frames, not command replies); sending them through the command queue would desynchronize the lock-step reply FIFO.
 
 **Callback signature:**
 
@@ -309,12 +325,12 @@ When attached via `fio_pubsub_engine_attach()`, the Redis engine implements the 
 
 | Pub/Sub event | Redis action |
 |---|---|
-| New channel subscription | `SUBSCRIBE channel` on `sub_conn` |
-| New pattern subscription | `PSUBSCRIBE pattern` on `sub_conn` |
-| Channel unsubscribe | `UNSUBSCRIBE channel` on `sub_conn` |
-| Pattern unsubscribe | `PUNSUBSCRIBE pattern` on `sub_conn` |
-| `fio_pubsub_publish(...)` | `PUBLISH channel message` on `pub_conn` (workers route via IPC) |
-| Incoming Redis push message | Re-published locally with `fio_pubsub_engine_ipc()` to fan out to all processes |
+| New channel subscription | `SUBSCRIBE channel` (fire-and-forget) |
+| New pattern subscription | `PSUBSCRIBE pattern` (fire-and-forget) |
+| Channel unsubscribe | `UNSUBSCRIBE channel` (fire-and-forget) |
+| Pattern unsubscribe | `PUNSUBSCRIBE pattern` (fire-and-forget) |
+| `fio_pubsub_publish(...)` | `PUBLISH channel message` through the command queue (workers route via IPC) |
+| Incoming Redis push message | Re-published locally with `fio_pubsub_engine_ipc()` to fan out to all processes (zero-copy from the read buffer) |
 
 The `filter` parameter from facil.io's Pub/Sub system is ignored by the Redis engine — Redis does not support numeric filter namespaces.
 
@@ -369,9 +385,9 @@ The IPC routing is automatic and transparent:
 
 | Call | On master | On worker |
 |---|---|---|
-| `fio_redis_send()` | Queued on `pub_conn` | Serialized → IPC → master → Redis → IPC reply → worker callback |
-| `fio_pubsub_publish()` | `PUBLISH` on `pub_conn` | Forwarded via IPC; master sends `PUBLISH` |
-| Subscription messages | Received on `sub_conn`, fanned out via Pub/Sub IPC | Delivered by Pub/Sub IPC from master |
+| `fio_redis_send()` | Queued on the connection | Serialized → IPC → master → Redis → IPC reply → worker callback |
+| `fio_pubsub_publish()` | `PUBLISH` through the command queue | Forwarded via IPC; master sends `PUBLISH` |
+| Subscription messages | Received as RESP3 push frames, fanned out via Pub/Sub IPC | Delivered by Pub/Sub IPC from master |
 
 Detection uses `fio_io_is_master()`. In single-process mode `fio_io_start(0)` everything uses the master path.
 
@@ -384,9 +400,10 @@ See [./404 ipc.md](./404 ipc.md) for IPC internals.
 ## Reconnect and Failure Behavior
 
 - **Connection loss**: The `on_close` callback logs a warning and schedules a reconnect via `fio_io_defer()`. Reconnection is attempted after a brief delay; on failure, it retries again.
-- **Queued commands**: Commands in the queue on the master stay queued and are flushed once the publishing connection is re-established.
-- **Resubscription**: When the subscription connection reconnects, the engine iterates the current Pub/Sub channel maps and re-sends all active `SUBSCRIBE` / `PSUBSCRIBE` commands directly. This restores subscription state without touching ref counts or re-attaching the engine.
-- **Keepalive**: A `PING` is sent on each idle connection after `ping_interval` seconds. If the publishing connection has unacknowledged commands when the timeout fires, the connection is forcibly closed and reconnected.
+- **Handshake**: Every (re)connection starts with `HELLO 3` (auth folded in) as the first queued command; its map reply is consumed by the normal reply FIFO. Handshake failure is a hard engine error (the engine stops; there is no RESP2 fallback).
+- **Queued commands**: Commands in the queue on the master stay queued and are flushed once the connection is re-established (after `HELLO`).
+- **Resubscription**: After the `HELLO` handshake, the engine iterates the current Pub/Sub channel maps and re-sends all active `SUBSCRIBE` / `PSUBSCRIBE` commands directly (single batched write, fire-and-forget). This restores subscription state without touching ref counts or re-attaching the engine.
+- **Keepalive**: A `PING` is queued on the connection after `ping_interval` seconds idle. If the connection has unacknowledged commands when the timeout fires, the connection is forcibly closed and reconnected.
 - **Engine destroyed while commands are pending**: All queued commands have their callbacks invoked immediately with `reply = FIOBJ_INVALID`.
 
 ---
@@ -411,6 +428,8 @@ FIOBJ objects passed to callbacks are **not** thread-safe. Copy any data you nee
 ## Limitations
 
 - `fio_redis_new()` must be called before `fio_io_start()` (i.e., before fork). Creating engines from worker processes is not supported.
+- **RESP3 required**: Redis >= 6.0 (or a RESP3-capable server such as Valkey). RESP2-only servers and RESP2-only proxies are not supported (the `HELLO 3` handshake fails hard).
 - Redis's numeric filter namespaces (`filter` field in Pub/Sub) are not supported. All Redis pub/sub operates with `filter = 0`.
 - Single-node Redis only. Redis Cluster requires connecting to the correct shard or using a proxy.
-- Very large individual replies must fit within `FIO_REDIS_READ_BUFFER`. Increase the macro if needed.
+- Replies and push messages are bounded by `payload_limit` (default 16 MiB cumulative per message), not by `FIO_REDIS_READ_BUFFER` — blob strings larger than the read buffer are streamed incrementally.
+- Chunked (`$?`) strings are rejected inside push frames (Redis never emits them; the command-reply path supports them).

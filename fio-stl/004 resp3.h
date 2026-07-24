@@ -66,6 +66,23 @@ RESP3 Parser Settings
 #define FIO_RESP3_MAX_NESTING 32
 #endif
 
+/**
+ * Fixed-length blob strings (`$<len>`, `!<len>`, `=<len>`) larger than this
+ * threshold are streamed incrementally when the callback table provides the
+ * streaming string callbacks (on_start_string / on_string_write /
+ * on_string_done): the parser starts the string as soon as its header is
+ * parsed and feeds data in chunks as it arrives (`result.consumed` advances
+ * per chunk), instead of waiting for the whole blob to be contiguous in the
+ * read window. This allows blobs larger than any consumer read buffer.
+ *
+ * Blobs at or below the threshold keep the wait-for-contiguity behavior
+ * (single zero-copy write, even across split reads). Callback tables without
+ * streaming callbacks are unaffected (always wait-for-contiguity).
+ */
+#ifndef FIO_RESP3_STREAM_THRESHOLD
+#define FIO_RESP3_STREAM_THRESHOLD 4096
+#endif
+
 /* *****************************************************************************
 RESP3 Type Constants
 ***************************************************************************** */
@@ -146,10 +163,15 @@ typedef struct {
   uint8_t streaming_string;
   /** Streaming string type (FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, etc.) */
   uint8_t streaming_string_type;
-  /** Reserved */
-  uint8_t reserved[1];
+  /** Streamed fixed-length blob: trailing CRLF bytes pending (0...2) */
+  uint8_t streaming_blob_crlf;
   /** Context for streaming string (from on_start_string) */
   void *streaming_string_ctx;
+  /**
+   * Streamed fixed-length blob: data bytes remaining to stream.
+   * Zero when inactive or in `$?` (chunked) streaming mode.
+   */
+  int64_t streaming_remaining;
   /** Stack for nested structures */
   fio_resp3_frame_s stack[FIO_RESP3_MAX_NESTING];
 } fio_resp3_parser_s;
@@ -721,6 +743,41 @@ FIO_IFUNC int fio___resp3_push_frame(fio_resp3_parser_s *p,
 }
 
 /* *****************************************************************************
+Internal Helper: Start incremental streaming of a fixed-length blob
+***************************************************************************** */
+
+/**
+ * Starts incremental streaming for a fixed-length blob string (`$`, `!`, `=`)
+ * whose declared length exceeds FIO_RESP3_STREAM_THRESHOLD.
+ *
+ * Returns non-zero if streaming started (parser state was updated and the
+ * caller must `continue` the parse loop), zero if the caller should fall
+ * back to the buffered (wait-for-contiguity) path.
+ *
+ * Streaming is skipped (fallback) when: the table has no streaming
+ * callbacks, the blob is small, or a chunked (`$?`) string is in progress
+ * (a `$` token is malformed inside `$?`; keep the historical lenient
+ * buffered handling there).
+ */
+FIO_SFUNC int fio___resp3_stream_blob_start(fio_resp3_parser_s *p,
+                                            fio___resp3_cb_s *cb,
+                                            size_t blob_len,
+                                            uint8_t type) {
+  if (!cb->on_start_string || blob_len <= FIO_RESP3_STREAM_THRESHOLD ||
+      p->streaming_string)
+    return 0;
+  void *ctx = cb->on_start_string(p->udata, blob_len, type);
+  if (!ctx)
+    return 0;
+  p->streaming_string = 1;
+  p->streaming_string_type = type;
+  p->streaming_string_ctx = ctx;
+  p->streaming_remaining = (int64_t)blob_len;
+  p->streaming_blob_crlf = 2;
+  return 1;
+}
+
+/* *****************************************************************************
 RESP3 Main Parse Function
 ***************************************************************************** */
 
@@ -748,6 +805,67 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
   }
 
   while (pos < end) {
+    /* Streamed fixed-length blob continuation.
+     *
+     * Feed blob data as it arrives (no EOL search - blob data is arbitrary
+     * bytes) and advance result.consumed per chunk, so consumer read buffers
+     * keep draining mid-blob. This state is only entered for blobs larger
+     * than FIO_RESP3_STREAM_THRESHOLD (see fio___resp3_stream_blob_start).
+     */
+    if (parser->streaming_remaining) {
+      size_t avail = (size_t)(end - pos);
+      size_t chunk = (avail < (size_t)parser->streaming_remaining)
+                         ? avail
+                         : (size_t)parser->streaming_remaining;
+      if (cb.on_string_write(parser->udata,
+                             parser->streaming_string_ctx,
+                             pos,
+                             chunk)) {
+        parser->error = 1;
+        result.err = 1;
+        goto done;
+      }
+      pos += chunk;
+      parser->streaming_remaining -= (int64_t)chunk;
+      result.consumed = (size_t)(pos - start);
+      if (parser->streaming_remaining)
+        break; /* need more data */
+    }
+    if (parser->streaming_blob_crlf) {
+      /* Consume the trailing CRLF. Tolerates the CRLF being split across
+       * parse calls; tolerates it missing entirely (matches the buffered
+       * path, which skips \r and \n only when present). */
+      while (parser->streaming_blob_crlf && pos < end) {
+        if ((parser->streaming_blob_crlf == 2 && *pos == '\r') ||
+            (parser->streaming_blob_crlf == 1 && *pos == '\n')) {
+          ++pos;
+          --parser->streaming_blob_crlf;
+        } else {
+          parser->streaming_blob_crlf = 0; /* tolerate missing CRLF */
+        }
+      }
+      result.consumed = (size_t)(pos - start);
+      if (parser->streaming_blob_crlf)
+        break; /* need more data */
+      /* Streamed blob complete */
+      obj = cb.on_string_done(parser->udata,
+                              parser->streaming_string_ctx,
+                              parser->streaming_string_type);
+      parser->streaming_string = 0;
+      parser->streaming_string_ctx = NULL;
+      parser->streaming_string_type = 0;
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
+      }
+      continue;
+    }
+
     const uint8_t *eol = fio___resp3_find_eol(pos, end);
     if (!eol)
       break; /* Need more data */
@@ -930,6 +1048,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
+      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
+      if (fio___resp3_stream_blob_start(parser,
+                                        &cb,
+                                        (size_t)blob_len,
+                                        FIO_RESP3_BLOB_STR))
+        continue;
+
       /* Check if we have complete blob data */
       if ((size_t)(end - pos) < (size_t)blob_len + 2) {
         /* Not enough data - rewind to start of this message */
@@ -1009,6 +1134,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
+      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
+      if (fio___resp3_stream_blob_start(parser,
+                                        &cb,
+                                        (size_t)blob_len,
+                                        FIO_RESP3_BLOB_ERR))
+        continue;
+
       if ((size_t)(end - pos) < (size_t)blob_len + 2) {
         pos = start + result.consumed;
         goto done;
@@ -1083,6 +1215,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         }
         break;
       }
+
+      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
+      if (fio___resp3_stream_blob_start(parser,
+                                        &cb,
+                                        (size_t)blob_len,
+                                        FIO_RESP3_VERBATIM))
+        continue;
 
       if ((size_t)(end - pos) < (size_t)blob_len + 2) {
         pos = start + result.consumed;
