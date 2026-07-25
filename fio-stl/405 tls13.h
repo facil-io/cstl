@@ -233,8 +233,10 @@ FIO_IFUNC uint8_t *fio___tls13_app_buf(fio___tls13_connection_s *c) {
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_connection_s)
 
-FIO_STATIC_ALLOC_DEF_UNSAFE(
-    fio___tls13_buffer_alloc, uint8_t, FIO___TLS13_READ_SCRATCH_CAP, 1, 4)
+FIO_STATIC_ALLOC_DEF(fio___tls13_buffer_alloc,
+                     uint8_t,
+                     FIO___TLS13_READ_SCRATCH_CAP,
+                     4)
 
 /* *****************************************************************************
 TLS 1.3 Context Builder - Self-Signed Certificate Generation

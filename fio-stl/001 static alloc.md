@@ -14,14 +14,14 @@ The implementation is in [`./000 core.h`](./000%20core.h).
 #endif
 ```
 
-Maximum safe concurrent calls for all static allocators defined with `FIO_STATIC_ALLOC_DEF`.
+Default slot count for library allocators that explicitly pass it as the fourth argument to `FIO_STATIC_ALLOC_DEF`.
 
-The allocator is a round-robin buffer. Once the number of in-flight allocations exceeds this multiplier, new allocations may reuse memory that a previous caller still holds. Raise this value if you use many static allocator calls or many threads and see buffer reuse too early.
+`FIO_STATIC_ALLOC_DEF` does not use this setting implicitly. For each allocator, choose its `max_concurrent_allocations` argument according to the number of short-lived slots that may be outstanding at once. Raise this setting only when an allocator uses it and its slots are being reused too early.
 
 ## `FIO_STATIC_ALLOC_DEF`
 
 ```c
-#define FIO_STATIC_ALLOC_DEF(name, type_T, size_per_allocation, allocations_per_thread)
+#define FIO_STATIC_ALLOC_DEF(name, type_T, units_per_allocation, max_concurrent_allocations)
 ```
 
 Defines a static allocator named `name`.
@@ -30,32 +30,35 @@ Defines a static allocator named `name`.
 static type_T *name(size_t count);
 ```
 
-The generated function takes a `count` and returns a `type_T *` to a buffer of `sizeof(type_T) * count * size_per_allocation` bytes, aligned for `type_T`.
+The generated function returns an aligned `type_T *` to a slot containing `units_per_allocation` elements. Its `count` argument advances the atomic round-robin position by that number of slots; it does not change the size of the returned slot. Passing `0` returns the first slot without advancing the position.
 
 - `name` — the allocator function name.
-- `type_T` — the element type the pointer is cast to.
-- `size_per_allocation` — base size multiplier for each allocation unit.
-- `allocations_per_thread` — extra headroom per logical caller.
+- `type_T` — the element type of each slot.
+- `units_per_allocation` — number of `type_T` elements in each slot.
+- `max_concurrent_allocations` — number of round-robin slots available before reuse.
 
-The total safe buffer size before reuse is:
+The logical arena capacity reported by `name##_size()` is:
 
 ```
-FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
-    sizeof(type_T) * size_per_allocation
+max_concurrent_allocations * units_per_allocation
 ```
 
 ## Generated API
 
-The macro produces a single function:
+The macro produces two functions:
 
-- **`type_T *name(size_t count)`** — returns a pointer to the next slice of the static round-robin buffer. No matching free exists; the memory is static and reused automatically.
+- **`type_T *name(size_t count)`** — returns a pointer to a slot selected from the static round-robin buffer. No matching free exists; the memory is static and reused automatically.
+- **`size_t name##_size(void)`** — returns the logical arena capacity in `type_T` units.
 
-There is no generated `name##_free`, `name##_reset`, or similar helper. The buffer is managed automatically by advancing an atomic position counter and wrapping around.
+There is no generated `name##_free`, `name##_reset`, or similar helper. The buffer is managed by an atomic position counter and wraps around after `max_concurrent_allocations` slots.
 
 ## Example
 
 ```c
-FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
+FIO_STATIC_ALLOC_DEF(numer2hex_allocator,
+                     char,
+                     19,
+                     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX);
 
 char *ntos16(uint16_t n) {
   char *buf = numer2hex_allocator(1);
@@ -71,4 +74,4 @@ The returned string is valid only until the allocator wraps around. A similar pa
 
 ## Thread Safety
 
-The allocator is only "good enough" thread-safe. The atomic position counter protects the round-robin index, but the safety window is bounded by `FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX`. Keep allocations short-lived and do not hold the returned pointer across too many other static allocator calls or across too many threads.
+The allocator is only "good enough" thread-safe. The atomic position counter protects the round-robin index, but the safety window is bounded by the allocator's `max_concurrent_allocations` argument. Keep slots short-lived and do not hold a returned pointer across too many calls or threads.

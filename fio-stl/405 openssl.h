@@ -1140,7 +1140,7 @@ Peer Information Iterator
 FIO_STATIC_ALLOC_DEF(fio___openssl_peer_der,
                      uint8_t,
                      FIO___OPENSSL_PEER_INFO_DER_MAX,
-                     1)
+                     4)
 
 /** Returns an owned reference to the peer certificate at `pos` (leaf first).
  *

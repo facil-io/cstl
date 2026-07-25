@@ -285,7 +285,10 @@ On POSIX: thin inline wrappers around getenv / setenv with identical signatures.
 
 #if FIO_OS_WIN
 
-FIO_STATIC_ALLOC_DEF(fio___sys_env_buf_new, char, 4096, 2)
+FIO_STATIC_ALLOC_DEF(fio___sys_env_buf_new,
+                     char,
+                     4096,
+                     (FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX << 1))
 /** Portable getenv: returns the value of environment variable `name`, or NULL.
  * Uses GetEnvironmentVariableA on Windows to bypass Ruby win32.h macro
  * redefinition of getenv. The returned pointer is valid until the next call. */

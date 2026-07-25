@@ -941,7 +941,7 @@ static void fio___io_poll_on_data(void *io_, void *ignr_) {
   return;
 }
 
-FIO_STATIC_ALLOC_DEF(fio___on_ready_buf_new, char, FIO_IO_BUFFER_PER_WRITE, 1)
+FIO_STATIC_ALLOC_DEF(fio___on_ready_buf_new, char, FIO_IO_BUFFER_PER_WRITE, 4)
 static void fio___io_poll_on_ready(void *io_, void *ignr_) {
   (void)ignr_;
 #if defined(DEBUG) && DEBUG

@@ -43,9 +43,7 @@ Most defaults are guarded with `#ifndef`; define them before including the heade
 - **`FIO_MEM_PAGE_SIZE_LOG`** — Log₂ of the OS memory page size. The memory allocator uses this to round allocations and map memory efficiently.  
   Default: `12` (4096-byte pages).  
   Change it if you are targeting a system with a different page size.
-- **`FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX`** — Maximum safe concurrent calls for static allocators created with `FIO_STATIC_ALLOC_DEF`.  
-  Default: `256`.  
-  Raise it if you use many static allocator calls or threads and are seeing reused buffers.
+- **`FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX`** — Default slot count for selected internal `FIO_STATIC_ALLOC_DEF` invocations (default: `256`). The macro does not use this setting implicitly; pass it explicitly as the fourth argument where appropriate.
 
 ### Concurrency
 

@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3125.
+Total symbols: 3126.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -75,7 +75,7 @@ Total symbols: 3125.
 - [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 41
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
-- [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 8
+- [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
 - [`./fio-stl/431 http handle.h`](#fio-stl-431-http-handle-h) — 118
 - [`./fio-stl/431 http1 parser.h`](#fio-stl-431-http1-parser-h) — 3
 - [`./fio-stl/431 websocket parser.h`](#fio-stl-431-websocket-parser-h) — 29
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1764 public symbols.
+1763 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -242,127 +242,76 @@ _Note:_  this MACRO defines or declares code.
 
 _Symbol type:_ `macro`
 
-#### `FIO_STATIC_ALLOC_DEF_UNSAFE`
-
-```c
-#define FIO_STATIC_ALLOC_DEF_UNSAFE(name,   \
-                                    type_T,   \
-                                    size_per_allocation,   \
-                                    allocations_per_thread,   \
-                                    max_thread_safty)   \
-  /** Allocates `count` blocks of memory from the `name` static arena. */   \
-  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {   \
-    static type_T name##buffer[sizeof(type_T) * max_thread_safty *   \
-                               size_per_allocation * allocations_per_thread];   \
-    static size_t pos;   \
-    if (!count)   \
-      return name##buffer;   \
-    size_t at = fio_atomic_add(&pos, count);   \
-    at %= max_thread_safty * allocations_per_thread;   \
-    return (at * size_per_allocation) + name##buffer;   \
-  }   \
-  /** Returns the size of the static arena in `sizeof(type_T)` units. */   \
-  FIO_IFUNC size_t name##_size(void) {   \
-    return (size_t)(max_thread_safty * size_per_allocation *   \
-                    allocations_per_thread);   \
-  }
-```
-
-Defines a simple (almost naive) static memory allocator named `name`.
-
-This defines a memory allocation function named `name` that accepts a
-single input `count` and returns a `type_T` pointer (`type_T *`) containing
-`sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
-
-```c
-static type_T *name(size_t allocation_count);
-```
-
-That memory is statically allocated, allowing it be returned and never
-needing to be freed.
-
-The functions can safely allocate the following number of bytes before
-the function returns the same memory block to another caller:
-
-```c
-max_thread_safty * allocations_per_thread * sizeof(type_T) *
-size_per_allocation
-```
-
-Example use:
-
-```c
-// defined a static allocator for 32 byte long strings
-FIO_STATIC_ALLOC_DEF_UNSAFE(numer2hex_allocator, char, 19, 1, 256);
-// a function that returns an unsigned number as a 16 digit hex string
-char * ntos16(uint16_t n) {
-  char * n = numer2hex_allocator(1);
-  n[0] = '0'; n[1] = 'x';
-  fio_ltoa16u(n+2, n, 16);
-  n[18] = 0;
-  return n;
-}
-```
-
-A similar approach is use by `fiobj_num2cstr` in order to provide temporary
-conversions of FIOBJ to a C String that doesn't require memory management.
-
-_Note:_  this MACRO defines or declares code.
-
-_Symbol type:_ `macro`
-
 #### `FIO_STATIC_ALLOC_DEF`
 
 ```c
 #define FIO_STATIC_ALLOC_DEF(name,   \
                              type_T,   \
-                             size_per_allocation,   \
-                             allocations_per_thread)   \
-  FIO_STATIC_ALLOC_DEF_UNSAFE(name,   \
-                              type_T,   \
-                              size_per_allocation,   \
-                              allocations_per_thread,   \
-                              FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX)
+                             units_per_allocation,   \
+                             max_concurrent_allocations)   \
+  /** Returns a slot from the `name` static arena. */   \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {   \
+    static type_T name##buffer[sizeof(type_T) * (max_concurrent_allocations) *   \
+                               (units_per_allocation)];   \
+    static size_t pos;   \
+    if (!count)   \
+      return name##buffer;   \
+    size_t at = fio_atomic_add(&pos, count);   \
+    at %= (max_concurrent_allocations);   \
+    return (at * (units_per_allocation)) + name##buffer;   \
+  }   \
+  /** Returns the logical arena capacity in `type_T` units. */   \
+  FIO_IFUNC size_t name##_size(void) {   \
+    return (size_t)((max_concurrent_allocations) * (units_per_allocation));   \
+  }
 ```
 
-Defines a simple (almost naive) static memory allocator named `name`.
+Defines a statically backed, round-robin allocator named `name`.
 
-This defines a memory allocation function named `name` that accepts a
-single input `count` and returns a `type_T` pointer (`type_T *`) containing
-`sizeof(type_T) * count * size_per_allocation` in correct memory alignment.
+This defines the following functions:
 
 ```c
-static type_T *name(size_t allocation_count);
+static type_T *name(size_t count);
+static inline size_t name##_size(void);
 ```
 
-That memory is statically allocated, allowing it be returned and never
-needing to be freed.
+The allocator has `max_concurrent_allocations` slots, each containing
+`units_per_allocation` `type_T` elements. `name(count)` returns a pointer to
+the slot selected by the atomic round-robin position. `count` advances that
+position by the requested number of slots; it does not change the size of
+the returned slot. Passing `0` returns the first slot without advancing.
 
-The functions can safely allocate the following number of bytes before
-the function returns the same memory block to another caller:
+The memory is static, correctly aligned for `type_T`, and must not be freed.
+`name##_size()` returns the logical arena capacity in `type_T` units:
 
 ```c
-FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX * allocations_per_thread *
-        sizeof(type_T) * size_per_allocation
+max_concurrent_allocations * units_per_allocation
 ```
+
+A returned slot remains valid until the allocator wraps and reuses it. Set
+`max_concurrent_allocations` for the maximum number of outstanding slots,
+including concurrent callers.
 
 Example use:
 
 ```c
-// defined a static allocator for 32 byte long strings
-FIO_STATIC_ALLOC_DEF(numer2hex_allocator, char, 19, 1);
+// defines a static allocator for 19-character strings
+FIO_STATIC_ALLOC_DEF(numer2hex_allocator,
+                     char,
+                     19,
+                     FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX);
 // a function that returns an unsigned number as a 16 digit hex string
-char * ntos16(uint16_t n) {
-  char * n = numer2hex_allocator(1);
-  n[0] = '0'; n[1] = 'x';
-  fio_ltoa16u(n+2, n, 16);
-  n[18] = 0;
-  return n;
+char *ntos16(uint16_t n) {
+  char *buf = numer2hex_allocator(1);
+  buf[0] = '0'; buf[1] = 'x';
+  fio_ltoa16u(buf + 2, n, 16);
+  buf[18] = 0;
+  return buf;
 }
 ```
 
-A similar approach is use by `fiobj_num2cstr` in order to provide temporary
-conversions of FIOBJ to a C String that doesn't require memory management.
+A similar approach is used by `fiobj_num2cstr` for temporary FIOBJ-to-string
+conversions that do not require memory management.
 
 _Note:_  this MACRO defines or declares code.
 
@@ -1010,7 +959,7 @@ _Symbol type:_ `macro`
 #define FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX 256
 ```
 
-The multiplier used to set the maximum number of safe concurrent calls.
+Default slot count used by selected internal static allocators.
 
 _Symbol type:_ `macro`
 
