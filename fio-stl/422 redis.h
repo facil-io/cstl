@@ -224,6 +224,16 @@ typedef struct {
   size_t payload_limit;
 } fio_redis_args_s;
 
+/** Redis connection state, observed from the IO thread. */
+typedef enum {
+  /** The engine stopped after a failed HELLO handshake (or NULL was queried). */
+  FIO_REDIS_STATE_ERROR,
+  /** No socket is attached, or the RESP3 HELLO handshake is still pending. */
+  FIO_REDIS_STATE_CONNECTING,
+  /** A socket is attached and its RESP3 HELLO handshake completed. */
+  FIO_REDIS_STATE_CONNECTED,
+} fio_redis_state_e;
+
 /**
  * Creates a Redis pub/sub engine with reference count = 1.
  *
@@ -265,6 +275,15 @@ SFUNC fio_pubsub_engine_s *fio_redis_dup(fio_pubsub_engine_s *engine);
  * Safe to call with NULL (no-op).
  */
 SFUNC void fio_redis_free(fio_pubsub_engine_s *engine);
+
+/**
+ * Returns the current Redis connection state.
+ *
+ * This function must be called from the IO thread. Commands can be sent in
+ * every state: they queue until the RESP3 HELLO handshake completes.
+ */
+SFUNC fio_redis_state_e
+fio_redis_state(fio_pubsub_engine_s const *engine);
 
 /**
  * Sends a Redis command through the engine's connection.
@@ -1541,49 +1560,119 @@ FIO_SFUNC void fio___redis_on_hello_reply(fio_pubsub_engine_s *e,
   FIO_LOG_DEBUG("(redis) HELLO 3 handshake complete (RESP3)");
 }
 
-/** Returns the buffer capacity needed for a batched (re)subscription
- * buffer (upper bound; fio___redis_resubscribe_write returns the exact
- * byte count). */
-FIO_SFUNC size_t fio___redis_resubscribe_size(void) {
-  size_t total = 0;
-  FIO_MAP_EACH(fio___pubsub_channel_map, &FIO___PUBSUB_POSTOFFICE.channels, i) {
-    fio_pubsub_channel_s *ch = i.node->key;
-    total += FIO___REDIS_SUB_CMD_OVERHEAD + ch->name_len;
+/**
+ * Returns a snapshot of the Redis connection state.
+ *
+ * This function must be called from the IO thread: it observes the command
+ * queue to distinguish a TCP connection awaiting `HELLO 3` from a RESP3-ready
+ * connection. Commands may be sent regardless of the returned state.
+ */
+SFUNC fio_redis_state_e
+fio_redis_state(fio_pubsub_engine_s const *engine) {
+  if (!engine)
+    return FIO_REDIS_STATE_ERROR;
+  fio_redis_engine_s const *r = (fio_redis_engine_s const *)engine;
+  if (!r->running)
+    return FIO_REDIS_STATE_ERROR;
+  if (!r->conn.io)
+    return FIO_REDIS_STATE_CONNECTING;
+  FIO_LIST_NODE const *node = r->cmd_queue.next;
+  if (node != &r->cmd_queue) {
+    fio_redis_cmd_s const *cmd =
+        FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, node);
+    if (cmd->callback == fio___redis_on_hello_reply)
+      return FIO_REDIS_STATE_CONNECTING;
   }
-  FIO_MAP_EACH(fio___pubsub_channel_map, &FIO___PUBSUB_POSTOFFICE.patterns, i) {
-    fio_pubsub_channel_s *ch = i.node->key;
-    total += FIO___REDIS_SUB_CMD_OVERHEAD + ch->name_len;
-  }
-  return total;
+  return FIO_REDIS_STATE_CONNECTED;
 }
 
+/** Capacity of the static resubscribe batch buffer. */
+#define FIO___REDIS_RESUBSCRIBE_BUF_CAPA (128 * 1024)
+
+/* A single static slot suffices: fio_io_write copies the data into the
+ * outgoing IO buffer, so the slot may be reused as soon as a write call
+ * returns (round robin of 1 concurrent allocation). */
+FIO_STATIC_ALLOC_DEF(fio___redis_resubscribe_buf,
+                     uint8_t,
+                     FIO___REDIS_RESUBSCRIBE_BUF_CAPA,
+                     1)
+
+/** Sink receiving ready-to-send resubscribe wire buffers. */
+typedef struct {
+  /** Opaque user data, passed back to `on_write`. */
+  void *udata;
+  /**
+   * Called once per flushed batch (and per oversized solo command).
+   * `buf` may be reused / freed as soon as the callback returns.
+   */
+  void (*on_write)(void *udata, uint8_t *buf, size_t len);
+} fio___redis_resubscribe_sink_s;
+
 /**
- * Writes the batched SUBSCRIBE/PSUBSCRIBE commands for all known channels
- * (channels first, then patterns). Returns the number of bytes written.
- * The destination MUST have at least fio___redis_resubscribe_size() bytes.
+ * Batches SUBSCRIBE/PSUBSCRIBE commands for all known channels (channels
+ * first, then patterns) into the static resubscribe buffer, calling
+ * `sink.on_write` whenever the buffer is full and once more at the end.
+ *
+ * Channel names that don't fit in half the buffer require a dynamic
+ * allocation and are sent as a separate SUBSCRIBE/PSUBSCRIBE message.
  */
-FIO_SFUNC size_t fio___redis_resubscribe_write(uint8_t *dest) {
-  uint8_t *pos = dest;
-  FIO_MAP_EACH(fio___pubsub_channel_map, &FIO___PUBSUB_POSTOFFICE.channels, i) {
-    fio_pubsub_channel_s *ch = i.node->key;
-    pos += fio___redis_write_sub_cmd(pos,
-                                     "SUBSCRIBE",
-                                     9,
-                                     FIO_BUF_INFO2(ch->name, ch->name_len));
+FIO_SFUNC void fio___redis_resubscribe_batch(fio___redis_resubscribe_sink_s sink) {
+  uint8_t *buf = fio___redis_resubscribe_buf(0);
+  const size_t half = FIO___REDIS_RESUBSCRIBE_BUF_CAPA / 2;
+  size_t used = 0;
+  for (int is_pattern = 0; is_pattern < 2; ++is_pattern) {
+    fio___pubsub_channel_map_s *map =
+        is_pattern ? &FIO___PUBSUB_POSTOFFICE.patterns
+                   : &FIO___PUBSUB_POSTOFFICE.channels;
+    const char *verb = is_pattern ? "PSUBSCRIBE" : "SUBSCRIBE";
+    const size_t verb_len = is_pattern ? 10 : 9;
+    FIO_MAP_EACH(fio___pubsub_channel_map, map, i) {
+      fio_pubsub_channel_s *ch = i.node->key;
+      size_t need = FIO___REDIS_SUB_CMD_OVERHEAD + ch->name_len;
+      if (need > half) {
+        /* oversized channel name: separate message, dynamic allocation */
+        if (used) {
+          sink.on_write(sink.udata, buf, used);
+          used = 0;
+        }
+        uint8_t *solo = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, need, 0);
+        if (solo) {
+          size_t len = fio___redis_write_sub_cmd(solo,
+                                                 verb,
+                                                 verb_len,
+                                                 FIO_BUF_INFO2(ch->name,
+                                                               ch->name_len));
+          sink.on_write(sink.udata, solo, len);
+          FIO_MEM_FREE(solo, need);
+        }
+        continue;
+      }
+      if (used + need > FIO___REDIS_RESUBSCRIBE_BUF_CAPA) {
+        sink.on_write(sink.udata, buf, used);
+        used = 0;
+      }
+      used += fio___redis_write_sub_cmd(buf + used,
+                                        verb,
+                                        verb_len,
+                                        FIO_BUF_INFO2(ch->name,
+                                                      ch->name_len));
+    }
   }
-  FIO_MAP_EACH(fio___pubsub_channel_map, &FIO___PUBSUB_POSTOFFICE.patterns, i) {
-    fio_pubsub_channel_s *ch = i.node->key;
-    pos += fio___redis_write_sub_cmd(pos,
-                                     "PSUBSCRIBE",
-                                     10,
-                                     FIO_BUF_INFO2(ch->name, ch->name_len));
-  }
-  return (size_t)(pos - dest);
+  if (used)
+    sink.on_write(sink.udata, buf, used);
+}
+
+/** fio_io_write adapter for fio___redis_resubscribe_batch. */
+FIO_SFUNC void fio___redis_resubscribe_io_write(void *io_,
+                                                uint8_t *buf,
+                                                size_t len) {
+  fio_io_write((fio_io_s *)io_, buf, len);
 }
 
 /**
  * Resubscription on (re)connect: sends SUBSCRIBE/PSUBSCRIBE for all channels
- * the pub/sub system knows about, batched into a single buffer and one write.
+ * the pub/sub system knows about, batched into the static resubscribe buffer
+ * (flushed whenever it fills up).
  *
  * We do NOT call fio_pubsub_engine_attach here because that defers
  * fio___pubsub_attach_task, which could run after fio___pubsub_detach_task
@@ -1600,19 +1689,10 @@ FIO_SFUNC size_t fio___redis_resubscribe_write(uint8_t *dest) {
 FIO_SFUNC void fio___redis_resubscribe(fio_redis_engine_s *r) {
   if (!r->attached || !r->running || !r->conn.io)
     return;
-  size_t total = fio___redis_resubscribe_size();
-  if (!total)
-    return;
-  uint8_t stack_buf[4096];
-  uint8_t *buf = stack_buf;
-  if (total > sizeof(stack_buf))
-    buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, total, 0);
-  if (!buf)
-    return;
-  size_t written = fio___redis_resubscribe_write(buf);
-  fio_io_write(r->conn.io, buf, written);
-  if (buf != stack_buf)
-    FIO_MEM_FREE(buf, total);
+  fio___redis_resubscribe_batch((fio___redis_resubscribe_sink_s){
+      .udata = (void *)r->conn.io,
+      .on_write = fio___redis_resubscribe_io_write,
+  });
 }
 
 /**

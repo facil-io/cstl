@@ -211,6 +211,28 @@ Releases the caller's reference. When the count reaches zero, destroys the engin
 
 Safe to call with `NULL` (no-op).
 
+### `fio_redis_state`
+
+```c
+typedef enum {
+  FIO_REDIS_STATE_ERROR,
+  FIO_REDIS_STATE_CONNECTING,
+  FIO_REDIS_STATE_CONNECTED,
+} fio_redis_state_e;
+
+fio_redis_state_e fio_redis_state(const fio_pubsub_engine_s *engine);
+```
+
+Returns a Redis connection-state snapshot when called from the IO thread:
+
+| State | Meaning |
+|---|---|
+| `FIO_REDIS_STATE_ERROR` | `engine` is `NULL`, or `HELLO 3` failed and disabled the engine. |
+| `FIO_REDIS_STATE_CONNECTING` | No TCP socket is attached, or the socket is awaiting its `HELLO 3` reply. |
+| `FIO_REDIS_STATE_CONNECTED` | The TCP socket is attached and its RESP3 `HELLO 3` handshake completed. |
+
+This is an observability API; callers may send commands in every state. Commands queue until the handshake completes.
+
 ### `fio_redis_send`
 
 ```c

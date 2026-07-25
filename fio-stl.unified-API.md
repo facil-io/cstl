@@ -35057,7 +35057,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-422-redis-h"></a> `./fio-stl/422 redis.h`
 
-8 public symbols.
+10 public symbols.
 
 ### Macros
 
@@ -35127,6 +35127,23 @@ Arguments for creating a Redis engine
 
 _Symbol type:_ `type`
 
+#### `fio_redis_state_e`
+
+```c
+typedef enum {
+/** The engine stopped after a failed HELLO handshake (or NULL was queried). */
+FIO_REDIS_STATE_ERROR,
+/** No socket is attached, or the RESP3 HELLO handshake is still pending. */
+FIO_REDIS_STATE_CONNECTING,
+/** A socket is attached and its RESP3 HELLO handshake completed. */
+FIO_REDIS_STATE_CONNECTED,
+} fio_redis_state_e
+```
+
+Redis connection state, observed from the IO thread.
+
+_Symbol type:_ `type`
+
 ### Functions
 
 #### `fio_redis_new`
@@ -35192,6 +35209,19 @@ Calling fio_pubsub_engine_detach() before fio_redis_free() is also safe
 (detach releases the system ref; free releases the caller ref).
 
 Safe to call with NULL (no-op).
+
+_Symbol type:_ `function`
+
+#### `fio_redis_state`
+
+```c
+fio_redis_state_e fio_redis_state(fio_pubsub_engine_s const *engine)
+```
+
+Returns the current Redis connection state.
+
+This function must be called from the IO thread. Commands can be sent in
+every state: they queue until the RESP3 HELLO handshake completes.
 
 _Symbol type:_ `function`
 

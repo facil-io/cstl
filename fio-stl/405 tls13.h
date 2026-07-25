@@ -51,7 +51,7 @@ typedef struct {
   fio_io_tls_s *tls;
   uint8_t is_client;
   /* Certificate chain (DER-encoded) for server */
-  fio_ubuf_info_s cert_der; /* alias for first certificate (compat/debug) */
+  fio_ubuf_info_s cert_der;    /* alias for first certificate (compat/debug) */
   fio_ubuf_info_s *cert_chain; /* Owned array of DER views */
   size_t cert_chain_count;
   /* Private key for server (P-256: 32-byte scalar, Ed25519: 32-byte seed).
@@ -183,9 +183,9 @@ FIO_CONSTRUCTOR(fio___tls13_sys_trust_register_cleanup) {
   (FIO_TLS13_MAX_CIPHERTEXT_LEN + FIO_TLS13_RECORD_HEADER_LEN +                \
    FIO_TLS13_TAG_LEN + 16)
 #define FIO___TLS13_OUT_BUF_CAP (4 * FIO___TLS13_OUT_RECORD_SIZE)
-#define FIO___TLS13_RECV_BUF_CAP                                             \
+#define FIO___TLS13_RECV_BUF_CAP                                               \
   (FIO_TLS13_RECORD_HEADER_LEN + FIO_TLS13_MAX_CIPHERTEXT_LEN)
-#define FIO___TLS13_APP_BUF_CAP FIO_TLS13_MAX_PLAINTEXT_LEN
+#define FIO___TLS13_APP_BUF_CAP      FIO_TLS13_MAX_PLAINTEXT_LEN
 #define FIO___TLS13_READ_SCRATCH_CAP (4 * FIO___TLS13_RECV_BUF_CAP)
 
 typedef struct {
@@ -1182,16 +1182,15 @@ FIO_SFUNC void fio___tls13_start(fio_io_s *io) {
     /* Set private key */
     if (ctx->signature_algo == FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA256 &&
         ctx->private_key_ext.buf) {
-      fio_tls13_server_set_private_key(&conn->state.server,
-                                       ctx->private_key_ext,
-                                       (fio_tls13_signature_algo_e)
-                                           ctx->signature_algo);
+      fio_tls13_server_set_private_key(
+          &conn->state.server,
+          ctx->private_key_ext,
+          (fio_tls13_signature_algo_e)ctx->signature_algo);
     } else if (ctx->private_key_len > 0) {
-      fio_tls13_server_set_private_key(&conn->state.server,
-                                       FIO_UBUF_INFO2(ctx->private_key,
-                                                      ctx->private_key_len),
-                                       (fio_tls13_signature_algo_e)
-                                           ctx->signature_algo);
+      fio_tls13_server_set_private_key(
+          &conn->state.server,
+          FIO_UBUF_INFO2(ctx->private_key, ctx->private_key_len),
+          (fio_tls13_signature_algo_e)ctx->signature_algo);
       /* Copy public key for P-256 signing */
       if (ctx->signature_algo == FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256) {
         FIO_MEMCPY(conn->state.server.credentials.public_key,
@@ -1226,10 +1225,16 @@ FIO_SFUNC int fio___tls13_decrypt_record(fio___tls13_connection_s *conn,
                                          const uint8_t *record,
                                          size_t record_len) {
   if (conn->is_client)
-    return fio_tls13_client_decrypt(
-        &conn->state.client, dest, dest_capacity, record, record_len);
-  return fio_tls13_server_decrypt(
-      &conn->state.server, dest, dest_capacity, record, record_len);
+    return fio_tls13_client_decrypt(&conn->state.client,
+                                    dest,
+                                    dest_capacity,
+                                    record,
+                                    record_len);
+  return fio_tls13_server_decrypt(&conn->state.server,
+                                  dest,
+                                  dest_capacity,
+                                  record,
+                                  record_len);
 }
 
 /** Reads post-handshake TLS records through scratch storage.
@@ -1264,15 +1269,14 @@ FIO_SFUNC ssize_t fio___tls13_read_connected(fio_socket_i fd,
       if (conn->recv_buf_len < FIO_TLS13_RECORD_HEADER_LEN) {
         needed = FIO_TLS13_RECORD_HEADER_LEN - conn->recv_buf_len;
       } else {
-        size_t ciphertext_len =
-            ((size_t)fio___tls13_recv_buf(conn)[3] << 8) |
-            fio___tls13_recv_buf(conn)[4];
+        size_t ciphertext_len = ((size_t)fio___tls13_recv_buf(conn)[3] << 8) |
+                                fio___tls13_recv_buf(conn)[4];
         if (ciphertext_len > FIO_TLS13_MAX_CIPHERTEXT_LEN) {
           errno = ECONNRESET;
           return -1;
         }
-        needed = FIO_TLS13_RECORD_HEADER_LEN + ciphertext_len -
-                 conn->recv_buf_len;
+        needed =
+            FIO_TLS13_RECORD_HEADER_LEN + ciphertext_len - conn->recv_buf_len;
       }
       ssize_t read_len = fio_sock_read(fd, (char *)scratch, needed);
       if (read_len <= 0)
@@ -1286,14 +1290,15 @@ FIO_SFUNC ssize_t fio___tls13_read_connected(fio_socket_i fd,
     size_t record_len = FIO_TLS13_RECORD_HEADER_LEN +
                         (((size_t)fio___tls13_recv_buf(conn)[3] << 8) |
                          fio___tls13_recv_buf(conn)[4]);
-    uint8_t *target = len >= FIO___TLS13_APP_BUF_CAP
-                          ? user_buf
-                          : fio___tls13_app_buf(conn);
-    size_t target_capacity = len >= FIO___TLS13_APP_BUF_CAP
-                                 ? len
-                                 : FIO___TLS13_APP_BUF_CAP;
-    int decrypted = fio___tls13_decrypt_record(
-        conn, target, target_capacity, fio___tls13_recv_buf(conn), record_len);
+    uint8_t *target =
+        len >= FIO___TLS13_APP_BUF_CAP ? user_buf : fio___tls13_app_buf(conn);
+    size_t target_capacity =
+        len >= FIO___TLS13_APP_BUF_CAP ? len : FIO___TLS13_APP_BUF_CAP;
+    int decrypted = fio___tls13_decrypt_record(conn,
+                                               target,
+                                               target_capacity,
+                                               fio___tls13_recv_buf(conn),
+                                               record_len);
     if (decrypted < 0) {
       errno = ECONNRESET;
       return -1;
@@ -1308,7 +1313,9 @@ FIO_SFUNC ssize_t fio___tls13_read_connected(fio_socket_i fd,
   if (conn->app_buf_len > conn->app_buf_pos) {
     size_t available = conn->app_buf_len - conn->app_buf_pos;
     size_t to_copy = len < available ? len : available;
-    FIO_MEMCPY(user_buf, fio___tls13_app_buf(conn) + conn->app_buf_pos, to_copy);
+    FIO_MEMCPY(user_buf,
+               fio___tls13_app_buf(conn) + conn->app_buf_pos,
+               to_copy);
     conn->app_buf_pos += to_copy;
     if (conn->app_buf_pos == conn->app_buf_len) {
       conn->app_buf_len = 0;
@@ -1335,8 +1342,8 @@ FIO_SFUNC ssize_t fio___tls13_read_connected(fio_socket_i fd,
   size_t offset = 0;
   size_t produced = 0;
   while ((size_t)read_len - offset >= FIO_TLS13_RECORD_HEADER_LEN) {
-    size_t ciphertext_len = ((size_t)scratch[offset + 3] << 8) |
-                            scratch[offset + 4];
+    size_t ciphertext_len =
+        ((size_t)scratch[offset + 3] << 8) | scratch[offset + 4];
     if (ciphertext_len > FIO_TLS13_MAX_CIPHERTEXT_LEN) {
       errno = ECONNRESET;
       return -1;
@@ -1896,7 +1903,7 @@ FIO_SFUNC int fio___tls13_peer_info_next(fio_socket_i fd,
   dest->verified = verified;
   dest->chain_index = (uint8_t)pos;
   return 0;
-#else  /* !H___FIO_X509___H || !H___FIO_SHA2___H */
+#else /* !H___FIO_X509___H || !H___FIO_SHA2___H */
   return -1; /* peer certificate inspection requires the X509 module */
 #endif
 }

@@ -605,6 +605,34 @@ static void test_hello_reply_routing(void) {
   FIO_ASSERT(engine.running == 0, "HELLO INVALID reply -> hard error");
 }
 
+static fio_redis_engine_s *test_redis_engine_new(void);
+
+static void test_redis_state(void) {
+  fprintf(stderr, "* Testing Redis connection state...\n");
+
+  fio_redis_engine_s *r = test_redis_engine_new();
+  FIO_ASSERT(fio_redis_state(NULL) == FIO_REDIS_STATE_ERROR,
+             "NULL engine state must be an error");
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
+             "detached engine must be connecting");
+
+  r->conn.io = (fio_io_s *)r;
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTED,
+             "attached engine without HELLO must be connected in test setup");
+
+  fio_redis_cmd_s hello = {.callback = fio___redis_on_hello_reply};
+  FIO_LIST_PUSH(&r->cmd_queue, &hello.node);
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
+             "queued HELLO must keep state connecting");
+  FIO_LIST_REMOVE(&hello.node);
+
+  r->running = 0;
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_ERROR,
+             "stopped engine state must be an error");
+  r->conn.io = NULL;
+  fio___redis_free(r);
+}
+
 static void test_push_reply_frame_routing(void) {
   fprintf(stderr, "* Testing Redis push/reply frame routing...\n");
 
@@ -687,6 +715,51 @@ static void test_push_confirmation_ignored(void) {
   fiobj_free((FIOBJ)r.obj);
 }
 
+/* Capture sink for fio___redis_resubscribe_batch: records each flushed
+ * buffer (offset + length) and concatenates all bytes for verification. */
+typedef struct {
+  uint8_t *buf;
+  size_t len;
+  size_t capa;
+  size_t writes;
+  size_t write_start[64];
+  size_t write_len[64];
+} fio___redis_test_capture_s;
+
+static void fio___redis_test_capture_write(void *udata,
+                                           uint8_t *buf,
+                                           size_t len) {
+  fio___redis_test_capture_s *c = (fio___redis_test_capture_s *)udata;
+  FIO_ASSERT(c->len + len <= c->capa, "resubscribe capture overflow");
+  FIO_ASSERT(c->writes < 64, "resubscribe capture: too many writes");
+  c->write_start[c->writes] = c->len;
+  c->write_len[c->writes] = len;
+  FIO_MEMCPY(c->buf + c->len, buf, len);
+  c->len += len;
+  ++c->writes;
+}
+
+static size_t fio___redis_test_run_batch(fio___redis_test_capture_s *c) {
+  fio___redis_resubscribe_batch((fio___redis_resubscribe_sink_s){
+      .udata = c,
+      .on_write = fio___redis_test_capture_write,
+  });
+  return c->writes;
+}
+
+/** Returns 1 if `needle` (nlen bytes) occurs in `hay` (hlen bytes). */
+static int fio___redis_test_mem_contains(const uint8_t *hay,
+                                         size_t hlen,
+                                         const uint8_t *needle,
+                                         size_t nlen) {
+  if (nlen > hlen)
+    return 0;
+  for (size_t i = 0; i + nlen <= hlen; ++i)
+    if (!FIO_MEMCMP(hay + i, needle, nlen))
+      return 1;
+  return 0;
+}
+
 static void test_resubscribe_batch_bytes(void) {
   fprintf(stderr, "* Testing Redis resubscribe batch bytes...\n");
 
@@ -703,25 +776,19 @@ static void test_resubscribe_batch_bytes(void) {
                                        pkey));
   FIO_ASSERT(cp && *cp && pp && *pp, "channel map insertion failed");
 
-  /* The batch is channels first, then patterns, in one buffer */
+  /* The batch is channels first, then patterns, in one write */
   const char *expected = "*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nachan\r\n"
                          "*2\r\n$10\r\nPSUBSCRIBE\r\n$3\r\np.*\r\n";
   size_t expected_len = FIO_STRLEN(expected);
 
-  size_t total = fio___redis_resubscribe_size();
-  FIO_ASSERT(total >= expected_len,
-             "resubscribe batch capacity too small: %zu vs %zu",
-             total,
-             expected_len);
-
-  uint8_t *buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, total, 0);
-  FIO_ASSERT_ALLOC(buf);
-  size_t written = fio___redis_resubscribe_write(buf);
-  FIO_ASSERT(written == expected_len && !FIO_MEMCMP(buf, expected, written),
+  uint8_t buf[1024];
+  fio___redis_test_capture_s cap = {.buf = buf, .capa = sizeof(buf)};
+  size_t writes = fio___redis_test_run_batch(&cap);
+  FIO_ASSERT(writes == 1 && cap.len == expected_len &&
+                 !FIO_MEMCMP(buf, expected, cap.len),
              "resubscribe batch bytes mismatch: %.*s",
-             (int)written,
+             (int)cap.len,
              (char *)buf);
-  FIO_MEM_FREE(buf, total);
 
   /* Cleanup: remove from the maps (destroys the channels) */
   fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.channels,
@@ -730,8 +797,181 @@ static void test_resubscribe_batch_bytes(void) {
   fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.patterns,
                                   pkey,
                                   NULL);
-  FIO_ASSERT(fio___redis_resubscribe_size() == 0,
+  cap = (fio___redis_test_capture_s){.buf = buf, .capa = sizeof(buf)};
+  FIO_ASSERT(fio___redis_test_run_batch(&cap) == 0 && cap.len == 0,
              "channel maps should be empty after removal");
+}
+
+static void test_resubscribe_batch_flush(void) {
+  fprintf(stderr, "* Testing Redis resubscribe batch flush...\n");
+
+  /* Add enough channels to overflow the 128Kb static buffer more than once.
+   * Each command is ~46 bytes (20-char name), so 6000 channels = ~270Kb. */
+#define FIO___TEST_FLUSH_CHANNELS 6000
+  static char names[FIO___TEST_FLUSH_CHANNELS][20];
+  for (size_t i = 0; i < FIO___TEST_FLUSH_CHANNELS; ++i) {
+    FIO_MEMCPY(names[i], "flush-test-chan-", 16);
+    names[i][16] = (char)('0' + ((i / 1000) % 10));
+    names[i][17] = (char)('0' + ((i / 100) % 10));
+    names[i][18] = (char)('0' + ((i / 10) % 10));
+    names[i][19] = (char)('0' + (i % 10));
+    fio_str_info_s key = FIO_STR_INFO3(names[i],
+                                       20,
+                                       FIO___PUBSUB_CHANNEL_ENCODE_CAPA(0, 0));
+    FIO_ASSERT(fio___pubsub_channel_map_set_ptr(
+                   &FIO___PUBSUB_POSTOFFICE.channels,
+                   key),
+               "flush test channel insertion failed");
+  }
+
+  size_t capa = (size_t)FIO___TEST_FLUSH_CHANNELS * 64;
+  uint8_t *buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, capa, 0);
+  FIO_ASSERT_ALLOC(buf);
+  fio___redis_test_capture_s cap = {.buf = buf, .capa = capa};
+  size_t writes = fio___redis_test_run_batch(&cap);
+  FIO_ASSERT(writes >= 2,
+             "batch should flush when the static buffer fills (writes=%zu)",
+             writes);
+  for (size_t w = 0; w < writes; ++w)
+    FIO_ASSERT(cap.write_len[w] <= FIO___REDIS_RESUBSCRIBE_BUF_CAPA,
+               "flushed batch exceeds static buffer capacity");
+
+  /* Each channel's command must appear intact in the captured stream,
+   * and the total length must match the sum of all command lengths. */
+  size_t total = 0;
+  for (size_t i = 0; i < FIO___TEST_FLUSH_CHANNELS; ++i) {
+    uint8_t cmd[64];
+    size_t cmd_len = fio___redis_write_sub_cmd(cmd,
+                                               "SUBSCRIBE",
+                                               9,
+                                               FIO_BUF_INFO2(names[i], 20));
+    total += cmd_len;
+    FIO_ASSERT(fio___redis_test_mem_contains(buf, cap.len, cmd, cmd_len),
+               "flushed batch missing channel command: %.20s",
+               names[i]);
+  }
+  FIO_ASSERT(cap.len == total,
+             "flushed batch total mismatch: %zu vs %zu",
+             cap.len,
+             total);
+
+  /* Cleanup */
+  for (size_t i = 0; i < FIO___TEST_FLUSH_CHANNELS; ++i) {
+    fio_str_info_s key = FIO_STR_INFO3(names[i],
+                                       20,
+                                       FIO___PUBSUB_CHANNEL_ENCODE_CAPA(0, 0));
+    fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.channels,
+                                    key,
+                                    NULL);
+  }
+  FIO_MEM_FREE(buf, capa);
+#undef FIO___TEST_FLUSH_CHANNELS
+}
+
+static void test_resubscribe_batch_oversized(void) {
+  fprintf(stderr, "* Testing Redis resubscribe oversized channel...\n");
+
+  /* A channel name that doesn't fit in half the 128Kb static buffer must be
+   * sent as a separate (dynamically allocated) subscribe message. */
+  const size_t big_len = (FIO___REDIS_RESUBSCRIBE_BUF_CAPA / 2) + 1024;
+  char *big = (char *)FIO_MEM_REALLOC(NULL, 0, big_len, 0);
+  FIO_ASSERT_ALLOC(big);
+  FIO_MEMSET(big, 'x', big_len);
+
+  fio_str_info_s small_key =
+      FIO_STR_INFO3((char *)"small", 5, FIO___PUBSUB_CHANNEL_ENCODE_CAPA(0, 0));
+  fio_str_info_s big_key = FIO_STR_INFO3(big,
+                                         big_len,
+                                         FIO___PUBSUB_CHANNEL_ENCODE_CAPA(0,
+                                                                          0));
+  FIO_ASSERT(fio___pubsub_channel_map_set_ptr(
+                 &FIO___PUBSUB_POSTOFFICE.channels,
+                 small_key) &&
+                 fio___pubsub_channel_map_set_ptr(
+                     &FIO___PUBSUB_POSTOFFICE.channels,
+                     big_key),
+             "oversized test channel insertion failed");
+
+  size_t capa = big_len + 256;
+  uint8_t *buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, capa, 0);
+  FIO_ASSERT_ALLOC(buf);
+  fio___redis_test_capture_s cap = {.buf = buf, .capa = capa};
+  size_t writes = fio___redis_test_run_batch(&cap);
+  FIO_ASSERT(writes == 2,
+             "oversized channel should split the batch into two writes "
+             "(writes=%zu)",
+             writes);
+
+  /* Build the expected commands */
+  uint8_t small_cmd[64];
+  size_t small_cmd_len = fio___redis_write_sub_cmd(small_cmd,
+                                                   "SUBSCRIBE",
+                                                   9,
+                                                   FIO_BUF_INFO2("small", 5));
+  uint8_t *big_cmd = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, capa, 0);
+  FIO_ASSERT_ALLOC(big_cmd);
+  size_t big_cmd_len = fio___redis_write_sub_cmd(big_cmd,
+                                                 "SUBSCRIBE",
+                                                 9,
+                                                 FIO_BUF_INFO2(big, big_len));
+
+  /* One write must be the solo oversized command, the other the small one */
+  int solo_found = 0, small_found = 0;
+  for (size_t w = 0; w < writes; ++w) {
+    uint8_t *seg = buf + cap.write_start[w];
+    if (cap.write_len[w] == big_cmd_len &&
+        !FIO_MEMCMP(seg, big_cmd, big_cmd_len))
+      solo_found = 1;
+    if (cap.write_len[w] == small_cmd_len &&
+        !FIO_MEMCMP(seg, small_cmd, small_cmd_len))
+      small_found = 1;
+  }
+  FIO_ASSERT(solo_found, "oversized channel not sent as a separate message");
+  FIO_ASSERT(small_found, "small channel missing from the batch");
+
+  /* Cleanup */
+  fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.channels,
+                                  small_key,
+                                  NULL);
+  fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.channels,
+                                  big_key,
+                                  NULL);
+  FIO_MEM_FREE(big_cmd, capa);
+  FIO_MEM_FREE(buf, capa);
+  FIO_MEM_FREE(big, big_len);
+}
+
+static void test_resubscribe_engine_guards(void) {
+  fprintf(stderr, "* Testing Redis resubscribe engine guards...\n");
+
+  /* A channel in the map: resubscribe would have data to send. */
+  fio_str_info_s ckey = FIO_STR_INFO3((char *)"guardchan",
+                                      9,
+                                      FIO___PUBSUB_CHANNEL_ENCODE_CAPA(0, 0));
+  FIO_ASSERT(fio___pubsub_channel_map_set_ptr(
+                 &FIO___PUBSUB_POSTOFFICE.channels,
+                 ckey),
+             "guard test channel insertion failed");
+
+  fio_redis_engine_s *r = test_redis_engine_new();
+  FIO_ASSERT(!r->conn.io, "fake engine should have no connection");
+
+  /* Not attached: no-op (must not touch the NULL io). */
+  r->attached = 0;
+  fio___redis_resubscribe(r);
+
+  /* Attached but no connection: no-op. */
+  r->attached = 1;
+  fio___redis_resubscribe(r);
+
+  /* Not running: no-op. */
+  r->running = 0;
+  fio___redis_resubscribe(r);
+
+  fio___redis_free(r);
+  fio___pubsub_channel_map_remove(&FIO___PUBSUB_POSTOFFICE.channels,
+                                  ckey,
+                                  NULL);
 }
 
 /* *****************************************************************************
@@ -1120,9 +1360,13 @@ int main(void) {
   test_payload_limit_container_overhead();
   test_hello_command_builder();
   test_hello_reply_routing();
+  test_redis_state();
   test_push_reply_frame_routing();
   test_push_confirmation_ignored();
   test_resubscribe_batch_bytes();
+  test_resubscribe_batch_flush();
+  test_resubscribe_batch_oversized();
+  test_resubscribe_engine_guards();
   test_push_capture_zero_copy();
   test_push_capture_split_payload();
   test_push_capture_temp_1mb();
