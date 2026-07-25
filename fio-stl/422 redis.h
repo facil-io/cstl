@@ -174,8 +174,8 @@ Redis Engine Settings
 
 /** The read-buffer position type must be able to hold FIO_REDIS_READ_BUFFER. */
 #define FIO___REDIS_BUF_POS_T uint32_t
-_Static_assert(FIO_REDIS_READ_BUFFER <= UINT32_MAX,
-               "FIO_REDIS_READ_BUFFER exceeds the buf_pos type (uint32_t)");
+FIO_ASSERT_STATIC(FIO_REDIS_READ_BUFFER <= UINT32_MAX,
+                  "FIO_REDIS_READ_BUFFER exceeds the buf_pos type (uint32_t)");
 
 #ifndef FIO_REDIS_MAX_BATCH
 /**
@@ -409,7 +409,7 @@ typedef struct fio_redis_cmd_s {
 typedef struct fio_redis_connection_s {
   fio_io_s *io;
   fio_resp3_parser_s parser;
-  fio___redis_parse_state_s ps; /* payload budget accounting (parser.udata) */
+  fio___redis_parse_state_s ps;  /* payload budget accounting (parser.udata) */
   FIO___REDIS_BUF_POS_T buf_pos; /* Position in read buffer */
 } fio_redis_connection_s;
 
@@ -435,8 +435,8 @@ typedef struct fio_redis_connection_s {
  * IO ↔ Engine: peers, no ownership in either direction.
  */
 typedef struct fio_redis_engine_s {
-  fio_pubsub_engine_s engine;   /* Must be first for casting */
-  fio_redis_connection_s conn;  /* THE connection (RESP3 multiplexes all) */
+  fio_pubsub_engine_s engine;  /* Must be first for casting */
+  fio_redis_connection_s conn; /* THE connection (RESP3 multiplexes all) */
   char *address;
   char *port;
   char *hello_cmd; /* Pre-formatted HELLO 3 [AUTH] command */
@@ -574,10 +574,8 @@ FIO_SFUNC int fio___redis_capture_write(fio___redis_parse_state_s *ps,
        * the consumer has no unconsumed tail to compact. */
       cur->ptr = (const uint8_t *)data;
     } else {
-      cur->temp = (uint8_t *)FIO_MEM_REALLOC(NULL,
-                                             0,
-                                             cur->declared ? cur->declared : 1,
-                                             0);
+      cur->temp = (uint8_t *)
+          FIO_MEM_REALLOC(NULL, 0, cur->declared ? cur->declared : 1, 0);
       if (!cur->temp)
         return -1;
       FIO_MEMCPY(cur->temp, data, len);
@@ -600,9 +598,8 @@ FIO_SFUNC void fio___redis_capture_publish(fio___redis_parse_state_s *ps,
   fio_redis_engine_s *r = FIO_PTR_FROM_FIELD(fio_redis_engine_s, conn, conn);
   const uint8_t *ch = ps->cap_channel.ptr;
   size_t ch_len = ps->cap_channel.len;
-  int dedup_hit =
-      (ch_len == r->last_channel_len &&
-       (!ch_len || !FIO_MEMCMP(r->last_channel, ch, ch_len)));
+  int dedup_hit = (ch_len == r->last_channel_len &&
+                   (!ch_len || !FIO_MEMCMP(r->last_channel, ch, ch_len)));
 
   if (ps->push_mode == FIO___REDIS_PUSH_MESSAGE) {
     if (ps->publish_hook) {
@@ -663,14 +660,12 @@ FIO_SFUNC void fio___redis_capture_string_done(fio___redis_parse_state_s *ps,
     return;
   }
 
-  int is_channel = (ps->push_mode == FIO___REDIS_PUSH_MESSAGE &&
-                    ps->elem_index == 1) ||
-                   (ps->push_mode == FIO___REDIS_PUSH_PMESSAGE &&
-                    ps->elem_index == 2);
-  int is_payload = (ps->push_mode == FIO___REDIS_PUSH_MESSAGE &&
-                    ps->elem_index == 2) ||
-                   (ps->push_mode == FIO___REDIS_PUSH_PMESSAGE &&
-                    ps->elem_index == 3);
+  int is_channel =
+      (ps->push_mode == FIO___REDIS_PUSH_MESSAGE && ps->elem_index == 1) ||
+      (ps->push_mode == FIO___REDIS_PUSH_PMESSAGE && ps->elem_index == 2);
+  int is_payload =
+      (ps->push_mode == FIO___REDIS_PUSH_MESSAGE && ps->elem_index == 2) ||
+      (ps->push_mode == FIO___REDIS_PUSH_PMESSAGE && ps->elem_index == 3);
 
   if (is_channel) {
     ps->cap_channel.ptr = temp ? temp : ptr;
@@ -1048,10 +1043,10 @@ FIO_SFUNC size_t fio___redis_fiobj2resp_len(FIOBJ obj, uint32_t depth) {
   if (depth > FIO___REDIS_RESP_MAX_DEPTH)
     return 0;
   switch (FIOBJ_TYPE(obj)) {
-  case FIOBJ_T_NULL: return 5; /* $-1\r\n */
-  case FIOBJ_T_TRUE: /* fallthrough */
+  case FIOBJ_T_NULL: return 5;  /* $-1\r\n */
+  case FIOBJ_T_TRUE:            /* fallthrough */
   case FIOBJ_T_FALSE: return 4; /* #t\r\n / #f\r\n */
-  case FIOBJ_T_NUMBER: /* :<i>\r\n */
+  case FIOBJ_T_NUMBER:          /* :<i>\r\n */
     return 3 + fio___redis_digits_i64(fiobj2i(obj));
   case FIOBJ_T_FLOAT: { /* ,<f>\r\n */
     char tmp[64];
@@ -1061,9 +1056,8 @@ FIO_SFUNC size_t fio___redis_fiobj2resp_len(FIOBJ obj, uint32_t depth) {
     size_t count = fiobj_array_count(obj);
     size_t len = 3 + fio___redis_digits_i64((int64_t)count);
     for (size_t i = 0; i < count; ++i) {
-      size_t sub =
-          fio___redis_fiobj2resp_len(fiobj_array_get(obj, (int32_t)i),
-                                     depth + 1);
+      size_t sub = fio___redis_fiobj2resp_len(fiobj_array_get(obj, (int32_t)i),
+                                              depth + 1);
       if (!sub || (len += sub) < sub)
         return 0; /* error or overflow */
     }
@@ -1276,7 +1270,6 @@ FIO_SFUNC size_t fio___redis_write_hello_cmd(uint8_t *dest,
   *pos++ = '\n';
   return (size_t)(pos - dest);
 }
-
 
 /* *****************************************************************************
 Reference Counting and Cleanup
@@ -1661,9 +1654,7 @@ FIO_SFUNC void fio___redis_on_attach(fio_io_s *io) {
   r->cmd_queue.next->prev = &hello->node;
   r->cmd_queue.next = &hello->node;
 
-  FIO_LOG_DEBUG("(redis) connection established to %s:%s",
-                r->address,
-                r->port);
+  FIO_LOG_DEBUG("(redis) connection established to %s:%s", r->address, r->port);
 
   /* Send any queued commands (HELLO is now at the head) - IO thread */
   r->pub_sent = 0;
@@ -1704,11 +1695,10 @@ FIO_SFUNC void fio___redis_parse_buffered(fio_redis_engine_s *r,
   size_t pos = 0;
   size_t count = 0;
   for (;;) {
-    fio_resp3_result_s result =
-        fio_resp3_parse(&conn->parser,
-                        &FIO___REDIS_RESP3_CALLBACKS,
-                        buf + pos,
-                        conn->buf_pos - pos);
+    fio_resp3_result_s result = fio_resp3_parse(&conn->parser,
+                                                &FIO___REDIS_RESP3_CALLBACKS,
+                                                buf + pos,
+                                                conn->buf_pos - pos);
 
     if (result.err || conn->ps.limit_exceeded) {
       FIO_LOG_ERROR("(redis) %s - closing connection",
@@ -1818,9 +1808,9 @@ FIO_SFUNC void fio___redis_on_close_internal(fio_redis_engine_s *r,
 
 FIO_SFUNC void fio___redis_on_close(void *buffer, void *udata) {
   (void)buffer;
-  fio___redis_on_close_internal(
-      (fio_redis_engine_s *)udata,
-      udata ? &((fio_redis_engine_s *)udata)->conn : NULL);
+  fio___redis_on_close_internal((fio_redis_engine_s *)udata,
+                                udata ? &((fio_redis_engine_s *)udata)->conn
+                                      : NULL);
 }
 
 /**
@@ -1899,8 +1889,10 @@ FIO_SFUNC void fio___redis_connect(void *engine_, void *conn_) {
   FIO_LOG_DEBUG("(redis) connecting to %s:%s", r->address, r->port);
 
   /* Start async connection - on_attach will be called when ready */
-  conn->io =
-      fio_io_connect(url, .protocol = &FIO___REDIS_PROTOCOL, .udata = r, .timeout = 30000);
+  conn->io = fio_io_connect(url,
+                            .protocol = &FIO___REDIS_PROTOCOL,
+                            .udata = r,
+                            .timeout = 30000);
   if (!conn->io) {
     FIO_LOG_ERROR("(redis) failed to initiate connection to %s:%s",
                   r->address,
