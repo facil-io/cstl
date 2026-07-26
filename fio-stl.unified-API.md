@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3126.
+Total symbols: 3127.
 
 ## Contents
 
@@ -22,7 +22,7 @@ Total symbols: 3126.
 - [`./fio-stl/002 random.h`](#fio-stl-002-random-h) — 15
 - [`./fio-stl/002 signals.h`](#fio-stl-002-signals-h) — 8
 - [`./fio-stl/002 sort.h`](#fio-stl-002-sort-h) — 3
-- [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 31
+- [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 32
 - [`./fio-stl/002 url.h`](#fio-stl-002-url-h) — 7
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 21
@@ -20172,7 +20172,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-002-threads-h"></a> `./fio-stl/002 threads.h`
 
-31 public symbols.
+32 public symbols.
 
 ### Macros
 
@@ -20354,6 +20354,19 @@ inline fio_thread_t fio_thread_current(void)
 ```
 
 Returns the current thread.
+
+_Symbol type:_ `function`
+
+#### `fio_thread_nid`
+
+```c
+inline uintptr_t fio_thread_nid(void)
+```
+
+Returns a process-local numeral ID for the current thread.
+
+The value is stable for the thread's lifetime and unique among live threads.
+It may be reused after the thread exits.
 
 _Symbol type:_ `function`
 

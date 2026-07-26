@@ -57,31 +57,56 @@ FIO_SFUNC void fio___test_thread_basic(void) {
 Thread Identity and Comparison
 ***************************************************************************** */
 
-/* Thread function that stores its own thread handle */
+typedef struct {
+  fio_thread_t self;
+  uintptr_t nid;
+  uintptr_t nid_repeat;
+  volatile int ready;
+  volatile int release;
+} fio___test_thread_identity_s;
+
+/* Stores the child identity and waits so both tested threads remain live. */
 FIO_SFUNC void *fio___test_thread_identity_fn(void *arg) {
-  fio_thread_t *stored = (fio_thread_t *)arg;
-  *stored = fio_thread_current();
+  fio___test_thread_identity_s *state = (fio___test_thread_identity_s *)arg;
+  state->self = fio_thread_current();
+  state->nid = fio_thread_nid();
+  state->nid_repeat = fio_thread_nid();
+  fio_atomic_exchange(&state->ready, 1);
+  int release = 0;
+  while (!release) {
+    fio_atomic_load(release, &state->release);
+    if (!release)
+      fio_thread_yield();
+  }
   return NULL;
 }
 
 FIO_SFUNC void fio___test_thread_identity(void) {
   fio_thread_t main_thread = fio_thread_current();
+  uintptr_t main_nid = fio_thread_nid();
   fio_thread_t child_thread;
-  fio_thread_t child_self = {0};
+  fio___test_thread_identity_s child = {0};
 
-  /* Create thread that stores its own handle */
-  int result = fio_thread_create(&child_thread,
-                                 fio___test_thread_identity_fn,
-                                 &child_self);
+  FIO_ASSERT(main_nid == fio_thread_nid(),
+             "fio_thread_nid should be stable in the same thread");
+
+  /* Keep the child alive while comparing both numeral IDs. */
+  int result =
+      fio_thread_create(&child_thread, fio___test_thread_identity_fn, &child);
   FIO_ASSERT(result == 0, "fio_thread_create should succeed");
 
-  /* Test thread equality before joining: child_thread is valid until join.
-   * child_self is written by the child before it returns; because the child
-   * writes child_self and then returns (causing join to unblock), there is a
-   * happens-before edge from the child's write to our read here only AFTER
-   * join.  We therefore join first to synchronize child_self, then verify
-   * child_self is a valid (non-zero) handle — we cannot compare child_thread
-   * to child_self after join because child_thread is invalid post-join. */
+  int ready = 0;
+  while (!ready) {
+    fio_atomic_load(ready, &child.ready);
+    if (!ready)
+      fio_thread_yield();
+  }
+  FIO_ASSERT(child.nid == child.nid_repeat,
+             "fio_thread_nid should be stable in the child thread");
+  FIO_ASSERT(main_nid != child.nid,
+             "Live threads should have different numeral IDs");
+
+  fio_atomic_exchange(&child.release, 1);
   result = fio_thread_join(&child_thread);
   FIO_ASSERT(result == 0, "fio_thread_join should succeed");
 
@@ -89,11 +114,11 @@ FIO_SFUNC void fio___test_thread_identity(void) {
   FIO_ASSERT(fio_thread_equal(&main_thread, &main_thread),
              "Same thread should be equal to itself");
 
-  /* child_self was set by fio_thread_current() inside the child thread.
-   * join() above provides the happens-before guarantee that child_self is
+  /* child.self was set by fio_thread_current() inside the child thread.
+   * join() above provides the happens-before guarantee that child.self is
    * fully written.  We verify it is a different thread than main_thread.
    * We do NOT use child_thread here: it is invalid after fio_thread_join. */
-  FIO_ASSERT(!fio_thread_equal(&main_thread, &child_self),
+  FIO_ASSERT(!fio_thread_equal(&main_thread, &child.self),
              "Child thread's self handle should differ from main thread");
 }
 

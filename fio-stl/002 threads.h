@@ -142,6 +142,14 @@ FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b);
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void);
 
+/**
+ * Returns a process-local numeral ID for the current thread.
+ *
+ * The value is stable for the thread's lifetime and unique among live threads.
+ * It may be reused after the thread exits.
+ */
+FIO_IFUNC uintptr_t fio_thread_nid(void);
+
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void);
 
@@ -254,6 +262,18 @@ FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return pthrea
 
 /** Returns the current thread. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) { return pthread_self(); }
+
+/** Returns a process-local numeral ID for the current thread. */
+FIO_IFUNC uintptr_t fio_thread_nid(void) {
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) ||         \
+    defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) ||  \
+    defined(__sun) || defined(_AIX)
+  return (uintptr_t)pthread_self();
+#else
+  /* errno is thread-local on POSIX systems and avoids pthread_t assumptions. */
+  return (uintptr_t)&errno;
+#endif
+}
 
 /** Yields thread execution. */
 FIO_IFUNC void fio_thread_yield(void) { sched_yield(); }
@@ -686,6 +706,11 @@ FIO_IFUNC int fio_thread_equal(fio_thread_t *a, fio_thread_t *b) { return *a == 
  * No kernel object created, no CloseHandle required, no leak. */
 FIO_IFUNC fio_thread_t fio_thread_current(void) {
   return (fio_thread_t)GetCurrentThreadId();
+}
+
+/** Returns a process-local numeral ID for the current thread. */
+FIO_IFUNC uintptr_t fio_thread_nid(void) {
+  return (uintptr_t)GetCurrentThreadId();
 }
 
 /** Yields thread execution. */

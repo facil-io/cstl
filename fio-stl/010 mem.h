@@ -1068,8 +1068,8 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     /* select the default arena selection using a thread ID. */
     union {
       void *p;
-      fio_thread_t t;
-    } u = {.t = fio_thread_current()};
+      uintptr_t u;
+    } u = {.u = fio_thread_nid()};
     arena_index = fio_risky_ptr(u.p) % arena_count;
   }
   for (size_t i = 0; i < arena_count; ++i) {
@@ -1077,7 +1077,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
             FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
     FIO_LOG_DDEBUG("thread %p had to switch arena from %zu / %zu",
-                   fio_thread_current(),
+                   (void *)fio_thread_nid(),
                    arena_index,
                    (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
     ++arena_index;
@@ -1123,8 +1123,8 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
     /* select the default arena selection using a thread ID. */
     union {
       void *p;
-      fio_thread_t t;
-    } u = {.t = fio_thread_current()};
+      uintptr_t u;
+    } u = {.u = fio_thread_nid()};
     arena_index = (fio_risky_ptr(u.p) & 1023) %
                   FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count;
 #if (defined(DEBUG) && 0)
@@ -1146,7 +1146,7 @@ FIO_SFUNC FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *
             FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena[arena_index].lock))
       return (FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena + arena_index);
     FIO_LOG_DDEBUG("thread %p had to switch arena from %zu / %zu",
-                   fio_thread_current(),
+                   (void *)fio_thread_nid(),
                    arena_index,
                    (size_t)FIO_NAME(FIO_MEMORY_NAME, __mem_state)->arena_count);
     ++arena_index;
