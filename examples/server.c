@@ -407,6 +407,9 @@ static void http_respond_crud(fio_http_s *h) {
   case FIO_HTTP_RESOURCE_INDEX:
     info = FIO_STR_INFO1("crude operation detected: INDEX.");
     break;
+  case FIO_HTTP_RESOURCE_QUERY:
+    info = FIO_STR_INFO1("crude operation detected: QUERY.");
+    break;
   case FIO_HTTP_RESOURCE_SHOW:
     info = FIO_STR_INFO1("crude operation detected: SHOW.");
     break;
