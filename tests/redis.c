@@ -1,9 +1,9 @@
 /* *****************************************************************************
 Redis Module Correctness Tests
 
-Fast, deterministic coverage for Redis helper behavior. Networked Redis and
-multi-process pub/sub checks from ./tests-old/redis.c are intentionally left for
-stress tests.
+Fast, deterministic coverage for Redis helper behavior, plus an optional live
+integration test (skipped when no server answers at 127.0.0.1:6379 or at
+FIO_TEST_REDIS_URL). Multi-process stress checks remain in ./tests-old/redis.c.
 ***************************************************************************** */
 #include "test-helpers.h"
 
@@ -533,7 +533,7 @@ static void test_hello_command_builder(void) {
   size_t len;
 
   /* AUTH-less variant */
-  const char *expected = "*3\r\n$5\r\nHELLO\r\n$1\r\n3\r\n";
+  const char *expected = "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n";
   FIO_ASSERT(fio___redis_hello_cmd_len(0) == FIO_STRLEN(expected),
              "HELLO no-auth length mismatch");
   len = fio___redis_write_hello_cmd(buf, NULL, 0);
@@ -582,7 +582,12 @@ static void test_hello_reply_routing(void) {
   fiobj_free(hello_reply);
 
   /* HELLO failure (-ERR, e.g. Redis < 6.0): a string, NOT a hash -> hard
-   * engine error (running cleared, no RESP2 fallback) */
+   * engine error (running cleared, no RESP2 fallback).
+   * NOTE: the canned -ERR wire below mimics a live server reply, so the
+   * WARNING/ERROR log lines it produces are expected test output. */
+  fprintf(stderr,
+          "*   (expected: canned -ERR and INVALID HELLO replies will log "
+          "handshake failures next)\n");
   ps.msg_total = 0;
   parser = (fio_resp3_parser_s){.udata = &ps};
   const char *err_wire = "-ERR unknown command 'HELLO'\r\n";
@@ -607,6 +612,101 @@ static void test_hello_reply_routing(void) {
 
 static fio_redis_engine_s *test_redis_engine_new(void);
 
+static void test_verb_should_wait(void) {
+  fprintf(stderr, "* Testing Redis command verb should_wait classification...\n");
+
+  /* Subscribe-family: no-wait (RESP3 confirmations arrive as push frames) */
+  const char *no_wait[] = {
+      "*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nachan\r\n",
+      "*2\r\n$10\r\nPSUBSCRIBE\r\n$3\r\np.*\r\n",
+      "*2\r\n$11\r\nUNSUBSCRIBE\r\n$5\r\nachan\r\n",
+      "*2\r\n$12\r\nPUNSUBSCRIBE\r\n$3\r\np.*\r\n",
+      "*2\r\n$9\r\nsubscribe\r\n$5\r\nachan\r\n", /* case-insensitive */
+      "*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nachan\r\n*2\r\n$10\r\nPSUBSCRIBE\r\n$3\r\np.*\r\n", /* batched blob: classified by first verb */
+  };
+  /* Everything else: lock-step reply expected */
+  const char *wait[] = {
+      "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n",
+      "*1\r\n$4\r\nPING\r\n",
+      "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n",
+      "*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n",
+      "*3\r\n$7\r\nPUBLISH\r\n$2\r\nch\r\n$3\r\nmsg\r\n",
+      "garbage",
+      "",
+  };
+  for (size_t i = 0; i < (sizeof(no_wait) / sizeof(no_wait[0])); ++i)
+    FIO_ASSERT(fio___redis_verb_should_wait((const uint8_t *)no_wait[i],
+                                            FIO_STRLEN(no_wait[i])) == 0,
+               "no-wait misclassification: %s",
+               no_wait[i]);
+  for (size_t i = 0; i < (sizeof(wait) / sizeof(wait[0])); ++i)
+    FIO_ASSERT(fio___redis_verb_should_wait((const uint8_t *)wait[i],
+                                            FIO_STRLEN(wait[i])) == 1,
+               "wait misclassification: %s",
+               wait[i]);
+}
+
+static void test_queue_cmd_bytes_order(void) {
+  fprintf(stderr, "* Testing Redis command queue ordering and flags...\n");
+
+  fio_redis_engine_s *r = test_redis_engine_new();
+
+  /* A leftover command queued before (re)attach (tail) */
+  const char *set_cmd = "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$1\r\nv\r\n";
+  FIO_ASSERT(fio___redis_queue_cmd_bytes(r,
+                                         set_cmd,
+                                         FIO_STRLEN(set_cmd),
+                                         NULL,
+                                         NULL,
+                                         0),
+             "queue SET failed");
+
+  /* on_attach order: resubscribe batch at head, then HELLO at head */
+  const char *sub_blob = "*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nachan\r\n"
+                         "*2\r\n$10\r\nPSUBSCRIBE\r\n$3\r\np.*\r\n";
+  FIO_ASSERT(fio___redis_queue_cmd_bytes(r,
+                                         sub_blob,
+                                         FIO_STRLEN(sub_blob),
+                                         NULL,
+                                         NULL,
+                                         1),
+             "queue resubscribe blob failed");
+  FIO_ASSERT(fio___redis_queue_cmd_bytes(r,
+                                         r->hello_cmd,
+                                         r->hello_cmd_len,
+                                         fio___redis_on_hello_reply,
+                                         NULL,
+                                         1),
+             "queue HELLO failed");
+
+  /* Final order: HELLO, resubscribe blob, SET; flags: wait, no-wait, wait */
+  fio_redis_cmd_s *n1 =
+      FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, r->cmd_queue.next);
+  fio_redis_cmd_s *n2 = FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, n1->node.next);
+  fio_redis_cmd_s *n3 = FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, n2->node.next);
+  FIO_ASSERT(&n3->node != &r->cmd_queue && n3->node.next == &r->cmd_queue,
+             "queue should hold exactly 3 commands");
+  FIO_ASSERT(n1->callback == fio___redis_on_hello_reply && n1->should_wait,
+             "HELLO must be first and lock-step");
+  FIO_ASSERT(n1->cmd_len == r->hello_cmd_len &&
+                 !FIO_MEMCMP(n1->cmd, r->hello_cmd, r->hello_cmd_len),
+             "HELLO bytes mismatch");
+  FIO_ASSERT(!n2->should_wait && n2->cmd_len == FIO_STRLEN(sub_blob),
+             "resubscribe blob must be second and no-wait");
+  FIO_ASSERT(n3->should_wait && n3->cmd_len == FIO_STRLEN(set_cmd),
+             "SET must be last and lock-step");
+
+  /* Drain the queue (mirrors destroy) */
+  while (!FIO_LIST_IS_EMPTY(&r->cmd_queue)) {
+    fio_redis_cmd_s *c =
+        FIO_PTR_FROM_FIELD(fio_redis_cmd_s, node, r->cmd_queue.next);
+    FIO_LIST_REMOVE(&c->node);
+    FIO_MEM_FREE(c, sizeof(*c) + c->cmd_len);
+    FIO_LEAK_COUNTER_ON_FREE(fio___redis_cmd);
+  }
+  fio___redis_free(r);
+}
+
 static void test_redis_state(void) {
   fprintf(stderr, "* Testing Redis connection state...\n");
 
@@ -617,6 +717,10 @@ static void test_redis_state(void) {
              "detached engine must be connecting");
 
   r->conn.io = (fio_io_s *)r;
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
+             "io assigned before on_attach (not ready) must be connecting");
+
+  r->conn.ready = 1;
   FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTED,
              "attached engine without HELLO must be connected in test setup");
 
@@ -1345,6 +1449,487 @@ static void test_push_capture_max_batch(void) {
   fio___redis_free(r);
 }
 
+/* *****************************************************************************
+Live Server Integration Test (optional)
+
+Connects to a real Redis/Valkey server (default 127.0.0.1:6379, override with
+the FIO_TEST_REDIS_URL environment variable, e.g.
+`FIO_TEST_REDIS_URL=redis://10.0.0.5:6380 make tests/redis`) and verifies,
+end to end:
+
+1. The RESP3 `HELLO 3` handshake (engine reaches FIO_REDIS_STATE_CONNECTED).
+2. Command round-trips: PING, SET, GET, DEL.
+3. Pub/Sub push delivery: SUBSCRIBE + PUBLISH through the attached engine.
+
+The test is skipped (silently) when no server answers the probe.
+***************************************************************************** */
+
+#define FIO___REDIS_LIVE_KEY "fio-stl:test:live:key"
+#define FIO___REDIS_LIVE_VAL "live-value"
+#define FIO___REDIS_LIVE_CH "fio-stl:test:live:ch"
+#define FIO___REDIS_LIVE_MSG "live-message"
+
+static struct {
+  fio_pubsub_engine_s *engine;
+  unsigned ping_ok : 1;
+  unsigned set_ok : 1;
+  unsigned get_ok : 1;
+  unsigned pubsub_ok : 1;
+  unsigned del_ok : 1;
+} fio___redis_live;
+
+/** Returns 1 if a TCP server answers at host:port, 0 otherwise. */
+static int fio___redis_live_probe(const char *url) {
+  char host[192];
+  char port[16];
+  const char *s = (url && url[0]) ? url : "127.0.0.1";
+  if (!FIO_MEMCMP(s, "redis://", 8))
+    s += 8;
+  const char *colon = strchr(s, ':');
+  size_t hlen = colon ? (size_t)(colon - s) : strlen(s);
+  if (!hlen || hlen >= sizeof(host))
+    return 0;
+  memcpy(host, s, hlen);
+  host[hlen] = 0;
+  size_t plen = colon ? strlen(colon + 1) : 0;
+  if (plen >= sizeof(port))
+    return 0;
+  if (plen)
+    memcpy(port, colon + 1, plen + 1);
+  else
+    memcpy(port, "6379", 5);
+  fio_socket_i fd = fio_sock_open(host, port, FIO_SOCK_TCP | FIO_SOCK_CLIENT);
+  if (fd == FIO_SOCKET_INVALID)
+    return 0;
+  fio_sock_close(fd);
+  return 1;
+}
+
+static void fio___redis_live_send(fio_pubsub_engine_s *e,
+                                  const char *verb,
+                                  const char *arg1,
+                                  const char *arg2,
+                                  void (*callback)(fio_pubsub_engine_s *,
+                                                   FIOBJ,
+                                                   void *)) {
+  FIOBJ cmd = fiobj_array_new();
+  fiobj_array_push(cmd, fiobj_str_new_cstr(verb, strlen(verb)));
+  if (arg1)
+    fiobj_array_push(cmd, fiobj_str_new_cstr(arg1, strlen(arg1)));
+  if (arg2)
+    fiobj_array_push(cmd, fiobj_str_new_cstr(arg2, strlen(arg2)));
+  FIO_ASSERT(!fio_redis_send(e, cmd, callback, NULL),
+             "live fio_redis_send(%s) failed",
+             verb);
+  fiobj_free(cmd);
+}
+
+static void fio___redis_live_on_del(fio_pubsub_engine_s *e,
+                                    FIOBJ reply,
+                                    void *udata) {
+  (void)e;
+  (void)udata;
+  FIO_ASSERT(reply && FIOBJ_TYPE(reply) == FIOBJ_T_NUMBER &&
+                 fiobj2i(reply) == 1,
+             "live DEL reply mismatch (expected 1)");
+  fio___redis_live.del_ok = 1;
+  fio_io_stop();
+}
+
+static void fio___redis_live_on_message(fio_pubsub_msg_s *msg) {
+  if (msg->channel.len != FIO_STRLEN(FIO___REDIS_LIVE_CH) ||
+      FIO_MEMCMP(msg->channel.buf, FIO___REDIS_LIVE_CH, msg->channel.len))
+    return; /* not our channel */
+  FIO_ASSERT(msg->message.len == FIO_STRLEN(FIO___REDIS_LIVE_MSG) &&
+                 !FIO_MEMCMP(msg->message.buf,
+                             FIO___REDIS_LIVE_MSG,
+                             msg->message.len),
+             "live pub/sub payload mismatch");
+  if (fio___redis_live.pubsub_ok)
+    return; /* duplicate delivery */
+  fio___redis_live.pubsub_ok = 1;
+  fio_pubsub_unsubscribe(.channel = FIO_BUF_INFO1(FIO___REDIS_LIVE_CH),
+                         .on_message = fio___redis_live_on_message);
+  /* DEL cleanup (also verifies a command after push delivery) */
+  fio___redis_live_send(fio___redis_live.engine,
+                        "DEL",
+                        FIO___REDIS_LIVE_KEY,
+                        NULL,
+                        fio___redis_live_on_del);
+}
+
+static void fio___redis_live_on_get(fio_pubsub_engine_s *e,
+                                    FIOBJ reply,
+                                    void *udata) {
+  (void)udata;
+  fio_str_info_s s = fiobj2cstr(reply);
+  FIO_ASSERT(reply && FIOBJ_TYPE(reply) == FIOBJ_T_STRING &&
+                 s.len == FIO_STRLEN(FIO___REDIS_LIVE_VAL) &&
+                 !FIO_MEMCMP(s.buf, FIO___REDIS_LIVE_VAL, s.len),
+             "live GET reply mismatch");
+  fio___redis_live.get_ok = 1;
+  /* Publish through the engine; push frame routes back via pub/sub. */
+  fio_pubsub_publish(.engine = e,
+                     .channel = FIO_BUF_INFO1(FIO___REDIS_LIVE_CH),
+                     .message = FIO_BUF_INFO1(FIO___REDIS_LIVE_MSG));
+}
+
+static void fio___redis_live_on_set(fio_pubsub_engine_s *e,
+                                    FIOBJ reply,
+                                    void *udata) {
+  (void)udata;
+  fio_str_info_s s = fiobj2cstr(reply);
+  FIO_ASSERT(reply && FIOBJ_TYPE(reply) == FIOBJ_T_STRING && s.len == 2 &&
+                 !FIO_MEMCMP(s.buf, "OK", 2),
+             "live SET reply mismatch (expected OK)");
+  fio___redis_live.set_ok = 1;
+  fio___redis_live_send(e,
+                        "GET",
+                        FIO___REDIS_LIVE_KEY,
+                        NULL,
+                        fio___redis_live_on_get);
+}
+
+static void fio___redis_live_on_ping(fio_pubsub_engine_s *e,
+                                     FIOBJ reply,
+                                     void *udata) {
+  (void)udata;
+  fio_str_info_s s = fiobj2cstr(reply);
+  FIO_ASSERT(reply && FIOBJ_TYPE(reply) == FIOBJ_T_STRING && s.len == 4 &&
+                 !FIO_MEMCMP(s.buf, "PONG", 4),
+             "live PING reply mismatch (expected PONG)");
+  fio___redis_live.ping_ok = 1;
+  fio___redis_live_send(e,
+                        "SET",
+                        FIO___REDIS_LIVE_KEY,
+                        FIO___REDIS_LIVE_VAL,
+                        fio___redis_live_on_set);
+}
+
+/** Polls the engine state; starts the command chain once HELLO completes. */
+static int fio___redis_live_poll(void *u1, void *u2) {
+  (void)u1;
+  (void)u2;
+  fio_redis_state_e st = fio_redis_state(fio___redis_live.engine);
+  if (st == FIO_REDIS_STATE_CONNECTED) {
+    fio___redis_live_send(fio___redis_live.engine,
+                          "PING",
+                          NULL,
+                          NULL,
+                          fio___redis_live_on_ping);
+    return -1; /* stop polling */
+  }
+  FIO_ASSERT(st != FIO_REDIS_STATE_ERROR,
+             "live HELLO 3 handshake failed (server must support RESP3)");
+  return 0;
+}
+
+static int fio___redis_live_timeout(void *u1, void *u2) {
+  (void)u1;
+  (void)u2;
+  FIO_ASSERT(0,
+             "live Redis integration timed out "
+             "(ping=%d set=%d get=%d pubsub=%d del=%d)",
+             (int)fio___redis_live.ping_ok,
+             (int)fio___redis_live.set_ok,
+             (int)fio___redis_live.get_ok,
+             (int)fio___redis_live.pubsub_ok,
+             (int)fio___redis_live.del_ok);
+  return -1;
+}
+
+static void fio___redis_live_on_start(void *udata) {
+  (void)udata;
+  /* Subscribe before the handshake completes: the engine (re)sends
+   * SUBSCRIBE for all registered channels after HELLO. */
+  fio_pubsub_subscribe(.channel = FIO_BUF_INFO1(FIO___REDIS_LIVE_CH),
+                       .on_message = fio___redis_live_on_message);
+  fio_io_run_every(.fn = fio___redis_live_poll,
+                   .every = 10,
+                   .repetitions = -1);
+  fio_io_run_every(.fn = fio___redis_live_timeout,
+                   .every = 5000,
+                   .repetitions = 1);
+}
+
+static void test_redis_live_server(void) {
+  fprintf(stderr, "* Testing Redis live server integration (optional)...\n");
+  const char *url = getenv("FIO_TEST_REDIS_URL");
+  if (!fio___redis_live_probe(url)) {
+    fprintf(stderr,
+            "*   SKIPPED - no Redis server answering (set FIO_TEST_REDIS_URL,\n"
+            "*   default 127.0.0.1:6379)\n");
+    return;
+  }
+  FIO_MEMSET(&fio___redis_live, 0, sizeof(fio___redis_live));
+  fio___redis_live.engine =
+      fio_redis_new(.url = ((url && url[0]) ? url : "127.0.0.1:6379"));
+  FIO_ASSERT(fio___redis_live.engine, "live engine allocation failed");
+  fio_redis_dup(fio___redis_live.engine);              /* caller ref */
+  fio_pubsub_engine_attach(fio___redis_live.engine);   /* system ref */
+  fio_state_callback_add(FIO_CALL_ON_START,
+                         fio___redis_live_on_start,
+                         NULL);
+  fio_io_start(0);
+  fio_state_callback_remove(FIO_CALL_ON_START,
+                            fio___redis_live_on_start,
+                            NULL);
+  fio_pubsub_engine_detach(fio___redis_live.engine);
+  fio_redis_free(fio___redis_live.engine);
+  FIO_ASSERT(fio___redis_live.ping_ok && fio___redis_live.set_ok &&
+                 fio___redis_live.get_ok && fio___redis_live.pubsub_ok &&
+                 fio___redis_live.del_ok,
+             "live integration incomplete "
+             "(ping=%d set=%d get=%d pubsub=%d del=%d)",
+             (int)fio___redis_live.ping_ok,
+             (int)fio___redis_live.set_ok,
+             (int)fio___redis_live.get_ok,
+             (int)fio___redis_live.pubsub_ok,
+             (int)fio___redis_live.del_ok);
+  fprintf(stderr,
+          "*   live server: HELLO 3, PING, SET/GET, pub/sub push, DEL - OK\n");
+  fio___redis_live.engine = NULL;
+}
+
+/* *****************************************************************************
+Destroy While Connecting (regression: segfault at exit)
+
+Creating an engine, initiating a connection, and destroying the engine
+before the connection is established used to segfault: fio___redis_destroy
+NULLed the io's udata, but a still-connecting io holds the IO layer's
+fio___io_connecting_s bookkeeping there (not the engine), so the connecting
+protocol's on_close dereferenced NULL.
+***************************************************************************** */
+
+static fio_redis_engine_s *fio___redis_test_dwc_engine;
+
+static void fio___redis_test_dwc_destroy(void *u1, void *u2) {
+  (void)u1;
+  (void)u2;
+  fio_redis_engine_s *r = fio___redis_test_dwc_engine;
+  /* This task was deferred immediately after the connect task, so no poll
+   * cycle could run in between: on_ready/on_attach cannot have fired and
+   * the io (if initiated) is guaranteed to still be in the connecting
+   * protocol. (conn.io may be NULL on hosts where connect() fails
+   * synchronously - then destroy is trivial and the regression simply
+   * isn't exercised on that host. Do NOT assert on conn.io: TEST-NET-1
+   * behavior varies with the local network stack.) */
+  FIO_ASSERT(!r->conn.ready, "connection must not be attached yet");
+  /* Destroy while the io is still in the connecting protocol (before the
+   * reactor's shutdown could close it gracefully). Before the fix this
+   * segfaulted: destroy NULLed the io's udata and the connecting
+   * protocol's fio___connecting_on_close dereferenced it. */
+  fio_redis_free((fio_pubsub_engine_s *)r);
+  fio___redis_test_dwc_engine = NULL;
+  fio_io_stop();
+}
+
+static void fio___redis_test_dwc_on_start(void *udata) {
+  (void)udata;
+  /* Initiate a connection and destroy the engine immediately after, in the
+   * same deferred-task drain: the connect task runs first, then the destroy
+   * task, with no poll cycle in between (deterministic still-connecting
+   * state - a timed destroy races with the local network stack). */
+  fio___redis_dup(fio___redis_test_dwc_engine); /* deferred task ref */
+  fio_io_defer(fio___redis_connect,
+               fio___redis_test_dwc_engine,
+               &fio___redis_test_dwc_engine->conn);
+  fio_io_defer(fio___redis_test_dwc_destroy, NULL, NULL);
+}
+
+static void test_redis_destroy_while_connecting(void) {
+  fprintf(stderr, "* Testing Redis engine destroy while connecting...\n");
+
+  fio_pubsub_engine_s *e = fio_redis_new(.url = "192.0.2.1:6390");
+  FIO_ASSERT(e, "engine allocation failed");
+  fio_redis_engine_s *r = (fio_redis_engine_s *)e;
+  fio___redis_test_dwc_engine = r;
+  fio_state_callback_add(FIO_CALL_ON_START,
+                         fio___redis_test_dwc_on_start,
+                         NULL);
+  fio_io_start(0);
+  fio_state_callback_remove(FIO_CALL_ON_START,
+                            fio___redis_test_dwc_on_start,
+                            NULL);
+  /* Engine was destroyed inside the reactor while still connecting. */
+  FIO_ASSERT(!fio___redis_test_dwc_engine,
+             "destroy task should have run inside the reactor");
+}
+
+/* *****************************************************************************
+Reconnect After Connection Loss (regression: missing reconnect retry)
+
+The original version of this test pointed the engine at a port where nothing
+listens (connection refused). That is inherently racy on macOS: a refused
+localhost connect sometimes fails synchronously (fio_io_connect returns NULL
+and conn->io is never set) and sometimes asynchronously (attach, then an
+instant RST). The poll task below detects retries via conn->io transitions, so
+the synchronous-refusal path blinded it and the test flaked.
+
+The deterministic version uses an in-test listener that accepts and
+immediately drops every connection, counting accepted connections on the
+SERVER side. A second accepted connection proves the whole cycle fired:
+established -> dropped -> on_close_internal -> 1s retry timer -> reconnect.
+
+NOTE: counting conn->io transitions from a poll task is NOT reliable here:
+a localhost connect+drop cycle completes within a few milliseconds, faster
+than any practical poll interval, so client-side transition polling misses
+whole cycles (attempts=0 timeouts). Server-side accept counting cannot
+miss.
+***************************************************************************** */
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+static struct {
+  fio_redis_engine_s *engine;
+  unsigned attempts; /* connections accepted by the drop listener */
+} fio___redis_test_rof;
+
+/** Accept-and-drop server protocol: count, then close on attach.
+ *
+ * Only the FIRST connection is dropped. The second is left open: the poll
+ * task destroys the engine while it is still established, so no retry
+ * timer outlives the engine (a drop-triggered retry would hold an engine
+ * ref that could fire after the reactor stopped -> leak at exit). */
+static void fio___redis_test_rof_drop_on_attach(fio_io_s *io) {
+  ++fio___redis_test_rof.attempts;
+  if (fio___redis_test_rof.attempts < 2)
+    fio_io_close(io);
+}
+
+/** Answers the kept-open second connection's HELLO with an empty RESP3 map
+ * (a successful handshake), so engine destroy finds no pending HELLO to
+ * fail (avoids a spurious "handshake failed" error in the test log). */
+static void fio___redis_test_rof_drop_on_data(fio_io_s *io) {
+  char buf[1024];
+  if (fio_io_read(io, buf, sizeof(buf)) && !fio_io_udata(io)) {
+    fio_io_udata_set(io, (void *)1);
+    fio_io_write(io, "%0\r\n", 4); /* empty RESP3 map = HELLO success */
+  }
+}
+
+static fio_io_protocol_s fio___redis_test_rof_drop_protocol = {
+    .on_attach = fio___redis_test_rof_drop_on_attach,
+    .on_data = fio___redis_test_rof_drop_on_data,
+};
+
+/** Finds a free localhost port by binding port 0 and releasing it. */
+static unsigned fio___redis_test_rof_free_port(void) {
+  int fd = (int)socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return 0;
+  struct sockaddr_in addr;
+  FIO_MEMSET(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0; /* ephemeral */
+  unsigned port = 0;
+  if (!bind(fd, (struct sockaddr *)&addr, sizeof(addr))) {
+    socklen_t addr_len = sizeof(addr);
+    if (!getsockname(fd, (struct sockaddr *)&addr, &addr_len))
+      port = (unsigned)ntohs(addr.sin_port);
+  }
+  close(fd);
+  return port;
+}
+
+/** Starts the accept-and-drop listener on a free port (retry on port race). */
+static fio_io_listener_s *fio___redis_test_rof_drop_listen(unsigned *port_out) {
+  for (int i = 0; i < 8; ++i) {
+    unsigned port = fio___redis_test_rof_free_port();
+    if (!port)
+      continue;
+    char url[64];
+    snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+    fio_io_listener_s *l =
+        fio_io_listen(.url = url,
+                      .protocol = &fio___redis_test_rof_drop_protocol,
+                      .hide_from_log = 1);
+    if (l) {
+      *port_out = port;
+      return l;
+    }
+  }
+  return NULL;
+}
+
+static int fio___redis_test_rof_poll(void *u1, void *u2) {
+  (void)u1;
+  (void)u2;
+  fio_redis_engine_s *r = fio___redis_test_rof.engine;
+  if (!r)
+    return -1; /* test done - cancel this timer */
+  if (fio___redis_test_rof.attempts >= 2) {
+    /* A second connection reached the listener: loss detection AND the
+     * 1s retry are both proven. Destroy now: running=0 suppresses any
+     * further retry and destroy closes the in-flight io. */
+    fio_redis_free((fio_pubsub_engine_s *)r);
+    fio___redis_test_rof.engine = NULL;
+    fio_io_stop();
+    return -1;
+  }
+  return 0;
+}
+
+static int fio___redis_test_rof_timeout(void *u1, void *u2) {
+  (void)u1;
+  (void)u2;
+  if (!fio___redis_test_rof.engine)
+    return -1; /* test finished before this timer fired - cancel it */
+  FIO_ASSERT(0,
+             "reconnect-after-loss timed out (attempts=%u)",
+             fio___redis_test_rof.attempts);
+  return -1;
+}
+
+static void fio___redis_test_rof_on_start(void *udata) {
+  (void)udata;
+  fio___redis_dup(fio___redis_test_rof.engine); /* deferred task ref */
+  fio_io_defer(fio___redis_connect,
+               fio___redis_test_rof.engine,
+               &fio___redis_test_rof.engine->conn);
+  fio_io_run_every(.fn = fio___redis_test_rof_poll,
+                   .every = 20,
+                   .repetitions = -1);
+  fio_io_run_every(.fn = fio___redis_test_rof_timeout,
+                   .every = 10000,
+                   .repetitions = 1);
+}
+
+static void test_redis_reconnect_on_drop(void) {
+  fprintf(stderr, "* Testing Redis reconnect after connection loss...\n");
+
+  /* Accept-and-drop listener on a free port: every engine connection is
+   * established, then dropped, forcing the reconnect path deterministically. */
+  unsigned port = 0;
+  fio_io_listener_s *listener = fio___redis_test_rof_drop_listen(&port);
+  FIO_ASSERT(listener, "failed to bind accept-and-drop listener");
+  char engine_url[64];
+  snprintf(engine_url, sizeof(engine_url), "127.0.0.1:%u", port);
+
+  fio_pubsub_engine_s *e = fio_redis_new(.url = engine_url);
+  FIO_ASSERT(e, "engine allocation failed");
+  FIO_MEMSET(&fio___redis_test_rof, 0, sizeof(fio___redis_test_rof));
+  fio___redis_test_rof.engine = (fio_redis_engine_s *)e;
+  fio_state_callback_add(FIO_CALL_ON_START,
+                         fio___redis_test_rof_on_start,
+                         NULL);
+  fio_io_start(0);
+  fio_state_callback_remove(FIO_CALL_ON_START,
+                            fio___redis_test_rof_on_start,
+                            NULL);
+  fio_io_listen_stop(listener);
+  FIO_ASSERT(!fio___redis_test_rof.engine,
+             "poll task should have destroyed the engine and stopped");
+  FIO_ASSERT(fio___redis_test_rof.attempts >= 2,
+             "expected the connection loss to be detected and retried "
+             "(attempts=%u)",
+             fio___redis_test_rof.attempts);
+}
+
 int main(void) {
   test_fiobj_command_to_resp();
   test_primitive_to_resp();
@@ -1360,6 +1945,8 @@ int main(void) {
   test_payload_limit_container_overhead();
   test_hello_command_builder();
   test_hello_reply_routing();
+  test_verb_should_wait();
+  test_queue_cmd_bytes_order();
   test_redis_state();
   test_push_reply_frame_routing();
   test_push_confirmation_ignored();
@@ -1375,5 +1962,8 @@ int main(void) {
   test_push_capture_confirmation_other();
   test_push_capture_budget_breach();
   test_push_capture_max_batch();
+  test_redis_destroy_while_connecting();
+  test_redis_reconnect_on_drop();
+  test_redis_live_server();
   return 0;
 }

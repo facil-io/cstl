@@ -33142,6 +33142,8 @@ Returns a self-destructible listener handle on success or NULL on error.
 NOTE: this schedules a task and should NOT be called within a PRE_START or
 ON_START state callback.
 
+NOTE: the returned listener is valid until `fio_io_listen_stop` is called.
+
 _Symbol type:_ `function`
 
 #### `fio_io_listen`
@@ -33162,7 +33164,7 @@ _Symbol type:_ `macro`
 void fio_io_listen_stop(fio_io_listener_s *l)
 ```
 
-Notifies a listener to stop listening.
+Notifies a listener to stop listening and destroys it.
 
 _Symbol type:_ `function`
 
@@ -33224,6 +33226,9 @@ fio_io_s *fio_io_connect(fio_io_connect_args_s args)
 
 Connects to a specific URL, returning the `fio_io_s` IO object or `NULL`.
 
+Note: The IO object returned is owned by the reactor. The copy returned is
+valid only until the next event is processed.
+
 _Symbol type:_ `function`
 
 #### `fio_io_connect`
@@ -33233,7 +33238,10 @@ _Symbol type:_ `function`
   fio_io_connect((fio_io_connect_args_s){.url = url_, __VA_ARGS__})
 ```
 
+Connects to a specific URL, returning the `fio_io_s` IO object or `NULL`.
 
+Note: The IO object returned is owned by the reactor. The copy returned is
+valid only until the next event is processed.
 
 _Note:_ this may be a macro only / macro wrapper for a function.
 
@@ -33496,7 +33504,7 @@ _Symbol type:_ `function`
 void fio_io_close_now(fio_io_s *io)
 ```
 
-Marks the IO for immediate closure.
+Marks the IO for immediate closure and destruction.
 
 _Symbol type:_ `function`
 

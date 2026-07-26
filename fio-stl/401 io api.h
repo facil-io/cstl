@@ -198,11 +198,13 @@ typedef struct fio_io_listener_s fio_io_listener_s;
  *
  * NOTE: this schedules a task and should NOT be called within a PRE_START or
  * ON_START state callback.
+ *
+ * NOTE: the returned listener is valid until `fio_io_listen_stop` is called.
  */
 SFUNC fio_io_listener_s *fio_io_listen(fio_io_listen_args_s args);
 #define fio_io_listen(...) fio_io_listen((fio_io_listen_args_s){__VA_ARGS__})
 
-/** Notifies a listener to stop listening. */
+/** Notifies a listener to stop listening and destroys it. */
 SFUNC void fio_io_listen_stop(fio_io_listener_s *l);
 
 /** Returns the listener's associated protocol. */
@@ -240,9 +242,20 @@ typedef struct {
   uint32_t timeout;
 } fio_io_connect_args_s;
 
-/** Connects to a specific URL, returning the `fio_io_s` IO object or `NULL`. */
+/**
+ * Connects to a specific URL, returning the `fio_io_s` IO object or `NULL`.
+ *
+ * Note: The IO object returned is owned by the reactor. The copy returned is
+ * valid only until the next event is processed.
+ * */
 SFUNC fio_io_s *fio_io_connect(fio_io_connect_args_s args);
 
+/**
+ * Connects to a specific URL, returning the `fio_io_s` IO object or `NULL`.
+ *
+ * Note: The IO object returned is owned by the reactor. The copy returned is
+ * valid only until the next event is processed.
+ * */
 #define fio_io_connect(url_, ...)                                              \
   fio_io_connect((fio_io_connect_args_s){.url = url_, __VA_ARGS__})
 
@@ -404,7 +417,7 @@ SFUNC void fio_io_write2(fio_io_s *io, fio_io_write_args_s args);
 /** Marks the IO for closure as soon as scheduled data was sent. */
 SFUNC void fio_io_close(fio_io_s *io);
 
-/** Marks the IO for immediate closure. */
+/** Marks the IO for immediate closure and destruction. */
 SFUNC void fio_io_close_now(fio_io_s *io);
 
 /**
@@ -558,9 +571,7 @@ struct fio_io_functions_s {
    * Returns 0 while data is available, or -1 when done / unavailable.
    * Implementations must not allocate memory in this callback.
    */
-  int (*peer_info_next)(fio_socket_i fd,
-                        fio_x509_cert_s *dest,
-                        void *context);
+  int (*peer_info_next)(fio_socket_i fd, fio_x509_cert_s *dest, void *context);
 };
 
 /**************************************************************************/ /**
