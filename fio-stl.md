@@ -20061,8 +20061,8 @@ Other settings:
 | `udata` | Default `fio_http_udata(h)` value. |
 | `tls_io_func`, `tls` | Optional TLS support. |
 | `queue` | Optional HTTP task queue. |
-| `public_folder` | Static-file root; can serve pre-compressed `.gz`/`.br` alternatives. With `compress_static`, missing variants are also **created on demand and written into this folder on GET** — the folder must be writable and quota'd (attacker-triggerable disk writes). Prefer pre-generating variants at deploy time. |
-| `max_age` | Static-file `Cache-Control` max-age value, in seconds. |
+| `public_folder` | Static-file root. Serves pre-compressed `.br`, `.zstd`, `.gz`, `.zip` variants when the client accepts them and the variant is fresh. With `compress_static`, missing `.br`/`.gz` variants are also **created on demand and written into this folder** — the folder must be writable and quota'd (attacker-triggerable disk writes). Prefer pre-generating variants at deploy time. The folder must exist when the listener starts, otherwise the setting is ignored. See *Static File Service* below. |
+| `max_age` | Static-file `Cache-Control` max-age value, in seconds. `0` (default) omits the header. Not inherited by routes. |
 | `max_header_size` | Maximum combined request line and header bytes. |
 | `max_line_len` | Maximum bytes per request / header line. |
 | `max_body_size` | Maximum request body size. |
@@ -20073,9 +20073,9 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression. See the compression security note below. |
-| `compress_dynamic` | Opt-in dynamic response compression. See the compression security note below. |
-| `compress_ws` | Opt-in WebSocket `permessage-deflate`. See the compression security note below. |
+| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Connection-global; per-route values are ignored. See the compression security note below. |
+| `compress_dynamic` | Opt-in dynamic response compression. Connection-global; per-route values are ignored. See the compression security note below. |
+| `compress_ws` | Opt-in WebSocket `permessage-deflate`. Connection-global; per-route values are ignored. See the compression security note below. |
 
 **Compression security note (BREACH/CRIME oracle risk):** compressing
 secrets together with attacker-reflected data enables length-oracle attacks
@@ -20185,6 +20185,14 @@ Route settings inherit missing listener callbacks and limits, including `udata`,
 header/body/message limits, timeouts, `public_folder`, and `log`. TLS settings
 are ignored on routes.
 
+Only `on_http`, `on_finish`, `udata`, the authentication callbacks,
+`public_folder`, and `max_age` are effective per route. Upgraded-connection
+callbacks (`on_open`, `on_message`, `on_ready`, `on_shutdown`, `on_close`),
+`queue`, `log`, limits, timeouts, and the `compress_*` flags are
+connection-global: they are read from the listener's root settings, so
+per-route values are stored but unused. Note that `max_age` is **not**
+inherited — a route that serves static files must set its own.
+
 ### Resource action helper
 
 ```c
@@ -20214,8 +20222,84 @@ Maps the current method and routed path to a small REST-style action:
 | `FIO_HTTP_RESOURCE_CREATE` | `PUT`, `POST`, or `PATCH /` |
 | `FIO_HTTP_RESOURCE_UPDATE` | `PUT`, `POST`, or `PATCH /:id` |
 | `FIO_HTTP_RESOURCE_DELETE` | `DELETE /:id` |
+| `FIO_HTTP_RESOURCE_QUERY` | `QUERY` (any path) |
 
 `FIO_HTTP_RESOURCE_NONE` is returned for unsupported shapes or invalid input.
+
+---
+
+## Static File Service
+
+When the matching route has a `public_folder`, the module attempts a static
+file response (via `fio_http_static_file_response`) for `GET` and `HEAD`
+requests **before** calling `on_http`. All other methods (`POST`, `PUT`,
+`DELETE`, `OPTIONS`, ...) fall through to `on_http` untouched — a static
+file is not a valid response to them (RFC 9110 §9.3) — as do misses (not
+found or unsafe path), with the status pre-set to 200.
+
+For the listener's root `public_folder` the full original path is appended
+to the folder; for a route-level `public_folder` the routed (prefix-trimmed)
+path is appended instead. Applications can also call
+`fio_http_static_file_response` directly from `on_http` — the API is
+method-agnostic (except `OPTIONS`, which it refuses), so the application
+can answer any other method with a file when it chooses to.
+
+### Path resolution and safety
+
+- The request path is URL-decoded and joined to the root folder; paths
+  folding backwards (`/../`, `//`) are rejected.
+- A path resolving to a folder is retried as the folder's index file
+  (`FIO_HTTP_DEFAULT_INDEX_FILENAME`, `"index"` by default).
+- With `FIO_HTTP_STATIC_FILE_COMPLETION` (default `1`), unresolved paths are
+  retried with `.html`, `.htm`, `.txt`, and `.md` appended (so a folder
+  resolves to `index.html`, `index.htm`, ...). Only regular files and
+  symlinks are served.
+- The response `Content-Type` comes from the MIME registry
+  (`fio_http_mimetype`); an unregistered extension logs a warning.
+
+### Pre-compressed variants
+
+Unless the request is ranged (see below), the `Accept-Encoding` header is
+tested in preference order **`br` → `zstd` → `gzip` → `deflate`**, mapping
+to `<file>.br`, `<file>.zstd`, `<file>.gz`, and `<file>.zip` next to the
+original. The first accepted variant that exists on disk **and** is at
+least as fresh as the original (modification time) is served, with
+`Content-Encoding` set accordingly. Tokens forbidden with `q=0` are never
+selected (RFC 9110 §12.5.3).
+
+With `compress_static` (`FIO_HTTP_CFLAG_COMPRESS_STATIC` on the handle),
+missing or stale `.br` / `.gz` variants are created on demand and written
+into the root folder:
+
+- creation is limited to compressible (text-like) MIME types and originals
+  between 1024 bytes and `FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT` (2 MiB);
+- creation is skipped when compression would not shrink the file;
+- `zstd` / `deflate` variants are only ever served pre-generated — they are
+  never created on demand;
+- on-demand writes are attacker-triggerable, so the folder **must** be
+  writable and quota'd. Pre-generating variants at deploy time is
+  recommended — the server only stats the files, so any external tool can
+  produce them.
+
+`Vary: accept-encoding` is set whenever a variant is served, and on
+identity responses whenever variants may be created, so caches key on the
+client's `Accept-Encoding`.
+
+### Conditional, ranged, and HEAD requests
+
+- The `ETag` is a hash of the served file's `stat` data (it changes when
+  the file changes). A matching `If-None-Match` (GET/HEAD) yields a `304`.
+- `Last-Modified` reflects the file's modification time;
+  `Cache-Control: max-age=<max_age>` is only sent when `max_age` is
+  non-zero.
+- Single `Range: bytes=start-end` requests are supported (`206` with
+  `Content-Range`), including open-ended (`bytes=N-`) and suffix
+  (`bytes=-N`) forms. `If-Range` must equal the current `ETag` or the
+  range is ignored. Unsatisfiable ranges get `416` with
+  `Content-Range: bytes */<length>`. Ranged responses are always identity
+  (no variant selection) and carry no `ETag`. `Accept-Ranges: bytes` is
+  always sent.
+- `HEAD` requests pass through the same logic and finish with headers only.
 
 ---
 
@@ -20632,8 +20716,10 @@ int64_t        fio_http_get_timestump(void);
 `fio_http_from` writes a best-effort peer address starting with the `Forwarded`
 header, then socket peer address, then `"[unknown]"`.
 
-`fio_http_static_file_response` sends a file from a root folder and finishes the
-response on success.
+`fio_http_static_file_response` sends a file from a root folder and finishes
+the response on success (0), returning -1 when the application should handle
+the request itself. See *Static File Service* for the path resolution,
+pre-compressed variant, range, and caching semantics.
 
 ### Path and MIME helpers
 

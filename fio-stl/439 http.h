@@ -77,7 +77,8 @@ typedef struct fio_http_settings_s {
   void (*pre_http_body)(fio_http_s *h);
   /** Callback for HTTP requests (server) or responses (client). */
   void (*on_http)(fio_http_s *h);
-  /** Called when a request / response cycle is finished with no Upgrade. */
+  /** Called when a request / response cycle is finished (for WebSocket /
+   * SSE connections, called after `on_close`, when the connection closes). */
   void (*on_finish)(fio_http_s *h);
 
   /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
@@ -118,17 +119,38 @@ typedef struct fio_http_settings_s {
   /** Optional HTTP task queue (for multi-threading HTTP responses) */
   fio_io_async_s *queue;
   /**
-   * A public folder for file transfers - allows to circumvent any application
-   * layer logic and simply serve static files.
+   * A public folder for file transfers - allows to circumvent any
+   * application layer logic and simply serve static files.
    *
-   * Supports automatic `gz` pre-compressed alternatives.
+   * Static file responses are attempted for `GET` and `HEAD` requests
+   * only (RFC 9110 §9.3 - a static file is not a valid response to other
+   * methods); any other method is forwarded to `on_http` (which may serve
+   * files explicitly by calling `fio_http_static_file_response`). On a
+   * miss the request is also forwarded to `on_http`. Folders resolve to
+   * their `index` file and missing extensions are auto-completed
+   * (`.html`, `.htm`, `.txt`, `.md`) - see
+   * `FIO_HTTP_STATIC_FILE_COMPLETION`.
+   *
+   * Pre-compressed variants are supported: when the client's
+   * `Accept-Encoding` allows it, an up-to-date `file.br`, `file.zstd`,
+   * `file.gz` or `file.zip` variant (preference order: `br`, `zstd`,
+   * `gzip`, `deflate`) is served instead of the original file. With
+   * `compress_static`, missing `.br` / `.gz` variants are also created on
+   * demand (written into this folder). Ranged requests are always served
+   * identity (no variant selection).
+   *
+   * The folder must exist when the listener starts, otherwise the setting
+   * is ignored (with an error log).
    */
   fio_str_info_s public_folder;
   /**
-   * The max-age value (in seconds) for caching static files send from
+   * The max-age value (in seconds) for caching static files sent from
    * `public_folder`.
    *
-   * Defaults to 0 (not sent).
+   * Defaults to 0 (the `Cache-Control` header is not sent).
+   *
+   * Note: NOT inherited by routes - a route that serves static files must
+   * set its own `max_age`.
    */
   size_t max_age;
   /**
@@ -191,11 +213,47 @@ typedef struct fio_http_settings_s {
   uint8_t connect_timeout;
   /** Logging flag - set to TRUE to log HTTP requests. */
   uint8_t log;
-  /** Opt-in: auto-compress static files (save .br/.gz to disk). */
+  /**
+   * Opt-in: auto-compress static files - missing `.br` / `.gz` variants are
+   * created on demand and written into the `public_folder`.
+   *
+   * Creation is limited to compressible (text-like) MIME types and file
+   * sizes between 1024 bytes and FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT (2
+   * MiB), and is skipped when compression wouldn't shrink the file.
+   * Variants whose modification time is older than the original file are
+   * re-created.
+   *
+   * Note: on-demand writes are attacker-triggerable - the public folder
+   * MUST be writable and quota'd. Pre-generating variants at deploy time is
+   * recommended.
+   *
+   * Note: connection-global (read from the listener's root settings when
+   * the connection's handle is attached) - per-route values have no effect.
+   */
   uint8_t compress_static;
-  /** Opt-in: auto-compress dynamic HTTP responses on-the-fly. */
+  /**
+   * Opt-in: auto-compress dynamic HTTP responses on-the-fly.
+   *
+   * Applies to finished (non-streaming) single-buffer responses larger than
+   * 1024 bytes with a compressible (text-like) `Content-Type`, preferring
+   * `br` over `gzip` per the client's `Accept-Encoding`. Responses with a
+   * pre-set `Content-Encoding` are never re-compressed. `Vary:
+   * accept-encoding` is set whenever compression was considered.
+   *
+   * Note: connection-global (read from the listener's root settings when
+   * the connection's handle is attached) - per-route values have no effect.
+   */
   uint8_t compress_dynamic;
-  /** Opt-in: enable permessage-deflate for WebSocket connections. */
+  /**
+   * Opt-in: enable permessage-deflate for WebSocket connections.
+   *
+   * Negotiation always forces both `*_no_context_takeover` flags (RFC 7692
+   * allows either endpoint to request them unilaterally), keeping
+   * persistent per-connection compression state at ~0.
+   *
+   * Note: connection-global (read from the listener's root settings when
+   * the connection's handle is attached) - per-route values have no effect.
+   */
   uint8_t compress_ws;
 } fio_http_settings_s;
 
@@ -255,11 +313,20 @@ HTTP Routing – prefix matching
  *   `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
  *   `"/user"` route will continue to behave the same.
  *
- * Note: the `udata`, `on_finish`, `public_folder` and `log` properties are all
- * inherited (if missing) from the default HTTP settings used to create the
- * listener.
+ * Note: the following properties are inherited (if missing) from the
+ * default HTTP settings used to create the listener: `udata`, `on_finish`,
+ * `on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+ * `max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+ * `timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
  *
  * Note: TLS options are ignored.
+ *
+ * Note: only `on_http`, `on_finish`, `udata`, the authentication
+ * callbacks, `public_folder` and `max_age` are effective per route. All
+ * other per-route values are stored but unused - upgraded connection
+ * callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
+ * timeouts and the `compress_*` flags are connection-global and are read
+ * from the listener's root settings.
  * */
 SFUNC int fio_http_route(fio_http_listener_s *listener,
                          const char *url,
@@ -280,11 +347,20 @@ SFUNC int fio_http_route(fio_http_listener_s *listener,
  *   `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
  *   `"/user"` route will continue to behave the same.
  *
- * Note: the `udata`, `on_finish`, `public_folder` and `log` properties are all
- * inherited (if missing) from the default HTTP settings used to create the
- * listener.
+ * Note: the following properties are inherited (if missing) from the
+ * default HTTP settings used to create the listener: `udata`, `on_finish`,
+ * `on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+ * `max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+ * `timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
  *
  * Note: TLS options are ignored.
+ *
+ * Note: only `on_http`, `on_finish`, `udata`, the authentication
+ * callbacks, `public_folder` and `max_age` are effective per route. All
+ * other per-route values are stored but unused - upgraded connection
+ * callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
+ * timeouts and the `compress_*` flags are connection-global and are read
+ * from the listener's root settings.
  * */
 #define fio_http_route(listener, url, ...)                                     \
   fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
@@ -292,6 +368,9 @@ SFUNC int fio_http_route(fio_http_listener_s *listener,
 /** Returns a link to the settings matching `url`, as set by `fio_http_route` */
 SFUNC fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *l,
                                                    const char *url);
+
+/** Returns a link to the settings handled by the handle's route. */
+SFUNC fio_http_settings_s *fio_http_handle_settings(fio_http_s *h);
 
 /* *****************************************************************************
 HTTP Routing – CRUD
@@ -844,8 +923,8 @@ FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
   return r;
 }
 
-void fio___http_route_get___(void);
-FIO_SFUNC fio_http_settings_s *fio___http_route_get(fio_http_s *h) {
+/** Returns a link to the settings handled by the handle's route. */
+FIO_SFUNC fio_http_settings_s *fio_http_handle_settings(fio_http_s *h) {
   fio_http_settings_s *r = NULL;
   fio___http_connection_s *connection =
       (fio___http_connection_s *)fio_http_cdata(h);
@@ -901,7 +980,7 @@ static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
                                                        fio_buf_info_s id,
                                                        fio_buf_info_s event,
                                                        fio_buf_info_s data) {
-  fio_http_settings_s *s = fio___http_route_get(h);
+  fio_http_settings_s *s = fio_http_handle_settings(h);
   s->on_message(h, data, 1);
   (void)h, (void)id, (void)event, (void)data;
 }
@@ -1109,7 +1188,7 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio_http_settings_s *s = fio___http_route_get(h);
+  fio_http_settings_s *s = fio_http_handle_settings(h);
   if (fio___http_on_http_test4upgrade(h, c, s))
     return;
   union {
@@ -1124,12 +1203,17 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio_http_settings_s *s = fio___http_route_get(h);
+  fio_http_settings_s *s = fio_http_handle_settings(h);
   if (fio___http_on_http_test4upgrade(h, c, s))
     return;
+  /* The automatic static service answers GET / HEAD requests only (RFC
+   * 9110 §9.3); any other method falls through to the application's
+   * `on_http` callback, which may serve files explicitly (if desired). */
+  fio_str_info_s m = fio_http_method(h);
+  const uint32_t m4 = (m.len >= 3) ? (fio_buf2u32u(m.buf) | 0x20202020UL) : 0UL;
   if (s->public_folder.buf &&
-      (fio_http_method(h).len != 4 || (fio_buf2u32u(fio_http_method(h).buf) |
-                                       0x20202020UL) != fio_buf2u32u("post")) &&
+      ((m.len == 3 && m4 == fio_buf2u32u("get\x20")) ||
+       (m.len == 4 && m4 == fio_buf2u32u("head"))) &&
       !fio_http_static_file_response(
           h,
           s->public_folder,

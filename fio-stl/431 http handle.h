@@ -807,8 +807,26 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status);
 SFUNC int fio_http_etag_is_match(fio_http_s *h);
 
 /**
- * Attempts to send a static file from the `root` folder. On success the
- * response is complete and 0 is returned. Otherwise returns -1.
+ * Attempts to send a static file from the `root_folder` folder.
+ *
+ * `file_name` is URL-decoded and appended to `root_folder` (path traversal
+ * is rejected). Folders resolve to their `index` file and missing
+ * extensions are auto-completed (`.html`, `.htm`, `.txt`, `.md` -
+ * `FIO_HTTP_STATIC_FILE_COMPLETION`). `OPTIONS` requests are refused (a
+ * static file is not a valid `OPTIONS` response).
+ *
+ * Handles conditional requests (`ETag` / `If-None-Match` -> 304), single
+ * `Range` requests (206 / 416, always served identity), and `HEAD`
+ * requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when
+ * `max_age` is non-zero) `Cache-Control: max-age=...`.
+ *
+ * Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
+ * in this preference order) are served when accepted by the client,
+ * present on disk, and fresh; `FIO_HTTP_CFLAG_COMPRESS_STATIC` also
+ * creates missing `.br` / `.gz` variants on demand.
+ *
+ * On success the response is complete and 0 is returned. On failure -1 is
+ * returned and the application should handle the request itself.
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s root_folder,
@@ -4528,12 +4546,21 @@ FIO_SFUNC int fio___http_mime_is_compressible(fio_str_info_s mime) {
  * Attempts to send a static file from the `root` folder. On success the
  * response is complete and 0 is returned. Otherwise returns -1.
  *
- * With `FIO_HTTP_CFLAG_COMPRESS_STATIC`, missing compressed variants
- * (`.br`/`.gz`) are created on demand and written into the `root` folder —
- * the folder MUST be writable and quota'd (on-demand writes are attacker-
- * triggerable); pre-generating variants at deploy time is recommended.
- * Ranged responses are always served identity (no variant selection), and
- * `Vary: accept-encoding` is set whenever variants may exist.
+ * Variant selection (skipped for ranged requests, which are always served
+ * identity): the client's `Accept-Encoding` is tested in preference order
+ * `br` -> `zstd` -> `gzip` -> `deflate` (files `file.br`, `file.zstd`,
+ * `file.gz`, `file.zip`); the first accepted variant that exists on disk
+ * and is at least as fresh as the original file is served. `zstd` and
+ * `deflate` variants are only ever served pre-generated, never created.
+ *
+ * With `FIO_HTTP_CFLAG_COMPRESS_STATIC`, missing or stale `.br` / `.gz`
+ * variants are created on demand and written into the `root` folder —
+ * limited to compressible (text-like) MIME types, 1024 byte to
+ * FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT originals, and only when compression
+ * shrinks the file. The folder MUST be writable and quota'd (on-demand
+ * writes are attacker-triggerable); pre-generating variants at deploy time
+ * is recommended. `Vary: accept-encoding` is set whenever variants may
+ * exist (including on identity responses).
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s rt,

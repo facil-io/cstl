@@ -36795,8 +36795,26 @@ _Symbol type:_ `function`
 int fio_http_static_file_response(fio_http_s *h, fio_str_info_s root_folder, fio_str_info_s file_name, size_t max_age)
 ```
 
-Attempts to send a static file from the `root` folder. On success the
-response is complete and 0 is returned. Otherwise returns -1.
+Attempts to send a static file from the `root_folder` folder.
+
+`file_name` is URL-decoded and appended to `root_folder` (path traversal
+is rejected). Folders resolve to their `index` file and missing
+extensions are auto-completed (`.html`, `.htm`, `.txt`, `.md` -
+`FIO_HTTP_STATIC_FILE_COMPLETION`). `OPTIONS` requests are refused (a
+static file is not a valid `OPTIONS` response).
+
+Handles conditional requests (`ETag` / `If-None-Match` -> 304), single
+`Range` requests (206 / 416, always served identity), and `HEAD`
+requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when
+`max_age` is non-zero) `Cache-Control: max-age=...`.
+
+Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
+in this preference order) are served when accepted by the client,
+present on disk, and fresh; `FIO_HTTP_CFLAG_COMPRESS_STATIC` also
+creates missing `.br` / `.gz` variants on demand.
+
+On success the response is complete and 0 is returned. On failure -1 is
+returned and the application should handle the request itself.
 
 _Symbol type:_ `function`
 
@@ -37320,7 +37338,8 @@ struct fio_http_settings_s {
 void (*pre_http_body)(fio_http_s *h);
 /** Callback for HTTP requests (server) or responses (client). */
 void (*on_http)(fio_http_s *h);
-/** Called when a request / response cycle is finished with no Upgrade. */
+/** Called when a request / response cycle is finished (for WebSocket /
+* SSE connections, called after `on_close`, when the connection closes). */
 void (*on_finish)(fio_http_s *h);
 /** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
 int (*on_authenticate_sse)(fio_http_s *h);
@@ -37354,17 +37373,38 @@ fio_io_tls_s *tls;
 /** Optional HTTP task queue (for multi-threading HTTP responses) */
 fio_io_async_s *queue;
 /**
-* A public folder for file transfers - allows to circumvent any application
-* layer logic and simply serve static files.
+* A public folder for file transfers - allows to circumvent any
+* application layer logic and simply serve static files.
 *
-* Supports automatic `gz` pre-compressed alternatives.
+* Static file responses are attempted for `GET` and `HEAD` requests
+* only (RFC 9110 §9.3 - a static file is not a valid response to other
+* methods); any other method is forwarded to `on_http` (which may serve
+* files explicitly by calling `fio_http_static_file_response`). On a
+* miss the request is also forwarded to `on_http`. Folders resolve to
+* their `index` file and missing extensions are auto-completed
+* (`.html`, `.htm`, `.txt`, `.md`) - see
+* `FIO_HTTP_STATIC_FILE_COMPLETION`.
+*
+* Pre-compressed variants are supported: when the client's
+* `Accept-Encoding` allows it, an up-to-date `file.br`, `file.zstd`,
+* `file.gz` or `file.zip` variant (preference order: `br`, `zstd`,
+* `gzip`, `deflate`) is served instead of the original file. With
+* `compress_static`, missing `.br` / `.gz` variants are also created on
+* demand (written into this folder). Ranged requests are always served
+* identity (no variant selection).
+*
+* The folder must exist when the listener starts, otherwise the setting
+* is ignored (with an error log).
 */
 fio_str_info_s public_folder;
 /**
-* The max-age value (in seconds) for caching static files send from
+* The max-age value (in seconds) for caching static files sent from
 * `public_folder`.
 *
-* Defaults to 0 (not sent).
+* Defaults to 0 (the `Cache-Control` header is not sent).
+*
+* Note: NOT inherited by routes - a route that serves static files must
+* set its own `max_age`.
 */
 size_t max_age;
 /**
@@ -37427,11 +37467,47 @@ uint8_t sse_timeout;
 uint8_t connect_timeout;
 /** Logging flag - set to TRUE to log HTTP requests. */
 uint8_t log;
-/** Opt-in: auto-compress static files (save .br/.gz to disk). */
+/**
+* Opt-in: auto-compress static files - missing `.br` / `.gz` variants are
+* created on demand and written into the `public_folder`.
+*
+* Creation is limited to compressible (text-like) MIME types and file
+* sizes between 1024 bytes and FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT (2
+* MiB), and is skipped when compression wouldn't shrink the file.
+* Variants whose modification time is older than the original file are
+* re-created.
+*
+* Note: on-demand writes are attacker-triggerable - the public folder
+* MUST be writable and quota'd. Pre-generating variants at deploy time is
+* recommended.
+*
+* Note: connection-global (read from the listener's root settings when
+* the connection's handle is attached) - per-route values have no effect.
+*/
 uint8_t compress_static;
-/** Opt-in: auto-compress dynamic HTTP responses on-the-fly. */
+/**
+* Opt-in: auto-compress dynamic HTTP responses on-the-fly.
+*
+* Applies to finished (non-streaming) single-buffer responses larger than
+* 1024 bytes with a compressible (text-like) `Content-Type`, preferring
+* `br` over `gzip` per the client's `Accept-Encoding`. Responses with a
+* pre-set `Content-Encoding` are never re-compressed. `Vary:
+* accept-encoding` is set whenever compression was considered.
+*
+* Note: connection-global (read from the listener's root settings when
+* the connection's handle is attached) - per-route values have no effect.
+*/
 uint8_t compress_dynamic;
-/** Opt-in: enable permessage-deflate for WebSocket connections. */
+/**
+* Opt-in: enable permessage-deflate for WebSocket connections.
+*
+* Negotiation always forces both `*_no_context_takeover` flags (RFC 7692
+* allows either endpoint to request them unilaterally), keeping
+* persistent per-connection compression state at ~0.
+*
+* Note: connection-global (read from the listener's root settings when
+* the connection's handle is attached) - per-route values have no effect.
+*/
 uint8_t compress_ws;
 }
 ```
@@ -37599,11 +37675,20 @@ Matching is performed as a best-prefix match. i.e.:
   `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
   `"/user"` route will continue to behave the same.
 
-Note: the `udata`, `on_finish`, `public_folder` and `log` properties are all
-inherited (if missing) from the default HTTP settings used to create the
-listener.
+Note: the following properties are inherited (if missing) from the
+default HTTP settings used to create the listener: `udata`, `on_finish`,
+`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+`timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
 
 Note: TLS options are ignored.
+
+Note: only `on_http`, `on_finish`, `udata`, the authentication
+callbacks, `public_folder` and `max_age` are effective per route. All
+other per-route values are stored but unused - upgraded connection
+callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
+timeouts and the `compress_*` flags are connection-global and are read
+from the listener's root settings.
 
 _Symbol type:_ `function`
 
@@ -37629,11 +37714,20 @@ Matching is performed as a best-prefix match. i.e.:
   `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
   `"/user"` route will continue to behave the same.
 
-Note: the `udata`, `on_finish`, `public_folder` and `log` properties are all
-inherited (if missing) from the default HTTP settings used to create the
-listener.
+Note: the following properties are inherited (if missing) from the
+default HTTP settings used to create the listener: `udata`, `on_finish`,
+`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+`timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
 
 Note: TLS options are ignored.
+
+Note: only `on_http`, `on_finish`, `udata`, the authentication
+callbacks, `public_folder` and `max_age` are effective per route. All
+other per-route values are stored but unused - upgraded connection
+callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
+timeouts and the `compress_*` flags are connection-global and are read
+from the listener's root settings.
 
 _Note:_ this may be a macro only / macro wrapper for a function.
 
