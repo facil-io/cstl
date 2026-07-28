@@ -435,6 +435,360 @@ static void test_sse_newline_first_edge_case(void) {
 }
 
 /* ===========================================================================
+   T008 — Static file: Vary on plain responses + Range guard
+   ===========================================================================
+ */
+
+/** Builds a temp directory with a compressible text file (and optionally its
+ * pre-compressed .gz variant). Returns the directory path length, or 0. */
+static size_t test_static_make_tree(char *dir,
+                                    size_t dir_cap,
+                                    const void *content,
+                                    size_t content_len,
+                                    int with_gz_variant) {
+  const char *options[] = {"TMPDIR", "TMP", "TEMP", NULL};
+  const char *tmpdir = NULL;
+  for (size_t i = 0; !tmpdir && options[i]; ++i)
+    tmpdir = fio_sys_env(options[i]);
+  size_t tmplen = tmpdir ? FIO_STRLEN(tmpdir) : 0;
+  if (!tmpdir || tmplen > 128) {
+#if FIO_OS_WIN
+    tmpdir = ".";
+    tmplen = 1;
+#else
+    tmpdir = "/tmp/";
+    tmplen = FIO_STRLEN(tmpdir);
+#endif
+  }
+  if (tmplen + 48 >= dir_cap)
+    return 0;
+  FIO_MEMCPY(dir, tmpdir, tmplen);
+  size_t len = tmplen;
+  if (len && dir[len - 1] != '/' && dir[len - 1] != '\\' &&
+      dir[len - 1] != FIO_FOLDER_SEPARATOR)
+    dir[len++] = FIO_FOLDER_SEPARATOR;
+  FIO_MEMCPY(dir + len, "http_vary_test_", 15);
+  len += 15;
+  len += fio_ltoa(dir + len, (int64_t)fio_rand64(), 16);
+  dir[len] = '\0';
+#if FIO_OS_WIN
+  if (!CreateDirectoryA(dir, NULL))
+    return 0;
+#else
+  if (mkdir(dir, 0755))
+    return 0;
+#endif
+
+  char path[512];
+  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
+  FILE *f = fopen(path, "wb");
+  FIO_ASSERT(f, "failed to create static vary test file");
+  FIO_ASSERT(fwrite(content, 1, content_len, f) == content_len,
+             "failed to write static vary test file");
+  fclose(f);
+
+  if (with_gz_variant) {
+    char gzpath[512];
+    snprintf(gzpath,
+             sizeof(gzpath),
+             "%s%ctest.txt.gz",
+             dir,
+             FIO_FOLDER_SEPARATOR);
+    size_t bound = fio_deflate_compress_bound(content_len) + 18;
+    uint8_t *gz = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+    FIO_ASSERT(gz, "failed to allocate gzip variant buffer");
+    size_t gz_len = fio_gzip_compress(gz, bound, content, content_len, 6);
+    FIO_ASSERT(gz_len > 18, "failed to gzip static vary test content");
+    f = fopen(gzpath, "wb");
+    FIO_ASSERT(f, "failed to create gzip variant file");
+    FIO_ASSERT(fwrite(gz, 1, gz_len, f) == gz_len,
+               "failed to write gzip variant file");
+    fclose(f);
+    FIO_MEM_FREE(gz, bound);
+  }
+  return len;
+}
+
+static void test_static_tree_cleanup(const char *dir) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
+  unlink(path);
+  snprintf(path,
+           sizeof(path),
+           "%s%ctest.txt.gz",
+           dir,
+           FIO_FOLDER_SEPARATOR);
+  unlink(path);
+  rmdir(dir);
+}
+
+static void test_static_vary_and_range_guards(void) {
+  fprintf(stderr, "  * static vary / range compression guards\n");
+
+  enum { CONTENT_LEN = 4096 };
+  char content[CONTENT_LEN];
+  for (size_t i = 0; i < CONTENT_LEN; ++i)
+    content[i] = (char)('a' + (i & 15));
+
+  char dir[512];
+  size_t dir_len = test_static_make_tree(dir,
+                                         sizeof(dir),
+                                         content,
+                                         CONTENT_LEN,
+                                         1 /* with .gz variant */);
+  FIO_ASSERT(dir_len > 0, "failed to create static vary test tree");
+
+  /* 1. Client does not accept gzip → plain file, but variants exist on
+   *    disk, so the response MUST carry `Vary: accept-encoding`. */
+  {
+    fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio_http_request_header_set(
+        h,
+        FIO_STR_INFO2((char *)"accept-encoding", 15),
+        FIO_STR_INFO1((char *)"identity"));
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "static plain: response should succeed");
+    fio_str_info_s ce = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-encoding", 16),
+        0);
+    FIO_ASSERT(!ce.buf,
+               "static plain: content-encoding must be absent (got '%.*s')",
+               (int)ce.len,
+               ce.buf ? ce.buf : "");
+    fio_str_info_s vary = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"vary", 4),
+        0);
+    FIO_ASSERT(vary.len >= 15 &&
+                   fio___http_header_has_token(vary,
+                                               "accept-encoding",
+                                               15),
+               "static plain: Vary: accept-encoding required while "
+               "compressed variants exist (caches must key on "
+               "Accept-Encoding)");
+    fio_http_free(h);
+  }
+
+  /* 2. Client accepts gzip → pre-compressed variant, with Vary. */
+  {
+    fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"gzip"));
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "static gzip: response should succeed");
+    fio_str_info_s ce = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-encoding", 16),
+        0);
+    FIO_ASSERT(ce.len == 4 && !memcmp(ce.buf, "gzip", 4),
+               "static gzip: expected content-encoding gzip");
+    fio_str_info_s vary = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"vary", 4),
+        0);
+    FIO_ASSERT(vary.len >= 15 &&
+                   fio___http_header_has_token(vary,
+                                               "accept-encoding",
+                                               15),
+               "static gzip: Vary: accept-encoding expected");
+    fio_http_free(h);
+  }
+
+  /* 3. Range request + gzip acceptance → identity (ranges over encoded
+   *    bytes are broken in practice). */
+  {
+    fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"gzip"));
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"range", 5),
+                                FIO_STR_INFO1((char *)"bytes=0-99"));
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "static range: response should succeed");
+    fio_str_info_s ce = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-encoding", 16),
+        0);
+    FIO_ASSERT(!ce.buf,
+               "static range: content-encoding must be absent for ranged "
+               "responses (got '%.*s')",
+               (int)ce.len,
+               ce.buf ? ce.buf : "");
+    FIO_ASSERT(fio_http_status(h) == 206,
+               "static range: expected status 206, got %u",
+               (unsigned)fio_http_status(h));
+    fio_http_free(h);
+  }
+
+  test_static_tree_cleanup(dir);
+}
+
+/* ===========================================================================
+   T006 — WebSocket permessage-deflate negotiation policy
+
+   The negotiation must ALWAYS force server_no_context_takeover +
+   client_no_context_takeover (RFC 7692 allows either endpoint to request
+   them unilaterally), honor server_max_window_bits when offered, and never
+   emit window-bits parameters. The policy lives in a pure helper
+   (fio___http_ws_deflate_negotiate) so it is testable without a live
+   connection; pre-fix the seam does not exist and this test fails.
+   ===========================================================================
+ */
+
+/** Returns non-zero if the `;`-separated extension response contains
+ * `name` as a parameter name (RFC 7692 Sec-WebSocket-Extensions grammar). */
+static int test_ws_ext_has_param(fio_str_info_s resp,
+                                 const char *name,
+                                 size_t name_len) {
+  const char *pos = resp.buf;
+  const char *end = resp.buf + resp.len;
+  while (pos < end) {
+    while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == ';'))
+      ++pos;
+    const char *tok = pos;
+    while (pos < end && *pos != ';' && *pos != '=')
+      ++pos;
+    const char *tok_end = pos;
+    while (tok_end > tok && (tok_end[-1] == ' ' || tok_end[-1] == '\t'))
+      --tok_end;
+    if ((size_t)(tok_end - tok) == name_len &&
+        !FIO_MEMCMP(tok, name, name_len))
+      return 1;
+    while (pos < end && *pos != ';')
+      ++pos;
+  }
+  return 0;
+}
+
+static void test_websocket_deflate_negotiation(void) {
+  fprintf(stderr, "  * WebSocket permessage-deflate negotiation policy\n");
+#ifdef FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM
+  char out[128];
+  int bits = 0;
+
+  /* 1. Bare offer → both no-context-takeover flags ALWAYS forced. */
+  {
+    bits = 0;
+    size_t len = fio___http_ws_deflate_negotiate(
+        FIO_STR_INFO2((char *)"permessage-deflate", 18),
+        out,
+        sizeof(out),
+        &bits);
+    FIO_ASSERT(len > 0, "negotiate: bare offer should succeed");
+    fio_str_info_s resp = FIO_STR_INFO2(out, len);
+    FIO_ASSERT(test_ws_ext_has_param(resp, "permessage-deflate", 18),
+               "negotiate bare: response must carry permessage-deflate");
+    FIO_ASSERT(test_ws_ext_has_param(resp, "server_no_context_takeover", 26),
+               "negotiate bare: server_no_context_takeover must ALWAYS be "
+               "forced");
+    FIO_ASSERT(test_ws_ext_has_param(resp, "client_no_context_takeover", 26),
+               "negotiate bare: client_no_context_takeover must ALWAYS be "
+               "forced");
+    FIO_ASSERT(bits == 15,
+               "negotiate bare: default server window bits should be 15, "
+               "got %d",
+               bits);
+  }
+
+  /* 2. server_max_window_bits is honored (recorded for distance clamping)
+   *    but never echoed as a parameter. */
+  {
+    bits = 0;
+    size_t len = fio___http_ws_deflate_negotiate(
+        FIO_STR_INFO2((char *)"permessage-deflate; server_max_window_bits=12",
+                      45),
+        out,
+        sizeof(out),
+        &bits);
+    FIO_ASSERT(len > 0, "negotiate: server_max_window_bits offer");
+    FIO_ASSERT(bits == 12,
+               "negotiate: server_max_window_bits=12 must be honored, got "
+               "%d",
+               bits);
+    fio_str_info_s resp = FIO_STR_INFO2(out, len);
+    FIO_ASSERT(!test_ws_ext_has_param(resp, "server_max_window_bits", 22),
+               "negotiate: response must never emit window-bits params");
+    FIO_ASSERT(test_ws_ext_has_param(resp, "server_no_context_takeover", 26),
+               "negotiate bits: server_no_context_takeover forced");
+    FIO_ASSERT(test_ws_ext_has_param(resp, "client_no_context_takeover", 26),
+               "negotiate bits: client_no_context_takeover forced");
+  }
+
+  /* 3. Browser-style offer (client_max_window_bits without value) → clean
+   *    negotiation, no window-bits params echoed. */
+  {
+    bits = 0;
+    size_t len = fio___http_ws_deflate_negotiate(
+        FIO_STR_INFO2((char *)"permessage-deflate; client_max_window_bits",
+                      41),
+        out,
+        sizeof(out),
+        &bits);
+    FIO_ASSERT(len > 0, "negotiate: browser-style offer should succeed");
+    fio_str_info_s resp = FIO_STR_INFO2(out, len);
+    FIO_ASSERT(!test_ws_ext_has_param(resp, "client_max_window_bits", 22),
+               "negotiate browser: must not echo client_max_window_bits");
+    FIO_ASSERT(test_ws_ext_has_param(resp, "server_no_context_takeover", 26) &&
+                   test_ws_ext_has_param(resp,
+                                         "client_no_context_takeover",
+                                         26),
+               "negotiate browser: both no-context-takeover flags forced");
+  }
+
+  /* 4. Full offer shape: no-context flags echoed by the client are still
+   *    forced; smallest offered server window wins within valid range. */
+  {
+    static const char full_offer[] =
+        "permessage-deflate; server_no_context_takeover; "
+        "client_no_context_takeover; server_max_window_bits=8";
+    bits = 0;
+    size_t len = fio___http_ws_deflate_negotiate(
+        FIO_STR_INFO2((char *)full_offer, sizeof(full_offer) - 1),
+        out,
+        sizeof(out),
+        &bits);
+    FIO_ASSERT(len > 0, "negotiate: full offer should succeed");
+    FIO_ASSERT(bits == 8,
+               "negotiate: server_max_window_bits=8 honored, got %d",
+               bits);
+  }
+
+  /* 5. Output buffer too small → graceful 0, no partial write past cap. */
+  {
+    bits = 0;
+    char tiny[8];
+    size_t len = fio___http_ws_deflate_negotiate(
+        FIO_STR_INFO2((char *)"permessage-deflate", 18),
+        tiny,
+        sizeof(tiny),
+        &bits);
+    FIO_ASSERT(len == 0,
+               "negotiate: undersized output buffer must return 0");
+  }
+#else  /* FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM */
+  fprintf(stderr,
+          "FAIL: permessage-deflate negotiation seam/policy not implemented "
+          "(FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM; see T022)\n");
+  exit(1);
+#endif /* FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM */
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -454,6 +808,8 @@ int main(void) {
   test_websocket_upgrade_helpers();
   test_sse_upgrade_helpers();
   test_sse_newline_first_edge_case();
+  test_static_vary_and_range_guards();
+  test_websocket_deflate_negotiation();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

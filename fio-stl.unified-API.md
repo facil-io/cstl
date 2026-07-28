@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3127.
+Total symbols: 3130.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -63,7 +63,7 @@ Total symbols: 3127.
 - [`./fio-stl/159 otp.h`](#fio-stl-159-otp-h) — 7
 - [`./fio-stl/159 secret.h`](#fio-stl-159-secret-h) — 5
 - [`./fio-stl/162 brotli.h`](#fio-stl-162-brotli-h) — 4
-- [`./fio-stl/162 deflate.h`](#fio-stl-162-deflate-h) — 11
+- [`./fio-stl/162 deflate.h`](#fio-stl-162-deflate-h) — 13
 - [`./fio-stl/190 tls13.h`](#fio-stl-190-tls13-h) — 60
 - [`./fio-stl/201 string.h`](#fio-stl-201-string-h) — 47
 - [`./fio-stl/202 array.h`](#fio-stl-202-array-h) — 30
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1763 public symbols.
+1764 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -312,6 +312,70 @@ char *ntos16(uint16_t n) {
 
 A similar approach is used by `fiobj_num2cstr` for temporary FIOBJ-to-string
 conversions that do not require memory management.
+
+_Note:_  this MACRO defines or declares code.
+
+_Symbol type:_ `macro`
+
+#### `FIO_STATIC_SAFE_ALLOC_DEF`
+
+```c
+#define FIO_STATIC_SAFE_ALLOC_DEF(name,   \
+                                  type_T,   \
+                                  units_per_allocation,   \
+                                  max_concurrent_allocations)   \
+  enum { name##__hdr_ = (int)((sizeof(type_T) < 16) ? sizeof(type_T) : 16) };   \
+  typedef struct FIO_ALIGN(16) name##__slot_s {   \
+    unsigned char busy_;   \
+    char reserved_[name##__hdr_ - 1];   \
+    type_T data_[(units_per_allocation)];   \
+  } name##__slot_s;   \
+  FIO_ASSERT_STATIC(offsetof(name##__slot_s, data_) == (size_t)name##__hdr_,   \
+                    "FIO_STATIC_SAFE_ALLOC_DEF: slot metadata header must be"   \
+                    " min(sizeof(type_T), 16) bytes");   \
+  /** Checks out a slot; returns its data block, or NULL when all are busy. */   \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name##_try(void) {   \
+    static name##__slot_s name##buffer[(max_concurrent_allocations)];   \
+    static size_t hint;   \
+    size_t start = fio_atomic_add(&hint, 1);   \
+    for (size_t i = 0; i < (size_t)(max_concurrent_allocations); ++i) {   \
+      size_t at = (start + i) % (size_t)(max_concurrent_allocations);   \
+      if (!(fio_atomic_or(&name##buffer[at].busy_, 1) & 1))   \
+        return name##buffer[at].data_;   \
+    }   \
+    return NULL;   \
+  }   \
+  /** Releases a slot previously returned by name##_try. */   \
+  FIO_SFUNC void name##_free(type_T *ptr) {   \
+    name##__slot_s *slot =   \
+        (name##__slot_s *)(void *)((char *)ptr - name##__hdr_);   \
+    fio_atomic_and(&slot->busy_, 0);   \
+  }   \
+  /** Returns the logical arena capacity in `type_T` units. */   \
+  FIO_IFUNC size_t name##_size(void) {   \
+    return (size_t)((max_concurrent_allocations) * (units_per_allocation));   \
+  }
+```
+
+FIO_STATIC_SAFE_ALLOC_DEF(name, type_T, units_per_allocation,
+                          max_concurrent_allocations)
+
+A contention-safe variant of FIO_STATIC_ALLOC_DEF for short-lived scratch
+slots with an explicit checkout lifecycle. Unlike the round-robin variant
+(which silently reuses slots past `max_concurrent_allocations`), this
+allocator returns NULL when every slot is busy, letting callers fall back
+gracefully instead of corrupting an in-flight user of the slot.
+
+Each slot carries a small metadata header holding the busy byte. The
+header is `min(sizeof(type_T), 16)` bytes: one element for small types
+(data naturally aligned for `type_T`), capped at 16 bytes for larger
+types (data 16-byte aligned). `type_T` alignment must be <= 16 (enforced
+at compile time).
+
+Generated API:
+  type_T *name##_try(void);      - checkout a slot, or NULL if all busy.
+  void    name##_free(type_T *); - release a slot returned by name##_try.
+  size_t  name##_size(void);     - logical arena capacity in type_T units.
 
 _Note:_  this MACRO defines or declares code.
 
@@ -29086,7 +29150,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-162-deflate-h"></a> `./fio-stl/162 deflate.h`
 
-11 public symbols.
+13 public symbols.
 
 ### Types
 
@@ -29196,6 +29260,20 @@ Returns NULL on allocation failure.
 
 _Symbol type:_ `function`
 
+#### `fio_deflate_new_takeover`
+
+```c
+fio_deflate_s *fio_deflate_new_takeover(int level, int is_compress)
+```
+
+Creates a streaming state with context takeover (cross-message history
+over the last 32KB). Allocates the window (+ compressor hash) inside the
+context's own block — the documented per-context cost (~160KB compressor,
+~32KB decompressor). `fio_deflate_new` (no-takeover) is the cheap default
+and the only mode the WebSocket layer negotiates.
+
+_Symbol type:_ `function`
+
 #### `fio_deflate_free`
 
 ```c
@@ -29213,6 +29291,19 @@ void fio_deflate_destroy(fio_deflate_s *s)
 ```
 
 Resets a deflate streaming context (keeps allocated memory, clears state).
+Frees the input buffer when it grew past 64KB, keeping persistent
+per-connection state bounded (no-takeover design).
+
+_Symbol type:_ `function`
+
+#### `fio_deflate_window_bits_set`
+
+```c
+void fio_deflate_window_bits_set(fio_deflate_s *s, int bits)
+```
+
+Clamps compressor match distances to 2^bits (8..15, default 15).
+Used to honor `server_max_window_bits` from RFC 7692 negotiation.
 
 _Symbol type:_ `function`
 
@@ -29222,7 +29313,8 @@ _Symbol type:_ `function`
 size_t fio_deflate_push(fio_deflate_s *s, void *out, size_t out_len, const void *in, size_t in_len, int flush)
 ```
 
-Streaming compress/decompress.
+Streaming compress/decompress (no-takeover: each flushed message is an
+independent deflate stream — there is no cross-message history mode).
 
 Processes `in_len` bytes from `in`, writing output to `out` (max `out_len`).
 `flush`: 0=normal, 1=sync_flush (for WebSocket frame boundaries).

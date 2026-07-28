@@ -2665,6 +2665,41 @@ The returned string is valid only until the allocator wraps around. A similar pa
 ## Thread Safety
 
 The allocator is only "good enough" thread-safe. The atomic position counter protects the round-robin index, but the safety window is bounded by the allocator's `max_concurrent_allocations` argument. Keep slots short-lived and do not hold a returned pointer across too many calls or threads.
+
+## `FIO_STATIC_SAFE_ALLOC_DEF`
+
+```c
+#define FIO_STATIC_SAFE_ALLOC_DEF(name, type_T, units_per_allocation, max_concurrent_allocations)
+```
+
+A contention-safe variant of `FIO_STATIC_ALLOC_DEF` for short-lived scratch slots with an explicit checkout lifecycle. Where the round-robin variant silently reuses a slot once more than `max_concurrent_allocations` are outstanding (corrupting the in-flight user), this allocator returns `NULL` when every slot is busy, letting callers fall back gracefully.
+
+Each slot carries a small metadata header holding its busy byte. The header is `min(sizeof(type_T), 16)` bytes: one element for small types (data naturally aligned for `type_T`), capped at 16 bytes for larger types (data 16-byte aligned). `type_T` alignment must be ≤ 16 (enforced at compile time).
+
+### Generated API
+
+- **`type_T *name##_try(void)`** — checks out a slot and returns a pointer to its data block (right after the metadata header), or `NULL` when all slots are busy.
+- **`void name##_free(type_T *ptr)`** — releases a slot returned by `name##_try` (clears the busy byte).
+- **`size_t name##_size(void)`** — logical arena capacity in `type_T` units.
+
+### Example
+
+```c
+FIO_STATIC_SAFE_ALLOC_DEF(my_scratch, uint8_t, 4096, 16);
+
+size_t work(const void *in, size_t len) {
+  uint8_t *slot = my_scratch_try();
+  if (!slot)
+    return 0; /* contention: caller falls back (e.g. uncompressed) */
+  size_t r = do_work(slot, in, len);
+  my_scratch_free(slot);
+  return r;
+}
+```
+
+### Thread Safety
+
+Slot checkout uses an atomic busy byte per slot with an atomic round-robin start hint; a checked-out slot is exclusively owned until `name##_free`. The busy-byte protocol is exact (no safety window) — the only failure mode is `NULL` under contention, which callers must handle.
 # String and Buffer Information
 
 Lightweight descriptors for byte ranges. They are defined in [`./000 core.h`](./000%20core.h) and are used throughout the library to pass around strings and buffers without taking ownership.
@@ -13445,7 +13480,33 @@ Return modes mirror `fio_deflate_decompress`: byte count, required size, or `0` 
 typedef struct fio_deflate_s fio_deflate_s;
 ```
 
-Opaque streaming compression/decompression state. It keeps window state across calls for context takeover.
+Opaque streaming compression/decompression state (~32 bytes without
+takeover). The streaming API supports two modes:
+
+- **No-takeover (default, `fio_deflate_new`):** each flushed message is an
+  independent deflate stream. Compressor scratch (hash + token buffers)
+  comes from a contention-safe static slot pool (`FIO_STATIC_SAFE_ALLOC_DEF`)
+  checked out per call, so persistent per-context state is ~0. This is the
+  only mode the WebSocket layer negotiates (both `*_no_context_takeover`
+  flags are always forced).
+- **Context takeover (`fio_deflate_new_takeover`):** matches may reference
+  the last 32KB of previous messages. The window (+ compressor hash) is
+  allocated inside the context's own block — the documented per-context cost
+  (~160KB compressor / ~32KB decompressor).
+
+**Thread safety:** contexts are stateful and unsynchronized — use one
+context per connection and serialize all `fio_deflate_push` calls per
+context (one writer at a time). The static scratch pool is internally
+synchronized; when every slot is momentarily busy, compression fails
+gracefully (returns `0`).
+
+**Overflow contract:** when the output buffer is too small, `fio_deflate_push`
+(compression) and `fio_deflate_compress` return `0` — output is NEVER
+silently truncated. Callers should treat `0` as "send uncompressed" or retry
+with a correctly-sized buffer (`fio_deflate_compress_bound`, which is now
+guaranteed sufficient at every level: the compressor falls back to stored
+blocks whenever Huffman coding would expand, capping negative-gain output at
+input + 5 bytes per 64KB block + a small header).
 
 ### `fio_deflate_new`
 
@@ -13453,7 +13514,15 @@ Opaque streaming compression/decompression state. It keeps window state across c
 SFUNC fio_deflate_s *fio_deflate_new(int level, int is_compress);
 ```
 
-Creates a streaming state. `is_compress != 0` creates a compressor; `0` creates a decompressor. Returns `NULL` on allocation failure.
+Creates a no-takeover streaming state. `is_compress != 0` creates a compressor; `0` creates a decompressor. Returns `NULL` on allocation failure. `level` is recorded for API compatibility; the streaming compressor always uses the fast greedy matcher (the one-shot `fio_deflate_compress` keeps levels 0-9).
+
+### `fio_deflate_new_takeover`
+
+```c
+SFUNC fio_deflate_s *fio_deflate_new_takeover(int level, int is_compress);
+```
+
+Creates a streaming state with context takeover (cross-message history over the last 32KB). Allocates the window (+ compressor hash) inside the context's own block (~160KB compressor / ~32KB decompressor). `fio_deflate_destroy` resets the history (keeping the allocation).
 
 ### `fio_deflate_free`
 
@@ -13469,7 +13538,15 @@ Frees a streaming state.
 SFUNC void fio_deflate_destroy(fio_deflate_s *s);
 ```
 
-Resets a streaming context while keeping allocated memory.
+Resets a streaming context. The input buffer is freed when it grew past 64KB, keeping persistent per-connection state bounded (no-takeover design).
+
+### `fio_deflate_window_bits_set`
+
+```c
+SFUNC void fio_deflate_window_bits_set(fio_deflate_s *s, int bits);
+```
+
+Clamps compressor match distances to 2^`bits` (8..15, default 15). Used to honor `server_max_window_bits` from RFC 7692 negotiation. Decompression ignores it (any in-message distance up to 32KB is accepted).
 
 ### `fio_deflate_push`
 
@@ -13482,12 +13559,14 @@ SFUNC size_t fio_deflate_push(fio_deflate_s *s,
                               int flush);
 ```
 
-Compresses or decompresses the next input chunk.
+Compresses or decompresses the next input chunk. Compression chunks input
+into 32KB blocks (bounded scratch, no message-sized copies) and emits the
+sync-flush trailer only on the message-final chunk.
 
-- `flush == 0`: normal streaming.
+- `flush == 0`: normal streaming (buffered up to 32KB, then auto-compressed).
 - `flush == 1`: sync flush, useful at WebSocket frame boundaries.
 
-For decompression, a return value greater than `out_len` means “retry with this much output space”; buffered input is preserved for that retry.
+For decompression, a return value greater than `out_len` means “retry with this much output space”; buffered input is preserved for that retry. Multi-block peer streams (e.g. zlib at any memLevel) inflate fully; the 9 completion bytes are appended internally.
 
 ## Example: Raw Roundtrip
 
@@ -19982,7 +20061,7 @@ Other settings:
 | `udata` | Default `fio_http_udata(h)` value. |
 | `tls_io_func`, `tls` | Optional TLS support. |
 | `queue` | Optional HTTP task queue. |
-| `public_folder` | Static-file root; can serve pre-compressed `.gz` alternatives. |
+| `public_folder` | Static-file root; can serve pre-compressed `.gz`/`.br` alternatives. With `compress_static`, missing variants are also **created on demand and written into this folder on GET** — the folder must be writable and quota'd (attacker-triggerable disk writes). Prefer pre-generating variants at deploy time. |
 | `max_age` | Static-file `Cache-Control` max-age value, in seconds. |
 | `max_header_size` | Maximum combined request line and header bytes. |
 | `max_line_len` | Maximum bytes per request / header line. |
@@ -19994,9 +20073,34 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression. |
-| `compress_dynamic` | Opt-in dynamic response compression. |
-| `compress_ws` | Opt-in WebSocket `permessage-deflate`. |
+| `compress_static` | Opt-in static-file compression. See the compression security note below. |
+| `compress_dynamic` | Opt-in dynamic response compression. See the compression security note below. |
+| `compress_ws` | Opt-in WebSocket `permessage-deflate`. See the compression security note below. |
+
+**Compression security note (BREACH/CRIME oracle risk):** compressing
+secrets together with attacker-reflected data enables length-oracle attacks
+(BREACH/CRIME). Do not enable compression for responses that mix secrets
+(CSRF tokens, session data) with attacker-controlled reflections, or emit
+such messages uncompressed per call (per-message opt-out: keep the cflag off
+at the route level for sensitive routes, or pre-set `content-encoding`
+— which the dynamic path always respects — to pass a body through
+uncompressed).
+
+**WebSocket `permessage-deflate` negotiation:** the server ALWAYS responds
+with `permessage-deflate; server_no_context_takeover;
+client_no_context_takeover` (RFC 7692 allows either endpoint to request the
+flags unilaterally), honoring `server_max_window_bits` when offered (the
+compressor clamps its distances accordingly) and never emitting window-bits
+parameters. Cross-message history is never used, so persistent compression
+state per connection is ~0 (two ~32-byte contexts plus a bounded input
+buffer, shrunk on every message reset); compressor scratch comes from a
+static process-wide slot pool checked out per call — under extreme
+contention a message simply goes out uncompressed.
+
+**Accept-Encoding handling:** `q=0` (in any zero-padded form) forbids an
+encoding (RFC 9110). `Vary: accept-encoding` is set whenever compressed
+variants may exist — including on identity responses. Ranged responses are
+never compressed (ranges over encoded bytes are broken in practice).
 
 Unset callbacks and limits are normalized when the listener, route, or client is
 created. Server `on_http` defaults to a 404 response; client `on_http` defaults
@@ -20181,6 +20285,12 @@ int fio_http_on_message_set(fio_http_s *h,
 
 `fio_http_websocket_write` writes one WebSocket message and fails if the handle
 is not an established WebSocket. `is_text` selects text vs. binary.
+
+**Serialization:** `fio_http_websocket_write` must be serialized per
+connection — concurrent calls on the same handle (e.g. from pub/sub or queue
+callbacks racing on multiple threads) may interleave frame bytes and must be
+guarded by the caller (mutex, or route all writes through the connection's
+queue). This also protects the per-connection compression context.
 
 `fio_http_on_message_set` overrides the `on_message` callback for the current
 WebSocket connection. Passing `NULL` restores the settings callback. It returns

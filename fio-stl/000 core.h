@@ -1147,7 +1147,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
                              type_T,                                           \
                              units_per_allocation,                             \
                              max_concurrent_allocations)                       \
-  /** Returns a slot from the `name` static arena. */                         \
+  /** Returns a slot from the `name` static arena. */                          \
   FIO_SFUNC FIO_WARN_UNUSED type_T *name(size_t count) {                       \
     static type_T name##buffer[sizeof(type_T) * (max_concurrent_allocations) * \
                                (units_per_allocation)];                        \
@@ -1158,7 +1158,64 @@ must be returned. The memory remains valid until its round-robin slot is reused.
     at %= (max_concurrent_allocations);                                        \
     return (at * (units_per_allocation)) + name##buffer;                       \
   }                                                                            \
-  /** Returns the logical arena capacity in `type_T` units. */                \
+  /** Returns the logical arena capacity in `type_T` units. */                 \
+  FIO_IFUNC size_t name##_size(void) {                                         \
+    return (size_t)((max_concurrent_allocations) * (units_per_allocation));    \
+  }
+
+/**
+ * FIO_STATIC_SAFE_ALLOC_DEF(name, type_T, units_per_allocation,
+ *                           max_concurrent_allocations)
+ *
+ * A contention-safe variant of FIO_STATIC_ALLOC_DEF for short-lived scratch
+ * slots with an explicit checkout lifecycle. Unlike the round-robin variant
+ * (which silently reuses slots past `max_concurrent_allocations`), this
+ * allocator returns NULL when every slot is busy, letting callers fall back
+ * gracefully instead of corrupting an in-flight user of the slot.
+ *
+ * Each slot carries a small metadata header holding the busy byte. The
+ * header is `min(sizeof(type_T), 16)` bytes: one element for small types
+ * (data naturally aligned for `type_T`), capped at 16 bytes for larger
+ * types (data 16-byte aligned). `type_T` alignment must be <= 16 (enforced
+ * at compile time).
+ *
+ * Generated API:
+ *   type_T *name##_try(void);      - checkout a slot, or NULL if all busy.
+ *   void    name##_free(type_T *); - release a slot returned by name##_try.
+ *   size_t  name##_size(void);     - logical arena capacity in type_T units.
+ */
+#define FIO_STATIC_SAFE_ALLOC_DEF(name,                                        \
+                                  type_T,                                      \
+                                  units_per_allocation,                        \
+                                  max_concurrent_allocations)                  \
+  enum { name##__hdr_ = (int)((sizeof(type_T) < 16) ? sizeof(type_T) : 16) };  \
+  typedef struct FIO_ALIGN(16) name##__slot_s {                                \
+    unsigned char busy_;                                                       \
+    char reserved_[name##__hdr_ - 1];                                          \
+    type_T data_[(units_per_allocation)];                                      \
+  } name##__slot_s;                                                            \
+  FIO_ASSERT_STATIC(offsetof(name##__slot_s, data_) == (size_t)name##__hdr_,   \
+                    "FIO_STATIC_SAFE_ALLOC_DEF: slot metadata header must be"  \
+                    " min(sizeof(type_T), 16) bytes");                         \
+  /** Checks out a slot; returns its data block, or NULL when all are busy. */ \
+  FIO_SFUNC FIO_WARN_UNUSED type_T *name##_try(void) {                         \
+    static name##__slot_s name##buffer[(max_concurrent_allocations)];          \
+    static size_t hint;                                                        \
+    size_t start = fio_atomic_add(&hint, 1);                                   \
+    for (size_t i = 0; i < (size_t)(max_concurrent_allocations); ++i) {        \
+      size_t at = (start + i) % (size_t)(max_concurrent_allocations);          \
+      if (!(fio_atomic_or(&name##buffer[at].busy_, 1) & 1))                    \
+        return name##buffer[at].data_;                                         \
+    }                                                                          \
+    return NULL;                                                               \
+  }                                                                            \
+  /** Releases a slot previously returned by name##_try. */                    \
+  FIO_SFUNC void name##_free(type_T *ptr) {                                    \
+    name##__slot_s *slot =                                                     \
+        (name##__slot_s *)(void *)((char *)ptr - name##__hdr_);                \
+    fio_atomic_and(&slot->busy_, 0);                                           \
+  }                                                                            \
+  /** Returns the logical arena capacity in `type_T` units. */                 \
   FIO_IFUNC size_t name##_size(void) {                                         \
     return (size_t)((max_concurrent_allocations) * (units_per_allocation));    \
   }
@@ -1293,8 +1350,9 @@ Static Assertions
 #else
 /** Perform a static (build time) assertion. */
 #define FIO_ASSERT_STATIC(cond, msg)                                           \
-  static const char *FIO_NAME(fio_static_assertion_failed,                     \
-                              __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
+  static FIO_MAYBE_UNUSED const char *FIO_NAME(                                \
+      fio_static_assertion_failed,                                             \
+      __LINE__)[(((cond) << 1) - 1)] = {(char *)msg}
 #endif
 
 typedef struct {

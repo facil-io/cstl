@@ -410,6 +410,81 @@ static void test_quality_roundtrips(void) {
   }
 }
 
+/* *****************************************************************************
+T005 — Inputs above 16MB must compress fully (chunked meta-blocks)
+
+fio_brotli_compress must support inputs larger than the 16MB single
+meta-block limit by emitting chunked meta-blocks (ISLAST on the final chunk
+only). Regression: the pre-fix implementation silently truncated the input
+at 16MB and returned a valid stream of the prefix.
+***************************************************************************** */
+
+static void test_large_input_roundtrips(void) {
+  fprintf(stderr,
+          "Testing >16MB Brotli roundtrips (chunked meta-blocks)...\n");
+  static const size_t sizes[] = {
+      (20u << 20) + 17, /* crosses the 16MB meta-block limit (+ tail) */
+      (16u << 20),      /* exactly at the old limit (regression guard) */
+      (16u << 20) + 1,  /* one byte past the old limit */
+  };
+  static const int qualities[] = {1, 6};
+
+  for (size_t si = 0; si < sizeof(sizes) / sizeof(sizes[0]); ++si) {
+    size_t n = sizes[si];
+    uint8_t *src = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, n, 0);
+    size_t bound = fio_brotli_compress_bound(n);
+    uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+    uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, n + 1024, 0);
+    TEST_ASSERT(src && comp && out,
+                "large input %zu: allocation failed",
+                n);
+    if (!src || !comp || !out)
+      goto next;
+    fio___brotli_make_corpus(src, n);
+
+    for (size_t qi = 0; qi < sizeof(qualities) / sizeof(qualities[0]);
+         ++qi) {
+      int q = qualities[qi];
+      size_t clen = fio_brotli_compress(comp, bound, src, n, q);
+      TEST_ASSERT(clen > 0 && clen <= bound,
+                  "large input %zu q%d: compress returned %zu (bound %zu)",
+                  n,
+                  q,
+                  clen,
+                  bound);
+      if (!clen || clen > bound)
+        continue;
+
+      TEST_ASSERT(fio_brotli_decompress(NULL, 0, comp, clen) == n,
+                  "large input %zu q%d: counting mode expected %zu",
+                  n,
+                  q,
+                  n);
+
+      size_t dlen = fio_brotli_decompress(out, n + 1024, comp, clen);
+      TEST_ASSERT(dlen == n,
+                  "large input %zu q%d: expected full roundtrip %zu bytes, "
+                  "got %zu (input silently truncated at 16MB)",
+                  n,
+                  q,
+                  n,
+                  dlen);
+      TEST_ASSERT(dlen == n && !FIO_MEMCMP(out, src, n),
+                  "large input %zu q%d: payload mismatch",
+                  n,
+                  q);
+    }
+
+  next:
+    if (out)
+      FIO_MEM_FREE(out, n + 1024);
+    if (comp)
+      FIO_MEM_FREE(comp, bound);
+    if (src)
+      FIO_MEM_FREE(src, n);
+  }
+}
+
 int main(void) {
   fprintf(stderr, "=== Brotli Correctness Test Suite ===\n\n");
 
@@ -417,6 +492,7 @@ int main(void) {
   test_dictionary_tables_and_transforms();
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
+  test_large_input_roundtrips();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
   return g_fail ? 1 : 0;

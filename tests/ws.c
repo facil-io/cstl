@@ -522,6 +522,130 @@ static void test_rsv_all_bits(void) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* 5b. RSV validation on continuation and control frames (RFC 6455 §5.2)      */
+/*                                                                            */
+/* RSV bits must be 0 on continuation and control frames (RFC 7692: control  */
+/* frames are never compressed). Only the OPENING data frame may carry RSV.  */
+/* -------------------------------------------------------------------------- */
+
+static void test_rsv1_on_continuation_rejected(void) {
+  /* FIN=0 text "a", then a continuation frame with RSV1 set. */
+  uint8_t stream[] = {0x01, 0x01, 'a', 0xC0, 0x01, 'b'};
+  fio_websocket_s p;
+  fio_websocket_event_s ev;
+  ws_test_ctx_s ctx;
+  ws_ctx_reset(&ctx);
+  fio_websocket_init(&p);
+
+  size_t c1 = fio_websocket_parse(&p, FIO_BUF_INFO2((char *)stream, 3), &ev);
+  ws_ctx_record(&ctx, &ev);
+  WS_CHECK(c1 == 3, "rsv1 continuation: opening fragment consumed");
+  WS_CHECK(ctx.data_events == 1, "rsv1 continuation: opening data event");
+
+  size_t c2 = fio_websocket_parse(
+      &p, FIO_BUF_INFO2((char *)stream + 3, 3), &ev);
+  ws_ctx_record(&ctx, &ev);
+  WS_CHECK(c2 == FIO_WEBSOCKET_PARSE_ERROR,
+           "rsv1 continuation: RSV1 on continuation must be a protocol error");
+  WS_CHECK(ctx.error_events == 1, "rsv1 continuation: error event emitted");
+  WS_CHECK(ctx.last_close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+           "rsv1 continuation: close code 1002");
+}
+
+static void test_rsv_on_control_rejected(void) {
+  /* ping with RSV1 set */
+  {
+    uint8_t frame[] = {0xC9, 0x02, 'h', 'i'};
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    ws_test_ctx_s ctx;
+    ws_ctx_reset(&ctx);
+    fio_websocket_init(&p);
+
+    size_t c = fio_websocket_parse(
+        &p, FIO_BUF_INFO2((char *)frame, sizeof(frame)), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c == FIO_WEBSOCKET_PARSE_ERROR,
+             "rsv1 ping: RSV1 on control frame must be a protocol error");
+    WS_CHECK(ctx.last_close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+             "rsv1 ping: close code 1002");
+  }
+  /* pong with RSV2 set */
+  {
+    uint8_t frame[] = {0xBA, 0x02, 'h', 'i'};
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    ws_test_ctx_s ctx;
+    ws_ctx_reset(&ctx);
+    fio_websocket_init(&p);
+
+    size_t c = fio_websocket_parse(
+        &p, FIO_BUF_INFO2((char *)frame, sizeof(frame)), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c == FIO_WEBSOCKET_PARSE_ERROR,
+             "rsv2 pong: RSV2 on control frame must be a protocol error");
+    WS_CHECK(ctx.last_close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+             "rsv2 pong: close code 1002");
+  }
+  /* close with RSV3 set */
+  {
+    uint8_t frame[] = {0x98, 0x00};
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    ws_test_ctx_s ctx;
+    ws_ctx_reset(&ctx);
+    fio_websocket_init(&p);
+
+    size_t c = fio_websocket_parse(
+        &p, FIO_BUF_INFO2((char *)frame, sizeof(frame)), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c == FIO_WEBSOCKET_PARSE_ERROR,
+             "rsv3 close: RSV3 on control frame must be a protocol error");
+    WS_CHECK(ctx.last_close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+             "rsv3 close: close code 1002");
+  }
+  /* continuation with RSV2 set (mid-message) */
+  {
+    uint8_t stream[] = {0x02, 0x01, 'a', 0xA0, 0x01, 'b'};
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    ws_test_ctx_s ctx;
+    ws_ctx_reset(&ctx);
+    fio_websocket_init(&p);
+
+    size_t c1 = fio_websocket_parse(&p, FIO_BUF_INFO2((char *)stream, 3), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c1 == 3, "rsv2 continuation: opening fragment consumed");
+
+    size_t c2 = fio_websocket_parse(
+        &p, FIO_BUF_INFO2((char *)stream + 3, 3), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c2 == FIO_WEBSOCKET_PARSE_ERROR,
+             "rsv2 continuation: RSV2 on continuation must be rejected");
+    WS_CHECK(ctx.last_close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+             "rsv2 continuation: close code 1002");
+  }
+  /* opening data frame with RSV1 still accepted (dispatch rejects when the
+   * extension was not negotiated — the parser must surface, not reject). */
+  {
+    uint8_t frame[] = {0xC1, 0x02, 'o', 'k'};
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    ws_test_ctx_s ctx;
+    ws_ctx_reset(&ctx);
+    fio_websocket_init(&p);
+
+    size_t c = fio_websocket_parse(
+        &p, FIO_BUF_INFO2((char *)frame, sizeof(frame)), &ev);
+    ws_ctx_record(&ctx, &ev);
+    WS_CHECK(c == sizeof(frame),
+             "rsv1 opening: opening data frame with RSV1 must be accepted");
+    WS_CHECK(ctx.error_events == 0, "rsv1 opening: no error event");
+    WS_CHECK(ev.rsv == FIO_WEBSOCKET_RSV1, "rsv1 opening: RSV1 surfaced");
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* 6. Protocol errors                                                         */
 /* -------------------------------------------------------------------------- */
 
@@ -848,6 +972,8 @@ int main(void) {
   test_mask_rotation_across_splits();
   test_rsv_bits_surfaced();
   test_rsv_all_bits();
+  test_rsv1_on_continuation_rejected();
+  test_rsv_on_control_rejected();
   test_bad_opcode();
   test_control_frame_fin_zero();
   test_oversized_control_payload();

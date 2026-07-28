@@ -2,6 +2,22 @@
 DEFLATE / INFLATE Correctness Tests
 Covers ./fio-stl/162 deflate.h.
 ***************************************************************************** */
+/* Allocation-counting seam (T004/T007 white-box memory budgets).
+ * Defining FIO_MEM_REALLOC / FIO_MEM_FREE before the first fio include routes
+ * every STL allocation in this translation unit through the counters below
+ * (`001 header.h` skips its defaults when both macros are already defined). */
+#include <stdlib.h>
+
+static void *fio___test_mem_realloc(void *ptr,
+                                    size_t old_size,
+                                    size_t new_size,
+                                    size_t copy_len);
+static void fio___test_mem_free(void *ptr, size_t size);
+#define FIO_MEM_REALLOC(ptr, old_size, new_size, copy_len)                     \
+  fio___test_mem_realloc((ptr), (old_size), (new_size), (copy_len))
+#define FIO_MEM_FREE(ptr, size) fio___test_mem_free((ptr), (size))
+#define FIO_MEM_REALLOC_IS_SAFE 0
+
 #include "test-helpers.h"
 
 #define FIO_DEFLATE
@@ -31,6 +47,80 @@ FIO_SFUNC void fio___deflate_fill(uint8_t *buf, size_t len, uint32_t seed) {
   for (size_t i = 0; i < len; ++i) {
     seed = seed * 1103515245U + 12345U;
     buf[i] = (uint8_t)((seed >> 16) & 0xFFU);
+  }
+}
+
+/* *****************************************************************************
+Allocation counting (white-box memory budgets)
+***************************************************************************** */
+
+static struct {
+  size_t live_allocs; /* live allocation count */
+  size_t live_bytes;  /* bytes currently allocated */
+  size_t peak_bytes;  /* high-water mark of live_bytes */
+  size_t max_single;  /* largest single allocation seen while armed */
+  size_t total_bytes; /* cumulative bytes allocated while armed */
+  int armed;          /* non-zero => count */
+} g_mem;
+
+static void fio___test_mem_reset(void) {
+  g_mem.live_allocs = 0;
+  g_mem.live_bytes = 0;
+  g_mem.peak_bytes = 0;
+  g_mem.max_single = 0;
+  g_mem.total_bytes = 0;
+}
+
+static void *fio___test_mem_realloc(void *ptr,
+                                    size_t old_size,
+                                    size_t new_size,
+                                    size_t copy_len) {
+  (void)copy_len;
+  if (g_mem.armed) {
+    if (!ptr) {
+      if (new_size) {
+        ++g_mem.live_allocs;
+        g_mem.live_bytes += new_size;
+        g_mem.total_bytes += new_size;
+        if (new_size > g_mem.max_single)
+          g_mem.max_single = new_size;
+      }
+    } else if (!new_size) {
+      /* new_size == 0 acts like free */
+      if (g_mem.live_allocs)
+        --g_mem.live_allocs;
+      g_mem.live_bytes =
+          (old_size >= g_mem.live_bytes) ? 0 : (g_mem.live_bytes - old_size);
+    } else {
+      g_mem.live_bytes = (new_size >= old_size)
+                             ? (g_mem.live_bytes + (new_size - old_size))
+                             : (g_mem.live_bytes - (old_size - new_size));
+      if (new_size > g_mem.max_single)
+        g_mem.max_single = new_size;
+    }
+    if (g_mem.live_bytes > g_mem.peak_bytes)
+      g_mem.peak_bytes = g_mem.live_bytes;
+  }
+  return realloc(ptr, new_size);
+}
+
+static void fio___test_mem_free(void *ptr, size_t size) {
+  if (g_mem.armed && ptr) {
+    if (g_mem.live_allocs)
+      --g_mem.live_allocs;
+    g_mem.live_bytes =
+        (size >= g_mem.live_bytes) ? 0 : (g_mem.live_bytes - size);
+  }
+  free(ptr);
+}
+
+/** xorshift64 fill — cryptographically-ish random, incompressible. */
+FIO_SFUNC void fio___deflate_fill_random(uint8_t *buf, size_t len, uint64_t s) {
+  for (size_t i = 0; i < len; ++i) {
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    buf[i] = (uint8_t)s;
   }
 }
 
@@ -631,6 +721,566 @@ static void test_zlib_streaming_interop(void) {
 }
 #endif /* HAVE_ZLIB */
 
+/* *****************************************************************************
+T001 — Multi-block deflate streams must inflate fully
+
+RFC 7692 peers (e.g. zlib at memLevel 8) emit MULTIPLE deflate blocks per
+message. The streaming inflater must process the whole stream, not stop after
+the first block (regression: forced BFINAL on the first block truncated
+multi-block messages).
+***************************************************************************** */
+
+static void test_stream_multiblock_inflate(void) {
+  fprintf(stderr, "Testing multi-block stream inflation...\n");
+  /* A single message containing TWO deflate blocks. Stored blocks are
+   * byte-aligned, so the hand-crafted concatenation is bit-exact (verified
+   * against zlib as the reference inflater — see the T009 critic notes).
+   * The inflater must not stop after the first block. */
+  static const uint8_t two_block_final[] = {
+      0x00, 0x05, 0x00, 0xFA, 0xFF, 'H', 'e', 'l', 'l', 'o', /* blk1 BFINAL=0 */
+      0x01, 0x05, 0x00, 0xFA, 0xFF, 'W', 'o', 'r', 'l', 'd'  /* blk2 BFINAL=1 */
+  };
+  /* Same two blocks, both non-final, followed by a stripped RFC 7692
+   * sync-flush (the pending empty-stored-block header byte without its
+   * 00 00 FF FF trailer) — the shape the WS receive path produces. */
+  static const uint8_t two_block_sync[] = {
+      0x00, 0x05, 0x00, 0xFA, 0xFF, 'H', 'e', 'l', 'l', 'o', /* blk1 BFINAL=0 */
+      0x00, 0x05, 0x00, 0xFA, 0xFF, 'W', 'o', 'r', 'l', 'd', /* blk2 BFINAL=0 */
+      0x00 /* pending empty stored block header (trailer stripped) */};
+  uint8_t out[32];
+  fio_deflate_s *dec = fio_deflate_new(0, 0);
+  TEST_ASSERT(dec != NULL, "multiblock: decompressor allocation failed");
+  if (!dec)
+    return;
+
+  size_t r = fio_deflate_push(dec,
+                              out,
+                              sizeof(out),
+                              two_block_final,
+                              sizeof(two_block_final),
+                              1);
+  TEST_ASSERT(r == 10,
+              "multiblock (final): expected 10 inflated bytes, got %zu "
+              "(stream truncated after first block)",
+              r);
+  TEST_ASSERT(r == 10 && !FIO_MEMCMP(out, "HelloWorld", 10),
+              "multiblock (final): payload mismatch");
+
+  fio_deflate_destroy(dec);
+  FIO_MEMSET(out, 0, sizeof(out));
+  r = fio_deflate_push(dec,
+                       out,
+                       sizeof(out),
+                       two_block_sync,
+                       sizeof(two_block_sync),
+                       1);
+  TEST_ASSERT(r == 10,
+              "multiblock (sync-stripped): expected 10 inflated bytes, got "
+              "%zu (stream truncated after first block)",
+              r);
+  TEST_ASSERT(r == 10 && !FIO_MEMCMP(out, "HelloWorld", 10),
+              "multiblock (sync-stripped): payload mismatch");
+
+  fio_deflate_free(dec);
+}
+
+#ifdef HAVE_ZLIB
+static void test_zlib_multiblock_inflate(void) {
+  fprintf(stderr,
+          "Testing multi-block inflation of a real zlib peer stream...\n");
+  /* zlib (memLevel 8) starts a new deflate block every ~16K tokens, so a
+   * 200KB sync-flushed message is a multi-block stream — exactly what
+   * browser WebSocket peers send. */
+  const size_t msg_len = 200 * 1024;
+  uint8_t *msg = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, msg_len + 64, 0);
+  TEST_ASSERT(msg != NULL, "zlib multiblock: allocation failed");
+  if (!msg)
+    return;
+  for (size_t i = 0; i < msg_len; i += 32) {
+    int n = snprintf((char *)msg + i,
+                     msg_len - i,
+                     "{\"key%05u\":\"value%05u\"},",
+                     (unsigned)i,
+                     (unsigned)(i * 7));
+    if (n < 0)
+      break;
+  }
+
+  z_stream zs;
+  FIO_MEMSET(&zs, 0, sizeof(zs));
+  TEST_ASSERT(deflateInit2(&zs, 1, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) ==
+                  Z_OK,
+              "zlib multiblock: deflateInit2 failed");
+  size_t comp_cap = deflateBound(&zs, (uLong)msg_len) + 16;
+  uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, comp_cap, 0);
+  TEST_ASSERT(comp != NULL, "zlib multiblock: allocation failed");
+  if (!comp) {
+    deflateEnd(&zs);
+    FIO_MEM_FREE(msg, msg_len + 64);
+    return;
+  }
+  zs.next_in = msg;
+  zs.avail_in = (uInt)msg_len;
+  zs.next_out = comp;
+  zs.avail_out = (uInt)comp_cap;
+  int zr = deflate(&zs, Z_SYNC_FLUSH);
+  TEST_ASSERT(zr == Z_OK, "zlib multiblock: deflate failed (%d)", zr);
+  size_t comp_len = comp_cap - zs.avail_out;
+  deflateEnd(&zs);
+  TEST_ASSERT(comp_len > 4 && comp[comp_len - 4] == 0x00 &&
+                  comp[comp_len - 3] == 0x00 && comp[comp_len - 2] == 0xFF &&
+                  comp[comp_len - 1] == 0xFF,
+              "zlib multiblock: expected sync-flush trailer");
+
+  /* Inflate as ONE WebSocket message (trailer stripped). */
+  fio_deflate_s *dec = fio_deflate_new(0, 0);
+  TEST_ASSERT(dec != NULL, "zlib multiblock: decompressor allocation failed");
+  size_t out_cap = msg_len + 64 * 1024;
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, out_cap, 0);
+  size_t r = 0;
+  if (dec && out)
+    r = fio_deflate_push(dec, out, out_cap, comp, comp_len - 4, 1);
+  TEST_ASSERT(r == msg_len,
+              "zlib multiblock: expected %zu inflated bytes, got %zu "
+              "(multi-block stream truncated)",
+              msg_len,
+              r);
+  TEST_ASSERT(r == msg_len && !FIO_MEMCMP(out, msg, msg_len),
+              "zlib multiblock: payload mismatch");
+
+  fio_deflate_free(dec);
+  if (out)
+    FIO_MEM_FREE(out, out_cap);
+  FIO_MEM_FREE(comp, comp_cap);
+  FIO_MEM_FREE(msg, msg_len + 64);
+}
+#endif /* HAVE_ZLIB */
+
+/* *****************************************************************************
+T002 — compress_bound must be sufficient at every level
+
+For incompressible data the Huffman worst case (~9 bits/literal) exceeds the
+stored-block estimate used by fio_deflate_compress_bound. A buffer of exactly
+`bound` bytes MUST always yield a valid, exactly-roundtripping stream; an
+undersized buffer MUST return 0 (never a silently truncated stream).
+***************************************************************************** */
+
+static void test_compress_bound_property(void) {
+  fprintf(stderr,
+          "Testing compress_bound sufficiency property (all levels)...\n");
+  enum { DATA_LEN = 1048576 }; /* 1MB (pre-fix bound is undersized here) */
+  uint8_t *data = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, DATA_LEN, 0);
+  size_t bound = fio_deflate_compress_bound(DATA_LEN);
+  uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, DATA_LEN, 0);
+  TEST_ASSERT(data && comp && out, "bound property: allocation failed");
+  if (!data || !comp || !out)
+    goto done;
+  fio___deflate_fill_random(data, DATA_LEN, 0x123456789ABCDEF0ULL);
+
+  for (int level = 0; level <= 9; ++level) {
+    FIO_MEMSET(comp, 0xAA, bound);
+    size_t clen = fio_deflate_compress(comp, bound, data, DATA_LEN, level);
+    TEST_ASSERT(clen > 0 && clen <= bound,
+                "level %d: compress into bound-sized buffer returned %zu "
+                "(bound %zu)",
+                level,
+                clen,
+                bound);
+    if (!clen || clen > bound)
+      continue;
+    size_t dlen = fio_deflate_decompress(out, DATA_LEN, comp, clen);
+    TEST_ASSERT(dlen == DATA_LEN && !FIO_MEMCMP(out, data, DATA_LEN),
+                "level %d: bound-sized buffer must yield an exact roundtrip "
+                "(got %zu bytes — silent truncation/corruption)",
+                level,
+                dlen);
+  }
+
+  /* Small sizes (stored-block boundaries) must also roundtrip exactly. */
+  {
+    static const size_t lens[] = {1, 63, 4096, 65535, 65536, 131073};
+    static const int levels[] = {0, 1, 6, 9};
+    for (size_t li = 0; li < sizeof(lens) / sizeof(lens[0]); ++li) {
+      size_t n = lens[li];
+      size_t b = fio_deflate_compress_bound(n);
+      for (size_t vi = 0; vi < sizeof(levels) / sizeof(levels[0]); ++vi) {
+        int level = levels[vi];
+        size_t clen = fio_deflate_compress(comp, b < bound ? b : bound,
+                                           data, n, level);
+        TEST_ASSERT(clen > 0 && clen <= b,
+                    "len %zu level %d: compress returned %zu (bound %zu)",
+                    n,
+                    level,
+                    clen,
+                    b);
+        if (!clen || clen > b)
+          continue;
+        size_t dlen = fio_deflate_decompress(out, n, comp, clen);
+        TEST_ASSERT(dlen == n && !FIO_MEMCMP(out, data, n),
+                    "len %zu level %d: roundtrip mismatch (got %zu)",
+                    n,
+                    level,
+                    dlen);
+      }
+    }
+  }
+
+  /* Deliberately undersized output buffer: MUST return 0 (no silent
+   * truncation, no bitwriter UB). */
+  {
+    size_t clen =
+        fio_deflate_compress(comp, bound >> 2, data, DATA_LEN, 6);
+    TEST_ASSERT(clen == 0,
+                "undersized buffer: compress must return 0, got %zu "
+                "(silently truncated stream)",
+                clen);
+  }
+
+  /* Streaming push with undersized buffer: same contract. */
+  {
+    fio_deflate_s *enc = fio_deflate_new(6, 1);
+    TEST_ASSERT(enc != NULL, "bound property: compressor allocation failed");
+    if (enc) {
+      uint8_t small[1024];
+      size_t clen = fio_deflate_push(enc, small, sizeof(small),
+                                     data, DATA_LEN, 1);
+      TEST_ASSERT(clen == 0,
+                  "undersized stream buffer: push must return 0, got %zu "
+                  "(silently truncated stream)",
+                  clen);
+      fio_deflate_free(enc);
+    }
+  }
+
+done:
+  if (out)
+    FIO_MEM_FREE(out, DATA_LEN);
+  if (comp)
+    FIO_MEM_FREE(comp, bound);
+  if (data)
+    FIO_MEM_FREE(data, DATA_LEN);
+}
+
+/* *****************************************************************************
+T003 — Negative-gain inputs must fall back to stored blocks
+
+Incompressible data must expand by at most the stored-block overhead
+(+5 bytes per 64KB block), never by the Huffman worst case.
+***************************************************************************** */
+
+static void test_stored_fallback_cap(void) {
+  fprintf(stderr, "Testing stored-block fallback expansion cap...\n");
+  enum { DATA_LEN = 262144 }; /* 256KB */
+  const size_t stored_cap =
+      DATA_LEN + 5 * ((DATA_LEN + 65534) / 65535) + 64;
+  uint8_t *data = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, DATA_LEN, 0);
+  size_t bound = fio_deflate_compress_bound(DATA_LEN);
+  uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, DATA_LEN, 0);
+  TEST_ASSERT(data && comp && out, "stored cap: allocation failed");
+  if (!data || !comp || !out)
+    goto done;
+  fio___deflate_fill_random(data, DATA_LEN, 0x0F1E2D3C4B5A6978ULL);
+
+  for (int level = 1; level <= 9; ++level) {
+    size_t clen = fio_deflate_compress(comp, bound, data, DATA_LEN, level);
+    TEST_ASSERT(clen > 0 && clen <= stored_cap,
+                "level %d: incompressible output %zu exceeds stored cap %zu "
+                "(no stored-block fallback)",
+                level,
+                clen,
+                stored_cap);
+    if (!clen || clen > bound)
+      continue;
+    size_t dlen = fio_deflate_decompress(out, DATA_LEN, comp, clen);
+    TEST_ASSERT(dlen == DATA_LEN && !FIO_MEMCMP(out, data, DATA_LEN),
+                "level %d: stored-fallback roundtrip mismatch (got %zu)",
+                level,
+                dlen);
+  }
+
+done:
+  if (out)
+    FIO_MEM_FREE(out, DATA_LEN);
+  if (comp)
+    FIO_MEM_FREE(comp, bound);
+  if (data)
+    FIO_MEM_FREE(data, DATA_LEN);
+}
+
+/* *****************************************************************************
+T004 — Streaming compression must use bounded (chunk-sized) scratch
+
+Compressing a huge message must not allocate message-sized scratch on the
+heap: the compressor chunks its input and big scratch lives in static
+round-robin pools (invisible to this counter). A 1MB message compressed in a
+single flush push must not produce any single allocation above the chunk
+budget (or grow the live heap beyond it).
+***************************************************************************** */
+
+static void test_stream_bounded_scratch(void) {
+  fprintf(stderr,
+          "Testing streaming compression scratch bounds (1MB message)...\n");
+  enum { MSG_LEN = 1u << 20, CHUNK_BUDGET = 256 * 1024 };
+  uint8_t *msg = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, MSG_LEN, 0);
+  size_t out_cap = fio_deflate_compress_bound(MSG_LEN) + 64;
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, out_cap, 0);
+  uint8_t *back = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, MSG_LEN + 64, 0);
+  TEST_ASSERT(msg && out && back, "bounded scratch: allocation failed");
+  if (!msg || !out || !back)
+    goto done;
+  fio___deflate_make_text(msg, MSG_LEN);
+
+  /* Warm up lazy global state so only per-call scratch is measured. */
+  {
+    fio_deflate_s *warm = fio_deflate_new(1, 1);
+    size_t wlen =
+        fio_deflate_push(warm, out, out_cap, msg, 4096, 1);
+    (void)wlen;
+    fio_deflate_free(warm);
+  }
+
+  size_t clen = 0, dlen = 0;
+  fio_deflate_s *enc = NULL, *dec = NULL;
+  fio___test_mem_reset();
+  g_mem.armed = 1;
+  enc = fio_deflate_new(1, 1);
+  dec = fio_deflate_new(0, 0);
+  if (enc && dec) {
+    clen = fio_deflate_push(enc, out, out_cap, msg, MSG_LEN, 1);
+    if (clen > 4)
+      dlen = fio_deflate_push(dec, back, MSG_LEN + 64, out, clen - 4, 1);
+  }
+  g_mem.armed = 0;
+
+  TEST_ASSERT(enc && dec, "bounded scratch: context allocation failed");
+  TEST_ASSERT(clen > 4,
+              "bounded scratch: compress returned %zu", clen);
+  TEST_ASSERT(dlen == MSG_LEN && !FIO_MEMCMP(back, msg, MSG_LEN),
+              "bounded scratch: roundtrip mismatch (got %zu of %u)",
+              dlen,
+              (unsigned)MSG_LEN);
+  TEST_ASSERT(g_mem.max_single <= CHUNK_BUDGET,
+              "bounded scratch: single heap allocation of %zu bytes during "
+              "1MB flush push (budget %u; scratch must be chunk-sized static "
+              "pool slots, never message-sized)",
+              g_mem.max_single,
+              (unsigned)CHUNK_BUDGET);
+  TEST_ASSERT(g_mem.peak_bytes <= CHUNK_BUDGET,
+              "bounded scratch: live heap peaked at %zu bytes during 1MB "
+              "flush push (budget %u)",
+              g_mem.peak_bytes,
+              (unsigned)CHUNK_BUDGET);
+
+  fio_deflate_free(enc);
+  fio_deflate_free(dec);
+
+done:
+  if (back)
+    FIO_MEM_FREE(back, MSG_LEN + 64);
+  if (out)
+    FIO_MEM_FREE(out, out_cap);
+  if (msg)
+    FIO_MEM_FREE(msg, MSG_LEN);
+}
+
+/* *****************************************************************************
+T007 — Persistent per-connection compression state ≈ 0
+
+The no-takeover design forbids persistent compression state per WebSocket
+connection: no inline 32KB window in the context struct, no eager hash-table
+allocation at context creation. Budget: 128KB MAX per connection (both
+contexts), ≤64KB target, ~0 stretch goal.
+***************************************************************************** */
+
+static void test_ws_memory_budget(void) {
+  fprintf(stderr,
+          "Testing persistent per-connection compression state budget...\n");
+
+  /* (1) The context struct must not embed a 32KB sliding window. */
+  TEST_ASSERT(sizeof(fio_deflate_s) <= 1024,
+              "fio_deflate_s embeds %zu bytes — the 32KB window must move "
+              "out of the struct into per-call scratch",
+              sizeof(fio_deflate_s));
+
+  /* (2) Context creation must not eagerly allocate hash/window state. */
+  {
+    fio_deflate_s *warm = fio_deflate_new(1, 1);
+    fio_deflate_free(warm);
+  }
+  fio_deflate_s *enc = NULL, *dec = NULL;
+  fio___test_mem_reset();
+  g_mem.armed = 1;
+  enc = fio_deflate_new(1, 1); /* server writes */
+  dec = fio_deflate_new(0, 0); /* peer data */
+  g_mem.armed = 0;
+  TEST_ASSERT(enc != NULL && dec != NULL,
+              "memory budget: context allocation failed");
+
+  /* Stretch target: a small struct + bounded input buffer only. */
+  TEST_ASSERT(g_mem.peak_bytes <= 16 * 1024,
+              "persistent compression state is %zu bytes at context "
+              "creation (target ≈ 0; eager hash tables / windows must move "
+              "to per-call static pools)",
+              g_mem.peak_bytes);
+  /* Hard outer bound mandated for each WebSocket connection. */
+  TEST_ASSERT(g_mem.peak_bytes <= 128 * 1024,
+              "persistent compression state %zu bytes exceeds the 128KB "
+              "per-connection outer bound",
+              g_mem.peak_bytes);
+
+  fio_deflate_free(enc);
+  fio_deflate_free(dec);
+}
+
+/* *****************************************************************************
+Takeover mode (generic streaming): cross-message history
+***************************************************************************** */
+
+static void test_stream_takeover_mode(void) {
+  fprintf(stderr,
+          "Testing context-takeover streaming (cross-message history)...\n");
+  /* Three messages: m2 is nearly identical to m1 (cross-message match
+   * magnet), m3 is fresh content. */
+  enum { M1_LEN = 2048 };
+  uint8_t m1[M1_LEN], m2[M1_LEN + 32];
+  static const char m3[] = "completely different payload, no shared history";
+  fio___deflate_make_text(m1, sizeof(m1));
+  FIO_MEMCPY(m2, m1, M1_LEN);
+  FIO_MEMCPY(m2 + M1_LEN, "!!", 2);
+  size_t m2_len = M1_LEN + 2;
+
+  uint8_t comp[M1_LEN * 2 + 256];
+  uint8_t out[M1_LEN * 2 + 256];
+
+  fio_deflate_s *enc = fio_deflate_new_takeover(6, 1);
+  fio_deflate_s *dec = fio_deflate_new_takeover(0, 0);
+  TEST_ASSERT(enc != NULL && dec != NULL,
+              "takeover: context allocation failed");
+  if (!enc || !dec) {
+    fio_deflate_free(enc);
+    fio_deflate_free(dec);
+    return;
+  }
+
+  /* Roundtrip m1, then m2 (which should lean on m1's history). */
+  size_t c1 = fio_deflate_push(enc, comp, sizeof(comp), m1, M1_LEN, 1);
+  TEST_ASSERT(c1 > 4, "takeover: m1 compress returned %zu", c1);
+  size_t d1 = c1 > 4 ? fio_deflate_push(dec, out, sizeof(out), comp, c1 - 4, 1)
+                     : 0;
+  TEST_ASSERT(d1 == M1_LEN && !FIO_MEMCMP(out, m1, M1_LEN),
+              "takeover: m1 roundtrip mismatch (%zu of %u)",
+              d1,
+              (unsigned)M1_LEN);
+
+  size_t c2 = fio_deflate_push(enc, comp, sizeof(comp), m2, m2_len, 1);
+  TEST_ASSERT(c2 > 4, "takeover: m2 compress returned %zu", c2);
+  size_t d2 = c2 > 4 ? fio_deflate_push(dec, out, sizeof(out), comp, c2 - 4, 1)
+                     : 0;
+  TEST_ASSERT(d2 == m2_len && !FIO_MEMCMP(out, m2, m2_len),
+              "takeover: m2 roundtrip mismatch (%zu of %zu)",
+              d2,
+              m2_len);
+
+  /* The cross-message advantage must be decisive: m2 ≈ m1+2B, so with
+   * takeover m2 compresses to a small fraction of m1's stream. */
+  TEST_ASSERT(c2 < (c1 / 2),
+              "takeover: m2 (%zu) should be << m1 (%zu) via cross-message "
+              "back-references",
+              c2,
+              c1);
+
+  /* m3 (fresh content) still roundtrips on the same contexts. */
+  size_t c3 = fio_deflate_push(enc, comp, sizeof(comp), m3, sizeof(m3) - 1, 1);
+  size_t d3 = c3 > 4 ? fio_deflate_push(dec, out, sizeof(out), comp, c3 - 4, 1)
+                     : 0;
+  TEST_ASSERT(d3 == sizeof(m3) - 1 && !FIO_MEMCMP(out, m3, sizeof(m3) - 1),
+              "takeover: m3 roundtrip mismatch");
+
+  /* destroy resets cross-message history: m2 again now stands alone. */
+  fio_deflate_destroy(enc);
+  fio_deflate_destroy(dec);
+  size_t c4 = fio_deflate_push(enc, comp, sizeof(comp), m2, m2_len, 1);
+  size_t d4 = c4 > 4 ? fio_deflate_push(dec, out, sizeof(out), comp, c4 - 4, 1)
+                     : 0;
+  TEST_ASSERT(d4 == m2_len && !FIO_MEMCMP(out, m2, m2_len),
+              "takeover: post-destroy roundtrip mismatch");
+  TEST_ASSERT(c4 > c2,
+              "takeover: post-destroy m2 (%zu) must lose cross-message "
+              "history (was %zu)",
+              c4,
+              c2);
+
+  fio_deflate_free(enc);
+  fio_deflate_free(dec);
+}
+
+#ifdef HAVE_ZLIB
+static void test_zlib_takeover_interop(void) {
+  fprintf(stderr,
+          "Testing takeover interop against a persistent zlib inflater...\n");
+  /* A persistent raw-inflate z_stream (like a real RFC 7692 peer with
+   * context takeover) must resolve our cross-message back-references. */
+  enum { M1_LEN = 4096 };
+  uint8_t m1[M1_LEN], m2[M1_LEN + 8];
+  fio___deflate_make_text(m1, sizeof(m1));
+  FIO_MEMCPY(m2, m1, M1_LEN);
+  FIO_MEMCPY(m2 + M1_LEN, "the end", 7);
+  size_t m2_len = M1_LEN + 7;
+  uint8_t comp[M1_LEN * 2 + 256];
+  uint8_t out[M1_LEN * 2 + 256];
+
+  fio_deflate_s *enc = fio_deflate_new_takeover(6, 1);
+  TEST_ASSERT(enc != NULL, "takeover interop: compressor allocation failed");
+  if (!enc)
+    return;
+  size_t c1 = fio_deflate_push(enc, comp, sizeof(comp), m1, M1_LEN, 1);
+  size_t c2 = fio_deflate_push(enc, comp + c1, sizeof(comp) - c1, m2, m2_len, 1);
+  TEST_ASSERT(c1 > 4 && c2 > 4,
+              "takeover interop: compress failed (%zu, %zu)",
+              c1,
+              c2);
+
+  /* The receiver's view per RFC 7692: each message's wire payload gets the
+   * 4-byte sync trailer re-appended (our pushes already include it) and is
+   * inflated on ONE persistent inflater whose window carries m1's history. */
+  z_stream zs;
+  FIO_MEMSET(&zs, 0, sizeof(zs));
+  TEST_ASSERT(inflateInit2(&zs, -15) == Z_OK,
+              "takeover interop: inflateInit2 failed");
+
+  zs.next_in = comp;
+  zs.avail_in = (uInt)c1;
+  zs.next_out = out;
+  zs.avail_out = (uInt)sizeof(out);
+  int rc = inflate(&zs, Z_SYNC_FLUSH);
+  size_t total = (rc == Z_OK || rc == Z_STREAM_END) ? (size_t)zs.total_out : 0;
+  TEST_ASSERT(total == M1_LEN && !FIO_MEMCMP(out, m1, M1_LEN),
+              "takeover interop: zlib m1 inflated %zu, expected %u",
+              total,
+              (unsigned)M1_LEN);
+
+  zs.next_in = comp + c1;
+  zs.avail_in = (uInt)c2;
+  int rc2 = inflate(&zs, Z_SYNC_FLUSH);
+  size_t total2 =
+      (rc2 == Z_OK || rc2 == Z_STREAM_END) ? (size_t)zs.total_out : 0;
+  inflateEnd(&zs);
+  size_t expect = M1_LEN + m2_len;
+  TEST_ASSERT(rc == Z_OK && rc2 == Z_OK && total2 == expect,
+              "takeover interop: zlib m2 total %zu, expected %zu (rc %d/%d)",
+              total2,
+              expect,
+              rc,
+              rc2);
+  TEST_ASSERT(total2 == expect && !FIO_MEMCMP(out, m1, M1_LEN) &&
+                  !FIO_MEMCMP(out + M1_LEN, m2, m2_len),
+              "takeover interop: payload mismatch");
+  fio_deflate_free(enc);
+}
+#endif /* HAVE_ZLIB */
+
 int main(void) {
   fprintf(stderr, "=== DEFLATE/INFLATE Correctness Test Suite ===\n\n");
 
@@ -640,10 +1290,18 @@ int main(void) {
   test_gzip_roundtrip_and_trailer();
   test_streaming_roundtrip();
   test_streaming_buffered_pushes();
+  test_stream_multiblock_inflate();
+  test_compress_bound_property();
+  test_stored_fallback_cap();
+  test_stream_bounded_scratch();
+  test_ws_memory_budget();
+  test_stream_takeover_mode();
 #ifdef HAVE_ZLIB
   test_zlib_raw_interop();
   test_zlib_gzip_interop();
   test_zlib_streaming_interop();
+  test_zlib_multiblock_inflate();
+  test_zlib_takeover_interop();
 #else
   fprintf(stderr, "zlib unavailable: skipping independent interop checks.\n");
 #endif

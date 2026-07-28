@@ -490,6 +490,13 @@ FIO_SFUNC size_t fio_websocket_parse(fio_websocket_s *p,
         return fio___websocket_fail(p, ev, FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);
       if (FIO_UNLIKELY(is_control && !fin))
         return fio___websocket_fail(p, ev, FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);
+      /* RFC 6455 §5.2: RSV bits MUST be 0 on continuation and control frames
+       * (RFC 7692: control frames are never compressed). Only the OPENING
+       * data frame may carry RSV bits (surfaced to the dispatcher, which
+       * rejects them when no extension was negotiated). */
+      if (FIO_UNLIKELY(wire_rsv &&
+                       (is_control || opcode == FIO_WEBSOCKET_OP_CONT)))
+        return fio___websocket_fail(p, ev, FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);
       if (FIO_UNLIKELY(opcode == FIO_WEBSOCKET_OP_CONT &&
                        !FIO_WEBSOCKET_GET_MSG_OPCODE(p)))
         return fio___websocket_fail(p, ev, FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);

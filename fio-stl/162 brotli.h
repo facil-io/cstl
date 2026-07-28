@@ -1075,9 +1075,9 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
 
     /* Compressed meta-block: if this is the last one, we're done.
      * If not last, we cannot skip the compressed body without full decode,
-     * so return 0 to indicate we can't determine the size. */
+     * so return SIZE_MAX to indicate the size needs a decoding pass. */
     if (!is_last)
-      return 0;
+      return (size_t)-1;
   }
   return total;
 }
@@ -1089,7 +1089,10 @@ SFUNC size_t fio_brotli_decompress(void *out,
   if (!in || !in_len)
     return 0;
 
-  /* Size query mode: out==NULL or out_len==0 — scan headers for MLEN sum */
+  /* Size query mode: out==NULL or out_len==0 — scan headers for MLEN sum.
+   * Single-meta-block (and uncompressed) streams scan cheaply. Streams with
+   * multiple compressed meta-blocks cannot be measured without decoding, so
+   * fall back to decode-and-discard with a grown-on-demand scratch. */
   if (!out || !out_len) {
     fio___brotli_bits_s bits;
     fio___brotli_bits_init(&bits, in, in_len);
@@ -1107,7 +1110,30 @@ SFUNC size_t fio_brotli_decompress(void *out,
       }
     }
 
-    return fio___brotli_scan_remaining_mlen(&bits);
+    size_t scanned = fio___brotli_scan_remaining_mlen(&bits);
+    if (scanned != (size_t)-1)
+      return scanned;
+    /* Multi-meta-block compressed stream: decode with an expanding scratch
+     * buffer. The decoder's overflow return is an exact lower bound, but it
+     * may advance only one meta-block per call — always at least double the
+     * capacity so the retry loop converges in O(n) total work. */
+    size_t cap = in_len << 2;
+    if (cap < (1U << 20))
+      cap = (1U << 20);
+    for (;;) {
+      uint8_t *scratch = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cap, 0);
+      if (!scratch)
+        return 0;
+      size_t r = fio_brotli_decompress(scratch, cap, in, in_len);
+      FIO_MEM_FREE(scratch, cap);
+      if (r <= cap)
+        return r; /* exact size (or 0 on corrupt data) */
+      /* r > cap: exact lower bound from the decoder; grow geometrically */
+      if (r > (cap << 1))
+        cap = r;
+      else
+        cap <<= 1;
+    }
   }
 
   fio___brotli_bits_s bits;
@@ -1198,6 +1224,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
         size_t needed = pos + mlen;
         bits.src += mlen;
         size_t rest = fio___brotli_scan_remaining_mlen(&bits);
+        if (rest == (size_t)-1)
+          rest = 0; /* exact size needs decoding; return the lower bound */
         return needed + rest;
       }
       FIO_MEMCPY(dst + pos, bits.src, mlen);
@@ -1386,6 +1414,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
             FIO_MEM_FREE(dist_cmap, dist_map_size);
           if (!is_last) {
             size_t rest = fio___brotli_scan_remaining_mlen(&bits);
+            if (rest == (size_t)-1)
+              rest = 0; /* exact size needs decoding; lower bound */
             needed += rest;
           }
           return needed;
@@ -1526,6 +1556,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
               FIO_MEM_FREE(dist_cmap, dist_map_size);
             if (!is_last) {
               size_t rest = fio___brotli_scan_remaining_mlen(&bits);
+              if (rest == (size_t)-1)
+                rest = 0; /* exact size needs decoding; lower bound */
               needed += rest;
             }
             return needed;
@@ -1569,6 +1601,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
               FIO_MEM_FREE(dist_cmap, dist_map_size);
             if (!is_last) {
               size_t rest = fio___brotli_scan_remaining_mlen(&bits);
+              if (rest == (size_t)-1)
+                rest = 0; /* exact size needs decoding; lower bound */
               needed += rest;
             }
             return needed;
@@ -3197,12 +3231,20 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   if (quality > 6)
     quality = 6;
 
-  const uint8_t *src = (const uint8_t *)in;
-  uint32_t src_len = (uint32_t)(in_len > 0x01000000U ? 0x01000000U : in_len);
+  const uint8_t *in_bytes = (const uint8_t *)in;
 
-  /* Choose WBITS: smallest power-of-2 window >= input size */
+  /* Meta-block chunking (RFC 7932): inputs above the 16MB single meta-block
+   * MLEN limit are emitted as a sequence of meta-blocks, ISLAST set only on
+   * the final one. Scratch (tokens, hash tables) stays chunk-sized, never
+   * input-sized. Inputs at/below 16MB keep the historical single-meta-block
+   * layout; larger inputs use 4MB meta-blocks. */
+  const uint32_t chunk_cap =
+      (in_len > 0x01000000U) ? (1U << 22) : (uint32_t)in_len;
+
+  /* Choose WBITS: smallest power-of-2 window >= chunk span (distances never
+   * cross a meta-block boundary here). */
   uint32_t wbits = 10;
-  while (wbits < FIO___BROTLI_MAX_WBITS && (1U << wbits) < src_len + 16)
+  while (wbits < FIO___BROTLI_MAX_WBITS && (1U << wbits) < chunk_cap + 16)
     ++wbits;
 
   /* Allocate hash table (q1-4, or q5+ on small data) or hash chain (q5+).
@@ -3214,7 +3256,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   size_t hash_alloc = 0; /* total allocation size for hash_table + hash_gen */
   size_t hc_alloc = 0;
   fio___brotli_hc_s *hash_chain = NULL;
-  int q5_small_data = (quality >= 5 && src_len < 8192);
+  int q5_small_data = (quality >= 5 && chunk_cap < 8192);
   /* Note: q6 block splitting also disabled for small data (threshold 8192
    * in fio___brotli_split_literals), so q5_small_data covers both q5+q6. */
 
@@ -3266,7 +3308,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     int is_dict_ref;   /* 1 if static dictionary reference (no ring buf push) */
   } fio___brotli_token_s;
 
-  size_t max_tokens = (size_t)src_len + 1;
+  size_t max_tokens = (size_t)chunk_cap + 1;
   size_t token_alloc = sizeof(fio___brotli_token_s) * max_tokens;
   fio___brotli_token_s *tokens =
       (fio___brotli_token_s *)FIO_MEM_REALLOC(NULL, 0, token_alloc, 0);
@@ -3277,15 +3319,42 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
       FIO_MEM_FREE(hash_table, hash_alloc);
     return 0;
   }
-  uint32_t token_count = 0;
 
-  /* Distance ring buffer for encoding — must match decompressor init.
-   * dist_rb[(idx-1)&3] = most recent distance = 4 per RFC 7932 Section 4. */
+  /* Distance ring buffer — STREAM level (RFC 7932 Section 4): it persists
+   * across meta-blocks, so it lives outside the chunk loop. Each chunk
+   * snapshots the state at chunk start; the histogram and emission passes
+   * replay from that snapshot, and the emission pass leaves the end state
+   * for the next chunk. */
   int32_t dist_rb[4] = {16,
                         15,
                         11,
                         4}; /* [idx-4]=16,[idx-3]=15,[idx-2]=11,[idx-1]=4 */
   uint32_t dist_rb_idx = 0;
+
+  uint32_t window_size = (1U << wbits) - 16;
+
+  /* Bit writer: sequential across all meta-blocks. WBITS is written once,
+   * as the stream header, before the first meta-block. */
+  fio___brotli_bw_s w;
+  fio___brotli_bw_init(&w, out, out_len);
+  fio___brotli_write_wbits(&w, wbits);
+
+  for (size_t chunk_off = 0; chunk_off < in_len; chunk_off += chunk_cap) {
+    const uint8_t *src = in_bytes + chunk_off;
+    const uint32_t src_len =
+        (uint32_t)((in_len - chunk_off > chunk_cap) ? chunk_cap
+                                                     : (in_len - chunk_off));
+    const int is_last_chunk = (chunk_off + chunk_cap >= in_len);
+    /* Snapshot the stream ring buffer at chunk start (Pass 1 advances the
+     * live state; Passes 2+3 replay from this snapshot). */
+    int32_t chunk_dist_rb[4];
+    chunk_dist_rb[0] = dist_rb[0];
+    chunk_dist_rb[1] = dist_rb[1];
+    chunk_dist_rb[2] = dist_rb[2];
+    chunk_dist_rb[3] = dist_rb[3];
+    const uint32_t chunk_dist_rb_idx = dist_rb_idx;
+
+  uint32_t token_count = 0;
 
   /* === Pass 1: LZ77 match finding === */
   uint32_t pos = 0;
@@ -3296,7 +3365,11 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   int prev_was_match = 0;
   int32_t prev_match_score = 0;
   int prev_match_is_dict = 0;
-  uint32_t window_size = (1U << wbits) - 16;
+
+  if (quality >= 5 && !q5_small_data)
+    fio___brotli_hc_reset(hash_chain); /* per-chunk reset (generation bump) */
+  else
+    ++hash_generation; /* q1-4: invalidate previous chunk's hash entries */
 
   if (quality >= 5 && !q5_small_data) {
     /* ================================================================
@@ -3886,12 +3959,13 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   FIO_MEMSET(iac_freqs, 0, sizeof(iac_freqs));
   FIO_MEMSET(dist_freqs, 0, sizeof(dist_freqs));
 
-  /* Reset distance ring buffer for encoding pass (must match decompressor) */
-  dist_rb[0] = 16;
-  dist_rb[1] = 15;
-  dist_rb[2] = 11;
-  dist_rb[3] = 4;
-  dist_rb_idx = 0;
+  /* Replay the distance ring buffer from this chunk's start state (the
+   * histogram pass must match the emission pass and the decompressor). */
+  dist_rb[0] = chunk_dist_rb[0];
+  dist_rb[1] = chunk_dist_rb[1];
+  dist_rb[2] = chunk_dist_rb[2];
+  dist_rb[3] = chunk_dist_rb[3];
+  dist_rb_idx = chunk_dist_rb_idx;
 
   uint32_t lit_pos = 0; /* tracks position in source for literal counting */
 
@@ -4083,18 +4157,16 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     fio___brotli_build_codes(bc_codes, bc_lens, 26);
   }
 
-  /* === Pass 3: Write bitstream === */
-  fio___brotli_bw_s w;
-  fio___brotli_bw_init(&w, out, out_len);
-
-  /* Stream header: WBITS */
-  fio___brotli_write_wbits(&w, wbits);
+  /* === Pass 3: Write bitstream (meta-block header + tables + data) === */
 
   /* Meta-block header (RFC 7932 Section 9.2) */
-  fio___brotli_bw_put(&w, 1, 1);        /* ISLAST = 1 */
-  fio___brotli_bw_put(&w, 0, 1);        /* ISLASTEMPTY = 0 (not empty) */
+  fio___brotli_bw_put(&w, (uint64_t)is_last_chunk, 1); /* ISLAST */
+  if (is_last_chunk) {
+    fio___brotli_bw_put(&w, 0, 1); /* ISLASTEMPTY = 0 (not empty) */
+  }
   fio___brotli_write_mlen(&w, src_len); /* MLEN */
-  /* ISUNCOMPRESSED bit is only present when ISLAST=0, so omitted here. */
+  if (!is_last_chunk)
+    fio___brotli_bw_put(&w, 0, 1); /* ISUNCOMPRESSED = 0 (present iff !ISLAST) */
 
   /* Block type counts: NBLTYPESL, NBLTYPESI=1, NBLTYPESD=1 */
   if (nbltypesl > 1) {
@@ -4215,13 +4287,13 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   }
 
   /* === Write compressed data === */
-  /* Reset distance ring buffer for final encoding pass (must match
-   * decompressor) */
-  dist_rb[0] = 16;
-  dist_rb[1] = 15;
-  dist_rb[2] = 11;
-  dist_rb[3] = 4;
-  dist_rb_idx = 0;
+  /* Replay the distance ring buffer from this chunk's start state (the
+   * emission pass leaves the end state in dist_rb for the next chunk). */
+  dist_rb[0] = chunk_dist_rb[0];
+  dist_rb[1] = chunk_dist_rb[1];
+  dist_rb[2] = chunk_dist_rb[2];
+  dist_rb[3] = chunk_dist_rb[3];
+  dist_rb_idx = chunk_dist_rb_idx;
   lit_pos = 0;
 
   /* Block splitting state for literal emission */
@@ -4334,6 +4406,8 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     if (tokens[t].distance > 0)
       lit_pos += copy_len;
   }
+
+  } /* end meta-block chunk loop */
 #undef FIO___BROTLI_MAX_LIT_TREES
 
   /* Write 8 trailing zero bits so the decompressor's bit reader always has

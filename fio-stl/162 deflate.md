@@ -107,7 +107,33 @@ Return modes mirror `fio_deflate_decompress`: byte count, required size, or `0` 
 typedef struct fio_deflate_s fio_deflate_s;
 ```
 
-Opaque streaming compression/decompression state. It keeps window state across calls for context takeover.
+Opaque streaming compression/decompression state (~32 bytes without
+takeover). The streaming API supports two modes:
+
+- **No-takeover (default, `fio_deflate_new`):** each flushed message is an
+  independent deflate stream. Compressor scratch (hash + token buffers)
+  comes from a contention-safe static slot pool (`FIO_STATIC_SAFE_ALLOC_DEF`)
+  checked out per call, so persistent per-context state is ~0. This is the
+  only mode the WebSocket layer negotiates (both `*_no_context_takeover`
+  flags are always forced).
+- **Context takeover (`fio_deflate_new_takeover`):** matches may reference
+  the last 32KB of previous messages. The window (+ compressor hash) is
+  allocated inside the context's own block — the documented per-context cost
+  (~160KB compressor / ~32KB decompressor).
+
+**Thread safety:** contexts are stateful and unsynchronized — use one
+context per connection and serialize all `fio_deflate_push` calls per
+context (one writer at a time). The static scratch pool is internally
+synchronized; when every slot is momentarily busy, compression fails
+gracefully (returns `0`).
+
+**Overflow contract:** when the output buffer is too small, `fio_deflate_push`
+(compression) and `fio_deflate_compress` return `0` — output is NEVER
+silently truncated. Callers should treat `0` as "send uncompressed" or retry
+with a correctly-sized buffer (`fio_deflate_compress_bound`, which is now
+guaranteed sufficient at every level: the compressor falls back to stored
+blocks whenever Huffman coding would expand, capping negative-gain output at
+input + 5 bytes per 64KB block + a small header).
 
 ### `fio_deflate_new`
 
@@ -115,7 +141,15 @@ Opaque streaming compression/decompression state. It keeps window state across c
 SFUNC fio_deflate_s *fio_deflate_new(int level, int is_compress);
 ```
 
-Creates a streaming state. `is_compress != 0` creates a compressor; `0` creates a decompressor. Returns `NULL` on allocation failure.
+Creates a no-takeover streaming state. `is_compress != 0` creates a compressor; `0` creates a decompressor. Returns `NULL` on allocation failure. `level` is recorded for API compatibility; the streaming compressor always uses the fast greedy matcher (the one-shot `fio_deflate_compress` keeps levels 0-9).
+
+### `fio_deflate_new_takeover`
+
+```c
+SFUNC fio_deflate_s *fio_deflate_new_takeover(int level, int is_compress);
+```
+
+Creates a streaming state with context takeover (cross-message history over the last 32KB). Allocates the window (+ compressor hash) inside the context's own block (~160KB compressor / ~32KB decompressor). `fio_deflate_destroy` resets the history (keeping the allocation).
 
 ### `fio_deflate_free`
 
@@ -131,7 +165,15 @@ Frees a streaming state.
 SFUNC void fio_deflate_destroy(fio_deflate_s *s);
 ```
 
-Resets a streaming context while keeping allocated memory.
+Resets a streaming context. The input buffer is freed when it grew past 64KB, keeping persistent per-connection state bounded (no-takeover design).
+
+### `fio_deflate_window_bits_set`
+
+```c
+SFUNC void fio_deflate_window_bits_set(fio_deflate_s *s, int bits);
+```
+
+Clamps compressor match distances to 2^`bits` (8..15, default 15). Used to honor `server_max_window_bits` from RFC 7692 negotiation. Decompression ignores it (any in-message distance up to 32KB is accepted).
 
 ### `fio_deflate_push`
 
@@ -144,12 +186,14 @@ SFUNC size_t fio_deflate_push(fio_deflate_s *s,
                               int flush);
 ```
 
-Compresses or decompresses the next input chunk.
+Compresses or decompresses the next input chunk. Compression chunks input
+into 32KB blocks (bounded scratch, no message-sized copies) and emits the
+sync-flush trailer only on the message-final chunk.
 
-- `flush == 0`: normal streaming.
+- `flush == 0`: normal streaming (buffered up to 32KB, then auto-compressed).
 - `flush == 1`: sync flush, useful at WebSocket frame boundaries.
 
-For decompression, a return value greater than `out_len` means “retry with this much output space”; buffered input is preserved for that retry.
+For decompression, a return value greater than `out_len` means “retry with this much output space”; buffered input is preserved for that retry. Multi-block peer streams (e.g. zlib at any memLevel) inflate fully; the 9 completion bytes are appended internally.
 
 ## Example: Raw Roundtrip
 

@@ -75,3 +75,38 @@ The returned string is valid only until the allocator wraps around. A similar pa
 ## Thread Safety
 
 The allocator is only "good enough" thread-safe. The atomic position counter protects the round-robin index, but the safety window is bounded by the allocator's `max_concurrent_allocations` argument. Keep slots short-lived and do not hold a returned pointer across too many calls or threads.
+
+## `FIO_STATIC_SAFE_ALLOC_DEF`
+
+```c
+#define FIO_STATIC_SAFE_ALLOC_DEF(name, type_T, units_per_allocation, max_concurrent_allocations)
+```
+
+A contention-safe variant of `FIO_STATIC_ALLOC_DEF` for short-lived scratch slots with an explicit checkout lifecycle. Where the round-robin variant silently reuses a slot once more than `max_concurrent_allocations` are outstanding (corrupting the in-flight user), this allocator returns `NULL` when every slot is busy, letting callers fall back gracefully.
+
+Each slot carries a small metadata header holding its busy byte. The header is `min(sizeof(type_T), 16)` bytes: one element for small types (data naturally aligned for `type_T`), capped at 16 bytes for larger types (data 16-byte aligned). `type_T` alignment must be ≤ 16 (enforced at compile time).
+
+### Generated API
+
+- **`type_T *name##_try(void)`** — checks out a slot and returns a pointer to its data block (right after the metadata header), or `NULL` when all slots are busy.
+- **`void name##_free(type_T *ptr)`** — releases a slot returned by `name##_try` (clears the busy byte).
+- **`size_t name##_size(void)`** — logical arena capacity in `type_T` units.
+
+### Example
+
+```c
+FIO_STATIC_SAFE_ALLOC_DEF(my_scratch, uint8_t, 4096, 16);
+
+size_t work(const void *in, size_t len) {
+  uint8_t *slot = my_scratch_try();
+  if (!slot)
+    return 0; /* contention: caller falls back (e.g. uncompressed) */
+  size_t r = do_work(slot, in, len);
+  my_scratch_free(slot);
+  return r;
+}
+```
+
+### Thread Safety
+
+Slot checkout uses an atomic busy byte per slot with an atomic round-robin start hint; a checked-out slot is exclusively owned until `name##_free`. The busy-byte protocol is exact (no safety window) — the only failure mode is `NULL` under contention, which callers must handle.

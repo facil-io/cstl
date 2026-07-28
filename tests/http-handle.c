@@ -1107,6 +1107,180 @@ static void test_body_parse_null_handle(void) {
 }
 
 /* ===========================================================================
+   T008 — Accept-Encoding q-values and dynamic compression guards
+   ===========================================================================
+ */
+
+static void test_accept_encoding_qvalues(void) {
+  fprintf(stderr, "  * accept-encoding q-value handling\n");
+  /* q=0 (in any zero-padded form) FORBIDS the encoding (RFC 9110 §12.5.3). */
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0", 8),
+                                   "gzip",
+                                   4),
+      "gzip;q=0 must not match gzip");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.0", 10),
+                                   "gzip",
+                                   4),
+      "gzip;q=0.0 must not match gzip");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.00", 11),
+                                   "gzip",
+                                   4),
+      "gzip;q=0.00 must not match gzip");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.000", 12),
+                                   "gzip",
+                                   4),
+      "gzip;q=0.000 must not match gzip");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip ; q=0", 10),
+                                   "gzip",
+                                   4),
+      "gzip ; q=0 (whitespace) must not match gzip");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;Q=0", 8),
+                                   "gzip",
+                                   4),
+      "gzip;Q=0 (uppercase) must not match gzip");
+  /* any q > 0 still matches */
+  FIO_ASSERT(
+      fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.001", 12),
+                                  "gzip",
+                                  4),
+      "gzip;q=0.001 should match gzip");
+  FIO_ASSERT(fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"gzip;q=0.5", 10),
+                 "gzip",
+                 4),
+             "gzip;q=0.5 should match gzip");
+  FIO_ASSERT(fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"gzip;q=1", 8),
+                 "gzip",
+                 4),
+             "gzip;q=1 should match gzip");
+  FIO_ASSERT(fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"gzip", 4),
+                 "gzip",
+                 4),
+             "bare gzip should match gzip");
+  /* multi-value headers: q=0 forbids only its own token */
+  FIO_ASSERT(fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
+                 "br",
+                 2),
+             "br should match in 'br, gzip;q=0'");
+  FIO_ASSERT(!fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
+                 "gzip",
+                 4),
+             "gzip must not match in 'br, gzip;q=0'");
+  /* unrelated parameters after a valid token are not q-values */
+  FIO_ASSERT(fio___http_header_has_token(
+                 FIO_STR_INFO2((char *)"gzip;foo=bar", 12),
+                 "gzip",
+                 4),
+             "gzip;foo=bar should match gzip (not a q-value)");
+}
+
+/** Writes `len` text bytes with finish=1 on a COMPRESS_DYNAMIC handle whose
+ * request carries `accept_encoding`; returns the response content-encoding
+ * header state for assertions. */
+static fio_str_info_s test_dynamic_write(fio_http_s *h,
+                                         const char *accept_encoding,
+                                         const void *body,
+                                         size_t len) {
+  fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+  fio_http_method_set(h, FIO_STR_INFO1((char *)"GET"));
+  fio_http_status_set(h, 200);
+  if (accept_encoding)
+    fio_http_request_header_set(
+        h,
+        FIO_STR_INFO2((char *)"accept-encoding", 15),
+        FIO_STR_INFO1((char *)accept_encoding));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"content-type", 12),
+                               FIO_STR_INFO1((char *)"text/plain"));
+  fio_http_write(h, .buf = (void *)body, .len = len, .finish = 1, .copy = 1);
+  return fio_http_response_header(h,
+                                  FIO_STR_INFO2((char *)"content-encoding",
+                                                16),
+                                  0);
+}
+
+static void test_dynamic_compress_guards(void) {
+  fprintf(stderr, "  * dynamic compression guards\n");
+  enum { BODY_LEN = 2048 };
+  char body[BODY_LEN];
+  for (size_t i = 0; i < BODY_LEN; ++i)
+    body[i] = (char)('a' + (i & 15)); /* compressible text */
+
+  /* sanity: plain gzip offer compresses */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_str_info_s ce = test_dynamic_write(h, "gzip", body, BODY_LEN);
+    FIO_ASSERT(ce.len == 4 && !memcmp(ce.buf, "gzip", 4),
+               "dynamic gzip offer: expected content-encoding gzip");
+    fio_http_free(h);
+  }
+  /* q=0 forbids gzip → identity */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_str_info_s ce = test_dynamic_write(h, "gzip;q=0", body, BODY_LEN);
+    FIO_ASSERT(!ce.buf,
+               "dynamic gzip;q=0: response must not be compressed "
+               "(content-encoding present: %.*s)",
+               (int)ce.len,
+               ce.buf ? ce.buf : "");
+    fio_str_info_s vary = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"vary", 4),
+        0);
+    FIO_ASSERT(vary.len,
+               "dynamic gzip;q=0: Vary: accept-encoding expected when "
+               "compression was evaluated but skipped");
+    fio_http_free(h);
+  }
+  /* all acceptable encodings forbidden → identity */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_str_info_s ce =
+        test_dynamic_write(h, "br;q=0, gzip;q=0", body, BODY_LEN);
+    FIO_ASSERT(!ce.buf,
+               "dynamic br;q=0, gzip;q=0: response must not be compressed");
+    fio_http_free(h);
+  }
+  /* app already set content-encoding → dynamic path must not double-compress */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-encoding",
+                                               16),
+                                 FIO_STR_INFO1((char *)"identity"));
+    fio_str_info_s ce = test_dynamic_write(h, "gzip, br", body, BODY_LEN);
+    FIO_ASSERT(ce.len == 8 && !memcmp(ce.buf, "identity", 8),
+               "dynamic preset content-encoding: must stay 'identity', got "
+               "'%.*s' (double compression)",
+               (int)ce.len,
+               ce.buf ? ce.buf : "");
+    fio_str_info_s cl = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-length", 14),
+        0);
+    char expect[16];
+    int expect_len = snprintf(expect, sizeof(expect), "%u", (unsigned)BODY_LEN);
+    FIO_ASSERT(cl.len == (size_t)expect_len &&
+                   !memcmp(cl.buf, expect, (size_t)expect_len),
+               "dynamic preset content-encoding: body must pass through "
+               "unmodified (content-length %.*s)",
+               (int)cl.len,
+               cl.buf ? cl.buf : "");
+    fio_http_free(h);
+  }
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -1143,6 +1317,10 @@ int main(void) {
   test_body_parse_unknown_content_type();
   test_body_parse_null_callbacks();
   test_body_parse_null_handle();
+
+  fprintf(stderr, "\nTesting accept-encoding / dynamic compression:\n");
+  test_accept_encoding_qvalues();
+  test_dynamic_compress_guards();
 
   fprintf(stderr, "\nAll HTTP handle tests passed!\n");
   return 0;

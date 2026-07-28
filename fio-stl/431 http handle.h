@@ -2661,18 +2661,22 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
   if (args->finish &&
       FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC)) &&
       args->len > 1024 && args->buf) {
+    /* Never double-compress: the application already encoded this response. */
+    if (fio___http_hmap_get_ptr(hdrs,
+                                FIO_STR_INFO2((char *)"content-encoding", 16)))
+      goto compression_done;
     fio_str_info_s ac =
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 0);
     if (!ac.len)
-      goto no_compress;
+      goto compression_done;
     /* only compress text-like content types */
     if (!fio___http_mime_is_compressible(
             fio_http_response_header(h,
                                      FIO_STR_INFO2((char *)"content-type", 12),
                                      0)))
-      goto no_compress;
+      goto compression_done;
     /* try encodings in preference order (brotli > gzip) */
     struct {
       fio_str_info_s token;
@@ -2739,7 +2743,17 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
           h,
           FIO_STR_INFO2((char *)"vary", 4),
           FIO_STR_INFO2((char *)"accept-encoding", 15));
+    } else if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0)
+                   .buf) {
+      /* Encodings were evaluated but identity won (e.g. `q=0`, no common
+       * token, or no gain): caches must still key on Accept-Encoding. */
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"vary", 4),
+          FIO_STR_INFO2((char *)"accept-encoding", 15));
     }
+  compression_done:; /* skipped paths rejoin here (Content-Length must
+                         still be validated for finished responses) */
   }
 #endif
   /* test if streaming / single body response */
@@ -2757,7 +2771,6 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
-no_compress:
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
@@ -4358,12 +4371,32 @@ fio_http_body_parse(fio_http_s *h,
 Static file helper
 ***************************************************************************** */
 
+/** Returns non-zero if the qvalue at `p` (pointing just past "q=") is
+ * exactly zero in any zero-padded form (0, 0.0, 0.00, 0.000). */
+FIO_SFUNC int fio___http_qvalue_is_zero(const char *p, const char *end) {
+  if (p >= end || *p != '0')
+    return 0;
+  ++p;
+  if (p < end && *p == '.') {
+    ++p;
+    while (p < end && *p >= '0' && *p <= '9') {
+      if (*p != '0')
+        return 0;
+      ++p;
+    }
+  }
+  return 1;
+}
+
 /**
  * Returns non-zero if `header` (a comma-separated header value) contains
  * `token` as a complete, standalone value.
  *
  * Handles formats like: "gzip, deflate, br" or "br;q=1.0, gzip;q=0.8"
- * Matching is case-insensitive and ignores quality parameters (;q=...).
+ * Matching is case-insensitive. Quality parameters are honored per RFC 9110
+ * §12.5.3: `q=0` (in any zero-padded form) FORBIDS the value (no match).
+ * All current callers match against Accept-Encoding; other `;params` are
+ * ignored rather than treated as q-values.
  */
 FIO_SFUNC int fio___http_header_has_token(fio_str_info_s header,
                                           const char *token,
@@ -4391,8 +4424,24 @@ FIO_SFUNC int fio___http_header_has_token(fio_str_info_s header,
         if ((tok_start[j] | 32) != (token[j] | 32))
           break;
       }
-      if (j == token_len)
-        return 1;
+      if (j == token_len) {
+        /* token matched — honor `q=0` in its parameters (RFC 9110) */
+        int forbidden = 0;
+        const char *pp = pos; /* at ';' or ',' or end */
+        while (pp < end && *pp != ',') {
+          while (pp < end && (*pp == ';' || *pp == ' ' || *pp == '\t'))
+            ++pp;
+          if (pp + 1 < end && (pp[0] | 32) == 'q' && pp[1] == '=') {
+            if (fio___http_qvalue_is_zero(pp + 2, end))
+              forbidden = 1;
+            break;
+          }
+          while (pp < end && *pp != ';' && *pp != ',')
+            ++pp;
+        }
+        if (!forbidden)
+          return 1;
+      }
     }
     /* skip past comma (and any ;q=... parameters) */
     while (pos < end && *pos != ',')
@@ -4478,6 +4527,13 @@ FIO_SFUNC int fio___http_mime_is_compressible(fio_str_info_s mime) {
 /**
  * Attempts to send a static file from the `root` folder. On success the
  * response is complete and 0 is returned. Otherwise returns -1.
+ *
+ * With `FIO_HTTP_CFLAG_COMPRESS_STATIC`, missing compressed variants
+ * (`.br`/`.gz`) are created on demand and written into the `root` folder —
+ * the folder MUST be writable and quota'd (on-demand writes are attacker-
+ * triggerable); pre-generating variants at deploy time is recommended.
+ * Ranged responses are always served identity (no variant selection), and
+ * `Vary: accept-encoding` is set whenever variants may exist.
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         fio_str_info_s rt,
@@ -4573,7 +4629,9 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
         fio_http_request_header(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 0);
-    if (!ac.len)
+    /* Ranges over encoded bytes are broken in practice: ranged responses
+     * are always served identity (no compressed variant selection). */
+    if (fio_http_request_header(h, FIO_STR_INFO2((char *)"range", 5), 0).len)
       goto accept_encoding_header_test_done;
     /* stat the original file for staleness comparison and creation */
     struct stat orig_st;
@@ -4585,6 +4643,17 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
         fio___http_mime_is_compressible(mime_type) &&
         (size_t)orig_st.st_size >= 1024 &&
         (size_t)orig_st.st_size <= FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT;
+    if (can_create &&
+        !fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0).buf)
+      /* Compressed variants exist (or may be created) for this resource:
+       * even the UNCOMPRESSED response must carry Vary so caches key on
+       * Accept-Encoding. */
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO2((char *)"vary", 4),
+                                   FIO_STR_INFO2((char *)"accept-encoding",
+                                                 15));
+    if (!ac.len)
+      goto accept_encoding_header_test_done;
     struct {
       fio_buf_info_s value;
       fio_buf_info_s ext;

@@ -1693,6 +1693,57 @@ FIO_SFUNC void fio___test_core_logging(void) {
 Main Test Entry Point
 ***************************************************************************** */
 
+FIO_STATIC_SAFE_ALLOC_DEF(fio___test_sa, uint64_t, 8, 4)
+
+typedef struct FIO_ALIGN(16) {
+  uint64_t v[2];
+} fio___test_sa16_s;
+FIO_STATIC_SAFE_ALLOC_DEF(fio___test_sa16, fio___test_sa16_s, 2, 2)
+
+FIO_SFUNC void fio___test_core_static_safe_alloc(void) {
+  fprintf(stderr, "* Testing FIO_STATIC_SAFE_ALLOC_DEF\n");
+  uint64_t *p[4] = {0};
+  /* exhaust all slots */
+  for (int i = 0; i < 4; ++i) {
+    p[i] = fio___test_sa_try();
+    FIO_ASSERT(p[i] != NULL, "slot %d checkout should succeed", i);
+    FIO_ASSERT(((uintptr_t)p[i] % _Alignof(uint64_t)) == 0,
+               "slot %d data must be aligned for its element type",
+               i);
+    for (int j = 0; j < i; ++j)
+      FIO_ASSERT(p[j] != p[i], "slots %d and %d alias", j, i);
+    p[i][0] = (uint64_t)(0xABCD + i);
+  }
+  FIO_ASSERT(fio___test_sa_try() == NULL,
+             "checkout past exhaustion must return NULL");
+  /* free restores availability (and data survives until reuse) */
+  fio___test_sa_free(p[1]);
+  uint64_t *q = fio___test_sa_try();
+  FIO_ASSERT(q != NULL, "checkout after free should succeed");
+  FIO_ASSERT(fio___test_sa_size() == 32, "logical arena capacity mismatch");
+  /* release everything; a full second cycle must work */
+  fio___test_sa_free(p[0]);
+  fio___test_sa_free(p[2]);
+  fio___test_sa_free(p[3]);
+  fio___test_sa_free(q);
+  for (int i = 0; i < 4; ++i) {
+    uint64_t *r = fio___test_sa_try();
+    FIO_ASSERT(r != NULL, "second cycle slot %d should succeed", i);
+    fio___test_sa_free(r);
+  }
+  /* 16-byte (or larger) element types keep 16-byte header/alignment */
+  fio___test_sa16_s *a = fio___test_sa16_try();
+  fio___test_sa16_s *b = fio___test_sa16_try();
+  FIO_ASSERT(a != NULL && b != NULL && a != b,
+             "16-byte slots should check out distinctly");
+  FIO_ASSERT((((uintptr_t)a & 15) == 0) && (((uintptr_t)b & 15) == 0),
+             "16-byte slot data must be 16-byte aligned");
+  FIO_ASSERT(fio___test_sa16_try() == NULL,
+             "16-byte slot exhaustion must return NULL");
+  fio___test_sa16_free(a);
+  fio___test_sa16_free(b);
+}
+
 int main(void) {
   /* Run merged core-adjacent tests first. */
   fio___test_core_type_sizes();
@@ -1728,5 +1779,6 @@ int main(void) {
   fio___test_core_rotation_per_lane();
   fio___test_core_rotation_all_sizes();
   fio___test_core_rotation_macros();
+  fio___test_core_static_safe_alloc();
   return 0;
 }

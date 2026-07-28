@@ -910,6 +910,62 @@ static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
 HTTP Request handling / handling
 ***************************************************************************** */
 
+#define FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM 1
+/**
+ * Builds the Sec-WebSocket-Extensions response for a permessage-deflate
+ * offer. ALWAYS forces `server_no_context_takeover` +
+ * `client_no_context_takeover` (RFC 7692 §7.1.1 allows either endpoint to
+ * request them unilaterally; persistent per-connection compression state is
+ * ~0 by design). Honors `server_max_window_bits` when offered (8..15,
+ * recorded into `*server_bits` so the compressor can clamp its distances);
+ * NEVER emits window-bits parameters (`client_max_window_bits` is pointless
+ * under no-takeover, and `server_max_window_bits` may only be answered <=
+ * the offer — our inflater accepts any in-message distance <= 32KB anyway).
+ * Returns the response length, or 0 when `out_cap` is too small.
+ */
+FIO_SFUNC size_t fio___http_ws_deflate_negotiate(fio_str_info_s offer,
+                                                 char *out,
+                                                 size_t out_cap,
+                                                 int *server_bits) {
+  static const char resp[] = "permessage-deflate; server_no_context_takeover"
+                             "; client_no_context_takeover";
+  int bits = 15;
+  const char *pos = offer.buf;
+  const char *end = offer.buf + offer.len;
+  while (pos < end) {
+    while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == ';'))
+      ++pos;
+    const char *name = pos;
+    while (pos < end && *pos != ';' && *pos != '=')
+      ++pos;
+    const char *name_end = pos;
+    while (name_end > name && (name_end[-1] == ' ' || name_end[-1] == '\t'))
+      --name_end;
+    if ((size_t)(name_end - name) == 22 &&
+        !FIO_MEMCMP(name, "server_max_window_bits", 22) && pos < end &&
+        *pos == '=') {
+      ++pos;
+      int v = 0;
+      int digits = 0;
+      while (pos < end && *pos >= '0' && *pos <= '9') {
+        v = v * 10 + (*pos - '0');
+        ++pos;
+        ++digits;
+      }
+      if (digits && v >= 8 && v <= 15)
+        bits = v; /* honored: compressor clamps distances <= 2^bits */
+    }
+    while (pos < end && *pos != ';')
+      ++pos;
+  }
+  if (out_cap < sizeof(resp) - 1)
+    return 0;
+  FIO_MEMCPY(out, resp, sizeof(resp) - 1);
+  if (server_bits)
+    *server_bits = bits;
+  return sizeof(resp) - 1;
+}
+
 FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   union {
     void (*fn)(fio_http_s *);
@@ -936,7 +992,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
     goto refuse_upgrade;
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
-  /* TODO: enable the RFC 7692: permessage-deflate extension negotiation */
+  /* RFC 7692: permessage-deflate extension negotiation (no-takeover only) */
   if (FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_WS))) {
     FIO_HTTP_HEADER_EACH_VALUE(
         h,
@@ -949,57 +1005,34 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       if (!FIO_STR_INFO_IS_EQ(val,
                               FIO_STR_INFO2((char *)"permessage-deflate", 18)))
         continue;
-      /* Parse extension parameters */
-      int server_no_ctx = 0, client_no_ctx = 0;
-      int client_bits_present = 0;
-      FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(val, p) {
-        FIO_LOG_DDEBUG2("\t %.*s: %.*s",
-                        (int)p.name.len,
-                        p.name.buf,
-                        (int)p.value.len,
-                        p.value.buf);
-        if (FIO_STR_INFO_IS_EQ(
-                p.name,
-                FIO_STR_INFO2((char *)"server_no_context_takeover", 26)))
-          server_no_ctx = 1;
-        else if (FIO_STR_INFO_IS_EQ(
-                     p.name,
-                     FIO_STR_INFO2((char *)"client_no_context_takeover", 26)))
-          client_no_ctx = 1;
-        else if (FIO_STR_INFO_IS_EQ(
-                     p.name,
-                     FIO_STR_INFO2((char *)"client_max_window_bits", 22)))
-          client_bits_present = 1;
-        /* server_max_window_bits: we always use 15, accept any valid value */
-      }
-      /* Build response extension header */
-      {
-        FIO_STR_INFO_TMP_VAR(ext_resp, 128);
-        fio_string_write(&ext_resp, NULL, "permessage-deflate", 18);
-        if (server_no_ctx)
-          fio_string_write(&ext_resp, NULL, "; server_no_context_takeover", 28);
-        if (client_no_ctx)
-          fio_string_write(&ext_resp, NULL, "; client_no_context_takeover", 28);
-        if (client_bits_present)
-          fio_string_write(&ext_resp, NULL, "; client_max_window_bits=15", 26);
-        fio_http_response_header_set(
-            h,
-            FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
-            ext_resp);
-      }
+      /* Negotiate: ALWAYS force both no_context_takeover flags (persistent
+       * compression state stays ~0 per connection); honor
+       * server_max_window_bits when offered. */
+      char ext_resp[80];
+      int server_bits = 15;
+      size_t ext_len = fio___http_ws_deflate_negotiate(val,
+                                                       ext_resp,
+                                                       sizeof(ext_resp),
+                                                       &server_bits);
+      if (!ext_len)
+        continue;
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
+          FIO_STR_INFO2(ext_resp, ext_len));
       /* Create deflate streaming contexts (stored at connection level,
        * outside the state union, so they survive the HTTP→WS transition).
        * Compressor = our writes (server side), Decompressor = client's data.
-       * For no_context_takeover: we still create contexts but will free and
-       * recreate them per-message in the compress/decompress callbacks. */
+       * Both are always reset per message (no-takeover), which keeps
+       * persistent per-connection state ≈ 0. */
       c->deflate_wr = fio_deflate_new(1, 1);
       c->deflate_rd = fio_deflate_new(1, 0);
-      c->deflate_wr_reset = (uint8_t)server_no_ctx;
-      c->deflate_rd_reset = (uint8_t)client_no_ctx;
+      fio_deflate_window_bits_set(c->deflate_wr, server_bits);
+      c->deflate_wr_reset = 1; /* server_no_context_takeover (always) */
+      c->deflate_rd_reset = 1; /* client_no_context_takeover (always) */
       FIO_LOG_DDEBUG2("WebSocket permessage-deflate negotiated "
-                      "(server_no_ctx=%d, client_no_ctx=%d)",
-                      server_no_ctx,
-                      client_no_ctx);
+                      "(no-context-takeover, server_max_window_bits=%d)",
+                      server_bits);
       break;
     }
   }
@@ -2237,7 +2270,7 @@ FIO_SFUNC uint16_t fio___websocket_deflate_transform(fio___http_connection_s *c,
       fio_deflate_destroy(c->deflate_rd);
     return 0;
   }
-  const size_t min_cap = 64U * 1024U;
+  const size_t min_cap = 4U * 1024U;
   const size_t ws_max =
       c->settings->ws_max_msg_size ? c->settings->ws_max_msg_size : (size_t)-1;
   size_t clamped = (msg->len < ws_max) ? msg->len : ws_max;
@@ -2715,13 +2748,21 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
             tail[3] == 0xFF) {
           comp_len -= 4;
         }
-        send_buf = comp_buf;
-        send_len = comp_len;
-        /* RSV1 (byte-0 bit 6 = 0x40) marks compressed; the write API
-         * takes the 3-bit rsv value shifted into 4..6, so RSV1 = 0x4
-         * (NOT 0x1 — that would set RSV3 and every RFC-compliant peer
-         * closes with protocol error 1002 on an unnegotiated RSV). */
-        rsv = FIO_WEBSOCKET_RSV1;
+        if (comp_len >= len) {
+          /* Negative gain: compression expanded the payload — send the
+           * original uncompressed (RSV1 stays clear) instead. */
+          FIO_MEM_FREE(comp_buf, comp_alloc);
+          comp_buf = NULL;
+          comp_alloc = 0;
+        } else {
+          send_buf = comp_buf;
+          send_len = comp_len;
+          /* RSV1 (byte-0 bit 6 = 0x40) marks compressed; the write API
+           * takes the 3-bit rsv value shifted into 4..6, so RSV1 = 0x4
+           * (NOT 0x1 — that would set RSV3 and every RFC-compliant peer
+           * closes with protocol error 1002 on an unnegotiated RSV). */
+          rsv = FIO_WEBSOCKET_RSV1;
+        }
       } else {
         /* Compression failed — fall back to uncompressed. */
         FIO_MEM_FREE(comp_buf, comp_alloc);

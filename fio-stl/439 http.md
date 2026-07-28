@@ -97,7 +97,7 @@ Other settings:
 | `udata` | Default `fio_http_udata(h)` value. |
 | `tls_io_func`, `tls` | Optional TLS support. |
 | `queue` | Optional HTTP task queue. |
-| `public_folder` | Static-file root; can serve pre-compressed `.gz` alternatives. |
+| `public_folder` | Static-file root; can serve pre-compressed `.gz`/`.br` alternatives. With `compress_static`, missing variants are also **created on demand and written into this folder on GET** — the folder must be writable and quota'd (attacker-triggerable disk writes). Prefer pre-generating variants at deploy time. |
 | `max_age` | Static-file `Cache-Control` max-age value, in seconds. |
 | `max_header_size` | Maximum combined request line and header bytes. |
 | `max_line_len` | Maximum bytes per request / header line. |
@@ -109,9 +109,34 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression. |
-| `compress_dynamic` | Opt-in dynamic response compression. |
-| `compress_ws` | Opt-in WebSocket `permessage-deflate`. |
+| `compress_static` | Opt-in static-file compression. See the compression security note below. |
+| `compress_dynamic` | Opt-in dynamic response compression. See the compression security note below. |
+| `compress_ws` | Opt-in WebSocket `permessage-deflate`. See the compression security note below. |
+
+**Compression security note (BREACH/CRIME oracle risk):** compressing
+secrets together with attacker-reflected data enables length-oracle attacks
+(BREACH/CRIME). Do not enable compression for responses that mix secrets
+(CSRF tokens, session data) with attacker-controlled reflections, or emit
+such messages uncompressed per call (per-message opt-out: keep the cflag off
+at the route level for sensitive routes, or pre-set `content-encoding`
+— which the dynamic path always respects — to pass a body through
+uncompressed).
+
+**WebSocket `permessage-deflate` negotiation:** the server ALWAYS responds
+with `permessage-deflate; server_no_context_takeover;
+client_no_context_takeover` (RFC 7692 allows either endpoint to request the
+flags unilaterally), honoring `server_max_window_bits` when offered (the
+compressor clamps its distances accordingly) and never emitting window-bits
+parameters. Cross-message history is never used, so persistent compression
+state per connection is ~0 (two ~32-byte contexts plus a bounded input
+buffer, shrunk on every message reset); compressor scratch comes from a
+static process-wide slot pool checked out per call — under extreme
+contention a message simply goes out uncompressed.
+
+**Accept-Encoding handling:** `q=0` (in any zero-padded form) forbids an
+encoding (RFC 9110). `Vary: accept-encoding` is set whenever compressed
+variants may exist — including on identity responses. Ranged responses are
+never compressed (ranges over encoded bytes are broken in practice).
 
 Unset callbacks and limits are normalized when the listener, route, or client is
 created. Server `on_http` defaults to a 404 response; client `on_http` defaults
@@ -296,6 +321,12 @@ int fio_http_on_message_set(fio_http_s *h,
 
 `fio_http_websocket_write` writes one WebSocket message and fails if the handle
 is not an established WebSocket. `is_text` selects text vs. binary.
+
+**Serialization:** `fio_http_websocket_write` must be serialized per
+connection — concurrent calls on the same handle (e.g. from pub/sub or queue
+callbacks racing on multiple threads) may interleave frame bytes and must be
+guarded by the caller (mutex, or route all writes through the connection's
+queue). This also protects the per-connection compression context.
 
 `fio_http_on_message_set` overrides the `on_message` callback for the current
 WebSocket connection. Passing `NULL` restores the settings callback. It returns
