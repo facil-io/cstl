@@ -369,9 +369,6 @@ SFUNC int fio_http_route(fio_http_listener_s *listener,
 SFUNC fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *l,
                                                    const char *url);
 
-/** Returns a link to the settings handled by the handle's route. */
-SFUNC fio_http_settings_s *fio_http_handle_settings(fio_http_s *h);
-
 /* *****************************************************************************
 HTTP Routing – CRUD
 ***************************************************************************** */
@@ -924,7 +921,7 @@ FIO_SFUNC fio_http_settings_s *fio___http_route_settings(
 }
 
 /** Returns a link to the settings handled by the handle's route. */
-FIO_SFUNC fio_http_settings_s *fio_http_handle_settings(fio_http_s *h) {
+FIO_SFUNC fio_http_settings_s *fio___http_handle_settings(fio_http_s *h) {
   fio_http_settings_s *r = NULL;
   fio___http_connection_s *connection =
       (fio___http_connection_s *)fio_http_cdata(h);
@@ -980,7 +977,7 @@ static void fio___http_default_on_eventsource_redirect(fio_http_s *h,
                                                        fio_buf_info_s id,
                                                        fio_buf_info_s event,
                                                        fio_buf_info_s data) {
-  fio_http_settings_s *s = fio_http_handle_settings(h);
+  fio_http_settings_s *s = fio___http_handle_settings(h);
   s->on_message(h, data, 1);
   (void)h, (void)id, (void)event, (void)data;
 }
@@ -1188,7 +1185,7 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio_http_settings_s *s = fio_http_handle_settings(h);
+  fio_http_settings_s *s = fio___http_handle_settings(h);
   if (fio___http_on_http_test4upgrade(h, c, s))
     return;
   union {
@@ -1203,7 +1200,7 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio_http_status_set(h, 200);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  fio_http_settings_s *s = fio_http_handle_settings(h);
+  fio_http_settings_s *s = fio___http_handle_settings(h);
   if (fio___http_on_http_test4upgrade(h, c, s))
     return;
   /* The automatic static service answers GET / HEAD requests only (RFC

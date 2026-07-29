@@ -2762,7 +2762,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
           FIO_STR_INFO2((char *)"vary", 4),
           FIO_STR_INFO2((char *)"accept-encoding", 15));
     } else if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0)
-                   .buf) {
+                    .buf) {
       /* Encodings were evaluated but identity won (e.g. `q=0`, no common
        * token, or no gain): caches must still key on Accept-Encoding. */
       fio_http_response_header_set(
@@ -4675,10 +4675,10 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
       /* Compressed variants exist (or may be created) for this resource:
        * even the UNCOMPRESSED response must carry Vary so caches key on
        * Accept-Encoding. */
-      fio_http_response_header_set(h,
-                                   FIO_STR_INFO2((char *)"vary", 4),
-                                   FIO_STR_INFO2((char *)"accept-encoding",
-                                                 15));
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"vary", 4),
+          FIO_STR_INFO2((char *)"accept-encoding", 15));
     if (!ac.len)
       goto accept_encoding_header_test_done;
     struct {
@@ -4693,7 +4693,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                        .ext = FIO_BUF_INFO2((char *)".br", 3),
                        .compress = fio_brotli_compress,
                        .bound = fio_brotli_compress_bound,
-                       .level = 6,
+                       .level = 4,
                    },
                    {
                        .value = FIO_BUF_INFO2((char *)"zstd", 4),
@@ -4751,7 +4751,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
           FIO_MEM_FREE(src, (size_t)orig_st.st_size);
           continue;
         }
-        size_t comp_len = options[i].compress(dst, bound, src, rd, 6);
+        size_t comp_len =
+            options[i].compress(dst, bound, src, rd, options[i].level);
         FIO_MEM_FREE(src, (size_t)orig_st.st_size);
         if (!comp_len || comp_len >= rd) {
           FIO_MEM_FREE(dst, bound);
