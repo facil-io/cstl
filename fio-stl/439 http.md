@@ -9,9 +9,9 @@
 the HTTP handle, the HTTP/1.x parser, the WebSocket parser, and the SSE /
 WebSocket glue code.
 
-Nearby context: [IO and HTTP overview](./400 io-overview.md), the underlying
-[HTTP handle header](./431 http handle.h), the [HTTP/1.x parser](./431 http1 parser.md),
-the [WebSocket parser](./431 websocket parser.md), and optional compression
+Nearby context: [IO and HTTP overview](./400 io-overview.md), the
+[HTTP/1.x parser](./004 http1 parser.md), the
+[WebSocket parser](./004 websocket parser.md), and optional compression
 support in [DEFLATE / Gzip](./162 deflate.md).
 
 ---
@@ -23,17 +23,42 @@ support in [DEFLATE / Gzip](./162 deflate.md).
 - `fio_http_settings_s` and `fio_http_listener_s`.
 - server APIs: `fio_http_listen`, `fio_http_listener_settings`,
   `fio_http_route`, and `fio_http_route_settings`.
-- client API: `fio_http_connect`.
+- client APIs: `fio_http_connect` and the `fio_http_websocket_connect`
+  convenience wrapper.
 - request routing helper: `fio_http_resource_action` and
   `fio_http_resource_action_e`.
 - upgrade helpers for WebSocket and SSE connections.
 - pub/sub helpers for upgraded connections.
 - handle access helpers: `fio_http_io` and `fio_http_settings`.
-- the HTTP handle API from [`431 http handle.h`](./431 http handle.h),
-  including request / response fields, headers, cookies, body storage, writing,
-  static-file responses, logging, MIME lookup, and controller hooks.
+- the HTTP handle API (handle and core implementation in
+  `432 http types.h`), including request / response fields, headers,
+  cookies, body storage, writing, static-file responses, logging, MIME
+  lookup, and controller hooks.
 
 Implementation helpers named `fio___...` are private implementation details.
+
+---
+
+## Module Files
+
+All HTTP module files share the `FIO_HTTP` flag.
+
+- `430 http api.h` — public declarations: settings, listener / route /
+  client APIs, and the full handle API.
+- `432 http types.h` — internal types plus the handle and core
+  implementation (header cache, body storage, static-file responses).
+- `434 http accept.h` — accept path, request dispatchers, upgrade
+  authorization.
+- `434 http1.h` — HTTP/1.1 request / response glue, protocol and
+  controller.
+- `434 sse.h` — EventSource (SSE) upgrade, helpers, protocol, controller.
+- `434 websocket.h` — WebSocket upgrade, events, protocol, write,
+  controller.
+- `438 http.h` — listen / connect glue, protocol wiring, shared helpers.
+- `439 http.h` — cleanup tail (the module's only `#undef FIO_HTTP` site).
+
+The parsers are separate modules: [`004 http1 parser.h`](./004 http1 parser.md)
+and [`004 websocket parser.h`](./004 websocket parser.md).
 
 ---
 
@@ -109,7 +134,7 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Connection-global; per-route values are ignored. See the compression security note below. |
+| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Per-route; routes inherit the listener's root value at route-creation. The value is a failure-memoization shift register (see *Static File Service*). Detached handles gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag instead. See the compression security note below. |
 | `compress_dynamic` | Opt-in dynamic response compression. Connection-global; per-route values are ignored. See the compression security note below. |
 | `compress_ws` | Opt-in WebSocket `permessage-deflate`. Connection-global; per-route values are ignored. See the compression security note below. |
 
@@ -218,16 +243,17 @@ Routes are best-prefix matches:
 Route declaration order is not significant unless an existing route is replaced.
 Route settings inherit missing listener callbacks and limits, including `udata`,
 `on_finish`, `on_stop`, SSE / WebSocket authentication callbacks,
-header/body/message limits, timeouts, `public_folder`, and `log`. TLS settings
-are ignored on routes.
+header/body/message limits, timeouts, `public_folder`, `compress_static`, and
+`log`. TLS settings are ignored on routes.
 
 Only `on_http`, `on_finish`, `udata`, the authentication callbacks,
-`public_folder`, and `max_age` are effective per route. Upgraded-connection
-callbacks (`on_open`, `on_message`, `on_ready`, `on_shutdown`, `on_close`),
-`queue`, `log`, limits, timeouts, and the `compress_*` flags are
-connection-global: they are read from the listener's root settings, so
-per-route values are stored but unused. Note that `max_age` is **not**
-inherited — a route that serves static files must set its own.
+`public_folder`, `max_age`, and `compress_static` are effective per route.
+Upgraded-connection callbacks (`on_open`, `on_message`, `on_ready`,
+`on_shutdown`, `on_close`), `queue`, `log`, limits, timeouts,
+`compress_dynamic`, and `compress_ws` are connection-global: they are read
+from the listener's root settings, so per-route values are stored but unused.
+Note that `max_age` is **not** inherited — a route that serves static files
+must set its own.
 
 ### Resource action helper
 
@@ -303,19 +329,34 @@ least as fresh as the original (modification time) is served, with
 `Content-Encoding` set accordingly. Tokens forbidden with `q=0` are never
 selected (RFC 9110 §12.5.3).
 
-With `compress_static` (`FIO_HTTP_CFLAG_COMPRESS_STATIC` on the handle),
-missing or stale `.br` / `.gz` variants are created on demand and written
-into the root folder:
+With `compress_static` enabled, missing or stale `.br` / `.gz` variants are
+created on demand and written into the root folder. Attached handles read the
+flag from the matching route's settings (routes inherit the listener's root
+value at route-creation); detached handles (created manually, with no
+settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag instead.
 
 - creation is limited to compressible (text-like) MIME types and originals
   between 1024 bytes and `FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT` (2 MiB);
 - creation is skipped when compression would not shrink the file;
+- `.br` variants are compressed at brotli quality 4 (the benchmark-reviewed
+  fast-path ceiling; q5+ engages the slow hash-chain path) and `.gz`
+  variants at gzip level 6;
 - `zstd` / `deflate` variants are only ever served pre-generated — they are
   never created on demand;
-- on-demand writes are attacker-triggerable, so the folder **must** be
-  writable and quota'd. Pre-generating variants at deploy time is
-  recommended — the server only stats the files, so any external tool can
-  produce them.
+- on-demand creation writes into the served folder and is triggered by
+  client requests; the folder must be writable for creation to succeed
+  (a write failure disables creation, see memoization below). Variants
+  may also be pre-generated at deploy time with any external tool — the
+  server only stats the files.
+
+`compress_static` is a failure-memoization shift register, updated atomically
+(the IO threads share the listener / route settings): any non-zero value
+enables on-demand creation. A compression success re-seeds bit 0
+(`value |= 1`); any other failure shifts the value left (`value <<= 1`), so
+8 consecutive failures shift out of the `uint8_t` and disable creation, as
+does a single filesystem-full / permission error (`ENOSPC`, `EACCES`,
+`EROFS`, `EDQUOT` — `value = 0`). Once 0, creation stays disabled until the
+settings are re-applied. Detached handles carry no memoization state.
 
 `Vary: accept-encoding` is set whenever a variant is served, and on
 identity responses whenever variants may be created, so caches key on the
@@ -360,6 +401,28 @@ Recognized upgrade schemes:
 Client `on_http` receives the response handle. If the response accepts a
 WebSocket or SSE upgrade, the connection switches to the upgraded protocol and
 uses the upgraded callbacks instead.
+
+### `fio_http_websocket_connect`
+
+```c
+fio_io_s *fio_http_websocket_connect(const char *url,
+                                     fio_http_s *h,
+                                     fio_http_settings_s settings);
+#define fio_http_websocket_connect(url, h, ...) \
+  fio_http_websocket_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Connects to a WebSocket server. A convenience wrapper around
+`fio_http_connect` that normalizes the `url` scheme before connecting:
+`http://` becomes `ws://`, `https://` becomes `wss://`, and a missing scheme
+defaults to `ws://` (`ws://` / `wss://` and any other scheme pass through
+unchanged).
+
+`fio_http_connect` issues the WebSocket upgrade request automatically for
+`ws://` / `wss://` URLs. If the server accepts the upgrade (`101`), the
+connection switches to the WebSocket protocol and the `on_open` /
+`on_message` / `on_close` callbacks are used. Any other response is routed
+to `settings.on_http` with the response handle.
 
 ---
 
@@ -463,8 +526,7 @@ channel and whose data is the published message.
 
 ## HTTP Handle API Pulled In by `FIO_HTTP`
 
-The HTTP handle can also be included directly with `FIO_HTTP_HANDLE`. The full
-HTTP module uses it as the request / response object exposed to callbacks.
+The HTTP handle is the request / response object exposed to callbacks.
 
 ### Lifetime
 

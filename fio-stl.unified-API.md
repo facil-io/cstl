@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3130.
+Total symbols: 3132.
 
 ## Contents
 
@@ -26,6 +26,7 @@ Total symbols: 3130.
 - [`./fio-stl/002 url.h`](#fio-stl-002-url-h) — 7
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 21
+- [`./fio-stl/004 http1 parser.h`](#fio-stl-004-http1-parser-h) — 3
 - [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 5
 - [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 3
 - [`./fio-stl/004 resp3.h`](#fio-stl-004-resp3-h) — 24
@@ -33,6 +34,7 @@ Total symbols: 3130.
 - [`./fio-stl/004 state callbacks.h`](#fio-stl-004-state-callbacks-h) — 4
 - [`./fio-stl/004 time.h`](#fio-stl-004-time-h) — 17
 - [`./fio-stl/004 urlencoded.h`](#fio-stl-004-urlencoded-h) — 3
+- [`./fio-stl/004 websocket parser.h`](#fio-stl-004-websocket-parser-h) — 29
 - [`./fio-stl/005 cli.h`](#fio-stl-005-cli-h) — 23
 - [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 46
 - [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 103
@@ -76,10 +78,7 @@ Total symbols: 3130.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/431 http handle.h`](#fio-stl-431-http-handle-h) — 118
-- [`./fio-stl/431 http1 parser.h`](#fio-stl-431-http1-parser-h) — 3
-- [`./fio-stl/431 websocket parser.h`](#fio-stl-431-websocket-parser-h) — 29
-- [`./fio-stl/439 http.h`](#fio-stl-439-http-h) — 30
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 150
 
 -----------------------------------------------------
 
@@ -21061,6 +21060,44 @@ _Symbol type:_ `macro`
 
 -----------------------------------------------------
 
+## <a id="fio-stl-004-http1-parser-h"></a> `./fio-stl/004 http1 parser.h`
+
+3 public symbols.
+
+### Macros
+
+#### `FIO_HTTP1_PARSER_INIT`
+
+```c
+#define FIO_HTTP1_PARSER_INIT ((fio_http1_parser_s){0})
+```
+
+Initialization value for the parser
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP1_PARSER_ERROR`
+
+```c
+#define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
+```
+
+The error return value for fio_http1_parse.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP1_EXPECTED_CHUNKED`
+
+```c
+#define FIO_HTTP1_EXPECTED_CHUNKED ((size_t)(-2))
+```
+
+A return value for `fio_http1_expected` when chunked data is expected.
+
+_Symbol type:_ `macro`
+
+-----------------------------------------------------
+
 ## <a id="fio-stl-004-json-h"></a> `./fio-stl/004 json.h`
 
 5 public symbols.
@@ -22484,6 +22521,313 @@ Note: The parser does NOT decode percent-encoded characters.
 Use `fio_string_write_url_dec` to decode if needed.
 
 _Symbol type:_ `function`
+
+-----------------------------------------------------
+
+## <a id="fio-stl-004-websocket-parser-h"></a> `./fio-stl/004 websocket parser.h`
+
+29 public symbols.
+
+### Macros
+
+#### `FIO_WEBSOCKET_DEFAULT_MAX_FRAME`
+
+```c
+#define FIO_WEBSOCKET_DEFAULT_MAX_FRAME (1ULL << 30)
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_PARSE_ERROR`
+
+```c
+#define FIO_WEBSOCKET_PARSE_ERROR ((size_t)-1)
+```
+
+Parse error sentinel.
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_RSV1`
+
+```c
+#define FIO_WEBSOCKET_RSV1 0x4U /* byte-0 bit 6 (permessage-deflate) */
+```
+
+RSV bit constants for the send-side API. These are the 3-bit values shifted
+ into byte-0 bits 4..6 on the wire (0x4 → RSV1=0x40, 0x2 → RSV2=0x20, 0x1 →
+ RSV3=0x10).
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_RSV2`
+
+```c
+#define FIO_WEBSOCKET_RSV2 0x2U /* byte-0 bit 5 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_RSV3`
+
+```c
+#define FIO_WEBSOCKET_RSV3 0x1U /* byte-0 bit 4 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_CONT`
+
+```c
+#define FIO_WEBSOCKET_OP_CONT   0x0
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_TEXT`
+
+```c
+#define FIO_WEBSOCKET_OP_TEXT   0x1
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_BINARY`
+
+```c
+#define FIO_WEBSOCKET_OP_BINARY 0x2
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_CLOSE`
+
+```c
+#define FIO_WEBSOCKET_OP_CLOSE  0x8
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_PING`
+
+```c
+#define FIO_WEBSOCKET_OP_PING   0x9
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_OP_PONG`
+
+```c
+#define FIO_WEBSOCKET_OP_PONG   0xA
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_STATE_HEADER`
+
+```c
+#define FIO_WEBSOCKET_STATE_HEADER  0
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_STATE_PAYLOAD`
+
+```c
+#define FIO_WEBSOCKET_STATE_PAYLOAD 1
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_STATE_CLOSED`
+
+```c
+#define FIO_WEBSOCKET_STATE_CLOSED  0xFE
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_STATE_ERROR`
+
+```c
+#define FIO_WEBSOCKET_STATE_ERROR   0xFF
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG_FIN`
+
+```c
+#define FIO_WEBSOCKET_FLAG_FIN             0x80
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG_MASKED`
+
+```c
+#define FIO_WEBSOCKET_FLAG_MASKED          0x40
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG_OPCODE_MASK`
+
+```c
+#define FIO_WEBSOCKET_FLAG_OPCODE_MASK     0x3C
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG_OPCODE_SHIFT`
+
+```c
+#define FIO_WEBSOCKET_FLAG_OPCODE_SHIFT    2
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK`
+
+```c
+#define FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK 0x03
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG2_PAUSED`
+
+```c
+#define FIO_WEBSOCKET_FLAG2_PAUSED        0x80
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK`
+
+```c
+#define FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK  0x70
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT`
+
+```c
+#define FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT 4
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_FIN`
+
+```c
+#define FIO_WEBSOCKET_GET_FIN(p) (((p)->flags & FIO_WEBSOCKET_FLAG_FIN) != 0)
+```
+
+Read the FIN bit from the current frame.
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_MASKED`
+
+```c
+#define FIO_WEBSOCKET_GET_MASKED(p)   \
+  (((p)->flags & FIO_WEBSOCKET_FLAG_MASKED) != 0)
+```
+
+Read the MASK bit from the current frame.
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_OPCODE`
+
+```c
+#define FIO_WEBSOCKET_GET_OPCODE(p)   \
+  (((p)->flags & FIO_WEBSOCKET_FLAG_OPCODE_MASK) >>   \
+   FIO_WEBSOCKET_FLAG_OPCODE_SHIFT)
+```
+
+Read the opcode from the current frame.
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_MSG_OPCODE`
+
+```c
+#define FIO_WEBSOCKET_GET_MSG_OPCODE(p)   \
+  ((p)->flags & FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK)
+```
+
+Read the message opcode (1=text, 2=binary, 0=none open).
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_PAUSED`
+
+```c
+#define FIO_WEBSOCKET_GET_PAUSED(p)   \
+  (((p)->flags2 & FIO_WEBSOCKET_FLAG2_PAUSED) != 0)
+```
+
+Read the paused flag (one-message-per-parse gate).
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_GET_MSG_RSV`
+
+```c
+#define FIO_WEBSOCKET_GET_MSG_RSV(p)   \
+  (((p)->flags2 & FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK) >>   \
+   FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT)
+```
+
+Read the RSV bits from the opening frame (3-bit format).
+
+_Symbol type:_ `macro`
 
 -----------------------------------------------------
 
@@ -35361,11 +35705,112 @@ _Symbol type:_ `function`
 
 -----------------------------------------------------
 
-## <a id="fio-stl-431-http-handle-h"></a> `./fio-stl/431 http handle.h`
+## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-118 public symbols.
+150 public symbols.
 
 ### Macros
+
+#### `FIO_HTTP_DEFAULT_MAX_HEADER_SIZE`
+
+```c
+#define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE 32768 /* (1UL << 15) */
+```
+
+The default HTTP total header size limit in bytes.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_DEFAULT_MAX_LINE_LEN`
+
+```c
+#define FIO_HTTP_DEFAULT_MAX_LINE_LEN 8192 /* (1UL << 13) */
+```
+
+The default HTTP header line limit in bytes.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_DEFAULT_MAX_BODY_SIZE`
+
+```c
+#define FIO_HTTP_DEFAULT_MAX_BODY_SIZE 33554432 /* (1UL << 25) */
+```
+
+The default HTTP payload size limit in bytes.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE`
+
+```c
+#define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE 262144 /* (1UL << 18) */
+```
+
+The default WebSocket message size limit in bytes.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_DEFAULT_TIMEOUT`
+
+```c
+#define FIO_HTTP_DEFAULT_TIMEOUT 50
+```
+
+The default timeout for HTTP connections.
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_DEFAULT_TIMEOUT_LONG`
+
+```c
+#define FIO_HTTP_DEFAULT_TIMEOUT_LONG 50
+```
+
+The default timeout for long held HTTP connections (WebSockets / SSE).
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER`
+
+```c
+#define FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER 0
+```
+
+Adds a "content-length" header to the HTTP handle (usually redundant).
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT`
+
+```c
+#define FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT ((1UL << 16) - 10UL)
+```
+
+UTF-8 validity tests will be performed only for data shorter than this.
+
+_Symbol type:_ `macro`
+
+#### `FIO_WEBSOCKET_STATS`
+
+```c
+#define FIO_WEBSOCKET_STATS 0
+```
+
+If true, logs longest WebSocket round-trips (using FIO_LOG_INFO).
+
+_Symbol type:_ `macro`
+
+#### `FIO_HTTP_WEBSOCKET_DEFLATE_MIN`
+
+```c
+#define FIO_HTTP_WEBSOCKET_DEFLATE_MIN 1024
+```
+
+Messages smaller than this are not compressed (fits in a single TCP/IP
+packet, compression saves no network overhead).
+
+_Symbol type:_ `macro`
 
 #### `FIO_HTTP_EXACT_LOGGING`
 
@@ -35697,6 +36142,226 @@ controller is expecting.
 
 _Symbol type:_ `type`
 
+#### `fio_http_settings_s`
+
+```c
+struct fio_http_settings_s {
+/** Called before body uploads, when a client sends an `Expect` header. */
+void (*pre_http_body)(fio_http_s *h);
+/** Callback for HTTP requests (server) or responses (client). */
+void (*on_http)(fio_http_s *h);
+/** Called when a request / response cycle is finished (for WebSocket /
+* SSE connections, called after `on_close`, when the connection closes). */
+void (*on_finish)(fio_http_s *h);
+/** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
+int (*on_authenticate_sse)(fio_http_s *h);
+/** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
+int (*on_authenticate_websocket)(fio_http_s *h);
+/** Called once a WebSocket / SSE connection upgrade is complete. */
+void (*on_open)(fio_http_s *h);
+/** Called when a WebSocket message is received. */
+void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
+/** Called when an EventSource event is received. */
+void (*on_eventsource)(fio_http_s *h,
+fio_buf_info_s id,
+fio_buf_info_s event,
+fio_buf_info_s data);
+/** Called when an EventSource reconnect event requests an ID. */
+void (*on_eventsource_reconnect)(fio_http_s *h, fio_buf_info_s id);
+/** Called for WebSocket / SSE connections when outgoing buffer is empty. */
+void (*on_ready)(fio_http_s *h);
+/** Called for open WebSocket / SSE connections during shutting down. */
+void (*on_shutdown)(fio_http_s *h);
+/** Called after a WebSocket / SSE connection is closed (for cleanup). */
+void (*on_close)(fio_http_s *h);
+/** (optional) the callback to be performed when the HTTP service closes. */
+void (*on_stop)(struct fio_http_settings_s *settings);
+/** Default opaque user data for HTTP handles (fio_http_s). */
+void *udata;
+/** Optional SSL/TLS support. */
+fio_io_functions_s *tls_io_func;
+/** Optional SSL/TLS support. */
+fio_io_tls_s *tls;
+/** Optional HTTP task queue (for multi-threading HTTP responses) */
+fio_io_async_s *queue;
+/**
+* A public folder for file transfers - allows to circumvent any
+* application layer logic and simply serve static files.
+*
+* Static file responses are attempted for `GET` and `HEAD` requests
+* only (RFC 9110 §9.3 - a static file is not a valid response to other
+* methods); any other method is forwarded to `on_http` (which may serve
+* files explicitly by calling `fio_http_static_file_response`). On a
+* miss the request is also forwarded to `on_http`. Folders resolve to
+* their `index` file and missing extensions are auto-completed
+* (`.html`, `.htm`, `.txt`, `.md`) - see
+* `FIO_HTTP_STATIC_FILE_COMPLETION`.
+*
+* Pre-compressed variants are supported: when the client's
+* `Accept-Encoding` allows it, an up-to-date `file.br`, `file.zstd`,
+* `file.gz` or `file.zip` variant (preference order: `br`, `zstd`,
+* `gzip`, `deflate`) is served instead of the original file. With
+* `compress_static`, missing `.br` / `.gz` variants are also created on
+* demand (written into this folder). Ranged requests are always served
+* identity (no variant selection).
+*
+* The folder must exist when the listener starts, otherwise the setting
+* is ignored (with an error log).
+*/
+fio_str_info_s public_folder;
+/**
+* The max-age value (in seconds) for caching static files sent from
+* `public_folder`.
+*
+* Defaults to 0 (the `Cache-Control` header is not sent).
+*
+* Note: NOT inherited by routes - a route that serves static files must
+* set its own `max_age`.
+*/
+size_t max_age;
+/**
+* The maximum total of bytes for the overall size of the request string and
+* headers, combined.
+*
+* Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE bytes.
+*/
+uint32_t max_header_size;
+/**
+* The maximum number of bytes allowed per header / request line.
+*
+* Defaults to FIO_HTTP_DEFAULT_MAX_LINE_LEN bytes.
+*/
+uint32_t max_line_len;
+/**
+* The maximum size of an HTTP request's body (posting / downloading).
+*
+* Defaults to FIO_HTTP_DEFAULT_MAX_BODY_SIZE bytes.
+*/
+size_t max_body_size;
+/**
+* The maximum WebSocket message size/buffer (in bytes) for Websocket
+* connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
+*/
+size_t ws_max_msg_size;
+/** reserved for future use. */
+intptr_t reserved1;
+/** reserved for future use. */
+intptr_t reserved2;
+/**
+* An HTTP/1.x connection timeout.
+*
+* Defaults to FIO_HTTP_DEFAULT_TIMEOUT seconds.
+*
+* Note: the connection might be closed (by other side) before timeout occurs.
+*/
+uint8_t timeout;
+/**
+* Timeout for the WebSocket connections in seconds. Defaults to
+* FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+*
+* A ping will be sent whenever the timeout is reached.
+*
+* Connections are only closed when a ping cannot be sent (the network layer
+* fails). Pongs are ignored.
+*/
+uint8_t ws_timeout;
+/**
+* Timeout for EventSource (SSE) connections in seconds. Defaults to
+* FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
+*
+* A ping will be sent whenever the timeout is reached.
+*
+* Connections are only closed when a ping cannot be sent (the network layer
+* fails).
+*/
+uint8_t sse_timeout;
+/** Timeout for client connections (only relevant in client mode). */
+uint8_t connect_timeout;
+/** Logging flag - set to TRUE to log HTTP requests. */
+uint8_t log;
+/**
+* Opt-in: auto-compress static files - missing `.br` / `.gz` variants are
+* created on demand and written into the `public_folder`.
+*
+* Creation is limited to compressible (text-like) MIME types and file
+* sizes between 1024 bytes and FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT (2
+* MiB), and is skipped when compression wouldn't shrink the file.
+* Variants whose modification time is older than the original file are
+* re-created.
+*
+* Note: on-demand writes are attacker-triggerable - the public folder
+* MUST be writable and quota'd. Pre-generating variants at deploy time is
+* recommended.
+*
+* Note: per-route (read from the matching route's settings; routes
+* inherit the listener's root value at route-creation). The value is a
+* failure-memoization shift register, atomically shared by the IO
+* threads - see `fio_http_static_file_response`. Detached handles (no
+* settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag
+* instead, with no memoization state.
+*/
+uint8_t compress_static;
+/**
+* Opt-in: auto-compress dynamic HTTP responses on-the-fly.
+*
+* Applies to finished (non-streaming) single-buffer responses larger than
+* 1024 bytes with a compressible (text-like) `Content-Type`, preferring
+* `br` over `gzip` per the client's `Accept-Encoding`. Responses with a
+* pre-set `Content-Encoding` are never re-compressed. `Vary:
+* accept-encoding` is set whenever compression was considered.
+*
+* Note: connection-global (read from the listener's root settings when
+* the connection's handle is attached) - per-route values have no effect.
+*/
+uint8_t compress_dynamic;
+/**
+* Opt-in: enable permessage-deflate for WebSocket connections.
+*
+* Negotiation always forces both `*_no_context_takeover` flags (RFC 7692
+* allows either endpoint to request them unilaterally), keeping
+* persistent per-connection compression state at ~0.
+*
+* Note: connection-global (read from the listener's root settings when
+* the connection's handle is attached) - per-route values have no effect.
+*/
+uint8_t compress_ws;
+}
+```
+
+
+
+_Symbol type:_ `type`
+
+#### `fio_http_listener_s`
+
+```c
+struct fio_http_listener_s
+```
+
+
+
+_Symbol type:_ `type`
+
+#### `fio_http_resource_action_e`
+
+```c
+typedef enum {
+FIO_HTTP_RESOURCE_NONE,
+FIO_HTTP_RESOURCE_INDEX,
+FIO_HTTP_RESOURCE_SHOW,
+FIO_HTTP_RESOURCE_NEW,
+FIO_HTTP_RESOURCE_EDIT,
+FIO_HTTP_RESOURCE_CREATE,
+FIO_HTTP_RESOURCE_UPDATE,
+FIO_HTTP_RESOURCE_DELETE,
+FIO_HTTP_RESOURCE_QUERY,
+} fio_http_resource_action_e
+```
+
+
+
+_Symbol type:_ `type`
+
 #### `fio_http_cookie_same_site_e`
 
 ```c
@@ -35868,7 +36533,237 @@ HTTP body parse result.
 
 _Symbol type:_ `type`
 
+#### `fio_http_sse_write_args_s`
+
+```c
+typedef struct {
+/** The message's `id` data (if any). */
+fio_buf_info_s id;
+/** The message's `event` data (if any). */
+fio_buf_info_s event;
+/** The message's `data` data (if any). */
+fio_buf_info_s data;
+} fio_http_sse_write_args_s
+```
+
+Named arguments for fio_http_sse_write.
+
+_Symbol type:_ `type`
+
 ### Functions
+
+#### `fio_http_io`
+
+```c
+fio_io_s *fio_http_io(fio_http_s *)
+```
+
+Returns the IO object associated with the HTTP object (request only).
+
+_Symbol type:_ `function`
+
+#### `fio_http_subscribe`
+
+```c
+#define fio_http_subscribe(h, ...)   \
+  fio_pubsub_subscribe(.io = fio_http_io(h), __VA_ARGS__)
+```
+
+Macro helper for HTTP handle pub/sub subscriptions.
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_http_listen`
+
+```c
+fio_http_listener_s *fio_http_listen(const char *url, fio_http_settings_s settings)
+```
+
+Listens to HTTP / WebSockets / SSE connections on `url`.
+
+_Symbol type:_ `function`
+
+#### `fio_http_listen`
+
+```c
+#define fio_http_listen(url, ...)   \
+  fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Listens to HTTP / WebSockets / SSE connections on `url`.
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_http_listener_settings`
+
+```c
+fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l)
+```
+
+Returns the a pointer to the HTTP settings associated with the listener.
+
+_Symbol type:_ `function`
+
+#### `fio_http_route`
+
+```c
+int fio_http_route(fio_http_listener_s *listener, const char *url, fio_http_settings_s settings)
+```
+
+Adds a route prefix to the HTTP handler.
+
+Order of route settings is irrelevant (unless overwriting an existing route).
+
+Matching is performed as a best-prefix match. i.e.:
+
+- All paths match the route `"/"` (the default prefix).
+
+- The route `"/user"` will match `"/user"` and all `"/user/..."` paths but
+  not `"/user..."`
+
+- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route
+  `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
+  `"/user"` route will continue to behave the same.
+
+Note: the following properties are inherited (if missing) from the
+default HTTP settings used to create the listener: `udata`, `on_finish`,
+`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+`timeout`, `ws_timeout`, `sse_timeout`, `log`, `compress_static` and
+`public_folder`.
+
+Note: TLS options are ignored.
+
+Note: only `on_http`, `on_finish`, `udata`, the authentication
+callbacks, `public_folder`, `max_age` and `compress_static` are
+effective per route. All other per-route values are stored but unused -
+upgraded connection callbacks (`on_open`, `on_message`, etc.), `queue`,
+`log`, limits, timeouts, `compress_dynamic` and `compress_ws` are
+connection-global and are read from the listener's root settings.
+
+_Symbol type:_ `function`
+
+#### `fio_http_route`
+
+```c
+#define fio_http_route(listener, url, ...)   \
+  fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Adds a route prefix to the HTTP handler.
+
+Order of route settings is irrelevant (unless overwriting an existing route).
+
+Matching is performed as a best-prefix match. i.e.:
+
+- All paths match the route `"/"` (the default prefix).
+
+- The route `"/user"` will match `"/user"` and all `"/user/..."` paths but
+  not `"/user..."`
+
+- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route
+  `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
+  `"/user"` route will continue to behave the same.
+
+Note: the following properties are inherited (if missing) from the
+default HTTP settings used to create the listener: `udata`, `on_finish`,
+`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
+`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
+`timeout`, `ws_timeout`, `sse_timeout`, `log`, `compress_static` and
+`public_folder`.
+
+Note: TLS options are ignored.
+
+Note: only `on_http`, `on_finish`, `udata`, the authentication
+callbacks, `public_folder`, `max_age` and `compress_static` are
+effective per route. All other per-route values are stored but unused -
+upgraded connection callbacks (`on_open`, `on_message`, etc.), `queue`,
+`log`, limits, timeouts, `compress_dynamic` and `compress_ws` are
+connection-global and are read from the listener's root settings.
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_http_route_settings`
+
+```c
+fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *l, const char *url)
+```
+
+Returns a link to the settings matching `url`, as set by `fio_http_route`
+
+_Symbol type:_ `function`
+
+#### `fio_http_resource_action`
+
+```c
+inline fio_http_resource_action_e fio_http_resource_action(fio_http_s *h)
+```
+
+returns expected action or `FIO_HTTP_RESOURCE_NONE` on error.
+
+_Symbol type:_ `function`
+
+#### `fio_http_connect`
+
+```c
+fio_io_s *fio_http_connect(const char *url, fio_http_s *h, fio_http_settings_s settings)
+```
+
+Connects to HTTP / WebSockets / SSE connections on `url`.
+
+_Symbol type:_ `function`
+
+#### `fio_http_connect`
+
+```c
+#define fio_http_connect(url, h, ...)   \
+  fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Connects to HTTP / WebSockets / SSE connections on `url`.
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_http_websocket_connect`
+
+```c
+fio_io_s *fio_http_websocket_connect(const char *url, fio_http_s *h, fio_http_settings_s settings)
+```
+
+Connects to a WebSocket server on `url`.
+
+A convenience wrapper around `fio_http_connect` that ensures a `ws://` or
+`wss://` scheme is used in the URL (`http://` becomes `ws://`, `https://`
+becomes `wss://`, a missing scheme defaults to `ws://`).
+
+The WebSocket upgrade request / response is handled automatically by the
+underlying `fio_http_connect`: on acceptance (101) the connection
+switches to the WebSocket callbacks (`on_open` / `on_message` /
+`on_close`); on rejection the response is routed to `settings.on_http`.
+
+_Symbol type:_ `function`
+
+#### `fio_http_websocket_connect`
+
+```c
+#define fio_http_websocket_connect(url, h, ...)   \
+  fio_http_websocket_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+```
+
+Connects to a WebSocket server on `url` (see
+`fio_http_websocket_connect`).
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
 
 #### `fio_http_new`
 
@@ -36582,86 +37477,6 @@ Closes a persistent HTTP connection (i.e., if upgraded).
 
 _Symbol type:_ `function`
 
-#### `fio_http_websocket_requested`
-
-```c
-int fio_http_websocket_requested(fio_http_s *)
-```
-
-Returns non-zero if request headers ask for a WebSockets Upgrade.
-
-_Symbol type:_ `function`
-
-#### `fio_http_websocket_accepted`
-
-```c
-int fio_http_websocket_accepted(fio_http_s *h)
-```
-
-Returns non-zero if the response accepts a WebSocket upgrade request.
-
-_Symbol type:_ `function`
-
-#### `fio_http_upgrade_websocket`
-
-```c
-void fio_http_upgrade_websocket(fio_http_s *)
-```
-
-Sets response data to agree to a WebSockets Upgrade.
-
-_Symbol type:_ `function`
-
-#### `fio_http_websocket_set_request`
-
-```c
-void fio_http_websocket_set_request(fio_http_s *)
-```
-
-Sets request data to request a WebSockets Upgrade.
-
-_Symbol type:_ `function`
-
-#### `fio_http_sse_requested`
-
-```c
-int fio_http_sse_requested(fio_http_s *)
-```
-
-Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.
-
-_Symbol type:_ `function`
-
-#### `fio_http_sse_accepted`
-
-```c
-int fio_http_sse_accepted(fio_http_s *h)
-```
-
-Returns non-zero if the response accepts an SSE request.
-
-_Symbol type:_ `function`
-
-#### `fio_http_upgrade_sse`
-
-```c
-void fio_http_upgrade_sse(fio_http_s *)
-```
-
-Sets response data to agree to an EventSource (SSE) Upgrade.
-
-_Symbol type:_ `function`
-
-#### `fio_http_sse_set_request`
-
-```c
-void fio_http_sse_set_request(fio_http_s *)
-```
-
-Sets request data to request an EventSource (SSE) Upgrade.
-
-_Symbol type:_ `function`
-
 #### `fio_http_mimetype_register`
 
 ```c
@@ -36810,8 +37625,10 @@ requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when
 
 Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
 in this preference order) are served when accepted by the client,
-present on disk, and fresh; `FIO_HTTP_CFLAG_COMPRESS_STATIC` also
-creates missing `.br` / `.gz` variants on demand.
+present on disk, and fresh; with `compress_static` enabled (the matching
+route's settings, or the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag on
+detached handles), missing `.br` / `.gz` variants are also created on
+demand.
 
 On success the response is complete and 0 is returned. On failure -1 is
 returned and the application should handle the request itself.
@@ -36874,882 +37691,83 @@ fio_str_info_s fio_http_log_time(uint64_t now_in_seconds)
 
 _Symbol type:_ `function`
 
------------------------------------------------------
-
-## <a id="fio-stl-431-http1-parser-h"></a> `./fio-stl/431 http1 parser.h`
-
-3 public symbols.
-
-### Macros
-
-#### `FIO_HTTP1_PARSER_INIT`
+#### `fio_http_websocket_requested`
 
 ```c
-#define FIO_HTTP1_PARSER_INIT ((fio_http1_parser_s){0})
+int fio_http_websocket_requested(fio_http_s *)
 ```
 
-Initialization value for the parser
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP1_PARSER_ERROR`
-
-```c
-#define FIO_HTTP1_PARSER_ERROR ((size_t)-1)
-```
-
-The error return value for fio_http1_parse.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP1_EXPECTED_CHUNKED`
-
-```c
-#define FIO_HTTP1_EXPECTED_CHUNKED ((size_t)(-2))
-```
-
-A return value for `fio_http1_expected` when chunked data is expected.
-
-_Symbol type:_ `macro`
-
------------------------------------------------------
-
-## <a id="fio-stl-431-websocket-parser-h"></a> `./fio-stl/431 websocket parser.h`
-
-29 public symbols.
-
-### Macros
-
-#### `FIO_WEBSOCKET_DEFAULT_MAX_FRAME`
-
-```c
-#define FIO_WEBSOCKET_DEFAULT_MAX_FRAME (1ULL << 30)
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_PARSE_ERROR`
-
-```c
-#define FIO_WEBSOCKET_PARSE_ERROR ((size_t)-1)
-```
-
-Parse error sentinel.
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_RSV1`
-
-```c
-#define FIO_WEBSOCKET_RSV1 0x4U /* byte-0 bit 6 (permessage-deflate) */
-```
-
-RSV bit constants for the send-side API. These are the 3-bit values shifted
- into byte-0 bits 4..6 on the wire (0x4 → RSV1=0x40, 0x2 → RSV2=0x20, 0x1 →
- RSV3=0x10).
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_RSV2`
-
-```c
-#define FIO_WEBSOCKET_RSV2 0x2U /* byte-0 bit 5 */
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_RSV3`
-
-```c
-#define FIO_WEBSOCKET_RSV3 0x1U /* byte-0 bit 4 */
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_CONT`
-
-```c
-#define FIO_WEBSOCKET_OP_CONT   0x0
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_TEXT`
-
-```c
-#define FIO_WEBSOCKET_OP_TEXT   0x1
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_BINARY`
-
-```c
-#define FIO_WEBSOCKET_OP_BINARY 0x2
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_CLOSE`
-
-```c
-#define FIO_WEBSOCKET_OP_CLOSE  0x8
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_PING`
-
-```c
-#define FIO_WEBSOCKET_OP_PING   0x9
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_OP_PONG`
-
-```c
-#define FIO_WEBSOCKET_OP_PONG   0xA
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_STATE_HEADER`
-
-```c
-#define FIO_WEBSOCKET_STATE_HEADER  0
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_STATE_PAYLOAD`
-
-```c
-#define FIO_WEBSOCKET_STATE_PAYLOAD 1
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_STATE_CLOSED`
-
-```c
-#define FIO_WEBSOCKET_STATE_CLOSED  0xFE
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_STATE_ERROR`
-
-```c
-#define FIO_WEBSOCKET_STATE_ERROR   0xFF
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG_FIN`
-
-```c
-#define FIO_WEBSOCKET_FLAG_FIN             0x80
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG_MASKED`
-
-```c
-#define FIO_WEBSOCKET_FLAG_MASKED          0x40
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG_OPCODE_MASK`
-
-```c
-#define FIO_WEBSOCKET_FLAG_OPCODE_MASK     0x3C
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG_OPCODE_SHIFT`
-
-```c
-#define FIO_WEBSOCKET_FLAG_OPCODE_SHIFT    2
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK`
-
-```c
-#define FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK 0x03
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG2_PAUSED`
-
-```c
-#define FIO_WEBSOCKET_FLAG2_PAUSED        0x80
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK`
-
-```c
-#define FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK  0x70
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT`
-
-```c
-#define FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT 4
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_FIN`
-
-```c
-#define FIO_WEBSOCKET_GET_FIN(p) (((p)->flags & FIO_WEBSOCKET_FLAG_FIN) != 0)
-```
-
-Read the FIN bit from the current frame.
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_MASKED`
-
-```c
-#define FIO_WEBSOCKET_GET_MASKED(p)   \
-  (((p)->flags & FIO_WEBSOCKET_FLAG_MASKED) != 0)
-```
-
-Read the MASK bit from the current frame.
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_OPCODE`
-
-```c
-#define FIO_WEBSOCKET_GET_OPCODE(p)   \
-  (((p)->flags & FIO_WEBSOCKET_FLAG_OPCODE_MASK) >>   \
-   FIO_WEBSOCKET_FLAG_OPCODE_SHIFT)
-```
-
-Read the opcode from the current frame.
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_MSG_OPCODE`
-
-```c
-#define FIO_WEBSOCKET_GET_MSG_OPCODE(p)   \
-  ((p)->flags & FIO_WEBSOCKET_FLAG_MSG_OPCODE_MASK)
-```
-
-Read the message opcode (1=text, 2=binary, 0=none open).
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_PAUSED`
-
-```c
-#define FIO_WEBSOCKET_GET_PAUSED(p)   \
-  (((p)->flags2 & FIO_WEBSOCKET_FLAG2_PAUSED) != 0)
-```
-
-Read the paused flag (one-message-per-parse gate).
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_GET_MSG_RSV`
-
-```c
-#define FIO_WEBSOCKET_GET_MSG_RSV(p)   \
-  (((p)->flags2 & FIO_WEBSOCKET_FLAG2_MSG_RSV_MASK) >>   \
-   FIO_WEBSOCKET_FLAG2_MSG_RSV_SHIFT)
-```
-
-Read the RSV bits from the opening frame (3-bit format).
-
-_Symbol type:_ `macro`
-
------------------------------------------------------
-
-## <a id="fio-stl-439-http-h"></a> `./fio-stl/439 http.h`
-
-30 public symbols.
-
-### Macros
-
-#### `FIO_HTTP_DEFAULT_MAX_HEADER_SIZE`
-
-```c
-#define FIO_HTTP_DEFAULT_MAX_HEADER_SIZE 32768 /* (1UL << 15) */
-```
-
-The default HTTP total header size limit in bytes.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_DEFAULT_MAX_LINE_LEN`
-
-```c
-#define FIO_HTTP_DEFAULT_MAX_LINE_LEN 8192 /* (1UL << 13) */
-```
-
-The default HTTP header line limit in bytes.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_DEFAULT_MAX_BODY_SIZE`
-
-```c
-#define FIO_HTTP_DEFAULT_MAX_BODY_SIZE 33554432 /* (1UL << 25) */
-```
-
-The default HTTP payload size limit in bytes.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE`
-
-```c
-#define FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE 262144 /* (1UL << 18) */
-```
-
-The default WebSocket message size limit in bytes.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_DEFAULT_TIMEOUT`
-
-```c
-#define FIO_HTTP_DEFAULT_TIMEOUT 50
-```
-
-The default timeout for HTTP connections.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_DEFAULT_TIMEOUT_LONG`
-
-```c
-#define FIO_HTTP_DEFAULT_TIMEOUT_LONG 50
-```
-
-The default timeout for long held HTTP connections (WebSockets / SSE).
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER`
-
-```c
-#define FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER 0
-```
-
-Adds a "content-length" header to the HTTP handle (usually redundant).
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT`
-
-```c
-#define FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT ((1UL << 16) - 10UL)
-```
-
-UTF-8 validity tests will be performed only for data shorter than this.
-
-_Symbol type:_ `macro`
-
-#### `FIO_WEBSOCKET_STATS`
-
-```c
-#define FIO_WEBSOCKET_STATS 0
-```
-
-If true, logs longest WebSocket round-trips (using FIO_LOG_INFO).
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_WEBSOCKET_DEFLATE_MIN`
-
-```c
-#define FIO_HTTP_WEBSOCKET_DEFLATE_MIN 1024
-```
-
-Messages smaller than this are not compressed (fits in a single TCP/IP
-packet, compression saves no network overhead).
-
-_Symbol type:_ `macro`
-
-### Types
-
-#### `fio_http_settings_s`
-
-```c
-struct fio_http_settings_s {
-/** Called before body uploads, when a client sends an `Expect` header. */
-void (*pre_http_body)(fio_http_s *h);
-/** Callback for HTTP requests (server) or responses (client). */
-void (*on_http)(fio_http_s *h);
-/** Called when a request / response cycle is finished (for WebSocket /
-* SSE connections, called after `on_close`, when the connection closes). */
-void (*on_finish)(fio_http_s *h);
-/** Authenticate EventSource (SSE) requests, return non-zero to deny.*/
-int (*on_authenticate_sse)(fio_http_s *h);
-/** Authenticate WebSockets Upgrade requests, return non-zero to deny.*/
-int (*on_authenticate_websocket)(fio_http_s *h);
-/** Called once a WebSocket / SSE connection upgrade is complete. */
-void (*on_open)(fio_http_s *h);
-/** Called when a WebSocket message is received. */
-void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
-/** Called when an EventSource event is received. */
-void (*on_eventsource)(fio_http_s *h,
-fio_buf_info_s id,
-fio_buf_info_s event,
-fio_buf_info_s data);
-/** Called when an EventSource reconnect event requests an ID. */
-void (*on_eventsource_reconnect)(fio_http_s *h, fio_buf_info_s id);
-/** Called for WebSocket / SSE connections when outgoing buffer is empty. */
-void (*on_ready)(fio_http_s *h);
-/** Called for open WebSocket / SSE connections during shutting down. */
-void (*on_shutdown)(fio_http_s *h);
-/** Called after a WebSocket / SSE connection is closed (for cleanup). */
-void (*on_close)(fio_http_s *h);
-/** (optional) the callback to be performed when the HTTP service closes. */
-void (*on_stop)(struct fio_http_settings_s *settings);
-/** Default opaque user data for HTTP handles (fio_http_s). */
-void *udata;
-/** Optional SSL/TLS support. */
-fio_io_functions_s *tls_io_func;
-/** Optional SSL/TLS support. */
-fio_io_tls_s *tls;
-/** Optional HTTP task queue (for multi-threading HTTP responses) */
-fio_io_async_s *queue;
-/**
-* A public folder for file transfers - allows to circumvent any
-* application layer logic and simply serve static files.
-*
-* Static file responses are attempted for `GET` and `HEAD` requests
-* only (RFC 9110 §9.3 - a static file is not a valid response to other
-* methods); any other method is forwarded to `on_http` (which may serve
-* files explicitly by calling `fio_http_static_file_response`). On a
-* miss the request is also forwarded to `on_http`. Folders resolve to
-* their `index` file and missing extensions are auto-completed
-* (`.html`, `.htm`, `.txt`, `.md`) - see
-* `FIO_HTTP_STATIC_FILE_COMPLETION`.
-*
-* Pre-compressed variants are supported: when the client's
-* `Accept-Encoding` allows it, an up-to-date `file.br`, `file.zstd`,
-* `file.gz` or `file.zip` variant (preference order: `br`, `zstd`,
-* `gzip`, `deflate`) is served instead of the original file. With
-* `compress_static`, missing `.br` / `.gz` variants are also created on
-* demand (written into this folder). Ranged requests are always served
-* identity (no variant selection).
-*
-* The folder must exist when the listener starts, otherwise the setting
-* is ignored (with an error log).
-*/
-fio_str_info_s public_folder;
-/**
-* The max-age value (in seconds) for caching static files sent from
-* `public_folder`.
-*
-* Defaults to 0 (the `Cache-Control` header is not sent).
-*
-* Note: NOT inherited by routes - a route that serves static files must
-* set its own `max_age`.
-*/
-size_t max_age;
-/**
-* The maximum total of bytes for the overall size of the request string and
-* headers, combined.
-*
-* Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE bytes.
-*/
-uint32_t max_header_size;
-/**
-* The maximum number of bytes allowed per header / request line.
-*
-* Defaults to FIO_HTTP_DEFAULT_MAX_LINE_LEN bytes.
-*/
-uint32_t max_line_len;
-/**
-* The maximum size of an HTTP request's body (posting / downloading).
-*
-* Defaults to FIO_HTTP_DEFAULT_MAX_BODY_SIZE bytes.
-*/
-size_t max_body_size;
-/**
-* The maximum WebSocket message size/buffer (in bytes) for Websocket
-* connections. Defaults to FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE bytes.
-*/
-size_t ws_max_msg_size;
-/** reserved for future use. */
-intptr_t reserved1;
-/** reserved for future use. */
-intptr_t reserved2;
-/**
-* An HTTP/1.x connection timeout.
-*
-* Defaults to FIO_HTTP_DEFAULT_TIMEOUT seconds.
-*
-* Note: the connection might be closed (by other side) before timeout occurs.
-*/
-uint8_t timeout;
-/**
-* Timeout for the WebSocket connections in seconds. Defaults to
-* FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
-*
-* A ping will be sent whenever the timeout is reached.
-*
-* Connections are only closed when a ping cannot be sent (the network layer
-* fails). Pongs are ignored.
-*/
-uint8_t ws_timeout;
-/**
-* Timeout for EventSource (SSE) connections in seconds. Defaults to
-* FIO_HTTP_DEFAULT_TIMEOUT_LONG seconds.
-*
-* A ping will be sent whenever the timeout is reached.
-*
-* Connections are only closed when a ping cannot be sent (the network layer
-* fails).
-*/
-uint8_t sse_timeout;
-/** Timeout for client connections (only relevant in client mode). */
-uint8_t connect_timeout;
-/** Logging flag - set to TRUE to log HTTP requests. */
-uint8_t log;
-/**
-* Opt-in: auto-compress static files - missing `.br` / `.gz` variants are
-* created on demand and written into the `public_folder`.
-*
-* Creation is limited to compressible (text-like) MIME types and file
-* sizes between 1024 bytes and FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT (2
-* MiB), and is skipped when compression wouldn't shrink the file.
-* Variants whose modification time is older than the original file are
-* re-created.
-*
-* Note: on-demand writes are attacker-triggerable - the public folder
-* MUST be writable and quota'd. Pre-generating variants at deploy time is
-* recommended.
-*
-* Note: connection-global (read from the listener's root settings when
-* the connection's handle is attached) - per-route values have no effect.
-*/
-uint8_t compress_static;
-/**
-* Opt-in: auto-compress dynamic HTTP responses on-the-fly.
-*
-* Applies to finished (non-streaming) single-buffer responses larger than
-* 1024 bytes with a compressible (text-like) `Content-Type`, preferring
-* `br` over `gzip` per the client's `Accept-Encoding`. Responses with a
-* pre-set `Content-Encoding` are never re-compressed. `Vary:
-* accept-encoding` is set whenever compression was considered.
-*
-* Note: connection-global (read from the listener's root settings when
-* the connection's handle is attached) - per-route values have no effect.
-*/
-uint8_t compress_dynamic;
-/**
-* Opt-in: enable permessage-deflate for WebSocket connections.
-*
-* Negotiation always forces both `*_no_context_takeover` flags (RFC 7692
-* allows either endpoint to request them unilaterally), keeping
-* persistent per-connection compression state at ~0.
-*
-* Note: connection-global (read from the listener's root settings when
-* the connection's handle is attached) - per-route values have no effect.
-*/
-uint8_t compress_ws;
-}
-```
-
-
-
-_Symbol type:_ `type`
-
-#### `fio_http_listener_s`
-
-```c
-struct fio_http_listener_s
-```
-
-
-
-_Symbol type:_ `type`
-
-#### `fio_http_resource_action_e`
-
-```c
-typedef enum {
-FIO_HTTP_RESOURCE_NONE,
-FIO_HTTP_RESOURCE_INDEX,
-FIO_HTTP_RESOURCE_SHOW,
-FIO_HTTP_RESOURCE_NEW,
-FIO_HTTP_RESOURCE_EDIT,
-FIO_HTTP_RESOURCE_CREATE,
-FIO_HTTP_RESOURCE_UPDATE,
-FIO_HTTP_RESOURCE_DELETE,
-FIO_HTTP_RESOURCE_QUERY,
-} fio_http_resource_action_e
-```
-
-
-
-_Symbol type:_ `type`
-
-#### `fio_http_sse_write_args_s`
-
-```c
-typedef struct {
-/** The message's `id` data (if any). */
-fio_buf_info_s id;
-/** The message's `event` data (if any). */
-fio_buf_info_s event;
-/** The message's `data` data (if any). */
-fio_buf_info_s data;
-} fio_http_sse_write_args_s
-```
-
-Named arguments for fio_http_sse_write.
-
-_Symbol type:_ `type`
-
-### Functions
-
-#### `fio_http_listen`
-
-```c
-fio_http_listener_s *fio_http_listen(const char *url, fio_http_settings_s settings)
-```
-
-Listens to HTTP / WebSockets / SSE connections on `url`.
+Returns non-zero if request headers ask for a WebSockets Upgrade.
 
 _Symbol type:_ `function`
 
-#### `fio_http_listen`
+#### `fio_http_websocket_accepted`
 
 ```c
-#define fio_http_listen(url, ...)   \
-  fio_http_listen(url, (fio_http_settings_s){__VA_ARGS__})
+int fio_http_websocket_accepted(fio_http_s *h)
 ```
 
-Listens to HTTP / WebSockets / SSE connections on `url`.
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
-#### `fio_http_listener_settings`
-
-```c
-fio_http_settings_s *fio_http_listener_settings(fio_http_listener_s *l)
-```
-
-Returns the a pointer to the HTTP settings associated with the listener.
+Returns non-zero if the response accepts a WebSocket upgrade request.
 
 _Symbol type:_ `function`
 
-#### `fio_http_io`
+#### `fio_http_upgrade_websocket`
 
 ```c
-fio_io_s *fio_http_io(fio_http_s *)
+void fio_http_upgrade_websocket(fio_http_s *)
 ```
 
-Returns the IO object associated with the HTTP object (request only).
+Sets response data to agree to a WebSockets Upgrade.
 
 _Symbol type:_ `function`
 
-#### `fio_http_subscribe`
+#### `fio_http_websocket_set_request`
 
 ```c
-#define fio_http_subscribe(h, ...)   \
-  fio_pubsub_subscribe(.io = fio_http_io(h), __VA_ARGS__)
+void fio_http_websocket_set_request(fio_http_s *)
 ```
 
-Macro helper for HTTP handle pub/sub subscriptions.
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
-#### `fio_http_connect`
-
-```c
-fio_io_s *fio_http_connect(const char *url, fio_http_s *h, fio_http_settings_s settings)
-```
-
-Connects to HTTP / WebSockets / SSE connections on `url`.
+Sets request data to request a WebSockets Upgrade.
 
 _Symbol type:_ `function`
 
-#### `fio_http_connect`
+#### `fio_http_sse_requested`
 
 ```c
-#define fio_http_connect(url, h, ...)   \
-  fio_http_connect(url, h, (fio_http_settings_s){__VA_ARGS__})
+int fio_http_sse_requested(fio_http_s *)
 ```
 
-Connects to HTTP / WebSockets / SSE connections on `url`.
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
-#### `fio_http_settings`
-
-```c
-fio_http_settings_s *fio_http_settings(fio_http_s *)
-```
-
-Returns the HTTP settings associated with the HTTP object, if any.
+Returns non-zero if request headers ask for an EventSource (SSE) Upgrade.
 
 _Symbol type:_ `function`
 
-#### `fio_http_route`
+#### `fio_http_sse_accepted`
 
 ```c
-int fio_http_route(fio_http_listener_s *listener, const char *url, fio_http_settings_s settings)
+int fio_http_sse_accepted(fio_http_s *h)
 ```
 
-Adds a route prefix to the HTTP handler.
-
-Order of route settings is irrelevant (unless overwriting an existing route).
-
-Matching is performed as a best-prefix match. i.e.:
-
-- All paths match the route `"/"` (the default prefix).
-
-- The route `"/user"` will match `"/user"` and all `"/user/..."` paths but
-  not `"/user..."`
-
-- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route
-  `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
-  `"/user"` route will continue to behave the same.
-
-Note: the following properties are inherited (if missing) from the
-default HTTP settings used to create the listener: `udata`, `on_finish`,
-`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
-`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
-`timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
-
-Note: TLS options are ignored.
-
-Note: only `on_http`, `on_finish`, `udata`, the authentication
-callbacks, `public_folder` and `max_age` are effective per route. All
-other per-route values are stored but unused - upgraded connection
-callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
-timeouts and the `compress_*` flags are connection-global and are read
-from the listener's root settings.
+Returns non-zero if the response accepts an SSE request.
 
 _Symbol type:_ `function`
 
-#### `fio_http_route`
+#### `fio_http_upgrade_sse`
 
 ```c
-#define fio_http_route(listener, url, ...)   \
-  fio_http_route(listener, url, (fio_http_settings_s){__VA_ARGS__})
+void fio_http_upgrade_sse(fio_http_s *)
 ```
 
-Adds a route prefix to the HTTP handler.
-
-Order of route settings is irrelevant (unless overwriting an existing route).
-
-Matching is performed as a best-prefix match. i.e.:
-
-- All paths match the route `"/"` (the default prefix).
-
-- The route `"/user"` will match `"/user"` and all `"/user/..."` paths but
-  not `"/user..."`
-
-- Setting `"/user/new"` as well as `"/user"` (in whatever order) will route
-  `"/user/new"` and `"/user/new/..."` to `"/user/new"`. Otherwise, the
-  `"/user"` route will continue to behave the same.
-
-Note: the following properties are inherited (if missing) from the
-default HTTP settings used to create the listener: `udata`, `on_finish`,
-`on_stop`, `on_authenticate_sse`, `on_authenticate_websocket`,
-`max_header_size`, `max_line_len`, `max_body_size`, `ws_max_msg_size`,
-`timeout`, `ws_timeout`, `sse_timeout`, `log` and `public_folder`.
-
-Note: TLS options are ignored.
-
-Note: only `on_http`, `on_finish`, `udata`, the authentication
-callbacks, `public_folder` and `max_age` are effective per route. All
-other per-route values are stored but unused - upgraded connection
-callbacks (`on_open`, `on_message`, etc.), `queue`, `log`, limits,
-timeouts and the `compress_*` flags are connection-global and are read
-from the listener's root settings.
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
-#### `fio_http_route_settings`
-
-```c
-fio_http_settings_s *fio_http_route_settings(fio_http_listener_s *l, const char *url)
-```
-
-Returns a link to the settings matching `url`, as set by `fio_http_route`
+Sets response data to agree to an EventSource (SSE) Upgrade.
 
 _Symbol type:_ `function`
 
-#### `fio_http_resource_action`
+#### `fio_http_sse_set_request`
 
 ```c
-inline fio_http_resource_action_e fio_http_resource_action(fio_http_s *h)
+void fio_http_sse_set_request(fio_http_s *)
 ```
 
-returns expected action or `FIO_HTTP_RESOURCE_NONE` on error.
+Sets request data to request an EventSource (SSE) Upgrade.
 
 _Symbol type:_ `function`
 
@@ -37797,5 +37815,15 @@ Writes an SSE message (UTF-8). Fails if connection wasn't upgraded yet.
 _Note:_ this may be a macro only / macro wrapper for a function.
 
 _Symbol type:_ `macro`
+
+#### `fio_http_settings`
+
+```c
+fio_http_settings_s *fio_http_settings(fio_http_s *)
+```
+
+Returns the HTTP settings associated with the HTTP object, if any.
+
+_Symbol type:_ `function`
 
 -----------------------------------------------------

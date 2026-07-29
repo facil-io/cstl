@@ -532,9 +532,9 @@ FIO_SFUNC void fio_bench_brotli_compress(void) {
               dt->name,
               data_size);
 
-      /* fio_brotli_compress at quality 1, 4, 5, 6 */
-      int qualities[] = {1, 4, 5, 6};
-      for (size_t qi = 0; qi < 4; ++qi) {
+      /* fio_brotli_compress at quality 1, 2, 4, 5, 6 */
+      int qualities[] = {1, 2, 4, 5, 6};
+      for (size_t qi = 0; qi < 5; ++qi) {
         int quality = qualities[qi];
         size_t clen = 0;
         char label[64];
@@ -738,6 +738,10 @@ FIO_SFUNC void fio_bench_compression_summary(void) {
 
   FIO___SUMMARY_ROW("fio_brotli (quality 1)",
                     fio_brotli_compress(comp, brotli_bound, src, data_size, 1),
+                    fio_brotli_decompress(dec, decomp_bound, comp, clen));
+
+  FIO___SUMMARY_ROW("fio_brotli (quality 2)",
+                    fio_brotli_compress(comp, brotli_bound, src, data_size, 2),
                     fio_brotli_decompress(dec, decomp_bound, comp, clen));
 
   FIO___SUMMARY_ROW("fio_brotli (quality 4)",

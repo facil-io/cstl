@@ -298,11 +298,6 @@ FIO_MAP Ordering & Naming Shortcut
 ***************************************************************************** */
 
 #if defined(FIO_HTTP)
-#undef FIO_HTTP_HANDLE
-#define FIO_HTTP_HANDLE
-#endif
-
-#if defined(FIO_HTTP_HANDLE)
 #undef FIO_JSON
 #define FIO_JSON
 #undef FIO_MULTIPART
@@ -321,7 +316,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_IPC
 #endif
 
-#if defined(FIO_IPC) || (defined(DEBUG) && defined(FIO_HTTP_HANDLE))
+#if defined(FIO_IPC) || (defined(DEBUG) && defined(FIO_HTTP))
 #undef FIO_IO
 #define FIO_IO
 #endif
@@ -377,13 +372,13 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SOCK
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_FIOBJ) ||    \
+#if defined(FIO_HTTP) || defined(FIO_QUEUE) || defined(FIO_FIOBJ) ||    \
     defined(FIO_LEAK_COUNTER) || defined(FIO_MEMORY_NAME) || defined(FIO_POLL)
 #undef FIO_STATE
 #define FIO_STATE
 #endif
 
-#if defined(FIO_STR) || defined(FIO_HTTP_HANDLE) || defined(FIO_STR_NAME) ||   \
+#if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STR_NAME) ||   \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
@@ -421,7 +416,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_SECRET
 #endif
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_OTP)
+#if defined(FIO_HTTP) || defined(FIO_OTP)
 #define FIO_SHA1
 #endif
 
@@ -479,7 +474,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 ***************************************************************************** */
 
-#if defined(FIO_HTTP_HANDLE) || defined(FIO_QUEUE) || defined(FIO_OTP) ||      \
+#if defined(FIO_HTTP) || defined(FIO_QUEUE) || defined(FIO_OTP) ||      \
     defined(FIO_X509)
 #undef FIO_TIME
 #define FIO_TIME
@@ -490,7 +485,7 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_FILES
 #endif
 
-#if defined(FIO_CLI) || defined(FIO_HTTP_HANDLE) ||                            \
+#if defined(FIO_CLI) || defined(FIO_HTTP) ||                            \
     defined(FIO_HTTP1_PARSER) || defined(FIO_JSON) || defined(FIO_STR) ||      \
     defined(FIO_TIME) || defined(FIO_FILES) || defined(FIO_SECRET)
 #undef FIO_ATOL
@@ -503,7 +498,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_CLI) || defined(FIO_MEMORY_NAME) || defined(FIO_POLL) ||       \
-    defined(FIO_STATE) || defined(FIO_HTTP_HANDLE) || defined(FIO_PUBSUB)
+    defined(FIO_STATE) || defined(FIO_HTTP) || defined(FIO_PUBSUB)
 #undef FIO_IMAP_CORE
 #define FIO_IMAP_CORE
 #endif
@@ -513,14 +508,14 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_MATH
 #endif
 
-#if defined(FIO_CLI) || defined(FIO_FILES) || defined(FIO_HTTP_HANDLE) ||      \
+#if defined(FIO_CLI) || defined(FIO_FILES) || defined(FIO_HTTP) ||      \
     defined(FIO_MEMORY_NAME) || defined(FIO_POLL) || defined(FIO_STATE) ||     \
     defined(FIO_STR) || defined(FIO_WEBSOCKET_PARSER)
 #undef FIO_RAND
 #define FIO_RAND
 #endif
 
-#if defined(FIO_HTTP_HANDLE)
+#if defined(FIO_HTTP)
 #undef FIO_DEFLATE
 #undef FIO_BROTLI
 #define FIO_DEFLATE
@@ -538,7 +533,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_MEMORY_NAME) || defined(FIO_QUEUE) ||                          \
-    (defined(DEBUG) && defined(FIO_STATE)) || defined(FIO_HTTP_HANDLE)
+    (defined(DEBUG) && defined(FIO_STATE)) || defined(FIO_HTTP)
 #undef FIO_THREADS
 #define FIO_THREADS
 #endif

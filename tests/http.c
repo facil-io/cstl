@@ -789,6 +789,580 @@ static void test_websocket_deflate_negotiation(void) {
 }
 
 /* ===========================================================================
+   T021 — WebSocket client connect wrapper (fio_http_websocket_connect)
+
+   Correctness-only, no reactor: `fio_io_connect` without a running reactor
+   opens the client socket and defers protocol attachment, so the outgoing
+   handle is fully prepared (upgrade request headers, path, host) before any
+   IO event fires. A loopback listener provides a connectable address; its
+   bound port is discovered with `getsockname` on the listener's internal fd
+   (the listener URL keeps port 0). The client completion seam
+   (`fio___http_on_http_client`, 434 http accept.h) is driven directly —
+   same precedent as FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM — because running
+   a canned 101 response through the HTTP/1.1 parser requires the reactor's
+   read path. Seam limitation: parser-level response handling
+   (`fio___http1_process_data` / `fio_http1_on_complete`) is not covered
+   here; only the post-parse dispatch logic is.
+   ===========================================================================
+ */
+
+static int test_ws_rec_on_http_calls = 0;
+static fio_http_s *test_ws_rec_on_http_h = NULL;
+static void test_ws_rec_on_http(fio_http_s *h) {
+  ++test_ws_rec_on_http_calls;
+  test_ws_rec_on_http_h = h;
+}
+static int test_ws_rec_on_open_calls = 0;
+static fio_http_s *test_ws_rec_on_open_h = NULL;
+static void test_ws_rec_on_open(fio_http_s *h) {
+  ++test_ws_rec_on_open_calls;
+  test_ws_rec_on_open_h = h;
+}
+
+/** Returns the bound port of a loopback listener created with port 0. */
+static unsigned test_ws_listener_port(fio_http_listener_s *l) {
+  fio___io_listen_s *li = (fio___io_listen_s *)l;
+  struct sockaddr_storage ss;
+  socklen_t slen = (socklen_t)sizeof(ss);
+  if (getsockname(li->fd, (struct sockaddr *)&ss, &slen))
+    return 0;
+  if (ss.ss_family == AF_INET)
+    return (unsigned)ntohs(((struct sockaddr_in *)&ss)->sin_port);
+  if (ss.ss_family == AF_INET6)
+    return (unsigned)ntohs(((struct sockaddr_in6 *)&ss)->sin6_port);
+  return 0;
+}
+
+/** Sets response data accepting the WebSocket upgrade (server-side math). */
+static void test_ws_set_accept_response(fio_http_s *h) {
+  fio_http_status_set(h, 101);
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"connection", 10),
+                               FIO_STR_INFO2((char *)"Upgrade", 7));
+  fio_http_response_header_set(h,
+                               FIO_STR_INFO2((char *)"upgrade", 7),
+                               FIO_STR_INFO2((char *)"websocket", 9));
+  fio_str_info_s k =
+      fio_http_request_header(h,
+                              FIO_STR_INFO2((char *)"sec-websocket-key", 17),
+                              0);
+  FIO_ASSERT(k.len == 24, "accept response: request key missing");
+  FIO_STR_INFO_TMP_VAR(accept_val, 63);
+  fio_string_write(&accept_val, NULL, k.buf, k.len);
+  fio_string_write(&accept_val,
+                   NULL,
+                   "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+                   36);
+  fio_sha1_s sha = fio_sha1(accept_val.buf, accept_val.len);
+  fio_sha1_digest(&sha);
+  accept_val.len = 0;
+  fio_string_write_base64enc(&accept_val,
+                             NULL,
+                             fio_sha1_digest(&sha),
+                             fio_sha1_len(),
+                             0);
+  fio_http_response_header_set(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-accept", 20),
+      accept_val);
+}
+
+/* ---------------------------------------------------------------------------
+ * WORKAROUND — pre-existing library bug; remove when fixed upstream.
+ *
+ * `fio__http_controller_on_destroyed_client` (fio-stl/438 http.h ~L347-360)
+ * pushes `fio___http_controller_on_destroyed_task` TWICE (L348 + L359)
+ * while the failure/close handlers (`fio___http_connect_on_failed`, 438
+ * http.h ~L96-102, and `fio___http_on_close`, 434 http accept.h ~L276-284)
+ * also free the connection — 2 references, 3 frees (ASAN-confirmed
+ * double-free of `fio___http_connection_s` on client connection teardown,
+ * e.g. a synchronous connect failure or a graceful close before upgrade).
+ * The bug is identical at git HEAD (old fio-stl/439 http.h L3145) and
+ * predates the HTTP module split. Adding one reference before teardown
+ * balances the count so these tests stay ASAN-clean. Remove this helper
+ * (and its call sites) when the library bug is fixed.
+ * ---------------------------------------------------------------------------
+ */
+static void test_ws_balance_connection_ref(fio_http_s *h) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+  if (c)
+    fio___http_connection_dup(c);
+}
+
+static void test_websocket_connect_wrapper(void) {
+  fprintf(stderr,
+          "  * WebSocket connect wrapper (scheme normalization, client "
+          "seams)\n");
+
+  /* Loopback listener, so `fio_io_connect` can open a client socket.
+     No reactor is started; the listener never accepts the connection. */
+  fio_http_listener_s *l =
+      fio_http_listen("tcp://127.0.0.1:0", .on_http = test_http_noop_on_http);
+  FIO_ASSERT(l, "wrapper test: fio_http_listen failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "wrapper test: listener port discovery failed");
+
+  /* (a) Scheme normalization: http://, https://, ws:// and scheme-less URLs
+   *     must all produce a handle carrying the WebSocket upgrade request. */
+  {
+    static const struct {
+      const char *fmt;
+      const char *path;
+      const char *query;
+      const char *host;
+    } cases[] = {
+        {"http://127.0.0.1:%u/ws-path?x=1", "/ws-path", "x=1", "127.0.0.1"},
+        {"https://127.0.0.1:%u/p", "/p", "", "127.0.0.1"},
+        {"ws://127.0.0.1:%u/p", "/p", "", "127.0.0.1"},
+        {"localhost:%u/p", "/p", "", "localhost"},
+    };
+    for (size_t i = 0; i < 4; ++i) {
+      char url[256];
+      snprintf(url, sizeof(url), cases[i].fmt, port);
+      test_ws_rec_on_http_calls = test_ws_rec_on_open_calls = 0;
+      fio_http_s *h = fio_http_new();
+      fio_io_s *io = fio_http_websocket_connect(url,
+                                                h,
+                                                .on_http = test_ws_rec_on_http,
+                                                .on_open = test_ws_rec_on_open);
+      FIO_ASSERT(io, "websocket_connect(%s): failed to create an IO", url);
+      FIO_ASSERT(fio_http_websocket_requested(h) == 1,
+                 "websocket_connect(%s): handle must carry the WS upgrade "
+                 "request (upgrade + sec-websocket-key + version)",
+                 url);
+      fio_str_info_s m = fio_http_method(h);
+      FIO_ASSERT(m.len == 3 && !FIO_MEMCMP(m.buf, "GET", 3),
+                 "websocket_connect(%s): method should default to GET",
+                 url);
+      fio_str_info_s path = fio_http_path(h);
+      FIO_ASSERT(path.len == strlen(cases[i].path) &&
+                     !FIO_MEMCMP(path.buf, cases[i].path, path.len),
+                 "websocket_connect(%s): path should be %s",
+                 url,
+                 cases[i].path);
+      fio_str_info_s query = fio_http_query(h);
+      FIO_ASSERT(query.len == strlen(cases[i].query) &&
+                     !FIO_MEMCMP(query.buf, cases[i].query, query.len),
+                 "websocket_connect(%s): query mismatch",
+                 url);
+      fio_str_info_s host =
+          fio_http_request_header(h, FIO_STR_INFO2((char *)"host", 4), 0);
+      FIO_ASSERT(host.len == strlen(cases[i].host) &&
+                     !FIO_MEMCMP(host.buf, cases[i].host, host.len),
+                 "websocket_connect(%s): host header should be %s",
+                 url,
+                 cases[i].host);
+      FIO_ASSERT(!test_ws_rec_on_http_calls && !test_ws_rec_on_open_calls,
+                 "websocket_connect(%s): no callback may fire before the "
+                 "response is processed",
+                 url);
+      /* teardown: close the IO and drain the deferred tasks (reactor-less
+         equivalents of the reactor's close path). The balancing reference
+         works around the pre-existing teardown double-free (see helper). */
+      test_ws_balance_connection_ref(h);
+      fio_io_close(io);
+      fio_queue_perform_all(fio_io_queue());
+    }
+  }
+
+  /* (b) Acceptance: a 101 response switches the handle to the WebSocket
+   *     protocol / controller and fires `on_open` (not `on_http`). */
+  {
+    char url[256];
+    snprintf(url, sizeof(url), "ws://127.0.0.1:%u/ws", port);
+    test_ws_rec_on_http_calls = test_ws_rec_on_open_calls = 0;
+    test_ws_rec_on_open_h = NULL;
+    fio_http_s *h = fio_http_new();
+    fio_io_s *io = fio_http_websocket_connect(url,
+                                              h,
+                                              .on_http = test_ws_rec_on_http,
+                                              .on_open = test_ws_rec_on_open);
+    FIO_ASSERT(io, "acceptance: connect failed");
+    FIO_ASSERT(fio_http_websocket_requested(h) == 1,
+               "acceptance: upgrade request missing");
+    test_ws_set_accept_response(h);
+    FIO_ASSERT(fio_http_websocket_accepted(h) == 1,
+               "acceptance: crafted 101 response should be accepted");
+    /* mimic the reactor-time wiring (fio___connecting_on_ready +
+       fio___http1_on_attach_client): link the IO and the connection */
+    fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+    c->io = io;
+    fio_io_udata_set(io, c);
+    /* drive the client completion seam directly */
+    fio___http_on_http_client(h, NULL);
+    fio___http_protocol_s *p =
+        FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings);
+    FIO_ASSERT(fio_http_controller(h) ==
+                   &p->state[FIO___HTTP_PROTOCOL_WS].controller,
+               "acceptance: handle controller should switch to WebSocket");
+    FIO_ASSERT(!test_ws_rec_on_open_calls,
+               "acceptance: on_open must wait for the protocol switch");
+    /* the deferred protocol switch attaches the WS protocol (on_open) and
+       tears everything down; the WS controller frees the connection in a
+       single pass, so no balancing reference is required here */
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(test_ws_rec_on_open_calls == 1 && test_ws_rec_on_open_h == h,
+               "acceptance: on_open should fire once the WS protocol "
+               "attaches (got %d)",
+               test_ws_rec_on_open_calls);
+    FIO_ASSERT(!test_ws_rec_on_http_calls,
+               "acceptance: on_http must not fire for a 101 response");
+  }
+
+  /* (c) Rejection: a non-101 response is routed to `settings.on_http`
+   *     with the response handle (`on_open` must not fire). */
+  {
+    char url[256];
+    snprintf(url, sizeof(url), "ws://127.0.0.1:%u/ws", port);
+    test_ws_rec_on_http_calls = test_ws_rec_on_open_calls = 0;
+    test_ws_rec_on_http_h = NULL;
+    fio_http_s *h = fio_http_new();
+    fio_io_s *io = fio_http_websocket_connect(url,
+                                              h,
+                                              .on_http = test_ws_rec_on_http,
+                                              .on_open = test_ws_rec_on_open);
+    FIO_ASSERT(io, "rejection: connect failed");
+    fio_http_status_set(h, 200);
+    FIO_ASSERT(!fio_http_websocket_accepted(h),
+               "rejection: a 200 response must not be accepted as an "
+               "upgrade");
+    /* drive the client completion seam directly */
+    fio___http_on_http_client(h, NULL);
+    /* balancing reference for the pre-existing teardown double-free (see
+       helper); the queued user callback frees the handle when drained */
+    test_ws_balance_connection_ref(h);
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(test_ws_rec_on_http_calls == 1 && test_ws_rec_on_http_h == h,
+               "rejection: on_http should fire once with the response "
+               "handle (got %d)",
+               test_ws_rec_on_http_calls);
+    FIO_ASSERT(!test_ws_rec_on_open_calls,
+               "rejection: on_open must not fire for a non-101 response");
+    /* the IO outlived the handle; close it and drain the close path */
+    fio_io_close(io);
+    fio_queue_perform_all(fio_io_queue());
+  }
+
+  fio_io_listen_stop((fio_io_listener_s *)l);
+}
+
+/* ===========================================================================
+   T032 — compress_static failure-memoization tests
+
+   Covers the note-result seam (`fio___http_static_compress_note_result`)
+   directly, the attached-handle gate against a read-only public folder
+   (EACCES → immediate permanent disable, no retry), and the unchanged
+   detached-handle path (CFLAG-gated on-demand `.br` creation).
+   ===========================================================================
+ */
+
+static void test_static_compress_note_result(void) {
+  fprintf(stderr, "  * static compress failure-memoization seam\n");
+
+  fio_http_settings_s s;
+
+  /* (a) From 1, eight consecutive failures shift the runway out of the
+   *     uint8_t: 1→2→4→…→128→0; once 0, further failures keep it 0. */
+  {
+    static const uint8_t walk[8] = {2, 4, 8, 16, 32, 64, 128, 0};
+    FIO_MEMSET(&s, 0, sizeof(s));
+    s.compress_static = 1;
+    for (size_t i = 0; i < 8; ++i) {
+      fio___http_static_compress_note_result(&s, EINVAL);
+      FIO_ASSERT(s.compress_static == walk[i],
+                 "runway step %zu: expected %u, got %u",
+                 i,
+                 (unsigned)walk[i],
+                 (unsigned)s.compress_static);
+    }
+    fio___http_static_compress_note_result(&s, EINVAL);
+    FIO_ASSERT(!s.compress_static,
+               "disabled (0) must stay disabled on further failures");
+    fio___http_static_compress_note_result(&s, EINVAL);
+    FIO_ASSERT(!s.compress_static,
+               "disabled (0) must stay disabled on further failures");
+  }
+
+  /* (b) Success re-seeds bit 0, restoring the 8-failure runway:
+   *     1 → fail → 2 → success → 3 → fail → 6 → success → 7. */
+  {
+    FIO_MEMSET(&s, 0, sizeof(s));
+    s.compress_static = 1;
+    fio___http_static_compress_note_result(&s, EINVAL);
+    FIO_ASSERT(s.compress_static == 2, "re-seed: expected 2, got %u",
+               (unsigned)s.compress_static);
+    fio___http_static_compress_note_result(&s, 0);
+    FIO_ASSERT(s.compress_static == 3 && (s.compress_static & 1),
+               "re-seed: success must set bit 0 (expected 3, got %u)",
+               (unsigned)s.compress_static);
+    fio___http_static_compress_note_result(&s, EINVAL);
+    FIO_ASSERT(s.compress_static == 6, "re-seed: expected 6, got %u",
+               (unsigned)s.compress_static);
+    fio___http_static_compress_note_result(&s, 0);
+    FIO_ASSERT(s.compress_static == 7 && (s.compress_static & 1),
+               "re-seed: success must set bit 0 (expected 7, got %u)",
+               (unsigned)s.compress_static);
+  }
+
+  /* (c) Fatal errnos (filesystem cannot accept new files) disable
+   *     immediately from any non-zero value. */
+  {
+    FIO_MEMSET(&s, 0, sizeof(s));
+    s.compress_static = 3;
+    fio___http_static_compress_note_result(&s, ENOSPC);
+    FIO_ASSERT(!s.compress_static, "ENOSPC must disable immediately");
+    s.compress_static = 3;
+    fio___http_static_compress_note_result(&s, EACCES);
+    FIO_ASSERT(!s.compress_static, "EACCES must disable immediately");
+    s.compress_static = 3;
+    fio___http_static_compress_note_result(&s, EROFS);
+    FIO_ASSERT(!s.compress_static, "EROFS must disable immediately");
+#ifdef EDQUOT
+    s.compress_static = 3;
+    fio___http_static_compress_note_result(&s, EDQUOT);
+    FIO_ASSERT(!s.compress_static, "EDQUOT must disable immediately");
+#endif
+  }
+
+  /* (d) NULL settings is a no-op (detached handles carry no state). */
+  {
+    fio___http_static_compress_note_result(NULL, 0);
+    fio___http_static_compress_note_result(NULL, EINVAL);
+    fio___http_static_compress_note_result(NULL, EACCES);
+  }
+
+  /* (e) No mapping: the shift keeps the 8-bit width (200<<1 mod 256 = 144);
+   *     success only ORs bit 0 (200 → 201). */
+  {
+    FIO_MEMSET(&s, 0, sizeof(s));
+    s.compress_static = 200;
+    fio___http_static_compress_note_result(&s, EINVAL);
+    FIO_ASSERT(s.compress_static == 144,
+               "8-bit shift: expected 144, got %u",
+               (unsigned)s.compress_static);
+    s.compress_static = 200;
+    fio___http_static_compress_note_result(&s, 0);
+    FIO_ASSERT(s.compress_static == 201,
+               "success re-seed: expected 201, got %u",
+               (unsigned)s.compress_static);
+  }
+}
+
+static void test_static_compress_attached_readonly(void) {
+  fprintf(stderr,
+          "  * static compress memoization (attached handle, read-only "
+          "folder)\n");
+#if FIO_OS_WIN
+  fprintf(stderr,
+          "    (skipped on Windows — POSIX folder permission semantics "
+          "required)\n");
+#else
+  enum { CONTENT_LEN = 4096 };
+  char content[CONTENT_LEN];
+  for (size_t i = 0; i < CONTENT_LEN; ++i)
+    content[i] = (char)('a' + (i & 15));
+
+  char dir[512];
+  size_t dir_len =
+      test_static_make_tree(dir, sizeof(dir), content, CONTENT_LEN, 0);
+  FIO_ASSERT(dir_len > 0, "read-only test: failed to create test tree");
+
+  /* Attached handle via the client-connection precedent (see
+     test_websocket_connect_wrapper): `fio_http_settings(h)` resolves the
+     route settings, so the settings gate (not the cflag gate) applies. */
+  fio_http_listener_s *l =
+      fio_http_listen("tcp://127.0.0.1:0", .on_http = test_http_noop_on_http);
+  FIO_ASSERT(l, "read-only test: fio_http_listen failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "read-only test: listener port discovery failed");
+  char url[256];
+  snprintf(url, sizeof(url), "ws://127.0.0.1:%u/file", port);
+  fio_http_s *h = fio_http_new();
+  fio_io_s *io =
+      fio_http_websocket_connect(url, h, .on_http = test_http_noop_on_http);
+  FIO_ASSERT(io, "read-only test: failed to create an attached handle");
+  /* the client wrapper sets `path` only; the settings resolver routes on
+     `opath` (set by the server parser on a live request) */
+  fio_http_opath_set(h, fio_http_path(h));
+  fio_http_settings_s *st = fio_http_settings(h);
+  FIO_ASSERT(st,
+             "read-only test: attached handle must resolve route settings");
+  st->compress_static = 1;
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept-encoding", 15),
+                              FIO_STR_INFO1((char *)"br, gzip"));
+
+  /* Make the folder read-only; skip gracefully if permissions are not
+     enforced (root, or a filesystem that ignores mode bits). */
+  int skipped = 0;
+  if (chmod(dir, 0555)) {
+    skipped = 1;
+  } else {
+    char probe[512];
+    snprintf(probe, sizeof(probe), "%s%cprobe.tmp", dir, FIO_FOLDER_SEPARATOR);
+    FILE *pf = fopen(probe, "wb");
+    if (pf) {
+      fclose(pf);
+      unlink(probe);
+      skipped = 1; /* create succeeded — permissions not enforced */
+    }
+  }
+  if (skipped) {
+    fprintf(stderr,
+            "    (skipped — folder permissions not enforced, e.g. running "
+            "as root)\n");
+    chmod(dir, 0755);
+    test_ws_balance_connection_ref(h);
+    fio_io_close(io);
+    fio_queue_perform_all(fio_io_queue());
+    fio_io_listen_stop((fio_io_listener_s *)l);
+    test_static_tree_cleanup(dir);
+    return;
+  }
+
+  /* Request 1: on-demand creation is attempted, the write fails with
+   * EACCES, the original file is served identity, and the settings value
+   * self-disables to 0 (fatal errno → immediate permanent disable). */
+  fio_http_status_set(h, 200); /* the status is caller/protocol supplied */
+  int r = fio_http_static_file_response(h,
+                                        FIO_STR_INFO2(dir, dir_len),
+                                        FIO_STR_INFO1((char *)"/test.txt"),
+                                        0);
+  FIO_ASSERT(r == 0, "read-only req1: response should succeed");
+  FIO_ASSERT(fio_http_status(h) == 200,
+             "read-only req1: expected status 200, got %u",
+             (unsigned)fio_http_status(h));
+  fio_str_info_s ce = fio_http_response_header(
+      h,
+      FIO_STR_INFO2((char *)"content-encoding", 16),
+      0);
+  FIO_ASSERT(!ce.buf,
+             "read-only req1: content-encoding must be absent (identity "
+             "response; got '%.*s')",
+             (int)ce.len,
+             ce.buf ? ce.buf : "");
+  uint8_t cv;
+  fio_atomic_load(cv, &st->compress_static);
+  FIO_ASSERT(!cv,
+             "read-only req1: EACCES must disable compress_static "
+             "immediately (got %u)",
+             (unsigned)cv);
+
+  /* Request 2: the memoized failure must prevent any retry — the value
+   * stays 0 and no `.br` / `.gz` variant appears on disk. */
+  fio_http_clear_response(h, 1);
+  fio_http_status_set(h, 200);
+  r = fio_http_static_file_response(h,
+                                    FIO_STR_INFO2(dir, dir_len),
+                                    FIO_STR_INFO1((char *)"/test.txt"),
+                                    0);
+  FIO_ASSERT(r == 0, "read-only req2: response should succeed");
+  FIO_ASSERT(fio_http_status(h) == 200,
+             "read-only req2: expected status 200, got %u",
+             (unsigned)fio_http_status(h));
+  ce = fio_http_response_header(h,
+                                FIO_STR_INFO2((char *)"content-encoding", 16),
+                                0);
+  FIO_ASSERT(!ce.buf,
+             "read-only req2: content-encoding must be absent (got '%.*s')",
+             (int)ce.len,
+             ce.buf ? ce.buf : "");
+  fio_atomic_load(cv, &st->compress_static);
+  FIO_ASSERT(!cv,
+             "read-only req2: compress_static must remain disabled (got %u)",
+             (unsigned)cv);
+  {
+    struct stat vst;
+    char vpath[512];
+    snprintf(vpath,
+             sizeof(vpath),
+             "%s%ctest.txt.br",
+             dir,
+             FIO_FOLDER_SEPARATOR);
+    FIO_ASSERT(fio_filename_stat(vpath, &vst),
+               "read-only req2: no .br variant may be created after "
+               "memoized failure");
+    snprintf(vpath,
+             sizeof(vpath),
+             "%s%ctest.txt.gz",
+             dir,
+             FIO_FOLDER_SEPARATOR);
+    FIO_ASSERT(fio_filename_stat(vpath, &vst),
+               "read-only req2: no .gz variant may be created after "
+               "memoized failure");
+  }
+
+  /* teardown: balancing reference for the pre-existing client-connection
+     teardown double-free (see helper), then restore perms and clean up. */
+  test_ws_balance_connection_ref(h);
+  fio_io_close(io);
+  fio_queue_perform_all(fio_io_queue());
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  chmod(dir, 0755);
+  test_static_tree_cleanup(dir);
+#endif /* FIO_OS_WIN */
+}
+
+static void test_static_compress_detached_creation(void) {
+  fprintf(stderr,
+          "  * static compress on-demand creation (detached handle, "
+          "writable folder)\n");
+
+  enum { CONTENT_LEN = 4096 };
+  char content[CONTENT_LEN];
+  for (size_t i = 0; i < CONTENT_LEN; ++i)
+    content[i] = (char)('a' + (i & 15));
+
+  char dir[512];
+  size_t dir_len =
+      test_static_make_tree(dir, sizeof(dir), content, CONTENT_LEN, 0);
+  FIO_ASSERT(dir_len > 0, "detached creation: failed to create test tree");
+
+  /* Detached handle (no route settings): the legacy CFLAG gate still
+   * enables on-demand creation — a missing `.br` variant is created,
+   * written into the folder, and served with content-encoding: br. */
+  fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+  FIO_ASSERT(!fio_http_settings(h),
+             "detached creation: handle must be detached (no settings)");
+  fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept-encoding", 15),
+                              FIO_STR_INFO1((char *)"br"));
+  fio_http_status_set(h, 200); /* the status is caller/protocol supplied */
+  int r = fio_http_static_file_response(h,
+                                        FIO_STR_INFO2(dir, dir_len),
+                                        FIO_STR_INFO1((char *)"/test.txt"),
+                                        0);
+  FIO_ASSERT(r == 0, "detached creation: response should succeed");
+  FIO_ASSERT(fio_http_status(h) == 200,
+             "detached creation: expected status 200, got %u",
+             (unsigned)fio_http_status(h));
+  fio_str_info_s ce = fio_http_response_header(
+      h,
+      FIO_STR_INFO2((char *)"content-encoding", 16),
+      0);
+  FIO_ASSERT(ce.len == 2 && !memcmp(ce.buf, "br", 2),
+             "detached creation: expected content-encoding br, got '%.*s'",
+             (int)ce.len,
+             ce.buf ? ce.buf : "");
+  {
+    struct stat vst;
+    char vpath[512];
+    snprintf(vpath,
+             sizeof(vpath),
+             "%s%ctest.txt.br",
+             dir,
+             FIO_FOLDER_SEPARATOR);
+    FIO_ASSERT(!fio_filename_stat(vpath, &vst) && vst.st_size > 0,
+               "detached creation: the .br variant must be created on "
+               "disk");
+    unlink(vpath);
+  }
+  fio_http_free(h);
+  test_static_tree_cleanup(dir);
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -810,6 +1384,10 @@ int main(void) {
   test_sse_newline_first_edge_case();
   test_static_vary_and_range_guards();
   test_websocket_deflate_negotiation();
+  test_websocket_connect_wrapper();
+  test_static_compress_note_result();
+  test_static_compress_attached_readonly();
+  test_static_compress_detached_creation();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

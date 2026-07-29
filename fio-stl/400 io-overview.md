@@ -29,7 +29,7 @@ WebSocket, and SSE.
         │ uses (internal)                          │ optional
         ▼                                          ▼
  ┌──────────────────────────────┐    ┌─────────────────────────────┐
- │  HTTP parsers  (431)          │    │     Pub/Sub  (420)           │
+ │  HTTP parsers  (004)          │    │     Pub/Sub  (420)           │
  │  · HTTP/1.1 parser            │    │  subscribe · publish         │
  │  · WebSocket parser (RFC6455) │    │  pattern matching · replay   │
  │  · HTTP Handle  (internal)    │    │  pluggable engine interface  │
@@ -199,10 +199,10 @@ All mutation runs on the IO thread via `fio_io_defer`.
 
 ---
 
-### HTTP Parsers — 431 http1 parser.h · 431 websocket parser.h
+### HTTP Parsers — 004 http1 parser.h · 004 websocket parser.h
 
 **Enable with:** `#define FIO_HTTP1_PARSER` / `#define FIO_WEBSOCKET_PARSER`  
-**Docs:** [./431 http1 parser.md](./431 http1 parser.md) · [./431 websocket parser.md](./431 websocket parser.md) *(planned)*
+**Docs:** [./004 http1 parser.md](./004 http1 parser.md) · [./004 websocket parser.md](./004 websocket parser.md)
 
 Zero-allocation, event-driven parsers — no internal buffering, no heap.
 
@@ -219,9 +219,9 @@ Zero-allocation, event-driven parsers — no internal buffering, no heap.
 These are the building blocks used internally by the HTTP layer. Direct use
 is for protocol-level work or embedding the parsers in a custom IO protocol.
 
-**HTTP Handle** (`431 http handle.h`, `#define FIO_HTTP_HANDLE`) is an
-internal module — the `fio_http_s` request/response state object with header
-cache, body (RAM or file), and logging support. It is fully covered by the
+**HTTP Handle** (internal — core in `432 http types.h`) is the
+`fio_http_s` request/response state object with header
+cache, body (RAM or file), and logging support. The handle is fully covered by the
 HTTP documentation; there is no separate public handle doc.
 
 ---
@@ -229,7 +229,7 @@ HTTP documentation; there is no separate public handle doc.
 ### HTTP — 439 http.h
 
 **Enable with:** `#define FIO_HTTP`  
-**Docs:** [./439 http.md](./439 http.md) *(planned)*
+**Docs:** [./439 http.md](./439 http.md)
 
 The top-level server and client. `fio_http_listen` registers an HTTP service
 on the IO reactor; `fio_http_connect` opens an HTTP client connection.
@@ -344,7 +344,7 @@ If you are implementing a custom TLS backend or need direct access to the TLS 1.
 | `405 tls13.h` | Native TLS 1.3 IO backend | [./405 tls13.md](./405 tls13.md) |
 | `420 pubsub.h` | Pub/Sub | [./420 pubsub.md](./420 pubsub.md) |
 | `422 redis.h` | Redis engine | [./422 redis.md](./422 redis.md) |
-| `431 http1 parser.h` | HTTP/1.1 parser | [./431 http1 parser.md](./431 http1 parser.md) |
-| `431 websocket parser.h` | WebSocket parser | [./431 websocket parser.md](./431 websocket parser.md) |
-| `431 http handle.h` | HTTP Handle (internal) | covered by HTTP docs |
+| `004 http1 parser.h` | HTTP/1.1 parser | [./004 http1 parser.md](./004 http1 parser.md) |
+| `004 websocket parser.h` | WebSocket parser | [./004 websocket parser.md](./004 websocket parser.md) |
+| `432 http types.h` | HTTP types / handle (internal) | covered by HTTP docs |
 | `439 http.h` | HTTP server / client | [./439 http.md](./439 http.md) |

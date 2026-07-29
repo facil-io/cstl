@@ -214,9 +214,12 @@ FIO_IFUNC int fio_filename_overwrite(const char *filename,
   if (fd == -1)
     return -1;
   ssize_t w = fio_fd_write(fd, buf, len);
+  int saved_errno = errno; /* preserve the write's errno across close() */
   close(fd);
-  if ((size_t)w != len)
+  if ((size_t)w != len) {
+    errno = saved_errno;
     return -1;
+  }
   return 0;
 }
 

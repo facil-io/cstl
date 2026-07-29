@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**API Changes** (`http`): the HTTP module was split into per-concern files — `430 http api.h` (public declarations), `432 http types.h` (internal types + handle/core implementation), `434 http accept.h` / `434 http1.h` / `434 sse.h` / `434 websocket.h` (protocol glue), `438 http.h` (listen/connect/protocol wiring) and `439 http.h` (cleanup tail). The standalone parsers moved from `431 http1 parser.h` / `431 websocket parser.h` to `004 http1 parser.h` / `004 websocket parser.h`.
+
+- `FIO_HTTP_HANDLE` was removed: `FIO_HTTP` is the only HTTP module flag.
+- New client API: `fio_http_websocket_connect(url, h, ...)` — a convenience wrapper around `fio_http_connect` that normalizes the URL scheme (`http://` -> `ws://`, `https://` -> `wss://`, missing scheme -> `ws://`).
+- `compress_static` is now per-route (routes inherit the listener's root value at route-creation; it is no longer copied to the handle at attach — `compress_dynamic` / `compress_ws` still are). It became a failure-memoization shift register: a compression success re-seeds bit 0 (`value |= 1`), any other failure shifts left (`value <<= 1`, so 8 consecutive failures disable on-demand creation), and `ENOSPC` / `EACCES` / `EROFS` / `EDQUOT` disables immediately (`value = 0`) until the settings are re-applied. Detached handles (no settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag instead.
+- On-demand static brotli compression uses quality 4 (benchmark-confirmed fast-path ceiling).
+- (`files`) `fio_filename_overwrite` now preserves `errno` on failure.
+
 **API Changes** (`x509`): renamed the signature/public-key algorithm identifiers in `fio_x509_cert_s` for clarity and internal consistency (both fields are `AlgorithmIdentifier`s per RFC 5280):
 
 - Struct members: `sig_alg` -> `signature_algo`, `key_type` -> `key_algo`

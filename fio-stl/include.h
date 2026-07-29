@@ -62,6 +62,9 @@
 #ifdef FIO_FILES
 #include "004 files.h"
 #endif
+#if defined(FIO_HTTP1_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "004 http1 parser.h"
+#endif
 #ifdef FIO_JSON
 #include "004 json.h"
 #endif
@@ -82,6 +85,9 @@
 #endif
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
+#endif
+#if defined(FIO_WEBSOCKET_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "004 websocket parser.h"
 #endif
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "005 cli.h"
@@ -245,18 +251,14 @@
 #include "422 redis.h"
 #endif
 
-#if defined(FIO_HTTP1_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "431 http1 parser.h"
-#endif
-#if defined(FIO_WEBSOCKET_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "431 websocket parser.h"
-#endif
-
-#if defined(FIO_HTTP_HANDLE) && !defined(FIO___RECURSIVE_INCLUDE)
-#include "431 http handle.h"
-#endif
-
 #if defined(FIO_HTTP) && !defined(FIO___RECURSIVE_INCLUDE)
+#include "430 http api.h"
+#include "432 http types.h"
+#include "434 http accept.h"
+#include "434 http1.h"
+#include "434 sse.h"
+#include "434 websocket.h"
+#include "438 http.h"
 #include "439 http.h"
 #endif
 
