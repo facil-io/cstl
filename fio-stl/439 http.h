@@ -15,6 +15,6 @@ once per template instantiation pass.
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#ifdef FIO___RECURSIVE_INCLUDE
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_HTTP)
 #undef FIO_HTTP
 #endif

@@ -249,10 +249,9 @@ void fio_http_websocket_connect___(void); /* IDE Marker */
  * WebSocket callbacks (`on_open` / `on_message` / `on_close`), otherwise
  * the response is routed to `settings.on_http`.
  */
-SFUNC fio_io_s *fio_http_websocket_connect FIO_NOOP(
-    const char *url,
-    fio_http_s *h,
-    fio_http_settings_s s) {
+SFUNC fio_io_s *fio_http_websocket_connect FIO_NOOP(const char *url,
+                                                    fio_http_s *h,
+                                                    fio_http_settings_s s) {
   FIO_STR_INFO_TMP_VAR(nurl, 4096);
   if (url)
     url = fio___http_websocket_normalize_url(url, &nurl);
@@ -581,7 +580,6 @@ SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *h) {
   r = fio___http_route_settings(&p->router, &path);
   return r;
 }
-
 
 /* *****************************************************************************
 HTTP Glue Finish

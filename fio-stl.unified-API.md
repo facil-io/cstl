@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3132.
+Total symbols: 3133.
 
 ## Contents
 
@@ -78,7 +78,7 @@ Total symbols: 3132.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 150
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 151
 
 -----------------------------------------------------
 
@@ -35707,7 +35707,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-150 public symbols.
+151 public symbols.
 
 ### Macros
 
@@ -37213,6 +37213,16 @@ int fio_http_body_fd(fio_http_s *)
 If the body is stored in a temporary file, returns the file's handle.
 
 Otherwise returns -1.
+
+_Symbol type:_ `function`
+
+#### `fio_http_body_close`
+
+```c
+void fio_http_body_close(fio_http_s *)
+```
+
+Releases body (payload) resources, closing any temporary files.
 
 _Symbol type:_ `function`
 

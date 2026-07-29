@@ -734,6 +734,9 @@ SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
  */
 SFUNC int fio_http_body_fd(fio_http_s *);
 
+/** Releases body (payload) resources, closing any temporary files. */
+SFUNC void fio_http_body_close(fio_http_s *);
+
 /* *****************************************************************************
 Path Section Looping
 ***************************************************************************** */

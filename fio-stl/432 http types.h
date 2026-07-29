@@ -266,7 +266,6 @@ FIO_IFUNC fio_http_resource_action_e fio_http_resource_action(fio_http_s *h) {
   return r;
 }
 
-
 /*
 REMEMBER:
 ========
@@ -521,7 +520,6 @@ typedef struct {
 #define FIO___RECURSIVE_INCLUDE 1
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
-
 
 /* *****************************************************************************
 HTTP Routing
@@ -2246,6 +2244,16 @@ SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
  * Otherwise returns -1.
  */
 SFUNC int fio_http_body_fd(fio_http_s *h) { return h->body.fd; }
+
+/** Releases body (payload) resources, closing any temporary files. */
+SFUNC void fio_http_body_close(fio_http_s *h) {
+  fio_bstr_free(h->body.buf);
+  if (h->body.fd != -1)
+    close(h->body.fd);
+  h->body.buf = NULL;
+  h->body.len = h->body.pos = 0;
+  h->body.fd = -1;
+}
 
 /** Adjusts the body's reading position. Negative values start at the end. */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
@@ -4225,8 +4233,9 @@ FIO_SFUNC int fio___http_mime_is_compressible(fio_str_info_s mime) {
  * NULL `settings` is a no-op (detached handles carry no memoization
  * state).
  */
-FIO_SFUNC void fio___http_static_compress_note_result(fio_http_settings_s *settings,
-                                                      int result) {
+FIO_SFUNC void fio___http_static_compress_note_result(
+    fio_http_settings_s *settings,
+    int result) {
   if (!settings)
     return;
   uint8_t *p = &settings->compress_static;

@@ -20744,11 +20744,17 @@ fio_str_info_s fio_http_body_read_until(fio_http_s *h,
 void           fio_http_body_expect(fio_http_s *h, size_t expected_length);
 void           fio_http_body_write(fio_http_s *h, const void *data, size_t len);
 int            fio_http_body_fd(fio_http_s *h);
+void           fio_http_body_close(fio_http_s *h);
 ```
 
 The handle stores body data in RAM until the configured threshold is crossed,
 then uses a temporary file. `fio_http_body_fd` returns that file descriptor or
 `-1`.
+
+`fio_http_body_close` releases the body's RAM buffer and temporary file (if
+any) and resets the body to empty. The body is also released automatically
+when the handle is cleared or destroyed, so calling this is only needed to
+free resources early, once the body has been consumed.
 
 ### Body parsing
 

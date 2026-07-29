@@ -6,6 +6,7 @@
 
 - `FIO_HTTP_HANDLE` was removed: `FIO_HTTP` is the only HTTP module flag.
 - New client API: `fio_http_websocket_connect(url, h, ...)` — a convenience wrapper around `fio_http_connect` that normalizes the URL scheme (`http://` -> `ws://`, `https://` -> `wss://`, missing scheme -> `ws://`).
+- New body API: `fio_http_body_close(h)` releases the body's RAM buffer and temporary file (if any) and resets the body to empty, so body resources can be freed early once the body was consumed.
 - `compress_static` is now per-route (routes inherit the listener's root value at route-creation; it is no longer copied to the handle at attach — `compress_dynamic` / `compress_ws` still are). It became a failure-memoization shift register: a compression success re-seeds bit 0 (`value |= 1`), any other failure shifts left (`value <<= 1`, so 8 consecutive failures disable on-demand creation), and `ENOSPC` / `EACCES` / `EROFS` / `EDQUOT` disables immediately (`value = 0`) until the settings are re-applied. Detached handles (no settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag instead.
 - On-demand static brotli compression uses quality 4 (benchmark-confirmed fast-path ceiling).
 - (`files`) `fio_filename_overwrite` now preserves `errno` on failure.
