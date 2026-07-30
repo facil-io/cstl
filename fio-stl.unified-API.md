@@ -31482,6 +31482,7 @@ uint32_t end;
 /* end common header (with embedded array type) */
 /** The array's capacity - limited to 32bits, but we use the extra padding. */
 uint32_t capa;
+uint32_t padding__;
 /** a pointer to the array's memory (if not embedded) */
 FIO_ARRAY_TYPE *ary;
 #if FIO_ARRAY_ENABLE_EMBEDDED > 1

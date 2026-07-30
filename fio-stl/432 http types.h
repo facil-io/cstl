@@ -1710,7 +1710,7 @@ FIO_IFUNC void fio___http_cookie_parse_cookie(fio_http_s *h, fio_str_info_s s) {
   while (s.len) {
     fio_str_info_s k = {0}, v = {0};
     /* remove white-space */
-    while ((s.buf[0] == ' ' || s.buf[0] == '\t') && s.len) {
+    while (s.len && (s.buf[0] == ' ' || s.buf[0] == '\t')) {
       ++s.buf;
       --s.len;
     }
@@ -4838,7 +4838,7 @@ static fio___http_mime_map_s FIO___HTTP_MIMETYPES;
 SFUNC int fio_http_mimetype_register(char *file_ext,
                                      size_t file_ext_len,
                                      fio_str_info_s mime_type) {
-  fio___http_mime_info_s tmp, *old;
+  fio___http_mime_info_s tmp = {0}, *old;
   if (file_ext_len > 7 || mime_type.len > 117)
     return -1;
   tmp.ext = 0;
@@ -4847,7 +4847,7 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
     goto remove_mime;
   FIO_MEMCPY(&tmp.mime, mime_type.buf, mime_type.len);
   tmp.len = mime_type.len;
-  tmp.mime[mime_type.len] = 0;
+  /* tmp.mime[mime_type.len] = 0; // not required, the whole buffer is zero */
   old = fio___http_mime_map_get(&FIO___HTTP_MIMETYPES, tmp);
   if (old && old->len == tmp.len && !FIO_MEMCMP(old->mime, tmp.mime, tmp.len)) {
     FIO_LOG_WARNING("mime-type collision: %.*s was %s, now %s",
