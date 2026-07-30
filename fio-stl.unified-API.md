@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3133.
+Total symbols: 3140.
 
 ## Contents
 
@@ -25,7 +25,7 @@ Total symbols: 3133.
 - [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 32
 - [`./fio-stl/002 url.h`](#fio-stl-002-url-h) — 7
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
-- [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 21
+- [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 28
 - [`./fio-stl/004 http1 parser.h`](#fio-stl-004-http1-parser-h) — 3
 - [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 5
 - [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 3
@@ -20795,9 +20795,19 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-files-h"></a> `./fio-stl/004 files.h`
 
-21 public symbols.
+28 public symbols.
 
 ### Macros
+
+#### `FIO_FILENAME_PATH_CAPA`
+
+```c
+#define FIO_FILENAME_PATH_CAPA (PATH_MAX | 4094)
+```
+
+
+
+_Symbol type:_ `macro`
 
 #### `FIO_FD_FIND_EOF`
 
@@ -20831,6 +20841,38 @@ _Symbol type:_ `macro`
 
 ### Types
 
+#### `fio_filename_remove_args_s`
+
+```c
+typedef struct {
+/** The path of the file / folder to remove. */
+const char *path;
+/** Set to allow the removal of an (empty) folder. */
+uint8_t folder;
+/** Set to remove a folder and all of its content (implies `folder`). */
+uint8_t recursive;
+} fio_filename_remove_args_s
+```
+
+Arguments for `fio_filename_remove`.
+
+_Symbol type:_ `type`
+
+#### `fio_filename_make_path_args_s`
+
+```c
+typedef struct {
+/** The folder path to create (nested folders allowed). */
+const char *path;
+/** The creation mode (POSIX only); zero (0) defaults to 0755. */
+uint32_t mode;
+} fio_filename_make_path_args_s
+```
+
+Arguments for `fio_filename_make_path`.
+
+_Symbol type:_ `type`
+
 #### `fio_filename_s`
 
 ```c
@@ -20857,6 +20899,9 @@ Opens `filename`, returning the same as values as `open` on POSIX systems.
 
 If `path` starts with a `"~/"` than it will be relative to the user's home
 folder (on Windows, testing for `"~\"`).
+
+Uses a fixed size stack buffer (zero allocations); over-long paths fail
+with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
 
 _Symbol type:_ `function`
 
@@ -20889,6 +20934,75 @@ int fio_filename_tmp(void)
 Creates a temporary file, returning its file descriptor.
 
 _Symbol type:_ `function`
+
+#### `fio_filename_remove`
+
+```c
+int fio_filename_remove(fio_filename_remove_args_s args)
+```
+
+Removes the file / link or folder at `path`.
+
+* By default (no flags), removes a file / link (like `unlink`).
+* With `folder` set, removes an empty folder (like `rmdir`).
+* With `recursive` set (implies `folder`), removes a folder and all of its
+  content (like `rm -r`). If `path` isn't a folder, the `recursive` flag
+  is ignored and `path` is removed as a file / link.
+
+Links are removed, never followed into.
+
+Uses a fixed size stack buffer (zero allocations); over-long paths fail
+with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
+
+Returns 0 on success and -1 on error. Recursive removal stops on the first
+error (some content may remain).
+
+_Symbol type:_ `function`
+
+#### `fio_filename_remove`
+
+```c
+#define fio_filename_remove(...)   \
+  fio_filename_remove((fio_filename_remove_args_s){__VA_ARGS__})
+```
+
+
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
+
+#### `fio_filename_make_path`
+
+```c
+int fio_filename_make_path(fio_filename_make_path_args_s args)
+```
+
+Creates the folder at `path`, including any missing parent folders
+(similar to `mkdir -p`).
+
+An existing folder is NOT an error. A non-folder component along the way IS
+an error (`errno == ENOTDIR`).
+
+Uses a fixed size stack buffer (zero allocations); over-long paths fail
+with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
+
+Returns 0 on success and -1 on error.
+
+_Symbol type:_ `function`
+
+#### `fio_filename_make_path`
+
+```c
+#define fio_filename_make_path(...)   \
+  fio_filename_make_path((fio_filename_make_path_args_s){__VA_ARGS__})
+```
+
+
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
 
 #### `fio_filename_overwrite`
 

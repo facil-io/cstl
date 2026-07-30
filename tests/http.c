@@ -262,12 +262,8 @@ static void test_static_file_response(void) {
   len += fio_ltoa(dir + len, (int64_t)fio_rand64(), 16);
   dir[len] = '\0';
 
-#if FIO_OS_WIN
-  FIO_ASSERT(CreateDirectoryA(dir, NULL),
+  FIO_ASSERT(fio_filename_make_path(.path = dir) == 0,
              "failed to create static test directory");
-#else
-  FIO_ASSERT(mkdir(dir, 0755) == 0, "failed to create static test directory");
-#endif
 
   char path[512];
   snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
@@ -296,13 +292,7 @@ static void test_static_file_response(void) {
              "static .txt file should have text/plain content-type");
 
   fio_http_free(h);
-#if FIO_OS_WIN
-  DeleteFileA(path);
-  RemoveDirectoryA(dir);
-#else
-  unlink(path);
-  rmdir(dir);
-#endif
+  fio_filename_remove(.path = dir, .recursive = 1);
 }
 
 static void test_error_response(void) {
@@ -471,13 +461,8 @@ static size_t test_static_make_tree(char *dir,
   len += 15;
   len += fio_ltoa(dir + len, (int64_t)fio_rand64(), 16);
   dir[len] = '\0';
-#if FIO_OS_WIN
-  if (!CreateDirectoryA(dir, NULL))
+  if (fio_filename_make_path(.path = dir))
     return 0;
-#else
-  if (mkdir(dir, 0755))
-    return 0;
-#endif
 
   char path[512];
   snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
@@ -510,16 +495,7 @@ static size_t test_static_make_tree(char *dir,
 }
 
 static void test_static_tree_cleanup(const char *dir) {
-  char path[512];
-  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
-  unlink(path);
-  snprintf(path,
-           sizeof(path),
-           "%s%ctest.txt.gz",
-           dir,
-           FIO_FOLDER_SEPARATOR);
-  unlink(path);
-  rmdir(dir);
+  fio_filename_remove(.path = dir, .recursive = 1);
 }
 
 static void test_static_vary_and_range_guards(void) {
@@ -1203,7 +1179,7 @@ static void test_static_compress_attached_readonly(void) {
     FILE *pf = fopen(probe, "wb");
     if (pf) {
       fclose(pf);
-      unlink(probe);
+      fio_filename_remove(.path = probe);
       skipped = 1; /* create succeeded — permissions not enforced */
     }
   }
@@ -1356,14 +1332,13 @@ static void test_static_compress_detached_creation(void) {
     FIO_ASSERT(!fio_filename_stat(vpath, &vst) && vst.st_size > 0,
                "detached creation: the .br variant must be created on "
                "disk");
-    unlink(vpath);
+    fio_filename_remove(.path = vpath);
   }
   fio_http_free(h);
   test_static_tree_cleanup(dir);
 }
 
-/* ===========================================================================
-   Main
+/* ===========================================================================   Main
    ===========================================================================
  */
 

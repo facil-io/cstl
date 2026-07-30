@@ -2,6 +2,12 @@
 
 ### Unreleased
 
+**API Changes** (`files`): the files module is now fully zero-allocation (it is included before the memory module, so `FIO_MEM_REALLOC` / `FIO_MEM_FREE` were never safe to use). Path manipulation uses a fixed-size stack buffer (`FIO_STR_INFO_TMP_VAR`) capped by the new `FIO_FILENAME_PATH_CAPA` configuration macro (default `PATH_MAX | 4094`); over-long paths fail with `errno == ENAMETOOLONG`.
+
+- New API: `fio_filename_remove(.path = ..., .folder = ..., .recursive = ...)` — removes a file / link (`unlink`-like, the default), an empty folder (`.folder = 1`, `rmdir`-like) or a whole tree (`.recursive = 1`, `rm -r`-like; implies `.folder`). Links (symlinks / reparse points) are removed, never followed into. Abstracts `unlink` / `rmdir` vs. `DeleteFileA` / `RemoveDirectoryA`.
+- New API: `fio_filename_make_path(.path = ..., .mode = ...)` — creates a folder including any missing parents (`mkdir -p`-like). An existing folder is not an error; a non-folder component fails with `errno == ENOTDIR`. `mode` defaults to `0755` (POSIX only). Root / drive / UNC `\\server\share` prefixes are never created.
+- `fio_filename_open` no longer allocates for `"~/"` expansion; over-long expansions fail with `errno == ENAMETOOLONG` (previously the limit was 64KB via allocation).
+
 **API Changes** (`http`): the HTTP module was split into per-concern files — `430 http api.h` (public declarations), `432 http types.h` (internal types + handle/core implementation), `434 http accept.h` / `434 http1.h` / `434 sse.h` / `434 websocket.h` (protocol glue), `438 http.h` (listen/connect/protocol wiring) and `439 http.h` (cleanup tail). The standalone parsers moved from `431 http1 parser.h` / `431 websocket parser.h` to `004 http1 parser.h` / `004 websocket parser.h`.
 
 - `FIO_HTTP_HANDLE` was removed: `FIO_HTTP` is the only HTTP module flag.
