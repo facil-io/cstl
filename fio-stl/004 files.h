@@ -470,20 +470,14 @@ FIO_IFUNC int fio___filename_is_unsafe_sep(const char *path,
 
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe(const char *path) {
-#if FIO_OS_WIN
-  return fio___filename_is_unsafe_sep(path, '\\', '\\');
-#else
-  return fio___filename_is_unsafe_sep(path, '/', '/');
-#endif
+  return fio___filename_is_unsafe_sep(path,
+                                      FIO_FOLDER_SEPARATOR,
+                                      FIO_FOLDER_SEPARATOR);
 }
 
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe_url(const char *path) {
-#if FIO_OS_WIN
-  return fio___filename_is_unsafe_sep(path, '/', '\\');
-#else
-  return fio___filename_is_unsafe_sep(path, '/', '/');
-#endif
+  return fio___filename_is_unsafe_sep(path, '/', FIO_FOLDER_SEPARATOR);
 }
 
 /** Creates a temporary file, returning its file descriptor. */

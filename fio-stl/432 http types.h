@@ -4316,6 +4316,8 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   rt.len -= ((rt.len > 0) && (fnm.len > 0 && fnm.buf[0] == '/') &&
              (rt.buf[rt.len - 1] == '/' ||
               rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
+  if (rt.len + fnm.len > 4079)
+    goto file_not_found;
   fio_string_write(&filename, NULL, rt.buf, rt.len);
   fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
   if (fio_filename_is_unsafe_url(filename.buf))
