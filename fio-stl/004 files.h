@@ -443,21 +443,24 @@ SFUNC int fio_filename_open(const char *filename, int flags) {
 }
 
 /** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//"). */
-static int fio___filename_is_unsafe_sep(const char *path, const char sep) {
+FIO_IFUNC int fio___filename_is_unsafe_sep(const char *path,
+                                           const char sep1,
+                                           const char sep2) {
   if (!path) /* no file is a safe file, nothing to do */
     return 0;
   /* Check for leading "../" which escapes the base directory */
-  if (path[0] == '.' && path[1] == '.' && (path[2] == sep || path[2] == '\0'))
+  if (path[0] == '.' && path[1] == '.' &&
+      (path[2] == sep1 || path[2] == sep2 || path[2] == '\0'))
     return 1;
   /* Scan through path looking for problematic patterns */
   while (*path) {
-    if (path[0] == sep) {
+    if (path[0] == sep1 || path[0] == sep2) {
       /* Check for "//" (double separator, potential path confusion) */
-      if (path[1] == sep)
+      if (path[1] == sep1 || path[1] == sep2)
         return 1;
       /* Check for "/../" or "/.." at end (path traversal) */
       if (path[1] == '.' && path[2] == '.' &&
-          (path[3] == sep || path[3] == '\0'))
+          (path[3] == sep1 || path[3] == sep2 || path[3] == '\0'))
         return 1;
     }
     ++path;
@@ -468,15 +471,19 @@ static int fio___filename_is_unsafe_sep(const char *path, const char sep) {
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe(const char *path) {
 #if FIO_OS_WIN
-  return fio___filename_is_unsafe_sep(path, '\\');
+  return fio___filename_is_unsafe_sep(path, '\\', '\\');
 #else
-  return fio___filename_is_unsafe_sep(path, '/');
+  return fio___filename_is_unsafe_sep(path, '/', '/');
 #endif
 }
 
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe_url(const char *path) {
-  return fio___filename_is_unsafe_sep(path, '/');
+#if FIO_OS_WIN
+  return fio___filename_is_unsafe_sep(path, '/', '\\');
+#else
+  return fio___filename_is_unsafe_sep(path, '/', '/');
+#endif
 }
 
 /** Creates a temporary file, returning its file descriptor. */
