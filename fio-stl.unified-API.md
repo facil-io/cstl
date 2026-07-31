@@ -496,7 +496,7 @@ _Symbol type:_ `macro`
 #### `FIO_VERSION_BUILD`
 
 ```c
-#define FIO_VERSION_BUILD "rc.02"
+#define FIO_VERSION_BUILD "rc.03"
 ```
 
 Build version: optional build info (string), i.e. "beta.02"

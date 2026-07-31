@@ -4306,7 +4306,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   /* combine public folder with path to get file name */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
-  FIO_STR_INFO_TMP_VAR(filename, 4095);
+  FIO_STR_INFO_TMP_VAR(filename, (FIO_FILENAME_PATH_CAPA - 1));
   { /* test for HEAD and OPTIONS requests */
     fio_str_info_s m = fio_keystr_info(&h->method);
     if ((m.len == 7 && (fio_buf2u64u(m.buf) | 0x2020202020202020ULL) ==
@@ -4316,7 +4316,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   rt.len -= ((rt.len > 0) && (fnm.len > 0 && fnm.buf[0] == '/') &&
              (rt.buf[rt.len - 1] == '/' ||
               rt.buf[rt.len - 1] == FIO_FOLDER_SEPARATOR));
-  if (rt.len + fnm.len > 4079)
+  if (rt.len + fnm.len > (FIO_FILENAME_PATH_CAPA - 16))
     goto file_not_found;
   fio_string_write(&filename, NULL, rt.buf, rt.len);
   fio_string_write_url_dec(&filename, NULL, fnm.buf, fnm.len);
