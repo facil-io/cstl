@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3140.
+Total symbols: 3143.
 
 ## Contents
 
@@ -14,7 +14,7 @@ Total symbols: 3140.
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
 - [`./fio-stl/001 patches.h`](#fio-stl-001-patches-h) — 2
-- [`./fio-stl/002 atol.h`](#fio-stl-002-atol-h) — 46
+- [`./fio-stl/002 atol.h`](#fio-stl-002-atol-h) — 49
 - [`./fio-stl/002 crc32.h`](#fio-stl-002-crc32-h) — 1
 - [`./fio-stl/002 glob matching.h`](#fio-stl-002-glob-matching-h) — 1
 - [`./fio-stl/002 imap.h`](#fio-stl-002-imap-h) — 7
@@ -18883,7 +18883,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-002-atol-h"></a> `./fio-stl/002 atol.h`
 
-46 public symbols.
+49 public symbols.
 
 ### Macros
 
@@ -19241,6 +19241,44 @@ uint64_t fio_atol_xbase(char **pstr, size_t base)
 ```
 
 Read an unsigned number in any base up to base 36.
+
+_Symbol type:_ `function`
+
+#### `fio_stol10u`
+
+```c
+uint64_t fio_stol10u(char **pos, const char *end)
+```
+
+Reads an unsigned base 10 number within `[pos, end)` - strict digits only
+(no whitespace, sign, underscores or prefixes). Advances `pos` past the
+digits consumed. On overflow sets `errno == E2BIG` and stops at the last
+valid digit. Callers detect empty / trailing junk by testing `pos`.
+
+_Symbol type:_ `function`
+
+#### `fio_stol10`
+
+```c
+int64_t fio_stol10(char **pos, const char *end)
+```
+
+Reads a signed base 10 number within `[pos, end)` - an optional leading
+`-` / `+` followed by strict digits only. Sets `errno == E2BIG` on
+overflow (either the magnitude or the signed range limit).
+
+_Symbol type:_ `function`
+
+#### `fio_stol16u`
+
+```c
+uint64_t fio_stol16u(char **pos, const char *end)
+```
+
+Reads an unsigned hex number within `[pos, end)` - strict hex digits
+only (NO `0x` prefix, no underscores). Advances `pos` past the digits
+consumed. On overflow sets `errno == E2BIG` and stops at the last valid
+digit.
 
 _Symbol type:_ `function`
 
@@ -21326,6 +21364,11 @@ events.
 Returns the number of bytes consumed before parsing stopped (due to either
 error or end of data). Stops as close as possible to the end of the buffer or
 once an object parsing was completed.
+
+Buffer requirement (guard-byte contract): number / quote-less key scanning
+may read the byte at `json_string[len]` while deciding a token ended. The
+buffer MUST remain readable through a non-numeric guard byte - pass a
+NUL-terminated string (`fio_bstr` qualifies) or append a guard byte.
 
 _Symbol type:_ `function`
 
@@ -37742,6 +37785,15 @@ is rejected). Folders resolve to their `index` file and missing
 extensions are auto-completed (`.html`, `.htm`, `.txt`, `.md` -
 `FIO_HTTP_STATIC_FILE_COMPLETION`). `OPTIONS` requests are refused (a
 static file is not a valid `OPTIONS` response).
+
+`root_folder` MUST name an existing folder (use `"."` for the CWD):
+the path-traversal guard rejects `..` folding, not absolute paths, so
+an empty root would expose absolute paths such as `/etc/passwd`.
+Settings-provided `public_folder` values are validated on listen/route
+creation (non-existent folders are rejected); direct callers MUST pass
+a valid, non-empty root. Symlinks inside the root are followed (like
+nginx's default) - applications requiring strict containment should
+keep the root free of symlinks.
 
 Handles conditional requests (`ETag` / `If-None-Match` -> 304), single
 `Range` requests (206 / 416, always served identity), and `HEAD`

@@ -62,7 +62,7 @@
 #ifdef FIO_FILES
 #include "004 files.h"
 #endif
-#if defined(FIO_HTTP1_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
+#if defined(FIO_HTTP1_PARSER)
 #include "004 http1 parser.h"
 #endif
 #ifdef FIO_JSON
@@ -86,7 +86,7 @@
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
 #endif
-#if defined(FIO_WEBSOCKET_PARSER) && !defined(FIO___RECURSIVE_INCLUDE)
+#if defined(FIO_WEBSOCKET_PARSER)
 #include "004 websocket parser.h"
 #endif
 #if defined(FIO_CLI) && !defined(FIO___RECURSIVE_INCLUDE)
