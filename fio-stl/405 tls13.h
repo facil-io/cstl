@@ -1931,8 +1931,10 @@ SFUNC fio_io_functions_s fio_tls13_io_functions(void) {
 TLS 1.3 Default Setup (when OpenSSL is not available)
 ***************************************************************************** */
 
-#if !defined(HAVE_OPENSSL) && !defined(H___FIO_OPENSSL___H)
-/** Setup TLS 1.3 as TLS IO default when OpenSSL is not available */
+#if (!defined(HAVE_OPENSSL) || defined(FIO_NO_TLS)) &&                           \
+    !defined(H___FIO_OPENSSL___H)
+/** Setup TLS 1.3 as TLS IO default when OpenSSL is not available (or was
+ * disabled with FIO_NO_TLS, which also skips the OpenSSL module). */
 FIO_CONSTRUCTOR(fio___tls13_setup_default) {
   static fio_io_functions_s FIO___TLS13_IO_FUNCS;
   FIO___TLS13_IO_FUNCS = fio_tls13_io_functions();

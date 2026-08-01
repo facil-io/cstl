@@ -27,6 +27,19 @@ OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
 CFLAGS+=$(OPTIMIZATION) $(WARNINGS) -I$(SRC_DIR) -I.
 LDFLAGS+= -lm
 
+# Feature-test results (detected -DHAVE_* defines) are collected in FLAGS,
+# kept out of CFLAGS so the debug / sanitizer presets below can redefine
+# CFLAGS wholesale without losing the detected configuration.
+FLAGS:=
+
+# Debug / sanitizer presets (used by the db/%, asan/% and ub/% patterns).
+DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
+# Mirror the Windows CI environment in sanitizer builds: FIO_NO_TLS forces
+# the native TLS path (no OpenSSL); FIO_MEMORY_DISABLE + FIO_MEMALT make
+# every allocation sanitizer-visible.
+ASAN_CFLAGS:=$(CFLAGS) -O1 -g -DDEBUG=1 -fsanitize=address -fno-omit-frame-pointer -DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS $(WARNINGS) -I$(SRC_DIR) -I.
+UB_CFLAGS:=$(CFLAGS) -O1 -g -DDEBUG=1 -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS $(WARNINGS) -I$(SRC_DIR) -I.
+
 # Main executable
 PROJECT = $(BUILD_DIR)/$(NAME)
 
@@ -72,14 +85,14 @@ all: everything___
 # Build main executable (only if source files exist)
 ifneq ($(strip $($(strip $(SOURCES)))),)
 $(PROJECT): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(FLAGS) -o $@ $^ $(LDFLAGS)
 endif
 
 # Build object files
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	@echo "* Compiling $*.c"
-	@$(CC) $(CFLAGS) -c -o $@ $<
+	@$(CC) $(CFLAGS) $(FLAGS) -c -o $@ $<
 
 # Create build directory
 $(BUILD_DIR):
@@ -110,6 +123,27 @@ FORCE:
 
 db/%: | clean set_debug_flags % ;
 %/db: | clean set_debug_flags % ;
+
+#############################################################################
+# Sanitizer Flags (asan/target, ub/target or target/asan, target/ub)
+#############################################################################
+
+set_asan_flags:
+	$(eval CFLAGS=$(ASAN_CFLAGS))
+	@echo "(!) Address sanitizer mode detected."
+
+set_ub_flags:
+	$(eval CFLAGS=$(UB_CFLAGS))
+	@echo "(!) Undefined-behavior sanitizer mode detected."
+
+asan/%: | clean set_asan_flags % ;
+%/asan: | clean set_asan_flags % ;
+
+ub/%: | clean set_ub_flags % ;
+%/ub: | clean set_ub_flags % ;
+
+
+# -DFIO_MEMORY_DISABLE -DFIO_MEMALT
 
 #############################################################################
 # Install
@@ -166,7 +200,7 @@ $(LIB_DIR):
 # Single PIC object — valid for both static archive and shared library
 $(LIB_DIR)/fio.pic.o: lib/fio.c lib/fio.h FORCE | $(LIB_DIR)
 	@echo "* Compiling lib/fio.c"
-	@$(CC) $(CFLAGS) -fPIC -c -o $@ lib/fio.c
+	@$(CC) $(CFLAGS) $(FLAGS) -fPIC -c -o $@ lib/fio.c
 
 $(LIB_STATIC): $(LIB_DIR)/fio.pic.o | $(LIB_DIR)
 	@echo "* Archiving $(LIB_STATIC)"
@@ -196,7 +230,7 @@ endef
 #   <folder>/<path/name>  - build and run a specific unit
 #   tmp/<folder>/<path/name> - the actual binary target
 define DEFINE_FOLDER
-$(1)_SOURCES := $(shell find $(1) -name "*.c" -type f 2>/dev/null | sort | sed 's/ /\\ /g')
+$(1)_SOURCES := $(filter-out $(TEST_EXCLUDE),$(shell find $(1) -name "*.c" -type f 2>/dev/null | sort | sed 's/ /\\ /g'))
 $(1)_BINS    := $$($(1)_SOURCES:%.c=$(BUILD_DIR)/%)
 $(1)_RUNS    := $$($(1)_SOURCES:$(1)/%.c=$(1)/%)
 
@@ -207,7 +241,7 @@ $(1)_RUNS    := $$($(1)_SOURCES:$(1)/%.c=$(1)/%)
 $$(BUILD_DIR)/$(1)/%: $(1)/%.c $(OBJECTS) FORCE | $(BUILD_DIR)
 	@mkdir -p $$(dir $$@)
 	@echo "* Compiling $(1)/$$*.c"
-	@$$(CC) $$(CFLAGS) -o $$@ $$< $$(filter-out $$(BUILD_DIR)/main.o,$$(OBJECTS)) $$(LDFLAGS)
+	@$$(CC) $$(CFLAGS) $$(FLAGS) -o $$@ $$< $$(filter-out $$(BUILD_DIR)/main.o,$$(OBJECTS)) $$(LDFLAGS)
 
 # Run one unit (explicit rules so prerequisites are built even for phony targets)
 $$(foreach run,$$($(1)_RUNS),$$(eval $$(call DEFINE_UNIT_RULE,$$(run))))
@@ -244,6 +278,12 @@ $(1): $$($(1)_BINS)
 	@echo $(AFTER_RUN_MESSAGE)
 
 endef
+
+# Units that cannot build under sanitizer goals (FIO_NO_TLS disables the
+# OpenSSL module, so the OpenSSL test unit has nothing to test).
+ifneq ($(filter asan/% %/asan ub/% %/ub,$(MAKECMDGOALS)),)
+TEST_EXCLUDE += tests/openssl.c
+endif
 
 $(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old ai-tmp,$(eval $(call DEFINE_FOLDER,$(folder))))
 
@@ -405,25 +445,25 @@ int main(void) {\\n\
 # Test for manual selection and then TRY_COMPILE with each polling engine
 ifdef FIO_POLL
   $(info * Skipping polling tests, enforcing manual selection of: poll)
-  FLAGS+=HAVE_POLL
+  FLAGS+=-DHAVE_POLL
 else ifdef FIO_FORCE_POLL
   $(info * Skipping polling tests, enforcing manual selection of: poll)
-  FLAGS+=HAVE_POLL
+  FLAGS+=-DHAVE_POLL
 else ifdef FIO_FORCE_EPOLL
   $(info * Skipping polling tests, enforcing manual selection of: epoll)
-  FLAGS+=HAVE_EPOLL
+  FLAGS+=-DHAVE_EPOLL
 else ifdef FIO_FORCE_KQUEUE
   $(info * Skipping polling tests, enforcing manual selection of: kqueue)
-  FLAGS+=HAVE_KQUEUE
+  FLAGS+=-DHAVE_KQUEUE
 else ifeq ($(call TRY_COMPILE, $(FIO_POLL_TEST_EPOLL), $(EMPTY)), 0)
   $(info * Detected `epoll`)
-  FLAGS+=HAVE_EPOLL
+  FLAGS+=-DHAVE_EPOLL
 else ifeq ($(call TRY_COMPILE, $(FIO_POLL_TEST_KQUEUE), $(EMPTY)), 0)
   $(info * Detected `kqueue`)
-  FLAGS+=HAVE_KQUEUE
+  FLAGS+=-DHAVE_KQUEUE
 else ifeq ($(call TRY_COMPILE, $(FIO_POLL_TEST_POLL), $(EMPTY)), 0)
   $(info * Detected `poll` - this is suboptimal fallback!)
-  FLAGS+=HAVE_POLL
+  FLAGS+=-DHAVE_POLL
 else
 $(warning No supported polling engine! won't be able to compile facil.io)
 endif
@@ -476,12 +516,12 @@ ifdef FIO_NO_TLS
   $(info * Skipping crypto library detection.)
 else ifeq ($(call TRY_COMPILE, $(FIO_TLS_TEST_OPENSSL), $(OPENSSL_CFLAGS) $(OPENSSL_LDFLAGS)), 0)
   $(info * Detected the OpenSSL library, setting HAVE_OPENSSL)
-  CFLAGS+=-DHAVE_OPENSSL $(OPENSSL_CFLAGS)
+  FLAGS+=-DHAVE_OPENSSL $(OPENSSL_CFLAGS)
   LDFLAGS+=$(OPENSSL_LDFLAGS)
 else ifeq ($(call TRY_COMPILE, "\#include <sodium.h.h>\\n int main(void) {}", $(LIBSODIUM_CFLAGS) $(LIBSODIUM_LDFLAGS)) , 0)
   # Sodium Crypto Library: https://doc.libsodium.org/usage
   $(info * Detected the Sodium library, setting HAVE_SODIUM)
-  CFLAGS+=-DHAVE_SODIUM $(LIBSODIUM_CFLAGS)
+  FLAGS+=-DHAVE_SODIUM $(LIBSODIUM_CFLAGS)
   LDFLAGS+=$(LIBSODIUM_LDFLAGS)
 else
   $(info * No compatible SSL/TLS library detected.)
@@ -496,7 +536,7 @@ ifneq ($(strip $(TEST4ZLIB)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, zlib.h, 0, -lz) , 0)
   $(info * Detected the zlib library, setting HAVE_ZLIB)
-  CFLAGS+= -DHAVE_ZLIB
+  FLAGS+= -DHAVE_ZLIB
   LDFLAGS+= -lz
 endif
 
@@ -509,11 +549,11 @@ ifneq ($(strip $(TEST4PG)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, libpq-fe.h, 0, -lpg) , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
-  CFLAGS+=-DHAVE_POSTGRESQL
+  FLAGS+=-DHAVE_POSTGRESQL
   LDFLAGS+=-lpg
 else ifeq ($(call TRY_HEADER_AND_FUNC, "/usr/include/postgresql/libpq-fe.h", 0, "-lpg") , 0)
   $(info * Detected the PostgreSQL library, setting HAVE_POSTGRESQL)
-  CFLAGS+=-DHAVE_POSTGRESQL -I/usr/include/postgresql
+  FLAGS+=-DHAVE_POSTGRESQL -I/usr/include/postgresql
   LDFLAGS+=-lpg
 endif
 
@@ -526,7 +566,7 @@ ifneq ($(strip $(TEST4SQLITE3)),)
 
 ifeq ($(call TRY_HEADER_AND_FUNC, sqlite3.h, sqlite3_open, -lsqlite3) , 0)
   $(info * Detected the SQLite3 library, setting HAVE_SQLITE3)
-  CFLAGS+= -DHAVE_SQLITE3
+  FLAGS+= -DHAVE_SQLITE3
   LDFLAGS+=-lsqlite3
 endif
 
@@ -537,9 +577,8 @@ endif #TEST4SQLITE3
 # similar flags are preserved when switching to debug mode)
 #############################################################################
 
-# Consider CFLAGS in debug mode:
-#    -fsanitize=thread -fsanitize=undefined -fsanitize=address -coverage -DFIO_MEMORY_DISABLE
-DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
+# NOTE: DEBUG_CFLAGS / ASAN_CFLAGS / UB_CFLAGS are defined at the top of
+# this file (with CFLAGS); detected -DHAVE_* defines live in FLAGS.
 
 #############################################################################
 # Help
@@ -556,6 +595,9 @@ help:
 	@echo "  lib             - Build static (libfio.a) and shared (libfio.dylib/.so) libraries"
 	@echo "  install         - Install binary and headers to $(INSTALL_PREFIX)"
 	@echo "  clean           - Remove build artifacts"
+	@echo "  db/<target>     - Build and run <target> with debug flags (also <target>/db)"
+	@echo "  asan/<target>   - Build and run <target> with AddressSanitizer (also <target>/asan)"
+	@echo "  ub/<target>     - Build and run <target> with UBSan (also <target>/ub)"
 	@echo "  help            - Show this help message"
 
 #############################################################################

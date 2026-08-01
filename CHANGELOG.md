@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Fix**: (`memalt`) `fio_memcpy` no longer routes overlapping copies to a raw `memcpy` path (undefined behavior; caught by the new `asan` build pattern). Overlapping ranges always take the buffered/reversed (memmove-safe) paths.
+
+**Fix**: (`core`) the vector rotation macros (`FIO_MATH_UXXX_OP_RROT/CRROT/LROT/CLROT`, i.e., `fio_u*_rrot*` / `fio_u*_crrot*` / `fio_u*_lrot*` / `fio_u*_clrot*`) now mask the rotation count on both shifts — rotating by the lane width (e.g., `fio_u256_crrot64(., 64)`) was shift-by-width undefined behavior and returned garbage under some optimizer/sanitizer combinations.
+
+**Fix**: (`tls13`) `FIO_NO_TLS` now correctly selects the native TLS 1.3 implementation as the IO default even when OpenSSL was detected — previously `HAVE_OPENSSL` + `FIO_NO_TLS` left no registered implementation (`build_context` failed with "no SSL/TLS implementation found").
+
+**Update**: (makefile) new build patterns `asan/<target>` and `ub/<target>` (also `<target>/asan`, `<target>/ub`) — AddressSanitizer / UBSan (fatal) builds that mirror the Windows CI environment (`-DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS`, native TLS). Detected `-DHAVE_*` defines moved from `CFLAGS` to `FLAGS`; `DEBUG_CFLAGS` / `ASAN_CFLAGS` / `UB_CFLAGS` presets live at the top of the makefile. OpenSSL-dependent units are auto-excluded from sanitizer aggregates.
+
 **Security**: (`files`, `http1 parser`, `resp3`, `atol`, `json`, `http`) proactive security audit fixes and hardening:
 
 - (`files`) `fio_filename_is_unsafe` now guards BOTH `/` and `\` on Windows (Win32 APIs accept either separator); previously only `\` was guarded, leaving Unix-flavored traversal (`foo/../../secret`) open on Windows. Regression tests added to `tests/files.c`.

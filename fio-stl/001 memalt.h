@@ -142,8 +142,6 @@ FIO_SFUNC void *fio___memcpy_buffered_reversed_x(void *d_,
   return (void *)d;
 }
 
-#define FIO___MEMCPY_BLOCKx_NUM 255ULL
-
 /** memcpy / memmove alternative that should work with unaligned memory */
 SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   char *d = (char *)dest_;
@@ -188,9 +186,11 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     return dest_;
   }
 
-  /* Existing path for larger copies or overlapping memory */
-  if (s + bytes <= d || d + bytes <= s ||
-      (uintptr_t)d + FIO___MEMCPY_BLOCKx_NUM < (uintptr_t)s) {
+  /* Existing path for larger copies or overlapping memory.
+   * NOTE: no "margin" shortcut here - the step size used by
+   * fio___memcpy_unsafe_x may exceed any fixed margin, so any overlap at
+   * all must take the buffered (memmove-safe) paths (ASAN/UB proof). */
+  if (s + bytes <= d || d + bytes <= s) {
     return fio___memcpy_unsafe_x(d, s, bytes);
   } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
     return fio___memcpy_buffered_x(d, s, bytes);
@@ -199,8 +199,6 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
   }
   return d;
 }
-
-#undef FIO___MEMCPY_BLOCKx_NUM
 
 /* *****************************************************************************
 FIO_MEMSET / fio_memset - memset fallbacks
