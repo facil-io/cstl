@@ -338,15 +338,18 @@ int main(void) {
   /* Strict, bounded variants (fio_stol10u / fio_stol10 / fio_stol16u) */
   {
     fprintf(stderr, "  * strict bounded number parsing\n");
-    char *p;
+    char *p, *base;
     /* fio_stol10u: digits only, bounded, E2BIG on overflow */
     p = (char *)"123";
     errno = 0;
     FIO_ASSERT(fio_stol10u(&p, p + 3) == 123 && p[0] == 0 && !errno,
                "fio_stol10u basic failed");
-    p = (char *)"12345";
+    /* NOTE: string literal pooling is unspecified (C11 6.4.5p7) - compare
+     * against a named base pointer, never a second literal instance. */
+    base = (char *)"12345";
+    p = base;
     errno = 0;
-    FIO_ASSERT(fio_stol10u(&p, p + 3) == 123 && p == (char *)"12345" + 3,
+    FIO_ASSERT(fio_stol10u(&p, base + 3) == 123 && p == base + 3,
                "fio_stol10u bound (end pointer) failed");
     p = (char *)"18446744073709551615"; /* UINT64_MAX */
     errno = 0;
@@ -422,9 +425,10 @@ int main(void) {
     errno = 0;
     FIO_ASSERT(fio_stol16u(&p, p + 2) == 0 && p[0] == 'g',
                "fio_stol16u non-hex must not advance pos");
-    p = (char *)"abcdef";
+    base = (char *)"abcdef";
+    p = base;
     errno = 0;
-    FIO_ASSERT(fio_stol16u(&p, p + 3) == 0xabc && p == (char *)"abcdef" + 3,
+    FIO_ASSERT(fio_stol16u(&p, base + 3) == 0xabc && p == base + 3,
                "fio_stol16u bound (end pointer) failed");
   }
   FIO_NAME_TEST(stl, aton_vectors)();
