@@ -865,6 +865,18 @@ static void test_ws_balance_connection_ref(fio_http_s *h) {
     fio___http_connection_dup(c);
 }
 
+/* Windows-only sub-step tracing: investigate the Windows-CI release-only
+ * crash in this test. Prints + flushes on Windows; no-op elsewhere. */
+#if FIO_OS_WIN
+#define TEST_WS_STEP(...)                                                     \
+  do {                                                                       \
+    fprintf(stderr, __VA_ARGS__);                                            \
+    fflush(stderr);                                                          \
+  } while (0)
+#else
+#define TEST_WS_STEP(...) ((void)0)
+#endif
+
 static void test_websocket_connect_wrapper(void) {
   fprintf(stderr,
           "  * WebSocket connect wrapper (scheme normalization, client "
@@ -877,6 +889,7 @@ static void test_websocket_connect_wrapper(void) {
   FIO_ASSERT(l, "wrapper test: fio_http_listen failed");
   unsigned port = test_ws_listener_port(l);
   FIO_ASSERT(port, "wrapper test: listener port discovery failed");
+  TEST_WS_STEP("    [ws-wrap] listener up, port=%u\n", port);
 
   /* (a) Scheme normalization: http://, https://, ws:// and scheme-less URLs
    *     must all produce a handle carrying the WebSocket upgrade request. */
@@ -895,6 +908,7 @@ static void test_websocket_connect_wrapper(void) {
     for (size_t i = 0; i < 4; ++i) {
       char url[256];
       snprintf(url, sizeof(url), cases[i].fmt, port);
+      TEST_WS_STEP("    [ws-wrap] (a.%zu) url=%s\n", i, url);
       test_ws_rec_on_http_calls = test_ws_rec_on_open_calls = 0;
       fio_http_s *h = fio_http_new();
       fio_io_s *io = fio_http_websocket_connect(url,
@@ -935,9 +949,11 @@ static void test_websocket_connect_wrapper(void) {
       /* teardown: close the IO and drain the deferred tasks (reactor-less
          equivalents of the reactor's close path). The balancing reference
          works around the pre-existing teardown double-free (see helper). */
+      TEST_WS_STEP("    [ws-wrap] (a.%zu) connected + asserted\n", i);
       test_ws_balance_connection_ref(h);
       fio_io_close(io);
       fio_queue_perform_all(fio_io_queue());
+      TEST_WS_STEP("    [ws-wrap] (a.%zu) closed + drained\n", i);
     }
   }
 
@@ -954,9 +970,11 @@ static void test_websocket_connect_wrapper(void) {
                                               .on_http = test_ws_rec_on_http,
                                               .on_open = test_ws_rec_on_open);
     FIO_ASSERT(io, "acceptance: connect failed");
+    TEST_WS_STEP("    [ws-wrap] (b) connected\n");
     FIO_ASSERT(fio_http_websocket_requested(h) == 1,
                "acceptance: upgrade request missing");
     test_ws_set_accept_response(h);
+    TEST_WS_STEP("    [ws-wrap] (b) 101 crafted\n");
     FIO_ASSERT(fio_http_websocket_accepted(h) == 1,
                "acceptance: crafted 101 response should be accepted");
     /* mimic the reactor-time wiring (fio___connecting_on_ready +
@@ -966,6 +984,7 @@ static void test_websocket_connect_wrapper(void) {
     fio_io_udata_set(io, c);
     /* drive the client completion seam directly */
     fio___http_on_http_client(h, NULL);
+    TEST_WS_STEP("    [ws-wrap] (b) seam driven\n");
     fio___http_protocol_s *p =
         FIO_PTR_FROM_FIELD(fio___http_protocol_s, settings, c->settings);
     FIO_ASSERT(fio_http_controller(h) ==
@@ -977,6 +996,7 @@ static void test_websocket_connect_wrapper(void) {
        tears everything down; the WS controller frees the connection in a
        single pass, so no balancing reference is required here */
     fio_queue_perform_all(fio_io_queue());
+    TEST_WS_STEP("    [ws-wrap] (b) drained\n");
     FIO_ASSERT(test_ws_rec_on_open_calls == 1 && test_ws_rec_on_open_h == h,
                "acceptance: on_open should fire once the WS protocol "
                "attaches (got %d)",
@@ -998,6 +1018,7 @@ static void test_websocket_connect_wrapper(void) {
                                               .on_http = test_ws_rec_on_http,
                                               .on_open = test_ws_rec_on_open);
     FIO_ASSERT(io, "rejection: connect failed");
+    TEST_WS_STEP("    [ws-wrap] (c) connected\n");
     fio_http_status_set(h, 200);
     FIO_ASSERT(!fio_http_websocket_accepted(h),
                "rejection: a 200 response must not be accepted as an "
@@ -1008,6 +1029,7 @@ static void test_websocket_connect_wrapper(void) {
        helper); the queued user callback frees the handle when drained */
     test_ws_balance_connection_ref(h);
     fio_queue_perform_all(fio_io_queue());
+    TEST_WS_STEP("    [ws-wrap] (c) seam driven + drained\n");
     FIO_ASSERT(test_ws_rec_on_http_calls == 1 && test_ws_rec_on_http_h == h,
                "rejection: on_http should fire once with the response "
                "handle (got %d)",
@@ -1017,10 +1039,13 @@ static void test_websocket_connect_wrapper(void) {
     /* the IO outlived the handle; close it and drain the close path */
     fio_io_close(io);
     fio_queue_perform_all(fio_io_queue());
+    TEST_WS_STEP("    [ws-wrap] (c) io closed + drained\n");
   }
 
   fio_io_listen_stop((fio_io_listener_s *)l);
+  TEST_WS_STEP("    [ws-wrap] listener stopped\n");
 }
+#undef TEST_WS_STEP
 
 /* ===========================================================================
    T032 — compress_static failure-memoization tests
