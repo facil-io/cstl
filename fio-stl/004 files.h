@@ -32,9 +32,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
  */
 #ifndef FIO_FILENAME_PATH_CAPA
 #if defined(PATH_MAX) && (PATH_MAX <= 16384)
-#define FIO_FILENAME_PATH_CAPA (PATH_MAX | 4094)
+#define FIO_FILENAME_PATH_CAPA (PATH_MAX | 4096)
 #else
-#define FIO_FILENAME_PATH_CAPA (4094)
+#define FIO_FILENAME_PATH_CAPA (4096)
 #endif
 #endif
 
