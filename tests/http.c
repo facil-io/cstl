@@ -877,6 +877,32 @@ static void test_ws_balance_connection_ref(fio_http_s *h) {
 #define TEST_WS_STEP(...) ((void)0)
 #endif
 
+/* Drains the IO queue one task at a time (semantically identical to
+ * fio_queue_perform_all), emitting Windows-only markers around each
+ * deferred task, so the crashing task is identifiable in CI logs. */
+static void test_ws_drain_marked(const char *tag, size_t index) {
+  size_t n = 0;
+  for (;;) {
+    fio_queue_task_s t = fio_queue_pop(fio_io_queue());
+    if (!t.fn)
+      break;
+    ++n;
+    TEST_WS_STEP("    [ws-wrap] %s[%zu]: task #%zu (fn=%p)...\n",
+                 tag,
+                 index,
+                 n,
+                 (void *)t.fn);
+    t.fn(t.udata1, t.udata2);
+    TEST_WS_STEP("    [ws-wrap] %s[%zu]: task #%zu done\n", tag, index, n);
+  }
+  TEST_WS_STEP("    [ws-wrap] %s[%zu]: queue empty after %zu tasks\n",
+               tag,
+               index,
+               n);
+  (void)tag;
+  (void)index;
+}
+
 static void test_websocket_connect_wrapper(void) {
   fprintf(stderr,
           "  * WebSocket connect wrapper (scheme normalization, client "
@@ -952,7 +978,7 @@ static void test_websocket_connect_wrapper(void) {
       TEST_WS_STEP("    [ws-wrap] (a.%zu) connected + asserted\n", i);
       test_ws_balance_connection_ref(h);
       fio_io_close(io);
-      fio_queue_perform_all(fio_io_queue());
+      test_ws_drain_marked("a-close", i);
       TEST_WS_STEP("    [ws-wrap] (a.%zu) closed + drained\n", i);
     }
   }
@@ -995,7 +1021,7 @@ static void test_websocket_connect_wrapper(void) {
     /* the deferred protocol switch attaches the WS protocol (on_open) and
        tears everything down; the WS controller frees the connection in a
        single pass, so no balancing reference is required here */
-    fio_queue_perform_all(fio_io_queue());
+    test_ws_drain_marked("b", 0);
     TEST_WS_STEP("    [ws-wrap] (b) drained\n");
     FIO_ASSERT(test_ws_rec_on_open_calls == 1 && test_ws_rec_on_open_h == h,
                "acceptance: on_open should fire once the WS protocol "
@@ -1028,7 +1054,7 @@ static void test_websocket_connect_wrapper(void) {
     /* balancing reference for the pre-existing teardown double-free (see
        helper); the queued user callback frees the handle when drained */
     test_ws_balance_connection_ref(h);
-    fio_queue_perform_all(fio_io_queue());
+    test_ws_drain_marked("c", 0);
     TEST_WS_STEP("    [ws-wrap] (c) seam driven + drained\n");
     FIO_ASSERT(test_ws_rec_on_http_calls == 1 && test_ws_rec_on_http_h == h,
                "rejection: on_http should fire once with the response "
@@ -1038,7 +1064,7 @@ static void test_websocket_connect_wrapper(void) {
                "rejection: on_open must not fire for a non-101 response");
     /* the IO outlived the handle; close it and drain the close path */
     fio_io_close(io);
-    fio_queue_perform_all(fio_io_queue());
+    test_ws_drain_marked("c-close", 0);
     TEST_WS_STEP("    [ws-wrap] (c) io closed + drained\n");
   }
 
