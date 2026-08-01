@@ -1210,6 +1210,15 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  * `FIO_HTTP_STATIC_FILE_COMPLETION`). `OPTIONS` requests are refused (a
  * static file is not a valid `OPTIONS` response).
  *
+ * `root_folder` MUST name an existing folder (use `"."` for the CWD):
+ * the path-traversal guard rejects `..` folding, not absolute paths, so
+ * an empty root would expose absolute paths such as `/etc/passwd`.
+ * Settings-provided `public_folder` values are validated on listen/route
+ * creation (non-existent folders are rejected); direct callers MUST pass
+ * a valid, non-empty root. Symlinks inside the root are followed (like
+ * nginx's default) - applications requiring strict containment should
+ * keep the root free of symlinks.
+ *
  * Handles conditional requests (`ETag` / `If-None-Match` -> 304), single
  * `Range` requests (206 / 416, always served identity), and `HEAD`
  * requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when

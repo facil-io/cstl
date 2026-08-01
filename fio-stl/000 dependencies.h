@@ -487,7 +487,8 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_CLI) || defined(FIO_HTTP) ||                            \
     defined(FIO_HTTP1_PARSER) || defined(FIO_JSON) || defined(FIO_STR) ||      \
-    defined(FIO_TIME) || defined(FIO_FILES) || defined(FIO_SECRET)
+    defined(FIO_TIME) || defined(FIO_FILES) || defined(FIO_SECRET) ||          \
+    defined(FIO_RESP3)
 #undef FIO_ATOL
 #define FIO_ATOL
 #endif

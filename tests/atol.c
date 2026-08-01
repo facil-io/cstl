@@ -335,6 +335,98 @@ int main(void) {
   TEST_LTOA_DIGITS_BIN(0xFF00000000000000ULL, 64);
 #undef TEST_LTOA_DIGITS_BIN
 
+  /* Strict, bounded variants (fio_stol10u / fio_stol10 / fio_stol16u) */
+  {
+    fprintf(stderr, "  * strict bounded number parsing\n");
+    char *p;
+    /* fio_stol10u: digits only, bounded, E2BIG on overflow */
+    p = (char *)"123";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 3) == 123 && p[0] == 0 && !errno,
+               "fio_stol10u basic failed");
+    p = (char *)"12345";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 3) == 123 && p == (char *)"12345" + 3,
+               "fio_stol10u bound (end pointer) failed");
+    p = (char *)"18446744073709551615"; /* UINT64_MAX */
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 20) == ~(uint64_t)0ULL && !errno,
+               "fio_stol10u UINT64_MAX failed");
+    p = (char *)"18446744073709551616"; /* UINT64_MAX + 1 */
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 20) == 1844674407370955161ULL &&
+                   errno == E2BIG && p[0] == '6',
+               "fio_stol10u overflow must set E2BIG and stop at last valid "
+               "digit (got errno=%d)",
+               errno);
+    p = (char *)"1_0";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 3) == 1 && p[0] == '_' && !errno,
+               "fio_stol10u must reject '_' separators (stop before '_')");
+    p = (char *)" 12";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 3) == 0 && p[0] == ' ',
+               "fio_stol10u must not skip whitespace");
+    p = (char *)"-12";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 3) == 0 && p[0] == '-',
+               "fio_stol10u must not accept a sign");
+    p = (char *)"x";
+    errno = 0;
+    FIO_ASSERT(fio_stol10u(&p, p + 1) == 0 && p[0] == 'x',
+               "fio_stol10u empty number must not advance pos");
+    /* fio_stol10: optional sign + strict digits, signed-range E2BIG */
+    p = (char *)"-123";
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 4) == -123 && !errno,
+               "fio_stol10 negative failed");
+    p = (char *)"+123";
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 4) == 123 && !errno,
+               "fio_stol10 plus-sign failed");
+    p = (char *)"9223372036854775807"; /* INT64_MAX */
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 19) == INT64_MAX && !errno,
+               "fio_stol10 INT64_MAX failed");
+    p = (char *)"9223372036854775808"; /* INT64_MAX + 1 */
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 19) == INT64_MAX && errno == E2BIG,
+               "fio_stol10 must set E2BIG past INT64_MAX");
+    p = (char *)"-9223372036854775808"; /* INT64_MIN */
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 20) == INT64_MIN && !errno,
+               "fio_stol10 INT64_MIN failed");
+    p = (char *)"-9223372036854775809"; /* INT64_MIN - 1 */
+    errno = 0;
+    FIO_ASSERT(fio_stol10(&p, p + 20) == INT64_MIN && errno == E2BIG,
+               "fio_stol10 must set E2BIG past INT64_MIN");
+    /* fio_stol16u: hex digits only, no 0x, bounded, E2BIG on overflow */
+    p = (char *)"fF";
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 2) == 255 && !errno,
+               "fio_stol16u basic failed");
+    p = (char *)"0x10";
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 4) == 0 && p[0] == 'x',
+               "fio_stol16u must NOT consume a 0x prefix");
+    p = (char *)"ffffffffffffffff"; /* 16 x f = UINT64_MAX */
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 16) == ~(uint64_t)0ULL && !errno,
+               "fio_stol16u UINT64_MAX failed");
+    p = (char *)"10000000000000000"; /* 17 digits */
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 17) == 0x1000000000000000ULL &&
+                   errno == E2BIG && p[0] == '0',
+               "fio_stol16u overflow must set E2BIG and stop");
+    p = (char *)"g1";
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 2) == 0 && p[0] == 'g',
+               "fio_stol16u non-hex must not advance pos");
+    p = (char *)"abcdef";
+    errno = 0;
+    FIO_ASSERT(fio_stol16u(&p, p + 3) == 0xabc && p == (char *)"abcdef" + 3,
+               "fio_stol16u bound (end pointer) failed");
+  }
   FIO_NAME_TEST(stl, aton_vectors)();
 
 #define TEST_DOUBLE(s, d, stop)                                                \

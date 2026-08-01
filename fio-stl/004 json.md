@@ -105,6 +105,8 @@ Parses `json_string` up to `len` bytes. Stops as soon as a complete top-level va
 
 **Note:** a UTF-8 BOM at the start of the buffer is skipped automatically.
 
+**Guard-byte contract:** number and quote-less key scanning may read the byte at `json_string[len]` while deciding a token ended (see the `fio_atol*` guard-byte contract). Callers MUST keep that byte readable and non-numeric - pass a NUL-terminated string (any `fio_bstr` string qualifies) or append a non-numeric guard byte. Exact-size buffers with no readable byte past `len` violate the contract and will trigger AddressSanitizer.
+
 #### `fio_json_parse_update`
 
 ```c

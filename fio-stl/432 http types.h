@@ -4303,7 +4303,10 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
                                         size_t max_age) {
   int fd = -1;
   size_t file_length = 0;
-  /* combine public folder with path to get file name */
+  /* combine public folder with path to get file name.
+    * NOTE: `rt` MUST name an existing folder (validated for settings-based
+    * callers; direct callers pass "." for the CWD) - the traversal guard
+    * rejects `..` folding, not absolute paths. */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
   FIO_STR_INFO_TMP_VAR(filename, (FIO_FILENAME_PATH_CAPA - 1));

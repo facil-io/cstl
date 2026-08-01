@@ -527,24 +527,10 @@ Internal Helper: Parse integer from buffer
 
 FIO_IFUNC int64_t fio___resp3_parse_int(const uint8_t **pos,
                                         const uint8_t *eol) {
-  int64_t result = 0;
-  int negative = 0;
-  const uint8_t *p = *pos;
-
-  if (p < eol && *p == '-') {
-    negative = 1;
-    ++p;
-  } else if (p < eol && *p == '+') {
-    ++p;
-  }
-
-  while (p < eol && *p >= '0' && *p <= '9') {
-    result = (result * 10) + (*p - '0');
-    ++p;
-  }
-
-  *pos = p;
-  return negative ? -result : result;
+  /* Typed adapter over the shared strict, bounded parser (002 atol.h).
+   * Clears `errno`; callers must test `errno == E2BIG` (overflow). */
+  errno = 0;
+  return fio_stol10((char **)pos, (const char *)eol);
 }
 
 /* *****************************************************************************
@@ -920,6 +906,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Number: :<number>\r\n ===== */
     case FIO_RESP3_NUMBER: {
       int64_t num = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       obj = cb.on_number(parser->udata, num);
       pos = eol + 1;
       obj = fio___resp3_on_value(parser, &cb, obj);
@@ -1031,6 +1023,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       }
 
       int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       pos = eol + 1;
 
       if (blob_len < 0) {
@@ -1118,6 +1116,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Blob Error: !<length>\r\n<bytes>\r\n ===== */
     case FIO_RESP3_BLOB_ERR: {
       int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       pos = eol + 1;
 
       if (blob_len <= 0) {
@@ -1200,6 +1204,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Verbatim String: =<length>\r\n<type:><bytes>\r\n ===== */
     case FIO_RESP3_VERBATIM: {
       int64_t blob_len = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       pos = eol + 1;
 
       if (blob_len < 0) {
@@ -1291,6 +1301,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
+        if (FIO_UNLIKELY(errno == E2BIG)) {
+          parser->error = 1;
+          result.err = 1;
+          cb.on_error_protocol(parser->udata);
+          goto done;
+        }
       }
       pos = eol + 1;
 
@@ -1348,6 +1364,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
+        if (FIO_UNLIKELY(errno == E2BIG)) {
+          parser->error = 1;
+          result.err = 1;
+          cb.on_error_protocol(parser->udata);
+          goto done;
+        }
       }
       pos = eol + 1;
 
@@ -1382,7 +1404,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
-      /* Maps: count is pairs, need count*2 elements */
+      /* Maps: count is pairs, need count*2 elements (guard the doubling) */
+      if (!streaming && count > (INT64_MAX >> 1)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       int64_t elements = streaming ? -1 : count * 2;
       if (fio___resp3_push_frame(parser,
                                  &cb,
@@ -1407,6 +1435,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
+        if (FIO_UNLIKELY(errno == E2BIG)) {
+          parser->error = 1;
+          result.err = 1;
+          cb.on_error_protocol(parser->udata);
+          goto done;
+        }
       }
       pos = eol + 1;
 
@@ -1461,6 +1495,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Push: ><count>\r\n ===== */
     case FIO_RESP3_PUSH: {
       int64_t count = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       pos = eol + 1;
 
       if (count < 0) {
@@ -1510,6 +1550,12 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Attribute: |<count>\r\n ===== */
     case FIO_RESP3_ATTR: {
       int64_t count = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       pos = eol + 1;
 
       if (count < 0) {
@@ -1525,6 +1571,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
+      /* Attributes: count is pairs, need count*2 (guard the doubling) */
+      if (count > (INT64_MAX >> 1)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
       if (fio___resp3_push_frame(parser,
                                  &cb,
                                  FIO_RESP3_ATTR,
@@ -1551,6 +1604,13 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       int64_t chunk_len = fio___resp3_parse_int(&pos, eol);
       pos = eol + 1;
 
+      if (FIO_UNLIKELY(errno == E2BIG)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+
       /* Length 0 means end of streaming string */
       if (chunk_len == 0) {
         obj = cb.on_string_done(parser->udata,
@@ -1569,6 +1629,15 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
           goto done;
         }
         break;
+      }
+
+      /* Negative chunk lengths are a protocol error (no negative lengths
+       * exist in RESP3); rejecting them also prevents an infinite rewind. */
+      if (chunk_len < 0) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
       }
 
       /* Check if we have complete chunk data */

@@ -57,14 +57,15 @@ int main(void) {
   /* Path traversal tests for fio_filename_is_unsafe / _url.
    *
    * Expected values depend on the separator set each function guards:
-   * - fio_filename_is_unsafe treats only the OS-native separator as
-   *   significant ('\\' on Windows, '/' elsewhere).
-   * - fio_filename_is_unsafe_url always treats '/' as a separator and (on
-   *   Windows) treats '\\' as a separator as well, so URL-decoded input is
-   *   guarded against both Unix and Windows flavored attempts on every
-   *   system (this is the guard used for static file URL paths).
+   * - On Windows, Win32 APIs accept BOTH '/' and '\\' as separators, so
+   *   BOTH functions guard both flavors (fixed 2026-07-31: previously
+   *   fio_filename_is_unsafe guarded '\\' only, leaving Unix-flavored
+   *   traversal open on Windows - the same bug class as the public one).
    * - On POSIX systems '\\' is an ordinary filename character, so Windows
-   *   flavored attempts are inert and must be reported as safe (0).
+   *   flavored attempts are inert and must be reported as safe (0) by both
+   *   functions.
+   * - Both functions are therefore equivalent; fio_filename_is_unsafe_url
+   *   remains the canonical guard for URL-decoded paths.
    */
 #if FIO_OS_WIN
 #define FIO___UNSAFE_EXP(posix, win) (win)
@@ -96,19 +97,19 @@ int main(void) {
       {.str = "", .unsafe = 0, .unsafe_url = 0},
       /* caught on every system, by both functions */
       {.str = "..", .unsafe = 1, .unsafe_url = 1},
-      /* Unix flavored attempts (POSIX: both 1, Windows: _url only) */
-      {.str = "../", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "../file", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "../../etc/passwd", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "/..", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "/../", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "folder/../file", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "folder/..", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "a/b/../../c", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "//", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "//server/share", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "folder//file", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1},
-      {.str = "../..\\file", .unsafe = FIO___UNSAFE_EXP(1, 0), .unsafe_url = 1}, /* mixed flavors */
+      /* Unix flavored attempts (caught by both functions on every system) */
+      {.str = "../", .unsafe = 1, .unsafe_url = 1},
+      {.str = "../file", .unsafe = 1, .unsafe_url = 1},
+      {.str = "../../etc/passwd", .unsafe = 1, .unsafe_url = 1},
+      {.str = "/..", .unsafe = 1, .unsafe_url = 1},
+      {.str = "/../", .unsafe = 1, .unsafe_url = 1},
+      {.str = "folder/../file", .unsafe = 1, .unsafe_url = 1},
+      {.str = "folder/..", .unsafe = 1, .unsafe_url = 1},
+      {.str = "a/b/../../c", .unsafe = 1, .unsafe_url = 1},
+      {.str = "//", .unsafe = 1, .unsafe_url = 1},
+      {.str = "//server/share", .unsafe = 1, .unsafe_url = 1},
+      {.str = "folder//file", .unsafe = 1, .unsafe_url = 1},
+      {.str = "../..\\file", .unsafe = 1, .unsafe_url = 1}, /* mixed flavors */
       /* Windows flavored attempts (inert on POSIX, both 1 on Windows) */
       {.str = "..\\", .unsafe = FIO___UNSAFE_EXP(0, 1), .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
       {.str = "..\\file", .unsafe = FIO___UNSAFE_EXP(0, 1), .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
@@ -121,8 +122,8 @@ int main(void) {
       {.str = "folder\\\\file", .unsafe = FIO___UNSAFE_EXP(0, 1), .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
       /* mixed flavors - inert on POSIX ('\\' is not a separator there) */
       {.str = "..\\../file", .unsafe = FIO___UNSAFE_EXP(0, 1), .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
-      /* mixed flavors - only the URL variant catches this on Windows */
-      {.str = "folder/..\\file", .unsafe = 0, .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
+      /* mixed flavors - on Windows the '/' traversal is caught by both */
+      {.str = "folder/..\\file", .unsafe = FIO___UNSAFE_EXP(0, 1), .unsafe_url = FIO___UNSAFE_EXP(0, 1)},
       {.str = NULL}, // clang-format on
   };
 #undef FIO___UNSAFE_EXP

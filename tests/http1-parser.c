@@ -412,6 +412,113 @@ static void test_leading_whitespace_no_newline(void) {
 }
 
 /* ===========================================================================
+ * Regression test (2026-07-31 audit): header-line CR trim underflow (CWE-125)
+ *
+ * An empty header line (end of headers) arriving at the very start of the
+ * parse buffer made `eol[-1]` read one byte BEFORE the buffer. Reproduced by
+ * splitting the request across two parse calls; the second buffer is an
+ * exact-size heap allocation holding only '\n', so AddressSanitizer (with
+ * FIO_MEMORY_DISABLE) detects any recurrence on unpatched code.
+ * ===========================================================================
+ */
+static void test_empty_header_line_at_buffer_start(void) {
+  fprintf(stderr, "  * empty header line at buffer start (split)\n");
+  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+  parser_state_s st = {0};
+  char part1[] = "GET / HTTP/1.1\nHost: a\n";
+  size_t r1 = fio_http1_parse(&parser,
+                              FIO_BUF_INFO2(part1, sizeof(part1) - 1),
+                              &st);
+  FIO_ASSERT(r1 == sizeof(part1) - 1,
+             "split empty-line: part1 not fully consumed");
+  char *p = (char *)FIO_MEM_REALLOC(NULL, 0, 1, 0);
+  FIO_ASSERT_ALLOC(p);
+  p[0] = '\n';
+  size_t r2 = fio_http1_parse(&parser, FIO_BUF_INFO2(p, 1), &st);
+  FIO_MEM_FREE(p, 1);
+  FIO_ASSERT(r2 != FIO_HTTP1_PARSER_ERROR,
+             "split empty-line: parser returned error");
+  FIO_ASSERT(st.complete, "split empty-line: request should be complete");
+}
+
+/* ===========================================================================
+ * Regression test (2026-07-31 audit): whitespace-skip bounds order (CWE-125)
+ *
+ * The request-line whitespace skip evaluated `start[0]` before the bounds
+ * check, reading one byte past an all-whitespace buffer. Feed an exact-size
+ * heap buffer of spaces only; AddressSanitizer (with FIO_MEMORY_DISABLE)
+ * detects any recurrence. The parser must simply wait for more data.
+ * ===========================================================================
+ */
+static void test_whitespace_only_buffer(void) {
+  fprintf(stderr, "  * all-whitespace buffer\n");
+  char *p = (char *)FIO_MEM_REALLOC(NULL, 0, 4, 0);
+  FIO_ASSERT_ALLOC(p);
+  FIO_MEMSET(p, ' ', 4);
+  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+  parser_state_s st = {0};
+  size_t r = fio_http1_parse(&parser, FIO_BUF_INFO2(p, 4), &st);
+  FIO_MEM_FREE(p, 4);
+  FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR, "ws only: parser returned error");
+  FIO_ASSERT(!st.complete, "ws only: should not be complete");
+}
+
+/* ===========================================================================
+ * Regression test (2026-07-31 audit): TE list trim loop bounds order
+ *
+ * `Transfer-Encoding: ,chunked` made the separator-trim loop evaluate
+ * `c_start[-1]` after reaching the start of the value (logical over-read).
+ * After the fix a separator-only prefix is consumed and the value is treated
+ * as plain "chunked".
+ * ===========================================================================
+ */
+static void test_te_separator_only_prefix(void) {
+  fprintf(stderr, "  * TE separator-only prefix (',chunked')\n");
+  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: ,chunked\r\n\r\n0\r\n\r\n";
+  parser_state_s st = {0};
+  size_t r = run_parse(&st, (char *)req, sizeof(req) - 1);
+  FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR, "te prefix: parser returned error");
+  FIO_ASSERT(st.complete, "te prefix: should be complete");
+}
+
+/* ===========================================================================
+ * Regression test (2026-07-31 audit, CWE-444 differential parsing):
+ * `Content-Length: 1_0` was accepted as 10 (fio_atol10u allows '_' digit
+ * separators) - a request-smuggling primitive against strict intermediaries.
+ * The strict bounded parser (fio_stol10u) stops at '_', failing the
+ * value-end check.
+ * ===========================================================================
+ */
+static void test_content_length_underscore_rejected(void) {
+  fprintf(stderr, "  * Content-Length with '_' separator rejected\n");
+  char req[] = "POST / HTTP/1.1\r\nContent-Length: 1_0\r\n\r\n";
+  parser_state_s st = {0};
+  size_t r = run_parse(&st, (char *)req, sizeof(req) - 1);
+  FIO_ASSERT(r == FIO_HTTP1_PARSER_ERROR,
+             "cl underscore: should be a parse error");
+}
+
+/* ===========================================================================
+ * Regression test (2026-07-31 audit, CWE-444): chunk sizes accepted a `0x`
+ * prefix and '_' separators (fio_atol16u semantics) - both are
+ * differential-parsing smuggling primitives. fio_stol16u is strict.
+ * ===========================================================================
+ */
+static void test_chunk_size_non_rfc_rejected(void) {
+  fprintf(stderr, "  * chunk size '0x' prefix / '_' separator rejected\n");
+  char req1[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0x10\r\n";
+  parser_state_s st1 = {0};
+  size_t r1 = run_parse(&st1, (char *)req1, sizeof(req1) - 1);
+  FIO_ASSERT(r1 == FIO_HTTP1_PARSER_ERROR,
+             "chunk size '0x10': should be a parse error");
+  char req2[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1_0\r\n";
+  parser_state_s st2 = {0};
+  size_t r2 = run_parse(&st2, (char *)req2, sizeof(req2) - 1);
+  FIO_ASSERT(r2 == FIO_HTTP1_PARSER_ERROR,
+             "chunk size '1_0': should be a parse error");
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -437,6 +544,11 @@ int main(void) {
   test_many_headers();
   test_parser_state_queries();
   test_leading_whitespace_no_newline();
+  test_empty_header_line_at_buffer_start();
+  test_whitespace_only_buffer();
+  test_te_separator_only_prefix();
+  test_content_length_underscore_rejected();
+  test_chunk_size_non_rfc_rejected();
   fprintf(stderr, "All HTTP/1 parser tests passed!\n");
   return 0;
 }

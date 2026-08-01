@@ -25,6 +25,24 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #endif
 
 /* *****************************************************************************
+Buffer Requirements (Guard-Byte Contract)
+*****************************************************************************
+
+Number parsing (`fio_atol*`, `fio_atof`, `fio_aton`) is optimized for
+NUL-terminated strings and may read up to - and including - the first
+non-numeric byte following a number (parsing stops at, but still reads,
+that byte).
+
+Callers MUST keep the buffer readable through that guard byte: pass a
+NUL-terminated string or ensure a non-numeric guard byte follows the data.
+`fio_bstr` strings always satisfy this contract. Exact-size buffers with
+no readable byte past the number (e.g., a 1-byte allocation holding "1")
+violate it, causing a 1-byte out-of-bounds read (AddressSanitizer
+detectable, use `FIO_MEMORY_DISABLE` when sanitizing).
+
+***************************************************************************** */
+
+/* *****************************************************************************
 Strings to Signed Numbers - The fio_aton function
 ***************************************************************************** */
 
@@ -178,6 +196,27 @@ SFUNC uint64_t fio_atol16u(char **pstr);
 SFUNC uint64_t fio_atol_bin(char **pstr);
 /** Read an unsigned number in any base up to base 36. */
 SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
+
+/* *****************************************************************************
+Strict, Bounded Number Parsing (wire-safe)
+***************************************************************************** */
+
+/** Reads an unsigned base 10 number within `[pos, end)` - strict digits only
+ * (no whitespace, sign, underscores or prefixes). Advances `pos` past the
+ * digits consumed. On overflow sets `errno == E2BIG` and stops at the last
+ * valid digit. Callers detect empty / trailing junk by testing `pos`. */
+SFUNC uint64_t fio_stol10u(char **pos, const char *end);
+
+/** Reads a signed base 10 number within `[pos, end)` - an optional leading
+ * `-` / `+` followed by strict digits only. Sets `errno == E2BIG` on
+ * overflow (either the magnitude or the signed range limit). */
+SFUNC int64_t fio_stol10(char **pos, const char *end);
+
+/** Reads an unsigned hex number within `[pos, end)` - strict hex digits
+ * only (NO `0x` prefix, no underscores). Advances `pos` past the digits
+ * consumed. On overflow sets `errno == E2BIG` and stops at the last valid
+ * digit. */
+SFUNC uint64_t fio_stol16u(char **pos, const char *end);
 
 /** Converts an unsigned `val` to a signed `val`, with overflow protection. */
 FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t invert);
@@ -421,6 +460,9 @@ FIO_IFUNC int64_t fio_u2i_limit(uint64_t val, size_t to_negative) {
     val = 0x7FFFFFFFFFFFFFFFULL;
     return (int64_t)val;
   }
+  /* a magnitude of exactly 2**63 is INT64_MIN - valid, not an overflow */
+  if (val == 0x8000000000000000ULL)
+    return (int64_t)val;
   if (!(val & 0x8000000000000000ULL)) {
     val = (uint64_t)((int64_t)0LL - (int64_t)val);
     return (int64_t)val;
@@ -677,6 +719,41 @@ SFUNC int64_t fio_atol10(char **pstr) {
   return fio_u2i_limit(val, inv);
 }
 
+/* *****************************************************************************
+Strict, Bounded Number Parsing (wire-safe)
+***************************************************************************** */
+
+/** Strict, bounded unsigned base 10 read - see API notes. */
+SFUNC uint64_t fio_stol10u(char **pos, const char *end) {
+  const char *p = *pos;
+  uint64_t r = 0;
+  while (p < end) {
+    const uint64_t d = (uint64_t)(p[0] - '0');
+    if (d > 9ULL)
+      break;
+    if (r > ((~(uint64_t)0ULL) - d) / 10ULL) {
+      errno = E2BIG;
+      break;
+    }
+    r = (r * 10ULL) + d;
+    ++p;
+  }
+  *pos = (char *)p;
+  return r;
+}
+
+/** Strict, bounded signed base 10 read - see API notes. */
+SFUNC int64_t fio_stol10(char **pos, const char *end) {
+  const char *p = *pos;
+  size_t inv = 0;
+  if (p < end && (p[0] == '-' || p[0] == '+')) {
+    inv = (size_t)(p[0] == '-');
+    ++p;
+  }
+  *pos = (char *)p;
+  return fio_u2i_limit(fio_stol10u(pos, end), inv);
+}
+
 /** Reads an unsigned hex formatted number (possibly prefixed with "0x"). */
 FIO_IFUNC uint64_t fio___atol16u_with_prefix(uint64_t r, char **pstr) {
   size_t d;
@@ -703,7 +780,7 @@ FIO_IFUNC uint64_t fio___atol16u_with_prefix(uint64_t r, char **pstr) {
   return r;
 possible_misread:
   /* if 0x was read, move to X. */
-  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
+  *pstr += ((pstr[0][0] == '0') && ((pstr[0][1] | 32) == 'x'));
   return r;
 }
 
@@ -712,7 +789,7 @@ SFUNC uint64_t fio_atol16u(char **pstr) {
   uint64_t r = 0;
   size_t d;
   unsigned char *p = (unsigned char *)*pstr;
-  p += ((p[0] == '0') & ((p[1] | 32) == 'x')) << 1;
+  p += ((p[0] == '0') && ((p[1] | 32) == 'x')) << 1;
   if ((d = fio_c2i(*p)) > 15)
     goto possible_misread;
   for (;;) {
@@ -734,7 +811,26 @@ SFUNC uint64_t fio_atol16u(char **pstr) {
   return r;
 possible_misread:
   /* if 0x was read, move to X. */
-  *pstr += ((pstr[0][0] == '0') & ((pstr[0][1] | 32) == 'x'));
+  *pstr += ((pstr[0][0] == '0') && ((pstr[0][1] | 32) == 'x'));
+  return r;
+}
+
+/** Strict, bounded unsigned hex read - see API notes. */
+SFUNC uint64_t fio_stol16u(char **pos, const char *end) {
+  const char *p = *pos;
+  uint64_t r = 0;
+  while (p < end) {
+    const size_t d = (size_t)fio_c2i((unsigned char)p[0]);
+    if (d > 15)
+      break;
+    if (r & UINT64_C(0xF000000000000000)) {
+      errno = E2BIG;
+      break;
+    }
+    r = (r << 4) | (uint64_t)d;
+    ++p;
+  }
+  *pos = (char *)p;
   return r;
 }
 

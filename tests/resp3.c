@@ -1690,6 +1690,47 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_chunked)(void) {
   test_obj_free(obj);
 }
 
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_negative_chunk)(void) {
+  /* Regression test (2026-07-31 audit, CWE-835/CWE-20): a negative streamed
+   * chunk length (`$?\r\n;-1\r\n`) must be a protocol error. Unpatched code
+   * rewound with err=0 on every call (infinite retry / DoS) and handed
+   * SIZE_MAX to on_start_string. */
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+  const char *data = "$?\r\n;-1\r\n";
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_streaming_callbacks, data, strlen(data));
+  FIO_ASSERT(r.err != 0 && parser.error,
+             "negative chunk length must be a protocol error");
+  FIO_ASSERT(test_state.parser_error_count == 1,
+             "on_error_protocol should be called once (got %d)",
+             test_state.parser_error_count);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_overflowing_int)(void) {
+  /* Regression test (2026-07-31 audit R2, CWE-190): integers beyond the
+   * uint64/int64 range must be a protocol error (E2BIG), not a silent wrap
+   * that desynchronizes framing. Also: map counts that would overflow the
+   * internal count*2 doubling must be rejected. */
+  test_state_reset();
+  fio_resp3_parser_s parser = {.udata = &test_state};
+  const char *data = "$99999999999999999999\r\n"; /* > UINT64_MAX */
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_callbacks, data, strlen(data));
+  FIO_ASSERT(r.err != 0 && parser.error,
+             "overflowing blob length must be a protocol error");
+  FIO_ASSERT(test_state.parser_error_count == 1,
+             "on_error_protocol should be called once");
+
+  test_state_reset();
+  fio_resp3_parser_s p2 = {.udata = &test_state};
+  const char *data2 = "%4611686018427387904\r\n"; /* > INT64_MAX/2 */
+  fio_resp3_result_s r2 =
+      fio_resp3_parse(&p2, &test_callbacks, data2, strlen(data2));
+  FIO_ASSERT(r2.err != 0 && p2.error,
+             "map count exceeding INT64_MAX/2 must be a protocol error");
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_string_in_array)(void) {
   test_state_reset();
   fio_resp3_parser_s parser = {.udata = &test_state};
@@ -2128,6 +2169,8 @@ int main(void) {
   FIO_NAME_TEST(stl, resp3_streaming_string_error)();
   FIO_NAME_TEST(stl, resp3_streaming_string_verbatim)();
   FIO_NAME_TEST(stl, resp3_streaming_string_chunked)();
+  FIO_NAME_TEST(stl, resp3_streaming_negative_chunk)();
+  FIO_NAME_TEST(stl, resp3_overflowing_int)();
   FIO_NAME_TEST(stl, resp3_streaming_string_in_array)();
   FIO_NAME_TEST(stl, resp3_streaming_string_fallback)();
   FIO_NAME_TEST(stl, resp3_simple_string_no_streaming)();

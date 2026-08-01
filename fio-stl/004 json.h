@@ -98,6 +98,11 @@ typedef struct {
  * Returns the number of bytes consumed before parsing stopped (due to either
  * error or end of data). Stops as close as possible to the end of the buffer or
  * once an object parsing was completed.
+ *
+ * Buffer requirement (guard-byte contract): number / quote-less key scanning
+ * may read the byte at `json_string[len]` while deciding a token ended. The
+ * buffer MUST remain readable through a non-numeric guard byte - pass a
+ * NUL-terminated string (`fio_bstr` qualifies) or append a guard byte.
  */
 SFUNC fio_json_result_s fio_json_parse(fio_json_parser_callbacks_s *settings,
                                        void *udata,

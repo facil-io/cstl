@@ -17,8 +17,7 @@
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if defined(FIO_HTTP1_PARSER) && !defined(H___FIO_HTTP1_PARSER___H) &&         \
-    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)) &&                  \
-    !defined(FIO___RECURSIVE_INCLUDE)
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
 /* *****************************************************************************
 The HTTP/1.1 provides static functions only, always as part or implementation.
 ***************************************************************************** */
@@ -202,9 +201,9 @@ static int fio_http1___start(fio_http1_parser_s *p,
   fio_buf_info_s wrd[3];
   char *start = buf->buf;
   char *tmp;
-  while ((start[0] == ' ' || start[0] == '\r' || start[0] == '\n') &&
-         start < buf->buf + buf->len) /* skip white space */
-    ++start;
+  while (start < buf->buf + buf->len &&
+         (start[0] == ' ' || start[0] == '\r' || start[0] == '\n'))
+    ++start; /* skip white space */
   if (start == buf->buf + buf->len) {
     buf->buf = start;
     return 1;
@@ -305,10 +304,12 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
         return -1;
       char *tmp = value.buf;
       errno = 0; /* reset errno before parsing */
-      uint64_t clen = fio_atol10u(&tmp);
-      /* Reject if: parsing failed (tmp didn't reach end), overflow occurred,
-       * or value collides with sentinel values */
+      uint64_t clen = fio_stol10u(&tmp, value.buf + value.len);
+      /* Reject if: parsing failed or trailing junk (tmp didn't reach end),
+       * overflow occurred, value doesn't fit size_t (32-bit builds), or
+       * value collides with sentinel values */
       if ((unsigned)(tmp != value.buf + value.len) | (errno == E2BIG) |
+          ((uint64_t)(size_t)clen != clen) |
           (clen == FIO___HTTP1_BODY_NOT_ALLOWED) |
           (clen == FIO_HTTP1_EXPECTED_CHUNKED))
         return -1;
@@ -341,9 +342,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
           return 0;
         if (c_start[-1] != ' ' && c_start[-1] != ',' && c_start[-1] != '\t')
           return -1;
-        while (
-            (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t') &&
-            c_start > value.buf)
+        while (c_start > value.buf &&
+               (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t'))
           --c_start;
         if (c_start == value.buf)
           return 0;
@@ -429,7 +429,7 @@ static inline int fio_http1___read_header_line(
 
     buf->len -= (eol - buf->buf) + 1;
     buf->buf = eol + 1;
-    eol -= (eol[-1] == '\r');
+    eol -= (eol != start && eol[-1] == '\r');
     if (FIO_UNLIKELY(eol == start))
       goto headers_finished;
 
@@ -558,9 +558,13 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
     return (buf->len < 10) ? 1 : -1;
 
   char *eol = buf->buf;
-  size_t expected = fio_atol16u(&eol); /* never overflows, EOL validated */
-  if (eol == buf->buf || expected > 0x0FFFFFFF) /* cap expected */
+  errno = 0;
+  /* strict, bounded hex: no 0x prefix, no separators, junk rejected below */
+  uint64_t expected64 = fio_stol16u(&eol, buf->buf + buf->len);
+  if (eol == buf->buf || errno == E2BIG ||
+      expected64 > 0x0FFFFFFF) /* cap expected */
     return -1;
+  size_t expected = (size_t)expected64;
   eol += (eol[0] == '\r');
   if (eol >= buf->buf + buf->len)
     return 1; /* read overflowed */

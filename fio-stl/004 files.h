@@ -472,11 +472,14 @@ FIO_IFUNC int fio___filename_is_unsafe_sep(const char *path,
   return 0;
 }
 
-/** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
+/** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//").
+ *
+ * On Windows both `/` and `\` are guarded, since Win32 APIs accept either
+ * separator - guarding only one would leave the other flavor open to path
+ * traversal. On POSIX `\` is an ordinary filename character and is ignored.
+ */
 SFUNC int fio_filename_is_unsafe(const char *path) {
-  return fio___filename_is_unsafe_sep(path,
-                                      FIO_FOLDER_SEPARATOR,
-                                      FIO_FOLDER_SEPARATOR);
+  return fio___filename_is_unsafe_sep(path, '/', FIO_FOLDER_SEPARATOR);
 }
 
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */

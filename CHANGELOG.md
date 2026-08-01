@@ -2,6 +2,18 @@
 
 ### Unreleased
 
+**Security**: (`files`, `http1 parser`, `resp3`, `atol`, `json`, `http`) proactive security audit fixes and hardening:
+
+- (`files`) `fio_filename_is_unsafe` now guards BOTH `/` and `\` on Windows (Win32 APIs accept either separator); previously only `\` was guarded, leaving Unix-flavored traversal (`foo/../../secret`) open on Windows. Regression tests added to `tests/files.c`.
+- (`http1 parser`) fixed three 1-byte out-of-bounds reads (ASAN-verified): `eol[-1]` underflow when an empty header line starts at the buffer; whitespace skip reading one byte past an all-whitespace buffer; and the `Transfer-Encoding` separator-trim loop evaluating `c_start[-1]` at the value start. Regression tests added to `tests/http1-parser.c`.
+- (`resp3`) a negative streamed chunk length (`$?\r\n;-1\r\n`) is now a protocol error; previously the parser rewound and retried forever (infinite-loop DoS). Regression test added to `tests/resp3.c`.
+- (`atol`) the `"0x"` prefix probes (`fio_atol16u`, `possible_misread` paths) no longer read `p[1]` unconditionally (short-circuit `&&`).
+- (`atol`, `json`) documented the guard-byte contract: number parsing may read up to and including the first non-numeric byte following a number — callers MUST pass a NUL-terminated string or append a guard byte (`fio_bstr` always qualifies). Documented in the `atol` module and on `fio_json_parse`.
+- (`atol`) new strict, bounded parsing family: `fio_stol10u`, `fio_stol10`, `fio_stol16u` — parse within an explicit `[pos, end)` window; digits only (no whitespace, underscores, `0x`/`0b` prefixes or `inf`/`nan`); `errno == E2BIG` on overflow. Use for wire protocols and any length/size field. `fio_u2i_limit` no longer flags `-9223372036854775808` (exactly `INT64_MIN`) as overflow.
+- (`http1 parser`) `Content-Length` and chunk sizes now use the strict bounded parsers: `Content-Length: 1_0`, `0x` chunk-size prefixes and chunk-size separators are rejected (request-smuggling differentials, CWE-444); `Content-Length` is additionally range-checked against `size_t` (32-bit truncation desync, CWE-197).
+- (`resp3`) integer parsing now delegates to the strict bounded parser via `FIO_RESP3` -> `FIO_ATOL` dependency: overflowing lengths/counts (`$99999999999999999999`) are a protocol error instead of UB/silent wrap (CWE-190); map/attribute counts that would overflow the internal `count * 2` doubling are rejected.
+- (`http`) documented the `fio_http_static_file_response` root contract: `root_folder` MUST name an existing folder (settings-provided folders are validated; use `"."` for the CWD) — the traversal guard rejects `..` folding, not absolute paths; symlinks inside the root are followed.
+
 **API Changes** (`files`): the files module is now fully zero-allocation (it is included before the memory module, so `FIO_MEM_REALLOC` / `FIO_MEM_FREE` were never safe to use). Path manipulation uses a fixed-size stack buffer (`FIO_STR_INFO_TMP_VAR`) capped by the new `FIO_FILENAME_PATH_CAPA` configuration macro (default `PATH_MAX | 4094`); over-long paths fail with `errno == ENAMETOOLONG`.
 
 - New API: `fio_filename_remove(.path = ..., .folder = ..., .recursive = ...)` — removes a file / link (`unlink`-like, the default), an empty folder (`.folder = 1`, `rmdir`-like) or a whole tree (`.recursive = 1`, `rm -r`-like; implies `.folder`). Links (symlinks / reparse points) are removed, never followed into. Abstracts `unlink` / `rmdir` vs. `DeleteFileA` / `RemoveDirectoryA`.
