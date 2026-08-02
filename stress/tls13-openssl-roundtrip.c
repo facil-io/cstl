@@ -11,6 +11,13 @@ an OpenSSL client certificate is exposed through fio_io_peer_info_next and that
 partially consumed plaintext schedules enough deferred on_data callbacks to
 drain the TLS buffer when the peer sends no more application data.
 
+It is also the TLS 1.3 SHA-384 interop gate (see ./AI-TODO.md): one phase
+forces an OpenSSL client to negotiate TLS_AES_256_GCM_SHA384 against the
+embedded TLS server, and a second phase forces an OpenSSL server restricted
+to TLS_AES_256_GCM_SHA384 to accept the embedded TLS client.  Both assert the
+negotiated cipher, exercising the SHA-384 transcript, HKDF and Finished paths
+in both directions.
+
 Without OpenSSL the test compiles to a no-op that exits 0.
 ***************************************************************************** */
 #define FIO_SHA2
@@ -29,9 +36,10 @@ Without OpenSSL the test compiles to a no-op that exits 0.
 #endif
 #include "../tests/test-helpers.h"
 
-#if HAVE_OPENSSL && FIO_OS_POSIX
+#if HAVE_OPENSSL && FIO_OS_POSIX && !defined(FIO_NO_TLS)
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <openssl/err.h>
 #include <openssl/obj_mac.h>
 #include <openssl/pem.h>
@@ -63,6 +71,16 @@ typedef struct {
   fio_io_listener_s *openssl_peer_listener;
   X509 *client_cert;
   EVP_PKEY *client_key;
+  fio_io_tls_s *client_tls;
+  SSL_CTX *openssl_server_ctx;
+  int openssl_server_fd;
+  int openssl_server_port;
+  int openssl_server_abort;
+  int openssl_server_failed;
+  int openssl_server_done;
+  int sha384_server_done;
+  int sha384_client_done;
+  int sha384_client_failed;
   int http_port;
   int partial_port;
   int openssl_peer_port;
@@ -77,11 +95,14 @@ typedef struct {
   int openssl_peer_failed;
   int thread_started;
   pthread_t thread;
+  int server_thread_started;
+  pthread_t server_thread;
 } fio___tls13_openssl_rt_state_s;
 
 static fio___tls13_openssl_rt_state_s fio___tls13_openssl_rt_state = {0};
 static fio_io_protocol_s fio___tls13_openssl_rt_partial_protocol = {0};
 static fio_io_protocol_s fio___tls13_openssl_rt_openssl_peer_protocol = {0};
+static fio_io_protocol_s fio___tls13_openssl_rt_sha384_client_protocol = {0};
 static int fio___tls13_openssl_rt_watchdog_fired = 0;
 
 /* *****************************************************************************
@@ -267,14 +288,12 @@ static int fio___tls13_openssl_rt_socket_connect(const char *host, int port) {
   return fd;
 }
 
-static int fio___tls13_openssl_rt_client_identity_create(char *trust_path) {
-  fio___tls13_openssl_rt_state_s *state = &fio___tls13_openssl_rt_state;
+static int fio___tls13_openssl_rt_identity_new(const char *cn,
+                                               X509 **cert_out,
+                                               EVP_PKEY **key_out) {
   EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
   EVP_PKEY *key = NULL;
   X509 *cert = NULL;
-  FILE *file = NULL;
-  int fd = -1;
-  int trust_file_created = 0;
   int result = -1;
 
   if (!kctx || EVP_PKEY_keygen_init(kctx) <= 0 ||
@@ -285,17 +304,43 @@ static int fio___tls13_openssl_rt_client_identity_create(char *trust_path) {
       !ASN1_INTEGER_set(X509_get_serialNumber(cert), 1) ||
       !X509_gmtime_adj(X509_getm_notBefore(cert), -3600) ||
       !X509_gmtime_adj(X509_getm_notAfter(cert), 3600) ||
-      !X509_NAME_add_entry_by_txt(
-          X509_get_subject_name(cert),
-          "CN",
-          MBSTRING_ASC,
-          (const unsigned char *)fio___tls13_openssl_rt_client_cn,
-          -1,
-          -1,
-          0) ||
+      !X509_NAME_add_entry_by_txt(X509_get_subject_name(cert),
+                                  "CN",
+                                  MBSTRING_ASC,
+                                  (const unsigned char *)cn,
+                                  -1,
+                                  -1,
+                                  0) ||
       !X509_set_issuer_name(cert, X509_get_subject_name(cert)) ||
       !X509_set_pubkey(cert, key) || X509_sign(cert, key, EVP_sha256()) <= 0)
     goto cleanup;
+
+  *cert_out = cert;
+  *key_out = key;
+  cert = NULL;
+  key = NULL;
+  result = 0;
+
+cleanup:
+  EVP_PKEY_CTX_free(kctx);
+  X509_free(cert);
+  EVP_PKEY_free(key);
+  if (result)
+    ERR_print_errors_fp(stderr);
+  return result;
+}
+
+static int fio___tls13_openssl_rt_client_identity_create(char *trust_path) {
+  fio___tls13_openssl_rt_state_s *state = &fio___tls13_openssl_rt_state;
+  FILE *file = NULL;
+  int fd = -1;
+  int trust_file_created = 0;
+  int result = -1;
+
+  if (fio___tls13_openssl_rt_identity_new(fio___tls13_openssl_rt_client_cn,
+                                          &state->client_cert,
+                                          &state->client_key))
+    return -1;
 
   fd = mkstemp(trust_path);
   if (fd < 0)
@@ -305,17 +350,13 @@ static int fio___tls13_openssl_rt_client_identity_create(char *trust_path) {
   if (!file)
     goto cleanup;
 
-  int write_ok = PEM_write_X509(file, cert) == 1;
+  int write_ok = PEM_write_X509(file, state->client_cert) == 1;
   if (fclose(file))
     write_ok = 0;
   file = NULL;
   fd = -1;
   if (!write_ok)
     goto cleanup;
-  state->client_cert = cert;
-  state->client_key = key;
-  cert = NULL;
-  key = NULL;
   result = 0;
 
 cleanup:
@@ -323,12 +364,13 @@ cleanup:
     fclose(file);
   else if (fd >= 0)
     close(fd);
-  EVP_PKEY_CTX_free(kctx);
-  X509_free(cert);
-  EVP_PKEY_free(key);
   if (result) {
     if (trust_file_created)
       unlink(trust_path);
+    X509_free(state->client_cert);
+    EVP_PKEY_free(state->client_key);
+    state->client_cert = NULL;
+    state->client_key = NULL;
     ERR_print_errors_fp(stderr);
   }
   return result;
@@ -345,7 +387,9 @@ static int fio___tls13_openssl_rt_client_cert_add(SSL_CTX *ctx) {
   return 0;
 }
 
-static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
+static int fio___tls13_openssl_rt_client_run(const char *host,
+                                             int port,
+                                             const char *cipher_suite) {
   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
   if (!ctx)
     return -1;
@@ -357,6 +401,11 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
   SSL_CTX_set_min_proto_version(ctx, TLS1_3_VERSION);
   SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+  if (cipher_suite && SSL_CTX_set_ciphersuites(ctx, cipher_suite) != 1) {
+    fprintf(stderr, "SSL_CTX_set_ciphersuites(%s) failed\n", cipher_suite);
+    SSL_CTX_free(ctx);
+    return -1;
+  }
 
   static const unsigned char alpn[] = "\x8http/1.1";
   SSL_CTX_set_alpn_protos(ctx, alpn, sizeof(alpn) - 1);
@@ -395,6 +444,20 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
     return -1;
   }
 
+  if (cipher_suite) {
+    const char *negotiated_cipher = SSL_get_cipher(ssl);
+    if (!negotiated_cipher || strcmp(negotiated_cipher, cipher_suite) != 0) {
+      fprintf(stderr,
+              "cipher suite mismatch: expected %s, got %s\n",
+              cipher_suite,
+              negotiated_cipher ? negotiated_cipher : "(null)");
+      SSL_free(ssl);
+      close(fd);
+      SSL_CTX_free(ctx);
+      return -1;
+    }
+  }
+
   const unsigned char *negotiated = NULL;
   unsigned int negotiated_len = 0;
   SSL_get0_alpn_selected(ssl, &negotiated, &negotiated_len);
@@ -421,11 +484,22 @@ static int fio___tls13_openssl_rt_client_run(const char *host, int port) {
   int total = 0;
   for (;;) {
     int n = SSL_read(ssl, response + total, (int)sizeof(response) - total - 1);
-    if (n > 0) {
-      total += n;
-      continue;
+    if (n <= 0)
+      break;
+    total += n;
+    response[total] = 0;
+    /* The server keeps the connection open after the response - stop once a
+     * complete Content-Length framed response was received instead of
+     * waiting for EOF (which would cost the socket timeout). */
+    char *hdr_end = strstr(response, "\r\n\r\n");
+    if (hdr_end) {
+      const char *cl = strstr(response, "content-length:");
+      if (!cl)
+        break; /* no body framing - headers complete the response */
+      int body_len = atoi(cl + sizeof("content-length:") - 1);
+      if (total >= (int)((hdr_end + 4 - response) + body_len))
+        break;
     }
-    break;
   }
   response[total] = 0;
 
@@ -478,7 +552,10 @@ static int fio___tls13_openssl_rt_partial_client_run(const char *host,
 
   int ok = 1;
   if (SSL_connect(ssl) <= 0) {
-    fprintf(stderr, "partial-read SSL_connect failed\n");
+    fprintf(stderr,
+            "partial-read SSL_connect failed: err=%d\n",
+            SSL_get_error(ssl, -1));
+    ERR_print_errors_fp(stderr);
     ok = 0;
   }
 
@@ -550,7 +627,10 @@ static int fio___tls13_openssl_rt_peer_client_run(const char *host, int port) {
   uint8_t byte = 'P';
   int ok = 1;
   if (SSL_connect(ssl) <= 0) {
-    fprintf(stderr, "OpenSSL-backend SSL_connect failed\n");
+    fprintf(stderr,
+            "OpenSSL-backend SSL_connect failed: err=%d\n",
+            SSL_get_error(ssl, -1));
+    ERR_print_errors_fp(stderr);
     ok = 0;
   } else if (SSL_write(ssl, &byte, 1) != 1) {
     fprintf(stderr, "OpenSSL-backend SSL_write failed\n");
@@ -568,6 +648,137 @@ static int fio___tls13_openssl_rt_peer_client_run(const char *host, int port) {
   close(fd);
   SSL_CTX_free(ctx);
   return ok ? 0 : -1;
+}
+
+/* *****************************************************************************
+TLS_AES_256_GCM_SHA384 gate: embedded TLS client vs. restricted OpenSSL server
+***************************************************************************** */
+
+static void fio___tls13_openssl_rt_sha384_on_attach(fio_io_s *io) {
+  /* fio_io_write buffers while the TLS handshake is in progress. */
+  uint8_t byte = 'C';
+  fio_io_write(io, &byte, 1);
+}
+
+static void fio___tls13_openssl_rt_sha384_on_data(fio_io_s *io) {
+  fio___tls13_openssl_rt_state_s *state =
+      (fio___tls13_openssl_rt_state_s *)fio_io_udata(io);
+  uint8_t byte = 0;
+  if (!fio_io_read(io, &byte, 1))
+    return; /* handshake progress or close_notify */
+  if (byte != 'S') {
+    fprintf(stderr,
+            "SHA-384 embedded client: unexpected acknowledgement %u\n",
+            (unsigned)byte);
+    fio_atomic_exchange(&state->sha384_client_failed, 1);
+  }
+  fio_atomic_exchange(&state->sha384_client_done, 1);
+  fio_io_close(io);
+}
+
+static void fio___tls13_openssl_rt_sha384_on_close(void *iobuf, void *udata) {
+  (void)iobuf;
+  fio___tls13_openssl_rt_state_s *state =
+      (fio___tls13_openssl_rt_state_s *)udata;
+  int done;
+  fio_atomic_load(done, &state->sha384_client_done);
+  if (!done) {
+    /* Closed before the exchange completed (e.g., handshake failure). */
+    fprintf(stderr,
+            "SHA-384 embedded client: connection closed before exchange\n");
+    fio_atomic_exchange(&state->sha384_client_failed, 1);
+    fio_atomic_exchange(&state->sha384_client_done, 1);
+  }
+}
+
+static void fio___tls13_openssl_rt_sha384_on_failed(
+    fio_io_protocol_s *protocol,
+    void *udata) {
+  (void)protocol;
+  fio___tls13_openssl_rt_state_s *state =
+      (fio___tls13_openssl_rt_state_s *)udata;
+  fprintf(stderr, "SHA-384 embedded client: TCP connect failed\n");
+  fio_atomic_exchange(&state->sha384_client_failed, 1);
+  fio_atomic_exchange(&state->sha384_client_done, 1);
+}
+
+/* OpenSSL server thread: TLS_AES_256_GCM_SHA384 only, one-byte echo. */
+static void *fio___tls13_openssl_rt_oserver_thread(void *ignr_) {
+  (void)ignr_;
+  fio___tls13_openssl_rt_state_s *state = &fio___tls13_openssl_rt_state;
+  int failed = 1;
+  int fd = -1;
+  SSL *ssl = NULL;
+
+  for (;;) {
+    int abort;
+    fio_atomic_load(abort, &state->openssl_server_abort);
+    if (abort) {
+      fprintf(stderr, "OpenSSL server: no connection arrived\n");
+      goto cleanup;
+    }
+    fd = accept(state->openssl_server_fd, NULL, NULL);
+    if (fd >= 0)
+      break;
+    if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+      usleep(1000);
+      continue;
+    }
+    perror("OpenSSL server accept");
+    goto cleanup;
+  }
+
+  ssl = SSL_new(state->openssl_server_ctx);
+  if (!ssl)
+    goto cleanup;
+  SSL_set_fd(ssl, fd);
+
+  /* accept() inherits O_NONBLOCK from the listening socket on BSD/macOS -
+   * restore blocking semantics so SSL_accept performs a full handshake. */
+  {
+    int fl = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+  }
+
+  if (SSL_accept(ssl) <= 0) {
+    fprintf(stderr,
+            "OpenSSL server: SSL_accept (SHA-384) failed: err=%d\n",
+            SSL_get_error(ssl, -1));
+    ERR_print_errors_fp(stderr);
+    goto cleanup;
+  }
+
+  {
+    const char *cipher = SSL_get_cipher(ssl);
+    if (!cipher || strcmp(cipher, "TLS_AES_256_GCM_SHA384") != 0) {
+      fprintf(stderr,
+              "OpenSSL server: cipher mismatch: %s\n",
+              cipher ? cipher : "(null)");
+      goto cleanup;
+    }
+    uint8_t byte = 0;
+    if (SSL_read(ssl, &byte, 1) != 1 || byte != 'C') {
+      fprintf(stderr, "OpenSSL server: payload read failed\n");
+      goto cleanup;
+    }
+    byte = 'S';
+    if (SSL_write(ssl, &byte, 1) != 1) {
+      fprintf(stderr, "OpenSSL server: payload write failed\n");
+      goto cleanup;
+    }
+  }
+  failed = 0;
+
+cleanup:
+  if (ssl) {
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+  }
+  if (fd >= 0)
+    close(fd);
+  state->openssl_server_failed = failed;
+  fio_atomic_exchange(&state->openssl_server_done, 1);
+  return NULL;
 }
 
 static void *fio___tls13_openssl_rt_thread(void *ignr_) {
@@ -589,14 +800,45 @@ static void *fio___tls13_openssl_rt_thread(void *ignr_) {
       fio___tls13_openssl_rt_state.partial_port <= 0 ||
       fio___tls13_openssl_rt_state.openssl_peer_port <= 0) {
     fio___tls13_openssl_rt_state.result = -1;
-  } else if (fio___tls13_openssl_rt_client_run(
-                 "127.0.0.1", fio___tls13_openssl_rt_state.http_port) ||
-             fio___tls13_openssl_rt_partial_client_run(
-                 "127.0.0.1", fio___tls13_openssl_rt_state.partial_port) ||
-             fio___tls13_openssl_rt_peer_client_run(
-                 "127.0.0.1",
-                 fio___tls13_openssl_rt_state.openssl_peer_port)) {
-    fio___tls13_openssl_rt_state.result = -1;
+  } else {
+    if (fio___tls13_openssl_rt_client_run("127.0.0.1",
+                                          fio___tls13_openssl_rt_state
+                                              .http_port,
+                                          NULL) ||
+        fio___tls13_openssl_rt_client_run("127.0.0.1",
+                                          fio___tls13_openssl_rt_state
+                                              .http_port,
+                                          "TLS_AES_256_GCM_SHA384") ||
+        fio___tls13_openssl_rt_partial_client_run(
+            "127.0.0.1", fio___tls13_openssl_rt_state.partial_port) ||
+        fio___tls13_openssl_rt_peer_client_run(
+            "127.0.0.1",
+            fio___tls13_openssl_rt_state.openssl_peer_port)) {
+      fio___tls13_openssl_rt_state.result = -1;
+    } else {
+      fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_server_done,
+                          1);
+    }
+  }
+
+  /* Wait (bounded) for the embedded-client SHA-384 phase on the reactor. */
+  for (int waited = 0; waited < 5000; ++waited) {
+    int client_done;
+    fio_atomic_load(client_done,
+                    &fio___tls13_openssl_rt_state.sha384_client_done);
+    if (client_done)
+      break;
+    usleep(1000);
+  }
+  {
+    int client_done;
+    fio_atomic_load(client_done,
+                    &fio___tls13_openssl_rt_state.sha384_client_done);
+    if (!client_done) {
+      fprintf(stderr, "SHA-384 embedded-client phase timed out\n");
+      fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_failed,
+                          1);
+    }
   }
   fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
   fio_io_stop();
@@ -609,6 +851,23 @@ Reactor callbacks
 
 static void fio___tls13_openssl_rt_start_client(void *ignr_) {
   (void)ignr_;
+  /* Connect the embedded TLS client to the SHA-384-only OpenSSL server. */
+  static char sha384_url[64];
+  snprintf(sha384_url,
+           sizeof(sha384_url),
+           "tcp://127.0.0.1:%d",
+           fio___tls13_openssl_rt_state.openssl_server_port);
+  fio_io_s *sha384_io =
+      fio_io_connect(sha384_url,
+                     .protocol = &fio___tls13_openssl_rt_sha384_client_protocol,
+                     .on_failed = fio___tls13_openssl_rt_sha384_on_failed,
+                     .udata = &fio___tls13_openssl_rt_state,
+                     .tls = fio___tls13_openssl_rt_state.client_tls,
+                     .timeout = 5000);
+  if (!sha384_io) {
+    fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_failed, 1);
+    fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_done, 1);
+  }
   if (pthread_create(&fio___tls13_openssl_rt_state.thread,
                      NULL,
                      fio___tls13_openssl_rt_thread,
@@ -655,10 +914,97 @@ int main(void) {
       .io_functions = openssl_funcs,
       .timeout = 5000,
   };
+  fio___tls13_openssl_rt_sha384_client_protocol = (fio_io_protocol_s){
+      .on_attach = fio___tls13_openssl_rt_sha384_on_attach,
+      .on_data = fio___tls13_openssl_rt_sha384_on_data,
+      .on_close = fio___tls13_openssl_rt_sha384_on_close,
+      .on_timeout = fio_io_touch,
+      .io_functions = tls13_funcs,
+      .timeout = 5000,
+  };
 
   char trust_path[] = ".tls13-openssl-client-cert-XXXXXX";
   FIO_ASSERT(!fio___tls13_openssl_rt_client_identity_create(trust_path),
              "failed to create the OpenSSL client identity");
+
+  /* OpenSSL server restricted to TLS_AES_256_GCM_SHA384: gates the embedded
+   * TLS client's SHA-384 transcript / key schedule / Finished computation. */
+  X509 *server_cert = NULL;
+  EVP_PKEY *server_key = NULL;
+  FIO_ASSERT(
+      !fio___tls13_openssl_rt_identity_new("localhost",
+                                           &server_cert,
+                                           &server_key),
+      "failed to create the OpenSSL server identity");
+  fio___tls13_openssl_rt_state.openssl_server_ctx =
+      SSL_CTX_new(TLS_server_method());
+  FIO_ASSERT(fio___tls13_openssl_rt_state.openssl_server_ctx,
+             "SSL_CTX_new (server) failed");
+  FIO_ASSERT(
+      SSL_CTX_use_certificate(fio___tls13_openssl_rt_state.openssl_server_ctx,
+                              server_cert) == 1 &&
+          SSL_CTX_use_PrivateKey(fio___tls13_openssl_rt_state
+                                     .openssl_server_ctx,
+                                 server_key) == 1 &&
+          SSL_CTX_check_private_key(
+              fio___tls13_openssl_rt_state.openssl_server_ctx) == 1,
+      "failed to load the OpenSSL server certificate");
+  SSL_CTX_set_min_proto_version(
+      fio___tls13_openssl_rt_state.openssl_server_ctx, TLS1_3_VERSION);
+  SSL_CTX_set_max_proto_version(
+      fio___tls13_openssl_rt_state.openssl_server_ctx, TLS1_3_VERSION);
+  FIO_ASSERT(SSL_CTX_set_ciphersuites(
+                 fio___tls13_openssl_rt_state.openssl_server_ctx,
+                 "TLS_AES_256_GCM_SHA384") == 1,
+             "SSL_CTX_set_ciphersuites (server) failed");
+
+  fio___tls13_openssl_rt_state.openssl_server_fd =
+      socket(AF_INET, SOCK_STREAM, 0);
+  FIO_ASSERT(fio___tls13_openssl_rt_state.openssl_server_fd >= 0,
+             "OpenSSL server socket failed");
+  {
+    int opt = 1;
+    setsockopt(fio___tls13_openssl_rt_state.openssl_server_fd,
+               SOL_SOCKET,
+               SO_REUSEADDR,
+               &opt,
+               sizeof(opt));
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    FIO_ASSERT(bind(fio___tls13_openssl_rt_state.openssl_server_fd,
+                    (struct sockaddr *)&addr,
+                    sizeof(addr)) == 0,
+               "OpenSSL server bind failed");
+    FIO_ASSERT(listen(fio___tls13_openssl_rt_state.openssl_server_fd, 4) == 0,
+               "OpenSSL server listen failed");
+    /* Non-blocking accept loop with an abort flag: portable hang-proofing
+     * without relying on SO_RCVTIMEO semantics for accept(). */
+    int fl = fcntl(fio___tls13_openssl_rt_state.openssl_server_fd, F_GETFL, 0);
+    fcntl(fio___tls13_openssl_rt_state.openssl_server_fd,
+          F_SETFL,
+          fl | O_NONBLOCK);
+    socklen_t addr_len = sizeof(addr);
+    FIO_ASSERT(getsockname(fio___tls13_openssl_rt_state.openssl_server_fd,
+                           (struct sockaddr *)&addr,
+                           &addr_len) == 0,
+               "OpenSSL server getsockname failed");
+    fio___tls13_openssl_rt_state.openssl_server_port = ntohs(addr.sin_port);
+  }
+  FIO_ASSERT(pthread_create(&fio___tls13_openssl_rt_state.server_thread,
+                            NULL,
+                            fio___tls13_openssl_rt_oserver_thread,
+                            NULL) == 0,
+             "failed to start the OpenSSL server thread");
+  fio___tls13_openssl_rt_state.server_thread_started = 1;
+
+  /* No trust roots: the embedded client skips server-certificate verification
+   * (mirrors the OpenSSL client's SSL_VERIFY_NONE) - this gate targets the
+   * TLS_AES_256_GCM_SHA384 key schedule, not X.509 handling. */
+  fio___tls13_openssl_rt_state.client_tls = fio_io_tls_new();
+  FIO_ASSERT(fio___tls13_openssl_rt_state.client_tls,
+             "fio_io_tls_new (client) failed");
 
   fio_io_tls_s *tls = fio_io_tls_new();
   FIO_ASSERT(tls, "fio_io_tls_new failed");
@@ -709,6 +1055,15 @@ int main(void) {
   if (fio___tls13_openssl_rt_state.thread_started)
     pthread_join(fio___tls13_openssl_rt_state.thread, NULL);
 
+  fio_atomic_exchange(&fio___tls13_openssl_rt_state.openssl_server_abort, 1);
+  if (fio___tls13_openssl_rt_state.server_thread_started)
+    pthread_join(fio___tls13_openssl_rt_state.server_thread, NULL);
+  close(fio___tls13_openssl_rt_state.openssl_server_fd);
+  SSL_CTX_free(fio___tls13_openssl_rt_state.openssl_server_ctx);
+  X509_free(server_cert);
+  EVP_PKEY_free(server_key);
+  fio_io_tls_free(fio___tls13_openssl_rt_state.client_tls);
+
   fio_io_listen_stop(
       (fio_io_listener_s *)fio___tls13_openssl_rt_state.http_listener);
   fio_io_listen_stop(fio___tls13_openssl_rt_state.partial_listener);
@@ -722,6 +1077,13 @@ int main(void) {
              "client thread did not complete");
   FIO_ASSERT(fio___tls13_openssl_rt_state.result == 0,
              "TLS 1.3 OpenSSL client roundtrip failed");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.sha384_server_done,
+             "TLS_AES_256_GCM_SHA384 OpenSSL-client phase did not complete");
+  FIO_ASSERT(!fio___tls13_openssl_rt_state.sha384_client_failed,
+             "TLS_AES_256_GCM_SHA384 embedded-client phase failed");
+  FIO_ASSERT(fio___tls13_openssl_rt_state.openssl_server_done &&
+                 !fio___tls13_openssl_rt_state.openssl_server_failed,
+             "TLS_AES_256_GCM_SHA384 OpenSSL-server exchange failed");
   FIO_ASSERT(!fio___tls13_openssl_rt_state.partial_failed,
              "TLS 1.3 partial-read data validation failed");
   FIO_ASSERT(fio___tls13_openssl_rt_state.partial_peer_cert_seen,
@@ -764,17 +1126,18 @@ int main(void) {
   }
 
   fprintf(stderr,
-          "TLS 1.3 HTTP, partial-read, and peer-certificate roundtrips "
-          "passed.\n");
+          "TLS 1.3 HTTP, partial-read, peer-certificate, and "
+          "TLS_AES_256_GCM_SHA384 roundtrips passed.\n");
   return 0;
 }
 
-#else /* !HAVE_OPENSSL || !FIO_OS_POSIX */
+#else /* !HAVE_OPENSSL || !FIO_OS_POSIX || FIO_NO_TLS */
 
 int main(void) {
   fprintf(stderr,
-          "* TLS 1.3 OpenSSL roundtrip skipped (OpenSSL/POSIX unavailable).\n");
+          "* TLS 1.3 OpenSSL roundtrip skipped (OpenSSL/POSIX unavailable "
+          "or FIO_NO_TLS).\n");
   return 0;
 }
 
-#endif /* HAVE_OPENSSL && FIO_OS_POSIX */
+#endif /* HAVE_OPENSSL && FIO_OS_POSIX && !FIO_NO_TLS */

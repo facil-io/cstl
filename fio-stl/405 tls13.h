@@ -1357,6 +1357,12 @@ FIO_SFUNC ssize_t fio___tls13_read_connected(fio_socket_i fd,
                                                scratch + offset,
                                                record_len);
     if (decrypted < 0) {
+      /* An alert (or any error) after plaintext was already produced in
+       * this batch must not discard it: deliver the produced bytes now and
+       * leave the failing record stashed in recv_buf so the error surfaces
+       * on the next read instead. */
+      if (produced)
+        break;
       errno = ECONNRESET;
       return -1;
     }

@@ -899,7 +899,7 @@ SFUNC void fio_tls13_derive_secret(void *restrict out,
   if (!transcript_hash || hash_len == 0) {
     /* Hash of empty string */
     if (use_sha384) {
-      fio_u512 h = fio_sha512("", 0);
+      fio_u512 h = fio_sha384("", 0);
       FIO_MEMCPY(empty_hash, h.u8, 48);
       hash_len_to_use = 48;
     } else {
@@ -1055,7 +1055,7 @@ SFUNC void fio_tls13_compute_finished(void *restrict verify_data,
                                       int use_sha384) {
   /* verify_data = HMAC(finished_key, Transcript-Hash) */
   if (use_sha384) {
-    fio_u512 hmac = fio_sha512_hmac(finished_key, 48, transcript_hash, 48);
+    fio_u512 hmac = fio_sha384_hmac(finished_key, 48, transcript_hash, 48);
     FIO_MEMCPY(verify_data, hmac.u8, 48);
   } else {
     fio_u256 hmac = fio_sha256_hmac(finished_key, 32, transcript_hash, 32);
@@ -3440,8 +3440,16 @@ TLS 1.3 Client Implementation
 FIO_SFUNC void fio___tls13_transcript_update(fio_tls13_client_s *client,
                                              const uint8_t *data,
                                              size_t len) {
+  /* The hash function is only known once the ServerHello cipher selection
+   * has been processed - feed BOTH transcripts until then (the ClientHello
+   * and the ServerHello itself precede the selection). */
+  if (!client->cipher_suite) {
+    fio_sha256_consume(&client->transcript_sha256, data, len);
+    fio_sha384_consume(&client->transcript_sha384, data, len);
+    return;
+  }
   if (client->use_sha384)
-    fio_sha512_consume(&client->transcript_sha384, data, len);
+    fio_sha384_consume(&client->transcript_sha384, data, len);
   else
     fio_sha256_consume(&client->transcript_sha256, data, len);
 }
@@ -3451,7 +3459,7 @@ FIO_SFUNC void fio___tls13_transcript_hash(fio_tls13_client_s *client,
                                            uint8_t *out) {
   if (client->use_sha384) {
     fio_sha512_s copy = client->transcript_sha384;
-    fio_u512 h = fio_sha512_finalize(&copy);
+    fio_u512 h = fio_sha384_finalize(&copy);
     FIO_MEMCPY(out, h.u8, 48);
   } else {
     fio_sha256_s copy = client->transcript_sha256;
@@ -3505,8 +3513,8 @@ FIO_SFUNC void fio___tls13_transcript_replace_with_message_hash(
 
   /* Reinitialize transcript hash and update with message_hash */
   if (client->use_sha384) {
-    client->transcript_sha384 = fio_sha512_init();
-    fio_sha512_consume(&client->transcript_sha384, message_hash, 4 + hash_len);
+    client->transcript_sha384 = fio_sha384_init();
+    fio_sha384_consume(&client->transcript_sha384, message_hash, 4 + hash_len);
   } else {
     client->transcript_sha256 = fio_sha256_init();
     fio_sha256_consume(&client->transcript_sha256, message_hash, 4 + hash_len);
@@ -5250,7 +5258,7 @@ SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
 
   /* Initialize transcript hashes */
   client->transcript_sha256 = fio_sha256_init();
-  client->transcript_sha384 = fio_sha512_init();
+  client->transcript_sha384 = fio_sha384_init();
 
   /* Generate random and X25519 keypair */
   fio_rand_bytes(client->client_random, 32);
@@ -6122,7 +6130,7 @@ FIO_SFUNC void fio___tls13_server_transcript_update(fio_tls13_server_s *server,
                                                     const uint8_t *data,
                                                     size_t len) {
   if (server->use_sha384)
-    fio_sha512_consume(&server->transcript_sha384, data, len);
+    fio_sha384_consume(&server->transcript_sha384, data, len);
   else
     fio_sha256_consume(&server->transcript_sha256, data, len);
 }
@@ -6132,7 +6140,7 @@ FIO_SFUNC void fio___tls13_server_transcript_hash(fio_tls13_server_s *server,
                                                   uint8_t *out) {
   if (server->use_sha384) {
     fio_sha512_s copy = server->transcript_sha384;
-    fio_u512 h = fio_sha512_finalize(&copy);
+    fio_u512 h = fio_sha384_finalize(&copy);
     FIO_MEMCPY(out, h.u8, 48);
   } else {
     fio_sha256_s copy = server->transcript_sha256;
@@ -7916,7 +7924,7 @@ SFUNC void fio_tls13_server_init(fio_tls13_server_s *server) {
 
   /* Initialize transcript hashes */
   server->transcript_sha256 = fio_sha256_init();
-  server->transcript_sha384 = fio_sha512_init();
+  server->transcript_sha384 = fio_sha384_init();
 
   /* Default to Ed25519 if no key type set */
   server->credentials.signature_algo = FIO_TLS13_SIGNATURE_ED25519;

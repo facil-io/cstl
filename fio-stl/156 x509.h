@@ -2229,10 +2229,10 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   tbs_content += version_len;
 
   /* Serial number: 16 bytes, DER-encoded INTEGER.
-   * Max size = 1 (tag) + 1 (length) + 16 (content) = 18 bytes.
-   * High bit is always cleared (serial[0] &= 0x7F), so no leading zero needed.
-   * When buf==NULL, we use this maximum to ensure callers allocate enough space
-   * regardless of how many leading zeros the actual random serial may have. */
+   * Size = 1 (tag) + 1 (length) + 16 (content) = 18 bytes.
+   * High bit is always cleared (serial[0] &= 0x7F), so no sign-pad zero, and
+   * the first byte is forced non-zero (see below), so no stripping - the
+   * actual encoding is always exactly 18 bytes. */
   size_t serial_len = 18;
   tbs_content += serial_len;
 
@@ -2301,12 +2301,16 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   if (buf_len < total)
     return 0;
 
-  /* Generate random serial number (20 bytes max per RFC 5280) */
+  /* Generate random serial number (20 bytes max per RFC 5280).
+   * The first byte must be non-zero: fio_der_encode_integer strips leading
+   * zero bytes, which would make the actual serial TLV shorter than the
+   * serial_len used when sizing the TBSCertificate SEQUENCE (declared
+   * length mismatch -> strict DER parsers reject the certificate). */
   uint8_t serial[16];
   do {
     fio_rand_bytes(serial, sizeof(serial));
-  } while (!fio_buf2u64u(serial) || !fio_buf2u64u(serial + 8));
-  serial[0] &= 0x7F; /* Ensure positive */
+    serial[0] &= 0x7F; /* Ensure positive */
+  } while (!serial[0] || !fio_buf2u64u(serial) || !fio_buf2u64u(serial + 8));
 
   /* Now encode everything */
   size_t offset = 0;

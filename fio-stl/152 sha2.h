@@ -1341,6 +1341,61 @@ key_too_long:
   k.u512[3] = fio_sha512(key, key_len);
   return fio_sha512_hmac(k.u512[3].u8, sizeof(k.u512[3]), msg, msg_len);
 }
+/**
+ * HMAC-SHA-384, resulting in a 48 byte authentication code.
+ *
+ * Keys are limited to 128 bytes due to the design of the HMAC algorithm.
+ *
+ * Returns a fio_u512 of which the first 48 bytes hold the HMAC-SHA-384 code.
+ * NOTE: HMAC-SHA-384 is NOT an HMAC-SHA-512 truncated to 48 bytes - the
+ * SHA-384 initial values differ (FIPS 180-4), changing the whole digest.
+ */
+SFUNC fio_u512 fio_sha384_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len) {
+  fio_sha512_s inner = fio_sha384_init();
+  fio_u2048 k;
+  /* copy key */
+  if (key_len > 128)
+    goto key_too_long;
+  if (key_len == 128)
+    fio_memcpy128(k.u8, key);
+  else {
+    k.u1024[0] = (fio_u1024){0};
+    fio_memcpy127x(k.u8, key, key_len);
+  }
+  /* prepare inner key */
+  for (size_t i = 0; i < 16; ++i)
+    k.u64[i] ^= (uint64_t)0x3636363636363636ULL;
+  /* hash of inner key + msg (same as consume(key)||consume(msg), but easier
+   * for compilers to optimize - see fio_sha512_hmac) */
+  {
+    /* consume key block */
+    fio___sha512_round(&inner.hash, k.u8);
+    /* consume data */
+    uint8_t *buf = (uint8_t *)msg;
+    for (size_t i = 127; i < msg_len; (i += 128), (buf += 128))
+      fio___sha512_round(&inner.hash, buf);
+    if ((msg_len & 127)) {
+      inner.cache = (fio_u1024){0};
+      fio_memcpy127x(inner.cache.u8, buf, msg_len);
+    }
+    inner.total_len = 128 + msg_len;
+  }
+  /* finalize SHA-384 (48 bytes) and append to end of key */
+  k.u512[2] = fio_sha512_finalize(&inner);
+  /* switch key to outer key */
+  for (size_t i = 0; i < 16; ++i)
+    k.u64[i] ^=
+        ((uint64_t)0x3636363636363636ULL ^ (uint64_t)0x5C5C5C5C5C5C5C5CULL);
+  /* hash outer key with inner hash appended and return (48 bytes read) */
+  return fio_sha384(k.u8, 176);
+
+key_too_long:
+  k.u512[3] = fio_sha384(key, key_len);
+  return fio_sha384_hmac(k.u512[3].u8, 48, msg, msg_len);
+}
 
 /* *****************************************************************************
 Cleanup

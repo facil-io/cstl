@@ -2,9 +2,9 @@
 Test for 152 sha2z hkdf.h
 
 Coverage: HKDF-Extract, HKDF-Expand, and combined HKDF against RFC 5869 test
-vectors for SHA-256; SHA-384 variant smoke tests; incremental output length
-boundaries; and salt/info sensitivity. Performance loops are intentionally
-omitted.
+vectors for SHA-256; SHA-384 vectors (RFC 5869 parameter sets, OpenSSL
+oracle); incremental output length boundaries; and salt/info sensitivity.
+Performance loops are intentionally omitted.
 ***************************************************************************** */
 #include "test-helpers.h"
 
@@ -139,10 +139,16 @@ static void fio___test_hkdf_rfc5869_case3(void) {
 }
 
 /* *****************************************************************************
-SHA-384 Variant Smoke Tests
+SHA-384 Variant Test Vectors
+
+RFC 5869 publishes no SHA-384 vectors, so these use the RFC 5869 Test Case 1
+and Test Case 3 parameter sets computed with HMAC-SHA-384 against OpenSSL
+(oracle derivation: ./ai-research/2026-08-02 001 hkdf-sha384-vectors.rb).
+HMAC-SHA-384 != HMAC-SHA-512 truncated to 48 bytes (FIPS 180-4 IVs differ),
+which is exactly what these assertions guard.
 ***************************************************************************** */
 
-static void fio___test_hkdf_sha384(void) {
+static void fio___test_hkdf_sha384_case1(void) {
   static const uint8_t ikm[22] = {
       0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
       0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b};
@@ -151,16 +157,32 @@ static void fio___test_hkdf_sha384(void) {
       0x08, 0x09, 0x0a, 0x0b, 0x0c};
   static const uint8_t info[10] = {
       0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9};
+  static const uint8_t expected_prk[48] = {
+      0x70, 0x4b, 0x39, 0x99, 0x07, 0x79, 0xce, 0x1d, 0xc5, 0x48, 0x05,
+      0x2c, 0x7d, 0xc3, 0x9f, 0x30, 0x35, 0x70, 0xdd, 0x13, 0xfb, 0x39,
+      0xf7, 0xac, 0xc5, 0x64, 0x68, 0x0b, 0xef, 0x80, 0xe8, 0xde, 0xc7,
+      0x0e, 0xe9, 0xa7, 0xe1, 0xf3, 0xe2, 0x93, 0xef, 0x68, 0xec, 0xeb,
+      0x07, 0x2a, 0x5a, 0xde};
+  static const uint8_t expected_okm[64] = {
+      0x9b, 0x50, 0x97, 0xa8, 0x60, 0x38, 0xb8, 0x05, 0x30, 0x90, 0x76,
+      0xa4, 0x4b, 0x3a, 0x9f, 0x38, 0x06, 0x3e, 0x25, 0xb5, 0x16, 0xdc,
+      0xbf, 0x36, 0x9f, 0x39, 0x4c, 0xfa, 0xb4, 0x36, 0x85, 0xf7, 0x48,
+      0xb6, 0x45, 0x77, 0x63, 0xe4, 0xf0, 0x20, 0x4f, 0xc5, 0xd9, 0x5d,
+      0x1d, 0xa3, 0xe6, 0x25, 0x87, 0xb2, 0x2e, 0xb8, 0x94, 0x3d, 0x0f,
+      0xab, 0x6b, 0xb6, 0x31, 0xa2, 0xfe, 0x9d, 0xf1, 0xa6};
 
   uint8_t prk[48];
   uint8_t okm[64];
-  uint8_t zero_prk[48] = {0};
-  uint8_t zero_okm[64] = {0};
 
   fio_hkdf_extract(prk, salt, sizeof(salt), ikm, sizeof(ikm), 1);
-  FIO_ASSERT(FIO_MEMCMP(prk, zero_prk, 48) != 0,
-             "HKDF-Extract SHA-384 produced zero PRK");
+  FIO_ASSERT(!FIO_MEMCMP(prk, expected_prk, 48),
+             "HKDF-Extract SHA-384 case 1 PRK mismatch");
 
+  fio_hkdf_expand(okm, sizeof(okm), prk, sizeof(prk), info, sizeof(info), 1);
+  FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 64),
+             "HKDF-Expand SHA-384 case 1 OKM mismatch");
+
+  FIO_MEMSET(okm, 0, sizeof(okm));
   fio_hkdf(okm,
            sizeof(okm),
            salt,
@@ -170,8 +192,36 @@ static void fio___test_hkdf_sha384(void) {
            info,
            sizeof(info),
            1);
-  FIO_ASSERT(FIO_MEMCMP(okm, zero_okm, 64) != 0,
-             "HKDF SHA-384 produced zero OKM");
+  FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 64),
+             "Combined HKDF SHA-384 case 1 OKM mismatch");
+}
+
+static void fio___test_hkdf_sha384_case3(void) {
+  static const uint8_t ikm[22] = {
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
+      0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b};
+  static const uint8_t expected_prk[48] = {
+      0x10, 0xe4, 0x0c, 0xf0, 0x72, 0xa4, 0xc5, 0x62, 0x6e, 0x43, 0xdd,
+      0x22, 0xc1, 0xcf, 0x72, 0x7d, 0x4b, 0xb1, 0x40, 0x97, 0x5c, 0x9a,
+      0xd0, 0xcb, 0xc8, 0xe4, 0x5b, 0x40, 0x06, 0x8f, 0x8f, 0x0b, 0xa5,
+      0x7c, 0xdb, 0x59, 0x8a, 0xf9, 0xdf, 0xa6, 0x96, 0x3a, 0x96, 0x89,
+      0x9a, 0xf0, 0x47, 0xe5};
+  static const uint8_t expected_okm[42] = {
+      0xc8, 0xc9, 0x6e, 0x71, 0x0f, 0x89, 0xb0, 0xd7, 0x99, 0x0b, 0xca,
+      0x68, 0xbc, 0xde, 0xc8, 0xcf, 0x85, 0x40, 0x62, 0xe5, 0x4c, 0x73,
+      0xa7, 0xab, 0xc7, 0x43, 0xfa, 0xde, 0x9b, 0x24, 0x2d, 0xaa, 0xcc,
+      0x1c, 0xea, 0x56, 0x70, 0x41, 0x5b, 0x52, 0x84, 0x9c};
+
+  uint8_t prk[48];
+  uint8_t okm[42];
+
+  fio_hkdf_extract(prk, NULL, 0, ikm, sizeof(ikm), 1);
+  FIO_ASSERT(!FIO_MEMCMP(prk, expected_prk, 48),
+             "HKDF-Extract SHA-384 case 3 (zero salt) PRK mismatch");
+
+  fio_hkdf(okm, sizeof(okm), NULL, 0, ikm, sizeof(ikm), NULL, 0, 1);
+  FIO_ASSERT(!FIO_MEMCMP(okm, expected_okm, 42),
+             "Combined HKDF SHA-384 case 3 (zero salt/info) OKM mismatch");
 }
 
 /* *****************************************************************************
@@ -266,7 +316,8 @@ int main(void) {
   fio___test_hkdf_rfc5869_case1();
   fio___test_hkdf_rfc5869_case2();
   fio___test_hkdf_rfc5869_case3();
-  fio___test_hkdf_sha384();
+  fio___test_hkdf_sha384_case1();
+  fio___test_hkdf_sha384_case3();
   fio___test_hkdf_edge_cases();
   fio___test_hkdf_sensitivity();
   return 0;

@@ -23,9 +23,9 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /* *****************************************************************************
 HKDF API
 
-Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha512_hmac).
-      Either define FIO_SHA2 before FIO_HKDF, or use FIO_CRYPTO to include all
-      crypto modules.
+Note: HKDF requires SHA-2 HMAC functions (fio_sha256_hmac, fio_sha384_hmac,
+      fio_sha512_hmac).  Either define FIO_SHA2 before FIO_HKDF, or use
+      FIO_CRYPTO to include all crypto modules.
 ***************************************************************************** */
 
 /** SHA-256 hash length (32 bytes). */
@@ -117,7 +117,6 @@ SFUNC void fio_hkdf_extract(void *restrict prk,
     return;
 
   if (use_sha384) {
-    /* SHA-384: use SHA-512 HMAC, truncate to 48 bytes */
     /* If salt is NULL or empty, use hash_len zeros */
     uint8_t zero_salt[48] = {0};
     const void *actual_salt = salt;
@@ -126,10 +125,9 @@ SFUNC void fio_hkdf_extract(void *restrict prk,
       actual_salt = zero_salt;
       actual_salt_len = 48;
     }
-    /* PRK = HMAC-SHA384(salt, IKM) - using SHA-512 HMAC truncated */
+    /* PRK = HMAC-SHA-384(salt, IKM) - first 48 bytes of the result */
     fio_u512 hmac_result =
-        fio_sha512_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
-    /* Copy first 48 bytes (SHA-384 output) */
+        fio_sha384_hmac(actual_salt, actual_salt_len, ikm, ikm_len);
     FIO_MEMCPY(prk, hmac_result.u8, 48);
   } else {
     /* SHA-256 */
@@ -195,7 +193,7 @@ SFUNC void fio_hkdf_expand(void *restrict okm,
     input[offset] = counter;
 
     if (use_sha384) {
-      fio_u512 hmac_result = fio_sha512_hmac(prk, prk_len, input, input_len);
+      fio_u512 hmac_result = fio_sha384_hmac(prk, prk_len, input, input_len);
       FIO_MEMCPY(t_prev, hmac_result.u8, 48);
       t_prev_len = 48;
     } else {

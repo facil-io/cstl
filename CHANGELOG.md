@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**Fix**: (`tls13`, `sha2`, `hkdf`) TLS 1.3 cipher suites using SHA-384 (`TLS_AES_256_GCM_SHA384`) now inter-operate with real TLS peers. The SHA-384 paths previously ran SHA-512 primitives: the transcript hash used the SHA-512 IV (FIPS 180-4 requires different SHA-384 IVs) and HMAC was SHA-512 truncated to 48 bytes, which is NOT HMAC-SHA-384. Added `fio_sha384_hmac` (`152 sha2.h`); HKDF extract/expand (`152 sha2z hkdf.h`), the transcript hash, the empty-string hash and the Finished computation (`190 tls13.h`) now use real SHA-384. The TLS client additionally feeds BOTH transcript hashes until the ServerHello cipher-suite selection is known (previously the ClientHello/ServerHello only landed in the SHA-256 transcript, breaking SHA-384 suite negotiation). New OpenSSL interop gate in `stress/tls13-openssl-roundtrip.c` asserts `TLS_AES_256_GCM_SHA384` negotiation in both directions (OpenSSL client and OpenSSL server).
+
+**Fix**: (`tls13` IO) application data received in the same read batch as a following alert record (e.g., payload + `close_notify` coalesced into one TCP segment) was silently discarded when the alert record reported an error. Plaintext already produced in the batch is now delivered first; the error surfaces on the next read.
+
+**Fix**: (`x509`) `fio_x509_self_signed_cert` could emit a certificate whose TBSCertificate SEQUENCE declared a longer content than actually encoded: the 16-byte serial INTEGER was sized at a fixed 18 bytes, but `fio_der_encode_integer` strips leading zero bytes from the random serial (whenever the masked first byte came out 0x00). Strict DER parsers (e.g., OpenSSL) reject such certificates with a sequence length mismatch. The first serial byte is now forced non-zero, so the serial encoding is always exactly the sized 18 bytes.
+
+**Update**: (tests) `tests/hkdf.c` SHA-384 cases upgraded from non-zero smoke assertions to real vector assertions (RFC 5869 parameter sets computed with an OpenSSL oracle — derivation script in `./ai-research/`); `tests/sha.c` gained RFC 4231 HMAC-SHA-384 vectors covering `fio_sha384_hmac` (including the over-block-size key path).
+
 **Fix**: (`memalt`) `fio_memcpy` no longer routes overlapping copies to a raw `memcpy` path (undefined behavior; caught by the new `asan` build pattern). Overlapping ranges always take the buffered/reversed (memmove-safe) paths.
 
 **Fix**: (`core`) the vector rotation macros (`FIO_MATH_UXXX_OP_RROT/CRROT/LROT/CLROT`, i.e., `fio_u*_rrot*` / `fio_u*_crrot*` / `fio_u*_lrot*` / `fio_u*_clrot*`) now mask the rotation count on both shifts — rotating by the lane width (e.g., `fio_u256_crrot64(., 64)`) was shift-by-width undefined behavior and returned garbage under some optimizer/sanitizer combinations.
