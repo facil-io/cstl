@@ -843,28 +843,6 @@ static void test_ws_set_accept_response(fio_http_s *h) {
       accept_val);
 }
 
-/* ---------------------------------------------------------------------------
- * WORKAROUND — pre-existing library bug; remove when fixed upstream.
- *
- * `fio__http_controller_on_destroyed_client` (fio-stl/438 http.h ~L347-360)
- * pushes `fio___http_controller_on_destroyed_task` TWICE (L348 + L359)
- * while the failure/close handlers (`fio___http_connect_on_failed`, 438
- * http.h ~L96-102, and `fio___http_on_close`, 434 http accept.h ~L276-284)
- * also free the connection — 2 references, 3 frees (ASAN-confirmed
- * double-free of `fio___http_connection_s` on client connection teardown,
- * e.g. a synchronous connect failure or a graceful close before upgrade).
- * The bug is identical at git HEAD (old fio-stl/439 http.h L3145) and
- * predates the HTTP module split. Adding one reference before teardown
- * balances the count so these tests stay ASAN-clean. Remove this helper
- * (and its call sites) when the library bug is fixed.
- * ---------------------------------------------------------------------------
- */
-static void test_ws_balance_connection_ref(fio_http_s *h) {
-  fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
-  if (c)
-    fio___http_connection_dup(c);
-}
-
 static void test_websocket_connect_wrapper(void) {
   fprintf(stderr,
           "  * WebSocket connect wrapper (scheme normalization, client "
@@ -933,9 +911,7 @@ static void test_websocket_connect_wrapper(void) {
                  "response is processed",
                  url);
       /* teardown: close the IO and drain the deferred tasks (reactor-less
-         equivalents of the reactor's close path). The balancing reference
-         works around the pre-existing teardown double-free (see helper). */
-      test_ws_balance_connection_ref(h);
+         equivalents of the reactor's close path). */
       fio_io_close(io);
       fio_queue_perform_all(fio_io_queue());
     }
@@ -1004,9 +980,7 @@ static void test_websocket_connect_wrapper(void) {
                "upgrade");
     /* drive the client completion seam directly */
     fio___http_on_http_client(h, NULL);
-    /* balancing reference for the pre-existing teardown double-free (see
-       helper); the queued user callback frees the handle when drained */
-    test_ws_balance_connection_ref(h);
+    /* the queued user callback frees the handle when drained */
     fio_queue_perform_all(fio_io_queue());
     FIO_ASSERT(test_ws_rec_on_http_calls == 1 && test_ws_rec_on_http_h == h,
                "rejection: on_http should fire once with the response "
@@ -1188,7 +1162,6 @@ static void test_static_compress_attached_readonly(void) {
             "    (skipped — folder permissions not enforced, e.g. running "
             "as root)\n");
     chmod(dir, 0755);
-    test_ws_balance_connection_ref(h);
     fio_io_close(io);
     fio_queue_perform_all(fio_io_queue());
     fio_io_listen_stop((fio_io_listener_s *)l);
@@ -1268,9 +1241,8 @@ static void test_static_compress_attached_readonly(void) {
                "memoized failure");
   }
 
-  /* teardown: balancing reference for the pre-existing client-connection
-     teardown double-free (see helper), then restore perms and clean up. */
-  test_ws_balance_connection_ref(h);
+  /* teardown: close the client connection, then restore perms and clean
+     up. */
   fio_io_close(io);
   fio_queue_perform_all(fio_io_queue());
   fio_io_listen_stop((fio_io_listener_s *)l);

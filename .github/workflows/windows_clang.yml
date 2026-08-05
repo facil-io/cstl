@@ -88,7 +88,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [RELEASE] $name ==="
 
-            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=native $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
+            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=x86-64-v3 $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++

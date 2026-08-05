@@ -344,9 +344,6 @@ FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
 
 /** Called when an HTTP handle is freed. */
 FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
-  fio_queue_push(fio_io_queue(),
-                 fio___http_controller_on_destroyed_task,
-                 fio_http_cdata(h));
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   c->state.http.on_finish(h);
   if (c->state.http.buf.buf)
