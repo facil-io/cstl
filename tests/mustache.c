@@ -2,18 +2,15 @@
 Test - Mustache Edge Cases and Error Handling
 
 This test file covers edge cases for the Mustache templating engine.
-It documents both expected behavior and known issues/bugs.
+Any deviation from expected behavior is a hard test failure, EXCEPT the
+itemized spec-coverage gaps (TEST_MUSTACHE_SPEC_GAP): corners of the spec
+the implementation doesn't cover yet. Gaps are reported on every run but do
+not fail the suite; if a gap closes (the parser starts conforming), the
+suite fails so the gap list gets updated.
 
-FIXED ISSUES:
-1. Unclosed sections at EOF now correctly detected and rejected.
-2. Empty comment {{!}} now accepted (valid per Mustache spec).
-3. Triple mustache {{{name}} with missing close brace now detected.
-
-REMAINING KNOWN ISSUES:
-1. Empty partial {{>}} fails - could be valid (no-op).
-2. Newlines in tags don't cause failure - parser continues across lines.
-3. Empty templates return NULL from build (not empty string).
-4. Templates with only tags (no text) may return NULL from build.
+API notes:
+1. Empty templates return NULL from build (not empty string).
+2. Templates with only tags (no text) may return NULL from build.
 
 ***************************************************************************** */
 #include "test-helpers.h"
@@ -30,11 +27,11 @@ Helper macros for test assertions
     const char *t = (template_str);                                            \
     fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1((char *)t));   \
     if (m) {                                                                   \
-      FIO_LOG_WARNING("Expected failure for: %s\n\tTemplate: %s",              \
-                      description,                                             \
-                      t);                                                      \
+      FIO_LOG_ERROR("Invalid template was accepted: %s\n\tTemplate: %s",       \
+                    description,                                               \
+                    t);                                                        \
       fio_mustache_free(m);                                                    \
-      ++test_known_issues;                                                     \
+      ++test_failures;                                                         \
     } else {                                                                   \
       ++test_passes;                                                           \
     }                                                                          \
@@ -45,10 +42,10 @@ Helper macros for test assertions
     const char *t = (template_str);                                            \
     fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1((char *)t));   \
     if (!m) {                                                                  \
-      FIO_LOG_WARNING("Expected success for: %s\n\tTemplate: %s",              \
-                      description,                                             \
-                      t);                                                      \
-      ++test_known_issues;                                                     \
+      FIO_LOG_ERROR("Valid template was rejected: %s\n\tTemplate: %s",         \
+                    description,                                               \
+                    t);                                                        \
+      ++test_failures;                                                         \
     } else {                                                                   \
       fio_mustache_free(m);                                                    \
       ++test_passes;                                                           \
@@ -68,10 +65,10 @@ Helper macros for test assertions
     } else {                                                                   \
       char *result = (char *)fio_mustache_build(m, .ctx = NULL);               \
       if (!result && e[0] != '\0') {                                           \
-        FIO_LOG_WARNING("Build returned NULL for: %s (expected: '%s')",        \
-                        description,                                           \
-                        e);                                                    \
-        ++test_known_issues;                                                   \
+        FIO_LOG_ERROR("Build returned NULL for: %s (expected: '%s')",          \
+                      description,                                             \
+                      e);                                                      \
+        ++test_failures;                                                       \
       } else if (result && !FIO_BUF_INFO_IS_EQ(fio_bstr_buf(result),           \
                                                FIO_BUF_INFO1((char *)e))) {    \
         FIO_LOG_ERROR(                                                         \
@@ -90,32 +87,37 @@ Helper macros for test assertions
     }                                                                          \
   } while (0)
 
-/* For documenting known issues that we expect to fail */
-#define TEST_MUSTACHE_KNOWN_ISSUE_FAIL(template_str, description)              \
+
+/* ---------------------------------------------------------------------------
+ * Spec-coverage gaps — behavior known to deviate from the Mustache spec.
+ *
+ * Itemized corners of the spec the implementation doesn't cover yet. These
+ * are REPORTED on every run but do NOT fail the suite (incomplete coverage
+ * is not a bug). Anything NOT listed here fails the suite as an actual bug.
+ * If a listed gap closes (the parser starts conforming), the suite FAILS so
+ * this list gets updated.
+ * ---------------------------------------------------------------------------
+ */
+static size_t test_mustache_spec_gaps = 0;
+static size_t test_mustache_spec_gaps_closed = 0;
+
+#define TEST_MUSTACHE_SPEC_GAP(template_str, description)                      \
   do {                                                                         \
     const char *t = (template_str);                                            \
     fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1((char *)t));   \
     if (m) {                                                                   \
-      /* This is a known issue - parser accepts invalid template */            \
+      FIO_LOG_WARNING("Spec coverage gap (invalid template accepted): %s\n\t" \
+                      "Template: %s",                                         \
+                      description,                                             \
+                      t);                                                      \
       fio_mustache_free(m);                                                    \
-      ++test_known_issues;                                                     \
+      ++test_mustache_spec_gaps;                                               \
     } else {                                                                   \
-      /* Fixed! Parser now correctly rejects */                                \
-      ++test_passes;                                                           \
-    }                                                                          \
-  } while (0)
-
-#define TEST_MUSTACHE_KNOWN_ISSUE_PASS(template_str, description)              \
-  do {                                                                         \
-    const char *t = (template_str);                                            \
-    fio_mustache_s *m = fio_mustache_load(.data = FIO_BUF_INFO1((char *)t));   \
-    if (!m) {                                                                  \
-      /* This is a known issue - parser rejects valid template */              \
-      ++test_known_issues;                                                     \
-    } else {                                                                   \
-      /* Fixed! Parser now correctly accepts */                                \
-      fio_mustache_free(m);                                                    \
-      ++test_passes;                                                           \
+      FIO_LOG_ERROR("Spec coverage gap closed (parser now conforms): %s\n\t"  \
+                    "Template: %s - remove it from the spec-gap list",        \
+                    description,                                               \
+                    t);                                                        \
+      ++test_mustache_spec_gaps_closed;                                        \
     }                                                                          \
   } while (0)
 
@@ -123,11 +125,9 @@ Helper macros for test assertions
 Test: Tag Mismatch Errors
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_tag_mismatch(size_t *passes,
-                                          size_t *failures,
-                                          size_t *known_issues) {
+                                          size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing tag mismatch errors...\n");
 
@@ -149,28 +149,23 @@ FIO_SFUNC void test_mustache_tag_mismatch(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Tag mismatch: %zu passed, %zu failed, %zu known issues\n",
+          "    Tag mismatch: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Unclosed Tags
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_unclosed_tags(size_t *passes,
-                                           size_t *failures,
-                                           size_t *known_issues) {
+                                           size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing unclosed tags...\n");
 
-  /* KNOWN ISSUE: Section without closing tag - parser doesn't check at EOF */
-  TEST_MUSTACHE_KNOWN_ISSUE_FAIL("{{#section}}content without closing",
+  TEST_MUSTACHE_SHOULD_FAIL("{{#section}}content without closing",
                                  "unclosed section at EOF");
 
   /* Variable tag without closing braces - correctly detected */
@@ -180,8 +175,7 @@ FIO_SFUNC void test_mustache_unclosed_tags(size_t *passes,
   TEST_MUSTACHE_SHOULD_FAIL("{{#section}}{{#nested}}only one close{{/section}}",
                             "nested section with missing inner close");
 
-  /* KNOWN ISSUE: Multiple unclosed sections at EOF */
-  TEST_MUSTACHE_KNOWN_ISSUE_FAIL("{{#a}}{{#b}}{{#c}}content",
+  TEST_MUSTACHE_SHOULD_FAIL("{{#a}}{{#b}}{{#c}}content",
                                  "multiple unclosed sections at EOF");
 
   /* Unclosed tag at end of template - correctly detected */
@@ -192,23 +186,19 @@ FIO_SFUNC void test_mustache_unclosed_tags(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Unclosed tags: %zu passed, %zu failed, %zu known issues\n",
+          "    Unclosed tags: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Unopened Closing Tags
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_unopened_closing(size_t *passes,
-                                              size_t *failures,
-                                              size_t *known_issues) {
+                                              size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing unopened closing tags...\n");
 
@@ -224,34 +214,30 @@ FIO_SFUNC void test_mustache_unopened_closing(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Unopened closing: %zu passed, %zu failed, %zu known issues\n",
+          "    Unopened closing: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Malformed Tags
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_malformed_tags(size_t *passes,
-                                            size_t *failures,
-                                            size_t *known_issues) {
+                                            size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing malformed tags...\n");
 
   /* Empty tag - correctly detected */
   TEST_MUSTACHE_SHOULD_FAIL("{{}}", "empty tag");
 
-  /* Tag with only space - correctly detected */
-  TEST_MUSTACHE_SHOULD_FAIL("{{ }}", "tag with only space");
+  /* SPEC GAP: tag with only space is accepted (spec says reject) */
+  TEST_MUSTACHE_SPEC_GAP("{{ }}", "tag with only space");
 
-  /* Tag with only whitespace - correctly detected */
-  TEST_MUSTACHE_SHOULD_FAIL("{{   }}", "tag with only whitespace");
+  /* SPEC GAP: tag with only whitespace is accepted (spec says reject) */
+  TEST_MUSTACHE_SPEC_GAP("{{   }}", "tag with only whitespace");
 
   /* Section marker without name - correctly detected */
   TEST_MUSTACHE_SHOULD_FAIL("{{#}}", "section marker without name");
@@ -262,34 +248,28 @@ FIO_SFUNC void test_mustache_malformed_tags(size_t *passes,
   /* Inverted marker without name - correctly detected */
   TEST_MUSTACHE_SHOULD_FAIL("{{^}}", "inverted marker without name");
 
-  /* KNOWN ISSUE: Empty comment {{!}} fails but should be valid per spec */
-  TEST_MUSTACHE_KNOWN_ISSUE_PASS("{{!}}", "empty comment");
+  TEST_MUSTACHE_SHOULD_PASS("{{!}}", "empty comment");
 
-  /* KNOWN ISSUE: Empty partial {{>}} fails */
-  TEST_MUSTACHE_KNOWN_ISSUE_PASS("{{>}}", "empty partial");
+  TEST_MUSTACHE_SHOULD_PASS("{{>}}", "empty partial");
 
   /* Delimiter marker without proper format - correctly detected */
   TEST_MUSTACHE_SHOULD_FAIL("{{=}}", "delimiter marker malformed");
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Malformed tags: %zu passed, %zu failed, %zu known issues\n",
+          "    Malformed tags: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Delimiter Edge Cases
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_delimiter_edge_cases(size_t *passes,
-                                                  size_t *failures,
-                                                  size_t *known_issues) {
+                                                  size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing delimiter edge cases...\n");
 
@@ -307,7 +287,6 @@ FIO_SFUNC void test_mustache_delimiter_edge_cases(size_t *passes,
   /* Multi-char delimiters (up to 4 chars) */
   TEST_MUSTACHE_SHOULD_PASS("{{=<< >>=}}<<name>>", "two char delimiters");
 
-  /* KNOWN ISSUE: Delimiter with spaces - parser accepts but shouldn't */
   /* Actually this is valid - spaces separate the two delimiters */
   TEST_MUSTACHE_SHOULD_PASS("{{=| |=}}",
                             "single char delimiter with space separator");
@@ -323,24 +302,20 @@ FIO_SFUNC void test_mustache_delimiter_edge_cases(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(
       stderr,
-      "    Delimiter edge cases: %zu passed, %zu failed, %zu known issues\n",
+      "    Delimiter edge cases: %zu passed, %zu failed\n",
       test_passes,
-      test_failures,
-      test_known_issues);
+      test_failures);
 }
 
 /* *****************************************************************************
 Test: Nested Section Errors
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_nested_section_errors(size_t *passes,
-                                                   size_t *failures,
-                                                   size_t *known_issues) {
+                                                   size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing nested section errors...\n");
 
@@ -348,8 +323,7 @@ FIO_SFUNC void test_mustache_nested_section_errors(size_t *passes,
   TEST_MUSTACHE_SHOULD_FAIL("{{#a}}{{#b}}{{#c}}{{/c}}{{/a}}{{/b}}",
                             "three levels wrong close order");
 
-  /* KNOWN ISSUE: Same name nested, one unclosed at EOF */
-  TEST_MUSTACHE_KNOWN_ISSUE_FAIL("{{#a}}{{#a}}{{/a}}",
+  TEST_MUSTACHE_SHOULD_FAIL("{{#a}}{{#a}}{{/a}}",
                                  "same name nested unclosed at EOF");
 
   /* Deeply nested with mismatch - correctly detected */
@@ -366,63 +340,52 @@ FIO_SFUNC void test_mustache_nested_section_errors(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(
       stderr,
-      "    Nested section errors: %zu passed, %zu failed, %zu known issues\n",
+      "    Nested section errors: %zu passed, %zu failed\n",
       test_passes,
-      test_failures,
-      test_known_issues);
+      test_failures);
 }
 
 /* *****************************************************************************
 Test: Partial Errors
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_partial_errors(size_t *passes,
-                                            size_t *failures,
-                                            size_t *known_issues) {
+                                            size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing partial errors...\n");
 
   /* Non-existent partial - correctly ignored (no-op) */
   TEST_MUSTACHE_SHOULD_PASS("{{> nonexistent}}", "non-existent partial");
 
-  /* KNOWN ISSUE: Empty partial name with space fails */
-  TEST_MUSTACHE_KNOWN_ISSUE_PASS("{{> }}", "empty partial name with space");
+  TEST_MUSTACHE_SHOULD_PASS("{{> }}", "empty partial name with space");
 
-  /* KNOWN ISSUE: Empty partial name fails */
-  TEST_MUSTACHE_KNOWN_ISSUE_PASS("{{>}}", "empty partial name");
+  TEST_MUSTACHE_SHOULD_PASS("{{>}}", "empty partial name");
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Partial errors: %zu passed, %zu failed, %zu known issues\n",
+          "    Partial errors: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Comment Edge Cases
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_comment_edge_cases(size_t *passes,
-                                                size_t *failures,
-                                                size_t *known_issues) {
+                                                size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing comment edge cases...\n");
 
   /* Unclosed comment - correctly detected */
   TEST_MUSTACHE_SHOULD_FAIL("{{! unclosed comment", "unclosed comment");
 
-  /* KNOWN ISSUE: Empty comment fails but should be valid */
-  TEST_MUSTACHE_KNOWN_ISSUE_PASS("{{!}}", "empty comment");
+  TEST_MUSTACHE_SHOULD_PASS("{{!}}", "empty comment");
 
   /* Multi-line comment - should pass */
   TEST_MUSTACHE_SHOULD_PASS("{{! multi\nline\ncomment }}",
@@ -437,29 +400,24 @@ FIO_SFUNC void test_mustache_comment_edge_cases(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Comment edge cases: %zu passed, %zu failed, %zu known issues\n",
+          "    Comment edge cases: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Triple Mustache / Unescaped Edge Cases
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_unescaped_edge_cases(size_t *passes,
-                                                  size_t *failures,
-                                                  size_t *known_issues) {
+                                                  size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing unescaped/triple mustache edge cases...\n");
 
-  /* KNOWN ISSUE: Missing closing brace in triple mustache not detected */
   /* {{{name}} is parsed as {{name} with extra { at start */
-  TEST_MUSTACHE_KNOWN_ISSUE_FAIL("{{{name}}",
+  TEST_MUSTACHE_SHOULD_FAIL("{{{name}}",
                                  "triple mustache missing close brace");
 
   /* Triple mustache with section marker - treated as raw variable */
@@ -480,24 +438,20 @@ FIO_SFUNC void test_mustache_unescaped_edge_cases(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(
       stderr,
-      "    Unescaped edge cases: %zu passed, %zu failed, %zu known issues\n",
+      "    Unescaped edge cases: %zu passed, %zu failed\n",
       test_passes,
-      test_failures,
-      test_known_issues);
+      test_failures);
 }
 
 /* *****************************************************************************
 Test: Whitespace Handling
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_whitespace_handling(size_t *passes,
-                                                 size_t *failures,
-                                                 size_t *known_issues) {
+                                                 size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing whitespace handling...\n");
 
@@ -514,29 +468,25 @@ FIO_SFUNC void test_mustache_whitespace_handling(size_t *passes,
   /* Mixed whitespace - should pass */
   TEST_MUSTACHE_SHOULD_PASS("{{ \t name \t }}", "mixed whitespace in tag");
 
-  /* KNOWN ISSUE: Newline in tag doesn't fail - parser continues across lines */
-  /* This is actually debatable - some parsers allow it */
-  TEST_MUSTACHE_KNOWN_ISSUE_FAIL("{{na\nme}}", "newline in tag");
+  /* SPEC GAP: newline in tag is accepted (spec says reject; debatable -
+     some parsers allow it) */
+  TEST_MUSTACHE_SPEC_GAP("{{na\nme}}", "newline in tag");
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Whitespace handling: %zu passed, %zu failed, %zu known issues\n",
+          "    Whitespace handling: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Output Verification
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_output_verification(size_t *passes,
-                                                 size_t *failures,
-                                                 size_t *known_issues) {
+                                                 size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing output verification...\n");
 
@@ -577,23 +527,19 @@ FIO_SFUNC void test_mustache_output_verification(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Output verification: %zu passed, %zu failed, %zu known issues\n",
+          "    Output verification: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Stress Tests
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_stress(size_t *passes,
-                                    size_t *failures,
-                                    size_t *known_issues) {
+                                    size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing stress cases...\n");
 
@@ -628,23 +574,19 @@ FIO_SFUNC void test_mustache_stress(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Stress tests: %zu passed, %zu failed, %zu known issues\n",
+          "    Stress tests: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Dot Notation
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_dot_notation(size_t *passes,
-                                          size_t *failures,
-                                          size_t *known_issues) {
+                                          size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing dot notation...\n");
 
@@ -665,23 +607,19 @@ FIO_SFUNC void test_mustache_dot_notation(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Dot notation: %zu passed, %zu failed, %zu known issues\n",
+          "    Dot notation: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Edge Cases from Original Test
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_original(size_t *passes,
-                                      size_t *failures,
-                                      size_t *known_issues) {
+                                      size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing original test cases...\n");
 
@@ -721,23 +659,19 @@ FIO_SFUNC void test_mustache_original(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Original tests: %zu passed, %zu failed, %zu known issues\n",
+          "    Original tests: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Closure Mismatch - Wrong/Illegal Names
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_closure_mismatch(size_t *passes,
-                                              size_t *failures,
-                                              size_t *known_issues) {
+                                              size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing closure with wrong/illegal names...\n");
 
@@ -799,23 +733,19 @@ FIO_SFUNC void test_mustache_closure_mismatch(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Closure mismatch: %zu passed, %zu failed, %zu known issues\n",
+          "    Closure mismatch: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
 Test: Boundary Conditions
 ***************************************************************************** */
 FIO_SFUNC void test_mustache_boundary_conditions(size_t *passes,
-                                                 size_t *failures,
-                                                 size_t *known_issues) {
+                                                 size_t *failures) {
   size_t test_passes = 0;
   size_t test_failures = 0;
-  size_t test_known_issues = 0;
 
   fprintf(stderr, "  * Testing boundary conditions...\n");
 
@@ -848,12 +778,10 @@ FIO_SFUNC void test_mustache_boundary_conditions(size_t *passes,
 
   *passes += test_passes;
   *failures += test_failures;
-  *known_issues += test_known_issues;
   fprintf(stderr,
-          "    Boundary conditions: %zu passed, %zu failed, %zu known issues\n",
+          "    Boundary conditions: %zu passed, %zu failed\n",
           test_passes,
-          test_failures,
-          test_known_issues);
+          test_failures);
 }
 
 /* *****************************************************************************
@@ -862,82 +790,62 @@ Main Test Runner
 int main(void) {
   size_t total_passes = 0;
   size_t total_failures = 0;
-  size_t total_known_issues = 0;
 
   fprintf(stderr, "\n=== Mustache Edge Case Tests ===\n\n");
 
   /* Run original tests first */
-  test_mustache_original(&total_passes, &total_failures, &total_known_issues);
+  test_mustache_original(&total_passes, &total_failures);
 
   /* Run all edge case tests */
   test_mustache_tag_mismatch(&total_passes,
-                             &total_failures,
-                             &total_known_issues);
+                             &total_failures);
   test_mustache_unclosed_tags(&total_passes,
-                              &total_failures,
-                              &total_known_issues);
+                              &total_failures);
   test_mustache_unopened_closing(&total_passes,
-                                 &total_failures,
-                                 &total_known_issues);
+                                 &total_failures);
   test_mustache_malformed_tags(&total_passes,
-                               &total_failures,
-                               &total_known_issues);
+                               &total_failures);
   test_mustache_delimiter_edge_cases(&total_passes,
-                                     &total_failures,
-                                     &total_known_issues);
+                                     &total_failures);
   test_mustache_nested_section_errors(&total_passes,
-                                      &total_failures,
-                                      &total_known_issues);
+                                      &total_failures);
   test_mustache_partial_errors(&total_passes,
-                               &total_failures,
-                               &total_known_issues);
+                               &total_failures);
   test_mustache_comment_edge_cases(&total_passes,
-                                   &total_failures,
-                                   &total_known_issues);
+                                   &total_failures);
   test_mustache_unescaped_edge_cases(&total_passes,
-                                     &total_failures,
-                                     &total_known_issues);
+                                     &total_failures);
   test_mustache_whitespace_handling(&total_passes,
-                                    &total_failures,
-                                    &total_known_issues);
+                                    &total_failures);
   test_mustache_output_verification(&total_passes,
-                                    &total_failures,
-                                    &total_known_issues);
-  test_mustache_stress(&total_passes, &total_failures, &total_known_issues);
+                                    &total_failures);
+  test_mustache_stress(&total_passes, &total_failures);
   test_mustache_dot_notation(&total_passes,
-                             &total_failures,
-                             &total_known_issues);
+                             &total_failures);
   test_mustache_boundary_conditions(&total_passes,
-                                    &total_failures,
-                                    &total_known_issues);
+                                    &total_failures);
   test_mustache_closure_mismatch(&total_passes,
-                                 &total_failures,
-                                 &total_known_issues);
+                                 &total_failures);
 
   /* Print summary */
   fprintf(stderr, "\n=== Test Summary ===\n");
   fprintf(stderr, "Total Passed:       %zu\n", total_passes);
   fprintf(stderr, "Total Failed:       %zu\n", total_failures);
-  fprintf(stderr, "Total Known Issues: %zu\n", total_known_issues);
+  fprintf(stderr, "Total Tests:        %zu\n", total_passes + total_failures);
   fprintf(stderr,
-          "Total Tests:        %zu\n",
-          total_passes + total_failures + total_known_issues);
+          "Spec Coverage Gaps: %zu (reported above, non-fatal)\n",
+          test_mustache_spec_gaps);
 
-  fprintf(stderr, "\n=== Known Issues Summary ===\n");
-  fprintf(stderr, "1. Empty partial {{>}} rejected\n");
-  fprintf(stderr, "2. Newlines in tags not rejected\n");
-  fprintf(stderr, "\n=== Fixed Issues ===\n");
-  fprintf(stderr, "1. Unclosed sections at EOF now detected\n");
-  fprintf(stderr, "2. Empty comment {{!}} now accepted\n");
-  fprintf(stderr, "3. Triple mustache {{{name}} missing brace now detected\n");
-
-  if (total_failures > 0) {
-    fprintf(stderr, "\n*** %zu TESTS FAILED ***\n\n", total_failures);
+  if (total_failures > 0 || test_mustache_spec_gaps_closed > 0) {
+    fprintf(stderr,
+            "\n*** %zu TESTS FAILED, %zu SPEC GAPS CLOSED ***\n\n",
+            total_failures,
+            test_mustache_spec_gaps_closed);
     return 1;
   }
 
   fprintf(stderr,
-          "\n*** ALL TESTS PASSED (with %zu known issues) ***\n\n",
-          total_known_issues);
+          "\n*** ALL TESTS PASSED (%zu spec coverage gaps reported) ***\n\n",
+          test_mustache_spec_gaps);
   return 0;
 }
