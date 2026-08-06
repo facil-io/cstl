@@ -9,9 +9,9 @@ Total symbols: 3143.
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1765
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
-- [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 2
+- [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
 - [`./fio-stl/001 patches.h`](#fio-stl-001-patches-h) — 2
 - [`./fio-stl/002 atol.h`](#fio-stl-002-atol-h) — 49
@@ -102,7 +102,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1764 public symbols.
+1765 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -1266,6 +1266,16 @@ Prints to STDERR, attempting to use only stack allocated memory.
 
 _Symbol type:_ `macro`
 
+#### `FIO_STDERR_FILE`
+
+```c
+#define FIO_STDERR_FILE stderr
+```
+
+
+
+_Symbol type:_ `macro`
+
 #### `FIO_ASSERT`
 
 ```c
@@ -1274,6 +1284,7 @@ _Symbol type:_ `macro`
     if (FIO_UNLIKELY(!(cond))) {   \
       FIO_LOG_FATAL(__VA_ARGS__);   \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));   \
+      fflush(FIO_STDERR_FILE);   \
       FIO___ASSERT_PERFORM_SIGNAL();   \
       exit(-1);   \
     }   \
@@ -1303,6 +1314,7 @@ _Symbol type:_ `macro`
       FIO_LOG_FATAL("(" FIO___FILE__   \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);   \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));   \
+      fflush(FIO_STDERR_FILE);   \
       FIO___ASSERT_PERFORM_SIGNAL();   \
       exit(-1);   \
     }   \
@@ -3209,9 +3221,9 @@ _Symbol type:_ `macro`
 #define FIO_MATH_UXXX_OP_RROT(t, a, b, bits)   \
   do {   \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)   \
-      (t)[i__] = ((a)[i__] >> ((b)[i__] & ((bits)-1))) |   \
-                 ((a)[i__] << (((bits) - ((b)[i__] & ((bits)-1))) &   \
-                              ((bits)-1)));   \
+      (t)[i__] =   \
+          ((a)[i__] >> ((b)[i__] & ((bits)-1))) |   \
+          ((a)[i__] << (((bits) - ((b)[i__] & ((bits)-1))) & ((bits)-1)));   \
   } while (0)
 ```
 
@@ -3240,9 +3252,9 @@ _Symbol type:_ `macro`
 #define FIO_MATH_UXXX_OP_LROT(t, a, b, bits)   \
   do {   \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)   \
-      (t)[i__] = ((a)[i__] << ((b)[i__] & ((bits)-1))) |   \
-                 ((a)[i__] >> (((bits) - ((b)[i__] & ((bits)-1))) &   \
-                              ((bits)-1)));   \
+      (t)[i__] =   \
+          ((a)[i__] << ((b)[i__] & ((bits)-1))) |   \
+          ((a)[i__] >> (((bits) - ((b)[i__] & ((bits)-1))) & ((bits)-1)));   \
   } while (0)
 ```
 
@@ -18762,19 +18774,9 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-001-logging-h"></a> `./fio-stl/001 logging.h`
 
-2 public symbols.
+1 public symbols.
 
 ### Macros
-
-#### `FIO_STDERR_FILE`
-
-```c
-#define FIO_STDERR_FILE stderr
-```
-
-
-
-_Symbol type:_ `macro`
 
 #### `FIO_LOG_LEVEL_DEFAULT`
 

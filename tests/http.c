@@ -16,6 +16,136 @@ Loopback sockets are used only for listener creation (no reactor is run).
 #include <string.h>
 
 /* ===========================================================================
+   Windows CI crash trap (permanent diagnostic net)
+
+   The Windows CI release step sporadically hard-crashes (silent access
+   violation; FIO_ASSERT never fires) in the WebSocket connect drain, on real
+   NT runners only — never reproduced under Wine/macOS/Linux/sanitizers, and
+   still flaky with -march=x86-64-v3. This trap prints the exception code,
+   faulting RIP, and a stack walk as module+RVA pairs, so a CI crash log can
+   be symbolized offline against a same-commit -gcodeview build, e.g.:
+     llvm-symbolizer --obj=http.exe <preferred_base+RVA>
+   (llvm-symbolizer on PE expects the link-time preferred base + RVA — a bare
+   RVA yields ??:0:0; the trap prints ready-to-paste `sym=` addresses.)
+   Uses WriteFile (not stdio) — keeps working even with a damaged heap.
+   ===========================================================================
+ */
+#if defined(_WIN32)
+#include <windows.h>
+
+static void test_http_win_crash_emit(const char *msg, size_t len) {
+  DWORD written = 0;
+  HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+  if (err && err != INVALID_HANDLE_VALUE)
+    WriteFile(err, msg, (DWORD)len, &written, NULL);
+}
+
+/* Link-time preferred image base (PDB addresses are relative to this, so
+   llvm-symbolizer needs preferred_base + RVA, regardless of ASLR). */
+static unsigned long long test_http_win_preferred_base(HMODULE mod) {
+  const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)(uintptr_t)mod;
+  const IMAGE_NT_HEADERS64 *nt;
+  if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE)
+    return 0;
+  nt = (const IMAGE_NT_HEADERS64 *)(uintptr_t)((char *)mod + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE)
+    return 0;
+  return (unsigned long long)nt->OptionalHeader.ImageBase;
+}
+
+static LONG WINAPI test_http_win_crash_trap(EXCEPTION_POINTERS *ep) {
+  char buf[512];
+  int n;
+  HMODULE exe = GetModuleHandleA(NULL);
+  const unsigned long long preferred = test_http_win_preferred_base(exe);
+#define TEST_HTTP_CRASH_LOG(...)                                              \
+  do {                                                                        \
+    n = snprintf(buf, sizeof(buf), __VA_ARGS__);                              \
+    if (n > 0)                                                                \
+      test_http_win_crash_emit(buf,                                           \
+                               (size_t)((size_t)n < sizeof(buf) ? (size_t)n   \
+                                                                 : sizeof(buf) - 1)); \
+  } while (0)
+
+  {
+    const void *rip = (const void *)ep->ExceptionRecord->ExceptionAddress;
+    HMODULE rip_mod = NULL;
+    char rip_sym[64];
+    rip_sym[0] = 0;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       (LPCSTR)rip,
+                       &rip_mod);
+    if (rip_mod == exe && preferred)
+      snprintf(rip_sym,
+               sizeof(rip_sym),
+               " sym=0x%llX",
+               preferred + (unsigned long long)((uintptr_t)rip -
+                                                (uintptr_t)exe));
+    TEST_HTTP_CRASH_LOG(
+        "\nFATAL: unhandled Windows exception 0x%08lX at RIP=%p%s%s\n",
+        (unsigned long)ep->ExceptionRecord->ExceptionCode,
+        rip,
+        rip_sym,
+        (rip_mod == exe) ? "" : " (RIP outside exe)");
+  }
+  if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      ep->ExceptionRecord->NumberParameters >= 2) {
+    ULONG_PTR op = ep->ExceptionRecord->ExceptionInformation[0];
+    TEST_HTTP_CRASH_LOG(
+        "FATAL: access violation (%s) at data address %p\n",
+        op == 0 ? "read" : op == 1 ? "write" : op == 8 ? "execute" : "op?",
+        (void *)ep->ExceptionRecord->ExceptionInformation[1]);
+  }
+  {
+    void *frames[64];
+    USHORT count = RtlCaptureStackBackTrace(0, 64, frames, NULL);
+    TEST_HTTP_CRASH_LOG("FATAL: module base=%p preferred=0x%llX — symbolize "
+                        "with llvm-symbolizer --obj=<exe> <sym addr>\n",
+                        (void *)exe,
+                        preferred);
+    for (USHORT i = 0; i < count; ++i) {
+      HMODULE mod = NULL;
+      char path[MAX_PATH];
+      const char *base = "?";
+      path[0] = 0;
+      if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                             (LPCSTR)frames[i],
+                             &mod) &&
+          mod) {
+        if (GetModuleFileNameA(mod, path, MAX_PATH)) {
+          base = path;
+          for (const char *p = path; *p; ++p)
+            if (*p == '\\' || *p == '/')
+              base = p + 1;
+        }
+      }
+      {
+        char sym[48];
+        sym[0] = 0;
+        if (mod == exe && preferred)
+          snprintf(sym,
+                   sizeof(sym),
+                   " sym=0x%llX",
+                   preferred + (unsigned long long)((uintptr_t)frames[i] -
+                                                    (uintptr_t)mod));
+        TEST_HTTP_CRASH_LOG(
+            "FATAL:   [%2u] %s+0x%llX%s\n",
+            (unsigned)i,
+            base,
+            mod ? (unsigned long long)((uintptr_t)frames[i] - (uintptr_t)mod)
+                : 0ULL,
+            sym);
+      }
+    }
+  }
+#undef TEST_HTTP_CRASH_LOG
+  return EXCEPTION_CONTINUE_SEARCH; /* preserve CI failure semantics + WER */
+}
+#endif
+
+/* ===========================================================================
    Helpers
    ===========================================================================
  */
@@ -1315,6 +1445,11 @@ static void test_static_compress_detached_creation(void) {
  */
 
 int main(void) {
+#if defined(_WIN32)
+  /* Permanent diagnostic net: make any future Windows CI hard crash
+     self-locating in the log (exception code + symbolizable module RVAs). */
+  SetUnhandledExceptionFilter(test_http_win_crash_trap);
+#endif
   fprintf(stderr, "Testing fio_http high-level behavior:\n");
 
   test_resource_action();

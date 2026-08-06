@@ -1306,6 +1306,9 @@ Logging Primitives (no-op)
 /* *****************************************************************************
 Assertions
 ***************************************************************************** */
+#ifndef FIO_STDERR_FILE
+#define FIO_STDERR_FILE stderr
+#endif
 
 #ifndef FIO_ASSERT
 /** Asserts a condition is true, or kills the application using SIGINT. */
@@ -1314,6 +1317,7 @@ Assertions
     if (FIO_UNLIKELY(!(cond))) {                                               \
       FIO_LOG_FATAL(__VA_ARGS__);                                              \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
+      fflush(FIO_STDERR_FILE);                                                 \
       FIO___ASSERT_PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -1333,6 +1337,7 @@ Assertions
       FIO_LOG_FATAL("(" FIO___FILE__                                           \
                     ":" FIO_MACRO2STR(__LINE__) ") " __VA_ARGS__);             \
       FIO_LOG_FATAL("     errno(%d): %s\n", errno, strerror(errno));           \
+      fflush(FIO_STDERR_FILE);                                                 \
       FIO___ASSERT_PERFORM_SIGNAL();                                           \
       exit(-1);                                                                \
     }                                                                          \
@@ -4253,31 +4258,31 @@ The loop count is computed dynamically via sizeof, yielding:
 #define FIO_MATH_UXXX_OP_RROT(t, a, b, bits)                                   \
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
-      (t)[i__] = ((a)[i__] >> ((b)[i__] & ((bits)-1))) |                       \
-                 ((a)[i__] << (((bits) - ((b)[i__] & ((bits)-1))) &           \
-                              ((bits)-1)));                                    \
+      (t)[i__] =                                                               \
+          ((a)[i__] >> ((b)[i__] & ((bits)-1))) |                              \
+          ((a)[i__] << (((bits) - ((b)[i__] & ((bits)-1))) & ((bits)-1)));     \
   } while (0)
 /** Performs `(a >> c) | (a << (bits - c))` (const right rotation) in a loop. */
 #define FIO_MATH_UXXX_OP_CRROT(t, a, c, bits)                                  \
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
       (t)[i__] = ((a)[i__] >> ((c) & ((bits)-1))) |                            \
-                 ((a)[i__] << (((bits) - ((c) & ((bits)-1))) & ((bits)-1)));  \
+                 ((a)[i__] << (((bits) - ((c) & ((bits)-1))) & ((bits)-1)));   \
   } while (0)
 /** Performs `(a << b) | (a >> (bits - b))` (left rotation) in a loop. */
 #define FIO_MATH_UXXX_OP_LROT(t, a, b, bits)                                   \
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
-      (t)[i__] = ((a)[i__] << ((b)[i__] & ((bits)-1))) |                       \
-                 ((a)[i__] >> (((bits) - ((b)[i__] & ((bits)-1))) &           \
-                              ((bits)-1)));                                    \
+      (t)[i__] =                                                               \
+          ((a)[i__] << ((b)[i__] & ((bits)-1))) |                              \
+          ((a)[i__] >> (((bits) - ((b)[i__] & ((bits)-1))) & ((bits)-1)));     \
   } while (0)
 /** Performs `(a << c) | (a >> (bits - c))` (const left rotation) in a loop. */
 #define FIO_MATH_UXXX_OP_CLROT(t, a, c, bits)                                  \
   do {                                                                         \
     for (size_t i__ = 0; i__ < (sizeof((t)) / sizeof((t)[0])); ++i__)          \
       (t)[i__] = ((a)[i__] << ((c) & ((bits)-1))) |                            \
-                 ((a)[i__] >> (((bits) - ((c) & ((bits)-1))) & ((bits)-1)));  \
+                 ((a)[i__] >> (((bits) - ((c) & ((bits)-1))) & ((bits)-1)));   \
   } while (0)
 
 /** Performs ternary `t = f(a, b, c)` lane-wise using easily vectorized loop. */

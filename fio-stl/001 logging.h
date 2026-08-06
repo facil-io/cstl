@@ -35,9 +35,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
     (defined(FIO_LOG) || defined(FIO_LEAK_COUNTER))
 #define H___FIO_LOG___H
 
-#ifndef FIO_STDERR_FILE
-#define FIO_STDERR_FILE stderr
-#endif
 #undef FIO_LOG2STDERR
 
 FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
