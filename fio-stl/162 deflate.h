@@ -458,8 +458,16 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
 
   /* Handle special cases */
   if (count[0] == num_syms) {
-    /* All zero lengths - invalid for required tables */
-    return 0;
+    /* All zero lengths: legal ONLY for distance tables — RFC 1951 §3.2.7:
+     * "one distance code of zero bits means that there are no distance
+     * codes used at all (the data is all literals)". Leave the table
+     * zeroed so any attempt to decode a distance errors out (the decode
+     * loops reject zero entries), and report success. Symbol-less litlen
+     * and precode tables are invalid (a block needs its end-of-block). */
+    if (table_type != 2)
+      return 0;
+    FIO_MEMSET(table, 0, sizeof(uint32_t) * (1U << root_bits));
+    return (1U << root_bits);
   }
 
   /* Check for over-subscribed or incomplete code */
@@ -471,6 +479,14 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
       if (left < 0)
         return 0; /* over-subscribed */
     }
+    /* Reject incomplete codes with zlib semantics: the precode must be
+     * complete; litlen/dist tables may be incomplete only when the longest
+     * code is a single 1-bit code (the unused patterns stay zero-filled
+     * and the decode loops reject them if a stream references them).
+     * Without this, incomplete tables silently decoded as literal 0 with
+     * a 0-bit code length, spinning the decode loop forever. */
+    if (left > 0 && (table_type == 0 || max_len != 1))
+      return 0;
   }
 
   /* Build offsets for sorting */
@@ -641,6 +657,9 @@ FIO_SFUNC int fio___inflate_fast(const uint8_t *restrict *in_p,
       entry = litlen_table[sub_off + bits];
     }
 
+    if (!entry)
+      return -1; /* invalid code (hole in an incomplete table) */
+
     if (FIO___DEFLATE_ENTRY_IS_LIT(entry)) {
       /* Literal byte - most common case */
       *out++ = (uint8_t)FIO___DEFLATE_ENTRY_LIT_SYM(entry);
@@ -681,6 +700,9 @@ FIO_SFUNC int fio___inflate_fast(const uint8_t *restrict *in_p,
       bits = fio___deflate_bitbuf_peek(bb, sub_bits);
       entry = dist_table[sub_off + bits];
     }
+
+    if (!entry)
+      return -1; /* invalid distance code (incomplete table hole) */
 
     uint32_t dist_codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
     fio___deflate_bitbuf_consume(bb, dist_codelen);
@@ -773,6 +795,9 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
       entry = litlen_table[sub_off + bits];
     }
 
+    if (!entry)
+      return -1; /* invalid code (hole in an incomplete table) */
+
     uint32_t codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
     if (bb->count < codelen)
       break;
@@ -838,6 +863,9 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
       bits = fio___deflate_bitbuf_peek(bb, sub_bits);
       entry = dist_table[sub_off + bits];
     }
+
+    if (!entry)
+      return -1; /* invalid distance code (incomplete table hole) */
 
     uint32_t dist_codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
     if (bb->count < dist_codelen)
@@ -931,6 +959,9 @@ FIO_SFUNC int fio___inflate_count(const uint8_t *restrict *in_p,
       entry = litlen_table[sub_off + bits];
     }
 
+    if (!entry)
+      return -1; /* invalid code (hole in an incomplete table) */
+
     uint32_t codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
     if (bb->count < codelen)
       break;
@@ -990,6 +1021,9 @@ FIO_SFUNC int fio___inflate_count(const uint8_t *restrict *in_p,
       bits = fio___deflate_bitbuf_peek(bb, sub_bits);
       entry = dist_table[sub_off + bits];
     }
+
+    if (!entry)
+      return -1; /* invalid distance code (incomplete table hole) */
 
     uint32_t dist_codelen = FIO___DEFLATE_ENTRY_CODELEN(entry);
     if (bb->count < dist_codelen)
@@ -1393,13 +1427,17 @@ FIO_SFUNC int fio___deflate_build_code_lengths(uint8_t *lens,
   if (num_used == 0)
     return 0;
   if (num_used == 1) {
-    /* Single symbol: assign length 1 */
-    for (uint32_t i = 0; i < num_syms; ++i) {
-      if (freqs[i]) {
-        lens[i] = 1;
-        return 0;
-      }
-    }
+    /* Single used symbol: emit two 1-bit codes (the used symbol plus one
+     * unused padding symbol) so the code set is complete (Kraft == 1).
+     * A lone 1-bit code is incomplete — zlib rejects incomplete precode
+     * sets outright and only tolerates them for litlen/dist tables when
+     * the maximum length is exactly 1. Padding is accepted everywhere. */
+    uint32_t used = 0;
+    while (!freqs[used])
+      ++used;
+    lens[used] = 1;
+    lens[used ? 0 : 1] = 1;
+    return 0;
   }
 
   /* Build Huffman tree using a simple O(n log n) approach.
@@ -1528,44 +1566,58 @@ FIO_SFUNC int fio___deflate_build_code_lengths(uint8_t *lens,
     }
   }
 
-  /* Limit code lengths to max_bits */
+  /* Limit code lengths to max_bits, repairing the Kraft sum exactly.
+   *
+   * Clamping deep leaves to max_bits leaves the set over-subscribed
+   * (Σ 2^-len > 1). Each repair step moves one leaf from the longest
+   * sub-max length one level down and absorbs one max-length leaf as its
+   * brother (zlib's gen_bitlen repair): the Kraft excess shrinks by
+   * exactly one 2^-max_bits unit per step, ending at Σ 2^-len == 1 — a
+   * complete code, never over- or under-subscribed. (The previous
+   * lengthen-one-step loop could overshoot into an incomplete set, which
+   * zlib rejects with "invalid distances/literal-lengths set".) */
   {
     uint32_t count[16] = {0};
     for (uint32_t i = 0; i < num_syms; ++i) {
       if (lens[i] > max_bits)
         lens[i] = (uint8_t)max_bits;
       if (lens[i])
-        count[lens[i]]++;
+        ++count[lens[i]];
     }
 
-    /* Check Kraft inequality and fix if needed */
-    for (;;) {
-      int32_t kraft = 0;
-      for (uint32_t i = 1; i <= max_bits; ++i)
-        kraft += (int32_t)count[i] << (max_bits - i);
+    /* Kraft excess in units of 2^-max_bits (clamping can only add). */
+    int32_t excess = -(int32_t)(1U << max_bits);
+    for (uint32_t i = 1; i <= max_bits; ++i)
+      excess += (int32_t)(count[i] << (max_bits - i));
 
-      if (kraft <= (1 << max_bits))
-        break;
-
-      /* Over-subscribed: lengthen shortest codes to reduce Kraft sum.
-       * Moving a code from length i to i+1 reduces kraft by 2^(max-i-1). */
-      int fixed = 0;
-      for (uint32_t i = 1; i < max_bits && !fixed; ++i) {
-        if (count[i] > 0) {
-          count[i]--;
-          count[i + 1]++;
-          /* Find a symbol with this length and lengthen it */
-          for (uint32_t s = 0; s < num_syms; ++s) {
-            if (lens[s] == i) {
-              lens[s]++;
-              fixed = 1;
-              break;
-            }
-          }
-        }
+    while (excess > 0) {
+      /* Longest sub-max length with at least one code. Guaranteed to
+       * exist when excess > 0: an all-max-length set of <= num_syms codes
+       * is strictly under-subscribed. */
+      uint32_t bits = max_bits - 1;
+      while (bits > 1 && !count[bits])
+        --bits;
+      if (!count[bits])
+        break; /* defensive: unreachable */
+      /* count[max_bits] > 0 whenever excess > 0 (excess starts strictly
+       * below the clamped-leaf count and both shrink in lockstep), so a
+       * distinct absorb candidate always exists. */
+      uint32_t grow = num_syms;   /* least-frequent leaf at `bits` */
+      uint32_t shrink = num_syms; /* most-frequent leaf at max_bits */
+      for (uint32_t s = 0; s < num_syms; ++s) {
+        if (lens[s] == bits &&
+            (grow == num_syms || freqs[s] < freqs[grow]))
+          grow = s;
+        if (lens[s] == max_bits &&
+            (shrink == num_syms || freqs[s] > freqs[shrink]))
+          shrink = s;
       }
-      if (!fixed)
-        break;
+      lens[grow] = (uint8_t)(bits + 1);   /* bits -> bits + 1 */
+      lens[shrink] = (uint8_t)(bits + 1); /* max_bits -> bits + 1 */
+      --count[bits];
+      --count[max_bits];
+      count[bits + 1] += 2;
+      excess -= 1;
     }
   }
 

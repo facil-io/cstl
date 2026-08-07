@@ -2367,18 +2367,29 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
     if (fio___http_hmap_get_ptr(hdrs,
                                 FIO_STR_INFO2((char *)"content-encoding", 16)))
       goto compression_done;
-    fio_str_info_s ac =
-        fio_http_request_header(h,
-                                FIO_STR_INFO2((char *)"accept-encoding", 15),
-                                0);
-    if (!ac.len)
-      goto compression_done;
     /* only compress text-like content types */
     if (!fio___http_mime_is_compressible(
             fio_http_response_header(h,
                                      FIO_STR_INFO2((char *)"content-type", 12),
                                      0)))
       goto compression_done;
+    fio_str_info_s ac =
+        fio_http_request_header(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                0);
+    if (!ac.len) {
+      /* No Accept-Encoding in the request: identity is served, but the
+       * representation WAS selected by considering Accept-Encoding (a
+       * gzip-capable request would receive a compressed variant), so
+       * caches must key on it — RFC 9110 §12.5.5. */
+      if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0)
+               .buf)
+        fio_http_response_header_set(
+            h,
+            FIO_STR_INFO2((char *)"vary", 4),
+            FIO_STR_INFO2((char *)"accept-encoding", 15));
+      goto compression_done;
+    }
     /* try encodings in preference order (brotli > gzip) */
     struct {
       fio_str_info_s token;
@@ -4669,9 +4680,27 @@ file_not_found:
   return -1;
 
 head_request:
-  /* TODO! HEAD responses should close?. */
   if (fd != -1)
     close(fd);
+  /* RFC 9110 §9.3.2: the server SHOULD send the same header fields in
+   * response to a HEAD request as it would have sent to GET — only the
+   * content is omitted. CDN origin revalidation depends on Content-Length
+   * / Content-Type / ETag matching the cached GET metadata. Note
+   * `file_length` and `mime_type` already reflect any selected compressed
+   * variant or 206 range, exactly like GET. */
+  if (mime_type.len)
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-type", 12),
+                                 mime_type);
+  {
+    char ibuf[32];
+    fio_str_info_s v = FIO_STR_INFO3(ibuf, 0, 32);
+    v.len = fio_digits10u(file_length);
+    fio_ltoa10u(v.buf, file_length, v.len);
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 v);
+  }
   {
     fio_http_write_args_s args = {.finish = 1};
     fio_http_write FIO_NOOP(h, args);

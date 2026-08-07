@@ -745,6 +745,176 @@ static void test_static_vary_and_range_guards(void) {
 }
 
 /* ===========================================================================
+   T009 — Static file: HEAD must mirror GET entity headers (RFC 9110 §9.3.2)
+
+   CDN origin revalidation issues HEAD and compares Content-Length /
+   Content-Type / Content-Encoding against the cached GET metadata. The
+   static handler used to short-circuit HEAD before setting Content-Type
+   and sent an empty write that forced Content-Length: 0.
+   ===========================================================================
+ */
+static void test_static_head_mirrors_get(void) {
+  fprintf(stderr, "  * static HEAD mirrors GET entity headers\n");
+
+  enum { CONTENT_LEN = 4096 };
+  char content[CONTENT_LEN];
+  for (size_t i = 0; i < CONTENT_LEN; ++i)
+    content[i] = (char)('a' + (i & 15));
+
+  char dir[512];
+  size_t dir_len = test_static_make_tree(dir,
+                                         sizeof(dir),
+                                         content,
+                                         CONTENT_LEN,
+                                         1 /* with .gz variant */);
+  FIO_ASSERT(dir_len > 0, "failed to create static HEAD test tree");
+
+  char expect_cl[16];
+  size_t expect_cl_len =
+      (size_t)snprintf(expect_cl, sizeof(expect_cl), "%u", (unsigned)CONTENT_LEN);
+
+  /* 1. Identity GET vs HEAD: same content-length and content-type. */
+  fio_str_info_s get_ct = {0};
+  {
+    fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+    fio_http_status_set(h, 200);
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "HEAD mirror: GET should succeed");
+    fio_str_info_s cl = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-length", 14),
+        0);
+    FIO_ASSERT(cl.len == expect_cl_len &&
+                   !FIO_MEMCMP(cl.buf, expect_cl, expect_cl_len),
+               "HEAD mirror: GET content-length sanity (got '%.*s')",
+               (int)cl.len,
+               cl.buf ? cl.buf : "");
+    get_ct = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-type", 12),
+        0);
+    FIO_ASSERT(get_ct.buf && get_ct.len,
+               "HEAD mirror: GET content-type sanity");
+    /* header storage is handle-owned; copy before freeing */
+    static char ct_copy[128];
+    FIO_ASSERT(get_ct.len < sizeof(ct_copy), "content-type too long");
+    FIO_MEMCPY(ct_copy, get_ct.buf, get_ct.len);
+    get_ct.buf = ct_copy;
+    fio_http_free(h);
+  }
+  {
+    fio_http_s *h = test_http_make_handle("HEAD", "/test.txt");
+    fio_http_status_set(h, 200);
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "HEAD mirror: HEAD should succeed");
+    fio_str_info_s cl = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-length", 14),
+        0);
+    FIO_ASSERT(cl.len == expect_cl_len &&
+                   !FIO_MEMCMP(cl.buf, expect_cl, expect_cl_len),
+               "HEAD must mirror GET content-length %s (got '%.*s')",
+               expect_cl,
+               (int)cl.len,
+               cl.buf ? cl.buf : "");
+    fio_str_info_s ct = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-type", 12),
+        0);
+    FIO_ASSERT(ct.buf && ct.len == get_ct.len &&
+                   !FIO_MEMCMP(ct.buf, get_ct.buf, get_ct.len),
+               "HEAD must mirror GET content-type '%.*s' (got '%.*s')",
+               (int)get_ct.len,
+               get_ct.buf,
+               (int)ct.len,
+               ct.buf ? ct.buf : "");
+    fio_http_free(h);
+  }
+
+  /* 2. HEAD with gzip acceptance: mirror the encoded variant's headers —
+   *    Content-Encoding: gzip and the .gz length (what GET would send). */
+  size_t gz_len = 0;
+  {
+    fio_http_s *h = test_http_make_handle("GET", "/test.txt");
+    fio_http_status_set(h, 200);
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"gzip"));
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "HEAD gzip mirror: GET should succeed");
+    fio_str_info_s cl = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-length", 14),
+        0);
+    FIO_ASSERT(cl.buf && cl.len,
+               "HEAD gzip mirror: GET content-length sanity");
+    static char cl_copy[16];
+    FIO_ASSERT(cl.len < sizeof(cl_copy), "content-length too long");
+    FIO_MEMCPY(cl_copy, cl.buf, cl.len);
+    cl_copy[cl.len] = 0;
+    gz_len = (size_t)atol(cl_copy);
+    FIO_ASSERT(gz_len > 0 && gz_len < CONTENT_LEN,
+               "HEAD gzip mirror: .gz variant should be smaller");
+    fio_http_free(h);
+  }
+  {
+    fio_http_s *h = test_http_make_handle("HEAD", "/test.txt");
+    fio_http_status_set(h, 200);
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"gzip"));
+    int r = fio_http_static_file_response(h,
+                                          FIO_STR_INFO2(dir, dir_len),
+                                          FIO_STR_INFO1((char *)"/test.txt"),
+                                          0);
+    FIO_ASSERT(r == 0, "HEAD gzip mirror: HEAD should succeed");
+    fio_str_info_s ce = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-encoding", 16),
+        0);
+    FIO_ASSERT(ce.len == 4 && !memcmp(ce.buf, "gzip", 4),
+               "HEAD gzip mirror: content-encoding gzip expected");
+    fio_str_info_s cl = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-length", 14),
+        0);
+    char expect_gz[16];
+    size_t expect_gz_len = (size_t)snprintf(expect_gz,
+                                            sizeof(expect_gz),
+                                            "%u",
+                                            (unsigned)gz_len);
+    FIO_ASSERT(cl.len == expect_gz_len &&
+                   !FIO_MEMCMP(cl.buf, expect_gz, expect_gz_len),
+               "HEAD gzip mirror: content-length must be the .gz length "
+               "%s (got '%.*s')",
+               expect_gz,
+               (int)cl.len,
+               cl.buf ? cl.buf : "");
+    fio_str_info_s ct = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-type", 12),
+        0);
+    FIO_ASSERT(ct.buf && ct.len == get_ct.len &&
+                   !FIO_MEMCMP(ct.buf, get_ct.buf, get_ct.len),
+               "HEAD gzip mirror: content-type must match GET");
+    fio_http_free(h);
+  }
+
+  test_static_tree_cleanup(dir);
+}
+
+/* ===========================================================================
    T006 — WebSocket permessage-deflate negotiation policy
 
    The negotiation must ALWAYS force server_no_context_takeover +
@@ -1465,6 +1635,7 @@ int main(void) {
   test_sse_upgrade_helpers();
   test_sse_newline_first_edge_case();
   test_static_vary_and_range_guards();
+  test_static_head_mirrors_get();
   test_websocket_deflate_negotiation();
   test_websocket_connect_wrapper();
   test_static_compress_note_result();

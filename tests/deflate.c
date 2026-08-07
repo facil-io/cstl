@@ -1281,6 +1281,161 @@ static void test_zlib_takeover_interop(void) {
 }
 #endif /* HAVE_ZLIB */
 
+/** Skewed-distribution text fill: random picks from a small vocabulary make
+ * token frequencies skewed enough to push Huffman trees past the 15-bit
+ * DEFLATE limit at scale (regression trigger for the corrupt-stream bug). */
+FIO_SFUNC void fio___deflate_fill_skewed_text(uint8_t *buf,
+                                              size_t len,
+                                              uint32_t seed) {
+  static const char words[] =
+      "the quick brown fox jumps over the lazy dog and runs through "
+      "compression tests headers content-type text/plain accept-encoding "
+      "gzip deflate brotli vary cache-control response body ";
+  const size_t wl = sizeof(words) - 1;
+  for (size_t i = 0; i < len; ++i) {
+    seed = seed * 1103515245U + 12345U;
+    buf[i] = (uint8_t)words[(seed >> 16) % wl];
+  }
+}
+
+/** Regression: on-the-fly gzip used to emit corrupt deflate streams for
+ * large compressible inputs (skewed frequencies drove the Huffman length
+ * limiter into an over/under-subscribed code set, which zlib rejects with
+ * "invalid distances set" and which spun fio's own inflater forever).
+ * Every level must produce streams that both fio and zlib can inflate. */
+static void test_large_skewed_roundtrips(void) {
+  fprintf(stderr,
+          "Testing large skewed-input roundtrips (deep Huffman trees)...\n");
+  const size_t sizes[] = {400 * 1024, 1024 * 1024};
+  const size_t max_size = 1024 * 1024;
+  uint8_t *data = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, max_size, 0);
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, max_size + 64, 0);
+  size_t bound = fio_deflate_compress_bound(max_size) + 18;
+  uint8_t *gz = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+  TEST_ASSERT(data && out && gz, "large skewed: allocation failed");
+  if (!data || !out || !gz)
+    goto done;
+  for (size_t si = 0; si < sizeof(sizes) / sizeof(sizes[0]); ++si) {
+    size_t n = sizes[si];
+    for (int mixed = 0; mixed < 2; ++mixed) {
+      fio___deflate_fill_skewed_text(data, n, 42U + (uint32_t)n);
+      if (mixed) /* half text, half incompressible */
+        fio___deflate_fill_random(data + (n / 2), n - (n / 2), 0xF00DU + n);
+      for (int level = 0; level <= 9; ++level) {
+        size_t gz_len = fio_gzip_compress(gz, bound, data, n, level);
+        TEST_ASSERT(gz_len > 18 && gz_len <= bound,
+                    "large skewed: n=%zu mixed=%d level=%d gzip len %zu",
+                    n,
+                    mixed,
+                    level,
+                    gz_len);
+        if (gz_len <= 18 || gz_len > bound)
+          continue;
+        size_t dlen = fio_gzip_decompress(out, max_size + 64, gz, gz_len);
+        TEST_ASSERT(dlen == n && !FIO_MEMCMP(out, data, n),
+                    "large skewed: fio roundtrip n=%zu mixed=%d level=%d "
+                    "got %zu",
+                    n,
+                    mixed,
+                    level,
+                    dlen);
+#ifdef HAVE_ZLIB
+        /* The reported failure mode: third-party decoders must accept the
+         * stream ("on-the-fly gzip emitted corrupt deflate streams"). */
+        FIO_MEMSET(out, 0xA5, n);
+        size_t zlen = fio___test_zlib_gzip_decompress(out, n, gz, gz_len);
+        TEST_ASSERT(zlen == n && !FIO_MEMCMP(out, data, n),
+                    "large skewed: ZLIB rejected fio gzip n=%zu mixed=%d "
+                    "level=%d (gz_len %zu, inflated %zu)",
+                    n,
+                    mixed,
+                    level,
+                    gz_len,
+                    zlen);
+#endif
+      }
+    }
+  }
+done:
+  if (data)
+    FIO_MEM_FREE(data, max_size);
+  if (out)
+    FIO_MEM_FREE(out, max_size + 64);
+  if (gz)
+    FIO_MEM_FREE(gz, bound);
+}
+
+/** Regression: decoder table validation. Hand-crafted dynamic-block streams
+ * (bit-exact fixtures) covering the incomplete/over-subscribed matrix.
+ * Pre-fix, fio accepted incomplete tables and could spin forever decoding
+ * the zero-filled table holes (0-bit code lengths = no bit consumption). */
+static void test_invalid_huffman_tables(void) {
+  fprintf(stderr, "Testing invalid / edge-case Huffman table rejection...\n");
+  uint8_t out[64];
+
+  /* A: incomplete distance table (lens 2+3, Kraft 3/8, max>1) — reject. */
+  static const uint8_t s_incomplete_dist[] = {
+      0x05, 0xC1, 0x81, 0x09, 0x00, 0x00, 0x00,
+      0x83, 0x20, 0xFF, 0xBF, 0xDA, 0x26};
+  TEST_ASSERT(fio_deflate_decompress(out,
+                                     sizeof(out),
+                                     s_incomplete_dist,
+                                     sizeof(s_incomplete_dist)) == 0,
+              "incomplete distance table (max>1) must be rejected");
+
+  /* B: all-zero distance table = "no distance codes used" (RFC 1951
+   * §3.2.7); an all-literals block. Must decode to "x" (zlib agrees). */
+  static const uint8_t s_no_dist_codes[] = {
+      0x05, 0xC0, 0x81, 0x09, 0x00, 0x00, 0x00,
+      0x83, 0xA0, 0xB7, 0x3D, 0x5F, 0x04};
+  size_t r = fio_deflate_decompress(out,
+                                    sizeof(out),
+                                    s_no_dist_codes,
+                                    sizeof(s_no_dist_codes));
+  TEST_ASSERT(r == 1 && out[0] == 'x',
+              "all-zero distance table must decode as all-literals "
+              "(expected 'x', got len %zu)",
+              r);
+
+  /* C: incomplete literal/length table (lens 2+3, max>1) — reject. */
+  static const uint8_t s_incomplete_litlen[] = {
+      0x05, 0xC1, 0x81, 0x09, 0x00, 0x00, 0x00,
+      0x83, 0xA0, 0xFE, 0xBF, 0x7A, 0x0A};
+  TEST_ASSERT(fio_deflate_decompress(out,
+                                     sizeof(out),
+                                     s_incomplete_litlen,
+                                     sizeof(s_incomplete_litlen)) == 0,
+              "incomplete litlen table (max>1) must be rejected");
+
+  /* D: over-subscribed distance table (lens 1+1+1) — reject. */
+  static const uint8_t s_oversub_dist[] = {
+      0x05, 0xC2, 0x81, 0x09, 0x00, 0x00, 0x00,
+      0x83, 0x20, 0xFF, 0xBF, 0x5A, 0x55};
+  TEST_ASSERT(fio_deflate_decompress(out,
+                                     sizeof(out),
+                                     s_oversub_dist,
+                                     sizeof(s_oversub_dist)) == 0,
+              "over-subscribed distance table must be rejected");
+
+  /* E: legal lone 1-bit distance code, but the stream references the
+   * unused bit pattern (a table hole). Must be rejected, not decoded as
+   * a 0-bit-length literal-0 spin (the pre-fix infinite loop). */
+  static const uint8_t s_dist_hole[] = {
+      0x0D, 0xC0, 0x81, 0x09, 0x00, 0x00, 0x00, 0x83,
+      0xA0, 0xDB, 0xFA, 0xFF, 0xA9, 0x34, 0x07};
+  TEST_ASSERT(fio_deflate_decompress(out,
+                                     sizeof(out),
+                                     s_dist_hole,
+                                     sizeof(s_dist_hole)) == 0,
+              "reference to a distance-table hole must be rejected");
+  /* size-query (counting) mode must reject too — this was the hang path. */
+  TEST_ASSERT(fio_deflate_decompress(NULL,
+                                     0,
+                                     s_dist_hole,
+                                     sizeof(s_dist_hole)) == 0,
+              "distance-table hole in counting mode must be rejected");
+}
+
 int main(void) {
   fprintf(stderr, "=== DEFLATE/INFLATE Correctness Test Suite ===\n\n");
 
@@ -1296,6 +1451,8 @@ int main(void) {
   test_stream_bounded_scratch();
   test_ws_memory_budget();
   test_stream_takeover_mode();
+  test_large_skewed_roundtrips();
+  test_invalid_huffman_tables();
 #ifdef HAVE_ZLIB
   test_zlib_raw_interop();
   test_zlib_gzip_interop();

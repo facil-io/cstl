@@ -1209,6 +1209,71 @@ static fio_str_info_s test_dynamic_write(fio_http_s *h,
                                   0);
 }
 
+/** Vary semantics (RFC 9110 §12.5.5): a compressible resource negotiates
+ * on Accept-Encoding, so even identity responses must carry
+ * `Vary: accept-encoding` — including requests without the header (a
+ * gzip-capable request would have received a different representation).
+ * Conversely, Vary must NOT appear when negotiation is impossible. */
+static void test_dynamic_vary_semantics(void) {
+  fprintf(stderr, "  * dynamic compression Vary semantics\n");
+  enum { BODY_LEN = 2048 };
+  char body[BODY_LEN];
+  for (size_t i = 0; i < BODY_LEN; ++i)
+    body[i] = (char)('a' + (i & 15)); /* compressible text */
+
+  /* no Accept-Encoding request header: identity body, but Vary required */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_str_info_s ce = test_dynamic_write(h, NULL, body, BODY_LEN);
+    FIO_ASSERT(!ce.buf,
+               "dynamic no-AE: response must be identity (got '%.*s')",
+               (int)ce.len,
+               ce.buf ? ce.buf : "");
+    fio_str_info_s vary = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"vary", 4),
+        0);
+    FIO_ASSERT(vary.len && fio___http_header_has_token(vary,
+                                                        "accept-encoding",
+                                                        15),
+               "dynamic no-AE: Vary: accept-encoding required (selection "
+               "depends on Accept-Encoding even when the header is absent)");
+    fio_http_free(h);
+  }
+  /* incompressible MIME: negotiation impossible, Vary must NOT appear */
+  {
+    fio_http_s *h = fio_http_new();
+    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+    fio_http_method_set(h, FIO_STR_INFO1((char *)"GET"));
+    fio_http_status_set(h, 200);
+    fio_http_request_header_set(
+        h,
+        FIO_STR_INFO2((char *)"accept-encoding", 15),
+        FIO_STR_INFO1((char *)"gzip"));
+    fio_http_response_header_set(h,
+                                 FIO_STR_INFO2((char *)"content-type", 12),
+                                 FIO_STR_INFO1((char *)"image/png"));
+    fio_http_write(h, .buf = (void *)body, .len = BODY_LEN, .finish = 1,
+                   .copy = 1);
+    fio_str_info_s ce = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"content-encoding", 16),
+        0);
+    FIO_ASSERT(!ce.buf,
+               "dynamic png: must stay identity (incompressible MIME)");
+    fio_str_info_s vary = fio_http_response_header(
+        h,
+        FIO_STR_INFO2((char *)"vary", 4),
+        0);
+    FIO_ASSERT(!vary.buf,
+               "dynamic png: Vary must be absent when negotiation is "
+               "impossible (got '%.*s')",
+               (int)vary.len,
+               vary.buf ? vary.buf : "");
+    fio_http_free(h);
+  }
+}
+
 static void test_dynamic_compress_guards(void) {
   fprintf(stderr, "  * dynamic compression guards\n");
   enum { BODY_LEN = 2048 };
@@ -1320,6 +1385,7 @@ int main(void) {
 
   fprintf(stderr, "\nTesting accept-encoding / dynamic compression:\n");
   test_accept_encoding_qvalues();
+  test_dynamic_vary_semantics();
   test_dynamic_compress_guards();
 
   fprintf(stderr, "\nAll HTTP handle tests passed!\n");
