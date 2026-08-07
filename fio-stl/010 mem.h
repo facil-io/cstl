@@ -103,6 +103,48 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                                                               size_t copy_len);
 
 /**
+ * Re-allocates memory, enforcing a minimum pointer alignment.
+ *
+ * This is the core of the aligned allocation API: `malloc_aligned` and
+ * `calloc_aligned` simply route to this function with a NULL `ptr`.
+ *
+ * The `alignment` argument is normalized as follows:
+ *
+ * - `0` is treated as the allocator's default (`FIO_MEMORY_ALIGN_SIZE`);
+ * - non power-of-2 values are rounded DOWN to the nearest power of 2;
+ * - the effective alignment is the maximum of the requested alignment, the
+ *   current alignment of `ptr` (if any) and `FIO_MEMORY_ALIGN_SIZE`;
+ * - effective values above `FIO_MEMORY_SYS_ALLOCATION_SIZE` fail
+ *   (returns NULL, sets `errno` to `EINVAL`).
+ *
+ * Data preservation semantics are identical to `realloc2` (`copy_len` bytes).
+ * In-place growth may only occur when the existing pointer already satisfies
+ * the requested alignment.
+ */
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME,
+                                   realloc_aligned)(void *ptr,
+                                                    size_t new_size,
+                                                    size_t copy_len,
+                                                    size_t alignment);
+
+/**
+ * Allocates `size` bytes, returning a pointer aligned to (at least)
+ * `alignment`. Same semantics as `realloc_aligned(NULL, size, 0, alignment)`.
+ */
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       malloc_aligned)(size_t size,
+                                                       size_t alignment);
+
+/**
+ * Same as `malloc_aligned(size_per_unit * unit_count, alignment)`,
+ * except that the allocated memory is zeroed out.
+ */
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc_aligned)(size_t size_per_unit,
+                                                       size_t unit_count,
+                                                       size_t alignment);
+
+/**
  * Allocates memory directly using `mmap`, this is preferred for objects that
  * both require almost a page of memory (or more) and expect a long lifetime.
  *
@@ -378,6 +420,34 @@ FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)(void) {
   return FIO_MEMORY_INITIALIZE_ALLOCATIONS;
 }
 
+/**
+ * Returns the number of usable bytes the allocator will actually reserve for
+ * an allocation request of `minimum_bytes` (the allocation's size class).
+ *
+ * The result is alignment agnostic - alignment padding, if any, is reserved
+ * in addition to the returned value.
+ *
+ * NOTE: when the custom allocator is bypassed (`FIO_MEMORY_DISABLE`), the
+ * system allocator exposes no rounding guarantee and `minimum_bytes` is
+ * returned unchanged.
+ */
+FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, alloc_size)(size_t minimum_bytes) {
+#if defined(FIO_MALLOC_TMP_USE_SYSTEM)
+  return minimum_bytes;
+#else
+  const size_t page_mask = (((size_t)1 << FIO_MEM_PAGE_SIZE_LOG) - 1);
+  if (!minimum_bytes)
+    return 0;
+  if (minimum_bytes <= FIO_MEMORY_ALLOC_LIMIT)
+    return (minimum_bytes + (FIO_MEMORY_ALIGN_SIZE - 1)) &
+           ~(size_t)(FIO_MEMORY_ALIGN_SIZE - 1);
+  if (minimum_bytes > (SIZE_MAX - FIO_MEMORY_ALIGN_SIZE - page_mask))
+    return minimum_bytes; /* the allocation would overflow / fail anyway */
+  return ((minimum_bytes + FIO_MEMORY_ALIGN_SIZE + page_mask) & ~page_mask) -
+         FIO_MEMORY_ALIGN_SIZE;
+#endif
+}
+
 /* *****************************************************************************
 Set global macros to use this allocator if FIO_MALLOC
 ***************************************************************************** */
@@ -393,6 +463,22 @@ Set global macros to use this allocator if FIO_MALLOC
 #define FIO_MEM_REALLOC_IS_SAFE fio_realloc_is_safe()
 #undef FIO_MEM_ALIGNMENT_SIZE
 #define FIO_MEM_ALIGNMENT_SIZE fio_malloc_alignment()
+/** Reallocates memory with an alignment requirement, assigning `ptr`. */
+#undef FIO_MEM_REALLOC_ALIGNED
+#define FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)  \
+  ((ptr) = fio_realloc_aligned((ptr), (new_size), (copy_len), (alignment)))
+/** Frees memory allocated by FIO_MEM_REALLOC_ALIGNED (route per allocator). */
+#undef FIO_MEM_FREE_ALIGNED
+#if defined(FIO_MALLOC_TMP_USE_SYSTEM) && FIO_OS_WIN
+#define FIO_MEM_FREE_ALIGNED(ptr, size) _aligned_free((ptr))
+#elif defined(FIO_MALLOC_TMP_USE_SYSTEM) && !FIO_OS_POSIX
+#define FIO_MEM_FREE_ALIGNED(ptr, size) fio___aligned_free_fallback((ptr))
+#else
+#define FIO_MEM_FREE_ALIGNED(ptr, size) fio_free((ptr))
+#endif
+/** Returns the usable size the allocator reserves for a `size` request. */
+#undef FIO_MEM_ALLOC_SIZE
+#define FIO_MEM_ALLOC_SIZE(size) fio_alloc_size((size))
 #undef FIO_MALLOC
 #endif /* FIO_MALLOC */
 
@@ -410,6 +496,13 @@ Temporarily (at least) set memory allocation macros to use this allocator
 #define FIO_MEM_FREE_(ptr, size) FIO_NAME(FIO_MEMORY_NAME, free)((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ FIO_NAME(FIO_MEMORY_NAME, realloc_is_safe)()
 #define FIO_MEM_ALIGNMENT_SIZE_  FIO_NAME(FIO_MEMORY_NAME, malloc_alignment)()
+#undef FIO_MEM_REALLOC_ALIGNED_
+#undef FIO_MEM_FREE_ALIGNED_
+#define FIO_MEM_REALLOC_ALIGNED_(ptr, old_size, new_size, copy_len,            \
+                                 alignment)                                    \
+  ((ptr) = FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)((ptr), (new_size),       \
+                                                      (copy_len), (alignment)))
+#define FIO_MEM_FREE_ALIGNED_(ptr, size) FIO_MEM_FREE_((ptr), (size))
 
 #endif /* FIO_MALLOC_TMP_USE_SYSTEM */
 
@@ -726,6 +819,45 @@ Overridable system allocation macros
 #endif /* H___FIO_MEM_INCLUDE_ONCE___H */
 
 /* *****************************************************************************
+Alignment request normalization (both allocator configs)
+***************************************************************************** */
+
+/* SublimeText marker */
+void fio___mem_align_normalize___(void);
+/**
+ * Normalizes an alignment request for `ptr`:
+ *
+ * - `0` requests the allocator's default (`FIO_MEMORY_ALIGN_SIZE`);
+ * - non power-of-2 requests are rounded DOWN to the nearest power of 2;
+ * - the result is the maximum of the request, the current alignment of `ptr`
+ *   (if any) and `FIO_MEMORY_ALIGN_SIZE`;
+ * - returns `0` if the (clamped) request exceeds
+ *   `FIO_MEMORY_SYS_ALLOCATION_SIZE` (the maximum supported alignment).
+ */
+FIO_IFUNC size_t FIO_NAME(FIO_MEMORY_NAME, __mem_align_normalize)(
+    void *ptr,
+    size_t alignment) {
+  /* power-of-2 floor, branch-free: 0 | 1 → 1, which the floor below raises
+   * to the allocator's default (0 requests the default) */
+  alignment = (size_t)1 << fio_msb_index_unsafe(alignment | 1);
+  /* reject only a request that exceeds the maximum supported alignment */
+  if (FIO_UNLIKELY(alignment > FIO_MEMORY_SYS_ALLOCATION_SIZE))
+    return 0;
+  /* never reduce the alignment a pointer already (accidentally) enjoys;
+   * the `+ (ptr == NULL)` term avoids branching on NULL (lsb(1) == 0) */
+  const size_t ptr_alignment_raw =
+      (size_t)1 << fio_lsb_index_unsafe((uintptr_t)ptr + (ptr == NULL));
+  const size_t ptr_alignment =
+      (ptr_alignment_raw > FIO_MEMORY_SYS_ALLOCATION_SIZE)
+          ? FIO_MEMORY_SYS_ALLOCATION_SIZE
+          : ptr_alignment_raw;
+  alignment = (alignment < ptr_alignment) ? ptr_alignment : alignment;
+  alignment = (alignment < FIO_MEMORY_ALIGN_SIZE) ? FIO_MEMORY_ALIGN_SIZE
+                                                  : alignment;
+  return alignment;
+}
+
+/* *****************************************************************************
 FIO_MEMORY_DISABLE - use the system allocator
 ***************************************************************************** */
 #if defined(FIO_MALLOC_TMP_USE_SYSTEM)
@@ -757,6 +889,125 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                                                               size_t copy_len) {
   return realloc(ptr, new_size);
   (void)copy_len;
+}
+/**
+ * Aligned reallocation using the system allocator backends:
+ * - Windows: `_aligned_malloc` / `_aligned_realloc` / `_aligned_free`;
+ * - POSIX: `posix_memalign` / `free` (realloc is emulated: alloc-copy-free);
+ * - otherwise: portable over-allocation with the raw pointer stashed
+ *   immediately before the returned (aligned) pointer.
+ *
+ * IMPORTANT: memory allocated / reallocated by this function MUST be freed
+ * using `FIO_MEM_FREE_ALIGNED` - plain `free` is NOT valid on Windows.
+ */
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME,
+                                   realloc_aligned)(void *ptr,
+                                                    size_t new_size,
+                                                    size_t copy_len,
+                                                    size_t alignment) {
+  alignment = FIO_NAME(FIO_MEMORY_NAME, __mem_align_normalize)(ptr, alignment);
+  if (!alignment) {
+    errno = EINVAL;
+    FIO_ASSERT_DEBUG(0, "realloc_aligned: alignment out of supported range");
+    return NULL;
+  }
+#if FIO_OS_WIN
+  if (!ptr) {
+    void *r = _aligned_malloc(new_size ? new_size : alignment, alignment);
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+    if (r)
+      FIO_MEMSET(r, 0, new_size);
+#elif defined(DEBUG) && DEBUG
+    if (r)
+      FIO_MEMSET(r, 0xFA, new_size);
+#endif
+    return r;
+  }
+  if (!new_size) {
+    _aligned_free(ptr);
+    return NULL;
+  }
+  {
+    /* NOTE: _aligned_realloc cannot realign under Wine's MSVCRT (EINVAL).
+     * Emulate: allocate-copy-free (always correct, also on real Windows). */
+    void *r = _aligned_malloc(new_size, alignment);
+    if (!r)
+      return NULL;
+    FIO_MEMCPY(r, ptr, (copy_len < new_size) ? copy_len : new_size);
+    _aligned_free(ptr);
+    return r;
+  }
+#elif FIO_OS_POSIX
+  if (!ptr) {
+    void *r = NULL;
+    if (posix_memalign(&r, alignment, new_size ? new_size : alignment))
+      return NULL;
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+    if (r)
+      FIO_MEMSET(r, 0, new_size);
+#elif defined(DEBUG) && DEBUG
+    if (r)
+      FIO_MEMSET(r, 0xFA, new_size);
+#endif
+    return r;
+  }
+  if (!new_size) {
+    free(ptr);
+    return NULL;
+  }
+  {
+    void *r = NULL;
+    if (posix_memalign(&r, alignment, new_size))
+      return NULL;
+    FIO_MEMCPY(r, ptr, (copy_len < new_size) ? copy_len : new_size);
+    free(ptr);
+    return r;
+  }
+#else  /* unknown OS: over-allocation with a stashed raw pointer */
+  if (!new_size && ptr) {
+    fio___aligned_free_fallback(ptr);
+    return NULL;
+  }
+  {
+    void *r = fio___aligned_alloc_fallback(new_size ? new_size : alignment,
+                                           alignment);
+    if (!r)
+      return NULL;
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+    if (!ptr)
+      FIO_MEMSET(r, 0, new_size);
+#elif defined(DEBUG) && DEBUG
+    if (!ptr)
+      FIO_MEMSET(r, 0xFA, new_size);
+#endif
+    if (ptr) {
+      FIO_MEMCPY(r, ptr, (copy_len < new_size) ? copy_len : new_size);
+      fio___aligned_free_fallback(ptr);
+    }
+    return r;
+  }
+#endif /* FIO_OS_WIN / FIO_OS_POSIX */
+}
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       malloc_aligned)(size_t size,
+                                                       size_t alignment) {
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, size, 0, alignment);
+}
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc_aligned)(size_t size_per_unit,
+                                                       size_t unit_count,
+                                                       size_t alignment) {
+  const size_t total = size_per_unit * unit_count;
+  if (total < size_per_unit || total < unit_count)
+    return NULL; /* test for size overflow */
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, total, 0, alignment);
+#else
+  void *p = FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, total, 0, alignment);
+  if (p)
+    FIO_MEMSET(p, 0, total);
+  return p;
+#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
 }
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   return calloc(size, 1);
@@ -1743,9 +1994,10 @@ Small allocation internal API
 /* SublimeText marker */
 void fio___mem_slice_new___(void);
 /** slice a block to allocate a set number of bytes. */
-FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                            __mem_slice_new)(size_t bytes,
-                                                            void *is_realloc) {
+                                                            void *is_realloc,
+                                                            size_t alignment) {
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
   FIO_NAME(FIO_MEMORY_NAME, __mem_arena_s) *a =
@@ -1772,20 +2024,34 @@ FIO_SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
       a->last_pos = 0;
     }
 
-    /* enough space? allocate */
-    if (c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
-      /* a lucky realloc? */
-      if (is_realloc &&
-          is_realloc ==
-              FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, a->last_pos)) {
-        c->blocks[b].pos += bytes;
-        fio_atomic_sub(&c->blocks[b].ref, 1); /* release reference added */
-        FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
-        return is_realloc;
-      }
-      p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, c->blocks[b].pos);
-      a->last_pos = c->blocks[b].pos;
+    /* a lucky realloc? (in-place growth keeps the pointer's alignment) */
+    if (is_realloc &&
+        is_realloc ==
+            FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, a->last_pos) &&
+        !((uintptr_t)is_realloc & (alignment - 1)) &&
+        c->blocks[b].pos + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
       c->blocks[b].pos += bytes;
+      fio_atomic_sub(&c->blocks[b].ref, 1); /* release reference added */
+      FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
+      return is_realloc;
+    }
+
+    /* alignment padding (the math yields 0 for the default alignment,
+     * since block offsets are always FIO_MEMORY_ALIGN_SIZE multiples) */
+    const uintptr_t raw_ptr =
+        (uintptr_t)FIO_NAME(FIO_MEMORY_NAME,
+                            __mem_chunk2ptr)(c, b, c->blocks[b].pos);
+    const size_t pad =
+        (size_t)(((raw_ptr + (alignment - 1)) &
+                  (~(uintptr_t)(alignment - 1))) -
+                 raw_ptr) >>
+                FIO_MEMORY_ALIGN_LOG;
+
+    /* enough space? allocate */
+    if (c->blocks[b].pos + pad + bytes < FIO_MEMORY_UNITS_PER_BLOCK) {
+      a->last_pos = c->blocks[b].pos + pad;
+      p = FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, a->last_pos);
+      c->blocks[b].pos += pad + bytes;
       FIO_NAME(FIO_MEMORY_NAME, __mem_arena_unlock)(a);
       return p;
     }
@@ -1930,8 +2196,10 @@ FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
 
 /* SublimeText marker */
 void fio___mem_big_slice_new___(void);
-FIO_SFUNC void *FIO_MEM_ALIGN_NEW
-FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
+FIO_IFUNC void *FIO_MEM_ALIGN_NEW
+FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes,
+                                               void *is_realloc,
+                                               size_t alignment) {
   void *p = NULL;
   bytes = (bytes + ((1UL << FIO_MEMORY_ALIGN_LOG) - 1)) >> FIO_MEMORY_ALIGN_LOG;
   for (;;) {
@@ -1955,23 +2223,34 @@ FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size_t bytes, void *is_realloc) {
       FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = 0;
     }
 
-    /* enough space? */
-    if (b->pos + bytes < FIO_MEMORY_UNITS_PER_BIG_BLOCK) {
-      /* a lucky realloc? */
-      if (is_realloc &&
-          is_realloc ==
-              FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
-                  b,
-                  FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos)) {
-        b->pos += bytes;
-        FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
-        return is_realloc;
-      }
-
-      p = FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, b->pos);
-      fio_atomic_add(&b->ref, 1); /* keep inside lock to enable reset */
-      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = b->pos;
+    /* a lucky realloc? (in-place growth keeps the pointer's alignment) */
+    if (is_realloc &&
+        is_realloc ==
+            FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(
+                b,
+                FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos) &&
+        !((uintptr_t)is_realloc & (alignment - 1)) &&
+        b->pos + bytes < FIO_MEMORY_UNITS_PER_BIG_BLOCK) {
       b->pos += bytes;
+      FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
+      return is_realloc;
+    }
+
+    /* alignment padding (the math yields 0 for the default alignment) */
+    const uintptr_t raw_ptr =
+        (uintptr_t)FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, b->pos);
+    const size_t pad =
+        (size_t)(((raw_ptr + (alignment - 1)) &
+                  (~(uintptr_t)(alignment - 1))) -
+                 raw_ptr) >>
+                FIO_MEMORY_ALIGN_LOG;
+
+    /* enough space? */
+    if (b->pos + pad + bytes < FIO_MEMORY_UNITS_PER_BIG_BLOCK) {
+      FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_last_pos = b->pos + pad;
+      p = FIO_NAME(FIO_MEMORY_NAME, __mem_big2ptr)(b, b->pos + pad);
+      fio_atomic_add(&b->ref, 1); /* keep inside lock to enable reset */
+      b->pos += pad + bytes;
       FIO_MEMORY_UNLOCK(FIO_NAME(FIO_MEMORY_NAME, __mem_state)->big_lock);
       return p;
     }
@@ -1995,6 +2274,43 @@ FIO_IFUNC void FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_free)(void *p) {
 }
 
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
+/* *****************************************************************************
+Memory Allocation - page-backed (mmap) allocation core
+***************************************************************************** */
+
+/* SublimeText marker */
+void fio___mem_mmap_aligned___(void);
+/**
+ * Page-backed allocation core. Returns a pointer `offset` bytes into a
+ * page-mapped chunk, where `offset == max(alignment, FIO_MEMORY_ALIGN_SIZE)`
+ * (the chunk base is always FIO_MEMORY_SYS_ALLOCATION_SIZE aligned, so the
+ * offset preserves the requested alignment).
+ */
+FIO_IFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_mmap_aligned)(
+    size_t size,
+    size_t alignment) {
+  const size_t offset =
+      (alignment > FIO_MEMORY_ALIGN_SIZE) ? alignment : FIO_MEMORY_ALIGN_SIZE;
+  size_t pages;
+  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c;
+  if ((uint64_t)(size + offset) < (uint64_t)size)
+    return NULL; /* size overflow */
+  pages = FIO_MEM_BYTES2PAGES(size + offset);
+  if (((uint64_t)pages >> (31 + FIO_MEM_PAGE_SIZE_LOG)))
+    return NULL;
+  c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)
+          FIO_MEM_SYS_ALLOC(pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
+  if (!c)
+    goto no_mem;
+  FIO_MEMORY_ON_ALLOC_FUNC();
+  FIO_MEMORY_ON_CHUNK_ALLOC(c);
+  c->marker = (uint32_t)(pages >> FIO_MEM_PAGE_SIZE_LOG);
+  return (void *)((uintptr_t)c + offset);
+no_mem:
+  errno = ENOMEM;
+  return NULL;
+}
+
 /* *****************************************************************************
 Memory Allocation - malloc(0) pointer
 ***************************************************************************** */
@@ -2080,18 +2396,69 @@ void fio___malloc__(void);
  */
 FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
                                            ___malloc)(size_t size,
-                                                      void *is_realloc) {
+                                                      void *is_realloc,
+                                                      size_t alignment) {
   void *p = NULL;
   if (!size)
     goto malloc_zero;
 
+  if (alignment == FIO_MEMORY_ALIGN_SIZE) {
+    /* classic routing */
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
-  if ((is_realloc && size > (FIO_MEMORY_BIG_BLOCK_SIZE -
-                             (FIO_MEMORY_BIG_BLOCK_HEADER_SIZE << 1))) ||
-      (!is_realloc && size > FIO_MEMORY_ALLOC_LIMIT))
+    if ((is_realloc && size > (FIO_MEMORY_BIG_BLOCK_SIZE -
+                               (FIO_MEMORY_BIG_BLOCK_HEADER_SIZE << 1))) ||
+        (!is_realloc && size > FIO_MEMORY_ALLOC_LIMIT))
+      goto mmap_route;
 #else
-  if (!is_realloc && size > FIO_MEMORY_ALLOC_LIMIT)
+    if (!is_realloc && size > FIO_MEMORY_ALLOC_LIMIT)
+      goto mmap_route;
 #endif
+  } else {
+    /*
+     * aligned routing: only routes that can guarantee the padding fits.
+     *
+     * - slice path: size <= FIO_MEMORY_BLOCK_ALLOC_LIMIT and alignment <=
+     *   FIO_MEMORY_BLOCK_ALLOC_LIMIT (padding + size always fit a block);
+     * - big-block path: size <= FIO_MEMORY_ALLOC_LIMIT and alignment <=
+     *   (FIO_MEMORY_SYS_ALLOCATION_SIZE >> 1);
+     * - otherwise: page-backed (mmap) route.
+     */
+    if (size > FIO_MEMORY_ALLOC_LIMIT ||
+        alignment > (FIO_MEMORY_SYS_ALLOCATION_SIZE >> 1))
+      goto mmap_route;
+#if !FIO_MEMORY_ENABLE_BIG_ALLOC
+    if (alignment > FIO_MEMORY_BLOCK_ALLOC_LIMIT)
+      goto mmap_route;
+#endif
+  }
+  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)) {
+    FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)();
+  }
+#if FIO_MEMORY_ENABLE_BIG_ALLOC
+  if (alignment == FIO_MEMORY_ALIGN_SIZE
+          ? ((is_realloc &&
+              size > FIO_MEMORY_BLOCK_SIZE - (2 << FIO_MEMORY_ALIGN_LOG)) ||
+             (!is_realloc && size > FIO_MEMORY_BLOCK_ALLOC_LIMIT))
+          : (size > FIO_MEMORY_BLOCK_ALLOC_LIMIT ||
+             alignment > FIO_MEMORY_BLOCK_ALLOC_LIMIT))
+    goto big_route;
+
+#endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
+
+  p = FIO_NAME(FIO_MEMORY_NAME, __mem_slice_new)(size, is_realloc, alignment);
+  if (p && p != is_realloc) {
+    FIO_MEMORY_ON_ALLOC_FUNC();
+  }
+  return p;
+#if FIO_MEMORY_ENABLE_BIG_ALLOC
+big_route:
+  p = FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size, is_realloc, alignment);
+  if (p && p != is_realloc) {
+    FIO_MEMORY_ON_ALLOC_FUNC();
+  }
+  return p;
+#endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
+mmap_route:
   {
 #ifdef DEBUG
     FIO_LOG_WARNING(
@@ -2100,29 +2467,9 @@ FIO_IFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
         fio_getpid(),
         FIO_MEM_BYTES2PAGES(size));
 #endif
-    p = FIO_NAME(FIO_MEMORY_NAME, mmap)(size);
+    p = FIO_NAME(FIO_MEMORY_NAME, __mem_mmap_aligned)(size, alignment);
     return p;
   }
-  if (!FIO_NAME(FIO_MEMORY_NAME, __mem_state)) {
-    FIO_NAME(FIO_MEMORY_NAME, __mem_state_setup)();
-  }
-#if FIO_MEMORY_ENABLE_BIG_ALLOC
-  if ((is_realloc &&
-       size > FIO_MEMORY_BLOCK_SIZE - (2 << FIO_MEMORY_ALIGN_LOG)) ||
-      (!is_realloc && size > FIO_MEMORY_BLOCK_ALLOC_LIMIT)) {
-    p = FIO_NAME(FIO_MEMORY_NAME, __mem_big_slice_new)(size, is_realloc);
-    if (p && p != is_realloc) {
-      FIO_MEMORY_ON_ALLOC_FUNC();
-    }
-    return p;
-  }
-#endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
-
-  p = FIO_NAME(FIO_MEMORY_NAME, __mem_slice_new)(size, is_realloc);
-  if (p && p != is_realloc) {
-    FIO_MEMORY_ON_ALLOC_FUNC();
-  }
-  return p;
 malloc_zero:
   p = FIO_MEMORY_MALLOC_ZERO_POINTER;
   return p;
@@ -2145,7 +2492,9 @@ void fio_malloc__(void);
  * consecutive calls, but locality can't be guaranteed.
  */
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, malloc)(size_t size) {
-  void *p = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(size, NULL);
+  void *p = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(size,
+                                                 NULL,
+                                                 FIO_MEMORY_ALIGN_SIZE);
 #if !FIO_MEMORY_INITIALIZE_ALLOCATIONS && defined(DEBUG) && DEBUG
   /* set all bytes to 0xAF to better catch initialization bugs */
   FIO_MEMSET(p, 0xFA, size);
@@ -2182,6 +2531,46 @@ SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
 }
 
 /* SublimeText marker */
+void fio_malloc_aligned__(void);
+/**
+ * Allocates `size` bytes, returning a pointer aligned to (at least)
+ * `alignment`. Routes to `realloc_aligned`.
+ */
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       malloc_aligned)(size_t size,
+                                                       size_t alignment) {
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, size, 0, alignment);
+}
+
+/* SublimeText marker */
+void fio_calloc_aligned__(void);
+/**
+ * Same as `malloc_aligned(size_per_unit * unit_count, alignment)`,
+ * except that the allocated memory is zeroed out.
+ */
+SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME,
+                                       calloc_aligned)(size_t size_per_unit,
+                                                       size_t unit_count,
+                                                       size_t alignment) {
+  const size_t total = size_per_unit * unit_count;
+  if (total < size_per_unit || total < unit_count)
+    return NULL; /* test for size overflow */
+#if FIO_MEMORY_INITIALIZE_ALLOCATIONS
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, total, 0, alignment);
+#else
+  void *p;
+  /* round up to alignment size. */
+  const size_t len = ((total) + (FIO_MEMORY_ALIGN_SIZE - 1)) &
+                     (~((size_t)FIO_MEMORY_ALIGN_SIZE - 1));
+  p = FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(NULL, len, 0, alignment);
+  /* initialize memory only when required */
+  if (p)
+    FIO_MEMSET(p, 0, len);
+  return p;
+#endif /* FIO_MEMORY_INITIALIZE_ALLOCATIONS */
+}
+
+/* SublimeText marker */
 void fio_free__(void);
 /** Frees memory that was allocated using this library. */
 SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) {
@@ -2204,8 +2593,9 @@ SFUNC void FIO_NAME(FIO_MEMORY_NAME, free)(void *ptr) {
   }
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
 
-  /* big mmap allocation? */
-  if (((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE) == (uintptr_t)ptr && c->marker)
+  /* page-backed (mmap) allocation? (any interior pointer is accepted,
+   * regular chunks always keep `marker == 0`) */
+  if (c->marker)
     goto mmap_free;
 
   FIO_NAME(FIO_MEMORY_NAME, __mem_slice_free)(ptr);
@@ -2216,7 +2606,7 @@ mmap_free:
   FIO_MEMSET(ptr,
              0,
              ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) -
-                 FIO_MEMORY_ALIGN_SIZE);
+                 ((uintptr_t)ptr - (uintptr_t)c));
   FIO_MEMORY_ON_CHUNK_FREE(c);
   FIO_MEM_SYS_FREE(c, (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG);
 }
@@ -2234,11 +2624,16 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc)(void *ptr,
 
 /**
  * Uses system page maps for reallocation.
+ *
+ * Keeps the pointer's offset within the page-mapped chunk, so the returned
+ * pointer enjoys the same (2MiB base relative) alignment as `ptr`.
  */
 FIO_SFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) * c,
+    void *ptr,
     size_t new_size) {
-  const size_t new_len = FIO_MEM_BYTES2PAGES(new_size + FIO_MEMORY_ALIGN_SIZE);
+  const size_t offset = (uintptr_t)ptr - (uintptr_t)c;
+  const size_t new_len = FIO_MEM_BYTES2PAGES(new_size + offset);
   c = (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)FIO_MEM_SYS_REALLOC(
       c,
       (size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG,
@@ -2247,7 +2642,7 @@ FIO_SFUNC void *FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(
   if (!c)
     return NULL;
   c->marker = (uint32_t)(new_len >> FIO_MEM_PAGE_SIZE_LOG);
-  return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
+  return (void *)((uintptr_t)c + offset);
 }
 
 /* SublimeText marker */
@@ -2261,24 +2656,48 @@ void fio_realloc2__(void);
 SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
                                                               size_t new_size,
                                                               size_t copy_len) {
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(ptr,
+                                                    new_size,
+                                                    copy_len,
+                                                    FIO_MEMORY_ALIGN_SIZE);
+}
+
+/* SublimeText marker */
+void fio_realloc_aligned__(void);
+/**
+ * Re-allocates memory, enforcing a minimum pointer alignment.
+ *
+ * This is the core of the aligned allocation API: `malloc_aligned` and
+ * `calloc_aligned` simply route to this function with a NULL `ptr`.
+ */
+SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME,
+                                   realloc_aligned)(void *ptr,
+                                                    size_t new_size,
+                                                    size_t copy_len,
+                                                    size_t alignment) {
   void *mem = NULL;
+  if (ptr == FIO_MEMORY_MALLOC_ZERO_POINTER)
+    ptr = NULL;
+  alignment = FIO_NAME(FIO_MEMORY_NAME, __mem_align_normalize)(ptr, alignment);
+  if (!alignment) {
+    errno = EINVAL;
+    FIO_ASSERT_DEBUG(0,
+                     "realloc_aligned: alignment out of supported range");
+    return NULL;
+  }
   if (!new_size)
     goto act_as_free;
-  if (!ptr || ptr == FIO_MEMORY_MALLOC_ZERO_POINTER)
+  if (!ptr)
     goto act_as_malloc;
 
   { /* test for big-paged malloc and limit copy_len */
     FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
         FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2chunk)(ptr);
-    size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, ptr);
+    size_t max_len;
     FIO_ASSERT(c,
                "(%d) cannot reallocate a pointer with a NULL system allocation",
                fio_getpid());
 
-    register size_t max_len =
-        ((uintptr_t)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0) +
-         FIO_MEMORY_BLOCK_SIZE) -
-        ((uintptr_t)ptr);
 #if FIO_MEMORY_ENABLE_BIG_ALLOC
     if (c->marker == FIO_MEMORY_BIG_BLOCK_MARKER) {
       /* extend max_len to accommodate possible length */
@@ -2286,13 +2705,23 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
           ((uintptr_t)c + FIO_MEMORY_SYS_ALLOCATION_SIZE) - ((uintptr_t)ptr);
     } else
 #endif /* FIO_MEMORY_ENABLE_BIG_ALLOC */
-      if ((uintptr_t)(c) + FIO_MEMORY_ALIGN_SIZE == (uintptr_t)ptr &&
-          c->marker) {
-        if (new_size > FIO_MEMORY_ALLOC_LIMIT)
-          return (
-              mem = FIO_NAME(FIO_MEMORY_NAME, __mem_realloc2_big)(c, new_size));
-        max_len = new_size; /* shrinking from mmap to allocator */
-      }
+        if (c->marker) {
+      /* page-backed (mmap) chunk - any interior pointer is valid */
+      const size_t offset = (uintptr_t)ptr - (uintptr_t)c;
+      const size_t wanted_offset = (alignment > FIO_MEMORY_ALIGN_SIZE)
+                                       ? alignment
+                                       : FIO_MEMORY_ALIGN_SIZE;
+      if (new_size > FIO_MEMORY_ALLOC_LIMIT && offset == wanted_offset)
+        return (mem = FIO_NAME(FIO_MEMORY_NAME,
+                               __mem_realloc2_big)(c, ptr, new_size));
+      max_len = ((size_t)c->marker << FIO_MEM_PAGE_SIZE_LOG) - offset;
+    } else {
+      const size_t b = FIO_NAME(FIO_MEMORY_NAME, __mem_ptr2index)(c, ptr);
+      max_len =
+          ((uintptr_t)FIO_NAME(FIO_MEMORY_NAME, __mem_chunk2ptr)(c, b, 0) +
+           FIO_MEMORY_BLOCK_SIZE) -
+          ((uintptr_t)ptr);
+    }
 
     if (copy_len > max_len)
       copy_len = max_len;
@@ -2300,7 +2729,7 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
       copy_len = new_size;
   }
 
-  mem = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(new_size, ptr);
+  mem = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(new_size, ptr, alignment);
   if (!mem || mem == ptr) {
     return mem;
   }
@@ -2325,7 +2754,7 @@ SFUNC void *FIO_MEM_ALIGN FIO_NAME(FIO_MEMORY_NAME, realloc2)(void *ptr,
   return mem;
 
 act_as_malloc:
-  mem = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(new_size, NULL);
+  mem = FIO_NAME(FIO_MEMORY_NAME, ___malloc)(new_size, NULL, alignment);
   return mem;
 
 act_as_free:
@@ -2348,21 +2777,8 @@ void fio_mmap__(void);
 SFUNC void *FIO_MEM_ALIGN_NEW FIO_NAME(FIO_MEMORY_NAME, mmap)(size_t size) {
   if (!size)
     return FIO_NAME(FIO_MEMORY_NAME, malloc)(0);
-  size_t pages = FIO_MEM_BYTES2PAGES(size + FIO_MEMORY_ALIGN_SIZE);
-  if (((uint64_t)pages >> (31 + FIO_MEM_PAGE_SIZE_LOG)))
-    return NULL;
-  FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *c =
-      (FIO_NAME(FIO_MEMORY_NAME, __mem_chunk_s) *)
-          FIO_MEM_SYS_ALLOC(pages, FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG);
-  if (!c)
-    goto no_mem;
-  FIO_MEMORY_ON_ALLOC_FUNC();
-  FIO_MEMORY_ON_CHUNK_ALLOC(c);
-  c->marker = (uint32_t)(pages >> FIO_MEM_PAGE_SIZE_LOG);
-  return (void *)((uintptr_t)c + FIO_MEMORY_ALIGN_SIZE);
-no_mem:
-  errno = ENOMEM;
-  return NULL;
+  return FIO_NAME(FIO_MEMORY_NAME, __mem_mmap_aligned)(size,
+                                                       FIO_MEMORY_ALIGN_SIZE);
 }
 
 /* *****************************************************************************
@@ -2378,6 +2794,27 @@ void free(void *ptr) { FIO_NAME(FIO_MEMORY_NAME, free)(ptr); }
 void *realloc(void *ptr, size_t new_size) {
   return FIO_NAME(FIO_MEMORY_NAME, realloc2)(ptr, new_size, new_size);
 }
+/* override the aligned allocation family as well, so libc-aligned pointers
+ * never reach `fio_free` (and vice versa). */
+void *aligned_alloc(size_t alignment, size_t size) {
+  return FIO_NAME(FIO_MEMORY_NAME, malloc_aligned)(size, alignment);
+}
+int posix_memalign(void **memptr, size_t alignment, size_t size) {
+  void *p = FIO_NAME(FIO_MEMORY_NAME, malloc_aligned)(size, alignment);
+  if (!p)
+    return errno; /* EINVAL (unsupported alignment) or ENOMEM */
+  *memptr = p;
+  return 0;
+}
+#if FIO_OS_WIN
+void *_aligned_malloc(size_t size, size_t alignment) {
+  return FIO_NAME(FIO_MEMORY_NAME, malloc_aligned)(size, alignment);
+}
+void *_aligned_realloc(void *ptr, size_t size, size_t alignment) {
+  return FIO_NAME(FIO_MEMORY_NAME, realloc_aligned)(ptr, size, size, alignment);
+}
+void _aligned_free(void *ptr) { FIO_NAME(FIO_MEMORY_NAME, free)(ptr); }
+#endif /* FIO_OS_WIN */
 #endif /* FIO_MALLOC_OVERRIDE_SYSTEM */
 #undef FIO_MALLOC_OVERRIDE_SYSTEM
 

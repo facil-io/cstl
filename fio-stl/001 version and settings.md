@@ -86,6 +86,10 @@ These macros are defined in [`./001 header.h`](./001%20header.h) and are re-eval
 - **`FIO_MEMORY_DISABLE`** — Define to disable all custom facil.io allocators and force system `malloc`/`free` for temporary allocations.
 - **`FIO_MALLOC_TMP_USE_SYSTEM`** — Force the recursive allocator variant to use the system `realloc`/`free`. Useful when a custom `FIO_MEM_REALLOC` needs an allocation path that will not recurse back into facil.io.
 - **`FIO_MEM_REALLOC_` / `FIO_MEM_FREE_`** — Recursive-safe copies of `FIO_MEM_REALLOC`/`FIO_MEM_FREE`. Override these when the custom allocator itself needs to allocate or free memory without re-entering the override.
+- **`FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)`** — Reallocate with a minimum pointer alignment, **assigning** the result to `ptr` (save a copy first if failure must be recoverable). `alignment` of `0` selects the allocator default; non power-of-2 values are rounded down to a power of 2; effective alignment never drops below the current alignment of `ptr` nor below the allocator default. Routes to `fio_realloc_aligned` when the facil.io allocator is available, or to the system backends (`_aligned_realloc` on Windows, `posix_memalign`-based emulation on POSIX).
+- **`FIO_MEM_FREE_ALIGNED(ptr, size)`** — Free a block obtained through `FIO_MEM_REALLOC_ALIGNED`. With the facil.io allocator this is simply `fio_free` (which accepts interior pointers); with the system backends it routes to `_aligned_free` on Windows or `free` on POSIX. Custom allocators that stash alignment bookkeeping near the returned pointer should override this pair together.
+- **`FIO_MEM_ALLOC_SIZE(size)`** — The usable bytes the allocator reserves for a `size` request (`fio_alloc_size`, or the identity function with the system allocator).
+- **`FIO_MEM_REALLOC_ALIGNED_` / `FIO_MEM_FREE_ALIGNED_`** — Recursive-safe copies of the aligned pair, mirroring `FIO_MEM_REALLOC_` / `FIO_MEM_FREE_`.
 
 ### Pointer tagging
 

@@ -68,7 +68,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_REF_DUPNAME     dup2
 #endif
 
-typedef struct {
+/* The header's alignment matches the wrapped type's alignment, rounding
+ * sizeof(__wrapper_s) up to a multiple of that alignment, so the object
+ * immediately following the header keeps its required alignment. */
+typedef struct FIO_ALIGN(_Alignof(FIO_REF_TYPE)) {
 #ifdef FIO_REF_FLEX_TYPE
   volatile uint32_t ref;
   uint32_t flx_size;
@@ -165,18 +168,21 @@ FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
 #ifdef FIO_REF_FLEX_TYPE
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                 FIO_REF_CONSTRUCTOR)(size_t members) {
-  FIO_NAME(FIO_REF_NAME, __wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME, __wrapper_s) *)FIO_MEM_REALLOC_(
-          NULL,
-          0,
-          sizeof(*o) + sizeof(FIO_REF_TYPE) +
-              (sizeof(FIO_REF_FLEX_TYPE) * members),
-          0);
+  FIO_NAME(FIO_REF_NAME, __wrapper_s) *o = NULL;
+  FIO_MEM_REALLOC_ALIGNED_(o,
+                           0,
+                           sizeof(*o) + sizeof(FIO_REF_TYPE) +
+                               (sizeof(FIO_REF_FLEX_TYPE) * members),
+                           0,
+                           _Alignof(FIO_REF_TYPE));
 #else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
-  FIO_NAME(FIO_REF_NAME, __wrapper_s) *o =
-      (FIO_NAME(FIO_REF_NAME, __wrapper_s) *)
-          FIO_MEM_REALLOC_(NULL, 0, sizeof(*o) + sizeof(FIO_REF_TYPE), 0);
+  FIO_NAME(FIO_REF_NAME, __wrapper_s) *o = NULL;
+  FIO_MEM_REALLOC_ALIGNED_(o,
+                           0,
+                           sizeof(*o) + sizeof(FIO_REF_TYPE),
+                           0,
+                           _Alignof(FIO_REF_TYPE));
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
@@ -209,9 +215,9 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
 #ifdef FIO_REF_FLEX_TYPE
-  FIO_MEM_FREE_(o, sizeof(*o) + (o->flx_size * sizeof(FIO_REF_FLEX_TYPE)));
+  FIO_MEM_FREE_ALIGNED_(o, sizeof(*o) + (o->flx_size * sizeof(FIO_REF_FLEX_TYPE)));
 #else
-  FIO_MEM_FREE_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
+  FIO_MEM_FREE_ALIGNED_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
 #endif
 }
 

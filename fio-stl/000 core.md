@@ -1,5 +1,7 @@
 # facil.io STL — Core
 
+## The C Server Toolbox Library
+
 Welcome to the heart of the facil.io C STL. This is where the boring-but-essential stuff lives: version numbers, compiler incantations, OS patches, atomics, memory primitives, and the low-level helpers that everything else builds on. It is not glamorous, but without it the rest of the library would be a pile of undefined behavior and segfaults.
 
 The core group covers the first two slices of the library — `000 core.h` and `001 header.h` — plus their specialized sidekicks. Each file below is a focused guide to one corner of that foundation.

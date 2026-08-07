@@ -4038,18 +4038,43 @@ Vector Types (SIMD / Math)
 
 #elif __has_attribute(vector_size)
 
+/* Vector types with natural alignment capped at 64 bytes (the strictest
+ * hardware requirement, AVX-512 register width).
+ *
+ * GCC/Clang give `vector_size` types a natural alignment equal to their size,
+ * which grows to 128..512 bytes for the 1024..4096 bit unions (always on
+ * the MSVC ABI, which reports these natural alignments for even wider
+ * vectors). Alignment reduction requires typedef position, so the vector
+ * types are hoisted here and the member macros only reference them. */
+#define FIO___UXXX_VCAP(bits) (((bits) / 8) > 64 ? 64 : ((bits) / 8))
+#define FIO___UXXX_VTYPEDEFS(bits)                                             \
+  typedef uint64_t __attribute__((vector_size((bits / 8)),                     \
+                                  aligned(FIO___UXXX_VCAP(bits))))             \
+      fio___v##bits##u64;                                                      \
+  typedef uint32_t __attribute__((vector_size((bits / 8)),                     \
+                                  aligned(FIO___UXXX_VCAP(bits))))             \
+      fio___v##bits##u32;                                                      \
+  typedef uint16_t __attribute__((vector_size((bits / 8)),                     \
+                                  aligned(FIO___UXXX_VCAP(bits))))             \
+      fio___v##bits##u16;                                                      \
+  typedef uint8_t __attribute__((vector_size((bits / 8)),                      \
+                                  aligned(FIO___UXXX_VCAP(bits))))             \
+      fio___v##bits##u8;
+FIO___UXXX_VTYPEDEFS(128)
+FIO___UXXX_VTYPEDEFS(256)
+FIO___UXXX_VTYPEDEFS(512)
+FIO___UXXX_VTYPEDEFS(1024)
+FIO___UXXX_VTYPEDEFS(2048)
+FIO___UXXX_VTYPEDEFS(4096)
+
 /** Defines a `bits` long vector using unsigned 64bit words */
-#define FIO_UXXX_X64_DEF(name, bits)                                           \
-  uint64_t __attribute__((vector_size((bits / 8)))) name[1]
+#define FIO_UXXX_X64_DEF(name, bits) fio___v##bits##u64 name[1]
 /** Defines a `bits` long vector using unsigned 32bit words */
-#define FIO_UXXX_X32_DEF(name, bits)                                           \
-  uint32_t __attribute__((vector_size((bits / 8)))) name[1]
+#define FIO_UXXX_X32_DEF(name, bits) fio___v##bits##u32 name[1]
 /** Defines a `bits` long vector using unsigned 16bit words */
-#define FIO_UXXX_X16_DEF(name, bits)                                           \
-  uint16_t __attribute__((vector_size((bits / 8)))) name[1]
+#define FIO_UXXX_X16_DEF(name, bits) fio___v##bits##u16 name[1]
 /** Defines a `bits` long vector using unsigned 8bit words */
-#define FIO_UXXX_X8_DEF(name, bits)                                            \
-  uint8_t __attribute__((vector_size((bits / 8)))) name[1]
+#define FIO_UXXX_X8_DEF(name, bits)  fio___v##bits##u8 name[1]
 #else
 /** Defines a `bits` long vector using unsigned 64bit words */
 #define FIO_UXXX_X64_DEF(name, bits) uint64_t name[(bits / 64)]
@@ -4142,6 +4167,14 @@ typedef union fio_u4096 {
 
 FIO_ASSERT_STATIC(sizeof(fio_u128) == 16, "Math type size error!");
 FIO_ASSERT_STATIC(sizeof(fio_u4096) == 512, "Math type size error!");
+/* natural alignment must never exceed 64 bytes (AVX-512) on any ABI, so the
+ * default allocator alignment always satisfies these types (see 010 mem.h) */
+FIO_ASSERT_STATIC(_Alignof(fio_u128) <= 64, "Math type alignment error!");
+FIO_ASSERT_STATIC(_Alignof(fio_u256) <= 64, "Math type alignment error!");
+FIO_ASSERT_STATIC(_Alignof(fio_u512) <= 64, "Math type alignment error!");
+FIO_ASSERT_STATIC(_Alignof(fio_u1024) <= 64, "Math type alignment error!");
+FIO_ASSERT_STATIC(_Alignof(fio_u2048) <= 64, "Math type alignment error!");
+FIO_ASSERT_STATIC(_Alignof(fio_u4096) <= 64, "Math type alignment error!");
 
 #define fio_u128_init8(...)  ((fio_u128){.u8 = {__VA_ARGS__}})
 #define fio_u128_init16(...) ((fio_u128){.u16 = {__VA_ARGS__}})

@@ -4,13 +4,13 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3143.
+Total symbols: 3151.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
 - [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1765
-- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 8
+- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 12
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
 - [`./fio-stl/001 patches.h`](#fio-stl-001-patches-h) — 2
@@ -36,7 +36,7 @@ Total symbols: 3143.
 - [`./fio-stl/004 urlencoded.h`](#fio-stl-004-urlencoded-h) — 3
 - [`./fio-stl/004 websocket parser.h`](#fio-stl-004-websocket-parser-h) — 29
 - [`./fio-stl/005 cli.h`](#fio-stl-005-cli-h) — 23
-- [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 46
+- [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 50
 - [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 103
 - [`./fio-stl/012 gfm.h`](#fio-stl-012-gfm-h) — 10
 - [`./fio-stl/102 poll api.h`](#fio-stl-102-poll-api-h) — 16
@@ -18677,7 +18677,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-001-header-h"></a> `./fio-stl/001 header.h`
 
-8 public symbols.
+12 public symbols.
 
 ### Macros
 
@@ -18719,6 +18719,47 @@ _Symbol type:_ `macro`
 ```
 
 Detect allocator allignment dynamically.
+
+_Symbol type:_ `macro`
+
+#### `FIO_MEM_REALLOC_ALIGNED`
+
+```c
+#define FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)   \
+  ((ptr) = fio_realloc_aligned((ptr), (new_size), (copy_len), (alignment)))
+```
+
+Reallocates memory with an alignment requirement, assigning `ptr`.
+
+_Symbol type:_ `macro`
+
+#### `FIO_MEM_ALLOC_SIZE`
+
+```c
+#define FIO_MEM_ALLOC_SIZE(size) fio_alloc_size((size))
+```
+
+Returns the usable size the allocator reserves for a `size` request.
+
+_Symbol type:_ `macro`
+
+#### `FIO_MEM_FREE_ALIGNED`
+
+```c
+#define FIO_MEM_FREE_ALIGNED(ptr, size) fio___aligned_free_fallback((ptr))
+```
+
+Frees memory allocated using FIO_MEM_REALLOC_ALIGNED.
+
+_Symbol type:_ `macro`
+
+#### `FIO_MEM_SYS_ALIGN_MAX_LOG`
+
+```c
+#define FIO_MEM_SYS_ALIGN_MAX_LOG 21
+```
+
+Mirrors the custom allocator's default FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG.
 
 _Symbol type:_ `macro`
 
@@ -23333,7 +23374,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-010-mem-h"></a> `./fio-stl/010 mem.h`
 
-46 public symbols.
+50 public symbols.
 
 ### Macros
 
@@ -23723,6 +23764,54 @@ This variation can perform better, as it might copy less data.
 
 _Symbol type:_ `function`
 
+#### `fio_realloc_aligned`
+
+```c
+void *FIO_MEM_ALIGN fio_realloc_aligned(void *ptr, size_t new_size, size_t copy_len, size_t alignment)
+```
+
+Re-allocates memory, enforcing a minimum pointer alignment.
+
+This is the core of the aligned allocation API: `malloc_aligned` and
+`calloc_aligned` simply route to this function with a NULL `ptr`.
+
+The `alignment` argument is normalized as follows:
+
+- `0` is treated as the allocator's default (`FIO_MEMORY_ALIGN_SIZE`);
+- non power-of-2 values are rounded DOWN to the nearest power of 2;
+- the effective alignment is the maximum of the requested alignment, the
+  current alignment of `ptr` (if any) and `FIO_MEMORY_ALIGN_SIZE`;
+- effective values above `FIO_MEMORY_SYS_ALLOCATION_SIZE` fail
+  (returns NULL, sets `errno` to `EINVAL`).
+
+Data preservation semantics are identical to `realloc2` (`copy_len` bytes).
+In-place growth may only occur when the existing pointer already satisfies
+the requested alignment.
+
+_Symbol type:_ `function`
+
+#### `fio_malloc_aligned`
+
+```c
+void *FIO_MEM_ALIGN_NEW fio_malloc_aligned(size_t size, size_t alignment)
+```
+
+Allocates `size` bytes, returning a pointer aligned to (at least)
+`alignment`. Same semantics as `realloc_aligned(NULL, size, 0, alignment)`.
+
+_Symbol type:_ `function`
+
+#### `fio_calloc_aligned`
+
+```c
+void *FIO_MEM_ALIGN_NEW fio_calloc_aligned(size_t size_per_unit, size_t unit_count, size_t alignment)
+```
+
+Same as `malloc_aligned(size_per_unit * unit_count, alignment)`,
+except that the allocated memory is zeroed out.
+
+_Symbol type:_ `function`
+
 #### `fio_mmap`
 
 ```c
@@ -23870,6 +23959,24 @@ inline size_t fio_realloc_is_safe(void)
 ```
 
 
+
+_Symbol type:_ `function`
+
+#### `fio_alloc_size`
+
+```c
+inline size_t fio_alloc_size(size_t minimum_bytes)
+```
+
+Returns the number of usable bytes the allocator will actually reserve for
+an allocation request of `minimum_bytes` (the allocation's size class).
+
+The result is alignment agnostic - alignment padding, if any, is reserved
+in addition to the returned value.
+
+NOTE: when the custom allocator is bypassed (`FIO_MEMORY_DISABLE`), the
+system allocator exposes no rounding guarantee and `minimum_bytes` is
+returned unchanged.
 
 _Symbol type:_ `function`
 

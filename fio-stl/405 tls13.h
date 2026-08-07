@@ -1061,8 +1061,10 @@ FIO_SFUNC fio___tls13_connection_s *fio___tls13_connection_new(
     fio___tls13_context_s *ctx) {
   /* Single allocation for struct + all buffers (flex array member) */
   size_t alloc_size = sizeof(fio___tls13_connection_s) + FIO___TLS13_BUF_TOTAL;
-  fio___tls13_connection_s *conn =
-      (fio___tls13_connection_s *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
+  fio___tls13_connection_s *conn = NULL;
+  /* the connection type is over-aligned (embedded vector unions) */
+  FIO_MEM_REALLOC_ALIGNED(conn, 0, alloc_size, 0,
+                          _Alignof(fio___tls13_connection_s));
   if (!conn)
     return NULL;
   FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_connection_s);
@@ -1086,7 +1088,7 @@ FIO_SFUNC void fio___tls13_connection_free(fio___tls13_connection_s *conn) {
 
   /* Single free for struct + all buffers (flex array member) */
   FIO_LEAK_COUNTER_ON_FREE(fio___tls13_connection_s);
-  FIO_MEM_FREE(conn, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
+  FIO_MEM_FREE_ALIGNED(conn, sizeof(*conn) + FIO___TLS13_BUF_TOTAL);
 }
 
 /** Drains serialized wire data, retaining any unsent suffix for retry. */

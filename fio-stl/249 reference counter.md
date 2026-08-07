@@ -223,6 +223,8 @@ void example(void) {
 
 The `_wrapper_s` header holds the reference count (and optional `flx_size` / `metadata` fields). Callers never see it — they only receive a pointer to the `FIO_REF_TYPE` that immediately follows.
 
+The header's declared alignment matches `_Alignof(FIO_REF_TYPE)`, so its size rounds up to a multiple of that alignment and the object that follows it is always correctly aligned. Allocation goes through `FIO_MEM_REALLOC_ALIGNED_` with the type's alignment (the allocator treats smaller-than-default requests as the default), so over-aligned types work in every allocator configuration.
+
 ---
 
 ## Notes

@@ -248,14 +248,10 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_slli_si128(fio_fx86_m128i a, int imm8) {
 #else
   if (!n)
     return a;
-  if (n >= 16) {
-    fio_fx86_m128i r;
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
-  fio_fx86_m128i r;
-  FIO_MEMSET(&r, 0, 16);
-  FIO_MEMCPY(r.u8 + n, a.u8, (size_t)(16 - n));
+  if (n >= 16)
+    return (fio_fx86_m128i){0};
+  fio_fx86_m128i r = {0};
+  fio_memcpy15x(r.u8 + n, a.u8, (size_t)(16 - n));
   return r;
 #endif
 }
@@ -286,14 +282,10 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_srli_si128(fio_fx86_m128i a, int imm8) {
 #else
   if (!n)
     return a;
-  if (n >= 16) {
-    fio_fx86_m128i r;
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
-  fio_fx86_m128i r;
-  FIO_MEMSET(&r, 0, 16);
-  FIO_MEMCPY(r.u8, a.u8 + n, (size_t)(16 - n));
+  if (n >= 16)
+    return (fio_fx86_m128i){0};
+  fio_fx86_m128i r = {0};
+  fio_memcpy15x(r.u8, a.u8 + n, (size_t)(16 - n));
   return r;
 #endif
 }
@@ -324,11 +316,9 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_slli_epi32(fio_fx86_m128i a, int imm8) {
   }
   }
 #else
+  if (n >= 32)
+    return (fio_fx86_m128i){0};
   fio_fx86_m128i r;
-  if (n >= 32) {
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
   for (int i = 0; i < 4; ++i)
     r.u32[i] = a.u32[i] << n;
   return r;
@@ -359,11 +349,9 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_srli_epi32(fio_fx86_m128i a, int imm8) {
   }
   }
 #else
+  if (n >= 32)
+    return (fio_fx86_m128i){0};
   fio_fx86_m128i r;
-  if (n >= 32) {
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
   for (int i = 0; i < 4; ++i)
     r.u32[i] = a.u32[i] >> n;
   return r;
@@ -393,11 +381,9 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_slli_epi64(fio_fx86_m128i a, int imm8) {
   }
   }
 #else
+  if (n >= 64)
+    return (fio_fx86_m128i){0};
   fio_fx86_m128i r;
-  if (n >= 64) {
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
   for (int i = 0; i < 2; ++i)
     r.u64[i] = a.u64[i] << n;
   return r;
@@ -427,11 +413,9 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_srli_epi64(fio_fx86_m128i a, int imm8) {
   }
   }
 #else
+  if (n >= 64)
+    return (fio_fx86_m128i){0};
   fio_fx86_m128i r;
-  if (n >= 64) {
-    FIO_MEMSET(&r, 0, 16);
-    return r;
-  }
   for (int i = 0; i < 2; ++i)
     r.u64[i] = a.u64[i] >> n;
   return r;
@@ -591,7 +575,8 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_set1_epi8(char a) {
   return _mm_set1_epi8(a);
 #else
   fio_fx86_m128i r;
-  FIO_MEMSET(&r, (uint8_t)a, 16);
+  for (int i = 0; i < 16; ++i)
+    r.u8[i] = (uint8_t)a;
   return r;
 #endif
 }
@@ -601,9 +586,7 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_setzero_si128(void) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_setzero_si128();
 #else
-  fio_fx86_m128i r;
-  FIO_MEMSET(&r, 0, 16);
-  return r;
+  return (fio_fx86_m128i){0};
 #endif
 }
 
@@ -612,8 +595,7 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_cvtsi32_si128(int a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
   return _mm_cvtsi32_si128(a);
 #else
-  fio_fx86_m128i r;
-  FIO_MEMSET(&r, 0, 16);
+  fio_fx86_m128i r = {0};
   r.u32[0] = (uint32_t)a;
   return r;
 #endif
@@ -653,30 +635,23 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_alignr_epi8(fio_fx86_m128i a,
   case 8: return _mm_alignr_epi8(a, b, 8);
   default: {
     /* Fallback for other values — pad to 48 bytes for imm8 17..31 safety */
-    uint8_t tmp[48];
+    uint8_t tmp[48] = {0};
     fio_memcpy16(tmp, &b);
     fio_memcpy16(tmp + 16, &a);
-    FIO_MEMSET(tmp + 32, 0, 16);
-    fio_fx86_m128i r;
-    if (n >= 32)
-      FIO_MEMSET(&r, 0, 16);
-    else
+    fio_fx86_m128i r = {0};
+    if (n < 32)
       fio_memcpy16(&r, tmp + n);
     return r;
   }
   }
 #else
   /* Pad to 48 bytes so imm8 values 17..31 don't read out of bounds */
-  uint8_t tmp[48];
+  uint8_t tmp[48] = {0};
   fio_memcpy16(tmp, &b);
   fio_memcpy16(tmp + 16, &a);
-  FIO_MEMSET(tmp + 32, 0, 16);
-  fio_fx86_m128i r;
-  if (n >= 32) {
-    FIO_MEMSET(&r, 0, 16);
-  } else {
+  fio_fx86_m128i r = {0};
+  if (n < 32)
     fio_memcpy16(&r, tmp + n);
-  }
   return r;
 #endif
 }
@@ -1487,11 +1462,9 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_slli_epi32(fio_fx86_m256i a, int imm8) {
   }
 #else
   fio_u256 ua = fio___fx86_to_u256(a);
-  fio_u256 r;
-  if (n >= 32) {
-    FIO_MEMSET(&r, 0, 32);
+  fio_u256 r = {0};
+  if (n >= 32)
     return fio___fx86_from_u256(r);
-  }
   for (int i = 0; i < 8; ++i)
     r.u32[i] = ua.u32[i] << n;
   return fio___fx86_from_u256(r);
@@ -1610,9 +1583,10 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_set1_epi8(char a) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_set1_epi8(a);
 #else
-  fio_fx86_m256i r;
-  FIO_MEMSET(&r, (uint8_t)a, 32);
-  return r;
+  fio_u256 r;
+  for (int i = 0; i < 32; ++i)
+    r.u8[i] = (uint8_t)a;
+  return fio___fx86_from_u256(r);
 #endif
 }
 
@@ -1778,9 +1752,7 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_setzero_si256(void) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
   return _mm256_setzero_si256();
 #else
-  fio_fx86_m256i r;
-  FIO_MEMSET(&r, 0, 32);
-  return r;
+  return fio___fx86_from_u256((fio_u256){0});
 #endif
 }
 
@@ -1823,17 +1795,13 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_alignr_epi8(fio_fx86_m256i a,
   case 8: return _mm256_alignr_epi8(a, b, 8);
   default: {
     /* Per-lane concatenate and shift — pad to 48 for imm8 17..31 safety */
-    uint8_t lo[48], hi[48];
+    uint8_t lo[48] = {0}, hi[48] = {0};
     fio_memcpy16(lo, &b);
     fio_memcpy16(lo + 16, &a);
-    FIO_MEMSET(lo + 32, 0, 16);
     fio_memcpy16(hi, (const uint8_t *)&b + 16);
     fio_memcpy16(hi + 16, (const uint8_t *)&a + 16);
-    FIO_MEMSET(hi + 32, 0, 16);
-    fio_fx86_m256i r;
-    if (n >= 32) {
-      FIO_MEMSET(&r, 0, 32);
-    } else {
+    fio_fx86_m256i r = {0};
+    if (n < 32) {
       fio_memcpy16(&r, lo + n);
       fio_memcpy16((uint8_t *)&r + 16, hi + n);
     }
@@ -1842,17 +1810,13 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_alignr_epi8(fio_fx86_m256i a,
   }
 #else
   /* Per-lane: concatenate b_lane:a_lane — pad to 48 for imm8 17..31 safety */
-  uint8_t lo[48], hi[48];
+  uint8_t lo[48] = {0}, hi[48] = {0};
   fio_memcpy16(lo, &b);
   fio_memcpy16(lo + 16, &a);
-  FIO_MEMSET(lo + 32, 0, 16);
   fio_memcpy16(hi, (const uint8_t *)&b + 16);
   fio_memcpy16(hi + 16, (const uint8_t *)&a + 16);
-  FIO_MEMSET(hi + 32, 0, 16);
-  fio_fx86_m256i r;
-  if (n >= 32) {
-    FIO_MEMSET(&r, 0, 32);
-  } else {
+  fio_fx86_m256i r = {0};
+  if (n < 32) {
     fio_memcpy16(&r, lo + n);
     fio_memcpy16((uint8_t *)&r + 16, hi + n);
   }
