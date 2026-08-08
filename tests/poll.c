@@ -269,6 +269,28 @@ static void test_poll_empty_review(void) {
   fprintf(stderr, "* empty review: OK\n");
 }
 
+/* On Windows, an empty poll map uses FIO_THREAD_WAIT rather than WSAPoll.
+ * Keep this timed check so a nanosecond/microsecond/millisecond conversion
+ * regression cannot turn a short poll timeout into a CI-scale delay. */
+static void test_poll_empty_review_timeout(void) {
+  fio_poll_s p;
+  fio_poll_init(&p,
+                .on_data = cb_on_data,
+                .on_ready = cb_on_ready,
+                .on_close = cb_on_close);
+  const int64_t started_at = FIO_NAME_TEST(stl, atol_time)();
+  const int events = fio_poll_review(&p, 100);
+  const int64_t elapsed_us = FIO_NAME_TEST(stl, atol_time)() - started_at;
+  FIO_ASSERT(events == 0,
+             "empty timed poll review should return 0 (got %d)",
+             events);
+  FIO_ASSERT(elapsed_us >= 50000 && elapsed_us < 2000000,
+             "100ms empty poll timeout took %lldus",
+             (long long)elapsed_us);
+  fio_poll_destroy(&p);
+  fprintf(stderr, "* empty 100ms timeout: %lldus\n", (long long)elapsed_us);
+}
+
 #if defined(FIO_POLL_ENGINE_POLL)
 static void test_poll_invalid_arguments(void) {
   FIO_ASSERT(fio_poll_forget(NULL, FIO_SOCKET_INVALID) == -1,
@@ -293,6 +315,7 @@ int main(void) {
   test_poll_on_close();
   test_poll_forget();
   test_poll_empty_review();
+  test_poll_empty_review_timeout();
 #if defined(FIO_POLL_ENGINE_POLL)
   test_poll_invalid_arguments();
 #endif
