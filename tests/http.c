@@ -140,6 +140,71 @@ static LONG WINAPI test_http_win_crash_trap(EXCEPTION_POINTERS *ep) {
       }
     }
   }
+  /* Fault-time register context: the stack walk beyond the fault frame has
+     proven unreliable (return addresses that don't align to post-call
+     boundaries), so dump the raw CONTEXT instead. In the MS x64 ABI the
+     first args live in RCX/RDX/R8 — for a fault inside fio_risky_hash, RCX
+     holds the hashed buffer pointer throughout the absorb loop. */
+  if (ep->ContextRecord) {
+    const CONTEXT *cx = ep->ContextRecord;
+    TEST_HTTP_CRASH_LOG("FATAL: ctx rax=%016llX rbx=%016llX rcx=%016llX "
+                        "rdx=%016llX\n",
+                        (unsigned long long)cx->Rax,
+                        (unsigned long long)cx->Rbx,
+                        (unsigned long long)cx->Rcx,
+                        (unsigned long long)cx->Rdx);
+    TEST_HTTP_CRASH_LOG("FATAL: ctx rsi=%016llX rdi=%016llX rbp=%016llX "
+                        "rsp=%016llX\n",
+                        (unsigned long long)cx->Rsi,
+                        (unsigned long long)cx->Rdi,
+                        (unsigned long long)cx->Rbp,
+                        (unsigned long long)cx->Rsp);
+    TEST_HTTP_CRASH_LOG("FATAL: ctx r8 =%016llX r9 =%016llX r10=%016llX "
+                        "r11=%016llX\n",
+                        (unsigned long long)cx->R8,
+                        (unsigned long long)cx->R9,
+                        (unsigned long long)cx->R10,
+                        (unsigned long long)cx->R11);
+    TEST_HTTP_CRASH_LOG("FATAL: ctx r12=%016llX r13=%016llX r14=%016llX "
+                        "r15=%016llX\n",
+                        (unsigned long long)cx->R12,
+                        (unsigned long long)cx->R13,
+                        (unsigned long long)cx->R14,
+                        (unsigned long long)cx->R15);
+    /* Fault-time stack window: raw qwords beginning at RSP. Any value that
+       falls inside the exe image is annotated with its preferred-base
+       address (`sym=`) — a call-return candidate for offline symbolization
+       (scan-based, so it works even when unwind info misleads). */
+    {
+      const unsigned long long *sp =
+          (const unsigned long long *)(uintptr_t)cx->Rsp;
+      MEMORY_BASIC_INFORMATION mbi;
+      for (size_t i = 0; i < 48; ++i) {
+        const unsigned long long *slot = sp + i;
+        if (!VirtualQuery((LPCVOID)slot, &mbi, sizeof(mbi)) ||
+            mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) ||
+            (mbi.Protect & PAGE_NOACCESS))
+          break;
+        {
+          unsigned long long v = *slot;
+          char sym[48];
+          sym[0] = 0;
+          if (preferred && v >= (unsigned long long)(uintptr_t)exe &&
+              v < (unsigned long long)(uintptr_t)exe + (16ULL << 20))
+            snprintf(sym,
+                     sizeof(sym),
+                     " sym=0x%llX",
+                     preferred + (v - (unsigned long long)(uintptr_t)exe));
+          if (sym[0] || !(i & 3)) /* image hits always; else every 4th */
+            TEST_HTTP_CRASH_LOG("FATAL: stack[%2zu] rsp+0x%03zX = %016llX%s\n",
+                                i,
+                                i * sizeof(v),
+                                v,
+                                sym);
+        }
+      }
+    }
+  }
 #undef TEST_HTTP_CRASH_LOG
   return EXCEPTION_CONTINUE_SEARCH; /* preserve CI failure semantics + WER */
 }
