@@ -796,6 +796,11 @@ static void test_zlib_multiblock_inflate(void) {
   TEST_ASSERT(msg != NULL, "zlib multiblock: allocation failed");
   if (!msg)
     return;
+  /* Pre-fill deterministically: the snprintf records below only cover
+   * 26 of every 32 bytes — without a pre-fill the gaps (and the tail)
+   * hold uninitialized heap data, making the compressed stream (and any
+   * failure it triggers) sporadic and non-reproducible. */
+  fio___deflate_fill(msg, msg_len + 64, 0x5AFE2026U);
   for (size_t i = 0; i < msg_len; i += 32) {
     int n = snprintf((char *)msg + i,
                      msg_len - i,
@@ -855,6 +860,284 @@ static void test_zlib_multiblock_inflate(void) {
   FIO_MEM_FREE(msg, msg_len + 64);
 }
 #endif /* HAVE_ZLIB */
+
+/* *****************************************************************************
+T001b — Decode table sizing, capacity guard, and heap growth
+
+The inflater builds Huffman decode tables into fixed stack buffers; when a
+table ever needs more entries than the stack budget, storage must EXPAND
+through the heap — never hard-fail a stream, never overflow the stack, and
+never leak. This white-box test drives the machinery directly (the internal
+macros are file-local, so root widths/caps are spelled out as literals).
+***************************************************************************** */
+
+static void test_decode_table_heap_growth(void) {
+  fprintf(stderr, "Testing decode-table sizing and heap growth path...\n");
+  enum {
+    LITLEN_ROOT_BITS = 11,
+    LITLEN_ROOT_SIZE = 1 << 11,
+    LITLEN_STACK_CAP = (1 << 11) + 512 /* LITLEN_MAX in 162 deflate.h */
+  };
+
+  uint8_t ll[288];
+  fio___deflate_fixed_litlen_lens(ll);
+
+  /* Sizing query touches no memory: fixed tree fits the 11-bit root. */
+  uint32_t need = fio___deflate_build_decode_table(NULL, 0, ll, 288, 11, 1);
+  TEST_ASSERT(need == (uint32_t)LITLEN_ROOT_SIZE,
+              "table sizing: fixed litlen needs %u entries, expected %u",
+              need,
+              (unsigned)LITLEN_ROOT_SIZE);
+
+  /* A deep but valid (Kraft-complete) code: one symbol each at lengths
+   * 1..10 plus 32 symbols at length 15 ((1 - 2^-10) + 32×2^-15 == 1).
+   * Canonically the 32 deep codes cover exactly two root prefixes, each
+   * needing a 16-entry subtable: 2048 + 2×16 = 2080 entries. */
+  uint8_t deep[286];
+  FIO_MEMSET(deep, 0, sizeof(deep));
+  for (uint32_t i = 0; i < 10; ++i)
+    deep[i] = (uint8_t)(i + 1);
+  for (uint32_t i = 10; i < 42; ++i)
+    deep[i] = 15;
+  need = fio___deflate_build_decode_table(NULL, 0, deep, 286, 11, 1);
+  TEST_ASSERT(need == (uint32_t)LITLEN_ROOT_SIZE + 32,
+              "table sizing: deep code needs %u entries, expected %u",
+              need,
+              (unsigned)LITLEN_ROOT_SIZE + 32);
+
+  /* Capacity guard: an undersized caller buffer fails cleanly (no write). */
+  uint32_t root_only[LITLEN_ROOT_SIZE];
+  FIO_MEMSET(root_only, 0xAA, sizeof(root_only));
+  uint32_t r =
+      fio___deflate_build_decode_table(root_only, LITLEN_ROOT_SIZE, deep, 286, 11, 1);
+  TEST_ASSERT(r == 0, "table guard: undersized buffer returned %u", r);
+
+  /* Reference build into a correctly sized buffer. */
+  uint32_t reference[LITLEN_STACK_CAP];
+  uint32_t ref = fio___deflate_build_decode_table(reference,
+                                                  LITLEN_STACK_CAP,
+                                                  deep,
+                                                  286,
+                                                  11,
+                                                  1);
+  TEST_ASSERT(ref == need, "table build: used %u entries, sizing said %u", ref, need);
+
+  /* Heap growth: a tiny "stack" buffer forces expansion through the heap.
+   * The heap-built table must be byte-identical to the reference build. */
+  fio___test_mem_reset();
+  g_mem.armed = 1;
+  uint32_t tiny[8];
+  uint32_t *heap = NULL;
+  size_t heap_cap = 0;
+  uint32_t *t = fio___deflate_decode_table_build(tiny,
+                                                 8,
+                                                 &heap,
+                                                 &heap_cap,
+                                                 deep,
+                                                 286,
+                                                 11,
+                                                 1);
+  TEST_ASSERT(t != NULL && t == heap && heap_cap >= need,
+              "table growth: expected heap table with cap >= %u (cap %zu)",
+              need,
+              heap_cap);
+  TEST_ASSERT(t && !FIO_MEMCMP(t, reference, (size_t)need * sizeof(uint32_t)),
+              "table growth: heap-built table differs from stack build");
+
+  /* The grown buffer is reused (not re-allocated) when it already fits. */
+  size_t cap_after_growth = heap_cap;
+  uint32_t *t2 = fio___deflate_decode_table_build(tiny,
+                                                  8,
+                                                  &heap,
+                                                  &heap_cap,
+                                                  deep,
+                                                  286,
+                                                  11,
+                                                  1);
+  TEST_ASSERT(t2 == heap && heap_cap == cap_after_growth,
+              "table growth: heap buffer not reused across calls");
+
+  /* Cleanup releases the grown buffer — no leak (allocation counter). */
+  {
+    fio___deflate_decode_tables_s tb;
+    tb.litlen_heap = heap;
+    tb.litlen_heap_cap = heap_cap;
+    tb.dist_heap = NULL;
+    tb.dist_heap_cap = 0;
+    fio___deflate_decode_tables_cleanup(&tb);
+  }
+  g_mem.armed = 0;
+  TEST_ASSERT(g_mem.live_allocs == 0,
+              "table growth: %zu live allocations after cleanup (leak)",
+              g_mem.live_allocs);
+}
+
+/* *****************************************************************************
+T001c — Big payload roundtrip
+
+Loads ./fio-stl.h and ./fio-stl.md (the repo's two largest text artifacts)
+TWICE each, joined by 64KB of incompressible random data: a ~12MB payload
+mixing highly compressible and incompressible regions, forcing many deflate
+blocks and deep Huffman trees at scale. Roundtrips through the one-shot API,
+the streaming (WebSocket-shaped) API, and — when zlib is available — a real
+zlib peer stream, mirroring the original sporadic-failure shape.
+***************************************************************************** */
+
+static uint8_t *fio___test_read_file(const char *path, size_t *len_out) {
+  *len_out = 0;
+  FILE *f = fopen(path, "rb");
+  if (!f)
+    return NULL;
+  if (fseek(f, 0, SEEK_END) == -1) {
+    fclose(f);
+    return NULL;
+  }
+  long sz = ftell(f);
+  if (sz <= 0 || fseek(f, 0, SEEK_SET) == -1) {
+    fclose(f);
+    return NULL;
+  }
+  uint8_t *buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, (size_t)sz, 0);
+  if (!buf) {
+    fclose(f);
+    return NULL;
+  }
+  if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
+    FIO_MEM_FREE(buf, (size_t)sz);
+    fclose(f);
+    return NULL;
+  }
+  fclose(f);
+  *len_out = (size_t)sz;
+  return buf;
+}
+
+static void test_big_payload_roundtrip(void) {
+  fprintf(stderr,
+          "Testing big payload roundtrip (fio-stl.h + fio-stl.md, \u00d72 + "
+          "random joints)...\n");
+  size_t hlen = 0, mlen = 0;
+  uint8_t *h = fio___test_read_file("./fio-stl.h", &hlen);
+  uint8_t *m = fio___test_read_file("./fio-stl.md", &mlen);
+  TEST_ASSERT(h != NULL && m != NULL,
+              "big payload: failed to load ./fio-stl.h / ./fio-stl.md "
+              "(tests must run from the project root)");
+  if (!h || !m) {
+    if (h)
+      FIO_MEM_FREE(h, hlen);
+    if (m)
+      FIO_MEM_FREE(m, mlen);
+    return;
+  }
+
+  const size_t joint = 64 * 1024;
+  const size_t plen = 2 * hlen + 2 * mlen + 3 * joint;
+  uint8_t *payload = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, plen, 0);
+  size_t bound = fio_deflate_compress_bound(plen);
+  uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+  uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, plen, 0);
+  TEST_ASSERT(payload && comp && out, "big payload: allocation failed");
+  if (!payload || !comp || !out)
+    goto done_files;
+
+  /* Assemble: [h][rnd][md][rnd][h][rnd][md] */
+  {
+    uint8_t *w = payload;
+    const uint8_t *parts[4] = {h, m, h, m};
+    const size_t lens[4] = {hlen, mlen, hlen, mlen};
+    for (int i = 0; i < 4; ++i) {
+      FIO_MEMCPY(w, parts[i], lens[i]);
+      w += lens[i];
+      if (i < 3) {
+        fio___deflate_fill_random(w, joint, 0xB16B00B5ULL + (uint64_t)i);
+        w += joint;
+      }
+    }
+    TEST_ASSERT((size_t)(w - payload) == plen, "big payload: assembly size error");
+  }
+
+  fio___test_mem_reset();
+  g_mem.armed = 1;
+
+  /* (a) One-shot, level 9 (deepest trees). */
+  {
+    size_t clen = fio_deflate_compress(comp, bound, payload, plen, 9);
+    TEST_ASSERT(clen > 0 && clen <= bound,
+                "big payload (one-shot): compress returned %zu", clen);
+    size_t dlen = fio_deflate_decompress(out, plen, comp, clen);
+    TEST_ASSERT(dlen == plen && !FIO_MEMCMP(out, payload, plen),
+                "big payload (one-shot): roundtrip mismatch (%zu of %zu)",
+                dlen,
+                plen);
+  }
+
+  /* (b) Streaming (WebSocket-shaped: sync-flushed, trailer stripped). */
+  {
+    fio_deflate_s *enc = fio_deflate_new(6, 1);
+    fio_deflate_s *dec = fio_deflate_new(0, 0);
+    TEST_ASSERT(enc && dec, "big payload (stream): context allocation failed");
+    size_t clen = 0, dlen = 0;
+    if (enc && dec) {
+      clen = fio_deflate_push(enc, comp, bound, payload, plen, 1);
+      if (clen > 4)
+        dlen = fio_deflate_push(dec, out, plen, comp, clen - 4, 1);
+    }
+    TEST_ASSERT(clen > 4, "big payload (stream): compress returned %zu", clen);
+    TEST_ASSERT(dlen == plen && !FIO_MEMCMP(out, payload, plen),
+                "big payload (stream): roundtrip mismatch (%zu of %zu)",
+                dlen,
+                plen);
+    fio_deflate_free(enc);
+    fio_deflate_free(dec);
+  }
+
+#ifdef HAVE_ZLIB
+  /* (c) Real zlib peer stream at level 9 — the original sporadic-failure
+   * shape, at ~60× the scale. */
+  {
+    z_stream zs;
+    FIO_MEMSET(&zs, 0, sizeof(zs));
+    TEST_ASSERT(deflateInit2(&zs, 9, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) ==
+                    Z_OK,
+                "big payload (zlib): deflateInit2 failed");
+    zs.next_in = payload;
+    zs.avail_in = (uInt)plen;
+    zs.next_out = comp;
+    zs.avail_out = (uInt)bound;
+    int zr = deflate(&zs, Z_SYNC_FLUSH);
+    TEST_ASSERT(zr == Z_OK, "big payload (zlib): deflate failed (%d)", zr);
+    size_t clen = bound - zs.avail_out;
+    deflateEnd(&zs);
+    TEST_ASSERT(clen > 4 && comp[clen - 4] == 0x00 && comp[clen - 3] == 0x00 &&
+                    comp[clen - 2] == 0xFF && comp[clen - 1] == 0xFF,
+                "big payload (zlib): expected sync-flush trailer");
+    fio_deflate_s *dec = fio_deflate_new(0, 0);
+    size_t dlen = 0;
+    if (dec)
+      dlen = fio_deflate_push(dec, out, plen, comp, clen > 4 ? clen - 4 : 0, 1);
+    TEST_ASSERT(dlen == plen && !FIO_MEMCMP(out, payload, plen),
+                "big payload (zlib peer): roundtrip mismatch (%zu of %zu)",
+                dlen,
+                plen);
+    fio_deflate_free(dec);
+  }
+#endif /* HAVE_ZLIB */
+
+  g_mem.armed = 0;
+  TEST_ASSERT(g_mem.live_allocs == 0,
+              "big payload: %zu live allocations after test (leak)",
+              g_mem.live_allocs);
+
+done_files:
+  if (payload)
+    FIO_MEM_FREE(payload, plen);
+  if (comp)
+    FIO_MEM_FREE(comp, bound);
+  if (out)
+    FIO_MEM_FREE(out, plen);
+  FIO_MEM_FREE(h, hlen);
+  FIO_MEM_FREE(m, mlen);
+}
 
 /* *****************************************************************************
 T002 — compress_bound must be sufficient at every level
@@ -1453,6 +1736,7 @@ int main(void) {
   test_stream_takeover_mode();
   test_large_skewed_roundtrips();
   test_invalid_huffman_tables();
+  test_decode_table_heap_growth();
 #ifdef HAVE_ZLIB
   test_zlib_raw_interop();
   test_zlib_gzip_interop();
@@ -1462,6 +1746,7 @@ int main(void) {
 #else
   fprintf(stderr, "zlib unavailable: skipping independent interop checks.\n");
 #endif
+  test_big_payload_roundtrip();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
   return g_fail ? 1 : 0;

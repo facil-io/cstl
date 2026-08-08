@@ -431,13 +431,21 @@ Huffman table building (for decompression)
 /**
  * Build a Huffman decode table from code lengths.
  *
- * Returns the total number of table entries used, or 0 on error.
- * `table` must have room for at least `(1 << root_bits) + max_subtable`
- * entries. `root_bits` is the first-level lookup width.
+ * When `table` is NULL this is a sizing query: no memory is touched and the
+ * REQUIRED number of table entries is returned (0 on invalid code). Callers
+ * use it to pick storage (stack buffer vs. grown heap buffer) before
+ * building.
+ *
+ * Otherwise builds the table and returns the number of entries used, or 0
+ * on error (invalid code, or `table_cap` smaller than the required size —
+ * unreachable when the caller sized the buffer via the sizing query).
+ *
+ * `root_bits` is the first-level lookup width.
  *
  * table_type: 0 = simple (precode), 1 = litlen, 2 = distance
  */
 FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
+                                                    uint32_t table_cap,
                                                     const uint8_t *lens,
                                                     uint32_t num_syms,
                                                     uint32_t root_bits,
@@ -466,6 +474,8 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
      * and precode tables are invalid (a block needs its end-of-block). */
     if (table_type != 2)
       return 0;
+    if (!table)
+      return (1U << root_bits); /* sizing query */
     FIO_MEMSET(table, 0, sizeof(uint32_t) * (1U << root_bits));
     return (1U << root_bits);
   }
@@ -504,6 +514,46 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
   /* Fill the root table and subtables */
   uint32_t table_pos = 1U << root_bits;
   uint32_t sym_idx = 0;
+
+  /* First pass: find the longest code under each root prefix, so every
+   * subtable is sized by its own longest code rather than the global
+   * max_len. Sizing by the global max_len wastes entries (a prefix whose
+   * longest code is 12 bits would still pay for 15-bit entries) and —
+   * because the callers' tables are fixed-size stack buffers — could
+   * overflow the buffer on legitimate zlib streams that use many root
+   * prefixes with long codes (stack smash, sporadic __stack_chk_fail). */
+  uint8_t prefix_max[FIO___DEFLATE_LITLEN_SIZE]; /* max root is 11 bits */
+  FIO_MEMSET(prefix_max, 0, sizeof(uint8_t) * (1U << root_bits));
+  {
+    uint32_t code = 0;
+    for (uint32_t len = 1; len <= max_len; ++len) {
+      for (uint32_t c = 0; c < count[len]; ++c) {
+        if (len > root_bits) {
+          uint32_t rev_code = 0;
+          for (uint32_t b = 0; b < len; ++b)
+            rev_code |= ((code >> (len - 1 - b)) & 1) << b;
+          uint32_t root_idx = rev_code & ((1U << root_bits) - 1);
+          if (prefix_max[root_idx] < len)
+            prefix_max[root_idx] = (uint8_t)len;
+        }
+        code++;
+      }
+      code <<= 1;
+    }
+  }
+
+  /* Total entries required: root + one subtable per used root prefix,
+   * each sized by that prefix's own longest code. */
+  {
+    uint32_t required = 1U << root_bits;
+    for (uint32_t i = 0; i < (1U << root_bits); ++i)
+      if (prefix_max[i])
+        required += 1U << ((uint32_t)prefix_max[i] - root_bits);
+    if (!table)
+      return required; /* sizing query */
+    if (required > table_cap)
+      return 0; /* caller undersized the buffer (should never happen) */
+  }
 
   /* Initialize root table to zero */
   FIO_MEMSET(table, 0, sizeof(uint32_t) * table_pos);
@@ -561,11 +611,11 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
         uint32_t sub_off;
 
         if (!FIO___DEFLATE_ENTRY_IS_SUB(table[root_idx])) {
-          /* Create new subtable */
-          sub_bits = max_len - root_bits;
-          if (sub_bits > 8)
-            sub_bits = 8; /* cap subtable size */
+          /* Create new subtable, sized by this prefix's own longest code */
+          sub_bits = (uint32_t)prefix_max[root_idx] - root_bits;
           sub_off = table_pos;
+          if (table_pos + (1U << sub_bits) > table_cap)
+            return 0; /* pathological table exceeds caller capacity */
           table[root_idx] =
               FIO___DEFLATE_ENTRY_SUB(sub_off, root_bits, sub_bits);
           /* Zero the subtable */
@@ -592,6 +642,86 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
   }
 
   return table_pos;
+}
+
+/* *****************************************************************************
+Decode table storage (stack buffers + on-demand heap growth)
+***************************************************************************** */
+
+/** Per-call decode table storage. Stack buffers cover every valid canonical
+ * table (per-prefix sizing keeps worst cases under the caps); heap buffers
+ * are grown on demand as a robust fallback — a too-deep table must never
+ * become a hard failure (nor a stack overflow). Freed by
+ * fio___deflate_decode_tables_cleanup. */
+typedef struct {
+  uint32_t litlen_stack[FIO___DEFLATE_LITLEN_MAX];
+  uint32_t dist_stack[FIO___DEFLATE_DIST_MAX];
+  uint32_t *litlen_heap;  /* grown on demand (valid streams never need it) */
+  uint32_t *dist_heap;
+  size_t litlen_heap_cap; /* in entries */
+  size_t dist_heap_cap;   /* in entries */
+} fio___deflate_decode_tables_s;
+
+/** Builds a decode table into `stack_buf`, growing `*heap_buf` instead when
+ * the required size exceeds `stack_cap` entries. Returns the ready table
+ * (stack or heap) or NULL on invalid code / allocation failure. The heap
+ * buffer persists across calls (multi-block streams reuse it) and belongs
+ * to the caller. */
+FIO_SFUNC uint32_t *fio___deflate_decode_table_build(
+    uint32_t *stack_buf,
+    uint32_t stack_cap,
+    uint32_t **heap_buf,
+    size_t *heap_cap,
+    const uint8_t *lens,
+    uint32_t num_syms,
+    uint32_t root_bits,
+    int table_type) {
+  uint32_t need = fio___deflate_build_decode_table(NULL,
+                                                   0,
+                                                   lens,
+                                                   num_syms,
+                                                   root_bits,
+                                                   table_type);
+  if (!need)
+    return NULL;
+  uint32_t *buf = stack_buf;
+  uint32_t cap = stack_cap;
+  if (need > stack_cap) {
+    /* Deeper than the stack budget — expand through the heap rather than
+     * reject the stream. */
+    if (*heap_cap < (size_t)need) {
+      size_t new_cap = *heap_cap ? *heap_cap : 1024;
+      while (new_cap < (size_t)need)
+        new_cap <<= 1;
+      uint32_t *nb = (uint32_t *)FIO_MEM_REALLOC(*heap_buf,
+                                                 *heap_cap * sizeof(uint32_t),
+                                                 new_cap * sizeof(uint32_t),
+                                                 0);
+      if (!nb)
+        return NULL;
+      *heap_buf = nb;
+      *heap_cap = new_cap;
+    }
+    buf = *heap_buf;
+    cap = (uint32_t)*heap_cap;
+  }
+  if (!fio___deflate_build_decode_table(buf,
+                                        cap,
+                                        lens,
+                                        num_syms,
+                                        root_bits,
+                                        table_type))
+    return NULL;
+  return buf;
+}
+
+/** Releases any heap-grown table buffers. */
+FIO_SFUNC void fio___deflate_decode_tables_cleanup(
+    fio___deflate_decode_tables_s *tb) {
+  if (tb->litlen_heap)
+    FIO_MEM_FREE(tb->litlen_heap, tb->litlen_heap_cap * sizeof(uint32_t));
+  if (tb->dist_heap)
+    FIO_MEM_FREE(tb->dist_heap, tb->dist_heap_cap * sizeof(uint32_t));
 }
 
 /* *****************************************************************************
@@ -1071,10 +1201,12 @@ FIO_IFUNC size_t fio_deflate_decompress_bound(size_t in_len) {
 }
 
 void fio_deflate_decompress___(void); /* IDE Marker */
-SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
-                                             size_t out_len,
-                                             const void *in,
-                                             size_t in_len) {
+FIO_SFUNC size_t fio___deflate_decompress_impl(
+    void *out,
+    size_t out_len,
+    const void *in,
+    size_t in_len,
+    fio___deflate_decode_tables_s *tb) {
   if (!in || !in_len)
     return 0;
 
@@ -1091,9 +1223,11 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
 
   fio___deflate_bitbuf_s bb = {0, 0};
 
-  /* Huffman decode tables (on stack, ~12KB) */
-  uint32_t litlen_table[FIO___DEFLATE_LITLEN_MAX];
-  uint32_t dist_table[FIO___DEFLATE_DIST_MAX];
+  /* Decode tables for the current block (point into tb's storage; the
+   * helper grows heap storage instead of failing if a table ever exceeds
+   * the stack budget). */
+  const uint32_t *litlen_table = NULL;
+  const uint32_t *dist_table = NULL;
 
   uint32_t bfinal = 0;
 
@@ -1165,13 +1299,19 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
       fio___deflate_fixed_litlen_lens(ll_lens);
       fio___deflate_fixed_dist_lens(d_lens);
 
-      if (!fio___deflate_build_decode_table(litlen_table,
+      /* Fixed tables always fit the stack buffers (max code length 9
+       * is below the 11-bit litlen root; 5 below the 8-bit dist root). */
+      litlen_table = tb->litlen_stack;
+      dist_table = tb->dist_stack;
+      if (!fio___deflate_build_decode_table(tb->litlen_stack,
+                                            FIO___DEFLATE_LITLEN_MAX,
                                             ll_lens,
                                             288,
                                             FIO___DEFLATE_LITLEN_BITS,
                                             1))
         return 0;
-      if (!fio___deflate_build_decode_table(dist_table,
+      if (!fio___deflate_build_decode_table(tb->dist_stack,
+                                            FIO___DEFLATE_DIST_MAX,
                                             d_lens,
                                             32,
                                             FIO___DEFLATE_DIST_BITS,
@@ -1212,6 +1352,7 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
       /* Build precode table */
       uint32_t precode_table[FIO___DEFLATE_PRECODE_SIZE];
       if (!fio___deflate_build_decode_table(precode_table,
+                                            FIO___DEFLATE_PRECODE_SIZE,
                                             cl_lens,
                                             19,
                                             FIO___DEFLATE_PRECODE_BITS,
@@ -1279,17 +1420,27 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
       }
 
       /* Build litlen and distance tables */
-      if (!fio___deflate_build_decode_table(litlen_table,
-                                            all_lens,
-                                            hlit,
-                                            FIO___DEFLATE_LITLEN_BITS,
-                                            1))
+      litlen_table = fio___deflate_decode_table_build(
+          tb->litlen_stack,
+          FIO___DEFLATE_LITLEN_MAX,
+          &tb->litlen_heap,
+          &tb->litlen_heap_cap,
+          all_lens,
+          hlit,
+          FIO___DEFLATE_LITLEN_BITS,
+          1);
+      if (!litlen_table)
         return 0;
-      if (!fio___deflate_build_decode_table(dist_table,
-                                            all_lens + hlit,
-                                            hdist,
-                                            FIO___DEFLATE_DIST_BITS,
-                                            2))
+      dist_table = fio___deflate_decode_table_build(
+          tb->dist_stack,
+          FIO___DEFLATE_DIST_MAX,
+          &tb->dist_heap,
+          &tb->dist_heap_cap,
+          all_lens + hlit,
+          hdist,
+          FIO___DEFLATE_DIST_BITS,
+          2);
+      if (!dist_table)
         return 0;
     }
 
@@ -1398,6 +1549,22 @@ SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
   if (counting)
     return out_pos;
   return (size_t)(outp - out_start);
+}
+
+SFUNC size_t fio_deflate_decompress FIO_NOOP(void *out,
+                                             size_t out_len,
+                                             const void *in,
+                                             size_t in_len) {
+  /* Stack-resident table storage (~12KB); heap-grown only if a table ever
+   * exceeds the stack budget. Always cleaned up, on every exit path. */
+  fio___deflate_decode_tables_s tb;
+  tb.litlen_heap = NULL;
+  tb.dist_heap = NULL;
+  tb.litlen_heap_cap = 0;
+  tb.dist_heap_cap = 0;
+  size_t r = fio___deflate_decompress_impl(out, out_len, in, in_len, &tb);
+  fio___deflate_decode_tables_cleanup(&tb);
+  return r;
 }
 
 /* *****************************************************************************
@@ -3157,11 +3324,13 @@ never patched, never copied.
  *  - On buffer too small: the REQUIRED total size (> out_len).
  *  - On corrupt/invalid data: 0.
  */
-FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
-                                                   size_t out_len,
-                                                   size_t prefix_len,
-                                                   const void *in,
-                                                   size_t in_len) {
+FIO_SFUNC size_t fio___deflate_decompress_prefixed_impl(
+    void *out,
+    size_t out_len,
+    size_t prefix_len,
+    const void *in,
+    size_t in_len,
+    fio___deflate_decode_tables_s *tb) {
   if (!out || !out_len || !in || !in_len)
     return 0;
   if (prefix_len >= out_len)
@@ -3178,8 +3347,11 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
 
   fio___deflate_bitbuf_s bb = {0, 0};
 
-  uint32_t litlen_table[FIO___DEFLATE_LITLEN_MAX];
-  uint32_t dist_table[FIO___DEFLATE_DIST_MAX];
+  /* Decode tables for the current block (point into tb's storage; the
+   * helper grows heap storage instead of failing if a table ever exceeds
+   * the stack budget). */
+  const uint32_t *litlen_table = NULL;
+  const uint32_t *dist_table = NULL;
 
   uint32_t bfinal = 0;
 
@@ -3243,13 +3415,19 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
       fio___deflate_fixed_litlen_lens(ll_lens);
       fio___deflate_fixed_dist_lens(d_lens);
 
-      if (!fio___deflate_build_decode_table(litlen_table,
+      /* Fixed tables always fit the stack buffers (max code length 9
+       * is below the 11-bit litlen root; 5 below the 8-bit dist root). */
+      litlen_table = tb->litlen_stack;
+      dist_table = tb->dist_stack;
+      if (!fio___deflate_build_decode_table(tb->litlen_stack,
+                                            FIO___DEFLATE_LITLEN_MAX,
                                             ll_lens,
                                             288,
                                             FIO___DEFLATE_LITLEN_BITS,
                                             1))
         return 0;
-      if (!fio___deflate_build_decode_table(dist_table,
+      if (!fio___deflate_build_decode_table(tb->dist_stack,
+                                            FIO___DEFLATE_DIST_MAX,
                                             d_lens,
                                             32,
                                             FIO___DEFLATE_DIST_BITS,
@@ -3286,6 +3464,7 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
 
       uint32_t precode_table[FIO___DEFLATE_PRECODE_SIZE];
       if (!fio___deflate_build_decode_table(precode_table,
+                                            FIO___DEFLATE_PRECODE_SIZE,
                                             cl_lens,
                                             19,
                                             FIO___DEFLATE_PRECODE_BITS,
@@ -3348,17 +3527,27 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
         }
       }
 
-      if (!fio___deflate_build_decode_table(litlen_table,
-                                            all_lens,
-                                            hlit,
-                                            FIO___DEFLATE_LITLEN_BITS,
-                                            1))
+      litlen_table = fio___deflate_decode_table_build(
+          tb->litlen_stack,
+          FIO___DEFLATE_LITLEN_MAX,
+          &tb->litlen_heap,
+          &tb->litlen_heap_cap,
+          all_lens,
+          hlit,
+          FIO___DEFLATE_LITLEN_BITS,
+          1);
+      if (!litlen_table)
         return 0;
-      if (!fio___deflate_build_decode_table(dist_table,
-                                            all_lens + hlit,
-                                            hdist,
-                                            FIO___DEFLATE_DIST_BITS,
-                                            2))
+      dist_table = fio___deflate_decode_table_build(
+          tb->dist_stack,
+          FIO___DEFLATE_DIST_MAX,
+          &tb->dist_heap,
+          &tb->dist_heap_cap,
+          all_lens + hlit,
+          hdist,
+          FIO___DEFLATE_DIST_BITS,
+          2);
+      if (!dist_table)
         return 0;
     }
 
@@ -3461,6 +3650,29 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
   if (counting)
     return out_pos;
   return (size_t)(outp - out_start);
+}
+
+FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
+                                                   size_t out_len,
+                                                   size_t prefix_len,
+                                                   const void *in,
+                                                   size_t in_len) {
+  /* Stack-resident table storage (~12KB); heap-grown only if a table ever
+   * exceeds the stack budget. Always cleaned up, on every exit path. */
+  fio___deflate_decode_tables_s tb;
+  tb.litlen_heap = NULL;
+  tb.dist_heap = NULL;
+  tb.litlen_heap_cap = 0;
+  tb.dist_heap_cap = 0;
+  size_t r =
+      fio___deflate_decompress_prefixed_impl(out,
+                                             out_len,
+                                             prefix_len,
+                                             in,
+                                             in_len,
+                                             &tb);
+  fio___deflate_decode_tables_cleanup(&tb);
+  return r;
 }
 
 FIO_SFUNC size_t fio___deflate_stream_decompress(fio_deflate_s *s,
