@@ -1,58 +1,107 @@
-# Rolling "edge" release of fio-stl.h — published only after ALL CI passes.
-# Copy to: facil-io/cstl/.github/workflows/release-edge.yml
-#
-# Fires when any of the four CI workflows completes on master; the verify
-# step confirms all four are green for that exact commit before releasing
-# (so the last one to finish triggers the actual publish).
-# Manual dispatch bypasses the gate (escape hatch).
+# Nightly "edge" release of fio-stl.h — published only after every CI suite
+# has passed for one exact master commit. `edge` is deliberately a moving tag.
 
 name: Release fio-stl.h (edge)
 
 on:
-  workflow_run:
-    workflows:
-      - POSIX C/C++ CI
-      - MacOS C/C++ CI
-      - Windows MSVC CI
-      - Windows Clang CI
-    types: [completed]
-    branches: [master]
+  schedule:
+    # Avoid the top-of-hour schedule rush; leaves time for the midnight full suite.
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Resolve validated commit
-        id: src
-        run: echo "sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+# A manual run must not race the nightly run while moving the mutable edge tag.
+concurrency:
+  group: release-edge
+  cancel-in-progress: false
 
-      - name: Verify all CI workflows passed for this commit
-        if: github.event_name == 'workflow_run'
+jobs:
+  select-candidate:
+    # Scheduled runs use master. Do not let a manually selected feature branch
+    # publish its workflow code or artifacts as the edge release.
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Find the newest commit that passed every suite
+        id: candidate
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ steps.src.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          for wf in "POSIX C/C++ CI" "MacOS C/C++ CI" "Windows MSVC CI" "Windows Clang CI"; do
-            conclusion=$(gh run list --workflow "$wf" --commit "$SHA" --branch master \
-              --limit 1 --json conclusion --jq '.[0].conclusion')
-            echo "$wf → $conclusion"
-            [ "$conclusion" = "success" ] || { echo "::error::$wf did not pass for $SHA"; exit 1; }
+          set -euo pipefail
+          workflows=(
+            c-cpp.yml
+            macos-c-cpp.yml
+            windows.yml
+            windows_clang.yml
+            nightly.yml
+          )
+
+          for workflow in "${workflows[@]}"; do
+            gh api --paginate \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=master&status=success&per_page=100" \
+              --jq '.workflow_runs[].head_sha' \
+              > "${RUNNER_TEMP}/${workflow}.success"
+            test -s "${RUNNER_TEMP}/${workflow}.success" || {
+              echo "::error::No successful master run found for ${workflow}"
+              exit 1
+            }
           done
 
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.src.outputs.sha }}   # the exact commit CI validated
+          while read -r sha; do
+            passed=1
+            for workflow in "${workflows[@]}"; do
+              grep -Fxq "$sha" "${RUNNER_TEMP}/${workflow}.success" || {
+                passed=0
+                break
+              }
+            done
+            if [ "$passed" -eq 1 ]; then
+              echo "Selected fully tested candidate: $sha"
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done < <(git rev-list origin/master)
 
-      - name: Publish rolling edge release
-        uses: softprops/action-gh-release@v2
+          echo "::error::No master commit has passed every required CI suite"
+          exit 1
+
+  publish:
+    needs: select-candidate
+    if: needs.select-candidate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.select-candidate.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Move edge tag to the validated commit
+        env:
+          SHA: ${{ needs.select-candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git tag --force edge "$SHA"
+          git push --force origin "refs/tags/edge"
+
+      - name: Update rolling edge release
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: edge
+          target_commitish: ${{ needs.select-candidate.outputs.sha }}
           name: fio-stl (edge)
-          body: Rolling edge release — `fio-stl.h` from `master`, published only after CI passes.
-          prerelease: true   # keeps GitHub's "Latest" badge free for numbered releases
+          body: Rolling nightly candidate — `fio-stl.h` from the newest `master` commit that passed every required CI suite.
+          prerelease: true # keeps GitHub's "Latest" badge free for numbered releases
           files: fio-stl.h
+          overwrite_files: true

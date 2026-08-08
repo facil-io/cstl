@@ -1,6 +1,10 @@
 # Change Log
 
-### Unreleased
+### Unreleased (2026-08-08)
+
+**Update**: (`release`) The rolling `edge` candidate is now selected nightly rather than once per CI completion. It moves the `edge` tag explicitly and refreshes the prerelease asset only for the newest `master` commit that passed the POSIX, macOS, MSVC, Clang, and full nightly suites.
+
+### edge (2026-08-08)
 
 **Fix**: (`tls13`, `sha2`, `hkdf`) TLS 1.3 cipher suites using SHA-384 (`TLS_AES_256_GCM_SHA384`) now inter-operate with real TLS peers. The SHA-384 paths previously ran SHA-512 primitives: the transcript hash used the SHA-512 IV (FIPS 180-4 requires different SHA-384 IVs) and HMAC was SHA-512 truncated to 48 bytes, which is NOT HMAC-SHA-384. Added `fio_sha384_hmac` (`152 sha2.h`); HKDF extract/expand (`152 sha2z hkdf.h`), the transcript hash, the empty-string hash and the Finished computation (`190 tls13.h`) now use real SHA-384. The TLS client additionally feeds BOTH transcript hashes until the ServerHello cipher-suite selection is known (previously the ClientHello/ServerHello only landed in the SHA-256 transcript, breaking SHA-384 suite negotiation). New OpenSSL interop gate in `stress/tls13-openssl-roundtrip.c` asserts `TLS_AES_256_GCM_SHA384` negotiation in both directions (OpenSSL client and OpenSSL server).
 

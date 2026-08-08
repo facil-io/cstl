@@ -526,6 +526,7 @@ HTTP Routing
 ***************************************************************************** */
 
 FIO_LEAK_COUNTER_DEF(fio___http_router_u)
+FIO_LEAK_COUNTER_DEF(fio___http_router_public_folder)
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
 
 void fio_http_route___(void);
@@ -611,6 +612,7 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
     s.tls =
         (fio_io_tls_s *)FIO_MEM_REALLOC_(NULL, 0, s.public_folder.len + 1, 0);
     FIO_ASSERT_ALLOC(s.tls);
+    FIO_LEAK_COUNTER_ON_ALLOC(fio___http_router_public_folder);
     FIO_MEMCPY(s.tls, s.public_folder.buf, s.public_folder.len);
     s.public_folder = FIO_STR_INFO2((char *)s.tls, s.public_folder.len);
     s.public_folder.buf[s.public_folder.len] = 0;
@@ -619,8 +621,10 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
   if (r->s.on_http) {
     if (r->s.on_stop != p->settings.on_stop || r->s.udata != p->settings.udata)
       r->s.on_stop(&r->s);
-    if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf)
+    if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf) {
+      FIO_LEAK_COUNTER_ON_FREE(fio___http_router_public_folder);
       FIO_MEM_FREE_(r->s.tls, r->s.public_folder.len + 1);
+    }
   }
   /* if we have a route with a static file service, we need this */
   if (s.public_folder.buf && s.public_folder.len) {
@@ -704,8 +708,10 @@ FIO_SFUNC fio_http_settings_s *fio___http_handle_settings(fio_http_s *h) {
 FIO_SFUNC void fio___http_router_destroy(fio___http_router_u *r) {
   if (!r)
     return;
-  if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf)
+  if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___http_router_public_folder);
     FIO_MEM_FREE_(r->s.tls, r->s.public_folder.len + 1);
+  }
   for (size_t i = (sizeof(r->s) / sizeof(void *)); i < 256; ++i) {
     if (!r->map[i])
       continue;

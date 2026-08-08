@@ -52,6 +52,9 @@ jobs:
                 continue
             }
 
+            # leak reports (FIO_LEAK_COUNTER) are advisory ERROR logs and
+            # appear in the step output; a double-free hard-asserts and
+            # fails via the exit code.
             & ".\${name}_d.exe"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "RUN FAILED: $name"
@@ -88,13 +91,21 @@ jobs:
             Write-Host ""
             Write-Host "=== [RELEASE] $name ==="
 
-            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=x86-64-v3 $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -o ".\${name}.exe" -lcrypt32
+            # -g/-gcodeview + /DEBUG:FULL emit a PDB without changing codegen;
+            # /OPT:REF + /OPT:ICF are lld's defaults when /DEBUG is absent, so
+            # passing them explicitly keeps the binary layout identical to the
+            # historical (sporadically crashing) builds while still producing
+            # symbols for the crash-trap RVAs.
+            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=x86-64-v3 $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -g -gcodeview -o ".\${name}.exe" -lcrypt32 "-Wl,/DEBUG:FULL" "-Wl,/OPT:REF" "-Wl,/OPT:ICF"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
                 continue
             }
 
+            # leak reports (FIO_LEAK_COUNTER) are advisory ERROR logs and
+            # appear in the step output; a double-free hard-asserts and
+            # fails via the exit code.
             & ".\${name}.exe"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "RUN FAILED: $name"
@@ -108,3 +119,14 @@ jobs:
         Write-Host ""
         Write-Host "Results: $passed passed, $failed failed out of $($passed + $failed) total"
         if ($failed -gt 0) { exit 1 }
+
+    - name: Upload crashing binaries + PDBs (failures only)
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-clang-test-binaries-${{ github.run_id }}
+        path: |
+          *.exe
+          *.pdb
+        retention-days: 30
+        if-no-files-found: ignore

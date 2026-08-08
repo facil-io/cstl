@@ -10,7 +10,7 @@ Thank you for inquiring `facil.io`'s contribution guide. It's people like you an
 
 * PRs are appreciated. Most likely the code you're looking for is @ the [facil.io C STL repository](https://github.com/facil-io/cstl).
 
-* Always add a comment in the CHANGELOG to say what you did and credit yourself.
+* Always add a dated CHANGELOG entry to say what you did and credit yourself. Use a new `### Unreleased (YYYY-MM-DD)` heading for each update batch; never append to a long-lived undated `Unreleased` section.
 
 * All copyrights for whatever you contribute will be owned by myself (Boaz Segev) and between us we'll consider them public domain (I don't want to deal legal stuff, moral rights and all that).
 

@@ -3734,6 +3734,8 @@ FIO_SFUNC size_t fio___deflate_stream_decompress(fio_deflate_s *s,
 Streaming API - public functions
 ***************************************************************************** */
 
+FIO_LEAK_COUNTER_DEF(fio_deflate_s)
+
 void fio_deflate_new___(void); /* IDE Marker */
 /** Context allocation size for the given mode (struct + optional takeover
  * flexible state in the same single block). */
@@ -3755,6 +3757,7 @@ SFUNC fio_deflate_s *fio_deflate_new FIO_NOOP(int level, int is_compress) {
       (fio_deflate_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(fio_deflate_s), 0);
   if (!s)
     return NULL;
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_deflate_s);
 
   FIO_MEMSET(s, 0, sizeof(fio_deflate_s));
   s->is_compress = (uint8_t)(!!is_compress);
@@ -3777,6 +3780,7 @@ SFUNC fio_deflate_s *fio_deflate_new_takeover FIO_NOOP(int level,
   fio_deflate_s *s = (fio_deflate_s *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
   if (!s)
     return NULL;
+  FIO_LEAK_COUNTER_ON_ALLOC(fio_deflate_s);
 
   FIO_MEMSET(s, 0, alloc_size);
   s->is_compress = (uint8_t)(!!is_compress);
@@ -3792,6 +3796,7 @@ void fio_deflate_free___(void); /* IDE Marker */
 SFUNC void fio_deflate_free FIO_NOOP(fio_deflate_s *s) {
   if (!s)
     return;
+  FIO_LEAK_COUNTER_ON_FREE(fio_deflate_s);
   if (s->buf)
     FIO_MEM_FREE(s->buf, s->buf_cap);
   FIO_MEM_FREE(s, fio___deflate_ctx_size(s->is_compress, s->takeover));

@@ -840,7 +840,10 @@ typedef struct {
   char url[];
 } fio___io_connecting_s;
 
+FIO_LEAK_COUNTER_DEF(fio___io_connecting_s)
+
 FIO_SFUNC void fio___connecting_cleanup(fio___io_connecting_s *c) {
+  FIO_LEAK_COUNTER_ON_FREE(fio___io_connecting_s);
   fio___io_func_free_context_caller(c->protocol.io_functions.free_context,
                                     c->tls_ctx);
   FIO_MEM_FREE_(c, sizeof(*c) + c->url_len + 1);
@@ -889,6 +892,7 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   fio___io_connecting_s *c = (fio___io_connecting_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*c) + url_len + 1, 0);
   FIO_ASSERT_ALLOC(c);
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___io_connecting_s);
   *c = (fio___io_connecting_s){
       .protocol =
           {

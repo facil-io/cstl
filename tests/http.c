@@ -1301,8 +1301,19 @@ static void test_websocket_connect_wrapper(void) {
     FIO_ASSERT(fio_http_websocket_accepted(h) == 1,
                "acceptance: crafted 101 response should be accepted");
     /* mimic the reactor-time wiring (fio___connecting_on_ready +
-       fio___http1_on_attach_client): link the IO and the connection */
+       fio___http1_on_attach_client): link the IO and the connection.
+       The connect scaffold (`fio___io_connecting_s`) currently owns the
+       io's udata; `fio___connecting_on_ready` never fires without a
+       reactor, so release it here exactly like on_ready's tail would
+       (`on_failed` must not run — the WS teardown owns the connection). */
     fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
+    /* the io's current protocol lives INSIDE the connect scaffold
+       (`&scaffold->protocol`), so the scaffold may only be freed after the
+       WS protocol switch below detaches from it (mirrors on_ready's
+       deferred cleanup); `on_failed` must not run — the WS teardown owns
+       the connection. */
+    fio___io_connecting_s *scaffold = (fio___io_connecting_s *)fio_io_udata(io);
+    scaffold->on_failed = NULL;
     c->io = io;
     fio_io_udata_set(io, c);
     /* drive the client completion seam directly */
@@ -1324,6 +1335,10 @@ static void test_websocket_connect_wrapper(void) {
                test_ws_rec_on_open_calls);
     FIO_ASSERT(!test_ws_rec_on_http_calls,
                "acceptance: on_http must not fire for a 101 response");
+    /* the drained protocol switch detached the io from the scaffold's
+       embedded protocol — releasing it now balances the connect path
+       (fio___connecting_on_ready never fires without a reactor). */
+    fio___connecting_cleanup(scaffold);
   }
 
   /* (c) Rejection: a non-101 response is routed to `settings.on_http`
