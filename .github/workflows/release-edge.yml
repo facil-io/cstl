@@ -1,0 +1,58 @@
+# Rolling "edge" release of fio-stl.h — published only after ALL CI passes.
+# Copy to: facil-io/cstl/.github/workflows/release-edge.yml
+#
+# Fires when any of the four CI workflows completes on master; the verify
+# step confirms all four are green for that exact commit before releasing
+# (so the last one to finish triggers the actual publish).
+# Manual dispatch bypasses the gate (escape hatch).
+
+name: Release fio-stl.h (edge)
+
+on:
+  workflow_run:
+    workflows:
+      - POSIX C/C++ CI
+      - MacOS C/C++ CI
+      - Windows MSVC CI
+      - Windows Clang CI
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve validated commit
+        id: src
+        run: echo "sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify all CI workflows passed for this commit
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.src.outputs.sha }}
+        run: |
+          set -e
+          for wf in "POSIX C/C++ CI" "MacOS C/C++ CI" "Windows MSVC CI" "Windows Clang CI"; do
+            conclusion=$(gh run list --workflow "$wf" --commit "$SHA" --branch master \
+              --limit 1 --json conclusion --jq '.[0].conclusion')
+            echo "$wf → $conclusion"
+            [ "$conclusion" = "success" ] || { echo "::error::$wf did not pass for $SHA"; exit 1; }
+          done
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.src.outputs.sha }}   # the exact commit CI validated
+
+      - name: Publish rolling edge release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: edge
+          name: fio-stl (edge)
+          body: Rolling edge release — `fio-stl.h` from `master`, published only after CI passes.
+          prerelease: true   # keeps GitHub's "Latest" badge free for numbered releases
+          files: fio-stl.h
