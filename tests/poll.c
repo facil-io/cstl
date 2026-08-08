@@ -269,6 +269,18 @@ static void test_poll_empty_review(void) {
   fprintf(stderr, "* empty review: OK\n");
 }
 
+#if defined(FIO_POLL_ENGINE_POLL)
+static void test_poll_invalid_arguments(void) {
+  FIO_ASSERT(fio_poll_forget(NULL, FIO_SOCKET_INVALID) == -1,
+             "poll backend must reject a NULL poller");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___poll_review_buffer),
+             "poll review buffer leak counter must be balanced");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___poll_map_s),
+             "poll monitor map leak counter must be balanced");
+  fprintf(stderr, "* invalid arguments + leak counters: OK\n");
+}
+#endif
+
 int main(void) {
   fprintf(stderr,
           "=== Poll subsystem test (engine: %s) ===\n",
@@ -281,6 +293,9 @@ int main(void) {
   test_poll_on_close();
   test_poll_forget();
   test_poll_empty_review();
+#if defined(FIO_POLL_ENGINE_POLL)
+  test_poll_invalid_arguments();
+#endif
 
   fprintf(stderr, "=== All poll tests passed ===\n");
   return 0;

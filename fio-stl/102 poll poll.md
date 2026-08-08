@@ -24,9 +24,9 @@ struct fio_poll_s {
 };
 ```
 
-The poll backend keeps monitored descriptors in an internal imap (`fio___poll_map_s`) and takes a snapshot before each `poll()` call. Descriptors added or re-armed during `fio_poll_review` are merged with surviving one-shot flags when the call returns.
+The poll backend keeps monitored descriptors in an internal imap (`fio___poll_map_s`) and snapshots its armed flags before each `poll()` call. Descriptors added or re-armed during `fio_poll_review` update the retained map directly; surviving one-shot flags are restored when the call returns.
 
-Do not rely on `fio_poll_forget` from another thread to cancel a descriptor that is already inside the in-flight snapshot: if the descriptor does not fire, the surviving snapshot entry can be merged back.
+`fio_poll_forget` from another thread removes the retained entry, so un-fired snapshot flags are not restored. It cannot suppress a callback for an event already returned by the in-flight `poll()` call.
 
 #### `fio_poll_engine`
 
@@ -46,6 +46,6 @@ Additional helper available only in the poll backend. Closes every monitored soc
 
 - `POLLRDHUP` is used when available; otherwise the backend relies on `POLLHUP`, `POLLERR`, and `POLLNVAL` for close/error detection.
 - On Windows, `POLLPRI` is omitted because `WSAPoll` rejects it.
-- Fired events are stripped from the descriptor’s flags (one-shot semantics). Surviving flags are merged back into the poll set after `poll()` returns; additions / re-arms merge cleanly, while concurrent removals of in-flight snapshot entries are not a cancellation guarantee.
+- Fired events are stripped from the descriptor’s flags (one-shot semantics). Surviving flags are restored to retained entries after `poll()` returns; concurrent removals prevent that restoration but cannot retract an event already returned by `poll()`.
 
 ------------------------------------------------------------

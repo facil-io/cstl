@@ -527,6 +527,9 @@ HTTP Routing
 
 FIO_LEAK_COUNTER_DEF(fio___http_router_u)
 FIO_LEAK_COUNTER_DEF(fio___http_router_public_folder)
+/* static-file on-demand compression scratch (src + dst share the counter;
+ * both have multiple free paths). */
+FIO_LEAK_COUNTER_DEF(fio___http_static_compress_buf)
 FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr);
 
 void fio_http_route___(void);
@@ -4509,9 +4512,11 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
           close(orig_fd);
           continue;
         }
+        FIO_LEAK_COUNTER_ON_ALLOC(fio___http_static_compress_buf);
         size_t rd = fio_fd_read(orig_fd, src, (size_t)orig_st.st_size, 0);
         close(orig_fd);
         if (rd != (size_t)orig_st.st_size) {
+          FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
           FIO_MEM_FREE(src, (size_t)orig_st.st_size);
           continue;
         }
@@ -4519,15 +4524,19 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
         size_t bound = options[i].bound(rd) + options[i].extra;
         void *dst = FIO_MEM_REALLOC(NULL, 0, bound, 0);
         if (!dst) {
+          FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
           FIO_MEM_FREE(src, (size_t)orig_st.st_size);
           continue;
         }
+        FIO_LEAK_COUNTER_ON_ALLOC(fio___http_static_compress_buf);
         size_t comp_len =
             options[i].compress(dst, bound, src, rd, options[i].level);
+        FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
         FIO_MEM_FREE(src, (size_t)orig_st.st_size);
         if (!comp_len || comp_len >= rd) {
           /* compression failed or didn't shrink the file */
           fio___http_static_compress_note_result(st, EINVAL);
+          FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
           FIO_MEM_FREE(dst, bound);
           continue;
         }
@@ -4539,6 +4548,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
         if (fio_filename_overwrite(filename.buf, dst, comp_len)) {
           /* write failure — errno preserved by fio_filename_overwrite */
           fio___http_static_compress_note_result(st, errno);
+          FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
           FIO_MEM_FREE(dst, bound);
           filename.len = orig_len;
           filename.buf[filename.len] = 0;
@@ -4546,6 +4556,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
         }
         /* variant written — compression success */
         fio___http_static_compress_note_result(st, 0);
+        FIO_LEAK_COUNTER_ON_FREE(fio___http_static_compress_buf);
         FIO_MEM_FREE(dst, bound);
       }
       /* compressed variant is ready — set response headers */

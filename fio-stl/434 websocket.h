@@ -149,6 +149,9 @@ WebSocket Event Handling (`fio_websocket_*`)
 FIO_SFUNC int fio___websocket_process_data(fio_io_s *io,
                                            fio___http_connection_s *c);
 
+/* permessage-deflate output scratch buffer (multiple free paths). */
+FIO_LEAK_COUNTER_DEF(fio___websocket_deflate_buf)
+
 /** Resumes parsing after async message delivery and reads pipelined bytes. */
 FIO_SFUNC void fio___websocket_on_message_finalize(void *c_, void *ignr_) {
   fio___http_connection_s *c = (fio___http_connection_s *)c_;
@@ -612,6 +615,8 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
     /* Output bound: input + 12.5% + 32B overhead. */
     comp_alloc = len + (len >> 3) + 32;
     comp_buf = (char *)FIO_MEM_REALLOC(NULL, 0, comp_alloc, 0);
+    if (comp_buf)
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___websocket_deflate_buf);
     if (comp_buf) {
       size_t comp_len =
           fio_deflate_push(c->deflate_wr, comp_buf, comp_alloc, buf, len, 1);
@@ -625,6 +630,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
         if (comp_len >= len) {
           /* Negative gain: compression expanded the payload — send the
            * original uncompressed (RSV1 stays clear) instead. */
+          FIO_LEAK_COUNTER_ON_FREE(fio___websocket_deflate_buf);
           FIO_MEM_FREE(comp_buf, comp_alloc);
           comp_buf = NULL;
           comp_alloc = 0;
@@ -639,6 +645,7 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
         }
       } else {
         /* Compression failed — fall back to uncompressed. */
+        FIO_LEAK_COUNTER_ON_FREE(fio___websocket_deflate_buf);
         FIO_MEM_FREE(comp_buf, comp_alloc);
         comp_buf = NULL;
         comp_alloc = 0;
@@ -659,8 +666,10 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
         c->is_client
             ? fio_websocket_write_message_client(tmp, msg, text_flag, 0, rsv)
             : fio_websocket_write_message_server(tmp, msg, text_flag, rsv);
-    if (comp_buf)
+    if (comp_buf) {
+      FIO_LEAK_COUNTER_ON_FREE(fio___websocket_deflate_buf);
       FIO_MEM_FREE(comp_buf, comp_alloc);
+    }
     fio_io_write2(c->io, .buf = tmp, .len = wlen, .copy = 1);
     return 0;
   }
@@ -672,8 +681,10 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
       c->is_client
           ? fio_websocket_write_message_client(payload, msg, text_flag, 0, rsv)
           : fio_websocket_write_message_server(payload, msg, text_flag, rsv));
-  if (comp_buf)
+  if (comp_buf) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___websocket_deflate_buf);
     FIO_MEM_FREE(comp_buf, comp_alloc);
+  }
   fio_io_write2(c->io,
                 .buf = payload,
                 .len = fio_bstr_len(payload),

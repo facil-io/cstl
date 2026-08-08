@@ -44,6 +44,9 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
 #undef FIO___POLL_IMAP_VALID
 #undef FIO___POLL_IMAP_HASH
 
+/* poll_review allocates this transient buffer after detaching the map. */
+FIO_LEAK_COUNTER_DEF(fio___poll_review_buffer)
+
 struct fio_poll_s {
   fio_poll_settings_s settings;
   fio___poll_map_s map;
@@ -119,11 +122,11 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
     /* re-arm: OR in new flags, always update udata */
     ptr->flags |= flags;
     ptr->udata = udata;
-  } else {
-    fio___poll_map_set(
-        &p->map,
-        (fio___poll_i_s){.udata = udata, .fd = fd, .flags = flags},
-        1);
+  } else if (!fio___poll_map_set(
+                 &p->map,
+                 (fio___poll_i_s){.udata = udata, .fd = fd, .flags = flags},
+                 1)) {
+    r = -1;
   }
   FIO___LOCK_UNLOCK(p->lock);
   return r;
@@ -144,44 +147,69 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
 SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int events = -1;
   int handled = 0;
-  if (!p || !(p->map.count)) {
-    if (timeout) {
+  if (!p)
+    return -1;
+
+  /* Allocate before snapshotting, so failure leaves monitors intact. */
+  FIO___LOCK_LOCK(p->lock);
+  const size_t max = p->map.count;
+  if (!max) {
+    FIO___LOCK_UNLOCK(p->lock);
+    if (timeout)
       FIO_THREAD_WAIT((timeout * 1000000));
-    }
     return 0;
   }
-  /* handle events in a copy, allowing events / threads to mutate it */
-  FIO___LOCK_LOCK(p->lock);
-  fio_poll_s cpy = *p;
-  p->map = (fio___poll_map_s){0};
-  FIO___LOCK_UNLOCK(p->lock);
-
-  const size_t max = cpy.map.count;
-  const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
 
   int r = 0, i = 0;
-  /* Allocate pfd[] and uary[] in one block.
-   * Pad the pfd[] section up to void* alignment before placing uary[]. */
-  const size_t pfd_bytes = (max * sizeof(struct pollfd) + sizeof(void *) - 1) &
-                           ~(sizeof(void *) - 1);
-  const size_t alloc_size = pfd_bytes + max * sizeof(void *);
-  struct pollfd *pfd =
-      (struct pollfd *)FIO_MEM_REALLOC_(NULL, 0, alloc_size, 0);
-  void **uary = (void **)((char *)pfd + pfd_bytes);
+  struct pollfd *pfd = NULL;
+  void **uary = NULL;
+  size_t pfd_bytes = 0;
+  size_t alloc_size = 0;
+  /* poll()/WSAPoll() receive an int-sized count here. Guard both that
+   * narrowing and the one-block allocation arithmetic. */
+  if (max > (size_t)INT_MAX ||
+      max > ((SIZE_MAX - (sizeof(void *) - 1)) / sizeof(*pfd))) {
+    FIO___LOCK_UNLOCK(p->lock);
+    errno = ENOMEM;
+    return -1;
+  }
+  pfd_bytes = (max * sizeof(*pfd) + sizeof(void *) - 1) &
+              ~(sizeof(void *) - 1);
+  if (max > ((SIZE_MAX - pfd_bytes) / sizeof(*uary))) {
+    FIO___LOCK_UNLOCK(p->lock);
+    errno = ENOMEM;
+    return -1;
+  }
+  alloc_size = pfd_bytes + max * sizeof(*uary);
+  pfd = (struct pollfd *)FIO_MEM_REALLOC_(NULL, 0, alloc_size, 0);
+  if (!pfd) {
+    FIO___LOCK_UNLOCK(p->lock);
+    errno = ENOMEM;
+    return -1;
+  }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___poll_review_buffer);
 
-  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    if (!(cpy.map.ary[pos].flags & flag_mask))
+  /* Snapshot events while retaining the map allocation. This lets concurrent
+   * monitor calls update the live map without a fallible merge afterwards. */
+  fio_poll_s cpy = {.settings = p->settings};
+  uary = (void **)((char *)pfd + pfd_bytes);
+  const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
+  FIO_IMAP_EACH(fio___poll_map, (&p->map), pos) {
+    fio___poll_i_s *entry = p->map.ary + pos;
+    if (!(entry->flags & flag_mask))
       continue;
-    pfd[r].fd = cpy.map.ary[pos].fd;
+    pfd[r].fd = entry->fd;
 #if FIO_OS_WIN
     /* POLLPRI is not supported by WSAPoll and causes WSAEINVAL */
-    pfd[r].events = (short)(cpy.map.ary[pos].flags & (POLLIN | POLLOUT));
+    pfd[r].events = (short)(entry->flags & (POLLIN | POLLOUT));
 #else
-    pfd[r].events = (short)(cpy.map.ary[pos].flags & FIO_POLL_POSSIBLE_FLAGS);
+    pfd[r].events = (short)(entry->flags & FIO_POLL_POSSIBLE_FLAGS);
 #endif
-    uary[r] = cpy.map.ary[pos].udata;
+    uary[r] = entry->udata;
+    entry->flags = 0;
     ++r;
   }
+  FIO___LOCK_UNLOCK(p->lock);
 
   {
     /* clamp timeout: poll()/WSAPoll() take int; SIZE_MAX cast → negative → ∞ */
@@ -192,6 +220,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     events = poll(pfd, r, timeout_ms);
 #endif
   }
+  if (events == -1 && errno == EINTR)
+    events = 0;
 
   if (events > 0) {
     /* handle events and strip consumed flags */
@@ -208,54 +238,27 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     }
   }
 
-  /* merge surviving (un-fired) entries from cpy back into p->map.
-   * On timeout (events <= 0), ALL cpy entries are surviving.
-   * Entries re-armed or forgotten by another thread during the poll
-   * are already reflected in p->map; OR surviving flags in on top. */
+  /* Restore flags that did not fire. A concurrent forget removes the retained
+   * entry, preventing the stale fd from being re-added after this review. */
   FIO___LOCK_LOCK(p->lock);
-  if (!p->map.count && events <= 0) {
-    /* fast path: nothing changed while we were polling — swap back */
-    p->map = cpy.map;
-    FIO___LOCK_UNLOCK(p->lock);
-    FIO_MEM_FREE(pfd, alloc_size);
-    return 0;
-  }
-  /* merge cpy entries that still have flags (un-fired) back into p->map */
-  FIO_IMAP_EACH(fio___poll_map, (&cpy.map), pos) {
-    fio___poll_i_s *src = &cpy.map.ary[pos];
-    /* find the surviving flags for this fd from the pfd array */
-    unsigned short surviving = src->flags; /* default: all flags (timeout) */
-    for (int j = 0; j < r; ++j) {
-      if (pfd[j].fd == src->fd) {
-        surviving = (unsigned short)pfd[j].events;
-        break;
-      }
-    }
-    if (!surviving)
-      continue; /* all events fired for this fd — truly one-shot, drop it */
-    fio___poll_i_s *existing =
-        fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = src->fd});
-    if (existing) {
-      /* user re-armed during poll: OR surviving flags in; keep new udata */
-      existing->flags |= surviving;
-    } else {
-      fio___poll_map_set(&p->map,
-                         (fio___poll_i_s){
-                             .fd = src->fd,
-                             .flags = surviving,
-                             .udata = src->udata,
-                         },
-                         1);
-    }
+  for (int j = 0; j < r; ++j) {
+    if (!pfd[j].events)
+      continue;
+    fio___poll_i_s *entry =
+        fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = pfd[j].fd});
+    if (entry)
+      entry->flags |= (unsigned short)pfd[j].events;
   }
   FIO___LOCK_UNLOCK(p->lock);
-  fio___poll_map_destroy(&cpy.map);
-  FIO_MEM_FREE(pfd, alloc_size);
+  FIO_LEAK_COUNTER_ON_FREE(fio___poll_review_buffer);
+  FIO_MEM_FREE_(pfd, alloc_size);
   return events;
 }
 
 /** Stops monitoring the specified file descriptor, returning -1 on error. */
 SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
+  if (!p || fd == FIO_SOCKET_INVALID)
+    return -1;
   FIO___LOCK_LOCK(p->lock);
   int r = fio___poll_map_remove(&p->map, (fio___poll_i_s){.fd = fd});
   FIO___LOCK_UNLOCK(p->lock);
@@ -264,6 +267,8 @@ SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
 
 /** Closes all sockets, calling the `on_close`. */
 SFUNC void fio_poll_close_all(fio_poll_s *p) {
+  if (!p)
+    return;
   FIO___LOCK_LOCK(p->lock);
   fio_poll_s cpy = *p;
   p->map = (fio___poll_map_s){0};

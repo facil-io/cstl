@@ -84,16 +84,29 @@ typedef struct {
 } fio___tls13_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___tls13_context_s)
+/* every owned DER/PEM-decoded/key heap buffer (cert chain entries, trust
+ * store entries, RSA key blobs, transient cert scratch) shares one counter:
+ * a wrong `trust_der_owned` flag or an ownership-transfer bug shows up as a
+ * double-free assert / leak report on this counter.
+ * Note: the trust `bufs`/`lens` arrays themselves use a realloc-grow pattern
+ * and are intentionally NOT counted (realloc is neither alloc nor free);
+ * their entries are, which covers the dangerous double-free case. */
+FIO_LEAK_COUNTER_DEF(fio___tls13_der_buf)
+FIO_LEAK_COUNTER_DEF(fio___tls13_cert_chain_ary)
 
 /** Free DER certificate buffers owned by a context. */
 FIO_SFUNC void fio___tls13_context_cert_chain_free(fio___tls13_context_s *ctx) {
   if (!ctx)
     return;
-  for (size_t i = 0; i < ctx->cert_chain_count; ++i)
+  for (size_t i = 0; i < ctx->cert_chain_count; ++i) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE((void *)ctx->cert_chain[i].buf, ctx->cert_chain[i].len);
-  if (ctx->cert_chain)
+  }
+  if (ctx->cert_chain) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_cert_chain_ary);
     FIO_MEM_FREE((void *)ctx->cert_chain,
                  ctx->cert_chain_count * sizeof(*ctx->cert_chain));
+  }
   ctx->cert_der = (fio_ubuf_info_s){0};
   ctx->cert_chain = NULL;
   ctx->cert_chain_count = 0;
@@ -110,13 +123,16 @@ FIO_SFUNC int fio___tls13_context_cert_chain_add(fio___tls13_context_s *ctx,
   fio_ubuf_info_s *new_chain = (fio_ubuf_info_s *)
       FIO_MEM_REALLOC(NULL, 0, new_count * sizeof(*ctx->cert_chain), 0);
   if (!new_chain) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(der_buf, der_len);
     return -1;
   }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_cert_chain_ary);
   if (old_count) {
     FIO_MEMCPY(new_chain,
                ctx->cert_chain,
                old_count * sizeof(*ctx->cert_chain));
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_cert_chain_ary);
     FIO_MEM_FREE((void *)ctx->cert_chain, old_count * sizeof(*ctx->cert_chain));
   }
   ctx->cert_chain = new_chain;
@@ -155,8 +171,10 @@ static fio_lock_i fio___tls13_sys_trust_lock = FIO_LOCK_INIT;
  * Registered once at startup via FIO_CONSTRUCTOR below. */
 FIO_SFUNC void fio___tls13_sys_trust_free(void *ignr_) {
   fio_lock(&fio___tls13_sys_trust_lock);
-  for (size_t i = 0; i < fio___tls13_sys_trust.count; ++i)
+  for (size_t i = 0; i < fio___tls13_sys_trust.count; ++i) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(fio___tls13_sys_trust.bufs[i], fio___tls13_sys_trust.lens[i]);
+  }
   if (fio___tls13_sys_trust.bufs)
     FIO_MEM_FREE(fio___tls13_sys_trust.bufs,
                  fio___tls13_sys_trust.count * sizeof(uint8_t *));
@@ -284,11 +302,13 @@ FIO_SFUNC int fio___tls13_make_self_signed(fio___tls13_context_s *ctx,
     fio_x509_keypair_clear(&keypair);
     return -1;
   }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
 
   size_t cert_der_len =
       fio_x509_self_signed_cert(cert_tmp, cert_size, &keypair, &opts);
   if (cert_der_len == 0) {
     FIO_LOG_ERROR("TLS 1.3: failed to generate self-signed certificate");
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(cert_tmp, cert_size);
     fio_x509_keypair_clear(&keypair);
     return -1;
@@ -297,11 +317,14 @@ FIO_SFUNC int fio___tls13_make_self_signed(fio___tls13_context_s *ctx,
   uint8_t *cert_der = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, cert_der_len, 0);
   if (!cert_der) {
     FIO_LOG_ERROR("TLS 1.3: failed to allocate exact certificate buffer");
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(cert_tmp, cert_size);
     fio_x509_keypair_clear(&keypair);
     return -1;
   }
+  FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
   FIO_MEMCPY(cert_der, cert_tmp, cert_der_len);
+  FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
   FIO_MEM_FREE(cert_tmp, cert_size);
 
   if (fio___tls13_context_cert_chain_add(ctx, cert_der, cert_der_len) != 0) {
@@ -384,6 +407,7 @@ FIO_SFUNC int fio___tls13_load_cert_pem_chain(fio___tls13_context_s *ctx,
           (uint8_t *)FIO_MEM_REALLOC(NULL, 0, pem_block.der_len, 0);
       if (!der_buf)
         return (loaded > 0) ? loaded : -1;
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
       FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
       if (fio___tls13_context_cert_chain_add(ctx, der_buf, pem_block.der_len) !=
           0)
@@ -498,6 +522,8 @@ FIO_SFUNC int fio___tls13_each_cert(struct fio_io_tls_each_s *e,
       }
       size_t encoded_len = 8 + pkey.rsa.n_len + pkey.rsa.d_len;
       uint8_t *encoded = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, encoded_len, 0);
+      if (encoded)
+        FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
       if (!encoded) {
         FIO_LOG_ERROR("TLS 1.3: failed to allocate RSA private key buffer");
         fio_pem_private_key_clear(&pkey);
@@ -601,6 +627,7 @@ FIO_SFUNC int fio___tls13_trust_array_push(uint8_t ***bufs_p,
                                                old_count * sizeof(size_t));
   if (!new_bufs || !new_lens) {
     FIO_LOG_ERROR("TLS 1.3: failed to allocate trust store arrays");
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(der_buf, der_len);
     if (new_bufs)
       *bufs_p = new_bufs;
@@ -678,6 +705,7 @@ FIO_SFUNC int fio___tls13_load_pem_bundle_into(uint8_t ***bufs_p,
         FIO_LOG_ERROR("TLS 1.3: failed to allocate DER buffer for PEM bundle");
         return (loaded > 0) ? loaded : -1;
       }
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
       FIO_MEMCPY(der_buf, tmp_der, pem_block.der_len);
       if (fio___tls13_trust_array_push(bufs_p,
                                        lens_p,
@@ -751,6 +779,7 @@ FIO_SFUNC int fio___tls13_get_system_trust(void) {
     uint8_t *der_buf = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, der_len, 0);
     if (!der_buf)
       continue;
+    FIO_LEAK_COUNTER_ON_ALLOC(fio___tls13_der_buf);
     FIO_MEMCPY(der_buf, pCert->pbCertEncoded, der_len);
     if (fio___tls13_trust_array_push(&fio___tls13_sys_trust.bufs,
                                      &fio___tls13_sys_trust.lens,
@@ -983,6 +1012,7 @@ error:
     fio___tls13_context_cert_chain_free(ctx);
     if (ctx->private_key_ext.buf) {
       fio_secure_zero(ctx->private_key_ext.buf, ctx->private_key_ext.len);
+      FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
       FIO_MEM_FREE(ctx->private_key_ext.buf, ctx->private_key_ext.len);
       ctx->private_key_ext.buf = NULL;
       ctx->private_key_ext.len = 0;
@@ -992,8 +1022,10 @@ error:
      * When trust_der_owned=0 the arrays are the global system trust singleton
      * and must NOT be freed here. */
     if (ctx->trust_der_owned) {
-      for (size_t i = 0; i < ctx->trust_der_count; ++i)
+      for (size_t i = 0; i < ctx->trust_der_count; ++i) {
+        FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
         FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
+      }
       if (ctx->trust_der_bufs)
         FIO_MEM_FREE(ctx->trust_der_bufs,
                      ctx->trust_der_count * sizeof(uint8_t *));
@@ -1023,6 +1055,7 @@ FIO_SFUNC void fio___tls13_free_context_task(void *tls_ctx, void *ignr_) {
   fio_secure_zero(ctx->private_key, sizeof(ctx->private_key));
   if (ctx->private_key_ext.buf) {
     fio_secure_zero(ctx->private_key_ext.buf, ctx->private_key_ext.len);
+    FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
     FIO_MEM_FREE(ctx->private_key_ext.buf, ctx->private_key_ext.len);
     ctx->private_key_ext.buf = NULL;
     ctx->private_key_ext.len = 0;
@@ -1032,8 +1065,10 @@ FIO_SFUNC void fio___tls13_free_context_task(void *tls_ctx, void *ignr_) {
    * When trust_der_owned=0 the arrays are the global system trust singleton
    * and must NOT be freed here — they are freed at process exit. */
   if (ctx->trust_der_owned) {
-    for (size_t i = 0; i < ctx->trust_der_count; ++i)
+    for (size_t i = 0; i < ctx->trust_der_count; ++i) {
+      FIO_LEAK_COUNTER_ON_FREE(fio___tls13_der_buf);
       FIO_MEM_FREE(ctx->trust_der_bufs[i], ctx->trust_der_lens[i]);
+    }
     if (ctx->trust_der_bufs)
       FIO_MEM_FREE(ctx->trust_der_bufs,
                    ctx->trust_der_count * sizeof(uint8_t *));
