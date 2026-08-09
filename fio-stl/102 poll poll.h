@@ -86,12 +86,12 @@ Poll Monitoring Implementation - possibly externed functions.
 FIO_IFUNC void fio___poll_handle_events(fio_poll_s *p,
                                         void *udata,
                                         unsigned short revents) {
-  if ((revents & POLLOUT))
-    p->settings.on_ready(udata);
   if ((revents & (POLLIN | POLLPRI)))
     p->settings.on_data(udata);
   if ((revents & (POLLHUP | POLLERR | POLLNVAL | FIO_POLL_EX_FLAGS)))
     p->settings.on_close(udata);
+  else if ((revents & POLLOUT))
+    p->settings.on_ready(udata);
 }
 
 /**
@@ -173,8 +173,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     errno = ENOMEM;
     return -1;
   }
-  pfd_bytes = (max * sizeof(*pfd) + sizeof(void *) - 1) &
-              ~(sizeof(void *) - 1);
+  pfd_bytes = (max * sizeof(*pfd) + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
   if (max > ((SIZE_MAX - pfd_bytes) / sizeof(*uary))) {
     FIO___LOCK_UNLOCK(p->lock);
     errno = ENOMEM;
@@ -199,12 +198,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     if (!(entry->flags & flag_mask))
       continue;
     pfd[r].fd = entry->fd;
-#if FIO_OS_WIN
-    /* POLLPRI is not supported by WSAPoll and causes WSAEINVAL */
-    pfd[r].events = (short)(entry->flags & (POLLIN | POLLOUT));
-#else
     pfd[r].events = (short)(entry->flags & FIO_POLL_POSSIBLE_FLAGS);
-#endif
     uary[r] = entry->udata;
     entry->flags = 0;
     ++r;

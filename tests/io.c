@@ -5,8 +5,8 @@ Correctness coverage for fio_io reactor state, IO object lifecycle,
 protocol callbacks, fd attachment, task/timer scheduling, env helpers,
 protocol iteration, TLS context helpers, and listen/connect roundtrip.
 
-Uses in-process socketpairs / loopback only.  No external processes,
-network calls, or benchmarking.
+Uses in-process socketpairs / loopback plus one bounded connection attempt to
+a known external host on a bad port. No external processes or benchmarking.
 ***************************************************************************** */
 #include "test-helpers.h"
 
@@ -30,6 +30,7 @@ static volatile int fio___test_io_attach_count = 0;
 static volatile int fio___test_io_data_count = 0;
 static volatile int fio___test_io_ready_count = 0;
 static volatile int fio___test_io_close_count = 0;
+static volatile int fio___test_io_client_close_count = 0;
 static volatile int fio___test_io_env_close_count = 0;
 static volatile int fio___test_io_timer_count = 0;
 
@@ -400,6 +401,80 @@ static void test_io_default_functions(void) {
 }
 
 /* *****************************************************************************
+Unit test - invalid-host connection failure
+
+An address-resolution failure occurs before an fio_io_s is created. The
+internal connecting protocol routes its own on_close to the application's
+on_failed callback, but the application protocol is never attached. Therefore
+on_failed is the only application callback and fio_io_free is not called.
+***************************************************************************** */
+static fio_io_protocol_s fio___test_io_invalid_host_protocol;
+static volatile int fio___test_io_invalid_host_failed_count = 0;
+static volatile int fio___test_io_invalid_host_unexpected_count = 0;
+static volatile int fio___test_io_invalid_host_close_count = 0;
+
+static void fio___test_io_invalid_host_unexpected(fio_io_s *io) {
+  ++fio___test_io_invalid_host_unexpected_count;
+  (void)io;
+}
+
+static void fio___test_io_invalid_host_on_close(void *buffer, void *udata) {
+  ++fio___test_io_invalid_host_close_count;
+  (void)buffer, (void)udata;
+}
+
+static void fio___test_io_invalid_host_on_failed(fio_io_protocol_s *pr,
+                                                  void *udata) {
+  ++fio___test_io_invalid_host_failed_count;
+  FIO_ASSERT(pr == &fio___test_io_invalid_host_protocol,
+             "invalid-host on_failed protocol mismatch");
+  FIO_ASSERT(udata == (void *)0xBAD,
+             "invalid-host on_failed udata mismatch");
+}
+
+static void test_io_connect_invalid_host(void) {
+  fio___test_io_invalid_host_failed_count = 0;
+  fio___test_io_invalid_host_unexpected_count = 0;
+  fio___test_io_invalid_host_close_count = 0;
+
+  fio___test_io_invalid_host_protocol = (fio_io_protocol_s){
+      .on_attach = fio___test_io_invalid_host_unexpected,
+      .on_data = fio___test_io_invalid_host_unexpected,
+      .on_ready = fio___test_io_invalid_host_unexpected,
+      .on_close = fio___test_io_invalid_host_on_close,
+      .on_timeout = fio___test_io_invalid_host_unexpected,
+      .timeout = 100,
+  };
+
+  fio_io_s *io = fio_io_connect("tcp://fio-io-test.invalid:19876",
+                                .protocol =
+                                    &fio___test_io_invalid_host_protocol,
+                                .on_failed =
+                                    fio___test_io_invalid_host_on_failed,
+                                .udata = (void *)0xBAD,
+                                .timeout = 100);
+
+  FIO_ASSERT(!io, "invalid-host fio_io_connect should return NULL");
+  FIO_ASSERT(fio___test_io_invalid_host_failed_count == 1,
+             "invalid-host on_failed should run exactly once (got %d)",
+             fio___test_io_invalid_host_failed_count);
+  FIO_ASSERT(!fio___test_io_invalid_host_unexpected_count,
+             "invalid-host application IO callback should not run (got %d)",
+             fio___test_io_invalid_host_unexpected_count);
+  FIO_ASSERT(!fio___test_io_invalid_host_close_count,
+             "invalid-host application on_close should not run (got %d)",
+             fio___test_io_invalid_host_close_count);
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io),
+             "invalid-host failure should not allocate an IO object");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
+             "invalid-host connecting state should be cleaned up");
+
+  fprintf(stderr,
+          "* invalid-host connect (on_failed=1, application callbacks=0, "
+          "IO allocations=0): OK\n");
+}
+
+/* *****************************************************************************
 Integration tests - protocol callbacks and IO object lifecycle
 
 All integration tests run inside a single reactor instance (workers=0).
@@ -413,10 +488,10 @@ static fio_io_protocol_s fio___test_io_pair_protocol;
 /* Protocol used for the listen/connect roundtrip */
 static fio_io_protocol_s fio___test_io_server_protocol;
 static fio_io_protocol_s fio___test_io_client_protocol;
+static fio_io_protocol_s fio___test_io_late_protocol;
 
 static fio_socket_i fio___test_io_pair_local = FIO_SOCKET_INVALID;
 static fio_io_s *fio___test_io_pair_io = NULL;
-static fio_io_s *fio___test_io_listen_io = NULL;
 static fio_io_listener_s *fio___test_io_listener = NULL;
 
 static volatile int fio___test_io_runner_step = 0;
@@ -424,6 +499,12 @@ static volatile int fio___test_io_pair_done = 0;
 static volatile int fio___test_io_listen_done = 0;
 static volatile int fio___test_io_timer_done = 0;
 static volatile int fio___test_io_timeout_fired = 0;
+static volatile int fio___test_io_lifecycle_settle_count = 0;
+static volatile int fio___test_io_late_started = 0;
+static volatile int fio___test_io_late_synchronous = 0;
+static volatile int fio___test_io_late_failed_count = 0;
+static volatile int fio___test_io_late_unexpected_count = 0;
+static volatile int fio___test_io_late_close_count = 0;
 
 /* ---- pair protocol callbacks ---- */
 static void fio___test_io_pair_on_attach(fio_io_s *io) {
@@ -514,12 +595,38 @@ static void fio___test_io_client_on_data(fio_io_s *io) {
 }
 
 static void fio___test_io_client_on_close(void *buffer, void *udata) {
+  ++fio___test_io_client_close_count;
+  FIO_ASSERT(fio___test_io_client_close_count == 1,
+             "client on_close called more than once");
   (void)buffer, (void)udata;
 }
 
 static void fio___test_io_client_on_failed(fio_io_protocol_s *pr, void *ud) {
   (void)pr, (void)ud;
   FIO_ASSERT(0, "client connection failed");
+}
+
+/* ---- late connection-failure protocol callbacks ---- */
+static void fio___test_io_late_unexpected(fio_io_s *io) {
+  ++fio___test_io_late_unexpected_count;
+  (void)io;
+}
+
+static void fio___test_io_late_on_close(void *buffer, void *udata) {
+  ++fio___test_io_late_close_count;
+  (void)buffer, (void)udata;
+}
+
+static void fio___test_io_late_on_failed(fio_io_protocol_s *pr, void *udata) {
+  ++fio___test_io_late_failed_count;
+  if (!fio___test_io_late_started)
+    fio___test_io_late_synchronous = 1;
+  FIO_ASSERT(fio___test_io_late_failed_count == 1,
+             "late-failure on_failed called more than once");
+  FIO_ASSERT(pr == &fio___test_io_late_protocol,
+             "late-failure on_failed protocol mismatch");
+  FIO_ASSERT(udata == (void *)0xD1E,
+             "late-failure on_failed udata mismatch");
 }
 
 /* ---- timer callback ---- */
@@ -645,15 +752,34 @@ static void fio___test_io_start_listen_task(void *u1, void *u2) {
                                 .udata = (void *)0xBEEF,
                                 .timeout = 5000);
   FIO_ASSERT(io, "connect should succeed");
-  fio___test_io_listen_io = io;
+}
+
+static void fio___test_io_start_late_failure_task(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  fio_io_s *io = fio_io_connect("tcp://example.com:81",
+                                .protocol = &fio___test_io_late_protocol,
+                                .on_failed = fio___test_io_late_on_failed,
+                                .udata = (void *)0xD1E,
+                                .timeout = 1500);
+  if (!io) {
+    fio___test_io_late_synchronous = 1;
+    return;
+  }
+  fio___test_io_late_started = 1;
 }
 
 static int fio___test_io_check_done_task(void *u1, void *u2) {
   (void)u1, (void)u2;
   if (fio___test_io_pair_done && fio___test_io_listen_done &&
-      fio___test_io_timer_done) {
-    fio_io_stop();
-    return -1;
+      fio___test_io_timer_done && fio___test_io_client_close_count == 1 &&
+      fio___test_io_late_failed_count == 1 &&
+      (fio___test_io_late_started || fio___test_io_late_synchronous)) {
+    /* Keep polling briefly after the expected lifecycle callbacks. This
+     * catches duplicate close/free tasks that arrive on a later poll cycle. */
+    if (++fio___test_io_lifecycle_settle_count >= 5) {
+      fio_io_stop();
+      return -1;
+    }
   }
   return 0;
 }
@@ -662,10 +788,18 @@ static int fio___test_io_timeout_cb(void *u1, void *u2) {
   (void)u1, (void)u2;
   fio___test_io_timeout_fired = 1;
   FIO_LOG_ERROR(
-      "io integration timeout (pair_done=%d listen_done=%d timer_done=%d)",
+      "io integration timeout (pair_done=%d listen_done=%d timer_done=%d "
+      "client_on_close=%d late_started=%d late_synchronous=%d "
+      "late_on_failed=%d late_callbacks=%d late_on_close=%d)",
       fio___test_io_pair_done,
       fio___test_io_listen_done,
-      fio___test_io_timer_done);
+      fio___test_io_timer_done,
+      fio___test_io_client_close_count,
+      fio___test_io_late_started,
+      fio___test_io_late_synchronous,
+      fio___test_io_late_failed_count,
+      fio___test_io_late_unexpected_count,
+      fio___test_io_late_close_count);
   fio_io_stop();
   return -1;
 }
@@ -675,6 +809,7 @@ static void fio___test_io_on_start(void *ignr_) {
   /* Schedule driver tasks and timers. */
   fio_io_defer(fio___test_io_attach_pair_task, NULL, NULL);
   fio_io_defer(fio___test_io_start_listen_task, NULL, NULL);
+  fio_io_defer(fio___test_io_start_late_failure_task, NULL, NULL);
 
   fio_io_run_every(.fn = fio___test_io_check_pair_task,
                    .every = 20,
@@ -686,7 +821,7 @@ static void fio___test_io_on_start(void *ignr_) {
                    .every = 10,
                    .repetitions = -1);
   fio_io_run_every(.fn = fio___test_io_timeout_cb,
-                   .every = 3000,
+                   .every = 7000,
                    .repetitions = 1);
 }
 
@@ -703,17 +838,23 @@ static void test_io_integration(void) {
   fio___test_io_data_count = 0;
   fio___test_io_ready_count = 0;
   fio___test_io_close_count = 0;
+  fio___test_io_client_close_count = 0;
   fio___test_io_pair_received_len = 0;
   fio___test_io_listen_received_len = 0;
   fio___test_io_pair_local = FIO_SOCKET_INVALID;
   fio___test_io_pair_io = NULL;
-  fio___test_io_listen_io = NULL;
   fio___test_io_listener = NULL;
   fio___test_io_runner_step = 0;
   fio___test_io_pair_done = 0;
   fio___test_io_listen_done = 0;
   fio___test_io_timer_done = 0;
   fio___test_io_timeout_fired = 0;
+  fio___test_io_lifecycle_settle_count = 0;
+  fio___test_io_late_started = 0;
+  fio___test_io_late_synchronous = 0;
+  fio___test_io_late_failed_count = 0;
+  fio___test_io_late_unexpected_count = 0;
+  fio___test_io_late_close_count = 0;
   fio___test_io_timer_count = 0;
 
   /* initialize protocols */
@@ -742,6 +883,14 @@ static void test_io_integration(void) {
       .timeout = 5000,
       .buffer_size = 128,
   };
+  fio___test_io_late_protocol = (fio_io_protocol_s){
+      .on_attach = fio___test_io_late_unexpected,
+      .on_data = fio___test_io_late_unexpected,
+      .on_ready = fio___test_io_late_unexpected,
+      .on_close = fio___test_io_late_on_close,
+      .on_timeout = fio___test_io_late_unexpected,
+      .timeout = 1500,
+  };
 
   fio_state_callback_add(FIO_CALL_ON_START, fio___test_io_on_start, NULL);
   fio_io_start(0);
@@ -761,6 +910,28 @@ static void test_io_integration(void) {
              fio___test_io_listen_received_len);
   FIO_ASSERT(!FIO_MEMCMP(fio___test_io_listen_received, "ECHO:hello", 10),
              "listen roundtrip received wrong data");
+  FIO_ASSERT(fio___test_io_client_close_count == 1,
+             "client on_close should run exactly once (got %d)",
+             fio___test_io_client_close_count);
+  FIO_ASSERT(fio___test_io_late_started ||
+                 fio___test_io_late_synchronous,
+             "late-failure connection produced no observable outcome");
+  FIO_ASSERT(fio___test_io_late_failed_count == 1,
+             "late-failure on_failed should run exactly once (got %d)",
+             fio___test_io_late_failed_count);
+  FIO_ASSERT(!fio___test_io_late_unexpected_count,
+             "late-failure application IO callback should not run (got %d)",
+             fio___test_io_late_unexpected_count);
+  FIO_ASSERT(!fio___test_io_late_close_count,
+             "late-failure application on_close should not run (got %d)",
+             fio___test_io_late_close_count);
+  if (fio___test_io_late_synchronous)
+    FIO_ASSERT(!fio___test_io_late_started,
+               "late-failure cannot be both synchronous and reactor-started");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io),
+             "IO objects should be fully released");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
+             "late-failure connecting state should be cleaned up");
 
   /* Cleanup the local end of the socketpair if it is still open. */
   if (FIO_SOCK_FD_ISVALID(fio___test_io_pair_local)) {
@@ -768,7 +939,17 @@ static void test_io_integration(void) {
     fio___test_io_pair_local = FIO_SOCKET_INVALID;
   }
 
-  fprintf(stderr, "* IO reactor integration: OK\n");
+  fprintf(stderr,
+          "* IO reactor integration (client on_close=1, IO allocations=0): "
+          "OK\n");
+  if (fio___test_io_late_synchronous)
+    fprintf(stderr,
+            "* WARNING: late connect ended synchronously; reactor lifecycle "
+            "coverage skipped (on_failed=1, IO allocations=0)\n");
+  else
+    fprintf(stderr,
+            "* late connect failure (on_failed=1, application callbacks=0, "
+            "IO allocations=0): OK\n");
 #endif
 }
 
@@ -785,6 +966,7 @@ int main(void) {
   test_io_env_global();
   test_io_tls_helpers();
   test_io_default_functions();
+  test_io_connect_invalid_host();
 
   test_io_integration();
 
