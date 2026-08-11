@@ -319,13 +319,38 @@ static struct FIO___IO_S {
   fio_io_s *wakeup;
   FIO___LOCK_TYPE lock;
   size_t shutdown_timeout;
+  /* the recorded IO (reactor) thread's numeral ID - the only thread allowed
+   * to perform the main IO queue (DEBUG tripwire, FIO___IO_ASSERT_IO_THREAD). */
+  uintptr_t io_thread;
 } FIO___IO = {
     .tick = 0,
     .wakeup_fd = FIO_SOCKET_INVALID,
     .stop = 1,
     .lock = FIO___LOCK_INIT,
     .shutdown_timeout = FIO_IO_SHUTDOWN_TIMEOUT,
+    .io_thread = 0,
 };
+
+#if defined(DEBUG)
+/* The IO layer is single-threaded per process: exactly one reactor thread
+ * performs the main queue (`FIO___IO.queue`) - polling, deferred tasks and
+ * the final `fio___io_free2` calls. The queue, not a lock, is the
+ * synchronization. Record that thread on first IO-layer use and trip on any
+ * access from a different thread (e.g., worker threads attached to the main
+ * queue, or direct IO access from application threads). */
+FIO_IFUNC void fio___io_assert_io_thread(void) {
+  const uintptr_t t = fio_thread_nid();
+  if (FIO_UNLIKELY(!FIO___IO.io_thread))
+    FIO___IO.io_thread = t; /* first touch records the reactor thread */
+  FIO_ASSERT_DEBUG(FIO___IO.io_thread == t,
+                   "IO reactor accessed from a non-IO thread! "
+                   "(the main IO queue must only be performed by the single "
+                   "reactor thread of each process)");
+}
+#define FIO___IO_ASSERT_IO_THREAD() fio___io_assert_io_thread()
+#else
+#define FIO___IO_ASSERT_IO_THREAD() ((void)0)
+#endif
 
 FIO_IFUNC void fio___io_defer_no_wakeup(void (*task)(void *, void *),
                                         void *udata1,
@@ -477,13 +502,13 @@ FIO_IFUNC void fio___io_monitor_out(fio_io_s *io) {
 }
 
 FIO_IFUNC void fio___io_monitor_forget(fio_io_s *io) {
-  // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d (called)",
-  //                 fio_io_pid(),
-  //                 io->fd);
-  if (!(FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLL_SET) &
-        FIO___IO_FLAG_POLL_SET))
-    return;
+  /* Always forget: the poll backend retains consumed one-shot entries (and
+   * may hold surviving armed flags) keyed by fd with the raw udata pointer.
+   * Skipping the forget leaves a stale entry that a later review can
+   * dispatch (POLLNVAL after close, or an fd-reused event) - resurrecting a
+   * freed IO. Forgetting an unmonitored fd is harmless (backend returns -1). */
   fio_poll_forget(&FIO___IO.poll, io->fd);
+  FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_POLL_SET);
   // FIO_LOG_DDEBUG2("(%d) IO monitoring Removed for %d", fio_io_pid(), io->fd);
 }
 
@@ -576,10 +601,10 @@ SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
                                  void *tls) {
   fio_io_s *io = NULL;
   fio_io_protocol_s cpy;
-  if (!FIO_SOCK_FD_ISVALID(fd))
-    goto error;
   if (!pr)
     pr = &FIO___IO_MOCK_PROTOCOL;
+  if (!FIO_SOCK_FD_ISVALID(fd))
+    goto error;
   io = fio___io_new2(pr->buffer_size);
   *io = (fio_io_s){
       .fd = fd,
@@ -601,8 +626,16 @@ SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
 
 error:
   cpy = *pr;
-  cpy.on_close(NULL, udata);
-  cpy.io_functions.cleanup(tls);
+  if (cpy.on_close)
+    cpy.on_close(NULL, udata);
+  /* Ownership of `tls` transfers to the reactor when `fio_io_attach_fd` is
+   * called, on success AND on failure. Release it here with the CONTEXT
+   * destructor: `cleanup` would be wrong, as it destroys per-connection
+   * state that only exists after `start` ran (type confusion + double free
+   * on the connect path, where on_close routes to free_context). */
+  if (tls && cpy.io_functions.free_context &&
+      cpy.io_functions.free_context != fio___io_func_default_free_context)
+    cpy.io_functions.free_context(tls);
   return io;
 }
 
@@ -821,18 +854,21 @@ SFUNC void fio_io_close_now(fio_io_s *io) {
 SFUNC fio_io_s *fio_io_dup(fio_io_s *io) { return fio___io_dup2(io); }
 
 SFUNC void fio___io_free_task(void *io_, void *ignr_) {
-  fio___io_free2((fio_io_s *)io_);
+  FIO___IO_ASSERT_IO_THREAD();
+  fio_io_s *io = (fio_io_s *)io_;
+  if (FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_WRITE_DIRTY) &
+      FIO___IO_FLAG_WRITE_DIRTY) {
+    fio___io_poll_on_ready_schd((void *)io);
+  }
+  fio___io_free2(io);
   (void)ignr_;
 }
 /** Free IO (reference) - thread-safe, flushes pending writes. */
 SFUNC void fio_io_free(fio_io_s *io) {
   if (!io)
     return;
-  if (FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_WRITE_DIRTY) &
-      FIO___IO_FLAG_WRITE_DIRTY) {
-    fio___io_poll_on_ready_schd((void *)io);
+  if ((io->flags & FIO___IO_FLAG_WRITE_DIRTY))
     fio___io_wakeup();
-  }
   fio___io_defer_no_wakeup(fio___io_free_task, (void *)io, NULL);
 }
 
@@ -1725,6 +1761,7 @@ Managing data after a fork
 FIO_SFUNC void fio___io_after_fork(void *ignr_) {
   (void)ignr_;
   FIO___IO.pid = fio_thread_getpid();
+  FIO___IO.io_thread = 0; /* forked child has a new reactor thread */
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
   fio_queue_perform_all(&FIO___IO.queue);
   FIO_LIST_EACH(fio_io_protocol_s,

@@ -4274,14 +4274,15 @@ FIO_SFUNC void fio___http_static_compress_note_result(
     return;
   }
   /* consecutive-failure shift register (CAS loop, keeps the 8-bit width) */
+  uint8_t cur;
+  fio_atomic_load(cur, p);
   for (;;) {
-    uint8_t cur;
-    fio_atomic_load(cur, p); /* reload: fallback CAS won't update `cur` */
     if (!cur)
       return; /* already disabled — stays disabled */
     uint8_t next = (uint8_t)(cur << 1);
     if (fio_atomic_compare_exchange_p(p, &cur, &next))
       return;
+    /* on failure, `cur` was updated to the current value */
   }
 }
 

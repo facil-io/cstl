@@ -277,6 +277,11 @@ IO Operations
  *
  * Returns NULL on error. the `fio_io_s` pointer must NOT be used except
  * within proper callbacks.
+ *
+ * Ownership of `tls` transfers to the reactor when `fio_io_attach_fd` is
+ * called, whether the call succeeds or fails - callers must not use or free
+ * it afterwards. On failure the reactor releases it with the TLS
+ * implementation's `free_context` (never the per-connection `cleanup`).
  */
 SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
                                  fio_io_protocol_s *protocol,

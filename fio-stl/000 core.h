@@ -787,7 +787,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 // clang-format off
 
-/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+/** An atomic compare and exchange operation, returns true if an exchange occurred. `p_expected` MAY be overwritten with the existing value (system specific). */
 #define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __atomic_compare_exchange((p_obj), (p_expected), (p_desired), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) __atomic_exchange_n((p_obj), (value), __ATOMIC_SEQ_CST)
@@ -826,10 +826,26 @@ Copyright and License: see header file (000 copyright.h) or top of file
   } while (!__sync_bool_compare_and_swap((p_obj), dest, dest))
 
 
-/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __sync_bool_compare_and_swap((p_obj), (p_expected), *(p_desired))
+/** An atomic compare and exchange operation, returns true if an exchange occurred. `p_expected` is overwritten with the value found at `p_obj`, matching the C11 atomics contract. */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired)            \
+  ({                                                                           \
+    __typeof__(*(p_obj)) fio___atomic_cmpxchg_old__ =                         \
+        __sync_val_compare_and_swap((p_obj), *(p_expected), *(p_desired));    \
+    int fio___atomic_cmpxchg_ok__ =                                            \
+        (fio___atomic_cmpxchg_old__ == *(p_expected));                        \
+    *(p_expected) = fio___atomic_cmpxchg_old__;                                \
+    fio___atomic_cmpxchg_ok__;                                                 \
+  })
 /** An atomic exchange operation, ruturns previous value */
-#define fio_atomic_exchange(p_obj, value) __sync_val_compare_and_swap((p_obj), *(p_obj), (value))
+#define fio_atomic_exchange(p_obj, value)                                      \
+  ({                                                                           \
+    __typeof__(*(p_obj)) fio___atomic_exchange_old__ = *(p_obj);               \
+    while (!__sync_bool_compare_and_swap((p_obj),                              \
+                                          fio___atomic_exchange_old__,         \
+                                          (value)))                            \
+      fio___atomic_exchange_old__ = *(p_obj);                                  \
+    fio___atomic_exchange_old__;                                               \
+  })
 /** An atomic addition operation, returns new value */
 #define fio_atomic_add(p_obj, value) __sync_fetch_and_add((p_obj), (value))
 /** An atomic subtraction operation, returns new value */
@@ -869,7 +885,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /** An atomic load operation, returns value in pointer. */
 #define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
 
-/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
+/** An atomic compare and exchange operation, returns true if an exchange occurred. `p_expected` MAY be overwritten with the existing value (system specific). */
 #define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) atomic_compare_exchange_strong((p_obj), (p_expected), (p_desired))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) atomic_exchange((p_obj), (value))
@@ -915,8 +931,58 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /** An atomic load operation, returns value in pointer. */
 #define fio_atomic_load(dest, p_obj) (dest = *(p_obj))
 
-/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) (FIO___ATOMICS_FN_ROUTE(_InterlockedCompareExchange, (p_obj),(*(p_desired)),(*(p_expected))), (*(p_obj) == *(p_desired)))
+/* _InterlockedCompareExchange* only returns the prior value; these wrappers
+ * also write it back into `*p_expected`, matching the other atomic backends. */
+FIO_IFUNC int fio___atomic_cmpxchg8(int8_t volatile *p_obj,
+                                     int8_t *p_expected,
+                                     int8_t p_desired) {
+  int8_t old = _InterlockedCompareExchange8(p_obj, p_desired, *p_expected);
+  int ok = (old == *p_expected);
+  *p_expected = old;
+  return ok;
+}
+FIO_IFUNC int fio___atomic_cmpxchg16(int16_t volatile *p_obj,
+                                      int16_t *p_expected,
+                                      int16_t p_desired) {
+  int16_t old = _InterlockedCompareExchange16(p_obj, p_desired, *p_expected);
+  int ok = (old == *p_expected);
+  *p_expected = old;
+  return ok;
+}
+FIO_IFUNC int fio___atomic_cmpxchg32(int32_t volatile *p_obj,
+                                      int32_t *p_expected,
+                                      int32_t p_desired) {
+  int32_t old = _InterlockedCompareExchange(p_obj, p_desired, *p_expected);
+  int ok = (old == *p_expected);
+  *p_expected = old;
+  return ok;
+}
+FIO_IFUNC int fio___atomic_cmpxchg64(int64_t volatile *p_obj,
+                                      int64_t *p_expected,
+                                      int64_t p_desired) {
+  int64_t old = _InterlockedCompareExchange64(p_obj, p_desired, *p_expected);
+  int ok = (old == *p_expected);
+  *p_expected = old;
+  return ok;
+}
+
+/** An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` is overwritten with the value found at `p_obj`, matching the other atomic backends. */
+#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired)           \
+  ((sizeof(*(p_obj)) == 1)                                                    \
+       ? fio___atomic_cmpxchg8((int8_t volatile *)(p_obj),                    \
+                                (int8_t *)(p_expected),                       \
+                                *(int8_t *)(p_desired))                       \
+   : (sizeof(*(p_obj)) == 2)                                                  \
+       ? fio___atomic_cmpxchg16((int16_t volatile *)(p_obj),                  \
+                                 (int16_t *)(p_expected),                     \
+                                 *(int16_t *)(p_desired))                     \
+   : (sizeof(*(p_obj)) == 4)                                                  \
+       ? fio___atomic_cmpxchg32((int32_t volatile *)(p_obj),                  \
+                                 (int32_t *)(p_expected),                     \
+                                 *(int32_t *)(p_desired))                     \
+       : fio___atomic_cmpxchg64((int64_t volatile *)(p_obj),                  \
+                                 (int64_t *)(p_expected),                     \
+                                 *(int64_t *)(p_desired)))
 /** An atomic exchange operation, returns previous value */
 #define fio_atomic_exchange(p_obj, value) FIO___ATOMICS_FN_ROUTE(_InterlockedExchange, (p_obj), (value))
 
@@ -4048,17 +4114,17 @@ Vector Types (SIMD / Math)
  * types are hoisted here and the member macros only reference them. */
 #define FIO___UXXX_VCAP(bits) (((bits) / 8) > 64 ? 64 : ((bits) / 8))
 #define FIO___UXXX_VTYPEDEFS(bits)                                             \
-  typedef uint64_t __attribute__((vector_size((bits / 8)),                     \
-                                  aligned(FIO___UXXX_VCAP(bits))))             \
+  typedef uint64_t                                                             \
+      __attribute__((vector_size((bits / 8)), aligned(FIO___UXXX_VCAP(bits)))) \
       fio___v##bits##u64;                                                      \
-  typedef uint32_t __attribute__((vector_size((bits / 8)),                     \
-                                  aligned(FIO___UXXX_VCAP(bits))))             \
+  typedef uint32_t                                                             \
+      __attribute__((vector_size((bits / 8)), aligned(FIO___UXXX_VCAP(bits)))) \
       fio___v##bits##u32;                                                      \
-  typedef uint16_t __attribute__((vector_size((bits / 8)),                     \
-                                  aligned(FIO___UXXX_VCAP(bits))))             \
+  typedef uint16_t                                                             \
+      __attribute__((vector_size((bits / 8)), aligned(FIO___UXXX_VCAP(bits)))) \
       fio___v##bits##u16;                                                      \
-  typedef uint8_t __attribute__((vector_size((bits / 8)),                      \
-                                  aligned(FIO___UXXX_VCAP(bits))))             \
+  typedef uint8_t                                                              \
+      __attribute__((vector_size((bits / 8)), aligned(FIO___UXXX_VCAP(bits)))) \
       fio___v##bits##u8;
 FIO___UXXX_VTYPEDEFS(128)
 FIO___UXXX_VTYPEDEFS(256)

@@ -581,6 +581,22 @@ SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
   return fio_sock_open(addr, pr, flags);
 }
 
+/** Returns the pending socket error (`SO_ERROR`), 0 if none, -1 on query
+ * failure. Used to detect failed non-blocking `connect` attempts. */
+SFUNC int fio_sock_error(fio_socket_i fd) {
+  int err = 0;
+#if FIO_OS_WIN
+  int len = (int)sizeof(err);
+  if (fio___winsock_fn.getsockopt(fd, SOL_SOCKET, SO_ERROR, (char *)&err, &len))
+    return -1;
+#else
+  socklen_t len = (socklen_t)sizeof(err);
+  if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len))
+    return -1;
+#endif
+  return err;
+}
+
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(fio_socket_i fd) {
 /* On Windows, always use ioctlsocket — MinGW defines O_NONBLOCK/F_GETFL/F_SETFL

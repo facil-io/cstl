@@ -79,6 +79,14 @@ typedef struct {
   void (*on_close)(void *udata);
 } fio_poll_settings_s;
 
+/* NOTE: `fio_poll_forget` is not a cancellation guarantee on any backend:
+ * an event already returned by the system call may still be dispatched.
+ * Thread safety covers the poller's internal state only; `udata` lifetime
+ * during dispatch is the caller's responsibility. The facil.io IO layer
+ * upholds this by only ever calling `fio_poll_forget` from the reactor
+ * thread (via deferred destruction) - never concurrently with a review and
+ * never from within a `fio_poll_settings_s` callback. */
+
 /** Initializes the polling object, allocating its resources. */
 FIO_IFUNC void fio_poll_init(fio_poll_s *p, fio_poll_settings_s);
 /** Initializes the polling object, allocating its resources. */

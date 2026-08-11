@@ -78,6 +78,7 @@ FIO_IFUNC int fio___io_queue_timers(void) {
 
 FIO_SFUNC void fio___io_tick(int max_timeout) {
   static size_t performed_idle = 0;
+  FIO___IO_ASSERT_IO_THREAD();
   int timeout = fio___io_queue_timers();
   if (fio_queue_count(&FIO___IO.queue))
     timeout = 0;
@@ -860,12 +861,21 @@ FIO_SFUNC void fio___connecting_on_close(void *buffer, void *udata) {
 FIO_SFUNC void fio___connecting_on_ready(fio_io_s *io) {
   if (!fio_io_is_open(io))
     return;
+  /* A writable socket is not proof of a successful non-blocking connect:
+   * kqueue reports EVFILT_WRITE together with EV_ERROR on failure and poll
+   * may report POLLOUT|POLLERR. Promote only when no async error is pending;
+   * otherwise the following on_close routes the failure to `on_failed`. */
+  if (fio_sock_error(fio_io_fd(io)))
+    return;
   fio___io_connecting_s *c = (fio___io_connecting_s *)fio_io_udata(io);
   FIO_LOG_DEBUG2("(%d) established client connection to %s",
                  fio_io_pid(),
                  c->url);
   fio_io_udata_set(io, c->udata);
-  fio_io_protocol_set(io, c->upr);
+  /* The synchronous swap keeps (protocol, udata) atomically consistent.
+   * NOTE: fio___io_protocol_set consumes a reference (it ends with
+   * fio___io_free_with_flush), so it must be handed a fresh dup2. */
+  fio___io_protocol_set((void *)fio___io_dup2(io), (void *)c->upr);
   c->on_failed = NULL;
   fio___io_defer_no_wakeup(fio___connecting_on_close, NULL, (void *)c);
 }
@@ -909,11 +919,16 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   };
   FIO_MEMCPY(c->url, args.url, url_len);
   c->url[url_len] = 0;
-  fio_io_s *io = fio_io_attach_fd(
-      fio_sock_open2(c->url, FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK),
-      &c->protocol,
-      c,
-      c->tls_ctx);
+  fio_socket_i fd = fio_sock_open2(c->url, FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
+  fio_io_s *io = NULL;
+  if (FIO_SOCK_FD_ISVALID(fd)) {
+    /* the TLS context's ownership transfers to the reactor (attach_fd) */
+    io = fio_io_attach_fd(fd, &c->protocol, c, c->tls_ctx);
+  } else {
+    /* never attached: teardown stays with the connecting state machine,
+     * which releases the context exactly once via free_context. */
+    fio___connecting_on_close(NULL, c);
+  }
   if (should_free_tls)
     fio_io_tls_free(args.tls);
   return io;

@@ -301,7 +301,8 @@ static void test_poll_invalid_arguments(void) {
              "poll monitor map leak counter must be balanced");
   fprintf(stderr, "* invalid arguments + leak counters: OK\n");
 }
-#endif
+
+#endif /* FIO_POLL_ENGINE_POLL */
 
 int main(void) {
   fprintf(stderr,

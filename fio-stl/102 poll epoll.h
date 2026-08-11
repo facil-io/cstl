@@ -160,8 +160,15 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   if (active_count > 0) {
     /* errors are dispatched via the EPOLLIN queue (see below) */
     for (unsigned i = 0; i < (unsigned)active_count; i++) {
-      if (events[i].events & EPOLLOUT)
-        p->settings.on_ready(events[i].data.ptr);
+      if (events[i].events & EPOLLOUT) {
+        /* an error/hangup on a writable event is a closure, not readiness
+         * (poll backend parity): a failed non-blocking connect reports
+         * EPOLLOUT together with EPOLLERR/EPOLLHUP. */
+        if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
+          p->settings.on_close(events[i].data.ptr);
+        else
+          p->settings.on_ready(events[i].data.ptr);
+      }
     } // end for loop
     total += active_count;
   }

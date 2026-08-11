@@ -34,12 +34,18 @@ typedef struct {
 
 #define FIO___POLL_IMAP_CMP(a, b) ((a)->fd == (b)->fd)
 #define FIO___POLL_IMAP_HASH(o)   (fio_risky_ptr((void *)((uintptr_t)((o)->fd))))
+/* Entries are always sockets: a live entry holds a valid socket descriptor.
+ * Removed slots are zeroed by the imap (fd == 0), so validity must reject
+ * both FIO_SOCKET_INVALID and zeroed slots (fd 0 is never monitored here) -
+ * otherwise rehashes resurrect removed entries as fd 0 zombies, duplicated
+ * fd 0 entries then fail every __fill_imap and the map expands without bound. */
+#define FIO___POLL_IMAP_VALID(o) (FIO_SOCK_FD_ISVALID((o)->fd) && (o)->fd)
 FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
                        fio___poll_i_s,
                        uint32_t,
                        FIO___POLL_IMAP_HASH,
                        FIO___POLL_IMAP_CMP,
-                       FIO_IMAP_ALWAYS_VALID)
+                       FIO___POLL_IMAP_VALID)
 #undef FIO___POLL_IMAP_CMP
 #undef FIO___POLL_IMAP_VALID
 #undef FIO___POLL_IMAP_HASH
@@ -233,7 +239,14 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       if (!pfd[i].revents)
         continue;
       ++handled;
-      /* strip fired flags — one-shot: consumed events are not re-queued */
+      /* strip fired flags — one-shot: consumed events are not re-queued.
+       * Strip whole event groups: WSAPoll reports sub-band bits (e.g.
+       * POLLRDNORM) while POLLIN/POLLOUT are supersets, so a raw bitwise
+       * strip can leave band bits (e.g. POLLRDBAND) armed on Windows. */
+      if (pfd[i].revents & POLLIN)
+        pfd[i].events &= (short)~POLLIN;
+      if (pfd[i].revents & POLLOUT)
+        pfd[i].events &= (short)~POLLOUT;
       pfd[i].events &= (short)~pfd[i].revents;
       /* if a close/error event fired, disarm all remaining flags for this fd */
       if (pfd[i].revents & (POLLHUP | POLLERR | POLLNVAL | FIO_POLL_EX_FLAGS))

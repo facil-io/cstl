@@ -39,6 +39,7 @@ DEBUG_CFLAGS:=$(CFLAGS) -O0 -DDEBUG=1 -fno-builtin $(WARNINGS) -I$(SRC_DIR) -I.
 # every allocation sanitizer-visible.
 ASAN_CFLAGS:=$(CFLAGS) -O1 -g -DDEBUG=1 -fsanitize=address -fno-omit-frame-pointer -DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS $(WARNINGS) -I$(SRC_DIR) -I.
 UB_CFLAGS:=$(CFLAGS) -O1 -g -DDEBUG=1 -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS $(WARNINGS) -I$(SRC_DIR) -I.
+TSAN_CFLAGS:=$(CFLAGS) -O1 -g -DDEBUG=1 -fsanitize=thread -fno-omit-frame-pointer -DFIO_MEMORY_DISABLE -DFIO_MEMALT -DFIO_NO_TLS $(WARNINGS) -I$(SRC_DIR) -I.
 
 # Main executable
 PROJECT = $(BUILD_DIR)/$(NAME)
@@ -125,7 +126,7 @@ db/%: | clean set_debug_flags % ;
 %/db: | clean set_debug_flags % ;
 
 #############################################################################
-# Sanitizer Flags (asan/target, ub/target or target/asan, target/ub)
+# Sanitizer Flags (asan/target, ub/target, tsan/target or target/asan, ...)
 #############################################################################
 
 set_asan_flags:
@@ -141,6 +142,13 @@ asan/%: | clean set_asan_flags % ;
 
 ub/%: | clean set_ub_flags % ;
 %/ub: | clean set_ub_flags % ;
+
+set_tsan_flags:
+	$(eval CFLAGS=$(TSAN_CFLAGS))
+	@echo "(!) Thread sanitizer mode detected."
+
+tsan/%: | clean set_tsan_flags % ;
+%/tsan: | clean set_tsan_flags % ;
 
 
 # -DFIO_MEMORY_DISABLE -DFIO_MEMALT
@@ -281,7 +289,7 @@ endef
 
 # Units that cannot build under sanitizer goals (FIO_NO_TLS disables the
 # OpenSSL module, so the OpenSSL test unit has nothing to test).
-ifneq ($(filter asan/% %/asan ub/% %/ub,$(MAKECMDGOALS)),)
+ifneq ($(filter asan/% %/asan ub/% %/ub tsan/% %/tsan,$(MAKECMDGOALS)),)
 TEST_EXCLUDE += tests/openssl.c
 endif
 

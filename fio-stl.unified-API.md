@@ -4024,7 +4024,7 @@ _Symbol type:_ `macro`
 #define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) __atomic_compare_exchange((p_obj), (p_expected), (p_desired), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
 ```
 
-An atomic compare and exchange operation, returns true if an exchange occured. `p_expected` MAY be overwritten with the existing value (system specific).
+An atomic compare and exchange operation, returns true if an exchange occurred. `p_expected` MAY be overwritten with the existing value (system specific).
 
 _Note:_ this may be a macro only / macro wrapper for a function.
 
@@ -33984,6 +33984,11 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 
 Returns NULL on error. the `fio_io_s` pointer must NOT be used except
 within proper callbacks.
+
+Ownership of `tls` transfers to the reactor when `fio_io_attach_fd` is
+called, whether the call succeeds or fails - callers must not use or free
+it afterwards. On failure the reactor releases it with the TLS
+implementation's `free_context` (never the per-connection `cleanup`).
 
 _Symbol type:_ `function`
 
