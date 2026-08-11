@@ -407,6 +407,10 @@ An address-resolution failure occurs before an fio_io_s is created. The
 internal connecting protocol routes its own on_close to the application's
 on_failed callback, but the application protocol is never attached. Therefore
 on_failed is the only application callback and fio_io_free is not called.
+
+The failure teardown is deferred to the IO queue (IO-thread affinity), so
+on_failed does NOT fire before fio_io_connect returns - this test drains
+the queue to perform it synchronously.
 ***************************************************************************** */
 static fio_io_protocol_s fio___test_io_invalid_host_protocol;
 static volatile int fio___test_io_invalid_host_failed_count = 0;
@@ -455,6 +459,10 @@ static void test_io_connect_invalid_host(void) {
                                 .timeout = 100);
 
   FIO_ASSERT(!io, "invalid-host fio_io_connect should return NULL");
+  /* Failure teardown is deferred to the IO queue. Drain it so the deferred
+   * fio___connecting_on_close runs on_failed and releases the connecting
+   * state before the assertions below. */
+  fio_queue_perform_all(fio_io_queue());
   FIO_ASSERT(fio___test_io_invalid_host_failed_count == 1,
              "invalid-host on_failed should run exactly once (got %d)",
              fio___test_io_invalid_host_failed_count);

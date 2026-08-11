@@ -232,7 +232,9 @@ typedef struct {
   const char *url;
   /** Connection protocol (once connection established). */
   fio_io_protocol_s *protocol;
-  /** Called in case of a failed connection, use for cleanup. */
+  /** Called in case of a failed connection, use for cleanup.
+   * Always runs on the IO thread, possibly asynchronously after
+   * `fio_io_connect` returns (even when it returns `NULL`). */
   void (*on_failed)(fio_io_protocol_s *protocol, void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
@@ -247,6 +249,18 @@ typedef struct {
  *
  * Note: The IO object returned is owned by the reactor. The copy returned is
  * valid only until the next event is processed.
+ *
+ * Ownership: calling `fio_io_connect` transfers ownership of `protocol`,
+ * `udata` and the connecting state to the reactor. Cleanup of these MUST be
+ * performed only from `on_failed` (connection never established) or
+ * `on_close` (established connection closed) - never in response to
+ * `fio_io_connect` returning `NULL`, as the reactor retains the connecting
+ * state until the deferred failure task runs.
+ *
+ * `on_failed` always runs on the IO thread and may fire asynchronously,
+ * after `fio_io_connect` returns (including when `NULL` is returned). This
+ * implies the reactor MUST run at some point after a call, or the
+ * transferred ownership is never released.
  * */
 SFUNC fio_io_s *fio_io_connect(fio_io_connect_args_s args);
 
@@ -255,6 +269,18 @@ SFUNC fio_io_s *fio_io_connect(fio_io_connect_args_s args);
  *
  * Note: The IO object returned is owned by the reactor. The copy returned is
  * valid only until the next event is processed.
+ *
+ * Ownership: calling `fio_io_connect` transfers ownership of `protocol`,
+ * `udata` and the connecting state to the reactor. Cleanup of these MUST be
+ * performed only from `on_failed` (connection never established) or
+ * `on_close` (established connection closed) - never in response to
+ * `fio_io_connect` returning `NULL`, as the reactor retains the connecting
+ * state until the deferred failure task runs.
+ *
+ * `on_failed` always runs on the IO thread and may fire asynchronously,
+ * after `fio_io_connect` returns (including when `NULL` is returned). This
+ * implies the reactor MUST run at some point after a call, or the
+ * transferred ownership is never released.
  * */
 #define fio_io_connect(url_, ...)                                              \
   fio_io_connect((fio_io_connect_args_s){.url = url_, __VA_ARGS__})

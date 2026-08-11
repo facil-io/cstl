@@ -320,7 +320,8 @@ static struct FIO___IO_S {
   FIO___LOCK_TYPE lock;
   size_t shutdown_timeout;
   /* the recorded IO (reactor) thread's numeral ID - the only thread allowed
-   * to perform the main IO queue (DEBUG tripwire, FIO___IO_ASSERT_IO_THREAD). */
+   * to perform the main IO queue (DEBUG tripwire, FIO___IO_ASSERT_IO_THREAD).
+   */
   uintptr_t io_thread;
 } FIO___IO = {
     .tick = 0,

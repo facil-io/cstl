@@ -925,9 +925,8 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
     /* the TLS context's ownership transfers to the reactor (attach_fd) */
     io = fio_io_attach_fd(fd, &c->protocol, c, c->tls_ctx);
   } else {
-    /* never attached: teardown stays with the connecting state machine,
-     * which releases the context exactly once via free_context. */
-    fio___connecting_on_close(NULL, c);
+    /* never attached. Teardown in IO thread for safety. */
+    fio___io_defer_no_wakeup(fio___connecting_on_close, NULL, c);
   }
   if (should_free_tls)
     fio_io_tls_free(args.tls);
