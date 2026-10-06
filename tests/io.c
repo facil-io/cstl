@@ -80,6 +80,38 @@ static void test_io_noop_and_protocol_set_init(void) {
   FIO_ASSERT(pr.timeout != 0,
              "protocol initialization should set default timeout");
 
+  FIO_ASSERT(fio_io_protocol_set(NULL, NULL) == NULL,
+             "protocol_set(NULL, NULL) should be a no-op");
+
+  /* pre-reactor initialization yields a complete plaintext protocol; the
+   * first real use with TLS (e.g., fio_io_listen + TLS) replaces the
+   * plaintext default IO functions with the TLS defaults. */
+  {
+    fio_io_functions_s tls_fn = fio_io_tls_default_functions(NULL);
+    fio_io_protocol_s tls_pr = {0};
+    fio_io_protocol_set(NULL, &tls_pr);
+    FIO_ASSERT(tls_pr.io_functions.start == fio_io_noop &&
+                   tls_pr.io_functions.read == fio___io_func_default_read &&
+                   tls_pr.io_functions.write == fio___io_func_default_write,
+               "pre-initialized protocol should have plaintext IO functions");
+    fio___io_protocol_init_test(&tls_pr, 1);
+    FIO_ASSERT(tls_pr.io_functions.start == tls_fn.start &&
+                   tls_pr.io_functions.read == tls_fn.read &&
+                   tls_pr.io_functions.build_context == tls_fn.build_context,
+               "pre-initialized protocol should get TLS IO defaults on first "
+               "TLS use");
+    fio___io_protocol_init_test(&tls_pr, 0); /* later uses don't re-init */
+    FIO_ASSERT(tls_pr.io_functions.read == tls_fn.read,
+               "IO functions are resolved once per protocol");
+
+    fio_io_protocol_s plain_pr = {0};
+    fio_io_protocol_set(NULL, &plain_pr);
+    fio___io_protocol_init_test(&plain_pr, 0);
+    FIO_ASSERT(plain_pr.io_functions.start == fio_io_noop &&
+                   plain_pr.io_functions.read == fio___io_func_default_read,
+               "plaintext use should keep plaintext IO defaults");
+  }
+
   fio_io_noop(NULL);
   fprintf(stderr, "* fio_io_noop + protocol_set init: OK\n");
 }
@@ -764,7 +796,27 @@ static void fio___test_io_start_listen_task(void *u1, void *u2) {
 
 static void fio___test_io_start_late_failure_task(void *u1, void *u2) {
   (void)u1, (void)u2;
-  fio_io_s *io = fio_io_connect("tcp://example.com:81",
+  /* Reserve an ephemeral loopback port, then close its listener before
+   * connecting. The resulting refused connection exercises the asynchronous
+   * failure path without relying on DNS or an external network endpoint. */
+  fio_socket_i listener =
+      fio_sock_open2("tcp://127.0.0.1:0", FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(listener),
+             "failed to reserve loopback port for late failure test");
+  struct sockaddr_in address = {0};
+  socklen_t address_len = sizeof(address);
+  FIO_ASSERT(!getsockname(listener,
+                           (struct sockaddr *)&address,
+                           &address_len),
+             "getsockname failed while reserving loopback port");
+  fio_sock_close(listener);
+
+  char url[64];
+  snprintf(url,
+           sizeof(url),
+           "tcp://127.0.0.1:%u",
+           ntohs(address.sin_port));
+  fio_io_s *io = fio_io_connect(url,
                                 .protocol = &fio___test_io_late_protocol,
                                 .on_failed = fio___test_io_late_on_failed,
                                 .udata = (void *)0xD1E,
@@ -961,6 +1013,455 @@ static void test_io_integration(void) {
 #endif
 }
 
+/* Asserts inside a running reactor: stop the reactor first, otherwise the
+ * at-exit cleanup keeps performing the (self-rescheduling) reactor task and a
+ * failing test hangs instead of exiting. */
+#define FIO___TEST_IO_REACTOR_ASSERT(cond, ...)                                 \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      fio_io_stop();                                                           \
+      FIO_ASSERT(0, __VA_ARGS__);                                              \
+    }                                                                          \
+  } while (0)
+
+/* *****************************************************************************
+Regression - one protocol shared by a listener and fio_io_connect
+
+`fio_io_connect` used to re-initialize the protocol unconditionally,
+resetting `reserved.ios` / `reserved.protocols` while live IOs were linked.
+This orphaned live IOs and double-linked the protocol into the reactor's
+protocol list (cycles -> reactor livelock, or writes into freed IOs).
+Assertions fire before the corruption can livelock the reactor.
+***************************************************************************** */
+#define FIO___TEST_IO_SHARED_MAX 8
+static fio_io_protocol_s fio___test_io_shared_protocol;
+static fio_io_s *fio___test_io_shared_ios[FIO___TEST_IO_SHARED_MAX];
+static volatile int fio___test_io_shared_attached = 0;
+static volatile int fio___test_io_shared_closed = 0;
+static volatile int fio___test_io_shared_failed = 0;
+static volatile int fio___test_io_shared_step = 0;
+static volatile int fio___test_io_shared_done = 0;
+static volatile int fio___test_io_shared_ticks = 0;
+static char fio___test_io_shared_url[64];
+
+static void fio___test_io_shared_on_attach(fio_io_s *io) {
+  FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_attached < FIO___TEST_IO_SHARED_MAX,
+             "shared protocol: too many attached IOs");
+  /* hold a reference so the test may close the IO safely later */
+  fio___test_io_shared_ios[fio___test_io_shared_attached++] = fio_io_dup(io);
+}
+static void fio___test_io_shared_on_data(fio_io_s *io) {
+  char buf[64];
+  while (fio_io_read(io, buf, sizeof(buf)))
+    ;
+}
+static void fio___test_io_shared_on_close(void *buffer, void *udata) {
+  ++fio___test_io_shared_closed;
+  (void)buffer, (void)udata;
+}
+static void fio___test_io_shared_on_failed(fio_io_protocol_s *pr, void *ud) {
+  ++fio___test_io_shared_failed;
+  (void)pr, (void)ud;
+}
+
+static void fio___test_io_shared_count_task(fio_io_s *io, void *count) {
+  ++*(size_t *)count;
+  (void)io;
+}
+/* IOs reachable through the protocol's `reserved.ios` list. */
+static size_t fio___test_io_shared_ios_count(void) {
+  size_t count = 0;
+  fio_io_protocol_each(&fio___test_io_shared_protocol,
+                       fio___test_io_shared_count_task,
+                       &count);
+  return count;
+}
+/* Times the protocol is linked in the reactor's protocol list (bounded, as a
+ * corrupted list may cycle). */
+static size_t fio___test_io_shared_links(void) {
+  size_t links = 0, guard = 0;
+  FIO_LIST_EACH(fio_io_protocol_s,
+                reserved.protocols,
+                &FIO___IO.protocols,
+                pr) {
+    links += (pr == &fio___test_io_shared_protocol);
+    if (++guard > 64)
+      break;
+  }
+  return links;
+}
+
+static void fio___test_io_shared_connect(void) {
+  fio_io_s *io = fio_io_connect(fio___test_io_shared_url,
+                                .protocol = &fio___test_io_shared_protocol,
+                                .on_failed = fio___test_io_shared_on_failed,
+                                .timeout = 5000);
+  FIO_ASSERT(io, "shared protocol: fio_io_connect failed");
+}
+
+static int fio___test_io_shared_driver(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  FIO___TEST_IO_REACTOR_ASSERT(++fio___test_io_shared_ticks < 500,
+             "shared protocol: test timed out at step %d (attached %d, "
+             "closed %d, failed %d)",
+             fio___test_io_shared_step,
+             fio___test_io_shared_attached,
+             fio___test_io_shared_closed,
+             fio___test_io_shared_failed);
+  FIO___TEST_IO_REACTOR_ASSERT(!fio___test_io_shared_failed,
+             "shared protocol: a connection failed");
+  switch (fio___test_io_shared_step) {
+  case 0: /* first client: one accepted + one client IO share the protocol */
+    fio___test_io_shared_connect();
+    fio___test_io_shared_step = 1;
+    return 0;
+  case 1:
+    if (fio___test_io_shared_attached < 2)
+      return 0;
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_ios_count() == 2,
+               "shared protocol: expected 2 IOs, found %zu",
+               fio___test_io_shared_ios_count());
+    /* second client while the protocol has live IOs */
+    fio___test_io_shared_connect();
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_ios_count() == 2,
+               "fio_io_connect orphaned the protocol's live IOs "
+               "(expected 2, found %zu)",
+               fio___test_io_shared_ios_count());
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_links() == 1,
+               "fio_io_connect corrupted the reactor protocol list");
+    fio___test_io_shared_step = 2;
+    return 0;
+  case 2:
+    if (fio___test_io_shared_attached < 4)
+      return 0;
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_ios_count() == 4,
+               "shared protocol: expected 4 IOs, found %zu",
+               fio___test_io_shared_ios_count());
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_links() == 1,
+               "shared protocol linked %zu times in the reactor list",
+               fio___test_io_shared_links());
+    for (int i = 0; i < fio___test_io_shared_attached; ++i) {
+      fio_io_close_now(fio___test_io_shared_ios[i]);
+      fio_io_free(fio___test_io_shared_ios[i]);
+      fio___test_io_shared_ios[i] = NULL;
+    }
+    fio___test_io_shared_step = 3;
+    return 0;
+  case 3:
+    if (fio___test_io_shared_closed < 4)
+      return 0;
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_ios_count() == 0,
+               "shared protocol: closed IOs still listed (%zu)",
+               fio___test_io_shared_ios_count());
+    FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_shared_links() == 0,
+               "empty shared protocol still in the reactor list");
+    fio___test_io_shared_done = 1;
+    fio_io_stop();
+    return -1;
+  }
+  return 0;
+}
+
+static void test_io_shared_protocol_listen_connect(void) {
+  FIO_MEMSET(fio___test_io_shared_ios, 0, sizeof(fio___test_io_shared_ios));
+  fio___test_io_shared_attached = 0;
+  fio___test_io_shared_closed = 0;
+  fio___test_io_shared_failed = 0;
+  fio___test_io_shared_step = 0;
+  fio___test_io_shared_done = 0;
+  fio___test_io_shared_ticks = 0;
+  fio___test_io_shared_protocol = (fio_io_protocol_s){
+      .on_attach = fio___test_io_shared_on_attach,
+      .on_data = fio___test_io_shared_on_data,
+      .on_close = fio___test_io_shared_on_close,
+      .on_timeout = fio_io_touch,
+  };
+
+  /* reserve an ephemeral loopback port for the listener */
+  fio_socket_i reserve =
+      fio_sock_open2("tcp://127.0.0.1:0", FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(reserve), "failed to reserve loopback port");
+  struct sockaddr_in address = {0};
+  socklen_t address_len = sizeof(address);
+  FIO_ASSERT(!getsockname(reserve, (struct sockaddr *)&address, &address_len),
+             "getsockname failed while reserving loopback port");
+  fio_sock_close(reserve);
+  snprintf(fio___test_io_shared_url,
+           sizeof(fio___test_io_shared_url),
+           "tcp://127.0.0.1:%u",
+           (unsigned)ntohs(address.sin_port));
+
+  fio_io_listener_s *listener =
+      fio_io_listen(.url = fio___test_io_shared_url,
+                    .protocol = &fio___test_io_shared_protocol,
+                    .hide_from_log = 1);
+  FIO_ASSERT(listener, "shared protocol: listen failed");
+  fio_io_run_every(.fn = fio___test_io_shared_driver,
+                   .every = 10,
+                   .repetitions = -1);
+  fio_io_start(0);
+  fio_io_listen_stop(listener);
+
+  FIO_ASSERT(fio___test_io_shared_done,
+             "shared protocol: test did not complete");
+  FIO_ASSERT(fio___test_io_shared_closed == 4,
+             "shared protocol: expected 4 on_close calls, got %d",
+             fio___test_io_shared_closed);
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io),
+             "shared protocol: IO objects should be fully released");
+  fprintf(stderr, "* shared protocol listen + connect (list integrity): OK\n");
+}
+#undef FIO___TEST_IO_SHARED_MAX
+
+/* *****************************************************************************
+Regression - protocol_set(io, NULL) ("zombie" / disengaged IO) lifecycle
+
+An IO with a non-default transport (e.g., TLS) keeps its IO functions when
+set to NULL (a temporary protocol, freed on close). Plaintext IOs use the
+shared mock protocol. The caller owns `udata` / buffer resources. Covers:
+re-NULL (no extra allocation, no IO leak), revival (transport carries over,
+no second `start`), same-protocol re-set (no IO leak) and the write tail.
+***************************************************************************** */
+typedef enum {
+  FIO___TEST_IO_ZOMBIE_CLOSE,   /* real -> NULL -> close */
+  FIO___TEST_IO_ZOMBIE_RENULL,  /* real -> NULL -> NULL -> close */
+  FIO___TEST_IO_ZOMBIE_REVIVE,  /* real -> NULL -> real2 -> close */
+  FIO___TEST_IO_ZOMBIE_WRITE,   /* real -> NULL, write tail -> close */
+  FIO___TEST_IO_ZOMBIE_SAME,    /* real -> same real -> close */
+  FIO___TEST_IO_ZOMBIE_PLAIN,   /* plaintext -> NULL (mock), write -> close */
+  FIO___TEST_IO_ZOMBIE_CASES
+} fio___test_io_zombie_case_e;
+
+static const char *fio___test_io_zombie_names[] = {
+    "real -> NULL -> close",
+    "real -> NULL -> NULL -> close",
+    "real -> NULL -> real2 -> close",
+    "real -> NULL -> write tail -> close",
+    "real -> same real -> close",
+    "plaintext -> NULL -> write tail -> close",
+};
+
+static struct {
+  fio___test_io_zombie_case_e tcase;
+  int step;
+  int ticks;
+  int done;
+  int start_calls;
+  int custom_reads;
+  int custom_writes;
+  int attach_calls;
+  int close_p1;
+  int close_p2;
+  int close_plain;
+  fio_io_s *io;
+  fio_io_protocol_s *zombie;
+  fio_socket_i peer;
+  char tail[16];
+  size_t tail_len;
+} fio___test_io_zombie;
+
+static ssize_t fio___test_io_zombie_read(fio_socket_i fd,
+                                         void *buf,
+                                         size_t len,
+                                         void *tls) {
+  ++fio___test_io_zombie.custom_reads;
+  return fio___io_func_default_read(fd, buf, len, tls);
+}
+static ssize_t fio___test_io_zombie_write(fio_socket_i fd,
+                                          const void *buf,
+                                          size_t len,
+                                          void *tls) {
+  ++fio___test_io_zombie.custom_writes;
+  return fio___io_func_default_write(fd, buf, len, tls);
+}
+static void fio___test_io_zombie_start(fio_io_s *io) {
+  ++fio___test_io_zombie.start_calls;
+  (void)io;
+}
+static void fio___test_io_zombie_on_attach(fio_io_s *io) {
+  ++fio___test_io_zombie.attach_calls;
+  (void)io;
+}
+static void fio___test_io_zombie_close_p1(void *b, void *u) {
+  ++fio___test_io_zombie.close_p1;
+  (void)b, (void)u;
+}
+static void fio___test_io_zombie_close_p2(void *b, void *u) {
+  ++fio___test_io_zombie.close_p2;
+  (void)b, (void)u;
+}
+static void fio___test_io_zombie_close_plain(void *b, void *u) {
+  ++fio___test_io_zombie.close_plain;
+  (void)b, (void)u;
+}
+
+static fio_io_protocol_s fio___test_io_zombie_p1;
+static fio_io_protocol_s fio___test_io_zombie_p2;
+static fio_io_protocol_s fio___test_io_zombie_plain;
+
+/* Reads the tail written to the peer (non-blocking, retried per tick). */
+static int fio___test_io_zombie_read_tail(void) {
+  ssize_t r = fio_sock_read(
+      fio___test_io_zombie.peer,
+      fio___test_io_zombie.tail + fio___test_io_zombie.tail_len,
+      sizeof(fio___test_io_zombie.tail) - 1 - fio___test_io_zombie.tail_len);
+  if (r > 0)
+    fio___test_io_zombie.tail_len += (size_t)r;
+  return fio___test_io_zombie.tail_len >= 4;
+}
+
+static int fio___test_io_zombie_driver(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  const fio___test_io_zombie_case_e tc = fio___test_io_zombie.tcase;
+  fio_io_s *io = fio___test_io_zombie.io;
+  FIO___TEST_IO_REACTOR_ASSERT(++fio___test_io_zombie.ticks < 300,
+             "zombie (%s): timed out at step %d",
+             fio___test_io_zombie_names[tc],
+             fio___test_io_zombie.step);
+  switch (fio___test_io_zombie.step) {
+  case 0: /* first switch */
+    fio_io_protocol_set(io,
+                        (tc == FIO___TEST_IO_ZOMBIE_SAME)
+                            ? &fio___test_io_zombie_p1
+                            : NULL);
+    break;
+  case 1: /* inspect the first switch, perform the second action */
+    if (tc == FIO___TEST_IO_ZOMBIE_SAME) {
+      FIO___TEST_IO_REACTOR_ASSERT(fio_io_protocol(io) == &fio___test_io_zombie_p1,
+                 "same-protocol re-set should keep the protocol");
+    } else if (tc == FIO___TEST_IO_ZOMBIE_PLAIN) {
+      FIO___TEST_IO_REACTOR_ASSERT(fio_io_protocol(io) == &FIO___IO_MOCK_PROTOCOL,
+                 "plaintext IO set to NULL should use the shared mock");
+    } else {
+      fio___test_io_zombie.zombie = fio_io_protocol(io);
+      FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_zombie.zombie != &FIO___IO_MOCK_PROTOCOL &&
+                     fio___test_io_zombie.zombie != &fio___test_io_zombie_p1,
+                 "custom transport IO set to NULL should get its own "
+                 "temporary protocol");
+      FIO___TEST_IO_REACTOR_ASSERT(fio___test_io_zombie.zombie->io_functions.read ==
+                         fio___test_io_zombie_read &&
+                     fio___test_io_zombie.zombie->io_functions.write ==
+                         fio___test_io_zombie_write,
+                 "temporary protocol should keep the IO's transport");
+    }
+    if (tc == FIO___TEST_IO_ZOMBIE_RENULL)
+      fio_io_protocol_set(io, NULL);
+    else if (tc == FIO___TEST_IO_ZOMBIE_REVIVE)
+      fio_io_protocol_set(io, &fio___test_io_zombie_p2);
+    else if (tc == FIO___TEST_IO_ZOMBIE_WRITE ||
+             tc == FIO___TEST_IO_ZOMBIE_PLAIN)
+      fio_io_write(io, "tail", 4);
+    break;
+  case 2: /* inspect the second action, then close */
+    if (tc == FIO___TEST_IO_ZOMBIE_RENULL)
+      FIO___TEST_IO_REACTOR_ASSERT(fio_io_protocol(io) == fio___test_io_zombie.zombie,
+                 "re-NULL should keep the same temporary protocol");
+    if (tc == FIO___TEST_IO_ZOMBIE_REVIVE)
+      FIO___TEST_IO_REACTOR_ASSERT(fio_io_protocol(io) == &fio___test_io_zombie_p2,
+                 "revived IO should use the new protocol");
+    if ((tc == FIO___TEST_IO_ZOMBIE_WRITE ||
+         tc == FIO___TEST_IO_ZOMBIE_PLAIN) &&
+        !fio___test_io_zombie_read_tail())
+      return 0; /* tail not arrived yet - retry next tick */
+    fio_io_close_now(io);
+    fio___test_io_zombie.io = NULL;
+    break;
+  default: /* wait for destruction */
+    if (FIO_LEAK_COUNTER_COUNT(fio___io) > 1) /* the wakeup IO remains */
+      return 0;
+    fio___test_io_zombie.done = 1;
+    fio_io_stop();
+    return -1;
+  }
+  ++fio___test_io_zombie.step;
+  return 0;
+}
+
+static void fio___test_io_zombie_run(fio___test_io_zombie_case_e tc) {
+  FIO_MEMSET(&fio___test_io_zombie, 0, sizeof(fio___test_io_zombie));
+  fio___test_io_zombie.tcase = tc;
+  fio_socket_i fds[2];
+  FIO_ASSERT(!fio_sock_socketpair(fds), "zombie: socketpair failed");
+  fio_sock_set_non_block(fds[1]);
+  fio___test_io_zombie.peer = fds[1];
+  fio___test_io_zombie.io =
+      fio_io_attach_fd(fds[0],
+                       (tc == FIO___TEST_IO_ZOMBIE_PLAIN)
+                           ? &fio___test_io_zombie_plain
+                           : &fio___test_io_zombie_p1,
+                       NULL,
+                       NULL);
+  FIO_ASSERT(fio___test_io_zombie.io, "zombie: attach failed");
+  fio_io_run_every(.fn = fio___test_io_zombie_driver,
+                   .every = 10,
+                   .repetitions = -1);
+  fio_io_start(0);
+  fio_sock_close(fio___test_io_zombie.peer);
+
+  const char *nm = fio___test_io_zombie_names[tc];
+  FIO_ASSERT(fio___test_io_zombie.done, "zombie (%s): did not complete", nm);
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io),
+             "zombie (%s): IO object leaked",
+             nm);
+  if (tc != FIO___TEST_IO_ZOMBIE_PLAIN) {
+    FIO_ASSERT(fio___test_io_zombie.start_calls == 1,
+               "zombie (%s): transport `start` should run once (ran %d)",
+               nm,
+               fio___test_io_zombie.start_calls);
+    FIO_ASSERT(fio___test_io_zombie.attach_calls ==
+                   1 + (tc == FIO___TEST_IO_ZOMBIE_REVIVE),
+               "zombie (%s): unexpected on_attach count (%d)",
+               nm,
+               fio___test_io_zombie.attach_calls);
+  }
+  /* the user's on_close runs only for the protocol the IO closed with */
+  FIO_ASSERT(fio___test_io_zombie.close_p1 ==
+                 (tc == FIO___TEST_IO_ZOMBIE_SAME),
+             "zombie (%s): unexpected protocol 1 on_close count (%d)",
+             nm,
+             fio___test_io_zombie.close_p1);
+  FIO_ASSERT(fio___test_io_zombie.close_p2 ==
+                 (tc == FIO___TEST_IO_ZOMBIE_REVIVE),
+             "zombie (%s): unexpected protocol 2 on_close count (%d)",
+             nm,
+             fio___test_io_zombie.close_p2);
+  FIO_ASSERT(!fio___test_io_zombie.close_plain,
+             "zombie (%s): plaintext on_close should not run after NULL",
+             nm);
+  if (tc == FIO___TEST_IO_ZOMBIE_WRITE || tc == FIO___TEST_IO_ZOMBIE_PLAIN)
+    FIO_ASSERT(fio___test_io_zombie.tail_len == 4 &&
+                   !FIO_MEMCMP(fio___test_io_zombie.tail, "tail", 4),
+               "zombie (%s): tail not delivered",
+               nm);
+  if (tc == FIO___TEST_IO_ZOMBIE_WRITE)
+    FIO_ASSERT(fio___test_io_zombie.custom_writes > 0,
+               "zombie (%s): tail should use the IO's transport",
+               nm);
+}
+
+static void test_io_protocol_set_null_lifecycle(void) {
+  fio___test_io_zombie_p1 = (fio_io_protocol_s){
+      .on_attach = fio___test_io_zombie_on_attach,
+      .on_close = fio___test_io_zombie_close_p1,
+      .io_functions =
+          {
+              .start = fio___test_io_zombie_start,
+              .read = fio___test_io_zombie_read,
+              .write = fio___test_io_zombie_write,
+          },
+  };
+  fio___test_io_zombie_p2 = fio___test_io_zombie_p1;
+  fio___test_io_zombie_p2.on_close = fio___test_io_zombie_close_p2;
+  fio___test_io_zombie_plain = (fio_io_protocol_s){
+      .on_close = fio___test_io_zombie_close_plain,
+  };
+  for (int i = 0; i < FIO___TEST_IO_ZOMBIE_CASES; ++i)
+    fio___test_io_zombie_run((fio___test_io_zombie_case_e)i);
+  fprintf(stderr,
+          "* protocol_set(io, NULL) lifecycle (%d cases, no leaks): OK\n",
+          (int)FIO___TEST_IO_ZOMBIE_CASES);
+}
+
 /* *****************************************************************************
 Main entry point
 ***************************************************************************** */
@@ -976,6 +1477,8 @@ int main(void) {
   test_io_default_functions();
   test_io_connect_invalid_host();
 
+  test_io_shared_protocol_listen_connect();
+  test_io_protocol_set_null_lifecycle();
   test_io_integration();
 
   fprintf(stderr, "=== IO tests passed ===\n");

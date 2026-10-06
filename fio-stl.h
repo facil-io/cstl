@@ -105537,7 +105537,7 @@ static void fio___io_on_ev_pubsub_mock(struct fio_pubsub_msg_s *msg) {
 static void fio___io_on_user_mock(fio_io_s *io, void *i_) {
   (void)io, (void)i_;
 }
-static void fio___io_on_close_mock(void *p1, void *p2) { (void)p1, (void)p2; }
+static void fio___io_on_close_noop(void *p1, void *p2) { (void)p1, (void)p2; }
 
 /* Called to perform a non-blocking `read`, same as the system call. */
 static ssize_t fio___io_func_default_read(fio_socket_i fd,
@@ -105630,8 +105630,11 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
       .cleanup = fio___io_func_default_cleanup,
       .peer_info_next = fio___io_func_default_peer_info_next,
   };
-  if (has_tls)
+  if (has_tls) {
     io_fn = fio_io_tls_default_functions(NULL);
+    if (pr->io_functions.read == fio___io_func_default_read)
+      pr->io_functions = io_fn;
+  }
   if (!pr->on_attach)
     pr->on_attach = fio_io_noop;
   if (!pr->on_data)
@@ -105639,7 +105642,7 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
   if (!pr->on_ready)
     pr->on_ready = fio_io_noop;
   if (!pr->on_close)
-    pr->on_close = fio___io_on_close_mock;
+    pr->on_close = fio___io_on_close_noop;
   if (!pr->on_shutdown)
     pr->on_shutdown = fio_io_noop;
   if (!pr->on_timeout)
@@ -105961,13 +105964,41 @@ FIO_SFUNC void fio___io_destroy(fio_io_s *io) {
 #include FIO_INCLUDE_FILE
 #undef FIO___RECURSIVE_INCLUDE
 
+FIO_LEAK_COUNTER_DEF(fio___io_protocol_zombie)
+
+static void fio___io_on_close_zombie(void *p1, void *p2) {
+  (void)p2;
+  if (!p1)
+    return;
+  fio_io_s *io = ((fio_io_s *)p1) - 1;
+  if (!io || !io->pr)
+    return;
+  FIO_MEM_FREE_(io->pr, sizeof(*io->pr));
+  FIO_LEAK_COUNTER_ON_FREE(fio___io_protocol_zombie);
+}
+
 FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
   fio_io_s *io = (fio_io_s *)io_;
   fio_io_protocol_s *pr = (fio_io_protocol_s *)pr_;
   fio_io_protocol_s *old = io->pr;
-  if (!pr)
+  if (!pr) {
     pr = &FIO___IO_MOCK_PROTOCOL;
+    if (old->on_close == fio___io_on_close_zombie)
+      pr = old;
+    else if (old->io_functions.read != fio___io_func_default_read) {
+      fio_io_protocol_s zero = {0};
+      pr = FIO_MEM_REALLOC_(NULL, 0, sizeof(fio_io_protocol_s), 0);
+      FIO_ASSERT_ALLOC(pr);
+      FIO_LEAK_COUNTER_ON_ALLOC(fio___io_protocol_zombie);
+      *pr = FIO___IO_MOCK_PROTOCOL;
+      pr->reserved = zero.reserved;
+      pr->on_close = fio___io_on_close_zombie;
+      pr->io_functions = old->io_functions;
+    }
+  }
   fio___io_protocol_init_test(pr, (io->tls != NULL));
+  if (pr == old)
+    goto finish;
   FIO_LIST_REMOVE(&io->node);
   if (FIO_LIST_IS_EMPTY(&old->reserved.ios))
     FIO_LIST_REMOVE_RESET(&old->reserved.protocols);
@@ -105979,12 +106010,17 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
                  fio_io_pid(),
                  fio_io_fd(io));
   pr->on_attach(io);
+
   /* avoid calling `start` and setting `on_ready` more than once */
   if (old == &FIO___IO_MOCK_PROTOCOL) {
     pr->io_functions.start(io);
     fio___io_monitor_out(io);
+  } else if (old->on_close == fio___io_on_close_zombie) {
+    FIO_MEM_FREE_(old,
+                  sizeof(*old)); /* zombie revived: transport carries over */
   }
   fio___io_monitor_in(io);
+finish:
   fio___io_free_with_flush(io);
   FIO_LOG_DEBUG2("(%d) attached IO with fd %d", fio_io_pid(), fio_io_fd(io));
 }
@@ -106059,6 +106095,12 @@ SFUNC fio_io_protocol_s *fio_io_protocol_set(fio_io_s *io,
   fio_io_defer(fio___io_protocol_set, (void *)fio___io_dup2(io), (void *)pr);
   return pr;
 init:
+  /* Pre-reactor initialization: a complete (plaintext) protocol, left
+   * un-marked so the first real use re-runs initialization with the known TLS
+   * state (which replaces plaintext default IO functions). The IO lists are
+   * still empty, as every real use marks the protocol. */
+  if (!pr)
+    return pr;
   old_flags = pr->reserved.flags;
   fio___io_protocol_init_test(pr, 0);
   pr->reserved.flags = old_flags;
@@ -108127,7 +108169,9 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   size_t url_len = strlen(args.url);
   fio_url_s url = fio_url_parse(args.url, url_len);
   args.tls = fio_io_tls_from_url(args.tls, url);
-  fio___io_protocol_init(args.protocol, !!args.tls);
+  /* guarded: the protocol may already have live IOs (e.g., shared with a
+   * listener or another client) - re-initializing resets its IO lists. */
+  fio___io_protocol_init_test(args.protocol, !!args.tls);
   if (url.query.len)
     url_len = url.query.buf - (args.url + 1);
   else if (url.target.len)
@@ -122080,8 +122124,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
        * representation WAS selected by considering Accept-Encoding (a
        * gzip-capable request would receive a compressed variant), so
        * caches must key on it — RFC 9110 §12.5.5. */
-      if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0)
-               .buf)
+      if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0).buf)
         fio_http_response_header_set(
             h,
             FIO_STR_INFO2((char *)"vary", 4),
@@ -122653,13 +122696,30 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!status || status > 1000)
     status = 404;
   h->status = (uint16_t)status;
-  FIO_STR_INFO_TMP_VAR(filename, 127);
-  /* read static error code file */
-  fio_string_write2(&filename,
-                    NULL,
-                    FIO_STRING_WRITE_UNUM(status),
-                    FIO_STRING_WRITE_STR2(".html", 5));
-  char *body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
+  char *body = NULL;
+  fio_http_settings_s *st = fio_http_settings(h);
+  fio_buf_info_s folders[] = {
+      FIO_BUF_INFO2("./", 2),
+      (st ? FIO_BUF_INFO2(st->public_folder.buf, st->public_folder.len)
+          : FIO_BUF_INFO0),
+      FIO_BUF_INFO0,
+  };
+  FIO_STR_INFO_TMP_VAR(filename, 1023);
+
+  for (size_t i = 0; !body && folders[i].len; ++i) {
+    filename.len = 0;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2(folders[i].buf, folders[i].len),
+                      FIO_STRING_WRITE_STR2(
+                          "/",
+                          (size_t)(folders[i].buf[folders[i].len - 1] != '/' &&
+                                   folders[i].buf[folders[i].len - 1] !=
+                                       FIO_FOLDER_SEPARATOR)),
+                      FIO_STRING_WRITE_UNUM(status),
+                      FIO_STRING_WRITE_STR2(".html", 5));
+    body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
+  }
   fio_http_write_args_s args = {.buf = body,
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
@@ -124014,9 +124074,9 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   int fd = -1;
   size_t file_length = 0;
   /* combine public folder with path to get file name.
-    * NOTE: `rt` MUST name an existing folder (validated for settings-based
-    * callers; direct callers pass "." for the CWD) - the traversal guard
-    * rejects `..` folding, not absolute paths. */
+   * NOTE: `rt` MUST name an existing folder (validated for settings-based
+   * callers; direct callers pass "." for the CWD) - the traversal guard
+   * rejects `..` folding, not absolute paths. */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
   FIO_STR_INFO_TMP_VAR(filename, (FIO_FILENAME_PATH_CAPA - 1));

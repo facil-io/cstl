@@ -2391,8 +2391,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
        * representation WAS selected by considering Accept-Encoding (a
        * gzip-capable request would receive a compressed variant), so
        * caches must key on it — RFC 9110 §12.5.5. */
-      if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0)
-               .buf)
+      if (!fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0).buf)
         fio_http_response_header_set(
             h,
             FIO_STR_INFO2((char *)"vary", 4),
@@ -2964,13 +2963,30 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
   if (!status || status > 1000)
     status = 404;
   h->status = (uint16_t)status;
-  FIO_STR_INFO_TMP_VAR(filename, 127);
-  /* read static error code file */
-  fio_string_write2(&filename,
-                    NULL,
-                    FIO_STRING_WRITE_UNUM(status),
-                    FIO_STRING_WRITE_STR2(".html", 5));
-  char *body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
+  char *body = NULL;
+  fio_http_settings_s *st = fio_http_settings(h);
+  fio_buf_info_s folders[] = {
+      FIO_BUF_INFO2("./", 2),
+      (st ? FIO_BUF_INFO2(st->public_folder.buf, st->public_folder.len)
+          : FIO_BUF_INFO0),
+      FIO_BUF_INFO0,
+  };
+  FIO_STR_INFO_TMP_VAR(filename, 1023);
+
+  for (size_t i = 0; !body && folders[i].len; ++i) {
+    filename.len = 0;
+    fio_string_write2(&filename,
+                      NULL,
+                      FIO_STRING_WRITE_STR2(folders[i].buf, folders[i].len),
+                      FIO_STRING_WRITE_STR2(
+                          "/",
+                          (size_t)(folders[i].buf[folders[i].len - 1] != '/' &&
+                                   folders[i].buf[folders[i].len - 1] !=
+                                       FIO_FOLDER_SEPARATOR)),
+                      FIO_STRING_WRITE_UNUM(status),
+                      FIO_STRING_WRITE_STR2(".html", 5));
+    body = fio_bstr_readfile(NULL, filename.buf, 0, 0);
+  }
   fio_http_write_args_s args = {.buf = body,
                                 .len = fio_bstr_len(body),
                                 .dealloc = (void (*)(void *))fio_bstr_free,
@@ -4325,9 +4341,9 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
   int fd = -1;
   size_t file_length = 0;
   /* combine public folder with path to get file name.
-    * NOTE: `rt` MUST name an existing folder (validated for settings-based
-    * callers; direct callers pass "." for the CWD) - the traversal guard
-    * rejects `..` folding, not absolute paths. */
+   * NOTE: `rt` MUST name an existing folder (validated for settings-based
+   * callers; direct callers pass "." for the CWD) - the traversal guard
+   * rejects `..` folding, not absolute paths. */
   fio_str_info_s mime_type = {0};
   FIO_STR_INFO_TMP_VAR(etag, 31);
   FIO_STR_INFO_TMP_VAR(filename, (FIO_FILENAME_PATH_CAPA - 1));

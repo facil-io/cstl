@@ -346,6 +346,16 @@ int main(int argc, char const *argv[]) {
                          ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
                          : FIO_STR_INFO2(NULL, 0));
 
+  if (fio_cli_get("-www"))
+    fio_http_route(listener,
+                   "/static/",
+                   .public_folder =
+                       fio_cli_get("-www")
+                           ? FIO_STR_INFO1((char *)fio_cli_get("-www"))
+                           : FIO_STR_INFO2(NULL, 0));
+
+  fio_http_route(listener, "/error", .on_http = NULL);
+
   /* we don't need the tls object any more. */
   fio_io_tls_free(tls);
 

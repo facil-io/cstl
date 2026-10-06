@@ -896,7 +896,9 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   size_t url_len = strlen(args.url);
   fio_url_s url = fio_url_parse(args.url, url_len);
   args.tls = fio_io_tls_from_url(args.tls, url);
-  fio___io_protocol_init(args.protocol, !!args.tls);
+  /* guarded: the protocol may already have live IOs (e.g., shared with a
+   * listener or another client) - re-initializing resets its IO lists. */
+  fio___io_protocol_init_test(args.protocol, !!args.tls);
   if (url.query.len)
     url_len = url.query.buf - (args.url + 1);
   else if (url.target.len)
