@@ -6,5 +6,7 @@ allocation API routes through the system allocator backends
 (`_aligned_malloc`/`_aligned_realloc`/`_aligned_free` on Windows,
 `posix_memalign`/`free` on POSIX).
 ***************************************************************************** */
+#ifndef FIO_MEMORY_DISABLE
 #define FIO_MEMORY_DISABLE
+#endif
 #include "malloc.c"

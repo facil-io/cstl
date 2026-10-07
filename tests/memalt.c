@@ -3,7 +3,10 @@ Test - Memalt Module
 Covers 001 memalt.h fallback memory helpers and 010 mem.h edge assertions
 split out of ./tests/core.c during Stage 4A ownership normalization.
 ***************************************************************************** */
+#ifndef FIO_MEMALT
 #define FIO_MEMALT
+#endif
+
 #include "test-helpers.h"
 
 /* *****************************************************************************

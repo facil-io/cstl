@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3151.
+Total symbols: 3152.
 
 ## Contents
 
@@ -22,7 +22,7 @@ Total symbols: 3151.
 - [`./fio-stl/002 random.h`](#fio-stl-002-random-h) — 15
 - [`./fio-stl/002 signals.h`](#fio-stl-002-signals-h) — 8
 - [`./fio-stl/002 sort.h`](#fio-stl-002-sort-h) — 3
-- [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 32
+- [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 33
 - [`./fio-stl/002 url.h`](#fio-stl-002-url-h) — 7
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 28
@@ -20318,7 +20318,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-002-threads-h"></a> `./fio-stl/002 threads.h`
 
-32 public symbols.
+33 public symbols.
 
 ### Macros
 
@@ -20635,6 +20635,16 @@ inline int fio_thread_cond_signal(fio_thread_cond_t *c)
 ```
 
 Signals a simple conditional variable.
+
+_Symbol type:_ `function`
+
+#### `fio_thread_cond_broadcast`
+
+```c
+inline int fio_thread_cond_broadcast(fio_thread_cond_t *c)
+```
+
+Signal broadcast for a conditional variable.
 
 _Symbol type:_ `function`
 

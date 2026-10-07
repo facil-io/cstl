@@ -3,10 +3,18 @@ Regression Tests - Tests for previously fixed bugs to prevent regression.
 
 Archive source: ./tests-old/regression.c
 ***************************************************************************** */
+#ifndef FIO_LOG
 #define FIO_LOG
+#endif
+#ifndef FIO_MEMALT
 #define FIO_MEMALT
+#endif
+#ifndef FIO_JSON
 #define FIO_JSON
+#endif
+#ifndef FIO_CRYPTO
 #define FIO_CRYPTO
+#endif
 #include "test-helpers.h"
 
 /* *****************************************************************************

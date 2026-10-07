@@ -210,6 +210,9 @@ FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
 /** Signals a simple conditional variable. */
 FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c);
 
+/** Signal broadcast for a conditional variable. */
+FIO_IFUNC int fio_thread_cond_broadcast(fio_thread_cond_t *c);
+
 /** Destroys a simple conditional variable. */
 FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c);
 
@@ -408,6 +411,10 @@ FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return pthread_cond_signal(c);
 }
 
+/** Signal broadcast for a conditional variable. */
+FIO_IFUNC int fio_thread_cond_broadcast(fio_thread_cond_t *c) {
+  return pthread_cond_broadcast(c);
+}
 /** Destroys a simple conditional variable. */
 FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) {
   pthread_cond_destroy(c);
@@ -808,8 +815,13 @@ FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c) {
   return 0;
 }
 
+FIO_IFUNC int fio_thread_cond_broadcast(fio_thread_cond_t *c) {
+  WakeAllConditionVariable(c);
+  return 0;
+}
+
 /** Destroys a simple conditional variable. */
-FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)(c); }
+FIO_IFUNC void fio_thread_cond_destroy(fio_thread_cond_t *c) { (void)c; }
 #endif /* FIO_THREADS_COND_BYO */
 
 #endif /* FIO_OS_WIN */
