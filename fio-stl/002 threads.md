@@ -288,6 +288,14 @@ FIO_IFUNC int fio_thread_cond_signal(fio_thread_cond_t *c);
 
 Wakes one waiter.
 
+#### `fio_thread_cond_broadcast`
+
+```c
+FIO_IFUNC int fio_thread_cond_broadcast(fio_thread_cond_t *c);
+```
+
+Wakes all waiters.
+
 #### `fio_thread_cond_destroy`
 
 ```c
