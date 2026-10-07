@@ -1006,15 +1006,15 @@ FIO_IFUNC int fio___atomic_cmpxchg64(int64_t volatile *p_obj,
 #define fio_atomic_or(p_obj, value)  FIO___ATOMICS_FN_ROUTE(_InterlockedOr, (p_obj), (value))
 
 /** An atomic addition operation, returns new value; MACRO! Accesses `value` twice(!). */
-#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)) + (value))
+#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)) + (value))
 /** An atomic subtraction operation, returns new value; MACRO! Accesses `value` twice(!). */
-#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)) - (value))
+#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)) - (value))
 /** An atomic AND (&) operation, returns new value; MACRO! Accesses `value` twice(!). */
-#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)) & (value))
+#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)) & (value))
 /** An atomic XOR (^) operation, returns new value; MACRO! Accesses `value` twice(!). */
-#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)) ^ (value))
+#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)) ^ (value))
 /** An atomic OR (|) operation, returns new value; MACRO! Accesses `value` twice(!). */
-#define fio_atomic_or_fetch(p_obj, value)  (atomic_fetch_or((p_obj), (value)) | (value))
+#define fio_atomic_or_fetch(p_obj, value)  (fio_atomic_or((p_obj), (value)) | (value))
 
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
