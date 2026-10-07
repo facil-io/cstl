@@ -2966,7 +2966,7 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
   char *body = NULL;
   fio_http_settings_s *st = fio_http_settings(h);
   fio_buf_info_s folders[] = {
-      FIO_BUF_INFO2("./", 2),
+      FIO_BUF_INFO2((char *)"./", 2),
       (st ? FIO_BUF_INFO2(st->public_folder.buf, st->public_folder.len)
           : FIO_BUF_INFO0),
       FIO_BUF_INFO0,

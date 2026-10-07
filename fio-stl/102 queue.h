@@ -559,10 +559,10 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
   if (!(grp.stop & 2)) {
+    FIO___LOCK_UNLOCK(grp.queue->lock);
     fio_thread_cond_destroy(&grp.cond);
     fio_thread_mutex_destroy(&grp.mutex);
     fio_thread_detach(&grp.thread);
-    FIO___LOCK_UNLOCK(grp.queue->lock);
   } else {
     grp.stop = 1;
     FIO___LOCK_UNLOCK(grp.queue->lock);
@@ -631,8 +631,9 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
       FIO_THREAD_RESCHEDULE();
     fio_thread_cond_destroy(&pos->cond);
     fio_thread_mutex_destroy(&pos->mutex);
-    pos->stop = 0;
-    fio_thread_join(&pos->thread);
+    fio_thread_t thr = pos->thread;
+    fio_atomic_and(&pos->stop, 0);
+    fio_thread_join(&thr);
     FIO___LOCK_LOCK(q->lock);
   }
   FIO___LOCK_UNLOCK(q->lock);

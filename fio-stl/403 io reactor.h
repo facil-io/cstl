@@ -73,7 +73,7 @@ FIO_IFUNC int fio___io_queue_timers(void) {
     first = 0;
   if (first > 0xFFFFFF) /* cap */
     first = 0xFFFFFF;
-  return first;
+  return (int)first;
 }
 
 FIO_SFUNC void fio___io_tick(int max_timeout) {
@@ -226,10 +226,10 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2);
 
 static void fio___io_wait_for_worker(void *thr_) {
   fio_thread_t t = (fio_thread_t)(uintptr_t)thr_;
-  fio_thread_join(&t);
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___io_wait_for_worker,
                             (void *)(uintptr_t)t);
+  fio_thread_join(&t);
 }
 
 /** Worker sentinel */

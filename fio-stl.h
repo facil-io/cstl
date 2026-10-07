@@ -37552,10 +37552,10 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
   if (!(grp.stop & 2)) {
+    FIO___LOCK_UNLOCK(grp.queue->lock);
     fio_thread_cond_destroy(&grp.cond);
     fio_thread_mutex_destroy(&grp.mutex);
     fio_thread_detach(&grp.thread);
-    FIO___LOCK_UNLOCK(grp.queue->lock);
   } else {
     grp.stop = 1;
     FIO___LOCK_UNLOCK(grp.queue->lock);
@@ -37624,8 +37624,9 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
       FIO_THREAD_RESCHEDULE();
     fio_thread_cond_destroy(&pos->cond);
     fio_thread_mutex_destroy(&pos->mutex);
-    pos->stop = 0;
-    fio_thread_join(&pos->thread);
+    fio_thread_t thr = pos->thread;
+    fio_atomic_and(&pos->stop, 0);
+    fio_thread_join(&thr);
     FIO___LOCK_LOCK(q->lock);
   }
   FIO___LOCK_UNLOCK(q->lock);
@@ -106054,6 +106055,7 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
   } else if (old->on_close == fio___io_on_close_zombie) {
     FIO_MEM_FREE_(old,
                   sizeof(*old)); /* zombie revived: transport carries over */
+    FIO_LEAK_COUNTER_ON_FREE(fio___io_protocol_zombie);
   }
   fio___io_monitor_in(io);
 finish:
@@ -107382,7 +107384,7 @@ FIO_IFUNC int fio___io_queue_timers(void) {
     first = 0;
   if (first > 0xFFFFFF) /* cap */
     first = 0xFFFFFF;
-  return first;
+  return (int)first;
 }
 
 FIO_SFUNC void fio___io_tick(int max_timeout) {
@@ -107535,10 +107537,10 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2);
 
 static void fio___io_wait_for_worker(void *thr_) {
   fio_thread_t t = (fio_thread_t)(uintptr_t)thr_;
-  fio_thread_join(&t);
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___io_wait_for_worker,
                             (void *)(uintptr_t)t);
+  fio_thread_join(&t);
 }
 
 /** Worker sentinel */
@@ -122735,7 +122737,7 @@ SFUNC int fio_http_send_error_response(fio_http_s *h, size_t status) {
   char *body = NULL;
   fio_http_settings_s *st = fio_http_settings(h);
   fio_buf_info_s folders[] = {
-      FIO_BUF_INFO2("./", 2),
+      FIO_BUF_INFO2((char *)"./", 2),
       (st ? FIO_BUF_INFO2(st->public_folder.buf, st->public_folder.len)
           : FIO_BUF_INFO0),
       FIO_BUF_INFO0,

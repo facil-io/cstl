@@ -610,6 +610,7 @@ FIO_SFUNC void fio___io_protocol_set(void *io_, void *pr_) {
   } else if (old->on_close == fio___io_on_close_zombie) {
     FIO_MEM_FREE_(old,
                   sizeof(*old)); /* zombie revived: transport carries over */
+    FIO_LEAK_COUNTER_ON_FREE(fio___io_protocol_zombie);
   }
   fio___io_monitor_in(io);
 finish:
