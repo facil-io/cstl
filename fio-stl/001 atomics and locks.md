@@ -23,13 +23,11 @@ All atomic macros use sequentially consistent ordering. They work on a pointer t
 | `fio_atomic_and(p_obj, value)` | `*p_obj &= value` | previous value |
 | `fio_atomic_or(p_obj, value)` | `*p_obj \|= value` | previous value |
 | `fio_atomic_xor(p_obj, value)` | `*p_obj ^= value` | previous value |
-| `fio_atomic_nand(p_obj, value)` | `*p_obj = ~(prev & value)` | previous value |
 | `fio_atomic_add_fetch(p_obj, value)` | `*p_obj += value` | new value |
 | `fio_atomic_sub_fetch(p_obj, value)` | `*p_obj -= value` | new value |
 | `fio_atomic_and_fetch(p_obj, value)` | `*p_obj &= value` | new value |
 | `fio_atomic_or_fetch(p_obj, value)` | `*p_obj \|= value` | new value |
 | `fio_atomic_xor_fetch(p_obj, value)` | `*p_obj ^= value` | new value |
-| `fio_atomic_nand_fetch(p_obj, value)` | `*p_obj = ~(prev & value)` | new value |
 
 The implementation prefers GCC/Clang `__atomic` builtins, falls back to legacy `__sync` builtins, then C11 `stdatomic.h`, then MSVC intrinsics.
 

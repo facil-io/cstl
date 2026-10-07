@@ -1534,15 +1534,7 @@ FIO_SFUNC void fio___test_core_atomics_and_locks(void) {
   FIO_ASSERT(fio_atomic_or_fetch(&val, 1) == 3,
              "fio_atomic_or_fetch should return new value");
   FIO_ASSERT(val == 3, "fio_atomic_or_fetch should update value");
-#if !_MSC_VER /* don't test missing MSVC features */
-  FIO_ASSERT(fio_atomic_nand_fetch(&val, 4) == ~0ULL,
-             "fio_atomic_nand_fetch should return new value");
-  FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
-  val = 3ULL;
-  FIO_ASSERT(fio_atomic_nand(&val, 4) == 3ULL,
-             "fio_atomic_nand should return old value");
-  FIO_ASSERT(val == ~0ULL, "fio_atomic_nand_fetch should update value");
-#endif /* !_MSC_VER */
+
   FIO_ASSERT(!fio_is_locked(&lock),
              "lock should be initialized in unlocked state");
   FIO_ASSERT(!fio_trylock(&lock), "fio_trylock should succeed");

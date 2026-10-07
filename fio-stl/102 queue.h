@@ -632,7 +632,7 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
     fio_thread_cond_destroy(&pos->cond);
     fio_thread_mutex_destroy(&pos->mutex);
     fio_thread_t thr = pos->thread;
-    fio_atomic_and(&pos->stop, 0);
+    fio_atomic_and(&pos->stop, 0); /* releases manager: pos is invalid now */
     fio_thread_join(&thr);
     FIO___LOCK_LOCK(q->lock);
   }

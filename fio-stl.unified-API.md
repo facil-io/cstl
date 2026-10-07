@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3152.
+Total symbols: 3150.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1765
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 12
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -102,7 +102,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1765 public symbols.
+1763 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -4102,18 +4102,6 @@ _Note:_ this may be a macro only / macro wrapper for a function.
 
 _Symbol type:_ `macro`
 
-#### `fio_atomic_nand`
-
-```c
-#define fio_atomic_nand(p_obj, value) __atomic_fetch_nand((p_obj), (value), __ATOMIC_SEQ_CST)
-```
-
-An atomic NOT AND ((~)&) operation, returns previous value
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
 #### `fio_atomic_add_fetch`
 
 ```c
@@ -4169,18 +4157,6 @@ _Symbol type:_ `macro`
 ```
 
 An atomic OR (|) operation, returns new value
-
-_Note:_ this may be a macro only / macro wrapper for a function.
-
-_Symbol type:_ `macro`
-
-#### `fio_atomic_nand_fetch`
-
-```c
-#define fio_atomic_nand_fetch(p_obj, value) __atomic_nand_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
-```
-
-An atomic NOT AND ((~)&) operation, returns new value
 
 _Note:_ this may be a macro only / macro wrapper for a function.
 

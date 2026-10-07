@@ -801,8 +801,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define fio_atomic_xor(p_obj, value) __atomic_fetch_xor((p_obj), (value), __ATOMIC_SEQ_CST)
 /** An atomic OR (|) operation, returns previous value */
 #define fio_atomic_or(p_obj, value) __atomic_fetch_or((p_obj), (value), __ATOMIC_SEQ_CST)
-/** An atomic NOT AND ((~)&) operation, returns previous value */
-#define fio_atomic_nand(p_obj, value) __atomic_fetch_nand((p_obj), (value), __ATOMIC_SEQ_CST)
 /** An atomic addition operation, returns new value */
 #define fio_atomic_add_fetch(p_obj, value) __atomic_add_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
 /** An atomic subtraction operation, returns new value */
@@ -813,8 +811,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define fio_atomic_xor_fetch(p_obj, value) __atomic_xor_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
 /** An atomic OR (|) operation, returns new value */
 #define fio_atomic_or_fetch(p_obj, value) __atomic_or_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
-/** An atomic NOT AND ((~)&) operation, returns new value */
-#define fio_atomic_nand_fetch(p_obj, value) __atomic_nand_fetch((p_obj), (value), __ATOMIC_SEQ_CST)
 /* note: __ATOMIC_SEQ_CST may be safer and __ATOMIC_ACQ_REL may be faster */
 
 /* Select the correct compiler builtin method. */
@@ -860,8 +856,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define fio_atomic_xor(p_obj, value) __sync_fetch_and_xor((p_obj), (value))
 /** An atomic OR (|) operation, returns new value */
 #define fio_atomic_or(p_obj, value) __sync_fetch_and_or((p_obj), (value))
-/** An atomic NOT AND ((~)&) operation, returns new value */
-#define fio_atomic_nand(p_obj, value) __sync_fetch_and_nand((p_obj), (value))
 /** An atomic addition operation, returns previous value */
 #define fio_atomic_add_fetch(p_obj, value) __sync_add_and_fetch((p_obj), (value))
 /** An atomic subtraction operation, returns previous value */
@@ -872,8 +866,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define fio_atomic_xor_fetch(p_obj, value) __sync_xor_and_fetch((p_obj), (value))
 /** An atomic OR (|) operation, returns previous value */
 #define fio_atomic_or_fetch(p_obj, value) __sync_or_and_fetch((p_obj), (value))
-/** An atomic NOT AND ((~)&) operation, returns previous value */
-#define fio_atomic_nand_fetch(p_obj, value) __sync_nand_and_fetch((p_obj), (value))
 
 
 /* Atomic Implementation Selector */
@@ -903,18 +895,16 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define fio_atomic_xor(p_obj, value) atomic_fetch_xor((p_obj), (value))
 /** An atomic OR (|) operation, returns previous value */
 #define fio_atomic_or(p_obj, value) atomic_fetch_or((p_obj), (value))
-/** An atomic NOT AND ((~)&) operation, returns previous value */
-#define fio_atomic_nand(p_obj, value) atomic_fetch_nand((p_obj), (value))
-/** An atomic addition operation, returns new value */
-#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)), atomic_load((p_obj)))
-/** An atomic subtraction operation, returns new value */
-#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)), atomic_load((p_obj)))
-/** An atomic AND (&) operation, returns new value */
-#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)), atomic_load((p_obj)))
-/** An atomic XOR (^) operation, returns new value */
-#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)), atomic_load((p_obj)))
-/** An atomic OR (|) operation, returns new value */
-#define fio_atomic_or_fetch(p_obj, value) (atomic_fetch_or((p_obj), (value)), atomic_load((p_obj)))
+/** An atomic addition operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
+#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)) + (value))
+/** An atomic subtraction operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
+#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)) - (value))
+/** An atomic AND (&) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
+#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)) & (value))
+/** An atomic XOR (^) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
+#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)) ^ (value))
+/** An atomic OR (|) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
+#define fio_atomic_or_fetch(p_obj, value)  (fio_atomic_or((p_obj), (value)) | (value))
 
 #elif _MSC_VER
 #pragma message ("Warning: WinAPI atomics have less features, but this is what this compiler has, so...")
@@ -1015,16 +1005,17 @@ FIO_IFUNC int fio___atomic_cmpxchg64(int64_t volatile *p_obj,
 /** An atomic OR (|) operation, returns previous value */
 #define fio_atomic_or(p_obj, value)  FIO___ATOMICS_FN_ROUTE(_InterlockedOr, (p_obj), (value))
 
-/** An atomic addition operation, returns new value */
-#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)), (*(p_obj)))
-/** An atomic subtraction operation, returns new value */
-#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)), (*(p_obj)))
-/** An atomic AND (&) operation, returns new value */
-#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)), (*(p_obj)))
-/** An atomic XOR (^) operation, returns new value */
-#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)), (*(p_obj)))
-/** An atomic OR (|) operation, returns new value */
-#define fio_atomic_or_fetch(p_obj, value) (fio_atomic_or((p_obj), (value)), (*(p_obj)))
+/** An atomic addition operation, returns new value; MACRO! Accesses `value` twice(!). */
+#define fio_atomic_add_fetch(p_obj, value) (atomic_fetch_add((p_obj), (value)) + (value))
+/** An atomic subtraction operation, returns new value; MACRO! Accesses `value` twice(!). */
+#define fio_atomic_sub_fetch(p_obj, value) (atomic_fetch_sub((p_obj), (value)) - (value))
+/** An atomic AND (&) operation, returns new value; MACRO! Accesses `value` twice(!). */
+#define fio_atomic_and_fetch(p_obj, value) (atomic_fetch_and((p_obj), (value)) & (value))
+/** An atomic XOR (^) operation, returns new value; MACRO! Accesses `value` twice(!). */
+#define fio_atomic_xor_fetch(p_obj, value) (atomic_fetch_xor((p_obj), (value)) ^ (value))
+/** An atomic OR (|) operation, returns new value; MACRO! Accesses `value` twice(!). */
+#define fio_atomic_or_fetch(p_obj, value)  (atomic_fetch_or((p_obj), (value)) | (value))
+
 #else
 #error Required atomics not found (__STDC_NO_ATOMICS__) and older __sync_add_and_fetch is also missing.
 
