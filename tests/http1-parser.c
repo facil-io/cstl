@@ -17,6 +17,11 @@ typedef struct {
   size_t content_length;
   int cl_received;
   size_t body_len;
+  fio_http1_parser_s *parser; /* set by the run_parse helpers */
+  int mark_skip_body;         /* if set, on_status calls skip_body (HEAD) */
+  int skips_at_status;        /* skips_body() before on_status marking */
+  int skips_at_header;        /* skips_body() at the first header callback */
+  int skips_at_cl;            /* skips_body() in the content-length callback */
 } parser_state_s;
 
 static void fio_http1_on_complete(void *udata) {
@@ -36,6 +41,11 @@ static int fio_http1_on_status(size_t istatus,
   parser_state_s *s = (parser_state_s *)udata;
   s->status = istatus;
   s->status_str = status;
+  if (!s->parser) /* direct fio_http1_parse calls */
+    return 0;
+  s->skips_at_status = !!fio_http1_parser_skips_body(s->parser);
+  if (s->mark_skip_body)
+    fio_http1_parser_skip_body(s->parser);
   return 0;
 }
 
@@ -55,6 +65,8 @@ static int fio_http1_on_header(fio_buf_info_s name,
                                fio_buf_info_s value,
                                void *udata) {
   parser_state_s *s = (parser_state_s *)udata;
+  if (!s->header_count && s->parser)
+    s->skips_at_header = !!fio_http1_parser_skips_body(s->parser);
   ++s->header_count;
   (void)name;
   (void)value;
@@ -68,6 +80,7 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
   parser_state_s *s = (parser_state_s *)udata;
   s->content_length = content_length;
   s->cl_received = 1;
+  s->skips_at_cl = s->parser && fio_http1_parser_skips_body(s->parser);
   (void)name;
   (void)value;
   return 0;
@@ -75,7 +88,7 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
 
 static int fio_http1_on_expect(void *udata) {
   parser_state_s *s = (parser_state_s *)udata;
-  s->expect = 1;
+  ++s->expect;
   return 0;
 }
 
@@ -87,6 +100,7 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
 
 static size_t run_parse(parser_state_s *st, char *buf, size_t len) {
   fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+  st->parser = &parser;
   return fio_http1_parse(&parser, FIO_BUF_INFO2(buf, len), st);
 }
 
@@ -94,6 +108,7 @@ static size_t run_parse_persist(parser_state_s *st,
                                 fio_http1_parser_s *parser,
                                 char *buf,
                                 size_t len) {
+  st->parser = parser;
   return fio_http1_parse(parser, FIO_BUF_INFO2(buf, len), st);
 }
 
@@ -519,6 +534,215 @@ static void test_chunk_size_non_rfc_rejected(void) {
 }
 
 /* ===========================================================================
+   Expect: 100-continue
+
+   The expect state is a parser flag (never function pointer identity, which
+   linker identical-code-folding may merge, i.e. MSVC `/OPT:ICF`). The
+   callback fires only for an accepted `Expect` header when a body may follow,
+   and exactly once per message (chunked trailers finish through the same
+   header-line path).
+   ===========================================================================
+ */
+
+static void test_expect_100_continue(void) {
+  fprintf(stderr, "  * expect: 100-continue\n");
+  { /* no Expect header: never fires (GET, POST with body) */
+    char get[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+    char post[] = "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi";
+    parser_state_s st = {0};
+    run_parse(&st, get, sizeof(get) - 1);
+    FIO_ASSERT(st.complete && !st.expect, "expect: GET without Expect fired");
+    st = (parser_state_s){0};
+    run_parse(&st, post, sizeof(post) - 1);
+    FIO_ASSERT(st.complete && !st.expect, "expect: POST without Expect fired");
+  }
+  { /* Expect on a request that may not have a body: never fires */
+    char get[] = "GET / HTTP/1.1\r\nExpect: 100-continue\r\n\r\n";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, get, sizeof(get) - 1);
+    FIO_ASSERT(r == sizeof(get) - 1 && st.complete,
+               "expect: GET with Expect should complete");
+    FIO_ASSERT(!st.expect, "expect: GET with Expect must not fire");
+  }
+  { /* Expect with a Content-Length body: fires once */
+    char post[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+                  "Content-Length: 2\r\n\r\nhi";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, post, sizeof(post) - 1);
+    FIO_ASSERT(r == sizeof(post) - 1 && st.complete && st.body_len == 2,
+               "expect: POST with Expect should complete with body");
+    FIO_ASSERT(st.expect == 1, "expect: POST should fire once (%d)", st.expect);
+  }
+  { /* Expect with a chunked body + trailer: fires once, not again */
+    char post[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+                  "Transfer-Encoding: chunked\r\n\r\n"
+                  "2\r\nhi\r\n0\r\nX-Trailer: 1\r\n\r\n";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, post, sizeof(post) - 1);
+    FIO_ASSERT(r == sizeof(post) - 1 && st.complete && st.body_len == 2,
+               "expect: chunked POST with Expect should complete");
+    FIO_ASSERT(st.expect == 1,
+               "expect: chunked POST should fire once (%d)",
+               st.expect);
+  }
+  { /* flag does not leak into the next message on a persistent parser */
+    char msgs[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+                  "Content-Length: 1\r\n\r\na"
+                  "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\nb";
+    fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+    parser_state_s st = {0};
+    size_t r = run_parse_persist(&st, &parser, msgs, sizeof(msgs) - 1);
+    FIO_ASSERT(st.complete && st.expect == 1, "expect: first message");
+    st = (parser_state_s){0};
+    run_parse_persist(&st, &parser, msgs + r, sizeof(msgs) - 1 - r);
+    FIO_ASSERT(st.complete && !st.expect,
+               "expect: flag leaked into the next message");
+  }
+}
+
+/* ===========================================================================
+   Messages without a body (RFC 9112 §6.3)
+
+   The parser identifies bodyless messages from the first line, before any
+   header callback (`fio_http1_parser_skips_body`): GET / HEAD / OPTIONS
+   requests and 1xx / 204 / 304 responses. Responses marked with
+   `fio_http1_parser_skip_body` (HEAD) behave the same. A bodyless response
+   ends at the empty line: `content-length` is reported to the content-length
+   callback (informational - callers must not reserve space), other framing
+   headers are forwarded as regular headers, and no payload is consumed.
+   ===========================================================================
+ */
+
+/** A string literal followed by its length (avoids `strlen`). */
+#define TEST_LIT(s) s, sizeof(s) - 1
+
+static void test_no_body_messages(void) {
+  fprintf(stderr, "  * messages without a body (1xx / 204 / 304 / HEAD)\n");
+  static const struct {
+    const char *msg;
+    size_t len;
+    size_t headers;      /* expected regular header callbacks */
+    int cl;              /* expect the content-length callback */
+  } bodyless[] = {
+      {TEST_LIT("HTTP/1.1 100 Continue\r\nContent-Length: 5\r\n\r\n"), 0, 1},
+      {TEST_LIT("HTTP/1.1 103 Early Hints\r\nLink: </s.css>\r\n\r\n"), 1, 0},
+      {TEST_LIT("HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n"), 0, 1},
+      {TEST_LIT("HTTP/1.1 304 Not Modified\r\n"
+                "Transfer-Encoding: chunked\r\n\r\n"),
+       1,
+       0},
+      {TEST_LIT("HTTP/1.1 304 Not Modified\r\nContent-Length: 5\r\n"
+                "Transfer-Encoding: chunked\r\n\r\n"),
+       1,
+       1},
+  };
+  for (size_t i = 0; i < sizeof(bodyless) / sizeof(bodyless[0]); ++i) {
+    char buf[256];
+    const size_t hlen = bodyless[i].len;
+    /* trailing bytes belong to the next message and must not be consumed */
+    FIO_MEMCPY(buf, bodyless[i].msg, hlen);
+    FIO_MEMCPY(buf + hlen, "HTTP/", 5);
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, buf, hlen + 5);
+    FIO_ASSERT(r == hlen && st.complete && !st.body_len,
+               "no-body response %zu: consumed %zu of %zu (complete %d)",
+               i,
+               r,
+               hlen,
+               st.complete);
+    FIO_ASSERT(st.skips_at_status,
+               "no-body response %zu: skips_body should be known before "
+               "the headers",
+               i);
+    FIO_ASSERT(st.header_count == bodyless[i].headers,
+               "no-body response %zu: framing headers should be forwarded "
+               "as regular headers (got %zu)",
+               i,
+               st.header_count);
+    FIO_ASSERT(st.cl_received == bodyless[i].cl,
+               "no-body response %zu: content-length callback mismatch",
+               i);
+    FIO_ASSERT(!st.cl_received || (st.skips_at_cl && st.content_length == 5),
+               "no-body response %zu: content-length callback should see "
+               "skips_body and the informational value",
+               i);
+  }
+  { /* status codes that do carry a body still read it */
+    char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, resp, sizeof(resp) - 1);
+    FIO_ASSERT(r == sizeof(resp) - 1 && st.complete && st.body_len == 2,
+               "200 response should read its body");
+    FIO_ASSERT(!st.skips_at_status && !st.skips_at_cl,
+               "200 response must not report skips_body");
+  }
+  { /* requests: GET / HEAD / OPTIONS known bodyless before any header */
+    static const struct {
+      const char *msg;
+      size_t len;
+    } reqs[] = {
+        {TEST_LIT("GET / HTTP/1.1\r\nHost: x\r\n\r\n")},
+        {TEST_LIT("HEAD / HTTP/1.1\r\nHost: x\r\n\r\n")},
+        {TEST_LIT("OPTIONS * HTTP/1.1\r\nHost: x\r\n\r\n")},
+    };
+    for (size_t i = 0; i < 3; ++i) {
+      parser_state_s st = {0};
+      char buf[64];
+      const size_t len = reqs[i].len;
+      FIO_MEMCPY(buf, reqs[i].msg, len);
+      run_parse(&st, buf, len);
+      FIO_ASSERT(st.complete && st.skips_at_header,
+                 "request %zu: skips_body should be known before headers",
+                 i);
+    }
+    char post[] = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\nhi";
+    parser_state_s st = {0};
+    run_parse(&st, post, sizeof(post) - 1);
+    FIO_ASSERT(st.complete && !st.skips_at_header && !st.skips_at_cl &&
+                   st.body_len == 2,
+               "POST request must not report skips_body");
+  }
+  { /* HEAD response: user marks the message from on_status */
+    char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"
+                  "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    const size_t first =
+        sizeof("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n") - 1;
+    fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+    parser_state_s st = {0};
+    st.mark_skip_body = 1;
+    size_t r = run_parse_persist(&st, &parser, resp, sizeof(resp) - 1);
+    FIO_ASSERT(r == first && st.complete && !st.body_len,
+               "HEAD response: should complete at the empty line (%zu/%zu)",
+               r,
+               first);
+    FIO_ASSERT(st.cl_received && st.skips_at_cl && st.content_length == 5,
+               "HEAD response: content-length should be reported with "
+               "skips_body set");
+    /* the mark is per message: the next response reads its body */
+    st = (parser_state_s){0};
+    size_t r2 =
+        run_parse_persist(&st, &parser, resp + r, sizeof(resp) - 1 - r);
+    FIO_ASSERT(r2 == sizeof(resp) - 1 - r && st.complete && st.body_len == 2,
+               "HEAD mark leaked into the next response");
+    FIO_ASSERT(!st.skips_at_cl, "HEAD mark leaked into skips_body");
+  }
+  { /* interim 1xx followed by the final response on one stream */
+    char resp[] = "HTTP/1.1 100 Continue\r\n\r\n"
+                  "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+    fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+    parser_state_s st = {0};
+    size_t r = run_parse_persist(&st, &parser, resp, sizeof(resp) - 1);
+    FIO_ASSERT(st.complete && st.status == 100 && !st.body_len,
+               "1xx stream: interim response should complete first");
+    st = (parser_state_s){0};
+    run_parse_persist(&st, &parser, resp + r, sizeof(resp) - 1 - r);
+    FIO_ASSERT(st.complete && st.status == 200 && st.body_len == 2,
+               "1xx stream: final response should follow with its body");
+  }
+}
+#undef TEST_LIT
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -549,6 +773,8 @@ int main(void) {
   test_te_separator_only_prefix();
   test_content_length_underscore_rejected();
   test_chunk_size_non_rfc_rejected();
+  test_expect_100_continue();
+  test_no_body_messages();
   fprintf(stderr, "All HTTP/1 parser tests passed!\n");
   return 0;
 }

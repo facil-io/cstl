@@ -1699,6 +1699,7 @@ static struct {
   volatile int client_status;
   volatile int client_body_ok;
   volatile int timed_out;
+  volatile int active; /* the guard timer may outlive this reactor run */
 } test_rt;
 
 static void test_rt_server_on_http(fio_http_s *h) {
@@ -1726,6 +1727,8 @@ static void test_rt_client_on_http(fio_http_s *h) {
 
 static int test_rt_timeout(void *ignr1, void *ignr2) {
   (void)ignr1, (void)ignr2;
+  if (!test_rt.active)
+    return -1;
   test_rt.timed_out = 1;
   fio_io_stop();
   return -1;
@@ -1756,7 +1759,9 @@ static void test_http_client_server_roundtrip(void) {
                                   .queue = &worker);
   FIO_ASSERT(io, "roundtrip: fio_http_connect failed");
 
+  test_rt.active = 1;
   fio_io_start(0); /* single process: 1 IO thread (this thread) */
+  test_rt.active = 0;
 
   fio_io_listen_stop((fio_io_listener_s *)l);
   FIO_ASSERT(!test_rt.timed_out, "roundtrip: timed out after 3 seconds");
@@ -1776,6 +1781,237 @@ static void test_http_client_server_roundtrip(void) {
   FIO_ASSERT(test_rt.client_body_ok, "roundtrip: response body mismatch");
 }
 #undef TEST_RT_BODY
+
+/* ===========================================================================
+   Client: interim 1xx responses and HEAD responses (live reactor)
+
+   A raw (non-HTTP) loopback server replies with canned bytes, so the client
+   sees exactly what a third-party server may send:
+   * GET  -> `100 Continue`, `103 Early Hints`, then the final `200` response.
+     The client must skip interim responses (RFC 9110 §15.2) and dispatch only
+     the final response (without the interim headers).
+   * HEAD -> `200` with `Content-Length: 5` and no body. The client must not
+     wait for a body (RFC 9110 §9.3.2); the connection is left open, so a
+     regression times out.
+   ===========================================================================
+ */
+
+static char test_raw_interim_reply[] =
+    "HTTP/1.1 100 Continue\r\n\r\n"
+    "HTTP/1.1 103 Early Hints\r\nLink: </s.css>; rel=preload\r\n\r\n"
+    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-Final: 1\r\n\r\nok";
+static char test_raw_head_reply[] =
+    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n";
+
+static struct {
+  volatile int get_calls;
+  volatile int get_status;
+  volatile int get_body_ok;
+  volatile int get_final_header;
+  volatile int get_interim_header;
+  volatile int head_calls;
+  volatile int head_status;
+  volatile int head_body_len;
+  volatile int head_clen_ok;
+  volatile int timed_out;
+  volatile int active; /* the guard timer may outlive this reactor run */
+} test_raw;
+
+static void test_raw_server_on_data(fio_io_s *io) {
+  char buf[1024];
+  size_t r = fio_io_read(io, buf, sizeof(buf));
+  if (!r || fio_io_udata(io))
+    return; /* one canned reply per connection */
+  fio_io_udata_set(io, (void *)1);
+  if (r >= 4 && fio_buf2u32u(buf) == fio_buf2u32u("HEAD"))
+    fio_io_write(io, test_raw_head_reply, sizeof(test_raw_head_reply) - 1);
+  else
+    fio_io_write(io,
+                 test_raw_interim_reply,
+                 sizeof(test_raw_interim_reply) - 1);
+}
+
+static void test_raw_maybe_stop(void) {
+  if (test_raw.get_calls && test_raw.head_calls)
+    fio_io_stop();
+}
+
+static void test_raw_client_on_http(fio_http_s *h) {
+  fio_str_info_s m = fio_http_method(h);
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  if (m.len == 4 && fio_buf2u32u(m.buf) == fio_buf2u32u("HEAD")) {
+    test_raw.head_status = (int)fio_http_status(h);
+    test_raw.head_body_len = (int)body.len;
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
+    test_raw.head_clen_ok = (cl.len == 1 && cl.buf[0] == '5');
+    ++test_raw.head_calls;
+  } else {
+    test_raw.get_status = (int)fio_http_status(h);
+    test_raw.get_body_ok =
+        (body.len == 2 && fio_buf2u16u(body.buf) == fio_buf2u16u("ok"));
+    test_raw.get_final_header =
+        !!fio_http_response_header(h, FIO_STR_INFO2((char *)"x-final", 7), 0)
+              .len;
+    test_raw.get_interim_header =
+        !!fio_http_response_header(h, FIO_STR_INFO2((char *)"link", 4), 0)
+              .len;
+    ++test_raw.get_calls;
+  }
+  test_raw_maybe_stop();
+}
+
+static int test_raw_timeout(void *ignr1, void *ignr2) {
+  (void)ignr1, (void)ignr2;
+  if (!test_raw.active)
+    return -1;
+  test_raw.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static void test_http_client_interim_and_head(void) {
+  fprintf(stderr, "  * client skips 1xx interim responses / HEAD has no body\n");
+  static fio_io_protocol_s raw_protocol;
+  raw_protocol = (fio_io_protocol_s){
+      .on_data = test_raw_server_on_data,
+      .on_timeout = fio_io_touch,
+      .timeout = 5000,
+  };
+  FIO_MEMSET(&test_raw, 0, sizeof(test_raw));
+  fio_io_run_every(.fn = test_raw_timeout, .every = 3000, .repetitions = 1);
+
+  fio_io_listener_s *l = fio_io_listen(.url = "tcp://127.0.0.1:0",
+                                       .protocol = &raw_protocol,
+                                       .hide_from_log = 1);
+  FIO_ASSERT(l, "interim/head: raw listener failed");
+  unsigned port = test_ws_listener_port((fio_http_listener_s *)l);
+  FIO_ASSERT(port, "interim/head: listener port discovery failed");
+
+  char url[128];
+  snprintf(url, sizeof(url), "http://127.0.0.1:%u/interim", port);
+  FIO_ASSERT(fio_http_connect(url, NULL, .on_http = test_raw_client_on_http),
+             "interim/head: GET connect failed");
+  snprintf(url, sizeof(url), "http://127.0.0.1:%u/head", port);
+  fio_http_s *head = fio_http_new();
+  fio_http_method_set(head, FIO_STR_INFO2((char *)"HEAD", 4));
+  FIO_ASSERT(fio_http_connect(url, head, .on_http = test_raw_client_on_http),
+             "interim/head: HEAD connect failed");
+
+  test_raw.active = 1;
+  fio_io_start(0);
+  test_raw.active = 0;
+
+  fio_io_listen_stop(l);
+  FIO_ASSERT(!test_raw.timed_out,
+             "interim/head: timed out (GET calls %d, HEAD calls %d)",
+             test_raw.get_calls,
+             test_raw.head_calls);
+  FIO_ASSERT(test_raw.get_calls == 1,
+             "interim: on_http should run once, for the final response "
+             "(got %d)",
+             test_raw.get_calls);
+  FIO_ASSERT(test_raw.get_status == 200,
+             "interim: expected final status 200 (got %d)",
+             test_raw.get_status);
+  FIO_ASSERT(test_raw.get_body_ok, "interim: final response body mismatch");
+  FIO_ASSERT(test_raw.get_final_header,
+             "interim: final response header missing");
+  FIO_ASSERT(!test_raw.get_interim_header,
+             "interim: 1xx headers leaked into the final response");
+  FIO_ASSERT(test_raw.head_calls == 1,
+             "head: on_http should run once (got %d)",
+             test_raw.head_calls);
+  FIO_ASSERT(test_raw.head_status == 200,
+             "head: expected status 200 (got %d)",
+             test_raw.head_status);
+  FIO_ASSERT(!test_raw.head_body_len,
+             "head: response must not have a body (got %d bytes)",
+             test_raw.head_body_len);
+  FIO_ASSERT(test_raw.head_clen_ok,
+             "head: content-length should be visible as a response header");
+}
+
+/* ===========================================================================
+   Server: a response line sent by a peer (live reactor)
+
+   A server never expects HTTP responses. The connection must be rejected
+   (logged as a SECURITY event and closed) rather than tripping a debug
+   assertion. A raw client sends a response line and waits for the close.
+   ===========================================================================
+ */
+
+static struct {
+  volatile int closed;
+  volatile int received;
+  volatile int timed_out;
+  volatile int active; /* the guard timer may outlive this reactor run */
+} test_srv_resp;
+
+static void test_srv_resp_on_attach(fio_io_s *io) {
+  static char msg[] = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+  fio_io_write(io, msg, sizeof(msg) - 1);
+}
+
+static void test_srv_resp_on_data(fio_io_s *io) {
+  char buf[256];
+  test_srv_resp.received += (int)fio_io_read(io, buf, sizeof(buf));
+}
+
+static void test_srv_resp_on_close(void *iobuf, void *udata) {
+  (void)iobuf, (void)udata;
+  test_srv_resp.closed = 1;
+  fio_io_stop();
+}
+
+static int test_srv_resp_timeout(void *ignr1, void *ignr2) {
+  (void)ignr1, (void)ignr2;
+  if (!test_srv_resp.active)
+    return -1;
+  test_srv_resp.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static void test_http_server_rejects_response(void) {
+  fprintf(stderr,
+          "  * server rejects a response line (expect a SECURITY log)\n");
+  static fio_io_protocol_s raw_client;
+  raw_client = (fio_io_protocol_s){
+      .on_attach = test_srv_resp_on_attach,
+      .on_data = test_srv_resp_on_data,
+      .on_close = test_srv_resp_on_close,
+      .on_timeout = fio_io_touch,
+      .timeout = 5000,
+  };
+  FIO_MEMSET(&test_srv_resp, 0, sizeof(test_srv_resp));
+  fio_io_run_every(.fn = test_srv_resp_timeout,
+                   .every = 3000,
+                   .repetitions = 1);
+  fio_http_listener_s *l =
+      fio_http_listen("tcp://127.0.0.1:0", .on_http = test_http_noop_on_http);
+  FIO_ASSERT(l, "server/response: fio_http_listen failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "server/response: listener port discovery failed");
+  char url[128];
+  snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+  FIO_ASSERT(fio_io_connect(url, .protocol = &raw_client),
+             "server/response: raw connect failed");
+
+  test_srv_resp.active = 1;
+  fio_io_start(0);
+  test_srv_resp.active = 0;
+
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  FIO_ASSERT(!test_srv_resp.timed_out,
+             "server/response: connection should be closed by the server");
+  FIO_ASSERT(test_srv_resp.closed, "server/response: on_close missing");
+  FIO_ASSERT(!test_srv_resp.received,
+             "server/response: server should not reply (got %d bytes)",
+             test_srv_resp.received);
+}
 
 /* ===========================================================================
    Main
@@ -1806,6 +2042,8 @@ int main(void) {
   test_static_compress_attached_readonly();
   test_static_compress_detached_creation();
   test_http_client_server_roundtrip();
+  test_http_client_interim_and_head();
+  test_http_server_rejects_response();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

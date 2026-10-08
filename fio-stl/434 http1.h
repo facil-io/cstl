@@ -22,6 +22,15 @@ HTTP/1.1 Request / Response Completed
 /** called when either a request or a response was received. */
 static void fio_http1_on_complete(void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  if (c->is_client && c->h) {
+    /* skip interim 1xx responses, except 101 (RFC 9110 §15.2) - the handle
+     * waits for the final response (the next status line resets it). */
+    const size_t status = fio_http_status(c->h);
+    if ((status - 100) < 100 && status != 101) {
+      c->state.http.header_bytes = 0;
+      return;
+    }
+  }
   fio_io_dup(c->io); /* make sure the IO and its data are valid in callback */
   fio_io_suspend(c->io);
   fio_http_s *h = c->h;
@@ -80,6 +89,12 @@ static int fio_http1_on_status(size_t istatus,
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
   fio_http_clear_response(c->h, istatus != 301 && istatus != 302);
   fio_http_status_set(c->h, istatus);
+  { /* responses to HEAD requests never have a body (RFC 9110 §9.3.2) */
+    fio_str_info_s m = fio_http_method(c->h);
+    if (m.len == 4 &&
+        (fio_buf2u32u(m.buf) | (uint32_t)0x20202020UL) == fio_buf2u32u("head"))
+      fio_http1_parser_skip_body(&c->state.http.parser);
+  }
   return 0;
   (void)status;
 }
@@ -103,11 +118,17 @@ static int fio_http1_on_url(fio_buf_info_s url, void *udata) {
 /** called when a the HTTP/1.x version is parsed. */
 static int fio_http1_on_version(fio_buf_info_s version, void *udata) {
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
-  FIO_ASSERT_DEBUG(c->h, "on_version called without a pre-existing handle!");
   if (!c->h)
-    return -1;
+    goto unexpected_response;
   fio_http_version_set(c->h, FIO_BUF2STR_INFO(version));
   return 0;
+unexpected_response: /* (requests always create a handle in `on_method`) */
+  FIO_LOG_SECURITY("(%d) HTTP/1.1 %s at fd %d - disconnecting.",
+                   fio_io_pid(),
+                   (c->is_client ? "unsolicited response received by client"
+                                 : "response received by server"),
+                   (int)fio_io_fd(c->io));
+  return -1; /* parser error: the connection is closed */
 }
 /** called when a header is parsed. */
 static int fio_http1_on_header(fio_buf_info_s name,
@@ -140,16 +161,20 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
   fio_http_s *h = c->h;
   if (!h)
     return 0;
-  if (content_length > c->settings->max_body_size)
-    goto too_big;
-  if (content_length)
-    fio_http_body_expect(c->h, content_length);
-#if FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER
+  if (!fio_http1_parser_skips_body(&c->state.http.parser)) {
+    if (content_length > c->settings->max_body_size)
+      goto too_big;
+    if (content_length)
+      fio_http_body_expect(c->h, content_length);
+    if (!FIO_HTTP_SHOW_CONTENT_LENGTH_HEADER)
+      return 0;
+  }
+  /* a skipped body (i.e., HEAD response) reserves nothing: its length is
+   * informational, so it stays visible as a header. */
   (!(h->status) ? fio_http_request_header_add
                 : fio_http_response_header_add)(h,
                                                 FIO_BUF2STR_INFO(name),
                                                 FIO_BUF2STR_INFO(value));
-#endif
   return 0;
 too_big:
   fio___http_request_too_big(c);

@@ -65,6 +65,9 @@ and [`004 websocket parser.h`](./004 websocket parser.md).
 ## Connection Model
 
 HTTP/1.x requests and client responses are parsed into `fio_http_s` handles.
+A response line received by a server connection (or an unsolicited response
+received by a client) is logged as a `SECURITY` event and the connection is
+closed.
 The HTTP layer suspends the IO object while the user callback is running and
 resumes it after the response is finished or the upgrade is installed.
 
@@ -401,6 +404,13 @@ Recognized upgrade schemes:
 Client `on_http` receives the response handle. If the response accepts a
 WebSocket or SSE upgrade, the connection switches to the upgraded protocol and
 uses the upgraded callbacks instead.
+
+Interim `1xx` responses (i.e., `100 Continue`, `103 Early Hints`) other than
+`101` are skipped (RFC 9110 §15.2): `on_http` runs once, for the final
+response, and interim headers are discarded. Responses to `HEAD` requests, and
+`204` / `304` responses, never read a body, even if they carry
+`content-length` or `transfer-encoding` headers. Those headers stay visible
+as response headers.
 
 ### `fio_http_websocket_connect`
 
