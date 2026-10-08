@@ -59,13 +59,13 @@ static LONG WINAPI test_http_win_crash_trap(EXCEPTION_POINTERS *ep) {
   int n;
   HMODULE exe = GetModuleHandleA(NULL);
   const unsigned long long preferred = test_http_win_preferred_base(exe);
-#define TEST_HTTP_CRASH_LOG(...)                                              \
-  do {                                                                        \
-    n = snprintf(buf, sizeof(buf), __VA_ARGS__);                              \
-    if (n > 0)                                                                \
-      test_http_win_crash_emit(buf,                                           \
-                               (size_t)((size_t)n < sizeof(buf) ? (size_t)n   \
-                                                                 : sizeof(buf) - 1)); \
+#define TEST_HTTP_CRASH_LOG(...)                                               \
+  do {                                                                         \
+    n = snprintf(buf, sizeof(buf), __VA_ARGS__);                               \
+    if (n > 0)                                                                 \
+      test_http_win_crash_emit(                                                \
+          buf,                                                                 \
+          (size_t)((size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1));    \
   } while (0)
 
   {
@@ -81,8 +81,8 @@ static LONG WINAPI test_http_win_crash_trap(EXCEPTION_POINTERS *ep) {
       snprintf(rip_sym,
                sizeof(rip_sym),
                " sym=0x%llX",
-               preferred + (unsigned long long)((uintptr_t)rip -
-                                                (uintptr_t)exe));
+               preferred +
+                   (unsigned long long)((uintptr_t)rip - (uintptr_t)exe));
     TEST_HTTP_CRASH_LOG(
         "\nFATAL: unhandled Windows exception 0x%08lX at RIP=%p%s%s\n",
         (unsigned long)ep->ExceptionRecord->ExceptionCode,
@@ -93,10 +93,12 @@ static LONG WINAPI test_http_win_crash_trap(EXCEPTION_POINTERS *ep) {
   if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
       ep->ExceptionRecord->NumberParameters >= 2) {
     ULONG_PTR op = ep->ExceptionRecord->ExceptionInformation[0];
-    TEST_HTTP_CRASH_LOG(
-        "FATAL: access violation (%s) at data address %p\n",
-        op == 0 ? "read" : op == 1 ? "write" : op == 8 ? "execute" : "op?",
-        (void *)ep->ExceptionRecord->ExceptionInformation[1]);
+    TEST_HTTP_CRASH_LOG("FATAL: access violation (%s) at data address %p\n",
+                        op == 0   ? "read"
+                        : op == 1 ? "write"
+                        : op == 8 ? "execute"
+                                  : "op?",
+                        (void *)ep->ExceptionRecord->ExceptionInformation[1]);
   }
   {
     void *frames[64];
@@ -715,31 +717,26 @@ static void test_static_vary_and_range_guards(void) {
   {
     fio_http_s *h = test_http_make_handle("GET", "/test.txt");
     fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
-    fio_http_request_header_set(
-        h,
-        FIO_STR_INFO2((char *)"accept-encoding", 15),
-        FIO_STR_INFO1((char *)"identity"));
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"identity"));
     int r = fio_http_static_file_response(h,
                                           FIO_STR_INFO2(dir, dir_len),
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "static plain: response should succeed");
-    fio_str_info_s ce = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-encoding", 16),
-        0);
+    fio_str_info_s ce =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
+                                 0);
     FIO_ASSERT(!ce.buf,
                "static plain: content-encoding must be absent (got '%.*s')",
                (int)ce.len,
                ce.buf ? ce.buf : "");
-    fio_str_info_s vary = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"vary", 4),
-        0);
+    fio_str_info_s vary =
+        fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0);
     FIO_ASSERT(vary.len >= 15 &&
-                   fio___http_header_has_token(vary,
-                                               "accept-encoding",
-                                               15),
+                   fio___http_header_has_token(vary, "accept-encoding", 15),
                "static plain: Vary: accept-encoding required while "
                "compressed variants exist (caches must key on "
                "Accept-Encoding)");
@@ -758,20 +755,16 @@ static void test_static_vary_and_range_guards(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "static gzip: response should succeed");
-    fio_str_info_s ce = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-encoding", 16),
-        0);
+    fio_str_info_s ce =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
+                                 0);
     FIO_ASSERT(ce.len == 4 && !memcmp(ce.buf, "gzip", 4),
                "static gzip: expected content-encoding gzip");
-    fio_str_info_s vary = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"vary", 4),
-        0);
+    fio_str_info_s vary =
+        fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0);
     FIO_ASSERT(vary.len >= 15 &&
-                   fio___http_header_has_token(vary,
-                                               "accept-encoding",
-                                               15),
+                   fio___http_header_has_token(vary, "accept-encoding", 15),
                "static gzip: Vary: accept-encoding expected");
     fio_http_free(h);
   }
@@ -792,10 +785,10 @@ static void test_static_vary_and_range_guards(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "static range: response should succeed");
-    fio_str_info_s ce = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-encoding", 16),
-        0);
+    fio_str_info_s ce =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
+                                 0);
     FIO_ASSERT(!ce.buf,
                "static range: content-encoding must be absent for ranged "
                "responses (got '%.*s')",
@@ -836,8 +829,8 @@ static void test_static_head_mirrors_get(void) {
   FIO_ASSERT(dir_len > 0, "failed to create static HEAD test tree");
 
   char expect_cl[16];
-  size_t expect_cl_len =
-      (size_t)snprintf(expect_cl, sizeof(expect_cl), "%u", (unsigned)CONTENT_LEN);
+  size_t expect_cl_len = (size_t)
+      snprintf(expect_cl, sizeof(expect_cl), "%u", (unsigned)CONTENT_LEN);
 
   /* 1. Identity GET vs HEAD: same content-length and content-type. */
   fio_str_info_s get_ct = {0};
@@ -849,19 +842,18 @@ static void test_static_head_mirrors_get(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "HEAD mirror: GET should succeed");
-    fio_str_info_s cl = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-length", 14),
-        0);
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
     FIO_ASSERT(cl.len == expect_cl_len &&
                    !FIO_MEMCMP(cl.buf, expect_cl, expect_cl_len),
                "HEAD mirror: GET content-length sanity (got '%.*s')",
                (int)cl.len,
                cl.buf ? cl.buf : "");
-    get_ct = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-type", 12),
-        0);
+    get_ct = fio_http_response_header(h,
+                                      FIO_STR_INFO2((char *)"content-type", 12),
+                                      0);
     FIO_ASSERT(get_ct.buf && get_ct.len,
                "HEAD mirror: GET content-type sanity");
     /* header storage is handle-owned; copy before freeing */
@@ -879,20 +871,20 @@ static void test_static_head_mirrors_get(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "HEAD mirror: HEAD should succeed");
-    fio_str_info_s cl = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-length", 14),
-        0);
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
     FIO_ASSERT(cl.len == expect_cl_len &&
                    !FIO_MEMCMP(cl.buf, expect_cl, expect_cl_len),
                "HEAD must mirror GET content-length %s (got '%.*s')",
                expect_cl,
                (int)cl.len,
                cl.buf ? cl.buf : "");
-    fio_str_info_s ct = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-type", 12),
-        0);
+    fio_str_info_s ct =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-type", 12),
+                                 0);
     FIO_ASSERT(ct.buf && ct.len == get_ct.len &&
                    !FIO_MEMCMP(ct.buf, get_ct.buf, get_ct.len),
                "HEAD must mirror GET content-type '%.*s' (got '%.*s')",
@@ -918,12 +910,11 @@ static void test_static_head_mirrors_get(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "HEAD gzip mirror: GET should succeed");
-    fio_str_info_s cl = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-length", 14),
-        0);
-    FIO_ASSERT(cl.buf && cl.len,
-               "HEAD gzip mirror: GET content-length sanity");
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
+    FIO_ASSERT(cl.buf && cl.len, "HEAD gzip mirror: GET content-length sanity");
     static char cl_copy[16];
     FIO_ASSERT(cl.len < sizeof(cl_copy), "content-length too long");
     FIO_MEMCPY(cl_copy, cl.buf, cl.len);
@@ -945,21 +936,19 @@ static void test_static_head_mirrors_get(void) {
                                           FIO_STR_INFO1((char *)"/test.txt"),
                                           0);
     FIO_ASSERT(r == 0, "HEAD gzip mirror: HEAD should succeed");
-    fio_str_info_s ce = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-encoding", 16),
-        0);
+    fio_str_info_s ce =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
+                                 0);
     FIO_ASSERT(ce.len == 4 && !memcmp(ce.buf, "gzip", 4),
                "HEAD gzip mirror: content-encoding gzip expected");
-    fio_str_info_s cl = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-length", 14),
-        0);
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
     char expect_gz[16];
-    size_t expect_gz_len = (size_t)snprintf(expect_gz,
-                                            sizeof(expect_gz),
-                                            "%u",
-                                            (unsigned)gz_len);
+    size_t expect_gz_len =
+        (size_t)snprintf(expect_gz, sizeof(expect_gz), "%u", (unsigned)gz_len);
     FIO_ASSERT(cl.len == expect_gz_len &&
                    !FIO_MEMCMP(cl.buf, expect_gz, expect_gz_len),
                "HEAD gzip mirror: content-length must be the .gz length "
@@ -967,10 +956,10 @@ static void test_static_head_mirrors_get(void) {
                expect_gz,
                (int)cl.len,
                cl.buf ? cl.buf : "");
-    fio_str_info_s ct = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-type", 12),
-        0);
+    fio_str_info_s ct =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-type", 12),
+                                 0);
     FIO_ASSERT(ct.buf && ct.len == get_ct.len &&
                    !FIO_MEMCMP(ct.buf, get_ct.buf, get_ct.len),
                "HEAD gzip mirror: content-type must match GET");
@@ -1008,8 +997,7 @@ static int test_ws_ext_has_param(fio_str_info_s resp,
     const char *tok_end = pos;
     while (tok_end > tok && (tok_end[-1] == ' ' || tok_end[-1] == '\t'))
       --tok_end;
-    if ((size_t)(tok_end - tok) == name_len &&
-        !FIO_MEMCMP(tok, name, name_len))
+    if ((size_t)(tok_end - tok) == name_len && !FIO_MEMCMP(tok, name, name_len))
       return 1;
     while (pos < end && *pos != ';')
       ++pos;
@@ -1076,8 +1064,7 @@ static void test_websocket_deflate_negotiation(void) {
   {
     bits = 0;
     size_t len = fio___http_ws_deflate_negotiate(
-        FIO_STR_INFO2((char *)"permessage-deflate; client_max_window_bits",
-                      41),
+        FIO_STR_INFO2((char *)"permessage-deflate; client_max_window_bits", 41),
         out,
         sizeof(out),
         &bits);
@@ -1085,11 +1072,10 @@ static void test_websocket_deflate_negotiation(void) {
     fio_str_info_s resp = FIO_STR_INFO2(out, len);
     FIO_ASSERT(!test_ws_ext_has_param(resp, "client_max_window_bits", 22),
                "negotiate browser: must not echo client_max_window_bits");
-    FIO_ASSERT(test_ws_ext_has_param(resp, "server_no_context_takeover", 26) &&
-                   test_ws_ext_has_param(resp,
-                                         "client_no_context_takeover",
-                                         26),
-               "negotiate browser: both no-context-takeover flags forced");
+    FIO_ASSERT(
+        test_ws_ext_has_param(resp, "server_no_context_takeover", 26) &&
+            test_ws_ext_has_param(resp, "client_no_context_takeover", 26),
+        "negotiate browser: both no-context-takeover flags forced");
   }
 
   /* 4. Full offer shape: no-context flags echoed by the client are still
@@ -1119,8 +1105,7 @@ static void test_websocket_deflate_negotiation(void) {
         tiny,
         sizeof(tiny),
         &bits);
-    FIO_ASSERT(len == 0,
-               "negotiate: undersized output buffer must return 0");
+    FIO_ASSERT(len == 0, "negotiate: undersized output buffer must return 0");
   }
 #else  /* FIO___HTTP_WS_DEFLATE_NEGOTIATE_SEAM */
   fprintf(stderr,
@@ -1420,14 +1405,16 @@ static void test_static_compress_note_result(void) {
     FIO_MEMSET(&s, 0, sizeof(s));
     s.compress_static = 1;
     fio___http_static_compress_note_result(&s, EINVAL);
-    FIO_ASSERT(s.compress_static == 2, "re-seed: expected 2, got %u",
+    FIO_ASSERT(s.compress_static == 2,
+               "re-seed: expected 2, got %u",
                (unsigned)s.compress_static);
     fio___http_static_compress_note_result(&s, 0);
     FIO_ASSERT(s.compress_static == 3 && (s.compress_static & 1),
                "re-seed: success must set bit 0 (expected 3, got %u)",
                (unsigned)s.compress_static);
     fio___http_static_compress_note_result(&s, EINVAL);
-    FIO_ASSERT(s.compress_static == 6, "re-seed: expected 6, got %u",
+    FIO_ASSERT(s.compress_static == 6,
+               "re-seed: expected 6, got %u",
                (unsigned)s.compress_static);
     fio___http_static_compress_note_result(&s, 0);
     FIO_ASSERT(s.compress_static == 7 && (s.compress_static & 1),
@@ -1516,8 +1503,7 @@ static void test_static_compress_attached_readonly(void) {
      `opath` (set by the server parser on a live request) */
   fio_http_opath_set(h, fio_http_path(h));
   fio_http_settings_s *st = fio_http_settings(h);
-  FIO_ASSERT(st,
-             "read-only test: attached handle must resolve route settings");
+  FIO_ASSERT(st, "read-only test: attached handle must resolve route settings");
   st->compress_static = 1;
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"accept-encoding", 15),
@@ -1562,10 +1548,10 @@ static void test_static_compress_attached_readonly(void) {
   FIO_ASSERT(fio_http_status(h) == 200,
              "read-only req1: expected status 200, got %u",
              (unsigned)fio_http_status(h));
-  fio_str_info_s ce = fio_http_response_header(
-      h,
-      FIO_STR_INFO2((char *)"content-encoding", 16),
-      0);
+  fio_str_info_s ce =
+      fio_http_response_header(h,
+                               FIO_STR_INFO2((char *)"content-encoding", 16),
+                               0);
   FIO_ASSERT(!ce.buf,
              "read-only req1: content-encoding must be absent (identity "
              "response; got '%.*s')",
@@ -1666,10 +1652,10 @@ static void test_static_compress_detached_creation(void) {
   FIO_ASSERT(fio_http_status(h) == 200,
              "detached creation: expected status 200, got %u",
              (unsigned)fio_http_status(h));
-  fio_str_info_s ce = fio_http_response_header(
-      h,
-      FIO_STR_INFO2((char *)"content-encoding", 16),
-      0);
+  fio_str_info_s ce =
+      fio_http_response_header(h,
+                               FIO_STR_INFO2((char *)"content-encoding", 16),
+                               0);
   FIO_ASSERT(ce.len == 2 && !memcmp(ce.buf, "br", 2),
              "detached creation: expected content-encoding br, got '%.*s'",
              (int)ce.len,
@@ -1732,9 +1718,8 @@ static void test_rt_client_on_http(fio_http_s *h) {
   test_rt.client_on_worker = !fio_thread_equal(&self, &test_rt.io_thread);
   test_rt.client_status = (int)fio_http_status(h);
   fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
-  test_rt.client_body_ok =
-      (body.len == sizeof(TEST_RT_BODY) - 1 &&
-       !FIO_MEMCMP(body.buf, TEST_RT_BODY, body.len));
+  test_rt.client_body_ok = (body.len == sizeof(TEST_RT_BODY) - 1 &&
+                            !FIO_MEMCMP(body.buf, TEST_RT_BODY, body.len));
   fio_atomic_add(&test_rt.client_calls, 1);
   fio_io_stop();
 }
@@ -1792,7 +1777,8 @@ static void test_http_client_server_roundtrip(void) {
 }
 #undef TEST_RT_BODY
 
-/* ===========================================================================   Main
+/* ===========================================================================
+   Main
    ===========================================================================
  */
 

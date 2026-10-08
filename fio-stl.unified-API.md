@@ -33427,7 +33427,8 @@ _Symbol type:_ `macro`
 #### `FIO_IO_ASYN_INIT`
 
 ```c
-#define FIO_IO_ASYN_INIT ((fio_io_async_s){0})
+#define FIO_IO_ASYN_INIT   \
+  { 0 }
 ```
 
 Initializes an IO Async Queue (multi-threaded task queue).

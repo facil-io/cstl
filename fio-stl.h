@@ -105397,7 +105397,8 @@ struct fio_io_async_s {
  * variable, as its memory must remain valid throughout the lifetime of the
  * IO reactor's app.
  */
-#define FIO_IO_ASYN_INIT ((fio_io_async_s){0})
+#define FIO_IO_ASYN_INIT                                                       \
+  { 0 }
 
 /** Returns the current task queue associated with the IO Async Queue. */
 FIO_IFUNC fio_queue_s *fio_io_async_queue(fio_io_async_s *q) { return q->q; }
