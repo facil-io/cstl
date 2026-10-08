@@ -12,11 +12,7 @@ The implementation is in [`./000 core.h`](./000%20core.h).
 uint64_t fio_cycle_counter(void);
 ```
 
-Returns a hardware cycle counter when one is available, or `0` otherwise.
-
-- On x86/x86_64 it reads `rdtsc`.
-- On AArch64 it reads `cntvct_el0`.
-- On other platforms it returns `0`.
+Returns a hardware cycle counter when one is available, or a number otherwise.
 
 In non-deterministic mode, the PRNG uses this for timing-based jitter during reseeding.
 

@@ -623,6 +623,7 @@ SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
 SFUNC void fio_queue_workers_join(fio_queue_s *q) {
   if (!q)
     return;
+  uint8_t had_workers = 0;
   fio_queue_workers_stop(q);
   FIO___LOCK_LOCK(q->lock);
   while (q->consumers.next && q->consumers.next != &q->consumers) {
@@ -630,6 +631,7 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
         FIO_PTR_FROM_FIELD(fio___thread_group_s, node, q->consumers.next);
     fio_atomic_or(&pos->stop, 3);
     FIO___LOCK_UNLOCK(q->lock);
+    had_workers = 1;
     while (fio_atomic_add(&pos->stop, 0) & 2)
       FIO_THREAD_RESCHEDULE();
     fio_thread_cond_destroy(&pos->cond);
@@ -640,6 +642,8 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
     FIO___LOCK_LOCK(q->lock);
   }
   FIO___LOCK_UNLOCK(q->lock);
+  if (had_workers) /* a queue with worker threads is emptied on `join` */
+    fio_queue_perform_all(q);
 }
 
 /* *****************************************************************************

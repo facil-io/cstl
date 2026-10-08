@@ -1571,7 +1571,8 @@ SFUNC int fio_mlkem768_keypair(uint8_t pk[1184], uint8_t sk[2400]) {
   uint8_t coins[64];
   if (!pk || !sk)
     return -1;
-  fio_rand_bytes(coins, 64);
+  if (fio_rand_bytes_secure(coins, 64))
+    fio_rand_bytes(coins, 64);
   int r = fio_mlkem768_keypair_derand(pk, sk, coins);
   FIO_MEMSET(coins, 0, sizeof(coins));
   return r;
@@ -1621,7 +1622,8 @@ SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
   uint8_t coins[FIO___MLKEM_SYMBYTES];
   if (!ct || !ss || !pk)
     return -1;
-  fio_rand_bytes(coins, FIO___MLKEM_SYMBYTES);
+  if (fio_rand_bytes_secure(coins, FIO___MLKEM_SYMBYTES))
+    fio_rand_bytes(coins, FIO___MLKEM_SYMBYTES);
   int r = fio_mlkem768_encaps_derand(ct, ss, pk, coins);
   FIO_MEMSET(coins, 0, sizeof(coins));
   return r;

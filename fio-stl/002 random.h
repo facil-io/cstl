@@ -35,8 +35,12 @@ SFUNC void fio_rand_bytes(void *target, size_t len);
 /**
  * Writes `len` bytes of cryptographically secure random data to `target`.
  *
- * Uses system CSPRNG: getrandom() on Linux, arc4random_buf() on BSD/macOS,
- * or /dev/urandom as fallback. Returns 0 on success, -1 on failure.
+ * Uses the system CSPRNG: arc4random_buf() on BSD/macOS, BCryptGenRandom() on
+ * Windows (MSVC links bcrypt.lib automatically; MinGW must link `-lbcrypt`),
+ * getrandom() on Linux, or /dev/urandom as fallback.
+ *
+ * Returns 0 on success, -1 on failure (never partial success; on failure the
+ * `target` content MUST NOT be used). A NULL `target` with `len > 0` fails.
  *
  * IMPORTANT: Use this for security-sensitive operations like key generation.
  */
@@ -902,26 +906,83 @@ Random - Implementation
 #include <sys/time.h>
 #endif
 
+#if FIO_OS_WIN && !defined(__CYGWIN__)
+/* BCryptGenRandom backs fio_rand_bytes_secure. MSVC links bcrypt.lib through
+ * the pragma; MinGW / clang (GNU driver) users must link `-lbcrypt`. */
+#include <bcrypt.h>
+#if _MSC_VER
+#pragma comment(lib, "bcrypt.lib")
+#endif
+#elif defined(__linux__) && __has_include(<sys/random.h>)
+#include <sys/random.h>
+#define FIO___RAND_HAS_GETRANDOM 1
+#endif
+
 /* The fio_rand64 implementation. */
 FIO_DEFINE_RANDOM128_FN(SFUNC, fio_rand, 11, 0)
 
 /**
- * Cryptographically secure random bytes using system CSPRNG.
- * Returns 0 on success, -1 on failure.
+ * Cryptographically secure random bytes using the system CSPRNG.
+ *
+ * Backends: arc4random_buf (BSD/macOS), BCryptGenRandom (Windows; MinGW must
+ * link `-lbcrypt`), getrandom (Linux) and /dev/urandom (fallback).
+ *
+ * Returns 0 on success, -1 on failure (`target` content is then undefined and
+ * MUST NOT be used). Never falls back to a non-cryptographic generator.
  */
 SFUNC int fio_rand_bytes_secure(void *target, size_t len) {
-  if (!target || !len)
+  if (!len)
     return 0;
+  if (!target)
+    return -1;
 
 #if (defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||     \
      defined(__NetBSD__) || defined(__DragonFly__))
   /* BSD/macOS: use arc4random_buf (always succeeds, CSPRNG) */
   arc4random_buf(target, len);
   return 0;
-#else
-  /* Generic POSIX fallback: read from /dev/urandom */
+#elif FIO_OS_WIN && !defined(__CYGWIN__)
+  /* Windows: system-preferred CSPRNG; ULONG is 32 bit, so chunk large requests */
   uint8_t *buf = (uint8_t *)target;
+  while (len) {
+    ULONG chunk = (len > (size_t)0x40000000UL) ? (ULONG)0x40000000UL : (ULONG)len;
+    NTSTATUS st = BCryptGenRandom(NULL,
+                                  (PUCHAR)buf,
+                                  chunk,
+                                  BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (st < 0) /* !BCRYPT_SUCCESS(st) */
+      return -1;
+    buf += chunk;
+    len -= (size_t)chunk;
+  }
+  return 0;
+#else
+  uint8_t *buf = (uint8_t *)target;
+#if FIO___RAND_HAS_GETRANDOM
+  /* Linux: getrandom blocks only until the pool is first initialized and
+   * needs no file descriptor. Fall back to /dev/urandom if the syscall is
+   * unavailable (ENOSYS) or filtered (e.g., EPERM under seccomp). */
+  while (len) {
+    ssize_t got = getrandom(buf, len, 0);
+    if (got < 0) {
+      if (errno == EINTR)
+        continue;
+      break;
+    }
+    if (got == 0)
+      break;
+    buf += got;
+    len -= (size_t)got;
+  }
+  if (!len)
+    return 0;
+#endif /* FIO___RAND_HAS_GETRANDOM */
+  /* Generic POSIX fallback: read from /dev/urandom */
+#ifdef O_CLOEXEC
+  int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+#else
   int fd = open("/dev/urandom", O_RDONLY);
+#endif
   if (fd < 0)
     return -1;
   while (len > 0) {
@@ -946,6 +1007,7 @@ SFUNC int fio_rand_bytes_secure(void *target, size_t len) {
 /* *****************************************************************************
 Random - Cleanup
 ***************************************************************************** */
+#undef FIO___RAND_HAS_GETRANDOM
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_RAND */
 #undef FIO_RAND

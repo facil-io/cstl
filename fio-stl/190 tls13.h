@@ -2884,7 +2884,8 @@ SFUNC int fio_tls13_build_certificate_request(uint8_t *out,
 
   /* Calculate size:
    * handshake_header(4) + ctx_len(1) + ctx + ext_len(2) +
-   * sig_algs_ext: type(2) + len(2) + algos_len(2) + algos(signature_algo_count*2) */
+   * sig_algs_ext: type(2) + len(2) + algos_len(2) +
+   * algos(signature_algo_count*2) */
   size_t sig_algs_ext_len = 2 + 2 + 2 + signature_algo_count * 2;
   size_t body_len = 1 + context.len + 2 + sig_algs_ext_len;
   size_t total_len = 4 + body_len;
@@ -3041,7 +3042,7 @@ typedef enum {
 /** Certificate chain: DER views + optional owned storage (received chains).
  * Private type - used only as a member of the connection structs. */
 typedef struct {
-  uint8_t *buf;              /* Owned storage, NULL when views are external */
+  uint8_t *buf; /* Owned storage, NULL when views are external */
   size_t buf_len;
   size_t buf_cap;
   size_t count;              /* Number of certificates */
@@ -3969,9 +3970,7 @@ FIO_SFUNC int fio___tls13_process_certificate_request(
   /* Store context (must be echoed in client Certificate) */
   client->auth.context_len = cr.context_len;
   if (cr.context_len > 0) {
-    FIO_MEMCPY(client->auth.context,
-               cr.context,
-               cr.context_len);
+    FIO_MEMCPY(client->auth.context, cr.context, cr.context_len);
   }
 
   /* Store accepted signature algorithms */
@@ -5261,7 +5260,8 @@ SFUNC void fio_tls13_client_init(fio_tls13_client_s *client,
   client->transcript_sha384 = fio_sha384_init();
 
   /* Generate random and X25519 keypair */
-  fio_rand_bytes(client->client_random, 32);
+  if (fio_rand_bytes_secure(client->client_random, 32))
+    fio_rand_bytes(client->client_random, 32);
   fio_x25519_keypair(client->x25519_private_key, client->x25519_public_key);
 
 #if defined(H___FIO_MLKEM___H)
@@ -5791,10 +5791,10 @@ typedef struct {
   fio_tls13_server_state_e state;
 
   /* Negotiated parameters */
-  uint16_t cipher_suite;     /* Selected cipher suite */
-  uint16_t key_share_group;  /* Selected key exchange group */
-  uint16_t signature_algo; /* Selected signature algorithm */
-  int use_sha384;            /* 0 = SHA-256, 1 = SHA-384 */
+  uint16_t cipher_suite;    /* Selected cipher suite */
+  uint16_t key_share_group; /* Selected key exchange group */
+  uint16_t signature_algo;  /* Selected signature algorithm */
+  int use_sha384;           /* 0 = SHA-256, 1 = SHA-384 */
 
   /* Key material */
   uint8_t server_random[32];
@@ -5926,7 +5926,7 @@ SFUNC void fio_tls13_server_set_private_key(fio_tls13_server_s *server,
  * @param trust_store Trust store for client cert chain verification, or NULL
  */
 FIO_IFUNC void fio_tls13_server_set_trust_store(fio_tls13_server_s *server,
-                                            void *trust_store);
+                                                void *trust_store);
 
 /**
  * Process incoming TLS record(s).
@@ -6114,8 +6114,8 @@ FIO_IFUNC int fio_tls13_server_client_cert_verified(
  * @param server Server context
  * @return Certificate view (empty buffer if none)
  */
-FIO_IFUNC fio_ubuf_info_s fio_tls13_server_get_client_cert(
-    fio_tls13_server_s *server) {
+FIO_IFUNC fio_ubuf_info_s
+fio_tls13_server_get_client_cert(fio_tls13_server_s *server) {
   if (!server || server->peer_auth.chain.count == 0)
     return (fio_ubuf_info_s){0};
   return server->peer_auth.chain.certs[0];
@@ -6621,8 +6621,8 @@ FIO_SFUNC int fio___tls13_build_certificate(fio_tls13_server_s *server,
   /* Calculate total size needed */
   size_t total_cert_size = 0;
   for (size_t i = 0; i < server->credentials.chain_count; ++i)
-    total_cert_size +=
-        3 + server->credentials.chain[i].len + 2; /* len(3) + cert + ext_len(2) */
+    total_cert_size += 3 + server->credentials.chain[i].len +
+                       2; /* len(3) + cert + ext_len(2) */
 
   size_t body_len =
       1 + 3 + total_cert_size; /* ctx_len(1) + list_len(3) + certs */
@@ -6649,7 +6649,9 @@ FIO_SFUNC int fio___tls13_build_certificate(fio_tls13_server_s *server,
     p += 3;
 
     /* Certificate data */
-    FIO_MEMCPY(p, server->credentials.chain[i].buf, server->credentials.chain[i].len);
+    FIO_MEMCPY(p,
+               server->credentials.chain[i].buf,
+               server->credentials.chain[i].len);
     p += server->credentials.chain[i].len;
 
     /* Extensions (empty) */
@@ -6662,7 +6664,8 @@ FIO_SFUNC int fio___tls13_build_certificate(fio_tls13_server_s *server,
 
 /* Internal: Build CertificateVerify message */
 /**
- * Parse the RSA private key structure stored in server->credentials.private_key.buf.
+ * Parse the RSA private key structure stored in
+ * server->credentials.private_key.buf.
  *
  * The minimum format is:
  *   [n_len:4][n:n_len][d_len:4][d:d_len]
@@ -6707,10 +6710,14 @@ FIO_SFUNC int fio___tls13_parse_rsa_private_key(fio_rsa_privkey_s *key,
 
   /* Optional fields.  Each is [len:4][data:len]; if the buffer ends here the
    * field is absent and the remaining code leaves the pointer NULL. */
-  const uint8_t **fields[] = {&key->e,   &key->p,   &key->q,
-                              &key->dP,  &key->dQ,  &key->qInv};
-  size_t *lens[] = {&key->e_len,   &key->p_len,   &key->q_len,
-                    &key->dP_len,  &key->dQ_len,  &key->qInv_len};
+  const uint8_t **fields[] =
+      {&key->e, &key->p, &key->q, &key->dP, &key->dQ, &key->qInv};
+  size_t *lens[] = {&key->e_len,
+                    &key->p_len,
+                    &key->q_len,
+                    &key->dP_len,
+                    &key->dQ_len,
+                    &key->qInv_len};
   for (size_t i = 0; i < 6; ++i) {
     if ((size_t)(pk - start) + 4 > pk_len)
       break;
@@ -6732,7 +6739,8 @@ FIO_SFUNC int fio___tls13_parse_rsa_private_key(fio_rsa_privkey_s *key,
 FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
                                                    uint8_t *out,
                                                    size_t out_capacity) {
-  if (!server->credentials.private_key.buf || server->credentials.private_key.len == 0)
+  if (!server->credentials.private_key.buf ||
+      server->credentials.private_key.len == 0)
     return -1;
 
   /* Build signed content per RFC 8446 Section 4.4.3 */
@@ -6800,7 +6808,9 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
     /* Parse the private key structure */
     fio_rsa_privkey_s rsa_key;
     if (fio___tls13_parse_rsa_private_key(
-            &rsa_key, server->credentials.private_key.buf, server->credentials.private_key.len) != 0) {
+            &rsa_key,
+            server->credentials.private_key.buf,
+            server->credentials.private_key.len) != 0) {
       FIO_LOG_DEBUG2("TLS 1.3 Server: RSA private key parsing failed");
       return -1;
     }
@@ -6826,7 +6836,9 @@ FIO_SFUNC int fio___tls13_build_certificate_verify(fio_tls13_server_s *server,
     /* Parse the private key structure (same format as SHA-256 case) */
     fio_rsa_privkey_s rsa_key;
     if (fio___tls13_parse_rsa_private_key(
-            &rsa_key, server->credentials.private_key.buf, server->credentials.private_key.len) != 0) {
+            &rsa_key,
+            server->credentials.private_key.buf,
+            server->credentials.private_key.len) != 0) {
       FIO_LOG_DEBUG2("TLS 1.3 Server: RSA private key parsing failed");
       return -1;
     }
@@ -7221,7 +7233,8 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   }
 
   /* Generate server random */
-  fio_rand_bytes(server->server_random, 32);
+  if (fio_rand_bytes_secure(server->server_random, 32))
+    fio_rand_bytes(server->server_random, 32);
 
   /* Compute shared secret based on selected key share group */
   if (server->key_share_group == FIO_TLS13_GROUP_X25519MLKEM768) {
@@ -7311,24 +7324,25 @@ FIO_SFUNC int fio___tls13_server_process_client_hello(
   /* CertificateRequest (if client auth is required/optional) */
   if (server->peer_auth.require > 0) {
     /* Generate random context for CertificateRequest */
-    fio_rand_bytes(server->peer_auth.context, 32);
+    if (fio_rand_bytes_secure(server->peer_auth.context, 32))
+      fio_rand_bytes(server->peer_auth.context, 32);
     server->peer_auth.context_len = 32;
 
     /* Signature algorithms we accept from clients */
     uint16_t signature_algos[] = {FIO_TLS13_SIGNATURE_ED25519,
-                           FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256,
-                           FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA256,
-                           FIO_TLS13_SIGNATURE_RSA_PKCS1_SHA256};
-    size_t signature_algo_count = sizeof(signature_algos) / sizeof(signature_algos[0]);
+                                  FIO_TLS13_SIGNATURE_ECDSA_SECP256R1_SHA256,
+                                  FIO_TLS13_SIGNATURE_RSA_PSS_RSAE_SHA256,
+                                  FIO_TLS13_SIGNATURE_RSA_PKCS1_SHA256};
+    size_t signature_algo_count =
+        sizeof(signature_algos) / sizeof(signature_algos[0]);
 
-    int cr_len =
-        fio_tls13_build_certificate_request(hs_msgs + hs_msgs_len,
-                                            sizeof(hs_msgs) - hs_msgs_len,
-                                            FIO_UBUF_INFO2(
-                                                server->peer_auth.context,
-                                                server->peer_auth.context_len),
-                                            signature_algos,
-                                            signature_algo_count);
+    int cr_len = fio_tls13_build_certificate_request(
+        hs_msgs + hs_msgs_len,
+        sizeof(hs_msgs) - hs_msgs_len,
+        FIO_UBUF_INFO2(server->peer_auth.context,
+                       server->peer_auth.context_len),
+        signature_algos,
+        signature_algo_count);
     if (cr_len < 0) {
       FIO_LOG_DEBUG2("TLS 1.3 Server: CertificateRequest build failed");
       fio___tls13_server_set_error(server,
@@ -7695,8 +7709,9 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
 #if defined(H___FIO_X509___H)
   /* Parse the leaf client certificate to obtain the public key. */
   fio_x509_cert_s leaf;
-  if (fio_x509_parse(
-          &leaf, server->peer_auth.chain.certs[0].buf, server->peer_auth.chain.certs[0].len) != 0) {
+  if (fio_x509_parse(&leaf,
+                     server->peer_auth.chain.certs[0].buf,
+                     server->peer_auth.chain.certs[0].len) != 0) {
     FIO_LOG_DEBUG2("TLS 1.3 Server: failed to parse client certificate");
     fio___tls13_server_set_error(server,
                                  FIO_TLS13_ALERT_LEVEL_FATAL,
@@ -7714,8 +7729,9 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
                                   (int64_t)fio_time_real().tv_sec,
                                   trust);
     if (v != 0) {
-      FIO_LOG_DEBUG2("TLS 1.3 Server: client cert chain verification failed (%d)",
-                     v);
+      FIO_LOG_DEBUG2(
+          "TLS 1.3 Server: client cert chain verification failed (%d)",
+          v);
       fio___tls13_server_set_error(server,
                                    FIO_TLS13_ALERT_LEVEL_FATAL,
                                    FIO_TLS13_ALERT_BAD_CERTIFICATE);
@@ -7847,8 +7863,9 @@ FIO_SFUNC int fio___tls13_server_verify_client_certificate_verify(
   (void)signature;
   (void)signed_content;
   (void)signed_content_len;
-  FIO_LOG_DEBUG2("TLS 1.3 Server: client certificate verification requires X509 "
-                 "module");
+  FIO_LOG_DEBUG2(
+      "TLS 1.3 Server: client certificate verification requires X509 "
+      "module");
   fio___tls13_server_set_error(server,
                                FIO_TLS13_ALERT_LEVEL_FATAL,
                                FIO_TLS13_ALERT_INTERNAL_ERROR);
@@ -7953,8 +7970,7 @@ SFUNC void fio_tls13_server_destroy(fio_tls13_server_s *server) {
 
   /* Free client certificate data buffer */
   if (server->peer_auth.chain.buf) {
-    FIO_MEM_FREE(server->peer_auth.chain.buf,
-                 server->peer_auth.chain.buf_cap);
+    FIO_MEM_FREE(server->peer_auth.chain.buf, server->peer_auth.chain.buf_cap);
     server->peer_auth.chain.buf = NULL;
     server->peer_auth.chain.buf_cap = 0;
     server->peer_auth.chain.buf_len = 0;

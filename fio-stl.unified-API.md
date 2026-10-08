@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3150.
+Total symbols: 3151.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1763
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 12
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -102,7 +102,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1763 public symbols.
+1764 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -3520,48 +3520,48 @@ _Symbol type:_ `macro`
   }   \
   /** Returns a 128 bit pseudo-random number. */   \
   extern FIO_MAYBE_UNUSED fio_u128 name##128(void) {   \
-    fio_u256 r;   \
-    if (!(fio_atomic_add(name##___state + 4, 1) &   \
-          ((1ULL << reseed_log) - 1)) &&   \
+    fio_u128 r;   \
+    uint64_t s0[4];   \
+    const uint64_t counter = fio_atomic_add(name##___state + 4, 1);   \
+    if (!(counter & ((1ULL << reseed_log) - 1)) &&   \
         ((size_t)(reseed_log - 1) < 63))   \
       name##_reseed();   \
-    uint64_t s1[4];   \
-    { /* load state to registers and roll, mul, add */   \
+    { /* load state + per-call input (timing, counter, address variation) */   \
       const uint64_t cycles =   \
           reseed_log ? fio_cycle_counter() + (uint64_t)(uintptr_t)&cycles   \
                      : 0xB5ULL;   \
       const uint64_t variation =   \
           0x4E55788DULL +   \
           (reseed_log ? (uint64_t)(uintptr_t)&name##_reseed : 0);   \
-      const uint64_t s0[] = {(name##___state[0] + cycles),   \
-                             (name##___state[1] + cycles),   \
-                             (name##___state[2] + cycles),   \
-                             (name##___state[3] + cycles)};   \
-      const uint64_t mulp[] = {0x37701261ED6C16C7ULL,   \
-                               0x764DBBB75F3B3E0DULL,   \
-                               ~(0x37701261ED6C16C7ULL),   \
-                               ~(0x764DBBB75F3B3E0DULL)};   \
-      const uint64_t addc[] = {name##___state[4],   \
-                               seed_offset + 0x59DD1C23ULL,   \
-                               name##___state[4] + cycles,   \
-                               variation};   \
-      for (size_t i = 0; i < 4; ++i) {   \
-        s1[i] = fio_lrot64(s0[i], 33);   \
-        s1[i] += addc[i];   \
-        s1[i] *= mulp[i];   \
-        s1[i] += s0[i];   \
-      }   \
+      s0[0] = name##___state[0] + cycles + counter;   \
+      s0[1] = name##___state[1] + cycles + (seed_offset + 0x59DD1C23ULL);   \
+      s0[2] = name##___state[2] + cycles + counter;   \
+      s0[3] = name##___state[3] + cycles + variation;   \
     }   \
+    { /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes */   \
+      const uint64_t a_ =   \
+          s0[0] + fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME0,   \
+                                      s0[3] ^ FIO_U64_HASH_PRIME1);   \
+      const uint64_t c_ =   \
+          s0[2] + fio_math_mul64_fold(s0[3] ^ FIO_U64_HASH_PRIME2,   \
+                                      s0[1] ^ FIO_U64_HASH_PRIME3);   \
+      s0[0] = s0[1]; /* rotate: the other pair is updated next call */   \
+      s0[1] = c_;   \
+      s0[2] = s0[3];   \
+      s0[3] = a_;   \
+    }   \
+    /* output: two multiply layers over all lanes (never stored) */   \
+    r.u64[0] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME8,   \
+                                   s0[1] ^ FIO_U64_HASH_PRIME9) +   \
+               fio_math_mul64_fold(s0[2] ^ FIO_U64_HASH_PRIME10,   \
+                                   s0[3] ^ FIO_U64_HASH_PRIME11);   \
+    r.u64[1] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME12,   \
+                                   s0[3] ^ FIO_U64_HASH_PRIME13) +   \
+               fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME14,   \
+                                   s0[2] ^ FIO_U64_HASH_PRIME15);   \
     for (size_t i = 0; i < 4; ++i) /* store to memory */   \
-      name##___state[i] = s1[i];   \
-    {   \
-      const uint8_t rotc[] = {31, 29, 27, 30};   \
-      for (size_t i = 0; i < 4; ++i)   \
-        r.u64[i] = fio_lrot64(s1[i], rotc[i]);   \
-    }   \
-    r.u64[0] += r.u64[2];   \
-    r.u64[1] += r.u64[3];   \
-    return r.u128[0];   \
+      name##___state[i] = s0[i];   \
+    return r;   \
   }   \
   /** Returns a 64 bit pseudo-random number. */   \
   extern FIO_MAYBE_UNUSED uint64_t name##64(void) {   \
@@ -10922,6 +10922,16 @@ FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out)
 ```
 
 Multiply with carry out.
+
+_Symbol type:_ `function`
+
+#### `fio_math_mul64_fold`
+
+```c
+FIO_MIFN uint64_t fio_math_mul64_fold(uint64_t a, uint64_t b)
+```
+
+
 
 _Symbol type:_ `function`
 
@@ -20020,8 +20030,12 @@ int fio_rand_bytes_secure(void *target, size_t len)
 
 Writes `len` bytes of cryptographically secure random data to `target`.
 
-Uses system CSPRNG: getrandom() on Linux, arc4random_buf() on BSD/macOS,
-or /dev/urandom as fallback. Returns 0 on success, -1 on failure.
+Uses the system CSPRNG: arc4random_buf() on BSD/macOS, BCryptGenRandom() on
+Windows (MSVC links bcrypt.lib automatically; MinGW must link `-lbcrypt`),
+getrandom() on Linux, or /dev/urandom as fallback.
+
+Returns 0 on success, -1 on failure (never partial success; on failure the
+`target` content MUST NOT be used). A NULL `target` with `len > 0` fails.
 
 IMPORTANT: Use this for security-sensitive operations like key generation.
 

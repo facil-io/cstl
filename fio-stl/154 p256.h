@@ -937,7 +937,9 @@ FIO_SFUNC void fio___p256_point_double(fio___p256_point_jacobian_s *r,
   fio___p256_point_set_infinity(&infinity);
   *r = generic;
   candidate = infinity;
-  fio___p256_point_cswap(r, &candidate, fio___p256_fe_ct_is_zero_mask(p->z) & 1);
+  fio___p256_point_cswap(r,
+                         &candidate,
+                         fio___p256_fe_ct_is_zero_mask(p->z) & 1);
 
   fio_secure_zero(t1, sizeof(t1));
   fio_secure_zero(t2, sizeof(t2));
@@ -1539,10 +1541,10 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
   for (int attempts = 0; attempts < 100; ++attempts) {
     /* Generate random nonce k in the valid scalar range 0 < k < n. */
     do {
-      fio_rand_bytes(k_bytes, 32);
+      if (fio_rand_bytes_secure(k_bytes, 32))
+        fio_rand_bytes(k_bytes, 32);
       fio___p256_scalar_from_bytes(k, k_bytes);
-    } while (fio___p256_scalar_ct_is_zero(k) |
-             fio___p256_scalar_ct_gte_n(k));
+    } while (fio___p256_scalar_ct_is_zero(k) | fio___p256_scalar_ct_gte_n(k));
 
     /* Compute R = k * G */
     fio___p256_point_mul(&R_jac, k, &g);
@@ -1752,7 +1754,8 @@ SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
   /* Generate random scalar and ensure 0 < k < n */
   for (int attempts = 0; attempts < 100; ++attempts) {
     do {
-      fio_rand_bytes(secret_key, 32);
+      if (fio_rand_bytes_secure(secret_key, 32))
+        fio_rand_bytes(secret_key, 32);
     } while (!fio_buf2u64u(secret_key) || !fio_buf2u64u(secret_key + 8) ||
              !fio_buf2u64u(secret_key + 16) || !fio_buf2u64u(secret_key + 24));
     fio___p256_scalar_from_bytes(k, secret_key);

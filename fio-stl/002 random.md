@@ -41,7 +41,9 @@ Fills `target` with `len` pseudo-random bytes.
 SFUNC int fio_rand_bytes_secure(void *target, size_t len);
 ```
 
-Fills `target` with `len` cryptographically secure random bytes from the system CSPRNG (`arc4random_buf` on BSD/macOS, `/dev/urandom` fallback elsewhere). Returns `0` on success, `-1` on failure.
+Fills `target` with `len` cryptographically secure random bytes from the system CSPRNG: `arc4random_buf` on BSD/macOS, `BCryptGenRandom` on Windows, `getrandom` on Linux, and `/dev/urandom` as the fallback (also used when `getrandom` is unavailable or blocked). Returns `0` on success, `-1` on failure (no partial success; never falls back to the non-cryptographic PRNG). A `len` of `0` succeeds; a `NULL` `target` with `len > 0` fails.
+
+**Windows linking**: MSVC links `bcrypt.lib` automatically (`#pragma comment`); MinGW / GNU-driver builds must link `-lbcrypt`.
 
 Use this for keys, nonces, and anything security-sensitive.
 

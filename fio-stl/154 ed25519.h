@@ -1273,7 +1273,8 @@ X25519 Public API Implementation
 ***************************************************************************** */
 
 SFUNC void fio_x25519_keypair(uint8_t secret_key[32], uint8_t public_key[32]) {
-  fio_rand_bytes(secret_key, 32);
+  if (fio_rand_bytes_secure(secret_key, 32))
+    fio_rand_bytes(secret_key, 32);
   fio_x25519_public_key(public_key, secret_key);
 }
 
@@ -2029,7 +2030,8 @@ Ed25519 Public API Implementation
 ***************************************************************************** */
 
 SFUNC void fio_ed25519_keypair(uint8_t secret_key[32], uint8_t public_key[32]) {
-  fio_rand_bytes(secret_key, 32);
+  if (fio_rand_bytes_secure(secret_key, 32))
+    fio_rand_bytes(secret_key, 32);
   fio_ed25519_public_key(public_key, secret_key);
 }
 

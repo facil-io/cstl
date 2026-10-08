@@ -108,7 +108,95 @@ static void fio___test_random_edge_cases(void) {
   }
 }
 
+static void fio___test_random_secure(void) {
+  /* Test: the system CSPRNG backend works on every platform */
+  {
+    static uint8_t buf[4096];
+    static const size_t lens[] = {1, 32, 4096};
+    for (size_t i = 0; i < sizeof(lens) / sizeof(lens[0]); ++i) {
+      FIO_ASSERT(fio_rand_bytes_secure(buf, lens[i]) == 0,
+                 "fio_rand_bytes_secure(%zu) should succeed",
+                 lens[i]);
+    }
+    uint8_t zero[64] = {0};
+    FIO_ASSERT(FIO_MEMCMP(buf, zero, 64) != 0,
+               "fio_rand_bytes_secure(4096) should produce non-zero output");
+  }
+
+  /* Test: consecutive 32 byte secrets differ */
+  {
+    uint8_t buf1[32] = {0}, buf2[32] = {0};
+    FIO_ASSERT(fio_rand_bytes_secure(buf1, 32) == 0 &&
+                   fio_rand_bytes_secure(buf2, 32) == 0,
+               "fio_rand_bytes_secure(32) should succeed");
+    FIO_ASSERT(FIO_MEMCMP(buf1, buf2, 32) != 0,
+               "Consecutive fio_rand_bytes_secure calls should differ");
+  }
+
+  /* Test: argument edge cases */
+  {
+    uint8_t buf[4] = {0xAA, 0xBB, 0xCC, 0xDD};
+    FIO_ASSERT(fio_rand_bytes_secure(buf, 0) == 0 && buf[0] == 0xAA &&
+                   buf[3] == 0xDD,
+               "fio_rand_bytes_secure(buf, 0) should be a successful no-op");
+    FIO_ASSERT(fio_rand_bytes_secure(NULL, 0) == 0,
+               "fio_rand_bytes_secure(NULL, 0) should succeed");
+    FIO_ASSERT(fio_rand_bytes_secure(NULL, 8) == -1,
+               "fio_rand_bytes_secure(NULL, 8) should fail");
+  }
+}
+
+/* Regression: the two 64 bit halves of a 128 bit result (and consecutive
+ * fio_rand64 values) must be uncorrelated. A mux/maj output combiner made
+ * halves agree on 75% of bits (mean Hamming distance 24, ideal 32). With
+ * 2^16 samples the mean's standard deviation is ~0.016 bits, so the 0.5
+ * tolerance is ~30 sigma: no flakes, but any real correlation fails. */
+FIO_DEFINE_RANDOM128_FN(static, fio___test_rng_det, 0, 0)
+FIO_DEFINE_RANDOM128_FN(static, fio___test_rng_live, 11, 0)
+
+static double fio___test_random_halves_distance(fio_u128 (*fn)(void)) {
+  uint64_t total = 0;
+  const size_t samples = (size_t)1 << 16;
+  for (size_t i = 0; i < samples; ++i) {
+    fio_u128 r = fn();
+    total += (uint64_t)fio_popcount(r.u64[0] ^ r.u64[1]);
+  }
+  return (double)total / (double)samples;
+}
+
+static void fio___test_random_uncorrelated(void) {
+  struct {
+    fio_u128 (*fn)(void);
+    const char *name;
+  } srcs[] = {
+      {fio_rand128, "fio_rand128"},
+      {fio___test_rng_det128, "RANDOM128_FN (reseed_log 0)"},
+      {fio___test_rng_live128, "RANDOM128_FN (reseed_log 11)"},
+  };
+  for (size_t i = 0; i < sizeof(srcs) / sizeof(srcs[0]); ++i) {
+    double d = fio___test_random_halves_distance(srcs[i].fn);
+    FIO_ASSERT(d > 31.5 && d < 32.5,
+               "%s: 128 bit halves correlated (mean Hamming distance %.2f, "
+               "expected 32)",
+               srcs[i].name,
+               d);
+  }
+  uint64_t total = 0;
+  const size_t samples = (size_t)1 << 16;
+  for (size_t i = 0; i < samples; ++i) {
+    uint64_t a = fio_rand64();
+    total += (uint64_t)fio_popcount(a ^ fio_rand64());
+  }
+  double d = (double)total / (double)samples;
+  FIO_ASSERT(d > 31.5 && d < 32.5,
+             "fio_rand64: consecutive values correlated (mean Hamming "
+             "distance %.2f, expected 32)",
+             d);
+}
+
 int main(void) {
   fio___test_random_edge_cases();
+  fio___test_random_secure();
+  fio___test_random_uncorrelated();
   return 0;
 }

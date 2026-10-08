@@ -45,7 +45,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [DEBUG-NOALLOC] $name ==="
 
-            & clang -O0 -Wno-deprecated-declarations "-Wno-#pragma-messages" -fstack-protector-all $src -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ".\${name}_d.exe" -lcrypt32
+            & clang -O0 -Wno-deprecated-declarations "-Wno-#pragma-messages" -fstack-protector-all $src -I. -DFIO_MEMORY_DISABLE=1 -DFIO_LEAK_COUNTER=1 -D_CRT_NONSTDC_NO_WARNINGS -DDEBUG -o ".\${name}_d.exe" -lcrypt32 -lbcrypt
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
@@ -96,7 +96,7 @@ jobs:
             # passing them explicitly keeps the binary layout identical to the
             # historical (sporadically crashing) builds while still producing
             # symbols for the crash-trap RVAs.
-            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=x86-64-v3 $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -g -gcodeview -o ".\${name}.exe" -lcrypt32 "-Wl,/DEBUG:FULL" "-Wl,/OPT:REF" "-Wl,/OPT:ICF"
+            & clang -O3 -Wno-deprecated-declarations "-Wno-#pragma-messages" -march=x86-64-v3 $src -I. -D_CRT_NONSTDC_NO_WARNINGS -DFIO_LEAK_COUNTER=1 -g -gcodeview -o ".\${name}.exe" -lcrypt32 -lbcrypt "-Wl,/DEBUG:FULL" "-Wl,/OPT:REF" "-Wl,/OPT:ICF"
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++

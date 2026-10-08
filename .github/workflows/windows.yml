@@ -43,7 +43,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [DEBUG-NOALLOC] $name ==="
 
-            & cl /Od /RTCsu /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG "/Fe:.\${name}_d.exe" /link crypt32.lib
+            & cl /Od /RTCsu /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG "/Fe:.\${name}_d.exe" /link crypt32.lib bcrypt.lib
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
@@ -86,7 +86,7 @@ jobs:
             Write-Host ""
             Write-Host "=== [RELEASE] $name ==="
 
-            & cl /O2 /Oi /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 "/Fe:.\${name}.exe" /link crypt32.lib
+            & cl /O2 /Oi /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 "/Fe:.\${name}.exe" /link crypt32.lib bcrypt.lib
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++

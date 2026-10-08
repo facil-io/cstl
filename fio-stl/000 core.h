@@ -3528,6 +3528,12 @@ FIO_MIFN uint64_t fio_math_mulc64(uint64_t a, uint64_t b, uint64_t *carry_out) {
   return (uint64_t)r;
 }
 
+FIO_MIFN uint64_t fio_math_mul64_fold(uint64_t a, uint64_t b) {
+  uint64_t r = fio_math_mulc64(a, b, &a);
+  r ^= a;
+  return r;
+}
+
 /**
  * Multi-precision long multiplication for `len` 64 bit words.
  *
@@ -4808,8 +4814,51 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
   __asm__ volatile("mrs %0, cntvct_el0" : "=r"(r));
   return r;
 }
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)__rdtsc(); }
+#elif defined(_MSC_VER) && defined(_M_ARM64)
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  return (uint64_t)_ReadStatusReg(ARM64_CNTVCT);
+}
+#elif defined(__riscv) && __riscv_xlen == 64
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  uint64_t r;
+  __asm__ volatile("rdtime %0" : "=r"(r));
+  return r;
+}
+#elif defined(__powerpc64__)
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  uint64_t r;
+  __asm__ volatile("mftb %0" : "=r"(r));
+  return r;
+}
 #else
-FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
+FIO_IFUNC uint64_t fio_cycle_counter(void) {
+  static size_t counter = 0;
+  const uint64_t cycler[16] = {
+      FIO_U64_HASH_PRIME0,
+      FIO_U64_HASH_PRIME1,
+      FIO_U64_HASH_PRIME2,
+      FIO_U64_HASH_PRIME3,
+      FIO_U64_HASH_PRIME4,
+      FIO_U64_HASH_PRIME5,
+      FIO_U64_HASH_PRIME6,
+      FIO_U64_HASH_PRIME7,
+      FIO_U64_HASH_PRIME8,
+      FIO_U64_HASH_PRIME9,
+      FIO_U64_HASH_PRIME10,
+      FIO_U64_HASH_PRIME11,
+      FIO_U64_HASH_PRIME12,
+      FIO_U64_HASH_PRIME13,
+      FIO_U64_HASH_PRIME14,
+      FIO_U64_HASH_PRIME15,
+  };
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (uint64_t)
+             cycler[((fio_atomic_add(&counter, 1) + (uint64_t)(&t)) & 15)] +
+         (uint64_t)((t.tv_sec << 30) + (int64_t)t.tv_nsec);
+}
 #endif
 
 /**
@@ -4872,48 +4921,48 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) { return (uint64_t)0; }
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
   extern FIO_MAYBE_UNUSED fio_u128 name##128(void) {                           \
-    fio_u256 r;                                                                \
-    if (!(fio_atomic_add(name##___state + 4, 1) &                              \
-          ((1ULL << reseed_log) - 1)) &&                                       \
+    fio_u128 r;                                                                \
+    uint64_t s0[4];                                                            \
+    const uint64_t counter = fio_atomic_add(name##___state + 4, 1);            \
+    if (!(counter & ((1ULL << reseed_log) - 1)) &&                             \
         ((size_t)(reseed_log - 1) < 63))                                       \
       name##_reseed();                                                         \
-    uint64_t s1[4];                                                            \
-    { /* load state to registers and roll, mul, add */                         \
+    { /* load state + per-call input (timing, counter, address variation) */   \
       const uint64_t cycles =                                                  \
           reseed_log ? fio_cycle_counter() + (uint64_t)(uintptr_t)&cycles      \
                      : 0xB5ULL;                                                \
       const uint64_t variation =                                               \
           0x4E55788DULL +                                                      \
           (reseed_log ? (uint64_t)(uintptr_t)&name##_reseed : 0);              \
-      const uint64_t s0[] = {(name##___state[0] + cycles),                     \
-                             (name##___state[1] + cycles),                     \
-                             (name##___state[2] + cycles),                     \
-                             (name##___state[3] + cycles)};                    \
-      const uint64_t mulp[] = {0x37701261ED6C16C7ULL,                          \
-                               0x764DBBB75F3B3E0DULL,                          \
-                               ~(0x37701261ED6C16C7ULL),                       \
-                               ~(0x764DBBB75F3B3E0DULL)};                      \
-      const uint64_t addc[] = {name##___state[4],                              \
-                               seed_offset + 0x59DD1C23ULL,                    \
-                               name##___state[4] + cycles,                     \
-                               variation};                                     \
-      for (size_t i = 0; i < 4; ++i) {                                         \
-        s1[i] = fio_lrot64(s0[i], 33);                                         \
-        s1[i] += addc[i];                                                      \
-        s1[i] *= mulp[i];                                                      \
-        s1[i] += s0[i];                                                        \
-      }                                                                        \
+      s0[0] = name##___state[0] + cycles + counter;                            \
+      s0[1] = name##___state[1] + cycles + (seed_offset + 0x59DD1C23ULL);      \
+      s0[2] = name##___state[2] + cycles + counter;                            \
+      s0[3] = name##___state[3] + cycles + variation;                          \
     }                                                                          \
+    { /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes */  \
+      const uint64_t a_ =                                                      \
+          s0[0] + fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME0,             \
+                                      s0[3] ^ FIO_U64_HASH_PRIME1);            \
+      const uint64_t c_ =                                                      \
+          s0[2] + fio_math_mul64_fold(s0[3] ^ FIO_U64_HASH_PRIME2,             \
+                                      s0[1] ^ FIO_U64_HASH_PRIME3);            \
+      s0[0] = s0[1]; /* rotate: the other pair is updated next call */         \
+      s0[1] = c_;                                                              \
+      s0[2] = s0[3];                                                           \
+      s0[3] = a_;                                                              \
+    }                                                                          \
+    /* output: two multiply layers over all lanes (never stored) */            \
+    r.u64[0] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME8,                \
+                                   s0[1] ^ FIO_U64_HASH_PRIME9) +              \
+               fio_math_mul64_fold(s0[2] ^ FIO_U64_HASH_PRIME10,               \
+                                   s0[3] ^ FIO_U64_HASH_PRIME11);              \
+    r.u64[1] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME12,               \
+                                   s0[3] ^ FIO_U64_HASH_PRIME13) +             \
+               fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME14,               \
+                                   s0[2] ^ FIO_U64_HASH_PRIME15);              \
     for (size_t i = 0; i < 4; ++i) /* store to memory */                       \
-      name##___state[i] = s1[i];                                               \
-    {                                                                          \
-      const uint8_t rotc[] = {31, 29, 27, 30};                                 \
-      for (size_t i = 0; i < 4; ++i)                                           \
-        r.u64[i] = fio_lrot64(s1[i], rotc[i]);                                 \
-    }                                                                          \
-    r.u64[0] += r.u64[2];                                                      \
-    r.u64[1] += r.u64[3];                                                      \
-    return r.u128[0];                                                          \
+      name##___state[i] = s0[i];                                               \
+    return r;                                                                  \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
   extern FIO_MAYBE_UNUSED uint64_t name##64(void) {                            \
