@@ -234,7 +234,9 @@ Queue Inline Helpers
 ***************************************************************************** */
 
 /** returns the number of tasks in the queue. */
-FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q) { return q->count; }
+FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q) {
+  return fio_atomic_add(&q->count, 0);
+}
 
 /** Initializes a fio_queue_s object. */
 FIO_IFUNC void fio_queue_init(fio_queue_s *q) {
@@ -397,10 +399,10 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     q->w = q->w->next;
     fio___task_ring_push(q->w, task);
   }
-  ++q->count;
+  fio_atomic_add(&q->count, 1);
   if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!pos->stop)
+      if (!fio_atomic_add(&pos->stop, 0))
         fio_thread_cond_signal(&pos->cond);
     }
   }
@@ -433,10 +435,10 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->dir = tmp->r = 0;
     tmp->buf[0] = task;
   }
-  ++q->count;
+  fio_atomic_add(&q->count, 1);
   if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
     FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!pos->stop)
+      if (!fio_atomic_add(&pos->stop, 0))
         fio_thread_cond_signal(&pos->cond);
     }
   }
@@ -454,10 +456,10 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   fio_queue_task_s t = {.fn = NULL};
   fio___task_ring_s *to_free = NULL;
   fio___task_ring_s *to_free_tst = NULL;
-  if (!q->count)
+  if (!fio_atomic_add(&q->count, 0))
     return t;
   FIO___LOCK_LOCK(q->lock);
-  if (!q->count)
+  if (!fio_atomic_add(&q->count, 0))
     goto finish;
   if (!(t = fio___task_ring_pop(q->r)).fn) {
     to_free = q->r;
@@ -465,7 +467,7 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
     to_free->next = NULL;
     t = fio___task_ring_pop(q->r);
   }
-  if (t.fn && !(--q->count) && q->r != &q->mem) {
+  if (t.fn && !(fio_atomic_sub_fetch(&q->count, 1)) && q->r != &q->mem) {
     if (to_free && to_free != &q->mem) { // edge case
       FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
       FIO_MEM_FREE_(to_free, sizeof(*to_free));
@@ -511,10 +513,10 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
   fio___thread_group_s *grp = (fio___thread_group_s *)g_;
   FIO_LEAK_COUNTER_ON_ALLOC(fio___queue_worker);
   fio_state_callback_force(FIO_CALL_ON_WORKER_THREAD_START);
-  while (!grp->stop) {
+  while (!fio_atomic_add(&grp->stop, 0)) {
     fio_queue_perform_all(grp->queue);
     fio_thread_mutex_lock(&grp->mutex);
-    if (!grp->stop)
+    if (!fio_atomic_add(&grp->stop, 0))
       fio_thread_cond_wait(&grp->cond, &grp->mutex);
     fio_thread_mutex_unlock(&grp->mutex);
     fio_queue_perform_all(grp->queue);
@@ -558,15 +560,16 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   fio_queue_perform_all(grp.queue);
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
-  if (!(grp.stop & 2)) {
+  if (!(fio_atomic_add(&grp.stop, 0) & 2)) {
     FIO___LOCK_UNLOCK(grp.queue->lock);
     fio_thread_cond_destroy(&grp.cond);
     fio_thread_mutex_destroy(&grp.mutex);
     fio_thread_detach(&grp.thread);
   } else {
-    grp.stop = 1;
+    fio_atomic_or(&grp.stop, 1);
+    fio_atomic_and(&grp.stop, 1);
     FIO___LOCK_UNLOCK(grp.queue->lock);
-    while (grp.stop & 1)
+    while (fio_atomic_add(&grp.stop, 0) & 1)
       FIO_THREAD_RESCHEDULE();
   }
   FIO_LEAK_COUNTER_ON_FREE(fio___queue_worker_manager);
@@ -585,16 +588,16 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
     FIO___LOCK_UNLOCK(q->lock);
     return -1;
   }
-  while (grp.stop)
+  while (fio_atomic_add(&grp.stop, 0))
     FIO_THREAD_RESCHEDULE();
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 }
 
 SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
-  if (!q || FIO_LIST_IS_EMPTY(&q->consumers))
+  if (!q)
     return;
-  FIO___LOCK_LOCK(q->lock);
+  FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     fio_atomic_or(&pos->stop, 1);
     fio_thread_mutex_lock(&pos->mutex);
@@ -604,13 +607,13 @@ SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
   FIO___LOCK_UNLOCK(q->lock);
 }
 
-/** Signals all worker threads to go back to work (new tasks were). */
+/** Signals all worker threads to go back to work (new tasks added). */
 SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
-  if (!q || FIO_LIST_IS_EMPTY(&q->consumers))
+  if (!q)
     return;
-  FIO___LOCK_LOCK(q->lock);
+  FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    if (!pos->stop)
+    if (!fio_atomic_add(&pos->stop, 0))
       fio_thread_cond_signal(&pos->cond);
   }
   FIO___LOCK_UNLOCK(q->lock);
@@ -627,7 +630,7 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
         FIO_PTR_FROM_FIELD(fio___thread_group_s, node, q->consumers.next);
     fio_atomic_or(&pos->stop, 3);
     FIO___LOCK_UNLOCK(q->lock);
-    while (pos->stop & 2)
+    while (fio_atomic_add(&pos->stop, 0) & 2)
       FIO_THREAD_RESCHEDULE();
     fio_thread_cond_destroy(&pos->cond);
     fio_thread_mutex_destroy(&pos->mutex);

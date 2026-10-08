@@ -1736,6 +1736,57 @@ FIO_SFUNC void fio___test_core_static_safe_alloc(void) {
   fio___test_sa16_free(b);
 }
 
+typedef struct {
+  FIO_LIST_NODE node;
+  int v;
+} fio___test_list_item_s;
+
+FIO_SFUNC void fio___test_core_list_each(void) {
+  fprintf(stderr, "* Testing FIO_LIST_EACH / FIO_LIST_EACH_REVERSED\n");
+  /* a zeroed (never initialized) head must iterate zero times */
+  FIO_LIST_HEAD zero = {0};
+  size_t count = 0;
+  FIO_LIST_EACH(fio___test_list_item_s, node, &zero, pos) {
+    (void)pos;
+    ++count;
+  }
+  FIO_LIST_EACH_REVERSED(fio___test_list_item_s, node, &zero, pos) {
+    (void)pos;
+    ++count;
+  }
+  FIO_ASSERT(!count, "zeroed list head should not iterate");
+
+  fio___test_list_item_s items[5];
+  for (int n = 0; n <= 5; ++n) {
+    FIO_LIST_HEAD head = FIO_LIST_INIT(head);
+    for (int i = 0; i < n; ++i) {
+      items[i].v = i;
+      FIO_LIST_PUSH(&head, &items[i].node);
+    }
+    int expect = 0;
+    FIO_LIST_EACH(fio___test_list_item_s, node, &head, pos) {
+      FIO_ASSERT(pos->v == expect, "forward order (n=%d)", n);
+      ++expect;
+    }
+    FIO_ASSERT(expect == n, "forward count %d != %d", expect, n);
+    expect = n;
+    FIO_LIST_EACH_REVERSED(fio___test_list_item_s, node, &head, pos) {
+      --expect;
+      FIO_ASSERT(pos->v == expect, "reversed order (n=%d)", n);
+    }
+    FIO_ASSERT(!expect, "reversed visited %d of %d nodes", n - expect, n);
+    /* removing the current node is safe in both directions */
+    count = 0;
+    FIO_LIST_EACH_REVERSED(fio___test_list_item_s, node, &head, pos) {
+      FIO_LIST_REMOVE(&pos->node);
+      ++count;
+    }
+    FIO_ASSERT(count == (size_t)n && FIO_LIST_IS_EMPTY(&head),
+               "reversed removal (n=%d)",
+               n);
+  }
+}
+
 int main(void) {
   /* Run merged core-adjacent tests first. */
   fio___test_core_type_sizes();
@@ -1772,5 +1823,6 @@ int main(void) {
   fio___test_core_rotation_all_sizes();
   fio___test_core_rotation_macros();
   fio___test_core_static_safe_alloc();
+  fio___test_core_list_each();
   return 0;
 }

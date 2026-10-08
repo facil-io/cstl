@@ -21,7 +21,10 @@ static void poison_stack(void *ignr_) {
   FIO_COMPILER_GUARD;
   FIO_MEMSET(buf, (int)(0xA0U), FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
-  fio_rand_bytes(buf, FIO___STACK_POISON_LENGTH);
+  /* Runs on every worker thread start: avoid the shared `fio_rand` state
+     (intentionally unsynchronized; reported by tsan). On failure (e.g., no
+     /dev/urandom on Windows) the 0xA0 fill above remains. */
+  (void)fio_rand_bytes_secure(buf, FIO___STACK_POISON_LENGTH);
   FIO_COMPILER_GUARD;
   fio_trylock(buf);
   FIO_LOG_DDEBUG2("(%d) Stack Poisoned: %zu Kb",

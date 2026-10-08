@@ -88,7 +88,7 @@ FIO_SFUNC void fio___io_tick(int max_timeout) {
   idle_round &= (timeout > 0);
   performed_idle &= idle_round;
   idle_round ^= performed_idle;
-  if ((idle_round & !FIO___IO.stop)) {
+  if ((idle_round & !fio_atomic_add(&FIO___IO.stop, 0))) {
     fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
@@ -168,7 +168,7 @@ FIO_SFUNC void fio___io_shutdown(void) {
 }
 
 FIO_SFUNC void fio___io_work_task(void *ignr_1, void *ignr_2) {
-  if (FIO___IO.stop)
+  if (fio_atomic_add(&FIO___IO.stop, 0))
     goto no_run;
   fio___io_tick(500);
   fio_queue_push(&FIO___IO.queue, fio___io_work_task, ignr_1, ignr_2);

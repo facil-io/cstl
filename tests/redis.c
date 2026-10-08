@@ -851,19 +851,6 @@ static size_t fio___redis_test_run_batch(fio___redis_test_capture_s *c) {
   return c->writes;
 }
 
-/** Returns 1 if `needle` (nlen bytes) occurs in `hay` (hlen bytes). */
-static int fio___redis_test_mem_contains(const uint8_t *hay,
-                                         size_t hlen,
-                                         const uint8_t *needle,
-                                         size_t nlen) {
-  if (nlen > hlen)
-    return 0;
-  for (size_t i = 0; i + nlen <= hlen; ++i)
-    if (!FIO_MEMCMP(hay + i, needle, nlen))
-      return 1;
-  return 0;
-}
-
 static void test_resubscribe_batch_bytes(void) {
   fprintf(stderr, "* Testing Redis resubscribe batch bytes...\n");
 
@@ -940,24 +927,37 @@ static void test_resubscribe_batch_flush(void) {
     FIO_ASSERT(cap.write_len[w] <= FIO___REDIS_RESUBSCRIBE_BUF_CAPA,
                "flushed batch exceeds static buffer capacity");
 
-  /* Each channel's command must appear intact in the captured stream,
-   * and the total length must match the sum of all command lengths. */
-  size_t total = 0;
-  for (size_t i = 0; i < FIO___TEST_FLUSH_CHANNELS; ++i) {
-    uint8_t cmd[64];
-    size_t cmd_len = fio___redis_write_sub_cmd(cmd,
-                                               "SUBSCRIBE",
-                                               9,
-                                               FIO_BUF_INFO2(names[i], 20));
-    total += cmd_len;
-    FIO_ASSERT(fio___redis_test_mem_contains(buf, cap.len, cmd, cmd_len),
-               "flushed batch missing channel command: %.20s",
-               names[i]);
-  }
-  FIO_ASSERT(cap.len == total,
+  /* Each channel's command must appear exactly once, intact, and the total
+   * length must match the sum of all command lengths. Linear walk (an O(n^2)
+   * search took ~14 minutes under tsan): all commands share one size
+   * (20-char names), so read the channel index from each command's last 4
+   * name digits, rebuild that command and compare in place. */
+  static uint8_t seen[FIO___TEST_FLUSH_CHANNELS];
+  FIO_MEMSET(seen, 0, sizeof(seen));
+  uint8_t cmd[64];
+  const size_t cmd_len = fio___redis_write_sub_cmd(cmd,
+                                                   "SUBSCRIBE",
+                                                   9,
+                                                   FIO_BUF_INFO2(names[0], 20));
+  FIO_ASSERT(cap.len == cmd_len * FIO___TEST_FLUSH_CHANNELS,
              "flushed batch total mismatch: %zu vs %zu",
              cap.len,
-             total);
+             cmd_len * FIO___TEST_FLUSH_CHANNELS);
+  for (size_t pos = 0; pos < cap.len; pos += cmd_len) {
+    const uint8_t *d = buf + pos + cmd_len - 6; /* last 4 name digits */
+    size_t i = (size_t)(d[0] - '0') * 1000 + (size_t)(d[1] - '0') * 100 +
+               (size_t)(d[2] - '0') * 10 + (size_t)(d[3] - '0');
+    FIO_ASSERT(i < FIO___TEST_FLUSH_CHANNELS && !seen[i] &&
+                   fio___redis_write_sub_cmd(cmd,
+                                             "SUBSCRIBE",
+                                             9,
+                                             FIO_BUF_INFO2(names[i], 20)) ==
+                       cmd_len &&
+                   !FIO_MEMCMP(buf + pos, cmd, cmd_len),
+               "flushed batch corrupt/duplicate command at offset %zu",
+               pos);
+    seen[i] = 1;
+  }
 
   /* Cleanup */
   for (size_t i = 0; i < FIO___TEST_FLUSH_CHANNELS; ++i) {

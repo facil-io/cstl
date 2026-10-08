@@ -505,6 +505,11 @@ typedef struct {
   char buf[];
 } fio___http_connection_s;
 
+/** Selects the task queue for `s` (async queue when running, else IO queue). */
+FIO_IFUNC fio_queue_s *fio___http_settings_queue(fio_http_settings_s *s) {
+  return ((s->queue && s->queue->q) ? s->queue->q : fio_io_queue());
+}
+
 #define FIO_REF_NAME             fio___http_connection
 #define FIO_REF_CONSTRUCTOR_ONLY 1
 #define FIO_REF_FLEX_TYPE        char

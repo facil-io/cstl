@@ -6,7 +6,8 @@ helper, static-file serving, error responses, and WebSocket/SSE upgrade
 helpers that wrap the HTTP handle.
 
 No performance loops, no external processes, no external network calls.
-Loopback sockets are used only for listener creation (no reactor is run).
+Loopback sockets are used for listener creation; one final test runs the
+reactor for an in-process client/server roundtrip.
 ***************************************************************************** */
 #define FIO_HTTP
 #include "test-helpers.h"
@@ -1690,6 +1691,107 @@ static void test_static_compress_detached_creation(void) {
   test_static_tree_cleanup(dir);
 }
 
+/* ===========================================================================
+   Client / server roundtrip (live reactor)
+
+   Our own HTTP client (`fio_http_connect`) talks to our own HTTP server
+   (`fio_http_listen`) over loopback. Single process: the reactor runs on the
+   main (IO) thread; server and client HTTP callbacks run on one async worker
+   thread (`.queue`). A 3 second
+   timer guards against hangs; `fio_io_stop` ends the reactor.
+   ===========================================================================
+ */
+
+#define TEST_RT_BODY "roundtrip-ok"
+
+static struct {
+  fio_thread_t io_thread;
+  volatile int server_calls;
+  volatile int server_on_worker;
+  volatile int client_calls;
+  volatile int client_on_worker;
+  volatile int client_status;
+  volatile int client_body_ok;
+  volatile int timed_out;
+} test_rt;
+
+static void test_rt_server_on_http(fio_http_s *h) {
+  fio_thread_t self = fio_thread_current();
+  test_rt.server_on_worker = !fio_thread_equal(&self, &test_rt.io_thread);
+  fio_str_info_s path = fio_http_path(h);
+  if (path.len == 10 && !FIO_MEMCMP(path.buf, "/roundtrip", 10))
+    fio_atomic_add(&test_rt.server_calls, 1);
+  fio_http_write(h,
+                 .buf = (char *)TEST_RT_BODY,
+                 .len = sizeof(TEST_RT_BODY) - 1,
+                 .finish = 1);
+}
+
+static void test_rt_client_on_http(fio_http_s *h) {
+  fio_thread_t self = fio_thread_current();
+  test_rt.client_on_worker = !fio_thread_equal(&self, &test_rt.io_thread);
+  test_rt.client_status = (int)fio_http_status(h);
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  test_rt.client_body_ok =
+      (body.len == sizeof(TEST_RT_BODY) - 1 &&
+       !FIO_MEMCMP(body.buf, TEST_RT_BODY, body.len));
+  fio_atomic_add(&test_rt.client_calls, 1);
+  fio_io_stop();
+}
+
+static int test_rt_timeout(void *ignr1, void *ignr2) {
+  (void)ignr1, (void)ignr2;
+  test_rt.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static void test_http_client_server_roundtrip(void) {
+  fprintf(stderr,
+          "  * client/server roundtrip (1 IO thread + 1 worker thread)\n");
+  static fio_io_async_s worker = FIO_IO_ASYN_INIT;
+  fio_io_async_attach(&worker, 1);
+  FIO_MEMSET(&test_rt, 0, sizeof(test_rt));
+  test_rt.io_thread = fio_thread_current();
+
+  fio_io_run_every(.fn = test_rt_timeout, .every = 3000, .repetitions = 1);
+
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .on_http = test_rt_server_on_http,
+                                           .queue = &worker);
+  FIO_ASSERT(l, "roundtrip: fio_http_listen failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "roundtrip: listener port discovery failed");
+
+  char url[128];
+  snprintf(url, sizeof(url), "http://127.0.0.1:%u/roundtrip", port);
+  fio_io_s *io = fio_http_connect(url,
+                                  NULL,
+                                  .on_http = test_rt_client_on_http,
+                                  .queue = &worker);
+  FIO_ASSERT(io, "roundtrip: fio_http_connect failed");
+
+  fio_io_start(0); /* single process: 1 IO thread (this thread) */
+
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  FIO_ASSERT(!test_rt.timed_out, "roundtrip: timed out after 3 seconds");
+  FIO_ASSERT(test_rt.server_calls == 1,
+             "roundtrip: server on_http should run once (got %d)",
+             test_rt.server_calls);
+  FIO_ASSERT(test_rt.server_on_worker,
+             "roundtrip: server on_http should run on the worker thread");
+  FIO_ASSERT(test_rt.client_calls == 1,
+             "roundtrip: client on_http should run once (got %d)",
+             test_rt.client_calls);
+  FIO_ASSERT(test_rt.client_on_worker,
+             "roundtrip: client on_http should run on the worker thread");
+  FIO_ASSERT(test_rt.client_status == 200,
+             "roundtrip: expected status 200 (got %d)",
+             test_rt.client_status);
+  FIO_ASSERT(test_rt.client_body_ok, "roundtrip: response body mismatch");
+}
+#undef TEST_RT_BODY
+
 /* ===========================================================================   Main
    ===========================================================================
  */
@@ -1704,10 +1806,6 @@ int main(void) {
 
   test_resource_action();
   test_listen_and_route();
-  /* In-process reactor roundtrip omitted: running fio_io_start inside a
-     correctness test reliably crashes during reactor shutdown, and the crash
-     is in reactor/connection cleanup rather than HTTP logic. The listen and
-     routing test above already exercises fio_http_listen creation. */
   test_settings_and_io_queries();
   test_static_file_response();
   test_error_response();
@@ -1721,6 +1819,7 @@ int main(void) {
   test_static_compress_note_result();
   test_static_compress_attached_readonly();
   test_static_compress_detached_creation();
+  test_http_client_server_roundtrip();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

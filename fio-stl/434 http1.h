@@ -405,6 +405,8 @@ FIO_SFUNC void fio___http1_on_attach_client(fio_io_s *io) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_io_udata(io);
   // c->io = fio_io_dup(io);
   c->io = io;
+  /* async queues resolve once the reactor runs - select it on attach */
+  c->queue = fio___http_settings_queue(c->settings);
   fio___http1_send_request(c->h);
   if (c->len)
     fio___http1_process_data(io, c);

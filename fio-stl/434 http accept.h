@@ -205,9 +205,7 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_io_s *io) {
   *c = (fio___http_connection_s){
       .io = io,
       .settings = &(p->settings),
-      .queue =
-          ((p->settings.queue && p->settings.queue->q) ? p->settings.queue->q
-                                                       : fio_io_queue()),
+      .queue = fio___http_settings_queue(&p->settings),
       .udata = p->settings.udata,
       .state.http =
           {

@@ -1547,9 +1547,13 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_LIST_EACH(type, node_name, head, pos)   \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->next),   \
+  for (type *pos =   \
+           ((head)->next ? FIO_PTR_FROM_FIELD(type, node_name, (head)->next)   \
+                         : FIO_PTR_FROM_FIELD(type, node_name, (head))),   \
             *next____p_ls_##pos =   \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next);   \
+                ((head)->next   \
+                     ? FIO_PTR_FROM_FIELD(type, node_name, (head)->next->next)   \
+                     : FIO_PTR_FROM_FIELD(type, node_name, (head)));   \
        pos != FIO_PTR_FROM_FIELD(type, node_name, (head));   \
        (pos = next____p_ls_##pos),   \
             (next____p_ls_##pos =   \
@@ -1566,9 +1570,13 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_LIST_EACH_REVERSED(type, node_name, head, pos)   \
-  for (type *pos = FIO_PTR_FROM_FIELD(type, node_name, (head)->prev),   \
+  for (type *pos =   \
+           ((head)->prev ? FIO_PTR_FROM_FIELD(type, node_name, (head)->prev)   \
+                         : FIO_PTR_FROM_FIELD(type, node_name, (head))),   \
             *next____p_ls_##pos =   \
-                FIO_PTR_FROM_FIELD(type, node_name, (head)->next->prev);   \
+                ((head)->prev   \
+                     ? FIO_PTR_FROM_FIELD(type, node_name, (head)->prev->prev)   \
+                     : FIO_PTR_FROM_FIELD(type, node_name, (head)));   \
        pos != FIO_PTR_FROM_FIELD(type, node_name, (head));   \
        (pos = next____p_ls_##pos),   \
             (next____p_ls_##pos =   \

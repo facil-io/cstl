@@ -173,8 +173,10 @@ FIO_SFUNC void *fio___test_thread_detach_fn(void *arg) {
 }
 
 FIO_SFUNC void fio___test_thread_detach(void) {
-  volatile int flag = 0;
+  /* static: the detached thread may outlive this frame (wait is bounded) */
+  static volatile int flag;
   fio_thread_t thread;
+  flag = 0;
 
   int result =
       fio_thread_create(&thread, fio___test_thread_detach_fn, (void *)&flag);
@@ -184,7 +186,7 @@ FIO_SFUNC void fio___test_thread_detach(void) {
   FIO_ASSERT(result == 0, "fio_thread_detach should return 0 on success");
 
   /* Wait for detached thread to complete (with timeout) */
-  for (int i = 0; i < 10000 && !flag; ++i) {
+  for (int i = 0; i < 10000 && !fio_atomic_add(&flag, 0); ++i) {
     fio_thread_yield();
   }
 
