@@ -963,11 +963,13 @@ _Symbol type:_ `macro`
 ```c
 #define FIO_THREAD_WAIT(nano_sec)   \
   do {   \
-    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);   \
+    const struct timespec tm = {.tv_sec = (time_t)((nano_sec) / 1000000000),   \
+                                .tv_nsec = ((long)(nano_sec) % 1000000000)};   \
+    nanosleep(&tm, (struct timespec *)NULL);   \
   } while (0)
 ```
 
-Calls NtDelayExecution with the requested nano-second count.
+Calls nanonsleep with the requested nano-second count.
 
 _Symbol type:_ `macro`
 

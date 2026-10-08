@@ -718,10 +718,10 @@ Sleep / Thread Scheduling Macros
 
 #ifndef FIO_THREAD_WAIT
 #if FIO_OS_WIN
-/** Calls NtDelayExecution with the requested nano-second count. */
 #define FIO_THREAD_WAIT(nano_sec)                                              \
   do {                                                                         \
-    Sleep(((nano_sec) / 1000000) ? ((nano_sec) / 1000000) : 1);                \
+    SleepEx(((nano_sec) / 1000000) ? (DWORD)((nano_sec) / 1000000) : 1,        \
+            FALSE);                                                            \
   } while (0)
 // https://docs.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-sleep
 

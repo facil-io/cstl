@@ -1266,7 +1266,9 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
     if (base < 2) { /* base 10 / Oct */
       dbl *= (expo_neg ? fio___aton_pow10n : fio___aton_pow10)(expo);
     } else {
-      dbl *= fio_u2d(1U, (expo_neg ? (int64_t)0 - expo : (int64_t)expo));
+      dbl *= fio_u2d(
+          1U,
+          (expo_neg ? (int64_t)((uint64_t)0ULL - expo) : (int64_t)expo));
     }
   }
   r.is_float = 1;

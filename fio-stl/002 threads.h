@@ -721,7 +721,7 @@ FIO_IFUNC uintptr_t fio_thread_nid(void) {
 }
 
 /** Yields thread execution. */
-FIO_IFUNC void fio_thread_yield(void) { Sleep(0); }
+FIO_IFUNC void fio_thread_yield(void) { SleepEx(0, FALSE); }
 
 #endif /* FIO_THREADS_BYO */
 
