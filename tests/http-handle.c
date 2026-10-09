@@ -224,6 +224,510 @@ static void test_handle_response_headers(void) {
   fio_http_free(h);
 }
 
+/* The same validation/removal contract applies to all six public setters. */
+typedef struct {
+  const char *category;
+  fio_str_info_s (*setters[3])(fio_http_s *, fio_str_info_s, fio_str_info_s);
+  fio_str_info_s (*get)(fio_http_s *, fio_str_info_s, size_t);
+  size_t (*count)(fio_http_s *, fio_str_info_s);
+  size_t (*each)(fio_http_s *,
+                 int (*)(fio_http_s *, fio_str_info_s, fio_str_info_s, void *),
+                 void *);
+} test_header_api_s;
+
+static const test_header_api_s TEST_HEADER_APIS[] = {
+    {"request",
+     {fio_http_request_header_set,
+      fio_http_request_header_add,
+      fio_http_request_header_set_if_missing},
+     fio_http_request_header,
+     fio_http_request_header_count,
+     fio_http_request_header_each},
+    {"response",
+     {fio_http_response_header_set,
+      fio_http_response_header_add,
+      fio_http_response_header_set_if_missing},
+     fio_http_response_header,
+     fio_http_response_header_count,
+     fio_http_response_header_each},
+};
+
+static void test_header_assert_preserved(fio_http_s *h,
+                                         const test_header_api_s *api) {
+  fio_str_info_s name = FIO_STR_INFO2((char *)"x-test", 6);
+  FIO_ASSERT(api->count(h, FIO_STR_INFO2(NULL, 0)) == 1,
+             "%s rejection changed the number of headers",
+             api->category);
+  FIO_ASSERT(api->count(h, name) == 2,
+             "%s rejection changed existing value count",
+             api->category);
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(api->get(h, name, 0), FIO_STR_INFO1((char *)"first")),
+      "%s rejection changed the first value",
+      api->category);
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(api->get(h, name, 1), FIO_STR_INFO1((char *)"second")),
+      "%s rejection changed the second value",
+      api->category);
+}
+
+static void test_handle_header_rejection(void) {
+  fprintf(stderr, "  * request/response header name and value rejection\n");
+  /* Independent of the production table: controls, SP, DEL and separators. */
+  static const char forbidden[] =
+      "\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+      " \x7f\"(),/:;<=>?@[\\]{}";
+  fio_str_info_s invalid_values[] = {
+      FIO_STR_INFO2((char *)"\0ok", 3),
+      FIO_STR_INFO2((char *)"o\0k", 3),
+      FIO_STR_INFO2((char *)"ok\0", 3),
+      FIO_STR_INFO2((char *)"\rok", 3),
+      FIO_STR_INFO2((char *)"o\rk", 3),
+      FIO_STR_INFO2((char *)"ok\r", 3),
+      FIO_STR_INFO2((char *)"\nok", 3),
+      FIO_STR_INFO2((char *)"o\nk", 3),
+      FIO_STR_INFO2((char *)"ok\n", 3),
+      FIO_STR_INFO1((char *)"good\r\nInjected: yes"),
+  };
+  fio_str_info_s name = FIO_STR_INFO2((char *)"x-test", 6);
+  fio_str_info_s missing = FIO_STR_INFO1((char *)"x-missing");
+  fio_str_info_s good = FIO_STR_INFO1((char *)"value");
+
+  for (size_t a = 0; a < sizeof(TEST_HEADER_APIS) / sizeof(*TEST_HEADER_APIS);
+       ++a) {
+    const test_header_api_s *api = &TEST_HEADER_APIS[a];
+    fio_http_s *h = fio_http_new();
+    FIO_ASSERT(h, "fio_http_new returned NULL");
+    api->setters[1](h, name, FIO_STR_INFO1((char *)"first"));
+    api->setters[1](h, name, FIO_STR_INFO1((char *)"second"));
+    for (size_t op = 0; op < 3; ++op) {
+      for (size_t i = 0; i < sizeof(forbidden) - 1; ++i) {
+        /* Explicit length catches embedded NUL truncation to existing x-test.
+         */
+        char bad_name[] = {'x', '-', 't', 'e', 's', 't', forbidden[i], 'x'};
+        fio_str_info_s r =
+            api->setters[op](h,
+                             FIO_STR_INFO2(bad_name, sizeof(bad_name)),
+                             good);
+        FIO_ASSERT(!r.buf && !r.len,
+                   "%s setter %zu accepted forbidden name byte 0x%02x",
+                   api->category,
+                   op,
+                   (unsigned)(uint8_t)forbidden[i]);
+        test_header_assert_preserved(h, api);
+        r = api->setters[op](h,
+                             FIO_STR_INFO2(bad_name, sizeof(bad_name)),
+                             FIO_STR_INFO2(NULL, 0));
+        FIO_ASSERT(!r.buf && !r.len,
+                   "%s setter %zu accepted invalid removal name",
+                   api->category,
+                   op);
+        test_header_assert_preserved(h, api);
+      }
+      for (size_t i = 0; i < sizeof(invalid_values) / sizeof(*invalid_values);
+           ++i) {
+        fio_str_info_s r = api->setters[op](h, name, invalid_values[i]);
+        FIO_ASSERT(!r.buf && !r.len,
+                   "%s setter %zu accepted invalid replacement %zu",
+                   api->category,
+                   op,
+                   i);
+        test_header_assert_preserved(h, api);
+        r = api->setters[op](h, missing, invalid_values[i]);
+        FIO_ASSERT(!r.buf && !r.len && !api->get(h, missing, 0).buf,
+                   "%s setter %zu stored invalid value %zu on missing header",
+                   api->category,
+                   op,
+                   i);
+        test_header_assert_preserved(h, api);
+      }
+    }
+    fio_http_free(h);
+  }
+}
+
+static int test_header_name_callback(fio_http_s *h,
+                                     fio_str_info_s name,
+                                     fio_str_info_s value,
+                                     void *udata) {
+  (void)h;
+  (void)value;
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(name, *(fio_str_info_s *)udata),
+             "stored header name does not match lowercase policy");
+  return 0;
+}
+
+static void test_handle_header_name_policy(void) {
+  fprintf(stderr, "  * header names, ASCII lowercase and immutable input\n");
+  static const char *const names[] = {
+      "X-Mixed",
+      ("X-Token!#$%&'*+-.^_`|~"
+       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
+      "X-\xc3\x89-\x80\xff",
+  };
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+  static const char *const stored_names[] = {
+      "x-mixed",
+      ("x-token!#$%&'*+-.^_`|~"
+       "0123456789abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"),
+      "x-\xc3\x89-\x80\xff",
+  };
+#endif
+  /* High-bit name bytes remain allowed, including non-UTF-8 bytes. */
+  fio_str_info_s value = FIO_STR_INFO1((char *)"text \t\xc3\xa9\x80\xff");
+  for (size_t a = 0; a < sizeof(TEST_HEADER_APIS) / sizeof(*TEST_HEADER_APIS);
+       ++a) {
+    const test_header_api_s *api = &TEST_HEADER_APIS[a];
+    for (size_t op = 0; op < 3; ++op) {
+      for (size_t i = 0; i < sizeof(names) / sizeof(*names); ++i) {
+        fio_http_s *h = fio_http_new();
+        FIO_ASSERT(h, "fio_http_new returned NULL");
+        fio_str_info_s name = FIO_STR_INFO1((char *)names[i]);
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+        fio_str_info_s stored = FIO_STR_INFO1((char *)stored_names[i]);
+#else
+        fio_str_info_s stored = name;
+#endif
+        /* A lowercase write into these literals would fault. */
+        fio_str_info_s r = api->setters[op](h, name, value);
+        FIO_ASSERT(FIO_STR_INFO_IS_EQ(r, value),
+                   "%s setter %zu rejected valid name %zu",
+                   api->category,
+                   op,
+                   i);
+        FIO_ASSERT(FIO_STR_INFO_IS_EQ(api->get(h, name, 0), value) &&
+                       FIO_STR_INFO_IS_EQ(api->get(h, stored, 0), value),
+                   "%s valid header lookup mismatch",
+                   api->category);
+        FIO_ASSERT(api->count(h, stored) == 1 &&
+                       api->each(h, test_header_name_callback, &stored) == 1,
+                   "%s valid header storage mismatch",
+                   api->category);
+#if !FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+        FIO_ASSERT(!api->get(h, FIO_STR_INFO1((char *)"x-mixed"), 0).buf,
+                   "disabled lowercase mode must preserve original case");
+#endif
+        char mutable_name[] = "X-Mutable";
+        api->setters[op](h,
+                         FIO_STR_INFO2(mutable_name, sizeof(mutable_name) - 1),
+                         value);
+        FIO_ASSERT(!memcmp(mutable_name, "X-Mutable", sizeof(mutable_name)),
+                   "%s setter %zu modified input name",
+                   api->category,
+                   op);
+        FIO_ASSERT(!memcmp(value.buf, "text \t\xc3\xa9\x80\xff", value.len),
+                   "%s setter %zu modified input value",
+                   api->category,
+                   op);
+        fio_http_free(h);
+      }
+    }
+  }
+}
+
+static void test_handle_header_name_length(void) {
+  fprintf(stderr, "  * 4095/4096 byte header name boundary\n");
+  char name_buf[4096];
+  FIO_MEMSET(name_buf, 'A', sizeof(name_buf));
+  fio_str_info_s name = FIO_STR_INFO2(name_buf, 4095);
+  fio_str_info_s too_long = FIO_STR_INFO2(name_buf, sizeof(name_buf));
+  fio_str_info_s value = FIO_STR_INFO1((char *)"boundary");
+  char stored_buf[4095];
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+  FIO_MEMSET(stored_buf, 'a', sizeof(stored_buf));
+#else
+  FIO_MEMSET(stored_buf, 'A', sizeof(stored_buf));
+#endif
+  fio_str_info_s stored = FIO_STR_INFO2(stored_buf, sizeof(stored_buf));
+  for (size_t a = 0; a < sizeof(TEST_HEADER_APIS) / sizeof(*TEST_HEADER_APIS);
+       ++a) {
+    const test_header_api_s *api = &TEST_HEADER_APIS[a];
+    for (size_t op = 0; op < 3; ++op) {
+      fio_http_s *h = fio_http_new();
+      FIO_ASSERT(h, "fio_http_new returned NULL");
+      fio_str_info_s r = api->setters[op](h, name, value);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(r, value),
+                 "%s setter %zu rejected a 4095 byte name",
+                 api->category,
+                 op);
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(api->get(h, name, 0), value) &&
+                     FIO_STR_INFO_IS_EQ(api->get(h, stored, 0), value),
+                 "%s 4095 byte name lookup failed",
+                 api->category);
+      FIO_ASSERT(api->each(h, test_header_name_callback, &stored) == 1,
+                 "%s 4095 byte name storage failed",
+                 api->category);
+      r = api->setters[op](h, too_long, FIO_STR_INFO1((char *)"replacement"));
+      FIO_ASSERT(!r.buf && !r.len && !api->get(h, too_long, 0).buf,
+                 "%s setter %zu accepted/looked up a 4096 byte name",
+                 api->category,
+                 op);
+      size_t unique_count = api->count(h, FIO_STR_INFO2(NULL, 0));
+      size_t stored_count = api->count(h, stored);
+      fio_str_info_s original_value = api->get(h, name, 0);
+      fio_str_info_s stored_value = api->get(h, stored, 0);
+      FIO_ASSERT(unique_count == 1,
+                 "%s setter %zu oversized name changed unique count to %zu",
+                 api->category,
+                 op,
+                 unique_count);
+      FIO_ASSERT(
+          FIO_STR_INFO_IS_EQ(original_value, value),
+          "%s setter %zu oversized name changed original lookup: %zu '%.*s'",
+          api->category,
+          op,
+          original_value.len,
+          (int)original_value.len,
+          original_value.buf ? original_value.buf : "");
+      FIO_ASSERT(
+          FIO_STR_INFO_IS_EQ(stored_value, value),
+          "%s setter %zu oversized name changed stored lookup: %zu '%.*s'",
+          api->category,
+          op,
+          stored_value.len,
+          (int)stored_value.len,
+          stored_value.buf ? stored_value.buf : "");
+      FIO_ASSERT(
+          stored_count == 1,
+          "%s setter %zu 4095 byte stored-name count is %zu (expected 1)",
+          api->category,
+          op,
+          stored_count);
+      for (size_t i = 0; i < sizeof(name_buf); ++i)
+        FIO_ASSERT(name_buf[i] == 'A',
+                   "header setter modified long input name");
+      fio_http_free(h);
+    }
+  }
+}
+
+static void test_handle_header_removal(void) {
+  fprintf(stderr, "  * null/empty header inputs preserve removal semantics\n");
+  fio_str_info_s name = FIO_STR_INFO2((char *)"x-test", 6);
+  fio_str_info_s invalid_names[] = {
+      FIO_STR_INFO2(NULL, 0),
+      FIO_STR_INFO2(NULL, 5),
+      FIO_STR_INFO2((char *)"", 0),
+  };
+  fio_str_info_s empty_values[] = {
+      FIO_STR_INFO2(NULL, 0),
+      FIO_STR_INFO2(NULL, 5),
+      FIO_STR_INFO2((char *)"\r\n", 0),
+  };
+  for (size_t a = 0; a < sizeof(TEST_HEADER_APIS) / sizeof(*TEST_HEADER_APIS);
+       ++a) {
+    const test_header_api_s *api = &TEST_HEADER_APIS[a];
+    for (size_t op = 0; op < 3; ++op) {
+      for (size_t i = 0; i < sizeof(empty_values) / sizeof(*empty_values);
+           ++i) {
+        fio_http_s *h = fio_http_new();
+        FIO_ASSERT(h, "fio_http_new returned NULL");
+        api->setters[1](h, name, FIO_STR_INFO1((char *)"first"));
+        api->setters[1](h, name, FIO_STR_INFO1((char *)"second"));
+        for (size_t n = 0; n < sizeof(invalid_names) / sizeof(*invalid_names);
+             ++n) {
+          fio_str_info_s r = api->setters[op](h,
+                                              invalid_names[n],
+                                              FIO_STR_INFO1((char *)"value"));
+          FIO_ASSERT(!r.buf && !r.len, "invalid empty/null name was accepted");
+          test_header_assert_preserved(h, api);
+          r = api->setters[op](h, invalid_names[n], empty_values[i]);
+          FIO_ASSERT(!r.buf && !r.len,
+                     "invalid empty/null removal name accepted");
+          test_header_assert_preserved(h, api);
+        }
+        fio_str_info_s r = api->setters[op](h, name, empty_values[i]);
+        FIO_ASSERT(!r.buf && !r.len, "empty/null value should return empty");
+        if (op == 1) { /* add: no-op, not removal */
+          test_header_assert_preserved(h, api);
+          api->setters[0](h, name, FIO_STR_INFO2(NULL, 0));
+        } else {
+          FIO_ASSERT(!api->get(h, name, 0).buf && api->count(h, name) == 0,
+                     "%s setter %zu did not remove header",
+                     api->category,
+                     op);
+        }
+        r = api->setters[op](h, name, empty_values[i]);
+        FIO_ASSERT(!r.buf && !r.len &&
+                       api->count(h, FIO_STR_INFO2(NULL, 0)) == 0,
+                   "%s setter %zu created header from empty/null value",
+                   api->category,
+                   op);
+        fio_http_free(h);
+      }
+    }
+  }
+}
+
+static void test_handle_should_close(void) {
+  fprintf(stderr, "  * request Connection close tokens\n");
+  static const struct {
+    const char *value;
+    int close;
+  } cases[] = {
+      {"", 0},
+      {"keep-alive", 0},
+      {"close", 1},
+      {"CLOSE", 1},
+      {"Close", 1},
+      {"closE", 1},
+      {"cLoSe", 1},
+      {" \tClOsE\t ", 1},
+      {"keep-alive, close", 1},
+      {"close, keep-alive", 1},
+      {", ,\t, ", 0},
+      {", ,\tclose\t ,,", 1},
+      {"keep-alive,,\tClOsE \t,,upgrade", 1},
+      {"xclose", 0},
+      {"close-extra", 0},
+      {"close;q=0", 0},
+      {"close ;q=0", 0},
+      {"closed", 0},
+      {"clos", 0},
+      {"cl ose", 0},
+      {"\vclose", 0},
+      {"close\f", 0},
+      {"xclose, close-extra, close;q=0", 0},
+  };
+  fio_str_info_s name = FIO_STR_INFO2((char *)"connection", 10);
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT(h, "fio_http_new returned NULL");
+  FIO_ASSERT(!fio___http1_should_close(h),
+             "absent Connection should not close");
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    fio_str_info_s value = FIO_STR_INFO1((char *)cases[i].value);
+    fio_http_request_header_set(h, name, value);
+    if (value.len)
+      FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_request_header(h, name, 0), value),
+                 "Connection case %zu was not stored intact",
+                 i);
+    FIO_ASSERT(!!fio___http1_should_close(h) == cases[i].close,
+               "Connection case %zu ('%s') close mismatch",
+               i,
+               cases[i].value);
+  }
+  fio_http_free(h);
+
+  /* Check every stored value, including a close in the first/middle/last field.
+   */
+  for (size_t close_at = 0; close_at < 3; ++close_at) {
+    h = fio_http_new();
+    FIO_ASSERT(h, "fio_http_new returned NULL");
+    for (size_t i = 0; i < 3; ++i)
+      fio_http_request_header_add(
+          h,
+          name,
+          FIO_STR_INFO1(
+              (char *)(i == close_at ? " \tClOsE\t " : "keep-alive,xclose")));
+    FIO_ASSERT(fio_http_request_header_count(h, name) == 3,
+               "repeated Connection fields not stored");
+    FIO_ASSERT(fio___http1_should_close(h),
+               "close in repeated Connection field %zu not detected",
+               close_at);
+    fio_http_free(h);
+  }
+
+  h = fio_http_new();
+  FIO_ASSERT(h, "fio_http_new returned NULL");
+  fio_http_request_header_add(h, name, FIO_STR_INFO1((char *)"keep-alive"));
+  fio_http_request_header_add(h, name, FIO_STR_INFO1((char *)", \t,,"));
+  fio_http_request_header_add(
+      h,
+      name,
+      FIO_STR_INFO1((char *)"xclose, close-extra, close;q=0"));
+  FIO_ASSERT(!fio___http1_should_close(h),
+             "repeated Connection nonmatches should not close");
+  fio_http_free(h);
+
+  h = fio_http_new();
+  FIO_ASSERT(h, "fio_http_new returned NULL");
+  fio_http_response_header_set(h, name, FIO_STR_INFO1((char *)"close"));
+  FIO_ASSERT(!fio___http1_should_close(h),
+             "response-only close must be ignored");
+  fio_http_request_header_set(h, name, FIO_STR_INFO1((char *)"keep-alive"));
+  FIO_ASSERT(!fio___http1_should_close(h),
+             "response close must not override request keep-alive");
+  fio_http_response_header_set(h, name, FIO_STR_INFO1((char *)"keep-alive"));
+  fio_http_request_header_set(h, name, FIO_STR_INFO1((char *)"close"));
+  FIO_ASSERT(fio___http1_should_close(h),
+             "response keep-alive must not override request close");
+  fio_http_free(h);
+}
+
+static void test_handle_should_close_http10(void) {
+  fprintf(stderr, "  * HTTP/1.0 persistence (RFC 9112 §9.3)\n");
+  static const struct {
+    const char *version;
+    const char *value; /* NULL: no Connection header */
+    int streaming;
+    int close;
+  } cases[] = {
+      {"HTTP/1.0", NULL, 0, 1},
+      {"HTTP/1.0", "upgrade", 0, 1},
+      {"HTTP/1.0", "keep-alive", 0, 0},
+      {"HTTP/1.0", " \tKeEp-AlIvE\t ", 0, 0},
+      {"HTTP/1.0", "upgrade, Keep-Alive", 0, 0},
+      {"HTTP/1.0", "keep-alive, close", 0, 1},
+      {"HTTP/1.0", "keep-alive-x", 0, 1},
+      {"HTTP/1.0", "keep-alive", 1, 1}, /* close-delimited stream */
+      {"HTTP/0.9", NULL, 0, 0}, /* not legacy: HTTP/1.1 semantics */
+      {"HTTP/0.9", NULL, 1, 0},
+      {"HTTP/1.1", NULL, 0, 0},
+      {"HTTP/1.1", NULL, 1, 0},
+      {"HTTP/1.1", "keep-alive", 1, 0},
+  };
+  fio_str_info_s name = FIO_STR_INFO2((char *)"connection", 10);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    fio_http_s *h = fio_http_new();
+    FIO_ASSERT(h, "fio_http_new returned NULL");
+    fio_http_version_set(h, FIO_STR_INFO1((char *)cases[i].version));
+    if (cases[i].value)
+      fio_http_request_header_set(h,
+                                  name,
+                                  FIO_STR_INFO1((char *)cases[i].value));
+    if (cases[i].streaming)
+      h->state |= FIO_HTTP_STATE_STREAMING;
+    FIO_ASSERT(!!fio___http1_should_close(h) == cases[i].close,
+               "%s Connection \"%s\" streaming %d: close should be %d",
+               cases[i].version,
+               cases[i].value ? cases[i].value : "(none)",
+               cases[i].streaming,
+               cases[i].close);
+    FIO_ASSERT(fio___http1_is_chunked(h) ==
+                   (cases[i].streaming && strcmp(cases[i].version, "HTTP/1.0")),
+               "%s streaming %d: chunked framing mismatch",
+               cases[i].version,
+               cases[i].streaming);
+    h->state &= ~FIO_HTTP_STATE_STREAMING;
+    fio_http_free(h);
+  }
+}
+
+static void test_handle_should_close_long_list(void) {
+  fprintf(stderr, "  * Connection close beyond 2048 bytes\n");
+  char list[4096];
+  size_t len = 0;
+  for (size_t i = 0; i < 256; ++i) {
+    FIO_MEMCPY(list + len, "keep-alive,", 11);
+    len += 11;
+  }
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT(h, "fio_http_new returned NULL");
+  fio_str_info_s name = FIO_STR_INFO2((char *)"connection", 10);
+  fio_http_request_header_set(h, name, FIO_STR_INFO2(list, len));
+  FIO_ASSERT(!fio___http1_should_close(h),
+             "long list without close should stay open");
+  static const char tail[] = " \tClOsE\t ,";
+  FIO_MEMCPY(list + len, tail, sizeof(tail) - 1);
+  len += sizeof(tail) - 1;
+  fio_http_request_header_set(h, name, FIO_STR_INFO2(list, len));
+  FIO_ASSERT(fio_http_request_header(h, name, 0).len == len && len > 2048,
+             "long Connection value was not stored intact");
+  FIO_ASSERT(fio___http1_should_close(h), "close beyond 2048 bytes was missed");
+  fio_http_free(h);
+}
+
 /* ===========================================================================
    Body
    ===========================================================================
@@ -1360,6 +1864,13 @@ int main(void) {
   test_handle_copy_request();
   test_handle_request_headers();
   test_handle_response_headers();
+  test_handle_header_rejection();
+  test_handle_header_name_policy();
+  test_handle_header_name_length();
+  test_handle_header_removal();
+  test_handle_should_close();
+  test_handle_should_close_long_list();
+  test_handle_should_close_http10();
   test_handle_body();
   test_handle_body_file_spill();
   test_handle_cookies();

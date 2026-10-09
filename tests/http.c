@@ -2014,9 +2014,757 @@ static void test_http_server_rejects_response(void) {
 }
 
 /* ===========================================================================
+   Server: request / application close must drain without dispatching a pipeline
+
+   Each raw client queues two requests in ONE write. Stream enough response data
+   to exceed typical socket buffers, then finish with a distinct final chunk.
+   Only the raw peer's close callback stops the reactor (never body receipt),
+   and it checks for actual EOF while its socket is still valid. Validate the
+   complete chunked wire response only after the reactor has stopped.
+   ===========================================================================
+ */
+
+enum {
+  TEST_HTTP_CLOSE_CHUNK_SIZE = 65536,
+  TEST_HTTP_CLOSE_CHUNKS = 64,
+  TEST_HTTP_CLOSE_BODY_SIZE =
+      TEST_HTTP_CLOSE_CHUNK_SIZE * TEST_HTTP_CLOSE_CHUNKS
+};
+
+static char test_http_close_chunk[TEST_HTTP_CLOSE_CHUNK_SIZE];
+static const char test_http_close_tail[] = "final chunk before EOF\n";
+
+static struct {
+  const char *request;
+  fio_socket_i client_fd;
+  uintptr_t generation;
+  size_t received;
+  int close_after_finish;
+  int server_calls;
+  int finish_calls;
+  int client_closes;
+  int eof;
+  int bad_path;
+  int unfinished;
+  int close_still_open;
+  int overflow;
+  int connect_failed;
+  int timed_out;
+  int active;
+  char wire[2 * (TEST_HTTP_CLOSE_BODY_SIZE + 8192)];
+} test_http_close;
+
+static void test_http_close_server_on_http(fio_http_s *h) {
+  fio_str_info_s path = fio_http_path(h);
+  const char *expected = test_http_close.server_calls ? "/second" : "/first";
+  ++test_http_close.server_calls;
+  if (path.len != strlen(expected) || FIO_MEMCMP(path.buf, expected, path.len))
+    test_http_close.bad_path = 1;
+  fio_http_status_set(h, 200);
+  /* Use the allocating chunk builder to isolate close/drain behavior from the
+   * separate large no-copy first-chunk framing defect. Keep the 4 MiB payload.
+   */
+  for (size_t i = 0; i < TEST_HTTP_CLOSE_CHUNKS; ++i)
+    fio_http_write(h,
+                   .buf = test_http_close_chunk,
+                   .len = sizeof(test_http_close_chunk),
+                   .copy = 1);
+  fio_http_write(h,
+                 .buf = test_http_close_tail,
+                 .len = sizeof(test_http_close_tail) - 1,
+                 .finish = 1);
+}
+
+static void test_http_close_server_on_finish(fio_http_s *h) {
+  ++test_http_close.finish_calls;
+  if (!fio_http_is_finished(h))
+    test_http_close.unfinished = 1;
+  if (test_http_close.close_after_finish == test_http_close.finish_calls) {
+    fio_http_close(h);
+    if (fio_io_is_open(fio_http_io(h)))
+      test_http_close.close_still_open = 1;
+  }
+}
+
+static void test_http_close_client_on_attach(fio_io_s *io) {
+  test_http_close.client_fd = fio_io_fd(io);
+  fio_io_write(io,
+               (void *)test_http_close.request,
+               strlen(test_http_close.request));
+}
+
+static void test_http_close_capture(const char *buf, size_t len) {
+  if (len >= sizeof(test_http_close.wire) - test_http_close.received) {
+    test_http_close.overflow = 1;
+    return;
+  }
+  FIO_MEMCPY(test_http_close.wire + test_http_close.received, buf, len);
+  test_http_close.received += len;
+  test_http_close.wire[test_http_close.received] = 0;
+}
+
+static void test_http_close_client_on_data(fio_io_s *io) {
+  char buf[16384];
+  size_t len;
+  while ((len = fio_io_read(io, buf, sizeof(buf))))
+    test_http_close_capture(buf, len);
+  /* Deliberately keep running after the complete body: closure is required. */
+}
+
+static void test_http_close_client_on_close(void *iobuf, void *udata) {
+  (void)iobuf, (void)udata;
+  char buf[16384];
+  ssize_t len;
+  ++test_http_close.client_closes;
+  /* on_close runs before fio_sock_close. Drain any data accompanying a poll
+   * hangup, and distinguish clean EOF from a reset or a local shutdown. */
+  do {
+    len = fio_sock_read(test_http_close.client_fd, buf, sizeof(buf));
+    if (len > 0)
+      test_http_close_capture(buf, (size_t)len);
+  } while (len > 0);
+  test_http_close.eof = (len == 0);
+  if (test_http_close.active)
+    fio_io_stop();
+}
+
+static void test_http_close_client_on_failed(fio_io_protocol_s *pr,
+                                             void *udata) {
+  (void)pr, (void)udata;
+  test_http_close.connect_failed = 1;
+  fio_io_stop();
+}
+
+static int test_http_close_timeout(void *generation, void *ignr) {
+  (void)ignr;
+  /* Earlier runs may leave their one-shot guards queued. */
+  if (!test_http_close.active ||
+      (uintptr_t)generation != test_http_close.generation)
+    return -1;
+  test_http_close.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static const char *test_http_close_line_end(const char *pos, const char *end) {
+  for (; end - pos >= 2; ++pos)
+    if (pos[0] == '\r' && pos[1] == '\n')
+      return pos;
+  return NULL;
+}
+
+static int test_http_close_wire_error(const char *reason,
+                                      const char *pos,
+                                      size_t response,
+                                      size_t body_len) {
+  size_t offset = (size_t)(pos - test_http_close.wire);
+  fprintf(stderr,
+          "    wire validation: %s; response=%zu offset=%zu body=%zu "
+          "received=%zu; next bytes:",
+          reason,
+          response + 1,
+          offset,
+          body_len,
+          test_http_close.received);
+  for (size_t i = 0; i < 24 && i < test_http_close.received - offset; ++i)
+    fprintf(stderr, " %02x", (unsigned)(unsigned char)pos[i]);
+  fprintf(stderr, "\n");
+  return 0;
+}
+
+/** Decode the captured chunked responses, checking every payload byte, the
+ * distinct last chunk, the zero-chunk terminator, and absence of extra data. */
+static int test_http_close_wire_ok(size_t expected_responses) {
+  static const char status_prefix[] = "HTTP/1.1 200 ";
+  const char *pos = test_http_close.wire;
+  const char *end = pos + test_http_close.received;
+  for (size_t response = 0; response < expected_responses; ++response) {
+    if ((size_t)(end - pos) < sizeof(status_prefix) - 1 ||
+        FIO_MEMCMP(pos, status_prefix, sizeof(status_prefix) - 1))
+      return test_http_close_wire_error("status prefix", pos, response, 0);
+    const char *header_end = pos;
+    while (end - header_end >= 4 && FIO_MEMCMP(header_end, "\r\n\r\n", 4))
+      ++header_end;
+    if (end - header_end < 4)
+      return test_http_close_wire_error("missing header terminator",
+                                        header_end,
+                                        response,
+                                        0);
+    const char *chunked = strstr(pos, "\r\ntransfer-encoding: chunked\r\n");
+    if (!chunked || chunked >= header_end)
+      return test_http_close_wire_error("missing chunked header",
+                                        pos,
+                                        response,
+                                        0);
+    pos = header_end + 4;
+    size_t body_len = 0;
+    for (;;) {
+      const char *line_end = test_http_close_line_end(pos, end);
+      size_t chunk_len = 0;
+      if (!line_end || pos == line_end)
+        return test_http_close_wire_error("missing / empty chunk length",
+                                          pos,
+                                          response,
+                                          body_len);
+      for (; pos < line_end; ++pos) {
+        unsigned char c = (unsigned char)*pos;
+        size_t digit;
+        if (c >= '0' && c <= '9')
+          digit = (size_t)(c - '0');
+        else if ((c | 32U) >= 'a' && (c | 32U) <= 'f')
+          digit = (size_t)((c | 32U) - 'a' + 10U);
+        else
+          return test_http_close_wire_error("invalid chunk hex digit",
+                                            pos,
+                                            response,
+                                            body_len);
+        if (chunk_len > (SIZE_MAX - digit) / 16)
+          return test_http_close_wire_error("chunk length overflow",
+                                            pos,
+                                            response,
+                                            body_len);
+        chunk_len = chunk_len * 16 + digit;
+      }
+      pos = line_end + 2;
+      if (end - pos < 2 || chunk_len > (size_t)(end - pos - 2))
+        return test_http_close_wire_error("truncated chunk payload / trailer",
+                                          pos,
+                                          response,
+                                          body_len);
+      if (FIO_MEMCMP(pos + chunk_len, "\r\n", 2))
+        return test_http_close_wire_error("invalid chunk trailer",
+                                          pos + chunk_len,
+                                          response,
+                                          body_len);
+      if (!chunk_len) {
+        pos += 2;
+        break;
+      }
+      for (size_t i = 0; i < chunk_len; ++i, ++body_len) {
+        char expected;
+        if (body_len < TEST_HTTP_CLOSE_BODY_SIZE)
+          expected =
+              test_http_close_chunk[body_len % TEST_HTTP_CLOSE_CHUNK_SIZE];
+        else if (body_len - TEST_HTTP_CLOSE_BODY_SIZE <
+                 sizeof(test_http_close_tail) - 1)
+          expected = test_http_close_tail[body_len - TEST_HTTP_CLOSE_BODY_SIZE];
+        else
+          return test_http_close_wire_error("excess payload",
+                                            pos + i,
+                                            response,
+                                            body_len);
+        if (pos[i] != expected)
+          return test_http_close_wire_error("payload byte mismatch",
+                                            pos + i,
+                                            response,
+                                            body_len);
+      }
+      pos += chunk_len + 2;
+    }
+    if (body_len !=
+        TEST_HTTP_CLOSE_BODY_SIZE + sizeof(test_http_close_tail) - 1)
+      return test_http_close_wire_error("incomplete payload before zero chunk",
+                                        pos,
+                                        response,
+                                        body_len);
+  }
+  if (pos != end)
+    return test_http_close_wire_error("unexpected data after responses",
+                                      pos,
+                                      expected_responses,
+                                      0);
+  return 1;
+}
+
+static void test_http_server_close_pipeline(void) {
+  fprintf(stderr, "  * server close drains response and suppresses pipeline\n");
+  static const struct {
+    const char *name;
+    const char *request;
+    int close_after_finish;
+    int expected_calls;
+  } cases[] = {
+      {"request close",
+       "GET /first HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+       "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n",
+       0,
+       1},
+      {"request comma / mixed case close",
+       "GET /first HTTP/1.1\r\nHost: localhost\r\n"
+       "Connection: keep-alive, \tClOsE \t, upgrade\r\n\r\n"
+       "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n",
+       0,
+       1},
+      {"request repeated connection headers",
+       "GET /first HTTP/1.1\r\nHost: localhost\r\n"
+       "Connection: keep-alive\r\ncOnNeCtIoN: upgrade, CLOSE\r\n\r\n"
+       "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n",
+       0,
+       1},
+      {"application close in first on_finish",
+       "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n"
+       "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n",
+       1,
+       1},
+      {"keepalive pipeline control",
+       "GET /first HTTP/1.1\r\nHost: localhost\r\nConnection: "
+       "keep-alive\r\n\r\n"
+       "GET /second HTTP/1.1\r\nHost: localhost\r\n\r\n",
+       2,
+       2},
+  };
+  static fio_io_protocol_s raw_client;
+  static uintptr_t generation;
+  static fio_io_async_s worker = FIO_IO_ASYN_INIT;
+  fio_io_async_attach(&worker, 1);
+  for (size_t i = 0; i < sizeof(test_http_close_chunk); ++i)
+    test_http_close_chunk[i] = (char)('!' + i % 90);
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fprintf(stderr, "    - %s\n", cases[i].name);
+    raw_client = (fio_io_protocol_s){
+        .on_attach = test_http_close_client_on_attach,
+        .on_data = test_http_close_client_on_data,
+        .on_close = test_http_close_client_on_close,
+        .on_timeout = fio_io_touch,
+        .timeout = 10000,
+    };
+    FIO_MEMSET(&test_http_close, 0, sizeof(test_http_close));
+    test_http_close.client_fd = FIO_SOCKET_INVALID;
+    test_http_close.generation = ++generation;
+    test_http_close.request = cases[i].request;
+    test_http_close.close_after_finish = cases[i].close_after_finish;
+    fio_io_run_every(.fn = test_http_close_timeout,
+                     .udata1 = (void *)test_http_close.generation,
+                     .every = 5000,
+                     .repetitions = 1);
+    fio_http_listener_s *l =
+        fio_http_listen("tcp://127.0.0.1:0",
+                        .on_http = test_http_close_server_on_http,
+                        .on_finish = test_http_close_server_on_finish,
+                        .queue = &worker);
+    FIO_ASSERT(l, "%s: listener failed", cases[i].name);
+    unsigned port = test_ws_listener_port(l);
+    FIO_ASSERT(port, "%s: listener port discovery failed", cases[i].name);
+    char url[128];
+    snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+    FIO_ASSERT(fio_io_connect(url,
+                              .protocol = &raw_client,
+                              .on_failed = test_http_close_client_on_failed),
+               "%s: raw connect failed",
+               cases[i].name);
+    test_http_close.active = 1;
+    fio_io_start(0);
+    test_http_close.active = 0;
+    fio_io_listen_stop((fio_io_listener_s *)l);
+    fio_queue_perform_all(fio_io_queue());
+
+    FIO_ASSERT(!test_http_close.connect_failed,
+               "%s: asynchronous connect failed",
+               cases[i].name);
+    FIO_ASSERT(
+        !test_http_close.timed_out,
+        "%s: timed out waiting for EOF (server %d, finish %d, bytes %zu)",
+        cases[i].name,
+        test_http_close.server_calls,
+        test_http_close.finish_calls,
+        test_http_close.received);
+    FIO_ASSERT(test_http_close.client_closes == 1 && test_http_close.eof,
+               "%s: raw peer must observe clean EOF exactly once",
+               cases[i].name);
+    FIO_ASSERT(test_http_close.server_calls == cases[i].expected_calls,
+               "%s: expected %d request callbacks, got %d",
+               cases[i].name,
+               cases[i].expected_calls,
+               test_http_close.server_calls);
+    FIO_ASSERT(test_http_close.finish_calls == cases[i].expected_calls,
+               "%s: expected %d user finish callbacks, got %d",
+               cases[i].name,
+               cases[i].expected_calls,
+               test_http_close.finish_calls);
+    FIO_ASSERT(!test_http_close.bad_path && !test_http_close.unfinished,
+               "%s: request order / finished-state mismatch",
+               cases[i].name);
+    FIO_ASSERT(!test_http_close.close_still_open,
+               "%s: application close must immediately clear public is_open",
+               cases[i].name);
+    FIO_ASSERT(!test_http_close.overflow &&
+                   test_http_close_wire_ok((size_t)cases[i].expected_calls),
+               "%s: incomplete / unexpected chunked response (%zu bytes)",
+               cases[i].name,
+               test_http_close.received);
+  }
+}
+
+/* ===========================================================================
+   Server: HTTP/1.x framing / persistence rules (RFC 9112)
+
+   A raw client writes one buffer (possibly pipelined) and records the wire
+   until the server closes. A connection the server keeps open times out.
+   - §6.3/§7: Transfer-Encoding without a final (single) `chunked` -> 400 +
+     close, never parsing the body as a pipelined request (smuggling).
+   - §3.2: HTTP/1.1 requests without exactly one Host -> 400 + close.
+   - §9.3: HTTP/1.0 is not persistent without `keep-alive`.
+   - §6.1: no Transfer-Encoding for HTTP/1.0 (stream until close).
+   ===========================================================================
+ */
+
+static struct {
+  const char *request;
+  fio_socket_i client_fd;
+  uintptr_t generation;
+  size_t received;
+  int client_closes;
+  int eof;
+  int connect_failed;
+  int timed_out;
+  int active;
+  int overflow;
+  char paths[256];
+  char te[64];
+  char wire[16384];
+} test_h1f;
+
+static void test_h1f_server_on_http(fio_http_s *h) {
+  fio_str_info_s path = fio_http_path(h);
+  fio_str_info_s te = fio_http_request_header(
+      h,
+      FIO_STR_INFO2((char *)"transfer-encoding", 17),
+      0);
+  if (te.len && te.len < sizeof(test_h1f.te))
+    FIO_MEMCPY(test_h1f.te, te.buf, te.len);
+  if (strlen(test_h1f.paths) + path.len + 2 < sizeof(test_h1f.paths)) {
+    strncat(test_h1f.paths, path.buf, path.len);
+    strcat(test_h1f.paths, ";");
+  }
+  fio_http_status_set(h, 200);
+  if (path.len == 7 && !FIO_MEMCMP(path.buf, "/stream", 7)) {
+    fio_http_write(h, .buf = "a", .len = 1, .copy = 1);
+    fio_http_write(h, .buf = "b", .len = 1, .copy = 1);
+    fio_http_write(h, .buf = "c", .len = 1, .copy = 1);
+    fio_http_write(h, .buf = "d", .len = 1, .copy = 1, .finish = 1);
+    return;
+  }
+  fio_http_write(h, .buf = "ok", .len = 2, .copy = 1, .finish = 1);
+}
+
+static void test_h1f_client_on_attach(fio_io_s *io) {
+  test_h1f.client_fd = fio_io_fd(io);
+  fio_io_write(io, (void *)test_h1f.request, strlen(test_h1f.request));
+}
+
+static void test_h1f_capture(const char *buf, size_t len) {
+  if (len >= sizeof(test_h1f.wire) - test_h1f.received) {
+    test_h1f.overflow = 1;
+    return;
+  }
+  FIO_MEMCPY(test_h1f.wire + test_h1f.received, buf, len);
+  test_h1f.received += len;
+  test_h1f.wire[test_h1f.received] = 0;
+}
+
+static void test_h1f_client_on_data(fio_io_s *io) {
+  char buf[4096];
+  size_t len;
+  while ((len = fio_io_read(io, buf, sizeof(buf))))
+    test_h1f_capture(buf, len);
+}
+
+static void test_h1f_client_on_close(void *iobuf, void *udata) {
+  (void)iobuf, (void)udata;
+  char buf[4096];
+  ssize_t len;
+  ++test_h1f.client_closes;
+  do {
+    len = fio_sock_read(test_h1f.client_fd, buf, sizeof(buf));
+    if (len > 0)
+      test_h1f_capture(buf, (size_t)len);
+  } while (len > 0);
+  test_h1f.eof = (len == 0);
+  if (test_h1f.active)
+    fio_io_stop();
+}
+
+static void test_h1f_client_on_failed(fio_io_protocol_s *pr, void *udata) {
+  (void)pr, (void)udata;
+  test_h1f.connect_failed = 1;
+  fio_io_stop();
+}
+
+static int test_h1f_timeout(void *generation, void *ignr) {
+  (void)ignr;
+  if (!test_h1f.active || (uintptr_t)generation != test_h1f.generation)
+    return -1;
+  test_h1f.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static size_t test_h1f_count(const char *needle) {
+  size_t count = 0;
+  for (const char *pos = test_h1f.wire; (pos = strstr(pos, needle)); ++pos)
+    ++count;
+  return count;
+}
+
+static int test_h1f_ends_with(const char *tail) {
+  size_t len = strlen(tail);
+  return test_h1f.received >= len &&
+         !FIO_MEMCMP(test_h1f.wire + test_h1f.received - len, tail, len);
+}
+
+static void test_http_server_h1_framing(void) {
+  fprintf(stderr, "  * server HTTP/1.x framing and persistence (RFC 9112)\n");
+#define TEST_H1F_SMUGGLE(te)                                                   \
+  "POST /front HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: " te "\r\n\r\n"       \
+  "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+/* a valid (empty) chunked body: only header validation can reject these */
+#define TEST_H1F_SMUGGLE0(te)                                                  \
+  "POST /front HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: " te "\r\n\r\n"       \
+  "0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+  static const struct {
+    const char *name;
+    const char *request;
+    const char *status; /* status line prefix of the first response */
+    const char *paths;  /* application dispatch log */
+    size_t responses;
+    const char *contains; /* optional wire substring */
+    const char *excludes; /* optional forbidden wire substring */
+    const char *tail;     /* optional wire suffix */
+    const char *te;       /* request transfer-encoding seen by the app */
+  } cases[] = {
+      {"TE chunked, gzip",
+       TEST_H1F_SMUGGLE("chunked, gzip"),
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"TE gzip", TEST_H1F_SMUGGLE("gzip"), "HTTP/1.1 400 ", "", 1},
+      {"TE identity", TEST_H1F_SMUGGLE("identity"), "HTTP/1.1 400 ", "", 1},
+      {"TE chunked, chunked",
+       TEST_H1F_SMUGGLE0("chunked, chunked"),
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"TE chunked;ext, chunked",
+       TEST_H1F_SMUGGLE0("Chunked;x=1 , chunked"),
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"TE chunked then gzip field lines",
+       TEST_H1F_SMUGGLE0("chunked\r\nTransfer-Encoding: gzip"),
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"TE chunked twice in field lines",
+       TEST_H1F_SMUGGLE0("chunked\r\nTransfer-Encoding: chunked"),
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"TE empty", TEST_H1F_SMUGGLE(""), "HTTP/1.1 400 ", "", 1},
+      {"TE gzip, chunked control (gzip passed through)",
+       "POST /te HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip, chunked\r\n"
+       "Connection: close\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+       "HTTP/1.1 200 ",
+       "/te;",
+       1,
+       NULL,
+       NULL,
+       "\r\n\r\nok",
+       "gzip"},
+      {"HTTP/1.1 missing Host",
+       "GET /nohost HTTP/1.1\r\n\r\nGET /next HTTP/1.1\r\nHost: x\r\n\r\n",
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"HTTP/1.1 duplicate Host",
+       "GET /dup HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n",
+       "HTTP/1.1 400 ",
+       "",
+       1},
+      {"HTTP/1.0 closes after response",
+       "GET /plain HTTP/1.0\r\n\r\nGET /second HTTP/1.0\r\n\r\n",
+       "HTTP/1.0 200 ",
+       "/plain;",
+       1,
+       NULL,
+       "connection:keep-alive",
+       "\r\n\r\nok"},
+      {"HTTP/1.0 stream is close delimited",
+       "GET /stream HTTP/1.0\r\n\r\n",
+       "HTTP/1.0 200 ",
+       "/stream;",
+       1,
+       NULL,
+       "transfer-encoding",
+       "\r\n\r\nabcd"},
+      {"HTTP/1.0 keep-alive persists",
+       "GET /plain HTTP/1.0\r\nConnection: Keep-Alive\r\n\r\n"
+       "GET /second HTTP/1.0\r\n\r\n",
+       "HTTP/1.0 200 ",
+       "/plain;/second;",
+       2,
+       "connection:keep-alive",
+       NULL,
+       "\r\n\r\nok"},
+      {"HTTP/1.0 keep-alive stream closes",
+       "GET /stream HTTP/1.0\r\nConnection: keep-alive\r\n\r\n"
+       "GET /second HTTP/1.0\r\n\r\n",
+       "HTTP/1.0 200 ",
+       "/stream;",
+       1,
+       NULL,
+       "transfer-encoding",
+       "\r\n\r\nabcd"},
+      {"HTTP/1.1 control (persistent, chunked stream)",
+       "GET /plain HTTP/1.1\r\nHost: x\r\n\r\n"
+       "GET /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+       "HTTP/1.1 200 ",
+       "/plain;/stream;",
+       2,
+       "transfer-encoding: chunked",
+       "connection:keep-alive",
+       "0\r\n\r\n"},
+  };
+#undef TEST_H1F_SMUGGLE
+#undef TEST_H1F_SMUGGLE0
+  static fio_io_protocol_s raw_client;
+  static uintptr_t generation;
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fprintf(stderr, "    - %s\n", cases[i].name);
+    raw_client = (fio_io_protocol_s){
+        .on_attach = test_h1f_client_on_attach,
+        .on_data = test_h1f_client_on_data,
+        .on_close = test_h1f_client_on_close,
+        .on_timeout = fio_io_touch,
+        .timeout = 10000,
+    };
+    FIO_MEMSET(&test_h1f, 0, sizeof(test_h1f));
+    test_h1f.client_fd = FIO_SOCKET_INVALID;
+    test_h1f.generation = ++generation;
+    test_h1f.request = cases[i].request;
+    fio_io_run_every(.fn = test_h1f_timeout,
+                     .udata1 = (void *)test_h1f.generation,
+                     .every = 2000,
+                     .repetitions = 1);
+    fio_http_listener_s *l =
+        fio_http_listen("tcp://127.0.0.1:0",
+                        .on_http = test_h1f_server_on_http,
+                        .log = 0);
+    FIO_ASSERT(l, "%s: listener failed", cases[i].name);
+    unsigned port = test_ws_listener_port(l);
+    FIO_ASSERT(port, "%s: listener port discovery failed", cases[i].name);
+    char url[128];
+    snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+    FIO_ASSERT(fio_io_connect(url,
+                              .protocol = &raw_client,
+                              .on_failed = test_h1f_client_on_failed),
+               "%s: raw connect failed",
+               cases[i].name);
+    test_h1f.active = 1;
+    fio_io_start(0);
+    test_h1f.active = 0;
+    fio_io_listen_stop((fio_io_listener_s *)l);
+    fio_queue_perform_all(fio_io_queue());
+
+    FIO_ASSERT(!test_h1f.connect_failed && !test_h1f.overflow,
+               "%s: connect / capture failure",
+               cases[i].name);
+    FIO_ASSERT(!test_h1f.timed_out,
+               "%s: server kept the connection open (paths \"%s\"):\n%s",
+               cases[i].name,
+               test_h1f.paths,
+               test_h1f.wire);
+    FIO_ASSERT(test_h1f.client_closes == 1 && test_h1f.eof,
+               "%s: raw peer must observe clean EOF exactly once",
+               cases[i].name);
+    FIO_ASSERT(!strcmp(test_h1f.paths, cases[i].paths),
+               "%s: dispatched \"%s\", expected \"%s\"",
+               cases[i].name,
+               test_h1f.paths,
+               cases[i].paths);
+    FIO_ASSERT(!strncmp(test_h1f.wire,
+                        cases[i].status,
+                        strlen(cases[i].status)) &&
+                   test_h1f_count("HTTP/1.") == cases[i].responses,
+               "%s: expected %zu response(s) starting \"%s\":\n%s",
+               cases[i].name,
+               cases[i].responses,
+               cases[i].status,
+               test_h1f.wire);
+    FIO_ASSERT(!cases[i].contains || strstr(test_h1f.wire, cases[i].contains),
+               "%s: missing \"%s\":\n%s",
+               cases[i].name,
+               cases[i].contains,
+               test_h1f.wire);
+    FIO_ASSERT(!cases[i].excludes || !strstr(test_h1f.wire, cases[i].excludes),
+               "%s: unexpected \"%s\":\n%s",
+               cases[i].name,
+               cases[i].excludes,
+               test_h1f.wire);
+    FIO_ASSERT(!cases[i].tail || test_h1f_ends_with(cases[i].tail),
+               "%s: wire must end with the body:\n%s",
+               cases[i].name,
+               test_h1f.wire);
+    FIO_ASSERT(!cases[i].te || !strcmp(test_h1f.te, cases[i].te),
+               "%s: app saw transfer-encoding \"%s\", expected \"%s\"",
+               cases[i].name,
+               test_h1f.te,
+               cases[i].te);
+  }
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
+
+static void test_header_iteration(void) {
+  fprintf(stderr, "  * zero-copy header value/property iteration\n");
+  fio_http_s *h = fio_http_new();
+  FIO_ASSERT(h, "HTTP allocation failed");
+  fio_str_info_s name = FIO_STR_INFO2((char *)"x-iterate", 9);
+  fio_http_request_header_add(
+      h,
+      name,
+      FIO_STR_INFO1((char *)"  , a  ; p = \"x\\\";y,z\" ; empty=  ,  "
+                           "b\t"));
+  fio_http_request_header_add(h, name, FIO_STR_INFO1((char *)"c"));
+  const char *expected[] = {"a", "b", "c"};
+  size_t count = 0;
+  FIO_HTTP_HEADER_EACH_VALUE(h, 1, name, item) {
+    FIO_ASSERT(count < 3 && item.value.len == strlen(expected[count]) &&
+                   !memcmp(item.value.buf, expected[count], item.value.len),
+               "header value iteration mismatch");
+    if (!count) {
+      size_t property_count = 0;
+      FIO_HTTP_HEADER_EACH_PROPERTY(item, property) {
+        if (!property_count)
+          FIO_ASSERT(property.name.len == 1 && property.name.buf[0] == 'p' &&
+                         property.value.len == 9 &&
+                         !memcmp(property.value.buf, "\"x\\\";y,z\"", 9),
+                     "quoted property mismatch");
+        else
+          FIO_ASSERT(property.name.len == 5 &&
+                         !memcmp(property.name.buf, "empty", 5) &&
+                         property.value.buf && !property.value.len,
+                     "empty property value mismatch");
+        ++property_count;
+      }
+      FIO_ASSERT(property_count == 2, "property count mismatch");
+    }
+    ++count;
+  }
+  FIO_ASSERT(count == 3, "repeated header field count mismatch");
+  fio_http_response_header_add(h, name, FIO_STR_INFO1((char *)"reply"));
+  count = 0;
+  FIO_HTTP_HEADER_EACH_VALUE(h, 0, name, item) {
+    FIO_ASSERT(item.value.len == 5 &&
+                   !memcmp(item.value.buf, "reply", 5),
+               "response header iteration mismatch");
+    ++count;
+  }
+  FIO_ASSERT(count == 1, "response header count mismatch");
+  fio_http_free(h);
+}
 
 int main(void) {
 #if defined(_WIN32)
@@ -2037,6 +2785,7 @@ int main(void) {
   test_static_vary_and_range_guards();
   test_static_head_mirrors_get();
   test_websocket_deflate_negotiation();
+  test_header_iteration();
   test_websocket_connect_wrapper();
   test_static_compress_note_result();
   test_static_compress_attached_readonly();
@@ -2044,6 +2793,8 @@ int main(void) {
   test_http_client_server_roundtrip();
   test_http_client_interim_and_head();
   test_http_server_rejects_response();
+  test_http_server_close_pipeline();
+  test_http_server_h1_framing();
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

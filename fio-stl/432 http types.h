@@ -67,82 +67,6 @@ All memory allocations should use:
 */
 
 /* *****************************************************************************
-Header Parsing Helpers - inlined helpers
-***************************************************************************** */
-
-#define FIO___HTTP_PARSED_HEADER_VALUE              0
-#define FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN 1
-#define FIO___HTTP_PARSED_HEADER_PROPERTY_DATA      2
-
-typedef struct {
-  fio_str_info_s name;
-  fio_str_info_s value;
-} fio___http_header_property_s;
-
-/**
- * Assumes a Buffer of bytes containing length info and string data as such:
- *   [ NUL byte - 1 byte at head of format ]
- *   repeat
- *   [ 2 byte info: (type | (len << 2)) ]
- *   [ Optional 2 byte info: (len << 2) (if type was 1)]
- *   [ String of `len` bytes][ NUL byte (not counted in `len`)]
- */
-
-FIO_IFUNC fio_str_info_s fio___http_parsed_headers_next(fio_str_info_s value) {
-  for (;;) {
-    const size_t coded = (size_t)fio_buf2u16u(value.buf + value.len + 1U);
-    if (!coded)
-      return (value = (fio_str_info_s){0});
-    const size_t block_len = coded >> 2;
-    value.buf += value.len + 3;
-    value.len = block_len;
-    if (!(coded & 3))
-      return value;
-    value.buf -= 3; /* reposition to read NUL + value rather than text start */
-  }
-}
-
-FIO_IFUNC fio___http_header_property_s
-fio___http_parsed_property_next(fio___http_header_property_s property) {
-  for (;;) {
-    size_t coded =
-        (size_t)fio_buf2u16u(property.value.buf + property.value.len + 1);
-    if (!(coded & 3))
-      return (property = (fio___http_header_property_s){{0}, {0}});
-    if ((coded & 3) == FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN) {
-      property.value.buf += 2;
-      coded = (size_t)fio_buf2u16u(property.value.buf + property.value.len + 1);
-    }
-    if ((coded & 3) != 2)
-      return (property = (fio___http_header_property_s){{0}, {0}});
-    coded >>= 2;
-    property.name.buf = property.value.buf + property.value.len + 3;
-    property.name.len = coded;
-    coded = (size_t)fio_buf2u16u(property.name.buf + property.name.len + 1);
-    FIO_ASSERT_DEBUG((coded & 3) == 2,
-                     "header property value parsing format error");
-    property.value.buf = property.name.buf + property.name.len + 3;
-    property.value.len = coded >> 2;
-    return property;
-  }
-}
-
-#undef FIO_HTTP_PARSED_HEADER_EACH
-#define FIO_HTTP_PARSED_HEADER_EACH(buf_parsed, value)                         \
-  for (fio_str_info_s value =                                                  \
-           fio___http_parsed_headers_next(FIO_STR_INFO2(buf_parsed.buf, 0));   \
-       value.len;                                                              \
-       value = fio___http_parsed_headers_next(value))
-
-#undef FIO_HTTP_HEADER_VALUE_EACH_PROPERTY
-#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value_, property)                  \
-  for (fio___http_header_property_s property =                                 \
-           fio___http_parsed_property_next(                                    \
-               (fio___http_header_property_s){.value = value_});               \
-       property.name.len;                                                      \
-       property = fio___http_parsed_property_next(property))
-
-/* *****************************************************************************
 Path Section Looping
 ***************************************************************************** */
 
@@ -1157,7 +1081,7 @@ FIO_IFUNC void fio___http_hmap_key_to_lower(fio_str_info_s *t,
     goto too_big;
   for (size_t i = 0; i < k->len; ++i) {
     uint8_t c = (uint8_t)k->buf[i];
-    c |= (uint8_t)(c >= 'A' || c <= 'Z') << 5;
+    c |= (uint8_t)(c >= 'A' && c <= 'Z') << 5;
     t->buf[i] = c;
   }
   t->len = k->len;
@@ -1177,10 +1101,31 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
                                               fio_str_info_s val,
                                               int add) {
   fio_str_info_s r = {0};
-  if (!key_input.buf || !key_input.len || !map)
+  if (!key_input.buf || !key_input.len || !map || key_input.len > 4095)
     return r;
-  /* make sure key is all lower-case? */
-  FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+  FIO_STR_INFO_TMP_VAR(key, 4096);
+  key.len = key_input.len;
+#else
+  fio_str_info_s key = key_input;
+#endif
+  /* Validate and, when enabled, normalize in the same bounded pass. */
+  for (size_t i = 0; i < key_input.len; ++i) {
+    const uint8_t c = (uint8_t)key_input.buf[i];
+    if (FIO_UNLIKELY(FIO___HTTP_FORBIDDEN_NAME_CHARS[c]))
+      return r;
+#if FIO_HTTP_ENFORCE_LOWERCASE_HEADERS
+    key.buf[i] = fio_ct_tolower((char)c);
+#endif
+  }
+  /* Reject injection before removing/replacing or caching any data. */
+  if (val.buf) {
+    for (size_t i = 0; i < val.len; ++i) {
+      const uint8_t c = (uint8_t)val.buf[i];
+      if (FIO_UNLIKELY(c == 0 || c == '\r' || c == '\n'))
+        return r;
+    }
+  }
   fio___http_sary_s *o;
   if (!val.buf || !val.len)
     goto remove_key;
@@ -1220,6 +1165,8 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_get2(fio___http_hmap_s *map,
                                               fio_str_info_s key_input,
                                               int32_t index) {
   fio_str_info_s r = {0};
+  if (key_input.len > 4095)
+    return r;
   FIO___HTTP_ENFORCE_LOWERCASE(key, key_input);
   fio___http_sary_s *a =
       fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
@@ -1444,7 +1391,8 @@ SFUNC void fio_http_start_time_set(fio_http_s *h) {
   h->received_at = fio_http_get_timestump();
 }
 
-/** Closes a persistent HTTP connection (i.e., if upgraded). */
+/** Closes the associated connection after previously scheduled output drains.
+ */
 SFUNC void fio_http_close(fio_http_s *h) { h->controller->close_io(h); }
 
 /** Creates a copy of an existing handle, copying only its request data. */
@@ -2824,137 +2772,6 @@ SFUNC void fio_http_sse_set_request(fio_http_s *h) {
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"cache-control", 13),
                               FIO_STR_INFO2((char *)"no-cache", 8));
-}
-
-/* *****************************************************************************
-Header Parsing Helpers - Implementation
-***************************************************************************** */
-
-/**
- * Assumes a Buffer of bytes containing length info and string data as such:
- *
- *   [ 2 byte info: (type | (len << 2)) ]
- *   [ Optional 2 byte info: (len << 2) (if type was 1)]
- *   [ String of `len` bytes][ NUL byte (not counted in `len`)]
- */
-
-FIO_SFUNC int fio___http_header_parse_properties(fio_str_info_s *dst,
-                                                 char *start,
-                                                 char *const end) {
-  for (;;) {
-    char *nxt = (char *)FIO_MEMCHR(start, ';', end - start);
-    if (!nxt)
-      nxt = end;
-    char *eq = (char *)FIO_MEMCHR(start, '=', nxt - start);
-    if (!eq)
-      eq = nxt;
-    /* write value to dst */
-    size_t len = eq - start;
-    if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
-      return -1; /* too long */
-    fio_u2buf16u(dst->buf + dst->len,
-                 ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
-    dst->len += 2;
-    if (len)
-      FIO_MEMCPY(dst->buf + dst->len, start, len);
-    dst->len += len;
-    dst->buf[dst->len++] = 0;
-
-    eq += (eq[0] == '=');
-    eq += (eq[0] == ' ' || eq[0] == '\t');
-    len = nxt - eq;
-    if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
-      return -1; /* too long */
-    fio_u2buf16u(dst->buf + dst->len,
-                 ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_DATA));
-    dst->len += 2;
-    if (len)
-      FIO_MEMCPY(dst->buf + dst->len, eq, len);
-    dst->len += len;
-    dst->buf[dst->len++] = 0;
-
-    if (nxt == end)
-      return 0;
-    nxt += (*nxt == ';');
-    while (*nxt == ' ' || *nxt == '\t')
-      ++nxt;
-    start = nxt;
-  }
-  return 0;
-}
-
-FIO_IFUNC int fio___http_header_parse(fio___http_hmap_s *map,
-                                      fio_str_info_s *dst,
-                                      fio_str_info_s header_name) {
-  fio___http_sary_s *a =
-      fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, header_name));
-  if (!a)
-    return -1;
-  dst->len = 0;
-  if (dst->capa < 3)
-    return -1;
-  dst->buf[dst->len++] = 0; /* first byte is a pretend NUL */
-  FIO_ARRAY_EACH(fio___http_sary, a, pos) {
-    fio_buf_info_s i = fio_bstr_buf(*pos);
-    if (!i.len)
-      continue;
-    char *const end = i.buf + i.len;
-    char *sep;
-    do {
-      sep = (char *)FIO_MEMCHR(i.buf, ',', end - i.buf);
-      if (!sep)
-        sep = end;
-      char *prop = (char *)FIO_MEMCHR(i.buf, ';', sep - i.buf);
-      if (!prop)
-        prop = sep;
-      size_t len = prop - i.buf;
-      if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
-        return -1; /* too long */
-      fio_u2buf16u(dst->buf + dst->len, (len << 2));
-      dst->len += 2;
-      FIO_MEMCPY(dst->buf + dst->len, i.buf, len);
-      dst->len += len;
-      dst->buf[dst->len++] = 0;
-      if (prop != sep) { /* parse properties */
-        ++prop;
-        len = sep - prop;
-        if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
-          return -1;
-        const size_t old_len = dst->len;
-        dst->len += 2;
-        if (fio___http_header_parse_properties(dst, prop, sep))
-          return -1;
-        len = dst->len - old_len;
-        if ((len & (~(size_t)0x3FFF)) | (dst->len + len + 3 > dst->capa))
-          return -1;
-        fio_u2buf16u(
-            dst->buf + old_len,
-            ((len << 2) | FIO___HTTP_PARSED_HEADER_PROPERTY_BLOCK_LEN));
-      }
-      sep += (*sep == ',');
-      while (*sep == ' ' || *sep == '\t')
-        ++sep;
-      i.buf = sep;
-    } while (sep < end);
-  }
-  if (dst->len + 2 > dst->capa)
-    return -1;
-  /* last u16 must be zero (end marker) */
-  dst->buf[dst->len++] = 0;
-  dst->buf[dst->len++] = 0;
-  return 0;
-}
-
-SFUNC int fio_http_response_header_parse(fio_http_s *h,
-                                         fio_str_info_s *buf_parsed,
-                                         fio_str_info_s header_name) {
-  return fio___http_header_parse(HTTP_HDR_RESPONSE(h), buf_parsed, header_name);
-}
-
-SFUNC int fio_http_request_header_parse(fio_http_s *h,
-                                        fio_str_info_s *buf_parsed,
-                                        fio_str_info_s header_name) {
-  return fio___http_header_parse(HTTP_HDR_REQUEST(h), buf_parsed, header_name);
 }
 
 /* *****************************************************************************

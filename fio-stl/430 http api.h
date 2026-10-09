@@ -981,7 +981,8 @@ SFUNC void fio_http_write(fio_http_s *, fio_http_write_args_s args);
   fio_http_write(http_handle, (fio_http_write_args_s){__VA_ARGS__})
 #define fio_http_finish(http_handle) fio_http_write(http_handle, .finish = 1)
 
-/** Closes a persistent HTTP connection (i.e., if upgraded). */
+/** Closes the associated connection after previously scheduled output drains.
+ * Schedule the complete response before calling this (i.e., in on_finish). */
 SFUNC void fio_http_close(fio_http_s *h);
 
 /* *****************************************************************************
@@ -1091,105 +1092,78 @@ fio_http_body_parse(fio_http_s *h,
                     void *udata);
 
 /* *****************************************************************************
-Header Parsing Helpers
+Header Value / Property Iteration
 ***************************************************************************** */
 
 /**
- * Copies all header data, from possibly an array of identical response headers,
- * resulting in a parsed format outputted to `buf_parsed`.
- *
- * Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
- * for the parsed output).
- *
- * Note that the parsed output isn't readable as a string, but is designed to
- * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
- *
- * See also `fio_http_response_header_parse`.
+ * A zero-copy cursor over repeated header fields, comma-separated values and
+ * semicolon-separated properties. `name` / `value` are length-delimited slices
+ * borrowed from the HTTP handle, NOT necessarily NUL-terminated. Quotes and
+ * escapes are retained, not decoded. Do not mutate headers during iteration.
+ * `properties` holds the bounded property span (or remaining properties).
+ * `index` and `is_request` are iterator state; do not change them.
+ * `value.buf == NULL` marks the end; a property may have a non-NULL value
+ * with zero length. Empty list elements and empty property names are skipped.
  */
-SFUNC int fio_http_response_header_parse(fio_http_s *h,
-                                         fio_str_info_s *buf_parsed,
-                                         fio_str_info_s header_name);
+typedef struct fio_http_header_each_s {
+  fio_buf_info_s name;       /* header name, or property name */
+  fio_buf_info_s value;      /* list value, or property value */
+  fio_buf_info_s properties; /* property span; cursor in property iterator */
+  unsigned index;            /* index of the current repeated header field */
+  unsigned is_request;
+} fio_http_header_each_s;
 
-/**
- * Copies all header data, from possibly an array of identical response headers,
- * resulting in a parsed format outputted to `buf_parsed`.
- *
- * Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
- * for the parsed output).
- *
- * Note that the parsed output isn't readable as a string, but is designed to
- * work with the `FIO_HTTP_PARSED_HEADER_EACH` and
- * `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
- *
- * i.e.:
- *
- * ```c
- *  FIO_STR_INFO_TMP_VAR(buf, 1023); // tmp buffer for the parsed output
- *  fio_http_s *h = fio_http_new();  // using a mock HTTP handle
- *  fio_http_request_header_add(
- *      h,
- *      FIO_STR_INFO2("accept", 6),
- *      FIO_STR_INFO1("text/html, application/json;q=0.9; d=500, image/png"));
- *  fio_http_request_header_add(h,
- *                              FIO_STR_INFO2("accept", 6),
- *                              FIO_STR_INFO1("text/yaml"));
- *  FIO_ASSERT(  // in production do NOT assert, but route to error instead!
- *      !fio_http_request_header_parse(h, &buf, FIO_STR_INFO2("accept", 6)),
- *      "parse returned error!");
- *  FIO_HTTP_PARSED_HEADER_EACH(buf, value) {
- *    printf("* processing value (%zu bytes): %s\n", value.len, value.buf);
- *    FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, prop) {
- *      printf("* for value %s: (%zu,%zu bytes) %s = %s\n",
- *             value.buf,
- *             prop.name.len,
- *             prop.value.len,
- *             prop.name.buf,
- *             prop.value.buf);
- *    }
- *  }
- * ```
+/** Starts iterating a header's values. `header_name` is a borrowed lookup key.
+ * Returns an iterator with `value.buf == NULL` when no value is available. */
+FIO_IFUNC fio_http_header_each_s
+fio_http_header_each_first(fio_http_s *http_handle,
+                           int is_request,
+                           fio_str_info_s header_name);
+
+/** Advances to the next value; `http_handle` must be the original handle.
+ * Sets `value.buf` to NULL after the last value. */
+FIO_IFUNC void fio_http_header_each_next(fio_http_header_each_s *pos,
+                                         fio_http_s *http_handle);
+
+/** Starts iterating a value's bounded property span. `properties` is borrowed.
+ * Returns an iterator with `value.buf == NULL` when no property exists. */
+FIO_IFUNC fio_http_header_each_s
+fio_http_header_each_property_first(const fio_buf_info_s *properties);
+
+/** Advances to the next property. A property without `=` has an empty value.
+ * Sets `value.buf` to NULL after the last property. */
+FIO_IFUNC void fio_http_header_each_property_next(fio_http_header_each_s *pos);
+
+/** Iterate repeated request (`is_request = 1`) or response (`0`) header
+ * fields and their comma-separated values; `pos` is a chosen cursor name.
+ * SP / HTAB around each value is trimmed. Use `.value.buf` and `.value.len`,
+ * not string functions, for the non-NUL-terminated slice. Do not mutate the
+ * handle while iterating. `break` / `continue` work as in a regular for loop.
+ * Example:
+ *   FIO_HTTP_HEADER_EACH_VALUE(h, 1, FIO_STR_INFO1("accept"), item) {
+ *     FIO_HTTP_HEADER_EACH_PROPERTY(item, property) {
+ *       // property.name and property.value are length-delimited slices.
+ *     }
+ *   }
  */
-SFUNC int fio_http_request_header_parse(fio_http_s *h,
-                                        fio_str_info_s *buf_parsed,
-                                        fio_str_info_s header_name);
+#define FIO_HTTP_HEADER_EACH_VALUE(http_handle, is_request, header_name, pos)  \
+  for (fio_http_header_each_s pos = fio_http_header_each_first((http_handle),  \
+                                                               (is_request),   \
+                                                               (header_name)); \
+       pos.value.buf;                                                          \
+       fio_http_header_each_next(&pos, (http_handle)))
 
-/**
- * Parses header for multiple values and properties and iterates over all
- * values.
- *
- * This MACRO will allocate 2048 bytes on the stack for parsing the header
- * values and properties, if more space is necessary dig deeper.
- *
- * Use FIO_HTTP_HEADER_VALUE_EACH_PROPERTY to iterate over a value's properties.
+/** Iterate semicolon-separated properties for a value cursor; `pos` is a
+ * chosen name. Names and values are trimmed of surrounding SP / HTAB.
+ * A missing `=` or an empty right-hand side yields `value.len == 0` with a
+ * non-NULL `value.buf`; stop iteration only when `value.buf == NULL`.
+ * Quoted strings remain quoted, without decoding. `break` / `continue` work.
  */
-#define FIO_HTTP_HEADER_EACH_VALUE(/* fio_http_s */ http_handle,               \
-                                   /* int / bool */ is_request,                \
-                                   /* fio_str_info_s */ header_name,           \
-                                   /* chosen var named */ value)               \
-  for (char fio___buf__##value##__[2048], /* allocate buffer on stack */       \
-           *fio___buf__##value##_ptr = NULL;                                   \
-       !fio___buf__##value##_ptr;                                              \
-       fio___buf__##value##_ptr = fio___buf__##value##__)                      \
-    for (fio_str_info_s fio___buf__##value##__str = /* declare buffer var */   \
-         FIO_STR_INFO3(fio___buf__##value##__, 0, 2048);                       \
-         fio___buf__##value##__str.buf == fio___buf__##value##__;              \
-         fio___buf__##value##__str.buf = fio___buf__##value##__ + 1)           \
-      if (!((is_request ? fio_http_request_header_parse                        \
-                        : fio_http_response_header_parse)(                     \
-              http_handle, /* parse headers */                                 \
-              &fio___buf__##value##__str,                                      \
-              header_name)))                                                   \
-  FIO_HTTP_PARSED_HEADER_EACH(fio___buf__##value##__str, value) /* loop        \
-                                                                 */
-
-/** Iterated through the properties associated with a parsed header values. */
-#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(/* fio_str_info_s   */ value,      \
-                                            /* chosen var named */ property)
-
-/** Used internally to iterate over a parsed header buffer. */
-#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,         \
-                                    /* chosen var named */ value)
+#define FIO_HTTP_HEADER_EACH_PROPERTY(value_, pos)                             \
+  for (fio_http_header_each_s pos =                                            \
+           fio_http_header_each_property_first(&(value_).properties);          \
+       pos.value.buf;                                                          \
+       fio_http_header_each_property_next(&pos))
 
 /* *****************************************************************************
 General Helpers
@@ -1388,6 +1362,174 @@ HTTP Settings Resolver
 
 /** Returns the HTTP settings associated with the HTTP object, if any. */
 SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *);
+
+/* *****************************************************************************
+Header Value / Property Iterator - Inline Implementation
+***************************************************************************** */
+
+/* Returns a trimmed slice (HTTP OWS is SP / HTAB only). */
+FIO_IFUNC fio_buf_info_s fio___http_header_each_trim(fio_buf_info_s slice) {
+  if (!slice.buf)
+    return slice;
+  while (slice.len && (*slice.buf == ' ' || *slice.buf == '\t')) {
+    ++slice.buf;
+    --slice.len;
+  }
+  while (slice.len &&
+         (slice.buf[slice.len - 1] == ' ' || slice.buf[slice.len - 1] == '\t'))
+    --slice.len;
+  return slice;
+}
+
+/* Scan NUL-terminated header storage without decoding quoted strings.
+ * An escaped quote/delimiter inside quotes is not a separator. */
+FIO_IFUNC const char *fio___http_header_each_find(const char *p,
+                                                  char first,
+                                                  char second) {
+  for (unsigned quoted = 0;
+       *p && (quoted | ((unsigned)(*p != first) & (unsigned)(*p != second)));
+       ++p) {
+    quoted ^= (unsigned)(*p == '"');
+    p += (unsigned)(quoted && *p == '\\' && p[1]);
+  }
+  return p;
+}
+
+/* Scan a property span, stopping at end or NUL. Never read beyond end,
+ * including when a backslash is its final byte. */
+FIO_IFUNC const char *fio___http_header_each_find_bounded(const char *p,
+                                                          const char *end,
+                                                          char first,
+                                                          char second) {
+  for (unsigned quoted = 0;
+       p < end && *p &&
+       (quoted | ((unsigned)(*p != first) & (unsigned)(*p != second)));
+       ++p) {
+    quoted ^= (unsigned)(*p == '"');
+    p += (unsigned)(quoted && *p == '\\' && p + 1 < end && p[1]);
+  }
+  return p;
+}
+
+/* Value iteration uses the NUL byte supplied by HTTP header storage.
+ * name retains the header lookup key; index changes only between fields.
+ * value.buf == NULL means end, not an empty token (empty list items skip).
+ * The handle and its headers must stay alive and unmodified during iteration.
+ */
+FIO_IFUNC void fio_http_header_each_next(fio_http_header_each_s *pos,
+                                         fio_http_s *http_handle) {
+  if (!pos)
+    return;
+  if (!http_handle) {
+    pos->value = FIO_BUF_INFO0;
+    return;
+  }
+  const char *p = NULL;
+  if (pos->value.buf) {
+    /* The property span ends at the current comma or the field's NUL.
+     * Without properties, resume just after the trimmed value. */
+    p = pos->properties.buf ? pos->properties.buf + pos->properties.len
+                            : pos->value.buf + pos->value.len;
+    p = fio___http_header_each_find(p, ',', ',');
+    if (*p == ',')
+      ++p;
+    else {
+      if (pos->index == INT32_MAX) {
+        pos->value = FIO_BUF_INFO0;
+        return;
+      }
+      ++pos->index;
+      p = NULL;
+    }
+  }
+  for (;;) {
+    if (!p) {
+      fio_str_info_s name = FIO_STR_INFO2(pos->name.buf, pos->name.len);
+      fio_str_info_s field =
+          pos->is_request
+              ? fio_http_request_header(http_handle, name, pos->index)
+              : fio_http_response_header(http_handle, name, pos->index);
+      if (!field.buf || !field.len) {
+        pos->value = FIO_BUF_INFO0;
+        pos->properties = FIO_BUF_INFO0;
+        return;
+      }
+      p = field.buf;
+    }
+    const char *separator = fio___http_header_each_find(p, ',', ';');
+    const char *end = separator;
+    if (*separator == ';')
+      end = fio___http_header_each_find(separator + 1, ',', ',');
+    pos->value = fio___http_header_each_trim(
+        FIO_BUF_INFO2((char *)p, (size_t)(separator - p)));
+    pos->properties = (*separator == ';')
+                          ? FIO_BUF_INFO2((char *)separator + 1,
+                                          (size_t)(end - separator - 1))
+                          : FIO_BUF_INFO0;
+    if (pos->value.len)
+      return;
+    if (*end == ',') {
+      p = end + 1;
+      continue;
+    }
+    if (pos->index == INT32_MAX) {
+      pos->value = FIO_BUF_INFO0;
+      return;
+    }
+    ++pos->index;
+    p = NULL;
+  }
+}
+
+FIO_IFUNC fio_http_header_each_s
+fio_http_header_each_first(fio_http_s *http_handle,
+                           int is_request,
+                           fio_str_info_s header_name) {
+  fio_http_header_each_s pos = {0};
+  if (!http_handle || !header_name.buf || !header_name.len)
+    return pos;
+  pos.name = FIO_BUF_INFO2(header_name.buf, header_name.len);
+  pos.is_request = !!is_request;
+  fio_http_header_each_next(&pos, http_handle);
+  return pos;
+}
+
+/* Property iteration is bounded by properties.len: the next comma is not a
+ * property separator. Empty property values have a non-NULL pointer. */
+FIO_IFUNC void fio_http_header_each_property_next(fio_http_header_each_s *pos) {
+  if (!pos)
+    return;
+  pos->value = FIO_BUF_INFO0;
+  while (pos->properties.len) {
+    const char *start = pos->properties.buf;
+    const char *limit = start + pos->properties.len;
+    const char *semi =
+        fio___http_header_each_find_bounded(start, limit, ';', ';');
+    const char *eq = fio___http_header_each_find_bounded(start, semi, '=', '=');
+    pos->name = fio___http_header_each_trim(
+        FIO_BUF_INFO2((char *)start, (size_t)(eq - start)));
+    pos->value =
+        (eq < semi)
+            ? fio___http_header_each_trim(
+                  FIO_BUF_INFO2((char *)eq + 1, (size_t)(semi - eq - 1)))
+            : FIO_BUF_INFO2((char *)semi, 0);
+    pos->properties.buf = (char *)semi + (semi < limit);
+    pos->properties.len = (size_t)(limit - semi) - (semi < limit);
+    if (pos->name.len)
+      return;
+  }
+  pos->value = FIO_BUF_INFO0;
+}
+
+FIO_IFUNC fio_http_header_each_s
+fio_http_header_each_property_first(const fio_buf_info_s *properties) {
+  fio_http_header_each_s pos = {0};
+  if (properties && properties->buf && properties->len) {
+    pos.properties = *properties;
+    fio_http_header_each_property_next(&pos);
+  }
+  return pos;
+}
 
 /* *****************************************************************************
 HTTP API Finish

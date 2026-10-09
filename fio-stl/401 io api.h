@@ -486,7 +486,7 @@ SFUNC int fio_io_is_suspended(fio_io_s *io);
  * suspension or throttling checks. */
 SFUNC void fio_io_on_data_schedule(fio_io_s *io);
 
-/** Returns 1 if the IO handle is marked as open. */
+/** Returns 1 if the IO handle is open and not marked for closure. */
 SFUNC int fio_io_is_open(fio_io_s *io);
 
 /** Returns the approximate number of bytes in the outgoing buffer. */

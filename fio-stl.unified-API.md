@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3151.
+Total symbols: 3153.
 
 ## Contents
 
@@ -78,7 +78,7 @@ Total symbols: 3151.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 151
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 153
 
 -----------------------------------------------------
 
@@ -34347,7 +34347,7 @@ _Symbol type:_ `function`
 int fio_io_is_open(fio_io_s *io)
 ```
 
-Returns 1 if the IO handle is marked as open.
+Returns 1 if the IO handle is open and not marked for closure.
 
 _Symbol type:_ `function`
 
@@ -36018,7 +36018,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-151 public symbols.
+153 public symbols.
 
 ### Macros
 
@@ -36270,56 +36270,43 @@ _Symbol type:_ `macro`
 #### `FIO_HTTP_HEADER_EACH_VALUE`
 
 ```c
-#define FIO_HTTP_HEADER_EACH_VALUE(/* fio_http_s */ http_handle,   \
-                                   /* int / bool */ is_request,   \
-                                   /* fio_str_info_s */ header_name,   \
-                                   /* chosen var named */ value)   \
-  for (char fio___buf__##value##__[2048], /* allocate buffer on stack */   \
-           *fio___buf__##value##_ptr = NULL;   \
-       !fio___buf__##value##_ptr;   \
-       fio___buf__##value##_ptr = fio___buf__##value##__)   \
-    for (fio_str_info_s fio___buf__##value##__str = /* declare buffer var */   \
-         FIO_STR_INFO3(fio___buf__##value##__, 0, 2048);   \
-         fio___buf__##value##__str.buf == fio___buf__##value##__;   \
-         fio___buf__##value##__str.buf = fio___buf__##value##__ + 1)   \
-      if (!((is_request ? fio_http_request_header_parse   \
-                        : fio_http_response_header_parse)(   \
-              http_handle, /* parse headers */   \
-              &fio___buf__##value##__str,   \
-              header_name)))   \
-  FIO_HTTP_PARSED_HEADER_EACH(fio___buf__##value##__str, value) /* loop   \
-                                                                 */
+#define FIO_HTTP_HEADER_EACH_VALUE(http_handle, is_request, header_name, pos)   \
+  for (fio_http_header_each_s pos = fio_http_header_each_first((http_handle),   \
+                                                               (is_request),   \
+                                                               (header_name));   \
+       pos.value.buf;   \
+       fio_http_header_each_next(&pos, (http_handle)))
 ```
 
-Parses header for multiple values and properties and iterates over all
-values.
-
-This MACRO will allocate 2048 bytes on the stack for parsing the header
-values and properties, if more space is necessary dig deeper.
-
-Use FIO_HTTP_HEADER_VALUE_EACH_PROPERTY to iterate over a value's properties.
+Iterate repeated request (`is_request = 1`) or response (`0`) header
+fields and their comma-separated values; `pos` is a chosen cursor name.
+SP / HTAB around each value is trimmed. Use `.value.buf` and `.value.len`,
+not string functions, for the non-NUL-terminated slice. Do not mutate the
+handle while iterating. `break` / `continue` work as in a regular for loop.
+Example:
+  FIO_HTTP_HEADER_EACH_VALUE(h, 1, FIO_STR_INFO1("accept"), item) {
+    FIO_HTTP_HEADER_EACH_PROPERTY(item, property) {
+      // property.name and property.value are length-delimited slices.
+    }
+  }
 
 _Symbol type:_ `macro`
 
-#### `FIO_HTTP_HEADER_VALUE_EACH_PROPERTY`
+#### `FIO_HTTP_HEADER_EACH_PROPERTY`
 
 ```c
-#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(/* fio_str_info_s   */ value,   \
-                                            /* chosen var named */ property)
+#define FIO_HTTP_HEADER_EACH_PROPERTY(value_, pos)   \
+  for (fio_http_header_each_s pos =   \
+           fio_http_header_each_property_first(&(value_).properties);   \
+       pos.value.buf;   \
+       fio_http_header_each_property_next(&pos))
 ```
 
-Iterated through the properties associated with a parsed header values.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_PARSED_HEADER_EACH`
-
-```c
-#define FIO_HTTP_PARSED_HEADER_EACH(/* fio_str_info_s   */ buf_parsed,   \
-                                    /* chosen var named */ value)
-```
-
-Used internally to iterate over a parsed header buffer.
+Iterate semicolon-separated properties for a value cursor; `pos` is a
+chosen name. Names and values are trimmed of surrounding SP / HTAB.
+A missing `=` or an empty right-hand side yields `value.len == 0` with a
+non-NULL `value.buf`; stop iteration only when `value.buf == NULL`.
+Quoted strings remain quoted, without decoding. `break` / `continue` work.
 
 _Symbol type:_ `macro`
 
@@ -36841,6 +36828,29 @@ int err;
 ```
 
 HTTP body parse result.
+
+_Symbol type:_ `type`
+
+#### `fio_http_header_each_s`
+
+```c
+struct fio_http_header_each_s {
+fio_buf_info_s name; /* header name, or property name */
+fio_buf_info_s value; /* list value, or property value */
+fio_buf_info_s properties; /* property span; cursor in property iterator */
+unsigned index; /* index of the current repeated header field */
+unsigned is_request;
+}
+```
+
+A zero-copy cursor over repeated header fields, comma-separated values and
+semicolon-separated properties. `name` / `value` are length-delimited slices
+borrowed from the HTTP handle, NOT necessarily NUL-terminated. Quotes and
+escapes are retained, not decoded. Do not mutate headers during iteration.
+`properties` holds the bounded property span (or remaining properties).
+`index` and `is_request` are iterator state; do not change them.
+`value.buf == NULL` marks the end; a property may have a non-NULL value
+with zero length. Empty list elements and empty property names are skipped.
 
 _Symbol type:_ `type`
 
@@ -37794,7 +37804,8 @@ _Symbol type:_ `macro`
 void fio_http_close(fio_http_s *h)
 ```
 
-Closes a persistent HTTP connection (i.e., if upgraded).
+Closes the associated connection after previously scheduled output drains.
+Schedule the complete response before calling this (i.e., in on_finish).
 
 _Symbol type:_ `function`
 
@@ -37839,69 +37850,47 @@ Calls the appropriate callbacks for each element found.
 
 _Symbol type:_ `function`
 
-#### `fio_http_response_header_parse`
+#### `fio_http_header_each_first`
 
 ```c
-int fio_http_response_header_parse(fio_http_s *h, fio_str_info_s *buf_parsed, fio_str_info_s header_name)
+inline fio_http_header_each_s fio_http_header_each_first(fio_http_s *http_handle, int is_request, fio_str_info_s header_name)
 ```
 
-Copies all header data, from possibly an array of identical response headers,
-resulting in a parsed format outputted to `buf_parsed`.
-
-Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
-for the parsed output).
-
-Note that the parsed output isn't readable as a string, but is designed to
-work with the `FIO_HTTP_PARSED_HEADER_EACH` and
-`FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
-
-See also `fio_http_response_header_parse`.
+Starts iterating a header's values. `header_name` is a borrowed lookup key.
+Returns an iterator with `value.buf == NULL` when no value is available.
 
 _Symbol type:_ `function`
 
-#### `fio_http_request_header_parse`
+#### `fio_http_header_each_next`
 
 ```c
-int fio_http_request_header_parse(fio_http_s *h, fio_str_info_s *buf_parsed, fio_str_info_s header_name)
+inline void fio_http_header_each_next(fio_http_header_each_s *pos, fio_http_s *http_handle)
 ```
 
-Copies all header data, from possibly an array of identical response headers,
-resulting in a parsed format outputted to `buf_parsed`.
+Advances to the next value; `http_handle` must be the original handle.
+Sets `value.buf` to NULL after the last value.
 
-Returns 0 on success or -1 on error (i.e., `buf_parsed.capa` wasn't enough
-for the parsed output).
+_Symbol type:_ `function`
 
-Note that the parsed output isn't readable as a string, but is designed to
-work with the `FIO_HTTP_PARSED_HEADER_EACH` and
-`FIO_HTTP_HEADER_VALUE_EACH_PROPERTY` property.
-
-i.e.:
+#### `fio_http_header_each_property_first`
 
 ```c
- FIO_STR_INFO_TMP_VAR(buf, 1023); // tmp buffer for the parsed output
- fio_http_s *h = fio_http_new();  // using a mock HTTP handle
- fio_http_request_header_add(
-     h,
-     FIO_STR_INFO2("accept", 6),
-     FIO_STR_INFO1("text/html, application/json;q=0.9; d=500, image/png"));
- fio_http_request_header_add(h,
-                             FIO_STR_INFO2("accept", 6),
-                             FIO_STR_INFO1("text/yaml"));
- FIO_ASSERT(  // in production do NOT assert, but route to error instead!
-     !fio_http_request_header_parse(h, &buf, FIO_STR_INFO2("accept", 6)),
-     "parse returned error!");
- FIO_HTTP_PARSED_HEADER_EACH(buf, value) {
-   printf("* processing value (%zu bytes): %s\n", value.len, value.buf);
-   FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, prop) {
-     printf("* for value %s: (%zu,%zu bytes) %s = %s\n",
-            value.buf,
-            prop.name.len,
-            prop.value.len,
-            prop.name.buf,
-            prop.value.buf);
-   }
- }
+inline fio_http_header_each_s fio_http_header_each_property_first(const fio_buf_info_s *properties)
 ```
+
+Starts iterating a value's bounded property span. `properties` is borrowed.
+Returns an iterator with `value.buf == NULL` when no property exists.
+
+_Symbol type:_ `function`
+
+#### `fio_http_header_each_property_next`
+
+```c
+inline void fio_http_header_each_property_next(fio_http_header_each_s *pos)
+```
+
+Advances to the next property. A property without `=` has an empty value.
+Sets `value.buf` to NULL after the last property.
 
 _Symbol type:_ `function`
 

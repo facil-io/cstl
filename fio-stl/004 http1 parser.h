@@ -89,6 +89,23 @@ FIO_IFUNC size_t fio_http1_parser_skips_body(fio_http1_parser_s *p);
 #define FIO___HTTP1_FLAG_EXPECT ((size_t)1)
 /** Internal parser flag: the message has no body (ignore body framing). */
 #define FIO___HTTP1_FLAG_NO_BODY ((size_t)2)
+/** Internal parser flag: an HTTP/1.1+ request still requires a Host header. */
+#define FIO___HTTP1_FLAG_HOST_REQUIRED ((size_t)4)
+/** Internal parser flag: a request Host header was already received. */
+#define FIO___HTTP1_FLAG_HOST_SEEN ((size_t)8)
+/** Internal parser flag: the message is a request (not a response). */
+#define FIO___HTTP1_FLAG_REQUEST ((size_t)16)
+/** Internal parser flag: Transfer-Encoding seen without a final `chunked`. */
+#define FIO___HTTP1_FLAG_TE_UNFRAMED ((size_t)32)
+
+/**
+ * Returns non-zero if `version` is exactly `HTTP/1.0`.
+ *
+ * HTTP/1.0 messages are not persistent without a `keep-alive` connection
+ * option and never use chunked transfer coding (RFC 9112 §9.3, §6.1). Every
+ * other version string (HTTP/0.9 is unsupported) gets HTTP/1.1 semantics.
+ */
+FIO_IFUNC int fio_http1_version_is_legacy(fio_buf_info_s version);
 
 /* *****************************************************************************
 HTTP/1.x callbacks (to be implemented by parser user)
@@ -199,6 +216,11 @@ FIO_IFUNC size_t fio_http1_parser_skips_body(fio_http1_parser_s *p) {
          (size_t)(p->expected == FIO___HTTP1_BODY_NOT_ALLOWED);
 }
 
+/** Returns non-zero if `version` is exactly `HTTP/1.0` (one 64 bit test). */
+FIO_IFUNC int fio_http1_version_is_legacy(fio_buf_info_s v) {
+  return v.len == 8 && fio_buf2u64u(v.buf) == fio_buf2u64u("HTTP/1.0");
+}
+
 /* *****************************************************************************
 Main Parsing Loop
 ***************************************************************************** */
@@ -292,6 +314,10 @@ static int fio_http1___start(fio_http1_parser_s *p,
        ((fio_buf2u64u(wrd[0].buf) | (uint64_t)0x2020202020202020ULL) ==
         method_options)))
     p->expected = FIO___HTTP1_BODY_NOT_ALLOWED;
+  /* HTTP/1.1 requests require exactly one Host header (RFC 9112 §3.2) */
+  p->flags |= FIO___HTTP1_FLAG_REQUEST;
+  if (!fio_http1_version_is_legacy(wrd[2]))
+    p->flags |= FIO___HTTP1_FLAG_HOST_REQUIRED;
 
   if (fio_http1_on_method(wrd[0], udata))
     return -1;
@@ -323,6 +349,29 @@ parse_response_line:
 Reading Headers
 ***************************************************************************** */
 
+/* Returns non-zero if a transfer-coding list names `chunked` (any position). */
+static int fio_http1___te_has_chunked(fio_buf_info_s v) {
+  while (v.len) {
+    char *comma = (char *)FIO_MEMCHR(v.buf, ',', v.len);
+    size_t len = comma ? (size_t)(comma - v.buf) : v.len;
+    char *semi = (char *)FIO_MEMCHR(v.buf, ';', len);
+    size_t start = 0, end = semi ? (size_t)(semi - v.buf) : len;
+    while (start < end && (v.buf[start] == ' ' || v.buf[start] == '\t'))
+      ++start;
+    while (end > start && (v.buf[end - 1] == ' ' || v.buf[end - 1] == '\t'))
+      --end;
+    if (end - start == 7 &&
+        (fio_buf2u32u(v.buf + start) | 0x20202020UL) == fio_buf2u32u("chun") &&
+        (fio_buf2u32u(v.buf + start + 3) | 0x20202020UL) ==
+            fio_buf2u32u("nked"))
+      return 1;
+    len += !!comma;
+    v.buf += len;
+    v.len -= len;
+  }
+  return 0;
+}
+
 /* handle headers before calling callback. */
 static inline int fio_http1___on_header(fio_http1_parser_s *p,
                                         fio_buf_info_s name,
@@ -333,8 +382,18 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
   const size_t no_body = (p->flags & FIO___HTTP1_FLAG_NO_BODY);
   /* test for special headers */
   switch (name.len) {
+  case 4: /* test for "host" (requests: exactly one, RFC 9112 §3.2) */
+    if ((p->flags & FIO___HTTP1_FLAG_REQUEST) &&
+        fio_buf2u32u(name.buf) == fio_buf2u32u("host")) {
+      if ((p->flags & FIO___HTTP1_FLAG_HOST_SEEN))
+        return -1;
+      p->flags |= FIO___HTTP1_FLAG_HOST_SEEN;
+      p->flags &= ~FIO___HTTP1_FLAG_HOST_REQUIRED;
+    }
+    break;
   case 6: /* test for "expect" */
-    if (!no_body && value.len == 12 && fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
+    if (!no_body && value.len == 12 &&
+        fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
         fio_buf2u32u(name.buf + 2) == fio_buf2u32u("pect")) {
       /* Expect value validation */
       if (fio_buf2u64u(value.buf) == fio_buf2u64u("100-cont") &&
@@ -381,27 +440,43 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
     }
     break;
   case 17: /* test for "transfer-encoding" (chunked?) */
-    if (!no_body && value.len >= 7 && (name.buf[16] == 'g') &&
+    if (!no_body && (name.buf[16] == 'g') &&
         !((fio_buf2u64u(name.buf) ^ fio_buf2u64u("transfer")) |
           (fio_buf2u64u(name.buf + 8) ^ fio_buf2u64u("-encodin")))) {
-      char *c_start = value.buf + value.len - 7;
-      if ((fio_buf2u32u(c_start) | 0x20202020UL) == fio_buf2u32u("chun") &&
-          (fio_buf2u32u(c_start + 3) | 0x20202020UL) == fio_buf2u32u("nked")) {
-        if (p->expected && p->expected != FIO_HTTP1_EXPECTED_CHUNKED)
-          return -1;
-        p->expected = FIO_HTTP1_EXPECTED_CHUNKED;
-        /* endpoint does not need to know if the body was chunked or not */
-        if (value.len == 7)
-          return 0;
-        if (c_start[-1] != ' ' && c_start[-1] != ',' && c_start[-1] != '\t')
-          return -1;
-        while (c_start > value.buf &&
-               (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t'))
-          --c_start;
-        if (c_start == value.buf)
-          return 0;
-        value.len = c_start - value.buf;
+      /* `chunked` MUST be the final coding, applied once (RFC 9112 §6.3,
+       * §7). Field lines form a single list (RFC 9110 §5.3): a coding after
+       * `chunked`, a repeated `chunked`, Content-Length (TE.CL) or a bodyless
+       * method (GET / HEAD / OPTIONS) all leave `p->expected` set - reject.
+       * A list that doesn't end with `chunked` can't be framed and is
+       * rejected once the headers end, rather than misreading the body as
+       * the next message (request smuggling). */
+      if (p->expected)
+        return -1;
+      char *c_start = value.buf + value.len - (value.len >= 7 ? 7 : 0);
+      if (value.len < 7 ||
+          (fio_buf2u32u(c_start) | 0x20202020UL) != fio_buf2u32u("chun") ||
+          (fio_buf2u32u(c_start + 3) | 0x20202020UL) !=
+              fio_buf2u32u("nked") ||
+          (value.len > 7 && c_start[-1] != ' ' && c_start[-1] != ',' &&
+           c_start[-1] != '\t')) {
+        if (fio_http1___te_has_chunked(value))
+          return -1; /* `chunked` isn't the final coding */
+        p->flags |= FIO___HTTP1_FLAG_TE_UNFRAMED;
+        break; /* forward the codings, a later field line may end the list */
       }
+      p->expected = FIO_HTTP1_EXPECTED_CHUNKED;
+      p->flags &= ~FIO___HTTP1_FLAG_TE_UNFRAMED;
+      /* endpoint does not need to know if the body was chunked or not */
+      while (c_start > value.buf &&
+             (c_start[-1] == ' ' || c_start[-1] == ',' || c_start[-1] == '\t'))
+        --c_start;
+      if (c_start == value.buf)
+        return 0;
+      value.len = c_start - value.buf;
+      if (fio_http1___te_has_chunked(value))
+        return -1;
+      /* remaining codings (i.e., `gzip`) are forwarded for the endpoint to
+       * decode (a 501 response is only a SHOULD, RFC 9112 §6.1). */
     }
     break;
   }
@@ -437,25 +512,28 @@ static inline int fio_http1___on_trailer(fio_http1_parser_s *p,
   return fio_http1_on_header(name, value, udata);
 }
 
+/** The subset of the forbidden chars that allows UTF-8 headers */
+static const _Bool FIO___HTTP_FORBIDDEN_NAME_CHARS[256] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
 /* seeks to the ':' divisor while testing and converting to downcase. */
 static char *fio_http1___seek_header_div(char *p) {
-  /* this is the subset of the forbidden chars that allows UTF-8 headers */
-  static const _Bool forbidden_name_chars[256] = {
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  FIO_ASSERT(forbidden_name_chars[' '] && forbidden_name_chars['\t'],
+  FIO_ASSERT(FIO___HTTP_FORBIDDEN_NAME_CHARS[' '] &&
+                 FIO___HTTP_FORBIDDEN_NAME_CHARS['\t'],
              "missing forbidden HTTP Header Name characters");
   for (;;) {
-    if (FIO_UNLIKELY(forbidden_name_chars[((uint8_t)(*p))]))
+    if (FIO_UNLIKELY(FIO___HTTP_FORBIDDEN_NAME_CHARS[((uint8_t)(*p))]))
       return p;
     *p = fio_ct_tolower(*p);
     ++p;
@@ -506,6 +584,9 @@ static inline int fio_http1___read_header_line(
   }
 
 headers_finished:
+  if ((p->flags &
+       (FIO___HTTP1_FLAG_HOST_REQUIRED | FIO___HTTP1_FLAG_TE_UNFRAMED)))
+    return -1; /* no Host for HTTP/1.1 (RFC 9112 §3.2) or no final chunked */
   if ((p->flags & FIO___HTTP1_FLAG_NO_BODY))
     p->expected = 0; /* body framing ignored (i.e., skip_body set late) */
   if ((p->flags & FIO___HTTP1_FLAG_EXPECT)) {

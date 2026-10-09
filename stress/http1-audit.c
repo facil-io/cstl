@@ -104,7 +104,7 @@ Audit cases
 static int audit_te_comma(void) {
   fprintf(stderr, "\t- te_comma\n");
   static const char req[] =
-      "POST / HTTP/1.1\r\nTransfer-Encoding: ,,,,chunked\r\n\r\n";
+      "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: ,,,,chunked\r\n\r\n";
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, sizeof(req) - 1, 0);
   FIO_ASSERT_ALLOC(buf);
   FIO_MEMCPY(buf, req, sizeof(req) - 1);
@@ -187,11 +187,14 @@ static int audit_many_small_chunks(void) {
   size_t chunk_count = 10000;
   size_t chunk_size = 1;
   size_t chunk_line_len = 3; /* "1\r\n" */
-  size_t total = 40 + chunk_count * (chunk_line_len + chunk_size + 2) + 5;
+  static const char head[] =
+      "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n";
+  size_t total = (sizeof(head) - 1) +
+                 chunk_count * (chunk_line_len + chunk_size + 2) + 5;
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, total, 0);
   FIO_ASSERT_ALLOC(buf);
-  FIO_MEMCPY(buf, "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", 40);
-  size_t pos = 40;
+  FIO_MEMCPY(buf, head, sizeof(head) - 1);
+  size_t pos = sizeof(head) - 1;
   for (size_t i = 0; i < chunk_count; ++i) {
     FIO_MEMCPY(buf + pos, "1\r\n", 3);
     pos += 3;
@@ -210,7 +213,7 @@ static int audit_many_small_chunks(void) {
 static int audit_chunk_extensions(void) {
   fprintf(stderr, "\t- chunk_extensions\n");
   static const char req[] =
-      "POST / HTTP/1.1\r\n"
+      "POST / HTTP/1.1\r\nHost: x\r\n"
       "Transfer-Encoding: chunked\r\n\r\n"
       "5;ext=val\r\nHello\r\n"
       "0\r\n\r\n";
@@ -265,7 +268,8 @@ static int audit_whitespace_in_header_name(void) {
 static int audit_duplicate_content_length(void) {
   fprintf(stderr, "\t- duplicate_content_length\n");
   static const char req[] =
-      "POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nHello";
+      "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\n"
+      "Content-Length: 5\r\n\r\nHello";
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, sizeof(req) - 1, 0);
   FIO_ASSERT_ALLOC(buf);
   FIO_MEMCPY(buf, req, sizeof(req) - 1);
@@ -278,7 +282,7 @@ static int audit_duplicate_content_length(void) {
 static int audit_content_length_whitespace(void) {
   fprintf(stderr, "\t- content_length_whitespace\n");
   static const char req[] =
-      "POST / HTTP/1.1\r\nContent-Length:   5  \r\n\r\nHello";
+      "POST / HTTP/1.1\r\nHost: x\r\nContent-Length:   5  \r\n\r\nHello";
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, sizeof(req) - 1, 0);
   FIO_ASSERT_ALLOC(buf);
   FIO_MEMCPY(buf, req, sizeof(req) - 1);

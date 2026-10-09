@@ -96,18 +96,20 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
         FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
         val) {
       FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
-                      (int)val.len,
-                      val.buf);
-      if (!FIO_STR_INFO_IS_EQ(val,
-                              FIO_STR_INFO2((char *)"permessage-deflate", 18)))
+                      (int)val.value.len,
+                      val.value.buf);
+      if (!FIO_BUF_INFO_IS_EQ(
+              val.value,
+              FIO_BUF_INFO2((char *)"permessage-deflate", 18)))
         continue;
       /* Negotiate: ALWAYS force both no_context_takeover flags (persistent
        * compression state stays ~0 per connection); honor
        * server_max_window_bits when offered. */
       char ext_resp[80];
       int server_bits = 15;
-      size_t ext_len = fio___http_ws_deflate_negotiate(val,
-                                                       ext_resp,
+      size_t ext_len = fio___http_ws_deflate_negotiate(
+          FIO_STR_INFO2(val.value.buf, val.value.len),
+          ext_resp,
                                                        sizeof(ext_resp),
                                                        &server_bits);
       if (!ext_len)

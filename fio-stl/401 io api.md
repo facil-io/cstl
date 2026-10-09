@@ -315,7 +315,9 @@ is being attached.
 was available on the non-blocking socket. Use close callbacks for final cleanup.
 
 `fio_io_close` closes after scheduled data is sent. `fio_io_close_now` closes as
-soon as possible. `fio_io_suspend` / `fio_io_unsuspend` control future
+soon as possible. `fio_io_is_open` returns 1 only while open and not marked for
+closure: it returns 0 immediately after `fio_io_close`, even while previously
+scheduled output is draining. `fio_io_suspend` / `fio_io_unsuspend` control future
 `on_data` delivery, and `fio_io_backlog` reports the approximate outgoing byte
 count.
 

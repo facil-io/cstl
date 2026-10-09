@@ -68,6 +68,14 @@ HTTP/1.x requests and client responses are parsed into `fio_http_s` handles.
 A response line received by a server connection (or an unsolicited response
 received by a client) is logged as a `SECURITY` event and the connection is
 closed.
+Malformed requests receive a `400 Bad Request` response and the connection is
+closed. This includes request framing that could be misread as a pipelined
+(smuggled) request: a `Transfer-Encoding` without a single, final `chunked`
+coding (RFC 9112 §6.3, §7), and an HTTP/1.1 request without exactly one `Host`
+header (RFC 9112 §3.2). Other transfer codings before the final `chunked`
+(i.e., `gzip, chunked`) stay visible to the application as a request
+`transfer-encoding` header (i.e., `gzip`); the body is passed through as
+received, still encoded.
 The HTTP layer suspends the IO object while the user callback is running and
 resumes it after the response is finished or the upgrade is installed.
 
@@ -78,6 +86,16 @@ Plain HTTP cycles use:
 3. `on_http` for application logic;
 4. `fio_http_write` / `fio_http_finish` to send the response;
 5. `on_finish` when the non-upgraded cycle is complete.
+
+For non-upgraded server HTTP/1 cycles, a request `Connection` field containing
+the case-insensitive `close` token closes after the complete response drains;
+subsequent pipelined requests are not dispatched. HTTP/1.0 requests are not
+persistent unless a request `Connection` field contains `keep-alive` (RFC 9112
+§9.3); the server confirms persistence with a `connection: keep-alive`
+response header (unless the application set a `connection` header). Application-initiated closure
+remains explicit: schedule the complete response, then call `fio_http_close`
+while the handle is valid (i.e., from `on_finish`). Setting only a response
+`Connection: close` header does not itself schedule closure.
 
 WebSocket and SSE cycles use the authentication callbacks before upgrade, then
 `on_open`, message / event callbacks, `on_ready`, `on_shutdown`, `on_close`, and
@@ -554,8 +572,9 @@ void        fio_http_close(fio_http_s *h);
 ```
 
 `fio_http_s` is reference-counted. It is not designed as a thread-safe mutable
-object. `fio_http_close` closes the persistent connection associated with an
-upgraded handle.
+object. `fio_http_close` closes the associated connection, including an ordinary
+HTTP/1 connection. Schedule the complete response before calling it; previously
+scheduled output drains before closure.
 
 ### User data and controller data
 
@@ -670,26 +689,35 @@ fio_http_response_header_each;
 `index` for repeated values. If `name.buf == NULL`, `*_header_count` returns
 the number of unique header names.
 
+Header insertion rejects names longer than 4095 bytes and names containing the
+parser's forbidden name bytes (including whitespace, colon, NUL, CR, and LF).
+Values containing NUL, CR, or LF are rejected. Invalid insertion returns an empty
+value without replacing an existing header. With
+`FIO_HTTP_ENFORCE_LOWERCASE_HEADERS`, names are validated and copied to ASCII
+lowercase in one pass; caller-owned input is not modified.
+
 Response headers cannot be changed after the response headers are sent.
 
-### Header parsing helpers
+### Header value and property iteration
 
 ```c
-int fio_http_request_header_parse(fio_http_s *h,
-                                  fio_str_info_s *buf_parsed,
-                                  fio_str_info_s header_name);
-int fio_http_response_header_parse(fio_http_s *h,
-                                   fio_str_info_s *buf_parsed,
-                                   fio_str_info_s header_name);
-
-#define FIO_HTTP_HEADER_EACH_VALUE(http_handle, is_request, header_name, value)
-#define FIO_HTTP_HEADER_VALUE_EACH_PROPERTY(value, property)
-#define FIO_HTTP_PARSED_HEADER_EACH(buf_parsed, value)
+FIO_HTTP_HEADER_EACH_VALUE(h, 1, FIO_STR_INFO1("accept"), item) {
+  /* item.name and item.value are length-delimited fio_buf_info_s slices. */
+  FIO_HTTP_HEADER_EACH_PROPERTY(item, prop) {
+    /* prop.name and prop.value are length-delimited slices. */
+  }
+}
 ```
 
-The parse helpers copy repeated comma-separated header values into a compact
-parsed buffer. The macros iterate values and `name=value` style properties. The
-macro form uses a 2048-byte stack buffer for the parse.
+The macros iterate repeated fields, comma-separated values and semicolon-separated
+properties without copying. They trim surrounding spaces and tabs; quoted
+strings remain quoted, including escapes. Slices borrow header storage and are
+not necessarily NUL-terminated: use their `.len` rather than string functions.
+Do not change headers during iteration. `value.buf == NULL` marks the end;
+empty property values may have a non-NULL buffer and zero length. The helpers
+`fio_http_header_each_first` / `fio_http_header_each_next` and
+`fio_http_header_each_property_first` / `fio_http_header_each_property_next`
+can also be used directly.
 
 ### Body storage and reads
 
@@ -798,7 +826,10 @@ void fio_http_write(fio_http_s *h, fio_http_write_args_s args);
 
 `fio_http_write` sends headers on the first write and then writes body data. If
 `finish` is set, the response is complete. Without `finish`, the response is a
-stream. File writes use `fd` and `offset`; the file descriptor is always closed
+stream. HTTP/1.1 streams use `transfer-encoding: chunked`; HTTP/1.0 responses
+never use a transfer coding (RFC 9112 §6.1), so an HTTP/1.0 stream is sent
+unframed and delimited by closing the connection, even if `keep-alive` was
+requested. File writes use `fd` and `offset`; the file descriptor is always closed
 by the write path.
 
 On upgraded handles, `fio_http_write` routes through the WebSocket or SSE

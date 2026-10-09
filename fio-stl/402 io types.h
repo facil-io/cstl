@@ -954,9 +954,10 @@ SFUNC int fio_io_is_suspended(fio_io_s *io) {
   return (int)((io->flags & FIO___IO_FLAG_SUSPENDED) / FIO___IO_FLAG_SUSPENDED);
 }
 
-/** Returns 1 if the IO handle is marked as open. */
+/** Returns 1 if the IO handle is open and not marked for closure. */
 SFUNC int fio_io_is_open(fio_io_s *io) {
-  return (int)((io->flags & FIO___IO_FLAG_OPEN) / FIO___IO_FLAG_OPEN);
+  return (io->flags & (FIO___IO_FLAG_OPEN | FIO___IO_FLAG_CLOSED_ALL)) ==
+         FIO___IO_FLAG_OPEN;
 }
 
 /** Returns the approximate number of bytes in the outgoing buffer. */
@@ -1090,7 +1091,11 @@ finish_loop:
       FIO___IO_FLAG_SET(io, FIO___IO_FLAG_THROTTLED);
     }
     fio___io_monitor_out(io);
-  } else if ((io->flags & FIO___IO_FLAG_CLOSE)) {
+  } else if ((io->flags & (FIO___IO_FLAG_CLOSE | FIO___IO_FLAG_WRITE_DIRTY))) {
+    /* Queued writes may not have reached io->out yet. The finish path clears
+     * WRITE_DIRTY and schedules another ready task behind those writes. */
+    if (io->flags & FIO___IO_FLAG_WRITE_DIRTY)
+      goto finish;
     io->pr->io_functions.finish(io->fd, io->tls);
     fio_io_close_now(io);
   } else {

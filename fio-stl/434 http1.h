@@ -445,6 +445,24 @@ FIO_SFUNC int fio___http_controller_get_fd(fio_http_s *h) {
   return fio_io_fd(fio_http_io(h));
 }
 
+/* Returns true for HTTP/1.0 handles (anything else is HTTP/1.1). */
+FIO_IFUNC int fio___http1_is_legacy(fio_http_s *h) {
+  return fio_http1_version_is_legacy(FIO_STR2BUF_INFO(fio_http_version(h)));
+}
+
+/* Streamed responses use chunked framing only for HTTP/1.1+ (RFC 9112 §6.1).
+ * HTTP/1.0 streams are delimited by closing the connection. */
+FIO_IFUNC int fio___http1_is_chunked(fio_http_s *h) {
+  return fio_http_is_streaming(h) && !fio___http1_is_legacy(h);
+}
+
+/* Request `Connection` options (RFC 9110 §7.6.1) as bit flags. */
+#define FIO___HTTP1_CONN_CLOSE      1
+#define FIO___HTTP1_CONN_KEEP_ALIVE 2
+
+/* Collects request Connection options (defined below). */
+FIO_SFUNC int fio___http1_connection_options(fio_http_s *h);
+
 /** Informs the controller that request / response headers must be sent. */
 FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
@@ -473,11 +491,23 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   /* write cookies */
   fio_http_set_cookie_each(h, fio_http1___write_header_callback, &buf);
   /* add streaming headers? */
-  if (fio_http_is_streaming(h))
+  if (fio___http1_is_chunked(h))
     fio_string_write(&buf,
                      FIO_STRING_REALLOC,
                      "transfer-encoding: chunked\r\n",
                      28);
+  /* HTTP/1.0 persistence must be confirmed (RFC 9112 §C.2.2) */
+  else if (fio___http1_is_legacy(h) && !c->is_client &&
+           !fio_http_is_streaming(h) &&
+           fio___http1_connection_options(h) == FIO___HTTP1_CONN_KEEP_ALIVE &&
+           !fio_http_response_header(h,
+                                     FIO_STR_INFO2((char *)"connection", 10),
+                                     0)
+                .buf)
+    fio_string_write(&buf,
+                     FIO_STRING_REALLOC,
+                     "connection:keep-alive\r\n",
+                     23);
   fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
   /* send data (move memory ownership)? */
   c->state.http.buf = buf;
@@ -495,7 +525,7 @@ FIO_SFUNC void fio___http_controller_http1_write_body(
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (!c->io || !fio_io_is_open(c->io))
     goto no_write_err;
-  if (fio_http_is_streaming(h))
+  if (fio___http1_is_chunked(h))
     goto stream_chunk;
   if (c->state.http.buf.len) {
     if (args.buf && args.len) {
@@ -630,11 +660,10 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_task(void *c_,
     goto no_io;
 
   if (fio_io_is_open(c->io)) {
-    /* TODO: test for connection:close header and h->status values */
     fio___http1_process_data(c->io, c);
+    if (!c->suspend && fio_io_is_open(c->io))
+      fio_io_unsuspend(c->io);
   }
-  if (!c->suspend)
-    fio_io_unsuspend(c->io);
   fio_io_free(c->io);
   return;
 
@@ -680,11 +709,64 @@ no_io:
   fio___http_connection_free(c); /* free HTTP connection element */
 }
 
+/* Collects the `close` / `keep-alive` options of all request Connection
+ * fields. */
+FIO_SFUNC int fio___http1_connection_options(fio_http_s *h) {
+  int r = 0;
+  fio___http_sary_s *a = fio___http_hmap_node2val_ptr(
+      fio___http_hmap_get_ptr(HTTP_HDR_REQUEST(h),
+                              FIO_STR_INFO2((char *)"connection", 10)));
+  if (!a)
+    return r;
+  FIO_ARRAY_EACH(fio___http_sary, a, pos) {
+    fio_buf_info_s v = fio_bstr_buf(*pos);
+    while (v.len) {
+      char *comma = (char *)FIO_MEMCHR(v.buf, ',', v.len);
+      const size_t consumed = comma ? (size_t)(comma - v.buf) + 1 : v.len;
+      size_t first = 0;
+      size_t last = comma ? consumed - 1 : consumed;
+      while (first < last && (v.buf[first] == ' ' || v.buf[first] == '\t'))
+        ++first;
+      while (last > first &&
+             (v.buf[last - 1] == ' ' || v.buf[last - 1] == '\t'))
+        --last;
+      if (last - first == 5 && (v.buf[first] | 0x20) == 'c' &&
+          (fio_buf2u32u(v.buf + first + 1) | (uint32_t)0x20202020UL) ==
+              fio_buf2u32u("lose"))
+        r |= FIO___HTTP1_CONN_CLOSE;
+      else if (last - first == 10 &&
+               (fio_buf2u64u(v.buf + first) |
+                (uint64_t)0x2020202020202020ULL) ==
+                   (fio_buf2u64u("keep-alive") |
+                    (uint64_t)0x2020202020202020ULL) &&
+               (fio_buf2u16u(v.buf + first + 8) | (uint16_t)0x2020U) ==
+                   fio_buf2u16u("ve"))
+        r |= FIO___HTTP1_CONN_KEEP_ALIVE;
+      v.buf += consumed;
+      v.len -= consumed;
+    }
+  }
+  return r;
+}
+
+/* Returns true if the server must close the connection after the response.
+ *
+ * HTTP/1.1: only when a request Connection field contains `close`.
+ * HTTP/1.0: unless `keep-alive` was requested (RFC 9112 §9.3) - and always
+ * for streamed responses, which are delimited by the connection close. */
+FIO_SFUNC int fio___http1_should_close(fio_http_s *h) {
+  if (!fio___http1_is_legacy(h))
+    return fio___http1_connection_options(h) & FIO___HTTP1_CONN_CLOSE;
+  if (fio_http_is_streaming(h))
+    return 1; /* close delimited, no header scan required */
+  return fio___http1_connection_options(h) != FIO___HTTP1_CONN_KEEP_ALIVE;
+}
+
 /** called once a request / response had finished */
 FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (c->state.http.buf.len) {
-    if (fio_http_is_streaming(h))
+    if (fio___http1_is_chunked(h))
       fio_string_write(&c->state.http.buf, FIO_STRING_REALLOC, "0\r\n\r\n", 5);
     fio_io_write2(c->io,
                   .buf = (void *)c->state.http.buf.buf,
@@ -692,7 +774,7 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
                   .dealloc = FIO_STRING_FREE);
     c->state.http.buf = FIO_STR_INFO0;
   } else {
-    if (fio_http_is_streaming(h))
+    if (fio___http1_is_chunked(h))
       fio_io_write2(c->io, .buf = (char *)"0\r\n\r\n", .len = 5, .copy = 1);
   }
   if (c->log)
@@ -701,7 +783,13 @@ FIO_SFUNC void fio___http_controller_http1_on_finish(fio_http_s *h) {
     goto upgraded;
   /* once the function returns, `h` may be freed (auto-finish on free).
    * so we must call this callback here (sync), no matter the thread */
+  const int close_connection = fio___http1_should_close(h);
   c->state.http.on_finish(h);
+  if (close_connection && c->io) {
+    fio_io_close(c->io);
+    fio_io_free(c->io); /* balance the completion-time fio_io_dup */
+    return;
+  }
   fio_io_defer(fio___http_controller_http1_on_finish_task, (void *)(c), NULL);
   return;
 

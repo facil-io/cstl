@@ -117,6 +117,7 @@ FIO_IFUNC size_t fio_http1_parser_is_on_body(fio_http1_parser_s *p);
 FIO_IFUNC size_t fio_http1_expected(fio_http1_parser_s *p);
 FIO_IFUNC void fio_http1_parser_skip_body(fio_http1_parser_s *p);
 FIO_IFUNC size_t fio_http1_parser_skips_body(fio_http1_parser_s *p);
+FIO_IFUNC int fio_http1_version_is_legacy(fio_buf_info_s version);
 ```
 
 - `fio_http1_parser_is_empty` returns non-zero when the parser is waiting for a
@@ -141,6 +142,13 @@ FIO_IFUNC size_t fio_http1_parser_skips_body(fio_http1_parser_s *p);
 - `fio_http1_parser_skips_body` returns non-zero when the current message has
   no body. It is known as soon as the first line is parsed (before any header
   callback). Test it before reserving body space. See *Messages Without a Body*.
+- `fio_http1_version_is_legacy` returns non-zero if a version string (as
+  passed to `fio_http1_on_version`) is exactly `HTTP/1.0` (case-sensitive).
+  HTTP/1.0 messages are not persistent without a `keep-alive` connection
+  option and never use chunked transfer coding (RFC 9112 §9.3, §6.1). Every
+  other version string gets HTTP/1.1 semantics. HTTP/0.9 is unsupported: its
+  version-less request line is rejected, and a `HTTP/0.9` version string is
+  treated as HTTP/1.1 (i.e., `host` is required).
 
 ### Constants
 
@@ -285,15 +293,39 @@ rejected.
 A `content-length: 0` value marks the message as having no body and does not
 call `fio_http1_on_header_content_length`.
 
-`transfer-encoding` is also special when its final token is `chunked`
-(case-insensitive):
+`transfer-encoding` is also special. Its field lines form a single coding list
+(RFC 9110 §5.3), and `chunked` (case-insensitive) must be the final coding,
+applied exactly once (RFC 9112 §6.3, §7). Anything else can't be framed safely,
+so it's rejected rather than reading the body as the next message (request
+smuggling):
 
-- the parser switches to chunked body decoding;
+- the parser switches to chunked body decoding when a field line ends with the
+  `chunked` token;
 - if the value is exactly `chunked`, no generic header callback is made;
 - if other transfer-coding text appears before the final `chunked` token, the
   final `chunked` token and adjacent separators are stripped before the
-  remaining value is passed to `fio_http1_on_header`;
-- malformed separators before the final `chunked` token are rejected.
+  remaining value is passed to `fio_http1_on_header` (i.e.,
+  `gzip, chunked` is framed as chunked and forwards `transfer-encoding: gzip`;
+  decoding it is up to the parser user, since a `501` response is only a
+  SHOULD under RFC 9112 §6.1);
+- a field line without a final `chunked` token (i.e., `gzip`) is forwarded
+  unchanged; a later field line may still end the list with `chunked`;
+- rejected: a list that doesn't end with `chunked` once the headers end (i.e.,
+  `gzip`, `identity`, `chunked, gzip`, an empty value, or a `chunked` line
+  followed by any other `transfer-encoding` line), a repeated `chunked`
+  coding (`chunked, chunked`), malformed separators before the final
+  `chunked` token, a `content-length` header, and requests using `GET`,
+  `HEAD`, or `OPTIONS`.
+
+Requests must carry exactly one `host` header, as required by RFC 9112 §3.2:
+
+- an HTTP/1.1 request without a `host` header is rejected once the headers
+  end;
+- a request with more than one `host` header line is rejected (for any
+  version);
+- `HTTP/1.0` requests may omit `host` (see `fio_http1_version_is_legacy`);
+- responses aren't affected. The `host` header itself is passed to
+  `fio_http1_on_header`.
 
 `expect` is special when its value is exactly `100-continue`. Any other
 `Expect` value is rejected.

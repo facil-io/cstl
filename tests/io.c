@@ -760,8 +760,14 @@ static int fio___test_io_check_pair_task(void *u1, void *u2) {
     FIO_ASSERT(fio___test_io_each_count >= 1,
                "protocol_each task should have run");
 
-    /* test close schedules graceful close */
+    /* A graceful close changes the public predicate immediately, but must
+     * preserve the internal OPEN bit until previously scheduled output drains. */
+    fio_io_write(fio___test_io_pair_io, "drain", 5);
     fio_io_close(fio___test_io_pair_io);
+    FIO_ASSERT(!fio_io_is_open(fio___test_io_pair_io),
+               "IO marked for closure must not report open");
+    FIO_ASSERT(fio___test_io_pair_io->flags & FIO___IO_FLAG_OPEN,
+               "graceful close must retain OPEN while output drains");
   }
   return 0;
 }
@@ -992,6 +998,17 @@ static void test_io_integration(void) {
              "IO objects should be fully released");
   FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
              "late-failure connecting state should be cleaned up");
+
+  FIO_ASSERT(fio___test_io_close_count >= 1,
+             "graceful pair close must deliver on_close");
+  char drained[8] = {0};
+  FIO_ASSERT(
+      fio_sock_read(fio___test_io_pair_local, drained, sizeof(drained)) == 5 &&
+          !FIO_MEMCMP(drained, "drain", 5),
+      "graceful close must drain previously scheduled output");
+  FIO_ASSERT(
+      fio_sock_read(fio___test_io_pair_local, drained, sizeof(drained)) == 0,
+      "pair peer must observe EOF after drained output");
 
   /* Cleanup the local end of the socketpair if it is still open. */
   if (FIO_SOCK_FD_ISVALID(fio___test_io_pair_local)) {
@@ -1462,6 +1479,66 @@ static void test_io_protocol_set_null_lifecycle(void) {
           (int)FIO___TEST_IO_ZOMBIE_CASES);
 }
 
+static unsigned test_io_close_order_calls;
+static void test_io_close_order_on_close(void *buf, void *udata) {
+  (void)buf;
+  (void)udata;
+  ++test_io_close_order_calls;
+}
+
+static void test_io_close_write_order(void) {
+  for (unsigned closing = 0; closing < 2; ++closing) {
+    fio_socket_i fds[2];
+    FIO_ASSERT(!fio_sock_socketpair(fds), "close ordering socketpair failed");
+    fio_io_protocol_s protocol = {.on_close = test_io_close_order_on_close};
+    fio_io_s *io = fio_io_attach_fd(fds[0], &protocol, NULL, NULL);
+    FIO_ASSERT(io, "close ordering attach failed");
+    fio_io_dup(io); /* observation reference after graceful close */
+    fio_queue_perform_all(fio_io_queue());
+    /* A ready task for earlier output may precede an accepted final write. */
+    fio___io_poll_on_ready_schd(io);
+    fio_io_write(io, "tail", 4);
+    if (closing) {
+      fio_io_close(io);
+      FIO_ASSERT(!fio_io_is_open(io), "pending graceful close must report closed");
+      fio_io_close(io); /* repeated close must be harmless */
+    }
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(!!fio_io_is_open(io) == !closing,
+               "dirty writes must not close an IO without a close request");
+    char buf[8];
+    ssize_t len = fio_sock_read(fds[1], buf, sizeof(buf));
+    FIO_ASSERT(len == 4 && !FIO_MEMCMP(buf, "tail", 4),
+               "earlier ready task must not discard final accepted write");
+    fio_io_close(io); /* close dirty-only control, or repeat after draining */
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(!(io->flags & FIO___IO_FLAG_OPEN),
+               "graceful close must finish after write tasks drain");
+    fio_io_free(io);
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(fio_sock_read(fds[1], buf, sizeof(buf)) == 0 &&
+                   test_io_close_order_calls == closing + 1,
+               "close ordering must deliver EOF and one close callback");
+    fio_sock_close(fds[1]);
+  }
+}
+
+static void test_io_open_predicate(void) {
+  fio_io_s io = {0};
+  FIO_ASSERT(!fio_io_is_open(&io), "zeroed IO must not report open");
+  io.flags = FIO___IO_FLAG_OPEN | FIO___IO_FLAG_SUSPENDED;
+  FIO_ASSERT(fio_io_is_open(&io), "suspended open IO must report open");
+  const uint32_t closing[] = {FIO___IO_FLAG_CLOSE,
+                              FIO___IO_FLAG_CLOSE_REMOTE,
+                              FIO___IO_FLAG_CLOSE_ERROR};
+  for (size_t i = 0; i < sizeof(closing) / sizeof(closing[0]); ++i) {
+    io.flags = FIO___IO_FLAG_OPEN | closing[i];
+    FIO_ASSERT(!fio_io_is_open(&io),
+               "IO with closing flag %u must not report open",
+               closing[i]);
+  }
+}
+
 /* *****************************************************************************
 Main entry point
 ***************************************************************************** */
@@ -1469,6 +1546,8 @@ int main(void) {
   fprintf(stderr, "=== IO API / types / reactor tests ===\n");
 
   test_io_reactor_state();
+  test_io_open_predicate();
+  test_io_close_write_order();
   test_io_noop_and_protocol_set_init();
   test_io_defer();
   test_io_protocol_each();

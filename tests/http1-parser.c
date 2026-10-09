@@ -151,7 +151,7 @@ static void test_lf_only(void) {
 
 static void test_leading_whitespace(void) {
   fprintf(stderr, "  * leading whitespace in request line\n");
-  char req[] = "    GET / HTTP/1.1\r\n\r\n";
+  char req[] = "    GET / HTTP/1.1\r\nHost: x\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result != FIO_HTTP1_PARSER_ERROR,
@@ -185,7 +185,7 @@ static void test_response_line(void) {
 
 static void test_content_length_body(void) {
   fprintf(stderr, "  * Content-Length body\n");
-  char req[] = "POST / HTTP/1.1\r\n"
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\n"
                "Content-Length: 5\r\n"
                "\r\n"
                "Hello";
@@ -204,7 +204,7 @@ static void test_content_length_fragmented(void) {
   fprintf(stderr, "  * Content-Length fragmented input\n");
   fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
   parser_state_s st = {0};
-  char part1[] = "POST / HTTP/1.1\r\nContent-Length: 11\r\n\r\nHel";
+  char part1[] = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 11\r\n\r\nHel";
   char part2[] = "lo World!";
   size_t r1 = run_parse_persist(&st, &parser, (char *)part1, sizeof(part1) - 1);
   size_t r2 = run_parse_persist(&st, &parser, (char *)part2, sizeof(part2) - 1);
@@ -218,7 +218,7 @@ static void test_content_length_fragmented(void) {
 
 static void test_empty_content_length_rejected(void) {
   fprintf(stderr, "  * empty Content-Length rejected\n");
-  char req[] = "GET / HTTP/1.1\r\nContent-Length: \r\n\r\n";
+  char req[] = "GET / HTTP/1.1\r\nHost: x\r\nContent-Length: \r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -227,7 +227,7 @@ static void test_empty_content_length_rejected(void) {
 
 static void test_huge_content_length_rejected(void) {
   fprintf(stderr, "  * huge Content-Length rejected\n");
-  char req[] = "GET / HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n";
+  char req[] = "GET / HTTP/1.1\r\nHost: x\r\nContent-Length: 99999999999999999999\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -236,7 +236,7 @@ static void test_huge_content_length_rejected(void) {
 
 static void test_cl_te_conflict_rejected(void) {
   fprintf(stderr, "  * Content-Length + Transfer-Encoding conflict rejected\n");
-  char req[] = "POST / HTTP/1.1\r\n"
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\n"
                "Content-Length: 5\r\n"
                "Transfer-Encoding: chunked\r\n"
                "\r\n"
@@ -254,7 +254,7 @@ static void test_cl_te_conflict_rejected(void) {
 
 static void test_chunked_body(void) {
   fprintf(stderr, "  * chunked body\n");
-  char req[] = "POST / HTTP/1.1\r\n"
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\n"
                "Transfer-Encoding: chunked\r\n"
                "\r\n"
                "5\r\nHello\r\n"
@@ -273,7 +273,7 @@ static void test_chunked_fragmented(void) {
   fprintf(stderr, "  * chunked fragmented input\n");
   fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
   parser_state_s st = {0};
-  char part1[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+  char part1[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n";
   char part2[] = "5\r\nHel";
   char part3[] = "lo\r\n0\r\n\r\n";
   size_t r1 = run_parse_persist(&st, &parser, (char *)part1, sizeof(part1) - 1);
@@ -294,7 +294,7 @@ static void test_chunked_fragmented(void) {
 
 static void test_bad_chunk_size_rejected(void) {
   fprintf(stderr, "  * bad chunk size rejected\n");
-  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n";
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nZZZ\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -303,7 +303,7 @@ static void test_bad_chunk_size_rejected(void) {
 
 static void test_negative_chunk_rejected(void) {
   fprintf(stderr, "  * negative chunk size rejected\n");
-  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\n";
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n-1\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -318,7 +318,7 @@ static void test_negative_chunk_rejected(void) {
 static void test_nul_in_uri_rejected(void) {
   fprintf(stderr, "  * NUL in URI rejected\n");
   char prefix[] = "GET /pa";
-  char suffix[] = "th HTTP/1.1\r\n\r\n";
+  char suffix[] = "th HTTP/1.1\r\nHost: x\r\n\r\n";
   size_t total = (sizeof(prefix) - 1) + 1 + (sizeof(suffix) - 1);
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, total, 0);
   FIO_ASSERT_ALLOC(buf);
@@ -351,7 +351,7 @@ static void test_nul_in_header_rejected(void) {
 
 static void test_missing_colon_rejected(void) {
   fprintf(stderr, "  * header missing colon rejected\n");
-  char req[] = "GET / HTTP/1.1\r\nHost\r\n\r\n";
+  char req[] = "GET / HTTP/1.1\r\nHost: x\r\nHost\r\n\r\n";
   parser_state_s st = {0};
   size_t result = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(result == FIO_HTTP1_PARSER_ERROR,
@@ -362,12 +362,14 @@ static void test_many_headers(void) {
   fprintf(stderr, "  * many headers accepted\n");
   size_t header_len = 6;
   size_t count = 1000;
-  size_t total = 14 + count * header_len + 2;
+  static const char first[] = "GET / HTTP/1.1\r\nHost: x\r\n";
+  const size_t first_len = sizeof(first) - 1;
+  size_t total = first_len + count * header_len + 2;
   char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, total, 0);
   FIO_ASSERT_ALLOC(buf);
-  FIO_MEMCPY(buf, "GET / HTTP/1.1\r\n", 14);
+  FIO_MEMCPY(buf, first, first_len);
   for (size_t i = 0; i < count; i++)
-    FIO_MEMCPY(buf + 14 + i * header_len, "H: v\r\n", header_len);
+    FIO_MEMCPY(buf + first_len + i * header_len, "H: v\r\n", header_len);
   FIO_MEMCPY(buf + total - 2, "\r\n", 2);
   parser_state_s st = {0};
   size_t result = run_parse(&st, buf, total);
@@ -489,7 +491,7 @@ static void test_whitespace_only_buffer(void) {
  */
 static void test_te_separator_only_prefix(void) {
   fprintf(stderr, "  * TE separator-only prefix (',chunked')\n");
-  char req[] = "POST / HTTP/1.1\r\nTransfer-Encoding: ,chunked\r\n\r\n0\r\n\r\n";
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: ,chunked\r\n\r\n0\r\n\r\n";
   parser_state_s st = {0};
   size_t r = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR, "te prefix: parser returned error");
@@ -506,7 +508,7 @@ static void test_te_separator_only_prefix(void) {
  */
 static void test_content_length_underscore_rejected(void) {
   fprintf(stderr, "  * Content-Length with '_' separator rejected\n");
-  char req[] = "POST / HTTP/1.1\r\nContent-Length: 1_0\r\n\r\n";
+  char req[] = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 1_0\r\n\r\n";
   parser_state_s st = {0};
   size_t r = run_parse(&st, (char *)req, sizeof(req) - 1);
   FIO_ASSERT(r == FIO_HTTP1_PARSER_ERROR,
@@ -521,12 +523,12 @@ static void test_content_length_underscore_rejected(void) {
  */
 static void test_chunk_size_non_rfc_rejected(void) {
   fprintf(stderr, "  * chunk size '0x' prefix / '_' separator rejected\n");
-  char req1[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n0x10\r\n";
+  char req1[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n0x10\r\n";
   parser_state_s st1 = {0};
   size_t r1 = run_parse(&st1, (char *)req1, sizeof(req1) - 1);
   FIO_ASSERT(r1 == FIO_HTTP1_PARSER_ERROR,
              "chunk size '0x10': should be a parse error");
-  char req2[] = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n1_0\r\n";
+  char req2[] = "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n1_0\r\n";
   parser_state_s st2 = {0};
   size_t r2 = run_parse(&st2, (char *)req2, sizeof(req2) - 1);
   FIO_ASSERT(r2 == FIO_HTTP1_PARSER_ERROR,
@@ -548,7 +550,7 @@ static void test_expect_100_continue(void) {
   fprintf(stderr, "  * expect: 100-continue\n");
   { /* no Expect header: never fires (GET, POST with body) */
     char get[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
-    char post[] = "POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi";
+    char post[] = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\nhi";
     parser_state_s st = {0};
     run_parse(&st, get, sizeof(get) - 1);
     FIO_ASSERT(st.complete && !st.expect, "expect: GET without Expect fired");
@@ -557,7 +559,7 @@ static void test_expect_100_continue(void) {
     FIO_ASSERT(st.complete && !st.expect, "expect: POST without Expect fired");
   }
   { /* Expect on a request that may not have a body: never fires */
-    char get[] = "GET / HTTP/1.1\r\nExpect: 100-continue\r\n\r\n";
+    char get[] = "GET / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n\r\n";
     parser_state_s st = {0};
     size_t r = run_parse(&st, get, sizeof(get) - 1);
     FIO_ASSERT(r == sizeof(get) - 1 && st.complete,
@@ -565,7 +567,7 @@ static void test_expect_100_continue(void) {
     FIO_ASSERT(!st.expect, "expect: GET with Expect must not fire");
   }
   { /* Expect with a Content-Length body: fires once */
-    char post[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+    char post[] = "POST / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
                   "Content-Length: 2\r\n\r\nhi";
     parser_state_s st = {0};
     size_t r = run_parse(&st, post, sizeof(post) - 1);
@@ -574,7 +576,7 @@ static void test_expect_100_continue(void) {
     FIO_ASSERT(st.expect == 1, "expect: POST should fire once (%d)", st.expect);
   }
   { /* Expect with a chunked body + trailer: fires once, not again */
-    char post[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+    char post[] = "POST / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
                   "Transfer-Encoding: chunked\r\n\r\n"
                   "2\r\nhi\r\n0\r\nX-Trailer: 1\r\n\r\n";
     parser_state_s st = {0};
@@ -586,9 +588,9 @@ static void test_expect_100_continue(void) {
                st.expect);
   }
   { /* flag does not leak into the next message on a persistent parser */
-    char msgs[] = "POST / HTTP/1.1\r\nExpect: 100-continue\r\n"
+    char msgs[] = "POST / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
                   "Content-Length: 1\r\n\r\na"
-                  "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\nb";
+                  "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 1\r\n\r\nb";
     fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
     parser_state_s st = {0};
     size_t r = run_parse_persist(&st, &parser, msgs, sizeof(msgs) - 1);
@@ -743,6 +745,96 @@ static void test_no_body_messages(void) {
 #undef TEST_LIT
 
 /* ===========================================================================
+   Transfer-Encoding and Host rules (RFC 9112 §3.2, §6.3, §7)
+
+   A request Transfer-Encoding whose final coding isn't a single `chunked`
+   can't be framed: rejecting it prevents the body from being parsed as the
+   next (smuggled) request. HTTP/1.1 requests need exactly one Host header.
+   ===========================================================================
+ */
+
+static void test_te_and_host_rules(void) {
+  fprintf(stderr, "  * Transfer-Encoding / Host framing rules\n");
+  static const struct {
+    const char *msg;
+    int ok;
+    size_t body;
+  } cases[] = {
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked, gzip\r\n\r\n",
+       0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n", 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: identity\r\n\r\n", 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunk\r\n\r\n", 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding:\r\n\r\n", 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked, "
+       "chunked\r\n\r\n0\r\n\r\n",
+       0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: CHUNKED ; a=1, gzip, "
+       "chunked\r\n\r\n0\r\n\r\n",
+       0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
+       "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+       0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
+       "Transfer-Encoding: gzip\r\n\r\n0\r\n\r\n",
+       0},
+      {"GET / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n", 0},
+      /* `gzip, chunked` is framed by chunked (gzip forwarded to the app) */
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip, "
+       "chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+       1,
+       2},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n"
+       "Transfer-Encoding: Chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
+       1,
+       2},
+      /* Host: required once for HTTP/1.1, optional for HTTP/1.0 */
+      {"GET / HTTP/1.1\r\n\r\n", 0},
+      {"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi", 0},
+      {"GET / HTTP/1.1\r\nHost: a\r\nHost: a\r\n\r\n", 0},
+      {"GET / HTTP/1.1\r\nHost:\r\n\r\n", 1},
+      {"GET / HTTP/2.0\r\n\r\n", 0},
+      {"GET / HTTP/1.0\r\n\r\n", 1},
+      {"GET / HTTP/0.9\r\n\r\n", 0}, /* not legacy: HTTP/1.1 semantics */
+      {"GET /\r\n\r\n", 0},          /* HTTP/0.9 request line */
+      {"GET / HTTP/1.0\r\nHost: a\r\nHost: b\r\n\r\n", 0},
+      /* responses never require a Host header */
+      {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 1, 2},
+      {"HTTP/1.1 200 OK\r\nHost: a\r\nHost: b\r\n\r\n", 1},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    char buf[256];
+    const size_t len = strlen(cases[i].msg);
+    FIO_ASSERT(len < sizeof(buf), "te/host case %zu too long", i);
+    FIO_MEMCPY(buf, cases[i].msg, len);
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, buf, len);
+    if (!cases[i].ok) {
+      FIO_ASSERT(r == FIO_HTTP1_PARSER_ERROR && !st.complete,
+                 "te/host case %zu should be rejected:\n%s",
+                 i,
+                 cases[i].msg);
+      continue;
+    }
+    FIO_ASSERT(r == len && st.complete && st.body_len == cases[i].body,
+               "te/host case %zu should complete (r=%zu body=%zu):\n%s",
+               i,
+               r,
+               st.body_len,
+               cases[i].msg);
+  }
+  FIO_ASSERT(fio_http1_version_is_legacy(FIO_BUF_INFO1((char *)"HTTP/1.0")) &&
+                 !fio_http1_version_is_legacy(FIO_BUF_INFO1((char *)"HTTP/0.9")) &&
+                 !fio_http1_version_is_legacy(FIO_BUF_INFO1((char *)"HTTP/1.")) &&
+                 !fio_http1_version_is_legacy(
+                     FIO_BUF_INFO1((char *)"HTTP/1.1")) &&
+                 !fio_http1_version_is_legacy(
+                     FIO_BUF_INFO1((char *)"HTTP/1.01")) &&
+                 !fio_http1_version_is_legacy(FIO_BUF_INFO1((char *)"http/1.0")),
+             "fio_http1_version_is_legacy mismatch");
+}
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -775,6 +867,7 @@ int main(void) {
   test_chunk_size_non_rfc_rejected();
   test_expect_100_continue();
   test_no_body_messages();
+  test_te_and_host_rules();
   fprintf(stderr, "All HTTP/1 parser tests passed!\n");
   return 0;
 }
