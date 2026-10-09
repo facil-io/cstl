@@ -2303,8 +2303,45 @@ FIO_SFUNC int fio____http_write_upgraded(fio_http_s *h,
   return 0;
 }
 
+/* Internal state: the response omits all content (HEAD / no-content status).
+ * Set once by `fio____http_write_start`; body writes are then discarded and
+ * the response is never streamed, so controllers never frame a body. */
+#define FIO___HTTP_STATE_NO_CONTENT 128
+
+/* Responses that never carry content: 1xx, 204, 205, 304 (RFC 9110 §15). */
+FIO_IFUNC int fio___http_status_has_no_content(size_t status) {
+  return ((status - 100) < 100) | (status == 204) | (status == 205) |
+         (status == 304);
+}
+
+/* Framing headers for a response without content (no streaming / coding). */
+FIO_SFUNC void fio___http_no_content_headers(fio_http_s *h,
+                                             fio___http_hmap_s *hdrs) {
+  fio___http_hmap_set2(hdrs,
+                       FIO_STR_INFO2((char *)"transfer-encoding", 17),
+                       FIO_STR_INFO0,
+                       -1);
+  if (h->status == 304) /* may describe the selected representation (§8.6) */
+    return;
+  /* 1xx / 204 MUST NOT send Content-Length (§8.6); 205 MUST indicate zero
+   * length (§15.3.6) - any other value would desynchronize the client. */
+  fio___http_hmap_set2(hdrs,
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       (h->status == 205) ? FIO_STR_INFO2((char *)"0", 1)
+                                          : FIO_STR_INFO0,
+                       -1);
+}
+
 FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
+  /* no content and no finish: nothing to frame yet. The response (headers,
+   * Content-Length vs. streaming) starts with the first body data or finish,
+   * so an empty stream becomes a `content-length: 0` response. */
+  if (!args->len && !args->finish && (uint32_t)(args->fd + 1) <= 1U) {
+    if (args->dealloc && args->buf)
+      args->dealloc((void *)args->buf);
+    return 0;
+  }
   /* if response has an `etag` header matching `if-none-match`, skip */
   fio___http_hmap_s *hdrs = h->headers + (!!h->status);
   if (h->status) {
@@ -2320,6 +2357,17 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
         FIO_STR_INFO2((char *)"date", 4),
         fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
         0);
+    if (FIO_UNLIKELY(fio___http_status_has_no_content(h->status))) {
+      h->state |= FIO___HTTP_STATE_NO_CONTENT;
+      fio___http_no_content_headers(h, hdrs);
+      goto send_headers; /* never compressed, framed or streamed */
+    }
+    { /* HEAD: GET's headers, no content (RFC 9110 §9.3.2) */
+      fio_str_info_s m = fio_keystr_info(&h->method);
+      if (FIO_UNLIKELY(m.len == 4 && (fio_buf2u32u(m.buf) | 0x20202020UL) ==
+                                         fio_buf2u32u("head")))
+        h->state |= FIO___HTTP_STATE_NO_CONTENT;
+    }
   }
 #if 1
   if (args->finish &&
@@ -2441,10 +2489,11 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       v.len = fio_digits10u(args->len);
       fio_ltoa10u(v.buf, args->len, v.len);
       fio___http_hmap_set2(hdrs, k, v, -1);
-    } else {
+    } else if (!(h->state & FIO___HTTP_STATE_NO_CONTENT)) {
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
+send_headers:
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
@@ -2452,8 +2501,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
 
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
-  int r = (int)0 - (int)((unsigned)(h->status == 204) | (h->status == 205) |
-                         (h->status == 304));
+  int r = 0 - !!(h->state & FIO___HTTP_STATE_NO_CONTENT);
   if (!r) {
     h->controller->write_body(h, *args);
     h->sent += args->len;

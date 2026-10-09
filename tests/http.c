@@ -2061,14 +2061,12 @@ static void test_http_close_server_on_http(fio_http_s *h) {
   if (path.len != strlen(expected) || FIO_MEMCMP(path.buf, expected, path.len))
     test_http_close.bad_path = 1;
   fio_http_status_set(h, 200);
-  /* Use the allocating chunk builder to isolate close/drain behavior from the
-   * separate large no-copy first-chunk framing defect. Keep the 4 MiB payload.
-   */
+  /* Large no-copy chunks (the first one follows the pending headers). */
   for (size_t i = 0; i < TEST_HTTP_CLOSE_CHUNKS; ++i)
     fio_http_write(h,
                    .buf = test_http_close_chunk,
                    .len = sizeof(test_http_close_chunk),
-                   .copy = 1);
+                   .copy = 0);
   fio_http_write(h,
                  .buf = test_http_close_tail,
                  .len = sizeof(test_http_close_tail) - 1,
@@ -2421,7 +2419,7 @@ static struct {
   int overflow;
   char paths[256];
   char te[64];
-  char wire[16384];
+  char wire[98304];
 } test_h1f;
 
 static void test_h1f_server_on_http(fio_http_s *h) {
@@ -2437,6 +2435,66 @@ static void test_h1f_server_on_http(fio_http_s *h) {
     strcat(test_h1f.paths, ";");
   }
   fio_http_status_set(h, 200);
+  if (path.len == 4 && !FIO_MEMCMP(path.buf, "/big", 4)) {
+    /* `/big?<pad>`: header padding moves the header buffer's spare capacity */
+    static char big[70000];
+    fio_str_info_s q = fio_http_query(h);
+    char *pos = q.buf;
+    size_t pad = q.len ? (size_t)fio_atol10u(&pos) : 0;
+    char padding[64];
+    FIO_MEMSET(big, 'B', sizeof(big));
+    FIO_MEMSET(padding, 'p', sizeof(padding));
+    if (pad && pad < sizeof(padding))
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"x-pad"),
+                                   FIO_STR_INFO2(padding, pad));
+    fio_http_write(h, .buf = big, .len = sizeof(big), .copy = 0);
+    fio_http_write(h, .buf = "end", .len = 3, .copy = 1, .finish = 1);
+    return;
+  }
+  if (path.len > 8 && !FIO_MEMCMP(path.buf, "/status/", 8)) {
+    /* `/status/<code>?<mode>`: modes `app` (app framing headers), `stream` */
+    char *pos = path.buf + 8;
+    fio_str_info_s mode = fio_http_query(h);
+    fio_http_status_set(h, (size_t)fio_atol10u(&pos));
+    if (mode.len == 3 && !FIO_MEMCMP(mode.buf, "app", 3)) {
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"content-length"),
+                                   FIO_STR_INFO1((char *)"7"));
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"transfer-encoding"),
+                                   FIO_STR_INFO1((char *)"chunked"));
+    }
+    if (mode.len == 5 && !FIO_MEMCMP(mode.buf, "empty", 5)) {
+      fio_http_write(h, .buf = "", .len = 0, .copy = 1);
+      fio_http_write(h, .len = 0);
+      fio_http_finish(h);
+      return;
+    }
+    if (mode.len == 4 && !FIO_MEMCMP(mode.buf, "late", 4)) {
+      /* an empty write doesn't start the response: headers stay open */
+      fio_http_write(h, .len = 0);
+      fio_http_response_header_set(h,
+                                   FIO_STR_INFO1((char *)"x-late"),
+                                   FIO_STR_INFO1((char *)"1"));
+      fio_http_write(h, .buf = "xy", .len = 2, .copy = 1, .finish = 1);
+      return;
+    }
+    if (mode.len == 11 && !FIO_MEMCMP(mode.buf, "emptystream", 11)) {
+      fio_http_write(h, .len = 0);
+      fio_http_write(h, .buf = "ab", .len = 2, .copy = 1);
+      fio_http_write(h, .len = 0);
+      fio_http_finish(h);
+      return;
+    }
+    if (mode.len == 6 && !FIO_MEMCMP(mode.buf, "stream", 6)) {
+      fio_http_write(h, .buf = "ab", .len = 2, .copy = 1);
+      fio_http_write(h, .buf = "cd", .len = 2, .copy = 1, .finish = 1);
+      return;
+    }
+    fio_http_write(h, .buf = "body", .len = 4, .copy = 1, .finish = 1);
+    return;
+  }
   if (path.len == 7 && !FIO_MEMCMP(path.buf, "/stream", 7)) {
     fio_http_write(h, .buf = "a", .len = 1, .copy = 1);
     fio_http_write(h, .buf = "b", .len = 1, .copy = 1);
@@ -2531,6 +2589,8 @@ static void test_http_server_h1_framing(void) {
     const char *excludes; /* optional forbidden wire substring */
     const char *tail;     /* optional wire suffix */
     const char *te;       /* request transfer-encoding seen by the app */
+    const char *excludes2; /* optional forbidden wire substrings */
+    const char *excludes3;
   } cases[] = {
       {"TE chunked, gzip",
        TEST_H1F_SMUGGLE("chunked, gzip"),
@@ -2614,6 +2674,162 @@ static void test_http_server_h1_framing(void) {
        NULL,
        "transfer-encoding",
        "\r\n\r\nabcd"},
+#define TEST_H1F_STATUS(code, mode)                                            \
+  "GET /status/" code mode " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+      /* RFC 9110 §8.6 / §15: responses without content are never framed */
+      {"204 drops content-length (body ignored)",
+       TEST_H1F_STATUS("204", ""),
+       "HTTP/1.1 204 ",
+       "/status/204;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding",
+       .excludes3 = "body"},
+      {"204 strips app content-length / transfer-encoding",
+       TEST_H1F_STATUS("204", "?app"),
+       "HTTP/1.1 204 ",
+       "/status/204;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding"},
+      {"204 stream is never chunked",
+       TEST_H1F_STATUS("204", "?stream"),
+       "HTTP/1.1 204 ",
+       "/status/204;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding",
+       .excludes3 = "\r\n\r\n0"},
+      {"1xx (103) drops content-length",
+       TEST_H1F_STATUS("103", "?app"),
+       "HTTP/1.1 103 ",
+       "/status/103;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding"},
+      {"304 adds no automatic content-length",
+       TEST_H1F_STATUS("304", ""),
+       "HTTP/1.1 304 ",
+       "/status/304;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding",
+       .excludes3 = "body"},
+      {"304 keeps app content-length",
+       TEST_H1F_STATUS("304", "?app"),
+       "HTTP/1.1 304 ",
+       "/status/304;",
+       1,
+       "content-length:7\r\n",
+       NULL,
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding"},
+      {"304 stream is never chunked",
+       TEST_H1F_STATUS("304", "?stream"),
+       "HTTP/1.1 304 ",
+       "/status/304;",
+       1,
+       NULL,
+       "content-length",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding",
+       .excludes3 = "\r\n\r\n0"},
+      {"205 always declares zero length",
+       TEST_H1F_STATUS("205", "?app"),
+       "HTTP/1.1 205 ",
+       "/status/205;",
+       1,
+       "content-length:0\r\n",
+       "content-length:7",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding"},
+      {"205 body is never declared",
+       TEST_H1F_STATUS("205", ""),
+       "HTTP/1.1 205 ",
+       "/status/205;",
+       1,
+       "content-length:0\r\n",
+       "body",
+       "\r\n\r\n"},
+      {"HEAD response sends no body",
+       "HEAD /plain HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+       "HTTP/1.1 200 ",
+       "/plain;",
+       1,
+       "content-length:2\r\n",
+       "\r\n\r\nok",
+       "\r\n\r\n"},
+      {"HEAD streamed response sends no chunks",
+       "HEAD /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+       "HTTP/1.1 200 ",
+       "/stream;",
+       1,
+       NULL,
+       "transfer-encoding",
+       "\r\n\r\n",
+       .excludes2 = "\r\n\r\n01",
+       .excludes3 = "\r\n\r\n0\r\n"},
+      {"HEAD large no-copy stream sends no chunks",
+       "HEAD /big HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+       "HTTP/1.1 200 ",
+       "/big;",
+       1,
+       NULL,
+       "BBBB",
+       "\r\n\r\n",
+       .excludes2 = "transfer-encoding"},
+      {"200 empty stream is sent with content-length:0",
+       TEST_H1F_STATUS("200", "?empty"),
+       "HTTP/1.1 200 ",
+       "/status/200;",
+       1,
+       "content-length:0\r\n",
+       "transfer-encoding",
+       "\r\n\r\n",
+       .excludes2 = "\r\n\r\n0\r\n"},
+      {"200 empty write keeps headers open (content-length)",
+       TEST_H1F_STATUS("200", "?late"),
+       "HTTP/1.1 200 ",
+       "/status/200;",
+       1,
+       "x-late:1\r\n",
+       "transfer-encoding",
+       "content-length:2\r\n\r\nxy"},
+      {"200 stream starts with body data (empty writes skipped)",
+       TEST_H1F_STATUS("200", "?emptystream"),
+       "HTTP/1.1 200 ",
+       "/status/200;",
+       1,
+       "transfer-encoding: chunked\r\n\r\n02\r\nab\r\n0\r\n\r\n",
+       "content-length",
+       "\r\n\r\n02\r\nab\r\n0\r\n\r\n"},
+#define TEST_H1F_BIG(pad)                                                      \
+  {"200 large no-copy first chunk (pad " pad ")",                              \
+   "GET /big?" pad " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",        \
+   "HTTP/1.1 200 ",                                                            \
+   "/big;",                                                                    \
+   1,                                                                          \
+   "\r\n\r\n011170\r\nBBBB",                                                   \
+   NULL,                                                                       \
+   "BBBB\r\n03\r\nend\r\n0\r\n\r\n"}
+      TEST_H1F_BIG("0"), TEST_H1F_BIG("1"), TEST_H1F_BIG("2"),
+      TEST_H1F_BIG("3"), TEST_H1F_BIG("4"), TEST_H1F_BIG("5"),
+      TEST_H1F_BIG("6"), TEST_H1F_BIG("7"), TEST_H1F_BIG("8"),
+      TEST_H1F_BIG("9"), TEST_H1F_BIG("10"), TEST_H1F_BIG("11"),
+      TEST_H1F_BIG("12"), TEST_H1F_BIG("13"), TEST_H1F_BIG("14"),
+      TEST_H1F_BIG("15"), TEST_H1F_BIG("16"), TEST_H1F_BIG("17"),
+#undef TEST_H1F_BIG
+#undef TEST_H1F_STATUS
       {"HTTP/1.1 control (persistent, chunked stream)",
        "GET /plain HTTP/1.1\r\nHost: x\r\n\r\n"
        "GET /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
@@ -2699,6 +2915,15 @@ static void test_http_server_h1_framing(void) {
                "%s: unexpected \"%s\":\n%s",
                cases[i].name,
                cases[i].excludes,
+               test_h1f.wire);
+    FIO_ASSERT((!cases[i].excludes2 ||
+                !strstr(test_h1f.wire, cases[i].excludes2)) &&
+                   (!cases[i].excludes3 ||
+                    !strstr(test_h1f.wire, cases[i].excludes3)),
+               "%s: unexpected \"%s\" / \"%s\":\n%s",
+               cases[i].name,
+               cases[i].excludes2 ? cases[i].excludes2 : "",
+               cases[i].excludes3 ? cases[i].excludes3 : "",
                test_h1f.wire);
     FIO_ASSERT(!cases[i].tail || test_h1f_ends_with(cases[i].tail),
                "%s: wire must end with the body:\n%s",

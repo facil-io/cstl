@@ -826,10 +826,30 @@ void fio_http_write(fio_http_s *h, fio_http_write_args_s args);
 
 `fio_http_write` sends headers on the first write and then writes body data. If
 `finish` is set, the response is complete. Without `finish`, the response is a
-stream. HTTP/1.1 streams use `transfer-encoding: chunked`; HTTP/1.0 responses
+stream. A finished response without an explicit `content-length` header gets
+one automatically. The response starts with the first write that carries body
+data (a buffer or a file) or `finish`: an empty write without `finish` is a
+no-op, so headers can still be set, and a response that is finished without
+any body data is sent with `content-length: 0` rather than as an empty
+chunked stream. HTTP/1.1 streams use `transfer-encoding: chunked`; HTTP/1.0 responses
 never use a transfer coding (RFC 9112 §6.1), so an HTTP/1.0 stream is sent
 unframed and delimited by closing the connection, even if `keep-alive` was
-requested. File writes use `fd` and `offset`; the file descriptor is always closed
+requested.
+
+Responses without content (`1xx`, `204`, `205`, `304`, RFC 9110 §15) never
+send body data, are never streamed or compressed, and never send
+`transfer-encoding` (an application-provided value is removed). Their
+`content-length` follows RFC 9110 §8.6:
+
+- `1xx` / `204`: removed, never added.
+- `205`: always `content-length: 0` (§15.3.6), replacing any other value.
+- `304`: an application-provided value is kept (it describes the selected
+  representation); none is added automatically.
+
+Responses to `HEAD` requests send the headers a `GET` would (a finished
+response still gets its automatic `content-length`), but never send content
+(RFC 9110 §9.3.2): body writes are discarded and the response is never
+streamed (no `transfer-encoding: chunked`). File writes use `fd` and `offset`; the file descriptor is always closed
 by the write path.
 
 On upgraded handles, `fio_http_write` routes through the WebSocket or SSE

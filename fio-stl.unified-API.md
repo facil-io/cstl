@@ -493,16 +493,6 @@ PATCH version: Bug fixes, minor features may be added.
 
 _Symbol type:_ `macro`
 
-#### `FIO_VERSION_BUILD`
-
-```c
-#define FIO_VERSION_BUILD "rc.03"
-```
-
-Build version: optional build info (string), i.e. "beta.02"
-
-_Symbol type:_ `macro`
-
 #### `FIO_VERSION_STRING`
 
 ```c
@@ -513,6 +503,16 @@ _Symbol type:_ `macro`
 ```
 
 Version as a String literal (MACRO).
+
+_Symbol type:_ `macro`
+
+#### `FIO_VERSION_BUILD`
+
+```c
+#define FIO_VERSION_BUILD ""
+```
+
+
 
 _Symbol type:_ `macro`
 
@@ -25765,10 +25765,13 @@ _Symbol type:_ `function`
 #### `fio_queue_workers_stop`
 
 ```c
-void fio_queue_workers_stop(fio_queue_s *q)
+size_t fio_queue_workers_stop(fio_queue_s *q)
 ```
 
 Signals all worker threads to stop performing tasks and terminate.
+
+Returns the number of worker groups signaled. Does NOT wait and does NOT
+promise that pending tasks are performed.
 
 _Symbol type:_ `function`
 
@@ -25779,6 +25782,8 @@ void fio_queue_workers_join(fio_queue_s *q)
 ```
 
 Signals all worker threads to stop, waiting for them to complete.
+
+If the queue had workers, pending tasks are performed before returning.
 
 _Symbol type:_ `function`
 

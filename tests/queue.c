@@ -240,7 +240,8 @@ FIO_SFUNC void test_queue_workers_noop_without_consumers(void) {
   fio_queue_s q;
   fio_queue_init(&q);
   /* stop / wake / join on a queue that never had workers must be no-ops */
-  fio_queue_workers_stop(&q);
+  FIO_ASSERT(!fio_queue_workers_stop(&q),
+             "fio_queue_workers_stop should report no worker groups");
   fio_queue_workers_wake(&q);
   fio_queue_workers_join(&q);
   uintptr_t counter = 0;
@@ -289,7 +290,8 @@ FIO_SFUNC void test_queue_workers_basic(void) {
   fio_queue_workers_wake(q); /* must be safe while workers are idle */
 
   /* teardown */
-  fio_queue_workers_stop(q);
+  FIO_ASSERT(fio_queue_workers_stop(q) == 1,
+             "fio_queue_workers_stop should report one worker group");
   fio_queue_workers_join(q);
   fio___queue_workers_assert_lifecycle(started + 4, ended + 4);
 
@@ -490,6 +492,73 @@ FIO_SFUNC void test_queue_workers_destroy_teardown(void) {
   fio___queue_workers_assert_lifecycle(started + 3, ended + 3);
 }
 
+/* Destroying a queue without workers must NOT perform pending tasks: a full
+   queue may be discarded. Uses several ring buffers to exercise freeing. */
+FIO_SFUNC void test_queue_destroy_discards_without_workers(void) {
+  fio_queue_s q;
+  fio_queue_init(&q);
+  uintptr_t counter = 0;
+  for (size_t i = 0; i < FIO___QUEUE_TEST_COUNT; ++i)
+    FIO_ASSERT(!fio_queue_push(&q, fio___queue_increment_task, &counter, NULL),
+               "push failed");
+  FIO_ASSERT(!fio_queue_push_urgent(&q, fio___queue_increment_task, &counter),
+             "urgent push failed");
+  fio_queue_destroy(&q);
+  FIO_ASSERT(!counter, "destroy without workers performed tasks (%zu)",
+             (size_t)counter);
+  FIO_ASSERT(!fio_queue_count(&q), "queue not empty after destroy");
+  /* queue is re-initialized and remains usable */
+  FIO_ASSERT(!fio_queue_push(&q, fio___queue_increment_task, &counter, NULL),
+             "push after destroy failed");
+  fio_queue_perform_all(&q);
+  FIO_ASSERT(counter == 1, "queue unusable after destroying a full queue");
+  fio_queue_destroy(&q);
+}
+
+/* `fio_queue_workers_join` on a queue with workers must drain pending tasks,
+   even when called right after pushing (no waiting for the workers). */
+FIO_SFUNC void test_queue_workers_join_drains(void) {
+  const uintptr_t total = FIO___QUEUE_TEST_COUNT * 4;
+  fio_queue_s q;
+  fio_queue_init(&q);
+  uintptr_t started = fio___queue_workers_load(&fio___queue_workers_started);
+  uintptr_t ended = fio___queue_workers_load(&fio___queue_workers_ended);
+  FIO_ASSERT(!fio_queue_workers_add(&q, 2), "fio_queue_workers_add failed");
+  fio___queue_workers_test_s info = {.total = total};
+  for (uintptr_t i = 1; i <= total; ++i)
+    FIO_ASSERT(!fio_queue_push(&q,
+                               .fn = fio___queue_workers_counted_task,
+                               .udata1 = (void *)i,
+                               .udata2 = &info),
+               "push failed");
+  fio_queue_workers_join(&q);
+  FIO_ASSERT(fio___queue_workers_load(&info.done) == total,
+             "join did not drain the queue (%zu/%zu)",
+             (size_t)fio___queue_workers_load(&info.done),
+             (size_t)total);
+  FIO_ASSERT(fio___queue_workers_load(&info.sum) ==
+                 fio___queue_workers_sum_up_to(total),
+             "join drain sum mismatch - task(s) lost or performed twice");
+  FIO_ASSERT(!fio_queue_count(&q), "queue not empty after join");
+  fio___queue_workers_assert_lifecycle(started + 2, ended + 2);
+
+  /* same promise for fio_queue_destroy with active workers */
+  info = (fio___queue_workers_test_s){.total = total};
+  FIO_ASSERT(!fio_queue_workers_add(&q, 2), "fio_queue_workers_add failed");
+  for (uintptr_t i = 1; i <= total; ++i)
+    FIO_ASSERT(!fio_queue_push(&q,
+                               .fn = fio___queue_workers_counted_task,
+                               .udata1 = (void *)i,
+                               .udata2 = &info),
+               "push failed");
+  fio_queue_destroy(&q);
+  FIO_ASSERT(fio___queue_workers_load(&info.done) == total,
+             "destroy with workers did not drain the queue (%zu/%zu)",
+             (size_t)fio___queue_workers_load(&info.done),
+             (size_t)total);
+  fio___queue_workers_assert_lifecycle(started + 4, ended + 4);
+}
+
 int main(void) {
   fio_state_callback_add(FIO_CALL_ON_WORKER_THREAD_START,
                          fio___queue_worker_started_callback,
@@ -500,17 +569,19 @@ int main(void) {
   test_queue_basic_ordering();
   test_queue_urgent_and_recursive_tasks();
   test_timer_queue();
+  test_queue_destroy_discards_without_workers();
   test_queue_workers_noop_without_consumers();
   test_queue_workers_basic();
   test_queue_workers_backlog();
   test_queue_workers_concurrent_producers();
   test_queue_workers_repeated_cycles();
   test_queue_workers_destroy_teardown();
+  test_queue_workers_join_drains();
+  test_queue_workers_multiple_groups();
   FIO_ASSERT(fio___queue_workers_load(&fio___queue_workers_started) ==
                  fio___queue_workers_load(&fio___queue_workers_ended),
              "worker thread lifecycle leak: %zu started vs %zu ended",
              (size_t)fio___queue_workers_load(&fio___queue_workers_started),
              (size_t)fio___queue_workers_load(&fio___queue_workers_ended));
-  test_queue_workers_multiple_groups();
   return 0;
 }

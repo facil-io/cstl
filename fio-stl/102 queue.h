@@ -76,6 +76,8 @@ typedef struct {
   fio_thread_mutex_t mutex;
   fio_thread_cond_t cond;
   size_t workers;
+  /** number of workers waiting (or about to wait) on `cond`. */
+  size_t sleeping;
   volatile unsigned stop;
 } fio___thread_group_s;
 
@@ -147,10 +149,19 @@ FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q);
 /** Adds worker / consumer threads to perform the jobs in the queue. */
 SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t count);
 
-/** Signals all worker threads to stop performing tasks and terminate. */
-SFUNC void fio_queue_workers_stop(fio_queue_s *q);
+/**
+ * Signals all worker threads to stop performing tasks and terminate.
+ *
+ * Returns the number of worker groups signaled. Does NOT wait and does NOT
+ * promise that pending tasks are performed.
+ */
+SFUNC size_t fio_queue_workers_stop(fio_queue_s *q);
 
-/** Signals all worker threads to stop, waiting for them to complete. */
+/**
+ * Signals all worker threads to stop, waiting for them to complete.
+ *
+ * If the queue had workers, pending tasks are performed before returning.
+ */
 SFUNC void fio_queue_workers_join(fio_queue_s *q);
 
 /** Signals all worker threads to go back to work (new tasks added). */
@@ -305,8 +316,10 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
   while (q->r) {
     fio___task_ring_s *tmp = q->r;
     q->r = q->r->next;
-    if (tmp != &q->mem)
-      FIO_MEM_FREE_(tmp, sizeof(*tmp));
+    if (tmp == &q->mem)
+      continue;
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+    FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
   FIO___LOCK_UNLOCK(q->lock);
   FIO___LOCK_DESTROY(q->lock);
@@ -373,6 +386,28 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
   return t;
 }
 
+/* Wakes one idle worker per active worker group. Call with `q->lock` held,
+ * after `q->count` was incremented.
+ *
+ * Lost wakeup protection: a worker increments `sleeping` and then reads
+ * `q->count`, both while holding the group mutex, and keeps holding the mutex
+ * until `cond_wait` releases it. A pusher increments `q->count` and then reads
+ * `sleeping`. All are sequentially consistent atomics, so either the worker
+ * sees the task (and doesn't wait) or the pusher sees the sleeper (and signals
+ * under the mutex, which it can only acquire once the worker is waiting).
+ * Groups without sleepers are skipped, avoiding the mutex on busy queues. */
+FIO_SFUNC void fio___queue_workers_signal(fio_queue_s *q) {
+  if (!q->consumers.next || FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    if (fio_atomic_add(&pos->stop, 0) || !fio_atomic_add(&pos->sleeping, 0))
+      continue;
+    fio_thread_mutex_lock(&pos->mutex);
+    fio_thread_cond_signal(&pos->cond);
+    fio_thread_mutex_unlock(&pos->mutex);
+  }
+}
+
 int fio_queue_push___(void); /* sublime text marker */
 /** Pushes a task to the queue. Returns -1 on error. */
 SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
@@ -400,12 +435,7 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   fio_atomic_add(&q->count, 1);
-  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
-    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!fio_atomic_add(&pos->stop, 0))
-        fio_thread_cond_signal(&pos->cond);
-    }
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -436,12 +466,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   fio_atomic_add(&q->count, 1);
-  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
-    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!fio_atomic_add(&pos->stop, 0))
-        fio_thread_cond_signal(&pos->cond);
-    }
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -516,8 +541,11 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
   while (!fio_atomic_add(&grp->stop, 0)) {
     fio_queue_perform_all(grp->queue);
     fio_thread_mutex_lock(&grp->mutex);
-    if (!fio_atomic_add(&grp->stop, 0))
+    /* announce, then re-check - see `fio___queue_workers_signal` */
+    fio_atomic_add(&grp->sleeping, 1);
+    if (!fio_atomic_add(&grp->stop, 0) && !fio_queue_count(grp->queue))
       fio_thread_cond_wait(&grp->cond, &grp->mutex);
+    fio_atomic_sub(&grp->sleeping, 1);
     fio_thread_mutex_unlock(&grp->mutex);
     fio_queue_perform_all(grp->queue);
   }
@@ -594,17 +622,20 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
   return 0;
 }
 
-SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
+SFUNC size_t fio_queue_workers_stop(fio_queue_s *q) {
   if (!q)
-    return;
+    return 0;
+  size_t count = 0;
   FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     fio_atomic_or(&pos->stop, 1);
     fio_thread_mutex_lock(&pos->mutex);
     fio_thread_cond_broadcast(&pos->cond);
     fio_thread_mutex_unlock(&pos->mutex);
+    ++count;
   }
   FIO___LOCK_UNLOCK(q->lock);
+  return count;
 }
 
 /** Signals all worker threads to go back to work (new tasks added). */
@@ -612,10 +643,7 @@ SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
   if (!q)
     return;
   FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    if (!fio_atomic_add(&pos->stop, 0))
-      fio_thread_cond_signal(&pos->cond);
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
 }
 
@@ -623,8 +651,7 @@ SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
 SFUNC void fio_queue_workers_join(fio_queue_s *q) {
   if (!q)
     return;
-  uint8_t had_workers = 0;
-  fio_queue_workers_stop(q);
+  uint8_t had_workers = !!fio_queue_workers_stop(q);
   FIO___LOCK_LOCK(q->lock);
   while (q->consumers.next && q->consumers.next != &q->consumers) {
     fio___thread_group_s *pos =

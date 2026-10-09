@@ -10235,7 +10235,7 @@ Initializes `q` in place.
 SFUNC void fio_queue_destroy(fio_queue_s *q);
 ```
 
-Frees ring buffers, stops and joins workers, and re-initializes `q`. After destruction the queue may be reused, but on some platforms the lock may need explicit re-initialization.
+Frees ring buffers, stops and joins workers, and re-initializes `q`. Pending tasks are performed only if the queue has workers (see `fio_queue_workers_join`); otherwise they are discarded without being performed. After destruction the queue may be reused, but on some platforms the lock may need explicit re-initialization.
 
 #### `fio_queue_new`
 
@@ -10330,10 +10330,14 @@ Spawns `count` consumer threads that automatically perform tasks as they arrive.
 #### `fio_queue_workers_stop`
 
 ```c
-SFUNC void fio_queue_workers_stop(fio_queue_s *q);
+SFUNC size_t fio_queue_workers_stop(fio_queue_s *q);
 ```
 
 Signals all workers to stop. Returns immediately without waiting.
+
+Pending tasks may remain in the queue (they can be performed later using `fio_queue_perform_all` or discarded by `fio_queue_destroy`).
+
+**Returns:** the number of worker groups signaled (one per successful `fio_queue_workers_add` call still attached to the queue).
 
 #### `fio_queue_workers_join`
 
@@ -10342,6 +10346,8 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q);
 ```
 
 Signals workers to stop and blocks until they terminate.
+
+If the queue had workers, any pending tasks are performed before the function returns (so `fio_queue_destroy`, which calls `fio_queue_workers_join`, drains a queue that has workers). A queue without workers is not drained: `fio_queue_destroy` on such a queue discards pending tasks without performing them.
 
 #### `fio_queue_workers_wake`
 
@@ -21082,10 +21088,30 @@ void fio_http_write(fio_http_s *h, fio_http_write_args_s args);
 
 `fio_http_write` sends headers on the first write and then writes body data. If
 `finish` is set, the response is complete. Without `finish`, the response is a
-stream. HTTP/1.1 streams use `transfer-encoding: chunked`; HTTP/1.0 responses
+stream. A finished response without an explicit `content-length` header gets
+one automatically. The response starts with the first write that carries body
+data (a buffer or a file) or `finish`: an empty write without `finish` is a
+no-op, so headers can still be set, and a response that is finished without
+any body data is sent with `content-length: 0` rather than as an empty
+chunked stream. HTTP/1.1 streams use `transfer-encoding: chunked`; HTTP/1.0 responses
 never use a transfer coding (RFC 9112 §6.1), so an HTTP/1.0 stream is sent
 unframed and delimited by closing the connection, even if `keep-alive` was
-requested. File writes use `fd` and `offset`; the file descriptor is always closed
+requested.
+
+Responses without content (`1xx`, `204`, `205`, `304`, RFC 9110 §15) never
+send body data, are never streamed or compressed, and never send
+`transfer-encoding` (an application-provided value is removed). Their
+`content-length` follows RFC 9110 §8.6:
+
+- `1xx` / `204`: removed, never added.
+- `205`: always `content-length: 0` (§15.3.6), replacing any other value.
+- `304`: an application-provided value is kept (it describes the selected
+  representation); none is added automatically.
+
+Responses to `HEAD` requests send the headers a `GET` would (a finished
+response still gets its automatic `content-length`), but never send content
+(RFC 9110 §9.3.2): body writes are discarded and the response is never
+streamed (no `transfer-encoding: chunked`). File writes use `fd` and `offset`; the file descriptor is always closed
 by the write path.
 
 On upgraded handles, `fio_http_write` routes through the WebSocket or SSE

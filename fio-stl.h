@@ -75,7 +75,7 @@ supports macros that will help detect and validate it's version.
 /** PATCH version: Bug fixes, minor features may be added. */
 #define FIO_VERSION_PATCH 0
 /** Build version: optional build info (string), i.e. "beta.02" */
-#define FIO_VERSION_BUILD "rc.03"
+/* #define FIO_VERSION_BUILD */
 
 #ifdef FIO_VERSION_BUILD
 /** Version as a String literal (MACRO). */
@@ -37314,6 +37314,8 @@ typedef struct {
   fio_thread_mutex_t mutex;
   fio_thread_cond_t cond;
   size_t workers;
+  /** number of workers waiting (or about to wait) on `cond`. */
+  size_t sleeping;
   volatile unsigned stop;
 } fio___thread_group_s;
 
@@ -37385,10 +37387,19 @@ FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q);
 /** Adds worker / consumer threads to perform the jobs in the queue. */
 SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t count);
 
-/** Signals all worker threads to stop performing tasks and terminate. */
-SFUNC void fio_queue_workers_stop(fio_queue_s *q);
+/**
+ * Signals all worker threads to stop performing tasks and terminate.
+ *
+ * Returns the number of worker groups signaled. Does NOT wait and does NOT
+ * promise that pending tasks are performed.
+ */
+SFUNC size_t fio_queue_workers_stop(fio_queue_s *q);
 
-/** Signals all worker threads to stop, waiting for them to complete. */
+/**
+ * Signals all worker threads to stop, waiting for them to complete.
+ *
+ * If the queue had workers, pending tasks are performed before returning.
+ */
 SFUNC void fio_queue_workers_join(fio_queue_s *q);
 
 /** Signals all worker threads to go back to work (new tasks added). */
@@ -37543,8 +37554,10 @@ SFUNC void fio_queue_destroy(fio_queue_s *q) {
   while (q->r) {
     fio___task_ring_s *tmp = q->r;
     q->r = q->r->next;
-    if (tmp != &q->mem)
-      FIO_MEM_FREE_(tmp, sizeof(*tmp));
+    if (tmp == &q->mem)
+      continue;
+    FIO_LEAK_COUNTER_ON_FREE(fio_queue_task_rings);
+    FIO_MEM_FREE_(tmp, sizeof(*tmp));
   }
   FIO___LOCK_UNLOCK(q->lock);
   FIO___LOCK_DESTROY(q->lock);
@@ -37611,6 +37624,28 @@ FIO_IFUNC fio_queue_task_s fio___task_ring_pop(fio___task_ring_s *r) {
   return t;
 }
 
+/* Wakes one idle worker per active worker group. Call with `q->lock` held,
+ * after `q->count` was incremented.
+ *
+ * Lost wakeup protection: a worker increments `sleeping` and then reads
+ * `q->count`, both while holding the group mutex, and keeps holding the mutex
+ * until `cond_wait` releases it. A pusher increments `q->count` and then reads
+ * `sleeping`. All are sequentially consistent atomics, so either the worker
+ * sees the task (and doesn't wait) or the pusher sees the sleeper (and signals
+ * under the mutex, which it can only acquire once the worker is waiting).
+ * Groups without sleepers are skipped, avoiding the mutex on busy queues. */
+FIO_SFUNC void fio___queue_workers_signal(fio_queue_s *q) {
+  if (!q->consumers.next || FIO_LIST_IS_EMPTY(&q->consumers))
+    return;
+  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
+    if (fio_atomic_add(&pos->stop, 0) || !fio_atomic_add(&pos->sleeping, 0))
+      continue;
+    fio_thread_mutex_lock(&pos->mutex);
+    fio_thread_cond_signal(&pos->cond);
+    fio_thread_mutex_unlock(&pos->mutex);
+  }
+}
+
 int fio_queue_push___(void); /* sublime text marker */
 /** Pushes a task to the queue. Returns -1 on error. */
 SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
@@ -37638,12 +37673,7 @@ SFUNC int fio_queue_push FIO_NOOP(fio_queue_s *q, fio_queue_task_s task) {
     fio___task_ring_push(q->w, task);
   }
   fio_atomic_add(&q->count, 1);
-  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
-    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!fio_atomic_add(&pos->stop, 0))
-        fio_thread_cond_signal(&pos->cond);
-    }
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -37674,12 +37704,7 @@ SFUNC int fio_queue_push_urgent FIO_NOOP(fio_queue_s *q,
     tmp->buf[0] = task;
   }
   fio_atomic_add(&q->count, 1);
-  if (!FIO_LIST_IS_EMPTY(&q->consumers)) {
-    FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-      if (!fio_atomic_add(&pos->stop, 0))
-        fio_thread_cond_signal(&pos->cond);
-    }
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 no_mem:
@@ -37754,8 +37779,11 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
   while (!fio_atomic_add(&grp->stop, 0)) {
     fio_queue_perform_all(grp->queue);
     fio_thread_mutex_lock(&grp->mutex);
-    if (!fio_atomic_add(&grp->stop, 0))
+    /* announce, then re-check - see `fio___queue_workers_signal` */
+    fio_atomic_add(&grp->sleeping, 1);
+    if (!fio_atomic_add(&grp->stop, 0) && !fio_queue_count(grp->queue))
       fio_thread_cond_wait(&grp->cond, &grp->mutex);
+    fio_atomic_sub(&grp->sleeping, 1);
     fio_thread_mutex_unlock(&grp->mutex);
     fio_queue_perform_all(grp->queue);
   }
@@ -37832,17 +37860,20 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
   return 0;
 }
 
-SFUNC void fio_queue_workers_stop(fio_queue_s *q) {
+SFUNC size_t fio_queue_workers_stop(fio_queue_s *q) {
   if (!q)
-    return;
+    return 0;
+  size_t count = 0;
   FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
     fio_atomic_or(&pos->stop, 1);
     fio_thread_mutex_lock(&pos->mutex);
     fio_thread_cond_broadcast(&pos->cond);
     fio_thread_mutex_unlock(&pos->mutex);
+    ++count;
   }
   FIO___LOCK_UNLOCK(q->lock);
+  return count;
 }
 
 /** Signals all worker threads to go back to work (new tasks added). */
@@ -37850,10 +37881,7 @@ SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
   if (!q)
     return;
   FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
-  FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    if (!fio_atomic_add(&pos->stop, 0))
-      fio_thread_cond_signal(&pos->cond);
-  }
+  fio___queue_workers_signal(q);
   FIO___LOCK_UNLOCK(q->lock);
 }
 
@@ -37861,8 +37889,7 @@ SFUNC void fio_queue_workers_wake(fio_queue_s *q) {
 SFUNC void fio_queue_workers_join(fio_queue_s *q) {
   if (!q)
     return;
-  uint8_t had_workers = 0;
-  fio_queue_workers_stop(q);
+  uint8_t had_workers = !!fio_queue_workers_stop(q);
   FIO___LOCK_LOCK(q->lock);
   while (q->consumers.next && q->consumers.next != &q->consumers) {
     fio___thread_group_s *pos =
@@ -122497,8 +122524,45 @@ FIO_SFUNC int fio____http_write_upgraded(fio_http_s *h,
   return 0;
 }
 
+/* Internal state: the response omits all content (HEAD / no-content status).
+ * Set once by `fio____http_write_start`; body writes are then discarded and
+ * the response is never streamed, so controllers never frame a body. */
+#define FIO___HTTP_STATE_NO_CONTENT 128
+
+/* Responses that never carry content: 1xx, 204, 205, 304 (RFC 9110 §15). */
+FIO_IFUNC int fio___http_status_has_no_content(size_t status) {
+  return ((status - 100) < 100) | (status == 204) | (status == 205) |
+         (status == 304);
+}
+
+/* Framing headers for a response without content (no streaming / coding). */
+FIO_SFUNC void fio___http_no_content_headers(fio_http_s *h,
+                                             fio___http_hmap_s *hdrs) {
+  fio___http_hmap_set2(hdrs,
+                       FIO_STR_INFO2((char *)"transfer-encoding", 17),
+                       FIO_STR_INFO0,
+                       -1);
+  if (h->status == 304) /* may describe the selected representation (§8.6) */
+    return;
+  /* 1xx / 204 MUST NOT send Content-Length (§8.6); 205 MUST indicate zero
+   * length (§15.3.6) - any other value would desynchronize the client. */
+  fio___http_hmap_set2(hdrs,
+                       FIO_STR_INFO2((char *)"content-length", 14),
+                       (h->status == 205) ? FIO_STR_INFO2((char *)"0", 1)
+                                          : FIO_STR_INFO0,
+                       -1);
+}
+
 FIO_SFUNC int fio____http_write_start(fio_http_s *h,
                                       fio_http_write_args_s *args) {
+  /* no content and no finish: nothing to frame yet. The response (headers,
+   * Content-Length vs. streaming) starts with the first body data or finish,
+   * so an empty stream becomes a `content-length: 0` response. */
+  if (!args->len && !args->finish && (uint32_t)(args->fd + 1) <= 1U) {
+    if (args->dealloc && args->buf)
+      args->dealloc((void *)args->buf);
+    return 0;
+  }
   /* if response has an `etag` header matching `if-none-match`, skip */
   fio___http_hmap_s *hdrs = h->headers + (!!h->status);
   if (h->status) {
@@ -122514,6 +122578,17 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
         FIO_STR_INFO2((char *)"date", 4),
         fio_http_date(fio_http_get_timestump() / FIO___HTTP_TIME_DIV),
         0);
+    if (FIO_UNLIKELY(fio___http_status_has_no_content(h->status))) {
+      h->state |= FIO___HTTP_STATE_NO_CONTENT;
+      fio___http_no_content_headers(h, hdrs);
+      goto send_headers; /* never compressed, framed or streamed */
+    }
+    { /* HEAD: GET's headers, no content (RFC 9110 §9.3.2) */
+      fio_str_info_s m = fio_keystr_info(&h->method);
+      if (FIO_UNLIKELY(m.len == 4 && (fio_buf2u32u(m.buf) | 0x20202020UL) ==
+                                         fio_buf2u32u("head")))
+        h->state |= FIO___HTTP_STATE_NO_CONTENT;
+    }
   }
 #if 1
   if (args->finish &&
@@ -122635,10 +122710,11 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       v.len = fio_digits10u(args->len);
       fio_ltoa10u(v.buf, args->len, v.len);
       fio___http_hmap_set2(hdrs, k, v, -1);
-    } else {
+    } else if (!(h->state & FIO___HTTP_STATE_NO_CONTENT)) {
       h->state |= FIO_HTTP_STATE_STREAMING;
     }
   }
+send_headers:
   /* start a response, unless status == 0 (which starts a request). */
   h->controller->send_headers(h);
   return (h->writer = fio____http_write_cont)(h, args);
@@ -122646,8 +122722,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
 
 FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
                                      fio_http_write_args_s *args) {
-  int r = (int)0 - (int)((unsigned)(h->status == 204) | (h->status == 205) |
-                         (h->status == 304));
+  int r = 0 - !!(h->state & FIO___HTTP_STATE_NO_CONTENT);
   if (!r) {
     h->controller->write_body(h, *args);
     h->sent += args->len;
@@ -125935,6 +126010,21 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   //               .dealloc = FIO_STRING_FREE,
   //               .copy = 0);
 }
+/* Sends pending response headers (if any) followed by a chunk-size line.
+ * The header buffer is grown as needed: it may have no spare capacity. */
+FIO_SFUNC void fio___http1_write_chunk_header(fio___http_connection_s *c,
+                                              size_t len) {
+  fio_string_write2(&c->state.http.buf,
+                    FIO_STRING_REALLOC,
+                    FIO_STRING_WRITE_HEX(len),         /* chunk length */
+                    FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header EOL */
+  fio_io_write2(c->io,
+                .buf = (void *)c->state.http.buf.buf,
+                .len = c->state.http.buf.len,
+                .dealloc = FIO_STRING_FREE);
+  c->state.http.buf = FIO_STR_INFO0;
+}
+
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 FIO_SFUNC void fio___http_controller_http1_write_body(
     fio_http_s *h,
@@ -125990,22 +126080,7 @@ stream_chunk:
         args.dealloc((void *)args.buf);
       return;
     } else { /* avoid copying the incoming data if possible */
-      FIO_STR_INFO_TMP_VAR(buf, 32);
-      if (c->state.http.buf.buf)
-        buf = c->state.http.buf;
-      c->state.http.buf = FIO_STR_INFO0;
-      fio_string_write2(
-          &buf,
-          NULL,
-          FIO_STRING_WRITE_HEX(args.len),    /* chunk header - length */
-          FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header - EOL */
-      fio_io_write2(c->io,
-                    .buf = buf.buf,
-                    .len = buf.len,
-                    .copy = !FIO_STR_INFO_TMP_IS_REALLOCATED(buf),
-                    .dealloc = FIO_STR_INFO_TMP_IS_REALLOCATED(buf)
-                                   ? FIO_STRING_FREE
-                                   : NULL);
+      fio___http1_write_chunk_header(c, args.len);
       fio_io_write2(c->io,
                     .buf = (void *)args.buf,
                     .len = args.len,
@@ -126027,22 +126102,7 @@ stream_chunk:
         goto no_length_err;
       args.len = (size_t)len;
     }
-    FIO_STR_INFO_TMP_VAR(buf, 32);
-    if (c->state.http.buf.buf)
-      buf = c->state.http.buf;
-    c->state.http.buf = FIO_STR_INFO0;
-    fio_string_write2(
-        &buf,
-        NULL,
-        FIO_STRING_WRITE_HEX(args.len),    /* chunk header - length */
-        FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header - EOL */
-    fio_io_write2(
-        c->io,
-        .buf = buf.buf,
-        .len = buf.len,
-        .copy = !FIO_STR_INFO_TMP_IS_REALLOCATED(buf),
-        .dealloc =
-            (FIO_STR_INFO_TMP_IS_REALLOCATED(buf) ? FIO_STRING_FREE : NULL));
+    fio___http1_write_chunk_header(c, args.len);
     fio_io_write2(c->io,
                   .fd = args.fd,
                   .len = args.len,

@@ -518,6 +518,21 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
   //               .dealloc = FIO_STRING_FREE,
   //               .copy = 0);
 }
+/* Sends pending response headers (if any) followed by a chunk-size line.
+ * The header buffer is grown as needed: it may have no spare capacity. */
+FIO_SFUNC void fio___http1_write_chunk_header(fio___http_connection_s *c,
+                                              size_t len) {
+  fio_string_write2(&c->state.http.buf,
+                    FIO_STRING_REALLOC,
+                    FIO_STRING_WRITE_HEX(len),         /* chunk length */
+                    FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header EOL */
+  fio_io_write2(c->io,
+                .buf = (void *)c->state.http.buf.buf,
+                .len = c->state.http.buf.len,
+                .dealloc = FIO_STRING_FREE);
+  c->state.http.buf = FIO_STR_INFO0;
+}
+
 /** called by the HTTP handle for each body chunk (or to finish a response. */
 FIO_SFUNC void fio___http_controller_http1_write_body(
     fio_http_s *h,
@@ -573,22 +588,7 @@ stream_chunk:
         args.dealloc((void *)args.buf);
       return;
     } else { /* avoid copying the incoming data if possible */
-      FIO_STR_INFO_TMP_VAR(buf, 32);
-      if (c->state.http.buf.buf)
-        buf = c->state.http.buf;
-      c->state.http.buf = FIO_STR_INFO0;
-      fio_string_write2(
-          &buf,
-          NULL,
-          FIO_STRING_WRITE_HEX(args.len),    /* chunk header - length */
-          FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header - EOL */
-      fio_io_write2(c->io,
-                    .buf = buf.buf,
-                    .len = buf.len,
-                    .copy = !FIO_STR_INFO_TMP_IS_REALLOCATED(buf),
-                    .dealloc = FIO_STR_INFO_TMP_IS_REALLOCATED(buf)
-                                   ? FIO_STRING_FREE
-                                   : NULL);
+      fio___http1_write_chunk_header(c, args.len);
       fio_io_write2(c->io,
                     .buf = (void *)args.buf,
                     .len = args.len,
@@ -610,22 +610,7 @@ stream_chunk:
         goto no_length_err;
       args.len = (size_t)len;
     }
-    FIO_STR_INFO_TMP_VAR(buf, 32);
-    if (c->state.http.buf.buf)
-      buf = c->state.http.buf;
-    c->state.http.buf = FIO_STR_INFO0;
-    fio_string_write2(
-        &buf,
-        NULL,
-        FIO_STRING_WRITE_HEX(args.len),    /* chunk header - length */
-        FIO_STRING_WRITE_STR2("\r\n", 2)); /* chunk header - EOL */
-    fio_io_write2(
-        c->io,
-        .buf = buf.buf,
-        .len = buf.len,
-        .copy = !FIO_STR_INFO_TMP_IS_REALLOCATED(buf),
-        .dealloc =
-            (FIO_STR_INFO_TMP_IS_REALLOCATED(buf) ? FIO_STRING_FREE : NULL));
+    fio___http1_write_chunk_header(c, args.len);
     fio_io_write2(c->io,
                   .fd = args.fd,
                   .len = args.len,
