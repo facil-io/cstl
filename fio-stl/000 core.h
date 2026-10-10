@@ -1265,8 +1265,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
                                   max_concurrent_allocations)                  \
   enum { name##__hdr_ = (int)((sizeof(type_T) < 16) ? sizeof(type_T) : 16) };  \
   typedef struct FIO_ALIGN(16) name##__slot_s {                                \
-    unsigned char busy_;                                                       \
-    char reserved_[name##__hdr_ - 1];                                          \
+    unsigned char busy_[name##__hdr_];                                         \
     type_T data_[(units_per_allocation)];                                      \
   } name##__slot_s;                                                            \
   FIO_ASSERT_STATIC(offsetof(name##__slot_s, data_) == (size_t)name##__hdr_,   \
@@ -1279,7 +1278,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
     size_t start = fio_atomic_add(&hint, 1);                                   \
     for (size_t i = 0; i < (size_t)(max_concurrent_allocations); ++i) {        \
       size_t at = (start + i) % (size_t)(max_concurrent_allocations);          \
-      if (!(fio_atomic_or(&name##buffer[at].busy_, 1) & 1))                    \
+      if (!(fio_atomic_or(name##buffer[at].busy_, 1) & 1))                     \
         return name##buffer[at].data_;                                         \
     }                                                                          \
     return NULL;                                                               \
@@ -1288,7 +1287,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
   FIO_SFUNC void name##_free(type_T *ptr) {                                    \
     name##__slot_s *slot =                                                     \
         (name##__slot_s *)(void *)((char *)ptr - name##__hdr_);                \
-    fio_atomic_and(&slot->busy_, 0);                                           \
+    fio_atomic_and(slot->busy_, 0);                                            \
   }                                                                            \
   /** Returns the logical arena capacity in `type_T` units. */                 \
   FIO_IFUNC size_t name##_size(void) {                                         \

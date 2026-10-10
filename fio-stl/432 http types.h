@@ -3256,6 +3256,7 @@ FIO_SFUNC void *fio___http_json_on_float(void *udata, double f) {
   return a->callbacks->on_float(a->udata, f);
 }
 
+FIO_STATIC_SAFE_ALLOC_DEF(fio___http_json_on_string_alloc, char, 4096, 32)
 /** Escaped string - needs unescaping before passing to callback */
 FIO_SFUNC void *fio___http_json_on_string(void *udata,
                                           const void *start,
@@ -3264,11 +3265,18 @@ FIO_SFUNC void *fio___http_json_on_string(void *udata,
   if (!a || !a->callbacks->on_string)
     return NULL;
   /* Unescape JSON string */
-  fio_str_info_s unescaped = {0};
-  fio_string_write_unescape(&unescaped, FIO_STRING_REALLOC, start, len);
+  fio_str_info_s unescaped = FIO_STR_INFO3(NULL, 0, 4095);
+  do {
+    unescaped.buf = fio___http_json_on_string_alloc_try();
+  } while (!unescaped.buf);
+  char *org = unescaped.buf;
+  fio_string_write_unescape(&unescaped, FIO_STRING_ALLOC_COPY, start, len);
   void *result =
       a->callbacks->on_string(a->udata, unescaped.buf, unescaped.len);
-  FIO_STRING_FREE(unescaped.buf);
+  if (unescaped.buf == org)
+    fio___http_json_on_string_alloc_free(org);
+  else
+    FIO_STRING_FREE(unescaped.buf);
   return result;
 }
 
@@ -3438,14 +3446,14 @@ FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
   /* Decode name */
   FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
   fio_string_write_url_dec(&decoded_name,
-                           FIO_STRING_REALLOC,
+                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
                            name.buf,
                            name.len);
 
   /* Decode value */
   FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
   fio_string_write_url_dec(&decoded_value,
-                           FIO_STRING_REALLOC,
+                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
                            value.buf,
                            value.len);
 

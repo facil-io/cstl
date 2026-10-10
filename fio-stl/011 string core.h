@@ -2071,11 +2071,21 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
                                      const void *raw,
                                      size_t raw_len) {
   static const uint8_t base32encode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  int r = 0;
-  size_t expected = ((raw_len * 8) / 5) + 1;
-  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
-    return (r = -1); /* no partial encoding. */
-  }
+  int r = -1;
+
+  /*  expected length calculation. */
+  const size_t groups = raw_len / 5;
+  const size_t rem = raw_len % 5;
+  const size_t partial = rem ? ((rem * 8 + 4) / 5) + 1 : 0; /* symbols + '=' */
+  if (groups > (SIZE_MAX - partial - 1) / 8 || !dest ||
+      dest->len > SIZE_MAX - (groups * 8 + partial) - 1)
+    return r;
+  size_t expected = groups * 8 + partial;
+
+  if (fio_string___write_validate_len(dest, reallocate, &expected))
+    return r;
+
+  r = 0;
   expected = dest->len;
   size_t bits = 0, store = 0;
   for (size_t i = 0; i < raw_len; ++i) {
@@ -2095,10 +2105,8 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
     bits -= 5;
   }
   if (bits) {
-    // dest->buf[dest->len++] = base32encode[store & ((1U << bits) - 1)];
     dest->buf[dest->len++] = base32encode[31U & (store << (5 - bits))];
-    dest->buf[dest->len] = '=';
-    dest->len += !!((dest->len - expected) % 5);
+    dest->buf[dest->len++] = '=';
   }
   dest->buf[dest->len] = 0;
   return r;
@@ -2140,11 +2148,14 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
-  int r = 0;
+  int r = -1;
   size_t expected = ((encoded_len * 5) / 8) + 1;
+  if (expected > encoded_len || expected > UINT32_MAX) /* overflow / risk */
+    return r;
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
-    return (r = -1); /* no partial encoding. */
+    return r; /* no partial encoding. */
   }
+  r = 0;
   uint64_t val = 0;
   uint64_t bits = 0;
   uint8_t *s = (uint8_t *)dest->buf + dest->len;
@@ -2167,11 +2178,7 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
     *(s++) = (0xFF & (val >> (bits - 8)));
     bits -= 8;
   }
-  if (bits) { /* letfover bits considered padding? */
-    val = 0xFF & (val << (8 - bits));
-    if (val || (encoded_len && ((uint8_t *)encoded)[encoded_len - 1] != '='))
-      *(s++) = val;
-  }
+  /* Remaining bits do not constitute another byte. */
   dest->len = (size_t)(s - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
   return r;
@@ -2404,15 +2411,16 @@ FIO_IFUNC int fio_string_write_url_dec_internal(
   if (dest->len + encoded_len >= dest->capa) { /* reserve only what we need */
     size_t act_len = 0;
     while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+      ++pr;
       act_len += pr - last;
-      last = pr + 1;
-      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16)
+      last = pr;
+      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
         last += 2;
-      else if (end - last > 4 && (last[0] | 32) == 'u' &&
-               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
-               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+      } else if (end - last > 4 && (last[0] | 32) == 'u' &&
+                 fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+                 fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
         last += 5;
-        act_len += 3; /* uXXXX length maxes out at 4 ... I think */
+        act_len += 2; /* uXXXX length maxes out at 4 ... I think, -% -u = 2 */
       }
       pr = last;
     }

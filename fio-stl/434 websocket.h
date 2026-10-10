@@ -710,6 +710,59 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
       args.dealloc((void *)args.buf);
     return;
   }
+  if (c->is_client) {
+    /* Generic writes must mask the actual payload, not only set the MASK bit.
+     * An fd cannot be sent directly: read it before framing, then close it
+     * as promised by the HTTP generic-write contract (even with copy=1). */
+    const size_t framed_len = fio_websocket_write_len(args.len, 1);
+    char *frame = NULL;
+    if (args.len <= SIZE_MAX - args.offset && framed_len <= UINT32_MAX &&
+        (args.buf ||
+         ((off_t)args.offset >= 0 &&
+          (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
+          (off_t)(args.offset + args.len) >= 0 &&
+          (uintmax_t)(off_t)(args.offset + args.len) ==
+              (uintmax_t)(args.offset + args.len))))
+      frame = fio_bstr_reserve(NULL, framed_len);
+    if (!frame)
+      goto client_write_error;
+    if (args.buf) {
+      fio_websocket_write_message_client(
+          frame, FIO_BUF_INFO2((char *)args.buf + args.offset, args.len), 0, 0, 0);
+    } else {
+      uint32_t mask = (uint32_t)(fio_rand64() | 0x01020408U);
+      size_t head = fio___websocket_hdr((uint8_t *)frame,
+                                       args.len,
+                                       mask,
+                                       FIO_WEBSOCKET_OP_BINARY,
+                                       0);
+      if (fio_fd_read(args.fd, frame + head, args.len, (off_t)args.offset) !=
+          args.len) {
+        fio_bstr_free(frame);
+        goto client_write_error;
+      }
+      fio_xmask_cpy(frame + head,
+                    frame + head,
+                    args.len,
+                    ((uint64_t)mask << 32) | (uint64_t)mask);
+    }
+    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+      close(args.fd);
+    if (args.dealloc && args.buf)
+      args.dealloc((void *)args.buf);
+    fio_io_write2(c->io,
+                  .buf = frame,
+                  .len = framed_len,
+                  .dealloc = (void (*)(void *))fio_bstr_free);
+    return;
+  client_write_error:
+    FIO_LOG_ERROR("WebSocket client write: couldn't frame %zu bytes", args.len);
+    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+      close(args.fd);
+    if (args.dealloc && args.buf)
+      args.dealloc((void *)args.buf);
+    return;
+  }
   char header[16];
   ((uint8_t *)header)[0] = 0 | 2 | 128;
   if (args.len < 126) {

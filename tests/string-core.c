@@ -589,6 +589,105 @@ FIO_SFUNC void test_string_url(void) {
   }
 }
 
+/* Boundaries at which the URL decoder's output-length estimate must include
+ * every decoded or literal percent byte and leave room for the terminator. */
+FIO_SFUNC void test_string_url_decode_boundaries(void) {
+  static const struct {
+    const char *input;
+    const char *output;
+  } cases[] = {
+      {"%41", "A"}, {"%zz", "%zz"}, {"%", "%"},
+      {"%u0041", "A"}, {"%u00E9", "\xC3\xA9"},
+      {"%uD83D%uDE00", "\xF0\x9F\x98\x80"},
+      {"a%41", "aA"}, {"a%zz", "a%zz"},
+  };
+  static const size_t tails[] = {
+      0, 1, 15, 16, 1022, 1023, 1024, 2046, 2047, 2048, 4094, 4095, 4096};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    const size_t prefix_len = strlen(cases[i].input);
+    const size_t decoded_len = strlen(cases[i].output);
+    for (size_t j = 0; j < sizeof(tails) / sizeof(*tails); ++j) {
+      const size_t input_len = prefix_len + tails[j];
+      char *input = (char *)malloc(input_len + 1);
+      FIO_ASSERT(input, "URL boundary input allocation failed");
+      FIO_MEMCPY(input, cases[i].input, prefix_len);
+      FIO_MEMSET(input + prefix_len, 'z', tails[j]);
+      input[input_len] = 0;
+      fio_str_info_s decoded = {0};
+      int r = fio_string_write_url_dec(
+          &decoded, FIO_STRING_ALLOC_COPY, input, input_len);
+      FIO_ASSERT(!r && decoded.buf && decoded.len == decoded_len + tails[j] &&
+                     decoded.len < decoded.capa && !decoded.buf[decoded.len] &&
+                     !FIO_MEMCMP(decoded.buf, cases[i].output, decoded_len) &&
+                     !FIO_MEMCMP(decoded.buf + decoded_len,
+                                 input + prefix_len,
+                                 tails[j]),
+                 "URL boundary case %zu/%zu (rc=%d, len=%zu, capacity=%zu)",
+                 i, j, r, decoded.len, decoded.capa);
+      FIO_STRING_FREE(decoded.buf);
+      free(input);
+    }
+  }
+}
+
+/* Check decoder estimates at allocation boundaries, using owned buffers so
+ * ASan can detect an off-by-one NUL write rather than stack spare capacity. */
+FIO_SFUNC void test_string_other_decode_boundaries(void) {
+  static const size_t sizes[] = {1, 2, 3, 15, 16, 17, 1023, 1024, 1025,
+                                 2047, 2048, 2049, 4095, 4096};
+  for (size_t i = 0; i < sizeof(sizes) / sizeof(*sizes); ++i) {
+    const size_t n = sizes[i];
+    char *input = (char *)malloc(n);
+    FIO_ASSERT(input, "codec boundary input allocation failed");
+    for (size_t k = 0; k < n; ++k)
+      input[k] = (char)((k * 73U + 13U) & 255U);
+    fio_str_info_s encoded = {0}, decoded = {0};
+    int r = fio_string_write_base64enc(
+        &encoded, FIO_STRING_ALLOC_COPY, input, n, 0);
+    FIO_ASSERT(!r && encoded.buf && encoded.len < encoded.capa &&
+                   !encoded.buf[encoded.len],
+               "base64 encode boundary %zu", n);
+    r = fio_string_write_base64dec(
+        &decoded, FIO_STRING_ALLOC_COPY, encoded.buf, encoded.len);
+    FIO_ASSERT(!r && decoded.buf && decoded.len == n &&
+                   decoded.len < decoded.capa && !decoded.buf[decoded.len] &&
+                   !FIO_MEMCMP(decoded.buf, input, n),
+               "base64 decode boundary %zu (rc=%d len=%zu capa=%zu)",
+               n, r, decoded.len, decoded.capa);
+    FIO_STRING_FREE(encoded.buf);
+    FIO_STRING_FREE(decoded.buf);
+    free(input);
+  }
+  static const struct {
+    const char *entity;
+    const char *decoded;
+  } entities[] = {{"&#65;", "A"}, {"&#x41;", "A"}, {"&amp;", "&"},
+                  {"&lt;", "<"}, {"&nbsp;", "\xC2\xA0"}};
+  static const size_t tails[] = {0, 1, 15, 16, 1023, 1024, 2047, 2048, 4095};
+  for (size_t i = 0; i < sizeof(entities) / sizeof(*entities); ++i)
+    for (size_t j = 0; j < sizeof(tails) / sizeof(*tails); ++j) {
+      const size_t prefix = strlen(entities[i].entity);
+      const size_t expected = strlen(entities[i].decoded);
+      const size_t input_len = prefix + tails[j];
+      char *input = (char *)malloc(input_len + 1);
+      FIO_ASSERT(input, "HTML boundary input allocation failed");
+      FIO_MEMCPY(input, entities[i].entity, prefix);
+      FIO_MEMSET(input + prefix, 'z', tails[j]);
+      input[input_len] = 0;
+      fio_str_info_s out = {0};
+      int r = fio_string_write_html_unescape(
+          &out, FIO_STRING_ALLOC_COPY, input, input_len);
+      FIO_ASSERT(!r && out.buf && out.len == expected + tails[j] &&
+                     out.len < out.capa && !out.buf[out.len] &&
+                     !FIO_MEMCMP(out.buf, entities[i].decoded, expected) &&
+                     !FIO_MEMCMP(out.buf + expected, input + prefix, tails[j]),
+                 "HTML decode boundary %zu/%zu (rc=%d len=%zu capa=%zu)",
+                 i, j, r, out.len, out.capa);
+      FIO_STRING_FREE(out.buf);
+      free(input);
+    }
+}
+
 /* =============================================================================
  * Test: HTML escaping/unescaping
  * ========================================================================== */
@@ -1027,6 +1126,8 @@ int main(void) {
   test_string_base64_short_input();
   test_string_base32();
   test_string_url();
+  test_string_url_decode_boundaries();
+  test_string_other_decode_boundaries();
   test_string_html();
   test_bstr();
   test_keystr();

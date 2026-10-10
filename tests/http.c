@@ -2591,6 +2591,7 @@ static void test_http_server_h1_framing(void) {
     const char *te;       /* request transfer-encoding seen by the app */
     const char *excludes2; /* optional forbidden wire substrings */
     const char *excludes3;
+    const char *contains2; /* additional order-independent wire substring */
   } cases[] = {
       {"TE chunked, gzip",
        TEST_H1F_SMUGGLE("chunked, gzip"),
@@ -2804,7 +2805,10 @@ static void test_http_server_h1_framing(void) {
        1,
        "x-late:1\r\n",
        "transfer-encoding",
-       "content-length:2\r\n\r\nxy"},
+       "\r\n\r\nxy",
+       .excludes2 = "transfer-encoding: chunked",
+       .excludes3 = "content-length:0",
+       .contains2 = "content-length:2\r\n"},
       {"200 stream starts with body data (empty writes skipped)",
        TEST_H1F_STATUS("200", "?emptystream"),
        "HTTP/1.1 200 ",
@@ -2910,6 +2914,11 @@ static void test_http_server_h1_framing(void) {
                "%s: missing \"%s\":\n%s",
                cases[i].name,
                cases[i].contains,
+               test_h1f.wire);
+    FIO_ASSERT(!cases[i].contains2 || strstr(test_h1f.wire, cases[i].contains2),
+               "%s: missing \"%s\":\n%s",
+               cases[i].name,
+               cases[i].contains2,
                test_h1f.wire);
     FIO_ASSERT(!cases[i].excludes || !strstr(test_h1f.wire, cases[i].excludes),
                "%s: unexpected \"%s\":\n%s",

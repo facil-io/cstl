@@ -1303,8 +1303,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
                                   max_concurrent_allocations)                  \
   enum { name##__hdr_ = (int)((sizeof(type_T) < 16) ? sizeof(type_T) : 16) };  \
   typedef struct FIO_ALIGN(16) name##__slot_s {                                \
-    unsigned char busy_;                                                       \
-    char reserved_[name##__hdr_ - 1];                                          \
+    unsigned char busy_[name##__hdr_];                                         \
     type_T data_[(units_per_allocation)];                                      \
   } name##__slot_s;                                                            \
   FIO_ASSERT_STATIC(offsetof(name##__slot_s, data_) == (size_t)name##__hdr_,   \
@@ -1317,7 +1316,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
     size_t start = fio_atomic_add(&hint, 1);                                   \
     for (size_t i = 0; i < (size_t)(max_concurrent_allocations); ++i) {        \
       size_t at = (start + i) % (size_t)(max_concurrent_allocations);          \
-      if (!(fio_atomic_or(&name##buffer[at].busy_, 1) & 1))                    \
+      if (!(fio_atomic_or(name##buffer[at].busy_, 1) & 1))                     \
         return name##buffer[at].data_;                                         \
     }                                                                          \
     return NULL;                                                               \
@@ -1326,7 +1325,7 @@ must be returned. The memory remains valid until its round-robin slot is reused.
   FIO_SFUNC void name##_free(type_T *ptr) {                                    \
     name##__slot_s *slot =                                                     \
         (name##__slot_s *)(void *)((char *)ptr - name##__hdr_);                \
-    fio_atomic_and(&slot->busy_, 0);                                           \
+    fio_atomic_and(slot->busy_, 0);                                            \
   }                                                                            \
   /** Returns the logical arena capacity in `type_T` units. */                 \
   FIO_IFUNC size_t name##_size(void) {                                         \
@@ -30760,11 +30759,21 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
                                      const void *raw,
                                      size_t raw_len) {
   static const uint8_t base32encode[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  int r = 0;
-  size_t expected = ((raw_len * 8) / 5) + 1;
-  if (fio_string___write_validate_len(dest, reallocate, &expected)) {
-    return (r = -1); /* no partial encoding. */
-  }
+  int r = -1;
+
+  /*  expected length calculation. */
+  const size_t groups = raw_len / 5;
+  const size_t rem = raw_len % 5;
+  const size_t partial = rem ? ((rem * 8 + 4) / 5) + 1 : 0; /* symbols + '=' */
+  if (groups > (SIZE_MAX - partial - 1) / 8 || !dest ||
+      dest->len > SIZE_MAX - (groups * 8 + partial) - 1)
+    return r;
+  size_t expected = groups * 8 + partial;
+
+  if (fio_string___write_validate_len(dest, reallocate, &expected))
+    return r;
+
+  r = 0;
   expected = dest->len;
   size_t bits = 0, store = 0;
   for (size_t i = 0; i < raw_len; ++i) {
@@ -30784,10 +30793,8 @@ SFUNC int fio_string_write_base32enc(fio_str_info_s *dest,
     bits -= 5;
   }
   if (bits) {
-    // dest->buf[dest->len++] = base32encode[store & ((1U << bits) - 1)];
     dest->buf[dest->len++] = base32encode[31U & (store << (5 - bits))];
-    dest->buf[dest->len] = '=';
-    dest->len += !!((dest->len - expected) % 5);
+    dest->buf[dest->len++] = '=';
   }
   dest->buf[dest->len] = 0;
   return r;
@@ -30829,11 +30836,14 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
-  int r = 0;
+  int r = -1;
   size_t expected = ((encoded_len * 5) / 8) + 1;
+  if (expected > encoded_len || expected > UINT32_MAX) /* overflow / risk */
+    return r;
   if (fio_string___write_validate_len(dest, reallocate, &expected)) {
-    return (r = -1); /* no partial encoding. */
+    return r; /* no partial encoding. */
   }
+  r = 0;
   uint64_t val = 0;
   uint64_t bits = 0;
   uint8_t *s = (uint8_t *)dest->buf + dest->len;
@@ -30856,11 +30866,7 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
     *(s++) = (0xFF & (val >> (bits - 8)));
     bits -= 8;
   }
-  if (bits) { /* letfover bits considered padding? */
-    val = 0xFF & (val << (8 - bits));
-    if (val || (encoded_len && ((uint8_t *)encoded)[encoded_len - 1] != '='))
-      *(s++) = val;
-  }
+  /* Remaining bits do not constitute another byte. */
   dest->len = (size_t)(s - (uint8_t *)dest->buf);
   dest->buf[dest->len] = 0;
   return r;
@@ -31093,15 +31099,16 @@ FIO_IFUNC int fio_string_write_url_dec_internal(
   if (dest->len + encoded_len >= dest->capa) { /* reserve only what we need */
     size_t act_len = 0;
     while (end > pr && (pr = (uint8_t *)FIO_MEMCHR(pr, '%', end - pr))) {
+      ++pr;
       act_len += pr - last;
-      last = pr + 1;
-      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16)
+      last = pr;
+      if (end - last > 1 && fio_c2i(last[0]) < 16 && fio_c2i(last[1]) < 16) {
         last += 2;
-      else if (end - last > 4 && (last[0] | 32) == 'u' &&
-               fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
-               fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
+      } else if (end - last > 4 && (last[0] | 32) == 'u' &&
+                 fio_c2i(last[1]) < 16 && fio_c2i(last[2]) < 16 &&
+                 fio_c2i(last[3]) < 16 && fio_c2i(last[4]) < 16) {
         last += 5;
-        act_len += 3; /* uXXXX length maxes out at 4 ... I think */
+        act_len += 2; /* uXXXX length maxes out at 4 ... I think, -% -u = 2 */
       }
       pr = last;
     }
@@ -123477,6 +123484,7 @@ FIO_SFUNC void *fio___http_json_on_float(void *udata, double f) {
   return a->callbacks->on_float(a->udata, f);
 }
 
+FIO_STATIC_SAFE_ALLOC_DEF(fio___http_json_on_string_alloc, char, 4096, 32)
 /** Escaped string - needs unescaping before passing to callback */
 FIO_SFUNC void *fio___http_json_on_string(void *udata,
                                           const void *start,
@@ -123485,11 +123493,18 @@ FIO_SFUNC void *fio___http_json_on_string(void *udata,
   if (!a || !a->callbacks->on_string)
     return NULL;
   /* Unescape JSON string */
-  fio_str_info_s unescaped = {0};
-  fio_string_write_unescape(&unescaped, FIO_STRING_REALLOC, start, len);
+  fio_str_info_s unescaped = FIO_STR_INFO3(NULL, 0, 4095);
+  do {
+    unescaped.buf = fio___http_json_on_string_alloc_try();
+  } while (!unescaped.buf);
+  char *org = unescaped.buf;
+  fio_string_write_unescape(&unescaped, FIO_STRING_ALLOC_COPY, start, len);
   void *result =
       a->callbacks->on_string(a->udata, unescaped.buf, unescaped.len);
-  FIO_STRING_FREE(unescaped.buf);
+  if (unescaped.buf == org)
+    fio___http_json_on_string_alloc_free(org);
+  else
+    FIO_STRING_FREE(unescaped.buf);
   return result;
 }
 
@@ -123659,14 +123674,14 @@ FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
   /* Decode name */
   FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
   fio_string_write_url_dec(&decoded_name,
-                           FIO_STRING_REALLOC,
+                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
                            name.buf,
                            name.len);
 
   /* Decode value */
   FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
   fio_string_write_url_dec(&decoded_value,
-                           FIO_STRING_REALLOC,
+                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
                            value.buf,
                            value.len);
 
@@ -127263,6 +127278,59 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
         !!fio_string_utf8_valid(FIO_STR_INFO2((char *)args.buf, args.len));
     fio_http_websocket_write(h, (void *)args.buf, args.len, is_text);
     if (args.dealloc)
+      args.dealloc((void *)args.buf);
+    return;
+  }
+  if (c->is_client) {
+    /* Generic writes must mask the actual payload, not only set the MASK bit.
+     * An fd cannot be sent directly: read it before framing, then close it
+     * as promised by the HTTP generic-write contract (even with copy=1). */
+    const size_t framed_len = fio_websocket_write_len(args.len, 1);
+    char *frame = NULL;
+    if (args.len <= SIZE_MAX - args.offset && framed_len <= UINT32_MAX &&
+        (args.buf ||
+         ((off_t)args.offset >= 0 &&
+          (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
+          (off_t)(args.offset + args.len) >= 0 &&
+          (uintmax_t)(off_t)(args.offset + args.len) ==
+              (uintmax_t)(args.offset + args.len))))
+      frame = fio_bstr_reserve(NULL, framed_len);
+    if (!frame)
+      goto client_write_error;
+    if (args.buf) {
+      fio_websocket_write_message_client(
+          frame, FIO_BUF_INFO2((char *)args.buf + args.offset, args.len), 0, 0, 0);
+    } else {
+      uint32_t mask = (uint32_t)(fio_rand64() | 0x01020408U);
+      size_t head = fio___websocket_hdr((uint8_t *)frame,
+                                       args.len,
+                                       mask,
+                                       FIO_WEBSOCKET_OP_BINARY,
+                                       0);
+      if (fio_fd_read(args.fd, frame + head, args.len, (off_t)args.offset) !=
+          args.len) {
+        fio_bstr_free(frame);
+        goto client_write_error;
+      }
+      fio_xmask_cpy(frame + head,
+                    frame + head,
+                    args.len,
+                    ((uint64_t)mask << 32) | (uint64_t)mask);
+    }
+    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+      close(args.fd);
+    if (args.dealloc && args.buf)
+      args.dealloc((void *)args.buf);
+    fio_io_write2(c->io,
+                  .buf = frame,
+                  .len = framed_len,
+                  .dealloc = (void (*)(void *))fio_bstr_free);
+    return;
+  client_write_error:
+    FIO_LOG_ERROR("WebSocket client write: couldn't frame %zu bytes", args.len);
+    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+      close(args.fd);
+    if (args.dealloc && args.buf)
       args.dealloc((void *)args.buf);
     return;
   }

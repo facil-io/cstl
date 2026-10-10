@@ -1610,6 +1610,165 @@ static void test_body_parse_null_handle(void) {
   FIO_ASSERT(r.err != 0, "null handle: should return error");
 }
 
+/* Verify full callback payloads while they are live and again after parse returns. */
+typedef struct {
+  const char *name;
+  size_t name_len;
+  const char *value;
+  size_t value_len;
+  size_t seen;
+} test_decode_ctx_s;
+
+static void *test_decode_string(void *udata, const void *data, size_t len) {
+  (void)udata;
+  return test_obj_str_new(data, len);
+}
+
+static void *test_decode_map(void *udata, void *parent) {
+  (void)udata;
+  (void)parent;
+  return test_obj_sentinel_new(TEST_OBJ_MAP);
+}
+
+static int test_decode_set(void *udata, void *map, void *key, void *value) {
+  test_decode_ctx_s *ctx = (test_decode_ctx_s *)udata;
+  test_obj_s *k = (test_obj_s *)key;
+  test_obj_s *v = (test_obj_s *)value;
+  FIO_ASSERT(map && k && v && k->type == TEST_OBJ_STRING &&
+                 v->type == TEST_OBJ_STRING,
+             "decoded pair: unexpected callback objects");
+  FIO_ASSERT(k->u.str.len == ctx->name_len &&
+                 !memcmp(k->u.str.buf, ctx->name, ctx->name_len),
+             "decoded key mismatch (got %zu, expected %zu)",
+             k->u.str.len, ctx->name_len);
+  FIO_ASSERT(v->u.str.len == ctx->value_len &&
+                 !memcmp(v->u.str.buf, ctx->value, ctx->value_len),
+             "decoded value mismatch (got %zu, expected %zu)",
+             v->u.str.len, ctx->value_len);
+  ++ctx->seen;
+  test_obj_free(k);
+  test_obj_free(v);
+  return 0;
+}
+
+static void *test_decode_error(void *udata, void *partial) {
+  (void)udata;
+  test_obj_free((test_obj_s *)partial);
+  return NULL;
+}
+
+static const fio_http_body_parse_callbacks_s TEST_DECODE_CALLBACKS = {
+    .on_string = test_decode_string,
+    .on_map = test_decode_map,
+    .map_set = test_decode_set,
+    .map_done = test_body_map_done,
+    .on_error = test_decode_error,
+    .free_unused = test_body_free_unused,
+};
+
+static void test_decode_parse(const char *content_type,
+                              const char *body,
+                              size_t body_len,
+                              test_decode_ctx_s *ctx) {
+  fio_http_s *h = test_body_make_handle(content_type, body, body_len);
+  FIO_ASSERT(h, "decode regression: handle allocation failed");
+  fio_http_body_parse_result_s r =
+      fio_http_body_parse(h, &TEST_DECODE_CALLBACKS, ctx);
+  FIO_ASSERT(!r.err && ctx->seen == 1,
+             "decode regression: parse err=%d pairs=%zu", r.err, ctx->seen);
+  test_body_free_result(&r);
+  fio_http_free(h);
+}
+
+static void test_body_decode_boundaries(void) {
+  fprintf(stderr, "  * JSON escape and URL form decode allocation boundaries\n");
+  static const size_t json_sizes[] = {4094, 4095, 4096, 4097, 8192};
+  static const size_t form_name_sizes[] = {1023, 1024, 1025, 2048};
+  static const size_t form_value_sizes[] = {4095, 4096, 4097, 8192};
+  for (size_t i = 0; i < sizeof(json_sizes) / sizeof(*json_sizes); ++i) {
+    size_t n = json_sizes[i];
+    char *expected = (char *)malloc(n + 1);
+    char *body = (char *)malloc(n + 32);
+    FIO_ASSERT(expected && body, "JSON fixture allocation failed");
+    memset(expected, 'a', n);
+    expected[n - 1] = '\n';
+    expected[n] = 0;
+    /* Escape crosses the 4095-byte decoded-buffer boundary at n=4096. */
+    memcpy(body, "{\"k\":\"", 6);
+    memset(body + 6, 'a', n - 1);
+    memcpy(body + 6 + n - 1, "\\n\"}", 4);
+    test_decode_ctx_s ctx = {"k", 1, expected, n, 0};
+    test_decode_parse("application/json", body, n + 9, &ctx);
+    /* Also test an escaped key with a large decoded value. */
+    memcpy(body, "{\"\\u006b\":\"", 11);
+    memset(body + 11, 'a', n - 1);
+    memcpy(body + 11 + n - 1, "\\n\"}", 4);
+    ctx.seen = 0;
+    test_decode_parse("application/json", body, n + 14, &ctx);
+    free(body);
+    free(expected);
+  }
+  /* Test-only isolation: let ASan reach JSON cases without the known form OOB. */
+  if (getenv("FIO_TEST_JSON_ONLY"))
+    return;
+  for (size_t i = 0; i < sizeof(form_name_sizes) / sizeof(*form_name_sizes); ++i) {
+    size_t nl = form_name_sizes[i];
+    size_t vl = form_value_sizes[i];
+    char *name = (char *)malloc(nl + 1);
+    char *value = (char *)malloc(vl + 1);
+    char *body = (char *)malloc(nl + vl + 16);
+    FIO_ASSERT(name && value && body, "form fixture allocation failed");
+    memset(name, 'n', nl);
+    memset(value, 'v', vl);
+    name[0] = 'A';
+    value[0] = 'B';
+    name[nl] = value[vl] = 0;
+    memcpy(body, "%41", 3);
+    memset(body + 3, 'n', nl - 1);
+    body[nl + 2] = '=';
+    memcpy(body + nl + 3, "%42", 3);
+    memset(body + nl + 6, 'v', vl - 1);
+    test_decode_ctx_s ctx = {name, nl, value, vl, 0};
+    test_decode_parse("application/x-www-form-urlencoded",
+                      body, nl + vl + 5, &ctx);
+    free(body);
+    free(value);
+    free(name);
+  }
+}
+
+/* Concurrent escaped JSON exercises the shared static allocator's ownership. */
+static void *test_decode_thread(void *arg) {
+  size_t id = (size_t)(uintptr_t)arg;
+  char *expected = (char *)malloc(5001);
+  char *body = (char *)malloc(5016);
+  FIO_ASSERT(expected && body, "concurrent fixture allocation failed");
+  memset(expected, (int)('a' + id), 4999);
+  expected[4999] = '\n';
+  expected[5000] = 0;
+  memcpy(body, "{\"k\":\"", 6);
+  memset(body + 6, (int)('a' + id), 4999);
+  memcpy(body + 5005, "\\n\"}", 4);
+  for (size_t i = 0; i < 1; ++i) {
+    test_decode_ctx_s ctx = {"k", 1, expected, 5000, 0};
+    test_decode_parse("application/json", body, 5009, &ctx);
+  }
+  free(body);
+  free(expected);
+  return NULL;
+}
+
+static void test_body_decode_concurrent(void) {
+  fprintf(stderr, "  * concurrent escaped JSON decode\n");
+  fio_thread_t threads[8];
+  for (size_t i = 0; i < 8; ++i)
+    FIO_ASSERT(!fio_thread_create(&threads[i], test_decode_thread,
+                                  (void *)(uintptr_t)i),
+               "decode thread creation failed");
+  for (size_t i = 0; i < 8; ++i)
+    FIO_ASSERT(!fio_thread_join(&threads[i]), "decode thread join failed");
+}
+
 /* ===========================================================================
    T008 — Accept-Encoding q-values and dynamic compression guards
    ===========================================================================
@@ -1893,6 +2052,8 @@ int main(void) {
   test_body_parse_unknown_content_type();
   test_body_parse_null_callbacks();
   test_body_parse_null_handle();
+  test_body_decode_boundaries();
+  test_body_decode_concurrent();
 
   fprintf(stderr, "\nTesting accept-encoding / dynamic compression:\n");
   test_accept_encoding_qvalues();
