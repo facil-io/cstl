@@ -428,6 +428,20 @@ static void test_settings_and_io_queries(void) {
    ===========================================================================
  */
 
+/* Construct paths without silently truncating a test fixture name. */
+static void test_static_path(char *dst,
+                             size_t cap,
+                             const char *dir,
+                             size_t dir_len,
+                             const char *name) {
+  size_t name_len = strlen(name);
+  FIO_ASSERT(name_len < cap && dir_len < cap - name_len - 1,
+             "static test path too long");
+  FIO_MEMCPY(dst, dir, dir_len);
+  dst[dir_len] = FIO_FOLDER_SEPARATOR;
+  FIO_MEMCPY(dst + dir_len + 1, name, name_len + 1);
+}
+
 static void test_static_file_response(void) {
   fprintf(stderr, "  * static file response\n");
 
@@ -464,7 +478,7 @@ static void test_static_file_response(void) {
              "failed to create static test directory");
 
   char path[512];
-  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
+  test_static_path(path, sizeof(path), dir, len, "test.txt");
   const char *content = "hello static file";
   FILE *f = fopen(path, "w");
   FIO_ASSERT(f, "failed to create static test file");
@@ -663,7 +677,7 @@ static size_t test_static_make_tree(char *dir,
     return 0;
 
   char path[512];
-  snprintf(path, sizeof(path), "%s%ctest.txt", dir, FIO_FOLDER_SEPARATOR);
+  test_static_path(path, sizeof(path), dir, len, "test.txt");
   FILE *f = fopen(path, "wb");
   FIO_ASSERT(f, "failed to create static vary test file");
   FIO_ASSERT(fwrite(content, 1, content_len, f) == content_len,
@@ -672,11 +686,7 @@ static size_t test_static_make_tree(char *dir,
 
   if (with_gz_variant) {
     char gzpath[512];
-    snprintf(gzpath,
-             sizeof(gzpath),
-             "%s%ctest.txt.gz",
-             dir,
-             FIO_FOLDER_SEPARATOR);
+    test_static_path(gzpath, sizeof(gzpath), dir, len, "test.txt.gz");
     size_t bound = fio_deflate_compress_bound(content_len) + 18;
     uint8_t *gz = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
     FIO_ASSERT(gz, "failed to allocate gzip variant buffer");
@@ -1211,19 +1221,26 @@ static void test_websocket_connect_wrapper(void) {
    *     must all produce a handle carrying the WebSocket upgrade request. */
   {
     static const struct {
-      const char *fmt;
+      const char *prefix;
       const char *path;
       const char *query;
       const char *host;
     } cases[] = {
-        {"http://127.0.0.1:%u/ws-path?x=1", "/ws-path", "x=1", "127.0.0.1"},
-        {"https://127.0.0.1:%u/p", "/p", "", "127.0.0.1"},
-        {"ws://127.0.0.1:%u/p", "/p", "", "127.0.0.1"},
-        {"localhost:%u/p", "/p", "", "localhost"},
+        {"http://127.0.0.1:", "/ws-path", "x=1", "127.0.0.1"},
+        {"https://127.0.0.1:", "/p", "", "127.0.0.1"},
+        {"ws://127.0.0.1:", "/p", "", "127.0.0.1"},
+        {"localhost:", "/p", "", "localhost"},
     };
     for (size_t i = 0; i < 4; ++i) {
       char url[256];
-      snprintf(url, sizeof(url), cases[i].fmt, port);
+      snprintf(url,
+               sizeof(url),
+               "%s%u%s%s%s",
+               cases[i].prefix,
+               port,
+               cases[i].path,
+               *cases[i].query ? "?" : "",
+               cases[i].query);
       test_ws_rec_on_http_calls = test_ws_rec_on_open_calls = 0;
       fio_http_s *h = fio_http_new();
       fio_io_s *io = fio_http_websocket_connect(url,
@@ -1516,7 +1533,7 @@ static void test_static_compress_attached_readonly(void) {
     skipped = 1;
   } else {
     char probe[512];
-    snprintf(probe, sizeof(probe), "%s%cprobe.tmp", dir, FIO_FOLDER_SEPARATOR);
+    test_static_path(probe, sizeof(probe), dir, dir_len, "probe.tmp");
     FILE *pf = fopen(probe, "wb");
     if (pf) {
       fclose(pf);
@@ -1590,19 +1607,11 @@ static void test_static_compress_attached_readonly(void) {
   {
     struct stat vst;
     char vpath[512];
-    snprintf(vpath,
-             sizeof(vpath),
-             "%s%ctest.txt.br",
-             dir,
-             FIO_FOLDER_SEPARATOR);
+    test_static_path(vpath, sizeof(vpath), dir, dir_len, "test.txt.br");
     FIO_ASSERT(fio_filename_stat(vpath, &vst),
                "read-only req2: no .br variant may be created after "
                "memoized failure");
-    snprintf(vpath,
-             sizeof(vpath),
-             "%s%ctest.txt.gz",
-             dir,
-             FIO_FOLDER_SEPARATOR);
+    test_static_path(vpath, sizeof(vpath), dir, dir_len, "test.txt.gz");
     FIO_ASSERT(fio_filename_stat(vpath, &vst),
                "read-only req2: no .gz variant may be created after "
                "memoized failure");
@@ -1663,11 +1672,7 @@ static void test_static_compress_detached_creation(void) {
   {
     struct stat vst;
     char vpath[512];
-    snprintf(vpath,
-             sizeof(vpath),
-             "%s%ctest.txt.br",
-             dir,
-             FIO_FOLDER_SEPARATOR);
+    test_static_path(vpath, sizeof(vpath), dir, dir_len, "test.txt.br");
     FIO_ASSERT(!fio_filename_stat(vpath, &vst) && vst.st_size > 0,
                "detached creation: the .br variant must be created on "
                "disk");

@@ -337,7 +337,6 @@ static void test_quality_roundtrips(void) {
   uint8_t text[TEXT_LEN];
   uint8_t binary[BINARY_LEN];
   uint8_t out[TEXT_LEN + 64];
-  size_t lens[7] = {0};
   fio___brotli_make_corpus(text, sizeof(text));
   fio___brotli_fill_pattern(binary, sizeof(binary), 0xC0FFEEU);
 
@@ -349,7 +348,6 @@ static void test_quality_roundtrips(void) {
                                         text,
                                         sizeof(text),
                                         quality);
-      lens[quality] = clen;
       TEST_ASSERT(clen > 0 && clen <= sizeof(compressed),
                   "text q%d: compress returned %zu",
                   quality,

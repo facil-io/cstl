@@ -149,9 +149,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_boolean)(void) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_bit_string)(void) {
   fio_der_element_s elem;
-  const uint8_t *bits;
-  size_t bit_len;
-  uint8_t unused;
+  const uint8_t *bits = NULL;
+  size_t bit_len = 0;
+  uint8_t unused = 0;
 
   FIO_ASSERT(fio_der_parse(&elem, test_bitstring, sizeof(test_bitstring)) &&
                  fio_der_parse_bit_string(&elem, &bits, &bit_len, &unused) ==
@@ -269,8 +269,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_string)(void) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_time)(void) {
   fio_der_element_s elem;
-  int64_t utc_ts;
-  int64_t gen_ts;
+  int64_t utc_ts = 0;
+  int64_t gen_ts = 0;
 
   FIO_ASSERT(fio_der_parse(&elem, test_utc_time, sizeof(test_utc_time)) &&
                  fio_der_parse_time(&elem, &utc_ts) == 0,

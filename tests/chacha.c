@@ -308,6 +308,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, chacha20_poly1305_edges)(void) {
   fio_rand_bytes(key, 32);
   fio_rand_bytes(nonce, 12);
   fio_rand_bytes(plaintext, sizeof(plaintext));
+  fio_rand_bytes(aad, sizeof(aad));
 
   /* Empty plaintext with non-empty AAD */
   {
@@ -485,6 +486,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, xchacha20_poly1305_edges)(void) {
   fio_rand_bytes(key, 32);
   fio_rand_bytes(nonce, 24);
   fio_rand_bytes(plaintext, sizeof(plaintext));
+  fio_rand_bytes(aad, sizeof(aad));
 
   /* Empty plaintext roundtrip */
   {

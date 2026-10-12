@@ -1612,6 +1612,12 @@ FIO_SFUNC void fio___test_core_type_sizes(void) {
   FIO_PRINT_SIZE_OF(void *);
   FIO_PRINT_SIZE_OF(uintmax_t);
   FIO_PRINT_SIZE_OF(long double);
+  FIO_PRINT_SIZE_OF(fio_u128);
+  FIO_PRINT_SIZE_OF(fio_u256);
+  FIO_PRINT_SIZE_OF(fio_u512);
+  FIO_PRINT_SIZE_OF(fio_u1024);
+  FIO_PRINT_SIZE_OF(fio_u2048);
+  FIO_PRINT_SIZE_OF(fio_u4096);
 #ifdef __SIZEOF_INT128__
   FIO_PRINT_SIZE_OF(__uint128_t);
 #endif

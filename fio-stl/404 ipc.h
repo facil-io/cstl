@@ -1153,7 +1153,7 @@ FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
   ipc->from = io_;
   fio_u128 *uuid = fio_io_buffer(io_);
-  fio_u128 peer_uuid;
+  fio_u128 peer_uuid = {0};
 
   if (fio_ipc_decrypt(ipc))
     goto peer_error;
@@ -1183,7 +1183,13 @@ FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
 uuid_msg:
   if (uuid->u64[0] || uuid->u64[1])
     goto peer_error; /* Already received UUID from this connection */
-  fio_memcpy16(&peer_uuid, &ipc->on_reply);
+  if (sizeof(ipc->on_reply) >= 8) {
+    fio_memcpy8(&peer_uuid, (char *)(void *)(&ipc->on_reply));
+    fio_memcpy8(&peer_uuid.u8[8], (char *)(void *)(&ipc->on_done));
+  } else /* (sizeof(ipc->on_reply) >= 4) */ {
+    fio_memcpy4(&peer_uuid, (char *)(void *)(&ipc->on_reply));
+    fio_memcpy4(&peer_uuid.u8[4], (char *)(void *)(&ipc->on_done));
+  }
   /* test if we already connected to peer previously */
   if (fio___ipc_cluster_filter(&FIO___IPC.peers,
                                peer_uuid.u64[0],
@@ -1664,6 +1670,8 @@ FIO_SFUNC void fio___ipc_cluster_udp_start(uint16_t port) {
 /* *****************************************************************************
 IPC - Remote - New Connection Attachments
 ***************************************************************************** */
+FIO_ASSERT_STATIC((sizeof(void (*)(void *)) >= 4),
+                  "function pointers MUST be 4 bytes or more");
 SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
   /* set peer UUID to zero and initialize parser */
   *fio___ipc_cluster_uuid(io) = fio_u128_init64(0, 0);
@@ -1674,7 +1682,14 @@ SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
   ipc->opcode = (uint32_t)0xFFFFFFFF;
   ipc->udata = FIO_IPC_EXCLUDE_SELF;
   ipc->routing_flags |= (FIO_IPC_FLAG_CLUSTER | FIO_IPC_FLAG_OPCODE);
-  fio_memcpy16(&ipc->on_reply, FIO___IPC.uuid.u8);
+  /* Store UUID over the `ipc->on_reply` and `ipc->on_done pointers */
+  if (sizeof(ipc->on_reply) >= 8) {
+    fio_memcpy8((char *)(void *)(&ipc->on_reply), FIO___IPC.uuid.u8);
+    fio_memcpy8((char *)(void *)(&ipc->on_done), FIO___IPC.uuid.u8 + 8);
+  } else /* (sizeof(ipc->on_reply) >= 4) */ {
+    fio_memcpy4((char *)(void *)(&ipc->on_reply), FIO___IPC.uuid.u8);
+    fio_memcpy4((char *)(void *)(&ipc->on_done), FIO___IPC.uuid.u8 + 4);
+  }
   fio_ipc_send_to(io, ipc);
 }
 

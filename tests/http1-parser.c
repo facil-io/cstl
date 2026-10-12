@@ -98,18 +98,19 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
   return 0;
 }
 
-static size_t run_parse(parser_state_s *st, char *buf, size_t len) {
-  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
-  st->parser = &parser;
-  return fio_http1_parse(&parser, FIO_BUF_INFO2(buf, len), st);
-}
-
 static size_t run_parse_persist(parser_state_s *st,
                                 fio_http1_parser_s *parser,
                                 char *buf,
                                 size_t len) {
-  st->parser = parser;
-  return fio_http1_parse(parser, FIO_BUF_INFO2(buf, len), st);
+  st->parser = parser; /* available to callbacks only during this parse */
+  size_t result = fio_http1_parse(parser, FIO_BUF_INFO2(buf, len), st);
+  st->parser = NULL;
+  return result;
+}
+
+static size_t run_parse(parser_state_s *st, char *buf, size_t len) {
+  fio_http1_parser_s parser = FIO_HTTP1_PARSER_INIT;
+  return run_parse_persist(st, &parser, buf, len);
 }
 
 /* ===========================================================================

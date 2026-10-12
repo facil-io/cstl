@@ -1318,12 +1318,14 @@ static fio_io_protocol_s fio___test_io_zombie_plain;
 
 /* Reads the tail written to the peer (non-blocking, retried per tick). */
 static int fio___test_io_zombie_read_tail(void) {
-  ssize_t r = fio_sock_read(
-      fio___test_io_zombie.peer,
-      fio___test_io_zombie.tail + fio___test_io_zombie.tail_len,
-      sizeof(fio___test_io_zombie.tail) - 1 - fio___test_io_zombie.tail_len);
+  size_t tail_len = fio___test_io_zombie.tail_len;
+  if (tail_len >= 4 || tail_len >= sizeof(fio___test_io_zombie.tail) - 1)
+    return tail_len >= 4;
+  ssize_t r = fio_sock_read(fio___test_io_zombie.peer,
+                            fio___test_io_zombie.tail + tail_len,
+                            sizeof(fio___test_io_zombie.tail) - 1 - tail_len);
   if (r > 0)
-    fio___test_io_zombie.tail_len += (size_t)r;
+    fio___test_io_zombie.tail_len = tail_len + (size_t)r;
   return fio___test_io_zombie.tail_len >= 4;
 }
 

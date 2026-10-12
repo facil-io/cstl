@@ -559,7 +559,7 @@ FIO_SFUNC fio_u256 fio___risky256_finalize(uint64_t v0[8], uint64_t v1[8]) {
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_primes[i];
   fio___risky256_round(v0);
-  fio_u256 r;
+  fio_u256 r = {0};
   for (size_t i = 0; i < 4; ++i)
     r.u64[i] = v0[i] ^ v0[i + 4];
   return r;
@@ -583,7 +583,7 @@ FIO_SFUNC fio_u512 fio___risky512_finalize(uint64_t v0[8], uint64_t v1[8]) {
     v0[i] ^= fio___risky256_extra0[i];
   fio___risky256_round(v0);
   /* First squeeze: 256 bits */
-  fio_u512 r;
+  fio_u512 r = {0};
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_primes[i];
   fio___risky256_round(v0);
@@ -942,10 +942,12 @@ SFUNC int fio_rand_bytes_secure(void *target, size_t len) {
   arc4random_buf(target, len);
   return 0;
 #elif FIO_OS_WIN && !defined(__CYGWIN__)
-  /* Windows: system-preferred CSPRNG; ULONG is 32 bit, so chunk large requests */
+  /* Windows: system-preferred CSPRNG; ULONG is 32 bit, so chunk large requests
+   */
   uint8_t *buf = (uint8_t *)target;
   while (len) {
-    ULONG chunk = (len > (size_t)0x40000000UL) ? (ULONG)0x40000000UL : (ULONG)len;
+    ULONG chunk =
+        (len > (size_t)0x40000000UL) ? (ULONG)0x40000000UL : (ULONG)len;
     NTSTATUS st = BCryptGenRandom(NULL,
                                   (PUCHAR)buf,
                                   chunk,
@@ -977,7 +979,7 @@ SFUNC int fio_rand_bytes_secure(void *target, size_t len) {
   if (!len)
     return 0;
 #endif /* FIO___RAND_HAS_GETRANDOM */
-  /* Generic POSIX fallback: read from /dev/urandom */
+    /* Generic POSIX fallback: read from /dev/urandom */
 #ifdef O_CLOEXEC
   int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
 #else

@@ -1077,13 +1077,13 @@ FIO_SFUNC int fio___test_risky256_length_extension(void) {
   int ext_eq_m = !fio___u256_cmp(h_ext, h_m);
 
   /* h_ext should not equal h_m XOR h_mp */
-  fio_u256 h_xor;
+  fio_u256 h_xor = {0};
   for (size_t i = 0; i < 4; ++i)
     h_xor.u64[i] = h_m.u64[i] ^ h_mp.u64[i];
   int ext_eq_xor = !fio___u256_cmp(h_ext, h_xor);
 
   /* h_ext should not equal h_m + h_mp (wrapping add) */
-  fio_u256 h_add;
+  fio_u256 h_add = {0};
   for (size_t i = 0; i < 4; ++i)
     h_add.u64[i] = h_m.u64[i] + h_mp.u64[i];
   int ext_eq_add = !fio___u256_cmp(h_ext, h_add);
