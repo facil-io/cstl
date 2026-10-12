@@ -1,6 +1,16 @@
 # Change Log
 
-### Unreleased (2026-08-08)
+### v.0.8.0
+
+This release includes the fixes and API changes below, plus the changes recorded under the earlier `edge` and `v.0.8.0.rc.01` entries. The `edge` tag remains a rolling prerelease, not the numbered 0.8.0 release.
+
+**Fix**: (`websocket`) generic client writes now frame and mask their payloads, including writes sourced from a file descriptor. The client no longer sends an unmasked payload while setting the WebSocket MASK bit. Round-trip coverage includes client and server messages.
+
+**Fix**: (`string core`, `http`) URL decoding now reserves enough space for decoded `%XX`, `%uXXXX`, and literal `%` sequences at allocation boundaries. HTTP body parsing has JSON escape and URL-encoded form boundary regressions, including concurrent JSON decoding coverage.
+
+**Fix**: (`string core`) Base32 encoding and decoding now handle padding and partial final groups correctly. The 3-byte round-trip case and RFC 4648 vectors have regression coverage.
+
+**Fix**: (`fx86`, `random`) portable vector fallbacks initialize their result storage before use; this includes vector results in the random module. (`ipc`) cluster peer UUID transfer no longer assumes function pointers occupy 16 contiguous bytes; it copies the UUID across the two pointer-sized slots.
 
 **Security**: (`rand`) `fio_rand_bytes_secure` always failed on Windows (no `/dev/urandom`), so callers either errored or silently used the non-cryptographic PRNG (RSA blinding, RSA-PSS salt, `fio_otp_generate_key`). Windows now uses `BCryptGenRandom` (`BCRYPT_USE_SYSTEM_PREFERRED_RNG`; MSVC auto-links `bcrypt.lib`, **MinGW / GNU-driver builds must link `-lbcrypt`**). Linux prefers `getrandom` (no fd, works in chroots), falling back to `/dev/urandom` (now opened `O_CLOEXEC`) when the syscall is unavailable or blocked. A `NULL` target with `len > 0` now returns `-1` instead of a false success.
 
