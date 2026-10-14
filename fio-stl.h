@@ -54817,12 +54817,13 @@ FIO_IFUNC int fio___p256_scalar_gte_n(const fio___p256_scalar_s a) {
 
 /** Secret-safe check: returns 1 if scalar >= n (curve order). */
 FIO_IFUNC int fio___p256_scalar_ct_gte_n(const fio___p256_scalar_s a) {
-  uint64_t borrow = 0;
-  (void)fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
-  (void)fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
-  (void)fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
-  (void)fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
+  uint64_t borrow = 0, ignr;
+  ignr = fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
+  ignr = fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
+  ignr = fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
+  ignr = fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
   return (int)(borrow ^ 1);
+  (void)ignr;
 }
 
 /** Secret-safe conditional scalar subtraction: a = cond ? a - n : a. */
@@ -58997,7 +58998,7 @@ FIO_SFUNC void fio___rsa_mul_mod(uint64_t *result,
 FIO_SFUNC uint64_t fio___rsa_ct_lt(const uint64_t *a,
                                    const uint64_t *b,
                                    size_t word_count) {
-  uint64_t lt = 0;
+  uint64_t lt = 0, ignr;
   uint64_t eq = (uint64_t)0 - 1; /* ~0 */
   for (size_t i = word_count; i > 0;) {
     --i;
@@ -59005,11 +59006,12 @@ FIO_SFUNC uint64_t fio___rsa_ct_lt(const uint64_t *a,
     uint64_t b_i = b[i];
     uint64_t diff = a_i ^ b_i;
     uint64_t borrow = 0;
-    (void)fio_math_subc64(a_i, b_i, 0, &borrow); /* borrow=1 iff a_i < b_i */
+    ignr = fio_math_subc64(a_i, b_i, 0, &borrow); /* borrow=1 iff a_i < b_i */
     lt |= (eq & borrow);
     eq &= (uint64_t)0 - (diff == 0);
   }
   return lt & 1;
+  (void)ignr;
 }
 
 /**
@@ -59037,15 +59039,15 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
     size_t high_words = full_word_count - mod_word_count;
     if (high_words > mod_word_count)
       high_words = mod_word_count;
-    FIO_MEMCPY(m_high, m_full + mod_word_count,
-               high_words * sizeof(uint64_t));
+    FIO_MEMCPY(m_high, m_full + mod_word_count, high_words * sizeof(uint64_t));
   }
 
   /* Montgomery multiplication below expects operands in normal form (< mod).
    * Since mod has its top bit set for RSA primes, m_high < R < 2*mod, so one
    * branchless conditional subtraction is sufficient. */
   uint64_t m_high_sub[FIO_RSA_MAX_WORDS];
-  uint64_t m_high_borrow = fio_math_sub(m_high_sub, m_high, mod, mod_word_count);
+  uint64_t m_high_borrow =
+      fio_math_sub(m_high_sub, m_high, mod, mod_word_count);
   uint64_t use_m_high_sub = (uint64_t)0 - (m_high_borrow ^ 1);
   uint64_t use_m_high = (uint64_t)0 - m_high_borrow;
   for (size_t i = 0; i < mod_word_count; ++i)
@@ -59072,7 +59074,7 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
   uint64_t carry_add[FIO_RSA_MAX_WORDS];
   for (size_t i = 0; i < mod_word_count; ++i)
     carry_add[i] = R_mod_mod[i] & carry_mask;
-  (void)fio_math_add(out, out, carry_add, mod_word_count);
+  uint64_t ignr_ = fio_math_add(out, out, carry_add, mod_word_count);
 
   /* For RSA primes R < 2*mod, so the value is < 2*mod after carry handling.
    * Two conditional subtractions are kept for conservative normalization. */
@@ -59092,6 +59094,7 @@ FIO_SFUNC void fio___rsa_reduce_mod(uint64_t *out,
   fio_secure_zero(m_high, sizeof(m_high));
   fio_secure_zero(m_high_sub, sizeof(m_high_sub));
   fio_secure_zero(carry_add, sizeof(carry_add));
+  (void)ignr_;
 }
 
 /**
@@ -59179,11 +59182,11 @@ FIO_SFUNC void fio___rsa_mul_mod(uint64_t *result,
  * where R = 2^(64 * word_count).
  */
 FIO_SFUNC void fio___rsa_mont_mul(uint64_t *result,
-                                   const uint64_t *a,
-                                   const uint64_t *b,
-                                   const uint64_t *n,
-                                   const uint64_t *n_prime,
-                                   size_t word_count) {
+                                  const uint64_t *a,
+                                  const uint64_t *b,
+                                  const uint64_t *n,
+                                  const uint64_t *n_prime,
+                                  size_t word_count) {
   uint64_t t[FIO_RSA_MAX_WORDS * 2];
   uint64_t m_full[FIO_RSA_MAX_WORDS * 2];
   uint64_t mn[FIO_RSA_MAX_WORDS * 2];
@@ -59221,9 +59224,9 @@ FIO_SFUNC void fio___rsa_mont_mul(uint64_t *result,
  *   r2modn is R^2 mod n.
  */
 FIO_SFUNC void fio___rsa_mont_setup(const uint64_t *n,
-                                     size_t word_count,
-                                     uint64_t *n_prime,
-                                     uint64_t *r2modn) {
+                                    size_t word_count,
+                                    uint64_t *n_prime,
+                                    uint64_t *r2modn) {
   uint64_t n_ext[FIO_RSA_MAX_WORDS * 2];
   uint64_t tmp[FIO_RSA_MAX_WORDS * 2];
   uint64_t prod[FIO_RSA_MAX_WORDS * 2];
@@ -59234,7 +59237,8 @@ FIO_SFUNC void fio___rsa_mont_setup(const uint64_t *n,
   n_prime[0] = (uint64_t)0 - n0_inv;
 
   for (int iter = 0; iter < 16; ++iter) {
-    /* prod = n * n_prime + 2  (Newton step for n' satisfying n*n' == -1 mod R) */
+    /* prod = n * n_prime + 2  (Newton step for n' satisfying n*n' == -1 mod R)
+     */
     fio_math_mul(prod, n, n_prime, word_count);
     uint64_t c = 0;
     prod[0] = fio_math_addc64(prod[0], 2, 0, &c);
@@ -59786,6 +59790,7 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
                                        const uint64_t *m_words,
                                        const fio_rsa_privkey_s *key,
                                        size_t word_count) {
+  uint64_t ignr_ = 0;
   const uint8_t *n_be = key->n;
   const uint8_t *p_be = key->p;
   const uint8_t *q_be = key->q;
@@ -59811,8 +59816,8 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
   size_t p_word_count = (p_len + 7) / 8;
   size_t q_word_count = (q_len + 7) / 8;
 
-  if (!p_word_count || p_word_count > FIO_RSA_MAX_WORDS / 2 ||
-      !q_word_count || q_word_count > FIO_RSA_MAX_WORDS / 2)
+  if (!p_word_count || p_word_count > FIO_RSA_MAX_WORDS / 2 || !q_word_count ||
+      q_word_count > FIO_RSA_MAX_WORDS / 2)
     return -1;
 
   uint64_t n_words[FIO_RSA_MAX_WORDS];
@@ -59881,10 +59886,10 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
   FIO_MEMSET(q_minus_2, 0, sizeof(q_minus_2));
   FIO_MEMCPY(p_minus_2, p, p_word_count * sizeof(uint64_t));
   FIO_MEMCPY(q_minus_2, q, q_word_count * sizeof(uint64_t));
-  (void)fio_math_sub(p_minus_2, p_minus_2, one, p_word_count); /* p-1 */
-  (void)fio_math_sub(p_minus_2, p_minus_2, one, p_word_count); /* p-2 */
-  (void)fio_math_sub(q_minus_2, q_minus_2, one, q_word_count); /* q-1 */
-  (void)fio_math_sub(q_minus_2, q_minus_2, one, q_word_count); /* q-2 */
+  ignr_ = fio_math_sub(p_minus_2, p_minus_2, one, p_word_count); /* p-1 */
+  ignr_ = fio_math_sub(p_minus_2, p_minus_2, one, p_word_count); /* p-2 */
+  ignr_ = fio_math_sub(q_minus_2, q_minus_2, one, q_word_count); /* q-1 */
+  ignr_ = fio_math_sub(q_minus_2, q_minus_2, one, q_word_count); /* q-2 */
 
   uint64_t r_inv_p[FIO_RSA_MAX_WORDS];
   uint64_t r_inv_q[FIO_RSA_MAX_WORDS];
@@ -59904,7 +59909,7 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
   uint64_t use_add = (uint64_t)0 - borrow;
   for (size_t i = 0; i < p_word_count; ++i)
     p_mask[i] = p[i] & use_add;
-  (void)fio_math_add(diff, diff, p_mask, p_word_count);
+  ignr_ = fio_math_add(diff, diff, p_mask, p_word_count);
   fio___rsa_mul_mod(h, qInv, diff, p, p_word_count);
 
   /* q * h mod n (zero-extend q and h to word_count) */
@@ -59920,7 +59925,7 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
 
   uint64_t qh[FIO_RSA_MAX_WORDS];
   fio___rsa_mul_mod(qh, q_ext, h_ext, n_words, word_count);
-  (void)fio_math_add(result_words, qh, s_q_ext, word_count);
+  ignr_ = fio_math_add(result_words, qh, s_q_ext, word_count);
 
   /* result may be in [0, 2*n); reduce once. */
   uint64_t sub_n[FIO_RSA_MAX_WORDS];
@@ -59960,6 +59965,7 @@ FIO_SFUNC int fio___rsa_private_op_crt(uint64_t *result_words,
   fio_secure_zero(n_words, sizeof(n_words));
 
   return 0;
+  (void)ignr_;
 }
 
 /**
@@ -60007,9 +60013,9 @@ FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
   fio___rsa_bytes_to_words(d_words, word_count, d, d_len);
   fio___rsa_bytes_to_words(msg_words, word_count, message, msg_len);
 
-  int have_crt = (key->p && key->p_len && key->q && key->q_len &&
-                  key->dP && key->dP_len && key->dQ && key->dQ_len &&
-                  key->qInv && key->qInv_len && key->e && key->e_len);
+  int have_crt = (key->p && key->p_len && key->q && key->q_len && key->dP &&
+                  key->dP_len && key->dQ && key->dQ_len && key->qInv &&
+                  key->qInv_len && key->e && key->e_len);
   int rc = -1;
 
   /* Verify message < modulus (constant-time). */
@@ -60022,8 +60028,11 @@ FIO_SFUNC int fio___rsa_private_op(uint8_t *result,
     /* No CRT parameters: fall back to the plain constant-time Montgomery
      * ladder.  Production signing keys should supply CRT parameters so the
      * CRT+blinding path above is used. */
-    rc = fio___rsa_private_op_non_crt(
-        result_words, msg_words, d_words, n_words, word_count);
+    rc = fio___rsa_private_op_non_crt(result_words,
+                                      msg_words,
+                                      d_words,
+                                      n_words,
+                                      word_count);
   }
 
   if (rc == 0)
@@ -60186,8 +60195,12 @@ SFUNC int fio_rsa_sign_pss(uint8_t *signature,
 
   /* Step 1: EMSA-PSS-ENCODE */
   uint8_t em[FIO_RSA_MAX_BYTES];
-  if (fio___rsa_emsa_pss_encode(
-          em, n_len, msg_hash, hash_len, hash_alg, top_mask) != 0) {
+  if (fio___rsa_emsa_pss_encode(em,
+                                n_len,
+                                msg_hash,
+                                hash_len,
+                                hash_alg,
+                                top_mask) != 0) {
     return -1;
   }
 

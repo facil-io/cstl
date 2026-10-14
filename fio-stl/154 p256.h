@@ -656,12 +656,13 @@ FIO_IFUNC int fio___p256_scalar_gte_n(const fio___p256_scalar_s a) {
 
 /** Secret-safe check: returns 1 if scalar >= n (curve order). */
 FIO_IFUNC int fio___p256_scalar_ct_gte_n(const fio___p256_scalar_s a) {
-  uint64_t borrow = 0;
-  (void)fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
-  (void)fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
-  (void)fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
-  (void)fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
+  uint64_t borrow = 0, ignr;
+  ignr = fio_math_subc64(a[0], FIO___P256_N[0], 0, &borrow);
+  ignr = fio_math_subc64(a[1], FIO___P256_N[1], borrow, &borrow);
+  ignr = fio_math_subc64(a[2], FIO___P256_N[2], borrow, &borrow);
+  ignr = fio_math_subc64(a[3], FIO___P256_N[3], borrow, &borrow);
   return (int)(borrow ^ 1);
+  (void)ignr;
 }
 
 /** Secret-safe conditional scalar subtraction: a = cond ? a - n : a. */

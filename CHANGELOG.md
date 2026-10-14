@@ -1,6 +1,10 @@
 # Change Log
 
-### v.0.8.0
+### Unreleased
+
+
+
+### v.0.8.0 - 2026-10-12
 
 This release includes the fixes and API changes below, plus the changes recorded under the earlier `edge` and `v.0.8.0.rc.01` entries. The `edge` tag remains a rolling prerelease, not the numbered 0.8.0 release.
 
