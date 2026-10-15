@@ -73,7 +73,7 @@ supports macros that will help detect and validate it's version.
 /** MINOR version: Deprecation, or significant features added. May break ABI. */
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
-#define FIO_VERSION_PATCH 1
+#define FIO_VERSION_PATCH 2
 /** Build version: optional build info (string), i.e. "beta.02" */
 /* #define FIO_VERSION_BUILD */
 
@@ -2146,6 +2146,7 @@ FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf32u(buf, i); }
 #warning                                                                       \
     "Couldn't calculate local version for fio_buf2zu and fio_u2bufzu\n\tSIZE_T_MAX == "##SIZE_T_MAX
 #endif
+
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
 ***************************************************************************** */
@@ -5026,7 +5027,85 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
   }
 
 /* *****************************************************************************
-String and Buffer Information Containers + Helper Macros
+Finding first different byte
+***************************************************************************** */
+#if FIO___DIFF_INDEX
+/**
+ * Returns index of first different byte, or original length if none found.
+ */
+FIO_SFUNC size_t fio___diff_index(const void *a_, const void *b_, size_t len) {
+
+  const uint8_t *a = a_, *b = b_;
+  if (FIO_UNLIKELY(!len | (a == b)))
+    return len;
+  if (a[0] != b[0])
+    return 0;
+  if (len == 1)
+    return len;
+  size_t i = 0;
+  while (len > 127) {
+    uint64_t a1[16], b1[16], tst = 0;
+    fio_memcpy128(a1, a + i);
+    fio_memcpy128(b1, b + i);
+    for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j)
+      tst |= (a1[j] ^ b1[j]);
+    if (tst) {
+      len |= 127;
+      break;
+    }
+    i += 128;
+    len -= 128;
+  }
+
+#define fio___diff_index_step(half)                                            \
+  do {                                                                         \
+    if ((len & half)) {                                                        \
+      uint64_t a1[(half / 8)], b1[(half / 8)];                                 \
+      for (size_t rounds = (len == half); 1; ++rounds) {                       \
+        uint64_t tst = 0;                                                      \
+        fio_memcpy##half(a1, a + i);                                           \
+        fio_memcpy##half(b1, b + i);                                           \
+        for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j) {            \
+          a1[j] ^= b1[j];                                                      \
+          tst |= a1[j];                                                        \
+        }                                                                      \
+        if (tst)                                                               \
+          break;                                                               \
+        if (rounds)                                                            \
+          return i + half;                                                     \
+        i += (len & (half - 1));                                               \
+      }                                                                        \
+      for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j)                \
+        if (a1[j])                                                             \
+          return i + (j << 3) +                                                \
+                 (fio_lsb_index_unsafe(fio_ltole64(a1[j])) >> 3);              \
+      return i;                                                                \
+    }                                                                          \
+  } while (0)
+
+  fio___diff_index_step(64);
+  fio___diff_index_step(32);
+  fio___diff_index_step(16);
+  fio___diff_index_step(8);
+
+  if ((len & 4)) {
+    size_t tst = (fio_buf2u32u(a + i) == fio_buf2u32u(b + i));
+    i += (tst << 2);     /* should skip? */
+    len |= (4 - (!tst)); /* should seek inside? */
+  }
+  if ((len & 2)) {
+    size_t tst = (fio_buf2u16u(a + i) == fio_buf2u16u(b + i));
+    i += (tst << 1);     /* should skip? */
+    len |= (2 - (!tst)); /* should seek inside? */
+  }
+
+  if (len & 1)
+    i += (a[i] == b[i]);
+  return i;
+}
+#endif
+/* *****************************************************************************
+String and Buffer Information Containers
 ***************************************************************************** */
 
 /** An information type for reporting the string's state. */
@@ -5055,15 +5134,205 @@ typedef struct fio_ubuf_info_s {
   unsigned char *buf;
 } fio_ubuf_info_s;
 
+/* *****************************************************************************
+Case Sensitive and Insensitive Equality
+***************************************************************************** */
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_SFUNC bool fio_buf_info_is_eq(const fio_buf_info_s a,
+                                  const fio_buf_info_s b) {
+  if (a.len != b.len)
+    return false;
+  size_t n = a.len;
+  if (!n || a.buf == b.buf)
+    return true;
+  if (!a.buf || !b.buf)
+    return false;
+  const uint8_t *x = (const uint8_t *)a.buf, *y = (const uint8_t *)b.buf;
+  if (x[0] != y[0])
+    return false;
+  if (n <= 32) {
+    if (n > 24)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+               (fio_buf2u64u(x + 16) ^ fio_buf2u64u(y + 16)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n > 16)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n >= 8)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n >= 4)
+      return !((fio_buf2u32u(x) ^ fio_buf2u32u(y)) |
+               (fio_buf2u32u(x + n - 4) ^ fio_buf2u32u(y + n - 4)));
+    if (n >= 2)
+      return !((fio_buf2u16u(x) ^ fio_buf2u16u(y)) | (x[n - 1] ^ y[n - 1]));
+    return true;
+  }
+  /* test 32 byte tail */
+  if (((fio_buf2u64u(x + n - 32) ^ fio_buf2u64u(y + n - 32)) |
+       (fio_buf2u64u(x + n - 24) ^ fio_buf2u64u(y + n - 24)) |
+       (fio_buf2u64u(x + n - 16) ^ fio_buf2u64u(y + n - 16)) |
+       (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8))))
+    return false;
+  while (n >= 128) {
+    uint8_t diff = 0;
+    for (size_t j = 0; j < 128; ++j)
+      diff |= (uint8_t)(x[j] ^ y[j]);
+    if (diff)
+      return false;
+    x += 128;
+    y += 128;
+    n -= 128;
+  }
+  if (n > 64) {
+    uint8_t diff = 0;
+    for (size_t j = 0; j < 64; ++j)
+      diff |= (uint8_t)(x[j] ^ y[j]);
+    if (diff)
+      return false;
+    x += 64;
+    y += 64;
+    n -= 64;
+  }
+  if (n > 32)
+    return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+             (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+             (fio_buf2u64u(x + 16) ^ fio_buf2u64u(y + 16)) |
+             (fio_buf2u64u(x + 24) ^ fio_buf2u64u(y + 24)));
+
+  return true;
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
+  if (a.len != b.len)
+    return false;
+  size_t n = a.len;
+  if (!n || a.buf == b.buf)
+    return true;
+  const uint8_t *x = (const uint8_t *)a.buf;
+  const uint8_t *y = (const uint8_t *)b.buf;
+  uint8_t diff = 0;
+  { /* fast path, testing first byte */
+    unsigned letter = ((y[0] | 0x20U) - 'a') <= ('z' - 'a');
+    if ((x[0] ^ y[0]) & ~(letter << 5))
+      return false;
+  }
+  if (n == 1)
+    return true;
+  while (n >= 64) {
+    for (size_t j = 0; j < 64; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    if (diff)
+      return false;
+    x += 64;
+    y += 64;
+    n -= 64;
+  }
+  while (n >= 16) {
+    for (size_t j = 0; j < 16; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    if (diff)
+      return false;
+    x += 16;
+    y += 16;
+    n -= 16;
+  }
+  if (n & 8) {
+    for (size_t j = 0; j < 8; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    n &= 7;
+    x += n;
+    y += n;
+    for (size_t j = 0; j < 8; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    return !diff;
+  }
+  for (size_t j = 0; j < n; ++j) {
+    unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+    diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+  }
+  return !diff;
+}
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_IFUNC bool fio_ubuf_info_is_eq(const fio_ubuf_info_s a,
+                                   const fio_ubuf_info_s b) {
+  return fio_buf_info_is_eq(
+      (fio_buf_info_s){.len = a.len, .buf = (char *)a.buf},
+      (fio_buf_info_s){.len = b.len, .buf = (char *)b.buf});
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_IFUNC bool fio_ubuf_info_is_ieq(const fio_ubuf_info_s a,
+                                    const fio_ubuf_info_s b) {
+  return fio_buf_info_is_ieq(
+      (const fio_buf_info_s){.len = a.len, .buf = (char *)a.buf},
+      (const fio_buf_info_s){.len = b.len, .buf = (char *)b.buf});
+}
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_IFUNC bool fio_str_info_is_eq(const fio_str_info_s a,
+                                  const fio_str_info_s b) {
+  return fio_buf_info_is_eq((const fio_buf_info_s){.len = a.len, .buf = a.buf},
+                            (const fio_buf_info_s){.len = b.len, .buf = b.buf});
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_IFUNC bool fio_str_info_is_ieq(const fio_str_info_s a,
+                                   const fio_str_info_s b) {
+  return fio_buf_info_is_ieq(
+      (const fio_buf_info_s){.len = a.len, .buf = a.buf},
+      (const fio_buf_info_s){.len = b.len, .buf = b.buf});
+}
+
+/* *****************************************************************************
+String and Buffer Information – Helper Macros
+***************************************************************************** */
+
+#ifdef FIO_MEMALT
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2) fio_str_info_is_eq(s1, s2)
+#else
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len &&                                                     \
    (!(s1).len || (s1).buf == (s2).buf ||                                       \
     ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
      !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+#endif
 
+#ifdef FIO_MEMALT
 /** Compares two `fio_buf_info_s` objects for content equality. */
-#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+#define FIO_BUF_INFO_IS_EQ(s1, s2) fio_buf_info_is_eq((s1), (s2))
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_UBUF_INFO_IS_EQ(s1, s2) fio_ubuf_info_is_eq((s1), (s2))
+#else
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2)  FIO_STR_INFO_IS_EQ((s1), (s2))
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_UBUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+#endif
 
 /** A NULL fio_str_info_s. */
 #define FIO_STR_INFO0 ((fio_str_info_s){0})
@@ -9318,24 +9587,94 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
 fio_memcmp
 ***************************************************************************** */
 
-/** Same as `memcmp`. Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`. */
+FIO_SFUNC int fio___memcmp7x(const void *restrict a_,
+                             const void *restrict b_,
+                             size_t len) {
+  unsigned r = 0;
+  const uint8_t *a = a_, *b = b_;
+  const size_t a4 = (len & 4), a3 = (len & 3);
+  if (a4) {
+    const uint64_t diff = (uint64_t)fio_buf2u32_be(a) - fio_buf2u32_be(b);
+    const uint64_t ndiff = ~diff;
+    r = (int)((ndiff & (ndiff + 1)) >> 63) - (int)(diff >> 63);
+  }
+  if (r | (!a3))
+    return r;
+  a += a4;
+  b += a4;
+  switch (a3) {
+  case 0: return 0;
+  case 1: return (int)((unsigned)*(uint8_t *)a - *(uint8_t *)b);
+  case 2: return (int)((unsigned)fio_buf2u16_be(a) - fio_buf2u16_be(b));
+  case 3: return (int)(fio_buf2u24_be(a) - fio_buf2u24_be(b)); ;
+  }
+  return (int)r;
+}
+
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  if (FIO_UNLIKELY(a_ == b_ || !len))
-    return 0;
-  if (FIO_UNLIKELY(!a_))
-    return -1;
-  if (FIO_UNLIKELY(!b_))
-    return 1;
-  const uint8_t *a = (const uint8_t *)a_;
-  const uint8_t *b = (const uint8_t *)b_;
-  size_t since = 0;
-#define FIO___MEMCMP_ACTION                                                    \
-  since += ((a[i] != b[i]) | (!!since)); /* runs inside loop */                \
-  if (since)                             /* runs outside loop */               \
-    return (int)1 - (int)((unsigned)(a[i - since] < b[i - since]) << 1);
-  FIO_FOR_UNROLL(len, 1, i, FIO___MEMCMP_ACTION);
-#undef FIO___MEMCMP_ACTION
-  return 0;
+  unsigned r = 0;
+  if (!len)
+    return r;
+  if (a_ == b_)
+    return r;
+  const uint8_t *a = a_, *b = b_;
+  uint64_t la, lb;
+  r = *a - *b;
+  if (r)
+    return (int)r;
+
+  if (len > 255)
+    while (len > 127) {
+      uint64_t wa[16], wb[16], diff = 0;
+      fio_memcpy128(wa, a);
+      fio_memcpy128(wb, b);
+      for (size_t i = 0; i < 16; ++i)
+        diff |= (wa[i] ^ wb[i]);
+      if (diff)
+        goto stop;
+      len -= 128;
+      a += 128;
+      b += 128;
+    }
+
+#define fio___memcmp_tst(bytes)                                                \
+  do                                                                           \
+    if ((len & bytes)) {                                                       \
+      uint64_t a1[(bytes / 8)], b1[(bytes / 8)];                               \
+      for (size_t rounds = (len == bytes); 1; ++rounds) {                      \
+        uint64_t tst = 0;                                                      \
+        fio_memcpy##bytes(a1, a);                                              \
+        fio_memcpy##bytes(b1, b);                                              \
+        for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j) {            \
+          a1[j] ^= b1[j];                                                      \
+          tst |= a1[j];                                                        \
+        }                                                                      \
+        if (tst) {                                                             \
+          goto stop;                                                           \
+        }                                                                      \
+        if (rounds)                                                            \
+          return 0;                                                            \
+        a += (len & (bytes - 1));                                              \
+        b += (len & (bytes - 1));                                              \
+      }                                                                        \
+    }                                                                          \
+  while (0)
+
+  fio___memcmp_tst(128);
+  fio___memcmp_tst(64);
+  fio___memcmp_tst(32);
+  fio___memcmp_tst(16);
+  fio___memcmp_tst(8);
+  return fio___memcmp7x(a, b, len);
+
+stop:
+  while ((la = fio_buf2u64u(a)) == (lb = fio_buf2u64u(b))) {
+    a += 8;
+    b += 8;
+  }
+  la = fio_lton64(la);
+  lb = fio_lton64(lb);
+  return (int)(la > lb) - (la < lb);
 }
 
 /* *****************************************************************************
@@ -29695,7 +30034,7 @@ FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b) {
 FIO_SFUNC int fio_bstr_is_eq(const char *a_, const char *b_) {
   fio_buf_info_s a = fio_bstr_buf(a_);
   fio_buf_info_s b = fio_bstr_buf(b_);
-  return FIO_STR_INFO_IS_EQ(a, b);
+  return FIO_BUF_INFO_IS_EQ(a, b);
 }
 
 /** Compares to see if fio_bstr a is equal to another String. */
@@ -62268,6 +62607,7 @@ no memcmp, no call) after building the value once with fio___der_oid_value.
 Generated by `bun ./ai-tools/oid-table.js c` - do not edit by hand.
 ***************************************************************************** */
 
+/* clang-format off */
 /* Signature Algorithms */
 #define FIO_X509_OID_SHA256_WITH_RSA \
   ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B, [15] = 9}}) /* 1.2.840.113549.1.1.11 */
@@ -62343,6 +62683,8 @@ Generated by `bun ./ai-tools/oid-table.js c` - do not edit by hand.
   ((fio_u128){.u8 = {0x55, 0x04, 0x0A, [15] = 3}}) /* 2.5.4.10 */
 #define FIO_X509_OID_ORG_UNIT \
   ((fio_u128){.u8 = {0x55, 0x04, 0x0B, [15] = 3}}) /* 2.5.4.11 */
+
+/* clang-format on */
 
 /* *****************************************************************************
 X.509 Parser API
@@ -62557,9 +62899,9 @@ typedef struct {
   int64_t not_before;     /**< Validity start (Unix timestamp, 0 = now) */
   int64_t not_after;      /**< Validity end (Unix timestamp, 0 = +1 year) */
   const fio_buf_info_s *san_dns; /**< Subject Alternative Names (DNS) */
-  size_t san_dns_count;   /**< Number of SAN DNS entries */
-  int is_ca;              /**< Set CA:TRUE in BasicConstraints */
-  uint16_t key_usage;     /**< Key Usage bits (0 = default for type) */
+  size_t san_dns_count;          /**< Number of SAN DNS entries */
+  int is_ca;                     /**< Set CA:TRUE in BasicConstraints */
+  uint16_t key_usage;            /**< Key Usage bits (0 = default for type) */
 } fio_x509_cert_options_s;
 
 /**
@@ -63257,9 +63599,7 @@ SFUNC int fio_x509_match_hostname(const fio_x509_cert_s *cert,
                    cert->san_ext.len);
     /* Re-parse the SAN extension to iterate through all DNS names */
     fio_der_element_s san_seq;
-    if (fio_der_parse(&san_seq,
-                       cert->san_ext.buf,
-                       cert->san_ext.len)) {
+    if (fio_der_parse(&san_seq, cert->san_ext.buf, cert->san_ext.len)) {
       if (fio_der_is_tag(&san_seq, FIO_DER_SEQUENCE)) {
         fio_der_iterator_s san_it;
         fio_der_element_s gn;
@@ -63510,12 +63850,12 @@ SFUNC int fio_x509_is_trusted(const fio_x509_cert_s *cert,
       continue;
 
     /* Compare subject DNs (the cert's issuer should match root's subject) */
-    if (FIO_BUF_INFO_IS_EQ(cert->issuer, root.subject)) {
+    if (FIO_UBUF_INFO_IS_EQ(cert->issuer, root.subject)) {
       return 0; /* Found trusted root */
     }
 
     /* Also check if the cert itself is a trusted root */
-    if (FIO_BUF_INFO_IS_EQ(cert->subject, root.subject)) {
+    if (FIO_UBUF_INFO_IS_EQ(cert->subject, root.subject)) {
       return 0; /* Cert is in trust store */
     }
   }
@@ -63546,7 +63886,7 @@ FIO_SFUNC int fio___x509_find_issuer_in_trust_store(
       continue;
 
     /* Check if this root's subject matches cert's issuer */
-    if (FIO_BUF_INFO_IS_EQ(cert->issuer, issuer->subject)) {
+    if (FIO_UBUF_INFO_IS_EQ(cert->issuer, issuer->subject)) {
       return 0; /* Found issuer */
     }
   }
@@ -63604,7 +63944,7 @@ SFUNC int fio_x509_verify_chain(const fio_ubuf_info_s *certs,
   /* Verify chain signatures and issuer relationships */
   for (size_t i = 0; i < cert_count - 1; ++i) {
     /* Verify issuer DN of cert[i] matches subject DN of cert[i+1] */
-    if (!FIO_BUF_INFO_IS_EQ(chain[i].issuer, chain[i + 1].subject)) {
+    if (!FIO_UBUF_INFO_IS_EQ(chain[i].issuer, chain[i + 1].subject)) {
       FIO_LOG_DEBUG("X.509 chain: issuer mismatch at position %zu", i);
       return FIO_X509_ERR_ISSUER_MISMATCH;
     }
@@ -63613,7 +63953,7 @@ SFUNC int fio_x509_verify_chain(const fio_ubuf_info_s *certs,
     if (!chain[i + 1].is_ca) {
       /* Check if it's a self-signed root (may not have BasicConstraints) */
       int is_self_signed =
-          FIO_BUF_INFO_IS_EQ(chain[i + 1].issuer, chain[i + 1].subject);
+          FIO_UBUF_INFO_IS_EQ(chain[i + 1].issuer, chain[i + 1].subject);
       /* Allow self-signed certs even without CA flag for compatibility */
       if (!is_self_signed) {
         FIO_LOG_DEBUG("X.509 chain: certificate %zu is not a CA", i + 1);
@@ -63633,7 +63973,7 @@ SFUNC int fio_x509_verify_chain(const fio_ubuf_info_s *certs,
 
   /* Check if the last certificate is self-signed */
   int is_self_signed =
-      FIO_BUF_INFO_IS_EQ(chain[last].issuer, chain[last].subject);
+      FIO_UBUF_INFO_IS_EQ(chain[last].issuer, chain[last].subject);
 
   if (is_self_signed) {
     /* Self-signed: verify its own signature (well-formedness check) */
@@ -63837,8 +64177,7 @@ FIO_SFUNC size_t fio___x509_encode_name(uint8_t *buf,
 
   /* Organizational Unit (OU) */
   if (opts->ou.len)
-    content_len +=
-        fio___x509_encode_rdn(NULL, FIO_X509_OID_ORG_UNIT, opts->ou);
+    content_len += fio___x509_encode_rdn(NULL, FIO_X509_OID_ORG_UNIT, opts->ou);
 
   /* Common Name (CN) - required */
   content_len +=
@@ -63956,8 +64295,7 @@ FIO_SFUNC size_t fio___x509_encode_ext_basic_constraints(uint8_t *buf,
                                                          int is_ca) {
   /* BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE } */
   size_t bc_content = is_ca ? fio_der_encode_boolean(NULL, 1) : 0;
-  size_t bc_len =
-      fio_der_encode_sequence_header(NULL, bc_content) + bc_content;
+  size_t bc_len = fio_der_encode_sequence_header(NULL, bc_content) + bc_content;
 
   /* Wrap in OCTET STRING */
   size_t octet_len = fio_der_encode_octet_string(NULL, NULL, bc_len);
@@ -64086,8 +64424,7 @@ FIO_SFUNC size_t fio___x509_encode_ext_san(uint8_t *buf,
     offset += fio___der_encode_oid(buf + offset, FIO_X509_OID_SUBJECT_ALT_NAME);
 
     /* OCTET STRING containing SAN */
-    size_t octet_hdr =
-        fio_der_encode_octet_string(buf + offset, NULL, san_len);
+    size_t octet_hdr = fio_der_encode_octet_string(buf + offset, NULL, san_len);
     uint8_t *san_buf = buf + offset + octet_hdr - san_len;
     size_t san_off = 0;
     san_off += fio_der_encode_sequence_header(san_buf + san_off, san_content);
@@ -64138,8 +64475,7 @@ FIO_SFUNC size_t fio___x509_encode_ext_eku(uint8_t *buf, int is_ca) {
     offset += fio___der_encode_oid(buf + offset, FIO_X509_OID_EXT_KEY_USAGE);
 
     /* OCTET STRING containing EKU SEQUENCE */
-    size_t octet_hdr =
-        fio_der_encode_octet_string(buf + offset, NULL, eku_len);
+    size_t octet_hdr = fio_der_encode_octet_string(buf + offset, NULL, eku_len);
     uint8_t *eku_buf = buf + offset + octet_hdr - eku_len;
     size_t eku_off = 0;
     eku_off += fio_der_encode_sequence_header(eku_buf + eku_off, eku_content);
@@ -64195,8 +64531,7 @@ fio___x509_encode_extensions(uint8_t *buf,
       fio_der_encode_sequence_header(NULL, ext_content) + ext_content;
 
   /* Wrap in context tag [3] */
-  size_t total =
-      fio_der_encode_context_header(NULL, 3, exts_len, 1) + exts_len;
+  size_t total = fio_der_encode_context_header(NULL, 3, exts_len, 1) + exts_len;
 
   if (buf) {
     size_t offset = 0;
@@ -64218,8 +64553,8 @@ fio___x509_encode_extensions(uint8_t *buf,
 }
 
 /** Helper: encode AlgorithmIdentifier for signature */
-FIO_SFUNC size_t fio___x509_encode_signature_algo(uint8_t *buf,
-                                           fio_x509_keypair_type_e type) {
+FIO_SFUNC size_t
+fio___x509_encode_signature_algo(uint8_t *buf, fio_x509_keypair_type_e type) {
   fio_u128 oid;
   int has_params;
 
@@ -64290,7 +64625,8 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
   tbs_content += serial_len;
 
   /* Signature algorithm */
-  size_t signature_algo_len = fio___x509_encode_signature_algo(NULL, keypair->type);
+  size_t signature_algo_len =
+      fio___x509_encode_signature_algo(NULL, keypair->type);
   tbs_content += signature_algo_len;
 
   /* Issuer (same as subject for self-signed) */
@@ -64327,7 +64663,8 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
       fio_der_encode_sequence_header(NULL, tbs_content) + tbs_content;
 
   /* Signature algorithm (again, in outer Certificate) */
-  size_t outer_signature_algo_len = fio___x509_encode_signature_algo(NULL, keypair->type);
+  size_t outer_signature_algo_len =
+      fio___x509_encode_signature_algo(NULL, keypair->type);
 
   /* Signature value (BIT STRING) */
   size_t sig_value_len;
@@ -64370,8 +64707,7 @@ SFUNC size_t fio_x509_self_signed_cert(uint8_t *buf,
 
   /* We need to encode TBS first to sign it, but we don't know the final
    * certificate length yet. Encode TBS to a temporary location. */
-  uint8_t *tbs_start =
-      buf + fio_der_encode_sequence_header(NULL, cert_content);
+  uint8_t *tbs_start = buf + fio_der_encode_sequence_header(NULL, cert_content);
 
   /* Encode TBSCertificate */
   size_t tbs_offset = 0;
@@ -110797,7 +111133,7 @@ static X509 *fio_io_tls_create_self_signed(const char *server_name) {
   }
 
   /* Set subject name with Organization and Common Name */
-  name = X509_get_subject_name(cert);
+  name = (X509_NAME *)X509_get_subject_name(cert);
   if (!name) {
     FIO_LOG_ERROR("OpenSSL: X509_get_subject_name failed");
     goto error;
@@ -119335,16 +119671,40 @@ SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
 /** Tests for GET, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_get(fio_http_s *h);
-/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for HEAD, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_head(fio_http_s *h);
 /** Tests for POST, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_post(fio_http_s *h);
+/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for CONNECT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_connect(fio_http_s *h);
+/** Tests for OPTIONS, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_options(fio_http_s *h);
+/** Tests for TRACE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_trace(fio_http_s *h);
 /** Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_patch(fio_http_s *h);
 /** Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_query(fio_http_s *h);
-/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for PROPFIND, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_propfind(fio_http_s *h);
+/** Tests for PROPPATCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_proppatch(fio_http_s *h);
+/** Tests for MKCOL, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_mkcol(fio_http_s *h);
+/** Tests for COPY, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_copy(fio_http_s *h);
+/** Tests for MOVE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_move(fio_http_s *h);
+/** Tests for LOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_lock(fio_http_s *h);
+/** Tests for UNLOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_unlock(fio_http_s *h);
+/** Tests for SEARCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_search(fio_http_s *h);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
@@ -120080,6 +120440,24 @@ HTTP Settings Resolver
 
 /** Returns the HTTP settings associated with the HTTP object, if any. */
 SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *);
+
+/* *****************************************************************************
+
+
+
+
+
+
+
+                          Inline / Macro Implementations
+
+
+
+
+
+
+
+***************************************************************************** */
 
 /* *****************************************************************************
 Header Value / Property Iterator - Inline Implementation
@@ -121762,7 +122140,8 @@ FIO___HTTP_MAKE_GET_SET(cflags)
 /* Test-only seam for detached handles: production callers configure
  * compression via listener/route settings, not controller flags. */
 #if defined(FIO_HTTP_TEST_COMPRESSION_FLAGS)
-FIO_IFUNC void fio___http_test_enable_compression(fio_http_s *h, int is_static) {
+FIO_IFUNC void fio___http_test_enable_compression(fio_http_s *h,
+                                                  int is_static) {
   fio___http_cflags_set(h,
                         is_static ? FIO___HTTP_CFLAG_COMPRESS_STATIC
                                   : FIO___HTTP_CFLAG_COMPRESS_DYNAMIC);
@@ -121819,7 +122198,13 @@ SFUNC int fio_http_is_sse(fio_http_s *h) {
 Method Name Matching
 ***************************************************************************** */
 
-#define FIO___HTTP_DEF_METHOD_TEST4(m, l)                                      \
+SFUNC int fio_http_method_is_get(fio_http_s *h);  /* IDE Marker*/
+SFUNC int fio_http_method_is_post(fio_http_s *h); /* IDE Marker*/
+SFUNC int fio_http_method_is_head(fio_http_s *h); /* IDE Marker*/
+SFUNC int fio_http_method_is_put(fio_http_s *h);  /* IDE Marker*/
+
+/* Define test for lengths 3 and 4 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
   /** Tests if fio_http_method is m (case insensitive). */                     \
   SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
@@ -121831,49 +122216,85 @@ Method Name Matching
     return (tst == is);                                                        \
   }
 
-FIO___HTTP_DEF_METHOD_TEST4(get, 3)
-FIO___HTTP_DEF_METHOD_TEST4(put, 3)
-FIO___HTTP_DEF_METHOD_TEST4(post, 4)
+FIO___HTTP_DEF_METHOD_TEST(copy, 4)
+FIO___HTTP_DEF_METHOD_TEST(get, 3)
+FIO___HTTP_DEF_METHOD_TEST(head, 4)
+FIO___HTTP_DEF_METHOD_TEST(lock, 4)
+FIO___HTTP_DEF_METHOD_TEST(move, 4)
+FIO___HTTP_DEF_METHOD_TEST(post, 4)
+FIO___HTTP_DEF_METHOD_TEST(put, 3)
 
-#undef FIO___HTTP_DEF_METHOD_TEST4
+#undef FIO___HTTP_DEF_METHOD_TEST
 
-/** Returns 1 if fio_http_method is PATCH (case insensitive). */
-SFUNC int fio_http_method_is_patch(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 5)
-    return 0;
-  if ((method.buf[0] | 0x20) != 'p')
-    return 0;
-  const uint32_t tst = fio_buf2u32u("atch") | 0x20202020U;
-  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
-  return (tst == is);
-}
-/** Returns 1 if fio_http_method is QUERY (case insensitive). */
-SFUNC int fio_http_method_is_query(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 5)
-    return 0;
-  if ((method.buf[0] | 0x20) != 'q')
-    return 0;
-  const uint32_t tst = fio_buf2u32u("uery") | 0x20202020U;
-  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
-  return (tst == is);
-}
+/* Define test for length 5 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    if ((method.buf[0] | 0x20) != name[0])                                     \
+      return 0;                                                                \
+    const uint32_t tst = fio_buf2u32u(name + 1) | 0x20202020U;                 \
+    const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;            \
+    return (tst == is);                                                        \
+  }
 
-/** Returns 1 if fio_http_method is DELETE (case insensitive). */
-SFUNC int fio_http_method_is_delete(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 6)
-    return 0;
-  const uint32_t tst1 = fio_buf2u32u("dele") | 0x20202020U;
-  const uint32_t is1 = fio_buf2u32u(method.buf) | 0x20202020U;
-  const uint32_t tst2 = fio_buf2u32u("lete") | 0x20202020U;
-  const uint32_t is2 = fio_buf2u32u(method.buf + 2) | 0x20202020U;
-  return !((tst1 ^ is1) | (tst2 ^ is2));
-}
+FIO___HTTP_DEF_METHOD_TEST(patch, 5)
+FIO___HTTP_DEF_METHOD_TEST(query, 5)
+FIO___HTTP_DEF_METHOD_TEST(trace, 5)
+FIO___HTTP_DEF_METHOD_TEST(mkcol, 5)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
+
+/* Define test for lengths 5-8 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    const uint32_t tst1 = fio_buf2u32u(name) | 0x20202020U;                    \
+    const uint32_t is1 = fio_buf2u32u(method.buf) | 0x20202020U;               \
+    const uint32_t tst2 = fio_buf2u32u(name + (l - 4)) | 0x20202020U;          \
+    const uint32_t is2 = fio_buf2u32u(method.buf + (l - 4)) | 0x20202020U;     \
+    return !((tst1 ^ is1) | (tst2 ^ is2));                                     \
+  }
+
+FIO___HTTP_DEF_METHOD_TEST(search, 6)
+FIO___HTTP_DEF_METHOD_TEST(delete, 6)
+FIO___HTTP_DEF_METHOD_TEST(options, 7)
+FIO___HTTP_DEF_METHOD_TEST(connect, 7)
+FIO___HTTP_DEF_METHOD_TEST(unlock, 6)
+FIO___HTTP_DEF_METHOD_TEST(propfind, 8)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
+
+/* Define test for lengths 9-16 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    const uint64_t tst1 =                                                      \
+        fio_buf2u64u(name) | (uint64_t)0x2020202020202020ULL;                  \
+    const uint64_t is1 =                                                       \
+        fio_buf2u64u(method.buf) | (uint64_t)0x2020202020202020ULL;            \
+    const uint32_t tst2 = fio_buf2u32u(name + (l - 8)) | 0x20202020U;          \
+    const uint32_t is2 = fio_buf2u32u(method.buf + (l - 8)) | 0x20202020U;     \
+    return !((tst1 ^ is1) | (uint64_t)(tst2 ^ is2));                           \
+  }
+
+FIO___HTTP_DEF_METHOD_TEST(proppatch, 9)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
 
 /* *****************************************************************************
 Header Data Management

@@ -451,134 +451,41 @@ FIO_SFUNC void fio___test_memchr_simd_boundaries(void) {
   }
 }
 
-FIO_SFUNC void fio___test_memcmp_equal_buffers(void) {
-  char a[128], b[128];
-  fio_rand_bytes(a, sizeof(a));
-  FIO_MEMCPY(b, a, sizeof(b));
-
-  /* Test various sizes */
-  size_t test_sizes[] = {0, 1, 7, 8, 63, 64, 65, 127, 128};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  for (size_t i = 0; i < num_sizes; ++i) {
-    size_t len = test_sizes[i];
-    int result = fio_memcmp(a, b, len);
-    FIO_ASSERT(result == 0,
-               "fio_memcmp should return 0 for equal buffers, size=%zu",
-               len);
-  }
-}
-
-FIO_SFUNC void fio___test_memcmp_difference_position(void) {
-  char a[128], b[128];
-
-  /* First byte differs (a > b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x40, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: first byte a > b should return positive");
-  }
-
-  /* First byte differs (a < b) */
-  {
-    FIO_MEMSET(a, 0x40, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: first byte a < b should return negative");
-  }
-
-  /* Last byte differs (a > b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[sizeof(a) - 1] = 0x60;
-    b[sizeof(b) - 1] = 0x40;
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: last byte a > b should return positive");
-  }
-
-  /* Last byte differs (a < b) */
-  {
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[sizeof(a) - 1] = 0x40;
-    b[sizeof(b) - 1] = 0x60;
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: last byte a < b should return negative");
-  }
-
-  /* Difference at boundary positions: 7, 8, 63, 64 */
-  size_t boundary_positions[] = {7, 8, 63, 64};
-  size_t num_positions =
-      sizeof(boundary_positions) / sizeof(boundary_positions[0]);
-
-  for (size_t i = 0; i < num_positions; ++i) {
-    size_t pos = boundary_positions[i];
-    if (pos >= sizeof(a))
-      continue;
-
-    FIO_MEMSET(a, 0x50, sizeof(a));
-    FIO_MEMSET(b, 0x50, sizeof(b));
-    a[pos] = 0x60;
-    b[pos] = 0x40;
-
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: difference at position %zu (a > b) failed",
-               pos);
-
-    a[pos] = 0x40;
-    b[pos] = 0x60;
-    result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: difference at position %zu (a < b) failed",
-               pos);
-  }
-}
-
-FIO_SFUNC void fio___test_memcmp_same_pointer(void) {
-  char buf[64];
-  fio_rand_bytes(buf, sizeof(buf));
-
-  int result = fio_memcmp(buf, buf, sizeof(buf));
-  FIO_ASSERT(result == 0, "fio_memcmp(a, a, len) should return 0");
-}
-
-FIO_SFUNC void fio___test_memcmp_byte_value_edge_cases(void) {
-  char a[8], b[8];
-
-  /* 0x7F vs 0x80 (sign bit boundary - must use unsigned comparison) */
-  {
-    FIO_MEMSET(a, 0x7F, sizeof(a));
-    FIO_MEMSET(b, 0x80, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0,
-               "fio_memcmp: 0x7F < 0x80 (unsigned comparison required)");
-
-    result = fio_memcmp(b, a, sizeof(a));
-    FIO_ASSERT(result > 0,
-               "fio_memcmp: 0x80 > 0x7F (unsigned comparison required)");
-  }
-
-  /* 0x00 vs 0x01 */
-  {
-    FIO_MEMSET(a, 0x00, sizeof(a));
-    FIO_MEMSET(b, 0x01, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0, "fio_memcmp: 0x00 < 0x01 failed");
-  }
-
-  /* 0xFE vs 0xFF */
-  {
-    FIO_MEMSET(a, 0xFE, sizeof(a));
-    FIO_MEMSET(b, 0xFF, sizeof(b));
-    int result = fio_memcmp(a, b, sizeof(a));
-    FIO_ASSERT(result < 0, "fio_memcmp: 0xFE < 0xFF failed");
+/* Differential comparison across the first differing byte, both orders,
+ * unsigned byte values, unaligned pointers, and block boundaries. */
+FIO_SFUNC void fio___test_memcmp_differential(void) {
+  enum { MAX_LEN = 4096 };
+  unsigned char a_store[MAX_LEN + 16], b_store[MAX_LEN + 16];
+  const size_t lengths[] = {0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31,
+                            32, 33, 63, 64, 65, 127, 128, 129,
+                            255, 256, 257, 1023, 1024, 1025, 4096};
+  FIO_ASSERT(fio_memcmp(NULL, NULL, 0) == 0, "empty memcmp");
+  for (size_t offset = 0; offset < 8; ++offset) {
+    unsigned char *a = a_store + offset;
+    unsigned char *b = b_store + ((offset + 3) & 7);
+    for (size_t i = 0; i < MAX_LEN; ++i)
+      a[i] = b[i] = (unsigned char)(i * 37U + 0x80U);
+    for (size_t k = 0; k < sizeof lengths / sizeof *lengths; ++k) {
+      size_t len = lengths[k];
+      FIO_ASSERT(fio_memcmp(a, b, len) == 0 && fio_memcmp(a, a, len) == 0,
+                 "memcmp equal len=%zu", len);
+      for (size_t pos = 0; pos < len; ++pos) {
+        unsigned char old = b[pos];
+        const unsigned char candidates[] = {0, 0x7f, 0x80, 0xff};
+        for (size_t v = 0; v < sizeof candidates; ++v) {
+          if (candidates[v] == a[pos]) continue;
+          b[pos] = candidates[v];
+          int expected = memcmp(a, b, len), got = fio_memcmp(a, b, len);
+          int reverse = fio_memcmp(b, a, len);
+          FIO_ASSERT((got > 0) - (got < 0) == (expected > 0) - (expected < 0) &&
+                     (reverse > 0) - (reverse < 0) == (expected < 0) - (expected > 0),
+                     "memcmp len=%zu pos=%zu offset=%zu byte=%u",
+                     len, pos, offset, (unsigned)candidates[v]);
+          FIO_ASSERT(!fio_ct_is_eq(a, b, len), "ct mismatch len=%zu pos=%zu", len, pos);
+        }
+        b[pos] = old;
+      }
+    }
   }
 }
 
@@ -798,10 +705,7 @@ int main(void) {
   fio___test_memchr_token_values();
   fio___test_memchr_size_boundaries();
   fio___test_memchr_simd_boundaries();
-  fio___test_memcmp_equal_buffers();
-  fio___test_memcmp_difference_position();
-  fio___test_memcmp_same_pointer();
-  fio___test_memcmp_byte_value_edge_cases();
+  fio___test_memcmp_differential();
   fio___test_strlen_lengths();
   fio___test_strlen_null_pointer();
   fio___test_strlen_alignment();

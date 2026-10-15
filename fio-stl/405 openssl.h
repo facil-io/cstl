@@ -338,7 +338,7 @@ static X509 *fio_io_tls_create_self_signed(const char *server_name) {
   }
 
   /* Set subject name with Organization and Common Name */
-  name = X509_get_subject_name(cert);
+  name = (X509_NAME *)X509_get_subject_name(cert);
   if (!name) {
     FIO_LOG_ERROR("OpenSSL: X509_get_subject_name failed");
     goto error;

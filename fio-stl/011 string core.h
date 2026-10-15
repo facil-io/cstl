@@ -1005,7 +1005,7 @@ FIO_SFUNC int fio_bstr_is_greater(const char *a, const char *b) {
 FIO_SFUNC int fio_bstr_is_eq(const char *a_, const char *b_) {
   fio_buf_info_s a = fio_bstr_buf(a_);
   fio_buf_info_s b = fio_bstr_buf(b_);
-  return FIO_STR_INFO_IS_EQ(a, b);
+  return FIO_BUF_INFO_IS_EQ(a, b);
 }
 
 /** Compares to see if fio_bstr a is equal to another String. */

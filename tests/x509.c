@@ -23,6 +23,8 @@ references are omitted.
 Static Test Certificate (minimal valid RSA parse-only)
 ***************************************************************************** */
 
+/* clang-format off */
+
 /* Minimal self-signed RSA certificate structure for parse-only tests.
  * The signature is fake, so signature verification is not tested with this
  * certificate; signature tests use generated Ed25519/P-256 certs. */
@@ -54,6 +56,7 @@ static const uint8_t test_minimal_cert[] = {
     0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C,
     0x3D, 0x3E, 0x3F};
 
+/* clang-format on */
 /* *****************************************************************************
 Generated Certificate Helpers
 ***************************************************************************** */
@@ -67,8 +70,7 @@ FIO_SFUNC uint8_t *FIO_NAME_TEST(stl, x509_make_cert)(size_t *out_len,
   fio_buf_info_s san_buf[8];
   FIO_ASSERT(san_count <= 8, "too many SAN entries for test helper");
   for (size_t i = 0; i < san_count; ++i)
-    san_buf[i] =
-        FIO_BUF_INFO2((char *)san_dns[i], FIO_STRLEN(san_dns[i]));
+    san_buf[i] = FIO_BUF_INFO2((char *)san_dns[i], FIO_STRLEN(san_dns[i]));
   fio_x509_cert_options_s opts = {
       .cn = FIO_BUF_INFO2((char *)cn, FIO_STRLEN(cn)),
       .san_dns = san_buf,
@@ -91,9 +93,9 @@ Basic Parsing Tests
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_parse_basic)(void) {
   fio_x509_cert_s cert;
-  FIO_ASSERT(fio_x509_parse(&cert, test_minimal_cert,
-                            sizeof(test_minimal_cert)) == 0,
-             "minimal RSA certificate parse failed");
+  FIO_ASSERT(
+      fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert)) == 0,
+      "minimal RSA certificate parse failed");
   FIO_ASSERT(cert.version == 2, "version should be v3 (2)");
   FIO_ASSERT(cert.signature_algo == FIO_X509_SIGNATURE_RSA_PKCS1_SHA256,
              "signature algorithm mismatch");
@@ -107,8 +109,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_parse_basic)(void) {
   FIO_ASSERT(cert.cn.buf != NULL && cert.cn.len == 4 &&
                  !FIO_MEMCMP(cert.cn.buf, "test", 4),
              "subject CN mismatch");
-  FIO_ASSERT(cert.tbs.buf != NULL && cert.tbs.len > 0,
-             "TBS data not captured");
+  FIO_ASSERT(cert.tbs.buf != NULL && cert.tbs.len > 0, "TBS data not captured");
   FIO_ASSERT(cert.signature.buf != NULL && cert.signature.len > 0,
              "signature not extracted");
   FIO_ASSERT(cert.issuer.buf != NULL && cert.subject.buf != NULL,
@@ -138,8 +139,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
 
   const char *san[] = {"localhost", "127.0.0.1"};
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "localhost", san, 2, 0);
+  uint8_t *cert =
+      FIO_NAME_TEST(stl,
+                    x509_make_cert)(&cert_len, &kp, "localhost", san, 2, 0);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -152,8 +154,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
   FIO_ASSERT(parsed.pubkey.ed25519.key.buf != NULL &&
                  !FIO_MEMCMP(parsed.pubkey.ed25519.key.buf, kp.public_key, 32),
              "Ed25519 public key mismatch");
-  FIO_ASSERT(parsed.cn.len == 9 &&
-                 !FIO_MEMCMP(parsed.cn.buf, "localhost", 9),
+  FIO_ASSERT(parsed.cn.len == 9 && !FIO_MEMCMP(parsed.cn.buf, "localhost", 9),
              "subject CN mismatch");
   FIO_ASSERT(parsed.is_ca == 0, "end-entity should not be CA");
   FIO_ASSERT(parsed.has_key_usage &&
@@ -170,11 +171,13 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_ed25519)(void) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_generated_p256)(void) {
   fio_x509_keypair_s kp;
-  FIO_ASSERT(fio_x509_keypair_p256(&kp) == 0, "P-256 key pair generation failed");
+  FIO_ASSERT(fio_x509_keypair_p256(&kp) == 0,
+             "P-256 key pair generation failed");
 
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "test.example.com", NULL, 0, 0);
+  uint8_t *cert = FIO_NAME_TEST(
+      stl,
+      x509_make_cert)(&cert_len, &kp, "test.example.com", NULL, 0, 0);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -201,8 +204,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_ca_flag)(void) {
              "Ed25519 key pair generation failed");
 
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "Test CA", NULL, 0, 1);
+  uint8_t *cert =
+      FIO_NAME_TEST(stl, x509_make_cert)(&cert_len, &kp, "Test CA", NULL, 0, 1);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -224,9 +227,9 @@ Validity and Hostname Tests
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_validity)(void) {
   fio_x509_cert_s cert;
-  FIO_ASSERT(fio_x509_parse(&cert, test_minimal_cert,
-                            sizeof(test_minimal_cert)) == 0,
-             "parse failed for validity test");
+  FIO_ASSERT(
+      fio_x509_parse(&cert, test_minimal_cert, sizeof(test_minimal_cert)) == 0,
+      "parse failed for validity test");
 
   FIO_ASSERT(fio_x509_check_validity(&cert, 1750000000) == 0,
              "certificate should be valid at 2025 timestamp");
@@ -245,8 +248,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_hostname)(void) {
 
   const char *san[] = {"localhost", "*.example.com", "test.local"};
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "localhost", san, 3, 0);
+  uint8_t *cert =
+      FIO_NAME_TEST(stl,
+                    x509_make_cert)(&cert_len, &kp, "localhost", san, 3, 0);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -277,8 +281,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_hostname_cn_fallback)(void) {
              "Ed25519 key pair generation failed");
 
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "cn-only.example.com", NULL, 0, 0);
+  uint8_t *cert = FIO_NAME_TEST(
+      stl,
+      x509_make_cert)(&cert_len, &kp, "cn-only.example.com", NULL, 0, 0);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -300,21 +305,23 @@ DN and Trust Store Tests
 ***************************************************************************** */
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_dn)(void) {
+  /* clang-format off */
   uint8_t dn1[] = {0x30, 0x0F, 0x31, 0x0D, 0x30, 0x0B, 0x06, 0x03, 0x55,
                    0x04, 0x03, 0x0C, 0x04, 't',  'e',  's',  't'};
   uint8_t dn2[] = {0x30, 0x0F, 0x31, 0x0D, 0x30, 0x0B, 0x06, 0x03, 0x55,
                    0x04, 0x03, 0x0C, 0x04, 't',  'e',  's',  't'};
   uint8_t dn3[] = {0x30, 0x10, 0x31, 0x0E, 0x30, 0x0C, 0x06, 0x03, 0x55,
                    0x04, 0x03, 0x0C, 0x05, 'o',  't',  'h',  'e',  'r'};
+  /* clang-format on */
 
-  FIO_ASSERT(FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
-                                FIO_UBUF_INFO2(dn2, sizeof(dn2))),
+  FIO_ASSERT(FIO_UBUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                 FIO_UBUF_INFO2(dn2, sizeof(dn2))),
              "identical DNs should be equal");
-  FIO_ASSERT(!FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
-                                 FIO_UBUF_INFO2(dn3, sizeof(dn3))),
+  FIO_ASSERT(!FIO_UBUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                  FIO_UBUF_INFO2(dn3, sizeof(dn3))),
              "different DNs should not be equal");
-  FIO_ASSERT(!FIO_BUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
-                                 FIO_UBUF_INFO2(dn1, sizeof(dn1) - 1)),
+  FIO_ASSERT(!FIO_UBUF_INFO_IS_EQ(FIO_UBUF_INFO2(dn1, sizeof(dn1)),
+                                  FIO_UBUF_INFO2(dn1, sizeof(dn1) - 1)),
              "different length DNs should not be equal");
 }
 
@@ -324,8 +331,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_trust_store)(void) {
              "Ed25519 key pair generation failed");
 
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "Test Root", NULL, 0, 1);
+  uint8_t *cert =
+      FIO_NAME_TEST(stl,
+                    x509_make_cert)(&cert_len, &kp, "Test Root", NULL, 0, 1);
 
   fio_x509_cert_s parsed;
   FIO_ASSERT(fio_x509_parse(&parsed, cert, cert_len) == 0,
@@ -361,8 +369,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_chain_self_signed)(void) {
              "Ed25519 key pair generation failed");
 
   size_t cert_len;
-  uint8_t *cert = FIO_NAME_TEST(stl, x509_make_cert)(
-      &cert_len, &kp, "Test Root", NULL, 0, 1);
+  uint8_t *cert =
+      FIO_NAME_TEST(stl,
+                    x509_make_cert)(&cert_len, &kp, "Test Root", NULL, 0, 1);
 
   const fio_ubuf_info_s certs[] = {FIO_UBUF_INFO2(cert, cert_len)};
   int64_t now = (int64_t)fio_time_real().tv_sec;
@@ -427,8 +436,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_tls_cert_message)(void) {
   *p++ = 0; /* extensions length */
 
   fio_tls_cert_entry_s entries[5];
-  int count =
-      (int)fio_tls_parse_certificate_message(entries, 5, msg, msg_len);
+  int count = (int)fio_tls_parse_certificate_message(entries, 5, msg, msg_len);
   FIO_ASSERT(count == 1, "expected 1 certificate entry, got %d", count);
   FIO_ASSERT(entries[0].cert_len == cert_len, "certificate length mismatch");
   FIO_ASSERT(!FIO_MEMCMP(entries[0].cert, test_minimal_cert, cert_len),
@@ -461,8 +469,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_error_strings)(void) {
              "PARSE error string missing");
   FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(FIO_X509_ERR_SIGNATURE)) > 0,
              "SIGNATURE error string missing");
-  FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(FIO_X509_ERR_HOSTNAME_MISMATCH)) >
-                 0,
+  FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(FIO_X509_ERR_HOSTNAME_MISMATCH)) > 0,
              "HOSTNAME_MISMATCH error string missing");
   FIO_ASSERT(FIO_STRLEN(fio_x509_error_str(-999)) > 0,
              "unknown error string missing");
@@ -470,9 +477,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_error_strings)(void) {
 
 FIO_SFUNC void FIO_NAME_TEST(stl, x509_invalid_inputs)(void) {
   fio_x509_cert_s cert;
-  FIO_ASSERT(fio_x509_parse(NULL, test_minimal_cert,
-                            sizeof(test_minimal_cert)) == -1,
-             "NULL cert should fail");
+  FIO_ASSERT(
+      fio_x509_parse(NULL, test_minimal_cert, sizeof(test_minimal_cert)) == -1,
+      "NULL cert should fail");
   FIO_ASSERT(fio_x509_parse(&cert, NULL, 100) == -1, "NULL data should fail");
   FIO_ASSERT(fio_x509_parse(&cert, test_minimal_cert, 0) == -1,
              "zero length should fail");
@@ -488,8 +495,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x509_invalid_inputs)(void) {
              "zero hostname length should fail");
 
   /* Key pair generation error handling */
-  FIO_ASSERT(fio_x509_keypair_ed25519(NULL) == -1,
-             "NULL keypair should fail");
+  FIO_ASSERT(fio_x509_keypair_ed25519(NULL) == -1, "NULL keypair should fail");
   FIO_ASSERT(fio_x509_keypair_p256(NULL) == -1,
              "NULL P-256 keypair should fail");
 

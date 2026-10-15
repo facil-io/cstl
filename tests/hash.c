@@ -418,7 +418,7 @@ FIO_SFUNC int fio___test_risky256_sanity(void) {
   {
     fio_u256 h1 = fio_risky256("", 0);
     fio_u256 h2 = fio_risky256("", 0);
-    fio_u256 zero = {{0}};
+    fio_u256 zero = {0};
     int is_zero = !fio___u256_cmp(h1, zero);
     int is_deterministic = !fio___u256_cmp(h1, h2);
     if (is_zero) {
@@ -923,7 +923,7 @@ FIO_SFUNC int fio___test_risky256_hmac(void) {
     const char *msg = "message";
     fio_u256 h1 = fio_risky256_hmac(long_key, 128, msg, 7);
     fio_u256 h2 = fio_risky256_hmac(long_key, 128, msg, 7);
-    fio_u256 zero = {{0}};
+    fio_u256 zero = {0};
     int is_zero = !fio___u256_cmp(h1, zero);
     int is_det = !fio___u256_cmp(h1, h2);
     if (is_zero || !is_det) {
@@ -941,7 +941,7 @@ FIO_SFUNC int fio___test_risky256_hmac(void) {
     const char *msg = "test";
     fio_u256 h1 = fio_risky256_hmac(NULL, 0, msg, 4);
     fio_u256 h2 = fio_risky256_hmac(NULL, 0, msg, 4);
-    fio_u256 zero = {{0}};
+    fio_u256 zero = {0};
     if (!fio___u256_cmp(h1, zero)) {
       fprintf(stderr, "    5e. HMAC empty key: zero output * FAIL *\n");
       ++failures;
@@ -958,7 +958,7 @@ FIO_SFUNC int fio___test_risky256_hmac(void) {
     const char *key = "key";
     fio_u256 h1 = fio_risky256_hmac(key, 3, NULL, 0);
     fio_u256 h2 = fio_risky256_hmac(key, 3, NULL, 0);
-    fio_u256 zero = {{0}};
+    fio_u256 zero = {0};
     if (!fio___u256_cmp(h1, zero)) {
       fprintf(stderr, "    5f. HMAC empty message: zero output * FAIL *\n");
       ++failures;
@@ -996,7 +996,7 @@ FIO_SFUNC int fio___test_risky256_hmac(void) {
     const char *msg = "message512";
     fio_u512 h1 = fio_risky512_hmac(key, 6, msg, 10);
     fio_u512 h2 = fio_risky512_hmac(key, 6, msg, 10);
-    fio_u512 zero = {{0}};
+    fio_u512 zero = {0};
     if (!fio___u512_cmp(h1, zero)) {
       fprintf(stderr, "    5h. HMAC-512 basic: zero output * FAIL *\n");
       ++failures;
@@ -1338,7 +1338,7 @@ FIO_SFUNC int fio___test_risky256_boundaries(void) {
     buf[i] = (uint8_t)(i & 255);
 
   /* store hashes for adjacent-length comparison */
-  fio_u256 prev_h = {{0}};
+  fio_u256 prev_h = {0};
   int prev_valid = 0;
 
   for (size_t t = 0; t < N; ++t) {
@@ -1348,7 +1348,7 @@ FIO_SFUNC int fio___test_risky256_boundaries(void) {
 
     /* 9a. Non-zero (skip len==0 which still produces non-zero from init) */
     {
-      fio_u256 zero = {{0}};
+      fio_u256 zero = {0};
       if (!fio___u256_cmp(h0, zero)) {
         fprintf(stderr, "    len=%zu: hash is zero: * FAIL *\n", len);
         ++failures;

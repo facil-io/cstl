@@ -19,7 +19,7 @@ INSTALL_PREFIX ?= /usr/local
 
 
 # Compiler / Linker Warnings... i.e. -Wpedantic -Weverything -Wno-format-pedantic -Wshorten-64-to-32
-WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security -Wno-psabi
+WARNINGS=-Wshadow -Wall -Wextra -Wpedantic -Wno-missing-field-initializers -Wformat-security -Wno-psabi -Wno-misleading-indentation
 # Compiler and linker flags
 # Consider: -O3 -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize
 OPTIMIZATION=-O3 -DNDEBUG -DNODEBUG
@@ -311,11 +311,15 @@ all-tests: test-all;
 #############################################################################
 
 ifneq ($(wildcard ./ai-tools/api2md.js),)
+ifneq ($(shell command -v bun 2>/dev/null),)
   API2MD_STATUS := $(shell ./ai-tools/api2md.js > "./fio-stl.unified-API.md"; echo $$?)
   $(info * Detected API auto-generation script, running now)
   ifneq ($(API2MD_STATUS),0)
     $(error ./ai-tools/api2md.js failed)
   endif
+else
+  $(info * Skipping API auto-generation: bun is not installed)
+endif
 endif
 
 #############################################################################

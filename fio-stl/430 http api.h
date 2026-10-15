@@ -614,16 +614,40 @@ SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
 /** Tests for GET, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_get(fio_http_s *h);
-/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for HEAD, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_head(fio_http_s *h);
 /** Tests for POST, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_post(fio_http_s *h);
+/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for CONNECT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_connect(fio_http_s *h);
+/** Tests for OPTIONS, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_options(fio_http_s *h);
+/** Tests for TRACE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_trace(fio_http_s *h);
 /** Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_patch(fio_http_s *h);
 /** Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_query(fio_http_s *h);
-/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for PROPFIND, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_propfind(fio_http_s *h);
+/** Tests for PROPPATCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_proppatch(fio_http_s *h);
+/** Tests for MKCOL, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_mkcol(fio_http_s *h);
+/** Tests for COPY, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_copy(fio_http_s *h);
+/** Tests for MOVE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_move(fio_http_s *h);
+/** Tests for LOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_lock(fio_http_s *h);
+/** Tests for UNLOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_unlock(fio_http_s *h);
+/** Tests for SEARCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_search(fio_http_s *h);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
@@ -1359,6 +1383,24 @@ HTTP Settings Resolver
 
 /** Returns the HTTP settings associated with the HTTP object, if any. */
 SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *);
+
+/* *****************************************************************************
+
+
+
+
+
+
+
+                          Inline / Macro Implementations
+
+
+
+
+
+
+
+***************************************************************************** */
 
 /* *****************************************************************************
 Header Value / Property Iterator - Inline Implementation

@@ -19,8 +19,7 @@ int main(void) {
 }
 #else
 
-#include <string.h> /* for system memcpy, memset, memchr, memcmp, strlen */
-
+#include <string.h> /* for system memcpy, memset, strlen */
 /* *****************************************************************************
 Helper Macros
 ***************************************************************************** */
@@ -224,112 +223,6 @@ FIO_SFUNC void fio___perf_memset(void) {
 }
 
 /* *****************************************************************************
-Performance Tests: fio_memchr
-***************************************************************************** */
-
-FIO_SFUNC void fio___perf_memchr(void) {
-  fprintf(stderr, "\t* Benchmarking fio_memchr...\n");
-
-  const size_t base_iterations = 8192;
-
-  size_t test_sizes[] = {4, 16, 64, 256, 1024, 4096, 16384};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  for (size_t s = 0; s < num_sizes; ++s) {
-    size_t mem_len = test_sizes[s] - 1;
-    size_t iterations = base_iterations
-                        << (mem_len < 4096 ? (12 - (mem_len >> 9)) : 0);
-    void *mem = malloc(mem_len + 2);
-    if (!mem)
-      continue;
-
-    /* Fill with non-zero bytes, put zero at end */
-    fio_memset(mem, 0x0101010101010101ULL * 0x80, mem_len + 1);
-    ((uint8_t *)mem)[mem_len] = 0;
-
-    char name_fio[64];
-    char name_sys[64];
-    snprintf(name_fio, sizeof(name_fio), "fio_memchr (%zu bytes)", mem_len);
-    snprintf(name_sys, sizeof(name_sys), "memchr (%zu bytes)", mem_len);
-
-    char *result = NULL;
-    FIO_PERF_BENCHMARK(name_fio,
-                       iterations,
-                       (void)0,
-                       result = (char *)fio_memchr(mem, 0, mem_len + 1),
-                       (void)result);
-
-    FIO_PERF_BENCHMARK(name_sys,
-                       iterations,
-                       (void)0,
-                       result = (char *)memchr(mem, 0, mem_len + 1),
-                       (void)result);
-
-    fprintf(stderr, "\n");
-    free(mem);
-  }
-}
-
-/* *****************************************************************************
-Performance Tests: fio_memcmp
-***************************************************************************** */
-
-FIO_SFUNC void fio___perf_memcmp(void) {
-  fprintf(stderr, "\t* Benchmarking fio_memcmp...\n");
-
-  const size_t base_iterations = 8192;
-
-  size_t test_sizes[] = {4, 16, 64, 256, 1024, 4096, 16384, 65536};
-  size_t num_sizes = sizeof(test_sizes) / sizeof(test_sizes[0]);
-
-  for (size_t s = 0; s < num_sizes; ++s) {
-    size_t mem_len = test_sizes[s];
-    size_t iterations = base_iterations
-                        << (mem_len < 4096 ? (12 - (mem_len >> 9)) : 2);
-    char *mem = (char *)malloc((mem_len << 1) + 128);
-    if (!mem)
-      continue;
-
-    uint64_t sig = (uintptr_t)mem;
-    sig ^= sig >> 13;
-    sig ^= sig << 17;
-    char *a = mem;
-    char *b = mem + mem_len + 32;
-    fio_memset(a, sig, mem_len);
-    fio_memset(b, sig, mem_len);
-
-    char name_fio[64];
-    char name_sys[64];
-    char name_ct[64];
-    snprintf(name_fio, sizeof(name_fio), "fio_memcmp (%zu bytes)", mem_len);
-    snprintf(name_sys, sizeof(name_sys), "memcmp (%zu bytes)", mem_len);
-    snprintf(name_ct, sizeof(name_ct), "fio_ct_is_eq (%zu bytes)", mem_len);
-
-    int result = 0;
-    FIO_PERF_BENCHMARK(name_fio,
-                       iterations,
-                       (void)0,
-                       result = fio_memcmp(a, b, mem_len),
-                       (void)result);
-
-    FIO_PERF_BENCHMARK(name_sys,
-                       iterations,
-                       (void)0,
-                       result = memcmp(a, b, mem_len),
-                       (void)result);
-
-    FIO_PERF_BENCHMARK(name_ct,
-                       iterations,
-                       (void)0,
-                       result = fio_ct_is_eq(a, b, mem_len),
-                       (void)result);
-
-    fprintf(stderr, "\n");
-    free(mem);
-  }
-}
-
-/* *****************************************************************************
 Performance Tests: fio_strlen
 ***************************************************************************** */
 
@@ -456,8 +349,6 @@ int main(void) {
   fio___perf_memcpy_x_primitives();
   fio___perf_memcpy_variable();
   fio___perf_memset();
-  fio___perf_memchr();
-  fio___perf_memcmp();
   fio___perf_strlen();
 
   fprintf(stderr, "\n===========================================\n");

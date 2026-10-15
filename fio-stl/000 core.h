@@ -35,7 +35,7 @@ supports macros that will help detect and validate it's version.
 /** MINOR version: Deprecation, or significant features added. May break ABI. */
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
-#define FIO_VERSION_PATCH 1
+#define FIO_VERSION_PATCH 2
 /** Build version: optional build info (string), i.e. "beta.02" */
 /* #define FIO_VERSION_BUILD */
 
@@ -2108,6 +2108,7 @@ FIO_IFUNC void fio_u2bufzu(void *buf, size_t i) { fio_u2buf32u(buf, i); }
 #warning                                                                       \
     "Couldn't calculate local version for fio_buf2zu and fio_u2bufzu\n\tSIZE_T_MAX == "##SIZE_T_MAX
 #endif
+
 /* *****************************************************************************
 Vector Math, Shuffle & Reduction on native types, for up to 2048 bits
 ***************************************************************************** */
@@ -4988,7 +4989,85 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
   }
 
 /* *****************************************************************************
-String and Buffer Information Containers + Helper Macros
+Finding first different byte
+***************************************************************************** */
+#if FIO___DIFF_INDEX
+/**
+ * Returns index of first different byte, or original length if none found.
+ */
+FIO_SFUNC size_t fio___diff_index(const void *a_, const void *b_, size_t len) {
+
+  const uint8_t *a = a_, *b = b_;
+  if (FIO_UNLIKELY(!len | (a == b)))
+    return len;
+  if (a[0] != b[0])
+    return 0;
+  if (len == 1)
+    return len;
+  size_t i = 0;
+  while (len > 127) {
+    uint64_t a1[16], b1[16], tst = 0;
+    fio_memcpy128(a1, a + i);
+    fio_memcpy128(b1, b + i);
+    for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j)
+      tst |= (a1[j] ^ b1[j]);
+    if (tst) {
+      len |= 127;
+      break;
+    }
+    i += 128;
+    len -= 128;
+  }
+
+#define fio___diff_index_step(half)                                            \
+  do {                                                                         \
+    if ((len & half)) {                                                        \
+      uint64_t a1[(half / 8)], b1[(half / 8)];                                 \
+      for (size_t rounds = (len == half); 1; ++rounds) {                       \
+        uint64_t tst = 0;                                                      \
+        fio_memcpy##half(a1, a + i);                                           \
+        fio_memcpy##half(b1, b + i);                                           \
+        for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j) {            \
+          a1[j] ^= b1[j];                                                      \
+          tst |= a1[j];                                                        \
+        }                                                                      \
+        if (tst)                                                               \
+          break;                                                               \
+        if (rounds)                                                            \
+          return i + half;                                                     \
+        i += (len & (half - 1));                                               \
+      }                                                                        \
+      for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j)                \
+        if (a1[j])                                                             \
+          return i + (j << 3) +                                                \
+                 (fio_lsb_index_unsafe(fio_ltole64(a1[j])) >> 3);              \
+      return i;                                                                \
+    }                                                                          \
+  } while (0)
+
+  fio___diff_index_step(64);
+  fio___diff_index_step(32);
+  fio___diff_index_step(16);
+  fio___diff_index_step(8);
+
+  if ((len & 4)) {
+    size_t tst = (fio_buf2u32u(a + i) == fio_buf2u32u(b + i));
+    i += (tst << 2);     /* should skip? */
+    len |= (4 - (!tst)); /* should seek inside? */
+  }
+  if ((len & 2)) {
+    size_t tst = (fio_buf2u16u(a + i) == fio_buf2u16u(b + i));
+    i += (tst << 1);     /* should skip? */
+    len |= (2 - (!tst)); /* should seek inside? */
+  }
+
+  if (len & 1)
+    i += (a[i] == b[i]);
+  return i;
+}
+#endif
+/* *****************************************************************************
+String and Buffer Information Containers
 ***************************************************************************** */
 
 /** An information type for reporting the string's state. */
@@ -5017,15 +5096,205 @@ typedef struct fio_ubuf_info_s {
   unsigned char *buf;
 } fio_ubuf_info_s;
 
+/* *****************************************************************************
+Case Sensitive and Insensitive Equality
+***************************************************************************** */
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_SFUNC bool fio_buf_info_is_eq(const fio_buf_info_s a,
+                                  const fio_buf_info_s b) {
+  if (a.len != b.len)
+    return false;
+  size_t n = a.len;
+  if (!n || a.buf == b.buf)
+    return true;
+  if (!a.buf || !b.buf)
+    return false;
+  const uint8_t *x = (const uint8_t *)a.buf, *y = (const uint8_t *)b.buf;
+  if (x[0] != y[0])
+    return false;
+  if (n <= 32) {
+    if (n > 24)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+               (fio_buf2u64u(x + 16) ^ fio_buf2u64u(y + 16)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n > 16)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n >= 8)
+      return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+               (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8)));
+    if (n >= 4)
+      return !((fio_buf2u32u(x) ^ fio_buf2u32u(y)) |
+               (fio_buf2u32u(x + n - 4) ^ fio_buf2u32u(y + n - 4)));
+    if (n >= 2)
+      return !((fio_buf2u16u(x) ^ fio_buf2u16u(y)) | (x[n - 1] ^ y[n - 1]));
+    return true;
+  }
+  /* test 32 byte tail */
+  if (((fio_buf2u64u(x + n - 32) ^ fio_buf2u64u(y + n - 32)) |
+       (fio_buf2u64u(x + n - 24) ^ fio_buf2u64u(y + n - 24)) |
+       (fio_buf2u64u(x + n - 16) ^ fio_buf2u64u(y + n - 16)) |
+       (fio_buf2u64u(x + n - 8) ^ fio_buf2u64u(y + n - 8))))
+    return false;
+  while (n >= 128) {
+    uint8_t diff = 0;
+    for (size_t j = 0; j < 128; ++j)
+      diff |= (uint8_t)(x[j] ^ y[j]);
+    if (diff)
+      return false;
+    x += 128;
+    y += 128;
+    n -= 128;
+  }
+  if (n > 64) {
+    uint8_t diff = 0;
+    for (size_t j = 0; j < 64; ++j)
+      diff |= (uint8_t)(x[j] ^ y[j]);
+    if (diff)
+      return false;
+    x += 64;
+    y += 64;
+    n -= 64;
+  }
+  if (n > 32)
+    return !((fio_buf2u64u(x) ^ fio_buf2u64u(y)) |
+             (fio_buf2u64u(x + 8) ^ fio_buf2u64u(y + 8)) |
+             (fio_buf2u64u(x + 16) ^ fio_buf2u64u(y + 16)) |
+             (fio_buf2u64u(x + 24) ^ fio_buf2u64u(y + 24)));
+
+  return true;
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
+  if (a.len != b.len)
+    return false;
+  size_t n = a.len;
+  if (!n || a.buf == b.buf)
+    return true;
+  const uint8_t *x = (const uint8_t *)a.buf;
+  const uint8_t *y = (const uint8_t *)b.buf;
+  uint8_t diff = 0;
+  { /* fast path, testing first byte */
+    unsigned letter = ((y[0] | 0x20U) - 'a') <= ('z' - 'a');
+    if ((x[0] ^ y[0]) & ~(letter << 5))
+      return false;
+  }
+  if (n == 1)
+    return true;
+  while (n >= 64) {
+    for (size_t j = 0; j < 64; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    if (diff)
+      return false;
+    x += 64;
+    y += 64;
+    n -= 64;
+  }
+  while (n >= 16) {
+    for (size_t j = 0; j < 16; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    if (diff)
+      return false;
+    x += 16;
+    y += 16;
+    n -= 16;
+  }
+  if (n & 8) {
+    for (size_t j = 0; j < 8; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    n &= 7;
+    x += n;
+    y += n;
+    for (size_t j = 0; j < 8; ++j) {
+      unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+      diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+    }
+    return !diff;
+  }
+  for (size_t j = 0; j < n; ++j) {
+    unsigned letter = ((unsigned)(y[j] | 0x20U) - 'a') <= ('z' - 'a');
+    diff |= (uint8_t)((x[j] ^ y[j]) & ~(letter << 5));
+  }
+  return !diff;
+}
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_IFUNC bool fio_ubuf_info_is_eq(const fio_ubuf_info_s a,
+                                   const fio_ubuf_info_s b) {
+  return fio_buf_info_is_eq(
+      (fio_buf_info_s){.len = a.len, .buf = (char *)a.buf},
+      (fio_buf_info_s){.len = b.len, .buf = (char *)b.buf});
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_IFUNC bool fio_ubuf_info_is_ieq(const fio_ubuf_info_s a,
+                                    const fio_ubuf_info_s b) {
+  return fio_buf_info_is_ieq(
+      (const fio_buf_info_s){.len = a.len, .buf = (char *)a.buf},
+      (const fio_buf_info_s){.len = b.len, .buf = (char *)b.buf});
+}
+
+/**
+ * Returns true if equal, similar to:
+ *       (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+ */
+FIO_IFUNC bool fio_str_info_is_eq(const fio_str_info_s a,
+                                  const fio_str_info_s b) {
+  return fio_buf_info_is_eq((const fio_buf_info_s){.len = a.len, .buf = a.buf},
+                            (const fio_buf_info_s){.len = b.len, .buf = b.buf});
+}
+
+/** An ASCII case insensitive compare for binary strings (not UTF-8). */
+FIO_IFUNC bool fio_str_info_is_ieq(const fio_str_info_s a,
+                                   const fio_str_info_s b) {
+  return fio_buf_info_is_ieq(
+      (const fio_buf_info_s){.len = a.len, .buf = a.buf},
+      (const fio_buf_info_s){.len = b.len, .buf = b.buf});
+}
+
+/* *****************************************************************************
+String and Buffer Information – Helper Macros
+***************************************************************************** */
+
+#ifdef FIO_MEMALT
+/** Compares two `fio_str_info_s` objects for content equality. */
+#define FIO_STR_INFO_IS_EQ(s1, s2) fio_str_info_is_eq(s1, s2)
+#else
 /** Compares two `fio_str_info_s` objects for content equality. */
 #define FIO_STR_INFO_IS_EQ(s1, s2)                                             \
   ((s1).len == (s2).len &&                                                     \
    (!(s1).len || (s1).buf == (s2).buf ||                                       \
     ((s1).buf && (s2).buf && (s1).buf[0] == (s2).buf[0] &&                     \
      !FIO_MEMCMP((s1).buf, (s2).buf, (s1).len))))
+#endif
 
+#ifdef FIO_MEMALT
 /** Compares two `fio_buf_info_s` objects for content equality. */
-#define FIO_BUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+#define FIO_BUF_INFO_IS_EQ(s1, s2) fio_buf_info_is_eq((s1), (s2))
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_UBUF_INFO_IS_EQ(s1, s2) fio_ubuf_info_is_eq((s1), (s2))
+#else
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_BUF_INFO_IS_EQ(s1, s2)  FIO_STR_INFO_IS_EQ((s1), (s2))
+/** Compares two `fio_buf_info_s` objects for content equality. */
+#define FIO_UBUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
+#endif
 
 /** A NULL fio_str_info_s. */
 #define FIO_STR_INFO0 ((fio_str_info_s){0})

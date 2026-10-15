@@ -615,24 +615,94 @@ SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
 fio_memcmp
 ***************************************************************************** */
 
-/** Same as `memcmp`. Returns 1 if `a > b`, -1 if `a < b` and 0 if `a == b`. */
+FIO_SFUNC int fio___memcmp7x(const void *restrict a_,
+                             const void *restrict b_,
+                             size_t len) {
+  unsigned r = 0;
+  const uint8_t *a = a_, *b = b_;
+  const size_t a4 = (len & 4), a3 = (len & 3);
+  if (a4) {
+    const uint64_t diff = (uint64_t)fio_buf2u32_be(a) - fio_buf2u32_be(b);
+    const uint64_t ndiff = ~diff;
+    r = (int)((ndiff & (ndiff + 1)) >> 63) - (int)(diff >> 63);
+  }
+  if (r | (!a3))
+    return r;
+  a += a4;
+  b += a4;
+  switch (a3) {
+  case 0: return 0;
+  case 1: return (int)((unsigned)*(uint8_t *)a - *(uint8_t *)b);
+  case 2: return (int)((unsigned)fio_buf2u16_be(a) - fio_buf2u16_be(b));
+  case 3: return (int)(fio_buf2u24_be(a) - fio_buf2u24_be(b)); ;
+  }
+  return (int)r;
+}
+
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  if (FIO_UNLIKELY(a_ == b_ || !len))
-    return 0;
-  if (FIO_UNLIKELY(!a_))
-    return -1;
-  if (FIO_UNLIKELY(!b_))
-    return 1;
-  const uint8_t *a = (const uint8_t *)a_;
-  const uint8_t *b = (const uint8_t *)b_;
-  size_t since = 0;
-#define FIO___MEMCMP_ACTION                                                    \
-  since += ((a[i] != b[i]) | (!!since)); /* runs inside loop */                \
-  if (since)                             /* runs outside loop */               \
-    return (int)1 - (int)((unsigned)(a[i - since] < b[i - since]) << 1);
-  FIO_FOR_UNROLL(len, 1, i, FIO___MEMCMP_ACTION);
-#undef FIO___MEMCMP_ACTION
-  return 0;
+  unsigned r = 0;
+  if (!len)
+    return r;
+  if (a_ == b_)
+    return r;
+  const uint8_t *a = a_, *b = b_;
+  uint64_t la, lb;
+  r = *a - *b;
+  if (r)
+    return (int)r;
+
+  if (len > 255)
+    while (len > 127) {
+      uint64_t wa[16], wb[16], diff = 0;
+      fio_memcpy128(wa, a);
+      fio_memcpy128(wb, b);
+      for (size_t i = 0; i < 16; ++i)
+        diff |= (wa[i] ^ wb[i]);
+      if (diff)
+        goto stop;
+      len -= 128;
+      a += 128;
+      b += 128;
+    }
+
+#define fio___memcmp_tst(bytes)                                                \
+  do                                                                           \
+    if ((len & bytes)) {                                                       \
+      uint64_t a1[(bytes / 8)], b1[(bytes / 8)];                               \
+      for (size_t rounds = (len == bytes); 1; ++rounds) {                      \
+        uint64_t tst = 0;                                                      \
+        fio_memcpy##bytes(a1, a);                                              \
+        fio_memcpy##bytes(b1, b);                                              \
+        for (size_t j = 0; j < (sizeof(a1) / sizeof(a1[0])); ++j) {            \
+          a1[j] ^= b1[j];                                                      \
+          tst |= a1[j];                                                        \
+        }                                                                      \
+        if (tst) {                                                             \
+          goto stop;                                                           \
+        }                                                                      \
+        if (rounds)                                                            \
+          return 0;                                                            \
+        a += (len & (bytes - 1));                                              \
+        b += (len & (bytes - 1));                                              \
+      }                                                                        \
+    }                                                                          \
+  while (0)
+
+  fio___memcmp_tst(128);
+  fio___memcmp_tst(64);
+  fio___memcmp_tst(32);
+  fio___memcmp_tst(16);
+  fio___memcmp_tst(8);
+  return fio___memcmp7x(a, b, len);
+
+stop:
+  while ((la = fio_buf2u64u(a)) == (lb = fio_buf2u64u(b))) {
+    a += 8;
+    b += 8;
+  }
+  la = fio_lton64(la);
+  lb = fio_lton64(lb);
+  return (int)(la > lb) - (la < lb);
 }
 
 /* *****************************************************************************
