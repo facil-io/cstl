@@ -59,11 +59,13 @@ jobs:
           fetch-depth: 0
 
       - name: Move latest tag to the selected release
+        id: latest
         env:
           RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
         run: |
           set -euo pipefail
           sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           git tag --force latest "$sha"
           git push --force origin refs/tags/latest
 
@@ -71,7 +73,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
-          target_commitish: ${{ steps.candidate.outputs.tag }}
+          target_commitish: ${{ steps.latest.outputs.sha }}
           name: fio-stl (latest)
           body: Latest stable fio-stl release. This rolling release currently mirrors `${{ steps.candidate.outputs.tag }}`.
           prerelease: false
