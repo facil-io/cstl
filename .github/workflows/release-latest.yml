@@ -75,9 +75,7 @@ jobs:
           RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release delete latest --cleanup-tag --yes || true
-          git tag --force latest "${{ steps.latest.outputs.sha }}"
-          git push --force origin refs/tags/latest
+          gh release delete latest --yes || true
           gh release create latest fio-stl.h \
             --title 'fio-stl (latest)' \
             --notes "Latest stable fio-stl release. This rolling release currently mirrors \`${RELEASE_TAG}\`."
