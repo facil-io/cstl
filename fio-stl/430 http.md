@@ -30,32 +30,11 @@ support in [DEFLATE / Gzip](./162 deflate.md).
 - upgrade helpers for WebSocket and SSE connections.
 - pub/sub helpers for upgraded connections.
 - handle access helpers: `fio_http_io` and `fio_http_settings`.
-- the HTTP handle API (handle and core implementation in
-  `432 http types.h`), including request / response fields, headers,
+- the HTTP handle API, including request / response fields, headers,
   cookies, body storage, writing, static-file responses, logging, MIME
   lookup, and controller hooks.
 
-Implementation helpers named `fio___...` are private implementation details.
-
----
-
-## Module Files
-
-All HTTP module files share the `FIO_HTTP` flag.
-
-- `430 http api.h` — public declarations: settings, listener / route /
-  client APIs, and the full handle API.
-- `432 http types.h` — internal types plus the handle and core
-  implementation (header cache, body storage, static-file responses).
-- `434 http accept.h` — accept path, request dispatchers, upgrade
-  authorization.
-- `434 http1.h` — HTTP/1.1 request / response glue, protocol and
-  controller.
-- `434 sse.h` — EventSource (SSE) upgrade, helpers, protocol, controller.
-- `434 websocket.h` — WebSocket upgrade, events, protocol, write,
-  controller.
-- `438 http.h` — listen / connect glue, protocol wiring, shared helpers.
-- `439 http.h` — cleanup tail (the module's only `#undef FIO_HTTP` site).
+Names prefixed with `fio___` are private and not part of the API.
 
 The parsers are separate modules: [`004 http1 parser.h`](./004 http1 parser.md)
 and [`004 websocket parser.h`](./004 websocket parser.md).
@@ -155,7 +134,7 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Per-route; routes inherit the listener's root value at route-creation. The value is a failure-memoization shift register (see *Static File Service*). Detached handles use an internal controller flag instead. See the compression security note below. |
+| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Per-route; routes inherit the listener's root value at route-creation. May drop to 0 when creation is disabled after failures (see *Static File Service*). See the compression security note below. |
 | `compress_dynamic` | Opt-in dynamic response compression. Connection-global; per-route values are ignored. See the compression security note below. |
 | `compress_ws` | Opt-in WebSocket `permessage-deflate`. Connection-global; per-route values are ignored. See the compression security note below. |
 
@@ -163,21 +142,18 @@ Other settings:
 secrets together with attacker-reflected data enables length-oracle attacks
 (BREACH/CRIME). Do not enable compression for responses that mix secrets
 (CSRF tokens, session data) with attacker-controlled reflections, or emit
-such messages uncompressed per call (per-message opt-out: keep the cflag off
-at the route level for sensitive routes, or pre-set `content-encoding`
-— which the dynamic path always respects — to pass a body through
-uncompressed).
+such messages uncompressed: leave `compress_dynamic` / `compress_ws` off
+for listeners serving them, or pre-set a response `content-encoding` header
+(it is always respected) to pass a body through uncompressed.
 
 **WebSocket `permessage-deflate` negotiation:** the server ALWAYS responds
 with `permessage-deflate; server_no_context_takeover;
 client_no_context_takeover` (RFC 7692 allows either endpoint to request the
 flags unilaterally), honoring `server_max_window_bits` when offered (the
 compressor clamps its distances accordingly) and never emitting window-bits
-parameters. Cross-message history is never used, so persistent compression
-state per connection is ~0 (two ~32-byte contexts plus a bounded input
-buffer, shrunk on every message reset); compressor scratch comes from a
-static process-wide slot pool checked out per call — under extreme
-contention a message simply goes out uncompressed.
+parameters. Cross-message history is never used, keeping per-connection
+compression memory minimal. Under heavy load, a message may be sent
+uncompressed.
 
 **Accept-Encoding handling:** `q=0` (in any zero-padded form) forbids an
 encoding (RFC 9110). `Vary: accept-encoding` is set whenever compressed
@@ -351,33 +327,29 @@ least as fresh as the original (modification time) is served, with
 selected (RFC 9110 §12.5.3).
 
 With `compress_static` enabled, missing or stale `.br` / `.gz` variants are
-created on demand and written into the root folder. Attached handles read the
-flag from the matching route's settings (routes inherit the listener's root
-value at route-creation); detached handles (created manually, with no
-settings) use an internal controller flag instead.
+created on demand and written into the root folder. The value is read from the
+matching route's settings (routes inherit the listener's root value at
+route-creation); handles without settings (created with `fio_http_new`) never
+create variants.
 
 - creation is limited to compressible (text-like) MIME types and originals
   between 1024 bytes and `FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT` (2 MiB);
 - creation is skipped when compression would not shrink the file;
-- `.br` variants are compressed at brotli quality 4 (the benchmark-reviewed
-  fast-path ceiling; q5+ engages the slow hash-chain path) and `.gz`
-  variants at gzip level 6;
+- `.br` variants are compressed at brotli quality 4 and `.gz` variants at
+  gzip level 6;
 - `zstd` / `deflate` variants are only ever served pre-generated — they are
   never created on demand;
 - on-demand creation writes into the served folder and is triggered by
   client requests; the folder must be writable for creation to succeed
-  (a write failure disables creation, see memoization below). Variants
+  (repeated failures disable creation, see below). Variants
   may also be pre-generated at deploy time with any external tool — the
   server only stats the files.
 
-`compress_static` is a failure-memoization shift register, updated atomically
-(the IO threads share the listener / route settings): any non-zero value
-enables on-demand creation. A compression success re-seeds bit 0
-(`value |= 1`); any other failure shifts the value left (`value <<= 1`), so
-8 consecutive failures shift out of the `uint8_t` and disable creation, as
-does a single filesystem-full / permission error (`ENOSPC`, `EACCES`,
-`EROFS`, `EDQUOT` — `value = 0`). Once 0, creation stays disabled until the
-settings are re-applied. Detached handles carry no memoization state.
+Any non-zero `compress_static` value enables on-demand creation. The server
+disables creation (setting the value to 0) after repeated consecutive
+failures, or after a single filesystem-full / permission error (`ENOSPC`,
+`EACCES`, `EROFS`, `EDQUOT`). Once disabled, creation stays off until the
+settings are re-applied.
 
 `Vary: accept-encoding` is set whenever a variant is served, and on
 identity responses whenever variants may be created, so caches key on the
@@ -594,6 +566,11 @@ fio_http_controller_s *fio_http_controller_set(fio_http_s *h,
 `udata` and `udata2` are for application state. `cdata` and the controller are
 used by the HTTP layer and custom controllers.
 
+`fio_http_controller` gets the handle's controller; `fio_http_controller_set`
+sets it and returns the controller in use. Passing `NULL` installs a no-op
+controller. Missing callbacks in a custom controller are filled in with no-op
+defaults, so the controller object must be writable and outlive the handle.
+
 ### Request / response properties
 
 ```c
@@ -628,8 +605,8 @@ pass a non-`NULL` HTTP handle (`h`). Unlike `fio_http_resource_action`, these
 helpers do not classify paths or combine PUT, POST, and PATCH into a single
 action.
 
-`fio_http_status_set(h, 0)` normalizes to `200`; values above the internal range
-normalize to `500`.
+`fio_http_status_set(h, 0)` normalizes to `200`; values above `1023` normalize
+to `500`.
 
 ### State checks
 
@@ -863,13 +840,10 @@ void           fio_http_write_log(fio_http_s *h);
 int            fio_http_from(fio_str_info_s *dest, const fio_http_s *h);
 fio_str_info_s fio_http_date(uint64_t now_in_seconds);
 fio_str_info_s fio_http_log_time(uint64_t now_in_seconds);
-int64_t        fio_http_get_timestump(void);
 ```
 
-`fio_http_get_timestump` is the inline timestamp helper used by the handle for
-`received_at` and log timing. User code usually reads timestamps with
-`fio_http_received_at` or formats them with `fio_http_date` /
-`fio_http_log_time`.
+Read request timestamps with `fio_http_received_at`; format dates with
+`fio_http_date` / `fio_http_log_time`.
 
 `fio_http_from` writes a best-effort peer address starting with the `Forwarded`
 header, then socket peer address, then `"[unknown]"`.
@@ -910,7 +884,8 @@ struct fio_http_controller_s {
 ```
 
 Controllers allow the handle to write through different protocols. Initialize
-custom controllers to zero before use. If controller callbacks are not
+custom controllers to zero before use; `private_flags` is reserved and must
+remain zero. If controller callbacks are not
 thread-safe, call `fio_http_write` only from the controller's expected thread.
 
 ---
@@ -947,6 +922,12 @@ FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT   /* 1 << 21 */
 FIO_HTTP_LOG_X_REQUEST_START          /* 1 */
 FIO_HTTP_ENFORCE_LOWERCASE_HEADERS    /* 0 */
 ```
+
+With `FIO_HTTP_LOG_X_REQUEST_START`, request logs (`.log = 1`) include the
+request's wait time when the client or proxy sends an `X-Request-Start`
+header holding a millisecond timestamp (optionally prefixed with `t=`). The
+wait time is omitted when the header is missing or the wait is 512 seconds or
+more.
 
 ---
 

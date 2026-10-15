@@ -143,6 +143,7 @@ HTTP Handle Settings
 #endif
 
 #ifndef FIO_HTTP_LOG_X_REQUEST_START
+/** Logs request wait time using x-request-start header */
 #define FIO_HTTP_LOG_X_REQUEST_START 1
 #endif
 
@@ -333,10 +334,12 @@ typedef struct fio_http_settings_s {
    * recommended.
    *
    * Note: per-route (read from the matching route's settings; routes
-   * inherit the listener's root value at route-creation). The value is a
-   * failure-memoization shift register, atomically shared by the IO
-   * threads - see `fio_http_static_file_response`. Detached handles (no
-   * settings) use an internal controller flag, with no memoization state.
+   * inherit the listener's root value at route-creation). Handles without
+   * settings (created with `fio_http_new`) never create variants.
+   *
+   * Note: on-demand creation disables itself (the value drops to 0) after
+   * repeated failures or a filesystem-full / permission error, until the
+   * settings are re-applied.
    */
   uint8_t compress_static;
   /**
@@ -585,7 +588,7 @@ FIO_IFUNC void *fio_http_udata2_set(fio_http_s *, void *);
 /** Gets the HTTP Controller associated with the HTTP handle. */
 FIO_IFUNC fio_http_controller_s *fio_http_controller(fio_http_s *h);
 
-/** Gets the HTTP Controller associated with the HTTP handle. */
+/** Sets the HTTP Controller associated with the HTTP handle. */
 FIO_IFUNC fio_http_controller_s *fio_http_controller_set(
     fio_http_s *h,
     fio_http_controller_s *controller);
@@ -1212,9 +1215,8 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  *
  * Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
  * in this preference order) are served when accepted by the client,
- * present on disk, and fresh; with `compress_static` enabled (the matching
- * route's settings, or an internal controller flag on detached handles),
- * missing `.br` / `.gz` variants are also created on
+ * present on disk, and fresh; with `compress_static` enabled in the matching
+ * route's settings, missing `.br` / `.gz` variants are also created on
  * demand.
  *
  * On success the response is complete and 0 is returned. On failure -1 is
@@ -1256,7 +1258,7 @@ The HTTP Controller
  * order for HTTP responses and requests to be sent.
  */
 struct fio_http_controller_s {
-  /* MUST be initialized to zero, used internally by the HTTP Handle. */
+  /** Reserved. MUST be initialized to zero. */
   uintptr_t private_flags;
   /** Called when an HTTP handle is freed. */
   void (*on_destroyed)(fio_http_s *h);
@@ -1531,13 +1533,11 @@ HTTP Handle Implementation - inlined static functions
 ***************************************************************************** */
 
 #define FIO___HTTP_GETSET_PTR(type, name, index_, pre_set_code)                \
-  /** Used internally to set / get the propecrty at its known pointer index.   \
-   */                                                                          \
+  /** Get the name property at its known pointer index. */                     \
   FIO_IFUNC type *fio_http_##name(fio_http_s *h) {                             \
     return ((type **)h)[index_];                                               \
   }                                                                            \
-  /** Used internally to set / get the propercty at its known pointer index.   \
-   */                                                                          \
+  /** Set the name property at its known pointer index. */                     \
   FIO_IFUNC type *fio_http_##name##_set(fio_http_s *h, type *ptr) {            \
     pre_set_code;                                                              \
     return (((type **)h)[index_] = ptr);                                       \
@@ -1546,28 +1546,19 @@ HTTP Handle Implementation - inlined static functions
 SFUNC fio_http_controller_s *fio___http_controller_validate(
     fio_http_controller_s *c);
 
-/* Create fio_http_udata_(get|set) functions */
+/** fio_http_udata / fio_http_udata_set */
 FIO___HTTP_GETSET_PTR(void, udata, 0, (void)0)
-/* Create fio_http_pdata_(get|set) functions */
+/** fio_http_udata2 / fio_http_udata2_set */
 FIO___HTTP_GETSET_PTR(void, udata2, 1, (void)0)
-/* Create fio_http_cdata_(get|set) functions */
+/** fio_http_cdata / fio_http_cdata_set */
 FIO___HTTP_GETSET_PTR(void, cdata, 2, (void)0)
-/* Create fio_http_controller_(get|set) functions */
+/** fio_http_controller / fio_http_controller_set */
 FIO___HTTP_GETSET_PTR(fio_http_controller_s,
                       controller,
                       3,
                       ptr = fio___http_controller_validate(ptr))
 
 #undef FIO___HTTP_GETSET_PTR
-/*
-REMEMBER:
-========
-
-All memory allocations should use:
-* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
-* FIO_MEM_FREE_(ptr, size)
-
-*/
 
 /* *****************************************************************************
 Path Section Looping

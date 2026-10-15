@@ -36236,7 +36236,7 @@ _Symbol type:_ `macro`
 #define FIO_HTTP_LOG_X_REQUEST_START 1
 ```
 
-
+Logs request wait time using x-request-start header
 
 _Symbol type:_ `macro`
 
@@ -36496,10 +36496,12 @@ uint8_t log;
 * recommended.
 *
 * Note: per-route (read from the matching route's settings; routes
-* inherit the listener's root value at route-creation). The value is a
-* failure-memoization shift register, atomically shared by the IO
-* threads - see `fio_http_static_file_response`. Detached handles (no
-* settings) use an internal controller flag, with no memoization state.
+* inherit the listener's root value at route-creation). Handles without
+* settings (created with `fio_http_new`) never create variants.
+*
+* Note: on-demand creation disables itself (the value drops to 0) after
+* repeated failures or a filesystem-full / permission error, until the
+* settings are re-applied.
 */
 uint8_t compress_static;
 /**
@@ -37115,7 +37117,7 @@ _Symbol type:_ `function`
 inline fio_http_controller_s *fio_http_controller_set( fio_http_s *h, fio_http_controller_s *controller)
 ```
 
-Gets the HTTP Controller associated with the HTTP handle.
+Sets the HTTP Controller associated with the HTTP handle.
 
 _Symbol type:_ `function`
 
@@ -37907,9 +37909,8 @@ requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when
 
 Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
 in this preference order) are served when accepted by the client,
-present on disk, and fresh; with `compress_static` enabled (the matching
-route's settings, or an internal controller flag on detached handles),
-missing `.br` / `.gz` variants are also created on
+present on disk, and fresh; with `compress_static` enabled in the matching
+route's settings, missing `.br` / `.gz` variants are also created on
 demand.
 
 On success the response is complete and 0 is returned. On failure -1 is
