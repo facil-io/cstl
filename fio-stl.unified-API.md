@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3149.
+Total symbols: 3161.
 
 ## Contents
 
@@ -78,7 +78,7 @@ Total symbols: 3149.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 149
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 161
 
 -----------------------------------------------------
 
@@ -36022,7 +36022,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-149 public symbols.
+161 public symbols.
 
 ### Macros
 
@@ -37181,13 +37181,13 @@ Tests for GET, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 
-#### `fio_http_method_is_put`
+#### `fio_http_method_is_head`
 
 ```c
-int fio_http_method_is_put(fio_http_s *h)
+int fio_http_method_is_head(fio_http_s *h)
 ```
 
-Tests for PUT, case-insensitively; requires a non-NULL HTTP handle.
+Tests for HEAD, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 
@@ -37198,6 +37198,56 @@ int fio_http_method_is_post(fio_http_s *h)
 ```
 
 Tests for POST, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_put`
+
+```c
+int fio_http_method_is_put(fio_http_s *h)
+```
+
+Tests for PUT, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_delete`
+
+```c
+int fio_http_method_is_delete(fio_http_s *h)
+```
+
+Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_connect`
+
+```c
+int fio_http_method_is_connect(fio_http_s *h)
+```
+
+Tests for CONNECT, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_options`
+
+```c
+int fio_http_method_is_options(fio_http_s *h)
+```
+
+Tests for OPTIONS, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_trace`
+
+```c
+int fio_http_method_is_trace(fio_http_s *h)
+```
+
+Tests for TRACE, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 
@@ -37221,13 +37271,83 @@ Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 
-#### `fio_http_method_is_delete`
+#### `fio_http_method_is_propfind`
 
 ```c
-int fio_http_method_is_delete(fio_http_s *h)
+int fio_http_method_is_propfind(fio_http_s *h)
 ```
 
-Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle.
+Tests for PROPFIND, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_proppatch`
+
+```c
+int fio_http_method_is_proppatch(fio_http_s *h)
+```
+
+Tests for PROPPATCH, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_mkcol`
+
+```c
+int fio_http_method_is_mkcol(fio_http_s *h)
+```
+
+Tests for MKCOL, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_copy`
+
+```c
+int fio_http_method_is_copy(fio_http_s *h)
+```
+
+Tests for COPY, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_move`
+
+```c
+int fio_http_method_is_move(fio_http_s *h)
+```
+
+Tests for MOVE, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_lock`
+
+```c
+int fio_http_method_is_lock(fio_http_s *h)
+```
+
+Tests for LOCK, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_unlock`
+
+```c
+int fio_http_method_is_unlock(fio_http_s *h)
+```
+
+Tests for UNLOCK, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_search`
+
+```c
+int fio_http_method_is_search(fio_http_s *h)
+```
+
+Tests for SEARCH, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 

@@ -20840,11 +20840,23 @@ size_t         fio_http_status(fio_http_s *h);
 size_t         fio_http_status_set(fio_http_s *h, size_t status);
 fio_str_info_s fio_http_method(fio_http_s *h);
 int fio_http_method_is_get(fio_http_s *h);
-int fio_http_method_is_put(fio_http_s *h);
+int fio_http_method_is_head(fio_http_s *h);
 int fio_http_method_is_post(fio_http_s *h);
+int fio_http_method_is_put(fio_http_s *h);
+int fio_http_method_is_delete(fio_http_s *h);
+int fio_http_method_is_connect(fio_http_s *h);
+int fio_http_method_is_options(fio_http_s *h);
+int fio_http_method_is_trace(fio_http_s *h);
 int fio_http_method_is_patch(fio_http_s *h);
 int fio_http_method_is_query(fio_http_s *h);
-int fio_http_method_is_delete(fio_http_s *h);
+int fio_http_method_is_propfind(fio_http_s *h);
+int fio_http_method_is_proppatch(fio_http_s *h);
+int fio_http_method_is_mkcol(fio_http_s *h);
+int fio_http_method_is_copy(fio_http_s *h);
+int fio_http_method_is_move(fio_http_s *h);
+int fio_http_method_is_lock(fio_http_s *h);
+int fio_http_method_is_unlock(fio_http_s *h);
+int fio_http_method_is_search(fio_http_s *h);
 fio_str_info_s fio_http_method_set(fio_http_s *h, fio_str_info_s value);
 fio_str_info_s fio_http_opath(fio_http_s *h);
 fio_str_info_s fio_http_opath_set(fio_http_s *h, fio_str_info_s value);
@@ -20865,7 +20877,9 @@ The `fio_http_method_is_*` helpers test whether the request method matches the
 named method, ignoring ASCII case. They return `1` for a match and `0` otherwise;
 pass a non-`NULL` HTTP handle (`h`). Unlike `fio_http_resource_action`, these
 helpers do not classify paths or combine PUT, POST, and PATCH into a single
-action.
+action. The helpers cover the core HTTP methods, PATCH, QUERY, and commonly
+used WebDAV methods (PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, and
+SEARCH).
 
 `fio_http_status_set(h, 0)` normalizes to `200`; values above `1023` normalize
 to `500`.

@@ -243,11 +243,23 @@ static void test_http_method_helpers(void) {
     int (*check)(fio_http_s *);
   } cases[] = {
       {"GET", fio_http_method_is_get},
-      {"PUT", fio_http_method_is_put},
+      {"HEAD", fio_http_method_is_head},
       {"POST", fio_http_method_is_post},
+      {"PUT", fio_http_method_is_put},
+      {"DELETE", fio_http_method_is_delete},
+      {"CONNECT", fio_http_method_is_connect},
+      {"OPTIONS", fio_http_method_is_options},
+      {"TRACE", fio_http_method_is_trace},
       {"PATCH", fio_http_method_is_patch},
       {"QUERY", fio_http_method_is_query},
-      {"DELETE", fio_http_method_is_delete},
+      {"PROPFIND", fio_http_method_is_propfind},
+      {"PROPPATCH", fio_http_method_is_proppatch},
+      {"MKCOL", fio_http_method_is_mkcol},
+      {"COPY", fio_http_method_is_copy},
+      {"MOVE", fio_http_method_is_move},
+      {"LOCK", fio_http_method_is_lock},
+      {"UNLOCK", fio_http_method_is_unlock},
+      {"SEARCH", fio_http_method_is_search},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
     fio_http_s *h = test_http_make_handle(cases[i].method, "/");
@@ -256,7 +268,7 @@ static void test_http_method_helpers(void) {
       if (i != j)
         FIO_ASSERT(cases[j].check(h) == 0, "other method matched");
     }
-    char mixed[8];
+    char mixed[16];
     size_t len = strlen(cases[i].method);
     memcpy(mixed, cases[i].method, len + 1);
     for (size_t j = 0; j < len; j += 2)

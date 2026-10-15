@@ -119335,16 +119335,40 @@ SFUNC fio_str_info_s fio_http_method(fio_http_s *);
 
 /** Tests for GET, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_get(fio_http_s *h);
-/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for HEAD, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_head(fio_http_s *h);
 /** Tests for POST, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_post(fio_http_s *h);
+/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for CONNECT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_connect(fio_http_s *h);
+/** Tests for OPTIONS, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_options(fio_http_s *h);
+/** Tests for TRACE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_trace(fio_http_s *h);
 /** Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_patch(fio_http_s *h);
 /** Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle. */
 SFUNC int fio_http_method_is_query(fio_http_s *h);
-/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
-SFUNC int fio_http_method_is_delete(fio_http_s *h);
+/** Tests for PROPFIND, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_propfind(fio_http_s *h);
+/** Tests for PROPPATCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_proppatch(fio_http_s *h);
+/** Tests for MKCOL, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_mkcol(fio_http_s *h);
+/** Tests for COPY, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_copy(fio_http_s *h);
+/** Tests for MOVE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_move(fio_http_s *h);
+/** Tests for LOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_lock(fio_http_s *h);
+/** Tests for UNLOCK, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_unlock(fio_http_s *h);
+/** Tests for SEARCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_search(fio_http_s *h);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
@@ -120080,6 +120104,24 @@ HTTP Settings Resolver
 
 /** Returns the HTTP settings associated with the HTTP object, if any. */
 SFUNC fio_http_settings_s *fio_http_settings(fio_http_s *);
+
+/* *****************************************************************************
+
+
+
+
+
+
+
+                          Inline / Macro Implementations
+
+
+
+
+
+
+
+***************************************************************************** */
 
 /* *****************************************************************************
 Header Value / Property Iterator - Inline Implementation
@@ -121762,7 +121804,8 @@ FIO___HTTP_MAKE_GET_SET(cflags)
 /* Test-only seam for detached handles: production callers configure
  * compression via listener/route settings, not controller flags. */
 #if defined(FIO_HTTP_TEST_COMPRESSION_FLAGS)
-FIO_IFUNC void fio___http_test_enable_compression(fio_http_s *h, int is_static) {
+FIO_IFUNC void fio___http_test_enable_compression(fio_http_s *h,
+                                                  int is_static) {
   fio___http_cflags_set(h,
                         is_static ? FIO___HTTP_CFLAG_COMPRESS_STATIC
                                   : FIO___HTTP_CFLAG_COMPRESS_DYNAMIC);
@@ -121819,7 +121862,13 @@ SFUNC int fio_http_is_sse(fio_http_s *h) {
 Method Name Matching
 ***************************************************************************** */
 
-#define FIO___HTTP_DEF_METHOD_TEST4(m, l)                                      \
+SFUNC int fio_http_method_is_get(fio_http_s *h);  /* IDE Marker*/
+SFUNC int fio_http_method_is_post(fio_http_s *h); /* IDE Marker*/
+SFUNC int fio_http_method_is_head(fio_http_s *h); /* IDE Marker*/
+SFUNC int fio_http_method_is_put(fio_http_s *h);  /* IDE Marker*/
+
+/* Define test for lengths 3 and 4 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
   /** Tests if fio_http_method is m (case insensitive). */                     \
   SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
@@ -121831,49 +121880,85 @@ Method Name Matching
     return (tst == is);                                                        \
   }
 
-FIO___HTTP_DEF_METHOD_TEST4(get, 3)
-FIO___HTTP_DEF_METHOD_TEST4(put, 3)
-FIO___HTTP_DEF_METHOD_TEST4(post, 4)
+FIO___HTTP_DEF_METHOD_TEST(copy, 4)
+FIO___HTTP_DEF_METHOD_TEST(get, 3)
+FIO___HTTP_DEF_METHOD_TEST(head, 4)
+FIO___HTTP_DEF_METHOD_TEST(lock, 4)
+FIO___HTTP_DEF_METHOD_TEST(move, 4)
+FIO___HTTP_DEF_METHOD_TEST(post, 4)
+FIO___HTTP_DEF_METHOD_TEST(put, 3)
 
-#undef FIO___HTTP_DEF_METHOD_TEST4
+#undef FIO___HTTP_DEF_METHOD_TEST
 
-/** Returns 1 if fio_http_method is PATCH (case insensitive). */
-SFUNC int fio_http_method_is_patch(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 5)
-    return 0;
-  if ((method.buf[0] | 0x20) != 'p')
-    return 0;
-  const uint32_t tst = fio_buf2u32u("atch") | 0x20202020U;
-  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
-  return (tst == is);
-}
-/** Returns 1 if fio_http_method is QUERY (case insensitive). */
-SFUNC int fio_http_method_is_query(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 5)
-    return 0;
-  if ((method.buf[0] | 0x20) != 'q')
-    return 0;
-  const uint32_t tst = fio_buf2u32u("uery") | 0x20202020U;
-  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
-  return (tst == is);
-}
+/* Define test for length 5 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    if ((method.buf[0] | 0x20) != name[0])                                     \
+      return 0;                                                                \
+    const uint32_t tst = fio_buf2u32u(name + 1) | 0x20202020U;                 \
+    const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;            \
+    return (tst == is);                                                        \
+  }
 
-/** Returns 1 if fio_http_method is DELETE (case insensitive). */
-SFUNC int fio_http_method_is_delete(fio_http_s *h) {
-  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  fio_str_info_s method = fio_http_method(h);
-  if (method.len != 6)
-    return 0;
-  const uint32_t tst1 = fio_buf2u32u("dele") | 0x20202020U;
-  const uint32_t is1 = fio_buf2u32u(method.buf) | 0x20202020U;
-  const uint32_t tst2 = fio_buf2u32u("lete") | 0x20202020U;
-  const uint32_t is2 = fio_buf2u32u(method.buf + 2) | 0x20202020U;
-  return !((tst1 ^ is1) | (tst2 ^ is2));
-}
+FIO___HTTP_DEF_METHOD_TEST(patch, 5)
+FIO___HTTP_DEF_METHOD_TEST(query, 5)
+FIO___HTTP_DEF_METHOD_TEST(trace, 5)
+FIO___HTTP_DEF_METHOD_TEST(mkcol, 5)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
+
+/* Define test for lengths 5-8 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    const uint32_t tst1 = fio_buf2u32u(name) | 0x20202020U;                    \
+    const uint32_t is1 = fio_buf2u32u(method.buf) | 0x20202020U;               \
+    const uint32_t tst2 = fio_buf2u32u(name + (l - 4)) | 0x20202020U;          \
+    const uint32_t is2 = fio_buf2u32u(method.buf + (l - 4)) | 0x20202020U;     \
+    return !((tst1 ^ is1) | (tst2 ^ is2));                                     \
+  }
+
+FIO___HTTP_DEF_METHOD_TEST(search, 6)
+FIO___HTTP_DEF_METHOD_TEST(delete, 6)
+FIO___HTTP_DEF_METHOD_TEST(options, 7)
+FIO___HTTP_DEF_METHOD_TEST(connect, 7)
+FIO___HTTP_DEF_METHOD_TEST(unlock, 6)
+FIO___HTTP_DEF_METHOD_TEST(propfind, 8)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
+
+/* Define test for lengths 9-16 */
+#define FIO___HTTP_DEF_METHOD_TEST(m, l)                                       \
+  /** Returns 1 if fio_http_method is m (case insensitive). */                 \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    static const char *name = #m;                                              \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    const uint64_t tst1 =                                                      \
+        fio_buf2u64u(name) | (uint64_t)0x2020202020202020ULL;                  \
+    const uint64_t is1 =                                                       \
+        fio_buf2u64u(method.buf) | (uint64_t)0x2020202020202020ULL;            \
+    const uint32_t tst2 = fio_buf2u32u(name + (l - 8)) | 0x20202020U;          \
+    const uint32_t is2 = fio_buf2u32u(method.buf + (l - 8)) | 0x20202020U;     \
+    return !((tst1 ^ is1) | (uint64_t)(tst2 ^ is2));                           \
+  }
+
+FIO___HTTP_DEF_METHOD_TEST(proppatch, 9)
+
+#undef FIO___HTTP_DEF_METHOD_TEST
 
 /* *****************************************************************************
 Header Data Management
