@@ -68,13 +68,12 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Update rolling latest release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
-        run: |
-          set -euo pipefail
-          gh release delete latest --cleanup-tag --yes || true
-          gh release create latest fio-stl.h \
-            --target '${{ steps.latest.outputs.sha }}' \
-            --title 'fio-stl (latest)' \
-            --notes "Latest stable fio-stl release. This rolling release currently mirrors \`${RELEASE_TAG}\`."
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          target_commitish: ${{ steps.latest.outputs.sha }}
+          name: fio-stl (latest)
+          body: Latest stable fio-stl release. This rolling release currently mirrors `${{ steps.candidate.outputs.tag }}`.
+          prerelease: false
+          files: fio-stl.h
+          overwrite_files: true
