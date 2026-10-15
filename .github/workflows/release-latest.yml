@@ -58,7 +58,7 @@ jobs:
           ref: ${{ steps.candidate.outputs.tag }}
           fetch-depth: 0
 
-      - name: Move latest tag to the selected release
+      - name: Resolve selected release commit
         id: latest
         env:
           RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
@@ -66,8 +66,6 @@ jobs:
           set -euo pipefail
           sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          git tag --force latest "$sha"
-          git push --force origin refs/tags/latest
 
       - name: Update rolling latest release
         env:
@@ -75,7 +73,8 @@ jobs:
           RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release delete latest --yes || true
+          gh release delete latest --cleanup-tag --yes || true
           gh release create latest fio-stl.h \
+            --target '${{ steps.latest.outputs.sha }}' \
             --title 'fio-stl (latest)' \
             --notes "Latest stable fio-stl release. This rolling release currently mirrors \`${RELEASE_TAG}\`."
