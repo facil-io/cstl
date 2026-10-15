@@ -4,12 +4,12 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3161.
+Total symbols: 3165.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1764
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1768
 - [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 12
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
@@ -102,7 +102,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1764 public symbols.
+1768 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -18603,6 +18603,48 @@ inline uint64_t fio_cycle_counter(void)
 ```
 
 
+
+_Symbol type:_ `function`
+
+#### `fio_buf_info_is_eq`
+
+```c
+FIO_SFUNC bool fio_buf_info_is_eq(fio_buf_info_s a, fio_buf_info_s b)
+```
+
+Returns true if equal, similar to:
+      (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+
+_Symbol type:_ `function`
+
+#### `fio_buf_info_is_ieq`
+
+```c
+FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b)
+```
+
+An ASCII case insensitive compare for binary strings (not UTF-8).
+
+_Symbol type:_ `function`
+
+#### `fio_str_info_is_eq`
+
+```c
+inline bool fio_str_info_is_eq(fio_str_info_s a, fio_str_info_s b)
+```
+
+Returns true if equal, similar to:
+      (a.len == b.len && !memcmp(a.buf, b.buf, a.len))
+
+_Symbol type:_ `function`
+
+#### `fio_str_info_is_ieq`
+
+```c
+inline bool fio_str_info_is_ieq(fio_str_info_s a, fio_str_info_s b)
+```
+
+An ASCII case insensitive compare for binary strings (not UTF-8).
 
 _Symbol type:_ `function`
 

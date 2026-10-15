@@ -1793,6 +1793,80 @@ FIO_SFUNC void fio___test_core_list_each(void) {
   }
 }
 
+/* ASCII reference independent of the optimized word-lane implementation. */
+FIO_SFUNC bool fio___core_buf_ieq_reference(fio_buf_info_s a, fio_buf_info_s b) {
+  if (a.len != b.len)
+    return false;
+  for (size_t i = 0; i < a.len; ++i) {
+    uint8_t x = (uint8_t)a.buf[i], y = (uint8_t)b.buf[i];
+    if (x >= 'A' && x <= 'Z') x = (uint8_t)(x + 32);
+    if (y >= 'A' && y <= 'Z') y = (uint8_t)(y + 32);
+    if (x != y) return false;
+  }
+  return true;
+}
+
+FIO_SFUNC void fio___core_check_info_eq(fio_buf_info_s a, fio_buf_info_s b) {
+  bool exact = a.len == b.len && (!a.len || !FIO_MEMCMP(a.buf, b.buf, a.len));
+  bool folded = fio___core_buf_ieq_reference(a, b);
+  FIO_ASSERT(fio_buf_info_is_eq(a, b) == exact,
+             "buf exact length=%zu", a.len);
+  FIO_ASSERT(fio_buf_info_is_ieq(a, b) == folded,
+             "buf ASCII length=%zu", a.len);
+  fio_str_info_s sa = {.len = a.len, .buf = a.buf};
+  fio_str_info_s sb = {.len = b.len, .buf = b.buf};
+  FIO_ASSERT(fio_str_info_is_eq(sa, sb) == exact,
+             "str exact length=%zu", a.len);
+  FIO_ASSERT(fio_str_info_is_ieq(sa, sb) == folded,
+             "str ASCII length=%zu", a.len);
+}
+
+FIO_SFUNC void fio___test_core_info_equality(void) {
+  enum { MAX_LEN = 2048 };
+  char a_store[MAX_LEN + 16], b_store[MAX_LEN + 16];
+  fio___core_check_info_eq((fio_buf_info_s){0}, (fio_buf_info_s){0});
+  for (unsigned x = 0; x < 256; ++x) {
+    for (unsigned y = 0; y < 256; ++y) {
+      a_store[0] = (char)x;
+      b_store[0] = (char)y;
+      fio___core_check_info_eq((fio_buf_info_s){1, a_store},
+                                (fio_buf_info_s){1, b_store});
+    }
+  }
+  /* Every byte position and length, including both neighbors of power-of-two
+   * boundaries, with unaligned input pointers and mixed ASCII case. */
+  for (size_t offset = 0; offset < 8; ++offset) {
+    char *a = a_store + offset;
+    char *b = b_store + ((offset + 3) & 7);
+    for (size_t i = 0; i < MAX_LEN; ++i) {
+      a[i] = "Az@`[_{|9!"[i % 10];
+      b[i] = a[i];
+      if (b[i] >= 'A' && b[i] <= 'Z') b[i] += 32;
+    }
+    const size_t lengths[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17,
+                              31, 32, 33, 63, 64, 65, 127, 128, 129,
+                              255, 256, 1023, 1024, 1025, 2047, 2048};
+    for (size_t k = 0; k < sizeof lengths / sizeof *lengths; ++k) {
+      size_t len = lengths[k];
+      fio_buf_info_s x = {len, a}, y = {len, b};
+      fio___core_check_info_eq(x, y);
+      fio___core_check_info_eq(x, x);
+      fio___core_check_info_eq(x, (fio_buf_info_s){len + 1, b});
+      for (size_t pos = 0; pos < len; ++pos) {
+        char original = b[pos];
+        b[pos] = '#';
+        fio___core_check_info_eq(x, y);
+        b[pos] = original;
+        a[pos] = (char)0xC0;
+        b[pos] = (char)0xE0;
+        fio___core_check_info_eq(x, y);
+        a[pos] = original >= 'a' && original <= 'z' ? original - 32 : original;
+        b[pos] = original;
+      }
+    }
+  }
+}
+
 int main(void) {
   /* Run merged core-adjacent tests first. */
   fio___test_core_type_sizes();
@@ -1807,6 +1881,7 @@ int main(void) {
   fio___test_core_bit_rotation();
   fio___test_core_bit_index();
   fio___test_core_buf_helpers();
+  fio___test_core_info_equality();
   fio___test_core_ct_operations();
   fio___test_core_ct_bitwise();
   fio___test_core_bitmap();
