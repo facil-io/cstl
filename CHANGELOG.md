@@ -4,6 +4,20 @@
 
 
 
+### v.0.8.1 - 2026-10-15
+
+**API**: (`http`) added case-insensitive method helpers for `GET`, `PUT`, `POST`, `PATCH`, `QUERY`, and `DELETE`: `fio_http_method_is_get`, `fio_http_method_is_put`, `fio_http_method_is_post`, `fio_http_method_is_patch`, `fio_http_method_is_query`, and `fio_http_method_is_delete`.
+
+**API**: (`http`) HTTP response state and compression-control flags are now private implementation details. Applications should inspect handles through `fio_http_is_clean`, `fio_http_is_finished`, `fio_http_is_freeing`, `fio_http_is_streaming`, `fio_http_is_upgraded`, `fio_http_is_websocket`, and `fio_http_is_sse`. Configure compression through listener or route settings instead of controller flags.
+
+**Fix**: (`http`) public inline helpers, path iteration, and resource-action routing now live with the public HTTP API declarations. This keeps them available when the library uses separate declarations and implementation through `FIO_EXTERN`.
+
+**Update**: (`http`) clarified the public API documentation, including controller assignment, static-file compression, route-relative resource paths, and reserved controller fields.
+
+**Update**: (`p256`, `rsa`) adjusted ignored arithmetic results to avoid compiler warnings. Cryptographic behavior is unchanged.
+
+
+
 ### v.0.8.0 - 2026-10-12
 
 This release includes the fixes and API changes below, plus the changes recorded under the earlier `edge` and `v.0.8.0.rc.01` entries. The `edge` tag remains a rolling prerelease, not the numbered 0.8.0 release.

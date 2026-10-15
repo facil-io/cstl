@@ -73,7 +73,7 @@ supports macros that will help detect and validate it's version.
 /** MINOR version: Deprecation, or significant features added. May break ABI. */
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
-#define FIO_VERSION_PATCH 0
+#define FIO_VERSION_PATCH 1
 /** Build version: optional build info (string), i.e. "beta.02" */
 /* #define FIO_VERSION_BUILD */
 

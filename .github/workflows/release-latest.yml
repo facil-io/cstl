@@ -1,0 +1,80 @@
+# Rolling "latest" release of fio-stl.h. A numbered release remains immutable;
+# this workflow moves the convenience `latest` tag and refreshes its asset.
+
+name: Release fio-stl.h (latest)
+
+on:
+  push:
+    tags:
+      - '**'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A tag push and its release publication may arrive close together.
+concurrency:
+  group: release-latest
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Ignore updates made by the rolling edge/latest workflows themselves.
+    if: >-
+      (github.event_name != 'push' ||
+       (github.ref_name != 'edge' && github.ref_name != 'latest')) &&
+      (github.event_name != 'release' ||
+       (github.event.release.tag_name != 'edge' && github.event.release.tag_name != 'latest'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Locate the newest numbered release
+        id: candidate
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            const candidates = releases
+              .filter(r => !r.draft && !r.prerelease)
+              .filter(r => r.tag_name !== 'edge' && r.tag_name !== 'latest')
+              .filter(r => /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(r.tag_name))
+              .sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+            if (!candidates.length)
+              core.setFailed('No published, non-prerelease numbered release was found.');
+            else {
+              const release = candidates[0];
+              core.info(`Selected ${release.tag_name}, published ${release.published_at}`);
+              core.setOutput('tag', release.tag_name);
+            }
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.candidate.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Move latest tag to the selected release
+        env:
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          git tag --force latest "$sha"
+          git push --force origin refs/tags/latest
+
+      - name: Update rolling latest release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          target_commitish: ${{ steps.candidate.outputs.tag }}
+          name: fio-stl (latest)
+          body: Latest stable fio-stl release. This rolling release currently mirrors `${{ steps.candidate.outputs.tag }}`.
+          prerelease: false
+          make_latest: false
+          files: fio-stl.h
+          overwrite_files: true
