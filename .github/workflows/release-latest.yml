@@ -77,6 +77,5 @@ jobs:
           name: fio-stl (latest)
           body: Latest stable fio-stl release. This rolling release currently mirrors `${{ steps.candidate.outputs.tag }}`.
           prerelease: false
-          make_latest: false
           files: fio-stl.h
           overwrite_files: true
