@@ -16,5 +16,16 @@ once per template instantiation pass.
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_HTTP)
+#undef FIO___HTTP_STATE_STREAMING
+#undef FIO___HTTP_STATE_FINISHED
+#undef FIO___HTTP_STATE_UPGRADED
+#undef FIO___HTTP_STATE_WEBSOCKET
+#undef FIO___HTTP_STATE_SSE
+#undef FIO___HTTP_STATE_COOKIES_PARSED
+#undef FIO___HTTP_STATE_FREEING
+#undef FIO___HTTP_STATE_NO_CONTENT
+#undef FIO___HTTP_CFLAG_COMPRESS_DYNAMIC
+#undef FIO___HTTP_CFLAG_COMPRESS_WS
+#undef FIO___HTTP_CFLAG_COMPRESS_STATIC
 #undef FIO_HTTP
 #endif

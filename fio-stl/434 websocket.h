@@ -89,7 +89,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
   /* RFC 7692: permessage-deflate extension negotiation (no-takeover only) */
-  if (FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_WS))) {
+  if (FIO_LIKELY(fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_WS))) {
     FIO_HTTP_HEADER_EACH_VALUE(
         h,
         1,
@@ -98,9 +98,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
                       (int)val.value.len,
                       val.value.buf);
-      if (!FIO_BUF_INFO_IS_EQ(
-              val.value,
-              FIO_BUF_INFO2((char *)"permessage-deflate", 18)))
+      if (!FIO_BUF_INFO_IS_EQ(val.value,
+                              FIO_BUF_INFO2((char *)"permessage-deflate", 18)))
         continue;
       /* Negotiate: ALWAYS force both no_context_takeover flags (persistent
        * compression state stays ~0 per connection); honor
@@ -110,8 +109,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       size_t ext_len = fio___http_ws_deflate_negotiate(
           FIO_STR_INFO2(val.value.buf, val.value.len),
           ext_resp,
-                                                       sizeof(ext_resp),
-                                                       &server_bits);
+          sizeof(ext_resp),
+          &server_bits);
       if (!ext_len)
         continue;
       fio_http_response_header_set(
@@ -717,34 +716,36 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
     const size_t framed_len = fio_websocket_write_len(args.len, 1);
     char *frame = NULL;
     if (args.len <= SIZE_MAX - args.offset && framed_len <= UINT32_MAX &&
-        (args.buf ||
-         ((off_t)args.offset >= 0 &&
-          (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
-          (off_t)(args.offset + args.len) >= 0 &&
-          (uintmax_t)(off_t)(args.offset + args.len) ==
-              (uintmax_t)(args.offset + args.len))))
+        (args.buf || ((off_t)args.offset >= 0 &&
+                      (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
+                      (off_t)(args.offset + args.len) >= 0 &&
+                      (uintmax_t)(off_t)(args.offset + args.len) ==
+                          (uintmax_t)(args.offset + args.len))))
       frame = fio_bstr_reserve(NULL, framed_len);
     if (!frame)
       goto client_write_error;
     if (args.buf) {
       fio_websocket_write_message_client(
-          frame, FIO_BUF_INFO2((char *)args.buf + args.offset, args.len), 0, 0, 0);
+          frame,
+          FIO_BUF_INFO2((char *)args.buf + args.offset, args.len),
+          0,
+          0,
+          0);
     } else {
       uint32_t mask = (uint32_t)(fio_rand64() | 0x01020408U);
       size_t head = fio___websocket_hdr((uint8_t *)frame,
-                                       args.len,
-                                       mask,
-                                       FIO_WEBSOCKET_OP_BINARY,
-                                       0);
+                                        args.len,
+                                        mask,
+                                        FIO_WEBSOCKET_OP_BINARY,
+                                        0);
       if (fio_fd_read(args.fd, frame + head, args.len, (off_t)args.offset) !=
           args.len) {
         fio_bstr_free(frame);
         goto client_write_error;
       }
-      fio_xmask_cpy(frame + head,
-                    frame + head,
-                    args.len,
-                    ((uint64_t)mask << 32) | (uint64_t)mask);
+      fio_xmask(frame + head,
+                args.len,
+                ((uint64_t)mask << 32) | (uint64_t)mask);
     }
     if (!args.buf && (unsigned)(args.fd + 1) > 1)
       close(args.fd);

@@ -10,7 +10,13 @@ Loopback sockets are used for listener creation; one final test runs the
 reactor for an in-process client/server roundtrip.
 ***************************************************************************** */
 #define FIO_HTTP
+#define FIO_HTTP_TEST_COMPRESSION_FLAGS
 #include "test-helpers.h"
+
+#if defined(FIO___HTTP_CFLAG_COMPRESS_STATIC) ||                             \
+    defined(FIO___HTTP_STATE_STREAMING)
+#error HTTP implementation flags must not leak past the module include
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -229,6 +235,61 @@ static fio_http_s *test_http_make_handle(const char *method, const char *path) {
 static void test_http_noop_on_http(fio_http_s *h) { (void)h; }
 static void test_http_api_on_http(fio_http_s *h) { (void)h; }
 static void test_http_apiv2_on_http(fio_http_s *h) { (void)h; }
+
+static void test_http_method_helpers(void) {
+  fprintf(stderr, "  * HTTP method helpers\n");
+  struct {
+    const char *method;
+    int (*check)(fio_http_s *);
+  } cases[] = {
+      {"GET", fio_http_method_is_get},
+      {"PUT", fio_http_method_is_put},
+      {"POST", fio_http_method_is_post},
+      {"PATCH", fio_http_method_is_patch},
+      {"QUERY", fio_http_method_is_query},
+      {"DELETE", fio_http_method_is_delete},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    fio_http_s *h = test_http_make_handle(cases[i].method, "/");
+    FIO_ASSERT(cases[i].check(h) == 1, "expected method should match");
+    for (size_t j = 0; j < sizeof(cases) / sizeof(*cases); ++j) {
+      if (i != j)
+        FIO_ASSERT(cases[j].check(h) == 0, "other method matched");
+    }
+    char mixed[8];
+    size_t len = strlen(cases[i].method);
+    memcpy(mixed, cases[i].method, len + 1);
+    for (size_t j = 0; j < len; j += 2)
+      mixed[j] = (char)(mixed[j] | 0x20);
+    fio_http_method_set(h, FIO_STR_INFO2(mixed, len));
+    FIO_ASSERT(cases[i].check(h) == 1, "mixed-case method should match");
+    if (len == 3) {
+      /* HTTP parsers can store GET/PUT in a non-terminated request line. */
+      char request_line[] = "GET /";
+      memcpy(request_line, cases[i].method, len);
+      fio_http_method_set(h, FIO_STR_INFO2(request_line, len));
+      FIO_ASSERT(cases[i].check(h) == 1,
+                 "three-byte method with following space should match");
+    }
+    fio_http_method_set(h, FIO_STR_INFO2(mixed, len - 1));
+    FIO_ASSERT(cases[i].check(h) == 0, "short method should not match");
+    fio_http_method_set(h, FIO_STR_INFO2(mixed, len + 1));
+    FIO_ASSERT(cases[i].check(h) == 0, "long method should not match");
+    fio_http_free(h);
+  }
+  /* A case-insensitive match must not turn ASCII punctuation into letters. */
+  {
+    fio_http_s *h = test_http_make_handle("POST", "/");
+    fio_http_method_set(h, FIO_STR_INFO1("pOST\x14"));
+    FIO_ASSERT(!fio_http_method_is_post(h), "POST with suffix must not match");
+    fio_http_method_set(h, FIO_STR_INFO1("\x10OST"));
+    FIO_ASSERT(!fio_http_method_is_post(h), "punctuation must not match POST");
+    fio_http_method_set(h, FIO_STR_INFO1("\x04ELETE"));
+    FIO_ASSERT(!fio_http_method_is_delete(h),
+               "punctuation must not match DELETE");
+    fio_http_free(h);
+  }
+}
 
 /* ===========================================================================
    Resource action detection
@@ -726,7 +787,7 @@ static void test_static_vary_and_range_guards(void) {
    *    disk, so the response MUST carry `Vary: accept-encoding`. */
   {
     fio_http_s *h = test_http_make_handle("GET", "/test.txt");
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio___http_test_enable_compression(h, 1);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 FIO_STR_INFO1((char *)"identity"));
@@ -756,7 +817,7 @@ static void test_static_vary_and_range_guards(void) {
   /* 2. Client accepts gzip → pre-compressed variant, with Vary. */
   {
     fio_http_s *h = test_http_make_handle("GET", "/test.txt");
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio___http_test_enable_compression(h, 1);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 FIO_STR_INFO1((char *)"gzip"));
@@ -783,7 +844,7 @@ static void test_static_vary_and_range_guards(void) {
    *    bytes are broken in practice). */
   {
     fio_http_s *h = test_http_make_handle("GET", "/test.txt");
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio___http_test_enable_compression(h, 1);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 FIO_STR_INFO1((char *)"gzip"));
@@ -911,7 +972,7 @@ static void test_static_head_mirrors_get(void) {
   {
     fio_http_s *h = test_http_make_handle("GET", "/test.txt");
     fio_http_status_set(h, 200);
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio___http_test_enable_compression(h, 1);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 FIO_STR_INFO1((char *)"gzip"));
@@ -937,7 +998,7 @@ static void test_static_head_mirrors_get(void) {
   {
     fio_http_s *h = test_http_make_handle("HEAD", "/test.txt");
     fio_http_status_set(h, 200);
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+    fio___http_test_enable_compression(h, 1);
     fio_http_request_header_set(h,
                                 FIO_STR_INFO2((char *)"accept-encoding", 15),
                                 FIO_STR_INFO1((char *)"gzip"));
@@ -1648,7 +1709,7 @@ static void test_static_compress_detached_creation(void) {
   fio_http_s *h = test_http_make_handle("GET", "/test.txt");
   FIO_ASSERT(!fio_http_settings(h),
              "detached creation: handle must be detached (no settings)");
-  fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC);
+  fio___http_test_enable_compression(h, 1);
   fio_http_request_header_set(h,
                               FIO_STR_INFO2((char *)"accept-encoding", 15),
                               FIO_STR_INFO1((char *)"br"));
@@ -1861,8 +1922,7 @@ static void test_raw_client_on_http(fio_http_s *h) {
         !!fio_http_response_header(h, FIO_STR_INFO2((char *)"x-final", 7), 0)
               .len;
     test_raw.get_interim_header =
-        !!fio_http_response_header(h, FIO_STR_INFO2((char *)"link", 4), 0)
-              .len;
+        !!fio_http_response_header(h, FIO_STR_INFO2((char *)"link", 4), 0).len;
     ++test_raw.get_calls;
   }
   test_raw_maybe_stop();
@@ -1878,7 +1938,8 @@ static int test_raw_timeout(void *ignr1, void *ignr2) {
 }
 
 static void test_http_client_interim_and_head(void) {
-  fprintf(stderr, "  * client skips 1xx interim responses / HEAD has no body\n");
+  fprintf(stderr,
+          "  * client skips 1xx interim responses / HEAD has no body\n");
   static fio_io_protocol_s raw_protocol;
   raw_protocol = (fio_io_protocol_s){
       .on_data = test_raw_server_on_data,
@@ -2429,10 +2490,10 @@ static struct {
 
 static void test_h1f_server_on_http(fio_http_s *h) {
   fio_str_info_s path = fio_http_path(h);
-  fio_str_info_s te = fio_http_request_header(
-      h,
-      FIO_STR_INFO2((char *)"transfer-encoding", 17),
-      0);
+  fio_str_info_s te =
+      fio_http_request_header(h,
+                              FIO_STR_INFO2((char *)"transfer-encoding", 17),
+                              0);
   if (te.len && te.len < sizeof(test_h1f.te))
     FIO_MEMCPY(test_h1f.te, te.buf, te.len);
   if (strlen(test_h1f.paths) + path.len + 2 < sizeof(test_h1f.paths)) {
@@ -2590,10 +2651,10 @@ static void test_http_server_h1_framing(void) {
     const char *status; /* status line prefix of the first response */
     const char *paths;  /* application dispatch log */
     size_t responses;
-    const char *contains; /* optional wire substring */
-    const char *excludes; /* optional forbidden wire substring */
-    const char *tail;     /* optional wire suffix */
-    const char *te;       /* request transfer-encoding seen by the app */
+    const char *contains;  /* optional wire substring */
+    const char *excludes;  /* optional forbidden wire substring */
+    const char *tail;      /* optional wire suffix */
+    const char *te;        /* request transfer-encoding seen by the app */
     const char *excludes2; /* optional forbidden wire substrings */
     const char *excludes3;
     const char *contains2; /* additional order-independent wire substring */
@@ -2831,12 +2892,24 @@ static void test_http_server_h1_framing(void) {
    "\r\n\r\n011170\r\nBBBB",                                                   \
    NULL,                                                                       \
    "BBBB\r\n03\r\nend\r\n0\r\n\r\n"}
-      TEST_H1F_BIG("0"), TEST_H1F_BIG("1"), TEST_H1F_BIG("2"),
-      TEST_H1F_BIG("3"), TEST_H1F_BIG("4"), TEST_H1F_BIG("5"),
-      TEST_H1F_BIG("6"), TEST_H1F_BIG("7"), TEST_H1F_BIG("8"),
-      TEST_H1F_BIG("9"), TEST_H1F_BIG("10"), TEST_H1F_BIG("11"),
-      TEST_H1F_BIG("12"), TEST_H1F_BIG("13"), TEST_H1F_BIG("14"),
-      TEST_H1F_BIG("15"), TEST_H1F_BIG("16"), TEST_H1F_BIG("17"),
+      TEST_H1F_BIG("0"),
+      TEST_H1F_BIG("1"),
+      TEST_H1F_BIG("2"),
+      TEST_H1F_BIG("3"),
+      TEST_H1F_BIG("4"),
+      TEST_H1F_BIG("5"),
+      TEST_H1F_BIG("6"),
+      TEST_H1F_BIG("7"),
+      TEST_H1F_BIG("8"),
+      TEST_H1F_BIG("9"),
+      TEST_H1F_BIG("10"),
+      TEST_H1F_BIG("11"),
+      TEST_H1F_BIG("12"),
+      TEST_H1F_BIG("13"),
+      TEST_H1F_BIG("14"),
+      TEST_H1F_BIG("15"),
+      TEST_H1F_BIG("16"),
+      TEST_H1F_BIG("17"),
 #undef TEST_H1F_BIG
 #undef TEST_H1F_STATUS
       {"HTTP/1.1 control (persistent, chunked stream)",
@@ -2870,10 +2943,9 @@ static void test_http_server_h1_framing(void) {
                      .udata1 = (void *)test_h1f.generation,
                      .every = 2000,
                      .repetitions = 1);
-    fio_http_listener_s *l =
-        fio_http_listen("tcp://127.0.0.1:0",
-                        .on_http = test_h1f_server_on_http,
-                        .log = 0);
+    fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                             .on_http = test_h1f_server_on_http,
+                                             .log = 0);
     FIO_ASSERT(l, "%s: listener failed", cases[i].name);
     unsigned port = test_ws_listener_port(l);
     FIO_ASSERT(port, "%s: listener port discovery failed", cases[i].name);
@@ -2906,15 +2978,14 @@ static void test_http_server_h1_framing(void) {
                cases[i].name,
                test_h1f.paths,
                cases[i].paths);
-    FIO_ASSERT(!strncmp(test_h1f.wire,
-                        cases[i].status,
-                        strlen(cases[i].status)) &&
-                   test_h1f_count("HTTP/1.") == cases[i].responses,
-               "%s: expected %zu response(s) starting \"%s\":\n%s",
-               cases[i].name,
-               cases[i].responses,
-               cases[i].status,
-               test_h1f.wire);
+    FIO_ASSERT(
+        !strncmp(test_h1f.wire, cases[i].status, strlen(cases[i].status)) &&
+            test_h1f_count("HTTP/1.") == cases[i].responses,
+        "%s: expected %zu response(s) starting \"%s\":\n%s",
+        cases[i].name,
+        cases[i].responses,
+        cases[i].status,
+        test_h1f.wire);
     FIO_ASSERT(!cases[i].contains || strstr(test_h1f.wire, cases[i].contains),
                "%s: missing \"%s\":\n%s",
                cases[i].name,
@@ -2930,15 +3001,14 @@ static void test_http_server_h1_framing(void) {
                cases[i].name,
                cases[i].excludes,
                test_h1f.wire);
-    FIO_ASSERT((!cases[i].excludes2 ||
-                !strstr(test_h1f.wire, cases[i].excludes2)) &&
-                   (!cases[i].excludes3 ||
-                    !strstr(test_h1f.wire, cases[i].excludes3)),
-               "%s: unexpected \"%s\" / \"%s\":\n%s",
-               cases[i].name,
-               cases[i].excludes2 ? cases[i].excludes2 : "",
-               cases[i].excludes3 ? cases[i].excludes3 : "",
-               test_h1f.wire);
+    FIO_ASSERT(
+        (!cases[i].excludes2 || !strstr(test_h1f.wire, cases[i].excludes2)) &&
+            (!cases[i].excludes3 || !strstr(test_h1f.wire, cases[i].excludes3)),
+        "%s: unexpected \"%s\" / \"%s\":\n%s",
+        cases[i].name,
+        cases[i].excludes2 ? cases[i].excludes2 : "",
+        cases[i].excludes3 ? cases[i].excludes3 : "",
+        test_h1f.wire);
     FIO_ASSERT(!cases[i].tail || test_h1f_ends_with(cases[i].tail),
                "%s: wire must end with the body:\n%s",
                cases[i].name,
@@ -2965,7 +3035,7 @@ static void test_header_iteration(void) {
       h,
       name,
       FIO_STR_INFO1((char *)"  , a  ; p = \"x\\\";y,z\" ; empty=  ,  "
-                           "b\t"));
+                            "b\t"));
   fio_http_request_header_add(h, name, FIO_STR_INFO1((char *)"c"));
   const char *expected[] = {"a", "b", "c"};
   size_t count = 0;
@@ -2996,8 +3066,7 @@ static void test_header_iteration(void) {
   fio_http_response_header_add(h, name, FIO_STR_INFO1((char *)"reply"));
   count = 0;
   FIO_HTTP_HEADER_EACH_VALUE(h, 0, name, item) {
-    FIO_ASSERT(item.value.len == 5 &&
-                   !memcmp(item.value.buf, "reply", 5),
+    FIO_ASSERT(item.value.len == 5 && !memcmp(item.value.buf, "reply", 5),
                "response header iteration mismatch");
     ++count;
   }
@@ -3013,6 +3082,7 @@ int main(void) {
 #endif
   fprintf(stderr, "Testing fio_http high-level behavior:\n");
 
+  test_http_method_helpers();
   test_resource_action();
   test_listen_and_route();
   test_settings_and_io_queries();

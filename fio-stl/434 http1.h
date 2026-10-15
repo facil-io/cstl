@@ -67,9 +67,9 @@ FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
   fio_http_udata_set(c->h, c->udata);
   fio_http_cdata_set(c->h, fio___http_connection_dup(c));
   if (c->settings->compress_dynamic)
-    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+    fio___http_cflags_set(c->h, FIO___HTTP_CFLAG_COMPRESS_DYNAMIC);
   if (c->settings->compress_ws)
-    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_WS);
+    fio___http_cflags_set(c->h, FIO___HTTP_CFLAG_COMPRESS_WS);
 }
 
 /** called when a request method is parsed. */
@@ -504,10 +504,7 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
                                      FIO_STR_INFO2((char *)"connection", 10),
                                      0)
                 .buf)
-    fio_string_write(&buf,
-                     FIO_STRING_REALLOC,
-                     "connection:keep-alive\r\n",
-                     23);
+    fio_string_write(&buf, FIO_STRING_REALLOC, "connection:keep-alive\r\n", 23);
   fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
   /* send data (move memory ownership)? */
   c->state.http.buf = buf;

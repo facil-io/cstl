@@ -2,6 +2,7 @@
 Test: HTTP handle correctness
 ***************************************************************************** */
 #define FIO_HTTP
+#define FIO_HTTP_TEST_COMPRESSION_FLAGS
 #include "test-helpers.h"
 
 /* ===========================================================================
@@ -36,18 +37,15 @@ static void test_handle_udata(void) {
   fio_http_s *h = fio_http_new();
   FIO_ASSERT(!fio_http_udata(h), "udata should start as NULL");
   fio_http_udata_set(h, (void *)(uintptr_t)0xAA);
-  FIO_ASSERT((uintptr_t)fio_http_udata(h) == 0xAA,
-             "udata roundtrip error");
+  FIO_ASSERT((uintptr_t)fio_http_udata(h) == 0xAA, "udata roundtrip error");
 
   FIO_ASSERT(!fio_http_udata2(h), "udata2 should start as NULL");
   fio_http_udata2_set(h, (void *)(uintptr_t)0xBB);
-  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 0xBB,
-             "udata2 roundtrip error");
+  FIO_ASSERT((uintptr_t)fio_http_udata2(h) == 0xBB, "udata2 roundtrip error");
 
   FIO_ASSERT(!fio_http_cdata(h), "cdata should start as NULL");
   fio_http_cdata_set(h, (void *)(uintptr_t)0xCC);
-  FIO_ASSERT((uintptr_t)fio_http_cdata(h) == 0xCC,
-             "cdata roundtrip error");
+  FIO_ASSERT((uintptr_t)fio_http_cdata(h) == 0xCC, "cdata roundtrip error");
 
   fio_http_controller_s *controller = fio_http_controller(h);
   FIO_ASSERT(controller, "controller should not be NULL (mock controller)");
@@ -74,9 +72,9 @@ static void test_handle_request_line(void) {
 
   FIO_ASSERT(!fio_http_method(h).buf, "method should start empty");
   fio_http_method_set(h, FIO_STR_INFO1((char *)"POST"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_method(h),
-                                FIO_STR_INFO1((char *)"POST")),
-             "method roundtrip error");
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_method(h), FIO_STR_INFO1((char *)"POST")),
+      "method roundtrip error");
 
   FIO_ASSERT(!fio_http_path(h).buf, "path should start empty");
   fio_http_path_set(h, FIO_STR_INFO1((char *)"/path/to/resource"));
@@ -92,9 +90,9 @@ static void test_handle_request_line(void) {
 
   FIO_ASSERT(!fio_http_query(h).buf, "query should start empty");
   fio_http_query_set(h, FIO_STR_INFO1((char *)"a=1&b=2"));
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(h),
-                                FIO_STR_INFO1((char *)"a=1&b=2")),
-             "query roundtrip error");
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_query(h), FIO_STR_INFO1((char *)"a=1&b=2")),
+      "query roundtrip error");
 
   FIO_ASSERT(!fio_http_version(h).buf, "version should start empty");
   fio_http_version_set(h, FIO_STR_INFO1((char *)"HTTP/1.1"));
@@ -112,26 +110,25 @@ static void test_handle_copy_request(void) {
   fio_http_path_set(h, FIO_STR_INFO1((char *)"/api"));
   fio_http_query_set(h, FIO_STR_INFO1((char *)"x=y"));
   fio_http_version_set(h, FIO_STR_INFO1((char *)"HTTP/1.1"));
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"x-custom", 8),
-      FIO_STR_INFO1((char *)"value"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"x-custom", 8),
+                              FIO_STR_INFO1((char *)"value"));
 
   fio_http_s *copy = fio_http_new_copy_request(h);
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_method(copy),
-                                FIO_STR_INFO1((char *)"GET")),
-             "copy method mismatch");
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_path(copy),
-                                FIO_STR_INFO1((char *)"/api")),
-             "copy path mismatch");
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_query(copy),
-                                FIO_STR_INFO1((char *)"x=y")),
-             "copy query mismatch");
-  FIO_ASSERT(FIO_STR_INFO_IS_EQ(fio_http_request_header(
-                                    copy,
-                                    FIO_STR_INFO2((char *)"x-custom", 8),
-                                    0),
-                                FIO_STR_INFO1((char *)"value")),
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_method(copy), FIO_STR_INFO1((char *)"GET")),
+      "copy method mismatch");
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_path(copy), FIO_STR_INFO1((char *)"/api")),
+      "copy path mismatch");
+  FIO_ASSERT(
+      FIO_STR_INFO_IS_EQ(fio_http_query(copy), FIO_STR_INFO1((char *)"x=y")),
+      "copy query mismatch");
+  FIO_ASSERT(FIO_STR_INFO_IS_EQ(
+                 fio_http_request_header(copy,
+                                         FIO_STR_INFO2((char *)"x-custom", 8),
+                                         0),
+                 FIO_STR_INFO1((char *)"value")),
              "copy header mismatch");
 
   fio_http_free(copy);
@@ -188,9 +185,9 @@ static void test_handle_request_headers(void) {
 
   fio_http_request_header_add(h, name, v2);
   size_t count = 0;
-  FIO_ASSERT(fio_http_request_header_each(h, test_header_each_callback, &count)
-                 == 1,
-             "each should return unique header count");
+  FIO_ASSERT(
+      fio_http_request_header_each(h, test_header_each_callback, &count) == 1,
+      "each should return unique header count");
   FIO_ASSERT(count == 2, "each callback count mismatch");
   FIO_ASSERT(fio_http_request_header_each(h, NULL, NULL) == 1,
              "each with NULL callback should return unique header count");
@@ -671,7 +668,7 @@ static void test_handle_should_close_http10(void) {
       {"HTTP/1.0", "keep-alive, close", 0, 1},
       {"HTTP/1.0", "keep-alive-x", 0, 1},
       {"HTTP/1.0", "keep-alive", 1, 1}, /* close-delimited stream */
-      {"HTTP/0.9", NULL, 0, 0}, /* not legacy: HTTP/1.1 semantics */
+      {"HTTP/0.9", NULL, 0, 0},         /* not legacy: HTTP/1.1 semantics */
       {"HTTP/0.9", NULL, 1, 0},
       {"HTTP/1.1", NULL, 0, 0},
       {"HTTP/1.1", NULL, 1, 0},
@@ -686,8 +683,11 @@ static void test_handle_should_close_http10(void) {
       fio_http_request_header_set(h,
                                   name,
                                   FIO_STR_INFO1((char *)cases[i].value));
-    if (cases[i].streaming)
-      h->state |= FIO_HTTP_STATE_STREAMING;
+    if (cases[i].streaming) {
+      fio_http_status_set(h, 200);
+      fio_http_write(h, .buf = "x", .len = 1, .copy = 1);
+      FIO_ASSERT(fio_http_is_streaming(h), "unfinished write should stream");
+    }
     FIO_ASSERT(!!fio___http1_should_close(h) == cases[i].close,
                "%s Connection \"%s\" streaming %d: close should be %d",
                cases[i].version,
@@ -699,7 +699,6 @@ static void test_handle_should_close_http10(void) {
                "%s streaming %d: chunked framing mismatch",
                cases[i].version,
                cases[i].streaming);
-    h->state &= ~FIO_HTTP_STATE_STREAMING;
     fio_http_free(h);
   }
 }
@@ -754,7 +753,8 @@ static void test_handle_body(void) {
   fio_http_body_seek(h, -6); /* negative from end */
   r = fio_http_body_read(h, 6);
   FIO_ASSERT(r.len == 6, "negative seek read length mismatch");
-  FIO_ASSERT(!memcmp(r.buf, " World", 6), "negative seek read content mismatch");
+  FIO_ASSERT(!memcmp(r.buf, " World", 6),
+             "negative seek read content mismatch");
 
   fio_http_body_seek(h, 0);
   r = fio_http_body_read_until(h, ' ', 0);
@@ -814,10 +814,9 @@ static void test_handle_cookies(void) {
   fprintf(stderr, "  * cookies\n");
   fio_http_s *h = fio_http_new();
 
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"cookie", 6),
-      FIO_STR_INFO1((char *)"sid=abc123; theme=dark"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"cookie", 6),
+                              FIO_STR_INFO1((char *)"sid=abc123; theme=dark"));
 
   fio_str_info_s sid = fio_http_cookie(h, "sid", 3);
   FIO_ASSERT(sid.len == 6 && !memcmp(sid.buf, "abc123", 6),
@@ -827,13 +826,13 @@ static void test_handle_cookies(void) {
   fio_http_cookie_each(h, test_cookie_each_callback, &count);
   FIO_ASSERT(count == 2, "cookie each count mismatch");
 
-  int set_r = fio_http_cookie_set(
-      h,
-      .name = FIO_STR_INFO1((char *)"session"),
-      .value = FIO_STR_INFO1((char *)"xyz"),
-      .max_age = 3600,
-      .http_only = 1,
-      .same_site = FIO_HTTP_COOKIE_SAME_SITE_STRICT);
+  int set_r =
+      fio_http_cookie_set(h,
+                          .name = FIO_STR_INFO1((char *)"session"),
+                          .value = FIO_STR_INFO1((char *)"xyz"),
+                          .max_age = 3600,
+                          .http_only = 1,
+                          .same_site = FIO_HTTP_COOKIE_SAME_SITE_STRICT);
   FIO_ASSERT(set_r == 0, "cookie set should succeed");
 
   fio_str_info_s session = fio_http_cookie(h, "session", 7);
@@ -869,8 +868,7 @@ static void test_handle_path_sections(void) {
       FIO_ASSERT(section.len == 3 && !memcmp(section.buf, "qux", 3),
                  "third path section mismatch");
       break;
-    default:
-      FIO_ASSERT(0, "unexpected path section");
+    default: FIO_ASSERT(0, "unexpected path section");
     }
   }
   FIO_ASSERT(count == 3, "path section count mismatch");
@@ -902,10 +900,9 @@ static void test_handle_helpers(void) {
   FIO_ASSERT(str.len, "log_time should not be empty");
 
   fio_http_s *h = fio_http_new();
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"x-forwarded-for", 15),
-      FIO_STR_INFO1((char *)"1.2.3.4"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"x-forwarded-for", 15),
+                              FIO_STR_INFO1((char *)"1.2.3.4"));
   char from_buf[64];
   fio_str_info_s from = FIO_STR_INFO3(from_buf, 0, sizeof(from_buf) - 1);
   int from_r = fio_http_from(&from, h);
@@ -926,14 +923,12 @@ static void test_handle_websocket_request(void) {
   FIO_ASSERT(!fio_http_websocket_requested(h),
              "empty handle should not request websocket");
 
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"connection", 10),
-      FIO_STR_INFO1((char *)"Upgrade"));
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"upgrade", 7),
-      FIO_STR_INFO1((char *)"websocket"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"connection", 10),
+                              FIO_STR_INFO1((char *)"Upgrade"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"upgrade", 7),
+                              FIO_STR_INFO1((char *)"websocket"));
   fio_http_request_header_set(
       h,
       FIO_STR_INFO2((char *)"sec-websocket-key", 17),
@@ -951,13 +946,11 @@ static void test_handle_websocket_request(void) {
 static void test_handle_sse_request(void) {
   fprintf(stderr, "  * SSE request detection\n");
   fio_http_s *h = fio_http_new();
-  FIO_ASSERT(!fio_http_sse_requested(h),
-             "empty handle should not request sse");
+  FIO_ASSERT(!fio_http_sse_requested(h), "empty handle should not request sse");
 
-  fio_http_request_header_set(
-      h,
-      FIO_STR_INFO2((char *)"accept", 6),
-      FIO_STR_INFO1((char *)"text/event-stream"));
+  fio_http_request_header_set(h,
+                              FIO_STR_INFO2((char *)"accept", 6),
+                              FIO_STR_INFO1((char *)"text/event-stream"));
   FIO_ASSERT(fio_http_sse_requested(h), "SSE request should be detected");
   fio_http_free(h);
 }
@@ -1443,7 +1436,7 @@ static size_t test_body_build_multipart(char *buf,
 #define MP_APPEND(s)                                                           \
   do {                                                                         \
     size_t _l = strlen(s);                                                     \
-    if (pos + _l < buf_size) {                                                \
+    if (pos + _l < buf_size) {                                                 \
       FIO_MEMCPY(buf + pos, s, _l);                                            \
       pos += _l;                                                               \
     }                                                                          \
@@ -1610,7 +1603,8 @@ static void test_body_parse_null_handle(void) {
   FIO_ASSERT(r.err != 0, "null handle: should return error");
 }
 
-/* Verify full callback payloads while they are live and again after parse returns. */
+/* Verify full callback payloads while they are live and again after parse
+ * returns. */
 typedef struct {
   const char *name;
   size_t name_len;
@@ -1640,11 +1634,13 @@ static int test_decode_set(void *udata, void *map, void *key, void *value) {
   FIO_ASSERT(k->u.str.len == ctx->name_len &&
                  !memcmp(k->u.str.buf, ctx->name, ctx->name_len),
              "decoded key mismatch (got %zu, expected %zu)",
-             k->u.str.len, ctx->name_len);
+             k->u.str.len,
+             ctx->name_len);
   FIO_ASSERT(v->u.str.len == ctx->value_len &&
                  !memcmp(v->u.str.buf, ctx->value, ctx->value_len),
              "decoded value mismatch (got %zu, expected %zu)",
-             v->u.str.len, ctx->value_len);
+             v->u.str.len,
+             ctx->value_len);
   ++ctx->seen;
   test_obj_free(k);
   test_obj_free(v);
@@ -1675,13 +1671,16 @@ static void test_decode_parse(const char *content_type,
   fio_http_body_parse_result_s r =
       fio_http_body_parse(h, &TEST_DECODE_CALLBACKS, ctx);
   FIO_ASSERT(!r.err && ctx->seen == 1,
-             "decode regression: parse err=%d pairs=%zu", r.err, ctx->seen);
+             "decode regression: parse err=%d pairs=%zu",
+             r.err,
+             ctx->seen);
   test_body_free_result(&r);
   fio_http_free(h);
 }
 
 static void test_body_decode_boundaries(void) {
-  fprintf(stderr, "  * JSON escape and URL form decode allocation boundaries\n");
+  fprintf(stderr,
+          "  * JSON escape and URL form decode allocation boundaries\n");
   static const size_t json_sizes[] = {4094, 4095, 4096, 4097, 8192};
   static const size_t form_name_sizes[] = {1023, 1024, 1025, 2048};
   static const size_t form_value_sizes[] = {4095, 4096, 4097, 8192};
@@ -1708,10 +1707,12 @@ static void test_body_decode_boundaries(void) {
     free(body);
     free(expected);
   }
-  /* Test-only isolation: let ASan reach JSON cases without the known form OOB. */
+  /* Test-only isolation: let ASan reach JSON cases without the known form OOB.
+   */
   if (getenv("FIO_TEST_JSON_ONLY"))
     return;
-  for (size_t i = 0; i < sizeof(form_name_sizes) / sizeof(*form_name_sizes); ++i) {
+  for (size_t i = 0; i < sizeof(form_name_sizes) / sizeof(*form_name_sizes);
+       ++i) {
     size_t nl = form_name_sizes[i];
     size_t vl = form_value_sizes[i];
     char *name = (char *)malloc(nl + 1);
@@ -1730,7 +1731,9 @@ static void test_body_decode_boundaries(void) {
     memset(body + nl + 6, 'v', vl - 1);
     test_decode_ctx_s ctx = {name, nl, value, vl, 0};
     test_decode_parse("application/x-www-form-urlencoded",
-                      body, nl + vl + 5, &ctx);
+                      body,
+                      nl + vl + 5,
+                      &ctx);
     free(body);
     free(value);
     free(name);
@@ -1762,7 +1765,8 @@ static void test_body_decode_concurrent(void) {
   fprintf(stderr, "  * concurrent escaped JSON decode\n");
   fio_thread_t threads[8];
   for (size_t i = 0; i < 8; ++i)
-    FIO_ASSERT(!fio_thread_create(&threads[i], test_decode_thread,
+    FIO_ASSERT(!fio_thread_create(&threads[i],
+                                  test_decode_thread,
                                   (void *)(uintptr_t)i),
                "decode thread creation failed");
   for (size_t i = 0; i < 8; ++i)
@@ -1777,11 +1781,10 @@ static void test_body_decode_concurrent(void) {
 static void test_accept_encoding_qvalues(void) {
   fprintf(stderr, "  * accept-encoding q-value handling\n");
   /* q=0 (in any zero-padded form) FORBIDS the encoding (RFC 9110 §12.5.3). */
-  FIO_ASSERT(
-      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0", 8),
-                                   "gzip",
-                                   4),
-      "gzip;q=0 must not match gzip");
+  FIO_ASSERT(!fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0", 8),
+                                          "gzip",
+                                          4),
+             "gzip;q=0 must not match gzip");
   FIO_ASSERT(
       !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.0", 10),
                                    "gzip",
@@ -1802,49 +1805,45 @@ static void test_accept_encoding_qvalues(void) {
                                    "gzip",
                                    4),
       "gzip ; q=0 (whitespace) must not match gzip");
-  FIO_ASSERT(
-      !fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;Q=0", 8),
-                                   "gzip",
-                                   4),
-      "gzip;Q=0 (uppercase) must not match gzip");
+  FIO_ASSERT(!fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;Q=0", 8),
+                                          "gzip",
+                                          4),
+             "gzip;Q=0 (uppercase) must not match gzip");
   /* any q > 0 still matches */
   FIO_ASSERT(
       fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.001", 12),
                                   "gzip",
                                   4),
       "gzip;q=0.001 should match gzip");
-  FIO_ASSERT(fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"gzip;q=0.5", 10),
-                 "gzip",
-                 4),
-             "gzip;q=0.5 should match gzip");
-  FIO_ASSERT(fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"gzip;q=1", 8),
-                 "gzip",
-                 4),
+  FIO_ASSERT(
+      fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=0.5", 10),
+                                  "gzip",
+                                  4),
+      "gzip;q=0.5 should match gzip");
+  FIO_ASSERT(fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;q=1", 8),
+                                         "gzip",
+                                         4),
              "gzip;q=1 should match gzip");
-  FIO_ASSERT(fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"gzip", 4),
-                 "gzip",
-                 4),
-             "bare gzip should match gzip");
+  FIO_ASSERT(
+      fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip", 4), "gzip", 4),
+      "bare gzip should match gzip");
   /* multi-value headers: q=0 forbids only its own token */
-  FIO_ASSERT(fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
-                 "br",
-                 2),
-             "br should match in 'br, gzip;q=0'");
-  FIO_ASSERT(!fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
-                 "gzip",
-                 4),
-             "gzip must not match in 'br, gzip;q=0'");
+  FIO_ASSERT(
+      fio___http_header_has_token(FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
+                                  "br",
+                                  2),
+      "br should match in 'br, gzip;q=0'");
+  FIO_ASSERT(
+      !fio___http_header_has_token(FIO_STR_INFO2((char *)"br, gzip;q=0", 12),
+                                   "gzip",
+                                   4),
+      "gzip must not match in 'br, gzip;q=0'");
   /* unrelated parameters after a valid token are not q-values */
-  FIO_ASSERT(fio___http_header_has_token(
-                 FIO_STR_INFO2((char *)"gzip;foo=bar", 12),
-                 "gzip",
-                 4),
-             "gzip;foo=bar should match gzip (not a q-value)");
+  FIO_ASSERT(
+      fio___http_header_has_token(FIO_STR_INFO2((char *)"gzip;foo=bar", 12),
+                                  "gzip",
+                                  4),
+      "gzip;foo=bar should match gzip (not a q-value)");
 }
 
 /** Writes `len` text bytes with finish=1 on a COMPRESS_DYNAMIC handle whose
@@ -1854,21 +1853,19 @@ static fio_str_info_s test_dynamic_write(fio_http_s *h,
                                          const char *accept_encoding,
                                          const void *body,
                                          size_t len) {
-  fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+  fio___http_test_enable_compression(h, 0);
   fio_http_method_set(h, FIO_STR_INFO1((char *)"GET"));
   fio_http_status_set(h, 200);
   if (accept_encoding)
-    fio_http_request_header_set(
-        h,
-        FIO_STR_INFO2((char *)"accept-encoding", 15),
-        FIO_STR_INFO1((char *)accept_encoding));
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)accept_encoding));
   fio_http_response_header_set(h,
                                FIO_STR_INFO2((char *)"content-type", 12),
                                FIO_STR_INFO1((char *)"text/plain"));
   fio_http_write(h, .buf = (void *)body, .len = len, .finish = 1, .copy = 1);
   return fio_http_response_header(h,
-                                  FIO_STR_INFO2((char *)"content-encoding",
-                                                16),
+                                  FIO_STR_INFO2((char *)"content-encoding", 16),
                                   0);
 }
 
@@ -1892,13 +1889,10 @@ static void test_dynamic_vary_semantics(void) {
                "dynamic no-AE: response must be identity (got '%.*s')",
                (int)ce.len,
                ce.buf ? ce.buf : "");
-    fio_str_info_s vary = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"vary", 4),
-        0);
-    FIO_ASSERT(vary.len && fio___http_header_has_token(vary,
-                                                        "accept-encoding",
-                                                        15),
+    fio_str_info_s vary =
+        fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0);
+    FIO_ASSERT(vary.len &&
+                   fio___http_header_has_token(vary, "accept-encoding", 15),
                "dynamic no-AE: Vary: accept-encoding required (selection "
                "depends on Accept-Encoding even when the header is absent)");
     fio_http_free(h);
@@ -1906,28 +1900,28 @@ static void test_dynamic_vary_semantics(void) {
   /* incompressible MIME: negotiation impossible, Vary must NOT appear */
   {
     fio_http_s *h = fio_http_new();
-    fio_http_cflags_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+    fio___http_test_enable_compression(h, 0);
     fio_http_method_set(h, FIO_STR_INFO1((char *)"GET"));
     fio_http_status_set(h, 200);
-    fio_http_request_header_set(
-        h,
-        FIO_STR_INFO2((char *)"accept-encoding", 15),
-        FIO_STR_INFO1((char *)"gzip"));
+    fio_http_request_header_set(h,
+                                FIO_STR_INFO2((char *)"accept-encoding", 15),
+                                FIO_STR_INFO1((char *)"gzip"));
     fio_http_response_header_set(h,
                                  FIO_STR_INFO2((char *)"content-type", 12),
                                  FIO_STR_INFO1((char *)"image/png"));
-    fio_http_write(h, .buf = (void *)body, .len = BODY_LEN, .finish = 1,
+    fio_http_write(h,
+                   .buf = (void *)body,
+                   .len = BODY_LEN,
+                   .finish = 1,
                    .copy = 1);
-    fio_str_info_s ce = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-encoding", 16),
-        0);
+    fio_str_info_s ce =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
+                                 0);
     FIO_ASSERT(!ce.buf,
                "dynamic png: must stay identity (incompressible MIME)");
-    fio_str_info_s vary = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"vary", 4),
-        0);
+    fio_str_info_s vary =
+        fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0);
     FIO_ASSERT(!vary.buf,
                "dynamic png: Vary must be absent when negotiation is "
                "impossible (got '%.*s')",
@@ -1961,10 +1955,8 @@ static void test_dynamic_compress_guards(void) {
                "(content-encoding present: %.*s)",
                (int)ce.len,
                ce.buf ? ce.buf : "");
-    fio_str_info_s vary = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"vary", 4),
-        0);
+    fio_str_info_s vary =
+        fio_http_response_header(h, FIO_STR_INFO2((char *)"vary", 4), 0);
     FIO_ASSERT(vary.len,
                "dynamic gzip;q=0: Vary: accept-encoding expected when "
                "compression was evaluated but skipped");
@@ -1983,8 +1975,7 @@ static void test_dynamic_compress_guards(void) {
   {
     fio_http_s *h = fio_http_new();
     fio_http_response_header_set(h,
-                                 FIO_STR_INFO2((char *)"content-encoding",
-                                               16),
+                                 FIO_STR_INFO2((char *)"content-encoding", 16),
                                  FIO_STR_INFO1((char *)"identity"));
     fio_str_info_s ce = test_dynamic_write(h, "gzip, br", body, BODY_LEN);
     FIO_ASSERT(ce.len == 8 && !memcmp(ce.buf, "identity", 8),
@@ -1992,10 +1983,10 @@ static void test_dynamic_compress_guards(void) {
                "'%.*s' (double compression)",
                (int)ce.len,
                ce.buf ? ce.buf : "");
-    fio_str_info_s cl = fio_http_response_header(
-        h,
-        FIO_STR_INFO2((char *)"content-length", 14),
-        0);
+    fio_str_info_s cl =
+        fio_http_response_header(h,
+                                 FIO_STR_INFO2((char *)"content-length", 14),
+                                 0);
     char expect[16];
     int expect_len = snprintf(expect, sizeof(expect), "%u", (unsigned)BODY_LEN);
     FIO_ASSERT(cl.len == (size_t)expect_len &&

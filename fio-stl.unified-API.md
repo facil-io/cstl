@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3153.
+Total symbols: 3149.
 
 ## Contents
 
@@ -78,7 +78,7 @@ Total symbols: 3153.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 153
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 149
 
 -----------------------------------------------------
 
@@ -36022,7 +36022,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-153 public symbols.
+149 public symbols.
 
 ### Macros
 
@@ -36314,106 +36314,6 @@ Quoted strings remain quoted, without decoding. `break` / `continue` work.
 
 _Symbol type:_ `macro`
 
-#### `FIO_HTTP_STATE_STREAMING`
-
-```c
-#define FIO_HTTP_STATE_STREAMING      1
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_FINISHED`
-
-```c
-#define FIO_HTTP_STATE_FINISHED       2
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_UPGRADED`
-
-```c
-#define FIO_HTTP_STATE_UPGRADED       4
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_WEBSOCKET`
-
-```c
-#define FIO_HTTP_STATE_WEBSOCKET      8
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_SSE`
-
-```c
-#define FIO_HTTP_STATE_SSE            16
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_COOKIES_PARSED`
-
-```c
-#define FIO_HTTP_STATE_COOKIES_PARSED 32
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_STATE_FREEING`
-
-```c
-#define FIO_HTTP_STATE_FREEING        64
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_CFLAG_COMPRESS_DYNAMIC`
-
-```c
-#define FIO_HTTP_CFLAG_COMPRESS_DYNAMIC 1
-```
-
-Controller flags (cflags) for opt-in compression features.
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_CFLAG_COMPRESS_WS`
-
-```c
-#define FIO_HTTP_CFLAG_COMPRESS_WS      2
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_HTTP_CFLAG_COMPRESS_STATIC`
-
-```c
-#define FIO_HTTP_CFLAG_COMPRESS_STATIC  4
-```
-
-
-
-_Symbol type:_ `macro`
-
 ### Types
 
 #### `fio_http_s`
@@ -36599,8 +36499,7 @@ uint8_t log;
 * inherit the listener's root value at route-creation). The value is a
 * failure-memoization shift register, atomically shared by the IO
 * threads - see `fio_http_static_file_response`. Detached handles (no
-* settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag
-* instead, with no memoization state.
+* settings) use an internal controller flag, with no memoization state.
 */
 uint8_t compress_static;
 /**
@@ -37267,6 +37166,66 @@ fio_str_info_s fio_http_method(fio_http_s *)
 ```
 
 Gets the method information associated with the HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_get`
+
+```c
+int fio_http_method_is_get(fio_http_s *h)
+```
+
+Tests for GET, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_put`
+
+```c
+int fio_http_method_is_put(fio_http_s *h)
+```
+
+Tests for PUT, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_post`
+
+```c
+int fio_http_method_is_post(fio_http_s *h)
+```
+
+Tests for POST, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_patch`
+
+```c
+int fio_http_method_is_patch(fio_http_s *h)
+```
+
+Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_query`
+
+```c
+int fio_http_method_is_query(fio_http_s *h)
+```
+
+Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle.
+
+_Symbol type:_ `function`
+
+#### `fio_http_method_is_delete`
+
+```c
+int fio_http_method_is_delete(fio_http_s *h)
+```
+
+Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle.
 
 _Symbol type:_ `function`
 
@@ -37949,8 +37908,8 @@ requests; sets `Last-Modified`, `Accept-Ranges: bytes`, and (when
 Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
 in this preference order) are served when accepted by the client,
 present on disk, and fresh; with `compress_static` enabled (the matching
-route's settings, or the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag on
-detached handles), missing `.br` / `.gz` variants are also created on
+route's settings, or an internal controller flag on detached handles),
+missing `.br` / `.gz` variants are also created on
 demand.
 
 On success the response is complete and 0 is returned. On failure -1 is

@@ -336,8 +336,7 @@ typedef struct fio_http_settings_s {
    * inherit the listener's root value at route-creation). The value is a
    * failure-memoization shift register, atomically shared by the IO
    * threads - see `fio_http_static_file_response`. Detached handles (no
-   * settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag
-   * instead, with no memoization state.
+   * settings) use an internal controller flag, with no memoization state.
    */
   uint8_t compress_static;
   /**
@@ -609,6 +608,19 @@ SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
 
 /** Gets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method(fio_http_s *);
+
+/** Tests for GET, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_get(fio_http_s *h);
+/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for POST, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_post(fio_http_s *h);
+/** Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_patch(fio_http_s *h);
+/** Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_query(fio_http_s *h);
+/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_delete(fio_http_s *h);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
@@ -1201,8 +1213,8 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  * Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
  * in this preference order) are served when accepted by the client,
  * present on disk, and fresh; with `compress_static` enabled (the matching
- * route's settings, or the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag on
- * detached handles), missing `.br` / `.gz` variants are also created on
+ * route's settings, or an internal controller flag on detached handles),
+ * missing `.br` / `.gz` variants are also created on
  * demand.
  *
  * On success the response is complete and 0 is returned. On failure -1 is
@@ -1287,23 +1299,6 @@ SFUNC void fio_http_upgrade_sse(fio_http_s *);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *);
-
-/* *****************************************************************************
-HTTP Handle State and Controller Flags
-***************************************************************************** */
-
-#define FIO_HTTP_STATE_STREAMING      1
-#define FIO_HTTP_STATE_FINISHED       2
-#define FIO_HTTP_STATE_UPGRADED       4
-#define FIO_HTTP_STATE_WEBSOCKET      8
-#define FIO_HTTP_STATE_SSE            16
-#define FIO_HTTP_STATE_COOKIES_PARSED 32
-#define FIO_HTTP_STATE_FREEING        64
-
-/** Controller flags (cflags) for opt-in compression features. */
-#define FIO_HTTP_CFLAG_COMPRESS_DYNAMIC 1
-#define FIO_HTTP_CFLAG_COMPRESS_WS      2
-#define FIO_HTTP_CFLAG_COMPRESS_STATIC  4
 
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
@@ -1529,6 +1524,173 @@ fio_http_header_each_property_first(const fio_buf_info_s *properties) {
     fio_http_header_each_property_next(&pos);
   }
   return pos;
+}
+
+/* *****************************************************************************
+HTTP Handle Implementation - inlined static functions
+***************************************************************************** */
+
+#define FIO___HTTP_GETSET_PTR(type, name, index_, pre_set_code)                \
+  /** Used internally to set / get the propecrty at its known pointer index.   \
+   */                                                                          \
+  FIO_IFUNC type *fio_http_##name(fio_http_s *h) {                             \
+    return ((type **)h)[index_];                                               \
+  }                                                                            \
+  /** Used internally to set / get the propercty at its known pointer index.   \
+   */                                                                          \
+  FIO_IFUNC type *fio_http_##name##_set(fio_http_s *h, type *ptr) {            \
+    pre_set_code;                                                              \
+    return (((type **)h)[index_] = ptr);                                       \
+  }
+
+SFUNC fio_http_controller_s *fio___http_controller_validate(
+    fio_http_controller_s *c);
+
+/* Create fio_http_udata_(get|set) functions */
+FIO___HTTP_GETSET_PTR(void, udata, 0, (void)0)
+/* Create fio_http_pdata_(get|set) functions */
+FIO___HTTP_GETSET_PTR(void, udata2, 1, (void)0)
+/* Create fio_http_cdata_(get|set) functions */
+FIO___HTTP_GETSET_PTR(void, cdata, 2, (void)0)
+/* Create fio_http_controller_(get|set) functions */
+FIO___HTTP_GETSET_PTR(fio_http_controller_s,
+                      controller,
+                      3,
+                      ptr = fio___http_controller_validate(ptr))
+
+#undef FIO___HTTP_GETSET_PTR
+/*
+REMEMBER:
+========
+
+All memory allocations should use:
+* FIO_MEM_REALLOC_(ptr, old_size, new_size, copy_len)
+* FIO_MEM_FREE_(ptr, size)
+
+*/
+
+/* *****************************************************************************
+Path Section Looping
+***************************************************************************** */
+
+#undef FIO_HTTP_PATH_EACH
+
+/**
+ * Loops over each section of the path, decrypting percent encoding as
+ * necessary.
+ *
+ * The macro accepts the following:
+ *
+ * - `path`: the path string - accessible using fio_http_path(h).
+ * - `pos` : the name of the variable to use for accessing the section.
+ *
+ * The variable `pos` is a `fio_buf_info_s`. This uses 4096 bytes on the stack.
+ * The variable `pos_reminder` is a `fio_buf_info_s` pointing to the rest of the
+ * path.
+ *
+ * **Note**: the macro will break if a path's section length is greater than
+ *           (about) 4063 bytes.
+ */
+#define FIO_HTTP_PATH_EACH(path, pos)                                          \
+  for (fio_buf_info_s pos##_reminder = FIO_STR2BUF_INFO(path),                 \
+                      pos,                                                     \
+                      buf[(4096 / sizeof(fio_buf_info_s)) - 2];                \
+       fio___http_path_each_next(&pos, &pos##_reminder, buf);)
+
+/* used internally for the macro FIO_HTTP_PATH_EACH */
+FIO_IFUNC bool fio___http_path_each_next(fio_buf_info_s *restrict section,
+                                         fio_buf_info_s *restrict path,
+                                         void *restrict mem) {
+  if (path->len < 2)
+    return 0;
+  const char *p = path->buf;
+  const char *e = p + path->len;
+  char *w = (char *)mem;
+  const char *w_start = w;
+  const char *w_end = w + (4096 - ((sizeof(fio_buf_info_s) * 2) + 1));
+  p += (*p == '/');
+  while (p < e && *p != '/' && w < w_end) {
+    while (p < e && *p != '%' && *p != '/' && w < w_end)
+      *(w++) = *(p++);
+    if (p == e || *p == '/')
+      break;
+    uint8_t hi, lo;
+    if (p + 4 > e || ((hi = fio_c2i((unsigned char)p[1])) > 15) ||
+        ((lo = fio_c2i((unsigned char)p[2])) > 15)) {
+      *(w++) = *(p++);
+      continue;
+    }
+    p += 3;
+    *(w++) = (char)((hi << 4) | lo);
+  }
+  *w = 0;
+  *section = FIO_BUF_INFO2((char *)w_start, (size_t)(w - w_start));
+  *path = FIO_BUF_INFO2((char *)p, (size_t)(e - p));
+  return (p == e || *p == '/');
+}
+
+/* *****************************************************************************
+Module Implementation - HTTP Routing – CRUD
+***************************************************************************** */
+
+/** returns expected action or `FIO_HTTP_RESOURCE_NONE` on error. */
+FIO_IFUNC fio_http_resource_action_e fio_http_resource_action(fio_http_s *h) {
+  fio_http_resource_action_e r = FIO_HTTP_RESOURCE_NONE;
+  if (!h)
+    return r;
+  const uint32_t new_s = fio_buf2u32u("/new") | 0x20202020U;
+  const uint32_t edit_s = fio_buf2u32u("edit");
+  const uint32_t get = fio_buf2u32u("get\x20");
+  const uint32_t put = fio_buf2u32u("put\x20");
+  const uint32_t post = fio_buf2u32u("post");
+  const uint32_t patc = fio_buf2u32u("patc");
+  const uint32_t dele = fio_buf2u32u("dele");
+  const uint32_t lete = fio_buf2u32u("lete");
+  const uint32_t query = fio_buf2u32u("quer");
+  fio_str_info_s method = fio_http_method(h);
+  fio_str_info_s path = fio_http_path(h);
+  bool path_ends_with_dash = (path.len && path.buf[path.len - 1] == '/');
+  bool path_is_new = ((path.len == 4 || (path.len > 4 && path.buf[4] == '/')) &&
+                      ((fio_buf2u32u(path.buf) | 0x20202020U) == new_s));
+  if (method.len < 3)
+    return r;
+  uint32_t tmp = fio_buf2u32u(method.buf) | 0x20202020U; /* down-case */
+  /* GET */
+  if (tmp == get) {
+    bool path_is_edit =
+        ((path.len > 6) &&
+         path.buf[path.len - (5 + path_ends_with_dash)] == '/' &&
+         ((fio_buf2u32u((path.buf + path.len) - (4 + path_ends_with_dash)) |
+           0x20202020U) == edit_s));
+    /* index vs show */
+    r = (fio_http_resource_action_e)((unsigned)FIO_HTTP_RESOURCE_INDEX +
+                                     (path.len > 1));
+    /* show vs new */
+    r = (fio_http_resource_action_e)((unsigned)r +
+                                     (path_is_new & (!path_is_edit)));
+    /* show vs edit */
+    r = (fio_http_resource_action_e)((unsigned)r +
+                                     ((unsigned)path_is_edit << 1));
+    /* new/edit collision */
+    r = (fio_http_resource_action_e)((unsigned)r -
+                                     (((unsigned)(r == FIO_HTTP_RESOURCE_EDIT) &
+                                       path_is_new) *
+                                      FIO_HTTP_RESOURCE_EDIT));
+    /* PUT/POST/PATCH */
+  } else if (tmp == put || (tmp == post && method.len == 4) ||
+             (tmp == patc && ((method.buf[4] | 32) == 'h') &&
+              method.len == 5)) {
+    /* create vs edit */
+    r = (fio_http_resource_action_e)((unsigned)FIO_HTTP_RESOURCE_CREATE +
+                                     (path.len > 1 && !path_is_new));
+    /* DELETE */
+  } else if (path.len > 1 && !path_is_new && method.len == 6 && tmp == dele &&
+             (fio_buf2u32u(method.buf + 2) | 0x20202020U) == lete) {
+    r = FIO_HTTP_RESOURCE_DELETE;
+  } else if (tmp == query && method.len == 5 && (method.buf[4] | 32) == 'y') {
+    r = FIO_HTTP_RESOURCE_QUERY;
+  }
+  return r;
 }
 
 /* *****************************************************************************

@@ -155,7 +155,7 @@ Other settings:
 | `sse_timeout` | SSE timeout; timeout pings are sent. |
 | `connect_timeout` | Client connection timeout. |
 | `log` | Enables HTTP request logging. |
-| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Per-route; routes inherit the listener's root value at route-creation. The value is a failure-memoization shift register (see *Static File Service*). Detached handles gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag instead. See the compression security note below. |
+| `compress_static` | Opt-in static-file compression (on-demand `.br`/`.gz` creation). Per-route; routes inherit the listener's root value at route-creation. The value is a failure-memoization shift register (see *Static File Service*). Detached handles use an internal controller flag instead. See the compression security note below. |
 | `compress_dynamic` | Opt-in dynamic response compression. Connection-global; per-route values are ignored. See the compression security note below. |
 | `compress_ws` | Opt-in WebSocket `permessage-deflate`. Connection-global; per-route values are ignored. See the compression security note below. |
 
@@ -354,7 +354,7 @@ With `compress_static` enabled, missing or stale `.br` / `.gz` variants are
 created on demand and written into the root folder. Attached handles read the
 flag from the matching route's settings (routes inherit the listener's root
 value at route-creation); detached handles (created manually, with no
-settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag instead.
+settings) use an internal controller flag instead.
 
 - creation is limited to compressible (text-like) MIME types and originals
   between 1024 bytes and `FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT` (2 MiB);
@@ -600,6 +600,12 @@ used by the HTTP layer and custom controllers.
 size_t         fio_http_status(fio_http_s *h);
 size_t         fio_http_status_set(fio_http_s *h, size_t status);
 fio_str_info_s fio_http_method(fio_http_s *h);
+int fio_http_method_is_get(fio_http_s *h);
+int fio_http_method_is_put(fio_http_s *h);
+int fio_http_method_is_post(fio_http_s *h);
+int fio_http_method_is_patch(fio_http_s *h);
+int fio_http_method_is_query(fio_http_s *h);
+int fio_http_method_is_delete(fio_http_s *h);
 fio_str_info_s fio_http_method_set(fio_http_s *h, fio_str_info_s value);
 fio_str_info_s fio_http_opath(fio_http_s *h);
 fio_str_info_s fio_http_opath_set(fio_http_s *h, fio_str_info_s value);
@@ -616,10 +622,16 @@ int64_t        fio_http_received_at_set(fio_http_s *h, int64_t value);
 `opath` is the original path before route prefix trimming. `path` is the routed
 path visible to the current callback.
 
+The `fio_http_method_is_*` helpers test whether the request method matches the
+named method, ignoring ASCII case. They return `1` for a match and `0` otherwise;
+pass a non-`NULL` HTTP handle (`h`). Unlike `fio_http_resource_action`, these
+helpers do not classify paths or combine PUT, POST, and PATCH into a single
+action.
+
 `fio_http_status_set(h, 0)` normalizes to `200`; values above the internal range
 normalize to `500`.
 
-### State checks and flags
+### State checks
 
 ```c
 int fio_http_is_clean(fio_http_s *h);
@@ -630,25 +642,6 @@ int fio_http_is_websocket(fio_http_s *h);
 int fio_http_is_sse(fio_http_s *h);
 int fio_http_is_freeing(fio_http_s *h);
 ```
-
-The handle also exposes inline flag helpers generated for `cflags` and
-`uflags`:
-
-```c
-uint16_t fio_http_cflags(fio_http_s *h);
-uint16_t fio_http_cflags_set(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_cflags_unset(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_cflags_flip(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_cflags_is_set(fio_http_s *h, uint16_t flags);
-
-uint16_t fio_http_uflags(fio_http_s *h);
-uint16_t fio_http_uflags_set(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_uflags_unset(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_uflags_flip(fio_http_s *h, uint16_t flags);
-uint16_t fio_http_uflags_is_set(fio_http_s *h, uint16_t flags);
-```
-
-Prefer the state helpers unless implementing protocol or controller glue.
 
 ### Headers
 
@@ -954,25 +947,6 @@ FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT   /* 1 << 21 */
 FIO_HTTP_LOG_X_REQUEST_START          /* 1 */
 FIO_HTTP_ENFORCE_LOWERCASE_HEADERS    /* 0 */
 ```
-
-State and controller flag macros are exposed for protocol glue:
-
-```c
-FIO_HTTP_STATE_STREAMING
-FIO_HTTP_STATE_FINISHED
-FIO_HTTP_STATE_UPGRADED
-FIO_HTTP_STATE_WEBSOCKET
-FIO_HTTP_STATE_SSE
-FIO_HTTP_STATE_COOKIES_PARSED
-FIO_HTTP_STATE_FREEING
-
-FIO_HTTP_CFLAG_COMPRESS_DYNAMIC
-FIO_HTTP_CFLAG_COMPRESS_WS
-FIO_HTTP_CFLAG_COMPRESS_STATIC
-```
-
-Prefer public helper functions over reading state bits directly in application
-code.
 
 ---
 

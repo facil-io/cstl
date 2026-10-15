@@ -119057,8 +119057,7 @@ typedef struct fio_http_settings_s {
    * inherit the listener's root value at route-creation). The value is a
    * failure-memoization shift register, atomically shared by the IO
    * threads - see `fio_http_static_file_response`. Detached handles (no
-   * settings) gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` handle cflag
-   * instead, with no memoization state.
+   * settings) use an internal controller flag, with no memoization state.
    */
   uint8_t compress_static;
   /**
@@ -119330,6 +119329,19 @@ SFUNC size_t fio_http_status_set(fio_http_s *, size_t status);
 
 /** Gets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method(fio_http_s *);
+
+/** Tests for GET, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_get(fio_http_s *h);
+/** Tests for PUT, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_put(fio_http_s *h);
+/** Tests for POST, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_post(fio_http_s *h);
+/** Tests for PATCH, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_patch(fio_http_s *h);
+/** Tests for QUERY, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_query(fio_http_s *h);
+/** Tests for DELETE, case-insensitively; requires a non-NULL HTTP handle. */
+SFUNC int fio_http_method_is_delete(fio_http_s *h);
 
 /** Sets the method information associated with the HTTP handle. */
 SFUNC fio_str_info_s fio_http_method_set(fio_http_s *, fio_str_info_s);
@@ -119922,8 +119934,8 @@ SFUNC int fio_http_etag_is_match(fio_http_s *h);
  * Pre-compressed variants (`file.br`, `file.zstd`, `file.gz`, `file.zip`,
  * in this preference order) are served when accepted by the client,
  * present on disk, and fresh; with `compress_static` enabled (the matching
- * route's settings, or the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag on
- * detached handles), missing `.br` / `.gz` variants are also created on
+ * route's settings, or an internal controller flag on detached handles),
+ * missing `.br` / `.gz` variants are also created on
  * demand.
  *
  * On success the response is complete and 0 is returned. On failure -1 is
@@ -120008,23 +120020,6 @@ SFUNC void fio_http_upgrade_sse(fio_http_s *);
 
 /** Sets request data to request an EventSource (SSE) Upgrade.*/
 SFUNC void fio_http_sse_set_request(fio_http_s *);
-
-/* *****************************************************************************
-HTTP Handle State and Controller Flags
-***************************************************************************** */
-
-#define FIO_HTTP_STATE_STREAMING      1
-#define FIO_HTTP_STATE_FINISHED       2
-#define FIO_HTTP_STATE_UPGRADED       4
-#define FIO_HTTP_STATE_WEBSOCKET      8
-#define FIO_HTTP_STATE_SSE            16
-#define FIO_HTTP_STATE_COOKIES_PARSED 32
-#define FIO_HTTP_STATE_FREEING        64
-
-/** Controller flags (cflags) for opt-in compression features. */
-#define FIO_HTTP_CFLAG_COMPRESS_DYNAMIC 1
-#define FIO_HTTP_CFLAG_COMPRESS_WS      2
-#define FIO_HTTP_CFLAG_COMPRESS_STATIC  4
 
 /* *****************************************************************************
 WebSocket Helpers - HTTP Upgraded Connections
@@ -120253,35 +120248,6 @@ fio_http_header_each_property_first(const fio_buf_info_s *properties) {
 }
 
 /* *****************************************************************************
-HTTP API Finish
-***************************************************************************** */
-#endif /* FIO_HTTP */
-/* ************************************************************************* */
-#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
-#define FIO___DEV___           /* Development inclusion - ignore line */
-#define FIO_HTTP               /* Development inclusion - ignore line */
-#include "./include.h"         /* Development inclusion - ignore line */
-#endif                         /* Development inclusion - ignore line */
-/* *****************************************************************************
-
-
-
-
-              HTTP Types - Internal Types, Handle and Core Implementation
-
-See also:
-https://www.rfc-editor.org/rfc/rfc9110.html
-
-
-
-Copyright and License: see header file (000 copyright.h) or top of file
-***************************************************************************** */
-#if defined(FIO_HTTP) && !defined(FIO___RECURSIVE_INCLUDE) &&                  \
-    !defined(H___FIO_HTTP_TYPES___H) &&                                        \
-    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
-#define H___FIO_HTTP_TYPES___H
-
-/* *****************************************************************************
 HTTP Handle Implementation - inlined static functions
 ***************************************************************************** */
 
@@ -120448,6 +120414,35 @@ FIO_IFUNC fio_http_resource_action_e fio_http_resource_action(fio_http_s *h) {
   return r;
 }
 
+/* *****************************************************************************
+HTTP API Finish
+***************************************************************************** */
+#endif /* FIO_HTTP */
+/* ************************************************************************* */
+#if !defined(FIO_INCLUDE_FILE) /* Dev test - ignore line */
+#define FIO___DEV___           /* Development inclusion - ignore line */
+#define FIO_HTTP               /* Development inclusion - ignore line */
+#include "./include.h"         /* Development inclusion - ignore line */
+#endif                         /* Development inclusion - ignore line */
+/* *****************************************************************************
+
+
+
+
+              HTTP Types - Internal Types, Handle and Core Implementation
+
+See also:
+https://www.rfc-editor.org/rfc/rfc9110.html
+
+
+
+Copyright and License: see header file (000 copyright.h) or top of file
+***************************************************************************** */
+#if defined(FIO_HTTP) && !defined(FIO___RECURSIVE_INCLUDE) &&                  \
+    !defined(H___FIO_HTTP_TYPES___H) &&                                        \
+    (defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN))
+#define H___FIO_HTTP_TYPES___H
+
 /*
 REMEMBER:
 ========
@@ -120457,6 +120452,23 @@ All memory allocations should use:
 * FIO_MEM_FREE_(ptr, size)
 
 */
+
+/* *****************************************************************************
+HTTP Handle State and Controller Flags
+***************************************************************************** */
+
+#define FIO___HTTP_STATE_STREAMING      1
+#define FIO___HTTP_STATE_FINISHED       2
+#define FIO___HTTP_STATE_UPGRADED       4
+#define FIO___HTTP_STATE_WEBSOCKET      8
+#define FIO___HTTP_STATE_SSE            16
+#define FIO___HTTP_STATE_COOKIES_PARSED 32
+#define FIO___HTTP_STATE_FREEING        64
+
+/** Controller flags (cflags) for opt-in compression features. */
+#define FIO___HTTP_CFLAG_COMPRESS_DYNAMIC 1
+#define FIO___HTTP_CFLAG_COMPRESS_WS      2
+#define FIO___HTTP_CFLAG_COMPRESS_STATIC  4
 
 /* *****************************************************************************
 HTTP Settings Validation
@@ -121563,10 +121575,9 @@ struct fio_http_s {
   int (*writer)(fio_http_s *, fio_http_write_args_s *);
   int64_t received_at;
   size_t sent;
+  uint32_t cflags;
   uint16_t state;
   uint16_t status;
-  uint16_t cflags;
-  uint16_t uflags;
   fio_keystr_s method;
   fio_keystr_s opath;
   fio_keystr_s path;
@@ -121595,7 +121606,7 @@ struct fio_http_s {
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   if (!h)
     return h;
-  h->state |= FIO_HTTP_STATE_FREEING;
+  h->state |= FIO___HTTP_STATE_FREEING;
   h->controller->on_destroyed(h);
 
   fio_keystr_destroy(&h->method, fio___http_keystr_free);
@@ -121730,32 +121741,42 @@ Controller / User Flags Set / Test / Flip
 
 #define FIO___HTTP_MAKE_GET_SET(flags)                                         \
   /** Returns all set flags */                                                 \
-  FIO_IFUNC uint16_t fio_http_##flags(fio_http_s *h) {                         \
+  FIO_IFUNC uint16_t fio___http_##flags(fio_http_s *h) {                       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return h->flags;                                                           \
   }                                                                            \
-  FIO_IFUNC uint16_t fio_http_##flags##_flip(fio_http_s *h, uint16_t flg) {    \
+  FIO_IFUNC uint16_t fio___http_##flags##_flip(fio_http_s *h, uint16_t flg) {  \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     h->flags ^= flg;                                                           \
     return h->flags & flg;                                                     \
   }                                                                            \
-  FIO_IFUNC uint16_t fio_http_##flags##_set(fio_http_s *h, uint16_t flg) {     \
+  FIO_IFUNC uint16_t fio___http_##flags##_set(fio_http_s *h, uint16_t flg) {   \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     h->flags |= flg;                                                           \
     return h->flags & flg;                                                     \
   }                                                                            \
-  FIO_IFUNC uint16_t fio_http_##flags##_unset(fio_http_s *h, uint16_t flg) {   \
+  FIO_IFUNC uint16_t fio___http_##flags##_unset(fio_http_s *h, uint16_t flg) { \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     h->flags &= ~flg;                                                          \
     return h->flags & flg;                                                     \
   }                                                                            \
-  FIO_IFUNC uint16_t fio_http_##flags##_is_set(fio_http_s *h, uint16_t flg) {  \
+  FIO_IFUNC uint16_t fio___http_##flags##_is_set(fio_http_s *h,                \
+                                                 uint16_t flg) {               \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
     return h->flags & flg;                                                     \
   }
 
 FIO___HTTP_MAKE_GET_SET(cflags)
-FIO___HTTP_MAKE_GET_SET(uflags)
+
+/* Test-only seam for detached handles: production callers configure
+ * compression via listener/route settings, not controller flags. */
+#if defined(FIO_HTTP_TEST_COMPRESSION_FLAGS)
+FIO_IFUNC void fio___http_test_enable_compression(fio_http_s *h, int is_static) {
+  fio___http_cflags_set(h,
+                        is_static ? FIO___HTTP_CFLAG_COMPRESS_STATIC
+                                  : FIO___HTTP_CFLAG_COMPRESS_DYNAMIC);
+}
+#endif
 
 #undef FIO___HTTP_MAKE_GET_SET
 /* *****************************************************************************
@@ -121764,43 +121785,103 @@ Handler State
 
 SFUNC int fio_http_is_clean(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return !(h->state & (~FIO_HTTP_STATE_COOKIES_PARSED));
+  return !(h->state & (~FIO___HTTP_STATE_COOKIES_PARSED));
 }
 
 /** Returns true if the HTTP handle's response was sent. */
 SFUNC int fio_http_is_finished(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_FINISHED));
+  return (!!(h->state & FIO___HTTP_STATE_FINISHED));
 }
 
 /** Returns true if handle is in the process of freeing itself. */
 SFUNC int fio_http_is_freeing(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_FREEING));
+  return (!!(h->state & FIO___HTTP_STATE_FREEING));
 }
 
 /** Returns true if the HTTP handle's response is streaming. */
 SFUNC int fio_http_is_streaming(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_STREAMING));
+  return (!!(h->state & FIO___HTTP_STATE_STREAMING));
 }
 
 /** Returns true if the HTTP connection was (or should have been) upgraded. */
 SFUNC int fio_http_is_upgraded(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_UPGRADED));
+  return (!!(h->state & FIO___HTTP_STATE_UPGRADED));
 }
 
 /** Returns true if the HTTP handle establishes a WebSocket Upgrade. */
 SFUNC int fio_http_is_websocket(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_WEBSOCKET));
+  return (!!(h->state & FIO___HTTP_STATE_WEBSOCKET));
 }
 
 /** Returns true if the HTTP handle establishes an EventSource connection. */
 SFUNC int fio_http_is_sse(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return (!!(h->state & FIO_HTTP_STATE_SSE));
+  return (!!(h->state & FIO___HTTP_STATE_SSE));
+}
+
+/* *****************************************************************************
+Method Name Matching
+***************************************************************************** */
+
+#define FIO___HTTP_DEF_METHOD_TEST4(m, l)                                      \
+  /** Tests if fio_http_method is m (case insensitive). */                     \
+  SFUNC int fio_http_method_is_##m(fio_http_s *h) {                            \
+    FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    fio_str_info_s method = fio_http_method(h);                                \
+    if (method.len != l)                                                       \
+      return 0;                                                                \
+    const uint32_t tst = fio_buf2u32u(#m) | 0x20202020U;                       \
+    const uint32_t is = fio_buf2u32u(method.buf) | 0x20202020U;                \
+    return (tst == is);                                                        \
+  }
+
+FIO___HTTP_DEF_METHOD_TEST4(get, 3)
+FIO___HTTP_DEF_METHOD_TEST4(put, 3)
+FIO___HTTP_DEF_METHOD_TEST4(post, 4)
+
+#undef FIO___HTTP_DEF_METHOD_TEST4
+
+/** Returns 1 if fio_http_method is PATCH (case insensitive). */
+SFUNC int fio_http_method_is_patch(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  fio_str_info_s method = fio_http_method(h);
+  if (method.len != 5)
+    return 0;
+  if ((method.buf[0] | 0x20) != 'p')
+    return 0;
+  const uint32_t tst = fio_buf2u32u("atch") | 0x20202020U;
+  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
+  return (tst == is);
+}
+/** Returns 1 if fio_http_method is QUERY (case insensitive). */
+SFUNC int fio_http_method_is_query(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  fio_str_info_s method = fio_http_method(h);
+  if (method.len != 5)
+    return 0;
+  if ((method.buf[0] | 0x20) != 'q')
+    return 0;
+  const uint32_t tst = fio_buf2u32u("uery") | 0x20202020U;
+  const uint32_t is = fio_buf2u32u(method.buf + 1) | 0x20202020U;
+  return (tst == is);
+}
+
+/** Returns 1 if fio_http_method is DELETE (case insensitive). */
+SFUNC int fio_http_method_is_delete(fio_http_s *h) {
+  FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
+  fio_str_info_s method = fio_http_method(h);
+  if (method.len != 6)
+    return 0;
+  const uint32_t tst1 = fio_buf2u32u("dele") | 0x20202020U;
+  const uint32_t is1 = fio_buf2u32u(method.buf) | 0x20202020U;
+  const uint32_t tst2 = fio_buf2u32u("lete") | 0x20202020U;
+  const uint32_t is2 = fio_buf2u32u(method.buf + 2) | 0x20202020U;
+  return !((tst1 ^ is1) | (tst2 ^ is2));
 }
 
 /* *****************************************************************************
@@ -122030,8 +122111,9 @@ int fio_http_cookie_set___(void); /* IDE Marker */
 SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
                                        fio_http_cookie_args_s cookie) {
   FIO_ASSERT_DEBUG(h, "Can't set cookie for NULL HTTP handler!");
-  if (!h || ((h->state & (FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_STREAMING)) |
-             (h->writer != fio____http_write_start)))
+  if (!h ||
+      ((h->state & (FIO___HTTP_STATE_FINISHED | FIO___HTTP_STATE_STREAMING)) |
+       (h->writer != fio____http_write_start)))
     return -1;
   /* promises that some warnings print only once. */
   static unsigned int warn_illegal = 0;
@@ -122232,8 +122314,8 @@ SFUNC int fio_http_cookie_set FIO_NOOP(fio_http_s *h,
 SFUNC fio_str_info_s fio_http_cookie(fio_http_s *h,
                                      const char *name,
                                      size_t name_len) {
-  if (!(fio_atomic_or(&h->state, FIO_HTTP_STATE_COOKIES_PARSED) &
-        FIO_HTTP_STATE_COOKIES_PARSED))
+  if (!(fio_atomic_or(&h->state, FIO___HTTP_STATE_COOKIES_PARSED) &
+        FIO___HTTP_STATE_COOKIES_PARSED))
     fio___http_cookie_collect(h);
   fio_str_info_s r =
       fio___http_cmap_get(h->cookies, FIO_STR_INFO2((char *)name, name_len));
@@ -122247,8 +122329,8 @@ SFUNC size_t fio_http_cookie_each(fio_http_s *h,
                                                   fio_str_info_s value,
                                                   void *udata),
                                   void *udata) {
-  if (!(fio_atomic_or(&h->state, FIO_HTTP_STATE_COOKIES_PARSED) &
-        FIO_HTTP_STATE_COOKIES_PARSED))
+  if (!(fio_atomic_or(&h->state, FIO___HTTP_STATE_COOKIES_PARSED) &
+        FIO___HTTP_STATE_COOKIES_PARSED))
     fio___http_cookie_collect(h);
   size_t i = 0;
   FIO_MAP_EACH(fio___http_cmap, h->cookies, pos) {
@@ -122629,7 +122711,8 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
   }
 #if 1
   if (args->finish &&
-      FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC)) &&
+      FIO_LIKELY(
+          fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_DYNAMIC)) &&
       args->len > 1024 && args->buf) {
     /* Never double-compress: the application already encoded this response. */
     if (fio___http_hmap_get_ptr(hdrs,
@@ -122748,7 +122831,7 @@ FIO_SFUNC int fio____http_write_start(fio_http_s *h,
       fio_ltoa10u(v.buf, args->len, v.len);
       fio___http_hmap_set2(hdrs, k, v, -1);
     } else if (!(h->state & FIO___HTTP_STATE_NO_CONTENT)) {
-      h->state |= FIO_HTTP_STATE_STREAMING;
+      h->state |= FIO___HTTP_STATE_STREAMING;
     }
   }
 send_headers:
@@ -122765,8 +122848,8 @@ FIO_SFUNC int fio____http_write_cont(fio_http_s *h,
     h->sent += args->len;
   }
   if (args->finish) {
-    h->state |= FIO_HTTP_STATE_FINISHED;
-    h->writer = (h->state & FIO_HTTP_STATE_UPGRADED)
+    h->state |= FIO___HTTP_STATE_FINISHED;
+    h->writer = (h->state & FIO___HTTP_STATE_UPGRADED)
                     ? fio____http_write_upgraded
                     : fio____http_write_done;
     h->controller->on_finish(h);
@@ -122804,7 +122887,7 @@ FIO_IFUNC int fio___http_response_etag_if_none_match(fio_http_s *h) {
                        -1);
 
   h->controller->send_headers(h);
-  h->state |= FIO_HTTP_STATE_FINISHED;
+  h->state |= FIO___HTTP_STATE_FINISHED;
   h->writer = fio____http_write_done;
   h->controller->on_finish(h);
   return -1;
@@ -122894,7 +122977,7 @@ SFUNC void fio_http_upgrade_websocket(fio_http_s *h) {
         accept_val);
   }
   { /* finish up */
-    h->state |= FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET;
+    h->state |= FIO___HTTP_STATE_UPGRADED | FIO___HTTP_STATE_WEBSOCKET;
     fio_http_write_args_s args = {.finish = 1};
     fio_http_write FIO_NOOP(h, args);
   }
@@ -122996,8 +123079,8 @@ SFUNC int fio_http_websocket_accepted(fio_http_s *h) {
       return 0;
     }
   }
-  h->state |= (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_WEBSOCKET |
-               FIO_HTTP_STATE_FINISHED);
+  h->state |= (FIO___HTTP_STATE_UPGRADED | FIO___HTTP_STATE_WEBSOCKET |
+               FIO___HTTP_STATE_FINISHED);
   h->writer = fio____http_write_upgraded;
   return 1;
 }
@@ -123040,8 +123123,8 @@ SFUNC int fio_http_sse_accepted(fio_http_s *h) {
                                    FIO_STR_INFO2((char *)"content-type", 12),
                                    0);
   }
-  h->state |=
-      (FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE | FIO_HTTP_STATE_FINISHED);
+  h->state |= (FIO___HTTP_STATE_UPGRADED | FIO___HTTP_STATE_SSE |
+               FIO___HTTP_STATE_FINISHED);
   h->writer = fio____http_write_upgraded;
   FIO_LOG_DDEBUG2("EventSource connection accepted.");
   return 1;
@@ -123060,8 +123143,8 @@ SFUNC void fio_http_upgrade_sse(fio_http_s *h) {
   fio___http_hmap_remove(HTTP_HDR_RESPONSE(h),
                          FIO_STR_INFO2((char *)"content-length", 14),
                          NULL);
-  h->state |=
-      FIO_HTTP_STATE_FINISHED | FIO_HTTP_STATE_UPGRADED | FIO_HTTP_STATE_SSE;
+  h->state |= FIO___HTTP_STATE_FINISHED | FIO___HTTP_STATE_UPGRADED |
+              FIO___HTTP_STATE_SSE;
   h->controller->send_headers(h);
   h->writer = fio____http_write_upgraded;
   h->controller->on_finish(h);
@@ -124467,7 +124550,7 @@ FIO_SFUNC void fio___http_static_compress_note_result(
  * EACCES, EROFS, EDQUOT — `value = 0`). Once 0, creation stays disabled
  * until the settings are re-applied. Routes inherit the value from the
  * listener settings at route-creation. Detached handles (no settings)
- * gate on the `FIO_HTTP_CFLAG_COMPRESS_STATIC` cflag instead, with no
+ * gate on the `FIO___HTTP_CFLAG_COMPRESS_STATIC` cflag instead, with no
  * memoization state.
  */
 SFUNC int fio_http_static_file_response(fio_http_s *h,
@@ -124590,7 +124673,7 @@ SFUNC int fio_http_static_file_response(fio_http_s *h,
     int can_create =
         have_orig_st &&
         (st ? settings_may_compress
-            : fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_STATIC)) &&
+            : fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_STATIC)) &&
         fio___http_mime_is_compressible(mime_type) &&
         (size_t)orig_st.st_size >= 1024 &&
         (size_t)orig_st.st_size <= FIO_HTTP_STATIC_FILE_COMPRESS_LIMIT;
@@ -125604,9 +125687,9 @@ FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
   fio_http_udata_set(c->h, c->udata);
   fio_http_cdata_set(c->h, fio___http_connection_dup(c));
   if (c->settings->compress_dynamic)
-    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_DYNAMIC);
+    fio___http_cflags_set(c->h, FIO___HTTP_CFLAG_COMPRESS_DYNAMIC);
   if (c->settings->compress_ws)
-    fio_http_cflags_set(c->h, FIO_HTTP_CFLAG_COMPRESS_WS);
+    fio___http_cflags_set(c->h, FIO___HTTP_CFLAG_COMPRESS_WS);
 }
 
 /** called when a request method is parsed. */
@@ -126041,10 +126124,7 @@ FIO_SFUNC void fio___http_controller_http1_send_headers(fio_http_s *h) {
                                      FIO_STR_INFO2((char *)"connection", 10),
                                      0)
                 .buf)
-    fio_string_write(&buf,
-                     FIO_STRING_REALLOC,
-                     "connection:keep-alive\r\n",
-                     23);
+    fio_string_write(&buf, FIO_STRING_REALLOC, "connection:keep-alive\r\n", 23);
   fio_string_write(&buf, FIO_STRING_REALLOC, "\r\n", 2);
   /* send data (move memory ownership)? */
   c->state.http.buf = buf;
@@ -126690,7 +126770,7 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
   /* RFC 7692: permessage-deflate extension negotiation (no-takeover only) */
-  if (FIO_LIKELY(fio_http_cflags_is_set(h, FIO_HTTP_CFLAG_COMPRESS_WS))) {
+  if (FIO_LIKELY(fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_WS))) {
     FIO_HTTP_HEADER_EACH_VALUE(
         h,
         1,
@@ -126699,9 +126779,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       FIO_LOG_DDEBUG2("WebSocket extension requested: %.*s",
                       (int)val.value.len,
                       val.value.buf);
-      if (!FIO_BUF_INFO_IS_EQ(
-              val.value,
-              FIO_BUF_INFO2((char *)"permessage-deflate", 18)))
+      if (!FIO_BUF_INFO_IS_EQ(val.value,
+                              FIO_BUF_INFO2((char *)"permessage-deflate", 18)))
         continue;
       /* Negotiate: ALWAYS force both no_context_takeover flags (persistent
        * compression state stays ~0 per connection); honor
@@ -126711,8 +126790,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       size_t ext_len = fio___http_ws_deflate_negotiate(
           FIO_STR_INFO2(val.value.buf, val.value.len),
           ext_resp,
-                                                       sizeof(ext_resp),
-                                                       &server_bits);
+          sizeof(ext_resp),
+          &server_bits);
       if (!ext_len)
         continue;
       fio_http_response_header_set(
@@ -127318,34 +127397,36 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
     const size_t framed_len = fio_websocket_write_len(args.len, 1);
     char *frame = NULL;
     if (args.len <= SIZE_MAX - args.offset && framed_len <= UINT32_MAX &&
-        (args.buf ||
-         ((off_t)args.offset >= 0 &&
-          (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
-          (off_t)(args.offset + args.len) >= 0 &&
-          (uintmax_t)(off_t)(args.offset + args.len) ==
-              (uintmax_t)(args.offset + args.len))))
+        (args.buf || ((off_t)args.offset >= 0 &&
+                      (uintmax_t)(off_t)args.offset == (uintmax_t)args.offset &&
+                      (off_t)(args.offset + args.len) >= 0 &&
+                      (uintmax_t)(off_t)(args.offset + args.len) ==
+                          (uintmax_t)(args.offset + args.len))))
       frame = fio_bstr_reserve(NULL, framed_len);
     if (!frame)
       goto client_write_error;
     if (args.buf) {
       fio_websocket_write_message_client(
-          frame, FIO_BUF_INFO2((char *)args.buf + args.offset, args.len), 0, 0, 0);
+          frame,
+          FIO_BUF_INFO2((char *)args.buf + args.offset, args.len),
+          0,
+          0,
+          0);
     } else {
       uint32_t mask = (uint32_t)(fio_rand64() | 0x01020408U);
       size_t head = fio___websocket_hdr((uint8_t *)frame,
-                                       args.len,
-                                       mask,
-                                       FIO_WEBSOCKET_OP_BINARY,
-                                       0);
+                                        args.len,
+                                        mask,
+                                        FIO_WEBSOCKET_OP_BINARY,
+                                        0);
       if (fio_fd_read(args.fd, frame + head, args.len, (off_t)args.offset) !=
           args.len) {
         fio_bstr_free(frame);
         goto client_write_error;
       }
-      fio_xmask_cpy(frame + head,
-                    frame + head,
-                    args.len,
-                    ((uint64_t)mask << 32) | (uint64_t)mask);
+      fio_xmask(frame + head,
+                args.len,
+                ((uint64_t)mask << 32) | (uint64_t)mask);
     }
     if (!args.buf && (unsigned)(args.fd + 1) > 1)
       close(args.fd);
@@ -127994,6 +128075,17 @@ once per template instantiation pass.
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
 #if !defined(FIO___RECURSIVE_INCLUDE) && defined(FIO_HTTP)
+#undef FIO___HTTP_STATE_STREAMING
+#undef FIO___HTTP_STATE_FINISHED
+#undef FIO___HTTP_STATE_UPGRADED
+#undef FIO___HTTP_STATE_WEBSOCKET
+#undef FIO___HTTP_STATE_SSE
+#undef FIO___HTTP_STATE_COOKIES_PARSED
+#undef FIO___HTTP_STATE_FREEING
+#undef FIO___HTTP_STATE_NO_CONTENT
+#undef FIO___HTTP_CFLAG_COMPRESS_DYNAMIC
+#undef FIO___HTTP_CFLAG_COMPRESS_WS
+#undef FIO___HTTP_CFLAG_COMPRESS_STATIC
 #undef FIO_HTTP
 #endif
 /* *****************************************************************************
