@@ -5089,12 +5089,18 @@ FIO_SFUNC bool fio_buf_info_is_eq(fio_buf_info_s a, fio_buf_info_s b) {
 #define fio___buf_info_is_eq_lim(half, v4)                                     \
   do {                                                                         \
     if ((a.len & half)) {                                                      \
-      uint64_t a1[(half / 4)], b1[(half / 4)], tst = 0;                        \
+      uint64_t a1[(half / 8)], b1[(half / 8)], tst = 0;                        \
       const size_t step = (a.len & (half - 1));                                \
       fio_memcpy##half(a1, a.buf);                                             \
       fio_memcpy##half(b1, b.buf);                                             \
-      fio_memcpy##half(a1 + (half >> 3), a.buf + step);                        \
-      fio_memcpy##half(b1 + (half >> 3), b.buf + step);                        \
+      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)                \
+        tst |= (a1[i] ^ b1[i]);                                                \
+      if (tst)                                                                 \
+        return 0;                                                              \
+      if (!step)                                                               \
+        return 1;                                                              \
+      fio_memcpy##half(a1, a.buf + step);                                      \
+      fio_memcpy##half(b1, b.buf + step);                                      \
       for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)                \
         tst |= (a1[i] ^ b1[i]);                                                \
       return !tst;                                                             \
@@ -5158,12 +5164,11 @@ FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
     do {
       fio_memcpy128(a1, a.buf);
       fio_memcpy128(b1, b.buf);
-      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)
+      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i) {
         a1[i] ^= b1[i];
-      for (size_t i = 0; i < 16; ++i)
         fio___buf_ieq_fold(a1[i], b1[i]);
-      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)
         tst |= a1[i];
+      }
       if (tst)
         return 0;
       a.buf += 128;
@@ -5177,30 +5182,37 @@ FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
     b.buf -= backstep;
     fio_memcpy128(a1, a.buf);
     fio_memcpy128(b1, b.buf);
-    for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)
+    for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i) {
       a1[i] ^= b1[i];
-    for (size_t i = 0; i < 16; ++i)
       fio___buf_ieq_fold(a1[i], b1[i]);
-    for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)
       tst |= a1[i];
+    }
     return !tst;
   }
 
 #define fio___buf_info_is_ieq_lim(half, v4)                                    \
   do {                                                                         \
     if (a.len & half) {                                                        \
-      uint64_t a1[(half / 4)], b1[(half / 4)], tst = 0;                        \
+      uint64_t a1[(half / 8)], b1[(half / 8)], tst = 0;                        \
       const size_t step = a.len & (half - 1);                                  \
       fio_memcpy##half(a1, a.buf);                                             \
       fio_memcpy##half(b1, b.buf);                                             \
-      fio_memcpy##half(a1 + (half >> 3), a.buf + step);                        \
-      fio_memcpy##half(b1 + (half >> 3), b.buf + step);                        \
-      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)                \
+      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i) {              \
         a1[i] ^= b1[i];                                                        \
-      for (size_t i = 0; i < (half / 4); ++i)                                  \
         fio___buf_ieq_fold(a1[i], b1[i]);                                      \
-      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i)                \
         tst |= a1[i];                                                          \
+      }                                                                        \
+      if (tst)                                                                 \
+        return 0;                                                              \
+      if (!step)                                                               \
+        return 1;                                                              \
+      fio_memcpy##half(a1, a.buf + step);                                      \
+      fio_memcpy##half(b1, b.buf + step);                                      \
+      for (size_t i = 0; i < (sizeof(a1) / sizeof(a1[0])); ++i) {              \
+        a1[i] ^= b1[i];                                                        \
+        fio___buf_ieq_fold(a1[i], b1[i]);                                      \
+        tst |= a1[i];                                                          \
+      }                                                                        \
       return !tst;                                                             \
     }                                                                          \
   } while (0)

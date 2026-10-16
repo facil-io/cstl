@@ -270,8 +270,8 @@ int main(void) {
   printf("bytes case   calls/run  fio_buf_info_is_eq_us  %s_us  %s/eq\n",
          BENCH_MEMCMP_NAME, BENCH_MEMCMP_NAME);
   fflush(stdout);
-  const size_t exact_lengths[] = {1, 7, 8, 9, 31, 32, 33, 127, 128, 129,
-                                  1023, 1024, 1025};
+  const size_t exact_lengths[] = {1, 7, 8, 9, 31, 32, 33, 63, 64, 65,
+                                  127, 128, 129, 1023, 1024, 1025};
   for (size_t k = 0; k < sizeof exact_lengths / sizeof exact_lengths[0]; ++k) {
     size_t len = exact_lengths[k];
     size_t iterations = 20000000 / len;
