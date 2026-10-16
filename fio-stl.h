@@ -73,7 +73,7 @@ supports macros that will help detect and validate it's version.
 /** MINOR version: Deprecation, or significant features added. May break ABI. */
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
-#define FIO_VERSION_PATCH 1
+#define FIO_VERSION_PATCH 2
 /** Build version: optional build info (string), i.e. "beta.02" */
 /* #define FIO_VERSION_BUILD */
 
@@ -5070,16 +5070,14 @@ FIO_SFUNC bool fio_buf_info_is_eq(fio_buf_info_s a, fio_buf_info_s b) {
     return 1;
   if (a.buf[0] != b.buf[0])
     return 0;
-  uint64_t a1[16], b1[16];
-  uint64_t tst = 0;
 
   for (size_t i = 127; i < a.len; i += 128) {
-    size_t at = i & (~(size_t)127ULL);
+    const size_t at = i & (~(size_t)127ULL);
+    uint64_t a1[16], b1[16];
     fio_memcpy128(a1, a.buf + at);
     fio_memcpy128(b1, b.buf + at);
     fio_u64x16_xor(a1, a1, b1);
-    tst = fio_u64x16_reduce_or(a1);
-    if (tst)
+    if (fio_u64x16_reduce_or(a1))
       return 0;
   }
   {
@@ -5090,56 +5088,73 @@ FIO_SFUNC bool fio_buf_info_is_eq(fio_buf_info_s a, fio_buf_info_s b) {
     b.len &= 127;
   }
   if ((a.len & 64)) {
-    const size_t reminder = ((a.len & 127) - 64);
-    fio_memcpy64(a1, a.buf);
-    fio_memcpy64(b1, b.buf);
-    fio_memcpy64((a1 + 8), a.buf + reminder);
-    fio_memcpy64((b1 + 8), b.buf + reminder);
-    fio_u64x16_xor(a1, a1, b1);
-    tst = fio_u64x16_reduce_or(a1);
+    const size_t last = ((a.len & 127) - 64);
+    uint64_t tst = 0;
+    tst |= fio_buf2u64u(a.buf + 0) ^ fio_buf2u64u(b.buf + 0);
+    tst |= fio_buf2u64u(a.buf + 8) ^ fio_buf2u64u(b.buf + 8);
+    tst |= fio_buf2u64u(a.buf + 16) ^ fio_buf2u64u(b.buf + 16);
+    tst |= fio_buf2u64u(a.buf + 24) ^ fio_buf2u64u(b.buf + 24);
+    tst |= fio_buf2u64u(a.buf + 32) ^ fio_buf2u64u(b.buf + 32);
+    tst |= fio_buf2u64u(a.buf + 40) ^ fio_buf2u64u(b.buf + 40);
+    tst |= fio_buf2u64u(a.buf + 48) ^ fio_buf2u64u(b.buf + 48);
+    tst |= fio_buf2u64u(a.buf + 56) ^ fio_buf2u64u(b.buf + 56);
+    tst |= fio_buf2u64u(a.buf + last + 0) ^ fio_buf2u64u(b.buf + last + 0);
+    tst |= fio_buf2u64u(a.buf + last + 8) ^ fio_buf2u64u(b.buf + last + 8);
+    tst |= fio_buf2u64u(a.buf + last + 16) ^ fio_buf2u64u(b.buf + last + 16);
+    tst |= fio_buf2u64u(a.buf + last + 24) ^ fio_buf2u64u(b.buf + last + 24);
+    tst |= fio_buf2u64u(a.buf + last + 32) ^ fio_buf2u64u(b.buf + last + 32);
+    tst |= fio_buf2u64u(a.buf + last + 40) ^ fio_buf2u64u(b.buf + last + 40);
+    tst |= fio_buf2u64u(a.buf + last + 48) ^ fio_buf2u64u(b.buf + last + 48);
+    tst |= fio_buf2u64u(a.buf + last + 56) ^ fio_buf2u64u(b.buf + last + 56);
     return !tst;
   }
   if ((a.len & 32)) {
-    const size_t reminder = ((a.len & 63) - 32);
-    fio_memcpy32(a1, a.buf);
-    fio_memcpy32(b1, b.buf);
-    fio_memcpy32((a1 + 4), a.buf + reminder);
-    fio_memcpy32((b1 + 4), b.buf + reminder);
-    fio_u64x8_xor(a1, a1, b1);
-    tst = fio_u64x8_reduce_or(a1);
+    const size_t last = ((a.len & 63) - 32);
+    uint64_t tst = 0;
+    tst |= fio_buf2u64u(a.buf + 0) ^ fio_buf2u64u(b.buf + 0);
+    tst |= fio_buf2u64u(a.buf + 0 + last) ^ fio_buf2u64u(b.buf + 0 + last);
+    tst |= fio_buf2u64u(a.buf + 8) ^ fio_buf2u64u(b.buf + 8);
+    tst |= fio_buf2u64u(a.buf + 8 + last) ^ fio_buf2u64u(b.buf + 8 + last);
+    tst |= fio_buf2u64u(a.buf + 16) ^ fio_buf2u64u(b.buf + 16);
+    tst |= fio_buf2u64u(a.buf + 16 + last) ^ fio_buf2u64u(b.buf + 16 + last);
+    tst |= fio_buf2u64u(a.buf + 24) ^ fio_buf2u64u(b.buf + 24);
+    tst |= fio_buf2u64u(a.buf + 24 + last) ^ fio_buf2u64u(b.buf + 24 + last);
     return !tst;
   }
   if ((a.len & 16)) {
-    const size_t reminder = ((a.len & 31) - 16);
-    fio_memcpy16(a1, a.buf);
-    fio_memcpy16(b1, b.buf);
-    fio_memcpy16((a1 + 2), a.buf + reminder);
-    fio_memcpy16((b1 + 2), b.buf + reminder);
-    fio_u64x4_xor(a1, a1, b1);
-    tst = fio_u64x4_reduce_or(a1);
+    const size_t last = ((a.len & 31) - 16);
+    uint64_t tst = 0;
+    tst |= fio_buf2u64u(a.buf + 0) ^ fio_buf2u64u(b.buf + 0);
+    tst |= fio_buf2u64u(a.buf + 0 + last) ^ fio_buf2u64u(b.buf + 0 + last);
+    tst |= fio_buf2u64u(a.buf + 8) ^ fio_buf2u64u(b.buf + 8);
+    tst |= fio_buf2u64u(a.buf + 8 + last) ^ fio_buf2u64u(b.buf + 8 + last);
     return !tst;
   }
   if ((a.len & 8)) {
-    const size_t reminder = ((a.len & 15) - 8);
-    fio_memcpy8(a1, a.buf);
-    fio_memcpy8(b1, b.buf);
-    fio_memcpy8((a1 + 1), a.buf + reminder);
-    fio_memcpy8((b1 + 1), b.buf + reminder);
-    fio_u64x2_xor(a1, a1, b1);
-    tst = fio_u64x2_reduce_or(a1);
+    const size_t last = ((a.len & 15) - 8);
+    uint64_t tst = 0;
+    tst |= fio_buf2u64u(a.buf + 0) ^ fio_buf2u64u(b.buf + 0);
+    tst |= fio_buf2u64u(a.buf + 0 + last) ^ fio_buf2u64u(b.buf + 0 + last);
     return !tst;
   }
-
-  switch ((a.len & 7)) {
-  case 7: tst |= a.buf[6] ^ b.buf[6]; /* fall through */
-  case 6: tst |= a.buf[5] ^ b.buf[5]; /* fall through */
-  case 5: tst |= a.buf[4] ^ b.buf[4]; /* fall through */
-  case 4: tst |= a.buf[3] ^ b.buf[3]; /* fall through */
-  case 3: tst |= a.buf[2] ^ b.buf[2]; /* fall through */
-  case 2: tst |= a.buf[1] ^ b.buf[1]; /* fall through */
-  case 1: tst |= a.buf[0] ^ b.buf[0]; /* fall through */
+  if ((a.len & 4)) {
+    const size_t last = ((a.len & 7) - 4);
+    uint32_t tst = 0;
+    tst |= fio_buf2u32u(a.buf + 0) ^ fio_buf2u32u(b.buf + 0);
+    tst |= fio_buf2u32u(a.buf + 0 + last) ^ fio_buf2u32u(b.buf + 0 + last);
+    return !tst;
   }
-  return !tst;
+  {
+    size_t tst = 0;
+    switch ((a.len & 3)) {
+    case 3:
+      tst |= ((size_t)(uint8_t)(a.buf[2] ^ b.buf[2])) << 16; /* fall through */
+    case 2:
+      tst |= ((size_t)(uint8_t)(a.buf[1] ^ b.buf[1])) << 8; /* fall through */
+    case 1: tst |= (size_t)(uint8_t)(a.buf[0] ^ b.buf[0]);  /* fall through */
+    }
+    return !tst;
+  }
 }
 
 /** An ASCII case insensitive compare for binary strings (not UTF-8). */
@@ -5148,36 +5163,38 @@ FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
     return 0;
   if (!a.len || a.buf == b.buf)
     return 1;
+
 /* One word at a time: the high bit in each lane prevents cross-byte borrows. */
-#define fio___buf_is_ieq_select_loop(words)                                    \
-  for (size_t j = 0; j < (words); ++j) {                                       \
-    const uint64_t original = b1[j];                                           \
-    const uint64_t folded = (original | case_bit) & ~high;                     \
-    const uint64_t letters = (((folded | high) - lower) &                      \
-                              ((upper | high) - folded) & ~original & high);   \
-    a1[j] &= ~(letters >> 2);                                                  \
-  }
+#define fio___buf_is_ieq_select_loop(dest, val, times, counter)                \
+  do {                                                                         \
+    for (size_t counter = 0; counter < times; ++counter) {                     \
+      const uint64_t original = val;                                           \
+      const uint64_t folded = (original | case_bit) & ~high;                   \
+      const uint64_t letters = (((folded | high) - lower) &                    \
+                                ((upper | high) - folded) & ~original & high); \
+      dest &= ~(letters >> 2);                                                 \
+    }                                                                          \
+  } while (0)
+
+  const uint64_t high = UINT64_C(0x8080808080808080);
+  const uint64_t case_bit = UINT64_C(0x2020202020202020);
+  const uint64_t lower = UINT64_C(0x6161616161616161); /* 'a' */
+  const uint64_t upper = UINT64_C(0x7a7a7a7a7a7a7a7a); /* 'z' */
 
   if (((a.buf[0] ^ b.buf[0]) &
        (~(((((uint8_t)a.buf[0] | 0x20U) >= (uint8_t)'a') &
            (((uint8_t)a.buf[0] | 0x20U) <= (uint8_t)'z'))
           << 5))))
     return 0;
-  uint64_t a1[16], b1[16];
-  uint64_t tst = 0;
-  const uint64_t high = UINT64_C(0x8080808080808080);
-  const uint64_t case_bit = UINT64_C(0x2020202020202020);
-  const uint64_t lower = UINT64_C(0x6161616161616161); /* 'a' */
-  const uint64_t upper = UINT64_C(0x7a7a7a7a7a7a7a7a); /* 'z' */
 
   for (size_t i = 127; i < a.len; i += 128) {
-    size_t at = i & (~(size_t)127ULL);
+    const size_t at = i & (~(size_t)127ULL);
+    uint64_t a1[16], b1[16];
     fio_memcpy128(a1, a.buf + at);
     fio_memcpy128(b1, b.buf + at);
     fio_u64x16_xor(a1, a1, b1);
-    fio___buf_is_ieq_select_loop(16);
-    tst = fio_u64x16_reduce_or(a1);
-    if (tst)
+    fio___buf_is_ieq_select_loop(a1[j], b1[j], 16, j);
+    if (fio_u64x16_reduce_or(a1))
       return 0;
   }
   {
@@ -5188,84 +5205,156 @@ FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
     b.len &= 127;
   }
   if ((a.len & 64)) {
-    const size_t reminder = ((a.len & 127) - 64);
-    fio_memcpy64(a1, a.buf);
-    fio_memcpy64(b1, b.buf);
-    fio_memcpy64((a1 + 8), a.buf + reminder);
-    fio_memcpy64((b1 + 8), b.buf + reminder);
-    fio_u64x16_xor(a1, a1, b1);
-    fio___buf_is_ieq_select_loop(16);
-    tst = fio_u64x16_reduce_or(a1);
+    const size_t last = ((a.len & 127) - 64);
+    uint64_t tst = 0, tmp, btmp;
+    tmp = fio_buf2u64u(a.buf + 0) ^ (btmp = fio_buf2u64u(b.buf + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 8) ^ (btmp = fio_buf2u64u(b.buf + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 16) ^ (btmp = fio_buf2u64u(b.buf + 16));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 24) ^ (btmp = fio_buf2u64u(b.buf + 24));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 32) ^ (btmp = fio_buf2u64u(b.buf + 32));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 40) ^ (btmp = fio_buf2u64u(b.buf + 40));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 48) ^ (btmp = fio_buf2u64u(b.buf + 48));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 56) ^ (btmp = fio_buf2u64u(b.buf + 56));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 0) ^
+          (btmp = fio_buf2u64u(b.buf + last + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 8) ^
+          (btmp = fio_buf2u64u(b.buf + last + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 16) ^
+          (btmp = fio_buf2u64u(b.buf + last + 16));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 24) ^
+          (btmp = fio_buf2u64u(b.buf + last + 24));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 32) ^
+          (btmp = fio_buf2u64u(b.buf + last + 32));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 40) ^
+          (btmp = fio_buf2u64u(b.buf + last + 40));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 48) ^
+          (btmp = fio_buf2u64u(b.buf + last + 48));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 56) ^
+          (btmp = fio_buf2u64u(b.buf + last + 56));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
     return !tst;
   }
   if ((a.len & 32)) {
-    const size_t reminder = ((a.len & 63) - 32);
-    fio_memcpy32(a1, a.buf);
-    fio_memcpy32(b1, b.buf);
-    fio_memcpy32((a1 + 4), a.buf + reminder);
-    fio_memcpy32((b1 + 4), b.buf + reminder);
-    fio_u64x8_xor(a1, a1, b1);
-    fio___buf_is_ieq_select_loop(8);
-    tst = fio_u64x8_reduce_or(a1);
+    const size_t last = ((a.len & 63) - 32);
+    uint64_t tst = 0, tmp, btmp;
+    tmp = fio_buf2u64u(a.buf + 0) ^ (btmp = fio_buf2u64u(b.buf + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 0) ^
+          (btmp = fio_buf2u64u(b.buf + last + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 8) ^ (btmp = fio_buf2u64u(b.buf + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 8) ^
+          (btmp = fio_buf2u64u(b.buf + last + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 16) ^ (btmp = fio_buf2u64u(b.buf + 16));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 16) ^
+          (btmp = fio_buf2u64u(b.buf + last + 16));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 24) ^ (btmp = fio_buf2u64u(b.buf + 24));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 24) ^
+          (btmp = fio_buf2u64u(b.buf + last + 24));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
     return !tst;
   }
   if ((a.len & 16)) {
-    const size_t reminder = ((a.len & 31) - 16);
-    fio_memcpy16(a1, a.buf);
-    fio_memcpy16(b1, b.buf);
-    fio_memcpy16((a1 + 2), a.buf + reminder);
-    fio_memcpy16((b1 + 2), b.buf + reminder);
-    fio_u64x4_xor(a1, a1, b1);
-    fio___buf_is_ieq_select_loop(4);
-    tst = fio_u64x4_reduce_or(a1);
+    const size_t last = ((a.len & 31) - 16);
+    uint64_t tst = 0, tmp, btmp;
+    tmp = fio_buf2u64u(a.buf + 0) ^ (btmp = fio_buf2u64u(b.buf + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 0) ^
+          (btmp = fio_buf2u64u(b.buf + last + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + 8) ^ (btmp = fio_buf2u64u(b.buf + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 8) ^
+          (btmp = fio_buf2u64u(b.buf + last + 8));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
     return !tst;
   }
   if ((a.len & 8)) {
-    const size_t reminder = ((a.len & 15) - 8);
-    fio_memcpy8(a1, a.buf);
-    fio_memcpy8(b1, b.buf);
-    fio_memcpy8((a1 + 1), a.buf + reminder);
-    fio_memcpy8((b1 + 1), b.buf + reminder);
-    fio_u64x2_xor(a1, a1, b1);
-    fio___buf_is_ieq_select_loop(2);
-    tst = fio_u64x2_reduce_or(a1);
+    const size_t last = ((a.len & 15) - 8);
+    uint64_t tst = 0, tmp, btmp;
+    tmp = fio_buf2u64u(a.buf + 0) ^ (btmp = fio_buf2u64u(b.buf + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
+    tmp = fio_buf2u64u(a.buf + last + 0) ^
+          (btmp = fio_buf2u64u(b.buf + last + 0));
+    fio___buf_is_ieq_select_loop(tmp, btmp, 1, __j);
+    tst |= tmp;
     return !tst;
   }
-  a1[0] = b1[0] = 0;
-  switch ((a.len & 7)) {
-  case 7:
-    ((uint8_t *)a1)[6] = a.buf[6];
-    ((uint8_t *)b1)[6] = b.buf[6];
-    /* fall through */
-  case 6:
-    ((uint8_t *)a1)[5] = a.buf[5];
-    ((uint8_t *)b1)[5] = b.buf[5];
-    /* fall through */
-  case 5:
-    ((uint8_t *)a1)[4] = a.buf[4];
-    ((uint8_t *)b1)[4] = b.buf[4];
-    /* fall through */
-  case 4:
-    ((uint8_t *)a1)[3] = a.buf[3];
-    ((uint8_t *)b1)[3] = b.buf[3];
-    /* fall through */
-  case 3:
-    ((uint8_t *)a1)[2] = a.buf[2];
-    ((uint8_t *)b1)[2] = b.buf[2];
-    /* fall through */
-  case 2:
-    ((uint8_t *)a1)[1] = a.buf[1];
-    ((uint8_t *)b1)[1] = b.buf[1];
-    /* fall through */
-  case 1:
-    ((uint8_t *)a1)[0] = a.buf[0];
-    ((uint8_t *)b1)[0] = b.buf[0];
-    /* fall through */
+  if ((a.len & 4)) {
+    const size_t last = ((a.len & 7) - 4);
+    uint64_t tst = 0, btmp1, btmp2;
+    tst = ((uint64_t)(fio_buf2u32u(a.buf) ^ (btmp1 = fio_buf2u32u(b.buf)))
+           << 32) |
+          (fio_buf2u32u(a.buf + last) ^ (btmp2 = fio_buf2u32u(b.buf + last)));
+    fio___buf_is_ieq_select_loop(tst, ((btmp1 << 32) | btmp2), 1, __j);
+    return !tst;
   }
-  a1[0] ^= b1[0];
-  fio___buf_is_ieq_select_loop(1);
-  tst = a1[0];
-  return !tst;
+  {
+    uint64_t a1 = 0, b2 = 0;
+    switch ((a.len & 3)) {
+    case 3:
+      a1 |= (((uint64_t)(uint8_t)a.buf[2]) << 16);
+      b2 |= (((uint64_t)(uint8_t)b.buf[2]) << 16); /* fall through */
+    case 2:
+      a1 |= (((uint64_t)(uint8_t)a.buf[1]) << 8);
+      b2 |= (((uint64_t)(uint8_t)b.buf[1]) << 8); /* fall through */
+    case 1:
+      a1 |= (uint64_t)(uint8_t)a.buf[0];
+      b2 |= (uint64_t)(uint8_t)b.buf[0]; /* fall through */
+    }
+    a1 ^= b2;
+    fio___buf_is_ieq_select_loop(a1, b2, 1, __j);
+    return !a1;
+  }
 #undef fio___buf_is_ieq_select_loop
 }
 

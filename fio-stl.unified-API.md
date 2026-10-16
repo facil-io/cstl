@@ -485,7 +485,7 @@ _Symbol type:_ `macro`
 #### `FIO_VERSION_PATCH`
 
 ```c
-#define FIO_VERSION_PATCH 1
+#define FIO_VERSION_PATCH 2
 ```
 
 PATCH version: Bug fixes, minor features may be added.
