@@ -189,9 +189,9 @@ static void exact_bench(size_t len, size_t mismatch, size_t iterations) {
   }
   qsort(times[0], REPEATS, sizeof times[0][0], cmp_u64);
   qsort(times[1], REPEATS, sizeof times[1][0], cmp_u64);
-  printf("%5zu %-6s %9llu %9llu %6.2fx\n", len,
+  printf("%5zu %-6s %9zu %21llu %11llu %6.2fx\n", len,
          mismatch == len ? "equal" : mismatch == 0 ? "first" :
-         mismatch == len - 1 ? "last" : "middle",
+         mismatch == len - 1 ? "last" : "middle", iterations,
          (unsigned long long)times[0][REPEATS / 2],
          (unsigned long long)times[1][REPEATS / 2],
          (double)times[1][REPEATS / 2] / (double)times[0][REPEATS / 2]);
@@ -264,10 +264,12 @@ int main(void) {
     if (n > 1) bench(n, n - 1);
   }
   puts("\nExact buffer-info equality: fio_buf_info_is_eq vs " BENCH_MEMCMP_NAME);
-  puts("Times in microseconds; ratio = comparator time / fio_buf_info_is_eq time (>1 favors fio_buf_info_is_eq).");
-  printf("bytes case   fio_buf_info_is_eq_us %s_us %s/fio_buf_info_is_eq (median of %d, 2 warmups)\n",
-         BENCH_MEMCMP_NAME, BENCH_MEMCMP_NAME, REPEATS);
   exact_correctness();
+  puts("fio_buf_info_is_eq benchmarks: times in microseconds, median of 7 runs after 2 warmups.");
+  puts("Ratio = comparator time / fio_buf_info_is_eq time (>1 favors fio_buf_info_is_eq).");
+  printf("bytes case   calls/run  fio_buf_info_is_eq_us  %s_us  %s/eq\n",
+         BENCH_MEMCMP_NAME, BENCH_MEMCMP_NAME);
+  fflush(stdout);
   const size_t exact_lengths[] = {1, 7, 8, 9, 31, 32, 33, 127, 128, 129,
                                   1023, 1024, 1025};
   for (size_t k = 0; k < sizeof exact_lengths / sizeof exact_lengths[0]; ++k) {
