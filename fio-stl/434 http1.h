@@ -416,7 +416,7 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
     fio_io_write2(c->io,
                   .buf = (char *)fio_http_dup(h),
                   .len = buf.len,
-                  .offset = (size_t)((char *)h - buf.buf),
+                  .offset = (size_t)(buf.buf - (char *)h),
                   .dealloc = (void (*)(void *))fio_http_free);
   } else {
     fio_io_write2(c->io,

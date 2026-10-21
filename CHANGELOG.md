@@ -1,10 +1,23 @@
 # Change Log
 
-### Unreleased
+### 0.8.2 - Unreleased
+
+**Security**: (`ipc`) cluster peers must complete the UUID handshake before any other message is handled. Messages sent before the handshake are rejected. A peer is refused when its UUID is zero, equals this instance's UUID, or was already connected. Each instance now draws a non-zero UUID at startup.
+
+**Fix**: (`http`) `fio_http_body_read` overflow protection when a caller passes a very large length.
+
+**Fix**: (`http1` client) the offset into the request header buffer was calculated backwards when sending an HTTP/1 request.
+
+**Fix**: (`ipc`) periodic UDP discovery broadcasts ran only once after startup, because `repetitions = 0` was treated as a single run. Broadcasts now repeat every 4–5 seconds, with jitter.
+
+**API**: (`http`) added case-insensitive method tests for `HEAD`, `OPTIONS`, `CONNECT`, `TRACE`, `COPY`, `MOVE`, `LOCK`, `UNLOCK`, `SEARCH`, `MKCOL`, `PROPFIND`, and `PROPPATCH`: `fio_http_method_is_head`, `fio_http_method_is_options`, and so on.
+
+**API**: (`core`) `fio_buf_info_is_eq` provides a safe `!memcmp` alternative. `FIO_BUF_INFO_IS_EQ` and `FIO_STR_INFO_IS_EQ` call it when `FIO_MEMALT` is set.
+
+**API**: (`ipc`) added `fio_ipc_cluster_on_peer` to receive cluster peer attach and detach events. Register up to 32 subscribers on the master before `fio_io_start`. Callbacks borrow each event; call `fio_ipc_dup` to keep one. An attached event holds a reference to the peer IO, and its data holds the peer UUID.
 
 
-
-### v.0.8.1 - 2026-10-15
+### 0.8.1 - 2026-10-15
 
 **API**: (`http`) added case-insensitive method helpers for `GET`, `PUT`, `POST`, `PATCH`, `QUERY`, and `DELETE`: `fio_http_method_is_get`, `fio_http_method_is_put`, `fio_http_method_is_post`, `fio_http_method_is_patch`, `fio_http_method_is_query`, and `fio_http_method_is_delete`.
 
@@ -18,7 +31,7 @@
 
 
 
-### v.0.8.0 - 2026-10-12
+### 0.8.0 - 2026-10-12
 
 This release includes the fixes and API changes below, plus the changes recorded under the earlier `edge` and `v.0.8.0.rc.01` entries. The `edge` tag remains a rolling prerelease, not the numbered 0.8.0 release.
 
@@ -137,7 +150,7 @@ This release includes the fixes and API changes below, plus the changes recorded
   - `fio_x509_verify_chain(const fio_ubuf_info_s *certs, size_t count, ...)`
   - Views are stored, not copied — pointed-to data must outlive the context.
 
-### v.0.8.0.rc.01 (2026-01-19)
+### 0.8.0.rc.01 (2026-01-19)
 
 **Breaking Change**: (`pubsub`) Complete rewrite of the Pub/Sub module with a new IPC-first architecture.
 
@@ -182,7 +195,7 @@ The Pub/Sub module has been completely rewritten to use the IPC module (`FIO_IPC
 
 ---
 
-### v.0.8.0.beta4
+### 0.8.0.beta4
 
 - The 0.8.x versions is a **total rewrite** with a **new API**, totally revised and redesigned. Why?
 

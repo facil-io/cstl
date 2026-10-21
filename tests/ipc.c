@@ -349,9 +349,7 @@ static void test_ipc_error_handling(void) {
   }
 
   /* fio_ipc_free with NULL (should be safe no-op) */
-  {
-    fio_ipc_free(NULL);
-  }
+  { fio_ipc_free(NULL); }
 }
 
 /* *****************************************************************************
@@ -873,10 +871,9 @@ static void test_ipc_multi_buffer_data(void) {
                  .on_reply = NULL,
                  .on_done = NULL,
                  .udata = NULL,
-                 .data =
-                     FIO_IPC_DATA(FIO_BUF_INFO1((char *)part1),
-                                  FIO_BUF_INFO0,
-                                  FIO_BUF_INFO1((char *)part2)));
+                 .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)part1),
+                                      FIO_BUF_INFO0,
+                                      FIO_BUF_INFO1((char *)part2)));
 
     fio_queue_perform_all(fio_io_queue());
 
@@ -1420,8 +1417,9 @@ static void test_ipc_udp_discovery_message(void) {
 
     msg.timestamp = fio_lton64(fio_io_last_tick() - 60000);
 
-    fprintf(stderr,
-            "      (expect SECURITY message about UDP discovery time window)\n");
+    fprintf(
+        stderr,
+        "      (expect SECURITY message about UDP discovery time window)\n");
     int result = fio___ipc_udp_discovery_validate(&msg);
     FIO_ASSERT(result == -1,
                "Old discovery message should fail time window validation");
@@ -1431,6 +1429,190 @@ static void test_ipc_udp_discovery_message(void) {
 /* *****************************************************************************
 Main entry point
 ***************************************************************************** */
+
+/* Peer lifecycle: exercise authenticated RPC handshake and connection close. */
+static size_t fio___test_lifecycle_attached[2];
+static size_t fio___test_lifecycle_detached[2];
+static fio_u128 fio___test_lifecycle_uuid;
+static fio_ipc_s *fio___test_lifecycle_saved;
+static fio_io_s *fio___test_lifecycle_io;
+static size_t fio___test_lifecycle_opcode_calls;
+
+static void fio___test_lifecycle_opcode(fio_ipc_s *ipc) {
+  ++fio___test_lifecycle_opcode_calls;
+  FIO_ASSERT(ipc->opcode == 0xCC11U && ipc->len == 3 &&
+                 FIO_MEMCMP(ipc->data, "ack", 3) == 0,
+             "ordinary opcode request reaches application handler");
+}
+static void fio___test_lifecycle_on_attached(fio_ipc_s *event) {
+  size_t *count = (size_t *)event->udata;
+  ++*count;
+  FIO_ASSERT(event->len == 16 && event->from == fio___test_lifecycle_io,
+             "attached event must contain UUID and originating IO");
+  FIO_ASSERT(!FIO_IPC_FLAG_TEST(event, FIO_IPC_FLAG_OPCODE) &&
+                 !FIO_IPC_FLAG_TEST(event, FIO_IPC_FLAG_REPLY) &&
+                 FIO_MEMCMP(event->data, fio___test_lifecycle_uuid.u8, 16) == 0,
+             "synthetic event must not advertise an opcode or reply");
+  if (count == &fio___test_lifecycle_attached[0]) {
+    fio___test_lifecycle_saved = fio_ipc_dup(event);
+    fio_ipc_s *msg =
+        fio_ipc_new(.cluster = 1,
+                    .opcode = 0xCC11U,
+                    .data = FIO_IPC_DATA(FIO_BUF_INFO2((char *)"ack", 3)));
+    FIO_ASSERT(msg && FIO_IPC_FLAG_TEST(msg, FIO_IPC_FLAG_OPCODE) &&
+                   !FIO_IPC_FLAG_TEST(msg, FIO_IPC_FLAG_REPLY),
+               "attached callback authors normal opcode request");
+    fio_ipc_send_to(event->from, msg);
+  }
+}
+static void fio___test_lifecycle_on_detached(fio_ipc_s *event) {
+  size_t *counter = (size_t *)event->udata;
+  size_t index = (counter == &fio___test_lifecycle_attached[0]) ? 0 : 1;
+  ++fio___test_lifecycle_detached[index];
+  FIO_ASSERT(event->len == 16 && event->from == NULL &&
+                 FIO_MEMCMP(event->data, fio___test_lifecycle_uuid.u8, 16) == 0,
+             "detached event contains UUID but no connection");
+}
+
+static fio_ipc_s *fio___test_lifecycle_hello(const fio_u128 *uuid) {
+  fio_ipc_s *msg = fio_ipc_new(.cluster = 1, .opcode = 0xFFFFFFFFU);
+  FIO_ASSERT(msg != NULL, "allocate hello");
+  fio_memcpy8((char *)(void *)&msg->on_reply, uuid->u8);
+  fio_memcpy8((char *)(void *)&msg->on_done, uuid->u8 + 8);
+  fio_ipc_encrypt(msg);
+  return msg;
+}
+
+static void test_ipc_cluster_lifecycle(void) {
+  FIO_ASSERT(fio_ipc_cluster_on_peer(.udata = NULL) == -1,
+             "empty subscription rejected");
+  FIO_ASSERT(!FIO___IPC.on_peer_count,
+             "invalid subscription leaves registry unchanged");
+  for (size_t i = 0; i < 2; ++i)
+    FIO_ASSERT(!fio_ipc_cluster_on_peer(
+                       .on_attached = fio___test_lifecycle_on_attached,
+                       .on_detached = fio___test_lifecycle_on_detached,
+                       .udata = &fio___test_lifecycle_attached[i]),
+               "register independent subscriber");
+  for (size_t i = 2; i < FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS; ++i)
+    FIO_ASSERT(
+        !fio_ipc_cluster_on_peer(.on_detached =
+                                     fio___test_lifecycle_on_detached,
+                                 .udata = &fio___test_lifecycle_detached[1]),
+        "append subscriber until capacity");
+  FIO_ASSERT(fio_ipc_cluster_on_peer(.on_attached =
+                                         fio___test_lifecycle_on_attached) ==
+                 -1,
+             "full subscriber list rejected without replacement");
+  FIO___IPC.on_peer_count = 2; /* discard test-only subscribers */
+  FIO_ASSERT(!fio_ipc_opcode_register(.opcode = 0xCC11U,
+                                      .call = fio___test_lifecycle_opcode),
+             "register ordinary application opcode");
+
+  fio___test_lifecycle_uuid =
+      fio_u128_init64(0x1234567890ABCDEFULL, 0xFEDCBA0987654321ULL);
+  fio_socket_i fds[2];
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create peer sockets");
+  fio___test_lifecycle_io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
+  FIO_ASSERT(fio___test_lifecycle_io != NULL, "attach RPC peer");
+  fio_queue_perform_all(fio_io_queue());
+  fio___ipc_on_rpc_master(
+      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
+      fio_io_dup(fio___test_lifecycle_io));
+  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                 fio___test_lifecycle_attached[1] == 1 &&
+                 !fio___test_lifecycle_detached[0],
+             "both subscribers receive valid handshake");
+  FIO_ASSERT(fio___test_lifecycle_saved &&
+                 fio___test_lifecycle_saved->from == fio___test_lifecycle_io &&
+                 FIO_MEMCMP(fio___test_lifecycle_saved->data,
+                            fio___test_lifecycle_uuid.u8,
+                            16) == 0,
+             "dup retains UUID and IO, not an outgoing message");
+  fio_queue_perform_all(fio_io_queue());
+  fio_ipc_s *request =
+      fio_ipc_new(.cluster = 1,
+                  .opcode = 0xCC11U,
+                  .data = FIO_IPC_DATA(FIO_BUF_INFO2((char *)"ack", 3)));
+  FIO_ASSERT(request != NULL, "allocate ordinary request");
+  fio_ipc_encrypt(request);
+  fio___ipc_on_rpc_master(request, fio_io_dup(fio___test_lifecycle_io));
+  FIO_ASSERT(fio___test_lifecycle_opcode_calls == 1,
+             "normal opcode request dispatches to application handler");
+  fio_queue_perform_all(fio_io_queue());
+
+  /* Duplicate handshake closes IO; retained event delays close notification. */
+  fio___ipc_on_rpc_master(
+      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
+      fio_io_dup(fio___test_lifecycle_io));
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                 fio___test_lifecycle_attached[1] == 1 &&
+                 !fio___test_lifecycle_detached[0] &&
+                 !fio___test_lifecycle_detached[1],
+             "retained event pins IO and delays both detach notifications");
+  fio_ipc_free(fio___test_lifecycle_saved);
+  fio___test_lifecycle_saved = NULL;
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_lifecycle_detached[0] == 1 &&
+                 fio___test_lifecycle_detached[1] == 1,
+             "both detached callbacks arrive after retained event freed");
+  fio_sock_close(fds[1]);
+
+  /* Rejected self-identity neither announces nor detaches. */
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create rejected peer sockets");
+  fio___test_lifecycle_io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
+  fio_queue_perform_all(fio_io_queue());
+  fio___ipc_on_rpc_master(fio___test_lifecycle_hello(&FIO___IPC.uuid),
+                          fio_io_dup(fio___test_lifecycle_io));
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                 fio___test_lifecycle_detached[1] == 1,
+             "failed handshake has no lifecycle callbacks");
+  fio_sock_close(fds[1]);
+
+  /* An ordinary RPC before authentication cannot trigger peer callbacks. */
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create pre-handshake sockets");
+  fio___test_lifecycle_io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
+  fio_queue_perform_all(fio_io_queue());
+  fio_ipc_s *premature = fio_ipc_new(.cluster = 1, .opcode = 0xCC11U);
+  FIO_ASSERT(premature != NULL, "allocate premature RPC");
+  fio_ipc_encrypt(premature);
+  fio___ipc_on_rpc_master(premature, fio_io_dup(fio___test_lifecycle_io));
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                 fio___test_lifecycle_detached[0] == 1 &&
+                 fio___test_lifecycle_opcode_calls == 1,
+             "pre-handshake RPC never dispatches or announces peer");
+  fio_sock_close(fds[1]);
+
+  /* Reconnect with same UUID gets a fresh pair of notifications. */
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create reconnected peer sockets");
+  fio___test_lifecycle_io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
+  fio_queue_perform_all(fio_io_queue());
+  fio___ipc_on_rpc_master(
+      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
+      fio_io_dup(fio___test_lifecycle_io));
+  FIO_ASSERT(fio___test_lifecycle_attached[0] == 2 &&
+                 fio___test_lifecycle_attached[1] == 2,
+             "reconnected peer announces to both subscribers");
+  fio_ipc_free(fio___test_lifecycle_saved);
+  fio___test_lifecycle_saved = NULL;
+  fio_queue_perform_all(fio_io_queue());
+  fio_io_close_now(fio___test_lifecycle_io);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_lifecycle_detached[0] == 2 &&
+                 fio___test_lifecycle_detached[1] == 2,
+             "reconnected peer detaches from both subscribers");
+  fio_sock_close(fds[1]);
+  FIO_MEMSET(FIO___IPC.on_peer, 0, sizeof(FIO___IPC.on_peer));
+  FIO___IPC.on_peer_count = 0; /* test isolation */
+  fio_ipc_opcode_register(.opcode = 0xCC11U, .call = NULL);
+}
 
 int main(void) {
   fprintf(stderr, "=== IPC correctness tests ===\n");
@@ -1466,6 +1648,7 @@ int main(void) {
   test_ipc_rpc_encryption();
   test_ipc_rpc_filter();
   test_ipc_udp_discovery_message();
+  test_ipc_cluster_lifecycle();
 
   fprintf(stderr, "=== IPC correctness tests passed ===\n");
   return 0;

@@ -17878,39 +17878,17 @@ int main(void) {
 #include FIO_INCLUDE_FILE
 ```
 
-IPC is the messaging backbone of the facil.io worker/master model. Workers
-fork from a master process. The master keeps listeners, manages state, and
-handles anything that needs a single authoritative view of the world. Workers
-handle client connections. IPC bridges the two: a worker sends a message to
-the master (or to every process in the cluster), the master executes it and
-optionally streams replies back.
+IPC is the messaging backbone of the facil.io worker/master model. Workers fork from a master process. The master keeps listeners, manages state, and handles anything that needs a single authoritative view of the world. Workers handle client connections. IPC bridges the two: a worker sends a message to the master (or to every process in the cluster), the master executes it and optionally streams replies back.
 
-All messages are encrypted in transit with ChaCha20-Poly1305 AEAD, keyed from
-the process secret. Local IPC runs over a Unix socket (or auto-generated TCP
-socket). Multi-machine RPC extends the same protocol over TCP with optional
-UDP peer discovery.
+IPC supports local messages and, when configured with a shared secret, messages between cluster peers. Register op-codes for messages sent between machines; do not send function pointers across machines.
 
-See [./400 io-overview.md](./400 io-overview.md) for where IPC sits in the
-full IO stack.
+See [./400 io-overview.md](./400 io-overview.md) for where IPC sits in the full IO stack.
 
 ---
 
 ## Worker/Master Model
 
-```
-master process
- ├── owns IPC listener socket
- ├── executes messages sent by workers
- ├── forwards cluster/broadcast messages to other machines
- └── worker process × N
-      ├── each has its own IO reactor loop
-      ├── connects back to master via IPC socket on startup
-      └── sends fio_ipc_* messages to reach master or peers
-```
-
-The master is always the hub. Workers can only talk *through* the master —
-there is no direct worker-to-worker channel. On shutdown the master sends a
-local broadcast instructing all workers to stop.
+Workers send local messages through the master. Use `fio_ipc_call` to reach the master, or `fio_ipc_local` to reach the master and local workers. For cluster peers, use `fio_ipc_cluster` or `fio_ipc_broadcast`.
 
 ---
 
@@ -17931,28 +17909,24 @@ Define before including the header to override defaults.
 
 ```c
 typedef struct fio_ipc_s {
-  fio_io_s *from;               /* originating IO (set by receiver; not transmitted) */
-  /* -- wire format starts here -- */
-  uint32_t len;                 /* data[] byte count            (AAD - authenticated) */
-  uint16_t flags;               /* user-settable flags           (AAD - authenticated) */
-  uint16_t routing_flags;       /* internal routing              (AAD - authenticated) */
-  uint64_t timestamp;           /* millisecond tick — part of nonce (unencrypted)    */
-  uint64_t id;                  /* random 64-bit value — part of nonce (unencrypted) */
+  fio_io_s *from; /* originating IO on receipt */
+  uint32_t len;   /* payload length */
+  uint16_t flags; /* application flags */
+  uint16_t routing_flags; /* routing state; do not edit directly */
+  uint64_t timestamp; /* message timestamp */
+  uint64_t id;        /* message ID */
   union {
-    void (*call)(struct fio_ipc_s *); /* function to call (local IPC; encrypted)  */
-    uint32_t opcode;                  /* registered op-code (cluster RPC; encrypted)*/
+    void (*call)(struct fio_ipc_s *); /* local handler */
+    uint32_t opcode;                  /* registered handler ID */
   };
-  void (*on_reply)(struct fio_ipc_s *); /* run on caller when reply arrives (encrypted) */
-  void (*on_done)(struct fio_ipc_s *);  /* run on caller when last reply arrives (encrypted) */
-  void *udata;                          /* caller-side opaque pointer (encrypted) */
-  char data[];                          /* payload + 16-byte Poly1305 MAC at tail (encrypted) */
+  void (*on_reply)(struct fio_ipc_s *); /* reply handler */
+  void (*on_done)(struct fio_ipc_s *);  /* final reply handler */
+  void *udata; /* caller context */
+  char data[]; /* payload; read only len bytes */
 } fio_ipc_s;
 ```
 
-Messages are reference-counted. Everything from `call` onward (including the
-payload) is encrypted on the wire. `from`, `timestamp`, and `id` are unencrypted
-and unauthenticated (they form the nonce). `len`, `flags`, and `routing_flags`
-are unencrypted but authenticated via AEAD.
+Messages are reference-counted. In callbacks, `data` contains `len` payload bytes; do not assume it is null-terminated. Treat routing state as read-only.
 
 ### `fio_ipc_args_s` — construction arguments
 
@@ -18008,8 +17982,7 @@ typedef struct {
   (fio_buf_info_s[]){ __VA_ARGS__, { .len = ((size_t)-1) } }
 ```
 
-Composes multiple buffers into a single message without intermediate
-allocation. Iteration stops at the first entry with `len == (size_t)-1`.
+Composes multiple buffers into a single message without intermediate allocation. Iteration stops at the first entry with `len == (size_t)-1`.
 
 ```c
 uint32_t seq = 42;
@@ -18026,8 +17999,7 @@ fio_ipc_call(.call = my_handler,
 
 ## Delivery Macros
 
-All four macros call `fio_ipc_new(...)` then `fio_ipc_send(...)`. They accept
-named fields from `fio_ipc_args_s`.
+All four macros call `fio_ipc_new(...)` then `fio_ipc_send(...)`. They accept named fields from `fio_ipc_args_s`.
 
 | Macro | Delivered to |
 |-------|-------------|
@@ -18047,11 +18019,9 @@ named fields from `fio_ipc_args_s`.
 #define fio_ipc_broadcast(...) fio_ipc_send(fio_ipc_new(.workers = 1, .cluster = 1, __VA_ARGS__))
 ```
 
-`fio_ipc_cluster` and `fio_ipc_broadcast` require an `opcode` (not a function
-pointer) because function pointers are meaningless across machine boundaries.
+`fio_ipc_cluster` and `fio_ipc_broadcast` require an `opcode` (not a function pointer) because function pointers are meaningless across machine boundaries.
 
-Use `.exclude = FIO_IPC_EXCLUDE_SELF` to skip the calling process when
-broadcasting locally.
+Use `.exclude = FIO_IPC_EXCLUDE_SELF` to skip the calling process when broadcasting locally.
 
 **`FIO_IPC_EXCLUDE_SELF`**
 
@@ -18059,8 +18029,7 @@ broadcasting locally.
 #define FIO_IPC_EXCLUDE_SELF ((fio_io_s *)((char *)-1LL))
 ```
 
-Pass as `.exclude` in `fio_ipc_args_s`, or set `ipc->from = FIO_IPC_EXCLUDE_SELF`
-before calling `fio_ipc_send`.
+Pass as `.exclude` in `fio_ipc_args_s`, or set `ipc->from = FIO_IPC_EXCLUDE_SELF` before calling `fio_ipc_send`.
 
 ---
 
@@ -18130,9 +18099,7 @@ SFUNC void fio_ipc_reply(fio_ipc_reply_args_s args);
   fio_ipc_reply((fio_ipc_reply_args_s){ .ipc = (r), __VA_ARGS__ })
 ```
 
-Send one or more replies from the master back to the caller. Set `.done = 1`
-on the final reply to trigger the caller's `on_done` callback. Replies inherit
-`call`, `on_reply`, `on_done`, and `udata` from the original request.
+Send one or more replies from the master back to the caller. Set `.done = 1` on the final reply to trigger the caller's `on_done` callback. Replies inherit `call`, `on_reply`, `on_done`, and `udata` from the original request.
 
 Streaming replies:
 
@@ -18152,8 +18119,7 @@ void stream_handler(fio_ipc_s *msg) {
 
 ## Op-Code Registration
 
-Op-codes let you perform cluster-wide RPC without transmitting function
-pointers (which differ per binary). Register before `fio_io_start`.
+Op-codes select handlers for cluster messages. Register them before `fio_io_start` on every participating process.
 
 ```c
 SFUNC int fio_ipc_opcode_register(fio_ipc_opcode_s opcode);
@@ -18166,7 +18132,7 @@ SFUNC const fio_ipc_opcode_s *fio_ipc_opcode(uint32_t opcode);
 ```
 
 - Op-codes must be non-zero `uint32_t` values.
-- Values `>= 0xFF000000` are reserved for internal use.
+- Values `>= 0xFF000000` are reserved; choose a lower value.
 - Pass `call = NULL` to unregister.
 - Must be called before `fio_io_start()` (not thread-safe after that).
 - Returns 0 on success, -1 on error.
@@ -18185,8 +18151,7 @@ fio_ipc_opcode_register(.opcode = OP_SYNC, .call = NULL);
 
 ## IPC URL
 
-The IPC socket URL is auto-generated at startup (`unix://fio_tmp_<rand>.sock`
-in `$TMPDIR`). Override before `fio_io_start` on the master:
+The IPC URL is generated at startup. The master can override it before `fio_io_start`:
 
 ```c
 /** Returns current IPC socket URL. */
@@ -18225,14 +18190,59 @@ SFUNC void fio_ipc_cluster_connect(const char *url);
 SFUNC uint16_t fio_ipc_cluster_port(void);
 ```
 
-- Call `fio_ipc_cluster_listen` from the master before or after
-  `fio_io_start`. It opens a TCP listener and a UDP broadcast socket on the
-  same port for automatic peer discovery.
-- Uses the environment's shared secret for encryption (ChaCha20-Poly1305,
-  no forward secrecy). Set `SECRET=<shared-key>` across all instances.
+### Cluster Peer Connection Callbacks
+
+#### `FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS`
+
+```c
+#define FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS 32
+```
+
+At most 32 peer lifecycle callbacks can be registered per process. Further registrations return `-1`.
+
+#### `fio_ipc_cluster_on_peer_s` and `fio_ipc_cluster_on_peer`
+
+```c
+typedef struct fio_ipc_cluster_on_peer_s {
+  void (*on_attached)(fio_ipc_s *event); /* optional */
+  void (*on_detached)(fio_ipc_s *event); /* optional */
+  void *udata; /* callback context; borrowed */
+} fio_ipc_cluster_on_peer_s;
+
+SFUNC int fio_ipc_cluster_on_peer(fio_ipc_cluster_on_peer_s args);
+#define fio_ipc_cluster_on_peer(...)                                           \
+  fio_ipc_cluster_on_peer((fio_ipc_cluster_on_peer_s){__VA_ARGS__})
+```
+
+Call on the master before `fio_io_start`. Each call adds a subscriber; at least one callback is required. `udata` may be NULL and remains caller-owned. Keep it valid while callbacks can run. Returns `0` on success, or `-1` for invalid callbacks, a worker, running IO, or full capacity. Registration is not thread-safe. There is no unsubscribe API.
+
+Callbacks borrow a `fio_ipc_s` event whose `data` contains the peer UUID (`event->len == 16`). During `on_attached`, `event->from` identifies the connected peer. During `on_detached`, it is `NULL`. To retain an event beyond the callback, use `fio_ipc_dup` and later `fio_ipc_free`.
+
+**Note:** To send to an attached peer, create a new opcode message and pass it with `event->from` to `fio_ipc_send_to` during the callback. The send takes ownership of the new message. Do not send or reply to the event itself. Keeping an attached event beyond the callback may delay its detach notification.
+
+```c
+#define PEER_HELLO_OP 42
+static void peer_hello(fio_ipc_s *message) { (void)message; }
+static void peer_attached(fio_ipc_s *event) {
+  fio_ipc_s *message = fio_ipc_new(
+      .cluster = 1, .opcode = PEER_HELLO_OP,
+      .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"hello")));
+  if (message)
+    fio_ipc_send_to(event->from, message);
+}
+static void peer_detached(fio_ipc_s *event) { (void)event; }
+/* On each peer before fio_io_start (illustrative setup statements): */
+if (fio_ipc_opcode_register(.opcode = PEER_HELLO_OP, .call = peer_hello) ||
+    fio_ipc_cluster_on_peer(.on_attached = peer_attached,
+                            .on_detached = peer_detached)) {
+  /* handle registration failure before starting IO */
+}
+```
+
+- Call `fio_ipc_cluster_listen` from the master before or after `fio_io_start` to accept and discover peers.
+- Set the same `SECRET` environment variable on all instances. Cluster encryption does not provide forward secrecy; rotate the secret by restarting instances.
 - All instances receive all `cluster` / `broadcast` messages.
-- `fio_ipc_cluster_connect` lets you manually reach peers on other subnets
-  where UDP broadcast doesn't reach.
+- `fio_ipc_cluster_connect` lets you manually reach peers on other subnets where UDP broadcast doesn't reach.
 
 ```c
 /* Typical setup */
@@ -18245,19 +18255,17 @@ fio_io_start(4);
 
 ## Core Lifetime API
 
-These are used internally by the delivery macros and are available for
-advanced use (e.g., constructing messages for local execution, or async
-message handling).
+Use these functions to construct, send, and retain messages when the delivery macros do not fit your use case.
 
 ```c
 /** Create a message without sending it. */
 SFUNC fio_ipc_s *fio_ipc_new(fio_ipc_args_s args);
 #define fio_ipc_new(...) fio_ipc_new((fio_ipc_args_s){ __VA_ARGS__ })
 
-/** Encrypt, route, and free the message. Takes ownership. */
+/** Send the message according to its delivery options. Takes ownership. */
 SFUNC void fio_ipc_send(fio_ipc_s *ipc);
 
-/** Encrypt and send directly to a specific IO. Takes ownership. */
+/** Send directly to a specific IO. Takes ownership. */
 SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *ipc);
 
 /** Increment reference count. */
@@ -18293,29 +18301,20 @@ void async_done(fio_ipc_s *msg) {
 
 ---
 
-## Encryption
+## Message encryption (advanced)
 
 ```c
-/** Encrypt a message in-place (idempotent). Called automatically by fio_ipc_send. */
 SFUNC void fio_ipc_encrypt(fio_ipc_s *m);
-
-/** Decrypt a message in-place. Returns 0 on success, non-zero on MAC failure. */
 FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m);
 ```
 
-ChaCha20-Poly1305 AEAD. Key derived from the shared process secret plus the
-message's `id` and `timestamp` fields (which form the nonce). `len`, `flags`,
-and `routing_flags` are authenticated but unencrypted. Everything else
-(`call`/`opcode`, `on_reply`, `on_done`, `udata`, `data`) is encrypted.
-
-Decryption failure logs a security warning and the connection is closed.
-Only processes sharing the same secret can communicate.
+Sending encrypts messages automatically. `fio_ipc_encrypt` encrypts a message in place; `fio_ipc_decrypt` returns `0` on success or nonzero if authentication fails. Most applications should use the delivery functions instead.
 
 ---
 
 ## Routing Flags
 
-`routing_flags` is internal — do not edit manually. Available for inspection:
+The routing flags are defined in the header for advanced use. Prefer the delivery macros and `.flags` for application data. Do not modify `routing_flags` on a received message:
 
 ```c
 #define FIO_IPC_FLAG_ENCRYPTED  ((uint16_t)1 << 0) /* message is encrypted */
@@ -18329,21 +18328,6 @@ Only processes sharing the same secret can communicate.
 /** Test a flag: returns flag value if set, 0 otherwise. */
 #define FIO_IPC_FLAG_TEST(msg, flag) (((msg)->routing_flags & (flag)) == (flag))
 ```
-
----
-
-## Keepalive
-
-IPC and cluster connections use an automatic ping/pong protocol. On the first
-timeout the system sends a ping; if no pong arrives before the next timeout
-the connection is closed. Ping frames are never delivered to user callbacks.
-
-Default timeouts (set in the protocol initializer):
-
-| Connection type | Timeout |
-|-----------------|---------|
-| Local IPC (master ↔ worker) | ~6 minutes |
-| Cluster RPC (machine ↔ machine) | ~55 seconds |
 
 ---
 
@@ -18366,6 +18350,8 @@ Default timeouts (set in the protocol initializer):
 - `fio_ipc_dup` / `fio_ipc_free` are thread-safe.
 - `fio_ipc_opcode_register` is **not** thread-safe after `fio_io_start`.
 - `fio_ipc_url_set` must be called on the master before `fio_io_start`.
+
+---
 # OpenSSL TLS Backend
 
 ```c

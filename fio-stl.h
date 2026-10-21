@@ -109210,6 +109210,32 @@ SFUNC void fio_ipc_cluster_connect(const char *url);
  * */
 SFUNC uint16_t fio_ipc_cluster_port(void);
 
+/* At most 32 independent lifecycle subscriptions per process. */
+#define FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS 32
+
+/** Lifecycle events are synthetic, reference-counted fio_ipc_s objects.
+ * data[0..15] contains the peer UUID in UDP-discovery byte order. The
+ * attached event owns a reference to the peer IO in event->from; the detached
+ * event has from == NULL. Never reply to or send an event itself. Instead,
+ * author a normal opcode message and fio_ipc_send_to(event->from, message)
+ * during on_attached. Callbacks borrow each event; fio_ipc_dup retains it.
+ * Retaining attached events may delay on_detached until their IO is freed.
+ * udata is borrowed and must outlive all callbacks using it.
+ */
+typedef struct fio_ipc_cluster_on_peer_s {
+  void (*on_attached)(fio_ipc_s *event); /* optional */
+  void (*on_detached)(fio_ipc_s *event); /* optional */
+  void *udata;                           /* callback context; borrowed */
+} fio_ipc_cluster_on_peer_s;
+
+/** Append a subscriber on the master before fio_io_start. At least one
+ * callback is required. Returns 0 on success, -1 for invalid callbacks,
+ * worker/running IO, or exhausted capacity. No partial registration occurs.
+ */
+SFUNC int fio_ipc_cluster_on_peer(fio_ipc_cluster_on_peer_s args);
+#define fio_ipc_cluster_on_peer(...)                                           \
+  fio_ipc_cluster_on_peer((fio_ipc_cluster_on_peer_s){__VA_ARGS__})
+
 /* *****************************************************************************
 IPC Flags - Used for message routing, settable in routing_flags
 
@@ -109376,6 +109402,8 @@ static struct {
   fio___ipc_cluster_filter_s received;  /* messages recently received */
   fio___ipc_cluster_filter_s peers;     /* connected peers */
   fio_u128 uuid;                        /* instance ID peers */
+  fio_ipc_cluster_on_peer_s on_peer[FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS];
+  size_t on_peer_count;
   uint16_t cluster_port;                /* last port number in cluster_listen */
   char ipc_url[FIO_IPC_URL_MAX_LENGTH]; /* IPC socket path */
 } FIO___IPC;
@@ -109905,11 +109933,12 @@ typedef struct {
   char buffer[];         /* FIO_IPC_BUFFER_LEN for small messages */
 } fio___ipc_parser_s;
 
-FIO_IFUNC fio_u128 *fio___ipc_cluster_uuid(fio_io_s *io) {
-  return (fio_u128 *)fio_io_buffer(io);
+/* The IO buffer need not have fio_u128's 16-byte alignment. */
+FIO_IFUNC uint8_t *fio___ipc_cluster_uuid(fio_io_s *io) {
+  return (uint8_t *)fio_io_buffer(io);
 }
 FIO_IFUNC fio___ipc_parser_s *fio___ipc_cluster_parser(fio_io_s *io) {
-  return (fio___ipc_parser_s *)(fio___ipc_cluster_uuid(io) + 1);
+  return (fio___ipc_parser_s *)(fio___ipc_cluster_uuid(io) + 16);
 }
 
 /** Get parser from IO buffer */
@@ -110070,30 +110099,70 @@ decrypt_error:
   fio___ipc_free(ipc);
 }
 
+/* Allocate a separate borrowed event per subscriber: retaining one event
+ * must not change another subscriber's callback context or ownership. */
+FIO_SFUNC void fio___ipc_lifecycle_emit(fio_io_s *io,
+                                        const fio_u128 *uuid,
+                                        bool attached) {
+  if (!fio_io_is_master())
+    return;
+  for (size_t i = 0; i < FIO___IPC.on_peer_count; ++i) {
+    const fio_ipc_cluster_on_peer_s *sub = &FIO___IPC.on_peer[i];
+    void (*fn)(fio_ipc_s *) = attached ? sub->on_attached : sub->on_detached;
+    if (!fn)
+      continue;
+    fio_ipc_s *event =
+        fio_ipc_new(.data = FIO_IPC_DATA(FIO_BUF_INFO2((char *)uuid->u8, 16)));
+    if (!event) {
+      FIO_LOG_ERROR("(%d) couldn't allocate IPC peer lifecycle event",
+                    fio_io_pid());
+      continue;
+    }
+    event->from = attached ? fio_io_dup(io) : NULL;
+    event->udata = sub->udata;
+    fn(event);
+    fio_ipc_free(event);
+  }
+}
+
+void fio_ipc_cluster_on_peer___(void); /* IDE marker */
+SFUNC int fio_ipc_cluster_on_peer FIO_NOOP(fio_ipc_cluster_on_peer_s args) {
+  if (!fio_io_is_master() || fio_io_is_running() ||
+      (!args.on_attached && !args.on_detached) ||
+      FIO___IPC.on_peer_count >= FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS)
+    return -1;
+  FIO___IPC.on_peer[FIO___IPC.on_peer_count++] = args;
+  return 0;
+}
+
 /** Wrapper that manages request vs response states */
+
 FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
   ipc->from = io_;
-  fio_u128 *uuid = fio_io_buffer(io_);
+  uint8_t *uuid = fio___ipc_cluster_uuid(io_);
   fio_u128 peer_uuid = {0};
+  fio_u128 old_uuid;
+  fio_memcpy16(old_uuid.u8, uuid);
 
   if (fio_ipc_decrypt(ipc))
     goto peer_error;
-  /* Handle internal ping/pong for cluster connections */
-  if (fio___ipc_handle_ping(ipc, fio___ipc_cluster_parser(io_)))
-    return;
   if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER) ||
       !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE))
     goto peer_error;
-
+  /* Nothing, not even a ping, is dispatched before a validated handshake. */
+  if (ipc->opcode == (uint32_t)0xFFFFFFFF)
+    goto uuid_msg;
+  if (!old_uuid.u64[0] && !old_uuid.u64[1])
+    goto peer_error;
   if (fio___ipc_cluster_filter_window(fio_ltole64(ipc->timestamp)) ||
       fio___ipc_cluster_filter(&FIO___IPC.received,
                                fio_ltole64(ipc->timestamp),
                                ipc->id))
     goto filtered;
-
-  if (ipc->opcode == (uint32_t)0xFFFFFFFF)
-    goto uuid_msg;
+  /* Handle internal ping/pong for established cluster connections. */
+  if (fio___ipc_handle_ping(ipc, fio___ipc_cluster_parser(io_)))
+    return;
 
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS)) {
     fio_ipc_send(ipc);
@@ -110103,8 +110172,15 @@ FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   return;
 
 uuid_msg:
-  if (uuid->u64[0] || uuid->u64[1])
-    goto peer_error; /* Already received UUID from this connection */
+  if (old_uuid.u64[0] || old_uuid.u64[1] || ipc->len ||
+      FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY) ||
+      FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_PING))
+    goto peer_error;
+  if (fio___ipc_cluster_filter_window(fio_ltole64(ipc->timestamp)) ||
+      fio___ipc_cluster_filter(&FIO___IPC.received,
+                               fio_ltole64(ipc->timestamp),
+                               ipc->id))
+    goto filtered;
   if (sizeof(ipc->on_reply) >= 8) {
     fio_memcpy8(&peer_uuid, (char *)(void *)(&ipc->on_reply));
     fio_memcpy8(&peer_uuid.u8[8], (char *)(void *)(&ipc->on_done));
@@ -110112,13 +110188,18 @@ uuid_msg:
     fio_memcpy4(&peer_uuid, (char *)(void *)(&ipc->on_reply));
     fio_memcpy4(&peer_uuid.u8[4], (char *)(void *)(&ipc->on_done));
   }
+  /* Reject self, zero and duplicate identities before announcing this peer. */
+  if (!peer_uuid.u64[0] || !peer_uuid.u64[1] ||
+      FIO_MEMCMP(peer_uuid.u8, FIO___IPC.uuid.u8, 16) == 0)
+    goto peer_error;
   /* test if we already connected to peer previously */
   if (fio___ipc_cluster_filter(&FIO___IPC.peers,
                                peer_uuid.u64[0],
                                peer_uuid.u64[1]))
     goto peer_error;
   /* set peer uuid */
-  *uuid = peer_uuid;
+  fio_memcpy16(uuid, peer_uuid.u8);
+  fio___ipc_lifecycle_emit(io_, &peer_uuid, true);
   fio___ipc_free(ipc);
   return;
 peer_error:
@@ -110450,12 +110531,12 @@ FIO_SFUNC void fio___ipc_udp_broadcast_task_done(void *io_, void *ignr_) {
 FIO_SFUNC void fio___ipc_udp_on_attach(fio_io_s *io) {
   /* Send initial broadcast */
   fio___ipc_udp_broadcast_hello(io);
-  /* Schedule periodic broadcasts (every 1-2 seconds with jitter) */
+  /* Schedule periodic broadcasts (every 4-5 seconds with jitter) */
   fio_io_run_every(.fn = fio___ipc_udp_broadcast_task,
                    .udata1 = fio_io_dup(io),
-                   .every = (uint32_t)(2048 | (1023 & FIO___IPC.uuid.u64[0])),
+                   .every = (uint32_t)(4096 | (1023 & FIO___IPC.uuid.u64[0])),
                    .on_finish = fio___ipc_udp_broadcast_task_done,
-                   .repetitions = 0); /* Repeat indefinitely */
+                   .repetitions = -1); /* Repeat indefinitely */
 }
 
 /** Called when UDP socket is closed */
@@ -110596,7 +110677,7 @@ FIO_ASSERT_STATIC((sizeof(void (*)(void *)) >= 4),
                   "function pointers MUST be 4 bytes or more");
 SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
   /* set peer UUID to zero and initialize parser */
-  *fio___ipc_cluster_uuid(io) = fio_u128_init64(0, 0);
+  FIO_MEMSET(fio___ipc_cluster_uuid(io), 0, 16);
   fio___ipc_parser_init(fio___ipc_cluster_parser(io));
   /* inform peer about our UUID */
   fio_ipc_s *ipc = fio_ipc_new(0);
@@ -110617,13 +110698,16 @@ SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
 
 /** Called when IPC socket is closed */
 FIO_SFUNC void fio___ipc_on_close_cluster(void *buffer, void *udata) {
-  fio___ipc_parser_s *p =
-      (fio___ipc_parser_s *)((char *)buffer + sizeof(fio_u128));
+  fio___ipc_parser_s *p = (fio___ipc_parser_s *)((char *)buffer + 16);
   fio___ipc_parser_destroy(p);
-  fio___ipc_cluster_filter_remove(
-      &FIO___IPC.peers,
-      (fio___ipc_msg_id_s){fio_buf2u64u(buffer),
-                           fio_buf2u64u(((char *)buffer + sizeof(uint64_t)))});
+  fio_u128 uuid;
+  fio_memcpy16(uuid.u8, buffer);
+  if (fio_io_is_master() && uuid.u64[0] && uuid.u64[1]) {
+    fio___ipc_cluster_filter_remove(
+        &FIO___IPC.peers,
+        (fio___ipc_msg_id_s){uuid.u64[0], uuid.u64[1]});
+    fio___ipc_lifecycle_emit(NULL, &uuid, false);
+  }
   (void)udata;
 }
 
@@ -110723,6 +110807,8 @@ FIO_SFUNC void fio___ipc_destroy(void *ignr_) {
   fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
   fio___ipc_cluster_filter_destroy(&FIO___IPC.peers);
   fio___ipc_cluster_ops_destroy(&FIO___IPC.opcodes);
+  FIO_MEMSET(FIO___IPC.on_peer, 0, sizeof(FIO___IPC.on_peer));
+  FIO___IPC.on_peer_count = 0;
   (void)ignr_;
 }
 
@@ -110732,6 +110818,9 @@ FIO_SFUNC void fio___ipc_on_fork(void *ignr_) {
   /* Cleanup master's resources - except opcodes (clients may use) */
   fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
   fio___ipc_cluster_filter_destroy(&FIO___IPC.peers);
+  /* Child never owns master's lifecycle subscriptions or their udata. */
+  FIO_MEMSET(FIO___IPC.on_peer, 0, sizeof(FIO___IPC.on_peer));
+  FIO___IPC.on_peer_count = 0;
 
   FIO___IPC.protocol_ipc.on_data = fio___ipc_on_data_worker;
   FIO___IPC.protocol_ipc.on_shutdown = fio___ipc_on_shutdown_worker;
@@ -110768,13 +110857,14 @@ FIO_CONSTRUCTOR(fio___ipc_init) {
       .on_data = fio___ipc_on_data_cluster,
       .on_close = fio___ipc_on_close_cluster,
       .on_timeout = fio___ipc_on_timeout_rpc,
-      .buffer_size =
-          sizeof(fio_u128) + sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
+      .buffer_size = 16 + sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
       .timeout = (55 * 1024), /* RPC (remote) timeout: ~55 sec */
   };
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_ipc); /* initialize - safety */
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_rpc); /* initialize - safety */
-  FIO___IPC.uuid = fio_u128_init64(fio_rand64(), fio_rand64());
+  do {
+    FIO___IPC.uuid = fio_rand128();
+  } while (!FIO___IPC.uuid.u64[0] || !FIO___IPC.uuid.u64[1]);
   fio_ipc_url_set(NULL);
   fio_state_callback_add(FIO_CALL_BEFORE_FORK, fio___ipc_listen, NULL);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___ipc_on_fork, NULL);
@@ -122069,12 +122159,16 @@ Simple Property Set / Get
 #define FIO___HTTP_MAKE_GET_SET(property)                                      \
   SFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                    \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    if (!h)                                                                    \
+      return FIO_STR_INFO0;                                                    \
     return fio_keystr_info(&h->property);                                      \
   }                                                                            \
                                                                                \
   SFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,                \
                                                  fio_str_info_s value) {       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    if (!h)                                                                    \
+      return FIO_STR_INFO0;                                                    \
     fio_keystr_s old = h->property; /* delay destroy in case of copy/edit. */  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
     fio_keystr_destroy(&old, fio___http_keystr_free);                          \
@@ -122992,7 +123086,7 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
   fio_str_info_s r = {0};
   if (h->body.pos == h->body.len)
     return r;
-  if (h->body.pos + length > h->body.len)
+  if (length > h->body.len - h->body.pos)
     length = h->body.len - h->body.pos;
   r = ((h->body.fd == -1) ? fio___http_body_read_buf
                           : fio___http_body_read_fd)(h, length);
@@ -126448,7 +126542,7 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
     fio_io_write2(c->io,
                   .buf = (char *)fio_http_dup(h),
                   .len = buf.len,
-                  .offset = (size_t)((char *)h - buf.buf),
+                  .offset = (size_t)(buf.buf - (char *)h),
                   .dealloc = (void (*)(void *))fio_http_free);
   } else {
     fio_io_write2(c->io,

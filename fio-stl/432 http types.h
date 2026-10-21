@@ -1280,12 +1280,16 @@ Simple Property Set / Get
 #define FIO___HTTP_MAKE_GET_SET(property)                                      \
   SFUNC fio_str_info_s fio_http_##property(fio_http_s *h) {                    \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    if (!h)                                                                    \
+      return FIO_STR_INFO0;                                                    \
     return fio_keystr_info(&h->property);                                      \
   }                                                                            \
                                                                                \
   SFUNC fio_str_info_s fio_http_##property##_set(fio_http_s *h,                \
                                                  fio_str_info_s value) {       \
     FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");                                 \
+    if (!h)                                                                    \
+      return FIO_STR_INFO0;                                                    \
     fio_keystr_s old = h->property; /* delay destroy in case of copy/edit. */  \
     h->property = fio_keystr_init(value, fio___http_keystr_alloc);             \
     fio_keystr_destroy(&old, fio___http_keystr_free);                          \
@@ -2203,7 +2207,7 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
   fio_str_info_s r = {0};
   if (h->body.pos == h->body.len)
     return r;
-  if (h->body.pos + length > h->body.len)
+  if (length > h->body.len - h->body.pos)
     length = h->body.len - h->body.pos;
   r = ((h->body.fd == -1) ? fio___http_body_read_buf
                           : fio___http_body_read_fd)(h, length);

@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3168.
+Total symbols: 3172.
 
 ## Contents
 
@@ -74,7 +74,7 @@ Total symbols: 3168.
 - [`./fio-stl/249 reference counter.h`](#fio-stl-249-reference-counter-h) — 17
 - [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 66
 - [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 104
-- [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 41
+- [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 45
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
@@ -34893,7 +34893,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-404-ipc-h"></a> `./fio-stl/404 ipc.h`
 
-41 public symbols.
+45 public symbols.
 
 ### Macros
 
@@ -34941,6 +34941,16 @@ _Symbol type:_ `macro`
 ```
 
 Excludes current process from fio_ipc_local (to be set in ipc->from)
+
+_Symbol type:_ `macro`
+
+#### `FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS`
+
+```c
+#define FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS 32
+```
+
+
 
 _Symbol type:_ `macro`
 
@@ -35116,6 +35126,27 @@ uint8_t flags_set; /* set to 1 if flags should be used (allows flags=0) */
 ```
 
 IPC reply arguments
+
+_Symbol type:_ `type`
+
+#### `fio_ipc_cluster_on_peer_s`
+
+```c
+struct fio_ipc_cluster_on_peer_s {
+void (*on_attached)(fio_ipc_s *event); /* optional */
+void (*on_detached)(fio_ipc_s *event); /* optional */
+void *udata; /* callback context; borrowed */
+}
+```
+
+Lifecycle events are synthetic, reference-counted fio_ipc_s objects.
+data[0..15] contains the peer UUID in UDP-discovery byte order. The
+attached event owns a reference to the peer IO in event->from; the detached
+event has from == NULL. Never reply to or send an event itself. Instead,
+author a normal opcode message and fio_ipc_send_to(event->from, message)
+during on_attached. Callbacks borrow each event; fio_ipc_dup retains it.
+Retaining attached events may delay on_detached until their IO is freed.
+udata is borrowed and must outlive all callbacks using it.
 
 _Symbol type:_ `type`
 
@@ -35442,6 +35473,31 @@ Returns the last port number passed to either fio_ipc_cluster_listen or
 fio_ipc_cluster_connect - zero if none.
 
 _Symbol type:_ `function`
+
+#### `fio_ipc_cluster_on_peer`
+
+```c
+int fio_ipc_cluster_on_peer(fio_ipc_cluster_on_peer_s args)
+```
+
+Append a subscriber on the master before fio_io_start. At least one
+callback is required. Returns 0 on success, -1 for invalid callbacks,
+worker/running IO, or exhausted capacity. No partial registration occurs.
+
+_Symbol type:_ `function`
+
+#### `fio_ipc_cluster_on_peer`
+
+```c
+#define fio_ipc_cluster_on_peer(...)   \
+  fio_ipc_cluster_on_peer((fio_ipc_cluster_on_peer_s){__VA_ARGS__})
+```
+
+
+
+_Note:_ this may be a macro only / macro wrapper for a function.
+
+_Symbol type:_ `macro`
 
 -----------------------------------------------------
 
